@@ -16,3 +16,5 @@ secrets/
 *.p12
 *.pfx
 *.log
+wrangler.local.jsonc
+wrangler.deploy.jsonc

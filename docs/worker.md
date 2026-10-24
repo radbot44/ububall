@@ -51,10 +51,36 @@ The first authorized allocation attempt schedules preparation if no completed ba
 
 Signing and persistent retry recovery use the existing [mint service](mint.md). Worker key import selects explicit Ed25519 curve/key material to avoid Node/workerd differences in optional JWK algorithm labels. Old signing keys must remain available until pending allocations using them are signed; retain old public keys to verify old certificates. A complete rotation/revocation policy is not implemented.
 
-## Verification and deployment boundary
+## First setup and updates
+
+On Windows, use PowerShell with Node 22.13+ and Git installed. From `C:\dev\ubumint`, run:
+
+```powershell
+.\install.ps1                 # install current local source, test, deploy
+.\install.ps1 -DryRun         # same checks, no Cloudflare upload
+.\install.ps1 -InstallOnly    # copy code only
+```
+
+The source checkout is authoritative, including current tracked working edits. This does not pull GitHub or push anything. Update your source checkout first when you want newer code. The installed folder is a deployment copy: do not use `git pull` or stash there. Existing separate code edits stop installation before copying; changes already identical to source are accepted. Replaced files are backed up outside the checkout. Runtime state and ignored files stay in place. The old installation's `.\update.ps1` now invokes this installer; `.\deploy.ps1` tests and redeploys the already installed code without copying updates.
+
+On the first run, existing `wrangler.local.jsonc` (or `wrangler.deploy.jsonc`) and `.dev.vars` are recovered into `%LOCALAPPDATA%\ubumint\settings.json`. Production config takes precedence over local development values; missing values and existing secrets come from `.dev.vars`. Recovery validates the matching public/private signing keys. It never generates a replacement mint identity. If credentials were lost everywhere, restore a backup; recovery cannot retrieve deleted secret values from Cloudflare.
+
+**Back up the entire `%LOCALAPPDATA%\ubumint` folder separately.** It contains permanent mint identity, private signing keys, Discord credentials, session secret, deployment settings and automatic backups. Access is restricted to your Windows account and SYSTEM. It survives deleting or recloning either checkout. Keep it private. Edit `settings.json` to change production settings; `vars` contains public settings and `secrets` contains private settings. Saved secrets are uploaded with the code in the same deployment, so missing Worker secrets are restored without rotating keys. Existing unrelated dashboard variables are preserved by `keep_vars`; explicitly saved values take precedence. `wrangler.deploy.jsonc` is generated and ignored. `wrangler.jsonc` stays a generic development template and is never your production settings file.
+
+For a **brand-new mint only**, register a Discord application and its exact HTTPS `/auth/callback` URL, choose your Worker name and final HTTPS origin, then run:
+
+```powershell
+.\install.ps1 -Setup
+```
+
+Setup prompts for the Worker name, origin and Discord credentials (the secret is hidden). It creates a fresh permanent mint ID, Ed25519 signing key and session secret only when no saved settings exist. Wrangler opens Cloudflare login when needed in an interactive terminal; if authentication fails, run `node node_modules/wrangler/bin/wrangler.js login` from the installation and rerun `deploy.ps1` without Setup. Setup uses workers.dev when the origin ends in `.workers.dev`; otherwise it configures that hostname as a Cloudflare custom domain and disables workers.dev. The custom domain must belong to a zone in your Cloudflare account. The lifetime mint limit starts at **0**; change `vars.LIFETIME_MINT_LIMIT` in saved settings and redeploy when ready to open issuance. Setup refuses to replace existing saved settings. For an existing mint, restore its saved settings instead of running Setup.
+
+`deploy.ps1` stops on dependency, validation, test or upload failures. Both suites use dot output by default; for detailed failures, run the failing file with `node --test --test-reporter=spec <file>`. A successful upload is followed by a public `/api/config` check for login configuration and the saved mint ID. A failed check reports failure even if Cloudflare accepted the upload. No script deletes production Durable Object storage or migrates local test state into production.
+
+## Verification
 
 `npm test` covers frozen DNA, files, mint transactions, lifetime limits and OAuth/session checks. `npm run test:worker` uses Wrangler's local test harness with isolated storage and ephemeral keys. It verifies frontend asset boundaries, private API access, CSRF/body validation, public-key-only configuration, signed issuance, concurrent retries, lifetime-limit rejection, collection isolation, real alarm-driven batch rollover and unfinished preparation recovery after object eviction. Browser checks cover custom import and the shared renderer/designer.
 
-`wrangler.jsonc` has no account, domain route or production identity, and disables workers.dev/preview URLs. Deployment still requires explicit owner authorization, configured secrets, a chosen nonzero allowance and the intended domain. Do not deploy merely to run tests. Worker storage and local Node SQLite databases are separate; no migration/import of local test state is implied.
+`wrangler.jsonc` has no account, domain route or production identity, disables workers.dev/preview URLs, and preserves dashboard variables. Production deployments use the generated config described above. Deployment requires owner authorization; running tests never deploys.
 
 Official references: [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/), [Durable Object SQLite](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), [alarms](https://developers.cloudflare.com/durable-objects/api/alarms/), [Discord OAuth2](https://docs.discord.com/developers/topics/oauth2).

@@ -2,9 +2,9 @@
   "name": "ubumint",
   "private": true,
   "scripts": {
-    "test": "node --test ubu.test.js ubu-file.test.js rarity.test.js mint.test.js auth.test.mjs",
+    "test": "node --test --test-reporter=dot ubu.test.js ubu-file.test.js rarity.test.js mint.test.js auth.test.mjs test/deploy-config.test.cjs",
     "dev": "node scripts/prepare-assets.cjs && wrangler dev --local --ip 127.0.0.1 --port 8790",
-    "test:worker": "node scripts/prepare-assets.cjs && node --test test/worker.integration.mjs"
+    "test:worker": "node scripts/prepare-assets.cjs && node --test --test-reporter=dot test/worker.integration.mjs"
   },
   "engines": {
     "node": ">=22.13.0"
