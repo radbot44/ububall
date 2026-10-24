@@ -177,18 +177,32 @@
       event.preventDefault(); navigatePack(event.key === 'ArrowLeft' ? -1 : 1);
     }
   });
-  $('finish-pack').addEventListener('click', () => {
-    if (!pack || pack.seen < pack.items.length) return;
+  function finishPack() {
+    if (!pack || pack.seen < pack.items.length) return false;
     try {
-      localStorage.removeItem(packKey); pack = null;
+      localStorage.removeItem(packKey);
+      pack = null;
       packScene?.reset(true);
-      $('reveal').close(); status(''); updatePackButton();
-    } catch (error) { $('reveal-progress').textContent = error.message; }
+      status('');
+      updatePackButton();
+      void refreshCollection();
+      return true;
+    } catch (error) {
+      $('reveal-progress').textContent = error.message;
+      return false;
+    }
+  }
+  $('finish-pack').addEventListener('click', () => {
+    if (finishPack()) $('reveal').close();
   });
-  $('pause-reveal').addEventListener('click', () => $('reveal').close());
+  $('pause-reveal').addEventListener('click', () => {
+    if (pack && pack.seen >= pack.items.length) finishPack();
+    $('reveal').close();
+  });
   $('reveal').addEventListener('close', () => {
-    if (current) display(current.text, current.result, true);
-    updatePackButton(); $('mint').focus();
+    if (pack && pack.seen >= pack.items.length) finishPack();
+    updatePackButton();
+    $('mint').focus();
   });
   const status = text => { $('status').textContent = text; };
   async function trustedKey(mint, id) {
@@ -291,23 +305,23 @@
       if (a.pending !== b.pending) return a.pending ? 1 : -1;
       const aFav = isFavorite(a.serial) ? 1 : 0;
       const bFav = isFavorite(b.serial) ? 1 : 0;
+      const aBits = a.rarity ? a.rarity.bits : 0;
+      const bBits = b.rarity ? b.rarity.bits : 0;
       if (sort === 'favorite') {
         if (aFav !== bFav) return bFav - aFav;
-        return (b.issuedAt || 0) - (a.issuedAt || 0) || b.serial.localeCompare(a.serial);
+        return (b.issuedAt || 0) - (a.issuedAt || 0) || bBits - aBits || b.serial.localeCompare(a.serial);
       }
       if (sort === 'rarity') {
-        const aBits = a.rarity ? a.rarity.bits : 0;
-        const bBits = b.rarity ? b.rarity.bits : 0;
         return bBits - aBits || b.serial.localeCompare(a.serial);
       }
       if (sort === 'serial') {
         return a.serial.localeCompare(b.serial);
       }
       if (sort === 'old') {
-        return (a.issuedAt || 0) - (b.issuedAt || 0) || a.serial.localeCompare(b.serial);
+        return (a.issuedAt || 0) - (b.issuedAt || 0) || aBits - bBits || a.serial.localeCompare(b.serial);
       }
       // 'recent'
-      return (b.issuedAt || 0) - (a.issuedAt || 0) || b.serial.localeCompare(a.serial);
+      return (b.issuedAt || 0) - (a.issuedAt || 0) || bBits - aBits || b.serial.localeCompare(a.serial);
     });
   }
 
@@ -346,6 +360,7 @@
     $('collection').hidden = false;
   }
 
+  const certCache = new Map();
   async function collection(reset = false) {
     if (pendingKey && localStorage.getItem(pendingKey)) return;
     const version = ++collectionVersion;
@@ -353,68 +368,53 @@
       collectionMap.clear();
       next = null;
     }
-    const data = await api('/api/ubus' + (!reset && next ? '?after=' + encodeURIComponent(next) : ''));
-    for (const entry of data.ubus) {
-      if (unseen(entry.serial)) continue;
-      if (!entry.certificate) {
-        if (!collectionMap.has(entry.serial)) {
-          collectionMap.set(entry.serial, { serial: entry.serial, pending: true });
-        }
-        continue;
-      }
-      if (!collectionMap.has(entry.serial)) {
-        const result = await inspect(entry.certificate);
-        const model = ubu.decode(ubu.fromCode(result.dna));
-        const r = window.rarity ? rarity.scoreRarity(model) : null;
-        collectionMap.set(entry.serial, {
-          serial: entry.serial,
-          certificate: entry.certificate,
-          result,
-          model,
-          rarity: r,
-          issuedAt: result.certificate?.issuedAt || 0
-        });
-      }
+    let cursor = !reset && next ? next : '';
+    try {
+      do {
+        const data = await api('/api/ubus' + (cursor ? '?after=' + encodeURIComponent(cursor) : ''));
+        if (version !== collectionVersion || (pendingKey && localStorage.getItem(pendingKey))) return;
+        await Promise.all(data.ubus.map(async entry => {
+          if (unseen(entry.serial)) return;
+          if (!entry.certificate) {
+            if (!collectionMap.has(entry.serial)) {
+              collectionMap.set(entry.serial, { serial: entry.serial, pending: true });
+            }
+            return;
+          }
+          if (!collectionMap.has(entry.serial)) {
+            let cached = certCache.get(entry.certificate);
+            if (!cached) {
+              const result = await inspect(entry.certificate);
+              const model = ubu.decode(ubu.fromCode(result.dna));
+              const r = window.rarity ? rarity.scoreRarity(model) : null;
+              cached = { result, model, rarity: r, issuedAt: result.certificate?.issuedAt || 0 };
+              certCache.set(entry.certificate, cached);
+            }
+            collectionMap.set(entry.serial, {
+              serial: entry.serial,
+              certificate: entry.certificate,
+              result: cached.result,
+              model: cached.model,
+              rarity: cached.rarity,
+              issuedAt: cached.issuedAt
+            });
+          }
+        }));
+        if (version !== collectionVersion || (pendingKey && localStorage.getItem(pendingKey))) return;
+        cursor = data.next;
+        next = cursor;
+        renderCollection();
+      } while (cursor);
+    } catch (error) {
+      status(`Could not refresh collection: ${error.message}`);
     }
-    if (version !== collectionVersion || (pendingKey && localStorage.getItem(pendingKey))) return;
-    next = data.next;
-    renderCollection();
   }
 
   async function loadMore() {
     if (loadingMore || !next || (pendingKey && localStorage.getItem(pendingKey))) return;
     loadingMore = true;
-    $('collection-status').hidden = false;
-    $('collection-status').textContent = 'Loading more ubus…';
     try {
-      const data = await api('/api/ubus?after=' + encodeURIComponent(next));
-      next = data.next;
-      for (const entry of data.ubus) {
-        if (unseen(entry.serial)) continue;
-        if (!entry.certificate) {
-          if (!collectionMap.has(entry.serial)) {
-            collectionMap.set(entry.serial, { serial: entry.serial, pending: true });
-          }
-          continue;
-        }
-        if (!collectionMap.has(entry.serial)) {
-          const result = await inspect(entry.certificate);
-          const model = ubu.decode(ubu.fromCode(result.dna));
-          const r = window.rarity ? rarity.scoreRarity(model) : null;
-          collectionMap.set(entry.serial, {
-            serial: entry.serial,
-            certificate: entry.certificate,
-            result,
-            model,
-            rarity: r,
-            issuedAt: result.certificate?.issuedAt || 0
-          });
-        }
-      }
-      renderCollection();
-      $('collection-status').hidden = true;
-    } catch (error) {
-      $('collection-status').textContent = `Could not load more: ${error.message}`;
+      await collection(false);
     } finally {
       loadingMore = false;
     }
