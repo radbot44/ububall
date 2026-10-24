@@ -546,8 +546,9 @@
 
     const S = 44;
     const span = 420;
-    // The inverse-rotated 320x480 card fits inside this square, with padding.
-    const region = { x: -134, y: -54, width: 588, height: 588 };
+    // Keep the original generous mask bounds: some browsers clip transformed
+    // masks differently when their region is tightened to the card's outline.
+    const region = { x: -span, y: -span, width: span * 2 + 320, height: span * 2 + 480 };
 
     function getLayerRects(layer) {
       const { angleIndex, angleTotal } = layer;
