@@ -36,7 +36,7 @@ h2 { font-size: 17px; margin: 0; }
 #pack-hint, #status { color: var(--muted); font-size: 12px; margin: 12px auto 0; }
 #status { min-height: 17px; max-width: 560px; }
 #pack-hint:empty { display: none; }
-/* Painted foil and film use fixed regions; only the folds and reflections move. */
+/* Canvas foil and film peel together as a continuous sheet. */
 .candy-pack {
   position: relative; display: block; width: min(600px, 100%); aspect-ratio: 1.65;
   margin: 4px auto 0; padding: 0; background: none; border-radius: 12px;

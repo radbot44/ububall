@@ -5,8 +5,11 @@
   const ease = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
   const mix = (a, b, t) => a + (b - a) * t;
   function createPackScene(canvas) {
-    const ctx = canvas.getContext('2d');
+    let ctx = canvas.getContext('2d');
     if (!ctx) return null;
+    const sheet = document.createElement('canvas');
+    sheet.width = 1200; sheet.height = 720;
+    const sheetCtx = sheet.getContext('2d');
     let frame = 0, progress = 0, started = 0, finish = null, count = 5, pointer = 0;
     let color, candyColors, creases, previousColor = -1;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -102,12 +105,44 @@
       ctx.restore();
     }
     function wrapper(t) {
-      const untwist = ease(0,.34,t), flat = ease(.25,.61,t), peel = ease(.6,.9,t);
-      ctx.save(); ctx.globalAlpha = 1-ease(.82,.94,t);
-      ctx.translate(peel*12,peel*185); ctx.rotate(mix(-.09,0,untwist)+peel*.12);
-      silhouette(flat); ctx.save(); ctx.clip();
-      film(flat,untwist); foil(flat,untwist); ctx.restore();
-      silhouette(flat); ctx.strokeStyle = '#e9f1ff40'; ctx.lineWidth = .8; ctx.stroke();
+      const untwist = ease(0,.38,t), flat = ease(.16,.48,t), peel = ease(.36,.91,t);
+      const screen = ctx; ctx = sheetCtx;
+      ctx.resetTransform(); ctx.clearRect(0,0,sheet.width,sheet.height);
+      ctx.setTransform(2,0,0,2,600,360);
+      // Move each tail as a piece of film, including its outline and reflections.
+      for (const side of [-1,0,1]) {
+        ctx.save();
+        if (side) {
+          ctx.translate(side*110,0);
+          ctx.rotate(side*Math.sin(untwist*Math.PI)*.48);
+          ctx.scale(1+untwist*.22,1-.35*Math.sin(untwist*Math.PI));
+          ctx.translate(-side*110,0);
+        }
+        ctx.beginPath(); ctx.rect(side < 0 ? -300 : side > 0 ? 110 : -110,-180,side ? 190 : 220,360); ctx.clip();
+        silhouette(flat); ctx.clip(); film(flat,untwist); if (!side) foil(flat,untwist);
+        silhouette(flat); ctx.strokeStyle = '#e9f1ff40'; ctx.lineWidth = .8; ctx.stroke();
+        ctx.restore();
+      }
+      ctx = screen;
+      ctx.save(); ctx.globalAlpha = 1-ease(.86,.96,t);
+      ctx.rotate(mix(-.09,0,untwist));
+      if (!peel) {
+        ctx.drawImage(sheet,-300,-180,600,360); ctx.restore(); return;
+      }
+      // A travelling curl carries the entire printed sheet over the fold.
+      // Drawing from bottom to top places the turned-back film over its front.
+      const fold = mix(-180,235,peel), radius = 24;
+      const foldedY = y => {
+        if (y >= fold) return y;
+        const distance = fold-y, arc = Math.min(distance/radius,Math.PI);
+        return fold-radius*Math.sin(arc)+Math.max(0,distance-Math.PI*radius)*.28;
+      };
+      for (let y = 179; y >= -180; y--) {
+        const top = foldedY(y), bottom = foldedY(y+1);
+        ctx.save(); ctx.translate(0,top); ctx.scale(1,bottom < top ? -1 : 1);
+        ctx.drawImage(sheet,0,(y+180)*2,1200,2,-300,0,600,Math.abs(bottom-top)+.7);
+        ctx.restore();
+      }
       ctx.restore();
     }
     function candy(x, y, hex, angle) {
@@ -131,9 +166,9 @@
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
       ctx.resetTransform(); ctx.clearRect(0,0,width,height);
       const scale = width/600; ctx.setTransform(scale,0,0,scale,width/2,height*.46);
-      const fan = ease(.54,.84,progress);
+      const fan = ease(.42,.8,progress);
       if (fan) {
-        ctx.save(); ctx.globalAlpha = ease(.54,.64,progress)*(1-ease(.96,1,progress));
+        ctx.save(); ctx.globalAlpha = ease(.42,.52,progress)*(1-ease(.96,1,progress));
         const order = Array.from({ length: count }, (_,i) => i).sort((a,b) => Math.abs(b-(count-1)/2)-Math.abs(a-(count-1)/2));
         for (const i of order) {
           const slot = i-(count-1)/2;
@@ -141,7 +176,7 @@
         }
         ctx.restore();
       }
-      if (progress < .94) wrapper(progress);
+      if (progress < .96) wrapper(progress);
       if (finish) {
         if (progress < 1) requestPaint();
         else { const done = finish; finish = null; done(); }
