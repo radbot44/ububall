@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ubumint",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-23",
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./dist/public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/auth/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "MINT", "class_name": "MintRegistry" }]
+  },
+  "migrations": [{ "tag": "registry-1", "new_sqlite_classes": ["MintRegistry"] }],
+  "vars": {
+    "BATCH_SIZE": "1000",
+    "LIFETIME_MINT_LIMIT": "0"
+  }
+}

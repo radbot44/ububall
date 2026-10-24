@@ -4,9 +4,11 @@ Private, owner-operated project for minting ubus for uburoom.
 
 Design requirement: a lean mint with zero fluff. Use the smallest practical implementation of current requirements, platform APIs and minimal dependencies. Measure meaningful optimizations; preserve DNA correctness, security and ownership integrity. Detailed engineering constraints are in AGENTS.md.
 
-DNA and appearance frozen by owner acceptance on 2026-10-23. No versions or future expansion. Unsigned files and local certificate signing/verification are implemented; production minting, trust configuration and ownership are not.
+DNA and appearance frozen by owner acceptance on 2026-10-23. No versions or future expansion. The local Cloudflare application includes a viewer, designer, Discord OAuth code, signed minting, persistent batches and a configurable lifetime mint limit. Production credentials, deployment and transfers are not configured.
 
-The permanent [DNA specification](docs/dna.md) and [uburithm](docs/uburithm.md) define the generator. The [.ubu profile](docs/ubu-file.md) defines certificates. Run `node --test` for DNA and file/signature checks.
+Run `npm run dev` to open the local Worker website at http://127.0.0.1:8790/. Setup and verification are in the [Cloudflare application guide](docs/worker.md). No runtime packages or frontend framework; Wrangler is the development dependency for local Workers execution and testing.
+
+The permanent [DNA specification](docs/dna.md) and [uburithm](docs/uburithm.md) define the generator. The [.ubu profile](docs/ubu-file.md) defines certificates. Run `npm test` and `npm run test:worker` for core and Cloudflare runtime checks.
 
 ## Product baseline
 
@@ -75,7 +77,7 @@ Both forms use the same frozen DNA and renderer. Hosts choose whether to allow c
 
 The [file profile](docs/ubu-file.md) is implemented in ubu-file.js using platform Ed25519 and strict JSON validation. It is a working development format, separate from frozen DNA. Encryption is not selected. Key distribution/rotation, Discord ownership, mint allowances and trade APIs remain separate work.
 
-Approved mint policy: prepare batches of **1,000** by default (configurable for subsequent batches), distribute randomly without replacement, and sign each ubu when assigned to its first owner. Serials follow creation order. The next batch starts after exhaustion. Local persistent batch storage and allocation are implemented; see the [service guide](docs/mint.md) and [file profile](docs/ubu-file.md#mint-batches). Worker scheduling, Discord authorization and mint allowances remain to be implemented.
+Approved mint policy: prepare batches of **1,000** by default (configurable for subsequent batches), distribute randomly without replacement, and sign each ubu when assigned to its first owner. Serials follow creation order. The next batch starts after exhaustion. Persistent batch storage, alarm scheduling, Discord OAuth and a configurable per-account lifetime limit are implemented locally; see the [service guide](docs/mint.md), [Cloudflare guide](docs/worker.md) and [file profile](docs/ubu-file.md#mint-batches). New issuance defaults to disabled until the owner configures a nonzero allowance.
 
 ## Illustrative lengths, not a format specification
 
@@ -89,8 +91,8 @@ Prefixes, key identifiers and other metadata add length. Encryption alone does n
 
 ## Local demo
 
-Open demo.html with ubu.js, ubu-file.js and demo.js beside it, or serve them on localhost. No build step, framework or dependencies. Text seeds use platform SHA-256; random generation uses platform randomness. The designer has no production mint keys, account or remote API calls.
+Open demo.html with ubu.js, ubu-file.js, ubu-render.js and demo.js beside it, or serve them on localhost. No framework or runtime dependencies. Text seeds use platform SHA-256; random generation uses platform randomness. The standalone designer has no production mint keys, account or remote API calls.
 
 The demo supports text seeds, canonical base64url or hexadecimal DNA input, local favorites/history, trait inspection, fixed schema samples and official-format custom .ubu import/export. Its 66-byte export contains only {"type":"ubu","dna":"..."}. Old ubu-demo envelopes are rejected; signed files are rejected until the application configures a trusted mint key. No key is trusted from an imported file.
 
-The decoder in ubu.js is separate from DOM rendering in demo.js. Both the main preview and thumbnails use the same renderer. Rendering rules and verification limits are recorded in docs/dna.md.
+The decoder in ubu.js is separate from DOM rendering in ubu-render.js. The site, designer and thumbnails share that renderer. Rendering rules and verification limits are recorded in docs/dna.md.

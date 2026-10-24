@@ -1,0 +1,29 @@
+:root { color-scheme: dark; font: 15px/1.5 Arial, Helvetica, sans-serif; color: #eeeeef; background: #101112; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+main { width: min(900px, calc(100% - 32px)); margin: 24px auto 64px; }
+header, nav, .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+header { justify-content: space-between; margin-bottom: 24px; }
+a { color: inherit; text-underline-offset: 4px; }
+.brand { font-size: 22px; font-weight: 700; text-decoration: none; }
+nav { font-size: 13px; }
+button, .button { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 8px 14px; border: 1px solid #3a3c40; border-radius: 7px; color: inherit; background: #222427; font: inherit; cursor: pointer; }
+button:hover, .button:hover { background: #303236; }
+button:disabled { opacity: .45; cursor: default; }
+:focus-visible, .button:focus-within { outline: 2px solid #babcc1; outline-offset: 3px; }
+.button { position: relative; }
+input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.viewer { display: flex; flex-direction: column; align-items: center; padding: 36px 18px 20px; border: 1px solid #333539; border-radius: 10px; background: #18191b; text-align: center; }
+#preview { display: grid; place-items: center; min-height: 280px; }
+.oomark { display: block; width: 260px; height: 260px; }
+.empty { max-width: 220px; color: #989a9f; }
+h1 { max-width: 100%; overflow-wrap: anywhere; margin: 20px 0 8px; font-size: clamp(25px, 5vw, 42px); letter-spacing: -.025em; line-height: 1.2; }
+h2 { font-size: 18px; margin-top: 28px; }
+#details, #authenticity { margin: 4px 0; color: #b5b7bc; font-size: 13px; }
+.actions { justify-content: center; margin-top: 22px; }
+#status { min-height: 24px; max-width: 580px; margin: 16px 0 0; color: #b5b7bc; font-size: 13px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.card { flex-direction: column; gap: 10px; padding: 18px 10px; text-align: center; font-size: 12px; }
+.ubu-thumb { width: 100px; height: 100px; display: block; }
+@media (max-width: 520px) { main { width: calc(100% - 20px); margin-top: 14px; } .viewer { padding: 24px 12px 16px; } nav { gap: 10px; } .oomark { width: 230px; height: 230px; } }

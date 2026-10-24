@@ -3,7 +3,7 @@
 ## Scope
 
 - This is the owner's private ubu mint project, separate from uburoom. Read README.md before planning or changing it.
-- The owner froze DNA on 2026-10-23 and authorized continuing with the local .ubu format/signature implementation. Read docs/dna.md, docs/uburithm.md and docs/ubu-file.md before relevant work. Cloud deployment, production keys, accounts, trading, encryption and uburoom integration remain separate work requiring authorization.
+- The owner froze DNA on 2026-10-23 and authorized local .ubu signing, batch storage, the Cloudflare application implementation and a configurable per-account lifetime mint limit. Read docs/dna.md, docs/uburithm.md, docs/ubu-file.md and docs/worker.md before relevant work. Deployment, production keys, creating/configuring external accounts, trading, encryption and uburoom integration remain separate work requiring authorization.
 - Keep owner requirements distinct from proposed mechanisms and examples. Do not turn an agent recommendation into an approved protocol decision.
 - Keep the repository private. Remote creation, pushes, publication, Cloudflare provisioning and deployment require explicit owner authorization. Never embed mint secrets in uburoom or browser code.
 
@@ -20,7 +20,7 @@
 - Two .ubu forms are implemented in ubu-file.js: unsigned/custom DNA and an Ed25519-signed issuance certificate. Both use the frozen DNA. Custom ubus never imply official issuance or registered ownership. Signed imports require a caller-trusted mint public key, with no unsigned fallback or file-supplied trust. Hosts may require signed files. The demo has no configured mint trust and imports/exports custom files only; never install test keys as production trust.
 - The mint must generate random DNA itself for ordinary minting. Do not authorize caller-selected seeds through the normal mint endpoint.
 - Mint-signed certificates include a permanent twelve-digit serial (000000000001–999999999999) covered by the signature. The future registry allocates serials atomically, uniquely per mint, without reuse or wraparound; retries must not mint twice. Custom files have no official serial. This metadata does not alter DNA.
-- Approved batch policy: default 1,000, configurable for subsequent batches. Prepare private random DNA/IDs/serials, distribute uniformly without replacement, sign on authorized allocation and start the next batch after exhaustion. Serial order is creation order. Local resumable preparation and atomic, idempotent ownership allocation are implemented in mint.js with mint-local.js; read docs/mint.md. Worker scheduling, authentication and allowances are not implemented. Never expose this internal service directly as a public endpoint.
+- Approved batch policy: default 1,000, configurable for subsequent batches. Prepare private random DNA/IDs/serials, distribute uniformly without replacement, sign on authorized allocation and start the next batch after exhaustion. Serial order is creation order. mint.js supplies atomic/idempotent allocation; mint-local.js is the Node SQLite adapter. worker.mjs supplies Durable Object storage and alarm scheduling, Discord OAuth and a configurable lifetime allowance (default 0). Enforce allowances in the allocation transaction. Never expose the internal service without authentication; see docs/mint.md and docs/worker.md.
 - Ed25519 and exact signing bytes are implemented; production trust distribution, key rotation and mint allowances remain design work. A public verification key must not grant minting authority. Test private keys remain ephemeral and must never be committed or configured as official mint keys.
 
 ## Implementation hygiene
@@ -34,3 +34,4 @@
 - Keep private keys, tokens, local bindings and state out of Git, logs and examples. Use placeholders in committed configuration.
 - Run repository commands inside this repository. Do not copy production configuration or data from uburoom.
 - Add focused verification for protocol, cryptographic, authorization and accounting boundaries when implemented; setup documentation does not need invented tests.
+- Run npm test and npm run test:worker for Worker/auth/mint changes. The latter uses isolated local Cloudflare runtime storage, never a remote deployment. Public assets must use the explicit whitelist in scripts/prepare-assets.cjs; never serve the repository root. ubu-render.js is shared by the designer and site; preserve the owner's finishes and lighting.

@@ -58,7 +58,7 @@ Owner-approved issuance policy: prepare a private inventory of random ubus in ba
 - Exhaust the current batch before allocating from the next one. Prepare the next batch in resumable chunks after exhaustion; requests may wait or receive a retry response while preparation completes.
 - Keep unallocated DNA private. Batch allocation does not replace authentication, mint allowances or protection against repeated requests to hunt for traits.
 
-This policy is approved. Local persistent preparation, allocation and signing recovery are implemented; see [mint.md](mint.md). Cloudflare scheduling, authentication and allowances are not implemented. Serial reservation is durable and numbers are never reused after a committed reservation, including after interrupted batch preparation.
+This policy is approved. Persistent preparation, allocation and signing recovery are implemented; see [mint.md](mint.md). Cloudflare alarm scheduling, Discord OAuth and configurable lifetime allowances are implemented locally; see [worker.md](worker.md). Production credentials and deployment are not configured. Serial reservation is durable and numbers are never reused after a committed reservation, including after interrupted batch preparation.
 
 ## Exact signing bytes
 

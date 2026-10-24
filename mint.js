@@ -34,6 +34,7 @@ class Mint {
         batch INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL,
         request TEXT NOT NULL, issued_at INTEGER NOT NULL, key TEXT NOT NULL,
         certificate TEXT, UNIQUE(owner, request)) STRICT`);
+      this.exec('CREATE INDEX IF NOT EXISTS issued_owner ON issued(owner)');
       this.exec('INSERT OR IGNORE INTO mint_state VALUES (1, ?, 1, 0, 0, 0, 0, 0)', mint);
       if (this.state().mint !== mint) throw new Error('Database belongs to another mint.');
     });
@@ -67,13 +68,17 @@ class Mint {
     });
   }
 
-  async issue({ owner, request }) {
+  async issue({ owner, request }, { lifetimeLimit } = {}) {
     // owner is an authenticated Discord snowflake supplied by trusted server code.
     if (typeof owner !== 'string' || !/^[1-9][0-9]{0,19}$/.test(owner) ||
         typeof request !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(request)) throw new Error('Invalid issuance request.');
+    if (lifetimeLimit !== undefined && (!Number.isSafeInteger(lifetimeLimit) || lifetimeLimit < 0)) throw new Error('Invalid lifetime limit.');
     const record = this.transaction(() => {
       const previous = this.exec('SELECT * FROM issued WHERE owner=? AND request=?', owner, request)[0];
       if (previous) return previous;
+      if (lifetimeLimit !== undefined && this.exec('SELECT COUNT(*) AS count FROM issued WHERE owner=?', owner)[0].count >= lifetimeLimit) {
+        throw new Error('Lifetime mint limit reached.');
+      }
       const state = this.state();
       if (!state.size || state.prepared !== state.size || !state.remaining) throw new Error('Batch preparation required.');
       // Rejection sampling avoids modulo bias, including non-power-of-two pool sizes.

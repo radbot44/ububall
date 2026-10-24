@@ -1,0 +1,15 @@
+{
+  "name": "ubumint",
+  "private": true,
+  "scripts": {
+    "test": "node --test ubu.test.js ubu-file.test.js mint.test.js auth.test.mjs",
+    "dev": "node scripts/prepare-assets.cjs && wrangler dev --local --ip 127.0.0.1 --port 8790",
+    "test:worker": "node scripts/prepare-assets.cjs && node --test test/worker.integration.mjs"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "devDependencies": {
+    "wrangler": "4.152.0"
+  }
+}

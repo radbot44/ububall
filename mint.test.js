@@ -156,3 +156,17 @@ test('allocation rolls back as a unit and request IDs are scoped to the owner', 
   assert.equal(await reopened.issue({ owner, request: request(1) }), first);
   assert.equal(mint.state().remaining, 1);
 });
+
+test('lifetime allowance is atomic and retries do not consume it twice', async t => {
+  const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
+  mint.prepare({ batchSize: 10 });
+  await assert.rejects(mint.issue({ owner, request: request(0) }, { lifetimeLimit: 0 }), /limit reached/);
+  assert.equal(mint.state().remaining, 10);
+  const outcomes = await Promise.allSettled(Array.from({ length: 8 }, (_, i) => mint.issue({ owner, request: request(i) }, { lifetimeLimit: 3 })));
+  assert.equal(outcomes.filter(r => r.status === 'fulfilled').length, 3);
+  assert.ok(outcomes.filter(r => r.status === 'rejected').every(r => /limit reached/.test(r.reason.message)));
+  assert.equal(mint.state().remaining, 7);
+  const first = outcomes[0].value;
+  assert.equal(await mint.issue({ owner, request: request(0) }, { lifetimeLimit: 0 }), first);
+  for (const lifetimeLimit of [-1, NaN, '3', 1.5]) await assert.rejects(mint.issue({ owner, request: request(9) }, { lifetimeLimit }), /Invalid lifetime/);
+});
