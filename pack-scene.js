@@ -56,26 +56,92 @@
       ctx.bezierCurveTo(-146, y(17,135), -196, y(76,135), -240, y(88,135));
       ctx.closePath();
     }
-    function film(flat, untwist) {
-      ctx.fillStyle = gradient(-240,-90,240,90, [[0,'#e9f1ff25'],[.25,'#d5e3ff10'],[.5,'#ffffff05'],[.8,'#e9f1ff18'],[1,'#e9f1ff36']]);
-      ctx.fillRect(-240,-135,480,270);
-      for (const side of [-1, 1]) {
-        ctx.save(); ctx.scale(side, 1);
-        for (let i = -6; i <= 6; i++) {
-          const inner = mix(i * 1.8, i * 22, flat), outer = i * mix(17,22,flat);
-          const curl = Math.sin(i * .8 + untwist * 2.8) * 21 * (1 - untwist);
-          ctx.beginPath(); ctx.moveTo(110,inner);
-          const ripple = Math.sin(i*2.3)*6;
-          ctx.bezierCurveTo(146,inner+curl,167,outer-12*(1-flat),190,outer+5+ripple);
-          ctx.bezierCurveTo(210,outer-5,225,outer+3-ripple,240,outer);
-          ctx.strokeStyle = gradient(110,0,240,0,[[0,'#ffffff18'],[.45,'#e3f0ff85'],[.65,'#ffffff20'],[1,'#ffffff65']]);
-          ctx.lineWidth = i % 3 === 0 ? 2 : .8; ctx.stroke();
-          ctx.translate(0,2); ctx.strokeStyle = '#050b1430'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.translate(0,-2);
+    function film(side, flat, untwist) {
+      // Start wound up and turn in one direction until the gathered knot releases.
+      const phase = side*(1-untwist)*(Math.PI*2+.35);
+      const flip = Math.cos(phase), swing = Math.sin(phase);
+      const ribs = [];
+      // A full D-shaped tail opens into a sheet only after the spin.
+      // The whole tail flips together; its separate knot covers the attachment.
+      for (let j = 0; j <= 12; j++) {
+        const v = j/6-1, rib = [];
+        for (let k = 0; k <= 8; k++) {
+          const u = k/8;
+          const closedX = 110+u*(36+104*Math.sqrt(Math.max(0,1-v*v)));
+          const closedY = mix(v*12,v*88,ease(0,1,u));
+          const crinkle = (Math.sin(k*1.7+j*2.3+side)*3
+            + Math.sin(k*.9-j*1.8)*1.4)*u*(1-flat*.55);
+          rib.push({
+            x: mix(closedX,110+u*158,flat)+u*v*swing*10
+              + Math.sin(j*2.7+k*.7)*u*2,
+            y: (mix(closedY,v*135,flat)+crinkle)*flip
+              + swing*u*(9+Math.sin(j*1.9+side)*6)
+          });
         }
-        // Broad reflections give the clear areas a continuous film surface.
-        ctx.fillStyle = gradient(110,0,240,20,[[0,'#ffffff00'],[.4,'#ffffff00'],[.48,'#ffffff24'],[.52,'#ffffff06'],[.8,'#ffffff00'],[.98,'#ffffff30']]);
-        ctx.fillRect(110,-135,130,270); ctx.restore();
+        ribs.push(rib);
       }
+      ctx.save(); ctx.scale(side,1);
+      for (let j = 0; j < 12; j++) {
+        const upper = ribs[j], lower = ribs[j+1];
+        const glint = Math.abs(Math.sin(j*.7+phase*.7))*(1-flat*.25);
+        ctx.beginPath(); ctx.moveTo(upper[0].x,upper[0].y);
+        for (let k = 1; k <= 8; k++) ctx.lineTo(upper[k].x,upper[k].y);
+        for (let k = 8; k >= 0; k--) ctx.lineTo(lower[k].x,lower[k].y);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(184,208,239,${.09+glint*.09})`; ctx.fill();
+        // A light and dark side of each fold stay attached to the material.
+        for (let k = 0; k < 8; k++) {
+          const a = upper[k], b = upper[k+1], c = lower[k+1], d = lower[k];
+          ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
+          ctx.lineTo(c.x,c.y); ctx.lineTo(d.x,d.y); ctx.closePath();
+          const light = Math.abs(Math.sin((j*.65+k*.9)+phase));
+          ctx.fillStyle = `rgba(226,240,255,${.015+light*.09})`; ctx.fill();
+        }
+        ctx.beginPath(); ctx.moveTo(upper[0].x,upper[0].y);
+        ctx.lineTo(upper[8].x,upper[8].y);
+        ctx.lineTo(lower[8].x,lower[8].y);
+        ctx.lineTo(lower[0].x,lower[0].y); ctx.closePath();
+        ctx.fillStyle = `rgba(238,246,255,${.06+glint*.25})`; ctx.fill();
+        const k = 3+j%4;
+        const creaseY = mix(upper[k+1].y,lower[k+1].y,.7);
+        ctx.beginPath(); ctx.moveTo(upper[k].x,upper[k].y);
+        ctx.lineTo(upper[k+1].x,creaseY);
+        ctx.lineTo(upper[k+2].x,upper[k+2].y);
+        ctx.strokeStyle = flip < 0 ? '#eff6ff38' : '#07101c50';
+        ctx.lineWidth = 1; ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(upper[0].x,upper[0].y);
+        for (let k = 1; k <= 8; k++) ctx.lineTo(upper[k].x,upper[k].y);
+        ctx.strokeStyle = flip < 0 ? '#eff6ff65' : '#06122445';
+        ctx.lineWidth = j % 3 === 0 ? 1.3 : .65; ctx.stroke();
+      }
+      // Trace the free edge so the full D silhouette stays visible.
+      ctx.beginPath(); ctx.moveTo(ribs[0][8].x,ribs[0][8].y);
+      for (let j = 1; j <= 12; j++) ctx.lineTo(ribs[j][8].x,ribs[j][8].y);
+      ctx.strokeStyle = '#e9f1ff55'; ctx.lineWidth = .9; ctx.stroke();
+      ctx.restore();
+    }
+    function knot(side, untwist) {
+      const release = ease(.45,1,untwist);
+      if (release === 1) return;
+      ctx.save(); ctx.scale(side,1);
+      ctx.globalAlpha *= 1-release;
+      ctx.translate(118+release*7,0);
+      // A persistent gathered collar, rather than a pinch created by the spin.
+      ctx.beginPath(); ctx.moveTo(-13,-13);
+      ctx.bezierCurveTo(-3,-22,11,-19,17,-10);
+      ctx.bezierCurveTo(10,-3,11,6,17,12);
+      ctx.bezierCurveTo(5,21,-5,18,-13,12);
+      ctx.quadraticCurveTo(-5,0,-13,-13); ctx.closePath();
+      ctx.fillStyle = gradient(-13,-18,17,18,[[0,'#c5d6e98c'],[.3,'#425368dd'],[.5,'#e3eeffb0'],[1,'#5d7498dd']]);
+      ctx.fill(); ctx.strokeStyle = '#e5efff90'; ctx.lineWidth = .8; ctx.stroke();
+      for (let i = -1; i <= 1; i++) {
+        const shift = i*7;
+        ctx.beginPath(); ctx.moveTo(-11,shift-7);
+        ctx.bezierCurveTo(-4,shift-3-release*10,4,shift+8+release*10,13,shift+5);
+        ctx.strokeStyle = '#07101b95'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.strokeStyle = '#eef6ffc0'; ctx.lineWidth = 1; ctx.stroke();
+      }
+      ctx.restore();
     }
     function foil(flat, untwist) {
       ctx.save(); ctx.beginPath(); ctx.rect(-110,-135,220,270); ctx.clip();
@@ -109,20 +175,12 @@
       const screen = ctx; ctx = sheetCtx;
       ctx.resetTransform(); ctx.clearRect(0,0,sheet.width,sheet.height);
       ctx.setTransform(2,0,0,2,600,360);
-      // Move each tail as a piece of film, including its outline and reflections.
-      for (const side of [-1,0,1]) {
-        ctx.save();
-        if (side) {
-          ctx.translate(side*110,0);
-          ctx.rotate(side*Math.sin(untwist*Math.PI)*.48);
-          ctx.scale(1+untwist*.22,1-.35*Math.sin(untwist*Math.PI));
-          ctx.translate(-side*110,0);
-        }
-        ctx.beginPath(); ctx.rect(side < 0 ? -300 : side > 0 ? 110 : -110,-180,side ? 190 : 220,360); ctx.clip();
-        silhouette(flat); ctx.clip(); film(flat,untwist); if (!side) foil(flat,untwist);
-        silhouette(flat); ctx.strokeStyle = '#e9f1ff40'; ctx.lineWidth = .8; ctx.stroke();
-        ctx.restore();
-      }
+      // Draw each tail independently, then the fixed printed center.
+      ctx.save();
+      for (const side of [-1,1]) film(side,flat,untwist);
+      foil(flat,untwist);
+      ctx.restore();
+      knot(-1,untwist); knot(1,untwist);
       ctx = screen;
       ctx.save(); ctx.globalAlpha = 1-ease(.86,.96,t);
       ctx.rotate(mix(-.09,0,untwist));
