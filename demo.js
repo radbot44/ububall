@@ -132,18 +132,50 @@
         if ((x + y * 3) % 4) continue;
         const [px, py] = points[y][x];
         const spark = svgNode('path', { d: `M${px - 5} ${py}h10M${px} ${py - 5}v10`,
-          stroke: '#fff', 'stroke-width': 1.1, 'stroke-linecap': 'round', opacity: 0 });
+          stroke: '#fff', 'stroke-width': 1.25, 'stroke-linecap': 'round', opacity: 0 });
         pattern.append(spark);
         const phase = (x * 1.7 + y * 2.3 + attribute.angle * Math.PI / 180);
         effects.push((dx, dy) => {
           const alignment = Math.max(0, Math.cos(phase + dx * 3 + dy * 2));
-          spark.setAttribute('opacity', Math.pow(alignment, 28) * Math.min(1, Math.hypot(dx, dy) * 3));
+          spark.setAttribute('opacity', Math.pow(alignment, 22) * Math.min(1, Math.hypot(dx, dy) * 3.4));
         });
       }
       lighting('luster', [[0, '#fff', .3], [.4, '#fff', 0], [1, '#000', .3]], true);
     }
     defs.append(pattern);
     return `url(#${id})`;
+  }
+  function materialEdge(defs, face, shapes, attribute, id, effects) {
+    // Erode the combined silhouette so overlapping eyes never acquire an internal seam.
+    const finishes = {
+      metallic: { width: 2.4, rim: .65, stops: [[0, '#fff', .85], [.43, '#fff', .12], [.49, '#000', .55], [.56, '#fff', .65], [1, '#000', .6]] },
+      glossy: { width: 3.4, rim: 1.1, stops: [[0, '#fff', .65], [.35, '#fff', .24], [.65, '#fff', .02], [1, '#000', .28]] },
+      iridescent: { width: 2.5, rim: .7, stops: [[0, '#82fff0', .8], [.28, '#aaa1ff', .65], [.5, '#ff8cdb', .55], [.72, '#ffe6a0', .6], [1, '#53bfff', .7]] },
+      crystalline: { width: 2, rim: .45, stops: [[0, '#fff', .9], [.24, '#fff', .55], [.25, '#000', .32], [.49, '#000', .12], [.5, '#fff', .8], [.74, '#fff', .2], [.75, '#000', .42], [1, '#000', .55]] }
+    };
+    const finish = finishes[attribute.texture];
+    const gradient = svgNode('linearGradient', { id: id + '-light', gradientUnits: 'userSpaceOnUse',
+      x1: 30, y1: 20, x2: 330, y2: 340, gradientTransform: `rotate(${attribute.angle} 180 180)` });
+    for (const [offset, color, opacity] of finish.stops) gradient.append(svgNode('stop', {
+      offset, 'stop-color': color, 'stop-opacity': opacity
+    }));
+    defs.append(gradient);
+    if (effects) effects.push((x, y) => gradient.setAttribute('gradientTransform',
+      `translate(${x * 38} ${y * 38}) rotate(${attribute.angle} 180 180)`));
+    for (const [index, width] of [finish.width, finish.rim].entries()) {
+      const key = id + '-' + index;
+      const filter = svgNode('filter', { id: key + '-cut', filterUnits: 'userSpaceOnUse',
+        x: 0, y: 0, width: 360, height: 360, 'color-interpolation-filters': 'sRGB' });
+      filter.append(svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: width, result: 'inset' }),
+        svgNode('feComposite', { in: 'SourceGraphic', in2: 'inset', operator: 'out' }));
+      const mask = svgNode('mask', { id: key + '-mask', maskUnits: 'userSpaceOnUse',
+        maskContentUnits: 'userSpaceOnUse', x: 0, y: 0, width: 360, height: 360 });
+      const silhouette = svgNode('g', { fill: '#fff', filter: `url(#${key}-cut)` });
+      for (const shape of shapes) silhouette.append(shape.cloneNode(true));
+      mask.append(silhouette); defs.append(filter, mask);
+      face.append(svgNode('rect', { width: 360, height: 360, fill: `url(#${id}-light)`,
+        mask: `url(#${key}-mask)`, opacity: index ? .8 : .38 }));
+    }
   }
   function renderSVG(m, className = 'oomark') {
     const effects = className === 'oomark' ? [] : null;
@@ -176,6 +208,7 @@
         ? material(defs, attribute, prefix + '-' + role + '-texture', effects)
         : (matteFill ||= material(defs, { texture: 'matte', angle: 0 }, prefix + '-matte', effects));
       face.append(svgNode('rect', { x: 0, y: 0, width: 360, height: 360, fill, 'clip-path': `url(#${clipId})` }));
+      if (attribute.texture) materialEdge(defs, face, shapes[role], attribute, prefix + '-' + role + '-edge', effects);
     }
     if (effects) attachLighting(svg, effects);
     return svg;
