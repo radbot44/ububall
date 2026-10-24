@@ -143,7 +143,7 @@ For angle a and side s (-1 top, +1 bottom), the visible half-plane in eye-local 
 
 `(-s sin(a)) x + (s cos(a)) y <= 66.05 - depth`.
 
-Intersect the active half-planes with the solid eye disc. Both eyes normally share top/bottom angles and depths. A left-eye angle flip negates both angles; a left-eye depth flip swaps the top/bottom depths, preserving which lids are active. Each flip succeeds only for ten-bit value 1023 (1/1024), independently.
+Intersect the active half-planes with the solid eye disc. Both eyes normally share top/bottom depths, but their eyelid angles are mirrored: the left eye uses the negated right-eye angle for each lid. A left-eye angle flip negates those default mirrored angles, making them match the right eye; a left-eye depth flip swaps the top/bottom depths, preserving which lids are active. Each flip succeeds only for ten-bit value 1023 (1/1024), independently.
 
 Displacement fields decode through the centered cubic into percentages px, py in [-1, +1]. Left-eye displacement flips negate the respective signed percentage, each only for roll 1023. Neutral zero stays zero. For each eye separately:
 

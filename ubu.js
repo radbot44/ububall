@@ -169,8 +169,9 @@
     const angleFlip = read(dna, 322, 10) === 1023, depthFlip = read(dna, 332, 10) === 1023;
     const angles = [curve(rawLids[0]) * 30, curve(rawLids[2]) * 30];
     const depths = [rawLids[1], rawLids[3]].map(v => EYE_TRAVEL * v / 1023);
+    // Mirror left-eye lid slopes by default; the rare angle flip cancels that mirroring.
     const makeLids = left => [0, 1].map(i => ({ active: lidRolls.active[i * 2 + (left ? 0 : 1)],
-      angle: left && angleFlip ? -angles[i] : angles[i], depth: depths[left && depthFlip ? 1 - i : i] }));
+      angle: left && !angleFlip ? -angles[i] : angles[i], depth: depths[left && depthFlip ? 1 - i : i] }));
     const right = eyeGeometry(px, py, makeLids(false));
     const left = eyeGeometry(flipX ? -px : px, flipY ? -py : py, makeLids(true));
     const rating = read(dna, 502, 10);
