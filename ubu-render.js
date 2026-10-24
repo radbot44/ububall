@@ -179,6 +179,22 @@
       face.append(svgNode('rect', { x: 0, y: 0, width: 360, height: 360, fill, 'clip-path': `url(#${clipId})` }));
       if (attribute.texture) materialEdge(defs, face, shapes[role], attribute, prefix + '-' + role + '-edge', effects);
     }
+    const domeId = prefix + '-dome';
+    const dome = svgNode('radialGradient', { id: domeId, gradientUnits: 'userSpaceOnUse', cx: 180, cy: 175, r: 176 });
+    dome.append(
+      svgNode('stop', { offset: '0%', 'stop-color': '#fff', 'stop-opacity': .14 }),
+      svgNode('stop', { offset: '38%', 'stop-color': '#fff', 'stop-opacity': .03 }),
+      svgNode('stop', { offset: '70%', 'stop-color': '#000', 'stop-opacity': .04 }),
+      svgNode('stop', { offset: '100%', 'stop-color': '#000', 'stop-opacity': .32 })
+    );
+    defs.append(dome);
+    face.append(svgNode('circle', { cx: 180, cy: 180, r: 176, fill: `url(#${domeId})`, 'pointer-events': 'none' }));
+    if (effects) {
+      effects.push((x, y) => {
+        dome.setAttribute('cx', String(180 + x * 20));
+        dome.setAttribute('cy', String(175 + y * 20));
+      });
+    }
     if (effects) attachLighting(svg, effects, surface || svg);
     return svg;
   }
