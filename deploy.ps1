@@ -13,6 +13,13 @@ function Run([string]$Program, [string[]]$Arguments) {
 }
 Push-Location $PSScriptRoot
 try {
+    $wranglerPath = [regex]::Escape($PSScriptRoot + '\node_modules\wrangler\')
+    $modulesPath = $PSScriptRoot + '\node_modules\'
+    $busy = @(Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='esbuild.exe' OR Name='workerd.exe'" | Where-Object {
+        ($_.CommandLine -and $_.CommandLine.Replace('/', '\') -match $wranglerPath) -or
+        ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($modulesPath, [StringComparison]::OrdinalIgnoreCase))
+    })
+    if ($busy.Count) { throw "Wrangler is already using this installation (process IDs: $($busy.ProcessId -join ', ')). Let that command finish or close its dev terminal, then retry." }
     $SettingsDirectory = [IO.Path]::GetFullPath($SettingsDirectory)
     New-Item -ItemType Directory -Force -Path $SettingsDirectory | Out-Null
     # Restrict saved production credentials, generated secret payloads and backups.

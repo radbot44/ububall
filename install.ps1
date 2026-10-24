@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Destination = (Join-Path (Split-Path $PSScriptRoot -Parent) 'ubumint-cloudflare'),
+    [string]$Destination,
     [switch]$DryRun,
     [switch]$InstallOnly,
     [switch]$Setup,
@@ -10,11 +10,40 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($ResetMint -and ($Setup -or $DryRun -or $InstallOnly)) { throw '-ResetMint requires deployment and cannot be combined with -Setup, -DryRun or -InstallOnly.' }
 $source = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+$SettingsDirectory = [IO.Path]::GetFullPath($SettingsDirectory)
+$manifestPath = Join-Path $SettingsDirectory 'installation.json'
+$installation = $null
+if (Test-Path -LiteralPath $manifestPath) {
+    $installation = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+}
+# The installed copy is an entry point too. Always install from the source
+# checkout rather than treating the deployment directory as another source.
+if ($installation.destination -eq $source -or (Split-Path $source -Leaf) -eq 'ubumint-cloudflare') {
+    $sourceDirectory = $installation.source
+    if (!$sourceDirectory) { $sourceDirectory = Join-Path (Split-Path $source -Parent) 'ubumint' }
+    $installer = Join-Path $sourceDirectory 'install.ps1'
+    if ([IO.Path]::GetFullPath($installer) -eq $PSCommandPath -or !(Test-Path -LiteralPath $installer -PathType Leaf)) {
+        throw "Source installer not found at $installer. Run install.ps1 from your ubumint source checkout."
+    }
+    $forward = @{}
+    foreach ($entry in $PSBoundParameters.GetEnumerator()) { $forward[$entry.Key] = $entry.Value }
+    if (!$forward.ContainsKey('Destination')) { $forward.Destination = $source }
+    $forward.SettingsDirectory = $SettingsDirectory
+    & $installer @forward
+    return
+}
+if (!$Destination) { $Destination = Join-Path (Split-Path $source -Parent) 'ubumint-cloudflare' }
 $Destination = [IO.Path]::GetFullPath($Destination).TrimEnd('\')
 if ($Destination -eq $source -or $Destination.StartsWith($source + '\', [StringComparison]::OrdinalIgnoreCase) -or $source.StartsWith($Destination + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'The installation must be separate from the source checkout.'
 }
-$SettingsDirectory = [IO.Path]::GetFullPath($SettingsDirectory)
+$wranglerPath = [regex]::Escape($Destination + '\node_modules\wrangler\')
+$modulesPath = $Destination + '\node_modules\'
+$busy = @(Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='esbuild.exe' OR Name='workerd.exe'" | Where-Object {
+    ($_.CommandLine -and $_.CommandLine.Replace('/', '\') -match $wranglerPath) -or
+    ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($modulesPath, [StringComparison]::OrdinalIgnoreCase))
+})
+if ($busy.Count) { throw "Wrangler is already using $Destination (process IDs: $($busy.ProcessId -join ', ')). Let that command finish or close its dev terminal, then retry. No installation files were changed." }
 New-Item -ItemType Directory -Force -Path $SettingsDirectory | Out-Null
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 & icacls.exe $SettingsDirectory /inheritance:r /grant:r "*${sid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
@@ -24,7 +53,6 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not protect the settings directory.' }
 $files = @(& git -C $source ls-files)
 if ($LASTEXITCODE -ne 0) { throw 'Could not list source files.' }
 $files = @($files + @('install.ps1', 'deploy.ps1', 'update.ps1', 'scripts/deploy-config.cjs', 'test/deploy-config.test.cjs') | Sort-Object -Unique)
-$manifestPath = Join-Path $SettingsDirectory 'installation.json'
 $oldHashes = @{}
 if (Test-Path -LiteralPath $manifestPath) {
     $previous = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
@@ -70,7 +98,7 @@ foreach ($file in $files) {
     New-Item -ItemType Directory -Force -Path (Split-Path $to -Parent) | Out-Null
     Copy-Item -LiteralPath (Join-Path $source $file) -Destination $to -Force
 }
-@{ destination = $Destination; files = $newHashes } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+@{ source = $source; destination = $Destination; files = $newHashes } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 Write-Host "Installed into $Destination. Private settings: $SettingsDirectory"
 if (!$InstallOnly) {
     & (Join-Path $Destination 'deploy.ps1') -DryRun:$DryRun -Setup:$Setup -ResetMint:$ResetMint -SettingsDirectory $SettingsDirectory
