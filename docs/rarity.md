@@ -10,9 +10,9 @@ Every complete 512-bit DNA string has identical probability ($2^{-512}$) under u
 
 $$\text{surprisal}(p) = -\log_2(p)$$
 
-Total appearance rarity is the sum of eight scored components:
+Total appearance rarity is the sum of nine scored components:
 
-$$\text{bits} = \text{finishes} + \text{colors} + \text{corners} + \text{mouthCuts} + \text{eyelids} + \text{eyeFlips} + \text{geometry} + \text{name}$$
+$$\text{bits} = \text{finishes} + \text{colors} + \text{harmony} + \text{corners} + \text{mouthCuts} + \text{eyelids} + \text{eyeFlips} + \text{geometry} + \text{name}$$
 
 The total is an interpretable rarity index in bits. It is not presented as a literal $1 \text{ in } 2^{\text{bits}}$ probability.
 
@@ -34,6 +34,20 @@ where $S(5, k)$ are the Stirling numbers of the second kind (`[1, 15, 25, 10, 1]
 - 3 distinct colors: $\approx 5.496$ bits
 - 2 distinct colors: $\approx 11.14$ bits
 - 1 color (monochrome): $20.0$ bits
+
+### Color harmony
+A separate small bonus recognizes coherent relationships among distinct palette colors, without changing DNA, color frequencies, or the distinct-color score. Indices 0–27 form a circular hue sequence; indices 28–31 are neutrals.
+
+- **Analogous:** at least 3 distinct hues fit within 4 steps of the 28-position hue wheel, including wraparound from 27 to 0.
+- **Complementary:** at least 3 distinct hues fit within two opposing radius-2 hue windows (14 positions apart), with colors on both sides; 4 or more distinct hues require at least 2 on each side.
+- **Neutral accent:** exactly 2 distinct chromatic colors within 3 hue steps, alongside one or more distinct neutrals.
+- **Grayscale:** at least 3 distinct neutral colors and no chromatic colors.
+
+A palette receives only its first qualifying pattern, never stacked bonuses. Let `k` be the number of distinct colors and `p` the fraction of unordered `k`-color subsets satisfying that pattern. These fractions are computed exactly by enumerating all `32 choose k` subsets, so the extra score is conditional on existing color-count rarity:
+
+$\text{harmony} = \min\left(3, \frac{-\log_2(p)}{3}\right)$
+
+No bonus is awarded for `k < 3` or an unmatched pattern. The maximum is **3 bits**, considerably smaller than a 10-bit rare material. This is a deliberately weighted aesthetic rarity bonus, not an independent event probability.
 
 ### Mouth corners
 Scores the probability of the resulting visible 4-corner pattern, taking pair precedence into account. For $c$ cut corners and pattern mask:
