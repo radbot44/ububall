@@ -189,44 +189,43 @@
       let idx = 0;
       const r = () => rolls[idx++ % rolls.length] / 65535;
 
-      // Circular gathered foil rim with slight organic crumple
+      // Circular gathered foil rim with organic crumple matching 110px candy radius
       foilRimPoints = [];
       const rimSegments = 48;
       for (let i = 0; i < rimSegments; i++) {
         const theta = (i / rimSegments) * Math.PI * 2;
-        const radius = 75 + (r() - 0.5) * 4;
+        const radius = 114 + (r() - 0.5) * 6;
         foilRimPoints.push({
           theta,
           x: Math.cos(theta) * radius,
-          y: Math.sin(theta) * radius,
-          crimp: (r() - 0.5) * 6
+          y: Math.sin(theta) * radius
         });
       }
 
       foilCreases = [];
       // Micro-crinkles pressed across the circular face
-      for (let i = 0; i < 42; i++) {
+      for (let i = 0; i < 48; i++) {
         const angle = r() * Math.PI * 2;
-        const dist = Math.sqrt(r()) * 65;
+        const dist = Math.sqrt(r()) * 96;
         const cx = Math.cos(angle) * dist;
         const cy = Math.sin(angle) * dist;
         const creaseAngle = r() * Math.PI * 2;
-        const len = 10 + r() * 26;
+        const len = 16 + r() * 36;
         foilCreases.push({
           x: cx, y: cy,
           dx: Math.cos(creaseAngle) * len,
           dy: Math.sin(creaseAngle) * len,
           normal: creaseAngle + Math.PI / 2,
           strength: 0.14 + r() * 0.48,
-          facet: (r() - 0.5) * 8
+          facet: (r() - 0.5) * 10
         });
       }
 
       // Radial creases gathered from the perimeter into the candy body
-      for (let i = 0; i < 24; i++) {
-        const theta = (i / 24) * Math.PI * 2 + (r() - 0.5) * 0.2;
-        const rOuter = 76;
-        const rInner = 50 + r() * 15;
+      for (let i = 0; i < 28; i++) {
+        const theta = (i / 28) * Math.PI * 2 + (r() - 0.5) * 0.2;
+        const rOuter = 114;
+        const rInner = 74 + r() * 22;
         const x1 = Math.cos(theta) * rOuter, y1 = Math.sin(theta) * rOuter;
         const x2 = Math.cos(theta) * rInner, y2 = Math.sin(theta) * rInner;
         foilCreases.push({
@@ -234,7 +233,7 @@
           dx: x2 - x1, dy: y2 - y1,
           normal: theta + Math.PI / 2,
           strength: 0.22 + r() * 0.45,
-          facet: (r() - 0.5) * 6
+          facet: (r() - 0.5) * 8
         });
       }
 
@@ -242,26 +241,26 @@
       foilTear = [];
       const segments = 16;
       for (let i = 0; i <= segments; i++) {
-        const tx = -95 + (190 / segments) * i;
-        const wave = Math.sin((i / segments) * Math.PI) * 8 - 4;
-        const jagged = (r() - 0.5) * 16;
+        const tx = -135 + (270 / segments) * i;
+        const wave = Math.sin((i / segments) * Math.PI) * 12 - 6;
+        const jagged = (r() - 0.5) * 20;
         foilTear.push({ x: tx, y: wave + jagged });
       }
 
       // Detached flying foil shards along the rip
       foilShards = Array.from({ length: 6 }, (_, i) => ({
-        x: (i - 2.5) * 28 + (r() - 0.5) * 16,
-        y: (r() - 0.5) * 15,
-        vx: (r() - 0.5) * 110,
-        vy: (i % 2 === 0 ? -1 : 1) * (60 + r() * 85),
+        x: (i - 2.5) * 40 + (r() - 0.5) * 22,
+        y: (r() - 0.5) * 20,
+        vx: (r() - 0.5) * 130,
+        vy: (i % 2 === 0 ? -1 : 1) * (70 + r() * 95),
         rot: (r() - 0.5) * 8,
-        size: 5 + r() * 8
+        size: 7 + r() * 11
       }));
     }
 
     function foilContour(target) {
       target.beginPath();
-      if (!foilRimPoints.length) { target.arc(0, 0, 76, 0, Math.PI * 2); return; }
+      if (!foilRimPoints.length) { target.arc(0, 0, 114, 0, Math.PI * 2); return; }
       target.moveTo(foilRimPoints[0].x, foilRimPoints[0].y);
       for (let i = 1; i < foilRimPoints.length; i++) {
         target.lineTo(foilRimPoints[i].x, foilRimPoints[i].y);
@@ -270,7 +269,7 @@
     }
 
     function drawCurledFoilEdge(target, points, dir, rip) {
-      const curl = Math.min(18, rip * 24);
+      const curl = Math.min(22, rip * 28);
       if (curl < 0.5) return;
       const offsetPoints = [];
       for (let i = 0; i < points.length; i++) {
@@ -302,7 +301,7 @@
       target.moveTo(offsetPoints[0].x, offsetPoints[0].y);
       for (let i = 1; i < offsetPoints.length; i++) target.lineTo(offsetPoints[i].x, offsetPoints[i].y);
       target.strokeStyle = '#ffffffee';
-      target.lineWidth = 1.2;
+      target.lineWidth = 1.3;
       target.stroke();
     }
 
@@ -315,22 +314,22 @@
       sheetCtx.fillStyle = color; sheetCtx.fill(); sheetCtx.clip();
 
       // 3D Spherical Volume Shading across circular candy
-      const lx = -26 + pointer * 32, ly = -32;
-      const spherical = sheetCtx.createRadialGradient(lx, ly, 4, 3, 5, 84);
+      const lx = -36 + pointer * 45, ly = -45;
+      const spherical = sheetCtx.createRadialGradient(lx, ly, 6, 4, 8, 122);
       spherical.addColorStop(0, '#ffffffdd');
       spherical.addColorStop(0.25, tint(color, 0.55));
       spherical.addColorStop(0.55, color);
       spherical.addColorStop(0.82, tint(color, -0.42));
       spherical.addColorStop(1, tint(color, -0.78));
-      sheetCtx.fillStyle = spherical; sheetCtx.fillRect(-95, -95, 190, 190);
+      sheetCtx.fillStyle = spherical; sheetCtx.fillRect(-135, -135, 270, 270);
 
       // Crimped / gathered foil flutes around circular rim
       for (const pt of foilRimPoints) {
-        const innerX = pt.x * 0.84, innerY = pt.y * 0.84;
+        const innerX = pt.x * 0.85, innerY = pt.y * 0.85;
         sheetCtx.beginPath(); sheetCtx.moveTo(pt.x, pt.y); sheetCtx.lineTo(innerX, innerY);
-        sheetCtx.strokeStyle = 'rgba(0,0,0,0.45)'; sheetCtx.lineWidth = 1.4; sheetCtx.stroke();
-        sheetCtx.beginPath(); sheetCtx.moveTo(pt.x + 0.8, pt.y + 0.6); sheetCtx.lineTo(innerX + 0.8, innerY + 0.6);
-        sheetCtx.strokeStyle = 'rgba(255,255,255,0.45)'; sheetCtx.lineWidth = 0.9; sheetCtx.stroke();
+        sheetCtx.strokeStyle = 'rgba(0,0,0,0.45)'; sheetCtx.lineWidth = 1.6; sheetCtx.stroke();
+        sheetCtx.beginPath(); sheetCtx.moveTo(pt.x + 1.2, pt.y + 0.8); sheetCtx.lineTo(innerX + 1.2, innerY + 0.8);
+        sheetCtx.strokeStyle = 'rgba(255,255,255,0.45)'; sheetCtx.lineWidth = 1.0; sheetCtx.stroke();
       }
 
       // 3D Crinkles & Creases pressed against the circular candy
@@ -348,14 +347,14 @@
         sheetCtx.fill();
 
         sheetCtx.beginPath(); sheetCtx.moveTo(c.x, c.y); sheetCtx.lineTo(c.x + c.dx, c.y + c.dy);
-        sheetCtx.strokeStyle = `rgba(0,0,0, ${c.strength * (0.35 + 0.55 * shade)})`; sheetCtx.lineWidth = 1.3; sheetCtx.stroke();
-        sheetCtx.beginPath(); sheetCtx.moveTo(c.x - 0.7, c.y - 0.5); sheetCtx.lineTo(c.x + c.dx - 0.7, c.y + c.dy - 0.5);
-        sheetCtx.strokeStyle = `rgba(255,255,255, ${c.strength * (0.3 + 0.75 * glint)})`; sheetCtx.lineWidth = 0.85; sheetCtx.stroke();
+        sheetCtx.strokeStyle = `rgba(0,0,0, ${c.strength * (0.35 + 0.55 * shade)})`; sheetCtx.lineWidth = 1.4; sheetCtx.stroke();
+        sheetCtx.beginPath(); sheetCtx.moveTo(c.x - 0.9, c.y - 0.6); sheetCtx.lineTo(c.x + c.dx - 0.9, c.y + c.dy - 0.6);
+        sheetCtx.strokeStyle = `rgba(255,255,255, ${c.strength * (0.3 + 0.75 * glint)})`; sheetCtx.lineWidth = 0.95; sheetCtx.stroke();
       }
 
       // Sweeping anisotropic metallic reflection
-      const shineX = -30 + pointer * 45;
-      sheetCtx.fillStyle = gradient(sheetCtx, shineX - 50, -80, shineX + 65, 80, [
+      const shineX = -40 + pointer * 65;
+      sheetCtx.fillStyle = gradient(sheetCtx, shineX - 70, -110, shineX + 90, 110, [
         [0, 'rgba(255,255,255,0)'],
         [0.32, 'rgba(255,255,255,0)'],
         [0.40, 'rgba(255,255,255,0.3)'],
@@ -365,37 +364,37 @@
         [0.76, 'rgba(255,255,255,0.22)'],
         [1, 'rgba(255,255,255,0)']
       ]);
-      sheetCtx.fillRect(-95, -95, 190, 190);
+      sheetCtx.fillRect(-135, -135, 270, 270);
 
       // Raised circular coin inner rim pressed through the foil
       sheetCtx.beginPath();
-      sheetCtx.arc(0, 0, 68, 0, Math.PI * 2);
-      sheetCtx.strokeStyle = 'rgba(0,0,0,0.4)';
-      sheetCtx.lineWidth = 2.5;
+      sheetCtx.arc(0, 0, 98, 0, Math.PI * 2);
+      sheetCtx.strokeStyle = 'rgba(0,0,0,0.38)';
+      sheetCtx.lineWidth = 3.0;
       sheetCtx.stroke();
       sheetCtx.beginPath();
-      sheetCtx.arc(-0.8, -0.8, 68, 0, Math.PI * 2);
+      sheetCtx.arc(-1.2, -1.2, 98, 0, Math.PI * 2);
       sheetCtx.strokeStyle = 'rgba(255,255,255,0.45)';
-      sheetCtx.lineWidth = 1.2;
+      sheetCtx.lineWidth = 1.4;
       sheetCtx.stroke();
 
       // Embossed circular 3D brand emblem pressed into the foil
       if (mark.complete && mark.naturalWidth) {
         sheetCtx.save();
         sheetCtx.globalAlpha = 0.5;
-        sheetCtx.drawImage(mark, -46 + 1.6, -46 + 1.6, 92, 92);
+        sheetCtx.drawImage(mark, -72 + 2.2, -72 + 2.2, 144, 144);
         sheetCtx.globalAlpha = 0.35;
-        sheetCtx.drawImage(mark, -46 - 1.2, -46 - 1.2, 92, 92);
+        sheetCtx.drawImage(mark, -72 - 1.8, -72 - 1.8, 144, 144);
         sheetCtx.globalAlpha = 0.85;
-        sheetCtx.drawImage(mark, -46, -46, 92, 92);
+        sheetCtx.drawImage(mark, -72, -72, 144, 144);
         sheetCtx.restore();
       }
 
       // Metallic rim specular highlight along upper-left curve
       sheetCtx.beginPath();
-      sheetCtx.arc(0, 0, 74, -Math.PI * 0.85, -Math.PI * 0.1);
+      sheetCtx.arc(0, 0, 110, -Math.PI * 0.85, -Math.PI * 0.1);
       sheetCtx.strokeStyle = '#ffffff60';
-      sheetCtx.lineWidth = 1.2;
+      sheetCtx.lineWidth = 1.4;
       sheetCtx.stroke();
 
       sheetCtx.restore();
@@ -405,24 +404,20 @@
       const rip = ease(0.08, 0.65, t);
       renderFoilSheet();
 
-      // Soft ambient shadow underneath circular candy
-      if (t < 0.85) {
+      // Ambient drop shadow ONLY when unopened (never casts on top of revealed ubus)
+      if (!rip) {
         ctx.save();
-        ctx.globalAlpha = (1 - ease(0.25, 0.75, t)) * 0.45;
         ctx.beginPath();
-        ctx.ellipse(4, 12, 78 * (1 - rip * 0.25), 24, 0, 0, Math.PI * 2);
-        ctx.fillStyle = '#000000';
+        ctx.ellipse(6, 16, 110, 30, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
         ctx.fill();
         ctx.restore();
-      }
-
-      if (!rip) {
         ctx.drawImage(sheet, -300, -180, 600, 360);
         return;
       }
 
       // Foil rips away in 3D: separating top and bottom flaps
-      const openY = rip * 125, openX = rip * 18, rot = rip * 0.2;
+      const openY = rip * 165, openX = rip * 24, rot = rip * 0.22;
       const fade = 1 - ease(0.80, 0.95, t);
 
       // Upper torn flap: curls up and peels away
@@ -466,7 +461,7 @@
         ctx.save();
         ctx.globalAlpha = fade;
         for (const s of foilShards) {
-          const sz = s.size || 6;
+          const sz = s.size || 8;
           const sx = s.x + s.vx * rip;
           const sy = s.y + s.vy * rip;
           ctx.save();
@@ -480,7 +475,7 @@
           ctx.fillStyle = gradient(ctx, -sz, -sz, sz, sz, [[0, '#ffffff'], [0.4, '#c8d7e6'], [0.8, color], [1, '#485869']]);
           ctx.fill();
           ctx.strokeStyle = '#ffffff99';
-          ctx.lineWidth = 0.8;
+          ctx.lineWidth = 0.9;
           ctx.stroke();
           ctx.restore();
         }
@@ -514,15 +509,15 @@
 
     function candy(x, y, hex, angle) {
       ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
-      ctx.shadowColor = '#0007'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 8;
-      ctx.beginPath(); ctx.arc(5, 6, 70, 0, Math.PI * 2); ctx.fillStyle = tint(hex, -.5); ctx.fill();
+      ctx.shadowColor = '#0007'; ctx.shadowBlur = 20; ctx.shadowOffsetY = 12;
+      ctx.beginPath(); ctx.arc(7, 9, 110, 0, Math.PI * 2); ctx.fillStyle = tint(hex, -.5); ctx.fill();
       ctx.shadowColor = 'transparent';
-      const gloss = ctx.createRadialGradient(-28, -35, 2, 4, 8, 92);
+      const gloss = ctx.createRadialGradient(-44, -55, 3, 6, 12, 144);
       gloss.addColorStop(0, tint(hex, .55)); gloss.addColorStop(.3, tint(hex, .15)); gloss.addColorStop(.62, hex); gloss.addColorStop(1, tint(hex, -.6));
-      ctx.beginPath(); ctx.arc(0, 0, 70, 0, Math.PI * 2); ctx.fillStyle = gloss; ctx.fill();
-      ctx.strokeStyle = '#ffffff35'; ctx.lineWidth = 1; ctx.stroke();
-      if (mark.complete && mark.naturalWidth) ctx.drawImage(mark, -46, -46, 92, 92);
-      ctx.beginPath(); ctx.ellipse(-24, -44, 24, 8, -.5, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(0, 0, 110, 0, Math.PI * 2); ctx.fillStyle = gloss; ctx.fill();
+      ctx.strokeStyle = '#ffffff35'; ctx.lineWidth = 1.4; ctx.stroke();
+      if (mark.complete && mark.naturalWidth) ctx.drawImage(mark, -72, -72, 144, 144);
+      ctx.beginPath(); ctx.ellipse(-38, -69, 38, 12, -.5, 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff48'; ctx.fill();
       ctx.restore();
     }
@@ -541,7 +536,7 @@
         const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => Math.abs(b - (count - 1) / 2) - Math.abs(a - (count - 1) / 2));
         for (const i of order) {
           const slot = i - (count - 1) / 2;
-          candy(slot * 82 * fan, -28 * fan + Math.abs(slot) * 14 * fan, candyColors[i % 5], slot * .11 * fan);
+          candy(slot * 88 * fan, -26 * fan + Math.abs(slot) * 14 * fan, candyColors[i % 5], slot * .10 * fan);
         }
         ctx.restore();
       }
