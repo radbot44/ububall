@@ -1,4 +1,4 @@
-/* Ubu DNA decoder. Preview implementation: appearance is not frozen yet. */
+/* Frozen Ubu DNA decoder. Preserve outputs; see docs/dna.md. */
 (function(root) {
   'use strict';
   const V = 'AEIOU';

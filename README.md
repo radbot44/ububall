@@ -4,15 +4,15 @@ Private, owner-operated project for minting ubus for uburoom.
 
 Design requirement: a lean mint with zero fluff. Use the smallest practical implementation of current requirements, platform APIs and minimal dependencies. Measure meaningful optimizations; preserve DNA correctness, security and ownership integrity. Detailed engineering constraints are in AGENTS.md.
 
-Status: local appearance preview. The complete DNA schema is closed to future expansion but remains adjustable until owner acceptance. Cloud minting and the final signed/encrypted file format are not implemented.
+DNA and appearance frozen by owner acceptance on 2026-10-23. No versions or future expansion. Unsigned files and local certificate signing/verification are implemented; production minting, trust configuration and ownership are not.
 
-The current [DNA specification draft](docs/dna-draft.md) records approved allocations and remaining decisions. The complete standard is not frozen. [The uburithm](docs/uburithm.md) records fixed naming rules and a proposed efficient calculation.
+The permanent [DNA specification](docs/dna.md) and [uburithm](docs/uburithm.md) define the generator. The [.ubu profile](docs/ubu-file.md) defines certificates. Run `node --test` for DNA and file/signature checks.
 
 ## Product baseline
 
 - An ubu is deterministically formed from random DNA, including its ubunym and oomark.
 - DNA supplies random input to generation rules. Multiple DNA values may produce the same currently visible traits.
-- There is one permanent, closed set of DNA laws, without generator versions or future expansion. All 256 bits are allocated. Changes are allowed during preview, before the owner freezes the schema.
+- There is one permanent, closed set of DNA laws, without generator versions or future expansion. All 256 bits are allocated. Existing meanings and outputs are permanent.
 - Ordinary minting generates DNA at the mint rather than accepting a caller-selected seed. Supported customization policy belongs to the consuming host; this does not prevent local browser modifications or hunting through repeated mint requests.
 - Ubucodes must visibly distinguish plain and protected forms. Parsing must distinguish them strictly; failed protected codes cannot fall back to plain decoding. Exact prefixes and host acceptance rules remain to be specified.
 - Cloudflare Workers is the intended minting target: a request obtains newly generated DNA in an authorized ubucode. No cloud resources have been provisioned.
@@ -21,7 +21,7 @@ The current [DNA specification draft](docs/dna-draft.md) records approved alloca
 
 The owner supplied this ordered 32-color palette. Each of the five current color roles (background, eye rings, irises, pupils and mouth) can draw one equally likely color from five random bits, for 25 bits total.
 
-This records the supplied palette order; field locations and the final mapping into the code have not been standardized.
+Palette order, hex values and the field mapping in docs/dna.md are permanent.
 
 | Index | Color | Hex |
 | --- | --- | --- |
@@ -62,18 +62,20 @@ This records the supplied palette order; field locations and the final mapping i
 
 The starting generator produces a six-letter nomen and six additional letters split into one or two surrounding words. The extra word length is selected from 2, 3, 4 or 6; orientation determines which side receives it. Letter choices follow constrained consonant/vowel patterns.
 
-The owner requires the existing naming rules and a 64-bit seed at the start of DNA. The official algorithm is called the uburithm. Its calculation may be optimized without changing naming rules. Text seeds are converted from exact UTF-8 text through SHA-256 into the complete DNA; its first 64 bits directly initialize the name stream. Random DNA and imported DNA bypass text hashing. Exact stream calculation remains under review.
+The owner requires the existing naming rules and a 64-bit seed at the start of DNA. The official algorithm is called the uburithm. Its calculation may be optimized without changing naming rules. Text seeds are converted from exact UTF-8 text through SHA-256 into the complete DNA; its first 64 bits directly initialize the name stream. Random DNA and imported DNA bypass text hashing. The exact stream calculation is permanent.
 
-## Open format decisions
+## Separate mint decisions
 
-1. Approved 256-bit layout: 64-bit ubunym seed, 80-bit attribute block, 24-bit corner block, 40-bit mouth geometry, 40-bit eye controls, 8-bit Ubuquity rating. See the DNA draft for authoritative allocations, rating ranges and feature rules.
-2. The demo uses the documented MSB-first order, slot roles and SplitMix64 calculation for review. Text-to-DNA hashing and direct initial-state input are approved; no future expansion mechanism is planned.
-3. All six corner rolls are four bits (6.25% success). The old width distribution is removed. Mouth width, height and X/Y displacement each use ten bits, as do eye X/Y displacement and the two rare left-eye flip controls. Numeric geometry and the centering curve are detailed as proposals in the DNA draft.
-4. Text encoding, prefixes, canonical parsing and exact plain/protected acceptance rules.
-5. Protection: central signatures, encryption, or both; trust scope and key rotation. Ed25519 signatures were recommended for independent verification across installations, but have not been selected.
-6. Mint API, caller identity, allowances, abuse controls and any durable accounting.
+DNA is fixed. Two .ubu forms are approved:
 
-These decisions define DNA generation separately from the envelope that proves issuance. A permanent DNA interpretation does not by itself settle cryptographic envelope evolution.
+- **Unsigned/custom:** contains DNA, freely designed or generated by anyone. It carries no proof of official issuance or registered ownership.
+- **Mint-signed:** contains DNA, a permanent twelve-digit mint serial (000000000001–999999999999), and certificate metadata covered by a signature verifiable against a trusted mint public key. Only successful verification establishes mint authenticity; a signature field or claimed mint name alone does not.
+
+Both forms use the same frozen DNA and renderer. Hosts choose whether to allow custom ubus or require mint-signed ones. Missing required signature data, an unknown/untrusted key or a failed signature never downgrades a signed-form file to unsigned. A deliberate export of its DNA as a new unsigned file carries no official status. Current transferable ownership is checked against the mint registry, separately from the issuance signature.
+
+The [file profile](docs/ubu-file.md) is implemented in ubu-file.js using platform Ed25519 and strict JSON validation. It is a working development format, separate from frozen DNA. Encryption is not selected. Key distribution/rotation, Discord ownership, mint allowances and trade APIs remain separate work.
+
+Approved mint policy: prepare batches of **1,000** by default (configurable for subsequent batches), distribute randomly without replacement, and sign each ubu when assigned to its first owner. Serials follow creation order. The next batch starts after exhaustion. Local persistent batch storage and allocation are implemented; see the [service guide](docs/mint.md) and [file profile](docs/ubu-file.md#mint-batches). Worker scheduling, Discord authorization and mint allowances remain to be implemented.
 
 ## Illustrative lengths, not a format specification
 
@@ -87,8 +89,8 @@ Prefixes, key identifiers and other metadata add length. Encryption alone does n
 
 ## Local demo
 
-Open demo.html with ubu.js and demo.js beside it, or serve these files on localhost. No build step, framework or dependencies. Text seeds use platform SHA-256; random generation uses platform randomness. There are no signing, encryption, account or remote API calls.
+Open demo.html with ubu.js, ubu-file.js and demo.js beside it, or serve them on localhost. No build step, framework or dependencies. Text seeds use platform SHA-256; random generation uses platform randomness. The designer has no production mint keys, account or remote API calls.
 
-The demo supports text seeds, canonical base64url or hexadecimal DNA input, local favorites/history, trait inspection, fixed schema samples and unsigned .ubu import/export. The temporary export contains only {"type":"ubu-demo","dna":"..."}; it is not the future mint certificate format.
+The demo supports text seeds, canonical base64url or hexadecimal DNA input, local favorites/history, trait inspection, fixed schema samples and official-format custom .ubu import/export. Its 66-byte export contains only {"type":"ubu","dna":"..."}. Old ubu-demo envelopes are rejected; signed files are rejected until the application configures a trusted mint key. No key is trusted from an imported file.
 
-The decoder in ubu.js is separate from DOM rendering in demo.js. Both the main preview and thumbnails use the same renderer. Rendering decisions and verification limits are recorded in docs/dna-draft.md.
+The decoder in ubu.js is separate from DOM rendering in demo.js. Both the main preview and thumbnails use the same renderer. Rendering rules and verification limits are recorded in docs/dna.md.

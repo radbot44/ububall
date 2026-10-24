@@ -106,7 +106,7 @@
       <div class="dna-row">
         <label class="seed-field">256-bit DNA<input id="dna-output" readonly spellcheck="false"></label>
         <button id="copy-dna" type="button">Copy</button>
-        <button id="export-ubu" type="button">Export .ubu</button>
+        <button id="export-ubu" type="button">Export custom .ubu</button>
         <label class="file-button">Import .ubu<input class="file-input" id="import-ubu" type="file" accept=".ubu,.json,application/json"></label>
       </div>
       <p class="status" id="input-error" role="status"></p>
@@ -129,9 +129,10 @@
       <div class="tab-panel ubu-grid" id="storage-panel" role="tabpanel" aria-labelledby="storage-tab"></div>
       <div class="tab-panel ubu-grid" id="history-panel" role="tabpanel" aria-labelledby="history-tab" hidden></div>
     </section>
-    <footer>Local schema preview. No signatures, encryption, accounts or external requests. Exported files are unsigned demo files.</footer>
+    <footer>Local ubu designer. Exports are unsigned custom ubus. No trusted mint keys, accounts or external requests.</footer>
   </main>
   <script src="ubu.js"></script>
+  <script src="ubu-file.js"></script>
   <script src="demo.js"></script>
 </body>
 </html>

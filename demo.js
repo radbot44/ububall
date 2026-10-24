@@ -349,7 +349,7 @@
     try { await navigator.clipboard.writeText(current); $('input-error').textContent = 'DNA copied.'; } catch { $('dna-output').select(); $('input-error').textContent = 'Select and copy the DNA above.'; }
   });
   $('export-ubu').addEventListener('click', () => {
-    const url = URL.createObjectURL(new Blob([JSON.stringify({ type: 'ubu-demo', dna: current })], { type: 'application/json' }));
+    const url = URL.createObjectURL(new Blob([ubuFile.unsigned(current)], { type: 'application/json' }));
     const link = node('a', { href: url, download: model(current).parts.fullName.replace(/ /g, '-') + '.ubu' });
     document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
@@ -357,11 +357,13 @@
     const ticket = ++generation;
     try {
       const file = event.target.files[0]; if (!file) return;
-      if (file.size > 4096) throw new Error('That file is too large for a demo ubu.');
-      const data = JSON.parse(await file.text());
-      if (data.type !== 'ubu-demo' || typeof data.dna !== 'string') throw new Error('Choose an unsigned ubu-demo file.');
-      const code = ubu.toCode(ubu.fromCode(data.dna));
-      if (ticket === generation) show(code);
+      if (file.size > ubuFile.MAX_BYTES) throw new Error('A .ubu file must contain 1–1024 bytes.');
+      // No production mint keys are configured in this local designer.
+      const result = await ubuFile.read(new Uint8Array(await file.arrayBuffer()));
+      if (ticket === generation) {
+        show(result.dna);
+        $('input-error').textContent = 'Imported custom ubu (unsigned).';
+      }
     } catch (error) { if (ticket === generation) fail(error); }
     event.target.value = '';
   });

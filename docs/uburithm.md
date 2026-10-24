@@ -1,6 +1,6 @@
 # The uburithm
 
-Status: naming rules and direct 64-bit initial-state input are approved. ubu.js implements the stream and precomputed pair arrays for the authorized local demo; permanent acceptance remains under review.
+Frozen by owner acceptance on 2026-10-23 (America/New_York). ubu.js implements this permanent naming algorithm. Optimizations must preserve seed-to-name outputs and draw consumption.
 
 ## Source review
 
@@ -20,16 +20,16 @@ Reviewed the supplied standalone generator and uburoom's web/ubumfa.js. The rele
 - For CC, X may only follow one of HLNRSWYXZ. Immediately after VV, a CC pair cannot start with H, W or Y. Draw across the complete allowed ordered pair list, rather than drawing the first and second characters independently.
 - A standalone consonant immediately after VV cannot be Y.
 
-## Proposed permanent random stream
+## Permanent random stream
 
-1. Read DNA bits 0-63 as one unsigned 64-bit initial state, under the DNA bit-order convention still awaiting approval. No string conversion or FNV seed hash.
+1. Read DNA bits 0-63 as one unsigned 64-bit initial state, most significant bit first. No string conversion or FNV seed hash.
 2. For every draw, increment state by 0x9e3779b97f4a7c15 modulo 2^64.
 3. Copy state to z. Set z = ((z XOR (z >> 30)) times 0xbf58476d1ce4e5b9) modulo 2^64.
 4. Set z = ((z XOR (z >> 27)) times 0x94d049bb133111eb) modulo 2^64.
 5. Let r = (z XOR (z >> 31)) >> 11, giving a nonnegative 53-bit integer. Logical shifts operate on unsigned values.
 6. For an n-outcome draw, preserve the reference rule floor((r / 2^53) times n), using IEEE-754 binary64 in that operation order. Orientation is before when r / 2^53 < 0.5.
 
-All 64-bit inputs, including zero, are valid. This reproduces the prototype stream mechanics from a raw initial state, not its original text-seed-to-state mapping. The finite outcome scaling is not mathematically uniform for non-power-of-two n; retaining it preserves the reference calculation. Replacing it with integer scaling or rejection sampling is a separate algorithm decision, not an assumed optimization.
+All 64-bit inputs, including zero, are valid. This reproduces the prototype stream mechanics from a raw initial state, not its original text-seed-to-state mapping. The finite outcome scaling is not mathematically uniform for non-power-of-two n; retaining it preserves the reference calculation. Do not substitute integer scaling or rejection sampling: those change the permanent mapping.
 
 ## Preserve the draw schedule
 
@@ -52,7 +52,7 @@ The reference consonantPair function recalculates the number of allowed pairs an
 
 Build each in exactly the reference order: first characters in their original alphabet order, second characters in the original allowed-second alphabet order. One draw with the original outcome count then directly indexes the array. This preserves the reference selection and draw count while avoiding repeated counting and scanning. The pair counts were checked with an isolated Node calculation.
 
-Other proposed optimizations:
+Potential output-preserving optimizations:
 
 - Precompute vowel-Y eligibility, VV/CC locations and post-VV consonant restrictions for every allowed pattern.
 - Cache all 25 vowel pairs and weighted sixteen-outcome vowel choices.
@@ -61,8 +61,6 @@ Other proposed optimizations:
 
 Names are short, so these are structural simplifications, not measured performance claims. The demo precomputes both consonant-pair arrays and the vowel-pair array, preserving the reference draw schedule. An isolated comparison of 10,000 raw-state seeds matched the original ubunym procedure. Pattern metadata remains calculated directly; no performance benchmark or claim of absolute optimality has been made.
 
-## Decisions remaining
+## Compatibility
 
-- Approve the exact SplitMix64 and bounded-draw calculations. Direct initialization from the first 64 DNA bits is approved; text seeds use SHA-256 over UTF-8 to obtain the entire DNA before naming.
-- Confirm whether the reference draw schedule is the desired official mapping before the first permanent ubu is minted.
-- Freeze fixed expected outputs for the implemented decoder after appearance acceptance, retaining optimized/reference equivalence as a compatibility gate.
+The exact stream, raw initial state and draw schedule are permanent. Text seeds hash through SHA-256 into complete DNA before naming. Run `node --test ubu.test.js`; fixed expected outputs must not be rewritten to approve a changed mapping.
