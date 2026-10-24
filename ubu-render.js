@@ -500,16 +500,31 @@
     };
   }
   function renderCardMaterials(m, effects = null) {
-    const materials = [];
-    const seen = new Set();
-    for (const role of roles) {
+    const CARD_ROLES = ['background', 'eyes', 'mouth', 'irises', 'pupils'];
+    const layers = [];
+    for (const role of CARD_ROLES) {
       const attr = m.attributes?.[role];
-      if (attr?.texture && attr.texture !== 'matte' && !seen.has(attr.texture)) {
-        seen.add(attr.texture);
-        materials.push(attr);
+      if (attr?.texture && attr.texture !== 'matte') {
+        layers.push({
+          role,
+          mat: attr,
+          angle: attr.angle ?? 45
+        });
       }
     }
-    if (!materials.length) return null;
+    if (!layers.length) return null;
+
+    const angleCounts = new Map();
+    for (const layer of layers) {
+      angleCounts.set(layer.angle, (angleCounts.get(layer.angle) || 0) + 1);
+    }
+    const angleIndices = new Map();
+    for (const layer of layers) {
+      const idx = angleIndices.get(layer.angle) || 0;
+      layer.angleIndex = idx;
+      layer.angleTotal = angleCounts.get(layer.angle);
+      angleIndices.set(layer.angle, idx + 1);
+    }
 
     const prefix = 'card-mat-' + (++serial);
     const svg = svgNode('svg', {
@@ -526,44 +541,151 @@
     bounds.append(svgNode('rect', { x: 0, y: 0, width: 320, height: 480, rx: 16, ry: 16 }));
     defs.append(bounds);
 
+    const face = svgNode('g', { 'clip-path': `url(#${boundsId})` });
+    svg.append(face);
+
     const S = 44;
     const span = 420;
-    const numMats = materials.length;
-    const cycle = S * 2 * numMats;
-    const start = -Math.ceil((span + cycle) / cycle) * cycle;
-    const stripeAngle = materials[0].angle ?? 45;
 
-    const matDefs = materials.map((mat, i) => {
-      const patId = `${prefix}-pat-${i}`;
-      const fill = material(defs, { ...mat, angle: mat.angle - stripeAngle }, patId, effects, 160, 240);
-      return { mat, fill };
-    });
-
-    const stripesGroup = svgNode('g', {
-      transform: `rotate(${stripeAngle} 160 240)`
-    });
-
-    for (let i = 0; i < numMats; i++) {
-      const { mat, fill } = matDefs[i];
-      const offset = i * S * 2;
+    function getLayerRects(layer) {
+      const { angleIndex, angleTotal } = layer;
+      const cycle = S * 2 * angleTotal;
+      const offset = angleIndex * S * 2;
+      const start = -Math.ceil((span + cycle) / cycle) * cycle;
+      const rects = [];
       for (let base = start; base <= span + 320; base += cycle) {
-        const x = base + offset;
-        stripesGroup.append(
+        rects.push({ x: base + offset, y: -span, width: S, height: span * 2 + 480 });
+      }
+      return rects;
+    }
+
+    for (let i = 0; i < layers.length; i++) {
+      layers[i].rects = getLayerRects(layers[i]);
+    }
+
+    const finishes = {
+      terrazzo: { width: 1.6, rim: .4, stops: [[0, '#fff', .4], [.5, '#fff', .06], [1, '#000', .22]] },
+      crackle: { width: 2, rim: .6, stops: [[0, '#fff', .55], [.45, '#fff', .12], [1, '#000', .28]] },
+      opalescent: { width: 2.6, rim: .7, stops: [[0, '#fff0da', .65], [.35, '#d3f9ee', .45], [.7, '#e7dfff', .35], [1, '#000', .2]] },
+      frosted: { width: 2.8, rim: .7, stops: [[0, '#fff', .65], [.5, '#fff', .28], [1, '#fff', .12]] },
+      woodgrain: { width: 1.5, rim: .4, stops: [[0, '#fff', .3], [.45, '#fff', .06], [1, '#000', .25]] },
+      holographic: { width: 2, rim: .65, stops: [[0, '#b8ffff', .8], [.3, '#ffc9f6', .65], [.6, '#fff2af', .65], [1, '#94bcff', .6]] },
+      pearlescent: { width: 2.5, rim: .7, stops: [[0, '#fff4e4', .65], [.4, '#e3efff', .25], [1, '#000', .2]] },
+      marble: { width: 1.8, rim: .5, stops: [[0, '#fff', .45], [.5, '#fff', .08], [1, '#000', .2]] },
+      lacquered: { width: 3.2, rim: 1, stops: [[0, '#fff', .85], [.32, '#fff', .3], [.5, '#000', .15], [1, '#000', .5]] },
+      metallic: { width: 2.4, rim: .65, stops: [[0, '#fff', .85], [.43, '#fff', .12], [.49, '#000', .55], [.56, '#fff', .65], [1, '#000', .6]] },
+      glossy: { width: 3.4, rim: 1.1, stops: [[0, '#fff', .65], [.35, '#fff', .24], [.65, '#fff', .02], [1, '#000', .28]] },
+      iridescent: { width: 2.5, rim: .7, stops: [[0, '#82fff0', .8], [.28, '#aaa1ff', .65], [.5, '#ff8cdb', .55], [.72, '#ffe6a0', .6], [1, '#53bfff', .7]] },
+      crystalline: { width: 2, rim: .45, stops: [[0, '#fff', .9], [.24, '#fff', .55], [.25, '#000', .32], [.49, '#000', .12], [.5, '#fff', .8], [.74, '#fff', .2], [.75, '#000', .42], [1, '#000', .55]] },
+      damascus: { width: 2, rim: .5, stops: [[0, '#fff', .6], [.4, '#fff', .15], [1, '#000', .3]] },
+      velvet: { width: 1.5, rim: .4, stops: [[0, '#fff', .25], [.5, '#fff', .05], [1, '#000', .2]] },
+      plush: { width: 1.5, rim: .4, stops: [[0, '#fff', .25], [.5, '#fff', .05], [1, '#000', .2]] }
+    };
+
+    for (let i = 0; i < layers.length; i++) {
+      const layer = layers[i];
+      const { mat, angle, rects } = layer;
+      const patId = `${prefix}-pat-${i}`;
+      const fill = material(defs, { ...mat, angle: 0 }, patId, effects, 160, 240);
+
+      const group = svgNode('g', {
+        transform: `rotate(${angle} 160 240)`
+      });
+
+      // Mask out upper layers so lower layers are never visible beneath upper translucent stripes
+      const upperLayers = layers.slice(i + 1);
+      if (upperLayers.length > 0) {
+        const maskId = `${prefix}-mask-${i}`;
+        const mask = svgNode('mask', {
+          id: maskId,
+          maskUnits: 'userSpaceOnUse',
+          x: -span, y: -span, width: span * 2 + 320, height: span * 2 + 480
+        });
+        mask.append(svgNode('rect', { x: -span, y: -span, width: span * 2 + 320, height: span * 2 + 480, fill: '#fff' }));
+        for (const upper of upperLayers) {
+          const upperGroup = svgNode('g', {
+            transform: `rotate(${upper.angle - angle} 160 240)`
+          });
+          for (const r of upper.rects) {
+            upperGroup.append(svgNode('rect', {
+              x: r.x, y: r.y, width: r.width, height: r.height, fill: '#000'
+            }));
+          }
+          mask.append(upperGroup);
+        }
+        defs.append(mask);
+        group.setAttribute('mask', `url(#${maskId})`);
+      }
+
+      const shapes = [];
+      for (const r of rects) {
+        const shape = svgNode('rect', { x: r.x, y: r.y, width: r.width, height: r.height });
+        shapes.push(shape);
+        group.append(
           svgNode('rect', {
-            x, y: -span, width: S, height: span * 2 + 480,
+            x: r.x, y: r.y, width: r.width, height: r.height,
             fill: mat.hex, opacity: .65
           }),
           svgNode('rect', {
-            x, y: -span, width: S, height: span * 2 + 480,
+            x: r.x, y: r.y, width: r.width, height: r.height,
             fill
           })
         );
       }
+
+      const finish = finishes[mat.texture];
+      if (finish) {
+        const edgeId = `${prefix}-edge-${i}`;
+        const gradId = `${edgeId}-light`;
+        const grad = svgNode('linearGradient', {
+          id: gradId, gradientUnits: 'userSpaceOnUse',
+          x1: 0, y1: 0, x2: 320, y2: 0
+        });
+        for (const [offset, color, opacity] of finish.stops) {
+          grad.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
+        }
+        defs.append(grad);
+        if (effects) {
+          effects.push((x, y) => {
+            grad.setAttribute('gradientTransform', `translate(${x * 30} ${y * 30})`);
+          });
+        }
+
+        for (const [idx, width] of [finish.width, finish.rim].entries()) {
+          const key = `${edgeId}-${idx}`;
+          const filter = svgNode('filter', {
+            id: `${key}-cut`, filterUnits: 'userSpaceOnUse',
+            x: -span, y: -span, width: span * 2 + 320, height: span * 2 + 480,
+            'color-interpolation-filters': 'sRGB'
+          });
+          filter.append(
+            svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: width, result: 'inset' }),
+            svgNode('feComposite', { in: 'SourceGraphic', in2: 'inset', operator: 'out' })
+          );
+          const edgeMask = svgNode('mask', {
+            id: `${key}-mask`, maskUnits: 'userSpaceOnUse',
+            maskContentUnits: 'userSpaceOnUse',
+            x: -span, y: -span, width: span * 2 + 320, height: span * 2 + 480
+          });
+          const silhouette = svgNode('g', { fill: '#fff', filter: `url(#${key}-cut)` });
+          for (const s of shapes) silhouette.append(s.cloneNode(true));
+          edgeMask.append(silhouette);
+          defs.append(filter, edgeMask);
+
+          for (const r of rects) {
+            group.append(svgNode('rect', {
+              x: r.x, y: r.y, width: r.width, height: r.height,
+              fill: `url(#${gradId})`,
+              mask: `url(#${key}-mask)`,
+              opacity: idx ? .8 : .42
+            }));
+          }
+        }
+      }
+
+      face.append(group);
     }
 
-    const face = svgNode('g', { 'clip-path': `url(#${boundsId})` });
-    face.append(stripesGroup);
-    svg.append(face);
     return svg;
   }
   renderSVG.cardMaterials = renderCardMaterials;
