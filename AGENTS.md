@@ -10,7 +10,7 @@
 ## DNA and ubucodes
 
 - DNA is random input to permanent deterministic generation rules, not merely a serialized list of resulting traits.
-- DNA is exactly 512 bits. Assigned field meanings are fixed; future additions use only unassigned bits 374–501. Old 256-bit beta ubus have no compatibility path. Preserve all 64 bytes when reading, storing or exporting. The owner designs the twelve new material patterns; retain their assignments with default matte rendering until those designs are supplied.
+- DNA is exactly 512 bits. Assigned field meanings are fixed; future additions use only unassigned bits 374–501. Old 256-bit beta ubus have no compatibility path. Preserve all 64 bytes when reading, storing or exporting. All sixteen rare material patterns are implemented in the shared renderer; the owner requested the twelve additions on 2026-10-24. Preserve their fixed assignments and the default matte treatment for inactive gates.
 - Approved layout: 64-bit name seed, five 18-bit attribute slots, 24-bit mouth rolls, 40-bit mouth geometry, 40-bit eye controls, 24-bit lid rolls, 40-bit lid geometry, 20-bit lid flips, 8-bit corner curvature, two six-bit central mouth rolls, 10-bit opening width, 2-bit notch curvature, 128 unassigned bits, final 10-bit Ubuquity. docs/dna.md is authoritative.
 - Eyes are solid filled discs with overlaid irises/pupils, not hollow rings. Iris radius equals the prototype opening radius (30.7126), with no seam-concealing oversize. Textures rotate about the ubu outer-circle center.
 - The official naming algorithm is the uburithm. Its mechanics and draw order are fixed in docs/uburithm.md. Improve calculation efficiency only while preserving outputs.

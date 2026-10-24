@@ -4,7 +4,7 @@ Private, owner-operated project for minting ubus for uburoom.
 
 Design requirement: a lean mint with zero fluff. Use the smallest practical implementation of current requirements, platform APIs and minimal dependencies. Measure meaningful optimizations; preserve DNA correctness, security and ownership integrity. Detailed engineering constraints are in AGENTS.md.
 
-The owner approved a replacement 512-bit DNA schema on 2026-10-24. Assigned fields are fixed; 128 unassigned bits are available for additions. Old beta ubus are rejected. Twelve new material IDs are assigned; their visual patterns await owner designs. The local Cloudflare application includes a viewer, designer, Discord OAuth code, signed minting, persistent batches and a configurable lifetime mint limit. Production credentials, deployment and transfers are not configured.
+The owner approved a replacement 512-bit DNA schema on 2026-10-24. Assigned fields are fixed; 128 unassigned bits are available for additions. Old beta ubus are rejected. All sixteen rare material IDs have distinct visual patterns in the shared renderer and labeled designer samples. The local Cloudflare application includes a viewer, designer, Discord OAuth code, signed minting, persistent batches and a configurable lifetime mint limit. Production credentials, deployment and transfers are not configured.
 
 Run `npm run dev` to open the local Worker website at http://127.0.0.1:8790/. Setup and verification are in the [Cloudflare application guide](docs/worker.md). No runtime packages or frontend framework; Wrangler is the development dependency for local Workers execution and testing.
 

@@ -1,6 +1,6 @@
 # Ubu DNA specification
 
-Owner-approved replacement schema, 2026-10-24 (America/New_York). DNA is exactly 512 bits. Previous 256-bit beta ubus are obsolete and rejected, with no conversion or compatibility path. Assigned fields have fixed positions; later additions may use only the unassigned bits. Material pattern designs for the twelve new materials remain the owner's work.
+Owner-approved replacement schema, 2026-10-24 (America/New_York). DNA is exactly 512 bits. Previous 256-bit beta ubus are obsolete and rejected, with no conversion or compatibility path. Assigned fields have fixed positions; later additions may use only the unassigned bits. All sixteen assigned materials have distinct rendering patterns.
 
 ## Input and representation
 
@@ -92,7 +92,7 @@ An inactive gate means default matte regardless of selector. A successful gate s
 | 14 | Damascus |
 | 15 | Opalescent |
 
-The existing four material designs remain unchanged. New selectors retain their names and rarity but currently render with the default matte treatment until the owner supplies designs. Do not invent their procedural patterns. Rotate designed materials about the global outer-circle center (180, 180), clockwise in SVG coordinates. Default matte has fixed zero orientation. Fixed procedural detail must not consume DNA or uburithm draws. Interactive lighting is presentation only; thumbnails remain static.
+The original four material designs remain unchanged. Pearlescent (4) adds a soft pastel sheen; marble (5) adds branching stone veins; lacquered (13) adds deep shading and sharp polished reflections; damascus (14) adds flowing layered bands. Velvet (6) adds dark soft pile with fine fibers; frosted (7) adds a pale granular haze; holographic (10) adds repeating spectral reflections and fine diffraction grooves; woodgrain (11) adds long fibers bending around a fixed knot, retaining the palette color as the stain. Terrazzo (8) adds scattered stone chips; crackle (9) adds a connected irregular glaze-crack network; silken (12) adds broad satin reflections and a fine weave; opalescent (15) adds milky depth with scattered soft color patches. These rendering additions do not change any DNA assignments. Rotate designed materials about the global outer-circle center (180, 180), clockwise in SVG coordinates. Default matte has fixed zero orientation. Fixed procedural detail must not consume DNA or uburithm draws. Interactive lighting is presentation only; thumbnails remain static.
 
 ## Colors
 
