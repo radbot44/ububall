@@ -546,6 +546,9 @@
 
     const S = 44;
     const span = 420;
+    // The inverse-rotated 320x480 card fits inside a 588x588 square.
+    // Leave room for the widest 3.4-unit edge erosion outside the visible card.
+    const region = { x: -134, y: -54, width: 588, height: 588 };
 
     function getLayerRects(layer) {
       const { angleIndex, angleTotal } = layer;
@@ -598,10 +601,9 @@
         const maskId = `${prefix}-mask-${i}`;
         const mask = svgNode('mask', {
           id: maskId,
-          maskUnits: 'userSpaceOnUse',
-          x: -span, y: -span, width: span * 2 + 320, height: span * 2 + 480
+          maskUnits: 'userSpaceOnUse', ...region
         });
-        mask.append(svgNode('rect', { x: -span, y: -span, width: span * 2 + 320, height: span * 2 + 480, fill: '#fff' }));
+        mask.append(svgNode('rect', { ...region, fill: '#fff' }));
         for (const upper of upperLayers) {
           const upperGroup = svgNode('g', {
             transform: `rotate(${upper.angle - angle} 160 240)`
@@ -655,8 +657,7 @@
           const key = `${edgeId}-${idx}`;
           const filter = svgNode('filter', {
             id: `${key}-cut`, filterUnits: 'userSpaceOnUse',
-            x: -span, y: -span, width: span * 2 + 320, height: span * 2 + 480,
-            'color-interpolation-filters': 'sRGB'
+            ...region, 'color-interpolation-filters': 'sRGB'
           });
           filter.append(
             svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: width, result: 'inset' }),
@@ -664,22 +665,23 @@
           );
           const edgeMask = svgNode('mask', {
             id: `${key}-mask`, maskUnits: 'userSpaceOnUse',
-            maskContentUnits: 'userSpaceOnUse',
-            x: -span, y: -span, width: span * 2 + 320, height: span * 2 + 480
+            maskContentUnits: 'userSpaceOnUse', ...region
           });
           const silhouette = svgNode('g', { fill: '#fff', filter: `url(#${key}-cut)` });
           for (const s of shapes) silhouette.append(s.cloneNode(true));
           edgeMask.append(silhouette);
           defs.append(filter, edgeMask);
 
+          // Same individual stripes and opacity, but rasterize the edge mask once.
+          const highlights = svgNode('g', { mask: `url(#${key}-mask)` });
           for (const r of rects) {
-            group.append(svgNode('rect', {
+            highlights.append(svgNode('rect', {
               x: r.x, y: r.y, width: r.width, height: r.height,
               fill: `url(#${gradId})`,
-              mask: `url(#${key}-mask)`,
               opacity: idx ? .8 : .42
             }));
           }
+          group.append(highlights);
         }
       }
 
