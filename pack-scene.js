@@ -43,26 +43,21 @@
       return g;
     }
     function silhouette(flat) {
+      // The foil hugs a rounded sweet, then stretches into a flat sheet.
       const y = (closed, opened) => mix(closed, opened, flat);
-      ctx.beginPath(); ctx.moveTo(-240, y(-88, -135));
-      ctx.bezierCurveTo(-196, y(-76,-135), -146, y(-17,-135), -110, y(-12,-135));
-      ctx.bezierCurveTo(-108, y(-76,-135), -61, y(-112,-135), 0, y(-112,-135));
-      ctx.bezierCurveTo(61, y(-112,-135), 108, y(-76,-135), 110, y(-12,-135));
-      ctx.bezierCurveTo(146, y(-17,-135), 196, y(-76,-135), 240, y(-88,-135));
-      ctx.lineTo(240, y(88,135));
-      ctx.bezierCurveTo(196, y(76,135), 146, y(17,135), 110, y(12,135));
-      ctx.bezierCurveTo(108, y(76,135), 61, y(112,135), 0, y(112,135));
-      ctx.bezierCurveTo(-61, y(112,135), -108, y(76,135), -110, y(12,135));
-      ctx.bezierCurveTo(-146, y(17,135), -196, y(76,135), -240, y(88,135));
+      ctx.beginPath(); ctx.moveTo(-110, y(-12, -135));
+      ctx.bezierCurveTo(-110, y(-57, -135), -74, y(-109, -135), 0, y(-112, -135));
+      ctx.bezierCurveTo(74, y(-109, -135), 110, y(-57, -135), 110, y(-12, -135));
+      ctx.lineTo(110, y(12, 135));
+      ctx.bezierCurveTo(110, y(57, 135), 74, y(109, 135), 0, y(112, 135));
+      ctx.bezierCurveTo(-74, y(109, 135), -110, y(57, 135), -110, y(12, 135));
       ctx.closePath();
     }
     function film(side, flat, untwist) {
-      // Start wound up and turn in one direction until the gathered knot releases.
       const phase = side*(1-untwist)*(Math.PI*2+.35);
       const flip = Math.cos(phase), swing = Math.sin(phase);
       const ribs = [];
-      // A full D-shaped tail opens into a sheet only after the spin.
-      // The whole tail flips together; its separate knot covers the attachment.
+      // The ribs define the outer contour and a few flowing creases, not a mesh.
       for (let j = 0; j <= 12; j++) {
         const v = j/6-1, rib = [];
         for (let k = 0; k <= 8; k++) {
@@ -81,43 +76,35 @@
         ribs.push(rib);
       }
       ctx.save(); ctx.scale(side,1);
-      for (let j = 0; j < 12; j++) {
-        const upper = ribs[j], lower = ribs[j+1];
-        const glint = Math.abs(Math.sin(j*.7+phase*.7))*(1-flat*.25);
-        ctx.beginPath(); ctx.moveTo(upper[0].x,upper[0].y);
-        for (let k = 1; k <= 8; k++) ctx.lineTo(upper[k].x,upper[k].y);
-        for (let k = 8; k >= 0; k--) ctx.lineTo(lower[k].x,lower[k].y);
-        ctx.closePath();
-        ctx.fillStyle = `rgba(184,208,239,${.09+glint*.09})`; ctx.fill();
-        // A light and dark side of each fold stay attached to the material.
+      // Paint the entire transparent tail once. Individual polygon fills caused
+      // the solid-looking facets and outlined-wireframe appearance.
+      ctx.beginPath(); ctx.moveTo(ribs[0][0].x, ribs[0][0].y);
+      for (let k = 1; k <= 8; k++) ctx.lineTo(ribs[0][k].x, ribs[0][k].y);
+      for (let j = 1; j <= 12; j++) ctx.lineTo(ribs[j][8].x, ribs[j][8].y);
+      for (let k = 7; k >= 0; k--) ctx.lineTo(ribs[12][k].x, ribs[12][k].y);
+      ctx.closePath();
+      ctx.fillStyle = gradient(110,-96,264,94,[[0,'#9ebad72b'],[.2,'#e4f3ff60'],[.37,'#91b1cf1e'],[.57,'#d4e8f73c'],[.78,'#f4faff53'],[1,'#829fbf2c']]);
+      ctx.fill(); ctx.clip();
+      ctx.fillStyle = gradient(110,0,260,0,[[0,'#0d1b3070'],[.12,'#17283d25'],[.45,'#a5c8ff08'],[.88,'#ffffff33'],[1,'#c6dff50a']]);
+      ctx.fillRect(108,-140,180,280);
+      // A few softly curved specular folds give the cellophane its sheen.
+      for (const j of [2,4,7,10]) {
+        const rib = ribs[j];
+        ctx.beginPath(); ctx.moveTo(rib[0].x,rib[0].y);
         for (let k = 0; k < 8; k++) {
-          const a = upper[k], b = upper[k+1], c = lower[k+1], d = lower[k];
-          ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
-          ctx.lineTo(c.x,c.y); ctx.lineTo(d.x,d.y); ctx.closePath();
-          const light = Math.abs(Math.sin((j*.65+k*.9)+phase));
-          ctx.fillStyle = `rgba(226,240,255,${.015+light*.09})`; ctx.fill();
+          ctx.quadraticCurveTo(rib[k].x,rib[k].y,
+            (rib[k].x+rib[k+1].x)/2,(rib[k].y+rib[k+1].y)/2);
         }
-        ctx.beginPath(); ctx.moveTo(upper[0].x,upper[0].y);
-        ctx.lineTo(upper[8].x,upper[8].y);
-        ctx.lineTo(lower[8].x,lower[8].y);
-        ctx.lineTo(lower[0].x,lower[0].y); ctx.closePath();
-        ctx.fillStyle = `rgba(238,246,255,${.06+glint*.25})`; ctx.fill();
-        const k = 3+j%4;
-        const creaseY = mix(upper[k+1].y,lower[k+1].y,.7);
-        ctx.beginPath(); ctx.moveTo(upper[k].x,upper[k].y);
-        ctx.lineTo(upper[k+1].x,creaseY);
-        ctx.lineTo(upper[k+2].x,upper[k+2].y);
-        ctx.strokeStyle = flip < 0 ? '#eff6ff38' : '#07101c50';
-        ctx.lineWidth = 1; ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(upper[0].x,upper[0].y);
-        for (let k = 1; k <= 8; k++) ctx.lineTo(upper[k].x,upper[k].y);
-        ctx.strokeStyle = flip < 0 ? '#eff6ff65' : '#06122445';
-        ctx.lineWidth = j % 3 === 0 ? 1.3 : .65; ctx.stroke();
+        ctx.lineTo(rib[8].x,rib[8].y);
+        ctx.strokeStyle = `rgba(241,249,255,${.075+.12*Math.abs(Math.sin(j*.74+phase*.5))})`;
+        ctx.lineWidth = j === 4 || j === 10 ? 2.2 : 1.2;
+        if (j === 4) { ctx.shadowColor = '#e8f5ff78'; ctx.shadowBlur = 8; }
+        ctx.stroke(); ctx.shadowBlur = 0;
       }
-      // Trace the free edge so the full D silhouette stays visible.
+      // Only the free edge is outlined, and only faintly.
       ctx.beginPath(); ctx.moveTo(ribs[0][8].x,ribs[0][8].y);
       for (let j = 1; j <= 12; j++) ctx.lineTo(ribs[j][8].x,ribs[j][8].y);
-      ctx.strokeStyle = '#e9f1ff55'; ctx.lineWidth = .9; ctx.stroke();
+      ctx.strokeStyle = '#f0f8ff55'; ctx.lineWidth = 1; ctx.stroke();
       ctx.restore();
     }
     function knot(side, untwist) {
@@ -144,8 +131,7 @@
       ctx.restore();
     }
     function foil(flat, untwist) {
-      ctx.save(); ctx.beginPath(); ctx.rect(-110,-135,220,270); ctx.clip();
-      ctx.fillStyle = color; ctx.fillRect(-110,-135,220,270);
+      ctx.save(); silhouette(flat); ctx.fillStyle = color; ctx.fill(); ctx.clip();
       // Painted curvature relaxes as the same sheet opens; its printed area never scales.
       const round = ctx.createRadialGradient(-35+pointer*12,-45,5,6,15,130);
       round.addColorStop(0,'#ffffff70'); round.addColorStop(.35,'#ffffff14'); round.addColorStop(.65,'#00000000'); round.addColorStop(.85,'#00000040'); round.addColorStop(1,'#000000b0');
@@ -155,12 +141,12 @@
         ctx.beginPath(); ctx.moveTo(c.x-5,c.y);
         ctx.lineTo(c.x+c.dx*.55,c.y+c.dy*.38); ctx.lineTo(c.x+c.dx,c.y+c.dy);
         ctx.lineTo(c.x+c.dx*.55+8,c.y+c.dy*.38); ctx.closePath();
-        ctx.fillStyle = gradient(c.x-7,0,c.x+12,0,[[0,'#00000000'],[.4,`rgba(0,0,0,${c.strength*.6})`],[.52,`rgba(255,255,255,${c.strength})`],[1,'#ffffff00']]);
+        ctx.fillStyle = gradient(c.x-7,0,c.x+12,0,[[0,'#00000000'],[.4,`rgba(0,0,0,${c.strength*.3})`],[.52,`rgba(255,255,255,${c.strength*.65})`],[1,'#ffffff00']]);
         ctx.fill();
         ctx.beginPath(); ctx.moveTo(c.x,c.y);
         ctx.lineTo(c.x+c.dx*.55,c.y+c.dy*.38); ctx.lineTo(c.x+c.dx,c.y+c.dy);
-        ctx.strokeStyle = `rgba(0,0,0,${c.strength*.6})`; ctx.lineWidth = 2.4; ctx.stroke();
-        ctx.translate(-.8,-.6); ctx.strokeStyle = `rgba(255,255,255,${c.strength})`; ctx.lineWidth = .8; ctx.stroke(); ctx.translate(.8,.6);
+        ctx.strokeStyle = `rgba(0,0,0,${c.strength*.34})`; ctx.lineWidth = 1.25; ctx.stroke();
+        ctx.translate(-.8,-.6); ctx.strokeStyle = `rgba(255,255,255,${c.strength*.75})`; ctx.lineWidth = .7; ctx.stroke(); ctx.translate(.8,.6);
       }
       const shineX = -70 + pointer*22 + untwist*85;
       ctx.fillStyle = gradient(shineX-55,-135,shineX+100,135,[[0,'#ffffff00'],[.31,'#ffffff00'],[.4,'#ffffff50'],[.43,'#ffffffa0'],[.46,'#ffffff12'],[.57,'#ffffff00'],[.8,'#ffffff22'],[1,'#ffffff00']]);
