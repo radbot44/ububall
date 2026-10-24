@@ -85,9 +85,9 @@
     $('rating').textContent = `${m.rating} / 1023`;
     if (window.rarity) {
       const r = rarity.scoreRarity(m);
-      $('rarity-percentile').textContent = `${r.percentile.toFixed(1)} / 100`;
-      $('rarity-bits').textContent = `${r.bits.toFixed(1)} bits`;
-      $('rarity-breakdown').textContent = `Rarity breakdown: finishes ${r.breakdown.finishes.toFixed(2)}b, colors ${r.breakdown.colors.toFixed(2)}b, corners ${r.breakdown.corners.toFixed(2)}b, mouth cuts ${r.breakdown.mouthCuts.toFixed(2)}b, eyelids ${r.breakdown.eyelids.toFixed(2)}b, eye flips ${r.breakdown.eyeFlips.toFixed(2)}b, geometry ${r.breakdown.geometry.toFixed(2)}b, name ${r.breakdown.name.toFixed(2)}b.`;
+      $('rarity-percentile').textContent = `${r.percentile.toFixed(3)} / 100`;
+      $('rarity-bits').textContent = `${r.bits.toFixed(6)} bits`;
+      $('rarity-breakdown').textContent = `Rarity breakdown: finishes ${r.breakdown.finishes.toFixed(2)}b, material preference ${r.breakdown.materialPreference.toFixed(2)}b, colors ${r.breakdown.colors.toFixed(2)}b, harmony ${r.breakdown.harmony.toFixed(2)}b, contrast ${r.breakdown.contrast.toFixed(2)}b, corners ${r.breakdown.corners.toFixed(2)}b, mouth cuts ${r.breakdown.mouthCuts.toFixed(2)}b, eyelids ${r.breakdown.eyelids.toFixed(2)}b, eye flips ${r.breakdown.eyeFlips.toFixed(2)}b, geometry ${r.breakdown.geometry.toFixed(2)}b, feature geometry ${r.breakdown.featureGeometry.toFixed(2)}b, name ${r.breakdown.name.toFixed(2)}b.`;
     }
     $('dna-output').value = code;
     $('seed').value = code; $('input-mode').value = 'dna';

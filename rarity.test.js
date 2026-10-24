@@ -110,6 +110,105 @@ test('a flip at exactly neutral displacement contributes no flip rarity; active 
   closeTo(scoreNonNeutral.breakdown.eyeFlips, 10, 'active flip with displacement contributes 10 bits');
 });
 
+test('continuous harmony responds smoothly to hue proximity and complementarity', () => {
+  const base = ubu.decode(new Uint8Array(64));
+  const score = colors => {
+    const attributes = Object.fromEntries(
+      Object.entries(base.attributes).map(([role, part], i) => [role, { ...part, color: colors[i] }])
+    );
+    return rarity.scoreRarity({ ...base, attributes }).breakdown;
+  };
+
+  const compact = score([0, 1, 2, 3, 4]);
+  const scattered = score([0, 5, 10, 15, 20]);
+  const opposed = score([0, 1, 2, 13, 14]);
+  assert.ok(compact.harmony > scattered.harmony, 'cohesive neighboring hues score higher');
+  assert.ok(opposed.harmony > scattered.harmony, 'opposing hue groups score higher');
+  assert.ok(scattered.harmony > 0, 'intermediate palettes receive fractional bonuses');
+  closeTo(score([27, 0, 1, 2, 3]).harmony, compact.harmony, 'hue wheel wraps at 27');
+  assert.ok(score([0, 1, 28, 29, 30]).harmony > 0, 'neutral and chromatic blend');
+  assert.ok(score([28, 29, 30, 31, 28]).harmony > 0, 'grayscale relations');
+  assert.ok(score([28, 31, 31, 31, 31]).harmony > score([28, 29, 29, 29, 29]).harmony,
+    'light and dark neutrals receive a little more contrast affinity');
+
+  assert.ok(score([0, 1, 1, 1, 1]).harmony > score([0, 3, 3, 3, 3]).harmony,
+    'hue similarity fades gradually');
+  assert.ok(score([0, 14, 14, 14, 14]).harmony > score([0, 11, 11, 11, 11]).harmony,
+    'complementary affinity fades gradually');
+  assert.equal(score([0, 7, 7, 7, 7]).harmony, 0, 'quarter-wheel-separated pair gets zero affinity');
+  assert.equal(score([3, 3, 3, 3, 3]).harmony, 0, 'identical colors do not double-count harmony');
+  closeTo(score([3, 3, 3, 3, 3]).colors, 20, 'existing exact-match score retained');
+  closeTo(compact.colors, scattered.colors, 'distinct-color score remains unchanged');
+  closeTo(opposed.harmony, score([14, 0, 13, 2, 1]).harmony,
+    'ordering of the five body parts does not change the bonus');
+
+  for (const colors of [[0, 1, 2, 3, 4], [0, 14, 14, 14, 14],
+    [28, 29, 30, 31, 28], [0, 1, 28, 29, 30], [0, 5, 10, 15, 20]]) {
+    const value = score(colors).harmony;
+    assert.ok(value >= 0 && value <= 3, 'harmony remains bounded at 0–3 bits');
+  }
+});
+
+test('rare materials remain equally likely but have ordered per-role desirability', () => {
+  const base = ubu.decode(new Uint8Array(64));
+  const roles = ['background', 'eyes', 'mouth', 'irises', 'pupils'];
+  const scores = roles.map(role => rarity.scoreRarity({ ...base,
+    attributes: Object.fromEntries(Object.entries(base.attributes).map(
+      ([key, a]) => [key, { ...a, texture: key === role ? 'metallic' : null }]
+    ))
+  }).breakdown);
+  assert.deepEqual(scores.map(s => s.materialPreference), [3, 2.25, 1.5, 0.75, 0]);
+  for (const s of scores) closeTo(s.finishes, scores[0].finishes, 'identical material odds');
+  assert.equal(rarity.scoreRarity(base).breakdown.materialPreference, 0);
+});
+
+test('luminance contrast responds to layer order rather than just the color set', () => {
+  const base = ubu.decode(new Uint8Array(64));
+  const keys = Object.keys(base.attributes);
+  const score = colors => rarity.scoreRarity({ ...base, attributes:
+    Object.fromEntries(keys.map((key, i) => [key, { ...base.attributes[key], color: colors[i] }]))
+  }).breakdown;
+  const a = score([31, 28, 14, 0, 5]), b = score([28, 31, 14, 0, 5]);
+  closeTo(a.colors, b.colors, 'same distinct count');
+  closeTo(a.harmony, b.harmony, 'same color harmony');
+  assert.notEqual(a.contrast, b.contrast);
+  assert.equal(score([0, 0, 0, 0, 0]).contrast, 0);
+});
+
+test('continuous geometry only scores expressed eyelid and opening parameters', () => {
+  const put = (dna, start, width, value) => {
+    for (let i = 0; i < width; i++) {
+      const bit = start + i, mask = 1 << (7 - (bit & 7));
+      dna[bit >> 3] = (dna[bit >> 3] & ~mask) | (((value >> (width - i - 1)) & 1) ? mask : 0);
+    }
+  };
+  const neutral = new Uint8Array(64);
+  for (const start of [178, 188, 198, 208, 218, 228, 282, 302]) put(neutral, start, 10, 511);
+  const widthScore = raw => {
+    const dna = new Uint8Array(neutral); put(dna, 178, 10, raw);
+    return rarity.scoreRarity(ubu.decode(dna)).breakdown.geometry;
+  };
+  assert.equal(widthScore(511), 0);
+  assert.ok(widthScore(550) > 0 && widthScore(550) < widthScore(700));
+  assert.ok(widthScore(700) < widthScore(900));
+  const lip = raw => {
+    const dna = new Uint8Array(neutral);
+    put(dna, 356, 6, 63); put(dna, 362, 10, raw);
+    return rarity.scoreRarity(ubu.decode(dna)).breakdown.featureGeometry;
+  };
+  assert.ok(lip(400) > lip(0));
+  assert.ok(lip(921) > lip(400));
+  closeTo(lip(921), lip(1023), 'visible opening saturates at full width');
+  const depth = (raw, active) => {
+    const dna = new Uint8Array(neutral);
+    if (active) put(dna, 258, 4, 15);
+    put(dna, 292, 10, raw);
+    return rarity.scoreRarity(ubu.decode(dna)).breakdown.featureGeometry;
+  };
+  assert.ok(depth(900, true) > depth(100, true));
+  closeTo(depth(900, false), depth(100, false), 'inactive eyelid raw depth is invisible');
+});
+
 test('one rare finish contributes 10 bits; all five matching colors contribute 20 color bits', () => {
   const modelOneFinish = {
     attributes: {
@@ -141,7 +240,7 @@ test('one rare finish contributes 10 bits; all five matching colors contribute 2
   closeTo(scoreMonochrome.breakdown.colors, 20.0, '5 identical colors contribute 20 bits');
 });
 
-test('mundane geometry receives zero bonus; extreme geometry receives correct tail bonus', () => {
+test('geometry is continuous and reaches 3.6 bits at the extreme', () => {
   const mundane = {
     attributes: {
       a: { texture: null, color: 0 },
@@ -158,8 +257,8 @@ test('mundane geometry receives zero bonus; extreme geometry receives correct ta
 
   const p0 = rarity.tailProbability(0);
   assert.equal(p0, 2 / 1024);
-  const expectedBonus0 = Math.log2(25.6);
-  closeTo(expectedBonus0, 4.678071905112637, 'value 0 bonus is ~4.678 bits');
+  const expectedBonus0 = 0.4 * -Math.log2(2 / 1024);
+  closeTo(expectedBonus0, 3.6, 'extreme value contributes 3.6 bits');
 
   const extreme = {
     ...mundane,
