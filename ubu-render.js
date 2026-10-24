@@ -8,10 +8,10 @@
     for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
     return element;
   }
-  function material(defs, attribute, id, effects) {
-    const rotate = `rotate(${attribute.angle} 180 180)`;
+  function material(defs, attribute, id, effects, cx = 180, cy = 180) {
+    const rotate = `rotate(${attribute.angle} ${cx} ${cy})`;
     // One global material field: every detail rotates about the outer-circle center.
-    const pattern = svgNode('pattern', { id, patternUnits: 'userSpaceOnUse', x: -180, y: -180,
+    const pattern = svgNode('pattern', { id, patternUnits: 'userSpaceOnUse', x: cx - 360, y: cy - 360,
       width: 720, height: 720, viewBox: '-180 -180 720 720', patternTransform: rotate });
     const cover = fill => pattern.append(svgNode('rect', { x: -180, y: -180, width: 720, height: 720, fill }));
     function lighting(name, stops, radial = false, attrs = {}) {
@@ -362,8 +362,8 @@
         mask: `url(#${key}-mask)`, opacity: index ? .8 : .38 }));
     }
   }
-  function renderSVG(m, className = 'oomark', surface = null) {
-    const effects = className === 'oomark' ? [] : null;
+  function renderSVG(m, className = 'oomark', surface = null, extraEffects = null) {
+    const effects = className === 'oomark' ? (extraEffects || []) : null;
     const prefix = 'ubu-' + (++serial);
     const svg = svgNode('svg', { class: className, viewBox: '0 0 360 360', role: 'img', 'aria-label': `${m.parts.fullName}, Ubuquity ${m.grade}` });
     const title = svgNode('title'); title.textContent = `${m.parts.fullName} · ${m.grade}`;
@@ -499,5 +499,87 @@
       window.removeEventListener('blur', reset);
     };
   }
+  function renderCardMaterials(m, effects = null) {
+    const materials = [];
+    const seen = new Set();
+    for (const role of roles) {
+      const attr = m.attributes?.[role];
+      if (attr?.texture && attr.texture !== 'matte' && !seen.has(attr.texture)) {
+        seen.add(attr.texture);
+        materials.push(attr);
+      }
+    }
+    if (!materials.length) return null;
+
+    const prefix = 'card-mat-' + (++serial);
+    const svg = svgNode('svg', {
+      class: 'card-materials',
+      viewBox: '0 0 320 480',
+      preserveAspectRatio: 'none',
+      'aria-hidden': 'true'
+    });
+    const defs = svgNode('defs');
+    svg.append(defs);
+
+    const boundsId = `${prefix}-bounds`;
+    const bounds = svgNode('clipPath', { id: boundsId, clipPathUnits: 'userSpaceOnUse' });
+    bounds.append(svgNode('rect', { x: 0, y: 0, width: 320, height: 480, rx: 16, ry: 16 }));
+    defs.append(bounds);
+
+    const S = 44;
+    const span = 420;
+    const numMats = materials.length;
+    const cycle = S * 2 * numMats;
+    const start = -Math.ceil((span + cycle) / cycle) * cycle;
+
+    const matDefs = materials.map((mat, i) => {
+      const patId = `${prefix}-pat-${i}`;
+      const fill = material(defs, mat, patId, effects, 160, 240);
+      const clipId = `${prefix}-clip-${i}`;
+      const clip = svgNode('clipPath', { id: clipId, clipPathUnits: 'userSpaceOnUse' });
+      defs.append(clip);
+      return { mat, fill, clipId, clip };
+    });
+
+    const stripeAngle = materials[0].angle ?? 45;
+    for (let i = 0; i < numMats; i++) {
+      const g = svgNode('g', {
+        transform: `translate(160 240) rotate(${stripeAngle}) translate(-160 -240)`
+      });
+      matDefs[i].clip.append(g);
+
+      const offset = i * S * 2;
+      for (let base = start; base <= span + 320; base += cycle) {
+        g.append(svgNode('rect', {
+          x: base + offset,
+          y: -span,
+          width: S,
+          height: span * 2 + 480
+        }));
+      }
+    }
+
+    const face = svgNode('g', { 'clip-path': `url(#${boundsId})` });
+    svg.append(face);
+
+    for (let i = 0; i < numMats; i++) {
+      const { mat, fill, clipId } = matDefs[i];
+      face.append(
+        svgNode('rect', {
+          x: 0, y: 0, width: 320, height: 480,
+          fill: mat.hex,
+          opacity: .65,
+          'clip-path': `url(#${clipId})`
+        }),
+        svgNode('rect', {
+          x: 0, y: 0, width: 320, height: 480,
+          fill,
+          'clip-path': `url(#${clipId})`
+        })
+      );
+    }
+    return svg;
+  }
+  renderSVG.cardMaterials = renderCardMaterials;
   globalThis.ubuRender = renderSVG;
 })();

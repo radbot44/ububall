@@ -119,13 +119,16 @@
     card.style.setProperty('--float-y', `${(-1.5 - Math.random() * 1.5).toFixed(1)}px`);
     card.style.setProperty('--float-dur', `${(3.0 + Math.random() * 1.2).toFixed(2)}s`);
     card.style.setProperty('--float-delay', `${dur.toFixed(2)}s`);
+    const cardEffects = [];
+    const cardBg = ubuRender.cardMaterials?.(item.model, cardEffects);
+    if (cardBg) card.append(cardBg);
     const top = document.createElement('div'); top.className = 'card-top';
     const brand = document.createElement('img'); brand.src = 'uburoom-wordmark-brand.svg'; brand.alt = 'uburoom';
     const serialNum = item.result.certificate?.serial || '';
     const favBtn = createHeartButton(serialNum);
     const serial = document.createElement('span'); serial.textContent = serialNum ? '#' + serialNum : '';
     top.append(brand, favBtn, serial);
-    const art = document.createElement('div'); art.className = 'card-art'; art.append(ubuRender(item.model, 'oomark', card));
+    const art = document.createElement('div'); art.className = 'card-art'; art.append(ubuRender(item.model, 'oomark', card, cardEffects));
     const name = document.createElement('h3'); name.textContent = item.model.parts.fullName;
     const stats = document.createElement('div'); stats.className = 'card-stats';
     for (const [label, value] of [['Rarity', `${item.rarity.percentile.toFixed(3)} / 100`], ['Ubuquity', item.model.grade]]) {
