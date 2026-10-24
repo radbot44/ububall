@@ -3,7 +3,7 @@
   const $ = id => document.getElementById(id);
   let config = { ready: false }, session = null, current = null, next = null, busy = false;
   const keys = new Map();
-  let pack = null, packKey = '', pendingKey = '', collectionVersion = 0;
+  let pack = null, packKey = '', pendingKey = '', collectionVersion = 0, revealIndex = 0;
   const unseen = serial => pack?.items.slice(pack.seen).some(item => item.result.certificate.serial === serial);
   function savePack() {
     localStorage.setItem(packKey, JSON.stringify({ certificates: pack.items.map(item => item.text), seen: pack.seen }));
@@ -22,9 +22,9 @@
   function updatePackButton() {
     const retry = pendingKey && localStorage.getItem(pendingKey);
     $('mint').disabled = busy || !session?.owner || !config.ready || (!pack && !retry && !config.lifetimeLimit);
-    const label = pack ? 'Continue your pack' : retry ? 'Retry opening your pack' : 'Unwrap your ubu pack';
+    const label = pack ? 'Continue pack' : retry ? 'Retry pack' : 'Unwrap pack';
     $('mint').setAttribute('aria-label', label);
-    $('pack-hint').textContent = busy ? 'Unwrapping your originals…' : session?.owner ? label + ' ↗' : 'Sign in to unwrap your pack';
+    $('pack-hint').textContent = busy ? 'Unwrapping…' : session?.owner ? label : '';
   }
   function tradingCard(item) {
     const card = document.createElement('article');
@@ -32,18 +32,17 @@
     card.style.setProperty('--card-hue', String(155 + item.rarity.percentile * 1.5));
     if (item.rarity.percentile >= 95) card.classList.add('foil');
     const top = document.createElement('div'); top.className = 'card-top';
-    const brand = document.createElement('span'); brand.textContent = 'ubu / ORIGINAL';
+    const brand = document.createElement('img'); brand.src = 'uburoom-wordmark-brand.svg'; brand.alt = 'uburoom';
     const serial = document.createElement('span'); serial.textContent = '#' + item.result.certificate.serial;
     top.append(brand, serial);
-    const art = document.createElement('div'); art.className = 'card-art'; art.append(ubuRender(item.model));
+    const art = document.createElement('div'); art.className = 'card-art'; art.append(ubuRender(item.model, 'oomark', card));
     const name = document.createElement('h3'); name.textContent = item.model.parts.fullName;
     const stats = document.createElement('div'); stats.className = 'card-stats';
-    for (const [label, value] of [['APPEARANCE RARITY', `${item.rarity.percentile.toFixed(1)} / 100`], ['UBUQUITY', item.model.grade]]) {
+    for (const [label, value] of [['Rarity', `${item.rarity.percentile.toFixed(1)} / 100`], ['Ubuquity', item.model.grade]]) {
       const stat = document.createElement('div'), caption = document.createElement('span'), number = document.createElement('strong');
       caption.textContent = label; number.textContent = value; stat.append(caption, number); stats.append(stat);
     }
-    const footer = document.createElement('p'); footer.className = 'card-footer'; footer.textContent = 'MINT SIGNATURE VERIFIED · ONE OF YOUR ORIGINALS';
-    card.append(top, art, name, stats, footer);
+    card.append(top, art, name, stats);
     return card;
   }
   function showReveal() {
@@ -51,37 +50,55 @@
       pack.seen = 1;
       try { savePack(); } catch (error) { pack.seen = 0; throw error; }
     }
-    const index = Math.max(0, pack.seen - 1), item = pack.items[index];
+    const index = revealIndex, item = pack.items[index];
     const last = index === pack.items.length - 1;
-    $('reveal-title').textContent = last ? (pack.items.length > 1 ? 'The rarest in your pack.' : 'Your little original.') : index === 0 ? 'Meet your first ubu.' : 'Another little original.';
-    $('reveal-progress').textContent = `${index + 1} of ${pack.items.length} ubus`;
-    $('card-stage').replaceChildren(tradingCard(item));
-    $('reveal-dots').replaceChildren(...pack.items.map((_, i) => { const dot = document.createElement('span'); dot.className = i <= index ? 'seen' : ''; return dot; }));
-    $('next-ubu').textContent = last ? 'Finish pack ✓' : 'Reveal next ubu →';
+    $('reveal-progress').textContent = `${index + 1} / ${pack.items.length}`;
+    // Render the background first so the visible card owns the shared lighting controller.
     display(item.text, item.result);
+    $('card-stage').replaceChildren(tradingCard(item));
+    $('reveal-dots').replaceChildren(...pack.items.map((_, i) => { const dot = document.createElement('span'); dot.className = i === index ? 'current' : i < pack.seen ? 'seen' : ''; return dot; }));
+    $('prev-ubu').disabled = index === 0;
+    $('next-ubu').disabled = last;
+    $('finish-pack').hidden = pack.seen < pack.items.length;
     if (!$('reveal').open) $('reveal').showModal();
-    $('next-ubu').focus();
   }
   async function refreshCollection() {
     try { await collection(true); } catch (error) { status(`Your pack is saved. Collection could not refresh: ${error.message}`); }
   }
-  $('next-ubu').addEventListener('click', () => {
+  function navigatePack(direction) {
+    const target = revealIndex + direction;
+    if (!pack || target < 0 || target >= pack.items.length) return;
     try {
-      if (pack.seen < pack.items.length) {
-        pack.seen++;
-        try { savePack(); } catch (error) { pack.seen--; throw error; }
-        showReveal();
-      } else {
-        localStorage.removeItem(packKey);
-        const count = pack.items.length; pack = null;
-        $('reveal').close(); status(`All ${count} ubus revealed. Your originals are in your collection.`);
-        updatePackButton();
+      const previousSeen = pack.seen;
+      if (target >= pack.seen) {
+        pack.seen = target + 1;
+        try { savePack(); } catch (error) { pack.seen = previousSeen; throw error; }
       }
-      void refreshCollection();
+      revealIndex = target;
+      showReveal();
+      if (pack.seen !== previousSeen) void refreshCollection();
+      if (document.activeElement.disabled) (target === 0 ? $('next-ubu') : $('prev-ubu')).focus();
     } catch (error) { $('reveal-progress').textContent = `Could not save your place: ${error.message}`; }
+  }
+  $('prev-ubu').addEventListener('click', () => navigatePack(-1));
+  $('next-ubu').addEventListener('click', () => navigatePack(1));
+  $('reveal').addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault(); navigatePack(event.key === 'ArrowLeft' ? -1 : 1);
+    }
+  });
+  $('finish-pack').addEventListener('click', () => {
+    if (!pack || pack.seen < pack.items.length) return;
+    try {
+      localStorage.removeItem(packKey); pack = null;
+      $('reveal').close(); status(''); updatePackButton();
+    } catch (error) { $('reveal-progress').textContent = error.message; }
   });
   $('pause-reveal').addEventListener('click', () => $('reveal').close());
-  $('reveal').addEventListener('close', () => { updatePackButton(); $('mint').focus(); });
+  $('reveal').addEventListener('close', () => {
+    if (current) display(current.text, current.result);
+    updatePackButton(); $('mint').focus();
+  });
   const status = text => { $('status').textContent = text; };
   async function trustedKey(mint, id) {
     if (!config.ready || mint !== config.mint || !Object.hasOwn(config.keys, id)) return null;
@@ -92,12 +109,12 @@
   function display(text, result) {
     const model = ubu.decode(ubu.fromCode(result.dna));
     const r = window.rarity ? rarity.scoreRarity(model) : null;
-    current = { text, name: model.parts.fullName };
+    current = { text, result, name: model.parts.fullName };
     $('preview').replaceChildren(ubuRender(model));
     $('ubunym').textContent = model.parts.fullName;
     const rarityText = r ? ` · Rarity ${r.percentile.toFixed(1)} / 100 (${r.bits.toFixed(1)} bits)` : '';
     $('details').textContent = `Ubuquity ${model.grade}${rarityText}` + (result.certificate ? ` · #${result.certificate.serial}` : '');
-    $('authenticity').textContent = result.type === 'signed' ? 'Mint signature verified · this file proves issuance, not ownership.' : 'Custom ubu · unsigned';
+    $('authenticity').textContent = result.type === 'signed' ? 'Verified mint certificate' : 'Custom · unsigned';
     $('download').hidden = false;
   }
   async function api(path, options) {
@@ -129,7 +146,7 @@
     }
     if (version !== collectionVersion || (pendingKey && localStorage.getItem(pendingKey))) return;
     if (reset) $('ubus').replaceChildren(...cards); else $('ubus').append(...cards);
-    if (reset && !cards.length) { const empty = document.createElement('p'); empty.textContent = pack ? 'Your ubus will appear here as you reveal them.' : 'No revealed ubus yet.'; $('ubus').append(empty); }
+    if (reset && !cards.length) { const empty = document.createElement('p'); empty.textContent = 'No revealed ubus.'; $('ubus').append(empty); }
     next = data.next; $('more').hidden = !next; $('collection').hidden = false;
   }
   $('import').addEventListener('change', async event => {
@@ -151,7 +168,7 @@
   $('mint').addEventListener('click', async () => {
     if (busy || !session?.owner) return;
     if (pack) {
-      try { showReveal(); await refreshCollection(); } catch (error) { status(error.message); }
+      try { revealIndex = Math.max(0, pack.seen - 1); showReveal(); await refreshCollection(); } catch (error) { status(error.message); }
       return;
     }
     busy = true; updatePackButton();
@@ -161,14 +178,15 @@
       ++collectionVersion;
       $('mint').classList.add('unwrapping');
       status('Unwrapping your pack…');
-      const animation = new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1100));
+      const animation = new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 2300));
       const data = await api('/api/mint', post({ request }));
       pack = await readPack(data.certificates);
       try { savePack(); } catch (error) { pack = null; throw error; }
       localStorage.removeItem(pendingKey);
       await animation;
+      revealIndex = 0;
       showReveal();
-      status('Your pack is open. Discover each ubu to add it to your collection.');
+      status('');
       await refreshCollection();
     } catch (error) { status(error.message); }
     finally { busy = false; $('mint').classList.remove('unwrapping'); updatePackButton(); }
@@ -195,11 +213,11 @@
           localStorage.removeItem(pendingKey);
         }
         updatePackButton();
-        status(config.ready && config.lifetimeLimit ? `Lifetime allowance: ${config.lifetimeLimit} pack${config.lifetimeLimit === 1 ? '' : 's'} per account.` : 'Pack opening is not open yet. You can still view .ubu files.');
-        if (pack) status('Your unwrapped pack is waiting. Continue where you left off.');
-        else if (localStorage.getItem(pendingKey)) status('Your pack opening was interrupted. Tap the wrapper to safely retry.');
+        status(config.ready && config.lifetimeLimit ? `${config.lifetimeLimit} pack${config.lifetimeLimit === 1 ? '' : 's'} per account` : 'Minting closed');
+        if (pack) status('');
+        else if (localStorage.getItem(pendingKey)) status('Opening interrupted. Retry to continue.');
         if (config.ready) await collection(true);
-      } else status(config.login ? 'Sign in with Discord to open a pack and see your collection.' : 'Pack opening is not open yet. You can still view custom .ubu files.');
+      } else { $('pack-hint').textContent = ''; status(config.login ? 'Sign in to open packs.' : 'Minting closed'); }
     } catch (error) { status(error.message); }
   })();
 })();

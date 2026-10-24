@@ -146,7 +146,7 @@
         mask: `url(#${key}-mask)`, opacity: index ? .8 : .38 }));
     }
   }
-  function renderSVG(m, className = 'oomark') {
+  function renderSVG(m, className = 'oomark', surface = null) {
     const effects = className === 'oomark' ? [] : null;
     const prefix = 'ubu-' + (++serial);
     const svg = svgNode('svg', { class: className, viewBox: '0 0 360 360', role: 'img', 'aria-label': `${m.parts.fullName}, Ubuquity ${m.grade}` });
@@ -179,11 +179,11 @@
       face.append(svgNode('rect', { x: 0, y: 0, width: 360, height: 360, fill, 'clip-path': `url(#${clipId})` }));
       if (attribute.texture) materialEdge(defs, face, shapes[role], attribute, prefix + '-' + role + '-edge', effects);
     }
-    if (effects) attachLighting(svg, effects);
+    if (effects) attachLighting(svg, effects, surface || svg);
     return svg;
   }
   let stopLighting = () => {};
-  function attachLighting(svg, effects) {
+  function attachLighting(svg, effects, surface) {
     stopLighting();
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     let frame = 0, x = 0, y = 0, targetX = 0, targetY = 0, rect;
@@ -192,22 +192,28 @@
       x += (targetX - x) * .18; y += (targetY - y) * .18;
       const settled = Math.abs(targetX - x) + Math.abs(targetY - y) < .001;
       if (settled) { x = targetX; y = targetY; }
-      svg.style.transform = `perspective(700px) rotateX(${-y * 12}deg) rotateY(${x * 12}deg)`;
+      surface.style.transform = `perspective(700px) rotateX(${-y * 12}deg) rotateY(${x * 12}deg)`;
+      if (surface !== svg) {
+        surface.style.setProperty('--light-x', `${50 + x * 45}%`);
+        surface.style.setProperty('--light-y', `${50 + y * 45}%`);
+      }
       svg.style.filter = x || y ? `drop-shadow(${-x * 9}px ${8 - y * 6}px 9px #0005)` : '';
       for (const effect of effects) effect(x, y);
       if (!settled) frame = requestAnimationFrame(paint);
     }
     const schedule = () => { if (!frame) frame = requestAnimationFrame(paint); };
     function reset() { targetX = targetY = 0; schedule(); }
-    svg.addEventListener('pointerenter', () => { rect = svg.getBoundingClientRect(); });
-    svg.addEventListener('pointermove', event => {
+    function enter() { rect = surface.getBoundingClientRect(); }
+    function move(event) {
       if (reduced.matches || event.pointerType === 'touch' || !rect) return;
       targetX = Math.max(-1, Math.min(1, (event.clientX - rect.left) / rect.width * 2 - 1));
       targetY = Math.max(-1, Math.min(1, (event.clientY - rect.top) / rect.height * 2 - 1));
       schedule();
-    });
-    svg.addEventListener('pointerleave', reset);
-    svg.addEventListener('pointercancel', reset);
+    }
+    surface.addEventListener('pointerenter', enter);
+    surface.addEventListener('pointermove', move);
+    surface.addEventListener('pointerleave', reset);
+    surface.addEventListener('pointercancel', reset);
     function preferenceChanged() {
       if (reduced.matches) { targetX = targetY = x = y = 0; schedule(); }
     }
@@ -215,6 +221,10 @@
     window.addEventListener('blur', reset);
     stopLighting = () => {
       cancelAnimationFrame(frame);
+      surface.removeEventListener('pointerenter', enter);
+      surface.removeEventListener('pointermove', move);
+      surface.removeEventListener('pointerleave', reset);
+      surface.removeEventListener('pointercancel', reset);
       reduced.removeEventListener('change', preferenceChanged);
       window.removeEventListener('blur', reset);
     };
