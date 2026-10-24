@@ -89,7 +89,7 @@ Dependencies and both test suites must pass before reset changes settings. Reset
 
 If upload or verification fails after reset is prepared, rerun `deploy.ps1` **without** `-ResetMint` to deploy the already generated identity. Do not reset repeatedly to retry an upload. Normal deployments retain the current identity and data.
 
-`npm test` covers frozen DNA, files, mint transactions, lifetime limits and OAuth/session checks. `npm run test:worker` uses Wrangler's local test harness with isolated storage and ephemeral keys. It verifies frontend asset boundaries, private API access, CSRF/body validation, public-key-only configuration, signed issuance, concurrent retries, lifetime-limit rejection, collection isolation, real alarm-driven batch rollover and unfinished preparation recovery after object eviction. Browser checks cover custom import and the shared renderer/designer.
+`npm test` covers the 512-bit DNA schema, files, mint transactions, lifetime limits and OAuth/session checks. `npm run test:worker` uses Wrangler's local test harness with isolated storage and ephemeral keys. It verifies frontend asset boundaries, private API access, CSRF/body validation, public-key-only configuration, signed issuance, concurrent retries, lifetime-limit rejection, collection isolation, real alarm-driven batch rollover and unfinished preparation recovery after object eviction. Browser checks cover custom import and the shared renderer/designer.
 
 `wrangler.jsonc` has no account, domain route or production identity, disables workers.dev/preview URLs, and preserves dashboard variables. Production deployments use the generated config described above. Deployment requires owner authorization; running tests never deploys.
 

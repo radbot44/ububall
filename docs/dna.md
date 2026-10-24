@@ -1,86 +1,98 @@
 # Ubu DNA specification
 
-Frozen by owner acceptance on 2026-10-23 (America/New_York). This is the permanent 256-bit DNA schema, including the current uburithm, geometry, curves and finish assignments. No generator versions, future expansion or reinterpretation. Optimizations must preserve its outputs. Mint certificates, ownership and cryptographic envelopes are separate and remain undecided.
+Owner-approved replacement schema, 2026-10-24 (America/New_York). DNA is exactly 512 bits. Previous 256-bit beta ubus are obsolete and rejected, with no conversion or compatibility path. Assigned fields have fixed positions; later additions may use only the unassigned bits. Material pattern designs for the twelve new materials remain the owner's work.
 
-## Owner requirements
+## Input and representation
 
-- DNA is random input to deterministic generation, rather than an editable list of resulting traits.
-- One canonical, permanent, closed interpretation, without generator versions or future expansion. The pre-release appearance review is complete; the rules below are fixed.
-- The first 64 bits seed the ubunym. Existing naming rules are set; calculation efficiency may improve. The official algorithm is named the uburithm; see uburithm.md.
-- Five body-part attribute slots each contain five color bits, three texture-angle bits and eight mutually exclusive texture bits, for 80 bits total. No extra body-part slots. The palette is recorded in README.md.
-- The owner revised both mouth-pair rolls to four bits, for 24 corner bits. The old eight-bit width distribution is removed. Four ten-bit fields control mouth width, height and horizontal/vertical displacement. Four more ten-bit fields control eye horizontal/vertical displacement and rare left-eye horizontal/vertical flips. The last eight bits determine Ubuquity; no bits remain vacant.
+- Text: encode the exact string with TextEncoder (UTF-8, no BOM, unpaired surrogates replaced by U+FFFD), then SHA-512 to the complete 64-byte DNA. Preserve case, leading zeros, whitespace and Unicode code-point sequences; no normalization. Empty text is valid.
+- Random: generate all 64 bytes using platform cryptographic randomness. Ordinary minting generates its own random DNA.
+- Imported DNA: preserve all 64 bytes directly, including unassigned bits. Never rehash imported DNA.
+- Number bits 0–511, first byte first and most significant bit first in every byte and field. All bit patterns are valid.
+- Canonical unpadded base64url is exactly 86 characters, with zero unused encoding padding bits. The designer also accepts exactly 128 hexadecimal characters; .ubu files accept only canonical base64url.
+- DNA equality compares all 64 bytes. Ownership, mint identity, serials, signatures and timestamps remain outside DNA.
 
-## Approved input paths
+## Block layout
 
-- Text seed: encode the exact text as UTF-8, hash those bytes with SHA-256, and use the resulting 32 bytes as the complete DNA. Preserve case, whitespace and leading zeros; do not trim, case-fold or normalize the input. An empty string is valid. Equivalent-looking Unicode text with different code-point sequences can produce different DNA.
-- Random generation: generate 32 bytes with platform cryptographic randomness.
-- Existing DNA or a .ubu file: read the complete DNA directly; never hash it again as if it were a text seed.
-- The first 64 DNA bits directly initialize the uburithm name stream. Text hashing occurs at the whole-DNA boundary, not again inside the name generator.
-- These generator input paths do not grant mint authority. Accepting caller-chosen text seeds for official minting is a separate policy decision; ordinary random minting remains the baseline.
-
-Input uses UTF-8 with no byte-order mark. Follow TextEncoder semantics: replace unpaired UTF-16 surrogates with U+FFFD. Valid Unicode text receives no normalization.
-
-## Representation details
-
-- Exactly 32 bytes (256 bits), populated by one of the approved input paths. Ordinary minting uses cryptographic randomness; do not zero fields whose current effect happens to be invisible.
-- Bits numbered 0 through 255, byte order first to last, most significant bit first within each byte. Field values are unsigned, most significant bit first. Fields may cross byte boundaries.
-- When represented as text, use canonical unpadded base64url (43 characters) decoding to exactly 32 bytes, with unused encoding padding bits zero. Text envelope prefixes are a separate decision.
-- All DNA patterns are valid. No mutable ownership, mint identity, timestamp, signature, encryption material or generator version is stored inside DNA.
-- DNA equality compares all 32 bytes. Equal current appearances do not imply equal DNA or equal minted identity.
-
-## Approved block layout
-
-Read fields most significant bit first in the order below. The five role assignments and all bit ranges are permanent.
-
-| Inclusive bit range | Width | Purpose |
+| Inclusive bits | Width | Purpose |
 | --- | --- | --- |
-| 0-63 | 64 | Ubunym seed |
-| 64-79 | 16 | Attribute slot 0: background |
-| 80-95 | 16 | Attribute slot 1: eyes |
-| 96-111 | 16 | Attribute slot 2: irises |
-| 112-127 | 16 | Attribute slot 3: pupils |
-| 128-143 | 16 | Attribute slot 4: mouth |
-| 144-147 | 4 | Top mouth-pair roll |
-| 148-151 | 4 | Bottom mouth-pair roll |
-| 152-155 | 4 | Top-left individual corner roll |
-| 156-159 | 4 | Top-right individual corner roll |
-| 160-163 | 4 | Bottom-left individual corner roll |
-| 164-167 | 4 | Bottom-right individual corner roll |
-| 168-177 | 10 | Mouth width |
-| 178-187 | 10 | Mouth height |
-| 188-197 | 10 | Mouth horizontal displacement |
-| 198-207 | 10 | Mouth vertical displacement |
-| 208-217 | 10 | Iris/pupil horizontal displacement |
-| 218-227 | 10 | Iris/pupil vertical displacement |
-| 228-237 | 10 | Left-eye horizontal flip roll |
-| 238-247 | 10 | Left-eye vertical flip roll |
-| 248-255 | 8 | Ubuquity rating |
+| 0–63 | 64 | Ubunym seed |
+| 64–81 | 18 | Background attributes |
+| 82–99 | 18 | Eye attributes |
+| 100–117 | 18 | Iris attributes |
+| 118–135 | 18 | Pupil attributes |
+| 136–153 | 18 | Mouth attributes |
+| 154–157 | 4 | Top mouth-pair roll |
+| 158–161 | 4 | Bottom mouth-pair roll |
+| 162–165 | 4 | Top-left mouth-corner roll |
+| 166–169 | 4 | Top-right mouth-corner roll |
+| 170–173 | 4 | Bottom-left mouth-corner roll |
+| 174–177 | 4 | Bottom-right mouth-corner roll |
+| 178–187 | 10 | Mouth width |
+| 188–197 | 10 | Mouth height |
+| 198–207 | 10 | Mouth horizontal displacement |
+| 208–217 | 10 | Mouth vertical displacement |
+| 218–227 | 10 | Iris/pupil horizontal displacement percentage |
+| 228–237 | 10 | Iris/pupil vertical displacement percentage |
+| 238–247 | 10 | Left-eye horizontal displacement flip roll |
+| 248–257 | 10 | Left-eye vertical displacement flip roll |
+| 258–261 | 4 | Top eyelid-pair roll |
+| 262–265 | 4 | Bottom eyelid-pair roll |
+| 266–269 | 4 | Top-left eyelid roll |
+| 270–273 | 4 | Top-right eyelid roll |
+| 274–277 | 4 | Bottom-left eyelid roll |
+| 278–281 | 4 | Bottom-right eyelid roll |
+| 282–291 | 10 | Top eyelid angle |
+| 292–301 | 10 | Top eyelid depth |
+| 302–311 | 10 | Bottom eyelid angle |
+| 312–321 | 10 | Bottom eyelid depth |
+| 322–331 | 10 | Left-eye eyelid angle flip roll |
+| 332–341 | 10 | Left-eye eyelid depth flip roll |
+| 342–343 | 2 | Top-left mouth-corner curvature |
+| 344–345 | 2 | Top-right mouth-corner curvature |
+| 346–347 | 2 | Bottom-left mouth-corner curvature |
+| 348–349 | 2 | Bottom-right mouth-corner curvature |
+| 350–355 | 6 | Top-center lip-notch roll |
+| 356–361 | 6 | Horizontal mouth-cut roll |
+| 362–371 | 10 | Horizontal mouth-opening width |
+| 372–373 | 2 | Lip-notch curvature roll |
+| 374–501 | 128 | Unassigned; preserve in full |
+| 502–511 | 10 | Ubuquity |
 
-64 + 80 + 24 + 40 + 40 + 8 = 256 bits. An attribute slot starts at absolute bit 64 + 16 times its slot index (0 through 4).
-
-There are no vacant fields. Inactive texture combinations mean no rare texture (the default matte finish); never reinterpret them as additional textures.
-
-All 256 bits are allocated. No future expansion or extension mechanism is planned.
+64 + 90 + 24 + 40 + 40 + 24 + 40 + 20 + 8 + 12 + 10 + 2 + 128 + 10 = 512.
 
 ## Body-part attributes
 
-Each 16-bit slot, in field order:
+Each 18-bit slot starts at bit 64 + 18 × slot index (0–4).
 
 | Relative bits | Meaning |
 | --- | --- |
-| 0-4 | Color index |
-| 5-7 | Texture orientation: eight angles in 45-degree steps |
-| 8-11 | Texture gate: all four bits must be one |
-| 12 | Metallic selector |
-| 13 | Glossy selector |
-| 14 | Iridescent selector |
-| 15 | Crystalline selector |
+| 0–4 | Color index, 0–31 |
+| 5–7 | Material angle, 0–7 mapping to 0°, 45°, …, 315° |
+| 8–13 | Material gate, active only for 63 (all ones) |
+| 14–17 | Material selector, 0–15 |
 
-A texture applies only when the gate is 1111 and exactly one selector is one. All other combinations mean no rare texture and render with the default matte finish. Given uniform random DNA, each part has a 1/64 (1.5625%) chance of any rare texture; each individual texture has a 1/256 (0.390625%) chance.
+An inactive gate means default matte regardless of selector. A successful gate selects exactly one material: any special material is 1/64 per part; each particular material is 1/1024. The selector order is:
 
-Interpret the three-bit orientation value as 0 through 7, mapping to 0, 45, 90, 135, 180, 225, 270 and 315 degrees respectively. Each is equally likely. Rotate the texture about the center of the ubu's outer circle (180, 180 in the reference 360-by-360 viewBox), using the same global pivot for all parts, rather than each part's local center. The default matte finish uses fixed zero-degree orientation, so orientation bits have no visible effect when there is no rare texture; preserve its DNA bits nevertheless.
+| Selector | Material |
+| --- | --- |
+| 0 | Metallic |
+| 1 | Glossy |
+| 2 | Iridescent |
+| 3 | Crystalline |
+| 4 | Pearlescent |
+| 5 | Marble |
+| 6 | Velvet |
+| 7 | Frosted |
+| 8 | Terrazzo |
+| 9 | Crackle |
+| 10 | Holographic |
+| 11 | Woodgrain |
+| 12 | Silken |
+| 13 | Lacquered |
+| 14 | Damascus |
+| 15 | Opalescent |
 
-Finish styling: positive rotation is clockwise in SVG coordinates. Metallic combines sharp reflection bands with fine brushed lines; glossy combines diffuse depth, a broad softbox reflection, an elliptical glint and a faint secondary reflection; the default matte finish combines soft diffuse shading with fine irregular grain; iridescent replaces the former rare matte selector with curved rainbow interference bands and a glossy oil-film reflection; crystalline uses a non-repeating irregular triangular field with contrasting facets and sparse bright edges. Procedural detail uses a fixed local seed, independent of DNA and the uburithm. All material details rotate around (180, 180) in global user coordinates, not each shape's local center. Material overlays are clipped to their part, with later foreground parts covering the eye/background layers normally. The accepted deterministic neutral finish is the visual reference. The main preview adds pointer-driven perspective tilt and moving material lighting, including angle-dependent crystal facet brightness and glints. This is a presentation effect on flat SVG geometry, not a volumetric mesh or an allocation change. The owner-requested iridescent finish replaces the former rare matte selector during the pre-freeze preview; existing DNA with that selector now displays iridescence. Pointer exit restores the neutral appearance; reduced-motion preferences disable interaction. Thumbnails remain static. Rare finishes also have inward-only silhouette edges: a crisp metallic bevel, a broader glossy rim, an iridescent color fringe, and a sharply banded crystalline cut. Edge lighting follows pointer motion in the main preview. Edges use the combined silhouette of each role to avoid seams where eyes overlap; default matte has no added rim.
+The existing four material designs remain unchanged. New selectors retain their names and rarity but currently render with the default matte treatment until the owner supplies designs. Do not invent their procedural patterns. Rotate designed materials about the global outer-circle center (180, 180), clockwise in SVG coordinates. Default matte has fixed zero orientation. Fixed procedural detail must not consume DNA or uburithm draws. Interactive lighting is presentation only; thumbnails remain static.
 
 ## Colors
 
@@ -90,7 +102,7 @@ The palette indices, names and hex values in README.md are permanent. No additio
 
 ## Name seed and the uburithm
 
-The owner set the first 64 bits aside for the ubunym and named the official algorithm the uburithm. The approved text-seed flow hashes the complete text into DNA first, then directly initializes the name stream from the first 64 bits. See uburithm.md for the permanent SplitMix64 calculation. Existing naming rules are fixed; prototype text-seed mappings are not a compatibility promise for the new SHA-256-to-DNA mapping.
+The owner set the first 64 bits aside for the ubunym and named the official algorithm the uburithm. The approved text-seed flow hashes the complete text into DNA first, then directly initializes the name stream from the first 64 bits. See uburithm.md for the permanent SplitMix64 calculation. Existing naming rules are fixed; prototype text-seed mappings are not a compatibility promise for the new SHA-512-to-DNA mapping.
 
 The reference procedure generates the six-letter nomen, selects an extra length from [2, 3, 4, 6], generates that word, selects its orientation, then generates the remaining 6 minus extra-length letters on the opposite side. It capitalizes each word's first letter and lowercases the rest. The complete name contains twelve letters across two or three words.
 
@@ -98,61 +110,65 @@ The exact SplitMix64 calculation, alphabets, patterns, contextual restrictions a
 
 The 64-bit seed supplies repeated deterministic rolls, rather than assigning DNA bits to every letter decision. Different seeds may generate the same name. Reachability of every theoretical name is not claimed.
 
-## Approved mouth corners
+## Pair/individual rolls
 
-- Each pair roll succeeds when its four bits are all one: 6.25% per pair.
-- If either pair succeeds, use only pair outcomes: cut both top corners if the top pair succeeds and both bottom corners if the bottom pair succeeds. Do not apply individual rolls in this branch.
-- If neither pair succeeds, each individual corner roll succeeds when its four bits are all one: 6.25% per corner, conditional on this branch.
-- Pair and individual rolls occupy permanent positions even when not used.
-- These are roll probabilities, not final shape probabilities. A pair can also appear through two individual successes.
-- Preserve the distinction between pair-branch and individual-branch outcomes as derived semantic data for descriptions. Do not carry the prototype's numeric '10'/'5' source labels into these new probabilities.
+Mouth corners and eyelids independently use the same structure. Each four-bit roll succeeds only for 15 (1/16). If either pair roll succeeds, use only the pair results: both top positions and/or both bottom positions. Otherwise apply the four individual rolls. Position order is top-left, top-right, bottom-left, bottom-right. Preserve pair versus individual source information. Inactive rolls never shift parsing.
 
-The owner retained the two-stage structure and revised the pair rolls from three bits to four. All six rolls now have a 6.25% success probability, with individual rolls applied only in the neither-pair branch.
+## Mouth geometry and cuts
 
-## Mouth geometry
+The normal mouth center is (179.995, 254.0531) in the reference 360×360 viewBox. Positive X is right and positive Y is down. Use the centered cubic below for sizes/displacements.
 
-The owner replaced the old width roll with four ten-bit parameters (0-1023 each). Width ranges from one iris diameter to the outer span of both eyes. Curved mapping should work like the eye-displacement system. The numeric ranges below are permanent, using the reference 360-by-360 canvas.
-
-| Parameter | Value 0 | Value 511 (normal) | Value 1023 |
+| Parameter | Value 0 | Value 511 | Value 1023 |
 | --- | --- | --- | --- |
 | Width | 61.4252 | 151.915 | 250.99 |
 | Height | 26.50305 | 53.0061 | 79.50915 |
-| Horizontal displacement | -12 | 0 | +12 |
-| Vertical displacement | -12 | 0 | +12 |
+| X displacement | -12 | 0 | +12 |
+| Y displacement | -12 | 0 | +12 |
 
-Width endpoints use the owner-corrected iris radius 30.7126 and eye outer radius 48.3813 + 35.3374/2, with eye-center separation 208.94 - 90.05. Normal mouth center is (179.995, 254.0531) in global viewBox coordinates. Geometry is centered at that position before applying displacement. Positive X is right and positive Y is down. Mouth movement is independent of eye movement.
+Active corners cut equal distances along adjacent edges, with distance min(height/3, width/3). The width cap leaves the middle third available for the independent central cuts. A curvature roll of 3 gives a quadratic curve through the original square corner as control point; 0–2 give a straight diagonal. This is 1/4 curved conditional on that corner appearing, independently per corner.
 
-The old five-category width distribution and its category-specific descriptions no longer apply. Corners retain 45-degree cuts of min(height/3, width/2), preventing narrow mouths from self-intersecting. All face geometry/materials are clipped to the outer radius-176 circle. Size, position and clipping are fixed.
+The top lip-notch and horizontal-cut rolls each succeed only for 63, independently (1/64 each, four times rarer than a corner occurrence roll).
 
-## Eye controls
+- Lip notch: one centered cut with depth `d = min(height/4, width/6)` and half-width d. Straight sides run at exactly 45° from (centerX-d, topY) through (centerX, topY+d) to (centerX+d, topY). The width cap keeps the notch clear of corner cuts even on narrow, tall mouths. Bits 372–373 independently select curvature: 3 means curved (1/4), 0–2 mean straight (3/4), conditional on the notch appearing. The curved variant replaces the two straight sides with a single quadratic between the same endpoints, using the triangular apex (centerX, topY+d) as control point; its endpoint tangents are 45° and its midpoint depth is d/2. Inactive curvature bits remain preserved.
+- Horizontal opening: rectangular cut centered in the mouth, height/4 high. Bits 362–371 encode a linear width ratio `0.1 + raw/1023`, spanning 10%–110% of mouth width. Values 921–1023 give a fully open horizontal band. Rendering caps the removed width at the silhouette edges, so oversized cuts cannot add fill outside the mouth. The stored ratio retains the complete 110% endpoint. The width field has no visible effect unless the horizontal-cut occurrence roll succeeds. Its top is 3height/8 below the mouth's top edge, leaving height/8 of material below the deepest lip-notch points. Both variants may occur together.
+- Openings reveal the underlying layers; do not paint them with a substitute background color.
 
-Owner requirements:
+## Eyes and eyelids
 
-- One ten-bit horizontal displacement and one ten-bit vertical displacement, shared by both eyes. Iris and pupil move together.
-- Each field ranges from 0 to 1023; 511 means normal placement. Horizontal endpoints place the iris's left/right edge at the corresponding eye edge; vertical endpoints do the same for top/bottom.
-- Use a curve favoring normal placement.
-- Two separate ten-bit rolls each have a 1/1024 chance to flip the left eye's horizontal or vertical displacement respectively. These do not flip the right eye or change colors/textures.
+Solid eye discs have radius 66.05, centered at (120.55, 145.5) and (239.44, 145.5). Iris radius is 30.7126; pupil radius is 17. Iris/pupil share a center and move together. All face layers are clipped to the radius-176 outer circle centered at (180, 180).
 
-A flip activates only when its roll is 1023 (all bits one), consistent with mouth gates. It negates the decoded signed offset, rather than complementing the stored ten-bit value: 1023 minus 511 would become 512 and incorrectly move a neutral eye. Neutral zero is preserved. The two flip rolls are independent.
+Eyelid angle is 30° × centered cubic(raw), spanning -30° to +30°, neutral at 511. Depth is linear: (66.05 - 30.7126) × raw/1023, from a tangent at depth zero to a line tangent to the centered iris at maximum depth. These limits keep a full iris feasible even with both lids at maximum depth.
 
-Owner clarification: the prototype's radius-34 iris extended beneath the ring only to hide an antialiasing seam; it was not a larger intended iris. Remove the hollow ring construction. Draw each eye as a solid filled disc of radius 66.05, then overlay the iris at radius 30.7126 (the former opening's radius), then its pupil. This leaves continuous eye color beneath the iris, with no background seam or separate opening. Pupil radius is 17.
+For angle a and side s (-1 top, +1 bottom), the visible half-plane in eye-local coordinates is:
 
-For a single displaced axis with the other centered, iris-to-eye edge contact occurs at center offset plus or minus (66.05 - 30.7126) = 35.3374. Iris and pupil move together over the eye disc. Scale combined X/Y offsets down radially only when their length exceeds 35.3374, so the entire iris remains inside the eye at diagonal extremes. Left-eye flips are applied afterward and preserve containment. This radial rule is permanent.
+`(-s sin(a)) x + (s cos(a)) y <= 66.05 - depth`.
+
+Intersect the active half-planes with the solid eye disc. Both eyes normally share top/bottom angles and depths. A left-eye angle flip negates both angles; a left-eye depth flip swaps the top/bottom depths, preserving which lids are active. Each flip succeeds only for ten-bit value 1023 (1/1024), independently.
+
+Displacement fields decode through the centered cubic into percentages px, py in [-1, +1]. Left-eye displacement flips negate the respective signed percentage, each only for roll 1023. Neutral zero stays zero. For each eye separately:
+
+1. Let length = hypot(px, py), direction = (px, py)/length. Zero length gives zero displacement.
+2. Begin with maximum center travel 35.3374 (eye radius minus iris radius).
+3. For each active lid with outward unit normal n and distance d, if n·direction > 0, limit travel to (d - iris radius)/(n·direction).
+4. Offset = direction × travel × min(1, length).
+
+This uses the available opening after lids/flips and contains the entire iris (and therefore the smaller pupil), including diagonal extremes. No lids reproduces the previous radial bounds.
 
 ## Ubuquity
 
-The owner assigned the final eight bits (248-255) to an unsigned integer, directly mapped to a grade. This is a separate DNA rating, not a calculated summary of textures or appearance. Preserve the raw value as well as the derived grade.
+Read the final ten bits as an unsigned integer, independently of appearance rarity.
 
-| Grade | Inclusive values | Count | Probability |
-| --- | --- | --- | --- |
-| B | 0-124 | 125 | 48.828125% |
-| A | 125-199 | 75 | 29.296875% |
-| A+ | 200-224 | 25 | 9.765625% |
-| S | 225-239 | 15 | 5.859375% |
-| S+ | 240-250 | 11 | 4.296875% |
-| S++ | 251-255 | 5 | 1.953125% |
+| Values | Grade | Label |
+| --- | --- | --- |
+| 0–299 | C | Blue (#477AE7) |
+| 300–599 | B | Green (#42C66B) |
+| 600–749 | A | Red (#EE4455) |
+| 750–899 | S | Orange (#FF9954) |
+| 900–999 | S+ | Orange with pink trim |
+| 1000–1020 | U | Pink (#FF7197) |
+| 1021–1023 | UBU | Pink with orange trim |
 
-Probabilities assume uniform random DNA. No special visual effects, privileges or minting rules are implied by the grade.
+The owner assigned 900 to S+ and 1000 to U. Grade population counts are 300, 300, 150, 150, 100, 21, 3 out of 1024.
 
 ## Centered curve
 
@@ -165,22 +181,8 @@ Then use c = t * t * t. This is a cheap cubic curve with exact endpoints -1 and 
 
 For a displacement with range [-D, +D], offset = D * c. For size with minimum a, normal b and maximum d, use b + c * (b - a) for c <= 0, or b + c * (d - b) for c > 0. Thus dimensions concentrate around their normal values without losing endpoints. The curve and numeric ranges are permanent. Use IEEE-754 binary64 for geometry. Conformance checks allow 1e-10 units of floating-point rounding tolerance without changing the specified mapping.
 
-## Permanence and verification
+## Verification and scope
 
-- No future expansion. Do not let branch-dependent parsing shift field boundaries.
-- Preserve all 32 bytes when saving, importing and exporting, regardless of understood features.
-- All fields are populated, including values whose effects are currently invisible. No bits remain unassigned; existing meanings cannot be repurposed after acceptance.
-- Changes to display scale may preserve geometry, but meaningful geometry, palette, name and probability changes cannot silently replace established laws.
-- Fixed reference vectors protect text conversion, bit extraction, names, finishes, probability boundaries, mouth branches and geometry. Never regenerate expectations simply to accommodate a failing change.
+Tests cover exact SHA-512 text conversion, all material gate/selector outcomes, all 1024 ratings, pair precedence, corner curvature, independent mouth cuts, eyelid flips, iris containment at extremes, byte preservation and rejection of obsolete beta DNA. Accepted raw-seed uburithm names remain in test/name-vectors.json; text-to-name mappings change because whole-DNA hashing changed.
 
-## Separate work remaining
-
-The working certificate profile and signature implementation are defined separately in ubu-file.md. The demo exports custom unsigned files, which grant no mint authority. Production mint trust and ownership remain separate work; none of this changes DNA.
-
-## Isolated verification
-
-2026-10-23: node --check passed for ubu.js and demo.js. An isolated Node comparison matched 10,000 raw-state name outputs against the original ubunym procedure, with identical draw mechanics. Checks also covered exact text hashing (including empty input, leading zeros, whitespace and distinct Unicode sequences), 1,000 random DNA encode/decode round trips and geometry bounds, all 256 texture flag combinations for each part, every Ubuquity value, pair-branch precedence, individual cuts, neutral/flipped eyes and invalid/noncanonical DNA rejection. A signed-zero assertion initially failed for flipped neutral eyes; the decoder now returns positive zero and the checks pass. These are source/isolated checks, not a performance benchmark or owner appearance acceptance.
-
-Browser preview: checked text-seed repeatability and leading-zero distinction, material samples, trait inspection, favorite saving, history navigation, invalid DNA errors and an unsigned export/import restoring the same DNA. The preview is served on loopback with only demo.html, demo.js and ubu.js exposed. The owner subsequently accepted DNA and appearance on 2026-10-23; the signed/encrypted envelope remains open.
-
-Freeze verification, 2026-10-23: twelve fixed accepted outputs are stored in test/dna-vectors.json. `node --test ubu.test.js` passed all four conformance checks with zero failures or skips. No decoder logic or renderer behavior changed during the freeze.
+The .ubu profile, mint storage and signed issuance use the same complete 64-byte DNA. Previous beta files are rejected, never padded or reinterpreted. Existing production state is not automatically migrated or reset by this code change; installation/deployment and mint resets remain separately authorized operations.

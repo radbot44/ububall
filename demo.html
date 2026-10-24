@@ -78,6 +78,14 @@
       details { padding: 10px; }
       th, td { padding: 6px 3px; }
     }
+
+[data-grade] { --grade-color: #ff7197; color: var(--grade-color) !important; }
+[data-grade="C"] { --grade-color: #477ae7; }
+[data-grade="B"] { --grade-color: #42c66b; }
+[data-grade="A"] { --grade-color: #ee4455; }
+[data-grade="S"], [data-grade="S+"] { --grade-color: #ff9954; }
+[data-grade="S+"] { -webkit-text-stroke: .6px #ff7197; paint-order: stroke fill; }
+[data-grade="UBU"] { -webkit-text-stroke: .6px #ff9954; paint-order: stroke fill; }
   </style>
 </head>
 <body>
@@ -105,7 +113,7 @@
         <button class="nav-button" id="forward-button" type="button" aria-label="Next ubu">→</button>
       </form>
       <div class="dna-row">
-        <label class="seed-field">256-bit DNA<input id="dna-output" readonly spellcheck="false"></label>
+        <label class="seed-field">512-bit DNA<input id="dna-output" readonly spellcheck="false"></label>
         <button id="copy-dna" type="button">Copy</button>
         <button id="export-ubu" type="button">Export custom .ubu</button>
         <label class="file-button">Import .ubu<input class="file-input" id="import-ubu" type="file" accept=".ubu,.json,application/json"></label>

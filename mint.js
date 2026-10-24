@@ -105,7 +105,7 @@ class Mint {
         let id;
         do { id = randomCode(16); } while (this.exec('SELECT id FROM inventory WHERE id=? UNION ALL SELECT id FROM issued WHERE id=?', id, id).length);
         this.exec('INSERT INTO inventory VALUES (-1, 0, ?, ?, ?)', id,
-          String(state.start_serial + slot).padStart(12, '0'), randomCode(32));
+          String(state.start_serial + slot).padStart(12, '0'), randomCode(64));
       }
       if (end === state.size) {
         // Sort entire batch into 5 rarity quintiles and assemble packs

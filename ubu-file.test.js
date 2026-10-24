@@ -3,27 +3,43 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { verify, createPublicKey } = require('node:crypto');
 const file = require('./ubu-file.js');
-const dna = 'A'.repeat(43);
+const dna = 'A'.repeat(86);
 const record = { mint: 'A'.repeat(22), id: 'AQEBAQEBAQEBAQEBAQEBAQ', serial: '000000000001', dna, issuedAt: 1792700000, key: 'mint-1' };
 const keyPair = () => crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+
+test('obsolete beta DNA is rejected in custom and signed files before trust lookup', async () => {
+  const old = 'A'.repeat(43);
+  let lookups = 0;
+  await assert.rejects(file.read(JSON.stringify({ type: 'ubu', dna: old })), /DNA/);
+  await assert.rejects(file.read(JSON.stringify({ type: 'ubu-signed', ...record, dna: old, signature: 'A'.repeat(86) }),
+    { resolveKey: () => { lookups++; return null; } }), /DNA/);
+  assert.equal(lookups, 0);
+});
+
+test('signed files preserve all 512 bits including unassigned fields', async () => {
+  const pair = await keyPair();
+  const complete = Buffer.from(crypto.getRandomValues(new Uint8Array(64))).toString('base64url');
+  const text = await file.sign({ ...record, dna: complete }, pair.privateKey);
+  assert.equal((await file.read(text, { resolveKey: () => pair.publicKey })).dna, complete);
+});
 
 test('unsigned files are canonical and never imply mint authority', async () => {
   const text = file.unsigned(dna);
   assert.equal(text, `{"type":"ubu","dna":"${dna}"}`);
-  assert.equal(Buffer.byteLength(text), 66);
+  assert.equal(Buffer.byteLength(text), 109);
   assert.deepEqual(await file.read(text), { type: 'unsigned', dna });
   assert.deepEqual(await file.read(new TextEncoder().encode(text)), { type: 'unsigned', dna });
   await assert.rejects(file.read(text, { allowUnsigned: false }), /requires mint-signed/);
   for (const bad of [text + '\n', ' ' + text, text.replace('{', '{"extra":true,'), text.replace('{', '{"dna":"bad",'),
     JSON.stringify({ dna, type: 'ubu' }), JSON.stringify({ type: 'ubu', dna, signature: 'A'.repeat(86) }),
-    JSON.stringify({ type: 'ubu-demo', dna }), JSON.stringify({ type: 'ubu', dna: '00'.repeat(32) })]) {
+    JSON.stringify({ type: 'ubu-demo', dna }), JSON.stringify({ type: 'ubu', dna: '00'.repeat(64) })]) {
     await assert.rejects(file.read(bad));
   }
 });
 test('signed certificate round-trips and independently verifies the exact signing bytes', async () => {
   const { privateKey, publicKey } = await keyPair();
   const text = await file.sign(record, privateKey);
-  assert.equal(Buffer.byteLength(text), 297);
+  assert.equal(Buffer.byteLength(text), 340);
   const resolveKey = (mint, key) => mint === record.mint && key === record.key ? publicKey : null;
   const result = await file.read(text, { allowUnsigned: false, resolveKey });
   assert.equal(result.type, 'signed'); assert.equal(result.dna, dna);
@@ -41,7 +57,7 @@ test('tampering with any signed field or signature is rejected, with no unsigned
   const text = await file.sign(record, privateKey);
   const parsed = JSON.parse(text), trust = { resolveKey: () => publicKey };
   const changed = {
-    mint: record.id, id: record.mint, serial: '000000000002', dna: 'AQ'.repeat(21) + 'A', issuedAt: record.issuedAt + 1, key: 'mint-2',
+    mint: record.id, id: record.mint, serial: '000000000002', dna: Buffer.alloc(64, 1).toString('base64url'), issuedAt: record.issuedAt + 1, key: 'mint-2',
     signature: Buffer.alloc(64, 1).toString('base64url')
   };
   for (const [field, value] of Object.entries(changed)) {
@@ -86,7 +102,7 @@ test('malformed files, encodings and metadata are rejected before trust lookup',
   let lookups = 0;
   const trust = { resolveKey: () => { lookups++; return null; } };
   for (const bad of ['', ' '.repeat(1025), 'null', '[]', '{}', '\ufeff' + file.unsigned(dna),
-    new Uint8Array([0xc3, 0x28]), file.unsigned(dna).replace(dna, 'A'.repeat(42) + 'B')]) {
+    new Uint8Array([0xc3, 0x28]), file.unsigned(dna).replace(dna, 'A'.repeat(85) + 'B')]) {
     await assert.rejects(file.read(bad, trust));
   }
   const pair = await keyPair(), signed = await file.sign(record, pair.privateKey);

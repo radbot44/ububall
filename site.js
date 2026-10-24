@@ -130,7 +130,7 @@
     const stats = document.createElement('div'); stats.className = 'card-stats';
     for (const [label, value] of [['Rarity', `${item.rarity.percentile.toFixed(1)} / 100`], ['Ubuquity', item.model.grade]]) {
       const stat = document.createElement('div'), caption = document.createElement('span'), number = document.createElement('strong');
-      caption.textContent = label; number.textContent = value; stat.append(caption, number); stats.append(stat);
+      caption.textContent = label; number.textContent = value; if (label === 'Ubuquity') number.dataset.grade = item.model.grade; stat.append(caption, number); stats.append(stat);
     }
     card.append(top, art, name, stats);
     return card;
@@ -217,7 +217,8 @@
     preview.replaceChildren(ubuRender(model));
     $('ubunym').textContent = model.parts.fullName;
     const rarityText = r ? ` · Rarity ${r.percentile.toFixed(1)} / 100 (${r.bits.toFixed(1)} bits)` : '';
-    $('details').textContent = `Ubuquity ${model.grade}${rarityText}` + (serial ? ` · #${serial}` : '');
+    const grade = document.createElement('strong'); grade.dataset.grade = model.grade; grade.textContent = model.grade;
+    $('details').replaceChildren('Ubuquity ', grade, rarityText + (serial ? ` · #${serial}` : ''));
     $('authenticity').textContent = result.type === 'signed' ? 'Verified mint certificate' : 'Custom · unsigned';
     $('download').hidden = false;
 

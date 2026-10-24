@@ -1,13 +1,15 @@
 # .ubu file format
 
-Status: working development profile implemented in ubu-file.js under owner authorization. This does not freeze the certificate protocol or alter the frozen DNA. No production keys, trusted mint configuration, ownership registry or cloud resources have been created.
+Status: working development profile implemented in ubu-file.js under owner authorization. This does not freeze the certificate protocol or alter the 512-bit DNA. No production keys, trusted mint configuration, ownership registry or cloud resources have been created.
+
+Old 256-bit beta files are rejected without conversion.
 
 ## Encoding
 
 - Extension: .ubu. Content: UTF-8 JSON, no BOM, encryption or compression. Maximum file size: 1024 bytes.
 - Writers use JSON.stringify with the exact field order shown below, no whitespace or trailing newline. Readers reject noncanonical files by reconstructing the expected object in that order and comparing its UTF-8 bytes to the original. This also rejects duplicate keys, extra fields and alternative encodings without a second JSON parser. Decode UTF-8 with fatal error handling before parsing.
 - Do not accept arbitrary objects, signature algorithms, inline public keys or key-fetch URLs.
-- DNA is exactly 43 canonical unpadded base64url characters decoding to 32 bytes, as defined in dna.md. The file profile does not accept the demo input's hexadecimal alternative.
+- DNA is exactly 86 canonical unpadded base64url characters decoding to 64 bytes, as defined in dna.md. The file profile does not accept the demo input's hexadecimal alternative.
 - This is a fixed application profile, not general-purpose canonical JSON or a general JOSE implementation. It requires no dependency beyond platform JSON and cryptography.
 
 ## Unsigned/custom
@@ -15,17 +17,17 @@ Status: working development profile implemented in ubu-file.js under owner autho
 Exact field order and types:
 
 ```json
-{"type":"ubu","dna":"<43-character DNA>"}
+{"type":"ubu","dna":"<86-character DNA>"}
 ```
 
-Only these two fields are permitted. Any person may generate or edit its DNA, including selecting finishes or Ubuquity. The importer validates the DNA and reports custom/unsigned status. It never invents a mint ID, issuance signature or registered ownership from this file. Its exact serialized size is 66 bytes.
+Only these two fields are permitted. Any person may generate or edit its DNA, including selecting finishes or Ubuquity. The importer validates the DNA and reports custom/unsigned status. It never invents a mint ID, issuance signature or registered ownership from this file. Its exact serialized size is 109 bytes.
 
 ## Mint-signed issuance certificate
 
 Exact field order and types:
 
 ```json
-{"type":"ubu-signed","mint":"<mint ID>","id":"<ubu ID>","serial":"000000000001","dna":"<43-character DNA>","issuedAt":1792700000,"key":"mint-1","signature":"<86-character signature>"}
+{"type":"ubu-signed","mint":"<mint ID>","id":"<ubu ID>","serial":"000000000001","dna":"<86-character DNA>","issuedAt":1792700000,"key":"mint-1","signature":"<86-character signature>"}
 ```
 
 Angle-bracket values are explanatory placeholders, not valid certificate data.
@@ -36,7 +38,7 @@ Angle-bracket values are explanatory placeholders, not valid certificate data.
 | mint | Permanent mint identity: canonical base64url of 16 random bytes, 22 characters |
 | id | Permanent ubu identity: canonical base64url of 16 random bytes, 22 characters; mint checks uniqueness before registering |
 | serial | Exactly twelve ASCII decimal digits, from 000000000001 through 999999999999; a string preserving leading zeros |
-| dna | Complete frozen 256-bit DNA |
+| dna | Complete frozen 512-bit DNA |
 | issuedAt | Nonnegative safe-integer Unix time in seconds, assigned by the mint |
 | key | Mint-scoped signing-key ID: 1-32 ASCII letters, digits, hyphen or underscore |
 | signature | Ed25519 signature: canonical base64url of 64 bytes, 86 characters |
@@ -75,7 +77,7 @@ Sign signingBytes directly with platform Ed25519 (pure Ed25519, not prehashed Ed
 
 Verification reconstructs the identical signingBytes after validating the schema. It uses only the public key already trusted for (mint, key), with Ed25519 fixed by this profile. Never trust a key merely because it is embedded in a file, supplied alongside it or hosted at an issuer URL named by it.
 
-The signed file contains the readable DNA once and the signature once. It is not an encrypted duplicate. For 22-character mint/id values, a 12-digit serial, a 10-digit issuance time and key mint-1, it is 297 bytes; key/time lengths can change the total.
+The signed file contains the readable DNA once and the signature once. It is not an encrypted duplicate. For 22-character mint/id values, a 12-digit serial, a 10-digit issuance time and key mint-1, it is 340 bytes; key/time lengths can change the total.
 
 ## Import results and host policy
 
@@ -110,6 +112,4 @@ ubu-file.js is shared plain JavaScript using platform Web Crypto, with no depend
 
 The designer exports custom files, accepts valid unsigned files and rejects signed files because no mint keys are configured. It contains no signing UI. Existing DNA favorites/history and all rendering remain unchanged.
 
-Serial update, 2026-10-23: `node --test` passes ten checks with no failures or skips. Serial tampering invalidates the signature; tests cover leading zeros, both range endpoints, missing/numeric/zero/out-of-range/non-decimal values and prohibition of serial metadata on custom files. Signed examples are now 297 bytes. Serial allocation/concurrency and browser verification of the revised certificate have not been exercised; allocation awaits the registry implementation.
-
-Verification, 2026-10-23: `node --test` passes nine checks with no failures or skips. They cover frozen DNA outputs, canonical files, exact signature framing, every signed-field alteration, wrong/untrusted keys, prohibited algorithm/key types, missing signatures, extra/duplicate fields, invalid UTF-8/BOM, invalid encodings and signed-only host policy. Tests generate temporary keys only in memory. Node's separate crypto verification API confirms the signing bytes. A loopback browser fixture also verified a Node-issued test certificate and rejected altered DNA. Browser custom import and untrusted signed-file rejection passed without changing the displayed DNA on failure. Production trust, revocation and ownership remain untested because they are not implemented.
+Verification, 2026-10-24: core and isolated Worker suites pass for the 512-bit profile. File tests cover complete 64-byte preservation, rejection of old beta DNA before trust lookup, exact signing bytes, independent Ed25519 verification, signed-field tampering, wrong/untrusted keys, strict canonical encoding, serial boundaries and no unsigned fallback. Tests use ephemeral keys only. The canonical custom file is 109 bytes; the example signed certificate is 340 bytes. No production keys or deployment state were changed.

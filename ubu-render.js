@@ -72,7 +72,7 @@
           r: .18 + roll() * .22, fill: i % 2 ? '#fff' : '#000', opacity: .018 + roll() * .032 }));
       }
       defs.append(grain); cover(`url(#${id}-grain)`);
-    } else {
+    } else if (attribute.texture === 'crystalline') {
       // An irregular triangulated field avoids a visibly repeating gemstone stamp.
       const points = [];
       for (let y = 0; y <= 12; y++) {
@@ -123,6 +123,7 @@
       crystalline: { width: 2, rim: .45, stops: [[0, '#fff', .9], [.24, '#fff', .55], [.25, '#000', .32], [.49, '#000', .12], [.5, '#fff', .8], [.74, '#fff', .2], [.75, '#000', .42], [1, '#000', .55]] }
     };
     const finish = finishes[attribute.texture];
+    if (!finish) return;
     const gradient = svgNode('linearGradient', { id: id + '-light', gradientUnits: 'userSpaceOnUse',
       x1: 30, y1: 20, x2: 330, y2: 340, gradientTransform: `rotate(${attribute.angle} 180 180)` });
     for (const [offset, color, opacity] of finish.stops) gradient.append(svgNode('stop', {
@@ -156,12 +157,22 @@
     bounds.append(svgNode('circle', { cx: 180, cy: 180, r: 176 })); defs.append(bounds);
     const face = svgNode('g', { 'clip-path': `url(#${prefix}-bounds)` });
     svg.append(title, defs, face);
-    const eyePositions = [[120.55, 145.5, m.eyes.leftX, m.eyes.leftY], [239.44, 145.5, m.eyes.dx, m.eyes.dy]];
+    const eyePositions = [[120.55, 145.5, m.eyes.left], [239.44, 145.5, m.eyes.right]];
+    const eyeShapes = eyePositions.map(([cx, cy, eye], i) => {
+      const shape = svgNode('circle', { cx, cy, r: 66.05 });
+      if (!eye.planes.length) return shape;
+      const id = prefix + '-lid-' + i;
+      const clip = svgNode('clipPath', { id, clipPathUnits: 'userSpaceOnUse' });
+      clip.append(svgNode('polygon', { points: ubu.eyePolygon(eye).map(([x, y]) => `${cx + x},${cy + y}`).join(' ') }));
+      defs.append(clip);
+      shape.setAttribute('clip-path', `url(#${id})`);
+      return shape;
+    });
     const shapes = {
       background: [svgNode('circle', { cx: 180, cy: 180, r: 176 })],
-      eyes: eyePositions.map(([cx, cy]) => svgNode('circle', { cx, cy, r: 66.05 })),
-      irises: eyePositions.map(([x, y, dx, dy]) => svgNode('circle', { cx: x + dx, cy: y + dy, r: 30.7126 })),
-      pupils: eyePositions.map(([x, y, dx, dy]) => svgNode('circle', { cx: x + dx, cy: y + dy, r: 17 })),
+      eyes: eyeShapes,
+      irises: eyePositions.map(([x, y, eye]) => svgNode('circle', { cx: x + eye.dx, cy: y + eye.dy, r: 30.7126 })),
+      pupils: eyePositions.map(([x, y, eye]) => svgNode('circle', { cx: x + eye.dx, cy: y + eye.dy, r: 17 })),
       mouth: [svgNode('path', { d: ubu.mouthPath(m.mouth) })]
     };
     let matteFill;
@@ -173,11 +184,12 @@
       const clip = svgNode('clipPath', { id: clipId, clipPathUnits: 'userSpaceOnUse' });
       for (const shape of shapes[role]) clip.append(shape.cloneNode(true));
       defs.append(clip);
-      const fill = attribute.texture
+      const designed = ['metallic', 'glossy', 'iridescent', 'crystalline'].includes(attribute.texture);
+      const fill = designed
         ? material(defs, attribute, prefix + '-' + role + '-texture', effects)
         : (matteFill ||= material(defs, { texture: 'matte', angle: 0 }, prefix + '-matte', effects));
       face.append(svgNode('rect', { x: 0, y: 0, width: 360, height: 360, fill, 'clip-path': `url(#${clipId})` }));
-      if (attribute.texture) materialEdge(defs, face, shapes[role], attribute, prefix + '-' + role + '-edge', effects);
+      if (designed) materialEdge(defs, face, shapes[role], attribute, prefix + '-' + role + '-edge', effects);
     }
     const domeId = prefix + '-dome';
     const dome = svgNode('radialGradient', { id: domeId, gradientUnits: 'userSpaceOnUse', cx: 180, cy: 175, r: 176 });

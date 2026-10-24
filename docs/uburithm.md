@@ -63,4 +63,4 @@ Names are short, so these are structural simplifications, not measured performan
 
 ## Compatibility
 
-The exact stream, raw initial state and draw schedule are permanent. Text seeds hash through SHA-256 into complete DNA before naming. Run `node --test ubu.test.js`; fixed expected outputs must not be rewritten to approve a changed mapping.
+The exact stream, raw initial state and draw schedule are permanent. Text seeds hash through SHA-512 into complete DNA before naming. Run `node --test ubu.test.js`; fixed expected outputs must not be rewritten to approve a changed mapping.

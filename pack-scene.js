@@ -15,7 +15,7 @@
     logo.src = 'uburoom-wordmark-brand.svg'; mark.src = 'uburoom-oomark-brand.svg';
     function paletteColor(index) {
       // Reuse the decoder's frozen palette without maintaining a second copy.
-      const dna = new Uint8Array(32); dna[8] = index << 3;
+      const dna = new Uint8Array(64); dna[8] = index << 3;
       return ubu.decode(dna).attributes.background.hex;
     }
     function tint(hex, amount) {

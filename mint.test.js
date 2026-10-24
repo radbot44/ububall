@@ -43,7 +43,7 @@ test('default 1000 batch prepares packs across quintiles, resumes after reopen a
   assert.equal(rows[0].serial, '000000000001'); assert.equal(rows[999].serial, '000000001000');
   assert.equal(new Set(rows.map(r => r.id)).size, 1000);
   assert.equal(new Set(rows.map(r => r.dna)).size, 1000);
-  assert.ok(rows.every(r => r.dna.length === 43));
+  assert.ok(rows.every(r => r.dna.length === 86));
   assert.ok(rows.every(r => r.pack_slot >= 0 && r.pack_slot < 200));
   assert.ok(rows.every(r => r.quintile >= 1 && r.quintile <= 5));
 

@@ -58,7 +58,7 @@
     const m = model(code);
     const article = node('article', { class: 'ubu-card' });
     const open = node('button', { type: 'button', class: 'ubu-card-main' });
-    open.append(renderSVG(m, 'ubu-thumb'), node('span', { class: 'ubu-card-name' }, caption || m.parts.fullName), node('span', { class: 'card-grade' }, m.grade));
+    open.append(renderSVG(m, 'ubu-thumb'), node('span', { class: 'ubu-card-name' }, caption || m.parts.fullName), node('span', { class: 'card-grade', 'data-grade': m.grade }, m.grade));
     open.addEventListener('click', () => show(code)); article.append(open);
     if (!caption) {
       const save = node('button', { type: 'button', class: 'card-heart' + (saved.includes(code) ? ' is-saved' : ''), 'aria-label': saved.includes(code) ? 'Remove from Ubu Storage' : 'Save to Ubu Storage' }, saved.includes(code) ? '♥' : '♡');
@@ -81,12 +81,13 @@
       $(role).textContent = m.parts[role]; $(role).parentElement.hidden = !m.parts[role];
     }
     $('grade').textContent = m.grade;
-    $('rating').textContent = `${m.rating} / 255`;
+    $('grade').dataset.grade = m.grade;
+    $('rating').textContent = `${m.rating} / 1023`;
     if (window.rarity) {
       const r = rarity.scoreRarity(m);
       $('rarity-percentile').textContent = `${r.percentile.toFixed(1)} / 100`;
       $('rarity-bits').textContent = `${r.bits.toFixed(1)} bits`;
-      $('rarity-breakdown').textContent = `Rarity breakdown: finishes ${r.breakdown.finishes.toFixed(2)}b, colors ${r.breakdown.colors.toFixed(2)}b, corners ${r.breakdown.corners.toFixed(2)}b, eye flips ${r.breakdown.eyeFlips.toFixed(2)}b, geometry ${r.breakdown.geometry.toFixed(2)}b, name ${r.breakdown.name.toFixed(2)}b.`;
+      $('rarity-breakdown').textContent = `Rarity breakdown: finishes ${r.breakdown.finishes.toFixed(2)}b, colors ${r.breakdown.colors.toFixed(2)}b, corners ${r.breakdown.corners.toFixed(2)}b, mouth cuts ${r.breakdown.mouthCuts.toFixed(2)}b, eyelids ${r.breakdown.eyelids.toFixed(2)}b, eye flips ${r.breakdown.eyeFlips.toFixed(2)}b, geometry ${r.breakdown.geometry.toFixed(2)}b, name ${r.breakdown.name.toFixed(2)}b.`;
     }
     $('dna-output').value = code;
     $('seed').value = code; $('input-mode').value = 'dna';
@@ -104,7 +105,8 @@
       return row;
     }));
     const f = value => Number(value.toFixed(3));
-    $('geometry').textContent = `Mouth: ${f(m.mouth.width)} × ${f(m.mouth.height)}; offset ${f(m.mouth.x - 179.995)}, ${f(m.mouth.y - 254.0531)}. Corners TL/TR/BL/BR: ${m.mouth.corners.map(c => c ? 'cut' : 'square').join(' / ')} (${m.mouth.source}). Eyes: offset ${f(m.eyes.dx)}, ${f(m.eyes.dy)}; left X flip ${m.eyes.flipX ? 'yes' : 'no'}, Y flip ${m.eyes.flipY ? 'yes' : 'no'}.`;
+    $('geometry').textContent = `Mouth: ${f(m.mouth.width)} × ${f(m.mouth.height)}; offset ${f(m.mouth.x - 179.995)}, ${f(m.mouth.y - 254.0531)}. Corners TL/TR/BL/BR: ${m.mouth.corners.map((c, i) => c ? m.mouth.curved[i] ? 'curved' : 'straight' : 'square').join(' / ')} (${m.mouth.source}). Eyes: offset ${f(m.eyes.dx)}, ${f(m.eyes.dy)}; left X flip ${m.eyes.flipX ? 'yes' : 'no'}, Y flip ${m.eyes.flipY ? 'yes' : 'no'}.`;
+    $('geometry').textContent += ` Lip notch: ${m.mouth.lipNotch ? m.mouth.notchCurved ? 'curved' : 'straight' : 'none'}; horizontal cut: ${m.mouth.horizontalCut}; opening width: ${f(m.mouth.openingRatio * 100)}%. Eyelids TL/TR/BL/BR: ${m.eyelids.active.join(' / ')}; angle/depth flips: ${m.eyelids.angleFlip} / ${m.eyelids.depthFlip}.`;
     history.splice(0, history.length, code, ...history.filter(value => value !== code).slice(0, LIMIT - 1));
     if (push && nav[navIndex] !== code) {
       nav = nav.slice(0, navIndex + 1); nav.push(code);
@@ -165,21 +167,31 @@
       dna[bit >> 3] = (dna[bit >> 3] & ~mask) | (((value >> (width - i - 1)) & 1) ? mask : 0);
     }
   }
-  const base = new Uint8Array(32);
-  for (const [slot, color] of [31, 28, 13, 31, 27].entries()) setBits(base, 64 + 16 * slot, 5, color);
-  for (const start of [168, 178, 188, 198, 208, 218]) setBits(base, start, 10, 511);
-  base[31] = 255;
+  const base = new Uint8Array(64);
+  for (const [slot, color] of [31, 28, 13, 31, 27].entries()) setBits(base, 64 + 18 * slot, 5, color);
+  for (const start of [178, 188, 198, 208, 218, 228, 282, 302]) setBits(base, start, 10, 511);
+  setBits(base, 502, 10, 1023);
+  setBits(base, 362, 10, 239);
   const specimens = [['Matte (default)', dna => {}]];
   for (const [i, texture] of ['Metallic', 'Glossy', 'Iridescent', 'Crystalline'].entries()) specimens.push([texture, dna => {
-    for (let slot = 0; slot < 5; slot++) { setBits(dna, 64 + slot * 16 + 8, 8, 240 | (8 >> i)); setBits(dna, 64 + slot * 16 + 5, 3, slot); }
+    for (let slot = 0; slot < 5; slot++) { setBits(dna, 64 + slot * 18 + 8, 10, (63 << 4) | i); setBits(dna, 64 + slot * 18 + 5, 3, slot); }
   }]);
-  specimens.push(['Left X flip', dna => { setBits(dna, 208, 10, 1023); setBits(dna, 228, 10, 1023); }],
-    ['Left Y flip', dna => { setBits(dna, 218, 10, 0); setBits(dna, 238, 10, 1023); }],
-    ['Diagonal eyes', dna => { setBits(dna, 208, 10, 1023); setBits(dna, 218, 10, 1023); }],
-    ['Small mouth', dna => { setBits(dna, 168, 10, 0); setBits(dna, 178, 10, 0); }],
-    ['Large mouth', dna => { setBits(dna, 168, 10, 1023); setBits(dna, 178, 10, 1023); setBits(dna, 188, 10, 1023); setBits(dna, 198, 10, 1023); }],
-    ['Pair cuts', dna => { setBits(dna, 144, 8, 255); }],
-    ['Individual cuts', dna => { setBits(dna, 152, 4, 15); setBits(dna, 164, 4, 15); }]);
+  specimens.push(['Left X flip', dna => { setBits(dna, 218, 10, 1023); setBits(dna, 238, 10, 1023); }],
+    ['Left Y flip', dna => { setBits(dna, 228, 10, 0); setBits(dna, 248, 10, 1023); }],
+    ['Diagonal eyes', dna => { setBits(dna, 218, 10, 1023); setBits(dna, 228, 10, 1023); }],
+    ['Small mouth', dna => { setBits(dna, 178, 10, 0); setBits(dna, 188, 10, 0); }],
+    ['Large mouth', dna => { setBits(dna, 178, 10, 1023); setBits(dna, 188, 10, 1023); setBits(dna, 198, 10, 1023); setBits(dna, 208, 10, 1023); }],
+    ['Pair cuts', dna => { setBits(dna, 154, 8, 255); }],
+    ['Individual cuts', dna => { setBits(dna, 162, 4, 15); setBits(dna, 174, 4, 15); }]);
+  specimens.push(['Curved corners', dna => { setBits(dna, 154, 8, 255); setBits(dna, 342, 8, 255); }],
+    ['Lip notch', dna => setBits(dna, 350, 6, 63)],
+    ['Curved lip notch', dna => { setBits(dna, 350, 6, 63); setBits(dna, 372, 2, 3); }],
+    ['Horizontal cut', dna => setBits(dna, 356, 6, 63)],
+    ['10% opening', dna => { setBits(dna, 356, 6, 63); setBits(dna, 362, 10, 0); }],
+    ['Fully open mouth', dna => { setBits(dna, 350, 12, 4095); setBits(dna, 362, 10, 1023); }],
+    ['Both mouth cuts', dna => { setBits(dna, 350, 12, 4095); }],
+    ['Top lids', dna => { setBits(dna, 258, 4, 15); setBits(dna, 292, 10, 800); }],
+    ['Both lids, flipped', dna => { setBits(dna, 258, 8, 255); setBits(dna, 282, 10, 1023); setBits(dna, 292, 10, 900); setBits(dna, 312, 10, 600); setBits(dna, 322, 20, 1048575); }]);
   $('sample-details').addEventListener('toggle', () => {
     if (!$('sample-details').open || $('samples').childElementCount) return;
     $('samples').replaceChildren(...specimens.map(([caption, change]) => { const dna = new Uint8Array(base); change(dna); return card(ubu.toCode(dna), caption); }));

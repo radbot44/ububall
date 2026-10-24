@@ -11,22 +11,11 @@ function closeTo(actual, expected, message) {
   assert.ok(Math.abs(actual - expected) < TOLERANCE, `${message}: got ${actual}, expected ${expected}, diff ${Math.abs(actual - expected)}`);
 }
 
-test('frozen DNA reference vectors match expected rarity bits within 1e-9', () => {
-  const vectors = [
-    { name: 'Empty text SHA-256 DNA', code: '47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU', expected: 3.049117452627 },
-    { name: 'Text seed 007', code: 'Yp9M-TN7DQx28wXYYPmIlM-ownlRa0JXR1FMqHEN65c', expected: 1.563690625457 },
-    { name: 'Text seed  x ', code: '_Bker9nFC-9O7SRNJJUp3pmA_6JARgfA-Y6sRMjadyg', expected: 10.485516409083 },
-    { name: 'All-zero DNA', code: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', expected: 50.743507380034 },
-    { name: 'All-ones DNA', code: '__________________________________________8', expected: 76.592124695260 }
-  ];
-
-  for (const v of vectors) {
-    const dna = ubu.fromCode(v.code);
-    const model = ubu.decode(dna);
-    const score = rarity.scoreRarity(model);
-    closeTo(score.bits, v.expected, v.name);
-    assert.equal(typeof score.percentile, 'number');
-    assert.ok(score.percentile >= 0 && score.percentile <= 100);
+test('512-bit inputs receive finite, repeatable appearance scores', async () => {
+  for (const dna of [new Uint8Array(64), new Uint8Array(64).fill(255), await ubu.fromText('007')]) {
+    const a = rarity.scoreRarity(ubu.decode(dna));
+    assert.deepEqual(a, rarity.scoreRarity(ubu.decode(ubu.fromCode(ubu.toCode(dna)))));
+    assert.ok(Number.isFinite(a.bits) && a.percentile >= 0 && a.percentile <= 100);
   }
 });
 
@@ -34,8 +23,8 @@ test('changing only Ubuquity does not change appearance rarity', () => {
   const baseDna = ubu.randomDNA();
   const dna1 = new Uint8Array(baseDna);
   const dna2 = new Uint8Array(baseDna);
-  dna1[31] = 0;   // Ubuquity grade B
-  dna2[31] = 255; // Ubuquity grade S++
+  dna1[62] &= 252; dna1[63] = 0; // C
+  dna2[62] |= 3; dna2[63] = 255; // UBU
 
   const model1 = ubu.decode(dna1);
   const model2 = ubu.decode(dna2);
@@ -49,8 +38,8 @@ test('changing only Ubuquity does not change appearance rarity', () => {
 
 test('changing only texture-angle bits does not change appearance rarity', () => {
   const dna1 = ubu.randomDNA();
-  // Part 0 texture: byte 9 high nibble = 0b1111 (15), low nibble = 0b1000 (8 -> metallic)
-  dna1[9] = 0b11111000;
+  // Slot 0: six-bit gate 63, four-bit selector 0 (metallic).
+  dna1[9] = 252; dna1[10] &= 63;
   // Modify angle bits (byte 8, lower 3 bits)
   const dna2 = new Uint8Array(dna1);
   dna2[8] = (dna2[8] ^ 0b00000101);
@@ -121,7 +110,7 @@ test('a flip at exactly neutral displacement contributes no flip rarity; active 
   closeTo(scoreNonNeutral.breakdown.eyeFlips, 10, 'active flip with displacement contributes 10 bits');
 });
 
-test('one rare finish contributes 8 bits; all five matching colors contribute 20 color bits', () => {
+test('one rare finish contributes 10 bits; all five matching colors contribute 20 color bits', () => {
   const modelOneFinish = {
     attributes: {
       a: { texture: 'metallic', color: 0 },
@@ -135,7 +124,7 @@ test('one rare finish contributes 8 bits; all five matching colors contribute 20
     parts: { praenomen: 'A', cognomen: 'B', fullName: 'A B C' }
   };
   const scoreOneFinish = rarity.scoreRarity(modelOneFinish);
-  const expectedFinishes = 8 + 4 * -Math.log2(63 / 64);
+  const expectedFinishes = 10 + 4 * -Math.log2(63 / 64);
   closeTo(scoreOneFinish.breakdown.finishes, expectedFinishes, 'one rare finish contribution');
 
   const modelMonochrome = {
@@ -187,7 +176,7 @@ test('mouth-corner precedence and combinations produce expected probabilities', 
     parts: { praenomen: 'A', cognomen: 'B', fullName: 'A B C' }
   };
   const p12 = (15 / 16) ** 4 * (1 / 16) ** 2 + 15 / 256;
-  closeTo(rarity.scoreRarity(modelMouth12).breakdown.corners, -Math.log2(p12), 'mask 12 mouth corner probability');
+  closeTo(rarity.scoreRarity(modelMouth12).breakdown.corners, -Math.log2(p12) - 2 * Math.log2(3 / 4), 'mask 12 mouth corner probability');
 });
 
 test('rarity calculation does not change decoded model or mutate DNA', () => {
@@ -211,4 +200,27 @@ test('percentile lookup is monotonic: increasing rarity bits cannot decrease per
     assert.ok(p >= 0 && p <= 100);
     prevPercentile = p;
   }
+});
+
+test('new expressed mouth and lid traits contribute their specified probabilities', () => {
+  const base = ubu.decode(new Uint8Array(64));
+  const noCuts = rarity.scoreRarity(base);
+  const changed = { ...base, mouth: { ...base.mouth, lipNotch: true, horizontalCut: true } };
+  closeTo(rarity.scoreRarity(changed).breakdown.mouthCuts, 12 - Math.log2(3 / 4), 'two independent one-in-64 cuts');
+  closeTo(noCuts.breakdown.mouthCuts, -2 * Math.log2(63 / 64), 'two absent cuts');
+  const straight = { ...base, mouth: { ...base.mouth, corners: [true, false, false, false], curved: [false, false, false, false] } };
+  const curved = { ...straight, mouth: { ...straight.mouth, curved: [true, false, false, false] } };
+  closeTo(rarity.scoreRarity(curved).breakdown.corners - rarity.scoreRarity(straight).breakdown.corners, Math.log2(3), 'curvature conditional odds');
+  const invisibleFlip = { ...base, eyelids: { ...base.eyelids, active: [true, false, false, false], raw: [511, 10, 1023, 10], angleFlip: true } };
+  const invisibleNoFlip = { ...invisibleFlip, eyelids: { ...invisibleFlip.eyelids, angleFlip: false } };
+  assert.equal(rarity.scoreRarity(invisibleFlip).breakdown.eyelids, rarity.scoreRarity(invisibleNoFlip).breakdown.eyelids);
+});
+
+test('notch curvature contributes only when the notch appears', () => {
+  const base = ubu.decode(new Uint8Array(64));
+  const straight = { ...base, mouth: { ...base.mouth, lipNotch: true, notchCurved: false } };
+  const curved = { ...base, mouth: { ...base.mouth, lipNotch: true, notchCurved: true } };
+  closeTo(rarity.scoreRarity(curved).breakdown.mouthCuts - rarity.scoreRarity(straight).breakdown.mouthCuts, Math.log2(3), 'notch curvature odds');
+  const inactive = { ...base, mouth: { ...base.mouth, notchCurved: true } };
+  assert.equal(rarity.scoreRarity(inactive).bits, rarity.scoreRarity(base).bits);
 });

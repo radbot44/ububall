@@ -392,3 +392,11 @@ body:has(#reveal[open]) { overflow: hidden; }
 }
 @media (max-height: 720px) { .card-stage, .viewer-card-stage { width: min(250px, 100%); }.reveal-toolbar, .viewer-toolbar { margin-bottom: 12px; }.card-art { margin: 10px 0; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+[data-grade] { --grade-color: #ff7197; color: var(--grade-color) !important; }
+[data-grade="C"] { --grade-color: #477ae7; }
+[data-grade="B"] { --grade-color: #42c66b; }
+[data-grade="A"] { --grade-color: #ee4455; }
+[data-grade="S"], [data-grade="S+"] { --grade-color: #ff9954; }
+[data-grade="S+"] { -webkit-text-stroke: .6px #ff7197; paint-order: stroke fill; }
+[data-grade="UBU"] { -webkit-text-stroke: .6px #ff9954; paint-order: stroke fill; }
