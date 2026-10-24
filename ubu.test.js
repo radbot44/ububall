@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const ubu = require('./ubu.js');
 const roles = ['background', 'eyes', 'irises', 'pupils', 'mouth'];
-const textures = ['metallic', 'glossy', 'iridescent', 'crystalline', 'pearlescent', 'marble', 'velvet', 'frosted', 'terrazzo', 'crackle', 'holographic', 'woodgrain', 'silken', 'lacquered', 'damascus', 'opalescent'];
+const textures = ['metallic', 'glossy', 'iridescent', 'crystalline', 'pearlescent', 'marble', 'velvet', 'frosted', 'terrazzo', 'crackle', 'holographic', 'woodgrain', 'plush', 'lacquered', 'damascus', 'opalescent'];
 function set(dna, start, width, value) {
   for (let i = 0; i < width; i++) {
     const bit = start + i, mask = 1 << (7 - (bit & 7));

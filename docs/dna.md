@@ -87,12 +87,12 @@ An inactive gate means default matte regardless of selector. A successful gate s
 | 9 | Crackle |
 | 10 | Holographic |
 | 11 | Woodgrain |
-| 12 | Silken |
+| 12 | Plush |
 | 13 | Lacquered |
 | 14 | Damascus |
 | 15 | Opalescent |
 
-The original four material designs remain unchanged. Pearlescent (4) adds a soft pastel sheen; marble (5) adds branching stone veins; lacquered (13) adds deep shading and sharp polished reflections; damascus (14) adds fine uneven etched ribbons. Velvet (6) adds dense soft curved pile with shaded roots and lit tips; frosted (7) adds a cool haze with branching ice crystals; holographic (10) adds repeating spectral reflections and fine diffraction grooves; woodgrain (11) adds long fibers bending around a fixed knot, retaining the palette color as the stain. Terrazzo (8) adds scattered stone chips; crackle (9) adds a connected jagged glaze-crack network with chipped edges; silken (12) adds satin reflections and interlaced warp/weft threads; opalescent (15) adds milky depth with scattered soft color patches. These rendering additions do not change any DNA assignments. Rotate designed materials about the global outer-circle center (180, 180), clockwise in SVG coordinates. Default matte has fixed zero orientation. Fixed procedural detail must not consume DNA or uburithm draws. Interactive lighting is presentation only; thumbnails remain static.
+The original four material designs remain unchanged. Pearlescent (4) adds a soft pastel sheen; marble (5) adds branching stone veins; lacquered (13) adds deep shading and sharp polished reflections; damascus (14) adds flat contrasting etched alloys with irregular turbulent bands. Velvet (6) adds continuous fine nap with an extreme matte finish and no directional sheen; frosted (7) adds a cool haze with branching ice crystals; holographic (10) adds repeating spectral reflections and fine diffraction grooves; woodgrain (11) adds long fibers bending around a fixed knot, retaining the palette color as the stain. Terrazzo (8) adds scattered stone chips; crackle (9) adds a connected jagged glaze-crack network with chipped edges; plush (12) replaces the former Silken finish with overlapping soft curls and deep pile, as requested by the owner; its selector and rarity remain unchanged; opalescent (15) adds milky depth with scattered soft color patches. These rendering additions do not change any DNA assignments. Rotate designed materials about the global outer-circle center (180, 180), clockwise in SVG coordinates. Default matte has fixed zero orientation. Fixed procedural detail must not consume DNA or uburithm draws. Interactive lighting is presentation only; thumbnails remain static.
 
 ## Colors
 

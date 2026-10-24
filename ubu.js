@@ -22,7 +22,7 @@
   ];
   const PARTS = ['background', 'eyes', 'irises', 'pupils', 'mouth'];
   const TEXTURES = ['metallic', 'glossy', 'iridescent', 'crystalline', 'pearlescent', 'marble',
-    'velvet', 'frosted', 'terrazzo', 'crackle', 'holographic', 'woodgrain', 'silken', 'lacquered', 'damascus', 'opalescent'];
+    'velvet', 'frosted', 'terrazzo', 'crackle', 'holographic', 'woodgrain', 'plush', 'lacquered', 'damascus', 'opalescent'];
   const MASK = 0xffffffffffffffffn;
   const EYE_RADIUS = 66.05;
   const IRIS_RADIUS = 30.7126;

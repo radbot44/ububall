@@ -176,7 +176,7 @@
   for (const [i, texture] of [[0, 'Metallic'], [1, 'Glossy'], [2, 'Iridescent'], [3, 'Crystalline'],
     [4, 'Pearlescent'], [14, 'Damascus'], [5, 'Marble'], [13, 'Lacquered'],
     [6, 'Velvet'], [7, 'Frosted'], [11, 'Woodgrain'], [10, 'Holographic'],
-    [8, 'Terrazzo'], [9, 'Crackle'], [12, 'Silken'], [15, 'Opalescent']]) specimens.push([texture, dna => {
+    [8, 'Terrazzo'], [9, 'Crackle'], [12, 'Plush'], [15, 'Opalescent']]) specimens.push([texture, dna => {
     for (let slot = 0; slot < 5; slot++) { setBits(dna, 64 + slot * 18 + 8, 10, (63 << 4) | i); setBits(dna, 64 + slot * 18 + 5, 3, slot); }
   }]);
   specimens.push(['Left X flip', dna => { setBits(dna, 218, 10, 1023); setBits(dna, 238, 10, 1023); }],
