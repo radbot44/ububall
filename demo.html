@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Ubu DNA demo</title>
+  <style>
+    :root { color-scheme: dark; --bg: #101112; --panel: #18191b; --text: #eeeeef; --muted: #989a9f; --border: #333539; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 Arial, Helvetica, sans-serif; }
+    button, input, select { font: inherit; }
+    button, .file-button { cursor: pointer; }
+    button, input, select, .file-button { min-height: 42px; border: 1px solid var(--border); border-radius: 7px; padding: 8px 12px; background: var(--panel); color: var(--text); }
+    button:hover, .file-button:hover { background: #303236; }
+    button:disabled { opacity: .4; cursor: default; }
+    :focus-visible { outline: 2px solid #babcc1; outline-offset: 3px; }
+    main { width: min(900px, calc(100% - 32px)); margin: 24px auto 64px; }
+    .name-box { position: relative; display: flex; align-items: center; flex-direction: column; gap: 24px; padding: 40px 18px 28px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+    .favorite-toggle { position: absolute; top: 12px; left: 12px; width: 40px; min-height: 40px; border-radius: 50%; padding: 0; color: var(--muted); font-size: 22px; }
+    .is-saved { color: #ff7197; }
+    .oomark { display: block; width: 250px; height: 250px; flex: none; }
+    .oomark-notes { color: var(--muted); font-size: 12px; text-align: center; }
+    .name-line { display: flex; align-items: baseline; justify-content: center; gap: .34em; white-space: nowrap; font-size: 51px; font-weight: 700; line-height: 1.2; letter-spacing: -.025em; }
+    .part { position: relative; }
+    .part-label { display: block; margin-top: 8px; color: var(--muted); font-size: 9px; line-height: 1.5; letter-spacing: .05em; text-align: center; text-transform: uppercase; }
+    .ubunym-caption { color: var(--muted); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+    .ubuquity { display: flex; align-items: baseline; gap: 10px; font-size: 12px; color: var(--muted); }
+    #grade { color: var(--text); font-size: 24px; line-height: 1; }
+    #rating { font-variant-numeric: tabular-nums; }
+    .controls { display: flex; align-items: end; gap: 8px; margin-top: 16px; }
+    .seed-field { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
+    .controls .input-kind { flex: 0 0 96px; }
+    label { color: var(--muted); font-size: 12px; }
+    input { min-width: 0; width: 100%; }
+    .generate { background: #e8e8ea; color: #151515; border-color: #e8e8ea; }
+    .generate:hover { background: #cfcfd3; }
+    .nav-button { width: 42px; padding: 0; }
+    .dna-row { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 12px 0; }
+    #dna-output { font: 12px/1.6 Consolas, monospace; }
+    .file-button { display: inline-flex; align-items: center; font-size: 13px; }
+    .file-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .file-button:focus-within { outline: 2px solid #babcc1; outline-offset: 3px; }
+    .status { min-height: 20px; margin: 4px 0 12px; color: #ffb4a9; font-size: 12px; }
+    details { margin: 16px 0; border: 1px solid var(--border); border-radius: 9px; padding: 12px 16px; }
+    summary { cursor: pointer; font-size: 13px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; text-align: left; }
+    th, td { padding: 7px 5px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 400; }
+    .detail-text { color: var(--muted); font-size: 12px; }
+    .collection-box { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; margin-top: 20px; }
+    .tabs { display: flex; border-bottom: 1px solid var(--border); }
+    .tab-button { flex: 1; border: 0; border-radius: 0; padding: 12px; color: var(--muted); }
+    .tab-button.is-active { background: #25272a; color: var(--text); }
+    .tab-count { margin-left: .3em; color: var(--muted); font-size: 12px; }
+    .tab-panel { padding: 16px; max-height: 580px; overflow: auto; }
+    .ubu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .ubu-card { position: relative; }
+    .ubu-card-main { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 10px 12px; background: #202225; }
+    .ubu-thumb { display: block; width: 100px; height: 100px; }
+    .ubu-card-name { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+    .card-grade { font-size: 12px; color: var(--muted); }
+    .card-heart { position: absolute; top: 6px; right: 6px; width: 30px; min-height: 30px; border-radius: 50%; padding: 0; }
+    .empty-state { margin: 0; color: var(--muted); font-size: 13px; }
+    #samples { margin-top: 16px; }
+    footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 600px) {
+      main { width: calc(100% - 20px); margin-top: 10px; }
+      .controls { flex-wrap: wrap; }
+      .controls .seed-field { flex-basis: calc(100% - 95px); }
+      .controls .input-kind { flex-basis: 87px; }
+      .controls .generate, #random-button { flex: 1; }
+      .dna-row .seed-field { flex-basis: 100%; }
+      .name-line { font-size: 40.5px; }
+      .oomark { width: 220px; height: 220px; }
+      .ubu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      details { padding: 10px; }
+      th, td { padding: 6px 3px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section aria-label="Ubu generator">
+      <div class="name-box" id="name-box" aria-live="polite">
+        <button class="favorite-toggle" id="favorite-toggle" type="button" aria-label="Save to Ubu Storage" aria-pressed="false">♡</button>
+        <svg class="oomark" id="oomark" viewBox="0 0 360 360" aria-label="Ubu preview"></svg>
+        <div class="name-line" id="name-line">
+          <div class="part"><span id="praenomen"></span><span class="part-label">Praenomen</span></div>
+          <div class="part"><span id="nomen"></span><span class="part-label">Nomen</span></div>
+          <div class="part"><span id="cognomen"></span><span class="part-label">Cognomen</span></div>
+        </div>
+        <div class="ubunym-caption">Ubunym</div>
+        <div class="ubuquity">Ubuquity <strong id="grade"></strong><span id="rating"></span></div>
+        <div class="oomark-notes" id="oomark-notes" hidden></div>
+      </div>
+      <form class="controls" id="generator-form">
+        <label class="seed-field input-kind">Input<select id="input-mode"><option value="text">Text seed</option><option value="dna">DNA</option></select></label>
+        <label class="seed-field">Seed or DNA<input id="seed" type="text" spellcheck="false" autocomplete="off"></label>
+        <button class="generate" type="submit">Get Ubu</button>
+        <button id="random-button" type="button">Random Ubu</button>
+        <button class="nav-button" id="back-button" type="button" aria-label="Previous ubu">←</button>
+        <button class="nav-button" id="forward-button" type="button" aria-label="Next ubu">→</button>
+      </form>
+      <div class="dna-row">
+        <label class="seed-field">256-bit DNA<input id="dna-output" readonly spellcheck="false"></label>
+        <button id="copy-dna" type="button">Copy</button>
+        <button id="export-ubu" type="button">Export .ubu</button>
+        <label class="file-button">Import .ubu<input class="file-input" id="import-ubu" type="file" accept=".ubu,.json,application/json"></label>
+      </div>
+      <p class="status" id="input-error" role="status"></p>
+    </section>
+    <details>
+      <summary>Ubu traits</summary>
+      <table><thead><tr><th>Part</th><th>Color</th><th>Texture</th><th>Angle</th></tr></thead><tbody id="traits"></tbody></table>
+      <p class="detail-text" id="geometry"></p>
+    </details>
+    <details id="sample-details">
+      <summary>Schema samples</summary>
+      <p class="detail-text">Fixed DNA examples for checking textures and extreme geometry. Select one to inspect or export it.</p>
+      <div class="ubu-grid" id="samples"></div>
+    </details>
+    <section class="collection-box" aria-label="Ubu collection">
+      <div class="tabs" role="tablist" aria-label="Collections">
+        <button class="tab-button is-active" id="storage-tab" role="tab" aria-controls="storage-panel" aria-selected="true">Ubu Storage<span class="tab-count" id="storage-count">0</span></button>
+        <button class="tab-button" id="history-tab" role="tab" aria-controls="history-panel" aria-selected="false">Ubu History<span class="tab-count" id="history-count">0</span></button>
+      </div>
+      <div class="tab-panel ubu-grid" id="storage-panel" role="tabpanel" aria-labelledby="storage-tab"></div>
+      <div class="tab-panel ubu-grid" id="history-panel" role="tabpanel" aria-labelledby="history-tab" hidden></div>
+    </section>
+    <footer>Local schema preview. No signatures, encryption, accounts or external requests. Exported files are unsigned demo files.</footer>
+  </main>
+  <script src="ubu.js"></script>
+  <script src="demo.js"></script>
+</body>
+</html>
