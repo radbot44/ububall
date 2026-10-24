@@ -204,3 +204,35 @@ test('lifetime allowance counts packs atomically and retries do not consume it t
   assert.deepEqual(await mint.issue({ owner, request: request(0) }, { lifetimeLimit: 0 }), first);
   for (const lifetimeLimit of [-1, NaN, '3', 1.5]) await assert.rejects(mint.issue({ owner, request: request(9) }, { lifetimeLimit }), /Invalid lifetime/);
 });
+
+test('seamlessly migrates legacy pre-pack database schema on initialization', async t => {
+  const f = await fixture(t);
+  const storage = f.open();
+  storage.exec(`CREATE TABLE mint_state (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1), mint TEXT NOT NULL,
+    next_serial INTEGER NOT NULL, batch INTEGER NOT NULL, size INTEGER NOT NULL,
+    prepared INTEGER NOT NULL, remaining INTEGER NOT NULL, start_serial INTEGER NOT NULL) STRICT`);
+  storage.exec(`CREATE TABLE inventory (
+    slot INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, serial TEXT NOT NULL UNIQUE, dna TEXT NOT NULL) STRICT`);
+  storage.exec(`CREATE TABLE issued (
+    id TEXT PRIMARY KEY, serial TEXT NOT NULL UNIQUE, dna TEXT NOT NULL,
+    batch INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL,
+    request TEXT NOT NULL, issued_at INTEGER NOT NULL, key TEXT NOT NULL,
+    certificate TEXT, UNIQUE(owner, request)) STRICT`);
+  storage.exec('CREATE INDEX issued_owner ON issued(owner)');
+  storage.exec(`INSERT INTO mint_state VALUES (1, '${mintID}', 6, 1, 10, 10, 5, 1)`);
+  storage.exec(`INSERT INTO issued VALUES ('legacy_id_1', '000000000001', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', 1, '${owner}', 1, 'legacy_req_1', 1700000000, 'test-1', '{"type":"ubu-signed"}')`);
+
+  const mint = new Mint(storage, f.options);
+  const legacyRow = storage.exec('SELECT * FROM issued WHERE id=?', 'legacy_id_1')[0];
+  assert.equal(legacyRow.pack_id, 'legacy_req_1');
+  assert.equal(legacyRow.quintile, 0);
+
+  const invCols = storage.exec('PRAGMA table_info(inventory)').map(c => c.name);
+  assert.ok(invCols.includes('pack_slot'));
+  assert.ok(invCols.includes('quintile'));
+
+  mint.prepare({ batchSize: 5 });
+  const result = await mint.issue({ owner, request: request(100) });
+  assert.equal(result.certificates.length, 5);
+});

@@ -125,6 +125,9 @@ export default {
         return json(result, result.status || 200, result.status === 503 ? { 'Retry-After': '2' } : {});
       }
       return json({ error: 'Endpoint not found.' }, 404);
-    } catch { return json({ error: 'Mint service unavailable. Retry the same request.' }, 503, { 'Retry-After': '2' }); }
+    } catch (error) {
+      console.error(error);
+      return json({ error: 'Mint service unavailable. Retry the same request.' }, 503, { 'Retry-After': '2' });
+    }
   }
 };

@@ -34,15 +34,48 @@ class Mint {
         singleton INTEGER PRIMARY KEY CHECK(singleton=1), mint TEXT NOT NULL,
         next_serial INTEGER NOT NULL, batch INTEGER NOT NULL, size INTEGER NOT NULL,
         prepared INTEGER NOT NULL, remaining INTEGER NOT NULL, start_serial INTEGER NOT NULL) STRICT`);
+
+      // Seamless migration from pre-pack single-ubu schema
+      const hasInventory = this.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory'").length > 0;
+      if (hasInventory) {
+        const invCols = this.exec('PRAGMA table_info(inventory)').map(c => c.name);
+        if (!invCols.includes('pack_slot')) {
+          this.exec('DROP TABLE inventory');
+          const state = this.exec('SELECT * FROM mint_state WHERE singleton=1')[0];
+          if (state && (state.remaining > 0 || state.prepared < state.size)) {
+            this.exec('UPDATE mint_state SET prepared=size, remaining=0 WHERE singleton=1');
+          }
+        }
+      }
+
       this.exec(`CREATE TABLE IF NOT EXISTS inventory (
         pack_slot INTEGER NOT NULL, quintile INTEGER NOT NULL, id TEXT NOT NULL UNIQUE, serial TEXT NOT NULL UNIQUE, dna TEXT NOT NULL) STRICT`);
       this.exec('CREATE INDEX IF NOT EXISTS inventory_pack ON inventory(pack_slot)');
-      this.exec(`CREATE TABLE IF NOT EXISTS issued (
-        id TEXT PRIMARY KEY, serial TEXT NOT NULL UNIQUE, dna TEXT NOT NULL,
-        batch INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL,
-        request TEXT NOT NULL, pack_id TEXT NOT NULL, quintile INTEGER NOT NULL,
-        issued_at INTEGER NOT NULL, key TEXT NOT NULL,
-        certificate TEXT, UNIQUE(owner, request, id)) STRICT`);
+
+      const hasIssued = this.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name='issued'").length > 0;
+      if (hasIssued) {
+        const issuedCols = this.exec('PRAGMA table_info(issued)').map(c => c.name);
+        if (!issuedCols.includes('pack_id')) {
+          this.exec(`CREATE TABLE issued_new (
+            id TEXT PRIMARY KEY, serial TEXT NOT NULL UNIQUE, dna TEXT NOT NULL,
+            batch INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL,
+            request TEXT NOT NULL, pack_id TEXT NOT NULL, quintile INTEGER NOT NULL,
+            issued_at INTEGER NOT NULL, key TEXT NOT NULL,
+            certificate TEXT, UNIQUE(owner, request, id)) STRICT`);
+          this.exec(`INSERT INTO issued_new (id, serial, dna, batch, owner, revision, request, pack_id, quintile, issued_at, key, certificate)
+            SELECT id, serial, dna, batch, owner, revision, request, request, 0, issued_at, key, certificate FROM issued`);
+          this.exec('DROP TABLE issued');
+          this.exec('ALTER TABLE issued_new RENAME TO issued');
+        }
+      } else {
+        this.exec(`CREATE TABLE IF NOT EXISTS issued (
+          id TEXT PRIMARY KEY, serial TEXT NOT NULL UNIQUE, dna TEXT NOT NULL,
+          batch INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL,
+          request TEXT NOT NULL, pack_id TEXT NOT NULL, quintile INTEGER NOT NULL,
+          issued_at INTEGER NOT NULL, key TEXT NOT NULL,
+          certificate TEXT, UNIQUE(owner, request, id)) STRICT`);
+      }
+
       this.exec('CREATE INDEX IF NOT EXISTS issued_owner ON issued(owner)');
       this.exec('CREATE INDEX IF NOT EXISTS issued_request ON issued(owner, request)');
       this.exec('INSERT OR IGNORE INTO mint_state VALUES (1, ?, 1, 0, 0, 0, 0, 0)', mint);
