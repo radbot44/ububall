@@ -127,6 +127,32 @@ test('eyelid and displacement flips preserve neutral values and act on the left 
     const m = ubu.decode(d); assert.ok(!m.eyes.flipX && !m.eyes.flipY && !m.eyelids.angleFlip && !m.eyelids.depthFlip);
   }
 });
+test('paired eyelid clips mirror across eyes unless the left-eye angle flip activates', () => {
+  for (const raw of [0, 511, 900, 1023]) for (const mask of [0xf0, 0x0f, 0xff]) {
+    const dna = neutral(); set(dna, 258, 8, mask);
+    set(dna, 282, 10, raw); set(dna, 302, 10, 1023 - raw);
+    set(dna, 292, 10, 600); set(dna, 312, 10, 800);
+    const { left, right } = ubu.decode(dna).eyes;
+    for (let i = 0; i < 2; i++) {
+      assert.equal(left.lids[i].active, right.lids[i].active);
+      close(left.lids[i].angle, -right.lids[i].angle);
+      close(left.lids[i].depth, right.lids[i].depth);
+    }
+    assert.equal(left.planes.length, right.planes.length);
+    for (let i = 0; i < left.planes.length; i++) {
+      close(left.planes[i].nx, -right.planes[i].nx);
+      close(left.planes[i].ny, right.planes[i].ny);
+      close(left.planes[i].distance, right.planes[i].distance);
+    }
+    const leftPoints = ubu.eyePolygon(left), rightPoints = ubu.eyePolygon(right);
+    assert.equal(leftPoints.length, rightPoints.length);
+    for (const [x, y] of leftPoints) assert.ok(rightPoints.some(([rx, ry]) =>
+      Math.abs(x + rx) < 1e-10 && Math.abs(y - ry) < 1e-10), 'mirrored clip polygon');
+    set(dna, 322, 10, 1023);
+    const flipped = ubu.decode(dna).eyes.left;
+    for (let i = 0; i < 2; i++) close(flipped.lids[i].angle, right.lids[i].angle);
+  }
+});
 test('entire iris and pupil stay inside circles and angled lids at extremes and random inputs', () => {
   const cases = [];
   for (const angle of [0, 511, 1023]) for (const depth of [0, 511, 1023]) for (const x of [0, 511, 1023]) for (const y of [0, 511, 1023]) {
