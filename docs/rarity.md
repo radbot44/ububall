@@ -6,7 +6,7 @@ Rarity is measured without querying the mint database or requiring a mint signat
 
 ## 1. Information-Theoretic Rarity Bits
 
-Every complete 512-bit DNA string has identical probability ($2^{-512}$) under uniform generation. Rarity therefore measures the improbability of an ubu's *expressed visual traits*, using information-theoretic surprisal:
+Every complete 512-bit DNA string has identical probability ($2^{-512}$) under uniform generation. Appearance rarity measures unusual *expressed visual traits* using information-theoretic surprisal, with an additional bounded color-harmony refinement:
 
 $$\text{surprisal}(p) = -\log_2(p)$$
 
@@ -36,18 +36,21 @@ where $S(5, k)$ are the Stirling numbers of the second kind (`[1, 15, 25, 10, 1]
 - 1 color (monochrome): $20.0$ bits
 
 ### Color harmony
-A separate small bonus recognizes coherent relationships among distinct palette colors, without changing DNA, color frequencies, or the distinct-color score. Indices 0–27 form a circular hue sequence; indices 28–31 are neutrals.
+A continuous **0–3-bit bonus** measures relationships between the distinct colors in all five roles. It refines (rather than replaces) the separate color-count score. This is a deliberately weighted visual-harmony index, not independent information-theoretic surprisal.
 
-- **Analogous:** at least 3 distinct hues fit within 4 steps of the 28-position hue wheel, including wraparound from 27 to 0.
-- **Complementary:** at least 3 distinct hues fit within two opposing radius-2 hue windows (14 positions apart), with colors on both sides; 4 or more distinct hues require at least 2 on each side.
-- **Neutral accent:** exactly 2 distinct chromatic colors within 3 hue steps, alongside one or more distinct neutrals.
-- **Grayscale:** at least 3 distinct neutral colors and no chromatic colors.
+Indices 0–27 form a circular, approximate hue sequence. For two chromatic colors, let `d` be their shortest circular index distance (0–14). Their affinity is:
 
-A palette receives only its first qualifying pattern, never stacked bonuses. Let `k` be the number of distinct colors and `p` the fraction of unordered `k`-color subsets satisfying that pattern. These fractions are computed exactly by enumerating all `32 choose k` subsets, so the extra score is conditional on existing color-count rarity:
+$$A(d) = \cos^2\left(\frac{\pi d}{14}\right)$$
 
-$\text{harmony} = \min\left(3, \frac{-\log_2(p)}{3}\right)$
+Affinity is highest for closely related colors (`d` near 0) and complementary colors (`d` near 14), and fades smoothly toward quarter-wheel separation (`d = 7`). The wheel wraps from index 27 to 0.
 
-No bonus is awarded for `k < 3` or an unmatched pattern. The maximum is **3 bits**, considerably smaller than a 10-bit rare material. This is a deliberately weighted aesthetic rarity bonus, not an independent event probability.
+Indices 28–31 are neutral (Alabaster, Slate, Gunmetal, Onyx). A chromatic–neutral pair receives affinity `0.4`; two distinct neutrals receive `0.7 + 0.1 × index distance`, recognizing graded light/dark contrast without treating neutral indices as chromatic hues.
+
+Compute the mean affinity `Ā` across all unordered pairs of **distinct** colors. With `k` distinct colors, the bonus is:
+
+$$\text{harmony} = 3 \times \frac{k-1}{4} \times \bar{A}^2$$
+
+For `k=1`, harmony is zero: the 20-bit exact-match rarity already rewards a single-color palette. The `(k-1)/4` factor keeps highly repeated palettes from receiving another large bonus. The squared mean favors coherent palettes while allowing ordinary mixed colors to have a small, smoothly varying contribution; the maximum is 3 bits, substantially below a 10-bit rare finish.
 
 ### Mouth corners
 Scores the probability of the resulting visible 4-corner pattern, taking pair precedence into account. For $c$ cut corners and pattern mask:

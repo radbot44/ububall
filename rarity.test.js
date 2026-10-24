@@ -110,7 +110,7 @@ test('a flip at exactly neutral displacement contributes no flip rarity; active 
   closeTo(scoreNonNeutral.breakdown.eyeFlips, 10, 'active flip with displacement contributes 10 bits');
 });
 
-test('color harmony rewards related hues without double-counting identical colors', () => {
+test('continuous harmony responds smoothly to hue proximity and complementarity', () => {
   const base = ubu.decode(new Uint8Array(64));
   const score = colors => {
     const attributes = Object.fromEntries(
@@ -118,18 +118,35 @@ test('color harmony rewards related hues without double-counting identical color
     );
     return rarity.scoreRarity({ ...base, attributes }).breakdown;
   };
-  assert.equal(score([0, 5, 10, 15, 20]).harmony, 0);
-  assert.ok(score([27, 0, 1, 2, 3]).harmony > 0, 'analogous hues wrap around index 27 to 0');
-  assert.ok(score([0, 1, 13, 14, 28]).harmony > 0, 'opposing hue families');
-  assert.ok(score([0, 1, 28, 29, 30]).harmony > 0, 'neutral accent');
-  assert.ok(score([28, 29, 30, 31, 28]).harmony > 0, 'grayscale');
-  assert.equal(score([3, 3, 3, 3, 3]).harmony, 0, 'one color is already rewarded');
-  assert.equal(score([3, 3, 4, 4, 4]).harmony, 0, 'two colors are already rewarded');
-  assert.ok(score([0, 1, 2, 3, 4]).harmony <= 3, 'bonus capped at 3 bits');
-  closeTo(score([0, 1, 2, 3, 4]).colors, score([0, 5, 10, 15, 20]).colors,
-    'distinct-color score unchanged');
-  closeTo(score([0, 1, 13, 14, 28]).harmony, score([28, 14, 13, 1, 0]).harmony,
-    'slot ordering does not change harmony');
+
+  const compact = score([0, 1, 2, 3, 4]);
+  const scattered = score([0, 5, 10, 15, 20]);
+  const opposed = score([0, 1, 2, 13, 14]);
+  assert.ok(compact.harmony > scattered.harmony, 'cohesive neighboring hues score higher');
+  assert.ok(opposed.harmony > scattered.harmony, 'opposing hue groups score higher');
+  assert.ok(scattered.harmony > 0, 'intermediate palettes receive fractional bonuses');
+  closeTo(score([27, 0, 1, 2, 3]).harmony, compact.harmony, 'hue wheel wraps at 27');
+  assert.ok(score([0, 1, 28, 29, 30]).harmony > 0, 'neutral and chromatic blend');
+  assert.ok(score([28, 29, 30, 31, 28]).harmony > 0, 'grayscale relations');
+  assert.ok(score([28, 31, 31, 31, 31]).harmony > score([28, 29, 29, 29, 29]).harmony,
+    'light and dark neutrals receive a little more contrast affinity');
+
+  assert.ok(score([0, 1, 1, 1, 1]).harmony > score([0, 3, 3, 3, 3]).harmony,
+    'hue similarity fades gradually');
+  assert.ok(score([0, 14, 14, 14, 14]).harmony > score([0, 11, 11, 11, 11]).harmony,
+    'complementary affinity fades gradually');
+  assert.equal(score([0, 7, 7, 7, 7]).harmony, 0, 'quarter-wheel-separated pair gets zero affinity');
+  assert.equal(score([3, 3, 3, 3, 3]).harmony, 0, 'identical colors do not double-count harmony');
+  closeTo(score([3, 3, 3, 3, 3]).colors, 20, 'existing exact-match score retained');
+  closeTo(compact.colors, scattered.colors, 'distinct-color score remains unchanged');
+  closeTo(opposed.harmony, score([14, 0, 13, 2, 1]).harmony,
+    'ordering of the five body parts does not change the bonus');
+
+  for (const colors of [[0, 1, 2, 3, 4], [0, 14, 14, 14, 14],
+    [28, 29, 30, 31, 28], [0, 1, 28, 29, 30], [0, 5, 10, 15, 20]]) {
+    const value = score(colors).harmony;
+    assert.ok(value >= 0 && value <= 3, 'harmony remains bounded at 0–3 bits');
+  }
 });
 
 test('one rare finish contributes 10 bits; all five matching colors contribute 20 color bits', () => {
