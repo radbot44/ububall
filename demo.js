@@ -39,7 +39,7 @@
     for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
     return element;
   }
-  function material(defs, attribute, id) {
+  function material(defs, attribute, id, effects) {
     const rotate = `rotate(${attribute.angle} 180 180)`;
     // One global material field: every detail rotates about the outer-circle center.
     const pattern = svgNode('pattern', { id, patternUnits: 'userSpaceOnUse', x: -180, y: -180,
@@ -52,6 +52,16 @@
         ...(radial ? { cx: 105, cy: 90, r: 265 } : { x1: 0, y1: 0, x2: 360, y2: 0 }), ...attrs
       });
       for (const [offset, color, opacity] of stops) gradient.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
+      if (effects) {
+        const base = attrs.gradientTransform || '';
+        const radians = attribute.angle * Math.PI / 180;
+        const strength = attribute.texture === 'matte' ? 15 : 65;
+        effects.push((x, y) => {
+          const dx = (x * Math.cos(radians) + y * Math.sin(radians)) * strength;
+          const dy = (-x * Math.sin(radians) + y * Math.cos(radians)) * strength;
+          gradient.setAttribute('gradientTransform', `translate(${dx} ${dy}) ${base}`);
+        });
+      }
       defs.append(gradient);
       cover(`url(#${key})`);
     }
@@ -76,6 +86,15 @@
       lighting('glint', [[0, '#fff', .85], [.24, '#fff', .48], [.65, '#fff', .08], [1, '#fff', 0]], true,
         { cx: 100, cy: 76, r: 58, gradientTransform: 'translate(0 38) scale(1 .5)' });
       lighting('edge', [[0, '#fff', 0], [.81, '#fff', 0], [.87, '#fff', .2], [.9, '#fff', 0], [1, '#fff', 0]]);
+    } else if (attribute.texture === 'iridescent') {
+      lighting('oil-depth', [[0, '#fff', .12], [.45, '#000', .06], [1, '#000', .38]], true);
+      // Broad thin-film color bands curve across the surface, retaining the base color beneath.
+      lighting('interference', [[0, '#8b5cff', .12], [.18, '#735dff', .48], [.3, '#ed61d3', .46],
+        [.41, '#ffb66d', .35], [.5, '#e9ef92', .27], [.59, '#69edca', .43],
+        [.7, '#49cfea', .5], [.82, '#7272f5', .44], [.94, '#de68ce', .35], [1, '#905cff', .2]], true,
+        { cx: 70, cy: 70, r: 330, gradientTransform: 'translate(-20 25) skewX(-18)' });
+      lighting('oil-sheen', [[0, '#fff', 0], [.22, '#fff', 0], [.32, '#dcfaff', .12],
+        [.37, '#fff', .52], [.4, '#ffe9fa', .21], [.49, '#fff', 0], [1, '#fff', 0]]);
     } else if (attribute.texture === 'matte') {
       lighting('diffuse', [[0, '#fff', .19], [.5, '#fff', .03], [1, '#000', .2]], true);
       const grain = svgNode('pattern', { id: id + '-grain', patternUnits: 'userSpaceOnUse', width: 48, height: 48 });
@@ -97,11 +116,29 @@
         const facets = split ? [[a, b, c], [b, d, c]] : [[a, b, d], [a, d, c]];
         for (const triangle of facets) {
           const light = roll(), fill = light > .46 ? '#fff' : '#000';
-          pattern.append(svgNode('polygon', { points: triangle.map(p => p.join(',')).join(' '),
-            fill, opacity: .08 + Math.abs(light - .46) * .86 }));
+          const opacity = .08 + Math.abs(light - .46) * .86;
+          const facet = svgNode('polygon', { points: triangle.map(p => p.join(',')).join(' '), fill, opacity });
+          pattern.append(facet);
+          if (effects) {
+            const normal = light * Math.PI * 2 + attribute.angle * Math.PI / 180;
+            effects.push((x, y) => facet.setAttribute('opacity', Math.max(.025,
+              Math.min(.78, opacity + .22 * (x * Math.cos(normal) + y * Math.sin(normal))))));
+          }
         }
         if (roll() > .76) pattern.append(svgNode('path', { d: split ? `M${b}L${c}` : `M${a}L${d}`, fill: 'none',
           stroke: '#fff', 'stroke-width': .65, opacity: .38 }));
+      }
+      if (effects) for (let y = 3; y < 9; y++) for (let x = 3; x < 9; x++) {
+        if ((x + y * 3) % 4) continue;
+        const [px, py] = points[y][x];
+        const spark = svgNode('path', { d: `M${px - 5} ${py}h10M${px} ${py - 5}v10`,
+          stroke: '#fff', 'stroke-width': 1.1, 'stroke-linecap': 'round', opacity: 0 });
+        pattern.append(spark);
+        const phase = (x * 1.7 + y * 2.3 + attribute.angle * Math.PI / 180);
+        effects.push((dx, dy) => {
+          const alignment = Math.max(0, Math.cos(phase + dx * 3 + dy * 2));
+          spark.setAttribute('opacity', Math.pow(alignment, 28) * Math.min(1, Math.hypot(dx, dy) * 3));
+        });
       }
       lighting('luster', [[0, '#fff', .3], [.4, '#fff', 0], [1, '#000', .3]], true);
     }
@@ -109,6 +146,7 @@
     return `url(#${id})`;
   }
   function renderSVG(m, className = 'oomark') {
+    const effects = className === 'oomark' ? [] : null;
     const prefix = 'ubu-' + (++serial);
     const svg = svgNode('svg', { class: className, viewBox: '0 0 360 360', role: 'img', 'aria-label': `${m.parts.fullName}, Ubuquity ${m.grade}` });
     const title = svgNode('title'); title.textContent = `${m.parts.fullName} · ${m.grade}`;
@@ -125,19 +163,59 @@
       pupils: eyePositions.map(([x, y, dx, dy]) => svgNode('circle', { cx: x + dx, cy: y + dy, r: 17 })),
       mouth: [svgNode('path', { d: ubu.mouthPath(m.mouth) })]
     };
+    let matteFill;
     for (const role of roles) {
       const attribute = m.attributes[role];
       const layer = svgNode('g', { fill: attribute.hex });
       layer.append(...shapes[role]); face.append(layer);
-      if (!attribute.texture) continue;
       const clipId = prefix + '-' + role + '-clip';
       const clip = svgNode('clipPath', { id: clipId, clipPathUnits: 'userSpaceOnUse' });
       for (const shape of shapes[role]) clip.append(shape.cloneNode(true));
       defs.append(clip);
-      const fill = material(defs, attribute, prefix + '-' + role + '-texture');
+      const fill = attribute.texture
+        ? material(defs, attribute, prefix + '-' + role + '-texture', effects)
+        : (matteFill ||= material(defs, { texture: 'matte', angle: 0 }, prefix + '-matte', effects));
       face.append(svgNode('rect', { x: 0, y: 0, width: 360, height: 360, fill, 'clip-path': `url(#${clipId})` }));
     }
+    if (effects) attachLighting(svg, effects);
     return svg;
+  }
+  let stopLighting = () => {};
+  function attachLighting(svg, effects) {
+    stopLighting();
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+    let frame = 0, x = 0, y = 0, targetX = 0, targetY = 0, rect;
+    function paint() {
+      frame = 0;
+      x += (targetX - x) * .18; y += (targetY - y) * .18;
+      const settled = Math.abs(targetX - x) + Math.abs(targetY - y) < .001;
+      if (settled) { x = targetX; y = targetY; }
+      svg.style.transform = `perspective(700px) rotateX(${-y * 12}deg) rotateY(${x * 12}deg)`;
+      svg.style.filter = x || y ? `drop-shadow(${-x * 9}px ${8 - y * 6}px 9px #0005)` : '';
+      for (const effect of effects) effect(x, y);
+      if (!settled) frame = requestAnimationFrame(paint);
+    }
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(paint); };
+    function reset() { targetX = targetY = 0; schedule(); }
+    svg.addEventListener('pointerenter', () => { rect = svg.getBoundingClientRect(); });
+    svg.addEventListener('pointermove', event => {
+      if (reduced.matches || event.pointerType === 'touch' || !rect) return;
+      targetX = Math.max(-1, Math.min(1, (event.clientX - rect.left) / rect.width * 2 - 1));
+      targetY = Math.max(-1, Math.min(1, (event.clientY - rect.top) / rect.height * 2 - 1));
+      schedule();
+    });
+    svg.addEventListener('pointerleave', reset);
+    svg.addEventListener('pointercancel', reset);
+    function preferenceChanged() {
+      if (reduced.matches) { targetX = targetY = x = y = 0; schedule(); }
+    }
+    reduced.addEventListener('change', preferenceChanged);
+    window.addEventListener('blur', reset);
+    stopLighting = () => {
+      cancelAnimationFrame(frame);
+      reduced.removeEventListener('change', preferenceChanged);
+      window.removeEventListener('blur', reset);
+    };
   }
   function fitName() {
     const line = $('name-line');
@@ -198,7 +276,7 @@
     const body = $('traits');
     body.replaceChildren(...roles.map(role => {
       const a = m.attributes[role], row = node('tr');
-      for (const text of [role, a.name, a.texture || 'none', a.angle + '°']) row.append(node('td', {}, text));
+      for (const text of [role, a.name, a.texture || 'matte (default)', a.angle + '°']) row.append(node('td', {}, text));
       return row;
     }));
     const f = value => Number(value.toFixed(3));
@@ -265,8 +343,8 @@
   for (const [slot, color] of [31, 28, 13, 31, 27].entries()) setBits(base, 64 + 16 * slot, 5, color);
   for (const start of [168, 178, 188, 198, 208, 218]) setBits(base, start, 10, 511);
   base[31] = 255;
-  const specimens = [['Neutral', dna => {}]];
-  for (const [i, texture] of ['Metallic', 'Glossy', 'Matte', 'Crystalline'].entries()) specimens.push([texture, dna => {
+  const specimens = [['Matte (default)', dna => {}]];
+  for (const [i, texture] of ['Metallic', 'Glossy', 'Iridescent', 'Crystalline'].entries()) specimens.push([texture, dna => {
     for (let slot = 0; slot < 5; slot++) { setBits(dna, 64 + slot * 16 + 8, 8, 240 | (8 >> i)); setBits(dna, 64 + slot * 16 + 5, 3, slot); }
   }]);
   specimens.push(['Left X flip', dna => { setBits(dna, 208, 10, 1023); setBits(dna, 228, 10, 1023); }],

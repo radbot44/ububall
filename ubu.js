@@ -21,7 +21,7 @@
     ['Alabaster', '#F8F6F2'], ['Slate', '#706D77'], ['Gunmetal', '#292E38'], ['Onyx', '#101217']
   ];
   const PARTS = ['background', 'eyes', 'irises', 'pupils', 'mouth'];
-  const TEXTURES = ['metallic', 'glossy', 'matte', 'crystalline'];
+  const TEXTURES = ['metallic', 'glossy', 'iridescent', 'crystalline'];
   const MASK = 0xffffffffffffffffn;
   const EYE_RADIUS = 66.05;
   const IRIS_RADIUS = 30.7126;

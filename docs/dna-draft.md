@@ -58,7 +58,7 @@ The owner approved this block order and revised the attribute block to five 16-b
 
 64 + 80 + 24 + 40 + 40 + 8 = 256 bits. An attribute slot starts at absolute bit 64 + 16 times its slot index (0 through 4).
 
-This revises the pre-release draft; no permanent DNA has been minted. There are no vacant fields inside the five attribute slots. Inactive texture combinations remain defined as no texture; do not later reinterpret them as additional textures.
+This revises the pre-release draft; no permanent DNA has been minted. There are no vacant fields inside the five attribute slots. Inactive texture combinations remain defined as no rare texture (the default matte finish); do not later reinterpret them as additional textures.
 
 All 256 bits are allocated. No future expansion or extension mechanism is planned.
 
@@ -73,14 +73,14 @@ Each 16-bit slot, in field order:
 | 8-11 | Texture gate: all four bits must be one |
 | 12 | Metallic selector |
 | 13 | Glossy selector |
-| 14 | Matte selector |
+| 14 | Iridescent selector |
 | 15 | Crystalline selector |
 
-A texture applies only when the gate is 1111 and exactly one selector is one. All other combinations mean no texture. Given uniform random DNA, each part has a 1/64 (1.5625%) chance of any texture; each individual texture has a 1/256 (0.390625%) chance.
+A texture applies only when the gate is 1111 and exactly one selector is one. All other combinations mean no rare texture and render with the default matte finish. Given uniform random DNA, each part has a 1/64 (1.5625%) chance of any rare texture; each individual texture has a 1/256 (0.390625%) chance.
 
-Interpret the three-bit orientation value as 0 through 7, mapping to 0, 45, 90, 135, 180, 225, 270 and 315 degrees respectively. Each is equally likely. Rotate the texture about the center of the ubu's outer circle (180, 180 in the reference 360-by-360 viewBox), using the same global pivot for all parts, rather than each part's local center. Orientation has no visible effect when there is no texture; preserve its DNA bits nevertheless.
+Interpret the three-bit orientation value as 0 through 7, mapping to 0, 45, 90, 135, 180, 225, 270 and 315 degrees respectively. Each is equally likely. Rotate the texture about the center of the ubu's outer circle (180, 180 in the reference 360-by-360 viewBox), using the same global pivot for all parts, rather than each part's local center. The default matte finish uses fixed zero-degree orientation, so orientation bits have no visible effect when there is no rare texture; preserve its DNA bits nevertheless.
 
-Preview styling: positive rotation is clockwise in SVG coordinates. Metallic combines sharp reflection bands with fine brushed lines; glossy combines diffuse depth, a broad softbox reflection, an elliptical glint and a faint secondary reflection; matte combines soft diffuse shading with fine irregular grain; crystalline uses a non-repeating irregular triangular field with contrasting facets and sparse bright edges. Procedural detail uses a fixed local seed, independent of DNA and the uburithm. All material details rotate around (180, 180) in global user coordinates, not each shape's local center. Material overlays are clipped to their part, with later foreground parts covering the eye/background layers normally. Styles are deterministic and editable until acceptance.
+Preview styling: positive rotation is clockwise in SVG coordinates. Metallic combines sharp reflection bands with fine brushed lines; glossy combines diffuse depth, a broad softbox reflection, an elliptical glint and a faint secondary reflection; the default matte finish combines soft diffuse shading with fine irregular grain; iridescent replaces the former rare matte selector with curved rainbow interference bands and a glossy oil-film reflection; crystalline uses a non-repeating irregular triangular field with contrasting facets and sparse bright edges. Procedural detail uses a fixed local seed, independent of DNA and the uburithm. All material details rotate around (180, 180) in global user coordinates, not each shape's local center. Material overlays are clipped to their part, with later foreground parts covering the eye/background layers normally. Styles are deterministic and editable until acceptance. The main preview adds pointer-driven perspective tilt and moving material lighting, including angle-dependent crystal facet brightness and glints. This is a presentation effect on flat SVG geometry, not a volumetric mesh or an allocation change. The owner-requested iridescent finish replaces the former rare matte selector during the pre-freeze preview; existing DNA with that selector now displays iridescence. Pointer exit restores the neutral appearance; reduced-motion preferences disable interaction. Thumbnails remain static.
 
 ## Colors
 
