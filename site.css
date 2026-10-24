@@ -77,7 +77,7 @@ body:has(#reveal[open]) { overflow: hidden; }
   background: linear-gradient(145deg, #424651, #222631 45%, #333846);
   box-shadow: inset 0 0 0 4px #ffffff09, 0 12px 24px #0005;
   transform-style: preserve-3d;
-  animation: card-arrive .65s cubic-bezier(.22, 1, .36, 1); will-change: transform;
+  animation: card-arrive var(--wobble-dur, .65s) cubic-bezier(.22, 1, .36, 1); will-change: transform;
 }
 .card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .card-top img { width: 88px; height: auto; }
@@ -85,8 +85,8 @@ body:has(#reveal[open]) { overflow: hidden; }
 .card-art { position: relative; z-index: 1; transform-style: preserve-3d; display: grid; place-items: center; aspect-ratio: 1; margin: 18px 0; border-radius: 50%; background: radial-gradient(circle, #ffffff0a, transparent 70%); }
 .card-art .oomark {
   width: 100%; height: auto; filter: drop-shadow(0 8px 9px #0005);
-  transform: translateZ(14px);
-  animation: ubu-arrive .65s cubic-bezier(.2, .9, .3, 1.2), ubu-float 3.5s .65s ease-in-out infinite alternate;
+  transform: translateZ(var(--popout-rest, 14px));
+  animation: ubu-arrive var(--wobble-dur, .65s) cubic-bezier(.2, .9, .3, 1.2), ubu-float var(--float-dur, 3.5s) var(--float-delay, .65s) ease-in-out infinite alternate;
   will-change: transform;
 }
 .trading-card h3 { font-size: 20px; line-height: 1.3; letter-spacing: -.4px; margin: 14px 0 18px; overflow-wrap: anywhere; }
@@ -102,21 +102,21 @@ body:has(#reveal[open]) { overflow: hidden; }
 .reveal-dots .seen { background: var(--muted); }.reveal-dots .current { background: var(--primary); }
 #finish-pack { min-width: 100px; }
 @keyframes card-arrive {
-  0% { opacity: 0; transform: perspective(800px) translateY(26px) rotateX(9deg) rotateY(-8deg) scale(.94); }
-  45% { opacity: 1; transform: perspective(800px) translateY(-4px) rotateX(-3deg) rotateY(4deg) scale(1.01); }
-  70% { transform: perspective(800px) translateY(2px) rotateX(1.8deg) rotateY(-2deg) scale(1); }
-  85% { transform: perspective(800px) translateY(-1px) rotateX(-.8deg) rotateY(.8deg); }
+  0% { opacity: 0; transform: perspective(800px) translateY(var(--wobble-y, 26px)) rotateX(var(--wobble-rx, 9deg)) rotateY(var(--wobble-ry, -8deg)) scale(.94); }
+  45% { opacity: 1; transform: perspective(800px) translateY(calc(var(--wobble-y, 26px) * -0.15)) rotateX(calc(var(--wobble-rx, 9deg) * -0.35)) rotateY(calc(var(--wobble-ry, -8deg) * -0.5)) scale(1.01); }
+  70% { transform: perspective(800px) translateY(calc(var(--wobble-y, 26px) * 0.08)) rotateX(calc(var(--wobble-rx, 9deg) * 0.2)) rotateY(calc(var(--wobble-ry, -8deg) * 0.25)) scale(1); }
+  85% { transform: perspective(800px) translateY(calc(var(--wobble-y, 26px) * -0.04)) rotateX(calc(var(--wobble-rx, 9deg) * -0.09)) rotateY(calc(var(--wobble-ry, -8deg) * -0.1)); }
   100% { opacity: 1; transform: perspective(800px) translateY(0) rotateX(0deg) rotateY(0deg) scale(1); }
 }
 @keyframes ubu-arrive {
   0% { opacity: 0; transform: translateZ(6px) scale(.92); }
-  45% { opacity: 1; transform: translateZ(30px) scale(1.06); }
-  70% { transform: translateZ(12px) scale(.98); }
-  100% { transform: translateZ(14px) scale(1); }
+  45% { opacity: 1; transform: translateZ(var(--popout-peak, 30px)) scale(1.06); }
+  70% { transform: translateZ(calc(var(--popout-rest, 14px) - 2px)) scale(.98); }
+  100% { transform: translateZ(var(--popout-rest, 14px)) scale(1); }
 }
 @keyframes ubu-float {
-  0% { transform: translateZ(11px) translateY(0); }
-  100% { transform: translateZ(17px) translateY(-2px); }
+  0% { transform: translateZ(var(--float-min, 11px)) translateY(0); }
+  100% { transform: translateZ(var(--float-max, 17px)) translateY(var(--float-y, -2px)); }
 }
 @media (max-width: 520px) {
   main { width: calc(100% - 16px); margin-top: 12px; }
