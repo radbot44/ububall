@@ -72,7 +72,7 @@
       lighting('pearl-sheen', [[0, '#fff', 0], [.2, '#fff', .04], [.38, '#fff', .38],
         [.5, '#fff', .16], [.7, '#fff', 0], [1, '#fff', 0]]);
     } else if (attribute.texture === 'damascus') {
-      // Flat etched alloys: quantized turbulent bands, without bevels or paired edge highlights.
+      // Polished etched alloys: quantized turbulent bands with steel luster, without bevels or paired edge highlights.
       const etch = svgNode('filter', { id: id + '-etch', filterUnits: 'userSpaceOnUse',
         x: -180, y: -180, width: 720, height: 720, 'color-interpolation-filters': 'sRGB' });
       etch.append(svgNode('feTurbulence', { type: 'fractalNoise', baseFrequency: '.009 .023',
@@ -85,6 +85,8 @@
       etch.append(bands); defs.append(etch);
       pattern.append(svgNode('rect', { x: -180, y: -180, width: 720, height: 720, filter: `url(#${id}-etch)` }));
       lighting('steel-flat', [[0, '#fff', .08], [.5, '#fff', .02], [1, '#000', .08]], true);
+      lighting('steel-polish', [[0, '#fff', 0], [.2, '#fff', .02], [.36, '#fff', .18],
+        [.43, '#fff', .32], [.51, '#fff', .12], [.66, '#fff', 0], [1, '#fff', 0]]);
     } else if (attribute.texture === 'marble') {
       lighting('stone-depth', [[0, '#fff', .24], [.5, '#fff', .04], [1, '#000', .18]], true);
       for (let vein = 0; vein < 11; vein++) {
@@ -117,11 +119,16 @@
       lighting('velvet-diffuse', [[0, '#000', .08], [.5, '#000', .13], [1, '#000', .22]], true);
       const nap = svgNode('filter', { id: id + '-nap', filterUnits: 'userSpaceOnUse',
         x: -180, y: -180, width: 720, height: 720, 'color-interpolation-filters': 'sRGB' });
-      nap.append(svgNode('feTurbulence', { type: 'fractalNoise', baseFrequency: .7, numOctaves: 3, seed: 173 }),
+      nap.append(svgNode('feTurbulence', { type: 'fractalNoise', baseFrequency: .36, numOctaves: 3, seed: 173 }),
         svgNode('feColorMatrix', { type: 'saturate', values: 0 }));
+      const napContrast = svgNode('feComponentTransfer');
+      for (const channel of ['R', 'G', 'B']) napContrast.append(svgNode('feFunc' + channel,
+        { type: 'linear', slope: 2.4, intercept: -.7 }));
+      napContrast.append(svgNode('feFuncA', { type: 'linear', slope: 0, intercept: 1 }));
+      nap.append(napContrast);
       defs.append(nap);
       pattern.append(svgNode('rect', { x: -180, y: -180, width: 720, height: 720,
-        filter: `url(#${id}-nap)`, opacity: .16 }));
+        filter: `url(#${id}-nap)`, opacity: .26 }));
     } else if (attribute.texture === 'frosted') {
       lighting('ice-body', [[0, '#e3faff', .42], [.45, '#c9e9fa', .2], [1, '#84accb', .1]], true);
       const frost = svgNode('pattern', { id: id + '-frost', patternUnits: 'userSpaceOnUse', width: 120, height: 120 });
