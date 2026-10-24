@@ -41,30 +41,71 @@
   }
   function material(defs, attribute, id) {
     const rotate = `rotate(${attribute.angle} 180 180)`;
-    if (attribute.texture === 'metallic' || attribute.texture === 'glossy') {
-      const gradient = svgNode('linearGradient', {
-        id, gradientUnits: 'userSpaceOnUse', x1: 0, y1: 0, x2: 360, y2: 0, gradientTransform: rotate
+    // One global material field: every detail rotates about the outer-circle center.
+    const pattern = svgNode('pattern', { id, patternUnits: 'userSpaceOnUse', x: -180, y: -180,
+      width: 720, height: 720, viewBox: '-180 -180 720 720', patternTransform: rotate });
+    const cover = fill => pattern.append(svgNode('rect', { x: -180, y: -180, width: 720, height: 720, fill }));
+    function lighting(name, stops, radial = false, attrs = {}) {
+      const key = id + '-' + name;
+      const gradient = svgNode(radial ? 'radialGradient' : 'linearGradient', {
+        id: key, gradientUnits: 'userSpaceOnUse',
+        ...(radial ? { cx: 105, cy: 90, r: 265 } : { x1: 0, y1: 0, x2: 360, y2: 0 }), ...attrs
       });
-      const stops = attribute.texture === 'metallic'
-        ? [[0, '#000', .32], [.24, '#fff', .15], [.38, '#000', .28], [.48, '#fff', .82], [.53, '#fff', .1], [.73, '#000', .4], [1, '#fff', .28]]
-        : [[0, '#000', .2], [.2, '#fff', 0], [.32, '#fff', .62], [.43, '#fff', .05], [.75, '#000', .12], [1, '#000', .4]];
       for (const [offset, color, opacity] of stops) gradient.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
       defs.append(gradient);
-    } else {
-      const matte = attribute.texture === 'matte';
-      const pattern = svgNode('pattern', { id, patternUnits: 'userSpaceOnUse', width: matte ? 6 : 48, height: matte ? 6 : 48, patternTransform: rotate });
-      if (matte) {
-        pattern.append(svgNode('rect', { width: 6, height: 6, fill: '#000', opacity: .08 }),
-          svgNode('circle', { cx: 1, cy: 1, r: .75, fill: '#fff', opacity: .18 }),
-          svgNode('circle', { cx: 4, cy: 4, r: .6, fill: '#000', opacity: .2 }));
-      } else {
-        for (const [points, fill, opacity] of [
-          ['0,0 32,0 16,24', '#fff', .38], ['32,0 48,0 48,32 16,24', '#000', .22],
-          ['0,0 16,24 0,48', '#000', .12], ['16,24 48,32 32,48 0,48', '#fff', .12], ['48,32 48,48 32,48', '#fff', .5]
-        ]) pattern.append(svgNode('polygon', { points, fill, opacity }));
-      }
-      defs.append(pattern);
+      cover(`url(#${key})`);
     }
+    // Fixed procedural detail never consumes DNA or the naming stream.
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    if (attribute.texture === 'metallic') {
+      lighting('reflection', [[0, '#000', .58], [.12, '#fff', .18], [.27, '#000', .4],
+        [.36, '#000', .62], [.405, '#fff', .85], [.44, '#fff', .38], [.51, '#000', .18],
+        [.64, '#000', .52], [.72, '#fff', .58], [.77, '#fff', .12], [1, '#000', .4]]);
+      const brush = svgNode('pattern', { id: id + '-brush', patternUnits: 'userSpaceOnUse', width: 72, height: 72 });
+      for (let i = 0; i < 64; i++) {
+        const y = roll() * 72;
+        brush.append(svgNode('path', { d: `M0 ${y}h72`, stroke: i % 3 ? '#fff' : '#000',
+          'stroke-width': .18 + roll() * .35, opacity: .025 + roll() * .065 }));
+      }
+      defs.append(brush); cover(`url(#${id}-brush)`);
+    } else if (attribute.texture === 'glossy') {
+      lighting('depth', [[0, '#fff', .16], [.3, '#fff', .02], [.7, '#000', .18], [1, '#000', .5]], true);
+      lighting('softbox', [[0, '#fff', 0], [.17, '#fff', 0], [.25, '#fff', .12],
+        [.30, '#fff', .58], [.34, '#fff', .7], [.38, '#fff', .25], [.46, '#fff', 0], [1, '#fff', 0]]);
+      lighting('glint', [[0, '#fff', .85], [.24, '#fff', .48], [.65, '#fff', .08], [1, '#fff', 0]], true,
+        { cx: 100, cy: 76, r: 58, gradientTransform: 'translate(0 38) scale(1 .5)' });
+      lighting('edge', [[0, '#fff', 0], [.81, '#fff', 0], [.87, '#fff', .2], [.9, '#fff', 0], [1, '#fff', 0]]);
+    } else if (attribute.texture === 'matte') {
+      lighting('diffuse', [[0, '#fff', .19], [.5, '#fff', .03], [1, '#000', .2]], true);
+      const grain = svgNode('pattern', { id: id + '-grain', patternUnits: 'userSpaceOnUse', width: 48, height: 48 });
+      for (let i = 0; i < 160; i++) {
+        grain.append(svgNode('circle', { cx: 1 + roll() * 46, cy: 1 + roll() * 46,
+          r: .18 + roll() * .22, fill: i % 2 ? '#fff' : '#000', opacity: .018 + roll() * .032 }));
+      }
+      defs.append(grain); cover(`url(#${id}-grain)`);
+    } else {
+      // An irregular triangulated field avoids a visibly repeating gemstone stamp.
+      const points = [];
+      for (let y = 0; y <= 12; y++) {
+        points[y] = [];
+        for (let x = 0; x <= 12; x++) points[y][x] = [-180 + x * 60 + (roll() - .5) * 32, -180 + y * 60 + (roll() - .5) * 32];
+      }
+      for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) {
+        const a = points[y][x], b = points[y][x + 1], c = points[y + 1][x], d = points[y + 1][x + 1];
+        const split = roll() < .5;
+        const facets = split ? [[a, b, c], [b, d, c]] : [[a, b, d], [a, d, c]];
+        for (const triangle of facets) {
+          const light = roll(), fill = light > .46 ? '#fff' : '#000';
+          pattern.append(svgNode('polygon', { points: triangle.map(p => p.join(',')).join(' '),
+            fill, opacity: .08 + Math.abs(light - .46) * .86 }));
+        }
+        if (roll() > .76) pattern.append(svgNode('path', { d: split ? `M${b}L${c}` : `M${a}L${d}`, fill: 'none',
+          stroke: '#fff', 'stroke-width': .65, opacity: .38 }));
+      }
+      lighting('luster', [[0, '#fff', .3], [.4, '#fff', 0], [1, '#000', .3]], true);
+    }
+    defs.append(pattern);
     return `url(#${id})`;
   }
   function renderSVG(m, className = 'oomark') {
