@@ -187,6 +187,7 @@
     stopLighting();
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     let frame = 0, x = 0, y = 0, targetX = 0, targetY = 0, rect;
+    svg.style.filter = 'drop-shadow(0px 8px 9px #0005)';
     function paint() {
       frame = 0;
       x += (targetX - x) * .18; y += (targetY - y) * .18;
@@ -197,7 +198,7 @@
         surface.style.setProperty('--light-x', `${50 + x * 45}%`);
         surface.style.setProperty('--light-y', `${50 + y * 45}%`);
       }
-      svg.style.filter = x || y ? `drop-shadow(${-x * 9}px ${8 - y * 6}px 9px #0005)` : '';
+      svg.style.filter = `drop-shadow(${-x * 9}px ${8 - y * 6}px 9px #0005)`;
       for (const effect of effects) effect(x, y);
       if (!settled) frame = requestAnimationFrame(paint);
     }
