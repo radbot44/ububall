@@ -619,18 +619,14 @@
         group.setAttribute('mask', `url(#${maskId})`);
       }
 
-      for (const r of rects) {
-        group.append(
-          svgNode('rect', {
-            x: r.x, y: r.y, width: r.width, height: r.height,
-            fill: mat.hex, opacity: .65
-          }),
-          svgNode('rect', {
-            x: r.x, y: r.y, width: r.width, height: r.height,
-            fill
-          })
-        );
-      }
+      // Compound paths keep the same stripe geometry but rasterize each
+      // expensive SVG material pattern once per layer, not once per stripe.
+      const stripes = rects.map(r =>
+        `M${r.x} ${r.y}h${r.width}v${r.height}h${-r.width}Z`).join('');
+      group.append(
+        svgNode('path', { d: stripes, fill: mat.hex, opacity: .65 }),
+        svgNode('path', { d: stripes, fill })
+      );
 
       const finish = finishes[mat.texture];
       if (finish) {
@@ -654,15 +650,12 @@
         // eroding a rectangular stripe exposes only its two vertical edges.
         // Draw those strips directly instead of filtering/masking entire stripes.
         for (const [idx, width] of [finish.width, finish.rim].entries()) {
-          for (const r of rects) {
-            for (const x of [r.x, r.x + r.width - width]) {
-              group.append(svgNode('rect', {
-                x, y: r.y, width, height: r.height,
-                fill: `url(#${gradId})`,
-                opacity: idx ? .8 : .42
-              }));
-            }
-          }
+          const edges = rects.map(r =>
+            `M${r.x} ${r.y}h${width}v${r.height}h${-width}Z` +
+            `M${r.x + r.width - width} ${r.y}h${width}v${r.height}h${-width}Z`).join('');
+          group.append(svgNode('path', {
+            d: edges, fill: `url(#${gradId})`, opacity: idx ? .8 : .42
+          }));
         }
       }
 
