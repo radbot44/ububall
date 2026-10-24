@@ -182,10 +182,10 @@
     const domeId = prefix + '-dome';
     const dome = svgNode('radialGradient', { id: domeId, gradientUnits: 'userSpaceOnUse', cx: 180, cy: 175, r: 176 });
     dome.append(
-      svgNode('stop', { offset: '0%', 'stop-color': '#fff', 'stop-opacity': .14 }),
-      svgNode('stop', { offset: '38%', 'stop-color': '#fff', 'stop-opacity': .03 }),
-      svgNode('stop', { offset: '70%', 'stop-color': '#000', 'stop-opacity': .04 }),
-      svgNode('stop', { offset: '100%', 'stop-color': '#000', 'stop-opacity': .32 })
+      svgNode('stop', { offset: '0%', 'stop-color': '#fff', 'stop-opacity': .10 }),
+      svgNode('stop', { offset: '38%', 'stop-color': '#fff', 'stop-opacity': .02 }),
+      svgNode('stop', { offset: '70%', 'stop-color': '#000', 'stop-opacity': .01 }),
+      svgNode('stop', { offset: '100%', 'stop-color': '#000', 'stop-opacity': .09 })
     );
     defs.append(dome);
     face.append(svgNode('circle', { cx: 180, cy: 180, r: 176, fill: `url(#${domeId})`, 'pointer-events': 'none' }));
@@ -221,16 +221,39 @@
     const schedule = () => { if (!frame) frame = requestAnimationFrame(paint); };
     function reset() { targetX = targetY = 0; schedule(); }
     function enter() { rect = surface.getBoundingClientRect(); }
+    function down(event) {
+      rect = surface.getBoundingClientRect();
+      if (event.pointerType === 'touch') {
+        try { surface.setPointerCapture(event.pointerId); } catch {}
+        move(event);
+      }
+    }
     function move(event) {
-      if (reduced.matches || event.pointerType === 'touch' || !rect) return;
+      if (reduced.matches || !rect) return;
+      if (event.pointerType === 'touch' && event.buttons === 0) return;
       targetX = Math.max(-1, Math.min(1, (event.clientX - rect.left) / rect.width * 2 - 1));
       targetY = Math.max(-1, Math.min(1, (event.clientY - rect.top) / rect.height * 2 - 1));
       schedule();
     }
+    function up(event) {
+      if (event.pointerType === 'touch') {
+        try { surface.releasePointerCapture(event.pointerId); } catch {}
+        reset();
+      }
+    }
+    function leave(event) {
+      if (event.pointerType !== 'touch') reset();
+    }
+    function cancel(event) {
+      try { surface.releasePointerCapture(event.pointerId); } catch {}
+      reset();
+    }
     surface.addEventListener('pointerenter', enter);
+    surface.addEventListener('pointerdown', down);
     surface.addEventListener('pointermove', move);
-    surface.addEventListener('pointerleave', reset);
-    surface.addEventListener('pointercancel', reset);
+    surface.addEventListener('pointerup', up);
+    surface.addEventListener('pointerleave', leave);
+    surface.addEventListener('pointercancel', cancel);
     function preferenceChanged() {
       if (reduced.matches) { targetX = targetY = x = y = 0; schedule(); }
     }
@@ -239,9 +262,11 @@
     stopLighting = () => {
       cancelAnimationFrame(frame);
       surface.removeEventListener('pointerenter', enter);
+      surface.removeEventListener('pointerdown', down);
       surface.removeEventListener('pointermove', move);
-      surface.removeEventListener('pointerleave', reset);
-      surface.removeEventListener('pointercancel', reset);
+      surface.removeEventListener('pointerup', up);
+      surface.removeEventListener('pointerleave', leave);
+      surface.removeEventListener('pointercancel', cancel);
       reduced.removeEventListener('change', preferenceChanged);
       window.removeEventListener('blur', reset);
     };

@@ -7,6 +7,78 @@
   try { packScene = createPackScene($('pack-canvas')); } catch { /* Keep opening usable without canvas. */ }
   if (!packScene) { $('pack-canvas').hidden = true; $('pack-canvas').nextElementSibling.hidden = false; }
   let pack = null, packKey = '', pendingKey = '', collectionVersion = 0, revealIndex = 0;
+  let isCardView = false, loadingMore = false;
+  const collectionMap = new Map();
+
+  const FAV_STORAGE_KEY = 'ubumint:favorites';
+  function loadFavorites() {
+    try {
+      const raw = localStorage.getItem(FAV_STORAGE_KEY);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set();
+    }
+  }
+  function saveFavorites(set) {
+    try {
+      localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(Array.from(set)));
+    } catch { /* Quota exceeded or storage disabled */ }
+  }
+  function isFavorite(serial) {
+    if (!serial) return false;
+    return loadFavorites().has(serial);
+  }
+  function createHeartSvg() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572');
+    svg.append(path);
+    return svg;
+  }
+  function createHeartButton(serial) {
+    const btn = document.createElement('button');
+    btn.className = 'card-heart';
+    btn.type = 'button';
+    btn.title = 'Favorite';
+    btn.setAttribute('aria-label', `Favorite #${serial}`);
+    btn.dataset.serial = serial;
+    const fav = isFavorite(serial);
+    if (fav) {
+      btn.classList.add('is-favorite');
+      btn.setAttribute('aria-pressed', 'true');
+    } else {
+      btn.setAttribute('aria-pressed', 'false');
+    }
+    btn.append(createHeartSvg());
+    btn.addEventListener('click', event => {
+      event.stopPropagation();
+      toggleFavorite(serial);
+    });
+    return btn;
+  }
+  function toggleFavorite(serial) {
+    if (!serial) return;
+    const favs = loadFavorites();
+    if (favs.has(serial)) favs.delete(serial);
+    else favs.add(serial);
+    saveFavorites(favs);
+    const nowFav = favs.has(serial);
+
+    if (current?.serial === serial) {
+      $('viewer-fav').classList.toggle('is-favorite', nowFav);
+      $('viewer-fav').setAttribute('aria-pressed', String(nowFav));
+    }
+    for (const btn of document.querySelectorAll(`.card[data-serial="${serial}"] .card-heart, .trading-card .card-heart[data-serial="${serial}"]`)) {
+      btn.classList.toggle('is-favorite', nowFav);
+      btn.setAttribute('aria-pressed', String(nowFav));
+    }
+    if ($('sort-ubus')?.value === 'favorite') {
+      renderCollection();
+    }
+  }
+
   const unseen = serial => pack?.items.slice(pack.seen).some(item => item.result.certificate.serial === serial);
   function savePack() {
     localStorage.setItem(packKey, JSON.stringify({ certificates: pack.items.map(item => item.text), seen: pack.seen }));
@@ -49,8 +121,10 @@
     card.style.setProperty('--float-delay', `${dur.toFixed(2)}s`);
     const top = document.createElement('div'); top.className = 'card-top';
     const brand = document.createElement('img'); brand.src = 'uburoom-wordmark-brand.svg'; brand.alt = 'uburoom';
-    const serial = document.createElement('span'); serial.textContent = '#' + item.result.certificate.serial;
-    top.append(brand, serial);
+    const serialNum = item.result.certificate?.serial || '';
+    const favBtn = createHeartButton(serialNum);
+    const serial = document.createElement('span'); serial.textContent = serialNum ? '#' + serialNum : '';
+    top.append(brand, favBtn, serial);
     const art = document.createElement('div'); art.className = 'card-art'; art.append(ubuRender(item.model, 'oomark', card));
     const name = document.createElement('h3'); name.textContent = item.model.parts.fullName;
     const stats = document.createElement('div'); stats.className = 'card-stats';
@@ -70,7 +144,7 @@
     const last = index === pack.items.length - 1;
     $('reveal-progress').textContent = `${index + 1} / ${pack.items.length}`;
     // Render the background first so the visible card owns the shared lighting controller.
-    display(item.text, item.result);
+    display(item.text, item.result, false);
     $('card-stage').replaceChildren(tradingCard(item));
     $('reveal-dots').replaceChildren(...pack.items.map((_, i) => { const dot = document.createElement('span'); dot.className = i === index ? 'current' : i < pack.seen ? 'seen' : ''; return dot; }));
     $('prev-ubu').disabled = index === 0;
@@ -113,7 +187,7 @@
   });
   $('pause-reveal').addEventListener('click', () => $('reveal').close());
   $('reveal').addEventListener('close', () => {
-    if (current) display(current.text, current.result);
+    if (current) display(current.text, current.result, true);
     updatePackButton(); $('mint').focus();
   });
   const status = text => { $('status').textContent = text; };
@@ -123,17 +197,84 @@
     return keys.get(id);
   }
   async function inspect(text) { return ubuFile.read(text, { resolveKey: trustedKey }); }
-  function display(text, result) {
+  function display(text, result, openModal = false) {
     const model = ubu.decode(ubu.fromCode(result.dna));
     const r = window.rarity ? rarity.scoreRarity(model) : null;
-    current = { text, result, name: model.parts.fullName };
-    $('preview').replaceChildren(ubuRender(model));
+    const serial = result.certificate ? result.certificate.serial : null;
+    current = { text, result, model, rarity: r, name: model.parts.fullName, serial };
+
+    // Reset card view to preview state
+    isCardView = false;
+    $('toggle-card-view').setAttribute('aria-pressed', 'false');
+    const preview = $('preview');
+    const cardStage = $('viewer-card-stage');
+    preview.hidden = false;
+    preview.classList.remove('preview-toggle-out', 'preview-toggle-in');
+    cardStage.hidden = true;
+    cardStage.classList.remove('card-toggle-in', 'card-toggle-out');
+    cardStage.replaceChildren();
+
+    preview.replaceChildren(ubuRender(model));
     $('ubunym').textContent = model.parts.fullName;
     const rarityText = r ? ` · Rarity ${r.percentile.toFixed(1)} / 100 (${r.bits.toFixed(1)} bits)` : '';
-    $('details').textContent = `Ubuquity ${model.grade}${rarityText}` + (result.certificate ? ` · #${result.certificate.serial}` : '');
+    $('details').textContent = `Ubuquity ${model.grade}${rarityText}` + (serial ? ` · #${serial}` : '');
     $('authenticity').textContent = result.type === 'signed' ? 'Verified mint certificate' : 'Custom · unsigned';
     $('download').hidden = false;
+
+    if (serial) {
+      $('viewer-fav').hidden = false;
+      const fav = isFavorite(serial);
+      $('viewer-fav').classList.toggle('is-favorite', fav);
+      $('viewer-fav').setAttribute('aria-pressed', String(fav));
+    } else {
+      $('viewer-fav').hidden = true;
+    }
+
+    if (openModal && !$('viewer').open) {
+      $('viewer').showModal();
+    }
   }
+
+  // Toggle card view in viewer dialog
+  $('toggle-card-view').addEventListener('click', () => {
+    if (!current) return;
+    isCardView = !isCardView;
+    $('toggle-card-view').setAttribute('aria-pressed', String(isCardView));
+    const preview = $('preview');
+    const cardStage = $('viewer-card-stage');
+    if (isCardView) {
+      cardStage.replaceChildren(tradingCard(current));
+      cardStage.hidden = false;
+      cardStage.classList.remove('card-toggle-out');
+      cardStage.classList.add('card-toggle-in');
+      preview.classList.remove('preview-toggle-in');
+      preview.classList.add('preview-toggle-out');
+      setTimeout(() => {
+        if (isCardView) preview.hidden = true;
+      }, 220);
+    } else {
+      preview.hidden = false;
+      preview.classList.remove('preview-toggle-out');
+      preview.classList.add('preview-toggle-in');
+      cardStage.classList.remove('card-toggle-in');
+      cardStage.classList.add('card-toggle-out');
+      setTimeout(() => {
+        if (!isCardView) {
+          cardStage.hidden = true;
+          cardStage.replaceChildren();
+        }
+      }, 240);
+    }
+  });
+
+  $('close-viewer').addEventListener('click', () => $('viewer').close());
+  $('viewer').addEventListener('click', event => {
+    if (event.target === $('viewer')) $('viewer').close();
+  });
+  $('viewer-fav').addEventListener('click', () => {
+    if (current?.serial) toggleFavorite(current.serial);
+  });
+
   async function api(path, options) {
     const response = await fetch(path, options);
     const data = await response.json();
@@ -141,38 +282,166 @@
     return data;
   }
   const post = data => ({ method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf }, body: JSON.stringify(data) });
+
+  function getSortedItems() {
+    const items = Array.from(collectionMap.values());
+    const sort = $('sort-ubus')?.value || 'recent';
+    return items.sort((a, b) => {
+      if (a.pending !== b.pending) return a.pending ? 1 : -1;
+      const aFav = isFavorite(a.serial) ? 1 : 0;
+      const bFav = isFavorite(b.serial) ? 1 : 0;
+      if (sort === 'favorite') {
+        if (aFav !== bFav) return bFav - aFav;
+        return (b.issuedAt || 0) - (a.issuedAt || 0) || b.serial.localeCompare(a.serial);
+      }
+      if (sort === 'rarity') {
+        const aBits = a.rarity ? a.rarity.bits : 0;
+        const bBits = b.rarity ? b.rarity.bits : 0;
+        return bBits - aBits || b.serial.localeCompare(a.serial);
+      }
+      if (sort === 'serial') {
+        return a.serial.localeCompare(b.serial);
+      }
+      if (sort === 'old') {
+        return (a.issuedAt || 0) - (b.issuedAt || 0) || a.serial.localeCompare(b.serial);
+      }
+      // 'recent'
+      return (b.issuedAt || 0) - (a.issuedAt || 0) || b.serial.localeCompare(a.serial);
+    });
+  }
+
+  function renderCollection() {
+    const sorted = getSortedItems();
+    const cards = [];
+    for (const item of sorted) {
+      if (item.pending) {
+        const pending = document.createElement('p');
+        pending.textContent = `#${item.serial} · Certificate pending`;
+        cards.push(pending);
+        continue;
+      }
+      const card = document.createElement('button');
+      card.className = 'card';
+      card.dataset.serial = item.serial;
+      const favBtn = createHeartButton(item.serial);
+      const thumb = ubuRender(item.model, 'ubu-thumb');
+      const name = document.createElement('span'); name.textContent = item.model.parts.fullName;
+      const serial = document.createElement('span'); serial.textContent = '#' + item.serial;
+      card.append(favBtn, thumb, name, serial);
+      card.addEventListener('click', () => {
+        display(item.certificate, item.result, true);
+        status('');
+      });
+      cards.push(card);
+    }
+    $('ubus').replaceChildren(...cards);
+    if (!cards.length) {
+      const empty = document.createElement('p');
+      empty.textContent = 'No revealed ubus.';
+      $('ubus').append(empty);
+    }
+    $('collection-sentinel').hidden = !next;
+    $('more').hidden = !next || Boolean(observer);
+    $('collection').hidden = false;
+  }
+
   async function collection(reset = false) {
-    // Until an interrupted mint is recovered, its newly allocated serials are unknown.
     if (pendingKey && localStorage.getItem(pendingKey)) return;
     const version = ++collectionVersion;
+    if (reset) {
+      collectionMap.clear();
+      next = null;
+    }
     const data = await api('/api/ubus' + (!reset && next ? '?after=' + encodeURIComponent(next) : ''));
-    const cards = [];
     for (const entry of data.ubus) {
       if (unseen(entry.serial)) continue;
       if (!entry.certificate) {
-        const pending = document.createElement('p'); pending.textContent = `#${entry.serial} · Certificate pending`; cards.push(pending); continue;
+        if (!collectionMap.has(entry.serial)) {
+          collectionMap.set(entry.serial, { serial: entry.serial, pending: true });
+        }
+        continue;
       }
-      const result = await inspect(entry.certificate);
-      const model = ubu.decode(ubu.fromCode(result.dna));
-      const card = document.createElement('button'); card.className = 'card';
-      const name = document.createElement('span'); name.textContent = model.parts.fullName;
-      const serial = document.createElement('span'); serial.textContent = '#' + entry.serial;
-      card.append(ubuRender(model, 'ubu-thumb'), name, serial);
-      card.addEventListener('click', () => { display(entry.certificate, result); status(''); });
-      cards.push(card);
+      if (!collectionMap.has(entry.serial)) {
+        const result = await inspect(entry.certificate);
+        const model = ubu.decode(ubu.fromCode(result.dna));
+        const r = window.rarity ? rarity.scoreRarity(model) : null;
+        collectionMap.set(entry.serial, {
+          serial: entry.serial,
+          certificate: entry.certificate,
+          result,
+          model,
+          rarity: r,
+          issuedAt: result.certificate?.issuedAt || 0
+        });
+      }
     }
     if (version !== collectionVersion || (pendingKey && localStorage.getItem(pendingKey))) return;
-    if (reset) $('ubus').replaceChildren(...cards); else $('ubus').append(...cards);
-    if (reset && !cards.length) { const empty = document.createElement('p'); empty.textContent = 'No revealed ubus.'; $('ubus').append(empty); }
-    next = data.next; $('more').hidden = !next; $('collection').hidden = false;
+    next = data.next;
+    renderCollection();
   }
+
+  async function loadMore() {
+    if (loadingMore || !next || (pendingKey && localStorage.getItem(pendingKey))) return;
+    loadingMore = true;
+    $('collection-status').hidden = false;
+    $('collection-status').textContent = 'Loading more ubus…';
+    try {
+      const data = await api('/api/ubus?after=' + encodeURIComponent(next));
+      next = data.next;
+      for (const entry of data.ubus) {
+        if (unseen(entry.serial)) continue;
+        if (!entry.certificate) {
+          if (!collectionMap.has(entry.serial)) {
+            collectionMap.set(entry.serial, { serial: entry.serial, pending: true });
+          }
+          continue;
+        }
+        if (!collectionMap.has(entry.serial)) {
+          const result = await inspect(entry.certificate);
+          const model = ubu.decode(ubu.fromCode(result.dna));
+          const r = window.rarity ? rarity.scoreRarity(model) : null;
+          collectionMap.set(entry.serial, {
+            serial: entry.serial,
+            certificate: entry.certificate,
+            result,
+            model,
+            rarity: r,
+            issuedAt: result.certificate?.issuedAt || 0
+          });
+        }
+      }
+      renderCollection();
+      $('collection-status').hidden = true;
+    } catch (error) {
+      $('collection-status').textContent = `Could not load more: ${error.message}`;
+    } finally {
+      loadingMore = false;
+    }
+  }
+
+  let observer = null;
+  if ('IntersectionObserver' in window) {
+    observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && next && !loadingMore && !busy) {
+          void loadMore();
+        }
+      }
+    }, { rootMargin: '300px' });
+    const sentinel = $('collection-sentinel');
+    if (sentinel) observer.observe(sentinel);
+  }
+
+  $('sort-ubus').addEventListener('change', () => renderCollection());
+  $('more').addEventListener('click', () => { void loadMore(); });
+
   $('import').addEventListener('change', async event => {
     const file = event.target.files[0]; if (!file) return;
     try {
       if (file.size > ubuFile.MAX_BYTES) throw new Error('A .ubu file must contain 1–1024 bytes.');
       const bytes = new Uint8Array(await file.arrayBuffer());
       const result = await inspect(bytes);
-      display(new TextDecoder().decode(bytes), result); status('');
+      display(new TextDecoder().decode(bytes), result, true); status('');
     } catch (error) { status(error.message); }
     finally { event.target.value = ''; }
   });
@@ -209,10 +478,6 @@
   });
   $('logout').addEventListener('click', async () => {
     try { await api('/api/logout', post({})); location.reload(); } catch (error) { status(error.message); }
-  });
-  $('more').addEventListener('click', async () => {
-    $('more').disabled = true;
-    try { await collection(); } catch (error) { status(error.message); } finally { $('more').disabled = false; }
   });
   (async () => {
     try {
