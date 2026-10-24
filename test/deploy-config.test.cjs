@@ -69,3 +69,45 @@ test('missing settings or mismatched signing keys stop deployment without creati
   assert.equal(fs.existsSync(path.join(f.root, 'wrangler.deploy.jsonc')), false);
   assert.ok(!result.stderr.includes(settings.secrets.SESSION_SECRET));
 });
+
+test('explicit reset backs up settings and changes only identity, signing keys and session secret', t => {
+  const f = fixture(t), before = f.setup();
+  before.account_id = 'test-account';
+  before.vars.BATCH_SIZE = '500';
+  before.vars.LIFETIME_MINT_LIMIT = '10000000';
+  before.secrets.OTHER_SECRET = 'retain-me';
+  const original = JSON.stringify(before);
+  fs.writeFileSync(path.join(f.home, 'settings.json'), original);
+  const result = f.run('reset');
+  assert.equal(result.status, 0, result.stderr);
+  const after = f.read('settings.json');
+  for (const field of ['MINT_ID', 'MINT_PUBLIC_KEYS']) assert.notEqual(after.vars[field], before.vars[field]);
+  for (const field of ['SESSION_SECRET', 'MINT_PRIVATE_KEYS']) assert.notEqual(after.secrets[field], before.secrets[field]);
+  const expected = structuredClone(before);
+  for (const field of ['MINT_ID', 'MINT_KEY_ID', 'MINT_PUBLIC_KEYS']) expected.vars[field] = after.vars[field];
+  for (const field of ['SESSION_SECRET', 'MINT_PRIVATE_KEYS']) expected.secrets[field] = after.secrets[field];
+  assert.deepEqual(after, expected);
+  const backups = fs.readdirSync(path.join(f.home, 'backups'));
+  assert.equal(backups.length, 1);
+  assert.equal(fs.readFileSync(path.join(f.home, 'backups', backups[0], 'settings.json'), 'utf8'), original);
+  assert.equal(f.run('build').status, 0); // Includes cryptographic public/private match validation.
+  assert.equal(f.run('build-reset').status, 0);
+  assert.deepEqual(f.read('deploy-secrets.json'), { SESSION_SECRET: after.secrets.SESSION_SECRET, MINT_PRIVATE_KEYS: after.secrets.MINT_PRIVATE_KEYS });
+  assert.ok(!result.stdout.includes(after.secrets.SESSION_SECRET));
+  assert.ok(!result.stdout.includes(before.secrets.DISCORD_CLIENT_SECRET));
+  const saved = fs.readFileSync(path.join(f.home, 'settings.json'), 'utf8');
+  assert.equal(f.run('recover').status, 0);
+  assert.equal(f.run('build').status, 0);
+  assert.equal(fs.readFileSync(path.join(f.home, 'settings.json'), 'utf8'), saved);
+});
+
+test('reset stops before replacing settings if backup cannot be created', t => {
+  const f = fixture(t);
+  assert.notEqual(f.run('reset').status, 0);
+  assert.equal(fs.existsSync(path.join(f.home, 'settings.json')), false);
+  f.setup();
+  const original = fs.readFileSync(path.join(f.home, 'settings.json'), 'utf8');
+  fs.writeFileSync(path.join(f.home, 'backups'), 'block backup directory');
+  assert.notEqual(f.run('reset').status, 0);
+  assert.equal(fs.readFileSync(path.join(f.home, 'settings.json'), 'utf8'), original);
+});

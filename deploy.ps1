@@ -2,9 +2,11 @@
 param(
     [switch]$DryRun,
     [switch]$Setup,
+    [switch]$ResetMint,
     [string]$SettingsDirectory = (Join-Path $env:LOCALAPPDATA 'ubumint')
 )
 $ErrorActionPreference = 'Stop'
+if ($ResetMint -and ($Setup -or $DryRun)) { throw '-ResetMint cannot be combined with -Setup or -DryRun.' }
 function Run([string]$Program, [string[]]$Arguments) {
     & $Program @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Program failed (exit $LASTEXITCODE). Deployment stopped." }
@@ -38,10 +40,16 @@ try {
     foreach ($legacy in @('wrangler.jsonc', 'wrangler.local.jsonc', 'wrangler.deploy.jsonc', '.dev.vars')) {
         if (Test-Path -LiteralPath $legacy) { Copy-Item -LiteralPath $legacy -Destination $backup }
     }
-    Run node @('scripts/deploy-config.cjs', 'build', $SettingsDirectory)
     Run npm.cmd @('ci', '--no-audit', '--no-fund')
     Run npm.cmd @('test')
     Run npm.cmd @('run', 'test:worker')
+    if ($ResetMint) {
+        Run node @('scripts/deploy-config.cjs', 'reset', $SettingsDirectory)
+        Write-Host 'Reset prepared. If upload fails, retry deploy.ps1 WITHOUT -ResetMint.'
+    }
+    $buildAction = 'build'
+    if ($ResetMint) { $buildAction = 'build-reset' }
+    Run node @('scripts/deploy-config.cjs', $buildAction, $SettingsDirectory)
     $wrangler = Join-Path $PSScriptRoot 'node_modules\wrangler\bin\wrangler.js'
     $arguments = @($wrangler, 'deploy', '--config', 'wrangler.deploy.jsonc', '--keep-vars', '--secrets-file', (Join-Path $SettingsDirectory 'deploy-secrets.json'))
     if ($DryRun) { $arguments += '--dry-run' }

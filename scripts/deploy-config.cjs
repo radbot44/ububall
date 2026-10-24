@@ -8,6 +8,12 @@ const settingsPath = path.join(home, 'settings.json');
 const read = p => JSON.parse(fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, ''));
 const write = (p, value) => fs.writeFileSync(p, JSON.stringify(value, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
 const secretNames = ['DISCORD_CLIENT_SECRET', 'SESSION_SECRET', 'MINT_PRIVATE_KEYS'];
+function freshIdentity(s) {
+  const jwk = generateKeyPairSync('ed25519').privateKey.export({ format: 'jwk' });
+  Object.assign(s.vars, { MINT_ID: randomBytes(16).toString('base64url'), MINT_KEY_ID: 'mint-1', MINT_PUBLIC_KEYS: JSON.stringify({ 'mint-1': jwk.x }) });
+  Object.assign(s.secrets, { SESSION_SECRET: randomBytes(32).toString('base64url'), MINT_PRIVATE_KEYS: JSON.stringify({ 'mint-1': jwk }) });
+  return s;
+}
 function validate(s) {
   const v = s.vars;
   if (!s.name || !v || !s.secrets) throw Error('Incomplete production settings.');
@@ -46,10 +52,9 @@ try {
   } else if (action === 'setup') {
     if (fs.existsSync(settingsPath)) throw Error('Settings already exist; refusing to replace the mint identity.');
     const input = JSON.parse(fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, ''));
-    const jwk = generateKeyPairSync('ed25519').privateKey.export({ format: 'jwk' });
-    const s = { name: input.name, workers_dev: true, preview_urls: false,
-      vars: { ORIGIN: input.origin, DISCORD_CLIENT_ID: input.clientId, MINT_ID: randomBytes(16).toString('base64url'), MINT_KEY_ID: 'mint-1', MINT_PUBLIC_KEYS: JSON.stringify({ 'mint-1': jwk.x }), BATCH_SIZE: '1000', LIFETIME_MINT_LIMIT: '0' },
-      secrets: { DISCORD_CLIENT_SECRET: input.clientSecret, SESSION_SECRET: randomBytes(32).toString('base64url'), MINT_PRIVATE_KEYS: JSON.stringify({ 'mint-1': jwk }) } };
+    const s = freshIdentity({ name: input.name, workers_dev: true, preview_urls: false,
+      vars: { ORIGIN: input.origin, DISCORD_CLIENT_ID: input.clientId, BATCH_SIZE: '1000', LIFETIME_MINT_LIMIT: '0' },
+      secrets: { DISCORD_CLIENT_SECRET: input.clientSecret } });
     const hostname = new URL(input.origin).hostname;
     if (!hostname.endsWith('.workers.dev')) {
       s.workers_dev = false;
@@ -58,11 +63,24 @@ try {
     validate(s);
     write(settingsPath, s);
     console.log('Created a NEW mint identity. Issuance remains closed (limit 0).');
+  } else if (action === 'reset') {
+    const previous = read(settingsPath);
+    validate(previous);
+    const s = freshIdentity(structuredClone(previous));
+    validate(s);
+    const backup = path.join(home, 'backups', `reset-${Date.now()}-${randomBytes(4).toString('hex')}`);
+    fs.mkdirSync(backup, { recursive: true, mode: 0o700 });
+    fs.copyFileSync(settingsPath, path.join(backup, 'settings.json'), fs.constants.COPYFILE_EXCL);
+    const pending = path.join(backup, 'new-settings.json');
+    write(pending, s);
+    fs.renameSync(pending, settingsPath);
+    console.log(`Fresh mint identity saved. Previous settings: ${backup}`);
+    console.log('After deployment: fresh registry, serials restart at 1, old sessions expire. Previous Cloudflare registry is retained, not erased.');
   }
-  if (!['recover', 'setup', 'build'].includes(action)) throw Error('Unknown action.');
+  if (!['recover', 'setup', 'reset', 'build', 'build-reset'].includes(action)) throw Error('Unknown action.');
   const s = read(settingsPath);
   validate(s);
-  if (action === 'build') {
+  if (action === 'build' || action === 'build-reset') {
     const base = read('wrangler.jsonc');
     // Do not send development defaults: even keep_vars overwrites explicitly supplied vars.
     delete base.vars;
@@ -71,7 +89,12 @@ try {
     const generated = 'wrangler.deploy.jsonc';
     fs.writeFileSync(generated, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
     const secretsPath = path.join(home, 'deploy-secrets.json');
-    fs.writeFileSync(secretsPath, JSON.stringify(secrets), { mode: 0o600 });
+    // Reset only replaces these two secrets. Leave existing remote Discord and
+    // unrelated secrets intact, even if they were changed in the dashboard.
+    const payload = action === 'build-reset'
+      ? { SESSION_SECRET: secrets.SESSION_SECRET, MINT_PRIVATE_KEYS: secrets.MINT_PRIVATE_KEYS }
+      : secrets;
+    fs.writeFileSync(secretsPath, JSON.stringify(payload), { mode: 0o600 });
     console.log('Production config validated; dashboard variables will be retained.');
   }
 } catch (error) {

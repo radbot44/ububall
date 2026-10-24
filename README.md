@@ -12,6 +12,8 @@ Install updates and deploy from this source checkout with **`.\install.ps1`**. I
 
 The permanent [DNA specification](docs/dna.md) and [uburithm](docs/uburithm.md) define the generator. The [.ubu profile](docs/ubu-file.md) defines certificates. Run `npm test` and `npm run test:worker` for core and Cloudflare runtime checks.
 
+To install updates and start a fresh mint, use `.\install.ps1 -ResetMint`; to reset only the installed mint, run `C:\dev\ubumint-cloudflare\deploy.ps1 -ResetMint`. This explicitly replaces the mint identity/keys and session secret, selecting a fresh registry starting at serial 1 while preserving the domain, Discord credentials and allowance. Previous registry data remains archived in Cloudflare. See [reset details](docs/worker.md#fresh-mint-reset).
+
 ## Product baseline
 
 - An ubu is deterministically formed from random DNA, including its ubunym and oomark.

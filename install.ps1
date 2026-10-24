@@ -4,9 +4,11 @@ param(
     [switch]$DryRun,
     [switch]$InstallOnly,
     [switch]$Setup,
+    [switch]$ResetMint,
     [string]$SettingsDirectory = (Join-Path $env:LOCALAPPDATA 'ubumint')
 )
 $ErrorActionPreference = 'Stop'
+if ($ResetMint -and ($Setup -or $DryRun -or $InstallOnly)) { throw '-ResetMint requires deployment and cannot be combined with -Setup, -DryRun or -InstallOnly.' }
 $source = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
 $Destination = [IO.Path]::GetFullPath($Destination).TrimEnd('\')
 if ($Destination -eq $source -or $Destination.StartsWith($source + '\', [StringComparison]::OrdinalIgnoreCase) -or $source.StartsWith($Destination + '\', [StringComparison]::OrdinalIgnoreCase)) {
@@ -71,5 +73,5 @@ foreach ($file in $files) {
 @{ destination = $Destination; files = $newHashes } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 Write-Host "Installed into $Destination. Private settings: $SettingsDirectory"
 if (!$InstallOnly) {
-    & (Join-Path $Destination 'deploy.ps1') -DryRun:$DryRun -Setup:$Setup -SettingsDirectory $SettingsDirectory
+    & (Join-Path $Destination 'deploy.ps1') -DryRun:$DryRun -Setup:$Setup -ResetMint:$ResetMint -SettingsDirectory $SettingsDirectory
 }
