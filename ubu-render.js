@@ -74,16 +74,18 @@
     } else if (attribute.texture === 'damascus') {
       lighting('steel-depth', [[0, '#fff', .24], [.3, '#000', .25], [.46, '#fff', .48],
         [.65, '#000', .32], [1, '#fff', .12]]);
-      // Warped parallel layers remain continuous across the entire material field.
-      for (let band = -55; band <= 55; band++) {
+      // Thin, uneven etched ribbons with hammered ripples instead of broad contour strokes.
+      for (let band = -145; band <= 145; band++) {
+        const base = band * 2.8 + 180, thickness = .35 + roll() * 1.25;
+        const phase = roll() * 4;
+        const edge = (x, offset) => base + offset + 10 * Math.sin(x / 37 + band * .055)
+          + 5 * Math.sin(x / 13 + band * .08) + 1.4 * Math.sin(x / 4.8 + phase)
+          + 14 * Math.sin(x / 83 + band * .09);
         let d = '';
-        for (let x = -180; x <= 540; x += 6) {
-          const y = band * 8 + 180 + 18 * Math.sin(x / 46 + band * .12)
-            + 11 * Math.sin(x / 23 - band * .17) + 24 * Math.sin(x / 105 + band * .24);
-          d += `${x === -180 ? 'M' : 'L'}${x} ${y.toFixed(2)}`;
-        }
-        pattern.append(svgNode('path', { d, fill: 'none', stroke: band % 2 ? '#000' : '#fff',
-          'stroke-width': band % 2 ? 2.4 : 1.2, opacity: band % 2 ? .3 : .36 }));
+        for (let x = -180; x <= 540; x += 4) d += `${x === -180 ? 'M' : 'L'}${x} ${edge(x, 0).toFixed(2)}`;
+        for (let x = 540; x >= -180; x -= 4) d += `L${x} ${edge(x, thickness).toFixed(2)}`;
+        pattern.append(svgNode('path', { d: d + 'Z', fill: band % 3 ? '#000' : '#fff',
+          opacity: band % 3 ? .14 + roll() * .16 : .1 + roll() * .12 }));
       }
       lighting('steel-sheen', [[0, '#fff', 0], [.35, '#fff', 0], [.43, '#fff', .25],
         [.5, '#fff', 0], [1, '#fff', 0]]);
@@ -114,27 +116,49 @@
         [.29, '#fff', .85], [.335, '#fff', .72], [.35, '#fff', .1], [.39, '#fff', 0], [1, '#fff', 0]]);
       lighting('lacquer-bounce', [[0, '#fff', 0], [.68, '#fff', 0], [.77, '#fff', .18],
         [.81, '#fff', .3], [.83, '#fff', 0], [1, '#fff', 0]]);
-    } else if (attribute.texture === 'velvet' || attribute.texture === 'frosted') {
-      const velvet = attribute.texture === 'velvet';
-      if (velvet) {
-        lighting('pile-depth', [[0, '#000', .14], [.4, '#000', .38], [1, '#000', .58]], true);
-        lighting('pile-sheen', [[0, '#fff', .03], [.2, '#fff', .08], [.42, '#fff', .26],
-          [.65, '#fff', .07], [1, '#fff', 0]]);
-      } else {
-        lighting('frost-haze', [[0, '#fff', .48], [.4, '#fff', .24], [1, '#fff', .09]], true);
-        lighting('frost-light', [[0, '#fff', 0], [.22, '#fff', .1], [.43, '#fff', .3],
-          [.7, '#fff', .08], [1, '#000', .12]]);
+    } else if (attribute.texture === 'velvet') {
+      lighting('pile-depth', [[0, '#000', .1], [.5, '#000', .28], [1, '#000', .48]], true);
+      lighting('pile-bloom', [[0, '#fff', .26], [.45, '#fff', .12], [1, '#fff', 0]], true,
+        { cx: 95, cy: 100, r: 240 });
+      // Dense curved tufts catch light at their tips, with dark roots beneath.
+      const pile = svgNode('pattern', { id: id + '-pile', patternUnits: 'userSpaceOnUse', width: 48, height: 48 });
+      let roots = '', tips = '';
+      for (let i = 0; i < 1250; i++) {
+        const x = roll() * 48, y = roll() * 48, length = 1.5 + roll() * 3;
+        const lean = .4 + .7 * Math.sin(x / 8 + y / 11) + (roll() - .5) * .7;
+        roots += `M${x} ${y}q${lean} ${-length * .7} ${lean * .65} ${-length}`;
+        tips += `M${x + lean * .65} ${y - length}l${-.25 - roll() * .35} ${.3 + roll() * .35}`;
       }
-      const grain = svgNode('pattern', { id: id + '-surface', patternUnits: 'userSpaceOnUse', width: 64, height: 64 });
-      for (let i = 0; i < 260; i++) {
-        const x = 2 + roll() * 60, y = 2 + roll() * 60;
-        grain.append(velvet
-          ? svgNode('path', { d: `M${x} ${y}l${(roll() - .5) * .6} ${.6 + roll() * 1.3}`,
-            stroke: i % 3 ? '#fff' : '#000', 'stroke-width': .35, opacity: .06 + roll() * .12 })
-          : svgNode('circle', { cx: x, cy: y, r: .25 + roll() * .6,
-            fill: i % 3 ? '#fff' : '#000', opacity: .06 + roll() * .14 }));
+      pile.append(svgNode('path', { d: roots, fill: 'none', stroke: '#000', 'stroke-width': .65, opacity: .14 }),
+        svgNode('path', { d: tips, fill: 'none', stroke: '#fff', 'stroke-width': .55, 'stroke-linecap': 'round', opacity: .18 }));
+      const soften = svgNode('filter', { id: id + '-soft-pile', x: '-10%', y: '-10%', width: '120%', height: '120%' });
+      soften.append(svgNode('feGaussianBlur', { stdDeviation: .28 }));
+      defs.append(soften, pile); cover(`url(#${id}-pile)`);
+      pattern.lastChild.setAttribute('filter', `url(#${id}-soft-pile)`);
+      lighting('nap', [[0, '#fff', .07], [.35, '#fff', .02], [.65, '#000', .08], [1, '#fff', .08]], false,
+        { x1: 0, y1: 0, x2: 130, y2: 220, spreadMethod: 'reflect' });
+    } else if (attribute.texture === 'frosted') {
+      lighting('ice-body', [[0, '#e3faff', .42], [.45, '#c9e9fa', .2], [1, '#84accb', .1]], true);
+      const frost = svgNode('pattern', { id: id + '-frost', patternUnits: 'userSpaceOnUse', width: 120, height: 120 });
+      for (let i = 0; i < 46; i++) {
+        const x = roll() * 120, y = roll() * 120, length = 5 + roll() * 15;
+        let d = `M0 0V${-length}`;
+        for (let j = 1; j <= 5; j++) {
+          const yb = -length * j / 6, branch = length * (1 - j / 7) * .3;
+          d += `M0 ${yb}l${branch} ${-branch}m${-branch} ${branch}l${-branch} ${-branch}`;
+        }
+        frost.append(svgNode('path', { d, transform: `translate(${x} ${y}) rotate(${roll() * 360})`,
+          fill: 'none', stroke: i % 4 ? '#ecfcff' : '#648da9', 'stroke-width': .4 + roll() * .45,
+          'stroke-linecap': 'round', opacity: .2 + roll() * .28 }));
       }
-      defs.append(grain); cover(`url(#${id}-surface)`);
+      for (let i = 0; i < 150; i++) {
+        const x = roll() * 120, y = roll() * 120, r = .5 + roll() * 1.3;
+        frost.append(svgNode('path', { d: `M${x} ${y-r}l${r*.5} ${r}l${-r*.5} ${r}l${-r*.5} ${-r}Z`,
+          fill: '#e6faff', opacity: .12 + roll() * .3 }));
+      }
+      defs.append(frost); cover(`url(#${id}-frost)`);
+      lighting('ice-glint', [[0, '#fff', 0], [.3, '#fff', .03], [.43, '#defaff', .3],
+        [.49, '#fff', .04], [1, '#fff', 0]]);
     } else if (attribute.texture === 'woodgrain') {
       lighting('wood-depth', [[0, '#fff', .2], [.5, '#fff', .02], [1, '#000', .24]], true);
       // Long fibers bend around a fixed knot; the palette color remains the stain.
@@ -203,9 +227,27 @@
           }
           cell = clipped;
         }
-        pattern.append(svgNode('polygon', { points: cell.map(p => p.join(',')).join(' '),
-          fill: '#fff', 'fill-opacity': roll() * .09, stroke: '#000', 'stroke-opacity': .38,
-          'stroke-width': 1.1, 'stroke-linejoin': 'round' }));
+        // Sample a common displacement field so adjacent cracks retain matching ragged edges.
+        const rough = [];
+        for (let i = 0; i < cell.length; i++) {
+          const a = cell[i], b = cell[(i + 1) % cell.length];
+          const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2));
+          for (let j = 0; j < steps; j++) {
+            const x = a[0] + (b[0] - a[0]) * j / steps, y = a[1] + (b[1] - a[1]) * j / steps;
+            rough.push([x + 3.5 * Math.sin(y / 7 + x / 19) + .9 * Math.sin(y * 1.7 + x),
+              y + 3.5 * Math.sin(x / 8 - y / 23) + .9 * Math.sin(x * 1.5 - y)]);
+          }
+        }
+        const d = 'M' + rough.map(p => p.join(',')).join('L') + 'Z';
+        pattern.append(svgNode('path', { d, fill: '#fff', 'fill-opacity': roll() * .07,
+          stroke: '#fff', 'stroke-opacity': .2, 'stroke-width': 2.5, 'stroke-linejoin': 'round' }),
+          svgNode('path', { d, fill: 'none', stroke: '#000', 'stroke-opacity': .48,
+            'stroke-width': 1.15, 'stroke-linejoin': 'round' }));
+        for (let i = 2; i < rough.length; i += 5) {
+          const [x, y] = rough[i], r = .5 + roll() * 1.8;
+          pattern.append(svgNode('path', { d: `M${x-2} ${y}l${r} ${-r}l${r*.7} ${r*1.4}Z`,
+            fill: i % 3 ? '#000' : '#fff', opacity: .15 + roll() * .2 }));
+        }
       }
       lighting('glaze-sheen', [[0, '#fff', 0], [.3, '#fff', .04], [.42, '#fff', .25],
         [.55, '#fff', .02], [1, '#fff', 0]]);
@@ -213,9 +255,14 @@
       lighting('silk-folds', [[0, '#000', .22], [.17, '#fff', .08], [.3, '#fff', .42],
         [.4, '#fff', .12], [.52, '#000', .27], [.68, '#fff', .12], [.8, '#fff', .36], [1, '#000', .2]], false,
         { x1: 0, y1: 0, x2: 340, y2: 110 });
-      const weave = svgNode('pattern', { id: id + '-weave', patternUnits: 'userSpaceOnUse', width: 6, height: 6 });
-      weave.append(svgNode('path', { d: 'M1 0v6M4 0v6', stroke: '#fff', 'stroke-width': .4, opacity: .12 }),
-        svgNode('path', { d: 'M0 2h6M0 5h6', stroke: '#000', 'stroke-width': .3, opacity: .06 }));
+      // Staggered satin floats: long warp threads pass over four short weft threads.
+      const weave = svgNode('pattern', { id: id + '-weave', patternUnits: 'userSpaceOnUse', width: 20, height: 20 });
+      for (let row = 0; row < 5; row++) for (let col = 0; col < 5; col++) {
+        const x = col * 4, y = row * 4, cross = (col + row * 2) % 5 === 0;
+        const d = cross ? `M${x} ${y+2}h3.5` : `M${x+2} ${y}v3.5`;
+        weave.append(svgNode('path', { d, stroke: '#000', 'stroke-width': 2.3, opacity: .22, 'stroke-linecap': 'round' }),
+          svgNode('path', { d, stroke: '#fff', 'stroke-width': 1.2, opacity: cross ? .14 : .26, 'stroke-linecap': 'round' }));
+      }
       defs.append(weave); cover(`url(#${id}-weave)`);
       lighting('silk-luster', [[0, '#fff', .16], [.5, '#fff', .02], [1, '#000', .12]], true);
     } else if (attribute.texture === 'opalescent') {
@@ -285,7 +332,7 @@
       crackle: { width: 2, rim: .6, stops: [[0, '#fff', .55], [.45, '#fff', .12], [1, '#000', .28]] },
       silken: { width: 2.5, rim: .5, stops: [[0, '#fff', .45], [.4, '#fff', .16], [1, '#000', .24]] },
       opalescent: { width: 2.6, rim: .7, stops: [[0, '#fff0da', .65], [.35, '#d3f9ee', .45], [.7, '#e7dfff', .35], [1, '#000', .2]] },
-      velvet: { width: 3, rim: .6, stops: [[0, '#fff', .24], [.4, '#fff', .08], [1, '#000', .3]] },
+      velvet: { width: 4, rim: 1.5, stops: [[0, '#fff', .12], [.4, '#fff', .05], [1, '#000', .15]] },
       frosted: { width: 2.8, rim: .7, stops: [[0, '#fff', .65], [.5, '#fff', .28], [1, '#fff', .12]] },
       woodgrain: { width: 1.5, rim: .4, stops: [[0, '#fff', .3], [.45, '#fff', .06], [1, '#000', .25]] },
       holographic: { width: 2, rim: .65, stops: [[0, '#b8ffff', .8], [.3, '#ffc9f6', .65], [.6, '#fff2af', .65], [1, '#94bcff', .6]] },
