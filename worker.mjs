@@ -74,8 +74,8 @@ export class MintRegistry extends DurableObject {
   }
   async issue(owner, request) {
     try {
-      const certificate = await this.mint.issue({ owner, request }, { lifetimeLimit: this.config.limit });
-      return { certificate };
+      const result = await this.mint.issue({ owner, request }, { lifetimeLimit: this.config.limit });
+      return result;
     } catch (error) {
       if (error.message === 'Lifetime mint limit reached.') return { error: error.message, status: 403 };
       if (error.message === 'Invalid issuance request.') return { error: error.message, status: 400 };

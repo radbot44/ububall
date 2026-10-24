@@ -82,6 +82,12 @@
     }
     $('grade').textContent = m.grade;
     $('rating').textContent = `${m.rating} / 255`;
+    if (window.rarity) {
+      const r = rarity.scoreRarity(m);
+      $('rarity-percentile').textContent = `${r.percentile.toFixed(1)} / 100`;
+      $('rarity-bits').textContent = `${r.bits.toFixed(1)} bits`;
+      $('rarity-breakdown').textContent = `Rarity breakdown: finishes ${r.breakdown.finishes.toFixed(2)}b, colors ${r.breakdown.colors.toFixed(2)}b, corners ${r.breakdown.corners.toFixed(2)}b, eye flips ${r.breakdown.eyeFlips.toFixed(2)}b, geometry ${r.breakdown.geometry.toFixed(2)}b, name ${r.breakdown.name.toFixed(2)}b.`;
+    }
     $('dna-output').value = code;
     $('seed').value = code; $('input-mode').value = 'dna';
     $('input-error').textContent = '';

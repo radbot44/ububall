@@ -9,6 +9,7 @@
   <script src="ubu.js" defer></script>
   <script src="ubu-file.js" defer></script>
   <script src="ubu-render.js" defer></script>
+  <script src="rarity.js" defer></script>
   <script src="site.js" defer></script>
 </head>
 <body>
@@ -19,7 +20,7 @@
       <h1 id="ubunym">Your ubu, here.</h1>
       <p id="details">View a certificate or get an ubu from the mint.</p>
       <p id="authenticity"></p>
-      <div class="actions"><label class="button">Open .ubu<input id="import" type="file" accept=".ubu,application/json"></label><button id="download" hidden>Download .ubu</button><button id="mint" disabled>Get an ubu</button></div>
+      <div class="actions"><label class="button">Open .ubu<input id="import" type="file" accept=".ubu,application/json"></label><button id="download" hidden>Download .ubu</button><button id="mint" disabled>Open pack</button></div>
       <p id="status" role="status" aria-live="polite">Connecting to the mint…</p>
     </section>
     <section id="collection" hidden aria-labelledby="collection-title"><h2 id="collection-title">Your ubus</h2><div id="ubus" class="grid"></div><button id="more" hidden>Load more</button></section>

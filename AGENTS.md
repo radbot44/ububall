@@ -2,7 +2,7 @@
 
 ## Scope
 
-- This is the owner's private ubu mint project, separate from uburoom. Read README.md before planning or changing it.
+- This is the owner's private ubu mint project, separate from uburoom. Read README.md before planning or changing it. The instance run on Cloudflare is saved to `ubumint-cloudflare`.
 - The owner froze DNA on 2026-10-23 and authorized local .ubu signing, batch storage, the Cloudflare application implementation and a configurable per-account lifetime mint limit. Read docs/dna.md, docs/uburithm.md, docs/ubu-file.md and docs/worker.md before relevant work. Deployment, production keys, creating/configuring external accounts, trading, encryption and uburoom integration remain separate work requiring authorization.
 - Keep owner requirements distinct from proposed mechanisms and examples. Do not turn an agent recommendation into an approved protocol decision.
 - Keep the repository private. Remote creation, pushes, publication, Cloudflare provisioning and deployment require explicit owner authorization. Never embed mint secrets in uburoom or browser code.

@@ -5,12 +5,16 @@ const { mkdtempSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { Worker } = require('node:worker_threads');
-const { Mint, DEFAULT_BATCH_SIZE } = require('./mint.js');
+const { Mint, DEFAULT_BATCH_SIZE, PACK_SIZE } = require('./mint.js');
 const { openStorage } = require('./mint-local.js');
 const file = require('./ubu-file.js');
+const ubu = require('./ubu.js');
+const rarity = require('./rarity.js');
+
 const mintID = 'A'.repeat(22);
 const owner = '123456789012345678';
 const request = n => `request_${String(n).padStart(12, '0')}`;
+
 async function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'ubumint-'));
   const path = join(directory, 'mint.sqlite');
@@ -22,89 +26,119 @@ async function fixture(t) {
   return { path, keys, options, open, stores };
 }
 
-test('default 1000 batch resumes after reopen and hides incomplete inventory', async t => {
+test('default 1000 batch prepares packs across quintiles, resumes after reopen and hides incomplete inventory', async t => {
   const f = await fixture(t);
   let storage = f.open(), mint = new Mint(storage, f.options);
   assert.equal(DEFAULT_BATCH_SIZE, 1000);
+  assert.equal(PACK_SIZE, 5);
   const partial = mint.prepare();
-  assert.equal(partial.size, 1000); assert.equal(partial.prepared, 100);
+  assert.equal(partial.size, 1000); assert.equal(partial.prepared, 100); assert.equal(partial.remaining, 0);
   await assert.rejects(mint.issue({ owner, request: request(1) }), /preparation required/);
   storage.close(); f.stores[0] = null;
   storage = f.open(); mint = new Mint(storage, f.options);
-  const complete = mint.prepare({ batchSize: 5, chunkSize: 1000 });
+  const complete = mint.prepare({ batchSize: 1000, chunkSize: 1000 });
   assert.equal(complete.size, 1000); assert.equal(complete.prepared, 1000);
-  const rows = storage.exec('SELECT * FROM inventory ORDER BY slot');
+  assert.equal(complete.remaining, 200); // 1000 / 5 = 200 packs
+  const rows = storage.exec('SELECT * FROM inventory ORDER BY serial');
   assert.equal(rows[0].serial, '000000000001'); assert.equal(rows[999].serial, '000000001000');
   assert.equal(new Set(rows.map(r => r.id)).size, 1000);
   assert.equal(new Set(rows.map(r => r.dna)).size, 1000);
   assert.ok(rows.every(r => r.dna.length === 43));
-  const cert = await mint.issue({ owner, request: request(1) });
-  const verified = await file.read(cert, { resolveKey: () => f.keys.publicKey });
-  assert.equal(verified.type, 'signed');
-  assert.equal(mint.state().remaining, 999);
-  assert.equal(await mint.issue({ owner, request: request(1) }), cert);
-  assert.equal(mint.prepare({ batchSize: 5 }).batch, 1);
-  assert.equal(storage.exec('SELECT owner, revision FROM issued')[0].owner, owner);
-  assert.equal(storage.exec('SELECT owner, revision FROM issued')[0].revision, 1);
+  assert.ok(rows.every(r => r.pack_slot >= 0 && r.pack_slot < 200));
+  assert.ok(rows.every(r => r.quintile >= 1 && r.quintile <= 5));
+
+  const result = await mint.issue({ owner, request: request(1) });
+  assert.equal(result.certificates.length, 5);
+  for (const cert of result.certificates) {
+    const verified = await file.read(cert, { resolveKey: () => f.keys.publicKey });
+    assert.equal(verified.type, 'signed');
+  }
+  // Remaining packs decreased from 200 to 199
+  assert.equal(mint.state().remaining, 199);
+  const retry = await mint.issue({ owner, request: request(1) });
+  assert.deepEqual(retry.certificates, result.certificates);
+  assert.equal(mint.state().remaining, 199);
+  assert.equal(storage.exec('SELECT COUNT(*) AS count FROM issued WHERE owner=?', owner)[0].count, 5);
+
+  // Check that the issued pack contains one ubu from each quintile (1 through 5)
+  const issuedRows = storage.exec('SELECT quintile, dna FROM issued WHERE owner=? AND request=? ORDER BY quintile', owner, request(1));
+  assert.deepEqual(issuedRows.map(r => r.quintile), [1, 2, 3, 4, 5]);
 });
 
-test('draws without replacement, exhausts before next batch and preserves creation serials', async t => {
+test('draws packs without replacement, exhausts before next batch and preserves creation serials', async t => {
   const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
-  mint.prepare({ batchSize: 7 });
+  mint.prepare({ batchSize: 15 }); // 3 packs of 5
+  assert.equal(mint.state().remaining, 3);
   const original = storage.exec('SELECT id, serial, dna FROM inventory');
-  const issued = await Promise.all(Array.from({ length: 7 }, (_, i) => mint.issue({ owner, request: request(i) })));
-  assert.deepEqual(new Set(issued.map(c => JSON.parse(c).id)), new Set(original.map(r => r.id)));
-  for (const text of issued) {
+  const packs = await Promise.all(Array.from({ length: 3 }, (_, i) => mint.issue({ owner, request: request(i) })));
+  const allIssuedCerts = packs.flatMap(p => p.certificates);
+  assert.equal(allIssuedCerts.length, 15);
+  assert.deepEqual(new Set(allIssuedCerts.map(c => JSON.parse(c).id)), new Set(original.map(r => r.id)));
+  for (const text of allIssuedCerts) {
     const cert = JSON.parse(text), source = original.find(r => r.id === cert.id);
     assert.equal(cert.serial, source.serial); assert.equal(cert.dna, source.dna);
   }
   assert.equal(storage.exec('SELECT * FROM inventory').length, 0);
+  assert.equal(mint.state().remaining, 0);
   await assert.rejects(mint.issue({ owner, request: request(8) }), /preparation required/);
-  assert.equal(await mint.issue({ owner, request: request(0) }), issued[0]);
-  assert.equal(mint.prepare({ batchSize: 2 }).batch, 2);
-  assert.deepEqual(storage.exec('SELECT serial FROM inventory ORDER BY slot').map(r => r.serial), ['000000000008', '000000000009']);
+  const retry = await mint.issue({ owner, request: request(0) });
+  assert.deepEqual(retry, packs[0]);
+  assert.equal(mint.prepare({ batchSize: 10 }).batch, 2);
+  const newInventory = storage.exec('SELECT serial FROM inventory ORDER BY serial');
+  assert.equal(newInventory.length, 10);
+  assert.equal(newInventory[0].serial, '000000000016');
+  assert.equal(newInventory[9].serial, '000000000025');
 });
 
-test('failed signing survives restart and retries the same record with its original key', async t => {
+test('failed signing survives restart and retries the same pack with its original key', async t => {
   const f = await fixture(t);
   let storage = f.open();
   const broken = new Mint(storage, { ...f.options, resolveSigningKey: () => { throw new Error('key unavailable'); } });
-  broken.prepare({ batchSize: 2 });
+  broken.prepare({ batchSize: 5 }); // 1 pack
   await assert.rejects(broken.issue({ owner, request: request(1) }), /key unavailable/);
-  const saved = storage.exec('SELECT * FROM issued')[0];
-  assert.equal(saved.certificate, null); assert.equal(broken.state().remaining, 1);
+  const saved = storage.exec('SELECT * FROM issued WHERE owner=? AND request=?', owner, request(1));
+  assert.equal(saved.length, 5);
+  assert.ok(saved.every(r => r.certificate === null));
+  assert.equal(broken.state().remaining, 0); // pack slot was allocated
+
   storage.close(); f.stores[0] = null;
   storage = f.open();
   let resolved;
   const mint = new Mint(storage, { ...f.options, key: 'test-2', resolveSigningKey: key => { resolved = key; return f.keys.privateKey; } });
-  const cert = JSON.parse(await mint.issue({ owner, request: request(1) }));
-  assert.equal(resolved, 'test-1'); assert.equal(cert.id, saved.id);
-  assert.equal(cert.issuedAt, saved.issued_at); assert.equal(cert.key, 'test-1');
-  assert.equal(mint.state().remaining, 1);
+  const result = await mint.issue({ owner, request: request(1) });
+  assert.equal(result.certificates.length, 5);
+  assert.equal(resolved, 'test-1');
+  for (let i = 0; i < 5; i++) {
+    const cert = JSON.parse(result.certificates[i]);
+    assert.equal(cert.id, saved[i].id);
+    assert.equal(cert.issuedAt, saved[i].issued_at);
+    assert.equal(cert.key, 'test-1');
+  }
 });
 
 test('preparation rollback, validation, mint binding and serial ceiling', async t => {
   const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
   storage.exec("CREATE TRIGGER fail_insert BEFORE INSERT ON inventory BEGIN SELECT RAISE(ABORT, 'test failure'); END");
-  assert.throws(() => mint.prepare({ batchSize: 2 }), /test failure/);
+  assert.throws(() => mint.prepare({ batchSize: 5 }), /test failure/);
   assert.equal(mint.state().next_serial, 1); assert.equal(mint.state().batch, 0);
   storage.exec('DROP TRIGGER fail_insert');
-  for (const batchSize of [0, -1, 1.5, '1000', 1000001]) assert.throws(() => mint.prepare({ batchSize }), /batch size/);
+  for (const batchSize of [0, -1, 1.5, '1000', 1000001, 7, 13]) assert.throws(() => mint.prepare({ batchSize }));
   assert.throws(() => mint.prepare({ chunkSize: 1001 }), /chunk size/);
   await assert.rejects(mint.issue({ owner: '', request: request(1) }), /Invalid issuance/);
   await assert.rejects(mint.issue({ owner, request: 'short' }), /Invalid issuance/);
   assert.throws(() => new Mint(storage, { ...f.options, mint: 'AQEBAQEBAQEBAQEBAQEBAQ' }), /another mint/);
-  storage.exec('UPDATE mint_state SET next_serial=999999999999');
-  assert.throws(() => mint.prepare({ batchSize: 2 }), /range exhausted/);
-  mint.prepare({ batchSize: 1 });
-  const cert = JSON.parse(await mint.issue({ owner, request: request(1) }));
-  assert.equal(cert.serial, '999999999999');
-  assert.throws(() => mint.prepare({ batchSize: 1 }), /range exhausted/);
+  storage.exec('UPDATE mint_state SET next_serial=999999999995');
+  assert.throws(() => mint.prepare({ batchSize: 10 }), /range exhausted/);
+  mint.prepare({ batchSize: 5 });
+  const result = await mint.issue({ owner, request: request(1) });
+  const serials = result.certificates.map(c => JSON.parse(c).serial);
+  assert.ok(serials.includes('999999999999'));
+  assert.throws(() => mint.prepare({ batchSize: 5 }), /range exhausted/);
 });
 
 test('independent concurrent SQLite connections cannot allocate twice', async t => {
   const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
-  mint.prepare({ batchSize: 40 });
+  mint.prepare({ batchSize: 40 }); // 8 packs
   const privateJwk = await crypto.subtle.exportKey('jwk', f.keys.privateKey);
   const source = `
     const { parentPort, workerData } = require('node:worker_threads');
@@ -119,54 +153,54 @@ test('independent concurrent SQLite connections cannot allocate twice', async t 
         parentPort.postMessage(results);
       } finally { storage.close(); }
     })().catch(error => { throw error; });`;
-  const outputs = await Promise.all(Array.from({ length: 3 }, (_, group) => new Promise((resolve, reject) => {
+  const outputs = await Promise.all(Array.from({ length: 2 }, (_, group) => new Promise((resolve, reject) => {
     const worker = new Worker(source, { eval: true, workerData: {
       modulePath: require.resolve('./mint.js'), storagePath: require.resolve('./mint-local.js'),
       path: f.path, privateJwk, mint: mintID, owner,
-      requests: [request(999), ...Array.from({ length: 10 }, (_, i) => request(group * 10 + i))]
+      requests: [request(999), ...Array.from({ length: 3 }, (_, i) => request(group * 10 + i))]
     } });
     let result;
     worker.on('message', value => { result = value; });
     worker.on('error', reject);
     worker.on('exit', code => code ? reject(new Error(`Worker exit ${code}`)) : resolve(result));
   })));
-  assert.equal(outputs[0][0], outputs[1][0]); assert.equal(outputs[1][0], outputs[2][0]);
-  const certificates = outputs.flat().map(text => JSON.parse(text));
-  assert.equal(new Set(certificates.map(c => c.id)).size, 31);
-  assert.equal(mint.state().remaining, 9);
-  assert.equal(storage.exec('SELECT * FROM issued').length, 31);
-  for (const text of outputs.flat()) await file.read(text, { resolveKey: () => f.keys.publicKey });
+  assert.deepEqual(outputs[0][0], outputs[1][0]);
+  const allCerts = outputs.flatMap(group => group.flatMap(res => res.certificates.map(text => JSON.parse(text))));
+  // 1 shared request (5 ubus) + 3 from group 0 (15 ubus) + 3 from group 1 (15 ubus) = 7 unique packs = 35 unique ubus
+  assert.equal(new Set(allCerts.map(c => c.id)).size, 35);
+  assert.equal(mint.state().remaining, 1); // 8 - 7 = 1 pack remaining
+  assert.equal(storage.exec('SELECT * FROM issued').length, 35);
 });
 
 test('allocation rolls back as a unit and request IDs are scoped to the owner', async t => {
   const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
   assert.throws(() => new Mint(storage, { ...f.options, key: undefined }), /configuration/);
-  mint.prepare({ batchSize: 3 });
-  const original = storage.exec('SELECT * FROM inventory ORDER BY slot');
+  mint.prepare({ batchSize: 15 }); // 3 packs
+  const original = storage.exec('SELECT * FROM inventory ORDER BY id');
   storage.exec("CREATE TRIGGER fail_allocation BEFORE UPDATE OF remaining ON mint_state BEGIN SELECT RAISE(ABORT, 'allocation failure'); END");
   await assert.rejects(mint.issue({ owner, request: request(1) }), /allocation failure/);
-  assert.deepEqual(storage.exec('SELECT * FROM inventory ORDER BY slot'), original);
+  assert.deepEqual(storage.exec('SELECT * FROM inventory ORDER BY id'), original);
   assert.equal(storage.exec('SELECT * FROM issued').length, 0);
   assert.equal(mint.state().remaining, 3);
   storage.exec('DROP TRIGGER fail_allocation');
   const first = await mint.issue({ owner, request: request(1) });
   const second = await mint.issue({ owner: '234567890123456789', request: request(1) });
-  assert.notEqual(JSON.parse(first).id, JSON.parse(second).id);
+  assert.notEqual(JSON.parse(first.certificates[0]).id, JSON.parse(second.certificates[0]).id);
   const reopened = new Mint(f.open(), { ...f.options, resolveSigningKey: () => { throw new Error('must use persisted certificate'); } });
-  assert.equal(await reopened.issue({ owner, request: request(1) }), first);
+  assert.deepEqual(await reopened.issue({ owner, request: request(1) }), first);
   assert.equal(mint.state().remaining, 1);
 });
 
-test('lifetime allowance is atomic and retries do not consume it twice', async t => {
+test('lifetime allowance counts packs atomically and retries do not consume it twice', async t => {
   const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
-  mint.prepare({ batchSize: 10 });
+  mint.prepare({ batchSize: 25 }); // 5 packs
   await assert.rejects(mint.issue({ owner, request: request(0) }, { lifetimeLimit: 0 }), /limit reached/);
-  assert.equal(mint.state().remaining, 10);
-  const outcomes = await Promise.allSettled(Array.from({ length: 8 }, (_, i) => mint.issue({ owner, request: request(i) }, { lifetimeLimit: 3 })));
-  assert.equal(outcomes.filter(r => r.status === 'fulfilled').length, 3);
+  assert.equal(mint.state().remaining, 5);
+  const outcomes = await Promise.allSettled(Array.from({ length: 5 }, (_, i) => mint.issue({ owner, request: request(i) }, { lifetimeLimit: 2 })));
+  assert.equal(outcomes.filter(r => r.status === 'fulfilled').length, 2);
   assert.ok(outcomes.filter(r => r.status === 'rejected').every(r => /limit reached/.test(r.reason.message)));
-  assert.equal(mint.state().remaining, 7);
+  assert.equal(mint.state().remaining, 3);
   const first = outcomes[0].value;
-  assert.equal(await mint.issue({ owner, request: request(0) }, { lifetimeLimit: 0 }), first);
+  assert.deepEqual(await mint.issue({ owner, request: request(0) }, { lifetimeLimit: 0 }), first);
   for (const lifetimeLimit of [-1, NaN, '3', 1.5]) await assert.rejects(mint.issue({ owner, request: request(9) }, { lifetimeLimit }), /Invalid lifetime/);
 });

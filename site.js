@@ -12,10 +12,12 @@
   async function inspect(text) { return ubuFile.read(text, { resolveKey: trustedKey }); }
   function display(text, result) {
     const model = ubu.decode(ubu.fromCode(result.dna));
+    const r = window.rarity ? rarity.scoreRarity(model) : null;
     current = { text, name: model.parts.fullName };
     $('preview').replaceChildren(ubuRender(model));
     $('ubunym').textContent = model.parts.fullName;
-    $('details').textContent = `Ubuquity ${model.grade}` + (result.certificate ? ` · #${result.certificate.serial}` : '');
+    const rarityText = r ? ` · Rarity ${r.percentile.toFixed(1)} / 100 (${r.bits.toFixed(1)} bits)` : '';
+    $('details').textContent = `Ubuquity ${model.grade}${rarityText}` + (result.certificate ? ` · #${result.certificate.serial}` : '');
     $('authenticity').textContent = result.type === 'signed' ? 'Mint signature verified · this file proves issuance, not ownership.' : 'Custom ubu · unsigned';
     $('download').hidden = false;
   }
@@ -69,12 +71,13 @@
       const storageKey = `ubumint:pending:${config.mint}:${session.owner}`;
       let request = localStorage.getItem(storageKey);
       if (!request) { request = crypto.randomUUID(); localStorage.setItem(storageKey, request); }
-      status('Getting your ubu…');
+      status('Opening your pack…');
       const data = await api('/api/mint', post({ request }));
-      const result = await inspect(data.certificate);
-      display(data.certificate, result);
+      const certs = data.certificates || [];
+      const inspected = await Promise.all(certs.map(c => inspect(c)));
+      if (certs.length) display(certs[certs.length - 1], inspected[inspected.length - 1]);
       localStorage.removeItem(storageKey);
-      status('Your ubu is ready.');
+      status(`Pack opened! ${certs.length} ubus added to your collection.`);
       await collection(true);
     } catch (error) { status(error.message); }
     finally { busy = false; $('mint').disabled = false; }
@@ -94,9 +97,9 @@
       if (session?.owner) {
         $('login').hidden = true; $('logout').hidden = false;
         $('mint').disabled = !config.ready || !config.lifetimeLimit;
-        status(config.ready && config.lifetimeLimit ? `Lifetime mint limit: ${config.lifetimeLimit} per account.` : 'Minting is not open yet. You can still view .ubu files.');
+        status(config.ready && config.lifetimeLimit ? `Lifetime allowance: ${config.lifetimeLimit} pack${config.lifetimeLimit === 1 ? '' : 's'} per account.` : 'Pack opening is not open yet. You can still view .ubu files.');
         if (config.ready) await collection(true);
-      } else status(config.login ? 'Sign in with Discord to get an ubu and see your collection.' : 'Minting is not open yet. You can still view custom .ubu files.');
+      } else status(config.login ? 'Sign in with Discord to open a pack and see your collection.' : 'Pack opening is not open yet. You can still view custom .ubu files.');
     } catch (error) { status(error.message); }
   })();
 })();

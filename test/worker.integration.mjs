@@ -12,7 +12,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     SESSION_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url'),
     MINT_ID: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url'), MINT_KEY_ID: 'test-1',
     MINT_PUBLIC_KEYS: JSON.stringify({ 'test-1': privateKey.x }), MINT_PRIVATE_KEYS: JSON.stringify({ 'test-1': privateKey }),
-    BATCH_SIZE: '2', LIFETIME_MINT_LIMIT: '3'
+    BATCH_SIZE: '10', LIFETIME_MINT_LIMIT: '3'
   };
   const server = createTestHarness({ workers: [{ configPath: './wrangler.jsonc', vars: {
     ORIGIN: env.ORIGIN, MINT_ID: env.MINT_ID, MINT_KEY_ID: env.MINT_KEY_ID, MINT_PUBLIC_KEYS: env.MINT_PUBLIC_KEYS,
@@ -45,7 +45,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
   }
   await t.test('only allowlisted frontend assets and trusted public configuration are served', async () => {
     assert.match(await (await fetch('/')).text(), /Ubu Mint/);
-    for (const path of ['/ubu-render.js', '/demo.html', '/site.js']) assert.equal((await fetch(path)).status, 200);
+    for (const path of ['/ubu-render.js', '/demo.html', '/site.js', '/rarity.js']) assert.equal((await fetch(path)).status, 200);
     for (const path of ['/worker.mjs', '/mint.js', '/auth.mjs', '/AGENTS.md', '/.dev.vars', '/state/mint.sqlite']) assert.equal((await fetch(path)).status, 404);
     const response = await fetch('/api/config'), config = await response.json();
     assert.equal(config.lifetimeLimit, 3); assert.equal(config.keys['test-1'], privateKey.x);
@@ -63,51 +63,56 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const response = await fetch('/auth/callback?code=x&state=forged');
     assert.equal(response.status, 400);
   });
-  let first;
+  let firstCertificates;
   await t.test('alarms prepare batches and concurrent retries return one verified issuance', async () => {
     const preparing = await issue('first_request_0001');
     assert.equal(preparing.status, 503); assert.equal(preparing.headers.get('Retry-After'), '2');
     const ready = await readyIssue('first_request_0001');
     assert.equal(ready.status, 200, await ready.clone().text());
-    first = (await ready.json()).certificate;
-    await file.read(first, { resolveKey: () => keys.publicKey });
+    firstCertificates = (await ready.json()).certificates;
+    assert.equal(firstCertificates.length, 5);
+    for (const cert of firstCertificates) await file.read(cert, { resolveKey: () => keys.publicKey });
     const retries = await Promise.all(Array.from({ length: 8 }, () => issue('first_request_0001')));
-    for (const retry of retries) assert.equal((await retry.json()).certificate, first);
+    for (const retry of retries) assert.deepEqual((await retry.json()).certificates, firstCertificates);
     const collection = await (await fetch('/api/ubus', { headers })).json();
-    assert.equal(collection.ubus.length, 1); assert.equal(collection.ubus[0].certificate, first);
+    assert.equal(collection.ubus.length, 5);
     const storage = await server.getWorker().getDurableObjectStorage('MINT', { name: env.MINT_ID });
     assert.equal((await storage.exec('SELECT remaining FROM mint_state'))[0].remaining, 1);
-    assert.equal((await storage.exec('SELECT COUNT(*) AS count FROM issued'))[0].count, 1);
+    assert.equal((await storage.exec('SELECT COUNT(*) AS count FROM issued'))[0].count, 5);
   });
   await t.test('state survives object eviction; next batch starts only after exhaustion', async () => {
     await server.getWorker().evictDurableObject('MINT', { name: env.MINT_ID });
-    assert.equal((await (await issue('first_request_0001')).json()).certificate, first);
+    assert.deepEqual((await (await issue('first_request_0001')).json()).certificates, firstCertificates);
     const second = await issue('second_request_0002'); assert.equal(second.status, 200);
+    const secondCertificates = (await second.json()).certificates;
+    assert.equal(secondCertificates.length, 5);
     const third = await readyIssue('third_request_0003'); assert.equal(third.status, 200, await third.clone().text());
-    const certificates = [first, (await second.json()).certificate, (await third.json()).certificate];
-    assert.equal(new Set(certificates.map(c => JSON.parse(c).serial)).size, 3);
+    const thirdCertificates = (await third.json()).certificates;
+    assert.equal(thirdCertificates.length, 5);
+    const certificates = [...firstCertificates, ...secondCertificates, ...thirdCertificates];
+    assert.equal(new Set(certificates.map(c => JSON.parse(c).serial)).size, 15);
     const storage = await server.getWorker().getDurableObjectStorage('MINT', { name: env.MINT_ID });
     assert.equal((await storage.exec('SELECT batch FROM mint_state'))[0].batch, 2);
     assert.equal((await issue('fourth_request_0004')).status, 403);
-    assert.equal((await (await issue('first_request_0001')).json()).certificate, first);
+    assert.deepEqual((await (await issue('first_request_0001')).json()).certificates, firstCertificates);
   });
   await t.test('concurrent new requests respect lifetime limit and collections are private', async () => {
     const other = await signedIn('234567890123456789');
     const otherHeaders = { ...headers, Cookie: other.cookie, 'X-Ubu-CSRF': other.csrf };
     const empty = await (await fetch('/api/ubus', { headers: otherHeaders })).json(); assert.equal(empty.ubus.length, 0);
-    // Three current issuances already consume the first owner's lifetime allowance.
+    // Three current pack issuances already consume the first owner's lifetime allowance.
     const results = await Promise.all(Array.from({ length: 6 }, (_, i) => issue('over_limit_request_' + i)));
     assert.ok(results.every(r => r.status === 403));
     const otherResult = await fetch('/api/mint', { method: 'POST', headers: otherHeaders, body: JSON.stringify({ request: 'other_owner_request_1' }) });
     assert.equal(otherResult.status, 200);
-    const collection = await (await fetch('/api/ubus', { headers: otherHeaders })).json(); assert.equal(collection.ubus.length, 1);
+    const collection = await (await fetch('/api/ubus', { headers: otherHeaders })).json(); assert.equal(collection.ubus.length, 5);
     const logout = await fetch('/api/logout', { method: 'POST', headers });
     assert.equal(logout.status, 200); assert.match(logout.headers.get('Set-Cookie'), /Max-Age=0/);
   });
   await t.test('multi-chunk alarm preparation resumes after object eviction', async () => {
     const chunkedMint = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url');
     await server.update(options => ({ workers: options.workers.map(worker => ({ ...worker,
-      vars: { ...worker.vars, MINT_ID: chunkedMint, BATCH_SIZE: '201' }
+      vars: { ...worker.vars, MINT_ID: chunkedMint, BATCH_SIZE: '205' }
     })) }));
     assert.equal((await issue('chunked_request_0001')).status, 503);
     const storage = await server.getWorker().getDurableObjectStorage('MINT', { name: chunkedMint });
@@ -118,11 +123,12 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
       if (state.prepared > 0) break;
       await new Promise(resolve => setTimeout(resolve, 50));
     } while (Date.now() < deadline);
-    assert.equal(state.prepared, 100); assert.equal(state.size, 201);
+    assert.equal(state.prepared, 100); assert.equal(state.size, 205);
     await server.getWorker().evictDurableObject('MINT', { name: chunkedMint });
     const ready = await readyIssue('chunked_request_0001');
     assert.equal(ready.status, 200, await ready.clone().text());
     const record = (await storage.exec('SELECT prepared, remaining, next_serial FROM mint_state'))[0];
-    assert.equal(record.prepared, 201); assert.equal(record.remaining, 200); assert.equal(record.next_serial, 202);
+    assert.equal(record.prepared, 205); assert.equal(record.remaining, 40); // 205/5 = 41 packs, 1 issued -> 40 packs remaining
+    assert.equal(record.next_serial, 206);
   });
 });

@@ -15,7 +15,7 @@ const mint = new Mint(storage, {
 });
 mint.prepare(); // one committed chunk of up to 100; repeat until prepared === size
 // Only after authenticating the owner and authorizing their mint allowance:
-const certificate = await mint.issue({ owner: authenticatedDiscordID, request: requestID });
+const { certificates } = await mint.issue({ owner: authenticatedDiscordID, request: requestID });
 storage.close();
 ```
 
@@ -24,11 +24,11 @@ Identifiers and key loading above come from trusted configuration, not request b
 ## Persistence and allocation
 
 - One database belongs to one immutable mint identity. Initialization rejects another identity.
-- `prepare({ batchSize = 1000, chunkSize = 100 })` reserves the next serial range and builds at most one chunk. Batch size accepts 1–1,000,000; chunk size 1–1,000. These are operational limits, separate from DNA. A changed batch size affects the next batch only. Call again to resume an unfinished batch; calls during an available, completed batch do no work.
+- `prepare({ batchSize = 1000, chunkSize = 100 })` reserves the next serial range and builds at most one chunk. Batch size accepts 5–1,000,000 (must be a multiple of 5); chunk size 1–1,000. These are operational limits, separate from DNA. A changed batch size affects the next batch only. When the batch completes generation, ubus are partitioned into 5 rarity quintiles and assembled into packs of 5 (one random ubu from each quintile). Calls during an available, completed batch do no work.
 - No allocation is allowed until preparation completes. After exhaustion, `issue` reports `Batch preparation required.` The Worker schedules alarms to call `prepare` in bounded steps, then lets requests retry. The core service itself does not run a scheduler.
-- Dense inventory slots permit a uniformly random draw with rejection sampling, followed by swapping the last slot into the removed slot. Selection does not scan or sort the inventory. IDs and DNA use platform cryptographic randomness.
+- Dense inventory pack slots permit a uniformly random draw with rejection sampling, followed by swapping the last pack slot into the removed slot.
 - The serial counter, preparation progress and each preparation chunk commit together. No serial is reused after committed reservation. The configured batch must fit within the remaining twelve-digit serial range; otherwise preparation fails without wrapping or silently changing batch size.
-- Allocation atomically inserts the issuance/owner record, removes its inventory slot and decrements the remaining count. Ownership starts at revision 1. There is no transfer implementation yet.
+- Allocation atomically inserts the issuance/owner records for all 5 ubus in the pack, removes its inventory pack slot and decrements the remaining pack count. Ownership starts at revision 1. There is no transfer implementation yet.
 - Request IDs are 16–128 ASCII letters/digits/underscores/hyphens, unique per authenticated owner. Reuse returns the original allocation across batches and restarts. A new request ID represents a new request; this is idempotency, not a mint allowance.
 - Signing happens after the allocation commit. The issuance time and signing-key ID are fixed by that commit. Signing failure leaves a recoverable allocation, rather than returning it to the pool. Retry with the same owner/request to finish it. Retain access to old signing keys while their allocated certificates are pending.
 - The exact signed certificate is persisted before return. Concurrent retries may compute the same signature, but return the single stored certificate. Completed retries do not require private-key access.
