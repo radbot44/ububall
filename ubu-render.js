@@ -531,53 +531,39 @@
     const numMats = materials.length;
     const cycle = S * 2 * numMats;
     const start = -Math.ceil((span + cycle) / cycle) * cycle;
+    const stripeAngle = materials[0].angle ?? 45;
 
     const matDefs = materials.map((mat, i) => {
       const patId = `${prefix}-pat-${i}`;
-      const fill = material(defs, mat, patId, effects, 160, 240);
-      const clipId = `${prefix}-clip-${i}`;
-      const clip = svgNode('clipPath', { id: clipId, clipPathUnits: 'userSpaceOnUse' });
-      defs.append(clip);
-      return { mat, fill, clipId, clip };
+      const fill = material(defs, { ...mat, angle: mat.angle - stripeAngle }, patId, effects, 160, 240);
+      return { mat, fill };
     });
 
-    const stripeAngle = materials[0].angle ?? 45;
-    for (let i = 0; i < numMats; i++) {
-      const g = svgNode('g', {
-        transform: `translate(160 240) rotate(${stripeAngle}) translate(-160 -240)`
-      });
-      matDefs[i].clip.append(g);
+    const stripesGroup = svgNode('g', {
+      transform: `rotate(${stripeAngle} 160 240)`
+    });
 
+    for (let i = 0; i < numMats; i++) {
+      const { mat, fill } = matDefs[i];
       const offset = i * S * 2;
       for (let base = start; base <= span + 320; base += cycle) {
-        g.append(svgNode('rect', {
-          x: base + offset,
-          y: -span,
-          width: S,
-          height: span * 2 + 480
-        }));
+        const x = base + offset;
+        stripesGroup.append(
+          svgNode('rect', {
+            x, y: -span, width: S, height: span * 2 + 480,
+            fill: mat.hex, opacity: .65
+          }),
+          svgNode('rect', {
+            x, y: -span, width: S, height: span * 2 + 480,
+            fill
+          })
+        );
       }
     }
 
     const face = svgNode('g', { 'clip-path': `url(#${boundsId})` });
+    face.append(stripesGroup);
     svg.append(face);
-
-    for (let i = 0; i < numMats; i++) {
-      const { mat, fill, clipId } = matDefs[i];
-      face.append(
-        svgNode('rect', {
-          x: 0, y: 0, width: 320, height: 480,
-          fill: mat.hex,
-          opacity: .65,
-          'clip-path': `url(#${clipId})`
-        }),
-        svgNode('rect', {
-          x: 0, y: 0, width: 320, height: 480,
-          fill,
-          'clip-path': `url(#${clipId})`
-        })
-      );
-    }
     return svg;
   }
   renderSVG.cardMaterials = renderCardMaterials;
