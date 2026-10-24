@@ -1,5 +1,5 @@
 'use strict';
-// Painted 2D foil, cellophane and candy. No 3D engine or geometry.
+// Painted foil, cellophane and candy using only 2D canvas paths and transforms.
 (() => {
   const clamp = n => Math.max(0, Math.min(1, n));
   const ease = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
@@ -11,7 +11,7 @@
     sheet.width = 1200; sheet.height = 720;
     const sheetCtx = sheet.getContext('2d');
     let frame = 0, progress = 0, started = 0, finish = null, count = 5, pointer = 0;
-    let color, candyColors, creases, previousColor = -1;
+    let color, candyColors, previousColor = -1;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     const logo = new Image(), mark = new Image();
     logo.onload = mark.onload = requestPaint;
@@ -30,11 +30,6 @@
       do { index = crypto.getRandomValues(new Uint8Array(1))[0] & 31; } while (index === previousColor);
       previousColor = index; color = paletteColor(index); canvas.dataset.color = String(index);
       candyColors = Array.from({ length: 5 }, (_, i) => paletteColor((index + i * 7) & 31));
-      const rolls = crypto.getRandomValues(new Uint16Array(150));
-      creases = Array.from({ length: 30 }, (_, i) => {
-        const r = j => rolls[i * 5 + j] / 65535;
-        return { x: r(0) * 220 - 110, y: r(1) * 270 - 135, dx: r(2) * 65 - 32, dy: r(3) * 85 + 15, strength: .08 + r(4) * .25 };
-      });
       requestPaint();
     }
     function gradient(x1, y1, x2, y2, stops) {
@@ -56,73 +51,126 @@
       ctx.bezierCurveTo(-146, y(17,135), -196, y(76,135), -240, y(88,135));
       ctx.closePath();
     }
-    function film(flat, untwist) {
-      ctx.fillStyle = gradient(-240,-90,240,90, [[0,'#e9f1ff25'],[.25,'#d5e3ff10'],[.5,'#ffffff05'],[.8,'#e9f1ff18'],[1,'#e9f1ff36']]);
-      ctx.fillRect(-240,-135,480,270);
-      for (const side of [-1, 1]) {
-        ctx.save(); ctx.scale(side, 1);
-        for (let i = -6; i <= 6; i++) {
-          const inner = mix(i * 1.8, i * 22, flat), outer = i * mix(17,22,flat);
-          const curl = Math.sin(i * .8 + untwist * 2.8) * 21 * (1 - untwist);
-          ctx.beginPath(); ctx.moveTo(110,inner);
-          const ripple = Math.sin(i*2.3)*6;
-          ctx.bezierCurveTo(146,inner+curl,167,outer-12*(1-flat),190,outer+5+ripple);
-          ctx.bezierCurveTo(210,outer-5,225,outer+3-ripple,240,outer);
-          ctx.strokeStyle = gradient(110,0,240,0,[[0,'#ffffff18'],[.45,'#e3f0ff85'],[.65,'#ffffff20'],[1,'#ffffff65']]);
-          ctx.lineWidth = i % 3 === 0 ? 2 : .8; ctx.stroke();
-          ctx.translate(0,2); ctx.strokeStyle = '#050b1430'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.translate(0,-2);
+    function film(side, flat, untwist) {
+      const phase = side*(1-ease(0,.3,untwist))*Math.PI;
+      const flip = Math.cos(phase), swing = Math.sin(phase);
+      const outerOpen = ease(.25,.63,untwist), innerOpen = ease(.63,1,untwist);
+      const ribs = [];
+      // One material grid, divided at two shared crease rows. The bottom flap
+      // lies over the top flap when closed, and each opens about its own crease.
+      for (let j = 0; j <= 18; j++) {
+        const v = j/9-1;
+        const hinge = v < -1/3 ? -1/3 : v > 1/3 ? 1/3 : v;
+        const opened = v < -1/3 ? innerOpen : v > 1/3 ? outerOpen : 1;
+        const angle = (1-opened)*Math.PI;
+        const foldedV = hinge+(v-hinge)*Math.cos(angle);
+        const closedV = hinge-(v-hinge);
+        // Release the gathered shape with its own flap, blending across the
+        // middle section so both shared crease rows stay joined throughout.
+        const spread = mix(innerOpen,outerOpen,ease(-1/3,1/3,v));
+        const rib = [];
+        for (let k = 0; k <= 8; k++) {
+          const u = k/8, free = ease(0,.25,u);
+          const outline = mix(closedV*3,v,spread);
+          const closedX = 108+u*(84+64*Math.sqrt(Math.max(0,1-outline*outline)));
+          const span = mix(mix(12,150,u),135,spread);
+          const crinkle = Math.sin(j*1.7+u*4)*u*1.5*(1-spread);
+          // The signed scale and lift are 2D hinge animation, not a second sheet.
+          // At each crease the displacement is exactly zero on both panels.
+          const lift = (v-hinge)*Math.sin(angle)*span*.4*free;
+          const spunY = (foldedV*span+crinkle)*flip+lift
+            + swing*u*8;
+          rib.push({
+            x: mix(closedX,108+u*160,spread)+u*foldedV*swing*10
+              + lift*.15,
+            // This edge overlaps the foil and follows its opening silhouette.
+            // Neither spin nor flap lift may move it away from the body.
+            y: mix(v*mix(12,135,flat),spunY,free)
+          });
         }
-        // Broad reflections give the clear areas a continuous film surface.
-        ctx.fillStyle = gradient(110,0,240,20,[[0,'#ffffff00'],[.4,'#ffffff00'],[.48,'#ffffff24'],[.52,'#ffffff06'],[.8,'#ffffff00'],[.98,'#ffffff30']]);
-        ctx.fillRect(110,-135,130,270); ctx.restore();
+        ribs.push(rib);
       }
+      // All three panels remain present after opening, occupying adjacent regions.
+      const order = flip < 0 ? [12,0,6] : [6,0,12];
+      for (const start of order) filmPanel(side,ribs.slice(start,start+7),start/6);
     }
-    function foil(flat, untwist) {
+    function filmPanel(side, ribs, face) {
+      const top = ribs[0], bottom = ribs[ribs.length-1];
+      ctx.save(); ctx.scale(side,1); ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(top[0].x,top[0].y);
+      for (const p of top.slice(1)) ctx.lineTo(p.x,p.y);
+      for (const rib of ribs.slice(1)) ctx.lineTo(rib[8].x,rib[8].y);
+      for (const p of [...bottom].reverse()) ctx.lineTo(p.x,p.y);
+      ctx.closePath();
+      // Three quiet face tones make the folds legible without a mesh of lines.
+      ctx.fillStyle = ['#b8d1ed24','#dbe9f52e','#f0f6ff38'][face]; ctx.fill();
+      ctx.strokeStyle = '#d7e7f17a'; ctx.lineWidth = 1.1; ctx.stroke();
+      ctx.clip();
+      ctx.fillStyle = gradient(125,-80,265,90,[[0,'#ffffff00'],[.48,'#ffffff00'],[.57,'#ffffff20'],[.67,'#ffffff00'],[1,'#ffffff00']]);
+      ctx.fillRect(105,-160,170,320);
+      // A single broken crease on each flap moves with that piece of film.
+      const crease = ribs[3];
+      ctx.beginPath(); ctx.moveTo(crease[2].x,crease[2].y);
+      ctx.lineTo(crease[5].x,crease[5].y+2);
+      ctx.lineTo(crease[7].x,crease[7].y);
+      ctx.strokeStyle = '#eff7ff60'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.restore();
+    }
+    function knot(side, untwist) {
+      const release = ease(.08,.4,untwist);
+      if (release === 1) return;
+      ctx.save(); ctx.scale(side,1);
+      ctx.globalAlpha *= 1-release;
+      ctx.translate(118+release*7,0);
+      // A persistent gathered collar, rather than a pinch created by the spin.
+      ctx.beginPath(); ctx.moveTo(-13,-13);
+      ctx.bezierCurveTo(-3,-22,11,-19,17,-10);
+      ctx.bezierCurveTo(10,-3,11,6,17,12);
+      ctx.bezierCurveTo(5,21,-5,18,-13,12);
+      ctx.quadraticCurveTo(-5,0,-13,-13); ctx.closePath();
+      ctx.fillStyle = gradient(-13,-18,17,18,[[0,'#dceafa55'],[.5,'#afc6dc88'],[1,'#dceafa55']]);
+      ctx.fill(); ctx.strokeStyle = '#e5efff90'; ctx.lineWidth = .8; ctx.stroke();
+      for (let i = 0; i <= 1; i++) {
+        const shift = i*7;
+        ctx.beginPath(); ctx.moveTo(-11,shift-7);
+        ctx.bezierCurveTo(-4,shift-3-release*10,4,shift+8+release*10,13,shift+5);
+        ctx.strokeStyle = '#20324750'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = '#eef6ff80'; ctx.lineWidth = 1; ctx.stroke();
+      }
+      ctx.restore();
+    }
+    function foil(flat) {
       ctx.save(); ctx.beginPath(); ctx.rect(-110,-135,220,270); ctx.clip();
       ctx.fillStyle = color; ctx.fillRect(-110,-135,220,270);
       // Painted curvature relaxes as the same sheet opens; its printed area never scales.
       const round = ctx.createRadialGradient(-35+pointer*12,-45,5,6,15,130);
-      round.addColorStop(0,'#ffffff70'); round.addColorStop(.35,'#ffffff14'); round.addColorStop(.65,'#00000000'); round.addColorStop(.85,'#00000040'); round.addColorStop(1,'#000000b0');
+      round.addColorStop(0,'#ffffff40'); round.addColorStop(.35,'#ffffff14'); round.addColorStop(.65,'#00000000'); round.addColorStop(.85,'#00000040'); round.addColorStop(1,'#00000065');
       ctx.globalAlpha *= 1-flat*.75; ctx.fillStyle = round; ctx.fillRect(-110,-135,220,270);
       ctx.globalAlpha /= 1-flat*.75;
-      for (const c of creases) {
-        ctx.beginPath(); ctx.moveTo(c.x-5,c.y);
-        ctx.lineTo(c.x+c.dx*.55,c.y+c.dy*.38); ctx.lineTo(c.x+c.dx,c.y+c.dy);
-        ctx.lineTo(c.x+c.dx*.55+8,c.y+c.dy*.38); ctx.closePath();
-        ctx.fillStyle = gradient(c.x-7,0,c.x+12,0,[[0,'#00000000'],[.4,`rgba(0,0,0,${c.strength*.6})`],[.52,`rgba(255,255,255,${c.strength})`],[1,'#ffffff00']]);
-        ctx.fill();
-        ctx.beginPath(); ctx.moveTo(c.x,c.y);
-        ctx.lineTo(c.x+c.dx*.55,c.y+c.dy*.38); ctx.lineTo(c.x+c.dx,c.y+c.dy);
-        ctx.strokeStyle = `rgba(0,0,0,${c.strength*.6})`; ctx.lineWidth = 2.4; ctx.stroke();
-        ctx.translate(-.8,-.6); ctx.strokeStyle = `rgba(255,255,255,${c.strength})`; ctx.lineWidth = .8; ctx.stroke(); ctx.translate(.8,.6);
-      }
-      const shineX = -70 + pointer*22 + untwist*85;
-      ctx.fillStyle = gradient(shineX-55,-135,shineX+100,135,[[0,'#ffffff00'],[.31,'#ffffff00'],[.4,'#ffffff50'],[.43,'#ffffffa0'],[.46,'#ffffff12'],[.57,'#ffffff00'],[.8,'#ffffff22'],[1,'#ffffff00']]);
+      // A broad, soft reflection and four short folds keep the illustration calm.
+      ctx.fillStyle = gradient(-90+pointer*10,-100,90,110,[[0,'#ffffff00'],[.4,'#ffffff20'],[.7,'#ffffff00'],[1,'#ffffff00']]);
       ctx.fillRect(-110,-135,220,270);
+      ctx.strokeStyle = '#ffffff35'; ctx.lineWidth = 1.2;
+      for (const side of [-1,1]) {
+        ctx.beginPath(); ctx.moveTo(side*94,-45); ctx.quadraticCurveTo(side*84,-60,side*69,-68); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(side*95,51); ctx.quadraticCurveTo(side*84,65,side*72,70); ctx.stroke();
+      }
       // Fixed-size printed logo, with a dark ink bed for all 32 wrapper colors.
       ctx.fillStyle = '#101217bb'; ctx.beginPath(); ctx.roundRect(-94,-32,188,64,6); ctx.fill();
       if (logo.complete && logo.naturalWidth) ctx.drawImage(logo,-88,-27,176,55);
       ctx.restore();
     }
     function wrapper(t) {
-      const untwist = ease(0,.38,t), flat = ease(.16,.48,t), peel = ease(.36,.91,t);
+      const untwist = ease(0,.5,t), flat = ease(.25,1,untwist), peel = ease(.5,.94,t);
       const screen = ctx; ctx = sheetCtx;
       ctx.resetTransform(); ctx.clearRect(0,0,sheet.width,sheet.height);
       ctx.setTransform(2,0,0,2,600,360);
-      // Move each tail as a piece of film, including its outline and reflections.
-      for (const side of [-1,0,1]) {
-        ctx.save();
-        if (side) {
-          ctx.translate(side*110,0);
-          ctx.rotate(side*Math.sin(untwist*Math.PI)*.48);
-          ctx.scale(1+untwist*.22,1-.35*Math.sin(untwist*Math.PI));
-          ctx.translate(-side*110,0);
-        }
-        ctx.beginPath(); ctx.rect(side < 0 ? -300 : side > 0 ? 110 : -110,-180,side ? 190 : 220,360); ctx.clip();
-        silhouette(flat); ctx.clip(); film(flat,untwist); if (!side) foil(flat,untwist);
-        silhouette(flat); ctx.strokeStyle = '#e9f1ff40'; ctx.lineWidth = .8; ctx.stroke();
-        ctx.restore();
-      }
+      film(-1,flat,untwist); film(1,flat,untwist);
+      ctx.save(); ctx.beginPath(); ctx.rect(-110,-180,220,360); ctx.clip();
+      silhouette(flat); ctx.clip(); foil(flat);
+      silhouette(flat); ctx.strokeStyle = '#e9f1ff40'; ctx.lineWidth = .8; ctx.stroke();
+      ctx.restore();
+      knot(-1,untwist); knot(1,untwist);
       ctx = screen;
       ctx.save(); ctx.globalAlpha = 1-ease(.86,.96,t);
       ctx.rotate(mix(-.09,0,untwist));
@@ -166,9 +214,9 @@
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
       ctx.resetTransform(); ctx.clearRect(0,0,width,height);
       const scale = width/600; ctx.setTransform(scale,0,0,scale,width/2,height*.46);
-      const fan = ease(.42,.8,progress);
+      const fan = ease(.58,.86,progress);
       if (fan) {
-        ctx.save(); ctx.globalAlpha = ease(.42,.52,progress)*(1-ease(.96,1,progress));
+        ctx.save(); ctx.globalAlpha = ease(.58,.68,progress)*(1-ease(.96,1,progress));
         const order = Array.from({ length: count }, (_,i) => i).sort((a,b) => Math.abs(b-(count-1)/2)-Math.abs(a-(count-1)/2));
         for (const i of order) {
           const slot = i-(count-1)/2;
