@@ -3,6 +3,9 @@
   const $ = id => document.getElementById(id);
   let config = { ready: false }, session = null, current = null, next = null, busy = false;
   const keys = new Map();
+  let packScene = null;
+  try { packScene = createPackScene($('pack-canvas')); } catch { /* Keep opening usable without canvas. */ }
+  if (!packScene) { $('pack-canvas').hidden = true; $('pack-canvas').nextElementSibling.hidden = false; }
   let pack = null, packKey = '', pendingKey = '', collectionVersion = 0, revealIndex = 0;
   const unseen = serial => pack?.items.slice(pack.seen).some(item => item.result.certificate.serial === serial);
   function savePack() {
@@ -91,6 +94,7 @@
     if (!pack || pack.seen < pack.items.length) return;
     try {
       localStorage.removeItem(packKey); pack = null;
+      packScene?.reset(true);
       $('reveal').close(); status(''); updatePackButton();
     } catch (error) { $('reveal-progress').textContent = error.message; }
   });
@@ -177,19 +181,18 @@
       if (!request) { request = crypto.randomUUID(); localStorage.setItem(pendingKey, request); }
       ++collectionVersion;
       $('mint').classList.add('unwrapping');
-      status('Unwrapping your pack…');
-      const animation = new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 2300));
+      status('');
       const data = await api('/api/mint', post({ request }));
       pack = await readPack(data.certificates);
       try { savePack(); } catch (error) { pack = null; throw error; }
       localStorage.removeItem(pendingKey);
-      await animation;
+      await packScene?.play(pack.items.length);
       revealIndex = 0;
       showReveal();
       status('');
       await refreshCollection();
     } catch (error) { status(error.message); }
-    finally { busy = false; $('mint').classList.remove('unwrapping'); updatePackButton(); }
+    finally { busy = false; packScene?.reset(); $('mint').classList.remove('unwrapping'); updatePackButton(); }
   });
   $('logout').addEventListener('click', async () => {
     try { await api('/api/logout', post({})); location.reload(); } catch (error) { status(error.message); }
