@@ -57,7 +57,16 @@ try {
             if ($verified) { break }
             if ($attempt -lt 5) { Start-Sleep -Seconds 2 }
         }
-        if (!$verified) { throw 'Deployment uploaded, but public configuration verification failed. Check the saved origin/domain route.' }
+        if (!$verified) {
+            $hostname = ([Uri]$settings.vars.ORIGIN).DnsSafeHost
+            try { [Net.Dns]::GetHostAddresses($hostname) | Out-Null }
+            catch {
+                Write-Warning "Worker uploaded successfully, but this computer cannot resolve $hostname yet. Public verification is pending. After creating or recreating a custom domain, DNS caches can retain the old missing-domain response. Run ipconfig /flushdns, restart the browser, and allow your DNS resolver time to refresh. Do not run -Setup again."
+                Write-Host "Settings and backups: $SettingsDirectory"
+                return
+            }
+            throw 'Worker uploaded successfully and DNS resolves, but public configuration verification failed. Check the saved origin, domain certificate and /api/config response. Do not run -Setup again.'
+        }
         Write-Host 'Deployment complete; public mint identity verified.'
     } else { Write-Host 'Dry run complete. Nothing was uploaded to Cloudflare.' }
     Write-Host "Settings and backups: $SettingsDirectory"
