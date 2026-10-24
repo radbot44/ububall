@@ -15,15 +15,35 @@
 <body>
   <main>
     <header><a class="brand" href="/">ubu mint</a><nav aria-label="Main"><a href="/demo.html">Designer</a><a id="login" href="/auth/discord" hidden>Sign in with Discord</a><button id="logout" hidden>Sign out</button></nav></header>
+    <section class="pack-shop" aria-labelledby="pack-title">
+      <p class="eyebrow">A little round. A little rare.</p>
+      <h1 id="pack-title">Unwrap something <em>you.</em></h1>
+      <p class="pack-intro">A pocketful of personalities. Yours to discover, one ubu at a time.</p>
+      <button id="mint" class="candy-pack" disabled aria-label="Unwrap your ubu pack">
+        <span class="wrapper-end wrapper-left" aria-hidden="true"></span>
+        <span class="wrapper-body"><span class="wrapper-small">FRESH FROM THE MINT</span><span class="wrapper-logo">ubu<span>●</span></span><span class="candy-rings" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="wrapper-flavor">ROUND LITTLE ORIGINALS</span></span>
+        <span class="wrapper-end wrapper-right" aria-hidden="true"></span>
+      </button>
+      <p id="pack-hint">Sign in to unwrap your pack</p>
+      <p id="status" role="status" aria-live="polite">Connecting to the mint…</p>
+    </section>
     <section class="viewer" aria-label="Ubu viewer">
       <div id="preview"><p class="empty">Open a .ubu file to meet your ubu.</p></div>
       <h1 id="ubunym">Your ubu, here.</h1>
       <p id="details">View a certificate or get an ubu from the mint.</p>
       <p id="authenticity"></p>
-      <div class="actions"><label class="button">Open .ubu<input id="import" type="file" accept=".ubu,application/json"></label><button id="download" hidden>Download .ubu</button><button id="mint" disabled>Open pack</button></div>
-      <p id="status" role="status" aria-live="polite">Connecting to the mint…</p>
+      <div class="actions"><label class="button">Open .ubu<input id="import" type="file" accept=".ubu,application/json"></label><button id="download" hidden>Download .ubu</button></div>
     </section>
     <section id="collection" hidden aria-labelledby="collection-title"><h2 id="collection-title">Your ubus</h2><div id="ubus" class="grid"></div><button id="more" hidden>Load more</button></section>
   </main>
+  <dialog id="reveal" aria-labelledby="reveal-title">
+    <div class="reveal-toolbar"><span class="eyebrow">Freshly unwrapped</span><button id="pause-reveal" aria-label="Close reveal and save your place">Save for later ×</button></div>
+    <h2 id="reveal-title">Meet your first ubu.</h2>
+    <p id="reveal-progress" aria-live="polite"></p>
+    <div id="card-stage" class="card-stage"></div>
+    <div id="reveal-dots" class="reveal-dots" aria-hidden="true"></div>
+    <button id="next-ubu" class="reveal-next">Reveal next ubu →</button>
+    <p class="reveal-note">Least rare to rarest. A little more magic with every reveal.</p>
+  </dialog>
 </body>
 </html>
