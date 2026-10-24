@@ -509,15 +509,15 @@
 
     function candy(x, y, hex, angle) {
       ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
-      ctx.shadowColor = '#0007'; ctx.shadowBlur = 20; ctx.shadowOffsetY = 12;
-      ctx.beginPath(); ctx.arc(7, 9, 110, 0, Math.PI * 2); ctx.fillStyle = tint(hex, -.5); ctx.fill();
+      ctx.shadowColor = '#0007'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 10;
+      ctx.beginPath(); ctx.arc(0, 0, 104, 0, Math.PI * 2); ctx.fillStyle = tint(hex, -.55); ctx.fill();
       ctx.shadowColor = 'transparent';
-      const gloss = ctx.createRadialGradient(-44, -55, 3, 6, 12, 144);
-      gloss.addColorStop(0, tint(hex, .55)); gloss.addColorStop(.3, tint(hex, .15)); gloss.addColorStop(.62, hex); gloss.addColorStop(1, tint(hex, -.6));
-      ctx.beginPath(); ctx.arc(0, 0, 110, 0, Math.PI * 2); ctx.fillStyle = gloss; ctx.fill();
-      ctx.strokeStyle = '#ffffff35'; ctx.lineWidth = 1.4; ctx.stroke();
-      if (mark.complete && mark.naturalWidth) ctx.drawImage(mark, -72, -72, 144, 144);
-      ctx.beginPath(); ctx.ellipse(-38, -69, 38, 12, -.5, 0, Math.PI * 2);
+      const gloss = ctx.createRadialGradient(-40, -50, 3, 5, 10, 136);
+      gloss.addColorStop(0, tint(hex, .55)); gloss.addColorStop(.3, tint(hex, .15)); gloss.addColorStop(.65, hex); gloss.addColorStop(1, tint(hex, -.6));
+      ctx.beginPath(); ctx.arc(0, 0, 104, 0, Math.PI * 2); ctx.fillStyle = gloss; ctx.fill();
+      ctx.strokeStyle = '#ffffff35'; ctx.lineWidth = 1.3; ctx.stroke();
+      if (mark.complete && mark.naturalWidth) ctx.drawImage(mark, -68, -68, 136, 136);
+      ctx.beginPath(); ctx.ellipse(-36, -65, 36, 11, -.5, 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff48'; ctx.fill();
       ctx.restore();
     }
@@ -530,9 +530,11 @@
       ctx.resetTransform(); ctx.clearRect(0, 0, width, height);
       const scale = width / 600; ctx.setTransform(scale, 0, 0, scale, width / 2, height * .46);
 
-      if (progress > 0) {
+      const revealStart = currentType && currentType.id === 'plastic' ? .36 : .18;
+      if (progress > revealStart) {
+        const reveal = ease(revealStart, revealStart + .14, progress);
         const fan = ease(.36, .78, progress);
-        ctx.save(); ctx.globalAlpha = ease(0, .12, progress) * (1 - ease(.96, 1, progress));
+        ctx.save(); ctx.globalAlpha = reveal * (1 - ease(.96, 1, progress));
         const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => Math.abs(b - (count - 1) / 2) - Math.abs(a - (count - 1) / 2));
         for (const i of order) {
           const slot = i - (count - 1) / 2;
