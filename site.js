@@ -128,7 +128,7 @@
     const art = document.createElement('div'); art.className = 'card-art'; art.append(ubuRender(item.model, 'oomark', card));
     const name = document.createElement('h3'); name.textContent = item.model.parts.fullName;
     const stats = document.createElement('div'); stats.className = 'card-stats';
-    for (const [label, value] of [['Rarity', `${item.rarity.percentile.toFixed(1)} / 100`], ['Ubuquity', item.model.grade]]) {
+    for (const [label, value] of [['Rarity', `${item.rarity.percentile.toFixed(3)} / 100`], ['Ubuquity', item.model.grade]]) {
       const stat = document.createElement('div'), caption = document.createElement('span'), number = document.createElement('strong');
       caption.textContent = label; number.textContent = value; if (label === 'Ubuquity') number.dataset.grade = item.model.grade; stat.append(caption, number); stats.append(stat);
     }
@@ -216,7 +216,7 @@
 
     preview.replaceChildren(ubuRender(model));
     $('ubunym').textContent = model.parts.fullName;
-    const rarityText = r ? ` · Rarity ${r.percentile.toFixed(1)} / 100 (${r.bits.toFixed(1)} bits)` : '';
+    const rarityText = r ? ` · Rarity ${r.percentile.toFixed(3)} / 100 (${r.bits.toFixed(6)} bits)` : '';
     const grade = document.createElement('strong'); grade.dataset.grade = model.grade; grade.textContent = model.grade;
     $('details').replaceChildren('Ubuquity ', grade, rarityText + (serial ? ` · #${serial}` : ''));
     $('authenticity').textContent = result.type === 'signed' ? 'Verified mint certificate' : 'Custom · unsigned';
