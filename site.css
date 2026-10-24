@@ -81,7 +81,7 @@ body:has(#reveal[open]) { overflow: hidden; }
 .card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .card-top img { width: 88px; height: auto; }
 .card-top > span { font-size: 9px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.card-art { display: grid; place-items: center; aspect-ratio: 1; margin: 18px 0; border-radius: 50%; background: radial-gradient(circle, #ffffff0a, transparent 70%); }
+.card-art { position: relative; z-index: 1; display: grid; place-items: center; aspect-ratio: 1; margin: 18px 0; border-radius: 50%; background: radial-gradient(circle, #ffffff0a, transparent 70%); }
 .card-art .oomark { width: 100%; height: auto; }
 .trading-card h3 { font-size: 20px; line-height: 1.3; letter-spacing: -.4px; margin: 14px 0 18px; overflow-wrap: anywhere; }
 .card-stats { display: grid; grid-template-columns: 1.5fr 1fr; gap: 12px; text-align: left; border-top: 1px solid #ffffff21; padding: 12px 0 4px; }
