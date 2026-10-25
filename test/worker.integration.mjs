@@ -179,4 +179,31 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(record.prepared, 205); assert.equal(record.remaining, 40); // 205/5 = 41 packs, 1 issued -> 40 packs remaining
     assert.equal(record.next_serial, 206);
   });
+  await t.test('pagination walks a collection larger than one page in every sort mode', async () => {
+    await server.update(options => ({ workers: options.workers.map(worker => ({
+      ...worker, vars: { ...worker.vars, LIFETIME_MINT_LIMIT: '20' }
+    })) }));
+    for (let i = 0; i < 11; i++) {
+      const response = await issue('pagination_request_' + String(i).padStart(5, '0'));
+      assert.equal(response.status, 200, await response.clone().text());
+    }
+    const all = await server.getWorker().getDurableObjectStorage('MINT', { name:
+      (await (await fetch('/api/config')).json()).mint });
+    const expected = await all.exec('SELECT serial FROM issued WHERE owner=?', '123456789012345678');
+    assert.equal(expected.length, 60);
+    for (const sort of ['recent', 'old', 'rarity', 'serial', 'favorite']) {
+      const results = [];
+      let cursor = '';
+      do {
+        const response = await fetch('/api/ubus?sort=' + sort + (cursor ? '&after=' + cursor : ''), { headers });
+        assert.equal(response.status, 200, await response.clone().text());
+        const page = await response.json();
+        results.push(...page.ubus.map(row => row.serial));
+        cursor = page.next;
+      } while (cursor);
+      assert.equal(results.length, 60);
+      assert.equal(new Set(results).size, 60);
+      assert.deepEqual([...results].sort(), expected.map(row => row.serial).sort());
+    }
+  });
 });
