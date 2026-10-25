@@ -178,7 +178,7 @@
     [6, 'Velvet'], [7, 'Frosted'], [11, 'Woodgrain'], [10, 'Holographic'],
     [8, 'Terrazzo'], [9, 'Crackle'], [12, 'Plush'], [15, 'Opalescent'],
     [16, 'Satin'], [20, 'Hammered Metal'], [21, 'Granite'], [22, 'Sandstone'],
-    [23, 'Obsidian'], [26, 'Mosaic'], [28, 'Quartz'], [29, 'Kintsugi'], [31, 'Starfield']]) specimens.push([texture, dna => {
+    [17, 'Leather'], [18, 'Denim'], [19, 'Carbon Fiber'], [23, 'Obsidian'], [24, 'Liquid'], [25, 'Bubbled'], [26, 'Mosaic'], [27, 'Circuitry'], [28, 'Quartz'], [29, 'Kintsugi'], [30, 'Lava'], [31, 'Starfield']]) specimens.push([texture, dna => {
     for (let slot = 0; slot < 5; slot++) { setBits(dna, 64 + slot * 18 + 8, 10, (31 << 5) | i); setBits(dna, 64 + slot * 18 + 5, 3, slot); }
   }]);
   specimens.push(['Left X flip', dna => { setBits(dna, 218, 10, 1023); setBits(dna, 238, 10, 1023); }],
