@@ -26,6 +26,35 @@ async function fixture(t) {
   return { path, keys, options, open, stores };
 }
 
+test('existing issued records migrate automatically without rewriting certificates', async t => {
+  const f = await fixture(t), storage = f.open();
+  const historicalDna = 'A'.repeat(86);
+  storage.exec(`CREATE TABLE issued (
+    id TEXT PRIMARY KEY, serial TEXT NOT NULL UNIQUE, dna TEXT NOT NULL,
+    batch INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL,
+    request TEXT NOT NULL, pack_id TEXT NOT NULL, quintile INTEGER NOT NULL,
+    issued_at INTEGER NOT NULL, key TEXT NOT NULL,
+    certificate TEXT, UNIQUE(owner, request, id)) STRICT`);
+  storage.exec('INSERT INTO issued VALUES (?, ?, ?, 1, ?, 1, ?, ?, 1, ?, ?, ?)',
+    'historical-id', '000000000001', historicalDna, owner, request(1), 'historical-pack',
+    1792700000, 'test-1', 'original-signed-certificate');
+  let mint = new Mint(storage, f.options);
+  assert.equal(mint.needsRarityBackfill(), true);
+  assert.deepEqual(storage.exec('SELECT favorite, rarity_bits, certificate FROM issued'), [
+    { favorite: 0, rarity_bits: null, certificate: 'original-signed-certificate' }
+  ]);
+  assert.equal(mint.backfillRarity(1), 1);
+  assert.equal(mint.backfillRarity(1), 0);
+  const migrated = storage.exec('SELECT favorite, rarity_bits, certificate FROM issued')[0];
+  assert.equal(migrated.favorite, 0);
+  assert.ok(Number.isFinite(migrated.rarity_bits));
+  assert.equal(migrated.certificate, 'original-signed-certificate');
+  storage.close(); f.stores[0] = null;
+  mint = new Mint(f.open(), f.options);
+  assert.equal(mint.needsRarityBackfill(), false);
+  assert.deepEqual(mint.exec('SELECT favorite, rarity_bits, certificate FROM issued')[0], migrated);
+});
+
 test('default 1000 batch prepares packs across quintiles, resumes after reopen and hides incomplete inventory', async t => {
   const f = await fixture(t);
   let storage = f.open(), mint = new Mint(storage, f.options);
@@ -59,6 +88,9 @@ test('default 1000 batch prepares packs across quintiles, resumes after reopen a
   assert.deepEqual(retry.certificates, result.certificates);
   assert.equal(mint.state().remaining, 199);
   assert.equal(storage.exec('SELECT COUNT(*) AS count FROM issued WHERE owner=?', owner)[0].count, 5);
+  const indexed = storage.exec('SELECT favorite, rarity_bits FROM issued WHERE owner=?', owner);
+  assert.ok(indexed.every(row => row.favorite === 0 && Number.isFinite(row.rarity_bits)));
+  assert.equal(mint.needsRarityBackfill(), false);
 
   // Check that the issued pack contains one ubu from each quintile (1 through 5)
   const issuedRows = storage.exec('SELECT quintile, dna FROM issued WHERE owner=? AND request=? ORDER BY quintile', owner, request(1));

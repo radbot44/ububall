@@ -17,7 +17,7 @@ function configuration(env) {
   if (!Number.isSafeInteger(limit) || limit < 0 || !Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 1000000) throw new Error('Invalid mint limits.');
   return { mint: env.MINT_ID, key: env.MINT_KEY_ID, keys, limit, batchSize };
 }
-async function body(request) {
+async function body(request, maxBytes = 512) {
   if (request.headers.get('Content-Type')?.split(';')[0] !== 'application/json') throw new Error('Expected JSON.');
   const reader = request.body?.getReader();
   if (!reader) throw new Error('Missing body.');
@@ -26,7 +26,7 @@ async function body(request) {
     while (true) {
       const { value, done } = await reader.read(); if (done) break;
       length += value.length;
-      if (length > 512) { await reader.cancel(); throw new Error('Body too large.'); }
+      if (length > maxBytes) { await reader.cancel(); throw new Error('Body too large.'); }
       chunks.push(value);
     }
     const bytes = new Uint8Array(length); let offset = 0;
@@ -57,20 +57,24 @@ export class MintRegistry extends DurableObject {
     }
     return this.signingKeys.get(id);
   }
-  async ensureBatch() {
+  needsPreparation() {
     const state = this.mint.state();
-    if (!state.size || state.prepared < state.size || !state.remaining) {
-      // Set the recovery alarm before doing work, so an interruption cannot strand preparation.
-      if (await this.ctx.storage.getAlarm() === null) await this.ctx.storage.setAlarm(Date.now() + 1000);
+    return (!state.size || state.prepared < state.size || !state.remaining) &&
+      !(state.prepared === state.size && state.next_serial + this.config.batchSize - 1 > 999999999999);
+  }
+  async ensureBatch() {
+    if ((this.needsPreparation() || this.mint.needsRarityBackfill()) &&
+        await this.ctx.storage.getAlarm() === null) {
+      await this.ctx.storage.setAlarm(Date.now() + 1000);
     }
   }
   async alarm() {
-    const current = this.mint.state();
-    if (current.size && current.prepared === current.size && current.remaining) return;
-    if (current.prepared === current.size && current.next_serial + this.config.batchSize - 1 > 999999999999) return;
+    if (!this.needsPreparation() && !this.mint.needsRarityBackfill()) return;
     await this.ctx.storage.setAlarm(Date.now() + 1000);
-    const state = this.mint.prepare({ batchSize: this.config.batchSize });
-    if (state.prepared === state.size) await this.ctx.storage.deleteAlarm();
+    // Don't let a large historical rarity migration block mint inventory preparation.
+    if (this.needsPreparation()) this.mint.prepare({ batchSize: this.config.batchSize });
+    else if (this.mint.needsRarityBackfill()) this.mint.backfillRarity();
+    if (!this.needsPreparation() && !this.mint.needsRarityBackfill()) await this.ctx.storage.deleteAlarm();
   }
   async issue(owner, request) {
     try {
@@ -83,11 +87,62 @@ export class MintRegistry extends DurableObject {
       throw error;
     } finally { await this.ensureBatch(); }
   }
-  collection(owner, cursor = '') {
-    if (cursor && !/^[0-9]{12}$/.test(cursor)) return { error: 'Invalid cursor.', status: 400 };
-    const rows = this.mint.exec('SELECT serial, certificate FROM issued WHERE owner=? AND serial>? ORDER BY serial LIMIT 51', owner, cursor);
-    return { ubus: rows.slice(0, 50).map(row => ({ serial: row.serial, certificate: row.certificate })),
-      next: rows.length > 50 ? rows[49].serial : null };
+  async collection(owner, sort = 'recent', cursor = '') {
+    const keys = {
+      recent: [['(certificate IS NULL)', 'ASC'], ['issued_at', 'DESC'], ['serial', 'DESC']],
+      old: [['(certificate IS NULL)', 'ASC'], ['issued_at', 'ASC'], ['serial', 'ASC']],
+      rarity: [['(certificate IS NULL)', 'ASC'], ['rarity_bits', 'DESC'], ['serial', 'DESC']],
+      serial: [['(certificate IS NULL)', 'ASC'], ['serial', 'ASC']],
+      favorite: [['(certificate IS NULL)', 'ASC'], ['favorite', 'DESC'], ['issued_at', 'DESC'], ['serial', 'DESC']]
+    }[sort];
+    if (!keys || (cursor && !/^[0-9]{12}$/.test(cursor))) return { error: 'Invalid collection sort or cursor.', status: 400 };
+    if (this.mint.needsRarityBackfill() && await this.ctx.storage.getAlarm() === null) {
+      await this.ctx.storage.setAlarm(Date.now() + 1000);
+    }
+    if (sort === 'rarity' && this.mint.needsRarityBackfill()) {
+      return { error: 'Preparing rarity sorting. Try again shortly.', status: 503 };
+    }
+    const binds = [owner];
+    let after = '';
+    if (cursor) {
+      const anchor = this.mint.exec('SELECT * FROM issued WHERE owner=? AND serial=?', owner, cursor)[0];
+      if (!anchor) return { error: 'Invalid collection cursor.', status: 400 };
+      const value = expression => expression === '(certificate IS NULL)' ? Number(anchor.certificate === null) : anchor[expression];
+      const parts = keys.map((key, i) => {
+        const terms = [];
+        for (let j = 0; j < i; j++) { terms.push(keys[j][0] + '=?'); binds.push(value(keys[j][0])); }
+        terms.push(key[0] + (key[1] === 'ASC' ? '>?' : '<?'));
+        binds.push(value(key[0]));
+        return '(' + terms.join(' AND ') + ')';
+      });
+      after = ' AND (' + parts.join(' OR ') + ')';
+    }
+    const order = keys.map(([expression, direction]) => expression + ' ' + direction).join(', ');
+    const rows = this.mint.exec('SELECT serial, certificate, favorite FROM issued WHERE owner=?' + after +
+      ' ORDER BY ' + order + ' LIMIT 51', ...binds);
+    return {
+      ubus: rows.slice(0, 50).map(row => ({
+        serial: row.serial, certificate: row.certificate, favorite: Boolean(row.favorite)
+      })),
+      next: rows.length > 50 ? rows[49].serial : null
+    };
+  }
+  favorite(owner, data) {
+    if (data && typeof data === 'object' && !Array.isArray(data) &&
+        Object.keys(data).length === 2 && /^[0-9]{12}$/.test(data.serial) &&
+        typeof data.favorite === 'boolean') {
+      const updated = this.mint.exec('UPDATE issued SET favorite=? WHERE owner=? AND serial=? RETURNING serial',
+        Number(data.favorite), owner, data.serial);
+      return updated.length ? { serial: data.serial, favorite: data.favorite } : { error: 'Ubu not found in your collection.', status: 404 };
+    }
+    if (data && typeof data === 'object' && !Array.isArray(data) &&
+        Object.keys(data).length === 1 && Array.isArray(data.serials) &&
+        data.serials.length <= 50 && data.serials.every(serial => typeof serial === 'string' && /^[0-9]{12}$/.test(serial))) {
+      if (data.serials.length) this.mint.exec('UPDATE issued SET favorite=1 WHERE owner=? AND serial IN (' +
+        data.serials.map(() => '?').join(',') + ')', owner, ...data.serials);
+      return { ok: true };
+    }
+    return { error: 'Invalid favorite request.', status: 400 };
   }
 }
 
@@ -113,7 +168,13 @@ export default {
       const config = configuration(env);
       const registry = env.MINT.get(env.MINT.idFromName(config.mint));
       if (path === '/api/ubus' && request.method === 'GET') {
-        const result = await registry.collection(session.owner, url.searchParams.get('after') || '');
+        const result = await registry.collection(session.owner, url.searchParams.get('sort') || 'recent', url.searchParams.get('after') || '');
+        return json(result, result.status || 200);
+      }
+      if (path === '/api/favorites' && request.method === 'POST') {
+        let data;
+        try { data = await body(request, 2048); } catch { return json({ error: 'Invalid favorite request body.' }, 400); }
+        const result = await registry.favorite(session.owner, data);
         return json(result, result.status || 200);
       }
       if (path === '/api/mint' && request.method === 'POST') {

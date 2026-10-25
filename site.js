@@ -7,27 +7,13 @@
   try { packScene = createPackScene($('pack-canvas')); } catch { /* Keep opening usable without canvas. */ }
   if (!packScene) { $('pack-canvas').hidden = true; $('pack-canvas').nextElementSibling.hidden = false; }
   let pack = null, packKey = '', pendingKey = '', collectionVersion = 0, revealIndex = 0;
-  let isCardView = false, loadingMore = false;
+  let isCardView = false;
   const collectionMap = new Map();
 
   const FAV_STORAGE_KEY = 'ubumint:favorites';
-  function loadFavorites() {
-    try {
-      const raw = localStorage.getItem(FAV_STORAGE_KEY);
-      return new Set(raw ? JSON.parse(raw) : []);
-    } catch {
-      return new Set();
-    }
-  }
-  function saveFavorites(set) {
-    try {
-      localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(Array.from(set)));
-    } catch { /* Quota exceeded or storage disabled */ }
-  }
-  function isFavorite(serial) {
-    if (!serial) return false;
-    return loadFavorites().has(serial);
-  }
+  const cardMap = new Map();
+  const changingFavorites = new Set();
+  const isFavorite = serial => collectionMap.get(serial)?.favorite === true;
   function createHeartSvg() {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
@@ -58,25 +44,42 @@
     });
     return btn;
   }
-  function toggleFavorite(serial) {
-    if (!serial) return;
-    const favs = loadFavorites();
-    if (favs.has(serial)) favs.delete(serial);
-    else favs.add(serial);
-    saveFavorites(favs);
-    const nowFav = favs.has(serial);
-
+  function syncFavoriteButtons(serial) {
+    const favorite = isFavorite(serial);
+    for (const btn of document.querySelectorAll('.card-heart[data-serial="' + serial + '"]')) {
+      btn.classList.toggle('is-favorite', favorite);
+      btn.setAttribute('aria-pressed', String(favorite));
+    }
     if (current?.serial === serial) {
-      $('viewer-fav').classList.toggle('is-favorite', nowFav);
-      $('viewer-fav').setAttribute('aria-pressed', String(nowFav));
+      $('viewer-fav').classList.toggle('is-favorite', favorite);
+      $('viewer-fav').setAttribute('aria-pressed', String(favorite));
     }
-    for (const btn of document.querySelectorAll(`.card[data-serial="${serial}"] .card-heart, .trading-card .card-heart[data-serial="${serial}"]`)) {
-      btn.classList.toggle('is-favorite', nowFav);
-      btn.setAttribute('aria-pressed', String(nowFav));
+  }
+  async function toggleFavorite(serial) {
+    const item = collectionMap.get(serial);
+    if (!item || changingFavorites.has(serial)) return;
+    changingFavorites.add(serial);
+    try {
+      const result = await api('/api/favorites', post({ serial, favorite: !item.favorite }));
+      item.favorite = result.favorite;
+      syncFavoriteButtons(serial);
+      if ($('sort-ubus').value === 'favorite') insertCard(item);
+    } catch (error) {
+      status('Could not update favorite: ' + error.message);
+    } finally {
+      changingFavorites.delete(serial);
     }
-    if ($('sort-ubus')?.value === 'favorite') {
-      renderCollection();
+  }
+  async function migrateBrowserFavorites() {
+    let serials;
+    try { serials = JSON.parse(localStorage.getItem(FAV_STORAGE_KEY) || '[]'); } catch { return; }
+    if (!Array.isArray(serials)) return;
+    serials = [...new Set(serials.filter(serial => typeof serial === 'string' && /^[0-9]{12}$/.test(serial)))];
+    for (let i = 0; i < serials.length; i += 50) {
+      await api('/api/favorites', post({ serials: serials.slice(i, i + 50) }));
     }
+    // Import is idempotent and only updates ubus owned by the signed-in account.
+    localStorage.removeItem(FAV_STORAGE_KEY);
   }
 
   const unseen = serial => pack?.items.slice(pack.seen).some(item => item.result.certificate.serial === serial);
@@ -153,10 +156,8 @@
     $('prev-ubu').disabled = index === 0;
     $('next-ubu').disabled = last;
     $('finish-pack').hidden = pack.seen < pack.items.length;
+    showMintedItem(item);
     if (!$('reveal').open) $('reveal').showModal();
-  }
-  async function refreshCollection() {
-    try { await collection(true); } catch (error) { status(`Your pack is saved. Collection could not refresh: ${error.message}`); }
   }
   function navigatePack(direction) {
     const target = revealIndex + direction;
@@ -169,7 +170,7 @@
       }
       revealIndex = target;
       showReveal();
-      if (pack.seen !== previousSeen) void refreshCollection();
+
       if (document.activeElement.disabled) (target === 0 ? $('next-ubu') : $('prev-ubu')).focus();
     } catch (error) { $('reveal-progress').textContent = `Could not save your place: ${error.message}`; }
   }
@@ -188,7 +189,7 @@
       packScene?.reset(true);
       status('');
       updatePackButton();
-      void refreshCollection();
+
       return true;
     } catch (error) {
       $('reveal-progress').textContent = error.message;
@@ -239,7 +240,7 @@
     $('authenticity').textContent = result.type === 'signed' ? 'Verified mint certificate' : 'Custom · unsigned';
     $('download').hidden = false;
 
-    if (serial) {
+    if (serial && collectionMap.has(serial)) {
       $('viewer-fav').hidden = false;
       const fav = isFavorite(serial);
       $('viewer-fav').classList.toggle('is-favorite', fav);
@@ -290,7 +291,7 @@
     if (event.target === $('viewer')) $('viewer').close();
   });
   $('viewer-fav').addEventListener('click', () => {
-    if (current?.serial) toggleFavorite(current.serial);
+    if (current?.serial) void toggleFavorite(current.serial);
   });
 
   async function api(path, options) {
@@ -301,133 +302,155 @@
   }
   const post = data => ({ method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf }, body: JSON.stringify(data) });
 
-  function getSortedItems() {
-    const items = Array.from(collectionMap.values());
+  function compareItems(a, b) {
+    if (a.pending !== b.pending) return Number(Boolean(a.pending)) - Number(Boolean(b.pending));
     const sort = $('sort-ubus')?.value || 'recent';
-    return items.sort((a, b) => {
-      if (a.pending !== b.pending) return a.pending ? 1 : -1;
-      const aFav = isFavorite(a.serial) ? 1 : 0;
-      const bFav = isFavorite(b.serial) ? 1 : 0;
-      const aBits = a.rarity ? a.rarity.bits : 0;
-      const bBits = b.rarity ? b.rarity.bits : 0;
-      if (sort === 'favorite') {
-        if (aFav !== bFav) return bFav - aFav;
-        return (b.issuedAt || 0) - (a.issuedAt || 0) || bBits - aBits || b.serial.localeCompare(a.serial);
-      }
-      if (sort === 'rarity') {
-        return bBits - aBits || b.serial.localeCompare(a.serial);
-      }
-      if (sort === 'serial') {
-        return a.serial.localeCompare(b.serial);
-      }
-      if (sort === 'old') {
-        return (a.issuedAt || 0) - (b.issuedAt || 0) || aBits - bBits || a.serial.localeCompare(b.serial);
-      }
-      // 'recent'
-      return (b.issuedAt || 0) - (a.issuedAt || 0) || bBits - aBits || b.serial.localeCompare(a.serial);
-    });
+    if (sort === 'serial') return a.serial.localeCompare(b.serial);
+    if (sort === 'rarity') return (b.rarity?.bits || 0) - (a.rarity?.bits || 0) || b.serial.localeCompare(a.serial);
+    if (sort === 'favorite' && a.favorite !== b.favorite) return Number(b.favorite) - Number(a.favorite);
+    if (sort === 'old') return (a.issuedAt || 0) - (b.issuedAt || 0) || a.serial.localeCompare(b.serial);
+    return (b.issuedAt || 0) - (a.issuedAt || 0) || b.serial.localeCompare(a.serial);
   }
 
-  function renderCollection() {
-    const sorted = getSortedItems();
-    const cards = [];
-    for (const item of sorted) {
-      if (item.pending) {
-        const pending = document.createElement('p');
-        pending.textContent = `#${item.serial} · Certificate pending`;
-        cards.push(pending);
-        continue;
-      }
-      const card = document.createElement('button');
-      card.className = 'card';
-      card.dataset.serial = item.serial;
-      const favBtn = createHeartButton(item.serial);
-      const thumb = ubuRender(item.model, 'ubu-thumb');
-      const name = document.createElement('span'); name.textContent = item.model.parts.fullName;
-      const serial = document.createElement('span'); serial.textContent = '#' + item.serial;
-      card.append(favBtn, thumb, name, serial);
-      card.addEventListener('click', () => {
-        display(item.certificate, item.result, true);
-        status('');
-      });
-      cards.push(card);
+  function collectionCard(item) {
+    if (item.pending) {
+      const pending = document.createElement('p');
+      pending.textContent = `#${item.serial} · Certificate pending`;
+      pending.dataset.serial = item.serial;
+      return pending;
     }
-    $('ubus').replaceChildren(...cards);
-    if (!cards.length) {
-      const empty = document.createElement('p');
-      empty.textContent = 'No revealed ubus.';
-      $('ubus').append(empty);
+    const card = document.createElement('button');
+    card.className = 'card';
+    card.dataset.serial = item.serial;
+    const favBtn = createHeartButton(item.serial);
+    const thumb = ubuRender(item.model, 'ubu-thumb');
+    const name = document.createElement('span'); name.textContent = item.model.parts.fullName;
+    const serial = document.createElement('span'); serial.textContent = '#' + item.serial;
+    card.append(favBtn, thumb, name, serial);
+    card.addEventListener('click', () => {
+      display(item.certificate, item.result, true);
+      status('');
+    });
+    return card;
+  }
+
+  // Preserve thumbnail DOM nodes and move only the card whose ordering changed.
+  function insertCard(item) {
+    const grid = $('ubus');
+    let node = cardMap.get(item.serial);
+    if (!node) {
+      node = collectionCard(item);
+      cardMap.set(item.serial, node);
     }
-    $('collection-sentinel').hidden = !next;
-    $('more').hidden = !next || Boolean(observer);
+    if (grid.firstElementChild && !grid.firstElementChild.dataset.serial) grid.replaceChildren();
+    // Binary search among existing DOM nodes; no sorting or thumbnail regeneration.
+    let low = 0, high = grid.children.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      const other = collectionMap.get(grid.children[mid].dataset.serial);
+      if (other && compareItems(other, item) < 0) low = mid + 1;
+      else high = mid;
+    }
+    const before = grid.children[low] || null;
+    if (before !== node) grid.insertBefore(node, before);
+  }
+
+  function showMintedItem(item) {
+    const serial = item.result.certificate.serial;
+    const old = collectionMap.get(serial);
+    if (old?.certificate === item.text) return;
+    if (old?.pending) { cardMap.get(serial)?.remove(); cardMap.delete(serial); }
+    const record = {
+      serial, certificate: item.text, result: item.result, model: item.model,
+      rarity: item.rarity, issuedAt: item.result.certificate.issuedAt, favorite: old?.favorite || false
+    };
+    collectionMap.set(serial, record);
+    if (document.querySelector('#ubus > p:not([data-serial])')) $('ubus').replaceChildren();
+    insertCard(record);
+    if (current?.serial === serial) {
+      $('viewer-fav').hidden = false;
+      syncFavoriteButtons(serial);
+    }
     $('collection').hidden = false;
   }
 
   const certCache = new Map();
+  let pageLoading = false;
   async function collection(reset = false) {
     if (pendingKey && localStorage.getItem(pendingKey)) return;
-    const version = ++collectionVersion;
-    if (reset) {
-      collectionMap.clear();
-      next = null;
-    }
-    let cursor = !reset && next ? next : '';
+    if (!reset && (pageLoading || !next)) return;
+    const version = reset ? ++collectionVersion : collectionVersion;
+    const sort = $('sort-ubus').value || 'recent';
+    const cursor = reset ? '' : next;
+    pageLoading = true;
     try {
-      do {
-        const data = await api('/api/ubus' + (cursor ? '?after=' + encodeURIComponent(cursor) : ''));
-        if (version !== collectionVersion || (pendingKey && localStorage.getItem(pendingKey))) return;
-        await Promise.all(data.ubus.map(async entry => {
-          if (unseen(entry.serial)) return;
-          if (!entry.certificate) {
-            if (!collectionMap.has(entry.serial)) {
-              collectionMap.set(entry.serial, { serial: entry.serial, pending: true });
-            }
-            return;
-          }
-          if (!collectionMap.has(entry.serial)) {
-            let cached = certCache.get(entry.certificate);
-            if (!cached) {
-              const result = await inspect(entry.certificate);
-              const model = ubu.decode(ubu.fromCode(result.dna));
-              const r = window.rarity ? rarity.scoreRarity(model) : null;
-              cached = { result, model, rarity: r, issuedAt: result.certificate?.issuedAt || 0 };
-              certCache.set(entry.certificate, cached);
-            }
-            collectionMap.set(entry.serial, {
-              serial: entry.serial,
-              certificate: entry.certificate,
-              result: cached.result,
-              model: cached.model,
-              rarity: cached.rarity,
-              issuedAt: cached.issuedAt
-            });
-          }
-        }));
-        if (version !== collectionVersion || (pendingKey && localStorage.getItem(pendingKey))) return;
-        cursor = data.next;
-        next = cursor;
-        renderCollection();
-      } while (cursor);
+      const data = await api('/api/ubus?sort=' + encodeURIComponent(sort) +
+        (cursor ? '&after=' + encodeURIComponent(cursor) : ''));
+      const items = await Promise.all(data.ubus.map(async entry => {
+        if (unseen(entry.serial)) return null;
+        if (!entry.certificate) return { serial: entry.serial, favorite: entry.favorite, pending: true };
+        let cached = certCache.get(entry.certificate);
+        if (!cached) {
+          const result = await inspect(entry.certificate);
+          const model = ubu.decode(ubu.fromCode(result.dna));
+          cached = { result, model, rarity: rarity.scoreRarity(model), issuedAt: result.certificate.issuedAt };
+          certCache.set(entry.certificate, cached);
+        }
+        return { serial: entry.serial, certificate: entry.certificate, favorite: entry.favorite,
+          result: cached.result, model: cached.model, rarity: cached.rarity, issuedAt: cached.issuedAt };
+      }));
+      if (version !== collectionVersion || sort !== $('sort-ubus').value ||
+          (pendingKey && localStorage.getItem(pendingKey))) return;
+
+      // Replace the page in one synchronous update on explicit sort/initial load.
+      if (reset) {
+        collectionMap.clear();
+        cardMap.clear();
+        $('ubus').replaceChildren();
+      }
+      for (const item of items) {
+        if (!item) continue;
+        const previous = collectionMap.get(item.serial);
+        if (previous?.pending && !item.pending) {
+          cardMap.get(item.serial)?.remove();
+          cardMap.delete(item.serial);
+        }
+        collectionMap.set(item.serial, item);
+        insertCard(item);
+        if (current?.serial === item.serial) syncFavoriteButtons(item.serial);
+      }
+      next = data.next;
+      // A first-page refresh must retain already revealed pack items not on that page.
+      if (reset && pack) for (const item of pack.items.slice(0, pack.seen)) showMintedItem(item);
+      if (!collectionMap.size && !next) {
+        const empty = document.createElement('p');
+        empty.textContent = 'No revealed ubus.';
+        $('ubus').append(empty);
+      }
+      $('collection-sentinel').hidden = !next;
+      $('more').hidden = !next || Boolean(observer);
+      $('collection').hidden = false;
     } catch (error) {
-      status(`Could not refresh collection: ${error.message}`);
+      if (version === collectionVersion) {
+        status('Could not load collection: ' + error.message);
+        if (error.message.startsWith('Preparing rarity sorting')) {
+          setTimeout(() => {
+            if (version === collectionVersion && $('sort-ubus').value === sort) void collection(reset);
+          }, 1200);
+        }
+      }
+    } finally {
+      if (version === collectionVersion) pageLoading = false;
     }
   }
 
-  async function loadMore() {
-    if (loadingMore || !next || (pendingKey && localStorage.getItem(pendingKey))) return;
-    loadingMore = true;
-    try {
-      await collection(false);
-    } finally {
-      loadingMore = false;
-    }
-  }
+  function loadMore() { return collection(false); }
 
   let observer = null;
   if ('IntersectionObserver' in window) {
     observer = new IntersectionObserver(entries => {
       for (const entry of entries) {
-        if (entry.isIntersecting && next && !loadingMore && !busy) {
+        if (entry.isIntersecting && next && !pageLoading && !busy) {
           void loadMore();
         }
       }
@@ -436,7 +459,7 @@
     if (sentinel) observer.observe(sentinel);
   }
 
-  $('sort-ubus').addEventListener('change', () => renderCollection());
+  $('sort-ubus').addEventListener('change', () => { void collection(true); });
   $('more').addEventListener('click', () => { void loadMore(); });
 
   $('import').addEventListener('change', async event => {
@@ -458,7 +481,7 @@
   $('mint').addEventListener('click', async () => {
     if (busy || !session?.owner) return;
     if (pack) {
-      try { revealIndex = Math.max(0, pack.seen - 1); showReveal(); await refreshCollection(); } catch (error) { status(error.message); }
+      try { revealIndex = Math.max(0, pack.seen - 1); showReveal(); } catch (error) { status(error.message); }
       return;
     }
     busy = true; updatePackButton();
@@ -476,7 +499,7 @@
       revealIndex = 0;
       showReveal();
       status('');
-      await refreshCollection();
+
     } catch (error) { status(error.message); }
     finally { busy = false; packScene?.reset(); $('mint').classList.remove('unwrapping'); updatePackButton(); }
   });
@@ -501,7 +524,10 @@
         status(config.ready && config.lifetimeLimit ? `${config.lifetimeLimit} pack${config.lifetimeLimit === 1 ? '' : 's'} per account` : 'Minting closed');
         if (pack) status('');
         else if (localStorage.getItem(pendingKey)) status('Opening interrupted. Retry to continue.');
-        if (config.ready) await collection(true);
+        if (config.ready) {
+          try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
+          await collection(true);
+        }
       } else { $('pack-hint').textContent = ''; status(config.login ? 'Sign in to open packs.' : 'Minting closed'); }
     } catch (error) { status(error.message); }
   })();
