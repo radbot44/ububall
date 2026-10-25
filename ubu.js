@@ -5,11 +5,14 @@
   const C = 'BCDFGHJKLMNPQRSTVWXYZ';
   const BEFORE_X = 'HLNRSWYXZ';
   const C_NO_X = C.replace('X', '');
-  const C_AFTER_VV = C.replace('Y', '');
+  const weight = ch => (ch === 'X' || ch === 'Z' ? 1 : ch === 'Q' ? 2 : (ch === 'K' || ch === 'Y' ? 3 : 6));
+  const C_POOL = [...C].flatMap(ch => Array(weight(ch)).fill(ch));
+  const C_AFTER_VV_POOL = C_POOL.filter(ch => ch !== 'Y');
   const VOWEL_PAIRS = [...V].flatMap(a => [...V].map(b => a + b));
   const PATTERNS = ['CVCVCV', 'CVCVVC', 'CVVCCV', 'CVVCVC', 'VCCVCV', 'VCCVVC', 'VCVCCV', 'VCVCVC'];
   const PAIRS = [C, C.replace(/[HWY]/g, '')].map(starters =>
-    [...starters].flatMap(first => [...(BEFORE_X.includes(first) ? C : C_NO_X)].map(second => first + second)));
+    [...starters].flatMap(first => [...(BEFORE_X.includes(first) ? C : C_NO_X)].flatMap(second =>
+      Array(weight(first) * weight(second)).fill(first + second))));
   const PALETTE = [
     ['Coral', '#FF7D69'], ['Sienna', '#A56C57'], ['Copper', '#CD7847'], ['Tangerine', '#FF9954'],
     ['Ochre', '#B68720'], ['Saffron', '#E8CA48'], ['Chartreuse', '#B4D858'], ['Olive', '#758C3D'],
@@ -22,7 +25,9 @@
   ];
   const PARTS = ['background', 'eyes', 'irises', 'pupils', 'mouth'];
   const TEXTURES = ['metallic', 'glossy', 'iridescent', 'crystalline', 'pearlescent', 'marble',
-    'velvet', 'frosted', 'terrazzo', 'crackle', 'holographic', 'woodgrain', 'plush', 'lacquered', 'damascus', 'opalescent'];
+    'velvet', 'frosted', 'terrazzo', 'crackle', 'holographic', 'woodgrain', 'plush', 'lacquered', 'damascus', 'opalescent',
+    'satin', 'leather', 'denim', 'carbon-fiber', 'hammered-metal', 'granite', 'sandstone', 'obsidian',
+    'liquid', 'bubbled', 'mosaic', 'circuitry', 'quartz', 'kintsugi', 'lava', 'starfield'];
   const MASK = 0xffffffffffffffffn;
   const EYE_RADIUS = 66.05;
   const IRIS_RADIUS = 30.7126;
@@ -57,8 +62,8 @@
       const allowY = i === 0 || i === length - 1 ||
         (p[i - 1] === 'C' && p[i + 1] === 'C' && p[i - 2] !== 'C' && p[i + 2] !== 'C');
       if (allowY) {
-        const n = rand(16);
-        letters[i] = n === 15 ? 'Y' : V[Math.floor(n / 3)];
+        const n = rand(31);
+        letters[i] = n === 30 ? 'Y' : V[Math.floor(n / 6)];
       } else letters[i] = V[rand(5)];
     }
     for (let i = p.indexOf('CC'); i !== -1; i = p.indexOf('CC', i + 2)) {
@@ -68,7 +73,7 @@
     }
     for (let i = 0; i < length; i++) {
       if (letters[i] !== undefined) continue;
-      const allowed = p.slice(i - 2, i) === 'VV' ? C_AFTER_VV : C;
+      const allowed = p.slice(i - 2, i) === 'VV' ? C_AFTER_VV_POOL : C_POOL;
       letters[i] = allowed[rand(allowed.length)];
     }
     const text = letters.join('');
@@ -153,10 +158,10 @@
     for (let i = 0; i < 5; i++) {
       const start = 64 + 18 * i;
       const color = read(dna, start, 5);
-      const textureIndex = read(dna, start + 14, 4);
+      const textureIndex = read(dna, start + 13, 5);
       attributes[PARTS[i]] = {
         color, name: PALETTE[color][0], hex: PALETTE[color][1], angle: read(dna, start + 5, 3) * 45,
-        texture: read(dna, start + 8, 6) === 63 ? TEXTURES[textureIndex] : null
+        texture: read(dna, start + 8, 5) === 31 ? TEXTURES[textureIndex] : null
       };
     }
     const mouthRolls = pairRolls(dna, 154), lidRolls = pairRolls(dna, 258);

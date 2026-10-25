@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const ubu = require('./ubu.js');
 const roles = ['background', 'eyes', 'irises', 'pupils', 'mouth'];
-const textures = ['metallic', 'glossy', 'iridescent', 'crystalline', 'pearlescent', 'marble', 'velvet', 'frosted', 'terrazzo', 'crackle', 'holographic', 'woodgrain', 'plush', 'lacquered', 'damascus', 'opalescent'];
+const textures = ['metallic', 'glossy', 'iridescent', 'crystalline', 'pearlescent', 'marble', 'velvet', 'frosted', 'terrazzo', 'crackle', 'holographic', 'woodgrain', 'plush', 'lacquered', 'damascus', 'opalescent', 'satin', 'leather', 'denim', 'carbon-fiber', 'hammered-metal', 'granite', 'sandstone', 'obsidian', 'liquid', 'bubbled', 'mosaic', 'circuitry', 'quartz', 'kintsugi', 'lava', 'starfield'];
 function set(dna, start, width, value) {
   for (let i = 0; i < width; i++) {
     const bit = start + i, mask = 1 << (7 - (bit & 7));
@@ -55,7 +55,7 @@ test('exact text uses SHA-512, and encoding preserves every bit including unassi
   for (const bad of ['', 'A'.repeat(43), '0'.repeat(64), 'A'.repeat(85), 'A'.repeat(87), 'A'.repeat(85) + 'B']) assert.throws(() => ubu.fromCode(bad));
   for (const length of [0, 32, 63, 65]) assert.throws(() => ubu.decode(new Uint8Array(length)));
 });
-test('each slot has sixteen mutually exclusive materials at 1/1024 each', () => {
+test('each slot has thirty-two mutually exclusive materials at 1/1024 each', () => {
   for (let slot = 0; slot < 5; slot++) {
     const counts = {};
     for (let flags = 0; flags < 1024; flags++) {
@@ -63,7 +63,7 @@ test('each slot has sixteen mutually exclusive materials at 1/1024 each', () => 
       const texture = ubu.decode(dna).attributes[roles[slot]].texture;
       counts[texture] = (counts[texture] || 0) + 1;
     }
-    assert.equal(counts.null, 1008);
+    assert.equal(counts.null, 992);
     for (const texture of textures) assert.equal(counts[texture], 1);
     for (let angle = 0; angle < 8; angle++) {
       const dna = neutral(); set(dna, 69 + slot * 18, 3, angle);

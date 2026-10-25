@@ -38,8 +38,8 @@ test('changing only Ubuquity does not change appearance rarity', () => {
 
 test('changing only texture-angle bits does not change appearance rarity', () => {
   const dna1 = ubu.randomDNA();
-  // Slot 0: six-bit gate 63, four-bit selector 0 (metallic).
-  dna1[9] = 252; dna1[10] &= 63;
+  // Slot 0: five-bit gate 31, five-bit selector 0 (metallic).
+  dna1[9] = 248; dna1[10] &= 63;
   // Modify angle bits (byte 8, lower 3 bits)
   const dna2 = new Uint8Array(dna1);
   dna2[8] = (dna2[8] ^ 0b00000101);
@@ -223,7 +223,7 @@ test('one rare finish contributes 10 bits; all five matching colors contribute 2
     parts: { praenomen: 'A', cognomen: 'B', fullName: 'A B C' }
   };
   const scoreOneFinish = rarity.scoreRarity(modelOneFinish);
-  const expectedFinishes = 10 + 4 * -Math.log2(63 / 64);
+  const expectedFinishes = 10 + 4 * -Math.log2(31 / 32);
   closeTo(scoreOneFinish.breakdown.finishes, expectedFinishes, 'one rare finish contribution');
 
   const modelMonochrome = {

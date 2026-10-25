@@ -1,6 +1,6 @@
 # Ubu DNA specification
 
-Owner-approved replacement schema, 2026-10-24 (America/New_York). DNA is exactly 512 bits. Previous 256-bit beta ubus are obsolete and rejected, with no conversion or compatibility path. Assigned fields have fixed positions; later additions may use only the unassigned bits. All sixteen assigned materials have distinct rendering patterns.
+Owner-approved replacement schema, 2026-10-25 (America/New_York). DNA is exactly 512 bits. Previous 256-bit beta ubus are obsolete and rejected, with no conversion or compatibility path. Assigned fields have fixed positions; later additions may use only the unassigned bits. All sixteen assigned materials have distinct rendering patterns.
 
 ## Input and representation
 
@@ -68,10 +68,10 @@ Each 18-bit slot starts at bit 64 + 18 × slot index (0–4).
 | --- | --- |
 | 0–4 | Color index, 0–31 |
 | 5–7 | Material angle, 0–7 mapping to 0°, 45°, …, 315° |
-| 8–13 | Material gate, active only for 63 (all ones) |
-| 14–17 | Material selector, 0–15 |
+| 8–12 | Material gate, active only for 31 (all ones) |
+| 13–17 | Material selector, 0–31 |
 
-An inactive gate means default matte regardless of selector. A successful gate selects exactly one material: any special material is 1/64 per part; each particular material is 1/1024. The selector order is:
+An inactive gate means default matte regardless of selector. A successful gate selects exactly one material: any special material is 1/32 per part; each particular material is 1/1024. The selector order is:
 
 | Selector | Material |
 | --- | --- |
@@ -91,8 +91,24 @@ An inactive gate means default matte regardless of selector. A successful gate s
 | 13 | Lacquered |
 | 14 | Damascus |
 | 15 | Opalescent |
+| 16 | Satin |
+| 17 | Leather |
+| 18 | Denim |
+| 19 | Carbon Fiber |
+| 20 | Hammered Metal |
+| 21 | Granite |
+| 22 | Sandstone |
+| 23 | Obsidian |
+| 24 | Liquid |
+| 25 | Bubbled |
+| 26 | Mosaic |
+| 27 | Circuitry |
+| 28 | Quartz |
+| 29 | Kintsugi |
+| 30 | Lava |
+| 31 | Starfield |
 
-The original four material designs remain unchanged. Pearlescent (4) adds a soft pastel sheen; marble (5) adds branching stone veins; lacquered (13) adds deep shading and sharp polished reflections; damascus (14) adds contrasting etched alloys with polished steel luster and irregular turbulent bands. Velvet (6) adds continuous textured nap with an extreme matte finish and no directional sheen; frosted (7) adds a cool haze with branching ice crystals; holographic (10) adds repeating spectral reflections and fine diffraction grooves; woodgrain (11) adds long fibers bending around a fixed knot, retaining the palette color as the stain. Terrazzo (8) adds scattered stone chips; crackle (9) adds a connected jagged glaze-crack network with chipped edges; plush (12) replaces the former Silken finish with overlapping soft curls and deep pile, as requested by the owner; its selector and rarity remain unchanged; opalescent (15) adds milky depth with scattered soft color patches. These rendering additions do not change any DNA assignments. Rotate designed materials about the global outer-circle center (180, 180), clockwise in SVG coordinates. Default matte has fixed zero orientation. Fixed procedural detail must not consume DNA or uburithm draws. Interactive lighting is presentation only; thumbnails remain static.
+The sixteen original material designs remain unchanged. Granite (21) adds dense mineral speckles and crystalline grains with stone polish luster; satin (16) adds fine silky fibers with a broad directional sheen; sandstone (22) adds layered sedimentary bands with fine porous grain; starfield (31) adds deep nebula clouds, starry pinpricks, and sparkle diffraction spikes; quartz (28) adds translucent hexagonal crystal prism formations with internal fractures and pale refractive glints; obsidian (23) adds deep glassy reflections with sharp angular conchoidal fractures; mosaic (26) adds individually shaded polygonal tiles with contrasting recessed grout lines; hammered metal (20) adds repoussé shallow dimples with localized specular highlights; kintsugi (29) adds dark irregular glaze fractures repaired with gleaming molten gold seams. IDs 17–19, 24–25, 27, and 30 are reserved for future visual shaders, gracefully defaulting to matte until implemented. Pearlescent (4) adds a soft pastel sheen; marble (5) adds branching stone veins; lacquered (13) adds deep shading and sharp polished reflections; damascus (14) adds contrasting etched alloys with polished steel luster and irregular turbulent bands. Velvet (6) adds continuous textured nap with an extreme matte finish and no directional sheen; frosted (7) adds a cool haze with branching ice crystals; holographic (10) adds repeating spectral reflections and fine diffraction grooves; woodgrain (11) adds long fibers bending around a fixed knot, retaining the palette color as the stain. Terrazzo (8) adds scattered stone chips; crackle (9) adds a connected jagged glaze-crack network with chipped edges; plush (12) replaces the former Silken finish with overlapping soft curls and deep pile, as requested by the owner; its selector and rarity remain unchanged; opalescent (15) adds milky depth with scattered soft color patches. These rendering additions do not change any DNA assignments. Rotate designed materials about the global outer-circle center (180, 180), clockwise in SVG coordinates. Default matte has fixed zero orientation. Fixed procedural detail must not consume DNA or uburithm draws. Interactive lighting is presentation only; thumbnails remain static.
 
 ## Colors
 

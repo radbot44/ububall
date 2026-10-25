@@ -1,6 +1,6 @@
 # The uburithm
 
-Frozen by owner acceptance on 2026-10-23 (America/New_York). ubu.js implements this permanent naming algorithm. Optimizations must preserve seed-to-name outputs and draw consumption.
+Owner-approved naming algorithm update on 2026-10-25 (America/New_York). ubu.js implements this permanent naming algorithm. Optimizations must preserve seed-to-name outputs and draw consumption.
 
 ## Source review
 
@@ -12,12 +12,12 @@ Reviewed the supplied standalone generator and uburoom's web/ubumfa.js. The rele
 - Generate nomen first. Select extra length from [2, 3, 4, 6], generate that word, select before/after orientation, then generate an opposite word of length 6 minus extra length unless that length is zero.
 - Title-case the generated ASCII words, retaining named slots even when a surrounding slot is empty. Join nonempty slots with one ASCII space.
 - Ordinary vowels, in order: AEIOU.
-- Consonants, in order: BCDFGHJKLMNPQRSTVWXYZ. Y can also be a restricted vowel.
+- Consonants, in order: BCDFGHJKLMNPQRSTVWXYZ. Weighted distribution: standard 16 consonants have weight 6; K and Y have weight 3; Q has weight 2; X and Z have weight 1 (total pool weight 106). Y can also be a restricted vowel.
 - Six-letter pattern order: CVCVCV, CVCVVC, CVVCCV, CVVCVC, VCCVCV, VCCVVC, VCVCCV, VCVCVC.
 - For other required lengths (2, 3, 4), choose CV or VC for each two-letter block. An odd trailing position alternates with its previous position.
 - VV draws from all 25 ordered ordinary-vowel pairs in vowel-major order, including doubles. Y cannot occupy either VV position.
-- For other vowel positions, Y is allowed at a word edge, or between two single consonants if neither neighbor belongs to a CC run. At eligible positions each ordinary vowel has weight three and Y has weight one (sixteen outcomes); otherwise draw from AEIOU.
-- For CC, X may only follow one of HLNRSWYXZ. Immediately after VV, a CC pair cannot start with H, W or Y. Draw across the complete allowed ordered pair list, rather than drawing the first and second characters independently.
+- For other vowel positions, Y is allowed at a word edge, or between two single consonants if neither neighbor belongs to a CC run. At eligible positions each ordinary vowel has weight six and Y has weight one (thirty-one outcomes); otherwise draw from AEIOU.
+- For CC, X may only follow one of HLNRSWYXZ. Immediately after VV, a CC pair cannot start with H, W or Y. Each allowed pair (c1, c2) is weighted by w(c1) × w(c2) across the complete ordered pair pool, rather than drawing the first and second characters independently.
 - A standalone consonant immediately after VV cannot be Y.
 
 ## Permanent random stream
@@ -47,8 +47,8 @@ Between words, retain the reference order: nomen, extra length, extra word, orie
 
 The reference consonantPair function recalculates the number of allowed pairs and scans groups on every call. Precompute two ordered pair arrays once:
 
-- Normal context: 429 ordered pairs.
-- Immediately after VV: 366 ordered pairs.
+- Normal context: 11,171 weighted instances across 429 distinct pairs.
+- Immediately after VV: 9,581 weighted instances across 366 distinct pairs.
 
 Build each in exactly the reference order: first characters in their original alphabet order, second characters in the original allowed-second alphabet order. One draw with the original outcome count then directly indexes the array. This preserves the reference selection and draw count while avoiding repeated counting and scanning. The pair counts were checked with an isolated Node calculation.
 
