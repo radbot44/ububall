@@ -412,12 +412,12 @@
         }
       }
     } else if (attribute.texture === 'quartz') {
-      // Regular hexagonal crystal lattice with 6-faceted isometric prism cells
-      const R = 28;
+      // Regular hexagonal crystal lattice with 6-faceted prismatic columns
+      const R = 48;
       const dx = R * Math.sqrt(3);
       const dy = R * 1.5;
-      for (let row = -2; row <= 14; row++) {
-        for (let col = -2; col <= 14; col++) {
+      for (let row = -1; row <= 8; row++) {
+        for (let col = -1; col <= 8; col++) {
           const cx = -180 + col * dx + (Math.abs(row % 2) ? dx / 2 : 0);
           const cy = -180 + row * dy;
           const verts = [];
@@ -425,18 +425,19 @@
             const a = k * Math.PI / 3 + Math.PI / 6;
             verts.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]);
           }
+          // 6 rhombohedral crystal prism facets meeting at apex
           for (let k = 0; k < 6; k++) {
             const v1 = verts[k], v2 = verts[(k + 1) % 6];
             const triangle = [[cx, cy], v1, v2];
-            const faceAngle = k * Math.PI / 3;
-            const dirLight = (Math.cos(faceAngle - Math.PI / 4) + 1) / 2;
+            const faceAngle = k * Math.PI / 3 + Math.PI / 6;
+            const dirLight = (Math.cos(faceAngle + Math.PI * 0.75) + 1) / 2;
             const fracture = roll();
-            const light = dirLight * 0.65 + fracture * 0.35;
-            const fill = light > 0.48 ? '#f0f8ff' : '#05111c';
-            const opacity = 0.08 + Math.abs(light - 0.48) * 0.82;
+            const light = dirLight * 0.7 + fracture * 0.3;
+            const fill = light > 0.46 ? '#ffffff' : '#000000';
+            const opacity = 0.04 + Math.abs(light - 0.46) * 0.48;
             const facet = svgNode('polygon', {
-              points: triangle.map(p => `${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(' '),
-              fill, opacity
+              points: triangle.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '),
+              fill, opacity: opacity.toFixed(3)
             });
             pattern.append(facet);
             if (effects) {
@@ -445,10 +446,25 @@
                 Math.min(0.78, opacity + 0.22 * (x * Math.cos(normal) + y * Math.sin(normal))))));
             }
           }
+          // Interior facet ridge lines from center apex to vertices
+          let ridges = '';
+          for (let k = 0; k < 6; k++) {
+            ridges += `M${cx.toFixed(1)} ${cy.toFixed(1)}L${verts[k][0].toFixed(1)} ${verts[k][1].toFixed(1)}`;
+          }
+          pattern.append(svgNode('path', {
+            d: ridges, fill: 'none', stroke: '#e8f8ff',
+            'stroke-width': 0.75, opacity: 0.32
+          }));
+          // Hexagonal crystal perimeter outline
+          pattern.append(svgNode('polygon', {
+            points: verts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '),
+            fill: 'none', stroke: '#defaff', 'stroke-width': 1.1, opacity: 0.45
+          }));
+          // Specular glint on selected crystal apexes
           if (roll() > 0.6) {
-            pattern.append(svgNode('polygon', {
-              points: verts.map(p => `${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(' '),
-              fill: 'none', stroke: '#defaff', 'stroke-width': 0.65, opacity: 0.38
+            pattern.append(svgNode('circle', {
+              cx: cx.toFixed(1), cy: cy.toFixed(1), r: (1.2 + roll() * 1.5).toFixed(1),
+              fill: '#ffffff', opacity: 0.8
             }));
           }
         }
@@ -592,24 +608,27 @@
       }
       lighting('leather-sheen', [[0, '#fff', 0], [.35, '#fff', .03], [.48, '#fff', .25], [.58, '#fff', .06], [1, '#fff', 0]]);
     } else if (attribute.texture === 'carbon-fiber') {
-      lighting('carbon-base', [[0, '#000', .6], [.3, '#000', .35], [.5, '#fff', .35], [1, '#000', .7]], true);
+      lighting('carbon-base', [[0, '#000', .35], [.3, '#000', .18], [.5, '#fff', .25], [1, '#000', .45]], true);
       // Tight woven 2x2 checker pattern with alternating reflective strands
       const carbon = svgNode('pattern', { id: id + '-twill', patternUnits: 'userSpaceOnUse', width: 36, height: 36 });
       for (const [bx, by, horiz] of [[0, 0, true], [18, 18, true], [18, 0, false], [0, 18, false]]) {
-        carbon.append(svgNode('rect', { x: bx, y: by, width: 18, height: 18, fill: horiz ? '#1a1a1a' : '#0d0d0d' }));
+        carbon.append(svgNode('rect', {
+          x: bx, y: by, width: 18, height: 18,
+          fill: '#000000', 'fill-opacity': horiz ? 0.38 : 0.58
+        }));
         for (let s = 0; s < 6; s++) {
           const pos = s * 3 + 1.5;
           if (horiz) {
             carbon.append(svgNode('line', {
               x1: bx, y1: by + pos, x2: bx + 18, y2: by + pos,
-              stroke: s % 2 ? '#ffffff' : '#333333', 'stroke-width': 0.8,
-              opacity: s % 2 ? 0.35 : 0.2
+              stroke: s % 2 ? '#ffffff' : '#000000', 'stroke-width': 0.8,
+              opacity: s % 2 ? 0.38 : 0.22
             }));
           } else {
             carbon.append(svgNode('line', {
               x1: bx + pos, y1: by, x2: bx + pos, y2: by + 18,
-              stroke: s % 2 ? '#ffffff' : '#333333', 'stroke-width': 0.8,
-              opacity: s % 2 ? 0.15 : 0.1
+              stroke: s % 2 ? '#ffffff' : '#000000', 'stroke-width': 0.8,
+              opacity: s % 2 ? 0.18 : 0.14
             }));
           }
         }
@@ -619,7 +638,7 @@
       lighting('carbon-flash-b', [[0, '#fff', 0], [.52, '#fff', 0], [.6, '#fff', .45], [.66, '#fff', .08], [1, '#fff', 0]]);
     } else if (attribute.texture === 'denim') {
       lighting('denim-diffuse', [[0, '#fff', .14], [.5, '#000', .05], [1, '#000', .28]], true);
-      // 3/1 right-hand diagonal twill weave with white weft threads peeking through indigo warp
+      // 3/1 right-hand diagonal twill weave with white weft threads peeking through colored warp
       const twill = svgNode('pattern', { id: id + '-denim', patternUnits: 'userSpaceOnUse', width: 24, height: 24 });
       for (let y = 0; y < 24; y += 3) {
         for (let x = 0; x < 24; x += 3) {
@@ -627,15 +646,15 @@
           const isWeft = diag === 0 || diag === 3;
           twill.append(svgNode('rect', {
             x, y, width: 2.8, height: 2.8,
-            fill: isWeft ? '#f0f3f8' : '#08182b',
-            opacity: isWeft ? 0.42 : 0.75
+            fill: isWeft ? '#ffffff' : '#000000',
+            opacity: isWeft ? 0.38 : 0.38
           }));
         }
       }
       for (let d = -24; d <= 48; d += 6) {
         twill.append(svgNode('line', {
           x1: d, y1: 0, x2: d + 24, y2: 24,
-          stroke: '#ffffff', 'stroke-width': 0.75, opacity: 0.18
+          stroke: '#ffffff', 'stroke-width': 0.75, opacity: 0.20
         }));
       }
       defs.append(twill); cover(`url(#${id}-denim)`);
@@ -665,7 +684,7 @@
       }
       lighting('bubble-sheen', [[0, '#fff', 0], [.25, '#fff', 0], [.42, '#fff', .5], [.5, '#defaff', .2], [1, '#fff', 0]]);
     } else if (attribute.texture === 'lava') {
-      lighting('basalt-crust', [[0, '#110200', .5], [.5, '#000', .7], [1, '#000', .85]], true);
+      lighting('basalt-crust', [[0, '#000', .35], [.5, '#000', .55], [1, '#000', .72]], true);
       // Dark volcanic crust plates separated by glowing incandescent magma rivers
       const seeds = [];
       for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
@@ -694,8 +713,9 @@
         const pts = cell.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
         pattern.append(svgNode('polygon', {
           points: pts,
-          fill: s % 3 ? '#080606' : '#140c0a',
-          stroke: '#ff3700', 'stroke-width': 5.5, 'stroke-opacity': 0.7,
+          fill: '#000000',
+          'fill-opacity': s % 3 ? 0.74 : 0.62,
+          stroke: '#ff3700', 'stroke-width': 5.5, 'stroke-opacity': 0.75,
           'stroke-linejoin': 'round'
         }));
         pattern.append(svgNode('polygon', {
