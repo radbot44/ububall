@@ -11,9 +11,6 @@
     const sheet = document.createElement('canvas');
     sheet.width = 1200; sheet.height = 720;
     const sheetCtx = sheet.getContext('2d');
-    const plasticPrint = document.createElement('canvas');
-    plasticPrint.width = 440; plasticPrint.height = 1408;
-    const plasticPrintCtx = plasticPrint.getContext('2d');
     const emboss = document.createElement('canvas');
     emboss.width = emboss.height = 320;
     const embossCtx = emboss.getContext('2d');
@@ -55,28 +52,28 @@
 
     function plasticSilhouette(flat, target) {
       const y = (closed, opened) => mix(closed, opened, flat);
-      target.beginPath(); target.moveTo(-128, y(-12, -135));
-      target.bezierCurveTo(-100, y(-14, -135), -108, y(-112, -135), 0, y(-112, -135));
-      target.bezierCurveTo(108, y(-112, -135), 100, y(-14, -135), 128, y(-12, -135));
-      target.lineTo(128, y(12, 135));
-      target.bezierCurveTo(100, y(14, 135), 108, y(112, 135), 0, y(112, 135));
-      target.bezierCurveTo(-108, y(112, 135), -100, y(14, 135), -128, y(12, 135));
+      target.beginPath(); target.moveTo(-110, y(-12, -135));
+      target.bezierCurveTo(-110, y(-57, -135), -74, y(-109, -135), 0, y(-112, -135));
+      target.bezierCurveTo(74, y(-109, -135), 110, y(-57, -135), 110, y(-12, -135));
+      target.lineTo(110, y(12, 135));
+      target.bezierCurveTo(110, y(57, 135), 74, y(109, 135), 0, y(112, 135));
+      target.bezierCurveTo(-74, y(109, 135), -110, y(57, 135), -110, y(12, 135));
       target.closePath();
     }
 
     function plasticFilm(side, flat, untwist, target) {
-      const phase = side * .18 * (1 - untwist);
+      const phase = side * (1 - untwist) * (Math.PI * 2 + .35);
       const flip = Math.cos(phase), swing = Math.sin(phase);
       const ribs = [];
       for (let j = 0; j <= 12; j++) {
         const v = j / 6 - 1, rib = [];
         for (let k = 0; k <= 8; k++) {
           const u = k / 8;
-          const closedX = 124 + u * (26 + 96 * Math.sqrt(Math.max(0, 1 - v * v)));
+          const closedX = 110 + u * (36 + 104 * Math.sqrt(Math.max(0, 1 - v * v)));
           const closedY = mix(v * 12, v * 88, ease(0, 1, u));
           const crinkle = (Math.sin(k * 1.7 + j * 2.3 + side) * 3 + Math.sin(k * .9 - j * 1.8) * 1.4) * u * (1 - flat * .55);
           rib.push({
-            x: mix(closedX + untwist * u * 22, 124 + u * 154, flat) + u * v * swing * 10 + Math.sin(j * 2.7 + k * .7) * u * 2,
+            x: mix(closedX, 110 + u * 158, flat) + u * v * swing * 10 + Math.sin(j * 2.7 + k * .7) * u * 2,
             y: (mix(closedY, v * 135, flat) + crinkle) * flip + swing * u * (9 + Math.sin(j * 1.9 + side) * 6)
           });
         }
@@ -124,7 +121,7 @@
       if (release === 1) return;
       target.save(); target.scale(side, 1);
       target.globalAlpha *= 1 - release;
-      target.translate(128 + release * 7, 0);
+      target.translate(118 + release * 7, 0);
       target.beginPath(); target.moveTo(-13, -13);
       target.bezierCurveTo(-3, -22, 11, -19, 17, -10);
       target.bezierCurveTo(10, -3, 11, 6, 17, 12);
@@ -142,8 +139,12 @@
       target.restore();
     }
 
-    function plasticTexture(flat, untwist, target) {
+    function plasticCenter(flat, untwist, target) {
       target.save(); plasticSilhouette(flat, target); target.fillStyle = color; target.fill(); target.clip();
+      const round = target.createRadialGradient(-35 + pointer * 12, -45, 5, 6, 15, 130);
+      round.addColorStop(0, '#ffffff70'); round.addColorStop(.35, '#ffffff14'); round.addColorStop(.65, '#00000000'); round.addColorStop(.85, '#00000040'); round.addColorStop(1, '#000000b0');
+      target.globalAlpha *= 1 - flat * .75; target.fillStyle = round; target.fillRect(-110, -135, 220, 270);
+      target.globalAlpha /= 1 - flat * .75;
       for (const c of plasticCreases) {
         target.beginPath(); target.moveTo(c.x - 5, c.y);
         target.lineTo(c.x + c.dx * .55, c.y + c.dy * .38); target.lineTo(c.x + c.dx, c.y + c.dy);
@@ -170,49 +171,12 @@
       target.fillStyle = gradient(target, shineX - 40, -135, shineX + 80, 135, [[0, '#ffffff00'], [.42, '#ffffff00'], [.46, '#ffffff38'], [.49, '#ffffff08'], [1, '#ffffff00']]);
       target.fillRect(-110, -135, 220, 270);
       target.restore();
-    }
-
-    function plasticCenter(flat, untwist, target) {
-      // Roll the printed surface around the horizontal axis, keeping the solid
-      // silhouette and its lighting stationary instead of squashing a flat disc.
-      plasticPrintCtx.resetTransform();
-      plasticPrintCtx.fillStyle = color; plasticPrintCtx.fillRect(0, 0, 440, 1408);
-      plasticPrintCtx.setTransform(2, 0, 0, 2, 220, 704);
-      plasticTexture(1, 0, plasticPrintCtx);
-      const spin = untwist * 1408;
-      target.save(); plasticSilhouette(flat, target); target.clip();
-      target.fillStyle = color; target.fillRect(-130, -135, 260, 270);
-      for (let y = -135; y < 135; y++) {
-        const latitude = Math.asin(Math.max(-1, Math.min(1, (y + .5) / 112)));
-        const surfaceY = mix(latitude * 112, y, flat) + spin;
-        const sourceY = ((surfaceY + 352) % 704 + 704) % 704;
-        target.drawImage(plasticPrint, 0, Math.min(1406, sourceY * 2), 440, 2, -128, y, 256, 1.1);
-      }
-      target.globalAlpha *= 1 - flat * .8;
-      target.fillStyle = gradient(target, 0, -112, 0, 112, [[0, '#000000a0'], [.16, '#ffffff35'], [.35, '#ffffff12'], [.58, '#00000008'], [.83, '#00000060'], [1, '#000000cc']]);
-      target.fillRect(-130, -135, 260, 270);
-      target.fillStyle = gradient(target, -128, 0, 128, 0, [[0, '#00000085'], [.18, '#00000020'], [.4, '#ffffff18'], [.68, '#ffffff00'], [.86, '#00000030'], [1, '#00000085']]);
-      target.fillRect(-130, -135, 260, 270);
-      const glow = target.createRadialGradient(-28 + pointer * 14, -46, 2, -20, -28, 100);
-      glow.addColorStop(0, '#ffffff48'); glow.addColorStop(.45, '#ffffff12'); glow.addColorStop(1, '#ffffff00');
-      target.fillStyle = glow; target.fillRect(-130, -135, 260, 270);
-      // Gathered folds cross the colored shoulders into the clear necks.
-      for (const side of [-1, 1]) {
-        target.save(); target.scale(side, 1);
-        target.fillStyle = gradient(target, 92, 0, 130, 0, [[0, '#dcefff00'], [1, '#dcefff60']]);
-        target.fillRect(92, -80, 40, 160);
-        for (let i = -2; i <= 2; i++) {
-          target.beginPath(); target.moveTo(88, i * 18);
-          target.quadraticCurveTo(107, i * 8, 130, i * 4);
-          target.strokeStyle = i % 2 ? '#ffffff50' : '#00000030'; target.lineWidth = 1; target.stroke();
-        }
-        target.restore();
-      }
-      target.restore();
+      plasticSilhouette(flat, target);
+      target.strokeStyle = '#ffffff45'; target.lineWidth = .8; target.stroke();
     }
 
     function renderPlastic(t) {
-      const untwist = ease(.03, .49, t), flat = ease(.49, .65, t), peel = ease(.59, .94, t);
+      const untwist = ease(0, .38, t), flat = ease(.16, .48, t), peel = ease(.36, .91, t);
       sheetCtx.resetTransform(); sheetCtx.clearRect(0, 0, sheet.width, sheet.height);
       sheetCtx.setTransform(2, 0, 0, 2, 600, 360);
       sheetCtx.save();
@@ -602,7 +566,7 @@
       ctx.resetTransform(); ctx.clearRect(0, 0, width, height);
       const scale = width / 600; ctx.setTransform(scale, 0, 0, scale, width / 2, height * .46);
 
-      const revealStart = currentType && currentType.id === 'plastic' ? .59 : .18;
+      const revealStart = currentType && currentType.id === 'plastic' ? .36 : .18;
       if (progress > revealStart) {
         const reveal = ease(revealStart, revealStart + .14, progress);
         const fan = ease(.36, .78, progress);
