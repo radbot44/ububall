@@ -80,6 +80,54 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await storage.exec('SELECT remaining FROM mint_state'))[0].remaining, 1);
     assert.equal((await storage.exec('SELECT COUNT(*) AS count FROM issued'))[0].count, 5);
   });
+  await t.test('sort pages and owner-backed favorites survive reloads and reject cross-account writes', async () => {
+    const readCollection = async (sort, after = '') => {
+      const response = await fetch('/api/ubus?sort=' + sort + (after ? '&after=' + after : ''), { headers });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const serials = firstCertificates.map(text => JSON.parse(text).serial);
+    const recent = await readCollection('recent');
+    assert.deepEqual(recent.ubus.map(row => row.serial), [...serials].sort().reverse());
+    assert.deepEqual((await readCollection('old')).ubus.map(row => row.serial), [...serials].sort());
+    assert.deepEqual((await readCollection('serial')).ubus.map(row => row.serial), [...serials].sort());
+    const middle = recent.ubus[2].serial;
+    assert.deepEqual((await readCollection('recent', middle)).ubus.map(row => row.serial),
+      recent.ubus.slice(3).map(row => row.serial));
+    const storage = await server.getWorker().getDurableObjectStorage('MINT', { name: env.MINT_ID });
+    const rarityExpected = (await storage.exec('SELECT serial FROM issued WHERE owner=? ORDER BY rarity_bits DESC, serial DESC',
+      '123456789012345678')).map(row => row.serial);
+    assert.deepEqual((await readCollection('rarity')).ubus.map(row => row.serial), rarityExpected);
+    assert.equal((await fetch('/api/ubus?sort=unexpected', { headers })).status, 400);
+    assert.equal((await fetch('/api/ubus?after=000000999999', { headers })).status, 400);
+
+    const favorite = (data, h = headers) => fetch('/api/favorites', {
+      method: 'POST', headers: h, body: JSON.stringify(data)
+    });
+    const target = [...serials].sort()[0];
+    assert.equal((await favorite({ serial: target, favorite: true })).status, 200);
+    assert.equal((await favorite({ serial: target, favorite: true })).status, 200);
+    let favorites = await readCollection('favorite');
+    assert.equal(favorites.ubus[0].serial, target);
+    assert.equal(favorites.ubus[0].favorite, true);
+    const another = [...serials].sort()[1];
+    assert.equal((await favorite({ serials: [another, '000000999999'] })).status, 200);
+    favorites = await readCollection('favorite');
+    assert.deepEqual(favorites.ubus.filter(row => row.favorite).map(row => row.serial).sort(), [target, another].sort());
+
+    const other = await signedIn('234567890123456789');
+    const outsider = { ...headers, Cookie: other.cookie, 'X-Ubu-CSRF': other.csrf };
+    assert.equal((await favorite({ serial: target, favorite: false }, outsider)).status, 404);
+    assert.equal((await fetch('/api/ubus?sort=favorite', { headers: outsider })).status, 200);
+    assert.equal((await favorite({ serial: target, favorite: false }, { ...headers, 'X-Ubu-CSRF': 'wrong' })).status, 403);
+    assert.equal((await favorite({ serials: [target, 'not-a-serial'] })).status, 400);
+    await server.getWorker().evictDurableObject('MINT', { name: env.MINT_ID });
+    favorites = await readCollection('favorite');
+    assert.equal(favorites.ubus.filter(row => row.favorite).length, 2);
+    assert.equal((await favorite({ serial: target, favorite: false })).status, 200);
+    favorites = await readCollection('favorite');
+    assert.equal(favorites.ubus.find(row => row.serial === target).favorite, false);
+  });
   await t.test('state survives object eviction; next batch starts only after exhaustion', async () => {
     await server.getWorker().evictDurableObject('MINT', { name: env.MINT_ID });
     assert.deepEqual((await (await issue('first_request_0001')).json()).certificates, firstCertificates);
