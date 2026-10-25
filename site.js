@@ -499,7 +499,8 @@
     choiceViews.forEach((view, i) => {
       const option = data.choices[i]; view.card.classList.remove('selected');
       view.scene?.setHints(option.type, option.hints);
-      const description = `Pack ${i + 1}: ` + option.hints.map((hint, j) => `Ubu ${j + 1}: background ${hint.background}; eyes, irises, pupils and mouth ${hint.accents.join(', ')}${hint.textured ? '; special finish' : '; matte finishes'}`).join('. ');
+      const hasSpecial = option.hints.some(h => h.textured);
+      const description = `Pack ${i + 1}: backgrounds ${option.hints.map(h => h.background).join(', ')}${hasSpecial ? '; special finish in pack' : '; matte finishes'}`;
       view.button.setAttribute('aria-label', description);
       view.button.title = description;
     });

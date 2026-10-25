@@ -69,47 +69,6 @@
       });
     }
 
-    function hintAccents(target) {
-      if (!packHints) return;
-      packHints.forEach((hint, i) => {
-        const angle = i * Math.PI * 2 / 5 - Math.PI / 2, x = Math.cos(angle) * 64, y = Math.sin(angle) * 64;
-        target.save(); target.translate(x, y); target.rotate(angle + .6);
-        hint.accents.forEach((hex, j) => {
-          target.beginPath(); target.ellipse((j - 1.5) * 7, 0, 2.6, 7 - j * .6, .3, 0, Math.PI * 2);
-          target.fillStyle = hex; target.fill();
-        });
-        if (hint.textured) {
-          if (currentType.id === 'plastic') {
-            // A pearlescent heat-sealed fold follows the printed color region.
-            const fold = () => {
-              target.beginPath(); target.moveTo(-22, 18);
-              target.bezierCurveTo(-8, 11, 7, 23, 23, 15);
-            };
-            fold();
-            target.strokeStyle = '#10121755'; target.lineWidth = 5; target.stroke();
-            target.strokeStyle = gradient(target, -24 + pointer * 10, 0, 26 + pointer * 10, 0,
-              [[0, '#c8e9ed55'], [.28, '#e8d8f2aa'], [.5, '#fff9e8ee'], [.72, '#c8e9edaa'], [1, '#e8d8f244']]);
-            target.lineWidth = 3; target.stroke();
-            target.save(); target.translate(0, -1); fold();
-            target.strokeStyle = '#ffffff70'; target.lineWidth = .65; target.stroke();
-            target.restore();
-          } else {
-            // A small impressed seal belongs to the foil, not a floating badge.
-            target.translate(0, 20);
-            for (const [offset, stroke] of [[.9, '#10121790'], [-.6, '#ffffffa0']]) {
-              target.beginPath(); target.ellipse(offset, offset, 9, 6, 0, 0, Math.PI * 2);
-              target.strokeStyle = stroke; target.lineWidth = 1.1; target.stroke();
-            }
-            target.strokeStyle = '#ffffff90'; target.lineWidth = .8;
-            for (let j = -1; j <= 1; j++) {
-              target.beginPath(); target.moveTo(j * 4 - 1, -2); target.lineTo(j * 4 + 1, 2); target.stroke();
-            }
-          }
-        }
-        target.restore();
-      });
-    }
-
     // --- Plastic Cellophane Wrapper ---
     let plasticCreases = [];
     function setupPlastic() {
@@ -212,7 +171,30 @@
     function plasticTexture(target) {
       target.save(); plasticSilhouette(1, target); target.fillStyle = color; target.fill(); target.clip();
       hintColors(target);
-      hintAccents(target);
+      if (packHints?.some(h => h.textured)) {
+        // A pearlescent heat-sealed seam across the cellophane indicates a special finish in the pack.
+        target.save();
+        const seamY = -64;
+        const fold = () => {
+          target.beginPath(); target.moveTo(-96, seamY);
+          target.bezierCurveTo(-32, seamY - 8, 32, seamY + 6, 96, seamY - 2);
+        };
+        fold();
+        target.strokeStyle = '#10121760'; target.lineWidth = 5; target.stroke();
+        target.strokeStyle = gradient(target, -80 + pointer * 25, 0, 80 + pointer * 25, 0,
+          [[0, '#c8e9ed44'], [.28, '#e8d8f2bb'], [.5, '#fff9e8ee'], [.72, '#c8e9edbb'], [1, '#e8d8f244']]);
+        target.lineWidth = 2.8; target.stroke();
+        target.save(); target.translate(0, -1); fold();
+        target.strokeStyle = '#ffffff85'; target.lineWidth = .7; target.stroke();
+        target.restore();
+        target.strokeStyle = '#ffffff55'; target.lineWidth = .75;
+        for (let cx = -88; cx <= 88; cx += 8) {
+          const tNorm = (cx + 96) / 192;
+          const cy = seamY + (-8 * (1 - tNorm) + 6 * tNorm) * (1 - Math.abs(tNorm - .5) * 1.8);
+          target.beginPath(); target.moveTo(cx, cy - 3); target.lineTo(cx + .5, cy + 3); target.stroke();
+        }
+        target.restore();
+      }
       for (const c of plasticCreases) {
         target.beginPath(); target.moveTo(c.x - 5, c.y);
         target.lineTo(c.x + c.dx * .55, c.y + c.dy * .38); target.lineTo(c.x + c.dx, c.y + c.dy);
@@ -528,7 +510,25 @@
       }
 
       sheetCtx.fillStyle = grainPattern; sheetCtx.fillRect(-135, -135, 270, 270);
-      hintAccents(sheetCtx);
+      if (packHints?.some(h => h.textured)) {
+        // An impressed mint seal stamped into the foil indicates a special finish in the pack.
+        sheetCtx.save();
+        sheetCtx.translate(pointer * 4, 80 + pointerY * 4);
+        for (const [offset, stroke] of [[1.1, '#101217a0'], [-0.8, '#ffffffc0']]) {
+          sheetCtx.beginPath(); sheetCtx.ellipse(offset, offset, 14, 9, 0, 0, Math.PI * 2);
+          sheetCtx.strokeStyle = stroke; sheetCtx.lineWidth = 1.3; sheetCtx.stroke();
+        }
+        sheetCtx.beginPath(); sheetCtx.ellipse(0, 0, 11, 6.8, 0, 0, Math.PI * 2);
+        sheetCtx.strokeStyle = '#ffffff60'; sheetCtx.lineWidth = .7; sheetCtx.stroke();
+        sheetCtx.strokeStyle = '#ffffffaa'; sheetCtx.lineWidth = .9;
+        for (let j = -2; j <= 2; j++) {
+          sheetCtx.beginPath();
+          sheetCtx.moveTo(j * 3.5 - 1, -3);
+          sheetCtx.lineTo(j * 3.5 + 1, 3);
+          sheetCtx.stroke();
+        }
+        sheetCtx.restore();
+      }
 
       sheetCtx.restore();
     }
@@ -689,33 +689,24 @@
           }
         }
         blobCtx.putImageData(blobPixels, 0, 0);
-        if (packHints) {
+        if (packHints?.some(h => h.textured)) {
           blobCtx.save(); blobCtx.globalCompositeOperation = 'source-atop';
           blobCtx.setTransform(2 / 3, 0, 0, 2 / 3, 200, 120);
-          packHints.forEach((hint, i) => {
+          // Pearly mica-like flecks embedded throughout the putty body indicate a special finish in the pack.
+          for (let i = 0; i < count; i++) {
             const lobe = lobes[i];
-            if (!lobe) return;
-            hint.accents.forEach((hex, j) => {
-              const x = lobe.x + (j - 1.5) * 11, y = lobe.y + 10 + Math.sin(j * 2) * 7;
-              const accent = blobCtx.createRadialGradient(x, y, 1, x, y, 8);
-              accent.addColorStop(0, hex + 'ee'); accent.addColorStop(1, hex + '00');
-              blobCtx.fillStyle = accent; blobCtx.fillRect(x - 8, y - 8, 16, 16);
-            });
-            if (hint.textured) {
-              // Embedded mica-like flecks travel with this lobe through splitting.
-              // Fixed positions and pointer lighting keep them from twinkling randomly.
-              for (let j = 0; j < 23; j++) {
-                const angle = j * 2.39996 + i, spread = Math.sqrt((j + .5) / 23);
-                const x = lobe.x + Math.cos(angle) * spread * 25;
-                const y = lobe.y - 14 + Math.sin(angle) * spread * 13;
-                const glint = .35 + .45 * Math.max(0, Math.cos(angle - pointer * .8 - pointerY * .5));
-                blobCtx.beginPath(); blobCtx.ellipse(x, y, 1.1 + j % 3 * .35, .65, angle, 0, Math.PI * 2);
-                blobCtx.fillStyle = `rgba(249,241,221,${glint})`; blobCtx.fill();
-                blobCtx.beginPath(); blobCtx.ellipse(x + .4, y + 1, 1, .4, angle, 0, Math.PI * 2);
-                blobCtx.fillStyle = '#10121745'; blobCtx.fill();
-              }
+            if (!lobe) continue;
+            for (let j = 0; j < 18; j++) {
+              const angle = j * 2.39996 + i * 1.25, spread = Math.sqrt((j + .5) / 18);
+              const x = lobe.x + Math.cos(angle) * spread * 27;
+              const y = lobe.y + Math.sin(angle) * spread * 16;
+              const glint = .35 + .45 * Math.max(0, Math.cos(angle - pointer * .8 - pointerY * .5));
+              blobCtx.beginPath(); blobCtx.ellipse(x, y, 1.1 + (j % 3) * .35, .65, angle, 0, Math.PI * 2);
+              blobCtx.fillStyle = `rgba(249,241,221,${glint})`; blobCtx.fill();
+              blobCtx.beginPath(); blobCtx.ellipse(x + .4, y + 1, 1, .4, angle, 0, Math.PI * 2);
+              blobCtx.fillStyle = '#10121745'; blobCtx.fill();
             }
-          });
+          }
           blobCtx.restore();
         }
       }
