@@ -76,6 +76,17 @@ class Mint {
           certificate TEXT, UNIQUE(owner, request, id)) STRICT`);
       }
 
+      // Add account-scoped favorites and persistent rarity sort keys without touching certificates.
+      // ALTER is transactional and safe on an existing Durable Object or local SQLite database.
+      const columns = this.exec('PRAGMA table_info(issued)').map(column => column.name);
+      if (!columns.includes('favorite')) this.exec('ALTER TABLE issued ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0 CHECK(favorite IN (0,1))');
+      if (!columns.includes('rarity_bits')) this.exec('ALTER TABLE issued ADD COLUMN rarity_bits REAL');
+      this.exec('CREATE INDEX IF NOT EXISTS issued_recent_sort ON issued(owner, (certificate IS NULL), issued_at DESC, serial DESC)');
+      this.exec('CREATE INDEX IF NOT EXISTS issued_old_sort ON issued(owner, (certificate IS NULL), issued_at ASC, serial ASC)');
+      this.exec('CREATE INDEX IF NOT EXISTS issued_rarity_sort ON issued(owner, (certificate IS NULL), rarity_bits DESC, serial DESC)');
+      this.exec('CREATE INDEX IF NOT EXISTS issued_serial_sort ON issued(owner, (certificate IS NULL), serial ASC)');
+      this.exec('CREATE INDEX IF NOT EXISTS issued_favorite_sort ON issued(owner, (certificate IS NULL), favorite DESC, issued_at DESC, serial DESC)');
+      this.exec('CREATE INDEX IF NOT EXISTS issued_rarity_backfill ON issued(id) WHERE rarity_bits IS NULL');
       this.exec('CREATE INDEX IF NOT EXISTS issued_owner ON issued(owner)');
       this.exec('CREATE INDEX IF NOT EXISTS issued_request ON issued(owner, request)');
       this.exec('INSERT OR IGNORE INTO mint_state VALUES (1, ?, 1, 0, 0, 0, 0, 0)', mint);
@@ -85,6 +96,19 @@ class Mint {
   exec(sql, ...bindings) { return Array.from(this.storage.exec(sql, ...bindings)); }
   transaction(callback) { return this.storage.transactionSync(callback); }
   state() { return this.exec('SELECT * FROM mint_state WHERE singleton=1')[0]; }
+  needsRarityBackfill() { return this.exec('SELECT 1 FROM issued WHERE rarity_bits IS NULL LIMIT 1').length > 0; }
+  // Bounded, resumable migration: no rewriting of signed certificates or mint records.
+  backfillRarity(chunkSize = 100) {
+    integer(chunkSize, 1000, 'rarity migration chunk');
+    return this.transaction(() => {
+      const rows = this.exec('SELECT id, dna FROM issued WHERE rarity_bits IS NULL LIMIT ?', chunkSize);
+      for (const row of rows) {
+        this.exec('UPDATE issued SET rarity_bits=? WHERE id=?',
+          scoreRarity(decode(fromCode(row.dna))).bits, row.id);
+      }
+      return rows.length;
+    });
+  }
 
   // Each call commits one bounded chunk; an interrupted batch resumes on the next call.
   prepare({ batchSize = DEFAULT_BATCH_SIZE, chunkSize = 100 } = {}) {
@@ -167,8 +191,11 @@ class Mint {
       const packId = randomCode(16);
 
       for (const item of packItems) {
-        this.exec(`INSERT INTO issued VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL)`,
-          item.id, item.serial, item.dna, state.batch, owner, request, packId, item.quintile, issuedAt, this.key);
+        this.exec(`INSERT INTO issued
+          (id, serial, dna, batch, owner, revision, request, pack_id, quintile, issued_at, key, certificate, favorite, rarity_bits)
+          VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, 0, ?)`,
+          item.id, item.serial, item.dna, state.batch, owner, request, packId, item.quintile, issuedAt, this.key,
+          scoreRarity(decode(fromCode(item.dna))).bits);
       }
 
       this.exec('DELETE FROM inventory WHERE pack_slot=?', chosenPack);
