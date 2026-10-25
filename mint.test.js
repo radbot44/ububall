@@ -40,7 +40,7 @@ test('existing issued records migrate automatically without rewriting certificat
     1792700000, 'test-1', 'original-signed-certificate');
   let mint = new Mint(storage, f.options);
   assert.equal(mint.needsRarityBackfill(), true);
-  assert.deepEqual(storage.exec('SELECT favorite, rarity_bits, certificate FROM issued'), [
+  assert.deepEqual(storage.exec('SELECT favorite, rarity_bits, certificate FROM issued').map(r => ({ ...r })), [
     { favorite: 0, rarity_bits: null, certificate: 'original-signed-certificate' }
   ]);
   assert.equal(mint.backfillRarity(1), 1);
