@@ -317,74 +317,64 @@
       }
       lighting('luster', [[0, '#fff', .3], [.4, '#fff', 0], [1, '#000', .3]], true);
     } else if (attribute.texture === 'granite') {
-      lighting('granite-depth', [[0, '#fff', .18], [.5, '#fff', .03], [1, '#000', .22]], true);
-      // Dense mineral speckles: quartz, biotite, feldspar and hornblende
-      const colors = ['#ffffff', '#141414', '#e2baa4', '#555f68', '#f0f3f6', '#222222'];
-      for (let i = 0; i < 520; i++) {
-        const cx = -180 + roll() * 720, cy = -180 + roll() * 720;
-        const radius = 0.8 + roll() * 2.8, count = 3 + Math.floor(roll() * 3), points = [];
-        for (let v = 0; v < count; v++) {
-          const a = (v + roll() * 0.4) * Math.PI * 2 / count;
-          const r = radius * (0.6 + roll() * 0.4);
-          points.push(`${(cx + Math.cos(a) * r).toFixed(1)},${(cy + Math.sin(a) * r).toFixed(1)}`);
+      // A dense, multiscale mineral matrix, grouped into compound paths.
+      const stone = svgNode('pattern', { id: id + '-minerals', patternUnits: 'userSpaceOnUse', width: 144, height: 144 });
+      const minerals = ['', '', '', '', '', ''];
+      for (let y = -1; y < 49; y++) for (let x = -1; x < 49; x++) {
+        const px = x*3 + roll()*2, py = y*3 + roll()*2;
+        const r = 1.5 + roll()*2.5;
+        let d = '';
+        for (let v=0;v<5;v++) {
+          const a = v*Math.PI*2/5, size = r*(.65+roll()*.35);
+          d += `${v ? 'L' : 'M'}${(px+Math.cos(a)*size).toFixed(2)} ${(py+Math.sin(a)*size).toFixed(2)}`;
         }
-        pattern.append(svgNode('polygon', {
-          points: points.join(' '),
-          fill: colors[i % colors.length],
-          opacity: 0.18 + roll() * 0.52
-        }));
+        minerals[Math.floor(roll()*6)] += d+'Z';
       }
-      for (let vein = 0; vein < 4; vein++) {
-        let x = -100 + vein * 160 + roll() * 40, d = `M${x.toFixed(1)} -180`;
-        for (let y = -100; y <= 540; y += 80) {
-          x += (roll() - 0.5) * 35;
-          d += `L${x.toFixed(1)} ${y}`;
-        }
-        pattern.append(svgNode('path', { d, fill: 'none', stroke: vein % 2 ? '#fff' : '#000', 'stroke-width': 0.6, opacity: 0.14 }));
-      }
-      lighting('granite-polish', [[0, '#fff', .25], [.35, '#fff', .08], [1, '#fff', 0]], true, { cx: 95, cy: 70, r: 210 });
+      const colors = ['#fff', '#000', '#fff', '#000', '#e3cbbb', '#889098'];
+      minerals.forEach((d,i) => stone.append(svgNode('path', { d, fill: colors[i], opacity: [.22,.32,.4,.17,.18,.22][i] })));
+      defs.append(stone); cover(`url(#${id}-minerals)`);
+      lighting('granite-depth', [[0, '#fff', .06], [.5, '#fff', 0], [1, '#000', .13]], true);
     } else if (attribute.texture === 'satin') {
-      lighting('satin-depth', [[0, '#fff', .32], [.3, '#fff', .1], [.65, '#000', .06], [1, '#000', .24]], true);
+      lighting('satin-depth', [[0, '#fff', .16], [.3, '#fff', .04], [.65, '#000', .03], [1, '#000', .16]], true);
       // Fine silky fibers with alternating thread opacity
       const silk = svgNode('pattern', { id: id + '-silk', patternUnits: 'userSpaceOnUse', width: 48, height: 48 });
       for (let i = 0; i < 32; i++) {
         const y = i * 1.5;
-        silk.append(svgNode('line', {
-          x1: 0, y1: y, x2: 48, y2: y,
+        silk.append(svgNode('path', {
+          d: `M0 ${y}q12 -0.65 24 0t24 0`, fill: 'none',
           stroke: i % 2 ? '#ffffff' : '#000000',
           'stroke-width': 0.75,
-          opacity: 0.05 + roll() * 0.12
+          opacity: 0.012 + roll() * 0.025
         }));
       }
       defs.append(silk); cover(`url(#${id}-silk)`);
-      lighting('satin-sheen', [[0, '#fff', 0], [.32, '#fff', 0], [.46, '#fff', .58], [.54, '#fff', .18], [.68, '#fff', 0]]);
+      // Broad curved glints suggest the soft drape of satin rather than metal.
+      const silkLight = svgNode('radialGradient', { id: id + '-drape' });
+      for (const [offset, opacity] of [[0, .36], [.35, .22], [.7, .06], [1, 0]]) {
+        silkLight.append(svgNode('stop', { offset, 'stop-color': '#fff', 'stop-opacity': opacity }));
+      }
+      defs.append(silkLight);
+      for (const [x, y, rx, ry, angle] of [[85, 100, 65, 310, -25], [300, 285, 90, 330, 24]]) {
+        pattern.append(svgNode('ellipse', { cx: x, cy: y, rx, ry,
+          transform: `rotate(${angle} ${x} ${y})`, fill: `url(#${id}-drape)` }));
+      }
+      lighting('satin-sheen', [[0, '#fff', 0], [.28, '#fff', .025], [.5, '#fff', .1], [.72, '#fff', .025], [1, '#fff', 0]]);
     } else if (attribute.texture === 'sandstone') {
-      lighting('sandstone-depth', [[0, '#fff', .2], [.5, '#fff', .03], [1, '#000', .22]], true);
-      // Irregular flowing sedimentary bands
-      const strataColors = ['#fff8eb', '#d9a76a', '#c26d4e', '#6b4430', '#eed9be', '#8d5b3f'];
-      for (let b = -4; b <= 18; b++) {
-        const baseY = b * 36;
-        let d = `M-180 ${baseY}`;
-        for (let x = -140; x <= 540; x += 40) {
-          const y = baseY + Math.sin(x / 65 + b * 1.3) * 14 + Math.sin(x / 25 - b) * 6 + (roll() - 0.5) * 4;
-          d += `L${x} ${y.toFixed(1)}`;
-        }
-        pattern.append(svgNode('path', {
-          d, fill: 'none',
-          stroke: strataColors[Math.abs(b) % strataColors.length],
-          'stroke-width': 3 + roll() * 12,
-          opacity: 0.08 + roll() * 0.18
-        }));
+      // Broad continuous strata share their curvature; fine grain supplies the surface.
+      for (let band=-6;band<27;band++) {
+        const y = band*26;
+        const d = `M-180 ${y}C60 ${y-60} 300 ${y+60} 540 ${y}L540 ${y+26}C300 ${y+86} 60 ${y-34} -180 ${y+26}Z`;
+        pattern.append(svgNode('path', { d, fill: band%3 ? '#000' : '#fff', opacity: .008+roll()*.018 }));
       }
-      for (let g = 0; g < 320; g++) {
-        pattern.append(svgNode('circle', {
-          cx: -180 + roll() * 720, cy: -180 + roll() * 720,
-          r: 0.5 + roll() * 1.2,
-          fill: g % 2 ? '#fff' : '#4a2e18',
-          opacity: 0.08 + roll() * 0.16
-        }));
+      const sand = svgNode('pattern', { id: id+'-sand', patternUnits: 'userSpaceOnUse', width: 96, height: 96 });
+      const grains = ['', '', '', ''];
+      for (let i=0;i<7000;i++) {
+        const x=roll()*96, y=roll()*96, r=.4+roll()*.65;
+        grains[i%4] += `M${x.toFixed(2)} ${y.toFixed(2)}h${r.toFixed(2)}v${r.toFixed(2)}h-${r.toFixed(2)}Z`;
       }
-      lighting('sandstone-sheen', [[0, '#fff', .12], [.4, '#fff', .02], [1, '#000', .15]], true);
+      grains.forEach((d,i) => sand.append(svgNode('path', { d, fill: i%2 ? '#fff' : '#000', opacity: i<2 ? .28 : .13 })));
+      defs.append(sand); cover(`url(#${id}-sand)`);
+      lighting('sandstone-depth', [[0, '#fff', .06], [.5, '#fff', 0], [1, '#000', .1]], true);
     } else if (attribute.texture === 'starfield') {
       lighting('starfield-space', [[0, '#000', .15], [.5, '#05031a', .45], [1, '#000', .7]], true);
       // Nebula dust clouds
@@ -472,23 +462,23 @@
       lighting('quartz-luster', [[0, '#fff', .35], [.35, '#fff', 0], [1, '#000', .3]], true);
       lighting('quartz-glint', [[0, '#fff', 0], [.3, '#fff', .04], [.44, '#defaff', .35], [.5, '#fff', .05], [1, '#fff', 0]]);
     } else if (attribute.texture === 'obsidian') {
-      lighting('obsidian-glass', [[0, '#fff', .25], [.25, '#fff', .04], [.5, '#000', .4], [1, '#000', .75]], true);
-      lighting('obsidian-specular', [[0, '#fff', 0], [.18, '#fff', .85], [.24, '#fff', .22], [1, '#fff', 0]]);
-      // Sparse angular conchoidal fractures
-      for (let f = 0; f < 8; f++) {
-        let x = -100 + roll() * 560, y = -100 + roll() * 560;
-        let d = `M${x.toFixed(1)} ${y.toFixed(1)}`;
-        const segments = 4 + Math.floor(roll() * 5);
-        for (let s = 0; s < segments; s++) {
-          const len = 20 + roll() * 45, ang = roll() * Math.PI * 2;
-          const nx = x + Math.cos(ang) * len, ny = y + Math.sin(ang) * len;
-          const cx = (x + nx) / 2 + (roll() - 0.5) * 15, cy = (y + ny) / 2 + (roll() - 0.5) * 15;
-          d += `Q${cx.toFixed(1)} ${cy.toFixed(1)} ${nx.toFixed(1)} ${ny.toFixed(1)}`;
-          x = nx; y = ny;
-        }
-        pattern.append(svgNode('path', { d, fill: 'none', stroke: '#000', 'stroke-width': 2.4, opacity: 0.6 }));
-        pattern.append(svgNode('path', { d, fill: 'none', stroke: '#fff', 'stroke-width': 0.75, opacity: 0.45 }));
+      lighting('obsidian-glass', [[0, '#fff', .08], [.35, '#000', .12], [1, '#000', .55]], true);
+      // Broad shell-like fracture surfaces, with glints on selected curved lips.
+      const shell = svgNode('linearGradient', { id: id+'-shell', x1: '0%', y1: '0%', x2: '75%', y2: '100%' });
+      for (const [offset,color,opacity] of [[0,'#fff',.18],[.12,'#fff',.035],[.55,'#000',.05],[1,'#000',.38]]) {
+        shell.append(svgNode('stop', { offset, 'stop-color':color, 'stop-opacity':opacity }));
       }
+      defs.append(shell);
+      for (let row=-1;row<5;row++) for (let col=-1;col<5;col++) {
+        const x=col*150+(roll()-.5)*80, y=row*145+(roll()-.5)*70;
+        const w=75+roll()*90, h=55+roll()*85;
+        const lip=`M${x-w} ${y}C${x-w*.4} ${y-h*.9} ${x+w*.35} ${y-h*.6} ${x+w} ${y+h*.2}`;
+        const d=lip+`Q${x+w*.4} ${y+h*.85} ${x-w*.5} ${y+h}Q${x-w*.7} ${y+h*.25} ${x-w} ${y}Z`;
+        pattern.append(svgNode('path', { d, fill:`url(#${id}-shell)` }));
+        if ((row+col)%3===0) pattern.append(svgNode('path', { d:lip, fill:'none', stroke:'#fff', 'stroke-width':.65, opacity:.12 }));
+      }
+      lighting('obsidian-reflection', [[0,'#fff',0],[.3,'#fff',.02],[.48,'#fff',.26],[.64,'#fff',.04],[1,'#fff',0]], true,
+        { cx:65, cy:35, r:310, gradientTransform:'translate(30 -15) skewX(-25)' });
     } else if (attribute.texture === 'mosaic') {
       lighting('mosaic-sheen', [[0, '#fff', .22], [.4, '#fff', .06], [1, '#000', .2]], true);
       // Polygonal Voronoi tiles with individual shading and contrasting grout
@@ -530,27 +520,22 @@
         }));
       }
     } else if (attribute.texture === 'hammered-metal') {
-      lighting('hammered-base', [[0, '#000', .5], [.2, '#fff', .2], [.4, '#000', .4], [.45, '#fff', .75], [1, '#000', .45]]);
-      // Irregular shallow dimples with localized highlights
-      for (let y = -160; y <= 520; y += 42) {
-        const rowOffset = (Math.floor(y / 42) % 2) * 24;
-        for (let x = -160; x <= 520; x += 48) {
-          const dx = x + rowOffset + (roll() - 0.5) * 14;
-          const dy = y + (roll() - 0.5) * 14;
-          const r = 12 + roll() * 7;
-          // Dimple shadow (bottom-right)
-          pattern.append(svgNode('ellipse', {
-            cx: (dx + 1.5).toFixed(1), cy: (dy + 1.5).toFixed(1),
-            rx: r.toFixed(1), ry: (r * 0.85).toFixed(1),
-            fill: '#000000', opacity: 0.28 + roll() * 0.18
-          }));
-          // Dimple highlight (top-left)
-          pattern.append(svgNode('ellipse', {
-            cx: (dx - 1.5).toFixed(1), cy: (dy - 1.5).toFixed(1),
-            rx: (r * 0.75).toFixed(1), ry: (r * 0.65).toFixed(1),
-            fill: '#ffffff', opacity: 0.22 + roll() * 0.26
-          }));
-        }
+      lighting('hammered-base', [[0,'#000',.25],[.25,'#fff',.08],[.48,'#fff',.3],[.7,'#000',.08],[1,'#000',.3]]);
+      const dent = svgNode('linearGradient', { id:id+'-dent', x1:'10%', y1:'0%', x2:'85%', y2:'100%' });
+      const dentStops = [[0,'#fff',.04],[.2,'#000',.16],[.5,'#000',.025],[.8,'#fff',.15],[1,'#fff',.025]];
+      for (const [offset,color,opacity] of dentStops) dent.append(svgNode('stop', { offset, 'stop-color':color, 'stop-opacity':opacity }));
+      defs.append(dent);
+      if (effects) effects.push((x,y) => {
+        dent.setAttribute('x1', `${10+x*25}%`); dent.setAttribute('y1', `${y*25}%`);
+        dent.setAttribute('x2', `${85-x*20}%`); dent.setAttribute('y2', `${100-y*20}%`);
+      });
+      const grid = Array.from({length:48}, (_,y) => Array.from({length:48}, (_,x) => [-192+x*16+(roll()-.5)*13,-192+y*16+(roll()-.5)*13]));
+      for (let y=0;y<47;y++) for (let x=0;x<47;x++) {
+        const pts=[grid[y][x],grid[y][x+1],grid[y+1][x+1],grid[y+1][x]];
+        const mid=pts.map((p,i)=>p.map((v,j)=>(v+pts[(i+1)%4][j])/2));
+        let d=`M${mid[3].join(' ')}`;
+        for (let i=0;i<4;i++) d+=`Q${pts[i].join(' ')} ${mid[i].join(' ')}`;
+        pattern.append(svgNode('path', { d:d+'Z', fill:`url(#${id}-dent)` }));
       }
     } else if (attribute.texture === 'kintsugi') {
       lighting('kintsugi-glaze', [[0, '#fff', .24], [.4, '#fff', .06], [1, '#000', .25]], true);
@@ -584,29 +569,33 @@
       }
       lighting('kintsugi-gold-flash', [[0, '#fff', 0], [.42, '#fff', 0], [.5, '#fff6b3', .55], [.58, '#ffd700', .18], [1, '#fff', 0]]);
     } else if (attribute.texture === 'leather') {
-      lighting('leather-depth', [[0, '#fff', .15], [.4, '#000', .08], [1, '#000', .35]], true);
-      // Pebbled grain: dense tiny pores and irregular micro-pebble cells
-      for (let p = 0; p < 450; p++) {
-        const cx = -180 + roll() * 720, cy = -180 + roll() * 720;
-        const rx = 1.2 + roll() * 2.8, ry = rx * (0.7 + roll() * 0.4);
-        pattern.append(svgNode('ellipse', {
-          cx: cx.toFixed(1), cy: cy.toFixed(1),
-          rx: rx.toFixed(1), ry: ry.toFixed(1),
-          fill: p % 2 ? '#000000' : '#ffffff',
-          opacity: 0.08 + roll() * 0.16
-        }));
-      }
-      // Natural organic creases across the hide
-      for (let c = 0; c < 6; c++) {
-        let x = -140 + c * 130 + roll() * 40, d = `M${x.toFixed(1)} -180`;
-        for (let y = -100; y <= 540; y += 70) {
-          x += (roll() - 0.5) * 50;
-          d += `Q${(x + (roll() - 0.5) * 20).toFixed(1)} ${(y - 35).toFixed(1)} ${x.toFixed(1)} ${y}`;
+      lighting('leather-depth', [[0, '#fff', .08], [.4, '#000', .03], [1, '#000', .2]], true);
+      const grain = svgNode('pattern', { id: id + '-grain', patternUnits: 'userSpaceOnUse', width: 96, height: 96 });
+      grain.append(svgNode('rect', { width: 96, height: 96, fill: '#000', opacity: .14 }));
+      // Shared jittered corners keep the fine pebbles packed, without a hexagonal grid.
+      const corners = Array.from({ length: 24 }, () => Array.from({ length: 24 }, () => [(roll()-.5)*2.8, (roll()-.5)*2.8]));
+      const corner = (x, y) => {
+        const jitter = corners[(y+24)%24][(x+24)%24];
+        return [x*4+jitter[0], y*4+jitter[1]];
+      };
+      const cells = ['', '', '', ''];
+      let grainGlints = '';
+      for (let row = -1; row <= 24; row++) {
+        for (let col = -1; col <= 24; col++) {
+          const points = [corner(col,row), corner(col+1,row), corner(col+1,row+1), corner(col,row+1)];
+          const center = points.reduce((a,p) => [a[0]+p[0]/4,a[1]+p[1]/4], [0,0]);
+          const inset = points.map(p => p.map((v,i) => center[i]+(v-center[i])*.9));
+          const mids = inset.map((p,i) => p.map((v,j) => (v+inset[(i+1)%4][j])/2));
+          let d = `M${mids[3].join(' ')}`;
+          for (let i=0;i<4;i++) d += `Q${inset[i].join(' ')} ${mids[i].join(' ')}`;
+          cells[Math.floor(roll()*4)] += d+'Z';
+          grainGlints += `M${mids[3].join(' ')}Q${inset[0].join(' ')} ${mids[0].join(' ')}`;
         }
-        pattern.append(svgNode('path', { d, fill: 'none', stroke: '#000000', 'stroke-width': 1.6, opacity: 0.28 }));
-        pattern.append(svgNode('path', { d, fill: 'none', stroke: '#ffffff', 'stroke-width': 0.6, opacity: 0.15 }));
       }
-      lighting('leather-sheen', [[0, '#fff', 0], [.35, '#fff', .03], [.48, '#fff', .25], [.58, '#fff', .06], [1, '#fff', 0]]);
+      cells.forEach((d,i) => grain.append(svgNode('path', { d, fill: '#fff', opacity: .04+i*.02 })));
+      grain.append(svgNode('path', { d: grainGlints, fill: 'none', stroke: '#fff', 'stroke-width': .3, opacity: .07 }));
+      defs.append(grain); cover(`url(#${id}-grain)`);
+      lighting('leather-sheen', [[0, '#fff', 0], [.3, '#fff', .02], [.5, '#fff', .07], [.7, '#fff', .02], [1, '#fff', 0]]);
     } else if (attribute.texture === 'carbon-fiber') {
       lighting('carbon-base', [[0, '#000', .35], [.3, '#000', .18], [.5, '#fff', .25], [1, '#000', .45]], true);
       // Tight woven 2x2 checker pattern with alternating reflective strands
@@ -637,28 +626,21 @@
       lighting('carbon-flash-a', [[0, '#fff', 0], [.38, '#fff', 0], [.46, '#fff', .65], [.5, '#fff', .1], [1, '#fff', 0]]);
       lighting('carbon-flash-b', [[0, '#fff', 0], [.52, '#fff', 0], [.6, '#fff', .45], [.66, '#fff', .08], [1, '#fff', 0]]);
     } else if (attribute.texture === 'denim') {
-      lighting('denim-diffuse', [[0, '#fff', .14], [.5, '#000', .05], [1, '#000', .28]], true);
-      // 3/1 right-hand diagonal twill weave with white weft threads peeking through colored warp
-      const twill = svgNode('pattern', { id: id + '-denim', patternUnits: 'userSpaceOnUse', width: 24, height: 24 });
-      for (let y = 0; y < 24; y += 3) {
-        for (let x = 0; x < 24; x += 3) {
-          const diag = (x + y) % 12;
-          const isWeft = diag === 0 || diag === 3;
-          twill.append(svgNode('rect', {
-            x, y, width: 2.8, height: 2.8,
-            fill: isWeft ? '#ffffff' : '#000000',
-            opacity: isWeft ? 0.38 : 0.38
+      lighting('denim-diffuse', [[0, '#fff', .06], [.5, '#000', .02], [1, '#000', .16]], true);
+      const twill = svgNode('pattern', { id: id + '-denim', patternUnits: 'userSpaceOnUse', width: 32, height: 32 });
+      // Three colored warp crossings to one pale weft crossing, offset each row.
+      for (let y = 0; y < 16; y++) {
+        for (let x = 0; x < 16; x++) {
+          const weft = (x + y) % 4 === 0;
+          twill.append(svgNode('path', {
+            d: weft ? `M${x*2+.2} ${y*2+1}h1.6` : `M${x*2+1} ${y*2+.15}v1.7`,
+            stroke: weft ? '#fff' : (x % 3 ? '#000' : '#fff'),
+            'stroke-width': weft ? .65 : .8, 'stroke-linecap': 'round',
+            opacity: weft ? .14 + roll() * .08 : .035 + roll() * .055
           }));
         }
       }
-      for (let d = -24; d <= 48; d += 6) {
-        twill.append(svgNode('line', {
-          x1: d, y1: 0, x2: d + 24, y2: 24,
-          stroke: '#ffffff', 'stroke-width': 0.75, opacity: 0.20
-        }));
-      }
       defs.append(twill); cover(`url(#${id}-denim)`);
-      lighting('denim-cross', [[0, '#fff', .1], [.45, '#fff', .02], [1, '#000', .15]], true);
     } else if (attribute.texture === 'bubbled') {
       lighting('bubble-depth', [[0, '#fff', .28], [.4, '#fff', .06], [1, '#000', .3]], true);
       // Overlapping translucent bubbles with iridescent rims and specular crescents
@@ -808,7 +790,49 @@
     defs.append(pattern);
     return `url(#${id})`;
   }
-  function materialEdge(defs, face, shapes, attribute, id, effects) {
+  function sandstoneEdge(defs, id) {
+    const grain = svgNode('pattern', { id, patternUnits: 'userSpaceOnUse', width: 48, height: 48 });
+    let state = 317;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    // Angular exposed grains and dark pores within the existing silhouette.
+    for (let i=0;i<260;i++) {
+      const x=roll()*48, y=roll()*48, r=.35+roll()*1.35;
+      grain.append(svgNode('path', { d:`M${x} ${y-r}l${r} ${r*.8}l${-r*.45} ${r}l${-r*1.2} ${-r*.35}Z`,
+        fill:i%3 ? '#000' : '#fff', opacity:.12+roll()*.28 }));
+    }
+    defs.append(grain);
+    return `url(#${id})`;
+  }
+  function materialEdge(defs, face, shapes, attribute, id, effects, seamContours = shapes) {
+    if (attribute.texture === 'denim') {
+      // Erode the union, so the joined eyes have no seam through their overlap.
+      // Clip dashed boundary strokes to two inset bands; tiny pupils get a hem only.
+      const small = shapes.every(shape => Number(shape.getAttribute('r')) > 0 && Number(shape.getAttribute('r')) <= 17);
+      for (const [index, inner, outer] of [[0, 0, 2], ...(!small ? [[1, 3, 4], [2, 6, 7]] : [])]) {
+        const key = `${id}-seam-${index}`;
+        const filter = svgNode('filter', { id: key, filterUnits: 'userSpaceOnUse', x: 0, y: 0, width: 360, height: 360 });
+        filter.append(svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: inner, result: 'outer' }),
+          svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: outer, result: 'inner' }),
+          svgNode('feComposite', { in: 'outer', in2: 'inner', operator: 'out' }));
+        const mask = svgNode('mask', { id: key + '-mask', maskUnits: 'userSpaceOnUse', x: 0, y: 0, width: 360, height: 360,
+          style: 'mask-type:alpha' });
+        const union = svgNode('g', { fill: '#fff', filter: `url(#${key})` });
+        for (const shape of shapes) union.append(shape.cloneNode(true));
+        mask.append(union); defs.append(filter, mask);
+        const seam = svgNode('g', { mask: `url(#${key}-mask)`, opacity: index ? .65 : .2 });
+        if (!index) seam.append(svgNode('rect', { width: 360, height: 360, fill: '#000' }));
+        else for (const shape of seamContours) {
+          const stitch = shape.cloneNode(true);
+          stitch.setAttribute('fill', 'none');
+          stitch.setAttribute('stroke', '#c6a36d');
+          stitch.setAttribute('stroke-width', 16);
+          stitch.setAttribute('stroke-dasharray', '3 3');
+          seam.append(stitch);
+        }
+        face.append(seam);
+      }
+      return;
+    }
     // Erode the combined silhouette so overlapping eyes never acquire an internal seam.
     const finishes = {
       terrazzo: { width: 1.6, rim: .4, stops: [[0, '#fff', .4], [.5, '#fff', .06], [1, '#000', .22]] },
@@ -824,16 +848,16 @@
       glossy: { width: 3.4, rim: 1.1, stops: [[0, '#fff', .65], [.35, '#fff', .24], [.65, '#fff', .02], [1, '#000', .28]] },
       iridescent: { width: 2.5, rim: .7, stops: [[0, '#82fff0', .8], [.28, '#aaa1ff', .65], [.5, '#ff8cdb', .55], [.72, '#ffe6a0', .6], [1, '#53bfff', .7]] },
       crystalline: { width: 2, rim: .45, stops: [[0, '#fff', .9], [.24, '#fff', .55], [.25, '#000', .32], [.49, '#000', .12], [.5, '#fff', .8], [.74, '#fff', .2], [.75, '#000', .42], [1, '#000', .55]] },
-      granite: { width: 1.8, rim: .5, stops: [[0, '#fff', .4], [.5, '#fff', .06], [1, '#000', .25]] },
-      satin: { width: 2.5, rim: .6, stops: [[0, '#fff', .7], [.3, '#fff', .2], [.55, '#fff', .04], [1, '#000', .25]] },
-      sandstone: { width: 1.7, rim: .45, stops: [[0, '#fff', .35], [.5, '#fff', .05], [1, '#000', .22]] },
+      granite: { width: 4, rim: .75, stops: [[0, '#fff', .85], [.42, '#fff', .5], [.49, '#fff', .22], [.5, '#000', .35], [1, '#000', .8]] },
+      satin: { width: 1.2, rim: .3, stops: [[0, '#fff', .22], [.3, '#fff', .06], [.55, '#fff', .02], [1, '#000', .12]] },
+      sandstone: { width: 3.2, rim: .7, stops: [[0, '#fff', .22], [.5, '#fff', .04], [1, '#000', .3]] },
       starfield: { width: 2.6, rim: .7, stops: [[0, '#d1e8ff', .6], [.35, '#e0b8ff', .35], [.7, '#0f0524', .5], [1, '#000', .7]] },
       quartz: { width: 2.2, rim: .5, stops: [[0, '#fff', .92], [.22, '#fff', .6], [.24, '#000', .28], [.48, '#fff', .82], [.72, '#fff', .25], [.74, '#000', .38], [1, '#000', .55]] },
       obsidian: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.2, '#fff', .15], [.6, '#000', .35], [1, '#000', .7]] },
       mosaic: { width: 2.2, rim: .55, stops: [[0, '#fff', .55], [.45, '#fff', .1], [1, '#000', .3]] },
       'hammered-metal': { width: 2.6, rim: .7, stops: [[0, '#fff', .88], [.38, '#fff', .18], [.45, '#000', .5], [.52, '#fff', .7], [1, '#000', .6]] },
       kintsugi: { width: 2.4, rim: .65, stops: [[0, '#ffe57f', .85], [.35, '#ffd24d', .3], [.48, '#000', .4], [.55, '#fff4b8', .75], [1, '#b8860b', .5]] },
-      leather: { width: 2.2, rim: .5, stops: [[0, '#fff', .5], [.35, '#fff', .1], [.7, '#000', .2], [1, '#000', .45]] },
+      leather: { width: 1.5, rim: .4, stops: [[0, '#fff', .2], [.35, '#fff', .04], [.7, '#000', .14], [1, '#000', .3]] },
       'carbon-fiber': { width: 2.6, rim: .7, stops: [[0, '#fff', .85], [.3, '#000', .5], [.6, '#fff', .65], [1, '#000', .7]] },
       denim: { width: 1.8, rim: .4, stops: [[0, '#fff', .35], [.5, '#fff', .05], [1, '#000', .3]] },
       bubbled: { width: 2.8, rim: .8, stops: [[0, '#fff', .85], [.3, '#d4f8ff', .4], [.6, '#ffd6f5', .25], [1, '#000', .35]] },
@@ -851,19 +875,24 @@
     defs.append(gradient);
     if (effects) effects.push((x, y) => gradient.setAttribute('gradientTransform',
       `translate(${x * 38} ${y * 38}) rotate(${attribute.angle} 180 180)`));
+    const crumbs = attribute.texture === 'sandstone' ? sandstoneEdge(defs, id+'-crumbs') : null;
     for (const [index, width] of [finish.width, finish.rim].entries()) {
       const key = id + '-' + index;
       const filter = svgNode('filter', { id: key + '-cut', filterUnits: 'userSpaceOnUse',
         x: 0, y: 0, width: 360, height: 360, 'color-interpolation-filters': 'sRGB' });
-      filter.append(svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: width, result: 'inset' }),
-        svgNode('feComposite', { in: 'SourceGraphic', in2: 'inset', operator: 'out' }));
+      filter.append(svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: width, result: 'inset' }));
+      if (crumbs) filter.append(
+        svgNode('feTurbulence', { type:'fractalNoise', baseFrequency:.28, numOctaves:2, seed:317, result:'grain' }),
+        svgNode('feDisplacementMap', { in:'inset', in2:'grain', scale:index ? 1.4 : 4, xChannelSelector:'R', yChannelSelector:'G', result:'inset' }));
+      filter.append(svgNode('feComposite', { in: 'SourceGraphic', in2: 'inset', operator: 'out' }));
       const mask = svgNode('mask', { id: key + '-mask', maskUnits: 'userSpaceOnUse',
         maskContentUnits: 'userSpaceOnUse', x: 0, y: 0, width: 360, height: 360 });
       const silhouette = svgNode('g', { fill: '#fff', filter: `url(#${key}-cut)` });
       for (const shape of shapes) silhouette.append(shape.cloneNode(true));
       mask.append(silhouette); defs.append(filter, mask);
       face.append(svgNode('rect', { width: 360, height: 360, fill: `url(#${id}-light)`,
-        mask: `url(#${key}-mask)`, opacity: index ? .8 : .38 }));
+        mask: `url(#${key}-mask)`, opacity: index ? .8 : attribute.texture === 'granite' ? .68 : .38 }));
+      if (crumbs && !index) face.append(svgNode('rect', { width:360, height:360, fill:crumbs, mask:`url(#${key}-mask)` }));
     }
   }
   function renderSVG(m, className = 'oomark', surface = null, extraEffects = null) {
@@ -909,7 +938,16 @@
         ? material(defs, attribute, prefix + '-' + role + '-texture', effects)
         : (matteFill ||= material(defs, { texture: 'matte', angle: 0 }, prefix + '-matte', effects));
       face.append(svgNode('rect', { x: 0, y: 0, width: 360, height: 360, fill, 'clip-path': `url(#${clipId})` }));
-      if (designed) materialEdge(defs, face, shapes[role], attribute, prefix + '-' + role + '-edge', effects);
+      if (designed) {
+        const contours = [...shapes[role]];
+        if (role === 'eyes' && attribute.texture === 'denim') {
+          for (const [cx, cy, eye] of eyePositions) if (eye.planes.length) {
+            // The union mask trims these lid contours to the actual eye boundary.
+            contours.push(svgNode('polygon', { points: ubu.eyePolygon(eye).map(([x, y]) => `${cx+x},${cy+y}`).join(' ') }));
+          }
+        }
+        materialEdge(defs, face, shapes[role], attribute, prefix + '-' + role + '-edge', effects, contours);
+      }
     }
     const domeId = prefix + '-dome';
     const dome = svgNode('radialGradient', { id: domeId, gradientUnits: 'userSpaceOnUse', cx: 180, cy: 175, r: 176 });
@@ -1084,16 +1122,16 @@
       glossy: { width: 3.4, rim: 1.1, stops: [[0, '#fff', .65], [.35, '#fff', .24], [.65, '#fff', .02], [1, '#000', .28]] },
       iridescent: { width: 2.5, rim: .7, stops: [[0, '#82fff0', .8], [.28, '#aaa1ff', .65], [.5, '#ff8cdb', .55], [.72, '#ffe6a0', .6], [1, '#53bfff', .7]] },
       crystalline: { width: 2, rim: .45, stops: [[0, '#fff', .9], [.24, '#fff', .55], [.25, '#000', .32], [.49, '#000', .12], [.5, '#fff', .8], [.74, '#fff', .2], [.75, '#000', .42], [1, '#000', .55]] },
-      granite: { width: 1.8, rim: .5, stops: [[0, '#fff', .4], [.5, '#fff', .06], [1, '#000', .25]] },
-      satin: { width: 2.5, rim: .6, stops: [[0, '#fff', .7], [.3, '#fff', .2], [.55, '#fff', .04], [1, '#000', .25]] },
-      sandstone: { width: 1.7, rim: .45, stops: [[0, '#fff', .35], [.5, '#fff', .05], [1, '#000', .22]] },
+      granite: { width: 4, rim: .75, stops: [[0, '#fff', .85], [.42, '#fff', .5], [.49, '#fff', .22], [.5, '#000', .35], [1, '#000', .8]] },
+      satin: { width: 1.2, rim: .3, stops: [[0, '#fff', .22], [.3, '#fff', .06], [.55, '#fff', .02], [1, '#000', .12]] },
+      sandstone: { width: 3.2, rim: .7, stops: [[0, '#fff', .22], [.5, '#fff', .04], [1, '#000', .3]] },
       starfield: { width: 2.6, rim: .7, stops: [[0, '#d1e8ff', .6], [.35, '#e0b8ff', .35], [.7, '#0f0524', .5], [1, '#000', .7]] },
       quartz: { width: 2.2, rim: .5, stops: [[0, '#fff', .92], [.22, '#fff', .6], [.24, '#000', .28], [.48, '#fff', .82], [.72, '#fff', .25], [.74, '#000', .38], [1, '#000', .55]] },
       obsidian: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.2, '#fff', .15], [.6, '#000', .35], [1, '#000', .7]] },
       mosaic: { width: 2.2, rim: .55, stops: [[0, '#fff', .55], [.45, '#fff', .1], [1, '#000', .3]] },
       'hammered-metal': { width: 2.6, rim: .7, stops: [[0, '#fff', .88], [.38, '#fff', .18], [.45, '#000', .5], [.52, '#fff', .7], [1, '#000', .6]] },
       kintsugi: { width: 2.4, rim: .65, stops: [[0, '#ffe57f', .85], [.35, '#ffd24d', .3], [.48, '#000', .4], [.55, '#fff4b8', .75], [1, '#b8860b', .5]] },
-      leather: { width: 2.2, rim: .5, stops: [[0, '#fff', .5], [.35, '#fff', .1], [.7, '#000', .2], [1, '#000', .45]] },
+      leather: { width: 1.5, rim: .4, stops: [[0, '#fff', .2], [.35, '#fff', .04], [.7, '#000', .14], [1, '#000', .3]] },
       'carbon-fiber': { width: 2.6, rim: .7, stops: [[0, '#fff', .85], [.3, '#000', .5], [.6, '#fff', .65], [1, '#000', .7]] },
       denim: { width: 1.8, rim: .4, stops: [[0, '#fff', .35], [.5, '#fff', .05], [1, '#000', .3]] },
       bubbled: { width: 2.8, rim: .8, stops: [[0, '#fff', .85], [.3, '#d4f8ff', .4], [.6, '#ffd6f5', .25], [1, '#000', .35]] },
@@ -1169,13 +1207,15 @@
         // Stripe ends lie outside the card at every rotation. Inside the card,
         // eroding a rectangular stripe exposes only its two vertical edges.
         // Draw those strips directly instead of filtering/masking entire stripes.
+        const crumbs = mat.texture === 'sandstone' ? sandstoneEdge(defs, edgeId+'-crumbs') : null;
         for (const [idx, width] of [finish.width, finish.rim].entries()) {
           const edges = rects.map(r =>
             `M${r.x} ${r.y}h${width}v${r.height}h${-width}Z` +
             `M${r.x + r.width - width} ${r.y}h${width}v${r.height}h${-width}Z`).join('');
           group.append(svgNode('path', {
-            d: edges, fill: `url(#${gradId})`, opacity: idx ? .8 : .42
+            d: edges, fill: `url(#${gradId})`, opacity: idx ? .8 : mat.texture === 'granite' ? .68 : .42
           }));
+          if (crumbs && !idx) group.append(svgNode('path', { d:edges, fill:crumbs }));
         }
       }
 
