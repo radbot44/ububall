@@ -20,6 +20,7 @@
     let frame = 0, progress = 0, started = 0, finish = null, count = 5, pointer = 0, pointerY = 0;
     let aimX = 0, aimY = 0, lastPaint = 0;
     let blobCanvas, blobCtx, blobPixels, blobColors = [], blobFaces = [];
+    let packHints = null;
     let color, candyColors, previousColor = -1, currentType = null;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     const logo = new Image(), mark = new Image();
@@ -55,6 +56,34 @@
       const g = target.createLinearGradient(x1, y1, x2, y2);
       for (const [at, value] of stops) g.addColorStop(at, value);
       return g;
+    }
+
+    function hintColors(target) {
+      if (!packHints) return;
+      target.fillStyle = packHints[0].background; target.fillRect(-135, -135, 270, 270);
+      packHints.forEach((hint, i) => {
+        const angle = i * Math.PI * 2 / 5 - Math.PI / 2, x = Math.cos(angle) * 58, y = Math.sin(angle) * 58;
+        const wash = target.createRadialGradient(x, y, 12, x, y, 125);
+        wash.addColorStop(0, hint.background); wash.addColorStop(.4, hint.background + 'dd'); wash.addColorStop(1, hint.background + '00');
+        target.fillStyle = wash; target.fillRect(-135, -135, 270, 270);
+      });
+    }
+
+    function hintAccents(target) {
+      if (!packHints) return;
+      packHints.forEach((hint, i) => {
+        const angle = i * Math.PI * 2 / 5 - Math.PI / 2, x = Math.cos(angle) * 64, y = Math.sin(angle) * 64;
+        target.save(); target.translate(x, y); target.rotate(angle + .6);
+        hint.accents.forEach((hex, j) => {
+          target.beginPath(); target.ellipse((j - 1.5) * 7, 0, 2.6, 7 - j * .6, .3, 0, Math.PI * 2);
+          target.fillStyle = hex; target.fill();
+        });
+        if (hint.textured) {
+          target.beginPath(); target.moveTo(0, 13); target.lineTo(3, 17); target.lineTo(0, 21); target.lineTo(-3, 17); target.closePath();
+          target.strokeStyle = '#ffffffcc'; target.lineWidth = 1.2; target.stroke();
+        }
+        target.restore();
+      });
     }
 
     // --- Plastic Cellophane Wrapper ---
@@ -158,6 +187,8 @@
 
     function plasticTexture(target) {
       target.save(); plasticSilhouette(1, target); target.fillStyle = color; target.fill(); target.clip();
+      hintColors(target);
+      hintAccents(target);
       for (const c of plasticCreases) {
         target.beginPath(); target.moveTo(c.x - 5, c.y);
         target.lineTo(c.x + c.dx * .55, c.y + c.dy * .38); target.lineTo(c.x + c.dx, c.y + c.dy);
@@ -387,15 +418,16 @@
       sheetCtx.save();
       foilContour(sheetCtx);
       sheetCtx.fillStyle = color; sheetCtx.fill(); sheetCtx.clip();
+      hintColors(sheetCtx);
 
       // 3D Spherical Volume Shading across circular candy
       const lx = -36 + pointer * 30, ly = -45 + pointerY * 28;
       const spherical = sheetCtx.createRadialGradient(lx, ly, 6, 4, 8, 132);
-      spherical.addColorStop(0, tint(color, .72));
-      spherical.addColorStop(0.25, tint(color, 0.38));
-      spherical.addColorStop(0.48, color);
-      spherical.addColorStop(0.78, tint(color, -0.38));
-      spherical.addColorStop(1, tint(color, -0.76));
+      spherical.addColorStop(0, packHints ? '#ffffff88' : tint(color, .72));
+      spherical.addColorStop(0.25, packHints ? '#ffffff33' : tint(color, 0.38));
+      spherical.addColorStop(0.48, packHints ? '#ffffff00' : color);
+      spherical.addColorStop(0.78, packHints ? '#00000060' : tint(color, -0.38));
+      spherical.addColorStop(1, packHints ? '#000000bb' : tint(color, -0.76));
       sheetCtx.fillStyle = spherical; sheetCtx.fillRect(-135, -135, 270, 270);
 
       // Crimped / gathered foil flutes around circular rim
@@ -472,6 +504,7 @@
       }
 
       sheetCtx.fillStyle = grainPattern; sheetCtx.fillRect(-135, -135, 270, 270);
+      hintAccents(sheetCtx);
 
       sheetCtx.restore();
     }
@@ -632,6 +665,26 @@
           }
         }
         blobCtx.putImageData(blobPixels, 0, 0);
+        if (packHints) {
+          blobCtx.save(); blobCtx.globalCompositeOperation = 'source-atop';
+          blobCtx.setTransform(2 / 3, 0, 0, 2 / 3, 200, 120);
+          packHints.forEach((hint, i) => {
+            const lobe = lobes[i];
+            if (!lobe) return;
+            hint.accents.forEach((hex, j) => {
+              const x = lobe.x + (j - 1.5) * 11, y = lobe.y + 10 + Math.sin(j * 2) * 7;
+              const accent = blobCtx.createRadialGradient(x, y, 1, x, y, 8);
+              accent.addColorStop(0, hex + 'ee'); accent.addColorStop(1, hex + '00');
+              blobCtx.fillStyle = accent; blobCtx.fillRect(x - 8, y - 8, 16, 16);
+            });
+            if (hint.textured) {
+              blobCtx.beginPath(); blobCtx.moveTo(lobe.x, lobe.y - 19); blobCtx.lineTo(lobe.x + 3, lobe.y - 14);
+              blobCtx.lineTo(lobe.x, lobe.y - 9); blobCtx.lineTo(lobe.x - 3, lobe.y - 14); blobCtx.closePath();
+              blobCtx.strokeStyle = '#ffffffbb'; blobCtx.lineWidth = 1.2; blobCtx.stroke();
+            }
+          });
+          blobCtx.restore();
+        }
       }
       ctx.save(); ctx.globalAlpha = 1 - ease(.94, 1, t);
       if (become < 1) {
@@ -678,6 +731,7 @@
     ];
 
     function recolor(packTypeId) {
+      packHints = null;
       finish = null; progress = 0;
       let index;
       do { index = crypto.getRandomValues(new Uint8Array(1))[0] & 31; } while (index === previousColor);
@@ -782,6 +836,14 @@
         else requestPaint();
       },
       setType(packTypeId) { recolor(packTypeId); },
+      setHints(packTypeId, hints) {
+        recolor(packTypeId);
+        packHints = hints;
+        candyColors = hints.map(hint => hint.background);
+        color = candyColors[0];
+        blobColors = candyColors.map(hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)));
+        requestPaint();
+      },
       getType() { return currentType ? currentType.id : null; }
     };
   }

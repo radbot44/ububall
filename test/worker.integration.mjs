@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createTestHarness } from 'wrangler';
 import { login, callback } from '../auth.mjs';
 import file from '../ubu-file.js';
+import ubu from '../ubu.js';
 
 test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { timeout: 60000 }, async t => {
   const keys = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
@@ -33,7 +34,14 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
   }
   const user = await signedIn('123456789012345678');
   const headers = { Cookie: user.cookie, Origin: env.ORIGIN, 'X-Ubu-CSRF': user.csrf, 'Content-Type': 'application/json' };
-  const issue = request => fetch('/api/mint', { method: 'POST', headers, body: JSON.stringify({ request }) });
+  const offer = (request, h = headers) => fetch('/api/packs', { method: 'POST', headers: h, body: JSON.stringify({ request }) });
+  const select = (request, choice, h = headers) => fetch('/api/mint', { method: 'POST', headers: h, body: JSON.stringify({ request, choice }) });
+  async function issue(request, h = headers) {
+    const response = await offer(request, h);
+    if (!response.ok) return response;
+    const data = await response.json();
+    return select(data.request, data.completed ? undefined : data.choices[0].choice, h);
+  }
   async function readyIssue(request) {
     const deadline = Date.now() + 20000;
     while (true) {
@@ -62,22 +70,48 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     }
     const response = await fetch('/auth/callback?code=x&state=forged');
     assert.equal(response.status, 400);
+    assert.equal((await select('unoffered_request_1')).status, 409);
+    assert.equal((await fetch('/api/packs', { method: 'POST' })).status, 401);
+    assert.equal((await offer('offer_request_0001', { ...headers, 'X-Ubu-CSRF': 'wrong' })).status, 403);
+    assert.equal((await fetch('/api/packs', { method: 'POST', headers, body: JSON.stringify({ request: 'offer_request_0001', dna: 'forged' }) })).status, 400);
   });
   let firstCertificates;
   await t.test('alarms prepare batches and concurrent retries return one verified issuance', async () => {
     const preparing = await issue('first_request_0001');
     assert.equal(preparing.status, 503); assert.equal(preparing.headers.get('Retry-After'), '2');
-    const ready = await readyIssue('first_request_0001');
+    let offered;
+    const deadline = Date.now() + 20000;
+    do {
+      const response = await offer('first_request_0001');
+      if (response.ok) { offered = await response.json(); break; }
+      assert.equal(response.status, 503);
+      await response.text(); await new Promise(resolve => setTimeout(resolve, 100));
+    } while (Date.now() < deadline);
+    assert.ok(offered);
+    assert.equal(offered.choices.length, 3);
+    assert.ok(!JSON.stringify(offered).includes('dna'));
+    await server.getWorker().evictDurableObject('MINT', { name: env.MINT_ID });
+    assert.deepEqual(await (await offer('different_request_0001')).json(), offered);
+    const outsider = await signedIn('345678901234567890');
+    assert.equal((await select(offered.request, offered.choices[0].choice, { ...headers, Cookie: outsider.cookie, 'X-Ubu-CSRF': outsider.csrf })).status, 409);
+    const ready = await select(offered.request, offered.choices[0].choice);
     assert.equal(ready.status, 200, await ready.clone().text());
     firstCertificates = (await ready.json()).certificates;
     assert.equal(firstCertificates.length, 5);
-    for (const cert of firstCertificates) await file.read(cert, { resolveKey: () => keys.publicKey });
+    for (let i = 0; i < firstCertificates.length; i++) {
+      const verified = await file.read(firstCertificates[i], { resolveKey: () => keys.publicKey });
+      const attrs = ubu.decode(ubu.fromCode(verified.dna)).attributes;
+      assert.deepEqual(offered.choices[0].hints[i], { background: attrs.background.hex,
+        accents: ['eyes', 'irises', 'pupils', 'mouth'].map(role => attrs[role].hex),
+        textured: Object.values(attrs).some(a => Boolean(a.texture)) });
+    }
+    assert.equal((await select(offered.request, offered.choices[1].choice)).status, 409);
     const retries = await Promise.all(Array.from({ length: 8 }, () => issue('first_request_0001')));
     for (const retry of retries) assert.deepEqual((await retry.json()).certificates, firstCertificates);
     const collection = await (await fetch('/api/ubus', { headers })).json();
     assert.equal(collection.ubus.length, 5);
     const storage = await server.getWorker().getDurableObjectStorage('MINT', { name: env.MINT_ID });
-    assert.equal((await storage.exec('SELECT remaining FROM mint_state'))[0].remaining, 1);
+    assert.equal((await storage.exec('SELECT remaining FROM mint_state'))[0].remaining, 3);
     assert.equal((await storage.exec('SELECT COUNT(*) AS count FROM issued'))[0].count, 5);
   });
   await t.test('sort pages and owner-backed favorites survive reloads and reject cross-account writes', async () => {
@@ -128,10 +162,10 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     favorites = await readCollection('favorite');
     assert.equal(favorites.ubus.find(row => row.serial === target).favorite, false);
   });
-  await t.test('state survives object eviction; next batch starts only after exhaustion', async () => {
+  await t.test('state survives object eviction and short inventories refill for three choices', async () => {
     await server.getWorker().evictDurableObject('MINT', { name: env.MINT_ID });
     assert.deepEqual((await (await issue('first_request_0001')).json()).certificates, firstCertificates);
-    const second = await issue('second_request_0002'); assert.equal(second.status, 200);
+    const second = await readyIssue('second_request_0002'); assert.equal(second.status, 200);
     const secondCertificates = (await second.json()).certificates;
     assert.equal(secondCertificates.length, 5);
     const third = await readyIssue('third_request_0003'); assert.equal(third.status, 200, await third.clone().text());
@@ -140,7 +174,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const certificates = [...firstCertificates, ...secondCertificates, ...thirdCertificates];
     assert.equal(new Set(certificates.map(c => JSON.parse(c).serial)).size, 15);
     const storage = await server.getWorker().getDurableObjectStorage('MINT', { name: env.MINT_ID });
-    assert.equal((await storage.exec('SELECT batch FROM mint_state'))[0].batch, 2);
+    assert.ok((await storage.exec('SELECT batch FROM mint_state'))[0].batch >= 3);
     assert.equal((await issue('fourth_request_0004')).status, 403);
     assert.deepEqual((await (await issue('first_request_0001')).json()).certificates, firstCertificates);
   });
@@ -151,7 +185,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     // Three current pack issuances already consume the first owner's lifetime allowance.
     const results = await Promise.all(Array.from({ length: 6 }, (_, i) => issue('over_limit_request_' + i)));
     assert.ok(results.every(r => r.status === 403));
-    const otherResult = await fetch('/api/mint', { method: 'POST', headers: otherHeaders, body: JSON.stringify({ request: 'other_owner_request_1' }) });
+    const otherResult = await issue('other_owner_request_1', otherHeaders);
     assert.equal(otherResult.status, 200);
     const collection = await (await fetch('/api/ubus', { headers: otherHeaders })).json(); assert.equal(collection.ubus.length, 5);
     const logout = await fetch('/api/logout', { method: 'POST', headers });

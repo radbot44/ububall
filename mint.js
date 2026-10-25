@@ -20,6 +20,19 @@ function identity(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{21}[AQgw]$/.test(value);
 }
 
+function issuanceRequest(owner, request, lifetimeLimit) {
+  if (typeof owner !== 'string' || !/^[1-9][0-9]{0,19}$/.test(owner) ||
+      typeof request !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(request)) throw new Error('Invalid issuance request.');
+  if (lifetimeLimit !== undefined && (!Number.isSafeInteger(lifetimeLimit) || lifetimeLimit < 0)) throw new Error('Invalid lifetime limit.');
+}
+
+function randomBelow(size) {
+  const limit = 4294967296 - (4294967296 % size);
+  let roll;
+  do { roll = crypto.getRandomValues(new Uint32Array(1))[0]; } while (roll >= limit);
+  return roll % size;
+}
+
 // Internal service only. The caller must authenticate and authorize every issuance.
 // storage supplies synchronous exec(sql, ...bindings) and transactionSync(callback).
 class Mint {
@@ -91,6 +104,17 @@ class Mint {
       this.exec('CREATE INDEX IF NOT EXISTS issued_request ON issued(owner, request)');
       this.exec('INSERT OR IGNORE INTO mint_state VALUES (1, ?, 1, 0, 0, 0, 0, 0)', mint);
       if (this.state().mint !== mint) throw new Error('Database belongs to another mint.');
+      if (!this.exec('PRAGMA table_info(inventory)').some(c => c.name === 'batch')) {
+        this.exec('ALTER TABLE inventory ADD COLUMN batch INTEGER NOT NULL DEFAULT 0');
+        this.exec('UPDATE inventory SET batch=?', this.state().batch);
+      }
+      this.exec(`CREATE TABLE IF NOT EXISTS pack_offers (
+        owner TEXT PRIMARY KEY, request TEXT NOT NULL, expires INTEGER NOT NULL) STRICT`);
+      this.exec(`CREATE TABLE IF NOT EXISTS pack_choices (
+        token TEXT PRIMARY KEY, owner TEXT NOT NULL, position INTEGER NOT NULL,
+        anchor TEXT NOT NULL UNIQUE, UNIQUE(owner, position)) STRICT`);
+      this.exec(`CREATE TABLE IF NOT EXISTS pack_selections (
+        owner TEXT NOT NULL, request TEXT NOT NULL, choice TEXT NOT NULL, PRIMARY KEY(owner, request)) STRICT`);
     });
   }
   exec(sql, ...bindings) { return Array.from(this.storage.exec(sql, ...bindings)); }
@@ -111,25 +135,26 @@ class Mint {
   }
 
   // Each call commits one bounded chunk; an interrupted batch resumes on the next call.
-  prepare({ batchSize = DEFAULT_BATCH_SIZE, chunkSize = 100 } = {}) {
+  prepare({ batchSize = DEFAULT_BATCH_SIZE, chunkSize = 100, minimumPacks = 1 } = {}) {
     integer(batchSize, 1000000, 'batch size');
     if (batchSize % PACK_SIZE !== 0) throw new Error('Batch size must be a multiple of 5.');
     integer(chunkSize, 1000, 'chunk size');
+    integer(minimumPacks, 3, 'minimum pack inventory');
     return this.transaction(() => {
       let state = this.state();
       if (state.prepared === state.size) {
-        if (state.remaining) return state;
+        if (state.remaining >= minimumPacks) return state;
         if (state.next_serial + batchSize - 1 > MAX_SERIAL) throw new Error('Serial range exhausted.');
         this.exec(`UPDATE mint_state SET batch=batch+1, size=?, prepared=0,
-          remaining=0, start_serial=next_serial, next_serial=next_serial+? WHERE singleton=1`, batchSize, batchSize);
+          start_serial=next_serial, next_serial=next_serial+? WHERE singleton=1`, batchSize, batchSize);
         state = this.state();
       }
       const end = Math.min(state.size, state.prepared + chunkSize);
       for (let slot = state.prepared; slot < end; slot++) {
         let id;
         do { id = randomCode(16); } while (this.exec('SELECT id FROM inventory WHERE id=? UNION ALL SELECT id FROM issued WHERE id=?', id, id).length);
-        this.exec('INSERT INTO inventory VALUES (-1, 0, ?, ?, ?)', id,
-          String(state.start_serial + slot).padStart(12, '0'), randomCode(64));
+        this.exec('INSERT INTO inventory (pack_slot, quintile, id, serial, dna, batch) VALUES (-1, 0, ?, ?, ?, ?)', id,
+          String(state.start_serial + slot).padStart(12, '0'), randomCode(64), state.batch);
       }
       if (end === state.size) {
         // Sort entire batch into 5 rarity quintiles and assemble packs
@@ -151,40 +176,89 @@ class Mint {
         }
         for (let p = 0; p < numPacks; p++) {
           for (let q = 0; q < PACK_SIZE; q++) {
-            this.exec('UPDATE inventory SET pack_slot=?, quintile=? WHERE id=?', p, q + 1, quintiles[q][p].id);
+            this.exec('UPDATE inventory SET pack_slot=?, quintile=? WHERE id=?', state.remaining + p, q + 1, quintiles[q][p].id);
           }
         }
-        this.exec('UPDATE mint_state SET prepared=?, remaining=? WHERE singleton=1', state.size, numPacks);
+        this.exec('UPDATE mint_state SET prepared=?, remaining=remaining+? WHERE singleton=1', state.size, numPacks);
       } else {
-        this.exec('UPDATE mint_state SET prepared=?, remaining=0 WHERE singleton=1', end);
+        this.exec('UPDATE mint_state SET prepared=? WHERE singleton=1', end);
       }
       return this.state();
     });
   }
 
-  async issue({ owner, request }, { lifetimeLimit } = {}) {
+  checkAllowance(owner, lifetimeLimit) {
+    if (lifetimeLimit !== undefined && this.exec('SELECT COUNT(DISTINCT request) AS count FROM issued WHERE owner=?', owner)[0].count >= lifetimeLimit) {
+      throw new Error('Lifetime mint limit reached.');
+    }
+  }
+  expireOffers() {
+    const now = Math.floor(Date.now() / 1000);
+    this.exec('DELETE FROM pack_choices WHERE owner IN (SELECT owner FROM pack_offers WHERE expires<=?)', now);
+    this.exec('DELETE FROM pack_offers WHERE expires<=?', now);
+  }
+  availablePack() {
+    const where = 'quintile=1 AND pack_slot>=0 AND NOT EXISTS (SELECT 1 FROM pack_choices WHERE anchor=inventory.id)';
+    const size = this.exec('SELECT COUNT(*) AS count FROM inventory WHERE ' + where)[0].count;
+    if (!size) throw new Error('Pack choices unavailable.');
+    return this.exec('SELECT id, pack_slot FROM inventory WHERE ' + where + ' ORDER BY pack_slot LIMIT 1 OFFSET ?', randomBelow(size))[0];
+  }
+  offer({ owner, request }, { lifetimeLimit } = {}) {
+    issuanceRequest(owner, request, lifetimeLimit);
+    return this.transaction(() => {
+      if (this.exec('SELECT 1 FROM issued WHERE owner=? AND request=? LIMIT 1', owner, request).length) return { request, completed: true };
+      this.checkAllowance(owner, lifetimeLimit);
+      this.expireOffers();
+      let offer = this.exec('SELECT * FROM pack_offers WHERE owner=?', owner)[0];
+      if (!offer) {
+        if (this.state().remaining < 3) throw new Error('Batch preparation required.');
+        offer = { owner, request, expires: Math.floor(Date.now() / 1000) + 86400 };
+        this.exec('INSERT INTO pack_offers VALUES (?, ?, ?)', owner, request, offer.expires);
+        for (let i = 0; i < 3; i++) {
+          const pack = this.availablePack();
+          this.exec('INSERT INTO pack_choices VALUES (?, ?, ?, ?)', randomCode(16), owner, i, pack.id);
+        }
+      }
+      const choices = this.exec('SELECT * FROM pack_choices WHERE owner=? ORDER BY position', owner).map(choice => {
+        const items = this.exec('SELECT dna FROM inventory WHERE pack_slot=(SELECT pack_slot FROM inventory WHERE id=?) ORDER BY quintile', choice.anchor);
+        return { choice: choice.token, type: ['plastic', 'foil', 'blob'][choice.position], hints: items.map(item => {
+          const attributes = decode(fromCode(item.dna)).attributes;
+          return {
+            background: attributes.background.hex,
+            accents: ['eyes', 'irises', 'pupils', 'mouth'].map(role => attributes[role].hex),
+            textured: Object.values(attributes).some(attribute => Boolean(attribute.texture))
+          };
+        }) };
+      });
+      return { request: offer.request, expires: offer.expires, choices };
+    });
+  }
+
+  async issue({ owner, request, choice }, { lifetimeLimit } = {}) {
     // owner is an authenticated Discord snowflake supplied by trusted server code.
-    if (typeof owner !== 'string' || !/^[1-9][0-9]{0,19}$/.test(owner) ||
-        typeof request !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(request)) throw new Error('Invalid issuance request.');
-    if (lifetimeLimit !== undefined && (!Number.isSafeInteger(lifetimeLimit) || lifetimeLimit < 0)) throw new Error('Invalid lifetime limit.');
+    issuanceRequest(owner, request, lifetimeLimit);
+    if (choice !== undefined && !identity(choice)) throw new Error('Invalid pack choice.');
 
     const records = this.transaction(() => {
       const previous = this.exec('SELECT * FROM issued WHERE owner=? AND request=? ORDER BY quintile', owner, request);
-      if (previous.length > 0) return previous;
-      if (lifetimeLimit !== undefined) {
-        const packCount = this.exec('SELECT COUNT(DISTINCT request) AS count FROM issued WHERE owner=?', owner)[0].count;
-        if (packCount >= lifetimeLimit) {
-          throw new Error('Lifetime mint limit reached.');
-        }
+      if (previous.length > 0) {
+        if (choice !== undefined && this.exec('SELECT choice FROM pack_selections WHERE owner=? AND request=?', owner, request)[0]?.choice !== choice) throw new Error('A different pack was already selected.');
+        return previous;
       }
+      this.checkAllowance(owner, lifetimeLimit);
+      this.expireOffers();
       const state = this.state();
-      if (!state.size || state.prepared !== state.size || !state.remaining) throw new Error('Batch preparation required.');
-
-      // Rejection sampling avoids modulo bias
-      const limit = 4294967296 - (4294967296 % state.remaining);
-      let roll;
-      do { roll = crypto.getRandomValues(new Uint32Array(1))[0]; } while (roll >= limit);
-      const chosenPack = roll % state.remaining;
+      let chosenPack;
+      if (choice !== undefined) {
+        const selected = this.exec(`SELECT inventory.pack_slot FROM pack_choices
+          JOIN pack_offers USING(owner) JOIN inventory ON inventory.id=pack_choices.anchor
+          WHERE pack_choices.owner=? AND pack_offers.request=? AND token=?`, owner, request, choice)[0];
+        if (!selected) throw new Error('Pack choice expired or unavailable.');
+        chosenPack = selected.pack_slot;
+      } else {
+        if (!state.size || !state.remaining) throw new Error('Batch preparation required.');
+        chosenPack = this.availablePack().pack_slot;
+      }
 
       const packItems = this.exec('SELECT * FROM inventory WHERE pack_slot=? ORDER BY quintile', chosenPack);
       const issuedAt = Math.floor(Date.now() / 1000);
@@ -194,7 +268,7 @@ class Mint {
         this.exec(`INSERT INTO issued
           (id, serial, dna, batch, owner, revision, request, pack_id, quintile, issued_at, key, certificate, favorite, rarity_bits)
           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, 0, ?)`,
-          item.id, item.serial, item.dna, state.batch, owner, request, packId, item.quintile, issuedAt, this.key,
+          item.id, item.serial, item.dna, item.batch, owner, request, packId, item.quintile, issuedAt, this.key,
           scoreRarity(decode(fromCode(item.dna))).bits);
       }
 
@@ -203,6 +277,11 @@ class Mint {
         this.exec('UPDATE inventory SET pack_slot=? WHERE pack_slot=?', chosenPack, state.remaining - 1);
       }
       this.exec('UPDATE mint_state SET remaining=remaining-1 WHERE singleton=1');
+      if (choice !== undefined) {
+        this.exec('INSERT INTO pack_selections VALUES (?, ?, ?)', owner, request, choice);
+        this.exec('DELETE FROM pack_choices WHERE owner=?', owner);
+        this.exec('DELETE FROM pack_offers WHERE owner=?', owner);
+      }
       return this.exec('SELECT * FROM issued WHERE owner=? AND request=? ORDER BY quintile', owner, request);
     });
 

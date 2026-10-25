@@ -15,7 +15,11 @@ const mint = new Mint(storage, {
 });
 mint.prepare(); // one committed chunk of up to 100; repeat until prepared === size
 // Only after authenticating the owner and authorizing their mint allowance:
-const { certificates } = await mint.issue({ owner: authenticatedDiscordID, request: requestID });
+const options = { lifetimeLimit: configuredLimit };
+const offer = mint.offer({ owner: authenticatedDiscordID, request: requestID }, options);
+// Return offer.choices to the authenticated owner; wait for their selection.
+const { certificates } = await mint.issue({ owner: authenticatedDiscordID,
+  request: offer.request, choice: selectedChoiceToken }, options);
 storage.close();
 ```
 
@@ -24,15 +28,22 @@ Identifiers and key loading above come from trusted configuration, not request b
 ## Persistence and allocation
 
 - One database belongs to one immutable mint identity. Initialization rejects another identity.
-- `prepare({ batchSize = 1000, chunkSize = 100 })` reserves the next serial range and builds at most one chunk. Batch size accepts 5–1,000,000 (must be a multiple of 5); chunk size 1–1,000. These are operational limits, separate from DNA. A changed batch size affects the next batch only. When the batch completes generation, ubus are partitioned into 5 rarity quintiles and assembled into packs of 5 (one random ubu from each quintile). Calls during an available, completed batch do no work.
-- No allocation is allowed until preparation completes. After exhaustion, `issue` reports `Batch preparation required.` The Worker schedules alarms to call `prepare` in bounded steps, then lets requests retry. The core service itself does not run a scheduler.
-- Dense inventory pack slots permit a uniformly random draw with rejection sampling, followed by swapping the last pack slot into the removed slot.
+- `prepare({ batchSize = 1000, chunkSize = 100, minimumPacks = 1 })` reserves the next serial range and builds at most one chunk. Batch size accepts 5–1,000,000 (a multiple of 5); chunk size 1–1,000; minimum packs 1–3. A changed batch size affects the next batch only. Each completed batch is partitioned into five rarity quintiles and assembled into packs of five (one random ubu from each quintile).
+- Unfinished batch rows are never offered or allocated. Existing complete packs remain usable during preparation. The Worker uses `minimumPacks: 3`: when fewer than three packs remain, alarms prepare the next batch in bounded chunks and append it to the leftovers. Each inventory ubu retains its original batch ID. This avoids throwing away the final one or two packs to maintain three choices.
+- Three unreserved packs are sampled uniformly without replacement, using rejection sampling. Reservations identify a pack by an immutable inventory ID, so swapping dense slots after another allocation cannot change an offer's contents.
+- `offer({ owner, request }, { lifetimeLimit })` returns three choices with opaque tokens, wrapper types, and five appearance hints each. A hint contains only a background hex color, four accent hex colors (eyes, irises, pupils, mouth), and a boolean indicating any active texture/pattern. DNA, IDs, serials, names, geometry, exact finishes and rarity remain private until issuance.
+- Each owner has at most one active offer, held for 24 hours. Reloads, other devices and different request IDs return that same offer and its canonical request ID. Repeated requests do not extend expiry. Expired reservations are released transactionally on the next offer/issuance operation. If other accounts hold all available packs, offers report temporary unavailability rather than stealing reservations or generating unlimited batches.
+- Offers do not issue, sign or consume allowance. Selecting a token checks its owner/request/expiry and the current allowance in the same transaction as allocation, records the winning choice, and releases both unchosen packs. Competing choices cannot win twice. A retry of the winning choice returns its original certificates, including after signing failure or an allowance reduction; a different token for that completed request is rejected.
 - The serial counter, preparation progress and each preparation chunk commit together. No serial is reused after committed reservation. The configured batch must fit within the remaining twelve-digit serial range; otherwise preparation fails without wrapping or silently changing batch size.
 - Allocation atomically inserts the issuance/owner records for all 5 ubus in the pack, removes its inventory pack slot and decrements the remaining pack count. Ownership starts at revision 1. There is no transfer implementation yet.
 - Request IDs are 16–128 ASCII letters/digits/underscores/hyphens, unique per authenticated owner. Reuse returns the original allocation across batches and restarts. A new request ID represents a new request; this is idempotency, not a mint allowance.
 - Signing happens after the allocation commit. The issuance time and signing-key ID are fixed by that commit. Signing failure leaves a recoverable allocation, rather than returning it to the pool. Retry with the same owner/request to finish it. Retain access to old signing keys while their allocated certificates are pending.
 - The exact signed certificate is persisted before return. Concurrent retries may compute the same signature, but return the single stored certificate. Completed retries do not require private-key access.
 - `state()` and the storage interface are internal administrative APIs. They must not become public inventory or owner lookup endpoints. Keep the database and its WAL/SHM files private; `state/` is ignored by Git.
+
+The low-level `issue` method retains request-only random allocation for trusted offline callers, excluding reserved packs. The public Worker permits request-only calls solely to recover an already allocated request; new issuance always requires a choice token. An `offer` call for an already allocated owner/request returns `{ request, completed: true }` so the browser can recover an interrupted selection without choosing again.
+
+Initialization adds an inventory `batch` column (backfilled with the current batch) and three reservation/selection tables. These changes are transactional and idempotent. Existing inventory DNA, serials, issued certificates, ownership, mint identity and keys are preserved. Older code using positional inventory inserts is incompatible with this added column; roll forward rather than redeploying unmodified older source. No reset is needed.
 
 The core uses synchronous `exec(sql, ...bindings)` and `transactionSync(callback)`. The local adapter uses `BEGIN IMMEDIATE` and full synchronous durability. The Cloudflare adapter maps those operations to SQLite-backed Durable Object storage without explicit SQLite BEGIN statements. See [Node SQLite](https://nodejs.org/download/release/v22.14.0/docs/api/sqlite.html) and [Cloudflare SQLite transactions](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/).
 

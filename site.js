@@ -3,9 +3,21 @@
   const $ = id => document.getElementById(id);
   let config = { ready: false }, session = null, current = null, next = null, busy = false;
   const keys = new Map();
-  let packScene = null;
-  try { packScene = createPackScene($('pack-canvas')); } catch { /* Keep opening usable without canvas. */ }
-  if (!packScene) { $('pack-canvas').hidden = true; $('pack-canvas').nextElementSibling.hidden = false; }
+  let packScene = null, offer = null;
+  const choiceViews = Array.from({ length: 3 }, (_, i) => {
+    const card = document.createElement('article'); card.className = 'pack-option';
+    const title = document.createElement('h2'); title.textContent = `Pack ${i + 1}`;
+    const button = document.createElement('button'); button.className = 'candy-pack'; button.disabled = true;
+    button.setAttribute('aria-label', `Choose pack ${i + 1}`);
+    const canvas = document.createElement('canvas'); canvas.setAttribute('aria-hidden', 'true'); button.append(canvas);
+    const swatches = document.createElement('div'); swatches.className = 'pack-swatches';
+    const choose = document.createElement('button'); choose.className = 'choose-pack'; choose.textContent = 'Choose this pack'; choose.disabled = true;
+    card.append(title, button, swatches, choose); $('pack-choices').append(card);
+    let scene = null;
+    try { scene = createPackScene(canvas); } catch { canvas.hidden = true; button.textContent = `Pack ${i + 1}`; }
+    button.addEventListener('click', () => selectPack(i)); choose.addEventListener('click', () => selectPack(i));
+    return { card, button, choose, swatches, scene };
+  });
   let pack = null, packKey = '', pendingKey = '', collectionVersion = 0, revealIndex = 0;
   let isCardView = false;
   const collectionMap = new Map();
@@ -94,15 +106,17 @@
       const model = ubu.decode(ubu.fromCode(result.dna));
       return { text, result, model, rarity: rarity.scoreRarity(model) };
     }));
-    items.sort((a, b) => a.rarity.bits - b.rarity.bits || a.result.certificate.serial.localeCompare(b.result.certificate.serial));
     return { items, seen };
   }
   function updatePackButton() {
     const retry = pendingKey && localStorage.getItem(pendingKey);
     $('mint').disabled = busy || !session?.owner || !config.ready || (!pack && !retry && !config.lifetimeLimit);
-    const label = pack ? 'Continue pack' : retry ? 'Retry pack' : 'Unwrap pack';
+    const label = pack ? 'Continue pack' : retry ? 'Resume pack choices' : 'Show packs';
+    $('mint').textContent = label;
+    $('mint').hidden = Boolean(offer && !pack && !busy);
     $('mint').setAttribute('aria-label', label);
-    $('pack-hint').textContent = busy ? 'Unwrapping…' : session?.owner ? label : '';
+    $('pack-hint').textContent = busy ? 'Preparing your pack…' : offer && !pack ? `Choose one pack. These choices are held until ${new Date(offer.expires * 1000).toLocaleString()}.` : session?.owner ? label : '';
+    for (const view of choiceViews) view.button.disabled = view.choose.disabled = busy || !offer || Boolean(pack);
   }
   function tradingCard(item) {
     const card = document.createElement('article');
@@ -186,7 +200,8 @@
     try {
       localStorage.removeItem(packKey);
       pack = null;
-      packScene?.reset(true);
+      offer = null; $('pack-choices').hidden = true; $('pack-legend').hidden = true;
+      packScene?.reset();
       status('');
       updatePackButton();
 
@@ -297,7 +312,7 @@
   async function api(path, options) {
     const response = await fetch(path, options);
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'The mint could not complete this request.');
+    if (!response.ok) { const error = new Error(data.error || 'The mint could not complete this request.'); error.status = response.status; throw error; }
     return data;
   }
   const post = data => ({ method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf }, body: JSON.stringify(data) });
@@ -377,7 +392,7 @@
   const certCache = new Map();
   let pageLoading = false;
   async function collection(reset = false) {
-    if (pendingKey && localStorage.getItem(pendingKey)) return;
+    if (pendingKey && localStorage.getItem(pendingKey + ':choice')) return;
     if (!reset && (pageLoading || !next)) return;
     const version = reset ? ++collectionVersion : collectionVersion;
     const sort = $('sort-ubus').value || 'recent';
@@ -400,7 +415,7 @@
           result: cached.result, model: cached.model, rarity: cached.rarity, issuedAt: cached.issuedAt };
       }));
       if (version !== collectionVersion || sort !== $('sort-ubus').value ||
-          (pendingKey && localStorage.getItem(pendingKey))) return;
+          (pendingKey && localStorage.getItem(pendingKey + ':choice'))) return;
 
       // Replace the page in one synchronous update on explicit sort/initial load.
       if (reset) {
@@ -478,30 +493,77 @@
     const link = document.createElement('a'); link.href = url; link.download = current.name.replaceAll(' ', '-') + '.ubu';
     document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
-  $('mint').addEventListener('click', async () => {
-    if (busy || !session?.owner) return;
-    if (pack) {
-      try { revealIndex = Math.max(0, pack.seen - 1); showReveal(); } catch (error) { status(error.message); }
-      return;
-    }
+  function showChoices(data) {
+    offer = data;
+    $('pack-choices').hidden = false; $('pack-legend').hidden = false;
+    $('pack-choices').classList.remove('choosing');
+    choiceViews.forEach((view, i) => {
+      const option = data.choices[i]; view.card.classList.remove('selected');
+      view.scene?.setHints(option.type, option.hints);
+      view.swatches.replaceChildren(...option.hints.map((hint, j) => {
+        const swatch = document.createElement('span'); swatch.className = 'pack-swatch'; swatch.style.background = hint.background;
+        const description = `Ubu ${j + 1}: background ${hint.background}; eyes, irises, pupils and mouth ${hint.accents.join(', ')}${hint.textured ? '; texture or pattern present' : '; matte finishes'}`;
+        swatch.setAttribute('role', 'img'); swatch.setAttribute('aria-label', description); swatch.title = description;
+        hint.accents.forEach((color, k) => { const dot = document.createElement('span'); dot.className = 'accent'; dot.style.background = color; dot.style.left = `${3 + k * 5}px`; swatch.append(dot); });
+        if (hint.textured) { const diamond = document.createElement('span'); diamond.className = 'pattern'; diamond.textContent = '◇'; diamond.setAttribute('aria-hidden', 'true'); swatch.append(diamond); }
+        return swatch;
+      }));
+    });
+  }
+  async function acceptPack(data) {
+    pack = await readPack(data.certificates);
+    try { savePack(); } catch (error) { pack = null; throw error; }
+    localStorage.removeItem(pendingKey); localStorage.removeItem(pendingKey + ':choice');
+    offer = null;
+  }
+  async function loadChoices() {
+    if (busy || !session?.owner || pack) return;
     busy = true; updatePackButton();
     try {
       let request = localStorage.getItem(pendingKey);
       if (!request) { request = crypto.randomUUID(); localStorage.setItem(pendingKey, request); }
-      ++collectionVersion;
-      $('mint').classList.add('unwrapping');
       status('');
-      const data = await api('/api/mint', post({ request }));
-      pack = await readPack(data.certificates);
-      try { savePack(); } catch (error) { pack = null; throw error; }
-      localStorage.removeItem(pendingKey);
+      const data = await api('/api/packs', post({ request }));
+      if (data.completed) {
+        await acceptPack(await api('/api/mint', post({ request: data.request })));
+        $('pack-choices').hidden = true; $('pack-legend').hidden = true;
+        status('Your selected pack is ready. Continue to reveal it.');
+      } else {
+        localStorage.setItem(pendingKey, data.request);
+        localStorage.removeItem(pendingKey + ':choice');
+        showChoices(data);
+      }
+    } catch (error) { status(error.message); }
+    finally { busy = false; updatePackButton(); }
+  }
+  async function selectPack(index) {
+    if (busy || pack || !offer) return;
+    const option = offer.choices[index], selection = { request: offer.request, choice: option.choice };
+    busy = true; updatePackButton();
+    try {
+      localStorage.setItem(pendingKey + ':choice', JSON.stringify(selection));
+      ++collectionVersion;
+      const data = await api('/api/mint', post(selection));
+      await acceptPack(data);
+      packScene = choiceViews[index].scene;
+      choiceViews[index].card.classList.add('selected'); $('pack-choices').classList.add('choosing');
       await packScene?.play(pack.items.length, pack.items.map(item => item.model));
+      $('pack-choices').hidden = true; $('pack-legend').hidden = true;
       revealIndex = 0;
       showReveal();
       status('');
-
-    } catch (error) { status(error.message); }
-    finally { busy = false; packScene?.reset(); $('mint').classList.remove('unwrapping'); updatePackButton(); }
+    } catch (error) {
+      // Refresh authoritative state after an ambiguous selection; never submit a
+      // second choice automatically. A committed selection is recovered by request.
+      offer = null; $('pack-choices').hidden = true; $('pack-legend').hidden = true;
+      status(error.message + ' Resume pack choices to recover or try again.');
+    } finally { busy = false; packScene?.reset(); updatePackButton(); }
+  }
+  $('mint').addEventListener('click', async () => {
+    if (busy || !session?.owner) return;
+    if (pack) {
+      try { revealIndex = Math.max(0, pack.seen - 1); showReveal(); } catch (error) { status(error.message); }
+    } else await loadChoices();
   });
   $('logout').addEventListener('click', async () => {
     try { await api('/api/logout', post({})); location.reload(); } catch (error) { status(error.message); }
@@ -519,6 +581,7 @@
         if (saved) {
           const data = JSON.parse(saved); pack = await readPack(data.certificates, data.seen);
           localStorage.removeItem(pendingKey);
+          localStorage.removeItem(pendingKey + ':choice');
         }
         updatePackButton();
         status(config.ready && config.lifetimeLimit ? `${config.lifetimeLimit} pack${config.lifetimeLimit === 1 ? '' : 's'} per account` : 'Minting closed');
@@ -526,6 +589,7 @@
         else if (localStorage.getItem(pendingKey)) status('Opening interrupted. Retry to continue.');
         if (config.ready) {
           try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
+          if (!pack && (config.lifetimeLimit || localStorage.getItem(pendingKey))) await loadChoices();
           await collection(true);
         }
       } else { $('pack-hint').textContent = ''; status(config.login ? 'Sign in to open packs.' : 'Minting closed'); }

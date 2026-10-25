@@ -59,7 +59,7 @@ export class MintRegistry extends DurableObject {
   }
   needsPreparation() {
     const state = this.mint.state();
-    return (!state.size || state.prepared < state.size || !state.remaining) &&
+    return (!state.size || state.prepared < state.size || state.remaining < 3) &&
       !(state.prepared === state.size && state.next_serial + this.config.batchSize - 1 > 999999999999);
   }
   async ensureBatch() {
@@ -72,17 +72,34 @@ export class MintRegistry extends DurableObject {
     if (!this.needsPreparation() && !this.mint.needsRarityBackfill()) return;
     await this.ctx.storage.setAlarm(Date.now() + 1000);
     // Don't let a large historical rarity migration block mint inventory preparation.
-    if (this.needsPreparation()) this.mint.prepare({ batchSize: this.config.batchSize });
+    if (this.needsPreparation()) this.mint.prepare({ batchSize: this.config.batchSize, minimumPacks: 3 });
     else if (this.mint.needsRarityBackfill()) this.mint.backfillRarity();
     if (!this.needsPreparation() && !this.mint.needsRarityBackfill()) await this.ctx.storage.deleteAlarm();
   }
-  async issue(owner, request) {
+  async offer(owner, request) {
     try {
-      const result = await this.mint.issue({ owner, request }, { lifetimeLimit: this.config.limit });
+      return this.mint.offer({ owner, request }, { lifetimeLimit: this.config.limit });
+    } catch (error) {
+      if (error.message === 'Lifetime mint limit reached.') return { error: error.message, status: 403 };
+      if (error.message === 'Invalid issuance request.') return { error: error.message, status: 400 };
+      if (error.message === 'Batch preparation required.') return { error: 'Preparing three packs. Try again shortly.', status: 503 };
+      if (error.message === 'Pack choices unavailable.') return { error: 'Available packs are reserved. Try again later.', status: 503 };
+      throw error;
+    } finally { await this.ensureBatch(); }
+  }
+  async issue(owner, request, choice) {
+    try {
+      // Request-only calls can recover old allocations, never bypass selection.
+      if (choice === undefined && !this.mint.exec('SELECT 1 FROM issued WHERE owner=? AND request=? LIMIT 1', owner, request).length) {
+        return { error: 'Choose a pack first.', status: 409 };
+      }
+      const result = await this.mint.issue({ owner, request, choice }, { lifetimeLimit: this.config.limit });
       return result;
     } catch (error) {
       if (error.message === 'Lifetime mint limit reached.') return { error: error.message, status: 403 };
       if (error.message === 'Invalid issuance request.') return { error: error.message, status: 400 };
+      if (error.message === 'Invalid pack choice.') return { error: error.message, status: 400 };
+      if (['Pack choice expired or unavailable.', 'A different pack was already selected.'].includes(error.message)) return { error: error.message, status: 409 };
       if (error.message === 'Batch preparation required.') return { error: 'Preparing the next batch. Try again shortly.', status: 503 };
       throw error;
     } finally { await this.ensureBatch(); }
@@ -177,12 +194,14 @@ export default {
         const result = await registry.favorite(session.owner, data);
         return json(result, result.status || 200);
       }
-      if (path === '/api/mint' && request.method === 'POST') {
+      if ((path === '/api/packs' || path === '/api/mint') && request.method === 'POST') {
         let data;
         try { data = await body(request); } catch { return json({ error: 'Provide a JSON request ID; maximum body size is 512 bytes.' }, 400); }
-        if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).length !== 1 || !Object.hasOwn(data, 'request') ||
-            typeof data.request !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(data.request)) return json({ error: 'Provide only a valid request ID.' }, 400);
-        const result = await registry.issue(session.owner, data.request);
+        const allowed = path === '/api/packs' ? ['request'] : ['request', 'choice'];
+        if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !allowed.includes(key)) ||
+            typeof data.request !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(data.request) ||
+            (Object.hasOwn(data, 'choice') && (typeof data.choice !== 'string' || !ID.test(data.choice)))) return json({ error: 'Provide a valid request ID and pack choice.' }, 400);
+        const result = path === '/api/packs' ? await registry.offer(session.owner, data.request) : await registry.issue(session.owner, data.request, data.choice);
         return json(result, result.status || 200, result.status === 503 ? { 'Retry-After': '2' } : {});
       }
       return json({ error: 'Endpoint not found.' }, 404);
