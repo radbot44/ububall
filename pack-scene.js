@@ -12,17 +12,30 @@
     sheet.width = 1200; sheet.height = 720;
     const sheetCtx = sheet.getContext('2d');
     const plasticPrint = document.createElement('canvas');
-    plasticPrint.width = 440; plasticPrint.height = 1408;
+    plasticPrint.width = 440; plasticPrint.height = 768;
     const plasticPrintCtx = plasticPrint.getContext('2d');
     const emboss = document.createElement('canvas');
     emboss.width = emboss.height = 320;
     const embossCtx = emboss.getContext('2d');
-    let frame = 0, progress = 0, started = 0, finish = null, count = 5, pointer = 0;
+    let frame = 0, progress = 0, started = 0, finish = null, count = 5, pointer = 0, pointerY = 0;
+    let aimX = 0, aimY = 0, lastPaint = 0;
     let color, candyColors, previousColor = -1, currentType = null;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     const logo = new Image(), mark = new Image();
     logo.onload = mark.onload = requestPaint;
     logo.src = 'uburoom-wordmark-brand.svg'; mark.src = 'uburoom-oomark-brand.svg';
+
+    // Fixed fine grain: generated once, so the material never sparkles at rest.
+    const grain = document.createElement('canvas');
+    grain.width = grain.height = 128;
+    const grainCtx = grain.getContext('2d'), pixels = grainCtx.createImageData(128, 128);
+    const noise = crypto.getRandomValues(new Uint8Array(128 * 128));
+    for (let i = 0; i < noise.length; i++) {
+      const value = noise[i] < 128 ? 0 : 255;
+      pixels.data.set([value, value, value, 3 + noise[i] % 9], i * 4);
+    }
+    grainCtx.putImageData(pixels, 0, 0);
+    const grainPattern = ctx.createPattern(grain, 'repeat');
 
     function paletteColor(index) {
       if (typeof ubu !== 'undefined' && ubu.decode) {
@@ -65,7 +78,7 @@
     }
 
     function plasticFilm(side, flat, untwist, target) {
-      const phase = side * .18 * (1 - untwist);
+      const phase = side * (Math.PI * 2 + .18) * (1 - untwist);
       const flip = Math.cos(phase), swing = Math.sin(phase);
       const ribs = [];
       for (let j = 0; j <= 12; j++) {
@@ -124,7 +137,7 @@
       if (release === 1) return;
       target.save(); target.scale(side, 1);
       target.globalAlpha *= 1 - release;
-      target.translate(128 + release * 7, 0);
+      target.translate(128, 0);
       target.beginPath(); target.moveTo(-13, -13);
       target.bezierCurveTo(-3, -22, 11, -19, 17, -10);
       target.bezierCurveTo(10, -3, 11, 6, 17, 12);
@@ -135,15 +148,15 @@
       for (let i = -1; i <= 1; i++) {
         const shift = i * 7;
         target.beginPath(); target.moveTo(-11, shift - 7);
-        target.bezierCurveTo(-4, shift - 3 - release * 10, 4, shift + 8 + release * 10, 13, shift + 5);
+        target.bezierCurveTo(-4, shift - 3, 4, shift + 8, 13, shift + 5);
         target.strokeStyle = '#07101b95'; target.lineWidth = 3; target.stroke();
         target.strokeStyle = '#eef6ffc0'; target.lineWidth = 1; target.stroke();
       }
       target.restore();
     }
 
-    function plasticTexture(flat, untwist, target) {
-      target.save(); plasticSilhouette(flat, target); target.fillStyle = color; target.fill(); target.clip();
+    function plasticTexture(target) {
+      target.save(); plasticSilhouette(1, target); target.fillStyle = color; target.fill(); target.clip();
       for (const c of plasticCreases) {
         target.beginPath(); target.moveTo(c.x - 5, c.y);
         target.lineTo(c.x + c.dx * .55, c.y + c.dy * .38); target.lineTo(c.x + c.dx, c.y + c.dy);
@@ -155,7 +168,7 @@
         target.strokeStyle = `rgba(0,0,0,${c.strength * .34})`; target.lineWidth = 1.25; target.stroke();
         target.translate(-.8, -.6); target.strokeStyle = `rgba(255,255,255,${c.strength * .75})`; target.lineWidth = .7; target.stroke(); target.translate(.8, .6);
       }
-      const shineX = -70 + pointer * 22 + untwist * 85;
+      const shineX = -70 + pointer * 22;
       target.fillStyle = gradient(target, shineX - 55, -135, shineX + 100, 135, [[0, '#ffffff00'], [.31, '#ffffff00'], [.4, '#ffffff50'], [.43, '#ffffffa0'], [.46, '#ffffff12'], [.57, '#ffffff00'], [.8, '#ffffff22'], [1, '#ffffff00']]);
       target.fillRect(-110, -135, 220, 270);
       // A narrow printed band leaves the colored cellophane visible above and below.
@@ -169,31 +182,31 @@
       // Continuous reflections sit over the ink as well as the film.
       target.fillStyle = gradient(target, shineX - 40, -135, shineX + 80, 135, [[0, '#ffffff00'], [.42, '#ffffff00'], [.46, '#ffffff38'], [.49, '#ffffff08'], [1, '#ffffff00']]);
       target.fillRect(-110, -135, 220, 270);
+      target.fillStyle = grainPattern; target.fillRect(-128, -135, 256, 270);
       target.restore();
     }
 
-    function plasticCenter(flat, untwist, target) {
-      // Roll the printed surface around the horizontal axis, keeping the solid
-      // silhouette and its lighting stationary instead of squashing a flat disc.
+    function plasticCenter(flat, target) {
+      // Project the print onto the rounded body; only the flaps unwind.
       plasticPrintCtx.resetTransform();
-      plasticPrintCtx.fillStyle = color; plasticPrintCtx.fillRect(0, 0, 440, 1408);
-      plasticPrintCtx.setTransform(2, 0, 0, 2, 220, 704);
-      plasticTexture(1, 0, plasticPrintCtx);
-      const spin = untwist * 1408;
+      plasticPrintCtx.fillStyle = color; plasticPrintCtx.fillRect(0, 0, 440, 768);
+      plasticPrintCtx.setTransform(2, 0, 0, 2, 220, 384);
+      plasticTexture(plasticPrintCtx);
       target.save(); plasticSilhouette(flat, target); target.clip();
       target.fillStyle = color; target.fillRect(-130, -135, 260, 270);
       for (let y = -135; y < 135; y++) {
         const latitude = Math.asin(Math.max(-1, Math.min(1, (y + .5) / 112)));
-        const surfaceY = mix(latitude * 112, y, flat) + spin;
-        const sourceY = ((surfaceY + 352) % 704 + 704) % 704;
-        target.drawImage(plasticPrint, 0, Math.min(1406, sourceY * 2), 440, 2, -128, y, 256, 1.1);
+        const surfaceY = mix(latitude * 112 + pointerY * 7, y, flat);
+        const sourceY = surfaceY + 192;
+        const bulge = Math.cos(latitude) * (1 - flat);
+        target.drawImage(plasticPrint, 0, sourceY * 2, 440, 2, -128 + pointer * 7 * bulge, y, 256, 1.1);
       }
       target.globalAlpha *= 1 - flat * .8;
       target.fillStyle = gradient(target, 0, -112, 0, 112, [[0, '#000000a0'], [.16, '#ffffff35'], [.35, '#ffffff12'], [.58, '#00000008'], [.83, '#00000060'], [1, '#000000cc']]);
       target.fillRect(-130, -135, 260, 270);
       target.fillStyle = gradient(target, -128, 0, 128, 0, [[0, '#00000085'], [.18, '#00000020'], [.4, '#ffffff18'], [.68, '#ffffff00'], [.86, '#00000030'], [1, '#00000085']]);
       target.fillRect(-130, -135, 260, 270);
-      const glow = target.createRadialGradient(-28 + pointer * 14, -46, 2, -20, -28, 100);
+      const glow = target.createRadialGradient(-28 + pointer * 24, -46 + pointerY * 22, 2, -20, -28, 100);
       glow.addColorStop(0, '#ffffff48'); glow.addColorStop(.45, '#ffffff12'); glow.addColorStop(1, '#ffffff00');
       target.fillStyle = glow; target.fillRect(-130, -135, 260, 270);
       // Gathered folds cross the colored shoulders into the clear necks.
@@ -217,12 +230,12 @@
       sheetCtx.setTransform(2, 0, 0, 2, 600, 360);
       sheetCtx.save();
       for (const side of [-1, 1]) plasticFilm(side, flat, untwist, sheetCtx);
-      plasticCenter(flat, untwist, sheetCtx);
+      plasticCenter(flat, sheetCtx);
       sheetCtx.restore();
       plasticKnot(-1, untwist, sheetCtx); plasticKnot(1, untwist, sheetCtx);
 
       ctx.save(); ctx.globalAlpha = 1 - ease(.86, .96, t);
-      ctx.rotate(mix(-.09, 0, untwist));
+      ctx.rotate(-.09);
       if (!peel) {
         ctx.drawImage(sheet, -300, -180, 600, 360); ctx.restore(); return;
       }
@@ -250,14 +263,14 @@
 
       // Circular gathered foil rim with organic crumple matching 110px candy radius
       foilRimPoints = [];
-      const rimSegments = 48;
+      const rimSegments = 36;
       for (let i = 0; i < rimSegments; i++) {
         const theta = (i / rimSegments) * Math.PI * 2;
-        const radius = 114 + (r() - 0.5) * 6;
+        const radius = 112 + Math.sin(theta * 3 + .4) * 2 + (r() - 0.5) * 3;
         foilRimPoints.push({
           theta,
           x: Math.cos(theta) * radius,
-          y: Math.sin(theta) * radius
+          y: Math.sin(theta) * radius * 1.06
         });
       }
 
@@ -269,13 +282,13 @@
         const cx = Math.cos(angle) * dist;
         const cy = Math.sin(angle) * dist;
         const creaseAngle = r() * Math.PI * 2;
-        const len = 16 + r() * 36;
+        const len = 8 + r() * 23;
         foilCreases.push({
           x: cx, y: cy,
           dx: Math.cos(creaseAngle) * len,
           dy: Math.sin(creaseAngle) * len,
           normal: creaseAngle + Math.PI / 2,
-          strength: 0.12 + r() * 0.32,
+          strength: 0.08 + r() * 0.22,
           facet: (r() - 0.5) * 10
         });
       }
@@ -284,14 +297,14 @@
       for (let i = 0; i < 28; i++) {
         const theta = (i / 28) * Math.PI * 2 + (r() - 0.5) * 0.2;
         const rOuter = 114;
-        const rInner = 74 + r() * 22;
+        const rInner = 87 + r() * 20;
         const x1 = Math.cos(theta) * rOuter, y1 = Math.sin(theta) * rOuter;
         const x2 = Math.cos(theta) * rInner, y2 = Math.sin(theta) * rInner;
         foilCreases.push({
           x: x1, y: y1,
           dx: x2 - x1, dy: y2 - y1,
           normal: theta + Math.PI / 2,
-          strength: 0.22 + r() * 0.45,
+          strength: 0.12 + r() * 0.22,
           facet: (r() - 0.5) * 8
         });
       }
@@ -320,9 +333,11 @@
     function foilContour(target) {
       target.beginPath();
       if (!foilRimPoints.length) { target.arc(0, 0, 114, 0, Math.PI * 2); return; }
-      target.moveTo(foilRimPoints[0].x, foilRimPoints[0].y);
-      for (let i = 1; i < foilRimPoints.length; i++) {
-        target.lineTo(foilRimPoints[i].x, foilRimPoints[i].y);
+      const last = foilRimPoints[foilRimPoints.length - 1], first = foilRimPoints[0];
+      target.moveTo((last.x + first.x) / 2, (last.y + first.y) / 2);
+      for (let i = 0; i < foilRimPoints.length; i++) {
+        const p = foilRimPoints[i], next = foilRimPoints[(i + 1) % foilRimPoints.length];
+        target.quadraticCurveTo(p.x, p.y, (p.x + next.x) / 2, (p.y + next.y) / 2);
       }
       target.closePath();
     }
@@ -373,18 +388,19 @@
       sheetCtx.fillStyle = color; sheetCtx.fill(); sheetCtx.clip();
 
       // 3D Spherical Volume Shading across circular candy
-      const lx = -36 + pointer * 45, ly = -45;
-      const spherical = sheetCtx.createRadialGradient(lx, ly, 6, 4, 8, 122);
+      const lx = -36 + pointer * 30, ly = -45 + pointerY * 28;
+      const spherical = sheetCtx.createRadialGradient(lx, ly, 6, 4, 8, 132);
       spherical.addColorStop(0, tint(color, .72));
       spherical.addColorStop(0.25, tint(color, 0.38));
-      spherical.addColorStop(0.55, color);
-      spherical.addColorStop(0.82, tint(color, -0.28));
-      spherical.addColorStop(1, tint(color, -0.62));
+      spherical.addColorStop(0.48, color);
+      spherical.addColorStop(0.78, tint(color, -0.38));
+      spherical.addColorStop(1, tint(color, -0.76));
       sheetCtx.fillStyle = spherical; sheetCtx.fillRect(-135, -135, 270, 270);
 
       // Crimped / gathered foil flutes around circular rim
       for (const pt of foilRimPoints) {
-        const innerX = pt.x * 0.87, innerY = pt.y * 0.87;
+        const reach = .92 + .035 * Math.sin(pt.theta * 7);
+        const innerX = pt.x * reach, innerY = pt.y * reach;
         // Small alternating facets make the gathered edge read as folded metal.
         sheetCtx.beginPath(); sheetCtx.moveTo(pt.x, pt.y);
         sheetCtx.lineTo(innerX, innerY);
@@ -393,9 +409,9 @@
         sheetCtx.fillStyle = Math.cos(pt.theta + .8) < 0 ? '#ffffff28' : '#00000028';
         sheetCtx.fill();
         sheetCtx.beginPath(); sheetCtx.moveTo(pt.x, pt.y); sheetCtx.lineTo(innerX, innerY);
-        sheetCtx.strokeStyle = 'rgba(0,0,0,0.45)'; sheetCtx.lineWidth = 1.6; sheetCtx.stroke();
+        sheetCtx.strokeStyle = 'rgba(0,0,0,0.20)'; sheetCtx.lineWidth = 1.2; sheetCtx.stroke();
         sheetCtx.beginPath(); sheetCtx.moveTo(pt.x + 1.2, pt.y + 0.8); sheetCtx.lineTo(innerX + 1.2, innerY + 0.8);
-        sheetCtx.strokeStyle = 'rgba(255,255,255,0.45)'; sheetCtx.lineWidth = 1.0; sheetCtx.stroke();
+        sheetCtx.strokeStyle = 'rgba(255,255,255,0.20)'; sheetCtx.lineWidth = .7; sheetCtx.stroke();
       }
 
       // 3D Crinkles & Creases pressed against the circular candy
@@ -412,9 +428,11 @@
         sheetCtx.fillStyle = `rgba(${glint > shade ? '255,255,255' : '0,0,0'}, ${c.strength * Math.max(glint, shade) * 0.38})`;
         sheetCtx.fill();
 
-        sheetCtx.beginPath(); sheetCtx.moveTo(c.x, c.y); sheetCtx.lineTo(c.x + c.dx, c.y + c.dy);
+        sheetCtx.beginPath(); sheetCtx.moveTo(c.x, c.y);
+        sheetCtx.quadraticCurveTo(c.x + c.dx * .5 + Math.cos(c.normal) * c.facet, c.y + c.dy * .5 + Math.sin(c.normal) * c.facet, c.x + c.dx, c.y + c.dy);
         sheetCtx.strokeStyle = `rgba(0,0,0, ${c.strength * (0.35 + 0.55 * shade)})`; sheetCtx.lineWidth = 1.4; sheetCtx.stroke();
-        sheetCtx.beginPath(); sheetCtx.moveTo(c.x - 0.9, c.y - 0.6); sheetCtx.lineTo(c.x + c.dx - 0.9, c.y + c.dy - 0.6);
+        sheetCtx.beginPath(); sheetCtx.moveTo(c.x - 0.7, c.y - 0.5);
+        sheetCtx.quadraticCurveTo(c.x + c.dx * .5 + Math.cos(c.normal) * c.facet - .7, c.y + c.dy * .5 + Math.sin(c.normal) * c.facet - .5, c.x + c.dx - .7, c.y + c.dy - .5);
         sheetCtx.strokeStyle = `rgba(255,255,255, ${c.strength * (0.3 + 0.75 * glint)})`; sheetCtx.lineWidth = 0.95; sheetCtx.stroke();
       }
 
@@ -432,21 +450,12 @@
       ]);
       sheetCtx.fillRect(-135, -135, 270, 270);
 
-      // Raised circular coin inner rim pressed through the foil
-      sheetCtx.beginPath();
-      sheetCtx.arc(0, 0, 98, 0, Math.PI * 2);
-      sheetCtx.strokeStyle = 'rgba(0,0,0,0.38)';
-      sheetCtx.lineWidth = 3.0;
-      sheetCtx.stroke();
-      sheetCtx.beginPath();
-      sheetCtx.arc(-1.2, -1.2, 98, 0, Math.PI * 2);
-      sheetCtx.strokeStyle = 'rgba(255,255,255,0.45)';
-      sheetCtx.lineWidth = 1.4;
-      sheetCtx.stroke();
-
       // Tint the SVG alpha mask to the foil: offset light and shade form a relief,
       // while the face picks up the same directional metallic reflection.
       if (mark.complete && mark.naturalWidth) {
+        sheetCtx.save();
+        sheetCtx.translate(pointer * 9, pointerY * 8 - 3);
+        sheetCtx.scale(.88, .88);
         embossCtx.clearRect(0, 0, 320, 320);
         embossCtx.drawImage(mark, 0, 0, 320, 320);
         embossCtx.globalCompositeOperation = 'source-in';
@@ -458,14 +467,10 @@
         embossCtx.fillRect(0, 0, 320, 320);
         sheetCtx.drawImage(emboss, -67, -67, 134, 134);
         embossCtx.globalCompositeOperation = 'source-over';
+        sheetCtx.restore();
       }
 
-      // Metallic rim specular highlight along upper-left curve
-      sheetCtx.beginPath();
-      sheetCtx.arc(0, 0, 110, -Math.PI * 0.85, -Math.PI * 0.1);
-      sheetCtx.strokeStyle = '#ffffff60';
-      sheetCtx.lineWidth = 1.4;
-      sheetCtx.stroke();
+      sheetCtx.fillStyle = grainPattern; sheetCtx.fillRect(-135, -135, 270, 270);
 
       sheetCtx.restore();
     }
@@ -478,10 +483,16 @@
       if (!rip) {
         ctx.save();
         ctx.beginPath();
-        ctx.ellipse(6, 16, 110, 30, 0, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+        ctx.ellipse(-pointer * 8, 123 - pointerY * 3, 78, 9, 0, 0, Math.PI * 2);
+        ctx.shadowColor = '#00000070'; ctx.shadowBlur = 14;
+        ctx.fillStyle = '#00000024';
         ctx.fill();
         ctx.restore();
+        // A soft lower shoulder stays behind the domed face as it tilts.
+        ctx.save(); ctx.translate(-pointer * 6, 5 - pointerY * 5); ctx.scale(.99, .99);
+        foilContour(ctx);
+        ctx.fillStyle = gradient(ctx, -90, -100, 90, 120, [[0, tint(color, -.32)], [1, tint(color, -.78)]]);
+        ctx.fill(); ctx.restore();
         ctx.drawImage(sheet, -300, -180, 600, 360);
         return;
       }
@@ -596,6 +607,11 @@
 
     function paint(now) {
       frame = 0;
+      const follow = 1 - Math.exp(-Math.min(64, now - lastPaint) / 85);
+      lastPaint = now;
+      pointer = mix(pointer, aimX, follow); pointerY = mix(pointerY, aimY, follow);
+      const settling = Math.abs(pointer - aimX) + Math.abs(pointerY - aimY) > .001;
+      if (!settling) { pointer = aimX; pointerY = aimY; }
       if (finish) progress = clamp((now - started) / 3600);
       const dpr = Math.min(devicePixelRatio, 2), width = Math.round(canvas.clientWidth * dpr), height = Math.round(canvas.clientHeight * dpr);
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
@@ -614,7 +630,17 @@
         }
         ctx.restore();
       }
-      if (progress < .96 && currentType) currentType.render(progress);
+      if (progress < .96 && currentType) {
+        ctx.save();
+        // Modest foreshortening plus surface parallax and moving light imply
+        // volume without a 3D dependency or transforming the interaction target.
+        ctx.translate(pointer * 4, pointerY * 3);
+        ctx.transform(Math.cos(pointer * .22), pointer * pointerY * .035, -pointer * pointerY * .025, Math.cos(pointerY * .20), 0, 0);
+        ctx.rotate(pointer * .025);
+        currentType.render(progress);
+        ctx.restore();
+      }
+      if (settling) requestPaint();
       if (finish) {
         if (progress < 1) requestPaint();
         else { const done = finish; finish = null; done(); }
@@ -625,17 +651,20 @@
 
     canvas.parentElement.addEventListener('pointermove', event => {
       if (reduced.matches || event.pointerType === 'touch' || finish) return;
-      const r = canvas.getBoundingClientRect(); pointer = clamp((event.clientX - r.left) / r.width) * 2 - 1; requestPaint();
+      const r = canvas.getBoundingClientRect();
+      aimX = clamp((event.clientX - r.left) / r.width) * 2 - 1;
+      aimY = clamp((event.clientY - r.top) / r.height) * 2 - 1;
+      requestPaint();
     });
-    canvas.parentElement.addEventListener('pointerleave', () => { pointer = 0; requestPaint(); });
+    canvas.parentElement.addEventListener('pointerleave', () => { aimX = aimY = 0; requestPaint(); });
     new ResizeObserver(requestPaint).observe(canvas);
-    reduced.addEventListener('change', () => { pointer = 0; if (reduced.matches && finish) started = performance.now() - 3600; requestPaint(); });
+    reduced.addEventListener('change', () => { aimX = aimY = pointer = pointerY = 0; if (reduced.matches && finish) started = performance.now() - 3600; requestPaint(); });
 
     recolor();
 
     return {
       play(amount = 5) {
-        count = amount; pointer = 0;
+        count = amount; aimX = aimY = pointer = pointerY = 0;
         if (reduced.matches) return Promise.resolve();
         started = performance.now(); progress = 0;
         return new Promise(resolve => { finish = resolve; requestPaint(); });
