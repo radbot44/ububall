@@ -7,7 +7,7 @@
   try { packScene = createPackScene($('pack-canvas')); } catch { /* Keep opening usable without canvas. */ }
   if (!packScene) { $('pack-canvas').hidden = true; $('pack-canvas').nextElementSibling.hidden = false; }
   let pack = null, packKey = '', pendingKey = '', collectionVersion = 0, revealIndex = 0;
-  let isCardView = false, loadingMore = false;
+  let isCardView = false;
   const collectionMap = new Map();
 
   const FAV_STORAGE_KEY = 'ubumint:favorites';
@@ -450,7 +450,7 @@
   if ('IntersectionObserver' in window) {
     observer = new IntersectionObserver(entries => {
       for (const entry of entries) {
-        if (entry.isIntersecting && next && !loadingMore && !busy) {
+        if (entry.isIntersecting && next && !pageLoading && !busy) {
           void loadMore();
         }
       }
