@@ -79,8 +79,32 @@
           target.fillStyle = hex; target.fill();
         });
         if (hint.textured) {
-          target.beginPath(); target.moveTo(0, 13); target.lineTo(3, 17); target.lineTo(0, 21); target.lineTo(-3, 17); target.closePath();
-          target.strokeStyle = '#ffffffcc'; target.lineWidth = 1.2; target.stroke();
+          if (currentType.id === 'plastic') {
+            // A pearlescent heat-sealed fold follows the printed color region.
+            const fold = () => {
+              target.beginPath(); target.moveTo(-22, 18);
+              target.bezierCurveTo(-8, 11, 7, 23, 23, 15);
+            };
+            fold();
+            target.strokeStyle = '#10121755'; target.lineWidth = 5; target.stroke();
+            target.strokeStyle = gradient(target, -24 + pointer * 10, 0, 26 + pointer * 10, 0,
+              [[0, '#c8e9ed55'], [.28, '#e8d8f2aa'], [.5, '#fff9e8ee'], [.72, '#c8e9edaa'], [1, '#e8d8f244']]);
+            target.lineWidth = 3; target.stroke();
+            target.save(); target.translate(0, -1); fold();
+            target.strokeStyle = '#ffffff70'; target.lineWidth = .65; target.stroke();
+            target.restore();
+          } else {
+            // A small impressed seal belongs to the foil, not a floating badge.
+            target.translate(0, 20);
+            for (const [offset, stroke] of [[.9, '#10121790'], [-.6, '#ffffffa0']]) {
+              target.beginPath(); target.ellipse(offset, offset, 9, 6, 0, 0, Math.PI * 2);
+              target.strokeStyle = stroke; target.lineWidth = 1.1; target.stroke();
+            }
+            target.strokeStyle = '#ffffff90'; target.lineWidth = .8;
+            for (let j = -1; j <= 1; j++) {
+              target.beginPath(); target.moveTo(j * 4 - 1, -2); target.lineTo(j * 4 + 1, 2); target.stroke();
+            }
+          }
         }
         target.restore();
       });
@@ -678,9 +702,18 @@
               blobCtx.fillStyle = accent; blobCtx.fillRect(x - 8, y - 8, 16, 16);
             });
             if (hint.textured) {
-              blobCtx.beginPath(); blobCtx.moveTo(lobe.x, lobe.y - 19); blobCtx.lineTo(lobe.x + 3, lobe.y - 14);
-              blobCtx.lineTo(lobe.x, lobe.y - 9); blobCtx.lineTo(lobe.x - 3, lobe.y - 14); blobCtx.closePath();
-              blobCtx.strokeStyle = '#ffffffbb'; blobCtx.lineWidth = 1.2; blobCtx.stroke();
+              // Embedded mica-like flecks travel with this lobe through splitting.
+              // Fixed positions and pointer lighting keep them from twinkling randomly.
+              for (let j = 0; j < 23; j++) {
+                const angle = j * 2.39996 + i, spread = Math.sqrt((j + .5) / 23);
+                const x = lobe.x + Math.cos(angle) * spread * 25;
+                const y = lobe.y - 14 + Math.sin(angle) * spread * 13;
+                const glint = .35 + .45 * Math.max(0, Math.cos(angle - pointer * .8 - pointerY * .5));
+                blobCtx.beginPath(); blobCtx.ellipse(x, y, 1.1 + j % 3 * .35, .65, angle, 0, Math.PI * 2);
+                blobCtx.fillStyle = `rgba(249,241,221,${glint})`; blobCtx.fill();
+                blobCtx.beginPath(); blobCtx.ellipse(x + .4, y + 1, 1, .4, angle, 0, Math.PI * 2);
+                blobCtx.fillStyle = '#10121745'; blobCtx.fill();
+              }
             }
           });
           blobCtx.restore();

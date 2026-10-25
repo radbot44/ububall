@@ -10,13 +10,12 @@
     const button = document.createElement('button'); button.className = 'candy-pack'; button.disabled = true;
     button.setAttribute('aria-label', `Choose pack ${i + 1}`);
     const canvas = document.createElement('canvas'); canvas.setAttribute('aria-hidden', 'true'); button.append(canvas);
-    const swatches = document.createElement('div'); swatches.className = 'pack-swatches';
     const choose = document.createElement('button'); choose.className = 'choose-pack'; choose.textContent = 'Choose this pack'; choose.disabled = true;
-    card.append(title, button, swatches, choose); $('pack-choices').append(card);
+    card.append(title, button, choose); $('pack-choices').append(card);
     let scene = null;
     try { scene = createPackScene(canvas); } catch { canvas.hidden = true; button.textContent = `Pack ${i + 1}`; }
     button.addEventListener('click', () => selectPack(i)); choose.addEventListener('click', () => selectPack(i));
-    return { card, button, choose, swatches, scene };
+    return { card, button, choose, scene };
   });
   let pack = null, packKey = '', pendingKey = '', collectionVersion = 0, revealIndex = 0;
   let isCardView = false;
@@ -500,14 +499,9 @@
     choiceViews.forEach((view, i) => {
       const option = data.choices[i]; view.card.classList.remove('selected');
       view.scene?.setHints(option.type, option.hints);
-      view.swatches.replaceChildren(...option.hints.map((hint, j) => {
-        const swatch = document.createElement('span'); swatch.className = 'pack-swatch'; swatch.style.background = hint.background;
-        const description = `Ubu ${j + 1}: background ${hint.background}; eyes, irises, pupils and mouth ${hint.accents.join(', ')}${hint.textured ? '; texture or pattern present' : '; matte finishes'}`;
-        swatch.setAttribute('role', 'img'); swatch.setAttribute('aria-label', description); swatch.title = description;
-        hint.accents.forEach((color, k) => { const dot = document.createElement('span'); dot.className = 'accent'; dot.style.background = color; dot.style.left = `${3 + k * 5}px`; swatch.append(dot); });
-        if (hint.textured) { const diamond = document.createElement('span'); diamond.className = 'pattern'; diamond.textContent = '◇'; diamond.setAttribute('aria-hidden', 'true'); swatch.append(diamond); }
-        return swatch;
-      }));
+      const description = `Pack ${i + 1}: ` + option.hints.map((hint, j) => `Ubu ${j + 1}: background ${hint.background}; eyes, irises, pupils and mouth ${hint.accents.join(', ')}${hint.textured ? '; special finish' : '; matte finishes'}`).join('. ');
+      view.button.setAttribute('aria-label', description);
+      view.button.title = description;
     });
   }
   async function acceptPack(data) {

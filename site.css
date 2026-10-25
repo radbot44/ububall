@@ -53,10 +53,6 @@ h2 { font-size: 17px; margin: 0; }
 .pack-option .candy-pack:disabled { opacity: 1; }
 .pack-option .candy-pack { margin: 0 auto; }
 .pack-option .choose-pack { margin-top: 12px; }
-.pack-swatches { display: flex; justify-content: center; gap: 9px; margin: 6px 0; }
-.pack-swatch { width: 28px; height: 28px; border-radius: 50%; border: 1px solid #ffffff35; position: relative; }
-.pack-swatch .accent { position: absolute; width: 5px; height: 5px; bottom: 5px; border-radius: 50%; }
-.pack-swatch .pattern { position: absolute; top: -10px; right: -5px; color: var(--text); text-shadow: 0 1px 3px #000; }
 .pack-choices.choosing { grid-template-columns: 1fr; }
 .pack-choices.choosing .pack-option:not(.selected) { display: none; }
 @media (max-width: 700px) {
