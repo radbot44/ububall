@@ -11,6 +11,9 @@
     const sheet = document.createElement('canvas');
     sheet.width = 1200; sheet.height = 720;
     const sheetCtx = sheet.getContext('2d');
+    const emboss = document.createElement('canvas');
+    emboss.width = emboss.height = 320;
+    const embossCtx = emboss.getContext('2d');
     let frame = 0, progress = 0, started = 0, finish = null, count = 5, pointer = 0;
     let color, candyColors, previousColor = -1, currentType = null;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -86,6 +89,15 @@
       target.fill(); target.clip();
       target.fillStyle = gradient(target, 110, 0, 260, 0, [[0, '#0d1b3070'], [.12, '#17283d25'], [.45, '#a5c8ff08'], [.88, '#ffffff33'], [1, '#c6dff50a']]);
       target.fillRect(108, -140, 180, 280);
+      // Alternating transparent planes catch light along the gathered folds.
+      for (let j = 0; j < 12; j++) {
+        target.beginPath(); target.moveTo(ribs[j][0].x, ribs[j][0].y);
+        for (let k = 1; k <= 8; k++) target.lineTo(ribs[j][k].x, ribs[j][k].y);
+        for (let k = 8; k >= 0; k--) target.lineTo(ribs[j + 1][k].x, ribs[j + 1][k].y);
+        target.closePath();
+        target.fillStyle = gradient(target, 115, 0, 270, 0, [[0, '#ffffff00'], [.4, j % 2 ? '#15213128' : '#edf6ff25'], [1, '#ffffff00']]);
+        target.fill();
+      }
       for (const j of [2, 4, 7, 10]) {
         const rib = ribs[j];
         target.beginPath(); target.moveTo(rib[0].x, rib[0].y);
@@ -147,9 +159,20 @@
       const shineX = -70 + pointer * 22 + untwist * 85;
       target.fillStyle = gradient(target, shineX - 55, -135, shineX + 100, 135, [[0, '#ffffff00'], [.31, '#ffffff00'], [.4, '#ffffff50'], [.43, '#ffffffa0'], [.46, '#ffffff12'], [.57, '#ffffff00'], [.8, '#ffffff22'], [1, '#ffffff00']]);
       target.fillRect(-110, -135, 220, 270);
-      target.fillStyle = '#101217bb'; target.beginPath(); target.roundRect(-94, -32, 188, 64, 6); target.fill();
-      if (logo.complete && logo.naturalWidth) target.drawImage(logo, -88, -27, 176, 55);
+      // A narrow printed band leaves the colored cellophane visible above and below.
+      target.fillStyle = gradient(target, 0, -29, 0, 29, [[0, '#101217b8'], [.5, '#101217e8'], [1, '#101217b8']]);
+      target.fillRect(-112, -29, 224, 58);
+      target.strokeStyle = '#ffffff40'; target.lineWidth = .6;
+      for (const y of [-29, 29]) {
+        target.beginPath(); target.moveTo(-110, y); target.lineTo(110, y); target.stroke();
+      }
+      if (logo.complete && logo.naturalWidth) target.drawImage(logo, -82, -25.6, 164, 51.2);
+      // Continuous reflections sit over the ink as well as the film.
+      target.fillStyle = gradient(target, shineX - 40, -135, shineX + 80, 135, [[0, '#ffffff00'], [.42, '#ffffff00'], [.46, '#ffffff38'], [.49, '#ffffff08'], [1, '#ffffff00']]);
+      target.fillRect(-110, -135, 220, 270);
       target.restore();
+      plasticSilhouette(flat, target);
+      target.strokeStyle = '#ffffff45'; target.lineWidth = .8; target.stroke();
     }
 
     function renderPlastic(t) {
@@ -204,7 +227,7 @@
 
       foilCreases = [];
       // Micro-crinkles pressed across the circular face
-      for (let i = 0; i < 48; i++) {
+      for (let i = 0; i < 32; i++) {
         const angle = r() * Math.PI * 2;
         const dist = Math.sqrt(r()) * 96;
         const cx = Math.cos(angle) * dist;
@@ -216,7 +239,7 @@
           dx: Math.cos(creaseAngle) * len,
           dy: Math.sin(creaseAngle) * len,
           normal: creaseAngle + Math.PI / 2,
-          strength: 0.14 + r() * 0.48,
+          strength: 0.12 + r() * 0.32,
           facet: (r() - 0.5) * 10
         });
       }
@@ -316,16 +339,23 @@
       // 3D Spherical Volume Shading across circular candy
       const lx = -36 + pointer * 45, ly = -45;
       const spherical = sheetCtx.createRadialGradient(lx, ly, 6, 4, 8, 122);
-      spherical.addColorStop(0, '#ffffffdd');
-      spherical.addColorStop(0.25, tint(color, 0.55));
+      spherical.addColorStop(0, tint(color, .72));
+      spherical.addColorStop(0.25, tint(color, 0.38));
       spherical.addColorStop(0.55, color);
-      spherical.addColorStop(0.82, tint(color, -0.42));
-      spherical.addColorStop(1, tint(color, -0.78));
+      spherical.addColorStop(0.82, tint(color, -0.28));
+      spherical.addColorStop(1, tint(color, -0.62));
       sheetCtx.fillStyle = spherical; sheetCtx.fillRect(-135, -135, 270, 270);
 
       // Crimped / gathered foil flutes around circular rim
       for (const pt of foilRimPoints) {
-        const innerX = pt.x * 0.85, innerY = pt.y * 0.85;
+        const innerX = pt.x * 0.87, innerY = pt.y * 0.87;
+        // Small alternating facets make the gathered edge read as folded metal.
+        sheetCtx.beginPath(); sheetCtx.moveTo(pt.x, pt.y);
+        sheetCtx.lineTo(innerX, innerY);
+        sheetCtx.lineTo(pt.x - Math.sin(pt.theta) * 4, pt.y + Math.cos(pt.theta) * 4);
+        sheetCtx.closePath();
+        sheetCtx.fillStyle = Math.cos(pt.theta + .8) < 0 ? '#ffffff28' : '#00000028';
+        sheetCtx.fill();
         sheetCtx.beginPath(); sheetCtx.moveTo(pt.x, pt.y); sheetCtx.lineTo(innerX, innerY);
         sheetCtx.strokeStyle = 'rgba(0,0,0,0.45)'; sheetCtx.lineWidth = 1.6; sheetCtx.stroke();
         sheetCtx.beginPath(); sheetCtx.moveTo(pt.x + 1.2, pt.y + 0.8); sheetCtx.lineTo(innerX + 1.2, innerY + 0.8);
@@ -340,8 +370,8 @@
 
         sheetCtx.beginPath();
         sheetCtx.moveTo(c.x, c.y);
-        sheetCtx.lineTo(c.x + c.dx * 0.5, c.y + c.dy * 0.5);
-        sheetCtx.lineTo(c.x + c.dx * 0.5 + c.facet, c.y + c.dy * 0.5);
+        sheetCtx.lineTo(c.x + c.dx, c.y + c.dy);
+        sheetCtx.lineTo(c.x + c.dx * 0.5 + Math.cos(c.normal) * c.facet, c.y + c.dy * 0.5 + Math.sin(c.normal) * c.facet);
         sheetCtx.closePath();
         sheetCtx.fillStyle = `rgba(${glint > shade ? '255,255,255' : '0,0,0'}, ${c.strength * Math.max(glint, shade) * 0.38})`;
         sheetCtx.fill();
@@ -358,7 +388,7 @@
         [0, 'rgba(255,255,255,0)'],
         [0.32, 'rgba(255,255,255,0)'],
         [0.40, 'rgba(255,255,255,0.3)'],
-        [0.44, 'rgba(255,255,255,0.85)'],
+        [0.44, 'rgba(255,255,255,0.48)'],
         [0.48, 'rgba(255,255,255,0.18)'],
         [0.60, 'rgba(255,255,255,0)'],
         [0.76, 'rgba(255,255,255,0.22)'],
@@ -378,16 +408,20 @@
       sheetCtx.lineWidth = 1.4;
       sheetCtx.stroke();
 
-      // Embossed circular 3D brand emblem pressed into the foil
+      // Tint the SVG alpha mask to the foil: offset light and shade form a relief,
+      // while the face picks up the same directional metallic reflection.
       if (mark.complete && mark.naturalWidth) {
-        sheetCtx.save();
-        sheetCtx.globalAlpha = 0.5;
-        sheetCtx.drawImage(mark, -72 + 2.2, -72 + 2.2, 144, 144);
-        sheetCtx.globalAlpha = 0.35;
-        sheetCtx.drawImage(mark, -72 - 1.8, -72 - 1.8, 144, 144);
-        sheetCtx.globalAlpha = 0.85;
-        sheetCtx.drawImage(mark, -72, -72, 144, 144);
-        sheetCtx.restore();
+        embossCtx.clearRect(0, 0, 320, 320);
+        embossCtx.drawImage(mark, 0, 0, 320, 320);
+        embossCtx.globalCompositeOperation = 'source-in';
+        embossCtx.fillStyle = tint(color, -.65); embossCtx.fillRect(0, 0, 320, 320);
+        sheetCtx.drawImage(emboss, -67 + 1.5, -67 + 1.8, 134, 134);
+        embossCtx.fillStyle = tint(color, .8); embossCtx.fillRect(0, 0, 320, 320);
+        sheetCtx.drawImage(emboss, -67 - 1, -67 - 1.2, 134, 134);
+        embossCtx.fillStyle = gradient(embossCtx, 0, 0, 320, 320, [[0, tint(color, .48)], [.35, tint(color, .12)], [.52, tint(color, .45)], [.6, color], [1, tint(color, -.3)]]);
+        embossCtx.fillRect(0, 0, 320, 320);
+        sheetCtx.drawImage(emboss, -67, -67, 134, 134);
+        embossCtx.globalCompositeOperation = 'source-over';
       }
 
       // Metallic rim specular highlight along upper-left curve
@@ -435,6 +469,7 @@
       ctx.closePath();
       ctx.clip();
       ctx.drawImage(sheet, -300, -180, 600, 360);
+      foilContour(ctx); ctx.clip();
       drawCurledFoilEdge(ctx, foilTear, -1, rip);
       ctx.restore();
 
@@ -453,6 +488,7 @@
       ctx.closePath();
       ctx.clip();
       ctx.drawImage(sheet, -300, -180, 600, 360);
+      foilContour(ctx); ctx.clip();
       drawCurledFoilEdge(ctx, foilTear, 1, rip);
       ctx.restore();
 
