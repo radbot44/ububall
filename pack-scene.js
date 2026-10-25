@@ -172,28 +172,30 @@
       target.save(); plasticSilhouette(1, target); target.fillStyle = color; target.fill(); target.clip();
       hintColors(target);
       if (packHints?.some(h => h.textured)) {
-        // A pearlescent heat-sealed seam across the cellophane indicates a special finish in the pack.
-        target.save();
-        const seamY = -64;
-        const fold = () => {
-          target.beginPath(); target.moveTo(-96, seamY);
-          target.bezierCurveTo(-32, seamY - 8, 32, seamY + 6, 96, seamY - 2);
-        };
-        fold();
-        target.strokeStyle = '#10121760'; target.lineWidth = 5; target.stroke();
-        target.strokeStyle = gradient(target, -80 + pointer * 25, 0, 80 + pointer * 25, 0,
-          [[0, '#c8e9ed44'], [.28, '#e8d8f2bb'], [.5, '#fff9e8ee'], [.72, '#c8e9edbb'], [1, '#e8d8f244']]);
-        target.lineWidth = 2.8; target.stroke();
-        target.save(); target.translate(0, -1); fold();
-        target.strokeStyle = '#ffffff85'; target.lineWidth = .7; target.stroke();
-        target.restore();
-        target.strokeStyle = '#ffffff55'; target.lineWidth = .75;
-        for (let cx = -88; cx <= 88; cx += 8) {
-          const tNorm = (cx + 96) / 192;
-          const cy = seamY + (-8 * (1 - tNorm) + 6 * tNorm) * (1 - Math.abs(tNorm - .5) * 1.8);
-          target.beginPath(); target.moveTo(cx, cy - 3); target.lineTo(cx + .5, cy + 3); target.stroke();
+        // Pearlescent heat-sealed seams across the top and bottom cellophane indicate a special finish in the pack.
+        for (const [seamY, bend] of [[-64, -1], [64, 1]]) {
+          target.save();
+          const fold = () => {
+            target.beginPath(); target.moveTo(-96, seamY);
+            target.bezierCurveTo(-32, seamY + bend * 8, 32, seamY - bend * 6, 96, seamY + bend * 2);
+          };
+          fold();
+          target.strokeStyle = '#10121760'; target.lineWidth = 5; target.stroke();
+          target.strokeStyle = gradient(target, -80 + pointer * 25, 0, 80 + pointer * 25, 0,
+            [[0, '#c8e9ed44'], [.28, '#e8d8f2bb'], [.5, '#fff9e8ee'], [.72, '#c8e9edbb'], [1, '#e8d8f244']]);
+          target.lineWidth = 2.8; target.stroke();
+          target.save(); target.translate(0, -1); fold();
+          target.strokeStyle = '#ffffff85'; target.lineWidth = .7; target.stroke();
+          target.restore();
+          target.strokeStyle = '#ffffff55'; target.lineWidth = .75;
+          for (let cx = -88; cx <= 88; cx += 8) {
+            const tNorm = (cx + 96) / 192;
+            const cy = seamY + (bend * 8 * (1 - tNorm) - bend * 6 * tNorm) * (1 - Math.abs(tNorm - .5) * 1.8);
+            target.beginPath(); target.moveTo(cx, cy - 3); target.lineTo(cx + .5, cy + 3);
+            target.stroke();
+          }
+          target.restore();
         }
-        target.restore();
       }
       for (const c of plasticCreases) {
         target.beginPath(); target.moveTo(c.x - 5, c.y);
