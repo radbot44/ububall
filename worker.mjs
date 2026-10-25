@@ -71,8 +71,9 @@ export class MintRegistry extends DurableObject {
   async alarm() {
     if (!this.needsPreparation() && !this.mint.needsRarityBackfill()) return;
     await this.ctx.storage.setAlarm(Date.now() + 1000);
-    if (this.mint.needsRarityBackfill()) this.mint.backfillRarity();
-    else this.mint.prepare({ batchSize: this.config.batchSize });
+    // Don't let a large historical rarity migration block mint inventory preparation.
+    if (this.needsPreparation()) this.mint.prepare({ batchSize: this.config.batchSize });
+    else if (this.mint.needsRarityBackfill()) this.mint.backfillRarity();
     if (!this.needsPreparation() && !this.mint.needsRarityBackfill()) await this.ctx.storage.deleteAlarm();
   }
   async issue(owner, request) {
