@@ -342,14 +342,16 @@
       node = collectionCard(item);
       cardMap.set(item.serial, node);
     }
-    let before = grid.firstElementChild;
-    while (before) {
-      if (before !== node) {
-        const other = collectionMap.get(before.dataset.serial);
-        if (other && compareItems(item, other) < 0) break;
-      }
-      before = before.nextElementSibling;
+    if (grid.firstElementChild && !grid.firstElementChild.dataset.serial) grid.replaceChildren();
+    // Binary search among existing DOM nodes; no sorting or thumbnail regeneration.
+    let low = 0, high = grid.children.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      const other = collectionMap.get(grid.children[mid].dataset.serial);
+      if (other && compareItems(other, item) < 0) low = mid + 1;
+      else high = mid;
     }
+    const before = grid.children[low] || null;
     if (before !== node) grid.insertBefore(node, before);
   }
 
@@ -429,7 +431,14 @@
       $('more').hidden = !next || Boolean(observer);
       $('collection').hidden = false;
     } catch (error) {
-      if (version === collectionVersion) status('Could not load collection: ' + error.message);
+      if (version === collectionVersion) {
+        status('Could not load collection: ' + error.message);
+        if (error.message.startsWith('Preparing rarity sorting')) {
+          setTimeout(() => {
+            if (version === collectionVersion && $('sort-ubus').value === sort) void collection(reset);
+          }, 1200);
+        }
+      }
     } finally {
       if (version === collectionVersion) pageLoading = false;
     }
