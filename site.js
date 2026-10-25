@@ -11,23 +11,9 @@
   const collectionMap = new Map();
 
   const FAV_STORAGE_KEY = 'ubumint:favorites';
-  function loadFavorites() {
-    try {
-      const raw = localStorage.getItem(FAV_STORAGE_KEY);
-      return new Set(raw ? JSON.parse(raw) : []);
-    } catch {
-      return new Set();
-    }
-  }
-  function saveFavorites(set) {
-    try {
-      localStorage.setItem(FAV_STORAGE_KEY, JSON.stringify(Array.from(set)));
-    } catch { /* Quota exceeded or storage disabled */ }
-  }
-  function isFavorite(serial) {
-    if (!serial) return false;
-    return loadFavorites().has(serial);
-  }
+  const cardMap = new Map();
+  const changingFavorites = new Set();
+  const isFavorite = serial => collectionMap.get(serial)?.favorite === true;
   function createHeartSvg() {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
@@ -58,25 +44,42 @@
     });
     return btn;
   }
-  function toggleFavorite(serial) {
-    if (!serial) return;
-    const favs = loadFavorites();
-    if (favs.has(serial)) favs.delete(serial);
-    else favs.add(serial);
-    saveFavorites(favs);
-    const nowFav = favs.has(serial);
-
+  function syncFavoriteButtons(serial) {
+    const favorite = isFavorite(serial);
+    for (const btn of document.querySelectorAll('.card-heart[data-serial="' + serial + '"]')) {
+      btn.classList.toggle('is-favorite', favorite);
+      btn.setAttribute('aria-pressed', String(favorite));
+    }
     if (current?.serial === serial) {
-      $('viewer-fav').classList.toggle('is-favorite', nowFav);
-      $('viewer-fav').setAttribute('aria-pressed', String(nowFav));
+      $('viewer-fav').classList.toggle('is-favorite', favorite);
+      $('viewer-fav').setAttribute('aria-pressed', String(favorite));
     }
-    for (const btn of document.querySelectorAll(`.card[data-serial="${serial}"] .card-heart, .trading-card .card-heart[data-serial="${serial}"]`)) {
-      btn.classList.toggle('is-favorite', nowFav);
-      btn.setAttribute('aria-pressed', String(nowFav));
+  }
+  async function toggleFavorite(serial) {
+    const item = collectionMap.get(serial);
+    if (!item || changingFavorites.has(serial)) return;
+    changingFavorites.add(serial);
+    try {
+      const result = await api('/api/favorites', post({ serial, favorite: !item.favorite }));
+      item.favorite = result.favorite;
+      syncFavoriteButtons(serial);
+      if ($('sort-ubus').value === 'favorite') insertCard(item);
+    } catch (error) {
+      status('Could not update favorite: ' + error.message);
+    } finally {
+      changingFavorites.delete(serial);
     }
-    if ($('sort-ubus')?.value === 'favorite') {
-      renderCollection();
+  }
+  async function migrateBrowserFavorites() {
+    let serials;
+    try { serials = JSON.parse(localStorage.getItem(FAV_STORAGE_KEY) || '[]'); } catch { return; }
+    if (!Array.isArray(serials)) return;
+    serials = [...new Set(serials.filter(serial => typeof serial === 'string' && /^[0-9]{12}$/.test(serial)))];
+    for (let i = 0; i < serials.length; i += 50) {
+      await api('/api/favorites', post({ serials: serials.slice(i, i + 50) }));
     }
+    // Import is idempotent and only updates ubus owned by the signed-in account.
+    localStorage.removeItem(FAV_STORAGE_KEY);
   }
 
   const unseen = serial => pack?.items.slice(pack.seen).some(item => item.result.certificate.serial === serial);
@@ -153,10 +156,8 @@
     $('prev-ubu').disabled = index === 0;
     $('next-ubu').disabled = last;
     $('finish-pack').hidden = pack.seen < pack.items.length;
+    showMintedItem(item);
     if (!$('reveal').open) $('reveal').showModal();
-  }
-  async function refreshCollection() {
-    try { await collection(true); } catch (error) { status(`Your pack is saved. Collection could not refresh: ${error.message}`); }
   }
   function navigatePack(direction) {
     const target = revealIndex + direction;
@@ -169,7 +170,7 @@
       }
       revealIndex = target;
       showReveal();
-      if (pack.seen !== previousSeen) void refreshCollection();
+
       if (document.activeElement.disabled) (target === 0 ? $('next-ubu') : $('prev-ubu')).focus();
     } catch (error) { $('reveal-progress').textContent = `Could not save your place: ${error.message}`; }
   }
@@ -188,7 +189,7 @@
       packScene?.reset(true);
       status('');
       updatePackButton();
-      void refreshCollection();
+
       return true;
     } catch (error) {
       $('reveal-progress').textContent = error.message;
@@ -239,7 +240,7 @@
     $('authenticity').textContent = result.type === 'signed' ? 'Verified mint certificate' : 'Custom · unsigned';
     $('download').hidden = false;
 
-    if (serial) {
+    if (serial && collectionMap.has(serial)) {
       $('viewer-fav').hidden = false;
       const fav = isFavorite(serial);
       $('viewer-fav').classList.toggle('is-favorite', fav);
@@ -290,7 +291,7 @@
     if (event.target === $('viewer')) $('viewer').close();
   });
   $('viewer-fav').addEventListener('click', () => {
-    if (current?.serial) toggleFavorite(current.serial);
+    if (current?.serial) void toggleFavorite(current.serial);
   });
 
   async function api(path, options) {
@@ -436,7 +437,7 @@
     if (sentinel) observer.observe(sentinel);
   }
 
-  $('sort-ubus').addEventListener('change', () => renderCollection());
+  $('sort-ubus').addEventListener('change', () => { void collection(true); });
   $('more').addEventListener('click', () => { void loadMore(); });
 
   $('import').addEventListener('change', async event => {
@@ -458,7 +459,7 @@
   $('mint').addEventListener('click', async () => {
     if (busy || !session?.owner) return;
     if (pack) {
-      try { revealIndex = Math.max(0, pack.seen - 1); showReveal(); await refreshCollection(); } catch (error) { status(error.message); }
+      try { revealIndex = Math.max(0, pack.seen - 1); showReveal(); } catch (error) { status(error.message); }
       return;
     }
     busy = true; updatePackButton();
@@ -476,7 +477,7 @@
       revealIndex = 0;
       showReveal();
       status('');
-      await refreshCollection();
+
     } catch (error) { status(error.message); }
     finally { busy = false; packScene?.reset(); $('mint').classList.remove('unwrapping'); updatePackButton(); }
   });
@@ -501,7 +502,10 @@
         status(config.ready && config.lifetimeLimit ? `${config.lifetimeLimit} pack${config.lifetimeLimit === 1 ? '' : 's'} per account` : 'Minting closed');
         if (pack) status('');
         else if (localStorage.getItem(pendingKey)) status('Opening interrupted. Retry to continue.');
-        if (config.ready) await collection(true);
+        if (config.ready) {
+          try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
+          await collection(true);
+        }
       } else { $('pack-hint').textContent = ''; status(config.login ? 'Sign in to open packs.' : 'Minting closed'); }
     } catch (error) { status(error.message); }
   })();
