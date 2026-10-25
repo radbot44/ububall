@@ -95,7 +95,9 @@ export class MintRegistry extends DurableObject {
       favorite: [['(certificate IS NULL)', 'ASC'], ['favorite', 'DESC'], ['issued_at', 'DESC'], ['serial', 'DESC']]
     }[sort];
     if (!keys || (cursor && !/^[0-9]{12}$/.test(cursor))) return { error: 'Invalid collection sort or cursor.', status: 400 };
-    await this.ensureBatch();
+    if (this.mint.needsRarityBackfill() && await this.ctx.storage.getAlarm() === null) {
+      await this.ctx.storage.setAlarm(Date.now() + 1000);
+    }
     if (sort === 'rarity' && this.mint.needsRarityBackfill()) {
       return { error: 'Preparing rarity sorting. Try again shortly.', status: 503 };
     }
