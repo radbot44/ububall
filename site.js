@@ -495,7 +495,7 @@
       pack = await readPack(data.certificates);
       try { savePack(); } catch (error) { pack = null; throw error; }
       localStorage.removeItem(pendingKey);
-      await packScene?.play(pack.items.length);
+      await packScene?.play(pack.items.length, pack.items.map(item => item.model));
       revealIndex = 0;
       showReveal();
       status('');

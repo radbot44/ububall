@@ -19,6 +19,7 @@
     const embossCtx = emboss.getContext('2d');
     let frame = 0, progress = 0, started = 0, finish = null, count = 5, pointer = 0, pointerY = 0;
     let aimX = 0, aimY = 0, lastPaint = 0;
+    let blobCanvas, blobCtx, blobPixels, blobColors = [], blobFaces = [];
     let color, candyColors, previousColor = -1, currentType = null;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     const logo = new Image(), mark = new Image();
@@ -566,10 +567,114 @@
       }
     }
 
+    // Compact-support metaballs merge into one surface, then pinch apart.
+    // The small raster is reused; all colors and grain remain fixed per pack.
+    function setupBlob() {
+      if (!blobCanvas) {
+        blobCanvas = document.createElement('canvas');
+        blobCanvas.width = 400; blobCanvas.height = 240;
+        blobCtx = blobCanvas.getContext('2d');
+        blobPixels = blobCtx.createImageData(400, 240);
+      }
+      const indices = [];
+      while (indices.length < 5) {
+        const index = crypto.getRandomValues(new Uint8Array(1))[0] & 31;
+        if (!indices.includes(index)) indices.push(index);
+      }
+      blobColors = indices.map(index => {
+        const hex = paletteColor(index);
+        return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+      });
+      blobFaces = [];
+    }
+
+    function renderBlob(t) {
+      const split = ease(.10, .60, t), become = ease(.67, .84, t);
+      const radius = mix(96, 66, split);
+      const lobes = Array.from({ length: count }, (_, i) => {
+        const angle = i * Math.PI * 2 / count - Math.PI / 2;
+        return {
+          x: mix(Math.cos(angle) * (48 + Math.sin(i * 3) * 12), (i - (count - 1) / 2) * 104, split),
+          y: mix(Math.sin(angle) * (43 + Math.cos(i * 2) * 12), 0, split) + Math.sin(t * 12 + i * 2) * 5 * Math.sin(split * Math.PI),
+          invRadius2: 1 / (radius * mix(1 + Math.sin(i * 2 + .5) * .13, 1, split)) ** 2
+        };
+      });
+      const pixels = blobPixels.data;
+      if (become < 1) {
+        for (let py = 0; py < 240; py++) {
+          const y = (py + .5) * 1.5 - 180;
+          for (let px = 0; px < 400; px++) {
+            const x = (px + .5) * 1.5 - 300, offset = (py * 400 + px) * 4;
+            let field = 0, nx = 0, ny = 0, red = 0, green = 0, blue = 0, weight = 0;
+            for (let i = 0; i < count; i++) {
+              const dx = x - lobes[i].x, dy = y - lobes[i].y;
+              const invRadius2 = lobes[i].invRadius2;
+              const a = Math.max(0, 1 - (dx * dx + dy * dy) * invRadius2);
+              if (!a) continue;
+              const value = a * a * a, pigment = value * value;
+              field += value;
+              nx += dx * a * a * invRadius2 * 140;
+              ny += dy * a * a * invRadius2 * 140;
+              const rgb = blobColors[i % 5];
+              red += rgb[0] * pigment; green += rgb[1] * pigment; blue += rgb[2] * pigment; weight += pigment;
+            }
+            const alpha = clamp((field - .22) * 28);
+            pixels[offset + 3] = Math.round(alpha * 255);
+            if (!alpha) continue;
+            const normal = Math.hypot(nx, ny, .7);
+            const light = clamp((nx * (-.38 + pointer * .22) + ny * (-.48 + pointerY * .22) + .64) / normal);
+            const sheen = Math.pow(light, 12) * 58;
+            const powder = (noise[(py % 128) * 128 + px % 128] / 255 - .5) * 10;
+            const shade = .48 + light * .65;
+            pixels[offset] = red / weight * shade + sheen + powder;
+            pixels[offset + 1] = green / weight * shade + sheen + powder;
+            pixels[offset + 2] = blue / weight * shade + sheen + powder;
+          }
+        }
+        blobCtx.putImageData(blobPixels, 0, 0);
+      }
+      ctx.save(); ctx.globalAlpha = 1 - ease(.94, 1, t);
+      if (become < 1) {
+        ctx.save(); ctx.globalAlpha *= 1 - become;
+        ctx.drawImage(blobCanvas, -300, -180, 600, 360); ctx.restore();
+      }
+      if (become) {
+        ctx.globalAlpha *= become;
+        for (let i = 0; i < count; i++) {
+          const { x, y } = lobes[i], face = blobFaces[i];
+          if (face) ctx.drawImage(face, x - 43, y - 43, 86, 86);
+          else {
+            // Standalone previews without minted models use the brand face.
+            ctx.fillStyle = `rgb(${blobColors[i % 5].join(',')})`;
+            ctx.beginPath(); ctx.arc(x, y, 42, 0, Math.PI * 2); ctx.fill();
+            if (mark.complete && mark.naturalWidth) ctx.drawImage(mark, x - 28, y - 28, 56, 56);
+          }
+        }
+      }
+      ctx.restore();
+    }
+
+    async function prepareBlobFaces(models) {
+      if (typeof ubuRender !== 'function') return [];
+      return Promise.all(models.slice(0, count).map(async model => {
+        let url;
+        try {
+          const svg = ubuRender(model, 'pack-preview');
+          svg.setAttribute('width', '180'); svg.setAttribute('height', '180');
+          url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' }));
+          const face = new Image(); face.src = url; await face.decode(); return face;
+        } catch { return null; }
+        finally { if (url) URL.revokeObjectURL(url); }
+      }));
+    }
+
+    const duration = () => currentType?.id === 'blob' ? 4800 : 3600;
+
     // Available pack types: randomly chosen when generated
     const PACK_TYPES = [
       { id: 'plastic', name: 'Plastic Cellophane', setup: setupPlastic, render: renderPlastic },
-      { id: 'foil', name: 'Crinkly Foil', setup: setupFoil, render: renderFoil }
+      { id: 'foil', name: 'Crinkly Foil', setup: setupFoil, render: renderFoil },
+      { id: 'blob', name: 'Powdered Alloy', setup: setupBlob, render: renderBlob }
     ];
 
     function recolor(packTypeId) {
@@ -612,14 +717,14 @@
       pointer = mix(pointer, aimX, follow); pointerY = mix(pointerY, aimY, follow);
       const settling = Math.abs(pointer - aimX) + Math.abs(pointerY - aimY) > .001;
       if (!settling) { pointer = aimX; pointerY = aimY; }
-      if (finish) progress = clamp((now - started) / 3600);
+      if (finish) progress = clamp((now - started) / duration());
       const dpr = Math.min(devicePixelRatio, 2), width = Math.round(canvas.clientWidth * dpr), height = Math.round(canvas.clientHeight * dpr);
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
       ctx.resetTransform(); ctx.clearRect(0, 0, width, height);
       const scale = width / 600; ctx.setTransform(scale, 0, 0, scale, width / 2, height * .46);
 
       const revealStart = currentType && currentType.id === 'plastic' ? .59 : .18;
-      if (progress > revealStart) {
+      if (currentType?.id !== 'blob' && progress > revealStart) {
         const reveal = ease(revealStart, revealStart + .14, progress);
         const fan = ease(.36, .78, progress);
         ctx.save(); ctx.globalAlpha = reveal * (1 - ease(.96, 1, progress));
@@ -630,7 +735,7 @@
         }
         ctx.restore();
       }
-      if (progress < .96 && currentType) {
+      if (progress < (currentType?.id === 'blob' ? 1 : .96) && currentType) {
         ctx.save();
         // Modest foreshortening plus surface parallax and moving light imply
         // volume without a 3D dependency or transforming the interaction target.
@@ -658,14 +763,16 @@
     });
     canvas.parentElement.addEventListener('pointerleave', () => { aimX = aimY = 0; requestPaint(); });
     new ResizeObserver(requestPaint).observe(canvas);
-    reduced.addEventListener('change', () => { aimX = aimY = pointer = pointerY = 0; if (reduced.matches && finish) started = performance.now() - 3600; requestPaint(); });
+    reduced.addEventListener('change', () => { aimX = aimY = pointer = pointerY = 0; if (reduced.matches && finish) started = performance.now() - duration(); requestPaint(); });
 
     recolor();
 
     return {
-      play(amount = 5) {
+      async play(amount = 5, models = []) {
         count = amount; aimX = aimY = pointer = pointerY = 0;
         if (reduced.matches) return Promise.resolve();
+        if (currentType?.id === 'blob') blobFaces = await prepareBlobFaces(models);
+        if (reduced.matches) return;
         started = performance.now(); progress = 0;
         return new Promise(resolve => { finish = resolve; requestPaint(); });
       },
@@ -679,6 +786,6 @@
     };
   }
 
-  createPackScene.types = ['plastic', 'foil'];
+  createPackScene.types = ['plastic', 'foil', 'blob'];
   globalThis.createPackScene = createPackScene;
 })();
