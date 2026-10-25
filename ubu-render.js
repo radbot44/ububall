@@ -316,7 +316,7 @@
         });
       }
       lighting('luster', [[0, '#fff', .3], [.4, '#fff', 0], [1, '#000', .3]], true);
-    }    } else if (attribute.texture === 'granite') {
+    } else if (attribute.texture === 'granite') {
       lighting('granite-depth', [[0, '#fff', .18], [.5, '#fff', .03], [1, '#000', .22]], true);
       // Dense mineral speckles: quartz, biotite, feldspar and hornblende
       const colors = ['#ffffff', '#141414', '#e2baa4', '#555f68', '#f0f3f6', '#222222'];
@@ -567,7 +567,6 @@
         }
       }
       lighting('kintsugi-gold-flash', [[0, '#fff', 0], [.42, '#fff', 0], [.5, '#fff6b3', .55], [.58, '#ffd700', .18], [1, '#fff', 0]]);
-    }
     }
     defs.append(pattern);
     return `url(#${id})`;
