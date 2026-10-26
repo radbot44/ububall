@@ -25,13 +25,14 @@
     trails.forEach(trail => { trail.length = 0; });
     particles.length = fireworks.length = 0;
   }
-  function burst(x, y, team, strength, celebration = false) {
+  function burst(x, y, team, strength, celebration = false, tangent = 0) {
     if (reducedMotion.matches) return;
-    const count = celebration ? 64 : Math.round(6 + strength * 10);
+    const count = celebration ? 64 : Math.round(3 + strength * 4);
     for (let i = 0; i < count && particles.length < 400; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = celebration ? 60 + Math.random() * 190 : 25 + Math.random() * (50 + strength * 100);
-      const life = celebration ? .8 + Math.random() * .8 : .18 + Math.random() * .25;
+      const angle = celebration ? Math.random() * Math.PI * 2
+        : tangent + (i % 2 ? Math.PI : 0) + (Math.random() - .5) * .6;
+      const speed = celebration ? 60 + Math.random() * 190 : 20 + Math.random() * (35 + strength * 65);
+      const life = celebration ? .8 + Math.random() * .8 : .14 + Math.random() * .16;
       particles.push({ x, y, px: x, py: y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
         team: i % 5 === 0 ? -1 : team, life, duration: life, celebration });
     }
@@ -47,7 +48,7 @@
       if (p.life <= 0) { particles.splice(i, 1); continue; }
       p.px = p.x; p.py = p.y;
       const drag = Math.exp(-dt * (p.celebration ? 1.2 : 4));
-      p.vx *= drag; p.vy = p.vy * drag + (p.celebration ? 95 : 30) * dt;
+      p.vx *= drag; p.vy = p.vy * drag + (p.celebration ? 95 : 0) * dt;
       p.x += p.vx * dt; p.y += p.vy * dt;
     }
     for (let i = fireworks.length - 1; i >= 0; i--) {
@@ -61,7 +62,8 @@
       if (Math.hypot(b.vx, b.vy) < 25) return;
       const trail = trails[i], previous = trail[trail.length - 1];
       if (!previous || Math.hypot(b.x - previous.x, b.y - previous.y) >= 3) {
-        trail.push({ x: b.x, y: b.y, life: .24 });
+        const duration = Math.max(.12, Math.min(.3, b.radius / 125));
+        trail.push({ x: b.x, y: b.y, life: duration, duration });
         if (trail.length > 40) trail.shift();
       }
     });
@@ -71,9 +73,9 @@
     trails.forEach((trail, index) => {
       const b = bodies[index], color = b.team === -1 ? '#ffffff' : b.team === 0 ? primary : secondary;
       for (let i = 0; i < trail.length; i++) {
-        const p = trail[i], end = trail[i + 1] || b, fade = Math.max(0, p.life / .24);
-        ctx.globalAlpha = fade * .35;
-        line(p.x, p.y, end.x, end.y, color, b.radius * .9 * fade);
+        const p = trail[i], end = trail[i + 1] || b, fade = Math.max(0, p.life / p.duration);
+        ctx.globalAlpha = fade * .23;
+        line(p.x, p.y, end.x, end.y, color, b.radius * .7 * fade);
       }
     });
     ctx.restore();
@@ -82,9 +84,11 @@
     ctx.save(); ctx.lineCap = 'round';
     for (const p of particles) {
       const color = p.team === -1 ? '#ffffff' : p.team === 0 ? primary : secondary;
-      ctx.globalAlpha = Math.min(1, p.life / p.duration * 2);
-      line(p.px, p.py, p.x, p.y, color, p.celebration ? 2.5 : 2);
-      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(p.x, p.y, p.celebration ? 1.8 : 1.2, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = Math.min(1, p.life / p.duration * 2) * (p.celebration ? 1 : .65);
+      ctx.shadowColor = color;
+      ctx.shadowBlur = p.celebration ? 12 * canvas.width / 1000 : 0;
+      line(p.px, p.py, p.x, p.y, color, p.celebration ? 2.5 : 1.3);
+      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(p.x, p.y, p.celebration ? 1.8 : .9, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
   }
@@ -529,8 +533,9 @@
     if (speed < 15) return;
     const distance = Math.hypot(b.x - a.x, b.y - a.y) || 1;
     const x = a.x + (b.x - a.x) * a.radius / distance, y = a.y + (b.y - a.y) * a.radius / distance;
-    burst(x, y, a.team, Math.min(1, speed / 600));
-    if (a.team !== b.team) burst(x, y, b.team, Math.min(1, speed / 600));
+    const tangent = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
+    burst(x, y, a.team, Math.min(1, speed / 600), false, tangent);
+    if (a.team !== b.team) burst(x, y, b.team, Math.min(1, speed / 600), false, tangent);
     const isBall = a.team === -1 || b.team === -1;
     const now = performance.now();
     if (isBall) {
@@ -564,7 +569,8 @@
     const now = performance.now();
     if (body._lastWallSound && (now - body._lastWallSound) < 60) return;
     body._lastWallSound = now;
-    burst(body.x + nx * body.radius, body.y + ny * body.radius, body.team, Math.min(1, velocity / 500));
+    burst(body.x + nx * body.radius, body.y + ny * body.radius, body.team,
+      Math.min(1, velocity / 500), false, Math.atan2(ny, nx) + Math.PI / 2);
     const norm = Math.min(1.0, Math.max(0.0, (velocity - 20) / 480));
     const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
     if (!window.ubuAudio) return;
