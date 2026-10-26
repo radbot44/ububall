@@ -139,7 +139,17 @@
     }
   });
   $('copy-dna').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(current); $('input-error').textContent = 'DNA copied.'; } catch { $('dna-output').select(); $('input-error').textContent = 'Select and copy the DNA above.'; }
+    try {
+      await navigator.clipboard.writeText(current);
+      $('input-error').textContent = 'DNA copied.';
+      const copyBtn = $('copy-dna');
+      const prevText = copyBtn.textContent;
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = prevText; }, 1500);
+    } catch {
+      $('dna-output').select();
+      $('input-error').textContent = 'Select and copy the DNA above.';
+    }
   });
   $('export-ubu').addEventListener('click', () => {
     const url = URL.createObjectURL(new Blob([ubuFile.unsigned(current)], { type: 'application/json' }));
