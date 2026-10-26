@@ -93,11 +93,12 @@
     ctx.strokeStyle = border; ctx.lineWidth = 4; ctx.stroke();
     ctx.setLineDash([6, 10]); line(500, 60, 500, 540, border); ctx.setLineDash([]);
     // Goal pockets interrupt the boundary at the same positions used by physics.
-    for (const [x, accent] of [[27, primary], [940, secondary]]) {
-      ctx.fillStyle = background; ctx.fillRect(x, 230, 33, 140);
-      line(x, 230, x + 33, 230, accent, 4);
-      line(x, 370, x + 33, 370, accent, 4);
-      line(x === 27 ? x : x + 33, 230, x === 27 ? x : x + 33, 370, accent, 4);
+    const depth = P.rink.goalDepth;
+    for (const [x, accent] of [[60 - depth, primary], [940, secondary]]) {
+      ctx.fillStyle = background; ctx.fillRect(x, 230, depth, 140);
+      line(x, 230, x + depth, 230, accent, 4);
+      line(x, 370, x + depth, 370, accent, 4);
+      line(x === 60 - depth ? x : x + depth, 230, x === 60 - depth ? x : x + depth, 370, accent, 4);
     }
     bodies.slice(0, 6).forEach((b, i) => {
       circle(b.x, b.y, b.radius + 3, i < 3 ? primary : secondary, 4);
@@ -179,12 +180,15 @@
     if (isBall) {
       const player = a.team !== -1 ? a : b;
       lastTouchByTeam[player.team] = player;
-      if (player.voice && window.ubuAudio) {
-        if (!player._lastHitSound || (now - player._lastHitSound) > 55) {
-          player._lastHitSound = now;
-          const norm = Math.min(1.0, Math.max(0.0, (speed - 25) / 550));
-          const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
+      const norm = Math.min(1.0, Math.max(0.0, (speed - 25) / 550));
+      const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
+      if (!player._lastHitSound || (now - player._lastHitSound) > 55) {
+        player._lastHitSound = now;
+        if (player.voice && window.ubuAudio) {
           window.ubuAudio.playCollision(player.voice, { volume });
+        }
+        if (window.ubuAudio) {
+          window.ubuAudio.playBallHit({ volume });
         }
       }
     } else if (a.team !== -1 && b.team !== -1) {
@@ -199,12 +203,28 @@
       }
     }
   }
+  function handleWall(body, velocity, wallType) {
+    if (velocity < 20) return;
+    const now = performance.now();
+    if (body._lastWallSound && (now - body._lastWallSound) < 60) return;
+    body._lastWallSound = now;
+    const norm = Math.min(1.0, Math.max(0.0, (velocity - 20) / 480));
+    const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
+    if (!window.ubuAudio) return;
+    if (wallType === 'post') {
+      window.ubuAudio.playGoalHit('post', { volume: Math.min(1.0, volume * 1.1) });
+    } else if (wallType === 'net') {
+      window.ubuAudio.playGoalHit('net', { volume });
+    } else {
+      window.ubuAudio.playWallHit({ volume });
+    }
+  }
   function frame(time) {
     const delta = lastTime ? Math.min((time - lastTime) / 1000, .05) : 0; lastTime = time;
     if (phase === 'play' && !$('roster-dialog').open && !document.hidden) {
       accumulator += delta;
       while (accumulator >= P.DT && phase === 'play') {
-        const goal = P.step(bodies, P.DT, handleCollision); elapsed += P.DT; accumulator -= P.DT;
+        const goal = P.step(bodies, P.DT, handleCollision, handleWall); elapsed += P.DT; accumulator -= P.DT;
         if (goal !== null || P.settled(bodies) || elapsed >= 12) finishTurn(goal);
       }
       draw();

@@ -642,6 +642,105 @@
     return toneHandle;
   }
 
+  function playBallHit(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx);
+    const now = ctx.currentTime;
+    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.8));
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(75, now + 0.05);
+
+    gain.gain.setValueAtTime(0.7 * volume, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(now);
+    osc.stop(now + 0.08);
+  }
+
+  function playWallHit(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx);
+    const now = ctx.currentTime;
+    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.6));
+
+    const osc = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(140, now);
+    osc.frequency.exponentialRampToValueAtTime(65, now + 0.06);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(450, now);
+
+    gain.gain.setValueAtTime(0.6 * volume, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(master);
+    osc.start(now);
+    osc.stop(now + 0.09);
+  }
+
+  function playGoalHit(type = 'post', options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx);
+    const now = ctx.currentTime;
+    const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.8));
+
+    if (type === 'post') {
+      const carrier = ctx.createOscillator();
+      const mod = ctx.createOscillator();
+      const modGain = ctx.createGain();
+      const gain = ctx.createGain();
+
+      carrier.type = 'sine';
+      carrier.frequency.setValueAtTime(1650, now);
+      mod.type = 'sine';
+      mod.frequency.setValueAtTime(2780, now);
+
+      modGain.gain.setValueAtTime(1200, now);
+      modGain.gain.exponentialRampToValueAtTime(0.1, now + 0.12);
+      mod.connect(modGain);
+      modGain.connect(carrier.frequency);
+
+      gain.gain.setValueAtTime(0.55 * volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+
+      carrier.connect(gain);
+      gain.connect(master);
+      carrier.start(now);
+      mod.start(now);
+      carrier.stop(now + 0.3);
+      mod.stop(now + 0.3);
+    } else {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(180, now);
+      osc.frequency.exponentialRampToValueAtTime(90, now + 0.09);
+
+      gain.gain.setValueAtTime(0.5 * volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start(now);
+      osc.stop(now + 0.13);
+    }
+  }
+
   function playFanfare(voice, customCtx = null, onNoteCallback = null) {
     stopAll();
     const ctx = customCtx || getAudioContext();
@@ -733,6 +832,9 @@
     getAudioContext,
     playVoice,
     playCollision,
+    playBallHit,
+    playWallHit,
+    playGoalHit,
     playFanfare,
     stop: stopAll
   };

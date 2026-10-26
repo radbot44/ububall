@@ -165,4 +165,10 @@ test('audio: mock AudioContext synthesis and scheduling', () => {
   const collisionHandle = audio.playCollision(testVoice, { ctx: mockCtx, volume: 0.5 });
   assert.equal(typeof collisionHandle.stop, 'function');
   collisionHandle.stop();
+
+  // Test physical hit sounds
+  audio.playBallHit({ ctx: mockCtx, volume: 0.8 });
+  audio.playWallHit({ ctx: mockCtx, volume: 0.6 });
+  audio.playGoalHit('post', { ctx: mockCtx, volume: 0.9 });
+  audio.playGoalHit('net', { ctx: mockCtx, volume: 0.7 });
 });

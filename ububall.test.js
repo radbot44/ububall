@@ -73,7 +73,7 @@ test('extreme size, traction and spin combinations stay finite and within the fi
       if (P.step(b) !== null) break;
       for (const body of b.slice(0, 6)) {
         assert.ok([body.x, body.y, body.vx, body.vy, body.omega].every(Number.isFinite));
-        assert.ok(body.x >= 60 + body.radius - .1 && body.x <= 940 - body.radius + .1);
+        assert.ok(body.x >= 60 - P.rink.goalDepth + body.radius - .1 && body.x <= 940 + P.rink.goalDepth - body.radius + .1);
         assert.ok(body.y >= 60 + body.radius - .1 && body.y <= 540 - body.radius + .1);
       }
     }
@@ -99,10 +99,10 @@ test('a ball fully crossing either goal scores for the opposite team', () => {
 test('a partial goal crossing does not score', () => {
   const b = P.kickoff(); b[6].x = 945; assert.equal(P.step(b), null);
 });
-test('ubus cannot enter the net even through its center', () => {
+test('ubus can enter the goal net and are contained by the back of the net', () => {
   const b = P.kickoff(); Object.assign(b[0], { x: 90, y: 300, vx: -720 });
-  for (let i = 0; i < 3; i++) P.step(b);
-  assert.ok(b[0].x >= 85); assert.ok(b[0].vx > 0);
+  for (let i = 0; i < 20; i++) P.step(b);
+  assert.ok(b[0].x < 60 + b[0].radius); assert.ok(b[0].x >= 60 - P.rink.goalDepth + b[0].radius - 0.1); assert.ok(b[0].vx > 0);
 });
 test('rounded corners reflect diagonally into the rink', () => {
   const b = P.kickoff(); Object.assign(b[6], { x: 100, y: 100, vx: -500, vy: -500 });
@@ -127,7 +127,7 @@ test('repeated crowded turns stay finite, bounded and settle', () => {
     P.launch(b, [...Array.from({ length: 3 }, () => ({ angle: random() * Math.PI * 2, power: random() })), ...P.cpuPlans(b, random)]);
     const goal = resolve(b);
     assert.ok(b.every(p => [p.x, p.y, p.vx, p.vy].every(Number.isFinite)));
-    assert.ok(b.slice(0, 6).every(p => p.x >= 84.9 && p.x <= 915.1 && p.y >= 84.9 && p.y <= 515.1));
+    assert.ok(b.slice(0, 6).every(p => p.x >= 60 - P.rink.goalDepth + p.radius - 0.1 && p.x <= 940 + P.rink.goalDepth - p.radius + 0.1 && p.y >= 84.9 && p.y <= 515.1));
     if (goal !== null) b = P.kickoff(); else P.stop(b);
   }
 });
