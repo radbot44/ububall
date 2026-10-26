@@ -8,7 +8,7 @@
   const practice = Array.from({ length: 6 }, () => ({ model: ubu.decode(ubu.randomDNA()), label: 'Practice ubu' }));
   let roster = practice.slice(0, 3), draft = [...roster], rosterSlot = 0;
   let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
-  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, skaters = [], next = '';
+  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, dragPoint = null, skaters = [], next = '';
   const radians = value => value * Math.PI / 180;
   const normalStats = () => ({
     impulse: 127, traction: 127, spin: 127, curve: 127,
@@ -76,11 +76,58 @@
   function newMatch() {
     window.ubuAudio?.stop();
     roster = [...draft]; buildTeam(); bodies = kickoff(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
-    resetPlans(); say('Set a direction and power for each ubu, then launch.'); draw();
+    resetPlans(); say('Pull back from an ubu to aim and launch, or turn its spin dial.'); draw();
   }
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
   function line(x1, y1, x2, y2, color, width = 2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
   function circle(x, y, r, color, width = 2) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
+  function computeTrajectory(body, plan) {
+    const points = [{ x: body.x, y: body.y }];
+    if (!plan || plan.power <= 0) return points;
+    const impulse = body.impulse || P.IMPULSE;
+    const v0 = (impulse / body.mass) * plan.power;
+    let vx = Math.cos(plan.angle) * v0;
+    let vy = Math.sin(plan.angle) * v0;
+    let omega = (plan.spin || 0) * (body.maxSpin || 8);
+    const curve = body.curveFactor !== undefined ? body.curveFactor : 0.04;
+    const friction = body.friction || 150;
+    let currX = body.x, currY = body.y;
+    const impulseRatio = impulse / P.IMPULSE;
+    const maxSteps = Math.min(55, Math.round(10 + plan.power * 32 * impulseRatio));
+    const dt = 1 / 60;
+    for (let s = 0; s < maxSteps; s++) {
+      const angle = omega * curve * dt;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      const nvx = vx * cos - vy * sin;
+      const nvy = vx * sin + vy * cos;
+      vx = nvx; vy = nvy;
+      omega = Math.sign(omega) * Math.max(0, Math.abs(omega) - 6 * dt);
+      currX += vx * dt; currY += vy * dt;
+      points.push({ x: currX, y: currY });
+      const speed = Math.hypot(vx, vy);
+      if (speed < 12) break;
+      const factor = Math.max(0, speed - friction * dt) / speed;
+      vx *= factor; vy *= factor;
+    }
+    return points;
+  }
+  function drawTrajectory(points, color) {
+    if (points.length < 2) return;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    const pEnd = points[points.length - 1];
+    const pPrev = points[Math.max(0, points.length - 3)];
+    const tipAngle = Math.atan2(pEnd.y - pPrev.y, pEnd.x - pPrev.x);
+    for (const offset of [-0.55, 0.55]) {
+      line(pEnd.x, pEnd.y, pEnd.x - Math.cos(tipAngle + offset) * 14, pEnd.y - Math.sin(tipAngle + offset) * 14, color, 4);
+    }
+  }
   function draw() {
     const ratio = Math.min(devicePixelRatio || 1, 2), width = Math.max(1, Math.round(canvas.clientWidth * ratio)), height = Math.round(width * .6);
     if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
@@ -102,7 +149,61 @@
     }
     bodies.slice(0, 6).forEach((b, i) => {
       circle(b.x, b.y, b.radius + 3, i < 3 ? primary : secondary, 4);
-      if (i === selected && phase === 'plan') circle(b.x, b.y, b.radius + 8, text, 2);
+      if (i === selected && phase === 'plan') {
+        circle(b.x, b.y, b.radius + 8, text, 2);
+
+        // Spin dial track around the selected ubu
+        const dialR = b.radius + 18;
+        ctx.setLineDash([3, 5]);
+        circle(b.x, b.y, dialR, 'rgba(255, 255, 255, 0.22)', 1.5);
+        ctx.setLineDash([]);
+
+        // Straight / 0 spin notch along launch angle
+        const notchX = b.x + Math.cos(plans[i].angle) * dialR;
+        const notchY = b.y + Math.sin(plans[i].angle) * dialR;
+        circle(notchX, notchY, 2.5, 'rgba(255, 255, 255, 0.5)', 2);
+
+        // Spin handle angle
+        const spin = plans[i].spin || 0;
+        const handleAngle = plans[i].angle + spin * (Math.PI / 2.2);
+        const hx = b.x + Math.cos(handleAngle) * dialR;
+        const hy = b.y + Math.sin(handleAngle) * dialR;
+
+        // Spin arc from straight notch to handle
+        if (Math.abs(spin) > 0.04) {
+          ctx.beginPath();
+          const startA = Math.min(plans[i].angle, handleAngle);
+          const endA = Math.max(plans[i].angle, handleAngle);
+          ctx.arc(b.x, b.y, dialR, startA, endA);
+          ctx.strokeStyle = '#ff9954';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        }
+
+        // Spin knob handle
+        const isDraggingSpin = dragMode === 'spin';
+        ctx.beginPath();
+        ctx.arc(hx, hy, 10, 0, Math.PI * 2);
+        ctx.fillStyle = isDraggingSpin ? '#ff9954' : '#22252a';
+        ctx.fill();
+        ctx.strokeStyle = isDraggingSpin ? '#ffffff' : '#ff9954';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        ctx.fillStyle = isDraggingSpin ? '#121315' : '#ffffff';
+        ctx.beginPath();
+        ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Slingshot pull-back dotted line while dragging backwards
+        if (dragMode === 'slingshot' && dragPoint) {
+          ctx.setLineDash([4, 6]);
+          line(b.x, b.y, dragPoint.x, dragPoint.y, '#ffffffaa', 2);
+          ctx.setLineDash([]);
+          circle(dragPoint.x, dragPoint.y, 6, primary, 2);
+        }
+      }
+
       if (phase === 'goal' && b === scoringPlayer) {
         circle(b.x, b.y, b.radius + 9, '#ff9954', 4);
         circle(b.x, b.y, b.radius + 15, primary, 2);
@@ -111,10 +212,11 @@
       skaters[i].style.width = b.radius / 5 + '%';
       skaters[i].style.transform = `translate(-50%, -50%) rotate(${b.rotation}rad)`;
       ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = i < 3 ? primary : secondary; ctx.fillText(String(i % 3 + 1), b.x, b.y + b.radius + 20);
+
+      // Curved launch arrow (length based on Impulse stat!)
       if (i < 3 && phase === 'plan' && plans[i].power > 0) {
-        const p = plans[i], length = 34 + p.power * 110, x = b.x + Math.cos(p.angle) * length, y = b.y + Math.sin(p.angle) * length;
-        line(b.x, b.y, x, y, primary, 4);
-        for (const offset of [-.55, .55]) line(x, y, x - Math.cos(p.angle + offset) * 14, y - Math.sin(p.angle + offset) * 14, primary, 4);
+        const trajectory = computeTrajectory(b, plans[i]);
+        drawTrajectory(trajectory, primary);
       }
     });
     const ball = bodies[6];
@@ -160,19 +262,80 @@
   for (const id of ['angle', 'power', 'shot-spin']) $(id).oninput = () => { if (phase !== 'plan') return; plans[selected] = { angle: radians(Number($('angle').value)), power: Number($('power').value) / 100, spin: Number($('shot-spin').value) / 100 }; sync(); draw(); };
   $('hold').onclick = () => { plans[selected].power = plans[selected].spin = 0; sync(); draw(); };
   function point(event) { const r = canvas.getBoundingClientRect(); return { x: (event.clientX - r.left) * 1000 / r.width, y: (event.clientY - r.top) * 600 / r.height }; }
+  function updateSpinFromPoint(p, b) {
+    const touchAngle = Math.atan2(p.y - b.y, p.x - b.x);
+    let diff = touchAngle - plans[selected].angle;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    plans[selected].spin = Math.max(-1, Math.min(1, diff / (Math.PI / 2.2)));
+  }
   canvas.onpointerdown = event => {
     window.ubuAudio?.getAudioContext();
     if (phase !== 'plan') return;
-    const p = point(event), index = bodies.slice(0, 3).findIndex(b => Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12);
+    const p = point(event);
+    const curB = bodies[selected];
+    const dialR = curB.radius + 18;
+    const spin = plans[selected]?.spin || 0;
+    const handleAngle = plans[selected].angle + spin * (Math.PI / 2.2);
+    const hx = curB.x + Math.cos(handleAngle) * dialR;
+    const hy = curB.y + Math.sin(handleAngle) * dialR;
+    const distToHandle = Math.hypot(p.x - hx, p.y - hy);
+    const distToCenter = Math.hypot(p.x - curB.x, p.y - curB.y);
+
+    if (distToHandle <= 16 || (distToCenter >= curB.radius + 8 && distToCenter <= curB.radius + 28)) {
+      drag = event.pointerId;
+      dragMode = 'spin';
+      canvas.setPointerCapture(drag);
+      updateSpinFromPoint(p, curB);
+      sync(); draw();
+      return;
+    }
+
+    const index = bodies.slice(0, 3).findIndex(b => Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12);
     if (index < 0) return;
-    selected = index; drag = event.pointerId; canvas.setPointerCapture(drag); sync(); draw();
+    selected = index;
+    drag = event.pointerId;
+    dragMode = 'slingshot';
+    dragPoint = { x: p.x, y: p.y };
+    canvas.setPointerCapture(drag);
+    sync(); draw();
   };
   canvas.onpointermove = event => {
-    if (drag !== event.pointerId || phase !== 'plan') return;
-    const p = point(event), b = bodies[selected], dx = p.x - b.x, dy = p.y - b.y;
-    plans[selected] = { ...plans[selected], angle: Math.atan2(dy, dx), power: Math.max(0, Math.min(1, (Math.hypot(dx, dy) - b.radius) / 119)) }; sync(); draw();
+    const p = point(event);
+    if (drag !== event.pointerId || phase !== 'plan') {
+      if (phase === 'plan') {
+        const curB = bodies[selected];
+        const dialR = curB.radius + 18;
+        const spin = plans[selected]?.spin || 0;
+        const handleAngle = plans[selected].angle + spin * (Math.PI / 2.2);
+        const hx = curB.x + Math.cos(handleAngle) * dialR;
+        const hy = curB.y + Math.sin(handleAngle) * dialR;
+        const distToHandle = Math.hypot(p.x - hx, p.y - hy);
+        const isOverUbu = bodies.slice(0, 3).some(b => Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 8);
+        canvas.style.cursor = (distToHandle <= 16) ? 'grab' : isOverUbu ? 'crosshair' : 'default';
+      }
+      return;
+    }
+    const b = bodies[selected];
+    if (dragMode === 'slingshot') {
+      dragPoint = { x: p.x, y: p.y };
+      const pullDx = p.x - b.x, pullDy = p.y - b.y;
+      const pullDist = Math.hypot(pullDx, pullDy);
+      if (pullDist > 4) {
+        plans[selected].angle = Math.atan2(-pullDy, -pullDx);
+        plans[selected].power = Math.max(0, Math.min(1, (pullDist - 6) / 120));
+      }
+    } else if (dragMode === 'spin') {
+      updateSpinFromPoint(p, b);
+    }
+    sync(); draw();
   };
-  canvas.onpointerup = canvas.onpointercancel = () => { drag = null; };
+  canvas.onpointerup = canvas.onpointercancel = () => {
+    drag = null;
+    dragMode = null;
+    dragPoint = null;
+    draw();
+  };
   function handleCollision(a, b, speed) {
     if (speed < 15) return;
     const isBall = a.team === -1 || b.team === -1;

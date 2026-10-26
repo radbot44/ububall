@@ -14,7 +14,7 @@
     body.maxSpin = 8 * multiplier(raw.spin ?? 127);
     body.grip = .3 * multiplier(raw.grip ?? 127);
     body.impulse = IMPULSE * multiplier(raw.impulse ?? 127);
-    body.curveFactor = .018 * multiplier(raw.curve ?? 127);
+    body.curveFactor = .04 * multiplier(raw.curve ?? 127);
     body.bounciness = multiplier(raw.bounciness ?? 127);
     body.power = multiplier(raw.power ?? 127);
     body.reach = 25 * multiplier(raw.reach ?? 127);
@@ -28,7 +28,7 @@
         y: i === 0 ? 300 : i === 1 ? 180 : 420, vx: 0, vy: 0,
         radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 8, omega: 0, rotation: 0, team, slot: i });
     }
-    bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: .012, omega: 0, rotation: 0, team: -1 });
+    bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: .03, omega: 0, rotation: 0, team: -1 });
     return bodies;
   }
   function reflect(b, nx, ny, penetration, wallType = 'wall', onWall = null) {
@@ -129,7 +129,7 @@
   function step(bodies, dt = DT, onCollide = null, onWall = null) {
     for (const b of bodies) {
       // Experimental curve: rotate velocity without adding translational energy.
-      const curve = b.curveFactor !== undefined ? b.curveFactor : .015;
+      const curve = b.curveFactor !== undefined ? b.curveFactor : (b.team === -1 ? .03 : .04);
       const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
       b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
       b.rotation += b.omega * dt;
