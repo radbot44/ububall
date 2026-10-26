@@ -41,7 +41,7 @@
 
     function paletteColor(index) {
       if (typeof ubu !== 'undefined' && ubu.decode) {
-        const dna = new Uint8Array(64); dna[8] = index << 3;
+        const dna = new Uint8Array(128); dna[8] = index << 3;
         return ubu.decode(dna).attributes.background.hex;
       }
       return '#3b82f6';

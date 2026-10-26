@@ -120,7 +120,7 @@ test('existing pack inventory upgrades without replacement and hints disclose on
   const f = await fixture(t), storage = f.open();
   let mint = new Mint(storage, f.options);
   mint.prepare({ batchSize: 15 });
-  const special = Buffer.alloc(64, 255).toString('base64url');
+  const special = Buffer.alloc(128, 255).toString('base64url');
   mint.exec('UPDATE inventory SET dna=? WHERE quintile=5', special);
   const before = mint.exec('SELECT id, serial, dna, pack_slot, quintile FROM inventory ORDER BY id');
   storage.exec('ALTER TABLE inventory DROP COLUMN batch');
@@ -148,7 +148,7 @@ async function fixture(t) {
 
 test('existing issued records migrate automatically without rewriting certificates', async t => {
   const f = await fixture(t), storage = f.open();
-  const historicalDna = 'A'.repeat(86);
+  const historicalDna = 'A'.repeat(171);
   storage.exec(`CREATE TABLE issued (
     id TEXT PRIMARY KEY, serial TEXT NOT NULL UNIQUE, dna TEXT NOT NULL,
     batch INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL,
@@ -192,7 +192,7 @@ test('default 1000 batch prepares packs across quintiles, resumes after reopen a
   assert.equal(rows[0].serial, '000000000001'); assert.equal(rows[999].serial, '000000001000');
   assert.equal(new Set(rows.map(r => r.id)).size, 1000);
   assert.equal(new Set(rows.map(r => r.dna)).size, 1000);
-  assert.ok(rows.every(r => r.dna.length === 86));
+  assert.ok(rows.every(r => r.dna.length === 171));
   assert.ok(rows.every(r => r.pack_slot >= 0 && r.pack_slot < 200));
   assert.ok(rows.every(r => r.quintile >= 1 && r.quintile <= 5));
 

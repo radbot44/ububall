@@ -21,7 +21,7 @@
     decode(data.mint, 16, 'mint ID');
     decode(data.id, 16, 'ubu ID');
     if (typeof data.serial !== 'string' || !/^(?!0{12}$)[0-9]{12}$/.test(data.serial)) throw new Error('Invalid ubu serial number.');
-    decode(data.dna, 64, 'DNA');
+    decode(data.dna, 128, 'DNA');
     if (!Number.isSafeInteger(data.issuedAt) || data.issuedAt < 0) throw new Error('Invalid issuance time.');
     if (typeof data.key !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(data.key)) throw new Error('Invalid signing-key ID.');
     return { type: 'ubu-signed', mint: data.mint, id: data.id, serial: data.serial, dna: data.dna, issuedAt: data.issuedAt, key: data.key };
@@ -30,7 +30,7 @@
     return encoder.encode('ubumint:issuance\n' + JSON.stringify(data));
   }
   function unsigned(dna) {
-    decode(dna, 64, 'DNA');
+    decode(dna, 128, 'DNA');
     return JSON.stringify({ type: 'ubu', dna });
   }
   async function sign(data, privateKey) {

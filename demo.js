@@ -167,10 +167,10 @@
       dna[bit >> 3] = (dna[bit >> 3] & ~mask) | (((value >> (width - i - 1)) & 1) ? mask : 0);
     }
   }
-  const base = new Uint8Array(64);
+  const base = new Uint8Array(128);
   for (const [slot, color] of [31, 28, 13, 31, 27].entries()) setBits(base, 64 + 18 * slot, 5, color);
   for (const start of [178, 188, 198, 208, 218, 228, 282, 302]) setBits(base, start, 10, 511);
-  setBits(base, 502, 10, 1023);
+  setBits(base, 1014, 10, 1023);
   setBits(base, 362, 10, 239);
   const specimens = [['Matte (default)', dna => {}]];
   for (const [i, texture] of [[0, 'Metallic'], [1, 'Glossy'], [2, 'Iridescent'], [3, 'Crystalline'],

@@ -10,8 +10,13 @@
   let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, skaters = [], next = '';
   const radians = value => value * Math.PI / 180;
-  const normalStats = () => ({ mass: 511, size: 511, traction: 511, spin: 511, grip: 511 });
-  let stats = Array.from({ length: 6 }, normalStats);
+  const normalStats = () => ({
+    impulse: 127, traction: 127, spin: 127, curve: 127,
+    size: 127, mass: 127, bounciness: 127, grip: 127,
+    power: 127, reach: 127, strength: 127, stability: 127,
+    efficiency: 127, synergy: 127, chemistry: 127
+  });
+  let stats = practice.map(p => ({ ...(p.model.stats || normalStats()) }));
   let lastPlans = null;
   function kickoff() {
     const result = P.kickoff(); result.slice(0, 6).forEach((b, i) => P.applyStats(b, stats[i])); return result;
@@ -42,7 +47,11 @@
   }
   function buildTeam() {
     $('team').replaceChildren(); $('skaters').replaceChildren();
-    skaters = [...roster, ...practice.slice(3)].map((entry, i) => {
+    const teamEntries = [...roster, ...practice.slice(3)];
+    teamEntries.forEach((entry, i) => {
+      if (entry.model && entry.model.stats) stats[i] = { ...entry.model.stats };
+    });
+    skaters = teamEntries.map((entry, i) => {
       const node = document.createElement('div'); node.className = 'skater'; node.append(ubuRender(entry.model, 'ball-ubu')); $('skaters').append(node);
       if (i < 3) {
         const button = document.createElement('button'), text = document.createElement('span'), small = document.createElement('small');
@@ -189,7 +198,7 @@
   for (const key of Object.keys(normalStats())) {
     const label = document.createElement('label'), input = document.createElement('input'), output = document.createElement('output');
     label.textContent = key[0].toUpperCase() + key.slice(1) + ' ';
-    input.id = 'stat-' + key; input.type = 'number'; input.min = 0; input.max = 1023; input.step = 1;
+    input.id = 'stat-' + key; input.type = 'number'; input.min = 0; input.max = 255; input.step = 1;
     output.id = 'mult-' + key; label.append(input, output); $('stat-inputs').append(label);
     input.oninput = previewStats;
   }
@@ -203,10 +212,10 @@
   }
   function previewStats() {
     const raw = readStats(); $('apply-stats').disabled = !raw || phase === 'play';
-    if (!raw) { $('stat-preview').textContent = 'Enter whole numbers from 0 to 1023.'; return; }
+    if (!raw) { $('stat-preview').textContent = 'Enter whole numbers from 0 to 255.'; return; }
     for (const key of Object.keys(raw)) $('mult-' + key).value = P.multiplier(raw[key]).toFixed(3) + '×';
     const b = {}; P.applyStats(b, raw);
-    $('stat-preview').textContent = `Mass ${b.mass.toFixed(2)} · Radius ${b.radius.toFixed(1)} · Slowing ${b.friction.toFixed(1)}/s · Max spin ${b.maxSpin.toFixed(2)} rad/s · Grip ${b.grip.toFixed(3)} · Full-power speed ${(P.IMPULSE / b.mass).toFixed(0)}. Equal launch impulse for every ubu.`;
+    $('stat-preview').textContent = `Mass ${b.mass.toFixed(2)} · Radius ${b.radius.toFixed(1)} · Slowing ${b.friction.toFixed(1)}/s · Max spin ${b.maxSpin.toFixed(2)} rad/s · Grip ${b.grip.toFixed(3)} · Full-power speed ${(b.impulse / b.mass).toFixed(0)}. DNA-driven physics.`;
   }
   function showStats() { for (const key of Object.keys(normalStats())) $('stat-' + key).value = stats[Number($('stat-player').value)][key]; previewStats(); }
   function resetField() {

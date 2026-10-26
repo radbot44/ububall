@@ -11,8 +11,8 @@ function closeTo(actual, expected, message) {
   assert.ok(Math.abs(actual - expected) < TOLERANCE, `${message}: got ${actual}, expected ${expected}, diff ${Math.abs(actual - expected)}`);
 }
 
-test('512-bit inputs receive finite, repeatable appearance scores', async () => {
-  for (const dna of [new Uint8Array(64), new Uint8Array(64).fill(255), await ubu.fromText('007')]) {
+test('1024-bit inputs receive finite, repeatable appearance scores', async () => {
+  for (const dna of [new Uint8Array(128), new Uint8Array(128).fill(255), await ubu.fromText('007')]) {
     const a = rarity.scoreRarity(ubu.decode(dna));
     assert.deepEqual(a, rarity.scoreRarity(ubu.decode(ubu.fromCode(ubu.toCode(dna)))));
     assert.ok(Number.isFinite(a.bits) && a.percentile >= 0 && a.percentile <= 100);
@@ -23,8 +23,8 @@ test('changing only Ubuquity does not change appearance rarity', () => {
   const baseDna = ubu.randomDNA();
   const dna1 = new Uint8Array(baseDna);
   const dna2 = new Uint8Array(baseDna);
-  dna1[62] &= 252; dna1[63] = 0; // C
-  dna2[62] |= 3; dna2[63] = 255; // UBU
+  dna1[126] &= 252; dna1[127] = 0; // C
+  dna2[126] |= 3; dna2[127] = 255; // UBU
 
   const model1 = ubu.decode(dna1);
   const model2 = ubu.decode(dna2);
@@ -111,7 +111,7 @@ test('a flip at exactly neutral displacement contributes no flip rarity; active 
 });
 
 test('continuous harmony responds smoothly to hue proximity and complementarity', () => {
-  const base = ubu.decode(new Uint8Array(64));
+  const base = ubu.decode(new Uint8Array(128));
   const score = colors => {
     const attributes = Object.fromEntries(
       Object.entries(base.attributes).map(([role, part], i) => [role, { ...part, color: colors[i] }])
@@ -150,7 +150,7 @@ test('continuous harmony responds smoothly to hue proximity and complementarity'
 });
 
 test('rare materials remain equally likely but have ordered per-role desirability', () => {
-  const base = ubu.decode(new Uint8Array(64));
+  const base = ubu.decode(new Uint8Array(128));
   const roles = ['background', 'eyes', 'mouth', 'irises', 'pupils'];
   const scores = roles.map(role => rarity.scoreRarity({ ...base,
     attributes: Object.fromEntries(Object.entries(base.attributes).map(
@@ -163,7 +163,7 @@ test('rare materials remain equally likely but have ordered per-role desirabilit
 });
 
 test('luminance contrast responds to layer order rather than just the color set', () => {
-  const base = ubu.decode(new Uint8Array(64));
+  const base = ubu.decode(new Uint8Array(128));
   const keys = Object.keys(base.attributes);
   const score = colors => rarity.scoreRarity({ ...base, attributes:
     Object.fromEntries(keys.map((key, i) => [key, { ...base.attributes[key], color: colors[i] }]))
@@ -182,7 +182,7 @@ test('continuous geometry only scores expressed eyelid and opening parameters', 
       dna[bit >> 3] = (dna[bit >> 3] & ~mask) | (((value >> (width - i - 1)) & 1) ? mask : 0);
     }
   };
-  const neutral = new Uint8Array(64);
+  const neutral = new Uint8Array(128);
   for (const start of [178, 188, 198, 208, 218, 228, 282, 302]) put(neutral, start, 10, 511);
   const widthScore = raw => {
     const dna = new Uint8Array(neutral); put(dna, 178, 10, raw);
@@ -302,7 +302,7 @@ test('percentile lookup is monotonic: increasing rarity bits cannot decrease per
 });
 
 test('new expressed mouth and lid traits contribute their specified probabilities', () => {
-  const base = ubu.decode(new Uint8Array(64));
+  const base = ubu.decode(new Uint8Array(128));
   const noCuts = rarity.scoreRarity(base);
   const changed = { ...base, mouth: { ...base.mouth, lipNotch: true, horizontalCut: true } };
   closeTo(rarity.scoreRarity(changed).breakdown.mouthCuts, 12 - Math.log2(3 / 4), 'two independent one-in-64 cuts');
@@ -316,7 +316,7 @@ test('new expressed mouth and lid traits contribute their specified probabilitie
 });
 
 test('notch curvature contributes only when the notch appears', () => {
-  const base = ubu.decode(new Uint8Array(64));
+  const base = ubu.decode(new Uint8Array(128));
   const straight = { ...base, mouth: { ...base.mouth, lipNotch: true, notchCurved: false } };
   const curved = { ...base, mouth: { ...base.mouth, lipNotch: true, notchCurved: true } };
   closeTo(rarity.scoreRarity(curved).breakdown.mouthCuts - rarity.scoreRarity(straight).breakdown.mouthCuts, Math.log2(3), 'notch curvature odds');

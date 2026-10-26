@@ -2,17 +2,17 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const P = require('./ububall-physics.js');
-const normal = { mass: 511, size: 511, traction: 511, spin: 511, grip: 511 };
+const normal = { mass: 127, size: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 };
 test('experimental stat curve preserves endpoints and concentrates values near normal', () => {
   assert.ok(Math.abs(P.multiplier(0) - 2 / 3) < 1e-12);
-  assert.equal(P.multiplier(511), 1); assert.equal(P.multiplier(1023), 1.5);
-  const values = Array.from({ length: 1024 }, (_, i) => P.multiplier(i));
+  assert.equal(P.multiplier(127), 1); assert.equal(P.multiplier(255), 1.5);
+  const values = Array.from({ length: 256 }, (_, i) => P.multiplier(i));
   assert.ok(values.every((v, i) => !i || v >= values[i - 1]));
-  assert.ok(values.filter(v => v >= .958 && v <= 1.063).length >= 512);
+  assert.ok(values.filter(v => v >= .958 && v <= 1.063).length >= 128);
 });
 test('mass changes launch speed while equal-power momentum stays constant', () => {
   const b = P.kickoff();
-  [0, 511, 1023].forEach((mass, i) => P.applyStats(b[i], { ...normal, mass }));
+  [0, 127, 255].forEach((mass, i) => P.applyStats(b[i], { ...normal, mass }));
   P.launch(b, Array.from({ length: 6 }, () => ({ angle: 0, power: 1 })));
   for (const body of b.slice(0, 3)) assert.ok(Math.abs(body.mass * body.vx - P.IMPULSE) < 1e-9);
   assert.ok(Math.abs(b[0].vx - 1080) < 1e-9); assert.equal(b[1].vx, 720); assert.equal(b[2].vx, 480);
@@ -28,6 +28,25 @@ test('spin bends travel symmetrically without adding translational speed', () =>
   assert.ok(Math.abs(outcomes[0].y + outcomes[2].y - 200) < 1e-8);
   assert.ok(outcomes.every(b => Math.abs(Math.hypot(b.vx, b.vy) - 69) < 1e-8));
 });
+test('impulse scales launch speed independently of mass', () => {
+  const b = P.kickoff();
+  [0, 127, 255].forEach((impulse, i) => P.applyStats(b[i], { ...normal, impulse }));
+  P.launch(b, Array.from({ length: 6 }, () => ({ angle: 0, power: 1 })));
+  assert.ok(Math.abs(b[0].vx - 720 * (2 / 3)) < 1e-9);
+  assert.equal(b[1].vx, 720);
+  assert.equal(b[2].vx, 1080);
+});
+test('curve stat scales trajectory bend for equal spin', () => {
+  const outcomes = [0, 127, 255].map(curve => {
+    const b = P.kickoff(); Object.assign(b[0], { x: 400, y: 100 });
+    P.applyStats(b[0], { ...normal, curve });
+    P.launch(b, [{ angle: 0, power: .2, spin: 1 }]);
+    for (let i = 0; i < 120; i++) P.step(b);
+    return b[0].y;
+  });
+  assert.ok(outcomes[0] < outcomes[1] && outcomes[1] < outcomes[2]);
+});
+
 test('spin transfers sideways impulse and angular momentum during a head-on collision', () => {
   const results = [-8, 0, 8].map(omega => {
     const b = P.kickoff(); Object.assign(b[0], { x: 463.1, y: 300, vx: 600, omega });
@@ -38,7 +57,7 @@ test('spin transfers sideways impulse and angular momentum during a head-on coll
   assert.ok(results[2][0].omega < 8);
 });
 test('higher grip transfers more spin when contact is slipping', () => {
-  const sideways = [0, 511, 1023].map(grip => {
+  const sideways = [0, 127, 255].map(grip => {
     const b = P.kickoff(); P.applyStats(b[0], { ...normal, grip });
     Object.assign(b[0], { x: 457.1, y: 300, vx: 300, omega: 100 });
     P.step(b, 0); assert.equal(b[0].friction, 150); return b[6].vy;
@@ -47,7 +66,7 @@ test('higher grip transfers more spin when contact is slipping', () => {
 });
 test('extreme size, traction and spin combinations stay finite and within the field', () => {
   for (let sample = 0; sample < 32; sample++) {
-    const b = P.kickoff(), raw = Object.fromEntries(Object.keys(normal).map((key, bit) => [key, sample & (1 << bit) ? 1023 : 0]));
+    const b = P.kickoff(), raw = Object.fromEntries(Object.keys(normal).map((key, bit) => [key, sample & (1 << bit) ? 255 : 0]));
     b.slice(0, 6).forEach(body => P.applyStats(body, raw));
     P.launch(b, b.slice(0, 6).map((body, i) => ({ angle: i * 1.3, power: 1, spin: i % 2 ? 1 : -1 })));
     for (let step = 0; step < 2880; step++) {

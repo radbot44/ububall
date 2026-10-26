@@ -1,4 +1,4 @@
-/* 512-bit Ubu DNA decoder. See docs/dna.md. */
+/* 1024-bit Ubu DNA decoder. See docs/dna.md. */
 (function(root) {
   'use strict';
   const V = 'AEIOU';
@@ -91,7 +91,7 @@
     return { praenomen, nomen, cognomen, fullName: [praenomen, nomen, cognomen].filter(Boolean).join(' ') };
   }
   function checkDNA(dna) {
-    if (!(dna instanceof Uint8Array) || dna.length !== 64) throw new TypeError('DNA must contain exactly 64 bytes.');
+    if (!(dna instanceof Uint8Array) || dna.length !== 128) throw new TypeError('DNA must contain exactly 128 bytes.');
   }
   function read(dna, start, width) {
     let n = 0;
@@ -101,6 +101,10 @@
   function curve(value) {
     const t = (value - 511) / (value <= 511 ? 511 : 512);
     return t * t * t;
+  }
+  function statMultiplier(raw) {
+    if (!Number.isInteger(raw) || raw < 0 || raw > 255) throw new RangeError('Stat must be an integer from 0 to 255.');
+    return raw < 127 ? 1 - ((127 - raw) / 127) ** 3 / 3 : 1 + ((raw - 127) / 128) ** 3 / 2;
   }
   function size(value, min, normal, max) {
     const c = curve(value);
@@ -179,8 +183,45 @@
       angle: left && !angleFlip ? -angles[i] : angles[i], depth: depths[left && depthFlip ? 1 - i : i] }));
     const right = eyeGeometry(px, py, makeLids(false));
     const left = eyeGeometry(flipX ? -px : px, flipY ? -py : py, makeLids(true));
-    const rating = read(dna, 502, 10);
+    const rating = read(dna, 1014, 10);
     const openingRaw = read(dna, 362, 10);
+    const stats = {
+      impulse: read(dna, 374, 8),
+      traction: read(dna, 382, 8),
+      spin: read(dna, 390, 8),
+      curve: read(dna, 398, 8),
+      size: read(dna, 406, 8),
+      mass: read(dna, 414, 8),
+      bounciness: read(dna, 422, 8),
+      grip: read(dna, 430, 8),
+      power: read(dna, 438, 8),
+      reach: read(dna, 446, 8),
+      strength: read(dna, 454, 8),
+      stability: read(dna, 462, 8),
+      efficiency: read(dna, 470, 8),
+      synergy: read(dna, 478, 8),
+      chemistry: read(dna, 486, 8)
+    };
+    const supers = [read(dna, 494, 4), read(dna, 498, 4), read(dna, 502, 4), read(dna, 506, 4)];
+    const personality = {
+      aggression: read(dna, 510, 6),
+      creativity: read(dna, 516, 6),
+      teamwork: read(dna, 522, 6),
+      clutch: read(dna, 528, 6)
+    };
+    const voice = {
+      instrument: read(dna, 534, 4),
+      pitch: read(dna, 538, 6),
+      decay: read(dna, 544, 4),
+      timbreMod: read(dna, 548, 2),
+      scale: read(dna, 550, 3),
+      tempo: read(dna, 553, 3),
+      notes: Array.from({ length: 8 }, (_, i) => {
+        const raw = read(dna, 556 + i * 5, 5);
+        return { degree: raw >> 2, duration: raw & 3 };
+      }),
+      groove: read(dna, 596, 2)
+    };
     return {
       dna: new Uint8Array(dna), nameSeed, parts: ubunym(nameSeed), attributes,
       mouth: {
@@ -195,6 +236,7 @@
       },
       eyes: { raw: rawEyes, dx: right.dx, dy: right.dy, flipX, flipY, leftX: left.dx, leftY: left.dy, left, right },
       eyelids: { raw: rawLids, active: lidRolls.active, source: lidRolls.source, angleFlip, depthFlip },
+      stats, supers, personality, voice,
       rating, grade: grade(rating)
     };
   }
@@ -229,23 +271,31 @@
     return path;
   }
   async function fromText(text) {
-    return new Uint8Array(await root.crypto.subtle.digest('SHA-512', new TextEncoder().encode(text)));
+    const encoder = new TextEncoder();
+    const [h1, h2] = await Promise.all([
+      root.crypto.subtle.digest('SHA-512', encoder.encode(text)),
+      root.crypto.subtle.digest('SHA-512', encoder.encode(text + '\x01'))
+    ]);
+    const dna = new Uint8Array(128);
+    dna.set(new Uint8Array(h1), 0);
+    dna.set(new Uint8Array(h2), 64);
+    return dna;
   }
   function randomDNA() {
-    return root.crypto.getRandomValues(new Uint8Array(64));
+    return root.crypto.getRandomValues(new Uint8Array(128));
   }
   function toCode(dna) {
     checkDNA(dna);
     return btoa(String.fromCharCode(...dna)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
   function fromCode(text) {
-    if (/^[0-9a-fA-F]{128}$/.test(text)) return Uint8Array.from(text.match(/../g), pair => parseInt(pair, 16));
-    if (!/^[A-Za-z0-9_-]{86}$/.test(text)) throw new Error('Use 86-character base64url DNA or 128 hexadecimal characters.');
-    const bytes = Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/') + '=='), ch => ch.charCodeAt(0));
+    if (/^[0-9a-fA-F]{256}$/.test(text)) return Uint8Array.from(text.match(/../g), pair => parseInt(pair, 16));
+    if (!/^[A-Za-z0-9_-]{171}$/.test(text)) throw new Error('Use 171-character base64url DNA or 256 hexadecimal characters.');
+    const bytes = Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/') + '='), ch => ch.charCodeAt(0));
     if (toCode(bytes) !== text) throw new Error('DNA has noncanonical padding bits.');
     return bytes;
   }
-  const api = { decode, fromText, randomDNA, toCode, fromCode, mouthPath, eyePolygon, grade, curve, ubunym };
+  const api = { decode, fromText, randomDNA, toCode, fromCode, mouthPath, eyePolygon, grade, curve, statMultiplier, ubunym };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.ubu = api;
 })(globalThis);

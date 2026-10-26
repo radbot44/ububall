@@ -4,15 +4,22 @@
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
   function multiplier(raw) {
-    if (!Number.isInteger(raw) || raw < 0 || raw > 1023) throw new RangeError('Stat must be an integer from 0 to 1023.');
-    return raw < 511 ? 1 - ((511 - raw) / 511) ** 3 / 3 : 1 + ((raw - 511) / 512) ** 3 / 2;
+    if (!Number.isInteger(raw) || raw < 0 || raw > 255) throw new RangeError('Stat must be an integer from 0 to 255.');
+    return raw < 127 ? 1 - ((127 - raw) / 127) ** 3 / 3 : 1 + ((raw - 127) / 128) ** 3 / 2;
   }
-  function applyStats(body, raw) {
-    body.mass = 3 * multiplier(raw.mass);
-    body.radius = 25 * multiplier(raw.size);
-    body.friction = 150 * multiplier(raw.traction);
-    body.maxSpin = 8 * multiplier(raw.spin);
-    body.grip = .3 * multiplier(raw.grip ?? 511);
+  function applyStats(body, raw = {}) {
+    body.mass = 3 * multiplier(raw.mass ?? 127);
+    body.radius = 25 * multiplier(raw.size ?? 127);
+    body.friction = 150 * multiplier(raw.traction ?? 127);
+    body.maxSpin = 8 * multiplier(raw.spin ?? 127);
+    body.grip = .3 * multiplier(raw.grip ?? 127);
+    body.impulse = IMPULSE * multiplier(raw.impulse ?? 127);
+    body.curveFactor = .08 * multiplier(raw.curve ?? 127);
+    body.bounciness = multiplier(raw.bounciness ?? 127);
+    body.power = multiplier(raw.power ?? 127);
+    body.reach = 25 * multiplier(raw.reach ?? 127);
+    body.strength = multiplier(raw.strength ?? 127);
+    body.stability = multiplier(raw.stability ?? 127);
   }
   function kickoff() {
     const bodies = [];
@@ -81,7 +88,8 @@
   function step(bodies, dt = DT) {
     for (const b of bodies) {
       // Experimental curve: rotate velocity without adding translational energy.
-      const angle = b.omega * .08 * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
+      const curve = b.curveFactor !== undefined ? b.curveFactor : .08;
+      const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
       b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
       b.rotation += b.omega * dt;
       b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - 3 * dt);
@@ -104,7 +112,8 @@
     bodies.forEach((b, i) => {
       if (b.team < 0) return;
       const plan = plans[i] || { angle: 0, power: 0 };
-      const speed = IMPULSE / b.mass * Math.max(0, Math.min(1, plan.power));
+      const impulse = b.impulse || IMPULSE;
+      const speed = impulse / b.mass * Math.max(0, Math.min(1, plan.power));
       b.vx = Math.cos(plan.angle) * speed; b.vy = Math.sin(plan.angle) * speed;
       b.omega = Math.max(-1, Math.min(1, plan.spin || 0)) * b.maxSpin;
     });

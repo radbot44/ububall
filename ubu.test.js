@@ -12,7 +12,7 @@ function set(dna, start, width, value) {
   }
 }
 function neutral() {
-  const dna = new Uint8Array(64);
+  const dna = new Uint8Array(128);
   for (const bit of [178, 188, 198, 208, 218, 228, 282, 302]) set(dna, bit, 10, 511);
   return dna;
 }
@@ -37,23 +37,25 @@ test('uburithm retains accepted raw-seed names independently of the replacement 
     assert.deepEqual([m.praenomen, m.nomen, m.cognomen], v.name);
   }
 });
-test('exact text uses SHA-512, and encoding preserves every bit including unassigned bits', async () => {
+test('exact text uses dual SHA-512, and encoding preserves every bit including unassigned bits', async () => {
   for (const text of ['', '007', '7', ' x ', 'x', 'é', 'e\u0301', '\ud800']) {
     const dna = await ubu.fromText(text);
-    assert.deepEqual(Buffer.from(dna), createHash('sha512').update(new TextEncoder().encode(text)).digest());
-    assert.equal(ubu.toCode(dna).length, 86);
+    const h1 = createHash('sha512').update(new TextEncoder().encode(text)).digest();
+    const h2 = createHash('sha512').update(new TextEncoder().encode(text + '\x01')).digest();
+    assert.deepEqual(Buffer.from(dna), Buffer.concat([h1, h2]));
+    assert.equal(ubu.toCode(dna).length, 171);
     assert.deepEqual(ubu.fromCode(ubu.toCode(dna)), dna);
     assert.deepEqual(ubu.fromCode(Buffer.from(dna).toString('hex')), dna);
   }
   const a = neutral(), b = new Uint8Array(a);
-  for (let i = 374; i <= 501; i++) set(b, i, 1, 1);
+  for (let i = 598; i <= 1013; i++) set(b, i, 1, 1);
   assert.notEqual(ubu.toCode(a), ubu.toCode(b));
   const ma = ubu.decode(a), mb = ubu.decode(b);
   delete ma.dna; delete mb.dna;
   assert.deepEqual(ma, mb);
-  assert.equal(ubu.randomDNA().length, 64);
-  for (const bad of ['', 'A'.repeat(43), '0'.repeat(64), 'A'.repeat(85), 'A'.repeat(87), 'A'.repeat(85) + 'B']) assert.throws(() => ubu.fromCode(bad));
-  for (const length of [0, 32, 63, 65]) assert.throws(() => ubu.decode(new Uint8Array(length)));
+  assert.equal(ubu.randomDNA().length, 128);
+  for (const bad of ['', 'A'.repeat(86), '0'.repeat(128), 'A'.repeat(170), 'A'.repeat(172), 'A'.repeat(170) + 'B']) assert.throws(() => ubu.fromCode(bad));
+  for (const length of [0, 64, 127, 129]) assert.throws(() => ubu.decode(new Uint8Array(length)));
 });
 test('each slot has thirty-two mutually exclusive materials at 1/1024 each', () => {
   for (let slot = 0; slot < 5; slot++) {
@@ -74,7 +76,7 @@ test('each slot has thirty-two mutually exclusive materials at 1/1024 each', () 
 test('all 1024 Ubuquity values use the last ten bits and exact approved boundaries', () => {
   const counts = {};
   for (let value = 0; value < 1024; value++) {
-    const dna = neutral(); set(dna, 502, 10, value);
+    const dna = neutral(); set(dna, 1014, 10, value);
     const m = ubu.decode(dna);
     const expected = value <= 299 ? 'C' : value <= 599 ? 'B' : value <= 749 ? 'A' : value <= 899 ? 'S' : value <= 999 ? 'S+' : value <= 1020 ? 'U' : 'UBU';
     assert.equal(m.rating, value); assert.equal(m.grade, expected);
@@ -219,4 +221,56 @@ test('notch sides are 45 degrees and its independent curvature roll is one in fo
     assert.equal(ubu.decode(dna).mouth.notchCurved, false);
     assert.ok(!ubu.mouthPath(ubu.decode(dna).mouth).includes('Q'));
   }
+});
+
+test('decodes all 15 core stats, supers, AI personality, voice, and fanfare correctly', () => {
+  const statNames = [
+    'impulse', 'traction', 'spin', 'curve',
+    'size', 'mass', 'bounciness', 'grip',
+    'power', 'reach', 'strength', 'stability',
+    'efficiency', 'synergy', 'chemistry'
+  ];
+  const dna = neutral();
+  statNames.forEach((name, i) => set(dna, 374 + i * 8, 8, (i * 17) % 256));
+  [1, 5, 9, 14].forEach((val, i) => set(dna, 494 + i * 4, 4, val));
+  set(dna, 510, 6, 45);
+  set(dna, 516, 6, 12);
+  set(dna, 522, 6, 60);
+  set(dna, 528, 6, 33);
+  set(dna, 534, 4, 7);
+  set(dna, 538, 6, 42);
+  set(dna, 544, 4, 11);
+  set(dna, 548, 2, 2);
+  set(dna, 550, 3, 5);
+  set(dna, 553, 3, 4);
+  for (let n = 0; n < 8; n++) set(dna, 556 + n * 5, 5, (n * 3) % 32);
+  set(dna, 596, 2, 3);
+
+  const m = ubu.decode(dna);
+  statNames.forEach((name, i) => assert.equal(m.stats[name], (i * 17) % 256));
+  assert.deepEqual(m.supers, [1, 5, 9, 14]);
+  assert.deepEqual(m.personality, { aggression: 45, creativity: 12, teamwork: 60, clutch: 33 });
+  assert.equal(m.voice.instrument, 7);
+  assert.equal(m.voice.pitch, 42);
+  assert.equal(m.voice.decay, 11);
+  assert.equal(m.voice.timbreMod, 2);
+  assert.equal(m.voice.scale, 5);
+  assert.equal(m.voice.tempo, 4);
+  assert.equal(m.voice.notes.length, 8);
+  for (let n = 0; n < 8; n++) {
+    const raw = (n * 3) % 32;
+    assert.deepEqual(m.voice.notes[n], { degree: raw >> 2, duration: raw & 3 });
+  }
+  assert.equal(m.voice.groove, 3);
+});
+
+test('statMultiplier maps 8-bit values symmetrically across centered cubic curve', () => {
+  assert.ok(Math.abs(ubu.statMultiplier(0) - 2 / 3) < 1e-12);
+  assert.equal(ubu.statMultiplier(127), 1);
+  assert.equal(ubu.statMultiplier(255), 1.5);
+  const values = Array.from({ length: 256 }, (_, i) => ubu.statMultiplier(i));
+  assert.ok(values.every((v, i) => !i || v >= values[i - 1]));
+  assert.throws(() => ubu.statMultiplier(-1));
+  assert.throws(() => ubu.statMultiplier(256));
+  assert.throws(() => ubu.statMultiplier(1.5));
 });

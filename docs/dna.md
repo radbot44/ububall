@@ -1,15 +1,15 @@
 # Ubu DNA specification
 
-Owner-approved replacement schema, 2026-10-25 (America/New_York). DNA is exactly 512 bits. Previous 256-bit beta ubus are obsolete and rejected, with no conversion or compatibility path. Assigned fields have fixed positions; later additions may use only the unassigned bits. All sixteen assigned materials have distinct rendering patterns.
+Owner-approved replacement schema, 2026-10-26 (America/New_York). DNA is exactly 1024 bits (128 bytes). Previous 256-bit beta and 512-bit ubus are obsolete and rejected, with no conversion or compatibility path. Assigned fields have fixed positions; later additions may use only the unassigned bits. All sixteen assigned materials have distinct rendering patterns.
 
 ## Input and representation
 
-- Text: encode the exact string with TextEncoder (UTF-8, no BOM, unpaired surrogates replaced by U+FFFD), then SHA-512 to the complete 64-byte DNA. Preserve case, leading zeros, whitespace and Unicode code-point sequences; no normalization. Empty text is valid.
-- Random: generate all 64 bytes using platform cryptographic randomness. Ordinary minting generates its own random DNA.
-- Imported DNA: preserve all 64 bytes directly, including unassigned bits. Never rehash imported DNA.
-- Number bits 0–511, first byte first and most significant bit first in every byte and field. All bit patterns are valid.
-- Canonical unpadded base64url is exactly 86 characters, with zero unused encoding padding bits. The designer also accepts exactly 128 hexadecimal characters; .ubu files accept only canonical base64url.
-- DNA equality compares all 64 bytes. Ownership, mint identity, serials, signatures and timestamps remain outside DNA.
+- Text: encode the exact string with TextEncoder (UTF-8, no BOM, unpaired surrogates replaced by U+FFFD), then compute two SHA-512 hashes: the first 64 bytes from SHA-512(text), and the second 64 bytes from SHA-512(text + '\x01'). This preserves previous visual traits and uburithm naming while expanding to 128 bytes. Preserve case, leading zeros, whitespace and Unicode code-point sequences; no normalization. Empty text is valid.
+- Random: generate all 128 bytes using platform cryptographic randomness. Ordinary minting generates its own random DNA.
+- Imported DNA: preserve all 128 bytes directly, including unassigned bits. Never rehash imported DNA.
+- Number bits 0–1023, first byte first and most significant bit first in every byte and field. All bit patterns are valid.
+- Canonical unpadded base64url is exactly 171 characters, with two unused encoding padding bits. The designer also accepts exactly 256 hexadecimal characters; .ubu files accept only canonical base64url.
+- DNA equality compares all 128 bytes. Ownership, mint identity, serials, signatures and timestamps remain outside DNA.
 
 ## Block layout
 
@@ -55,10 +55,41 @@ Owner-approved replacement schema, 2026-10-25 (America/New_York). DNA is exactly
 | 356–361 | 6 | Horizontal mouth-cut roll |
 | 362–371 | 10 | Horizontal mouth-opening width |
 | 372–373 | 2 | Lip-notch curvature roll |
-| 374–501 | 128 | Unassigned; preserve in full |
-| 502–511 | 10 | Ubuquity |
+| 374–381 | 8 | Ububall Movement: Impulse |
+| 382–389 | 8 | Ububall Movement: Traction |
+| 390–397 | 8 | Ububall Movement: Spin |
+| 398–405 | 8 | Ububall Movement: Curve |
+| 406–413 | 8 | Ububall Physical: Size |
+| 414–421 | 8 | Ububall Physical: Mass |
+| 422–429 | 8 | Ububall Physical: Bounciness |
+| 430–437 | 8 | Ububall Physical: Grip |
+| 438–445 | 8 | Ububall Engagement: Power |
+| 446–453 | 8 | Ububall Engagement: Reach |
+| 454–461 | 8 | Ububall Engagement: Strength |
+| 462–469 | 8 | Ububall Engagement: Stability |
+| 470–477 | 8 | Ububall Super: Efficiency |
+| 478–485 | 8 | Ububall Super: Synergy |
+| 486–493 | 8 | Ububall Super: Chemistry |
+| 494–497 | 4 | Ububall Super Slot 1 |
+| 498–501 | 4 | Ububall Super Slot 2 |
+| 502–505 | 4 | Ububall Super Slot 3 |
+| 506–509 | 4 | Ububall Super Slot 4 |
+| 510–515 | 6 | AI Tactical Brain: Aggression |
+| 516–521 | 6 | AI Tactical Brain: Creativity |
+| 522–527 | 6 | AI Tactical Brain: Teamwork |
+| 528–533 | 6 | AI Tactical Brain: Clutch |
+| 534–537 | 4 | Voice Synthesizer: Instrument |
+| 538–543 | 6 | Voice Synthesizer: Root pitch |
+| 544–547 | 4 | Voice Synthesizer: Decay |
+| 548–549 | 2 | Voice Synthesizer: Timbre modulation |
+| 550–552 | 3 | Goal Fanfare: Scale / mode |
+| 553–555 | 3 | Goal Fanfare: Tempo |
+| 556–595 | 40 | Goal Fanfare: 8-note sequence (8 × 5 bits: 3-bit degree, 2-bit duration) |
+| 596–597 | 2 | Goal Fanfare: Groove / swing |
+| 598–1013 | 416 | Unassigned reserve; preserve in full |
+| 1014–1023 | 10 | Ubuquity |
 
-64 + 90 + 24 + 40 + 40 + 24 + 40 + 20 + 8 + 12 + 10 + 2 + 128 + 10 = 512.
+374 + 120 + 16 + 24 + 16 + 48 + 416 + 10 = 1024.
 
 ## Body-part attributes
 
@@ -172,7 +203,7 @@ This uses the available opening after lids/flips and contains the entire iris (a
 
 ## Ubuquity
 
-Read the final ten bits as an unsigned integer, independently of appearance rarity.
+Read the final ten bits (bits 1014–1023) as an unsigned integer, independently of appearance rarity. In Ububall, this determines the starting special meter percentage (grades 1021–1023 = 100% full meter).
 
 | Values | Grade | Label |
 | --- | --- | --- |
@@ -201,4 +232,4 @@ For a displacement with range [-D, +D], offset = D * c. For size with minimum a,
 
 Tests cover exact SHA-512 text conversion, all material gate/selector outcomes, all 1024 ratings, pair precedence, corner curvature, independent mouth cuts, eyelid flips, iris containment at extremes, byte preservation and rejection of obsolete beta DNA. Accepted raw-seed uburithm names remain in test/name-vectors.json; text-to-name mappings change because whole-DNA hashing changed.
 
-The .ubu profile, mint storage and signed issuance use the same complete 64-byte DNA. Previous beta files are rejected, never padded or reinterpreted. Existing production state is not automatically migrated or reset by this code change; installation/deployment and mint resets remain separately authorized operations.
+The .ubu profile, mint storage and signed issuance use the same complete 128-byte DNA. Previous beta and 512-bit files are rejected, never padded or reinterpreted. Existing production state is not automatically migrated or reset by this code change; installation/deployment and mint resets remain separately authorized operations.
