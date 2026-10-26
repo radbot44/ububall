@@ -81,7 +81,7 @@
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
   function line(x1, y1, x2, y2, color, width = 2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
   function circle(x, y, r, color, width = 2) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
-  function computeTrajectory(body, plan) {
+  function computeTrajectory(body, plan, ball) {
     const points = [{ x: body.x, y: body.y }];
     if (!plan || plan.power <= 0) return points;
     const impulse = body.impulse || P.IMPULSE;
@@ -92,9 +92,13 @@
     const curve = body.curveFactor !== undefined ? body.curveFactor : 0.04;
     const friction = body.friction || 150;
     let currX = body.x, currY = body.y;
-    const impulseRatio = impulse / P.IMPULSE;
-    const maxSteps = Math.min(55, Math.round(10 + plan.power * 32 * impulseRatio));
-    const dt = 1 / 60;
+    const r = body.radius;
+    const reach = Math.max(r, body.reach || r, 18);
+    const ballR = ball ? ball.radius : 18;
+    const k = P.rink;
+    const dt = 1 / 120;
+    const maxSteps = 480;
+
     for (let s = 0; s < maxSteps; s++) {
       const angle = omega * curve * dt;
       const cos = Math.cos(angle), sin = Math.sin(angle);
@@ -103,30 +107,131 @@
       vx = nvx; vy = nvy;
       omega = Math.sign(omega) * Math.max(0, Math.abs(omega) - 6 * dt);
       currX += vx * dt; currY += vy * dt;
-      points.push({ x: currX, y: currY });
+
+      const inGoalY = currY > k.goalTop && currY < k.goalBottom;
+      if (inGoalY) {
+        if (currX < k.left) {
+          const backX = k.left - k.goalDepth + r;
+          if (currX < backX) { currX = backX; vx = -vx * 0.5; omega *= 0.5; }
+          if (currY < k.goalTop + r) { currY = k.goalTop + r; vy = -vy * 0.5; omega *= 0.5; }
+          if (currY > k.goalBottom - r) { currY = k.goalBottom - r; vy = -vy * 0.5; omega *= 0.5; }
+        } else if (currX < k.left + r) {
+          for (const py of [k.goalTop, k.goalBottom]) {
+            const dx = k.left - currX, dy = py - currY, d = Math.hypot(dx, dy);
+            if (d < r && d > 0) {
+              const nx = dx / d, ny = dy / d;
+              currX -= nx * (r - d); currY -= ny * (r - d);
+              const v = vx * nx + vy * ny;
+              if (v > 0) { vx -= 1.82 * v * nx; vy -= 1.82 * v * ny; omega *= 0.5; }
+            }
+          }
+        }
+        if (currX > k.right) {
+          const backX = k.right + k.goalDepth - r;
+          if (currX > backX) { currX = backX; vx = -vx * 0.5; omega *= 0.5; }
+          if (currY < k.goalTop + r) { currY = k.goalTop + r; vy = -vy * 0.5; omega *= 0.5; }
+          if (currY > k.goalBottom - r) { currY = k.goalBottom - r; vy = -vy * 0.5; omega *= 0.5; }
+        } else if (currX > k.right - r) {
+          for (const py of [k.goalTop, k.goalBottom]) {
+            const dx = k.right - currX, dy = py - currY, d = Math.hypot(dx, dy);
+            if (d < r && d > 0) {
+              const nx = dx / d, ny = dy / d;
+              currX -= nx * (r - d); currY -= ny * (r - d);
+              const v = vx * nx + vy * ny;
+              if (v > 0) { vx -= 1.82 * v * nx; vy -= 1.82 * v * ny; omega *= 0.5; }
+            }
+          }
+        }
+      } else {
+        if (currX < k.left + r) { currX = k.left + r; vx = -vx * 0.8; omega *= 0.5; }
+        if (currX > k.right - r) { currX = k.right - r; vx = -vx * 0.8; omega *= 0.5; }
+      }
+
+      const insidePocket = (currX < k.left) || (currX > k.right);
+      if (!insidePocket) {
+        if (currY < k.top + r) { currY = k.top + r; vy = -vy * 0.8; omega *= 0.5; }
+        if (currY > k.bottom - r) { currY = k.bottom - r; vy = -vy * 0.8; omega *= 0.5; }
+        const cx = currX < k.left + k.corner ? k.left + k.corner : currX > k.right - k.corner ? k.right - k.corner : null;
+        const cy = currY < k.top + k.corner ? k.top + k.corner : currY > k.bottom - k.corner ? k.bottom - k.corner : null;
+        if (cx !== null && cy !== null) {
+          const dx = currX - cx, dy = currY - cy, d = Math.hypot(dx, dy), limit = k.corner - r;
+          if (d > limit) {
+            const nx = dx / d, ny = dy / d;
+            currX -= nx * (d - limit); currY -= ny * (d - limit);
+            const v = vx * nx + vy * ny;
+            if (v > 0) { vx -= 1.82 * v * nx; vy -= 1.82 * v * ny; omega *= 0.5; }
+          }
+        }
+      }
+
+      if (ball) {
+        const distToBall = Math.hypot(currX - ball.x, currY - ball.y);
+        if (distToBall <= reach + ballR) {
+          points.push({ x: currX, y: currY });
+          break;
+        }
+      }
+
       const speed = Math.hypot(vx, vy);
       if (speed < 12) break;
       const factor = Math.max(0, speed - friction * dt) / speed;
       vx *= factor; vy *= factor;
+
+      if (s % 2 === 1 || s === maxSteps - 1) {
+        points.push({ x: currX, y: currY });
+      }
     }
     return points;
   }
-  function drawTrajectory(points, color) {
+  function drawTrajectory(body, plan, points, color) {
     if (points.length < 2) return;
+    const impulse = body.impulse || P.IMPULSE;
+    const impulseRatio = impulse / P.IMPULSE;
+    const maxArrowDist = Math.max(20, 110 * impulseRatio * plan.power);
+
+    let cumDist = 0;
+    let splitIdx = points.length - 1;
+    for (let i = 1; i < points.length; i++) {
+      cumDist += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+      if (cumDist >= maxArrowDist) {
+        splitIdx = i;
+        break;
+      }
+    }
+
+    // 1. Solid arrow up to splitIdx
     ctx.beginPath();
     ctx.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+    for (let i = 1; i <= splitIdx; i++) ctx.lineTo(points[i].x, points[i].y);
     ctx.strokeStyle = color;
     ctx.lineWidth = 4;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.stroke();
-    const pEnd = points[points.length - 1];
-    const pPrev = points[Math.max(0, points.length - 3)];
+
+    // Arrowhead at splitIdx
+    const pEnd = points[splitIdx];
+    const pPrev = points[Math.max(0, splitIdx - 2)];
     const tipAngle = Math.atan2(pEnd.y - pPrev.y, pEnd.x - pPrev.x);
     for (const offset of [-0.55, 0.55]) {
       line(pEnd.x, pEnd.y, pEnd.x - Math.cos(tipAngle + offset) * 14, pEnd.y - Math.sin(tipAngle + offset) * 14, color, 4);
     }
+
+    // 2. Dashed trajectory line beyond splitIdx
+    if (splitIdx < points.length - 1) {
+      ctx.beginPath();
+      ctx.moveTo(points[splitIdx].x, points[splitIdx].y);
+      for (let i = splitIdx + 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 3. Terminating little circle
+    const finalPt = points[points.length - 1];
+    circle(finalPt.x, finalPt.y, 4.5, color, 2.5);
   }
   function draw() {
     const ratio = Math.min(devicePixelRatio || 1, 2), width = Math.max(1, Math.round(canvas.clientWidth * ratio)), height = Math.round(width * .6);
@@ -148,61 +253,8 @@
       line(x === 60 - depth ? x : x + depth, 230, x === 60 - depth ? x : x + depth, 370, accent, 4);
     }
     bodies.slice(0, 6).forEach((b, i) => {
-      circle(b.x, b.y, b.radius + 3, i < 3 ? primary : secondary, 4);
-      if (i === selected && phase === 'plan') {
-        circle(b.x, b.y, b.radius + 8, text, 2);
-
-        // Spin dial track around the selected ubu
-        const dialR = b.radius + 18;
-        ctx.setLineDash([3, 5]);
-        circle(b.x, b.y, dialR, 'rgba(255, 255, 255, 0.22)', 1.5);
-        ctx.setLineDash([]);
-
-        // Straight / 0 spin notch along launch angle
-        const notchX = b.x + Math.cos(plans[i].angle) * dialR;
-        const notchY = b.y + Math.sin(plans[i].angle) * dialR;
-        circle(notchX, notchY, 2.5, 'rgba(255, 255, 255, 0.5)', 2);
-
-        // Spin handle angle
-        const spin = plans[i].spin || 0;
-        const handleAngle = plans[i].angle + spin * (Math.PI / 2.2);
-        const hx = b.x + Math.cos(handleAngle) * dialR;
-        const hy = b.y + Math.sin(handleAngle) * dialR;
-
-        // Spin arc from straight notch to handle
-        if (Math.abs(spin) > 0.04) {
-          ctx.beginPath();
-          const startA = Math.min(plans[i].angle, handleAngle);
-          const endA = Math.max(plans[i].angle, handleAngle);
-          ctx.arc(b.x, b.y, dialR, startA, endA);
-          ctx.strokeStyle = '#ff9954';
-          ctx.lineWidth = 3;
-          ctx.stroke();
-        }
-
-        // Spin knob handle
-        const isDraggingSpin = dragMode === 'spin';
-        ctx.beginPath();
-        ctx.arc(hx, hy, 10, 0, Math.PI * 2);
-        ctx.fillStyle = isDraggingSpin ? '#ff9954' : '#22252a';
-        ctx.fill();
-        ctx.strokeStyle = isDraggingSpin ? '#ffffff' : '#ff9954';
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-
-        ctx.fillStyle = isDraggingSpin ? '#121315' : '#ffffff';
-        ctx.beginPath();
-        ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Slingshot pull-back dotted line while dragging backwards
-        if (dragMode === 'slingshot' && dragPoint) {
-          ctx.setLineDash([4, 6]);
-          line(b.x, b.y, dragPoint.x, dragPoint.y, '#ffffffaa', 2);
-          ctx.setLineDash([]);
-          circle(dragPoint.x, dragPoint.y, 6, primary, 2);
-        }
-      }
+      const reachR = Math.max(b.radius, b.reach || b.radius, 18);
+      circle(b.x, b.y, reachR + 2, i < 3 ? primary : secondary, 4);
 
       if (phase === 'goal' && b === scoringPlayer) {
         circle(b.x, b.y, b.radius + 9, '#ff9954', 4);
@@ -213,12 +265,64 @@
       skaters[i].style.transform = `translate(-50%, -50%) rotate(${b.rotation}rad)`;
       ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = i < 3 ? primary : secondary; ctx.fillText(String(i % 3 + 1), b.x, b.y + b.radius + 20);
 
-      // Curved launch arrow (length based on Impulse stat!)
+      // Curved launch arrow and dashed trajectory (drawn before spin knob so knob is on top)
       if (i < 3 && phase === 'plan' && plans[i].power > 0) {
-        const trajectory = computeTrajectory(b, plans[i]);
-        drawTrajectory(trajectory, primary);
+        const trajectory = computeTrajectory(b, plans[i], bodies[6]);
+        drawTrajectory(b, plans[i], trajectory, primary);
       }
     });
+
+    // Spin dial knob & arc and selection ring for selected ubu (above arrow in z-index)
+    if (phase === 'plan') {
+      const b = bodies[selected];
+      circle(b.x, b.y, b.radius + 8, text, 2);
+
+      const dialR = b.radius + 18;
+      // Straight / 0 spin notch along launch angle
+      const notchX = b.x + Math.cos(plans[selected].angle) * dialR;
+      const notchY = b.y + Math.sin(plans[selected].angle) * dialR;
+      circle(notchX, notchY, 2.5, 'rgba(255, 255, 255, 0.5)', 2);
+
+      // Spin handle angle
+      const spin = plans[selected].spin || 0;
+      const handleAngle = plans[selected].angle + spin * (Math.PI / 2.2);
+      const hx = b.x + Math.cos(handleAngle) * dialR;
+      const hy = b.y + Math.sin(handleAngle) * dialR;
+
+      // Spin arc from straight notch to handle
+      if (Math.abs(spin) > 0.04) {
+        ctx.beginPath();
+        const startA = Math.min(plans[selected].angle, handleAngle);
+        const endA = Math.max(plans[selected].angle, handleAngle);
+        ctx.arc(b.x, b.y, dialR, startA, endA);
+        ctx.strokeStyle = '#ff9954';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
+      // Spin knob handle (above arrow in z-index)
+      const isDraggingSpin = dragMode === 'spin';
+      ctx.beginPath();
+      ctx.arc(hx, hy, 10, 0, Math.PI * 2);
+      ctx.fillStyle = isDraggingSpin ? '#ff9954' : '#22252a';
+      ctx.fill();
+      ctx.strokeStyle = isDraggingSpin ? '#ffffff' : '#ff9954';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      ctx.fillStyle = isDraggingSpin ? '#121315' : '#ffffff';
+      ctx.beginPath();
+      ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Slingshot pull-back dotted line while dragging backwards
+      if (dragMode === 'slingshot' && dragPoint) {
+        ctx.setLineDash([4, 6]);
+        line(b.x, b.y, dragPoint.x, dragPoint.y, '#ffffffaa', 2);
+        ctx.setLineDash([]);
+        circle(dragPoint.x, dragPoint.y, 6, primary, 2);
+      }
+    }
     const ball = bodies[6];
     ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); ctx.fillStyle = background; ctx.fill(); circle(ball.x, ball.y, ball.radius, text, 2);
     if (ballMark.complete && ballMark.naturalWidth) {
@@ -318,13 +422,18 @@
     }
     const b = bodies[selected];
     if (dragMode === 'slingshot') {
-      dragPoint = { x: p.x, y: p.y };
+      const MAX_PULL = 120;
       const pullDx = p.x - b.x, pullDy = p.y - b.y;
       const pullDist = Math.hypot(pullDx, pullDy);
       if (pullDist > 4) {
         plans[selected].angle = Math.atan2(-pullDy, -pullDx);
-        plans[selected].power = Math.max(0, Math.min(1, (pullDist - 6) / 120));
+        plans[selected].power = Math.max(0, Math.min(1, (pullDist - 6) / MAX_PULL));
       }
+      const clampedDist = Math.min(pullDist, MAX_PULL + 6);
+      dragPoint = pullDist > 0 ? {
+        x: b.x + (pullDx / pullDist) * clampedDist,
+        y: b.y + (pullDy / pullDist) * clampedDist
+      } : { x: b.x, y: b.y };
     } else if (dragMode === 'spin') {
       updateSpinFromPoint(p, b);
     }

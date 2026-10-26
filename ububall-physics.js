@@ -17,7 +17,7 @@
     body.curveFactor = .04 * multiplier(raw.curve ?? 127);
     body.bounciness = multiplier(raw.bounciness ?? 127);
     body.power = multiplier(raw.power ?? 127);
-    body.reach = 25 * multiplier(raw.reach ?? 127);
+    body.reach = Math.max(body.radius, 25 * multiplier(raw.reach ?? 127), 18);
     body.strength = multiplier(raw.strength ?? 127);
     body.stability = multiplier(raw.stability ?? 127);
   }
@@ -48,30 +48,48 @@
   }
   function walls(b, onWall = null) {
     const r = b.radius, k = rink;
-    const inGoalY = b.y >= k.goalTop + r && b.y <= k.goalBottom - r;
+    const inGoalY = b.y > k.goalTop && b.y < k.goalBottom;
 
-    if (b.x < k.left + r) {
-      if (inGoalY) {
+    if (inGoalY) {
+      if (b.x < k.left) {
         const backX = k.left - k.goalDepth + r;
-        if (b.x < backX) reflect(b, -1, 0, backX - b.x, 'net', onWall);
-      } else {
-        reflect(b, -1, 0, k.left + r - b.x, 'wall', onWall);
+        if (b.x < backX) {
+          reflect(b, -1, 0, backX - b.x, 'net', onWall);
+          if (b.team === -1) { b.vx *= 0.1; b.vy *= 0.1; }
+        }
+        if (b.y < k.goalTop + r) reflect(b, 0, -1, k.goalTop + r - b.y, 'net', onWall);
+        if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall);
+      } else if (b.x < k.left + r) {
+        for (const y of [k.goalTop, k.goalBottom]) {
+          const dx = k.left - b.x, dy = y - b.y, d = Math.hypot(dx, dy);
+          if (d < r && d > 0) reflect(b, dx / d, dy / d, r - d, 'post', onWall);
+        }
       }
+    } else {
+      if (b.x < k.left + r) reflect(b, -1, 0, k.left + r - b.x, 'wall', onWall);
     }
-    if (b.x > k.right - r) {
-      if (inGoalY) {
+
+    if (inGoalY) {
+      if (b.x > k.right) {
         const backX = k.right + k.goalDepth - r;
-        if (b.x > backX) reflect(b, 1, 0, b.x - backX, 'net', onWall);
-      } else {
-        reflect(b, 1, 0, b.x - k.right + r, 'wall', onWall);
+        if (b.x > backX) {
+          reflect(b, 1, 0, b.x - backX, 'net', onWall);
+          if (b.team === -1) { b.vx *= 0.1; b.vy *= 0.1; }
+        }
+        if (b.y < k.goalTop + r) reflect(b, 0, -1, k.goalTop + r - b.y, 'net', onWall);
+        if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall);
+      } else if (b.x > k.right - r) {
+        for (const y of [k.goalTop, k.goalBottom]) {
+          const dx = k.right - b.x, dy = y - b.y, d = Math.hypot(dx, dy);
+          if (d < r && d > 0) reflect(b, dx / d, dy / d, r - d, 'post', onWall);
+        }
       }
+    } else {
+      if (b.x > k.right - r) reflect(b, 1, 0, b.x - k.right + r, 'wall', onWall);
     }
 
     const insidePocket = (b.x < k.left) || (b.x > k.right);
-    if (insidePocket) {
-      if (b.y < k.goalTop + r) reflect(b, 0, -1, k.goalTop + r - b.y, 'net', onWall);
-      if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall);
-    } else {
+    if (!insidePocket) {
       if (b.y < k.top + r) reflect(b, 0, -1, k.top + r - b.y, 'wall', onWall);
       if (b.y > k.bottom - r) reflect(b, 0, 1, b.y - k.bottom + r, 'wall', onWall);
       const cx = b.x < k.left + k.corner ? k.left + k.corner : b.x > k.right - k.corner ? k.right - k.corner : null;
@@ -81,17 +99,11 @@
         if (d > limit) reflect(b, dx / d, dy / d, d - limit, 'wall', onWall);
       }
     }
-
-    // Goal posts
-    for (const x of [k.left, k.right]) for (const y of [k.goalTop, k.goalBottom]) {
-      const dx = x - b.x, dy = y - b.y, d = Math.hypot(dx, dy), limit = r + 5;
-      if (d < limit && d > 0) reflect(b, dx / d, dy / d, limit - d, 'post', onWall);
-    }
   }
   function collide(a, b, onCollide = null) {
     const isBall = a.team === -1 || b.team === -1;
-    const ra = (isBall && a.team !== -1) ? (a.reach || a.radius) : a.radius;
-    const rb = (isBall && b.team !== -1) ? (b.reach || b.radius) : b.radius;
+    const ra = (isBall && a.team !== -1) ? Math.max(a.radius, a.reach || a.radius, 18) : a.radius;
+    const rb = (isBall && b.team !== -1) ? Math.max(b.radius, b.reach || b.radius, 18) : b.radius;
     const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), radius = ra + rb;
     if (d >= radius) return;
     const nx = d ? dx / d : 1, ny = d ? dy / d : 0, inverse = 1 / a.mass + 1 / b.mass;
@@ -143,9 +155,12 @@
       for (const b of bodies) walls(b, onWall);
     }
     const ball = bodies.find(b => b.team === -1);
-    if (ball.y >= rink.goalTop + ball.radius && ball.y <= rink.goalBottom - ball.radius) {
-      if (ball.x + ball.radius < rink.left) return 1;
-      if (ball.x - ball.radius > rink.right) return 0;
+    if (ball) {
+      const inGoalY = ball.y >= rink.goalTop && ball.y <= rink.goalBottom;
+      if (inGoalY) {
+        if (ball.x - ball.radius <= rink.left - rink.goalDepth + 1 || ball.x + ball.radius < rink.left) return 1;
+        if (ball.x + ball.radius >= rink.right + rink.goalDepth - 1 || ball.x - ball.radius > rink.right) return 0;
+      }
     }
     return null;
   }

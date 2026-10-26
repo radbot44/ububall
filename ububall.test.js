@@ -99,6 +99,27 @@ test('a ball fully crossing either goal scores for the opposite team', () => {
 test('a partial goal crossing does not score', () => {
   const b = P.kickoff(); b[6].x = 945; assert.equal(P.step(b), null);
 });
+test('touching the back of the net scores a goal', () => {
+  const b = P.kickoff();
+  b[6].x = 940 + P.rink.goalDepth - b[6].radius;
+  assert.equal(P.step(b), 0);
+  const b2 = P.kickoff();
+  b2[6].x = 60 - P.rink.goalDepth + b2[6].radius;
+  assert.equal(P.step(b2), 1);
+});
+test('fast ball entering goal registers a score without bouncing out', () => {
+  const b = P.kickoff();
+  Object.assign(b[6], { x: 920, y: 300, vx: 2000 });
+  const goal = resolve(b);
+  assert.equal(goal, 0);
+});
+test('ball riding the wall does not jump out at the edge of the net', () => {
+  const b = P.kickoff();
+  Object.assign(b[6], { x: 60 + b[6].radius, y: 215, vx: 0, vy: 400 });
+  for (let i = 0; i < 20; i++) P.step(b);
+  assert.ok(b[6].x <= 60 + b[6].radius + 1.0);
+  assert.ok(b[6].y > 230);
+});
 test('ubus can enter the goal net and are contained by the back of the net', () => {
   const b = P.kickoff(); Object.assign(b[0], { x: 90, y: 300, vx: -720 });
   for (let i = 0; i < 20; i++) P.step(b);
@@ -155,14 +176,14 @@ test('reach increases ball interaction radius without expanding player-on-player
   const hitLow = (() => {
     const b = P.kickoff();
     P.applyStats(b[0], { ...normal, reach: 0 });
-    Object.assign(b[0], { x: 460, y: 300, vx: 500 });
+    Object.assign(b[0], { x: 450, y: 300, vx: 500 });
     P.step(b, 0);
     return b[6].vx !== 0;
   })();
   const hitHigh = (() => {
     const b = P.kickoff();
     P.applyStats(b[0], { ...normal, reach: 255 });
-    Object.assign(b[0], { x: 460, y: 300, vx: 500 });
+    Object.assign(b[0], { x: 450, y: 300, vx: 500 });
     P.step(b, 0);
     return b[6].vx !== 0;
   })();
@@ -179,6 +200,13 @@ test('reach increases ball interaction radius without expanding player-on-player
     return b[1].vx !== 0;
   })();
   assert.equal(pLow, false);
+});
+test('big ubus with low reach still hit the ball with their outer radius', () => {
+  const b = P.kickoff();
+  P.applyStats(b[0], { ...normal, size: 255, reach: 0 });
+  Object.assign(b[0], { x: 500 - 54, y: 300, vx: 500 });
+  P.step(b, 0);
+  assert.ok(b[6].vx !== 0);
 });
 test('strength amplifies body-checking force and stability dampens knockback', () => {
   const checkResults = [0, 127, 255].map(strength => {
