@@ -62,7 +62,7 @@
       if (Math.hypot(b.vx, b.vy) < 25) return;
       const trail = trails[i], previous = trail[trail.length - 1];
       if (!previous || Math.hypot(b.x - previous.x, b.y - previous.y) >= 3) {
-        const duration = Math.max(.12, Math.min(.3, b.radius / 125));
+        const duration = .24; // Fixed lifetime makes trail length follow speed, not body size.
         trail.push({ x: b.x, y: b.y, life: duration, duration });
         if (trail.length > 40) trail.shift();
       }
@@ -75,7 +75,7 @@
       for (let i = 0; i < trail.length; i++) {
         const p = trail[i], end = trail[i + 1] || b, fade = Math.max(0, p.life / p.duration);
         ctx.globalAlpha = fade * .23;
-        line(p.x, p.y, end.x, end.y, color, b.radius * .7 * fade);
+        line(p.x, p.y, end.x, end.y, color, b.radius * 2 * fade);
       }
     });
     ctx.restore();
