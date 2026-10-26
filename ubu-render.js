@@ -480,44 +480,21 @@
       lighting('obsidian-reflection', [[0,'#fff',0],[.3,'#fff',.02],[.48,'#fff',.26],[.64,'#fff',.04],[1,'#fff',0]], true,
         { cx:65, cy:35, r:310, gradientTransform:'translate(30 -15) skewX(-25)' });
     } else if (attribute.texture === 'mosaic') {
-      lighting('mosaic-sheen', [[0, '#fff', .22], [.4, '#fff', .06], [1, '#000', .2]], true);
-      // Polygonal Voronoi tiles with individual shading and contrasting grout
-      const seeds = [];
-      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
-        seeds.push([-180 + (x + 0.2 + roll() * 0.6) * 90, -180 + (y + 0.2 + roll() * 0.6) * 90]);
-      }
-      for (let s = 0; s < seeds.length; s++) {
-        const seed = seeds[s];
-        let cell = [[-180, -180], [540, -180], [540, 540], [-180, 540]];
-        for (const other of seeds) {
-          if (other === seed || !cell.length) continue;
-          const nx = other[0] - seed[0], ny = other[1] - seed[1];
-          const limit = (other[0] ** 2 + other[1] ** 2 - seed[0] ** 2 - seed[1] ** 2) / 2;
-          const clipped = [];
-          for (let i = 0; i < cell.length; i++) {
-            const a = cell[i], b = cell[(i + 1) % cell.length];
-            const da = a[0] * nx + a[1] * ny - limit, db = b[0] * nx + b[1] * ny - limit;
-            if (da <= 0) clipped.push(a);
-            if ((da <= 0) !== (db <= 0)) {
-              const t = da / (da - db);
-              clipped.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-            }
-          }
-          cell = clipped;
-        }
-        if (!cell.length) continue;
-        const pts = cell.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-        const tileTone = roll();
-        const tileFill = tileTone > 0.5 ? '#ffffff' : '#000000';
-        const tileOpacity = 0.04 + Math.abs(tileTone - 0.5) * 0.28;
-        pattern.append(svgNode('polygon', {
-          points: pts,
-          fill: tileFill,
-          'fill-opacity': tileOpacity,
-          stroke: '#282725',
-          'stroke-width': 2.8,
-          'stroke-linejoin': 'round'
-        }));
+      // Small hand-cut tesserae with inset faces, exposed bevels and recessed grout.
+      cover('rgba(25,23,21,0.4)');
+      const glaze=svgNode('linearGradient',{id:id+'-glaze',x1:'0%',y1:'0%',x2:'75%',y2:'100%'});
+      for(const [offset,color,opacity] of [[0,'#fff',.3],[.3,'#fff',.04],[.75,'#000',.04],[1,'#000',.16]])
+        glaze.append(svgNode('stop',{offset,'stop-color':color,'stop-opacity':opacity}));
+      defs.append(glaze);
+      for(let row=-10;row<28;row++) for(let col=-10;col<28;col++) {
+        const x=col*20+(row%2)*8,y=row*20;
+        const pts=[[x+1+roll(),y+1+roll()],[x+18-roll(),y+1+roll()],[x+18-roll(),y+18-roll()],[x+1+roll(),y+18-roll()]];
+        const points=pts.map(p=>p.join(',')).join(' ');
+        pattern.append(svgNode('polygon',{points,fill:attribute.hex}));
+        pattern.append(svgNode('polygon',{points,fill:roll()>.5?'#fff':'#000',opacity:.04+roll()*.14}));
+        pattern.append(svgNode('polygon',{points,fill:`url(#${id}-glaze)`}));
+        pattern.append(svgNode('path',{d:`M${pts[3]}L${pts[0]}L${pts[1]}`,fill:'none',stroke:'#fff','stroke-width':.85,opacity:.3}));
+        pattern.append(svgNode('path',{d:`M${pts[1]}L${pts[2]}L${pts[3]}`,fill:'none',stroke:'#000','stroke-width':1.1,opacity:.4}));
       }
     } else if (attribute.texture === 'hammered-metal') {
       lighting('hammered-base', [[0,'#000',.25],[.25,'#fff',.08],[.48,'#fff',.3],[.7,'#000',.08],[1,'#000',.3]]);
@@ -642,29 +619,25 @@
       }
       defs.append(twill); cover(`url(#${id}-denim)`);
     } else if (attribute.texture === 'bubbled') {
-      lighting('bubble-depth', [[0, '#fff', .28], [.4, '#fff', .06], [1, '#000', .3]], true);
-      // Overlapping translucent bubbles with iridescent rims and specular crescents
-      for (let b = 0; b < 45; b++) {
-        const bx = -100 + roll() * 560, by = -100 + roll() * 560;
-        const r = 12 + roll() * 32;
-        pattern.append(svgNode('circle', {
-          cx: bx.toFixed(1), cy: by.toFixed(1), r: r.toFixed(1),
-          fill: '#ffffff', 'fill-opacity': 0.05 + roll() * 0.08,
-          stroke: b % 2 ? '#defaff' : '#ffeaf6', 'stroke-width': 1.2,
-          'stroke-opacity': 0.55 + roll() * 0.35
-        }));
-        const hr = r * 0.72;
-        pattern.append(svgNode('path', {
-          d: `M${(bx - hr).toFixed(1)} ${by.toFixed(1)}A${hr.toFixed(1)} ${hr.toFixed(1)} 0 0 1 ${bx.toFixed(1)} ${(by - hr).toFixed(1)}`,
-          fill: 'none', stroke: '#ffffff', 'stroke-width': (1.8 + roll() * 1.4).toFixed(1),
-          'stroke-linecap': 'round', opacity: 0.65 + roll() * 0.3
-        }));
-        pattern.append(svgNode('circle', {
-          cx: (bx + r * 0.5).toFixed(1), cy: (by + r * 0.5).toFixed(1),
-          r: (r * 0.12).toFixed(1), fill: '#ffffff', opacity: 0.45
-        }));
+      lighting('bubble-depth', [[0,'#fff',.08],[.5,'#fff',0],[1,'#000',.18]], true);
+      const film=svgNode('radialGradient',{id:id+'-film',cx:'45%',cy:'42%',r:'58%'});
+      for(const [offset,color,opacity] of [[0,'#fff',0],[.65,'#fff',.015],[.83,'#000',.13],[.94,'#c7d8e4',.25],[1,'#000',.12]])
+        film.append(svgNode('stop',{offset,'stop-color':color,'stop-opacity':opacity}));
+      const glint=svgNode('radialGradient',{id:id+'-glint'});
+      for(const [offset,opacity] of [[0,.8],[.35,.5],[.72,.12],[1,0]]) glint.append(svgNode('stop',{offset,'stop-color':'#fff','stop-opacity':opacity}));
+      defs.append(film,glint);
+      const bubbles=[];
+      for(let i=0;i<180;i++) {
+        const x=-150+roll()*660,y=-150+roll()*660,r=7+roll()**2*40;
+        if(bubbles.some(b=>Math.hypot(x-b.x,y-b.y)<(r+b.r)*.83))continue;
+        bubbles.push({x,y,r});
+        pattern.append(svgNode('circle',{cx:x,cy:y,r,fill:`url(#${id}-film)`}));
+        // Soft elongated reflections follow the curvature, without symbolic white arcs.
+        pattern.append(svgNode('ellipse',{cx:x-r*.38,cy:y-r*.56,rx:r*.38,ry:r*.12,
+          transform:`rotate(-35 ${x-r*.38} ${y-r*.56})`,fill:`url(#${id}-glint)`}));
+        pattern.append(svgNode('ellipse',{cx:x+r*.4,cy:y+r*.65,rx:r*.25,ry:r*.055,
+          transform:`rotate(-32 ${x+r*.4} ${y+r*.65})`,fill:`url(#${id}-glint)`,opacity:.35}));
       }
-      lighting('bubble-sheen', [[0, '#fff', 0], [.25, '#fff', 0], [.42, '#fff', .5], [.5, '#defaff', .2], [1, '#fff', 0]]);
     } else if (attribute.texture === 'lava') {
       lighting('basalt-crust', [[0, '#000', .35], [.5, '#000', .55], [1, '#000', .72]], true);
       // Dark volcanic crust plates separated by glowing incandescent magma rivers
@@ -715,77 +688,73 @@
       }
       lighting('lava-thermal', [[0, '#ff4400', .45], [.35, '#ffaa00', .25], [1, '#000', 0]], true);
     } else if (attribute.texture === 'circuitry') {
-      lighting('pcb-substrate', [[0, '#fff', .12], [.5, '#000', .08], [1, '#000', .4]], true);
-      // Conductive PCB traces with illuminated nodes
-      for (let t = 0; t < 28; t++) {
-        let x = -100 + roll() * 560, y = -100 + roll() * 560;
-        let d = `M${x.toFixed(1)} ${y.toFixed(1)}`;
-        const steps = 4 + Math.floor(roll() * 6);
-        const pads = [[x, y]];
-        for (let s = 0; s < steps; s++) {
-          const len = 25 + roll() * 60;
-          const dir = Math.floor(roll() * 4);
-          if (dir === 0) x += len;
-          else if (dir === 1) y += len;
-          else if (dir === 2) { x += len * 0.7; y += len * 0.7; }
-          else { x += len * 0.7; y -= len * 0.7; }
-          d += `L${x.toFixed(1)} ${y.toFixed(1)}`;
-          pads.push([x, y]);
-        }
-        pattern.append(svgNode('path', {
-          d, fill: 'none',
-          stroke: '#d4af37', 'stroke-width': 1.5, opacity: 0.85,
-          'stroke-linecap': 'round', 'stroke-linejoin': 'round'
-        }));
-        for (const [px, py] of pads) {
-          pattern.append(svgNode('circle', {
-            cx: px.toFixed(1), cy: py.toFixed(1), r: 3.2,
-            fill: '#d4af37', stroke: '#222222', 'stroke-width': 0.8
-          }));
-          pattern.append(svgNode('circle', {
-            cx: px.toFixed(1), cy: py.toFixed(1), r: 1.2,
-            fill: '#111111'
-          }));
-          if (roll() > 0.65) {
-            pattern.append(svgNode('circle', {
-              cx: px.toFixed(1), cy: py.toFixed(1), r: 2.2,
-              fill: t % 2 ? '#42c66b' : '#00e1ff', opacity: 0.95
-            }));
+      lighting('pcb-substrate', [[0,'#fff',.025],[.5,'#000',.08],[1,'#000',.24]], true);
+      const board=svgNode('pattern',{id:id+'-board',patternUnits:'userSpaceOnUse',width:256,height:256});
+      const cyan='#50e8ee';
+      for(let row=0;row<2;row++) for(let col=0;col<2;col++) {
+        const cell=svgNode('g',{transform:`translate(${col*128} ${row*128}) rotate(${(row+col)*90} 64 64)`});
+        // Four dense bus bundles fan out from a processor into the surrounding board.
+        for(let side=0;side<4;side++) {
+          const bus=svgNode('g',{transform:`rotate(${side*90} 64 64)`});
+          for(let pin=0;pin<9;pin++) {
+            const x=48+pin*4, elbow=22+Math.abs(pin-4)*2, end=x+(pin<4?-12:12);
+            const d=`M${x} 43V${elbow}L${end} ${elbow-12}V0`;
+            bus.append(svgNode('path',{d,fill:'none',stroke:'#000','stroke-width':2.4,opacity:.25}));
+            bus.append(svgNode('path',{d,fill:'none',stroke:'#72999b','stroke-width':.85,opacity:.55}));
+            if((pin+side+row)%4===0) {
+              bus.append(svgNode('path',{d,fill:'none',stroke:cyan,'stroke-width':3.5,opacity:.09}),
+                svgNode('path',{d,fill:'none',stroke:cyan,'stroke-width':.95,opacity:.85}));
+            }
+            bus.append(svgNode('rect',{x:x-.9,y:39,width:1.8,height:5,fill:'#a5bdbd',opacity:.8}));
           }
+          cell.append(bus);
         }
+        const shell='M46 43H82L85 46V82L82 85H46L43 82V46Z';
+        cell.append(svgNode('path',{d:shell,fill:'#111c23',stroke:'#526a74','stroke-width':1}));
+        cell.append(svgNode('rect',{x:49,y:49,width:30,height:30,fill:'#192e38',stroke:cyan,'stroke-width':.65,'stroke-opacity':.7}));
+        // Layered die and short illuminated corners give the processor a cyber accent.
+        cell.append(svgNode('path',{d:'M51 59V51H59M69 51H77V59M77 69V77H69M59 77H51V69',fill:'none',stroke:cyan,'stroke-width':1.4,opacity:.9}));
+        for(let n=0;n<5;n++) cell.append(svgNode('path',{d:`M54 ${55+n*4}h20`,stroke:'#69a3ae','stroke-width':.5,opacity:.28}));
+        cell.append(svgNode('rect',{x:59,y:59,width:10,height:10,fill:cyan,opacity:.13}));
+        // Small heatsink banks occupy the corners between bus bundles.
+        for(const [x,y] of [[5,5],[98,98]]) {
+          cell.append(svgNode('rect',{x,y,width:25,height:25,rx:1,fill:'#142128',stroke:'#455760','stroke-width':.7}));
+          for(let fin=0;fin<6;fin++) cell.append(svgNode('path',{d:`M${x+3} ${y+3+fin*3.6}h19`,stroke:'#809198','stroke-width':1.1,opacity:.55}));
+        }
+        for(const [x,y] of [[102,6],[6,102]]) {
+          for(let n=0;n<4;n++) cell.append(svgNode('rect',{x:x+n*5,y,width:2,height:15,fill:n===1?cyan:'#779293',opacity:n===1?.7:.35}));
+        }
+        board.append(cell);
       }
-      lighting('pcb-sheen', [[0, '#fff', 0], [.44, '#fff', .4], [.52, '#fff', .08], [1, '#fff', 0]]);
+      defs.append(board);cover(`url(#${id}-board)`);
+      lighting('pcb-sheen', [[0,'#fff',.07],[.5,'#fff',.015],[1,'#fff',0]], true);
     } else if (attribute.texture === 'liquid') {
-      lighting('liquid-depth', [[0, '#fff', .35], [.25, '#fff', .12], [.6, '#000', .15], [1, '#000', .5]], true);
-      // Flowing fluid streamlines and refractive light caustic convergence network
-      for (let r = 0; r < 9; r++) {
-        let x = -220 + r * 95;
-        let d = `M${x.toFixed(1)} -180`;
-        for (let y = -120; y <= 540; y += 45) {
-          const next = x + Math.sin(y / 40 + r * 1.5) * 35 + (roll() - 0.5) * 18;
-          d += `Q${((x + next) / 2 + 15).toFixed(1)} ${(y - 22).toFixed(1)} ${next.toFixed(1)} ${y}`;
-          x = next;
+      lighting('liquid-depth', [[0,'#fff',.12],[.4,'#000',.02],[1,'#000',.3]], true);
+      // Sample one periodic wave surface; shared normals produce connected reflections.
+      const ripples=svgNode('pattern',{id:id+'-ripples',patternUnits:'userSpaceOnUse',width:360,height:360});
+      const shades=Array.from({length:32},()=> '');
+      const tau=Math.PI*2;
+      for(let y=0;y<360;y+=2) for(let x=0;x<360;x+=2) {
+        let dx=0,dy=0,height=0;
+        for(const [kx,ky,amplitude,phase] of [[5,1,1.2,0],[1,5,1.2,1.3],[4,-4,.9,2.1],[9,3,.35,.6]]) {
+          const wave=tau*(kx*x+ky*y)/360+phase;
+          height+=amplitude*Math.sin(wave);
+          const c=amplitude*Math.cos(wave)*tau/360;
+          dx+=kx*c;dy+=ky*c;
         }
-        pattern.append(svgNode('path', {
-          d, fill: 'none', stroke: '#ffffff',
-          'stroke-width': (1.8 + roll() * 3.5).toFixed(1),
-          opacity: 0.14 + roll() * 0.22,
-          'stroke-linecap': 'round'
-        }));
+        const length=Math.hypot(dx,dy,1);
+        const spec=Math.pow(Math.max(0,(-dx*.12+dy*.45+.885)/length),64);
+        const tone=Math.max(0,Math.min(31,Math.round(8+spec*12+Math.exp(-height*height*2)*18-(dx+dy)*6)));
+        shades[tone]+=`M${x} ${y}h2v2h-2Z`;
       }
-      for (let c = 0; c < 16; c++) {
-        const cx = -100 + roll() * 560, cy = -100 + roll() * 560;
-        const rx = 35 + roll() * 65, ry = 18 + roll() * 35;
-        pattern.append(svgNode('ellipse', {
-          cx: cx.toFixed(1), cy: cy.toFixed(1),
-          rx: rx.toFixed(1), ry: ry.toFixed(1),
-          transform: `rotate(${(roll() * 180).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})`,
-          fill: 'none', stroke: '#ffffff', 'stroke-width': 1.2,
-          opacity: 0.12 + roll() * 0.25
-        }));
-      }
-      lighting('liquid-sheen', [[0, '#fff', 0], [.18, '#fff', .7], [.26, '#fff', .18], [1, '#fff', 0]]);
-      lighting('liquid-caustic-bounce', [[0, '#fff', 0], [.65, '#fff', 0], [.74, '#fff', .32], [.8, '#fff', 0], [1, '#fff', 0]]);
+      const soften=svgNode('filter',{id:id+'-ripple-soften',x:'-5%',y:'-5%',width:'110%',height:'110%'});
+      soften.append(svgNode('feGaussianBlur',{stdDeviation:.35}));defs.append(soften);
+      const waterSurface=svgNode('g',{filter:`url(#${id}-ripple-soften)`});
+      shades.forEach((d,i)=>waterSurface.append(svgNode('path',{d,fill:i<9?'#000':'#fff',opacity:i<9?(9-i)*.025:(i-9)*.035})));
+      ripples.append(waterSurface);
+      defs.append(ripples);cover(`url(#${id}-ripples)`);
+      lighting('liquid-reflection',[[0,'#fff',.03],[.4,'#fff',.13],[.7,'#fff',.02],[1,'#fff',0]],true);
+
     }
     defs.append(pattern);
     return `url(#${id})`;
@@ -862,7 +831,7 @@
       denim: { width: 1.8, rim: .4, stops: [[0, '#fff', .35], [.5, '#fff', .05], [1, '#000', .3]] },
       bubbled: { width: 2.8, rim: .8, stops: [[0, '#fff', .85], [.3, '#d4f8ff', .4], [.6, '#ffd6f5', .25], [1, '#000', .35]] },
       lava: { width: 2.5, rim: .6, stops: [[0, '#ff9900', .9], [.35, '#ff3300', .6], [.65, '#3a0800', .7], [1, '#110000', .85]] },
-      circuitry: { width: 2.2, rim: .55, stops: [[0, '#fff', .75], [.3, '#ffd700', .45], [.6, '#004422', .3], [1, '#000', .6]] },
+      circuitry: { width: 1.3, rim: .35, stops: [[0, '#fff', .25], [.3, '#a4a69b', .2], [.6, '#000', .16], [1, '#000', .4]] },
       liquid: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.25, '#fff', .35], [.55, '#fff', .05], [1, '#000', .4]] }
     };
     const finish = finishes[attribute.texture];
@@ -1136,7 +1105,7 @@
       denim: { width: 1.8, rim: .4, stops: [[0, '#fff', .35], [.5, '#fff', .05], [1, '#000', .3]] },
       bubbled: { width: 2.8, rim: .8, stops: [[0, '#fff', .85], [.3, '#d4f8ff', .4], [.6, '#ffd6f5', .25], [1, '#000', .35]] },
       lava: { width: 2.5, rim: .6, stops: [[0, '#ff9900', .9], [.35, '#ff3300', .6], [.65, '#3a0800', .7], [1, '#110000', .85]] },
-      circuitry: { width: 2.2, rim: .55, stops: [[0, '#fff', .75], [.3, '#ffd700', .45], [.6, '#004422', .3], [1, '#000', .6]] },
+      circuitry: { width: 1.3, rim: .35, stops: [[0, '#fff', .25], [.3, '#a4a69b', .2], [.6, '#000', .16], [1, '#000', .4]] },
       liquid: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.25, '#fff', .35], [.55, '#fff', .05], [1, '#000', .4]] },
       damascus: { width: 2, rim: .5, stops: [[0, '#fff', .6], [.4, '#fff', .15], [1, '#000', .3]] },
       velvet: { width: 1.5, rim: .4, stops: [[0, '#fff', .25], [.5, '#fff', .05], [1, '#000', .2]] },
