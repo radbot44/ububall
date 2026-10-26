@@ -160,4 +160,9 @@ test('audio: mock AudioContext synthesis and scheduling', () => {
   });
   assert.equal(typeof fanfareHandle.stop, 'function');
   fanfareHandle.stop();
+
+  // Test playCollision with volume scaling
+  const collisionHandle = audio.playCollision(testVoice, { ctx: mockCtx, volume: 0.5 });
+  assert.equal(typeof collisionHandle.stop, 'function');
+  collisionHandle.stop();
 });

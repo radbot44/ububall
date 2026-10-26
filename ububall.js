@@ -17,9 +17,21 @@
     efficiency: 127, synergy: 127, chemistry: 127
   });
   let stats = practice.map(p => ({ ...(p.model.stats || normalStats()) }));
-  let lastPlans = null;
+  let lastPlans = null, teamEntries = [...roster, ...practice.slice(3)];
+  let lastTouchByTeam = { 0: null, 1: null }, scoringPlayer = null;
   function kickoff() {
-    const result = P.kickoff(); result.slice(0, 6).forEach((b, i) => P.applyStats(b, stats[i])); return result;
+    lastTouchByTeam = { 0: null, 1: null }; scoringPlayer = null;
+    const result = P.kickoff();
+    result.slice(0, 6).forEach((b, i) => {
+      P.applyStats(b, stats[i]);
+      const entry = teamEntries[i] || practice[i];
+      if (entry?.model) {
+        b.playerIndex = i;
+        b.voice = entry.model.voice;
+        b.name = entry.model.parts?.fullName;
+      }
+    });
+    return result;
   }
   function say(message) { $('game-status').textContent = message; }
   function resetPlans() {
@@ -47,7 +59,7 @@
   }
   function buildTeam() {
     $('team').replaceChildren(); $('skaters').replaceChildren();
-    const teamEntries = [...roster, ...practice.slice(3)];
+    teamEntries = [...roster, ...practice.slice(3)];
     teamEntries.forEach((entry, i) => {
       if (entry.model && entry.model.stats) stats[i] = { ...entry.model.stats };
     });
@@ -62,8 +74,9 @@
     });
   }
   function newMatch() {
-    roster = [...draft]; bodies = kickoff(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
-    buildTeam(); resetPlans(); say('Set a direction and power for each ubu, then launch.'); draw();
+    window.ubuAudio?.stop();
+    roster = [...draft]; buildTeam(); bodies = kickoff(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
+    resetPlans(); say('Set a direction and power for each ubu, then launch.'); draw();
   }
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
   function line(x1, y1, x2, y2, color, width = 2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
@@ -89,6 +102,10 @@
     bodies.slice(0, 6).forEach((b, i) => {
       circle(b.x, b.y, b.radius + 3, i < 3 ? primary : secondary, 4);
       if (i === selected && phase === 'plan') circle(b.x, b.y, b.radius + 8, text, 2);
+      if (phase === 'goal' && b === scoringPlayer) {
+        circle(b.x, b.y, b.radius + 9, '#ff9954', 4);
+        circle(b.x, b.y, b.radius + 15, primary, 2);
+      }
       skaters[i].style.left = b.x / 10 + '%'; skaters[i].style.top = b.y / 6 + '%';
       skaters[i].style.width = b.radius / 5 + '%';
       skaters[i].style.transform = `translate(-50%, -50%) rotate(${b.rotation}rad)`;
@@ -111,7 +128,16 @@
     P.stop(bodies); accumulator = 0;
     if (goal !== null) {
       scores[goal]++; phase = scores[goal] >= 5 ? 'over' : 'goal';
-      say(phase === 'over' ? (goal === 0 ? 'You win! Start a new match for a rematch.' : 'CPU wins. Start a new match to try again.') : `${goal === 0 ? 'You score!' : 'CPU scores.'} Ready for the next kickoff.`);
+      const scorer = lastTouchByTeam[goal] || bodies.slice(goal * 3, goal * 3 + 3)[0];
+      scoringPlayer = scorer;
+      const scorerName = scorer?.name || (goal === 0 ? 'Your ubu' : 'CPU ubu');
+      say(phase === 'over'
+        ? (goal === 0 ? `You win! Final goal by ${scorerName}. Start a new match for a rematch.` : `CPU wins. Final goal by ${scorerName}. Start a new match to try again.`)
+        : `${goal === 0 ? 'You score!' : 'CPU scores.'} Goal by ${scorerName}! Ready for the next kickoff.`
+      );
+      if (scorer?.voice && window.ubuAudio) {
+        window.ubuAudio.playFanfare(scorer.voice);
+      }
       sync();
       if (phase === 'goal') { $('launch').disabled = false; $('launch').textContent = 'Next kickoff'; }
     } else {
@@ -120,8 +146,13 @@
     draw();
   }
   $('launch').onclick = () => {
-    if (phase === 'goal') { bodies = kickoff(); turn++; phase = 'plan'; resetPlans(); say('Kickoff. Plan your next three launches.'); draw(); return; }
+    window.ubuAudio?.getAudioContext();
+    if (phase === 'goal') {
+      window.ubuAudio?.stop();
+      bodies = kickoff(); turn++; phase = 'plan'; resetPlans(); say('Kickoff. Plan your next three launches.'); draw(); return;
+    }
     if (phase !== 'plan') return;
+    window.ubuAudio?.stop();
     lastPlans = structuredClone(plans);
     drag = null; P.launch(bodies, [...plans, ...($('cpu-hold').checked ? [] : cpu)]); elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
   };
@@ -129,6 +160,7 @@
   $('hold').onclick = () => { plans[selected].power = plans[selected].spin = 0; sync(); draw(); };
   function point(event) { const r = canvas.getBoundingClientRect(); return { x: (event.clientX - r.left) * 1000 / r.width, y: (event.clientY - r.top) * 600 / r.height }; }
   canvas.onpointerdown = event => {
+    window.ubuAudio?.getAudioContext();
     if (phase !== 'plan') return;
     const p = point(event), index = bodies.slice(0, 3).findIndex(b => Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12);
     if (index < 0) return;
@@ -140,12 +172,39 @@
     plans[selected] = { ...plans[selected], angle: Math.atan2(dy, dx), power: Math.max(0, Math.min(1, (Math.hypot(dx, dy) - b.radius) / 119)) }; sync(); draw();
   };
   canvas.onpointerup = canvas.onpointercancel = () => { drag = null; };
+  function handleCollision(a, b, speed) {
+    if (speed < 15) return;
+    const isBall = a.team === -1 || b.team === -1;
+    const now = performance.now();
+    if (isBall) {
+      const player = a.team !== -1 ? a : b;
+      lastTouchByTeam[player.team] = player;
+      if (player.voice && window.ubuAudio) {
+        if (!player._lastHitSound || (now - player._lastHitSound) > 55) {
+          player._lastHitSound = now;
+          const norm = Math.min(1.0, Math.max(0.0, (speed - 25) / 550));
+          const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
+          window.ubuAudio.playCollision(player.voice, { volume });
+        }
+      }
+    } else if (a.team !== -1 && b.team !== -1) {
+      const norm = Math.min(1.0, Math.max(0.0, (speed - 40) / 600));
+      const volume = Math.min(1.0, 0.12 + 0.75 * (norm ** 0.8));
+      const primary = (Math.hypot(a.vx, a.vy) * a.mass >= Math.hypot(b.vx, b.vy) * b.mass) ? a : b;
+      if (primary.voice && window.ubuAudio) {
+        if (!primary._lastHitSound || (now - primary._lastHitSound) > 65) {
+          primary._lastHitSound = now;
+          window.ubuAudio.playCollision(primary.voice, { volume });
+        }
+      }
+    }
+  }
   function frame(time) {
     const delta = lastTime ? Math.min((time - lastTime) / 1000, .05) : 0; lastTime = time;
     if (phase === 'play' && !$('roster-dialog').open && !document.hidden) {
       accumulator += delta;
       while (accumulator >= P.DT && phase === 'play') {
-        const goal = P.step(bodies); elapsed += P.DT; accumulator -= P.DT;
+        const goal = P.step(bodies, P.DT, handleCollision); elapsed += P.DT; accumulator -= P.DT;
         if (goal !== null || P.settled(bodies) || elapsed >= 12) finishTurn(goal);
       }
       draw();
@@ -219,6 +278,7 @@
   }
   function showStats() { for (const key of Object.keys(normalStats())) $('stat-' + key).value = stats[Number($('stat-player').value)][key]; previewStats(); }
   function resetField() {
+    window.ubuAudio?.stop();
     bodies = kickoff(); scores = [0, 0]; turn = 1; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     cpu = P.cpuPlans(bodies, () => .5); sync(); previewStats(); draw(); say('Field reset. Your planned launches are preserved.');
   }

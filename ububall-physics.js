@@ -65,7 +65,7 @@
       if (d < limit && d > 0) reflect(b, dx / d, dy / d, limit - d);
     }
   }
-  function collide(a, b) {
+  function collide(a, b, onCollide = null) {
     const isBall = a.team === -1 || b.team === -1;
     const ra = (isBall && a.team !== -1) ? (a.reach || a.radius) : a.radius;
     const rb = (isBall && b.team !== -1) ? (b.reach || b.radius) : b.radius;
@@ -101,8 +101,9 @@
     a.vx -= tangent * tx / a.mass; a.vy -= tangent * ty / a.mass;
     b.vx += tangent * tx / b.mass; b.vy += tangent * ty / b.mass;
     a.omega -= 2 * tangent / (a.mass * a.radius); b.omega -= 2 * tangent / (b.mass * b.radius);
+    if (typeof onCollide === 'function') onCollide(a, b, -closing, baseImpulse);
   }
-  function step(bodies, dt = DT) {
+  function step(bodies, dt = DT, onCollide = null) {
     for (const b of bodies) {
       // Experimental curve: rotate velocity without adding translational energy.
       const curve = b.curveFactor !== undefined ? b.curveFactor : .08;
@@ -115,7 +116,7 @@
       b.vx *= factor; b.vy *= factor;
     }
     for (let pass = 0; pass < 3; pass++) {
-      for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) collide(bodies[i], bodies[j]);
+      for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) collide(bodies[i], bodies[j], onCollide);
       for (const b of bodies) walls(b);
     }
     const ball = bodies.find(b => b.team === -1);

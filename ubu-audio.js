@@ -147,7 +147,8 @@
       duration = 0.3,
       decay = 0.3,
       timbreMod = 0,
-      pitchBend = 0 // semitone pitch bend for voice tone inflection
+      pitchBend = 0, // semitone pitch bend for voice tone inflection
+      volume = 1.0
     } = params;
 
     const stopNodes = [];
@@ -157,8 +158,13 @@
     const targetDecay = Math.max(0.05, Math.min(decay, duration * 1.5));
     const endTime = startTime + targetDecay + 0.05;
 
-    // Connect envelope to destination
-    envGain.connect(dest);
+    // Connect envelope through a volume scaler to destination
+    const volGain = ctx.createGain();
+    const clampedVol = Math.max(0.01, Math.min(2.0, volume));
+    volGain.gain.setValueAtTime(clampedVol, startTime);
+
+    envGain.connect(volGain);
+    volGain.connect(dest);
 
     // Timbre modifiers: detune or overtone
     const detuneCents = timbreMod === 1 ? 7 : 0;
@@ -560,6 +566,8 @@
         try {
           envGain.gain.cancelScheduledValues(ctx.currentTime);
           envGain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.01);
+          volGain.gain.cancelScheduledValues(ctx.currentTime);
+          volGain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.01);
           for (const node of stopNodes) {
             try { node.stop(ctx.currentTime + 0.015); } catch {}
           }
@@ -578,14 +586,15 @@
     }
   }
 
-  function playVoice(voice, customCtx = null) {
-    stopAll();
+  function playVoice(voice, customCtx = null, options = {}) {
+    if (!options.overlap) stopAll();
     const ctx = customCtx || getAudioContext();
     if (!ctx) return { stop() {} };
 
     const parsed = parseVoiceInfo(voice);
     const master = createMasterChain(ctx);
     const now = ctx.currentTime;
+    const volume = options.volume ?? 1.0;
 
     // A friendly signature voice chirp / call
     const toneHandle = playTone(ctx, master, {
@@ -595,7 +604,8 @@
       duration: parsed.decaySeconds,
       decay: parsed.decaySeconds,
       timbreMod: parsed.timbreMod,
-      pitchBend: 2.5 // subtle upward scoop into pitch gives personality!
+      pitchBend: 2.5, // subtle upward scoop into pitch gives personality!
+      volume
     });
 
     const handle = {
@@ -604,8 +614,32 @@
         if (activePlayback === handle) activePlayback = null;
       }
     };
-    activePlayback = handle;
+    if (!options.overlap) activePlayback = handle;
     return handle;
+  }
+
+  function playCollision(voice, options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return { stop() {} };
+
+    const parsed = parseVoiceInfo(voice);
+    const master = createMasterChain(ctx);
+    const now = ctx.currentTime;
+    const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 1.0));
+
+    // Collision sound: snappy, responsive impact chirp with scaled loudness
+    const duration = Math.min(parsed.decaySeconds, 0.22);
+    const toneHandle = playTone(ctx, master, {
+      instrument: parsed.instrumentIndex,
+      freq: parsed.rootFreq,
+      startTime: now,
+      duration: duration,
+      decay: duration,
+      timbreMod: parsed.timbreMod,
+      pitchBend: 1.8,
+      volume
+    });
+    return toneHandle;
   }
 
   function playFanfare(voice, customCtx = null, onNoteCallback = null) {
@@ -698,6 +732,7 @@
     parseVoiceInfo,
     getAudioContext,
     playVoice,
+    playCollision,
     playFanfare,
     stop: stopAll
   };

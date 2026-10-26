@@ -215,3 +215,18 @@ test('bounciness scales collision restitution between colliding bodies', () => {
   });
   assert.ok(bounceResults[0] < bounceResults[1] && bounceResults[1] < bounceResults[2]);
 });
+
+test('step invokes onCollide callback reporting colliding bodies and impact speed', () => {
+  const b = P.kickoff();
+  Object.assign(b[0], { x: 400, y: 300, vx: 500, vy: 0 });
+  Object.assign(b[6], { x: 435, y: 300, vx: 0, vy: 0 });
+  let reported = null;
+  P.step(b, 0, (bodyA, bodyB, speed, impulse) => {
+    reported = { bodyA, bodyB, speed, impulse };
+  });
+  assert.ok(reported !== null);
+  assert.equal(reported.bodyA, b[0]);
+  assert.equal(reported.bodyB, b[6]);
+  assert.ok(Math.abs(reported.speed - 500) < 1e-6);
+  assert.ok(reported.impulse > 0);
+});
