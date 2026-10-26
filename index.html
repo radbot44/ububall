@@ -10,12 +10,13 @@
   <script src="ubu-file.js" defer></script>
   <script src="ubu-render.js" defer></script>
   <script src="rarity.js" defer></script>
+  <script src="ubu-audio.js" defer></script>
   <script src="pack-scene.js" defer></script>
   <script src="site.js" defer></script>
 </head>
 <body>
   <main>
-    <header><a class="brand" href="/" aria-label="uburoom mint"><img src="uburoom-wordmark-brand.svg" alt="uburoom"><span>mint</span></a><nav aria-label="Main"><label class="button quiet">Open .ubu<input id="import" type="file" accept=".ubu,application/json"></label><a class="quiet" href="/ububall.html">Ububall</a><a class="quiet" href="/demo.html">Designer</a><a class="primary" id="login" href="/auth/discord" hidden>Sign in with Discord</a><button id="logout" hidden>Sign out</button></nav></header>
+    <header><a class="brand" href="/" aria-label="uburoom mint"><img src="uburoom-wordmark-brand.svg" alt="uburoom"><span>mint</span></a><nav aria-label="Main"><label class="button quiet">Open .ubu<input id="import" type="file" accept=".ubu,application/json"></label><a class="quiet" href="/ububall.html">Ububall</a><a class="quiet" href="/demo.html">Designer</a><a class="quiet" href="/voice.html">Voice Demo</a><a class="primary" id="login" href="/auth/discord" hidden>Sign in with Discord</a><button id="logout" hidden>Sign out</button></nav></header>
     <section class="pack-shop" aria-labelledby="pack-title">
       <h1 id="pack-title">Packs</h1>
       <p class="pack-intro">Choose what catches your eye. Each pack holds five ubus.</p>
@@ -66,6 +67,19 @@
       <h2 id="ubunym"></h2>
       <p id="details"></p>
       <p id="authenticity"></p>
+      <div id="viewer-voice" class="viewer-voice">
+        <div class="viewer-voice-bar">
+          <button id="viewer-voice-tone" class="voice-play-btn" type="button" title="Play signature voice tone">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            <span>Voice</span>
+          </button>
+          <button id="viewer-voice-fanfare" class="voice-play-btn" type="button" title="Play goal fanfare">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            <span>Fanfare</span>
+          </button>
+        </div>
+        <div id="viewer-voice-info" class="viewer-voice-info"></div>
+      </div>
       <a id="download" class="secondary" download="ubu.ubu">Download .ubu</a>
     </div>
   </dialog>

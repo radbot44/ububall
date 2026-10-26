@@ -86,6 +86,13 @@
 [data-grade="S"], [data-grade="S+"] { --grade-color: #ff9954; }
 [data-grade="S+"] { -webkit-text-stroke: .6px #ff7197; paint-order: stroke fill; }
 [data-grade="UBU"] { -webkit-text-stroke: .6px #ff9954; paint-order: stroke fill; }
+    .voice-demo-panel { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; }
+    .voice-demo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .fanfare-notes-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .fanfare-note-chip { padding: 4px 10px; border-radius: 6px; background: #202225; border: 1px solid var(--border); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); cursor: pointer; transition: all .1s ease; }
+    .fanfare-note-chip:hover { border-color: #777; color: var(--text); }
+    .fanfare-note-chip.is-rest { opacity: .45; font-style: italic; }
+    .fanfare-note-chip.is-playing-note { background: #ff7197; color: #121315; font-weight: 700; border-color: #fff; transform: scale(1.1); box-shadow: 0 0 8px rgba(255, 113, 151, 0.6); }
   </style>
 </head>
 <body>
@@ -126,6 +133,18 @@
       <p class="detail-text" id="geometry"></p>
       <p class="detail-text" id="rarity-breakdown"></p>
     </details>
+    <details id="voice-details" open>
+      <summary>Voice & Goal Fanfare</summary>
+      <div class="voice-demo-panel">
+        <div class="voice-demo-actions">
+          <button id="voice-play-tone" type="button">Play Voice Tone</button>
+          <button id="voice-play-fanfare" type="button">Play Goal Fanfare</button>
+          <button id="voice-stop" type="button">Stop</button>
+        </div>
+        <p class="detail-text" id="voice-summary"></p>
+        <div id="fanfare-strip" class="fanfare-notes-strip"></div>
+      </div>
+    </details>
     <details id="sample-details">
       <summary>Schema samples</summary>
       <p class="detail-text">Fixed DNA examples for checking textures and extreme geometry. Select one to inspect or export it.</p>
@@ -145,6 +164,7 @@
   <script src="ubu-file.js"></script>
   <script src="ubu-render.js"></script>
   <script src="rarity.js"></script>
+  <script src="ubu-audio.js"></script>
   <script src="demo.js"></script>
 </body>
 </html>

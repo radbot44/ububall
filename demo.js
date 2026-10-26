@@ -107,6 +107,30 @@
     const f = value => Number(value.toFixed(3));
     $('geometry').textContent = `Mouth: ${f(m.mouth.width)} × ${f(m.mouth.height)}; offset ${f(m.mouth.x - 179.995)}, ${f(m.mouth.y - 254.0531)}. Corners TL/TR/BL/BR: ${m.mouth.corners.map((c, i) => c ? m.mouth.curved[i] ? 'curved' : 'straight' : 'square').join(' / ')} (${m.mouth.source}). Eyes: offset ${f(m.eyes.dx)}, ${f(m.eyes.dy)}; left X flip ${m.eyes.flipX ? 'yes' : 'no'}, Y flip ${m.eyes.flipY ? 'yes' : 'no'}.`;
     $('geometry').textContent += ` Lip notch: ${m.mouth.lipNotch ? m.mouth.notchCurved ? 'curved' : 'straight' : 'none'}; horizontal cut: ${m.mouth.horizontalCut}; opening width: ${f(m.mouth.openingRatio * 100)}%. Eyelids TL/TR/BL/BR: ${m.eyelids.active.join(' / ')}; angle/depth flips: ${m.eyelids.angleFlip} / ${m.eyelids.depthFlip}.`;
+    if (window.ubuAudio && m.voice) {
+      window.ubuAudio.stop();
+      const p = window.ubuAudio.parseVoiceInfo(m.voice);
+      $('voice-summary').textContent = `Instrument: ${p.instrument} (#${p.instrumentIndex}) · Root Pitch: ${p.rootName} (${Math.round(p.rootFreq)} Hz, pitch code ${p.pitchIndex}) · Decay: ${p.decaySeconds.toFixed(2)}s · Timbre Mod: ${p.timbreMod} · Scale: ${p.scale} · Tempo: ${p.tempoBpm} BPM · Groove: ${p.groove}`;
+      const chips = p.notes.map((note, i) => {
+        const chip = node('button', {
+          type: 'button',
+          class: 'fanfare-note-chip' + (note.isRest ? ' is-rest' : ''),
+          title: note.isRest ? `Note ${i + 1}: Rest` : `Note ${i + 1}: ${note.name} (${note.beats} beats) - click to audition`
+        }, note.isRest ? '—' : note.name);
+        chip.addEventListener('click', () => {
+          if (!note.isRest && note.freq) {
+            window.ubuAudio.playVoice({
+              instrument: p.instrumentIndex,
+              pitch: note.midi - 36,
+              decay: m.voice.decay,
+              timbreMod: p.timbreMod
+            });
+          }
+        });
+        return chip;
+      });
+      $('fanfare-strip').replaceChildren(...chips);
+    }
     history.splice(0, history.length, code, ...history.filter(value => value !== code).slice(0, LIMIT - 1));
     if (push && nav[navIndex] !== code) {
       nav = nav.slice(0, navIndex + 1); nav.push(code);
@@ -131,6 +155,24 @@
   $('favorite-toggle').addEventListener('click', () => toggle(current));
   $('back-button').addEventListener('click', () => { generation++; show(nav[--navIndex], false); });
   $('forward-button').addEventListener('click', () => { generation++; show(nav[++navIndex], false); });
+  $('voice-play-tone')?.addEventListener('click', () => {
+    if (!current) return;
+    const m = model(current);
+    if (m?.voice && window.ubuAudio) window.ubuAudio.playVoice(m.voice);
+  });
+  $('voice-play-fanfare')?.addEventListener('click', () => {
+    if (!current) return;
+    const m = model(current);
+    if (!m?.voice || !window.ubuAudio) return;
+    const chips = Array.from($('fanfare-strip').children);
+    window.ubuAudio.playFanfare(m.voice, null, (idx) => {
+      chips.forEach((c, i) => c.classList.toggle('is-playing-note', i === idx));
+    });
+  });
+  $('voice-stop')?.addEventListener('click', () => {
+    window.ubuAudio?.stop();
+    Array.from($('fanfare-strip').children).forEach(c => c.classList.remove('is-playing-note'));
+  });
   for (const id of ['storage', 'history']) $(id + '-tab').addEventListener('click', () => {
     for (const candidate of ['storage', 'history']) {
       $(candidate + '-panel').hidden = candidate !== id;

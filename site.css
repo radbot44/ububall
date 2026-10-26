@@ -206,6 +206,110 @@ body:has(.viewer[open]) { overflow: hidden; }
 .oomark { display: block; width: 260px; height: 260px; touch-action: none; }
 #ubunym { margin: 16px 0 8px; overflow-wrap: anywhere; }
 #details, #authenticity { font-size: 12px; color: var(--muted); margin: 4px 0; }
+
+.viewer-voice {
+  width: 100%;
+  max-width: 420px;
+  margin: 14px 0 16px;
+  padding: 12px 14px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.viewer-voice-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.voice-play-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: all .15s ease;
+}
+.voice-play-btn:hover {
+  background: var(--hover);
+  border-color: var(--muted);
+}
+.voice-play-btn:active, .voice-play-btn.is-active {
+  background: color-mix(in srgb, var(--primary) 18%, var(--card));
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.voice-play-btn svg {
+  flex-shrink: 0;
+}
+.viewer-voice-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+.voice-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.voice-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: #141618;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.voice-tag strong {
+  color: var(--text);
+  font-weight: 500;
+}
+.fanfare-notes-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.fanfare-note-chip {
+  padding: 3px 6px;
+  min-width: 28px;
+  text-align: center;
+  border-radius: 5px;
+  background: #141618;
+  border: 1px solid #2d3036;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  transition: all .1s ease;
+}
+.fanfare-note-chip.is-rest {
+  opacity: .45;
+  font-style: italic;
+}
+.fanfare-note-chip.is-playing-note {
+  background: var(--primary);
+  color: #121315;
+  font-weight: 700;
+  border-color: #fff;
+  transform: scale(1.12);
+  box-shadow: 0 0 10px rgba(255, 113, 151, 0.6);
+}
 .actions { justify-content: center; margin-top: 16px; }
 .button { position: relative; }
 input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }

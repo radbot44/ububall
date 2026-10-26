@@ -253,6 +253,8 @@
     $('details').replaceChildren('Ubuquity ', grade, rarityText + (serial ? ` · #${serial}` : ''));
     $('authenticity').textContent = result.type === 'signed' ? 'Verified mint certificate' : 'Custom · unsigned';
     $('download').hidden = false;
+    window.ubuAudio?.stop();
+    renderViewerVoice(model.voice);
 
     if (serial && collectionMap.has(serial)) {
       $('viewer-fav').hidden = false;
@@ -306,6 +308,82 @@
   });
   $('viewer-fav').addEventListener('click', () => {
     if (current?.serial) void toggleFavorite(current.serial);
+  });
+
+  let viewerNoteChips = [];
+
+  function renderViewerVoice(voice) {
+    const infoEl = $('viewer-voice-info');
+    if (!infoEl) return;
+    infoEl.replaceChildren();
+    viewerNoteChips = [];
+    if (!voice || !window.ubuAudio) return;
+
+    const parsed = window.ubuAudio.parseVoiceInfo(voice);
+    const tags = document.createElement('div');
+    tags.className = 'voice-tags';
+
+    const makeTag = (label, value) => {
+      const tag = document.createElement('span');
+      tag.className = 'voice-tag';
+      const lbl = document.createElement('span');
+      lbl.textContent = label + ':';
+      const val = document.createElement('strong');
+      val.textContent = value;
+      tag.append(lbl, val);
+      return tag;
+    };
+
+    tags.append(
+      makeTag('Voice', parsed.instrument),
+      makeTag('Pitch', `${parsed.rootName} (${Math.round(parsed.rootFreq)} Hz)`),
+      makeTag('Scale', parsed.scale),
+      makeTag('Tempo', `${parsed.tempoBpm} BPM`),
+      makeTag('Groove', parsed.groove)
+    );
+
+    const fanfareRow = document.createElement('div');
+    fanfareRow.className = 'fanfare-notes-strip';
+
+    parsed.notes.forEach((note, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'fanfare-note-chip' + (note.isRest ? ' is-rest' : '');
+      chip.textContent = note.isRest ? '—' : note.name;
+      chip.title = note.isRest ? `Note ${i + 1}: Rest` : `Note ${i + 1}: ${note.name} (Degree ${note.degree + 1})`;
+      fanfareRow.append(chip);
+      viewerNoteChips.push(chip);
+    });
+
+    infoEl.append(tags, fanfareRow);
+  }
+
+  $('viewer-voice-tone')?.addEventListener('click', () => {
+    if (!current?.model?.voice || !window.ubuAudio) return;
+    const btn = $('viewer-voice-tone');
+    btn.classList.add('is-active');
+    window.ubuAudio.playVoice(current.model.voice);
+    setTimeout(() => btn.classList.remove('is-active'), 400);
+  });
+
+  $('viewer-voice-fanfare')?.addEventListener('click', () => {
+    if (!current?.model?.voice || !window.ubuAudio) return;
+    const btn = $('viewer-voice-fanfare');
+    btn.classList.add('is-active');
+    window.ubuAudio.playFanfare(current.model.voice, null, (index, note) => {
+      viewerNoteChips.forEach((chip, i) => {
+        chip.classList.toggle('is-playing-note', i === index);
+      });
+      if (index === -1) {
+        btn.classList.remove('is-active');
+      }
+    });
+  });
+
+  $('viewer')?.addEventListener('close', () => {
+    window.ubuAudio?.stop();
+    viewerNoteChips.forEach(chip => chip.classList.remove('is-playing-note'));
+    $('viewer-voice-tone')?.classList.remove('is-active');
+    $('viewer-voice-fanfare')?.classList.remove('is-active');
   });
 
   async function api(path, options) {

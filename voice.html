@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Ubu Voice & Goal Fanfare Lab</title>
+  <style>
+    :root { color-scheme: dark; --bg: #101112; --panel: #18191b; --card: #202225; --text: #eeeeef; --muted: #989a9f; --border: #333539; --primary: #ff7197; --accent: #ff9954; --blue: #477ae7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 Arial, Helvetica, sans-serif; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap; }
+    .brand { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; color: inherit; font-size: 16px; font-weight: 700; }
+    .brand img { height: 20px; width: auto; }
+    .brand span { font-size: 12px; color: var(--primary); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+    nav { display: flex; align-items: center; gap: 14px; }
+    nav a { color: var(--muted); text-decoration: none; font-size: 13px; }
+    nav a:hover, nav a.active { color: var(--text); }
+    main { width: min(1000px, calc(100% - 32px)); margin: 28px auto 64px; display: flex; flex-direction: column; gap: 24px; }
+    h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -.02em; }
+    h2 { font-size: 16px; margin: 0 0 14px; color: var(--text); font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+    .subtitle { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; background: var(--card); color: var(--text); transition: all .15s ease; touch-action: manipulation; }
+    button:hover { background: #2f3237; border-color: #555860; }
+    button.primary { background: var(--primary); color: #121315; font-weight: 600; border-color: var(--primary); }
+    button.primary:hover { background: #ff85a6; }
+    button.is-active { background: var(--accent); color: #121315; font-weight: 600; border-color: #fff; transform: scale(1.02); }
+    .hero-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; background: linear-gradient(135deg, #232029, #1a1e26); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+    .hero-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .hero-info { display: flex; flex-direction: column; gap: 4px; }
+    .hero-title { font-size: 18px; font-weight: 700; color: #fff; }
+    .hero-stats { font-size: 12px; color: var(--muted); }
+    .grid-16 { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+    .inst-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px 14px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); text-align: left; cursor: pointer; }
+    .inst-card:hover { border-color: var(--muted); background: #292c31; }
+    .inst-card.selected { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--card)); }
+    .inst-name { font-weight: 600; font-size: 13px; color: #fff; }
+    .inst-desc { font-size: 11px; color: var(--muted); }
+    .synth-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+    .field label span.val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+    input[type=range] { width: 100%; accent-color: var(--primary); }
+    select { background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+    .sequencer-strip { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; margin-top: 14px; overflow-x: auto; }
+    .seq-step { display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; text-align: center; }
+    .seq-step.playing { border-color: #fff; background: var(--primary); color: #121315; transform: scale(1.04); box-shadow: 0 0 12px rgba(255, 113, 151, 0.7); }
+    .seq-step.playing * { color: #121315 !important; }
+    .seq-num { font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+    .seq-pitch { font-size: 14px; font-weight: 700; height: 22px; display: flex; align-items: center; justify-content: center; }
+    .dna-code-box { font: 12px/1.6 Consolas, monospace; background: #0c0d0e; padding: 12px; border-radius: 8px; border: 1px solid var(--border); color: #6ee7b7; word-break: break-all; }
+    @media (max-width: 700px) {
+      .sequencer-strip { grid-template-columns: repeat(4, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="/" aria-label="uburoom mint"><img src="uburoom-wordmark-brand.svg" alt="uburoom"><span>Voice Lab</span></a>
+    <nav>
+      <a href="/">Packs</a>
+      <a href="/ububall.html">Ububall</a>
+      <a href="/demo.html">Designer</a>
+      <a href="/voice.html" class="active">Voice Lab</a>
+    </nav>
+  </header>
+  <main>
+    <div>
+      <h1>Ubu Voice & Goal Fanfare Lab</h1>
+      <p class="subtitle">Audition and tweak procedural synthesizer voices (bits 534–549) and 8-note goal fanfares (bits 550–597) in real time.</p>
+    </div>
+
+    <section class="hero-bar">
+      <div class="hero-info">
+        <div id="hero-title" class="hero-title">Crystal Chime · C4 Major Pentatonic</div>
+        <div id="hero-stats" class="hero-stats">120 BPM · Light Swing · Decay 0.48s · Timbre Clean</div>
+      </div>
+      <div class="hero-controls">
+        <button id="btn-hero-tone" class="primary" type="button">▶ Play Voice Tone</button>
+        <button id="btn-hero-fanfare" class="primary" type="button" style="background:var(--accent);border-color:var(--accent)">▶ Play Goal Fanfare</button>
+        <button id="btn-hero-stop" type="button">Stop</button>
+        <button id="btn-randomize" type="button">Random Voice</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>16 Synthesizer Sound Profiles <span>Bits 534–537 (4 bits)</span></h2>
+      <div id="inst-grid" class="grid-16"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Synthesizer Voice Parameters <span>Bits 538–549 (12 bits)</span></h2>
+      <div class="synth-grid">
+        <div class="field">
+          <label for="slider-pitch">Root Pitch (6 bits: 0–63) <span id="val-pitch" class="val">C4 (60 · 261.6 Hz)</span></label>
+          <input id="slider-pitch" type="range" min="0" max="63" value="24">
+        </div>
+        <div class="field">
+          <label for="slider-decay">Decay Envelope (4 bits: 0–15) <span id="val-decay" class="val">0.48s</span></label>
+          <input id="slider-decay" type="range" min="0" max="15" value="6">
+        </div>
+        <div class="field">
+          <label for="select-timbre">Timbre Modulation (2 bits: 0–3) <span id="val-timbre" class="val">Pure</span></label>
+          <select id="select-timbre">
+            <option value="0">0: Pure / Clean</option>
+            <option value="1">1: Warm Chorus (+7¢ detune)</option>
+            <option value="2">2: Resonant Bite (+4dB filter Q)</option>
+            <option value="3">3: Octave Shimmer</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>8-Note Goal Fanfare Composer <span>Bits 550–597 (48 bits)</span></h2>
+      <div class="synth-grid" style="margin-bottom: 16px;">
+        <div class="field">
+          <label for="select-scale">Scale / Mode (3 bits) <span id="val-scale" class="val">Major Pentatonic</span></label>
+          <select id="select-scale"></select>
+        </div>
+        <div class="field">
+          <label for="select-tempo">Tempo (3 bits) <span id="val-tempo" class="val">120 BPM</span></label>
+          <select id="select-tempo"></select>
+        </div>
+        <div class="field">
+          <label for="select-groove">Groove / Swing (2 bits) <span id="val-groove" class="val">Light Swing</span></label>
+          <select id="select-groove">
+            <option value="0">0: Straight (Quantized)</option>
+            <option value="1" selected>1: Light Swing (+12% delay on offbeats)</option>
+            <option value="2">2: Shuffle (+22% delay on offbeats)</option>
+            <option value="3">3: Staccato Accent (55% gate)</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">8-Note Sequence (8 notes × 5 bits = 40 bits). Click any step to test its note:</div>
+      <div id="sequencer" class="sequencer-strip"></div>
+    </section>
+
+    <section class="panel">
+      <h2>DNA Binary Representation (64 bits)</h2>
+      <div id="dna-hex" class="dna-code-box"></div>
+    </section>
+  </main>
+
+  <script src="ubu.js"></script>
+  <script src="ubu-audio.js"></script>
+  <script>
+    'use strict';
+    (() => {
+      const $ = id => document.getElementById(id);
+      const audio = window.ubuAudio;
+
+      // Active state model
+      let state = {
+        instrument: 3, // Crystal Chime
+        pitch: 24,     // C4
+        decay: 6,      // ~0.48s
+        timbreMod: 0,
+        scale: 2,      // Major Pentatonic
+        tempo: 3,      // 120 BPM
+        groove: 1,     // Light Swing
+        notes: [
+          { degree: 0, duration: 1 },
+          { degree: 2, duration: 1 },
+          { degree: 4, duration: 1 },
+          { degree: 7, duration: 2 },
+          { degree: 0, duration: 3 }, // Rest
+          { degree: 5, duration: 0 },
+          { degree: 6, duration: 0 },
+          { degree: 7, duration: 2 }
+        ]
+      };
+
+      const DESCRIPTIONS = [
+        'Warm sine fundamental with gentle octave chime',
+        'Snappy percussive wooden click with rapid drop',
+        'Metallic FM ring with crisp bright overtone',
+        'Dual crystalline sine waves with subtle shimmer',
+        'Classic 8-bit NES square wave with vibrato',
+        'Sawtooth through sweeping resonant lowpass filter',
+        'Soft swell sine with warm fifth harmonic',
+        'Deep rounded punch with punchy transient click',
+        'Acoustic thumb piano with rapid overtone ping',
+        'Hollow resonant wooden mallet bar pop',
+        'Lush sine with warm 5.5 Hz tremolo wobble',
+        'Sawtooth with lowpass filter envelope swell',
+        'Rhodes-style bell ping with warm tine sustain',
+        'Punchy dual-oscillator bass with snappy resonance',
+        'Gentle breathy sine/triangle acoustic tone',
+        'Retro arcade downward laser zap drop'
+      ];
+
+      // Build instrument cards
+      const instGrid = $('inst-grid');
+      audio.INSTRUMENTS.forEach((name, i) => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'inst-card' + (i === state.instrument ? ' selected' : '');
+        const title = document.createElement('span');
+        title.className = 'inst-name';
+        title.textContent = `${i}: ${name}`;
+        const desc = document.createElement('span');
+        desc.className = 'inst-desc';
+        desc.textContent = DESCRIPTIONS[i];
+        card.append(title, desc);
+        card.addEventListener('click', () => {
+          state.instrument = i;
+          updateUI();
+          audio.playVoice(state);
+        });
+        instGrid.append(card);
+      });
+
+      // Populate scales and tempos
+      const scaleSelect = $('select-scale');
+      audio.SCALES.forEach((s, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = `${i}: ${s.name} (${s.degrees.join(', ')})`;
+        scaleSelect.append(opt);
+      });
+      scaleSelect.value = state.scale;
+      scaleSelect.addEventListener('change', () => {
+        state.scale = Number(scaleSelect.value);
+        updateUI();
+      });
+
+      const tempoSelect = $('select-tempo');
+      audio.TEMPOS.forEach((bpm, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = `${i}: ${bpm} BPM`;
+        tempoSelect.append(opt);
+      });
+      tempoSelect.value = state.tempo;
+      tempoSelect.addEventListener('change', () => {
+        state.tempo = Number(tempoSelect.value);
+        updateUI();
+      });
+
+      // Inputs
+      $('slider-pitch').addEventListener('input', e => {
+        state.pitch = Number(e.target.value);
+        updateUI();
+        audio.playVoice(state);
+      });
+
+      $('slider-decay').addEventListener('input', e => {
+        state.decay = Number(e.target.value);
+        updateUI();
+      });
+
+      $('select-timbre').addEventListener('change', e => {
+        state.timbreMod = Number(e.target.value);
+        updateUI();
+      });
+
+      $('select-groove').addEventListener('change', e => {
+        state.groove = Number(e.target.value);
+        updateUI();
+      });
+
+      // Sequencer steps
+      function renderSequencer() {
+        const seq = $('sequencer');
+        seq.replaceChildren();
+        const parsed = audio.parseVoiceInfo(state);
+
+        parsed.notes.forEach((note, i) => {
+          const step = document.createElement('div');
+          step.className = 'seq-step';
+          step.id = `seq-step-${i}`;
+
+          const num = document.createElement('span');
+          num.className = 'seq-num';
+          num.textContent = `Note ${i + 1}`;
+
+          const pitch = document.createElement('span');
+          pitch.className = 'seq-pitch';
+          pitch.textContent = note.isRest ? '—' : note.name;
+
+          // Degree select
+          const degSel = document.createElement('select');
+          for (let d = 0; d < 8; d++) {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = `Deg ${d + 1}`;
+            degSel.append(opt);
+          }
+          degSel.value = note.degree;
+          degSel.disabled = note.isRest;
+          degSel.addEventListener('change', () => {
+            state.notes[i].degree = Number(degSel.value);
+            updateUI();
+            const p = audio.parseVoiceInfo(state);
+            audio.playVoice({ instrument: state.instrument, pitch: p.notes[i].midi - 36, decay: state.decay, timbreMod: state.timbreMod });
+          });
+
+          // Duration select
+          const durSel = document.createElement('select');
+          const durNames = ['16th', '8th', 'Quarter', 'Rest'];
+          durNames.forEach((name, d) => {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = name;
+            durSel.append(opt);
+          });
+          durSel.value = note.duration;
+          durSel.addEventListener('change', () => {
+            state.notes[i].duration = Number(durSel.value);
+            updateUI();
+          });
+
+          step.append(num, pitch, degSel, durSel);
+          step.addEventListener('click', e => {
+            if (e.target.tagName === 'SELECT') return;
+            const p = audio.parseVoiceInfo(state);
+            if (!p.notes[i].isRest && p.notes[i].freq) {
+              audio.playVoice({ instrument: state.instrument, pitch: p.notes[i].midi - 36, decay: state.decay, timbreMod: state.timbreMod });
+            }
+          });
+          seq.append(step);
+        });
+      }
+
+      function updateUI() {
+        const parsed = audio.parseVoiceInfo(state);
+
+        // Highlight selected instrument card
+        Array.from(instGrid.children).forEach((c, idx) => {
+          c.classList.toggle('selected', idx === state.instrument);
+        });
+
+        // Update readouts
+        $('slider-pitch').value = state.pitch;
+        $('val-pitch').textContent = `${parsed.rootName} (${parsed.rootMidi} · ${Math.round(parsed.rootFreq)} Hz)`;
+
+        $('slider-decay').value = state.decay;
+        $('val-decay').textContent = `${parsed.decaySeconds.toFixed(2)}s`;
+
+        $('select-timbre').value = state.timbreMod;
+        $('select-scale').value = state.scale;
+        $('select-tempo').value = state.tempo;
+        $('select-groove').value = state.groove;
+
+        $('hero-title').textContent = `${parsed.instrument} · ${parsed.rootName} ${parsed.scale}`;
+        $('hero-stats').textContent = `${parsed.tempoBpm} BPM · ${parsed.groove} · Decay ${parsed.decaySeconds.toFixed(2)}s · Timbre ${$('select-timbre').options[state.timbreMod].text}`;
+
+        renderSequencer();
+
+        // Compute 64-bit DNA binary
+        let bits = '';
+        const pushBits = (val, len) => { bits += (val >>> 0).toString(2).padStart(len, '0'); };
+        pushBits(state.instrument, 4);
+        pushBits(state.pitch, 6);
+        pushBits(state.decay, 4);
+        pushBits(state.timbreMod, 2);
+        pushBits(state.scale, 3);
+        pushBits(state.tempo, 3);
+        state.notes.forEach(n => {
+          pushBits((n.degree << 2) | n.duration, 5);
+        });
+        pushBits(state.groove, 2);
+
+        let hex = '';
+        for (let i = 0; i < 64; i += 8) {
+          hex += parseInt(bits.slice(i, i + 8), 2).toString(16).padStart(2, '0');
+        }
+        $('dna-hex').textContent = `Bits 534–597 (64 bits): ${bits.match(/.{1,8}/g).join(' ')}\nHex (8 bytes): ${hex.toUpperCase()}`;
+      }
+
+      // Buttons
+      $('btn-hero-tone').addEventListener('click', () => {
+        audio.playVoice(state);
+      });
+
+      $('btn-hero-fanfare').addEventListener('click', () => {
+        const btn = $('btn-hero-fanfare');
+        btn.classList.add('is-active');
+        audio.playFanfare(state, null, (idx) => {
+          for (let i = 0; i < 8; i++) {
+            $(`seq-step-${i}`)?.classList.toggle('playing', i === idx);
+          }
+          if (idx === -1) btn.classList.remove('is-active');
+        });
+      });
+
+      $('btn-hero-stop').addEventListener('click', () => {
+        audio.stop();
+        for (let i = 0; i < 8; i++) $(`seq-step-${i}`)?.classList.remove('playing');
+        $('btn-hero-fanfare').classList.remove('is-active');
+      });
+
+      $('btn-randomize').addEventListener('click', () => {
+        state = {
+          instrument: Math.floor(Math.random() * 16),
+          pitch: Math.floor(Math.random() * 64),
+          decay: Math.floor(Math.random() * 16),
+          timbreMod: Math.floor(Math.random() * 4),
+          scale: Math.floor(Math.random() * 8),
+          tempo: Math.floor(Math.random() * 8),
+          groove: Math.floor(Math.random() * 4),
+          notes: Array.from({ length: 8 }, () => ({
+            degree: Math.floor(Math.random() * 8),
+            duration: Math.floor(Math.random() * 4)
+          }))
+        };
+        updateUI();
+        audio.playFanfare(state, null, (idx) => {
+          for (let i = 0; i < 8; i++) $(`seq-step-${i}`)?.classList.toggle('playing', i === idx);
+          if (idx === -1) $('btn-hero-fanfare').classList.remove('is-active');
+        });
+      });
+
+      updateUI();
+    })();
+  </script>
+</body>
+</html>
