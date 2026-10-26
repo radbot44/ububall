@@ -19,7 +19,77 @@
   let stats = practice.map(p => ({ ...(p.model.stats || normalStats()) }));
   let lastPlans = null, teamEntries = [...roster, ...practice.slice(3)];
   let lastTouchByTeam = { 0: null, 1: null }, scoringPlayer = null;
+  const trails = Array.from({ length: 7 }, () => []), particles = [], fireworks = [];
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  function clearEffects() {
+    trails.forEach(trail => { trail.length = 0; });
+    particles.length = fireworks.length = 0;
+  }
+  function burst(x, y, team, strength, celebration = false) {
+    if (reducedMotion.matches) return;
+    const count = celebration ? 64 : Math.round(6 + strength * 10);
+    for (let i = 0; i < count && particles.length < 400; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = celebration ? 60 + Math.random() * 190 : 25 + Math.random() * (50 + strength * 100);
+      const life = celebration ? .8 + Math.random() * .8 : .18 + Math.random() * .25;
+      particles.push({ x, y, px: x, py: y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+        team: i % 5 === 0 ? -1 : team, life, duration: life, celebration });
+    }
+  }
+  function updateEffects(dt) {
+    if (reducedMotion.matches) { clearEffects(); return; }
+    for (const trail of trails) {
+      for (const point of trail) point.life -= dt;
+      while (trail.length && trail[0].life <= 0) trail.shift();
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i]; p.life -= dt;
+      if (p.life <= 0) { particles.splice(i, 1); continue; }
+      p.px = p.x; p.py = p.y;
+      const drag = Math.exp(-dt * (p.celebration ? 1.2 : 4));
+      p.vx *= drag; p.vy = p.vy * drag + (p.celebration ? 95 : 30) * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+    }
+    for (let i = fireworks.length - 1; i >= 0; i--) {
+      const f = fireworks[i]; f.delay -= dt;
+      if (f.delay <= 0) { burst(f.x, f.y, f.team, 1, true); fireworks.splice(i, 1); }
+    }
+  }
+  function recordTrails() {
+    if (reducedMotion.matches) return;
+    bodies.forEach((b, i) => {
+      if (Math.hypot(b.vx, b.vy) < 25) return;
+      const trail = trails[i], previous = trail[trail.length - 1];
+      if (!previous || Math.hypot(b.x - previous.x, b.y - previous.y) >= 3) {
+        trail.push({ x: b.x, y: b.y, life: .24 });
+        if (trail.length > 40) trail.shift();
+      }
+    });
+  }
+  function drawTrails(primary, secondary) {
+    ctx.save(); ctx.lineCap = 'round';
+    trails.forEach((trail, index) => {
+      const b = bodies[index], color = b.team === -1 ? '#ffffff' : b.team === 0 ? primary : secondary;
+      for (let i = 0; i < trail.length; i++) {
+        const p = trail[i], end = trail[i + 1] || b, fade = Math.max(0, p.life / .24);
+        ctx.globalAlpha = fade * .35;
+        line(p.x, p.y, end.x, end.y, color, b.radius * .9 * fade);
+      }
+    });
+    ctx.restore();
+  }
+  function drawParticles(primary, secondary) {
+    ctx.save(); ctx.lineCap = 'round';
+    for (const p of particles) {
+      const color = p.team === -1 ? '#ffffff' : p.team === 0 ? primary : secondary;
+      ctx.globalAlpha = Math.min(1, p.life / p.duration * 2);
+      line(p.px, p.py, p.x, p.y, color, p.celebration ? 2.5 : 2);
+      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(p.x, p.y, p.celebration ? 1.8 : 1.2, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
   function kickoff() {
+    clearEffects();
     lastTouchByTeam = { 0: null, 1: null }; scoringPlayer = null;
     const result = P.kickoff();
     result.slice(0, 6).forEach((b, i) => {
@@ -252,6 +322,7 @@
       line(x, 370, x + depth, 370, accent, 4);
       line(x === 60 - depth ? x : x + depth, 230, x === 60 - depth ? x : x + depth, 370, accent, 4);
     }
+    drawTrails(primary, secondary);
     bodies.slice(0, 6).forEach((b, i) => {
       const reachR = Math.max(b.radius, b.reach || b.radius, 18);
       circle(b.x, b.y, reachR + 2, i < 3 ? primary : secondary, 4);
@@ -330,11 +401,20 @@
       const size = ball.radius * 1.7;
       ctx.drawImage(ballMark, -size / 2, -size / 2, size, size); ctx.restore();
     }
+    drawParticles(primary, secondary);
   }
   function finishTurn(goal) {
     P.stop(bodies); accumulator = 0;
     if (goal !== null) {
       scores[goal]++; phase = scores[goal] >= 5 ? 'over' : 'goal';
+      const ball = bodies[6];
+      burst(ball.x, ball.y, goal, 1, true);
+      if (!reducedMotion.matches) {
+        for (let i = 0; i < 4; i++) fireworks.push({
+          x: goal === 0 ? 740 + Math.random() * 110 : 150 + Math.random() * 110,
+          y: 160 + Math.random() * 260, team: goal, delay: .18 + i * .22
+        });
+      }
       const scorer = lastTouchByTeam[goal] || bodies.slice(goal * 3, goal * 3 + 3)[0];
       scoringPlayer = scorer;
       const scorerName = scorer?.name || (goal === 0 ? 'Your ubu' : 'CPU ubu');
@@ -447,6 +527,10 @@
   };
   function handleCollision(a, b, speed) {
     if (speed < 15) return;
+    const distance = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const x = a.x + (b.x - a.x) * a.radius / distance, y = a.y + (b.y - a.y) * a.radius / distance;
+    burst(x, y, a.team, Math.min(1, speed / 600));
+    if (a.team !== b.team) burst(x, y, b.team, Math.min(1, speed / 600));
     const isBall = a.team === -1 || b.team === -1;
     const now = performance.now();
     if (isBall) {
@@ -475,11 +559,12 @@
       }
     }
   }
-  function handleWall(body, velocity, wallType) {
+  function handleWall(body, velocity, wallType, nx, ny) {
     if (velocity < 20) return;
     const now = performance.now();
     if (body._lastWallSound && (now - body._lastWallSound) < 60) return;
     body._lastWallSound = now;
+    burst(body.x + nx * body.radius, body.y + ny * body.radius, body.team, Math.min(1, velocity / 500));
     const norm = Math.min(1.0, Math.max(0.0, (velocity - 20) / 480));
     const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
     if (!window.ubuAudio) return;
@@ -493,14 +578,18 @@
   }
   function frame(time) {
     const delta = lastTime ? Math.min((time - lastTime) / 1000, .05) : 0; lastTime = time;
-    if (phase === 'play' && !$('roster-dialog').open && !document.hidden) {
+    const active = !$('roster-dialog').open && !document.hidden;
+    const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length);
+    if (active) updateEffects(delta);
+    if (phase === 'play' && active) {
       accumulator += delta;
       while (accumulator >= P.DT && phase === 'play') {
         const goal = P.step(bodies, P.DT, handleCollision, handleWall); elapsed += P.DT; accumulator -= P.DT;
+        recordTrails();
         if (goal !== null || P.settled(bodies) || elapsed >= 12) finishTurn(goal);
       }
       draw();
-    }
+    } else if (active && hadEffects) draw();
     requestAnimationFrame(frame);
   }
   function rosterSlots() {

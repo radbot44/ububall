@@ -43,7 +43,7 @@
       b.vx += impulse * tx / b.mass; b.vy += impulse * ty / b.mass;
       b.omega += 2 * impulse / (b.mass * b.radius);
       b.omega *= 0.5; // Dampen spin on wall contact so balls don't curve right back into the wall
-      if (typeof onWall === 'function') onWall(b, velocity, wallType);
+      if (typeof onWall === 'function') onWall(b, velocity, wallType, nx, ny);
     }
   }
   function walls(b, onWall = null) {
