@@ -47,12 +47,21 @@ export function origin(env) {
   if (url.origin !== env.ORIGIN || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))) throw new Error('Invalid configured origin.');
   return url.origin;
 }
+function timingSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
+}
+
 export async function session(request, env) {
   const value = await unseal(cookie(request, sessionName), env.SESSION_SECRET, 'session');
   return value && /^[1-9][0-9]{0,19}$/.test(value.owner) && /^[A-Za-z0-9_-]{43}$/.test(value.csrf) ? value : null;
 }
 export function mutationAllowed(request, env, value) {
-  return request.headers.get('Origin') === origin(env) && request.headers.get('X-Ubu-CSRF') === value.csrf;
+  return request.headers.get('Origin') === origin(env) && timingSafeEqual(request.headers.get('X-Ubu-CSRF'), value.csrf);
 }
 export function logoutCookie() { return setCookie(sessionName, '', 0); }
 

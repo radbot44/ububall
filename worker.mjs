@@ -4,7 +4,7 @@ import * as auth from './auth.mjs';
 const { Mint } = mintModule;
 const ID = /^[A-Za-z0-9_-]{21}[AQgw]$/;
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: {
-  'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers
+  'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', ...headers
 } });
 function configuration(env) {
   const keys = JSON.parse(env.MINT_PUBLIC_KEYS || '{}');

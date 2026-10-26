@@ -27,6 +27,8 @@ test('Discord login validates state, exchanges credentials server-side and seals
   const session = await auth.session(request, env);
   assert.equal(session.owner, '123456789012345678');
   assert.equal(auth.mutationAllowed(new Request(env.ORIGIN, { headers: { Origin: env.ORIGIN, 'X-Ubu-CSRF': session.csrf } }), env, session), true);
+  assert.equal(auth.mutationAllowed(new Request(env.ORIGIN, { headers: { Origin: env.ORIGIN, 'X-Ubu-CSRF': session.csrf + 'extra' } }), env, session), false);
+  assert.equal(auth.mutationAllowed(new Request(env.ORIGIN, { headers: { Origin: env.ORIGIN, 'X-Ubu-CSRF': session.csrf.slice(0, -1) + 'X' } }), env, session), false);
   assert.equal(auth.mutationAllowed(new Request(env.ORIGIN, { headers: { Origin: 'https://evil.example', 'X-Ubu-CSRF': session.csrf } }), env, session), false);
   assert.equal(auth.mutationAllowed(new Request(env.ORIGIN), env, session), false);
   const forged = cookie.split(';')[0].replace('=', '=x');

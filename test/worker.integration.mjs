@@ -59,6 +59,8 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(config.lifetimeLimit, 3); assert.equal(config.keys['test-1'], privateKey.x);
     assert.ok(!JSON.stringify(config).includes(privateKey.d));
     assert.equal(response.headers.get('Cache-Control'), 'no-store');
+    assert.equal(response.headers.get('X-Frame-Options'), 'DENY');
+    assert.equal(response.headers.get('Referrer-Policy'), 'no-referrer');
   });
   await t.test('public mint endpoint rejects missing auth, CSRF, forged owner and oversized input', async () => {
     const unauthenticated = await fetch('/api/mint', { method: 'POST' });
