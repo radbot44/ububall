@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark"><title>Ububall · Ubu Mint</title>
+  <link rel="stylesheet" href="site.css"><link rel="stylesheet" href="ububall.css">
+  <script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script>
+  <script src="ububall-physics.js" defer></script><script src="ububall.js" defer></script>
+</head>
+<body><main class="ball-page">
+  <header><a class="brand" href="/"><img src="uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a><nav aria-label="Main"><a class="quiet" href="/">Mint & collection</a><a class="quiet" href="/demo.html">Designer</a></nav></header>
+  <div class="game-heading"><h1>ububall</h1><button id="new-match">New match</button></div>
+  <section class="stadium" aria-label="Ububall match">
+    <div class="scoreboard"><span class="home">You <strong id="home-score">0</strong></span><div><span id="phase">Plan · Turn 1</span><small>First to five</small></div><span class="away"><strong id="away-score">0</strong> CPU</span></div>
+    <div class="rink-wrap"><canvas id="rink" width="1000" height="600" aria-label="Playing field. Use the team buttons and direction and power sliders below to plan your launches."></canvas><div id="skaters" aria-hidden="true"></div></div>
+    <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
+  </section>
+  <section class="planning" aria-label="Launch planning">
+    <div id="team" class="team"></div>
+    <div class="controls"><label>Direction <output id="angle-value">0°</output><input id="angle" type="range" min="0" max="359" value="0"><small>0° right · 90° down · 180° left · 270° up</small></label><label>Power <output id="power-value">0%</output><input id="power" type="range" min="0" max="100" value="0"><small>0% holds position</small></label><label>Shot spin <output id="shot-spin-value">0%</output><input id="shot-spin" type="range" min="-100" max="100" value="0"><small>− counterclockwise · + clockwise</small></label><button id="hold">Hold this ubu</button><button class="primary" id="launch">Launch</button></div>
+    <p class="hint">Select an ubu, then drag from it toward your target. Longer arrows mean more power. You attack the right goal.</p>
+  </section>
+  <details class="rules" id="stat-testing" open>
+    <summary>Stat testing</summary>
+    <p>Temporary values; no DNA changes. Set each stat from 0 to 1023. Normal is 511. Applying values resets the field and score, keeping your planned shot.</p>
+    <label>Ubu <select id="stat-player"><option value="0">Your ubu 1</option><option value="1">Your ubu 2</option><option value="2">Your ubu 3</option><option value="3">CPU ubu 1</option><option value="4">CPU ubu 2</option><option value="5">CPU ubu 3</option></select></label>
+    <div id="stat-inputs" class="stat-inputs"></div>
+    <p id="stat-preview"></p>
+    <div class="actions"><button id="apply-stats">Apply & reset field</button><button id="normal-stats">All stats normal</button><button id="reset-field">Reset field</button><button id="restore-shot" disabled>Reuse last shot at kickoff</button><label><input id="cpu-hold" type="checkbox"> Hold CPU launches for testing</label></div>
+  </details>
+  <details class="rules"><summary>How to play</summary><p>Both teams launch at the same time. The CPU plans from the field positions, without seeing your arrows. All three ubus can strike the ball, block shots, and bump opponents. Only the ball enters the nets. After motion stops, plan again from the new positions. A goal resets the field; first to five wins.</p><p>Stats are temporary test values, separate from DNA. Spin curves travel and affects collisions. Practice ubus are custom characters, not minted collectibles. Matches stay in this browser and award no mint items.</p></details>
+  <dialog id="roster-dialog"><h2>Choose your team</h2><p>Choose a character for each slot. Empty slots use practice ubus.</p><div id="roster-slots"></div><p id="roster-status" role="status"></p><button id="load-collection">Load my collection</button><button id="more-collection" hidden>Load more</button><div id="roster-options"></div><div class="actions"><button id="start-match" class="primary">Start match</button><button id="cancel-roster">Cancel</button></div></dialog>
+</main></body></html>

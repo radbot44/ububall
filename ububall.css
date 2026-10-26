@@ -1,0 +1,61 @@
+.ball-page { max-width: 1040px; }
+.game-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.stadium { background: var(--card); border-radius: 12px; overflow: hidden; }
+.scoreboard { display: flex; align-items: center; justify-content: center; gap: 32px; padding: 16px; }
+.scoreboard > span { display: flex; align-items: center; gap: 12px; font-weight: 500; }
+.scoreboard strong { font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; }
+.home { color: var(--primary); }
+.away { color: var(--secondary); }
+.scoreboard > div { text-align: center; font-size: 14px; }
+.scoreboard small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.rink-wrap { position: relative; aspect-ratio: 5 / 3; }
+#rink { display: block; width: 100%; height: 100%; touch-action: none; }
+#skaters { position: absolute; inset: 0; pointer-events: none; }
+.skater { position: absolute; width: 5%; aspect-ratio: 1; transform: translate(-50%, -50%); }
+.skater svg { width: 100%; height: 100%; display: block; }
+#game-status { margin: 0; padding: 0 16px 16px; color: var(--muted); text-align: center; }
+.planning { padding-top: 16px; }
+.team { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.team button { justify-content: flex-start; gap: 8px; text-align: left; border: 2px solid transparent; }
+.team button[aria-pressed=true] { border-color: var(--primary); }
+.team svg { width: 40px; height: 40px; flex: none; }
+.team span { min-width: 0; overflow-wrap: anywhere; }
+.team small { display: block; color: var(--muted); margin-top: 4px; font-size: 12px; }
+.controls { display: flex; gap: 16px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+.controls label { flex: 1; min-width: 160px; }
+.controls input { display: block; width: 100%; accent-color: var(--primary); margin: 12px 0; }
+.controls output { float: right; font-variant-numeric: tabular-nums; }
+.controls small, .hint { font-size: 12px; color: var(--muted); }
+.hint { margin: 12px 0 0; }
+.rules { padding: 16px 0; color: var(--muted); }
+.rules summary { cursor: pointer; color: var(--text); }
+#roster-dialog { width: min(700px, calc(100% - 24px)); max-height: 85vh; overflow: auto; background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+#roster-dialog::backdrop { background: #0009; }
+#roster-slots { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+#roster-slots button { border: 2px solid transparent; }
+#roster-slots button[aria-pressed=true] { border-color: var(--primary); }
+#roster-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 16px 0; }
+#roster-options button { flex-direction: column; font-size: 12px; gap: 8px; }
+#roster-options svg { width: 64px; height: 64px; }
+@media (max-width: 650px) {
+  .ball-page { width: calc(100% - 24px); }
+  .scoreboard { gap: 16px; }
+  .scoreboard > span { gap: 8px; }
+  .scoreboard strong { font-size: 24px; }
+  .scoreboard > div { font-size: 12px; }
+  .team button { flex-direction: column; align-items: flex-start; }
+  .team svg { width: 32px; height: 32px; }
+  .controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .controls label { min-width: 0; }
+  .controls label:last-of-type { grid-column: 1 / -1; }
+  #game-status { font-size: 12px; }
+  #roster-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.stat-inputs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+.stat-inputs input { display: block; width: 100%; margin: 8px 0; }
+.stat-inputs output { font-size: 12px; }
+#stat-testing input[type=number], #stat-testing select { min-height: 40px; border: 1px solid var(--border); border-radius: 12px; background: var(--elevated); color: var(--text); padding: 8px 12px; font: inherit; }
+#stat-testing input[type=checkbox] { accent-color: var(--primary); }
+@media(max-width:650px) { .stat-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
