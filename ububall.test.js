@@ -140,3 +140,78 @@ test('CPU can complete a first-to-five match against a stationary team', () => {
   }
   assert.equal(score[1], 5);
 });
+
+test('power multiplies impulse transferred to the ball on contact', () => {
+  const vBall = [0, 127, 255].map(power => {
+    const b = P.kickoff();
+    P.applyStats(b[0], { ...normal, power });
+    Object.assign(b[0], { x: 465, y: 300, vx: 500 });
+    P.step(b, 0);
+    return b[6].vx;
+  });
+  assert.ok(vBall[0] < vBall[1] && vBall[1] < vBall[2]);
+});
+test('reach increases ball interaction radius without expanding player-on-player hitbox', () => {
+  const hitLow = (() => {
+    const b = P.kickoff();
+    P.applyStats(b[0], { ...normal, reach: 0 });
+    Object.assign(b[0], { x: 460, y: 300, vx: 500 });
+    P.step(b, 0);
+    return b[6].vx !== 0;
+  })();
+  const hitHigh = (() => {
+    const b = P.kickoff();
+    P.applyStats(b[0], { ...normal, reach: 255 });
+    Object.assign(b[0], { x: 460, y: 300, vx: 500 });
+    P.step(b, 0);
+    return b[6].vx !== 0;
+  })();
+  assert.equal(hitLow, false);
+  assert.equal(hitHigh, true);
+
+  const pLow = (() => {
+    const b = P.kickoff();
+    P.applyStats(b[0], { ...normal, reach: 255 });
+    P.applyStats(b[1], { ...normal, reach: 255 });
+    Object.assign(b[0], { x: 400, y: 300, vx: 500 });
+    Object.assign(b[1], { x: 455, y: 300, vx: 0 });
+    P.step(b, 0);
+    return b[1].vx !== 0;
+  })();
+  assert.equal(pLow, false);
+});
+test('strength amplifies body-checking force and stability dampens knockback', () => {
+  const checkResults = [0, 127, 255].map(strength => {
+    const b = P.kickoff();
+    P.applyStats(b[0], { ...normal, strength });
+    P.applyStats(b[1], { ...normal });
+    Object.assign(b[0], { x: 400, y: 300, vx: 500 });
+    Object.assign(b[1], { x: 430, y: 300, vx: 0 });
+    P.step(b, 0);
+    return b[1].vx;
+  });
+  assert.ok(checkResults[0] < checkResults[1] && checkResults[1] < checkResults[2]);
+
+  const stabResults = [0, 127, 255].map(stability => {
+    const b = P.kickoff();
+    P.applyStats(b[0], { ...normal });
+    P.applyStats(b[1], { ...normal, stability });
+    Object.assign(b[0], { x: 400, y: 300, vx: 500 });
+    Object.assign(b[1], { x: 430, y: 300, vx: 0 });
+    P.step(b, 0);
+    return b[1].vx;
+  });
+  assert.ok(stabResults[0] > stabResults[1] && stabResults[1] > stabResults[2]);
+});
+test('bounciness scales collision restitution between colliding bodies', () => {
+  const bounceResults = [0, 127, 255].map(bounciness => {
+    const b = P.kickoff();
+    P.applyStats(b[0], { ...normal, bounciness });
+    P.applyStats(b[1], { ...normal, bounciness });
+    Object.assign(b[0], { x: 400, y: 300, vx: 500 });
+    Object.assign(b[1], { x: 430, y: 300, vx: -500 });
+    P.step(b, 0);
+    return b[1].vx - b[0].vx;
+  });
+  assert.ok(bounceResults[0] < bounceResults[1] && bounceResults[1] < bounceResults[2]);
+});

@@ -66,7 +66,10 @@
     }
   }
   function collide(a, b) {
-    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), radius = a.radius + b.radius;
+    const isBall = a.team === -1 || b.team === -1;
+    const ra = (isBall && a.team !== -1) ? (a.reach || a.radius) : a.radius;
+    const rb = (isBall && b.team !== -1) ? (b.reach || b.radius) : b.radius;
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), radius = ra + rb;
     if (d >= radius) return;
     const nx = d ? dx / d : 1, ny = d ? dy / d : 0, inverse = 1 / a.mass + 1 / b.mass;
     const correction = (radius - d) / inverse;
@@ -74,12 +77,26 @@
     b.x += nx * correction / b.mass; b.y += ny * correction / b.mass;
     const closing = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
     if (closing >= 0) return;
-    const impulse = -1.88 * closing / inverse;
-    a.vx -= impulse * nx / a.mass; a.vy -= impulse * ny / a.mass;
-    b.vx += impulse * nx / b.mass; b.vy += impulse * ny / b.mass;
+
+    const bounce = ((a.bounciness || 1) + (b.bounciness || 1)) / 2;
+    const baseImpulse = -1.88 * bounce * closing / inverse;
+
+    let impulseA = baseImpulse, impulseB = baseImpulse;
+    if (isBall) {
+      if (a.team !== -1 && a.power) impulseB *= a.power;
+      else if (b.team !== -1 && b.power) impulseA *= b.power;
+    } else {
+      const strA = a.strength || 1, stabA = a.stability || 1;
+      const strB = b.strength || 1, stabB = b.stability || 1;
+      impulseB *= (strA / stabB);
+      impulseA *= (strB / stabA);
+    }
+
+    a.vx -= impulseA * nx / a.mass; a.vy -= impulseA * ny / a.mass;
+    b.vx += impulseB * nx / b.mass; b.vy += impulseB * ny / b.mass;
     const tx = -ny, ty = nx;
     const slip = (b.vx - a.vx) * tx + (b.vy - a.vy) * ty - a.omega * a.radius - b.omega * b.radius;
-    const limit = Math.sqrt(a.grip * b.grip) * impulse;
+    const limit = Math.sqrt(a.grip * b.grip) * baseImpulse;
     const tangent = Math.max(-limit, Math.min(limit, -slip / (3 * inverse)));
     a.vx -= tangent * tx / a.mass; a.vy -= tangent * ty / a.mass;
     b.vx += tangent * tx / b.mass; b.vy += tangent * ty / b.mass;
