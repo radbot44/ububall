@@ -143,15 +143,6 @@
       }
     }
   }
-      const entry = teamEntries[i] || practice[i];
-      if (entry?.model) {
-        b.playerIndex = i;
-        b.voice = entry.model.voice;
-        b.name = entry.model.parts?.fullName;
-      }
-    });
-    return result;
-  }
   function say(message) { $('game-status').textContent = message; }
   function resetPlans() {
     plans = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0 }));
@@ -1247,5 +1238,4 @@
   document.addEventListener('visibilitychange', () => { lastTime = 0; });
   new ResizeObserver(() => draw()).observe(canvas);
   practice.slice(0, 3).forEach(addOption); newMatch(); requestAnimationFrame(frame);
-})();
 })();
