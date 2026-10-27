@@ -10,22 +10,22 @@
 <body><main class="ball-page">
   <header><a class="brand" href="/"><img src="uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a><nav aria-label="Main"><a class="quiet" href="/">Mint & collection</a><a class="quiet" href="/demo.html">Designer</a></nav></header>
   <div class="game-heading"><h1>ububall</h1><button id="new-match">New match</button></div>
-  <section class="stadium" aria-label="Ububall match">
-    <div class="scoreboard"><span class="home">You <strong id="home-score">0</strong></span><div><span id="phase">Plan · Turn 1</span><small>First to five</small></div><span class="away"><strong id="away-score">0</strong> CPU</span></div>
-    <div class="stadium-layout">
-      <aside class="team-column home-column" aria-label="Your team">
-        <div id="team" class="team"></div>
-      </aside>
-      <div class="rink-center">
-        <div class="rink-wrap"><canvas id="rink" width="1000" height="600" aria-label="Playing field. Use the team buttons and direction and power sliders below to plan your launches."></canvas><div id="skaters" aria-hidden="true"></div></div>
-        <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
-        <div class="stadium-actions"><button class="primary" id="launch">Launch</button></div>
-      </div>
-      <aside class="team-column away-column" aria-label="CPU team">
-        <div id="cpu-team" class="team cpu-team"></div>
-      </aside>
-    </div>
-  </section>
+  <div class="arena-layout">
+    <aside class="team-column home-column" aria-label="Your team">
+      <div class="column-heading"><span class="home">Your team</span></div>
+      <div id="team" class="team"></div>
+    </aside>
+    <section class="stadium" aria-label="Ububall match">
+      <div class="scoreboard"><span class="home">You <strong id="home-score">0</strong></span><div><span id="phase">Plan · Turn 1</span><small>First to five</small></div><span class="away"><strong id="away-score">0</strong> CPU</span></div>
+      <div class="rink-wrap"><canvas id="rink" width="1000" height="600" aria-label="Playing field. Use the team buttons and direction and power sliders below to plan your launches."></canvas><div id="skaters" aria-hidden="true"></div></div>
+      <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
+      <div class="stadium-actions"><button class="primary" id="launch">Launch</button></div>
+    </section>
+    <aside class="team-column away-column" aria-label="CPU team">
+      <div class="column-heading"><span class="away">CPU team</span></div>
+      <div id="cpu-team" class="team cpu-team"></div>
+    </aside>
+  </div>
   <details class="rules" id="stat-testing">
     <summary>Stat testing</summary>
     <div class="controls"><label>Direction <output id="angle-value">0°</output><input id="angle" type="range" min="0" max="359" value="0"><small>0° right · 90° down · 180° left · 270° up</small></label><label>Power <output id="power-value">0%</output><input id="power" type="range" min="0" max="100" value="0"><small>0% holds position</small></label><label>Shot spin <output id="shot-spin-value">0%</output><input id="shot-spin" type="range" min="-100" max="100" value="0"><small>− counterclockwise · + clockwise</small></label><button id="hold">Hold this ubu</button></div>

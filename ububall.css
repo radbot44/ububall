@@ -1,32 +1,30 @@
 /* Ububall arena and layout */
-.ball-page { max-width: 1200px; width: min(1200px, calc(100% - 32px)); }
+.ball-page { max-width: 1520px; width: min(1520px, calc(100% - 32px)); }
 .game-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
-.stadium { background: var(--card); border-radius: 16px; overflow: hidden; border: 1px solid var(--border); }
-.scoreboard { display: flex; align-items: center; justify-content: center; gap: 32px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
-.scoreboard > span { display: flex; align-items: center; gap: 12px; font-weight: 500; }
-.scoreboard strong { font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; }
-.home { color: var(--primary); }
-.away { color: var(--secondary); }
-.scoreboard > div { text-align: center; font-size: 14px; }
-.scoreboard small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
 
-/* 3-column layout inside stadium */
-.stadium-layout {
+/* Arena layout: Stadium in center at full size, columns on the outside */
+.arena-layout {
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr) 210px;
+  grid-template-columns: 210px minmax(0, 1040px) 210px;
+  justify-content: center;
   gap: 16px;
-  padding: 16px;
   align-items: start;
 }
-.team-column { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.column-heading {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  padding-left: 2px;
+}
+.team-column { display: flex; flex-direction: column; min-width: 0; }
 .team { display: flex; flex-direction: column; gap: 10px; }
 .team button, .team .team-card {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   padding: 10px;
-  background: var(--elevated);
-  border: 2px solid transparent;
+  background: var(--card);
+  border: 2px solid var(--border);
   border-radius: 12px;
   text-align: left;
   width: 100%;
@@ -37,10 +35,10 @@
 .team button:hover { background: var(--hover); }
 .team button[aria-pressed=true] {
   border-color: var(--primary);
-  background: color-mix(in srgb, var(--elevated), var(--primary) 9%);
+  background: color-mix(in srgb, var(--card), var(--primary) 9%);
 }
 .cpu-team .team-card {
-  background: color-mix(in srgb, var(--elevated), #000 15%);
+  background: var(--card);
   border: 1px solid var(--border);
 }
 .card-header { display: flex; align-items: center; gap: 10px; }
@@ -88,17 +86,31 @@
   line-height: 1;
 }
 
-/* Center area: Rink, status, launch button */
-.rink-center { position: relative; display: flex; flex-direction: column; min-width: 0; }
+/* Stadium */
+.stadium {
+  position: relative;
+  background: var(--card);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.scoreboard { display: flex; align-items: center; justify-content: center; gap: 32px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.scoreboard > span { display: flex; align-items: center; gap: 12px; font-weight: 500; }
+.scoreboard strong { font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; }
+.home { color: var(--primary); }
+.away { color: var(--secondary); }
+.scoreboard > div { text-align: center; font-size: 14px; }
+.scoreboard small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+
 .rink-wrap { position: relative; aspect-ratio: 5 / 3; }
-#rink { display: block; width: 100%; height: 100%; touch-action: none; border-radius: 10px; }
+#rink { display: block; width: 100%; height: 100%; touch-action: none; }
 #skaters { position: absolute; inset: 0; pointer-events: none; }
 .skater { position: absolute; width: 5%; aspect-ratio: 1; transform: translate(-50%, -50%); }
 .skater svg { width: 100%; height: 100%; display: block; }
-#game-status { margin: 8px 0 4px; padding: 0 16px; color: var(--muted); text-align: center; font-size: 13px; }
+#game-status { margin: 10px 0 4px; padding: 0 16px; color: var(--muted); text-align: center; font-size: 13px; }
 
 /* Launch button in stadium */
-.stadium-actions { display: flex; justify-content: center; align-items: center; padding: 6px 0 2px; }
+.stadium-actions { display: flex; justify-content: center; align-items: center; padding: 8px 0 16px; }
 #launch {
   min-width: 160px;
   min-height: 42px;
@@ -116,25 +128,25 @@
 /* Goal phase: Launch button moves front and center over rink */
 .stadium.goal-phase .stadium-actions {
   position: absolute;
-  top: 45%;
+  top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 25;
   padding: 0;
 }
 .stadium.goal-phase #launch {
-  min-width: 200px;
-  min-height: 52px;
-  font-size: 17px;
+  min-width: 220px;
+  min-height: 56px;
+  font-size: 18px;
   font-weight: 700;
-  padding: 14px 36px;
-  border-radius: 26px;
-  box-shadow: 0 8px 32px #000c, 0 0 0 3px var(--primary), 0 0 24px rgba(255, 153, 84, 0.6);
+  padding: 16px 40px;
+  border-radius: 28px;
+  box-shadow: 0 8px 32px #000e, 0 0 0 3px var(--primary), 0 0 28px rgba(255, 153, 84, 0.7);
   animation: pulse-kickoff 1.4s ease-in-out infinite alternate;
 }
 @keyframes pulse-kickoff {
-  0% { transform: scale(1); box-shadow: 0 8px 32px #000c, 0 0 0 2px var(--primary), 0 0 16px rgba(255, 153, 84, 0.4); }
-  100% { transform: scale(1.06); box-shadow: 0 12px 36px #000e, 0 0 0 4px var(--primary), 0 0 32px rgba(255, 153, 84, 0.85); }
+  0% { transform: scale(1); box-shadow: 0 8px 32px #000e, 0 0 0 2px var(--primary), 0 0 16px rgba(255, 153, 84, 0.4); }
+  100% { transform: scale(1.06); box-shadow: 0 14px 40px #000f, 0 0 0 4px var(--primary), 0 0 36px rgba(255, 153, 84, 0.9); }
 }
 
 .controls { display: flex; gap: 16px; align-items: center; margin: 16px 0; flex-wrap: wrap; }
@@ -160,10 +172,13 @@
 #stat-testing input[type=number], #stat-testing select { min-height: 40px; border: 1px solid var(--border); border-radius: 12px; background: var(--elevated); color: var(--text); padding: 8px 12px; font: inherit; }
 #stat-testing input[type=checkbox] { accent-color: var(--primary); }
 
-@media (max-width: 900px) {
-  .stadium-layout { grid-template-columns: 1fr; }
-  .rink-center { order: -1; }
-  .team { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 1300px) {
+  .arena-layout { grid-template-columns: 200px 1fr 200px; }
+}
+@media (max-width: 1000px) {
+  .arena-layout { grid-template-columns: 1fr; }
+  .stadium { order: -1; }
+  .home-column, .away-column { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .controls label { min-width: 0; }
   .controls label:last-of-type { grid-column: 1 / -1; }
@@ -174,7 +189,7 @@
   .scoreboard > span { gap: 8px; }
   .scoreboard strong { font-size: 24px; }
   .scoreboard > div { font-size: 12px; }
-  .team { grid-template-columns: 1fr; }
+  .home-column, .away-column { grid-template-columns: 1fr; }
   #game-status { font-size: 12px; }
   #roster-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
