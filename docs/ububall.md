@@ -46,11 +46,36 @@ Every stat is stored as an 8-bit unsigned integer (`0–255`, neutral `127`) and
 
 ## 3. Special Ability Loadout (Bits 494–509: 16 Bits)
 
-Four independent 4-bit slots allowing 16 unique super ability types per slot:
+Four independent 4-bit slots encode an ubu's unlocked supers from the canonical 8 ability types (`slot_value % 8`):
 - **Super Slot 1:** Bits 494–497 (0–15)
 - **Super Slot 2:** Bits 498–501 (0–15)
 - **Super Slot 3:** Bits 502–505 (0–15)
 - **Super Slot 4:** Bits 506–509 (0–15)
+
+Before each match, players equip one active super per ubu from their unlocked slots.
+
+### The 8 Canonical Supers
+
+| ID | Super | Archetype | Tactical Use | In-Game Mechanics |
+| :--- | :--- | :--- | :--- | :--- |
+| `0` | **Stalwart** | Anchor / Defense | Crease blocking, impenetrable screening | Body position locks at 0 velocity with infinite mass ($1/\text{mass} = 0$). Cannot be moved or deflected by any collision. |
+| `1` | **Knockout** | Enforcer / CC | Neutralizing key opposing threats | First opposing skater touched is stunned for the subsequent turn (launch velocity forced to 0). |
+| `2` | **Sticky** | Carrier / Possession | Puck recovery and controlled breakouts | On ball contact, the ball welds to the skater's body and travels with them until the turn settles. |
+| `3` | **Cannonball** | Striker / Finisher | Long-range laser shots and blistering rebounds | Imparts $2.5\times$ base impulse to the ball on contact. |
+| `4` | **Magnet** | Playmaker / Interceptor | Puck retrieval and pass interception | Exerts a continuous attractive tractor pull on the ball within 260px while the skater is in motion. |
+| `5` | **Colossus** | Titan / Space Control | Wide zone coverage, heavy checking | Temporarily increases radius by $1.8\times$ and mass by $2.5\times$ for the turn, resetting on turn settle. |
+| `6` | **Shockwave** | Disrupter / Scrum Breaker | Clearing the crease and board pile-ups | Triggers a radial concussive blast repelling all bodies within 220px outward upon impact. |
+| `7` | **Ghost** | Infiltrator / Skater | Bypassing screens and heavy checks | Phases straight through opposing skaters without collision, while still interacting with the ball and rink boards. |
+
+### Super Meter & Activation
+- **Starting Meter:** Initialized at kickoff from `Ubuquity` (Bits 1014–1023: $\text{Ubuquity} / 1020 \times 100\%$).
+- **Meter Capacity:** 100% per ubu. Activating a super costs 100% meter for that turn.
+- **Meter Accumulation:**
+  - Ball strikes: $+18\% \times \text{Efficiency multiplier}$.
+  - Body checks: $+10\% \times \text{Efficiency multiplier}$.
+  - Passive turn completion: $+10\% \times \text{Efficiency multiplier}$.
+  - Conceding team rally bonus: $+15\%$ upon being scored against.
+  - Teammate Synergy/Chemistry: Whenever an ubu gains meter, teammates receive an inbound bonus: $\Delta M \times (\text{Synergy} \times \text{Chemistry} \times 0.25)$.
 
 ---
 

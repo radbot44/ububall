@@ -19,11 +19,11 @@
   let stats = practice.map(p => ({ ...(p.model.stats || normalStats()) }));
   let lastPlans = null, teamEntries = [...roster, ...practice.slice(3)];
   let lastTouchByTeam = { 0: null, 1: null }, scoringPlayer = null;
-  const trails = Array.from({ length: 7 }, () => []), particles = [], fireworks = [];
+  const trails = Array.from({ length: 7 }, () => []), particles = [], fireworks = [], shockwaves = [];
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   function clearEffects() {
     trails.forEach(trail => { trail.length = 0; });
-    particles.length = fireworks.length = 0;
+    particles.length = fireworks.length = shockwaves.length = 0;
   }
   function burst(x, y, team, strength, celebration = false, tangent = 0) {
     if (reducedMotion.matches) return;
@@ -54,6 +54,10 @@
     for (let i = fireworks.length - 1; i >= 0; i--) {
       const f = fireworks[i]; f.delay -= dt;
       if (f.delay <= 0) { burst(f.x, f.y, f.team, 1, true); fireworks.splice(i, 1); }
+    }
+    for (let i = shockwaves.length - 1; i >= 0; i--) {
+      const s = shockwaves[i]; s.life -= dt;
+      if (s.life <= 0) { shockwaves.splice(i, 1); }
     }
   }
   function recordTrails() {
@@ -95,9 +99,50 @@
   function kickoff() {
     clearEffects();
     lastTouchByTeam = { 0: null, 1: null }; scoringPlayer = null;
+    const oldBodies = bodies;
     const result = P.kickoff();
     result.slice(0, 6).forEach((b, i) => {
       P.applyStats(b, stats[i]);
+      const entry = teamEntries[i] || practice[i];
+      if (entry?.model) {
+        b.playerIndex = i;
+        b.voice = entry.model.voice;
+        b.name = entry.model.parts?.fullName;
+        b.equippedSuper = entry.equippedSuper || P.SUPERS[(entry.model.supers?.[0] ?? i) % 8];
+        if (oldBodies?.[i]?.meter !== undefined) {
+          b.meter = oldBodies[i].meter;
+          b.stunned = oldBodies[i].stunned || false;
+        } else {
+          const rating = entry.model.rating ?? 511;
+          b.meter = Math.min(100, Math.max(0, (rating / 1020) * 100));
+          b.stunned = false;
+        }
+        b.superArm = false;
+        b.superActive = null;
+      }
+    });
+    return result;
+  }
+  function gainMeter(b, baseAmount) {
+    if (!b || b.team < 0) return;
+    const playerIdx = b.playerIndex;
+    const eff = stats[playerIdx]?.efficiency ?? 127;
+    const effMult = P.multiplier(eff);
+    const gain = baseAmount * effMult;
+    b.meter = Math.min(100, Math.max(0, (b.meter || 0) + gain));
+
+    const syn = stats[playerIdx]?.synergy ?? 127;
+    const synMult = P.multiplier(syn);
+    const start = b.team * 3, end = start + 3;
+    for (let i = start; i < end; i++) {
+      const teammate = bodies[i];
+      if (teammate && teammate !== b) {
+        const chem = stats[i]?.chemistry ?? 127;
+        const chemMult = P.multiplier(chem);
+        teammate.meter = Math.min(100, Math.max(0, (teammate.meter || 0) + gain * synMult * chemMult * 0.25));
+      }
+    }
+  }
       const entry = teamEntries[i] || practice[i];
       if (entry?.model) {
         b.playerIndex = i;
@@ -160,12 +205,46 @@
     wrap.append(compactBox, fullBox);
     return wrap;
   }
+  function renderSuperPanel(playerIndex, isCpu = false) {
+    const wrap = document.createElement('div'); wrap.className = 'super-panel';
+    const topRow = document.createElement('div'); topRow.className = 'super-row';
+    const label = document.createElement('span'); label.className = 'super-name-badge'; label.id = `super-name-${playerIndex}`;
+    const initialSuper = bodies?.[playerIndex]?.equippedSuper || teamEntries[playerIndex]?.equippedSuper || P.SUPERS[0];
+    label.textContent = `⚡ ${initialSuper.name}`;
+    const pct = document.createElement('span'); pct.className = 'super-pct'; pct.id = `super-pct-${playerIndex}`;
+    pct.textContent = `${Math.round(bodies?.[playerIndex]?.meter ?? 0)}%`;
+    topRow.append(label, pct);
+    const meterTrack = document.createElement('div'); meterTrack.className = 'super-meter-track';
+    const meterFill = document.createElement('i'); meterFill.className = 'super-meter-fill'; meterFill.id = `super-fill-${playerIndex}`;
+    meterFill.style.width = `${Math.min(100, Math.round(bodies?.[playerIndex]?.meter ?? 0))}%`;
+    meterTrack.append(meterFill);
+    wrap.append(topRow, meterTrack);
+    if (!isCpu) {
+      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'super-arm-btn'; btn.id = `super-arm-${playerIndex}`;
+      btn.textContent = 'ARM SUPER'; btn.disabled = true;
+      btn.onclick = e => {
+        e.stopPropagation();
+        const b = bodies[playerIndex];
+        if (b && b.meter >= 100 && phase === 'plan' && !b.stunned) {
+          b.superArm = !b.superArm;
+          sync(); draw();
+        }
+      };
+      wrap.append(btn);
+    }
+    return wrap;
+  }
   function sync() {
     const planning = phase === 'plan';
     const isGoal = phase === 'goal';
     $('phase').textContent = phase === 'over' ? 'Match complete' : `${planning ? 'Plan' : isGoal ? 'Goal' : 'In play'} · Turn ${turn}`;
     $('home-score').textContent = scores[0]; $('away-score').textContent = scores[1];
-    for (const id of ['angle', 'power', 'shot-spin', 'hold']) $(id).disabled = !planning;
+    const curB = bodies[selected];
+    const isStunned = Boolean(curB?.stunned);
+    if (isStunned) {
+      plans[selected].power = plans[selected].spin = 0;
+    }
+    for (const id of ['angle', 'power', 'shot-spin', 'hold']) $(id).disabled = !planning || isStunned;
     $('launch').disabled = !planning && !isGoal;
     for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = phase === 'play';
     $('restore-shot').disabled = phase === 'play' || !lastPlans;
@@ -179,7 +258,26 @@
     [...$('team').children].forEach((button, i) => {
       button.setAttribute('aria-pressed', String(i === selected)); button.disabled = !planning;
       const small = button.querySelector('small');
-      if (small) small.textContent = `${Math.round(plans[i].power * 100)}% power · ${Math.round((plans[i].spin || 0) * 100)}% spin`;
+      if (small) {
+        if (bodies[i]?.stunned) small.textContent = '💫 Stunned this turn';
+        else small.textContent = `${Math.round(plans[i].power * 100)}% power · ${Math.round((plans[i].spin || 0) * 100)}% spin`;
+      }
+    });
+    bodies.slice(0, 6).forEach((b, i) => {
+      const pctNode = $(`super-pct-${i}`);
+      if (pctNode) pctNode.textContent = `${Math.round(b.meter || 0)}%`;
+      const fillNode = $(`super-fill-${i}`);
+      if (fillNode) fillNode.style.width = `${Math.min(100, Math.round(b.meter || 0))}%`;
+      const nameNode = $(`super-name-${i}`);
+      if (nameNode) nameNode.textContent = `⚡ ${b.equippedSuper?.name || 'Stalwart'}`;
+      if (i < 3) {
+        const armBtn = $(`super-arm-${i}`);
+        if (armBtn) {
+          armBtn.disabled = !planning || (b.meter < 100) || Boolean(b.stunned);
+          armBtn.classList.toggle('armed', Boolean(b.superArm));
+          armBtn.textContent = b.stunned ? '💫 STUNNED' : b.superArm ? '⚡ ARMED' : 'ARM SUPER';
+        }
+      }
     });
   }
   function buildTeam() {
@@ -202,7 +300,7 @@
       const small = document.createElement('small'); small.textContent = '0% power · 0% spin';
       titles.append(strong, small);
       header.append(ubuRender(entry.model, 'ball-thumb'), titles);
-      button.append(header, renderStatsBox(stats[i] || entry.model.stats || {}));
+      button.append(header, renderStatsBox(stats[i] || entry.model.stats || {}), renderSuperPanel(i, false));
       button.onclick = () => { selected = i; sync(); draw(); };
       $('team').append(button);
     });
@@ -216,7 +314,7 @@
         const small = document.createElement('small'); small.className = 'away'; small.textContent = `CPU ${idx + 1}`;
         titles.append(strong, small);
         header.append(ubuRender(entry.model, 'ball-thumb'), titles);
-        card.append(header, renderStatsBox(stats[i] || entry.model.stats || {}));
+        card.append(header, renderStatsBox(stats[i] || entry.model.stats || {}), renderSuperPanel(i, true));
         $('cpu-team').append(card);
       });
     }
@@ -583,6 +681,18 @@
       line(x === 60 - depth ? x : x + depth, 230, x === 60 - depth ? x : x + depth, 370, accent, 4);
     }
     drawTrails(primary, secondary);
+    shockwaves.forEach(s => {
+      const progress = 1 - Math.max(0, s.life / s.duration);
+      const r = s.currentRadius + (s.maxRadius - s.currentRadius) * progress;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.strokeStyle = s.team === 0 ? primary : secondary;
+      ctx.lineWidth = Math.max(1, 6 * (1 - progress));
+      ctx.globalAlpha = Math.max(0, 1 - progress);
+      ctx.stroke();
+      ctx.restore();
+    });
     bodies.slice(0, 6).forEach((b, i) => {
       const reachR = Math.max(b.radius, b.reach || b.radius, 18);
       circle(b.x, b.y, reachR + 2, i < 3 ? primary : secondary, 4);
@@ -591,8 +701,47 @@
         circle(b.x, b.y, b.radius + 9, '#ff9954', 4);
         circle(b.x, b.y, b.radius + 15, primary, 2);
       }
+      if (b.superArm || b.superActive) {
+        const auraColor = b.superActive === 'cannonball' ? '#ff4d4d'
+          : b.superActive === 'magnet' ? '#33ccff'
+          : b.superActive === 'sticky' ? '#44dd66'
+          : b.superActive === 'stalwart' ? '#ffd166'
+          : b.superActive === 'knockout' ? '#ff3366'
+          : b.superActive === 'colossus' ? '#bb66ff'
+          : b.superActive === 'ghost' ? '#b2ebf2'
+          : '#ff7197';
+        ctx.save();
+        ctx.beginPath();
+        const pulse = Math.sin(Date.now() / 120) * 3;
+        ctx.arc(b.x, b.y, b.radius + 8 + pulse, 0, Math.PI * 2);
+        ctx.strokeStyle = auraColor;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = auraColor;
+        ctx.shadowBlur = 14;
+        ctx.stroke();
+        ctx.restore();
+      }
+      if (b.stunned) {
+        ctx.save();
+        ctx.font = '16px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('💫', b.x, b.y - b.radius - 8);
+        ctx.restore();
+      }
+      if (b.superActive === 'magnet') {
+        const ball = bodies[6];
+        const dist = Math.hypot(b.x - ball.x, b.y - ball.y);
+        if (dist < 260) {
+          ctx.save();
+          ctx.setLineDash([4, 6]);
+          line(b.x, b.y, ball.x, ball.y, '#33ccff88', 2);
+          ctx.restore();
+        }
+      }
       skaters[i].style.left = b.x / 10 + '%'; skaters[i].style.top = b.y / 6 + '%';
       skaters[i].style.width = b.radius / 5 + '%';
+      skaters[i].style.opacity = b.superActive === 'ghost' ? '0.45' : '1';
+      skaters[i].style.filter = b.stunned ? 'grayscale(0.8) brightness(0.7)' : '';
       skaters[i].style.transform = `translate(-50%, -50%) rotate(${b.rotation}rad)`;
       ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = i < 3 ? primary : secondary; ctx.fillText(String(i % 3 + 1), b.x, b.y + b.radius + 20);
 
@@ -602,6 +751,14 @@
         drawTrajectory(b, plans[i], trajectoryData, primary);
       }
     });
+    if (bodies[6]?.stuckTo) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc((bodies[6].stuckTo.x + bodies[6].x) / 2, (bodies[6].stuckTo.y + bodies[6].y) / 2, 7, 0, Math.PI * 2);
+      ctx.fillStyle = '#44dd6688';
+      ctx.fill();
+      ctx.restore();
+    }
 
     // Spin dial arced line with arrowheads (above arrow in z-index)
     if (phase === 'plan') {
@@ -698,8 +855,19 @@
   }
   function finishTurn(goal) {
     P.stop(bodies); accumulator = 0;
+    bodies.slice(0, 6).forEach(b => {
+      if (b.stunnedNext) {
+        b.stunned = true;
+        delete b.stunnedNext;
+      }
+      b.superActive = null;
+      b.shockwaveFired = false;
+      gainMeter(b, 10);
+    });
     if (goal !== null) {
       scores[goal]++; phase = scores[goal] >= 5 ? 'over' : 'goal';
+      const conceding = 1 - goal;
+      bodies.slice(conceding * 3, conceding * 3 + 3).forEach(b => gainMeter(b, 15));
       const ball = bodies[6];
       burst(ball.x, ball.y, goal, 1, true);
       if (!reducedMotion.matches) {
@@ -734,7 +902,23 @@
     if (phase !== 'plan') return;
     window.ubuAudio?.stop();
     lastPlans = structuredClone(plans);
-    drag = null; P.launch(bodies, [...plans, ...($('cpu-hold').checked ? [] : cpu)]); elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
+    drag = null;
+    bodies.slice(0, 3).forEach(b => {
+      if (b.superArm && b.meter >= 100) {
+        b.meter = 0;
+        b.superActive = b.equippedSuper.key;
+        b.superArm = false;
+      }
+    });
+    if (!$('cpu-hold').checked) {
+      bodies.slice(3, 6).forEach(b => {
+        if (b.meter >= 100 && (Math.random() < 0.75 || b.slot === 0)) {
+          b.meter = 0;
+          b.superActive = b.equippedSuper.key;
+        }
+      });
+    }
+    P.launch(bodies, [...plans, ...($('cpu-hold').checked ? [] : cpu)]); elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
   };
   for (const id of ['angle', 'power', 'shot-spin']) $(id).oninput = () => { if (phase !== 'plan') return; plans[selected] = { angle: radians(Number($('angle').value)), power: Number($('power').value) / 100, spin: Number($('shot-spin').value) / 100 }; sync(); draw(); };
   $('hold').onclick = () => { plans[selected].power = plans[selected].spin = 0; sync(); draw(); };
@@ -841,6 +1025,7 @@
     if (isBall) {
       const player = a.team !== -1 ? a : b;
       lastTouchByTeam[player.team] = player;
+      gainMeter(player, 18);
       const norm = Math.min(1.0, Math.max(0.0, (speed - 25) / 550));
       const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
       if (!player._lastHitSound || (now - player._lastHitSound) > 55) {
@@ -853,6 +1038,8 @@
         }
       }
     } else if (a.team !== -1 && b.team !== -1) {
+      gainMeter(a, 10);
+      gainMeter(b, 10);
       const norm = Math.min(1.0, Math.max(0.0, (speed - 40) / 600));
       const volume = Math.min(1.0, 0.12 + 0.75 * (norm ** 0.8));
       const primary = (Math.hypot(a.vx, a.vy) * a.mass >= Math.hypot(b.vx, b.vy) * b.mass) ? a : b;
@@ -882,15 +1069,22 @@
       window.ubuAudio.playWallHit({ volume });
     }
   }
+  function handleShockwave(source, radius) {
+    burst(source.x, source.y, source.team, 1, true);
+    shockwaves.push({ x: source.x, y: source.y, currentRadius: 10, maxRadius: radius, team: source.team, life: 0.35, duration: 0.35 });
+    if (window.ubuAudio) {
+      window.ubuAudio.playGoalHit?.('net', { volume: 0.8 });
+    }
+  }
   function frame(time) {
     const delta = lastTime ? Math.min((time - lastTime) / 1000, .05) : 0; lastTime = time;
     const active = !$('roster-dialog').open && !document.hidden;
-    const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length);
+    const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length;
     if (active) updateEffects(delta);
     if (phase === 'play' && active) {
       accumulator += delta;
       while (accumulator >= P.DT && phase === 'play') {
-        const goal = P.step(bodies, P.DT, handleCollision, handleWall); elapsed += P.DT; accumulator -= P.DT;
+        const goal = P.step(bodies, P.DT, handleCollision, handleWall, handleShockwave); elapsed += P.DT; accumulator -= P.DT;
         recordTrails();
         if (goal !== null || P.settled(bodies) || elapsed >= 12) finishTurn(goal);
       }
@@ -898,9 +1092,40 @@
     } else if (active && hadEffects) draw();
     requestAnimationFrame(frame);
   }
+  function updateRosterSuperPicker() {
+    const picker = $('roster-super');
+    if (!picker) return;
+    picker.replaceChildren();
+    const entry = draft[rosterSlot];
+    if (!entry) return;
+    const available = entry?.model?.supers
+      ? Array.from(new Set(entry.model.supers.map(s => s % 8)))
+      : [0, 1, 2, 3, 4, 5, 6, 7];
+    const list = available.length ? available.map(id => P.SUPERS[id]) : P.SUPERS;
+    const currentId = (entry.equippedSuper?.id ?? ((entry.model?.supers?.[0] ?? rosterSlot) % 8));
+    list.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = `${s.name}: ${s.desc}`;
+      if (s.id === currentId) opt.selected = true;
+      picker.append(opt);
+    });
+    picker.onchange = () => {
+      draft[rosterSlot].equippedSuper = P.SUPERS[Number(picker.value)];
+      rosterSlots();
+    };
+  }
   function rosterSlots() {
     $('roster-slots').replaceChildren();
-    draft.forEach((entry, i) => { const button = document.createElement('button'); button.textContent = `${i + 1}. ${entry.model.parts.fullName}`; button.setAttribute('aria-pressed', String(i === rosterSlot)); button.onclick = () => { rosterSlot = i; rosterSlots(); }; $('roster-slots').append(button); });
+    draft.forEach((entry, i) => {
+      const button = document.createElement('button');
+      const superObj = entry.equippedSuper || P.SUPERS[(entry.model?.supers?.[0] ?? i) % 8];
+      button.textContent = `${i + 1}. ${entry.model.parts.fullName} · ⚡ ${superObj.name}`;
+      button.setAttribute('aria-pressed', String(i === rosterSlot));
+      button.onclick = () => { rosterSlot = i; rosterSlots(); };
+      $('roster-slots').append(button);
+    });
+    updateRosterSuperPicker();
   }
   function addOption(entry) {
     const button = document.createElement('button'), label = document.createElement('span'); label.textContent = entry.model.parts.fullName + ' · ' + entry.label;
@@ -944,7 +1169,11 @@
   $('new-match').onclick = () => {
     draft = [...roster]; rosterSlot = 0; rosterSlots(); $('roster-status').textContent = 'Test stats stay with their team slots when changing characters.'; $('roster-dialog').showModal();
   };
-  $('start-match').onclick = () => { $('roster-dialog').close(); newMatch(); };
+  $('start-match').onclick = () => {
+    $('roster-dialog').close();
+    roster = draft.map(d => ({ ...d }));
+    newMatch();
+  };
   $('cancel-roster').onclick = () => $('roster-dialog').close();
   // A modal pauses the simulation; cancelling preserves the current turn.
   for (const key of Object.keys(normalStats())) {
@@ -953,6 +1182,32 @@
     input.id = 'stat-' + key; input.type = 'number'; input.min = 0; input.max = 255; input.step = 1;
     output.id = 'mult-' + key; label.append(input, output); $('stat-inputs').append(label);
     input.oninput = previewStats;
+  }
+  const statSuper = $('stat-super');
+  if (statSuper) {
+    P.SUPERS.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = `${s.name}: ${s.desc}`;
+      statSuper.append(opt);
+    });
+    statSuper.onchange = () => {
+      const idx = Number($('stat-player').value);
+      const chosen = P.SUPERS[Number(statSuper.value)];
+      if (bodies[idx]) bodies[idx].equippedSuper = chosen;
+      if (teamEntries[idx]) teamEntries[idx].equippedSuper = chosen;
+      sync(); draw();
+    };
+  }
+  const fillMeter = $('fill-meter');
+  if (fillMeter) {
+    fillMeter.onclick = () => {
+      const idx = Number($('stat-player').value);
+      if (bodies[idx]) {
+        bodies[idx].meter = 100;
+        sync(); draw();
+      }
+    };
   }
   function readStats() {
     const result = {};
@@ -969,7 +1224,14 @@
     const b = {}; P.applyStats(b, raw);
     $('stat-preview').textContent = `Mass ${b.mass.toFixed(2)} · Radius ${b.radius.toFixed(1)} · Slowing ${b.friction.toFixed(1)}/s · Max spin ${b.maxSpin.toFixed(2)} rad/s · Grip ${b.grip.toFixed(3)} · Full-power speed ${(b.impulse / b.mass).toFixed(0)}. DNA-driven physics.`;
   }
-  function showStats() { for (const key of Object.keys(normalStats())) $('stat-' + key).value = stats[Number($('stat-player').value)][key]; previewStats(); }
+  function showStats() {
+    const idx = Number($('stat-player').value);
+    for (const key of Object.keys(normalStats())) $('stat-' + key).value = stats[idx][key];
+    if ($('stat-super') && bodies?.[idx]) {
+      $('stat-super').value = bodies[idx].equippedSuper?.id ?? 0;
+    }
+    previewStats();
+  }
   function resetField() {
     window.ubuAudio?.stop();
     bodies = kickoff(); scores = [0, 0]; turn = 1; phase = 'plan'; elapsed = accumulator = 0; drag = null;
@@ -985,4 +1247,5 @@
   document.addEventListener('visibilitychange', () => { lastTime = 0; });
   new ResizeObserver(() => draw()).observe(canvas);
   practice.slice(0, 3).forEach(addOption); newMatch(); requestAnimationFrame(frame);
+})();
 })();

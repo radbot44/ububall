@@ -156,6 +156,104 @@ body.show-full-stats .full-stats { display: flex; }
   line-height: 1;
 }
 
+/* Super Ability Panel */
+.super-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #ffffff12;
+  width: 100%;
+}
+.super-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+}
+.super-name-badge {
+  font-weight: 700;
+  color: #ff7197;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.super-pct {
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.super-meter-track {
+  height: 6px;
+  background: var(--background);
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid #ffffff0a;
+  width: 100%;
+}
+.super-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #ff7197, #ff9954);
+  transition: width 0.2s ease;
+}
+.super-arm-btn {
+  margin-top: 4px;
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--elevated);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.super-arm-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.super-arm-btn:not(:disabled) {
+  background: color-mix(in srgb, #ff7197 22%, var(--card));
+  border-color: #ff7197;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(255, 113, 151, 0.4);
+  cursor: pointer;
+}
+.super-arm-btn.armed {
+  background: #ff7197;
+  color: #0b0d10;
+  border-color: #ffffff;
+  box-shadow: 0 0 16px rgba(255, 113, 151, 0.85);
+  font-weight: 800;
+}
+.super-select {
+  background: var(--elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 3px 6px;
+  width: 100%;
+  margin-top: 4px;
+}
+.stunned-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #ffd166;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
 /* Stadium */
 .stadium {
   position: relative;
@@ -263,4 +361,4 @@ body.show-full-stats .full-stats { display: flex; }
   #game-status { font-size: 12px; }
   #roster-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
+}
