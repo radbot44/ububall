@@ -377,3 +377,54 @@ test('Ghost phases through opposing players without collision but still hits the
   P.step(b, 0);
   assert.ok(b[6].vx > 0);
 });
+
+test('settled keeps a strict velocity boundary after squared-distance optimization', () => {
+  const bodies = P.kickoff();
+  assert.equal(P.settled(bodies), true);
+  bodies[0].vx = 2;
+  assert.equal(P.settled(bodies), false);
+  bodies[0].vx = 1.999;
+  assert.equal(P.settled(bodies), true);
+  bodies[0].omega = 0.05;
+  assert.equal(P.settled(bodies), false);
+});
+test('low-speed zero-spin motion brakes to rest without changing position integration', () => {
+  const bodies = P.kickoff(), b = bodies[0], dt = P.DT;
+  Object.assign(b, { vx: 0.2, vy: -0.3, omega: 0 });
+  const x = b.x + b.vx * dt, y = b.y + b.vy * dt;
+  P.step(bodies);
+  assert.ok(Math.abs(b.x - x) < 1e-12);
+  assert.ok(Math.abs(b.y - y) < 1e-12);
+  assert.equal(b.vx, 0);
+  assert.equal(b.vy, 0);
+});
+test('magnet attraction respects its distance bounds', () => {
+  const bodies = P.kickoff();
+  Object.assign(bodies[0], { x: 300, y: 300, superActive: 'magnet' });
+  P.step(bodies, P.DT);
+  assert.ok(bodies[6].vx < 0);
+  const distant = P.kickoff();
+  Object.assign(distant[0], { x: 180, y: 300, superActive: 'magnet' });
+  P.step(distant, P.DT);
+  assert.equal(distant[6].vx, 0);
+});
+test('shockwaves stay finite at coincident positions and repel nearby bodies', () => {
+  const source = { x: 300, y: 300, vx: 0, vy: 0, mass: 3 };
+  const center = { x: 300, y: 300, vx: 0, vy: 0, mass: 3 };
+  const nearby = { x: 400, y: 300, vx: 0, vy: 0, mass: 1 };
+  const far = { x: 600, y: 300, vx: 0, vy: 0, mass: 1 };
+  P.triggerShockwave(source, [source, center, nearby, far]);
+  assert.deepEqual([center.vx, center.vy], [0, 0]);
+  assert.ok(nearby.vx > 0);
+  assert.equal(far.vx, 0);
+  assert.ok([center, nearby, far].every(b => Number.isFinite(b.vx) && Number.isFinite(b.vy)));
+});
+test('zero-spin full-speed movement stays finite over long physics turns', () => {
+  const bodies = P.kickoff();
+  const plans = Array.from({ length: 6 }, (_, i) => ({ angle: i * Math.PI / 3, power: 1, spin: 0 }));
+  P.launch(bodies, plans);
+  for (let i = 0; i < 480; i++) {
+    P.step(bodies);
+    assert.ok(bodies.every(b => [b.x, b.y, b.vx, b.vy, b.omega].every(Number.isFinite)));
+  }
+});
