@@ -397,80 +397,39 @@
     if (points.length < 2) return;
     const impulse = body.impulse || P.IMPULSE;
     const impulseRatio = impulse / P.IMPULSE;
-    const ringR = Math.max(body.radius, body.reach || body.radius, 18) + 2;
     const maxArrowDist = Math.max(20, 110 * impulseRatio * plan.power);
-    const targetEndDist = ringR + maxArrowDist;
 
-    // Find base point where trajectory crosses the hitbox ring
-    let baseIdx = 1;
-    while (baseIdx < points.length && points[baseIdx].dist < ringR) baseIdx++;
-    if (baseIdx >= points.length) return;
-
-    const pB0 = points[baseIdx - 1], pB1 = points[baseIdx];
-    const tBase = (ringR - pB0.dist) / (pB1.dist - pB0.dist || 1);
-    const basePt = {
-      x: pB0.x + (pB1.x - pB0.x) * tBase,
-      y: pB0.y + (pB1.y - pB0.y) * tBase,
-      dist: ringR
-    };
-
-    // Find end point of solid arrow (same length maxArrowDist, starting from ringR)
-    let endIdx = baseIdx;
-    while (endIdx < points.length && points[endIdx].dist < targetEndDist) endIdx++;
-
-    let arrowEndPt;
-    if (endIdx >= points.length) {
-      arrowEndPt = points[points.length - 1];
-      endIdx = points.length - 1;
-    } else {
-      const pE0 = points[endIdx - 1], pE1 = points[endIdx];
-      const tEnd = (targetEndDist - pE0.dist) / (pE1.dist - pE0.dist || 1);
-      arrowEndPt = {
-        x: pE0.x + (pE1.x - pE0.x) * tEnd,
-        y: pE0.y + (pE1.y - pE0.y) * tEnd,
-        dist: targetEndDist
-      };
+    let splitIdx = points.length - 1;
+    for (let i = 1; i < points.length; i++) {
+      if (points[i].dist >= maxArrowDist) {
+        splitIdx = i;
+        break;
+      }
     }
 
-    // 1. Solid arrow starting from basePt at hitbox ring
+    // 1. Solid arrow up to splitIdx
     ctx.save();
     ctx.beginPath();
-    ctx.moveTo(basePt.x, basePt.y);
-    for (let i = baseIdx; i < endIdx; i++) ctx.lineTo(points[i].x, points[i].y);
-    ctx.lineTo(arrowEndPt.x, arrowEndPt.y);
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i <= splitIdx; i++) ctx.lineTo(points[i].x, points[i].y);
     ctx.strokeStyle = color;
     ctx.lineWidth = 4;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.stroke();
 
-    // Arrowhead at arrowEndPt
-    const pPrev = (endIdx > baseIdx) ? points[endIdx - 1] : basePt;
-    const tipAngle = Math.atan2(arrowEndPt.y - pPrev.y, arrowEndPt.x - pPrev.x);
+    // Arrowhead at splitIdx
+    const pEnd = points[splitIdx];
+    const pPrev = points[Math.max(0, splitIdx - 1)];
+    const tipAngle = Math.atan2(pEnd.y - pPrev.y, pEnd.x - pPrev.x);
     for (const offset of [-0.55, 0.55]) {
-      line(arrowEndPt.x, arrowEndPt.y, arrowEndPt.x - Math.cos(tipAngle + offset) * 14, arrowEndPt.y - Math.sin(tipAngle + offset) * 14, color, 4);
+      line(pEnd.x, pEnd.y, pEnd.x - Math.cos(tipAngle + offset) * 14, pEnd.y - Math.sin(tipAngle + offset) * 14, color, 4);
     }
     ctx.restore();
 
-    // 2. Dashed trajectory line beyond arrowEndPt, fading away at about a rink-height (480px)
-    if (endIdx < points.length - 1 || arrowEndPt.dist < points[points.length - 1].dist) {
-      if (endIdx < points.length) {
-        const d = points[endIdx].dist;
-        const alpha = Math.max(0, Math.min(1, (480 - d) / 180));
-        if (alpha > 0.01) {
-          ctx.save();
-          ctx.setLineDash([4, 4]);
-          ctx.strokeStyle = color;
-          ctx.globalAlpha = alpha;
-          ctx.lineWidth = 2.5;
-          ctx.beginPath();
-          ctx.moveTo(arrowEndPt.x, arrowEndPt.y);
-          ctx.lineTo(points[endIdx].x, points[endIdx].y);
-          ctx.stroke();
-          ctx.restore();
-        }
-      }
-      for (let i = endIdx + 1; i < points.length; i++) {
+    // 2. Dashed trajectory line beyond splitIdx, fading away at about a rink-height (480px)
+    if (splitIdx < points.length - 1) {
+      for (let i = splitIdx + 1; i < points.length; i++) {
         const d = points[i].dist;
         const alpha = Math.max(0, Math.min(1, (480 - d) / 180));
         if (alpha <= 0.01) continue;
