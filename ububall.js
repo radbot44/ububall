@@ -115,33 +115,27 @@
   }
   function renderStatsBox(statSource) {
     const wrap = document.createElement('div'); wrap.className = 'ubu-stats-wrap';
-    const compactBox = document.createElement('div'); compactBox.className = 'ubu-stats compact-stats';
-    const compactStats = [
-      ['Impulse', '#76b9ef', 'impulse'],
-      ['Mass', '#42c66b', 'mass'],
-      ['Power', '#ff9954', 'power'],
-      ['Spin', '#ff7197', 'spin']
-    ];
-    for (const [label, color, key] of compactStats) {
-      const val = statSource[key] ?? 127;
-      const row = document.createElement('div'); row.className = 'stat-row';
-      const name = document.createElement('span'); name.className = 'stat-lbl'; name.textContent = label;
-      const track = document.createElement('div'); track.className = 'stat-track';
-      const fill = document.createElement('i');
-      fill.style.width = `${Math.min(100, Math.max(0, Math.round(val / 255 * 100)))}%`;
-      fill.style.backgroundColor = color;
-      track.append(fill);
-      const valSpan = document.createElement('span'); valSpan.className = 'stat-val'; valSpan.textContent = String(val);
-      row.append(name, track, valSpan);
-      compactBox.append(row);
-    }
-    const fullBox = document.createElement('div'); fullBox.className = 'ubu-stats full-stats';
     const groups = [
       ['Movement', '#76b9ef', ['impulse', 'traction', 'spin', 'curve']],
       ['Physical', '#42c66b', ['size', 'mass', 'bounciness', 'grip']],
       ['Engagement', '#ff9954', ['power', 'reach', 'strength', 'stability']],
       ['Super', '#ff7197', ['efficiency', 'synergy', 'chemistry']]
     ];
+    const compactBox = document.createElement('div'); compactBox.className = 'ubu-stats compact-stats';
+    for (const [label, color, keys] of groups) {
+      const avg = Math.round(keys.reduce((sum, k) => sum + (statSource[k] ?? 127), 0) / keys.length);
+      const row = document.createElement('div'); row.className = 'stat-row';
+      const name = document.createElement('span'); name.className = 'stat-lbl'; name.textContent = label;
+      const track = document.createElement('div'); track.className = 'stat-track';
+      const fill = document.createElement('i');
+      fill.style.width = `${Math.min(100, Math.max(0, Math.round(avg / 255 * 100)))}%`;
+      fill.style.backgroundColor = color;
+      track.append(fill);
+      const valSpan = document.createElement('span'); valSpan.className = 'stat-val'; valSpan.textContent = String(avg);
+      row.append(name, track, valSpan);
+      compactBox.append(row);
+    }
+    const fullBox = document.createElement('div'); fullBox.className = 'ubu-stats full-stats';
     for (const [groupName, color, keys] of groups) {
       const groupHeading = document.createElement('div');
       groupHeading.className = 'stat-group-title';
