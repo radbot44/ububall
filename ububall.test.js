@@ -258,3 +258,173 @@ test('step invokes onCollide callback reporting colliding bodies and impact spee
   assert.ok(Math.abs(reported.speed - 500) < 1e-6);
   assert.ok(reported.impulse > 0);
 });
+
+
+test('SUPERS registry exposes all 8 canonical abilities with consistent metadata', () => {
+  assert.equal(P.SUPERS.length, 8);
+  const keys = ['stalwart', 'knockout', 'sticky', 'cannonball', 'magnet', 'colossus', 'shockwave', 'ghost'];
+  P.SUPERS.forEach((s, i) => {
+    assert.equal(s.id, i);
+    assert.equal(s.key, keys[i]);
+    assert.ok(typeof s.name === 'string' && s.name.length > 0);
+    assert.ok(typeof s.desc === 'string' && s.desc.length > 0);
+    assert.ok(typeof s.icon === 'string' && s.icon.endsWith('.png'));
+  });
+});
+
+test('Stalwart anchors body at 0 velocity and does not move upon collision', () => {
+  const b = P.kickoff();
+  b[0].superActive = 'stalwart';
+  Object.assign(b[0], { x: 400, y: 300, vx: 0, vy: 0 });
+  Object.assign(b[3], { x: 440, y: 300, vx: -600, vy: 0 });
+  P.step(b, 0);
+  assert.equal(b[0].vx, 0);
+  assert.equal(b[0].vy, 0);
+  assert.equal(b[0].x, 400);
+  assert.ok(b[3].vx > 0);
+});
+
+test('Knockout stuns opponent on contact and prevents them from moving next turn', () => {
+  const b = P.kickoff();
+  b[0].superActive = 'knockout';
+  Object.assign(b[0], { x: 400, y: 300, vx: 500, vy: 0 });
+  Object.assign(b[3], { x: 435, y: 300, vx: 0, vy: 0 });
+  P.step(b, 0);
+  assert.equal(b[3].stunnedNext, true);
+  assert.equal(b[0].superActive, null);
+
+  b[3].stunned = b[3].stunnedNext;
+  delete b[3].stunnedNext;
+  P.launch(b, Array.from({ length: 6 }, () => ({ angle: 0, power: 1 })));
+  assert.equal(b[3].vx, 0);
+  assert.equal(b[3].vy, 0);
+  assert.equal(b[3].stunned, false);
+});
+
+test('Sticky grabs the ball on contact and carries it along with skater movement', () => {
+  const b = P.kickoff();
+  b[0].superActive = 'sticky';
+  Object.assign(b[0], { x: 460, y: 300, vx: 400, vy: 0 });
+  Object.assign(b[6], { x: 500, y: 300, vx: 0, vy: 0 });
+  P.step(b, 0);
+  assert.equal(b[6].stuckTo, b[0]);
+  const initialBallX = b[6].x;
+  for (let i = 0; i < 20; i++) P.step(b, P.DT);
+  assert.ok(b[6].x > initialBallX);
+  assert.equal(b[6].stuckTo, b[0]);
+});
+
+test('Cannonball amplifies impulse imparted to the ball on contact', () => {
+  const runShot = isSuper => {
+    const b = P.kickoff();
+    if (isSuper) b[0].superActive = 'cannonball';
+    Object.assign(b[0], { x: 460, y: 300, vx: 500, vy: 0 });
+    Object.assign(b[6], { x: 500, y: 300, vx: 0, vy: 0 });
+    P.step(b, 0);
+    return b[6].vx;
+  };
+  const normalVx = runShot(false);
+  const cannonVx = runShot(true);
+  assert.ok(cannonVx > normalVx * 2.0);
+});
+
+test('Magnet exerts an active attractive pull on the ball while in motion', () => {
+  const b = P.kickoff();
+  b[0].superActive = 'magnet';
+  Object.assign(b[0], { x: 350, y: 300, vx: 100, vy: 0 });
+  Object.assign(b[6], { x: 500, y: 300, vx: 0, vy: 0 });
+  for (let i = 0; i < 30; i++) P.step(b, P.DT);
+  assert.ok(b[6].vx < 0);
+});
+
+test('Colossus increases radius and mass during launch and restores them on stop', () => {
+  const b = P.kickoff();
+  P.applyStats(b[0], normal);
+  const origRadius = b[0].radius;
+  const origMass = b[0].mass;
+  b[0].superActive = 'colossus';
+  P.launch(b, [{ angle: 0, power: 0.5 }]);
+  assert.ok(Math.abs(b[0].radius - origRadius * 1.8) < 1e-6);
+  assert.ok(Math.abs(b[0].mass - origMass * 2.5) < 1e-6);
+  P.stop(b);
+  assert.ok(Math.abs(b[0].radius - origRadius) < 1e-6);
+  assert.ok(Math.abs(b[0].mass - origMass) < 1e-6);
+});
+
+test('Shockwave propels nearby players and the ball radially outward upon triggering', () => {
+  const b = P.kickoff();
+  Object.assign(b[0], { x: 400, y: 300 });
+  Object.assign(b[1], { x: 450, y: 300, vx: 0, vy: 0 });
+  Object.assign(b[6], { x: 400, y: 360, vx: 0, vy: 0 });
+  let shockRadius = null;
+  P.triggerShockwave(b[0], b, (source, radius) => { shockRadius = radius; });
+  assert.equal(shockRadius, 220);
+  assert.ok(b[1].vx > 0);
+  assert.ok(b[6].vy > 0);
+});
+
+test('Ghost phases through opposing players without collision but still hits the ball', () => {
+  const b = P.kickoff();
+  b[0].superActive = 'ghost';
+  Object.assign(b[0], { x: 400, y: 300, vx: 500, vy: 0 });
+  Object.assign(b[3], { x: 430, y: 300, vx: 0, vy: 0 });
+  P.step(b, 0);
+  assert.equal(b[0].vx, 500);
+  assert.equal(b[3].vx, 0);
+
+  Object.assign(b[0], { x: 460, y: 300, vx: 500, vy: 0 });
+  Object.assign(b[6], { x: 500, y: 300, vx: 0, vy: 0 });
+  P.step(b, 0);
+  assert.ok(b[6].vx > 0);
+});
+
+test('settled keeps a strict velocity boundary after squared-distance optimization', () => {
+  const bodies = P.kickoff();
+  assert.equal(P.settled(bodies), true);
+  bodies[0].vx = 2;
+  assert.equal(P.settled(bodies), false);
+  bodies[0].vx = 1.999;
+  assert.equal(P.settled(bodies), true);
+  bodies[0].omega = 0.05;
+  assert.equal(P.settled(bodies), false);
+});
+test('low-speed zero-spin motion brakes to rest without changing position integration', () => {
+  const bodies = P.kickoff(), b = bodies[0], dt = P.DT;
+  Object.assign(b, { vx: 0.2, vy: -0.3, omega: 0 });
+  const x = b.x + b.vx * dt, y = b.y + b.vy * dt;
+  P.step(bodies);
+  assert.ok(Math.abs(b.x - x) < 1e-12);
+  assert.ok(Math.abs(b.y - y) < 1e-12);
+  assert.equal(b.vx, 0);
+  assert.equal(b.vy, 0);
+});
+test('magnet attraction respects its distance bounds', () => {
+  const bodies = P.kickoff();
+  Object.assign(bodies[0], { x: 300, y: 300, superActive: 'magnet' });
+  P.step(bodies, P.DT);
+  assert.ok(bodies[6].vx < 0);
+  const distant = P.kickoff();
+  Object.assign(distant[0], { x: 180, y: 300, superActive: 'magnet' });
+  P.step(distant, P.DT);
+  assert.equal(distant[6].vx, 0);
+});
+test('shockwaves stay finite at coincident positions and repel nearby bodies', () => {
+  const source = { x: 300, y: 300, vx: 0, vy: 0, mass: 3 };
+  const center = { x: 300, y: 300, vx: 0, vy: 0, mass: 3 };
+  const nearby = { x: 400, y: 300, vx: 0, vy: 0, mass: 1 };
+  const far = { x: 600, y: 300, vx: 0, vy: 0, mass: 1 };
+  P.triggerShockwave(source, [source, center, nearby, far]);
+  assert.deepEqual([center.vx, center.vy], [0, 0]);
+  assert.ok(nearby.vx > 0);
+  assert.equal(far.vx, 0);
+  assert.ok([center, nearby, far].every(b => Number.isFinite(b.vx) && Number.isFinite(b.vy)));
+});
+test('zero-spin full-speed movement stays finite over long physics turns', () => {
+  const bodies = P.kickoff();
+  const plans = Array.from({ length: 6 }, (_, i) => ({ angle: i * Math.PI / 3, power: 1, spin: 0 }));
+  P.launch(bodies, plans);
+  for (let i = 0; i < 480; i++) {
+    P.step(bodies);
+    assert.ok(bodies.every(b => [b.x, b.y, b.vx, b.vy, b.omega].every(Number.isFinite)));
+  }
+});

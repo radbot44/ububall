@@ -9,7 +9,17 @@
 </head>
 <body><main class="ball-page">
   <header><a class="brand" href="/"><img src="uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a><nav aria-label="Main"><a class="quiet" href="/">Mint & collection</a><a class="quiet" href="/demo.html">Designer</a></nav></header>
-  <div class="game-heading"><h1>ububall</h1><button id="new-match">New match</button></div>
+  <div class="game-heading">
+    <h1>ububall</h1>
+    <div class="heading-actions">
+      <label class="toggle-switch" title="Toggle between compact and full stat profiles">
+        <input type="checkbox" id="toggle-full-stats">
+        <span class="toggle-track"></span>
+        <span>Full stats</span>
+      </label>
+      <button id="new-match">New match</button>
+    </div>
+  </div>
   <div class="arena-layout">
     <aside class="team-column home-column" aria-label="Your team">
       <div class="column-heading"><span class="home">Your team</span></div>
@@ -32,10 +42,11 @@
     <p class="hint">Click an ubu and pull back like a slingshot to aim and set power. Grab the spin dial on the ubu to curve your shot. You attack the right goal.</p>
     <p>Temporary values; no DNA changes. Set each stat from 0 to 1023. Normal is 511. Applying values resets the field and score, keeping your planned shot.</p>
     <label>Ubu <select id="stat-player"><option value="0">Your ubu 1</option><option value="1">Your ubu 2</option><option value="2">Your ubu 3</option><option value="3">CPU ubu 1</option><option value="4">CPU ubu 2</option><option value="5">CPU ubu 3</option></select></label>
+    <div class="controls"><label>Equipped Super <select id="stat-super"></select></label><img id="stat-super-thumb" class="stat-super-thumb" alt="" src="00_stalwart.png"><button id="fill-meter" type="button">Fill Super Meter (100%)</button></div>
     <div id="stat-inputs" class="stat-inputs"></div>
     <p id="stat-preview"></p>
     <div class="actions"><button id="apply-stats">Apply & reset field</button><button id="normal-stats">All stats normal</button><button id="reset-field">Reset field</button><button id="restore-shot" disabled>Reuse last shot at kickoff</button><label><input id="cpu-hold" type="checkbox"> Hold CPU launches for testing</label></div>
   </details>
   <details class="rules"><summary>How to play</summary><p>Both teams launch at the same time. The CPU plans from the field positions, without seeing your arrows. All three ubus can strike the ball, block shots, bump opponents, and enter the goal nets. After motion stops, plan again from the new positions. A goal resets the field; first to five wins.</p><p>Stats are temporary test values, separate from DNA. Spin curves travel and affects collisions. Practice ubus are custom characters, not minted collectibles. Matches stay in this browser and award no mint items.</p></details>
-  <dialog id="roster-dialog"><h2>Choose your team</h2><p>Choose a character for each slot. Empty slots use practice ubus.</p><div id="roster-slots"></div><p id="roster-status" role="status"></p><button id="load-collection">Load my collection</button><button id="more-collection" hidden>Load more</button><div id="roster-options"></div><div class="actions"><button id="start-match" class="primary">Start match</button><button id="cancel-roster">Cancel</button></div></dialog>
+  <dialog id="roster-dialog"><h2>Choose your team</h2><p>Choose a character for each slot. Empty slots use practice ubus.</p><div id="roster-slots"></div><div id="roster-super-picker" style="margin: 8px 0;"><label>Equipped Super <select id="roster-super"></select></label><div id="roster-super-grid" class="super-picker-grid"></div></div><p id="roster-status" role="status"></p><button id="load-collection">Load my collection</button><button id="more-collection" hidden>Load more</button><div id="roster-options"></div><div class="actions"><button id="start-match" class="primary">Start match</button><button id="cancel-roster">Cancel</button></div></dialog>
 </main></body></html>
