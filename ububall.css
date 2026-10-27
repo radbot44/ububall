@@ -1,6 +1,54 @@
 /* Ububall arena and layout */
 .ball-page { max-width: 1520px; width: min(1520px, calc(100% - 32px)); }
 .game-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.heading-actions { display: flex; align-items: center; gap: 16px; }
+.toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  transition: color 0.15s ease;
+}
+.toggle-switch:hover { color: var(--text); }
+.toggle-switch input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.toggle-track {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  vertical-align: middle;
+}
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2), background 0.2s ease;
+}
+.toggle-switch input:checked + .toggle-track {
+  background: color-mix(in srgb, var(--primary) 25%, var(--card));
+  border-color: var(--primary);
+}
+.toggle-switch input:checked + .toggle-track::after {
+  transform: translateX(14px);
+  background: var(--primary);
+}
+.toggle-switch input:focus-visible + .toggle-track {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
 
 /* Arena layout: Stadium in center at full size, columns on the outside */
 .arena-layout {
@@ -56,6 +104,7 @@
 .card-titles small { display: block; color: var(--muted); margin-top: 3px; font-size: 11px; }
 
 /* Stats box below ubu name */
+.ubu-stats-wrap { width: 100%; }
 .ubu-stats {
   display: flex;
   flex-direction: column;
@@ -65,8 +114,29 @@
   border-top: 1px solid #ffffff12;
   width: 100%;
 }
+.full-stats { display: none; }
+body.show-full-stats .compact-stats { display: none; }
+body.show-full-stats .full-stats { display: flex; }
+.stat-group-title {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 6px;
+  margin-bottom: 2px;
+}
+.stat-group-title:first-child { margin-top: 0; }
 .stat-row { display: flex; align-items: center; gap: 6px; font-size: 10px; }
-.stat-lbl { width: 64px; flex: none; color: var(--muted); font-size: 10px; line-height: 1; }
+.stat-lbl {
+  width: 66px;
+  flex: none;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .stat-track {
   flex: 1;
   height: 6px;

@@ -9,7 +9,17 @@
 </head>
 <body><main class="ball-page">
   <header><a class="brand" href="/"><img src="uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a><nav aria-label="Main"><a class="quiet" href="/">Mint & collection</a><a class="quiet" href="/demo.html">Designer</a></nav></header>
-  <div class="game-heading"><h1>ububall</h1><button id="new-match">New match</button></div>
+  <div class="game-heading">
+    <h1>ububall</h1>
+    <div class="heading-actions">
+      <label class="toggle-switch" title="Toggle between compact and full stat profiles">
+        <input type="checkbox" id="toggle-full-stats">
+        <span class="toggle-track"></span>
+        <span>Full stats</span>
+      </label>
+      <button id="new-match">New match</button>
+    </div>
+  </div>
   <div class="arena-layout">
     <aside class="team-column home-column" aria-label="Your team">
       <div class="column-heading"><span class="home">Your team</span></div>
