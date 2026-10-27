@@ -4,7 +4,7 @@ import * as auth from './auth.mjs';
 const { Mint } = mintModule;
 const ID = /^[A-Za-z0-9_-]{21}[AQgw]$/;
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: {
-  'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers
+  'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', ...headers
 } });
 function configuration(env) {
   const keys = JSON.parse(env.MINT_PUBLIC_KEYS || '{}');
@@ -112,7 +112,7 @@ export class MintRegistry extends DurableObject {
       serial: [['(certificate IS NULL)', 'ASC'], ['serial', 'ASC']],
       favorite: [['(certificate IS NULL)', 'ASC'], ['favorite', 'DESC'], ['issued_at', 'DESC'], ['serial', 'DESC']]
     }[sort];
-    if (!keys || (cursor && !/^[0-9]{12}$/.test(cursor))) return { error: 'Invalid collection sort or cursor.', status: 400 };
+    if (!Array.isArray(keys) || (cursor && !/^[0-9]{12}$/.test(cursor))) return { error: 'Invalid collection sort or cursor.', status: 400 };
     if (this.mint.needsRarityBackfill() && await this.ctx.storage.getAlarm() === null) {
       await this.ctx.storage.setAlarm(Date.now() + 1000);
     }

@@ -133,6 +133,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
       '123456789012345678')).map(row => row.serial);
     assert.deepEqual((await readCollection('rarity')).ubus.map(row => row.serial), rarityExpected);
     assert.equal((await fetch('/api/ubus?sort=unexpected', { headers })).status, 400);
+    assert.equal((await fetch('/api/ubus?sort=toString', { headers })).status, 400);
     assert.equal((await fetch('/api/ubus?after=000000999999', { headers })).status, 400);
 
     const favorite = (data, h = headers) => fetch('/api/favorites', {
