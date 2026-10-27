@@ -17,6 +17,9 @@
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, dragPoint = null, spinClickStart = null, skaters = [], next = '';
   let isPortrait = false;
   const stadium = document.querySelector('.stadium');
+  const stageArea = document.querySelector('.stadium-stage-area');
+  const rinkStage = document.querySelector('.rink-stage');
+  const rinkWrap = document.querySelector('.rink-wrap');
   const btnFullscreen = $('btn-fullscreen'), btnRotate = $('btn-rotate');
   const radians = value => value * Math.PI / 180;
   const normalStats = () => ({
@@ -719,8 +722,80 @@
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
   if (document.body) themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { themeColors = null; if (skaters.length) draw(); });
+  function fitStadium() {
+    if (!stageArea || !rinkStage || !rinkWrap) return;
+    const isFs = isFullscreenActive();
+
+    if (!isPortrait && !isFs) {
+      rinkStage.style.width = '';
+      rinkStage.style.height = '';
+      rinkWrap.style.width = '';
+      rinkWrap.style.height = '';
+      rinkWrap.style.top = '';
+      rinkWrap.style.left = '';
+      rinkWrap.style.transform = '';
+      return;
+    }
+
+    let availW = stageArea.clientWidth || stadium?.clientWidth || 360;
+    let availH = stageArea.clientHeight;
+
+    if (!availH || !isFs) {
+      const vh = window.innerHeight || document.documentElement.clientHeight || 600;
+      availH = isPortrait ? Math.min(vh * 0.72, 680) : Math.min(vh * 0.8, 600);
+    }
+
+    availW = Math.max(120, availW);
+    availH = Math.max(120, availH);
+
+    if (isPortrait) {
+      const targetRatio = 3 / 5;
+      let stageW, stageH;
+      if (availW / availH > targetRatio) {
+        stageH = Math.floor(availH);
+        stageW = Math.floor(stageH * targetRatio);
+      } else {
+        stageW = Math.floor(availW);
+        stageH = Math.floor(stageW / targetRatio);
+      }
+
+      const wrapW = stageH;
+      const wrapH = stageW;
+
+      rinkStage.style.width = stageW + 'px';
+      rinkStage.style.height = stageH + 'px';
+
+      rinkWrap.style.width = wrapW + 'px';
+      rinkWrap.style.height = wrapH + 'px';
+      rinkWrap.style.top = '50%';
+      rinkWrap.style.left = '50%';
+      rinkWrap.style.transform = 'translate(-50%, -50%) rotate(-90deg)';
+    } else {
+      const targetRatio = 5 / 3;
+      let stageW, stageH;
+      if (availW / availH > targetRatio) {
+        stageH = Math.floor(availH);
+        stageW = Math.floor(stageH * targetRatio);
+      } else {
+        stageW = Math.floor(availW);
+        stageH = Math.floor(stageW / targetRatio);
+      }
+
+      rinkStage.style.width = stageW + 'px';
+      rinkStage.style.height = stageH + 'px';
+
+      rinkWrap.style.width = '100%';
+      rinkWrap.style.height = '100%';
+      rinkWrap.style.top = '';
+      rinkWrap.style.left = '';
+      rinkWrap.style.transform = '';
+    }
+  }
   function draw() {
-    const ratio = Math.min(devicePixelRatio || 1, 2), width = Math.max(1, Math.round(canvas.clientWidth * ratio)), height = Math.round(width * .6);
+    fitStadium();
+    const ratio = Math.min(devicePixelRatio || 1, 2);
+    const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
+    const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
     if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
     ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); ctx.clearRect(0, 0, 1000, 600);
     if (!themeColors) {
@@ -1496,6 +1571,10 @@
 
   showStats();
   document.addEventListener('visibilitychange', () => { lastTime = 0; });
-  new ResizeObserver(() => draw()).observe(canvas);
+  const ro = new ResizeObserver(() => draw());
+  ro.observe(canvas);
+  if (stadium) ro.observe(stadium);
+  if (stageArea) ro.observe(stageArea);
+  window.addEventListener('resize', () => draw());
   practice.slice(0, 3).forEach(addOption); newMatch(); requestAnimationFrame(frame);
 })();

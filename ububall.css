@@ -396,6 +396,14 @@ body.show-full-stats .full-stats { display: flex; }
   display: block;
 }
 
+.stadium-stage-area {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
 .rink-stage {
   position: relative;
   width: 100%;
@@ -404,6 +412,7 @@ body.show-full-stats .full-stats { display: flex; }
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: none;
 }
 .rink-wrap {
   position: relative;
@@ -503,16 +512,13 @@ body.show-full-stats .full-stats { display: flex; }
 /* Portrait orientation for stadium */
 .stadium.portrait-mode .rink-stage {
   aspect-ratio: 3 / 5;
-  width: min(100%, calc(70dvh * 3 / 5));
-  max-width: 440px;
+  max-width: 100%;
   margin: 0 auto;
 }
 .stadium.portrait-mode .rink-wrap {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 166.666667%;
-  height: 60%;
   transform: translate(-50%, -50%) rotate(-90deg);
   transform-origin: center center;
 }
@@ -542,27 +548,14 @@ body.show-full-stats .full-stats { display: flex; }
 body.stadium-fullscreen-active {
   overflow: hidden;
 }
-.stadium:fullscreen .rink-stage,
-.stadium.stadium-fullscreen .rink-stage {
+.stadium:fullscreen .stadium-stage-area,
+.stadium.stadium-fullscreen .stadium-stage-area {
   flex: 1 1 0;
   min-height: 0;
-  max-height: none;
-  height: auto;
   width: 100%;
-  margin: 0 auto;
-}
-.stadium:fullscreen:not(.portrait-mode) .rink-stage,
-.stadium.stadium-fullscreen:not(.portrait-mode) .rink-stage {
-  aspect-ratio: 5 / 3;
-  width: min(100vw, calc((100dvh - 140px) * 5 / 3));
-  height: auto;
-}
-.stadium:fullscreen.portrait-mode .rink-stage,
-.stadium.stadium-fullscreen.portrait-mode .rink-stage {
-  aspect-ratio: 3 / 5;
-  max-width: none;
-  width: min(100vw, calc((100dvh - 140px) * 3 / 5));
-  height: auto;
+  height: 100%;
+  padding: 4px 8px;
+  box-sizing: border-box;
 }
 
 .controls { display: flex; gap: 16px; align-items: center; margin: 16px 0; flex-wrap: wrap; }
