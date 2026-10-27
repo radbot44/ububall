@@ -61,8 +61,8 @@
         if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall);
       } else if (b.x < k.left + r) {
         for (const y of [k.goalTop, k.goalBottom]) {
-          const dx = k.left - b.x, dy = y - b.y, d = Math.hypot(dx, dy);
-          if (d < r && d > 0) reflect(b, dx / d, dy / d, r - d, 'post', onWall);
+          const dx = k.left - b.x, dy = y - b.y, d2 = dx * dx + dy * dy;
+          if (d2 < r * r && d2 > 0) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, r - d, 'post', onWall); }
         }
       }
     } else {
@@ -80,8 +80,8 @@
         if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall);
       } else if (b.x > k.right - r) {
         for (const y of [k.goalTop, k.goalBottom]) {
-          const dx = k.right - b.x, dy = y - b.y, d = Math.hypot(dx, dy);
-          if (d < r && d > 0) reflect(b, dx / d, dy / d, r - d, 'post', onWall);
+          const dx = k.right - b.x, dy = y - b.y, d2 = dx * dx + dy * dy;
+          if (d2 < r * r && d2 > 0) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, r - d, 'post', onWall); }
         }
       }
     } else {
@@ -95,8 +95,8 @@
       const cx = b.x < k.left + k.corner ? k.left + k.corner : b.x > k.right - k.corner ? k.right - k.corner : null;
       const cy = b.y < k.top + k.corner ? k.top + k.corner : b.y > k.bottom - k.corner ? k.bottom - k.corner : null;
       if (cx !== null && cy !== null) {
-        const dx = b.x - cx, dy = b.y - cy, d = Math.hypot(dx, dy), limit = k.corner - r;
-        if (d > limit) reflect(b, dx / d, dy / d, d - limit, 'wall', onWall);
+        const dx = b.x - cx, dy = b.y - cy, d2 = dx * dx + dy * dy, limit = k.corner - r;
+        if (limit > 0 && d2 > limit * limit) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, d - limit, 'wall', onWall); }
       }
     }
   }
@@ -104,8 +104,11 @@
     const isBall = a.team === -1 || b.team === -1;
     const ra = (isBall && a.team !== -1) ? Math.max(a.radius, a.reach || a.radius, 18) : a.radius;
     const rb = (isBall && b.team !== -1) ? Math.max(b.radius, b.reach || b.radius, 18) : b.radius;
-    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), radius = ra + rb;
-    if (d >= radius) return;
+    const dx = b.x - a.x, dy = b.y - a.y, radius = ra + rb;
+    // Early threshold check on squared distance avoids calculating Math.sqrt for non-colliding pairs.
+    const d2 = dx * dx + dy * dy;
+    if (d2 >= radius * radius) return;
+    const d = Math.sqrt(d2);
     const nx = d ? dx / d : 1, ny = d ? dy / d : 0, inverse = 1 / a.mass + 1 / b.mass;
     const correction = (radius - d) / inverse;
     a.x -= nx * correction / a.mass; a.y -= ny * correction / a.mass;
@@ -147,7 +150,8 @@
       b.rotation += b.omega * dt;
       b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - 6 * dt);
       b.x += b.vx * dt; b.y += b.vy * dt;
-      const speed = Math.hypot(b.vx, b.vy), factor = speed ? Math.max(0, speed - b.friction * dt) / speed : 0;
+      // Fast velocity magnitude via Math.sqrt avoids Math.hypot overhead in the 240Hz physics loop.
+      const speed = Math.sqrt(b.vx * b.vx + b.vy * b.vy), factor = speed ? Math.max(0, speed - b.friction * dt) / speed : 0;
       b.vx *= factor; b.vy *= factor;
     }
     for (let pass = 0; pass < 3; pass++) {
@@ -174,11 +178,11 @@
       b.omega = Math.max(-1, Math.min(1, plan.spin || 0)) * b.maxSpin;
     });
   }
-  function settled(bodies) { return bodies.every(b => Math.hypot(b.vx, b.vy) < 2 && Math.abs(b.omega) < .05); }
+  function settled(bodies) { return bodies.every(b => (b.vx * b.vx + b.vy * b.vy) < 4 && Math.abs(b.omega) < .05); }
   function stop(bodies) { for (const b of bodies) b.vx = b.vy = b.omega = 0; }
   function cpuPlans(bodies, random = Math.random) {
     const ball = bodies[6], players = bodies.slice(3, 6);
-    const attacker = players.reduce((a, b) => Math.hypot(a.x - ball.x, a.y - ball.y) < Math.hypot(b.x - ball.x, b.y - ball.y) ? a : b);
+    const attacker = players.reduce((a, b) => ((a.x - ball.x) ** 2 + (a.y - ball.y) ** 2) < ((b.x - ball.x) ** 2 + (b.y - ball.y) ** 2) ? a : b);
     return players.map(b => {
       let x, y;
       if (b === attacker) {
@@ -187,7 +191,7 @@
       } else if (b.slot === 0 || players.indexOf(attacker) === 0 && b.slot === 1) {
         x = 850; y = Math.max(245, Math.min(355, ball.y));
       } else { x = Math.min(790, ball.x + 140); y = ball.y < 300 ? 390 : 210; }
-      const distance = Math.hypot(x - b.x, y - b.y);
+      const dx = x - b.x, dy = y - b.y, distance = Math.sqrt(dx * dx + dy * dy);
       return { angle: Math.atan2(y - b.y, x - b.x), power: distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * b.friction * (distance + (b === attacker ? 220 : 0))) / (IMPULSE / b.mass)) };
     });
   }
