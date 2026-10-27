@@ -1,0 +1,3 @@
+## 2026-10-26 - Skip unnecessary distance and rotation work in Ububall
+**Learning:** Squared-distance comparisons can reject non-collisions before computing a square root. Velocity thresholds and stationary/zero-spin states offer similar early exits. In planning mode, caching trajectory previews across redraws avoids repeated path simulation without changing the physics model. Replacing `Math.hypot` with `Math.sqrt(dx * dx + dy * dy)` may introduce tiny floating-point differences; validate gameplay states and browser rendering rather than claiming exact numerical equivalence.
+**Action:** Prefer cheap rejection checks in hot loops, guard trigonometry when spin is zero, cache previews using field-and-plan state, and benchmark representative scenarios.

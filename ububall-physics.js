@@ -73,8 +73,8 @@
         if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall);
       } else if (b.x < k.left + r) {
         for (const y of [k.goalTop, k.goalBottom]) {
-          const dx = k.left - b.x, dy = y - b.y, d = Math.hypot(dx, dy);
-          if (d < r && d > 0) reflect(b, dx / d, dy / d, r - d, 'post', onWall);
+          const dx = k.left - b.x, dy = y - b.y, d2 = dx * dx + dy * dy;
+          if (d2 < r * r && d2 > 0) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, r - d, 'post', onWall); }
         }
       }
     } else {
@@ -92,8 +92,8 @@
         if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall);
       } else if (b.x > k.right - r) {
         for (const y of [k.goalTop, k.goalBottom]) {
-          const dx = k.right - b.x, dy = y - b.y, d = Math.hypot(dx, dy);
-          if (d < r && d > 0) reflect(b, dx / d, dy / d, r - d, 'post', onWall);
+          const dx = k.right - b.x, dy = y - b.y, d2 = dx * dx + dy * dy;
+          if (d2 < r * r && d2 > 0) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, r - d, 'post', onWall); }
         }
       }
     } else {
@@ -107,8 +107,8 @@
       const cx = b.x < k.left + k.corner ? k.left + k.corner : b.x > k.right - k.corner ? k.right - k.corner : null;
       const cy = b.y < k.top + k.corner ? k.top + k.corner : b.y > k.bottom - k.corner ? k.bottom - k.corner : null;
       if (cx !== null && cy !== null) {
-        const dx = b.x - cx, dy = b.y - cy, d = Math.hypot(dx, dy), limit = k.corner - r;
-        if (d > limit) reflect(b, dx / d, dy / d, d - limit, 'wall', onWall);
+        const dx = b.x - cx, dy = b.y - cy, d2 = dx * dx + dy * dy, limit = k.corner - r;
+        if (limit < 0 || d2 > limit * limit) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, d - limit, 'wall', onWall); }
       }
     }
   }
@@ -116,8 +116,9 @@
     const radius = 220;
     for (const b of bodies) {
       if (b === source) continue;
-      const dx = b.x - source.x, dy = b.y - source.y, d = Math.hypot(dx, dy) || 1;
-      if (d < radius) {
+      const dx = b.x - source.x, dy = b.y - source.y, d2 = dx * dx + dy * dy;
+      if (d2 > 0 && d2 < radius * radius) {
+        const d = Math.sqrt(d2);
         const force = (1 - d / radius) * 1100;
         const m = b.mass || 1;
         b.vx += (dx / d) * force / m;
@@ -132,8 +133,10 @@
 
     const ra = (isBall && a.team !== -1) ? Math.max(a.radius, a.reach || a.radius, 18) : a.radius;
     const rb = (isBall && b.team !== -1) ? Math.max(b.radius, b.reach || b.radius, 18) : b.radius;
-    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), radius = ra + rb;
-    if (d >= radius) return;
+    const dx = b.x - a.x, dy = b.y - a.y, radius = ra + rb;
+    const d2 = dx * dx + dy * dy;
+    if (d2 >= radius * radius) return;
+    const d = Math.sqrt(d2);
 
     if (!isBall && a.team !== b.team) {
       if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; }
@@ -145,7 +148,7 @@
       const ball = a.team === -1 ? a : b;
       if (player.superActive === 'sticky') {
         ball.stuckTo = player;
-        const ox = ball.x - player.x, oy = ball.y - player.y, od = Math.hypot(ox, oy) || 1;
+        const ox = ball.x - player.x, oy = ball.y - player.y, od = Math.sqrt(ox * ox + oy * oy) || 1;
         const targetDist = player.radius + ball.radius;
         ball.stickOffset = { x: (ox / od) * targetDist, y: (oy / od) * targetDist };
       }
@@ -219,8 +222,10 @@
     if (ball && !ball.stuckTo) {
       for (const b of bodies) {
         if (b.team !== -1 && b.superActive === 'magnet') {
-          const dx = b.x - ball.x, dy = b.y - ball.y, d = Math.hypot(dx, dy);
-          if (d > b.radius + ball.radius && d < 260) {
+          const dx = b.x - ball.x, dy = b.y - ball.y, d2 = dx * dx + dy * dy;
+          const minDist = b.radius + ball.radius;
+          if (d2 > minDist * minDist && d2 < 260 * 260) {
+            const d = Math.sqrt(d2);
             const pull = 650 * (1 - d / 260);
             ball.vx += (dx / d) * pull * dt;
             ball.vy += (dy / d) * pull * dt;
@@ -242,13 +247,21 @@
       }
       // Experimental curve: rotate velocity without adding translational energy.
       const curve = b.curveFactor !== undefined ? b.curveFactor : (b.team === -1 ? .03 : .04);
-      const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
-      b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
+      if (b.omega !== 0) {
+        const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
+        b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
+      }
       b.rotation += b.omega * dt;
       b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - 6 * dt);
       b.x += b.vx * dt; b.y += b.vy * dt;
-      const speed = Math.hypot(b.vx, b.vy), factor = speed ? Math.max(0, speed - b.friction * dt) / speed : 0;
-      b.vx *= factor; b.vy *= factor;
+      const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = b.friction * dt;
+      if (speed2 <= deceleration * deceleration) {
+        b.vx = b.vy = 0;
+      } else {
+        const speed = Math.sqrt(speed2);
+        const factor = Math.max(0, speed - deceleration) / speed;
+        b.vx *= factor; b.vy *= factor;
+      }
     }
     for (let pass = 0; pass < 3; pass++) {
       for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) collide(bodies[i], bodies[j], onCollide, bodies, onShockwave);
@@ -293,7 +306,7 @@
       b.omega = Math.max(-1, Math.min(1, plan.spin || 0)) * b.maxSpin;
     });
   }
-  function settled(bodies) { return bodies.every(b => Math.hypot(b.vx, b.vy) < 2 && Math.abs(b.omega) < .05); }
+  function settled(bodies) { return bodies.every(b => b.vx * b.vx + b.vy * b.vy < 4 && Math.abs(b.omega) < .05); }
   function stop(bodies) {
     for (const b of bodies) {
       b.vx = b.vy = b.omega = 0;
@@ -310,7 +323,7 @@
   }
   function cpuPlans(bodies, random = Math.random) {
     const ball = bodies[6], players = bodies.slice(3, 6);
-    const attacker = players.reduce((a, b) => Math.hypot(a.x - ball.x, a.y - ball.y) < Math.hypot(b.x - ball.x, b.y - ball.y) ? a : b);
+    const attacker = players.reduce((a, b) => ((a.x - ball.x) ** 2 + (a.y - ball.y) ** 2) < ((b.x - ball.x) ** 2 + (b.y - ball.y) ** 2) ? a : b);
     return players.map(b => {
       let x, y;
       if (b === attacker) {
@@ -319,7 +332,7 @@
       } else if (b.slot === 0 || players.indexOf(attacker) === 0 && b.slot === 1) {
         x = 850; y = Math.max(245, Math.min(355, ball.y));
       } else { x = Math.min(790, ball.x + 140); y = ball.y < 300 ? 390 : 210; }
-      const distance = Math.hypot(x - b.x, y - b.y);
+      const dx = x - b.x, dy = y - b.y, distance = Math.sqrt(dx * dx + dy * dy);
       return { angle: Math.atan2(y - b.y, x - b.x), power: distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * b.friction * (distance + (b === attacker ? 220 : 0))) / (IMPULSE / b.mass)) };
     });
   }
