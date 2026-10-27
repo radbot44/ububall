@@ -120,6 +120,7 @@
   function tradingCard(item) {
     const card = document.createElement('article');
     card.className = 'trading-card';
+    card.dataset.finish = item.model.grade;
     card.style.setProperty('--card-hue', String(155 + item.rarity.percentile * 1.5));
     if (item.rarity.percentile >= 95) card.classList.add('foil');
     const signX = Math.random() < .5 ? -1 : 1, signY = Math.random() < .5 ? -1 : 1;
@@ -136,8 +137,17 @@
     card.style.setProperty('--float-dur', `${(3.0 + Math.random() * 1.2).toFixed(2)}s`);
     card.style.setProperty('--float-delay', `${dur.toFixed(2)}s`);
     const cardEffects = [];
+    // Share the renderer's smoothed light source with every printed foil surface.
+    cardEffects.push((x, y) => {
+      card.style.setProperty('--foil-angle', `${125 + x * 30 - y * 20}deg`);
+      card.style.setProperty('--foil-shadow-x', `${-x * 1.5}px`);
+      card.style.setProperty('--foil-shadow-y', `${2 - y}px`);
+      card.style.setProperty('--foil-glint', String(.45 + .5 * Math.abs(x * .7 - y * .3)));
+    });
     const cardBg = ubuRender.cardMaterials?.(item.model, cardEffects);
     if (cardBg) card.append(cardBg);
+    const hologram = document.createElement('div'); hologram.className = 'card-hologram'; hologram.setAttribute('aria-hidden', 'true');
+    card.append(hologram);
     const top = document.createElement('div'); top.className = 'card-top';
     const brand = document.createElement('img'); brand.src = 'uburoom-wordmark-brand.svg'; brand.alt = 'uburoom';
     const serialNum = item.result.certificate?.serial || '';
@@ -146,12 +156,32 @@
     top.append(brand, favBtn, serial);
     const art = document.createElement('div'); art.className = 'card-art'; art.append(ubuRender(item.model, 'oomark', card, cardEffects));
     const name = document.createElement('h3'); name.textContent = item.model.parts.fullName;
-    const stats = document.createElement('div'); stats.className = 'card-stats';
-    for (const [label, value] of [['Rarity', `${item.rarity.percentile.toFixed(3)} / 100`], ['Ubuquity', item.model.grade]]) {
-      const stat = document.createElement('div'), caption = document.createElement('span'), number = document.createElement('strong');
-      caption.textContent = label; number.textContent = value; if (label === 'Ubuquity') number.dataset.grade = item.model.grade; stat.append(caption, number); stats.append(stat);
+    const badge = document.createElement('div'); badge.className = 'card-ubuquity'; badge.dataset.grade = item.model.grade;
+    const caption = document.createElement('span'); caption.className = 'badge-caption'; caption.textContent = 'Ubuquity';
+    const lettering = document.createElement('strong'); lettering.className = 'grade-lettering'; lettering.textContent = item.model.grade;
+    badge.append(caption, lettering);
+    const stats = document.createElement('section'); stats.className = 'card-stats'; stats.setAttribute('aria-label', 'Average stats by group');
+    const statsTitle = document.createElement('h4'); statsTitle.textContent = 'Stat profile'; stats.append(statsTitle);
+    const groups = [
+      ['Movement', '#76b9ef', ['impulse', 'traction', 'spin', 'curve']],
+      ['Physical', '#42c66b', ['size', 'mass', 'bounciness', 'grip']],
+      ['Engagement', '#ff9954', ['power', 'reach', 'strength', 'stability']],
+      ['Super', '#ff7197', ['efficiency', 'synergy', 'chemistry']]
+    ];
+    for (const [label, color, keys] of groups) {
+      const average = keys.reduce((sum, key) => sum + item.model.stats[key], 0) / keys.length;
+      const row = document.createElement('div'), caption = document.createElement('span'), bar = document.createElement('div'), fill = document.createElement('i');
+      row.className = 'card-stat'; row.style.setProperty('--stat-color', color);
+      caption.textContent = label; bar.className = 'stat-bar';
+      bar.setAttribute('role', 'meter'); bar.setAttribute('aria-label', label);
+      bar.setAttribute('aria-valuemin', '0'); bar.setAttribute('aria-valuemax', '255'); bar.setAttribute('aria-valuenow', average.toFixed(2));
+      fill.style.width = `${average / 255 * 100}%`; bar.append(fill, caption); row.append(bar); stats.append(row);
     }
-    card.append(top, art, name, stats);
+    const rarity = document.createElement('div'); rarity.className = 'card-rarity';
+    const rarityCaption = document.createElement('span'), rarityValue = document.createElement('strong');
+    rarityCaption.textContent = 'Appearance rarity'; rarityValue.textContent = `${item.rarity.percentile.toFixed(3)} / 100`;
+    rarity.append(rarityCaption, rarityValue);
+    card.append(top, badge, art, name, stats, rarity);
     return card;
   }
   function showReveal() {
