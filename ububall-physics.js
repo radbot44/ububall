@@ -4,14 +4,14 @@
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
   const SUPERS = Object.freeze([
-    { id: 0, key: 'stalwart', name: 'Stalwart', desc: 'Become an immovable anchor for this turn.' },
-    { id: 1, key: 'knockout', name: 'Knockout', desc: 'Knock out the next opponent touched; they cannot move next turn.' },
-    { id: 2, key: 'sticky', name: 'Sticky', desc: 'Grab onto the ball on contact and hold possession.' },
-    { id: 3, key: 'cannonball', name: 'Cannonball', desc: 'Blast the ball with explosive impulse on contact.' },
-    { id: 4, key: 'magnet', name: 'Magnet', desc: 'Pull the ball toward you while moving across the rink.' },
-    { id: 5, key: 'colossus', name: 'Colossus', desc: 'Swell in size and mass for massive coverage.' },
-    { id: 6, key: 'shockwave', name: 'Shockwave', desc: 'Release a radial shockwave repelling players and the ball.' },
-    { id: 7, key: 'ghost', name: 'Ghost', desc: 'Phase through opposing players without collision.' }
+    { id: 0, key: 'stalwart', name: 'Stalwart', desc: 'Become an immovable anchor for this turn.', icon: '00_stalwart.png' },
+    { id: 1, key: 'knockout', name: 'Knockout', desc: 'Knock out the next opponent touched; they cannot move next turn.', icon: '01_knockout.png' },
+    { id: 2, key: 'sticky', name: 'Sticky', desc: 'Grab onto the ball on contact and hold possession.', icon: '02_sticky.png' },
+    { id: 3, key: 'cannonball', name: 'Cannonball', desc: 'Blast the ball with explosive impulse on contact.', icon: '03_cannonball.png' },
+    { id: 4, key: 'magnet', name: 'Magnet', desc: 'Pull the ball toward you while moving across the rink.', icon: '04_magnet.png' },
+    { id: 5, key: 'colossus', name: 'Colossus', desc: 'Swell in size and mass for massive coverage.', icon: '05_colossus.png' },
+    { id: 6, key: 'shockwave', name: 'Shockwave', desc: 'Release a radial shockwave repelling players and the ball.', icon: '06_shockwave.png' },
+    { id: 7, key: 'ghost', name: 'Ghost', desc: 'Phase through opposing players without collision.', icon: '07_ghost.png' }
   ]);
   function multiplier(raw) {
     if (!Number.isInteger(raw) || raw < 0 || raw > 255) throw new RangeError('Stat must be an integer from 0 to 255.');

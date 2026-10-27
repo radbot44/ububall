@@ -5,6 +5,12 @@
   const ballMark = new Image();
   ballMark.src = 'uburoom-oomark-brand.svg';
   ballMark.onload = () => { if (skaters.length) draw(); };
+  const superImages = P.SUPERS.map(s => {
+    const img = new Image();
+    img.src = s.icon;
+    img.onload = () => { if (skaters.length) draw(); };
+    return img;
+  });
   const practice = Array.from({ length: 6 }, () => ({ model: ubu.decode(ubu.randomDNA()), label: 'Practice ubu' }));
   let roster = practice.slice(0, 3), draft = [...roster], rosterSlot = 0;
   let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
@@ -96,7 +102,7 @@
     }
     ctx.restore();
   }
-  function kickoff() {
+  function kickoff(isNewMatch = false) {
     clearEffects();
     lastTouchByTeam = { 0: null, 1: null }; scoringPlayer = null;
     const oldBodies = bodies;
@@ -109,13 +115,13 @@
         b.voice = entry.model.voice;
         b.name = entry.model.parts?.fullName;
         b.equippedSuper = entry.equippedSuper || P.SUPERS[(entry.model.supers?.[0] ?? i) % 8];
-        if (oldBodies?.[i]?.meter !== undefined) {
-          b.meter = oldBodies[i].meter;
-          b.stunned = oldBodies[i].stunned || false;
-        } else {
+        if (isNewMatch) {
           const rating = entry.model.rating ?? 511;
           b.meter = Math.min(100, Math.max(0, (rating / 1020) * 100));
           b.stunned = false;
+        } else {
+          b.meter = oldBodies?.[i]?.meter ?? 0;
+          b.stunned = oldBodies?.[i]?.stunned || false;
         }
         b.superArm = false;
         b.superActive = null;
@@ -201,7 +207,16 @@
     const topRow = document.createElement('div'); topRow.className = 'super-row';
     const label = document.createElement('span'); label.className = 'super-name-badge'; label.id = `super-name-${playerIndex}`;
     const initialSuper = bodies?.[playerIndex]?.equippedSuper || teamEntries[playerIndex]?.equippedSuper || P.SUPERS[0];
-    label.textContent = `⚡ ${initialSuper.name}`;
+    const icon = document.createElement('img');
+    icon.className = 'super-icon';
+    icon.id = `super-icon-${playerIndex}`;
+    icon.src = initialSuper.icon;
+    icon.alt = initialSuper.name;
+    icon.title = `${initialSuper.name}: ${initialSuper.desc}`;
+    const nameSpan = document.createElement('span');
+    nameSpan.id = `super-name-text-${playerIndex}`;
+    nameSpan.textContent = initialSuper.name;
+    label.append(icon, nameSpan);
     const pct = document.createElement('span'); pct.className = 'super-pct'; pct.id = `super-pct-${playerIndex}`;
     pct.textContent = `${Math.round(bodies?.[playerIndex]?.meter ?? 0)}%`;
     topRow.append(label, pct);
@@ -259,8 +274,14 @@
       if (pctNode) pctNode.textContent = `${Math.round(b.meter || 0)}%`;
       const fillNode = $(`super-fill-${i}`);
       if (fillNode) fillNode.style.width = `${Math.min(100, Math.round(b.meter || 0))}%`;
-      const nameNode = $(`super-name-${i}`);
-      if (nameNode) nameNode.textContent = `⚡ ${b.equippedSuper?.name || 'Stalwart'}`;
+      const textNode = $(`super-name-text-${i}`);
+      if (textNode) textNode.textContent = b.equippedSuper?.name || 'Stalwart';
+      const iconNode = $(`super-icon-${i}`);
+      if (iconNode && b.equippedSuper?.icon) {
+        iconNode.src = b.equippedSuper.icon;
+        iconNode.alt = b.equippedSuper.name;
+        iconNode.title = `${b.equippedSuper.name}: ${b.equippedSuper.desc}`;
+      }
       if (i < 3) {
         const armBtn = $(`super-arm-${i}`);
         if (armBtn) {
@@ -312,7 +333,7 @@
   }
   function newMatch() {
     window.ubuAudio?.stop();
-    roster = [...draft]; buildTeam(); bodies = kickoff(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
+    roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     resetPlans(); say('Pull back from an ubu to aim and launch, or turn its spin dial.'); draw();
   }
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
@@ -710,6 +731,14 @@
         ctx.shadowColor = auraColor;
         ctx.shadowBlur = 14;
         ctx.stroke();
+
+        const superIdx = b.equippedSuper?.id ?? 0;
+        const icon = superImages[superIdx];
+        if (icon && icon.complete && icon.naturalWidth) {
+          const sz = 22;
+          ctx.shadowBlur = 8;
+          ctx.drawImage(icon, b.x - sz / 2, b.y - b.radius - sz - 4, sz, sz);
+        }
         ctx.restore();
       }
       if (b.stunned) {
@@ -1085,8 +1114,10 @@
   }
   function updateRosterSuperPicker() {
     const picker = $('roster-super');
+    const grid = $('roster-super-grid');
     if (!picker) return;
     picker.replaceChildren();
+    if (grid) grid.replaceChildren();
     const entry = draft[rosterSlot];
     if (!entry) return;
     const available = entry?.model?.supers
@@ -1100,6 +1131,25 @@
       opt.textContent = `${s.name}: ${s.desc}`;
       if (s.id === currentId) opt.selected = true;
       picker.append(opt);
+
+      if (grid) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'super-picker-btn';
+        btn.setAttribute('aria-pressed', String(s.id === currentId));
+        btn.title = `${s.name}: ${s.desc}`;
+        const img = document.createElement('img');
+        img.src = s.icon;
+        img.alt = s.name;
+        const txt = document.createElement('span');
+        txt.textContent = s.name;
+        btn.append(img, txt);
+        btn.onclick = () => {
+          draft[rosterSlot].equippedSuper = s;
+          rosterSlots();
+        };
+        grid.append(btn);
+      }
     });
     picker.onchange = () => {
       draft[rosterSlot].equippedSuper = P.SUPERS[Number(picker.value)];
@@ -1111,7 +1161,13 @@
     draft.forEach((entry, i) => {
       const button = document.createElement('button');
       const superObj = entry.equippedSuper || P.SUPERS[(entry.model?.supers?.[0] ?? i) % 8];
-      button.textContent = `${i + 1}. ${entry.model.parts.fullName} · ⚡ ${superObj.name}`;
+      const icon = document.createElement('img');
+      icon.className = 'slot-super-icon';
+      icon.src = superObj.icon;
+      icon.alt = superObj.name;
+      const text = document.createElement('span');
+      text.textContent = `${i + 1}. ${entry.model.parts.fullName} · ${superObj.name} `;
+      button.append(text, icon);
       button.setAttribute('aria-pressed', String(i === rosterSlot));
       button.onclick = () => { rosterSlot = i; rosterSlots(); };
       $('roster-slots').append(button);
@@ -1187,6 +1243,7 @@
       const chosen = P.SUPERS[Number(statSuper.value)];
       if (bodies[idx]) bodies[idx].equippedSuper = chosen;
       if (teamEntries[idx]) teamEntries[idx].equippedSuper = chosen;
+      if ($('stat-super-thumb')) $('stat-super-thumb').src = chosen.icon;
       sync(); draw();
     };
   }
@@ -1219,7 +1276,9 @@
     const idx = Number($('stat-player').value);
     for (const key of Object.keys(normalStats())) $('stat-' + key).value = stats[idx][key];
     if ($('stat-super') && bodies?.[idx]) {
-      $('stat-super').value = bodies[idx].equippedSuper?.id ?? 0;
+      const s = bodies[idx].equippedSuper || P.SUPERS[0];
+      $('stat-super').value = s.id;
+      if ($('stat-super-thumb')) $('stat-super-thumb').src = s.icon;
     }
     previewStats();
   }

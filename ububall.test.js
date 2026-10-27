@@ -268,6 +268,7 @@ test('SUPERS registry exposes all 8 canonical abilities with consistent metadata
     assert.equal(s.key, keys[i]);
     assert.ok(typeof s.name === 'string' && s.name.length > 0);
     assert.ok(typeof s.desc === 'string' && s.desc.length > 0);
+    assert.ok(typeof s.icon === 'string' && s.icon.endsWith('.png'));
   });
 });
 

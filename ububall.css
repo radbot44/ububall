@@ -173,6 +173,9 @@ body.show-full-stats .full-stats { display: flex; }
   font-size: 11px;
 }
 .super-name-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 700;
   color: #ff7197;
   font-size: 11px;
@@ -180,6 +183,67 @@ body.show-full-stats .full-stats { display: flex; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.super-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  flex: none;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px;
+}
+.super-panel:hover .super-icon {
+  transform: scale(1.08);
+  transition: transform 0.15s ease;
+}
+.slot-super-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 6px;
+  object-fit: contain;
+}
+.super-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 10px 0;
+}
+.super-picker-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 10px;
+  color: var(--text);
+}
+.super-picker-btn img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+.super-picker-btn[aria-pressed="true"] {
+  border-color: #ff7197;
+  background: color-mix(in srgb, #ff7197 20%, var(--elevated));
+  box-shadow: 0 0 10px rgba(255, 113, 151, 0.4);
+}
+.stat-super-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.08);
+  vertical-align: middle;
+  margin-left: 8px;
 }
 .super-pct {
   font-size: 10px;
