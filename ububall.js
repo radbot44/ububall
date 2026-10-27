@@ -157,7 +157,7 @@
   function circle(x, y, r, color, width = 2) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
   function computeBallTrajectory(startX, startY, initVx, initVy, initialSpin) {
     const points = [{ x: startX, y: startY, dist: 0 }];
-    let currX = startX, currY = startY;
+    let currX = startX, currY = startY, prevX = startX, prevY = startY;
     let vx = initVx, vy = initVy;
     let omega = (initialSpin || 0) * 8;
     const curve = 0.03;
@@ -228,9 +228,9 @@
       const factor = Math.max(0, speed - friction * dt) / speed;
       vx *= factor; vy *= factor;
 
-      const prev = points[points.length - 1];
-      const stepD = Math.hypot(currX - prev.x, currY - prev.y);
+      const stepD = Math.hypot(currX - prevX, currY - prevY);
       totalDist += stepD;
+      prevX = currX; prevY = currY;
       if (s % 2 === 1 || s === 479 || totalDist >= MAX_PATH_LEN) {
         points.push({ x: currX, y: currY, dist: totalDist });
       }
@@ -251,7 +251,7 @@
     let omega = (plan.spin || 0) * (body.maxSpin || 8);
     const curve = body.curveFactor !== undefined ? body.curveFactor : 0.04;
     const friction = body.friction || 150;
-    let currX = body.x, currY = body.y;
+    let currX = body.x, currY = body.y, prevX = body.x, prevY = body.y;
     const r = body.radius;
     const reach = Math.max(r, body.reach || r, 18);
     const k = P.rink;
@@ -382,9 +382,9 @@
       const factor = Math.max(0, speed - friction * dt) / speed;
       vx *= factor; vy *= factor;
 
-      const prev = points[points.length - 1];
-      const stepD = Math.hypot(currX - prev.x, currY - prev.y);
+      const stepD = Math.hypot(currX - prevX, currY - prevY);
       totalDist += stepD;
+      prevX = currX; prevY = currY;
       if (s % 2 === 1 || s === 599 || totalDist >= MAX_PATH_LEN) {
         points.push({ x: currX, y: currY, dist: totalDist });
       }
@@ -393,81 +393,22 @@
     return { points, impacts, ballTrajectory };
   }
   function drawTrajectory(body, plan, trajectoryData, color) {
+    if (!plan || plan.power <= 0) return;
     const points = trajectoryData?.points || [];
-    if (points.length < 2) return;
     const impulse = body.impulse || P.IMPULSE;
     const impulseRatio = impulse / P.IMPULSE;
     const ringR = Math.max(body.radius, body.reach || body.radius, 18) + 2;
     const maxArrowDist = Math.max(20, 110 * impulseRatio * plan.power);
-    const targetEndDist = ringR + maxArrowDist;
 
-    function getPointAtDist(targetD) {
-      if (targetD <= 0) return { x: points[0].x, y: points[0].y, idx: 0 };
+    // 1. Dashed trajectory path (separate from the impulse arrow)
+    if (points.length > 1) {
       for (let i = 1; i < points.length; i++) {
-        if (points[i].dist >= targetD) {
-          const p0 = points[i - 1], p1 = points[i];
-          const t = (targetD - p0.dist) / (p1.dist - p0.dist || 1);
-          return {
-            x: p0.x + (p1.x - p0.x) * t,
-            y: p0.y + (p1.y - p0.y) * t,
-            idx: i
-          };
-        }
-      }
-      const last = points[points.length - 1];
-      const prev = points[points.length - 2] || { x: body.x, y: body.y };
-      const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
-      const extra = targetD - last.dist;
-      return {
-        x: last.x + Math.cos(angle) * extra,
-        y: last.y + Math.sin(angle) * extra,
-        idx: points.length
-      };
-    }
-
-    const basePt = getPointAtDist(ringR);
-    const endPt = getPointAtDist(targetEndDist);
-
-    // 1. Solid arrow starting from basePt at the hitbox ring up to endPt
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(basePt.x, basePt.y);
-    for (let i = basePt.idx; i < Math.min(endPt.idx, points.length); i++) {
-      ctx.lineTo(points[i].x, points[i].y);
-    }
-    ctx.lineTo(endPt.x, endPt.y);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-
-    // Arrowhead at endPt
-    const pPrev = (endPt.idx > basePt.idx && endPt.idx - 1 < points.length) ? points[endPt.idx - 1] : basePt;
-    const tipAngle = Math.atan2(endPt.y - pPrev.y, endPt.x - pPrev.x);
-    for (const offset of [-0.55, 0.55]) {
-      line(endPt.x, endPt.y, endPt.x - Math.cos(tipAngle + offset) * 14, endPt.y - Math.sin(tipAngle + offset) * 14, color, 4);
-    }
-    ctx.restore();
-
-    // 2. Dashed trajectory line beyond endPt, fading away at about a rink-height (480px)
-    if (endPt.idx < points.length) {
-      const d = points[endPt.idx].dist;
-      const alpha = Math.max(0, Math.min(1, (480 - d) / 180));
-      if (alpha > 0.01) {
-        ctx.save();
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = alpha;
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(endPt.x, endPt.y);
-        ctx.lineTo(points[endPt.idx].x, points[endPt.idx].y);
-        ctx.stroke();
-        ctx.restore();
-      }
-      for (let i = endPt.idx + 1; i < points.length; i++) {
         const d = points[i].dist;
+        if (d < ringR) continue;
+        const p0 = points[i - 1].dist < ringR ? {
+          x: body.x + (points[i].x - body.x) * (ringR / (points[i].dist || 1)),
+          y: body.y + (points[i].y - body.y) * (ringR / (points[i].dist || 1))
+        } : points[i - 1];
         const alpha = Math.max(0, Math.min(1, (480 - d) / 180));
         if (alpha <= 0.01) continue;
         ctx.save();
@@ -476,12 +417,34 @@
         ctx.globalAlpha = alpha;
         ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.moveTo(points[i - 1].x, points[i - 1].y);
+        ctx.moveTo(p0.x, p0.y);
         ctx.lineTo(points[i].x, points[i].y);
         ctx.stroke();
         ctx.restore();
       }
     }
+
+    // 2. Solid impulse arrow coming out of the hitbox ring in plan.angle
+    const startX = body.x + Math.cos(plan.angle) * ringR;
+    const startY = body.y + Math.sin(plan.angle) * ringR;
+    const endX = startX + Math.cos(plan.angle) * maxArrowDist;
+    const endY = startY + Math.sin(plan.angle) * maxArrowDist;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(endX, endY);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Arrowhead at the tip of the impulse arrow
+    const tipAngle = plan.angle;
+    for (const offset of [-0.55, 0.55]) {
+      line(endX, endY, endX - Math.cos(tipAngle + offset) * 14, endY - Math.sin(tipAngle + offset) * 14, color, 4);
+    }
+    ctx.restore();
 
     // 3. Terminating small circle if path stopped naturally
     const finalPt = points[points.length - 1];
