@@ -325,24 +325,143 @@ body.show-full-stats .full-stats { display: flex; }
   border-radius: 16px;
   overflow: hidden;
   border: 1px solid var(--border);
+  transition: max-width 0.2s ease, border-radius 0.2s ease;
 }
-.scoreboard { display: flex; align-items: center; justify-content: center; gap: 32px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
-.scoreboard > span { display: flex; align-items: center; gap: 12px; font-weight: 500; }
+.scoreboard {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.scoreboard-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+}
+.scoreboard-content > span {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 500;
+}
 .scoreboard strong { font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; }
 .home { color: var(--primary); }
 .away { color: var(--secondary); }
-.scoreboard > div { text-align: center; font-size: 14px; }
+.phase-info { text-align: center; font-size: 14px; }
 .scoreboard small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
 
-.rink-wrap { position: relative; aspect-ratio: 5 / 3; }
+.stadium-toolbar {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.stadium-tool-btn {
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+  border-radius: 8px;
+  background: var(--elevated);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  touch-action: manipulation;
+}
+.stadium-tool-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+  border-color: var(--border);
+}
+.stadium-tool-btn:active {
+  transform: scale(0.94);
+}
+.stadium-tool-btn[aria-pressed="true"] {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 18%, var(--card));
+  border-color: var(--primary);
+}
+.stadium-tool-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.rink-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 5 / 3;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rink-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 5 / 3;
+}
 #rink { display: block; width: 100%; height: 100%; touch-action: none; }
 #skaters { position: absolute; inset: 0; pointer-events: none; }
 .skater { position: absolute; width: 5%; aspect-ratio: 1; transform: translate(-50%, -50%); }
 .skater svg { width: 100%; height: 100%; display: block; }
 #game-status { margin: 10px 0 4px; padding: 0 16px; color: var(--muted); text-align: center; font-size: 13px; }
 
-/* Launch button in stadium */
-.stadium-actions { display: flex; justify-content: center; align-items: center; padding: 8px 0 16px; }
+/* Launch and HUD actions in stadium */
+.stadium-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px 16px;
+}
+.stadium-super-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 42px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 21px;
+  border: 1px solid var(--border);
+  background: var(--elevated);
+  color: var(--muted);
+  cursor: default;
+  transition: all 0.15s ease;
+  user-select: none;
+  touch-action: manipulation;
+}
+.stadium-super-btn .super-icon {
+  width: 20px;
+  height: 20px;
+}
+.stadium-super-btn:not(:disabled) {
+  background: color-mix(in srgb, #ff7197 22%, var(--card));
+  border-color: #ff7197;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(255, 113, 151, 0.45);
+  cursor: pointer;
+}
+.stadium-super-btn.armed {
+  background: #ff7197;
+  color: #0b0d10;
+  border-color: #ffffff;
+  box-shadow: 0 0 18px rgba(255, 113, 151, 0.9);
+}
+.stadium.goal-phase #stadium-super-btn {
+  display: none;
+}
 #launch {
   min-width: 160px;
   min-height: 42px;
@@ -381,6 +500,71 @@ body.show-full-stats .full-stats { display: flex; }
   100% { transform: scale(1.06); box-shadow: 0 14px 40px #000f, 0 0 0 4px var(--primary), 0 0 36px rgba(255, 153, 84, 0.9); }
 }
 
+/* Portrait orientation for stadium */
+.stadium.portrait-mode .rink-stage {
+  aspect-ratio: 3 / 5;
+  width: min(100%, calc(70dvh * 3 / 5));
+  max-width: 440px;
+  margin: 0 auto;
+}
+.stadium.portrait-mode .rink-wrap {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 166.666667%;
+  height: 60%;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  transform-origin: center center;
+}
+.stadium.portrait-mode #game-status {
+  font-size: 12px;
+  margin: 6px 0 2px;
+}
+
+/* Fullscreen mode (native API and CSS fallback) */
+.stadium:fullscreen,
+.stadium.stadium-fullscreen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border-radius: 0;
+  border: 0;
+  z-index: 99999;
+  background: var(--background);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+body.stadium-fullscreen-active {
+  overflow: hidden;
+}
+.stadium:fullscreen .rink-stage,
+.stadium.stadium-fullscreen .rink-stage {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  height: auto;
+  width: 100%;
+  margin: 0 auto;
+}
+.stadium:fullscreen:not(.portrait-mode) .rink-stage,
+.stadium.stadium-fullscreen:not(.portrait-mode) .rink-stage {
+  aspect-ratio: 5 / 3;
+  width: min(100vw, calc((100dvh - 140px) * 5 / 3));
+  height: auto;
+}
+.stadium:fullscreen.portrait-mode .rink-stage,
+.stadium.stadium-fullscreen.portrait-mode .rink-stage {
+  aspect-ratio: 3 / 5;
+  max-width: none;
+  width: min(100vw, calc((100dvh - 140px) * 3 / 5));
+  height: auto;
+}
+
 .controls { display: flex; gap: 16px; align-items: center; margin: 16px 0; flex-wrap: wrap; }
 .controls label { flex: 1; min-width: 160px; }
 .controls input { display: block; width: 100%; accent-color: var(--primary); margin: 12px 0; }
@@ -417,10 +601,17 @@ body.show-full-stats .full-stats { display: flex; }
 }
 @media (max-width: 650px) {
   .ball-page { width: calc(100% - 24px); }
-  .scoreboard { gap: 16px; }
-  .scoreboard > span { gap: 8px; }
-  .scoreboard strong { font-size: 24px; }
-  .scoreboard > div { font-size: 12px; }
+  .scoreboard { padding: 10px 12px; }
+  .scoreboard-content { gap: 14px; }
+  .scoreboard-content > span { gap: 6px; }
+  .scoreboard strong { font-size: 22px; }
+  .phase-info { font-size: 12px; }
+  .stadium-toolbar { right: 8px; gap: 4px; }
+  .stadium-tool-btn { width: 30px; height: 30px; padding: 5px; border-radius: 6px; }
+  .stadium-tool-btn svg { width: 16px; height: 16px; }
+  .stadium-actions { gap: 8px; padding: 6px 12px 12px; }
+  .stadium-super-btn { min-height: 38px; padding: 6px 10px; font-size: 11px; }
+  #launch { min-width: 130px; min-height: 38px; font-size: 14px; }
   .home-column, .away-column { grid-template-columns: 1fr; }
   #game-status { font-size: 12px; }
   #roster-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }

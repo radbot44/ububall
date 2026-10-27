@@ -15,6 +15,9 @@
   let roster = practice.slice(0, 3), draft = [...roster], rosterSlot = 0;
   let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, dragPoint = null, spinClickStart = null, skaters = [], next = '';
+  let isPortrait = false;
+  const stadium = document.querySelector('.stadium');
+  const btnFullscreen = $('btn-fullscreen'), btnRotate = $('btn-rotate');
   const radians = value => value * Math.PI / 180;
   const normalStats = () => ({
     impulse: 127, traction: 127, spin: 127, curve: 127,
@@ -291,6 +294,31 @@
         }
       }
     });
+    const hudSuperBtn = $('stadium-super-btn');
+    const hudSuperText = $('stadium-super-text');
+    const hudSuperIcon = $('stadium-super-icon');
+    if (hudSuperBtn && curB) {
+      const s = curB.equippedSuper || P.SUPERS[0];
+      if (hudSuperIcon && s?.icon) {
+        hudSuperIcon.src = s.icon;
+        hudSuperIcon.alt = s.name;
+        hudSuperIcon.title = `${s.name}: ${s.desc}`;
+      }
+      const canArm = planning && (curB.meter >= 100) && !curB.stunned;
+      hudSuperBtn.disabled = !canArm;
+      hudSuperBtn.classList.toggle('armed', Boolean(curB.superArm));
+      if (hudSuperText) {
+        if (curB.stunned) {
+          hudSuperText.textContent = '💫 STUNNED';
+        } else if (curB.superArm) {
+          hudSuperText.textContent = '⚡ ARMED';
+        } else if (curB.meter >= 100) {
+          hudSuperText.textContent = `ARM ${s.name.toUpperCase()}`;
+        } else {
+          hudSuperText.textContent = `${s.name} ${Math.round(curB.meter || 0)}%`;
+        }
+      }
+    }
   }
   function buildTeam() {
     $('team').replaceChildren();
@@ -737,7 +765,15 @@
         if (icon && icon.complete && icon.naturalWidth) {
           const sz = 22;
           ctx.shadowBlur = 8;
-          ctx.drawImage(icon, b.x - sz / 2, b.y - b.radius - sz - 4, sz, sz);
+          ctx.save();
+          if (isPortrait) {
+            ctx.translate(b.x + b.radius + sz / 2 + 5, b.y);
+            ctx.rotate(Math.PI / 2);
+          } else {
+            ctx.translate(b.x, b.y - b.radius - sz / 2 - 4);
+          }
+          ctx.drawImage(icon, -sz / 2, -sz / 2, sz, sz);
+          ctx.restore();
         }
         ctx.restore();
       }
@@ -745,7 +781,14 @@
         ctx.save();
         ctx.font = '16px system-ui';
         ctx.textAlign = 'center';
-        ctx.fillText('💫', b.x, b.y - b.radius - 8);
+        ctx.textBaseline = 'middle';
+        if (isPortrait) {
+          ctx.translate(b.x + b.radius + 14, b.y);
+          ctx.rotate(Math.PI / 2);
+        } else {
+          ctx.translate(b.x, b.y - b.radius - 8);
+        }
+        ctx.fillText('💫', 0, 0);
         ctx.restore();
       }
       if (b.superActive === 'magnet') {
@@ -763,7 +806,19 @@
       skaters[i].style.opacity = b.superActive === 'ghost' ? '0.45' : '1';
       skaters[i].style.filter = b.stunned ? 'grayscale(0.8) brightness(0.7)' : '';
       skaters[i].style.transform = `translate(-50%, -50%) rotate(${b.rotation}rad)`;
-      ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = i < 3 ? primary : secondary; ctx.fillText(String(i % 3 + 1), b.x, b.y + b.radius + 20);
+      ctx.save();
+      ctx.font = 'bold 12px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = i < 3 ? primary : secondary;
+      if (isPortrait) {
+        ctx.translate(b.x - b.radius - 18, b.y);
+        ctx.rotate(Math.PI / 2);
+      } else {
+        ctx.translate(b.x, b.y + b.radius + 18);
+      }
+      ctx.fillText(String(i % 3 + 1), 0, 0);
+      ctx.restore();
 
       // Curved launch arrow and dashed trajectory (drawn before spin knob so knob is on top)
       if (i < 3 && phase === 'plan' && plans[i].power > 0) {
@@ -942,7 +997,23 @@
   };
   for (const id of ['angle', 'power', 'shot-spin']) $(id).oninput = () => { if (phase !== 'plan') return; plans[selected] = { angle: radians(Number($('angle').value)), power: Number($('power').value) / 100, spin: Number($('shot-spin').value) / 100 }; sync(); draw(); };
   $('hold').onclick = () => { plans[selected].power = plans[selected].spin = 0; sync(); draw(); };
-  function point(event) { const r = canvas.getBoundingClientRect(); return { x: (event.clientX - r.left) * 1000 / r.width, y: (event.clientY - r.top) * 600 / r.height }; }
+  function point(event) {
+    const r = canvas.getBoundingClientRect();
+    if (isPortrait) {
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const dx = event.clientX - cx;
+      const dy = event.clientY - cy;
+      return {
+        x: Math.min(1000, Math.max(0, 500 - (dy / r.height) * 1000)),
+        y: Math.min(600, Math.max(0, 300 + (dx / r.width) * 600))
+      };
+    }
+    return {
+      x: (event.clientX - r.left) * 1000 / r.width,
+      y: (event.clientY - r.top) * 600 / r.height
+    };
+  }
   function updateSpinFromPoint(p, b) {
     const touchAngle = Math.atan2(p.y - b.y, p.x - b.x);
     let diff = touchAngle - plans[selected].angle;
@@ -1293,6 +1364,101 @@
   $('normal-stats').onclick = () => { stats = Array.from({ length: 6 }, normalStats); showStats(); resetField(); };
   $('reset-field').onclick = resetField;
   $('restore-shot').onclick = () => { if (!lastPlans) return; plans = structuredClone(lastPlans); resetField(); };
+  const hudSuperBtn = $('stadium-super-btn');
+  if (hudSuperBtn) {
+    hudSuperBtn.onclick = () => {
+      const b = bodies[selected];
+      if (b && b.meter >= 100 && phase === 'plan' && !b.stunned) {
+        b.superArm = !b.superArm;
+        sync(); draw();
+      }
+    };
+  }
+
+  function isFullscreenActive() {
+    return Boolean(document.fullscreenElement || stadium?.classList.contains('stadium-fullscreen'));
+  }
+
+  function updateFullscreenUI() {
+    const active = isFullscreenActive();
+    if (btnFullscreen) {
+      btnFullscreen.setAttribute('aria-pressed', String(active));
+      btnFullscreen.title = active ? 'Exit fullscreen' : 'Toggle fullscreen';
+      btnFullscreen.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Toggle fullscreen');
+      const enterIcon = $('icon-fs-enter');
+      const exitIcon = $('icon-fs-exit');
+      if (enterIcon && exitIcon) {
+        enterIcon.style.display = active ? 'none' : 'block';
+        exitIcon.style.display = active ? 'block' : 'none';
+      }
+    }
+  }
+
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (stadium?.classList.contains('stadium-fullscreen')) {
+        stadium.classList.remove('stadium-fullscreen');
+        document.body.classList.remove('stadium-fullscreen-active');
+        updateFullscreenUI();
+        draw();
+      } else if (stadium?.requestFullscreen) {
+        await stadium.requestFullscreen();
+      } else if (document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        stadium?.classList.add('stadium-fullscreen');
+        document.body.classList.add('stadium-fullscreen-active');
+        updateFullscreenUI();
+        draw();
+      }
+    } catch {
+      stadium?.classList.toggle('stadium-fullscreen');
+      document.body.classList.toggle('stadium-fullscreen-active');
+      updateFullscreenUI();
+      draw();
+    }
+  }
+
+  function toggleRotate() {
+    isPortrait = !isPortrait;
+    stadium?.classList.toggle('portrait-mode', isPortrait);
+    if (btnRotate) {
+      btnRotate.setAttribute('aria-pressed', String(isPortrait));
+      btnRotate.title = isPortrait ? 'Switch to landscape orientation' : 'Switch to portrait orientation';
+      btnRotate.setAttribute('aria-label', isPortrait ? 'Switch to landscape orientation' : 'Switch to portrait orientation');
+    }
+    try {
+      localStorage.setItem('ububall-orientation', isPortrait ? 'portrait' : 'landscape');
+      if (document.fullscreenElement && screen.orientation?.lock) {
+        screen.orientation.lock(isPortrait ? 'portrait' : 'landscape').catch(() => {});
+      }
+    } catch {}
+    draw();
+  }
+
+  if (btnFullscreen) btnFullscreen.onclick = toggleFullscreen;
+  if (btnRotate) btnRotate.onclick = toggleRotate;
+  document.addEventListener('fullscreenchange', () => {
+    updateFullscreenUI();
+    draw();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && stadium?.classList.contains('stadium-fullscreen')) {
+      stadium.classList.remove('stadium-fullscreen');
+      document.body.classList.remove('stadium-fullscreen-active');
+      updateFullscreenUI();
+      draw();
+    }
+  });
+
+  try {
+    if (localStorage.getItem('ububall-orientation') === 'portrait') {
+      toggleRotate();
+    }
+  } catch {}
+
   showStats();
   document.addEventListener('visibilitychange', () => { lastTime = 0; });
   new ResizeObserver(() => draw()).observe(canvas);

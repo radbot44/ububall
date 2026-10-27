@@ -26,10 +26,45 @@
       <div id="team" class="team"></div>
     </aside>
     <section class="stadium" aria-label="Ububall match">
-      <div class="scoreboard"><span class="home">You <strong id="home-score">0</strong></span><div><span id="phase">Plan · Turn 1</span><small>First to five</small></div><span class="away"><strong id="away-score">0</strong> CPU</span></div>
-      <div class="rink-wrap"><canvas id="rink" width="1000" height="600" aria-label="Playing field. Use the team buttons and direction and power sliders below to plan your launches."></canvas><div id="skaters" aria-hidden="true"></div></div>
+      <div class="scoreboard">
+        <div class="scoreboard-content">
+          <span class="home">You <strong id="home-score">0</strong></span>
+          <div class="phase-info"><span id="phase">Plan · Turn 1</span><small>First to five</small></div>
+          <span class="away"><strong id="away-score">0</strong> CPU</span>
+        </div>
+        <div class="stadium-toolbar">
+          <button id="btn-rotate" class="stadium-tool-btn" type="button" aria-label="Rotate stadium orientation" title="Rotate orientation (Portrait / Landscape)">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+              <path d="M21 21v-5h-5"/>
+            </svg>
+          </button>
+          <button id="btn-fullscreen" class="stadium-tool-btn" type="button" aria-label="Toggle fullscreen" title="Toggle fullscreen">
+            <svg id="icon-fs-enter" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            <svg id="icon-fs-exit" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display: none;">
+              <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="rink-stage">
+        <div class="rink-wrap">
+          <canvas id="rink" width="1000" height="600" aria-label="Playing field. Use the team buttons and direction and power sliders below to plan your launches."></canvas>
+          <div id="skaters" aria-hidden="true"></div>
+        </div>
+      </div>
       <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
-      <div class="stadium-actions"><button class="primary" id="launch">Launch</button></div>
+      <div class="stadium-actions">
+        <button id="stadium-super-btn" type="button" class="stadium-super-btn" aria-label="Arm super for selected ubu">
+          <img id="stadium-super-icon" class="super-icon" alt="" src="00_stalwart.png">
+          <span id="stadium-super-text">Super 0%</span>
+        </button>
+        <button class="primary" id="launch">Launch</button>
+      </div>
     </section>
     <aside class="team-column away-column" aria-label="CPU team">
       <div class="column-heading"><span class="away">CPU team</span></div>
