@@ -113,39 +113,89 @@
     cpu = P.cpuPlans(bodies); // Commit before any human planning input.
     sync();
   }
+  function renderStatsBox(statSource) {
+    const box = document.createElement('div'); box.className = 'ubu-stats';
+    const groups = [
+      ['Movement', '#76b9ef', ['impulse', 'traction', 'spin', 'curve']],
+      ['Physical', '#42c66b', ['size', 'mass', 'bounciness', 'grip']],
+      ['Engagement', '#ff9954', ['power', 'reach', 'strength', 'stability']],
+      ['Super', '#ff7197', ['efficiency', 'synergy', 'chemistry']]
+    ];
+    for (const [label, color, keys] of groups) {
+      const avg = Math.round(keys.reduce((sum, k) => sum + (statSource[k] ?? 127), 0) / keys.length);
+      const row = document.createElement('div'); row.className = 'stat-row';
+      const name = document.createElement('span'); name.className = 'stat-lbl'; name.textContent = label;
+      const track = document.createElement('div'); track.className = 'stat-track';
+      const fill = document.createElement('i');
+      fill.style.width = `${Math.min(100, Math.max(0, Math.round(avg / 255 * 100)))}%`;
+      fill.style.backgroundColor = color;
+      track.append(fill);
+      const val = document.createElement('span'); val.className = 'stat-val'; val.textContent = String(avg);
+      row.append(name, track, val);
+      box.append(row);
+    }
+    return box;
+  }
   function sync() {
     const planning = phase === 'plan';
-    $('phase').textContent = phase === 'over' ? 'Match complete' : `${planning ? 'Plan' : phase === 'goal' ? 'Goal' : 'In play'} · Turn ${turn}`;
+    const isGoal = phase === 'goal';
+    $('phase').textContent = phase === 'over' ? 'Match complete' : `${planning ? 'Plan' : isGoal ? 'Goal' : 'In play'} · Turn ${turn}`;
     $('home-score').textContent = scores[0]; $('away-score').textContent = scores[1];
-    for (const id of ['angle', 'power', 'shot-spin', 'hold', 'launch']) $(id).disabled = !planning;
+    for (const id of ['angle', 'power', 'shot-spin', 'hold']) $(id).disabled = !planning;
+    $('launch').disabled = !planning && !isGoal;
     for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = phase === 'play';
     $('restore-shot').disabled = phase === 'play' || !lastPlans;
     if (!readStats()) $('apply-stats').disabled = true;
-    $('launch').textContent = 'Launch';
+    document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
+    $('launch').textContent = isGoal ? 'Next kickoff' : 'Launch';
     const angle = Math.round((plans[selected].angle * 180 / Math.PI + 360) % 360);
     $('angle').value = angle; $('angle-value').value = angle + '°';
     $('power').value = Math.round(plans[selected].power * 100); $('power-value').value = $('power').value + '%';
     $('shot-spin').value = Math.round((plans[selected].spin || 0) * 100); $('shot-spin-value').value = $('shot-spin').value + '%';
     [...$('team').children].forEach((button, i) => {
       button.setAttribute('aria-pressed', String(i === selected)); button.disabled = !planning;
-      button.querySelector('small').textContent = `${Math.round(plans[i].power * 100)}% power · ${Math.round((plans[i].spin || 0) * 100)}% spin`;
+      const small = button.querySelector('small');
+      if (small) small.textContent = `${Math.round(plans[i].power * 100)}% power · ${Math.round((plans[i].spin || 0) * 100)}% spin`;
     });
   }
   function buildTeam() {
-    $('team').replaceChildren(); $('skaters').replaceChildren();
+    $('team').replaceChildren();
+    if ($('cpu-team')) $('cpu-team').replaceChildren();
+    $('skaters').replaceChildren();
     teamEntries = [...roster, ...practice.slice(3)];
     teamEntries.forEach((entry, i) => {
       if (entry.model && entry.model.stats) stats[i] = { ...entry.model.stats };
     });
     skaters = teamEntries.map((entry, i) => {
       const node = document.createElement('div'); node.className = 'skater'; node.append(ubuRender(entry.model, 'ball-ubu')); $('skaters').append(node);
-      if (i < 3) {
-        const button = document.createElement('button'), text = document.createElement('span'), small = document.createElement('small');
-        text.textContent = `${i + 1}. ${entry.model.parts.fullName}`; text.append(small); button.append(ubuRender(entry.model, 'ball-thumb'), text);
-        button.onclick = () => { selected = i; sync(); draw(); }; $('team').append(button);
-      }
       return node;
     });
+    teamEntries.slice(0, 3).forEach((entry, i) => {
+      const button = document.createElement('button'); button.type = 'button'; button.id = `player-${i}`;
+      const header = document.createElement('div'); header.className = 'card-header';
+      const titles = document.createElement('div'); titles.className = 'card-titles';
+      const strong = document.createElement('strong'); strong.textContent = `${i + 1}. ${entry.model.parts.fullName}`;
+      const small = document.createElement('small'); small.textContent = '0% power · 0% spin';
+      titles.append(strong, small);
+      header.append(ubuRender(entry.model, 'ball-thumb'), titles);
+      button.append(header, renderStatsBox(stats[i] || entry.model.stats || {}));
+      button.onclick = () => { selected = i; sync(); draw(); };
+      $('team').append(button);
+    });
+    if ($('cpu-team')) {
+      teamEntries.slice(3, 6).forEach((entry, idx) => {
+        const i = idx + 3;
+        const card = document.createElement('div'); card.className = 'team-card cpu-card'; card.id = `player-${i}`;
+        const header = document.createElement('div'); header.className = 'card-header';
+        const titles = document.createElement('div'); titles.className = 'card-titles';
+        const strong = document.createElement('strong'); strong.textContent = `${idx + 1}. ${entry.model.parts.fullName}`;
+        const small = document.createElement('small'); small.className = 'away'; small.textContent = `CPU ${idx + 1}`;
+        titles.append(strong, small);
+        header.append(ubuRender(entry.model, 'ball-thumb'), titles);
+        card.append(header, renderStatsBox(stats[i] || entry.model.stats || {}));
+        $('cpu-team').append(card);
+      });
+    }
   }
   function newMatch() {
     window.ubuAudio?.stop();
@@ -893,6 +943,7 @@
   function resetField() {
     window.ubuAudio?.stop();
     bodies = kickoff(); scores = [0, 0]; turn = 1; phase = 'plan'; elapsed = accumulator = 0; drag = null;
+    buildTeam();
     cpu = P.cpuPlans(bodies, () => .5); sync(); previewStats(); draw(); say('Field reset. Your planned launches are preserved.');
   }
   $('stat-player').onchange = showStats;

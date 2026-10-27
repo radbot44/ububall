@@ -12,16 +12,24 @@
   <div class="game-heading"><h1>ububall</h1><button id="new-match">New match</button></div>
   <section class="stadium" aria-label="Ububall match">
     <div class="scoreboard"><span class="home">You <strong id="home-score">0</strong></span><div><span id="phase">Plan · Turn 1</span><small>First to five</small></div><span class="away"><strong id="away-score">0</strong> CPU</span></div>
-    <div class="rink-wrap"><canvas id="rink" width="1000" height="600" aria-label="Playing field. Use the team buttons and direction and power sliders below to plan your launches."></canvas><div id="skaters" aria-hidden="true"></div></div>
-    <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
+    <div class="stadium-layout">
+      <aside class="team-column home-column" aria-label="Your team">
+        <div id="team" class="team"></div>
+      </aside>
+      <div class="rink-center">
+        <div class="rink-wrap"><canvas id="rink" width="1000" height="600" aria-label="Playing field. Use the team buttons and direction and power sliders below to plan your launches."></canvas><div id="skaters" aria-hidden="true"></div></div>
+        <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
+        <div class="stadium-actions"><button class="primary" id="launch">Launch</button></div>
+      </div>
+      <aside class="team-column away-column" aria-label="CPU team">
+        <div id="cpu-team" class="team cpu-team"></div>
+      </aside>
+    </div>
   </section>
-  <section class="planning" aria-label="Launch planning">
-    <div id="team" class="team"></div>
-    <div class="controls"><label>Direction <output id="angle-value">0°</output><input id="angle" type="range" min="0" max="359" value="0"><small>0° right · 90° down · 180° left · 270° up</small></label><label>Power <output id="power-value">0%</output><input id="power" type="range" min="0" max="100" value="0"><small>0% holds position</small></label><label>Shot spin <output id="shot-spin-value">0%</output><input id="shot-spin" type="range" min="-100" max="100" value="0"><small>− counterclockwise · + clockwise</small></label><button id="hold">Hold this ubu</button><button class="primary" id="launch">Launch</button></div>
-    <p class="hint">Click an ubu and pull back like a slingshot to aim and set power. Grab the spin dial on the ubu to curve your shot. You attack the right goal.</p>
-  </section>
-  <details class="rules" id="stat-testing" open>
+  <details class="rules" id="stat-testing">
     <summary>Stat testing</summary>
+    <div class="controls"><label>Direction <output id="angle-value">0°</output><input id="angle" type="range" min="0" max="359" value="0"><small>0° right · 90° down · 180° left · 270° up</small></label><label>Power <output id="power-value">0%</output><input id="power" type="range" min="0" max="100" value="0"><small>0% holds position</small></label><label>Shot spin <output id="shot-spin-value">0%</output><input id="shot-spin" type="range" min="-100" max="100" value="0"><small>− counterclockwise · + clockwise</small></label><button id="hold">Hold this ubu</button></div>
+    <p class="hint">Click an ubu and pull back like a slingshot to aim and set power. Grab the spin dial on the ubu to curve your shot. You attack the right goal.</p>
     <p>Temporary values; no DNA changes. Set each stat from 0 to 1023. Normal is 511. Applying values resets the field and score, keeping your planned shot.</p>
     <label>Ubu <select id="stat-player"><option value="0">Your ubu 1</option><option value="1">Your ubu 2</option><option value="2">Your ubu 3</option><option value="3">CPU ubu 1</option><option value="4">CPU ubu 2</option><option value="5">CPU ubu 3</option></select></label>
     <div id="stat-inputs" class="stat-inputs"></div>
