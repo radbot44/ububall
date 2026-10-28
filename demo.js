@@ -180,8 +180,19 @@
       $(candidate + '-tab').setAttribute('aria-selected', String(candidate === id));
     }
   });
+let copyTimeout = null;
   $('copy-dna').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(current); $('input-error').textContent = 'DNA copied.'; } catch { $('dna-output').select(); $('input-error').textContent = 'Select and copy the DNA above.'; }
+  const btn = $('copy-dna');
+  try {
+    await navigator.clipboard.writeText(current);
+    $('input-error').textContent = 'DNA copied.';
+    btn.textContent = 'Copied! ✓';
+    clearTimeout(copyTimeout);
+    copyTimeout = setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  } catch {
+    $('dna-output').select();
+    $('input-error').textContent = 'Select and copy the DNA above.';
+  }
   });
   $('export-ubu').addEventListener('click', () => {
     const url = URL.createObjectURL(new Blob([ubuFile.unsigned(current)], { type: 'application/json' }));
