@@ -37,16 +37,16 @@
     trails.forEach(trail => { trail.length = 0; });
     particles.length = fireworks.length = shockwaves.length = 0;
   }
-  function burst(x, y, team, strength, celebration = false, tangent = 0) {
+  function burst(x, y, team, strength, celebration = false, tangent = 0, color = null) {
     if (reducedMotion.matches) return;
     const count = celebration ? 64 : Math.round(3 + strength * 4);
     for (let i = 0; i < count && particles.length < 400; i++) {
       const angle = celebration ? Math.random() * Math.PI * 2
         : tangent + (i % 2 ? Math.PI : 0) + (Math.random() - .5) * .6;
-      const speed = celebration ? 60 + Math.random() * 190 : 20 + Math.random() * (35 + strength * 65);
-      const life = celebration ? .8 + Math.random() * .8 : .14 + Math.random() * .16;
+      const speed = celebration ? 60 + Math.random() * 190 : 20 + Math.max(0, strength - 1) * 20 + Math.random() * (35 + strength * 65);
+      const life = celebration ? .8 + Math.random() * .8 : .14 + Math.random() * .16 + Math.max(0, strength - 1) * .05;
       particles.push({ x, y, px: x, py: y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
-        team: i % 5 === 0 ? -1 : team, life, duration: life, celebration });
+        team: i % 5 === 0 ? -1 : team, life, duration: life, celebration, color });
     }
   }
   function updateEffects(dt) {
@@ -96,10 +96,37 @@
     });
     ctx.restore();
   }
+  function drawStickyTether(host, ball) {
+    const dx = ball.x - host.x, dy = ball.y - host.y, d = Math.hypot(dx, dy);
+    if (d <= Math.abs(host.radius - ball.radius) || !d) return;
+    const ux = dx / d, uy = dy / d;
+    const c = (host.radius - ball.radius) / d, t = Math.sqrt(Math.max(0, 1 - c * c));
+    // Common external tangents meet both circular surfaces cleanly. Draw behind
+    // the skaters and ball, so only the energy bridge between them is exposed.
+    const ends = [-1, 1].map(sign => {
+      const nx = ux * c - sign * uy * t, ny = uy * c + sign * ux * t;
+      return { ax: host.x + nx * host.radius, ay: host.y + ny * host.radius,
+        bx: ball.x + nx * ball.radius, by: ball.y + ny * ball.radius };
+    });
+    ctx.save();
+    const pulse = reducedMotion.matches ? .65 : .65 + .15 * Math.sin(elapsed * 14);
+    ctx.globalAlpha = pulse;
+    ctx.beginPath(); ctx.moveTo(ends[0].ax, ends[0].ay);
+    ctx.lineTo(ends[0].bx, ends[0].by); ctx.lineTo(ends[1].bx, ends[1].by);
+    ctx.lineTo(ends[1].ax, ends[1].ay); ctx.closePath();
+    ctx.fillStyle = '#44dd662b'; ctx.fill();
+    ctx.lineCap = 'round'; ctx.shadowColor = '#44dd66';
+    ctx.shadowBlur = reducedMotion.matches ? 0 : 8 * canvas.width / 1000;
+    for (const e of ends) {
+      line(e.ax, e.ay, e.bx, e.by, '#44dd66', 3);
+      line(e.ax, e.ay, e.bx, e.by, '#d9ffe3', 1);
+    }
+    ctx.restore();
+  }
   function drawParticles(primary, secondary) {
     ctx.save(); ctx.lineCap = 'round';
     for (const p of particles) {
-      const color = p.team === -1 ? '#ffffff' : p.team === 0 ? primary : secondary;
+      const color = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? primary : secondary);
       ctx.globalAlpha = Math.min(1, p.life / p.duration * 2) * (p.celebration ? 1 : .65);
       ctx.shadowColor = color;
       ctx.shadowBlur = p.celebration ? 12 * canvas.width / 1000 : 0;
@@ -585,7 +612,7 @@
       ctx.save();
       ctx.beginPath();
       ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-      ctx.strokeStyle = s.team === 0 ? primary : secondary;
+      ctx.strokeStyle = s.color || (s.team === 0 ? primary : secondary);
       ctx.lineWidth = Math.max(1, 6 * (1 - progress));
       ctx.globalAlpha = Math.max(0, 1 - progress);
       ctx.stroke();
@@ -642,7 +669,7 @@
         }
         ctx.restore();
       }
-      if (b.stunned) {
+      if (b.stunned || b.stunnedNext) {
         ctx.save();
         ctx.font = '16px system-ui';
         ctx.textAlign = 'center';
@@ -669,7 +696,7 @@
       const style = skaters[i].style;
       const left = b.x / 10 + '%', top = b.y / 6 + '%', width = b.radius / 5 + '%';
       const opacity = b.superActive === 'ghost' ? '0.45' : '1';
-      const filter = b.stunned ? 'grayscale(0.8) brightness(0.7)' : '';
+      const filter = b.stunned || b.stunnedNext ? 'grayscale(0.8) brightness(0.7)' : '';
       const transform = `translate(-50%, -50%) rotate(${b.rotation}rad)`;
       if (style.left !== left) style.left = left;
       if (style.top !== top) style.top = top;
@@ -703,14 +730,7 @@
         drawTrajectory(b, plan, cached.data, primary);
       }
     });
-    if (bodies[6]?.stuckTo) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc((bodies[6].stuckTo.x + bodies[6].x) / 2, (bodies[6].stuckTo.y + bodies[6].y) / 2, 7, 0, Math.PI * 2);
-      ctx.fillStyle = '#44dd6688';
-      ctx.fill();
-      ctx.restore();
-    }
+    if (bodies[6]?.stuckTo) drawStickyTether(bodies[6].stuckTo, bodies[6]);
 
     // Spin dial arced line with arrowheads (above arrow in z-index)
     if (phase === 'plan') {
@@ -1043,12 +1063,27 @@
     }
   }
   const superImpactTimes = new WeakMap();
-  function handleSuper(key, phase, body) {
+  function handleSuper(key, phase, body, target = null) {
     // Sustained contact can resolve repeatedly within one animation frame.
     if (key === 'stalwart' && phase === 'impact') {
       const now = performance.now();
       if (now - (superImpactTimes.get(body) ?? -Infinity) < 100) return;
       superImpactTimes.set(body, now);
+    }
+    if (phase === 'impact' && target && !reducedMotion.matches) {
+      const dx = target.x - body.x, dy = target.y - body.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      const reach = target.team === -1 ? Math.max(body.radius, body.reach || body.radius, 18) : body.radius;
+      const x = body.x + dx / distance * reach, y = body.y + dy / distance * reach;
+      const tangent = Math.atan2(dy, dx) + Math.PI / 2;
+      if (key === 'knockout') {
+        burst(x, y, target.team, 3, false, tangent, '#ff3366');
+      } else if (key === 'cannonball' || key === 'stalwart') {
+        const color = key === 'cannonball' ? '#ff634d' : '#ffd166';
+        burst(x, y, body.team, 3.5, false, tangent, color);
+        if (shockwaves.length < 32) shockwaves.push({ x, y, currentRadius: 4,
+          maxRadius: key === 'cannonball' ? 48 : 36, team: body.team, color, life: .24, duration: .24 });
+      }
     }
     window.ubuAudio?.playSuper?.(key, phase);
   }

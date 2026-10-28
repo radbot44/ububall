@@ -145,8 +145,8 @@
     const d = Math.sqrt(d2);
 
     if (!isBall && a.team !== b.team) {
-      if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; onSuper?.('knockout', 'impact', a); }
-      if (b.superActive === 'knockout') { a.stunnedNext = true; b.superActive = null; onSuper?.('knockout', 'impact', b); }
+      if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; onSuper?.('knockout', 'impact', a, b); }
+      if (b.superActive === 'knockout') { a.stunnedNext = true; b.superActive = null; onSuper?.('knockout', 'impact', b, a); }
     }
 
     if (allBodies) {
@@ -168,7 +168,7 @@
       const ball = a.team === -1 ? a : b;
       if (player.superActive === 'sticky') {
         ball.stuckTo = player;
-        onSuper?.('sticky', 'impact', player);
+        onSuper?.('sticky', 'impact', player, ball);
         const ox = ball.x - player.x, oy = ball.y - player.y, od = Math.sqrt(ox * ox + oy * oy) || 1;
         const targetDist = player.radius + ball.radius;
         ball.stickOffset = { x: (ox / od) * targetDist, y: (oy / od) * targetDist };
@@ -198,8 +198,8 @@
 
     if (closing >= 0) return;
     if (!isBall) {
-      if (a.superActive === 'stalwart') onSuper?.('stalwart', 'impact', a);
-      if (b.superActive === 'stalwart') onSuper?.('stalwart', 'impact', b);
+      if (a.superActive === 'stalwart') onSuper?.('stalwart', 'impact', a, b);
+      if (b.superActive === 'stalwart') onSuper?.('stalwart', 'impact', b, a);
     }
 
     const bounce = ((a.bounciness || 1) + (b.bounciness || 1)) / 2;
@@ -209,8 +209,8 @@
     if (isBall) {
       if (a.team !== -1 && a.power) impulseB *= a.power;
       else if (b.team !== -1 && b.power) impulseA *= b.power;
-      if (a.team !== -1 && a.superActive === 'cannonball') { impulseB *= 2.5; a.superActive = null; onSuper?.('cannonball', 'impact', a); }
-      else if (b.team !== -1 && b.superActive === 'cannonball') { impulseA *= 2.5; b.superActive = null; onSuper?.('cannonball', 'impact', b); }
+      if (a.team !== -1 && a.superActive === 'cannonball') { impulseB *= 2.5; a.superActive = null; onSuper?.('cannonball', 'impact', a, b); }
+      else if (b.team !== -1 && b.superActive === 'cannonball') { impulseA *= 2.5; b.superActive = null; onSuper?.('cannonball', 'impact', b, a); }
     } else {
       const strA = a.strength || 1, stabA = a.stability || 1;
       const strB = b.strength || 1, stabB = b.stability || 1;

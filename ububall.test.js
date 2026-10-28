@@ -541,7 +541,10 @@ test('Super events report effects once without changing the simulation', () => {
     Object.assign(a, { x: 400, y: 250, vx: key === 'stalwart' ? 0 : 100, superActive: key });
     Object.assign(b, { x: 400 + a.radius + b.radius - 2, y: 250, vx: -100 });
     const bodies = [a, b], control = structuredClone(bodies), events = [];
-    P.step(bodies, P.DT, null, null, null, (key, phase) => events.push([key, phase]));
+    P.step(bodies, P.DT, null, null, null, (key, phase, source, target) => {
+      assert.equal(source, a); assert.equal(target, b);
+      events.push([key, phase]);
+    });
     P.step(control, P.DT);
     assert.deepEqual(bodies, control, key + ' callback is observational');
     assert.deepEqual(events, [[key, 'impact']]);
