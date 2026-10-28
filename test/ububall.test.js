@@ -454,34 +454,50 @@ test('Sticky carrier near wall keeps welded ball strictly inside rink boundaries
   }
 });
 
-test('computeTrajectory transfers skater spin to ball trajectory and reflects Armed Supers', () => {
-  const bSpin = [-1, 1].map(spin => {
-    const b = P.kickoff();
-    Object.assign(b[0], { x: 420, y: 300 });
-    const res = P.computeTrajectory(b[0], { angle: 0, power: 0.8, spin }, b);
-    return res.ballTrajectory.at(-1).y;
-  });
-  assert.ok(bSpin[0] !== 300 && bSpin[1] !== 300);
-  assert.ok(Math.sign(bSpin[0] - 300) === -Math.sign(bSpin[1] - 300));
+test('shared prediction matches live ticks for team plans and every super without mutating inputs', () => {
+  for (const ability of P.SUPERS) {
+    const bodies = P.kickoff();
+    bodies.slice(0, 6).forEach((b, i) => P.applyStats(b, { ...normal, strength: 90 + i * 20, stability: 200 - i * 15, reach: 150 }));
+    Object.assign(bodies[0], { x: 410, y: 300, meter: 100, superArm: true, equippedSuper: ability });
+    Object.assign(bodies[1], { x: 470, y: 220 });
+    Object.assign(bodies[2], { x: 580, y: 350, superActive: 'magnet' });
+    Object.assign(bodies[3], { x: 555, y: 300, meter: 100, superArm: true, equippedSuper: P.SUPERS[0], superActive: 'ghost' });
+    const plans = [{ angle: .08, power: .9, spin: -.6 }, { angle: 1.2, power: .7, spin: .8 }, { angle: Math.PI, power: .45, spin: -.3 }];
+    const original = structuredClone({ bodies, plans });
+    const prediction = P.predictTurn(bodies, plans);
+    assert.deepEqual({ bodies, plans }, original, ability.key + ' leaves live state untouched');
+    const live = structuredClone(bodies);
+    live[3].superArm = false; live[3].superActive = null;
+    P.startTurn(live, plans);
+    let goal = null;
+    for (let tick = 1; tick <= prediction.ticks; tick++) {
+      goal = P.step(live, P.DT);
+      for (let i = 0; i < live.length; i++) {
+        const point = prediction.paths[i].find(p => p.tick === tick);
+        if (point) assert.deepEqual([point.x, point.y], [live[i].x, live[i].y], `${ability.key} body ${i} tick ${tick}`);
+      }
+      if (goal !== null || P.settled(live)) { assert.equal(tick, prediction.ticks); break; }
+    }
+    assert.equal(prediction.goal, goal);
+    assert.equal(prediction.paths.length, 7);
+    assert.ok(prediction.ticks <= 720);
+  }
+});
 
-  const bGhost = P.kickoff();
-  Object.assign(bGhost[0], { x: 350, y: 300, meter: 100, superArm: true, equippedSuper: P.SUPERS[7] });
-  Object.assign(bGhost[3], { x: 425, y: 300 });
-  const ghostTraj = P.computeTrajectory(bGhost[0], { angle: 0, power: 1, spin: 0 }, bGhost);
-  assert.ok(ghostTraj.impacts.some(imp => imp.type === 'ball'));
-  assert.ok(!ghostTraj.impacts.some(imp => imp.type === 'ubu'));
-
-  const bStalwart = P.kickoff();
-  Object.assign(bStalwart[0], { meter: 100, superArm: true, equippedSuper: P.SUPERS[0] });
-  const stalwartTraj = P.computeTrajectory(bStalwart[0], { angle: 0, power: 1, spin: 0 }, bStalwart);
-  assert.equal(stalwartTraj.points.length, 1);
-
-  const bCol = P.kickoff();
-  Object.assign(bCol[0], { x: 200, y: 120, meter: 100, superArm: false, equippedSuper: P.SUPERS[5] });
-  const normalDist = P.computeTrajectory(bCol[0], { angle: 0, power: 0.4, spin: 0 }, bCol).points.at(-1).dist;
-  bCol[0].superArm = true;
-  const colossusDist = P.computeTrajectory(bCol[0], { angle: 0, power: 0.4, spin: 0 }, bCol).points.at(-1).dist;
-  assert.ok(colossusDist < normalDist * 0.5);
+test('shared prediction preserves Sticky references and accounts for a holding teammate being struck', () => {
+  const bodies = P.kickoff();
+  Object.assign(bodies[0], { x: 350, y: 300 });
+  Object.assign(bodies[1], { x: 430, y: 300 });
+  Object.assign(bodies[6], { x: 473, y: 300, stuckTo: bodies[1], stickOffset: { x: 43, y: 0 } });
+  const plans = [{ angle: 0, power: 1, spin: .3 }];
+  const original = structuredClone(bodies);
+  const prediction = P.predictTurn(bodies, plans);
+  assert.deepEqual(bodies, original);
+  assert.equal(bodies[6].stuckTo, bodies[1]);
+  assert.ok(prediction.paths[1].some(p => p.x !== 430));
+  assert.ok(prediction.paths[6].some(p => p.x !== 473));
+  const held = P.predictTurn(bodies, []);
+  assert.notDeepEqual(prediction.paths[6], held.paths[6]);
 });
 
 test('AI Tactical Brain dynamically assigns roles and behaviors from 24-bit personality', () => {
@@ -567,4 +583,31 @@ test('Magnet pull event only fires inside its active range with a free ball', ()
     assert.deepEqual(bodies, control);
     assert.deepEqual(events, expected ? ['magnet'] : []);
   }
+});
+
+
+test('prediction stops at goals or its tick budget and respects stun and super charge', () => {
+  const bodies = P.kickoff();
+  Object.assign(bodies[6], { x: 945, y: 300, vx: 400 });
+  const goal = P.predictTurn(bodies, []);
+  assert.equal(goal.goal, 0);
+  const live = structuredClone(bodies);
+  P.startTurn(live, []);
+  let goalTick = 0, scored = null;
+  while (scored === null && goalTick < 720) { scored = P.step(live, P.DT); goalTick++; }
+  assert.equal(goal.ticks, goalTick);
+  assert.equal(goal.paths[6].at(-1).tick, goalTick);
+  const drifting = P.kickoff();
+  Object.assign(drifting[6], { vx: 20, friction: 0 });
+  assert.equal(P.predictTurn(drifting, []).ticks, 720);
+  const stunned = P.kickoff();
+  Object.assign(stunned[0], { stunned: true, superArm: true, meter: 100, equippedSuper: P.SUPERS[5] });
+  const plan = [{ angle: 0, power: 1, spin: 1 }];
+  const prediction = P.predictTurn(stunned, plan);
+  assert.equal(prediction.ticks, 1);
+  assert.deepEqual(prediction.paths[0].at(-1), { x: 180, y: 300, tick: 1 });
+  stunned[0].stunned = false; stunned[0].meter = 99;
+  const undercharged = P.predictTurn(stunned, plan);
+  stunned[0].superArm = false;
+  assert.deepEqual(undercharged, P.predictTurn(stunned, plan));
 });

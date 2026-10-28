@@ -557,251 +557,51 @@
       return { angle, power, spin: Math.max(-1, Math.min(1, spin)), superArm: Boolean(superArm) };
     });
   }
-  function effectiveSuper(b) {
-    if (!b || b.team === -1 || b.stunned) return null;
-    if (b.superActive) return b.superActive;
-    if (b.superArm && (b.meter === undefined || b.meter >= 100)) return b.equippedSuper?.key || null;
-    return null;
-  }
-  function integrateBody(b, dt) {
-    const curve = b.curveFactor !== undefined ? b.curveFactor : (b.team === -1 ? BALL_CURVE : SKATER_CURVE);
-    if (b.omega !== 0) {
-      const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
-      b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
-    }
-    b.rotation = (b.rotation || 0) + b.omega * dt;
-    b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - 6 * dt);
-    b.x += b.vx * dt; b.y += b.vy * dt;
-    const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = b.friction * dt;
-    if (speed2 <= deceleration * deceleration) {
-      b.vx = b.vy = 0;
-    } else {
-      const speed = Math.sqrt(speed2);
-      const factor = Math.max(0, speed - deceleration) / speed;
-      b.vx *= factor; b.vy *= factor;
-    }
-  }
-  function computeTrajectory(body, plan, allBodies) {
-    const points = [{ x: body.x, y: body.y, dist: 0 }];
-    const impacts = [];
-    let ballTrajectory = null;
-    const superKey = effectiveSuper(body);
-    if (!plan || plan.power <= 0 || body.stunned || superKey === 'stalwart') {
-      return { points, impacts, ballTrajectory };
-    }
-    const isColossus = superKey === 'colossus';
-    const baseR = body.baseRadius || body.radius || 25;
-    const baseM = body.baseMass || body.mass || 3;
-    const r = baseR * (isColossus ? 1.8 : 1);
-    const mass = baseM * (isColossus ? 2.5 : 1);
-    const reach = Math.max(r, body.reach || r, 18);
-    const impulse = body.impulse || IMPULSE;
-    const maxSpin = body.maxSpin ?? 8;
-    const power = Math.max(0, Math.min(1, plan.power));
-    const v0 = (impulse / mass) * power;
-    const sim = {
-      x: body.x, y: body.y,
-      vx: Math.cos(plan.angle) * v0,
-      vy: Math.sin(plan.angle) * v0,
-      radius: r, baseRadius: baseR,
-      mass, baseMass: baseM,
-      reach,
-      friction: body.friction ?? 150,
-      grip: body.grip ?? .3,
-      maxSpin,
-      curveFactor: body.curveFactor ?? SKATER_CURVE,
-      bounciness: body.bounciness ?? 1,
-      power: body.power ?? 1,
-      strength: body.strength ?? 1,
-      stability: body.stability ?? 1,
-      omega: Math.max(-1, Math.min(1, plan.spin || 0)) * maxSpin,
-      rotation: 0,
-      team: body.team ?? 0,
-      superActive: superKey,
-      shockwaveFired: false
-    };
-    const otherUbus = (allBodies || []).filter(b => b && b.team !== -1 && b !== body).map(other => {
-      const oSuper = effectiveSuper(other);
-      const oColossus = oSuper === 'colossus';
-      return {
-        x: other.x, y: other.y, vx: 0, vy: 0, omega: 0,
-        radius: (other.baseRadius || other.radius || 25) * (oColossus ? 1.8 : 1),
-        mass: (other.baseMass || other.mass || 3) * (oColossus ? 2.5 : 1),
-        grip: other.grip ?? .3,
-        bounciness: other.bounciness ?? 1,
-        strength: other.strength ?? 1,
-        stability: other.stability ?? 1,
-        team: other.team,
-        superActive: oSuper
-      };
+  // Shared turn preparation for gameplay and prediction. Supers activate before launch.
+  function startTurn(bodies, plans, onSuper = null) {
+    bodies.forEach((b, i) => {
+      if (b.team < 0) return;
+      if (!b.stunned && (b.superArm || plans[i]?.superArm) && b.meter >= 100) {
+        b.meter = 0;
+        b.superActive = b.equippedSuper.key;
+        b.superArm = false;
+      }
+      if (!b.stunned && ['stalwart', 'colossus', 'ghost'].includes(b.superActive)) {
+        onSuper?.(b.superActive, 'launch', b);
+      }
     });
-    const rawBall = (allBodies || []).find(b => b && b.team === -1) || (allBodies || [])[6];
-    const simBall = rawBall ? {
-      x: rawBall.x, y: rawBall.y, vx: 0, vy: 0,
-      radius: rawBall.radius ?? 18,
-      mass: rawBall.mass ?? 1,
-      friction: rawBall.friction ?? 85,
-      grip: rawBall.grip ?? .3,
-      maxSpin: rawBall.maxSpin ?? 8,
-      curveFactor: rawBall.curveFactor ?? BALL_CURVE,
-      bounciness: rawBall.bounciness ?? 1,
-      omega: 0, rotation: 0, team: -1,
-      stuckTo: null, stickOffset: null
-    } : null;
-
-    const MAX_PATH_LEN = 480, MAX_STEPS = 1200;
-    let prevX = sim.x, prevY = sim.y, totalDist = 0, simDone = false;
-    let prevBallX = simBall ? simBall.x : 0, prevBallY = simBall ? simBall.y : 0;
-    let ballDist = 0, ballStarted = false, ballDone = !simBall;
-    const ballPoints = simBall ? [{ x: simBall.x, y: simBall.y, dist: 0 }] : [];
-    let hasDirectBallImpact = false;
-
-    for (let s = 0; s < MAX_STEPS; s++) {
-      if (simDone && ballDone) break;
-      if (!simDone && simBall && !simBall.stuckTo && sim.superActive === 'magnet') {
-        const dx = sim.x - simBall.x, dy = sim.y - simBall.y, d2 = dx * dx + dy * dy;
-        const minDist = sim.radius + simBall.radius;
-        if (d2 > minDist * minDist && d2 < 260 * 260) {
-          const d = Math.sqrt(d2);
-          const pull = 650 * (1 - d / 260);
-          simBall.vx += (dx / d) * pull * DT;
-          simBall.vy += (dy / d) * pull * DT;
-          ballStarted = true;
-        }
-      }
-      if (!simDone) integrateBody(sim, DT);
-      if (simBall && !ballDone) {
-        if (simBall.stuckTo === sim) {
-          const off = simBall.stickOffset || { x: sim.radius + simBall.radius, y: 0 };
-          simBall.x = sim.x + off.x; simBall.y = sim.y + off.y;
-          simBall.vx = sim.vx; simBall.vy = sim.vy; simBall.omega = sim.omega;
-          ballStarted = true;
-        } else if (ballStarted) {
-          integrateBody(simBall, DT);
-        }
-      }
-      if (!simDone) {
-        for (const other of otherUbus) {
-          if (other.team !== sim.team && (sim.superActive === 'ghost' || other.superActive === 'ghost')) continue;
-          const dx = other.x - sim.x, dy = other.y - sim.y, minDist = sim.radius + other.radius;
-          const d2 = dx * dx + dy * dy;
-          if (d2 >= minDist * minDist || d2 === 0) continue;
-          const d = Math.sqrt(d2), nx = dx / d, ny = dy / d;
-          sim.x = other.x - nx * minDist;
-          sim.y = other.y - ny * minDist;
-          const closing = -sim.vx * nx - sim.vy * ny;
-          if (closing < 0) {
-            const isKnockout = sim.superActive === 'knockout' && other.team !== sim.team;
-            if (isKnockout) sim.superActive = null;
-            impacts.push({
-              x: other.x - nx * other.radius,
-              y: other.y - ny * other.radius,
-              type: isKnockout ? 'knockout' : 'ubu'
-            });
-            if (sim.superActive === 'shockwave' && !sim.shockwaveFired) {
-              sim.shockwaveFired = true;
-              if (simBall && !ballDone) {
-                const bvx = simBall.vx, bvy = simBall.vy;
-                triggerShockwave(sim, [sim, simBall]);
-                if (simBall.vx !== bvx || simBall.vy !== bvy) ballStarted = true;
-              }
-            }
-            const invA = 1 / sim.mass;
-            const invB = other.superActive === 'stalwart' ? 0 : 1 / other.mass;
-            const inverse = invA + invB;
-            const bounce = ((sim.bounciness || 1) + (other.bounciness || 1)) / 2;
-            const baseImpulse = -1.88 * bounce * closing / inverse;
-            const impulseA = baseImpulse * ((other.strength || 1) / (sim.stability || 1));
-            sim.vx -= impulseA * nx * invA;
-            sim.vy -= impulseA * ny * invA;
-            const tx = -ny, ty = nx;
-            const slip = -sim.vx * tx - sim.vy * ty - sim.omega * sim.radius;
-            const limit = Math.sqrt(sim.grip * other.grip) * baseImpulse;
-            const tangent = Math.max(-limit, Math.min(limit, -slip / (3 * inverse)));
-            sim.vx -= tangent * tx * invA;
-            sim.vy -= tangent * ty * invA;
-            sim.omega -= 2 * tangent * invA / sim.radius;
-          }
-        }
-      }
-      if (!simDone && simBall && !ballDone && simBall.stuckTo !== sim) {
-        const dx = simBall.x - sim.x, dy = simBall.y - sim.y;
-        const hitRadius = Math.max(sim.radius, sim.reach || sim.radius, 18) + simBall.radius;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < hitRadius * hitRadius) {
-          const d = Math.sqrt(d2) || 1, nx = dx / d, ny = dy / d;
-          const reachR = Math.max(sim.radius, sim.reach || sim.radius, 18);
-          if (!hasDirectBallImpact) {
-            hasDirectBallImpact = true;
-            impacts.push({ x: sim.x + nx * reachR, y: sim.y + ny * reachR, type: 'ball' });
-          }
-          collide(sim, simBall, null, [sim, simBall], null);
-          ballStarted = true;
-        }
-      }
-      if (!simDone) walls(sim);
-      if (simBall && !ballDone) {
-        if (simBall.stuckTo === sim) {
-          const off = simBall.stickOffset || { x: sim.radius + simBall.radius, y: 0 };
-          const ex = sim.x + off.x, ey = sim.y + off.y;
-          simBall.x = ex; simBall.y = ey;
-          simBall.vx = sim.vx; simBall.vy = sim.vy; simBall.omega = sim.omega;
-          walls(simBall);
-          const dx = simBall.x - ex, dy = simBall.y - ey;
-          if (dx !== 0 || dy !== 0) {
-            sim.x += dx; sim.y += dy;
-            sim.vx = simBall.vx; sim.vy = simBall.vy;
-            walls(sim);
-            const ox = simBall.x - sim.x, oy = simBall.y - sim.y, od = Math.hypot(ox, oy) || 1;
-            const td = sim.radius + simBall.radius;
-            simBall.stickOffset = { x: (ox / od) * td, y: (oy / od) * td };
-            simBall.x = sim.x + simBall.stickOffset.x;
-            simBall.y = sim.y + simBall.stickOffset.y;
-          }
-        } else if (ballStarted) {
-          walls(simBall);
-        }
-      }
-      if (!simDone) {
-        const stepD = Math.hypot(sim.x - prevX, sim.y - prevY);
-        totalDist += stepD;
-        prevX = sim.x; prevY = sim.y;
-        const speed2 = sim.vx * sim.vx + sim.vy * sim.vy;
-        const settledNow = speed2 < 100 && Math.abs(sim.omega) < .05;
-        if (s % 4 === 3 || settledNow || totalDist >= MAX_PATH_LEN) {
-          points.push({ x: sim.x, y: sim.y, dist: totalDist });
-        }
-        if (settledNow || totalDist >= MAX_PATH_LEN) {
-          simDone = true;
-          if (simBall && simBall.stuckTo === sim) ballDone = true;
-        }
-      }
-      if (simBall && ballStarted && !ballDone) {
-        const stepBallD = Math.hypot(simBall.x - prevBallX, simBall.y - prevBallY);
-        ballDist += stepBallD;
-        prevBallX = simBall.x; prevBallY = simBall.y;
-        const inGoalY = simBall.y >= rink.goalTop && simBall.y <= rink.goalBottom;
-        const isGoal = inGoalY && (
-          simBall.x - simBall.radius <= rink.left - rink.goalDepth + 1 || simBall.x + simBall.radius < rink.left ||
-          simBall.x + simBall.radius >= rink.right + rink.goalDepth - 1 || simBall.x - simBall.radius > rink.right
-        );
-        if (isGoal) {
-          ballPoints.push({ x: simBall.x, y: simBall.y, dist: ballDist, goal: true });
-          ballDone = true;
-          if (simBall.stuckTo === sim) simDone = true;
-        } else {
-          const bSpeed2 = simBall.vx * simBall.vx + simBall.vy * simBall.vy;
-          const bSettled = !simBall.stuckTo && bSpeed2 < 144 && Math.abs(simBall.omega) < .05;
-          if (s % 4 === 3 || bSettled || ballDist >= MAX_PATH_LEN) {
-            ballPoints.push({ x: simBall.x, y: simBall.y, dist: ballDist });
-          }
-          if (bSettled || ballDist >= MAX_PATH_LEN) ballDone = true;
-        }
-      }
-    }
-    if (ballStarted && ballPoints.length > 1) ballTrajectory = ballPoints;
-    return { points, impacts, ballTrajectory };
+    launch(bodies, plans);
   }
-  const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, multiplier, applyStats, kickoff, step, launch, settled, stop, triggerShockwave, cpuPlans, computeTrajectory };
+  const PREDICTION_TICKS = 720;
+  function predictTurn(bodies, plans) {
+    // Clone the whole graph so Sticky references point to cloned teammates.
+    const sim = structuredClone(bodies);
+    const held = { angle: 0, power: 0, spin: 0 };
+    const predictedPlans = sim.map((b, i) => {
+      if (b.team === 0) return plans[i] || held;
+      if (b.team > 0) {
+        b.superArm = false;
+        b.superActive = null;
+        if (b.colossusApplied) {
+          b.radius = b.baseRadius; b.mass = b.baseMass; b.colossusApplied = false;
+        }
+      }
+      return held;
+    });
+    startTurn(sim, predictedPlans);
+    const paths = sim.map(b => [{ x: b.x, y: b.y, tick: 0 }]);
+    let goal = null, ticks = 0;
+    for (let tick = 1; tick <= PREDICTION_TICKS; tick++) {
+      goal = step(sim, DT);
+      ticks = tick;
+      const done = goal !== null || settled(sim) || tick === PREDICTION_TICKS;
+      if (tick % 4 === 0 || done) {
+        sim.forEach((b, i) => paths[i].push({ x: b.x, y: b.y, tick }));
+      }
+      if (done) break;
+    }
+    return { paths, ticks, goal, horizon: PREDICTION_TICKS };
+  }
+  const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, multiplier, applyStats, kickoff, step, launch, settled, stop, triggerShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

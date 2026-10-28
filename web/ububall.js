@@ -425,13 +425,9 @@
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
   function line(x1, y1, x2, y2, color, width = 2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
   function circle(x, y, r, color, width = 2) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
-  function computeTrajectory(body, plan, allBodies) {
-    return P.computeTrajectory(body, plan, allBodies);
-  }
-  function drawTrajectory(body, plan, trajectoryData, color) {
+  function drawImpulse(body, plan, color) {
     const activeSuper = body.superActive || ((body.superArm && (body.meter ?? 0) >= 100) ? body.equippedSuper?.key : null);
     if (!plan || plan.power <= 0 || body.stunned || activeSuper === 'stalwart') return;
-    const points = trajectoryData?.points || [];
     const isColossus = activeSuper === 'colossus';
     const effRadius = body.radius * (isColossus ? 1.8 : 1);
     const impulse = body.impulse || P.IMPULSE;
@@ -439,31 +435,7 @@
     const ringR = Math.max(effRadius, body.reach || effRadius, 18) + 2;
     const maxArrowDist = Math.max(20, 110 * impulseRatio * plan.power);
 
-    // 1. Dashed trajectory path (separate from the impulse arrow)
-    if (points.length > 1) {
-      for (let i = 1; i < points.length; i++) {
-        const d = points[i].dist;
-        if (d < ringR) continue;
-        const p0 = points[i - 1].dist < ringR ? {
-          x: body.x + (points[i].x - body.x) * (ringR / (points[i].dist || 1)),
-          y: body.y + (points[i].y - body.y) * (ringR / (points[i].dist || 1))
-        } : points[i - 1];
-        const alpha = Math.max(0, Math.min(1, (480 - d) / 180));
-        if (alpha <= 0.01) continue;
-        ctx.save();
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = alpha;
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(p0.x, p0.y);
-        ctx.lineTo(points[i].x, points[i].y);
-        ctx.stroke();
-        ctx.restore();
-      }
-    }
-
-    // 2. Solid impulse arrow coming out of the hitbox ring in plan.angle
+    // Solid impulse arrow coming out of the hitbox ring in plan.angle
     const startX = body.x + Math.cos(plan.angle) * ringR;
     const startY = body.y + Math.sin(plan.angle) * ringR;
     const endX = startX + Math.cos(plan.angle) * maxArrowDist;
@@ -485,51 +457,30 @@
     }
     ctx.restore();
 
-    // 3. Terminating small circle if path stopped naturally
-    const finalPt = points[points.length - 1];
-    if (finalPt.dist < 460) {
-      circle(finalPt.x, finalPt.y, 4, color, 2);
-    }
-
-    // 4. Ball trajectory (if ball is hit)
-    const ballTrajectory = trajectoryData?.ballTrajectory;
-    if (ballTrajectory && ballTrajectory.length > 1) {
-      for (let i = 1; i < ballTrajectory.length; i++) {
-        const d = ballTrajectory[i].dist;
-        const alpha = Math.max(0, Math.min(1, (480 - d) / 180));
-        if (alpha <= 0.01) continue;
-        ctx.save();
-        ctx.setLineDash([3, 4]);
-        ctx.strokeStyle = '#f2efe9';
-        ctx.globalAlpha = alpha * 0.9;
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(ballTrajectory[i - 1].x, ballTrajectory[i - 1].y);
-        ctx.lineTo(ballTrajectory[i].x, ballTrajectory[i].y);
-        ctx.stroke();
-        ctx.restore();
-      }
-      const lastBall = ballTrajectory[ballTrajectory.length - 1];
-      if (lastBall.goal) {
-        circle(lastBall.x, lastBall.y, 6.5, '#ff9954', 2.5);
-        circle(lastBall.x, lastBall.y, 2.5, '#ffffff', 2);
-      } else if (lastBall.dist < 460) {
-        circle(lastBall.x, lastBall.y, 3.5, '#f2efe9', 2);
-      }
-    }
-
-    // 5. Impact spots
-    const impacts = trajectoryData?.impacts || [];
-    for (const impact of impacts) {
-      const impactColor = impact.type === 'knockout' ? '#ff3366' : '#ff9954';
-      circle(impact.x, impact.y, 7, impactColor, 2.5);
-      ctx.beginPath();
-      ctx.arc(impact.x, impact.y, 3, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
-    }
   }
-  const trajectoryCache = [null, null, null];
+  let predictionCache = null;
+  function drawPrediction(primary, secondary) {
+    // Include all state and all plans: changing any teammate invalidates the one simulation.
+    const key = JSON.stringify([bodies, plans]);
+    if (predictionCache?.key !== key) predictionCache = { key, data: P.predictTurn(bodies, plans) };
+    const prediction = predictionCache.data;
+    prediction.paths.forEach((points, index) => {
+      const isBall = bodies[index].team === -1;
+      const color = isBall ? '#f2efe9' : bodies[index].team === 0 ? primary : secondary;
+      ctx.save();
+      ctx.setLineDash(isBall ? [3, 4] : [4, 4]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = isBall ? 2.5 : 2;
+      for (let i = 1; i < points.length; i++) {
+        const from = points[i - 1], to = points[i];
+        if (from.x === to.x && from.y === to.y) continue;
+        const fade = Math.min(1, (prediction.horizon - to.tick) / 240);
+        ctx.globalAlpha = fade * (isBall ? .9 : .65);
+        ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.stroke();
+      }
+      ctx.restore();
+    });
+  }
   let themeColors = null;
   const themeObserver = new MutationObserver(() => { themeColors = null; if (skaters.length) draw(); });
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
@@ -618,9 +569,6 @@
         border: color('border'), surface: color('elevated'), background: color('background') };
     }
     const { primary, secondary, text, border, surface, background } = themeColors;
-    const fieldSignature = phase === 'plan' ? bodies.map(b => [b.x, b.y, b.radius, b.reach, b.mass,
-      b.bounciness, b.power, b.grip, b.impulse, b.friction, b.maxSpin, b.curveFactor,
-      b.superArm ? b.equippedSuper?.key : '', b.superActive || ''].join(',')).join(';') : '';
     rounded(60, 60, 880, 480, 100); ctx.fillStyle = surface; ctx.fill();
     ctx.strokeStyle = border; ctx.lineWidth = 4; ctx.stroke();
     ctx.setLineDash([6, 10]); line(500, 60, 500, 540, border); ctx.setLineDash([]);
@@ -632,6 +580,7 @@
       line(x, 370, x + depth, 370, accent, 4);
       line(x === 60 - depth ? x : x + depth, 230, x === 60 - depth ? x : x + depth, 370, accent, 4);
     }
+    if (phase === 'plan') drawPrediction(primary, secondary);
     drawTrails(primary, secondary);
     shockwaves.forEach(s => {
       const progress = 1 - Math.max(0, s.life / s.duration);
@@ -763,17 +712,7 @@
       ctx.fillText(String(i % 3 + 1), 0, 0);
       ctx.restore();
 
-      // Curved launch arrow and dashed trajectory.
-      if (i < 3 && phase === 'plan' && plans[i].power > 0) {
-        const plan = plans[i];
-        const key = `${fieldSignature}|${i}|${plan.angle}|${plan.power}|${plan.spin}`;
-        let cached = trajectoryCache[i];
-        if (!cached || cached.key !== key) {
-          cached = { key, data: computeTrajectory(b, plan, bodies) };
-          trajectoryCache[i] = cached;
-        }
-        drawTrajectory(b, plan, cached.data, primary);
-      }
+      if (i < 3 && phase === 'plan') drawImpulse(b, plans[i], primary);
     });
     if (bodies[6]?.stuckTo) drawStickyTether(bodies[6].stuckTo, bodies[6]);
 
@@ -852,27 +791,7 @@
     window.ubuAudio?.stop();
     lastPlans = structuredClone(plans);
     drag = null;
-    bodies.slice(0, 3).forEach(b => {
-      if (b.superArm && b.meter >= 100) {
-        b.meter = 0;
-        b.superActive = b.equippedSuper.key;
-        b.superArm = false;
-      }
-    });
-    if (!$('cpu-hold').checked) {
-      bodies.slice(3, 6).forEach((b, i) => {
-        if (b.meter >= 100 && !b.stunned && cpu?.[i]?.superArm) {
-          b.meter = 0;
-          b.superActive = b.equippedSuper.key;
-        }
-      });
-    }
-    for (const body of bodies) {
-      if (!body.stunned && ['stalwart', 'colossus', 'ghost'].includes(body.superActive)) {
-        handleSuper(body.superActive, 'launch', body);
-      }
-    }
-    P.launch(bodies, [...plans, ...($('cpu-hold').checked ? [] : cpu)]); elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
+    P.startTurn(bodies, [...plans, ...($('cpu-hold').checked ? [] : cpu)], handleSuper); elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
   };
   for (const [id, key, scale] of [['angle', 'angle', Math.PI / 180], ['power', 'power', .01], ['shot-spin', 'spin', .01]]) {
     $(id).oninput = () => {
