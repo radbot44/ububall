@@ -671,3 +671,13 @@ body.stadium-fullscreen-active {
   .spin-heading label { flex-basis: 100%; }
   #reset-spin { margin-left: auto; }
 }
+
+/* Screen-space popover follows the selected ubu without rotating in portrait mode. */
+#field-spin { position: absolute; z-index: 30; width: min(230px, calc(100% - 12px)); margin: 0; padding: 8px 10px; box-sizing: border-box; border: 1px solid var(--primary); border-radius: 12px; background: var(--card); box-shadow: 0 4px 16px #0008; }
+#field-spin[hidden] { display: none; }
+#field-spin .spin-heading { flex-wrap: nowrap; gap: 6px; font-size: 11px; }
+#field-spin .spin-heading label { flex-basis: auto; }
+#field-spin #spin-player { display: block; }
+#field-spin #reset-spin { min-height: 44px; margin-left: 0; padding: 4px 6px; }
+#field-spin .spin-labels span { display: flex; align-items: center; gap: 4px; }
+#field-spin .spin-labels svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }

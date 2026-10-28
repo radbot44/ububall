@@ -52,6 +52,36 @@
         </div>
       </div>
       <div class="stadium-stage-area">
+      <!-- Tabler rotate and rotate-clockwise icons, copied from uburoom web/icons.js.
+https://github.com/tabler/tabler-icons
+MIT License
+
+Copyright (c) 2020-2026 Paweł Kuna
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+      -->
+      <div class="spin-control" id="field-spin" hidden>
+        <div class="spin-heading"><label for="shot-spin">Spin <span id="spin-player"></span></label><output id="shot-spin-value" for="shot-spin">0%</output><button id="reset-spin" type="button">Reset</button></div>
+        <input id="shot-spin" type="range" min="-100" max="100" step="1" value="0" aria-describedby="spin-help">
+        <div id="spin-help" class="spin-labels"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5"/></svg> CCW</span><span>CW <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5"/></svg></span></div>
+      </div>
+
         <div class="rink-stage">
           <div class="rink-wrap">
             <canvas id="rink" width="1000" height="600" aria-label="Playing field. Use the team buttons and direction and power sliders below to plan your launches."></canvas>
@@ -61,11 +91,6 @@
       </div>
       <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
       <div id="team-selector" class="team-selector" aria-label="Select ubu"></div>
-      <div class="spin-control">
-        <div class="spin-heading"><label for="shot-spin">Spin <span id="spin-player"></span></label><output id="shot-spin-value" for="shot-spin">0%</output><button id="reset-spin" type="button">Reset spin</button></div>
-        <input id="shot-spin" type="range" min="-100" max="100" step="1" value="0" aria-describedby="spin-help">
-        <div id="spin-help" class="spin-labels"><span>Counterclockwise</span><span>Clockwise</span></div>
-      </div>
       <details class="shot-controls"><summary>Shot controls · <span id="selected-name"></span></summary>
     <div class="controls"><label>Direction <output id="angle-value">0°</output><input id="angle" type="range" min="0" max="359" value="0"><small>0° right · 90° down · 180° left · 270° up</small></label><label>Power <output id="power-value">0%</output><input id="power" type="range" min="0" max="100" value="0"><small>0% holds position</small></label><button id="hold">Hold this ubu</button></div>
       </details>
@@ -85,7 +110,7 @@
   <details class="rules" id="stat-testing">
     <summary>Stat testing</summary>
 
-    <p class="hint">Click an ubu and pull back like a slingshot to aim and set power. Use the Spin slider below the field to curve your shot. You attack the right goal.</p>
+    <p class="hint">Click an ubu and pull back like a slingshot to aim and set power. Use the Spin slider beside the selected ubu to curve your shot. You attack the right goal.</p>
     <p>Temporary values; no DNA changes. Set each stat from 0 to 1023. Normal is 511. Applying values resets the field and score, keeping your planned shot.</p>
     <label>Ubu <select id="stat-player"><option value="0">Your ubu 1</option><option value="1">Your ubu 2</option><option value="2">Your ubu 3</option><option value="3">CPU ubu 1</option><option value="4">CPU ubu 2</option><option value="5">CPU ubu 3</option></select></label>
     <div class="controls"><label>Equipped Super <select id="stat-super"></select></label><img id="stat-super-thumb" class="stat-super-thumb" alt="" src="assets/00_stalwart.png"><button id="fill-meter" type="button">Fill Super Meter (100%)</button></div>

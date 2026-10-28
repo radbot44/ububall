@@ -16,6 +16,7 @@
   let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, dragPoint = null, skaters = [], next = '';
   let isPortrait = false;
+  let arrowGrab = null;
   const stadium = document.querySelector('.stadium');
   const stageArea = document.querySelector('.stadium-stage-area');
   const rinkStage = document.querySelector('.rink-stage');
@@ -309,7 +310,7 @@
     $('power').value = Math.round(plans[selected].power * 100); $('power-value').value = $('power').value + '%';
     $('shot-spin').value = Math.round((plans[selected].spin || 0) * 100); $('shot-spin-value').value = $('shot-spin').value === '0' ? 'No spin' : `${Math.abs(Number($('shot-spin').value))}% ${Number($('shot-spin').value) < 0 ? 'CCW' : 'CW'}`;
     $('shot-spin').setAttribute('aria-valuetext', $('shot-spin-value').value);
-    $('spin-player').textContent = `- ${selected + 1}. ${teamEntries[selected].model.parts.fullName}`;
+    $('spin-player').textContent = `- Ubu ${selected + 1}`;
     [...$('team').children].forEach((button, i) => {
       button.classList.toggle('selected', i === selected);
       const select = button.querySelector('.card-select');
@@ -419,27 +420,29 @@
   function newMatch(playJingle = false) {
     window.ubuAudio?.stop();
     roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
-    resetPlans(); say('Pull back from an ubu to aim and launch, then set spin with the slider below.'); draw();
+    resetPlans(); say('Pull back from an ubu to aim and launch, drag an arrowhead to adjust, or set spin beside the selected ubu.'); draw();
     if (playJingle) window.ubuAudio?.playGameStart?.();
   }
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
   function line(x1, y1, x2, y2, color, width = 2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
   function circle(x, y, r, color, width = 2) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
-  function drawImpulse(body, plan, color) {
+  function impulseGeometry(body, plan) {
     const activeSuper = body.superActive || ((body.superArm && (body.meter ?? 0) >= 100) ? body.equippedSuper?.key : null);
-    if (!plan || plan.power <= 0 || body.stunned || activeSuper === 'stalwart') return;
-    const isColossus = activeSuper === 'colossus';
+    const isColossus = activeSuper === 'colossus' && !body.colossusApplied;
     const effRadius = body.radius * (isColossus ? 1.8 : 1);
-    const impulse = body.impulse || P.IMPULSE;
-    const impulseRatio = (impulse / P.IMPULSE) / (isColossus ? 2.5 : 1);
+    const scale = 110 * ((body.impulse || P.IMPULSE) / P.IMPULSE) / (isColossus ? 2.5 : 1);
     const ringR = Math.max(effRadius, body.reach || effRadius, 18) + 2;
-    const maxArrowDist = Math.max(20, 110 * impulseRatio * plan.power);
-
-    // Solid impulse arrow coming out of the hitbox ring in plan.angle
-    const startX = body.x + Math.cos(plan.angle) * ringR;
-    const startY = body.y + Math.sin(plan.angle) * ringR;
-    const endX = startX + Math.cos(plan.angle) * maxArrowDist;
-    const endY = startY + Math.sin(plan.angle) * maxArrowDist;
+    const distance = ringR + Math.max(20, scale * plan.power);
+    return { ringR, scale, distance, x: body.x + Math.cos(plan.angle) * distance, y: body.y + Math.sin(plan.angle) * distance,
+      visible: plan.power > 0 && !body.stunned && activeSuper !== 'stalwart' };
+  }
+  function drawImpulse(body, plan, color) {
+    if (!plan) return;
+    const arrow = impulseGeometry(body, plan);
+    if (!arrow.visible) return;
+    const startX = body.x + Math.cos(plan.angle) * arrow.ringR;
+    const startY = body.y + Math.sin(plan.angle) * arrow.ringR;
+    const endX = arrow.x, endY = arrow.y;
 
     ctx.save();
     ctx.beginPath();
@@ -457,6 +460,39 @@
     }
     ctx.restore();
 
+  }
+  function screenPoint(p) {
+    const r = canvas.getBoundingClientRect();
+    return isPortrait ? { x: r.left + p.y / 600 * r.width, y: r.top + (1 - p.x / 1000) * r.height }
+      : { x: r.left + p.x / 1000 * r.width, y: r.top + p.y / 600 * r.height };
+  }
+  function badgePoint(b) {
+    return isPortrait ? { x: b.x + b.radius + 21, y: b.y } : { x: b.x, y: b.y - b.radius - 21 };
+  }
+  function fieldTarget(event) {
+    const near = p => { const q = screenPoint(p); return Math.hypot(q.x - event.clientX, q.y - event.clientY) <= 22; };
+    const own = bodies.slice(0, 3);
+    const badge = own.findIndex(b => !b.stunned && b.meter >= 100 && near(badgePoint(b)));
+    if (badge >= 0) return { mode: 'super', index: badge };
+    const arrow = own.findIndex((b, i) => { const a = impulseGeometry(b, plans[i]); return a.visible && near(a); });
+    if (arrow >= 0) return { mode: 'arrow', index: arrow };
+    const p = point(event);
+    return { mode: 'slingshot', index: own.findIndex(b => !b.stunned && Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12) };
+  }
+  function positionSpinControl() {
+    const control = $('field-spin');
+    control.hidden = phase !== 'plan' || drag !== null;
+    if (control.hidden) return;
+    const b = bodies[selected], center = screenPoint(b), stage = stageArea.getBoundingClientRect();
+    const r = canvas.getBoundingClientRect();
+    const radius = b.radius * (isPortrait ? r.height / 1000 : r.width / 1000);
+    const width = control.offsetWidth, height = control.offsetHeight;
+    const arrow = screenPoint(impulseGeometry(b, plans[selected]));
+    // Prefer the side opposite the arrow, then clamp inside the stage near the edges.
+    let y = arrow.y > center.y + 8 ? center.y - radius - height - 52 : center.y + radius + 24;
+    const x = Math.max(6, Math.min(stage.width - width - 6, center.x - stage.left - width / 2));
+    y = Math.max(6, Math.min(stage.height - height - 6, y - stage.top));
+    control.style.left = x + 'px'; control.style.top = y + 'px';
   }
   let predictionCache = null;
   function drawPrediction(primary, secondary) {
@@ -557,6 +593,7 @@
   }
   function draw() {
     fitStadium();
+    positionSpinControl();
     const ratio = Math.min(devicePixelRatio || 1, 2);
     const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
     const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
@@ -635,10 +672,10 @@
           ctx.shadowBlur = 8;
           ctx.save();
           if (isPortrait) {
-            ctx.translate(b.x + b.radius + sz / 2 + 5, b.y);
+            ctx.translate(badgePoint(b).x, badgePoint(b).y);
             ctx.rotate(Math.PI / 2);
           } else {
-            ctx.translate(b.x, b.y - b.radius - sz / 2 - 4);
+            ctx.translate(badgePoint(b).x, badgePoint(b).y);
           }
           ctx.drawImage(icon, -sz / 2, -sz / 2, sz, sz);
           ctx.restore();
@@ -823,12 +860,20 @@
     window.ubuAudio?.getAudioContext();
     if (phase !== 'plan') return;
     const p = point(event);
-    const index = bodies.slice(0, 3).findIndex(b => Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12);
-    if (index < 0) return;
-    selected = index;
+    const target = fieldTarget(event);
+    if (target.index < 0) return;
+    selected = target.index;
+    if (target.mode === 'super') {
+      bodies[selected].superArm = !bodies[selected].superArm;
+      sync(); draw(); return;
+    }
     drag = event.pointerId;
-    dragMode = 'slingshot';
-    dragPoint = { x: p.x, y: p.y };
+    dragMode = target.mode;
+    if (dragMode === 'arrow') {
+      const arrow = impulseGeometry(bodies[selected], plans[selected]);
+      arrowGrab = { x: p.x - arrow.x, y: p.y - arrow.y, distance: arrow.distance, power: plans[selected].power };
+    }
+    dragPoint = dragMode === 'slingshot' ? p : null;
     canvas.setPointerCapture(drag);
     sync(); draw();
   };
@@ -836,13 +881,18 @@
     const p = point(event);
     if (drag !== event.pointerId || phase !== 'plan') {
       if (phase === 'plan') {
-        const isOverUbu = bodies.slice(0, 3).some(b => Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12);
-        canvas.style.cursor = isOverUbu ? 'crosshair' : 'default';
+        const target = fieldTarget(event);
+        canvas.style.cursor = target.index < 0 ? 'default' : target.mode === 'super' ? 'pointer' : target.mode === 'arrow' ? 'grab' : 'crosshair';
       }
       return;
     }
     const b = bodies[selected];
-    if (dragMode === 'slingshot') {
+    if (dragMode === 'arrow') {
+      const dx = p.x - arrowGrab.x - b.x, dy = p.y - arrowGrab.y - b.y;
+      const arrow = impulseGeometry(b, plans[selected]);
+      plans[selected].angle = Math.atan2(dy, dx);
+      plans[selected].power = Math.max(0, Math.min(1, arrowGrab.power + (Math.hypot(dx, dy) - arrowGrab.distance) / arrow.scale));
+    } else if (dragMode === 'slingshot') {
       const MAX_PULL = 120;
       const pullDx = p.x - b.x, pullDy = p.y - b.y;
       const pullDist = Math.hypot(pullDx, pullDy);
@@ -859,6 +909,7 @@
     sync(); draw();
   };
   canvas.onpointerup = canvas.onpointercancel = () => {
+    arrowGrab = null;
     drag = null;
     dragMode = null;
     dragPoint = null;
