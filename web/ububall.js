@@ -1,7 +1,11 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id), P = ububallPhysics;
-  const canvas = $('rink'), ctx = canvas.getContext('2d');
+  const canvas = $('rink');
+  let ctx = canvas.getContext('2d');
+  let layoutDirty = true, renderWidth = 1, renderHeight = 1;
+  const dirtyMeters = new Set();
+  let rinkCache = null;
   const ballMark = new Image();
   ballMark.src = 'assets/uburoom-oomark-brand.svg';
   ballMark.onload = () => { if (skaters.length) draw(); };
@@ -21,6 +25,9 @@
   const stageArea = document.querySelector('.stadium-stage-area');
   const rinkStage = document.querySelector('.rink-stage');
   const rinkWrap = document.querySelector('.rink-wrap');
+  const badgeCanvas = document.createElement('canvas'); badgeCanvas.className = 'field-badges';
+  badgeCanvas.setAttribute('aria-hidden', 'true'); rinkWrap.append(badgeCanvas);
+  const badgeCtx = badgeCanvas.getContext('2d');
   const btnFullscreen = $('btn-fullscreen'), btnRotate = $('btn-rotate');
   const radians = value => value * Math.PI / 180;
   const normalStats = () => ({
@@ -124,13 +131,25 @@
     }
     ctx.restore();
   }
+  const glowSprites = new Map();
+  function glowSprite(color, ring = false) {
+    const key = color + ring;
+    if (glowSprites.has(key)) return glowSprites.get(key);
+    const sprite = document.createElement('canvas'); sprite.width = sprite.height = 128;
+    const c = sprite.getContext('2d'); c.strokeStyle = c.fillStyle = color;
+    c.shadowColor = color; c.shadowBlur = 14;
+    c.beginPath(); c.arc(64, 64, ring ? 40 : 6, 0, Math.PI * 2);
+    if (ring) { c.lineWidth = 3; c.stroke(); } else c.fill();
+    glowSprites.set(key, sprite); return sprite;
+  }
   function drawParticles(primary, secondary) {
     ctx.save(); ctx.lineCap = 'round';
     for (const p of particles) {
       const color = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? primary : secondary);
       ctx.globalAlpha = Math.min(1, p.life / p.duration * 2) * (p.celebration ? 1 : .65);
       ctx.shadowColor = color;
-      ctx.shadowBlur = p.celebration ? 12 * canvas.width / 1000 : 0;
+      ctx.shadowBlur = 0;
+      if (p.celebration) ctx.drawImage(glowSprite(color), p.x - 24, p.y - 24, 48, 48);
       line(p.px, p.py, p.x, p.y, color, p.celebration ? 2.5 : 1.3);
       ctx.fillStyle = color; ctx.beginPath(); ctx.arc(p.x, p.y, p.celebration ? 1.8 : .9, 0, Math.PI * 2); ctx.fill();
     }
@@ -166,11 +185,7 @@
   }
   function gainMeter(b, baseAmount) {
     if (!b || b.team < 0 || b.usedSuperThisTurn) return;
-    const updateBar = body => {
-      const fill = $(`super-fill-${body.playerIndex}`), pct = $(`super-pct-${body.playerIndex}`);
-      if (fill) fill.style.width = body.meter + '%';
-      if (pct) pct.textContent = Math.floor(body.meter) + '%';
-    };
+    const updateBar = body => dirtyMeters.add(body);
     const playerIdx = b.playerIndex;
     const eff = stats[playerIdx]?.efficiency ?? 127;
     const effMult = P.multiplier(eff);
@@ -190,6 +205,14 @@
         updateBar(teammate);
       }
     }
+  }
+  function flushMeters() {
+    for (const body of dirtyMeters) {
+      const fill = $(`super-fill-${body.playerIndex}`), pct = $(`super-pct-${body.playerIndex}`);
+      if (fill) fill.style.width = body.meter + '%';
+      if (pct) pct.textContent = Math.floor(body.meter) + '%';
+    }
+    dirtyMeters.clear();
   }
   function say(message) { $('game-status').textContent = message; }
   function resetPlans() {
@@ -390,7 +413,18 @@
       if (entry.model && entry.model.stats) stats[i] = { ...entry.model.stats };
     });
     skaters = teamEntries.map((entry, i) => {
-      const node = document.createElement('div'); node.className = 'skater'; node.append(ubuRender(entry.model, 'ball-ubu')); $('skaters').append(node);
+      const node = document.createElement('div'); node.className = 'skater';
+      const svg = ubuRender(entry.model, 'ball-ubu'); node.append(svg); $('skaters').append(node);
+      // Rasterize once per roster; retain the SVG if decoding is unavailable.
+      const image = new Image();
+      const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' }));
+      image.onload = () => {
+        const sprite = document.createElement('canvas'); sprite.width = sprite.height = 256;
+        sprite.getContext('2d').drawImage(image, 0, 0, 256, 256);
+        node.replaceChildren(sprite); URL.revokeObjectURL(url);
+      };
+      image.onerror = () => URL.revokeObjectURL(url);
+      image.src = url;
       return node;
     });
     teamEntries.slice(0, 3).forEach((entry, i) => {
@@ -482,8 +516,6 @@
   function fieldTarget(event) {
     const near = p => { const q = screenPoint(p); return Math.hypot(q.x - event.clientX, q.y - event.clientY) <= 22; };
     const own = bodies.slice(0, 3);
-    const badge = own.findIndex(b => !b.stunned && b.meter >= 100 && near(badgePoint(b)));
-    if (badge >= 0) return { mode: 'super', index: badge };
     const arrow = own.findIndex((b, i) => { const a = impulseGeometry(b, plans[i]); return a.visible && near(a); });
     if (arrow >= 0) return { mode: 'arrow', index: arrow };
     const p = point(event);
@@ -627,12 +659,18 @@
     }
   }
   function draw() {
-    fitStadium();
-    positionSpinControl();
+    if (layoutDirty) {
+      fitStadium();
+      renderWidth = canvas.clientWidth; renderHeight = canvas.clientHeight;
+      layoutDirty = false;
+    }
+    if (phase === 'plan') positionSpinControl();
     const ratio = Math.min(devicePixelRatio || 1, 2);
-    const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
-    const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
+    const width = Math.max(1, Math.round(renderWidth * ratio));
+    const height = Math.max(1, Math.round(renderHeight * ratio));
     if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+    if (badgeCanvas.width !== width || badgeCanvas.height !== height) { badgeCanvas.width = width; badgeCanvas.height = height; }
+    badgeCtx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); badgeCtx.clearRect(0, 0, 1000, 600);
     ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); ctx.clearRect(0, 0, 1000, 600);
     if (!themeColors) {
       const theme = getComputedStyle(document.documentElement);
@@ -641,6 +679,11 @@
         border: color('border'), surface: color('elevated'), background: color('background') };
     }
     const { primary, secondary, text, border, surface, background } = themeColors;
+    const rinkKey = width + ',' + height + JSON.stringify(themeColors);
+    if (rinkCache?.key !== rinkKey) {
+      const layer = document.createElement('canvas'); layer.width = width; layer.height = height;
+      const mainContext = ctx; ctx = layer.getContext('2d');
+      ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0);
     rounded(60, 60, 880, 480, 100); ctx.fillStyle = surface; ctx.fill();
     ctx.strokeStyle = border; ctx.lineWidth = 4; ctx.stroke();
     ctx.setLineDash([6, 10]); line(500, 60, 500, 540, border); ctx.setLineDash([]);
@@ -652,6 +695,9 @@
       line(x, 370, x + depth, 370, accent, 4);
       line(x === 60 - depth ? x : x + depth, 230, x === 60 - depth ? x : x + depth, 370, accent, 4);
     }
+      ctx = mainContext; rinkCache = { key: rinkKey, layer };
+    }
+    ctx.drawImage(rinkCache.layer, 0, 0, 1000, 600);
     if (phase === 'plan') drawPrediction(primary, secondary);
     drawTrails(primary, secondary);
     shockwaves.forEach(s => {
@@ -691,46 +737,41 @@
           ctx.restore();
         }
         ctx.save();
-        ctx.beginPath();
         const pulse = Math.sin(Date.now() / 120) * 3;
-        ctx.arc(b.x, b.y, b.radius + 8 + pulse, 0, Math.PI * 2);
-        ctx.strokeStyle = auraColor;
-        ctx.lineWidth = 3;
-        ctx.shadowColor = auraColor;
-        ctx.shadowBlur = 14;
-        ctx.stroke();
+        const glowSize = (b.radius + 8 + pulse) * 128 / 40;
+        ctx.drawImage(glowSprite(auraColor, true), b.x - glowSize / 2, b.y - glowSize / 2, glowSize, glowSize);
 
         const superIdx = b.equippedSuper?.id ?? 0;
         const icon = superImages[superIdx];
         if (icon && icon.complete && icon.naturalWidth) {
           const sz = 30;
-          ctx.shadowBlur = 8;
-          ctx.save();
+          badgeCtx.shadowBlur = 0;
+          badgeCtx.save();
           if (isPortrait) {
-            ctx.translate(badgePoint(b).x, badgePoint(b).y);
-            ctx.rotate(Math.PI / 2);
+            badgeCtx.translate(badgePoint(b).x, badgePoint(b).y);
+            badgeCtx.rotate(Math.PI / 2);
           } else {
-            ctx.translate(badgePoint(b).x, badgePoint(b).y);
+            badgeCtx.translate(badgePoint(b).x, badgePoint(b).y);
           }
-          ctx.drawImage(icon, -sz / 2, -sz / 2, sz, sz);
-          ctx.restore();
+          badgeCtx.drawImage(icon, -sz / 2, -sz / 2, sz, sz);
+          badgeCtx.restore();
         }
         ctx.restore();
       }
       if (b.meter >= 100 && !b.superArm && !b.superActive) {
         const icon = superImages[b.equippedSuper?.id ?? 0], p = badgePoint(b);
         if (icon?.complete && icon.naturalWidth) {
-          ctx.save(); ctx.translate(p.x, p.y); if (isPortrait) ctx.rotate(Math.PI / 2);
-          ctx.filter = 'grayscale(1)'; ctx.drawImage(icon, -15, -15, 30, 30); ctx.restore();
+          badgeCtx.save(); badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
+          badgeCtx.filter = 'grayscale(1)'; badgeCtx.drawImage(icon, -15, -15, 30, 30); badgeCtx.restore();
         }
       }
       if (phase === 'play' && b.guarding) {
-        ctx.save();
+        badgeCtx.save();
         const p = isPortrait ? { x: b.x - b.radius * .65, y: b.y + b.radius * .65 } : { x: b.x + b.radius * .65, y: b.y + b.radius * .65 };
-        ctx.translate(p.x, p.y); if (isPortrait) ctx.rotate(Math.PI / 2);
-        ctx.scale(1.1, 1.1); ctx.translate(-12, -12); ctx.fillStyle = '#4798ff';
-        ctx.fill(new Path2D('M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3'));
-        ctx.restore();
+        badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
+        badgeCtx.scale(1.1, 1.1); badgeCtx.translate(-12, -12); badgeCtx.fillStyle = '#4798ff';
+        badgeCtx.fill(new Path2D('M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3'));
+        badgeCtx.restore();
       }
       if (b.stunned || b.stunnedNext) {
         ctx.save();
@@ -757,12 +798,11 @@
         }
       }
       const style = skaters[i].style;
-      const left = b.x / 10 + '%', top = b.y / 6 + '%', width = b.radius / 5 + '%';
+      const width = b.radius / 5 + '%';
       const opacity = b.superActive === 'ghost' ? '0.45' : '1';
       const filter = b.stunned || b.stunnedNext ? 'grayscale(0.8) brightness(0.7)' : '';
-      const transform = `translate(-50%, -50%) rotate(${b.rotation}rad)`;
-      if (style.left !== left) style.left = left;
-      if (style.top !== top) style.top = top;
+      const transform = `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${b.rotation}rad)`;
+
       if (style.width !== width) style.width = width;
       if (style.opacity !== opacity) style.opacity = opacity;
       if (style.filter !== filter) style.filter = filter;
@@ -893,10 +933,6 @@
     const target = fieldTarget(event);
     if (target.index < 0) return;
     selected = target.index;
-    if (target.mode === 'super') {
-      bodies[selected].superArm = !bodies[selected].superArm;
-      sync(); draw(); return;
-    }
     drag = event.pointerId;
     dragMode = target.mode;
     if (dragMode === 'arrow') {
@@ -1025,19 +1061,22 @@
     }
   }
   function frame(time) {
-    const delta = lastTime ? Math.min((time - lastTime) / 1000, .05) : 0; lastTime = time;
+    const delta = lastTime ? Math.max(0, (time - lastTime) / 1000) : 0; lastTime = time;
     const active = !$('roster-dialog').open && !document.hidden;
+    if (!active) { lastTime = 0; accumulator = 0; }
     const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length;
     if (active) updateEffects(delta);
     if (phase === 'play' && active) {
       accumulator += delta;
-      while (accumulator >= P.DT && phase === 'play') {
+      let steps = 0;
+      while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
         const goal = P.step(bodies, P.DT, handleCollision, handleWall, handleShockwave, handleSuper); elapsed += P.DT; accumulator -= P.DT;
         recordTrails();
         if (goal !== null || P.settled(bodies) || elapsed >= 12) finishTurn(goal);
       }
       draw();
     } else if (active && hadEffects) draw();
+    flushMeters();
     requestAnimationFrame(frame);
   }
   function updateRosterSuperPicker() {
@@ -1238,6 +1277,7 @@
   }
 
   function updateFullscreenUI() {
+    layoutDirty = true;
     const active = isFullscreenActive();
     if (btnFullscreen) {
       btnFullscreen.setAttribute('aria-pressed', String(active));
@@ -1280,6 +1320,7 @@
   }
 
   function toggleRotate() {
+    layoutDirty = true;
     isPortrait = !isPortrait;
     stadium?.classList.toggle('portrait-mode', isPortrait);
     if (btnRotate) {
@@ -1319,11 +1360,11 @@
 
   [...$('stat-player').options].forEach((option, i) => { option.textContent = teamEntries[i].model.parts.fullName; });
   showStats();
-  document.addEventListener('visibilitychange', () => { lastTime = 0; });
-  const ro = new ResizeObserver(() => draw());
+  document.addEventListener('visibilitychange', () => { lastTime = 0; accumulator = 0; });
+  const ro = new ResizeObserver(() => { layoutDirty = true; draw(); });
   ro.observe(canvas);
   if (stadium) ro.observe(stadium);
   if (stageArea) ro.observe(stageArea);
-  window.addEventListener('resize', () => draw());
+  window.addEventListener('resize', () => { layoutDirty = true; draw(); });
   practice.slice(0, 3).forEach(addOption); newMatch(); requestAnimationFrame(frame);
 })();

@@ -480,7 +480,7 @@ test('shared prediction matches live ticks for team plans and every super withou
     }
     assert.equal(prediction.goal, goal);
     assert.equal(prediction.paths.length, 7);
-    assert.ok(prediction.ticks <= 720);
+    assert.ok(prediction.ticks <= 480);
   }
 });
 
@@ -594,12 +594,12 @@ test('prediction stops at goals or its tick budget and respects stun and super c
   const live = structuredClone(bodies);
   P.startTurn(live, []);
   let goalTick = 0, scored = null;
-  while (scored === null && goalTick < 720) { scored = P.step(live, P.DT); goalTick++; }
+  while (scored === null && goalTick < 480) { scored = P.step(live, P.DT); goalTick++; }
   assert.equal(goal.ticks, goalTick);
   assert.equal(goal.paths[6].at(-1).tick, goalTick);
   const drifting = P.kickoff();
   Object.assign(drifting[6], { vx: 20, friction: 0 });
-  assert.equal(P.predictTurn(drifting, []).ticks, 720);
+  assert.equal(P.predictTurn(drifting, []).ticks, 480);
   const stunned = P.kickoff();
   Object.assign(stunned[0], { stunned: true, superArm: true, meter: 100, equippedSuper: P.SUPERS[5] });
   const plan = [{ angle: 0, power: 1, spin: 1 }];

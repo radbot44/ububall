@@ -710,3 +710,8 @@ body.stadium-fullscreen-active {
 
 #field-spin button { display: grid; place-items: center; flex: none; width: 32px; min-height: 44px; padding: 0; background: transparent; border: 0; border-radius: 0; }
 #field-spin { gap: 2px; }
+
+.field-badges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+
+.skater { left: 0; top: 0; will-change: transform; }
+.skater canvas { display: block; width: 100%; height: 100%; }

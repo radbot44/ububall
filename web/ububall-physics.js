@@ -587,7 +587,7 @@
     });
     launch(bodies, plans);
   }
-  const PREDICTION_TICKS = 720;
+  const PREDICTION_TICKS = 480;
   function predictTurn(bodies, plans) {
     // Clone the whole graph so Sticky references point to cloned teammates.
     const sim = structuredClone(bodies);
