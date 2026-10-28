@@ -18,7 +18,7 @@
     return { card, button, choose, scene };
   });
   let pack = null, packKey = '', pendingKey = '', collectionVersion = 0, revealIndex = 0;
-  let isCardView = false;
+  let viewerView = 'ubu';
   const collectionMap = new Map();
 
   const FAV_STORAGE_KEY = 'ubumint:favorites';
@@ -265,18 +265,7 @@
     const serial = result.certificate ? result.certificate.serial : null;
     current = { text, result, model, rarity: r, name: model.parts.fullName, serial };
 
-    // Reset card view to preview state
-    isCardView = false;
-    $('toggle-card-view').setAttribute('aria-pressed', 'false');
-    const preview = $('preview');
-    const cardStage = $('viewer-card-stage');
-    preview.hidden = false;
-    preview.classList.remove('preview-toggle-out', 'preview-toggle-in');
-    cardStage.hidden = true;
-    cardStage.classList.remove('card-toggle-in', 'card-toggle-out');
-    cardStage.replaceChildren();
-
-    preview.replaceChildren(ubuRender(model));
+    setViewerView(viewerView);
     $('ubunym').textContent = model.parts.fullName;
     const rarityText = r ? ` · Rarity ${r.percentile.toFixed(3)} / 100 (${r.bits.toFixed(6)} bits)` : '';
     const grade = document.createElement('strong'); grade.dataset.grade = model.grade; grade.textContent = model.grade;
@@ -300,37 +289,35 @@
     }
   }
 
-  // Toggle card view in viewer dialog
-  $('toggle-card-view').addEventListener('click', () => {
+  function setViewerView(view) {
     if (!current) return;
-    isCardView = !isCardView;
-    $('toggle-card-view').setAttribute('aria-pressed', String(isCardView));
-    const preview = $('preview');
-    const cardStage = $('viewer-card-stage');
-    if (isCardView) {
-      cardStage.replaceChildren(tradingCard(current));
-      cardStage.hidden = false;
-      cardStage.classList.remove('card-toggle-out');
-      cardStage.classList.add('card-toggle-in');
-      preview.classList.remove('preview-toggle-in');
-      preview.classList.add('preview-toggle-out');
-      setTimeout(() => {
-        if (isCardView) preview.hidden = true;
-      }, 220);
-    } else {
-      preview.hidden = false;
-      preview.classList.remove('preview-toggle-out');
-      preview.classList.add('preview-toggle-in');
-      cardStage.classList.remove('card-toggle-in');
-      cardStage.classList.add('card-toggle-out');
-      setTimeout(() => {
-        if (!isCardView) {
-          cardStage.hidden = true;
-          cardStage.replaceChildren();
-        }
-      }, 240);
+    viewerView = view;
+    for (const tab of document.querySelectorAll('.viewer-tabs [role="tab"]')) {
+      const selected = tab.dataset.view === view;
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      const panel = $(tab.getAttribute('aria-controls'));
+      panel.hidden = !selected;
+      panel.replaceChildren();
+      if (selected) panel.append(view === 'card' ? tradingCard(current)
+        : view === 'token' ? ubuRender.token(current.model) : ubuRender(current.model));
     }
-  });
+  }
+  const viewTabs = [...document.querySelectorAll('.viewer-tabs [role="tab"]')];
+  for (const [index, tab] of viewTabs.entries()) {
+    tab.addEventListener('click', () => setViewerView(tab.dataset.view));
+    tab.addEventListener('keydown', event => {
+      let next;
+      if (event.key === 'ArrowRight') next = (index + 1) % viewTabs.length;
+      else if (event.key === 'ArrowLeft') next = (index + viewTabs.length - 1) % viewTabs.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = viewTabs.length - 1;
+      else return;
+      event.preventDefault();
+      setViewerView(viewTabs[next].dataset.view);
+      viewTabs[next].focus();
+    });
+  }
 
   $('close-viewer').addEventListener('click', () => $('viewer').close());
   $('viewer').addEventListener('click', event => {

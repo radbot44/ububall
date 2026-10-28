@@ -88,7 +88,7 @@ body:has(.viewer[open]) { overflow: hidden; }
   align-items: center;
   gap: 8px;
 }
-.viewer-toggle-card {
+.viewer-tabs button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -103,11 +103,11 @@ body:has(.viewer[open]) { overflow: hidden; }
   touch-action: manipulation;
   transition: all .2s ease;
 }
-.viewer-toggle-card:hover {
+.viewer-tabs button:hover {
   background: var(--hover);
   color: var(--text);
 }
-.viewer-toggle-card[aria-pressed="true"] {
+.viewer-tabs button[aria-selected="true"] {
   background: color-mix(in srgb, var(--primary) 18%, var(--elevated));
   color: var(--primary);
   border-color: color-mix(in srgb, var(--primary) 35%, transparent);
@@ -142,67 +142,12 @@ body:has(.viewer[open]) { overflow: hidden; }
   perspective: 800px;
 }
 
-/* Animations for toggling card view in the viewer */
-@keyframes card-toggle-in {
-  0% {
-    opacity: 0;
-    transform: perspective(800px) translateY(28px) rotateX(16deg) scale(0.92);
-  }
-  60% {
-    opacity: 1;
-    transform: perspective(800px) translateY(-4px) rotateX(-3deg) scale(1.02);
-  }
-  100% {
-    opacity: 1;
-    transform: perspective(800px) translateY(0) rotateX(0deg) scale(1);
-  }
-}
-@keyframes card-toggle-out {
-  0% {
-    opacity: 1;
-    transform: perspective(800px) translateY(0) rotateX(0deg) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: perspective(800px) translateY(24px) rotateX(14deg) scale(0.92);
-  }
-}
-@keyframes preview-toggle-in {
-  0% {
-    opacity: 0;
-    transform: scale(0.88);
-  }
-  70% {
-    opacity: 1;
-    transform: scale(1.03);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-@keyframes preview-toggle-out {
-  0% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(0.9);
-  }
-}
-.card-toggle-in {
-  animation: card-toggle-in .42s cubic-bezier(.22, 1, .36, 1) forwards;
-}
-.card-toggle-out {
-  animation: card-toggle-out .24s ease forwards;
-}
-.preview-toggle-in {
-  animation: preview-toggle-in .32s cubic-bezier(.22, 1, .36, 1) forwards;
-}
-.preview-toggle-out {
-  animation: preview-toggle-out .22s ease forwards;
-}
+/* Each view owns its renderer and light controller; switching is immediate. */
+.viewer-tabs { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: 13px; }
+.viewer-tabs button { padding: 6px 12px; }
+.viewer-token-stage { display: grid; place-items: center; width: 100%; min-height: 300px; padding: 18px; border-radius: 18px; background: radial-gradient(ellipse at 50% 42%, #343944, #171b23 72%); perspective: 800px; }
+.enamel-token { display: block; width: min(380px, 100%); height: auto; overflow: visible; touch-action: none; rotate: x 8deg; }
+@media (prefers-reduced-motion: reduce) { .enamel-token { rotate: none; } }
 
 .oomark { display: block; width: 260px; height: 260px; touch-action: none; }
 #ubunym { margin: 16px 0 8px; overflow-wrap: anywhere; }

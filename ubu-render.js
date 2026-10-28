@@ -888,8 +888,37 @@
       if (crumbs && !index) face.append(svgNode('rect', { width:360, height:360, fill:crumbs, mask:`url(#${key}-mask)` }));
     }
   }
-  function renderSVG(m, className = 'oomark', surface = null, extraEffects = null) {
-    const effects = className === 'oomark' ? (extraEffects || []) : null;
+  function enamelMetal(defs, prefix, grade, effects) {
+    // Match the card lettering's grade palette; ordinary grades use satin nickel.
+    const palettes = {
+      S: [[0, '#fff0d4'], [.34, '#ffc885'], [.48, '#ae6331'], [.52, '#ffe0ad'], [.8, '#ff9954'], [1, '#ffe0ad']],
+      'S+': [[0, '#fff3dd'], [.38, '#ffbd89'], [.48, '#aa4f54'], [.51, '#ffe3cf'], [.76, '#ff8dac'], [1, '#ffc48b']],
+      U: [[0, '#ffda65'], [.16, '#c350f2'], [.28, '#6431bd'], [.38, '#fff3cf'], [.58, '#ff54b7'], [.82, '#ffc94f'], [1, '#fff3cf']],
+      UBU: [[0, '#ffda65'], [.16, '#c350f2'], [.28, '#6431bd'], [.38, '#fff3cf'], [.58, '#ff54b7'], [.82, '#ffc94f'], [1, '#fff3cf']]
+    };
+    const id = prefix + '-metal';
+    const gradient = svgNode('linearGradient', { id, gradientUnits: 'userSpaceOnUse', x1: 15, y1: 0, x2: 345, y2: 360 });
+    for (const [offset, color] of palettes[grade] || [[0, '#f3eee4'], [.25, '#b7b7b2'], [.46, '#727679'], [.5, '#fff8e9'], [.65, '#bfc1be'], [1, '#73787c']]) {
+      gradient.append(svgNode('stop', { offset, 'stop-color': color }));
+    }
+    defs.append(gradient);
+    effects.push((x, y) => gradient.setAttribute('gradientTransform', `translate(${x * 35} ${y * 35}) rotate(${x * 12 - y * 8} 180 180)`));
+    return `url(#${id})`;
+  }
+  function enamelDivider(defs, face, shapes, id, metal) {
+    // Erode the filled union, including lid clips and mouth holes. No seam
+    // appears inside overlapping eyes, and later layers hide covered borders.
+    const filter = svgNode('filter', { id, filterUnits: 'userSpaceOnUse', x: 0, y: 0, width: 360, height: 360 });
+    filter.append(svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: 1.25, result: 'inside' }),
+      svgNode('feComposite', { in: 'SourceAlpha', in2: 'inside', operator: 'out' }));
+    const mask = svgNode('mask', { id: id + '-mask', maskUnits: 'userSpaceOnUse', x: 0, y: 0, width: 360, height: 360, style: 'mask-type:alpha' });
+    const union = svgNode('g', { fill: '#fff', filter: `url(#${id})` });
+    for (const shape of shapes) union.append(shape.cloneNode(true));
+    mask.append(union); defs.append(filter, mask);
+    face.append(svgNode('rect', { width: 360, height: 360, fill: metal, mask: `url(#${id}-mask)` }));
+  }
+  function renderSVG(m, className = 'oomark', surface = null, extraEffects = null, enamel = false) {
+    const effects = className === 'oomark' || enamel ? (extraEffects || []) : null;
     const prefix = 'ubu-' + (++serial);
     const svg = svgNode('svg', { class: className, viewBox: '0 0 360 360', role: 'img', 'aria-label': `${m.parts.fullName}, Ubuquity ${m.grade}` });
     const title = svgNode('title'); title.textContent = `${m.parts.fullName} · ${m.grade}`;
@@ -898,6 +927,16 @@
     bounds.append(svgNode('circle', { cx: 180, cy: 180, r: 176 })); defs.append(bounds);
     const face = svgNode('g', { 'clip-path': `url(#${prefix}-bounds)` });
     svg.append(title, defs, face);
+    const metal = enamel ? enamelMetal(defs, prefix, m.grade, effects) : null;
+    if (enamel) {
+      svg.setAttribute('viewBox', '-12 -12 384 404');
+      // The back is offset downwards to expose a shallow metal sidewall.
+      const body = svgNode('g');
+      body.append(svgNode('circle', { cx: 180, cy: 187, r: 181, fill: metal }),
+        svgNode('circle', { cx: 180, cy: 187, r: 181, fill: '#000', opacity: .3 }),
+        svgNode('circle', { cx: 180, cy: 180, r: 181, fill: metal, stroke: '#fff', 'stroke-opacity': .3, 'stroke-width': .7 }));
+      svg.insertBefore(body, face);
+    }
     const eyePositions = [[120.55, 145.5, m.eyes.left], [239.44, 145.5, m.eyes.right]];
     const eyeShapes = eyePositions.map(([cx, cy, eye], i) => {
       const shape = svgNode('circle', { cx, cy, r: 66.05 });
@@ -931,7 +970,9 @@
         ? material(defs, attribute, prefix + '-' + role + '-texture', effects)
         : (matteFill ||= material(defs, { texture: 'matte', angle: 0 }, prefix + '-matte', effects));
       face.append(svgNode('rect', { x: 0, y: 0, width: 360, height: 360, fill, 'clip-path': `url(#${clipId})` }));
-      if (designed) {
+      if (enamel) {
+        if (role !== 'background') enamelDivider(defs, face, shapes[role], prefix + '-divider-' + role, metal);
+      } else if (designed) {
         const contours = [...shapes[role]];
         if (role === 'eyes' && attribute.texture === 'denim') {
           for (const [cx, cy, eye] of eyePositions) if (eye.planes.length) {
@@ -942,24 +983,37 @@
         materialEdge(defs, face, shapes[role], attribute, prefix + '-' + role + '-edge', effects, contours);
       }
     }
+    if (enamel) {
+      const coatId = prefix + '-enamel-coat';
+      const coat = svgNode('linearGradient', { id: coatId, gradientUnits: 'userSpaceOnUse', x1: 35, y1: 0, x2: 300, y2: 360 });
+      for (const [offset, opacity] of [[0, .22], [.22, .05], [.35, .02], [.43, .16], [.5, .025], [.8, 0], [1, .08]]) {
+        coat.append(svgNode('stop', { offset, 'stop-color': '#fff', 'stop-opacity': opacity }));
+      }
+      defs.append(coat);
+      face.append(svgNode('circle', { cx: 180, cy: 180, r: 176, fill: `url(#${coatId})`, 'pointer-events': 'none' }),
+        svgNode('circle', { cx: 180, cy: 180, r: 175.5, fill: 'none', stroke: '#000', 'stroke-opacity': .28, 'stroke-width': 1 }));
+      effects.push((x, y) => coat.setAttribute('gradientTransform', `translate(${x * 25} ${y * 25})`));
+      attachLighting(svg, effects, surface || svg);
+      return svg;
+    }
     // Keep the front flat; only the narrow perimeter rolls into the token edge.
     // This overlays the complete face without changing any DNA-derived paths.
     const edgeId = prefix + '-token-edge';
-    const edge = svgNode('radialGradient', { id: edgeId, gradientUnits: 'userSpaceOnUse', cx: 180, cy: 178, r: 178 });
+    const edge = svgNode('radialGradient', { id: edgeId, gradientUnits: 'userSpaceOnUse', cx: 178, cy: 176, r: 180 });
     edge.append(
       svgNode('stop', { offset: '0%', 'stop-color': '#000', 'stop-opacity': 0 }),
-      svgNode('stop', { offset: '95%', 'stop-color': '#000', 'stop-opacity': 0 }),
-      svgNode('stop', { offset: '98%', 'stop-color': '#000', 'stop-opacity': .08 }),
-      svgNode('stop', { offset: '100%', 'stop-color': '#000', 'stop-opacity': .24 })
+      svgNode('stop', { offset: '94%', 'stop-color': '#000', 'stop-opacity': 0 }),
+      svgNode('stop', { offset: '98%', 'stop-color': '#000', 'stop-opacity': .13 }),
+      svgNode('stop', { offset: '100%', 'stop-color': '#000', 'stop-opacity': .32 })
     );
     const rimId = prefix + '-token-rim';
     const rim = svgNode('linearGradient', { id: rimId, x1: 0, y1: 0, x2: 1, y2: 1 });
-    for (const [offset, color, opacity] of [[0, '#fff', .38], [.4, '#fff', .06], [.65, '#000', .04], [1, '#000', .22]]) {
+    for (const [offset, color, opacity] of [[0, '#fff', .44], [.4, '#fff', .07], [.65, '#000', .06], [1, '#000', .28]]) {
       rim.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
     }
     defs.append(edge, rim);
     face.append(svgNode('circle', { cx: 180, cy: 180, r: 176, fill: `url(#${edgeId})`, 'pointer-events': 'none' }),
-      svgNode('circle', { cx: 180, cy: 180, r: 175, fill: 'none', stroke: `url(#${rimId})`, 'stroke-width': 2, 'pointer-events': 'none' }));
+      svgNode('circle', { cx: 180, cy: 180, r: 174.5, fill: 'none', stroke: `url(#${rimId})`, 'stroke-width': 3, 'pointer-events': 'none' }));
     if (effects) {
       effects.push((x, y) => {
         rim.setAttribute('x1', String(x * .15));
@@ -1225,6 +1279,7 @@
 
     return svg;
   }
+  renderSVG.token = m => renderSVG(m, 'enamel-token', null, null, true);
   renderSVG.cardMaterials = renderCardMaterials;
   globalThis.ubuRender = renderSVG;
 })();

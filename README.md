@@ -99,6 +99,8 @@ Prefixes, key identifiers and other metadata add length. Encryption alone does n
 
 Open demo.html with ubu.js, ubu-file.js, ubu-render.js and demo.js beside it, or serve them on localhost. No framework or runtime dependencies. Text seeds use platform SHA-512; random generation uses platform randomness. The standalone designer has no production mint keys, account or remote API calls.
 
+The site viewer offers Ubu, Card and Token tabs. Token presents the same character as an enamel collectible with satin nickel dividers; S, S+, U and UBU use their card-rating metal palettes. This is presentation only and does not alter DNA or issuance.
+
 The demo supports text seeds, canonical base64url or hexadecimal DNA input, local favorites/history, trait inspection, fixed schema samples and official-format custom .ubu import/export. Its 109-byte export contains only {"type":"ubu","dna":"..."}. Old ubu-demo envelopes are rejected; signed files are rejected until the application configures a trusted mint key. No key is trusted from an imported file.
 
 The decoder in ubu.js is separate from DOM rendering in ubu-render.js. The site, designer and thumbnails share that renderer. Rendering rules and verification limits are recorded in docs/dna.md.
