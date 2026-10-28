@@ -533,3 +533,35 @@ test('AI Tactical Brain dynamically assigns roles and behaviors from 24-bit pers
   assert.equal(supPlans[1].superArm, true); // Striker arms Cannonball on clean look
   assert.equal(Boolean(bSup[3].superArm), false); // Body state untouched during planning
 });
+
+test('Super events report effects once without changing the simulation', () => {
+  for (const key of ['knockout', 'sticky', 'cannonball', 'stalwart']) {
+    const all = P.kickoff();
+    const a = all[0], b = key === 'sticky' || key === 'cannonball' ? all[6] : all[3];
+    Object.assign(a, { x: 400, y: 250, vx: key === 'stalwart' ? 0 : 100, superActive: key });
+    Object.assign(b, { x: 400 + a.radius + b.radius - 2, y: 250, vx: -100 });
+    const bodies = [a, b], control = structuredClone(bodies), events = [];
+    P.step(bodies, P.DT, null, null, null, (key, phase) => events.push([key, phase]));
+    P.step(control, P.DT);
+    assert.deepEqual(bodies, control, key + ' callback is observational');
+    assert.deepEqual(events, [[key, 'impact']]);
+    if (key !== 'stalwart') {
+      for (let i = 0; i < 10; i++) P.step(bodies, P.DT, null, null, null, (key, phase) => events.push([key, phase]));
+      assert.equal(events.length, 1, key + ' does not repeat after consumption/grab');
+    }
+  }
+});
+
+test('Magnet pull event only fires inside its active range with a free ball', () => {
+  for (const [distance, stuck, expected] of [[150, false, true], [300, false, false], [150, true, false]]) {
+    const all = P.kickoff(), a = all[0], ball = all[6];
+    Object.assign(a, { x: 400, y: 250, superActive: 'magnet' });
+    Object.assign(ball, { x: 400 + distance, y: 250 });
+    if (stuck) ball.stuckTo = a;
+    const bodies = [a, ball], control = structuredClone(bodies), events = [];
+    P.step(bodies, P.DT, null, null, null, key => events.push(key));
+    P.step(control, P.DT);
+    assert.deepEqual(bodies, control);
+    assert.deepEqual(events, expected ? ['magnet'] : []);
+  }
+});

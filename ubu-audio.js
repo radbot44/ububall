@@ -123,7 +123,7 @@
     return sharedContext;
   }
 
-  function createMasterChain(ctx) {
+  function createMasterChain(ctx, cleanup = null) {
     const compressor = ctx.createDynamicsCompressor();
     compressor.threshold.setValueAtTime(-12, ctx.currentTime);
     compressor.knee.setValueAtTime(30, ctx.currentTime);
@@ -136,6 +136,7 @@
 
     compressor.connect(masterGain);
     masterGain.connect(ctx.destination);
+    if (cleanup) cleanup.push(compressor, masterGain);
     return compressor;
   }
 
@@ -580,6 +581,7 @@
   let activePlayback = null;
 
   function stopAll() {
+    for (const handle of superPlayback) handle.stop();
     if (activePlayback) {
       activePlayback.stop();
       activePlayback = null;
@@ -741,6 +743,104 @@
     }
   }
 
+  const superPlayback = new Set();
+  const magnetTimes = new WeakMap();
+  function playSuper(key, phase = key === 'magnet' ? 'pull' : 'impact', options = {}) {
+    const phases = { stalwart: ['launch', 'impact'], knockout: ['impact'], sticky: ['impact'],
+      cannonball: ['impact'], magnet: ['pull'], colossus: ['launch'], shockwave: ['impact'], ghost: ['launch'] };
+    const silent = { stop() {} };
+    if (!phases[key]?.includes(phase)) return silent;
+    const volume = Number.isFinite(options.volume) ? Math.max(0, Math.min(1, options.volume)) : 0.8;
+    if (!volume) return silent;
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return silent;
+    const now = ctx.currentTime;
+    if (key === 'magnet') {
+      if (now - (magnetTimes.get(ctx) ?? -Infinity) < .18) return silent;
+      magnetTimes.set(ctx, now);
+    }
+    const nodes = [], oscillators = [];
+    const master = createMasterChain(ctx, nodes), bus = ctx.createGain();
+    bus.gain.setValueAtTime(volume, now); bus.connect(master);
+    nodes.push(bus);
+    let ended = 0, stopped = false;
+    const handle = { stop() {
+      if (stopped) return;
+      stopped = true;
+      bus.gain.cancelScheduledValues(ctx.currentTime);
+      bus.gain.setValueAtTime(volume, ctx.currentTime);
+      bus.gain.linearRampToValueAtTime(0, ctx.currentTime + .015);
+      for (const osc of oscillators) { try { osc.stop(ctx.currentTime + .02); } catch {} }
+      superPlayback.delete(handle);
+    } };
+    function oscillator(type, from, to, duration, dest, detune = 0) {
+      const osc = ctx.createOscillator(); osc.type = type;
+      osc.frequency.setValueAtTime(from, now);
+      osc.frequency.exponentialRampToValueAtTime(to, now + duration);
+      osc.detune.setValueAtTime(detune, now);
+      osc.connect(dest); nodes.push(osc); oscillators.push(osc);
+      osc.onended = () => {
+        if (++ended === oscillators.length) {
+          for (const node of nodes) node.disconnect();
+          superPlayback.delete(handle);
+        }
+      };
+      osc.start(now); osc.stop(now + duration + .01);
+      return osc;
+    }
+    function tone(type, from, to, duration, level, attack = .003, filter = null, detune = 0) {
+      const gain = ctx.createGain(); nodes.push(gain);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(level, now + attack);
+      gain.gain.exponentialRampToValueAtTime(.0001, now + duration);
+      gain.connect(bus);
+      let dest = gain;
+      if (filter) {
+        dest = ctx.createBiquadFilter(); nodes.push(dest);
+        dest.type = filter[0]; dest.frequency.setValueAtTime(filter[1], now);
+        dest.frequency.exponentialRampToValueAtTime(filter[2], now + duration);
+        dest.Q.setValueAtTime(filter[3], now); dest.connect(gain);
+      }
+      return oscillator(type, from, to, duration, dest, detune);
+    }
+    function modulate(carrier, type, hz, depth, duration) {
+      const gain = ctx.createGain(); nodes.push(gain);
+      gain.gain.setValueAtTime(depth, now);
+      gain.gain.exponentialRampToValueAtTime(.01, now + duration);
+      gain.connect(carrier.frequency);
+      oscillator(type, hz, hz, duration, gain);
+    }
+    if (key === 'stalwart') {
+      const hit = phase === 'impact', duration = hit ? .18 : .38;
+      const carrier = tone('sine', 110, hit ? 65 : 100, duration, .65, .003,
+        hit ? ['lowpass', 700, 220, 1] : null);
+      modulate(carrier, 'sine', 303, hit ? 125 : 220, duration);
+    } else if (key === 'knockout') {
+      const carrier = tone('sawtooth', 960, 140, .19, .28, .002, ['lowpass', 3400, 550, 1]);
+      modulate(carrier, 'square', 65, 100, .19);
+    } else if (key === 'sticky') {
+      tone('triangle', 180, 520, .12, .8, .002, ['bandpass', 180, 520, 3]);
+    } else if (key === 'cannonball') {
+      tone('sine', 130, 38, .32, .9);
+      tone('sawtooth', 260, 65, .075, .2, .002, ['lowpass', 1600, 100, 5]);
+    } else if (key === 'magnet') {
+      const carrier = tone('sine', 165, 145, .22, .12, .035);
+      modulate(carrier, 'sine', 32, 18, .22);
+    } else if (key === 'colossus') {
+      tone('triangle', 65, 130, .55, .55, .09, null, -7);
+      tone('sawtooth', 65, 130, .55, .15, .09, ['lowpass', 240, 500, .7], 7);
+    } else if (key === 'shockwave') {
+      tone('sine', 160, 32, .5, .9);
+      tone('sawtooth', 320, 45, .16, .2, .002, ['lowpass', 1800, 90, 9]);
+    } else if (key === 'ghost') {
+      tone('sine', 880, 880, .75, .24, .08, null, -5);
+      tone('sine', 1320, 1320, .8, .17, .09, null, 5);
+      tone('sine', 1760, 1760, .85, .09, .1, null, -3);
+    }
+    superPlayback.add(handle);
+    return handle;
+  }
+
   function playFanfare(voice, customCtx = null, onNoteCallback = null) {
     stopAll();
     const ctx = customCtx || getAudioContext();
@@ -835,6 +935,7 @@
     playBallHit,
     playWallHit,
     playGoalHit,
+    playSuper,
     playFanfare,
     stop: stopAll
   };

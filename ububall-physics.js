@@ -127,7 +127,7 @@
     }
     if (typeof onShockwave === 'function') onShockwave(source, radius);
   }
-  function collide(a, b, onCollide = null, allBodies = null, onShockwave = null) {
+  function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, onSuper = null) {
     const isBall = a.team === -1 || b.team === -1;
     if (!isBall && a.team !== b.team && (a.superActive === 'ghost' || b.superActive === 'ghost')) return;
 
@@ -145,8 +145,8 @@
     const d = Math.sqrt(d2);
 
     if (!isBall && a.team !== b.team) {
-      if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; }
-      if (b.superActive === 'knockout') { a.stunnedNext = true; b.superActive = null; }
+      if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; onSuper?.('knockout', 'impact', a); }
+      if (b.superActive === 'knockout') { a.stunnedNext = true; b.superActive = null; onSuper?.('knockout', 'impact', b); }
     }
 
     if (allBodies) {
@@ -168,6 +168,7 @@
       const ball = a.team === -1 ? a : b;
       if (player.superActive === 'sticky') {
         ball.stuckTo = player;
+        onSuper?.('sticky', 'impact', player);
         const ox = ball.x - player.x, oy = ball.y - player.y, od = Math.sqrt(ox * ox + oy * oy) || 1;
         const targetDist = player.radius + ball.radius;
         ball.stickOffset = { x: (ox / od) * targetDist, y: (oy / od) * targetDist };
@@ -196,6 +197,10 @@
     if (invB > 0) { b.x += nx * correction * invB; b.y += ny * correction * invB; }
 
     if (closing >= 0) return;
+    if (!isBall) {
+      if (a.superActive === 'stalwart') onSuper?.('stalwart', 'impact', a);
+      if (b.superActive === 'stalwart') onSuper?.('stalwart', 'impact', b);
+    }
 
     const bounce = ((a.bounciness || 1) + (b.bounciness || 1)) / 2;
     const baseImpulse = -1.88 * bounce * closing / inverse;
@@ -204,8 +209,8 @@
     if (isBall) {
       if (a.team !== -1 && a.power) impulseB *= a.power;
       else if (b.team !== -1 && b.power) impulseA *= b.power;
-      if (a.team !== -1 && a.superActive === 'cannonball') { impulseB *= 2.5; a.superActive = null; }
-      else if (b.team !== -1 && b.superActive === 'cannonball') { impulseA *= 2.5; b.superActive = null; }
+      if (a.team !== -1 && a.superActive === 'cannonball') { impulseB *= 2.5; a.superActive = null; onSuper?.('cannonball', 'impact', a); }
+      else if (b.team !== -1 && b.superActive === 'cannonball') { impulseA *= 2.5; b.superActive = null; onSuper?.('cannonball', 'impact', b); }
     } else {
       const strA = a.strength || 1, stabA = a.stability || 1;
       const strB = b.strength || 1, stabB = b.stability || 1;
@@ -236,7 +241,7 @@
 
     if (typeof onCollide === 'function') onCollide(a, b, -closing, baseImpulse);
   }
-  function step(bodies, dt = DT, onCollide = null, onWall = null, onShockwave = null) {
+  function step(bodies, dt = DT, onCollide = null, onWall = null, onShockwave = null, onSuper = null) {
     const ball = bodies.find(b => b.team === -1);
     if (ball && !ball.stuckTo) {
       for (const b of bodies) {
@@ -245,6 +250,7 @@
           const minDist = b.radius + ball.radius;
           if (d2 > minDist * minDist && d2 < 260 * 260) {
             const d = Math.sqrt(d2);
+            onSuper?.('magnet', 'pull', b);
             const pull = 650 * (1 - d / 260);
             ball.vx += (dx / d) * pull * dt;
             ball.vy += (dy / d) * pull * dt;
@@ -283,7 +289,7 @@
       }
     }
     for (let pass = 0; pass < 3; pass++) {
-      for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) collide(bodies[i], bodies[j], onCollide, bodies, onShockwave);
+      for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) collide(bodies[i], bodies[j], onCollide, bodies, onShockwave, onSuper);
       for (const b of bodies) {
         if (b.superActive === 'stalwart') {
           b.vx = b.vy = b.omega = 0;

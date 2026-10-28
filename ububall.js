@@ -870,6 +870,11 @@
         }
       });
     }
+    for (const body of bodies) {
+      if (!body.stunned && ['stalwart', 'colossus', 'ghost'].includes(body.superActive)) {
+        handleSuper(body.superActive, 'launch', body);
+      }
+    }
     P.launch(bodies, [...plans, ...($('cpu-hold').checked ? [] : cpu)]); elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
   };
   for (const id of ['angle', 'power', 'shot-spin']) $(id).oninput = () => { if (phase !== 'plan') return; plans[selected] = { angle: radians(Number($('angle').value)), power: Number($('power').value) / 100, spin: Number($('shot-spin').value) / 100 }; sync(); draw(); };
@@ -1037,11 +1042,21 @@
       window.ubuAudio.playWallHit({ volume });
     }
   }
+  const superImpactTimes = new WeakMap();
+  function handleSuper(key, phase, body) {
+    // Sustained contact can resolve repeatedly within one animation frame.
+    if (key === 'stalwart' && phase === 'impact') {
+      const now = performance.now();
+      if (now - (superImpactTimes.get(body) ?? -Infinity) < 100) return;
+      superImpactTimes.set(body, now);
+    }
+    window.ubuAudio?.playSuper?.(key, phase);
+  }
   function handleShockwave(source, radius) {
     burst(source.x, source.y, source.team, 1, true);
     shockwaves.push({ x: source.x, y: source.y, currentRadius: 10, maxRadius: radius, team: source.team, life: 0.35, duration: 0.35 });
     if (window.ubuAudio) {
-      window.ubuAudio.playGoalHit?.('net', { volume: 0.8 });
+      window.ubuAudio.playSuper?.('shockwave', 'impact', { volume: 0.8 });
     }
   }
   function frame(time) {
@@ -1052,7 +1067,7 @@
     if (phase === 'play' && active) {
       accumulator += delta;
       while (accumulator >= P.DT && phase === 'play') {
-        const goal = P.step(bodies, P.DT, handleCollision, handleWall, handleShockwave); elapsed += P.DT; accumulator -= P.DT;
+        const goal = P.step(bodies, P.DT, handleCollision, handleWall, handleShockwave, handleSuper); elapsed += P.DT; accumulator -= P.DT;
         recordTrails();
         if (goal !== null || P.settled(bodies) || elapsed >= 12) finishTurn(goal);
       }

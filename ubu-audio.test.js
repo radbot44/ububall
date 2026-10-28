@@ -172,3 +172,44 @@ test('audio: mock AudioContext synthesis and scheduling', () => {
   audio.playGoalHit('post', { ctx: mockCtx, volume: 0.9 });
   audio.playGoalHit('net', { ctx: mockCtx, volume: 0.7 });
 });
+
+test('Super synthesis bounds playback, cleans nodes, and throttles Magnet', () => {
+  const nodes = [], oscillators = [];
+  class Param {
+    setValueAtTime(value, time) { assert.ok(Number.isFinite(value) && Number.isFinite(time)); }
+    linearRampToValueAtTime(value, time) { this.setValueAtTime(value, time); }
+    exponentialRampToValueAtTime(value, time) { assert.ok(value > 0); this.setValueAtTime(value, time); }
+    cancelScheduledValues() {}
+  }
+  function node() {
+    const n = { connect() {}, disconnect() { this.disconnected = true; }, start() {},
+      stop(time) { assert.ok(Number.isFinite(time)); this.end = time; } };
+    for (const key of ['gain','frequency','detune','Q','threshold','knee','ratio','attack','release']) n[key] = new Param();
+    nodes.push(n); return n;
+  }
+  const ctx = { currentTime: 1, destination: {}, createGain: node, createBiquadFilter: node,
+    createDynamicsCompressor: node, createOscillator() { const n = node(); oscillators.push(n); return n; } };
+  for (const [key, phase] of [['stalwart','launch'],['stalwart','impact'],['knockout','impact'],['sticky','impact'],
+    ['cannonball','impact'],['magnet','pull'],['colossus','launch'],['shockwave','impact'],['ghost','launch']]) {
+    const start = nodes.length, oscStart = oscillators.length;
+    audio.playSuper(key, phase, { ctx });
+    assert.ok(oscillators.length > oscStart, key);
+    for (const osc of oscillators.slice(oscStart)) {
+      assert.ok(osc.end > ctx.currentTime && osc.end <= ctx.currentTime + 1);
+      osc.onended();
+    }
+    assert.ok(nodes.slice(start).every(n => n.disconnected), key + ' cleans its graph');
+  }
+  let count = nodes.length;
+  audio.playSuper('magnet', 'pull', { ctx });
+  audio.playSuper('unknown', 'impact', { ctx });
+  audio.playSuper('ghost', 'impact', { ctx });
+  audio.playSuper('shockwave', 'impact', { ctx, volume: 0 });
+  assert.equal(nodes.length, count);
+  ctx.currentTime += .181;
+  audio.playSuper('magnet', undefined, { ctx });
+  assert.ok(nodes.length > count);
+  audio.stop();
+  assert.ok(oscillators.at(-1).end <= ctx.currentTime + .021);
+  audio.stop();
+});
