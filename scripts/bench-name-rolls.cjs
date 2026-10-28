@@ -4,10 +4,10 @@ const Module = require('node:module');
 const { performance } = require('node:perf_hooks');
 const { randomFillSync } = require('node:crypto');
 const assert = require('node:assert/strict');
-const { scoreRarity } = require('../rarity.js');
+const { scoreRarity } = require('../shared/rarity.js');
 
 // Experimental only: compile all variants identically, without editing ubu.js.
-const filename = path.resolve(__dirname, '../ubu.js');
+const filename = path.resolve(__dirname, '../shared/ubu.js');
 const production = fs.readFileSync(filename, 'utf8').replace(/\r\n/g, '\n');
 const source = fs.readFileSync(path.join(__dirname, 'bench-name-baseline.txt'), 'utf8').replace(/\r\n/g, '\n') +
   production.slice(production.indexOf('  const PALETTE'), production.indexOf('  class NameRandom')) +

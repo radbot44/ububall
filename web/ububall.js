@@ -3,7 +3,7 @@
   const $ = id => document.getElementById(id), P = ububallPhysics;
   const canvas = $('rink'), ctx = canvas.getContext('2d');
   const ballMark = new Image();
-  ballMark.src = 'uburoom-oomark-brand.svg';
+  ballMark.src = 'assets/uburoom-oomark-brand.svg';
   ballMark.onload = () => { if (skaters.length) draw(); };
   const superImages = P.SUPERS.map(s => {
     const img = new Image();

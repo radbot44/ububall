@@ -8,7 +8,7 @@
   <script src="ububall-physics.js" defer></script><script src="ububall.js" defer></script>
 </head>
 <body><main class="ball-page">
-  <header><a class="brand" href="/"><img src="uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a><nav aria-label="Main"><a class="quiet" href="/">Mint & collection</a><a class="quiet" href="/demo.html">Designer</a></nav></header>
+  <header><a class="brand" href="/"><img src="assets/uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a><nav aria-label="Main"><a class="quiet" href="/">Mint & collection</a><a class="quiet" href="/demo.html">Designer</a></nav></header>
   <div class="game-heading">
     <h1>ububall</h1>
     <div class="heading-actions">
@@ -62,7 +62,7 @@
       <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
       <div class="stadium-actions">
         <button id="stadium-super-btn" type="button" class="stadium-super-btn" aria-label="Arm super for selected ubu">
-          <img id="stadium-super-icon" class="super-icon" alt="" src="00_stalwart.png">
+          <img id="stadium-super-icon" class="super-icon" alt="" src="assets/00_stalwart.png">
           <span id="stadium-super-text">Super 0%</span>
         </button>
         <button class="primary" id="launch">Launch</button>
@@ -79,7 +79,7 @@
     <p class="hint">Click an ubu and pull back like a slingshot to aim and set power. Grab the spin dial on the ubu to curve your shot. You attack the right goal.</p>
     <p>Temporary values; no DNA changes. Set each stat from 0 to 1023. Normal is 511. Applying values resets the field and score, keeping your planned shot.</p>
     <label>Ubu <select id="stat-player"><option value="0">Your ubu 1</option><option value="1">Your ubu 2</option><option value="2">Your ubu 3</option><option value="3">CPU ubu 1</option><option value="4">CPU ubu 2</option><option value="5">CPU ubu 3</option></select></label>
-    <div class="controls"><label>Equipped Super <select id="stat-super"></select></label><img id="stat-super-thumb" class="stat-super-thumb" alt="" src="00_stalwart.png"><button id="fill-meter" type="button">Fill Super Meter (100%)</button></div>
+    <div class="controls"><label>Equipped Super <select id="stat-super"></select></label><img id="stat-super-thumb" class="stat-super-thumb" alt="" src="assets/00_stalwart.png"><button id="fill-meter" type="button">Fill Super Meter (100%)</button></div>
     <div id="stat-inputs" class="stat-inputs"></div>
     <p id="stat-preview"></p>
     <div class="actions"><button id="apply-stats">Apply & reset field</button><button id="normal-stats">All stats normal</button><button id="reset-field">Reset field</button><button id="restore-shot" disabled>Reuse last shot at kickoff</button><label><input id="cpu-hold" type="checkbox"> Hold CPU launches for testing</label></div>

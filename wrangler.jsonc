@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ubumint",
-  "main": "worker.mjs",
+  "main": "server/worker.mjs",
   "compatibility_date": "2026-10-23",
   "workers_dev": false,
   "preview_urls": false,

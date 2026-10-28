@@ -1,7 +1,7 @@
 'use strict';
-const { sign } = require('./ubu-file.js');
-const { decode, fromCode } = require('./ubu.js');
-const { scoreRarity } = require('./rarity.js');
+const { sign } = require('../shared/ubu-file.js');
+const { decode, fromCode } = require('../shared/ubu.js');
+const { scoreRarity } = require('../shared/rarity.js');
 
 const MAX_SERIAL = 999999999999;
 const DEFAULT_BATCH_SIZE = 1000;

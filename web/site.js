@@ -149,7 +149,7 @@
     const hologram = document.createElement('div'); hologram.className = 'card-hologram'; hologram.setAttribute('aria-hidden', 'true');
     card.append(hologram);
     const top = document.createElement('div'); top.className = 'card-top';
-    const brand = document.createElement('img'); brand.src = 'uburoom-wordmark-brand.svg'; brand.alt = 'uburoom';
+    const brand = document.createElement('img'); brand.src = 'assets/uburoom-wordmark-brand.svg'; brand.alt = 'uburoom';
     const serialNum = item.result.certificate?.serial || '';
     const favBtn = createHeartButton(serialNum);
     const serial = document.createElement('span'); serial.textContent = serialNum ? '#' + serialNum : '';

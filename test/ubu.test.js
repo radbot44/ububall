@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
-const ubu = require('./ubu.js');
+const ubu = require('../shared/ubu.js');
 const roles = ['background', 'eyes', 'irises', 'pupils', 'mouth'];
 const textures = ['metallic', 'glossy', 'iridescent', 'crystalline', 'pearlescent', 'marble', 'velvet', 'frosted', 'terrazzo', 'crackle', 'holographic', 'woodgrain', 'plush', 'lacquered', 'damascus', 'opalescent', 'satin', 'leather', 'denim', 'carbon-fiber', 'hammered-metal', 'granite', 'sandstone', 'obsidian', 'liquid', 'bubbled', 'mosaic', 'circuitry', 'quartz', 'kintsugi', 'lava', 'starfield'];
 function set(dna, start, width, value) {
@@ -32,7 +32,7 @@ test('neutral and endpoint mouth geometry retain their numeric ranges in the new
   assert.equal(ubu.curve(0), -1); assert.equal(ubu.curve(511), 0); assert.equal(ubu.curve(1023), 1);
 });
 test('packed uburithm matches independently captured benchmark vectors', () => {
-  for (const {seed, ...expected} of require('./test/packed-name-vectors.json')) {
+  for (const {seed, ...expected} of require('./packed-name-vectors.json')) {
     assert.deepEqual(ubu.ubunym(BigInt('0x' + seed)), expected);
   }
 });
@@ -276,7 +276,7 @@ test('statMultiplier maps 8-bit values symmetrically across centered cubic curve
 
 test('packed names retain slots, spelling format and placement for all visible structures', () => {
   const seen = new Set();
-  for (const {seed} of require('./test/packed-name-vectors.json')) {
+  for (const {seed} of require('./packed-name-vectors.json')) {
     const name = ubu.ubunym(BigInt('0x' + seed));
     const {praenomen: p, nomen: n, cognomen: c, cognomenBeforeNomen: front} = name;
     assert.match(n, /^[A-Z][a-z]{5}$/);

@@ -1,9 +1,9 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const ubu = require('./ubu.js');
-const rarity = require('./rarity.js');
-const file = require('./ubu-file.js');
+const ubu = require('../shared/ubu.js');
+const rarity = require('../shared/rarity.js');
+const file = require('../shared/ubu-file.js');
 
 const TOLERANCE = 1e-9;
 

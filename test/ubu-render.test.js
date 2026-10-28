@@ -10,7 +10,7 @@ class Element {
   append(...children) { this.children.push(...children); }
 }
 const context = vm.createContext({ document: { createElementNS: (_, tag) => new Element(tag) } });
-vm.runInContext(fs.readFileSync(require.resolve('./ubu-render.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(require.resolve('../shared/ubu-render.js'), 'utf8'), context);
 function card(angles) {
   return context.ubuRender.cardMaterials({ attributes: Object.fromEntries(
     ['background', 'eyes', 'mouth', 'irises', 'pupils'].slice(0, angles.length).map((role, i) =>

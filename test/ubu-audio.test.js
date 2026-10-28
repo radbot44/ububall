@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const audio = require('./ubu-audio.js');
+const audio = require('../shared/ubu-audio.js');
 
 test('audio: constants and definitions', () => {
   assert.equal(audio.INSTRUMENTS.length, 16);

@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { verify, createPublicKey } = require('node:crypto');
-const file = require('./ubu-file.js');
+const file = require('../shared/ubu-file.js');
 const dna = 'A'.repeat(171);
 const record = { mint: 'A'.repeat(22), id: 'AQEBAQEBAQEBAQEBAQEBAQ', serial: '000000000001', dna, issuedAt: 1792700000, key: 'mint-1' };
 const keyPair = () => crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);

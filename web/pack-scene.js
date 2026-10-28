@@ -25,7 +25,7 @@
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     const logo = new Image(), mark = new Image();
     logo.onload = mark.onload = requestPaint;
-    logo.src = 'uburoom-wordmark-brand.svg'; mark.src = 'uburoom-oomark-brand.svg';
+    logo.src = 'assets/uburoom-wordmark-brand.svg'; mark.src = 'assets/uburoom-oomark-brand.svg';
 
     // Fixed fine grain: generated once, so the material never sparkles at rest.
     const grain = document.createElement('canvas');

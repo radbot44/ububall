@@ -1,9 +1,9 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
-const ubu = require('../ubu.js');
+const ubu = require('../shared/ubu.js');
 
-const { scoreRarity } = require('../rarity.js');
+const { scoreRarity } = require('../shared/rarity.js');
 
 const SAMPLE_SIZE = 1000000;
 const STEPS = 1000;

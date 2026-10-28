@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as auth from './auth.mjs';
+import * as auth from '../server/auth.mjs';
 const env = { ORIGIN: 'https://mint.example', DISCORD_CLIENT_ID: '123', DISCORD_CLIENT_SECRET: 'test-only', SESSION_SECRET: Buffer.alloc(32, 7).toString('base64url') };
 async function authorize(overrides = {}) {
   const login = await auth.login(new Request(env.ORIGIN + '/auth/discord'), env);

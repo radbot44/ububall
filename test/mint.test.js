@@ -5,11 +5,11 @@ const { mkdtempSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { Worker } = require('node:worker_threads');
-const { Mint, DEFAULT_BATCH_SIZE, PACK_SIZE } = require('./mint.js');
-const { openStorage } = require('./mint-local.js');
-const file = require('./ubu-file.js');
-const ubu = require('./ubu.js');
-const rarity = require('./rarity.js');
+const { Mint, DEFAULT_BATCH_SIZE, PACK_SIZE } = require('../server/mint.js');
+const { openStorage } = require('../server/mint-local.js');
+const file = require('../shared/ubu-file.js');
+const ubu = require('../shared/ubu.js');
+const rarity = require('../shared/rarity.js');
 
 const mintID = 'A'.repeat(22);
 const owner = '123456789012345678';
@@ -307,7 +307,7 @@ test('independent concurrent SQLite connections cannot allocate twice', async t 
     })().catch(error => { throw error; });`;
   const outputs = await Promise.all(Array.from({ length: 2 }, (_, group) => new Promise((resolve, reject) => {
     const worker = new Worker(source, { eval: true, workerData: {
-      modulePath: require.resolve('./mint.js'), storagePath: require.resolve('./mint-local.js'),
+      modulePath: require.resolve('../server/mint.js'), storagePath: require.resolve('../server/mint-local.js'),
       path: f.path, privateJwk, mint: mintID, owner,
       requests: [request(999), ...Array.from({ length: 3 }, (_, i) => request(group * 10 + i))]
     } });
