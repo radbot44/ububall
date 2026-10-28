@@ -191,6 +191,8 @@
   }
   function renderStatsBox(statSource) {
     const wrap = document.createElement('div'); wrap.className = 'ubu-stats-wrap';
+    const details = document.createElement('details'); details.className = 'stat-details';
+    const summary = document.createElement('summary'); summary.textContent = 'Individual stats'; details.append(summary);
     const groups = [
       ['Movement', '#76b9ef', ['impulse', 'traction', 'spin', 'curve']],
       ['Physical', '#42c66b', ['size', 'mass', 'bounciness', 'grip']],
@@ -233,7 +235,10 @@
         fullBox.append(row);
       }
     }
-    wrap.append(compactBox, fullBox);
+    compactBox.setAttribute('aria-label', 'Category averages');
+    compactBox.title = 'Category averages · 0–255';
+    details.append(fullBox); wrap.append(compactBox, details);
+    details.open = Boolean($('toggle-full-stats')?.checked);
     return wrap;
   }
   function renderSuperPanel(playerIndex, isCpu = false) {
@@ -285,18 +290,28 @@
       plans[selected].power = plans[selected].spin = 0;
     }
     for (const id of ['angle', 'power', 'shot-spin', 'hold']) $(id).disabled = !planning || isStunned;
-    $('launch').disabled = !planning && !isGoal;
+    $('launch').disabled = phase === 'play';
     for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = phase === 'play';
     $('restore-shot').disabled = phase === 'play' || !lastPlans;
     if (!readStats()) $('apply-stats').disabled = true;
     document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
-    $('launch').textContent = isGoal ? 'Next kickoff' : 'Launch';
+    $('launch').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : 'Launch team';
+    $('selected-name').textContent = `${selected + 1}. ${teamEntries[selected].model.parts.fullName}`;
+    const launching = plans.filter((p, i) => p.power > 0 && !bodies[i].stunned && !(bodies[i].superArm && bodies[i].equippedSuper?.key === 'stalwart')).length;
+    $('plan-summary').textContent = planning ? `${launching} launching · ${3 - launching} holding` : '';
+    [...$('team-selector').children].forEach((button, i) => {
+      button.setAttribute('aria-pressed', String(i === selected));
+      button.disabled = !planning;
+      button.querySelector('span').textContent = `${i + 1} · ${bodies[i].stunned ? 'Stunned' : plans[i].power > 0 ? Math.round(plans[i].power * 100) + '%' : 'Hold'}${bodies[i].superArm ? ' · Armed' : ''}`;
+    });
     const angle = Math.round((plans[selected].angle * 180 / Math.PI + 360) % 360);
     $('angle').value = angle; $('angle-value').value = angle + 'Â°';
     $('power').value = Math.round(plans[selected].power * 100); $('power-value').value = $('power').value + '%';
     $('shot-spin').value = Math.round((plans[selected].spin || 0) * 100); $('shot-spin-value').value = $('shot-spin').value + '%';
     [...$('team').children].forEach((button, i) => {
-      button.setAttribute('aria-pressed', String(i === selected)); button.disabled = !planning;
+      button.classList.toggle('selected', i === selected);
+      const select = button.querySelector('.card-select');
+      select.setAttribute('aria-pressed', String(i === selected)); select.disabled = !planning;
       const small = button.querySelector('small');
       if (small) {
         if (bodies[i]?.stunned) small.textContent = 'ðŸ’« Stunned this turn';
@@ -337,6 +352,7 @@
       }
       const canArm = planning && (curB.meter >= 100) && !curB.stunned;
       hudSuperBtn.disabled = !canArm;
+      hudSuperBtn.setAttribute('aria-pressed', String(Boolean(curB.superArm)));
       hudSuperBtn.classList.toggle('armed', Boolean(curB.superArm));
       if (hudSuperText) {
         if (curB.stunned) {
@@ -344,15 +360,16 @@
         } else if (curB.superArm) {
           hudSuperText.textContent = 'âš¡ ARMED';
         } else if (curB.meter >= 100) {
-          hudSuperText.textContent = `ARM ${s.name.toUpperCase()}`;
+          hudSuperText.textContent = `${selected + 1} · Arm ${s.name}`;
         } else {
-          hudSuperText.textContent = `${s.name} ${Math.round(curB.meter || 0)}%`;
+          hudSuperText.textContent = `${selected + 1} · ${s.name} charging ${Math.floor(curB.meter || 0)}%`;
         }
       }
     }
   }
   function buildTeam() {
     $('team').replaceChildren();
+    $('team-selector').replaceChildren();
     if ($('cpu-team')) $('cpu-team').replaceChildren();
     $('skaters').replaceChildren();
     teamEntries = [...roster, ...practice.slice(3)];
@@ -364,16 +381,23 @@
       return node;
     });
     teamEntries.slice(0, 3).forEach((entry, i) => {
-      const button = document.createElement('button'); button.type = 'button'; button.id = `player-${i}`;
+      const button = document.createElement('div'); button.className = 'team-card'; button.id = `player-${i}`;
+      const select = document.createElement('button'); select.type = 'button'; select.className = 'card-select';
       const header = document.createElement('div'); header.className = 'card-header';
       const titles = document.createElement('div'); titles.className = 'card-titles';
       const strong = document.createElement('strong'); strong.textContent = `${i + 1}. ${entry.model.parts.fullName}`;
       const small = document.createElement('small'); small.textContent = '0% power Â· 0% spin';
       titles.append(strong, small);
       header.append(ubuRender(entry.model, 'ball-thumb'), titles);
-      button.append(header, renderStatsBox(stats[i] || entry.model.stats || {}), renderSuperPanel(i, false));
-      button.onclick = () => { selected = i; sync(); draw(); };
+      select.append(header);
+      button.append(select, renderStatsBox(stats[i] || entry.model.stats || {}), renderSuperPanel(i, false));
+      select.onclick = () => { selected = i; sync(); draw(); };
       $('team').append(button);
+      const shortcut = document.createElement('button'); shortcut.type = 'button';
+      shortcut.setAttribute('aria-label', `Select ${entry.model.parts.fullName}`);
+      shortcut.append(ubuRender(entry.model, 'ball-thumb'), document.createElement('span'));
+      shortcut.onclick = select.onclick;
+      $('team-selector').append(shortcut);
     });
     if ($('cpu-team')) {
       teamEntries.slice(3, 6).forEach((entry, idx) => {
@@ -866,7 +890,11 @@
     }
     draw();
   }
-  $('launch').onclick = () => {
+  $('launch').onclick = async () => {
+    if (phase === 'over') {
+      if (isFullscreenActive()) await toggleFullscreen();
+      $('new-match').click(); return;
+    }
     window.ubuAudio?.getAudioContext();
     if (phase === 'goal') {
       window.ubuAudio?.stop();
@@ -1210,6 +1238,7 @@
   if (toggleFull) {
     toggleFull.onchange = () => {
       document.body.classList.toggle('show-full-stats', toggleFull.checked);
+      document.querySelectorAll('.stat-details').forEach(node => { node.open = toggleFull.checked; });
     };
   }
   $('new-match').onclick = () => {

@@ -238,9 +238,9 @@
       target.fillStyle = color; target.fillRect(-130, -135, 260, 270);
       for (let y = -135; y < 135; y++) {
         const latitude = Math.asin(Math.max(-1, Math.min(1, (y + .5) / 112)));
-        const surfaceY = mix(latitude * 112 + pointerY * 7, y, flat);
-        const sourceY = surfaceY + 192;
         const bulge = Math.cos(latitude) * (1 - flat);
+        const surfaceY = mix(latitude * (135 / (Math.PI / 2)), y, flat) + pointerY * 7 * bulge;
+        const sourceY = surfaceY + 192;
         target.drawImage(plasticPrint, 0, sourceY * 2, 440, 2, -128 + pointer * 7 * bulge, y, 256, 1.1);
       }
       target.globalAlpha *= 1 - flat * .8;

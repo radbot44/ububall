@@ -66,7 +66,7 @@
 }
 .team-column { display: flex; flex-direction: column; min-width: 0; }
 .team { display: flex; flex-direction: column; gap: 10px; }
-.team button, .team .team-card {
+.team .team-card {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -81,7 +81,7 @@
 }
 .team button { cursor: pointer; }
 .team button:hover { background: var(--hover); }
-.team button[aria-pressed=true] {
+.team .team-card.selected {
   border-color: var(--primary);
   background: color-mix(in srgb, var(--card), var(--primary) 9%);
 }
@@ -609,4 +609,38 @@ body.stadium-fullscreen-active {
   #game-status { font-size: 12px; }
   #roster-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Separate selection, character actions, and the team-wide turn action. */
+.team .card-select { width: 100%; padding: 0; border: 0; background: transparent; text-align: left; }
+.team .card-select:disabled { opacity: 1; }
+.team .super-arm-btn { min-height: 30px; text-transform: none; letter-spacing: normal; }
+.team .super-arm-btn:disabled { opacity: 1; background: transparent; border-color: transparent; box-shadow: none; }
+.team-selector { display: flex; justify-content: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap; }
+.team-selector button { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; border: 1px solid var(--border); }
+.team-selector button svg { width: 28px; height: 28px; }
+.team-selector button[aria-pressed=true] { border-color: var(--primary); background: color-mix(in srgb, var(--card), var(--primary) 12%); }
+.team-selector button:disabled { opacity: 1; }
+.shot-controls { margin: 0 16px; padding: 8px 0; border-top: 1px solid var(--border); }
+.shot-controls summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.shot-controls .controls { margin: 12px 0; }
+.team-launch { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+#plan-summary { font-size: 12px; color: var(--muted); }
+#plan-summary:empty { display: none; }
+.stadium-actions { flex-wrap: wrap; }
+.stadium:fullscreen, .stadium.stadium-fullscreen { overflow-y: auto; }
+.stadium:fullscreen > :not(.stadium-stage-area), .stadium.stadium-fullscreen > :not(.stadium-stage-area) { flex-shrink: 0; }
+
+.stat-details > summary { font-size: 11px; color: var(--muted); cursor: pointer; margin-top: 8px; }
+.ubu-stats-wrap:not(:has(.stat-details[open])) > .compact-stats { display: flex; }
+.ubu-stats-wrap:has(.stat-details[open]) > .compact-stats { display: none; }
+.stat-details[open] > .full-stats { display: flex; }
+@media (min-width: 651px) and (max-width: 1000px) {
+  .home-column, .away-column { display: flex; }
+  .team { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 650px) {
+  .scoreboard { flex-wrap: wrap; gap: 10px; }
+  .stadium-toolbar { position: static; transform: none; margin-left: auto; }
+  .shot-controls .controls { grid-template-columns: 1fr; }
 }
