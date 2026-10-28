@@ -1,6 +1,6 @@
 # The uburithm
 
-Owner-approved naming algorithm update on 2026-10-25 (America/New_York). ubu.js implements this permanent naming algorithm. The owner approved independent surrounding-word visibility rolls on 2026-10-28. Optimizations must preserve the updated outputs and draw consumption.
+Owner-approved naming algorithm update on 2026-10-25 (America/New_York). ubu.js implements this permanent naming algorithm. The owner approved independent surrounding-word visibility rolls and 1/8 front placement of visible cognomens on 2026-10-28. Optimizations must preserve the updated outputs and draw consumption.
 
 ## Source review
 
@@ -41,7 +41,7 @@ Within each word:
 4. Draw CC pairs from left to right.
 5. Draw remaining consonants from left to right.
 
-Between words, retain the reference order: nomen, extra length, extra word, orientation, opposite word. Then always consume two more stream draws, first praenomen visibility and then cognomen visibility; each shows its slot only when the draw is below 0.5, even when that slot was originally empty. Do not collapse two pattern draws into one, move orientation ahead of word generation, or add a retry without recognizing that this changes the seed-to-name mapping.
+Between words, retain the reference order: nomen, extra length, extra word, orientation, opposite word. Then always consume two more stream draws, first praenomen visibility and then cognomen visibility; each shows its slot only when the draw is below 0.5, even when that slot was originally empty. Always consume a third draw for placement, even when the cognomen is absent. A draw below 0.125 puts a visible cognomen immediately before the nomen: C-N or P-C-N; otherwise use N-C or P-N-C. Keep the named slots unchanged and expose `cognomenBeforeNomen` as true only for a visible front cognomen. Placement never changes word spelling or visibility. Do not collapse two pattern draws into one, move orientation ahead of word generation, or add a retry without recognizing that this changes the seed-to-name mapping.
 
 ## Efficiency review
 

@@ -328,9 +328,19 @@ test('name rarity groups short surrounding words and ignores placement', () => {
   const base = ubu.decode(new Uint8Array(128));
   for (const [pre, post, probability] of [
     ['', '', 5/16], ['Ab', '', 3/8], ['', 'Abc', 3/8], ['Abcd', '', 3/8],
-    ['Abcdef', '', 1/8], ['', 'Abcdef', 1/8], ['Ab', 'Abcd', 3/16], ['Abc', 'Def', 3/16]
+    ['Abcdef', '', 1/8], ['', 'Abcdef', 1/8], ['Ab', 'Abcd', 21/128], ['Abc', 'Def', 21/128]
   ]) {
     const model = { ...base, parts: { nomen: 'Abcdef', praenomen: pre, cognomen: post } };
     closeTo(rarity.scoreRarity(model).breakdown.name, -Math.log2(probability), 'joint name probability');
+  }
+});
+
+test('front placement adds rarity only when both surrounding words are visible', () => {
+  const base = ubu.decode(new Uint8Array(128));
+  for (const [pre, post, probability] of [
+    ['Ab', 'Cdef', 3/128], ['', 'Ab', 3/8], ['', 'Abc', 3/8], ['', 'Abcd', 3/8], ['', 'Abcdef', 1/8]
+  ]) {
+    const parts = { praenomen: pre, nomen: 'Gahije', cognomen: post, cognomenBeforeNomen: true };
+    closeTo(rarity.scoreRarity({ ...base, parts }).breakdown.name, -Math.log2(probability), 'front placement category');
   }
 });

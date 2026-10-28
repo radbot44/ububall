@@ -96,9 +96,9 @@ class Mint {
       if (!columns.includes('rarity_bits')) this.exec('ALTER TABLE issued ADD COLUMN rarity_bits REAL');
       // Invalidate legacy scores once; existing bounded alarm backfill recalculates them.
       this.exec('CREATE TABLE IF NOT EXISTS rarity_revision (singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL) STRICT');
-      if (!this.exec('SELECT 1 FROM rarity_revision WHERE singleton=1 AND revision=1').length) {
+      if (!this.exec('SELECT 1 FROM rarity_revision WHERE singleton=1 AND revision=2').length) {
         this.exec('UPDATE issued SET rarity_bits=NULL');
-        this.exec('INSERT OR REPLACE INTO rarity_revision VALUES (1, 1)');
+        this.exec('INSERT OR REPLACE INTO rarity_revision VALUES (1, 2)');
       }
       this.exec('CREATE INDEX IF NOT EXISTS issued_recent_sort ON issued(owner, (certificate IS NULL), issued_at DESC, serial DESC)');
       this.exec('CREATE INDEX IF NOT EXISTS issued_old_sort ON issued(owner, (certificate IS NULL), issued_at ASC, serial ASC)');

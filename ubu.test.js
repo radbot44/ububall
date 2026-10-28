@@ -279,14 +279,18 @@ test('statMultiplier maps 8-bit values symmetrically across centered cubic curve
 });
 
 test('fixed visibility vectors cover neither, either and both surrounding slots', () => {
-  for (const [seed, parts] of [
+  for (const [seed, parts, front = false] of [
     [0n, ['', 'Icahyf', 'Simuon']],
     [4n, ['', 'Muijun', '']],
     [8n, ['Saipbi', 'Ocdoji', '']],
-    [0xffffffffffffffffn, ['Ata', 'Uretiw', 'Eko']]
+    [0xffffffffffffffffn, ['Ata', 'Uretiw', 'Eko']],
+    [3n, ['', 'Fopoda', 'Ruiloh'], true],
+    [17n, ['Ar', 'Ibhece', 'Biyu'], true]
   ]) {
     const name = ubu.ubunym(seed);
     assert.deepEqual([name.praenomen, name.nomen, name.cognomen], parts);
-    assert.equal(name.fullName, parts.filter(Boolean).join(' '));
+    assert.equal(name.cognomenBeforeNomen, front);
+    const ordered = front ? [parts[0], parts[2], parts[1]] : parts;
+    assert.equal(name.fullName, ordered.filter(Boolean).join(' '));
   }
 });

@@ -91,7 +91,11 @@
     const showCognomen = random() < 0.5;
     const praenomen = showPraenomen ? (before ? extra : opposite) : '';
     const cognomen = showCognomen ? (before ? opposite : extra) : '';
-    return { praenomen, nomen, cognomen, fullName: [praenomen, nomen, cognomen].filter(Boolean).join(' ') };
+    // Always consume placement after visibility, including for an empty cognomen.
+    const frontRoll = random() < 0.125;
+    const cognomenBeforeNomen = Boolean(cognomen) && frontRoll;
+    const ordered = cognomenBeforeNomen ? [praenomen, cognomen, nomen] : [praenomen, nomen, cognomen];
+    return { praenomen, nomen, cognomen, cognomenBeforeNomen, fullName: ordered.filter(Boolean).join(' ') };
   }
   function checkDNA(dna) {
     if (!(dna instanceof Uint8Array) || dna.length !== 128) throw new TypeError('DNA must contain exactly 128 bytes.');
