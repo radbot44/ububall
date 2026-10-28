@@ -14,7 +14,7 @@
   const practice = Array.from({ length: 6 }, () => ({ model: ubu.decode(ubu.randomDNA()), label: 'Practice ubu' }));
   let roster = practice.slice(0, 3), draft = [...roster], rosterSlot = 0;
   let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
-  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, dragPoint = null, spinClickStart = null, skaters = [], next = '';
+  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, dragPoint = null, skaters = [], next = '';
   let isPortrait = false;
   const stadium = document.querySelector('.stadium');
   const stageArea = document.querySelector('.stadium-stage-area');
@@ -236,7 +236,7 @@
       }
     }
     compactBox.setAttribute('aria-label', 'Category averages');
-    compactBox.title = 'Category averages · 0–255';
+    compactBox.title = 'Category averages Â· 0â€“255';
     details.append(fullBox); wrap.append(compactBox, details);
     details.open = Boolean($('toggle-full-stats')?.checked);
     return wrap;
@@ -289,25 +289,27 @@
     if (isStunned) {
       plans[selected].power = plans[selected].spin = 0;
     }
-    for (const id of ['angle', 'power', 'shot-spin', 'hold']) $(id).disabled = !planning || isStunned;
+    for (const id of ['angle', 'power', 'shot-spin', 'reset-spin', 'hold']) $(id).disabled = !planning || isStunned;
     $('launch').disabled = phase === 'play';
     for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = phase === 'play';
     $('restore-shot').disabled = phase === 'play' || !lastPlans;
     if (!readStats()) $('apply-stats').disabled = true;
     document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
-    $('launch').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : 'Launch team';
+    $('launch').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motionâ€¦' : 'Launch team';
     $('selected-name').textContent = `${selected + 1}. ${teamEntries[selected].model.parts.fullName}`;
     const launching = plans.filter((p, i) => p.power > 0 && !bodies[i].stunned && !(bodies[i].superArm && bodies[i].equippedSuper?.key === 'stalwart')).length;
-    $('plan-summary').textContent = planning ? `${launching} launching · ${3 - launching} holding` : '';
+    $('plan-summary').textContent = planning ? `${launching} launching Â· ${3 - launching} holding` : '';
     [...$('team-selector').children].forEach((button, i) => {
       button.setAttribute('aria-pressed', String(i === selected));
       button.disabled = !planning;
-      button.querySelector('span').textContent = `${i + 1} · ${bodies[i].stunned ? 'Stunned' : plans[i].power > 0 ? Math.round(plans[i].power * 100) + '%' : 'Hold'}${bodies[i].superArm ? ' · Armed' : ''}`;
+      button.querySelector('span').textContent = `${i + 1} Â· ${bodies[i].stunned ? 'Stunned' : plans[i].power > 0 ? Math.round(plans[i].power * 100) + '%' : 'Hold'}${bodies[i].superArm ? ' Â· Armed' : ''}`;
     });
     const angle = Math.round((plans[selected].angle * 180 / Math.PI + 360) % 360);
     $('angle').value = angle; $('angle-value').value = angle + 'Â°';
     $('power').value = Math.round(plans[selected].power * 100); $('power-value').value = $('power').value + '%';
-    $('shot-spin').value = Math.round((plans[selected].spin || 0) * 100); $('shot-spin-value').value = $('shot-spin').value + '%';
+    $('shot-spin').value = Math.round((plans[selected].spin || 0) * 100); $('shot-spin-value').value = $('shot-spin').value === '0' ? 'No spin' : `${Math.abs(Number($('shot-spin').value))}% ${Number($('shot-spin').value) < 0 ? 'CCW' : 'CW'}`;
+    $('shot-spin').setAttribute('aria-valuetext', $('shot-spin-value').value);
+    $('spin-player').textContent = `- ${selected + 1}. ${teamEntries[selected].model.parts.fullName}`;
     [...$('team').children].forEach((button, i) => {
       button.classList.toggle('selected', i === selected);
       const select = button.querySelector('.card-select');
@@ -360,9 +362,9 @@
         } else if (curB.superArm) {
           hudSuperText.textContent = 'âš¡ ARMED';
         } else if (curB.meter >= 100) {
-          hudSuperText.textContent = `${selected + 1} · Arm ${s.name}`;
+          hudSuperText.textContent = `${selected + 1} Â· Arm ${s.name}`;
         } else {
-          hudSuperText.textContent = `${selected + 1} · ${s.name} charging ${Math.floor(curB.meter || 0)}%`;
+          hudSuperText.textContent = `${selected + 1} Â· ${s.name} charging ${Math.floor(curB.meter || 0)}%`;
         }
       }
     }
@@ -417,7 +419,7 @@
   function newMatch(playJingle = false) {
     window.ubuAudio?.stop();
     roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
-    resetPlans(); say('Pull back from an ubu to aim and launch, or turn its spin dial.'); draw();
+    resetPlans(); say('Pull back from an ubu to aim and launch, then set spin with the slider below.'); draw();
     if (playJingle) window.ubuAudio?.playGameStart?.();
   }
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
@@ -680,7 +682,7 @@
         const superIdx = b.equippedSuper?.id ?? 0;
         const icon = superImages[superIdx];
         if (icon && icon.complete && icon.naturalWidth) {
-          const sz = 22;
+          const sz = 30;
           ctx.shadowBlur = 8;
           ctx.save();
           if (isPortrait) {
@@ -692,6 +694,24 @@
           ctx.drawImage(icon, -sz / 2, -sz / 2, sz, sz);
           ctx.restore();
         }
+        ctx.restore();
+      }
+      // A steady badge marks a full meter; the colored aura still means armed/active.
+      if (b.meter >= 100 && !b.superArm && !b.superActive) {
+        ctx.save();
+        if (isPortrait) {
+          ctx.translate(b.x + b.radius + 21, b.y);
+          ctx.rotate(Math.PI / 2);
+        } else {
+          ctx.translate(b.x, b.y - b.radius - 21);
+        }
+        ctx.fillStyle = '#101217';
+        ctx.beginPath(); ctx.roundRect(-20, -18, 40, 36, 8); ctx.fill();
+        ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2; ctx.stroke();
+        const icon = superImages[b.equippedSuper?.id ?? 0];
+        if (icon?.complete && icon.naturalWidth) ctx.drawImage(icon, -14, -14, 28, 28);
+        ctx.fillStyle = '#ffd166';
+        ctx.beginPath(); ctx.arc(17, -15, 5, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
       }
       if (b.stunned || b.stunnedNext) {
@@ -743,7 +763,7 @@
       ctx.fillText(String(i % 3 + 1), 0, 0);
       ctx.restore();
 
-      // Curved launch arrow and dashed trajectory (drawn before spin knob so knob is on top)
+      // Curved launch arrow and dashed trajectory.
       if (i < 3 && phase === 'plan' && plans[i].power > 0) {
         const plan = plans[i];
         const key = `${fieldSignature}|${i}|${plan.angle}|${plan.power}|${plan.spin}`;
@@ -757,81 +777,9 @@
     });
     if (bodies[6]?.stuckTo) drawStickyTether(bodies[6].stuckTo, bodies[6]);
 
-    // Spin dial arced line with arrowheads (above arrow in z-index)
     if (phase === 'plan') {
       const b = bodies[selected];
       circle(b.x, b.y, b.radius + 8, text, 2);
-
-      const dialR = b.radius + 18;
-      const launchAngle = plans[selected].angle;
-      const spin = plans[selected].spin || 0;
-      const isSpinOffset = Math.abs(spin) >= 0.06;
-      const handleAngle = launchAngle + spin * (Math.PI / 2.2);
-
-      // 0-spin notch along launch angle
-      const notchX = b.x + Math.cos(launchAngle) * dialR;
-      const notchY = b.y + Math.sin(launchAngle) * dialR;
-      circle(notchX, notchY, 2.5, 'rgba(255, 255, 255, 0.7)', 2);
-
-      if (!isSpinOffset) {
-        // Spin is 0: show arced line centered on arrow with TWO arrowheads
-        const span = 0.35;
-        const startA = launchAngle - span;
-        const endA = launchAngle + span;
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, dialR, startA, endA);
-        ctx.strokeStyle = '#ff9954';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-
-        // Arrowhead 1 at startA (pointing CCW)
-        const p1x = b.x + Math.cos(startA) * dialR;
-        const p1y = b.y + Math.sin(startA) * dialR;
-        const t1 = startA - Math.PI / 2;
-        line(p1x, p1y, p1x - Math.cos(t1 - 0.55) * 10, p1y - Math.sin(t1 - 0.55) * 10, '#ff9954', 2.5);
-        line(p1x, p1y, p1x - Math.cos(t1 + 0.55) * 10, p1y - Math.sin(t1 + 0.55) * 10, '#ff9954', 2.5);
-
-        // Arrowhead 2 at endA (pointing CW)
-        const p2x = b.x + Math.cos(endA) * dialR;
-        const p2y = b.y + Math.sin(endA) * dialR;
-        const t2 = endA + Math.PI / 2;
-        line(p2x, p2y, p2x - Math.cos(t2 - 0.55) * 10, p2y - Math.sin(t2 - 0.55) * 10, '#ff9954', 2.5);
-        line(p2x, p2y, p2x - Math.cos(t2 + 0.55) * 10, p2y - Math.sin(t2 + 0.55) * 10, '#ff9954', 2.5);
-      } else {
-        // Spin is away from arrow: show arced line with ONLY ONE arrowhead at the tip
-        const startA = Math.min(launchAngle, handleAngle);
-        const endA = Math.max(launchAngle, handleAngle);
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, dialR, startA, endA);
-        ctx.strokeStyle = '#ff9954';
-        ctx.lineWidth = 3.5;
-        ctx.stroke();
-
-        const hx = b.x + Math.cos(handleAngle) * dialR;
-        const hy = b.y + Math.sin(handleAngle) * dialR;
-        const tangent = handleAngle + (spin > 0 ? Math.PI / 2 : -Math.PI / 2);
-
-        const tipX = hx + Math.cos(tangent) * 4;
-        const tipY = hy + Math.sin(tangent) * 4;
-        const wing1X = hx - Math.cos(tangent - 0.6) * 13;
-        const wing1Y = hy - Math.sin(tangent - 0.6) * 13;
-        const wing2X = hx - Math.cos(tangent + 0.6) * 13;
-        const wing2Y = hy - Math.sin(tangent + 0.6) * 13;
-        const notchBackX = hx - Math.cos(tangent) * 7;
-        const notchBackY = hy - Math.sin(tangent) * 7;
-
-        ctx.beginPath();
-        ctx.moveTo(tipX, tipY);
-        ctx.lineTo(wing1X, wing1Y);
-        ctx.lineTo(notchBackX, notchBackY);
-        ctx.lineTo(wing2X, wing2Y);
-        ctx.closePath();
-        ctx.fillStyle = '#ff9954';
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.8;
-        ctx.stroke();
-      }
 
       // Slingshot pull-back dotted line while dragging backwards
       if (dragMode === 'slingshot' && dragPoint) {
@@ -926,7 +874,14 @@
     }
     P.launch(bodies, [...plans, ...($('cpu-hold').checked ? [] : cpu)]); elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motionâ€¦');
   };
-  for (const id of ['angle', 'power', 'shot-spin']) $(id).oninput = () => { if (phase !== 'plan') return; plans[selected] = { angle: radians(Number($('angle').value)), power: Number($('power').value) / 100, spin: Number($('shot-spin').value) / 100 }; sync(); draw(); };
+  for (const [id, key, scale] of [['angle', 'angle', Math.PI / 180], ['power', 'power', .01], ['shot-spin', 'spin', .01]]) {
+    $(id).oninput = () => {
+      if (phase !== 'plan' || bodies[selected].stunned) return;
+      plans[selected][key] = Number($(id).value) * scale;
+      sync(); draw();
+    };
+  }
+  $('reset-spin').onclick = () => { if (phase !== 'plan' || bodies[selected].stunned) return; plans[selected].spin = 0; sync(); draw(); };
   $('hold').onclick = () => { plans[selected].power = plans[selected].spin = 0; sync(); draw(); };
   function point(event) {
     const r = canvas.getBoundingClientRect();
@@ -945,37 +900,10 @@
       y: (event.clientY - r.top) * 600 / r.height
     };
   }
-  function updateSpinFromPoint(p, b) {
-    const touchAngle = Math.atan2(p.y - b.y, p.x - b.x);
-    let diff = touchAngle - plans[selected].angle;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    plans[selected].spin = Math.max(-1, Math.min(1, diff / (Math.PI / 2.2)));
-  }
   canvas.onpointerdown = event => {
     window.ubuAudio?.getAudioContext();
     if (phase !== 'plan') return;
     const p = point(event);
-    const curB = bodies[selected];
-    const dialR = curB.radius + 18;
-    const spin = plans[selected]?.spin || 0;
-    const isSpinOffset = Math.abs(spin) >= 0.06;
-    const handleAngle = plans[selected].angle + spin * (Math.PI / 2.2);
-    const hx = curB.x + Math.cos(handleAngle) * dialR;
-    const hy = curB.y + Math.sin(handleAngle) * dialR;
-    const distToHandle = Math.hypot(p.x - hx, p.y - hy);
-    const distToCenter = Math.hypot(p.x - curB.x, p.y - curB.y);
-
-    if (distToHandle <= 18 || (distToCenter >= curB.radius + 8 && distToCenter <= curB.radius + 28)) {
-      drag = event.pointerId;
-      dragMode = 'spin';
-      spinClickStart = (isSpinOffset && distToHandle <= 18) ? { x: p.x, y: p.y } : null;
-      canvas.setPointerCapture(drag);
-      if (!spinClickStart) updateSpinFromPoint(p, curB);
-      sync(); draw();
-      return;
-    }
-
     const index = bodies.slice(0, 3).findIndex(b => Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12);
     if (index < 0) return;
     selected = index;
@@ -989,16 +917,8 @@
     const p = point(event);
     if (drag !== event.pointerId || phase !== 'plan') {
       if (phase === 'plan') {
-        const curB = bodies[selected];
-        const dialR = curB.radius + 18;
-        const spin = plans[selected]?.spin || 0;
-        const isSpinOffset = Math.abs(spin) >= 0.06;
-        const handleAngle = plans[selected].angle + spin * (Math.PI / 2.2);
-        const hx = curB.x + Math.cos(handleAngle) * dialR;
-        const hy = curB.y + Math.sin(handleAngle) * dialR;
-        const distToHandle = Math.hypot(p.x - hx, p.y - hy);
-        const isOverUbu = bodies.slice(0, 3).some(b => Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 8);
-        canvas.style.cursor = (isSpinOffset && distToHandle <= 18) ? 'pointer' : (distToHandle <= 18) ? 'grab' : isOverUbu ? 'crosshair' : 'default';
+        const isOverUbu = bodies.slice(0, 3).some(b => Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12);
+        canvas.style.cursor = isOverUbu ? 'crosshair' : 'default';
       }
       return;
     }
@@ -1016,20 +936,10 @@
         x: b.x + (pullDx / pullDist) * clampedDist,
         y: b.y + (pullDy / pullDist) * clampedDist
       } : { x: b.x, y: b.y };
-    } else if (dragMode === 'spin') {
-      if (spinClickStart && Math.hypot(p.x - spinClickStart.x, p.y - spinClickStart.y) > 6) {
-        spinClickStart = null;
-      }
-      updateSpinFromPoint(p, b);
     }
     sync(); draw();
   };
   canvas.onpointerup = canvas.onpointercancel = () => {
-    if (dragMode === 'spin' && spinClickStart) {
-      plans[selected].spin = 0;
-      sync();
-    }
-    spinClickStart = null;
     drag = null;
     dragMode = null;
     dragPoint = null;

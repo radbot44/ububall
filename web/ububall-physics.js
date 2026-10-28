@@ -3,6 +3,7 @@
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
+  const SKATER_CURVE = .06, BALL_CURVE = .045;
   const SUPERS = Object.freeze([
     { id: 0, key: 'stalwart', name: 'Stalwart', desc: 'Become an immovable anchor for this turn.', icon: 'assets/00_stalwart.png' },
     { id: 1, key: 'knockout', name: 'Knockout', desc: 'Knock out the next opponent touched; they cannot move next turn.', icon: 'assets/01_knockout.png' },
@@ -26,7 +27,7 @@
     body.maxSpin = 8 * multiplier(raw.spin ?? 127);
     body.grip = .3 * multiplier(raw.grip ?? 127);
     body.impulse = IMPULSE * multiplier(raw.impulse ?? 127);
-    body.curveFactor = .04 * multiplier(raw.curve ?? 127);
+    body.curveFactor = SKATER_CURVE * multiplier(raw.curve ?? 127);
     body.bounciness = multiplier(raw.bounciness ?? 127);
     body.power = multiplier(raw.power ?? 127);
     body.reach = Math.max(body.radius, 25 * multiplier(raw.reach ?? 127), 18);
@@ -40,7 +41,7 @@
         y: i === 0 ? 300 : i === 1 ? 180 : 420, vx: 0, vy: 0,
         radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 8, omega: 0, rotation: 0, team, slot: i });
     }
-    bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: .03, omega: 0, rotation: 0, team: -1 });
+    bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1 });
     return bodies;
   }
   function reflect(b, nx, ny, penetration, wallType = 'wall', onWall = null) {
@@ -271,7 +272,7 @@
         continue;
       }
       // Experimental curve: rotate velocity without adding translational energy.
-      const curve = b.curveFactor !== undefined ? b.curveFactor : (b.team === -1 ? .03 : .04);
+      const curve = b.curveFactor !== undefined ? b.curveFactor : (b.team === -1 ? BALL_CURVE : SKATER_CURVE);
       if (b.omega !== 0) {
         const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
         b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
@@ -546,7 +547,7 @@
 
       if (Math.abs(spin) > 0.01 && power > 0.05) {
         const omega0 = spin * (b.maxSpin || 8);
-        const curveF = b.curveFactor ?? 0.04;
+        const curveF = b.curveFactor ?? SKATER_CURVE;
         const v0 = Math.max(60, power * maxV);
         const estT = Math.min(1.2, distance / (v0 * 0.72));
         const avgOmega = Math.sign(omega0) * Math.max(0, Math.abs(omega0) - 3 * estT);
@@ -563,7 +564,7 @@
     return null;
   }
   function integrateBody(b, dt) {
-    const curve = b.curveFactor !== undefined ? b.curveFactor : (b.team === -1 ? .03 : .04);
+    const curve = b.curveFactor !== undefined ? b.curveFactor : (b.team === -1 ? BALL_CURVE : SKATER_CURVE);
     if (b.omega !== 0) {
       const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
       b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
@@ -608,7 +609,7 @@
       friction: body.friction ?? 150,
       grip: body.grip ?? .3,
       maxSpin,
-      curveFactor: body.curveFactor ?? .04,
+      curveFactor: body.curveFactor ?? SKATER_CURVE,
       bounciness: body.bounciness ?? 1,
       power: body.power ?? 1,
       strength: body.strength ?? 1,
@@ -642,7 +643,7 @@
       friction: rawBall.friction ?? 85,
       grip: rawBall.grip ?? .3,
       maxSpin: rawBall.maxSpin ?? 8,
-      curveFactor: rawBall.curveFactor ?? .03,
+      curveFactor: rawBall.curveFactor ?? BALL_CURVE,
       bounciness: rawBall.bounciness ?? 1,
       omega: 0, rotation: 0, team: -1,
       stuckTo: null, stickOffset: null
