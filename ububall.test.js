@@ -428,3 +428,58 @@ test('zero-spin full-speed movement stays finite over long physics turns', () =>
     assert.ok(bodies.every(b => [b.x, b.y, b.vx, b.vy, b.omega].every(Number.isFinite)));
   }
 });
+
+test('Sticky with high reach does not self-collide or propel carrier backwards', () => {
+  const b = P.kickoff();
+  P.applyStats(b[0], { ...normal, reach: 255 });
+  b[0].superActive = 'sticky';
+  Object.assign(b[0], { x: 455, y: 300, vx: 400, vy: 0 });
+  Object.assign(b[6], { x: 500, y: 300, vx: 0, vy: 0 });
+  let collisions = 0;
+  for (let i = 0; i < 30; i++) P.step(b, P.DT, () => { collisions++; });
+  assert.equal(b[6].stuckTo, b[0]);
+  assert.equal(collisions, 1);
+  assert.ok(b[0].vx > 0 && b[0].x > 455);
+});
+
+test('Sticky carrier near wall keeps welded ball strictly inside rink boundaries', () => {
+  const b = P.kickoff();
+  b[0].superActive = 'sticky';
+  Object.assign(b[0], { x: 860, y: 150, vx: 600, vy: -200 });
+  Object.assign(b[6], { x: 903, y: 150, vx: 0, vy: 0 });
+  for (let i = 0; i < 120; i++) {
+    P.step(b, P.DT);
+    assert.ok(b[6].x <= P.rink.right - b[6].radius + 1e-6);
+    assert.ok(b[6].y >= P.rink.top + b[6].radius - 1e-6);
+  }
+});
+
+test('computeTrajectory transfers skater spin to ball trajectory and reflects Armed Supers', () => {
+  const bSpin = [-1, 1].map(spin => {
+    const b = P.kickoff();
+    Object.assign(b[0], { x: 420, y: 300 });
+    const res = P.computeTrajectory(b[0], { angle: 0, power: 0.8, spin }, b);
+    return res.ballTrajectory.at(-1).y;
+  });
+  assert.ok(bSpin[0] !== 300 && bSpin[1] !== 300);
+  assert.ok(Math.sign(bSpin[0] - 300) === -Math.sign(bSpin[1] - 300));
+
+  const bGhost = P.kickoff();
+  Object.assign(bGhost[0], { x: 350, y: 300, meter: 100, superArm: true, equippedSuper: P.SUPERS[7] });
+  Object.assign(bGhost[3], { x: 425, y: 300 });
+  const ghostTraj = P.computeTrajectory(bGhost[0], { angle: 0, power: 1, spin: 0 }, bGhost);
+  assert.ok(ghostTraj.impacts.some(imp => imp.type === 'ball'));
+  assert.ok(!ghostTraj.impacts.some(imp => imp.type === 'ubu'));
+
+  const bStalwart = P.kickoff();
+  Object.assign(bStalwart[0], { meter: 100, superArm: true, equippedSuper: P.SUPERS[0] });
+  const stalwartTraj = P.computeTrajectory(bStalwart[0], { angle: 0, power: 1, spin: 0 }, bStalwart);
+  assert.equal(stalwartTraj.points.length, 1);
+
+  const bCol = P.kickoff();
+  Object.assign(bCol[0], { x: 200, y: 120, meter: 100, superArm: false, equippedSuper: P.SUPERS[5] });
+  const normalDist = P.computeTrajectory(bCol[0], { angle: 0, power: 0.4, spin: 0 }, bCol).points.at(-1).dist;
+  bCol[0].superArm = true;
+  const colossusDist = P.computeTrajectory(bCol[0], { angle: 0, power: 0.4, spin: 0 }, bCol).points.at(-1).dist;
+  assert.ok(colossusDist < normalDist * 0.5);
+});

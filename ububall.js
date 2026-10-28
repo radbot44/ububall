@@ -370,261 +370,18 @@
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
   function line(x1, y1, x2, y2, color, width = 2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
   function circle(x, y, r, color, width = 2) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
-  function computeBallTrajectory(startX, startY, initVx, initVy, initialSpin) {
-    const points = [{ x: startX, y: startY, dist: 0 }];
-    let currX = startX, currY = startY, prevX = startX, prevY = startY;
-    let vx = initVx, vy = initVy;
-    let omega = (initialSpin || 0) * 8;
-    const curve = 0.03;
-    const friction = 85;
-    const r = 18;
-    const k = P.rink;
-    const dt = 1 / 120;
-    const MAX_PATH_LEN = 480;
-    let totalDist = 0;
-
-    for (let s = 0; s < 480; s++) {
-      if (omega !== 0) {
-        const angle = omega * curve * dt;
-        const cos = Math.cos(angle), sin = Math.sin(angle);
-        const nvx = vx * cos - vy * sin, nvy = vx * sin + vy * cos;
-        vx = nvx; vy = nvy;
-      }
-      omega = Math.sign(omega) * Math.max(0, Math.abs(omega) - 6 * dt);
-      currX += vx * dt; currY += vy * dt;
-
-      // Check goal
-      const inGoalY = currY >= k.goalTop && currY <= k.goalBottom;
-      if (inGoalY) {
-        if (currX - r <= k.left - k.goalDepth + 1 || currX + r < k.left ||
-            currX + r >= k.right + k.goalDepth - 1 || currX - r > k.right) {
-          totalDist += Math.hypot(currX - points[points.length - 1].x, currY - points[points.length - 1].y);
-          points.push({ x: currX, y: currY, dist: totalDist, goal: true });
-          break;
-        }
-      }
-
-      // Walls
-      if (inGoalY) {
-        if (currX < k.left) {
-          const backX = k.left - k.goalDepth + r;
-          if (currX < backX) { currX = backX; vx = -vx * 0.2; }
-          if (currY < k.goalTop + r) { currY = k.goalTop + r; vy = -vy * 0.5; }
-          if (currY > k.goalBottom - r) { currY = k.goalBottom - r; vy = -vy * 0.5; }
-        }
-        if (currX > k.right) {
-          const backX = k.right + k.goalDepth - r;
-          if (currX > backX) { currX = backX; vx = -vx * 0.2; }
-          if (currY < k.goalTop + r) { currY = k.goalTop + r; vy = -vy * 0.5; }
-          if (currY > k.goalBottom - r) { currY = k.goalBottom - r; vy = -vy * 0.5; }
-        }
-      } else {
-        if (currX < k.left + r) { currX = k.left + r; vx = -vx * 0.8; }
-        if (currX > k.right - r) { currX = k.right - r; vx = -vx * 0.8; }
-      }
-
-      const insidePocket = (currX < k.left) || (currX > k.right);
-      if (!insidePocket) {
-        if (currY < k.top + r) { currY = k.top + r; vy = -vy * 0.8; }
-        if (currY > k.bottom - r) { currY = k.bottom - r; vy = -vy * 0.8; }
-        const cx = currX < k.left + k.corner ? k.left + k.corner : currX > k.right - k.corner ? k.right - k.corner : null;
-        const cy = currY < k.top + k.corner ? k.top + k.corner : currY > k.bottom - k.corner ? k.bottom - k.corner : null;
-        if (cx !== null && cy !== null) {
-          const dx = currX - cx, dy = currY - cy, d2 = dx * dx + dy * dy, limit = k.corner - r;
-          if (limit < 0 || d2 > limit * limit) {
-            const d = Math.sqrt(d2);
-            const nx = dx / d, ny = dy / d;
-            currX -= nx * (d - limit); currY -= ny * (d - limit);
-            const v = vx * nx + vy * ny;
-            if (v > 0) { vx -= 1.82 * v * nx; vy -= 1.82 * v * ny; }
-          }
-        }
-      }
-
-      const speed2 = vx * vx + vy * vy;
-      if (speed2 < 144) break;
-      const speed = Math.sqrt(speed2);
-      const factor = Math.max(0, speed - friction * dt) / speed;
-      vx *= factor; vy *= factor;
-
-      const stepD = Math.hypot(currX - prevX, currY - prevY);
-      totalDist += stepD;
-      prevX = currX; prevY = currY;
-      if (s % 2 === 1 || s === 479 || totalDist >= MAX_PATH_LEN) {
-        points.push({ x: currX, y: currY, dist: totalDist });
-      }
-      if (totalDist >= MAX_PATH_LEN) break;
-    }
-    return points;
-  }
   function computeTrajectory(body, plan, allBodies) {
-    const points = [{ x: body.x, y: body.y, dist: 0 }];
-    const impacts = [];
-    let ballTrajectory = null;
-    if (!plan || plan.power <= 0) return { points, impacts, ballTrajectory };
-
-    const impulse = body.impulse || P.IMPULSE;
-    const v0 = (impulse / body.mass) * plan.power;
-    let vx = Math.cos(plan.angle) * v0;
-    let vy = Math.sin(plan.angle) * v0;
-    let omega = (plan.spin || 0) * (body.maxSpin || 8);
-    const curve = body.curveFactor !== undefined ? body.curveFactor : 0.04;
-    const friction = body.friction || 150;
-    let currX = body.x, currY = body.y, prevX = body.x, prevY = body.y;
-    const r = body.radius;
-    const reach = Math.max(r, body.reach || r, 18);
-    const k = P.rink;
-    const dt = 1 / 120;
-    const MAX_PATH_LEN = 480;
-    let totalDist = 0;
-    let hasHitBall = false;
-
-    const otherUbus = (allBodies || []).slice(0, 6).filter(b => b !== body);
-    const ball = (allBodies || [])[6];
-
-    for (let s = 0; s < 600; s++) {
-      if (omega !== 0) {
-        const angle = omega * curve * dt;
-        const cos = Math.cos(angle), sin = Math.sin(angle);
-        const nvx = vx * cos - vy * sin;
-        const nvy = vx * sin + vy * cos;
-        vx = nvx; vy = nvy;
-      }
-      omega = Math.sign(omega) * Math.max(0, Math.abs(omega) - 6 * dt);
-      currX += vx * dt; currY += vy * dt;
-
-      // Walls
-      const inGoalY = currY > k.goalTop && currY < k.goalBottom;
-      if (inGoalY) {
-        if (currX < k.left) {
-          const backX = k.left - k.goalDepth + r;
-          if (currX < backX) { currX = backX; vx = -vx * 0.5; omega *= 0.5; }
-          if (currY < k.goalTop + r) { currY = k.goalTop + r; vy = -vy * 0.5; omega *= 0.5; }
-          if (currY > k.goalBottom - r) { currY = k.goalBottom - r; vy = -vy * 0.5; omega *= 0.5; }
-        } else if (currX < k.left + r) {
-          for (const py of [k.goalTop, k.goalBottom]) {
-            const dx = k.left - currX, dy = py - currY, d2 = dx * dx + dy * dy;
-            if (d2 < r * r && d2 > 0) {
-              const d = Math.sqrt(d2);
-              const nx = dx / d, ny = dy / d;
-              currX -= nx * (r - d); currY -= ny * (r - d);
-              const v = vx * nx + vy * ny;
-              if (v > 0) { vx -= 1.82 * v * nx; vy -= 1.82 * v * ny; omega *= 0.5; }
-            }
-          }
-        }
-        if (currX > k.right) {
-          const backX = k.right + k.goalDepth - r;
-          if (currX > backX) { currX = backX; vx = -vx * 0.5; omega *= 0.5; }
-          if (currY < k.goalTop + r) { currY = k.goalTop + r; vy = -vy * 0.5; omega *= 0.5; }
-          if (currY > k.goalBottom - r) { currY = k.goalBottom - r; vy = -vy * 0.5; omega *= 0.5; }
-        } else if (currX > k.right - r) {
-          for (const py of [k.goalTop, k.goalBottom]) {
-            const dx = k.right - currX, dy = py - currY, d2 = dx * dx + dy * dy;
-            if (d2 < r * r && d2 > 0) {
-              const d = Math.sqrt(d2);
-              const nx = dx / d, ny = dy / d;
-              currX -= nx * (r - d); currY -= ny * (r - d);
-              const v = vx * nx + vy * ny;
-              if (v > 0) { vx -= 1.82 * v * nx; vy -= 1.82 * v * ny; omega *= 0.5; }
-            }
-          }
-        }
-      } else {
-        if (currX < k.left + r) { currX = k.left + r; vx = -vx * 0.8; omega *= 0.5; }
-        if (currX > k.right - r) { currX = k.right - r; vx = -vx * 0.8; omega *= 0.5; }
-      }
-
-      const insidePocket = (currX < k.left) || (currX > k.right);
-      if (!insidePocket) {
-        if (currY < k.top + r) { currY = k.top + r; vy = -vy * 0.8; omega *= 0.5; }
-        if (currY > k.bottom - r) { currY = k.bottom - r; vy = -vy * 0.8; omega *= 0.5; }
-        const cx = currX < k.left + k.corner ? k.left + k.corner : currX > k.right - k.corner ? k.right - k.corner : null;
-        const cy = currY < k.top + k.corner ? k.top + k.corner : currY > k.bottom - k.corner ? k.bottom - k.corner : null;
-        if (cx !== null && cy !== null) {
-          const dx = currX - cx, dy = currY - cy, d2 = dx * dx + dy * dy, limit = k.corner - r;
-          if (limit < 0 || d2 > limit * limit) {
-            const d = Math.sqrt(d2);
-            const nx = dx / d, ny = dy / d;
-            currX -= nx * (d - limit); currY -= ny * (d - limit);
-            const v = vx * nx + vy * ny;
-            if (v > 0) { vx -= 1.82 * v * nx; vy -= 1.82 * v * ny; omega *= 0.5; }
-          }
-        }
-      }
-
-      // 3. Collision with other Ubus (stationary)
-      for (const other of otherUbus) {
-        const dx = currX - other.x, dy = currY - other.y, d2 = dx * dx + dy * dy;
-        const minDist = r + other.radius;
-        if (d2 < minDist * minDist && d2 > 0) {
-          const d = Math.sqrt(d2);
-          const nx = dx / d, ny = dy / d;
-          currX = other.x + nx * minDist;
-          currY = other.y + ny * minDist;
-          const vClosing = -(vx * nx + vy * ny);
-          if (vClosing > 0) {
-            impacts.push({ x: other.x + nx * other.radius, y: other.y + ny * other.radius, type: 'ubu' });
-            const bounce = ((body.bounciness || 1) + (other.bounciness || 1)) / 2;
-            const impulseMag = 1.8 * bounce * vClosing * (other.mass / (body.mass + other.mass));
-            vx += impulseMag * nx; vy += impulseMag * ny;
-            omega *= 0.5;
-          }
-        }
-      }
-
-      // 4. Collision with ball (stationary)
-      if (ball && !hasHitBall) {
-        const dx = ball.x - currX, dy = ball.y - currY, d2 = dx * dx + dy * dy;
-        const minDist = reach + ball.radius;
-        if (d2 < minDist * minDist && d2 > 0) {
-          const d = Math.sqrt(d2);
-          hasHitBall = true;
-          const nx = dx / d, ny = dy / d;
-          const contactX = currX + nx * reach;
-          const contactY = currY + ny * reach;
-          impacts.push({ x: contactX, y: contactY, type: 'ball' });
-
-          const vClosing = vx * nx + vy * ny;
-          if (vClosing > 0) {
-            const inverse = 1 / body.mass + 1 / ball.mass;
-            const bounce = ((body.bounciness || 1) + 1) / 2;
-            const baseImpulse = 1.88 * bounce * vClosing / inverse;
-            const impulseToBall = baseImpulse * (body.power || 1);
-            const ballVx = impulseToBall * nx / ball.mass;
-            const ballVy = impulseToBall * ny / ball.mass;
-
-            ballTrajectory = computeBallTrajectory(ball.x, ball.y, ballVx, ballVy, body.spin || 0);
-
-            vx -= baseImpulse * nx / body.mass;
-            vy -= baseImpulse * ny / body.mass;
-            omega *= 0.5;
-          }
-        }
-      }
-
-      const speed2 = vx * vx + vy * vy;
-      if (speed2 < 100) break;
-      const speed = Math.sqrt(speed2);
-      const factor = Math.max(0, speed - friction * dt) / speed;
-      vx *= factor; vy *= factor;
-
-      const stepD = Math.hypot(currX - prevX, currY - prevY);
-      totalDist += stepD;
-      prevX = currX; prevY = currY;
-      if (s % 2 === 1 || s === 599 || totalDist >= MAX_PATH_LEN) {
-        points.push({ x: currX, y: currY, dist: totalDist });
-      }
-      if (totalDist >= MAX_PATH_LEN) break;
-    }
-    return { points, impacts, ballTrajectory };
+    return P.computeTrajectory(body, plan, allBodies);
   }
   function drawTrajectory(body, plan, trajectoryData, color) {
-    if (!plan || plan.power <= 0) return;
+    const activeSuper = body.superActive || ((body.superArm && (body.meter ?? 0) >= 100) ? body.equippedSuper?.key : null);
+    if (!plan || plan.power <= 0 || body.stunned || activeSuper === 'stalwart') return;
     const points = trajectoryData?.points || [];
+    const isColossus = activeSuper === 'colossus';
+    const effRadius = body.radius * (isColossus ? 1.8 : 1);
     const impulse = body.impulse || P.IMPULSE;
-    const impulseRatio = impulse / P.IMPULSE;
-    const ringR = Math.max(body.radius, body.reach || body.radius, 18) + 2;
+    const impulseRatio = (impulse / P.IMPULSE) / (isColossus ? 2.5 : 1);
+    const ringR = Math.max(effRadius, body.reach || effRadius, 18) + 2;
     const maxArrowDist = Math.max(20, 110 * impulseRatio * plan.power);
 
     // 1. Dashed trajectory path (separate from the impulse arrow)
@@ -709,7 +466,8 @@
     // 5. Impact spots
     const impacts = trajectoryData?.impacts || [];
     for (const impact of impacts) {
-      circle(impact.x, impact.y, 7, '#ff9954', 2.5);
+      const impactColor = impact.type === 'knockout' ? '#ff3366' : '#ff9954';
+      circle(impact.x, impact.y, 7, impactColor, 2.5);
       ctx.beginPath();
       ctx.arc(impact.x, impact.y, 3, 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff';
@@ -806,7 +564,8 @@
     }
     const { primary, secondary, text, border, surface, background } = themeColors;
     const fieldSignature = phase === 'plan' ? bodies.map(b => [b.x, b.y, b.radius, b.reach, b.mass,
-      b.bounciness, b.power, b.spin, b.impulse, b.friction, b.maxSpin, b.curveFactor].join(',')).join(';') : '';
+      b.bounciness, b.power, b.grip, b.impulse, b.friction, b.maxSpin, b.curveFactor,
+      b.superArm ? b.equippedSuper?.key : '', b.superActive || ''].join(',')).join(';') : '';
     rounded(60, 60, 880, 480, 100); ctx.fillStyle = surface; ctx.fill();
     ctx.strokeStyle = border; ctx.lineWidth = 4; ctx.stroke();
     ctx.setLineDash([6, 10]); line(500, 60, 500, 540, border); ctx.setLineDash([]);
@@ -840,14 +599,21 @@
         circle(b.x, b.y, b.radius + 15, primary, 2);
       }
       if (b.superArm || b.superActive) {
-        const auraColor = b.superActive === 'cannonball' ? '#ff4d4d'
-          : b.superActive === 'magnet' ? '#33ccff'
-          : b.superActive === 'sticky' ? '#44dd66'
-          : b.superActive === 'stalwart' ? '#ffd166'
-          : b.superActive === 'knockout' ? '#ff3366'
-          : b.superActive === 'colossus' ? '#bb66ff'
-          : b.superActive === 'ghost' ? '#b2ebf2'
+        const activeKey = b.superActive || (b.superArm ? b.equippedSuper?.key : null);
+        const auraColor = activeKey === 'cannonball' ? '#ff4d4d'
+          : activeKey === 'magnet' ? '#33ccff'
+          : activeKey === 'sticky' ? '#44dd66'
+          : activeKey === 'stalwart' ? '#ffd166'
+          : activeKey === 'knockout' ? '#ff3366'
+          : activeKey === 'colossus' ? '#bb66ff'
+          : activeKey === 'ghost' ? '#b2ebf2'
           : '#ff7197';
+        if (phase === 'plan' && b.superArm && activeKey === 'colossus') {
+          ctx.save();
+          ctx.setLineDash([5, 5]);
+          circle(b.x, b.y, b.radius * 1.8, '#bb66ffaa', 2);
+          ctx.restore();
+        }
         ctx.save();
         ctx.beginPath();
         const pulse = Math.sin(Date.now() / 120) * 3;
