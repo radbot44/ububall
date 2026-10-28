@@ -119,6 +119,7 @@
       if (entry?.model) {
         b.playerIndex = i;
         b.voice = entry.model.voice;
+        b.personality = entry.model.personality;
         b.name = entry.model.parts?.fullName;
         b.equippedSuper = entry.equippedSuper || P.SUPERS[(entry.model.supers?.[0] ?? i) % 8];
         if (isNewMatch) {
@@ -158,7 +159,7 @@
   function say(message) { $('game-status').textContent = message; }
   function resetPlans() {
     plans = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0 }));
-    cpu = P.cpuPlans(bodies); // Commit before any human planning input.
+    cpu = P.cpuPlans(bodies, Math.random, scores); // Commit before any human planning input.
     sync();
   }
   function renderStatsBox(statSource) {
@@ -862,8 +863,8 @@
       }
     });
     if (!$('cpu-hold').checked) {
-      bodies.slice(3, 6).forEach(b => {
-        if (b.meter >= 100 && (Math.random() < 0.75 || b.slot === 0)) {
+      bodies.slice(3, 6).forEach((b, i) => {
+        if (b.meter >= 100 && !b.stunned && cpu?.[i]?.superArm) {
           b.meter = 0;
           b.superActive = b.equippedSuper.key;
         }
@@ -1233,7 +1234,7 @@
     window.ubuAudio?.stop();
     bodies = kickoff(); scores = [0, 0]; turn = 1; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     buildTeam();
-    cpu = P.cpuPlans(bodies, () => .5); sync(); previewStats(); draw(); say('Field reset. Your planned launches are preserved.');
+    cpu = P.cpuPlans(bodies, () => .5, scores); sync(); previewStats(); draw(); say('Field reset. Your planned launches are preserved.');
   }
   $('stat-player').onchange = showStats;
   $('apply-stats').onclick = () => { const raw = readStats(); if (!raw || phase === 'play') return; stats[Number($('stat-player').value)] = raw; resetField(); };

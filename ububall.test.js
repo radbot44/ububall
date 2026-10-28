@@ -483,3 +483,53 @@ test('computeTrajectory transfers skater spin to ball trajectory and reflects Ar
   const colossusDist = P.computeTrajectory(bCol[0], { angle: 0, power: 0.4, spin: 0 }, bCol).points.at(-1).dist;
   assert.ok(colossusDist < normalDist * 0.5);
 });
+
+test('AI Tactical Brain dynamically assigns roles and behaviors from 24-bit personality', () => {
+  // 1. Aggression drives dynamic Striker vs Crease Anchor assignment
+  const bRole = P.kickoff();
+  bRole[3].personality = { aggression: 0, creativity: 31, teamwork: 31, clutch: 31 };
+  bRole[4].personality = { aggression: 63, creativity: 0, teamwork: 0, clutch: 31 };
+  bRole[5].personality = { aggression: 63, creativity: 0, teamwork: 0, clutch: 31 };
+  const rolePlans = P.cpuPlans(bRole, () => 0.5, [0, 0]);
+  assert.ok(rolePlans[0].power < 0.35);
+  assert.ok(rolePlans[1].power > 0.5);
+
+  // 2. Creativity unlocks spin curve around a screening defender
+  const bCre = P.kickoff();
+  Object.assign(bCre[0], { x: 300, y: 300 });
+  Object.assign(bCre[4], { x: 580, y: 300, personality: { aggression: 50, creativity: 0, teamwork: 0, clutch: 31 } });
+  const linearPlan = P.cpuPlans(bCre, () => 0.5)[1];
+  bCre[4].personality = { aggression: 50, creativity: 63, teamwork: 0, clutch: 31 };
+  const creativePlan = P.cpuPlans(bCre, () => 0.5)[1];
+  assert.equal(linearPlan.spin, 0);
+  assert.ok(Math.abs(creativePlan.spin) > 0.4);
+
+  // 3. Teamwork redirects blocked shot into a lead pass for an open wing teammate
+  const bTmw = P.kickoff();
+  Object.assign(bTmw[0], { x: 320, y: 300 });
+  Object.assign(bTmw[4], { x: 580, y: 300, personality: { aggression: 45, creativity: 10, teamwork: 0, clutch: 31 } });
+  Object.assign(bTmw[5], { x: 400, y: 160 });
+  const soloPlan = P.cpuPlans(bTmw, () => 0.5)[1];
+  bTmw[4].personality = { aggression: 45, creativity: 10, teamwork: 63, clutch: 31 };
+  const passPlan = P.cpuPlans(bTmw, () => 0.5)[1];
+  assert.ok(Math.abs(soloPlan.angle - passPlan.angle) > 0.15);
+
+  // 4. Option A Clutch spectrum: Iceman (0) stays composed in crease vs Hero Ball (63) surges up-ice at match point
+  const bClu = P.kickoff();
+  for (let i = 3; i < 6; i++) bClu[i].personality = { aggression: 31, creativity: 31, teamwork: 31, clutch: 0 };
+  const icemanPlans = P.cpuPlans(bClu, () => 0.9, [4, 3]);
+  for (let i = 3; i < 6; i++) bClu[i].personality = { aggression: 31, creativity: 31, teamwork: 31, clutch: 63 };
+  const heroPlans = P.cpuPlans(bClu, () => 0.9, [4, 3]);
+  assert.ok(heroPlans[0].power > icemanPlans[0].power);
+  assert.ok(heroPlans[1].power > icemanPlans[1].power);
+
+  // 5. Tactical Super selection stays hidden on bodies during planning and only arms contextually
+  const bSup = P.kickoff();
+  Object.assign(bSup[3], { x: 830, y: 300, meter: 100, equippedSuper: P.SUPERS[0], personality: { aggression: 0, creativity: 31, teamwork: 31, clutch: 0 } });
+  Object.assign(bSup[4], { x: 570, y: 300, meter: 100, equippedSuper: P.SUPERS[3], personality: { aggression: 60, creativity: 31, teamwork: 31, clutch: 63 } });
+  const supPlans = P.cpuPlans(bSup, () => 0.5, [4, 2]);
+  assert.equal(supPlans[0].superArm, true); // Anchor arms Stalwart in crease under threat
+  assert.equal(supPlans[0].power, 0);
+  assert.equal(supPlans[1].superArm, true); // Striker arms Cannonball on clean look
+  assert.equal(Boolean(bSup[3].superArm), false); // Body state untouched during planning
+});
