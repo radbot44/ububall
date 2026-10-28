@@ -77,9 +77,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
       -->
       <div class="spin-control" id="field-spin" hidden>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5"/></svg>
+        <button id="spin-less" type="button" aria-label="Decrease spin by 10 percent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5"/></svg></button>
         <input id="shot-spin" type="range" min="-100" max="100" step="1" value="0" aria-label="Selected ubu spin: counterclockwise to clockwise">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5"/></svg>
+        <button id="spin-more" type="button" aria-label="Increase spin by 10 percent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5"/></svg></button>
       </div>
 
         <div class="rink-stage">
@@ -110,7 +110,7 @@ SOFTWARE.
   <details class="rules" id="stat-testing">
     <summary>Stat testing</summary>
 
-    <p class="hint">Click an ubu and pull back like a slingshot to aim and set power. Use the Spin slider beside the selected ubu to curve your shot. You attack the right goal.</p>
+    <p class="hint">Drag from an ubu toward the target to aim and set power, or adjust its arrowhead. Use the Spin slider beside the selected ubu to curve your shot. You attack the right goal.</p>
     <p>Temporary values; no DNA changes. Set each stat from 0 to 1023. Normal is 511. Applying values resets the field and score, keeping your planned shot.</p>
     <label>Ubu <select id="stat-player"><option value="0">Your ubu 1</option><option value="1">Your ubu 2</option><option value="2">Your ubu 3</option><option value="3">CPU ubu 1</option><option value="4">CPU ubu 2</option><option value="5">CPU ubu 3</option></select></label>
     <div class="controls"><label>Equipped Super <select id="stat-super"></select></label><img id="stat-super-thumb" class="stat-super-thumb" alt="" src="assets/00_stalwart.png"><button id="fill-meter" type="button">Fill Super Meter (100%)</button></div>

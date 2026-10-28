@@ -14,7 +14,7 @@
   const practice = Array.from({ length: 6 }, () => ({ model: ubu.decode(ubu.randomDNA()), label: 'Practice ubu' }));
   let roster = practice.slice(0, 3), draft = [...roster], rosterSlot = 0;
   let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
-  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, dragPoint = null, skaters = [], next = '';
+  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [], next = '';
   let isPortrait = false;
   let arrowGrab = null;
   const stadium = document.querySelector('.stadium');
@@ -165,7 +165,7 @@
     return result;
   }
   function gainMeter(b, baseAmount) {
-    if (!b || b.team < 0) return;
+    if (!b || b.team < 0 || b.usedSuperThisTurn) return;
     const playerIdx = b.playerIndex;
     const eff = stats[playerIdx]?.efficiency ?? 127;
     const effMult = P.multiplier(eff);
@@ -177,7 +177,7 @@
     const start = b.team * 3, end = start + 3;
     for (let i = start; i < end; i++) {
       const teammate = bodies[i];
-      if (teammate && teammate !== b) {
+      if (teammate && teammate !== b && !teammate.usedSuperThisTurn) {
         const chem = stats[i]?.chemistry ?? 127;
         const chemMult = P.multiplier(chem);
         teammate.meter = Math.min(100, Math.max(0, (teammate.meter || 0) + gain * synMult * chemMult * 0.25));
@@ -290,7 +290,7 @@
     if (isStunned) {
       plans[selected].power = plans[selected].spin = 0;
     }
-    for (const id of ['angle', 'power', 'shot-spin', 'hold']) $(id).disabled = !planning || isStunned;
+    for (const id of ['angle', 'power', 'shot-spin', 'spin-less', 'spin-more', 'hold']) $(id).disabled = !planning || isStunned;
     $('launch').disabled = phase === 'play';
     for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = phase === 'play';
     $('restore-shot').disabled = phase === 'play' || !lastPlans;
@@ -310,6 +310,8 @@
     $('power').value = Math.round(plans[selected].power * 100); $('power-value').value = $('power').value + '%';
     const spinValue = Math.round((plans[selected].spin || 0) * 100);
     $('shot-spin').value = spinValue;
+    $('shot-spin').style.setProperty('--spin-start', Math.min(50, (spinValue + 100) / 2) + '%');
+    $('shot-spin').style.setProperty('--spin-end', Math.max(50, (spinValue + 100) / 2) + '%');
     $('shot-spin').setAttribute('aria-valuetext', spinValue === 0 ? 'No spin' : `${Math.abs(spinValue)}% ${spinValue < 0 ? 'counterclockwise' : 'clockwise'}`);
     $('shot-spin').setAttribute('aria-label', `Spin for ${teamEntries[selected].model.parts.fullName}`);
     [...$('team').children].forEach((button, i) => {
@@ -421,7 +423,7 @@
   function newMatch(playJingle = false) {
     window.ubuAudio?.stop();
     roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
-    resetPlans(); say('Pull back from an ubu to aim and launch, drag an arrowhead to adjust, or set spin beside the selected ubu.'); draw();
+    resetPlans(); say('Drag from an ubu toward your target to aim. Drag its arrowhead to adjust power and direction.'); draw();
     if (playJingle) window.ubuAudio?.playGameStart?.();
   }
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
@@ -433,7 +435,7 @@
     const effRadius = body.radius * (isColossus ? 1.8 : 1);
     const scale = 110 * ((body.impulse || P.IMPULSE) / P.IMPULSE) / (isColossus ? 2.5 : 1);
     const ringR = Math.max(effRadius, body.reach || effRadius, 18) + 2;
-    const distance = ringR + Math.max(20, scale * plan.power);
+    const distance = ringR + scale * plan.power;
     return { ringR, scale, distance, x: body.x + Math.cos(plan.angle) * distance, y: body.y + Math.sin(plan.angle) * distance,
       visible: plan.power > 0 && !body.stunned && activeSuper !== 'stalwart' };
   }
@@ -478,7 +480,7 @@
     const arrow = own.findIndex((b, i) => { const a = impulseGeometry(b, plans[i]); return a.visible && near(a); });
     if (arrow >= 0) return { mode: 'arrow', index: arrow };
     const p = point(event);
-    return { mode: 'slingshot', index: own.findIndex(b => !b.stunned && Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12) };
+    return { mode: 'aim', index: own.findIndex(b => !b.stunned && Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12) };
   }
   function positionSpinControl() {
     const control = $('field-spin');
@@ -490,11 +492,14 @@
     const width = control.offsetWidth, height = control.offsetHeight;
     const arrow = screenPoint(impulseGeometry(b, plans[selected]));
     // Prefer the side opposite the arrow, then clamp inside the stage near the edges.
-    let y = arrow.y > center.y + 8 ? center.y - radius - height - 38 : center.y + radius + 18;
+    let y = arrow.y > center.y + 8 ? center.y - radius - height - 24 : center.y + radius + 5;
     const x = Math.max(6, Math.min(stage.width - width - 6, center.x - stage.left - width / 2));
     y = Math.max(6, Math.min(stage.height - height - 6, y - stage.top));
     control.style.left = x + 'px'; control.style.top = y + 'px';
   }
+  const impactStamp = document.createElement('canvas');
+  impactStamp.width = impactStamp.height = 128;
+  const impactCtx = impactStamp.getContext('2d');
   let predictionCache = null;
   function drawPrediction(primary, secondary) {
     // Include all state and all plans: changing any teammate invalidates the one simulation.
@@ -517,6 +522,30 @@
       }
       ctx.restore();
     });
+    for (const hit of prediction.impacts) {
+      const team = bodies[hit.index].team;
+      const color = team < 0 ? '#ffffff' : team === 0 ? primary : secondary;
+      impactCtx.clearRect(0, 0, 128, 128);
+      impactCtx.globalCompositeOperation = 'source-over';
+      impactCtx.fillStyle = color;
+      impactCtx.beginPath(); impactCtx.arc(64, 64, 60, 0, Math.PI * 2); impactCtx.fill();
+      if (team >= 0) {
+        impactCtx.globalCompositeOperation = 'destination-out';
+        impactCtx.font = 'bold 64px system-ui'; impactCtx.textAlign = 'center'; impactCtx.textBaseline = 'middle';
+        impactCtx.fillText(String(hit.index % 3 + 1), 64, 66);
+      }
+      ctx.save();
+      ctx.translate(hit.x, hit.y);
+      if (isPortrait) ctx.rotate(Math.PI / 2);
+      const fade = Math.min(1, (prediction.horizon - hit.tick) / 240);
+      ctx.globalAlpha = .3 * fade;
+      const size = hit.radius * 128 / 60;
+      ctx.drawImage(impactStamp, -size / 2, -size / 2, size, size);
+      ctx.globalAlpha = .65 * fade;
+      circle(0, 0, hit.radius, color, 1.5);
+      if (hit.reach > hit.radius) { ctx.setLineDash([3, 3]); circle(0, 0, hit.reach, color, 1); }
+      ctx.restore();
+    }
   }
   let themeColors = null;
   const themeObserver = new MutationObserver(() => { themeColors = null; if (skaters.length) draw(); });
@@ -757,14 +786,6 @@
     if (phase === 'plan') {
       const b = bodies[selected];
       circle(b.x, b.y, b.radius + 8, text, 2);
-
-      // Slingshot pull-back dotted line while dragging backwards
-      if (dragMode === 'slingshot' && dragPoint) {
-        ctx.setLineDash([4, 6]);
-        line(b.x, b.y, dragPoint.x, dragPoint.y, '#ffffffaa', 2);
-        ctx.setLineDash([]);
-        circle(dragPoint.x, dragPoint.y, 6, primary, 2);
-      }
     }
     const ball = bodies[6];
     ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); ctx.fillStyle = background; ctx.fill(); circle(ball.x, ball.y, ball.radius, text, 2);
@@ -838,6 +859,13 @@
       sync(); draw();
     };
   }
+  for (const [id, delta] of [['spin-less', -.1], ['spin-more', .1]]) {
+    $(id).onclick = () => {
+      if (phase !== 'plan' || bodies[selected].stunned) return;
+      plans[selected].spin = Math.max(-1, Math.min(1, Math.round(((plans[selected].spin || 0) + delta) * 10) / 10));
+      sync(); draw();
+    };
+  }
   $('hold').onclick = () => { plans[selected].power = plans[selected].spin = 0; sync(); draw(); };
   function point(event) {
     const r = canvas.getBoundingClientRect();
@@ -873,7 +901,6 @@
       const arrow = impulseGeometry(bodies[selected], plans[selected]);
       arrowGrab = { x: p.x - arrow.x, y: p.y - arrow.y, distance: arrow.distance, power: plans[selected].power };
     }
-    dragPoint = dragMode === 'slingshot' ? p : null;
     canvas.setPointerCapture(drag);
     sync(); draw();
   };
@@ -892,27 +919,19 @@
       const arrow = impulseGeometry(b, plans[selected]);
       plans[selected].angle = Math.atan2(dy, dx);
       plans[selected].power = Math.max(0, Math.min(1, arrowGrab.power + (Math.hypot(dx, dy) - arrowGrab.distance) / arrow.scale));
-    } else if (dragMode === 'slingshot') {
-      const MAX_PULL = 120;
-      const pullDx = p.x - b.x, pullDy = p.y - b.y;
-      const pullDist = Math.hypot(pullDx, pullDy);
-      if (pullDist > 4) {
-        plans[selected].angle = Math.atan2(-pullDy, -pullDx);
-        plans[selected].power = Math.max(0, Math.min(1, (pullDist - 6) / MAX_PULL));
-      }
-      const clampedDist = Math.min(pullDist, MAX_PULL + 6);
-      dragPoint = pullDist > 0 ? {
-        x: b.x + (pullDx / pullDist) * clampedDist,
-        y: b.y + (pullDy / pullDist) * clampedDist
-      } : { x: b.x, y: b.y };
+    } else if (dragMode === 'aim') {
+      const dx = p.x - b.x, dy = p.y - b.y;
+      const arrow = impulseGeometry(b, plans[selected]);
+      plans[selected].angle = Math.atan2(dy, dx);
+      plans[selected].power = Math.max(0, Math.min(1, (Math.hypot(dx, dy) - arrow.ringR) / arrow.scale));
     }
+
     sync(); draw();
   };
   canvas.onpointerup = canvas.onpointercancel = () => {
     arrowGrab = null;
     drag = null;
     dragMode = null;
-    dragPoint = null;
     draw();
   };
   function handleCollision(a, b, speed) {

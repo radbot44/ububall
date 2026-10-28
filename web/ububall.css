@@ -653,14 +653,14 @@ body.stadium-fullscreen-active {
 .super-picker-btn img { width: 44px; height: 44px; }
 .stat-super-thumb { width: 40px; height: 40px; }
 /* Bare spin slider follows the selected ubu in screen space. */
-#field-spin { position: absolute; z-index: 30; display: flex; align-items: center; gap: 6px; width: min(176px, calc(100% - 12px)); height: 44px; margin: 0; padding: 0; }
+#field-spin { position: absolute; z-index: 30; display: flex; align-items: center; gap: 6px; width: min(146px, calc(100% - 12px)); height: 44px; margin: 0; padding: 0; }
 #field-spin[hidden] { display: none; }
-#field-spin > svg { flex: none; width: 20px; height: 20px; fill: none; stroke: var(--text); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+#field-spin svg { flex: none; width: 20px; height: 20px; fill: none; stroke: var(--text); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 #shot-spin { appearance: none; display: block; min-width: 0; width: 100%; height: 44px; margin: 0; background: transparent; cursor: pointer; touch-action: pan-y; }
-#shot-spin::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--muted) 49%, var(--text) 49%, var(--text) 51%, var(--muted) 51%); }
-#shot-spin::-webkit-slider-thumb { appearance: none; width: 22px; height: 22px; margin-top: -9px; border-radius: 50%; border: 2px solid var(--text); background: var(--primary); }
-#shot-spin::-moz-range-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--muted) 49%, var(--text) 49%, var(--text) 51%, var(--muted) 51%); }
-#shot-spin::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--text); background: var(--primary); }
+#shot-spin::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--muted) var(--spin-start, 50%), var(--primary) var(--spin-start, 50%), var(--primary) var(--spin-end, 50%), var(--muted) var(--spin-end, 50%)); }
+#shot-spin::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%; border: 0; background: var(--primary); }
+#shot-spin::-moz-range-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--muted) var(--spin-start, 50%), var(--primary) var(--spin-start, 50%), var(--primary) var(--spin-end, 50%), var(--muted) var(--spin-end, 50%)); }
+#shot-spin::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; border: 0; background: var(--primary); }
 #shot-spin:disabled { opacity: .45; cursor: default; }
 
 /* Portrait game: score, flexible field, and a compact thumb-accessible action dock. */
@@ -707,3 +707,6 @@ body.stadium-fullscreen-active {
   .stadium.portrait-mode { border-radius: 12px; }
   .stadium.portrait-mode:fullscreen, .stadium.portrait-mode.stadium-fullscreen { border-radius: 0; }
 }
+
+#field-spin button { display: grid; place-items: center; flex: none; width: 32px; min-height: 44px; padding: 0; background: transparent; border: 0; border-radius: 0; }
+#field-spin { gap: 2px; }

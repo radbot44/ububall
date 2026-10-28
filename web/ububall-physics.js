@@ -561,7 +561,9 @@
   function startTurn(bodies, plans, onSuper = null) {
     bodies.forEach((b, i) => {
       if (b.team < 0) return;
+      b.usedSuperThisTurn = Boolean(b.superActive) && !b.stunned;
       if (!b.stunned && (b.superArm || plans[i]?.superArm) && b.meter >= 100) {
+        b.usedSuperThisTurn = true;
         b.meter = 0;
         b.superActive = b.equippedSuper.key;
         b.superArm = false;
@@ -590,17 +592,25 @@
     });
     startTurn(sim, predictedPlans);
     const paths = sim.map(b => [{ x: b.x, y: b.y, tick: 0 }]);
+    const impacts = [], lastImpact = new Map();
     let goal = null, ticks = 0;
+    function recordImpact(b) {
+      const index = sim.indexOf(b), last = lastImpact.get(index);
+      if (last && (ticks - last.tick < 12 || Math.hypot(b.x - last.x, b.y - last.y) < 8)) return;
+      const marker = { index, x: b.x, y: b.y, radius: b.radius, reach: b.team < 0 ? b.radius : Math.max(b.radius, b.reach || b.radius), tick: ticks };
+      lastImpact.set(index, marker);
+      impacts.push(marker);
+    }
     for (let tick = 1; tick <= PREDICTION_TICKS; tick++) {
-      goal = step(sim, DT);
       ticks = tick;
+      goal = step(sim, DT, (a, b) => { recordImpact(a); recordImpact(b); }, recordImpact);
       const done = goal !== null || settled(sim) || tick === PREDICTION_TICKS;
       if (tick % 4 === 0 || done) {
         sim.forEach((b, i) => paths[i].push({ x: b.x, y: b.y, tick }));
       }
       if (done) break;
     }
-    return { paths, ticks, goal, horizon: PREDICTION_TICKS };
+    return { paths, impacts, ticks, goal, horizon: PREDICTION_TICKS };
   }
   const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, multiplier, applyStats, kickoff, step, launch, settled, stop, triggerShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
