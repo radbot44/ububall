@@ -21,6 +21,12 @@
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [], next = '';
   let isPortrait = false;
   let arrowGrab = null;
+  let pullBehind = false;
+  $('aim-mode').onclick = () => {
+    pullBehind = !pullBehind;
+    $('aim-mode').textContent = pullBehind ? 'Aim: pull back' : 'Aim: drag arrow';
+    $('aim-mode').setAttribute('aria-pressed', String(pullBehind));
+  };
   const stadium = document.querySelector('.stadium');
   const stageArea = document.querySelector('.stadium-stage-area');
   const rinkStage = document.querySelector('.rink-stage');
@@ -311,6 +317,7 @@
     return wrap;
   }
   function sync() {
+    layoutDirty = true;
     const planning = phase === 'plan';
     const isGoal = phase === 'goal';
     $('phase').textContent = phase === 'over' ? 'Match complete' : `${planning ? 'Plan' : isGoal ? 'Goal' : 'In play'} · Turn ${turn}`;
@@ -664,7 +671,7 @@
       renderWidth = canvas.clientWidth; renderHeight = canvas.clientHeight;
       layoutDirty = false;
     }
-    if (phase === 'plan') positionSpinControl();
+    positionSpinControl();
     const ratio = Math.min(devicePixelRatio || 1, 2);
     const width = Math.max(1, Math.round(renderWidth * ratio));
     const height = Math.max(1, Math.round(renderHeight * ratio));
@@ -720,8 +727,8 @@
         circle(b.x, b.y, b.radius + 9, '#ff9954', 4);
         circle(b.x, b.y, b.radius + 15, primary, 2);
       }
-      if (b.superArm || b.superActive) {
-        const activeKey = b.superActive || (b.superArm ? b.equippedSuper?.key : null);
+      if (b.meter >= 100 || b.superArm || b.superActive) {
+        const activeKey = b.superActive || b.equippedSuper?.key;
         const auraColor = activeKey === 'cannonball' ? '#ff4d4d'
           : activeKey === 'magnet' ? '#33ccff'
           : activeKey === 'sticky' ? '#44dd66'
@@ -739,11 +746,11 @@
         ctx.save();
         const pulse = Math.sin(Date.now() / 120) * 3;
         const glowSize = (b.radius + 8 + pulse) * 128 / 40;
-        ctx.drawImage(glowSprite(auraColor, true), b.x - glowSize / 2, b.y - glowSize / 2, glowSize, glowSize);
+        if (b.meter >= 100) ctx.drawImage(glowSprite(auraColor, true), b.x - glowSize / 2, b.y - glowSize / 2, glowSize, glowSize);
 
         const superIdx = b.equippedSuper?.id ?? 0;
         const icon = superImages[superIdx];
-        if (icon && icon.complete && icon.naturalWidth) {
+        if (b.superActive && icon && icon.complete && icon.naturalWidth) {
           const sz = 30;
           badgeCtx.shadowBlur = 0;
           badgeCtx.save();
@@ -757,13 +764,6 @@
           badgeCtx.restore();
         }
         ctx.restore();
-      }
-      if (b.meter >= 100 && !b.superArm && !b.superActive) {
-        const icon = superImages[b.equippedSuper?.id ?? 0], p = badgePoint(b);
-        if (icon?.complete && icon.naturalWidth) {
-          badgeCtx.save(); badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
-          badgeCtx.filter = 'grayscale(1)'; badgeCtx.drawImage(icon, -15, -15, 30, 30); badgeCtx.restore();
-        }
       }
       if (phase === 'play' && b.guarding) {
         badgeCtx.save();
@@ -801,7 +801,7 @@
       const width = b.radius / 5 + '%';
       const opacity = b.superActive === 'ghost' ? '0.45' : '1';
       const filter = b.stunned || b.stunnedNext ? 'grayscale(0.8) brightness(0.7)' : '';
-      const transform = `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${b.rotation}rad)`;
+      const transform = `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${b.rotation + (isPortrait ? Math.PI / 2 : 0)}rad)`;
 
       if (style.width !== width) style.width = width;
       if (style.opacity !== opacity) style.opacity = opacity;
@@ -832,7 +832,7 @@
     const ball = bodies[6];
     ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); ctx.fillStyle = background; ctx.fill(); circle(ball.x, ball.y, ball.radius, text, 2);
     if (ballMark.complete && ballMark.naturalWidth) {
-      ctx.save(); ctx.translate(ball.x, ball.y); ctx.rotate(ball.rotation);
+      ctx.save(); ctx.translate(ball.x, ball.y); ctx.rotate(ball.rotation + (isPortrait ? Math.PI / 2 : 0));
       const size = ball.radius * 1.7;
       ctx.drawImage(ballMark, -size / 2, -size / 2, size, size); ctx.restore();
     }
@@ -840,6 +840,7 @@
   }
   function finishTurn(goal) {
     P.stop(bodies); accumulator = 0;
+    layoutDirty = true;
     bodies.slice(0, 6).forEach(b => {
       if (b.stunnedNext) {
         b.stunned = true;
@@ -960,8 +961,8 @@
     } else if (dragMode === 'aim') {
       const dx = p.x - b.x, dy = p.y - b.y;
       const arrow = impulseGeometry(b, plans[selected]);
-      plans[selected].angle = Math.atan2(dy, dx);
-      plans[selected].power = Math.max(0, Math.min(1, (Math.hypot(dx, dy) - arrow.ringR) / arrow.scale));
+      plans[selected].angle = Math.atan2(pullBehind ? -dy : dy, pullBehind ? -dx : dx);
+      plans[selected].power = Math.max(0, Math.min(1, pullBehind ? (Math.hypot(dx, dy) - 6) / 120 : (Math.hypot(dx, dy) - arrow.ringR) / arrow.scale));
     }
 
     sync(); draw();
@@ -1075,7 +1076,7 @@
         if (goal !== null || P.settled(bodies) || elapsed >= 12) finishTurn(goal);
       }
       draw();
-    } else if (active && hadEffects) draw();
+    } else if (active && (hadEffects || (!reducedMotion.matches && bodies.some(b => b.meter >= 100)))) draw();
     flushMeters();
     requestAnimationFrame(frame);
   }
@@ -1365,6 +1366,8 @@
   ro.observe(canvas);
   if (stadium) ro.observe(stadium);
   if (stageArea) ro.observe(stageArea);
-  window.addEventListener('resize', () => { layoutDirty = true; draw(); });
+  const resizeField = () => { layoutDirty = true; draw(); };
+  window.addEventListener('resize', resizeField);
+  window.visualViewport?.addEventListener('resize', resizeField);
   practice.slice(0, 3).forEach(addOption); newMatch(); requestAnimationFrame(frame);
 })();
