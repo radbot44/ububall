@@ -1,6 +1,6 @@
 # The uburithm
 
-Owner-approved naming algorithm update on 2026-10-25 (America/New_York). ubu.js implements this permanent naming algorithm. The owner approved independent surrounding-word visibility rolls and 1/8 front placement of visible cognomens on 2026-10-28. Optimizations must preserve the updated outputs and draw consumption.
+Owner-approved naming algorithm update on 2026-10-25 (America/New_York). ubu.js implements this permanent naming algorithm. The owner approved independent surrounding-word visibility rolls and 1/8 front placement of visible cognomens on 2026-10-28. The later packed-stream approval below supersedes the original draw schedule.
 
 ## Source review
 
@@ -9,7 +9,7 @@ Reviewed the supplied standalone generator and uburoom's web/ubumfa.js. The rele
 ## Fixed naming rules
 
 - Generate a six-letter nomen, plus six letters split across praenomen/cognomen using the original procedure below. After generating every word, independently show each surrounding slot with probability 1/2. Hidden words are omitted, never redistributed; an originally empty slot remains empty. Names contain one to three visible words.
-- Generate nomen first. Select extra length from [2, 3, 4, 6], generate that word, select before/after orientation, then generate an opposite word of length 6 minus extra length unless that length is zero.
+- Generate nomen first, then flag-selected extra and opposite words. The packed flag layout and chunk draw order below are authoritative.
 - Title-case the generated ASCII words, retaining named slots even when a surrounding slot is empty. Join nonempty slots with one ASCII space.
 - Ordinary vowels, in order: AEIOU.
 - Consonants, in order: BCDFGHJKLMNPQRSTVWXYZ. Weighted distribution: standard 16 consonants have weight 6; K and Y have weight 3; Q has weight 2; X and Z have weight 1 (total pool weight 106). Y can also be a restricted vowel.
@@ -20,47 +20,77 @@ Reviewed the supplied standalone generator and uburoom's web/ubumfa.js. The rele
 - For CC, X may only follow one of HLNRSWYXZ. Immediately after VV, a CC pair cannot start with H, W or Y. Each allowed pair (c1, c2) is weighted by w(c1) Ã— w(c2) across the complete ordered pair pool, rather than drawing the first and second characters independently.
 - A standalone consonant immediately after VV cannot be Y.
 
-## Permanent random stream
+## Packed naming stream (owner approved 2026-10-28)
 
-1. Read DNA bits 0-63 as one unsigned 64-bit initial state, most significant bit first. No string conversion or FNV seed hash.
-2. For every draw, increment state by 0x9e3779b97f4a7c15 modulo 2^64.
-3. Copy state to z. Set z = ((z XOR (z >> 30)) times 0xbf58476d1ce4e5b9) modulo 2^64.
-4. Set z = ((z XOR (z >> 27)) times 0x94d049bb133111eb) modulo 2^64.
-5. Let r = (z XOR (z >> 31)) >> 11, giving a nonnegative 53-bit integer. Logical shifts operate on unsigned values.
-6. For an n-outcome draw, preserve the reference rule floor((r / 2^53) times n), using IEEE-754 binary64 in that operation order. Orientation is before when r / 2^53 < 0.5.
+The owner authorized promotion of the benchmark Gemini hybrid to the real generator. This replaces the former seed-to-name mapping for all DNA, including issued ubus. Letter weights, contextual rules, structural odds and the first 64-bit DNA seed remain unchanged. No DNA or certificate bytes change. Future optimizations must preserve this packed mapping.
 
-All 64-bit inputs, including zero, are valid. This reproduces the prototype stream mechanics from a raw initial state, not its original text-seed-to-state mapping. The finite outcome scaling is not mathematically uniform for non-power-of-two n; retaining it preserves the reference calculation. Do not substitute integer scaling or rejection sampling: those change the permanent mapping.
+### SplitMix64 and initial flags
 
-## Preserve the draw schedule
+Read DNA bits 0–63 as an unsigned, MSB-first 64-bit seed. For every mix:
 
-Within each word:
+1. Increment state by `0x9e3779b97f4a7c15` modulo 2^64.
+2. Set `z = ((state XOR (state >> 30)) * 0xbf58476d1ce4e5b9)` modulo 2^64.
+3. Set `z = ((z XOR (z >> 27)) * 0x94d049bb133111eb)` modulo 2^64.
+4. Set `z = z XOR (z >> 31)`. Shifts are unsigned logical shifts.
 
-1. Draw the pattern (one draw for a six-letter pattern; one draw per two-letter block for the other required lengths).
-2. Draw VV pairs from left to right.
-3. Draw unfilled vowel positions from left to right.
-4. Draw CC pairs from left to right.
-5. Draw remaining consonants from left to right.
+Mix once at initialization. Let `lo` and `hi` be its low and high unsigned 32-bit halves. Reserve the low eight bits of `lo` as flags:
 
-Between words, retain the reference order: nomen, extra length, extra word, orientation, opposite word. Then always consume two more stream draws, first praenomen visibility and then cognomen visibility; each shows its slot only when the draw is below 0.5, even when that slot was originally empty. Always consume a third draw for placement, even when the cognomen is absent. A draw below 0.125 puts a visible cognomen immediately before the nomen: C-N or P-C-N; otherwise use N-C or P-N-C. Keep the named slots unchanged and expose `cognomenBeforeNomen` as true only for a visible front cognomen. Placement never changes word spelling or visibility. Do not collapse two pattern draws into one, move orientation ahead of word generation, or add a retry without recognizing that this changes the seed-to-name mapping.
+| Flag bits (least significant first) | Meaning |
+| --- | --- |
+| 0–1 | Extra length index into [2, 3, 4, 6] |
+| 2 | Extra word before nomen when zero |
+| 3 | Show praenomen when zero |
+| 4 | Show cognomen when zero |
+| 5–7 | Put visible cognomen immediately before nomen when all zero |
 
-## Efficiency review
+Initialize the quotient pool with `value = lo >>> 8`, `range = 2^24`. Queue `hi` as the first 32-bit refill. Later mixes supply high then low 32-bit halves, preserving unused halves between requests.
 
-The reference consonantPair function recalculates the number of allowed pairs and scans groups on every call. Precompute two ordered pair arrays once:
+### Bounded integer draws
 
-- Normal context: 11,171 weighted instances across 429 distinct pairs.
-- Immediately after VV: 9,581 weighted instances across 366 distinct pairs.
+To draw `int(n)` in [0,n), repeat:
 
-Build each in exactly the reference order: first characters in their original alphabet order, second characters in the original allowed-second alphabet order. One draw with the original outcome count then directly indexes the array. This preserves the reference selection and draw count while avoiding repeated counting and scanning. The pair counts were checked with an isolated Node calculation.
+1. If `range < n`, append one queued 32-bit chunk: `value = value * 2^32 + chunk`, `range *= 2^32`.
+2. Compute `limit = range - range % n`.
+3. If `value < limit`, return `result = value % n`, retaining `value = (value - result) / n` and `range = limit / n`.
+4. Otherwise subtract `limit` from both `value` and `range`, and retry, refilling if needed.
 
-Potential output-preserving optimizations:
+Use exact integer values in IEEE-754 binary64. The largest bound is 11,171, so refills keep values below 2^46, safely below the 2^53 exact-integer limit. Do not truncate the quotient to 32 bits. Rejection avoids modulo bias and quotient recycling retains unused randomness. Independence/unbiasedness describes ideal uniform source words; the deterministic 64-bit seed cannot supply unlimited mathematical independence. Rejection has no fixed maximum mix count.
 
-- Precompute vowel-Y eligibility, VV/CC locations and post-VV consonant restrictions for every allowed pattern.
-- Cache all 25 vowel pairs and weighted sixteen-outcome vowel choices.
-- Reuse short immutable tables across names; do not precompute complete names or enormous name enumerations.
-- Keep integer state arithmetic explicit. Do not replace the random stream for speed without reviewing the permanent mapping.
+### Weighted chunk tables and draw order
 
-Names are short, so these are structural simplifications, not measured performance claims. The demo precomputes both consonant-pair arrays and the vowel-pair array, preserving the reference draw schedule. An isolated comparison of 10,000 raw-state seeds matched the original ubunym procedure. Pattern metadata remains calculated directly; no performance benchmark or claim of absolute optimality has been made.
+Construct tables using the alphabets and weights above. A cross product A×B iterates A outside B, preserving repeated weighted entries. Capitalize only the first letter of the assembled word; all other letters are lowercase. Define:
 
-## Compatibility
+- C: weighted 106-entry consonant pool; C1: C without Y (103 entries).
+- Y: weighted 31-entry vowel pool (six copies of each AEIOU, then Y); V: ordinary AEIOU.
+- VV: all 25 ordered ordinary-vowel pairs, vowel-major order.
+- CC: 11,171-entry weighted pair pool; CC1: 9,581-entry pool immediately after VV. First-character order is the consonant alphabet; second-character order is the permitted consonant alphabet. Repeat each pair by the product of character weights.
+- CV = C×Y, VC = Y×C, CVV = C×VV, VVC1 = VV×C1, C1V = C1×Y, V5C = V×C.
 
-The exact stream, raw initial state and draw schedule are permanent. Text seeds hash through SHA-512 into complete DNA before naming. Run `node --test ubu.test.js`; original word vectors remain unchanged to verify spelling preservation; visibility is verified separately. The visibility update applies to all existing DNA without changing DNA or certificates.
+For every six-letter word, draw `int(8)` then follow this table left to right. Each chunk is one bounded draw unless noted. Use a capitalized variant only for the first chunk.
+
+| Pattern draw | Pattern | Chunk draws / assembly |
+| --- | --- | --- |
+| 0 | CVCVCV | CV + CV + CV |
+| 1 | CVCVVC | CV + C + VVC1 |
+| 2 | CVVCCV | CVV + CC1 + Y |
+| 3 | CVVCVC | CVV + C1V + C |
+| 4 | VCCVCV | Draw Y×Y once; first vowel + CC + V5C + second vowel |
+| 5 | VCCVVC | Y + CC + VVC1 |
+| 6 | VCVCCV | Draw V×Y once; VC + first vowel + CC + second vowel |
+| 7 | VCVCVC | VC + VC + VC |
+
+A two-letter word draws once from concatenated capitalized CV then VC tables (6,572 entries).
+
+A three-letter word draws `int(2)`: zero selects CV + C; one selects VC + Y.
+
+A four-letter word draws `int(4)`: zero selects CV + CV; one draws Y×Y once and assembles first vowel + CC + second vowel; two selects CVV + C1; three selects VC + VC.
+
+Generate the six-letter nomen first, then the extra word of the flag-selected length, then an opposite word of length `6 - extraLength` unless zero. Assign slots using the orientation flag; apply visibility flags without redistributing letters. For a visible front cognomen, order slots P-C-N; otherwise P-N-C. Omit empty slots and join with one ASCII space. Set `cognomenBeforeNomen` true only when the cognomen is visible and its front flag succeeds.
+
+## Verification and cost
+
+`test/packed-name-vectors.json` captures outputs from the independently compiled benchmark candidate before promotion. `test/name-vectors.json` records historical outputs and is not rewritten. Production matched the benchmark candidate across 10,000 raw seeds; non-name decoded fields also matched the prior decoder. Protocol tests exercise quotient retention, rejection and large refills.
+
+The optimization adds pre-cased lookup tables and startup work in exchange for reduced per-name CPU. The benchmark observed two mixes per name; this is not a guaranteed bound. `node scripts/bench-name-rolls.cjs` compares the saved historical naming baseline, combined flags, packed recycling and Gemini hybrid using the current decoder/rarity code. Benchmark fixtures are never public assets.
+
+Rarity uses the unchanged structural category probabilities. The changed mapping requires recalculating stored scores (revision 3) and recalibrating percentiles; existing assembled packs retain contents and quintile labels. Deployment remains separately authorized.

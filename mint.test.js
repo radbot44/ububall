@@ -397,7 +397,7 @@ test('name rarity upgrade invalidates old non-null scores once and preserves iss
   mint.exec('UPDATE issued SET favorite=1, rarity_bits=-99');
   const before = mint.exec('SELECT id, dna, serial, certificate, favorite FROM issued ORDER BY id');
   const inventory = mint.exec('SELECT * FROM inventory ORDER BY id');
-  mint.exec('UPDATE rarity_revision SET revision=1');
+  mint.exec('UPDATE rarity_revision SET revision=2');
   const upgraded = new Mint(f.open(), f.options);
   assert.equal(upgraded.needsRarityBackfill(), true);
   assert.equal(upgraded.backfillRarity(2), 2);

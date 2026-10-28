@@ -112,3 +112,5 @@ Official references: [Workers Static Assets](https://developers.cloudflare.com/w
 The 2026-10-28 name visibility update adds a singleton `rarity_revision` table and invalidates existing issued rarity sort keys once, transactionally. The existing bounded alarm backfill refreshes them; reopening does not invalidate them again. Certificates, favorites, DNA, offers and assembled inventory remain intact. Subsequent pack assembly uses the new rarity categories.
 
 The cognomen placement update advances `rarity_revision` to 2, invalidating revision-1 scores once for the same bounded backfill. Existing assembled packs remain intact. P-C-N is scored separately from P-N-C; two-word placement is rarity-neutral.
+
+The owner-approved packed name generator changes existing names on the next deployment. Rarity revision 3 invalidates stored issued scores once and uses the existing bounded alarm backfill. DNA, signatures, favorites, mint identity and existing pack contents are preserved; no mint reset is needed. Percentiles were recalibrated for the new mapping.

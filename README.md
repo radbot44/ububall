@@ -70,7 +70,7 @@ Palette order, hex values and the field mapping in docs/dna.md are permanent.
 
 The starting generator produces a six-letter nomen and six additional letters split into one or two surrounding words. The extra word length is selected from 2, 3, 4 or 6; orientation determines which side receives it. Letter choices follow constrained consonant/vowel patterns.
 
-The owner requires the existing naming rules and a 64-bit seed at the start of DNA. The official algorithm is called the uburithm. Its calculation may be optimized without changing naming rules. Text seeds are converted from exact UTF-8 text through SHA-512 into the complete DNA; its first 64 bits directly initialize the name stream. Random DNA and imported DNA bypass text hashing. The exact stream calculation is permanent.
+The owner requires the existing naming rules and a 64-bit seed at the start of DNA. The official algorithm is called the uburithm. The owner-approved packed Gemini implementation uses weighted pre-cased chunks and quotient recycling; the 2026-10-28 promotion replaces previous seed-to-name outputs while retaining letter rules and structural odds. Future optimizations preserve the packed mapping. Text seeds are converted from exact UTF-8 text through SHA-512 into the complete DNA; its first 64 bits directly initialize the name stream. Random DNA and imported DNA bypass text hashing. The exact stream calculation is permanent.
 
 ## Separate mint decisions
 

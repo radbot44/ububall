@@ -9,7 +9,6 @@
   const C_POOL = [...C].flatMap(ch => Array(weight(ch)).fill(ch));
   const C_AFTER_VV_POOL = C_POOL.filter(ch => ch !== 'Y');
   const VOWEL_PAIRS = [...V].flatMap(a => [...V].map(b => a + b));
-  const PATTERNS = ['CVCVCV', 'CVCVVC', 'CVVCCV', 'CVVCVC', 'VCCVCV', 'VCCVVC', 'VCVCCV', 'VCVCVC'];
   const PAIRS = [C, C.replace(/[HWY]/g, '')].map(starters =>
     [...starters].flatMap(first => [...(BEFORE_X.includes(first) ? C : C_NO_X)].flatMap(second =>
       Array(weight(first) * weight(second)).fill(first + second))));
@@ -33,66 +32,127 @@
   const IRIS_RADIUS = 30.7126;
   const EYE_TRAVEL = EYE_RADIUS - IRIS_RADIUS;
 
-  function randomForState(state) {
-    return () => {
+  class NameRandom {
+    constructor(state) {
       state = (state + 0x9e3779b97f4a7c15n) & MASK;
+      this.state = state;
       let z = state;
       z = ((z ^ (z >> 30n)) * 0xbf58476d1ce4e5b9n) & MASK;
       z = ((z ^ (z >> 27n)) * 0x94d049bb133111ebn) & MASK;
-      return Number((z ^ (z >> 31n)) >> 11n) / 9007199254740992;
-    };
+      z ^= z >> 31n;
+      const low = Number(z & 0xffffffffn);
+      this.flags = low & 0xff;
+      this.value = low >>> 8;
+      this.range = 0x1000000;
+      this.low = Number(z >> 32n);
+      this.haveLow = true;
+    }
+    next32() {
+      if (this.haveLow) { this.haveLow = false; return this.low; }
+      let state = (this.state + 0x9e3779b97f4a7c15n) & MASK;
+      this.state = state;
+      let z = state;
+      z = ((z ^ (z >> 30n)) * 0xbf58476d1ce4e5b9n) & MASK;
+      z = ((z ^ (z >> 27n)) * 0x94d049bb133111ebn) & MASK;
+      z ^= z >> 31n;
+      this.low = Number(z & 0xffffffffn);
+      this.haveLow = true;
+      return Number(z >> 32n);
+    }
+    int(n) {
+      // Before refill range < n <= 11,171; all pool arithmetic stays below 2^46.
+      for (;;) {
+        if (this.range < n) {
+          this.value = this.value * 4294967296 + this.next32();
+          this.range *= 4294967296;
+        }
+        const limit = this.range - (this.range % n);
+        if (this.value < limit) {
+          const result = this.value % n;
+          this.value = (this.value - result) / n;
+          this.range = limit / n;
+          return result;
+        }
+        this.value -= limit;
+        this.range -= limit;
+      }
+    }
   }
-  function patternForLength(length, rand) {
-    if (length === 6) return PATTERNS[rand(8)];
-    let p = '';
-    for (let i = 0; i < Math.floor(length / 2); i++) p += rand(2) === 0 ? 'CV' : 'VC';
-    if (length % 2) p += p.endsWith('V') ? 'C' : 'V';
-    return p;
+  // Weighted, pre-cased chunks; table order is part of the naming mapping.
+  const VY_UP = [...V].flatMap(v => Array(6).fill(v)).concat('Y');
+  const VY_LO = VY_UP.map(v => v.toLowerCase());
+  const V5_LO = [...V].map(v => v.toLowerCase());
+  const C0_UP = C_POOL;
+  const C0_LO = C_POOL.map(c => c.toLowerCase());
+  const C1_LO = C_AFTER_VV_POOL.map(c => c.toLowerCase());
+  const VV_LO = VOWEL_PAIRS.map(vv => vv.toLowerCase());
+  const CC0_LO = PAIRS[0].map(cc => cc.toLowerCase());
+  const CC1_LO = PAIRS[1].map(cc => cc.toLowerCase());
+
+  const CAP_CV = C0_UP.flatMap(c => VY_LO.map(v => c + v));     // 3,286
+  const LOW_CV = C0_LO.flatMap(c => VY_LO.map(v => c + v));     // 3,286
+  const CAP_VC = VY_UP.flatMap(v => C0_LO.map(c => v + c));     // 3,286
+  const LOW_VC = VY_LO.flatMap(v => C0_LO.map(c => v + c));     // 3,286
+  const WORD_2 = CAP_CV.concat(CAP_VC);                         // 6,572
+  const CAP_CVV = C0_UP.flatMap(c => VV_LO.map(vv => c + vv));  // 2,650
+  const LOW_VVC1 = VV_LO.flatMap(vv => C1_LO.map(c => vv + c)); // 2,575
+  const LOW_C1V = C1_LO.flatMap(c => VY_LO.map(v => c + v));    // 3,193
+  const LOW_V5C = V5_LO.flatMap(v => C0_LO.map(c => v + c));    // 530
+  const VY_PAIR_HEAD = VY_UP.flatMap(v1 => VY_LO.map(() => v1));// 961
+  const VY_PAIR_TAIL = VY_UP.flatMap(() => VY_LO);              // 961
+  const V5_VY_HEAD = V5_LO.flatMap(v1 => VY_LO.map(() => v1));  // 155
+  const V5_VY_TAIL = V5_LO.flatMap(() => VY_LO);                // 155
+
+  function word6(random) {
+    switch (random.int(8)) {
+      case 0: return CAP_CV[random.int(3286)] + LOW_CV[random.int(3286)] + LOW_CV[random.int(3286)];
+      case 1: return CAP_CV[random.int(3286)] + C0_LO[random.int(106)] + LOW_VVC1[random.int(2575)];
+      case 2: return CAP_CVV[random.int(2650)] + CC1_LO[random.int(9581)] + VY_LO[random.int(31)];
+      case 3: return CAP_CVV[random.int(2650)] + LOW_C1V[random.int(3193)] + C0_LO[random.int(106)];
+      case 4: {
+        const vv = random.int(961);
+        return VY_PAIR_HEAD[vv] + CC0_LO[random.int(11171)] + LOW_V5C[random.int(530)] + VY_PAIR_TAIL[vv];
+      }
+      case 5: return VY_UP[random.int(31)] + CC0_LO[random.int(11171)] + LOW_VVC1[random.int(2575)];
+      case 6: {
+        const vv = random.int(155);
+        return CAP_VC[random.int(3286)] + V5_VY_HEAD[vv] + CC0_LO[random.int(11171)] + V5_VY_TAIL[vv];
+      }
+      default: return CAP_VC[random.int(3286)] + LOW_VC[random.int(3286)] + LOW_VC[random.int(3286)];
+    }
   }
+
   function word(length, random) {
-    const rand = n => Math.floor(random() * n);
-    const p = patternForLength(length, rand);
-    const letters = Array(length);
-    for (let i = p.indexOf('VV'); i !== -1; i = p.indexOf('VV', i + 2)) {
-      const pair = VOWEL_PAIRS[rand(25)];
-      letters[i] = pair[0]; letters[i + 1] = pair[1];
+    if (length === 6) return word6(random);
+    if (length === 2) return WORD_2[random.int(6572)];
+    if (length === 3) {
+      return random.int(2) === 0
+        ? CAP_CV[random.int(3286)] + C0_LO[random.int(106)]
+        : CAP_VC[random.int(3286)] + VY_LO[random.int(31)];
     }
-    for (let i = 0; i < length; i++) {
-      if (p[i] !== 'V' || letters[i] !== undefined) continue;
-      const allowY = i === 0 || i === length - 1 ||
-        (p[i - 1] === 'C' && p[i + 1] === 'C' && p[i - 2] !== 'C' && p[i + 2] !== 'C');
-      if (allowY) {
-        const n = rand(31);
-        letters[i] = n === 30 ? 'Y' : V[Math.floor(n / 6)];
-      } else letters[i] = V[rand(5)];
+    switch (random.int(4)) {
+      case 0: return CAP_CV[random.int(3286)] + LOW_CV[random.int(3286)];
+      case 1: {
+        const vv = random.int(961);
+        return VY_PAIR_HEAD[vv] + CC0_LO[random.int(11171)] + VY_PAIR_TAIL[vv];
+      }
+      case 2: return CAP_CVV[random.int(2650)] + C1_LO[random.int(103)];
+      default: return CAP_VC[random.int(3286)] + LOW_VC[random.int(3286)];
     }
-    for (let i = p.indexOf('CC'); i !== -1; i = p.indexOf('CC', i + 2)) {
-      const pairs = PAIRS[p.slice(i - 2, i) === 'VV' ? 1 : 0];
-      const pair = pairs[rand(pairs.length)];
-      letters[i] = pair[0]; letters[i + 1] = pair[1];
-    }
-    for (let i = 0; i < length; i++) {
-      if (letters[i] !== undefined) continue;
-      const allowed = p.slice(i - 2, i) === 'VV' ? C_AFTER_VV_POOL : C_POOL;
-      letters[i] = allowed[rand(allowed.length)];
-    }
-    const text = letters.join('');
-    return text[0] + text.slice(1).toLowerCase();
   }
   function ubunym(state) {
-    const random = randomForState(state);
-    const nomen = word(6, random);
-    const length = [2, 3, 4, 6][Math.floor(random() * 4)];
+    const random = new NameRandom(state);
+    const nomen = word6(random);
+    const length = [2, 3, 4, 6][random.flags & 3];
     const extra = word(length, random);
-    const before = random() < 0.5;
+    const before = (random.flags & 4) === 0;
     const opposite = length < 6 ? word(6 - length, random) : '';
-    // Consume both visibility rolls after the complete original word schedule.
-    const showPraenomen = random() < 0.5;
-    const showCognomen = random() < 0.5;
+    // Visibility and placement use disjoint bits of the initial flags.
+    const showPraenomen = (random.flags & 8) === 0;
+    const showCognomen = (random.flags & 16) === 0;
     const praenomen = showPraenomen ? (before ? extra : opposite) : '';
     const cognomen = showCognomen ? (before ? opposite : extra) : '';
-    // Always consume placement after visibility, including for an empty cognomen.
-    const frontRoll = random() < 0.125;
+    const frontRoll = (random.flags & 224) === 0;
     const cognomenBeforeNomen = Boolean(cognomen) && frontRoll;
     const ordered = cognomenBeforeNomen ? [praenomen, cognomen, nomen] : [praenomen, nomen, cognomen];
     return { praenomen, nomen, cognomen, cognomenBeforeNomen, fullName: ordered.filter(Boolean).join(' ') };
@@ -101,9 +161,8 @@
     if (!(dna instanceof Uint8Array) || dna.length !== 128) throw new TypeError('DNA must contain exactly 128 bytes.');
   }
   function read(dna, start, width) {
-    let n = 0;
-    for (let bit = start; bit < start + width; bit++) n = n * 2 + ((dna[bit >> 3] >> (7 - (bit & 7))) & 1);
-    return n;
+    const i = start >> 3;
+    return (((dna[i] << 16) | (dna[i + 1] << 8) | dna[i + 2]) >>> (24 - (start & 7) - width)) & ((1 << width) - 1);
   }
   function curve(value) {
     const t = (value - 511) / (value <= 511 ? 511 : 512);
@@ -121,20 +180,27 @@
     return value < 300 ? 'C' : value < 600 ? 'B' : value < 750 ? 'A' : value < 900 ? 'S' : value < 1000 ? 'S+' : value < 1021 ? 'U' : 'UBU';
   }
   function pairRolls(dna, start) {
-    const top = read(dna, start, 4) === 15, bottom = read(dna, start + 4, 4) === 15;
-    const paired = top || bottom;
-    return { active: paired ? [top, top, bottom, bottom] :
-      [8, 12, 16, 20].map(offset => read(dna, start + offset, 4) === 15), source: paired ? 'pairs' : 'individual' };
+    const pairs = read(dna, start, 8);
+    const top = (pairs >>> 4) === 15, bottom = (pairs & 15) === 15;
+    if (top || bottom) return { active: [top, top, bottom, bottom], source: 'pairs' };
+    const indiv = read(dna, start + 8, 16);
+    return {
+      active: [(indiv >>> 12) === 15, ((indiv >>> 8) & 15) === 15, ((indiv >>> 4) & 15) === 15, (indiv & 15) === 15],
+      source: 'individual'
+    };
   }
   function eyeGeometry(px, py, lids) {
-    // Each lid keeps n·point <= distance. Eroding by the iris radius bounds its entire footprint.
-    const planes = lids.map((lid, i) => {
+    const planes = [];
+    for (let i = 0; i < 2; i++) {
+      const lid = lids[i];
+      if (!lid.active) continue;
       const angle = lid.angle * Math.PI / 180, side = i ? 1 : -1;
-      return { nx: -side * Math.sin(angle), ny: side * Math.cos(angle), distance: EYE_RADIUS - lid.depth };
-    }).filter((_, i) => lids[i].active);
-    const length = Math.hypot(px, py);
+      planes.push({ nx: -side * Math.sin(angle), ny: side * Math.cos(angle), distance: EYE_RADIUS - lid.depth });
+    }
+    const length = (px === 0 && py === 0) ? 0 : Math.hypot(px, py);
     let travel = EYE_TRAVEL;
-    if (length) for (const p of planes) {
+    if (length) for (let i = 0; i < planes.length; i++) {
+      const p = planes[i];
       const projection = (p.nx * px + p.ny * py) / length;
       if (projection > 0) travel = Math.min(travel, Math.max(0, p.distance - IRIS_RADIUS) / projection);
     }

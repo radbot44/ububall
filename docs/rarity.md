@@ -99,7 +99,7 @@ The owner-approved 2026-10-28 visibility rules use joint word-count/length categ
 | Praenomen Nomen Cognomen | 21/128 | 2.607683 |
 | Praenomen Cognomen Nomen | 3/128 | 5.415037 |
 
-Both visibility rolls occur after all original word draws, followed by a 1/8 front-placement roll. Two-word placement remains rarity-neutral. Already-empty slots stay empty. The new rules apply to all DNA, including existing issuance. Percentiles are recalibrated against 1,000,000 random 128-byte DNA samples. Existing issued sort scores are invalidated once and recalculated by bounded backfill. Existing assembled packs retain their contents/quintile labels; subsequent pack assembly uses the updated scores.
+The packed naming stream uses disjoint initial flag bits for visibility and 1/8 front placement. Two-word placement remains rarity-neutral. Already-empty slots stay empty. The new rules apply to all DNA, including existing issuance. Percentiles are recalibrated against 1,000,000 random 128-byte DNA samples. Existing issued sort scores are invalidated once and recalculated by bounded backfill. Existing assembled packs retain their contents/quintile labels; subsequent pack assembly uses the updated scores.
 
 ## 2. Calibrated Percentile (0–100)
 

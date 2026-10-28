@@ -31,13 +31,9 @@ test('neutral and endpoint mouth geometry retain their numeric ranges in the new
   }
   assert.equal(ubu.curve(0), -1); assert.equal(ubu.curve(511), 0); assert.equal(ubu.curve(1023), 1);
 });
-test('visibility rolls retain the original nomen and surrounding word spellings', () => {
-  for (const v of require('./test/name-vectors.json')) {
-    const m = ubu.ubunym(BigInt('0x' + v.seed));
-    assert.equal(m.nomen, v.name[1]);
-    assert.ok(m.praenomen === '' || m.praenomen === v.name[0]);
-    assert.ok(m.cognomen === '' || m.cognomen === v.name[2]);
-    assert.deepEqual(m, ubu.ubunym(BigInt('0x' + v.seed)));
+test('packed uburithm matches independently captured benchmark vectors', () => {
+  for (const {seed, ...expected} of require('./test/packed-name-vectors.json')) {
+    assert.deepEqual(ubu.ubunym(BigInt('0x' + seed)), expected);
   }
 });
 test('exact text uses dual SHA-512, and encoding preserves every bit including unassigned bits', async () => {
@@ -278,19 +274,70 @@ test('statMultiplier maps 8-bit values symmetrically across centered cubic curve
   assert.throws(() => ubu.statMultiplier(1.5));
 });
 
-test('fixed visibility vectors cover neither, either and both surrounding slots', () => {
-  for (const [seed, parts, front = false] of [
-    [0n, ['', 'Icahyf', 'Simuon']],
-    [4n, ['', 'Muijun', '']],
-    [8n, ['Saipbi', 'Ocdoji', '']],
-    [0xffffffffffffffffn, ['Ata', 'Uretiw', 'Eko']],
-    [3n, ['', 'Fopoda', 'Ruiloh'], true],
-    [17n, ['Ar', 'Ibhece', 'Biyu'], true]
-  ]) {
-    const name = ubu.ubunym(seed);
-    assert.deepEqual([name.praenomen, name.nomen, name.cognomen], parts);
-    assert.equal(name.cognomenBeforeNomen, front);
-    const ordered = front ? [parts[0], parts[2], parts[1]] : parts;
-    assert.equal(name.fullName, ordered.filter(Boolean).join(' '));
+test('packed names retain slots, spelling format and placement for all visible structures', () => {
+  const seen = new Set();
+  for (const {seed} of require('./test/packed-name-vectors.json')) {
+    const name = ubu.ubunym(BigInt('0x' + seed));
+    const {praenomen: p, nomen: n, cognomen: c, cognomenBeforeNomen: front} = name;
+    assert.match(n, /^[A-Z][a-z]{5}$/);
+    for (const word of [p,c]) if (word) assert.match(word, /^[A-Z][a-z]{1,5}$/);
+    assert.equal(name.fullName, (front ? [p,c,n] : [p,n,c]).filter(Boolean).join(' '));
+    assert.ok(!front || c);
+    seen.add((p ? 'P' : '') + (front ? 'CN' : c ? 'NC' : 'N'));
+  }
+  assert.deepEqual([...seen].sort(), ['N','NC','CN','PN','PNC','PCN'].sort());
+});
+
+// Access private sampler boundaries without expanding the production API.
+function packedInternals() {
+  const fs = require('node:fs'), Module = require('node:module');
+  const filename = require.resolve('./ubu.js');
+  const source = fs.readFileSync(filename, 'utf8').replace('const api = { decode,',
+    'const api = { NameRandom, word6, word, decode,');
+  const compiled = new Module(filename, module);
+  compiled.filename = filename;
+  compiled._compile(source, filename);
+  return compiled.exports;
+}
+test('packed sampler rejects tails, retains quotient and handles >32-bit refills exactly', () => {
+  const { NameRandom } = packedInternals();
+  const rng = new NameRandom(0n);
+  rng.range = 8; rng.value = 7;
+  let refills = 0;
+  rng.next32 = () => { refills++; return 0; };
+  // Reject [5,8), retaining value=2,range=3, then append one full chunk.
+  const value = 2n * 2n**32n, range = 3n * 2n**32n;
+  const limit = range - range % 5n;
+  assert.equal(rng.int(5), Number(value % 5n));
+  assert.equal(refills, 1);
+  assert.equal(rng.value, Number(value / 5n));
+  assert.equal(rng.range, Number(limit / 5n));
+  // Largest supported bound, with a refill near the maximum exact pool size.
+  rng.range = 11170; rng.value = 11169;
+  const bigValue = 11169n * 2n**32n;
+  const bigRange = 11170n * 2n**32n;
+  assert.equal(rng.int(11171), Number(bigValue % 11171n));
+  assert.equal(rng.value, Number(bigValue / 11171n));
+  assert.equal(rng.range, Number((bigRange - bigRange % 11171n) / 11171n));
+});
+test('packed chunk endpoints obey vowel/consonant contexts for every word pattern', () => {
+  const { word6 } = packedInternals();
+  const patterns = ['CVCVCV','CVCVVC','CVVCCV','CVVCVC','VCCVCV','VCCVVC','VCVCCV','VCVCVC'];
+  for (let pattern = 0; pattern < 8; pattern++) for (const last of [false,true]) {
+    let first = true;
+    const word = word6({int(n) { if (first) { first=false; assert.equal(n,8); return pattern; } return last ? n-1 : 0; }}).toUpperCase();
+    assert.equal(word.length, 6);
+    const p = patterns[pattern];
+    for (let i=0;i<6;i++) {
+      if (p[i] === 'V') {
+        const y = i === 0 || i === 5 || (p[i-1] === 'C' && p[i+1] === 'C' && p[i-2] !== 'C' && p[i+2] !== 'C');
+        assert.ok((y ? 'AEIOUY' : 'AEIOU').includes(word[i]));
+        if (p[i-1] === 'V' || p[i+1] === 'V') assert.notEqual(word[i], 'Y');
+      } else {
+        assert.ok('BCDFGHJKLMNPQRSTVWXYZ'.includes(word[i]));
+        if (p.slice(i-2,i) === 'VV') assert.ok(!(p[i+1] === 'C' ? 'HWY' : 'Y').includes(word[i]));
+        if (word[i] === 'X' && p[i-1] === 'C') assert.ok('HLNRSWYXZ'.includes(word[i-1]));
+      }
+    }
   }
 });
