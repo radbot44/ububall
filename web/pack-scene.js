@@ -724,9 +724,7 @@
           if (face) ctx.drawImage(face, x - 43, y - 43, 86, 86);
           else {
             // Standalone previews without minted models use the brand face.
-            ctx.fillStyle = `rgb(${blobColors[i % 5].join(',')})`;
-            ctx.beginPath(); ctx.arc(x, y, 42, 0, Math.PI * 2); ctx.fill();
-            if (mark.complete && mark.naturalWidth) ctx.drawImage(mark, x - 28, y - 28, 56, 56);
+            candy(x, y, `rgb(${blobColors[i % 5].join(',')})`, 0, 42);
           }
         }
       }
@@ -775,18 +773,65 @@
       requestPaint();
     }
 
-    function candy(x, y, hex, angle) {
+    function candy(x, y, hex, angle, R = 104) {
       ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
-      ctx.shadowColor = '#0007'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 10;
-      ctx.beginPath(); ctx.arc(0, 0, 104, 0, Math.PI * 2); ctx.fillStyle = tint(hex, -.55); ctx.fill();
+
+      // Natural ubu token drop shadow
+      ctx.shadowColor = '#00000055';
+      ctx.shadowBlur = Math.round(9 * (R / 176));
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = Math.round(8 * (R / 176));
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fillStyle = hex; ctx.fill();
       ctx.shadowColor = 'transparent';
-      const gloss = ctx.createRadialGradient(-40, -50, 3, 5, 10, 136);
-      gloss.addColorStop(0, tint(hex, .55)); gloss.addColorStop(.3, tint(hex, .15)); gloss.addColorStop(.65, hex); gloss.addColorStop(1, tint(hex, -.6));
-      ctx.beginPath(); ctx.arc(0, 0, 104, 0, Math.PI * 2); ctx.fillStyle = gloss; ctx.fill();
-      ctx.strokeStyle = '#ffffff35'; ctx.lineWidth = 1.3; ctx.stroke();
-      if (mark.complete && mark.naturalWidth) ctx.drawImage(mark, -68, -68, 136, 136);
-      ctx.beginPath(); ctx.ellipse(-36, -65, 36, 11, -.5, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff48'; ctx.fill();
+
+      // Keep the front flat; surface texture and face detail are clipped to the token circle.
+      ctx.save();
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.clip();
+
+      // Subtle directional diffuse light field matching ubu-render matte
+      const diffuse = ctx.createLinearGradient(-R, -R, R, R);
+      diffuse.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
+      diffuse.addColorStop(0.5, 'rgba(255, 255, 255, 0.02)');
+      diffuse.addColorStop(1, 'rgba(0, 0, 0, 0.07)');
+      ctx.fillStyle = diffuse;
+      ctx.fillRect(-R, -R, R * 2, R * 2);
+
+      // Fine matte surface grain
+      if (grainPattern) {
+        ctx.fillStyle = grainPattern;
+        ctx.fillRect(-R, -R, R * 2, R * 2);
+      }
+
+      // Brand placeholder oomark face
+      if (mark.complete && mark.naturalWidth) {
+        const faceSize = R * (136 / 104);
+        ctx.drawImage(mark, -faceSize / 2, -faceSize / 2, faceSize, faceSize);
+      }
+
+      // Narrow perimeter rolled edge overlay (94% to 100% of radius)
+      const ox = R * (-2 / 176), oy = R * (-4 / 176), edgeR = R * (180 / 176);
+      const edge = ctx.createRadialGradient(ox, oy, 0, ox, oy, edgeR);
+      edge.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      edge.addColorStop(0.94, 'rgba(0, 0, 0, 0)');
+      edge.addColorStop(0.98, 'rgba(0, 0, 0, 0.13)');
+      edge.addColorStop(1, 'rgba(0, 0, 0, 0.32)');
+      ctx.fillStyle = edge;
+      ctx.fillRect(-R, -R, R * 2, R * 2);
+
+      ctx.restore();
+
+      // Token rim stroke
+      const rim = ctx.createLinearGradient(-R, -R, R, R);
+      rim.addColorStop(0, 'rgba(255, 255, 255, 0.44)');
+      rim.addColorStop(0.4, 'rgba(255, 255, 255, 0.07)');
+      rim.addColorStop(0.65, 'rgba(0, 0, 0, 0.06)');
+      rim.addColorStop(1, 'rgba(0, 0, 0, 0.28)');
+      ctx.strokeStyle = rim;
+      ctx.lineWidth = Math.max(1, R * (3 / 176));
+      ctx.beginPath();
+      ctx.arc(0, 0, R * (174.5 / 176), 0, Math.PI * 2);
+      ctx.stroke();
+
       ctx.restore();
     }
 
