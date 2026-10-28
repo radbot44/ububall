@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestHarness } from 'wrangler';
-import { login, callback } from '../auth.mjs';
-import file from '../ubu-file.js';
-import ubu from '../ubu.js';
+import { login, callback } from '../server/auth.mjs';
+import file from '../shared/ubu-file.js';
+import ubu from '../shared/ubu.js';
 
 test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { timeout: 60000 }, async t => {
   const keys = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);

@@ -291,7 +291,7 @@ test('packed names retain slots, spelling format and placement for all visible s
 // Access private sampler boundaries without expanding the production API.
 function packedInternals() {
   const fs = require('node:fs'), Module = require('node:module');
-  const filename = require.resolve('./ubu.js');
+  const filename = require.resolve('../shared/ubu.js');
   const source = fs.readFileSync(filename, 'utf8').replace('const api = { decode,',
     'const api = { NameRandom, word6, word, decode,');
   const compiled = new Module(filename, module);

@@ -97,7 +97,7 @@ Prefixes, key identifiers and other metadata add length. Encryption alone does n
 
 ## Local demo
 
-Open demo.html with ubu.js, ubu-file.js, ubu-render.js and demo.js beside it, or serve them on localhost. No framework or runtime dependencies. Text seeds use platform SHA-512; random generation uses platform randomness. The standalone designer has no production mint keys, account or remote API calls.
+Open `web/demo.html` (or `/demo.html` when running `npm run dev`). No framework or runtime dependencies. Text seeds use platform SHA-512; random generation uses platform randomness. The standalone designer has no production mint keys, account or remote API calls.
 
 The site viewer offers Ubu, Card and Token tabs. Token presents the same character as an enamel collectible with satin nickel dividers; S, S+, U and UBU use their card-rating metal palettes. This is presentation only and does not alter DNA or issuance.
 

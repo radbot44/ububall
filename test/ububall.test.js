@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const P = require('./ububall-physics.js');
+const P = require('../web/ububall-physics.js');
 const normal = { mass: 127, size: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 };
 test('experimental stat curve preserves endpoints and concentrates values near normal', () => {
   assert.ok(Math.abs(P.multiplier(0) - 2 / 3) < 1e-12);

@@ -79,11 +79,38 @@ foreach ($file in $files) {
     }
     throw "Separate edit in $file. Preserve or reconcile it before updating; nothing has been copied."
 }
+$removed = @($oldHashes.Keys | Where-Object { $_ -notin $newHashes.Keys })
+foreach ($file in $removed) {
+    $existing = Join-Path $Destination $file
+    if (!(Test-Path -LiteralPath $existing -PathType Leaf)) { continue }
+    $existingHash = (Get-FileHash -LiteralPath $existing -Algorithm SHA256).Hash
+    if ($oldHashes[$file] -ne $existingHash) {
+        $baseline = & git -C $Destination rev-parse "HEAD:$file" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $blob = & git -C $Destination hash-object --path=$file $existing
+            if ($LASTEXITCODE -ne 0 -or $baseline -ne $blob) {
+                throw "Separate edit in removed file $file. Preserve or reconcile it before updating; nothing has been removed."
+            }
+        }
+    }
+}
 $backup = Join-Path $SettingsDirectory ('backups\install-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 foreach ($file in $changed) {
     $saved = Join-Path $backup $file
     New-Item -ItemType Directory -Force -Path (Split-Path $saved -Parent) | Out-Null
     Copy-Item -LiteralPath (Join-Path $Destination $file) -Destination $saved
+}
+foreach ($file in $removed) {
+    $existing = Join-Path $Destination $file
+    if (Test-Path -LiteralPath $existing -PathType Leaf) {
+        $saved = Join-Path $backup $file
+        New-Item -ItemType Directory -Force -Path (Split-Path $saved -Parent) | Out-Null
+        Move-Item -LiteralPath $existing -Destination $saved -Force
+    }
+}
+$distPublic = Join-Path $Destination 'dist\public'
+if (Test-Path -LiteralPath $distPublic) {
+    Remove-Item -LiteralPath $distPublic -Recurse -Force
 }
 # Recover private settings before replacing the tracked Wrangler configuration.
 if (!(Test-Path (Join-Path $SettingsDirectory 'settings.json')) -and (Test-Path (Join-Path $Destination 'wrangler.local.jsonc'))) {

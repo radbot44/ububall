@@ -1,12 +1,12 @@
 # Local mint service
 
-`mint.js` implements batch preparation and issuance. `mint-local.js` persists it with Node's built-in SQLite, without packages or an HTTP listener. The local runtime is Node 22.13+; SQLite is experimental in the installed Node 22 runtime. `worker.mjs` supplies the Cloudflare storage adapter, API and scheduling; see [worker.md](worker.md). No cloud deployment has been performed.
+`server/mint.js` implements batch preparation and issuance. `server/mint-local.js` persists it with Node's built-in SQLite, without packages or an HTTP listener. The local runtime is Node 22.13+; SQLite is experimental in the installed Node 22 runtime. `server/worker.mjs` supplies the Cloudflare storage adapter, API and scheduling; see [worker.md](worker.md). No cloud deployment has been performed.
 
 ## Use from trusted server code
 
 ```javascript
-const { Mint } = require('../mint.js');
-const { openStorage } = require('../mint-local.js');
+const { Mint } = require('../server/mint.js');
+const { openStorage } = require('../server/mint-local.js');
 const storage = openStorage('state/mint.sqlite'); // create the private parent directory first
 const mint = new Mint(storage, {
   mint: configuredMintID,
