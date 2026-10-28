@@ -29,6 +29,8 @@
   };
   const stadium = document.querySelector('.stadium');
   const stageArea = document.querySelector('.stadium-stage-area');
+  const spinLayer = document.createElement('div'); spinLayer.className = 'spin-layer';
+  stageArea.append(spinLayer); spinLayer.append($('field-spin'));
   const rinkStage = document.querySelector('.rink-stage');
   const rinkWrap = document.querySelector('.rink-wrap');
   const badgeCanvas = document.createElement('canvas'); badgeCanvas.className = 'field-badges';
@@ -530,8 +532,11 @@
   }
   function positionSpinControl() {
     const control = $('field-spin');
-    control.hidden = phase !== 'plan' || drag !== null;
-    if (control.hidden) return;
+    control.hidden = false;
+    const visible = phase === 'plan' && drag === null;
+    control.style.visibility = visible ? 'visible' : 'hidden';
+    control.inert = !visible;
+    if (!visible) return;
     const b = bodies[selected], center = screenPoint(b), stage = stageArea.getBoundingClientRect();
     const r = canvas.getBoundingClientRect();
     const radius = b.radius * (isPortrait ? r.height / 1000 : r.width / 1000);
@@ -541,7 +546,7 @@
     let y = arrow.y > center.y + 8 ? center.y - radius - height - 24 : center.y + radius + 5;
     const x = Math.max(6, Math.min(stage.width - width - 6, center.x - stage.left - width / 2));
     y = Math.max(6, Math.min(stage.height - height - 6, y - stage.top));
-    control.style.left = x + 'px'; control.style.top = y + 'px';
+    control.style.transform = `translate3d(${x}px, ${y}px, 0)`;
   }
   const impactStamp = document.createElement('canvas');
   impactStamp.width = impactStamp.height = 128;
@@ -890,6 +895,7 @@
       bodies = kickoff(); turn++; phase = 'plan'; resetPlans(); say('Kickoff. Plan your next three launches.'); draw(); return;
     }
     if (phase !== 'plan') return;
+    if ($('field-spin').contains(document.activeElement)) document.activeElement.blur();
     window.ubuAudio?.stop();
     lastPlans = structuredClone(plans);
     drag = null;
