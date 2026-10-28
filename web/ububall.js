@@ -166,12 +166,18 @@
   }
   function gainMeter(b, baseAmount) {
     if (!b || b.team < 0 || b.usedSuperThisTurn) return;
+    const updateBar = body => {
+      const fill = $(`super-fill-${body.playerIndex}`), pct = $(`super-pct-${body.playerIndex}`);
+      if (fill) fill.style.width = body.meter + '%';
+      if (pct) pct.textContent = Math.floor(body.meter) + '%';
+    };
     const playerIdx = b.playerIndex;
     const eff = stats[playerIdx]?.efficiency ?? 127;
     const effMult = P.multiplier(eff);
     const gain = baseAmount * effMult;
     b.meter = Math.min(100, Math.max(0, (b.meter || 0) + gain));
 
+    updateBar(b);
     const syn = stats[playerIdx]?.synergy ?? 127;
     const synMult = P.multiplier(syn);
     const start = b.team * 3, end = start + 3;
@@ -181,6 +187,7 @@
         const chem = stats[i]?.chemistry ?? 127;
         const chemMult = P.multiplier(chem);
         teammate.meter = Math.min(100, Math.max(0, (teammate.meter || 0) + gain * synMult * chemMult * 0.25));
+        updateBar(teammate);
       }
     }
   }
@@ -297,13 +304,13 @@
     if (!readStats()) $('apply-stats').disabled = true;
     document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
     $('launch').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : 'Launch team';
-    $('selected-name').textContent = `${selected + 1}. ${teamEntries[selected].model.parts.fullName}`;
+    $('selected-name').textContent = teamEntries[selected].model.parts.fullName;
     const launching = plans.filter((p, i) => p.power > 0 && !bodies[i].stunned && !(bodies[i].superArm && bodies[i].equippedSuper?.key === 'stalwart')).length;
     $('plan-summary').textContent = planning ? `${launching} launching · ${3 - launching} holding` : '';
     [...$('team-selector').children].forEach((button, i) => {
       button.setAttribute('aria-pressed', String(i === selected));
       button.disabled = !planning;
-      button.querySelector('span').textContent = `${i + 1} · ${bodies[i].stunned ? 'Stunned' : plans[i].power > 0 ? Math.round(plans[i].power * 100) + '%' : 'Hold'}${bodies[i].superArm ? ' · Armed' : ''}`;
+      button.querySelector('span').textContent = `${bodies[i].stunned ? 'Stunned' : plans[i].power > 0 ? Math.round(plans[i].power * 100) + '%' : 'Hold'}${bodies[i].superArm ? ' · Armed' : ''}`;
     });
     const angle = Math.round((plans[selected].angle * 180 / Math.PI + 360) % 360);
     $('angle').value = angle; $('angle-value').value = angle + '°';
@@ -366,9 +373,9 @@
         } else if (curB.superArm) {
           hudSuperText.textContent = '⚡ ARMED';
         } else if (curB.meter >= 100) {
-          hudSuperText.textContent = `${selected + 1} · Arm ${s.name}`;
+          hudSuperText.textContent = `Arm ${s.name}`;
         } else {
-          hudSuperText.textContent = `${selected + 1} · ${s.name} charging ${Math.floor(curB.meter || 0)}%`;
+          hudSuperText.textContent = `${s.name} charging ${Math.floor(curB.meter || 0)}%`;
         }
       }
     }
@@ -391,7 +398,7 @@
       const select = document.createElement('button'); select.type = 'button'; select.className = 'card-select';
       const header = document.createElement('div'); header.className = 'card-header';
       const titles = document.createElement('div'); titles.className = 'card-titles';
-      const strong = document.createElement('strong'); strong.textContent = `${i + 1}. ${entry.model.parts.fullName}`;
+      const strong = document.createElement('strong'); strong.textContent = entry.model.parts.fullName;
       const small = document.createElement('small'); small.textContent = '0% power · 0% spin';
       titles.append(strong, small);
       header.append(ubuRender(entry.model, 'ball-thumb'), titles);
@@ -411,8 +418,8 @@
         const card = document.createElement('div'); card.className = 'team-card cpu-card'; card.id = `player-${i}`;
         const header = document.createElement('div'); header.className = 'card-header';
         const titles = document.createElement('div'); titles.className = 'card-titles';
-        const strong = document.createElement('strong'); strong.textContent = `${idx + 1}. ${entry.model.parts.fullName}`;
-        const small = document.createElement('small'); small.className = 'away'; small.textContent = `CPU ${idx + 1}`;
+        const strong = document.createElement('strong'); strong.textContent = entry.model.parts.fullName;
+        const small = document.createElement('small'); small.className = 'away'; small.textContent = 'CPU';
         titles.append(strong, small);
         header.append(ubuRender(entry.model, 'ball-thumb'), titles);
         card.append(header, renderStatsBox(stats[i] || entry.model.stats || {}), renderSuperPanel(i, true));
@@ -470,7 +477,7 @@
       : { x: r.left + p.x / 1000 * r.width, y: r.top + p.y / 600 * r.height };
   }
   function badgePoint(b) {
-    return isPortrait ? { x: b.x + b.radius + 21, y: b.y } : { x: b.x, y: b.y - b.radius - 21 };
+    return isPortrait ? { x: b.x - b.radius * .65, y: b.y - b.radius * .65 } : { x: b.x - b.radius * .65, y: b.y + b.radius * .65 };
   }
   function fieldTarget(event) {
     const near = p => { const q = screenPoint(p); return Math.hypot(q.x - event.clientX, q.y - event.clientY) <= 22; };
@@ -522,6 +529,12 @@
       }
       ctx.restore();
     });
+    for (const stop of prediction.stops) {
+      if (!stop.stopped || !prediction.paths[stop.index].some(p => Math.hypot(p.x - stop.x, p.y - stop.y) > 3)) continue;
+      const color = bodies[stop.index].team < 0 ? '#fff' : bodies[stop.index].team === 0 ? primary : secondary;
+      line(stop.x - 4, stop.y - 4, stop.x + 4, stop.y + 4, color, 2);
+      line(stop.x + 4, stop.y - 4, stop.x - 4, stop.y + 4, color, 2);
+    }
     for (const hit of prediction.impacts) {
       const team = bodies[hit.index].team;
       const color = team < 0 ? '#ffffff' : team === 0 ? primary : secondary;
@@ -529,21 +542,13 @@
       impactCtx.globalCompositeOperation = 'source-over';
       impactCtx.fillStyle = color;
       impactCtx.beginPath(); impactCtx.arc(64, 64, 60, 0, Math.PI * 2); impactCtx.fill();
-      if (team >= 0) {
-        impactCtx.globalCompositeOperation = 'destination-out';
-        impactCtx.font = 'bold 64px system-ui'; impactCtx.textAlign = 'center'; impactCtx.textBaseline = 'middle';
-        impactCtx.fillText(String(hit.index % 3 + 1), 64, 66);
-      }
       ctx.save();
       ctx.translate(hit.x, hit.y);
       if (isPortrait) ctx.rotate(Math.PI / 2);
       const fade = Math.min(1, (prediction.horizon - hit.tick) / 240);
-      ctx.globalAlpha = .3 * fade;
-      const size = hit.radius * 128 / 60;
+      ctx.globalAlpha = .2 * fade;
+      const size = hit.reach * 128 / 60;
       ctx.drawImage(impactStamp, -size / 2, -size / 2, size, size);
-      ctx.globalAlpha = .65 * fade;
-      circle(0, 0, hit.radius, color, 1.5);
-      if (hit.reach > hit.radius) { ctx.setLineDash([3, 3]); circle(0, 0, hit.reach, color, 1); }
       ctx.restore();
     }
   }
@@ -712,22 +717,19 @@
         }
         ctx.restore();
       }
-      // A steady badge marks a full meter; the colored aura still means armed/active.
       if (b.meter >= 100 && !b.superArm && !b.superActive) {
-        ctx.save();
-        if (isPortrait) {
-          ctx.translate(b.x + b.radius + 21, b.y);
-          ctx.rotate(Math.PI / 2);
-        } else {
-          ctx.translate(b.x, b.y - b.radius - 21);
+        const icon = superImages[b.equippedSuper?.id ?? 0], p = badgePoint(b);
+        if (icon?.complete && icon.naturalWidth) {
+          ctx.save(); ctx.translate(p.x, p.y); if (isPortrait) ctx.rotate(Math.PI / 2);
+          ctx.filter = 'grayscale(1)'; ctx.drawImage(icon, -15, -15, 30, 30); ctx.restore();
         }
-        ctx.fillStyle = '#101217';
-        ctx.beginPath(); ctx.roundRect(-20, -18, 40, 36, 8); ctx.fill();
-        ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2; ctx.stroke();
-        const icon = superImages[b.equippedSuper?.id ?? 0];
-        if (icon?.complete && icon.naturalWidth) ctx.drawImage(icon, -14, -14, 28, 28);
-        ctx.fillStyle = '#ffd166';
-        ctx.beginPath(); ctx.arc(17, -15, 5, 0, Math.PI * 2); ctx.fill();
+      }
+      if (phase === 'play' && b.guarding) {
+        ctx.save();
+        const p = isPortrait ? { x: b.x - b.radius * .65, y: b.y + b.radius * .65 } : { x: b.x + b.radius * .65, y: b.y + b.radius * .65 };
+        ctx.translate(p.x, p.y); if (isPortrait) ctx.rotate(Math.PI / 2);
+        ctx.scale(1.1, 1.1); ctx.translate(-12, -12); ctx.fillStyle = '#4798ff';
+        ctx.fill(new Path2D('M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3'));
         ctx.restore();
       }
       if (b.stunned || b.stunnedNext) {
@@ -776,7 +778,7 @@
       } else {
         ctx.translate(b.x, b.y + b.radius + 18);
       }
-      ctx.fillText(String(i % 3 + 1), 0, 0);
+
       ctx.restore();
 
       if (i < 3 && phase === 'plan') drawImpulse(b, plans[i], primary);
@@ -1092,7 +1094,7 @@
       icon.src = superObj.icon;
       icon.alt = superObj.name;
       const text = document.createElement('span');
-      text.textContent = `${i + 1}. ${entry.model.parts.fullName} · ${superObj.name} `;
+      text.textContent = `${entry.model.parts.fullName} · ${superObj.name} `;
       button.append(text, icon);
       button.setAttribute('aria-pressed', String(i === rosterSlot));
       button.onclick = () => { rosterSlot = i; rosterSlots(); };
@@ -1315,6 +1317,7 @@
     }
   } catch {}
 
+  [...$('stat-player').options].forEach((option, i) => { option.textContent = teamEntries[i].model.parts.fullName; });
   showStats();
   document.addEventListener('visibilitychange', () => { lastTime = 0; });
   const ro = new ResizeObserver(() => draw());

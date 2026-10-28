@@ -91,9 +91,7 @@ SOFTWARE.
       </div>
       <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
       <div id="team-selector" class="team-selector" aria-label="Select ubu"></div>
-      <details class="shot-controls"><summary>Shot controls · <span id="selected-name"></span></summary>
-    <div class="controls"><label>Direction <output id="angle-value">0°</output><input id="angle" type="range" min="0" max="359" value="0"><small>0° right · 90° down · 180° left · 270° up</small></label><label>Power <output id="power-value">0%</output><input id="power" type="range" min="0" max="100" value="0"><small>0% holds position</small></label><button id="hold">Hold this ubu</button></div>
-      </details>
+
       <div class="stadium-actions">
         <button id="stadium-super-btn" type="button" class="stadium-super-btn" aria-label="Arm super for selected ubu">
           <img id="stadium-super-icon" class="super-icon" alt="" src="assets/00_stalwart.png">
@@ -109,6 +107,9 @@ SOFTWARE.
   </div>
   <details class="rules" id="stat-testing">
     <summary>Stat testing</summary>
+      <details class="shot-controls"><summary>Shot controls · <span id="selected-name"></span></summary>
+    <div class="controls"><label>Direction <output id="angle-value">0°</output><input id="angle" type="range" min="0" max="359" value="0"><small>0° right · 90° down · 180° left · 270° up</small></label><label>Power <output id="power-value">0%</output><input id="power" type="range" min="0" max="100" value="0"><small>0% holds position</small></label><button id="hold">Hold this ubu</button></div>
+      </details>
 
     <p class="hint">Drag from an ubu toward the target to aim and set power, or adjust its arrowhead. Use the Spin slider beside the selected ubu to curve your shot. You attack the right goal.</p>
     <p>Temporary values; no DNA changes. Set each stat from 0 to 1023. Normal is 511. Applying values resets the field and score, keeping your planned shot.</p>

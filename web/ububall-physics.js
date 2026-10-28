@@ -360,6 +360,8 @@
   function settled(bodies) { return bodies.every(b => b.vx * b.vx + b.vy * b.vy < 4 && Math.abs(b.omega) < .05); }
   function stop(bodies) {
     for (const b of bodies) {
+      if (b.guardBase) Object.assign(b, b.guardBase);
+      b.guardBase = null; b.guarding = false;
       b.vx = b.vy = b.omega = 0;
       if (b.colossusApplied) {
         if (b.baseRadius) b.radius = b.baseRadius;
@@ -561,6 +563,17 @@
   function startTurn(bodies, plans, onSuper = null) {
     bodies.forEach((b, i) => {
       if (b.team < 0) return;
+      if (b.guardBase) Object.assign(b, b.guardBase);
+      b.guardBase = null;
+      b.guarding = !plans[i]?.power || Boolean(b.stunned);
+      if (b.guarding) {
+        b.guardBase = { reach: b.reach, friction: b.friction, strength: b.strength, stability: b.stability, bounciness: b.bounciness };
+        b.reach = Math.max(b.radius, Math.min(37.5, (b.reach || b.radius) * 1.25));
+        b.friction = Math.min(225, b.friction * 1.25);
+        b.strength = Math.min(1.5, (b.strength || 1) * 1.25);
+        b.stability = Math.min(1.5, (b.stability || 1) * 1.25);
+        b.bounciness = Math.max(2 / 3, (b.bounciness || 1) * .75);
+      }
       b.usedSuperThisTurn = Boolean(b.superActive) && !b.stunned;
       if (!b.stunned && (b.superArm || plans[i]?.superArm) && b.meter >= 100) {
         b.usedSuperThisTurn = true;
@@ -610,7 +623,7 @@
       }
       if (done) break;
     }
-    return { paths, impacts, ticks, goal, horizon: PREDICTION_TICKS };
+    return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS };
   }
   const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, multiplier, applyStats, kickoff, step, launch, settled, stop, triggerShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
