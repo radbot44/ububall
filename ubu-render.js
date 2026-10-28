@@ -1105,7 +1105,8 @@
         layers.push({
           role,
           mat: attr,
-          angle: attr.angle ?? 45
+          // Opposite angles share one stripe orientation and offset sequence.
+          angle: ((attr.angle ?? 45) % 180 + 180) % 180
         });
       }
     }
@@ -1126,8 +1127,8 @@
     const prefix = 'card-mat-' + (++serial);
     const svg = svgNode('svg', {
       class: 'card-materials',
-      viewBox: '0 0 320 480',
-      preserveAspectRatio: 'none',
+      viewBox: '0 0 480 320',
+      preserveAspectRatio: 'xMidYMid slice',
       'aria-hidden': 'true'
     });
     const defs = svgNode('defs');
@@ -1135,7 +1136,7 @@
 
     const boundsId = `${prefix}-bounds`;
     const bounds = svgNode('clipPath', { id: boundsId, clipPathUnits: 'userSpaceOnUse' });
-    bounds.append(svgNode('rect', { x: 0, y: 0, width: 320, height: 480, rx: 16, ry: 16 }));
+    bounds.append(svgNode('rect', { x: 0, y: 0, width: 480, height: 320, rx: 16, ry: 16 }));
     defs.append(bounds);
 
     const face = svgNode('g', { 'clip-path': `url(#${boundsId})` });
@@ -1145,7 +1146,7 @@
     const span = 420;
     // Keep the original generous mask bounds: some browsers clip transformed
     // masks differently when their region is tightened to the card's outline.
-    const region = { x: -span, y: -span, width: span * 2 + 320, height: span * 2 + 480 };
+    const region = { x: -span, y: -span, width: span * 2 + 480, height: span * 2 + 320 };
 
     function getLayerRects(layer) {
       const { angleIndex, angleTotal } = layer;
@@ -1153,8 +1154,8 @@
       const offset = angleIndex * S * 2;
       const start = -Math.ceil((span + cycle) / cycle) * cycle;
       const rects = [];
-      for (let base = start; base <= span + 320; base += cycle) {
-        rects.push({ x: base + offset, y: -span, width: S, height: span * 2 + 480 });
+      for (let base = start; base <= span + 480; base += cycle) {
+        rects.push({ x: base + offset, y: -span, width: S, height: span * 2 + 320 });
       }
       return rects;
     }
@@ -1202,10 +1203,10 @@
       const layer = layers[i];
       const { mat, angle, rects } = layer;
       const patId = `${prefix}-pat-${i}`;
-      const fill = material(defs, { ...mat, angle: 0 }, patId, effects, 160, 240);
+      const fill = material(defs, { ...mat, angle: (mat.angle ?? 45) - angle }, patId, effects, 240, 160);
 
       const group = svgNode('g', {
-        transform: `rotate(${angle} 160 240)`
+        transform: `rotate(${angle} 240 160)`
       });
 
       // Mask out upper layers so lower layers are never visible beneath upper translucent stripes
@@ -1219,7 +1220,7 @@
         mask.append(svgNode('rect', { ...region, fill: '#fff' }));
         for (const upper of upperLayers) {
           const upperGroup = svgNode('g', {
-            transform: `rotate(${upper.angle - angle} 160 240)`
+            transform: `rotate(${upper.angle - angle} 240 160)`
           });
           for (const r of upper.rects) {
             upperGroup.append(svgNode('rect', {
@@ -1247,7 +1248,7 @@
         const gradId = `${edgeId}-light`;
         const grad = svgNode('linearGradient', {
           id: gradId, gradientUnits: 'userSpaceOnUse',
-          x1: 0, y1: 0, x2: 320, y2: 0
+          x1: 0, y1: 0, x2: 480, y2: 0
         });
         for (const [offset, color, opacity] of finish.stops) {
           grad.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
