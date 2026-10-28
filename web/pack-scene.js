@@ -11,9 +11,6 @@
     const sheet = document.createElement('canvas');
     sheet.width = 1200; sheet.height = 720;
     const sheetCtx = sheet.getContext('2d');
-    const fanCanvas = document.createElement('canvas');
-    fanCanvas.width = 1200; fanCanvas.height = 720;
-    const fanCtx = fanCanvas.getContext('2d');
     const plasticPrint = document.createElement('canvas');
     plasticPrint.width = 440; plasticPrint.height = 768;
     const plasticPrintCtx = plasticPrint.getContext('2d');
@@ -26,8 +23,10 @@
     let packHints = null;
     let color, candyColors, previousColor = -1, currentType = null;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+    const tokenCache = new Map();
     const logo = new Image(), mark = new Image();
-    logo.onload = mark.onload = requestPaint;
+    logo.onload = requestPaint;
+    mark.onload = () => { tokenCache.clear(); requestPaint(); };
     logo.src = 'assets/uburoom-wordmark-brand.svg'; mark.src = 'assets/uburoom-oomark-brand.svg';
 
     // Fixed fine grain: generated once, so the material never sparkles at rest.
@@ -758,6 +757,7 @@
     ];
 
     function recolor(packTypeId) {
+      tokenCache.clear();
       packHints = null;
       finish = null; progress = 0;
       let index;
@@ -776,66 +776,87 @@
       requestPaint();
     }
 
-    function candy(x, y, hex, angle, R = 104, targetCtx = ctx) {
-      targetCtx.save(); targetCtx.translate(x, y); targetCtx.rotate(angle);
-
+    function renderUbuTo(tCtx, hex, R) {
       // Natural ubu token drop shadow
-      targetCtx.shadowColor = '#00000055';
-      targetCtx.shadowBlur = Math.round(9 * (R / 176));
-      targetCtx.shadowOffsetX = 0;
-      targetCtx.shadowOffsetY = Math.round(8 * (R / 176));
-      targetCtx.beginPath(); targetCtx.arc(0, 0, R, 0, Math.PI * 2); targetCtx.fillStyle = hex; targetCtx.fill();
-      targetCtx.shadowColor = 'transparent';
+      tCtx.shadowColor = '#00000055';
+      tCtx.shadowBlur = Math.round(9 * (R / 176));
+      tCtx.shadowOffsetX = 0;
+      tCtx.shadowOffsetY = Math.round(8 * (R / 176));
+      tCtx.beginPath(); tCtx.arc(0, 0, R, 0, Math.PI * 2); tCtx.fillStyle = hex; tCtx.fill();
+      tCtx.shadowColor = 'transparent';
 
       // Keep the front flat; surface texture and face detail are clipped to the token circle.
-      targetCtx.save();
-      targetCtx.beginPath(); targetCtx.arc(0, 0, R, 0, Math.PI * 2); targetCtx.clip();
+      tCtx.save();
+      tCtx.beginPath(); tCtx.arc(0, 0, R, 0, Math.PI * 2); tCtx.clip();
 
       // Subtle directional diffuse light field matching ubu-render matte
-      const diffuse = targetCtx.createLinearGradient(-R, -R, R, R);
+      const diffuse = tCtx.createLinearGradient(-R, -R, R, R);
       diffuse.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
       diffuse.addColorStop(0.5, 'rgba(255, 255, 255, 0.02)');
       diffuse.addColorStop(1, 'rgba(0, 0, 0, 0.07)');
-      targetCtx.fillStyle = diffuse;
-      targetCtx.fillRect(-R, -R, R * 2, R * 2);
+      tCtx.fillStyle = diffuse;
+      tCtx.fillRect(-R, -R, R * 2, R * 2);
 
       // Fine matte surface grain
       if (grainPattern) {
-        targetCtx.fillStyle = grainPattern;
-        targetCtx.fillRect(-R, -R, R * 2, R * 2);
+        tCtx.fillStyle = grainPattern;
+        tCtx.fillRect(-R, -R, R * 2, R * 2);
       }
 
       // Brand placeholder oomark face
       if (mark.complete && mark.naturalWidth) {
         const faceSize = R * (136 / 104);
-        targetCtx.drawImage(mark, -faceSize / 2, -faceSize / 2, faceSize, faceSize);
+        tCtx.drawImage(mark, -faceSize / 2, -faceSize / 2, faceSize, faceSize);
       }
 
       // Narrow perimeter rolled edge overlay (94% to 100% of radius)
       const ox = R * (-2 / 176), oy = R * (-4 / 176), edgeR = R * (180 / 176);
-      const edge = targetCtx.createRadialGradient(ox, oy, 0, ox, oy, edgeR);
+      const edge = tCtx.createRadialGradient(ox, oy, 0, ox, oy, edgeR);
       edge.addColorStop(0, 'rgba(0, 0, 0, 0)');
       edge.addColorStop(0.94, 'rgba(0, 0, 0, 0)');
       edge.addColorStop(0.98, 'rgba(0, 0, 0, 0.13)');
       edge.addColorStop(1, 'rgba(0, 0, 0, 0.32)');
-      targetCtx.fillStyle = edge;
-      targetCtx.fillRect(-R, -R, R * 2, R * 2);
+      tCtx.fillStyle = edge;
+      tCtx.fillRect(-R, -R, R * 2, R * 2);
 
-      targetCtx.restore();
+      tCtx.restore();
 
       // Token rim stroke
-      const rim = targetCtx.createLinearGradient(-R, -R, R, R);
+      const rim = tCtx.createLinearGradient(-R, -R, R, R);
       rim.addColorStop(0, 'rgba(255, 255, 255, 0.44)');
       rim.addColorStop(0.4, 'rgba(255, 255, 255, 0.07)');
       rim.addColorStop(0.65, 'rgba(0, 0, 0, 0.06)');
       rim.addColorStop(1, 'rgba(0, 0, 0, 0.28)');
-      targetCtx.strokeStyle = rim;
-      targetCtx.lineWidth = Math.max(1, R * (3 / 176));
-      targetCtx.beginPath();
-      targetCtx.arc(0, 0, R * (174.5 / 176), 0, Math.PI * 2);
-      targetCtx.stroke();
+      tCtx.strokeStyle = rim;
+      tCtx.lineWidth = Math.max(1, R * (3 / 176));
+      tCtx.beginPath();
+      tCtx.arc(0, 0, R * (174.5 / 176), 0, Math.PI * 2);
+      tCtx.stroke();
+    }
 
-      targetCtx.restore();
+    function getToken(hex, R) {
+      const hasMark = Boolean(mark.complete && mark.naturalWidth);
+      const key = `${hex}:${R}`;
+      let cached = tokenCache.get(key);
+      if (cached && cached.hasMark === hasMark) return cached;
+      const halfSize = Math.ceil(R * 1.35);
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = halfSize * 4;
+      const tCtx = canvas.getContext('2d');
+      tCtx.setTransform(2, 0, 0, 2, halfSize * 2, halfSize * 2);
+      renderUbuTo(tCtx, hex, R);
+      cached = { canvas, halfSize, hasMark };
+      tokenCache.set(key, cached);
+      return cached;
+    }
+
+    function candy(x, y, hex, angle, R = 104) {
+      const token = getToken(hex, R);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.drawImage(token.canvas, -token.halfSize, -token.halfSize, token.halfSize * 2, token.halfSize * 2);
+      ctx.restore();
     }
 
     function paint(now) {
@@ -855,21 +876,14 @@
       if (currentType?.id !== 'blob' && progress > revealStart) {
         const reveal = ease(revealStart, revealStart + .14, progress);
         const fan = ease(.36, .78, progress);
-        const alpha = reveal * (1 - ease(.96, 1, progress));
-        if (alpha > 0.001) {
-          fanCtx.resetTransform();
-          fanCtx.clearRect(0, 0, fanCanvas.width, fanCanvas.height);
-          fanCtx.setTransform(2, 0, 0, 2, 600, 360);
-          const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => Math.abs(b - (count - 1) / 2) - Math.abs(a - (count - 1) / 2));
-          for (const i of order) {
-            const slot = i - (count - 1) / 2;
-            candy(slot * 88 * fan, -26 * fan + Math.abs(slot) * 14 * fan, candyColors[i % 5], slot * .10 * fan, 104, fanCtx);
-          }
-          ctx.save();
-          ctx.globalAlpha = alpha;
-          ctx.drawImage(fanCanvas, -300, -180, 600, 360);
-          ctx.restore();
+        ctx.save();
+        ctx.globalAlpha = reveal * (1 - ease(.96, 1, progress));
+        const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => Math.abs(b - (count - 1) / 2) - Math.abs(a - (count - 1) / 2));
+        for (const i of order) {
+          const slot = i - (count - 1) / 2;
+          candy(slot * 88 * fan, -26 * fan + Math.abs(slot) * 14 * fan, candyColors[i % 5], slot * .10 * fan);
         }
+        ctx.restore();
       }
       if (progress < (currentType?.id === 'blob' ? 1 : .96) && currentType) {
         ctx.save();
