@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark"><title>Ububall · Ubu Mint</title>
   <link rel="stylesheet" href="site.css"><link rel="stylesheet" href="ububall.css">
   <script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script>
@@ -77,9 +77,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
       -->
       <div class="spin-control" id="field-spin" hidden>
-        <div class="spin-heading"><label for="shot-spin">Spin <span id="spin-player"></span></label><output id="shot-spin-value" for="shot-spin">0%</output><button id="reset-spin" type="button">Reset</button></div>
-        <input id="shot-spin" type="range" min="-100" max="100" step="1" value="0" aria-describedby="spin-help">
-        <div id="spin-help" class="spin-labels"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5"/></svg> CCW</span><span>CW <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5"/></svg></span></div>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5"/></svg>
+        <input id="shot-spin" type="range" min="-100" max="100" step="1" value="0" aria-label="Selected ubu spin: counterclockwise to clockwise">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5"/></svg>
       </div>
 
         <div class="rink-stage">

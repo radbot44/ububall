@@ -290,7 +290,7 @@
     if (isStunned) {
       plans[selected].power = plans[selected].spin = 0;
     }
-    for (const id of ['angle', 'power', 'shot-spin', 'reset-spin', 'hold']) $(id).disabled = !planning || isStunned;
+    for (const id of ['angle', 'power', 'shot-spin', 'hold']) $(id).disabled = !planning || isStunned;
     $('launch').disabled = phase === 'play';
     for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = phase === 'play';
     $('restore-shot').disabled = phase === 'play' || !lastPlans;
@@ -308,9 +308,10 @@
     const angle = Math.round((plans[selected].angle * 180 / Math.PI + 360) % 360);
     $('angle').value = angle; $('angle-value').value = angle + '°';
     $('power').value = Math.round(plans[selected].power * 100); $('power-value').value = $('power').value + '%';
-    $('shot-spin').value = Math.round((plans[selected].spin || 0) * 100); $('shot-spin-value').value = $('shot-spin').value === '0' ? 'No spin' : `${Math.abs(Number($('shot-spin').value))}% ${Number($('shot-spin').value) < 0 ? 'CCW' : 'CW'}`;
-    $('shot-spin').setAttribute('aria-valuetext', $('shot-spin-value').value);
-    $('spin-player').textContent = `- Ubu ${selected + 1}`;
+    const spinValue = Math.round((plans[selected].spin || 0) * 100);
+    $('shot-spin').value = spinValue;
+    $('shot-spin').setAttribute('aria-valuetext', spinValue === 0 ? 'No spin' : `${Math.abs(spinValue)}% ${spinValue < 0 ? 'counterclockwise' : 'clockwise'}`);
+    $('shot-spin').setAttribute('aria-label', `Spin for ${teamEntries[selected].model.parts.fullName}`);
     [...$('team').children].forEach((button, i) => {
       button.classList.toggle('selected', i === selected);
       const select = button.querySelector('.card-select');
@@ -489,7 +490,7 @@
     const width = control.offsetWidth, height = control.offsetHeight;
     const arrow = screenPoint(impulseGeometry(b, plans[selected]));
     // Prefer the side opposite the arrow, then clamp inside the stage near the edges.
-    let y = arrow.y > center.y + 8 ? center.y - radius - height - 52 : center.y + radius + 24;
+    let y = arrow.y > center.y + 8 ? center.y - radius - height - 38 : center.y + radius + 18;
     const x = Math.max(6, Math.min(stage.width - width - 6, center.x - stage.left - width / 2));
     y = Math.max(6, Math.min(stage.height - height - 6, y - stage.top));
     control.style.left = x + 'px'; control.style.top = y + 'px';
@@ -540,7 +541,7 @@
     let availW = stageArea.clientWidth || stadium?.clientWidth || 360;
     let availH = stageArea.clientHeight;
 
-    if (!availH || !isFs) {
+    if (!availH || (!isFs && !isPortrait)) {
       const vh = window.innerHeight || document.documentElement.clientHeight || 600;
       availH = isPortrait ? Math.min(vh * 0.72, 680) : Math.min(vh * 0.8, 600);
     }
@@ -837,7 +838,6 @@
       sync(); draw();
     };
   }
-  $('reset-spin').onclick = () => { if (phase !== 'plan' || bodies[selected].stunned) return; plans[selected].spin = 0; sync(); draw(); };
   $('hold').onclick = () => { plans[selected].power = plans[selected].spin = 0; sync(); draw(); };
   function point(event) {
     const r = canvas.getBoundingClientRect();

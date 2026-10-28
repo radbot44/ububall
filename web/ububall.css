@@ -652,32 +652,58 @@ body.stadium-fullscreen-active {
 .slot-super-icon { width: 28px; height: 28px; }
 .super-picker-btn img { width: 44px; height: 44px; }
 .stat-super-thumb { width: 40px; height: 40px; }
-.spin-control { width: min(520px, calc(100% - 32px)); margin: 4px auto 8px; }
-.spin-heading { display: flex; align-items: center; gap: 12px; font-size: 13px; }
-.spin-heading label { flex: 1; min-width: 0; }
-#spin-player { color: var(--muted); }
-.spin-heading output { white-space: nowrap; font-variant-numeric: tabular-nums; }
-#reset-spin { min-height: 44px; padding: 6px 10px; font-size: 12px; }
-#shot-spin { display: block; width: 100%; height: 44px; margin: 0; accent-color: var(--primary); cursor: pointer; touch-action: pan-y; }
-#shot-spin { appearance: none; background: transparent; }
-#shot-spin::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--border) 49.5%, var(--text) 49.5%, var(--text) 50.5%, var(--border) 50.5%); }
-#shot-spin::-webkit-slider-thumb { appearance: none; width: 28px; height: 28px; margin-top: -11px; border-radius: 50%; border: 2px solid var(--text); background: var(--primary); }
-#shot-spin::-moz-range-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--border) 49.5%, var(--text) 49.5%, var(--text) 50.5%, var(--border) 50.5%); }
-#shot-spin::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--text); background: var(--primary); }
-#shot-spin:disabled { opacity: .45; cursor: default; }
-.spin-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
-@media (max-width: 650px) {
-  .spin-heading { flex-wrap: wrap; gap: 6px; }
-  .spin-heading label { flex-basis: 100%; }
-  #reset-spin { margin-left: auto; }
-}
-
-/* Screen-space popover follows the selected ubu without rotating in portrait mode. */
-#field-spin { position: absolute; z-index: 30; width: min(230px, calc(100% - 12px)); margin: 0; padding: 8px 10px; box-sizing: border-box; border: 1px solid var(--primary); border-radius: 12px; background: var(--card); box-shadow: 0 4px 16px #0008; }
+/* Bare spin slider follows the selected ubu in screen space. */
+#field-spin { position: absolute; z-index: 30; display: flex; align-items: center; gap: 6px; width: min(176px, calc(100% - 12px)); height: 44px; margin: 0; padding: 0; }
 #field-spin[hidden] { display: none; }
-#field-spin .spin-heading { flex-wrap: nowrap; gap: 6px; font-size: 11px; }
-#field-spin .spin-heading label { flex-basis: auto; }
-#field-spin #spin-player { display: block; }
-#field-spin #reset-spin { min-height: 44px; margin-left: 0; padding: 4px 6px; }
-#field-spin .spin-labels span { display: flex; align-items: center; gap: 4px; }
-#field-spin .spin-labels svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#field-spin > svg { flex: none; width: 20px; height: 20px; fill: none; stroke: var(--text); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+#shot-spin { appearance: none; display: block; min-width: 0; width: 100%; height: 44px; margin: 0; background: transparent; cursor: pointer; touch-action: pan-y; }
+#shot-spin::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--muted) 49%, var(--text) 49%, var(--text) 51%, var(--muted) 51%); }
+#shot-spin::-webkit-slider-thumb { appearance: none; width: 22px; height: 22px; margin-top: -9px; border-radius: 50%; border: 2px solid var(--text); background: var(--primary); }
+#shot-spin::-moz-range-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--muted) 49%, var(--text) 49%, var(--text) 51%, var(--muted) 51%); }
+#shot-spin::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--text); background: var(--primary); }
+#shot-spin:disabled { opacity: .45; cursor: default; }
+
+/* Portrait game: score, flexible field, and a compact thumb-accessible action dock. */
+.stadium.portrait-mode {
+  display: grid;
+  grid-template-areas: "score" "field" "status" "team" "actions" "controls";
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto auto;
+  height: min(920px, 100svh);
+  min-height: 540px;
+}
+.stadium.portrait-mode .scoreboard { grid-area: score; flex-wrap: nowrap; gap: 4px; padding: 6px 8px; }
+.stadium.portrait-mode .scoreboard-content { flex: 1; gap: 10px; min-width: 0; }
+.stadium.portrait-mode .scoreboard-content > span { gap: 5px; font-size: 12px; }
+.stadium.portrait-mode .scoreboard strong { font-size: 24px; }
+.stadium.portrait-mode .phase-info { font-size: 12px; }
+.stadium.portrait-mode .scoreboard small { font-size: 10px; margin-top: 2px; }
+.stadium.portrait-mode .stadium-toolbar { position: static; transform: none; margin: 0; gap: 0; }
+.stadium.portrait-mode .stadium-tool-btn { width: 44px; height: 44px; border: 0; background: transparent; }
+.stadium.portrait-mode .stadium-stage-area { grid-area: field; height: auto; min-height: 0; padding: 0; }
+.stadium.portrait-mode #game-status { grid-area: status; margin: 0; padding: 4px 10px; font-size: 11px; line-height: 1.3; }
+.stadium.portrait-mode .team-selector { grid-area: team; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 6px 10px; }
+.stadium.portrait-mode .team-selector button { min-width: 0; min-height: 48px; justify-content: center; padding: 4px; font-size: 11px; }
+.stadium.portrait-mode .team-selector button svg { flex: none; width: 30px; height: 30px; }
+.stadium.portrait-mode .team-selector button span { overflow-wrap: anywhere; }
+.stadium.portrait-mode .stadium-actions { grid-area: actions; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; gap: 8px; padding: 4px 10px 6px; }
+.stadium.portrait-mode .stadium-super-btn { min-width: 0; min-height: 52px; padding: 6px 8px; border-radius: 12px; text-align: left; font-size: 11px; }
+.stadium.portrait-mode .stadium-super-btn .super-icon { width: 30px; height: 30px; }
+.stadium.portrait-mode .team-launch { flex-direction: column-reverse; justify-content: center; gap: 3px; }
+.stadium.portrait-mode #launch { width: 100%; min-width: 0; min-height: 48px; border-radius: 12px; box-shadow: none; }
+.stadium.portrait-mode #plan-summary { font-size: 10px; }
+.stadium.portrait-mode .shot-controls { grid-area: controls; margin: 0 10px; padding: 0; }
+.stadium.portrait-mode .shot-controls summary { padding: 8px 0; font-size: 11px; }
+.stadium.portrait-mode .shot-controls[open] { max-height: 30dvh; overflow-y: auto; }
+.stadium.portrait-mode.goal-phase .stadium-actions { position: static; transform: none; }
+.stadium.portrait-mode.goal-phase .team-launch { grid-column: 1 / -1; }
+.stadium.portrait-mode.goal-phase #launch { animation: none; padding: 8px 16px; }
+.stadium.portrait-mode:fullscreen, .stadium.portrait-mode.stadium-fullscreen {
+  height: 100dvh; min-height: 0; overflow: hidden;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  box-sizing: border-box;
+}
+@media (max-width: 650px) {
+  .ball-page:has(.portrait-mode) { width: calc(100% - 12px); }
+  .stadium.portrait-mode { border-radius: 12px; }
+  .stadium.portrait-mode:fullscreen, .stadium.portrait-mode.stadium-fullscreen { border-radius: 0; }
+}
