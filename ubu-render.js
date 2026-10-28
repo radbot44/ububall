@@ -271,7 +271,9 @@
       lighting('opal-polish', [[0, '#fff', .45], [.3, '#fff', .16], [1, '#fff', 0]], true,
         { cx: 105, cy: 80, r: 135 });
     } else if (attribute.texture === 'matte') {
-      lighting('diffuse', [[0, '#fff', .19], [.5, '#fff', .03], [1, '#000', .2]], true);
+      // Printed matte parts share one flat light field, not individual domes.
+      lighting('diffuse', [[0, '#fff', .12], [.5, '#fff', .02], [1, '#000', .07]], false,
+        { x1: 0, y1: 0, x2: 360, y2: 360 });
       const grain = svgNode('pattern', { id: id + '-grain', patternUnits: 'userSpaceOnUse', width: 48, height: 48 });
       for (let i = 0; i < 160; i++) {
         grain.append(svgNode('circle', { cx: 1 + roll() * 46, cy: 1 + roll() * 46,
@@ -940,20 +942,28 @@
         materialEdge(defs, face, shapes[role], attribute, prefix + '-' + role + '-edge', effects, contours);
       }
     }
-    const domeId = prefix + '-dome';
-    const dome = svgNode('radialGradient', { id: domeId, gradientUnits: 'userSpaceOnUse', cx: 180, cy: 175, r: 176 });
-    dome.append(
-      svgNode('stop', { offset: '0%', 'stop-color': '#fff', 'stop-opacity': .10 }),
-      svgNode('stop', { offset: '38%', 'stop-color': '#fff', 'stop-opacity': .02 }),
-      svgNode('stop', { offset: '70%', 'stop-color': '#000', 'stop-opacity': .01 }),
-      svgNode('stop', { offset: '100%', 'stop-color': '#000', 'stop-opacity': .09 })
+    // Keep the front flat; only the narrow perimeter rolls into the token edge.
+    // This overlays the complete face without changing any DNA-derived paths.
+    const edgeId = prefix + '-token-edge';
+    const edge = svgNode('radialGradient', { id: edgeId, gradientUnits: 'userSpaceOnUse', cx: 180, cy: 178, r: 178 });
+    edge.append(
+      svgNode('stop', { offset: '0%', 'stop-color': '#000', 'stop-opacity': 0 }),
+      svgNode('stop', { offset: '95%', 'stop-color': '#000', 'stop-opacity': 0 }),
+      svgNode('stop', { offset: '98%', 'stop-color': '#000', 'stop-opacity': .08 }),
+      svgNode('stop', { offset: '100%', 'stop-color': '#000', 'stop-opacity': .24 })
     );
-    defs.append(dome);
-    face.append(svgNode('circle', { cx: 180, cy: 180, r: 176, fill: `url(#${domeId})`, 'pointer-events': 'none' }));
+    const rimId = prefix + '-token-rim';
+    const rim = svgNode('linearGradient', { id: rimId, x1: 0, y1: 0, x2: 1, y2: 1 });
+    for (const [offset, color, opacity] of [[0, '#fff', .38], [.4, '#fff', .06], [.65, '#000', .04], [1, '#000', .22]]) {
+      rim.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
+    }
+    defs.append(edge, rim);
+    face.append(svgNode('circle', { cx: 180, cy: 180, r: 176, fill: `url(#${edgeId})`, 'pointer-events': 'none' }),
+      svgNode('circle', { cx: 180, cy: 180, r: 175, fill: 'none', stroke: `url(#${rimId})`, 'stroke-width': 2, 'pointer-events': 'none' }));
     if (effects) {
       effects.push((x, y) => {
-        dome.setAttribute('cx', String(180 + x * 20));
-        dome.setAttribute('cy', String(175 + y * 20));
+        rim.setAttribute('x1', String(x * .15));
+        rim.setAttribute('y1', String(y * .15));
       });
     }
     if (effects) attachLighting(svg, effects, surface || svg);

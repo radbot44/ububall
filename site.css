@@ -459,7 +459,7 @@ body:has(#reveal[open]) { overflow: hidden; }
   padding: 3cqw; border: 1px solid #777a81; border-radius: 16px;
   aspect-ratio: 3 / 2; display: grid; grid-template-columns: 18% 46% 1fr;
   grid-template-rows: auto 1fr auto; column-gap: 2%;
-  background: linear-gradient(145deg, #424651, #222631 45%, #333846);
+  background: linear-gradient(145deg, #333843, #202530 55%, #2b303c);
   box-shadow: inset 0 0 0 4px #ffffff09, 0 12px 24px #0005;
   transform-style: preserve-3d;
   animation: card-arrive var(--wobble-dur, .65s) cubic-bezier(.22, 1, .36, 1); will-change: transform;
@@ -475,12 +475,11 @@ body:has(#reveal[open]) { overflow: hidden; }
   animation: ubu-arrive var(--wobble-dur, .65s) cubic-bezier(.2, .9, .3, 1.2), ubu-float var(--float-dur, 3.5s) var(--float-delay, .65s) ease-in-out infinite alternate;
   will-change: transform;
 }
-.trading-card h3 { grid-column: 2; grid-row: 3; position: relative; z-index: 2; text-align: center; transform: translateY(-3cqw); font-size: 3.1cqw; line-height: 1.3; letter-spacing: -.4px; margin: 0; align-self: center; overflow-wrap: anywhere; color: #eee7de; text-shadow: 0 1px #ffffff38, 0 2px 3px #000a; }
-.card-stats { grid-column: 3; grid-row: 2; align-self: center; position: relative; z-index: 2; display: grid; gap: 1.8cqw; text-align: left; border: 1px solid transparent; border-radius: 8px; background: linear-gradient(145deg, #34414e, #171c25 45%, #20212b) padding-box, var(--foil-ink) border-box; padding: 2cqw; box-shadow: inset 0 0 0 2px #0005, 0 2px 5px #0005; }
+.trading-card h3 { grid-column: 2; grid-row: 3; position: relative; z-index: 2; text-align: center; transform: translateY(-3cqw); font-size: 3.1cqw; line-height: 1.3; letter-spacing: -.4px; margin: 0; align-self: center; overflow-wrap: anywhere; color: #eee7de; text-shadow: 0 2px 3px #0006; }
+.card-stats { grid-column: 3; grid-row: 2; align-self: center; position: relative; z-index: 2; display: grid; gap: 1.8cqw; text-align: left; border: 1px solid transparent; border-radius: 8px; background: linear-gradient(145deg, #29313c, #1b2029 65%, #20232d) padding-box, var(--foil-ink) border-box; padding: 2cqw; box-shadow: inset 0 0 0 2px #0005, 0 2px 5px #0005; }
 .card-stats h4 { font-size: 1.3cqw; text-transform: uppercase; letter-spacing: .18em; color: var(--muted); margin: 0 0 .4cqw; }
-.stat-bar { position: relative; height: 5cqw; border: 1px solid color-mix(in srgb, var(--stat-color) 60%, #89909b); border-radius: 1px; background: linear-gradient(180deg, #ffffff0b, transparent 45%, #0004), #12151b; overflow: hidden; box-shadow: 0 1px #ffffff20, inset 0 1px 3px #000b; }
-.stat-bar i { position: absolute; inset: 0 auto 0 0; display: block; height: 100%; background: linear-gradient(var(--foil-angle), #ffffff28, transparent 25%, #ffffff4d 48%, transparent 62%, #0003), linear-gradient(180deg, #ffffff45, transparent 18%, #0002 65%, #0005), color-mix(in srgb, var(--stat-color) 88%, #101217); border-right: 1px solid #ffffff6b; box-shadow: inset 0 1px #ffffff80, inset 0 -1px #0008; }
-.stat-bar span { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 1.2cqw; font-size: 1.8cqw; font-weight: 700; letter-spacing: .02em; color: #faf7f2; text-shadow: 0 1px 1px #000, 0 -1px #ffffff30; }
+.stat-bar { position: relative; height: 5cqw; border: 1px solid color-mix(in srgb, var(--stat-color) 45%, #59616e); border-radius: 3px; background: linear-gradient(180deg, #ffffff06, transparent), #171c24; overflow: hidden; box-shadow: inset 0 1px 2px #0003; }
+.stat-bar span { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 1.2cqw; font-size: 1.8cqw; font-weight: 700; letter-spacing: .02em; color: #faf7f2; text-shadow: 0 1px 2px #0008; }
 .card-rarity { grid-column: 1; grid-row: 3; position: relative; z-index: 2; text-align: left; align-self: center; }
 .card-rarity span { display: block; color: var(--muted); font-size: 1.2cqw; }
 .card-rarity strong { font-size: 1.6cqw; font-weight: 500; }
@@ -497,16 +496,11 @@ body:has(#reveal[open]) { overflow: hidden; }
 [data-grade="U"] .grade-lettering { background: linear-gradient(var(--foil-angle), #fff5e7 12%, #f4c9ef 32%, #9a758e 46%, #fff1db 50%, #ff98be 68%, #ffdab6 90%); background-clip: text; color: transparent; filter: drop-shadow(0 1px 0 #ffe6cf) drop-shadow(0 3px 0 #7a4d69) drop-shadow(0 5px 3px #0006); }
 [data-grade="UBU"] .grade-lettering { font-size: 7.8cqw; font-weight: 900; letter-spacing: -.075em; background: linear-gradient(var(--foil-angle), #fff9e8 8%, #f6d2ac 26%, #c8a6c8 40%, #756b85 46%, #fff4da 49%, #f8d5aa 57%, #dca7b6 74%, #fff0d0 94%); background-clip: text; color: transparent; filter: drop-shadow(0 1px 0 #fff0d4) drop-shadow(0 3px 0 #886579) drop-shadow(0 5px 0 #453b4b) drop-shadow(0 6px 4px #0005); }
 .card-ubuquity .grade-lettering { background-size: 180% 180%; background-position: var(--light-x) var(--light-y); }
-.stat-bar i { background-size: 180% 180%, 100% 100%; background-position: var(--light-x) var(--light-y), center; }
-.stat-bar span { text-shadow: var(--foil-shadow-x) var(--foil-shadow-y) 1px #000, 0 -1px #ffffff30; }
-.card-stats::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(var(--foil-angle), transparent 20%, #ffffff12 45%, #ffffff25 49%, transparent 58%); background-size: 200% 200%; background-position: var(--light-x) var(--light-y); }
-/* Fine foil rules and etched scales keep the stat panel crisp at card size. */
+.stat-bar i { position: absolute; inset: 0 auto 0 0; display: block; height: 100%; background: linear-gradient(135deg, #ffffff28, transparent 55%, #00000012), var(--stat-color); border-right: 1px solid #ffffff40; box-shadow: inset 0 1px #ffffff30; }
+/* Fine satin rules and etched scales keep the stat panel crisp at card size. */
 .card-stats::before { content: ''; position: absolute; inset: .55cqw; border: 1px solid #d7e8f32b; border-radius: 5px; pointer-events: none; background: linear-gradient(var(--foil-angle), #c9efff80, #ffffff08 30%, #ffcad340) top / 100% 1px no-repeat; }
 .card-stats h4 { color: #d5dfe8; text-shadow: 0 1px 2px #000; }
-.stat-bar { border-radius: 3px; box-shadow: 0 1px #ffffff30, inset 0 0 0 2px #0005, 0 0 6px color-mix(in srgb, var(--stat-color) 12%, transparent); }
-.stat-bar::before { content: ''; position: absolute; inset: auto 4px 2px; height: 3px; background: repeating-linear-gradient(90deg, #dce9fa55 0 1px, transparent 1px 5px); }
-.stat-bar i { inset-block: 2px; height: auto; border-radius: 1px; }
-.stat-bar i::after { content: ''; position: absolute; right: 0; top: 12%; bottom: 12%; width: 1px; background: #efffff; box-shadow: 0 0 4px 1px var(--stat-color), 0 0 9px var(--stat-color); opacity: var(--foil-glint, .65); }
+.stat-bar::before { content: ''; position: absolute; inset: auto 4px 2px; height: 3px; z-index: 1; pointer-events: none; background: repeating-linear-gradient(90deg, #dce9fa55 0 1px, transparent 1px 5px); }
 .card-ubuquity { --grade-glow: transparent; isolation: isolate; background: none; }
 .card-ubuquity::before { content: ''; position: absolute; inset: -25% -30%; z-index: -1; pointer-events: none; background: radial-gradient(ellipse at center, var(--grade-glow), transparent 65%); filter: blur(5px); }
 .grade-lettering { position: relative; }
@@ -524,21 +518,20 @@ body:has(#reveal[open]) { overflow: hidden; }
 .trading-card[data-finish="S+"] { --foil-tint: #ff9cb1; }
 .trading-card[data-finish="U"] { --foil-tint: #d6a7f7; }
 .trading-card[data-finish="UBU"] { --foil-tint: #f4bfdd; }
-.card-hologram { --holo-strength: .035; --holo-spectrum: #a9b9cc, #eef4ff, #8296ad; position: absolute; inset: 10px; z-index: 1; pointer-events: none; opacity: var(--holo-strength); background-image: linear-gradient(var(--foil-angle), transparent 28%, #ffffff05 40%, #fff 48%, transparent 55%), linear-gradient(var(--foil-angle), var(--holo-spectrum)); background-size: 220% 220%, 180% 180%; background-position: var(--light-x) var(--light-y); mask: url('uburoom-oomark-brand.svg') 3% 3% / 12cqw 12cqw repeat; mix-blend-mode: screen; }
-[data-finish="B"] .card-hologram { --holo-strength: .05; --holo-spectrum: #439a92, #c6ffd8, #7ba7e2; }
-[data-finish="A"] .card-hologram { --holo-strength: .07; --holo-spectrum: #ff6586, #ffe7bf, #ad85f5, #ff9fae; }
-[data-finish="S"] .card-hologram { --holo-strength: .09; --holo-spectrum: #ffb84e, #ff7197, #a085ff, #82e5ec, #ffe6a2; }
-[data-finish="S+"] .card-hologram { --holo-strength: .115; --holo-spectrum: #ff619d, #ffc66a, #89ffcf, #6cd7ff, #b68aff, #ff85c2; }
-[data-finish="U"] .card-hologram { --holo-strength: .11; --holo-spectrum: #fa62ff, #8670ff, #5af0ff, #baff8a, #ffe16b, #ff74b9, #956bff; animation: hologram-drift 12s ease-in-out infinite alternate; }
-[data-finish="UBU"] .card-hologram { --holo-strength: .14; --holo-spectrum: #ff4fbd, #1b1930 14%, #ffce59 25%, #51ffe9 38%, #181c34 50%, #6793ff 62%, #d052ff 78%, #ff4fbd; background-image: linear-gradient(var(--foil-angle), transparent 22%, #ffffff08 40%, #fff 48%, transparent 54%, #ffffff28 72%, transparent 78%), repeating-linear-gradient(var(--foil-angle), #ffffff35 0 1px, transparent 1px 4px), linear-gradient(var(--foil-angle), var(--holo-spectrum)); background-size: 220% 220%, 100% 100%, 120% 120%; animation: hologram-drift 9s ease-in-out infinite alternate; }
+.card-hologram { --holo-strength: 0.0175; --holo-spectrum: #a9b9cc, #eef4ff, #8296ad; position: absolute; inset: 10px; z-index: 1; pointer-events: none; opacity: var(--holo-strength); background-image: linear-gradient(var(--foil-angle), transparent 28%, #ffffff05 40%, #fff 48%, transparent 55%), linear-gradient(var(--foil-angle), var(--holo-spectrum)); background-size: 220% 220%, 180% 180%; background-position: var(--light-x) var(--light-y); mask: url('uburoom-oomark-brand.svg') 3% 3% / 12cqw 12cqw repeat; mix-blend-mode: screen; }
+[data-finish="B"] .card-hologram { --holo-strength: 0.025; --holo-spectrum: #439a92, #c6ffd8, #7ba7e2; }
+[data-finish="A"] .card-hologram { --holo-strength: 0.035; --holo-spectrum: #ff6586, #ffe7bf, #ad85f5, #ff9fae; }
+[data-finish="S"] .card-hologram { --holo-strength: 0.045; --holo-spectrum: #ffb84e, #ff7197, #a085ff, #82e5ec, #ffe6a2; }
+[data-finish="S+"] .card-hologram { --holo-strength: 0.0575; --holo-spectrum: #ff619d, #ffc66a, #89ffcf, #6cd7ff, #b68aff, #ff85c2; }
+[data-finish="U"] .card-hologram { --holo-strength: 0.055; --holo-spectrum: #fa62ff, #8670ff, #5af0ff, #baff8a, #ffe16b, #ff74b9, #956bff; animation: hologram-drift 12s ease-in-out infinite alternate; }
+[data-finish="UBU"] .card-hologram { --holo-strength: 0.07; --holo-spectrum: #ff4fbd, #1b1930 14%, #ffce59 25%, #51ffe9 38%, #181c34 50%, #6793ff 62%, #d052ff 78%, #ff4fbd; background-image: linear-gradient(var(--foil-angle), transparent 22%, #ffffff08 40%, #fff 48%, transparent 54%, #ffffff28 72%, transparent 78%), repeating-linear-gradient(var(--foil-angle), #ffffff35 0 1px, transparent 1px 4px), linear-gradient(var(--foil-angle), var(--holo-spectrum)); background-size: 220% 220%, 100% 100%, 120% 120%; animation: hologram-drift 9s ease-in-out infinite alternate; }
 @keyframes hologram-drift { from { background-position: calc(var(--light-x) - 12%) calc(var(--light-y) - 6%); } to { background-position: calc(var(--light-x) + 12%) calc(var(--light-y) + 6%); } }
 :is([data-grade="U"], [data-grade="UBU"]) .grade-lettering { background-image: conic-gradient(from 25deg at 18% 45%, #ffffff00 0deg 55deg, #fff8 55deg 90deg, #4947ef66 90deg 150deg, #fff0 150deg 220deg, #ff53cf88 220deg 260deg, #fff0 260deg), conic-gradient(from 110deg at 52% 60%, #fff0 0deg 70deg, #64e4ff88 70deg 120deg, #8434db66 120deg 185deg, #fff0 185deg), linear-gradient(var(--foil-angle), #ffda65, #c350f2 16%, #6431bd 28%, #fff3cf 38%, #ff54b7 58%, #ffc94f 82%); background-size: 110% 110%, 140% 140%, 180% 180%; background-clip: text; filter: none; text-shadow: 0 2px 0 #74566c40, 0 4px 3px #0004; animation: crystal-sheen 7s ease-in-out infinite alternate; }
 @keyframes crystal-sheen { from { background-position: calc(var(--light-x) - 10%) var(--light-y); } to { background-position: calc(var(--light-x) + 10%) calc(var(--light-y) + 8%); } }
-.stat-bar i { background-image: linear-gradient(var(--foil-angle), #fff0 20%, #fff9 45%, #fff0 52%, #0003 75%), repeating-linear-gradient(0deg, #fff1 0 1px, #0001 1px 2px), linear-gradient(180deg, #f2f8ff80, #ffffff08 25%, #0006 48%, #ffffff40 52%, #0004 100%); background-color: var(--stat-color); background-size: 180% 180%, 100% 100%, 100% 100%; background-position: var(--light-x) var(--light-y), center, center; box-shadow: inset 0 1px #fff9, inset 0 -1px #0009; }
-.trading-card::before { content: ''; position: absolute; inset: 0; padding: 5px; border-radius: inherit; pointer-events: none; z-index: 3; background: radial-gradient(ellipse at var(--light-x) var(--light-y), #ffffff9c, transparent 55%), var(--foil-ink); mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); mask-composite: exclude; box-shadow: inset 0 0 0 1px #fff6; }
-.trading-card::after { content: ''; position: absolute; inset: 8px; border: 1px solid #e6d8ce40; border-radius: 8px; pointer-events: none; background: radial-gradient(ellipse at var(--light-x) var(--light-y), #fff2, transparent 65%), repeating-linear-gradient(90deg, #ffffff03 0 8.9%, #ffffff17 9%, #ffffff03 9.2%, #1012170a 9.3% 18%); mix-blend-mode: screen; z-index: 1; }
+.trading-card::before { content: ''; position: absolute; inset: 0; padding: 3px; border-radius: inherit; pointer-events: none; z-index: 3; background: radial-gradient(ellipse at var(--light-x) var(--light-y), #ffffff48, transparent 55%), var(--foil-ink); mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); mask-composite: exclude; box-shadow: inset 0 0 0 1px #fff6; }
+.trading-card::after { content: ''; position: absolute; inset: 8px; border: 1px solid #e6d8ce40; border-radius: 8px; pointer-events: none; background: radial-gradient(ellipse at var(--light-x) var(--light-y), #ffffff08, transparent 65%), repeating-linear-gradient(90deg, #ffffff03 0 8.9%, #ffffff06 9%, #ffffff03 9.2%, #1012170a 9.3% 18%); mix-blend-mode: screen; z-index: 1; }
 .foil { border-color: #b7a5ba; background: linear-gradient(135deg, #594559, #283c4a 36%, #494435 70%, #4d3545); }
-.foil::after { background: radial-gradient(ellipse at var(--light-x) var(--light-y), #fff3, transparent 60%), repeating-linear-gradient(90deg, #ffffff03 0 8.9%, #ffffff20 9%, #ffffff03 9.2%, #1012170a 9.3% 18%), linear-gradient(120deg, #ffa9500c, #ff719710, #7fbfff0c, transparent); }
+.foil::after { background: radial-gradient(ellipse at var(--light-x) var(--light-y), #ffffff0c, transparent 60%), repeating-linear-gradient(90deg, #ffffff03 0 8.9%, #ffffff08 9%, #ffffff03 9.2%, #1012170a 9.3% 18%), linear-gradient(120deg, #ffa9500c, #ff719710, #7fbfff0c, transparent); }
 #reveal-progress { color: var(--muted); font-size: 12px; margin: 24px 0 8px; font-variant-numeric: tabular-nums; }
 .reveal-dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 8px 0 16px; }
 .reveal-dots span { width: 5px; height: 5px; border-radius: 50%; background: var(--border); }
