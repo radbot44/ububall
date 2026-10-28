@@ -841,6 +841,104 @@
     return handle;
   }
 
+  function playGameStart(options = {}) {
+    const isCtx = options && typeof options.createOscillator === 'function';
+    const opts = isCtx ? { ctx: options } : (options || {});
+    if (!opts.overlap) stopAll();
+    const ctx = opts.ctx || getAudioContext();
+    if (!ctx) return { stop() {} };
+
+    const volume = Number.isFinite(opts.volume)
+      ? Math.max(0.01, Math.min(1.5, opts.volume))
+      : 0.95;
+
+    const master = createMasterChain(ctx);
+    const step = 60 / 150 / 4; // 16th-note grid at 150 BPM (0.10s per step)
+    const now = ctx.currentTime + 0.03;
+    const activeNodes = [];
+
+    function schedule(instrument, midi, startStep, stepLen, decaySec, vol, timbreMod = 0, pitchBend = 0) {
+      const handle = playTone(ctx, master, {
+        instrument,
+        freq: noteFrequency(midi),
+        startTime: now + startStep * step,
+        duration: stepLen * step,
+        decay: decaySec,
+        timbreMod,
+        pitchBend,
+        volume: vol * volume
+      });
+      activeNodes.push(handle);
+    }
+
+    // 1. Lead Fanfare: Brass Ping (11) + Square Chip (4)
+    const leadMelody = [
+      [67,  0, 1.0, 0.14, 0.75, 0.45, 0],   // G4
+      [72,  1, 1.0, 0.14, 0.80, 0.45, 0],   // C5
+      [74,  2, 1.0, 0.14, 0.85, 0.50, 0],   // D5
+      [76,  3, 1.0, 0.16, 0.90, 0.50, 0],   // E5
+      [79,  4, 1.8, 0.24, 0.95, 0.55, 1.0], // G5 (accented call)
+      [76,  6, 1.0, 0.15, 0.80, 0.45, 0],   // E5
+      [81,  7, 1.8, 0.24, 1.00, 0.55, 1.0], // A5 (heroic lift)
+      [79,  9, 1.8, 0.24, 0.95, 0.50, 0],   // G5
+      [84, 11, 7.0, 0.85, 1.05, 0.60, 1.5]  // C6 (triumphant apex)
+    ];
+
+    for (const [midi, s, len, dec, bVol, cVol, bend] of leadMelody) {
+      schedule(11, midi, s, len, dec, bVol, 2, bend);
+      schedule(4,  midi, s, len, dec, cVol, 1, 0);
+    }
+
+    // 2. Harmony Stabs: Electric Piano (12) on IV-V cadence & Warm Pad (6) + Brass (11) on I Cadd9 finale
+    const harmonyStabs = [
+      [12, 65,  4, 2.5, 0.28, 0.55, 1],
+      [12, 72,  4, 2.5, 0.28, 0.50, 1],
+      [12, 67,  7, 3.5, 0.35, 0.60, 1],
+      [12, 71,  7, 3.5, 0.35, 0.55, 1],
+      [12, 74,  7, 3.5, 0.35, 0.55, 1],
+      [6,  60, 11, 7.5, 0.90, 0.65, 1],
+      [6,  64, 11, 7.5, 0.90, 0.60, 1],
+      [6,  67, 11, 7.5, 0.90, 0.60, 1],
+      [11, 76, 11, 6.5, 0.78, 0.65, 2],
+      [11, 79, 11, 6.5, 0.78, 0.65, 2]
+    ];
+
+    for (const [inst, midi, s, len, dec, vol, mod] of harmonyStabs) {
+      schedule(inst, midi, s, len, dec, vol, mod);
+    }
+
+    // 3. Bassline: Synth Bass (13) + Sub Pluck (7) anchor
+    const bassNotes = [
+      [13, 48,  0, 3.5, 0.32, 0.85, 2], // C3 pickup pedal
+      [13, 41,  4, 2.8, 0.28, 0.90, 2], // F2 (IV)
+      [13, 43,  7, 3.8, 0.35, 0.95, 2], // G2 (V)
+      [13, 36, 11, 7.0, 0.80, 1.00, 2], // C2 (I root bite)
+      [7,  48, 11, 7.0, 0.85, 0.95, 0]  // C3 Sub Pluck punch
+    ];
+
+    for (const [inst, midi, s, len, dec, vol, mod] of bassNotes) {
+      schedule(inst, midi, s, len, dec, vol, mod);
+    }
+
+    // 4. Woodblock (1) face-off ticks + Metal Ping (2) & Crystal Chime (3) finale shimmer
+    for (const [s, midi] of [[0, 72], [2, 76], [4, 79], [7, 81]]) {
+      schedule(1, midi, s, 0.5, 0.09, 0.45, 2);
+    }
+    schedule(2, 84, 11,   5.0, 0.65, 0.55, 2);
+    schedule(3, 79, 11.5, 4.0, 0.55, 0.50, 1);
+    schedule(3, 86, 12.2, 4.0, 0.55, 0.50, 1);
+    schedule(3, 96, 13.0, 5.0, 0.70, 0.55, 1);
+
+    const handle = {
+      stop() {
+        for (const node of activeNodes) node.stop();
+        if (activePlayback === handle) activePlayback = null;
+      }
+    };
+    if (!opts.overlap) activePlayback = handle;
+    return handle;
+  }
+
   function playFanfare(voice, customCtx = null, onNoteCallback = null) {
     stopAll();
     const ctx = customCtx || getAudioContext();
@@ -936,6 +1034,7 @@
     playWallHit,
     playGoalHit,
     playSuper,
+    playGameStart,
     playFanfare,
     stop: stopAll
   };

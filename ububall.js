@@ -390,10 +390,11 @@
       });
     }
   }
-  function newMatch() {
+  function newMatch(playJingle = false) {
     window.ubuAudio?.stop();
     roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     resetPlans(); say('Pull back from an ubu to aim and launch, or turn its spin dial.'); draw();
+    if (playJingle) window.ubuAudio?.playGameStart?.();
   }
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
   function line(x1, y1, x2, y2, color, width = 2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
@@ -1217,7 +1218,7 @@
   $('start-match').onclick = () => {
     $('roster-dialog').close();
     roster = draft.map(d => ({ ...d }));
-    newMatch();
+    newMatch(true);
   };
   $('cancel-roster').onclick = () => $('roster-dialog').close();
   // A modal pauses the simulation; cancelling preserves the current turn.
