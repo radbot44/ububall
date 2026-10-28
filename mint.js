@@ -94,6 +94,12 @@ class Mint {
       const columns = this.exec('PRAGMA table_info(issued)').map(column => column.name);
       if (!columns.includes('favorite')) this.exec('ALTER TABLE issued ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0 CHECK(favorite IN (0,1))');
       if (!columns.includes('rarity_bits')) this.exec('ALTER TABLE issued ADD COLUMN rarity_bits REAL');
+      // Invalidate legacy scores once; existing bounded alarm backfill recalculates them.
+      this.exec('CREATE TABLE IF NOT EXISTS rarity_revision (singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL) STRICT');
+      if (!this.exec('SELECT 1 FROM rarity_revision WHERE singleton=1 AND revision=1').length) {
+        this.exec('UPDATE issued SET rarity_bits=NULL');
+        this.exec('INSERT OR REPLACE INTO rarity_revision VALUES (1, 1)');
+      }
       this.exec('CREATE INDEX IF NOT EXISTS issued_recent_sort ON issued(owner, (certificate IS NULL), issued_at DESC, serial DESC)');
       this.exec('CREATE INDEX IF NOT EXISTS issued_old_sort ON issued(owner, (certificate IS NULL), issued_at ASC, serial ASC)');
       this.exec('CREATE INDEX IF NOT EXISTS issued_rarity_sort ON issued(owner, (certificate IS NULL), rarity_bits DESC, serial DESC)');

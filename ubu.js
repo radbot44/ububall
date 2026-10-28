@@ -86,8 +86,11 @@
     const extra = word(length, random);
     const before = random() < 0.5;
     const opposite = length < 6 ? word(6 - length, random) : '';
-    const praenomen = before ? extra : opposite;
-    const cognomen = before ? opposite : extra;
+    // Consume both visibility rolls after the complete original word schedule.
+    const showPraenomen = random() < 0.5;
+    const showCognomen = random() < 0.5;
+    const praenomen = showPraenomen ? (before ? extra : opposite) : '';
+    const cognomen = showCognomen ? (before ? opposite : extra) : '';
     return { praenomen, nomen, cognomen, fullName: [praenomen, nomen, cognomen].filter(Boolean).join(' ') };
   }
   function checkDNA(dna) {

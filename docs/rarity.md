@@ -89,7 +89,16 @@ All six 10-bit mouth/eye parameters now contribute `0.4 × (-log2(tailProbabilit
 These are small, continuously graded appearance modifiers, not literal independent rarity probabilities.
 
 ### Name structure
-The uburithm produces 2-word names ($p = 1/4$, contributing $2$ bits) or 3-word names ($p = 3/4$, contributing $\approx 0.415$ bits).
+The owner-approved 2026-10-28 visibility rules use joint word-count/length categories, scored once as `-log2(p)`. Placement before or after the nomen does not affect scoring.
+
+| Visible structure | Probability | Bits |
+| --- | --- | --- |
+| Nomen only | 5/16 | 1.678072 |
+| Nomen + one 2-, 3- or 4-letter word | 3/8 | 1.415037 |
+| Nomen + one 6-letter word | 1/8 | 3 |
+| Nomen + two surrounding words | 3/16 | 2.415037 |
+
+Both visibility rolls occur after all original word draws. Already-empty slots stay empty. The new rules apply to all DNA, including existing issuance. Percentiles are recalibrated against 1,000,000 random 128-byte DNA samples. Existing issued sort scores are invalidated once and recalculated by bounded backfill. Existing assembled packs retain their contents/quintile labels; subsequent pack assembly uses the updated scores.
 
 ## 2. Calibrated Percentile (0–100)
 

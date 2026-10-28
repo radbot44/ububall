@@ -388,3 +388,25 @@ test('seamlessly migrates legacy pre-pack database schema on initialization', as
   const result = await mint.issue({ owner, request: request(100) });
   assert.equal(result.certificates.length, 5);
 });
+
+test('name rarity upgrade invalidates old non-null scores once and preserves issued state', async t => {
+  const f = await fixture(t), mint = new Mint(f.open(), f.options);
+  mint.prepare({ batchSize: 15 });
+  const offer = mint.offer({ owner, request: request(1) });
+  await mint.issue({ owner, request: offer.request, choice: offer.choices[0].choice });
+  mint.exec('UPDATE issued SET favorite=1, rarity_bits=-99');
+  const before = mint.exec('SELECT id, dna, serial, certificate, favorite FROM issued ORDER BY id');
+  const inventory = mint.exec('SELECT * FROM inventory ORDER BY id');
+  mint.exec('DROP TABLE rarity_revision');
+  const upgraded = new Mint(f.open(), f.options);
+  assert.equal(upgraded.needsRarityBackfill(), true);
+  assert.equal(upgraded.backfillRarity(2), 2);
+  const reopened = new Mint(f.open(), f.options);
+  assert.equal(reopened.exec('SELECT COUNT(*) AS n FROM issued WHERE rarity_bits IS NOT NULL')[0].n, 2);
+  assert.equal(reopened.backfillRarity(), 3);
+  assert.equal(reopened.needsRarityBackfill(), false);
+  assert.deepEqual(reopened.exec('SELECT id, dna, serial, certificate, favorite FROM issued ORDER BY id'), before);
+  assert.deepEqual(reopened.exec('SELECT * FROM inventory ORDER BY id'), inventory);
+  for (const row of reopened.exec('SELECT dna, rarity_bits FROM issued'))
+    assert.equal(row.rarity_bits, rarity.scoreRarity(ubu.decode(ubu.fromCode(row.dna))).bits);
+});

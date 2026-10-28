@@ -31,10 +31,13 @@ test('neutral and endpoint mouth geometry retain their numeric ranges in the new
   }
   assert.equal(ubu.curve(0), -1); assert.equal(ubu.curve(511), 0); assert.equal(ubu.curve(1023), 1);
 });
-test('uburithm retains accepted raw-seed names independently of the replacement schema', () => {
+test('visibility rolls retain the original nomen and surrounding word spellings', () => {
   for (const v of require('./test/name-vectors.json')) {
     const m = ubu.ubunym(BigInt('0x' + v.seed));
-    assert.deepEqual([m.praenomen, m.nomen, m.cognomen], v.name);
+    assert.equal(m.nomen, v.name[1]);
+    assert.ok(m.praenomen === '' || m.praenomen === v.name[0]);
+    assert.ok(m.cognomen === '' || m.cognomen === v.name[2]);
+    assert.deepEqual(m, ubu.ubunym(BigInt('0x' + v.seed)));
   }
 });
 test('exact text uses dual SHA-512, and encoding preserves every bit including unassigned bits', async () => {
@@ -273,4 +276,17 @@ test('statMultiplier maps 8-bit values symmetrically across centered cubic curve
   assert.throws(() => ubu.statMultiplier(-1));
   assert.throws(() => ubu.statMultiplier(256));
   assert.throws(() => ubu.statMultiplier(1.5));
+});
+
+test('fixed visibility vectors cover neither, either and both surrounding slots', () => {
+  for (const [seed, parts] of [
+    [0n, ['', 'Icahyf', 'Simuon']],
+    [4n, ['', 'Muijun', '']],
+    [8n, ['Saipbi', 'Ocdoji', '']],
+    [0xffffffffffffffffn, ['Ata', 'Uretiw', 'Eko']]
+  ]) {
+    const name = ubu.ubunym(seed);
+    assert.deepEqual([name.praenomen, name.nomen, name.cognomen], parts);
+    assert.equal(name.fullName, parts.filter(Boolean).join(' '));
+  }
 });

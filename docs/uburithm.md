@@ -1,6 +1,6 @@
 # The uburithm
 
-Owner-approved naming algorithm update on 2026-10-25 (America/New_York). ubu.js implements this permanent naming algorithm. Optimizations must preserve seed-to-name outputs and draw consumption.
+Owner-approved naming algorithm update on 2026-10-25 (America/New_York). ubu.js implements this permanent naming algorithm. The owner approved independent surrounding-word visibility rolls on 2026-10-28. Optimizations must preserve the updated outputs and draw consumption.
 
 ## Source review
 
@@ -8,7 +8,7 @@ Reviewed the supplied standalone generator and uburoom's web/ubumfa.js. The rele
 
 ## Fixed naming rules
 
-- Six-letter nomen, plus six letters split across praenomen/cognomen; two or three nonempty words total.
+- Generate a six-letter nomen, plus six letters split across praenomen/cognomen using the original procedure below. After generating every word, independently show each surrounding slot with probability 1/2. Hidden words are omitted, never redistributed; an originally empty slot remains empty. Names contain one to three visible words.
 - Generate nomen first. Select extra length from [2, 3, 4, 6], generate that word, select before/after orientation, then generate an opposite word of length 6 minus extra length unless that length is zero.
 - Title-case the generated ASCII words, retaining named slots even when a surrounding slot is empty. Join nonempty slots with one ASCII space.
 - Ordinary vowels, in order: AEIOU.
@@ -41,7 +41,7 @@ Within each word:
 4. Draw CC pairs from left to right.
 5. Draw remaining consonants from left to right.
 
-Between words, retain the reference order: nomen, extra length, extra word, orientation, opposite word. Do not collapse two pattern draws into one, move orientation ahead of word generation, or add a retry without recognizing that this changes the seed-to-name mapping.
+Between words, retain the reference order: nomen, extra length, extra word, orientation, opposite word. Then always consume two more stream draws, first praenomen visibility and then cognomen visibility; each shows its slot only when the draw is below 0.5, even when that slot was originally empty. Do not collapse two pattern draws into one, move orientation ahead of word generation, or add a retry without recognizing that this changes the seed-to-name mapping.
 
 ## Efficiency review
 
@@ -63,4 +63,4 @@ Names are short, so these are structural simplifications, not measured performan
 
 ## Compatibility
 
-The exact stream, raw initial state and draw schedule are permanent. Text seeds hash through SHA-512 into complete DNA before naming. Run `node --test ubu.test.js`; fixed expected outputs must not be rewritten to approve a changed mapping.
+The exact stream, raw initial state and draw schedule are permanent. Text seeds hash through SHA-512 into complete DNA before naming. Run `node --test ubu.test.js`; original word vectors remain unchanged to verify spelling preservation; visibility is verified separately. The visibility update applies to all existing DNA without changing DNA or certificates.

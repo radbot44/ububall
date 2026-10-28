@@ -108,3 +108,5 @@ If upload or verification fails after reset is prepared, rerun `deploy.ps1` **wi
 `wrangler.jsonc` has no account, domain route or production identity, disables workers.dev/preview URLs, and preserves dashboard variables. Production deployments use the generated config described above. Deployment requires owner authorization; running tests never deploys.
 
 Official references: [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/), [Durable Object SQLite](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), [alarms](https://developers.cloudflare.com/durable-objects/api/alarms/), [Discord OAuth2](https://docs.discord.com/developers/topics/oauth2).
+
+The 2026-10-28 name visibility update adds a singleton `rarity_revision` table and invalidates existing issued rarity sort keys once, transactionally. The existing bounded alarm backfill refreshes them; reopening does not invalidate them again. Certificates, favorites, DNA, offers and assembled inventory remain intact. Subsequent pack assembly uses the new rarity categories.

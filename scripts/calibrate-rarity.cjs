@@ -10,7 +10,7 @@ const STEPS = 1000;
 
 console.log(`Calibrating rarity distribution from ${SAMPLE_SIZE} samples...`);
 const scores = new Float64Array(SAMPLE_SIZE);
-const buf = new Uint8Array(64);
+const buf = new Uint8Array(128);
 
 for (let i = 0; i < SAMPLE_SIZE; i++) {
   crypto.getRandomValues(buf);

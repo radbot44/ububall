@@ -323,3 +323,14 @@ test('notch curvature contributes only when the notch appears', () => {
   const inactive = { ...base, mouth: { ...base.mouth, notchCurved: true } };
   assert.equal(rarity.scoreRarity(inactive).bits, rarity.scoreRarity(base).bits);
 });
+
+test('name rarity groups short surrounding words and ignores placement', () => {
+  const base = ubu.decode(new Uint8Array(128));
+  for (const [pre, post, probability] of [
+    ['', '', 5/16], ['Ab', '', 3/8], ['', 'Abc', 3/8], ['Abcd', '', 3/8],
+    ['Abcdef', '', 1/8], ['', 'Abcdef', 1/8], ['Ab', 'Abcd', 3/16], ['Abc', 'Def', 3/16]
+  ]) {
+    const model = { ...base, parts: { nomen: 'Abcdef', praenomen: pre, cognomen: post } };
+    closeTo(rarity.scoreRarity(model).breakdown.name, -Math.log2(probability), 'joint name probability');
+  }
+});
