@@ -11,6 +11,9 @@
     const sheet = document.createElement('canvas');
     sheet.width = 1200; sheet.height = 720;
     const sheetCtx = sheet.getContext('2d');
+    const fanCanvas = document.createElement('canvas');
+    fanCanvas.width = 1200; fanCanvas.height = 720;
+    const fanCtx = fanCanvas.getContext('2d');
     const plasticPrint = document.createElement('canvas');
     plasticPrint.width = 440; plasticPrint.height = 768;
     const plasticPrintCtx = plasticPrint.getContext('2d');
@@ -773,66 +776,66 @@
       requestPaint();
     }
 
-    function candy(x, y, hex, angle, R = 104) {
-      ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
+    function candy(x, y, hex, angle, R = 104, targetCtx = ctx) {
+      targetCtx.save(); targetCtx.translate(x, y); targetCtx.rotate(angle);
 
       // Natural ubu token drop shadow
-      ctx.shadowColor = '#00000055';
-      ctx.shadowBlur = Math.round(9 * (R / 176));
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = Math.round(8 * (R / 176));
-      ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fillStyle = hex; ctx.fill();
-      ctx.shadowColor = 'transparent';
+      targetCtx.shadowColor = '#00000055';
+      targetCtx.shadowBlur = Math.round(9 * (R / 176));
+      targetCtx.shadowOffsetX = 0;
+      targetCtx.shadowOffsetY = Math.round(8 * (R / 176));
+      targetCtx.beginPath(); targetCtx.arc(0, 0, R, 0, Math.PI * 2); targetCtx.fillStyle = hex; targetCtx.fill();
+      targetCtx.shadowColor = 'transparent';
 
       // Keep the front flat; surface texture and face detail are clipped to the token circle.
-      ctx.save();
-      ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.clip();
+      targetCtx.save();
+      targetCtx.beginPath(); targetCtx.arc(0, 0, R, 0, Math.PI * 2); targetCtx.clip();
 
       // Subtle directional diffuse light field matching ubu-render matte
-      const diffuse = ctx.createLinearGradient(-R, -R, R, R);
+      const diffuse = targetCtx.createLinearGradient(-R, -R, R, R);
       diffuse.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
       diffuse.addColorStop(0.5, 'rgba(255, 255, 255, 0.02)');
       diffuse.addColorStop(1, 'rgba(0, 0, 0, 0.07)');
-      ctx.fillStyle = diffuse;
-      ctx.fillRect(-R, -R, R * 2, R * 2);
+      targetCtx.fillStyle = diffuse;
+      targetCtx.fillRect(-R, -R, R * 2, R * 2);
 
       // Fine matte surface grain
       if (grainPattern) {
-        ctx.fillStyle = grainPattern;
-        ctx.fillRect(-R, -R, R * 2, R * 2);
+        targetCtx.fillStyle = grainPattern;
+        targetCtx.fillRect(-R, -R, R * 2, R * 2);
       }
 
       // Brand placeholder oomark face
       if (mark.complete && mark.naturalWidth) {
         const faceSize = R * (136 / 104);
-        ctx.drawImage(mark, -faceSize / 2, -faceSize / 2, faceSize, faceSize);
+        targetCtx.drawImage(mark, -faceSize / 2, -faceSize / 2, faceSize, faceSize);
       }
 
       // Narrow perimeter rolled edge overlay (94% to 100% of radius)
       const ox = R * (-2 / 176), oy = R * (-4 / 176), edgeR = R * (180 / 176);
-      const edge = ctx.createRadialGradient(ox, oy, 0, ox, oy, edgeR);
+      const edge = targetCtx.createRadialGradient(ox, oy, 0, ox, oy, edgeR);
       edge.addColorStop(0, 'rgba(0, 0, 0, 0)');
       edge.addColorStop(0.94, 'rgba(0, 0, 0, 0)');
       edge.addColorStop(0.98, 'rgba(0, 0, 0, 0.13)');
       edge.addColorStop(1, 'rgba(0, 0, 0, 0.32)');
-      ctx.fillStyle = edge;
-      ctx.fillRect(-R, -R, R * 2, R * 2);
+      targetCtx.fillStyle = edge;
+      targetCtx.fillRect(-R, -R, R * 2, R * 2);
 
-      ctx.restore();
+      targetCtx.restore();
 
       // Token rim stroke
-      const rim = ctx.createLinearGradient(-R, -R, R, R);
+      const rim = targetCtx.createLinearGradient(-R, -R, R, R);
       rim.addColorStop(0, 'rgba(255, 255, 255, 0.44)');
       rim.addColorStop(0.4, 'rgba(255, 255, 255, 0.07)');
       rim.addColorStop(0.65, 'rgba(0, 0, 0, 0.06)');
       rim.addColorStop(1, 'rgba(0, 0, 0, 0.28)');
-      ctx.strokeStyle = rim;
-      ctx.lineWidth = Math.max(1, R * (3 / 176));
-      ctx.beginPath();
-      ctx.arc(0, 0, R * (174.5 / 176), 0, Math.PI * 2);
-      ctx.stroke();
+      targetCtx.strokeStyle = rim;
+      targetCtx.lineWidth = Math.max(1, R * (3 / 176));
+      targetCtx.beginPath();
+      targetCtx.arc(0, 0, R * (174.5 / 176), 0, Math.PI * 2);
+      targetCtx.stroke();
 
-      ctx.restore();
+      targetCtx.restore();
     }
 
     function paint(now) {
@@ -852,13 +855,21 @@
       if (currentType?.id !== 'blob' && progress > revealStart) {
         const reveal = ease(revealStart, revealStart + .14, progress);
         const fan = ease(.36, .78, progress);
-        ctx.save(); ctx.globalAlpha = reveal * (1 - ease(.96, 1, progress));
-        const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => Math.abs(b - (count - 1) / 2) - Math.abs(a - (count - 1) / 2));
-        for (const i of order) {
-          const slot = i - (count - 1) / 2;
-          candy(slot * 88 * fan, -26 * fan + Math.abs(slot) * 14 * fan, candyColors[i % 5], slot * .10 * fan);
+        const alpha = reveal * (1 - ease(.96, 1, progress));
+        if (alpha > 0.001) {
+          fanCtx.resetTransform();
+          fanCtx.clearRect(0, 0, fanCanvas.width, fanCanvas.height);
+          fanCtx.setTransform(2, 0, 0, 2, 600, 360);
+          const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => Math.abs(b - (count - 1) / 2) - Math.abs(a - (count - 1) / 2));
+          for (const i of order) {
+            const slot = i - (count - 1) / 2;
+            candy(slot * 88 * fan, -26 * fan + Math.abs(slot) * 14 * fan, candyColors[i % 5], slot * .10 * fan, 104, fanCtx);
+          }
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.drawImage(fanCanvas, -300, -180, 600, 360);
+          ctx.restore();
         }
-        ctx.restore();
       }
       if (progress < (currentType?.id === 'blob' ? 1 : .96) && currentType) {
         ctx.save();
