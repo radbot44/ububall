@@ -13,7 +13,25 @@
     // One global material field: every detail rotates about the outer-circle center.
     const pattern = svgNode('pattern', { id, patternUnits: 'userSpaceOnUse', x: cx - 360, y: cy - 360,
       width: 720, height: 720, viewBox: '-180 -180 720 720', patternTransform: rotate });
-    const cover = fill => pattern.append(svgNode('rect', { x: -180, y: -180, width: 720, height: 720, fill }));
+    const lightLayers = [];
+    const cover = fill => { const rect = svgNode('rect', { x: -180, y: -180, width: 720, height: 720, fill }); pattern.append(rect); return rect; };
+    const rgb = (attribute.hex || '#808080').slice(1).match(/../g).map(v => parseInt(v, 16));
+    const dark = (rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722) / 255 < .25;
+    function animate(effect) { if (effects) (effects.idle ||= []).push(effect); }
+    function sparkle(points, strength = 1) {
+      const groups = Array.from({ length: 6 }, () => svgNode('g', { fill: '#fff', opacity: .3, 'data-sparkle': '' }));
+      points.forEach(([x, y, r], i) => {
+        groups[i % 6].append(svgNode('path', { d: `M${x-r} ${y}l${r*.8} ${-r*.2}l${r*.2} ${-r}l${r*.2} ${r}l${r*.8} ${r*.2}l${-r*.8} ${r*.2}l${-r*.2} ${r}l${-r*.2} ${-r}Z` }));
+      });
+      pattern.append(...groups);
+      animate((x, y, time) => groups.forEach((g, i) => {
+        const twinkle = Math.max(0, Math.sin(time * (.65 + i * .09) + i * 2.1)) ** 12;
+        const glint = Math.max(0, Math.sin(x * 3 + y * 2 + i * 1.7)) ** 18;
+        g.setAttribute('opacity', Math.min(1, .12 + strength * (.72 * twinkle + .55 * glint)));
+      }));
+      return groups;
+    }
+
     function lighting(name, stops, radial = false, attrs = {}) {
       const key = id + '-' + name;
       const gradient = svgNode(radial ? 'radialGradient' : 'linearGradient', {
@@ -32,7 +50,7 @@
         });
       }
       defs.append(gradient);
-      cover(`url(#${key})`);
+      lightLayers.push(cover(`url(#${key})`));
     }
     // Fixed procedural detail never consumes DNA or the naming stream.
     let state = 173;
@@ -89,21 +107,26 @@
         [.43, '#fff', .32], [.51, '#fff', .12], [.66, '#fff', 0], [1, '#fff', 0]]);
     } else if (attribute.texture === 'marble') {
       lighting('stone-depth', [[0, '#fff', .24], [.5, '#fff', .04], [1, '#000', .18]], true);
-      for (let vein = 0; vein < 11; vein++) {
+      const cloud = svgNode('filter', { id: id + '-mineral', x: '-10%', y: '-10%', width: '120%', height: '120%' });
+      cloud.append(svgNode('feTurbulence', { type: 'fractalNoise', baseFrequency: '.012 .025', numOctaves: 3, seed: 41 }),
+        svgNode('feColorMatrix', { type: 'saturate', values: 0 }));
+      defs.append(cloud);
+      pattern.append(svgNode('rect', { x: -180, y: -180, width: 720, height: 720, filter: `url(#${id}-mineral)`, opacity: .22 }));
+      for (let vein = 0; vein < 17; vein++) {
         let x = -230 + vein * 80, d = `M${x} -180`;
         const points = [];
         for (let y = -120; y <= 540; y += 60) {
-          const next = x + (roll() - .38) * 95;
+          const next = x + (roll() - .48) * 140;
           d += `C${x + 28} ${y - 40} ${next - 24} ${y - 20} ${next} ${y}`;
           points.push([next, y]); x = next;
         }
-        for (const [width, color, opacity] of [[9, '#fff', .09], [2.3, '#000', .24], [.65, '#fff', .35]]) {
+        for (const [width, color, opacity] of [[6 + roll()*9, '#fff', .055], [1 + roll()*2.2, dark ? '#adb3b9' : '#000', .18], [.35, '#fff', .15]]) {
           pattern.append(svgNode('path', { d, fill: 'none', stroke: color, 'stroke-width': width, opacity }));
         }
         for (let i = 1; i < points.length; i += 3) {
           const [px, py] = points[i], direction = roll() < .5 ? -1 : 1;
           pattern.append(svgNode('path', { d: `M${px} ${py}q${direction * 35} -18 ${direction * 52} -52t${direction * 48} -65`,
-            fill: 'none', stroke: '#000', 'stroke-width': .7, opacity: .18 }));
+            fill: 'none', stroke: dark ? '#b3b6bb' : '#000', 'stroke-width': .35 + roll()*.65, opacity: .18 }));
         }
       }
       lighting('stone-polish', [[0, '#fff', .25], [.35, '#fff', .08], [1, '#fff', 0]], true,
@@ -115,20 +138,22 @@
       lighting('lacquer-bounce', [[0, '#fff', 0], [.68, '#fff', 0], [.77, '#fff', .18],
         [.81, '#fff', .3], [.83, '#fff', 0], [1, '#fff', 0]]);
     } else if (attribute.texture === 'velvet') {
-      // Continuous fine nap: no tiled fiber boundaries, directional bands or specular sheen.
+      // Fine low-contrast nap with broad brushed patches, never glittering noise.
+      lighting('nap-brush', [[0,'#fff',.045],[.4,'#fff',.09],[.7,'#000',.035],[1,'#fff',.02]], true,
+        { cx: 80, cy: 160, r: 310, gradientTransform: 'scale(1 .8)' });
       lighting('velvet-diffuse', [[0, '#000', .08], [.5, '#000', .13], [1, '#000', .22]], true);
       const nap = svgNode('filter', { id: id + '-nap', filterUnits: 'userSpaceOnUse',
         x: -180, y: -180, width: 720, height: 720, 'color-interpolation-filters': 'sRGB' });
-      nap.append(svgNode('feTurbulence', { type: 'fractalNoise', baseFrequency: .36, numOctaves: 3, seed: 173 }),
+      nap.append(svgNode('feTurbulence', { type: 'fractalNoise', baseFrequency: '.65 .85', numOctaves: 2, seed: 173 }),
         svgNode('feColorMatrix', { type: 'saturate', values: 0 }));
       const napContrast = svgNode('feComponentTransfer');
       for (const channel of ['R', 'G', 'B']) napContrast.append(svgNode('feFunc' + channel,
-        { type: 'linear', slope: 2.4, intercept: -.7 }));
+        { type: 'linear', slope: .8, intercept: .12 }));
       napContrast.append(svgNode('feFuncA', { type: 'linear', slope: 0, intercept: 1 }));
       nap.append(napContrast);
       defs.append(nap);
       pattern.append(svgNode('rect', { x: -180, y: -180, width: 720, height: 720,
-        filter: `url(#${id}-nap)`, opacity: .26 }));
+        filter: `url(#${id}-nap)`, opacity: .14 }));
     } else if (attribute.texture === 'frosted') {
       lighting('ice-body', [[0, '#e3faff', .42], [.45, '#c9e9fa', .2], [1, '#84accb', .1]], true);
       const frost = svgNode('pattern', { id: id + '-frost', patternUnits: 'userSpaceOnUse', width: 120, height: 120 });
@@ -151,8 +176,10 @@
       defs.append(frost); cover(`url(#${id}-frost)`);
       lighting('ice-glint', [[0, '#fff', 0], [.3, '#fff', .03], [.43, '#defaff', .3],
         [.49, '#fff', .04], [1, '#fff', 0]]);
+      sparkle(Array.from({length: 85}, () => [-160+roll()*680, -160+roll()*680, 1+roll()*1.5]), .85);
     } else if (attribute.texture === 'woodgrain') {
       lighting('wood-depth', [[0, '#fff', .2], [.5, '#fff', .02], [1, '#000', .24]], true);
+      if (dark) pattern.append(svgNode('rect', { x:-180,y:-180,width:720,height:720,fill:'#b7a897',opacity:.075 }));
       // Long fibers bend around a fixed knot; the palette color remains the stain.
       for (let fiber = -28; fiber <= 100; fiber++) {
         const baseX = fiber * 6 + roll() * 3;
@@ -163,11 +190,11 @@
           const x = baseX + bend + 3 * Math.sin(y / 65 + fiber * .16) + 1.2 * Math.sin(y / 19 + fiber);
           d += `${y === -180 ? 'M' : 'L'}${x.toFixed(2)} ${y}`;
         }
-        pattern.append(svgNode('path', { d, fill: 'none', stroke: fiber % 4 ? '#000' : '#fff',
-          'stroke-width': .5 + roll() * 1.4, opacity: .1 + roll() * .17 }));
+        pattern.append(svgNode('path', { d, fill: 'none', stroke: fiber % 4 ? (dark ? '#a69a8b' : '#000') : (dark ? '#000' : '#fff'),
+          'stroke-width': .5 + roll() * 1.4, opacity: (dark ? .055 : .1) + roll() * (dark ? .09 : .17) }));
       }
       for (let ring = 1; ring <= 5; ring++) pattern.append(svgNode('ellipse', {
-        cx: 140, cy: 180, rx: ring * 3, ry: ring * 9, fill: 'none', stroke: '#000',
+        cx: 140, cy: 180, rx: ring * 3, ry: ring * 9, fill: 'none', stroke: dark ? '#a69a8b' : '#000',
         'stroke-width': .7, opacity: .23 - ring * .02 }));
       lighting('wood-satin', [[0, '#fff', 0], [.35, '#fff', .12], [.6, '#fff', .04], [1, '#fff', 0]]);
     } else if (attribute.texture === 'holographic') {
@@ -223,23 +250,25 @@
         const rough = [];
         for (let i = 0; i < cell.length; i++) {
           const a = cell[i], b = cell[(i + 1) % cell.length];
-          const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2));
+          const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 3));
           for (let j = 0; j < steps; j++) {
             const x = a[0] + (b[0] - a[0]) * j / steps, y = a[1] + (b[1] - a[1]) * j / steps;
             rough.push([x + 3.5 * Math.sin(y / 7 + x / 19) + .9 * Math.sin(y * 1.7 + x),
               y + 3.5 * Math.sin(x / 8 - y / 23) + .9 * Math.sin(x * 1.5 - y)]);
           }
         }
-        const d = 'M' + rough.map(p => p.join(',')).join('L') + 'Z';
+        const d = 'M' + rough.map(p => p.map(v => v.toFixed(2)).join(',')).join('L') + 'Z';
         pattern.append(svgNode('path', { d, fill: '#fff', 'fill-opacity': roll() * .07,
           stroke: '#fff', 'stroke-opacity': .2, 'stroke-width': 2.5, 'stroke-linejoin': 'round' }),
           svgNode('path', { d, fill: 'none', stroke: '#000', 'stroke-opacity': .48,
             'stroke-width': 1.15, 'stroke-linejoin': 'round' }));
+        const chips = ['', ''];
         for (let i = 2; i < rough.length; i += 5) {
           const [x, y] = rough[i], r = .5 + roll() * 1.8;
-          pattern.append(svgNode('path', { d: `M${x-2} ${y}l${r} ${-r}l${r*.7} ${r*1.4}Z`,
-            fill: i % 3 ? '#000' : '#fff', opacity: .15 + roll() * .2 }));
+          chips[i % 3 ? 0 : 1] += `M${(x-2).toFixed(2)} ${y.toFixed(2)}l${r.toFixed(2)} ${(-r).toFixed(2)}l${(r*.7).toFixed(2)} ${(r*1.4).toFixed(2)}Z`;
+          roll();
         }
+        chips.forEach((d,i) => pattern.append(svgNode('path', { d, fill:i?'#fff':'#000', opacity:.25 })));
       }
       lighting('glaze-sheen', [[0, '#fff', 0], [.3, '#fff', .04], [.42, '#fff', .25],
         [.55, '#fff', .02], [1, '#fff', 0]]);
@@ -364,9 +393,9 @@
     } else if (attribute.texture === 'sandstone') {
       // Broad continuous strata share their curvature; fine grain supplies the surface.
       for (let band=-6;band<27;band++) {
-        const y = band*26;
+        const y = band*26 + Math.sin(band*1.7)*9;
         const d = `M-180 ${y}C60 ${y-60} 300 ${y+60} 540 ${y}L540 ${y+26}C300 ${y+86} 60 ${y-34} -180 ${y+26}Z`;
-        pattern.append(svgNode('path', { d, fill: band%3 ? '#000' : '#fff', opacity: .008+roll()*.018 }));
+        pattern.append(svgNode('path', { d, fill: band%3 ? '#000' : '#fff', opacity: .035+roll()*.075 }));
       }
       const sand = svgNode('pattern', { id: id+'-sand', patternUnits: 'userSpaceOnUse', width: 96, height: 96 });
       const grains = ['', '', '', ''];
@@ -378,60 +407,51 @@
       defs.append(sand); cover(`url(#${id}-sand)`);
       lighting('sandstone-depth', [[0, '#fff', .06], [.5, '#fff', 0], [1, '#000', .1]], true);
     } else if (attribute.texture === 'starfield') {
-      lighting('starfield-space', [[0, '#000', .15], [.5, '#05031a', .45], [1, '#000', .7]], true);
-      // Nebula dust clouds
-      const nebulaColors = ['#4ef0ff', '#e056fd', '#8c52ff', '#ffdf78', '#638cff'];
-      for (let n = 0; n < 14; n++) {
-        const color = nebulaColors[n % nebulaColors.length];
-        lighting('starfield-nebula-' + n, [[0, color, .32], [.45, color, .14], [1, color, 0]], true,
-          { cx: -50 + roll() * 460, cy: -50 + roll() * 460, r: 40 + roll() * 85 });
+      lighting('starfield-space', [[0,'#040516',.35],[.6,'#030513',.6],[1,'#000',.8]], true);
+      const far=svgNode('g'), near=svgNode('g'), stars=svgNode('g');
+      const colors=['#526cbf','#b15add','#408ba8','#d28a9d'];
+      for(let i=0;i<22;i++) {
+        const x=-150+roll()*650,y=-150+roll()*650,r=45+roll()*120;
+        const grad=svgNode('radialGradient',{id:id+'-nebula-'+i});
+        for(const [offset,opacity] of [[0,.5],[.35,.23],[1,0]])grad.append(svgNode('stop',{offset,'stop-color':colors[i%4],'stop-opacity':opacity}));
+        defs.append(grad);far.append(svgNode('ellipse',{cx:x,cy:y,rx:r,ry:r*(.35+roll()*.5),transform:`rotate(${roll()*180} ${x} ${y})`,fill:`url(#${id}-nebula-${i})`}));
       }
-      const halo=svgNode('radialGradient',{id:id+'-star-halo'});
-      halo.append(svgNode('stop',{offset:0,'stop-color':'#dce8ff','stop-opacity':.45}),svgNode('stop',{offset:1,'stop-color':'#dce8ff','stop-opacity':0}));
-      defs.append(halo);
-      // Pinprick stars and sparkle diffraction spikes
-      for (let s = 0; s < 140; s++) {
-        const sx = -180 + roll() * 720, sy = -180 + roll() * 720;
-        const r = 0.4 + roll() * 1.2;
-        pattern.append(svgNode('circle', {
-          cx: sx.toFixed(1), cy: sy.toFixed(1), r: r.toFixed(2),
-          fill: s % 5 ? '#ffffff' : '#cce7ff',
-          opacity: 0.25 + roll() * 0.72
-        }));
-        if (r > 1.45) {
-          pattern.append(svgNode('circle',{cx:sx,cy:sy,r:r*3,fill:`url(#${id}-star-halo)`}));
-          const spike = 2.5 + roll() * 4;
-          pattern.append(svgNode('path', {
-            d: `M${(sx - spike).toFixed(1)} ${sy.toFixed(1)}h${(spike * 2).toFixed(1)}M${sx.toFixed(1)} ${(sy - spike).toFixed(1)}v${(spike * 2).toFixed(1)}`,
-            stroke: '#ffffff', 'stroke-width': 0.55, opacity: 0.35 + roll() * 0.25
-          }));
-        }
+      const dust=svgNode('radialGradient',{id:id+'-depth-dust'});
+      for(const [offset,opacity] of [[0,.8],[.45,.38],[1,0]])dust.append(svgNode('stop',{offset,'stop-color':'#030511','stop-opacity':opacity}));
+      defs.append(dust);
+      for(let i=0;i<12;i++)near.append(svgNode('ellipse',{cx:-150+roll()*650,cy:-150+roll()*650,rx:80+roll()*100,ry:16+roll()*35,transform:'rotate(-28 180 180)',fill:`url(#${id}-depth-dust)`}));
+      const glints=[];
+      for(let i=0;i<220;i++) {
+        const x=-160+roll()*680,y=-160+roll()*680,r=.15+roll()**3*1.1;
+        stars.append(svgNode('circle',{cx:x,cy:y,r,fill:i%4?'#f4f7ff':'#aacbff',opacity:.2+roll()*.65}));
+        if(r>.65)glints.push([x,y,r*3]);
       }
-      const veil=svgNode('radialGradient',{id:id+'-dust-veil'});
-      veil.append(svgNode('stop',{offset:0,'stop-color':'#050513','stop-opacity':.12}),svgNode('stop',{offset:1,'stop-color':'#050513','stop-opacity':0}));
-      defs.append(veil);
-      for(let i=0;i<6;i++) {
-        const x=-80+i*100,y=100+Math.sin(i*1.7)*140;
-        pattern.append(svgNode('ellipse',{cx:x,cy:y,rx:120,ry:20+i*3,transform:`rotate(${-25+i*9} ${x} ${y})`,fill:`url(#${id}-dust-veil)`}));
-      }
-      const dust=svgNode('pattern',{id:id+'-space-dust',patternUnits:'userSpaceOnUse',width:144,height:144});
-      let specks='';
-      for(let i=0;i<150;i++) {
-        const x=roll()*144,y=roll()*144,r=.15+roll()*.28;
-        specks+=`M${x} ${y}h${r}v${r}h-${r}Z`;
-      }
-      dust.append(svgNode('path',{d:specks,fill:'#dce6ff',opacity:.35}));
-      defs.append(dust);cover(`url(#${id}-space-dust)`);
+      const wisps=svgNode('filter',{id:id+'-wisps',x:'-10%',y:'-10%',width:'120%',height:'120%','color-interpolation-filters':'sRGB'});
+      wisps.append(svgNode('feTurbulence',{type:'fractalNoise',baseFrequency:'.012 .023',numOctaves:3,seed:67,result:'clouds'}),
+        svgNode('feColorMatrix',{in:'clouds',type:'matrix',values:'0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 2 -.45',result:'density'}),
+        svgNode('feComposite',{in:'SourceGraphic',in2:'density',operator:'in'}));
+      defs.append(wisps);far.setAttribute('filter',`url(#${id}-wisps)`);
+      pattern.append(far,near,stars);const starSparkles=sparkle(glints,1.1);
+      if(effects)effects.push((x,y)=>{
+        // Foreground dust moves most; the distant nebula remains almost fixed.
+        far.setAttribute('transform',`translate(${-x*3} ${-y*3})`);
+        near.setAttribute('transform',`translate(${-x*22} ${-y*22})`);
+        stars.setAttribute('transform',`translate(${-x*8} ${-y*8})`);
+        for (const group of starSparkles) group.setAttribute('transform',`translate(${-x*8} ${-y*8})`);
+      });
     } else if (attribute.texture === 'quartz') {
       lighting('quartz-body', [[0,'#fff',.16],[.5,'#fff',.02],[1,'#000',.18]],true);
       const crystal=svgNode('linearGradient',{id:id+'-crystal',x1:'0%',y1:'0%',x2:'100%',y2:'25%'});
       for(const [offset,color,opacity] of [[0,'#fff',.32],[.24,'#fff',.04],[.55,'#000',.12],[.8,'#fff',.24],[1,'#fff',.06]])
         crystal.append(svgNode('stop',{offset,'stop-color':color,'stop-opacity':opacity}));
       defs.append(crystal);
+      const crystalTips = [];
       // Unequal overlapping prisms, with long faces and pointed terminations.
       for(let i=0;i<85;i++) {
         const x=-160+roll()*680,y=-160+roll()*680,w=10+roll()*20,h=32+roll()*85;
-        const group=svgNode('g',{transform:`translate(${x} ${y}) rotate(${-45+roll()*90})`});
+        const angle=-45+roll()*90;
+        const group=svgNode('g',{transform:`translate(${x} ${y}) rotate(${angle})`});
+        crystalTips.push([x+h*Math.sin(angle*Math.PI/180), y-h*Math.cos(angle*Math.PI/180), 1.4+roll()*1.7]);
         group.append(svgNode('path',{d:`M0 ${-h}L${w} ${-h+w}V${h*.45}L0 ${h*.65}L${-w} ${h*.45}V${-h+w}Z`,fill:`url(#${id}-crystal)`}));
         group.append(svgNode('path',{d:`M0 ${-h}L${w*.2} ${-h+w*1.5}V${h*.6}L${-w} ${h*.45}V${-h+w}Z`,fill:'#fff',opacity:.08+roll()*.13}));
         group.append(svgNode('path',{d:`M0 ${-h}L${w*.2} ${-h+w*1.5}L${w} ${-h+w}Z`,fill:'#fff',opacity:.22+roll()*.2}));
@@ -440,6 +460,7 @@
         group.append(svgNode('path',{d:`M${-w*.8} ${fracture}l${w*.9} ${-w*.3}l${w*.7} ${w*.5}`,fill:'none',stroke:'#fff','stroke-width':.5,opacity:.12}));
         pattern.append(group);
       }
+      sparkle(crystalTips);
       lighting('quartz-glint',[[0,'#fff',0],[.3,'#fff',.02],[.45,'#e8faff',.2],[.6,'#fff',.02],[1,'#fff',0]]);
     } else if (attribute.texture === 'obsidian') {
       lighting('obsidian-glass', [[0, '#fff', .08], [.35, '#000', .12], [1, '#000', .55]], true);
@@ -482,18 +503,16 @@
       const dentStops = [[0,'#fff',.04],[.2,'#000',.16],[.5,'#000',.025],[.8,'#fff',.15],[1,'#fff',.025]];
       for (const [offset,color,opacity] of dentStops) dent.append(svgNode('stop', { offset, 'stop-color':color, 'stop-opacity':opacity }));
       defs.append(dent);
-      if (effects) effects.push((x,y) => {
-        dent.setAttribute('x1', `${10+x*25}%`); dent.setAttribute('y1', `${y*25}%`);
-        dent.setAttribute('x2', `${85-x*20}%`); dent.setAttribute('y2', `${100-y*20}%`);
-      });
-      const grid = Array.from({length:48}, (_,y) => Array.from({length:48}, (_,x) => [-192+x*16+(roll()-.5)*13,-192+y*16+(roll()-.5)*13]));
-      for (let y=0;y<47;y++) for (let x=0;x<47;x++) {
+      const tile=svgNode('pattern',{id:id+'-dents',patternUnits:'userSpaceOnUse',width:160,height:160});
+      const grid = Array.from({length:13}, (_,y) => Array.from({length:13}, (_,x) => [-16+x*16+(roll()-.5)*13,-16+y*16+(roll()-.5)*13]));
+      for (let y=0;y<12;y++) for (let x=0;x<12;x++) {
         const pts=[grid[y][x],grid[y][x+1],grid[y+1][x+1],grid[y+1][x]];
         const mid=pts.map((p,i)=>p.map((v,j)=>(v+pts[(i+1)%4][j])/2));
         let d=`M${mid[3].join(' ')}`;
         for (let i=0;i<4;i++) d+=`Q${pts[i].join(' ')} ${mid[i].join(' ')}`;
-        pattern.append(svgNode('path', { d:d+'Z', fill:`url(#${id}-dent)` }));
+        tile.append(svgNode('path', { d:d+'Z', fill:`url(#${id}-dent)` }));
       }
+      defs.append(tile); cover(`url(#${id}-dents)`);
     } else if (attribute.texture === 'kintsugi') {
       lighting('kintsugi-glaze',[[0,'#fff',.12],[.5,'#fff',.02],[1,'#000',.2]],true);
       const gold=svgNode('linearGradient',{id:id+'-gold',gradientUnits:'userSpaceOnUse',x1:0,y1:0,x2:300,y2:220,spreadMethod:'reflect'});
@@ -618,20 +637,23 @@
       const glint=svgNode('radialGradient',{id:id+'-glint'});
       for(const [offset,opacity] of [[0,.8],[.35,.5],[.72,.12],[1,0]]) glint.append(svgNode('stop',{offset,'stop-color':'#fff','stop-opacity':opacity}));
       defs.append(film,glint);
+      const reflection = svgNode('g', { id: id+'-reflection' });
+      reflection.append(svgNode('ellipse', { cx: -.3, cy: -.45, rx: .32, ry: .13, transform:'rotate(-30 -.3 -.45)', fill:`url(#${id}-glint)` }));
+      defs.append(reflection);
+      if (effects) effects.push((x,y) => {
+        reflection.setAttribute('transform', `translate(${x*.28} ${y*.28}) rotate(${x*18-y*12})`);
+        film.setAttribute('cx', `${45+x*15}%`); film.setAttribute('cy', `${42+y*15}%`);
+      });
       const bubbles=[];
       for(let i=0;i<180;i++) {
         const x=-150+roll()*660,y=-150+roll()*660,r=7+roll()**2*40;
         if(bubbles.some(b=>Math.hypot(x-b.x,y-b.y)<(r+b.r)*.83))continue;
         bubbles.push({x,y,r});
         pattern.append(svgNode('circle',{cx:x,cy:y,r,fill:`url(#${id}-film)`}));
-        // Soft elongated reflections follow the curvature, without symbolic white arcs.
-        pattern.append(svgNode('ellipse',{cx:x-r*.38,cy:y-r*.56,rx:r*.38,ry:r*.12,
-          transform:`rotate(-35 ${x-r*.38} ${y-r*.56})`,fill:`url(#${id}-glint)`}));
-        pattern.append(svgNode('ellipse',{cx:x+r*.4,cy:y+r*.65,rx:r*.25,ry:r*.055,
-          transform:`rotate(-32 ${x+r*.4} ${y+r*.65})`,fill:`url(#${id}-glint)`,opacity:.35}));
+        pattern.append(svgNode('use', { href: `#${id}-reflection`, transform: `translate(${x} ${y}) scale(${r})`, opacity: .6 }));
       }
     } else if (attribute.texture === 'lava') {
-      lighting('basalt-crust', [[0, '#000', .35], [.5, '#000', .55], [1, '#000', .72]], true);
+      lighting('basalt-crust', [[0, '#000', .08], [.5, '#000', .16], [1, '#000', .25]], true);
       const heat=svgNode('radialGradient',{id:id+'-heat'});
       for(const [offset,color,opacity] of [[0,'#ffd16c',.95],[.25,'#ff9c20',.9],[.5,'#ec3a04',.65],[1,'#b72304',0]])
         heat.append(svgNode('stop',{offset,'stop-color':color,'stop-opacity':opacity}));
@@ -673,7 +695,7 @@
         pattern.append(svgNode('polygon', {
           points: pts,
           fill: '#000000',
-          'fill-opacity': s % 3 ? 0.74 : 0.62,
+          'fill-opacity': s % 3 ? 0.22 : 0.12,
           stroke: '#9e230b', 'stroke-width': 10+roll()*5, 'stroke-opacity': .8,
           'stroke-linejoin': 'round'
         }));
@@ -712,41 +734,25 @@
       dust.forEach((d,i)=>crust.append(svgNode('path',{d,fill:i?'#000':'#b3a09a',opacity:i?.2:.14})));
       defs.append(crust);cover(`url(#${id}-crust)`);
     } else if (attribute.texture === 'circuitry') {
-      lighting('pcb-substrate', [[0,'#fff',.025],[.5,'#000',.08],[1,'#000',.24]], true);
-      const board=svgNode('pattern',{id:id+'-board',patternUnits:'userSpaceOnUse',width:256,height:256});
-      const cyan='#50e8ee';
-      for(let row=0;row<2;row++) for(let col=0;col<2;col++) {
-        const cell=svgNode('g',{transform:`translate(${col*128} ${row*128}) rotate(${(row+col)*90} 64 64)`});
-        // Four dense bus bundles fan out from a processor into the surrounding board.
-        for(let side=0;side<4;side++) {
-          const bus=svgNode('g',{transform:`rotate(${side*90} 64 64)`});
-          for(let pin=0;pin<9;pin++) {
-            const x=48+pin*4, elbow=22+Math.abs(pin-4)*2, end=x+(pin<4?-12:12);
-            const d=`M${x} 43V${elbow}L${end} ${elbow-12}V0`;
-            bus.append(svgNode('path',{d,fill:'none',stroke:'#000','stroke-width':2.4,opacity:.25}));
-            bus.append(svgNode('path',{d,fill:'none',stroke:'#72999b','stroke-width':.85,opacity:.55}));
-            if((pin+side+row)%4===0) {
-              bus.append(svgNode('path',{d,fill:'none',stroke:cyan,'stroke-width':3.5,opacity:.09}),
-                svgNode('path',{d,fill:'none',stroke:cyan,'stroke-width':.95,opacity:.85}));
-            }
-            bus.append(svgNode('rect',{x:x-.9,y:39,width:1.8,height:5,fill:'#a5bdbd',opacity:.8}));
-          }
-          cell.append(bus);
+      lighting('pcb-substrate', [[0,'#fff',.025],[.5,'#000',.04],[1,'#000',.16]], true);
+      const board=svgNode('pattern',{id:id+'-board',patternUnits:'userSpaceOnUse',width:360,height:360});
+      // Irregular component footprints and locally routed buses, with muted metal.
+      for(let row=0;row<7;row++) for(let col=0;col<7;col++) {
+        const x=col*52+5+roll()*10,y=row*52+5+roll()*10,w=9+roll()*14,h=8+roll()*18;
+        const cell=svgNode('g',{transform:`translate(${x} ${y}) rotate(${Math.floor(roll()*4)*90} 18 18)`});
+        for(let pin=0;pin<5;pin++) {
+          const py=3+pin*3.5, run=8+roll()*13, step=4+Math.floor(roll()*4)*3;
+          const d=`M${w} ${py}h${run}l${step} ${step}v${10+roll()*16}`;
+          cell.append(svgNode('path',{d,fill:'none',stroke:'#111513','stroke-width':1.8,opacity:.5}),
+            svgNode('path',{d,fill:'none',stroke:pin%3?'#958b70':'#b7b9ad','stroke-width':.6,opacity:.6}),
+            svgNode('circle',{cx:w+run+step,cy:py+step+10,r:1,fill:'#171b18',stroke:'#a49b80','stroke-width':.5}));
         }
-        const shell='M46 43H82L85 46V82L82 85H46L43 82V46Z';
-        cell.append(svgNode('path',{d:shell,fill:'#111c23',stroke:'#526a74','stroke-width':1}));
-        cell.append(svgNode('rect',{x:49,y:49,width:30,height:30,fill:'#192e38',stroke:cyan,'stroke-width':.65,'stroke-opacity':.7}));
-        // Layered die and short illuminated corners give the processor a cyber accent.
-        cell.append(svgNode('path',{d:'M51 59V51H59M69 51H77V59M77 69V77H69M59 77H51V69',fill:'none',stroke:cyan,'stroke-width':1.4,opacity:.9}));
-        for(let n=0;n<5;n++) cell.append(svgNode('path',{d:`M54 ${55+n*4}h20`,stroke:'#69a3ae','stroke-width':.5,opacity:.28}));
-        cell.append(svgNode('rect',{x:59,y:59,width:10,height:10,fill:cyan,opacity:.13}));
-        // Small heatsink banks occupy the corners between bus bundles.
-        for(const [x,y] of [[5,5],[98,98]]) {
-          cell.append(svgNode('rect',{x,y,width:25,height:25,rx:1,fill:'#142128',stroke:'#455760','stroke-width':.7}));
-          for(let fin=0;fin<6;fin++) cell.append(svgNode('path',{d:`M${x+3} ${y+3+fin*3.6}h19`,stroke:'#809198','stroke-width':1.1,opacity:.55}));
-        }
-        for(const [x,y] of [[102,6],[6,102]]) {
-          for(let n=0;n<4;n++) cell.append(svgNode('rect',{x:x+n*5,y,width:2,height:15,fill:n===1?cyan:'#779293',opacity:n===1?.7:.35}));
+        cell.append(svgNode('rect',{x:0,y:0,width:w,height:h,rx:.8,fill:'#1a1c1c',stroke:'#888b80','stroke-width':.55}));
+        for(let pin=2;pin<h-1;pin+=3)cell.append(svgNode('path',{d:`M-3 ${pin}h3M${w} ${pin}h3`,stroke:'#b1ae99','stroke-width':1.2}));
+        cell.append(svgNode('path',{d:`M2 2h${w-4}`,stroke:'#c7c7b4','stroke-width':.5,opacity:.35}));
+        for(let j=0;j<3;j++) {
+          const px=roll()*35,py=h+5+j*5;
+          cell.append(svgNode('rect',{x:px,y:py,width:4+roll()*4,height:2,fill:j%2?'#777469':'#292c29',stroke:'#c2b9a1','stroke-width':.4}));
         }
         board.append(cell);
       }
@@ -760,8 +766,10 @@
       const tau=Math.PI*2;
       for(let y=0;y<360;y+=2) for(let x=0;x<360;x+=2) {
         let dx=0,dy=0,height=0;
-        for(const [kx,ky,amplitude,phase] of [[5,1,1.2,0],[1,5,1.2,1.3],[4,-4,.9,2.1],[9,3,.35,.6]]) {
-          const wave=tau*(kx*x+ky*y)/360+phase;
+        for(const [kx,ky,amplitude,phase] of [[2,1,1.4,.3],[1,3,.9,1.3],[4,-2,.6,2.1],[9,3,.25,.6],[13,-7,.12,1.8]]) {
+          const wx=x+18*Math.sin(tau*y/180)+9*Math.sin(tau*x/120);
+          const wy=y+24*Math.sin(tau*x/360)+7*Math.cos(tau*y/90);
+          const wave=tau*(kx*wx+ky*wy)/360+phase;
           height+=amplitude*Math.sin(wave);
           const c=amplitude*Math.cos(wave)*tau/360;
           dx+=kx*c;dy+=ky*c;
@@ -777,8 +785,30 @@
       shades.forEach((d,i)=>waterSurface.append(svgNode('path',{d,fill:i<9?'#000':'#fff',opacity:i<9?(9-i)*.025:(i-9)*.035})));
       ripples.append(waterSurface);
       defs.append(ripples);cover(`url(#${id}-ripples)`);
+      animate((x,y,time) => ripples.setAttribute('patternTransform', `translate(${Math.sin(time*.22)*7+x*3} ${Math.cos(time*.17)*9+y*3}) scale(${1+Math.sin(time*.19)*.025} ${1+Math.cos(time*.23)*.025})`));
       lighting('liquid-reflection',[[0,'#fff',.03],[.4,'#fff',.13],[.7,'#fff',.02],[1,'#fff',0]],true);
 
+    }
+    if (['crackle', 'hammered-metal'].includes(attribute.texture)) {
+      const frozen = svgNode('svg', { xmlns: NS, viewBox: '-180 -180 720 720', width:720, height:720 });
+      const localDefs = svgNode('defs');
+      for (const node of defs.children) if ((node.getAttribute('id') || '').startsWith(id+'-')) localDefs.append(node.cloneNode(true));
+      frozen.append(localDefs);
+      for (const node of [...pattern.children]) if (!lightLayers.includes(node)) frozen.append(node);
+      const image = svgNode('image', { x:-180,y:-180,width:720,height:720,
+        href: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(frozen)) });
+      pattern.replaceChildren(image, ...lightLayers);
+      // Rasterize the immutable detail once. A nested vector image alone still
+      // rerasterizes thousands of crack segments during gradient updates.
+      const source = new Image();
+      source.onload = () => {
+        if (!image.isConnected) return;
+        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 720;
+        const context = canvas.getContext('2d');
+        context.drawImage(source, 0, 0, 720, 720);
+        image.setAttribute('href', canvas.toDataURL('image/png'));
+      };
+      source.src = image.getAttribute('href');
     }
     defs.append(pattern);
     return `url(#${id})`;
@@ -797,11 +827,12 @@
     return `url(#${id})`;
   }
   function materialEdge(defs, face, shapes, attribute, id, effects, seamContours = shapes) {
-    if (attribute.texture === 'denim') {
+    if (['denim', 'leather', 'plush', 'velvet'].includes(attribute.texture)) {
+      const plush = attribute.texture === 'plush', velvet = attribute.texture === 'velvet', leather = attribute.texture === 'leather';
       // Erode the union, so the joined eyes have no seam through their overlap.
       // Clip dashed boundary strokes to two inset bands; tiny pupils get a hem only.
       const small = shapes.every(shape => Number(shape.getAttribute('r')) > 0 && Number(shape.getAttribute('r')) <= 17);
-      for (const [index, inner, outer] of [[0, 0, 2], ...(!small ? [[1, 3, 4], [2, 6, 7]] : [])]) {
+      for (const [index, inner, outer] of [[0, 0, plush ? 3 : 2], ...(!small && !velvet ? (plush ? [[1, 2, 6]] : leather ? [[1, 3, 4.5]] : [[1, 3, 4], [2, 6, 7]]) : [])]) {
         const key = `${id}-seam-${index}`;
         const filter = svgNode('filter', { id: key, filterUnits: 'userSpaceOnUse', x: 0, y: 0, width: 360, height: 360 });
         filter.append(svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: inner, result: 'outer' }),
@@ -812,14 +843,23 @@
         const union = svgNode('g', { fill: '#fff', filter: `url(#${key})` });
         for (const shape of shapes) union.append(shape.cloneNode(true));
         mask.append(union); defs.append(filter, mask);
-        const seam = svgNode('g', { mask: `url(#${key}-mask)`, opacity: index ? .65 : .2 });
-        if (!index) seam.append(svgNode('rect', { width: 360, height: 360, fill: '#000' }));
+        const seam = svgNode('g', { mask: `url(#${key}-mask)`, opacity: index ? (plush ? .85 : .65) : (velvet || plush ? .12 : .2) });
+        if (!index) {
+          seam.append(svgNode('rect', { width: 360, height: 360, fill: '#000' }));
+          if (velvet || plush) {
+            const fuzz=svgNode('pattern',{id:key+'-fuzz',patternUnits:'userSpaceOnUse',width:8,height:8});
+            fuzz.append(svgNode('path',{d:'M0 1l2 1M4 0l-1 3M7 3l-2 2M1 6l2-1M5 7l2 1',stroke:'#fff','stroke-width':plush?1.2:.65,'stroke-linecap':'round'}));
+            defs.append(fuzz);seam.setAttribute('opacity',.38);
+            seam.append(svgNode('rect',{width:360,height:360,fill:`url(#${key}-fuzz)`}));
+          }
+        }
         else for (const shape of seamContours) {
           const stitch = shape.cloneNode(true);
           stitch.setAttribute('fill', 'none');
-          stitch.setAttribute('stroke', '#c6a36d');
+          stitch.setAttribute('stroke', plush ? '#d8caba' : leather ? '#b8a58a' : '#c6a36d');
           stitch.setAttribute('stroke-width', 16);
-          stitch.setAttribute('stroke-dasharray', '3 3');
+          stitch.setAttribute('stroke-dasharray', plush ? '2 5' : leather ? '2.5 2.5' : '3 3');
+          stitch.setAttribute('stroke-linecap', 'round');
           seam.append(stitch);
         }
         face.append(seam);
@@ -974,7 +1014,7 @@
         if (role !== 'background') enamelDivider(defs, face, shapes[role], prefix + '-divider-' + role, metal);
       } else if (designed) {
         const contours = [...shapes[role]];
-        if (role === 'eyes' && attribute.texture === 'denim') {
+        if (role === 'eyes' && ['denim','leather','plush'].includes(attribute.texture)) {
           for (const [cx, cy, eye] of eyePositions) if (eye.planes.length) {
             // The union mask trims these lid contours to the actual eye boundary.
             contours.push(svgNode('polygon', { points: ubu.eyePolygon(eye).map(([x, y]) => `${cx+x},${cy+y}`).join(' ') }));
@@ -1013,7 +1053,7 @@
     }
     defs.append(edge, rim);
     face.append(svgNode('circle', { cx: 180, cy: 180, r: 176, fill: `url(#${edgeId})`, 'pointer-events': 'none' }),
-      svgNode('circle', { cx: 180, cy: 180, r: 174.5, fill: 'none', stroke: `url(#${rimId})`, 'stroke-width': 3, 'pointer-events': 'none' }));
+      svgNode('circle', { cx: 180, cy: 180, r: 174.5, fill: 'none', stroke: `url(#${rimId})`, 'stroke-width': ['velvet','plush'].includes(m.attributes.background.texture) ? 0 : 3, 'pointer-events': 'none' }));
     if (effects) {
       effects.push((x, y) => {
         rim.setAttribute('x1', String(x * .15));
@@ -1027,10 +1067,20 @@
   function attachLighting(svg, effects, surface) {
     stopLighting();
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-    let frame = 0, x = 0, y = 0, targetX = 0, targetY = 0, rect;
+    let frame = 0, x = 0, y = 0, targetX = 0, targetY = 0, rect, lastPaint = 0;
+    const idle = effects.idle || [];
+    function visible() {
+      const dialog = surface.closest('dialog');
+      const bounds = surface.getBoundingClientRect();
+      return bounds.bottom > 0 && bounds.right > 0 && bounds.top < innerHeight && bounds.left < innerWidth && surface.isConnected && !document.hidden && (!dialog || dialog.open) && surface.getClientRects().length > 0;
+    }
     svg.style.filter = 'drop-shadow(0px 8px 9px #0005)';
-    function paint() {
+    function paint(time) {
       frame = 0;
+      if (!visible()) return;
+      if (idle.length && time - lastPaint < 32) { frame = requestAnimationFrame(paint); return; }
+      lastPaint = time;
+      const moving = x !== targetX || y !== targetY;
       x += (targetX - x) * .18; y += (targetY - y) * .18;
       const settled = Math.abs(targetX - x) + Math.abs(targetY - y) < .001;
       if (settled) { x = targetX; y = targetY; }
@@ -1040,10 +1090,11 @@
         surface.style.setProperty('--light-y', `${50 + y * 45}%`);
       }
       svg.style.filter = `drop-shadow(${-x * 9}px ${8 - y * 6}px 9px #0005)`;
-      for (const effect of effects) effect(x, y);
-      if (!settled) frame = requestAnimationFrame(paint);
+      if (moving || reduced.matches) for (const effect of effects) effect(x, y);
+      for (const effect of idle) effect(x, y, reduced.matches ? 0 : time / 1000);
+      if (!settled || (idle.length && !reduced.matches)) frame = requestAnimationFrame(paint);
     }
-    const schedule = () => { if (!frame) frame = requestAnimationFrame(paint); };
+    const schedule = () => { if (!frame && visible()) frame = requestAnimationFrame(paint); };
     function reset() { targetX = targetY = 0; schedule(); }
     function enter() { rect = surface.getBoundingClientRect(); }
     function down(event) {
@@ -1080,12 +1131,26 @@
     surface.addEventListener('pointerleave', leave);
     surface.addEventListener('pointercancel', cancel);
     function preferenceChanged() {
-      if (reduced.matches) { targetX = targetY = x = y = 0; schedule(); }
+      if (reduced.matches) targetX = targetY = x = y = 0;
+      schedule();
     }
+    // One active viewer owns idle animation. Observe dialog/tab visibility,
+    // not changing SVG attributes, and never run a hidden RAF polling loop.
+    const visibility = new MutationObserver(schedule);
+    visibility.observe(document.body, { childList:true, subtree:true, attributes:true, attributeFilter:['open','hidden'] });
+    const intersection = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) schedule();
+      else { cancelAnimationFrame(frame); frame = 0; }
+    });
+    intersection.observe(surface);
+    document.addEventListener('visibilitychange', schedule);
+    queueMicrotask(schedule);
     reduced.addEventListener('change', preferenceChanged);
     window.addEventListener('blur', reset);
     stopLighting = () => {
       cancelAnimationFrame(frame);
+      visibility.disconnect(); intersection.disconnect();
+      document.removeEventListener('visibilitychange', schedule);
       surface.removeEventListener('pointerenter', enter);
       surface.removeEventListener('pointerdown', down);
       surface.removeEventListener('pointermove', move);
