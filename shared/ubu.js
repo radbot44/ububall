@@ -243,11 +243,12 @@
     }
     const mouthRolls = pairRolls(dna, 154), lidRolls = pairRolls(dna, 258);
     const corners = mouthRolls.active;
-    const rawMouth = [178, 188, 198, 208].map(bit => read(dna, bit, 10));
-    const rawEyes = [218, 228].map(bit => read(dna, bit, 10));
+    // Direct array literals avoid callback/iterator allocation overhead on hot decode paths.
+    const rawMouth = [read(dna, 178, 10), read(dna, 188, 10), read(dna, 198, 10), read(dna, 208, 10)];
+    const rawEyes = [read(dna, 218, 10), read(dna, 228, 10)];
     const px = curve(rawEyes[0]), py = curve(rawEyes[1]);
     const flipX = read(dna, 238, 10) === 1023, flipY = read(dna, 248, 10) === 1023;
-    const rawLids = [282, 292, 302, 312].map(bit => read(dna, bit, 10));
+    const rawLids = [read(dna, 282, 10), read(dna, 292, 10), read(dna, 302, 10), read(dna, 312, 10)];
     const angleFlip = read(dna, 322, 10) === 1023, depthFlip = read(dna, 332, 10) === 1023;
     const angles = [curve(rawLids[0]) * 30, curve(rawLids[2]) * 30];
     const depths = [rawLids[1], rawLids[3]].map(v => EYE_TRAVEL * v / 1023);
@@ -282,6 +283,12 @@
       teamwork: read(dna, 522, 6),
       clutch: read(dna, 528, 6)
     };
+    // Indexed loop avoids Array.from closure and iterator allocations during decode.
+    const notes = new Array(8);
+    for (let i = 0; i < 8; i++) {
+      const raw = read(dna, 556 + i * 5, 5);
+      notes[i] = { degree: raw >> 2, duration: raw & 3 };
+    }
     const voice = {
       instrument: read(dna, 534, 4),
       pitch: read(dna, 538, 6),
@@ -289,10 +296,7 @@
       timbreMod: read(dna, 548, 2),
       scale: read(dna, 550, 3),
       tempo: read(dna, 553, 3),
-      notes: Array.from({ length: 8 }, (_, i) => {
-        const raw = read(dna, 556 + i * 5, 5);
-        return { degree: raw >> 2, duration: raw & 3 };
-      }),
+      notes,
       groove: read(dna, 596, 2)
     };
     return {
@@ -361,12 +365,24 @@
     checkDNA(dna);
     return btoa(String.fromCharCode(...dna)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
+  // Validates 171-char base64url DNA and verifies that trailing padding bits are zero
+  // by checking that the 171st character is in [AEIMQUYcgkosw048] (6-bit value ends in 00).
+  // This avoids re-encoding bytes with toCode to verify canonical padding.
+  const CANONICAL_B64_171 = /^[A-Za-z0-9_-]{170}[AEIMQUYcgkosw048]$/;
   function fromCode(text) {
-    if (/^[0-9a-fA-F]{256}$/.test(text)) return Uint8Array.from(text.match(/../g), pair => parseInt(pair, 16));
-    if (!/^[A-Za-z0-9_-]{171}$/.test(text)) throw new Error('Use 171-character base64url DNA or 256 hexadecimal characters.');
-    const bytes = Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/') + '='), ch => ch.charCodeAt(0));
-    if (toCode(bytes) !== text) throw new Error('DNA has noncanonical padding bits.');
-    return bytes;
+    if (CANONICAL_B64_171.test(text)) {
+      const str = atob(text.replace(/-/g, '+').replace(/_/g, '/') + '=');
+      const bytes = new Uint8Array(128);
+      for (let i = 0; i < 128; i++) bytes[i] = str.charCodeAt(i);
+      return bytes;
+    }
+    if (/^[0-9a-fA-F]{256}$/.test(text)) {
+      const bytes = new Uint8Array(128);
+      for (let i = 0; i < 128; i++) bytes[i] = parseInt(text.substring(i * 2, i * 2 + 2), 16);
+      return bytes;
+    }
+    if (/^[A-Za-z0-9_-]{171}$/.test(text)) throw new Error('DNA has noncanonical padding bits.');
+    throw new Error('Use 171-character base64url DNA or 256 hexadecimal characters.');
   }
   const api = { decode, fromText, randomDNA, toCode, fromCode, mouthPath, eyePolygon, grade, curve, statMultiplier, ubunym };
   if (typeof module === 'object' && module.exports) module.exports = api;
