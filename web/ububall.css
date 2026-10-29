@@ -759,3 +759,8 @@ body.stadium-fullscreen-active {
 .spin-layer { position: absolute; inset: 0; contain: strict; overflow: clip; pointer-events: none; z-index: 30; }
 #field-spin { left: 0; top: 0; width: 146px; max-width: calc(100% - 12px); height: 44px; box-sizing: border-box; visibility: hidden; pointer-events: auto; }
 #shot-spin { font-size: 16px; }
+
+.classic-match .super-panel, .classic-match #stadium-super-btn { display: none; }
+.classic-match .stadium-actions .team-launch { grid-column: 1 / -1; }
+#blitz-clock { font-weight: 800; color: var(--primary); font-variant-numeric: tabular-nums; margin-left: 6px; }
+#match-mode { padding: 10px; background: var(--elevated); color: var(--text); border: 1px solid var(--border); border-radius: 8px; }

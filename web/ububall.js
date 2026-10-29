@@ -20,6 +20,14 @@
   let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [], next = '';
   let isPortrait = false;
+  let matchMode = 'standard', scorelessTurns = 0, planDeadline = 0;
+  const classicMode = () => matchMode.includes('classic');
+  const blitzMode = () => matchMode.includes('blitz');
+  function startPlanClock() { planDeadline = performance.now() + (scorelessTurns >= 10 ? 5000 : 10000); }
+  function updateClock() {
+    const clock = $('blitz-clock'); clock.hidden = !blitzMode() || phase !== 'plan';
+    if (!clock.hidden) clock.textContent = Math.max(0, Math.ceil((planDeadline - performance.now()) / 1000)) + 's';
+  }
   let arrowGrab = null;
   let pullBehind = false;
   $('aim-mode').onclick = () => {
@@ -223,7 +231,7 @@
     const oldBodies = bodies;
     const result = P.kickoff();
     result.slice(0, 6).forEach((b, i) => {
-      P.applyStats(b, stats[i]);
+      P.applyStats(b, classicMode() ? normalStats() : stats[i]);
       const entry = teamEntries[i] || practice[i];
       if (entry?.model) {
         b.playerIndex = i;
@@ -239,6 +247,7 @@
           b.meter = oldBodies?.[i]?.meter ?? 0;
           b.stunned = oldBodies?.[i]?.stunned || false;
         }
+        if (classicMode()) { b.meter = 0; b.equippedSuper = null; }
         b.superArm = false;
         b.superActive = null;
       }
@@ -246,7 +255,7 @@
     return result;
   }
   function gainMeter(b, baseAmount) {
-    if (!b || b.team < 0 || b.usedSuperThisTurn) return;
+    if (classicMode() || !b || b.team < 0 || b.usedSuperThisTurn) return;
     const updateBar = body => dirtyMeters.add(body);
     const playerIdx = b.playerIndex;
     const eff = stats[playerIdx]?.efficiency ?? 127;
@@ -278,6 +287,7 @@
   }
   function say(message) { $('game-status').textContent = message; }
   function resetPlans() {
+    startPlanClock();
     plans = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0 }));
     cpu = P.cpuPlans(bodies, Math.random, scores); // Commit before any human planning input.
     sync();
@@ -363,7 +373,7 @@
       btn.onclick = e => {
         e.stopPropagation();
         const b = bodies[playerIndex];
-        if (b && b.meter >= 100 && phase === 'plan' && !b.stunned) {
+        if (!classicMode() && b && b.meter >= 100 && phase === 'plan' && !b.stunned) {
           b.superArm = !b.superArm;
           sync(); draw();
         }
@@ -374,6 +384,7 @@
   }
   function sync() {
     layoutDirty = true;
+    updateClock();
     const planning = phase === 'plan';
     const isGoal = phase === 'goal';
     $('phase').textContent = phase === 'over' ? 'Match complete' : `${planning ? 'Plan' : isGoal ? 'Goal' : 'In play'} · Turn ${turn}`;
@@ -387,7 +398,8 @@
     $('launch').disabled = phase === 'play';
     for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = phase === 'play';
     $('restore-shot').disabled = phase === 'play' || !lastPlans;
-    if (!readStats()) $('apply-stats').disabled = true;
+    if (!readStats() || classicMode()) $('apply-stats').disabled = true;
+    if (classicMode()) for (const id of ['stat-super', 'fill-meter', 'normal-stats']) $(id).disabled = true;
     document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
     $('launch').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : 'Launch team';
     $('selected-name').textContent = teamEntries[selected].model.parts.fullName;
@@ -484,7 +496,7 @@
     $('skaters').replaceChildren();
     teamEntries = [...roster, ...practice.slice(3)];
     teamEntries.forEach((entry, i) => {
-      if (entry.model && entry.model.stats) stats[i] = { ...entry.model.stats };
+      if (entry.model && entry.model.stats) stats[i] = classicMode() ? normalStats() : { ...entry.model.stats };
     });
     skaters = teamEntries.map((entry, i) => {
       const node = document.createElement('div'); node.className = 'skater';
@@ -536,6 +548,11 @@
     }
   }
   function newMatch(playJingle = false) {
+    matchMode = $('match-mode').value;
+    scorelessTurns = 0;
+    document.body.classList.toggle('classic-match', classicMode());
+    $('mode-label').textContent = $('match-mode').selectedOptions[0].textContent;
+    stats = [...draft, ...practice.slice(3)].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
     window.ubuAudio?.stop();
     roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     resetPlans(); say('Drag from an ubu toward your target to aim. Drag its arrowhead to adjust power and direction.'); draw();
@@ -921,6 +938,7 @@
       gainMeter(b, 10);
     });
     if (goal !== null) {
+      scorelessTurns = 0;
       scores[goal]++; phase = scores[goal] >= 5 ? 'over' : 'goal';
       const conceding = 1 - goal;
       bodies.slice(conceding * 3, conceding * 3 + 3).forEach(b => gainMeter(b, 15));
@@ -945,6 +963,7 @@
       sync();
       if (phase === 'goal') { $('launch').disabled = false; $('launch').textContent = 'Next kickoff'; }
     } else {
+      scorelessTurns++;
       turn++; phase = 'plan'; resetPlans(); say('Field settled. Plan your next three launches.');
     }
     draw();
@@ -1135,6 +1154,8 @@
   function frame(time) {
     const delta = lastTime ? Math.max(0, (time - lastTime) / 1000) : 0; lastTime = time;
     const active = !$('roster-dialog').open && !document.hidden;
+    updateClock();
+    if (blitzMode() && phase === 'plan' && performance.now() >= planDeadline) $('launch').click();
     if (!active) { lastTime = 0; accumulator = 0; }
     const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length;
     if (active) updateEffects(delta);
@@ -1255,6 +1276,7 @@
     };
   }
   $('new-match').onclick = () => {
+    $('match-mode').value = matchMode;
     draft = [...roster]; rosterSlot = 0; rosterSlots(); $('roster-status').textContent = 'Test stats stay with their team slots when changing characters.'; $('roster-dialog').showModal();
   };
   $('start-match').onclick = () => {
@@ -1292,7 +1314,7 @@
   if (fillMeter) {
     fillMeter.onclick = () => {
       const idx = Number($('stat-player').value);
-      if (bodies[idx]) {
+      if (!classicMode() && bodies[idx]) {
         bodies[idx].meter = 100;
         sync(); draw();
       }
@@ -1324,6 +1346,7 @@
     previewStats();
   }
   function resetField() {
+    scorelessTurns = 0; startPlanClock();
     window.ubuAudio?.stop();
     bodies = kickoff(); scores = [0, 0]; turn = 1; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     buildTeam();
@@ -1338,7 +1361,7 @@
   if (hudSuperBtn) {
     hudSuperBtn.onclick = () => {
       const b = bodies[selected];
-      if (b && b.meter >= 100 && phase === 'plan' && !b.stunned) {
+      if (!classicMode() && b && b.meter >= 100 && phase === 'plan' && !b.stunned) {
         b.superArm = !b.superArm;
         sync(); draw();
       }
