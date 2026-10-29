@@ -4,6 +4,19 @@
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
   const SKATER_CURVE = .06, BALL_CURVE = .045;
+  const CLOSE_SPIN_GAIN = 2;
+  function ballHitRadius(body) { return Math.max(body.radius, body.reach || body.radius, 18); }
+  function checkCloseSpin(bodies, ball) {
+    if (!ball?.openingShot) return;
+    let eligible = false;
+    for (const body of bodies) {
+      if (!body.closeSpinBonus) continue;
+      const range = ballHitRadius(body) + ball.radius + 3 * ball.radius;
+      if ((body.x - ball.x) ** 2 + (body.y - ball.y) ** 2 > range * range) body.closeSpinBonus = 0;
+      else eligible = true;
+    }
+    if (!eligible) ball.openingShot = false;
+  }
   const SUPERS = Object.freeze([
     { id: 0, key: 'stalwart', name: 'Stalwart', desc: 'Become an immovable anchor for this turn.', icon: 'assets/00_stalwart.png' },
     { id: 1, key: 'knockout', name: 'Knockout', desc: 'Knock out the next opponent touched; they cannot move next turn.', icon: 'assets/01_knockout.png' },
@@ -116,7 +129,7 @@
   function triggerShockwave(source, bodies, onShockwave) {
     const radius = 220;
     for (const b of bodies) {
-      if (b === source) continue;
+      if (b === source || b.superActive === 'stalwart') continue;
       const dx = b.x - source.x, dy = b.y - source.y, d2 = dx * dx + dy * dy;
       if (d2 > 0 && d2 < radius * radius) {
         const d = Math.sqrt(d2);
@@ -138,12 +151,22 @@
       if (ball.stuckTo === player) return;
     }
 
-    const ra = (isBall && a.team !== -1) ? Math.max(a.radius, a.reach || a.radius, 18) : a.radius;
-    const rb = (isBall && b.team !== -1) ? Math.max(b.radius, b.reach || b.radius, 18) : b.radius;
+    const ra = (isBall && a.team !== -1) ? ballHitRadius(a) : a.radius;
+    const rb = (isBall && b.team !== -1) ? ballHitRadius(b) : b.radius;
     const dx = b.x - a.x, dy = b.y - a.y, radius = ra + rb;
     const d2 = dx * dx + dy * dy;
-    if (d2 >= radius * radius) return;
+    if (d2 > radius * radius) return;
     const d = Math.sqrt(d2);
+    // Any ubu contact consumes the opening shot, even a stationary touch.
+    // Capture the eligible spin before consuming it; no rebound can re-arm it.
+    let closeSpin = 0;
+    if (isBall) {
+      const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
+      if (ball.openingShot) closeSpin = player.closeSpinBonus || 0;
+      if (closeSpin && allBodies?.some(other => other.team >= 0 && other !== player &&
+          (other.x - ball.x) ** 2 + (other.y - ball.y) ** 2 <= (ballHitRadius(other) + ball.radius) ** 2)) closeSpin = 0;
+      ball.openingShot = false;
+    }
 
     if (!isBall && a.team !== b.team) {
       if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; onSuper?.('knockout', 'impact', a, b); }
@@ -204,19 +227,41 @@
     }
 
     const bounce = ((a.bounciness || 1) + (b.bounciness || 1)) / 2;
-    const baseImpulse = -1.88 * bounce * closing / inverse;
+    // Restitution describes the rebound, not the entire stopping impulse.
+    // Ordinary contacts must never be superelastic, even at maximum stats.
+    const restitution = Math.min(1, .88 * bounce);
+    const baseImpulse = -(1 + restitution) * closing / inverse;
 
     let impulseA = baseImpulse, impulseB = baseImpulse;
     if (isBall) {
       if (a.team !== -1 && a.power) impulseB *= a.power;
       else if (b.team !== -1 && b.power) impulseA *= b.power;
-      if (a.team !== -1 && a.superActive === 'cannonball') { impulseB *= 2.5; a.superActive = null; onSuper?.('cannonball', 'impact', a, b); }
-      else if (b.team !== -1 && b.superActive === 'cannonball') { impulseA *= 2.5; b.superActive = null; onSuper?.('cannonball', 'impact', b, a); }
     } else {
       const strA = a.strength || 1, stabA = a.stability || 1;
       const strB = b.strength || 1, stabB = b.stability || 1;
       impulseB *= (strA / stabB);
       impulseA *= (strB / stabA);
+    }
+
+    // Power/check stats redistribute impact energy; they cannot manufacture it.
+    // Preserve tangential motion and bound only the normal collision response.
+    const normalA = a.vx * nx + a.vy * ny, normalB = b.vx * nx + b.vy * ny;
+    const energyBefore = (invA ? a.mass * normalA * normalA : 0)
+      + (invB ? b.mass * normalB * normalB : 0);
+    const nextA = invA ? normalA - impulseA * invA : 0;
+    const nextB = invB ? normalB + impulseB * invB : 0;
+    const energyAfter = (invA ? a.mass * nextA * nextA : 0)
+      + (invB ? b.mass * nextB * nextB : 0);
+    const scale = energyAfter > energyBefore ? Math.sqrt(energyBefore / energyAfter) : 1;
+    if (invA) impulseA = (normalA - nextA * scale) / invA;
+    if (invB) impulseB = (nextB * scale - normalB) / invB;
+
+    // Cannonball is an explicit, single-use source of energy for the ball only.
+    // Keep its extra impulse out of the ordinary collision's energy budget.
+    let cannon = null, cannonImpulse = 0;
+    if (isBall) {
+      if (a.team !== -1 && a.superActive === 'cannonball') { cannon = a; cannonImpulse = 1.5 * impulseB; }
+      else if (b.team !== -1 && b.superActive === 'cannonball') { cannon = b; cannonImpulse = -1.5 * impulseA; }
     }
 
     if (invA > 0) {
@@ -240,10 +285,34 @@
       b.omega -= 2 * tangent * invB / b.radius;
     }
 
+    if (cannon) {
+      const ball = a.team === -1 ? a : b;
+      ball.vx += cannonImpulse * nx / ball.mass;
+      ball.vy += cannonImpulse * ny / ball.mass;
+      cannon.superActive = null;
+      onSuper?.('cannonball', 'impact', cannon, ball);
+    }
+
+    if (closeSpin) {
+      const ball = a.team === -1 ? a : b;
+      ball.omega = Math.max(-24, Math.min(24, ball.omega + closeSpin));
+    }
+
     if (typeof onCollide === 'function') onCollide(a, b, -closing, baseImpulse);
   }
   function step(bodies, dt = DT, onCollide = null, onWall = null, onShockwave = null, onSuper = null) {
     const ball = bodies.find(b => b.team === -1);
+    checkCloseSpin(bodies, ball);
+    if (ball?.openingShot) {
+      // Existing contact must count before motion can separate the bodies.
+      // A different ubu already touching also invalidates a close setup.
+      const touching = bodies.filter(b => b.team >= 0 && (b.x - ball.x) ** 2 + (b.y - ball.y) ** 2 <= (ballHitRadius(b) + ball.radius) ** 2);
+      if (touching.length > 1 || (touching.length === 1 && !touching[0].closeSpinBonus)) ball.openingShot = false;
+      if (touching.length === 1) {
+        const b = touching[0];
+        if ((ball.vx - b.vx) * (ball.x - b.x) + (ball.vy - b.vy) * (ball.y - b.y) >= 0) ball.openingShot = false;
+      }
+    }
     if (ball && !ball.stuckTo) {
       for (const b of bodies) {
         if (b.team !== -1 && b.superActive === 'magnet') {
@@ -289,13 +358,18 @@
         b.vx *= factor; b.vy *= factor;
       }
     }
+    checkCloseSpin(bodies, ball);
     for (let pass = 0; pass < 3; pass++) {
-      for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) collide(bodies[i], bodies[j], onCollide, bodies, onShockwave, onSuper);
+      for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) {
+        collide(bodies[i], bodies[j], onCollide, bodies, onShockwave, onSuper);
+        checkCloseSpin(bodies, ball);
+      }
       for (const b of bodies) {
         if (b.superActive === 'stalwart') {
           b.vx = b.vy = b.omega = 0;
         } else if (b.team !== -1) {
           walls(b, onWall);
+          checkCloseSpin(bodies, ball);
         }
       }
       if (ball) {
@@ -322,6 +396,7 @@
         } else {
           walls(ball, onWall);
         }
+        checkCloseSpin(bodies, ball);
       }
     }
     if (ball) {
@@ -334,6 +409,7 @@
     return null;
   }
   function launch(bodies, plans) {
+    for (const b of bodies) b.closeSpinBonus = 0;
     bodies.forEach((b, i) => {
       if (b.team < 0) return;
       if (b.stunned) {
@@ -355,11 +431,25 @@
       const speed = impulse / b.mass * Math.max(0, Math.min(1, plan.power));
       b.vx = Math.cos(plan.angle) * speed; b.vy = Math.sin(plan.angle) * speed;
       b.omega = Math.max(-1, Math.min(1, plan.spin || 0)) * b.maxSpin;
+      if (plan.power > 0) b.closeSpinBonus = b.omega * CLOSE_SPIN_GAIN;
     });
+    const ball = bodies.find(b => b.team === -1);
+    if (ball) {
+      ball.openingShot = true;
+      for (const b of bodies) {
+        if (!b.closeSpinBonus) continue;
+        const gap = Math.max(0, Math.hypot(b.x - ball.x, b.y - ball.y) - ballHitRadius(b) - ball.radius);
+        const proximity = Math.max(0, 1 - gap / (3 * ball.radius));
+        b.closeSpinBonus *= proximity * proximity * (3 - 2 * proximity);
+      }
+      ball.openingShot = bodies.some(b => b.closeSpinBonus !== 0);
+    }
   }
   function settled(bodies) { return bodies.every(b => b.vx * b.vx + b.vy * b.vy < 4 && Math.abs(b.omega) < .05); }
   function stop(bodies) {
     for (const b of bodies) {
+      b.closeSpinBonus = 0;
+      b.openingShot = false;
       if (b.guardBase) Object.assign(b, b.guardBase);
       b.guardBase = null; b.guarding = false;
       b.vx = b.vy = b.omega = 0;

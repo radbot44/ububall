@@ -860,7 +860,9 @@ body.stadium-fullscreen-active {
 .classic-match .super-panel, .classic-match #stadium-super-btn { display: none; }
 .classic-match .stadium-actions .team-launch { grid-column: 1 / -1; }
 #blitz-clock { font-weight: 800; color: var(--primary); font-variant-numeric: tabular-nums; margin-left: 6px; }
-#match-mode { padding: 10px; background: var(--elevated); color: var(--text); border: 1px solid var(--border); border-radius: 8px; }
+#match-mode, #cpu-level { padding: 10px; background: var(--elevated); color: var(--text); border: 1px solid var(--border); border-radius: 8px; }
+.match-settings { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.match-settings label { display: flex; align-items: center; gap: 8px; }
 /* Online lobby stays outside the rink's sizing and rotation containers. */
 #online-dialog { width: min(560px, 94vw); max-height: 90dvh; overflow: auto; }
 #online-dialog label { display: block; margin: 12px 0; }

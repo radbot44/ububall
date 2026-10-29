@@ -244,6 +244,170 @@ test('bounciness scales collision restitution between colliding bodies', () => {
   assert.ok(bounceResults[0] < bounceResults[1] && bounceResults[1] < bounceResults[2]);
 });
 
+function kineticEnergy(bodies) {
+  return bodies.reduce((sum, b) => sum + .5 * b.mass * (b.vx ** 2 + b.vy ** 2)
+    + .25 * b.mass * b.radius ** 2 * b.omega ** 2, 0);
+}
+
+function closeSpinSetup(gap = 0, spin = 1, reach = 25) {
+  const bodies = P.kickoff();
+  bodies.slice(0, 6).forEach(b => P.applyStats(b));
+  Object.assign(bodies[0], { x: 400, y: 300, reach });
+  Object.assign(bodies[6], { x: 400 + reach + 18 + gap, y: 300 });
+  P.startTurn(bodies, [{ angle: 0, power: .6, spin }]);
+  return bodies;
+}
+function strikeCloseSpin(bodies) {
+  const player = bodies[0], ball = bodies[6];
+  ball.x = player.x + Math.max(player.radius, player.reach) + ball.radius - .1;
+  ball.y = player.y;
+  P.step(bodies, 0);
+}
+
+test('close spin ramps from zero at 1.5 ball diameters to full at hitbox contact', () => {
+  for (const spin of [-1, 0, 1]) {
+    const bonuses = [54, 27, 0].map(gap => {
+      const bodies = closeSpinSetup(gap, spin), control = structuredClone(bodies);
+      control[6].openingShot = false;
+      strikeCloseSpin(bodies); strikeCloseSpin(control);
+      assert.equal(bodies[6].vx, control[6].vx);
+      assert.equal(bodies[6].vy, control[6].vy);
+      return bodies[6].omega - control[6].omega;
+    });
+    assert.deepEqual(bonuses, [0, 8 * spin, 16 * spin]);
+  }
+  const reach = closeSpinSetup(0, 1, 37.5);
+  assert.equal(reach[0].closeSpinBonus, 16);
+  assert.equal(closeSpinSetup(55)[0].closeSpinBonus, 0);
+});
+
+test('leaving close-spin range cancels it permanently even when the ball returns', () => {
+  const bodies = closeSpinSetup();
+  bodies[6].x = 400 + 25 + 18 + 54 + .01;
+  P.step(bodies, 0);
+  assert.equal(bodies[0].closeSpinBonus, 0);
+  const control = structuredClone(bodies); control[6].openingShot = false;
+  strikeCloseSpin(bodies); strikeCloseSpin(control);
+  assert.equal(bodies[6].omega, control[6].omega);
+});
+
+test('a teammate or opponent touching first cancels the opening spin bonus', () => {
+  for (const index of [1, 3]) {
+    const bodies = closeSpinSetup(20);
+    Object.assign(bodies[index], { x: bodies[6].x + 43, y: 300, vx: 0, vy: 0 });
+    P.step(bodies, 0);
+    assert.equal(bodies[6].openingShot, false);
+    Object.assign(bodies[index], { x: 800, y: 450 });
+    const control = structuredClone(bodies); control[0].closeSpinBonus = 0;
+    strikeCloseSpin(bodies); strikeCloseSpin(control);
+    assert.equal(bodies[6].omega, control[6].omega);
+  }
+});
+
+test('close spin is single use, with no bonus on simultaneous or separating touches', () => {
+  const bodies = closeSpinSetup(); strikeCloseSpin(bodies);
+  assert.equal(bodies[6].openingShot, false);
+  Object.assign(bodies[0], { vx: 500, vy: 0, omega: 0 });
+  Object.assign(bodies[6], { vx: 0, vy: 0, omega: 0 });
+  strikeCloseSpin(bodies);
+  assert.equal(bodies[6].omega, 0);
+  const simultaneous = closeSpinSetup();
+  Object.assign(simultaneous[1], { x: simultaneous[6].x + 43, y: 300 });
+  const control = structuredClone(simultaneous); control[6].openingShot = false;
+  P.step(simultaneous); P.step(control);
+  assert.equal(simultaneous[6].omega, control[6].omega);
+  const separating = closeSpinSetup(); separating[0].vx = -100;
+  P.step(separating);
+  assert.equal(separating[6].openingShot, false);
+});
+
+test('Sticky leaves a full close-spin setup next turn; held and stunned ubus get no bonus', () => {
+  const bodies = closeSpinSetup(); bodies[0].superActive = 'sticky';
+  strikeCloseSpin(bodies);
+  assert.equal(bodies[6].stuckTo, bodies[0]);
+  P.stop(bodies);
+  P.startTurn(bodies, [{ angle: 0, power: .6, spin: 1 }]);
+  assert.ok(Math.abs(bodies[0].closeSpinBonus - 16) < 1e-9);
+  for (const stunned of [false, true]) {
+    P.stop(bodies); bodies[0].stunned = stunned;
+    P.startTurn(bodies, [{ angle: 0, power: stunned ? .6 : 0, spin: 1 }]);
+    assert.equal(bodies[0].closeSpinBonus, 0);
+  }
+});
+
+test('close spin curves the ball in the same way in preview and gameplay', () => {
+  const bodies = closeSpinSetup(); P.stop(bodies);
+  const before = structuredClone(bodies), plans = [{ angle: 0, power: .6, spin: 1 }];
+  const prediction = P.predictTurn(bodies, plans);
+  assert.deepEqual(bodies, before);
+  P.startTurn(bodies, plans);
+  for (let tick = 0; tick < 120; tick++) P.step(bodies);
+  const point = prediction.paths[6].find(p => p.tick === 120);
+  assert.equal(point.x, bodies[6].x); assert.equal(point.y, bodies[6].y);
+  assert.ok(bodies[6].y > 310);
+});
+
+test('maximum bounce and checking stats cannot turn a collision into a speed boost', () => {
+  const bodies = P.kickoff().slice(0, 2);
+  bodies.forEach(b => P.applyStats(b, { bounciness: 255, strength: 255, stability: 0 }));
+  Object.assign(bodies[0], { x: 400, y: 300, vx: 500 });
+  Object.assign(bodies[1], { x: 449, y: 300, vx: -500 });
+  const before = kineticEnergy(bodies);
+  P.step(bodies, 0);
+  assert.ok(kineticEnergy(bodies) <= before * (1 + 1e-12));
+  assert.ok(bodies.every(b => Math.abs(b.vx) <= 500 + 1e-9));
+});
+
+test('ordinary contacts cannot create kinetic energy across stat extremes and spin', () => {
+  for (const ballContact of [false, true]) for (const value of [0, 127, 255]) {
+    for (const other of [0, 127, 255]) for (const spin of [-12, 0, 12]) {
+      const all = P.kickoff(), a = all[0], b = all[ballContact ? 6 : 3];
+      P.applyStats(a, { mass: value, power: value, strength: value, stability: other, bounciness: value, grip: value });
+      if (!ballContact) P.applyStats(b, { mass: other, strength: other, stability: value, bounciness: other, grip: other });
+      Object.assign(a, { x: 400, y: 300, vx: 500, vy: 80, omega: spin });
+      Object.assign(b, { x: 400 + a.radius + b.radius - 1, y: 300, vx: -700, vy: -60, omega: -spin });
+      const before = kineticEnergy([a, b]);
+      P.step([a, b], 0);
+      assert.ok(kineticEnergy([a, b]) <= before * (1 + 1e-12), `${ballContact}/${value}/${other}/${spin}`);
+    }
+  }
+});
+
+test('Cannonball boosts the ball once without boosting its shooter or subsequent ricochets', () => {
+  const setup = superActive => {
+    const bodies = P.kickoff();
+    bodies.slice(0, 6).forEach(b => P.applyStats(b, { bounciness: 255, power: 255, strength: 255, stability: 0 }));
+    Object.assign(bodies[0], { x: 460, y: 300, vx: 720, superActive });
+    return bodies;
+  };
+  const bodies = setup('cannonball'), ordinary = setup(null);
+  let activations = 0;
+  P.step(bodies, 0, null, null, null, key => { if (key === 'cannonball') activations++; });
+  P.step(ordinary, 0);
+  assert.equal(bodies[0].vx, ordinary[0].vx);
+  assert.ok(Math.abs(bodies[6].vx - ordinary[6].vx * 2.5) < 1e-9);
+  assert.equal(bodies[0].superActive, null);
+  let previous = kineticEnergy(bodies), ricochets = 0;
+  for (let tick = 0; tick < 2880; tick++) {
+    const goal = P.step(bodies, P.DT, () => { ricochets++; }, null, null, key => { if (key === 'cannonball') activations++; });
+    const energy = kineticEnergy(bodies);
+    assert.ok(energy <= previous * (1 + 1e-10) + 1e-8, `Ricochet gained energy at tick ${tick}`);
+    previous = energy;
+    if (goal !== null || P.settled(bodies)) break;
+  }
+  assert.equal(activations, 1);
+  assert.ok(ricochets > 0);
+});
+
+test('Shockwave cannot give an immovable Stalwart velocity for a later collision', () => {
+  const bodies = P.kickoff();
+  Object.assign(bodies[0], { x: 400, y: 300 });
+  Object.assign(bodies[3], { x: 450, y: 300, superActive: 'stalwart' });
+  P.triggerShockwave(bodies[0], bodies);
+  assert.equal(bodies[3].vx, 0);
+  assert.equal(bodies[3].vy, 0);
+});
+
 test('step invokes onCollide callback reporting colliding bodies and impact speed', () => {
   const b = P.kickoff();
   Object.assign(b[0], { x: 400, y: 300, vx: 500, vy: 0 });

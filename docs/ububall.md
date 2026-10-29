@@ -46,6 +46,10 @@ Every stat is stored as an 8-bit unsigned integer (`0–255`, neutral `127`) and
 
 ## 3. Special Ability Loadout (Bits 494–509: 16 Bits)
 
+Collision stability: ordinary body/ball contacts cannot increase total kinetic energy. Bounciness scales the rebound coefficient (capped at elastic restitution); Power, Strength and Stability redistribute the normal collision response within the incoming energy budget. Cannonball's single-use extra ball impulse is applied separately, so its intended boost remains available without ordinary ricochets repeatedly amplifying it. Shockwave does not impart velocity to an immovable Stalwart.
+
+Close-control spin: a launching ubu can add selected spin to the opening ball strike. At launch, measure the gap between its ball-contact hitbox (including Reach) and the ball's hitbox. The bonus smoothly increases from zero at 1.5 ball diameters to full at touching, using `p²(3−2p)` where `p = clamp(1 − gap / (3 × ball radius), 0, 1)`. The initial tuning adds up to twice the selected launch angular velocity, capped at ±24 rad/s for the resulting ball spin, without adding translational velocity. Zero-spin, held and stunned ubus receive no bonus. Leaving range permanently cancels eligibility for that turn; any other ubu touching first also cancels it, including a teammate or stationary contact. Simultaneous contacts grant no bonus. Only the opening approaching strike can apply it, never a rebound. Sticky contact consumes the opening strike without an extra spin bonus while attached; its settled position can supply a full-bonus setup next turn. Preview, CPU search and gameplay share this implementation.
+
 Four independent 4-bit slots encode an ubu's unlocked supers from the canonical 8 ability types (`slot_value % 8`):
 - **Super Slot 1:** Bits 494–497 (0–15)
 - **Super Slot 2:** Bits 498–501 (0–15)

@@ -80,3 +80,5 @@ See the [file profile](docs/ubu-file.md) for full encoding, signing prefix (`ubu
 Run tests with:
 - `npm test`: runs unit and integration tests across audio, rendering, physics, match engine, DNA decoder, file profiles, appearance rarity, mint transactions, auth and installer forwarding.
 - `npm run test:worker`: runs isolated Cloudflare Worker runtime integration tests against ephemeral local storage.
+
+CPU search, difficulty presets and reproducible match experiments: [CPU simulation guide](docs/cpu-simulation.md). Run `npm run test:cpu` for focused checks or `npm run sim:cpu -- --scenarios --a hard` for tactical diagnostics.

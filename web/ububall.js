@@ -22,6 +22,8 @@
   let isPortrait = false;
   let matchMode = 'standard', scorelessTurns = 0, planDeadline = 0;
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
+  const cpuClient = createCPUClient();
+  let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuLevel = 'medium';
   const classicMode = () => matchMode.includes('classic');
   const blitzMode = () => matchMode.includes('blitz');
   function startPlanClock() { planDeadline = performance.now() + (ububallMatch.planningMilliseconds(matchMode, scorelessTurns) ?? 10000); }
@@ -275,10 +277,22 @@
     dirtyMeters.clear();
   }
   function say(message) { $('game-status').textContent = message; }
+  function prepareCPU() {
+    const generation = ++cpuGeneration;
+    cpuClient.cancel();
+    if (online?.active) return;
+    cpu = P.cpuPlans(bodies, () => .5, scores);
+    cpuReady = cpuClient.plan({ version: 1, mode: matchMode, bodies, stats, scores, turn, scorelessTurns },
+      { level: cpuLevel, seed: turn }).then(result => {
+      if (generation !== cpuGeneration || !result || online?.active) return;
+      if (result.error) console.warn('CPU search unavailable; using baseline plan.');
+      else cpu = result.plans;
+    });
+  }
   function resetPlans() {
     startPlanClock();
     plans = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0 }));
-    cpu = P.cpuPlans(bodies, Math.random, scores); // Commit before any human planning input.
+    prepareCPU(); // Snapshot before any human planning input.
     sync();
   }
   function renderStatsBox(statSource) {
@@ -376,7 +390,7 @@
     updateClock();
     const planning = phase === 'plan';
     const isGoal = phase === 'goal';
-    $('phase').textContent = phase === 'over' ? 'Match complete' : `${planning ? 'Plan' : isGoal ? 'Goal' : 'In play'} · Turn ${turn}`;
+    $('phase').textContent = phase === 'over' ? 'Match complete' : `${planning ? 'Plan' : isGoal ? 'Goal' : phase === 'cpu-wait' ? 'CPU planning' : 'In play'} · Turn ${turn}`;
     $('home-score').textContent = scores[0]; $('away-score').textContent = scores[1];
     const curB = bodies[selected];
     const isStunned = Boolean(curB?.stunned);
@@ -384,13 +398,13 @@
       plans[selected].power = plans[selected].spin = 0;
     }
     for (const id of ['angle', 'power', 'shot-spin', 'spin-less', 'spin-more', 'hold']) $(id).disabled = !planning || isStunned;
-    $('launch').disabled = phase === 'play';
-    for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = phase === 'play';
-    $('restore-shot').disabled = phase === 'play' || !lastPlans;
+    $('launch').disabled = phase === 'play' || phase === 'cpu-wait';
+    for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = phase === 'play' || phase === 'cpu-wait';
+    $('restore-shot').disabled = phase === 'play' || phase === 'cpu-wait' || !lastPlans;
     if (!readStats() || classicMode()) $('apply-stats').disabled = true;
     if (classicMode()) for (const id of ['stat-super', 'fill-meter', 'normal-stats']) $(id).disabled = true;
     document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
-    $('launch').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : 'Launch team';
+    $('launch').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : phase === 'cpu-wait' ? 'CPU planning…' : 'Launch team';
     $('selected-name').textContent = teamEntries[selected].model.parts.fullName;
     const launching = plans.filter((p, i) => p.power > 0 && !bodies[i].stunned && !(bodies[i].superArm && bodies[i].equippedSuper?.key === 'stalwart')).length;
     $('plan-summary').textContent = planning ? `${launching} launching · ${3 - launching} holding` : '';
@@ -968,6 +982,10 @@
       bodies = kickoff(); turn++; phase = 'plan'; resetPlans(); say('Kickoff. Plan your next three launches.'); draw(); return;
     }
     if (phase !== 'plan') return;
+    const generation = cpuGeneration;
+    phase = 'cpu-wait'; drag = null; sync(); say('CPU is finishing its plan…');
+    await cpuReady;
+    if (generation !== cpuGeneration || phase !== 'cpu-wait' || online?.active) return;
     if ($('field-spin').contains(document.activeElement)) document.activeElement.blur();
     window.ubuAudio?.stop();
     lastPlans = structuredClone(plans);
@@ -1269,11 +1287,13 @@
   }
   $('new-match').onclick = () => {
     $('match-mode').value = matchMode;
+    $('cpu-level').value = cpuLevel;
     draft = [...roster]; rosterSlot = 0; rosterSlots(); $('roster-status').textContent = 'Test stats stay with their team slots when changing characters.'; $('roster-dialog').showModal();
   };
   $('start-match').onclick = () => {
     $('roster-dialog').close();
     roster = draft.map(d => ({ ...d }));
+    cpuLevel = $('cpu-level').value;
     newMatch(true);
   };
   $('cancel-roster').onclick = () => $('roster-dialog').close();
@@ -1342,7 +1362,7 @@
     window.ubuAudio?.stop();
     bodies = kickoff(); scores = [0, 0]; turn = 1; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     buildTeam();
-    cpu = P.cpuPlans(bodies, () => .5, scores); sync(); previewStats(); draw(); say('Field reset. Your planned launches are preserved.');
+    prepareCPU(); sync(); previewStats(); draw(); say('Field reset. Your planned launches are preserved.');
   }
   $('stat-player').onchange = showStats;
   $('apply-stats').onclick = () => { const raw = readStats(); if (!raw || phase === 'play') return; stats[Number($('stat-player').value)] = raw; resetField(); };
