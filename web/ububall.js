@@ -21,10 +21,19 @@
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [], next = '';
   let isPortrait = false;
   let matchMode = 'standard', scorelessTurns = 0, planDeadline = 0;
+  let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const classicMode = () => matchMode.includes('classic');
   const blitzMode = () => matchMode.includes('blitz');
-  function startPlanClock() { planDeadline = performance.now() + (scorelessTurns >= 10 ? 5000 : 10000); }
+  function startPlanClock() { planDeadline = performance.now() + (ububallMatch.planningMilliseconds(matchMode, scorelessTurns) ?? 10000); }
   function updateClock() {
+    if (online?.active) {
+      const s = online.state, clock = $('blitz-clock');
+      clock.hidden = !blitzMode() || s?.phase !== 'plan';
+      if (!clock.hidden) clock.textContent = Math.max(0, Math.ceil((s.deadline === null ? s.remaining : s.deadline - online.now()) / 1000)) + 's';
+      const other = s ? 1 - s.seat : 1;
+      $('online-forfeit').hidden = !s || s.phase === 'over' || !s.connected[s.seat] || s.connected[other] || s.disconnectedAt[other] === null || online.now() - s.disconnectedAt[other] < 60000;
+      return;
+    }
     const clock = $('blitz-clock'); clock.hidden = !blitzMode() || phase !== 'plan';
     if (!clock.hidden) clock.textContent = Math.max(0, Math.ceil((planDeadline - performance.now()) / 1000)) + 's';
   }
@@ -255,27 +264,7 @@
     return result;
   }
   function gainMeter(b, baseAmount) {
-    if (classicMode() || !b || b.team < 0 || b.usedSuperThisTurn) return;
-    const updateBar = body => dirtyMeters.add(body);
-    const playerIdx = b.playerIndex;
-    const eff = stats[playerIdx]?.efficiency ?? 127;
-    const effMult = P.multiplier(eff);
-    const gain = baseAmount * effMult;
-    b.meter = Math.min(100, Math.max(0, (b.meter || 0) + gain));
-
-    updateBar(b);
-    const syn = stats[playerIdx]?.synergy ?? 127;
-    const synMult = P.multiplier(syn);
-    const start = b.team * 3, end = start + 3;
-    for (let i = start; i < end; i++) {
-      const teammate = bodies[i];
-      if (teammate && teammate !== b && !teammate.usedSuperThisTurn) {
-        const chem = stats[i]?.chemistry ?? 127;
-        const chemMult = P.multiplier(chem);
-        teammate.meter = Math.min(100, Math.max(0, (teammate.meter || 0) + gain * synMult * chemMult * 0.25));
-        updateBar(teammate);
-      }
-    }
+    for (const changed of ububallMatch.gainMeter(P, bodies, stats, b, baseAmount, classicMode())) dirtyMeters.add(changed);
   }
   function flushMeters() {
     for (const body of dirtyMeters) {
@@ -477,9 +466,16 @@
         }
       }
     }
+    if (online?.active) {
+      $('launch').disabled = phase !== 'plan';
+      $('launch').textContent = phase === 'plan' ? 'Lock moves' : phase === 'play' ? 'In motion…' : phase === 'over' ? 'Match complete' : 'Waiting…';
+      $('new-match').disabled = true;
+      for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = true;
+    }
   }
   function buildTeam() {
-    materialEmitters = [...roster, ...practice.slice(3)].map(entry => {
+    if (!online?.active) teamEntries = [...roster, ...practice.slice(3)];
+    materialEmitters = teamEntries.map(entry => {
       const seen = new Set();
       const styles = [];
       for (const attribute of Object.values(entry.model.attributes)) {
@@ -494,7 +490,6 @@
     $('team-selector').replaceChildren();
     if ($('cpu-team')) $('cpu-team').replaceChildren();
     $('skaters').replaceChildren();
-    teamEntries = [...roster, ...practice.slice(3)];
     teamEntries.forEach((entry, i) => {
       if (entry.model && entry.model.stats) stats[i] = classicMode() ? normalStats() : { ...entry.model.stats };
     });
@@ -539,7 +534,7 @@
         const header = document.createElement('div'); header.className = 'card-header';
         const titles = document.createElement('div'); titles.className = 'card-titles';
         const strong = document.createElement('strong'); strong.textContent = entry.model.parts.fullName;
-        const small = document.createElement('small'); small.className = 'away'; small.textContent = 'CPU';
+        const small = document.createElement('small'); small.className = 'away'; small.textContent = online?.active ? 'Opponent' : 'CPU';
         titles.append(strong, small);
         header.append(ubuRender(entry.model, 'ball-thumb'), titles);
         card.append(header, renderStatsBox(stats[i] || entry.model.stats || {}), renderSuperPanel(i, true));
@@ -810,7 +805,7 @@
       const reachR = Math.max(b.radius, b.reach || b.radius, 18);
       circle(b.x, b.y, reachR + 2, i < 3 ? primary : secondary, 4);
 
-      if (phase === 'goal' && b === scoringPlayer) {
+      if ((phase === 'goal' || (onlineReplay?.goalPlayed && phase === 'play')) && b === scoringPlayer) {
         circle(b.x, b.y, b.radius + 9, '#ff9954', 4);
         circle(b.x, b.y, b.radius + 15, primary, 2);
       }
@@ -926,22 +921,12 @@
     drawParticles(primary, secondary);
   }
   function finishTurn(goal) {
-    P.stop(bodies); accumulator = 0;
-    layoutDirty = true;
-    bodies.slice(0, 6).forEach(b => {
-      if (b.stunnedNext) {
-        b.stunned = true;
-        delete b.stunnedNext;
-      }
-      b.superActive = null;
-      b.shockwaveFired = false;
-      gainMeter(b, 10);
-    });
+    ububallMatch.finishTurn(P, bodies, stats, scores, goal, classicMode());
+    bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
+    accumulator = 0; layoutDirty = true;
     if (goal !== null) {
       scorelessTurns = 0;
-      scores[goal]++; phase = scores[goal] >= 5 ? 'over' : 'goal';
-      const conceding = 1 - goal;
-      bodies.slice(conceding * 3, conceding * 3 + 3).forEach(b => gainMeter(b, 15));
+      phase = scores[goal] >= 5 ? 'over' : 'goal';
       const ball = bodies[6];
       burst(ball.x, ball.y, goal, 1, true);
       if (!reducedMotion.matches) {
@@ -969,6 +954,10 @@
     draw();
   }
   $('launch').onclick = async () => {
+    if (online?.active) {
+      if (phase === 'plan' && online.send(networkMoves(), true)) { phase = 'waiting'; drag = null; sync(); draw(); }
+      return;
+    }
     if (phase === 'over') {
       if (isFullscreenActive()) await toggleFullscreen();
       $('new-match').click(); return;
@@ -999,7 +988,7 @@
       sync(); draw();
     };
   }
-  $('hold').onclick = () => { plans[selected].power = plans[selected].spin = 0; sync(); draw(); };
+  $('hold').onclick = () => { if (phase !== 'plan' || bodies[selected].stunned) return; plans[selected].power = plans[selected].spin = 0; sync(); draw(); };
   function point(event) {
     const r = canvas.getBoundingClientRect();
     if (isPortrait) {
@@ -1155,11 +1144,14 @@
     const delta = lastTime ? Math.max(0, (time - lastTime) / 1000) : 0; lastTime = time;
     const active = !$('roster-dialog').open && !document.hidden;
     updateClock();
-    if (blitzMode() && phase === 'plan' && performance.now() >= planDeadline) $('launch').click();
+    if (online?.active) {
+      if (phase === 'plan') online.send(networkMoves());
+      if (onlineReplay && active) playOnlineReplay();
+    } else if (blitzMode() && phase === 'plan' && performance.now() >= planDeadline) $('launch').click();
     if (!active) { lastTime = 0; accumulator = 0; }
     const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length;
     if (active) updateEffects(delta);
-    if (phase === 'play' && active) {
+    if (phase === 'play' && active && !online?.active) {
       accumulator += delta;
       let steps = 0;
       while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
@@ -1465,4 +1457,128 @@
   window.addEventListener('resize', resizeField);
   window.visualViewport?.addEventListener('resize', resizeField);
   practice.slice(0, 3).forEach(addOption); newMatch(); requestAnimationFrame(frame);
+  function networkMoves() {
+    return plans.map((p, i) => ({ angle: p.angle + (online?.state?.seat ? Math.PI : 0), power: p.power,
+      spin: p.spin || 0, superArm: Boolean(bodies[i].superArm) }));
+  }
+  function onlineOrder(items, seat) { return seat ? [...items.slice(3, 6), ...items.slice(0, 3), ...items.slice(6)] : items; }
+  function viewBodies(items, seat) {
+    return onlineOrder(structuredClone(items), seat).map((b, i) => {
+      if (seat) { b.x = 1000 - b.x; b.y = 600 - b.y; b.vx = -b.vx; b.vy = -b.vy; b.rotation += Math.PI; }
+      b.playerIndex = i; b.team = i < 3 ? 0 : i < 6 ? 1 : -1;
+      const entry = teamEntries[i];
+      if (entry?.model) {
+        b.name = entry.model.parts?.fullName;
+        b.voice = entry.model.voice;
+        b.personality = entry.model.personality;
+        b.equippedSuper = classicMode() ? null : (entry.equippedSuper || b.equippedSuper);
+      }
+      return b;
+    });
+  }
+  function playOnlineReplay() {
+    const replay = onlineReplay, tick = Math.min(replay.ticks, Math.max(0, (online.now() - replay.startedAt) / 1000 / P.DT));
+    const frames = replay.frames;
+    let index = Math.min(frames.length - 1, Math.floor(tick / 8));
+    while (index > 0 && frames[index].tick > tick) index--;
+    const a = frames[index], b = frames[Math.min(index + 1, frames.length - 1)];
+    const blend = a === b ? 0 : Math.min(1, (tick - a.tick) / (b.tick - a.tick));
+    const samples = a.bodies.map((body, i) => {
+      const sample = { ...body };
+      for (const key of ['x', 'y', 'rotation']) sample[key] += (b.bodies[i][key] - body[key]) * blend;
+      return sample;
+    });
+    viewBodies(samples, online.state.seat).forEach((sample, i) => { Object.assign(bodies[i], sample); dirtyMeters.add(bodies[i]); });
+    if (!replay.supersPlayed) {
+      replay.supersPlayed = true;
+      replay.plans.forEach((p, idx) => {
+        if (p.superArm) {
+          const viewIdx = online.state.seat ? (idx < 3 ? idx + 3 : idx - 3) : idx;
+          const superKey = bodies[viewIdx]?.equippedSuper?.key;
+          if (superKey && window.ubuAudio) window.ubuAudio.playSuper?.(superKey, 'play');
+        }
+      });
+    }
+    if (replay.goal !== null) {
+      const preScores = online.state.seat ? [...online.state.game.scores].reverse() : [...online.state.game.scores];
+      const viewGoal = replay.goal === online.state.seat ? 0 : 1;
+      if (tick < replay.ticks) {
+        preScores[viewGoal]--;
+        scores = preScores;
+      } else {
+        scores = online.state.seat ? [...online.state.game.scores].reverse() : [...online.state.game.scores];
+        if (!replay.goalPlayed) {
+          replay.goalPlayed = true;
+          const ball = bodies[6];
+          burst(ball.x, ball.y, viewGoal, 1, true);
+          if (!reducedMotion.matches) {
+            for (let i = 0; i < 4; i++) fireworks.push({
+              x: viewGoal === 0 ? 740 + Math.random() * 110 : 150 + Math.random() * 110,
+              y: 160 + Math.random() * 260, team: viewGoal, delay: .18 + i * .22
+            });
+          }
+          const viewScorerIndex = replay.scorer === null ? null : (online.state.seat ? (replay.scorer < 3 ? replay.scorer + 3 : replay.scorer - 3) : replay.scorer);
+          const scorer = viewScorerIndex !== null ? bodies[viewScorerIndex] : bodies[viewGoal * 3];
+          scoringPlayer = scorer;
+          const scorerName = scorer?.name || (viewGoal === 0 ? 'Your ubu' : 'Opponent ubu');
+          say(online.state.game.winner !== null
+            ? (viewGoal === 0 ? `You win! Final goal by ${scorerName}.` : `Opponent wins. Final goal by ${scorerName}.`)
+            : `${viewGoal === 0 ? 'You score!' : 'Opponent scores.'} Goal by ${scorerName}! Ready for the next kickoff.`
+          );
+          if (scorer?.voice && window.ubuAudio) window.ubuAudio.playFanfare(scorer.voice);
+          sync();
+        }
+      }
+    }
+    recordTrails(); emitMaterialTrails(Math.min(.05, 1 / 60)); draw();
+  }
+  online = ububallOnline({
+    onState(s) {
+      document.body.classList.add('online-match');
+      $('online-open').textContent = 'Online match';
+      $('opponent-label').textContent = 'Opponent'; $('opponent-heading').textContent = 'Opponent team';
+      $('online-match-status').hidden = false; $('new-match').disabled = true;
+      matchMode = s.mode; document.body.classList.toggle('classic-match', classicMode());
+      $('mode-label').textContent = 'Online · ' + $('online-mode').querySelector(`option[value="${s.mode}"]`).textContent;
+      if (!s.game) { phase = 'waiting'; onlineReplay = null; sync(); draw(); return; }
+      const rosterKey = JSON.stringify(s.rosters);
+      if (rosterKey !== onlineRoster) {
+        onlineRoster = rosterKey;
+        teamEntries = onlineOrder(s.rosters.flat(), s.seat).map(entry => ({ model: ubu.decode(ubu.fromCode(entry.dna)), equippedSuper: P.SUPERS[entry.superId] }));
+        roster = teamEntries.slice(0, 3); buildTeam();
+      }
+      const fresh = onlineTurn !== s.turn || onlineDisconnected || (s.phase === 'plan' && onlinePhase !== 'plan');
+      onlinePhase = s.phase;
+      onlineDisconnected = false;
+      const armed = bodies.slice(0, 3).map(b => Boolean(b.superArm));
+      if (fresh || !s.connected.every(Boolean) || s.locked[s.seat]) drag = null;
+      if (fresh) { onlineTurn = s.turn; scoringPlayer = null; clearEffects(); }
+      bodies = viewBodies(s.game.bodies, s.seat);
+      stats = onlineOrder(s.game.stats, s.seat);
+      const rawScores = (s.phase === 'resolving' && s.replay?.goal !== null && !s.replay.goalPlayed)
+        ? s.game.scores.map((sc, gi) => gi === s.replay.goal ? sc - 1 : sc)
+        : s.game.scores;
+      scores = s.seat ? [...rawScores].reverse() : [...rawScores];
+      turn = s.turn; scorelessTurns = s.game.scorelessTurns;
+      if (fresh) plans = s.moves.map(p => ({
+        ...p,
+        angle: p.power === 0 ? 0 : (((p.angle + (s.seat ? Math.PI : 0)) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
+      }));
+      plans.forEach((p, i) => { bodies[i].superArm = fresh ? s.moves[i].superArm : armed[i]; });
+      onlineReplay = s.replay;
+      phase = s.phase === 'over' ? 'over' : s.phase === 'resolving' ? 'play' : s.connected.every(Boolean) && !s.locked[s.seat] ? 'plan' : 'waiting';
+      $('online-match-status').textContent = s.phase === 'over' ? (s.winner === s.seat ? 'You win!' : 'Opponent wins.') : !s.connected.every(Boolean) ? 'Disconnected · planning paused' : s.locked[s.seat] ? 'Moves locked · waiting for opponent' : s.phase === 'resolving' ? 'Turn in motion' : 'Plan your moves';
+      sync(); if (onlineReplay) playOnlineReplay(); else draw();
+    },
+    onDisconnect() { onlineDisconnected = true; phase = 'waiting'; drag = null; $('online-match-status').textContent = 'Reconnecting · planning paused'; sync(); draw(); },
+    onError(message) { $('online-match-status').textContent = message; },
+    onLeave() {
+      onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = ''; scoringPlayer = null;
+      document.body.classList.remove('online-match');
+      $('online-open').textContent = 'Play online';
+      $('new-match').disabled = false; $('online-match-status').hidden = true; $('online-forfeit').hidden = true;
+      $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
+      draft = practice.slice(0, 3); newMatch();
+    }
+  });
 })();

@@ -240,4 +240,73 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
       assert.deepEqual([...results].sort(), expected.map(row => row.serial).sort());
     }
   });
+  await t.test('online invites enforce identity and ownership, hide drafts and persist authoritative turns', async () => {
+    const guest = await signedIn('456789012345678901');
+    const guestHeaders = { ...headers, Cookie: guest.cookie, 'X-Ubu-CSRF': guest.csrf };
+    const post = (path, data, h = headers) => fetch(path, { method: 'POST', headers: h, body: JSON.stringify(data) });
+    assert.equal((await fetch('/api/ububall', { method: 'POST' })).status, 401);
+    assert.equal((await post('/api/ububall', { mode: 'standard', teams: 'practice' }, { ...headers, 'X-Ubu-CSRF': 'wrong' })).status, 403);
+    assert.equal((await post('/api/ububall', { mode: 'standard', teams: 'practice', owner: 'forged' })).status, 400);
+    const created = await post('/api/ububall', { mode: 'blitz', teams: 'practice' });
+    assert.equal(created.status, 200, await created.clone().text());
+    const { id } = await created.json(), base = '/api/ububall/' + id;
+    assert.equal((await fetch(base + '/state', { headers: guestHeaders })).status, 400);
+    assert.equal((await post(base + '/join', {}, guestHeaders)).status, 200);
+    const outsider = await signedIn('567890123456789012');
+    assert.equal((await post(base + '/join', {}, { ...headers, Cookie: outsider.cookie, 'X-Ubu-CSRF': outsider.csrf })).status, 400);
+    assert.equal((await fetch(base + '/socket', { headers: { ...headers, Upgrade: 'websocket', Origin: 'https://evil.example' } })).status, 403);
+    async function connect(h) {
+      const response = await fetch(base + '/socket', { headers: { ...h, Upgrade: 'websocket' } });
+      assert.equal(response.status, 101, response.status === 101 ? '' : await response.text());
+      const ws = response.webSocket, messages = [];
+      ws.addEventListener('message', event => messages.push(JSON.parse(event.data))); ws.accept();
+      return { ws, messages, async wait(predicate) {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const found = messages.find(predicate); if (found) return found;
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        assert.fail('Timed out waiting for match state: ' + JSON.stringify(messages.map(m => ({ type: m.type, phase: m.phase, error: m.error }))));
+      } };
+    }
+    const hostSocket = await connect(headers), guestSocket = await connect(guestHeaders);
+    t.after(() => { for (const s of [hostSocket, guestSocket]) { try { s.ws.close(); } catch {} } });
+    for (const h of [headers, guestHeaders]) {
+      const lobby = await (await fetch(base + '/state', { headers: h })).json();
+      const supers = lobby.practice.map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
+      assert.equal((await post(base + '/team', { supers, dna: 'forged' }, h)).status, 400);
+      assert.equal((await post(base + '/team', { supers }, h)).status, 200);
+    }
+    await hostSocket.wait(m => m.phase === 'plan');
+    const moves = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false }));
+    const hostMoves = structuredClone(moves); hostMoves[0].power = .25;
+    hostSocket.ws.send(JSON.stringify({ type: 'moves', turn: 1, moves: hostMoves, lock: true }));
+    const privateView = await guestSocket.wait(m => m.phase === 'plan' && m.locked[0]);
+    assert.deepEqual(privateView.moves, moves); assert.equal(privateView.replay, null);
+    assert.ok(!JSON.stringify(privateView).includes('123456789012345678'));
+    guestSocket.ws.send(JSON.stringify({ type: 'moves', turn: 1, moves, lock: true }));
+    const result = await hostSocket.wait(m => m.phase === 'resolving');
+    assert.equal(result.game.turn, 2); assert.equal(result.replay.plans.length, 6);
+    assert.ok(result.replay.frames.length > 0);
+    const nextTurn = await hostSocket.wait(m => m.phase === 'plan' && m.turn === 2);
+    assert.equal(nextTurn.locked[0], false);
+    guestSocket.ws.close();
+    const paused = await hostSocket.wait(m => m.turn === 2 && m.connected[1] === false);
+    assert.equal(paused.deadline, null); assert.ok(paused.remaining > 0);
+    assert.equal((await post(base + '/forfeit', {})).status, 400);
+    hostSocket.ws.close();
+    await server.getWorker().evictDurableObject('UBUBALL', { name: id });
+    const recovered = await (await fetch(base + '/state', { headers })).json();
+    assert.equal(recovered.turn, 2); assert.deepEqual(recovered.game.scores, [0, 0]);
+
+    const owned = await (await post('/api/ububall', { mode: 'classic', teams: 'owned' })).json();
+    const ownedBase = '/api/ububall/' + owned.id;
+    await post(ownedBase + '/join', {}, guestHeaders);
+    const collection = await (await fetch('/api/ubus', { headers })).json();
+    const entries = collection.ubus.slice(0, 3);
+    const selection = { serials: entries.map(e => e.serial), supers: entries.map(e => ubu.decode(ubu.fromCode(JSON.parse(e.certificate).dna)).supers[0] % 8) };
+    assert.equal((await post(ownedBase + '/team', selection, guestHeaders)).status, 400);
+    assert.equal((await post(ownedBase + '/team', { ...selection, serials: [selection.serials[0], selection.serials[0], selection.serials[0]] })).status, 400);
+    assert.equal((await post(ownedBase + '/team', selection)).status, 200);
+  });
 });

@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import mintModule from './mint.js';
 import * as auth from './auth.mjs';
+export { UbuballMatch } from './ububall-object.mjs';
 const { Mint } = mintModule;
 const ID = /^[A-Za-z0-9_-]{21}[AQgw]$/;
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: {
@@ -161,6 +162,12 @@ export class MintRegistry extends DurableObject {
     }
     return { error: 'Invalid favorite request.', status: 400 };
   }
+  ububallTeam(owner, serials) {
+    if (!Array.isArray(serials) || serials.length !== 3 || new Set(serials).size !== 3 ||
+        serials.some(s => typeof s !== 'string' || !/^[0-9]{12}$/.test(s))) return { error: 'Choose three different owned ubus.' };
+    const entries = serials.map(serial => this.mint.exec('SELECT serial, dna FROM issued WHERE owner=? AND serial=? AND certificate IS NOT NULL', owner, serial)[0]);
+    return entries.every(Boolean) ? { entries } : { error: 'Ubu not found in your collection.' };
+  }
 }
 
 export default {
@@ -182,6 +189,32 @@ export default {
       if (!session) return json({ error: 'Sign in with Discord first.' }, 401);
       if (request.method !== 'GET' && !auth.mutationAllowed(request, env, session)) return json({ error: 'Invalid request origin or token.' }, 403);
       if (path === '/api/logout' && request.method === 'POST') return json({ ok: true }, 200, { 'Set-Cookie': auth.logoutCookie() });
+      if (path === '/api/ububall' && request.method === 'POST') {
+        let data;
+        try { data = await body(request); } catch { return json({ error: 'Invalid match request.' }, 400); }
+        if (!data || Object.keys(data).some(k => !['mode', 'teams'].includes(k))) return json({ error: 'Invalid match request.' }, 400);
+        const id = crypto.randomUUID();
+        const response = await env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/create', {
+          method: 'POST', headers: { 'X-Match-Owner': session.owner, 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+        }));
+        const result = await response.json();
+        return json(response.ok ? { id, ...result } : result, response.status);
+      }
+      const match = path.match(/^\/api\/ububall\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(join|team|state|socket|forfeit)$/);
+      if (match) {
+        const [, id, action] = match, get = action === 'state' || action === 'socket';
+        if (request.method !== (get ? 'GET' : 'POST')) return json({ error: 'Method not allowed.' }, 405);
+        // Browser sockets cannot carry custom CSRF headers; enforce the exact Origin instead.
+        if (action === 'socket' && request.headers.get('Origin') !== auth.origin(env)) return json({ error: 'Invalid socket origin.' }, 403);
+        let data;
+        if (!get) { try { data = await body(request, 2048); } catch { return json({ error: 'Invalid match request.' }, 400); } }
+        return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + action, {
+          method: request.method,
+          headers: { 'X-Match-Owner': session.owner, 'X-Match-Expires': String(session.expires * 1000),
+            'Content-Type': 'application/json', ...(action === 'socket' ? { Upgrade: 'websocket' } : {}) },
+          body: get ? undefined : JSON.stringify(data)
+        }));
+      }
       const config = configuration(env);
       const registry = env.MINT.get(env.MINT.idFromName(config.mint));
       if (path === '/api/ubus' && request.method === 'GET') {

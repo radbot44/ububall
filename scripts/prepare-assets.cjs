@@ -8,12 +8,12 @@ mkdirSync(targetAssets, { recursive: true });
 
 // Explicit public files only; repository contents and secrets are never an asset root.
 const webFiles = [
-  'ububall.html', 'ububall.css', 'ububall.js', 'ububall-physics.js',
+  'ububall.html', 'ububall.css', 'ububall.js', 'ububall-physics.js', 'ububall-online.js',
   'index.html', 'site.css', 'site.js', 'pack-scene.js',
   'voice.html', 'demo.html', 'demo.js'
 ];
 const sharedFiles = [
-  'ubu.js', 'ubu-file.js', 'ubu-render.js', 'ubu-audio.js', 'rarity.js'
+  'ububall-match.js', 'ubu.js', 'ubu-file.js', 'ubu-render.js', 'ubu-audio.js', 'rarity.js'
 ];
 const assetFiles = [
   'uburoom-wordmark-brand.svg', 'uburoom-oomark-brand.svg',

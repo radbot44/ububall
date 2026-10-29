@@ -764,3 +764,13 @@ body.stadium-fullscreen-active {
 .classic-match .stadium-actions .team-launch { grid-column: 1 / -1; }
 #blitz-clock { font-weight: 800; color: var(--primary); font-variant-numeric: tabular-nums; margin-left: 6px; }
 #match-mode { padding: 10px; background: var(--elevated); color: var(--text); border: 1px solid var(--border); border-radius: 8px; }
+/* Online lobby stays outside the rink's sizing and rotation containers. */
+#online-dialog { width: min(560px, 94vw); max-height: 90dvh; overflow: auto; }
+#online-dialog label { display: block; margin: 12px 0; }
+#online-dialog select, #online-invite { max-width: 100%; }
+#online-invite { width: 100%; }
+.online-team-slot { display: flex; align-items: center; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+.online-team-slot select { min-width: 0; flex: 1; }
+#online-match-status { font-size: .85rem; color: var(--muted, #aeb7c6); }
+.online-match #stat-testing { display: none; }
+.online-match .stadium-actions { flex-wrap: wrap; }

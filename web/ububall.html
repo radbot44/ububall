@@ -5,7 +5,7 @@
   <meta name="color-scheme" content="dark"><title>Ububall · Ubu Mint</title>
   <link rel="stylesheet" href="site.css"><link rel="stylesheet" href="ububall.css">
   <script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script>
-  <script src="ububall-physics.js" defer></script><script src="ububall.js" defer></script>
+  <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-online.js" defer></script><script src="ububall.js" defer></script>
 </head>
 <body><main class="ball-page">
   <header><a class="brand" href="/"><img src="assets/uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a><nav aria-label="Main"><a class="quiet" href="/">Mint & collection</a><a class="quiet" href="/demo.html">Designer</a></nav></header>
@@ -17,7 +17,7 @@
         <span class="toggle-track"></span>
         <span>Full stats</span>
       </label>
-      <button id="new-match">New match</button>
+      <button id="online-open">Play online</button><button id="new-match">New match</button>
     </div>
   </div>
   <div class="arena-layout">
@@ -31,7 +31,7 @@
         <div class="scoreboard-content">
           <span class="home">You <strong id="home-score">0</strong></span>
           <div class="phase-info"><span id="phase">Plan · Turn 1</span><small id="mode-label">First to five</small><span id="blitz-clock" hidden></span></div>
-          <span class="away"><strong id="away-score">0</strong> CPU</span>
+          <span class="away"><strong id="away-score">0</strong> <span id="opponent-label">CPU</span></span>
         </div>
         <div class="stadium-toolbar">
           <button id="btn-rotate" class="stadium-tool-btn" type="button" aria-label="Rotate stadium orientation" title="Rotate orientation (Portrait / Landscape)">
@@ -94,6 +94,7 @@ SOFTWARE.
       <div id="team-selector" class="team-selector" aria-label="Select ubu"></div>
 
       <div class="stadium-actions">
+        <span id="online-match-status" role="status" hidden></span><button id="online-forfeit" hidden>Claim forfeit</button>
         <button id="stadium-super-btn" type="button" class="stadium-super-btn" aria-label="Arm super for selected ubu">
           <img id="stadium-super-icon" class="super-icon" alt="" src="assets/00_stalwart.png">
           <span id="stadium-super-text">Super 0%</span>
@@ -102,7 +103,7 @@ SOFTWARE.
       </div>
     </section>
     <aside class="team-column away-column" aria-label="CPU team">
-      <div class="column-heading"><span class="away">CPU team</span></div>
+      <div class="column-heading"><span class="away" id="opponent-heading">CPU team</span></div>
       <div id="cpu-team" class="team cpu-team"></div>
     </aside>
   </div>
@@ -122,4 +123,17 @@ SOFTWARE.
   </details>
   <details class="rules"><summary>How to play</summary><p>Both teams launch at the same time. The CPU plans from the field positions, without seeing your arrows. All three ubus can strike the ball, block shots, bump opponents, and enter the goal nets. After motion stops, plan again from the new positions. A goal resets the field; first to five wins.</p><p>Stats are temporary test values, separate from DNA. Spin curves travel and affects collisions. Practice ubus are custom characters, not minted collectibles. Matches stay in this browser and award no mint items.</p></details>
   <dialog id="roster-dialog"><h2>Choose your team</h2><label>Mode <select id="match-mode"><option value="standard">Ububall</option><option value="classic">Ububall Classic</option><option value="blitz">Ububall Blitz</option><option value="classic-blitz">Ububall Classic Blitz</option></select></label><p>Classic: equal default stats, no supers. Blitz: 10 seconds to plan; 5 seconds after 10 scoreless turns. A goal resets the clock limit.</p><p>Choose a character for each slot. Empty slots use practice ubus.</p><div id="roster-slots"></div><div id="roster-super-picker" style="margin: 8px 0;"><label>Equipped Super <select id="roster-super"></select></label><div id="roster-super-grid" class="super-picker-grid"></div></div><p id="roster-status" role="status"></p><button id="load-collection">Load my collection</button><button id="more-collection" hidden>Load more</button><div id="roster-options"></div><div class="actions"><button id="start-match" class="primary">Start match</button><button id="cancel-roster">Cancel</button></div></dialog>
+  <dialog id="online-dialog"><h2>Online Ububall</h2>
+    <div id="online-create-controls">
+      <label>Mode <select id="online-mode"><option value="standard">Ububall</option><option value="classic">Ububall Classic</option><option value="blitz">Ububall Blitz</option><option value="classic-blitz">Ububall Classic Blitz</option></select></label>
+      <label>Teams <select id="online-policy"><option value="practice">Practice teams</option><option value="owned">Owned ubus</option></select></label>
+      <p>Invite one opponent. Both players sign in with Discord. Moves stay private until launch; Blitz uses your latest saved moves.</p>
+      <button id="online-create" class="primary">Create invite match</button>
+    </div>
+    <div id="online-lobby" hidden><label>Invite link <input id="online-invite" readonly></label><button id="online-copy">Copy invite</button>
+      <div id="online-team"></div><button id="online-load" hidden>Load my collection</button><button id="online-ready" class="primary">Ready to play</button>
+      <p>Disconnects pause planning. After 60 seconds your opponent can claim a forfeit. Matches expire after 24 hours.</p><button id="online-leave">Leave online match</button>
+    </div>
+    <p id="online-status" role="status"></p><a href="/auth/discord">Sign in with Discord</a><button id="online-close">Close</button>
+  </dialog>
 </main></body></html>
