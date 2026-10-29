@@ -48,6 +48,41 @@
   let lastPlans = null, teamEntries = [...roster, ...practice.slice(3)];
   let lastTouchByTeam = { 0: null, 1: null }, scoringPlayer = null;
   const trails = Array.from({ length: 7 }, () => []), particles = [], fireworks = [], shockwaves = [];
+  const materialStyles = {
+    metallic: ['spark', '#e1eaff'], glossy: ['bubble', '#ffffff'], iridescent: ['spark', 'rainbow'],
+    crystalline: ['shard', '#a8eaff'], pearlescent: ['bubble', '#ffe5ed'], marble: ['dust', '#e5ddd1'],
+    velvet: ['dust', null], frosted: ['spark', '#c9f4ff'], terrazzo: ['chip', null], crackle: ['spark', '#ffe4a5'],
+    holographic: ['shard', 'rainbow'], woodgrain: ['streak', '#bf915f'], plush: ['dust', null],
+    lacquered: ['streak', null], damascus: ['streak', '#ccd3e0'], opalescent: ['bubble', 'rainbow'],
+    satin: ['streak', null], leather: ['chip', '#b18361'], denim: ['streak', '#8baee0'],
+    'carbon-fiber': ['chip', '#83929d'], 'hammered-metal': ['spark', '#d5dbe2'], granite: ['chip', '#b0b0bc'],
+    sandstone: ['dust', '#e3c28c'], obsidian: ['shard', '#a690c6'], liquid: ['bubble', null],
+    bubbled: ['bubble', '#d2f7ff'], mosaic: ['chip', 'rainbow'], circuitry: ['spark', '#65ffd1'],
+    quartz: ['shard', '#f4d7ff'], kintsugi: ['streak', '#ffd36b'], lava: ['spark', '#ff843e'],
+    starfield: ['spark', '#e4d5ff']
+  };
+  let materialEmitters = [];
+  function emitMaterialTrails(dt) {
+    if (reducedMotion.matches) return;
+    materialEmitters.forEach((emitter, i) => {
+      const b = bodies[i], speed = Math.hypot(b.vx, b.vy);
+      if (speed < 25 || !emitter.styles.length) { emitter.time = 0; return; }
+      emitter.time += dt;
+      if (emitter.time < 1 / 24) return;
+      emitter.time %= 1 / 24;
+      for (const effect of emitter.styles) {
+        if (particles.length >= 300) break;
+        const spread = (Math.random() - .5) * b.radius * 1.4;
+        const x = b.x - b.vx / speed * b.radius - b.vy / speed * spread;
+        const y = b.y - b.vy / speed * b.radius + b.vx / speed * spread;
+        const life = .3 + Math.random() * .3;
+        const color = effect.color === 'rainbow' ? `hsl(${Math.floor(Math.random() * 360)} 85% 78%)` : effect.color;
+        particles.push({ x, y, px: x, py: y, vx: -b.vx * .06 + (Math.random() - .5) * 28,
+          vy: -b.vy * .06 + (Math.random() - .5) * 28, team: b.team, color, life, duration: life,
+          materialShape: effect.shape, size: 1.5 + Math.random() * 2, angle: Math.random() * Math.PI });
+      }
+    });
+  }
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   function clearEffects() {
     trails.forEach(trail => { trail.length = 0; });
@@ -155,6 +190,25 @@
     for (const p of particles) {
       const color = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? primary : secondary);
       ctx.globalAlpha = Math.min(1, p.life / p.duration * 2) * (p.celebration ? 1 : .65);
+      if (p.materialShape) {
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.angle);
+        ctx.strokeStyle = ctx.fillStyle = color; ctx.lineWidth = 1;
+        const size = p.size * Math.min(1, p.life / p.duration * 2);
+        ctx.beginPath();
+        if (p.materialShape === 'spark') {
+          ctx.moveTo(-size, 0); ctx.lineTo(size, 0); ctx.moveTo(0, -size); ctx.lineTo(0, size); ctx.stroke();
+        } else if (p.materialShape === 'streak') {
+          ctx.moveTo(-size * 2, 0); ctx.lineTo(size * 2, 0); ctx.stroke();
+        } else if (p.materialShape === 'shard') {
+          ctx.moveTo(0, -size * 1.6); ctx.lineTo(size, size); ctx.lineTo(-size, size); ctx.closePath(); ctx.fill();
+        } else if (p.materialShape === 'chip') {
+          ctx.fillRect(-size / 2, -size / 2, size, size);
+        } else {
+          ctx.arc(0, 0, size, 0, Math.PI * 2);
+          if (p.materialShape === 'bubble') ctx.stroke(); else ctx.fill();
+        }
+        ctx.restore(); continue;
+      }
       ctx.shadowColor = color;
       ctx.shadowBlur = 0;
       if (p.celebration) ctx.drawImage(glowSprite(color), p.x - 24, p.y - 24, 48, 48);
@@ -413,6 +467,17 @@
     }
   }
   function buildTeam() {
+    materialEmitters = [...roster, ...practice.slice(3)].map(entry => {
+      const seen = new Set();
+      const styles = [];
+      for (const attribute of Object.values(entry.model.attributes)) {
+        const style = materialStyles[attribute.texture];
+        if (!style || seen.has(attribute.texture)) continue;
+        seen.add(attribute.texture);
+        styles.push({ shape: style[0], color: style[1] || attribute.hex });
+      }
+      return { styles, time: 0 };
+    });
     $('team').replaceChildren();
     $('team-selector').replaceChildren();
     if ($('cpu-team')) $('cpu-team').replaceChildren();
@@ -1081,6 +1146,7 @@
         recordTrails();
         if (goal !== null || P.settled(bodies) || elapsed >= 12) finishTurn(goal);
       }
+      if (phase === 'play') emitMaterialTrails(delta);
       draw();
     } else if (active && (hadEffects || (!reducedMotion.matches && bodies.some(b => b.meter >= 100)))) draw();
     flushMeters();
