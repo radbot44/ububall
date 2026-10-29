@@ -15,8 +15,11 @@ async function authorize(overrides = {}) {
   return { result, calls, state, stateCookie };
 }
 test('Discord login validates state, exchanges credentials server-side and seals an HttpOnly session', async () => {
+  const login = await auth.login(new Request(env.ORIGIN + '/auth/discord'), env);
+  assert.equal(login.headers.get('X-Frame-Options'), 'DENY');
   const { result, calls } = await authorize();
   assert.equal(result.status, 302); assert.equal(result.headers.get('Location'), env.ORIGIN + '/');
+  assert.equal(result.headers.get('X-Frame-Options'), 'DENY');
   assert.equal(calls.length, 2);
   assert.equal(calls[0].options.body.get('client_secret'), env.DISCORD_CLIENT_SECRET);
   assert.equal(calls[0].options.body.get('redirect_uri'), env.ORIGIN + '/auth/callback');

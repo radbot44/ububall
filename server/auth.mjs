@@ -62,13 +62,13 @@ export async function login(request, env) {
   const url = new URL('https://discord.com/oauth2/authorize');
   url.search = new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID, response_type: 'code', scope: 'identify',
     redirect_uri: origin(env) + '/auth/callback', state: nonce }).toString();
-  return new Response(null, { status: 302, headers: { Location: url.href, 'Set-Cookie': setCookie(stateName, token, 600), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
+  return new Response(null, { status: 302, headers: { Location: url.href, 'Set-Cookie': setCookie(stateName, token, 600), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY' } });
 }
 export async function callback(request, env, fetchDiscord = fetch) {
   const url = new URL(request.url);
   const state = await unseal(cookie(request, stateName), env.SESSION_SECRET, 'oauth');
   const failed = () => new Response('Discord login failed. Please try again.', { status: 400,
-    headers: { 'Set-Cookie': setCookie(stateName, '', 0), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
+    headers: { 'Set-Cookie': setCookie(stateName, '', 0), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'X-Content-Type-Options': 'nosniff' } });
   if (!state || state.nonce !== url.searchParams.get('state') || !url.searchParams.get('code') || url.searchParams.has('error')) return failed();
   try {
     const response = await fetchDiscord('https://discord.com/api/v10/oauth2/token', { method: 'POST',
@@ -84,7 +84,7 @@ export async function callback(request, env, fetchDiscord = fetch) {
     const user = await userResponse.json();
     if (typeof user.id !== 'string' || !/^[1-9][0-9]{0,19}$/.test(user.id)) return failed();
     const sessionToken = await seal({ purpose: 'session', owner: user.id, csrf: random(), expires: Math.floor(Date.now() / 1000) + 86400 }, env.SESSION_SECRET);
-    const headers = new Headers({ Location: origin(env) + '/', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+    const headers = new Headers({ Location: origin(env) + '/', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY' });
     headers.append('Set-Cookie', setCookie(stateName, '', 0));
     headers.append('Set-Cookie', setCookie(sessionName, sessionToken, 86400));
     return new Response(null, { status: 302, headers });
