@@ -16,7 +16,7 @@
 </head>
 <body>
   <main>
-    <header><a class="brand" href="/" aria-label="uburoom ububall"><img src="assets/uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a><nav aria-label="Main"><a class="quiet" href="/">Play</a><a class="quiet active" href="/mint.html" aria-current="page">Mint &amp; Collection</a><label class="button quiet">Open .ubu<input id="import" type="file" accept=".ubu,application/json"></label><a class="quiet" href="/demo.html">Designer</a><a class="quiet nav-secondary" href="/voice.html">Voice Demo</a><a class="primary" id="login" href="/auth/discord" hidden>Sign in with Discord</a><button id="logout" hidden>Sign out</button></nav></header>
+    <header><a class="brand" href="/" aria-label="uburoom ububall"><img src="assets/uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a><nav aria-label="Main"><a class="quiet" href="/">Play</a><a class="quiet active" href="/mint.html" aria-current="page">Mint &amp; Collection</a><label class="button quiet">Open .ubu<input id="import" type="file" accept=".ubu,application/json"></label><a class="quiet" href="/demo.html">Designer</a><a class="quiet nav-secondary" href="/voice.html">Voice Demo</a><a class="primary" id="login" href="/auth/discord?return=/mint.html" hidden>Sign in with Discord</a><button id="logout" hidden>Sign out</button></nav></header>
     <section class="pack-shop" aria-labelledby="pack-title">
       <h1 id="pack-title">Packs</h1>
       <p class="pack-intro">Choose what catches your eye. Each pack holds five ubus for your collection and Ububall team.</p>
@@ -29,16 +29,19 @@
     <section id="collection" hidden aria-labelledby="collection-title">
       <div class="collection-header">
         <h2 id="collection-title">Your ubus</h2>
-        <label for="sort-ubus" class="sort-control">
-          <span>Sort</span>
-          <select id="sort-ubus">
-            <option value="recent">Recent</option>
-            <option value="old">Old</option>
-            <option value="rarity">Rarity</option>
-            <option value="serial">Serial number</option>
-            <option value="favorite">Favorite</option>
-          </select>
-        </label>
+        <div class="collection-actions">
+          <a id="play-with-ubus" class="button primary" href="/?roster=1">Play with my ubus</a>
+          <label for="sort-ubus" class="sort-control">
+            <span>Sort</span>
+            <select id="sort-ubus">
+              <option value="recent">Recent</option>
+              <option value="old">Old</option>
+              <option value="rarity">Rarity</option>
+              <option value="serial">Serial number</option>
+              <option value="favorite">Favorite</option>
+            </select>
+          </label>
+        </div>
       </div>
       <div id="ubus" class="grid"></div>
       <div id="collection-sentinel" class="collection-sentinel" aria-hidden="true"></div>

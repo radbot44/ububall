@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as auth from '../server/auth.mjs';
 const env = { ORIGIN: 'https://mint.example', DISCORD_CLIENT_ID: '123', DISCORD_CLIENT_SECRET: 'test-only', SESSION_SECRET: Buffer.alloc(32, 7).toString('base64url') };
-async function authorize(overrides = {}) {
-  const login = await auth.login(new Request(env.ORIGIN + '/auth/discord'), env);
+async function authorize(overrides = {}, loginPath = '/auth/discord') {
+  const login = await auth.login(new Request(env.ORIGIN + loginPath), env);
   const state = new URL(login.headers.get('Location')).searchParams.get('state');
   const stateCookie = login.headers.get('Set-Cookie').split(';')[0];
   const request = new Request(env.ORIGIN + '/auth/callback?code=test-code&state=' + state, { headers: { Cookie: stateCookie } });
@@ -43,4 +43,42 @@ test('invalid OAuth state and invalid Discord identities never create a session'
   assert.equal((await authorize({ id: '../bad' })).result.status, 400);
   assert.throws(() => auth.origin({ ORIGIN: 'http://evil.example' }));
   assert.throws(() => auth.origin({ ORIGIN: 'https://mint.example/path' }));
+});
+
+test('Discord login return navigation preserves safe paths and rejects malicious destinations', async () => {
+  const normal = await authorize();
+  assert.equal(normal.result.headers.get('Location'), env.ORIGIN + '/');
+
+  const mint = await authorize({}, '/auth/discord?return=/mint.html');
+  assert.equal(mint.result.headers.get('Location'), env.ORIGIN + '/mint.html');
+
+  const invite = await authorize({}, '/auth/discord?return=/?match=12345678-1234-4000-8000-123456789abc');
+  assert.equal(invite.result.headers.get('Location'), env.ORIGIN + '/?match=12345678-1234-4000-8000-123456789abc');
+
+  const returnTo = await authorize({}, '/auth/discord?return_to=/mint.html?sort=favorite');
+  assert.equal(returnTo.result.headers.get('Location'), env.ORIGIN + '/mint.html?sort=favorite');
+
+  for (const evil of [
+    '/auth/discord?return=https://evil.example/steal',
+    '/auth/discord?return=//evil.example/steal',
+    '/auth/discord?return=/\\evil.example/steal',
+    '/auth/discord?return=\\\\evil.example/steal',
+    '/auth/discord?return=javascript:alert(1)',
+    '/auth/discord?return=data:text/html,bad',
+    '/auth/discord?return=/auth/discord',
+    '/auth/discord?return=/api/session',
+    '/auth/discord?return=/bad%0D%0ALocation:evil.example'
+  ]) {
+    const res = await authorize({}, evil);
+    assert.equal(res.result.headers.get('Location'), env.ORIGIN + '/');
+  }
+
+  const login = await auth.login(new Request(env.ORIGIN + '/auth/discord?return=/mint.html'), env);
+  const state = new URL(login.headers.get('Location')).searchParams.get('state');
+  const stateCookie = login.headers.get('Set-Cookie').split(';')[0];
+  const callbackReq = new Request(env.ORIGIN + '/auth/callback?code=test-code&state=' + state + '&return=https://evil.example', {
+    headers: { Cookie: stateCookie }
+  });
+  const res = await auth.callback(callbackReq, env, async url => Response.json(url.endsWith('/token') ? { access_token: 't', token_type: 'Bearer' } : { id: '123' }));
+  assert.equal(res.headers.get('Location'), env.ORIGIN + '/mint.html');
 });

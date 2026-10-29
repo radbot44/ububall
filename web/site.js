@@ -662,7 +662,10 @@
     try {
       config = await api('/api/config');
       $('login').hidden = !config.login;
-      if (config.login) session = await api('/api/session');
+      if (config.login) {
+        $('login').href = '/auth/discord?return=' + encodeURIComponent((location.pathname === '/index.html' ? '/' : location.pathname) + location.search);
+        session = await api('/api/session');
+      }
       if (session?.owner) {
         $('login').hidden = true; $('logout').hidden = false;
         pendingKey = `ubumint:pending:${config.mint}:${session.owner}`;

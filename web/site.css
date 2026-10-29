@@ -327,6 +327,19 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
   margin-bottom: 12px;
   flex-wrap: wrap;
 }
+.collection-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+#play-with-ubus {
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
 .sort-control {
   display: inline-flex;
   align-items: center;
