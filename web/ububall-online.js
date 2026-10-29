@@ -4,12 +4,21 @@ function ububallOnline(hooks) {
   let id = null, socket = null, session = null, state = null, retry = null, heartbeat = null;
   let stopped = false, lastPong = 0, offset = 0, choices = [], collection = [], cursor = '', lastDraft = '', sentAt = 0;
   const status = text => { $('online-status').textContent = text; };
+  async function refreshSession() {
+    const response = await fetch('/api/session');
+    if (!response.ok) throw new Error('Could not check your Discord session. Reopen online settings to retry.');
+    session = await response.json();
+    $('online-login').hidden = Boolean(session?.owner);
+    $('online-account-status').textContent = session?.owner ? 'Signed in with Discord' : 'Both players need to sign in with Discord.';
+    $('online-create').disabled = !session?.owner;
+  }
   async function api(path, data) {
-    if (!session?.owner) session = await (await fetch('/api/session')).json();
+    if (!session?.owner) await refreshSession();
     if (!session?.owner) throw new Error('Sign in with Discord from Mint & collection, then return here.');
     const response = await fetch(path, data === undefined ? {} : { method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf }, body: JSON.stringify(data) });
     const result = await response.json();
+    if (response.status === 401) await refreshSession();
     if (!response.ok) throw new Error(result.error || 'Could not reach the match.');
     return result;
   }
@@ -101,16 +110,29 @@ function ububallOnline(hooks) {
     $('online-create-controls').hidden = false; $('online-lobby').hidden = true; $('online-dialog').close();
     hooks.onLeave();
   }
-  $('online-open').onclick = () => { $('online-dialog').showModal(); };
+  const settings = { mode: 'standard', policy: 'practice' };
+  for (const key of Object.keys(settings)) {
+    const group = $('online-' + key);
+    group.onclick = event => {
+      const button = event.target.closest('button[data-value]');
+      if (!button) return;
+      settings[key] = button.dataset.value;
+      for (const option of group.children) option.setAttribute('aria-pressed', String(option === button));
+    };
+  }
+  $('online-open').onclick = () => {
+    $('online-dialog').showModal();
+    refreshSession().catch(error => status(error.message));
+  };
   $('online-close').onclick = () => $('online-dialog').close();
   $('online-leave').onclick = leave;
   $('online-create').onclick = async () => {
     $('online-create').disabled = true;
     try {
-      const result = await api('/api/ububall', { mode: $('online-mode').value, teams: $('online-policy').value });
+      const result = await api('/api/ububall', { mode: settings.mode, teams: settings.policy });
       await enter(result.id, result);
     } catch (error) { status(error.message); }
-    finally { $('online-create').disabled = false; }
+    finally { $('online-create').disabled = !session?.owner; }
   };
   $('online-copy').onclick = async () => {
     try { await navigator.clipboard.writeText($('online-invite').value); status('Invite copied.'); }
