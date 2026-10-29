@@ -53,11 +53,9 @@
       if (plans[i].superArm && (classic || b.stunned || b.meter < 100 || !b.equippedSuper)) throw new Error('Super unavailable.');
       b.superArm = false;
     });
-    const frames = [], lastTouch = [null, null];
-    const record = tick => frames.push({ tick, bodies: bodies.map(b => ({ x: b.x, y: b.y, rotation: b.rotation,
-      vx: b.vx, vy: b.vy, omega: b.omega, radius: b.radius, reach: b.reach ?? b.radius, meter: b.meter ?? 0, guarding: Boolean(b.guarding),
-      superActive: b.superActive || null, stunned: Boolean(b.stunned || b.stunnedNext) })) });
-    P.startTurn(bodies, plans); record(0);
+    const initialBodies = structuredClone(bodies);
+    const lastTouch = [null, null];
+    P.startTurn(bodies, plans);
     let goal = null, ticks = 0;
     for (let tick = 1; tick <= 2880; tick++) {
       goal = P.step(bodies, P.DT, (a, b, speed) => {
@@ -73,7 +71,6 @@
       });
       ticks = tick;
       const done = goal !== null || P.settled(bodies) || tick === 2880;
-      if (tick % 8 === 0 || done) record(tick);
       if (done) break;
     }
     next.winner = finishTurn(P, bodies, next.stats, next.scores, goal, classic);
@@ -81,7 +78,7 @@
     next.turn++;
     next.phase = next.winner !== null ? 'over' : goal !== null ? 'goal' : 'plan';
     return { state: next, replay: { version: VERSION, turn: state.turn, plans, ticks, goal,
-      scorer: goal === null ? null : lastTouch[goal], frames } };
+      scorer: goal === null ? null : lastTouch[goal], initialBodies } };
   }
   const api = { VERSION, MODES, validatePlans, planningMilliseconds, gainMeter, finishTurn, resolveTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallMatch = api;

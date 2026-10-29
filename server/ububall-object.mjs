@@ -88,6 +88,7 @@ export class UbuballMatch extends DurableObject {
           this.room.selectTeam(owner, entries, data.supers);
         }
         if (path === '/forfeit') this.room.claimForfeit(owner, now);
+        if (path === '/rematch') this.room.rematch(owner, now);
         this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);
         return json(this.snapshot(owner, now));
       } catch (error) { return json({ error: error.message }, 400); }
@@ -107,9 +108,20 @@ export class UbuballMatch extends DurableObject {
         if (data.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong', now })); await this.schedule(now); return;
         }
+        if (data.type === 'rematch') {
+          this.room.rematch(a.owner, now);
+          this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);
+          return;
+        }
         if (data.type !== 'moves' || Object.keys(data).some(k => !['type', 'turn', 'moves', 'lock'].includes(k))) throw new Error('Invalid message.');
         this.room.submit(a.owner, data.turn, data.moves, data.lock, now);
-        this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);
+        this.room.advance(now); this.save();
+        if (data.lock === false && this.room.state.phase === 'plan') {
+          ws.send(JSON.stringify(this.snapshot(a.owner, now)));
+        } else {
+          this.broadcast(now);
+        }
+        await this.schedule(now);
       } catch (error) {
         // Deadline may have passed before the alarm ran; resolve the last accepted draft.
         this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);

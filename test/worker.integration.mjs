@@ -287,7 +287,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     guestSocket.ws.send(JSON.stringify({ type: 'moves', turn: 1, moves, lock: true }));
     const result = await hostSocket.wait(m => m.phase === 'resolving');
     assert.equal(result.game.turn, 2); assert.equal(result.replay.plans.length, 6);
-    assert.ok(result.replay.frames.length > 0);
+    assert.equal(result.replay.initialBodies.length, 7);
     const nextTurn = await hostSocket.wait(m => m.phase === 'plan' && m.turn === 2);
     assert.equal(nextTurn.locked[0], false);
     guestSocket.ws.close();

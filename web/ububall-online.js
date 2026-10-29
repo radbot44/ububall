@@ -67,6 +67,7 @@ function ububallOnline(hooks) {
     $('online-ready').disabled = next.ready[next.seat];
     $('online-ready').textContent = next.ready[next.seat] ? 'Team ready' : 'Ready to play';
     if (!before || before.phase !== next.phase || (!choices.length && next.phase === 'lobby')) teamPicker();
+    if (next.phase === 'lobby' && next.teams === 'owned' && !collection.length && !loadingCollection) loadCollection();
     if (next.phase === 'lobby') status(!next.occupied[1] ? 'Share the invite link with your opponent.' : next.ready[next.seat] ? 'Waiting for your opponent to choose a team.' : 'Choose your team, then ready up.');
     else {
       $('online-dialog').close();
@@ -147,7 +148,10 @@ function ububallOnline(hooks) {
       }));
     } catch (error) { status(error.message); $('online-ready').disabled = false; }
   };
-  $('online-load').onclick = async () => {
+  let loadingCollection = false;
+  async function loadCollection() {
+    if (loadingCollection) return;
+    loadingCollection = true;
     $('online-load').disabled = true;
     try {
       const data = await api('/api/ubus?sort=recent' + (cursor ? '&after=' + cursor : ''));
@@ -157,8 +161,9 @@ function ububallOnline(hooks) {
       cursor = data.next || ''; teamPicker();
       $('online-load').textContent = cursor ? 'Load more ubus' : 'Refresh collection';
     } catch (error) { status(error.message); }
-    finally { $('online-load').disabled = false; }
-  };
+    finally { loadingCollection = false; $('online-load').disabled = false; }
+  }
+  $('online-load').onclick = loadCollection;
   $('online-forfeit').onclick = async () => {
     try { receive(await api('/api/ububall/' + id + '/forfeit', {})); }
     catch (error) { hooks.onError(error.message); }
@@ -171,6 +176,14 @@ function ububallOnline(hooks) {
   return {
     get active() { return Boolean(id); }, get state() { return state; },
     now: () => Date.now() + offset,
+    rematch() {
+      if (!state || state.phase !== 'over') return;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'rematch' }));
+      } else {
+        api('/api/ububall/' + id + '/rematch', {}).then(receive).catch(error => hooks.onError(error.message));
+      }
+    },
     send(moves, lock = false) {
       if (!state || state.phase !== 'plan' || state.locked[state.seat] || !state.connected.every(Boolean) || socket?.readyState !== WebSocket.OPEN) return false;
       const text = JSON.stringify({ type: 'moves', turn: state.turn, moves, lock });

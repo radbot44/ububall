@@ -1476,33 +1476,80 @@
       return b;
     });
   }
-  function playOnlineReplay() {
-    const replay = onlineReplay, tick = Math.min(replay.ticks, Math.max(0, (online.now() - replay.startedAt) / 1000 / P.DT));
-    const frames = replay.frames;
-    let index = Math.min(frames.length - 1, Math.floor(tick / 8));
-    while (index > 0 && frames[index].tick > tick) index--;
-    const a = frames[index], b = frames[Math.min(index + 1, frames.length - 1)];
-    const blend = a === b ? 0 : Math.min(1, (tick - a.tick) / (b.tick - a.tick));
-    const samples = a.bodies.map((body, i) => {
-      const sample = { ...body };
-      for (const key of ['x', 'y', 'rotation']) sample[key] += (b.bodies[i][key] - body[key]) * blend;
-      return sample;
-    });
-    viewBodies(samples, online.state.seat).forEach((sample, i) => { Object.assign(bodies[i], sample); dirtyMeters.add(bodies[i]); });
-    if (!replay.supersPlayed) {
-      replay.supersPlayed = true;
-      replay.plans.forEach((p, idx) => {
-        if (p.superArm) {
-          const viewIdx = online.state.seat ? (idx < 3 ? idx + 3 : idx - 3) : idx;
-          const superKey = bodies[viewIdx]?.equippedSuper?.key;
-          if (superKey && window.ubuAudio) window.ubuAudio.playSuper?.(superKey, 'play');
+  function toViewBody(cb) {
+    if (!cb) return null;
+    const idx = onlineReplay?.simBodies?.indexOf(cb);
+    if (idx === undefined || idx < 0) return cb;
+    const viewIdx = online?.state?.seat ? (idx < 3 ? idx + 3 : idx < 6 ? idx - 3 : 6) : idx;
+    return bodies[viewIdx] || cb;
+  }
+  function syncViewBodies() {
+    if (!onlineReplay?.simBodies) return;
+    const seat = online?.state?.seat;
+    onlineReplay.simBodies.forEach((cb, i) => {
+      const viewIdx = seat ? (i < 3 ? i + 3 : i < 6 ? i - 3 : 6) : i;
+      const vb = bodies[viewIdx];
+      if (vb) {
+        if (seat) {
+          vb.x = 1000 - cb.x; vb.y = 600 - cb.y;
+          vb.vx = -cb.vx; vb.vy = -cb.vy;
+          vb.rotation = cb.rotation + Math.PI;
+        } else {
+          vb.x = cb.x; vb.y = cb.y;
+          vb.vx = cb.vx; vb.vy = cb.vy;
+          vb.rotation = cb.rotation;
         }
-      });
+        vb.omega = cb.omega;
+        vb.meter = cb.meter ?? 0;
+        vb.guarding = Boolean(cb.guarding);
+        vb.superActive = cb.superActive || null;
+        vb.stunned = Boolean(cb.stunned || cb.stunnedNext);
+        vb.stuckTo = cb.stuckTo ? toViewBody(cb.stuckTo) : null;
+        dirtyMeters.add(vb);
+      }
+    });
+  }
+  function replayCollision(a, b, speed) {
+    syncViewBodies();
+    handleCollision(toViewBody(a), toViewBody(b), speed);
+  }
+  function replayWall(body, velocity, wallType, nx, ny) {
+    syncViewBodies();
+    const seat = online?.state?.seat;
+    handleWall(toViewBody(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny);
+  }
+  function replayShockwave(source, radius) {
+    syncViewBodies();
+    handleShockwave(toViewBody(source), radius);
+  }
+  function replaySuper(key, phase, body, target = null) {
+    syncViewBodies();
+    handleSuper(key, phase, toViewBody(body), target ? toViewBody(target) : null);
+  }
+  function playOnlineReplay() {
+    const replay = onlineReplay;
+    if (!replay || !replay.simBodies) return;
+    const elapsedSec = Math.max(0, (online.now() - replay.startedAt) / 1000);
+    const targetTick = Math.min(replay.ticks, Math.floor(elapsedSec / P.DT));
+    if (replay.currentTick === undefined) replay.currentTick = 0;
+
+    if (targetTick - replay.currentTick > 60) {
+      while (replay.currentTick < targetTick - 8) {
+        P.step(replay.simBodies, P.DT);
+        replay.currentTick++;
+      }
     }
+
+    while (replay.currentTick < targetTick) {
+      P.step(replay.simBodies, P.DT, replayCollision, replayWall, replayShockwave, replaySuper);
+      replay.currentTick++;
+    }
+    syncViewBodies();
+
     if (replay.goal !== null) {
       const preScores = online.state.seat ? [...online.state.game.scores].reverse() : [...online.state.game.scores];
       const viewGoal = replay.goal === online.state.seat ? 0 : 1;
-      if (tick < replay.ticks) {
+      if (replay.currentTick < replay.ticks) {
         preScores[viewGoal]--;
         scores = preScores;
       } else {
@@ -1529,7 +1576,17 @@
           sync();
         }
       }
+    } else {
+      scores = online.state.seat ? [...online.state.game.scores].reverse() : [...online.state.game.scores];
     }
+
+    if (replay.currentTick >= replay.ticks) {
+      viewBodies(online.state.game.bodies, online.state.seat).forEach((sample, i) => {
+        Object.assign(bodies[i], sample);
+        dirtyMeters.add(bodies[i]);
+      });
+    }
+
     recordTrails(); emitMaterialTrails(Math.min(.05, 1 / 60)); draw();
   }
   online = ububallOnline({
@@ -1539,7 +1596,17 @@
       $('opponent-label').textContent = 'Opponent'; $('opponent-heading').textContent = 'Opponent team';
       $('online-match-status').hidden = false; $('new-match').disabled = true;
       matchMode = s.mode; document.body.classList.toggle('classic-match', classicMode());
-      $('mode-label').textContent = 'Online · ' + $('online-mode').querySelector(`option[value="${s.mode}"]`).textContent;
+      $('mode-label').textContent = 'Online · ' + ($('match-mode').querySelector(`option[value="${s.mode}"]`)?.textContent || s.mode);
+      const rematchBtn = $('online-rematch');
+      if (rematchBtn) {
+        rematchBtn.hidden = s.phase !== 'over';
+        if (s.phase === 'over') {
+          const myRematch = s.rematch?.[s.seat];
+          const oppRematch = s.rematch?.[1 - s.seat];
+          rematchBtn.disabled = Boolean(myRematch);
+          rematchBtn.textContent = myRematch ? 'Rematch requested' : oppRematch ? 'Accept rematch' : 'Rematch';
+        }
+      }
       if (!s.game) { phase = 'waiting'; onlineReplay = null; sync(); draw(); return; }
       const rosterKey = JSON.stringify(s.rosters);
       if (rosterKey !== onlineRoster) {
@@ -1565,9 +1632,29 @@
         angle: p.power === 0 ? 0 : (((p.angle + (s.seat ? Math.PI : 0)) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
       }));
       plans.forEach((p, i) => { bodies[i].superArm = fresh ? s.moves[i].superArm : armed[i]; });
-      onlineReplay = s.replay;
+      if (!s.replay) {
+        onlineReplay = null;
+      } else if (onlineReplay?.turn !== s.replay.turn) {
+        onlineReplay = s.replay;
+        onlineReplay.currentTick = 0;
+        onlineReplay.simBodies = structuredClone(s.replay.initialBodies);
+        const classic = classicMode();
+        onlineReplay.simBodies.forEach((b, i) => {
+          if (i < 6) {
+            const entry = (i < 3 ? s.rosters[0]?.[i] : s.rosters[1]?.[i - 3]);
+            if (entry) {
+              const model = ubu.decode(ubu.fromCode(entry.dna));
+              b.voice = model.voice;
+              b.name = model.parts?.fullName;
+              b.equippedSuper = classic ? null : P.SUPERS[entry.superId];
+            }
+          }
+        });
+        P.startTurn(onlineReplay.simBodies, onlineReplay.plans, replaySuper);
+        syncViewBodies();
+      }
       phase = s.phase === 'over' ? 'over' : s.phase === 'resolving' ? 'play' : s.connected.every(Boolean) && !s.locked[s.seat] ? 'plan' : 'waiting';
-      $('online-match-status').textContent = s.phase === 'over' ? (s.winner === s.seat ? 'You win!' : 'Opponent wins.') : !s.connected.every(Boolean) ? 'Disconnected · planning paused' : s.locked[s.seat] ? 'Moves locked · waiting for opponent' : s.phase === 'resolving' ? 'Turn in motion' : 'Plan your moves';
+      $('online-match-status').textContent = s.phase === 'over' ? (s.rematch?.[s.seat] ? 'Rematch requested · waiting for opponent' : s.rematch?.[1 - s.seat] ? 'Opponent requested a rematch!' : (s.winner === s.seat ? 'You win!' : 'Opponent wins.')) : !s.connected.every(Boolean) ? 'Disconnected · planning paused' : s.locked[s.seat] ? 'Moves locked · waiting for opponent' : s.phase === 'resolving' ? 'Turn in motion' : 'Plan your moves';
       sync(); if (onlineReplay) playOnlineReplay(); else draw();
     },
     onDisconnect() { onlineDisconnected = true; phase = 'waiting'; drag = null; $('online-match-status').textContent = 'Reconnecting · planning paused'; sync(); draw(); },
@@ -1577,8 +1664,13 @@
       document.body.classList.remove('online-match');
       $('online-open').textContent = 'Play online';
       $('new-match').disabled = false; $('online-match-status').hidden = true; $('online-forfeit').hidden = true;
+      const rematchBtn = $('online-rematch'); if (rematchBtn) rematchBtn.hidden = true;
       $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
       draft = practice.slice(0, 3); newMatch();
     }
   });
+  const rematchBtn = $('online-rematch');
+  if (rematchBtn) {
+    rematchBtn.onclick = () => { online?.rematch?.(); };
+  }
 })();

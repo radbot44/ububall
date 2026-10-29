@@ -89,7 +89,7 @@ test('authoritative resolution is repeatable, immutable, bounded and serializabl
   const moves=Array.from({length:6},(_,i)=>({angle:i<3?0:Math.PI,power:.8,spin:.3,superArm:false}));
   const original=structuredClone(state), first=M.resolveTurn(P,state,moves);
   assert.deepEqual(state,original);assert.deepEqual(first,M.resolveTurn(P,state,moves));
-  assert.ok(first.replay.ticks<=2880);assert.ok(first.replay.frames.length<=361);
+  assert.ok(first.replay.ticks<=2880);assert.equal(first.replay.initialBodies.length,7);
   assert.equal(first.state.turn,2);assert.doesNotThrow(()=>JSON.stringify(first));
   moves[0].superArm=true;assert.throws(()=>M.resolveTurn(P,state,moves));
 });
@@ -111,8 +111,33 @@ test('authoritative supers consume meter and preserve the no-gain rule through s
     const moves=Array.from({length:6},(_,i)=>({angle:0,power:i===0?.7:0,spin:.4,superArm:i===0}));
     const result=M.resolveTurn(P,state,moves);
     assert.equal(result.state.bodies[0].meter,0,key);
-    assert.equal(result.replay.frames[0].bodies[0].superActive,key);
+    assert.equal(result.replay.initialBodies[0].meter,100,key);
     assert.equal(result.state.bodies[0].superActive,null);
     assert.doesNotThrow(()=>JSON.stringify(result));
   }
+});
+
+test('MatchRoom rematch requires match over and agreement from both players', () => {
+  const room = new MatchRoom('host', 'standard', 'practice');
+  const ubu = require('../shared/ubu.js');
+  room.join('guest');
+  room.connect('host', 1000); room.connect('guest', 1000);
+  assert.throws(() => room.rematch('host', 1000));
+  const hostSupers = room.state.practice[0].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
+  const guestSupers = room.state.practice[1].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
+  room.selectTeam('host', room.state.practice[0], hostSupers);
+  room.selectTeam('guest', room.state.practice[1], guestSupers);
+  room.advance(1000);
+  assert.equal(room.state.phase, 'plan');
+  assert.throws(() => room.rematch('host', 1000));
+  room.state.phase = 'over'; room.state.winner = 0; room.state.turn = 10;
+  room.rematch('host', 2000);
+  assert.deepEqual(room.state.rematch, [true, false]);
+  assert.equal(room.state.phase, 'over');
+  room.rematch('guest', 2000);
+  assert.equal(room.state.phase, 'plan');
+  assert.equal(room.state.turn, 1);
+  assert.equal(room.state.winner, null);
+  assert.deepEqual(room.state.rematch, [false, false]);
+  assert.deepEqual(room.state.game.scores, [0, 0]);
 });

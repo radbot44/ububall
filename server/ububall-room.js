@@ -9,7 +9,7 @@ class MatchRoom {
     if (typeof host !== 'string' || !host || !rules.MODES.includes(mode) || !['owned', 'practice'].includes(teams)) throw new Error('Invalid lobby.');
     this.state = { version: rules.VERSION, mode, teams, players: [host, null], phase: 'lobby', turn: 1,
       scorelessTurns: 0, drafts: [hold(), hold()], locked: [false, false], connected: [false, false],
-      disconnectedAt: [null, null], deadline: null, remaining: null, winner: null };
+      disconnectedAt: [null, null], deadline: null, remaining: null, winner: null, rematch: [false, false] };
     this.state.rosters = [null, null];
     this.state.practice = [null, null];
     this.state.game = null;
@@ -75,7 +75,7 @@ class MatchRoom {
       const result = rules.resolveTurn(P, s.game, moves);
       s.game = result.state; s.replay = result.replay;
       s.turn = s.game.turn; s.scorelessTurns = s.game.scorelessTurns;
-      s.playUntil = now + Math.ceil(s.replay.ticks * P.DT * 1000) + 750;
+      s.playUntil = now + Math.ceil(s.replay.ticks * P.DT * 1000) + (s.replay.goal !== null ? 2200 : 750);
       s.replay.startedAt = now;
     }
   }
@@ -125,6 +125,20 @@ class MatchRoom {
         s.disconnectedAt[other] === null || now - s.disconnectedAt[other] < 60000) throw new Error('Forfeit is not available.');
     s.phase = 'over'; s.winner = i; s.deadline = null;
   }
+  rematch(owner, now) {
+    const s = this.state, i = this.seat(owner);
+    if (s.phase !== 'over') throw new Error('Match is not over.');
+    s.rematch[i] = true;
+    if (s.rematch.every(Boolean) && s.connected.every(Boolean)) {
+      s.rematch = [false, false];
+      s.winner = null;
+      s.turn = 1;
+      s.scorelessTurns = 0;
+      s.phase = 'lobby';
+      s.game = { version: rules.VERSION, mode: s.mode, ...this.kickoff(), scores: [0, 0], scorelessTurns: 0, turn: 1 };
+      this.beginPlanning(now);
+    }
+  }
   view(owner) {
     const s = this.state, seat = this.seat(owner);
     return { version: s.version, seat, mode: s.mode, teams: s.teams, phase: s.phase, turn: s.turn,
@@ -133,7 +147,7 @@ class MatchRoom {
       ready: s.rosters.map(Boolean), rosters: structuredClone(s.rosters),
       practice: s.teams === 'practice' ? structuredClone(s.practice[seat]) : null,
       game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
-      playUntil: s.playUntil, disconnectedAt: [...s.disconnectedAt] };
+      playUntil: s.playUntil, disconnectedAt: [...s.disconnectedAt], rematch: [...s.rematch] };
   }
 }
 module.exports = { MatchRoom };
