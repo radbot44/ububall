@@ -1,6 +1,6 @@
 # Ubu DNA specification
 
-Owner-approved replacement schema, 2026-10-26 (America/New_York). DNA is exactly 1024 bits (128 bytes). Previous 256-bit beta and 512-bit ubus are obsolete and rejected, with no conversion or compatibility path. Assigned fields have fixed positions; later additions may use only the unassigned bits. All sixteen assigned materials have distinct rendering patterns.
+Owner-approved replacement schema, 2026-10-26 (America/New_York). DNA is exactly 1024 bits (128 bytes). Previous 256-bit beta and 512-bit ubus are obsolete and rejected, with no conversion or compatibility path. Assigned fields have fixed positions; later additions may use only the unassigned bits. All thirty-two assigned materials have distinct rendering patterns.
 
 ## Input and representation
 

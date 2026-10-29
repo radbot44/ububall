@@ -67,7 +67,7 @@ To deploy after merging this PR, update the source checkout and run `./install.p
 
 ## First setup and updates
 
-On Windows, use PowerShell with Node 22.13+ and Git installed. From `C:\dev\ubumint`, run:
+On Windows, use PowerShell with Node 22.13+ and Git installed. From `C:\dev\ububall` (or legacy `C:\dev\ubumint`), run:
 
 ```powershell
 .\install.ps1                 # install current local source, test, deploy
@@ -97,7 +97,7 @@ Setup prompts for the Worker name, origin and Discord credentials (the secret is
 
 ### Fresh mint reset
 
-To keep the installation, domain, Discord credentials, batch size and allowance but start a new mint, run `C:\dev\ubumint-cloudflare\deploy.ps1 -ResetMint`. To install current source updates and reset in one step, run `C:\dev\ubumint\install.ps1 -ResetMint` instead. Reset is an explicit operation, never part of a normal update. It cannot be combined with Setup, DryRun or InstallOnly.
+To keep the installation, domain, Discord credentials, batch size and allowance but start a new mint, run `C:\dev\ubumint-cloudflare\deploy.ps1 -ResetMint`. To install current source updates and reset in one step, run `C:\dev\ububall\install.ps1 -ResetMint` instead. Reset is an explicit operation, never part of a normal update. It cannot be combined with Setup, DryRun or InstallOnly.
 
 Dependencies and both test suites must pass before reset changes settings. Reset then backs up the previous settings under `%LOCALAPPDATA%\ubumint\backups\reset-*`, generates a new mint ID, signing keys and session secret, and deploys. The different mint ID selects a fresh Durable Object registry: empty collections, unused lifetime allowances and serial allocation starting at 1. Previous sessions expire and previous certificates are no longer trusted by the new mint. This preserves permanent serial uniqueness within each mint identity. The old Cloudflare database is retained separately, not physically deleted; saved settings backups are not database backups.
 
