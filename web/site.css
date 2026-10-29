@@ -22,6 +22,20 @@ button, .button, .quiet, .primary {
   color: var(--text); font: inherit; cursor: pointer; touch-action: manipulation;
 }
 button:hover, .button:hover, .quiet:hover { background: var(--hover); }
+nav a[aria-current="page"], nav a.active {
+  border: 1px solid color-mix(in srgb, var(--primary) 70%, var(--border));
+  background: color-mix(in srgb, var(--elevated) 75%, var(--primary) 25%);
+  color: var(--text);
+  font-weight: 600;
+}
+.nav-secondary {
+  color: var(--muted);
+  opacity: 0.85;
+}
+.nav-secondary:hover {
+  opacity: 1;
+  color: var(--text);
+}
 button:disabled { opacity: .4; cursor: default; }
 .primary { background: var(--primary); color: var(--background); font-weight: 600; }
 .primary:hover { background: color-mix(in srgb, var(--primary), white 10%); }

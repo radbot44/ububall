@@ -61,7 +61,7 @@ function ububallOnline(hooks) {
     const before = state; state = next; offset = next.now - Date.now();
     $('online-create-controls').hidden = true;
     $('online-lobby').hidden = false;
-    $('online-invite').value = location.origin + location.pathname + '?match=' + id;
+    $('online-invite').value = location.origin + '/?match=' + id;
     $('online-ready').hidden = next.phase !== 'lobby';
     $('online-load').hidden = next.phase !== 'lobby' || next.teams !== 'owned';
     $('online-ready').disabled = next.ready[next.seat];
@@ -95,7 +95,7 @@ function ububallOnline(hooks) {
   }
   async function enter(matchId, initial) {
     id = matchId; state = null; choices = []; stopped = false; lastDraft = '';
-    const url = new URL(location.href); url.searchParams.set('match', id); history.replaceState(null, '', url);
+    const url = new URL(location.href); url.pathname = '/'; url.searchParams.set('match', id); history.replaceState(null, '', url);
     receive(initial); connect();
     clearInterval(heartbeat);
     heartbeat = setInterval(() => {
@@ -107,7 +107,7 @@ function ububallOnline(hooks) {
   }
   function leave() {
     stopped = true; clearTimeout(retry); clearInterval(heartbeat); socket?.close(); socket = null; id = null; state = null;
-    const url = new URL(location.href); url.searchParams.delete('match'); history.replaceState(null, '', url);
+    const url = new URL(location.href); url.pathname = '/'; url.searchParams.delete('match'); history.replaceState(null, '', url);
     $('online-create-controls').hidden = false; $('online-lobby').hidden = true; $('online-dialog').close();
     hooks.onLeave();
   }

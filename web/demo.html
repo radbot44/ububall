@@ -93,10 +93,27 @@
     .fanfare-note-chip:hover { border-color: #777; color: var(--text); }
     .fanfare-note-chip.is-rest { opacity: .45; font-style: italic; }
     .fanfare-note-chip.is-playing-note { background: #ff7197; color: #121315; font-weight: 700; border-color: #fff; transform: scale(1.1); box-shadow: 0 0 8px rgba(255, 113, 151, 0.6); }
+    .demo-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 24px; flex-wrap: wrap; }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; }
+    .brand img { width: 140px; height: auto; display: block; }
+    .brand span { color: var(--muted); border-left: 1px solid var(--border); padding-left: 12px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+    nav.demo-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    nav.demo-nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); }
+    nav.demo-nav a:hover, nav.demo-nav a.active { color: var(--text); border-color: var(--muted); }
+    nav.demo-nav a.active { font-weight: 600; border-color: #ff9954; color: var(--text); }
   </style>
 </head>
 <body>
   <main>
+    <header class="demo-header">
+      <a class="brand" href="/" aria-label="uburoom ububall"><img src="assets/uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a>
+      <nav class="demo-nav" aria-label="Main">
+        <a href="/">Play</a>
+        <a href="/mint.html">Mint &amp; Collection</a>
+        <a href="/demo.html" class="active" aria-current="page">Designer</a>
+        <a href="/voice.html">Voice Demo</a>
+      </nav>
+    </header>
     <section aria-label="Ubu generator">
       <div class="name-box" id="name-box" aria-live="polite">
         <button class="favorite-toggle" id="favorite-toggle" type="button" aria-label="Save to Ubu Storage" aria-pressed="false">♡</button>

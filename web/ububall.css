@@ -1,5 +1,102 @@
 /* Ububall arena and layout */
 .ball-page { max-width: 1520px; width: min(1520px, calc(100% - 32px)); }
+
+/* Featured Mint entry point on Ububall homepage */
+.mint-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: color-mix(in srgb, var(--card) 92%, var(--primary) 8%);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, var(--primary) 40%);
+  border-radius: 14px;
+  padding: 8px 16px;
+  margin-bottom: 14px;
+}
+.mint-entry-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+.mint-entry-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 32%, transparent);
+  border-radius: 6px;
+  padding: 3px 8px;
+  flex-shrink: 0;
+}
+.mint-entry-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.35;
+}
+.mint-entry-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--background);
+  background: var(--primary);
+  border-radius: 8px;
+  padding: 6px 14px;
+  min-height: 32px;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+.mint-entry-cta:hover {
+  background: color-mix(in srgb, var(--primary), white 10%);
+}
+@media (max-width: 650px) {
+  .mint-entry {
+    padding: 6px 10px;
+    gap: 8px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+  }
+  .mint-entry-badge {
+    display: none;
+  }
+  .mint-entry-text {
+    font-size: 11.5px;
+    line-height: 1.25;
+  }
+  .mint-entry-cta {
+    padding: 4px 10px;
+    font-size: 11.5px;
+    min-height: 28px;
+  }
+}
+@media (max-width: 480px) {
+  .mint-entry {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .mint-entry-text {
+    font-size: 11px;
+  }
+  .mint-entry-cta {
+    justify-content: center;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+}
 .game-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .heading-actions { display: flex; align-items: center; gap: 16px; }
 .toggle-switch {

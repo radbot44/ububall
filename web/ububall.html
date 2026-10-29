@@ -1,147 +1,15 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="dark"><title>Ububall · Ubu Mint</title>
-  <link rel="stylesheet" href="site.css"><link rel="stylesheet" href="ububall.css">
-  <script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script>
-  <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-online.js" defer></script><script src="ububall.js" defer></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ububall</title>
+  <script>
+    location.replace('/' + location.search + location.hash);
+  </script>
+  <meta http-equiv="refresh" content="0; url=/">
 </head>
-<body><main class="ball-page">
-  <header><a class="brand" href="/"><img src="assets/uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a><nav aria-label="Main"><a class="quiet" href="/">Mint & collection</a><a class="quiet" href="/demo.html">Designer</a></nav></header>
-  <div class="game-heading">
-    <h1>ububall</h1>
-    <div class="heading-actions">
-      <label class="toggle-switch" title="Toggle between compact and full stat profiles">
-        <input type="checkbox" id="toggle-full-stats">
-        <span class="toggle-track"></span>
-        <span>Full stats</span>
-      </label>
-      <button id="online-open">Play online</button><button id="new-match">New match</button>
-    </div>
-  </div>
-  <div class="arena-layout">
-    <aside class="team-column home-column" aria-label="Your team">
-      <div class="column-heading"><span class="home">Your team</span></div>
-      <div id="team" class="team"></div>
-    </aside>
-    <section class="stadium" aria-label="Ububall match">
-      <div class="scoreboard">
-        <button id="aim-mode" type="button" aria-pressed="false">Aim: drag arrow</button>
-        <div class="scoreboard-content">
-          <span class="home">You <strong id="home-score">0</strong></span>
-          <div class="phase-info"><span id="phase">Plan · Turn 1</span><small id="mode-label">First to five</small><span id="blitz-clock" hidden></span></div>
-          <span class="away"><strong id="away-score">0</strong> <span id="opponent-label">CPU</span></span>
-        </div>
-        <div class="stadium-toolbar">
-          <button id="btn-rotate" class="stadium-tool-btn" type="button" aria-label="Rotate stadium orientation" title="Rotate orientation (Portrait / Landscape)">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="7" y="3" width="10" height="18" rx="2"/>
-              <path d="M3 10V6h4"/>
-              <path d="M21 14v4h-4"/>
-
-            </svg>
-          </button>
-          <button id="btn-fullscreen" class="stadium-tool-btn" type="button" aria-label="Toggle fullscreen" title="Toggle fullscreen">
-            <svg id="icon-fs-enter" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-            </svg>
-            <svg id="icon-fs-exit" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display: none;">
-              <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-      <div class="stadium-stage-area">
-      <!-- Tabler rotate and rotate-clockwise icons, copied from uburoom web/icons.js.
-https://github.com/tabler/tabler-icons
-MIT License
-
-Copyright (c) 2020-2026 Paweł Kuna
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-      -->
-      <div class="spin-control" id="field-spin" hidden>
-        <button id="spin-less" type="button" aria-label="Decrease spin by 10 percent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5"/></svg></button>
-        <input id="shot-spin" type="range" min="-100" max="100" step="1" value="0" aria-label="Selected ubu spin: counterclockwise to clockwise">
-        <button id="spin-more" type="button" aria-label="Increase spin by 10 percent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5"/></svg></button>
-      </div>
-
-        <div class="rink-stage">
-          <div class="rink-wrap">
-            <canvas id="rink" width="1000" height="600" aria-label="Playing field. Use the team buttons and direction and power sliders below to plan your launches."></canvas>
-            <div id="skaters" aria-hidden="true"></div>
-          </div>
-        </div>
-      </div>
-      <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
-      <div id="team-selector" class="team-selector" aria-label="Select ubu"></div>
-
-      <div class="stadium-actions">
-        <span id="online-match-status" role="status" hidden></span><button id="online-rematch" hidden>Rematch</button><button id="online-forfeit" hidden>Claim forfeit</button>
-        <button id="stadium-super-btn" type="button" class="stadium-super-btn" aria-label="Arm super for selected ubu">
-          <img id="stadium-super-icon" class="super-icon" alt="" src="assets/00_stalwart.png">
-          <span id="stadium-super-text">Super 0%</span>
-        </button>
-        <div class="team-launch"><span id="plan-summary"></span><button class="primary" id="launch">Launch team</button></div>
-      </div>
-    </section>
-    <aside class="team-column away-column" aria-label="CPU team">
-      <div class="column-heading"><span class="away" id="opponent-heading">CPU team</span></div>
-      <div id="cpu-team" class="team cpu-team"></div>
-    </aside>
-  </div>
-  <details class="rules" id="stat-testing">
-    <summary>Stat testing</summary>
-      <details class="shot-controls"><summary>Shot controls · <span id="selected-name"></span></summary>
-    <div class="controls"><label>Direction <output id="angle-value">0°</output><input id="angle" type="range" min="0" max="359" value="0"><small>0° right · 90° down · 180° left · 270° up</small></label><label>Power <output id="power-value">0%</output><input id="power" type="range" min="0" max="100" value="0"><small>0% holds position</small></label><button id="hold">Hold this ubu</button></div>
-      </details>
-
-    <p class="hint">Drag from an ubu toward the target to aim and set power, or adjust its arrowhead. Use the Spin slider beside the selected ubu to curve your shot. You attack the right goal.</p>
-    <p>Temporary values; no DNA changes. Set each stat from 0 to 1023. Normal is 511. Applying values resets the field and score, keeping your planned shot.</p>
-    <label>Ubu <select id="stat-player"><option value="0">Your ubu 1</option><option value="1">Your ubu 2</option><option value="2">Your ubu 3</option><option value="3">CPU ubu 1</option><option value="4">CPU ubu 2</option><option value="5">CPU ubu 3</option></select></label>
-    <div class="controls"><label>Equipped Super <select id="stat-super"></select></label><img id="stat-super-thumb" class="stat-super-thumb" alt="" src="assets/00_stalwart.png"><button id="fill-meter" type="button">Fill Super Meter (100%)</button></div>
-    <div id="stat-inputs" class="stat-inputs"></div>
-    <p id="stat-preview"></p>
-    <div class="actions"><button id="apply-stats">Apply & reset field</button><button id="normal-stats">All stats normal</button><button id="reset-field">Reset field</button><button id="restore-shot" disabled>Reuse last shot at kickoff</button><label><input id="cpu-hold" type="checkbox"> Hold CPU launches for testing</label></div>
-  </details>
-  <details class="rules"><summary>How to play</summary><p>Both teams launch at the same time. The CPU plans from the field positions, without seeing your arrows. All three ubus can strike the ball, block shots, bump opponents, and enter the goal nets. After motion stops, plan again from the new positions. A goal resets the field; first to five wins.</p><p>Stats are temporary test values, separate from DNA. Spin curves travel and affects collisions. Practice ubus are custom characters, not minted collectibles. Matches stay in this browser and award no mint items.</p></details>
-  <dialog id="roster-dialog"><h2>Choose your team</h2><label>Mode <select id="match-mode"><option value="standard">Ububall</option><option value="classic">Ububall Classic</option><option value="blitz">Ububall Blitz</option><option value="classic-blitz">Ububall Classic Blitz</option></select></label><p>Classic: equal default stats, no supers. Blitz: 10 seconds to plan; 5 seconds after 10 scoreless turns. A goal resets the clock limit.</p><p>Choose a character for each slot. Empty slots use practice ubus.</p><div id="roster-slots"></div><div id="roster-super-picker" style="margin: 8px 0;"><label>Equipped Super <select id="roster-super"></select></label><div id="roster-super-grid" class="super-picker-grid"></div></div><p id="roster-status" role="status"></p><button id="load-collection">Load my collection</button><button id="more-collection" hidden>Load more</button><div id="roster-options"></div><div class="actions"><button id="start-match" class="primary">Start match</button><button id="cancel-roster">Cancel</button></div></dialog>
-  <dialog id="online-dialog" aria-labelledby="online-title"><div class="online-heading"><div><h2 id="online-title">Online Ububall</h2><p>One opponent. Three ubus. First to five.</p></div><button id="online-close" class="icon-button" aria-label="Close online settings">&#10005;</button></div>
-    <div id="online-create-controls">
-      <fieldset><legend>Game mode</legend><div id="online-mode" class="online-options">
-        <button data-value="standard" aria-pressed="true">Ububall<small>Stats &amp; supers</small></button>
-        <button data-value="classic" aria-pressed="false">Classic<small>Equal stats · no supers</small></button>
-        <button data-value="blitz" aria-pressed="false">Blitz<small>Timed turns · supers</small></button>
-        <button data-value="classic-blitz" aria-pressed="false">Classic Blitz<small>Timed turns · no supers</small></button>
-      </div><p class="online-hint">Blitz gives you 10 seconds to plan, dropping to 5 after 10 scoreless turns. A goal resets the limit.</p></fieldset>
-      <fieldset><legend>Teams</legend><div id="online-policy" class="online-options">
-        <button data-value="practice" aria-pressed="true">Practice teams<small>Play with provided ubus</small></button>
-        <button data-value="owned" aria-pressed="false">Owned ubus<small>Choose from your collection</small></button>
-      </div></fieldset>
-      <p class="online-hint">Invite a friend with a private link. Moves stay private until launch; Blitz uses your latest saved moves.</p>
-      <button id="online-create" class="primary" disabled>Create invite match</button>
-    </div>
-    <div id="online-lobby" hidden><label>Invite link <input id="online-invite" readonly></label><button id="online-copy">Copy invite</button>
-      <div id="online-team"></div><button id="online-load" hidden>Load my collection</button><button id="online-ready" class="primary">Ready to play</button>
-      <p>Disconnects pause planning. After 60 seconds your opponent can claim a forfeit. Matches expire after 24 hours.</p><button id="online-leave">Leave online match</button>
-    </div>
-    <p id="online-status" role="status"></p><div class="online-account"><span id="online-account-status" role="status">Checking Discord session…</span><a id="online-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a></div>
-  </dialog>
-</main></body></html>
+<body>
+  <p>Redirecting to <a href="/">Ububall</a>…</p>
+</body>
+</html>

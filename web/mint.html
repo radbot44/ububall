@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Mint &amp; Collection · Ububall</title>
+  <link rel="stylesheet" href="site.css">
+  <script src="ubu.js" defer></script>
+  <script src="ubu-file.js" defer></script>
+  <script src="ubu-render.js" defer></script>
+  <script src="rarity.js" defer></script>
+  <script src="ubu-audio.js" defer></script>
+  <script src="pack-scene.js" defer></script>
+  <script src="site.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><a class="brand" href="/" aria-label="uburoom ububall"><img src="assets/uburoom-wordmark-brand.svg" alt="uburoom"><span>ububall</span></a><nav aria-label="Main"><a class="quiet" href="/">Play</a><a class="quiet active" href="/mint.html" aria-current="page">Mint &amp; Collection</a><label class="button quiet">Open .ubu<input id="import" type="file" accept=".ubu,application/json"></label><a class="quiet" href="/demo.html">Designer</a><a class="quiet nav-secondary" href="/voice.html">Voice Demo</a><a class="primary" id="login" href="/auth/discord" hidden>Sign in with Discord</a><button id="logout" hidden>Sign out</button></nav></header>
+    <section class="pack-shop" aria-labelledby="pack-title">
+      <h1 id="pack-title">Packs</h1>
+      <p class="pack-intro">Choose what catches your eye. Each pack holds five ubus for your collection and Ububall team.</p>
+      <div id="pack-choices" class="pack-choices" hidden></div>
+      <p id="pack-legend" class="pack-intro" hidden>Colors hint at backgrounds inside. A reflective seam, stamped seal or pearly flecks hint at a special finish in the pack.</p>
+      <button id="mint" class="primary" disabled>Show packs</button>
+      <p id="pack-hint">Sign in to choose your pack</p>
+      <p id="status" role="status" aria-live="polite">Connecting to the mint…</p>
+    </section>
+    <section id="collection" hidden aria-labelledby="collection-title">
+      <div class="collection-header">
+        <h2 id="collection-title">Your ubus</h2>
+        <label for="sort-ubus" class="sort-control">
+          <span>Sort</span>
+          <select id="sort-ubus">
+            <option value="recent">Recent</option>
+            <option value="old">Old</option>
+            <option value="rarity">Rarity</option>
+            <option value="serial">Serial number</option>
+            <option value="favorite">Favorite</option>
+          </select>
+        </label>
+      </div>
+      <div id="ubus" class="grid"></div>
+      <div id="collection-sentinel" class="collection-sentinel" aria-hidden="true"></div>
+      <button id="more" hidden>Load more</button>
+      <p id="collection-status" class="collection-status" role="status" aria-live="polite" hidden></p>
+    </section>
+  </main>
+  <dialog id="viewer" class="viewer" aria-labelledby="ubunym">
+    <div class="viewer-toolbar">
+      <div class="viewer-tabs" role="tablist" aria-label="Ubu view">
+        <button id="view-ubu" type="button" role="tab" aria-selected="true" aria-controls="preview" data-view="ubu">Ubu</button>
+        <button id="view-card" type="button" role="tab" aria-selected="false" aria-controls="viewer-card-stage" data-view="card" tabindex="-1">Card</button>
+        <button id="view-token" type="button" role="tab" aria-selected="false" aria-controls="viewer-token-stage" data-view="token" tabindex="-1">Token</button>
+      </div>
+      <div class="viewer-actions">
+        <button id="viewer-fav" class="icon-button card-heart" type="button" aria-label="Favorite" title="Favorite">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572"/></svg>
+        </button>
+        <button id="close-viewer" class="icon-button" type="button" aria-label="Close viewer">×</button>
+      </div>
+    </div>
+    <div class="viewer-body">
+      <div id="viewer-display" class="viewer-display">
+        <div id="preview" class="viewer-preview" role="tabpanel" aria-labelledby="view-ubu"></div>
+        <div id="viewer-card-stage" class="viewer-card-stage" role="tabpanel" aria-labelledby="view-card" hidden></div>
+        <div id="viewer-token-stage" class="viewer-token-stage" role="tabpanel" aria-labelledby="view-token" hidden></div>
+      </div>
+      <h2 id="ubunym"></h2>
+      <p id="details"></p>
+      <p id="authenticity"></p>
+      <div id="viewer-voice" class="viewer-voice">
+        <div class="viewer-voice-bar">
+          <button id="viewer-voice-tone" class="voice-play-btn" type="button" title="Play signature voice tone">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            <span>Voice</span>
+          </button>
+          <button id="viewer-voice-fanfare" class="voice-play-btn" type="button" title="Play goal fanfare">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            <span>Fanfare</span>
+          </button>
+        </div>
+        <div id="viewer-voice-info" class="viewer-voice-info"></div>
+      </div>
+      <a id="download" class="secondary" download="ubu.ubu">Download .ubu</a>
+    </div>
+  </dialog>
+  <dialog id="reveal" aria-labelledby="reveal-title">
+    <div class="reveal-toolbar"><h2 id="reveal-title">Pack</h2><button id="pause-reveal" class="icon-button" aria-label="Close pack">×</button></div>
+    <div class="reveal-layout">
+      <button id="prev-ubu" class="icon-button" aria-label="Previous ubu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button>
+      <div id="card-stage" class="card-stage"></div>
+      <button id="next-ubu" class="icon-button" aria-label="Next ubu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg></button>
+    </div>
+    <p id="reveal-progress" aria-live="polite"></p>
+    <div id="reveal-dots" class="reveal-dots" aria-hidden="true"></div>
+    <button id="finish-pack" class="primary" hidden>Done</button>
+  </dialog>
+</body>
+</html>

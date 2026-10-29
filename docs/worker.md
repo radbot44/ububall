@@ -13,7 +13,7 @@ npm run test:worker
 npm run dev
 ```
 
-Open http://127.0.0.1:8790/. The viewer accepts custom .ubu files without configuration. The designer is at /demo.html and uses the same `ubu-render.js`; its DNA and rendering rules are unchanged. The original localhost designer can still run separately.
+Open http://127.0.0.1:8790/ to play Ububall. The Mint and collection are at `/mint.html`, accepting custom .ubu files without configuration. The designer is at /demo.html and uses the same `ubu-render.js`; its DNA and rendering rules are unchanged. The original localhost designer can still run separately.
 
 `scripts/prepare-assets.cjs` copies only the explicit frontend files to ignored `dist/public/`. It refuses unexpected output files. Never change the assets directory to the repository root. Rerun `npm run dev` after changing frontend files to refresh the copied assets. API source changes are watched by Wrangler.
 

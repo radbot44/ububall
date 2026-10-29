@@ -52,8 +52,19 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     }
   }
   await t.test('only allowlisted frontend assets and trusted public configuration are served', async () => {
-    assert.match(await (await fetch('/')).text(), /Ubu Mint/);
-    for (const path of ['/ubu-render.js', '/demo.html', '/site.js', '/rarity.js']) assert.equal((await fetch(path)).status, 200);
+    const home = await (await fetch('/')).text();
+    assert.match(home, /ububall/i);
+    assert.match(home, /id="rink"/);
+    assert.match(home, /class="mint-entry"/);
+    const mint = await (await fetch('/mint.html')).text();
+    assert.match(mint, /Packs/);
+    assert.match(mint, /id="pack-choices"/);
+    assert.match(mint, /id="collection"/);
+    const legacy = await fetch('/ububall.html?match=fixture-123');
+    assert.equal(legacy.status, 200);
+    const legacyText = await legacy.text();
+    assert.match(legacyText, /location\.replace\('\/' \+ location\.search/);
+    for (const path of ['/ubu-render.js', '/demo.html', '/site.js', '/rarity.js', '/mint.html', '/ububall.html', '/ububall.js', '/ububall.css']) assert.equal((await fetch(path)).status, 200);
     for (const path of ['/worker.mjs', '/mint.js', '/auth.mjs', '/AGENTS.md', '/.dev.vars', '/state/mint.sqlite']) assert.equal((await fetch(path)).status, 404);
     const response = await fetch('/api/config'), config = await response.json();
     assert.equal(config.lifetimeLimit, 3); assert.equal(config.keys['test-1'], privateKey.x);
