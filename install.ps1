@@ -18,12 +18,40 @@ if (Test-Path -LiteralPath $manifestPath) {
 }
 # The installed copy is an entry point too. Always install from the source
 # checkout rather than treating the deployment directory as another source.
-if ($installation.destination -eq $source -or (Split-Path $source -Leaf) -eq 'ubumint-cloudflare') {
-    $sourceDirectory = $installation.source
-    if (!$sourceDirectory) { $sourceDirectory = Join-Path (Split-Path $source -Parent) 'ubumint' }
+if (($installation -and $installation.destination -eq $source) -or (Split-Path $source -Leaf) -eq 'ubumint-cloudflare') {
+    $sourceDirectory = $null
+    if ($installation -and $installation.source) {
+        $candidate = $installation.source
+        if (Test-Path -LiteralPath (Join-Path $candidate 'install.ps1') -PathType Leaf) {
+            $sourceDirectory = $candidate
+        } elseif ((Split-Path $candidate -Leaf) -eq 'ubumint') {
+            $renamed = Join-Path (Split-Path $candidate -Parent) 'ububall'
+            if (Test-Path -LiteralPath (Join-Path $renamed 'install.ps1') -PathType Leaf) {
+                $sourceDirectory = $renamed
+            }
+        } elseif ((Split-Path $candidate -Leaf) -eq 'ububall') {
+            $legacy = Join-Path (Split-Path $candidate -Parent) 'ubumint'
+            if (Test-Path -LiteralPath (Join-Path $legacy 'install.ps1') -PathType Leaf) {
+                $sourceDirectory = $legacy
+            }
+        }
+    }
+    if (!$sourceDirectory) {
+        $parent = Split-Path $source -Parent
+        foreach ($name in @('ububall', 'ubumint')) {
+            $candidate = Join-Path $parent $name
+            if (Test-Path -LiteralPath (Join-Path $candidate 'install.ps1') -PathType Leaf) {
+                $sourceDirectory = $candidate
+                break
+            }
+        }
+        if (!$sourceDirectory) {
+            $sourceDirectory = Join-Path $parent 'ububall'
+        }
+    }
     $installer = Join-Path $sourceDirectory 'install.ps1'
     if ([IO.Path]::GetFullPath($installer) -eq $PSCommandPath -or !(Test-Path -LiteralPath $installer -PathType Leaf)) {
-        throw "Source installer not found at $installer. Run install.ps1 from your ubumint source checkout."
+        throw "Source installer not found at $installer. Run install.ps1 from your ububall or ubumint source checkout."
     }
     $forward = @{}
     foreach ($entry in $PSBoundParameters.GetEnumerator()) { $forward[$entry.Key] = $entry.Value }
@@ -32,7 +60,13 @@ if ($installation.destination -eq $source -or (Split-Path $source -Leaf) -eq 'ub
     & $installer @forward
     return
 }
-if (!$Destination) { $Destination = Join-Path (Split-Path $source -Parent) 'ubumint-cloudflare' }
+if (!$Destination) {
+    if ($installation -and $installation.destination) {
+        $Destination = $installation.destination
+    } else {
+        $Destination = Join-Path (Split-Path $source -Parent) 'ubumint-cloudflare'
+    }
+}
 $Destination = [IO.Path]::GetFullPath($Destination).TrimEnd('\')
 if ($Destination -eq $source -or $Destination.StartsWith($source + '\', [StringComparison]::OrdinalIgnoreCase) -or $source.StartsWith($Destination + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'The installation must be separate from the source checkout.'

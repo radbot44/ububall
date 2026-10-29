@@ -1,6 +1,7 @@
 'use strict';
 function ububallOnline(hooks) {
   const $ = id => document.getElementById(id);
+  const invite = new URL(location.href).searchParams.get('match');
   let id = null, socket = null, session = null, state = null, retry = null, heartbeat = null;
   let stopped = false, lastPong = 0, offset = 0, choices = [], collection = [], cursor = '', lastDraft = '', sentAt = 0;
   const status = text => { $('online-status').textContent = text; };
@@ -11,10 +12,12 @@ function ububallOnline(hooks) {
     $('online-login').hidden = Boolean(session?.owner);
     $('online-account-status').textContent = session?.owner ? 'Signed in with Discord' : 'Both players need to sign in with Discord.';
     $('online-create').disabled = !session?.owner;
+    const returnDest = invite ? '/?match=' + encodeURIComponent(invite) : (id ? '/?match=' + encodeURIComponent(id) : ((location.pathname === '/index.html' ? '/' : location.pathname) + location.search));
+    $('online-login').href = '/auth/discord?return=' + encodeURIComponent(returnDest);
   }
   async function api(path, data) {
     if (!session?.owner) await refreshSession();
-    if (!session?.owner) throw new Error('Sign in with Discord from Mint & collection, then return here.');
+    if (!session?.owner) throw new Error('Sign in with Discord below to join the match.');
     const response = await fetch(path, data === undefined ? {} : { method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf }, body: JSON.stringify(data) });
     const result = await response.json();
@@ -61,7 +64,7 @@ function ububallOnline(hooks) {
     const before = state; state = next; offset = next.now - Date.now();
     $('online-create-controls').hidden = true;
     $('online-lobby').hidden = false;
-    $('online-invite').value = location.origin + location.pathname + '?match=' + id;
+    $('online-invite').value = location.origin + '/?match=' + id;
     $('online-ready').hidden = next.phase !== 'lobby';
     $('online-load').hidden = next.phase !== 'lobby' || next.teams !== 'owned';
     $('online-ready').disabled = next.ready[next.seat];
@@ -95,7 +98,7 @@ function ububallOnline(hooks) {
   }
   async function enter(matchId, initial) {
     id = matchId; state = null; choices = []; stopped = false; lastDraft = '';
-    const url = new URL(location.href); url.searchParams.set('match', id); history.replaceState(null, '', url);
+    const url = new URL(location.href); url.pathname = '/'; url.searchParams.set('match', id); history.replaceState(null, '', url);
     receive(initial); connect();
     clearInterval(heartbeat);
     heartbeat = setInterval(() => {
@@ -107,7 +110,7 @@ function ububallOnline(hooks) {
   }
   function leave() {
     stopped = true; clearTimeout(retry); clearInterval(heartbeat); socket?.close(); socket = null; id = null; state = null;
-    const url = new URL(location.href); url.searchParams.delete('match'); history.replaceState(null, '', url);
+    const url = new URL(location.href); url.pathname = '/'; url.searchParams.delete('match'); history.replaceState(null, '', url);
     $('online-create-controls').hidden = false; $('online-lobby').hidden = true; $('online-dialog').close();
     hooks.onLeave();
   }
@@ -168,7 +171,6 @@ function ububallOnline(hooks) {
     try { receive(await api('/api/ububall/' + id + '/forfeit', {})); }
     catch (error) { hooks.onError(error.message); }
   };
-  const invite = new URL(location.href).searchParams.get('match');
   if (invite) {
     $('online-dialog').showModal();
     api('/api/ububall/' + encodeURIComponent(invite) + '/join', {}).then(result => enter(invite, result)).catch(error => status(error.message));

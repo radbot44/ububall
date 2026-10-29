@@ -13,7 +13,7 @@ npm run test:worker
 npm run dev
 ```
 
-Open http://127.0.0.1:8790/. The viewer accepts custom .ubu files without configuration. The designer is at /demo.html and uses the same `ubu-render.js`; its DNA and rendering rules are unchanged. The original localhost designer can still run separately.
+Open http://127.0.0.1:8790/ to play Ububall. The Mint and collection are at `/mint.html`, accepting custom .ubu files without configuration. The designer is at /demo.html and uses the same `ubu-render.js`; its DNA and rendering rules are unchanged. The original localhost designer can still run separately.
 
 `scripts/prepare-assets.cjs` copies only the explicit frontend files to ignored `dist/public/`. It refuses unexpected output files. Never change the assets directory to the repository root. Rerun `npm run dev` after changing frontend files to refresh the copied assets. API source changes are watched by Wrangler.
 
@@ -67,7 +67,7 @@ To deploy after merging this PR, update the source checkout and run `./install.p
 
 ## First setup and updates
 
-On Windows, use PowerShell with Node 22.13+ and Git installed. From `C:\dev\ubumint`, run:
+On Windows, use PowerShell with Node 22.13+ and Git installed. From `C:\dev\ububall` (or legacy `C:\dev\ubumint`), run:
 
 ```powershell
 .\install.ps1                 # install current local source, test, deploy
@@ -75,7 +75,7 @@ On Windows, use PowerShell with Node 22.13+ and Git installed. From `C:\dev\ubum
 .\install.ps1 -InstallOnly    # copy code only
 ```
 
-The source checkout is authoritative, including current tracked working edits. You can also run `.\install.ps1` from `ubumint-cloudflare`: it forwards to the recorded source checkout (or sibling `ubumint` for older installations), retaining all switches. This does not pull GitHub or push anything. Update your source checkout first when you want newer code. The installed folder is a deployment copy: do not use `git pull` or stash there. Existing separate code edits stop installation before copying; changes already identical to source are accepted. Replaced files are backed up outside the checkout. Runtime state and ignored files stay in place. The old installation's `.\update.ps1` now invokes this installer; `.\deploy.ps1` tests and redeploys the already installed code without copying updates.
+The source checkout is authoritative, including current tracked working edits. You can also run `.\install.ps1` from `ubumint-cloudflare`: it forwards to the recorded source checkout (or sibling `ububall` / `ubumint` for unmanifested or renamed installations), retaining all switches. This does not pull GitHub or push anything. Update your source checkout first when you want newer code. The installed folder is a deployment copy: do not use `git pull` or stash there. Existing separate code edits stop installation before copying; changes already identical to source are accepted. Replaced files are backed up outside the checkout. Runtime state and ignored files stay in place. The old installation's `.\update.ps1` now invokes this installer; `.\deploy.ps1` tests and redeploys the already installed code without copying updates.
 
 Install and deploy stop before touching the installation when another Wrangler command is using it. Let an existing deployment finish, or close its local dev terminal, before retrying; this avoids Windows executable locks during dependency installation.
 
@@ -97,13 +97,13 @@ Setup prompts for the Worker name, origin and Discord credentials (the secret is
 
 ### Fresh mint reset
 
-To keep the installation, domain, Discord credentials, batch size and allowance but start a new mint, run `C:\dev\ubumint-cloudflare\deploy.ps1 -ResetMint`. To install current source updates and reset in one step, run `C:\dev\ubumint\install.ps1 -ResetMint` instead. Reset is an explicit operation, never part of a normal update. It cannot be combined with Setup, DryRun or InstallOnly.
+To keep the installation, domain, Discord credentials, batch size and allowance but start a new mint, run `C:\dev\ubumint-cloudflare\deploy.ps1 -ResetMint`. To install current source updates and reset in one step, run `C:\dev\ububall\install.ps1 -ResetMint` instead. Reset is an explicit operation, never part of a normal update. It cannot be combined with Setup, DryRun or InstallOnly.
 
 Dependencies and both test suites must pass before reset changes settings. Reset then backs up the previous settings under `%LOCALAPPDATA%\ubumint\backups\reset-*`, generates a new mint ID, signing keys and session secret, and deploys. The different mint ID selects a fresh Durable Object registry: empty collections, unused lifetime allowances and serial allocation starting at 1. Previous sessions expire and previous certificates are no longer trusted by the new mint. This preserves permanent serial uniqueness within each mint identity. The old Cloudflare database is retained separately, not physically deleted; saved settings backups are not database backups.
 
 If upload or verification fails after reset is prepared, rerun `deploy.ps1` **without** `-ResetMint` to deploy the already generated identity. Do not reset repeatedly to retry an upload. Normal deployments retain the current identity and data.
 
-`npm test` covers the 512-bit DNA schema, files, mint transactions, lifetime limits and OAuth/session checks. `npm run test:worker` uses Wrangler's local test harness with isolated storage and ephemeral keys. It verifies frontend asset boundaries, private API access, CSRF/body validation, public-key-only configuration, signed issuance, concurrent retries, lifetime-limit rejection, collection isolation, real alarm-driven batch rollover and unfinished preparation recovery after object eviction. Browser checks cover custom import and the shared renderer/designer.
+`npm test` covers the 1024-bit DNA schema, files, mint transactions, lifetime limits and OAuth/session checks. `npm run test:worker` uses Wrangler's local test harness with isolated storage and ephemeral keys. It verifies frontend asset boundaries, private API access, CSRF/body validation, public-key-only configuration, signed issuance, concurrent retries, lifetime-limit rejection, collection isolation, real alarm-driven batch rollover and unfinished preparation recovery after object eviction. Browser checks cover custom import and the shared renderer/designer.
 
 `wrangler.jsonc` has no account, domain route or production identity, disables workers.dev/preview URLs, and preserves dashboard variables. Production deployments use the generated config described above. Deployment requires owner authorization; running tests never deploys.
 

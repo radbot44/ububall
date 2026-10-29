@@ -22,6 +22,20 @@ button, .button, .quiet, .primary {
   color: var(--text); font: inherit; cursor: pointer; touch-action: manipulation;
 }
 button:hover, .button:hover, .quiet:hover { background: var(--hover); }
+nav a[aria-current="page"], nav a.active {
+  border: 1px solid color-mix(in srgb, var(--primary) 70%, var(--border));
+  background: color-mix(in srgb, var(--elevated) 75%, var(--primary) 25%);
+  color: var(--text);
+  font-weight: 600;
+}
+.nav-secondary {
+  color: var(--muted);
+  opacity: 0.85;
+}
+.nav-secondary:hover {
+  opacity: 1;
+  color: var(--text);
+}
 button:disabled { opacity: .4; cursor: default; }
 .primary { background: var(--primary); color: var(--background); font-weight: 600; }
 .primary:hover { background: color-mix(in srgb, var(--primary), white 10%); }
@@ -312,6 +326,19 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
   gap: 16px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+}
+.collection-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+#play-with-ubus {
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
 }
 .sort-control {
   display: inline-flex;

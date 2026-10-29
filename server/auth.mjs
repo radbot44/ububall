@@ -56,9 +56,27 @@ export function mutationAllowed(request, env, value) {
 }
 export function logoutCookie() { return setCookie(sessionName, '', 0); }
 
+export function safeReturnPath(raw, env) {
+  if (!raw || typeof raw !== 'string' || /[\x00-\x1F\x7F]/.test(raw)) return '/';
+  if (raw.startsWith('//') || raw.startsWith('/\\') || raw.startsWith('\\')) return '/';
+  try {
+    const base = origin(env);
+    const parsed = new URL(raw, base);
+    if (parsed.origin !== base) return '/';
+    const target = parsed.pathname + parsed.search + parsed.hash;
+    if (!target.startsWith('/') || target.startsWith('//') || target.startsWith('/\\')) return '/';
+    if (target.startsWith('/auth/') || target.startsWith('/api/')) return '/';
+    return target;
+  } catch {
+    return '/';
+  }
+}
+
 export async function login(request, env) {
+  const reqUrl = new URL(request.url);
+  const returnTo = safeReturnPath(reqUrl.searchParams.get('return') || reqUrl.searchParams.get('return_to'), env);
   const nonce = random();
-  const token = await seal({ purpose: 'oauth', nonce, expires: Math.floor(Date.now() / 1000) + 600 }, env.SESSION_SECRET);
+  const token = await seal({ purpose: 'oauth', nonce, returnTo, expires: Math.floor(Date.now() / 1000) + 600 }, env.SESSION_SECRET);
   const url = new URL('https://discord.com/oauth2/authorize');
   url.search = new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID, response_type: 'code', scope: 'identify',
     redirect_uri: origin(env) + '/auth/callback', state: nonce }).toString();
@@ -83,8 +101,9 @@ export async function callback(request, env, fetchDiscord = fetch) {
     if (!userResponse.ok) return failed();
     const user = await userResponse.json();
     if (typeof user.id !== 'string' || !/^[1-9][0-9]{0,19}$/.test(user.id)) return failed();
+    const returnTo = safeReturnPath(state.returnTo, env);
     const sessionToken = await seal({ purpose: 'session', owner: user.id, csrf: random(), expires: Math.floor(Date.now() / 1000) + 86400 }, env.SESSION_SECRET);
-    const headers = new Headers({ Location: origin(env) + '/', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+    const headers = new Headers({ Location: origin(env) + returnTo, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
     headers.append('Set-Cookie', setCookie(stateName, '', 0));
     headers.append('Set-Cookie', setCookie(sessionName, sessionToken, 86400));
     return new Response(null, { status: 302, headers });

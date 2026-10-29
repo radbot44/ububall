@@ -1673,4 +1673,12 @@
   if (rematchBtn) {
     rematchBtn.onclick = () => { online?.rematch?.(); };
   }
+  const rosterParam = new URL(location.href).searchParams.get('roster');
+  if (rosterParam !== null) {
+    const url = new URL(location.href);
+    url.searchParams.delete('roster');
+    history.replaceState(null, '', url);
+    $('new-match').click();
+    loadCollection();
+  }
 })();
