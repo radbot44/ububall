@@ -44,10 +44,12 @@
   }
   function heart() {
     const isSaved = saved.includes(current);
+    const label = isSaved ? 'Remove from Ubu Storage' : 'Save to Ubu Storage';
     $('favorite-toggle').textContent = isSaved ? '♥' : '♡';
     $('favorite-toggle').classList.toggle('is-saved', isSaved);
     $('favorite-toggle').setAttribute('aria-pressed', String(isSaved));
-    $('favorite-toggle').setAttribute('aria-label', isSaved ? 'Remove from Ubu Storage' : 'Save to Ubu Storage');
+    $('favorite-toggle').setAttribute('aria-label', label);
+    $('favorite-toggle').setAttribute('title', label);
   }
   function toggle(code) {
     const index = saved.indexOf(code);
@@ -180,8 +182,19 @@
       $(candidate + '-tab').setAttribute('aria-selected', String(candidate === id));
     }
   });
+  let copyTimeout;
   $('copy-dna').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(current); $('input-error').textContent = 'DNA copied.'; } catch { $('dna-output').select(); $('input-error').textContent = 'Select and copy the DNA above.'; }
+    try {
+      await navigator.clipboard.writeText(current);
+      const btn = $('copy-dna');
+      btn.textContent = 'Copied!';
+      clearTimeout(copyTimeout);
+      copyTimeout = setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+      $('input-error').textContent = '';
+    } catch {
+      $('dna-output').select();
+      $('input-error').textContent = 'Select and copy the DNA above.';
+    }
   });
   $('export-ubu').addEventListener('click', () => {
     const url = URL.createObjectURL(new Blob([ubuFile.unsigned(current)], { type: 'application/json' }));
