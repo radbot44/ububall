@@ -4,6 +4,7 @@
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
   const SKATER_CURVE = .06, BALL_CURVE = .045;
+  const AIR_DRAG = .00015; // Quadratic drag for balls and ubus; strongest on fast shots.
   const CLOSE_SPIN_GAIN = 2;
   function ballHitRadius(body) { return Math.max(body.radius, body.reach || body.radius, 18); }
   function checkCloseSpin(bodies, ball) {
@@ -349,7 +350,7 @@
       b.rotation += b.omega * dt;
       b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - 6 * dt);
       b.x += b.vx * dt; b.y += b.vy * dt;
-      const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = b.friction * dt;
+      const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = (b.friction + AIR_DRAG * speed2) * dt;
       if (speed2 <= deceleration * deceleration) {
         b.vx = b.vy = 0;
       } else {

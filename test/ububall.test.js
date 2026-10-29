@@ -26,7 +26,20 @@ test('spin bends travel symmetrically without adding translational speed', () =>
   });
   assert.ok(outcomes[0].y < 100 && outcomes[2].y > 100);
   assert.ok(Math.abs(outcomes[0].y + outcomes[2].y - 200) < 1e-8);
-  assert.ok(outcomes.every(b => Math.abs(Math.hypot(b.vx, b.vy) - 69) < 1e-8));
+  const straightSpeed = Math.hypot(outcomes[1].vx, outcomes[1].vy);
+  assert.ok(straightSpeed < 69 && straightSpeed > 0);
+  assert.ok(outcomes.every(b => Math.abs(Math.hypot(b.vx, b.vy) - straightSpeed) < 1e-8));
+});
+test('air drag slows both balls and ubus more strongly at higher speeds', () => {
+  for (const index of [0, 6]) {
+    const losses = [100, 700].map(speed => {
+      const body = P.kickoff()[index];
+      Object.assign(body, { x: 500, y: 300, vx: speed, vy: 0, friction: 0 });
+      P.step([body]);
+      return speed - body.vx;
+    });
+    assert.ok(losses[0] > 0 && losses[1] > losses[0] * 40);
+  }
 });
 test('impulse scales launch speed independently of mass', () => {
   const b = P.kickoff();
