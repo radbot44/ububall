@@ -1,12 +1,12 @@
 # Appearance Rarity
 
-Appearance rarity is a deterministic, derived measurement of how unusual an ubu's expressed traits are. It does not alter the 512-bit DNA specification, uburithm, trait probabilities, renderer behavior, or `.ubu` file formats.
+Appearance rarity is a deterministic, derived measurement of how unusual an ubu's expressed traits are. It does not alter the 1024-bit DNA specification, uburithm, trait probabilities, renderer behavior, or `.ubu` file formats.
 
 Rarity is measured without querying the mint database or requiring a mint signature. The same DNA always receives the exact same rarity score.
 
 ## 1. Information-Theoretic Rarity Bits
 
-Every complete 512-bit DNA string has identical probability ($2^{-512}$) under uniform generation. Appearance rarity measures unusual *expressed visual traits* using information-theoretic surprisal, with additional bounded visual refinements:
+Every complete 1024-bit DNA string has identical probability ($2^{-1024}$) under uniform generation. Appearance rarity measures unusual *expressed visual traits* using information-theoretic surprisal, with additional bounded visual refinements:
 
 $$\text{surprisal}(p) = -\log_2(p)$$
 
