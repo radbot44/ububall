@@ -28,7 +28,7 @@ function issuanceRequest(owner, request, lifetimeLimit) {
 
 // A pack's wrapper comes from its random choice token, so each pack is independently random yet
 // stays the same when an offer is shown again. Summing the 6-bit digits keeps the bias negligible.
-const PACK_TYPES = ['plastic', 'foil', 'blob', 'gumball', 'egg', 'gift'];
+const PACK_TYPES = ['plastic', 'foil', 'blob', 'gumball', 'egg', 'gift', 'cookie', 'envelope'];
 const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 const packType = token => PACK_TYPES[[...token].reduce((sum, digit) => sum + BASE64URL.indexOf(digit), 0) % PACK_TYPES.length];
 

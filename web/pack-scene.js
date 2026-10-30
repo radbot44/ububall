@@ -1,5 +1,6 @@
 'use strict';
-// Painted 2D wrappers (cellophane, foil, blob, gumball capsule, egg, gift box). No 3D engine or geometry.
+// Painted 2D wrappers (cellophane, foil, blob, gumball capsule, egg, gift box, fortune cookie,
+// wax-sealed envelope). No 3D engine or geometry.
 (() => {
   const clamp = n => Math.max(0, Math.min(1, n));
   const ease = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
@@ -941,6 +942,153 @@
       ctx.restore();
     }
 
+    // --- Fortune Cookie ---
+    // A golden folded cookie with its fortune slip peeking out, printed with five dots in the pack's
+    // colours; a dusting of gold hints at a special finish. It strains, snaps in two and the slip
+    // unfurls into the ubus.
+    let crumbs = [], dust = [];
+    function setupCookie() {
+      const rolls = crypto.getRandomValues(new Uint16Array(160)), u = i => rolls[i] / 65535;
+      crumbs = Array.from({ length: 26 }, (_, i) => ({ x: u(i) * 210 - 105, y: u(i + 26) * 90 - 50, r: .8 + u(i + 52) * 1.8 }));
+      dust = Array.from({ length: 30 }, (_, i) => ({ x: u(i + 80) * 200 - 100, y: u(i + 110) * 80 - 50 }));
+    }
+    // One smooth arch on top; underneath, the two wings curl in to a pinch at the centre.
+    function cookiePath() {
+      ctx.beginPath(); ctx.moveTo(-126, 22);
+      ctx.bezierCurveTo(-118, -58, -54, -80, 0, -80); ctx.bezierCurveTo(54, -80, 118, -58, 126, 22);
+      ctx.bezierCurveTo(112, 52, 70, 56, 44, 40); ctx.bezierCurveTo(26, 30, 14, 8, 0, 4);
+      ctx.bezierCurveTo(-14, 8, -26, 30, -44, 40); ctx.bezierCurveTo(-70, 56, -112, 52, -126, 22); ctx.closePath();
+    }
+    function cookieBody() {
+      cookiePath();
+      ctx.fillStyle = gradient(ctx, -80 + pointer * 20, -70, 60 + pointer * 20, 70, [[0, '#f6d58e'], [.45, '#e0a64e'], [1, '#a8662a']]);
+      ctx.fill();
+      ctx.save(); cookiePath(); ctx.clip();
+      for (const c of crumbs) { ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.fillStyle = '#8a531f66'; ctx.fill(); }
+      if (special()) for (const d of dust) {
+        ctx.globalAlpha = .4 + .6 * Math.abs(Math.sin(d.x * .2 + pointer * 3 + pointerY));
+        ctx.fillStyle = '#fff1c4'; ctx.fillRect(d.x, d.y, 1.8, 1.8);
+      }
+      ctx.restore();
+      // The fold: the dark hollow under the pinch, the ridge rising from it, and a sheen on the arch.
+      ctx.beginPath(); ctx.moveTo(-40, 34); ctx.bezierCurveTo(-24, 14, -10, 2, 0, 2); ctx.bezierCurveTo(10, 2, 24, 14, 40, 34);
+      ctx.bezierCurveTo(20, 22, -20, 22, -40, 34); ctx.fillStyle = '#5e3511cc'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, 2); ctx.bezierCurveTo(-6, -26, -4, -52, 0, -76);
+      ctx.strokeStyle = '#8a531f70'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-96, -26); ctx.bezierCurveTo(-80, -60, -40, -72, -12, -72);
+      ctx.strokeStyle = '#fff3d066'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.stroke();
+    }
+    function fortuneSlip(rise, unfurl) {
+      ctx.save(); ctx.translate(2, 26 - rise * 60); ctx.rotate(-.12 * (1 - unfurl));
+      const w = mix(70, 150, unfurl), h = 22;
+      ctx.fillStyle = '#fbf8f1'; ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.strokeStyle = '#00000018'; ctx.lineWidth = 1; ctx.strokeRect(-w / 2, -h / 2, w, h);
+      for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.arc(-w / 2 + w * (i + .5) / 5, 0, 4.2, 0, Math.PI * 2); ctx.fillStyle = hintHex(i); ctx.fill(); }
+      ctx.restore();
+    }
+    function renderCookie(t) {
+      const strain = ease(.04, .26, t), snap = ease(.26, .4, t), apart = ease(.32, .62, t), slip = ease(.3, .5, t);
+      const shiver = Math.sin(t * 160) * 1.6 * strain * (1 - snap);
+      ctx.save(); ctx.translate(shiver, 14);
+      ctx.save(); ctx.globalAlpha = 1 - apart;
+      ctx.beginPath(); ctx.ellipse(0, 70, 110, 10, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000038'; ctx.filter = 'blur(6px)'; ctx.fill(); ctx.filter = 'none';
+      ctx.restore();
+      // The slip sits in the pinch at the front; it rises and unrolls in front of the halves as the cookie breaks.
+      if (!snap) { cookieBody(); fortuneSlip(0, 0); ctx.restore(); return; }
+      for (const side of [-1, 1]) {
+        ctx.save(); ctx.globalAlpha = 1 - apart;
+        ctx.translate(side * (snap * 18 + apart * 90), apart * 60); ctx.rotate(side * (snap * .18 + apart * .5));
+        ctx.beginPath(); ctx.rect(side < 0 ? -140 : 0, -100, 140, 200); ctx.clip();
+        cookieBody();
+        ctx.restore();
+      }
+      ctx.save(); ctx.globalAlpha = 1 - ease(.5, .62, t); fortuneSlip(slip, slip); ctx.restore();
+      ctx.restore();
+    }
+
+    // --- Wax-Sealed Envelope ---
+    // A cream envelope with an airmail border in the pack's colours, closed with a wax seal
+    // pressed with the oomark: red wax, or gold when a special finish is inside. The seal cracks,
+    // the flap opens and a card slides out as the ubus.
+    let sealEdge = [];
+    function setupEnvelope() {
+      const rolls = crypto.getRandomValues(new Uint16Array(28));
+      sealEdge = Array.from(rolls, value => 29 + value / 65535 * 3.5);
+    }
+    function waxColors() { return special() ? ['#f3cf7c', '#c8922f', '#7d5517'] : ['#d9504f', '#a8232d', '#5e0f16']; }
+    function sealBlob(r = 1) {
+      ctx.beginPath();
+      sealEdge.forEach((radius, i) => { const a = i / sealEdge.length * Math.PI * 2, x = Math.cos(a) * radius * r, y = Math.sin(a) * radius * r; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.closePath();
+    }
+    // The oomark pressed into the wax: two rings and a bar, raised with a light upper edge.
+    function sealMark() {
+      const draw = (dx, dy, color) => {
+        ctx.save(); ctx.translate(dx, dy); ctx.scale(.15, .15); ctx.strokeStyle = color;
+        ctx.lineWidth = 35.3; for (const cx of [-59.45, 59.44]) { ctx.beginPath(); ctx.arc(cx, -34.5, 48.38, 0, Math.PI * 2); ctx.stroke(); }
+        ctx.lineWidth = 53; ctx.beginPath(); ctx.moveTo(-75.96, 74.05); ctx.lineTo(75.95, 74.05); ctx.stroke();
+        ctx.restore();
+      };
+      const [light, mid, dark] = waxColors();
+      draw(.9, 1.1, dark); draw(-.6, -.7, light); draw(0, 0, mid);
+    }
+    function seal(crackOpen) {
+      const [light, mid, dark] = waxColors();
+      for (const side of crackOpen ? [-1, 1] : [0]) {
+        ctx.save();
+        if (side) { ctx.translate(side * crackOpen * 10, crackOpen * 6); ctx.rotate(side * crackOpen * .25); ctx.beginPath(); ctx.rect(side < 0 ? -40 : 0, -40, 40, 80); ctx.clip(); }
+        sealBlob(1.06); ctx.fillStyle = dark; ctx.fill();
+        sealBlob();
+        const wax = ctx.createRadialGradient(-10 + pointer * 6, -12 + pointerY * 5, 3, 0, 0, 34);
+        wax.addColorStop(0, light); wax.addColorStop(.5, mid); wax.addColorStop(1, dark);
+        ctx.fillStyle = wax; ctx.fill();
+        sealMark();
+        ctx.restore();
+      }
+    }
+    function envelopeBody() {
+      const W = 250, H = 160, x = -W / 2, y = -H / 2;
+      ctx.fillStyle = gradient(ctx, x, y, x + W, y + H, [[0, '#fbf6ec'], [1, '#e2d8c6']]);
+      ctx.fillRect(x, y, W, H);
+      // Airmail border: diagonal dashes cycling through the pack's colours.
+      ctx.save(); ctx.beginPath(); ctx.rect(x, y, W, H); ctx.rect(x + 9, y + 9, W - 18, H - 18); ctx.clip('evenodd');
+      ctx.lineWidth = 7;
+      for (let k = -12; k < 40; k++) { ctx.strokeStyle = hintHex(k % 5 < 0 ? k % 5 + 5 : k % 5); ctx.beginPath(); ctx.moveTo(x + k * 12, y + H + 10); ctx.lineTo(x + k * 12 + H + 20, y - 10); ctx.stroke(); }
+      ctx.restore();
+      // Side and bottom folds.
+      ctx.strokeStyle = '#00000014'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x + 9, y + H - 9); ctx.lineTo(0, 12); ctx.lineTo(x + W - 9, y + H - 9); ctx.stroke();
+    }
+    function renderEnvelope(t) {
+      const crackT = ease(.06, .18, t), open = ease(.18, .42, t), card = ease(.38, .58, t), away = ease(.52, .72, t);
+      const W = 250, H = 160, top = -H / 2;
+      ctx.save(); ctx.translate(0, 16 + away * 60); ctx.globalAlpha = 1 - away;
+      ctx.beginPath(); ctx.ellipse(0, H / 2 + 8, W * .5, 9, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000038'; ctx.filter = 'blur(6px)'; ctx.fill(); ctx.filter = 'none';
+      envelopeBody();
+      // The flap folds from pointing down over the envelope to standing open above it. Once open,
+      // it sits behind the card, which shows only where it has risen above the envelope's edge.
+      const tipY = mix(top + 96, top - 96, open), inside = tipY < top;
+      const flap = () => {
+        ctx.beginPath(); ctx.moveTo(-W / 2, top); ctx.lineTo(W / 2, top); ctx.lineTo(0, tipY); ctx.closePath();
+        ctx.fillStyle = inside ? gradient(ctx, 0, top, 0, tipY, [[0, '#d9cdb8'], [1, '#efe6d6']]) : gradient(ctx, 0, top, 0, tipY, [[0, '#f7f0e2'], [1, '#e6dbc7']]);
+        ctx.fill(); ctx.strokeStyle = '#00000020'; ctx.lineWidth = 1.2; ctx.stroke();
+      };
+      if (inside) flap();
+      if (card) {
+        ctx.save(); ctx.beginPath(); ctx.rect(-W / 2, top - 200, W, 200); ctx.clip();
+        ctx.fillStyle = '#fffdf8'; ctx.fillRect(-W / 2 + 18, top + 20 - card * 110, W - 36, 120);
+        ctx.strokeStyle = '#00000018'; ctx.lineWidth = 1; ctx.strokeRect(-W / 2 + 18, top + 20 - card * 110, W - 36, 120);
+        ctx.restore();
+      }
+      if (!inside) flap();
+      // The seal rides the flap's tip until it cracks apart and falls.
+      if (!inside || open < .55) {
+        ctx.save(); ctx.globalAlpha *= 1 - ease(.18, .32, t); ctx.translate(0, mix(top + 92, top + 92 + 40, ease(.18, .32, t)));
+        seal(crackT); ctx.restore();
+      }
+      ctx.restore();
+    }
+
     // Each wrapper's animation length (ms), when the ubus begin to fan out (null: it shows them
     // itself), and when the wrapper stops drawing.
     const duration = () => currentType?.duration || 3600;
@@ -952,7 +1100,9 @@
       { id: 'blob', name: 'Powdered Alloy', setup: setupBlob, render: renderBlob, duration: 4800, reveal: null, end: 1 },
       { id: 'gumball', name: 'Gumball Capsule', setup: setupGumball, render: renderGumball, duration: 3000, reveal: .46, end: .96 },
       { id: 'egg', name: 'Speckled Egg', setup: setupEgg, render: renderEgg, duration: 2600, reveal: .12, end: .96, taps: 3 },
-      { id: 'gift', name: 'Gift Box', setup: setupGift, render: renderGift, duration: 3000, reveal: .38, end: .96 }
+      { id: 'gift', name: 'Gift Box', setup: setupGift, render: renderGift, duration: 3000, reveal: .38, end: .96 },
+      { id: 'cookie', name: 'Fortune Cookie', setup: setupCookie, render: renderCookie, duration: 2800, reveal: .42, end: .96 },
+      { id: 'envelope', name: 'Wax-Sealed Envelope', setup: setupEnvelope, render: renderEnvelope, duration: 3000, reveal: .48, end: .96 }
     ];
 
     function recolor(packTypeId) {
@@ -1157,6 +1307,6 @@
     };
   }
 
-  createPackScene.types = ['plastic', 'foil', 'blob', 'gumball', 'egg', 'gift'];
+  createPackScene.types = ['plastic', 'foil', 'blob', 'gumball', 'egg', 'gift', 'cookie', 'envelope'];
   globalThis.createPackScene = createPackScene;
 })();

@@ -842,6 +842,19 @@
       noiseGrain(ctx, master, at(0.05), 0.24 * seconds, { freq: 1400, to: 2600, q: 0.9, level: 0.05 });
       blip(ctx, master, at(0.29), 0.09, 180, 420, 0.26);
       noiseGrain(ctx, master, at(0.29), 0.05, { freq: 900, q: 1, level: 0.12, type: 'lowpass' });
+    } else if (type === 'cookie') {
+      // Fortune cookie: a short, crisp crunch as it snaps, a few crumbs, and the soft flick of the
+      // fortune slip unrolling.
+      for (let i = 0; i < 16; i++) noiseGrain(ctx, master, at(0.27) + rand(0, 0.07), rand(0.002, 0.006), { freq: rand(800, 3500), q: 1, level: rand(0.18, 0.36), pan: rand(-0.3, 0.3) });
+      for (let i = 0; i < 5; i++) noiseGrain(ctx, master, at(rand(0.3, 0.45)), 0.003, { freq: rand(2500, 4500), q: 2, level: 0.08, pan: rand(-0.5, 0.5) });
+      noiseGrain(ctx, master, at(0.32), 0.18, { freq: 2200, to: 1500, q: 0.8, level: 0.04 });
+    } else if (type === 'envelope') {
+      // Envelope: the wax seal cracks with a small snap, the paper flap swishes open, and the card
+      // slides out.
+      blip(ctx, master, at(0.07), 0.03, 900, 500, 0.12);
+      for (let i = 0; i < 6; i++) noiseGrain(ctx, master, at(0.07) + rand(0, 0.04), 0.003, { freq: rand(1500, 4000), q: 1.5, level: 0.16 });
+      noiseGrain(ctx, master, at(0.2), 0.2 * seconds, { freq: 1200, to: 2200, q: 0.9, level: 0.04 });
+      noiseGrain(ctx, master, at(0.4), 0.18 * seconds, { freq: 2500, to: 1800, q: 0.9, level: 0.035 });
     }
   }
 
