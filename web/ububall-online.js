@@ -134,16 +134,19 @@ function ububallOnline(hooks) {
     $('online-create-controls').hidden = false; $('online-lobby').hidden = true; $('online-dialog').close();
     hooks.onLeave();
   }
-  const settings = { mode: 'standard', policy: 'practice' };
-  for (const key of Object.keys(settings)) {
-    const group = $('online-' + key);
-    group.onclick = event => {
-      const button = event.target.closest('button[data-value]');
-      if (!button) return;
-      settings[key] = button.dataset.value;
-      for (const option of group.children) option.setAttribute('aria-pressed', String(option === button));
-    };
-  }
+  const settings = { policy: 'practice' };
+  $('online-policy').onclick = event => {
+    const button = event.target.closest('button[data-value]');
+    if (!button) return;
+    settings.policy = button.dataset.value;
+    for (const option of $('online-policy').children) option.setAttribute('aria-pressed', String(option === button));
+  };
+  // Rules toggle independently; none selected plays standard Ububall.
+  $('online-mode').onclick = event => {
+    const button = event.target.closest('button[data-rule]');
+    if (button) button.setAttribute('aria-pressed', String(button.getAttribute('aria-pressed') !== 'true'));
+  };
+  const onlineMode = () => [...$('online-mode').querySelectorAll('button[aria-pressed="true"]')].map(b => b.dataset.rule).join('-') || 'standard';
   $('online-open').onclick = () => {
     $('online-dialog').showModal();
     refreshSession().catch(error => status(error.message));
@@ -153,7 +156,7 @@ function ububallOnline(hooks) {
   $('online-create').onclick = async () => {
     $('online-create').disabled = true;
     try {
-      const result = await api('/api/ububall', { mode: settings.mode, teams: settings.policy });
+      const result = await api('/api/ububall', { mode: onlineMode(), teams: settings.policy });
       await enter(result.id, result);
     } catch (error) { status(error.message); }
     finally { $('online-create').disabled = !playable(); }

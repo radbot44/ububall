@@ -2,13 +2,13 @@
 const rules = require('../shared/ububall-match.js');
 const P = require('../web/ububall-physics.js');
 const ubu = require('../shared/ubu.js');
-const hold = () => Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false }));
+const hold = () => Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false }));
 // Durable storage adapter will persist this object; no client-supplied owner identities.
 class MatchRoom {
   constructor(host, mode, teams, guest = false) {
     if (typeof host !== 'string' || !host || !rules.MODES.includes(mode) || !['owned', 'practice'].includes(teams)) throw new Error('Invalid lobby.');
     this.state = { version: rules.VERSION, mode, teams, players: [host, null], phase: 'lobby', turn: 1,
-      scorelessTurns: 0, drafts: [hold(), hold()], locked: [false, false], connected: [false, false],
+      drafts: [hold(), hold()], locked: [false, false], connected: [false, false],
       disconnectedAt: [null, null], deadline: null, remaining: null, winner: null, rematch: [false, false] };
     this.state.rosters = [null, null];
     this.state.practice = [null, null];
@@ -56,9 +56,9 @@ class MatchRoom {
   kickoff(previous = null) {
     const s = this.state, bodies = P.kickoff(), stats = [];
     s.rosters.flat().forEach((entry, i) => {
-      const model = ubu.decode(ubu.fromCode(entry.dna)), b = bodies[i], classic = s.mode.includes('classic');
+      const model = ubu.decode(ubu.fromCode(entry.dna)), b = bodies[i], classic = rules.rule(s.mode, 'classic');
       stats.push(classic ? {} : model.stats);
-      P.applyStats(b, stats[i]);
+      rules.applyStats(P, b, stats[i], s.mode);
       b.playerIndex = i;
       b.equippedSuper = classic ? null : P.SUPERS[entry.superId];
       b.meter = classic ? 0 : previous ? previous[i].meter : Math.min(100, model.rating / 1020 * 100);
@@ -70,7 +70,7 @@ class MatchRoom {
   advance(now) {
     const s = this.state;
     if (s.phase === 'lobby' && s.rosters.every(Boolean) && s.connected.every(Boolean)) {
-      s.game = { version: rules.VERSION, mode: s.mode, ...this.kickoff(), scores: [0, 0], scorelessTurns: 0, turn: 1 };
+      s.game = { version: rules.VERSION, mode: s.mode, ...this.kickoff(), scores: [0, 0], turn: 1 };
       this.beginPlanning(now);
     }
     if (s.phase === 'resolving' && s.playUntil !== null && now >= s.playUntil) {
@@ -83,7 +83,7 @@ class MatchRoom {
     if (moves) {
       const result = rules.resolveTurn(P, s.game, moves);
       s.game = result.state; s.replay = result.replay;
-      s.turn = s.game.turn; s.scorelessTurns = s.game.scorelessTurns;
+      s.turn = s.game.turn;
       s.playUntil = now + Math.ceil(s.replay.ticks * P.DT * 1000) + (s.replay.goal !== null ? 2200 : 750);
       s.replay.startedAt = now;
     }
@@ -106,7 +106,7 @@ class MatchRoom {
     if (!s.players[1] || !['lobby', 'resolving'].includes(s.phase)) throw new Error('Cannot begin turn.');
     s.phase = 'plan'; s.drafts = [hold(), hold()]; s.locked = [false, false];
     s.replay = null;
-    const duration = rules.planningMilliseconds(s.mode, s.scorelessTurns);
+    const duration = rules.planningMilliseconds(s.mode);
     s.deadline = duration !== null && s.connected.every(Boolean) ? now + duration : null;
     s.remaining = s.deadline === null ? duration : null;
   }
@@ -115,7 +115,7 @@ class MatchRoom {
     if (s.phase !== 'plan' || s.turn !== turn || s.locked[i] || !s.connected.every(Boolean) ||
         (s.deadline !== null && now >= s.deadline) || typeof lock !== 'boolean') throw new Error('Turn is not editable.');
     const validated = rules.validatePlans(moves);
-    if (s.mode.includes('classic') && validated.some(p => p.superArm)) throw new Error('Classic has no supers.');
+    if (rules.rule(s.mode, 'classic') && validated.some(p => p.superArm)) throw new Error('Classic has no supers.');
     if (s.game) validated.forEach((p, index) => {
       const b = s.game.bodies[i * 3 + index];
       if (p.superArm && (b.stunned || b.meter < 100 || !b.equippedSuper)) throw new Error('Super unavailable.');
@@ -142,9 +142,8 @@ class MatchRoom {
       s.rematch = [false, false];
       s.winner = null;
       s.turn = 1;
-      s.scorelessTurns = 0;
       s.phase = 'lobby';
-      s.game = { version: rules.VERSION, mode: s.mode, ...this.kickoff(), scores: [0, 0], scorelessTurns: 0, turn: 1 };
+      s.game = { version: rules.VERSION, mode: s.mode, ...this.kickoff(), scores: [0, 0], turn: 1 };
       this.beginPlanning(now);
     }
   }

@@ -6,6 +6,7 @@
   const SKATER_CURVE = .06, BALL_CURVE = .045;
   const AIR_DRAG = .00015; // Quadratic drag for balls and ubus; strongest on fast shots.
   const CLOSE_SPIN_GAIN = 2;
+  const GUARD_BRAKE = .25; // Share of velocity and spin a guarding ubu keeps when its turn starts.
   function ballHitRadius(body) { return Math.max(body.radius, body.reach || body.radius, 18); }
   function checkCloseSpin(bodies, ball) {
     if (!ball?.openingShot) return;
@@ -427,11 +428,16 @@
         b.radius *= 1.8;
         b.mass *= 2.5;
       }
+      if (b.guarding) {
+        b.vx *= GUARD_BRAKE; b.vy *= GUARD_BRAKE; b.omega *= GUARD_BRAKE;
+        return;
+      }
+      // Launches add to current motion, so a moving ubu keeps its momentum.
       const plan = plans[i] || { angle: 0, power: 0 };
       const impulse = b.impulse || IMPULSE;
       const speed = impulse / b.mass * Math.max(0, Math.min(1, plan.power));
-      b.vx = Math.cos(plan.angle) * speed; b.vy = Math.sin(plan.angle) * speed;
-      b.omega = Math.max(-1, Math.min(1, plan.spin || 0)) * b.maxSpin;
+      b.vx += Math.cos(plan.angle) * speed; b.vy += Math.sin(plan.angle) * speed;
+      b.omega = Math.max(-b.maxSpin, Math.min(b.maxSpin, b.omega + Math.max(-1, Math.min(1, plan.spin || 0)) * b.maxSpin));
       if (plan.power > 0) b.closeSpinBonus = b.omega * CLOSE_SPIN_GAIN;
     });
     const ball = bodies.find(b => b.team === -1);
@@ -447,13 +453,14 @@
     }
   }
   function settled(bodies) { return bodies.every(b => b.vx * b.vx + b.vy * b.vy < 4 && Math.abs(b.omega) < .05); }
-  function stop(bodies) {
+  // Ends turn effects; keepMotion leaves velocities for a Pulse turn that ends mid-motion.
+  function stop(bodies, keepMotion = false) {
     for (const b of bodies) {
       b.closeSpinBonus = 0;
       b.openingShot = false;
       if (b.guardBase) Object.assign(b, b.guardBase);
       b.guardBase = null; b.guarding = false;
-      b.vx = b.vy = b.omega = 0;
+      if (!keepMotion) b.vx = b.vy = b.omega = 0;
       if (b.colossusApplied) {
         if (b.baseRadius) b.radius = b.baseRadius;
         if (b.baseMass) b.mass = b.baseMass;
@@ -519,7 +526,7 @@
     const wingOpenX = Math.max(200, Math.min(760, ball.x - 90 + (1 - wTrait.agg) * 180 - Math.max(0, wTrait.surge) * 70));
 
     return players.map((b, idx) => {
-      if (b.stunned) return { angle: 0, power: 0, spin: 0, superArm: false };
+      if (b.stunned) return { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
       const { agg, cre, tmw, surge } = traits[idx];
       const sKey = b.equippedSuper?.key || b.superKey;
       const canSuper = (b.meter ?? 0) >= 100 && !b.stunned;
@@ -629,7 +636,7 @@
       }
 
       if (superArm && sKey === 'stalwart') {
-        return { angle: 0, power: 0, spin: 0, superArm: true };
+        return { angle: 0, power: 0, spin: 0, superArm: true, guard: false };
       }
 
       const dx = tx - b.x, dy = ty - b.y, distance = Math.hypot(dx, dy);
@@ -647,7 +654,9 @@
         angle -= avgOmega * curveF * estT * 0.5;
       }
 
-      return { angle, power, spin: Math.max(-1, Math.min(1, spin)), superArm: Boolean(superArm) };
+      // A baseline ubu with nowhere to go brakes in place.
+      if (!power) return { angle: 0, power: 0, spin: 0, superArm: Boolean(superArm), guard: true };
+      return { angle, power, spin: Math.max(-1, Math.min(1, spin)), superArm: Boolean(superArm), guard: false };
     });
   }
   // Shared turn preparation for gameplay and prediction. Supers activate before launch.
@@ -656,7 +665,7 @@
       if (b.team < 0) return;
       if (b.guardBase) Object.assign(b, b.guardBase);
       b.guardBase = null;
-      b.guarding = !plans[i]?.power || Boolean(b.stunned);
+      b.guarding = Boolean(plans[i]?.guard || b.stunned);
       if (b.guarding) {
         b.guardBase = { reach: b.reach, friction: b.friction, strength: b.strength, stability: b.stability, bounciness: b.bounciness };
         b.reach = Math.max(b.radius, Math.min(37.5, (b.reach || b.radius) * 1.25));

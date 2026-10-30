@@ -4,7 +4,7 @@ Owner decisions: private invite matches; host chooses owned-ubu or practice team
 
 Implemented foundation: shared meter rules and Blitz duration calculation used by the local game; strict network move validation; a server-side match lifecycle with private drafts, locking, deadline expiry, pause/resume and forfeit authorization. These modules are not exposed through network routes yet.
 
-Authoritative turn resolution validates both teams' moves and super eligibility, runs the existing 240 Hz physics for at most 12 seconds, and returns settled state plus replay frames sampled every eight ticks. Scoring, end-of-turn meter and stun rules are shared with the local game. Tests cover deterministic resolution, input immutability, bounded replay, victory and super meter consumption.
+Authoritative turn resolution validates both teams' moves and super eligibility, runs the existing 240 Hz physics for at most 12 seconds (1 second in Pulse, whose replays chain turn to turn from each turn's moving initial state), and returns the resulting state plus replay frames sampled every eight ticks. Scoring, end-of-turn meter and stun rules are shared with the local game. Tests cover deterministic resolution, input immutability, bounded replay, victory and super meter consumption.
 
 Completed online play architecture:
 - Dedicated `UbuballMatch` Durable Object per match, persisting state to SQLite and driven by alarms for turn resolution and timeouts.

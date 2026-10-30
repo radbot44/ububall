@@ -8,13 +8,13 @@ function initialState(seed = 1, mode = 'standard') {
   const random = C.randomSource(seed), bodies = P.kickoff(), stats = [];
   for (const b of bodies.slice(0, 6)) {
     const model = U.decode(Uint8Array.from({ length: 128 }, () => Math.floor(random() * 256)));
-    const raw = mode.includes('classic') ? {} : model.stats;
-    stats.push(raw); P.applyStats(b, raw);
+    const classic = M.rule(mode, 'classic'), raw = classic ? {} : model.stats;
+    stats.push(raw); M.applyStats(P, b, raw, mode);
     b.personality = model.personality;
-    b.equippedSuper = mode.includes('classic') ? null : P.SUPERS[model.supers[0] % 8];
-    b.meter = mode.includes('classic') ? 0 : Math.min(100, model.rating / 1020 * 100);
+    b.equippedSuper = classic ? null : P.SUPERS[model.supers[0] % 8];
+    b.meter = classic ? 0 : Math.min(100, model.rating / 1020 * 100);
   }
-  return { version: 1, mode, bodies, stats, scores: [0, 0], turn: 1, scorelessTurns: 0, phase: 'plan', winner: null };
+  return { version: M.VERSION, mode, bodies, stats, scores: [0, 0], turn: 1, phase: 'plan', winner: null };
 }
 function kickoff(state) {
   const positions = P.kickoff();

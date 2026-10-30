@@ -328,7 +328,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
       assert.equal((await post(base + '/team', { supers }, h)).status, 200);
     }
     await hostSocket.wait(m => m.phase === 'plan');
-    const moves = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false }));
+    const moves = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false }));
     const hostMoves = structuredClone(moves); hostMoves[0].power = .25;
     hostSocket.ws.send(JSON.stringify({ type: 'moves', turn: 1, moves: hostMoves, lock: true }));
     const privateView = await guestSocket.wait(m => m.phase === 'plan' && m.locked[0]);

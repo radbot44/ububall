@@ -1,6 +1,6 @@
 # CPU planning and simulation
 
-The local CPU evaluates complete three-player plans through `ububallMatch.resolveTurn`, using the gameplay physics, 240 Hz timestep, 12-second turn cap, guard bonuses, supers, stun and meter rules. It never receives the human's planned arrows or super arming choices. Browser planning runs in a Web Worker from the public state captured at the start of the turn. Launch waits for that plan; a reset cancels old work. Worker failure or a ten-second timeout falls back to the previous heuristic planner.
+The local CPU evaluates complete three-player plans through `ububallMatch.resolveTurn`, using the gameplay physics, 240 Hz timestep, 12-second turn cap (1 second in Pulse), explicit guard braking, supers, stun and meter rules. It never receives the human's planned arrows or super arming choices. Browser planning runs in a Web Worker from the public state captured at the start of the turn. Launch waits for that plan; a reset cancels old work. Worker failure or a ten-second timeout falls back to the previous heuristic planner.
 
 The existing heuristic supplies the initial plan and preserves personality-dependent role selection. Search tries direct shots at different powers and goal positions, defensive holds and clears, banks and spin based on creativity, and paired pass/receiver moves based on teamwork. It evaluates whole teams, then refines angle/power/spin and tries a few joint alternatives. Armed and unarmed candidates are compared when a super is available. DNA and game physics are unchanged.
 

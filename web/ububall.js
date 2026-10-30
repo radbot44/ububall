@@ -20,13 +20,15 @@
   let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [], next = '';
   let isPortrait = false;
-  let matchMode = 'standard', scorelessTurns = 0, planDeadline = 0;
+  let matchMode = 'standard', planDeadline = 0;
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const cpuClient = createCPUClient();
   let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuLevel = 'medium';
-  const classicMode = () => matchMode.includes('classic');
-  const blitzMode = () => matchMode.includes('blitz');
-  function startPlanClock() { planDeadline = performance.now() + (ububallMatch.planningMilliseconds(matchMode, scorelessTurns) ?? 10000); }
+  const classicMode = () => ububallMatch.rule(matchMode, 'classic');
+  const blitzMode = () => ububallMatch.rule(matchMode, 'blitz');
+  const pulseMode = () => ububallMatch.rule(matchMode, 'pulse');
+  const idlePlan = () => ({ angle: 0, power: 0, spin: 0, guard: false });
+  function startPlanClock() { planDeadline = performance.now() + (ububallMatch.planningMilliseconds(matchMode) ?? Infinity); }
   function updateClock() {
     if (online?.active) {
       const s = online.state, clock = $('blitz-clock');
@@ -39,7 +41,7 @@
     const clock = $('blitz-clock'); clock.hidden = !blitzMode() || phase !== 'plan';
     if (!clock.hidden) clock.textContent = Math.max(0, Math.ceil((planDeadline - performance.now()) / 1000)) + 's';
   }
-  let arrowGrab = null;
+  let arrowGrab = null, dragStart = null, dragMoved = false;
   let pullBehind = false;
   $('aim-mode').onclick = () => {
     pullBehind = !pullBehind;
@@ -278,7 +280,7 @@
     const oldBodies = bodies;
     const result = P.kickoff();
     result.slice(0, 6).forEach((b, i) => {
-      P.applyStats(b, classicMode() ? normalStats() : stats[i]);
+      ububallMatch.applyStats(P, b, stats[i], matchMode);
       const entry = teamEntries[i] || practice[i];
       if (entry?.model) {
         b.playerIndex = i;
@@ -318,7 +320,7 @@
     cpuClient.cancel();
     if (online?.active) return;
     cpu = P.cpuPlans(bodies, () => .5, scores);
-    cpuReady = cpuClient.plan({ version: 1, mode: matchMode, bodies, stats, scores, turn, scorelessTurns },
+    cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn },
       { level: cpuLevel, seed: turn }).then(result => {
       if (generation !== cpuGeneration || !result || online?.active) return;
       if (result.error) console.warn('CPU search unavailable; using baseline plan.');
@@ -327,7 +329,7 @@
   }
   function resetPlans() {
     startPlanClock();
-    plans = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0 }));
+    plans = Array.from({ length: 3 }, idlePlan);
     prepareCPU(); // Snapshot before any human planning input.
     sync();
   }
@@ -443,11 +445,13 @@
     $('launch').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : phase === 'cpu-wait' ? 'CPU planning…' : 'Launch team';
     $('selected-name').textContent = teamEntries[selected].model.parts.fullName;
     const launching = plans.filter((p, i) => p.power > 0 && !bodies[i].stunned && !(bodies[i].superArm && bodies[i].equippedSuper?.key === 'stalwart')).length;
-    $('plan-summary').textContent = planning ? `${launching} launching · ${3 - launching} holding` : '';
+    const guarding = plans.filter((p, i) => p.guard && !bodies[i].stunned).length;
+    $('plan-summary').textContent = planning ? `${launching} launching · ${guarding} guarding` : '';
+    $('hold').setAttribute('aria-pressed', String(Boolean(plans[selected].guard)));
     [...$('team-selector').children].forEach((button, i) => {
       button.setAttribute('aria-pressed', String(i === selected));
       button.disabled = !planning;
-      button.querySelector('span').textContent = `${bodies[i].stunned ? 'Stunned' : plans[i].power > 0 ? Math.round(plans[i].power * 100) + '%' : 'Hold'}${bodies[i].superArm ? ' · Armed' : ''}`;
+      button.querySelector('span').textContent = `${bodies[i].stunned ? 'Stunned' : plans[i].guard ? 'Guard' : plans[i].power > 0 ? Math.round(plans[i].power * 100) + '%' : 'Hold'}${bodies[i].superArm ? ' · Armed' : ''}`;
     });
     const angle = Math.round((plans[selected].angle * 180 / Math.PI + 360) % 360);
     $('angle').value = angle; $('angle-value').value = angle + '°';
@@ -465,6 +469,7 @@
       const small = button.querySelector('small');
       if (small) {
         if (bodies[i]?.stunned) small.textContent = '💫 Stunned this turn';
+        else if (plans[i].guard) small.textContent = 'Guarding';
         else small.textContent = `${Math.round(plans[i].power * 100)}% power · ${Math.round((plans[i].spin || 0) * 100)}% spin`;
       }
     });
@@ -593,10 +598,9 @@
     }
   }
   function newMatch(playJingle = false) {
-    matchMode = $('match-mode').value;
-    scorelessTurns = 0;
+    matchMode = ububallMatch.RULES.filter(rule => $('rule-' + rule).checked).join('-') || 'standard';
     document.body.classList.toggle('classic-match', classicMode());
-    $('mode-label').textContent = $('match-mode').selectedOptions[0].textContent;
+    $('mode-label').textContent = ububallMatch.modeName(matchMode);
     stats = [...draft, ...practice.slice(3)].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
     window.ubuAudio?.stop();
     roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
@@ -900,7 +904,7 @@
         circle(b.x, b.y, b.radius + 9, goalAccent, 4);
         circle(b.x, b.y, b.radius + 15, goalAccent, 2);
       }
-      if (phase === 'play' && b.guarding) {
+      if ((phase === 'play' && b.guarding) || (phase === 'plan' && i < 3 && plans[i]?.guard)) {
         badgeCtx.save();
         const p = isPortrait ? { x: b.x - b.radius * .65, y: b.y + b.radius * .65 } : { x: b.x + b.radius * .65, y: b.y + b.radius * .65 };
         badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
@@ -974,11 +978,10 @@
     drawParticles(home, away);
   }
   function finishTurn(goal) {
-    ububallMatch.finishTurn(P, bodies, stats, scores, goal, classicMode());
+    ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode);
     bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
     accumulator = 0; layoutDirty = true;
     if (goal !== null) {
-      scorelessTurns = 0;
       phase = scores[goal] >= 5 ? 'over' : 'goal';
       const ball = bodies[6];
       burst(ball.x, ball.y, goal, 1, true);
@@ -1001,8 +1004,8 @@
       sync();
       if (phase === 'goal') { $('launch').disabled = false; $('launch').textContent = 'Next kickoff'; }
     } else {
-      scorelessTurns++;
-      turn++; phase = 'plan'; resetPlans(); say('Field settled. Plan your next three launches.');
+      turn++; phase = 'plan'; resetPlans();
+      say(pulseMode() && !P.settled(bodies) ? 'Pulse paused. Adjust your launches or guard to brake.' : 'Field settled. Plan your next three launches.');
     }
     draw();
   }
@@ -1034,18 +1037,24 @@
   for (const [id, key, scale] of [['angle', 'angle', Math.PI / 180], ['power', 'power', .01], ['shot-spin', 'spin', .01]]) {
     $(id).oninput = () => {
       if (phase !== 'plan' || bodies[selected].stunned) return;
-      plans[selected][key] = Number($(id).value) * scale;
+      plans[selected][key] = Number($(id).value) * scale; plans[selected].guard = false;
       sync(); draw();
     };
   }
   for (const [id, delta] of [['spin-less', -.1], ['spin-more', .1]]) {
     $(id).onclick = () => {
       if (phase !== 'plan' || bodies[selected].stunned) return;
-      plans[selected].spin = Math.max(-1, Math.min(1, Math.round(((plans[selected].spin || 0) + delta) * 10) / 10));
+      plans[selected].spin = Math.max(-1, Math.min(1, Math.round(((plans[selected].spin || 0) + delta) * 10) / 10)); plans[selected].guard = false;
       sync(); draw();
     };
   }
-  $('hold').onclick = () => { if (phase !== 'plan' || bodies[selected].stunned) return; plans[selected].power = plans[selected].spin = 0; sync(); draw(); };
+  // Guarding replaces the launch and brakes the ubu; clearing it leaves the ubu coasting.
+  function toggleGuard(i) {
+    if (phase !== 'plan' || bodies[i].stunned) return;
+    plans[i] = { ...idlePlan(), guard: !plans[i].guard };
+    sync(); draw();
+  }
+  $('hold').onclick = () => toggleGuard(selected);
   function point(event) {
     const r = canvas.getBoundingClientRect();
     if (isPortrait) {
@@ -1072,6 +1081,7 @@
     selected = target.index;
     drag = event.pointerId;
     dragMode = target.mode;
+    dragStart = p; dragMoved = false;
     if (dragMode === 'arrow') {
       const arrow = impulseGeometry(bodies[selected], plans[selected]);
       arrowGrab = { x: p.x - arrow.x, y: p.y - arrow.y, distance: arrow.distance, power: plans[selected].power };
@@ -1089,6 +1099,9 @@
       return;
     }
     const b = bodies[selected];
+    // A tap toggles guard; aiming starts once the pointer leaves the tap radius.
+    if (!dragMoved && Math.hypot(p.x - dragStart.x, p.y - dragStart.y) < 6) return;
+    dragMoved = true; plans[selected].guard = false;
     if (dragMode === 'arrow') {
       const dx = p.x - arrowGrab.x - b.x, dy = p.y - arrowGrab.y - b.y;
       const arrow = impulseGeometry(b, plans[selected]);
@@ -1103,7 +1116,8 @@
 
     sync(); draw();
   };
-  canvas.onpointerup = canvas.onpointercancel = () => {
+  canvas.onpointerup = canvas.onpointercancel = event => {
+    if (event.type === 'pointerup' && drag === event.pointerId && dragMode === 'aim' && !dragMoved) toggleGuard(selected);
     arrowGrab = null;
     drag = null;
     dragMode = null;
@@ -1216,7 +1230,7 @@
       while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
         const goal = P.step(bodies, P.DT, handleCollision, handleWall, handleShockwave, handleSuper); elapsed += P.DT; accumulator -= P.DT;
         recordTrails();
-        if (goal !== null || P.settled(bodies) || elapsed >= 12) finishTurn(goal);
+        if (goal !== null || P.settled(bodies) || Math.round(elapsed / P.DT) >= ububallMatch.turnTicks(matchMode)) finishTurn(goal);
       }
       if (phase === 'play') emitMaterialTrails(delta);
       draw();
@@ -1327,7 +1341,7 @@
     };
   }
   $('new-match').onclick = () => {
-    $('match-mode').value = matchMode;
+    for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(matchMode, rule);
     $('cpu-level').value = cpuLevel;
     draft = [...roster]; rosterSlot = 0; rosterSlots(); $('roster-status').textContent = 'Test stats stay with their team slots when changing characters.'; $('roster-dialog').showModal();
   };
@@ -1399,7 +1413,7 @@
     previewStats();
   }
   function resetField() {
-    scorelessTurns = 0; startPlanClock();
+    startPlanClock();
     window.ubuAudio?.stop();
     bodies = kickoff(); scores = [0, 0]; turn = 1; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     buildTeam();
@@ -1520,7 +1534,7 @@
   practice.slice(0, 3).forEach(addOption); newMatch(); requestAnimationFrame(frame);
   function networkMoves() {
     return plans.map((p, i) => ({ angle: p.angle + (online?.state?.seat ? Math.PI : 0), power: p.power,
-      spin: p.spin || 0, superArm: Boolean(bodies[i].superArm) }));
+      spin: p.spin || 0, superArm: Boolean(bodies[i].superArm), guard: Boolean(p.guard) }));
   }
   function onlineOrder(items, seat) { return seat ? [...items.slice(3, 6), ...items.slice(0, 3), ...items.slice(6)] : items; }
   function viewBodies(items, seat) {
@@ -1657,7 +1671,7 @@
       $('opponent-label').textContent = 'Opponent'; $('opponent-heading').textContent = 'Opponent team';
       $('online-match-status').hidden = false; $('new-match').disabled = true;
       matchMode = s.mode; document.body.classList.toggle('classic-match', classicMode());
-      $('mode-label').textContent = 'Online · ' + ($('match-mode').querySelector(`option[value="${s.mode}"]`)?.textContent || s.mode);
+      $('mode-label').textContent = 'Online · ' + ububallMatch.modeName(s.mode);
       const rematchBtn = $('online-rematch');
       if (rematchBtn) {
         rematchBtn.hidden = s.phase !== 'over';
@@ -1687,7 +1701,7 @@
         ? s.game.scores.map((sc, gi) => gi === s.replay.goal ? sc - 1 : sc)
         : s.game.scores;
       scores = s.seat ? [...rawScores].reverse() : [...rawScores];
-      turn = s.turn; scorelessTurns = s.game.scorelessTurns;
+      turn = s.turn;
       if (fresh) plans = s.moves.map(p => ({
         ...p,
         angle: p.power === 0 ? 0 : (((p.angle + (s.seat ? Math.PI : 0)) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)

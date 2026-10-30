@@ -4,7 +4,8 @@
   const node = typeof module === 'object' && module.exports;
   const P = node ? require('../web/ububall-physics.js') : root.ububallPhysics;
   const M = node ? require('./ububall-match.js') : root.ububallMatch;
-  const HOLD = Object.freeze({ angle: 0, power: 0, spin: 0, superArm: false });
+  const HOLD = Object.freeze({ angle: 0, power: 0, spin: 0, superArm: false, guard: false });
+  const GUARD = Object.freeze({ ...HOLD, guard: true });
   const LEVELS = Object.freeze({
     easy: Object.freeze({ candidates: 18, opponents: 1, risk: .15 }),
     medium: Object.freeze({ candidates: 60, opponents: 2, risk: .35 }),
@@ -29,14 +30,14 @@
     }
     return P.cpuPlans(bodies, random, team ? state.scores : [...state.scores].reverse()).map(p => ({
       angle: team ? p.angle : Math.PI - p.angle, power: p.power,
-      spin: (p.spin || 0) * (team ? 1 : -1), superArm: Boolean(p.superArm)
+      spin: (p.spin || 0) * (team ? 1 : -1), superArm: Boolean(p.superArm), guard: Boolean(p.guard)
     }));
   }
   function aim(body, x, y, drive = 0) {
     const distance = Math.hypot(x - body.x, y - body.y);
     return { angle: Math.atan2(y - body.y, x - body.x),
       power: distance < 2 ? 0 : Math.min(1, Math.sqrt(2 * body.friction * (distance + drive)) / ((body.impulse || P.IMPULSE) / body.mass)),
-      spin: 0, superArm: false };
+      spin: 0, superArm: false, guard: false };
   }
   function strike(body, ball, x, y) {
     const d = Math.hypot(x - ball.x, y - ball.y) || 1;
@@ -47,7 +48,7 @@
     const body = state.bodies[team * 3 + index], ball = state.bodies[6];
     if (body.stunned) return [HOLD];
     const goal = team ? 60 : 940, ownGoal = 1000 - goal;
-    const moves = [HOLD, base];
+    const moves = [HOLD, GUARD, base];
     for (const y of [300, 250, 350]) {
       const shot = strike(body, ball, goal, y);
       for (const power of [shot.power, shot.power * .75, 1]) moves.push({ ...shot, power });
@@ -62,9 +63,9 @@
     if (creativity > .3) {
       // Reflected goal supplies bank-shot seeds; exact physics judges each result.
       for (const y of [2 * 78 - 300, 2 * 522 - 300]) moves.push(strike(body, ball, goal, y));
-      for (const spin of [-creativity, creativity]) moves.push({ ...moves[2], spin });
+      for (const spin of [-creativity, creativity]) moves.push({ ...moves[3], spin });
     }
-    if (!state.mode.includes('classic') && body.meter >= 100 && body.equippedSuper) {
+    if (!M.rule(state.mode, 'classic') && body.meter >= 100 && body.equippedSuper) {
       for (const move of [...moves]) moves.push({ ...move, superArm: true });
     }
     return moves;
@@ -132,7 +133,7 @@
     }
     while (evaluated < settings.candidates) {
       const next = best.map(p => ({ ...p })), i = Math.floor(random() * 3);
-      if (state.bodies[team * 3 + i].stunned) { consider(next); continue; }
+      if (state.bodies[team * 3 + i].stunned || next[i].guard) { consider(next); continue; }
       if (evaluated % 4 === 0) {
         for (let j = 0; j < 3; j++) next[j] = choices[j][Math.floor(random() * choices[j].length)];
       } else {
@@ -145,6 +146,6 @@
     }
     return { plans: M.validatePlans(best), diagnostics: { level, candidates: evaluated, simulations, ticks, score: bestScore, milliseconds: performance.now() - started } };
   }
-  const api = { LEVELS, WEIGHTS, HOLD, randomSource, legacy, plan };
+  const api = { LEVELS, WEIGHTS, HOLD, GUARD, randomSource, legacy, plan };
   if (node) module.exports = api; else root.ububallCPU = api;
 })(globalThis);
