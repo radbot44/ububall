@@ -766,6 +766,8 @@
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
     const master = createMasterChain(ctx);
+    // Foil and wet crackle live up to 12 kHz; open the chain's usual 7.5 kHz softening.
+    master.frequency.setValueAtTime(16000, ctx.currentTime);
     const now = ctx.currentTime + 0.02;
     const at = fraction => now + fraction * seconds;
     const rand = (low, high) => low + Math.random() * (high - low);
@@ -786,39 +788,36 @@
       scatter(0.08, 0.38, 20, crinkle);
       scatter(0.62, 0.85, 16, crinkle);
     } else if (type === 'foil') {
-      // Foil: one quick, light rip through a thin candy wrapper: tiny, bright grains that swell
-      // and fade over a third of a second as the sheet tears.
-      const start = at(0.14), length = 0.34;
-      for (let t = start; t < start + length; t += rand(0.002, 0.005)) {
+      // Foil, modelled on a recording of thin foil: one quick rip of very bright, fluttering hiss
+      // (most energy 3-12 kHz) with tiny crackles riding on it, about fifty a second.
+      const start = at(0.14), length = 0.32;
+      for (let t = start; t < start + length; t += 0.012) {
+        const x = (t - start) / length, swell = Math.sin(Math.PI * x) ** 0.7;
+        noiseGrain(ctx, master, t, 0.016, { freq: rand(6000, 9500), q: 0.7, level: 0.09 * swell * rand(0.4, 1) });
+      }
+      for (let t = start; t < start + length; t += rand(0.012, 0.034)) {
         const x = (t - start) / length;
-        noiseGrain(ctx, master, t, rand(0.0015, 0.004), { freq: rand(4200, 7200), q: rand(0.8, 1.4), level: rand(0.08, 0.18) * Math.sin(Math.PI * x) ** 0.6 });
+        noiseGrain(ctx, master, t, rand(0.002, 0.005), { freq: rand(4000, 11000), q: rand(1, 2.5), level: rand(0.09, 0.24) * Math.sin(Math.PI * x) ** 0.5, pan: rand(-0.3, 0.3) });
       }
     } else if (type === 'blob') {
-      // Blob: one slow, sludgy goop while it stretches and splits: thick low noise through a
-      // resonant lowpass that wanders irregularly (no steady wobble), its level gently swelling in
-      // and out with soft, uneven surges. Then a bubbly bloop as each lobe becomes an ubu.
-      const start = at(0.12), end = at(0.5), length = end - start;
-      const goo = ctx.createBufferSource();
-      const filter = ctx.createBiquadFilter();
-      const gain = ctx.createGain();
-      goo.buffer = grainNoise(ctx);
-      goo.loop = true;
-      filter.type = 'lowpass';
-      filter.Q.setValueAtTime(6, start);
-      const steps = 12;
-      const cutoff = new Float32Array(steps).map((_, i) => 200 + 260 * Math.sin(Math.PI * i / (steps - 1)) * rand(0.6, 1));
-      const surge = new Float32Array(steps * 2).map((_, i) => {
-        const x = i / (steps * 2 - 1);
-        return 0.0001 + 0.24 * Math.min(1, x * 5, (1 - x) * 3) * rand(0.65, 1);
-      });
-      filter.frequency.setValueCurveAtTime(cutoff, start, length);
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.setValueCurveAtTime(surge, start, length);
-      goo.connect(filter);
-      filter.connect(gain);
-      gain.connect(master);
-      goo.start(start);
-      goo.stop(end + 0.02);
+      // Blob, modelled on a recording of squished slime: one wet squelch as the goo stretches.
+      // Real squishes are bright, not boomy (most energy 1.5-8 kHz): a dense cluster of tiny
+      // pops, thin-film bubbles bursting as short rising chirps among wet crackles, swelling in
+      // a few uneven lumps. Then a bubbly bloop as each lobe becomes an ubu.
+      const start = at(0.14), length = 0.75;
+      const lumps = [0.15, 0.45, 0.75].map(centre => centre + rand(-0.06, 0.06));
+      const density = x => lumps.reduce((sum, c) => sum + Math.exp(-(((x - c) / 0.11) ** 2)), 0);
+      for (let t = start; t < start + length; t += 0.003) {
+        const x = (t - start) / length, d = Math.min(1, density(x));
+        if (Math.random() > d * 0.3) continue;
+        const pan = rand(-0.3, 0.3);
+        if (Math.random() < 0.55) {
+          const pitch = rand(1400, 4200);
+          blip(ctx, master, t, rand(0.004, 0.01), pitch, pitch * rand(1.3, 1.8), rand(0.04, 0.11) * d, pan);
+        } else {
+          noiseGrain(ctx, master, t, rand(0.003, 0.008), { freq: rand(1800, 9500), q: rand(1.5, 4), level: rand(0.08, 0.2) * d, pan });
+        }
+      }
       for (let i = 0; i < 5; i++) blip(ctx, master, at(0.67 + i * 0.03), 0.09, 320, 640, 0.22, (i - 2) * 0.3);
     }
   }
