@@ -39,11 +39,12 @@
   function applyStats(P, body, raw, mode) {
     P.applyStats(body, rule(mode, 'classic') ? {} : raw);
   }
-  // Meter values (owner decision 2026-10-30): meter comes only from contact and conceding.
+  // Meter values (owner decision 2026-10-30): meter comes from contact, conceding, aces (a goal on a
+  // round's first turn, to the scorer) and saves.
   // Contact counts only for real impacts against the ball or an opponent, at most once per
   // cooldown per ubu, so pinging around the ball or an enemy cannot farm it (cooldown and
   // impact speed are tuning, not owner decisions).
-  const METER = Object.freeze({ ball: 8, check: 4, conceded: 6, teammate: .15, minSpeed: 60, cooldownTicks: 360 });
+  const METER = Object.freeze({ ball: 8, check: 4, conceded: 6, ace: 10, save: 6, teammate: .15, minSpeed: 60, cooldownTicks: 360 });
   function gainMeter(P, bodies, stats, body, amount, classic = false) {
     const changed = [];
     if (classic || !body || body.team < 0 || body.usedSuperThisTurn) return changed;
@@ -70,7 +71,24 @@
     }
     return changed;
   }
-  function finishTurn(P, bodies, stats, scores, goal, mode) {
+  // The ubu behind a real ball contact, or null.
+  function toucher(a, b, speed) {
+    if (speed < 15 || (a.team === -1) === (b.team === -1)) return null;
+    return a.team === -1 ? b : a;
+  }
+  // Saves among the ubus (by index) that touched the ball in one tick: from the field as it stood
+  // before that tick, the ball was heading into the ubu's own goal and would have gone in without it,
+  // touching nothing but the posts and net.
+  function saves(P, before, touched) {
+    const ball = before.find(b => b.team === -1);
+    return [...touched].filter(i => {
+      const team = before[i].team;
+      if (!ball || ball.stuckTo || team < 0 || (team ? ball.vx <= 0 : ball.vx >= 0)) return false;
+      return P.wouldScore(before, before[i]) === 1 - team;
+    });
+  }
+  // `ace` is the scorer's index when a goal came on the round's first turn.
+  function finishTurn(P, bodies, stats, scores, goal, mode, ace = null) {
     const classic = rule(mode, 'classic');
     // Turn effects end every turn; in Pulse, momentum carries into the next one.
     P.stop(bodies, rule(mode, 'pulse') && goal === null);
@@ -80,6 +98,7 @@
     if (goal !== null) {
       scores[goal]++;
       for (const b of bodies.filter(b => b.team === 1 - goal)) gainMeter(P, bodies, stats, b, METER.conceded, classic);
+      if (ace !== null) gainMeter(P, bodies, stats, bodies[ace], METER.ace, classic);
     }
     return goal !== null && scores[goal] >= 5 ? goal : null;
   }
@@ -100,26 +119,33 @@
     // The match clock counts simulated ticks across turns for meter cooldowns.
     const clock = state.clock || 0;
     let goal = null, ticks = 0;
+    const saved = [], touched = new Set();
     for (let tick = 1; tick <= limit; tick++) {
+      const before = bodies.map(b => ({ ...b }));
+      touched.clear();
       goal = P.step(bodies, P.DT, (a, b, speed) => {
-        if (speed >= 15 && (a.team === -1 || b.team === -1)) {
-          const player = a.team === -1 ? b : a;
-          lastTouch[player.team] = bodies.indexOf(player);
-        }
+        const player = toucher(a, b, speed);
+        if (player) { lastTouch[player.team] = bodies.indexOf(player); touched.add(bodies.indexOf(player)); }
         contactMeter(P, bodies, next.stats, a, b, speed, clock + tick, classic);
       });
+      for (const index of saves(P, before, touched)) {
+        saved.push({ tick, index });
+        gainMeter(P, bodies, next.stats, bodies[index], METER.save, classic);
+      }
       ticks = tick;
       const done = goal !== null || P.settled(bodies) || tick === limit;
       if (done) break;
     }
-    next.winner = finishTurn(P, bodies, next.stats, next.scores, goal, state.mode);
+    // A round runs from kickoff to goal; scoring on its first turn is an ace.
+    const ace = goal !== null && !state.roundTurns, scorer = goal === null ? null : lastTouch[goal];
+    next.winner = finishTurn(P, bodies, next.stats, next.scores, goal, state.mode, ace ? scorer : null);
+    next.roundTurns = goal === null ? (state.roundTurns || 0) + 1 : 0;
     next.clock = clock + ticks;
     next.lastTouch = goal === null ? lastTouch : [null, null];
     next.turn++;
     next.phase = next.winner !== null ? 'over' : goal !== null ? 'goal' : 'plan';
-    return { state: next, replay: { version: VERSION, turn: state.turn, plans, ticks, goal,
-      scorer: goal === null ? null : lastTouch[goal], initialBodies } };
+    return { state: next, replay: { version: VERSION, turn: state.turn, plans, ticks, goal, scorer, ace, saves: saved, initialBodies } };
   }
-  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, replaySpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, gainMeter, contactMeter, finishTurn, resolveTurn };
+  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, replaySpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, gainMeter, contactMeter, toucher, saves, finishTurn, resolveTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallMatch = api;
 })(globalThis);

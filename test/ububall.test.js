@@ -279,47 +279,69 @@ function strikeCloseSpin(bodies) {
   P.step(bodies, 0);
 }
 
-test('close spin ramps from zero at 1.5 ball diameters to full at hitbox contact', () => {
+test('spin strike counter-rotates the ball 1x from range, ramping to 2x spin and a power boost within 2 ball diameters', () => {
   for (const spin of [-1, 0, 1]) {
-    const bonuses = [54, 27, 0].map(gap => {
+    [10, 10, 15, 20].forEach((gain, i) => {
+      const gap = [300, 72, 36, 0][i];
       const bodies = closeSpinSetup(gap, spin), control = structuredClone(bodies);
       control[6].openingShot = false;
       strikeCloseSpin(bodies); strikeCloseSpin(control);
-      assert.equal(bodies[6].vx, control[6].vx);
-      assert.equal(bodies[6].vy, control[6].vy);
-      return bodies[6].omega - control[6].omega;
+      // Within range, the strike adds speed along the ball's heading: half the ubu's 432 px/s at
+      // point blank and full spin. From range it adds none.
+      const boost = [0, 0, 108, 216][i] * Math.abs(spin), speed = Math.hypot(control[6].vx, control[6].vy);
+      assert.ok(Math.abs(Math.hypot(bodies[6].vx, bodies[6].vy) - speed - boost) < 1e-9);
+      assert.ok(Math.abs(bodies[6].vx * control[6].vy - bodies[6].vy * control[6].vx) < 1e-6);
+      // Contact friction already spins the ball against the ubu; the bonus adds to it, up to the ±24 cap.
+      const expected = Math.max(-24, Math.min(24, control[6].omega - gain * spin));
+      assert.ok(Math.abs(bodies[6].omega - expected) < 1e-9);
+      if (spin) assert.ok(Math.sign(control[6].omega) === -spin);
     });
-    assert.deepEqual(bonuses, [0, 8 * spin, 16 * spin]);
   }
-  const reach = closeSpinSetup(0, 1, 37.5);
-  assert.equal(reach[0].closeSpinBonus, 16);
-  assert.equal(closeSpinSetup(55)[0].closeSpinBonus, 0);
+  assert.equal(closeSpinSetup(0, 1, 37.5)[0].spinStrike, 2);
+  assert.equal(closeSpinSetup(300)[0].spinStrike, 1);
 });
 
-test('leaving close-spin range cancels it permanently even when the ball returns', () => {
-  const bodies = closeSpinSetup();
-  bodies[6].x = 400 + 25 + 18 + 54 + .01;
-  P.step(bodies, 0);
-  assert.equal(bodies[0].closeSpinBonus, 0);
-  const control = structuredClone(bodies); control[6].openingShot = false;
+test('spin strike uses the remaining spin, which decays at 5 rad/s', () => {
+  const [ubu] = P.kickoff(); P.applyStats(ubu); ubu.omega = 10;
+  P.step([ubu], .2);
+  assert.ok(Math.abs(ubu.omega - 9) < 1e-9);
+  const bodies = closeSpinSetup(300), control = structuredClone(bodies);
+  bodies[0].omega = control[0].omega = 4; control[6].openingShot = false;
   strikeCloseSpin(bodies); strikeCloseSpin(control);
-  assert.equal(bodies[6].omega, control[6].omega);
+  assert.ok(Math.abs(bodies[6].omega - control[6].omega + 4) < 1e-9);
 });
 
-test('a teammate or opponent touching first cancels the opening spin bonus', () => {
+test('a wall bounce or another ubu touched first spends the spin strike', () => {
+  const walled = closeSpinSetup(300);
+  Object.assign(walled[0], { x: 80, y: 150, vx: -100 });
+  P.step(walled, 0);
+  assert.equal(walled[0].spinStrike, 0);
+  for (const index of [1, 3]) {
+    const bodies = closeSpinSetup(300);
+    Object.assign(bodies[index], { x: bodies[0].x, y: bodies[0].y + 49, vx: 0, vy: 0 });
+    P.step(bodies, 0);
+    assert.equal(bodies[0].spinStrike, 0);
+    Object.assign(bodies[index], { x: 800, y: 450 });
+    const control = structuredClone(bodies); control[6].openingShot = false;
+    strikeCloseSpin(bodies); strikeCloseSpin(control);
+    assert.equal(bodies[6].omega, control[6].omega);
+  }
+});
+
+test('a teammate or opponent touching first cancels the spin strike', () => {
   for (const index of [1, 3]) {
     const bodies = closeSpinSetup(20);
     Object.assign(bodies[index], { x: bodies[6].x + 43, y: 300, vx: 0, vy: 0 });
     P.step(bodies, 0);
     assert.equal(bodies[6].openingShot, false);
     Object.assign(bodies[index], { x: 800, y: 450 });
-    const control = structuredClone(bodies); control[0].closeSpinBonus = 0;
+    const control = structuredClone(bodies); control[0].spinStrike = 0;
     strikeCloseSpin(bodies); strikeCloseSpin(control);
     assert.equal(bodies[6].omega, control[6].omega);
   }
 });
 
-test('close spin is single use, with no bonus on simultaneous or separating touches', () => {
+test('spin strike is single use, with no bonus on simultaneous or separating touches', () => {
   const bodies = closeSpinSetup(); strikeCloseSpin(bodies);
   assert.equal(bodies[6].openingShot, false);
   Object.assign(bodies[0], { vx: 500, vy: 0, omega: 0 });
@@ -336,21 +358,21 @@ test('close spin is single use, with no bonus on simultaneous or separating touc
   assert.equal(separating[6].openingShot, false);
 });
 
-test('Sticky leaves a full close-spin setup next turn; held and stunned ubus get no bonus', () => {
+test('Sticky leaves a point-blank spin strike next turn; held and stunned ubus get no bonus', () => {
   const bodies = closeSpinSetup(); bodies[0].superActive = 'sticky';
   strikeCloseSpin(bodies);
   assert.equal(bodies[6].stuckTo, bodies[0]);
   P.stop(bodies);
   P.startTurn(bodies, [{ angle: 0, power: .6, spin: 1 }]);
-  assert.ok(Math.abs(bodies[0].closeSpinBonus - 16) < 1e-9);
+  assert.equal(bodies[0].spinStrike, 2);
   for (const stunned of [false, true]) {
     P.stop(bodies); bodies[0].stunned = stunned;
     P.startTurn(bodies, [{ angle: 0, power: stunned ? .6 : 0, spin: 1 }]);
-    assert.equal(bodies[0].closeSpinBonus, 0);
+    assert.equal(bodies[0].spinStrike, 0);
   }
 });
 
-test('close spin curves the ball in the same way in preview and gameplay', () => {
+test('spin strike curves the ball in the same way in preview and gameplay', () => {
   const bodies = closeSpinSetup(); P.stop(bodies);
   const before = structuredClone(bodies), plans = [{ angle: 0, power: .6, spin: 1 }];
   const prediction = P.predictTurn(bodies, plans);
@@ -359,7 +381,7 @@ test('close spin curves the ball in the same way in preview and gameplay', () =>
   for (let tick = 0; tick < 120; tick++) P.step(bodies);
   const point = prediction.paths[6].find(p => p.tick === 120);
   assert.equal(point.x, bodies[6].x); assert.equal(point.y, bodies[6].y);
-  assert.ok(bodies[6].y > 310);
+  assert.ok(bodies[6].y < 290);
 });
 
 test('maximum bounce and checking stats cannot turn a collision into a speed boost', () => {

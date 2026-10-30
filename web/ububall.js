@@ -73,7 +73,7 @@
   });
   let stats = practice.map(p => ({ ...(p.model.stats || normalStats()) }));
   let lastPlans = null, teamEntries = [...roster, ...practice.slice(3)];
-  let lastTouchByTeam = { 0: null, 1: null }, scoringPlayer = null;
+  let lastTouchByTeam = { 0: null, 1: null }, scoringPlayer = null, roundTurns = 0;
   const trails = Array.from({ length: 7 }, () => []), particles = [], fireworks = [], shockwaves = [];
   const materialStyles = {
     metallic: ['spark', '#e1eaff'], glossy: ['bubble', '#ffffff'], iridescent: ['spark', 'rainbow'],
@@ -90,7 +90,7 @@
   };
   let materialEmitters = [];
   // Field details. All are cosmetic and cleared with the other effects; reduced motion disables them.
-  const skids = [], skidState = [], ripples = [], pings = [], danger = [0, 0];
+  const skids = [], skidState = [], burns = [], burnState = {}, ripples = [], pings = [], popups = [], danger = [0, 0];
   let ballFlare = 0, kickoffGlow = 0, goalSweep = null;
   const SKID_LIFE = 12; // Seconds of play before a skid mark fades out.
   // A sharp loss of speed (hard guard braking or a heavy hit) starts a short skid: an ubu-wide mark
@@ -113,22 +113,53 @@
     }
     s.path.points.push({ x: b.x, y: b.y, depth }); s.path.age = 0;
   }
-  // The ball runs orange from 67% of full-launch speed and throws sparks from 80%.
-  const ballHeat = b => Math.max(ballFlare, Math.min(1, Math.max(0, (Math.hypot(b.vx, b.vy) / P.MAX_SPEED - .67) / .33)));
+  // Ball heat by speed, as a share of full-launch speed (initial thresholds): orange from 75%,
+  // sparks and red from 85%, fully red hot from 95% (scorching the ice) and on fire past 99%.
+  const HEAT = { orange: .75, red: .85, redHot: .95, fire: .99 };
+  const BURN_LIFE = 20; // Seconds of play before a burn mark fades out.
+  const speedShare = b => Math.hypot(b.vx, b.vy) / P.MAX_SPEED;
+  // 0 is white, 1 orange and 2 red hot. A Cannonball flare runs it orange.
+  function ballHeat(b) {
+    const s = speedShare(b);
+    const level = s < HEAT.red ? (s - HEAT.orange) / (HEAT.red - HEAT.orange) : 1 + (s - HEAT.red) / (HEAT.redHot - HEAT.red);
+    return Math.max(ballFlare, Math.min(2, Math.max(0, level)));
+  }
   function sparkBall(ball, dt) {
-    const speed = Math.hypot(ball.vx, ball.vy), level = Math.max(ballFlare, (speed / P.MAX_SPEED - .8) / .2);
+    const speed = Math.hypot(ball.vx, ball.vy), share = speed / P.MAX_SPEED;
+    const level = Math.max(ballFlare, (share - HEAT.red) / (HEAT.redHot - HEAT.red));
     if (level <= 0 || speed < 1) return;
-    const count = Math.ceil(dt * 90 * Math.min(1, level));
+    const ux = ball.vx / speed, uy = ball.vy / speed, count = Math.ceil(dt * 90 * Math.min(1, level));
     for (let k = 0; k < count && particles.length < 360; k++) {
-      const x = ball.x - ball.vx / speed * ball.radius, y = ball.y - ball.vy / speed * ball.radius, life = .2 + Math.random() * .2;
+      const x = ball.x - ux * ball.radius, y = ball.y - uy * ball.radius, life = .2 + Math.random() * .2;
       particles.push({ x, y, px: x, py: y, vx: -ball.vx * .25 + (Math.random() - .5) * 160, vy: -ball.vy * .25 + (Math.random() - .5) * 160,
         team: -1, color: Math.random() < .5 ? '#ffb347' : '#fff1c1', life, duration: life });
     }
+    // On fire: flickering flames stream off the back of the ball.
+    if (share > HEAT.fire) for (let k = Math.ceil(dt * 120); k > 0 && particles.length < 380; k--) {
+      const spread = (Math.random() - .5) * ball.radius * 1.4, life = .18 + Math.random() * .22;
+      const x = ball.x - ux * ball.radius * .5 - uy * spread, y = ball.y - uy * ball.radius * .5 + ux * spread;
+      particles.push({ x, y, px: x, py: y, vx: -ball.vx * .12 + (Math.random() - .5) * 50, vy: -ball.vy * .12 + (Math.random() - .5) * 50,
+        team: -1, color: ['#fff3b0', '#ffc43d', '#ff7a1a', '#ff3b1a'][Math.floor(Math.random() * 4)], life, duration: life, flame: 10 + Math.random() * 12 });
+    }
+  }
+  // A ball past red hot scorches a dark streak into the ice along its path.
+  function burnIce(ball) {
+    const heat = (speedShare(ball) - HEAT.redHot) / (HEAT.fire - HEAT.redHot), last = burnState.path?.points.at(-1);
+    if (heat <= 0 || ball.stuckTo || (last && Math.hypot(ball.x - last.x, ball.y - last.y) > 60)) burnState.path = null;
+    if (heat <= 0 || ball.stuckTo) return;
+    if (!burnState.path) {
+      burnState.path = { points: [], width: ball.radius * 1.3, age: 0 };
+      burns.push(burnState.path); if (burns.length > 30) burns.shift();
+    }
+    const points = burnState.path.points, previous = points.at(-1);
+    if (!previous || Math.hypot(ball.x - previous.x, ball.y - previous.y) >= 3) points.push({ x: ball.x, y: ball.y, depth: Math.min(1, .4 + .6 * heat) });
+    burnState.path.age = 0;
   }
   function emitSkaterEffects(dt) {
     if (reducedMotion.matches) return;
     bodies.slice(0, 6).forEach((b, i) => markIce(b, i, dt));
     sparkBall(bodies[6], dt);
+    burnIce(bodies[6]);
     materialEmitters.forEach((emitter, i) => {
       const b = bodies[i], speed = Math.hypot(b.vx, b.vy);
       if (speed < 25 || !emitter.styles.length) { emitter.time = 0; return; }
@@ -152,7 +183,7 @@
   function clearEffects() {
     trails.forEach(trail => { trail.length = 0; });
     particles.length = fireworks.length = shockwaves.length = 0;
-    skids.length = skidState.length = ripples.length = pings.length = 0;
+    skids.length = skidState.length = burns.length = ripples.length = pings.length = popups.length = 0; burnState.path = null;
     danger[0] = danger[1] = ballFlare = kickoffGlow = 0; goalSweep = null;
   }
   function burst(x, y, team, strength, celebration = false, tangent = 0, color = null) {
@@ -178,10 +209,10 @@
   }
   // Goal celebration: a burst at the ball, the goal light sweep, then a volley of rockets over the
   // scoring half that break into peony and ring shells in the team colour, white and gold.
-  function celebrate(team, ball) {
+  function celebrate(team, ball, label = 'GOAL') {
     if (reducedMotion.matches) return;
     burst(ball.x, ball.y, team, 1, true);
-    goalSweep = { team, p: 0 };
+    goalSweep = { team, p: 0, label };
     for (let i = 0; i < 9; i++) fireworks.push({ x: team === 0 ? 560 + Math.random() * 340 : 100 + Math.random() * 340, y: 560,
       vy: -(430 + Math.random() * 160), fuse: .55 + Math.random() * .3, delay: .1 + i * .17, team, ring: i % 3 === 2 });
   }
@@ -231,7 +262,9 @@
     const moving = phase === 'play' || Boolean(goalReplay);
     if (moving) for (const s of skids) s.age += dt;
     for (let i = skids.length - 1; i >= 0; i--) if (skids[i].age >= SKID_LIFE) skids.splice(i, 1);
-    for (const list of [ripples, pings]) {
+    if (moving) for (const s of burns) s.age += dt;
+    for (let i = burns.length - 1; i >= 0; i--) if (burns[i].age >= BURN_LIFE) burns.splice(i, 1);
+    for (const list of [ripples, pings, popups]) {
       for (const e of list) e.life -= dt;
       for (let i = list.length - 1; i >= 0; i--) if (list[i].life <= 0) list.splice(i, 1);
     }
@@ -316,7 +349,9 @@
     ribbon(points, widthAt);
     ctx.restore();
   }
-  const heatColor = h => `rgb(255, ${Math.round(255 - 115 * h)}, ${Math.round(255 - 215 * h)})`;
+  // White to orange (heat 1), then orange to red hot (heat 2).
+  const heatColor = h => h <= 1 ? `rgb(255, ${Math.round(255 - 115 * h)}, ${Math.round(255 - 215 * h)})`
+    : `rgb(255, ${Math.round(140 - 100 * (h - 1))}, ${Math.round(40 - 20 * (h - 1))})`;
   function inRink(paint) { ctx.save(); rounded(60, 60, 880, 480, 100); ctx.clip(); paint(); ctx.restore(); }
   // Drawn on the ice beneath bodies and trails.
   function drawFieldUnder(colors) {
@@ -333,6 +368,14 @@
       softRibbon(s.points, p => s.width * .7 * (.4 + .6 * p.depth) * thin, s.width * .45, '#000000');
       ctx.globalAlpha = .08 * fade;
       softRibbon(s.points, p => s.width * .3 * p.depth * thin, s.width * .2, '#000000');
+    }
+    for (const s of burns) {
+      if (s.points.length < 2) continue;
+      const t = s.age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
+      ctx.globalAlpha = .3 * fade;
+      softRibbon(s.points, p => s.width * (.5 + .5 * p.depth), s.width * .35, '#2b1206');
+      ctx.globalAlpha = .22 * fade;
+      softRibbon(s.points, p => s.width * .35 * p.depth, s.width * .15, '#000000');
     }
     ctx.globalAlpha = 1;
     if (phase === 'plan' && pulseMode() && !P.settled(bodies)) inRink(() => { ctx.fillStyle = 'rgba(120,170,255,.07)'; ctx.fillRect(60, 60, 880, 480); });
@@ -374,7 +417,7 @@
     }
   }
   // Goal light: a team-colour wash and a wide glowing band with a white core sweeping out from the
-  // scored goal, the goal frame flaring, and "GOAL" popping in above the ubus.
+  // scored goal, the goal frame flaring, and "GOAL" (or "ACE!" on a round's first turn) popping in above the ubus.
   function drawGoalSweep(sweep, color) {
     const p = sweep.p, x = sweep.team ? 60 + p * 880 : 940 - p * 880;
     inRink(() => {
@@ -394,9 +437,26 @@
     badgeCtx.globalAlpha = p < .7 ? 1 : (1 - p) / .3;
     badgeCtx.font = '900 88px system-ui, sans-serif'; badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle';
     badgeCtx.shadowColor = color; badgeCtx.shadowBlur = 30 * canvas.width / 1000;
-    badgeCtx.lineWidth = 6; badgeCtx.strokeStyle = color; badgeCtx.strokeText('GOAL', 0, 0);
-    badgeCtx.fillStyle = '#ffffff'; badgeCtx.fillText('GOAL', 0, 0);
+    badgeCtx.lineWidth = 6; badgeCtx.strokeStyle = color; badgeCtx.strokeText(sweep.label, 0, 0);
+    badgeCtx.fillStyle = '#ffffff'; badgeCtx.fillText(sweep.label, 0, 0);
     badgeCtx.restore();
+  }
+  // Short callouts ("Save!") that pop in over an ubu and drift up as they fade.
+  function popup(body, text) {
+    if (!reducedMotion.matches && popups.length < 8) popups.push({ x: body.x, y: body.y - body.radius - 20, text, team: body.team, life: 1.2, duration: 1.2 });
+  }
+  function drawPopups(home, away) {
+    for (const p of popups) {
+      const age = 1 - p.life / p.duration, t = Math.min(1, age / .2), scale = 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2;
+      const color = p.team ? away : home;
+      badgeCtx.save(); badgeCtx.translate(p.x, p.y - age * 22); if (isPortrait) badgeCtx.rotate(Math.PI / 2); badgeCtx.scale(scale, scale);
+      badgeCtx.globalAlpha = age < .7 ? 1 : (1 - age) / .3;
+      badgeCtx.font = '900 26px system-ui, sans-serif'; badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle';
+      badgeCtx.shadowColor = color; badgeCtx.shadowBlur = 12 * canvas.width / 1000;
+      badgeCtx.lineWidth = 4; badgeCtx.strokeStyle = color; badgeCtx.strokeText(p.text, 0, 0);
+      badgeCtx.fillStyle = '#ffffff'; badgeCtx.fillText(p.text, 0, 0);
+      badgeCtx.restore();
+    }
   }
   // Faint arcs on a hard-spinning ball, turning with it.
   function drawBallSpin(ball, text) {
@@ -588,6 +648,10 @@
         }
         c.restore(); continue;
       }
+      if (p.flame) {
+        c.save(); c.globalCompositeOperation = 'lighter'; c.fillStyle = color;
+        c.beginPath(); c.arc(p.x, p.y, p.flame * .45 * (.4 + .6 * fade), 0, Math.PI * 2); c.fill(); c.restore(); continue;
+      }
       if (p.celebration) c.drawImage(glowSprite(color), p.x - 24, p.y - 24, 48, 48);
       c.beginPath(); c.moveTo(p.px, p.py); c.lineTo(p.x, p.y); c.strokeStyle = color; c.lineWidth = p.celebration ? 2.5 : 1.3; c.stroke();
       c.fillStyle = color; c.beginPath(); c.arc(p.x, p.y, p.celebration ? 1.8 : .9, 0, Math.PI * 2); c.fill();
@@ -596,7 +660,7 @@
   }
   function kickoff(isNewMatch = false) {
     clearEffects(); kickoffGlow = 1;
-    lastTouchByTeam = { 0: null, 1: null }; scoringPlayer = null;
+    lastTouchByTeam = { 0: null, 1: null }; scoringPlayer = null; roundTurns = 0;
     const oldBodies = bodies;
     const result = P.kickoff();
     result.slice(0, 6).forEach((b, i) => {
@@ -622,6 +686,12 @@
       }
     });
     return result;
+  }
+  // A save pops a callout over the saver; offline it also earns meter (online, the server credits it).
+  function creditSave(body) {
+    popup(body, 'Save!');
+    if (online?.active || goalReplay) return;
+    for (const changed of ububallMatch.gainMeter(P, bodies, stats, body, ububallMatch.METER.save, classicMode())) dirtyMeters.add(changed);
   }
   // Online meters come from the server; replays never earn meter.
   function contactMeter(a, b, speed) {
@@ -1284,6 +1354,12 @@
     }
     const ball = bodies[6];
     ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); ctx.fillStyle = background; ctx.fill(); circle(ball.x, ball.y, ball.radius, text, 2);
+    // From red, the ball itself glows with its heat.
+    const glow = Math.max(0, ballHeat(ball) - 1);
+    if (glow > 0) {
+      ctx.save(); ctx.globalAlpha = .75 * glow; ctx.shadowColor = heatColor(2); ctx.shadowBlur = 16 * glow * canvas.width / 1000;
+      ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); ctx.fillStyle = heatColor(1 + glow); ctx.fill(); ctx.restore();
+    }
     if (ballMark.complete && ballMark.naturalWidth) {
       ctx.save(); ctx.translate(ball.x, ball.y); ctx.rotate(ball.rotation + (isPortrait ? Math.PI / 2 : 0));
       const size = ball.radius * 1.7;
@@ -1292,6 +1368,7 @@
     drawBallSpin(ball, text);
     drawParticles(home, away);
     drawFieldOver(themeColors);
+    drawPopups(home, away);
     drawParticles(home, away, true);
     if (goalReplay) {
       ctx.save(); ctx.translate(isPortrait ? 30 : 500, isPortrait ? 300 : 32); if (isPortrait) ctx.rotate(Math.PI / 2);
@@ -1358,20 +1435,23 @@
   function finishTurn(goal) {
     const ticks = Math.round(elapsed / P.DT);
     if (playSegments.length) playSegments[playSegments.length - 1].ticks = ticks;
-    ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode);
+    // A goal on the round's first turn is an ace, earning its scorer extra meter.
+    const ace = goal !== null && !roundTurns, toucher = goal === null ? null : lastTouchByTeam[goal];
+    ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode, ace && toucher ? bodies.indexOf(toucher) : null);
+    roundTurns++;
     matchTicks += ticks;
     bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
     accumulator = 0; layoutDirty = true;
     if (goal !== null) {
       phase = scores[goal] >= 5 ? 'over' : 'goal';
-      celebrate(goal, bodies[6]);
+      celebrate(goal, bodies[6], ace ? 'ACE!' : 'GOAL');
       const scorer = lastTouchByTeam[goal] || bodies.slice(goal * 3, goal * 3 + 3)[0];
       goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
       scoringPlayer = scorer;
       const scorerName = scorer?.name || (goal === 0 ? 'Your ubu' : 'CPU ubu');
       say(phase === 'over'
         ? (goal === 0 ? `You win! Final goal by ${scorerName}. Start a new match for a rematch.` : `CPU wins. Final goal by ${scorerName}. Start a new match to try again.`)
-        : `${goal === 0 ? 'You score!' : 'CPU scores.'} Goal by ${scorerName}! Ready for the next kickoff.`
+        : `${goal === 0 ? 'You score!' : 'CPU scores.'} ${ace ? 'Ace' : 'Goal'} by ${scorerName}! Ready for the next kickoff.`
       );
       loopFanfare(scorer?.voice);
       sync();
@@ -1606,7 +1686,13 @@
       accumulator += delta;
       let steps = 0;
       while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
-        const goal = P.step(bodies, P.DT, handleCollision, handleWall, handleShockwave, handleSuper); elapsed += P.DT; accumulator -= P.DT;
+        const before = bodies.map(b => ({ ...b })), touched = new Set();
+        const goal = P.step(bodies, P.DT, (a, b, speed) => {
+          const player = ububallMatch.toucher(a, b, speed);
+          if (player) touched.add(bodies.indexOf(player));
+          handleCollision(a, b, speed);
+        }, handleWall, handleShockwave, handleSuper); elapsed += P.DT; accumulator -= P.DT;
+        for (const index of ububallMatch.saves(P, before, touched)) creditSave(bodies[index]);
         recordTrails();
         if (goal !== null || P.settled(bodies) || Math.round(elapsed / P.DT) >= ububallMatch.turnTicks(matchMode)) finishTurn(goal);
       }
@@ -1998,6 +2084,7 @@
     while (replay.currentTick < targetTick) {
       P.step(replay.simBodies, P.DT, replayCollision, replayWall, replayShockwave, replaySuper);
       replay.currentTick++;
+      for (const s of replay.saves || []) if (s.tick === replay.currentTick) { syncViewBodies(); popup(toViewBody(replay.simBodies[s.index]), 'Save!'); }
     }
     syncViewBodies();
 
@@ -2012,14 +2099,14 @@
         if (!replay.goalPlayed) {
           replay.goalPlayed = true;
           goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
-          celebrate(viewGoal, bodies[6]);
+          celebrate(viewGoal, bodies[6], replay.ace ? 'ACE!' : 'GOAL');
           const viewScorerIndex = replay.scorer === null ? null : (online.state.seat ? (replay.scorer < 3 ? replay.scorer + 3 : replay.scorer - 3) : replay.scorer);
           const scorer = viewScorerIndex !== null ? bodies[viewScorerIndex] : bodies[viewGoal * 3];
           scoringPlayer = scorer;
           const scorerName = scorer?.name || (viewGoal === 0 ? 'Your ubu' : 'Opponent ubu');
           say(online.state.game.winner !== null
             ? (viewGoal === 0 ? `You win! Final goal by ${scorerName}.` : `Opponent wins. Final goal by ${scorerName}.`)
-            : `${viewGoal === 0 ? 'You score!' : 'Opponent scores.'} Goal by ${scorerName}! Ready for the next kickoff.`
+            : `${viewGoal === 0 ? 'You score!' : 'Opponent scores.'} ${replay.ace ? 'Ace' : 'Goal'} by ${scorerName}! Ready for the next kickoff.`
           );
           loopFanfare(scorer?.voice);
           sync();

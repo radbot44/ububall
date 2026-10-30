@@ -5,20 +5,11 @@
   const IMPULSE = 3 * MAX_SPEED;
   const SKATER_CURVE = .06, BALL_CURVE = .045;
   const AIR_DRAG = .00015; // Quadratic drag for balls and ubus; strongest on fast shots.
-  const CLOSE_SPIN_GAIN = 2;
+  const SPIN_DECAY = 5; // Rad/s of spin every body loses each second.
+  const STRIKE_GAIN = 1, CLOSE_SPIN_GAIN = 2; // Spin strike multiplier from range and at point blank.
+  const STRIKE_POWER = .5; // Point-blank strike's extra ball speed at full spin, as a share of the ubu's speed.
   const GUARD_BRAKE = .25; // Share of velocity and spin a guarding ubu keeps when its turn starts.
   function ballHitRadius(body) { return Math.max(body.radius, body.reach || body.radius, 18); }
-  function checkCloseSpin(bodies, ball) {
-    if (!ball?.openingShot) return;
-    let eligible = false;
-    for (const body of bodies) {
-      if (!body.closeSpinBonus) continue;
-      const range = ballHitRadius(body) + ball.radius + 3 * ball.radius;
-      if ((body.x - ball.x) ** 2 + (body.y - ball.y) ** 2 > range * range) body.closeSpinBonus = 0;
-      else eligible = true;
-    }
-    if (!eligible) ball.openingShot = false;
-  }
   const SUPERS = Object.freeze([
     { id: 0, key: 'stalwart', name: 'Stalwart', desc: 'Become an immovable anchor for this turn.', icon: 'assets/00_stalwart.png' },
     { id: 1, key: 'knockout', name: 'Knockout', desc: 'Knock out the next opponent touched; they cannot move next turn.', icon: 'assets/01_knockout.png' },
@@ -41,7 +32,7 @@
     body.baseMass = body.mass;
     body.baseRadius = body.radius;
     body.friction = 150 * multiplier(raw.traction ?? 127);
-    body.maxSpin = 8 * multiplier(raw.spin ?? 127);
+    body.maxSpin = 10 * multiplier(raw.spin ?? 127);
     body.grip = .3 * multiplier(raw.grip ?? 127);
     body.impulse = IMPULSE * multiplier(raw.impulse ?? 127);
     body.curveFactor = SKATER_CURVE * multiplier(raw.curve ?? 127);
@@ -56,7 +47,7 @@
     for (let team = 0; team < 2; team++) for (let i = 0; i < 3; i++) {
       bodies.push({ x: team ? (i === 0 ? 820 : 690) : (i === 0 ? 180 : 310),
         y: i === 0 ? 300 : i === 1 ? 180 : 420, vx: 0, vy: 0,
-        radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 8, omega: 0, rotation: 0, team, slot: i });
+        radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 10, omega: 0, rotation: 0, team, slot: i });
     }
     bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1 });
     return bodies;
@@ -65,6 +56,7 @@
     b.x -= nx * penetration; b.y -= ny * penetration;
     const velocity = b.vx * nx + b.vy * ny;
     if (velocity > 0) {
+      b.spinStrike = 0; // A wall bounce spends a launching ubu's spin strike.
       b.vx -= 1.82 * velocity * nx; b.vy -= 1.82 * velocity * ny;
       const tx = -ny, ty = nx;
       const slip = b.vx * tx + b.vy * ty + b.omega * b.radius;
@@ -161,16 +153,22 @@
     const d2 = dx * dx + dy * dy;
     if (d2 > radius * radius) return;
     const d = Math.sqrt(d2);
-    // Any ubu contact consumes the opening shot, even a stationary touch.
-    // Capture the eligible spin before consuming it; no rebound can re-arm it.
-    let closeSpin = 0;
+    // Any ubu contact consumes the opening shot, even a stationary touch. Capture the striker's
+    // remaining spin before contact friction changes it; no rebound can re-arm it. The bonus spins
+    // the ball against the ubu, the way contact friction already does, like meshing gears.
+    // Close in, the strike also drives the ball harder, in proportion to the ubu's spin and speed,
+    // so a heavily spun shot still travels.
+    let closeSpin = 0, strikeBoost = 0;
     if (isBall) {
       const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
-      if (ball.openingShot) closeSpin = player.closeSpinBonus || 0;
+      if (ball.openingShot && player.spinStrike) {
+        closeSpin = -player.spinStrike * player.omega;
+        strikeBoost = STRIKE_POWER * (player.spinStrike - STRIKE_GAIN) * Math.min(1, Math.abs(player.omega) / player.maxSpin) * Math.hypot(player.vx, player.vy);
+      }
       if (closeSpin && allBodies?.some(other => other.team >= 0 && other !== player &&
-          (other.x - ball.x) ** 2 + (other.y - ball.y) ** 2 <= (ballHitRadius(other) + ball.radius) ** 2)) closeSpin = 0;
+          (other.x - ball.x) ** 2 + (other.y - ball.y) ** 2 <= (ballHitRadius(other) + ball.radius) ** 2)) closeSpin = strikeBoost = 0;
       ball.openingShot = false;
-    }
+    } else a.spinStrike = b.spinStrike = 0; // Touching another ubu first spends both strikes.
 
     if (!isBall && a.team !== b.team) {
       if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; onSuper?.('knockout', 'impact', a, b); }
@@ -298,20 +296,23 @@
     }
 
     if (closeSpin) {
-      const ball = a.team === -1 ? a : b;
+      const ball = a.team === -1 ? a : b, away = ball === b ? 1 : -1;
       ball.omega = Math.max(-24, Math.min(24, ball.omega + closeSpin));
+      // The boost follows the ball's new heading, or straight off the ubu if it was stopped dead.
+      const speed = Math.hypot(ball.vx, ball.vy);
+      ball.vx += (speed ? ball.vx / speed : nx * away) * strikeBoost;
+      ball.vy += (speed ? ball.vy / speed : ny * away) * strikeBoost;
     }
 
     if (typeof onCollide === 'function') onCollide(a, b, -closing, baseImpulse);
   }
   function step(bodies, dt = DT, onCollide = null, onWall = null, onShockwave = null, onSuper = null) {
     const ball = bodies.find(b => b.team === -1);
-    checkCloseSpin(bodies, ball);
     if (ball?.openingShot) {
       // Existing contact must count before motion can separate the bodies.
       // A different ubu already touching also invalidates a close setup.
       const touching = bodies.filter(b => b.team >= 0 && (b.x - ball.x) ** 2 + (b.y - ball.y) ** 2 <= (ballHitRadius(b) + ball.radius) ** 2);
-      if (touching.length > 1 || (touching.length === 1 && !touching[0].closeSpinBonus)) ball.openingShot = false;
+      if (touching.length > 1 || (touching.length === 1 && !touching[0].spinStrike)) ball.openingShot = false;
       if (touching.length === 1) {
         const b = touching[0];
         if ((ball.vx - b.vx) * (ball.x - b.x) + (ball.vy - b.vy) * (ball.y - b.y) >= 0) ball.openingShot = false;
@@ -351,7 +352,7 @@
         b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
       }
       b.rotation += b.omega * dt;
-      b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - 6 * dt);
+      b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - SPIN_DECAY * dt);
       b.x += b.vx * dt; b.y += b.vy * dt;
       const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = (b.friction + AIR_DRAG * speed2) * dt;
       if (speed2 <= deceleration * deceleration) {
@@ -362,18 +363,15 @@
         b.vx *= factor; b.vy *= factor;
       }
     }
-    checkCloseSpin(bodies, ball);
     for (let pass = 0; pass < 3; pass++) {
       for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) {
         collide(bodies[i], bodies[j], onCollide, bodies, onShockwave, onSuper);
-        checkCloseSpin(bodies, ball);
       }
       for (const b of bodies) {
         if (b.superActive === 'stalwart') {
           b.vx = b.vy = b.omega = 0;
         } else if (b.team !== -1) {
           walls(b, onWall);
-          checkCloseSpin(bodies, ball);
         }
       }
       if (ball) {
@@ -400,7 +398,6 @@
         } else {
           walls(ball, onWall);
         }
-        checkCloseSpin(bodies, ball);
       }
     }
     if (ball) {
@@ -413,7 +410,7 @@
     return null;
   }
   function launch(bodies, plans) {
-    for (const b of bodies) b.closeSpinBonus = 0;
+    for (const b of bodies) b.spinStrike = 0;
     bodies.forEach((b, i) => {
       if (b.team < 0) return;
       if (b.stunned) {
@@ -445,25 +442,26 @@
         b.vx += dx * scale; b.vy += dy * scale;
       }
       b.omega = Math.max(-b.maxSpin, Math.min(b.maxSpin, b.omega + Math.max(-1, Math.min(1, plan.spin || 0)) * b.maxSpin));
-      if (plan.power > 0) b.closeSpinBonus = b.omega * CLOSE_SPIN_GAIN;
+      if (plan.power > 0 && b.omega) b.spinStrike = STRIKE_GAIN;
     });
+    // A spinning launch arms a spin strike: if the ball is the first thing the ubu touches, the
+    // ball gains the ubu's remaining spin times its gain, counter-rotating, rising to point-blank within 2 ball diameters.
     const ball = bodies.find(b => b.team === -1);
     if (ball) {
-      ball.openingShot = true;
       for (const b of bodies) {
-        if (!b.closeSpinBonus) continue;
+        if (!b.spinStrike) continue;
         const gap = Math.max(0, Math.hypot(b.x - ball.x, b.y - ball.y) - ballHitRadius(b) - ball.radius);
-        const proximity = Math.max(0, 1 - gap / (3 * ball.radius));
-        b.closeSpinBonus *= proximity * proximity * (3 - 2 * proximity);
+        const proximity = Math.max(0, 1 - gap / (4 * ball.radius));
+        b.spinStrike += (CLOSE_SPIN_GAIN - STRIKE_GAIN) * proximity * proximity * (3 - 2 * proximity);
       }
-      ball.openingShot = bodies.some(b => b.closeSpinBonus !== 0);
+      ball.openingShot = bodies.some(b => b.spinStrike);
     }
   }
   function settled(bodies) { return bodies.every(b => b.vx * b.vx + b.vy * b.vy < 4 && Math.abs(b.omega) < .05); }
   // Ends turn effects; keepMotion leaves velocities for a Pulse turn that ends mid-motion.
   function stop(bodies, keepMotion = false) {
     for (const b of bodies) {
-      b.closeSpinBonus = 0;
+      b.spinStrike = 0;
       b.openingShot = false;
       if (b.guardBase) Object.assign(b, b.guardBase);
       b.guardBase = null; b.guarding = false;
@@ -478,6 +476,20 @@
     }
     const ball = bodies.find(b => b.team === -1);
     if (ball) { ball.stuckTo = null; ball.stickOffset = null; }
+  }
+  // The goal the ball would enter (as step reports it) with one body taken off the field, if it
+  // gets there touching no ubu and no boards (posts and net allowed) within `ticks`; otherwise null.
+  function wouldScore(bodies, removed, ticks = 960) {
+    const sim = bodies.filter(b => b !== removed).map(b => ({ ...b, stuckTo: null }));
+    const ball = sim.find(b => b.team === -1);
+    let clean = Boolean(ball);
+    for (let t = 0; t < ticks && clean; t++) {
+      const goal = step(sim, DT, (a, b) => { if (a === ball || b === ball) clean = false; },
+        (b, velocity, type) => { if (b === ball && type === 'wall') clean = false; });
+      if (goal !== null) return clean ? goal : null;
+      if (!ball.vx && !ball.vy) return null;
+    }
+    return null;
   }
   function segmentBlocked(ax, ay, bx, by, obstacles, clearance = 38) {
     const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
@@ -653,11 +665,11 @@
       const power = distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * b.friction * Math.max(0, distance + extraDrive)) / maxV);
 
       if (Math.abs(spin) > 0.01 && power > 0.05) {
-        const omega0 = spin * (b.maxSpin || 8);
+        const omega0 = spin * (b.maxSpin || 10);
         const curveF = b.curveFactor ?? SKATER_CURVE;
         const v0 = Math.max(60, power * maxV);
         const estT = Math.min(1.2, distance / (v0 * 0.72));
-        const avgOmega = Math.sign(omega0) * Math.max(0, Math.abs(omega0) - 3 * estT);
+        const avgOmega = Math.sign(omega0) * Math.max(0, Math.abs(omega0) - SPIN_DECAY / 2 * estT);
         angle -= avgOmega * curveF * estT * 0.5;
       }
 
@@ -732,6 +744,6 @@
     }
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS };
   }
-  const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, multiplier, applyStats, kickoff, step, launch, settled, stop, triggerShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, multiplier, applyStats, kickoff, step, launch, settled, stop, wouldScore, triggerShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

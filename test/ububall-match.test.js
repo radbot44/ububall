@@ -244,3 +244,38 @@ test('turns earn no meter; conceding a goal earns the conceded bonus', () => {
   assert.ok(bodies.slice(0,3).every(b=>b.meter===0));
   assert.ok(Math.abs(bodies[3].meter-M.METER.conceded*(1+2*M.METER.teammate))<1e-9);
 });
+
+function shotState(ball, place = {}) {
+  const bodies=P.kickoff(); bodies.slice(0,6).forEach(b=>{P.applyStats(b);b.meter=0;});
+  Object.assign(bodies[6],ball);
+  for (const [i,at] of Object.entries(place)) Object.assign(bodies[i],at);
+  return {version:M.VERSION,mode:'standard',bodies,stats:[],scores:[0,0],turn:1};
+}
+const still=()=>({angle:0,power:0,spin:0,superArm:false,guard:false});
+test('a goal on the first turn of a round is an ace and earns the scorer extra meter', () => {
+  const state=shotState({x:930,y:300,vx:300}); state.lastTouch=[2,null];
+  const ace=M.resolveTurn(P,state,Array.from({length:6},still));
+  assert.equal(ace.replay.ace,true); assert.equal(ace.state.roundTurns,0);
+  assert.ok(Math.abs(ace.state.bodies[2].meter-M.METER.ace)<1e-9);
+  assert.ok(Math.abs(ace.state.bodies[0].meter-M.METER.ace*M.METER.teammate)<1e-9);
+  const later=M.resolveTurn(P,{...structuredClone(state),roundTurns:2},Array.from({length:6},still));
+  assert.equal(later.replay.ace,false); assert.equal(later.state.bodies[2].meter,0);
+  const quiet=M.resolveTurn(P,shotState({x:500,y:300}),Array.from({length:6},still));
+  assert.equal(quiet.replay.ace,false); assert.equal(quiet.state.roundTurns,1);
+});
+test('a save needs a ball that would have gone in untouched without the saver', () => {
+  const blocked=M.resolveTurn(P,shotState({x:260,y:300,vx:-600},{0:{x:130,y:300}}),Array.from({length:6},still));
+  assert.deepEqual(blocked.replay.saves.map(s=>s.index),[0]);
+  assert.ok(Math.abs(blocked.state.bodies[0].meter-M.METER.ball-M.METER.save)<1e-9);
+  // Wide of the goal, the boards would have stopped it first.
+  const wide=M.resolveTurn(P,shotState({x:260,y:150,vx:-600},{0:{x:130,y:150}}),Array.from({length:6},still));
+  assert.deepEqual(wide.replay.saves,[]);
+  // A teammate behind would have stopped it anyway.
+  const covered=M.resolveTurn(P,shotState({x:260,y:300,vx:-600},{0:{x:150,y:300},1:{x:95,y:300}}),Array.from({length:6},still));
+  assert.deepEqual(covered.replay.saves,[]);
+  // Blocking a shot at the opponents' goal is never a save; blocking one at your own is.
+  const away=M.resolveTurn(P,shotState({x:260,y:300,vx:600},{0:{x:300,y:100},1:{x:390,y:300}}),Array.from({length:6},still));
+  assert.deepEqual(away.replay.saves,[]);
+  const own=M.resolveTurn(P,shotState({x:740,y:300,vx:600},{3:{x:870,y:300}}),Array.from({length:6},still));
+  assert.deepEqual(own.replay.saves.map(s=>s.index),[3]);
+});
