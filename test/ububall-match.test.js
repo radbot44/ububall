@@ -198,3 +198,23 @@ test('a Pulse goal credits the last toucher from an earlier turn', () => {
   assert.equal(result.replay.goal,0); assert.equal(result.replay.scorer,2);
   assert.deepEqual(result.state.lastTouch,[null,null]);
 });
+test('goal replays re-simulate a chained Pulse play exactly and ease to half speed', () => {
+  let state=pulseState('pulse'); state.bodies[3].y=520; state.bodies[4].y=500; Object.assign(state.bodies[6],{x:420,y:300});
+  const moves=Array.from({length:6},idle); moves[0]={...idle(),power:1};
+  const segments=[];
+  for (let turn=0; turn<20 && state.phase!=='goal'; turn++) {
+    const result=M.resolveTurn(P,state,turn<2?moves:Array.from({length:6},idle));
+    segments.push(JSON.parse(JSON.stringify(result.replay))); state=result.state;
+  }
+  assert.equal(state.phase,'goal'); assert.ok(segments.length>1);
+  let goal=null;
+  for (const segment of segments) {
+    const sim=structuredClone(segment.initialBodies); P.startTurn(sim,segment.plans);
+    for (let tick=0; tick<segment.ticks; tick++) goal=P.step(sim,P.DT);
+  }
+  assert.equal(goal,segments.at(-1).goal);
+  assert.equal(M.replaySpeed(500),1); assert.equal(M.replaySpeed(240),1); assert.equal(M.replaySpeed(40),.5);
+  assert.ok(M.replaySpeed(150)>.5 && M.replaySpeed(150)<1);
+  const ms=M.replayMilliseconds(P,480)-M.GOAL_REPLAY_DELAY-M.GOAL_REPLAY_HOLD;
+  assert.ok(ms>2000 && ms<3000);
+});

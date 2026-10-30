@@ -582,15 +582,7 @@ body.show-full-stats .full-stats { display: flex; }
   box-shadow: 0 6px 20px rgba(255, 153, 84, 0.5);
 }
 
-/* Goal phase: Launch button moves front and center over rink */
-.stadium.goal-phase .stadium-actions {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 25;
-  padding: 0;
-}
+/* Goal phase: the kickoff button stays below the rink so the goal and its replay stay visible */
 .stadium.goal-phase #launch {
   min-width: 220px;
   min-height: 56px;
@@ -791,7 +783,6 @@ body.stadium-fullscreen-active {
 .stadium.portrait-mode .shot-controls { grid-area: controls; margin: 0 10px; padding: 0; }
 .stadium.portrait-mode .shot-controls summary { padding: 8px 0; font-size: 11px; }
 .stadium.portrait-mode .shot-controls[open] { max-height: 30dvh; overflow-y: auto; }
-.stadium.portrait-mode.goal-phase .stadium-actions { position: static; transform: none; }
 .stadium.portrait-mode.goal-phase .team-launch { grid-column: 1 / -1; }
 .stadium.portrait-mode.goal-phase #launch { animation: none; padding: 8px 16px; }
 .stadium.portrait-mode:fullscreen, .stadium.portrait-mode.stadium-fullscreen {

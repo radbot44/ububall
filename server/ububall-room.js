@@ -84,7 +84,9 @@ class MatchRoom {
       const result = rules.resolveTurn(P, s.game, moves);
       s.game = result.state; s.replay = result.replay;
       s.turn = s.game.turn;
-      s.playUntil = now + Math.ceil(s.replay.ticks * P.DT * 1000) + (s.replay.goal !== null ? 2200 : 750);
+      // A play is the unbroken motion since the field last rested; a goal waits for its replay.
+      s.playTicks = (P.settled(s.replay.initialBodies) ? 0 : s.playTicks || 0) + s.replay.ticks;
+      s.playUntil = now + Math.ceil(s.replay.ticks * P.DT * 1000) + (s.replay.goal !== null ? rules.replayMilliseconds(P, s.playTicks) : 750);
       s.replay.startedAt = now;
     }
   }
