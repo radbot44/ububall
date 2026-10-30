@@ -204,25 +204,41 @@
     glowSprites.set(color, sprite); return sprite;
   }
   const superGlowSprites = new Map();
+  const SUPER_AURA_THEMES = {
+    cannonball: ['#ff3344', '#ff9954'], // fiery red & orange
+    magnet: ['#3388ff', '#ff3344'],     // blue & red
+    sticky: ['#42c66b', '#21845b'],     // emerald green & darker green
+    stalwart: ['#ffd166', '#4f5fc2'],   // gold & indigo
+    knockout: ['#ee2b47', '#ff7197'],   // crimson & pink
+    colossus: ['#ffe043', '#c8961e'],   // yellow & darker yellow
+    ghost: ['#33e0ff', '#f8f6f2'],      // cyan & alabaster
+    shockwave: ['#ff7197', '#9d467a']   // rose & mulberry
+  };
   function hexToRgba(hex, alpha) {
     let c = hex.replace('#', '');
     if (c.length === 3) c = c.split('').map(x => x + x).join('');
     const num = parseInt(c, 16);
     return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${alpha})`;
   }
-  function superGlowSprite(color) {
-    if (superGlowSprites.has(color)) return superGlowSprites.get(color);
+  function superGlowSprite(key) {
+    if (superGlowSprites.has(key)) return superGlowSprites.get(key);
+    const [c1, c2] = SUPER_AURA_THEMES[key] || ['#ff7197', '#ff9954'];
     const sprite = document.createElement('canvas'); sprite.width = sprite.height = 256;
     const c = sprite.getContext('2d');
-    const grad = c.createRadialGradient(128, 128, 12, 128, 128, 124);
-    grad.addColorStop(0, hexToRgba(color, 0.95));
-    grad.addColorStop(0.25, hexToRgba(color, 0.82));
-    grad.addColorStop(0.5, hexToRgba(color, 0.50));
-    grad.addColorStop(0.75, hexToRgba(color, 0.20));
-    grad.addColorStop(1, hexToRgba(color, 0));
+    const grad = c.createRadialGradient(128, 128, 10, 128, 128, 124);
+    grad.addColorStop(0, hexToRgba(c1, 0.96));
+    grad.addColorStop(0.18, hexToRgba(c1, 0.90));
+    grad.addColorStop(0.26, hexToRgba(c1, 0.82));
+    grad.addColorStop(0.38, hexToRgba(c2, 0.84));
+    grad.addColorStop(0.48, hexToRgba(c2, 0.74));
+    grad.addColorStop(0.60, hexToRgba(c1, 0.68));
+    grad.addColorStop(0.72, hexToRgba(c1, 0.52));
+    grad.addColorStop(0.84, hexToRgba(c2, 0.38));
+    grad.addColorStop(0.92, hexToRgba(c2, 0.18));
+    grad.addColorStop(1, hexToRgba(c2, 0));
     c.fillStyle = grad;
     c.beginPath(); c.arc(128, 128, 124, 0, Math.PI * 2); c.fill();
-    superGlowSprites.set(color, sprite); return sprite;
+    superGlowSprites.set(key, sprite); return sprite;
   }
   function drawParticles(home, away) {
     ctx.save(); ctx.lineCap = 'round';
@@ -799,7 +815,7 @@
       const theme = getComputedStyle(document.documentElement);
       const color = name => theme.getPropertyValue('--' + name).trim();
       themeColors = { primary: color('primary'), secondary: color('secondary'),
-        home: color('team-home') || '#E8CA48', away: color('team-away') || '#477AE7',
+        home: color('team-home') || '#E8CA48', away: color('team-away') || '#AA54D3',
         text: color('text'), border: color('border'), surface: color('elevated'), background: color('background') };
     }
     const { primary, secondary, home, away, text, border, surface, background } = themeColors;
@@ -841,15 +857,7 @@
       const isSuperReady = (b.meter >= 100) || Boolean(b.superArm) || Boolean(b.superActive);
 
       if (isSuperReady) {
-        const activeKey = b.superActive || b.equippedSuper?.key;
-        const auraColor = activeKey === 'cannonball' ? '#ff4d4d'
-          : activeKey === 'magnet' ? '#33ccff'
-          : activeKey === 'sticky' ? '#44dd66'
-          : activeKey === 'stalwart' ? '#ffd166'
-          : activeKey === 'knockout' ? '#ff3366'
-          : activeKey === 'colossus' ? '#bb66ff'
-          : activeKey === 'ghost' ? '#b2ebf2'
-          : '#ff7197';
+        const activeKey = b.superActive || b.equippedSuper?.key || 'stalwart';
 
         ctx.save();
         const pulseSpeed = b.superActive ? 80 : b.superArm ? 100 : 150;
@@ -858,13 +866,13 @@
         const glowR = baseR + pulse * (b.superActive ? 5 : 3.5);
         const alpha = (b.superActive ? 0.98 : b.superArm ? 0.92 : 0.82) + pulse * 0.12;
         ctx.globalAlpha = Math.max(0.2, Math.min(1, alpha));
-        ctx.drawImage(superGlowSprite(auraColor), b.x - glowR, b.y - glowR, glowR * 2, glowR * 2);
+        ctx.drawImage(superGlowSprite(activeKey), b.x - glowR, b.y - glowR, glowR * 2, glowR * 2);
         ctx.restore();
 
         if (phase === 'plan' && b.superArm && activeKey === 'colossus') {
           ctx.save();
           ctx.setLineDash([5, 5]);
-          circle(b.x, b.y, b.radius * 1.8, '#bb66ffaa', 2);
+          circle(b.x, b.y, b.radius * 1.8, '#ffe043cc', 2);
           ctx.restore();
         }
 
@@ -920,7 +928,7 @@
         if (dx * dx + dy * dy < 260 * 260) {
           ctx.save();
           ctx.setLineDash([4, 6]);
-          line(b.x, b.y, ball.x, ball.y, '#33ccff88', 2);
+          line(b.x, b.y, ball.x, ball.y, '#3388ffcc', 2.5);
           ctx.restore();
         }
       }
@@ -1172,7 +1180,7 @@
       const x = body.x + dx / distance * reach, y = body.y + dy / distance * reach;
       const tangent = Math.atan2(dy, dx) + Math.PI / 2;
       if (key === 'knockout') {
-        burst(x, y, target.team, 3, false, tangent, '#ff3366');
+        burst(x, y, target.team, 3, false, tangent, '#ee2b47');
       } else if (key === 'cannonball' || key === 'stalwart') {
         const color = key === 'cannonball' ? '#ff634d' : '#ffd166';
         burst(x, y, body.team, 3.5, false, tangent, color);
@@ -1183,8 +1191,10 @@
     window.ubuAudio?.playSuper?.(key, phase);
   }
   function handleShockwave(source, radius) {
-    burst(source.x, source.y, source.team, 1, true);
-    shockwaves.push({ x: source.x, y: source.y, currentRadius: 10, maxRadius: radius, team: source.team, life: 0.35, duration: 0.35 });
+    burst(source.x, source.y, source.team, 1, false, 0, '#ff7197');
+    burst(source.x, source.y, source.team, 1, false, 0, '#9d467a');
+    shockwaves.push({ x: source.x, y: source.y, currentRadius: 10, maxRadius: radius, team: source.team, color: '#ff7197', life: 0.35, duration: 0.35 });
+    shockwaves.push({ x: source.x, y: source.y, currentRadius: 6, maxRadius: radius * 0.88, team: source.team, color: '#9d467a', life: 0.30, duration: 0.30 });
     if (window.ubuAudio) {
       window.ubuAudio.playSuper?.('shockwave', 'impact', { volume: 0.8 });
     }
