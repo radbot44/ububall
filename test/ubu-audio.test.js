@@ -3,6 +3,147 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const audio = require('../shared/ubu-audio.js');
 
+// Record the actual scheduled sources and graph, including reverb reachability.
+function recordedContext() {
+  const nodes = [];
+  const param = () => ({ events: [], value: 0,
+    setValueAtTime(value, time) { this.events.push([value, time]); this.value = value; },
+    linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} });
+  const node = kind => {
+    const n = { kind, outputs: [], connect(to) { this.outputs.push(to); }, disconnect() {},
+      start(time) { this.started = time; }, stop(time) { this.stopped = time; } };
+    for (const key of ['gain', 'frequency', 'detune', 'Q', 'threshold', 'knee', 'ratio', 'attack', 'release', 'pan']) n[key] = param();
+    nodes.push(n);
+    return n;
+  };
+  return { nodes, currentTime: 0, sampleRate: 44100, destination: node('destination'),
+    createGain: () => node('gain'), createOscillator: () => node('oscillator'),
+    createBiquadFilter: () => node('filter'), createDynamicsCompressor: () => node('compressor'),
+    createStereoPanner: () => node('panner'), createBufferSource: () => node('buffer'),
+    createConvolver: () => node('room'),
+    createBuffer: (channels, length, sampleRate) => {
+      const data = Array.from({ length: channels }, () => new Float32Array(length));
+      return { sampleRate, getChannelData: channel => data[channel] };
+    }
+  };
+}
+
+test('fanfare sustains a dry bass pulse under a merged chord, with wet lead and pad', () => {
+  const ctx = recordedContext();
+  const voice = { instrument: 14, pitch: 24, decay: 6, timbreMod: 0, scale: 0, tempo: 3, groove: 0,
+    notes: Array.from({ length: 8 }, () => ({ degree: 0, duration: 2 })) };
+  const handle = audio.playFanfare(voice, ctx);
+  try {
+    const oscillators = ctx.nodes.filter(n => n.kind === 'oscillator');
+    const bass = oscillators.filter(n => n.type === 'sine' && Math.abs(n.frequency.value - audio.noteFrequency(48)) < 1e-8);
+    assert.equal(bass.length, 8, 'merged eight-beat chord still has eight bass pulses');
+    assert.deepEqual(bass.map(n => n.started), Array.from({ length: 8 }, (_, i) => 0.05 + i * 0.5));
+    for (let i = 0; i < bass.length - 1; i++) assert.ok(bass[i].stopped < bass[i + 1].started);
+    const reachesRoom = (n, seen = new Set()) => {
+      if (seen.has(n)) return false;
+      seen.add(n);
+      return n.kind === 'room' || n.outputs.some(to => reachesRoom(to, seen));
+    };
+    for (const n of oscillators) assert.equal(reachesRoom(n), n.type === 'triangle' || n.type === 'sawtooth');
+    for (const n of ctx.nodes.filter(n => n.kind === 'buffer')) assert.equal(reachesRoom(n), false);
+  } finally { handle.stop(); }
+});
+
+test('victory accents follow sounding endpoints, preserve modes and stop with playback', () => {
+  for (let scale = 0; scale < 8; scale++) {
+    for (const notes of [
+      Array.from({ length: 8 }, () => ({ degree: 0, duration: 3 })),
+      Array.from({ length: 8 }, (_, i) => ({ degree: 1, duration: i === 3 ? 0 : 3 })),
+      [{ degree: 0, duration: 2 }, { degree: 1, duration: 0 }, { degree: 4, duration: 3 }],
+      [{ degree: 0, duration: 0 }, { degree: 1, duration: 0 }],
+      [{ degree: 0, duration: 3 }, { degree: 1, duration: 0 }, { degree: 4, duration: 0 }, { degree: 0, duration: 2 }]
+    ]) {
+      const ctx = recordedContext();
+      const voice = { instrument: 14, pitch: 24, decay: 6, timbreMod: 0, scale, tempo: 7, groove: 2, notes };
+      const handle = audio.playFanfare(voice, ctx);
+      const brass = ctx.nodes.filter(n => n.kind === 'oscillator' && n.type === 'sawtooth');
+      const lead = ctx.nodes.filter(n => n.kind === 'oscillator' && n.type === 'triangle' && !n.detune.events.length);
+      const beat = 60 / 168;
+      if (!lead.length) assert.equal(brass.length, 0, 'all rests do not invent a victory melody');
+      else {
+        const first = lead[0].started, last = lead.at(-1).started;
+        const opening = last - first >= beat * 0.5 && lead[1].started - first >= 0.08;
+        assert.equal(brass.length, opening ? 7 : 4, 'deduplicate short/single-note accents and tight shuffle entries');
+        const finalTones = audio.chordFor(audio.scalePitches(scale), audio.scaleDegreeSemitones(scale,
+          notes.findLast(n => n.duration !== 3).degree)).tones;
+        for (const n of brass) {
+          assert.ok(n.started === first || n.started === last);
+          const semitone = Math.round(12 * Math.log2(n.frequency.value / audio.noteFrequency(48)));
+          const pitchClass = ((semitone % 12) + 12) % 12;
+          assert.ok(audio.scalePitches(scale).includes(pitchClass));
+          if (n.started === last) assert.ok(finalTones.includes(pitchClass), 'arrival follows final note, not forced tonic');
+        }
+        const kicks = ctx.nodes.filter(n => n.kind === 'oscillator' && n.type === 'sine' && n.frequency.value === 150);
+        assert.deepEqual(kicks.map(n => n.started), [...new Set(brass.map(n => n.started))]);
+      }
+      handle.stop();
+      for (const n of brass) assert.ok(n.stopped <= 0.015, 'stop cancels scheduled accents');
+    }
+  }
+});
+
+test('fanfare preserves lead pitches, rests and groove timing while pad voices move smoothly', () => {
+  for (let groove = 0; groove < 4; groove++) {
+    const ctx = recordedContext();
+    const voice = { instrument: 14, pitch: 24, decay: 6, timbreMod: 0, scale: 0, tempo: 3, groove,
+      notes: [{ degree: 0, duration: 2 }, { degree: 3, duration: 2 }, { degree: 6, duration: 2 },
+        { degree: 0, duration: 3 }, { degree: 2, duration: 0 }, { degree: 4, duration: 1 }] };
+    const original = JSON.stringify(voice), handle = audio.playFanfare(voice, ctx);
+    try {
+      const triangles = ctx.nodes.filter(n => n.kind === 'oscillator' && n.type === 'triangle');
+      const lead = triangles.filter(n => n.detune.events.length === 0);
+      const parsed = audio.parseVoiceInfo(voice);
+      let at = 0.05, index = 0;
+      parsed.notes.forEach((note, i) => {
+        if (!note.isRest) {
+          const swing = i % 2 ? (groove === 1 ? 0.06 : groove === 2 ? 0.11 : 0) : 0;
+          assert.ok(Math.abs(lead[index].started - at - swing) < 1e-9);
+          assert.ok(Math.abs(lead[index++].frequency.value - note.freq) < 1e-8);
+        }
+        at += note.beats * 0.5;
+      });
+      assert.equal(lead.length, index);
+      assert.equal(JSON.stringify(voice), original);
+      const pad = triangles.filter(n => n.detune.value === -6);
+      const semitones = pad.map(n => Math.round(12 * Math.log2(n.frequency.value / audio.noteFrequency(48))));
+      // C -> F retains C; F -> G moves each voice just two semitones.
+      assert.deepEqual(semitones.slice(0, 9), [0, 4, 7, 0, 5, 9, 2, 7, 11]);
+    } finally { handle.stop(); }
+  }
+});
+
+test('victory accompaniment releases before the next loop and follows each variation', t => {
+  let queued;
+  t.mock.method(global, 'setTimeout', callback => { queued = callback; return callback; });
+  t.mock.method(global, 'clearTimeout', () => {});
+  const ctx = recordedContext();
+  const voice = { instrument: 14, pitch: 24, decay: 6, timbreMod: 0, scale: 1, tempo: 7, groove: 2,
+    notes: Array.from({ length: 8 }, (_, i) => ({ degree: i, duration: i === 7 ? 3 : 0 })) };
+  const parsed = audio.parseVoiceInfo(voice);
+  const beats = parsed.notes.reduce((sum, n) => sum + n.beats, 0);
+  const period = Math.ceil((beats + 4 * beats / 8) / 2) * 2 * 60 / parsed.tempoBpm;
+  const handle = audio.playFanfare(voice, ctx, null, { loop: true });
+  try {
+    for (let repeat = 0; repeat < 4; repeat++) {
+      if (repeat) { ctx.currentTime = repeat * period; queued(); }
+      const from = 0.05 + repeat * period, next = from + period;
+      const brass = ctx.nodes.filter(n => n.kind === 'oscillator' && n.type === 'sawtooth' && n.started >= from - 1e-9);
+      assert.ok(brass.length > 0);
+      for (const n of brass) {
+        assert.ok(n.started < next);
+        assert.ok(n.stopped < next, 'brass release fits in the existing loop period');
+        const semi = Math.round(12 * Math.log2(n.frequency.value / audio.noteFrequency(48)));
+        assert.ok(audio.scalePitches(1).includes(((semi % 12) + 12) % 12));
+      }
+    }
+  } finally { handle.stop(); }
+});
+
 test('audio: constants and definitions', () => {
   assert.equal(audio.INSTRUMENTS.length, 16);
   assert.equal(new Set(audio.INSTRUMENTS).size, 16);
