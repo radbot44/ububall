@@ -167,24 +167,14 @@
         team: i % 5 === 0 ? -1 : team, life, duration: life, celebration, color, overlay: celebration });
     }
   }
-  // The scorer's fanfare repeats until the next kickoff (or a new match), with a gap as long as four
-  // of its own notes at its tempo. The finish callback already arrives 0.2 s after the last note.
-  let fanfareLoop = null, fanfareTimer = 0;
+  // The scorer's fanfare loops seamlessly until the next kickoff (or a new match).
+  let fanfareLoop = null;
   function loopFanfare(voice) {
     stopFanfare();
-    if (!voice || !window.ubuAudio) return;
-    const { notes, tempoBpm } = window.ubuAudio.parseVoiceInfo(voice);
-    const noteMs = notes.reduce((sum, n) => sum + n.beats, 0) / notes.length * 60000 / tempoBpm;
-    const token = fanfareLoop = {}, gap = Math.max(0, 4 * noteMs - 200);
-    const play = () => {
-      if (fanfareLoop !== token) return;
-      window.ubuAudio.playFanfare(voice, null, i => { if (i === -1 && fanfareLoop === token) fanfareTimer = setTimeout(play, gap); });
-    };
-    play();
+    if (voice && window.ubuAudio) fanfareLoop = window.ubuAudio.playFanfare(voice, null, null, { loop: true });
   }
   function stopFanfare() {
-    if (!fanfareLoop) return;
-    fanfareLoop = null; clearTimeout(fanfareTimer); window.ubuAudio?.stop();
+    fanfareLoop?.stop(); fanfareLoop = null;
   }
   // Goal celebration: a burst at the ball, the goal light sweep, then a volley of rockets over the
   // scoring half that break into peony and ring shells in the team colour, white and gold.

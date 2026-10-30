@@ -109,6 +109,7 @@ test('audio: mock AudioContext synthesis and scheduling', () => {
       this.ratio = new MockParam(8);
       this.attack = new MockParam(0.003);
       this.release = new MockParam(0.25);
+      this.pan = new MockParam(0);
     }
     connect() {}
     disconnect() {}
@@ -116,13 +117,22 @@ test('audio: mock AudioContext synthesis and scheduling', () => {
     stop() {}
   }
 
+  let convolvers = 0;
   const mockCtx = {
     currentTime: 1.0,
+    sampleRate: 8000,
     destination: new MockNode(),
     createGain() { return new MockNode(); },
     createOscillator() { return new MockNode(); },
     createBiquadFilter() { return new MockNode(); },
-    createDynamicsCompressor() { return new MockNode(); }
+    createDynamicsCompressor() { return new MockNode(); },
+    createStereoPanner() { return new MockNode(); },
+    createBufferSource() { return new MockNode(); },
+    createConvolver() { convolvers++; return new MockNode(); },
+    createBuffer(channels, length, sampleRate) {
+      const data = Array.from({ length: channels }, () => new Float32Array(length));
+      return { sampleRate, getChannelData: channel => data[channel] };
+    }
   };
 
   // Test playVoice for all 16 instruments
@@ -159,7 +169,13 @@ test('audio: mock AudioContext synthesis and scheduling', () => {
     noteCallbackCount++;
   });
   assert.equal(typeof fanfareHandle.stop, 'function');
+  assert.equal(convolvers, 1); // The fanfare plays through its room reverb.
   fanfareHandle.stop();
+
+  // Looping queues repeats on the audio clock and stops cleanly.
+  const loopHandle = audio.playFanfare(testVoice, mockCtx, null, { loop: true });
+  assert.equal(typeof loopHandle.stop, 'function');
+  loopHandle.stop();
 
   // Test playGameStart
   const startHandle = audio.playGameStart({ ctx: mockCtx, volume: 0.9 });
@@ -217,4 +233,31 @@ test('Super synthesis bounds playback, cleans nodes, and throttles Magnet', () =
   audio.stop();
   assert.ok(oscillators.at(-1).end <= ctx.currentTime + .021);
   audio.stop();
+});
+
+test('fanfare chords follow the melody and loops vary deterministically from the DNA', () => {
+  const major = audio.scalePitches(0);
+  assert.deepEqual(major, [0, 2, 4, 5, 7, 9, 11]);
+  assert.equal(audio.scalePitches(2).length, 5); // pentatonic
+  assert.deepEqual(audio.chordFor(major, 0).tones, [0, 4, 7]); // root note: home chord
+  assert.deepEqual(audio.chordFor(major, 4).tones, [0, 4, 7]); // E sits in the home chord
+  assert.deepEqual(audio.chordFor(major, 5).tones, [5, 9, 0]); // F: the IV chord
+  assert.deepEqual(audio.chordFor(major, 11).tones, [7, 11, 2]); // B: the V chord
+  for (let scale = 0; scale < 8; scale++) {
+    const pitches = audio.scalePitches(scale);
+    for (const pc of pitches) assert.ok(audio.chordFor(pitches, pc).tones.includes(pc)); // melody note is always in its chord
+  }
+  const voice = { instrument: 5, pitch: 28, decay: 4, timbreMod: 1, scale: 1, tempo: 4, groove: 0,
+    notes: Array.from({ length: 8 }, (_, i) => ({ degree: (i * 5) % 8, duration: i % 4 })) };
+  const cycle = audio.loopVariations(voice);
+  assert.equal(cycle.length, 4); assert.equal(cycle[0], null); assert.equal(cycle[2], null);
+  assert.ok(cycle[1] && cycle[3] && cycle[1] !== cycle[3]);
+  assert.deepEqual(audio.loopVariations({ ...voice }), cycle); // same DNA, same song
+  const pitches = audio.scalePitches(voice.scale), info = audio.parseVoiceInfo(voice);
+  const notes = info.notes.map(n => ({ ...n, semi: n.isRest ? null : n.midi - info.rootMidi }));
+  for (const variation of [cycle[1], cycle[3]]) {
+    const varied = variation(notes, pitches);
+    assert.deepEqual(varied.map(n => n.beats).sort(), notes.map(n => n.beats).sort()); // same rhythm values
+    for (const n of varied) if (!n.isRest) assert.ok(pitches.includes(((n.semi % 12) + 12) % 12)); // stays in key
+  }
 });

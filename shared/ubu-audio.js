@@ -123,21 +123,29 @@
     return sharedContext;
   }
 
+  // In-game sounds: a gentle high-cut takes the edge off bright transients, and moderate compression
+  // keeps hits even without squashing them.
   function createMasterChain(ctx, cleanup = null) {
+    const soften = ctx.createBiquadFilter();
+    soften.type = 'lowpass';
+    soften.frequency.setValueAtTime(7500, ctx.currentTime);
+    soften.Q.setValueAtTime(0.5, ctx.currentTime);
+
     const compressor = ctx.createDynamicsCompressor();
     compressor.threshold.setValueAtTime(-12, ctx.currentTime);
     compressor.knee.setValueAtTime(30, ctx.currentTime);
-    compressor.ratio.setValueAtTime(8, ctx.currentTime);
-    compressor.attack.setValueAtTime(0.003, ctx.currentTime);
+    compressor.ratio.setValueAtTime(4, ctx.currentTime);
+    compressor.attack.setValueAtTime(0.005, ctx.currentTime);
     compressor.release.setValueAtTime(0.25, ctx.currentTime);
 
     const masterGain = ctx.createGain();
     masterGain.gain.setValueAtTime(0.22, ctx.currentTime);
 
+    soften.connect(compressor);
     compressor.connect(masterGain);
     masterGain.connect(ctx.destination);
-    if (cleanup) cleanup.push(compressor, masterGain);
-    return compressor;
+    if (cleanup) cleanup.push(soften, compressor, masterGain);
+    return soften;
   }
 
   function playTone(ctx, dest, params) {
@@ -149,7 +157,8 @@
       decay = 0.3,
       timbreMod = 0,
       pitchBend = 0, // semitone pitch bend for voice tone inflection
-      volume = 1.0
+      volume = 1.0,
+      soft = 0 // seconds to fade in over, so sharp instrument attacks never click
     } = params;
 
     const stopNodes = [];
@@ -164,7 +173,15 @@
     const clampedVol = Math.max(0.01, Math.min(2.0, volume));
     volGain.gain.setValueAtTime(clampedVol, startTime);
 
-    envGain.connect(volGain);
+    if (soft) {
+      const guard = ctx.createGain();
+      guard.gain.setValueAtTime(0, startTime);
+      guard.gain.linearRampToValueAtTime(1, startTime + soft);
+      envGain.connect(guard);
+      guard.connect(volGain);
+    } else {
+      envGain.connect(volGain);
+    }
     volGain.connect(dest);
 
     // Timbre modifiers: detune or overtone
@@ -639,9 +656,17 @@
       decay: duration,
       timbreMod: parsed.timbreMod,
       pitchBend: 1.8,
-      volume
+      volume,
+      soft: 0.005
     });
     return toneHandle;
+  }
+
+  // Impact envelope: a 3 ms rise instead of an instant start, then the usual quick decay.
+  function strike(gain, level, now, end) {
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(level, now + 0.003);
+    gain.gain.exponentialRampToValueAtTime(0.0001, end);
   }
 
   function playBallHit(options = {}) {
@@ -657,8 +682,7 @@
     osc.frequency.setValueAtTime(220, now);
     osc.frequency.exponentialRampToValueAtTime(75, now + 0.05);
 
-    gain.gain.setValueAtTime(0.7 * volume, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+    strike(gain, 0.7 * volume, now, now + 0.07);
 
     osc.connect(gain);
     gain.connect(master);
@@ -684,8 +708,7 @@
     filter.type = 'lowpass';
     filter.frequency.setValueAtTime(450, now);
 
-    gain.gain.setValueAtTime(0.6 * volume, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+    strike(gain, 0.6 * volume, now, now + 0.08);
 
     osc.connect(filter);
     filter.connect(gain);
@@ -712,13 +735,12 @@
       mod.type = 'sine';
       mod.frequency.setValueAtTime(2780, now);
 
-      modGain.gain.setValueAtTime(1200, now);
+      modGain.gain.setValueAtTime(900, now);
       modGain.gain.exponentialRampToValueAtTime(0.1, now + 0.12);
       mod.connect(modGain);
       modGain.connect(carrier.frequency);
 
-      gain.gain.setValueAtTime(0.55 * volume, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+      strike(gain, 0.5 * volume, now, now + 0.28);
 
       carrier.connect(gain);
       gain.connect(master);
@@ -733,8 +755,7 @@
       osc.frequency.setValueAtTime(180, now);
       osc.frequency.exponentialRampToValueAtTime(90, now + 0.09);
 
-      gain.gain.setValueAtTime(0.5 * volume, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+      strike(gain, 0.5 * volume, now, now + 0.12);
 
       osc.connect(gain);
       gain.connect(master);
@@ -939,75 +960,273 @@
     return handle;
   }
 
-  function playFanfare(voice, customCtx = null, onNoteCallback = null) {
+  // Fanfare finishing: trims rumble and harsh highs, compresses gently instead of pumping, and adds a
+  // short generated room reverb. Notes, timing, instrument and decay all still come from the DNA.
+  let roomImpulse = null;
+  function fanfareRoom(ctx) {
+    if (roomImpulse && roomImpulse.sampleRate === ctx.sampleRate) return roomImpulse;
+    const length = Math.round(ctx.sampleRate * 1.4);
+    roomImpulse = ctx.createBuffer(2, length, ctx.sampleRate);
+    for (let channel = 0; channel < 2; channel++) {
+      const data = roomImpulse.getChannelData(channel);
+      for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 3;
+    }
+    return roomImpulse;
+  }
+  function createFanfareChain(ctx) {
+    const input = ctx.createGain(), lowCut = ctx.createBiquadFilter(), highCut = ctx.createBiquadFilter();
+    const dry = ctx.createGain(), wet = ctx.createGain(), room = ctx.createConvolver();
+    const compressor = ctx.createDynamicsCompressor(), master = ctx.createGain(), t = ctx.currentTime;
+    lowCut.type = 'highpass'; lowCut.frequency.setValueAtTime(70, t);
+    highCut.type = 'lowpass'; highCut.frequency.setValueAtTime(6500, t); highCut.Q.setValueAtTime(0.5, t);
+    room.buffer = fanfareRoom(ctx);
+    dry.gain.setValueAtTime(0.85, t); wet.gain.setValueAtTime(0.22, t);
+    compressor.threshold.setValueAtTime(-18, t); compressor.knee.setValueAtTime(24, t);
+    compressor.ratio.setValueAtTime(3, t); compressor.attack.setValueAtTime(0.01, t); compressor.release.setValueAtTime(0.3, t);
+    master.gain.setValueAtTime(0.24, t);
+    input.connect(lowCut); lowCut.connect(highCut);
+    highCut.connect(dry); dry.connect(compressor);
+    highCut.connect(room); room.connect(wet); wet.connect(compressor);
+    compressor.connect(master); master.connect(ctx.destination);
+    // Stopping fades the whole chain out in 30 ms, so the reverb tail ends with the notes.
+    input.silence = () => {
+      const now = ctx.currentTime;
+      master.gain.cancelScheduledValues(now);
+      master.gain.setValueAtTime(master.gain.value, now);
+      master.gain.linearRampToValueAtTime(0, now + 0.03);
+      setTimeout(() => master.disconnect(), 60);
+    };
+    return input;
+  }
+
+  // Fanfare harmony, built only from the DNA scale. A scale's distinct notes, e.g. Major is
+  // [0, 2, 4, 5, 7, 9, 11] semitones above the root and the pentatonic scales have five.
+  function scalePitches(scaleIndex) {
+    return [...new Set(SCALES[scaleIndex].degrees.map(semi => semi % 12))].sort((a, b) => a - b);
+  }
+  // A note's position counted in scale steps (octaves included), and back again.
+  function scaleIndexOf(pitches, semitone) {
+    const pc = ((semitone % 12) + 12) % 12;
+    return Math.max(0, pitches.indexOf(pc)) + pitches.length * Math.floor(semitone / 12);
+  }
+  function scaleSemitone(pitches, index) {
+    const n = pitches.length;
+    return pitches[((index % n) + n) % n] + 12 * Math.floor(index / n);
+  }
+  // The chord under a melody note is a scale triad (every other scale note) that contains it,
+  // preferring the home chord, then the chords built on the 4th and 5th notes, as most songs do.
+  const CHORD_PREFERENCE = [0, 3, 4, 5, 1, 2, 6];
+  function chordFor(pitches, semitone) {
+    const n = pitches.length, step = ((scaleIndexOf(pitches, semitone) % n) + n) % n;
+    const roots = [step, step - 2, step - 4].map(r => ((r % n) + n) % n);
+    const root = CHORD_PREFERENCE.find(r => r < n && roots.includes(r)) ?? roots[0];
+    return { root, tones: [0, 2, 4].map(k => pitches[(root + k) % n]) };
+  }
+  // Loop variations, chosen from the DNA so an ubu's song develops the same way every time: a
+  // four-loop cycle of the original melody, variation A, the original, then variation B. Each
+  // keeps the melody's rhythm and scale; the chords follow whatever the melody becomes.
+  const shift = (p, n, steps) => n.isRest ? n : { ...n, semi: scaleSemitone(p, scaleIndexOf(p, n.semi) + steps) };
+  const VARIATIONS = [
+    (notes, p) => notes.map(n => shift(p, n, 2)), // a third higher
+    (notes, p) => notes.map(n => shift(p, n, 4)), // a fifth higher
+    (notes, p) => { // mirrored: steps up become steps down around the first note
+      const pivot = scaleIndexOf(p, notes.find(n => !n.isRest)?.semi ?? 0);
+      return notes.map(n => n.isRest ? n : { ...n, semi: scaleSemitone(p, 2 * pivot - scaleIndexOf(p, n.semi)) });
+    },
+    notes => [...notes].reverse(), // played backwards
+    (notes, p) => notes.map((n, i) => i < notes.length / 2 ? n : shift(p, n, 1)) // second half answers a step higher
+  ];
+  function voiceSeed(voice) {
+    let hash = 2166136261;
+    const mix = value => { hash = Math.imul(hash ^ (value & 255), 16777619) >>> 0; };
+    for (const key of ['instrument', 'pitch', 'decay', 'timbreMod', 'scale', 'tempo', 'groove']) mix(voice[key] | 0);
+    for (const note of voice.notes || []) { mix(note.degree | 0); mix(note.duration | 0); }
+    return hash;
+  }
+  function loopVariations(voice) {
+    const seed = voiceSeed(voice), a = seed % VARIATIONS.length;
+    return [null, VARIATIONS[a], null, VARIATIONS[(a + 1 + (seed >>> 8) % (VARIATIONS.length - 1)) % VARIATIONS.length]];
+  }
+
+  // Accompaniment under the melody: on every beat, a soft pad and a bass note play the chord that
+  // contains the melody note sounding then (after the melody, the home chord), with quiet
+  // percussion on each beat and a light kick on the opening and final notes. The melody leads.
+  let noiseBuffer = null;
+  function accompany(ctx, dest, plan) {
+    const { start, end, lastStart, secondsPerBeat, chords, padRoot, bassRoot } = plan, sources = [];
+    const pad = ctx.createBiquadFilter();
+    pad.type = 'lowpass'; pad.frequency.setValueAtTime(1100, start); pad.connect(dest);
+    chords.forEach((chord, k) => {
+      const last = k === chords.length - 1, from = chord.at, until = last ? end + 0.85 : chord.until + 0.1;
+      // Pad: two slightly detuned triangles per chord note, crossfading into the next chord.
+      for (const tone of chord.tones) for (const detune of [-6, 6]) {
+        const osc = ctx.createOscillator(), gain = ctx.createGain();
+        osc.type = 'triangle'; osc.frequency.setValueAtTime(padRoot * Math.pow(2, tone / 12), from); osc.detune.setValueAtTime(detune, from);
+        gain.gain.setValueAtTime(0.0001, from); gain.gain.linearRampToValueAtTime(0.035, from + 0.08);
+        gain.gain.setValueAtTime(0.035, Math.max(from + 0.08, until - (last ? 0.5 : 0.1)));
+        gain.gain.exponentialRampToValueAtTime(0.0001, until);
+        osc.connect(gain); gain.connect(pad); osc.start(from); osc.stop(until + 0.05); sources.push(osc);
+      }
+      // Bass: the chord's root, held up to a beat and a half.
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      const ring = Math.max(0.25, Math.min(chord.until - from + 0.2, secondsPerBeat * 1.6));
+      let freq = bassRoot * Math.pow(2, chord.tones[0] / 12);
+      if (freq > 160) freq /= 2;
+      osc.type = 'sine'; osc.frequency.setValueAtTime(freq, from);
+      gain.gain.setValueAtTime(0.0001, from); gain.gain.linearRampToValueAtTime(0.3, from + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, from + ring);
+      osc.connect(gain); gain.connect(dest); osc.start(from); osc.stop(from + ring + 0.05); sources.push(osc);
+    });
+    // Percussion: a soft hat on every beat, a little stronger every fourth.
+    if (!noiseBuffer || noiseBuffer.sampleRate !== ctx.sampleRate) {
+      noiseBuffer = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.1), ctx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    }
+    const hatFilter = ctx.createBiquadFilter();
+    hatFilter.type = 'highpass'; hatFilter.frequency.setValueAtTime(7000, start); hatFilter.connect(dest);
+    for (let beat = 0, at = start; at < end - 0.01; beat++, at = start + beat * secondsPerBeat) {
+      const hat = ctx.createBufferSource(), gain = ctx.createGain();
+      hat.buffer = noiseBuffer;
+      gain.gain.setValueAtTime(beat % 4 ? 0.05 : 0.08, at); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.04);
+      hat.connect(gain); gain.connect(hatFilter); hat.start(at); hat.stop(at + 0.06); sources.push(hat);
+    }
+    for (const at of lastStart > start + secondsPerBeat ? [start, lastStart] : [start]) {
+      const kick = ctx.createOscillator(), gain = ctx.createGain();
+      kick.type = 'sine'; kick.frequency.setValueAtTime(150, at); kick.frequency.exponentialRampToValueAtTime(80, at + 0.12);
+      gain.gain.setValueAtTime(0.0001, at); gain.gain.linearRampToValueAtTime(0.35, at + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.18);
+      kick.connect(gain); gain.connect(dest); kick.start(at); kick.stop(at + 0.2); sources.push(kick);
+    }
+    return { stop() { for (const source of sources) { try { source.stop(); } catch {} } } };
+  }
+
+  // options.loop repeats the phrase seamlessly until stopped. Each repeat is scheduled on the audio
+  // clock an even number of beats after the last (the melody plus a rest of about four of its own
+  // notes, rounded up), and the accompaniment runs through the rest, so the loop stays on one beat.
+  function playFanfare(voice, customCtx = null, onNoteCallback = null, options = {}) {
     stopAll();
     const ctx = customCtx || getAudioContext();
     if (!ctx) return { stop() {} };
 
     const parsed = parseVoiceInfo(voice);
-    const master = createMasterChain(ctx);
+    const master = createFanfareChain(ctx);
     const secondsPerBeat = 60 / parsed.tempoBpm;
     const now = ctx.currentTime + 0.05; // tiny lead-in for smooth scheduling
 
     const activeNodes = [];
     const timers = [];
-    let currentTime = now;
 
-    parsed.notes.forEach((note, i) => {
-      // Groove / swing offset
-      let swingOffset = 0;
-      if (parsed.grooveIndex === 1 && (i % 2 === 1)) {
-        // Light swing
-        swingOffset = secondsPerBeat * 0.12;
-      } else if (parsed.grooveIndex === 2 && (i % 2 === 1)) {
-        // Shuffle
-        swingOffset = secondsPerBeat * 0.22;
+    const pitches = scalePitches(parsed.scaleIndex), variations = loopVariations(voice);
+    const fit = (freq, low) => { while (freq >= low * 2) freq /= 2; while (freq < low) freq *= 2; return freq; };
+    const padRoot = fit(parsed.rootFreq, 130), bassRoot = fit(parsed.rootFreq, 80);
+    const baseNotes = parsed.notes.map(n => ({ ...n, semi: n.isRest ? null : n.midi - parsed.rootMidi }));
+
+    function phrase(phraseStart, accompanyUntil = null, variation = null) {
+      const notes = variation ? variation(baseNotes, pitches) : baseNotes;
+      let currentTime = phraseStart, lastStart = phraseStart, beat = 0;
+      const onsets = [];
+      notes.forEach((note, i) => {
+        // Groove / swing offset
+        let swingOffset = 0;
+        if (parsed.grooveIndex === 1 && (i % 2 === 1)) {
+          // Light swing
+          swingOffset = secondsPerBeat * 0.12;
+        } else if (parsed.grooveIndex === 2 && (i % 2 === 1)) {
+          // Shuffle
+          swingOffset = secondsPerBeat * 0.22;
+        }
+
+        const noteStartTime = currentTime + swingOffset;
+        const nominalDuration = note.beats * secondsPerBeat;
+        // Staccato groove shortens held note
+        const playDuration = parsed.grooveIndex === 3 ? nominalDuration * 0.55 : nominalDuration * 0.92;
+
+        if (!note.isRest) {
+          // Notes alternate slightly left and right for width, and may ring a little past their
+          // length (the DNA decay still caps it) so the line sounds connected rather than chopped.
+          let dest = master;
+          if (ctx.createStereoPanner) {
+            dest = ctx.createStereoPanner();
+            dest.pan.setValueAtTime(i % 2 ? 0.15 : -0.15, noteStartTime);
+            dest.connect(master);
+          }
+          let freq = parsed.rootFreq * Math.pow(2, note.semi / 12);
+          while (freq > 2600) freq /= 2; // variations never climb into shrill registers
+          const handle = playTone(ctx, dest, {
+            instrument: parsed.instrumentIndex,
+            freq,
+            startTime: noteStartTime,
+            duration: playDuration,
+            decay: Math.min(parsed.decaySeconds, playDuration * 1.5),
+            timbreMod: parsed.timbreMod,
+            soft: 0.012
+          });
+          activeNodes.push(handle);
+          lastStart = noteStartTime;
+          onsets.push({ beat, semi: note.semi });
+        }
+
+        // Visual callback sync
+        if (typeof onNoteCallback === 'function') {
+          const delayMs = Math.max(0, (noteStartTime - ctx.currentTime) * 1000);
+          const timerId = setTimeout(() => {
+            onNoteCallback(i, parsed.notes[note.index]);
+          }, delayMs);
+          timers.push(timerId);
+        }
+
+        currentTime += nominalDuration;
+        beat += note.beats;
+      });
+      // One chord per beat from the melody note sounding on it (the home chord once the melody
+      // ends), merging repeats, so the melody itself writes the progression.
+      const until = accompanyUntil ?? currentTime, chords = [];
+      for (let b = 0; phraseStart + b * secondsPerBeat < until - 0.01; b++) {
+        const sounding = [...onsets].reverse().find(o => o.beat <= b + 1e-9) ?? onsets[0];
+        const chord = b < beat && sounding ? chordFor(pitches, sounding.semi) : chordFor(pitches, 0);
+        const at = phraseStart + b * secondsPerBeat, next = Math.min(until, at + secondsPerBeat);
+        const previous = chords[chords.length - 1];
+        if (previous && previous.root === chord.root) previous.until = next;
+        else chords.push({ ...chord, at, until: next });
       }
+      activeNodes.push(accompany(ctx, master, { start: phraseStart, end: until, lastStart, secondsPerBeat, chords, padRoot, bassRoot }));
+      return currentTime;
+    }
 
-      const noteStartTime = currentTime + swingOffset;
-      const nominalDuration = note.beats * secondsPerBeat;
-      // Staccato groove shortens held note
-      const playDuration = parsed.grooveIndex === 3 ? nominalDuration * 0.55 : nominalDuration * 0.92;
-
-      if (!note.isRest && note.freq) {
-        const handle = playTone(ctx, master, {
-          instrument: parsed.instrumentIndex,
-          freq: note.freq,
-          startTime: noteStartTime,
-          duration: playDuration,
-          decay: Math.min(parsed.decaySeconds, playDuration * 1.2),
-          timbreMod: parsed.timbreMod
-        });
-        activeNodes.push(handle);
-      }
-
-      // Visual callback sync
+    // Final finish callback. The handle stays active while the reverb tail rings, so stopping
+    // after the last note still silences the tail, without reporting the finish twice.
+    let finished = false;
+    if (options.loop) {
+      const melodyBeats = parsed.notes.reduce((sum, n) => sum + n.beats, 0);
+      const loopBeats = melodyBeats + 4 * melodyBeats / Math.max(1, parsed.notes.length);
+      const period = Math.ceil(loopBeats / 2) * 2 * secondsPerBeat;
+      let next = now, repeat = 0;
+      // Keep at least one full repeat queued ahead of the audio clock.
+      const queue = () => {
+        while (next < ctx.currentTime + period) { phrase(next, next + period, variations[repeat++ % variations.length]); next += period; }
+        timers.push(setTimeout(queue, period * 500));
+      };
+      queue();
+    } else {
+      const end = phrase(now);
       if (typeof onNoteCallback === 'function') {
-        const delayMs = Math.max(0, (noteStartTime - ctx.currentTime) * 1000);
-        const timerId = setTimeout(() => {
-          onNoteCallback(i, note);
-        }, delayMs);
-        timers.push(timerId);
+        const finishDelayMs = Math.max(0, (end - ctx.currentTime + 0.2) * 1000);
+        const finishTimer = setTimeout(() => {
+          finished = true;
+          onNoteCallback(-1, null); // -1 indicates playback finished
+        }, finishDelayMs);
+        timers.push(finishTimer);
       }
-
-      currentTime += nominalDuration;
-    });
-
-    // Final finish callback
-    if (typeof onNoteCallback === 'function') {
-      const finishDelayMs = Math.max(0, (currentTime - ctx.currentTime + 0.2) * 1000);
-      const finishTimer = setTimeout(() => {
-        onNoteCallback(-1, null); // -1 indicates playback finished
-        if (activePlayback === handle) activePlayback = null;
-      }, finishDelayMs);
-      timers.push(finishTimer);
     }
 
     const handle = {
       stop() {
         for (const timer of timers) clearTimeout(timer);
         for (const node of activeNodes) node.stop();
-        if (typeof onNoteCallback === 'function') onNoteCallback(-1, null);
+        master.silence();
+        if (!finished && typeof onNoteCallback === 'function') onNoteCallback(-1, null);
+        finished = true;
         if (activePlayback === handle) activePlayback = null;
       }
     };
@@ -1036,6 +1255,9 @@
     playSuper,
     playGameStart,
     playFanfare,
+    scalePitches,
+    chordFor,
+    loopVariations,
     stop: stopAll
   };
 
