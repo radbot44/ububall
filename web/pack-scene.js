@@ -943,43 +943,58 @@
     }
 
     // --- Fortune Cookie ---
-    // A golden folded cookie with its fortune slip peeking out, printed with five dots in the pack's
-    // colours; a dusting of gold hints at a special finish. It strains, snaps in two and the slip
-    // unfurls into the ubus.
+    // A golden folded cookie hiding a fortune slip printed with five dots in the pack's colours; a
+    // dusting of gold hints at a special finish. It strains, snaps in two and the slip unfurls
+    // as the ubus appear.
     let crumbs = [], dust = [];
     function setupCookie() {
       const rolls = crypto.getRandomValues(new Uint16Array(160)), u = i => rolls[i] / 65535;
       crumbs = Array.from({ length: 26 }, (_, i) => ({ x: u(i) * 210 - 105, y: u(i + 26) * 90 - 50, r: .8 + u(i + 52) * 1.8 }));
       dust = Array.from({ length: 30 }, (_, i) => ({ x: u(i + 80) * 200 - 100, y: u(i + 110) * 80 - 50 }));
     }
-    // One smooth arch on top; underneath, the two wings curl in to a pinch at the centre.
+    // A folded half-moon seen from the front: a full rounded dome whose two lower lobes bulge
+    // down on either side of a pinch, with the thick folded rim showing along the top.
     function cookiePath() {
-      ctx.beginPath(); ctx.moveTo(-126, 22);
-      ctx.bezierCurveTo(-118, -58, -54, -80, 0, -80); ctx.bezierCurveTo(54, -80, 118, -58, 126, 22);
-      ctx.bezierCurveTo(112, 52, 70, 56, 44, 40); ctx.bezierCurveTo(26, 30, 14, 8, 0, 4);
-      ctx.bezierCurveTo(-14, 8, -26, 30, -44, 40); ctx.bezierCurveTo(-70, 56, -112, 52, -126, 22); ctx.closePath();
+      ctx.beginPath(); ctx.moveTo(-118, 34);
+      ctx.bezierCurveTo(-124, -36, -70, -88, 0, -88); ctx.bezierCurveTo(70, -88, 124, -36, 118, 34);
+      ctx.bezierCurveTo(112, 70, 56, 80, 28, 60); ctx.bezierCurveTo(18, 52, 10, 40, 6, 28);
+      ctx.bezierCurveTo(0, 40, -10, 52, -24, 60); ctx.bezierCurveTo(-54, 80, -112, 70, -118, 34); ctx.closePath();
+    }
+    // The crease: a narrow curved slit rising from the pinch, where the darker inside shows.
+    function cookieFold() {
+      ctx.beginPath(); ctx.moveTo(6, 30); ctx.bezierCurveTo(10, 10, 6, -10, -6, -26);
+      ctx.bezierCurveTo(0, -8, 2, 12, -2, 30); ctx.closePath();
     }
     function cookieBody() {
       cookiePath();
-      ctx.fillStyle = gradient(ctx, -80 + pointer * 20, -70, 60 + pointer * 20, 70, [[0, '#f6d58e'], [.45, '#e0a64e'], [1, '#a8662a']]);
+      ctx.fillStyle = gradient(ctx, -90 + pointer * 20, -80, 70 + pointer * 20, 70, [[0, '#f7d98c'], [.5, '#e8b55a'], [1, '#c4863a']]);
       ctx.fill();
       ctx.save(); cookiePath(); ctx.clip();
-      for (const c of crumbs) { ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.fillStyle = '#8a531f66'; ctx.fill(); }
+      // The folded rim: a darker, toasted band just inside the dome's edge, and a pale lip inside it.
+      ctx.beginPath(); ctx.moveTo(-118, 48); ctx.bezierCurveTo(-124, -30, -70, -86, 0, -86); ctx.bezierCurveTo(70, -86, 124, -30, 118, 48);
+      ctx.strokeStyle = '#b07332'; ctx.lineWidth = 16; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-104, 46); ctx.bezierCurveTo(-108, -22, -62, -72, 0, -72); ctx.bezierCurveTo(62, -72, 108, -22, 104, 46);
+      ctx.strokeStyle = '#fbe2a855'; ctx.lineWidth = 3; ctx.stroke();
+      for (const c of crumbs) { ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.fillStyle = '#a86a2a55'; ctx.fill(); }
       if (special()) for (const d of dust) {
         ctx.globalAlpha = .4 + .6 * Math.abs(Math.sin(d.x * .2 + pointer * 3 + pointerY));
         ctx.fillStyle = '#fff1c4'; ctx.fillRect(d.x, d.y, 1.8, 1.8);
       }
+      ctx.globalAlpha = 1;
+      // The pinch: the darker inside of the fold, its two lit lips, and a soft pleat on each side.
+      cookieFold(); ctx.fillStyle = gradient(ctx, 0, -26, 0, 30, [[0, '#a8682a00'], [.5, '#6e4115'], [1, '#5a330f']]); ctx.fill();
+      // The overlapping lip catches the light along the slit's right edge.
+      ctx.beginPath(); ctx.moveTo(7, 30); ctx.bezierCurveTo(11, 10, 7, -10, -5, -26);
+      ctx.strokeStyle = '#f7d996'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.stroke();
+      // Each lobe rounds into the pinch with a soft shadow.
+      ctx.fillStyle = '#7a4a1a40';
+      for (const side of [-1, 1]) { ctx.beginPath(); ctx.ellipse(side * 18 + 2, 50, 14, 10, 0, 0, Math.PI * 2); ctx.fill(); }
       ctx.restore();
-      // The fold: the dark hollow under the pinch, the ridge rising from it, and a sheen on the arch.
-      ctx.beginPath(); ctx.moveTo(-40, 34); ctx.bezierCurveTo(-24, 14, -10, 2, 0, 2); ctx.bezierCurveTo(10, 2, 24, 14, 40, 34);
-      ctx.bezierCurveTo(20, 22, -20, 22, -40, 34); ctx.fillStyle = '#5e3511cc'; ctx.fill();
-      ctx.beginPath(); ctx.moveTo(0, 2); ctx.bezierCurveTo(-6, -26, -4, -52, 0, -76);
-      ctx.strokeStyle = '#8a531f70'; ctx.lineWidth = 3; ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(-96, -26); ctx.bezierCurveTo(-80, -60, -40, -72, -12, -72);
-      ctx.strokeStyle = '#fff3d066'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-84, -40); ctx.bezierCurveTo(-66, -66, -36, -74, -14, -74);
+      ctx.strokeStyle = '#fff6dc66'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.stroke();
     }
     function fortuneSlip(rise, unfurl) {
-      ctx.save(); ctx.translate(2, 26 - rise * 60); ctx.rotate(-.12 * (1 - unfurl));
+      ctx.save(); ctx.translate(2, 20 - rise * 60); ctx.rotate(-.12 * (1 - unfurl));
       const w = mix(70, 150, unfurl), h = 22;
       ctx.fillStyle = '#fbf8f1'; ctx.fillRect(-w / 2, -h / 2, w, h);
       ctx.strokeStyle = '#00000018'; ctx.lineWidth = 1; ctx.strokeRect(-w / 2, -h / 2, w, h);
@@ -993,8 +1008,8 @@
       ctx.save(); ctx.globalAlpha = 1 - apart;
       ctx.beginPath(); ctx.ellipse(0, 70, 110, 10, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000038'; ctx.filter = 'blur(6px)'; ctx.fill(); ctx.filter = 'none';
       ctx.restore();
-      // The slip sits in the pinch at the front; it rises and unrolls in front of the halves as the cookie breaks.
-      if (!snap) { cookieBody(); fortuneSlip(0, 0); ctx.restore(); return; }
+      // The fortune stays hidden inside until the cookie breaks; then it rises and unrolls in front of the halves.
+      if (!snap) { cookieBody(); ctx.restore(); return; }
       for (const side of [-1, 1]) {
         ctx.save(); ctx.globalAlpha = 1 - apart;
         ctx.translate(side * (snap * 18 + apart * 90), apart * 60); ctx.rotate(side * (snap * .18 + apart * .5));
@@ -1009,7 +1024,7 @@
     // --- Wax-Sealed Envelope ---
     // A cream envelope with an airmail border in the pack's colours, closed with a wax seal
     // pressed with the oomark: red wax, or gold when a special finish is inside. The seal cracks,
-    // the flap opens and a card slides out as the ubus.
+    // the flap opens and the ubus climb out.
     let sealEdge = [];
     function setupEnvelope() {
       const rolls = crypto.getRandomValues(new Uint16Array(28));
@@ -1060,13 +1075,11 @@
       ctx.beginPath(); ctx.moveTo(x + 9, y + H - 9); ctx.lineTo(0, 12); ctx.lineTo(x + W - 9, y + H - 9); ctx.stroke();
     }
     function renderEnvelope(t) {
-      const crackT = ease(.06, .18, t), open = ease(.18, .42, t), card = ease(.38, .58, t), away = ease(.52, .72, t);
-      const W = 250, H = 160, top = -H / 2;
-      ctx.save(); ctx.translate(0, 16 + away * 60); ctx.globalAlpha = 1 - away;
+      const crackT = ease(.06, .18, t), open = ease(.18, .42, t), rise = ease(.38, .58, t), fan = ease(.56, .82, t), away = ease(.52, .72, t);
+      const W = 250, H = 160, top = -H / 2, drop = 16 + away * 60;
+      ctx.save(); ctx.translate(0, drop); ctx.globalAlpha = 1 - away;
       ctx.beginPath(); ctx.ellipse(0, H / 2 + 8, W * .5, 9, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000038'; ctx.filter = 'blur(6px)'; ctx.fill(); ctx.filter = 'none';
-      envelopeBody();
-      // The flap folds from pointing down over the envelope to standing open above it. Once open,
-      // it sits behind the card, which shows only where it has risen above the envelope's edge.
+      // The flap folds from pointing down over the envelope to standing open behind it.
       const tipY = mix(top + 96, top - 96, open), inside = tipY < top;
       const flap = () => {
         ctx.beginPath(); ctx.moveTo(-W / 2, top); ctx.lineTo(W / 2, top); ctx.lineTo(0, tipY); ctx.closePath();
@@ -1074,12 +1087,21 @@
         ctx.fill(); ctx.strokeStyle = '#00000020'; ctx.lineWidth = 1.2; ctx.stroke();
       };
       if (inside) flap();
-      if (card) {
-        ctx.save(); ctx.beginPath(); ctx.rect(-W / 2, top - 200, W, 200); ctx.clip();
-        ctx.fillStyle = '#fffdf8'; ctx.fillRect(-W / 2 + 18, top + 20 - card * 110, W - 36, 120);
-        ctx.strokeStyle = '#00000018'; ctx.lineWidth = 1; ctx.strokeRect(-W / 2 + 18, top + 20 - card * 110, W - 36, 120);
+      // The ubus climb out of the opening, small, then spread into the reveal fan. They are drawn
+      // before the envelope's panel, so the part still inside stays hidden behind it.
+      if (rise) {
+        ctx.save(); ctx.translate(0, -drop); ctx.globalAlpha = 1 - ease(.96, 1, t);
+        const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => Math.abs(b - (count - 1) / 2) - Math.abs(a - (count - 1) / 2));
+        for (const i of order) {
+          const slot = i - (count - 1) / 2;
+          const x = mix(slot * 36, slot * 88, fan), y = mix(mix(40, -110, rise), -26 + Math.abs(slot) * 14, fan);
+          ctx.save(); ctx.translate(x, y); ctx.scale(mix(.45, 1, fan), mix(.45, 1, fan));
+          candy(0, 0, candyColors[i % 5], slot * .10 * fan);
+          ctx.restore();
+        }
         ctx.restore();
       }
+      envelopeBody();
       if (!inside) flap();
       // The seal rides the flap's tip until it cracks apart and falls.
       if (!inside || open < .55) {
@@ -1102,7 +1124,7 @@
       { id: 'egg', name: 'Speckled Egg', setup: setupEgg, render: renderEgg, duration: 2600, reveal: .12, end: .96, taps: 3 },
       { id: 'gift', name: 'Gift Box', setup: setupGift, render: renderGift, duration: 3000, reveal: .38, end: .96 },
       { id: 'cookie', name: 'Fortune Cookie', setup: setupCookie, render: renderCookie, duration: 2800, reveal: .42, end: .96 },
-      { id: 'envelope', name: 'Wax-Sealed Envelope', setup: setupEnvelope, render: renderEnvelope, duration: 3000, reveal: .48, end: .96 }
+      { id: 'envelope', name: 'Wax-Sealed Envelope', setup: setupEnvelope, render: renderEnvelope, duration: 3000, reveal: null, end: 1 }
     ];
 
     function recolor(packTypeId) {
