@@ -786,26 +786,39 @@
       scatter(0.08, 0.38, 20, crinkle);
       scatter(0.62, 0.85, 16, crinkle);
     } else if (type === 'foil') {
-      // Foil: a short, ragged rip as the sheet tears, with a thin metallic crinkle or two, and a
-      // faint crumple as the flaps fall away.
-      scatter(0.1, 0.48, 60, (t, speed) => noiseGrain(ctx, master, t, rand(0.003, 0.008), {
-        freq: rand(1400, 3400), q: rand(0.8, 1.6), level: rand(0.18, 0.42) * (0.4 + speed * 0.6)
-      }));
-      scatter(0.1, 0.48, 3, t => noiseGrain(ctx, master, t, rand(0.015, 0.03), { freq: rand(4800, 6800), q: rand(8, 12), level: rand(0.15, 0.3), pan: rand(-0.4, 0.4) }));
-      [0.83, 0.88].forEach(fraction => noiseGrain(ctx, master, at(fraction), rand(0.008, 0.016), { freq: rand(2600, 5000), q: rand(3, 6), level: rand(0.12, 0.22), pan: rand(-0.5, 0.5) }));
+      // Foil: one quick, light rip through a thin candy wrapper: tiny, bright grains that swell
+      // and fade over a third of a second as the sheet tears.
+      const start = at(0.14), length = 0.34;
+      for (let t = start; t < start + length; t += rand(0.002, 0.005)) {
+        const x = (t - start) / length;
+        noiseGrain(ctx, master, t, rand(0.0015, 0.004), { freq: rand(4200, 7200), q: rand(0.8, 1.4), level: rand(0.08, 0.18) * Math.sin(Math.PI * x) ** 0.6 });
+      }
     } else if (type === 'blob') {
-      // Blob: sludgy squirts as the goo stretches and splits, each a thick gurgle of low, dense
-      // grains that sinks in pitch and trails off in a soft hiss ('glurrsshh'), then a bubbly
-      // bloop as each lobe becomes an ubu, left to right.
-      const squirt = (fraction, pan) => {
-        const start = at(fraction), length = 0.36;
-        for (let t = start; t < start + length; t += rand(0.008, 0.016)) {
-          const x = (t - start) / length;
-          noiseGrain(ctx, master, t, rand(0.018, 0.03), { freq: rand(700, 1000) * (1 - x * 0.6), q: rand(3, 5), level: 0.32 * (1 - x * 0.7), type: 'lowpass', pan });
-        }
-        noiseGrain(ctx, master, start + length * 0.7, 0.2, { freq: 2600, to: 1400, q: 0.7, level: 0.08, pan });
-      };
-      squirt(0.16, -0.3); squirt(0.3, 0.3); squirt(0.44, 0);
+      // Blob: one slow, sludgy goop while it stretches and splits: thick low noise through a
+      // resonant lowpass that wanders irregularly (no steady wobble), its level gently swelling in
+      // and out with soft, uneven surges. Then a bubbly bloop as each lobe becomes an ubu.
+      const start = at(0.12), end = at(0.5), length = end - start;
+      const goo = ctx.createBufferSource();
+      const filter = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+      goo.buffer = grainNoise(ctx);
+      goo.loop = true;
+      filter.type = 'lowpass';
+      filter.Q.setValueAtTime(6, start);
+      const steps = 12;
+      const cutoff = new Float32Array(steps).map((_, i) => 200 + 260 * Math.sin(Math.PI * i / (steps - 1)) * rand(0.6, 1));
+      const surge = new Float32Array(steps * 2).map((_, i) => {
+        const x = i / (steps * 2 - 1);
+        return 0.0001 + 0.24 * Math.min(1, x * 5, (1 - x) * 3) * rand(0.65, 1);
+      });
+      filter.frequency.setValueCurveAtTime(cutoff, start, length);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.setValueCurveAtTime(surge, start, length);
+      goo.connect(filter);
+      filter.connect(gain);
+      gain.connect(master);
+      goo.start(start);
+      goo.stop(end + 0.02);
       for (let i = 0; i < 5; i++) blip(ctx, master, at(0.67 + i * 0.03), 0.09, 320, 640, 0.22, (i - 2) * 0.3);
     }
   }
