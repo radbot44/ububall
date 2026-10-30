@@ -97,7 +97,7 @@
     font-size: 11px;
   }
 }
-.game-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.game-heading { display: flex; align-items: center; justify-content: flex-end; gap: 16px; margin-bottom: 16px; }
 .heading-actions { display: flex; align-items: center; gap: 16px; }
 .toggle-switch {
   display: inline-flex;

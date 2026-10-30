@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signing in…</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      background: #101217;
+      color: #F8F7F4;
+      font: 14px/1.4 Inter, system-ui, -apple-system, sans-serif;
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .status {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="status">
+    <p>Signing in to Ububall…</p>
+  </div>
+  <script>
+    'use strict';
+    (() => {
+      try {
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage({ type: 'ubu-auth-complete' }, window.location.origin);
+          window.close();
+          return;
+        }
+      } catch {}
+      window.location.replace('/');
+    })();
+  </script>
+</body>
+</html>

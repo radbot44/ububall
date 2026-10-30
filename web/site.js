@@ -666,26 +666,35 @@
         $('login').href = '/auth/discord?return=' + encodeURIComponent((location.pathname === '/index.html' ? '/' : location.pathname) + location.search);
         session = await api('/api/session');
       }
-      if (session?.owner) {
-        $('login').hidden = true; $('logout').hidden = false;
-        pendingKey = `ubumint:pending:${config.mint}:${session.owner}`;
-        packKey = `ubumint:reveal:${config.mint}:${session.owner}`;
-        const saved = localStorage.getItem(packKey);
-        if (saved) {
-          const data = JSON.parse(saved); pack = await readPack(data.certificates, data.seen);
-          localStorage.removeItem(pendingKey);
-          localStorage.removeItem(pendingKey + ':choice');
+      async function handleSession(s) {
+        session = s;
+        if (session?.owner) {
+          $('login').hidden = true;
+          pendingKey = `ubumint:pending:${config.mint}:${session.owner}`;
+          packKey = `ubumint:reveal:${config.mint}:${session.owner}`;
+          const saved = localStorage.getItem(packKey);
+          if (saved) {
+            const data = JSON.parse(saved); pack = await readPack(data.certificates, data.seen);
+            localStorage.removeItem(pendingKey);
+            localStorage.removeItem(pendingKey + ':choice');
+          }
+          updatePackButton();
+          status(config.ready && config.lifetimeLimit ? `${config.lifetimeLimit} pack${config.lifetimeLimit === 1 ? '' : 's'} per account` : 'Minting closed');
+          if (pack) status('');
+          else if (localStorage.getItem(pendingKey)) status('Opening interrupted. Retry to continue.');
+          if (config.ready) {
+            try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
+            if (!pack && (config.lifetimeLimit || localStorage.getItem(pendingKey))) await loadChoices();
+            await collection(true);
+          }
+        } else { $('pack-hint').textContent = ''; status(config.login ? 'Sign in to open packs.' : 'Minting closed'); }
+      }
+      window.addEventListener('ubu:session', event => {
+        if (event.detail?.owner && (!session?.owner || session.owner !== event.detail.owner)) {
+          handleSession(event.detail);
         }
-        updatePackButton();
-        status(config.ready && config.lifetimeLimit ? `${config.lifetimeLimit} pack${config.lifetimeLimit === 1 ? '' : 's'} per account` : 'Minting closed');
-        if (pack) status('');
-        else if (localStorage.getItem(pendingKey)) status('Opening interrupted. Retry to continue.');
-        if (config.ready) {
-          try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
-          if (!pack && (config.lifetimeLimit || localStorage.getItem(pendingKey))) await loadChoices();
-          await collection(true);
-        }
-      } else { $('pack-hint').textContent = ''; status(config.login ? 'Sign in to open packs.' : 'Minting closed'); }
+      });
+      await handleSession(session);
     } catch (error) { status(error.message); }
   })();
 })();

@@ -15,6 +15,17 @@ function ububallOnline(hooks) {
     const returnDest = invite ? '/?match=' + encodeURIComponent(invite) : (id ? '/?match=' + encodeURIComponent(id) : ((location.pathname === '/index.html' ? '/' : location.pathname) + location.search));
     $('online-login').href = '/auth/discord?return=' + encodeURIComponent(returnDest);
   }
+  window.addEventListener('ubu:session', event => {
+    if (event.detail?.owner) {
+      session = event.detail;
+      const loginBtn = $('online-login');
+      const statusSpan = $('online-account-status');
+      const createBtn = $('online-create');
+      if (loginBtn) loginBtn.hidden = true;
+      if (statusSpan) statusSpan.textContent = 'Signed in with Discord';
+      if (createBtn) createBtn.disabled = false;
+    }
+  });
   async function api(path, data) {
     if (!session?.owner) await refreshSession();
     if (!session?.owner) throw new Error('Sign in with Discord below to join the match.');

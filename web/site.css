@@ -1,4 +1,12 @@
 /* uburoom's slate theme and control sizes. */
+@font-face {
+  font-family: 'Uburoom Sans';
+  src: url('assets/UburoomSans-Color.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --background: #101217; --card: #1B1E26; --elevated: #292E38; --border: #393F4D;
   --text: #F8F7F4; --muted: #AAB0BC; --primary: #FF9954; --secondary: #FF7197;
@@ -9,42 +17,207 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; }
-main { width: min(1040px, calc(100% - 48px)); margin: 22px auto 48px; }
+main { width: min(1040px, calc(100% - 48px)); margin: 0 auto 48px; }
 a { color: inherit; text-decoration: none; }
-header, nav, .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-header { justify-content: space-between; margin-bottom: 22px; }
-.brand { display: flex; align-items: center; gap: 12px; }
-.brand img { width: 164px; height: auto; display: block; }
-.brand span { color: var(--muted); border-left: 1px solid var(--border); padding-left: 12px; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Site header with constant width across all pages */
+.site-header {
+  width: min(1520px, calc(100% - 32px));
+  margin: 16px auto 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.site-brand, .brand {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+.site-brand img, .brand img {
+  height: 38px;
+  width: auto;
+  display: block;
+}
+
+/* Tab based navigation */
+.site-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--card);
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  min-width: 0;
+}
+.site-nav a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  min-height: 36px;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+}
+.site-nav a:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--elevated) 60%, transparent);
+}
+.site-nav a[aria-current="page"],
+.site-nav a.active {
+  background: var(--primary);
+  color: #101217;
+  font-weight: 600;
+}
+
+.site-header-actions, .actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+#identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--elevated);
+  color: var(--text);
+  font-weight: 500;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+#identity:hover {
+  background: var(--hover);
+  border-color: color-mix(in srgb, var(--border), var(--text) 20%);
+}
+#identity svg {
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+
+/* Account popup dialog matching uburoom */
+.account-dialog {
+  width: min(440px, calc(100% - 24px));
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--card);
+  color: var(--text);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+.account-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(2px);
+}
+.account-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.account-dialog-header h2 {
+  font-size: 20px;
+  margin: 0;
+}
+.account-identities {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.account-provider-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: var(--elevated);
+}
+.provider-details {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.discord-symbol {
+  display: grid;
+  place-items: center;
+  background: #5865F2;
+  border-radius: 8px;
+  width: 34px;
+  height: 30px;
+  flex: none;
+}
+.discord-symbol svg {
+  width: 22px;
+  height: 16px;
+  fill: #fff;
+}
+.provider-info h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.provider-info p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.account-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 button, .button, .quiet, .primary {
   display: inline-flex; align-items: center; justify-content: center; min-height: 40px;
   padding: 10px 16px; border: 0; border-radius: 12px; background: var(--elevated);
   color: var(--text); font: inherit; cursor: pointer; touch-action: manipulation;
 }
 button:hover, .button:hover, .quiet:hover { background: var(--hover); }
-nav a[aria-current="page"], nav a.active {
-  border: 1px solid color-mix(in srgb, var(--primary) 70%, var(--border));
-  background: color-mix(in srgb, var(--elevated) 75%, var(--primary) 25%);
-  color: var(--text);
-  font-weight: 600;
-}
-.nav-secondary {
-  color: var(--muted);
-  opacity: 0.85;
-}
-.nav-secondary:hover {
-  opacity: 1;
-  color: var(--text);
-}
 button:disabled { opacity: .4; cursor: default; }
 .primary { background: var(--primary); color: var(--background); font-weight: 600; }
 .primary:hover { background: color-mix(in srgb, var(--primary), white 10%); }
-#login { min-height: 44px; }
+#login { min-height: 40px; }
 :focus-visible, .button:focus-within { outline: 2px solid var(--text); outline-offset: 2px; }
 .icon-button { width: 40px; height: 40px; flex: none; padding: 8px; border-radius: 10px; color: var(--muted); }
 .icon-button svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
-h1 { font-size: 22px; letter-spacing: -.5px; margin: 0; }
-h2 { font-size: 17px; margin: 0; }
+h1, h2, dialog h2, .panel h2, .account-dialog h2 {
+  font-family: 'Uburoom Sans', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 400;
+}
+h1 { font-size: 24px; letter-spacing: normal; margin: 0; }
+h2 { font-size: 18px; margin: 0; }
 .pack-shop { background: var(--card); border-radius: 22px; padding: 20px; text-align: center; overflow: hidden; }
 #pack-title { text-align: left; font-size: 17px; letter-spacing: 0; }
 #pack-hint, #status { color: var(--muted); font-size: 12px; margin: 12px auto 0; }
@@ -326,6 +499,22 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
   gap: 16px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+}
+.collection-actions .file-btn {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+.collection-actions .file-btn input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
 }
 .collection-actions {
   display: inline-flex;
