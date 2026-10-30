@@ -75,7 +75,8 @@ test('MatchRoom advance drives full lifecycle from lobby to resolving and next t
   room.advance(1100);
   assert.equal(room.state.phase, 'plan');
   assert.equal(room.state.locked[0], true);
-  room.submit('guest', 1, moves(), true, 1200);
+  const guarded = moves(); guarded[1].guard = true;
+  room.submit('guest', 1, guarded, true, 1200);
   room.advance(1200);
   assert.equal(room.state.phase, 'resolving');
   assert.ok(room.state.replay);
@@ -88,6 +89,9 @@ test('MatchRoom advance drives full lifecycle from lobby to resolving and next t
   assert.equal(room.state.locked[0], false);
   assert.equal(room.state.locked[1], false);
   assert.equal(room.state.replay, null);
+  // A guarding ubu stays on guard into the next turn.
+  assert.deepEqual(room.state.drafts[1].map(p => p.guard), [false, true, false]);
+  assert.deepEqual(room.state.drafts[0].map(p => p.guard), [false, false, false]);
 });
 
 test('authoritative resolution is repeatable, immutable, bounded and serializable', () => {
@@ -245,26 +249,27 @@ test('turns earn no meter; conceding a goal earns the conceded bonus', () => {
   assert.ok(Math.abs(bodies[3].meter-M.METER.conceded*(1+2*M.METER.teammate))<1e-9);
 });
 
-function shotState(ball, place = {}) {
+// `extra` adds match state, such as who is responsible for the ball (`credit`).
+function shotState(ball, place = {}, extra = {}) {
   const bodies=P.kickoff(); bodies.slice(0,6).forEach(b=>{P.applyStats(b);b.meter=0;});
   Object.assign(bodies[6],ball);
   for (const [i,at] of Object.entries(place)) Object.assign(bodies[i],at);
-  return {version:M.VERSION,mode:'standard',bodies,stats:[],scores:[0,0],turn:1};
+  return {version:M.VERSION,mode:'standard',bodies,stats:[],scores:[0,0],turn:1,...extra};
 }
 const still=()=>({angle:0,power:0,spin:0,superArm:false,guard:false});
 test('a goal on the first turn of a round is an ace and earns the scorer extra meter', () => {
   const state=shotState({x:930,y:300,vx:300}); state.lastTouch=[2,null];
   const ace=M.resolveTurn(P,state,Array.from({length:6},still));
-  assert.equal(ace.replay.ace,true); assert.equal(ace.state.roundTurns,0);
+  assert.equal(ace.replay.label,'ACE!'); assert.equal(ace.state.roundTurns,0);
   assert.ok(Math.abs(ace.state.bodies[2].meter-M.METER.ace)<1e-9);
   assert.ok(Math.abs(ace.state.bodies[0].meter-M.METER.ace*M.METER.teammate)<1e-9);
   const later=M.resolveTurn(P,{...structuredClone(state),roundTurns:2},Array.from({length:6},still));
-  assert.equal(later.replay.ace,false); assert.equal(later.state.bodies[2].meter,0);
+  assert.equal(later.replay.label,'GOAL'); assert.equal(later.state.bodies[2].meter,0);
   const quiet=M.resolveTurn(P,shotState({x:500,y:300}),Array.from({length:6},still));
-  assert.equal(quiet.replay.ace,false); assert.equal(quiet.state.roundTurns,1);
+  assert.equal(quiet.replay.label,null); assert.equal(quiet.state.roundTurns,1);
 });
 test('a save needs a ball that would have gone in untouched without the saver', () => {
-  const blocked=M.resolveTurn(P,shotState({x:260,y:300,vx:-600},{0:{x:130,y:300}}),Array.from({length:6},still));
+  const blocked=M.resolveTurn(P,shotState({x:260,y:300,vx:-600},{0:{x:130,y:300}},{credit:{3:1}}),Array.from({length:6},still));
   assert.deepEqual(blocked.replay.saves.map(s=>s.index),[0]);
   assert.ok(Math.abs(blocked.state.bodies[0].meter-M.METER.ball-M.METER.save)<1e-9);
   // Wide of the goal, the boards would have stopped it first.
@@ -273,9 +278,121 @@ test('a save needs a ball that would have gone in untouched without the saver', 
   // A teammate behind would have stopped it anyway.
   const covered=M.resolveTurn(P,shotState({x:260,y:300,vx:-600},{0:{x:150,y:300},1:{x:95,y:300}}),Array.from({length:6},still));
   assert.deepEqual(covered.replay.saves,[]);
+  // Too far out to count, though it would have gone in.
+  const far=M.resolveTurn(P,shotState({x:500,y:300,vx:-900},{0:{x:400,y:300},3:{x:820,y:120}}),Array.from({length:6},still));
+  assert.deepEqual(far.replay.saves,[]);
+  // Two ubus meeting the ball in the same tick is a scramble, not a save.
+  const lone=M.resolveTurn(P,shotState({x:260,y:300,vx:-600},{0:{x:217.5,y:300}},{credit:{3:1}}),Array.from({length:6},still));
+  assert.deepEqual(lone.replay.saves.map(s=>s.index),[0]);
+  const scramble=M.resolveTurn(P,shotState({x:260,y:300,vx:-600},{0:{x:217.5,y:300},4:{x:260,y:257.5,vy:300}}),Array.from({length:6},still));
+  assert.deepEqual(scramble.replay.saves,[]);
   // Blocking a shot at the opponents' goal is never a save; blocking one at your own is.
   const away=M.resolveTurn(P,shotState({x:260,y:300,vx:600},{0:{x:300,y:100},1:{x:390,y:300}}),Array.from({length:6},still));
   assert.deepEqual(away.replay.saves,[]);
   const own=M.resolveTurn(P,shotState({x:740,y:300,vx:600},{3:{x:870,y:300}}),Array.from({length:6},still));
   assert.deepEqual(own.replay.saves.map(s=>s.index),[3]);
+});
+
+test('responsibility stays with the shooter through a glancing deflection and passes on a block', () => {
+  const touched=new Set([4]);
+  const glance=M.credit({0:1},{vx:-600,vy:0},{vx:-590,vy:60},touched);
+  assert.ok(glance[0]>.95 && glance[4]<.05);
+  const block=M.credit({0:1},{vx:-600,vy:0},{vx:400,vy:0},touched);
+  assert.deepEqual(block,{4:1});
+  const bodies=P.kickoff();
+  assert.equal(M.responsibleTeam(bodies,glance),0); assert.equal(M.responsibleTeam(bodies,{}),null);
+});
+test('own goals, bank shots and hat tricks are called, and own-goal saves earn nothing', () => {
+  const idle=()=>Array.from({length:6},still);
+  // Team 1 last sent the ball toward its own goal.
+  const own=M.resolveTurn(P,shotState({x:930,y:300,vx:300},{},{lastTouch:[2,4],credit:{4:1}}),idle());
+  assert.equal(own.replay.label,'OWN GOAL'); assert.equal(own.state.bodies[2].meter,0);
+  assert.deepEqual(own.state.tally.goals,[0,0,0,0,0,0]);
+  const bank=M.resolveTurn(P,shotState({x:930,y:300,vx:300},{},{lastTouch:[2,null],credit:{2:1},banked:true,roundTurns:1}),idle());
+  assert.equal(bank.replay.label,'BANK SHOT!');
+  const hat=M.resolveTurn(P,shotState({x:930,y:300,vx:300},{},{lastTouch:[2,null],credit:{2:1},tally:{...M.newTally(),goals:[0,0,2,0,0,0]},roundTurns:1}),idle());
+  assert.equal(hat.replay.label,'HAT TRICK!'); assert.deepEqual(hat.state.tally.goals,[0,0,3,0,0,0]);
+  // The ball comes off the boards, and a later touch would clear it.
+  const play=M.newPlay(), bodies=P.kickoff(); Object.assign(bodies[6],{x:500,y:80,vy:-300});
+  for(let t=0;t<20;t++) M.playTick(P,bodies,play);
+  assert.equal(play.banked,true);
+  const ownSave=M.resolveTurn(P,shotState({x:260,y:300,vx:-600},{0:{x:130,y:300}},{credit:{1:1}}),idle());
+  assert.deepEqual(ownSave.replay.saves.map(s=>[s.index,s.own]),[[0,true]]);
+  assert.ok(Math.abs(ownSave.state.bodies[0].meter-M.METER.ball)<1e-9);
+});
+test('a close-range spin strike is reported for its callout', () => {
+  const state=shotState({x:443,y:300},{0:{x:400,y:300}});
+  const moves=Array.from({length:6},still); moves[0]={angle:0,power:.6,spin:1,superArm:false,guard:false};
+  const result=M.resolveTurn(P,state,moves);
+  assert.equal(result.replay.struck.length,1);
+  assert.ok(result.state.bodies.every(b=>!b.spinStruck));
+});
+
+test('an assist goes to the teammate who passed to the scorer, unless an opponent touched it between', () => {
+  const bodies=P.kickoff(); bodies.slice(0,6).forEach(b=>P.applyStats(b));
+  bodies.forEach((b,i)=>{ if(i<6) Object.assign(b,{x:100+i*30,y:100}); });
+  const play=M.newPlay(), touch=i=>{
+    Object.assign(bodies[6],{x:500,y:300,vx:0,vy:0}); Object.assign(bodies[i],{x:457.5,y:300,vx:300,vy:0});
+    M.playTick(P,bodies,play); Object.assign(bodies[i],{x:100+i*30,y:100,vx:0,vy:0});
+  };
+  touch(1); touch(2);
+  assert.equal(play.lastTouch[0],2); assert.equal(play.assist[0],1);
+  touch(2); assert.equal(play.assist[0],1); // The scorer's own touches keep the pass.
+  touch(4); touch(2); assert.equal(play.assist[0],null);
+  // Awarded at the goal, with assist meter, and carried in the match state between turns.
+  const state=shotState({x:930,y:300,vx:300},{},{lastTouch:[2,null],last:2,assist:[1,null],credit:{2:1},roundTurns:1});
+  const result=M.resolveTurn(P,state,Array.from({length:6},still));
+  assert.equal(result.replay.assist,1); assert.deepEqual(result.state.tally.assists,[0,1,0,0,0,0]);
+  assert.ok(Math.abs(result.state.bodies[1].meter-M.METER.assist)<1e-9);
+});
+test('snipes, rebounds, comebacks, shutouts and huge shots are recognised', () => {
+  const idle=()=>Array.from({length:6},still), base={lastTouch:[2,null],last:2,credit:{2:1},roundTurns:1};
+  const snipe=M.resolveTurn(P,shotState({x:930,y:300,vx:300},{},{...base,shotX:[420,null]}),idle());
+  assert.equal(snipe.replay.label,'SNIPE!');
+  const bankedSnipe=M.resolveTurn(P,shotState({x:930,y:300,vx:300},{},{...base,shotX:[420,null],banked:true}),idle());
+  assert.equal(bankedSnipe.replay.label,'BANK SHOT!');
+  const rebound=M.resolveTurn(P,shotState({x:930,y:300,vx:300},{},{...base,shotX:[900,null],age:100,saved:{at:90,team:1}}),idle());
+  assert.equal(rebound.replay.label,'REBOUND!');
+  const stale=M.resolveTurn(P,shotState({x:930,y:300,vx:300},{},{...base,shotX:[900,null],age:500,saved:{at:90,team:1}}),idle());
+  assert.equal(stale.replay.label,'GOAL');
+  const tally=M.newTally();
+  for (const scores of [[0,1],[0,2],[0,3],[5,3]]) M.noteScore(tally,scores);
+  assert.deepEqual(M.honours(tally,[5,3],0),{comeback:true,shutout:false});
+  assert.deepEqual(M.honours(M.newTally(),[5,0],0),{comeback:false,shutout:true});
+  const moves=idle(); moves[0]={angle:0,power:1,spin:0,superArm:false,guard:false};
+  const blast=M.resolveTurn(P,shotState({x:343,y:300},{0:{x:300,y:300}}),moves);
+  assert.ok(blast.state.tally.topSpeed[0]>P.MAX_SPEED);
+});
+test('a touch is only a save if the ball then stays out of the goal', () => {
+  const keeper=y=>M.resolveTurn(P,shotState({x:800,y,vx:700},{3:{x:905,y:300}},{credit:{0:1}}),Array.from({length:6},still));
+  const deflected=keeper(250);
+  assert.equal(deflected.replay.goal,0); assert.deepEqual(deflected.replay.saves,[]);
+  assert.equal(deflected.state.tally.saves[3],0);
+  assert.deepEqual(keeper(300).replay.saves.map(s=>s.index),[3]);
+});
+test('hit-stop comes from the hitting ubu, longer for shots that travel or head into goal', () => {
+  const shoot=(angle,power,place)=>{
+    const moves=Array.from({length:6},still); moves[0]={angle,power,spin:0,superArm:false,guard:false};
+    return M.resolveTurn(P,shotState({x:300+43*Math.cos(angle),y:300+43*Math.sin(angle)},{0:{x:300,y:300},...place}),moves).replay.stops;
+  };
+  // Straight at the far goal: its own path goes in, whoever is in the way.
+  assert.deepEqual(shoot(0,1)[0],{tick:1,ms:M.HIT_STOP.goal});
+  // Off the boards and a long way untouched.
+  const away={3:{x:820,y:540},4:{x:690,y:540},5:{x:690,y:540}};
+  assert.equal(shoot(-1.2,1,{1:{x:310,y:540},2:{x:310,y:540},...away})[0].ms,M.HIT_STOP.long);
+  // Straight into a nearby ubu: a big shot, but stopped at once.
+  assert.equal(shoot(-1.2,1,{1:{x:345,y:150}})[0].ms,M.HIT_STOP.hit);
+  // A soft touch is not a big shot.
+  assert.deepEqual(shoot(0,.5).filter(s=>s.tick===1),[]);
+  // A fast ball off a still ubu is not a big shot either.
+  const ping=M.resolveTurn(P,shotState({x:400,y:200,vx:1000},{3:{x:520,y:200}}),Array.from({length:6},still));
+  assert.deepEqual(ping.replay.stops,[]);
+});
+
+test('resolving a turn without presentation effects gives the same match state', () => {
+  const moves=Array.from({length:6},(_,i)=>({angle:i<3?0:Math.PI,power:1,spin:.6,superArm:false,guard:false}));
+  const state=shotState({x:343,y:300},{0:{x:300,y:300}});
+  const full=M.resolveTurn(P,state,moves), fast=M.resolveTurn(P,state,moves,{effects:false});
+  assert.deepEqual(fast.state,full.state); assert.equal(fast.replay.goal,full.replay.goal);
+  assert.ok(full.replay.stops.length>0); assert.deepEqual(fast.replay.stops,[]); assert.equal(fast.replay.initialBodies,null);
 });

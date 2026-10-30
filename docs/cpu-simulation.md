@@ -54,6 +54,23 @@ Omitted values inherit the preset and default weights in `shared/ububall-cpu.js`
 
 The search is one turn deep. It does not yet model a human's habits, optimize multi-turn combinations, or prove that a pass is received. It judges those candidate plays by their actual team outcome. More search is not guaranteed to improve results against every unseen opponent.
 
+## Measure stat value
+
+`scripts/stat-balance.cjs` plays CPU-vs-CPU matches through `resolveTurn` to measure how much each ubu stat is worth. Matches run in parallel worker threads (all cores but two by default) and are reproducible from their seed. Each pairing is played twice with sides swapped and the pair's goal difference averaged, so side advantage cancels; supers, personalities and starting meter are random per seed but mirrored between the teams.
+
+```powershell
+npm run sim:stats -- --experiment sweep --pairs 20 --output personal/stat-sweep.json
+npm run sim:stats -- --experiment regression --pairs 600 --seed 1001 --output personal/stat-regression.json
+npm run sim:stats -- --experiment sweep --stats size,reach --pairs 40 --level medium
+```
+
+- **sweep:** for each stat, a team with it at 0 and at 255 on all three ubus (others neutral) plays an all-neutral team. Reports goal difference per match with a 95% interval and the win rate of decided matches; the swing (255 minus 0) ranks the stats.
+- **regression:** every stat on every ubu is random. A least-squares fit of each pair's goal difference on the teams' average stat differences gives every stat's value at once, as goal difference per +128 team-average edge, with a 95% interval. It also absorbs interactions the sweep holds fixed.
+
+Options: `--pairs`, `--seed`, `--level` (CPU preset, default `easy` for throughput), `--turns` (cap per match, default 60), `--threads`, `--stats` (comma-separated subset), `--output`. Results depend on how well the CPU uses each stat; confirm a ranking with a smaller `--level medium` run before acting on it. Keep reports under ignored `personal/`.
+
+CPU search calls `resolveTurn` with `effects: false`, which skips presentation-only work (hit-stop look-aheads and the replay's starting snapshot) without changing any rule.
+
 ## Initial validation (2026-10-29)
 
 These initial match results predate the collision-energy fix. They are historical baseline measurements, not win-rate claims for the corrected physics. Re-run comparisons when tuning levels against the updated engine.

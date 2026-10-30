@@ -101,7 +101,7 @@
     function score(moves) {
       let sum = 0, worst = Infinity;
       for (const response of responses) {
-        const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response]);
+        const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false });
         const value = evaluate(result.state, team, result.replay.goal, weights);
         sum += value; worst = Math.min(worst, value); simulations++; ticks += result.replay.ticks;
       }

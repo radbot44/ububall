@@ -812,3 +812,17 @@ test('prediction stops at goals or its tick budget and respects stun and super c
   stunned[0].superArm = false;
   assert.deepEqual(undercharged, P.predictTurn(stunned, plan));
 });
+
+test('bigger ubus slow down faster on the ice and through the air', () => {
+  const travel = size => {
+    const b = P.kickoff(); P.applyStats(b[0], { ...normal, size });
+    Object.assign(b[0], { x: 200, y: 300, vx: 600 });
+    for (let i = 0; i < 240; i++) P.step([b[0]]);
+    return { x: b[0].x, friction: b[0].friction, drag: b[0].drag };
+  };
+  const [small, mid, big] = [0, 127, 255].map(travel);
+  assert.equal(mid.friction, 150); assert.equal(mid.drag, .00015);
+  assert.ok(small.friction < mid.friction && mid.friction < big.friction);
+  assert.ok(small.drag < mid.drag && mid.drag < big.drag);
+  assert.ok(small.x > mid.x && mid.x > big.x);
+});

@@ -27,11 +27,15 @@
     return raw < 127 ? (2 / 3) ** ((127 - raw) / 127) : 1.5 ** ((raw - 127) / 128);
   }
   function applyStats(body, raw = {}) {
+    const size = multiplier(raw.size ?? 127);
     body.mass = 3 * multiplier(raw.mass ?? 127);
-    body.radius = 25 * multiplier(raw.size ?? 127);
+    body.radius = 25 * size;
     body.baseMass = body.mass;
     body.baseRadius = body.radius;
-    body.friction = 150 * multiplier(raw.traction ?? 127);
+    // Bigger ubus drag more on the ice and through the air, in proportion to size (tuning): a
+    // counterweight to the reach and coverage their size gives them.
+    body.friction = 150 * multiplier(raw.traction ?? 127) * size;
+    body.drag = AIR_DRAG * size;
     body.maxSpin = 10 * multiplier(raw.spin ?? 127);
     body.grip = .3 * multiplier(raw.grip ?? 127);
     body.impulse = IMPULSE * multiplier(raw.impulse ?? 127);
@@ -302,6 +306,7 @@
       const speed = Math.hypot(ball.vx, ball.vy);
       ball.vx += (speed ? ball.vx / speed : nx * away) * strikeBoost;
       ball.vy += (speed ? ball.vy / speed : ny * away) * strikeBoost;
+      if (strikeBoost) ball.spinStruck = true; // Read and cleared by the caller, for a callout.
     }
 
     if (typeof onCollide === 'function') onCollide(a, b, -closing, baseImpulse);
@@ -354,7 +359,7 @@
       b.rotation += b.omega * dt;
       b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - SPIN_DECAY * dt);
       b.x += b.vx * dt; b.y += b.vy * dt;
-      const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = (b.friction + AIR_DRAG * speed2) * dt;
+      const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = (b.friction + (b.drag ?? AIR_DRAG) * speed2) * dt;
       if (speed2 <= deceleration * deceleration) {
         b.vx = b.vy = 0;
       } else {
@@ -365,7 +370,10 @@
     }
     for (let pass = 0; pass < 3; pass++) {
       for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) {
-        collide(bodies[i], bodies[j], onCollide, bodies, onShockwave, onSuper);
+        // Bodies further apart than both contact radii cannot touch; collide would return untouched.
+        const a = bodies[i], c = bodies[j], reach = ballHitRadius(a) + ballHitRadius(c), dx = a.x - c.x, dy = a.y - c.y;
+        if (dx * dx + dy * dy > reach * reach) continue;
+        collide(a, c, onCollide, bodies, onShockwave, onSuper);
       }
       for (const b of bodies) {
         if (b.superActive === 'stalwart') {
@@ -463,6 +471,7 @@
     for (const b of bodies) {
       b.spinStrike = 0;
       b.openingShot = false;
+      b.spinStruck = false;
       if (b.guardBase) Object.assign(b, b.guardBase);
       b.guardBase = null; b.guarding = false;
       if (!keepMotion) b.vx = b.vy = b.omega = 0;
@@ -477,20 +486,26 @@
     const ball = bodies.find(b => b.team === -1);
     if (ball) { ball.stuckTo = null; ball.stickOffset = null; }
   }
-  // The goal the ball would enter (as step reports it) with one body taken off the field, if it
-  // gets there touching no ubu and no boards (posts and net allowed) within `ticks`; otherwise null.
-  function wouldScore(bodies, removed, ticks = 960) {
+  // Follows the ball ahead on a copy of the field (with `removed` taken off it) until it touches an
+  // ubu, or the boards unless `boards` allows them (posts and net always count as clear), stops or
+  // `ticks` run out. Returns the goal it enters cleanly (as step reports it) or null, and how far it
+  // travelled untouched.
+  function ballRun(bodies, { removed = null, boards = false, ticks = 960 } = {}) {
     const sim = bodies.filter(b => b !== removed).map(b => ({ ...b, stuckTo: null }));
     const ball = sim.find(b => b.team === -1);
-    let clean = Boolean(ball);
+    let clean = Boolean(ball), distance = 0;
     for (let t = 0; t < ticks && clean; t++) {
+      const x = ball.x, y = ball.y;
       const goal = step(sim, DT, (a, b) => { if (a === ball || b === ball) clean = false; },
-        (b, velocity, type) => { if (b === ball && type === 'wall') clean = false; });
-      if (goal !== null) return clean ? goal : null;
-      if (!ball.vx && !ball.vy) return null;
+        (b, velocity, type) => { if (b === ball && type === 'wall' && !boards) clean = false; });
+      if (clean) distance += Math.hypot(ball.x - x, ball.y - y);
+      if (goal !== null) return { goal: clean ? goal : null, distance };
+      if (!ball.vx && !ball.vy) break;
     }
-    return null;
+    return { goal: null, distance };
   }
+  // The goal the ball would enter with one body taken off the field, touching no ubu and no boards.
+  function wouldScore(bodies, removed, ticks = 960) { return ballRun(bodies, { removed, ticks }).goal; }
   function segmentBlocked(ax, ay, bx, by, obstacles, clearance = 38) {
     const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
     if (len2 < 1) return null;
@@ -744,6 +759,6 @@
     }
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS };
   }
-  const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, multiplier, applyStats, kickoff, step, launch, settled, stop, wouldScore, triggerShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, multiplier, applyStats, kickoff, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

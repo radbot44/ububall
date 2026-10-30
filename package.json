@@ -6,7 +6,8 @@
     "dev": "node scripts/prepare-assets.cjs && wrangler dev --local --ip 127.0.0.1 --port 8790",
     "test:worker": "node scripts/prepare-assets.cjs && node --test --test-reporter=dot test/worker.integration.mjs",
     "test:cpu": "node --test --test-reporter=dot test/ububall-cpu.test.js",
-    "sim:cpu": "node scripts/cpu-simulation.cjs"
+    "sim:cpu": "node scripts/cpu-simulation.cjs",
+    "sim:stats": "node scripts/stat-balance.cjs"
   },
   "engines": {
     "node": ">=22.13.0"

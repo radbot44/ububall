@@ -2,7 +2,8 @@
 const rules = require('../shared/ububall-match.js');
 const P = require('../web/ububall-physics.js');
 const ubu = require('../shared/ubu.js');
-const hold = () => Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false }));
+const idle = () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false });
+const hold = () => Array.from({ length: 3 }, idle);
 // Durable storage adapter will persist this object; no client-supplied owner identities.
 class MatchRoom {
   constructor(host, mode, teams, guest = false) {
@@ -106,7 +107,10 @@ class MatchRoom {
   beginPlanning(now) {
     const s = this.state;
     if (!s.players[1] || !['lobby', 'resolving'].includes(s.phase)) throw new Error('Cannot begin turn.');
-    s.phase = 'plan'; s.drafts = [hold(), hold()]; s.locked = [false, false];
+    // Guarding ubus stay on guard into the next turn of the same round.
+    const keepGuard = s.game?.phase === 'plan';
+    s.phase = 'plan'; s.locked = [false, false];
+    s.drafts = keepGuard ? s.drafts.map(draft => draft.map(p => ({ ...idle(), guard: p.guard }))) : [hold(), hold()];
     s.replay = null;
     const duration = rules.planningMilliseconds(s.mode);
     s.deadline = duration !== null && s.connected.every(Boolean) ? now + duration : null;
