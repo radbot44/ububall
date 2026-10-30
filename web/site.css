@@ -238,7 +238,8 @@ h2 { font-size: 18px; margin: 0; }
 .pack-choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 12px 0 8px; }
 /* Dealt packs bob out of step, lift toward the pointer and glow in their lead colour. */
 .pack-option { position: relative; min-width: 0; padding: 12px 4px 18px; transition: opacity .35s, translate .35s cubic-bezier(.5, 0, .8, .4), scale .25s; }
-.pack-option .candy-pack { margin: 0 auto; transition: scale .2s, filter .2s; animation: pack-bob 2.6s ease-in-out var(--bob-delay, 0s) infinite alternate; }
+/* A transparent resting shadow gives the glow the same filter shape, so it fades in as well as out. */
+.pack-option .candy-pack { margin: 0 auto; filter: drop-shadow(0 12px 22px transparent); transition: scale .2s, filter .25s; animation: pack-bob 2.6s ease-in-out var(--bob-delay, 0s) infinite alternate; }
 .pack-option .candy-pack:disabled { opacity: 1; }
 .pack-option .candy-pack:not(:disabled) { cursor: pointer; }
 .pack-option .candy-pack:not(:disabled):is(:hover, :focus-visible) { scale: 1.07; filter: drop-shadow(0 12px 22px color-mix(in srgb, var(--pack-glow, #ff9954) 55%, transparent)); }

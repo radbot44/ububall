@@ -690,51 +690,144 @@
     osc.stop(now + 0.08);
   }
 
-  // Pack sounds from filtered noise: 'deal' flicks three packs onto the table, 'pick' is a soft
-  // pop as one is chosen, and 'tear' rips the wrapper open.
+  // One second of white noise per audio context; grains read random slices of it.
+  const grainNoiseBuffers = new WeakMap();
+  function grainNoise(ctx) {
+    if (!grainNoiseBuffers.has(ctx)) {
+      const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      grainNoiseBuffers.set(ctx, buffer);
+    }
+    return grainNoiseBuffers.get(ctx);
+  }
+  // A filtered noise grain: the building block of crinkles, rips and squelches.
+  function noiseGrain(ctx, dest, start, length, { freq, to = freq, q = 1.2, level, type = 'bandpass', pan = 0 }) {
+    const source = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    source.buffer = grainNoise(ctx);
+    filter.type = type;
+    filter.Q.setValueAtTime(q, start);
+    filter.frequency.setValueAtTime(freq, start);
+    if (to !== freq) filter.frequency.exponentialRampToValueAtTime(to, start + length);
+    strike(gain, level, start, start + length);
+    source.connect(filter);
+    filter.connect(gain);
+    let out = gain;
+    if (pan && ctx.createStereoPanner) {
+      out = ctx.createStereoPanner();
+      out.pan.setValueAtTime(pan, start);
+      gain.connect(out);
+    }
+    out.connect(dest);
+    source.start(start, Math.random() * 0.9);
+    source.stop(start + length + 0.02);
+  }
+  // A short pitched blip: pops, plops and bloops.
+  function blip(ctx, dest, start, length, from, to, level, pan = 0) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(from, start);
+    osc.frequency.exponentialRampToValueAtTime(to, start + length);
+    strike(gain, level, start, start + length);
+    osc.connect(gain);
+    let out = gain;
+    if (pan && ctx.createStereoPanner) {
+      out = ctx.createStereoPanner();
+      out.pan.setValueAtTime(pan, start);
+      gain.connect(out);
+    }
+    out.connect(dest);
+    osc.start(start);
+    osc.stop(start + length + 0.02);
+  }
+
+  // Pack shop sounds: 'deal' flicks three packs onto the table in step with their staggered
+  // arrival, and 'pick' is a soft pop as one is chosen.
   function playPack(kind, options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
     const master = createMasterChain(ctx);
     const now = ctx.currentTime;
-    const noise = (at, length, from, to, level, q = 1.2) => {
-      const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * length), ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-      const source = ctx.createBufferSource();
+    if (kind === 'deal') {
+      for (let i = 0; i < 3; i++) noiseGrain(ctx, master, now + i * 0.12, 0.09, { freq: 2600, to: 900, level: 0.5, pan: (i - 1) * 0.5 });
+    } else if (kind === 'pick') {
+      blip(ctx, master, now, 0.14, 420, 940, 0.45);
+      noiseGrain(ctx, master, now, 0.05, { freq: 3200, to: 1800, level: 0.25 });
+    }
+  }
+
+  // Pack openings, scheduled from the moment the unwrap animation starts so each sound lands on
+  // its visual step. Phases are fractions of the animation and match pack-scene.js; activity in a
+  // phase follows its smoothstep speed, which peaks halfway through.
+  function playUnwrap(type, seconds, options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx);
+    const now = ctx.currentTime + 0.02;
+    const at = fraction => now + fraction * seconds;
+    const rand = (low, high) => low + Math.random() * (high - low);
+    // Scatter grains through a phase at up to `rate` per second, densest where the motion is fastest.
+    const scatter = (from, to, rate, make) => {
+      const step = 0.005;
+      for (let t = at(from); t < at(to); t += step) {
+        const x = (t - at(from)) / (at(to) - at(from)), speed = 4 * x * (1 - x);
+        if (Math.random() < rate * speed * step) make(t, speed);
+      }
+    };
+    if (type === 'plastic') {
+      // Cellophane: sharp, bright crackles while the twisted ends unwind, a few softer ones as
+      // the film relaxes flat, then a crinkly peel with a faint swish of film.
+      const crackle = (t, speed, bright = 1) => noiseGrain(ctx, master, t, rand(0.006, 0.022), {
+        freq: rand(2400, 7000) * bright, q: rand(2, 6), level: rand(0.6, 1.4) * (0.5 + speed / 2), pan: rand(-0.5, 0.5)
+      });
+      scatter(0.03, 0.49, 85, crackle);
+      scatter(0.49, 0.65, 35, (t, speed) => crackle(t, speed, 0.6));
+      scatter(0.59, 0.94, 60, crackle);
+      noiseGrain(ctx, master, at(0.59), 0.35 * seconds, { freq: 5200, to: 3000, q: 0.5, level: 0.12, type: 'highpass' });
+    } else if (type === 'foil') {
+      // Foil: a gritty, ragged rip as the sheet tears open, with thin metallic crinkles riding on
+      // it, then a light crumple as the torn flaps fall away.
+      scatter(0.08, 0.65, 300, (t, speed) => noiseGrain(ctx, master, t, rand(0.003, 0.009), {
+        freq: rand(1200, 3600), q: rand(0.7, 1.6), level: rand(0.3, 0.8) * (0.4 + speed * 0.6)
+      }));
+      scatter(0.08, 0.65, 45, t => noiseGrain(ctx, master, t, rand(0.02, 0.04), { freq: rand(4800, 7000), q: rand(8, 14), level: rand(0.25, 0.55), pan: rand(-0.4, 0.4) }));
+      scatter(0.8, 0.95, 40, t => noiseGrain(ctx, master, t, rand(0.008, 0.02), { freq: rand(2500, 5500), q: rand(3, 8), level: rand(0.25, 0.5), pan: rand(-0.6, 0.6) }));
+    } else if (type === 'blob') {
+      // Blob: thick goo stretches with a wobbling, resonant squelch and sticky plops, the five
+      // lobes come apart with rising pops, then each turns into an ubu with a bubbly bloop, left to right.
+      const goo = ctx.createBufferSource();
       const filter = ctx.createBiquadFilter();
+      const wobble = ctx.createOscillator();
+      const depth = ctx.createGain();
       const gain = ctx.createGain();
-      const start = now + at;
-      source.buffer = buffer;
-      filter.type = 'bandpass';
-      filter.Q.setValueAtTime(q, start);
-      filter.frequency.setValueAtTime(from, start);
-      filter.frequency.exponentialRampToValueAtTime(to, start + length);
-      strike(gain, level, start, start + length);
-      source.connect(filter);
+      goo.buffer = grainNoise(ctx);
+      goo.loop = true;
+      filter.type = 'lowpass';
+      filter.Q.setValueAtTime(9, now);
+      filter.frequency.setValueAtTime(260, at(0.1));
+      filter.frequency.linearRampToValueAtTime(620, at(0.45));
+      filter.frequency.linearRampToValueAtTime(320, at(0.6));
+      wobble.frequency.setValueAtTime(4.5, now);
+      depth.gain.setValueAtTime(140, now);
+      wobble.connect(depth);
+      depth.connect(filter.frequency);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.setValueAtTime(0.0001, at(0.1));
+      gain.gain.linearRampToValueAtTime(0.5, at(0.35));
+      gain.gain.linearRampToValueAtTime(0.0001, at(0.6));
+      goo.connect(filter);
       filter.connect(gain);
       gain.connect(master);
-      source.start(start);
-      source.stop(start + length + 0.02);
-    };
-    if (kind === 'deal') {
-      for (let i = 0; i < 3; i++) noise(i * 0.12, 0.09, 2600, 900, 0.5);
-    } else if (kind === 'pick') {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(420, now);
-      osc.frequency.exponentialRampToValueAtTime(940, now + 0.08);
-      strike(gain, 0.45, now, now + 0.14);
-      osc.connect(gain);
-      gain.connect(master);
-      osc.start(now);
-      osc.stop(now + 0.16);
-      noise(0, 0.05, 3200, 1800, 0.25);
-    } else if (kind === 'tear') {
-      // A rising rip with a few crackles as the seal gives way.
-      noise(0, 0.42, 700, 4200, 0.55, 0.8);
-      for (const at of [0.05, 0.13, 0.2, 0.29]) noise(at, 0.03, 5200, 3000, 0.3, 3);
+      goo.start(now);
+      wobble.start(now);
+      goo.stop(at(0.62));
+      wobble.stop(at(0.62));
+      scatter(0.1, 0.6, 7, t => blip(ctx, master, t, rand(0.07, 0.12), rand(160, 220), rand(70, 95), 0.35, rand(-0.4, 0.4)));
+      [0.42, 0.47, 0.52, 0.56].forEach((fraction, i) => blip(ctx, master, at(fraction), 0.08, 150, 340, 0.45, (i - 1.5) * 0.35));
+      for (let i = 0; i < 5; i++) blip(ctx, master, at(0.67 + i * 0.03), 0.13, 300, 720, 0.4, (i - 2) * 0.3);
     }
   }
 
@@ -1405,6 +1498,7 @@
     playBallHit,
     playCoin,
     playPack,
+    playUnwrap,
     playWallHit,
     playGoalHit,
     playSuper,

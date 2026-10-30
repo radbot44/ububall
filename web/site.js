@@ -963,7 +963,6 @@
       await acceptPack(data);
       packScene = choiceViews[index].scene;
       $('pack-choices').classList.add('choosing');
-      sound('playPack', 'tear');
       await packScene?.play(pack.items.length, pack.items.map(item => item.model));
       $('pack-choices').hidden = true;
       revealIndex = 0;

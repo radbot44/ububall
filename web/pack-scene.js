@@ -924,6 +924,8 @@
         if (currentType?.id === 'blob') blobFaces = await prepareBlobFaces(models);
         if (reduced.matches) return;
         started = performance.now(); progress = 0;
+        // The opening sounds share this start, so each lands on its step of the animation.
+        if (navigator.userActivation?.hasBeenActive) globalThis.ubuAudio?.playUnwrap?.(currentType?.id, duration() / 1000);
         return new Promise(resolve => { finish = resolve; requestPaint(); });
       },
       reset(newColor = false, packTypeId) {
