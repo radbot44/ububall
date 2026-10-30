@@ -10,6 +10,7 @@
 :root {
   --background: #101217; --card: #1B1E26; --elevated: #292E38; --border: #393F4D;
   --text: #F8F7F4; --muted: #AAB0BC; --primary: #FF9954; --secondary: #FF7197;
+  --team-home: #E8CA48; --team-away: #477AE7;
   --hover: color-mix(in srgb, var(--elevated), var(--text) 8%);
   color-scheme: dark; font: 14px/1.4 Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
   color: var(--text); background: var(--background);

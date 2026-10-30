@@ -445,8 +445,8 @@ body.show-full-stats .full-stats { display: flex; }
   font-weight: 500;
 }
 .scoreboard strong { font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; }
-.home { color: var(--primary); }
-.away { color: var(--secondary); }
+.home { color: var(--team-home); }
+.away { color: var(--team-away); }
 .phase-info { text-align: center; font-size: 14px; }
 .scoreboard small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
 
@@ -716,7 +716,7 @@ body.stadium-fullscreen-active {
 .team-selector { display: flex; justify-content: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap; }
 .team-selector button { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; border: 1px solid var(--border); }
 .team-selector button svg { width: 28px; height: 28px; }
-.team-selector button[aria-pressed=true] { border-color: var(--primary); background: color-mix(in srgb, var(--card), var(--primary) 12%); }
+.team-selector button[aria-pressed=true] { border-color: var(--team-home); background: color-mix(in srgb, var(--card), var(--team-home) 12%); }
 .team-selector button:disabled { opacity: 1; }
 .shot-controls { margin: 0 16px; padding: 8px 0; border-top: 1px solid var(--border); }
 .shot-controls summary { cursor: pointer; font-size: 13px; color: var(--muted); }

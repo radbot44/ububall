@@ -154,10 +154,10 @@
       }
     });
   }
-  function drawTrails(primary, secondary) {
+  function drawTrails(home, away) {
     ctx.save(); ctx.lineCap = 'round';
     trails.forEach((trail, index) => {
-      const b = bodies[index], color = b.team === -1 ? '#ffffff' : b.team === 0 ? primary : secondary;
+      const b = bodies[index], color = b.team === -1 ? '#ffffff' : b.team === 0 ? home : away;
       for (let i = 0; i < trail.length; i++) {
         const p = trail[i], end = trail[i + 1] || b, fade = Math.max(0, p.life / p.duration);
         ctx.globalAlpha = fade * .23;
@@ -204,10 +204,10 @@
     if (ring) { c.lineWidth = 3; c.stroke(); } else c.fill();
     glowSprites.set(key, sprite); return sprite;
   }
-  function drawParticles(primary, secondary) {
+  function drawParticles(home, away) {
     ctx.save(); ctx.lineCap = 'round';
     for (const p of particles) {
-      const color = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? primary : secondary);
+      const color = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? home : away);
       ctx.globalAlpha = Math.min(1, p.life / p.duration * 2) * (p.celebration ? 1 : .65);
       if (p.materialShape) {
         ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.angle);
@@ -643,14 +643,14 @@
   impactStamp.width = impactStamp.height = 128;
   const impactCtx = impactStamp.getContext('2d');
   let predictionCache = null;
-  function drawPrediction(primary, secondary) {
+  function drawPrediction(home, away) {
     // Include all state and all plans: changing any teammate invalidates the one simulation.
     const key = JSON.stringify([bodies, plans]);
     if (predictionCache?.key !== key) predictionCache = { key, data: P.predictTurn(bodies, plans) };
     const prediction = predictionCache.data;
     prediction.paths.forEach((points, index) => {
       const isBall = bodies[index].team === -1;
-      const color = isBall ? '#f2efe9' : bodies[index].team === 0 ? primary : secondary;
+      const color = isBall ? '#f2efe9' : bodies[index].team === 0 ? home : away;
       ctx.save();
       ctx.setLineDash(isBall ? [3, 4] : [4, 4]);
       ctx.strokeStyle = color;
@@ -666,13 +666,13 @@
     });
     for (const stop of prediction.stops) {
       if (!stop.stopped || !prediction.paths[stop.index].some(p => Math.hypot(p.x - stop.x, p.y - stop.y) > 3)) continue;
-      const color = bodies[stop.index].team < 0 ? '#fff' : bodies[stop.index].team === 0 ? primary : secondary;
+      const color = bodies[stop.index].team < 0 ? '#fff' : bodies[stop.index].team === 0 ? home : away;
       line(stop.x - 4, stop.y - 4, stop.x + 4, stop.y + 4, color, 2);
       line(stop.x + 4, stop.y - 4, stop.x - 4, stop.y + 4, color, 2);
     }
     for (const hit of prediction.impacts) {
       const team = bodies[hit.index].team;
-      const color = team < 0 ? '#ffffff' : team === 0 ? primary : secondary;
+      const color = team < 0 ? '#ffffff' : team === 0 ? home : away;
       impactCtx.clearRect(0, 0, 128, 128);
       impactCtx.globalCompositeOperation = 'source-over';
       impactCtx.fillStyle = color;
@@ -778,10 +778,11 @@
     if (!themeColors) {
       const theme = getComputedStyle(document.documentElement);
       const color = name => theme.getPropertyValue('--' + name).trim();
-      themeColors = { primary: color('primary'), secondary: color('secondary'), text: color('text'),
-        border: color('border'), surface: color('elevated'), background: color('background') };
+      themeColors = { primary: color('primary'), secondary: color('secondary'),
+        home: color('team-home') || '#E8CA48', away: color('team-away') || '#477AE7',
+        text: color('text'), border: color('border'), surface: color('elevated'), background: color('background') };
     }
-    const { primary, secondary, text, border, surface, background } = themeColors;
+    const { primary, secondary, home, away, text, border, surface, background } = themeColors;
     const rinkKey = width + ',' + height + JSON.stringify(themeColors);
     if (rinkCache?.key !== rinkKey) {
       const layer = document.createElement('canvas'); layer.width = width; layer.height = height;
@@ -792,7 +793,7 @@
     ctx.setLineDash([6, 10]); line(500, 60, 500, 540, border); ctx.setLineDash([]);
     // Goal pockets interrupt the boundary at the same positions used by physics.
     const depth = P.rink.goalDepth;
-    for (const [x, accent] of [[60 - depth, primary], [940, secondary]]) {
+    for (const [x, accent] of [[60 - depth, home], [940, away]]) {
       ctx.fillStyle = background; ctx.fillRect(x, 230, depth, 140);
       line(x, 230, x + depth, 230, accent, 4);
       line(x, 370, x + depth, 370, accent, 4);
@@ -801,15 +802,15 @@
       ctx = mainContext; rinkCache = { key: rinkKey, layer };
     }
     ctx.drawImage(rinkCache.layer, 0, 0, 1000, 600);
-    if (phase === 'plan') drawPrediction(primary, secondary);
-    drawTrails(primary, secondary);
+    if (phase === 'plan') drawPrediction(home, away);
+    drawTrails(home, away);
     shockwaves.forEach(s => {
       const progress = 1 - Math.max(0, s.life / s.duration);
       const r = s.currentRadius + (s.maxRadius - s.currentRadius) * progress;
       ctx.save();
       ctx.beginPath();
       ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-      ctx.strokeStyle = s.color || (s.team === 0 ? primary : secondary);
+      ctx.strokeStyle = s.color || (s.team === 0 ? home : away);
       ctx.lineWidth = Math.max(1, 6 * (1 - progress));
       ctx.globalAlpha = Math.max(0, 1 - progress);
       ctx.stroke();
@@ -817,11 +818,12 @@
     });
     bodies.slice(0, 6).forEach((b, i) => {
       const reachR = Math.max(b.radius, b.reach || b.radius, 18);
-      circle(b.x, b.y, reachR + 2, i < 3 ? primary : secondary, 4);
+      circle(b.x, b.y, reachR + 2, i < 3 ? home : away, 4);
 
       if ((phase === 'goal' || (onlineReplay?.goalPlayed && phase === 'play')) && b === scoringPlayer) {
-        circle(b.x, b.y, b.radius + 9, '#ff9954', 4);
-        circle(b.x, b.y, b.radius + 15, primary, 2);
+        const goalAccent = b.team === 0 ? home : away;
+        circle(b.x, b.y, b.radius + 9, goalAccent, 4);
+        circle(b.x, b.y, b.radius + 15, goalAccent, 2);
       }
       if (b.meter >= 100 || b.superArm || b.superActive) {
         const activeKey = b.superActive || b.equippedSuper?.key;
@@ -907,7 +909,7 @@
       ctx.font = 'bold 12px system-ui';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = i < 3 ? primary : secondary;
+      ctx.fillStyle = i < 3 ? home : away;
       if (isPortrait) {
         ctx.translate(b.x - b.radius - 18, b.y);
         ctx.rotate(Math.PI / 2);
@@ -917,7 +919,7 @@
 
       ctx.restore();
 
-      if (i < 3 && phase === 'plan') drawImpulse(b, plans[i], primary);
+      if (i < 3 && phase === 'plan') drawImpulse(b, plans[i], home);
     });
     if (bodies[6]?.stuckTo) drawStickyTether(bodies[6].stuckTo, bodies[6]);
 
@@ -932,7 +934,7 @@
       const size = ball.radius * 1.7;
       ctx.drawImage(ballMark, -size / 2, -size / 2, size, size); ctx.restore();
     }
-    drawParticles(primary, secondary);
+    drawParticles(home, away);
   }
   function finishTurn(goal) {
     ububallMatch.finishTurn(P, bodies, stats, scores, goal, classicMode());
