@@ -778,56 +778,46 @@
       }
     };
     if (type === 'plastic') {
-      // Cellophane: sharp, bright crackles while the twisted ends unwind, a few softer ones as
-      // the film relaxes flat, then a crinkly peel with a faint swish of film.
-      const crackle = (t, speed, bright = 1) => noiseGrain(ctx, master, t, rand(0.006, 0.022), {
-        freq: rand(2400, 7000) * bright, q: rand(2, 6), level: rand(0.6, 1.4) * (0.5 + speed / 2), pan: rand(-0.5, 0.5)
+      // Cellophane: a sprinkle of light crinkles as the twisted ends unwind, and a few more as the
+      // film peels back.
+      const crinkle = (t, speed) => noiseGrain(ctx, master, t, rand(0.006, 0.016), {
+        freq: rand(2800, 6500), q: rand(2, 5), level: rand(0.25, 0.55) * (0.6 + speed * 0.4), pan: rand(-0.4, 0.4)
       });
-      scatter(0.03, 0.49, 85, crackle);
-      scatter(0.49, 0.65, 35, (t, speed) => crackle(t, speed, 0.6));
-      scatter(0.59, 0.94, 60, crackle);
-      noiseGrain(ctx, master, at(0.59), 0.35 * seconds, { freq: 5200, to: 3000, q: 0.5, level: 0.12, type: 'highpass' });
+      scatter(0.08, 0.38, 20, crinkle);
+      scatter(0.62, 0.85, 16, crinkle);
     } else if (type === 'foil') {
-      // Foil: a gritty, ragged rip as the sheet tears open, with thin metallic crinkles riding on
-      // it, then a light crumple as the torn flaps fall away.
-      scatter(0.08, 0.65, 300, (t, speed) => noiseGrain(ctx, master, t, rand(0.003, 0.009), {
-        freq: rand(1200, 3600), q: rand(0.7, 1.6), level: rand(0.3, 0.8) * (0.4 + speed * 0.6)
+      // Foil: one short, ragged rip as the sheet tears, with a couple of thin metallic crinkles,
+      // and a faint crumple as the flaps fall away.
+      scatter(0.1, 0.48, 110, (t, speed) => noiseGrain(ctx, master, t, rand(0.003, 0.008), {
+        freq: rand(1400, 3400), q: rand(0.8, 1.6), level: rand(0.18, 0.42) * (0.4 + speed * 0.6)
       }));
-      scatter(0.08, 0.65, 45, t => noiseGrain(ctx, master, t, rand(0.02, 0.04), { freq: rand(4800, 7000), q: rand(8, 14), level: rand(0.25, 0.55), pan: rand(-0.4, 0.4) }));
-      scatter(0.8, 0.95, 40, t => noiseGrain(ctx, master, t, rand(0.008, 0.02), { freq: rand(2500, 5500), q: rand(3, 8), level: rand(0.25, 0.5), pan: rand(-0.6, 0.6) }));
+      scatter(0.1, 0.48, 7, t => noiseGrain(ctx, master, t, rand(0.015, 0.03), { freq: rand(4800, 6800), q: rand(8, 12), level: rand(0.15, 0.3), pan: rand(-0.4, 0.4) }));
+      [0.82, 0.86, 0.89].forEach(fraction => noiseGrain(ctx, master, at(fraction), rand(0.008, 0.016), { freq: rand(2600, 5000), q: rand(3, 6), level: rand(0.12, 0.22), pan: rand(-0.5, 0.5) }));
     } else if (type === 'blob') {
-      // Blob: thick goo stretches with a wobbling, resonant squelch and sticky plops, the five
-      // lobes come apart with rising pops, then each turns into an ubu with a bubbly bloop, left to right.
+      // Blob: a soft, gloopy stretch with a few sticky plops, pops as the lobes come apart, then a
+      // bubbly bloop as each becomes an ubu, left to right.
       const goo = ctx.createBufferSource();
       const filter = ctx.createBiquadFilter();
-      const wobble = ctx.createOscillator();
-      const depth = ctx.createGain();
       const gain = ctx.createGain();
       goo.buffer = grainNoise(ctx);
       goo.loop = true;
       filter.type = 'lowpass';
-      filter.Q.setValueAtTime(9, now);
-      filter.frequency.setValueAtTime(260, at(0.1));
-      filter.frequency.linearRampToValueAtTime(620, at(0.45));
-      filter.frequency.linearRampToValueAtTime(320, at(0.6));
-      wobble.frequency.setValueAtTime(4.5, now);
-      depth.gain.setValueAtTime(140, now);
-      wobble.connect(depth);
-      depth.connect(filter.frequency);
+      filter.Q.setValueAtTime(2, now);
+      filter.frequency.setValueAtTime(300, at(0.12));
+      filter.frequency.linearRampToValueAtTime(480, at(0.32));
+      filter.frequency.linearRampToValueAtTime(300, at(0.5));
       gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.setValueAtTime(0.0001, at(0.1));
-      gain.gain.linearRampToValueAtTime(0.5, at(0.35));
-      gain.gain.linearRampToValueAtTime(0.0001, at(0.6));
+      gain.gain.setValueAtTime(0.0001, at(0.12));
+      gain.gain.linearRampToValueAtTime(0.16, at(0.3));
+      gain.gain.linearRampToValueAtTime(0.0001, at(0.5));
       goo.connect(filter);
       filter.connect(gain);
       gain.connect(master);
-      goo.start(now);
-      wobble.start(now);
-      goo.stop(at(0.62));
-      wobble.stop(at(0.62));
-      scatter(0.1, 0.6, 7, t => blip(ctx, master, t, rand(0.07, 0.12), rand(160, 220), rand(70, 95), 0.35, rand(-0.4, 0.4)));
-      [0.42, 0.47, 0.52, 0.56].forEach((fraction, i) => blip(ctx, master, at(fraction), 0.08, 150, 340, 0.45, (i - 1.5) * 0.35));
-      for (let i = 0; i < 5; i++) blip(ctx, master, at(0.67 + i * 0.03), 0.13, 300, 720, 0.4, (i - 2) * 0.3);
+      goo.start(at(0.12));
+      goo.stop(at(0.52));
+      scatter(0.12, 0.5, 3, t => blip(ctx, master, t, rand(0.06, 0.1), rand(160, 210), rand(80, 100), 0.22, rand(-0.3, 0.3)));
+      [0.44, 0.5, 0.56].forEach((fraction, i) => blip(ctx, master, at(fraction), 0.07, 160, 320, 0.26, (i - 1) * 0.35));
+      for (let i = 0; i < 5; i++) blip(ctx, master, at(0.67 + i * 0.03), 0.09, 320, 640, 0.22, (i - 2) * 0.3);
     }
   }
 
