@@ -5,7 +5,7 @@ const ubu = require('../shared/ubu.js');
 const hold = () => Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false }));
 // Durable storage adapter will persist this object; no client-supplied owner identities.
 class MatchRoom {
-  constructor(host, mode, teams) {
+  constructor(host, mode, teams, guest = false) {
     if (typeof host !== 'string' || !host || !rules.MODES.includes(mode) || !['owned', 'practice'].includes(teams)) throw new Error('Invalid lobby.');
     this.state = { version: rules.VERSION, mode, teams, players: [host, null], phase: 'lobby', turn: 1,
       scorelessTurns: 0, drafts: [hold(), hold()], locked: [false, false], connected: [false, false],
@@ -16,17 +16,26 @@ class MatchRoom {
     this.state.replay = null;
     this.state.playUntil = null;
     this.state.expires = Date.now() + 86400000;
-    if (teams === 'practice') this.practiceTeam(host);
+    if (teams === 'practice' || guest) this.practiceTeam(host);
   }
   seat(owner) { const i = this.state.players.indexOf(owner); if (i < 0) throw new Error('Not a match player.'); return i; }
-  join(owner) {
+  join(owner, guest = false) {
     const s = this.state;
     if (typeof owner !== 'string' || !owner) throw new Error('Invalid player.');
     if (s.players.includes(owner)) return this.seat(owner);
     if (s.phase !== 'lobby' || s.players[1]) throw new Error('Match is full.');
     s.players[1] = owner;
-    if (s.teams === 'practice') this.practiceTeam(owner);
+    // Guests have no collection, so they always field a server-generated practice team.
+    if (s.teams === 'practice' || guest) this.practiceTeam(owner);
     return 1;
+  }
+  claim(owner, alias) {
+    const s = this.state, i = s.players.indexOf(alias);
+    if (!alias || i < 0 || s.players.includes(owner)) return false;
+    s.players[i] = owner;
+    // A former guest who hasn't readied yet in an owned match may now pick their own ubus.
+    if (s.phase === 'lobby' && s.teams === 'owned' && !s.rosters[i]) s.practice[i] = null;
+    return true;
   }
   practiceTeam(owner) {
     const i = this.seat(owner);
@@ -145,7 +154,7 @@ class MatchRoom {
       occupied: s.players.map(Boolean), connected: [...s.connected], locked: [...s.locked],
       moves: structuredClone(s.drafts[seat]), deadline: s.deadline, remaining: s.remaining, winner: s.winner,
       ready: s.rosters.map(Boolean), rosters: structuredClone(s.rosters),
-      practice: s.teams === 'practice' ? structuredClone(s.practice[seat]) : null,
+      practice: structuredClone(s.practice[seat]),
       game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
       playUntil: s.playUntil, disconnectedAt: [...s.disconnectedAt], rematch: [...s.rematch] };
   }

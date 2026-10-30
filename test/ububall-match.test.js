@@ -141,3 +141,17 @@ test('MatchRoom rematch requires match over and agreement from both players', ()
   assert.deepEqual(room.state.rematch, [false, false]);
   assert.deepEqual(room.state.game.scores, [0, 0]);
 });
+
+test('guest seats use practice teams in owned matches and carry over to Discord', () => {
+  const room = new MatchRoom('g_host', 'classic', 'owned', true);
+  room.join('111', false);
+  assert.equal(room.state.practice[0].length, 3); assert.equal(room.state.practice[1], null);
+  assert.equal(room.view('111').practice, null);
+  assert.throws(() => room.join('g_guest', true));
+  assert.equal(room.claim('222', 'g_unknown'), false);
+  assert.equal(room.claim('111', 'g_host'), false); // cannot take both seats
+  assert.equal(room.claim('333', 'g_host'), true);
+  assert.deepEqual(room.state.players, ['333', '111']);
+  assert.equal(room.state.practice[0], null);
+  assert.throws(() => room.seat('g_host'));
+});

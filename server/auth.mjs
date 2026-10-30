@@ -47,9 +47,18 @@ export function origin(env) {
   if (url.origin !== env.ORIGIN || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))) throw new Error('Invalid configured origin.');
   return url.origin;
 }
+const GUEST = /^g_[A-Za-z0-9_-]{43}$/;
+// Guest IDs can never match a Discord ID, so they can never reach a mint collection.
 export async function session(request, env) {
   const value = await unseal(cookie(request, sessionName), env.SESSION_SECRET, 'session');
-  return value && /^[1-9][0-9]{0,19}$/.test(value.owner) && /^[A-Za-z0-9_-]{43}$/.test(value.csrf) ? value : null;
+  if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value.csrf)) return null;
+  const discord = value.guest === undefined && /^[1-9][0-9]{0,19}$/.test(value.owner) && (value.alias === undefined || GUEST.test(value.alias));
+  const guest = value.guest === true && GUEST.test(value.owner) && value.alias === undefined;
+  return discord || guest ? value : null;
+}
+export async function guest(env) {
+  const value = { purpose: 'session', owner: 'g_' + random(), guest: true, csrf: random(), expires: Math.floor(Date.now() / 1000) + 604800 };
+  return { value, cookie: setCookie(sessionName, await seal(value, env.SESSION_SECRET), 604800) };
 }
 export function mutationAllowed(request, env, value) {
   return request.headers.get('Origin') === origin(env) && request.headers.get('X-Ubu-CSRF') === value.csrf;
@@ -102,7 +111,10 @@ export async function callback(request, env, fetchDiscord = fetch) {
     const user = await userResponse.json();
     if (typeof user.id !== 'string' || !/^[1-9][0-9]{0,19}$/.test(user.id)) return failed();
     const returnTo = safeReturnPath(state.returnTo, env);
-    const sessionToken = await seal({ purpose: 'session', owner: user.id, csrf: random(), expires: Math.floor(Date.now() / 1000) + 86400 }, env.SESSION_SECRET);
+    // A guest signing in keeps their match seats: the Discord session names the guest ID it replaced.
+    const previous = await session(request, env);
+    const sessionToken = await seal({ purpose: 'session', owner: user.id, csrf: random(), expires: Math.floor(Date.now() / 1000) + 86400,
+      ...(previous?.guest ? { alias: previous.owner } : {}) }, env.SESSION_SECRET);
     const headers = new Headers({ Location: origin(env) + returnTo, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
     headers.append('Set-Cookie', setCookie(stateName, '', 0));
     headers.append('Set-Cookie', setCookie(sessionName, sessionToken, 86400));

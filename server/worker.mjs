@@ -185,8 +185,15 @@ export default {
       if (path === '/auth/discord' && request.method === 'GET') return auth.login(request, env);
       if (path === '/auth/callback' && request.method === 'GET') return auth.callback(request, env);
       const session = await auth.session(request, env);
-      if (path === '/api/session' && request.method === 'GET') return json(session ? { owner: session.owner, csrf: session.csrf } : { owner: null });
-      if (!session) return json({ error: 'Sign in with Discord first.' }, 401);
+      if (path === '/api/session' && request.method === 'GET') return json(!session ? { owner: null } :
+        session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, csrf: session.csrf });
+      if (path === '/api/guest' && request.method === 'POST') {
+        if (request.headers.get('Origin') !== auth.origin(env)) return json({ error: 'Invalid request origin.' }, 403);
+        if (session) return json(session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, csrf: session.csrf });
+        const created = await auth.guest(env);
+        return json({ owner: null, guest: true, csrf: created.value.csrf }, 200, { 'Set-Cookie': created.cookie });
+      }
+      if (!session) return json({ error: 'Sign in with Discord or play as a guest first.' }, 401);
       if (request.method !== 'GET' && !auth.mutationAllowed(request, env, session)) return json({ error: 'Invalid request origin or token.' }, 403);
       if (path === '/api/logout' && request.method === 'POST') return json({ ok: true }, 200, { 'Set-Cookie': auth.logoutCookie() });
       if (path === '/api/ububall' && request.method === 'POST') {
@@ -195,12 +202,12 @@ export default {
         if (!data || Object.keys(data).some(k => !['mode', 'teams'].includes(k))) return json({ error: 'Invalid match request.' }, 400);
         const id = crypto.randomUUID();
         const response = await env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/create', {
-          method: 'POST', headers: { 'X-Match-Owner': session.owner, 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+          method: 'POST', headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'Content-Type': 'application/json' }, body: JSON.stringify(data)
         }));
         const result = await response.json();
         return json(response.ok ? { id, ...result } : result, response.status);
       }
-      const match = path.match(/^\/api\/ububall\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(join|team|state|socket|forfeit)$/);
+      const match = path.match(/^\/api\/ububall\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(join|team|state|socket|forfeit|rematch)$/);
       if (match) {
         const [, id, action] = match, get = action === 'state' || action === 'socket';
         if (request.method !== (get ? 'GET' : 'POST')) return json({ error: 'Method not allowed.' }, 405);
@@ -210,11 +217,13 @@ export default {
         if (!get) { try { data = await body(request, 2048); } catch { return json({ error: 'Invalid match request.' }, 400); } }
         return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + action, {
           method: request.method,
-          headers: { 'X-Match-Owner': session.owner, 'X-Match-Expires': String(session.expires * 1000),
+          headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Alias': session.alias || '',
+            'X-Match-Expires': String(session.expires * 1000),
             'Content-Type': 'application/json', ...(action === 'socket' ? { Upgrade: 'websocket' } : {}) },
           body: get ? undefined : JSON.stringify(data)
         }));
       }
+      if (session.guest) return json({ error: 'Sign in with Discord to use the mint.' }, 403);
       const config = configuration(env);
       const registry = env.MINT.get(env.MINT.idFromName(config.mint));
       if (path === '/api/ubus' && request.method === 'GET') {

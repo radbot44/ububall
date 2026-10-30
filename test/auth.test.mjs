@@ -82,3 +82,18 @@ test('Discord login return navigation preserves safe paths and rejects malicious
   const res = await auth.callback(callbackReq, env, async url => Response.json(url.endsWith('/token') ? { access_token: 't', token_type: 'Bearer' } : { id: '123' }));
   assert.equal(res.headers.get('Location'), env.ORIGIN + '/mint.html');
 });
+
+test('guest sessions are distinct from Discord identities and Discord login records the replaced guest', async () => {
+  const guest = await auth.guest(env);
+  const cookie = guest.cookie.split(';')[0];
+  const value = await auth.session(new Request(env.ORIGIN, { headers: { Cookie: cookie } }), env);
+  assert.equal(value.guest, true); assert.match(value.owner, /^g_[A-Za-z0-9_-]{43}$/);
+  const login = await auth.login(new Request(env.ORIGIN + '/auth/discord'), env);
+  const state = new URL(login.headers.get('Location')).searchParams.get('state');
+  const result = await auth.callback(new Request(env.ORIGIN + '/auth/callback?code=x&state=' + state, {
+    headers: { Cookie: login.headers.get('Set-Cookie').split(';')[0] + '; ' + cookie } }), env,
+    async url => Response.json(url.endsWith('/token') ? { access_token: 't', token_type: 'Bearer' } : { id: '123456789012345678' }));
+  const discord = result.headers.getSetCookie().find(c => c.startsWith('__Host-ubu-session=')).split(';')[0];
+  const upgraded = await auth.session(new Request(env.ORIGIN, { headers: { Cookie: discord } }), env);
+  assert.equal(upgraded.owner, '123456789012345678'); assert.equal(upgraded.alias, value.owner); assert.equal(upgraded.guest, undefined);
+});

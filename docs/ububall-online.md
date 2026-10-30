@@ -13,6 +13,8 @@ Completed online play architecture:
 - Symmetrical rightward-attacking client view transform flips seat 1 coordinates and angles seamlessly.
 - Replay playback interpolates 30 Hz sampled frames, delays scoreboard updates until the goal moment, triggers fanfare, bursts, and super audio, and highlights scoring players.
 - Strict control locking across moves locking, turn motion, opponent disconnects, and match completion; disconnects freeze Blitz planning and allow forfeit claims after 60 seconds.
+- Heartbeats use the Durable Object WebSocket auto-response, so `{"type":"ping"}` never wakes a hibernating match; liveness uses the auto-response timestamp.
+- Guests may host and join without Discord. Guest seats always field server-generated practice teams and cannot reach the mint; a guest who signs in with Discord in the same browser keeps their seat.
 - Reconnects and page reloads seamlessly restore active matches via `?match=<id>` URL parameters.
 - Comprehensive test coverage in `test/ububall-match.test.js` and `test/worker.integration.mjs`.
 

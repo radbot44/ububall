@@ -319,6 +319,8 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     }
     const hostSocket = await connect(headers), guestSocket = await connect(guestHeaders);
     t.after(() => { for (const s of [hostSocket, guestSocket]) { try { s.ws.close(); } catch {} } });
+    hostSocket.ws.send('{"type":"ping"}');
+    await hostSocket.wait(m => m.type === 'pong');
     for (const h of [headers, guestHeaders]) {
       const lobby = await (await fetch(base + '/state', { headers: h })).json();
       const supers = lobby.practice.map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
@@ -356,5 +358,43 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await post(ownedBase + '/team', selection, guestHeaders)).status, 400);
     assert.equal((await post(ownedBase + '/team', { ...selection, serials: [selection.serials[0], selection.serials[0], selection.serials[0]] })).status, 400);
     assert.equal((await post(ownedBase + '/team', selection)).status, 200);
+  });
+  await t.test('guests play practice teams against Discord users, never reach the mint and keep their seat on sign-in', async () => {
+    assert.equal((await fetch('/api/guest', { method: 'POST', headers: { Origin: 'https://evil.example' } })).status, 403);
+    const start = await fetch('/api/guest', { method: 'POST', headers: { Origin: env.ORIGIN } });
+    assert.equal(start.status, 200);
+    const guestCookie = start.headers.get('Set-Cookie').split(';')[0], guestSession = await start.json();
+    assert.equal(guestSession.owner, null); assert.equal(guestSession.guest, true);
+    assert.deepEqual(await (await fetch('/api/session', { headers: { Cookie: guestCookie } })).json(), guestSession);
+    const g = { Cookie: guestCookie, Origin: env.ORIGIN, 'X-Ubu-CSRF': guestSession.csrf, 'Content-Type': 'application/json' };
+    const post = (path, data, h) => fetch(path, { method: 'POST', headers: h, body: JSON.stringify(data) });
+    assert.equal((await fetch('/api/ubus', { headers: g })).status, 403);
+    assert.equal((await post('/api/favorites', { serials: [] }, g)).status, 403);
+    assert.equal((await post('/api/packs', { request: 'guest-request-000001' }, g)).status, 403);
+    assert.equal((await post('/api/mint', { request: 'guest-request-000001' }, g)).status, 403);
+
+    // A guest hosts an owned-team match; the Discord opponent picks owned ubus, the guest gets a practice team.
+    const created = await post('/api/ububall', { mode: 'classic', teams: 'owned' }, g);
+    assert.equal(created.status, 200, await created.clone().text());
+    const match = await created.json(), base = '/api/ububall/' + match.id;
+    assert.equal(match.practice.length, 3);
+    const joined = await (await post(base + '/join', {}, headers)).json();
+    assert.equal(joined.practice, null);
+    assert.equal((await post(base + '/team', { serials: ['000000000001', '000000000002', '000000000003'], supers: [0, 0, 0] }, g)).status, 400);
+
+    // Discord sign-in from the guest's browser carries the seat over to the Discord account.
+    const begin = await login(new Request(env.ORIGIN + '/auth/discord'), env);
+    const state = new URL(begin.headers.get('Location')).searchParams.get('state');
+    const signed = await callback(new Request(env.ORIGIN + '/auth/callback?code=fixture&state=' + state, {
+      headers: { Cookie: begin.headers.get('Set-Cookie').split(';')[0] + '; ' + guestCookie } }), env,
+      async url => Response.json(url.endsWith('/token') ? { access_token: 'test-only', token_type: 'Bearer' } : { id: '678901234567890123' }));
+    const discordCookie = signed.headers.getSetCookie().find(c => c.startsWith('__Host-ubu-session=')).split(';')[0];
+    const discordSession = await (await fetch('/api/session', { headers: { Cookie: discordCookie } })).json();
+    const d = { ...g, Cookie: discordCookie, 'X-Ubu-CSRF': discordSession.csrf };
+    const claimed = await (await fetch(base + '/state', { headers: d })).json();
+    assert.equal(claimed.seat, 0); assert.equal(claimed.practice, null);
+    assert.equal((await fetch(base + '/state', { headers: g })).status, 400);
+    const rematch = await post(base + '/rematch', {}, d);
+    assert.equal(rematch.status, 400); assert.match((await rematch.json()).error, /not over/);
   });
 });

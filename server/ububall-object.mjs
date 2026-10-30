@@ -7,10 +7,13 @@ const json = (value, status = 200) => Response.json(value, { status, headers: { 
 export class UbuballMatch extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    // Workerd answers heartbeats itself, so pings never wake a hibernating match.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS match_state (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL)');
     const row = ctx.storage.sql.exec('SELECT data FROM match_state WHERE id=1').toArray()[0];
     if (row) { this.room = Object.create(MatchRoom.prototype); this.room.state = JSON.parse(row.data); }
   }
+  seen(ws, a) { return Math.max(a.lastSeen, this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0); }
   save() {
     this.room.state.revision = (this.room.state.revision || 0) + 1;
     this.ctx.storage.sql.exec('INSERT OR REPLACE INTO match_state VALUES (1, ?)', JSON.stringify(this.room.state));
@@ -20,7 +23,7 @@ export class UbuballMatch extends DurableObject {
     const deadlines = [s.expires, s.deadline, s.playUntil];
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment();
-      if (a.live) deadlines.push(a.lastSeen + 30000, a.expires);
+      if (a.live) deadlines.push(this.seen(ws, a) + 30000, a.expires);
     }
     await this.ctx.storage.setAlarm(Math.max(now + 1, Math.min(...deadlines.filter(v => v !== null))));
   }
@@ -36,29 +39,37 @@ export class UbuballMatch extends DurableObject {
     if (!a?.live) return;
     a.live = false; ws.serializeAttachment(a);
     ws.close(code, 'Reconnect to resume');
-    if (!this.ctx.getWebSockets().some(other => {
+    if (this.room.state.players.includes(a.owner) && !this.ctx.getWebSockets().some(other => {
       const b = other.deserializeAttachment(); return b.live && b.owner === a.owner;
     })) this.room.disconnect(a.owner, now);
   }
   sweep(now) {
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment();
-      if (a.live && (now >= a.lastSeen + 30000 || now >= a.expires)) this.retire(ws, Math.min(a.lastSeen + 30000, a.expires));
+      const seen = a.live ? this.seen(ws, a) : 0;
+      if (a.live && (now >= seen + 30000 || now >= a.expires)) this.retire(ws, Math.min(seen + 30000, a.expires));
     }
   }
   async fetch(request) {
     return this.ctx.blockConcurrencyWhile(async () => {
       const now = Date.now(), path = new URL(request.url).pathname;
-      const owner = request.headers.get('X-Match-Owner');
+      const owner = request.headers.get('X-Match-Owner'), guest = request.headers.get('X-Match-Guest') === '1';
       if (!owner) return json({ error: 'Sign in first.' }, 401);
       try {
         if (path === '/create') {
           if (this.room) throw new Error('Match already exists.');
           const data = await request.json();
-          this.room = new MatchRoom(owner, data.mode, data.teams);
+          this.room = new MatchRoom(owner, data.mode, data.teams, guest);
         } else if (!this.room || now >= this.room.state.expires) return json({ error: 'Match expired or not found.' }, 404);
         this.sweep(now);
-        if (path === '/join') this.room.join(owner);
+        const alias = request.headers.get('X-Match-Alias');
+        if (alias && this.room.claim(owner, alias)) {
+          for (const ws of this.ctx.getWebSockets()) {
+            const a = ws.deserializeAttachment();
+            if (a.owner === alias) { a.owner = owner; ws.serializeAttachment(a); }
+          }
+        }
+        if (path === '/join') this.room.join(owner, guest);
         else this.room.seat(owner);
         if (path === '/socket') {
           if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return json({ error: 'WebSocket required.' }, 426);
@@ -76,13 +87,13 @@ export class UbuballMatch extends DurableObject {
           const data = await request.json();
           if (!data || Object.keys(data).some(k => !['serials', 'supers'].includes(k))) throw new Error('Invalid team.');
           let entries;
-          if (this.room.state.teams === 'owned') {
+          if (!this.room.state.practice[this.room.seat(owner)]) {
             const registry = this.env.MINT.get(this.env.MINT.idFromName(this.env.MINT_ID));
             const result = await registry.ububallTeam(owner, data.serials);
             if (result.error) throw new Error(result.error);
             entries = result.entries;
           } else {
-            if (data.serials !== undefined) throw new Error('This match uses practice teams.');
+            if (data.serials !== undefined) throw new Error('This seat uses a practice team.');
             entries = this.room.practiceTeam(owner);
           }
           this.room.selectTeam(owner, entries, data.supers);
@@ -105,9 +116,6 @@ export class UbuballMatch extends DurableObject {
         const data = JSON.parse(message);
         if (!data || typeof data !== 'object') throw new Error('Invalid message.');
         a.lastSeen = now; ws.serializeAttachment(a);
-        if (data.type === 'ping') {
-          ws.send(JSON.stringify({ type: 'pong', now })); await this.schedule(now); return;
-        }
         if (data.type === 'rematch') {
           this.room.rematch(a.owner, now);
           this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);
