@@ -15,7 +15,11 @@
     card.append(button, sparkle); $('pack-choices').append(card);
     let scene = null;
     try { scene = createPackScene(canvas); } catch { canvas.hidden = true; button.textContent = `Pack ${i + 1}`; }
-    button.addEventListener('click', () => selectPack(i));
+    button.addEventListener('click', () => {
+      // A tap-to-open wrapper takes taps on the chosen pack; otherwise a click picks the pack.
+      if (!scene?.tap()) { selectPack(i); return; }
+      if (!scene.awaitingTap()) { button.disabled = true; $('pack-hint').textContent = ''; }
+    });
     return { card, button, scene };
   });
   // Sounds need a page gesture first; packs dealt on page load stay silent.
@@ -963,7 +967,13 @@
       await acceptPack(data);
       packScene = choiceViews[index].scene;
       $('pack-choices').classList.add('choosing');
-      await packScene?.play(pack.items.length, pack.items.map(item => item.model));
+      const opening = packScene?.play(pack.items.length, pack.items.map(item => item.model));
+      if (packScene?.awaitingTap()) {
+        const button = choiceViews[index].button;
+        button.disabled = false; button.setAttribute('aria-label', 'Tap to crack it open'); button.focus();
+        $('pack-hint').textContent = 'Tap to crack it!';
+      }
+      await opening;
       $('pack-choices').hidden = true;
       revealIndex = 0;
       showReveal();

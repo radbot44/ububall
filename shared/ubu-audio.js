@@ -745,7 +745,7 @@
   }
 
   // Pack shop sounds: 'deal' flicks three packs onto the table in step with their staggered
-  // arrival, and 'pick' is a soft pop as one is chosen.
+  // arrival, 'pick' is a soft pop as one is chosen, and 'crack' taps an egg (options.stage 1-3).
   function playPack(kind, options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
@@ -756,6 +756,12 @@
     } else if (kind === 'pick') {
       blip(ctx, master, now, 0.14, 420, 940, 0.45);
       noiseGrain(ctx, master, now, 0.05, { freq: 3200, to: 1800, level: 0.25 });
+    } else if (kind === 'crack') {
+      // An eggshell tap: a light tick, with more small crackles as the crack spreads.
+      const stage = options.stage || 1;
+      noiseGrain(ctx, master, now, 0.004, { freq: 3600, q: 2, level: 0.3 });
+      blip(ctx, master, now, 0.02, 1700, 1400, 0.08);
+      for (let i = 1; i < stage * 2; i++) noiseGrain(ctx, master, now + 0.01 + Math.random() * 0.05 * stage, 0.003, { freq: 2600 + Math.random() * 3000, q: 2, level: 0.12 + 0.04 * stage });
     }
   }
 
@@ -819,6 +825,23 @@
         }
       }
       for (let i = 0; i < 5; i++) blip(ctx, master, at(0.67 + i * 0.03), 0.09, 320, 640, 0.22, (i - 2) * 0.3);
+    } else if (type === 'gumball') {
+      // Gumball capsule: a light ratchet of clicks as the dome twists, a hollow pop as it comes
+      // apart, and a soft rattle as the gumballs jump.
+      for (let i = 0; i < 9; i++) noiseGrain(ctx, master, at(0.06 + i * 0.03), 0.003, { freq: 3200, q: 3, level: 0.14 });
+      blip(ctx, master, at(0.35), 0.08, 260, 680, 0.28);
+      noiseGrain(ctx, master, at(0.35), 0.03, { freq: 1800, q: 1, level: 0.12 });
+      [0.4, 0.43, 0.47, 0.5].forEach(fraction => blip(ctx, master, at(fraction), 0.02, rand(900, 1200), rand(700, 850), 0.07, rand(-0.3, 0.3)));
+    } else if (type === 'egg') {
+      // Egg hatching (after the player's taps): the shell gives with a little crunch and the cap
+      // pops off.
+      for (let i = 0; i < 5; i++) noiseGrain(ctx, master, at(0.01) + i * 0.012, 0.003, { freq: rand(2600, 5200), q: 2, level: 0.16, pan: rand(-0.3, 0.3) });
+      blip(ctx, master, at(0.06), 0.07, 300, 620, 0.2);
+    } else if (type === 'gift') {
+      // Gift box: a soft satin slide as the ribbon slips off, then a papery pop as the lid lifts.
+      noiseGrain(ctx, master, at(0.05), 0.24 * seconds, { freq: 1400, to: 2600, q: 0.9, level: 0.05 });
+      blip(ctx, master, at(0.29), 0.09, 180, 420, 0.26);
+      noiseGrain(ctx, master, at(0.29), 0.05, { freq: 900, q: 1, level: 0.12, type: 'lowpass' });
     }
   }
 

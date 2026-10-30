@@ -1,5 +1,5 @@
 'use strict';
-// Painted 2D foil, cellophane and candy wrappers. No 3D engine or geometry.
+// Painted 2D wrappers (cellophane, foil, blob, gumball capsule, egg, gift box). No 3D engine or geometry.
 (() => {
   const clamp = n => Math.max(0, Math.min(1, n));
   const ease = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
@@ -747,13 +747,212 @@
       }));
     }
 
-    const duration = () => currentType?.id === 'blob' ? 4800 : 3600;
+    // Shared by the newer wrappers: the pack's hint colours, and whether it holds a special finish.
+    const hintHex = i => packHints ? packHints[i % 5].background : candyColors[i % 5];
+    const special = () => Boolean(packHints?.some(h => h.textured));
+    function ball(x, y, r, hex) {
+      const shade = ctx.createRadialGradient(x - r * .35, y - r * .4, r * .1, x, y, r);
+      shade.addColorStop(0, tint(hex, .55)); shade.addColorStop(.45, hex); shade.addColorStop(1, tint(hex, -.4));
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = shade; ctx.fill();
+    }
+
+    // --- Gumball Capsule ---
+    // A clear dome shows five gumballs in the pack's background colours over an opaque base;
+    // glitter in the base plastic hints at a special finish. It twists, pops apart and lets them out.
+    let gumballs = [], glitter = [];
+    function setupGumball() {
+      const rolls = crypto.getRandomValues(new Uint16Array(90)), u = i => rolls[i] / 65535;
+      gumballs = [[-54, -24], [0, -26], [54, -24], [-27, -70], [27, -70]].map(([x, y], i) => ({ x: x + u(i) * 6 - 3, y: y + u(i + 5) * 6 - 3 }));
+      glitter = Array.from({ length: 36 }, (_, i) => ({ a: .15 + u(10 + i) * 2.85, d: .25 + u(50 + i) * .65, s: .8 + u(i + 20) * 1.6 }));
+    }
+    function renderGumball(t) {
+      const twist = ease(.04, .34, t), pop = ease(.34, .48, t), away = ease(.44, .6, t);
+      const R = 112, base = hintHex(0), shake = Math.sin(t * 110) * 2.4 * Math.sin(Math.PI * twist);
+      ctx.save(); ctx.translate(shake, 10);
+      ctx.save(); ctx.globalAlpha = 1 - away;
+      ctx.beginPath(); ctx.ellipse(0, R + 6, R * .8, 10, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000038'; ctx.filter = 'blur(6px)'; ctx.fill(); ctx.filter = 'none';
+      ctx.restore();
+      // Opaque base half, with a lip at the seam.
+      ctx.save(); ctx.globalAlpha = 1 - away; ctx.translate(0, pop * 22 + away * 120);
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI); ctx.closePath();
+      ctx.fillStyle = gradient(ctx, -R, 0, R * .6, R, [[0, tint(base, .3)], [.45, base], [1, tint(base, -.5)]]); ctx.fill();
+      if (special()) {
+        for (const g of glitter) {
+          const x = Math.cos(g.a) * g.d * R, y = Math.sin(g.a) * g.d * R;
+          ctx.globalAlpha = (1 - away) * (.35 + .65 * Math.abs(Math.sin(g.a * 7 + pointer * 2.5 + pointerY)));
+          ctx.fillStyle = '#fff8e6'; ctx.fillRect(x - g.s / 2, y - g.s / 2, g.s, g.s);
+        }
+        ctx.globalAlpha = 1 - away;
+      }
+      ctx.fillStyle = gradient(ctx, -R, 0, R, 0, [[0, tint(base, .45)], [.5, tint(base, .15)], [1, tint(base, -.3)]]);
+      ctx.fillRect(-R, -2, R * 2, 10);
+      ctx.restore();
+      // Gumballs jump as the dome pops, then give way to the ubus.
+      ctx.save(); ctx.globalAlpha = 1 - ease(.44, .58, t);
+      gumballs.forEach((g, i) => ball(g.x, g.y - Math.sin(Math.PI * pop) * (22 + i * 4), 25, hintHex(i)));
+      ctx.restore();
+      // Clear dome: tick marks along its rim travel as it twists; it then flies off.
+      ctx.save(); ctx.globalAlpha = 1 - away;
+      ctx.translate(away * 60, -pop * 60 - away * 170); ctx.rotate(-pop * .3 - away * .5);
+      ctx.beginPath(); ctx.arc(0, 0, R, Math.PI, Math.PI * 2); ctx.closePath();
+      ctx.fillStyle = '#ffffff12'; ctx.fill();
+      ctx.strokeStyle = '#ffffff66'; ctx.lineWidth = 2.2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(-14 + pointer * 10, -6 + pointerY * 6, R * .78, Math.PI * 1.12, Math.PI * 1.42);
+      ctx.strokeStyle = '#ffffffaa'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.stroke();
+      ctx.strokeStyle = '#ffffff55'; ctx.lineWidth = 2;
+      for (let k = 0; k < 9; k++) {
+        const x = ((k * 26 + twist * 140) % 234) - 117;
+        if (Math.abs(x) > R - 6) continue;
+        ctx.beginPath(); ctx.moveTo(x, -12); ctx.lineTo(x, -3); ctx.stroke();
+      }
+      ctx.restore();
+      ctx.restore();
+    }
+
+    // --- Speckled Egg ---
+    // Speckled in the pack's colours, with an iridescent sheen when a special finish is inside.
+    // The player taps it three times to crack it; then it hatches.
+    let speckles = [], crack = [], eggTaps = 0, knockAt = -1e9, awaitTap = null;
+    function setupEgg() {
+      const rolls = crypto.getRandomValues(new Uint16Array(260)), u = i => rolls[i] / 65535;
+      speckles = Array.from({ length: 70 }, (_, i) => ({ x: u(i) * 180 - 90, y: u(i + 70) * 230 - 115, r: 1.5 + u(i + 140) * 4.5, c: i % 5 }));
+      crack = Array.from({ length: 11 }, (_, i) => ({ x: -96 + i * 19.2, y: -6 + (i % 2 ? -1 : 1) * (6 + u(220 + i) * 8) }));
+      eggTaps = 0; knockAt = -1e9; awaitTap = null;
+    }
+    function eggPath(target) {
+      target.beginPath(); target.moveTo(0, -118);
+      target.bezierCurveTo(60, -118, 94, -28, 92, 28); target.bezierCurveTo(90, 88, 50, 116, 0, 116);
+      target.bezierCurveTo(-50, 116, -90, 88, -92, 28); target.bezierCurveTo(-94, -28, -60, -118, 0, -118);
+      target.closePath();
+    }
+    function eggShell() {
+      const pale = tint(hintHex(0), .62);
+      eggPath(ctx);
+      const body = ctx.createRadialGradient(-30 + pointer * 12, -50 + pointerY * 10, 8, 0, 10, 140);
+      body.addColorStop(0, tint(pale, .6)); body.addColorStop(.55, pale); body.addColorStop(1, tint(hintHex(0), .05));
+      ctx.fillStyle = body; ctx.fill();
+      ctx.save(); eggPath(ctx); ctx.clip();
+      for (const sp of speckles) { ctx.beginPath(); ctx.arc(sp.x, sp.y, sp.r, 0, Math.PI * 2); ctx.fillStyle = hintHex(sp.c) + 'cc'; ctx.fill(); }
+      if (special()) {
+        ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha *= .32;
+        ctx.fillStyle = gradient(ctx, -100 + pointer * 40, -120, 100 + pointer * 40, 120, [[0, '#ff9ad5'], [.3, '#9ec5ff'], [.55, '#a8ffd8'], [.8, '#ffe9a0'], [1, '#ff9ad5']]);
+        ctx.fillRect(-100, -120, 200, 240);
+      }
+      ctx.restore();
+      const shown = Math.min(1, eggTaps / 3), mid = (crack.length - 1) / 2;
+      if (shown) {
+        const pts = crack.filter((_, i) => Math.abs(i - mid) <= mid * shown + .01);
+        ctx.beginPath(); pts.forEach((pt, i) => i ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y));
+        ctx.strokeStyle = '#ffffff70'; ctx.lineWidth = 2; ctx.save(); ctx.translate(.8, 1.4); ctx.stroke(); ctx.restore();
+        ctx.strokeStyle = tint(hintHex(0), -.7); ctx.lineWidth = 2.4; ctx.lineJoin = 'round'; ctx.stroke();
+      }
+    }
+    function renderEgg(t) {
+      const now = performance.now(), since = now - knockAt;
+      let rock = since < 700 ? Math.sin(since / 34) * Math.exp(-since / 200) * .16 : 0;
+      // While it waits for taps, the egg gives an occasional nudge to invite one.
+      if (awaitTap && since > 1600) rock += Math.sin(now / 90) * Math.max(0, Math.sin(now / 900)) ** 8 * .08;
+      if (awaitTap || since < 700) requestPaint();
+      const lift = ease(.02, .3, t), drop = ease(.2, .48, t);
+      ctx.save(); ctx.translate(0, 4); ctx.rotate(rock);
+      ctx.save(); ctx.globalAlpha = 1 - drop;
+      ctx.beginPath(); ctx.ellipse(0, 122, 70, 9, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000038'; ctx.filter = 'blur(6px)'; ctx.fill(); ctx.filter = 'none';
+      ctx.restore();
+      if (!lift) { eggShell(); ctx.restore(); return; }
+      // Hatching: the shell parts along the crack; the cap tips off and the base sinks away.
+      // One side of the crack: the cap above it (edge -170) or the base below it (edge 170).
+      const half = edge => { ctx.beginPath(); ctx.moveTo(-130, edge); ctx.lineTo(130, edge); for (let i = crack.length - 1; i >= 0; i--) ctx.lineTo(crack[i].x, crack[i].y); ctx.closePath(); };
+      ctx.save(); ctx.globalAlpha = 1 - drop; ctx.translate(0, drop * 14);
+      half(170); ctx.clip(); eggShell();
+      ctx.restore();
+      ctx.save(); ctx.globalAlpha = 1 - ease(.18, .4, t); ctx.translate(lift * 50, -lift * 150); ctx.rotate(lift * .7);
+      half(-170); ctx.clip(); eggShell();
+      ctx.restore();
+      ctx.restore();
+    }
+
+    // --- Gift Box ---
+    // A box seen from slightly above and to the side: front, side and lid top, each wrapped in
+    // paper striped in the pack's colours, tied with a satin ribbon, or a gold foil ribbon when a
+    // special finish is inside. The view shifts with the pointer. The ribbon slips off, the lid
+    // pops and the box falls away.
+    function setupGift() {}
+    function ribbonFill(x1, y1, x2, y2) {
+      return special()
+        ? gradient(ctx, x1 + pointer * 30, y1, x2 + pointer * 30, y2, [[0, '#fff0d4'], [.35, '#e2b25e'], [.5, '#8f5f24'], [.62, '#ffe1a8'], [1, '#c48a3c']])
+        : gradient(ctx, x1, y1, x2, y2, [[0, '#fbf7f0'], [.6, '#e4dccf'], [1, '#bdb3a4']]);
+    }
+    function paper(w, h) {
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip();
+      ctx.fillStyle = tint(hintHex(0), -.12); ctx.fillRect(0, 0, w, h);
+      ctx.lineWidth = 15;
+      for (let k = -14; k < 14; k++) {
+        ctx.strokeStyle = hintHex((k + 20) % 5); ctx.beginPath();
+        ctx.moveTo(k * 22, h + 10); ctx.lineTo(k * 22 + h + 20, -10); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    // Draws in a face's own coordinates (w x h) mapped onto the parallelogram from (x, y) along u and v.
+    function face(x, y, u, v, w, h, draw) {
+      ctx.save(); ctx.transform(u[0] / w, u[1] / w, v[0] / h, v[1] / h, x, y);
+      ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip();
+      draw(w, h);
+      ctx.restore();
+    }
+    // A wrapped block: front w x h at (x, y), with its side and (optionally) top in depth d.
+    function block(x, y, w, h, d, top, ribbon, untie) {
+      const shade = (w2, h2, fill) => { ctx.fillStyle = fill; ctx.fillRect(0, 0, w2, h2); };
+      const band = (fx, fy, fw, fh) => { ctx.save(); ctx.globalAlpha *= 1 - untie; ctx.fillStyle = ribbonFill(fx, fy, fx + fw, fy + fh); ctx.fillRect(fx, fy, fw, fh); ctx.restore(); };
+      face(x + w, y, d, [0, h], 60, h, (fw, fh) => { paper(fw, fh); shade(fw, fh, '#00000052'); if (ribbon) band(23, 0, 14, fh); });
+      if (top) face(x, y, [w, 0], d, w, 60, (fw, fh) => { paper(fw, fh); shade(fw, fh, '#ffffff1e'); if (ribbon) { band(fw / 2 - 14, 0, 28, fh); band(0, 23, fw, 14); } });
+      face(x, y, [w, 0], [0, h], w, h, (fw, fh) => {
+        paper(fw, fh);
+        shade(fw, fh, gradient(ctx, 0, 0, fw, fh, [[0, '#ffffff22'], [.5, '#ffffff00'], [1, '#00000030']]));
+        if (ribbon) band(fw / 2 - 14, 0, 28, fh);
+      });
+    }
+    function renderGift(t) {
+      const untie = ease(.04, .3, t), lid = ease(.28, .44, t), fall = ease(.42, .62, t);
+      // Depth runs back and up; the pointer turns the box a little.
+      const d = [40 + pointer * 14, -26 + pointerY * 7];
+      ctx.save(); ctx.translate(-14, 10);
+      ctx.save(); ctx.globalAlpha = 1 - fall;
+      ctx.beginPath(); ctx.ellipse(14, 112, 124, 11, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000038'; ctx.filter = 'blur(6px)'; ctx.fill(); ctx.filter = 'none';
+      ctx.restore();
+      ctx.save(); ctx.globalAlpha = 1 - fall; ctx.translate(0, fall * 70);
+      block(-96, -28, 192, 134, d, false, true, untie);
+      ctx.restore();
+      // The lid overhangs the box a little; the bow sits on its top face.
+      ctx.save(); ctx.globalAlpha = 1 - ease(.36, .52, t);
+      ctx.translate(-lid * 70, -lid * 150); ctx.rotate(-lid * .8);
+      block(-104, -64, 208, 36, [d[0] * 1.04, d[1] * 1.04], true, true, untie);
+      ctx.fillStyle = '#00000030'; ctx.fillRect(-104, -28, 208, 3);
+      ctx.save(); ctx.globalAlpha *= 1 - untie;
+      ctx.translate(d[0] / 2, -64 + d[1] / 2 - untie * 30); ctx.scale(1 - untie * .6, 1 - untie * .6);
+      for (const side of [-1, 1]) {
+        ctx.save(); ctx.rotate(side * .5);
+        ctx.beginPath(); ctx.ellipse(side * 30, -10, 32, 17, 0, 0, Math.PI * 2); ctx.fillStyle = ribbonFill(side * 60, -28, 0, 8); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(side * 30, -10, 15, 6, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000030'; ctx.fill();
+        ctx.restore();
+      }
+      ctx.beginPath(); ctx.arc(0, -4, 12, 0, Math.PI * 2); ctx.fillStyle = ribbonFill(-12, -16, 12, 8); ctx.fill();
+      ctx.restore();
+      ctx.restore();
+      ctx.restore();
+    }
+
+    // Each wrapper's animation length (ms), when the ubus begin to fan out (null: it shows them
+    // itself), and when the wrapper stops drawing.
+    const duration = () => currentType?.duration || 3600;
 
     // Available pack types: randomly chosen when generated
     const PACK_TYPES = [
-      { id: 'plastic', name: 'Plastic Cellophane', setup: setupPlastic, render: renderPlastic },
-      { id: 'foil', name: 'Crinkly Foil', setup: setupFoil, render: renderFoil },
-      { id: 'blob', name: 'Powdered Alloy', setup: setupBlob, render: renderBlob }
+      { id: 'plastic', name: 'Plastic Cellophane', setup: setupPlastic, render: renderPlastic, duration: 3600, reveal: .59, end: .96 },
+      { id: 'foil', name: 'Crinkly Foil', setup: setupFoil, render: renderFoil, duration: 3600, reveal: .18, end: .96 },
+      { id: 'blob', name: 'Powdered Alloy', setup: setupBlob, render: renderBlob, duration: 4800, reveal: null, end: 1 },
+      { id: 'gumball', name: 'Gumball Capsule', setup: setupGumball, render: renderGumball, duration: 3000, reveal: .46, end: .96 },
+      { id: 'egg', name: 'Speckled Egg', setup: setupEgg, render: renderEgg, duration: 2600, reveal: .12, end: .96, taps: 3 },
+      { id: 'gift', name: 'Gift Box', setup: setupGift, render: renderGift, duration: 3000, reveal: .38, end: .96 }
     ];
 
     function recolor(packTypeId) {
@@ -872,8 +1071,8 @@
       ctx.resetTransform(); ctx.clearRect(0, 0, width, height);
       const scale = width / 600; ctx.setTransform(scale, 0, 0, scale, width / 2, height * .46);
 
-      const revealStart = currentType && currentType.id === 'plastic' ? .59 : .18;
-      if (currentType?.id !== 'blob' && progress > revealStart) {
+      const revealStart = currentType?.reveal ?? null;
+      if (revealStart !== null && progress > revealStart) {
         const reveal = ease(revealStart, revealStart + .14, progress);
         const fan = ease(.36, .78, progress);
         ctx.save();
@@ -885,7 +1084,7 @@
         }
         ctx.restore();
       }
-      if (progress < (currentType?.id === 'blob' ? 1 : .96) && currentType) {
+      if (currentType && progress < currentType.end) {
         ctx.save();
         // Modest foreshortening plus surface parallax and moving light imply
         // volume without a 3D dependency or transforming the interaction target.
@@ -922,14 +1121,26 @@
         count = amount; aimX = aimY = pointer = pointerY = 0;
         if (reduced.matches) return Promise.resolve();
         if (currentType?.id === 'blob') blobFaces = await prepareBlobFaces(models);
+        // Tap-to-open wrappers wait here until the player has tapped enough times.
+        if (currentType?.taps && eggTaps < currentType.taps) await new Promise(resolve => { awaitTap = resolve; requestPaint(); });
         if (reduced.matches) return;
         started = performance.now(); progress = 0;
         // The opening sounds share this start, so each lands on its step of the animation.
         if (navigator.userActivation?.hasBeenActive) globalThis.ubuAudio?.playUnwrap?.(currentType?.id, duration() / 1000);
         return new Promise(resolve => { finish = resolve; requestPaint(); });
       },
+      // True while a tap-to-open wrapper is waiting for the player.
+      awaitingTap() { return Boolean(awaitTap); },
+      tap() {
+        if (!awaitTap) return false;
+        eggTaps++; knockAt = performance.now();
+        if (navigator.userActivation?.hasBeenActive) globalThis.ubuAudio?.playPack?.('crack', { stage: eggTaps });
+        if (eggTaps >= currentType.taps) { const resolve = awaitTap; awaitTap = null; resolve(); }
+        requestPaint();
+        return true;
+      },
       reset(newColor = false, packTypeId) {
-        finish = null; progress = 0; count = 5;
+        finish = null; progress = 0; count = 5; eggTaps = 0; awaitTap = null;
         if (newColor) recolor(packTypeId);
         else requestPaint();
       },
@@ -946,6 +1157,6 @@
     };
   }
 
-  createPackScene.types = ['plastic', 'foil', 'blob'];
+  createPackScene.types = ['plastic', 'foil', 'blob', 'gumball', 'egg', 'gift'];
   globalThis.createPackScene = createPackScene;
 })();
