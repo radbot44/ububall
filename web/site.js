@@ -6,17 +6,21 @@
   let packScene = null, offer = null;
   const choiceViews = Array.from({ length: 3 }, (_, i) => {
     const card = document.createElement('article'); card.className = 'pack-option';
-    const title = document.createElement('h2'); title.textContent = `Pack ${i + 1}`;
     const button = document.createElement('button'); button.className = 'candy-pack'; button.disabled = true;
     button.setAttribute('aria-label', `Choose pack ${i + 1}`);
     const canvas = document.createElement('canvas'); canvas.setAttribute('aria-hidden', 'true'); button.append(canvas);
-    const choose = document.createElement('button'); choose.className = 'choose-pack'; choose.textContent = 'Choose this pack'; choose.disabled = true;
-    card.append(title, button, choose); $('pack-choices').append(card);
+    const sparkle = document.createElement('span'); sparkle.className = 'pack-sparkle'; sparkle.setAttribute('aria-hidden', 'true');
+    for (let s = 0; s < 3; s++) sparkle.append(Object.assign(document.createElement('i'), { textContent: '\u2726' }));
+    card.style.setProperty('--bob-delay', `${-i * .7}s`);
+    card.append(button, sparkle); $('pack-choices').append(card);
     let scene = null;
     try { scene = createPackScene(canvas); } catch { canvas.hidden = true; button.textContent = `Pack ${i + 1}`; }
-    button.addEventListener('click', () => selectPack(i)); choose.addEventListener('click', () => selectPack(i));
-    return { card, button, choose, scene };
+    button.addEventListener('click', () => selectPack(i));
+    return { card, button, scene };
   });
+  // Sounds need a page gesture first; packs dealt on page load stay silent.
+  const sound = (kind, name) => { if (navigator.userActivation?.hasBeenActive) window.ubuAudio?.[kind]?.(name); };
+  let outOfPacks = false;
   let pack = null, packKey = '', pendingKey = '', collectionVersion = 0, revealIndex = 0;
   let viewerView = 'ubu';
   const collectionMap = new Map();
@@ -107,15 +111,14 @@
     }));
     return { items, seen };
   }
+  // The shop deals packs by itself; the one button only continues an unrevealed pack or retries.
   function updatePackButton() {
-    const retry = pendingKey && localStorage.getItem(pendingKey);
-    $('mint').disabled = busy || !session?.owner || !config.ready || (!pack && !retry && !config.lifetimeLimit);
-    const label = pack ? 'Continue pack' : retry ? 'Resume pack choices' : 'Show packs';
+    const canDeal = session?.owner && config.ready && (config.lifetimeLimit || (pendingKey && localStorage.getItem(pendingKey)));
+    const label = pack ? 'Continue pack' : 'Try again';
     $('mint').textContent = label;
-    $('mint').hidden = Boolean(offer && !pack && !busy);
-    $('mint').setAttribute('aria-label', label);
-    $('pack-hint').textContent = busy ? 'Preparing your pack…' : offer && !pack ? `Choose one pack. These choices are held until ${new Date(offer.expires * 1000).toLocaleString()}.` : session?.owner ? label : '';
-    for (const view of choiceViews) view.button.disabled = view.choose.disabled = busy || !offer || Boolean(pack);
+    $('mint').hidden = busy || !(pack || (canDeal && !offer && !outOfPacks));
+    $('pack-hint').textContent = busy && !offer ? 'Shuffling packs…' : offer && !pack && !busy ? 'Pick a pack!' : '';
+    for (const view of choiceViews) view.button.disabled = busy || !offer || Boolean(pack);
   }
   // Above 99 a run of nines extends the display to the first other digit, so rounding never
   // carries into them; six or more nines may round up.
@@ -492,11 +495,11 @@
     try {
       localStorage.removeItem(packKey);
       pack = null;
-      offer = null; $('pack-choices').hidden = true; $('pack-legend').hidden = true;
+      offer = null; $('pack-choices').hidden = true;
       packScene?.reset();
       status('');
       updatePackButton();
-
+      void loadChoices();
       return true;
     } catch (error) {
       $('reveal-progress').textContent = error.message;
@@ -895,18 +898,28 @@
     const link = document.createElement('a'); link.href = url; link.download = current.name.replaceAll(' ', '-') + '.ubu';
     document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
+  // Packs are dealt onto the table one after another, then bob in place until one is picked.
   function showChoices(data) {
     offer = data;
-    $('pack-choices').hidden = false; $('pack-legend').hidden = false;
+    $('pack-choices').hidden = false;
     $('pack-choices').classList.remove('choosing');
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
     choiceViews.forEach((view, i) => {
-      const option = data.choices[i]; view.card.classList.remove('selected');
+      const option = data.choices[i]; view.card.classList.remove('selected', 'leaving');
       view.scene?.setHints(option.type, option.hints);
       const hasSpecial = option.hints.some(h => h.textured);
+      view.card.classList.toggle('special', hasSpecial);
+      view.card.style.setProperty('--pack-glow', option.hints[0].background);
       const description = `Pack ${i + 1}: backgrounds ${option.hints.map(h => h.background).join(', ')}${hasSpecial ? '; special finish in pack' : '; matte finishes'}`;
       view.button.setAttribute('aria-label', description);
       view.button.title = description;
+      if (!still) view.card.animate([
+        { transform: `translateY(-70px) rotate(${(i - 1) * 14}deg) scale(.7)`, opacity: 0 },
+        { transform: 'translateY(8px) rotate(0deg) scale(1.04)', opacity: 1, offset: .7 },
+        { transform: 'none', opacity: 1 }
+      ], { duration: 520, delay: i * 120, easing: 'cubic-bezier(.2, .8, .3, 1)', fill: 'backwards' });
     });
+    sound('playPack', 'deal');
   }
   async function acceptPack(data) {
     pack = await readPack(data.certificates);
@@ -924,37 +937,43 @@
       const data = await api('/api/packs', post({ request }));
       if (data.completed) {
         await acceptPack(await api('/api/mint', post({ request: data.request })));
-        $('pack-choices').hidden = true; $('pack-legend').hidden = true;
-        status('Your selected pack is ready. Continue to reveal it.');
+        $('pack-choices').hidden = true;
+        status('Your pack is ready.');
       } else {
         localStorage.setItem(pendingKey, data.request);
         localStorage.removeItem(pendingKey + ':choice');
         showChoices(data);
       }
-    } catch (error) { status(error.message); }
-    finally { busy = false; updatePackButton(); }
+    } catch (error) {
+      outOfPacks = error.message === 'Lifetime mint limit reached.';
+      status(outOfPacks ? "You've opened every pack you can. Enjoy your ubus!" : error.message);
+    } finally { busy = false; updatePackButton(); }
   }
   async function selectPack(index) {
     if (busy || pack || !offer) return;
     const option = offer.choices[index], selection = { request: offer.request, choice: option.choice };
     busy = true; updatePackButton();
+    // The pick lands at once: the others fly off while the mint confirms the choice.
+    choiceViews.forEach((view, i) => view.card.classList.toggle(i === index ? 'selected' : 'leaving', true));
+    sound('playPack', 'pick');
     try {
       localStorage.setItem(pendingKey + ':choice', JSON.stringify(selection));
       ++collectionVersion;
-      const data = await api('/api/mint', post(selection));
+      const [data] = await Promise.all([api('/api/mint', post(selection)), new Promise(resolve => setTimeout(resolve, 380))]);
       await acceptPack(data);
       packScene = choiceViews[index].scene;
-      choiceViews[index].card.classList.add('selected'); $('pack-choices').classList.add('choosing');
+      $('pack-choices').classList.add('choosing');
+      sound('playPack', 'tear');
       await packScene?.play(pack.items.length, pack.items.map(item => item.model));
-      $('pack-choices').hidden = true; $('pack-legend').hidden = true;
+      $('pack-choices').hidden = true;
       revealIndex = 0;
       showReveal();
       status('');
     } catch (error) {
       // Refresh authoritative state after an ambiguous selection; never submit a
       // second choice automatically. A committed selection is recovered by request.
-      offer = null; $('pack-choices').hidden = true; $('pack-legend').hidden = true;
-      status(error.message + ' Resume pack choices to recover or try again.');
+      offer = null; $('pack-choices').hidden = true;
+      status(error.message + ' Try again to recover your pack.');
     } finally { busy = false; packScene?.reset(); updatePackButton(); }
   }
   $('mint').addEventListener('click', async () => {
@@ -987,9 +1006,7 @@
             localStorage.removeItem(pendingKey + ':choice');
           }
           updatePackButton();
-          status(config.ready && config.lifetimeLimit ? `${config.lifetimeLimit} pack${config.lifetimeLimit === 1 ? '' : 's'} per account` : 'Minting closed');
-          if (pack) status('');
-          else if (localStorage.getItem(pendingKey)) status('Opening interrupted. Retry to continue.');
+          status(pack || (config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey))) ? '' : 'Minting closed');
           if (config.ready) {
             try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
             if (!pack && (config.lifetimeLimit || localStorage.getItem(pendingKey))) await loadChoices();

@@ -26,6 +26,12 @@ function issuanceRequest(owner, request, lifetimeLimit) {
   if (lifetimeLimit !== undefined && (!Number.isSafeInteger(lifetimeLimit) || lifetimeLimit < 0)) throw new Error('Invalid lifetime limit.');
 }
 
+// A pack's wrapper comes from its random choice token, so each pack is independently random yet
+// stays the same when an offer is shown again. Summing the 6-bit digits keeps the bias negligible.
+const PACK_TYPES = ['plastic', 'foil', 'blob'];
+const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const packType = token => PACK_TYPES[[...token].reduce((sum, digit) => sum + BASE64URL.indexOf(digit), 0) % PACK_TYPES.length];
+
 function randomBelow(size) {
   const limit = 4294967296 - (4294967296 % size);
   let roll;
@@ -227,7 +233,7 @@ class Mint {
       }
       const choices = this.exec('SELECT * FROM pack_choices WHERE owner=? ORDER BY position', owner).map(choice => {
         const items = this.exec('SELECT dna FROM inventory WHERE pack_slot=(SELECT pack_slot FROM inventory WHERE id=?) ORDER BY quintile', choice.anchor);
-        return { choice: choice.token, type: ['plastic', 'foil', 'blob'][choice.position], hints: items.map(item => {
+        return { choice: choice.token, type: packType(choice.token), hints: items.map(item => {
           const attributes = decode(fromCode(item.dna)).attributes;
           return {
             background: attributes.background.hex,

@@ -690,6 +690,54 @@
     osc.stop(now + 0.08);
   }
 
+  // Pack sounds from filtered noise: 'deal' flicks three packs onto the table, 'pick' is a soft
+  // pop as one is chosen, and 'tear' rips the wrapper open.
+  function playPack(kind, options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx);
+    const now = ctx.currentTime;
+    const noise = (at, length, from, to, level, q = 1.2) => {
+      const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * length), ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      const source = ctx.createBufferSource();
+      const filter = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+      const start = now + at;
+      source.buffer = buffer;
+      filter.type = 'bandpass';
+      filter.Q.setValueAtTime(q, start);
+      filter.frequency.setValueAtTime(from, start);
+      filter.frequency.exponentialRampToValueAtTime(to, start + length);
+      strike(gain, level, start, start + length);
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(master);
+      source.start(start);
+      source.stop(start + length + 0.02);
+    };
+    if (kind === 'deal') {
+      for (let i = 0; i < 3; i++) noise(i * 0.12, 0.09, 2600, 900, 0.5);
+    } else if (kind === 'pick') {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(420, now);
+      osc.frequency.exponentialRampToValueAtTime(940, now + 0.08);
+      strike(gain, 0.45, now, now + 0.14);
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start(now);
+      osc.stop(now + 0.16);
+      noise(0, 0.05, 3200, 1800, 0.25);
+    } else if (kind === 'tear') {
+      // A rising rip with a few crackles as the seal gives way.
+      noise(0, 0.42, 700, 4200, 0.55, 0.8);
+      for (const at of [0.05, 0.13, 0.2, 0.29]) noise(at, 0.03, 5200, 3000, 0.3, 3);
+    }
+  }
+
   // Coin tinks: each strike is a bright, inharmonic metal ping. 'flick' throws the coin;
   // 'land' rattles it to rest with quickening, fading bounces.
   function playCoin(kind = 'land', options = {}) {
@@ -1356,6 +1404,7 @@
     playCollision,
     playBallHit,
     playCoin,
+    playPack,
     playWallHit,
     playGoalHit,
     playSuper,
