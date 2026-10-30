@@ -777,10 +777,6 @@
         if (Math.random() < rate * speed * step) make(t, speed);
       }
     };
-    // A brief metallic ring: inharmonic partials that sweep up for a 'shink' or sit still for a 'tink'.
-    const ring = (t, base, rise, length, level, pan = 0) => {
-      for (const [ratio, part] of [[1, 1], [2.76, 0.45], [5.4, 0.2]]) blip(ctx, master, t, length * (1.4 - part * 0.4), base * ratio, base * ratio * rise, level * part, pan);
-    };
     if (type === 'plastic') {
       // Cellophane: a sprinkle of soft crinkles as the twisted ends unwind, and a few more as the
       // film peels back. Lower, broader grains keep it gentle rather than sharp.
@@ -790,18 +786,26 @@
       scatter(0.08, 0.38, 20, crinkle);
       scatter(0.62, 0.85, 16, crinkle);
     } else if (type === 'foil') {
-      // Foil: a bright metallic 'shink' as the sheet rips open, and a light 'tink' as the torn
-      // flaps fall away.
-      noiseGrain(ctx, master, at(0.1), 0.22, { freq: 3800, to: 6400, q: 6, level: 0.16 });
-      ring(at(0.1), 1900, 1.35, 0.26, 0.2);
-      ring(at(0.84), 2600, 1, 0.16, 0.14, 0.2);
+      // Foil: a short, ragged rip as the sheet tears, with a thin metallic crinkle or two, and a
+      // faint crumple as the flaps fall away.
+      scatter(0.1, 0.48, 60, (t, speed) => noiseGrain(ctx, master, t, rand(0.003, 0.008), {
+        freq: rand(1400, 3400), q: rand(0.8, 1.6), level: rand(0.18, 0.42) * (0.4 + speed * 0.6)
+      }));
+      scatter(0.1, 0.48, 3, t => noiseGrain(ctx, master, t, rand(0.015, 0.03), { freq: rand(4800, 6800), q: rand(8, 12), level: rand(0.15, 0.3), pan: rand(-0.4, 0.4) }));
+      [0.83, 0.88].forEach(fraction => noiseGrain(ctx, master, at(fraction), rand(0.008, 0.016), { freq: rand(2600, 5000), q: rand(3, 6), level: rand(0.12, 0.22), pan: rand(-0.5, 0.5) }));
     } else if (type === 'blob') {
-      // Blob: wet, gloopy drips and burbles as the goo stretches and splits (droplet blips that
-      // rise in pitch, with a few deep glorps), pops as the lobes come apart, then a bubbly bloop
-      // as each becomes an ubu, left to right.
-      scatter(0.12, 0.5, 16, (t, speed) => blip(ctx, master, t, rand(0.035, 0.06), rand(260, 520), rand(700, 1300), 0.16 * (0.5 + speed / 2), rand(-0.4, 0.4)));
-      scatter(0.12, 0.5, 3, t => blip(ctx, master, t, rand(0.09, 0.14), rand(150, 190), rand(70, 90), 0.24, rand(-0.3, 0.3)));
-      [0.44, 0.5, 0.56].forEach((fraction, i) => blip(ctx, master, at(fraction), 0.07, 160, 320, 0.26, (i - 1) * 0.35));
+      // Blob: sludgy squirts as the goo stretches and splits, each a thick gurgle of low, dense
+      // grains that sinks in pitch and trails off in a soft hiss ('glurrsshh'), then a bubbly
+      // bloop as each lobe becomes an ubu, left to right.
+      const squirt = (fraction, pan) => {
+        const start = at(fraction), length = 0.36;
+        for (let t = start; t < start + length; t += rand(0.008, 0.016)) {
+          const x = (t - start) / length;
+          noiseGrain(ctx, master, t, rand(0.018, 0.03), { freq: rand(700, 1000) * (1 - x * 0.6), q: rand(3, 5), level: 0.32 * (1 - x * 0.7), type: 'lowpass', pan });
+        }
+        noiseGrain(ctx, master, start + length * 0.7, 0.2, { freq: 2600, to: 1400, q: 0.7, level: 0.08, pan });
+      };
+      squirt(0.16, -0.3); squirt(0.3, 0.3); squirt(0.44, 0);
       for (let i = 0; i < 5; i++) blip(ctx, master, at(0.67 + i * 0.03), 0.09, 320, 640, 0.22, (i - 2) * 0.3);
     }
   }
