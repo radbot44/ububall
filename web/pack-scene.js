@@ -946,7 +946,7 @@
     // A golden folded cookie holding a fortune slip printed with five dots in the pack's colours; a
     // dusting of gold hints at a special finish. It strains, snaps in two and the slip unfurls
     // as the ubus appear.
-    let crumbs = [], dust = [];
+    let crumbs = [], dust = [], cookieLayer, cookieLayerCtx;
     function setupCookie() {
       const rolls = crypto.getRandomValues(new Uint16Array(160)), u = i => rolls[i] / 65535;
       crumbs = Array.from({ length: 26 }, (_, i) => ({ x: u(i) * 210 - 105, y: u(i + 26) * 90 - 50, r: .8 + u(i + 52) * 1.8 }));
@@ -954,7 +954,7 @@
     }
     // Two broad wafer faces overlap in three-quarter view. The long diagonal fold curls into
     // the crown; the rear wing ends above the pointed front wing, leaving an open notch.
-    function cookiePath() {
+    function cookiePath(ctx) {
       ctx.beginPath(); ctx.moveTo(-120, -6);
       ctx.bezierCurveTo(-103, -63, -25, -112, 37, -91);
       ctx.bezierCurveTo(93, -73, 137, -22, 124, 31);
@@ -964,7 +964,7 @@
       ctx.bezierCurveTo(-67, 14, -105, 8, -117, 1);
       ctx.quadraticCurveTo(-122, -2, -120, -6); ctx.closePath();
     }
-    function cookieFront() {
+    function cookieFront(ctx) {
       ctx.beginPath(); ctx.moveTo(-73, 76);
       ctx.bezierCurveTo(-46, 28, -7, -24, 33, -66);
       ctx.bezierCurveTo(46, -80, 35, -85, 25, -75);
@@ -973,10 +973,10 @@
       ctx.bezierCurveTo(80, 88, 14, 109, -56, 96);
       ctx.bezierCurveTo(-77, 93, -82, 92, -73, 76); ctx.closePath();
     }
-    function cookieBody() {
-      cookiePath(); ctx.fillStyle = gradient(ctx, -65, -85, 65, 105, [[0, '#f4d496'], [.5, '#e9bd75'], [1, '#bc803d']]); ctx.fill();
+    function cookieBody(ctx) {
+      cookiePath(ctx); ctx.fillStyle = gradient(ctx, -65, -85, 65, 105, [[0, '#f4d496'], [.5, '#e9bd75'], [1, '#bc803d']]); ctx.fill();
       ctx.strokeStyle = '#895025'; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.stroke();
-      ctx.save(); cookiePath(); ctx.clip();
+      ctx.save(); cookiePath(ctx); ctx.clip();
       // The rear face folds down toward the long crease instead of forming a rounded lobe.
       ctx.beginPath(); ctx.moveTo(-119, -5);
       ctx.bezierCurveTo(-77, 25, -9, -29, 29, -73);
@@ -992,10 +992,10 @@
       ctx.bezierCurveTo(35, -87, 40, -78, 28, -68);
       ctx.bezierCurveTo(-13, -25, -51, 29, -79, 80); ctx.closePath();
       ctx.fillStyle = '#875025'; ctx.fill();
-      cookieFront();
+      cookieFront(ctx);
       ctx.fillStyle = gradient(ctx, -35 + pointer * 15, -65, 95 + pointer * 15, 85, [[0, '#ffe3a2'], [.52, '#efc781'], [1, '#d29b53']]);
       ctx.fill();
-      ctx.save(); cookieFront(); ctx.clip();
+      ctx.save(); cookieFront(ctx); ctx.clip();
       // A broad crescent of toasted shading gives the folded face depth.
       ctx.beginPath(); ctx.moveTo(67, -76);
       ctx.bezierCurveTo(110, -6, 83, 49, 7, 80);
@@ -1024,7 +1024,7 @@
       ctx.strokeStyle = '#945a2a'; ctx.lineWidth = 2.5; ctx.stroke();
       ctx.restore();
     }
-    function fortuneSlip(rise, unfurl) {
+    function fortuneSlip(ctx, rise, unfurl) {
       ctx.save(); ctx.translate(mix(53, 0, rise), mix(99, 4, rise)); ctx.rotate(.65 * (1 - unfurl));
       const w = mix(70, 220, unfurl), h = mix(22, 48, unfurl), curl = unfurl * 5;
       ctx.beginPath(); ctx.moveTo(-w / 2, -h / 2 + curl);
@@ -1036,8 +1036,12 @@
       for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.arc((i - 2) * mix(14, 32, unfurl), 0, mix(4.2, 6, unfurl), 0, Math.PI * 2); ctx.fillStyle = hintHex(i); ctx.fill(); }
       ctx.restore();
     }
-    function cookieHalf(side, turn, apart, shell) {
-      ctx.save(); ctx.globalAlpha = 1 - apart;
+    function cookieCrease(ctx) {
+      ctx.bezierCurveTo(50, -88, 48, -79, 33, -66);
+      ctx.bezierCurveTo(10, -46, -16, -18, -36, 10);
+    }
+    function cookieHalf(ctx, side, turn, apart, shell) {
+      ctx.save();
       // Rotate the existing diagonal crease upright. The foreshortened rear wing unfolds as
       // it turns, so both mouths face the fortune instead of cutting across either wafer face.
       ctx.translate((side * 92 + 20) * turn + side * apart * 70, (side < 0 ? 48 : -4) * turn + apart * 55);
@@ -1045,38 +1049,58 @@
       ctx.rotate(-.58 * turn + side * apart * .12);
       if (shell) {
         ctx.beginPath(); ctx.moveTo(37, -140); ctx.lineTo(37, -91);
-        ctx.bezierCurveTo(50, -88, 48, -79, 33, -66);
-        ctx.bezierCurveTo(10, -46, -16, -18, -36, 10);
+        cookieCrease(ctx);
         ctx.lineTo(-140, 50); ctx.lineTo(-160, 140);
         ctx.lineTo(side * 160, 140); ctx.lineTo(side * 160, -140); ctx.closePath(); ctx.clip();
-        cookieBody();
+        cookieBody(ctx);
       } else if (turn) {
-        // The cavity opens toward the gap, behind the paper and the shell's cut edge.
-        const bx = side < 0 ? -36 : -79, by = side < 0 ? 10 : 80;
+        // Close the cavity against the actual curved cut, including the front wing's rolled
+        // tip. A straight chord here leaves a gap at the crown and buries the opposite rim.
+        const bx = side < 0 ? -36 : -75, by = side < 0 ? 10 : 91;
         const depth = -side * 42 * turn, nx = depth * .82, ny = depth * .57;
+        const rim = () => ctx.bezierCurveTo(mix(37, bx, .75) + nx, mix(-91, by, .75) + ny,
+          50 + nx * .65, -88 + ny * .15, 37, -91);
         ctx.beginPath(); ctx.moveTo(37, -91);
-        ctx.bezierCurveTo(mix(37, bx, .3) + nx, mix(-91, by, .3) + ny,
-          mix(37, bx, .7) + nx, mix(-91, by, .7) + ny, bx, by);
-        ctx.quadraticCurveTo(mix(37, bx, .5) - nx * .2, mix(-91, by, .5) - ny * .2, 37, -91); ctx.closePath();
+        cookieCrease(ctx);
+        if (side > 0) { ctx.lineTo(-72, 65); ctx.quadraticCurveTo(-82, 83, bx, by); }
+        rim(); ctx.closePath();
         ctx.fillStyle = gradient(ctx, 37, -91, bx, by, [[0, '#6c3517'], [.5, '#8b441c'], [1, '#4d2512']]); ctx.fill();
-        ctx.strokeStyle = '#a9682c'; ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(bx, by); rim();
+        ctx.strokeStyle = '#a9682c'; ctx.lineWidth = 5; ctx.lineCap = 'butt'; ctx.stroke();
         ctx.strokeStyle = '#f4ce83'; ctx.lineWidth = 2; ctx.stroke();
       }
       ctx.restore();
     }
     function renderCookie(t) {
       const strain = ease(.04, .26, t), snap = ease(.26, .49, t), apart = ease(.65, .84, t), slip = ease(.27, .49, t);
+      if (apart === 1) return;
       const shiver = Math.sin(t * 160) * 1.6 * strain * (1 - snap);
-      ctx.save(); ctx.translate(shiver, 14);
-      ctx.save(); ctx.globalAlpha = 1 - apart;
-      ctx.beginPath(); ctx.ellipse(0, 115, 110, 10, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000038'; ctx.filter = 'blur(6px)'; ctx.fill(); ctx.filter = 'none';
-      ctx.restore();
+      let target = ctx;
+      // Flatten the opaque shell, hollow and paper before fading. Reuse a screen-sized layer
+      // only during the fade, preserving the current device scale and pointer transform.
+      if (apart) {
+        if (!cookieLayer) { cookieLayer = document.createElement('canvas'); cookieLayerCtx = cookieLayer.getContext('2d'); }
+        if (cookieLayer.width !== canvas.width || cookieLayer.height !== canvas.height) {
+          cookieLayer.width = canvas.width; cookieLayer.height = canvas.height;
+        }
+        target = cookieLayerCtx;
+        target.resetTransform(); target.clearRect(0, 0, cookieLayer.width, cookieLayer.height);
+        target.setTransform(ctx.getTransform());
+      }
+      target.save(); target.translate(shiver, 14);
+      target.save();
+      target.beginPath(); target.ellipse(0, 115, 110, 10, 0, 0, Math.PI * 2); target.fillStyle = '#00000038'; target.filter = 'blur(6px)'; target.fill();
+      target.restore();
       // Only the tip peeks out at rest; the enlarged fortune bridges the open mouths.
-      if (!snap) { fortuneSlip(0, 0); cookieBody(); ctx.restore(); return; }
-      for (const side of [-1, 1]) cookieHalf(side, snap, apart, false);
-      ctx.save(); ctx.globalAlpha = 1 - apart; fortuneSlip(slip, slip); ctx.restore();
-      for (const side of [-1, 1]) cookieHalf(side, snap, apart, true);
-      ctx.restore();
+      if (!snap) { fortuneSlip(target, 0, 0); cookieBody(target); target.restore(); return; }
+      for (const side of [-1, 1]) cookieHalf(target, side, snap, apart, false);
+      fortuneSlip(target, slip, slip);
+      for (const side of [-1, 1]) cookieHalf(target, side, snap, apart, true);
+      target.restore();
+      if (apart) {
+        ctx.save(); ctx.resetTransform(); ctx.globalAlpha *= 1 - apart;
+        ctx.drawImage(cookieLayer, 0, 0); ctx.restore();
+      }
     }
 
     // --- Wax-Sealed Envelope ---
