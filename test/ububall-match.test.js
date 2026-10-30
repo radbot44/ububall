@@ -21,7 +21,7 @@ test('Classic, Blitz and Pulse combine independently', () => {
   assert.equal(M.planningMilliseconds('classic-pulse'),null);
   assert.equal(M.turnTicks('standard'),2880); assert.equal(M.turnTicks('classic-pulse'),240);
   const a={}, b={}; M.applyStats(P,a,{impulse:200},'blitz'); M.applyStats(P,b,{impulse:200},'classic-pulse');
-  assert.equal(a.impulse,P.IMPULSE*P.multiplier(200)); assert.equal(b.impulse,P.IMPULSE/2);
+  assert.equal(a.impulse,P.IMPULSE*P.multiplier(200)); assert.equal(b.impulse,P.IMPULSE);
 });
 test('shared meter rules exclude super users and the opposing team', () => {
   const bodies=P.kickoff(); bodies.forEach(b=>b.meter=0); bodies[1].usedSuperThisTurn=true;
@@ -169,7 +169,7 @@ function pulseState(mode) {
 }
 const idle=()=>({angle:0,power:0,spin:0,superArm:false,guard:false});
 test('Pulse turns stop after one second and carry momentum into the next turn', () => {
-  const moves=Array.from({length:6},idle); moves[1]={...idle(),power:1};
+  const moves=Array.from({length:6},idle); moves[1]={...idle(),power:.5};
   const start=pulseState('pulse'); start.bodies[4].y=500; // Clear the lane ahead.
   const pulse=M.resolveTurn(P,start,moves);
   assert.equal(pulse.replay.ticks,240); assert.equal(pulse.state.phase,'plan');
@@ -181,7 +181,6 @@ test('Pulse turns stop after one second and carry momentum into the next turn', 
   const flat=pulseState('standard'); flat.bodies[4].y=500;
   const standard=M.resolveTurn(P,flat,moves);
   assert.ok(standard.replay.ticks>240); assert.equal(standard.state.bodies[1].vx,0);
-  assert.ok(standard.replay.initialBodies[1].impulse===2*pulse.replay.initialBodies[1].impulse);
 });
 test('guard is explicit and brakes a moving ubu', () => {
   const state=pulseState('pulse'); Object.assign(state.bodies[1],{vx:300,vy:-200});
@@ -200,7 +199,7 @@ test('a Pulse goal credits the last toucher from an earlier turn', () => {
 });
 test('goal replays re-simulate a chained Pulse play exactly and ease to half speed', () => {
   let state=pulseState('pulse'); state.bodies[3].y=520; state.bodies[4].y=500; Object.assign(state.bodies[6],{x:420,y:300});
-  const moves=Array.from({length:6},idle); moves[0]={...idle(),power:1};
+  const moves=Array.from({length:6},idle); moves[0]={...idle(),power:.5};
   const segments=[];
   for (let turn=0; turn<20 && state.phase!=='goal'; turn++) {
     const result=M.resolveTurn(P,state,turn<2?moves:Array.from({length:6},idle));
@@ -217,4 +216,14 @@ test('goal replays re-simulate a chained Pulse play exactly and ease to half spe
   assert.ok(M.replaySpeed(150)>.5 && M.replaySpeed(150)<1);
   const ms=M.replayMilliseconds(P,480)-M.GOAL_REPLAY_DELAY-M.GOAL_REPLAY_HOLD;
   assert.ok(ms>2000 && ms<3000);
+});
+test('launches steer toward the arrow velocity and cannot exceed full-launch speed', () => {
+  const body=P.kickoff()[0]; M.applyStats(P,body,{},'pulse'); const full=body.impulse/body.mass;
+  const launch=(angle,power)=>P.launch([body],[{angle,power,spin:0}]);
+  launch(0,1); assert.equal(body.vx,full); assert.equal(body.vy,0);
+  launch(0,1); assert.equal(body.vx,full); // Repeating a full launch adds nothing.
+  launch(Math.PI,1); assert.ok(Math.abs(body.vx)<1e-9); // A full reverse at top speed brakes to a stop.
+  body.vx=full; launch(Math.PI/2,1); assert.ok(Math.hypot(body.vx,body.vy)<=full+1e-9); assert.ok(body.vy>0);
+  body.vx=2*full; body.vy=0; launch(0,0); assert.equal(body.vx,2*full); // No power coasts.
+  launch(0,1); assert.equal(body.vx,full); // Over-speed from a hit is reined in toward the arrow.
 });

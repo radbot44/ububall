@@ -442,7 +442,6 @@
     $('launch').disabled = phase === 'play' || phase === 'cpu-wait';
     for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = phase === 'play' || phase === 'cpu-wait';
     $('restore-shot').disabled = phase === 'play' || phase === 'cpu-wait' || !lastPlans;
-    $('replay-goal').hidden = Boolean(online?.active || goalReplay || goalReplayAt) || !['goal', 'over'].includes(phase) || !playSegments.length;
     if (!readStats() || classicMode()) $('apply-stats').disabled = true;
     if (classicMode()) for (const id of ['stat-super', 'fill-meter', 'normal-stats']) $(id).disabled = true;
     document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
@@ -1002,6 +1001,10 @@
     shock: (source, radius) => { syncReplay(); handleShockwave(replayView(source), radius); },
     super: (key, stage, body, target = null) => { syncReplay(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
   };
+  function restartGoalReplay() {
+    Object.assign(goalReplay, { index: -1, played: 0, steps: 0, doneAt: 0 });
+    clearEffects(); nextReplaySegment();
+  }
   function nextReplaySegment() {
     const r = goalReplay, segment = r.segments[++r.index];
     r.sim = structuredClone(segment.bodies); r.tick = 0;
@@ -1013,14 +1016,15 @@
     if (!segments.length || (online?.active && online.state?.phase !== 'resolving')) return;
     endGoalReplay();
     const real = bodies, scorer = real.indexOf(scoringPlayer);
-    goalReplay = { segments, index: -1, played: 0, total: segments.reduce((n, s) => n + s.ticks, 0), steps: 0, doneAt: 0,
+    goalReplay = { segments, total: segments.reduce((n, s) => n + s.ticks, 0),
       real, display: structuredClone(real), seat: online?.active ? online.state.seat : 0, scorer };
     bodies = goalReplay.display; scoringPlayer = bodies[scorer] || null;
-    clearEffects(); nextReplaySegment(); sync(); draw();
+    restartGoalReplay(); draw();
   }
+  // The replay loops until the next kickoff (or, online, until the server moves on).
   function advanceGoalReplay(delta) {
     const r = goalReplay;
-    if (r.played >= r.total) { if (performance.now() >= r.doneAt) endGoalReplay(); return; }
+    if (r.played >= r.total) { if (performance.now() >= r.doneAt) restartGoalReplay(); draw(); return; }
     r.steps += delta / P.DT * ububallMatch.replaySpeed(r.total - r.played);
     for (let n = 0; r.steps >= 1 && r.played < r.total && n < 48; n++) {
       if (r.tick >= r.segments[r.index].ticks) nextReplaySegment();
@@ -1120,9 +1124,7 @@
     plans[i] = { ...idlePlan(), guard: !plans[i].guard };
     sync(); draw();
   }
-  $('hold').onclick = () => toggleGuard(selected);
-  $('replay-goal').onclick = startGoalReplay;
-  function point(event) {
+  $('hold').onclick = () => toggleGuard(selected);  function point(event) {
     const r = canvas.getBoundingClientRect();
     if (isPortrait) {
       const cx = r.left + r.width / 2;

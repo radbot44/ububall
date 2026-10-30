@@ -5,7 +5,7 @@
   // Classic, Blitz and Pulse are independent rules, joined in this order; 'standard' has none.
   const RULES = ['classic', 'blitz', 'pulse'];
   const MODES = Array.from({ length: 8 }, (_, n) => RULES.filter((r, i) => n >> i & 1).join('-') || 'standard');
-  const BLITZ_MILLISECONDS = 5000, TURN_TICKS = 2880, PULSE_TICKS = 240, PULSE_IMPULSE = .5;
+  const BLITZ_MILLISECONDS = 5000, TURN_TICKS = 2880, PULSE_TICKS = 240;
   const GOAL_REPLAY_DELAY = 1600, GOAL_REPLAY_HOLD = 1200;
   // Goal replays run in real time, then ease to half speed over the last second before the goal.
   function replaySpeed(ticksLeft) { return .5 + .5 * Math.min(1, Math.max(0, (ticksLeft - 72) / 168)); }
@@ -38,7 +38,6 @@
   function turnTicks(mode) { return rule(mode, 'pulse') ? PULSE_TICKS : TURN_TICKS; }
   function applyStats(P, body, raw, mode) {
     P.applyStats(body, rule(mode, 'classic') ? {} : raw);
-    if (rule(mode, 'pulse')) body.impulse *= PULSE_IMPULSE;
   }
   function gainMeter(P, bodies, stats, body, amount, classic = false) {
     const changed = [];

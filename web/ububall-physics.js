@@ -432,11 +432,16 @@
         b.vx *= GUARD_BRAKE; b.vy *= GUARD_BRAKE; b.omega *= GUARD_BRAKE;
         return;
       }
-      // Launches add to current motion, so a moving ubu keeps its momentum.
+      // A launch steers toward the arrow's velocity using at most one full launch of change,
+      // so a moving ubu can turn or brake but its own launches never exceed full-launch speed.
+      // From rest this is the plain launch. No power leaves the ubu coasting.
       const plan = plans[i] || { angle: 0, power: 0 };
-      const impulse = b.impulse || IMPULSE;
-      const speed = impulse / b.mass * Math.max(0, Math.min(1, plan.power));
-      b.vx += Math.cos(plan.angle) * speed; b.vy += Math.sin(plan.angle) * speed;
+      const full = (b.impulse || IMPULSE) / b.mass, power = Math.max(0, Math.min(1, plan.power));
+      if (power > 0) {
+        const dx = Math.cos(plan.angle) * full * power - b.vx, dy = Math.sin(plan.angle) * full * power - b.vy;
+        const scale = Math.min(1, full / (Math.hypot(dx, dy) || 1));
+        b.vx += dx * scale; b.vy += dy * scale;
+      }
       b.omega = Math.max(-b.maxSpin, Math.min(b.maxSpin, b.omega + Math.max(-1, Math.min(1, plan.spin || 0)) * b.maxSpin));
       if (plan.power > 0) b.closeSpinBonus = b.omega * CLOSE_SPIN_GAIN;
     });
