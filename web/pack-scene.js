@@ -943,7 +943,7 @@
     }
 
     // --- Fortune Cookie ---
-    // A golden folded cookie hiding a fortune slip printed with five dots in the pack's colours; a
+    // A golden folded cookie holding a fortune slip printed with five dots in the pack's colours; a
     // dusting of gold hints at a special finish. It strains, snaps in two and the slip unfurls
     // as the ubus appear.
     let crumbs = [], dust = [];
@@ -952,49 +952,80 @@
       crumbs = Array.from({ length: 26 }, (_, i) => ({ x: u(i) * 210 - 105, y: u(i + 26) * 90 - 50, r: .8 + u(i + 52) * 1.8 }));
       dust = Array.from({ length: 30 }, (_, i) => ({ x: u(i + 80) * 200 - 100, y: u(i + 110) * 80 - 50 }));
     }
-    // A folded half-moon seen from the front: a full rounded dome whose two lower lobes bulge
-    // down on either side of a pinch, with the thick folded rim showing along the top.
+    // Two broad wafer faces overlap in three-quarter view. The long diagonal fold curls into
+    // the crown; the rear wing ends above the pointed front wing, leaving an open notch.
     function cookiePath() {
-      ctx.beginPath(); ctx.moveTo(-118, 34);
-      ctx.bezierCurveTo(-124, -36, -70, -88, 0, -88); ctx.bezierCurveTo(70, -88, 124, -36, 118, 34);
-      ctx.bezierCurveTo(112, 70, 56, 80, 28, 60); ctx.bezierCurveTo(18, 52, 10, 40, 6, 28);
-      ctx.bezierCurveTo(0, 40, -10, 52, -24, 60); ctx.bezierCurveTo(-54, 80, -112, 70, -118, 34); ctx.closePath();
+      ctx.beginPath(); ctx.moveTo(-120, -6);
+      ctx.bezierCurveTo(-103, -63, -25, -112, 37, -91);
+      ctx.bezierCurveTo(93, -73, 137, -22, 124, 31);
+      ctx.bezierCurveTo(112, 86, 27, 120, -64, 104);
+      ctx.bezierCurveTo(-88, 100, -84, 86, -72, 65);
+      ctx.lineTo(-36, 10);
+      ctx.bezierCurveTo(-67, 14, -105, 8, -117, 1);
+      ctx.quadraticCurveTo(-122, -2, -120, -6); ctx.closePath();
     }
-    // The crease: a narrow curved slit rising from the pinch, where the darker inside shows.
-    function cookieFold() {
-      ctx.beginPath(); ctx.moveTo(6, 30); ctx.bezierCurveTo(10, 10, 6, -10, -6, -26);
-      ctx.bezierCurveTo(0, -8, 2, 12, -2, 30); ctx.closePath();
+    function cookieFront() {
+      ctx.beginPath(); ctx.moveTo(-73, 76);
+      ctx.bezierCurveTo(-46, 28, -7, -24, 33, -66);
+      ctx.bezierCurveTo(46, -80, 35, -85, 25, -75);
+      ctx.bezierCurveTo(38, -101, 76, -75, 97, -46);
+      ctx.bezierCurveTo(122, -13, 124, 20, 106, 48);
+      ctx.bezierCurveTo(80, 88, 14, 109, -56, 96);
+      ctx.bezierCurveTo(-77, 93, -82, 92, -73, 76); ctx.closePath();
     }
     function cookieBody() {
-      cookiePath();
-      ctx.fillStyle = gradient(ctx, -90 + pointer * 20, -80, 70 + pointer * 20, 70, [[0, '#f7d98c'], [.5, '#e8b55a'], [1, '#c4863a']]);
-      ctx.fill();
+      cookiePath(); ctx.fillStyle = gradient(ctx, -65, -85, 65, 105, [[0, '#f4d496'], [.5, '#e9bd75'], [1, '#bc803d']]); ctx.fill();
+      ctx.strokeStyle = '#895025'; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.stroke();
       ctx.save(); cookiePath(); ctx.clip();
-      // The folded rim: a darker, toasted band just inside the dome's edge, and a pale lip inside it.
-      ctx.beginPath(); ctx.moveTo(-118, 48); ctx.bezierCurveTo(-124, -30, -70, -86, 0, -86); ctx.bezierCurveTo(70, -86, 124, -30, 118, 48);
-      ctx.strokeStyle = '#b07332'; ctx.lineWidth = 16; ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(-104, 46); ctx.bezierCurveTo(-108, -22, -62, -72, 0, -72); ctx.bezierCurveTo(62, -72, 108, -22, 104, 46);
-      ctx.strokeStyle = '#fbe2a855'; ctx.lineWidth = 3; ctx.stroke();
-      for (const c of crumbs) { ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.fillStyle = '#a86a2a55'; ctx.fill(); }
+      // The rear face folds down toward the long crease instead of forming a rounded lobe.
+      ctx.beginPath(); ctx.moveTo(-119, -5);
+      ctx.bezierCurveTo(-77, 25, -9, -29, 29, -73);
+      ctx.lineTo(-34, 13); ctx.lineTo(-121, 12); ctx.closePath();
+      ctx.fillStyle = '#c28a4670'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-117, -7);
+      ctx.quadraticCurveTo(-121, 3, -79, 7);
+      ctx.strokeStyle = '#fff0bd'; ctx.lineWidth = 3; ctx.stroke();
+      // A dark, tapered pocket follows the front face from its rolled tip into the crown.
+      ctx.beginPath(); ctx.moveTo(-69, 92);
+      ctx.bezierCurveTo(-40, 34, -3, -17, 35, -63);
+      ctx.bezierCurveTo(54, -85, 31, -93, 22, -74);
+      ctx.bezierCurveTo(35, -87, 40, -78, 28, -68);
+      ctx.bezierCurveTo(-13, -25, -51, 29, -79, 80); ctx.closePath();
+      ctx.fillStyle = '#875025'; ctx.fill();
+      cookieFront();
+      ctx.fillStyle = gradient(ctx, -35 + pointer * 15, -65, 95 + pointer * 15, 85, [[0, '#ffe3a2'], [.52, '#efc781'], [1, '#d29b53']]);
+      ctx.fill();
+      ctx.save(); cookieFront(); ctx.clip();
+      // A broad crescent of toasted shading gives the folded face depth.
+      ctx.beginPath(); ctx.moveTo(67, -76);
+      ctx.bezierCurveTo(110, -6, 83, 49, 7, 80);
+      ctx.bezierCurveTo(99, 64, 139, 9, 98, -47); ctx.closePath();
+      ctx.fillStyle = '#b77a3355'; ctx.fill();
+      for (const c of crumbs) { ctx.beginPath(); ctx.ellipse(c.x, c.y, c.r, c.r * .55, -.4, 0, Math.PI * 2); ctx.fillStyle = '#a86a2a40'; ctx.fill(); }
+      if (grainPattern) { ctx.fillStyle = grainPattern; ctx.fillRect(-125, -105, 255, 220); }
+      ctx.save();
+      const shellAlpha = ctx.globalAlpha;
       if (special()) for (const d of dust) {
-        ctx.globalAlpha = .4 + .6 * Math.abs(Math.sin(d.x * .2 + pointer * 3 + pointerY));
+        ctx.globalAlpha = shellAlpha * (.4 + .6 * Math.abs(Math.sin(d.x * .2 + pointer * 3 + pointerY)));
         ctx.fillStyle = '#fff1c4'; ctx.fillRect(d.x, d.y, 1.8, 1.8);
       }
-      ctx.globalAlpha = 1;
-      // The pinch: the darker inside of the fold, its two lit lips, and a soft pleat on each side.
-      cookieFold(); ctx.fillStyle = gradient(ctx, 0, -26, 0, 30, [[0, '#a8682a00'], [.5, '#6e4115'], [1, '#5a330f']]); ctx.fill();
-      // The overlapping lip catches the light along the slit's right edge.
-      ctx.beginPath(); ctx.moveTo(7, 30); ctx.bezierCurveTo(11, 10, 7, -10, -5, -26);
-      ctx.strokeStyle = '#f7d996'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.stroke();
-      // Each lobe rounds into the pinch with a soft shadow.
-      ctx.fillStyle = '#7a4a1a40';
-      for (const side of [-1, 1]) { ctx.beginPath(); ctx.ellipse(side * 18 + 2, 50, 14, 10, 0, 0, Math.PI * 2); ctx.fill(); }
       ctx.restore();
-      ctx.beginPath(); ctx.moveTo(-84, -40); ctx.bezierCurveTo(-66, -66, -36, -74, -14, -74);
-      ctx.strokeStyle = '#fff6dc66'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.stroke();
+      ctx.restore();
+      // The pale curled lip ends in a thin toasted edge along the bottom of the wafer.
+      ctx.beginPath(); ctx.moveTo(23, -77);
+      ctx.bezierCurveTo(47, -99, 61, -71, 32, -47);
+      ctx.strokeStyle = '#fff0bd'; ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-72, 79);
+      ctx.bezierCurveTo(-87, 94, -49, 98, -18, 98);
+      ctx.bezierCurveTo(52, 98, 117, 57, 116, 6);
+      ctx.strokeStyle = '#fff0bd'; ctx.lineWidth = 4; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-66, 95);
+      ctx.bezierCurveTo(-5, 113, 87, 86, 114, 38);
+      ctx.strokeStyle = '#945a2a'; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.restore();
     }
     function fortuneSlip(rise, unfurl) {
-      ctx.save(); ctx.translate(2, 20 - rise * 60); ctx.rotate(-.12 * (1 - unfurl));
+      ctx.save(); ctx.translate(mix(53, 2, rise), mix(99, -40, rise)); ctx.rotate(.65 * (1 - unfurl));
       const w = mix(70, 150, unfurl), h = 22;
       ctx.fillStyle = '#fbf8f1'; ctx.fillRect(-w / 2, -h / 2, w, h);
       ctx.strokeStyle = '#00000018'; ctx.lineWidth = 1; ctx.strokeRect(-w / 2, -h / 2, w, h);
@@ -1006,14 +1037,14 @@
       const shiver = Math.sin(t * 160) * 1.6 * strain * (1 - snap);
       ctx.save(); ctx.translate(shiver, 14);
       ctx.save(); ctx.globalAlpha = 1 - apart;
-      ctx.beginPath(); ctx.ellipse(0, 70, 110, 10, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000038'; ctx.filter = 'blur(6px)'; ctx.fill(); ctx.filter = 'none';
+      ctx.beginPath(); ctx.ellipse(0, 115, 110, 10, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000038'; ctx.filter = 'blur(6px)'; ctx.fill(); ctx.filter = 'none';
       ctx.restore();
-      // The fortune stays hidden inside until the cookie breaks; then it rises and unrolls in front of the halves.
-      if (!snap) { cookieBody(); ctx.restore(); return; }
+      // Only the paper tip peeks out at rest; the full fortune rises as the shell breaks.
+      if (!snap) { fortuneSlip(0, 0); cookieBody(); ctx.restore(); return; }
       for (const side of [-1, 1]) {
         ctx.save(); ctx.globalAlpha = 1 - apart;
         ctx.translate(side * (snap * 18 + apart * 90), apart * 60); ctx.rotate(side * (snap * .18 + apart * .5));
-        ctx.beginPath(); ctx.rect(side < 0 ? -140 : 0, -100, 140, 200); ctx.clip();
+        ctx.beginPath(); ctx.rect(side < 0 ? -140 : 0, -120, 140, 260); ctx.clip();
         cookieBody();
         ctx.restore();
       }
