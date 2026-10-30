@@ -2,6 +2,8 @@
 (() => {
   const NS = 'http://www.w3.org/2000/svg';
   const roles = ['background', 'eyes', 'irises', 'pupils', 'mouth'];
+  const DESIGNED = new Set(['metallic', 'glossy', 'iridescent', 'crystalline', 'pearlescent', 'damascus', 'marble', 'lacquered',
+    'velvet', 'frosted', 'woodgrain', 'holographic', 'terrazzo', 'crackle', 'plush', 'opalescent', 'granite', 'satin', 'sandstone', 'starfield', 'quartz', 'obsidian', 'mosaic', 'hammered-metal', 'kintsugi', 'leather', 'carbon-fiber', 'denim', 'bubbled', 'lava', 'circuitry', 'liquid']);
   let serial = 0;
   function svgNode(tag, attrs = {}) {
     const element = document.createElementNS(NS, tag);
@@ -957,6 +959,26 @@
     mask.append(union); defs.append(filter, mask);
     face.append(svgNode('rect', { width: 360, height: 360, fill: metal, mask: `url(#${id}-mask)` }));
   }
+  function enamelBody(svg, face, metal) {
+    svg.setAttribute('viewBox', '-12 -12 384 404');
+    // The back is offset downwards to expose a shallow metal sidewall.
+    const body = svgNode('g');
+    body.append(svgNode('circle', { cx: 180, cy: 187, r: 181, fill: metal }),
+      svgNode('circle', { cx: 180, cy: 187, r: 181, fill: '#000', opacity: .3 }),
+      svgNode('circle', { cx: 180, cy: 180, r: 181, fill: metal, stroke: '#fff', 'stroke-opacity': .3, 'stroke-width': .7 }));
+    svg.insertBefore(body, face);
+  }
+  function enamelCoat(defs, face, prefix, effects) {
+    const coatId = prefix + '-enamel-coat';
+    const coat = svgNode('linearGradient', { id: coatId, gradientUnits: 'userSpaceOnUse', x1: 35, y1: 0, x2: 300, y2: 360 });
+    for (const [offset, opacity] of [[0, .22], [.22, .05], [.35, .02], [.43, .16], [.5, .025], [.8, 0], [1, .08]]) {
+      coat.append(svgNode('stop', { offset, 'stop-color': '#fff', 'stop-opacity': opacity }));
+    }
+    defs.append(coat);
+    face.append(svgNode('circle', { cx: 180, cy: 180, r: 176, fill: `url(#${coatId})`, 'pointer-events': 'none' }),
+      svgNode('circle', { cx: 180, cy: 180, r: 175.5, fill: 'none', stroke: '#000', 'stroke-opacity': .28, 'stroke-width': 1 }));
+    effects.push((x, y) => coat.setAttribute('gradientTransform', `translate(${x * 25} ${y * 25})`));
+  }
   function renderSVG(m, className = 'oomark', surface = null, extraEffects = null, enamel = false) {
     const effects = className === 'oomark' || enamel ? (extraEffects || []) : null;
     const prefix = 'ubu-' + (++serial);
@@ -968,15 +990,7 @@
     const face = svgNode('g', { 'clip-path': `url(#${prefix}-bounds)` });
     svg.append(title, defs, face);
     const metal = enamel ? enamelMetal(defs, prefix, m.grade, effects) : null;
-    if (enamel) {
-      svg.setAttribute('viewBox', '-12 -12 384 404');
-      // The back is offset downwards to expose a shallow metal sidewall.
-      const body = svgNode('g');
-      body.append(svgNode('circle', { cx: 180, cy: 187, r: 181, fill: metal }),
-        svgNode('circle', { cx: 180, cy: 187, r: 181, fill: '#000', opacity: .3 }),
-        svgNode('circle', { cx: 180, cy: 180, r: 181, fill: metal, stroke: '#fff', 'stroke-opacity': .3, 'stroke-width': .7 }));
-      svg.insertBefore(body, face);
-    }
+    if (enamel) enamelBody(svg, face, metal);
     const eyePositions = [[120.55, 145.5, m.eyes.left], [239.44, 145.5, m.eyes.right]];
     const eyeShapes = eyePositions.map(([cx, cy, eye], i) => {
       const shape = svgNode('circle', { cx, cy, r: 66.05 });
@@ -1004,8 +1018,7 @@
       const clip = svgNode('clipPath', { id: clipId, clipPathUnits: 'userSpaceOnUse' });
       for (const shape of shapes[role]) clip.append(shape.cloneNode(true));
       defs.append(clip);
-      const designed = ['metallic', 'glossy', 'iridescent', 'crystalline', 'pearlescent', 'damascus', 'marble', 'lacquered',
-        'velvet', 'frosted', 'woodgrain', 'holographic', 'terrazzo', 'crackle', 'plush', 'opalescent', 'granite', 'satin', 'sandstone', 'starfield', 'quartz', 'obsidian', 'mosaic', 'hammered-metal', 'kintsugi', 'leather', 'carbon-fiber', 'denim', 'bubbled', 'lava', 'circuitry', 'liquid'].includes(attribute.texture);
+      const designed = DESIGNED.has(attribute.texture);
       const fill = designed
         ? material(defs, attribute, prefix + '-' + role + '-texture', effects)
         : (matteFill ||= material(defs, { texture: 'matte', angle: 0 }, prefix + '-matte', effects));
@@ -1024,20 +1037,17 @@
       }
     }
     if (enamel) {
-      const coatId = prefix + '-enamel-coat';
-      const coat = svgNode('linearGradient', { id: coatId, gradientUnits: 'userSpaceOnUse', x1: 35, y1: 0, x2: 300, y2: 360 });
-      for (const [offset, opacity] of [[0, .22], [.22, .05], [.35, .02], [.43, .16], [.5, .025], [.8, 0], [1, .08]]) {
-        coat.append(svgNode('stop', { offset, 'stop-color': '#fff', 'stop-opacity': opacity }));
-      }
-      defs.append(coat);
-      face.append(svgNode('circle', { cx: 180, cy: 180, r: 176, fill: `url(#${coatId})`, 'pointer-events': 'none' }),
-        svgNode('circle', { cx: 180, cy: 180, r: 175.5, fill: 'none', stroke: '#000', 'stroke-opacity': .28, 'stroke-width': 1 }));
-      effects.push((x, y) => coat.setAttribute('gradientTransform', `translate(${x * 25} ${y * 25})`));
+      enamelCoat(defs, face, prefix, effects);
       attachLighting(svg, effects, surface || svg);
       return svg;
     }
-    // Keep the front flat; only the narrow perimeter rolls into the token edge.
-    // This overlays the complete face without changing any DNA-derived paths.
+    tokenEdge(defs, face, prefix, m, effects);
+    if (effects) attachLighting(svg, effects, surface || svg);
+    return svg;
+  }
+  // Keep the face flat; only the narrow perimeter rolls into the token edge.
+  // This overlays the complete face without changing any DNA-derived paths.
+  function tokenEdge(defs, face, prefix, m, effects) {
     const edgeId = prefix + '-token-edge';
     const edge = svgNode('radialGradient', { id: edgeId, gradientUnits: 'userSpaceOnUse', cx: 178, cy: 176, r: 180 });
     edge.append(
@@ -1060,7 +1070,69 @@
         rim.setAttribute('y1', String(y * .15));
       });
     }
-    if (effects) attachLighting(svg, effects, surface || svg);
+  }
+  // Back mark centres sit on a true hex grid (rows √3/2 apart, so every neighbour is one 68-unit
+  // cell away); two rings around the centre mark make a 19-mark hexagon inside a plain margin.
+  // Each mark turns a quarter from every mark it touches.
+  const BACK_MARKS = [], BACK_MARK_SCALE = (.85 * 68 / 299).toFixed(5);
+  for (let row = -2; row <= 2; row++) {
+    const odd = ((row % 2) + 2) % 2, count = 5 - Math.abs(row);
+    for (let i = 0; i < count; i++) {
+      const x = (i - (count - 1) / 2) * 68, col = Math.round((x - odd * 34) / 68);
+      BACK_MARKS.push({ x: 180 + x, y: +(180 + row * 34 * Math.sqrt(3)).toFixed(2), turn: (((col % 4) + 4) % 4 + 2 * odd) % 4 * 90 });
+    }
+  }
+  // Paints a back's oomarks: rings in the eye colour and bar in the mouth colour (irises and
+  // pupils are not used), each with its material, on the background colour and material.
+  // Enamel backs set each cell in metal; plain backs get the front's material edges.
+  function paintBack(defs, face, prefix, m, effects, metal = null) {
+    const ring = (cx, cy) => `M${cx - 66.0487} ${cy}a66.0487 66.0487 0 1 0 132.0974 0a66.0487 66.0487 0 1 0 -132.0974 0Z`
+      + `M${cx - 30.7126} ${cy}a30.7126 30.7126 0 1 0 61.4252 0a30.7126 30.7126 0 1 0 -61.4252 0Z`;
+    const shapes = { background: [svgNode('circle', { cx: 180, cy: 180, r: 176 })], eyes: [], mouth: [] };
+    for (const { x, y, turn } of BACK_MARKS) {
+      const transform = `translate(${x} ${y}) rotate(${turn}) scale(${BACK_MARK_SCALE})`;
+      // The rings overlap, so each is its own even-odd path; one path would cancel the overlap.
+      for (const cx of [-59.45, 59.44]) shapes.eyes.push(svgNode('path', { d: ring(cx, -34.508), 'fill-rule': 'evenodd', 'clip-rule': 'evenodd', transform }));
+      shapes.mouth.push(svgNode('rect', { x: -75.9625, y: 47.54205, width: 151.915, height: 53.0061, transform }));
+    }
+    for (const role of ['background', 'eyes', 'mouth']) {
+      const attribute = m.attributes[role], clipId = `${prefix}-${role}-clip`, designed = DESIGNED.has(attribute.texture);
+      const layer = svgNode('g', { fill: attribute.hex }), clip = svgNode('clipPath', { id: clipId, clipPathUnits: 'userSpaceOnUse' });
+      layer.append(...shapes[role]);
+      for (const shape of shapes[role]) clip.append(shape.cloneNode(true));
+      defs.append(clip);
+      const texture = material(defs, designed ? attribute : { texture: 'matte', angle: 0 }, `${prefix}-${role}-texture`, effects);
+      face.append(layer, svgNode('rect', { x: 0, y: 0, width: 360, height: 360, fill: texture, 'clip-path': `url(#${clipId})` }));
+      if (metal) { if (role !== 'background') enamelDivider(defs, face, shapes[role], `${prefix}-divider-${role}`, metal); }
+      else if (designed) materialEdge(defs, face, shapes[role], attribute, `${prefix}-${role}-edge`, effects);
+    }
+  }
+  // The canonical back: the ubu's colours as a hexagon of oomarks inside a plain margin, with the
+  // front's rolled edge. Light effects join the front's, so both faces share one light.
+  function renderBack(m, effects = null) {
+    const prefix = 'ubu-back-' + (++serial);
+    const svg = svgNode('svg', { class: 'ubu-back', viewBox: '0 0 360 360', 'aria-hidden': 'true' });
+    const defs = svgNode('defs'), face = svgNode('g', { 'clip-path': `url(#${prefix}-bounds)` });
+    const bounds = svgNode('clipPath', { id: prefix + '-bounds', clipPathUnits: 'userSpaceOnUse' });
+    bounds.append(svgNode('circle', { cx: 180, cy: 180, r: 176 })); defs.append(bounds);
+    svg.append(defs, face);
+    paintBack(defs, face, prefix, m, effects);
+    tokenEdge(defs, face, prefix, m, effects);
+    svg.style.filter = 'drop-shadow(0px 8px 9px #0005)';
+    return svg;
+  }
+  // The token's back: the same marks as enamel cells set in metal on the background enamel.
+  function renderTokenBack(m, effects) {
+    const prefix = 'ubu-token-back-' + (++serial);
+    const svg = svgNode('svg', { class: 'enamel-token token-back', viewBox: '0 0 360 360', 'aria-hidden': 'true' });
+    const defs = svgNode('defs'), face = svgNode('g', { 'clip-path': `url(#${prefix}-bounds)` });
+    const bounds = svgNode('clipPath', { id: prefix + '-bounds', clipPathUnits: 'userSpaceOnUse' });
+    bounds.append(svgNode('circle', { cx: 180, cy: 180, r: 176 })); defs.append(bounds);
+    svg.append(defs, face);
+    const metal = enamelMetal(defs, prefix, m.grade, effects);
+    enamelBody(svg, face, metal);
+    paintBack(defs, face, prefix, m, effects, metal);
+    enamelCoat(defs, face, prefix, effects);
     return svg;
   }
   let stopLighting = () => {};
@@ -1345,7 +1417,9 @@
 
     return svg;
   }
-  renderSVG.token = m => renderSVG(m, 'enamel-token', null, null, true);
+  renderSVG.token = (m, surface = null, effects = null) => renderSVG(m, 'enamel-token', surface, effects, true);
+  renderSVG.tokenBack = renderTokenBack;
+  renderSVG.back = renderBack;
   renderSVG.cardMaterials = renderCardMaterials;
   globalThis.ubuRender = renderSVG;
 })();

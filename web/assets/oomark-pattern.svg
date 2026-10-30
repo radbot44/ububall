@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1196" height="517.88" viewBox="0 0 1196 517.88">
+  <title>uburoom oomark card pattern</title>
+  <desc>Repeating oomark tile: centres on a true hex grid (odd rows shift half a mark, rows √3/2 apart), and each mark turns a quarter so no touching marks share an orientation.</desc>
+  <defs>
+    <g id="o" fill="none" stroke="#fff" transform="translate(149.5 149.5) scale(0.85) translate(-149.5 -149.5)">
+      <circle cx="90.05" cy="114.992" r="48.3813" stroke-width="35.3374"/>
+      <circle cx="208.94" cy="114.992" r="48.3813" stroke-width="35.3374"/>
+      <line x1="73.5375" x2="225.4525" y1="223.5451" y2="223.5451" stroke-width="53.0061"/>
+    </g>
+  </defs>
+  <use href="#o" transform="translate(0 0.0) rotate(0 149.5 149.5)"/>
+  <use href="#o" transform="translate(299 0.0) rotate(90 149.5 149.5)"/>
+  <use href="#o" transform="translate(598 0.0) rotate(180 149.5 149.5)"/>
+  <use href="#o" transform="translate(897 0.0) rotate(270 149.5 149.5)"/>
+  <use href="#o" transform="translate(-149.5 258.94) rotate(90 149.5 149.5)"/>
+  <use href="#o" transform="translate(149.5 258.94) rotate(180 149.5 149.5)"/>
+  <use href="#o" transform="translate(448.5 258.94) rotate(270 149.5 149.5)"/>
+  <use href="#o" transform="translate(747.5 258.94) rotate(0 149.5 149.5)"/>
+  <use href="#o" transform="translate(1046.5 258.94) rotate(90 149.5 149.5)"/>
+</svg>

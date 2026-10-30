@@ -690,6 +690,31 @@
     osc.stop(now + 0.08);
   }
 
+  // Coin tinks: each strike is a bright, inharmonic metal ping. 'flick' throws the coin;
+  // 'land' rattles it to rest with quickening, fading bounces.
+  function playCoin(kind = 'land', options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx);
+    const now = ctx.currentTime;
+    const base = kind === 'flick' ? 2600 : 2300;
+    const hits = kind === 'flick' ? [[0, 0.5]] : [[0, 0.7], [0.13, 0.38], [0.22, 0.2], [0.28, 0.1]];
+    for (const [at, level] of hits) {
+      for (const [ratio, part, decay] of [[1, 1, 0.2], [2.76, 0.42, 0.09], [5.4, 0.18, 0.05]]) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const start = now + at;
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(base * ratio, start);
+        strike(gain, 0.5 * level * part, start, start + decay + 0.02);
+        osc.connect(gain);
+        gain.connect(master);
+        osc.start(start);
+        osc.stop(start + decay + 0.05);
+      }
+    }
+  }
+
   function playWallHit(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
@@ -1330,6 +1355,7 @@
     playVoice,
     playCollision,
     playBallHit,
+    playCoin,
     playWallHit,
     playGoalHit,
     playSuper,
