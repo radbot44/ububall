@@ -26,7 +26,7 @@ test('Classic, Blitz and Pulse combine independently', () => {
 test('shared meter rules exclude super users and the opposing team', () => {
   const bodies=P.kickoff(); bodies.forEach(b=>b.meter=0); bodies[1].usedSuperThisTurn=true;
   M.gainMeter(P,bodies,[],bodies[0],18);
-  assert.equal(bodies[0].meter,18); assert.equal(bodies[1].meter,0); assert.equal(bodies[2].meter,4.5); assert.equal(bodies[3].meter,0);
+  assert.equal(bodies[0].meter,18); assert.equal(bodies[1].meter,0); assert.equal(bodies[2].meter,18*M.METER.teammate); assert.equal(bodies[3].meter,0);
   M.gainMeter(P,bodies,[],bodies[1],18); assert.equal(bodies[1].meter,0);
 });
 
@@ -226,4 +226,21 @@ test('launches steer toward the arrow velocity and cannot exceed full-launch spe
   body.vx=full; launch(Math.PI/2,1); assert.ok(Math.hypot(body.vx,body.vy)<=full+1e-9); assert.ok(body.vy>0);
   body.vx=2*full; body.vy=0; launch(0,0); assert.equal(body.vx,2*full); // No power coasts.
   launch(0,1); assert.equal(body.vx,full); // Over-speed from a hit is reined in toward the arrow.
+});
+test('contact meter needs real impacts and cools down so pinging cannot farm it', () => {
+  const bodies=P.kickoff(); bodies.forEach(b=>b.meter=0); const [a,mate]=bodies, enemy=bodies[3], ball=bodies[6];
+  const {ball:award,check,minSpeed,cooldownTicks}=M.METER;
+  M.contactMeter(P,bodies,[],a,ball,minSpeed-1,0); assert.equal(a.meter,0);
+  M.contactMeter(P,bodies,[],a,mate,500,0); assert.equal(a.meter,0); // Teammate bumps never count.
+  M.contactMeter(P,bodies,[],ball,a,minSpeed,0); assert.equal(a.meter,award); assert.equal(ball.meter,0);
+  M.contactMeter(P,bodies,[],a,ball,500,cooldownTicks-1); M.contactMeter(P,bodies,[],a,enemy,500,cooldownTicks-1);
+  assert.equal(a.meter,award); assert.equal(enemy.meter,check); // Cooldown covers ball and enemy alike.
+  M.contactMeter(P,bodies,[],a,ball,500,cooldownTicks); assert.equal(a.meter,2*award);
+});
+test('turns earn no meter; conceding a goal earns the conceded bonus', () => {
+  const bodies=P.kickoff(); bodies.forEach(b=>b.meter=0);
+  M.finishTurn(P,bodies,[],[0,0],null,'standard'); assert.ok(bodies.every(b=>b.meter===0));
+  M.finishTurn(P,bodies,[],[0,0],0,'standard');
+  assert.ok(bodies.slice(0,3).every(b=>b.meter===0));
+  assert.ok(Math.abs(bodies[3].meter-M.METER.conceded*(1+2*M.METER.teammate))<1e-9);
 });

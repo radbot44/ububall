@@ -27,7 +27,7 @@ The owner approved the 1024-bit (128-byte) DNA schema on 2026-10-26. DNA supplie
 - **Text seeds:** Converted from exact UTF-8 text through dual SHA-512 into complete 128-byte DNA (first 64 bytes from SHA-512(text), second 64 bytes from SHA-512(text + '\x01')).
 - **Ubunym naming:** Initialized directly from the first 64 DNA bits and evaluated via the official `uburithm` SplitMix64 generator (`docs/uburithm.md`).
 - **Visual traits (bits 0–373, 374 bits):** 5 body-part attribute slots (background, eye rings, irises, pupils, mouth) with 18 bits each, drawing colors from the 32-color palette and finishes across 32 assigned rare materials, plus geometric mouth/eye controls, corner curvature and lip-notch cuts.
-- **Core game stats (bits 374–493, 120 bits):** 15 stats evaluated with centered cubic multiplier curves (0 = 2/3×, 127 = 1.0×, 255 = 1.5×):
+- **Core game stats (bits 374–493, 120 bits):** 15 stats evaluated with an exponential multiplier curve, equal percentage per stat point (0 = 2/3×, 127 = 1.0×, 255 = 1.5×):
   - *Movement (8 bits each):* Impulse, Traction, Spin, Curve.
   - *Physical (8 bits each):* Size, Mass, Bounciness, Grip.
   - *Engagement (8 bits each):* Power, Reach, Strength, Stability.

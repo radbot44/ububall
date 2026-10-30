@@ -3,12 +3,14 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const P = require('../web/ububall-physics.js');
 const normal = { mass: 127, size: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 };
-test('experimental stat curve preserves endpoints and concentrates values near normal', () => {
+test('exponential stat curve preserves endpoints and spreads mid-range stats evenly', () => {
   assert.ok(Math.abs(P.multiplier(0) - 2 / 3) < 1e-12);
   assert.equal(P.multiplier(127), 1); assert.equal(P.multiplier(255), 1.5);
   const values = Array.from({ length: 256 }, (_, i) => P.multiplier(i));
-  assert.ok(values.every((v, i) => !i || v >= values[i - 1]));
-  assert.ok(values.filter(v => v >= .958 && v <= 1.063).length >= 128);
+  assert.ok(values.every((v, i) => !i || v > values[i - 1]));
+  // Each step is a near-constant percentage, so the middle half spans a real range.
+  assert.ok(Math.abs(P.multiplier(64) - (2 / 3) ** (63 / 127)) < 1e-12 && P.multiplier(64) < .82);
+  assert.ok(Math.abs(P.multiplier(191) - Math.sqrt(1.5)) < 1e-12);
 });
 test('mass changes launch speed while equal-power momentum stays constant', () => {
   const b = P.kickoff();

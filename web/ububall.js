@@ -23,6 +23,7 @@
   let matchMode = 'standard', planDeadline = 0;
   // Each turn of the current play (motion since the field last rested), for goal replays.
   let playSegments = [], goalReplay = null, goalReplayAt = 0;
+  let matchTicks = 0; // Simulated ticks played locally, for meter cooldowns.
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const cpuClient = createCPUClient();
   let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuLevel = 'medium';
@@ -244,6 +245,55 @@
     c.beginPath(); c.arc(128, 128, 124, 0, Math.PI * 2); c.fill();
     superGlowSprites.set(key, sprite); return sprite;
   }
+  // Super aura: ready = a ring with a steady sweep and a faint halo; armed and active = full halo,
+  // a counter ring and two orbiting sparks. The icon badge names the super.
+  function drawSuperAura(b, key, reach) {
+    const [c1, c2] = SUPER_AURA_THEMES[key] || ['#ff7197', '#ff9954'];
+    const level = b.superActive || b.superArm ? 2 : 1, still = reducedMotion.matches;
+    const t = still ? 0 : performance.now() / 1000, spin = t * (.6 + level * 1.2);
+    const ringR = reach + 6 + level * 2;
+    ctx.save();
+    const haloR = ringR + 10 + level * 4 + (still ? 0 : Math.sin(t * 3) * 2);
+    ctx.globalAlpha = level === 2 ? .45 : .22;
+    ctx.drawImage(superGlowSprite(key), b.x - haloR, b.y - haloR, haloR * 2, haloR * 2);
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = level === 2 ? .75 : .55;
+    circle(b.x, b.y, ringR, c1, level === 2 ? 2.5 : 2);
+    ctx.globalAlpha = level === 2 ? 1 : .85;
+    ctx.shadowBlur = 6 * canvas.width / 1000; ctx.shadowColor = c1;
+    for (const [radius, dir] of level === 2 ? [[ringR, 1], [ringR + 5, -1]] : [[ringR, 1]]) {
+      const sweep = ctx.createConicGradient(spin * dir, b.x, b.y);
+      sweep.addColorStop(0, hexToRgba(c2, 0)); sweep.addColorStop(.3, hexToRgba(c2, .9));
+      sweep.addColorStop(.36, hexToRgba(c1, 0)); sweep.addColorStop(1, hexToRgba(c1, 0));
+      ctx.strokeStyle = sweep; ctx.lineWidth = level === 2 ? 3.5 : 3;
+      ctx.beginPath(); ctx.arc(b.x, b.y, radius, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+    if (level === 2 && !still) for (let k = 0; k < 2; k++) {
+      const head = spin * 1.5 + k * Math.PI;
+      for (let s = 4; s >= 0; s--) {
+        const angle = head - s * .08;
+        ctx.globalAlpha = (1 - s / 5) * .8;
+        ctx.fillStyle = s ? (k ? c2 : c1) : '#ffffff';
+        ctx.beginPath(); ctx.arc(b.x + Math.cos(angle) * ringR, b.y + Math.sin(angle) * ringR, 2.2 - s * .3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+  // Small upright icon badge naming the ready, armed or active super.
+  function drawSuperBadge(b, key) {
+    const icon = superImages[b.equippedSuper?.id ?? 0];
+    if (!icon?.complete || !icon.naturalWidth) return;
+    const [c1] = SUPER_AURA_THEMES[key] || ['#ff7197'];
+    const size = b.superActive || b.superArm ? 24 : 20, p = badgePoint(b);
+    badgeCtx.save();
+    badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
+    badgeCtx.beginPath(); badgeCtx.arc(0, 0, size / 2 + 2, 0, Math.PI * 2);
+    badgeCtx.fillStyle = '#0b0d10d9'; badgeCtx.fill();
+    badgeCtx.lineWidth = 1.5; badgeCtx.strokeStyle = c1; badgeCtx.stroke();
+    badgeCtx.drawImage(icon, -size / 2, -size / 2, size, size);
+    badgeCtx.restore();
+  }
   function drawParticles(home, away) {
     ctx.save(); ctx.lineCap = 'round';
     for (const p of particles) {
@@ -305,9 +355,11 @@
     });
     return result;
   }
-  function gainMeter(b, baseAmount) {
-    if (goalReplay) return;
-    for (const changed of ububallMatch.gainMeter(P, bodies, stats, b, baseAmount, classicMode())) dirtyMeters.add(changed);
+  // Online meters come from the server; replays never earn meter.
+  function contactMeter(a, b, speed) {
+    if (online?.active || goalReplay) return;
+    const tick = matchTicks + Math.round(elapsed / P.DT);
+    for (const changed of ububallMatch.contactMeter(P, bodies, stats, a, b, speed, tick, classicMode())) dirtyMeters.add(changed);
   }
   function flushMeters() {
     for (const body of dirtyMeters) {
@@ -867,15 +919,7 @@
       if (isSuperReady) {
         const activeKey = b.superActive || b.equippedSuper?.key || 'stalwart';
 
-        ctx.save();
-        const pulseSpeed = b.superActive ? 80 : b.superArm ? 100 : 150;
-        const pulse = reducedMotion.matches ? 0 : Math.sin(Date.now() / pulseSpeed);
-        const baseR = Math.max(b.radius + 26, reachR + 22) + (b.superActive ? 4 : b.superArm ? 2 : 0);
-        const glowR = baseR + pulse * (b.superActive ? 5 : 3.5);
-        const alpha = (b.superActive ? 0.98 : b.superArm ? 0.92 : 0.82) + pulse * 0.12;
-        ctx.globalAlpha = Math.max(0.2, Math.min(1, alpha));
-        ctx.drawImage(superGlowSprite(activeKey), b.x - glowR, b.y - glowR, glowR * 2, glowR * 2);
-        ctx.restore();
+        drawSuperAura(b, activeKey, reachR);
 
         if (phase === 'plan' && b.superArm && activeKey === 'colossus') {
           ctx.save();
@@ -884,21 +928,7 @@
           ctx.restore();
         }
 
-        const superIdx = b.equippedSuper?.id ?? 0;
-        const icon = superImages[superIdx];
-        if (b.superActive && icon && icon.complete && icon.naturalWidth) {
-          const sz = 30;
-          badgeCtx.shadowBlur = 0;
-          badgeCtx.save();
-          if (isPortrait) {
-            badgeCtx.translate(badgePoint(b).x, badgePoint(b).y);
-            badgeCtx.rotate(Math.PI / 2);
-          } else {
-            badgeCtx.translate(badgePoint(b).x, badgePoint(b).y);
-          }
-          badgeCtx.drawImage(icon, -sz / 2, -sz / 2, sz, sz);
-          badgeCtx.restore();
-        }
+        drawSuperBadge(b, activeKey);
       }
 
       circle(b.x, b.y, reachR + 2, i < 3 ? home : away, 4);
@@ -1043,8 +1073,10 @@
     clearEffects(); sync(); draw();
   }
   function finishTurn(goal) {
-    if (playSegments.length) playSegments[playSegments.length - 1].ticks = Math.round(elapsed / P.DT);
+    const ticks = Math.round(elapsed / P.DT);
+    if (playSegments.length) playSegments[playSegments.length - 1].ticks = ticks;
     ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode);
+    matchTicks += ticks;
     bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
     accumulator = 0; layoutDirty = true;
     if (goal !== null) {
@@ -1201,10 +1233,10 @@
     if (a.team !== b.team) burst(x, y, b.team, Math.min(1, speed / 600), false, tangent);
     const isBall = a.team === -1 || b.team === -1;
     const now = performance.now();
+    contactMeter(a, b, speed);
     if (isBall) {
       const player = a.team !== -1 ? a : b;
       lastTouchByTeam[player.team] = player;
-      gainMeter(player, 18);
       const norm = Math.min(1.0, Math.max(0.0, (speed - 25) / 550));
       const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
       if (!player._lastHitSound || (now - player._lastHitSound) > 55) {
@@ -1217,8 +1249,6 @@
         }
       }
     } else if (a.team !== -1 && b.team !== -1) {
-      gainMeter(a, 10);
-      gainMeter(b, 10);
       const norm = Math.min(1.0, Math.max(0.0, (speed - 40) / 600));
       const volume = Math.min(1.0, 0.12 + 0.75 * (norm ** 0.8));
       const primary = (Math.hypot(a.vx, a.vy) * a.mass >= Math.hypot(b.vx, b.vy) * b.mass) ? a : b;

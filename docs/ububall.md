@@ -29,7 +29,7 @@ $$\text{Total} = 374 + 120 + 16 + 24 + 64 + 416 + 10 = \mathbf{1024 \text{ bits}
 
 ## 2. Core Physical & Game Stats (Bits 374–493: 120 Bits)
 
-Every stat is stored as an 8-bit unsigned integer (`0–255`, neutral `127`) and evaluated through the centered cubic multiplier curve ($0 = 2/3\times$, $127 = 1.0\times$, $255 = 1.5\times$).
+Every stat is stored as an 8-bit unsigned integer (`0–255`, neutral `127`) and evaluated through an exponential multiplier curve, so each stat point changes the result by the same percentage (owner decision 2026-10-30, replacing the flatter centered cubic): below neutral $m = (2/3)^{(127-raw)/127}$, above $m = 1.5^{(raw-127)/128}$. Reference points: $0 = 2/3\times$, $64 \approx 0.82\times$, $127 = 1.0\times$, $191 \approx 1.22\times$, $255 = 1.5\times$.
 
 | Category | Stat | Bits | Width | Values | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -82,11 +82,12 @@ Before each match, players equip one active super per ubu from their unlocked sl
 - **Starting Meter:** Initialized at kickoff from `Ubuquity` (Bits 1014–1023: $\text{Ubuquity} / 1020 \times 100\%$).
 - **Meter Capacity:** 100% per ubu. Activating a super costs 100% meter for that turn.
 - **Meter Accumulation:**
-  - Ball strikes: $+18\% \times \text{Efficiency multiplier}$.
-  - Body checks: $+10\% \times \text{Efficiency multiplier}$.
-  - Passive turn completion: $+10\% \times \text{Efficiency multiplier}$.
-  - Conceding team rally bonus: $+15\%$ upon being scored against.
-  - Teammate Synergy/Chemistry: Whenever an ubu gains meter, teammates receive an inbound bonus: $\Delta M \times (\text{Synergy} \times \text{Chemistry} \times 0.25)$.
+  - Values in `METER` (`shared/ububall-match.js`); amounts are owner decisions of 2026-10-30. There is no passive per-turn gain.
+  - Ball strikes: $+8\% \times \text{Efficiency multiplier}$.
+  - Checks against an opponent: $+4\% \times \text{Efficiency multiplier}$ each. Teammate bumps earn nothing.
+  - Conceding team rally bonus: $+6\% \times \text{Efficiency multiplier}$ upon being scored against.
+  - Anti-farming (tuning, not an owner decision): contact only counts at impact speed 60 or more, and each ubu earns contact meter at most once per 1.5 seconds of simulated play (ball and checks share the cooldown, which carries across Pulse turns).
+  - Teammate Synergy/Chemistry: Whenever an ubu gains meter, teammates receive an inbound bonus: $\Delta M \times (\text{Synergy} \times \text{Chemistry} \times 0.15)$.
 
 ---
 

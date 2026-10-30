@@ -31,7 +31,9 @@
   ]);
   function multiplier(raw) {
     if (!Number.isInteger(raw) || raw < 0 || raw > 255) throw new RangeError('Stat must be an integer from 0 to 255.');
-    return raw < 127 ? 1 - ((127 - raw) / 127) ** 3 / 3 : 1 + ((raw - 127) / 128) ** 3 / 2;
+    // Exponential: every stat point changes the result by the same percentage, so mid-range
+    // stats matter as much as extremes. 0 = 2/3×, 127 = 1×, 255 = 1.5×.
+    return raw < 127 ? (2 / 3) ** ((127 - raw) / 127) : 1.5 ** ((raw - 127) / 128);
   }
   function applyStats(body, raw = {}) {
     body.mass = 3 * multiplier(raw.mass ?? 127);
