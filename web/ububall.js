@@ -194,15 +194,35 @@
     ctx.restore();
   }
   const glowSprites = new Map();
-  function glowSprite(color, ring = false) {
-    const key = color + ring;
-    if (glowSprites.has(key)) return glowSprites.get(key);
+  function glowSprite(color) {
+    if (glowSprites.has(color)) return glowSprites.get(color);
     const sprite = document.createElement('canvas'); sprite.width = sprite.height = 128;
-    const c = sprite.getContext('2d'); c.strokeStyle = c.fillStyle = color;
+    const c = sprite.getContext('2d'); c.fillStyle = color;
     c.shadowColor = color; c.shadowBlur = 14;
-    c.beginPath(); c.arc(64, 64, ring ? 40 : 6, 0, Math.PI * 2);
-    if (ring) { c.lineWidth = 3; c.stroke(); } else c.fill();
-    glowSprites.set(key, sprite); return sprite;
+    c.beginPath(); c.arc(64, 64, 6, 0, Math.PI * 2);
+    c.fill();
+    glowSprites.set(color, sprite); return sprite;
+  }
+  const superGlowSprites = new Map();
+  function hexToRgba(hex, alpha) {
+    let c = hex.replace('#', '');
+    if (c.length === 3) c = c.split('').map(x => x + x).join('');
+    const num = parseInt(c, 16);
+    return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${alpha})`;
+  }
+  function superGlowSprite(color) {
+    if (superGlowSprites.has(color)) return superGlowSprites.get(color);
+    const sprite = document.createElement('canvas'); sprite.width = sprite.height = 256;
+    const c = sprite.getContext('2d');
+    const grad = c.createRadialGradient(128, 128, 12, 128, 128, 124);
+    grad.addColorStop(0, hexToRgba(color, 0.95));
+    grad.addColorStop(0.25, hexToRgba(color, 0.82));
+    grad.addColorStop(0.5, hexToRgba(color, 0.50));
+    grad.addColorStop(0.75, hexToRgba(color, 0.20));
+    grad.addColorStop(1, hexToRgba(color, 0));
+    c.fillStyle = grad;
+    c.beginPath(); c.arc(128, 128, 124, 0, Math.PI * 2); c.fill();
+    superGlowSprites.set(color, sprite); return sprite;
   }
   function drawParticles(home, away) {
     ctx.save(); ctx.lineCap = 'round';
@@ -818,14 +838,9 @@
     });
     bodies.slice(0, 6).forEach((b, i) => {
       const reachR = Math.max(b.radius, b.reach || b.radius, 18);
-      circle(b.x, b.y, reachR + 2, i < 3 ? home : away, 4);
+      const isSuperReady = (b.meter >= 100) || Boolean(b.superArm) || Boolean(b.superActive);
 
-      if ((phase === 'goal' || (onlineReplay?.goalPlayed && phase === 'play')) && b === scoringPlayer) {
-        const goalAccent = b.team === 0 ? home : away;
-        circle(b.x, b.y, b.radius + 9, goalAccent, 4);
-        circle(b.x, b.y, b.radius + 15, goalAccent, 2);
-      }
-      if (b.meter >= 100 || b.superArm || b.superActive) {
+      if (isSuperReady) {
         const activeKey = b.superActive || b.equippedSuper?.key;
         const auraColor = activeKey === 'cannonball' ? '#ff4d4d'
           : activeKey === 'magnet' ? '#33ccff'
@@ -835,16 +850,23 @@
           : activeKey === 'colossus' ? '#bb66ff'
           : activeKey === 'ghost' ? '#b2ebf2'
           : '#ff7197';
+
+        ctx.save();
+        const pulseSpeed = b.superActive ? 80 : b.superArm ? 100 : 150;
+        const pulse = reducedMotion.matches ? 0 : Math.sin(Date.now() / pulseSpeed);
+        const baseR = Math.max(b.radius + 26, reachR + 22) + (b.superActive ? 4 : b.superArm ? 2 : 0);
+        const glowR = baseR + pulse * (b.superActive ? 5 : 3.5);
+        const alpha = (b.superActive ? 0.98 : b.superArm ? 0.92 : 0.82) + pulse * 0.12;
+        ctx.globalAlpha = Math.max(0.2, Math.min(1, alpha));
+        ctx.drawImage(superGlowSprite(auraColor), b.x - glowR, b.y - glowR, glowR * 2, glowR * 2);
+        ctx.restore();
+
         if (phase === 'plan' && b.superArm && activeKey === 'colossus') {
           ctx.save();
           ctx.setLineDash([5, 5]);
           circle(b.x, b.y, b.radius * 1.8, '#bb66ffaa', 2);
           ctx.restore();
         }
-        ctx.save();
-        const pulse = Math.sin(Date.now() / 120) * 3;
-        const glowSize = (b.radius + 8 + pulse) * 128 / 40;
-        if (b.meter >= 100) ctx.drawImage(glowSprite(auraColor, true), b.x - glowSize / 2, b.y - glowSize / 2, glowSize, glowSize);
 
         const superIdx = b.equippedSuper?.id ?? 0;
         const icon = superImages[superIdx];
@@ -861,7 +883,14 @@
           badgeCtx.drawImage(icon, -sz / 2, -sz / 2, sz, sz);
           badgeCtx.restore();
         }
-        ctx.restore();
+      }
+
+      circle(b.x, b.y, reachR + 2, i < 3 ? home : away, 4);
+
+      if ((phase === 'goal' || (onlineReplay?.goalPlayed && phase === 'play')) && b === scoringPlayer) {
+        const goalAccent = b.team === 0 ? home : away;
+        circle(b.x, b.y, b.radius + 9, goalAccent, 4);
+        circle(b.x, b.y, b.radius + 15, goalAccent, 2);
       }
       if (phase === 'play' && b.guarding) {
         badgeCtx.save();
@@ -1181,7 +1210,7 @@
       }
       if (phase === 'play') emitMaterialTrails(delta);
       draw();
-    } else if (active && (hadEffects || (!reducedMotion.matches && bodies.some(b => b.meter >= 100)))) draw();
+    } else if (active && (hadEffects || (!reducedMotion.matches && bodies.some(b => b.meter >= 100 || b.superArm || b.superActive)))) draw();
     flushMeters();
     requestAnimationFrame(frame);
   }
