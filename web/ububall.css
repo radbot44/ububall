@@ -1091,3 +1091,15 @@ body.demo-match:not(.in-match) .demo-badge { display: block; }
 }
 .demo-finger.pressed { transform: translate(-39.6%, -91.7%) scale(.88); }
 @media (prefers-reduced-motion: reduce) { .field-banner.show { opacity: 1; } }
+
+/* Portrait without team columns: one row under the rink holds the ubu picker and the selected ubu's
+   knobs, above the actions. */
+@media (max-width: 1000px) {
+  body.in-match .stadium.portrait-mode { grid-template-areas: "score" "field" "dock" "actions"; grid-template-rows: 64px minmax(0, 1fr) auto 76px; }
+  body.in-match .stadium.portrait-mode .knob-dock { grid-area: dock; display: flex; align-items: center; gap: 8px; padding: 6px 10px 0; }
+  body.in-match .stadium.portrait-mode .team-selector { display: flex; flex: none; gap: 4px; padding: 0; }
+  body.in-match .stadium.portrait-mode .team-selector button { flex-direction: column; gap: 1px; width: 46px; min-height: 0; padding: 3px 2px; font-size: 10px; }
+  body.in-match .stadium.portrait-mode .team-selector button svg { width: 26px; height: 26px; }
+  body.in-match .stadium.portrait-mode .knob-dock .knob-row { flex: 1; margin: 0; }
+  body.in-match .stadium.portrait-mode .knob-dock .knob svg { width: 40px; height: 40px; }
+}
