@@ -1375,7 +1375,6 @@
       $('launch').disabled = phase !== 'plan';
       $('launch').textContent = phase === 'plan' ? 'Lock moves' : phase === 'play' ? 'In motion…' : phase === 'over' ? 'Match complete' : 'Waiting…';
       $('new-match').disabled = true;
-      for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = true;
     }
   }
   function buildTeam() {

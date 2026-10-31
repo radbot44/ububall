@@ -874,7 +874,6 @@ body.stadium-fullscreen-active {
 .online-team-slot { display: flex; align-items: center; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
 .online-team-slot select { min-width: 0; flex: 1; }
 #online-match-status { font-size: .85rem; color: var(--muted, #aeb7c6); }
-.online-match #stat-testing { display: none; }
 .online-match .stadium-actions { flex-wrap: wrap; }
 
 /* Online setup follows the site's slate modal and control palette. */
