@@ -1081,6 +1081,7 @@
     });
     $('team').replaceChildren();
     $('team-selector').replaceChildren();
+    $('home-lineup').replaceChildren();
     if ($('cpu-team')) $('cpu-team').replaceChildren();
     $('skaters').replaceChildren();
     teamEntries.forEach((entry, i) => {
@@ -1119,6 +1120,15 @@
       shortcut.append(ubuRender(entry.model, 'ball-thumb'), document.createElement('span'));
       shortcut.onclick = select.onclick;
       $('team-selector').append(shortcut);
+      const lineup = document.createElement('div'); lineup.className = 'home-ubu';
+      lineup.append(ubuRender(entry.model, 'home-ubu-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }));
+      const superInfo = classicMode() ? null : entry.equippedSuper || P.SUPERS[(entry.model.supers?.[0] ?? i) % 8];
+      if (superInfo) {
+        const superLabel = document.createElement('small');
+        superLabel.append(Object.assign(document.createElement('img'), { src: superInfo.icon, alt: '' }), superInfo.name);
+        lineup.append(superLabel);
+      }
+      $('home-lineup').append(lineup);
     });
     if ($('cpu-team')) {
       teamEntries.slice(3, 6).forEach((entry, idx) => {
@@ -1296,7 +1306,7 @@
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { themeColors = null; if (skaters.length) draw(); });
   function fitStadium() {
     if (!stageArea || !rinkStage || !rinkWrap) return;
-    const isFs = isFullscreenActive();
+    const isFs = isFullscreenActive() || document.body.classList.contains('in-match');
 
     if (!isPortrait && !isFs) {
       rinkStage.style.width = '';
@@ -1848,7 +1858,7 @@
   function impact(ms) { hitStopUntil = performance.now() + ms; if (!reducedMotion.matches) shake = 1; }
   function frame(time) {
     const delta = lastTime ? Math.max(0, (time - lastTime) / 1000) : 0; lastTime = time;
-    const active = !$('roster-dialog').open && !document.hidden;
+    const active = !$('roster-dialog').open && !$('pause-menu').open && !document.hidden;
     updateClock();
     if (online?.active) {
       if (phase === 'plan') online.send(networkMoves());
@@ -1990,6 +2000,7 @@
     roster = draft.map(d => ({ ...d }));
     cpuLevel = $('cpu-level').value;
     newMatch(true);
+    enterMatch();
   };
   $('cancel-roster').onclick = () => $('roster-dialog').close();
   // A modal pauses the simulation; cancelling preserves the current turn.
@@ -2153,8 +2164,46 @@
       document.body.classList.remove('stadium-fullscreen-active');
       updateFullscreenUI();
       draw();
-    }
+    } else if (e.key === 'Escape' && inMatch && !document.querySelector('dialog[open]')) openPause();
   });
+
+  // Match mode: the field fills the screen and the site chrome hides. Entering adds a history
+  // entry, so the system back button opens the menu instead of leaving the match.
+  let inMatch = false;
+  const portraitScreen = matchMedia('(orientation: portrait)');
+  function fitOrientation() { if (inMatch && isPortrait !== portraitScreen.matches) toggleRotate(); }
+  function matchInProgress() { return $('home-score').textContent !== '0' || $('away-score').textContent !== '0' || !/Turn 1$/.test($('phase').textContent); }
+  function updateHome() { $('home-play').textContent = online?.active ? 'Back to online match' : matchInProgress() ? 'Resume match' : 'Play vs CPU'; }
+  function enterMatch() {
+    if (location.pathname !== '/') return;
+    if (!history.state?.match) history.pushState({ match: true }, '', location.href);
+    if (inMatch) return;
+    inMatch = true; document.body.classList.add('in-match');
+    fitOrientation(); layoutDirty = true; draw();
+  }
+  function exitMatchMode() {
+    if ($('pause-menu').open) $('pause-menu').close();
+    if (!inMatch) return;
+    inMatch = false; document.body.classList.remove('in-match');
+    layoutDirty = true; updateHome();
+  }
+  function openPause() {
+    $('pause-title').textContent = online?.active ? 'Menu' : 'Paused';
+    $('pause-restart').disabled = $('new-match').disabled;
+    $('pause-menu').showModal();
+  }
+  $('pause').onclick = openPause;
+  $('pause-resume').onclick = () => $('pause-menu').close();
+  $('pause-restart').onclick = () => { $('pause-menu').close(); $('new-match').click(); };
+  $('pause-leave').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
+  $('home-play').onclick = enterMatch;
+  portraitScreen.addEventListener('change', () => { fitOrientation(); draw(); });
+  window.addEventListener('popstate', () => {
+    if (location.pathname !== '/') return;
+    if (history.state?.match) enterMatch();
+    else if (inMatch) { history.pushState({ match: true }, '', location.href); openPause(); }
+  });
+  window.addEventListener('ubu:screen', event => { if (event.detail !== 'play') exitMatchMode(); else updateHome(); });
 
   try {
     if (localStorage.getItem('ububall-orientation') === 'portrait') {
@@ -2313,6 +2362,7 @@
   }
   online = ububallOnline({
     onState(s) {
+      if (!document.body.classList.contains('online-match')) enterMatch();
       document.body.classList.add('online-match');
       $('online-open').textContent = 'Online match';
       $('opponent-label').textContent = 'Opponent'; $('opponent-heading').textContent = 'Opponent team';
@@ -2414,4 +2464,6 @@
   }
   openRosterFromLink();
   window.addEventListener('ubu:screen', openRosterFromLink);
+  // A reload during a match returns to match mode.
+  if (history.state?.match) enterMatch();
 })();

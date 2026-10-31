@@ -30,24 +30,20 @@
   </header>
   <main class="ball-page" data-screen="play">
 
-  <aside class="mint-entry" aria-label="Ubu Mint">
-    <div class="mint-entry-content">
-      <span class="mint-entry-badge">Ubu Mint</span>
-      <p class="mint-entry-text">Discover new ubus, open packs, and build a collection for use in ububall.</p>
+  <section class="play-home" aria-labelledby="home-title">
+    <div class="home-team">
+      <div class="home-team-head"><h1 id="home-title">Your team</h1><button id="new-match" type="button">Change team</button></div>
+      <div id="home-lineup" class="home-lineup"></div>
     </div>
-    <a class="mint-entry-cta" href="/mint">Open packs &rarr;</a>
-  </aside>
-  <div class="game-heading">
-    <h1 class="visually-hidden">ububall</h1>
-    <div class="heading-actions">
-      <label class="toggle-switch" title="Toggle between compact and full stat profiles">
-        <input type="checkbox" id="toggle-full-stats">
-        <span class="toggle-track"></span>
-        <span>Full stats</span>
-      </label>
-      <button id="online-open">Play online</button><button id="new-match">New match</button>
-    </div>
-  </div>
+    <div class="home-actions"><button id="home-play" class="primary" type="button">Play vs CPU</button><button id="online-open" type="button">Play online</button></div>
+    <aside class="mint-entry" aria-label="Ubu Mint">
+      <div class="mint-entry-content">
+        <span class="mint-entry-badge">Ubu Mint</span>
+        <p class="mint-entry-text">Discover new ubus, open packs, and build a collection for use in ububall.</p>
+      </div>
+      <div class="mint-entry-links"><a class="mint-entry-cta" href="/mint">Open packs &rarr;</a><a class="mint-entry-link" href="/collection">Your collection</a></div>
+    </aside>
+  </section>
   <div class="arena-layout">
     <aside class="team-column home-column" aria-label="Your team">
       <div class="column-heading"><span class="home">Your team</span></div>
@@ -55,7 +51,9 @@
     </aside>
     <section class="stadium" aria-label="Ububall match">
       <div class="scoreboard">
-        <button id="aim-mode" type="button" aria-pressed="false">Aim: drag arrow</button>
+        <button id="pause" class="stadium-tool-btn" type="button" aria-label="Open match menu" aria-haspopup="dialog" title="Menu">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
         <div class="scoreboard-content">
           <span class="home">You <strong id="home-score">0</strong></span>
           <div class="phase-info"><span id="phase">Plan · Turn 1</span><small id="mode-label">First to five</small><span id="blitz-clock" hidden></span></div>
@@ -149,6 +147,19 @@ SOFTWARE.
     <div class="actions"><button id="apply-stats">Apply & reset field</button><button id="normal-stats">All stats normal</button><button id="reset-field">Reset field</button><button id="restore-shot" disabled>Reuse last shot at kickoff</button><label><input id="cpu-hold" type="checkbox"> Hold CPU launches for testing</label></div>
   </details>
   <details class="rules"><summary>How to play</summary><p>Both teams launch at the same time. The CPU plans from the field positions, without seeing your arrows. All three ubus can strike the ball, block shots, bump opponents, and enter the goal nets. After motion stops, plan again from the new positions. A goal resets the field; first to five wins.</p><p>Stats are temporary test values, separate from DNA. Spin curves travel and affects collisions. Practice ubus are custom characters, not minted collectibles. Matches stay in this browser and award no mint items.</p></details>
+  <dialog id="pause-menu" class="pause-menu" aria-labelledby="pause-title">
+    <h2 id="pause-title">Paused</h2>
+    <div class="pause-actions">
+      <button id="pause-resume" class="primary" type="button">Resume</button>
+      <button id="pause-restart" type="button">New match</button>
+      <button id="pause-leave" type="button">Leave match</button>
+    </div>
+    <div class="pause-settings">
+      <button id="aim-mode" type="button" aria-pressed="false">Aim: drag arrow</button>
+      <label class="toggle-switch" title="Toggle between compact and full stat profiles"><input type="checkbox" id="toggle-full-stats"><span class="toggle-track"></span><span>Full stats</span></label>
+    </div>
+    <nav class="pause-links" aria-label="Leave to"><a href="/mint">Ubu Mint</a><a href="/collection">Collection</a></nav>
+  </dialog>
   <dialog id="roster-dialog"><h2>Choose your team</h2><div class="match-settings"><label>CPU difficulty <select id="cpu-level"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></label><label><input type="checkbox" id="rule-classic"> Classic</label><label><input type="checkbox" id="rule-blitz"> Blitz</label><label><input type="checkbox" id="rule-pulse"> Pulse</label></div><p>Ububall plays with stats and supers. Add any rules: Classic uses equal default stats with no supers. Blitz gives 5 seconds to plan. Pulse runs each turn for 1 second and momentum carries into the next. Launching while moving steers toward the arrow, never past full launch speed.</p><p>Choose a character for each slot. Empty slots use practice ubus.</p><div id="roster-slots"></div><div id="roster-super-picker" style="margin: 8px 0;"><label>Equipped Super <select id="roster-super"></select></label><div id="roster-super-grid" class="super-picker-grid"></div></div><p id="roster-status" role="status"></p><button id="load-collection">Load my collection</button><button id="more-collection" hidden>Load more</button><div id="roster-options"></div><div class="actions"><button id="start-match" class="primary">Start match</button><button id="cancel-roster">Cancel</button></div></dialog>
   <dialog id="online-dialog" aria-labelledby="online-title"><div class="online-heading"><div><h2 id="online-title">Online Ububall</h2><p>One opponent. Three ubus. First to five.</p></div><button id="online-close" class="icon-button" aria-label="Close online settings">&#10005;</button></div>
     <div id="online-create-controls">
