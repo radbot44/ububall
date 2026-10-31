@@ -10,7 +10,6 @@
 
 /* Play home: the lineup, the way into a match and the way to Ubu Mint. */
 .play-home { display: grid; gap: 14px; width: min(880px, 100%); margin: 4px auto 24px; }
-body:not(.in-match) .ball-page > .rules { width: min(880px, 100%); margin-inline: auto; }
 .home-team { padding: 18px; background: var(--card); border: 1px solid var(--border); border-radius: 22px; box-shadow: var(--panel-shadow); }
 .home-team-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .home-team-head h1 { color: var(--team-home); }
@@ -57,7 +56,7 @@ body:not(.in-match) .ball-page > .rules { width: min(880px, 100%); margin-inline
 }
 
 /* Match mode: the stadium fills the screen; the home screen and site chrome step aside. */
-body.in-match .play-home, body.in-match .rules,
+body.in-match .play-home,
 body.in-match .site-header, body.in-match .site-nav { display: none; }
 body.in-match { padding-bottom: 0; overflow: hidden; }
 body.in-match .ball-page {
@@ -87,7 +86,6 @@ body:not(.in-match) .play-home { margin-top: 14px; }
   .play-home :is(.mint-entry, .mint-entry-content) { flex-direction: column; align-items: stretch; text-align: center; gap: 10px; }
   .play-home .mint-entry-badge { align-self: center; }
   .play-home .mint-entry-links { justify-content: center; }
-  body:not(.in-match) .ball-page > .rules { grid-column: 1 / -1; width: 100%; }
 }
 /* Short landscape screens (phones on their side): the rink runs top to bottom and the scoreboard
    and controls move to a sidebar on the side where the top of the phone is. */
@@ -355,15 +353,6 @@ body.show-full-stats .full-stats { display: flex; }
   border-color: #ff7197;
   background: color-mix(in srgb, #ff7197 20%, var(--elevated));
   box-shadow: 0 0 10px rgba(255, 113, 151, 0.4);
-}
-.stat-super-thumb {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  object-fit: contain;
-  background: rgba(255, 255, 255, 0.08);
-  vertical-align: middle;
-  margin-left: 8px;
 }
 .super-pct {
   font-size: 10px;
@@ -670,20 +659,7 @@ body.stadium-fullscreen-active {
   box-sizing: border-box;
 }
 
-.controls { display: flex; gap: 16px; align-items: center; margin: 16px 0; flex-wrap: wrap; }
-.controls label { flex: 1; min-width: 160px; }
-.controls input { display: block; width: 100%; accent-color: var(--primary); margin: 12px 0; }
-.controls output { float: right; font-variant-numeric: tabular-nums; }
-.controls small, .hint { font-size: 12px; color: var(--muted); }
-.hint { margin: 8px 0 16px; }
-.rules { padding: 16px 0; color: var(--muted); }
-.rules summary { cursor: pointer; color: var(--text); font-weight: 500; }
 
-.stat-inputs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
-.stat-inputs input { display: block; width: 100%; margin: 8px 0; }
-.stat-inputs output { font-size: 12px; }
-#stat-testing input[type=number], #stat-testing select { min-height: 40px; border: 1px solid var(--border); border-radius: 12px; background: var(--elevated); color: var(--text); padding: 8px 12px; font: inherit; }
-#stat-testing input[type=checkbox] { accent-color: var(--primary); }
 
 @media (max-width: 1300px) {
   .arena-layout { grid-template-columns: 200px 1fr 200px; }
@@ -692,9 +668,6 @@ body.stadium-fullscreen-active {
   .arena-layout { grid-template-columns: 1fr; }
   .stadium { order: -1; }
   .home-column, .away-column { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  .controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .controls label { min-width: 0; }
-  .controls label:last-of-type { grid-column: 1 / -1; }
 }
 @media (max-width: 650px) {
   .ball-page { width: calc(100% - 24px); }
@@ -711,7 +684,6 @@ body.stadium-fullscreen-active {
   #launch { min-width: 130px; min-height: 38px; font-size: 14px; }
   .home-column, .away-column { grid-template-columns: 1fr; }
   #game-status { font-size: 12px; }
-  .stat-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* Separate selection, character actions, and the team-wide turn action. */
@@ -724,9 +696,6 @@ body.stadium-fullscreen-active {
 .team-selector button svg { width: 28px; height: 28px; }
 .team-selector button[aria-pressed=true] { border-color: var(--team-home); background: color-mix(in srgb, var(--card), var(--team-home) 12%); }
 .team-selector button:disabled { opacity: 1; }
-.shot-controls { margin: 0 16px; padding: 8px 0; border-top: 1px solid var(--border); }
-.shot-controls summary { cursor: pointer; font-size: 13px; color: var(--muted); }
-.shot-controls .controls { margin: 12px 0; }
 .team-launch { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 #plan-summary { font-size: 12px; color: var(--muted); }
 #plan-summary:empty { display: none; }
@@ -745,7 +714,6 @@ body.stadium-fullscreen-active {
 @media (max-width: 650px) {
   .scoreboard { flex-wrap: wrap; gap: 10px; }
   .stadium-toolbar { position: static; transform: none; margin-left: auto; }
-  .shot-controls .controls { grid-template-columns: 1fr; }
 }
 
 /* Prominent ability art and touch-friendly spin control outside the aiming area. */
@@ -793,9 +761,6 @@ body.stadium-fullscreen-active {
 .stadium.portrait-mode .team-launch { flex-direction: column-reverse; justify-content: center; gap: 3px; }
 .stadium.portrait-mode #launch { width: 100%; min-width: 0; min-height: 48px; border-radius: 12px; box-shadow: none; }
 .stadium.portrait-mode #plan-summary { font-size: 10px; }
-.stadium.portrait-mode .shot-controls { grid-area: controls; margin: 0 10px; padding: 0; }
-.stadium.portrait-mode .shot-controls summary { padding: 8px 0; font-size: 11px; }
-.stadium.portrait-mode .shot-controls[open] { max-height: 30dvh; overflow-y: auto; }
 .stadium.portrait-mode.goal-phase .team-launch { grid-column: 1 / -1; }
 .stadium.portrait-mode.goal-phase #launch { animation: none; padding: 8px 16px; }
 .stadium.portrait-mode:fullscreen, .stadium.portrait-mode.stadium-fullscreen {
@@ -981,3 +946,39 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 @media (max-width: 640px), (max-height: 560px) {
   .team-sheet { width: 100%; height: 100dvh; max-width: none; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top); }
 }
+
+/* Announcements over the rink ("Plan your shot…", "Launch!", the winner). */
+.field-banner {
+  position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; padding: 0 12px; pointer-events: none;
+  font-family: var(--font-display); font-size: clamp(32px, 12cqmin, 76px); line-height: 1; text-align: center; color: var(--text);
+  -webkit-text-stroke: .08em #101217; paint-order: stroke fill; text-shadow: 0 6px 18px #000a; opacity: 0;
+}
+.rink-stage { container-type: size; }
+.field-banner[data-tone="launch"] { color: var(--primary); }
+.field-banner[data-tone="home"] { color: var(--team-home); }
+.field-banner[data-tone="away"] { color: var(--team-away); }
+.field-banner.show { animation: field-banner var(--banner-ms, 1200ms) ease both; }
+@keyframes field-banner {
+  0% { opacity: 0; transform: scale(.6); }
+  12% { opacity: 1; transform: scale(1.08); }
+  20% { transform: scale(1); }
+  85% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.04); }
+}
+/* The demo's flashing tag and the pointer that acts out Saffron's planning. */
+.demo-badge {
+  display: none; position: absolute; left: 50%; bottom: 3%; z-index: 5; transform: translateX(-50%); pointer-events: none;
+  font-family: var(--font-display); font-size: clamp(13px, 3.4cqmin, 22px); letter-spacing: .2em; color: var(--text);
+  animation: demo-flash 1.4s ease-in-out infinite;
+}
+body.demo-match:not(.in-match) .demo-badge { display: block; }
+@keyframes demo-flash { 50% { opacity: .2; } }
+.demo-finger {
+  position: absolute; z-index: 7; width: clamp(40px, 12cqmin, 64px); height: auto; pointer-events: none;
+  /* The fingertip (9.5, 22 in the icon) sits on the target point. */
+  transform: translate(-39.6%, -91.7%); transform-origin: 39.6% 91.7%; transition: transform .12s ease;
+  fill: #fff; stroke: #000; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+  filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff) drop-shadow(0 3px 4px #0007);
+}
+.demo-finger.pressed { transform: translate(-39.6%, -91.7%) scale(.88); }
+@media (prefers-reduced-motion: reduce) { .field-banner.show { opacity: 1; } }

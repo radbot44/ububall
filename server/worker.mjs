@@ -189,7 +189,7 @@ export default {
       if (path === '/auth/callback' && request.method === 'GET') return auth.callback(request, env);
       const session = await auth.session(request, env);
       if (path === '/api/session' && request.method === 'GET') return json(!session ? { owner: null } :
-        session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, csrf: session.csrf });
+        session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, name: session.name ?? null, csrf: session.csrf });
       if (path === '/api/guest' && request.method === 'POST') {
         if (request.headers.get('Origin') !== auth.origin(env)) return json({ error: 'Invalid request origin.' }, 403);
         if (session) return json(session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, csrf: session.csrf });

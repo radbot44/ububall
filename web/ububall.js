@@ -31,7 +31,7 @@
   const cpuClient = createCPUClient();
   let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuLevel = 'medium';
   // The home screen demo (CPU against CPU) plays silently.
-  let demo = false;
+  let demo = false, demoLevels = ['medium', 'hard'];
   const gameAudio = () => demo ? null : window.ubuAudio;
   const classicMode = () => ububallMatch.rule(matchMode, 'classic');
   const blitzMode = () => ububallMatch.rule(matchMode, 'blitz');
@@ -75,7 +75,7 @@
     efficiency: 127, synergy: 127, chemistry: 127
   });
   let stats = practice.map(p => ({ ...(p.model.stats || normalStats()) }));
-  let lastPlans = null, teamEntries = [...roster, ...practice.slice(3)];
+  let teamEntries = [...roster, ...practice.slice(3)];
   let play = ububallMatch.newPlay(), tally = ububallMatch.newTally(), scoringPlayer = null, roundTurns = 0;
   // The status line's wording for each goal call.
   const GOAL_WORDS = { 'OWN GOAL': 'Own goal', 'HAT TRICK!': 'Hat trick', 'ACE!': 'Ace', 'BANK SHOT!': 'Bank shot', GOAL: 'Goal' };
@@ -861,15 +861,25 @@
     if (online?.active) return;
     cpu = P.cpuPlans(bodies, () => .5, scores);
     cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn },
-      { level: cpuLevel, seed: turn }).then(result => {
+      { level: demo ? demoLevels[1] : cpuLevel, seed: turn }).then(result => {
       if (generation !== cpuGeneration || !result || online?.active) return;
       if (result.error) console.warn('CPU search unavailable; using baseline plan.');
       else cpu = result.plans;
     });
   }
+  // Big announcements over the rink. The promise settles once the banner has gone.
+  let bannerTimer = 0, planBanner = Promise.resolve();
+  function banner(text, ms = 1200, tone = '') {
+    const el = $('field-banner');
+    clearTimeout(bannerTimer);
+    el.textContent = text; el.dataset.tone = tone; el.style.setProperty('--banner-ms', ms + 'ms');
+    el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+    return new Promise(resolve => { bannerTimer = setTimeout(() => { el.classList.remove('show'); resolve(); }, ms); });
+  }
   // Between turns, guarding ubus stay on guard (keeping their faded arrow); otherwise plans clear.
   function resetPlans(keepGuard = false) {
     startPlanClock();
+    if (!online?.active) planBanner = banner('Plan your shot…', 1300);
     plans = Array.from({ length: 3 }, (_, i) => keepGuard && plans?.[i]?.guard ? { ...plans[i] } : idlePlan());
     prepareCPU(); // Snapshot before any human planning input.
     sync();
@@ -975,27 +985,18 @@
     if (isStunned) {
       plans[selected].power = plans[selected].spin = 0;
     }
-    for (const id of ['angle', 'power', 'shot-spin', 'spin-less', 'spin-more', 'hold']) $(id).disabled = !planning || isStunned;
+    for (const id of ['shot-spin', 'spin-less', 'spin-more']) $(id).disabled = !planning || isStunned;
     $('launch').disabled = phase === 'play' || phase === 'cpu-wait';
-    for (const node of $('stat-testing').querySelectorAll('input, select, button')) node.disabled = phase === 'play' || phase === 'cpu-wait';
-    $('restore-shot').disabled = phase === 'play' || phase === 'cpu-wait' || !lastPlans;
-    if (!readStats() || classicMode()) $('apply-stats').disabled = true;
-    if (classicMode()) for (const id of ['stat-super', 'fill-meter', 'normal-stats']) $(id).disabled = true;
     document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
     $('launch').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : phase === 'cpu-wait' ? 'CPU planning…' : 'Launch team';
-    $('selected-name').textContent = teamEntries[selected].model.parts.fullName;
     const launching = plans.filter((p, i) => p.power > 0 && !bodies[i].stunned && !(bodies[i].superArm && bodies[i].equippedSuper?.key === 'stalwart')).length;
     const guarding = plans.filter((p, i) => p.guard && !bodies[i].stunned).length;
     $('plan-summary').textContent = planning ? `${launching} launching · ${guarding} guarding` : '';
-    $('hold').setAttribute('aria-pressed', String(Boolean(plans[selected].guard)));
     [...$('team-selector').children].forEach((button, i) => {
       button.setAttribute('aria-pressed', String(i === selected));
       button.disabled = !planning;
       button.querySelector('span').textContent = `${bodies[i].stunned ? 'Stunned' : plans[i].guard ? 'Guard' : plans[i].power > 0 ? Math.round(plans[i].power * 100) + '%' : 'Hold'}${bodies[i].superArm ? ' · Armed' : ''}`;
     });
-    const angle = Math.round((plans[selected].angle * 180 / Math.PI + 360) % 360);
-    $('angle').value = angle; $('angle-value').value = angle + '°';
-    $('power').value = Math.round(plans[selected].power * 100); $('power-value').value = $('power').value + '%';
     const spinValue = Math.round((plans[selected].spin || 0) * 100);
     $('shot-spin').value = spinValue;
     $('shot-spin').style.setProperty('--spin-start', Math.min(50, (spinValue + 100) / 2) + '%');
@@ -1569,7 +1570,7 @@
     super: (key, stage, body, target = null) => { syncReplay(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
   };
   function restartGoalReplay() {
-    Object.assign(goalReplay, { index: -1, played: 0, steps: 0, doneAt: 0 });
+    Object.assign(goalReplay, { index: -1, played: 0, steps: 0, doneAt: 0, loops: (goalReplay.loops || 0) + 1 });
     clearEffects(); nextReplaySegment();
   }
   function nextReplaySegment() {
@@ -1628,7 +1629,7 @@
       phase = scores[goal] >= 5 ? 'over' : 'goal';
       celebrate(goal, bodies[6], call.label);
       if (call.assist !== null) popup(bodies[call.assist], 'Assist');
-      if (phase === 'over') queueSummary();
+      if (phase === 'over') { queueSummary(); if (!demo) banner(goal === 0 ? 'You win!' : 'CPU wins!', 3500, goal === 0 ? 'home' : 'away'); }
       const scorer = bodies[call.scorer] || bodies.slice(goal * 3, goal * 3 + 3)[0];
       goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
       scoringPlayer = scorer;
@@ -1668,13 +1669,13 @@
     if (generation !== cpuGeneration || phase !== 'cpu-wait' || online?.active) return;
     if ($('field-spin').contains(document.activeElement)) document.activeElement.blur();
     gameAudio()?.stop();
-    lastPlans = structuredClone(plans);
     drag = null;
-    const turnPlans = [...plans, ...($('cpu-hold').checked ? [] : cpu)];
+    const turnPlans = [...plans, ...cpu];
     recordSegment(bodies, turnPlans);
     P.startTurn(bodies, turnPlans, handleSuper); elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
+    if (!demo) banner('Launch!', 800, 'launch');
   };
-  for (const [id, key, scale] of [['angle', 'angle', Math.PI / 180], ['power', 'power', .01], ['shot-spin', 'spin', .01]]) {
+  for (const [id, key, scale] of [['shot-spin', 'spin', .01]]) {
     $(id).oninput = () => {
       if (phase !== 'plan' || bodies[selected].stunned) return;
       plans[selected][key] = Number($(id).value) * scale; plans[selected].guard = false;
@@ -1695,7 +1696,7 @@
     plans[i] = { ...plans[i], guard: !plans[i].guard };
     sync(); draw();
   }
-  $('hold').onclick = () => toggleGuard(selected);  function point(event) {
+  function point(event) {
     const r = canvas.getBoundingClientRect();
     if (isPortrait) {
       const cx = r.left + r.width / 2;
@@ -1982,7 +1983,7 @@
       const { entries } = await fetchCollectionPage('favorite', '');
       if (entries.length < 3 || !roster.every(entry => practice.includes(entry))) return;
       draft = entries.slice(0, 3);
-      if (demo) newMatch(); else if (!matchInProgress()) newMatch(); else roster = [...draft];
+      if (demo) newDemoGame(); else if (!matchInProgress()) newMatch(); else roster = [...draft];
       updateHome();
     } catch {}
   });
@@ -2009,78 +2010,6 @@
   };
   $('cancel-roster').onclick = () => $('roster-dialog').close();
   // A modal pauses the simulation; cancelling preserves the current turn.
-  for (const key of Object.keys(normalStats())) {
-    const label = document.createElement('label'), input = document.createElement('input'), output = document.createElement('output');
-    label.textContent = key[0].toUpperCase() + key.slice(1) + ' ';
-    input.id = 'stat-' + key; input.type = 'number'; input.min = 0; input.max = 255; input.step = 1;
-    output.id = 'mult-' + key; label.append(input, output); $('stat-inputs').append(label);
-    input.oninput = previewStats;
-  }
-  const statSuper = $('stat-super');
-  if (statSuper) {
-    P.SUPERS.forEach(s => {
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      opt.textContent = `${s.name}: ${s.desc}`;
-      statSuper.append(opt);
-    });
-    statSuper.onchange = () => {
-      const idx = Number($('stat-player').value);
-      const chosen = P.SUPERS[Number(statSuper.value)];
-      if (bodies[idx]) bodies[idx].equippedSuper = chosen;
-      if (teamEntries[idx]) teamEntries[idx].equippedSuper = chosen;
-      if ($('stat-super-thumb')) $('stat-super-thumb').src = chosen.icon;
-      sync(); draw();
-    };
-  }
-  const fillMeter = $('fill-meter');
-  if (fillMeter) {
-    fillMeter.onclick = () => {
-      const idx = Number($('stat-player').value);
-      if (!classicMode() && bodies[idx]) {
-        bodies[idx].meter = 100;
-        sync(); draw();
-      }
-    };
-  }
-  function readStats() {
-    const result = {};
-    for (const key of Object.keys(normalStats())) {
-      const input = $('stat-' + key); if (!input.value || !input.checkValidity()) return null;
-      result[key] = Number(input.value);
-    }
-    return result;
-  }
-  function previewStats() {
-    const raw = readStats(); $('apply-stats').disabled = !raw || phase === 'play';
-    if (!raw) { $('stat-preview').textContent = 'Enter whole numbers from 0 to 255.'; return; }
-    for (const key of Object.keys(raw)) $('mult-' + key).value = P.multiplier(raw[key]).toFixed(3) + '×';
-    const b = {}; P.applyStats(b, raw);
-    $('stat-preview').textContent = `Mass ${b.mass.toFixed(2)} · Radius ${b.radius.toFixed(1)} · Slowing ${b.friction.toFixed(1)}/s · Max spin ${b.maxSpin.toFixed(2)} rad/s · Grip ${b.grip.toFixed(3)} · Full-power speed ${P.launchSpeed(b).toFixed(0)}. DNA-driven physics.`;
-  }
-  function showStats() {
-    const idx = Number($('stat-player').value);
-    for (const key of Object.keys(normalStats())) $('stat-' + key).value = stats[idx][key];
-    if ($('stat-super') && bodies?.[idx]) {
-      const s = bodies[idx].equippedSuper || P.SUPERS[0];
-      $('stat-super').value = s.id;
-      if ($('stat-super-thumb')) $('stat-super-thumb').src = s.icon;
-    }
-    previewStats();
-  }
-  function resetField() {
-    endGoalReplay(); playSegments = [];
-    startPlanClock();
-    stopFanfare(); gameAudio()?.stop();
-    bodies = kickoff(); scores = [0, 0]; tally = ububallMatch.newTally(); closeSummary(); turn = 1; phase = 'plan'; elapsed = accumulator = 0; drag = null;
-    buildTeam();
-    prepareCPU(); sync(); previewStats(); draw(); say('Field reset. Your planned launches are preserved.');
-  }
-  $('stat-player').onchange = showStats;
-  $('apply-stats').onclick = () => { const raw = readStats(); if (!raw || phase === 'play') return; stats[Number($('stat-player').value)] = raw; resetField(); };
-  $('normal-stats').onclick = () => { stats = Array.from({ length: 6 }, normalStats); showStats(); resetField(); };
-  $('reset-field').onclick = resetField;
-  $('restore-shot').onclick = () => { if (!lastPlans) return; plans = structuredClone(lastPlans); resetField(); };
   const hudSuperBtn = $('stadium-super-btn');
   if (hudSuperBtn) {
     hudSuperBtn.onclick = () => {
@@ -2219,8 +2148,6 @@
     }
   } catch {}
 
-  [...$('stat-player').options].forEach((option, i) => { option.textContent = teamEntries[i].model.parts.fullName; });
-  showStats();
   document.addEventListener('visibilitychange', () => { lastTime = 0; accumulator = 0; });
   const ro = new ResizeObserver(() => { layoutDirty = true; draw(); });
   ro.observe(canvas);
@@ -2475,22 +2402,109 @@
   // The phone's top edge in landscape, so the match sidebar can sit there.
   function updateTopSide() { const angle = screen.orientation?.angle ?? window.orientation; document.body.dataset.topSide = angle === 270 || angle === -90 ? 'right' : 'left'; }
   updateTopSide(); screen.orientation?.addEventListener('change', updateTopSide);
-  // Home screen demo: when no match is under way, the CPU plays both teams on the home rink.
-  const demoClient = createCPUClient();
-  let demoBusy = false, demoGoalAt = 0;
-  function startDemo() { if (demo || inMatch || online?.active) return; demo = true; setPortrait(false); newMatch(); updateHome(); }
-  function stopDemo() { if (!demo) return; demo = false; demoBusy = false; demoGoalAt = 0; demoClient.cancel(); }
-  setInterval(async () => {
-    if (!demo || inMatch || document.hidden || document.querySelector('[data-screen="play"]').hidden || document.querySelector('dialog[open]')) return;
-    if (phase === 'over') { newMatch(); return; }
-    if (phase === 'goal') { demoGoalAt ||= performance.now(); if (performance.now() - demoGoalAt > 2500) { demoGoalAt = 0; $('launch').click(); } return; }
-    if (phase !== 'plan' || demoBusy) return;
-    demoBusy = true;
-    const result = await demoClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn }, { level: 'easy', seed: turn }, 0);
-    demoBusy = false;
-    if (!demo || phase !== 'plan' || !result || result.error) return;
-    plans = result.plans; $('launch').click();
-  }, 400);
+  // Home screen demo: Saffron (the home team) against Amethyst, one hard CPU and one medium, chosen
+  // at random each game. Saffron's planning is acted out with a pointer, as a how-to for new players.
+  const demoClient = createCPUClient(), DEMO_STOP = Symbol('demo stopped');
+  let demoRun = 0;
+  const capital = text => text[0].toUpperCase() + text.slice(1);
+  function demoPaused() { return inMatch || document.hidden || $('field-banner').closest('[data-screen]').hidden || Boolean(document.querySelector('dialog[open]')); }
+  // Waits count only while the demo is on screen; a stopped demo ends its walkthrough.
+  async function demoWait(run, ms, until = null) {
+    let left = ms;
+    while (until ? !until() : left > 0) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      if (run !== demoRun) throw DEMO_STOP;
+      if (!demoPaused()) left -= 100;
+    }
+  }
+  function newDemoGame() {
+    demoLevels = Math.random() < .5 ? ['hard', 'medium'] : ['medium', 'hard'];
+    newMatch();
+    $('home-label').textContent = 'Saffron'; $('opponent-label').textContent = 'Amethyst';
+    $('mode-label').textContent = `${capital(demoLevels[0])} vs ${capital(demoLevels[1])}`;
+  }
+  function startDemo() {
+    if (demo || inMatch || online?.active) return;
+    demo = true; document.body.classList.add('demo-match'); setPortrait(false);
+    newDemoGame(); updateHome();
+    void demoLoop(++demoRun);
+  }
+  function stopDemo() {
+    if (!demo) return;
+    demo = false; demoRun++; demoClient.cancel(); hideFinger();
+    document.body.classList.remove('demo-match');
+    $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU';
+  }
+  async function demoLoop(run) {
+    try {
+      for (;;) {
+        await demoWait(run, 100);
+        if (phase === 'plan') await demoPlanTurn(run);
+        else if (phase === 'goal' || phase === 'over') await demoAfterGoal(run);
+      }
+    } catch (error) { if (error !== DEMO_STOP) throw error; }
+  }
+  // Each goal replays twice; a win is announced and lingers before the next game.
+  async function demoAfterGoal(run) {
+    const scored = performance.now();
+    await demoWait(run, 0, () => (goalReplay?.loops ?? 0) >= 3 || (!goalReplay && !goalReplayAt && performance.now() - scored > 3000));
+    if (phase === 'over') {
+      const home = scores[0] > scores[1];
+      endGoalReplay();
+      await banner(home ? 'Saffron wins!' : 'Amethyst wins!', 4000, home ? 'home' : 'away');
+      await demoWait(run, 800);
+      newDemoGame();
+    } else $('launch').click();
+  }
+  async function demoPlanTurn(run) {
+    const t = turn, planning = demoClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn },
+      { level: demoLevels[0], seed: turn }, 0);
+    await planBanner; await demoWait(run, 600);
+    const result = await planning;
+    if (run !== demoRun) throw DEMO_STOP;
+    if (!result || result.error || phase !== 'plan' || turn !== t) return;
+    for (let i = 0; i < 3; i++) await demoAim(run, i, result.plans[i]);
+    await demoWait(run, 500);
+    await banner('Launch!', 900, 'launch');
+    await demoWait(run, 400);
+    if (phase === 'plan' && turn === t) $('launch').click();
+  }
+  // The pointer's fingertip sits on a field point, through the inverse of the pointer-input mapping.
+  function placeFinger(x, y) {
+    const finger = $('demo-finger'), stage = finger.parentElement.getBoundingClientRect(), r = canvas.getBoundingClientRect();
+    const px = isPortrait ? r.left + r.width / 2 + (y - 300) * r.width / 600 : r.left + x * r.width / 1000;
+    const py = isPortrait ? r.top + r.height / 2 + (500 - x) * r.height / 1000 : r.top + y * r.height / 600;
+    finger.style.left = px - stage.left + 'px'; finger.style.top = py - stage.top + 'px';
+  }
+  function hideFinger() { $('demo-finger').toggleAttribute('hidden', true); $('demo-finger').classList.remove('pressed'); }
+  async function demoAim(run, i, target) {
+    const b = bodies[i];
+    selected = i; sync(); draw();
+    if (b.stunned || target.guard || !(target.power > 0)) { plans[i] = { ...target }; sync(); draw(); await demoWait(run, 500); return; }
+    plans[i] = { ...target, power: 0 };
+    placeFinger(b.x, b.y); $('demo-finger').toggleAttribute('hidden', false);
+    await demoWait(run, 350);
+    $('demo-finger').classList.add('pressed');
+    await demoWait(run, 200);
+    const began = performance.now(), ms = 900;
+    await new Promise(resolve => {
+      const step = now => {
+        if (run !== demoRun) { resolve(); return; }
+        const k = Math.min(1, (now - began) / ms), eased = 1 - (1 - k) ** 3;
+        plans[i] = { ...target, power: target.power * eased };
+        const arrow = impulseGeometry(b, plans[i]);
+        placeFinger(arrow.x, arrow.y);
+        sync(); draw();
+        if (k < 1) requestAnimationFrame(step); else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+    if (run !== demoRun) throw DEMO_STOP;
+    plans[i] = { ...target }; sync(); draw();
+    await demoWait(run, 300);
+    hideFinger();
+    await demoWait(run, 300);
+  }
   // A reload during a match returns to match mode; otherwise the home rink plays a demo.
   if (history.state?.match) enterMatch(); else startDemo();
 })();

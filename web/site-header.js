@@ -87,12 +87,12 @@
       if (identityBtn) {
         identityBtn.hidden = false;
         identityBtn.disabled = false;
-        identityBtn.title = `Discord account: ${currentSession.owner}`;
+        identityBtn.title = `Signed in with Discord as ${currentSession.name || 'your Discord account'}`;
         const nameSpan = identityBtn.querySelector('.identity-name');
-        if (nameSpan) nameSpan.textContent = 'Account';
+        if (nameSpan) nameSpan.textContent = currentSession.name || 'Account';
       }
       if (discordIdentity) {
-        discordIdentity.textContent = `Connected as ${currentSession.owner}`;
+        discordIdentity.textContent = currentSession.name ? `Connected as ${currentSession.name}` : 'Connected';
       }
     } else {
       if (loginBtn) {

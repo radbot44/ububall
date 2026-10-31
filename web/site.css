@@ -25,7 +25,9 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body {
-  margin: 0; min-height: 100dvh;
+  /* flow-root keeps the header margin inside the body, so no strip of page shows above it and
+     the page is never taller than the screen. */
+  display: flow-root; margin: 0; min-height: 100dvh;
   background: radial-gradient(ellipse 90% 60% at 50% -10%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 70%) no-repeat, var(--background);
 }
 /* Uburoom Sans has a single heavy weight; never let the browser fake a bolder one. */
@@ -145,6 +147,7 @@ a { color: inherit; text-decoration: none; }
   flex-shrink: 0;
 }
 
+#identity .identity-name { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #identity {
   display: inline-flex;
   align-items: center;

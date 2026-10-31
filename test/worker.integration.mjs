@@ -392,9 +392,10 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const state = new URL(begin.headers.get('Location')).searchParams.get('state');
     const signed = await callback(new Request(env.ORIGIN + '/auth/callback?code=fixture&state=' + state, {
       headers: { Cookie: begin.headers.get('Set-Cookie').split(';')[0] + '; ' + guestCookie } }), env,
-      async url => Response.json(url.endsWith('/token') ? { access_token: 'test-only', token_type: 'Bearer' } : { id: '678901234567890123' }));
+      async url => Response.json(url.endsWith('/token') ? { access_token: 'test-only', token_type: 'Bearer' } : { id: '678901234567890123', username: 'ubufan', global_name: '  Ubu Fan  ' }));
     const discordCookie = signed.headers.getSetCookie().find(c => c.startsWith('__Host-ubu-session=')).split(';')[0];
     const discordSession = await (await fetch('/api/session', { headers: { Cookie: discordCookie } })).json();
+    assert.equal(discordSession.name, 'Ubu Fan');
     const d = { ...g, Cookie: discordCookie, 'X-Ubu-CSRF': discordSession.csrf };
     const claimed = await (await fetch(base + '/state', { headers: d })).json();
     assert.equal(claimed.seat, 0); assert.equal(claimed.practice, null);

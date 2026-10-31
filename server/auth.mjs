@@ -113,7 +113,9 @@ export async function callback(request, env, fetchDiscord = fetch) {
     const returnTo = safeReturnPath(state.returnTo, env);
     // A guest signing in keeps their match seats: the Discord session names the guest ID it replaced.
     const previous = await session(request, env);
-    const sessionToken = await seal({ purpose: 'session', owner: user.id, csrf: random(), expires: Math.floor(Date.now() / 1000) + 86400,
+    // The display name is shown in the header; the ID never is.
+    const name = [user.global_name, user.username].find(n => typeof n === 'string' && n.trim())?.trim().slice(0, 32);
+    const sessionToken = await seal({ purpose: 'session', owner: user.id, ...(name ? { name } : {}), csrf: random(), expires: Math.floor(Date.now() / 1000) + 86400,
       ...(previous?.guest ? { alias: previous.owner } : {}) }, env.SESSION_SECRET);
     const headers = new Headers({ Location: origin(env) + returnTo, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
     headers.append('Set-Cookie', setCookie(stateName, '', 0));
