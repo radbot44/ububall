@@ -5,7 +5,7 @@
   <meta name="color-scheme" content="dark"><title>Ububall</title>
   <link rel="stylesheet" href="site.css"><link rel="stylesheet" href="ububall.css">
   <script src="site-header.js" defer></script><script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script>
-  <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-cpu-client.js" defer></script><script src="ububall-online.js" defer></script><script src="ububall.js" defer></script><script src="app.js" defer></script>
+  <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-replay.js" defer></script><script src="ububall-cpu-client.js" defer></script><script src="ububall-online.js" defer></script><script src="ububall.js" defer></script><script src="app.js" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -31,7 +31,7 @@
   <main class="ball-page" data-screen="play">
 
   <section class="play-home" aria-labelledby="home-title">
-    <div class="home-actions"><button id="home-play" class="primary" type="button">Play vs CPU</button><button id="online-open" type="button">Play online</button></div>
+    <div class="home-actions"><button id="home-play" class="primary" type="button">Play vs CPU</button><button id="online-open" type="button">Play online</button><button id="replays-open" type="button">Replays</button></div>
     <div class="home-team">
       <div class="home-team-head"><h1 id="home-title">Your team</h1><button id="new-match" type="button">Change team</button></div>
       <div id="home-lineup" class="home-lineup"></div>
@@ -132,6 +132,18 @@ SOFTWARE.
           <span id="stadium-super-text">Super 0%</span>
         </button>
         <div class="team-launch"><span id="plan-summary"></span><button class="primary" id="launch">Launch team</button></div>
+        <div id="replay-bar" class="replay-bar">
+          <div class="replay-track"><input id="replay-seek" type="range" min="0" max="1" step="1" value="0" aria-label="Replay position"><div id="replay-marks" class="replay-marks"></div></div>
+          <div class="replay-controls">
+            <button id="replay-prev" class="icon-button" type="button" aria-label="Previous turn" title="Previous turn (Left arrow)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M18 6l-9 6 9 6z"/></svg></button>
+            <button id="replay-play" class="icon-button primary" type="button" aria-label="Pause" title="Play or pause (Space)"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="icon-pause" d="M8 5v14M16 5v14"/><path class="icon-play" d="M7 4l13 8-13 8z"/></svg></button>
+            <button id="replay-next" class="icon-button" type="button" aria-label="Next turn" title="Next turn (Right arrow)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 6l9 6-9 6z"/></svg></button>
+            <span id="replay-time" class="replay-time">0:00 / 0:00</span>
+            <select id="replay-speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
+            <button id="replay-export" type="button">Export</button>
+            <button id="replay-exit" type="button">Exit replay</button>
+          </div>
+        </div>
       </div>
     </section>
     <aside class="team-column away-column" aria-label="CPU team">
@@ -152,6 +164,11 @@ SOFTWARE.
       <label class="toggle-switch" title="Show the spin slider beside the selected ubu"><input type="checkbox" id="toggle-spin-slider"><span class="toggle-track"></span><span>Spin slider</span></label>
     </div>
     <nav class="pause-links" aria-label="Leave to"><a href="/mint">Ubu Mint</a><a href="/collection">Collection</a></nav>
+  </dialog>
+  <dialog id="replays-dialog" class="replays-dialog" aria-labelledby="replays-title">
+    <div class="online-heading"><div><h2 id="replays-title">Replays</h2><p id="replays-note"></p></div><button id="replays-close" class="icon-button" type="button" aria-label="Close replays">&#10005;</button></div>
+    <p id="replays-status" role="status"></p>
+    <ul id="replays-list" class="replays-list"></ul>
   </dialog>
   <dialog id="roster-dialog" class="team-sheet" data-step="mode" aria-labelledby="roster-title">
     <button id="cancel-roster" class="icon-button team-sheet-close" type="button" aria-label="Close">&#10005;</button>

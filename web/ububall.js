@@ -18,7 +18,7 @@
     img.onload = () => { if (skaters.length) draw(); };
     return img;
   });
-  const practice = Array.from({ length: 6 }, () => ({ model: ubu.decode(ubu.randomDNA()), label: 'Practice ubu' }));
+  const practice = Array.from({ length: 6 }, () => { const dna = ubu.randomDNA(); return { model: ubu.decode(dna), dna: ubu.toCode(dna), label: 'Practice ubu' }; });
   let roster = practice.slice(0, 3), draft = [...roster], rosterSlot = 0;
   let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [], next = '';
@@ -26,6 +26,8 @@
   let matchMode = 'standard', planDeadline = 0;
   // Each turn of the current play (motion since the field last rested), for goal replays.
   let playSegments = [], goalReplay = null, goalReplayAt = 0;
+  // The replay viewer (see watchReplay), and the match being recorded for the replay library.
+  let theater = null, recording = null, recordingOnline = false;
   let matchTicks = 0; // Simulated ticks played locally, for meter cooldowns.
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const cpuClient = createCPUClient();
@@ -388,7 +390,7 @@
       const s = shockwaves[i]; s.life -= dt;
       if (s.life <= 0) { shockwaves.splice(i, 1); }
     }
-    const moving = phase === 'play' || Boolean(goalReplay);
+    const moving = phase === 'play' || Boolean(goalReplay) || Boolean(theater && !theater.paused);
     if (moving) for (const s of skids) s.age += dt;
     for (let i = skids.length - 1; i >= 0; i--) if (skids[i].age >= SKID_LIFE) skids.splice(i, 1);
     if (moving) for (const s of burns) s.age += dt;
@@ -582,7 +584,7 @@
     if (goalCall) drawGoalCall(goalCall, goalCall.team ? away : home);
     if (pulseMode() && !goalReplay) {
       const turnSeconds = ububallMatch.turnTicks(matchMode) * P.DT;
-      const progress = phase !== 'play' ? 0 : online?.active ? (onlineReplay?.currentTick ?? 0) * P.DT / turnSeconds : elapsed / turnSeconds;
+      const progress = theater ? theater.tick * P.DT / turnSeconds : phase !== 'play' ? 0 : online?.active ? (onlineReplay?.currentTick ?? 0) * P.DT / turnSeconds : elapsed / turnSeconds;
       ctx.save(); ctx.lineCap = 'round';
       ctx.globalAlpha = .25; line(160, 556, 840, 556, border, 4);
       if (progress > 0) { ctx.globalAlpha = .9; line(160, 556, 160 + 680 * Math.min(1, progress), 556, '#DA4DB5', 4); }
@@ -1163,18 +1165,23 @@
       const actions = document.createElement('div'); actions.className = 'summary-actions'; actions.append(rematch, close, leave);
       summaryDialog.replaceChildren(title, honour, table, note, status, actions);
       updateRematch(online.state);
-    } else summaryDialog.replaceChildren(title, honour, table, note, close);
+    } else {
+      const watch = document.createElement('button'); watch.type = 'button'; watch.textContent = 'Watch replay';
+      watch.onclick = async () => { const id = await lastSaved; if (id) openReplay(id); };
+      const actions = document.createElement('div'); actions.className = 'summary-actions'; actions.append(close, watch);
+      summaryDialog.replaceChildren(title, honour, table, note, actions);
+    }
     if (!summaryDialog.open) summaryDialog.showModal();
   }
   // A save from a ball the saver's own team was most responsible for is a sheepish "Save..." with no meter.
   function creditSave(body, own) {
     popup(body, own ? 'Save...' : 'Save!');
-    if (own || online?.active || goalReplay) return;
+    if (own || online?.active || goalReplay || theater) return;
     for (const changed of ububallMatch.gainMeter(P, bodies, stats, body, ububallMatch.METER.save, classicMode())) dirtyMeters.add(changed);
   }
   // Online meters come from the server; replays never earn meter.
   function contactMeter(a, b, speed) {
-    if (online?.active || goalReplay) return;
+    if (online?.active || goalReplay || theater) return;
     const tick = matchTicks + Math.round(elapsed / P.DT);
     for (const changed of ububallMatch.contactMeter(P, bodies, stats, a, b, speed, tick, classicMode())) dirtyMeters.add(changed);
   }
@@ -1404,7 +1411,7 @@
     updateClock();
     const planning = phase === 'plan';
     const isGoal = phase === 'goal';
-    $('phase').textContent = phase === 'over' ? 'Final' : planning ? 'Plan' : isGoal ? 'Goal' : phase === 'cpu-wait' ? 'CPU' : phase === 'waiting' ? 'Waiting' : 'In play';
+    $('phase').textContent = phase === 'replay' ? 'Replay' : phase === 'over' ? 'Final' : planning ? 'Plan' : isGoal ? 'Goal' : phase === 'cpu-wait' ? 'CPU' : phase === 'waiting' ? 'Waiting' : 'In play';
     $('turn-label').textContent = turn;
     for (const team of [0, 1]) {
       // A goal pops the score; a side reaching 4 goals is on match point.
@@ -1511,7 +1518,7 @@
     }
   }
   function buildTeam() {
-    if (!online?.active) teamEntries = [...roster, ...practice.slice(3)];
+    if (!online?.active && !theater) teamEntries = [...roster, ...practice.slice(3)];
     if (!knobDock.querySelector('.knob-row')) {
       const row = document.createElement('div'); row.className = 'knob-row';
       row.append(...['angle', 'power', 'spin'].map(kind => makeKnob(kind)));
@@ -1598,13 +1605,14 @@
     }
   }
   function newMatch(playJingle = false) {
-    endGoalReplay(); playSegments = [];
+    endGoalReplay(); playSegments = []; saveRecording();
     matchMode = cpuMode;
     document.body.classList.toggle('classic-match', classicMode());
     showMode(matchMode);
     stats = [...draft, ...practice.slice(3)].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
     stopFanfare(); gameAudio()?.stop();
     roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
+    if (!demo) recording = ububallReplay.create({ mode: matchMode, names: ['You', 'CPU'], ubus: bodies.slice(0, 6).map((b, i) => ({ dna: teamEntries[i].dna, super: b.equippedSuper?.id ?? null })) });
     resetPlans(); say('Drag from an ubu toward your target to aim. Drag its arrowhead to adjust power and direction.'); draw();
     if (playJingle) gameAudio()?.playGameStart?.();
   }
@@ -2024,11 +2032,13 @@
     playSegments.push({ bodies: structuredClone(source), plans: structuredClone(turnPlans), ticks });
   }
   // Replays re-simulate each recorded turn from its exact starting state on a display copy.
-  const replayView = cb => toViewBody(cb, goalReplay.sim, goalReplay.seat);
-  const syncReplay = () => syncViewBodies(goalReplay.sim, goalReplay.seat);
+  // The goal replay and the replay viewer share these.
+  const shown = () => goalReplay || theater;
+  const replayView = cb => toViewBody(cb, shown().sim, shown().seat);
+  const syncReplay = () => syncViewBodies(shown().sim, shown().seat);
   const replayFx = {
     hit: (a, b, speed) => { syncReplay(); handleCollision(replayView(a), replayView(b), speed); },
-    wall: (body, velocity, wallType, nx, ny) => { syncReplay(); handleWall(replayView(body), velocity, wallType, goalReplay.seat ? -nx : nx, goalReplay.seat ? -ny : ny); },
+    wall: (body, velocity, wallType, nx, ny) => { syncReplay(); handleWall(replayView(body), velocity, wallType, shown().seat ? -nx : nx, shown().seat ? -ny : ny); },
     shock: (source, radius) => { syncReplay(); handleShockwave(replayView(source), radius); },
     super: (key, stage, body, target = null) => { syncReplay(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
   };
@@ -2076,6 +2086,251 @@
     bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
     clearEffects(); sync(); draw();
   }
+  // Replays (shared/ububall-replay.js): every match is recorded turn by turn and saved on this
+  // device when it ends or is left, keeping the latest ububallReplay.KEEP. Each saved entry holds
+  // the .ububall file and a summary for the list, with names and scores in rink order.
+  const replayStore = (() => {
+    let db = null;
+    const open = () => db ||= new Promise((resolve, reject) => {
+      const request = indexedDB.open('ububall', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('replays', { keyPath: 'id', autoIncrement: true });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => { db = null; reject(request.error); };
+    });
+    async function run(mode, work) {
+      const tx = (await open()).transaction('replays', mode), request = work(tx.objectStore('replays'));
+      return new Promise((resolve, reject) => { tx.oncomplete = () => resolve(request.result); tx.onerror = tx.onabort = () => reject(tx.error); });
+    }
+    return {
+      // Ids rise with age, so adding one drops the oldest beyond the limit.
+      add: entry => run('readwrite', store => {
+        const request = store.add(entry);
+        store.getAllKeys().onsuccess = event => event.target.result.slice(0, -ububallReplay.KEEP).forEach(id => store.delete(id));
+        return request;
+      }),
+      all: () => run('readonly', store => store.getAll()),
+      get: id => run('readonly', store => store.get(id)),
+      remove: id => run('readwrite', store => store.delete(id))
+    };
+  })();
+  // The id of the replay saved last, or null.
+  let lastSaved = Promise.resolve(null);
+  // Saves the recording, an unfinished match up to its last whole turn, and stops it.
+  function saveRecording() {
+    const r = recording;
+    recording = null; recordingOnline = false;
+    if (!r) return lastSaved;
+    r.turns = r.turns.filter(t => t.ticks);
+    if (!r.turns.length) return lastSaved;
+    const last = r.turns.at(-1), endScores = r.final?.scores || last.scores.map((n, team) => n + (last.goal?.team === team ? 1 : 0));
+    lastSaved = ububallReplay.write(r).then(file => replayStore.add({ format: ububallReplay.FORMAT, physics: P.VERSION, recorded: r.recorded,
+      mode: r.mode, seat: r.seat, names: r.names, scores: endScores, final: Boolean(r.final), turns: r.turns.length, file }))
+      .catch(error => { console.warn('Replay not saved.', error); return null; });
+    return lastSaved;
+  }
+  addEventListener('pagehide', () => void saveRecording());
+  // Completes the local turn just played.
+  function noteTurn(ticks, goal, cards) {
+    const t = recording?.turns.at(-1);
+    if (t && !t.ticks) Object.assign(t, { ticks, goal, cards: [...cards] });
+  }
+  // Online, the server's turns are recorded in its (seat 0) order and the replay shows this seat's side.
+  let onlinePlanFouls = null;
+  function recordOnline(s) {
+    if (s.phase === 'plan') onlinePlanFouls = structuredClone(s.game.fouls);
+    if (recordingOnline || s.phase === 'over') return;
+    saveRecording();
+    const [me, them] = onlineNames(s), classic = ububallMatch.rule(s.mode, 'classic');
+    recording = ububallReplay.create({ mode: s.mode, seat: s.seat, names: s.seat ? [them, me] : [me, them],
+      ubus: s.rosters.flat().map(entry => ({ dna: entry.dna, super: classic ? null : entry.superId })) });
+    recordingOnline = true;
+  }
+  function recordOnlineTurn(s) {
+    if (!recordingOnline) return;
+    const r = s.replay, scores = s.game.scores.map((n, team) => team === r.goal ? n - 1 : n);
+    const t = ububallReplay.addTurn(recording, { turn: r.turn, scores, fouls: onlinePlanFouls || ububallMatch.newFouls(), bodies: r.initialBodies, plans: r.plans });
+    Object.assign(t, { ticks: r.ticks, cards: [...(s.game.fouls?.cards || [])],
+      goal: r.goal === null ? null : { team: r.goal, label: r.label, scorer: r.label === 'OWN GOAL' ? null : r.scorer, assist: r.assist } });
+  }
+  function finishOnlineRecording(s) {
+    if (!recordingOnline || s.phase !== 'over') return;
+    // A match left early has no winner from play.
+    if (s.game.winner !== null) recording.final = { scores: [...s.game.scores], winner: s.game.winner };
+    saveRecording();
+  }
+  // The replay viewer re-simulates each turn from its recorded start, as goal replays do. Seeking
+  // starts from the nearest turn's start and simulates forward without effects.
+  const replayClock = ticks => { const sec = Math.floor(ticks * P.DT); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
+  function watchReplay(replay, file) {
+    saveRecording(); stopDemo(); closeSummary(); endGoalReplay(); stopFanfare(); gameAudio()?.stop();
+    cpuGeneration++; cpuClient.cancel();
+    const seat = replay.seat, names = seat ? [...replay.names].reverse() : replay.names;
+    theater = { replay, file, seat, ...ububallReplay.timeline(replay), speed: Number($('replay-speed').value), paused: false, steps: 0, holdUntil: 0, index: 0, tick: 0, called: false };
+    matchMode = replay.mode; document.body.classList.toggle('classic-match', classicMode()); showMode(matchMode);
+    teamEntries = onlineOrder(replay.ubus.map(u => ({ model: ubu.decode(ubu.fromCode(u.dna)), dna: u.dna, equippedSuper: u.super === null ? null : P.SUPERS[u.super] })), seat);
+    stats = teamEntries.map(entry => classicMode() ? normalStats() : { ...entry.model.stats });
+    $('home-label').textContent = names[0]; $('opponent-label').textContent = names[1]; $('opponent-heading').textContent = `${names[1]}'s team`;
+    bodies = kickoff(true); buildTeam(); phase = 'replay'; selected = 0; drag = null;
+    document.body.classList.add('replay-match');
+    say(`Replay · ${names[0]} vs ${names[1]} · ${new Date(replay.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`);
+    replayMarks(); enterMatch(); seekReplay(0);
+  }
+  // Leaves the viewer for a fresh match.
+  function endReplay() {
+    if (!theater) return;
+    theater = null; document.body.classList.remove('replay-match'); clearEffects();
+    $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
+    newMatch();
+  }
+  function loadReplayTurn(k, fx) {
+    const th = theater, t = th.replay.turns[k];
+    th.index = k; th.tick = 0; th.called = false; th.sim = ububallReplay.restore(t.bodies);
+    th.fouls = { ...ububallMatch.newFouls(), ...structuredClone(t.fouls) };
+    scores = th.seat ? [...t.scores].reverse() : [...t.scores]; turn = t.turn;
+    // The home cards show the moves this turn was played with.
+    plans = onlineOrder(t.plans, th.seat).slice(0, 3).map(p => ({ ...p, angle: p.angle + (th.seat ? Math.PI : 0) }));
+    P.startTurn(th.sim, t.plans, fx ? replayFx.super : null);
+    fouls = viewFouls(th.fouls, th.seat);
+  }
+  function stepReplay(fx) {
+    const th = theater, sim = th.sim;
+    if (fx) P.step(sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super); else P.step(sim, P.DT);
+    if (sim[6].spinStruck) { sim[6].spinStruck = false; if (fx) { syncReplay(); popup(bodies[6], 'Spin strike!'); } }
+    ububallMatch.lapseFouls(P, sim, th.fouls);
+    th.tick++;
+  }
+  function seekReplay(at) {
+    const th = theater, turns = th.replay.turns;
+    at = Math.max(0, Math.min(th.total, Math.round(at)));
+    let k = 0;
+    while (k + 1 < turns.length && th.starts[k + 1] <= at) k++;
+    loadReplayTurn(k, false);
+    while (th.tick < Math.min(at - th.starts[k], turns[k].ticks)) stepReplay(false);
+    th.holdUntil = 0; th.steps = 0; fouls = viewFouls(th.fouls, th.seat);
+    clearEffects(); syncReplay(); shownScores.splice(0, 2, ...scores); sync(); updateReplayBar(); draw();
+  }
+  // At a turn's end its goal is called and held a moment; at the replay's end it pauses. False stops this frame's steps.
+  function endReplayTurn() {
+    const th = theater, t = th.replay.turns[th.index];
+    if (t.goal && !th.called) {
+      th.called = true; th.steps = 0; th.holdUntil = performance.now() + 2500;
+      const team = th.seat ? 1 - t.goal.team : t.goal.team, scorer = t.goal.scorer === null ? null : bodies[viewIndex(t.goal.scorer, th.seat)];
+      scores[team]++; sync();
+      celebrate(team, bodies[6], t.goal.label, scorer);
+      goalTab(team, t.goal.label, scorer?.name || null);
+      return false;
+    }
+    if (th.index + 1 >= th.replay.turns.length) { th.paused = true; th.steps = 0; return false; }
+    if (t.goal) clearEffects();
+    loadReplayTurn(th.index + 1, true); syncReplay(); sync();
+    return true;
+  }
+  function advanceReplay(delta) {
+    const th = theater;
+    if (!th.paused && performance.now() >= th.holdUntil) {
+      th.steps += delta / P.DT * th.speed;
+      for (let n = 0; th.steps >= 1 && n < 240; n++) {
+        if (th.tick >= th.replay.turns[th.index].ticks) { if (!endReplayTurn()) break; continue; }
+        stepReplay(true); th.steps--; syncReplay(); recordTrails();
+      }
+      fouls = viewFouls(th.fouls, th.seat);
+      emitSkaterEffects(delta);
+    }
+    updateReplayBar(); draw();
+  }
+  function updateReplayBar() {
+    const th = theater, at = th.starts[th.index] + th.tick, seek = $('replay-seek'), play = $('replay-play');
+    seek.max = th.total;
+    if (!seek.matches(':active')) seek.value = at;
+    $('replay-time').textContent = `${replayClock(at)} / ${replayClock(th.total)}`;
+    play.classList.toggle('paused', th.paused);
+    play.setAttribute('aria-label', th.paused ? 'Play' : 'Pause');
+  }
+  // Goals (tap to watch from just before) and cards along the timeline.
+  function replayMarks() {
+    const th = theater, marks = [];
+    th.replay.turns.forEach((t, k) => {
+      const end = th.starts[k] + t.ticks, left = `${end / th.total * 100}%`;
+      if (t.goal) {
+        const team = th.seat ? 1 - t.goal.team : t.goal.team, scorer = t.goal.scorer === null ? null : teamEntries[viewIndex(t.goal.scorer, th.seat)];
+        const mark = document.createElement('button'); mark.type = 'button'; mark.className = `replay-mark ${team ? 'away' : 'home'}`; mark.style.left = left;
+        mark.title = [t.goal.label, scorer?.model.parts.fullName].filter(Boolean).join(' · ');
+        mark.setAttribute('aria-label', mark.title);
+        mark.onclick = () => seekReplay(Math.max(th.starts[k], end - 3 / P.DT));
+        marks.push(mark);
+      }
+      if (t.cards.length) {
+        const mark = document.createElement('span'); mark.className = 'replay-mark card'; mark.style.left = left;
+        marks.push(mark);
+      }
+    });
+    $('replay-marks').replaceChildren(...marks);
+  }
+  $('replay-seek').oninput = event => { if (theater) seekReplay(Number(event.target.value)); };
+  $('replay-play').onclick = () => {
+    const th = theater;
+    if (!th) return;
+    if (th.paused && th.index === th.replay.turns.length - 1 && th.tick >= th.replay.turns[th.index].ticks) seekReplay(0);
+    th.paused = !th.paused; th.steps = 0; updateReplayBar();
+  };
+  $('replay-prev').onclick = () => { const th = theater; if (th) seekReplay(th.starts[Math.max(0, th.tick > 120 ? th.index : th.index - 1)]); };
+  $('replay-next').onclick = () => { const th = theater; if (th && th.index + 1 < th.replay.turns.length) seekReplay(th.starts[th.index + 1]); };
+  $('replay-speed').onchange = event => { if (theater) theater.speed = Number(event.target.value); };
+  $('replay-export').onclick = () => { if (theater) downloadReplay(theater.file, theater.replay.recorded); };
+  $('replay-exit').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
+  // Space plays and pauses and the arrows step by turn, unless a control has focus.
+  document.addEventListener('keydown', event => {
+    if (!theater || document.querySelector('dialog[open]') || event.target.closest?.('button, input, select, textarea')) return;
+    const button = { ' ': 'replay-play', ArrowLeft: 'replay-prev', ArrowRight: 'replay-next' }[event.key];
+    if (button) { event.preventDefault(); $(button).click(); }
+  });
+  function downloadReplay(file, recorded) {
+    const d = new Date(recorded), two = n => String(n).padStart(2, '0');
+    const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([file], { type: 'application/gzip' })),
+      download: `ububall-${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}.ububall` });
+    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }
+  async function openReplay(id) {
+    if (online?.active) { $('replays-status').textContent = 'Leave your online match to watch a replay.'; return; }
+    if (matchInProgress() && !theater && !confirm('Watching a replay ends your current match.')) return;
+    try {
+      const entry = await replayStore.get(id), replay = await ububallReplay.read(entry.file);
+      if ($('replays-dialog').open) $('replays-dialog').close();
+      watchReplay(replay, entry.file);
+    } catch (error) { $('replays-status').textContent = error.message; }
+  }
+  // The library, newest first. Replays from another physics version can never play again (see
+  // P.VERSION), so opening it removes them.
+  async function openReplays() {
+    const list = $('replays-list'), status = $('replays-status');
+    $('replays-note').textContent = `Your latest ${ububallReplay.KEEP} matches, saved on this device.`;
+    status.textContent = 'Loading…'; list.replaceChildren();
+    if (!$('replays-dialog').open) $('replays-dialog').showModal();
+    let entries;
+    try { entries = await replayStore.all(); } catch { status.textContent = 'Replays cannot be saved in this browser.'; return; }
+    const stale = entries.filter(e => e.physics !== P.VERSION || e.format !== ububallReplay.FORMAT);
+    await Promise.all(stale.map(e => replayStore.remove(e.id)));
+    entries = entries.filter(e => !stale.includes(e)).reverse();
+    status.textContent = [stale.length && `Removed ${stale.length} replay${stale.length === 1 ? '' : 's'} from an older version of ububall.`,
+      !entries.length && 'No replays yet. Matches are saved here automatically.'].filter(Boolean).join(' ');
+    for (const e of entries) {
+      const names = e.seat ? [...e.names].reverse() : e.names, sc = e.seat ? [...e.scores].reverse() : e.scores;
+      const item = document.createElement('li'), title = document.createElement('strong'), meta = document.createElement('small');
+      title.textContent = `${names[0]} ${sc[0]}–${sc[1]} ${names[1]}`;
+      meta.textContent = [ububallMatch.modeName(e.mode), new Date(e.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }),
+        `${e.turns} turn${e.turns === 1 ? '' : 's'}`, !e.final && 'Unfinished'].filter(Boolean).join(' · ');
+      const actions = document.createElement('div'); actions.className = 'replay-actions';
+      for (const [label, run, primary] of [['Watch', () => openReplay(e.id), true], ['Export', () => downloadReplay(e.file, e.recorded)],
+        ['Delete', async () => { await replayStore.remove(e.id); item.remove(); }]]) {
+        const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.onclick = run;
+        if (primary) button.className = 'primary';
+        actions.append(button);
+      }
+      item.append(title, meta, actions); list.append(item);
+    }
+  }
+  $('replays-open').onclick = openReplays;
+  $('replays-close').onclick = () => $('replays-dialog').close();
   function finishTurn(goal) {
     const ticks = Math.round(elapsed / P.DT);
     if (playSegments.length) playSegments[playSegments.length - 1].ticks = ticks;
@@ -2084,6 +2339,7 @@
     if (goal !== null && ballOnFire()) lightNet(goal); else quench();
     ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null }, fouls, tally);
     if (fouls.faceoff) play = ububallMatch.newPlay();
+    noteTurn(ticks, goal === null ? null : { team: goal, label: call.label, scorer: call.own ? null : call.scorer, assist: call.assist }, fouls.cards);
     announceFouls();
     if (goal !== null) ububallMatch.noteScore(tally, scores);
     roundTurns++;
@@ -2094,7 +2350,10 @@
       phase = scores[goal] >= 5 ? 'over' : 'goal';
       celebrate(goal, bodies[6], call.label, call.own ? null : bodies[call.scorer] || null);
       if (call.assist !== null) popup(bodies[call.assist], 'Assist');
-      if (phase === 'over') queueSummary();
+      if (phase === 'over') {
+        queueSummary();
+        if (recording) { recording.final = { scores: [...scores], winner: goal }; saveRecording(); }
+      }
       const scorer = bodies[call.scorer] || bodies.slice(goal * 3, goal * 3 + 3)[0];
       goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
       scoringPlayer = scorer;
@@ -2138,6 +2397,7 @@
     drag = null;
     const turnPlans = [...plans, ...cpu];
     recordSegment(bodies, turnPlans);
+    if (recording) ububallReplay.addTurn(recording, { turn, scores, fouls, bodies, plans: turnPlans });
     P.startTurn(bodies, turnPlans, handleSuper); elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
     if (!demo) banner('Launch!', 800, 'launch');
   };
@@ -2351,7 +2611,8 @@
     const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length || goalCall ||
       ripples.length || pings.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
     if (active) updateEffects(delta);
-    if (phase === 'play' && active && !online?.active) {
+    if (theater) { if (active) advanceReplay(delta); }
+    else if (phase === 'play' && active && !online?.active) {
       if (performance.now() < hitStopUntil) accumulator = 0; else accumulator += delta;
       let steps = 0;
       while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
@@ -2432,7 +2693,7 @@
         if (!keys.has(id)) keys.set(id, crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: config.keys[id], ext: true }, 'Ed25519', false, ['verify']));
         return keys.get(id);
       } });
-      entries.push({ model: ubu.decode(ubu.fromCode(result.dna)), label: '#' + entry.serial, key: entry.serial });
+      entries.push({ model: ubu.decode(ubu.fromCode(result.dna)), dna: result.dna, label: '#' + entry.serial, key: entry.serial });
     }
     return { entries, next: data.next || '' };
   }
@@ -2637,6 +2898,7 @@
   }
   function exitMatchMode() {
     if ($('pause-menu').open) $('pause-menu').close();
+    endReplay();
     if (!inMatch) return;
     inMatch = false; document.body.classList.remove('in-match');
     setPortrait(false); layoutDirty = true; updateHome();
@@ -2649,7 +2911,7 @@
   }
   $('pause').onclick = openPause;
   $('pause-resume').onclick = () => $('pause-menu').close();
-  $('pause-restart').onclick = () => { $('pause-menu').close(); openSetup('mode'); };
+  $('pause-restart').onclick = () => { $('pause-menu').close(); endReplay(); openSetup('mode'); };
   $('pause-leave').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
   $('home-play').onclick = () => { if (online?.active || matchInProgress()) enterMatch(); else openSetup('mode'); };
   portraitScreen.addEventListener('change', () => { fitOrientation(); draw(); });
@@ -2865,9 +3127,10 @@
       const rosterKey = JSON.stringify(s.rosters);
       if (rosterKey !== onlineRoster) {
         onlineRoster = rosterKey;
-        teamEntries = onlineOrder(s.rosters.flat(), s.seat).map(entry => ({ model: ubu.decode(ubu.fromCode(entry.dna)), equippedSuper: P.SUPERS[entry.superId] }));
+        teamEntries = onlineOrder(s.rosters.flat(), s.seat).map(entry => ({ model: ubu.decode(ubu.fromCode(entry.dna)), dna: entry.dna, equippedSuper: P.SUPERS[entry.superId] }));
         roster = teamEntries.slice(0, 3); buildTeam();
       }
+      recordOnline(s);
       const fresh = onlineTurn !== s.turn || onlineDisconnected || (s.phase === 'plan' && onlinePhase !== 'plan');
       onlinePhase = s.phase;
       onlineDisconnected = false;
@@ -2913,15 +3176,18 @@
           }
         });
         recordSegment(onlineReplay.simBodies, onlineReplay.plans, s.replay.ticks);
+        recordOnlineTurn(s);
         P.startTurn(onlineReplay.simBodies, onlineReplay.plans, replaySuper);
         syncViewBodies();
       }
+      finishOnlineRecording(s);
       phase = s.phase === 'over' ? 'over' : s.phase === 'resolving' ? 'play' : s.connected.every(Boolean) && !s.locked[s.seat] ? 'plan' : 'waiting';
       sync(); if (onlineReplay) playOnlineReplay(); else draw();
     },
     onDisconnect() { onlineDisconnected = true; phase = 'waiting'; drag = null; $('online-match-status').textContent = 'Reconnecting · planning paused'; sync(); draw(); },
     onError(message) { $('online-match-status').textContent = message; },
     onLeave() {
+      saveRecording();
       onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = ''; scoringPlayer = null;
       document.body.classList.remove('online-match');
       $('online-open').textContent = 'Play online';

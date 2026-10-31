@@ -13,7 +13,7 @@ const webFiles = [
   'voice.html', 'demo.html', 'demo.js', 'auth-complete.html'
 ];
 const sharedFiles = [
-  'ububall-match.js', 'ububall-cpu.js', 'ubu.js', 'ubu-file.js', 'ubu-render.js', 'ubu-audio.js', 'rarity.js'
+  'ububall-match.js', 'ububall-replay.js', 'ububall-cpu.js', 'ubu.js', 'ubu-file.js', 'ubu-render.js', 'ubu-audio.js', 'rarity.js'
 ];
 const assetFiles = [
   'uburoom-wordmark-brand.svg', 'uburoom-oomark-brand.svg', 'oomark-pattern.svg', 'ububall-logo.svg', 'UburoomSans-Regular.woff2',

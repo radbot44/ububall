@@ -1,5 +1,8 @@
 'use strict';
 (function (root) {
+  // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
+  // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
+  const VERSION = 1;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -844,6 +847,6 @@
     }
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS };
   }
-  const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);
