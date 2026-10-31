@@ -12,12 +12,12 @@ test('network move validation rejects forged state and non-finite or out-of-rang
   const guarded=moves(); Object.assign(guarded[0],{guard:true,spin:.5});
   assert.deepEqual(M.validatePlans(guarded)[0],{angle:0,power:0,spin:0,superArm:false,guard:true});
 });
-test('Classic, Blitz and Pulse combine independently', () => {
+test('Classic, Pulse and Blitz combine independently', () => {
   assert.equal(M.MODES.length,8);
-  assert.ok(['standard','classic','blitz','pulse','classic-blitz','classic-pulse','blitz-pulse','classic-blitz-pulse'].every(m=>M.MODES.includes(m)));
-  assert.throws(()=>M.rule('pulse-classic','pulse'));
-  assert.equal(M.modeName('standard'),'Ububall'); assert.equal(M.modeName('classic-blitz-pulse'),'Ububall Classic Blitz Pulse');
-  assert.equal(M.planningMilliseconds('blitz'),5000); assert.equal(M.planningMilliseconds('blitz-pulse'),5000);
+  assert.ok(['standard','classic','blitz','pulse','classic-pulse','classic-blitz','pulse-blitz','classic-pulse-blitz'].every(m=>M.MODES.includes(m)));
+  assert.throws(()=>M.rule('blitz-pulse','pulse'));
+  assert.equal(M.modeName('standard'),'Ububall'); assert.equal(M.modeName('classic-pulse-blitz'),'Ububall Classic Pulse Blitz');
+  assert.equal(M.planningMilliseconds('blitz'),5000); assert.equal(M.planningMilliseconds('pulse-blitz'),5000);
   assert.equal(M.planningMilliseconds('classic-pulse'),null);
   assert.equal(M.turnTicks('standard'),2880); assert.equal(M.turnTicks('classic-pulse'),240);
   const a={}, b={}; M.applyStats(P,a,{impulse:200},'blitz'); M.applyStats(P,b,{impulse:200},'classic-pulse');

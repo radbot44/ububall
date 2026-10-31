@@ -2,8 +2,8 @@
 (function(root) {
   'use strict';
   const VERSION = 2;
-  // Classic, Blitz and Pulse are independent rules, joined in this order; 'standard' has none.
-  const RULES = ['classic', 'blitz', 'pulse'];
+  // Classic, Pulse and Blitz are independent rules, joined in this order; 'standard' has none.
+  const RULES = ['classic', 'pulse', 'blitz'];
   const MODES = Array.from({ length: 8 }, (_, n) => RULES.filter((r, i) => n >> i & 1).join('-') || 'standard');
   const BLITZ_MILLISECONDS = 5000, TURN_TICKS = 2880, PULSE_TICKS = 240;
   const GOAL_REPLAY_DELAY = 1600, GOAL_REPLAY_HOLD = 1200;

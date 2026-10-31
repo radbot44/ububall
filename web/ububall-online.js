@@ -141,22 +141,20 @@ function ububallOnline(hooks) {
     settings.policy = button.dataset.value;
     for (const option of $('online-policy').children) option.setAttribute('aria-pressed', String(option === button));
   };
-  // Rules toggle independently; none selected plays standard Ububall.
-  $('online-mode').onclick = event => {
-    const button = event.target.closest('button[data-rule]');
-    if (button) button.setAttribute('aria-pressed', String(button.getAttribute('aria-pressed') !== 'true'));
-  };
-  const onlineMode = () => [...$('online-mode').querySelectorAll('button[aria-pressed="true"]')].map(b => b.dataset.rule).join('-') || 'standard';
-  $('online-open').onclick = () => {
+  // The rules come from the mode screen; this dialog then sets up the invite.
+  let createMode = 'standard';
+  function showDialog() {
     $('online-dialog').showModal();
     refreshSession().catch(error => status(error.message));
-  };
+  }
+  $('online-open').onclick = () => { if (id) showDialog(); else hooks.chooseMode(createMode); };
+  $('online-mode-change').onclick = () => { $('online-dialog').close(); hooks.chooseMode(createMode); };
   $('online-close').onclick = () => $('online-dialog').close();
   $('online-leave').onclick = leave;
   $('online-create').onclick = async () => {
     $('online-create').disabled = true;
     try {
-      const result = await api('/api/ububall', { mode: onlineMode(), teams: settings.policy });
+      const result = await api('/api/ububall', { mode: createMode, teams: settings.policy });
       await enter(result.id, result);
     } catch (error) { status(error.message); }
     finally { $('online-create').disabled = !playable(); }
@@ -211,6 +209,7 @@ function ububallOnline(hooks) {
   }
   return {
     get active() { return Boolean(id); }, get state() { return state; },
+    create(mode) { createMode = mode; $('online-mode-name').textContent = ububallMatch.modeName(mode); showDialog(); },
     now: () => Date.now() + offset,
     rematch() {
       if (!state || state.phase !== 'over') return;

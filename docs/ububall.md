@@ -2,7 +2,7 @@
 
 Ububall is a 3v3 simultaneous-turn physics hockey game played on a curved-corner rink.
 
-Match rules (owner decision 2026-10-29): Ububall plays with DNA stats and supers. Classic, Blitz and Pulse are independent rules that combine freely; `shared/ububall-match.js` implements them.
+Match rules (owner decision 2026-10-29): Ububall plays with DNA stats and supers. Classic, Pulse and Blitz are independent rules that combine freely; `shared/ububall-match.js` implements them.
 - **Classic:** every ubu uses default stats and has no supers.
 - **Blitz:** 5 seconds to plan each turn.
 - **Pulse:** a turn ends after 1 second of simulation (or a goal, or a settled field) instead of waiting for the field to settle. Momentum carries into the next turn. Launches use the normal impulse but steer toward the arrow's velocity (owner decision 2026-10-29): the change in velocity is capped at one full launch, so an ubu's own launches can turn or brake it but never push it past its full-launch speed; only collisions and supers can. From rest this equals an ordinary launch, so turns that start settled are unaffected. A launch with no power leaves the ubu coasting. Supers can be armed on any turn and last that turn. The last ball touch carries across turns for goal credit.

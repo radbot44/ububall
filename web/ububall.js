@@ -29,7 +29,7 @@
   let matchTicks = 0; // Simulated ticks played locally, for meter cooldowns.
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const cpuClient = createCPUClient();
-  let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuLevel = 'medium';
+  let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuLevel = 'medium', cpuMode = 'standard';
   // The home screen demo (CPU against CPU) plays silently.
   let demo = false, demoLevels = ['medium', 'hard'];
   const gameAudio = () => demo ? null : window.ubuAudio;
@@ -1155,7 +1155,7 @@
   }
   function newMatch(playJingle = false) {
     endGoalReplay(); playSegments = [];
-    matchMode = ububallMatch.RULES.filter(rule => $('rule-' + rule).checked).join('-') || 'standard';
+    matchMode = cpuMode;
     document.body.classList.toggle('classic-match', classicMode());
     $('mode-label').textContent = ububallMatch.modeName(matchMode);
     stats = [...draft, ...practice.slice(3)].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
@@ -1633,7 +1633,7 @@
       phase = scores[goal] >= 5 ? 'over' : 'goal';
       celebrate(goal, bodies[6], call.label);
       if (call.assist !== null) popup(bodies[call.assist], 'Assist');
-      if (phase === 'over') { queueSummary(); if (!demo) banner(goal === 0 ? 'You win!' : 'CPU wins!', 3500, goal === 0 ? 'home' : 'away'); }
+      if (phase === 'over') queueSummary();
       const scorer = bodies[call.scorer] || bodies.slice(goal * 3, goal * 3 + 3)[0];
       goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
       scoringPlayer = scorer;
@@ -1658,7 +1658,7 @@
     }
     if (phase === 'over') {
       if (isFullscreenActive()) await toggleFullscreen();
-      $('new-match').click(); return;
+      openSetup('mode'); return;
     }
     gameAudio()?.getAudioContext();
     if (phase === 'goal') {
@@ -1873,7 +1873,12 @@
       if (goalReplay) { if (active) advanceGoalReplay(delta); }
       else if (onlineReplay && active) playOnlineReplay();
     } else if (blitzMode() && phase === 'plan' && performance.now() >= planDeadline) $('launch').click();
-    if (goalReplayAt && performance.now() >= goalReplayAt) { goalReplayAt = 0; startGoalReplay(); }
+    if (goalReplayAt && performance.now() >= goalReplayAt) {
+      goalReplayAt = 0;
+      // The winner is announced once the goal call has cleared (the demo does so after its replays).
+      if (phase === 'over' && !demo && !online?.active) banner(scores[0] > scores[1] ? 'You win!' : 'CPU wins!', 3500, scores[0] > scores[1] ? 'home' : 'away');
+      startGoalReplay();
+    }
     if (!active) { lastTime = 0; accumulator = 0; }
     const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length ||
       ripples.length || pings.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
@@ -1978,7 +1983,7 @@
     } catch (error) { collectionState = 'idle'; $('roster-collection-status').textContent = error.message; }
   }
   new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting) && $('roster-dialog').open) void loadCollection(); },
-    { root: $('roster-dialog').querySelector('.team-sheet-body'), rootMargin: '400px' }).observe($('roster-sentinel'));
+    { root: $('roster-scroll'), rootMargin: '400px' }).observe($('roster-sentinel'));
   $('roster-signin-btn').onclick = () => window.openDiscordLogin?.();
   // Signed-in players start with their own ubus (favorites first) until they choose a team.
   window.addEventListener('ubu:session', async event => {
@@ -1998,17 +2003,51 @@
       document.querySelectorAll('.stat-details').forEach(node => { node.open = toggleFull.checked; });
     };
   }
-  $('new-match').onclick = () => {
-    for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(matchMode, rule);
-    $('cpu-level').value = cpuLevel;
-    draft = [...roster]; rosterSlot = 0; rosterSlots(); $('roster-status').textContent = ''; $('roster-dialog').showModal();
-    void loadCollection();
+  // Match setup: a mode screen (rules and CPU level), then a team screen where only the ubu list scrolls.
+  // Online play borrows the mode screen, then continues to its own match settings.
+  let setupFor = 'cpu';
+  const chosenMode = () => ububallMatch.RULES.filter(rule => $('rule-' + rule).checked).join('-') || 'standard';
+  function setupStep(step) {
+    const sheet = $('roster-dialog');
+    sheet.dataset.step = step; sheet.dataset.for = setupFor;
+    $('sheet-next').textContent = setupFor === 'online' ? 'Next: online match' : 'Next: choose team';
+    if (step === 'team') { $('team-mode').textContent = ububallMatch.modeName(chosenMode()); void loadCollection(); }
+  }
+  function rosterTab(tab) {
+    for (const name of ['yours', 'practice']) {
+      $('tab-' + name).setAttribute('aria-selected', String(name === tab));
+      $('roster-' + name).hidden = name !== tab;
+    }
+    $('roster-scroll').scrollTop = 0;
+    if (tab === 'yours') void loadCollection();
+  }
+  function openSetup(step, purpose = 'cpu', mode = cpuMode) {
+    setupFor = purpose;
+    for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(mode, rule);
+    document.querySelector(`input[name="cpu-level"][value="${cpuLevel}"]`).checked = true;
+    draft = [...roster]; rosterSlot = 0; rosterSlots(); $('roster-status').textContent = '';
+    rosterTab(window.getUbuSession?.()?.owner ? 'yours' : 'practice');
+    setupStep(step);
+    if (!$('roster-dialog').open) $('roster-dialog').showModal();
+  }
+  $('new-match').onclick = () => openSetup('team');
+  $('sheet-next').onclick = () => {
+    if (setupFor === 'cpu') { setupStep('team'); return; }
+    $('roster-dialog').close(); online.create(chosenMode());
   };
+  $('team-back').onclick = () => setupStep('mode');
+  $('tab-yours').onclick = () => rosterTab('yours');
+  $('tab-practice').onclick = () => rosterTab('practice');
+  // Back (Escape, or a phone's back gesture) steps from the team screen to the mode screen.
+  $('roster-dialog').addEventListener('cancel', event => {
+    if ($('roster-dialog').dataset.step === 'team') { event.preventDefault(); setupStep('mode'); }
+  });
   $('start-match').onclick = () => {
     $('roster-dialog').close();
     stopDemo();
     roster = draft.map(d => ({ ...d }));
-    cpuLevel = $('cpu-level').value;
+    cpuMode = chosenMode();
+    cpuLevel = document.querySelector('input[name="cpu-level"]:checked').value;
     newMatch(true);
     enterMatch();
   };
@@ -2135,9 +2174,9 @@
   }
   $('pause').onclick = openPause;
   $('pause-resume').onclick = () => $('pause-menu').close();
-  $('pause-restart').onclick = () => { $('pause-menu').close(); $('new-match').click(); };
+  $('pause-restart').onclick = () => { $('pause-menu').close(); openSetup('mode'); };
   $('pause-leave').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
-  $('home-play').onclick = () => { if (phase === 'over' && !online?.active) newMatch(true); enterMatch(); };
+  $('home-play').onclick = () => { if (online?.active || matchInProgress()) enterMatch(); else openSetup('mode'); };
   portraitScreen.addEventListener('change', () => { fitOrientation(); draw(); });
   window.addEventListener('popstate', () => {
     if (location.pathname !== '/') return;
@@ -2300,6 +2339,7 @@
     recordTrails(); emitSkaterEffects(Math.min(.05, 1 / 60)); draw();
   }
   online = ububallOnline({
+    chooseMode(mode) { openSetup('mode', 'online', mode); },
     onState(s) {
       if (!document.body.classList.contains('online-match')) { stopDemo(); enterMatch(); }
       document.body.classList.add('online-match');
