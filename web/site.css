@@ -866,9 +866,13 @@ body:has(#reveal[open]) { overflow: hidden; }
   .brand img { width: 130px; } header { gap: 12px; } nav { gap: 6px; }
   .pack-shop { padding: 16px; }.candy-pack { margin-top: 24px; }
   .viewer { padding: 16px 12px; }
-  #reveal { padding: 12px; }.reveal-layout { gap: 8px; grid-template-columns: 40px minmax(0, 1fr) 40px; }
-  .reveal-layout { gap: 4px; grid-template-columns: 24px minmax(0, 1fr) 24px; }
-  .reveal-layout > button { min-width: 24px; padding: 0; }
+  /* The card takes the full width; the arrows move beneath it. */
+  #reveal { width: calc(100% - 16px); max-width: none; padding: 12px; }
+  .reveal-layout { grid-template-columns: 1fr 1fr; grid-template-areas: "card card" "prev next"; gap: 12px 8px; }
+  .card-stage { grid-area: card; }
+  #prev-ubu { grid-area: prev; justify-self: end; }
+  #next-ubu { grid-area: next; justify-self: start; }
+  #reveal-progress { margin-top: 12px; }
   .card-top .card-heart { width: 20px; height: 20px; }
   .card-top .card-heart svg { width: 14px; height: 14px; }
   .card-stats, .card-fanfare { border-radius: 6px; }

@@ -2272,7 +2272,7 @@
       button.type = 'button'; button.className = 'roster-slot';
       const superObj = entry.equippedSuper || P.SUPERS[(entry.model?.supers?.[0] ?? i) % 8];
       const superLabel = document.createElement('small');
-      superLabel.append(Object.assign(document.createElement('img'), { src: superObj.icon, alt: '' }), superObj.name);
+      superLabel.append(Object.assign(document.createElement('img'), { src: superObj.icon, alt: '' }), Object.assign(document.createElement('span'), { textContent: superObj.name }));
       button.append(ubuRender(entry.model, 'roster-slot-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }), superLabel);
       button.setAttribute('aria-pressed', String(i === rosterSlot));
       button.setAttribute('aria-label', `Slot ${i + 1}: ${entry.model.parts.fullName}`);

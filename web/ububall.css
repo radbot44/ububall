@@ -329,7 +329,7 @@ body.show-full-stats .full-stats { display: flex; }
 }
 .super-picker-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin: 10px 0;
 }
@@ -338,7 +338,9 @@ body.show-full-stats .full-stats { display: flex; }
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   padding: 6px 4px;
+  overflow-wrap: anywhere;
   background: var(--elevated);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -493,6 +495,11 @@ button.super-panel.armed .super-pct { color: #ffffff; font-weight: 800; }
   font-weight: 500;
 }
 .scoreboard strong { font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; }
+/* Online names can be long: each side shrinks and cuts its name off so the score and turn stay on one line. */
+.scoreboard-content { min-width: 0; }
+.scoreboard-content > span { min-width: 0; }
+#home-label, #opponent-label { min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phase-info { flex: none; white-space: nowrap; }
 .home { color: var(--team-home); }
 .away { color: var(--team-away); }
 .phase-info { text-align: center; font-size: 14px; }
@@ -898,6 +905,12 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .online-account { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
 #online-invite, .online-team-slot select { background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px; font: inherit; }
 .online-team-slot .ball-thumb { width: 56px; height: 56px; }
+/* Narrow phones stack each slot's ubu and super pickers beside the portrait so names stay readable. */
+@media (max-width: 480px) {
+  .online-team-slot { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; }
+  .online-team-slot .ball-thumb { grid-row: span 2; width: 48px; height: 48px; }
+  .online-team-slot select { padding: 8px 10px; }
+}
 @media (max-width: 400px) { #online-dialog { padding: 16px; } .online-options { grid-template-columns: 1fr; } }
 
 /* Super meter: a glint at the growing end on each gain, and a shimmer when full. */
@@ -983,9 +996,10 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 /* Team screen. */
 .team-step { padding-top: 12px; }
 .team-step-head { display: flex; align-items: center; gap: 10px; min-height: 44px; padding-right: 52px; margin-bottom: 10px; }
-.team-step-head h2 { margin: 0; font-size: 22px; }
-.team-step-head .quiet { padding: 8px 12px; }
-.team-mode { margin-left: auto; overflow: hidden; color: var(--muted); font-family: var(--font-display); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.team-step-head .quiet { flex: none; padding: 8px 12px; white-space: nowrap; }
+.team-heading { display: grid; min-width: 0; }
+.team-step-head h2 { margin: 0; font-size: 22px; line-height: 1.1; white-space: nowrap; }
+.team-mode { overflow: hidden; color: var(--muted); font-family: var(--font-display); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .roster-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .roster-slot {
   display: grid; justify-items: center; align-content: start; gap: 3px; min-width: 0; padding: 10px 6px 8px;
@@ -995,8 +1009,9 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .roster-slot-art { width: 56px; height: 56px; }
 .roster-slot strong { max-width: 100%; font-size: 14px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .roster-slot small, .roster-option small { font-family: var(--font-body); font-size: 11px; }
-.roster-slot small { display: flex; align-items: center; gap: 3px; color: var(--secondary); }
-.roster-slot small img { width: 16px; }
+.roster-slot small { display: flex; align-items: center; gap: 3px; max-width: 100%; min-width: 0; color: var(--secondary); }
+.roster-slot small img { flex: none; width: 16px; }
+.roster-slot small span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .roster-super { margin: 8px 0 0; }
 .roster-super .super-picker-grid { margin: 0; }
 .roster-super-name { margin: 6px 0 0; min-height: 2.6em; color: var(--muted); font-size: 12px; }
@@ -1028,7 +1043,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
   .mode-option { padding-block: 8px; gap: 3px; }
   .mode-option strong { font-size: clamp(20px, 10dvh, 44px); }
   .mode-state { margin-top: 0; padding-block: 3px; }
-  .roster-super .super-picker-btn { flex-direction: row; justify-content: center; padding: 3px 6px; font-size: 12px; }
+  .roster-super .super-picker-btn { padding: 3px 4px; font-size: 11px; }
   .roster-super .super-picker-btn img { width: 26px; height: 26px; }
   .roster-tabs { margin: 4px 0 6px; padding: 3px; }
   .roster-tabs button { min-height: 32px; font-size: 14px; }
@@ -1037,9 +1052,15 @@ body:has(#online-dialog[open]) { overflow: hidden; }
   .team-sheet-foot { padding-block: 8px calc(8px + env(safe-area-inset-bottom)); }
   .team-sheet-foot button { min-height: 44px; font-size: 18px; }
   .team-step-head { margin-bottom: 6px; }
-  .roster-slot { grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: center; column-gap: 8px; padding: 6px 8px; text-align: left; }
-  .roster-slot-art { grid-row: span 2; width: 36px; height: 36px; }
+  .roster-slot { padding: 6px 4px; }
+  .roster-slot-art { width: 36px; height: 36px; }
   .roster-super-name { display: none; }
+}
+/* Short and wide: the slot art sits beside its name. Narrow phones keep it stacked so names fit. */
+@media (max-height: 560px) and (min-width: 520px) {
+  .roster-slot { grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: center; column-gap: 8px; padding: 6px 8px; text-align: left; }
+  .roster-slot-art { grid-row: span 2; }
+  .roster-super .super-picker-btn { flex-direction: row; justify-content: center; padding: 3px 6px; font-size: 12px; }
 }
 
 /* Announcements over the rink ("Plan your shot…", "Launch!", the winner). */
