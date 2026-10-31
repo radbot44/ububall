@@ -44,18 +44,22 @@
   // Contact counts only for real impacts against the ball or an opponent, at most once per
   // cooldown per ubu, so pinging around the ball or an enemy cannot farm it (cooldown and
   // impact speed are tuning, not owner decisions).
-  const METER = Object.freeze({ ball: 8, check: 4, conceded: 6, ace: 10, save: 6, assist: 4, teammate: .15, minSpeed: 60, cooldownTicks: 360 });
+  // Every gain is scaled by `rate` (owner decision 2026-10-30: slightly below the listed amounts).
+  const METER = Object.freeze({ ball: 8, check: 4, conceded: 6, ace: 10, save: 6, assist: 4, teammate: .15, rate: .85, minSpeed: 60, cooldownTicks: 360 });
+  // Efficiency, Synergy and Chemistry swing harder than other stats (owner decision 2026-10-30): their
+  // multiplier is squared, 0.44–2.25×, so good super stats matter and poor ones hold a ubu back.
+  const superStat = (P, raw) => P.multiplier(raw ?? 127) ** 2;
   function gainMeter(P, bodies, stats, body, amount, classic = false) {
     const changed = [];
     if (classic || !body || body.team < 0 || body.usedSuperThisTurn) return changed;
     const index = bodies.indexOf(body);
     if (index < 0) return changed;
-    const gain = amount * P.multiplier(stats[index]?.efficiency ?? 127);
+    const gain = amount * METER.rate * superStat(P, stats[index]?.efficiency);
     body.meter = Math.min(100, Math.max(0, (body.meter || 0) + gain)); changed.push(body);
-    const synergy = P.multiplier(stats[index]?.synergy ?? 127);
+    const synergy = superStat(P, stats[index]?.synergy);
     bodies.forEach((other, i) => {
       if (other === body || other.team !== body.team || other.usedSuperThisTurn) return;
-      other.meter = Math.min(100, Math.max(0, (other.meter || 0) + gain * synergy * P.multiplier(stats[i]?.chemistry ?? 127) * METER.teammate));
+      other.meter = Math.min(100, Math.max(0, (other.meter || 0) + gain * synergy * superStat(P, stats[i]?.chemistry) * METER.teammate));
       changed.push(other);
     });
     return changed;
@@ -138,7 +142,7 @@
   function bigShot(P, before, touched, ball) {
     if (touched.size !== 1) return false;
     const [i] = touched, b = before[i], dx = ball.x - b.x, dy = ball.y - b.y, d = Math.hypot(dx, dy) || 1;
-    return (b.vx * dx + b.vy * dy) / d >= BIG_SHOT.share * (b.impulse || P.IMPULSE) / b.mass;
+    return (b.vx * dx + b.vy * dy) / d >= BIG_SHOT.share * P.launchSpeed(b);
   }
   function hitStop(P, bodies, ball, big, struck, save, savedBig) {
     let ms = save || struck || big ? HIT_STOP.hit : 0;
@@ -146,6 +150,25 @@
     if (big && P.ballRun(bodies, { boards: true, ticks: 480 }).distance >= P.rink.bottom - P.rink.top) ms = HIT_STOP.long;
     if (big && P.ballRun([ball], { ticks: 960 }).goal !== null) ms = HIT_STOP.goal;
     return ms;
+  }
+  // Per-tick scratch and the tick in progress, which the step callbacks below read, so neither is
+  // rebuilt every tick. A nested tick would take fresh scratch and restore the outer tick after.
+  let spareTick = null, activeTick = null;
+  function tickTouch(a, b, speed) {
+    const t = activeTick, player = toucher(a, b, speed);
+    if (player) {
+      // A touch passed from a teammate makes that teammate the assist; an opponent's touch clears it.
+      const { bodies, play } = t, i = bodies.indexOf(player), team = player.team, last = play.last;
+      if (last !== i) play.assist[team] = last !== null && bodies[last].team === team ? last : null;
+      play.last = i; play.lastTouch[team] = i; play.shotX[team] = t.ball.x; play.banked = false;
+      t.touched.add(i);
+    }
+    t.fx.collide?.(a, b, speed);
+  }
+  function tickWall(body, velocity, type, nx, ny) {
+    const t = activeTick;
+    if (body === t.ball && type === 'wall') t.play.banked = true;
+    t.fx.wall?.(body, velocity, type, nx, ny);
   }
   // Steps the field one tick and keeps the play (and the tally, if given) current. Returns the goal
   // (as P.step reports it), the tick's saves, whether a close-range spin strike landed and the
@@ -155,30 +178,27 @@
     // Each tick records only motion; the full pre-tick field is rebuilt from it when the ball was
     // touched, which is all the save and big-shot checks need. Copying every body each tick was the
     // single largest cost of CPU search.
-    const motion = new Float64Array(bodies.length * 5), touched = new Set(), ball = bodies.find(b => b.team === -1);
-    bodies.forEach((b, i) => { motion[i * 5] = b.x; motion[i * 5 + 1] = b.y; motion[i * 5 + 2] = b.vx; motion[i * 5 + 3] = b.vy; motion[i * 5 + 4] = b.omega; });
+    const t = spareTick || { motion: new Float64Array(35), touched: new Set() }, outer = activeTick;
+    spareTick = null; activeTick = t;
+    if (t.motion.length < bodies.length * 5) t.motion = new Float64Array(bodies.length * 5);
+    const { motion, touched } = t, ball = bodies.find(b => b.team === -1);
+    touched.clear(); t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx;
+    for (let i = 0; i < bodies.length; i++) {
+      const b = bodies[i];
+      motion[i * 5] = b.x; motion[i * 5 + 1] = b.y; motion[i * 5 + 2] = b.vx; motion[i * 5 + 3] = b.vy; motion[i * 5 + 4] = b.omega;
+    }
     const stuck = ball.stuckTo;
     play.age++;
-    const goal = P.step(bodies, P.DT, (a, b, speed) => {
-      const player = toucher(a, b, speed);
-      if (player) {
-        // A touch passed from a teammate makes that teammate the assist; an opponent's touch clears it.
-        const i = bodies.indexOf(player), team = player.team, last = play.last;
-        if (last !== i) play.assist[team] = last !== null && bodies[last].team === team ? last : null;
-        play.last = i; play.lastTouch[team] = i; play.shotX[team] = ball.x; play.banked = false;
-        touched.add(i);
-      }
-      fx.collide?.(a, b, speed);
-    }, (body, velocity, type, nx, ny) => {
-      if (body === ball && type === 'wall') play.banked = true;
-      fx.wall?.(body, velocity, type, nx, ny);
-    }, fx.shockwave, fx.super);
+    const goal = P.step(bodies, P.DT, tickTouch, tickWall, fx.shockwave, fx.super);
+    activeTick = outer;
     const before = touched.size ? bodies.map((b, i) => ({ ...b, x: motion[i * 5], y: motion[i * 5 + 1], vx: motion[i * 5 + 2],
       vy: motion[i * 5 + 3], omega: motion[i * 5 + 4], stuckTo: b === ball ? stuck : b.stuckTo })) : null;
     const ballBefore = before?.[bodies.indexOf(ball)], tickSaves = touched.size ? saves(P, before, bodies, touched, play.credit) : [];
     play.credit = credit(play.credit, ballBefore, ball, touched);
     for (const save of tickSaves) play.saved = { at: play.age, team: bodies[save.index].team };
-    const speed = Math.hypot(ball.vx, ball.vy), big = bigShot(P, before, touched, ball), struck = Boolean(ball.spinStruck);
+    // A Cannonball hit always counts as a big shot.
+    const cannon = touched.size > 0 && [...touched].some(i => before[i].superActive === 'cannonball' && bodies[i].superActive !== 'cannonball');
+    const speed = Math.hypot(ball.vx, ball.vy), big = cannon || bigShot(P, before, touched, ball), struck = Boolean(ball.spinStruck);
     const stop = effects ? hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big) : 0;
     if (touched.size) play.big = big;
     if (tally) {
@@ -186,6 +206,7 @@
       for (const save of tickSaves) if (!save.own) tally.saves[save.index]++;
     }
     if (struck) ball.spinStruck = false;
+    t.bodies = t.play = t.ball = t.fx = null; spareTick = t;
     return { goal, saves: tickSaves, struck, stop };
   }
   // A rebound is a goal within this many ticks of the conceding team's save.
@@ -230,13 +251,14 @@
     return goal !== null && scores[goal] >= 5 ? goal : null;
   }
   // `effects: false` resolves the same turn without presentation-only work (hit-stop look-aheads,
-  // the replay's starting snapshot), for fast CPU search.
-  function resolveTurn(P, state, moves, { effects = true } = {}) {
+  // the replay's starting snapshot), for fast CPU search. CPU search may also end a turn early: after
+  // `ticks`, or once `decided(bodies)` reports its outcome is clear. Matches never pass either.
+  function resolveTurn(P, state, moves, { effects = true, ticks: maxTicks = Infinity, decided = null } = {}) {
     if (state.version !== VERSION || !MODES.includes(state.mode)) throw new Error('Unsupported match rules.');
     if (!Array.isArray(moves) || moves.length !== 6) throw new Error('Both teams must submit.');
     const plans = [...validatePlans(moves.slice(0, 3)), ...validatePlans(moves.slice(3))];
     const next = structuredClone(state), bodies = next.bodies;
-    const classic = rule(state.mode, 'classic'), limit = turnTicks(state.mode);
+    const classic = rule(state.mode, 'classic'), limit = Math.min(turnTicks(state.mode), maxTicks);
     bodies.slice(0, 6).forEach((b, i) => {
       if (plans[i].superArm && (classic || b.stunned || b.meter < 100 || !b.equippedSuper)) throw new Error('Super unavailable.');
       b.superArm = false;
@@ -259,7 +281,7 @@
       if (result.struck) struck.push(tick);
       if (result.stop) stops.push({ tick, ms: result.stop });
       ticks = tick;
-      const done = goal !== null || P.settled(bodies) || tick === limit;
+      const done = goal !== null || P.settled(bodies) || tick === limit || Boolean(decided?.(bodies));
       if (done) break;
     }
     // A round runs from kickoff to goal; scoring on its first turn is an ace.

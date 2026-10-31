@@ -1051,6 +1051,21 @@
       }
       return oscillator(type, from, to, duration, dest, detune);
     }
+    // Filtered noise from `offset` seconds in: the body of squishes, crackles, blasts and crashes.
+    function noise(offset, duration, level, type, from, to, q = 1, attack = .002) {
+      const start = now + offset, source = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+      nodes.push(source, filter, gain); oscillators.push(source);
+      source.buffer = grainNoise(ctx);
+      filter.type = type; filter.Q.setValueAtTime(q, start);
+      filter.frequency.setValueAtTime(from, start); filter.frequency.exponentialRampToValueAtTime(to, start + duration);
+      gain.gain.setValueAtTime(0, start); gain.gain.linearRampToValueAtTime(level, start + attack);
+      gain.gain.exponentialRampToValueAtTime(.0001, start + duration);
+      source.connect(filter); filter.connect(gain); gain.connect(bus);
+      source.onended = () => {
+        if (++ended === oscillators.length) { for (const n of nodes) n.disconnect(); superPlayback.delete(handle); }
+      };
+      source.start(start, Math.random() * .5); source.stop(start + duration + .01);
+    }
     function modulate(carrier, type, hz, depth, duration) {
       const gain = ctx.createGain(); nodes.push(gain);
       gain.gain.setValueAtTime(depth, now);
@@ -1058,32 +1073,45 @@
       gain.connect(carrier.frequency);
       oscillator(type, hz, hz, duration, gain);
     }
+    // Each super's sound, kept soft and short.
     if (key === 'stalwart') {
-      const hit = phase === 'impact', duration = hit ? .18 : .38;
-      const carrier = tone('sine', 110, hit ? 65 : 100, duration, .65, .003,
-        hit ? ['lowpass', 700, 220, 1] : null);
-      modulate(carrier, 'sine', 303, hit ? 125 : 220, duration);
+      // Clanking steel: inharmonic metal partials ringing off a sharp strike; a lighter clank on each hit.
+      const hit = phase === 'impact', scale = hit ? .45 : 1;
+      [[523, .2, .55], [1371, .12, .4], [2211, .07, .28], [3187, .04, .2]].forEach(([hz, level, decay]) =>
+        tone('sine', hz, hz * .995, decay * scale + .04, level * (hit ? .7 : 1), .001));
+      noise(0, .03, hit ? .15 : .25, 'highpass', 3500, 2500, .7);
     } else if (key === 'knockout') {
-      const carrier = tone('sawtooth', 960, 140, .19, .28, .002, ['lowpass', 3400, 550, 1]);
-      modulate(carrier, 'square', 65, 100, .19);
+      // A hard collision: a heavy thud under a short crack.
+      tone('sine', 140, 45, .24, .75, .002);
+      noise(0, .06, .45, 'bandpass', 1800, 600, 1.4);
     } else if (key === 'sticky') {
-      tone('triangle', 180, 520, .12, .8, .002, ['bandpass', 180, 520, 3]);
+      // A wet squish: a squelch sweeping down with a soft plop under it.
+      noise(0, .2, .4, 'bandpass', 900, 220, 4, .01);
+      tone('sine', 260, 110, .13, .3, .004);
     } else if (key === 'cannonball') {
-      tone('sine', 130, 38, .32, .9);
-      tone('sawtooth', 260, 65, .075, .2, .002, ['lowpass', 1600, 100, 5]);
+      // An explosion: a burst that darkens as it fades, over a low boom.
+      noise(0, .7, .4, 'lowpass', 4200, 140, .7);
+      tone('sine', 75, 30, .55, .5, .003);
     } else if (key === 'magnet') {
-      const carrier = tone('sine', 165, 145, .22, .12, .035);
-      modulate(carrier, 'sine', 32, 18, .22);
+      // A wobbling tractor beam: a hum with a slow vibrato (retriggered while it pulls).
+      const carrier = tone('sine', 220, 214, .24, .1, .035);
+      modulate(carrier, 'sine', 7, 22, .24);
+      tone('triangle', 330, 324, .24, .03, .035);
     } else if (key === 'colossus') {
-      tone('triangle', 65, 130, .55, .55, .09, null, -7);
-      tone('sawtooth', 65, 130, .55, .15, .09, ['lowpass', 240, 500, .7], 7);
+      // A big thundering crash: a deep impact rolling into rumble.
+      noise(0, .9, .4, 'lowpass', 700, 70, .8, .006);
+      noise(.12, .75, .2, 'lowpass', 260, 60, .6, .08);
+      tone('sine', 58, 34, .85, .5, .006);
     } else if (key === 'shockwave') {
-      tone('sine', 160, 32, .5, .9);
-      tone('sawtooth', 320, 45, .16, .2, .002, ['lowpass', 1800, 90, 9]);
+      // An electric shock: a buzzing zap with crackles snapping through it.
+      const carrier = tone('sawtooth', 120, 70, .32, .16, .002, ['lowpass', 3200, 900, 2]);
+      modulate(carrier, 'square', 53, 70, .32);
+      for (let k = 0; k < 6; k++) noise(k * .045 + Math.random() * .02, .02, .22, 'highpass', 3000, 2400, .8);
     } else if (key === 'ghost') {
-      tone('sine', 880, 880, .75, .24, .08, null, -5);
-      tone('sine', 1320, 1320, .8, .17, .09, null, 5);
-      tone('sine', 1760, 1760, .85, .09, .1, null, -3);
+      // Like the magnet's beam, but faster and higher, drifting down as it fades.
+      const carrier = tone('sine', 700, 600, .7, .09, .05);
+      modulate(carrier, 'sine', 16, 55, .7);
+      tone('sine', 1050, 900, .7, .03, .06);
     }
     superPlayback.add(handle);
     return handle;

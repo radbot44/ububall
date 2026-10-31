@@ -7,7 +7,7 @@ Match rules (owner decision 2026-10-29): Ububall plays with DNA stats and supers
 - **Blitz:** 5 seconds to plan each turn.
 - **Pulse:** a turn ends after 1 second of simulation (or a goal, or a settled field) instead of waiting for the field to settle. Momentum carries into the next turn. Launches use the normal impulse but steer toward the arrow's velocity (owner decision 2026-10-29): the change in velocity is capped at one full launch, so an ubu's own launches can turn or brake it but never push it past its full-launch speed; only collisions and supers can. From rest this equals an ordinary launch, so turns that start settled are unaffected. A launch with no power leaves the ubu coasting. Supers can be armed on any turn and last that turn. The last ball touch carries across turns for goal credit.
 
-Guarding is an explicit choice in every mode: tap the selected ubu again (or use Guard) to guard instead of launching; the first tap only selects it. Guarding keeps the ubu's arrow, faded, so tapping again brings the launch back. A guarding ubu stays on guard into the next turn of the same round until it is tapped off or re-aimed; a kickoff clears it. A guarding ubu keeps its defensive bonuses for the turn and brakes sharply (initial tuning, not an owner decision: it keeps 25% of its velocity and spin when the turn starts). An ubu with no launch and no guard coasts. Stunned ubus still guard automatically.
+Guarding is an explicit choice in every mode: tap the selected ubu again (or use Guard) to guard instead of launching; the first tap only selects it. Guarding keeps the ubu's arrow, faded, so tapping again brings the launch back. A guarding ubu stays on guard into the next turn of the same round until it is tapped off or re-aimed; a kickoff clears it. A guarding ubu keeps its defensive bonuses for the turn and brakes sharply (initial tuning, not an owner decision: it keeps 25% of its velocity and spin when the turn starts). An ubu with no launch and no guard coasts. A knocked-out (stunned) ubu is simply frozen for its turn: it cannot guard.
 
 ## 1. 1024-Bit DNA Block Layout (128 Bytes Total)
 
@@ -34,22 +34,24 @@ Every stat is stored as an 8-bit unsigned integer (`0–255`, neutral `127`) and
 | Category | Stat | Bits | Width | Values | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Movement** | `Impulse` | 374–381 | 8 | 0–255 | Engine thrust / launch speed ceiling |
-| | `Traction` | 382–389 | 8 | 0–255 | Braking deceleration on ice |
+| | `Traction` | 382–389 | 8 | 0–255 | Braking deceleration on ice, over a narrower span than most stats (multiplier^0.7, 0.75–1.33×; tuning) |
 | | `Spin` | 390–397 | 8 | 0–255 | Maximum launch rotation rate |
-| | `Curve` | 398–405 | 8 | 0–255 | Magnus effect trajectory bending |
-| **Physical** | `Size` | 406–413 | 8 | 0–255 | Physical collision radius; rink friction and air drag scale with it (tuning), so bigger ubus slow down faster |
-| | `Mass` | 414–421 | 8 | 0–255 | Body weight and collision momentum |
-| | `Bounciness` | 422–429 | 8 | 0–255 | Collision elasticity / restitution |
+| | `Curve` | 398–405 | 8 | 0–255 | Bends the ubu's own path, and the path of the ball after it strikes it; multiplies the spin a spin strike passes to the ball (still counter-rotating) |
+| **Physical** | `Size` | 406–413 | 8 | 0–255 | Physical collision radius. Size trade-offs (tuning, powers of the size multiplier in `SIZE`): smaller ubus launch faster (^−0.28), curve more and re-steer a moving launch more (^−0.5), and strike spin harder (^−0.5); bigger ubus lose more speed off the boards (^−0.5). |
+| | `Mass` | 414–421 | 8 | 0–255 | Body weight and collision momentum, over a narrower span than other stats (the square root of the multiplier, 0.82–1.22×; tuning). It does not slow the launch (full-launch speed comes from Impulse alone), so a heavier ubu shoots and checks harder and is harder to knock away; only Colossus's added weight slows a launch. Ubus have no air drag; the ball does. |
+| | `Bounciness` | 422–429 | 8 | 0–255 | How much speed the ubu keeps off the boards (0.82 × multiplier, capped at 0.95, before the size loss). Body and ball contacts use one fixed rebound (0.88). |
 | | `Grip` | 430–437 | 8 | 0–255 | Contact friction and spin transfer |
 | **Engagement** | `Power` | 438–445 | 8 | 0–255 | Velocity transfer to the ball (shot power) |
 | | `Reach` | 446–453 | 8 | 0–255 | Ball-only intercept/poke-check radius |
-| | `Strength` | 454–461 | 8 | 0–255 | Check momentum delivered into opponents |
-| | `Stability` | 462–469 | 8 | 0–255 | Resistance to checks and momentum loss |
-| **Super** | `Efficiency` | 470–477 | 8 | 0–255 | Meter gain rate from in-game events |
-| | `Synergy` | 478–485 | 8 | 0–255 | Outbound meter bonus granted to teammates |
-| | `Chemistry` | 486–493 | 8 | 0–255 | Inbound meter bonus received from teammates |
+| | `Strength` | 454–461 | 8 | 0–255 | Check momentum delivered into opponents, which also deepens dazes (below) |
+| | `Stability` | 462–469 | 8 | 0–255 | Resistance to checks and momentum loss, and to dazes (divides them) |
+| **Super** | `Efficiency` | 470–477 | 8 | 0–255 | Meter gain rate from in-game events (squared multiplier, 0.44–2.25×) |
+| | `Synergy` | 478–485 | 8 | 0–255 | Outbound meter bonus granted to teammates (squared multiplier, 0.44–2.25×) |
+| | `Chemistry` | 486–493 | 8 | 0–255 | Inbound meter bonus received from teammates (squared multiplier, 0.44–2.25×) |
 
 ---
+
+**Daze** (tuning in `DAZE`): when a check between opponents knocks the ubu that was hit by more than 250 px/s, it is dazed by (knock − 250) / 2850 ÷ its Stability, at most 20% per check (a neutral full-power check: 15%). The attacker, whichever drove into the contact faster, is not dazed by its own check; in an even head-on crash both are. Dazes stack up to 40%. Up to 15% a daze has no effect; beyond it the ubu's next launch speed is cut, rising evenly from 0 to 40% at the cap (30% daze: 24% slower); the daze clears when its next turn starts, whether it launches, guards or is stunned. Ubus dazed past 15% show a turning swirl above them and a "Dazed" note on their card with the launch cut.
 
 ## 3. Special Ability Loadout (Bits 494–509: 16 Bits)
 
@@ -69,19 +71,21 @@ Before each match, players equip one active super per ubu from their unlocked sl
 
 | ID | Super | Archetype | Tactical Use | In-Game Mechanics |
 | :--- | :--- | :--- | :--- | :--- |
-| `0` | **Stalwart** | Anchor / Defense | Crease blocking, impenetrable screening | Body position locks at 0 velocity with infinite mass ($1/\text{mass} = 0$). Cannot be moved or deflected by any collision. |
-| `1` | **Knockout** | Enforcer / CC | Neutralizing key opposing threats | First opposing skater touched is stunned for the subsequent turn (launch velocity forced to 0). |
-| `2` | **Sticky** | Carrier / Possession | Puck recovery and controlled breakouts | On ball contact, the ball welds to the skater's body and travels with them until the turn settles. |
-| `3` | **Cannonball** | Striker / Finisher | Long-range laser shots and blistering rebounds | Imparts $2.5\times$ base impulse to the ball on contact. |
-| `4` | **Magnet** | Playmaker / Interceptor | Puck retrieval and pass interception | Exerts a continuous attractive tractor pull on the ball within 260px while the skater is in motion. |
-| `5` | **Colossus** | Titan / Space Control | Wide zone coverage, heavy checking | Temporarily increases radius by $1.8\times$ and mass by $2.5\times$ for the turn, resetting on turn settle. |
-| `6` | **Shockwave** | Disrupter / Scrum Breaker | Clearing the crease and board pile-ups | Triggers a radial concussive blast repelling all bodies within 220px outward upon impact. |
-| `7` | **Ghost** | Infiltrator / Skater | Bypassing screens and heavy checks | Phases straight through opposing skaters without collision, while still interacting with the ball and rink boards. |
+| `0` | **Stalwart** | Anchor / Defense | Crease blocking, impenetrable screening | Body position locks at 0 velocity with infinite mass ($1/\text{mass} = 0$). Cannot be moved or deflected by any collision. Lasts 3 s of play. |
+| `1` | **Knockout** | Enforcer / CC | Neutralizing key opposing threats | First opposing skater touched is stunned for the subsequent turn: frozen, and unable to guard. Armed for 3 s of play. |
+| `2` | **Sticky** | Carrier / Possession | Puck recovery and controlled breakouts | On ball contact, the ball welds to the skater's body and travels with them. It lets go after 2 s of play, or when an opponent hits the carrier; the carrier skates with 1.5× friction meanwhile. Armed for 3 s. |
+| `3` | **Cannonball** | Striker / Finisher | Long-range laser shots and blistering rebounds | Imparts $2\times$ base impulse to the ball on contact, and always counts as a big shot for hit-stop. Armed for 3 s of play. |
+| `4` | **Magnet** | Playmaker / Interceptor | Puck retrieval and pass interception | Pulls the ball within 190 px for 3 s of play, up to 1000 px/s² close in, fading to nothing at the edge. |
+| `5` | **Colossus** | Titan / Space Control | Wide zone coverage, heavy checking | Increases radius and mass by $1.8\times$ for 3 s of play (or until the turn settles); the extra weight slows its launch to about 55%. |
+| `6` | **Shockwave** | Disrupter / Scrum Breaker | Clearing the crease and board pile-ups | Goes off on contact with an opponent, or when its 3 s run out: a radial blast repelling bodies and the ball within 170 px (teammates feel 40% of it). |
+| `7` | **Ghost** | Infiltrator / Skater | Bypassing screens and heavy checks | Phases straight through opposing skaters without collision for 3 s of play, while still interacting with the ball and rink boards. |
+
+Super timing (tuning in `SUPER`): every super lasts 3 s of play (720 ticks) or until spent, and ends when a turn settles; in Pulse it carries across the 1-second turns until its time runs out. Each super has a short, soft sound: Stalwart clanks like steel, Knockout lands a hard hit, Sticky squishes, Cannonball explodes, Magnet hums like a wobbling tractor beam while it pulls, Colossus crashes like thunder, Shockwave zaps, Ghost wobbles high and fast.
 
 ### Ball Responsibility & Goal Calls
 - **Responsibility** (`credit` in `shared/ububall-match.js`): each ubu holds a share of responsibility for the ball's current velocity. After a tick in which ubus touch the ball, the part of the new velocity carried over from the old one (its projection, as a fraction) stays with whoever gave it, and the rest is split among that tick's touchers. A glancing deflection leaves a shot with its shooter; stopping or redirecting the ball takes it over. Boards do not change it. The responsible team is the one with the larger share. It resets at kickoff and carries across Pulse turns.
 - **Goal calls**, shown in place of "GOAL" (first match wins): "OWN GOAL" when the conceding team was most responsible for the ball; "HAT TRICK!" for a scorer's third goal of the match (own goals do not count toward it); "BANK SHOT!" when the ball came off the boards after its last ubu touch; "SNIPE!" when the scorer's last touch was in their own half; "REBOUND!" within 1 second (240 ticks) of a save by the conceding team; "ACE!" on the first turn of a round.
-- **Assists:** the teammate who passed to the scorer, with no opponent touch between that pass and the scoring shot (the scorer may touch it several times). It carries across turns, shows an "Assist" callout and earns $+4\% 	imes 	ext{Efficiency multiplier}$ (a proposed amount, not yet an owner decision). Own goals have no assist.
+- **Assists:** the teammate who passed to the scorer, with no opponent touch between that pass and the scoring shot (the scorer may touch it several times). It carries across turns, shows an "Assist" callout and earns $+4\% \times \text{Efficiency multiplier}$ (a proposed amount, not yet an owner decision). Own goals have no assist.
 - **Callouts:** "Save!" or "Save..." over a saver (see Meter Accumulation), and "Spin strike!" when a close-range spin strike adds power.
 - **Hit-stop** (tuning in `HIT_STOP` and `BIG_SHOT`), with a slight rink shake: 60 ms for a real save (not "Save..."), a spin strike or a big shot; 100 ms for a save of a big shot, a spin strike that is also a big shot, or a big shot that will travel at least a rink height (480 px) untouched (boards allowed); 150 ms for a big shot whose own path, ignoring ubus and stopping at the boards, goes into a goal. A big shot is a lone touch by an ubu driving into the ball at 80% or more of its own full-launch speed; the ball's speed does not count, so a fast ball off a still ubu is not one.
 - **Match summary:** at full time, after the final goal's replay has played once, a summary shows the score, a comeback (the winner was 3 or more goals down) or shutout, and each ubu's goals, assists, saves and top shot (ball speed off its fastest touch), naming an MVP (3 per goal, 2 per assist or save, fastest shot breaks ties).
@@ -90,14 +94,14 @@ Before each match, players equip one active super per ubu from their unlocked sl
 - **Starting Meter:** Initialized at kickoff from `Ubuquity` (Bits 1014–1023: $\text{Ubuquity} / 1020 \times 100\%$).
 - **Meter Capacity:** 100% per ubu. Activating a super costs 100% meter for that turn.
 - **Meter Accumulation:**
-  - Values in `METER` (`shared/ububall-match.js`); amounts are owner decisions of 2026-10-30. There is no passive per-turn gain.
+  - Values in `METER` (`shared/ububall-match.js`); amounts are owner decisions of 2026-10-30. Every gain is scaled by `rate` (0.85, owner decision 2026-10-30), and the super stats use their multiplier squared (0.44–2.25×) so good ones matter and poor ones hold an ubu back. There is no passive per-turn gain.
   - Ball strikes: $+8\% \times \text{Efficiency multiplier}$.
   - Checks against an opponent: $+4\% \times \text{Efficiency multiplier}$ each. Teammate bumps earn nothing.
   - Conceding team rally bonus: $+6\% \times \text{Efficiency multiplier}$ upon being scored against.
   - Ace: a goal on the first turn of a round (the turns from one kickoff to the next goal) earns the scorer (the scoring team's last toucher) $+10\% \times \text{Efficiency multiplier}$, unless it is an own goal.
   - Save: $+6\% \times \text{Efficiency multiplier}$, with a "Save!" callout over the saver, when an ubu touches the ball while it is heading into its own goal and, from the field as it stood just before that contact and with the saver removed, the ball would have gone in touching nothing but the goal posts and net (no boards, no other ubu). Only a lone touch counts (two ubus meeting the ball in the same tick is a scramble), the ball must be within 300 px of the goal mouth's centre, and without the saver it must have been due in within 1 second (240 ticks); these limits are tuning in `SAVE`. The touch must also keep the ball out: from the field just after it, the ball must not go on into that goal (even off the boards) before another ubu touches it, so a deflection that still goes in is no save. A save from a ball the saver's own team was most responsible for (see Ball Responsibility) still shows, as "Save...", but earns nothing.
   - Anti-farming (tuning, not an owner decision): contact only counts at impact speed 60 or more, and each ubu earns contact meter at most once per 1.5 seconds of simulated play (ball and checks share the cooldown, which carries across Pulse turns).
-  - Teammate Synergy/Chemistry: Whenever an ubu gains meter, teammates receive an inbound bonus: $\Delta M \times (\text{Synergy} \times \text{Chemistry} \times 0.15)$.
+  - Teammate Synergy/Chemistry: Whenever an ubu gains meter, teammates receive an inbound bonus: $\Delta M \times (\text{Synergy}^2 \times \text{Chemistry}^2 \times 0.15)$, using the stat multipliers.
 
 ---
 

@@ -26,7 +26,7 @@ test('Classic, Blitz and Pulse combine independently', () => {
 test('shared meter rules exclude super users and the opposing team', () => {
   const bodies=P.kickoff(); bodies.forEach(b=>b.meter=0); bodies[1].usedSuperThisTurn=true;
   M.gainMeter(P,bodies,[],bodies[0],18);
-  assert.equal(bodies[0].meter,18); assert.equal(bodies[1].meter,0); assert.equal(bodies[2].meter,18*M.METER.teammate); assert.equal(bodies[3].meter,0);
+  assert.equal(bodies[0].meter,18*M.METER.rate); assert.equal(bodies[1].meter,0); assert.equal(bodies[2].meter,18*M.METER.rate*M.METER.teammate); assert.equal(bodies[3].meter,0);
   M.gainMeter(P,bodies,[],bodies[1],18); assert.equal(bodies[1].meter,0);
 });
 
@@ -233,7 +233,7 @@ test('launches steer toward the arrow velocity and cannot exceed full-launch spe
 });
 test('contact meter needs real impacts and cools down so pinging cannot farm it', () => {
   const bodies=P.kickoff(); bodies.forEach(b=>b.meter=0); const [a,mate]=bodies, enemy=bodies[3], ball=bodies[6];
-  const {ball:award,check,minSpeed,cooldownTicks}=M.METER;
+  const {minSpeed,cooldownTicks,rate}=M.METER, award=M.METER.ball*rate, check=M.METER.check*rate;
   M.contactMeter(P,bodies,[],a,ball,minSpeed-1,0); assert.equal(a.meter,0);
   M.contactMeter(P,bodies,[],a,mate,500,0); assert.equal(a.meter,0); // Teammate bumps never count.
   M.contactMeter(P,bodies,[],ball,a,minSpeed,0); assert.equal(a.meter,award); assert.equal(ball.meter,0);
@@ -246,7 +246,7 @@ test('turns earn no meter; conceding a goal earns the conceded bonus', () => {
   M.finishTurn(P,bodies,[],[0,0],null,'standard'); assert.ok(bodies.every(b=>b.meter===0));
   M.finishTurn(P,bodies,[],[0,0],0,'standard');
   assert.ok(bodies.slice(0,3).every(b=>b.meter===0));
-  assert.ok(Math.abs(bodies[3].meter-M.METER.conceded*(1+2*M.METER.teammate))<1e-9);
+  assert.ok(Math.abs(bodies[3].meter-M.METER.conceded*M.METER.rate*(1+2*M.METER.teammate))<1e-9);
 });
 
 // `extra` adds match state, such as who is responsible for the ball (`credit`).
@@ -261,8 +261,8 @@ test('a goal on the first turn of a round is an ace and earns the scorer extra m
   const state=shotState({x:930,y:300,vx:300}); state.lastTouch=[2,null];
   const ace=M.resolveTurn(P,state,Array.from({length:6},still));
   assert.equal(ace.replay.label,'ACE!'); assert.equal(ace.state.roundTurns,0);
-  assert.ok(Math.abs(ace.state.bodies[2].meter-M.METER.ace)<1e-9);
-  assert.ok(Math.abs(ace.state.bodies[0].meter-M.METER.ace*M.METER.teammate)<1e-9);
+  assert.ok(Math.abs(ace.state.bodies[2].meter-M.METER.ace*M.METER.rate)<1e-9);
+  assert.ok(Math.abs(ace.state.bodies[0].meter-M.METER.ace*M.METER.rate*M.METER.teammate)<1e-9);
   const later=M.resolveTurn(P,{...structuredClone(state),roundTurns:2},Array.from({length:6},still));
   assert.equal(later.replay.label,'GOAL'); assert.equal(later.state.bodies[2].meter,0);
   const quiet=M.resolveTurn(P,shotState({x:500,y:300}),Array.from({length:6},still));
@@ -271,7 +271,7 @@ test('a goal on the first turn of a round is an ace and earns the scorer extra m
 test('a save needs a ball that would have gone in untouched without the saver', () => {
   const blocked=M.resolveTurn(P,shotState({x:260,y:300,vx:-600},{0:{x:130,y:300}},{credit:{3:1}}),Array.from({length:6},still));
   assert.deepEqual(blocked.replay.saves.map(s=>s.index),[0]);
-  assert.ok(Math.abs(blocked.state.bodies[0].meter-M.METER.ball-M.METER.save)<1e-9);
+  assert.ok(Math.abs(blocked.state.bodies[0].meter-(M.METER.ball+M.METER.save)*M.METER.rate)<1e-9);
   // Wide of the goal, the boards would have stopped it first.
   const wide=M.resolveTurn(P,shotState({x:260,y:150,vx:-600},{0:{x:130,y:150}}),Array.from({length:6},still));
   assert.deepEqual(wide.replay.saves,[]);
@@ -318,7 +318,7 @@ test('own goals, bank shots and hat tricks are called, and own-goal saves earn n
   assert.equal(play.banked,true);
   const ownSave=M.resolveTurn(P,shotState({x:260,y:300,vx:-600},{0:{x:130,y:300}},{credit:{1:1}}),idle());
   assert.deepEqual(ownSave.replay.saves.map(s=>[s.index,s.own]),[[0,true]]);
-  assert.ok(Math.abs(ownSave.state.bodies[0].meter-M.METER.ball)<1e-9);
+  assert.ok(Math.abs(ownSave.state.bodies[0].meter-M.METER.ball*M.METER.rate)<1e-9);
 });
 test('a close-range spin strike is reported for its callout', () => {
   const state=shotState({x:443,y:300},{0:{x:400,y:300}});
@@ -343,7 +343,7 @@ test('an assist goes to the teammate who passed to the scorer, unless an opponen
   const state=shotState({x:930,y:300,vx:300},{},{lastTouch:[2,null],last:2,assist:[1,null],credit:{2:1},roundTurns:1});
   const result=M.resolveTurn(P,state,Array.from({length:6},still));
   assert.equal(result.replay.assist,1); assert.deepEqual(result.state.tally.assists,[0,1,0,0,0,0]);
-  assert.ok(Math.abs(result.state.bodies[1].meter-M.METER.assist)<1e-9);
+  assert.ok(Math.abs(result.state.bodies[1].meter-M.METER.assist*M.METER.rate)<1e-9);
 });
 test('snipes, rebounds, comebacks, shutouts and huge shots are recognised', () => {
   const idle=()=>Array.from({length:6},still), base={lastTouch:[2,null],last:2,credit:{2:1},roundTurns:1};
@@ -395,4 +395,21 @@ test('resolving a turn without presentation effects gives the same match state',
   const full=M.resolveTurn(P,state,moves), fast=M.resolveTurn(P,state,moves,{effects:false});
   assert.deepEqual(fast.state,full.state); assert.equal(fast.replay.goal,full.replay.goal);
   assert.ok(full.replay.stops.length>0); assert.deepEqual(fast.replay.stops,[]); assert.equal(fast.replay.initialBodies,null);
+});
+
+test('super stats swing meter gain harder than other stats', () => {
+  const gained = efficiency => { const bodies=P.kickoff(); bodies.forEach(b=>b.meter=0); M.gainMeter(P,bodies,[{efficiency}],bodies[0],10); return bodies[0].meter; };
+  assert.ok(Math.abs(gained(255)-10*M.METER.rate*2.25)<1e-9 && Math.abs(gained(0)-10*M.METER.rate*4/9)<1e-9);
+  const shared = (synergy, chemistry) => { const bodies=P.kickoff(); bodies.forEach(b=>b.meter=0); M.gainMeter(P,bodies,[{synergy},{chemistry}],bodies[0],10); return bodies[1].meter; };
+  assert.ok(Math.abs(shared(255,255)-10*M.METER.rate*M.METER.teammate*2.25**2)<1e-9);
+});
+
+test('a Cannonball hit always earns big-shot hit-stop', () => {
+  const state=shotState({x:343,y:300},{0:{x:300,y:300}});
+  state.bodies[0].superActive='cannonball'; state.bodies[0].superTicks=P.SUPER.ticks;
+  const moves=Array.from({length:6},still); moves[0]={angle:0,power:.4,spin:0,superArm:false,guard:false};
+  const plain=M.resolveTurn(P,shotState({x:343,y:300},{0:{x:300,y:300}}),moves);
+  // The soft shot itself earns no pause; the Cannonball version pauses on the hit.
+  const first=r=>r.replay.stops[0]?.tick ?? Infinity, cannon=M.resolveTurn(P,state,moves);
+  assert.ok(first(cannon)<first(plain) && cannon.replay.stops[0].ms>=M.HIT_STOP.hit);
 });

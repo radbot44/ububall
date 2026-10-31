@@ -4,20 +4,44 @@
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
   const SKATER_CURVE = .06, BALL_CURVE = .045;
-  const AIR_DRAG = .00015; // Quadratic drag for balls and ubus; strongest on fast shots.
+  const AIR_DRAG = .00015; // Quadratic drag on the ball, strongest on fast shots; ubus have none.
   const SPIN_DECAY = 5; // Rad/s of spin every body loses each second.
   const STRIKE_GAIN = 1, CLOSE_SPIN_GAIN = 2; // Spin strike multiplier from range and at point blank.
   const STRIKE_POWER = .5; // Point-blank strike's extra ball speed at full spin, as a share of the ubu's speed.
   const GUARD_BRAKE = .25; // Share of velocity and spin a guarding ubu keeps when its turn starts.
+  const WALL_BOUNCE = .82; // Share of speed into the boards that comes back out.
+  // Size trade-offs (tuning): as powers of the size multiplier, small ubus launch faster, curve and
+  // re-steer more and strike spin harder; big ubus lose more speed off the boards.
+  const SIZE = Object.freeze({ launch: -.28, agility: -.5, strike: -.5, boards: -.5 });
+  // Daze (tuning): a check that knocks an ubu by more than `speed` px/s dazes it by the excess over
+  // `scale` (a neutral full-power check: 15%), divided by its Stability and at most `hit` per check.
+  // Dazes stack up to `max`. Up to `free` a daze has no effect; beyond it the next launch's speed is
+  // cut, rising evenly to `max` at the cap, so one hard check shrugs off but repeated ones tell.
+  const DAZE = Object.freeze({ speed: 250, scale: 2850, hit: .2, free: .15, max: .4 });
+  function daze(body, knock) {
+    if (knock > DAZE.speed) body.daze = Math.min(DAZE.max, (body.daze || 0) + Math.min(DAZE.hit, (knock - DAZE.speed) / DAZE.scale / (body.stability || 1)));
+  }
+  function dazeSlow(body) {
+    const daze = body.daze || 0;
+    return daze <= DAZE.free ? 0 : (daze - DAZE.free) / (DAZE.max - DAZE.free) * DAZE.max;
+  }
+  // Super tuning: every super lasts SUPER.ticks of play (3 s) or until spent, carrying across Pulse
+  // turns. Sticky lets go after holdTicks or when an opponent hits the carrier, who skates with
+  // carryFriction × friction meanwhile. Magnet pulls within magnetRadius, up to magnetPull px/s² at
+  // contact. Shockwave fires on an opponent or when its time runs out, pushing within shockRadius;
+  // teammates feel shockTeammate of it. Cannonball adds cannonball × the ball impulse. Colossus
+  // grows by colossusRadius and colossusMass.
+  const SUPER = Object.freeze({ ticks: 720, holdTicks: 480, carryFriction: 1.5, magnetRadius: 190, magnetPull: 1000,
+    shockRadius: 170, shockForce: 1100, shockTeammate: .4, cannonball: 1, colossusRadius: 1.8, colossusMass: 1.8 });
   function ballHitRadius(body) { return Math.max(body.radius, body.reach || body.radius, 18); }
   const SUPERS = Object.freeze([
     { id: 0, key: 'stalwart', name: 'Stalwart', desc: 'Become an immovable anchor for this turn.', icon: 'assets/00_stalwart.png' },
     { id: 1, key: 'knockout', name: 'Knockout', desc: 'Knock out the next opponent touched; they cannot move next turn.', icon: 'assets/01_knockout.png' },
-    { id: 2, key: 'sticky', name: 'Sticky', desc: 'Grab onto the ball on contact and hold possession.', icon: 'assets/02_sticky.png' },
+    { id: 2, key: 'sticky', name: 'Sticky', desc: 'Grab the ball on contact and carry it for up to 2 seconds, until an opponent hits you.', icon: 'assets/02_sticky.png' },
     { id: 3, key: 'cannonball', name: 'Cannonball', desc: 'Blast the ball with explosive impulse on contact.', icon: 'assets/03_cannonball.png' },
-    { id: 4, key: 'magnet', name: 'Magnet', desc: 'Pull the ball toward you while moving across the rink.', icon: 'assets/04_magnet.png' },
-    { id: 5, key: 'colossus', name: 'Colossus', desc: 'Swell in size and mass for massive coverage.', icon: 'assets/05_colossus.png' },
-    { id: 6, key: 'shockwave', name: 'Shockwave', desc: 'Release a radial shockwave repelling players and the ball.', icon: 'assets/06_shockwave.png' },
+    { id: 4, key: 'magnet', name: 'Magnet', desc: 'Pull the ball strongly toward you for 3 seconds when it comes close.', icon: 'assets/04_magnet.png' },
+    { id: 5, key: 'colossus', name: 'Colossus', desc: 'Swell in size and mass for massive coverage, moving slower while big.', icon: 'assets/05_colossus.png' },
+    { id: 6, key: 'shockwave', name: 'Shockwave', desc: 'Blast nearby players and the ball away when you hit an opponent, or when time runs out.', icon: 'assets/06_shockwave.png' },
     { id: 7, key: 'ghost', name: 'Ghost', desc: 'Phase through opposing players without collision.', icon: 'assets/07_ghost.png' }
   ]);
   function multiplier(raw) {
@@ -26,21 +50,33 @@
     // stats matter as much as extremes. 0 = 2/3×, 127 = 1×, 255 = 1.5×.
     return raw < 127 ? (2 / 3) ** ((127 - raw) / 127) : 1.5 ** ((raw - 127) / 128);
   }
+  // Full-launch speed comes from Impulse, not Mass, so a heavier ubu launches as fast and carries more
+  // momentum into the ball and opponents. Only weight added on top of its own (Colossus) slows it.
+  // Smaller ubus launch a little faster, and a daze from heavy checks slows the next launch.
+  function launchSpeed(body) {
+    return (body.impulse || IMPULSE) / 3 * (body.baseMass || body.mass) / body.mass * (body.sizeMult || 1) ** SIZE.launch * (1 - dazeSlow(body));
+  }
   function applyStats(body, raw = {}) {
-    const size = multiplier(raw.size ?? 127);
-    body.mass = 3 * multiplier(raw.mass ?? 127);
-    body.radius = 25 * size;
+    // Mass spans a narrower range than other stats (0.82–1.22×, tuning): weight helps every shot,
+    // check and block without a launch-speed cost, so a full 2/3–1.5× span dominated.
+    body.mass = 3 * Math.sqrt(multiplier(raw.mass ?? 127));
+    body.sizeMult = multiplier(raw.size ?? 127);
+    body.radius = 25 * body.sizeMult;
     body.baseMass = body.mass;
     body.baseRadius = body.radius;
-    // Bigger ubus drag more on the ice and through the air, in proportion to size (tuning): a
-    // counterweight to the reach and coverage their size gives them.
-    body.friction = 150 * multiplier(raw.traction ?? 127) * size;
-    body.drag = AIR_DRAG * size;
+    // Traction spans a narrower range than most stats (0.75–1.33×, tuning): stopping where you aim
+    // was the strongest stat.
+    body.friction = 150 * multiplier(raw.traction ?? 127) ** .7;
     body.maxSpin = 10 * multiplier(raw.spin ?? 127);
     body.grip = .3 * multiplier(raw.grip ?? 127);
     body.impulse = IMPULSE * multiplier(raw.impulse ?? 127);
-    body.curveFactor = SKATER_CURVE * multiplier(raw.curve ?? 127);
+    // Curve bends the ubu's own path (more for small ubus) and the path of the ball it strikes, and
+    // strengthens its spin strike.
+    body.curveMult = multiplier(raw.curve ?? 127);
+    body.curveFactor = SKATER_CURVE * body.curveMult * body.sizeMult ** SIZE.agility;
     body.bounciness = multiplier(raw.bounciness ?? 127);
+    // Bounciness acts on the boards only; big ubus lose more speed off them.
+    body.wallBounce = Math.min(.95, WALL_BOUNCE * body.bounciness * body.sizeMult ** SIZE.boards);
     body.power = multiplier(raw.power ?? 127);
     body.reach = Math.max(body.radius, 25 * multiplier(raw.reach ?? 127), 18);
     body.strength = multiplier(raw.strength ?? 127);
@@ -56,15 +92,19 @@
     bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1 });
     return bodies;
   }
+  // Counts boards and contacts resolved, so a collision pass that resolved nothing ends the passes.
+  let resolved = 0;
   function reflect(b, nx, ny, penetration, wallType = 'wall', onWall = null) {
+    resolved++;
     b.x -= nx * penetration; b.y -= ny * penetration;
     const velocity = b.vx * nx + b.vy * ny;
     if (velocity > 0) {
       b.spinStrike = 0; // A wall bounce spends a launching ubu's spin strike.
-      b.vx -= 1.82 * velocity * nx; b.vy -= 1.82 * velocity * ny;
+      const rebound = 1 + (b.wallBounce ?? WALL_BOUNCE);
+      b.vx -= rebound * velocity * nx; b.vy -= rebound * velocity * ny;
       const tx = -ny, ty = nx;
       const slip = b.vx * tx + b.vy * ty + b.omega * b.radius;
-      const limit = b.grip * 1.82 * velocity * b.mass;
+      const limit = b.grip * rebound * velocity * b.mass;
       const impulse = Math.max(-limit, Math.min(limit, -slip * b.mass / 3));
       b.vx += impulse * tx / b.mass; b.vy += impulse * ty / b.mass;
       b.omega += 2 * impulse / (b.mass * b.radius);
@@ -74,6 +114,9 @@
   }
   function walls(b, onWall = null) {
     const r = b.radius, k = rink;
+    // Clear of every board, post and corner arc: nothing below can apply.
+    if (b.x >= k.left + r && b.x <= k.right - r && b.y >= k.top + r && b.y <= k.bottom - r &&
+        ((b.x >= k.left + k.corner && b.x <= k.right - k.corner) || (b.y >= k.top + k.corner && b.y <= k.bottom - k.corner))) return;
     const inGoalY = b.y > k.goalTop && b.y < k.goalBottom;
 
     if (inGoalY) {
@@ -127,19 +170,30 @@
     }
   }
   function triggerShockwave(source, bodies, onShockwave) {
-    const radius = 220;
+    const radius = SUPER.shockRadius;
     for (const b of bodies) {
       if (b === source || b.superActive === 'stalwart') continue;
       const dx = b.x - source.x, dy = b.y - source.y, d2 = dx * dx + dy * dy;
       if (d2 > 0 && d2 < radius * radius) {
         const d = Math.sqrt(d2);
-        const force = (1 - d / radius) * 1100;
+        const force = (1 - d / radius) * SUPER.shockForce * (b.team === source.team ? SUPER.shockTeammate : 1);
         const m = b.mass || 1;
         b.vx += (dx / d) * force / m;
         b.vy += (dy / d) * force / m;
       }
     }
     if (typeof onShockwave === 'function') onShockwave(source, radius);
+  }
+  // Ends a ubu's super: Colossus shrinks back and a Sticky ball is let go.
+  function endSuper(b, bodies) {
+    if (b.colossusApplied) {
+      if (b.baseRadius) b.radius = b.baseRadius;
+      if (b.baseMass) b.mass = b.baseMass;
+      b.colossusApplied = false;
+    }
+    const ball = bodies?.find(o => o.team === -1);
+    if (ball?.stuckTo === b) { ball.stuckTo = null; ball.stickOffset = null; }
+    b.superActive = null; b.superTicks = 0; b.shockwaveFired = false;
   }
   function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, onSuper = null) {
     const isBall = a.team === -1 || b.team === -1;
@@ -156,6 +210,7 @@
     const dx = b.x - a.x, dy = b.y - a.y, radius = ra + rb;
     const d2 = dx * dx + dy * dy;
     if (d2 > radius * radius) return;
+    resolved++;
     const d = Math.sqrt(d2);
     // Any ubu contact consumes the opening shot, even a stationary touch. Capture the striker's
     // remaining spin before contact friction changes it; no rebound can re-arm it. The bonus spins
@@ -166,8 +221,10 @@
     if (isBall) {
       const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
       if (ball.openingShot && player.spinStrike) {
-        closeSpin = -player.spinStrike * player.omega;
-        strikeBoost = STRIKE_POWER * (player.spinStrike - STRIKE_GAIN) * Math.min(1, Math.abs(player.omega) / player.maxSpin) * Math.hypot(player.vx, player.vy);
+        // Smaller ubus strike harder; Curve passes on more spin.
+        const small = (player.sizeMult || 1) ** SIZE.strike;
+        closeSpin = -player.spinStrike * player.omega * small * (player.curveMult || 1);
+        strikeBoost = small * STRIKE_POWER * (player.spinStrike - STRIKE_GAIN) * Math.min(1, Math.abs(player.omega) / player.maxSpin) * Math.hypot(player.vx, player.vy);
       }
       if (closeSpin && allBodies?.some(other => other.team >= 0 && other !== player &&
           (other.x - ball.x) ** 2 + (other.y - ball.y) ** 2 <= (ballHitRadius(other) + ball.radius) ** 2)) closeSpin = strikeBoost = 0;
@@ -177,17 +234,12 @@
     if (!isBall && a.team !== b.team) {
       if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; onSuper?.('knockout', 'impact', a, b); }
       if (b.superActive === 'knockout') { a.stunnedNext = true; b.superActive = null; onSuper?.('knockout', 'impact', b, a); }
-    }
-
-    if (allBodies) {
-      if (a.superActive === 'shockwave' && !a.shockwaveFired) {
-        a.shockwaveFired = true;
-        triggerShockwave(a, allBodies, onShockwave);
-      }
-      if (b.superActive === 'shockwave' && !b.shockwaveFired) {
-        b.shockwaveFired = true;
-        triggerShockwave(b, allBodies, onShockwave);
-      }
+      // An opponent's hit knocks a Sticky ball loose.
+      if (a.superActive === 'sticky' && allBodies?.find(o => o.team === -1)?.stuckTo === a) endSuper(a, allBodies);
+      if (b.superActive === 'sticky' && allBodies?.find(o => o.team === -1)?.stuckTo === b) endSuper(b, allBodies);
+      // Shockwave goes off on contact with an opponent.
+      if (allBodies && a.superActive === 'shockwave' && !a.shockwaveFired) { a.shockwaveFired = true; triggerShockwave(a, allBodies, onShockwave); }
+      if (allBodies && b.superActive === 'shockwave' && !b.shockwaveFired) { b.shockwaveFired = true; triggerShockwave(b, allBodies, onShockwave); }
     }
 
     const nx = d ? dx / d : 1, ny = d ? dy / d : 0;
@@ -197,7 +249,7 @@
       const player = a.team !== -1 ? a : b;
       const ball = a.team === -1 ? a : b;
       if (player.superActive === 'sticky') {
-        ball.stuckTo = player;
+        ball.stuckTo = player; ball.stuckTicks = 0;
         onSuper?.('sticky', 'impact', player, ball);
         const ox = ball.x - player.x, oy = ball.y - player.y, od = Math.sqrt(ox * ox + oy * oy) || 1;
         const targetDist = player.radius + ball.radius;
@@ -232,10 +284,9 @@
       if (b.superActive === 'stalwart') onSuper?.('stalwart', 'impact', b, a);
     }
 
-    const bounce = ((a.bounciness || 1) + (b.bounciness || 1)) / 2;
-    // Restitution describes the rebound, not the entire stopping impulse.
-    // Ordinary contacts must never be superelastic, even at maximum stats.
-    const restitution = Math.min(1, .88 * bounce);
+    // Restitution describes the rebound, not the entire stopping impulse. Bounciness acts only on
+    // the boards, so every body and ball contact shares one sub-elastic rebound.
+    const restitution = .88;
     const baseImpulse = -(1 + restitution) * closing / inverse;
 
     let impulseA = baseImpulse, impulseB = baseImpulse;
@@ -266,8 +317,8 @@
     // Keep its extra impulse out of the ordinary collision's energy budget.
     let cannon = null, cannonImpulse = 0;
     if (isBall) {
-      if (a.team !== -1 && a.superActive === 'cannonball') { cannon = a; cannonImpulse = 1.5 * impulseB; }
-      else if (b.team !== -1 && b.superActive === 'cannonball') { cannon = b; cannonImpulse = -1.5 * impulseA; }
+      if (a.team !== -1 && a.superActive === 'cannonball') { cannon = a; cannonImpulse = SUPER.cannonball * impulseB; }
+      else if (b.team !== -1 && b.superActive === 'cannonball') { cannon = b; cannonImpulse = -SUPER.cannonball * impulseA; }
     }
 
     if (invA > 0) {
@@ -276,6 +327,14 @@
     if (invB > 0) {
       b.vx += impulseB * nx * invB; b.vy += impulseB * ny * invB;
     } else { b.vx = b.vy = b.omega = 0; }
+    // A hard check between opponents dazes the ubu that was hit, if knocked hard enough (see DAZE).
+    // Whichever drove into the contact faster is the attacker and is not dazed by its own check; in
+    // an even head-on crash both are.
+    if (!isBall && a.team !== b.team) {
+      const driveA = normalA, driveB = -normalB;
+      if (driveB >= driveA) daze(a, Math.abs(impulseA * invA));
+      if (driveA >= driveB) daze(b, Math.abs(impulseB * invB));
+    }
 
     const tx = -ny, ty = nx;
     const slip = (b.vx - a.vx) * tx + (b.vy - a.vy) * ty - a.omega * a.radius - b.omega * b.radius;
@@ -299,6 +358,9 @@
       onSuper?.('cannonball', 'impact', cannon, ball);
     }
 
+    // The ball curves as the ubu that last struck it would: Curve shapes shots too.
+    if (isBall) (a.team === -1 ? a : b).curveFactor = BALL_CURVE * ((a.team === -1 ? b : a).curveMult || 1);
+
     if (closeSpin) {
       const ball = a.team === -1 ? a : b, away = ball === b ? 1 : -1;
       ball.omega = Math.max(-24, Math.min(24, ball.omega + closeSpin));
@@ -311,15 +373,18 @@
 
     if (typeof onCollide === 'function') onCollide(a, b, -closing, baseImpulse);
   }
+  let spareRadii = new Float64Array(7); // Broad-phase scratch, taken while a step uses it.
   function step(bodies, dt = DT, onCollide = null, onWall = null, onShockwave = null, onSuper = null) {
     const ball = bodies.find(b => b.team === -1);
     if (ball?.openingShot) {
       // Existing contact must count before motion can separate the bodies.
       // A different ubu already touching also invalidates a close setup.
-      const touching = bodies.filter(b => b.team >= 0 && (b.x - ball.x) ** 2 + (b.y - ball.y) ** 2 <= (ballHitRadius(b) + ball.radius) ** 2);
-      if (touching.length > 1 || (touching.length === 1 && !touching[0].spinStrike)) ball.openingShot = false;
-      if (touching.length === 1) {
-        const b = touching[0];
+      let touching = 0, b = null;
+      for (const other of bodies) {
+        if (other.team >= 0 && (other.x - ball.x) ** 2 + (other.y - ball.y) ** 2 <= (ballHitRadius(other) + ball.radius) ** 2) { touching++; b = other; }
+      }
+      if (touching > 1 || (touching === 1 && !b.spinStrike)) ball.openingShot = false;
+      if (touching === 1) {
         if ((ball.vx - b.vx) * (ball.x - b.x) + (ball.vy - b.vy) * (ball.y - b.y) >= 0) ball.openingShot = false;
       }
     }
@@ -328,16 +393,25 @@
         if (b.team !== -1 && b.superActive === 'magnet') {
           const dx = b.x - ball.x, dy = b.y - ball.y, d2 = dx * dx + dy * dy;
           const minDist = b.radius + ball.radius;
-          if (d2 > minDist * minDist && d2 < 260 * 260) {
+          if (d2 > minDist * minDist && d2 < SUPER.magnetRadius ** 2) {
             const d = Math.sqrt(d2);
             onSuper?.('magnet', 'pull', b);
-            const pull = 650 * (1 - d / 260);
+            const pull = SUPER.magnetPull * (1 - d / SUPER.magnetRadius);
             ball.vx += (dx / d) * pull * dt;
             ball.vy += (dy / d) * pull * dt;
           }
         }
       }
     }
+    // Supers run on play time: each lasts SUPER.ticks; an unspent Shockwave goes off as it ends. (A
+    // super set without a timer runs until the turn ends.)
+    for (const b of bodies) {
+      if (!b.superActive || b.team < 0 || !b.superTicks) continue;
+      if (--b.superTicks > 0) continue;
+      if (b.superActive === 'shockwave' && !b.shockwaveFired) { b.shockwaveFired = true; triggerShockwave(b, bodies, onShockwave); }
+      endSuper(b, bodies);
+    }
+    if (ball?.stuckTo && ++ball.stuckTicks >= SUPER.holdTicks) endSuper(ball.stuckTo, bodies);
     for (const b of bodies) {
       if (b.superActive === 'stalwart') {
         b.vx = b.vy = b.omega = 0;
@@ -359,7 +433,8 @@
       b.rotation += b.omega * dt;
       b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - SPIN_DECAY * dt);
       b.x += b.vx * dt; b.y += b.vy * dt;
-      const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = (b.friction + (b.drag ?? AIR_DRAG) * speed2) * dt;
+      const carrying = ball?.stuckTo === b ? SUPER.carryFriction : 1;
+      const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = (b.friction * carrying + (b.team === -1 ? AIR_DRAG * speed2 : 0)) * dt;
       if (speed2 <= deceleration * deceleration) {
         b.vx = b.vy = 0;
       } else {
@@ -368,10 +443,16 @@
         b.vx *= factor; b.vy *= factor;
       }
     }
+    // Contact radii never grow during a step (Colossus only shrinks back), so radii taken once
+    // stay a safe bound for the broad phase.
+    const count = bodies.length, hit = spareRadii?.length >= count ? spareRadii : new Float64Array(count);
+    spareRadii = null;
+    for (let i = 0; i < count; i++) hit[i] = ballHitRadius(bodies[i]);
     for (let pass = 0; pass < 3; pass++) {
-      for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) {
+      const resolvedBefore = resolved;
+      for (let i = 0; i < count; i++) for (let j = i + 1; j < count; j++) {
         // Bodies further apart than both contact radii cannot touch; collide would return untouched.
-        const a = bodies[i], c = bodies[j], reach = ballHitRadius(a) + ballHitRadius(c), dx = a.x - c.x, dy = a.y - c.y;
+        const a = bodies[i], c = bodies[j], reach = hit[i] + hit[j], dx = a.x - c.x, dy = a.y - c.y;
         if (dx * dx + dy * dy > reach * reach) continue;
         collide(a, c, onCollide, bodies, onShockwave, onSuper);
       }
@@ -407,7 +488,10 @@
           walls(ball, onWall);
         }
       }
+      // Nothing touched: the field is unchanged, so further passes would find nothing either.
+      if (resolved === resolvedBefore) break;
     }
+    spareRadii = hit;
     if (ball) {
       const inGoalY = ball.y >= rink.goalTop && ball.y <= rink.goalBottom;
       if (inGoalY) {
@@ -421,32 +505,35 @@
     for (const b of bodies) b.spinStrike = 0;
     bodies.forEach((b, i) => {
       if (b.team < 0) return;
+      // A daze lasts until the ubu's next turn starts, whether or not it launches.
       if (b.stunned) {
         b.vx = 0; b.vy = 0; b.omega = 0;
-        b.stunned = false;
+        b.stunned = false; b.daze = 0;
         return;
       }
       if (b.superActive === 'stalwart') {
-        b.vx = 0; b.vy = 0; b.omega = 0;
+        b.vx = 0; b.vy = 0; b.omega = 0; b.daze = 0;
         return;
       }
       if (b.superActive === 'colossus' && !b.colossusApplied) {
         b.colossusApplied = true;
-        b.radius *= 1.8;
-        b.mass *= 2.5;
+        b.radius *= SUPER.colossusRadius;
+        b.mass *= SUPER.colossusMass;
       }
       if (b.guarding) {
-        b.vx *= GUARD_BRAKE; b.vy *= GUARD_BRAKE; b.omega *= GUARD_BRAKE;
+        b.vx *= GUARD_BRAKE; b.vy *= GUARD_BRAKE; b.omega *= GUARD_BRAKE; b.daze = 0;
         return;
       }
-      // A launch steers toward the arrow's velocity using at most one full launch of change,
-      // so a moving ubu can turn or brake but its own launches never exceed full-launch speed.
-      // From rest this is the plain launch. No power leaves the ubu coasting.
+      // A launch steers toward the arrow's velocity using at most one full launch of change (more
+      // for small ubus, which re-steer more easily), so a moving ubu can turn or brake but its own
+      // launches never exceed full-launch speed. From rest this is the plain launch. No power leaves
+      // the ubu coasting.
       const plan = plans[i] || { angle: 0, power: 0 };
-      const full = (b.impulse || IMPULSE) / b.mass, power = Math.max(0, Math.min(1, plan.power));
+      const full = launchSpeed(b), power = Math.max(0, Math.min(1, plan.power));
+      b.daze = 0;
       if (power > 0) {
         const dx = Math.cos(plan.angle) * full * power - b.vx, dy = Math.sin(plan.angle) * full * power - b.vy;
-        const scale = Math.min(1, full / (Math.hypot(dx, dy) || 1));
+        const scale = Math.min(1, full * (b.sizeMult || 1) ** SIZE.agility / (Math.hypot(dx, dy) || 1));
         b.vx += dx * scale; b.vy += dy * scale;
       }
       b.omega = Math.max(-b.maxSpin, Math.min(b.maxSpin, b.omega + Math.max(-1, Math.min(1, plan.spin || 0)) * b.maxSpin));
@@ -475,16 +562,11 @@
       if (b.guardBase) Object.assign(b, b.guardBase);
       b.guardBase = null; b.guarding = false;
       if (!keepMotion) b.vx = b.vy = b.omega = 0;
-      if (b.colossusApplied) {
-        if (b.baseRadius) b.radius = b.baseRadius;
-        if (b.baseMass) b.mass = b.baseMass;
-        b.colossusApplied = false;
-      }
-      b.superActive = null;
-      b.shockwaveFired = false;
+      // In Pulse, a running super carries into the next turn until its time runs out.
+      if (!keepMotion) endSuper(b, bodies);
     }
     const ball = bodies.find(b => b.team === -1);
-    if (ball) { ball.stuckTo = null; ball.stickOffset = null; }
+    if (ball && !keepMotion) { ball.stuckTo = null; ball.stickOffset = null; }
   }
   // Follows the ball ahead on a copy of the field (with `removed` taken off it) until it touches an
   // ubu, or the boards unless `boards` allows them (posts and net always count as clear), stops or
@@ -572,7 +654,7 @@
 
       if (idx === strikerIdx) {
         if (b.x < ball.x - 14) {
-          if (canSuper && sKey === 'magnet' && dBall < 245) {
+          if (canSuper && sKey === 'magnet' && dBall < 180) {
             superArm = true;
             tx = 60; ty = 300 + (b.y >= ball.y ? 45 : -45);
             extraDrive = 160;
@@ -620,7 +702,7 @@
             if (sKey === 'cannonball' && dBall < 340) superArm = true;
             else if (sKey === 'sticky' && dBall < 300) superArm = true;
             else if (sKey === 'ghost' && (approachBlock || dBall < 280)) superArm = true;
-            else if (sKey === 'magnet' && dBall < 320) superArm = true;
+            else if (sKey === 'magnet' && dBall < 230) superArm = true;
             else if (sKey === 'shockwave' && dBall < 260 && (shotBlock || approachBlock)) superArm = true;
             else if (sKey === 'knockout' && approachBlock && dBall < 280) superArm = true;
             else if (sKey === 'colossus' && dBall < 220 && (agg > 0.55 || surge > 0.3)) superArm = true;
@@ -647,7 +729,7 @@
           if (sKey === 'stalwart' && inCrease && threat && Math.hypot(tx - b.x, ty - b.y) < 45) superArm = true;
           else if (sKey === 'colossus' && (inCrease || ball.x > 580)) superArm = true;
           else if ((sKey === 'shockwave' || sKey === 'sticky') && ball.x > 680 && dBall < 220) superArm = true;
-          else if (sKey === 'magnet' && ball.x > 650 && dBall < 250) superArm = true;
+          else if (sKey === 'magnet' && ball.x > 650 && dBall < 190) superArm = true;
         }
       } else {
         const nearestThreat = humans.reduce((best, h) =>
@@ -662,7 +744,7 @@
           tx = wingOpenX; ty = wingOpenY;
           if (cre > 0.5) spin = (ty < 300 ? 0.35 : -0.35) * cre;
           if (canSuper) {
-            if (sKey === 'magnet' && dBall < 250) superArm = true;
+            if (sKey === 'magnet' && dBall < 190) superArm = true;
             else if (sKey === 'ghost' && segmentBlocked(b.x, b.y, tx, ty, humans, 18)) superArm = true;
             else if (sKey === 'colossus' && (dBall < 220 || surge > 0.4)) superArm = true;
           }
@@ -674,8 +756,7 @@
       }
 
       const dx = tx - b.x, dy = ty - b.y, distance = Math.hypot(dx, dy);
-      const effMass = b.mass * (superArm && sKey === 'colossus' ? 2.5 : 1);
-      const maxV = (b.impulse || IMPULSE) / effMass;
+      const maxV = launchSpeed(b) / (superArm && sKey === 'colossus' && !b.colossusApplied ? SUPER.colossusMass : 1);
       let angle = Math.atan2(dy, dx);
       const power = distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * b.friction * Math.max(0, distance + extraDrive)) / maxV);
 
@@ -699,7 +780,8 @@
       if (b.team < 0) return;
       if (b.guardBase) Object.assign(b, b.guardBase);
       b.guardBase = null;
-      b.guarding = Boolean(plans[i]?.guard || b.stunned);
+      // A stunned (knocked-out) ubu is simply frozen: it cannot guard.
+      b.guarding = Boolean(plans[i]?.guard) && !b.stunned;
       if (b.guarding) {
         b.guardBase = { reach: b.reach, friction: b.friction, strength: b.strength, stability: b.stability, bounciness: b.bounciness };
         b.reach = Math.max(b.radius, Math.min(37.5, (b.reach || b.radius) * 1.25));
@@ -712,11 +794,9 @@
       if (!b.stunned && (b.superArm || plans[i]?.superArm) && b.meter >= 100) {
         b.usedSuperThisTurn = true;
         b.meter = 0;
-        b.superActive = b.equippedSuper.key;
+        b.superActive = b.equippedSuper.key; b.superTicks = SUPER.ticks;
         b.superArm = false;
-      }
-      if (!b.stunned && ['stalwart', 'colossus', 'ghost'].includes(b.superActive)) {
-        onSuper?.(b.superActive, 'launch', b);
+        if (['stalwart', 'colossus', 'ghost'].includes(b.superActive)) onSuper?.(b.superActive, 'launch', b);
       }
     });
     launch(bodies, plans);
@@ -759,6 +839,6 @@
     }
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS };
   }
-  const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, multiplier, applyStats, kickoff, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, dazeSlow, multiplier, launchSpeed, applyStats, kickoff, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

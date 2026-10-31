@@ -12,6 +12,24 @@
     hard: Object.freeze({ candidates: 120, opponents: 3, risk: .55 })
   });
   const WEIGHTS = Object.freeze({ goal: 10000, progress: 1, access: .35, cover: .3, meter: .35 });
+  // Each candidate is judged on at most 2 s of play (owner decision 2026-10-30), or sooner once its
+  // result is clear.
+  const SEARCH_TICKS = 480;
+  // Clear: the ball is at rest and loose, no super is running, and no ubu still sliding could reach
+  // the ball on its own momentum (a straight-line stopping distance; knock-ons are not followed).
+  function decided(bodies) {
+    const ball = bodies[6];
+    if (ball.vx || ball.vy || ball.stuckTo) return false;
+    for (let i = 0; i < 6; i++) {
+      const b = bodies[i];
+      if (b.superActive) return false;
+      const speed2 = b.vx * b.vx + b.vy * b.vy;
+      if (!speed2) continue;
+      const contact = Math.max(b.radius, b.reach || b.radius, 18) + ball.radius;
+      if (Math.hypot(b.x - ball.x, b.y - ball.y) - contact <= speed2 / (2 * b.friction)) return false;
+    }
+    return true;
+  }
   function randomSource(seed = 1) {
     let value = seed >>> 0;
     return () => ((value = (Math.imul(value, 1664525) + 1013904223) >>> 0) / 4294967296);
@@ -92,7 +110,12 @@
     const started = performance.now(), random = randomSource(config.seed ?? 1);
     // Only public state crosses this boundary. Discard any UI arming flags.
     const state = structuredClone(input);
-    for (const b of state.bodies) { b.superArm = false; b.superActive = null; }
+    // Every candidate copies the state, so presentation fields (voice, name, super descriptions) go.
+    for (const b of state.bodies) {
+      b.superArm = false; b.superActive = null;
+      delete b.voice; delete b.name;
+      if (b.equippedSuper) b.equippedSuper = { id: b.equippedSuper.id, key: b.equippedSuper.key };
+    }
     let best = legacy(state, team), simulations = 0, ticks = 0, evaluated = 0;
     const opponent = legacy(state, 1 - team);
     const ball = state.bodies[6];
@@ -101,7 +124,7 @@
     function score(moves) {
       let sum = 0, worst = Infinity;
       for (const response of responses) {
-        const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false });
+        const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false, ticks: SEARCH_TICKS, decided });
         const value = evaluate(result.state, team, result.replay.goal, weights);
         sum += value; worst = Math.min(worst, value); simulations++; ticks += result.replay.ticks;
       }
@@ -146,6 +169,6 @@
     }
     return { plans: M.validatePlans(best), diagnostics: { level, candidates: evaluated, simulations, ticks, score: bestScore, milliseconds: performance.now() - started } };
   }
-  const api = { LEVELS, WEIGHTS, HOLD, GUARD, randomSource, legacy, plan };
+  const api = { LEVELS, WEIGHTS, SEARCH_TICKS, HOLD, GUARD, randomSource, legacy, decided, plan };
   if (node) module.exports = api; else root.ububallCPU = api;
 })(globalThis);

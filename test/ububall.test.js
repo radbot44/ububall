@@ -12,12 +12,27 @@ test('exponential stat curve preserves endpoints and spreads mid-range stats eve
   assert.ok(Math.abs(P.multiplier(64) - (2 / 3) ** (63 / 127)) < 1e-12 && P.multiplier(64) < .82);
   assert.ok(Math.abs(P.multiplier(191) - Math.sqrt(1.5)) < 1e-12);
 });
-test('mass changes launch speed while equal-power momentum stays constant', () => {
+test('mass leaves launch speed alone, so heavier ubus carry more momentum', () => {
   const b = P.kickoff();
   [0, 127, 255].forEach((mass, i) => P.applyStats(b[i], { ...normal, mass }));
   P.launch(b, Array.from({ length: 6 }, () => ({ angle: 0, power: 1 })));
-  for (const body of b.slice(0, 3)) assert.ok(Math.abs(body.mass * body.vx - P.IMPULSE) < 1e-9);
-  assert.ok(Math.abs(b[0].vx - 1080) < 1e-9); assert.equal(b[1].vx, 720); assert.equal(b[2].vx, 480);
+  for (const body of b.slice(0, 3)) assert.ok(Math.abs(body.vx - 720) < 1e-9);
+  assert.ok(b[0].mass * b[0].vx < b[1].mass * b[1].vx && b[1].mass * b[1].vx < b[2].mass * b[2].vx);
+  // Weight added on top of the ubu's own (Colossus) still slows its launch.
+  const heavy = P.kickoff()[0]; P.applyStats(heavy); heavy.mass *= 2.5;
+  assert.ok(Math.abs(P.launchSpeed(heavy) - 720 / 2.5) < 1e-9);
+});
+test('heavier ubus shoot and check harder and are harder to knock away', () => {
+  const hit = mass => {
+    const b = P.kickoff(); P.applyStats(b[0], { ...normal, mass }); Object.assign(b[0], { x: 300, y: 300, vx: 720 });
+    Object.assign(b[6], { x: 343, y: 300 }); P.step(b, 0);
+    const c = P.kickoff(); P.applyStats(c[0], { ...normal, mass }); P.applyStats(c[3], normal);
+    Object.assign(c[0], { x: 300, y: 300, vx: 720 }); Object.assign(c[3], { x: 349, y: 300 }); P.step(c, 0);
+    return { ball: b[6].vx, check: c[3].vx };
+  };
+  const [light, mid, heavy] = [0, 127, 255].map(hit);
+  assert.ok(light.ball < mid.ball && mid.ball < heavy.ball);
+  assert.ok(light.check < mid.check && mid.check < heavy.check);
 });
 test('spin bends travel symmetrically without adding translational speed', () => {
   const outcomes = [-1, 0, 1].map(spin => {
@@ -29,10 +44,10 @@ test('spin bends travel symmetrically without adding translational speed', () =>
   assert.ok(outcomes[0].y < 100 && outcomes[2].y > 100);
   assert.ok(Math.abs(outcomes[0].y + outcomes[2].y - 200) < 1e-8);
   const straightSpeed = Math.hypot(outcomes[1].vx, outcomes[1].vy);
-  assert.ok(straightSpeed < 69 && straightSpeed > 0);
+  assert.ok(straightSpeed < 70 && straightSpeed > 0);
   assert.ok(outcomes.every(b => Math.abs(Math.hypot(b.vx, b.vy) - straightSpeed) < 1e-8));
 });
-test('air drag slows both balls and ubus more strongly at higher speeds', () => {
+test('air drag slows the ball more strongly at higher speeds; ubus have none', () => {
   for (const index of [0, 6]) {
     const losses = [100, 700].map(speed => {
       const body = P.kickoff()[index];
@@ -40,7 +55,8 @@ test('air drag slows both balls and ubus more strongly at higher speeds', () => 
       P.step([body]);
       return speed - body.vx;
     });
-    assert.ok(losses[0] > 0 && losses[1] > losses[0] * 40);
+    if (index === 6) assert.ok(losses[0] > 0 && losses[1] > losses[0] * 40);
+    else assert.deepEqual(losses, [0, 0]);
   }
 });
 test('impulse scales launch speed independently of mass', () => {
@@ -246,17 +262,27 @@ test('strength amplifies body-checking force and stability dampens knockback', (
   });
   assert.ok(stabResults[0] > stabResults[1] && stabResults[1] > stabResults[2]);
 });
-test('bounciness scales collision restitution between colliding bodies', () => {
-  const bounceResults = [0, 127, 255].map(bounciness => {
+// Off the top boards at 400 px/s: how fast the ubu comes back.
+function offBoards(raw) {
+  const b = P.kickoff(); P.applyStats(b[0], { ...normal, ...raw });
+  Object.assign(b[0], { x: 500, y: 60 + b[0].radius - 1, vx: 0, vy: -400 });
+  P.step([b[0]], 0);
+  return b[0].vy;
+}
+test('bounciness acts on the boards only, and big ubus lose more speed off them', () => {
+  const bounce = [0, 127, 255].map(bounciness => offBoards({ bounciness }));
+  assert.ok(bounce[0] < bounce[1] && bounce[1] < bounce[2] && bounce[2] <= 400 * .95 + 1e-9);
+  const size = [0, 127, 255].map(size => offBoards({ size }));
+  assert.ok(size[0] > size[1] && size[1] > size[2]);
+  // Body contacts no longer depend on it.
+  const contact = [0, 255].map(bounciness => {
     const b = P.kickoff();
-    P.applyStats(b[0], { ...normal, bounciness });
-    P.applyStats(b[1], { ...normal, bounciness });
-    Object.assign(b[0], { x: 400, y: 300, vx: 500 });
-    Object.assign(b[1], { x: 430, y: 300, vx: -500 });
+    P.applyStats(b[0], { ...normal, bounciness }); P.applyStats(b[1], { ...normal, bounciness });
+    Object.assign(b[0], { x: 400, y: 300, vx: 500 }); Object.assign(b[1], { x: 430, y: 300, vx: -500 });
     P.step(b, 0);
     return b[1].vx - b[0].vx;
   });
-  assert.ok(bounceResults[0] < bounceResults[1] && bounceResults[1] < bounceResults[2]);
+  assert.equal(contact[0], contact[1]);
 });
 
 function kineticEnergy(bodies) {
@@ -422,7 +448,7 @@ test('Cannonball boosts the ball once without boosting its shooter or subsequent
   P.step(bodies, 0, null, null, null, key => { if (key === 'cannonball') activations++; });
   P.step(ordinary, 0);
   assert.equal(bodies[0].vx, ordinary[0].vx);
-  assert.ok(Math.abs(bodies[6].vx - ordinary[6].vx * 2.5) < 1e-9);
+  assert.ok(Math.abs(bodies[6].vx - ordinary[6].vx * (1 + P.SUPER.cannonball)) < 1e-9);
   assert.equal(bodies[0].superActive, null);
   let previous = kineticEnergy(bodies), ricochets = 0;
   for (let tick = 0; tick < 2880; tick++) {
@@ -526,7 +552,7 @@ test('Cannonball amplifies impulse imparted to the ball on contact', () => {
   };
   const normalVx = runShot(false);
   const cannonVx = runShot(true);
-  assert.ok(cannonVx > normalVx * 2.0);
+  assert.ok(cannonVx > normalVx * 1.8);
 });
 
 test('Magnet exerts an active attractive pull on the ball while in motion', () => {
@@ -545,8 +571,8 @@ test('Colossus increases radius and mass during launch and restores them on stop
   const origMass = b[0].mass;
   b[0].superActive = 'colossus';
   P.launch(b, [{ angle: 0, power: 0.5 }]);
-  assert.ok(Math.abs(b[0].radius - origRadius * 1.8) < 1e-6);
-  assert.ok(Math.abs(b[0].mass - origMass * 2.5) < 1e-6);
+  assert.ok(Math.abs(b[0].radius - origRadius * P.SUPER.colossusRadius) < 1e-6);
+  assert.ok(Math.abs(b[0].mass - origMass * P.SUPER.colossusMass) < 1e-6);
   P.stop(b);
   assert.ok(Math.abs(b[0].radius - origRadius) < 1e-6);
   assert.ok(Math.abs(b[0].mass - origMass) < 1e-6);
@@ -559,7 +585,7 @@ test('Shockwave propels nearby players and the ball radially outward upon trigge
   Object.assign(b[6], { x: 400, y: 360, vx: 0, vy: 0 });
   let shockRadius = null;
   P.triggerShockwave(b[0], b, (source, radius) => { shockRadius = radius; });
-  assert.equal(shockRadius, 220);
+  assert.equal(shockRadius, P.SUPER.shockRadius);
   assert.ok(b[1].vx > 0);
   assert.ok(b[6].vy > 0);
 });
@@ -601,7 +627,7 @@ test('low-speed zero-spin motion brakes to rest without changing position integr
 });
 test('magnet attraction respects its distance bounds', () => {
   const bodies = P.kickoff();
-  Object.assign(bodies[0], { x: 300, y: 300, superActive: 'magnet' });
+  Object.assign(bodies[0], { x: 500 - P.SUPER.magnetRadius + 20, y: 300, superActive: 'magnet' });
   P.step(bodies, P.DT);
   assert.ok(bodies[6].vx < 0);
   const distant = P.kickoff();
@@ -813,16 +839,138 @@ test('prediction stops at goals or its tick budget and respects stun and super c
   assert.deepEqual(undercharged, P.predictTurn(stunned, plan));
 });
 
-test('bigger ubus slow down faster on the ice and through the air', () => {
+test('size does not change how an ubu slows down', () => {
   const travel = size => {
     const b = P.kickoff(); P.applyStats(b[0], { ...normal, size });
     Object.assign(b[0], { x: 200, y: 300, vx: 600 });
     for (let i = 0; i < 240; i++) P.step([b[0]]);
-    return { x: b[0].x, friction: b[0].friction, drag: b[0].drag };
+    return b[0].x;
   };
   const [small, mid, big] = [0, 127, 255].map(travel);
-  assert.equal(mid.friction, 150); assert.equal(mid.drag, .00015);
-  assert.ok(small.friction < mid.friction && mid.friction < big.friction);
-  assert.ok(small.drag < mid.drag && mid.drag < big.drag);
-  assert.ok(small.x > mid.x && mid.x > big.x);
+  assert.equal(small, mid); assert.equal(mid, big);
+});
+
+test('small ubus launch faster, curve and re-steer more, and strike spin harder', () => {
+  const ubu = size => { const b = P.kickoff()[0]; P.applyStats(b, { ...normal, size }); return b; };
+  const [small, mid, big] = [0, 127, 255].map(ubu);
+  assert.ok(P.launchSpeed(small) > P.launchSpeed(mid) && P.launchSpeed(mid) > P.launchSpeed(big));
+  assert.ok(small.curveFactor > mid.curveFactor && mid.curveFactor > big.curveFactor);
+  // Turning a moving ubu straight around: a small one gets further.
+  const turn = size => {
+    const b = P.kickoff(); P.applyStats(b[0], { ...normal, size }); Object.assign(b[0], { vx: 600, vy: 0 });
+    P.launch(b, [{ angle: Math.PI, power: 1 }]);
+    return b[0].vx;
+  };
+  assert.ok(turn(0) < turn(127) && turn(127) < turn(255));
+  // Point-blank spin strike: the small striker gives the ball more spin and speed.
+  const strike = size => {
+    const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal)); P.applyStats(b[0], { ...normal, size });
+    Object.assign(b[0], { x: 400, y: 300 }); Object.assign(b[6], { x: 400 + b[0].reach + 18, y: 300 });
+    P.startTurn(b, [{ angle: 0, power: .6, spin: .4 }]); // Below the ball's spin cap.
+    b[6].x = b[0].x + Math.max(b[0].radius, b[0].reach) + 18 - .1; P.step(b, 0);
+    return { spin: Math.abs(b[6].omega), speed: Math.hypot(b[6].vx, b[6].vy) };
+  };
+  const [s0, s1] = [strike(0), strike(127)];
+  assert.ok(s0.spin > s1.spin && s0.speed > s1.speed);
+});
+test('curve strengthens spin strikes and bends the ball its ubu strikes', () => {
+  const shot = curve => {
+    const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal)); P.applyStats(b[0], { ...normal, curve });
+    Object.assign(b[0], { x: 400, y: 300 }); Object.assign(b[6], { x: 443, y: 300 });
+    P.startTurn(b, [{ angle: 0, power: .6, spin: 1 }]);
+    b[6].x = 442.9; P.step(b, 0);
+    return b[6];
+  };
+  const [low, high] = [shot(0), shot(255)];
+  assert.ok(Math.abs(high.omega) > Math.abs(low.omega));
+  assert.equal(Math.sign(high.omega), Math.sign(low.omega)); // Still counter-rotating, never reversed.
+  assert.ok(high.curveFactor > low.curveFactor);
+});
+test('hard checks daze the next launch, stack, and Stability resists them', () => {
+  const check = (stability, hits) => {
+    const b = P.kickoff(); P.applyStats(b[0], normal); P.applyStats(b[3], { ...normal, stability });
+    for (let i = 0; i < hits; i++) { Object.assign(b[0], { x: 300, y: 300, vx: 720, vy: 0 }); Object.assign(b[3], { x: 349, y: 300, vx: 0, vy: 0 }); P.step(b, 0); }
+    return b;
+  };
+  const once = check(127, 1)[3].daze, twice = check(127, 2)[3].daze;
+  assert.ok(Math.abs(once - .15) < .005 && twice > once && check(127, 4)[3].daze === P.DAZE.max);
+  assert.ok(!check(127, 1)[0].daze); // The attacker is not dazed by its own check.
+  const crash = P.kickoff(); P.applyStats(crash[0], normal); P.applyStats(crash[3], normal);
+  Object.assign(crash[0], { x: 300, y: 300, vx: 720 }); Object.assign(crash[3], { x: 349, y: 300, vx: -720 }); P.step(crash, 0);
+  assert.equal(crash[0].daze, P.DAZE.hit); assert.equal(crash[3].daze, P.DAZE.hit); // Head-on: both, capped per hit.
+  assert.ok(check(255, 1)[3].daze < once);
+  // A soft bump does nothing.
+  const soft = P.kickoff(); P.applyStats(soft[0], normal); P.applyStats(soft[3], normal);
+  Object.assign(soft[0], { x: 300, y: 300, vx: 200 }); Object.assign(soft[3], { x: 349, y: 300 }); P.step(soft, 0);
+  assert.ok(!soft[3].daze);
+  // The next launch is slower, then the daze is gone.
+  // Up to 15% a daze does nothing; beyond it the launch slows, reaching 40% at the cap.
+  assert.equal(P.dazeSlow({ daze: once }), 0);
+  assert.ok(Math.abs(P.dazeSlow({ daze: P.DAZE.max }) - .4) < 1e-12);
+  const dazed = check(127, 2), slow = P.dazeSlow(dazed[3]), full = P.launchSpeed({ ...dazed[3], daze: 0 });
+  assert.ok(slow > 0);
+  Object.assign(dazed[3], { vx: 0, vy: 0 });
+  P.launch(dazed, [null, null, null, { angle: 0, power: 1 }]);
+  assert.ok(Math.abs(Math.abs(dazed[3].vx) - full * (1 - slow)) < 1e-9);
+  assert.equal(dazed[3].daze, 0);
+});
+test('traction spans a narrower range than other stats', () => {
+  const friction = traction => { const b = P.kickoff()[0]; P.applyStats(b, { ...normal, traction }); return b.friction; };
+  assert.ok(Math.abs(friction(255) - 150 * 1.5 ** .7) < 1e-9 && Math.abs(friction(0) - 150 * (2 / 3) ** .7) < 1e-9);
+});
+
+test('supers last three seconds of play, carrying across Pulse turns', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  b[0].meter = 100; b[0].equippedSuper = P.SUPERS[4];
+  P.startTurn(b, [{ angle: 0, power: 0, spin: 0, superArm: true }]);
+  assert.equal(b[0].superActive, 'magnet'); assert.equal(b[0].superTicks, P.SUPER.ticks);
+  for (let i = 0; i < 240; i++) P.step(b);
+  P.stop(b, true); // A Pulse turn break keeps it running.
+  assert.equal(b[0].superActive, 'magnet');
+  for (let i = 0; i < P.SUPER.ticks; i++) P.step(b);
+  assert.equal(b[0].superActive, null);
+  b[0].superActive = 'ghost'; b[0].superTicks = 100; P.stop(b); // A full stop ends it.
+  assert.equal(b[0].superActive, null);
+});
+test('Sticky lets go after its hold time or when an opponent hits the carrier, who skates slower', () => {
+  const grab = () => {
+    const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+    Object.assign(b[0], { x: 400, y: 300, vx: 200, superActive: 'sticky', superTicks: P.SUPER.ticks });
+    Object.assign(b[6], { x: 442, y: 300 }); P.step(b, 0);
+    return b;
+  };
+  const held = grab(); assert.equal(held[6].stuckTo, held[0]);
+  for (let i = 0; i < P.SUPER.holdTicks; i++) P.step(held);
+  assert.equal(held[6].stuckTo, null); assert.equal(held[0].superActive, null);
+  const hit = grab(); Object.assign(hit[3], { x: hit[0].x - 49, y: 300, vx: 400 }); P.step(hit, 0);
+  assert.equal(hit[6].stuckTo, null);
+  const free = P.kickoff(); P.applyStats(free[0], normal); Object.assign(free[0], { x: 400, y: 300, vx: 200 });
+  const carrier = grab(); Object.assign(carrier[0], { vx: 200, vy: 0 });
+  P.step(free); P.step(carrier);
+  assert.ok(carrier[0].vx < free[0].vx);
+});
+test('Shockwave goes off on an opponent or when its time runs out, pushing teammates less', () => {
+  const field = () => {
+    const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+    Object.assign(b[0], { x: 400, y: 300, superActive: 'shockwave', superTicks: P.SUPER.ticks });
+    return b;
+  };
+  const touchBall = field(); Object.assign(touchBall[0], { vx: 300 }); Object.assign(touchBall[6], { x: 442, y: 300 }); P.step(touchBall, 0);
+  assert.ok(!touchBall[0].shockwaveFired);
+  const touchMate = field(); Object.assign(touchMate[1], { x: 449, y: 300, vx: -300 }); P.step(touchMate, 0);
+  assert.ok(!touchMate[0].shockwaveFired);
+  const touchFoe = field(); Object.assign(touchFoe[3], { x: 449, y: 300, vx: -300 }); P.step(touchFoe, 0);
+  assert.ok(touchFoe[0].shockwaveFired);
+  const timed = field(); timed[0].superTicks = 1; Object.assign(timed[1], { x: 480, y: 300 }); Object.assign(timed[3], { x: 400, y: 380 });
+  P.step(timed, 0);
+  assert.ok(timed[1].vx > 0 && timed[3].vy > 0 && timed[1].vx < timed[3].vy);
+});
+test('knocked-out ubus cannot guard, and Colossus launches at a slower pace', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  b[0].stunned = true;
+  P.startTurn(b, [{ angle: 0, power: 0, spin: 0, guard: true }]);
+  assert.equal(b[0].guarding, false);
+  const c = P.kickoff(); P.applyStats(c[0], normal); c[0].superActive = 'colossus';
+  P.launch(c, [{ angle: 0, power: 1 }]);
+  assert.ok(Math.abs(c[0].vx - 720 / P.SUPER.colossusMass) < 1e-9);
 });

@@ -94,7 +94,7 @@
   let materialEmitters = [];
   // Field details. All are cosmetic and cleared with the other effects; reduced motion disables them.
   const skids = [], skidState = [], burns = [], burnState = {}, ripples = [], pings = [], popups = [], danger = [0, 0];
-  let ballFlare = 0, kickoffGlow = 0, goalSweep = null, hitStopUntil = 0, shake = 0;
+  let ballFlare = 0, kickoffGlow = 0, goalSweep = null, hitStopUntil = 0, shake = 0, shakeX = 0, shakeY = 0;
   const SKID_LIFE = 12; // Seconds of play before a skid mark fades out.
   // A sharp loss of speed (hard guard braking or a heavy hit) starts a short skid: an ubu-wide mark
   // whose depth at each point follows how hard the ubu slowed there. Friction and drag slow an ubu by
@@ -218,7 +218,7 @@
     particles.length = fireworks.length = shockwaves.length = 0;
     skids.length = skidState.length = burns.length = ripples.length = pings.length = popups.length = 0; burnState.path = null; fireTime = 0; quench();
     if (netFire) netFire.lit = false;
-    shake = 0; rinkWrap.style.translate = '';
+    shake = shakeX = shakeY = 0; rinkWrap.style.translate = '';
     danger[0] = danger[1] = ballFlare = kickoffGlow = 0; goalSweep = null;
   }
   function burst(x, y, team, strength, celebration = false, tangent = 0, color = null) {
@@ -307,7 +307,9 @@
     for (const side of [0, 1]) danger[side] += ((threat?.side === side ? threat.level : 0) - danger[side]) * Math.min(1, dt * 10);
     burnNet(dt);
     shake = Math.max(0, shake - dt / .2);
-    rinkWrap.style.translate = shake ? `${((Math.random() - .5) * 5 * shake).toFixed(2)}px ${((Math.random() - .5) * 5 * shake).toFixed(2)}px` : '';
+    shakeX = shake ? Number(((Math.random() - .5) * 5 * shake).toFixed(2)) : 0;
+    shakeY = shake ? Number(((Math.random() - .5) * 5 * shake).toFixed(2)) : 0;
+    rinkWrap.style.translate = shake ? `${shakeX}px ${shakeY}px` : '';
     ballFlare = Math.max(0, ballFlare - dt / .8);
     kickoffGlow = Math.max(0, kickoffGlow - dt / 1.5);
     if (goalSweep && (goalSweep.p += dt / 1.5) >= 1) goalSweep = null;
@@ -400,6 +402,23 @@
     return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(', ')})`;
   }
   function inRink(paint) { ctx.save(); rounded(60, 60, 880, 480, 100); ctx.clip(); paint(); ctx.restore(); }
+  // A layer over the rink canvas, repainted only when `key` changes and otherwise drawn as one image.
+  // For content that stays still across many frames, such as the plan-phase prediction. `scale`
+  // paints soft, heavily blurred content at a fraction of the canvas resolution.
+  function cachedLayer(cache, key, paint, scale = 1) {
+    if (cache.key !== key) {
+      const width = Math.max(1, Math.round(canvas.width * scale)), height = Math.max(1, Math.round(canvas.height * scale)), main = ctx;
+      cache.layer ||= document.createElement('canvas');
+      if (cache.layer.width !== width || cache.layer.height !== height) { cache.layer.width = width; cache.layer.height = height; }
+      ctx = cache.layer.getContext('2d');
+      ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); ctx.clearRect(0, 0, 1000, 600);
+      ctx.save();
+      try { paint(); } finally { ctx.restore(); ctx = main; }
+      cache.key = key;
+    }
+    ctx.drawImage(cache.layer, 0, 0, 1000, 600);
+  }
+  const iceCache = {};
   // Drawn on the ice beneath bodies and trails.
   function drawFieldUnder(colors) {
     const { primary, home, away } = colors;
@@ -407,6 +426,25 @@
       ctx.save(); ctx.globalAlpha = kickoffGlow; ctx.shadowColor = primary; ctx.shadowBlur = 12 * canvas.width / 1000;
       circle(500, 300, 70 + (1 - kickoffGlow) * 10, primary, 3); ctx.restore();
     }
+    // Skid and burn marks only change while play runs, so planning reuses one painted layer. Their
+    // edges are blurred far wider than a field unit, so the layer is painted at one pixel per field
+    // unit at most (half resolution on a 2× screen): the blur costs a quarter, with no visible change.
+    if (skids.length || burns.length) {
+      let key = canvas.width + ',' + canvas.height;
+      for (const s of skids) key += ',' + s.age + ':' + s.points.length;
+      key += '|';
+      for (const s of burns) key += ',' + s.age + ':' + s.points.length;
+      cachedLayer(iceCache, key, paintIce, Math.min(1, 1000 / canvas.width));
+    }
+    if (phase === 'plan' && pulseMode() && !P.settled(bodies)) inRink(() => { ctx.fillStyle = 'rgba(120,170,255,.07)'; ctx.fillRect(60, 60, 880, 480); });
+    danger.forEach((glow, side) => {
+      if (glow < .02) return;
+      const x = side ? 940 : 60, color = side ? away : home;
+      ctx.save(); ctx.globalAlpha = Math.min(1, glow) * .4; ctx.shadowColor = color; ctx.shadowBlur = 8 * glow * canvas.width / 1000;
+      line(x, 230, x, 370, color, 5); ctx.restore();
+    });
+  }
+  function paintIce() {
     for (const s of skids) {
       // A blurred body and a tighter blurred core darken the ice: soft edges, deepest where braking
       // was hardest. Fading also thins the mark, so its 8-bit opacity steps never show as one jump.
@@ -424,14 +462,6 @@
       ctx.globalAlpha = .22 * fade;
       softRibbon(s.points, p => s.width * .35 * p.depth, s.width * .15, '#000000');
     }
-    ctx.globalAlpha = 1;
-    if (phase === 'plan' && pulseMode() && !P.settled(bodies)) inRink(() => { ctx.fillStyle = 'rgba(120,170,255,.07)'; ctx.fillRect(60, 60, 880, 480); });
-    danger.forEach((glow, side) => {
-      if (glow < .02) return;
-      const x = side ? 940 : 60, color = side ? away : home;
-      ctx.save(); ctx.globalAlpha = Math.min(1, glow) * .4; ctx.shadowColor = color; ctx.shadowBlur = 8 * glow * canvas.width / 1000;
-      line(x, 230, x, 370, color, 5); ctx.restore();
-    });
   }
   // Drawn above bodies: ripples, post flashes, the goal light sweep and the Pulse turn timer.
   function drawFieldOver(colors) {
@@ -932,7 +962,6 @@
     return wrap;
   }
   function sync() {
-    layoutDirty = true;
     updateClock();
     const planning = phase === 'plan';
     const isGoal = phase === 'goal';
@@ -978,6 +1007,7 @@
       if (small) {
         if (bodies[i]?.stunned) small.textContent = '💫 Stunned this turn';
         else if (plans[i].guard) small.textContent = 'Guarding';
+        else if (bodies[i] && P.dazeSlow(bodies[i]) > 0) small.textContent = `Dazed · launch −${Math.round(P.dazeSlow(bodies[i]) * 100)}%`;
         else small.textContent = `${Math.round(plans[i].power * 100)}% power · ${Math.round((plans[i].spin || 0) * 100)}% spin`;
       }
     });
@@ -1171,6 +1201,20 @@
     const p = point(event);
     return { mode: 'aim', index: own.findIndex(b => !b.stunned && Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12) };
   }
+  // The rink's box within the stage and the spin control's size, measured only when layout changes
+  // (and without the rink shake), so placing the control never forces the page to lay out again.
+  let fieldBox = null;
+  function measureField() {
+    const r = canvas.getBoundingClientRect(), stage = stageArea.getBoundingClientRect(), control = $('field-spin');
+    fieldBox = { left: r.left - stage.left - shakeX, top: r.top - stage.top - shakeY, width: r.width, height: r.height,
+      stageWidth: stage.width, stageHeight: stage.height, controlWidth: control.offsetWidth, controlHeight: control.offsetHeight };
+  }
+  // A field point in the stage's coordinates (screenPoint, without reading the page).
+  function stagePoint(p) {
+    const r = fieldBox;
+    return isPortrait ? { x: r.left + p.y / 600 * r.width, y: r.top + (1 - p.x / 1000) * r.height }
+      : { x: r.left + p.x / 1000 * r.width, y: r.top + p.y / 600 * r.height };
+  }
   function positionSpinControl() {
     const control = $('field-spin');
     control.hidden = false;
@@ -1178,26 +1222,33 @@
     control.style.visibility = visible ? 'visible' : 'hidden';
     control.inert = !visible;
     if (!visible) return;
-    const b = bodies[selected], center = screenPoint(b), stage = stageArea.getBoundingClientRect();
-    const r = canvas.getBoundingClientRect();
+    const b = bodies[selected], center = stagePoint(b), r = fieldBox;
     const radius = b.radius * (isPortrait ? r.height / 1000 : r.width / 1000);
-    const width = control.offsetWidth, height = control.offsetHeight;
-    const arrow = screenPoint(impulseGeometry(b, plans[selected]));
+    const width = r.controlWidth, height = r.controlHeight;
+    const arrow = stagePoint(impulseGeometry(b, plans[selected]));
     // Prefer the side opposite the arrow, then clamp inside the stage near the edges.
     let y = arrow.y > center.y + 8 ? center.y - radius - height - 24 : center.y + radius + 5;
-    const x = Math.max(6, Math.min(stage.width - width - 6, center.x - stage.left - width / 2));
-    y = Math.max(6, Math.min(stage.height - height - 6, y - stage.top));
+    const x = Math.max(6, Math.min(r.stageWidth - width - 6, center.x - width / 2));
+    y = Math.max(6, Math.min(r.stageHeight - height - 6, y));
     control.style.transform = `translate3d(${x}px, ${y}px, 0)`;
   }
-  const impactStamp = document.createElement('canvas');
-  impactStamp.width = impactStamp.height = 128;
-  const impactCtx = impactStamp.getContext('2d');
+  const impactStamps = new Map();
+  function impactStamp(color) {
+    if (impactStamps.has(color)) return impactStamps.get(color);
+    const stamp = document.createElement('canvas'); stamp.width = stamp.height = 128;
+    const c = stamp.getContext('2d'); c.fillStyle = color;
+    c.beginPath(); c.arc(64, 64, 60, 0, Math.PI * 2); c.fill();
+    impactStamps.set(color, stamp); return stamp;
+  }
   let predictionCache = null;
+  const predictionLayer = {};
   function drawPrediction(home, away) {
     // Include all state and all plans: changing any teammate invalidates the one simulation.
     const key = JSON.stringify([bodies, plans]);
     if (predictionCache?.key !== key) predictionCache = { key, data: P.predictTurn(bodies, plans) };
-    const prediction = predictionCache.data;
+    cachedLayer(predictionLayer, [canvas.width, canvas.height, home, away, isPortrait, key].join(), () => paintPrediction(predictionCache.data, home, away));
+  }
+  function paintPrediction(prediction, home, away) {
     prediction.paths.forEach((points, index) => {
       const isBall = bodies[index].team === -1;
       const color = isBall ? '#f2efe9' : bodies[index].team === 0 ? home : away;
@@ -1226,21 +1277,18 @@
     for (const hit of prediction.impacts) {
       const team = bodies[hit.index].team;
       const color = team < 0 ? '#ffffff' : team === 0 ? home : away;
-      impactCtx.clearRect(0, 0, 128, 128);
-      impactCtx.globalCompositeOperation = 'source-over';
-      impactCtx.fillStyle = color;
-      impactCtx.beginPath(); impactCtx.arc(64, 64, 60, 0, Math.PI * 2); impactCtx.fill();
       ctx.save();
       ctx.translate(hit.x, hit.y);
       if (isPortrait) ctx.rotate(Math.PI / 2);
       const fade = Math.min(1, (prediction.horizon - hit.tick) / 240);
       ctx.globalAlpha = .2 * fade;
       const size = hit.reach * 128 / 60;
-      ctx.drawImage(impactStamp, -size / 2, -size / 2, size, size);
+      ctx.drawImage(impactStamp(color), -size / 2, -size / 2, size, size);
       ctx.restore();
     }
     ctx.restore();
   }
+  const GUARD_SHIELD = new Path2D('M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3');
   let themeColors = null;
   const themeObserver = new MutationObserver(() => { themeColors = null; if (skaters.length) draw(); });
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
@@ -1319,6 +1367,7 @@
     if (layoutDirty) {
       fitStadium();
       renderWidth = canvas.clientWidth; renderHeight = canvas.clientHeight;
+      measureField();
       layoutDirty = false;
     }
     positionSpinControl();
@@ -1409,8 +1458,21 @@
         const p = isPortrait ? { x: b.x - b.radius * .65, y: b.y + b.radius * .65 } : { x: b.x + b.radius * .65, y: b.y + b.radius * .65 };
         badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
         badgeCtx.scale(1.1, 1.1); badgeCtx.translate(-12, -12); badgeCtx.fillStyle = '#4798ff';
-        badgeCtx.fill(new Path2D('M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3'));
+        badgeCtx.fill(GUARD_SHIELD);
         badgeCtx.restore();
+      }
+      // Dazed enough to slow its launch: a dizzy swirl turns above the ubu, larger and stronger the
+      // deeper the daze.
+      const slow = P.dazeSlow(b);
+      if (slow > 0 && !b.stunned) {
+        const depth = slow / P.DAZE.max, spin = reducedMotion.matches ? 0 : performance.now() / 300;
+        ctx.save();
+        ctx.translate(isPortrait ? b.x + b.radius + 12 : b.x, isPortrait ? b.y : b.y - b.radius - 12);
+        ctx.rotate(spin); ctx.globalAlpha = .55 + .45 * depth;
+        ctx.strokeStyle = '#c3cbff'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+        ctx.beginPath();
+        for (let a = 0; a <= Math.PI * 3.5; a += .2) { const r = 1 + a * (.7 + .4 * depth); a ? ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r) : ctx.moveTo(r, 0); }
+        ctx.stroke(); ctx.restore();
       }
       if (b.stunned || b.stunnedNext) {
         ctx.save();
@@ -1446,20 +1508,6 @@
       if (style.opacity !== opacity) style.opacity = opacity;
       if (style.filter !== filter) style.filter = filter;
       if (style.transform !== transform) style.transform = transform;
-      ctx.save();
-      ctx.font = 'bold 12px system-ui';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = i < 3 ? home : away;
-      if (isPortrait) {
-        ctx.translate(b.x - b.radius - 18, b.y);
-        ctx.rotate(Math.PI / 2);
-      } else {
-        ctx.translate(b.x, b.y + b.radius + 18);
-      }
-
-      ctx.restore();
-
       if (i < 3 && phase === 'plan') drawImpulse(b, plans[i], home);
     });
     if (bodies[6]?.stuckTo) drawStickyTether(bodies[6].stuckTo, bodies[6]);
@@ -1992,7 +2040,7 @@
     if (!raw) { $('stat-preview').textContent = 'Enter whole numbers from 0 to 255.'; return; }
     for (const key of Object.keys(raw)) $('mult-' + key).value = P.multiplier(raw[key]).toFixed(3) + '×';
     const b = {}; P.applyStats(b, raw);
-    $('stat-preview').textContent = `Mass ${b.mass.toFixed(2)} · Radius ${b.radius.toFixed(1)} · Slowing ${b.friction.toFixed(1)}/s · Max spin ${b.maxSpin.toFixed(2)} rad/s · Grip ${b.grip.toFixed(3)} · Full-power speed ${(b.impulse / b.mass).toFixed(0)}. DNA-driven physics.`;
+    $('stat-preview').textContent = `Mass ${b.mass.toFixed(2)} · Radius ${b.radius.toFixed(1)} · Slowing ${b.friction.toFixed(1)}/s · Max spin ${b.maxSpin.toFixed(2)} rad/s · Grip ${b.grip.toFixed(3)} · Full-power speed ${P.launchSpeed(b).toFixed(0)}. DNA-driven physics.`;
   }
   function showStats() {
     const idx = Number($('stat-player').value);
@@ -2121,6 +2169,7 @@
   ro.observe(canvas);
   if (stadium) ro.observe(stadium);
   if (stageArea) ro.observe(stageArea);
+  ro.observe($('field-spin')); // Its size places it; it has none until first shown.
   const resizeField = () => { layoutDirty = true; draw(); };
   window.addEventListener('resize', resizeField);
   window.visualViewport?.addEventListener('resize', resizeField);
@@ -2169,7 +2218,7 @@
         }
         vb.omega = cb.omega;
         vb.meter = cb.meter ?? 0;
-        vb.guarding = Boolean(cb.guarding);
+        vb.guarding = Boolean(cb.guarding); vb.daze = cb.daze || 0;
         vb.superActive = cb.superActive || null;
         vb.stunned = Boolean(cb.stunned || cb.stunnedNext);
         vb.stuckTo = cb.stuckTo ? toViewBody(cb.stuckTo, sim, seat) : null;

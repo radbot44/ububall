@@ -349,8 +349,10 @@ test('Super synthesis bounds playback, cleans nodes, and throttles Magnet', () =
     for (const key of ['gain','frequency','detune','Q','threshold','knee','ratio','attack','release']) n[key] = new Param();
     nodes.push(n); return n;
   }
-  const ctx = { currentTime: 1, destination: {}, createGain: node, createBiquadFilter: node,
-    createDynamicsCompressor: node, createOscillator() { const n = node(); oscillators.push(n); return n; } };
+  const ctx = { currentTime: 1, destination: {}, sampleRate: 8000, createGain: node, createBiquadFilter: node,
+    createDynamicsCompressor: node, createOscillator() { const n = node(); oscillators.push(n); return n; },
+    createBuffer: (channels, length) => ({ getChannelData: () => new Float32Array(length) }),
+    createBufferSource() { const n = node(); oscillators.push(n); return n; } };
   for (const [key, phase] of [['stalwart','launch'],['stalwart','impact'],['knockout','impact'],['sticky','impact'],
     ['cannonball','impact'],['magnet','pull'],['colossus','launch'],['shockwave','impact'],['ghost','launch']]) {
     const start = nodes.length, oscStart = oscillators.length;

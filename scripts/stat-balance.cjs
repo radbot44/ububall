@@ -3,6 +3,7 @@
 //
 //   sweep:      one team has a single stat at 0 or 255 on all three ubus, the other is all-neutral;
 //               everything else (supers, personalities, starting meter) is mirrored between teams.
+//   supers:     one team has a single super on all three ubus, the other has none; stats are neutral.
 //   regression: every stat on every ubu is random; a least-squares fit of goal difference on the
 //               teams' average stat differences values all stats at once.
 //
@@ -18,7 +19,8 @@ const STATS = ['impulse', 'traction', 'spin', 'curve', 'size', 'mass', 'bouncine
   'power', 'reach', 'strength', 'stability', 'efficiency', 'synergy', 'chemistry'];
 
 // One match: `teams` holds each team's three raw stat objects; `swapped` puts team A on the right.
-function match({ teams, seed, swapped, level, maxTurns }) {
+// `supers` optionally fixes each team's super ([team A, team B], an index into P.SUPERS or null for none).
+function match({ teams, seed, swapped, level, maxTurns, supers = null }) {
   const random = C.randomSource(seed), bodies = P.kickoff(), stats = [];
   // Mirrored loadout: each slot gets the same super, personality and starting meter on both sides.
   const slots = [0, 1, 2].map(() => ({
@@ -30,7 +32,8 @@ function match({ teams, seed, swapped, level, maxTurns }) {
   bodies.slice(0, 6).forEach((b, i) => {
     const raw = order[Math.floor(i / 3)][i % 3], slot = slots[i % 3];
     stats.push(raw); M.applyStats(P, b, raw, 'standard');
-    b.personality = slot.personality; b.equippedSuper = P.SUPERS[slot.superId]; b.meter = slot.meter;
+    const own = supers ? supers[(i < 3) === !swapped ? 0 : 1] : slot.superId;
+    b.personality = slot.personality; b.equippedSuper = own === null ? null : P.SUPERS[own]; b.meter = slot.meter;
   });
   let state = { version: M.VERSION, mode: 'standard', bodies, stats, scores: [0, 0], turn: 1, phase: 'plan', winner: null };
   let turns = 0;
@@ -112,9 +115,9 @@ async function main() {
   const level = args.level || 'easy', maxTurns = Number(args.turns || 60);
   const threads = Number(args.threads || Math.max(1, os.availableParallelism() - 2));
   const stats = args.stats ? String(args.stats).split(',') : STATS;
-  if (!['sweep', 'regression'].includes(experiment) || !stats.every(s => STATS.includes(s)) || ![pairs, seed, maxTurns, threads].every(Number.isInteger) || pairs < 1) throw new Error('Invalid options.');
+  if (!['sweep', 'regression', 'supers'].includes(experiment) || !stats.every(s => STATS.includes(s)) || ![pairs, seed, maxTurns, threads].every(Number.isInteger) || pairs < 1) throw new Error('Invalid options.');
   const common = { level, maxTurns };
-  const pairJobs = (teams, s) => [false, true].map(swapped => ({ ...common, teams, seed: s, swapped }));
+  const pairJobs = (teams, s, supers = null) => [false, true].map(swapped => ({ ...common, teams, seed: s, swapped, supers }));
   let report;
   if (experiment === 'sweep') {
     const cells = [];
@@ -134,6 +137,17 @@ async function main() {
     console.log(`\nGoal difference per match for a team with the stat on all three ubus vs an all-neutral team (${level} CPU, ${pairs} side-swapped pairs each).`);
     console.log('stat'.padEnd(12) + 'at 0'.padStart(15) + 'at 255'.padStart(15) + 'swing'.padStart(8) + '  win% at 255');
     for (const r of report.stats) console.log(r.stat.padEnd(12) + `${r.low.toFixed(2)} ± ${r.lowCi.toFixed(2)}`.padStart(15) + `${r.high.toFixed(2)} ± ${r.highCi.toFixed(2)}`.padStart(15) + r.swing.toFixed(2).padStart(8) + `  ${r.winHigh === null ? '–' : Math.round(r.winHigh * 100) + '%'}`);
+  } else if (experiment === 'supers') {
+    const jobs = [];
+    for (let id = 0; id < P.SUPERS.length; id++) for (let p = 0; p < pairs; p++) jobs.push(...pairJobs([team({}), team({})], seed + p, [id, null]));
+    const results = await run(jobs, threads), per = 2 * pairs;
+    const rows = P.SUPERS.map((sup, id) => ({ super: sup.name, ...summarise(results.slice(id * per, (id + 1) * per)) })).sort((a, b) => b.goalDiff - a.goalDiff);
+    report = { experiment, level, pairs, seed, maxTurns, supers: rows };
+    console.log(`
+Goal difference per match for a team with one super on all three ubus vs a team with none (${level} CPU, ${pairs} side-swapped pairs each).
+`);
+    console.log('super'.padEnd(12) + 'goal diff'.padStart(16) + '  win%');
+    for (const r of rows) console.log(r.super.padEnd(12) + `${r.goalDiff.toFixed(2)} ± ${r.ci.toFixed(2)}`.padStart(16) + `  ${r.winRate === null ? '–' : Math.round(r.winRate * 100) + '%'}`);
   } else {
     const random = C.randomSource(seed), jobs = [], designs = [];
     const randomTeam = () => [0, 1, 2].map(() => ({ ...neutral(), ...Object.fromEntries(stats.map(s => [s, Math.floor(random() * 256)])) }));
