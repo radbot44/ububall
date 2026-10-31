@@ -125,7 +125,7 @@
       accountDialog.close();
     }
     await checkSession();
-    if (location.pathname === '/mint.html' || location.pathname.endsWith('/mint.html')) {
+    if (location.pathname === '/mint' || location.pathname === '/collection') {
       location.reload();
     }
   }

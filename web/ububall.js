@@ -2403,12 +2403,15 @@
   if (rematchBtn) {
     rematchBtn.onclick = () => { online?.rematch?.(); };
   }
-  const rosterParam = new URL(location.href).searchParams.get('roster');
-  if (rosterParam !== null) {
+  // "Play with my ubus" arrives as /?roster=1, on load or from the Collection screen.
+  function openRosterFromLink() {
     const url = new URL(location.href);
+    if (url.pathname !== '/' || !url.searchParams.has('roster')) return;
     url.searchParams.delete('roster');
     history.replaceState(null, '', url);
     $('new-match').click();
     loadCollection();
   }
+  openRosterFromLink();
+  window.addEventListener('ubu:screen', openRosterFromLink);
 })();

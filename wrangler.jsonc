@@ -9,7 +9,7 @@
   "assets": {
     "directory": "./dist/public",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*", "/auth/*"]
+    "run_worker_first": ["/api/*", "/auth/*", "/mint", "/mint.html", "/collection"]
   },
   "durable_objects": {
     "bindings": [{ "name": "MINT", "class_name": "MintRegistry" }, { "name": "UBUBALL", "class_name": "UbuballMatch" }]

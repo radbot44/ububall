@@ -522,7 +522,12 @@
     updatePackButton();
     $('mint').focus();
   });
-  const status = text => { $('status').textContent = text; };
+  // Collection shares this status line except for pack-only messages.
+  const status = (text, packOnly = false) => {
+    $('status').textContent = text;
+    const note = packOnly ? '' : text;
+    $('collection-status').textContent = note; $('collection-status').hidden = !note;
+  };
   async function trustedKey(mint, id) {
     if (!config.ready || mint !== config.mint || !Object.hasOwn(config.keys, id)) return null;
     if (!keys.has(id)) keys.set(id, crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: config.keys[id], ext: true }, 'Ed25519', false, ['verify']));
@@ -950,7 +955,7 @@
       }
     } catch (error) {
       outOfPacks = error.message === 'Lifetime mint limit reached.';
-      status(outOfPacks ? "You've opened every pack you can. Enjoy your ubus!" : error.message);
+      status(outOfPacks ? "You've opened every pack you can. Enjoy your ubus!" : error.message, outOfPacks);
     } finally { busy = false; updatePackButton(); }
   }
   async function selectPack(index) {
@@ -1015,13 +1020,13 @@
             localStorage.removeItem(pendingKey + ':choice');
           }
           updatePackButton();
-          status(pack || (config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey))) ? '' : 'Minting closed');
+          status(pack || (config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey))) ? '' : 'Minting closed', true);
           if (config.ready) {
             try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
             if (!pack && (config.lifetimeLimit || localStorage.getItem(pendingKey))) await loadChoices();
             await collection(true);
           }
-        } else { $('pack-hint').textContent = ''; status(config.login ? 'Sign in to open packs.' : 'Minting closed'); }
+        } else { $('pack-hint').textContent = ''; status(config.login ? 'Sign in to open packs and see your collection.' : 'Minting closed', !config.login); }
       }
       window.addEventListener('ubu:session', event => {
         if (event.detail?.owner && (!session?.owner || session.owner !== event.detail.owner)) {

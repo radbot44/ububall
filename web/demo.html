@@ -109,11 +109,12 @@
   <header class="site-header">
     <a class="site-brand" href="/" aria-label="ububall"><img src="assets/ububall-logo.svg" alt="ububall"></a>
     <nav class="site-nav" aria-label="Main">
-      <a href="/">Play</a>
-      <a href="/mint.html">Mint &amp; Collection</a>
-      <a class="active" href="/demo.html" aria-current="page">Designer</a>
-      <a href="/voice.html">Voice Demo</a>
+      <a href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m12 7 4.5 3.3-1.7 5.2H9.2l-1.7-5.2z"/></svg><span>Play</span></a>
+      <a href="/mint"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13m7-9v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7m2.5-4a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg><span>Ubu Mint</span></a>
+      <a href="/collection"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="12" height="15" rx="2"/><path d="M8 3h10a2 2 0 0 1 2 2v12"/></svg><span>Collection</span></a>
+      <button type="button" class="active" popovertarget="more-menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span>More</span></button>
     </nav>
+    <div id="more-menu" class="more-menu" popover><a href="/demo.html" aria-current="page">Designer</a><a href="/voice.html">Voice Demo</a></div>
     <div class="site-header-actions">
       <button id="login" class="button primary" type="button">Sign in with Discord</button>
       <button id="identity" class="button quiet" type="button" aria-haspopup="dialog" aria-controls="account-dialog" aria-label="Account settings" title="Account settings" hidden>

@@ -173,6 +173,9 @@ export class MintRegistry extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url), path = url.pathname;
+    // Ubu Mint and Collection are screens of the single-page app at /.
+    if (path === '/mint.html') return Response.redirect(new URL('/mint' + url.search, url), 301);
+    if (path === '/mint' || path === '/collection') return env.ASSETS.fetch(new Request(new URL('/', url), request));
     if (!path.startsWith('/api/') && !path.startsWith('/auth/')) return env.ASSETS.fetch(request);
     try {
       if (path === '/api/config' && request.method === 'GET') {

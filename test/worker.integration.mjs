@@ -57,7 +57,12 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.match(home, /id="rink"/);
     assert.match(home, /id="roster-dialog"/);
     assert.match(home, /class="mint-entry"/);
-    const mint = await (await fetch('/mint.html')).text();
+    assert.match(home, /src="app.js"/);
+    const oldMint = await fetch('/mint.html?sort=favorite', { redirect: 'manual' });
+    assert.equal(oldMint.status, 301);
+    assert.equal(new URL(oldMint.headers.get('Location')).pathname + new URL(oldMint.headers.get('Location')).search, '/mint?sort=favorite');
+    assert.equal(await (await fetch('/collection')).text(), home);
+    const mint = await (await fetch('/mint')).text();
     assert.match(mint, /Packs/);
     assert.match(mint, /id="pack-choices"/);
     assert.match(mint, /id="collection"/);
@@ -67,7 +72,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(legacy.status, 200);
     const legacyText = await legacy.text();
     assert.match(legacyText, /location\.replace\('\/' \+ location\.search/);
-    for (const path of ['/ubu-render.js', '/demo.html', '/site.js', '/rarity.js', '/mint.html', '/ububall.html', '/ububall.js', '/ububall.css']) assert.equal((await fetch(path)).status, 200);
+    for (const path of ['/ubu-render.js', '/demo.html', '/site.js', '/rarity.js', '/app.js', '/ububall.html', '/ububall.js', '/ububall.css']) assert.equal((await fetch(path)).status, 200);
     for (const path of ['/worker.mjs', '/mint.js', '/auth.mjs', '/AGENTS.md', '/.dev.vars', '/state/mint.sqlite']) assert.equal((await fetch(path)).status, 404);
     const response = await fetch('/api/config'), config = await response.json();
     assert.equal(config.lifetimeLimit, 3); assert.equal(config.keys['test-1'], privateKey.x);

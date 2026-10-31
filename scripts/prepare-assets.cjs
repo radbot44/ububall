@@ -1,15 +1,17 @@
 'use strict';
-const { mkdirSync, copyFileSync, readdirSync } = require('node:fs');
+const { mkdirSync, copyFileSync, rmSync } = require('node:fs');
 const { resolve, join } = require('node:path');
 const root = resolve(__dirname, '..');
 const target = join(root, 'dist', 'public');
 const targetAssets = join(target, 'assets');
+// Rebuild from scratch so files dropped from the lists below are never served.
+rmSync(target, { recursive: true, force: true });
 mkdirSync(targetAssets, { recursive: true });
 
 // Explicit public files only; repository contents and secrets are never an asset root.
 const webFiles = [
   'ububall.html', 'ububall.css', 'ububall.js', 'ububall-physics.js', 'ububall-online.js', 'ububall-cpu-worker.js', 'ububall-cpu-client.js',
-  'index.html', 'mint.html', 'site.css', 'site.js', 'site-header.js', 'pack-scene.js',
+  'index.html', 'app.js', 'site.css', 'site.js', 'site-header.js', 'pack-scene.js',
   'voice.html', 'demo.html', 'demo.js', 'auth-complete.html'
 ];
 const sharedFiles = [
@@ -20,14 +22,6 @@ const assetFiles = [
   '00_stalwart.png', '01_knockout.png', '02_sticky.png', '03_cannonball.png',
   '04_magnet.png', '05_colossus.png', '06_shockwave.png', '07_ghost.png'
 ];
-
-const topFiles = [...webFiles, ...sharedFiles, 'assets'];
-for (const name of readdirSync(target)) {
-  if (!topFiles.includes(name)) throw new Error('Unexpected file in public output: ' + name);
-}
-for (const name of readdirSync(targetAssets)) {
-  if (!assetFiles.includes(name)) throw new Error('Unexpected file in public assets output: ' + name);
-}
 
 for (const name of webFiles) copyFileSync(join(root, 'web', name), join(target, name));
 for (const name of sharedFiles) copyFileSync(join(root, 'shared', name), join(target, name));
