@@ -71,6 +71,7 @@ export class UbuballMatch extends DurableObject {
         }
         if (path === '/join') this.room.join(owner, guest);
         else this.room.seat(owner);
+        this.room.rename(owner, decodeURIComponent(request.headers.get('X-Match-Name') || ''));
         if (path === '/socket') {
           if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return json({ error: 'WebSocket required.' }, 426);
           // One controlling connection per player. Replacing a tab cannot leave a ghost player.
@@ -99,6 +100,8 @@ export class UbuballMatch extends DurableObject {
           this.room.selectTeam(owner, entries, data.supers);
         }
         if (path === '/forfeit') this.room.claimForfeit(owner, now);
+        if (path === '/unready') this.room.unready(owner);
+        if (path === '/leave') this.room.leave(owner, now);
         if (path === '/rematch') this.room.rematch(owner, now);
         this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);
         return json(this.snapshot(owner, now));

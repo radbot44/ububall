@@ -8,9 +8,10 @@ const hold = () => Array.from({ length: 3 }, idle);
 class MatchRoom {
   constructor(host, mode, teams, guest = false) {
     if (typeof host !== 'string' || !host || !rules.MODES.includes(mode) || !['owned', 'practice'].includes(teams)) throw new Error('Invalid lobby.');
-    this.state = { version: rules.VERSION, mode, teams, players: [host, null], phase: 'lobby', turn: 1,
+    this.state = { version: rules.VERSION, mode, teams, players: [host, null], names: [null, null], phase: 'lobby', turn: 1,
       drafts: [hold(), hold()], locked: [false, false], connected: [false, false],
-      disconnectedAt: [null, null], deadline: null, remaining: null, winner: null, rematch: [false, false] };
+      disconnectedAt: [null, null], deadline: null, remaining: null, winner: null, rematch: [false, false],
+      ready: [false, false], left: [false, false] };
     this.state.rosters = [null, null];
     this.state.practice = [null, null];
     this.state.game = null;
@@ -35,8 +36,12 @@ class MatchRoom {
     if (!alias || i < 0 || s.players.includes(owner)) return false;
     s.players[i] = owner;
     // A former guest who hasn't readied yet in an owned match may now pick their own ubus.
-    if (s.phase === 'lobby' && s.teams === 'owned' && !s.rosters[i]) s.practice[i] = null;
+    if (s.phase === 'lobby' && s.teams === 'owned' && !s.ready[i]) { s.practice[i] = null; s.rosters[i] = null; }
     return true;
+  }
+  // Discord display names label each side; guests have none.
+  rename(owner, name) {
+    this.state.names[this.seat(owner)] = typeof name === 'string' && name.trim() ? name.trim().slice(0, 32) : null;
   }
   practiceTeam(owner) {
     const i = this.seat(owner);
@@ -52,7 +57,25 @@ class MatchRoom {
       if (!Number.isInteger(id) || !model.supers.map(n => n % 8).includes(id)) throw new Error('Super not available to this ubu.');
       return { dna: entry.dna, serial: entry.serial || null, superId: id };
     });
-    s.rosters[i] = roster;
+    s.rosters[i] = roster; s.ready[i] = true;
+  }
+  // Until kickoff a ready player may go back and change their team.
+  unready(owner) {
+    const s = this.state, i = this.seat(owner);
+    if (s.phase !== 'lobby') throw new Error('Match already started.');
+    s.ready[i] = false;
+  }
+  // Leaving ends the match for both players: a lobby guest frees their seat, anyone else concedes.
+  leave(owner, now) {
+    const s = this.state, i = this.seat(owner);
+    if (s.phase === 'lobby' && i === 1) {
+      s.players[1] = null; s.names[1] = null; s.rosters[1] = null; s.practice[1] = null; s.ready[1] = false;
+      s.connected[1] = false; s.disconnectedAt[1] = null;
+      return;
+    }
+    if (s.phase !== 'over') { s.phase = 'over'; s.winner = s.game ? 1 - i : null; }
+    s.left[i] = true; s.rematch = [false, false];
+    s.deadline = null; s.remaining = null; s.playUntil = null; s.replay = null;
   }
   kickoff(previous = null) {
     const s = this.state, bodies = P.kickoff(), stats = [];
@@ -70,7 +93,7 @@ class MatchRoom {
   }
   advance(now) {
     const s = this.state;
-    if (s.phase === 'lobby' && s.rosters.every(Boolean) && s.connected.every(Boolean)) {
+    if (s.phase === 'lobby' && s.ready.every(Boolean) && s.connected.every(Boolean)) {
       s.game = { version: rules.VERSION, mode: s.mode, ...this.kickoff(), scores: [0, 0], turn: 1 };
       this.beginPlanning(now);
     }
@@ -143,22 +166,20 @@ class MatchRoom {
   rematch(owner, now) {
     const s = this.state, i = this.seat(owner);
     if (s.phase !== 'over') throw new Error('Match is not over.');
+    if (s.left.some(Boolean)) throw new Error('Your opponent left the match.');
     s.rematch[i] = true;
-    if (s.rematch.every(Boolean) && s.connected.every(Boolean)) {
-      s.rematch = [false, false];
-      s.winner = null;
-      s.turn = 1;
-      s.phase = 'lobby';
-      s.game = { version: rules.VERSION, mode: s.mode, ...this.kickoff(), scores: [0, 0], turn: 1 };
-      this.beginPlanning(now);
+    // Both asked: back to the lobby with the same teams selected, so each player can swap or ready up.
+    if (s.rematch.every(Boolean)) {
+      s.rematch = [false, false]; s.ready = [false, false]; s.winner = null; s.turn = 1; s.phase = 'lobby';
+      s.game = null; s.replay = null; s.playUntil = null; s.expires = now + 86400000;
     }
   }
   view(owner) {
     const s = this.state, seat = this.seat(owner);
     return { version: s.version, seat, mode: s.mode, teams: s.teams, phase: s.phase, turn: s.turn,
-      occupied: s.players.map(Boolean), connected: [...s.connected], locked: [...s.locked],
+      occupied: s.players.map(Boolean), names: [...s.names], connected: [...s.connected], locked: [...s.locked],
       moves: structuredClone(s.drafts[seat]), deadline: s.deadline, remaining: s.remaining, winner: s.winner,
-      ready: s.rosters.map(Boolean), rosters: structuredClone(s.rosters),
+      ready: [...s.ready], left: [...s.left], rosters: structuredClone(s.rosters),
       practice: structuredClone(s.practice[seat]),
       game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
       playUntil: s.playUntil, disconnectedAt: [...s.disconnectedAt], rematch: [...s.rematch] };

@@ -151,6 +151,22 @@ test('MatchRoom rematch requires match over and agreement from both players', ()
   assert.equal(room.state.winner, null);
   assert.deepEqual(room.state.rematch, [false, false]);
   assert.deepEqual(room.state.game.scores, [0, 0]);
+  // A rematch asked for while the opponent is away starts when they reconnect.
+  room.state.phase = 'over'; room.state.winner = 1;
+  room.disconnect('guest', 3000);
+  room.rematch('host', 3000); room.rematch('guest', 3000);
+  assert.equal(room.state.phase, 'over');
+  room.connect('guest', 4000); room.advance(4000);
+  assert.equal(room.state.phase, 'plan');
+  assert.equal(room.state.expires, 4000 + 86400000);
+});
+
+test('MatchRoom shows each seat its players\' display names', () => {
+  const room = new MatchRoom('host', 'standard', 'practice');
+  room.rename('host', '  Saffron  '); room.join('guest'); room.rename('guest', '');
+  assert.deepEqual(room.view('guest').names, ['Saffron', null]);
+  room.rename('guest', 'x'.repeat(40));
+  assert.equal(room.view('host').names[1].length, 32);
 });
 
 test('guest seats use practice teams in owned matches and carry over to Discord', () => {

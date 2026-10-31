@@ -1015,7 +1015,7 @@
     if (!summaryPending || demo) return;
     summaryPending = false; clearTimeout(summaryTimer);
     const { tally: t, scores: sc } = viewTally(), winner = sc[0] > sc[1] ? 0 : 1, h = ububallMatch.honours(t, sc, winner);
-    const them = online?.active ? 'Opponent' : 'CPU';
+    const them = $('opponent-label').textContent;
     if (!summaryDialog) {
       summaryDialog = document.createElement('dialog'); summaryDialog.id = 'match-summary';
       summaryDialog.setAttribute('aria-labelledby', 'match-summary-title');
@@ -1041,7 +1041,17 @@
     const close = document.createElement('button'); close.type = 'button'; close.className = 'primary'; close.textContent = 'Close';
     close.onclick = () => summaryDialog.close();
     const note = document.createElement('p'); note.className = 'summary-note'; note.textContent = 'Fouls are yellow cards. Top shot is the ball speed off that ubu\'s fastest touch.';
-    summaryDialog.replaceChildren(title, honour, table, note, close);
+    if (online?.active) {
+      const rematch = document.createElement('button'); rematch.type = 'button'; rematch.className = 'primary summary-rematch';
+      rematch.onclick = () => online.rematch();
+      const leave = document.createElement('button'); leave.type = 'button'; leave.textContent = 'Leave match';
+      leave.onclick = () => $('online-leave').click();
+      close.className = '';
+      const status = document.createElement('p'); status.className = 'summary-rematch-status'; status.setAttribute('role', 'status');
+      const actions = document.createElement('div'); actions.className = 'summary-actions'; actions.append(rematch, close, leave);
+      summaryDialog.replaceChildren(title, honour, table, note, status, actions);
+      updateRematch(online.state);
+    } else summaryDialog.replaceChildren(title, honour, table, note, close);
     if (!summaryDialog.open) summaryDialog.showModal();
   }
   // A save from a ball the saver's own team was most responsible for is a sheepish "Save..." with no meter.
@@ -1375,6 +1385,7 @@
       $('launch').disabled = phase !== 'plan';
       $('launch').textContent = phase === 'plan' ? 'Lock moves' : phase === 'play' ? 'In motion…' : phase === 'over' ? 'Match complete' : 'Waiting…';
       $('new-match').disabled = true;
+      $('launch').hidden = phase === 'over';
     }
   }
   function buildTeam() {
@@ -1456,7 +1467,7 @@
         const header = document.createElement('div'); header.className = 'card-header';
         const titles = document.createElement('div'); titles.className = 'card-titles';
         const strong = document.createElement('strong'); strong.textContent = entry.model.parts.fullName;
-        const small = document.createElement('small'); small.className = 'away'; small.textContent = online?.active ? 'Opponent' : 'CPU';
+        const small = document.createElement('small'); small.className = 'away'; small.textContent = $('opponent-label').textContent;
         titles.append(strong, small);
         header.append(ubuRender(entry.model, 'ball-thumb'), titles);
         card.append(header, renderStatsBox(stats[i] || entry.model.stats || {}), renderSuperPanel(i, true));
@@ -2668,10 +2679,10 @@
           const viewScorerIndex = replay.scorer === null ? null : (online.state.seat ? (replay.scorer < 3 ? replay.scorer + 3 : replay.scorer - 3) : replay.scorer);
           const scorer = viewScorerIndex !== null ? bodies[viewScorerIndex] : bodies[viewGoal * 3];
           scoringPlayer = scorer;
-          const scorerName = scorer?.name || (viewGoal === 0 ? 'Your ubu' : 'Opponent ubu');
+          const them = onlineNames(online.state)[1], scorerName = scorer?.name || (viewGoal === 0 ? 'Your ubu' : `${them}'s ubu`);
           say(online.state.game.winner !== null
-            ? (viewGoal === 0 ? `You win! ${callText(replay.label || 'GOAL', scorerName)}${honourText(0)}` : `Opponent wins. ${callText(replay.label || 'GOAL', scorerName)}${honourText(1)}`)
-            : `${viewGoal === 0 ? 'You score!' : 'Opponent scores.'} ${callText(replay.label || 'GOAL', scorerName)} Ready for the next kickoff.`
+            ? (viewGoal === 0 ? `You win! ${callText(replay.label || 'GOAL', scorerName)}${honourText(0)}` : `${them} wins. ${callText(replay.label || 'GOAL', scorerName)}${honourText(1)}`)
+            : `${viewGoal === 0 ? 'You score!' : `${them} scores.`} ${callText(replay.label || 'GOAL', scorerName)} Ready for the next kickoff.`
           );
           loopFanfare(scorer?.voice);
           sync();
@@ -2694,26 +2705,35 @@
 
     recordTrails(); emitSkaterEffects(Math.min(.05, 1 / 60)); draw();
   }
+  // Each side's Discord display name, mine first; a guest has none.
+  function onlineNames(s) {
+    return [s.names[s.seat] || 'Guest', s.occupied[1 - s.seat] ? s.names[1 - s.seat] || 'Guest' : 'Opponent'];
+  }
+  // The stadium and the full-time summary both offer the rematch; one tap asks, the other accepts.
+  function updateRematch(s) {
+    const them = onlineNames(s)[1], mine = s.rematch[s.seat], theirs = s.rematch[1 - s.seat];
+    for (const button of [$('online-rematch'), summaryDialog?.querySelector('.summary-rematch')]) {
+      if (!button) continue;
+      button.hidden = s.phase !== 'over'; button.disabled = mine;
+      button.textContent = mine ? 'Rematch requested' : theirs ? 'Accept rematch' : 'Rematch';
+    }
+    const note = summaryDialog?.querySelector('.summary-rematch-status');
+    if (note) note.textContent = s.phase !== 'over' ? '' : mine && !s.connected[1 - s.seat] ? `${them} is offline. The rematch starts when they return.` :
+      mine ? `Waiting for ${them} to accept.` : theirs ? `${them} wants a rematch.` : '';
+  }
   online = ububallOnline({
     chooseMode(mode) { openSetup('mode', 'online', mode); },
     onState(s) {
       if (!document.body.classList.contains('online-match')) { stopDemo(); enterMatch(); }
       document.body.classList.add('online-match');
       $('online-open').textContent = 'Online match';
-      $('opponent-label').textContent = 'Opponent'; $('opponent-heading').textContent = 'Opponent team';
+      const [me, them] = onlineNames(s);
+      $('home-label').textContent = me; $('opponent-label').textContent = them; $('opponent-heading').textContent = `${them}'s team`;
       $('online-match-status').hidden = false; $('new-match').disabled = true;
       matchMode = s.mode; document.body.classList.toggle('classic-match', classicMode());
       $('mode-label').textContent = 'Online · ' + ububallMatch.modeName(s.mode);
-      const rematchBtn = $('online-rematch');
-      if (rematchBtn) {
-        rematchBtn.hidden = s.phase !== 'over';
-        if (s.phase === 'over') {
-          const myRematch = s.rematch?.[s.seat];
-          const oppRematch = s.rematch?.[1 - s.seat];
-          rematchBtn.disabled = Boolean(myRematch);
-          rematchBtn.textContent = myRematch ? 'Rematch requested' : oppRematch ? 'Accept rematch' : 'Rematch';
-        }
-      }
+      updateRematch(s);
+      if (onlinePhase === 'over' && s.phase !== 'over') closeSummary();
       if (!s.game) { phase = 'waiting'; onlineReplay = null; sync(); draw(); return; }
       const rosterKey = JSON.stringify(s.rosters);
       if (rosterKey !== onlineRoster) {
@@ -2770,7 +2790,7 @@
         syncViewBodies();
       }
       phase = s.phase === 'over' ? 'over' : s.phase === 'resolving' ? 'play' : s.connected.every(Boolean) && !s.locked[s.seat] ? 'plan' : 'waiting';
-      $('online-match-status').textContent = s.phase === 'over' ? (s.rematch?.[s.seat] ? 'Rematch requested · waiting for opponent' : s.rematch?.[1 - s.seat] ? 'Opponent requested a rematch!' : (s.winner === s.seat ? 'You win!' : 'Opponent wins.')) : !s.connected.every(Boolean) ? 'Disconnected · planning paused' : s.locked[s.seat] ? 'Moves locked · waiting for opponent' : s.phase === 'resolving' ? 'Turn in motion' : 'Plan your moves';
+      $('online-match-status').textContent = s.phase === 'over' ? (s.rematch[s.seat] ? `Rematch requested · waiting for ${them}` : s.rematch[1 - s.seat] ? `${them} wants a rematch!` : (s.winner === s.seat ? 'You win!' : `${them} wins.`)) : !s.connected.every(Boolean) ? `${them} disconnected · planning paused` : s.locked[s.seat] ? `Moves locked · waiting for ${them}` : s.phase === 'resolving' ? 'Turn in motion' : 'Plan your moves';
       sync(); if (onlineReplay) playOnlineReplay(); else draw();
     },
     onDisconnect() { onlineDisconnected = true; phase = 'waiting'; drag = null; $('online-match-status').textContent = 'Reconnecting · planning paused'; sync(); draw(); },
@@ -2780,15 +2800,12 @@
       document.body.classList.remove('online-match');
       $('online-open').textContent = 'Play online';
       $('new-match').disabled = false; $('online-match-status').hidden = true; $('online-forfeit').hidden = true;
-      const rematchBtn = $('online-rematch'); if (rematchBtn) rematchBtn.hidden = true;
-      $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
+      $('online-rematch').hidden = true; $('launch').hidden = false; closeSummary();
+      $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
       draft = practice.slice(0, 3); newMatch();
     }
   });
-  const rematchBtn = $('online-rematch');
-  if (rematchBtn) {
-    rematchBtn.onclick = () => { online?.rematch?.(); };
-  }
+  $('online-rematch').onclick = () => online.rematch();
   // "Play with my ubus" arrives as /?roster=1, on load or from the Collection screen.
   function openRosterFromLink() {
     const url = new URL(location.href);

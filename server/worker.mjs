@@ -205,12 +205,12 @@ export default {
         if (!data || Object.keys(data).some(k => !['mode', 'teams'].includes(k))) return json({ error: 'Invalid match request.' }, 400);
         const id = crypto.randomUUID();
         const response = await env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/create', {
-          method: 'POST', headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+          method: 'POST', headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Name': encodeURIComponent(session.name || ''), 'Content-Type': 'application/json' }, body: JSON.stringify(data)
         }));
         const result = await response.json();
         return json(response.ok ? { id, ...result } : result, response.status);
       }
-      const match = path.match(/^\/api\/ububall\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(join|team|state|socket|forfeit|rematch)$/);
+      const match = path.match(/^\/api\/ububall\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(join|team|unready|state|socket|forfeit|rematch|leave)$/);
       if (match) {
         const [, id, action] = match, get = action === 'state' || action === 'socket';
         if (request.method !== (get ? 'GET' : 'POST')) return json({ error: 'Method not allowed.' }, 405);
@@ -221,6 +221,7 @@ export default {
         return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + action, {
           method: request.method,
           headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Alias': session.alias || '',
+            'X-Match-Name': encodeURIComponent(session.name || ''),
             'X-Match-Expires': String(session.expires * 1000),
             'Content-Type': 'application/json', ...(action === 'socket' ? { Upgrade: 'websocket' } : {}) },
           body: get ? undefined : JSON.stringify(data)

@@ -91,7 +91,8 @@ function ububallOnline(hooks) {
     if (before && Boolean(before.practice) !== Boolean(next.practice)) choices = [];
     if (!before || before.phase !== next.phase || (!choices.length && next.phase === 'lobby')) teamPicker();
     if (next.phase === 'lobby' && !next.practice && !collection.length && !loadingCollection) loadCollection();
-    if (next.phase === 'lobby') status(!next.occupied[1] ? 'Share the invite link with your opponent.' : next.ready[next.seat] ? 'Waiting for your opponent to choose a team.' : 'Choose your team, then ready up.');
+    const them = next.names[1 - next.seat] || 'Your opponent';
+    if (next.phase === 'lobby') status(!next.occupied[1] ? 'Share the invite link with your opponent.' : next.ready[next.seat] ? `Waiting for ${them} to choose a team.` : `${them} joined. Choose your team, then ready up.`);
     else {
       $('online-dialog').close();
       $('online-status').textContent = '';
