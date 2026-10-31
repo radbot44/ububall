@@ -867,14 +867,18 @@
       else cpu = result.plans;
     });
   }
-  // Big announcements over the rink. The promise settles once the banner has gone.
-  let bannerTimer = 0, planBanner = Promise.resolve();
+  // Big announcements over the rink. The promise settles once the banner has gone, or as soon as
+  // another banner replaces it.
+  let bannerTimer = 0, bannerGone = null, planBanner = Promise.resolve();
   function banner(text, ms = 1200, tone = '') {
     const el = $('field-banner');
-    clearTimeout(bannerTimer);
+    clearTimeout(bannerTimer); bannerGone?.();
     el.textContent = text; el.dataset.tone = tone; el.style.setProperty('--banner-ms', ms + 'ms');
     el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
-    return new Promise(resolve => { bannerTimer = setTimeout(() => { el.classList.remove('show'); resolve(); }, ms); });
+    return new Promise(resolve => {
+      bannerGone = resolve;
+      bannerTimer = setTimeout(() => { el.classList.remove('show'); bannerGone = null; resolve(); }, ms);
+    });
   }
   // Between turns, guarding ubus stay on guard (keeping their faded arrow); otherwise plans clear.
   function resetPlans(keepGuard = false) {
@@ -2405,7 +2409,7 @@
   // Home screen demo: Saffron (the home team) against Amethyst, one hard CPU and one medium, chosen
   // at random each game. Saffron's planning is acted out with a pointer, as a how-to for new players.
   const demoClient = createCPUClient(), DEMO_STOP = Symbol('demo stopped');
-  let demoRun = 0;
+  let demoRun = 0, demoGame = 0;
   const capital = text => text[0].toUpperCase() + text.slice(1);
   function demoPaused() { return inMatch || document.hidden || $('field-banner').closest('[data-screen]').hidden || Boolean(document.querySelector('dialog[open]')); }
   // Waits count only while the demo is on screen; a stopped demo ends its walkthrough.
@@ -2419,7 +2423,7 @@
   }
   function newDemoGame() {
     demoLevels = Math.random() < .5 ? ['hard', 'medium'] : ['medium', 'hard'];
-    newMatch();
+    demoGame++; hideFinger(); newMatch();
     $('home-label').textContent = 'Saffron'; $('opponent-label').textContent = 'Amethyst';
     $('mode-label').textContent = `${capital(demoLevels[0])} vs ${capital(demoLevels[1])}`;
   }
@@ -2456,18 +2460,25 @@
       newDemoGame();
     } else $('launch').click();
   }
+  // A walkthrough belongs to one turn of one game. If the game is replaced underneath it (say,
+  // the player's own ubus arrive after sign-in), it stops and the loop starts the new turn's.
   async function demoPlanTurn(run) {
-    const t = turn, planning = demoClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn },
+    const game = demoGame, t = turn, current = () => game === demoGame && phase === 'plan' && turn === t;
+    const planning = demoClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn },
       { level: demoLevels[0], seed: turn }, 0);
     await planBanner; await demoWait(run, 600);
     const result = await planning;
     if (run !== demoRun) throw DEMO_STOP;
-    if (!result || result.error || phase !== 'plan' || turn !== t) return;
-    for (let i = 0; i < 3; i++) await demoAim(run, i, result.plans[i]);
+    if (!result || result.error || !current()) return;
+    for (let i = 0; i < 3; i++) {
+      await demoAim(run, i, result.plans[i], current);
+      if (!current()) return;
+    }
     await demoWait(run, 500);
+    if (!current()) return;
     await banner('Launch!', 900, 'launch');
     await demoWait(run, 400);
-    if (phase === 'plan' && turn === t) $('launch').click();
+    if (current()) $('launch').click();
   }
   // The pointer's fingertip sits on a field point, through the inverse of the pointer-input mapping.
   function placeFinger(x, y) {
@@ -2477,29 +2488,32 @@
     finger.style.left = px - stage.left + 'px'; finger.style.top = py - stage.top + 'px';
   }
   function hideFinger() { $('demo-finger').toggleAttribute('hidden', true); $('demo-finger').classList.remove('pressed'); }
-  async function demoAim(run, i, target) {
+  async function demoAim(run, i, target, current) {
     const b = bodies[i];
     selected = i; sync(); draw();
     if (b.stunned || target.guard || !(target.power > 0)) { plans[i] = { ...target }; sync(); draw(); await demoWait(run, 500); return; }
     plans[i] = { ...target, power: 0 };
     placeFinger(b.x, b.y); $('demo-finger').toggleAttribute('hidden', false);
     await demoWait(run, 350);
+    if (!current()) { hideFinger(); return; }
     $('demo-finger').classList.add('pressed');
     await demoWait(run, 200);
     const began = performance.now(), ms = 900;
     await new Promise(resolve => {
-      const step = now => {
-        if (run !== demoRun) { resolve(); return; }
+      const step = () => {
+        const now = performance.now();
+        if (run !== demoRun || !current()) { resolve(); return; }
         const k = Math.min(1, (now - began) / ms), eased = 1 - (1 - k) ** 3;
         plans[i] = { ...target, power: target.power * eased };
         const arrow = impulseGeometry(b, plans[i]);
         placeFinger(arrow.x, arrow.y);
         sync(); draw();
-        if (k < 1) requestAnimationFrame(step); else resolve();
+        if (k < 1) setTimeout(step, 16); else resolve();
       };
-      requestAnimationFrame(step);
+      step();
     });
     if (run !== demoRun) throw DEMO_STOP;
+    if (!current()) { hideFinger(); return; }
     plans[i] = { ...target }; sync(); draw();
     await demoWait(run, 300);
     hideFinger();
