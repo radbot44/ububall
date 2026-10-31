@@ -146,19 +146,44 @@ test('MatchRoom rematch requires match over and agreement from both players', ()
   assert.deepEqual(room.state.rematch, [true, false]);
   assert.equal(room.state.phase, 'over');
   room.rematch('guest', 2000);
-  assert.equal(room.state.phase, 'plan');
+  // Both asked: back to the lobby with the teams kept but not ready.
+  assert.equal(room.state.phase, 'lobby');
   assert.equal(room.state.turn, 1);
   assert.equal(room.state.winner, null);
+  assert.equal(room.state.game, null);
   assert.deepEqual(room.state.rematch, [false, false]);
-  assert.deepEqual(room.state.game.scores, [0, 0]);
-  // A rematch asked for while the opponent is away starts when they reconnect.
-  room.state.phase = 'over'; room.state.winner = 1;
-  room.disconnect('guest', 3000);
-  room.rematch('host', 3000); room.rematch('guest', 3000);
-  assert.equal(room.state.phase, 'over');
-  room.connect('guest', 4000); room.advance(4000);
+  assert.deepEqual(room.state.ready, [false, false]);
+  assert.ok(room.state.rosters.every(Boolean));
+  assert.equal(room.state.expires, 2000 + 86400000);
+  room.selectTeam('host', room.state.practice[0], hostSupers); room.advance(3000);
+  assert.equal(room.state.phase, 'lobby');
+  room.selectTeam('guest', room.state.practice[1], guestSupers); room.advance(3000);
   assert.equal(room.state.phase, 'plan');
-  assert.equal(room.state.expires, 4000 + 86400000);
+  assert.deepEqual(room.state.game.scores, [0, 0]);
+});
+
+test('MatchRoom lets players change teams before kickoff and leave cleanly', () => {
+  const room = new MatchRoom('host', 'standard', 'practice');
+  const ubu = require('../shared/ubu.js');
+  const supers = i => room.state.practice[i].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
+  room.join('guest'); room.connect('host', 0); room.connect('guest', 0);
+  room.selectTeam('host', room.state.practice[0], supers(0)); room.unready('host');
+  room.selectTeam('guest', room.state.practice[1], supers(1)); room.advance(0);
+  assert.equal(room.state.phase, 'lobby');
+  // A lobby guest leaving frees the seat for someone else.
+  room.leave('guest', 0);
+  assert.deepEqual(room.state.players, ['host', null]);
+  assert.deepEqual(room.state.ready, [false, false]);
+  room.join('other'); room.connect('other', 0);
+  room.selectTeam('host', room.state.practice[0], supers(0)); room.selectTeam('other', room.state.practice[1], supers(1));
+  room.advance(0);
+  assert.equal(room.state.phase, 'plan');
+  assert.throws(() => room.unready('host'));
+  // Leaving mid-match concedes, and no rematch is offered.
+  room.leave('other', 1000);
+  assert.equal(room.state.phase, 'over'); assert.equal(room.state.winner, 0);
+  assert.deepEqual(room.view('host').left, [false, true]);
+  assert.throws(() => room.rematch('host', 1000), /left/);
 });
 
 test('MatchRoom shows each seat its players\' display names', () => {

@@ -47,7 +47,12 @@ function ububallOnline(hooks) {
   function teamPicker() {
     const container = $('online-team'); container.replaceChildren();
     if (!state || state.phase !== 'lobby') return;
-    const practice = Boolean(state.practice), entries = practice ? state.practice : collection;
+    const practice = Boolean(state.practice), entries = practice ? state.practice : collection, kept = state.rosters[state.seat];
+    // After a rematch (or a reload) the last team stays selected.
+    if (!choices.length && kept) {
+      choices = kept.map(entry => ({ ...entry }));
+      if (!practice) for (const entry of kept) if (!collection.some(c => c.serial === entry.serial)) collection.push({ serial: entry.serial, dna: entry.dna });
+    }
     for (let i = 0; i < 3; i++) {
       const row = document.createElement('div'); row.className = 'online-team-slot';
       const select = document.createElement('select'); select.setAttribute('aria-label', 'Team character');
@@ -74,7 +79,7 @@ function ububallOnline(hooks) {
       select.onchange = selected; selected();
       supers.onchange = () => { choices[i].superId = Number(supers.value); };
       supers.hidden = state.mode.includes('classic');
-      select.disabled = practice;
+      select.dataset.fixed = practice ? '1' : '';
       row.append(portrait, select, supers); container.append(row);
     }
   }
@@ -84,21 +89,40 @@ function ububallOnline(hooks) {
     $('online-create-controls').hidden = true;
     $('online-lobby').hidden = false;
     $('online-invite').value = location.origin + '/?match=' + id;
+    const other = 1 - next.seat, them = next.names[other] || (next.occupied[other] ? 'Your opponent' : 'Opponent'), ready = next.ready[next.seat];
     $('online-ready').hidden = next.phase !== 'lobby';
-    $('online-load').hidden = next.phase !== 'lobby' || Boolean(next.practice);
-    $('online-ready').disabled = next.ready[next.seat];
-    $('online-ready').textContent = next.ready[next.seat] ? 'Team ready' : 'Ready to play';
+    $('online-load').hidden = next.phase !== 'lobby' || Boolean(next.practice) || ready;
+    $('online-ready').disabled = false;
+    $('online-ready').textContent = ready ? 'Change team' : 'Ready to play';
+    $('online-ready').classList.toggle('primary', !ready);
+    $('online-team-note').textContent = next.phase !== 'lobby' ? '' : next.teams === 'practice' ? 'This match uses random practice teams.' :
+      next.practice ? 'Guests play with a random practice team. Sign in with Discord below to use your own ubus; you keep your seat.' : '';
     if (before && Boolean(before.practice) !== Boolean(next.practice)) choices = [];
     if (!before || before.phase !== next.phase || (!choices.length && next.phase === 'lobby')) teamPicker();
+    for (const select of $('online-team').querySelectorAll('select')) select.disabled = ready || select.dataset.fixed === '1';
     if (next.phase === 'lobby' && !next.practice && !collection.length && !loadingCollection) loadCollection();
-    const them = next.names[1 - next.seat] || 'Your opponent';
-    if (next.phase === 'lobby') status(!next.occupied[1] ? 'Share the invite link with your opponent.' : next.ready[next.seat] ? `Waiting for ${them} to choose a team.` : `${them} joined. Choose your team, then ready up.`);
-    else {
+    if (before && !before.occupied[other] && next.occupied[other]) nudge(`${them} joined`);
+    if (before && !before.rematch[other] && next.rematch[other]) nudge(`${them} wants a rematch`);
+    if (before?.phase === 'lobby' && next.phase === 'plan') nudge('Kickoff');
+    if (next.phase === 'lobby') {
+      // A rematch brings both players back here to keep or change their teams.
+      if (before && before.phase !== 'lobby' && !$('online-dialog').open) $('online-dialog').showModal();
+      status(!next.occupied[other] ? 'Share the invite link with your opponent.' : ready ? `Team ready. Waiting for ${them}${next.ready[other] ? ' to connect' : ' to choose a team'}.` :
+        next.ready[other] ? `${them} is ready. Choose your team, then ready up.` : `${them} joined. Choose your team, then ready up.`);
+    } else if (!next.game) {
+      // The host left before kickoff: nothing to play, so the dialog stays to explain and offer Leave.
+      status(`${them} closed this match.`);
+      return;
+    } else {
       $('online-dialog').close();
       $('online-status').textContent = '';
     }
     hooks.onState(next);
   }
+  // A player waiting in another tab sees what changed in this tab's title.
+  const title = document.title;
+  function nudge(text) { if (document.hidden) document.title = '● ' + text + ' · ' + title; }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = title; });
   function connect() {
     if (stopped || !id) return;
     const current = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/ububall/' + id + '/socket');
@@ -113,7 +137,9 @@ function ububallOnline(hooks) {
     current.onclose = event => {
       if (socket !== current || stopped) return;
       hooks.onDisconnect();
-      if (event.code === 4001 || event.code === 4002) { stopped = true; status(event.code === 4001 ? 'Match opened in another tab.' : 'Match expired.'); return; }
+      if (event.code === 4001 || event.code === 4002 || event.code === 4003) {
+        stopped = true; status(event.code === 4001 ? 'Match opened in another tab.' : event.code === 4002 ? 'Match expired.' : 'You left this match.'); return;
+      }
       status('Reconnecting…'); retry = setTimeout(connect, 1500);
     };
   }
@@ -129,8 +155,13 @@ function ububallOnline(hooks) {
       }
     }, 10000);
   }
-  function leave() {
-    stopped = true; clearTimeout(retry); clearInterval(heartbeat); socket?.close(); socket = null; id = null; state = null;
+  // Leaving tells the server, so the opponent isn't left waiting to claim a forfeit.
+  async function leave() {
+    const live = state && ['plan', 'resolving'].includes(state.phase);
+    if (live && !confirm(`Leaving ends the match and gives ${state.names[1 - state.seat] || 'your opponent'} the win. Leave?`)) return;
+    stopped = true;
+    if (id) await api('/api/ububall/' + id + '/leave', {}).catch(() => {});
+    clearTimeout(retry); clearInterval(heartbeat); socket?.close(); socket = null; id = null; state = null; choices = [];
     const url = new URL(location.href); url.pathname = '/'; url.searchParams.delete('match'); history.replaceState(null, '', url);
     $('online-create-controls').hidden = false; $('online-lobby').hidden = true; $('online-dialog').close();
     hooks.onLeave();
@@ -160,6 +191,9 @@ function ububallOnline(hooks) {
     } catch (error) { status(error.message); }
     finally { $('online-create').disabled = !playable(); }
   };
+  // Phones get their share sheet, so the invite goes straight to a chat app.
+  $('online-share').hidden = !navigator.share || !matchMedia('(pointer: coarse)').matches;
+  $('online-share').onclick = () => navigator.share({ title: 'Ububall', text: 'Play me at Ububall', url: $('online-invite').value }).catch(() => {});
   $('online-copy').onclick = async () => {
     try { await navigator.clipboard.writeText($('online-invite').value); status('Invite copied.'); }
     catch { $('online-invite').select(); status('Copy the selected invite link.'); }
@@ -167,6 +201,7 @@ function ububallOnline(hooks) {
   $('online-ready').onclick = async () => {
     $('online-ready').disabled = true;
     try {
+      if (state.ready[state.seat]) { receive(await api('/api/ububall/' + id + '/unready', {})); return; }
       if (choices.length !== 3 || choices.some(c => !c)) throw new Error('Choose three ubus first.');
       receive(await api('/api/ububall/' + id + '/team', {
         ...(!state.practice ? { serials: choices.map(c => c.serial) } : {}), supers: choices.map(c => c.superId)

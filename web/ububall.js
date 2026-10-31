@@ -2714,12 +2714,12 @@
     const them = onlineNames(s)[1], mine = s.rematch[s.seat], theirs = s.rematch[1 - s.seat];
     for (const button of [$('online-rematch'), summaryDialog?.querySelector('.summary-rematch')]) {
       if (!button) continue;
-      button.hidden = s.phase !== 'over'; button.disabled = mine;
+      button.hidden = s.phase !== 'over' || s.left.some(Boolean); button.disabled = mine;
       button.textContent = mine ? 'Rematch requested' : theirs ? 'Accept rematch' : 'Rematch';
     }
     const note = summaryDialog?.querySelector('.summary-rematch-status');
-    if (note) note.textContent = s.phase !== 'over' ? '' : mine && !s.connected[1 - s.seat] ? `${them} is offline. The rematch starts when they return.` :
-      mine ? `Waiting for ${them} to accept.` : theirs ? `${them} wants a rematch.` : '';
+    if (note) note.textContent = s.phase !== 'over' ? '' : s.left[1 - s.seat] ? `${them} left the match.` :
+      mine && !s.connected[1 - s.seat] ? `${them} is offline. They can accept when they return.` : mine ? `Waiting for ${them} to accept.` : theirs ? `${them} wants a rematch.` : '';
   }
   online = ububallOnline({
     chooseMode(mode) { openSetup('mode', 'online', mode); },
@@ -2734,6 +2734,9 @@
       $('mode-label').textContent = 'Online · ' + ububallMatch.modeName(s.mode);
       updateRematch(s);
       if (onlinePhase === 'over' && s.phase !== 'over') closeSummary();
+      $('online-match-status').textContent = s.phase === 'lobby' ? 'Choosing teams' : s.phase === 'over' ? (s.left[1 - s.seat] ? `${them} left the match.` : s.rematch[s.seat] ? `Rematch requested · waiting for ${them}` :
+        s.rematch[1 - s.seat] ? `${them} wants a rematch!` : (s.winner === s.seat ? 'You win!' : `${them} wins.`)) : !s.connected.every(Boolean) ? `${them} disconnected · planning paused` :
+        s.locked[s.seat] ? `Moves locked · waiting for ${them}` : s.phase === 'resolving' ? 'Turn in motion' : 'Plan your moves';
       if (!s.game) { phase = 'waiting'; onlineReplay = null; sync(); draw(); return; }
       const rosterKey = JSON.stringify(s.rosters);
       if (rosterKey !== onlineRoster) {
@@ -2790,7 +2793,6 @@
         syncViewBodies();
       }
       phase = s.phase === 'over' ? 'over' : s.phase === 'resolving' ? 'play' : s.connected.every(Boolean) && !s.locked[s.seat] ? 'plan' : 'waiting';
-      $('online-match-status').textContent = s.phase === 'over' ? (s.rematch[s.seat] ? `Rematch requested · waiting for ${them}` : s.rematch[1 - s.seat] ? `${them} wants a rematch!` : (s.winner === s.seat ? 'You win!' : `${them} wins.`)) : !s.connected.every(Boolean) ? `${them} disconnected · planning paused` : s.locked[s.seat] ? `Moves locked · waiting for ${them}` : s.phase === 'resolving' ? 'Turn in motion' : 'Plan your moves';
       sync(); if (onlineReplay) playOnlineReplay(); else draw();
     },
     onDisconnect() { onlineDisconnected = true; phase = 'waiting'; drag = null; $('online-match-status').textContent = 'Reconnecting · planning paused'; sync(); draw(); },

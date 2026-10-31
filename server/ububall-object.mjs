@@ -31,7 +31,7 @@ export class UbuballMatch extends DurableObject {
   broadcast(now) {
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment();
-      if (a.live) { try { ws.send(JSON.stringify(this.snapshot(a.owner, now))); } catch { /* close handler tracks presence */ } }
+      if (a.live && this.room.state.players.includes(a.owner)) { try { ws.send(JSON.stringify(this.snapshot(a.owner, now))); } catch { /* close handler tracks presence */ } }
     }
   }
   retire(ws, now, code = 4000) {
@@ -101,10 +101,13 @@ export class UbuballMatch extends DurableObject {
         }
         if (path === '/forfeit') this.room.claimForfeit(owner, now);
         if (path === '/unready') this.room.unready(owner);
-        if (path === '/leave') this.room.leave(owner, now);
+        if (path === '/leave') {
+          for (const ws of this.ctx.getWebSockets()) if (ws.deserializeAttachment().owner === owner) this.retire(ws, now, 4003);
+          this.room.leave(owner, now);
+        }
         if (path === '/rematch') this.room.rematch(owner, now);
         this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);
-        return json(this.snapshot(owner, now));
+        return json(path === '/leave' ? { left: true } : this.snapshot(owner, now));
       } catch (error) { return json({ error: error.message }, 400); }
     });
   }
