@@ -70,8 +70,7 @@
     }));
     fitScorebug();
   }
-  // The largest scorebug size whose sides clear the menu and tools (see the scorebug CSS); phone
-  // layouts are fixed. Then the turn cell holds the widest text this match can show (two-digit turns,
+  // The largest scorebug size whose sides clear the menu and tools (see the scorebug CSS). Then the turn cell holds the widest text this match can show (two-digit turns,
   // its phases, and Blitz seconds), so text changes never move the score.
   const BUG_SIZES = ['full', 'letters', 'short', 'small', 'tiny'];
   function fitScorebug() {
@@ -79,11 +78,12 @@
     if (!board.offsetWidth) return;
     const compact = getComputedStyle(board.querySelector('.bug-center')).display === 'contents';
     const edge = (node, side) => node.offsetWidth ? node.getBoundingClientRect()[side] : board.getBoundingClientRect()[side === 'right' ? 'left' : 'right'];
-    for (const size of compact ? ['compact'] : BUG_SIZES) {
+    // On phones the logo and rules sit between the menu and tools: rules in full when they fit there.
+    for (const size of compact ? ['compact-words', 'compact'] : BUG_SIZES) {
       board.dataset.size = size;
       fitStatus(status);
-      const left = board.querySelector('.bug-left').getBoundingClientRect().left, right = board.querySelector('.bug-right').getBoundingClientRect().right;
-      if (compact || (left >= edge($('pause'), 'right') + 8 && right <= edge(board.querySelector('.stadium-toolbar'), 'left') - 8)) break;
+      const left = board.querySelector('.bug-left').getBoundingClientRect(), right = compact ? left : board.querySelector('.bug-right').getBoundingClientRect();
+      if (left.left >= edge($('pause'), 'right') + 8 && right.right <= edge(board.querySelector('.stadium-toolbar'), 'left') - 8) break;
     }
   }
   function fitStatus(status) {
@@ -99,18 +99,25 @@
     [turnNode.textContent, phaseNode.textContent, clock.textContent, clock.hidden] = saved;
     status.style.width = ''; status.style.setProperty('--status-width', Math.ceil(widest) + 'px');
   }
-  // Event tabs drop from under the scorebug one at a time: cards, warnings, power plays, match point.
-  // `tone` colours a tab for a side (home or away); untoned tabs are amber.
+  // Event tabs drop from under the scorebug one at a time: goals, cards, warnings, power plays, match
+  // point. A tab about a side (`team`) hangs under that side's score cell, kept inside the scoreboard;
+  // `colour` paints it in that side's colour, otherwise it is amber.
   const bugTabs = [];
   let bugTabTimer = 0;
-  function bugTab(text, tone = '') {
-    bugTabs.push({ text, tone });
+  function bugTab(text, { team = null, colour = false } = {}) {
+    bugTabs.push({ text, team, colour });
     if (!bugTabTimer) nextBugTab();
   }
   function nextBugTab() {
     const tab = $('bug-tab'), next = bugTabs.shift();
     if (!next) { tab.classList.remove('show'); bugTabTimer = 0; return; }
-    tab.textContent = next.text; tab.dataset.tone = next.tone; tab.classList.add('show');
+    tab.textContent = next.text; tab.dataset.tone = next.colour ? (next.team ? 'away' : 'home') : '';
+    const board = tab.parentElement.getBoundingClientRect(), width = tab.offsetWidth;
+    const cell = next.team === null ? null : tab.parentElement.querySelector(next.team ? '.bug-away' : '.bug-home').getBoundingClientRect();
+    const x = cell ? cell.left - board.left + cell.width / 2 : board.width / 2;
+    tab.style.left = Math.max(width / 2, Math.min(board.width - width / 2, x)) + 'px';
+    tab.style.top = tab.parentElement.querySelector('.bug-home').getBoundingClientRect().bottom - board.top + 'px';
+    tab.classList.add('show');
     bugTabTimer = setTimeout(() => { tab.classList.remove('show'); bugTabTimer = setTimeout(nextBugTab, 300); }, 2600);
   }
   let arrowGrab = null, dragStart = null, dragMoved = false;
@@ -152,7 +159,12 @@
   let play = ububallMatch.newPlay(), tally = ububallMatch.newTally(), scoringPlayer = null, roundTurns = 0;
   // Goal camping and corner stalling warnings and cards, as this view sees them (see ububallMatch.FOULS).
   let fouls = ububallMatch.newFouls();
-  // Scores as the scorebug last showed them, to call match point once.
+  // A goal's tab names the call and its scorer (an own goal names no one).
+  function goalTab(team, label, scorer) {
+    const call = label.replace(/!$/, '').toLowerCase();
+    bugTab(scorer ? `${call} · ${scorer}` : call, { team, colour: true });
+  }
+  // Scores as the scorebug last showed them, to pop a goal and call match point once.
   const shownScores = [0, 0];
   // The status line's wording for each goal call.
   const GOAL_WORDS = { 'OWN GOAL': 'Own goal', 'HAT TRICK!': 'Hat trick', 'ACE!': 'Ace', 'BANK SHOT!': 'Bank shot', GOAL: 'Goal' };
@@ -174,7 +186,7 @@
   let materialEmitters = [];
   // Field details. All are cosmetic and cleared with the other effects; reduced motion disables them.
   const skids = [], skidState = [], burns = [], burnState = {}, ripples = [], pings = [], popups = [], danger = [0, 0];
-  let ballFlare = 0, kickoffGlow = 0, goalSweep = null, hitStopUntil = 0, shake = 0, shakeX = 0, shakeY = 0;
+  let ballFlare = 0, kickoffGlow = 0, goalSweep = null, goalCall = null, hitStopUntil = 0, shake = 0, shakeX = 0, shakeY = 0;
   const SKID_LIFE = 12; // Seconds of play before a skid mark fades out.
   // A sharp loss of speed (hard guard braking or a heavy hit) starts a short skid: an ubu-wide mark
   // whose depth at each point follows how hard the ubu slowed there. Friction and drag slow an ubu by
@@ -299,7 +311,7 @@
     skids.length = skidState.length = burns.length = ripples.length = pings.length = popups.length = 0; burnState.path = null; fireTime = 0; quench();
     if (netFire) netFire.lit = false;
     shake = shakeX = shakeY = 0; rinkWrap.style.translate = '';
-    danger[0] = danger[1] = ballFlare = kickoffGlow = 0; goalSweep = null;
+    danger[0] = danger[1] = ballFlare = kickoffGlow = 0; goalSweep = goalCall = null;
   }
   function burst(x, y, team, strength, celebration = false, tangent = 0, color = null) {
     if (reducedMotion.matches) return;
@@ -324,10 +336,12 @@
   }
   // Goal celebration: a burst at the ball, the goal light sweep, then a volley of rockets over the
   // scoring half that break into peony and ring shells in the team colour, white and gold.
-  function celebrate(team, ball, label = 'GOAL') {
+  // `scorer` is the scoring ubu's body, or null (an own goal names no one).
+  function celebrate(team, ball, label = 'GOAL', scorer = null) {
+    goalCall = { team, label, scorer: scorer ? bodies.indexOf(scorer) : -1, name: scorer?.name || '', t: 0 };
     if (reducedMotion.matches) return;
     burst(ball.x, ball.y, team, 1, true);
-    goalSweep = { team, p: 0, label };
+    goalSweep = { team, p: 0 };
     for (let i = 0; i < 9; i++) fireworks.push({ x: team === 0 ? 560 + Math.random() * 340 : 100 + Math.random() * 340, y: 560,
       vy: -(430 + Math.random() * 160), fuse: .55 + Math.random() * .3, delay: .1 + i * .17, team, ring: i % 3 === 2 });
   }
@@ -393,6 +407,7 @@
     ballFlare = Math.max(0, ballFlare - dt / .8);
     kickoffGlow = Math.max(0, kickoffGlow - dt / 1.5);
     if (goalSweep && (goalSweep.p += dt / 1.5) >= 1) goalSweep = null;
+    if (goalCall && (goalCall.t += dt) >= GOAL_CALL_SECONDS) goalCall = null;
   }
   // Which goal the ball really threatens, and how strongly: its own path (curve and slowing
   // included, off nothing but posts and net) carries it in within ~0.9 seconds, faster and sooner
@@ -564,6 +579,7 @@
       ctx.fillStyle = text; ctx.beginPath(); ctx.arc(g.x, g.y, 3 * (1 - p) + 1, 0, Math.PI * 2); ctx.fill(); ctx.restore();
     }
     if (goalSweep) drawGoalSweep(goalSweep, goalSweep.team ? away : home);
+    if (goalCall) drawGoalCall(goalCall, goalCall.team ? away : home);
     if (pulseMode() && !goalReplay) {
       const turnSeconds = ububallMatch.turnTicks(matchMode) * P.DT;
       const progress = phase !== 'play' ? 0 : online?.active ? (onlineReplay?.currentTick ?? 0) * P.DT / turnSeconds : elapsed / turnSeconds;
@@ -589,13 +605,28 @@
     line(mouth, 230, back, 230, color, 6); line(back, 230, back, 370, color, 6); line(mouth, 370, back, 370, color, 6);
     line(mouth, 230, mouth, 370, '#ffffff', 3);
     ctx.restore();
-    const t = Math.min(1, p / .18), scale = 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2;
+  }
+  // The goal call over the rink: the scorer's face in a ring of the team's colour, the call ("GOAL",
+  // "BANK SHOT!"...) and the scorer's name. It pops in (still, with reduced motion) and fades at the end.
+  const GOAL_CALL_SECONDS = 2.4;
+  function drawGoalCall(call, color) {
+    const pop = reducedMotion.matches ? 1 : Math.min(1, call.t / .27), scale = 1 + 2.70158 * (pop - 1) ** 3 + 1.70158 * (pop - 1) ** 2;
+    const face = skaters[call.scorer]?.querySelector('canvas'), top = face ? 40 : 0;
+    const write = (text, y, size) => {
+      badgeCtx.font = `900 ${size}px system-ui, sans-serif`; badgeCtx.lineWidth = size / 14; badgeCtx.strokeStyle = color;
+      badgeCtx.strokeText(text, 0, y); badgeCtx.fillStyle = '#ffffff'; badgeCtx.fillText(text, 0, y);
+    };
     badgeCtx.save(); badgeCtx.translate(500, 300); if (isPortrait) badgeCtx.rotate(Math.PI / 2); badgeCtx.scale(scale, scale);
-    badgeCtx.globalAlpha = p < .7 ? 1 : (1 - p) / .3;
-    badgeCtx.font = '900 88px system-ui, sans-serif'; badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle';
+    badgeCtx.globalAlpha = Math.max(0, Math.min(1, (GOAL_CALL_SECONDS - call.t) / .5));
     badgeCtx.shadowColor = color; badgeCtx.shadowBlur = 30 * canvas.width / 1000;
-    badgeCtx.lineWidth = 6; badgeCtx.strokeStyle = color; badgeCtx.strokeText(sweep.label, 0, 0);
-    badgeCtx.fillStyle = '#ffffff'; badgeCtx.fillText(sweep.label, 0, 0);
+    if (face) {
+      badgeCtx.beginPath(); badgeCtx.arc(0, -82, 74, 0, Math.PI * 2); badgeCtx.fillStyle = color; badgeCtx.fill();
+      badgeCtx.shadowBlur = 0; badgeCtx.drawImage(face, -66, -148, 132, 132);
+      badgeCtx.shadowBlur = 30 * canvas.width / 1000;
+    }
+    badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle';
+    write(call.label, top, 88);
+    if (call.name) write(call.name, top + 66, 34);
     badgeCtx.restore();
   }
   // Short callouts ("Save!") that pop in over an ubu and drift up as they fade.
@@ -709,15 +740,15 @@
     for (const i of fouls.cards) popup(bodies[i], 'Yellow card');
     for (const team of [0, 1]) {
       const carded = fouls.cards.filter(i => bodies[i].team === team);
-      if (carded.length === 1) bugTab(`Yellow card · ${bodies[carded[0]].name || sideName(team)}`);
-      else if (carded.length) bugTab(`${carded.length} yellow cards · ${sideName(team)}`);
+      if (carded.length === 1) bugTab(`Yellow card · ${bodies[carded[0]].name || sideName(team)}`, { team });
+      else if (carded.length) bugTab(`${carded.length} yellow cards · ${sideName(team)}`, { team });
     }
-    for (const team of [0, 1]) if (fouls.crease[team]) bugTab(`Goal camping · ${sideName(team)}`);
+    for (const team of [0, 1]) if (fouls.crease[team]) bugTab(`Goal camping · ${sideName(team)}`, { team });
     if (fouls.cornerTurns === ububallMatch.FOULS.stallTurns) bugTab('Corner stalling');
     if (fouls.faceoff) bugTab('Corner reset');
     // The side with more ubus on the ice for the coming turn is on the power play.
     const out = [0, 1].map(team => bodies.slice(0, 6).filter(b => b.team === team && b.carded).length);
-    if (out[0] !== out[1]) { const team = out[0] < out[1] ? 0 : 1; bugTab(`Power play · ${sideName(team)}`, team ? 'away' : 'home'); }
+    if (out[0] !== out[1]) { const team = out[0] < out[1] ? 0 : 1; bugTab(`Power play · ${sideName(team)}`, { team, colour: true }); }
     // A card whistles; a warning only just given sounds its alert.
     if (fouls.cards.length) gameAudio()?.playFoul('card');
     else if (fouls.crease[0] || fouls.crease[1] || fouls.cornerTurns === ububallMatch.FOULS.stallTurns) gameAudio()?.playFoul('warning');
@@ -1376,8 +1407,12 @@
     $('phase').textContent = phase === 'over' ? 'Final' : planning ? 'Plan' : isGoal ? 'Goal' : phase === 'cpu-wait' ? 'CPU' : phase === 'waiting' ? 'Waiting' : 'In play';
     $('turn-label').textContent = turn;
     for (const team of [0, 1]) {
-      // A side reaching 4 goals is on match point.
-      if (scores[team] === 4 && shownScores[team] === 3 && phase !== 'over') bugTab(`Match point · ${sideName(team)}`, team ? 'away' : 'home');
+      // A goal pops the score; a side reaching 4 goals is on match point.
+      if (scores[team] > shownScores[team]) {
+        const cell = $(team ? 'away-score' : 'home-score').parentElement;
+        cell.classList.remove('scored'); void cell.offsetWidth; cell.classList.add('scored');
+      }
+      if (scores[team] === 4 && shownScores[team] === 3 && phase !== 'over') bugTab(`Match point · ${sideName(team)}`, { team, colour: true });
       shownScores[team] = scores[team];
       $(team ? 'away-score' : 'home-score').textContent = scores[team];
     }
@@ -2057,13 +2092,14 @@
     accumulator = 0; layoutDirty = true;
     if (goal !== null) {
       phase = scores[goal] >= 5 ? 'over' : 'goal';
-      celebrate(goal, bodies[6], call.label);
+      celebrate(goal, bodies[6], call.label, call.own ? null : bodies[call.scorer] || null);
       if (call.assist !== null) popup(bodies[call.assist], 'Assist');
       if (phase === 'over') queueSummary();
       const scorer = bodies[call.scorer] || bodies.slice(goal * 3, goal * 3 + 3)[0];
       goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
       scoringPlayer = scorer;
       const scorerName = scorer?.name || (goal === 0 ? 'Your ubu' : 'CPU ubu');
+      goalTab(goal, call.label, call.own ? null : scorerName);
       say(phase === 'over'
         ? (goal === 0 ? `You win! ${callText(call.label, scorerName)}${honourText(0)} Start a new match for a rematch.` : `CPU wins. ${callText(call.label, scorerName)}${honourText(1)} Start a new match to try again.`)
         : `${goal === 0 ? 'You score!' : 'CPU scores.'} ${callText(call.label, scorerName)} Ready for the next kickoff.`
@@ -2312,7 +2348,7 @@
       startGoalReplay();
     }
     if (!active) { lastTime = 0; accumulator = 0; }
-    const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length ||
+    const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length || goalCall ||
       ripples.length || pings.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
     if (active) updateEffects(delta);
     if (phase === 'play' && active && !online?.active) {
@@ -2758,15 +2794,16 @@
         if (!replay.goalPlayed) {
           replay.goalPlayed = true;
           goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
-          celebrate(viewGoal, bodies[6], replay.label || 'GOAL');
-          if (ballOnFire()) lightNet(viewGoal);
           const toView = index => index === null || index === undefined ? null : online.state.seat ? (index < 3 ? index + 3 : index - 3) : index;
+          celebrate(viewGoal, bodies[6], replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : bodies[toView(replay.scorer)] || null);
+          if (ballOnFire()) lightNet(viewGoal);
           if (toView(replay.assist) !== null) popup(bodies[toView(replay.assist)], 'Assist');
           if (online.state.game.winner !== null) queueSummary();
           const viewScorerIndex = replay.scorer === null ? null : (online.state.seat ? (replay.scorer < 3 ? replay.scorer + 3 : replay.scorer - 3) : replay.scorer);
           const scorer = viewScorerIndex !== null ? bodies[viewScorerIndex] : bodies[viewGoal * 3];
           scoringPlayer = scorer;
           const them = onlineNames(online.state)[1], scorerName = scorer?.name || (viewGoal === 0 ? 'Your ubu' : `${them}'s ubu`);
+          goalTab(viewGoal, replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : scorerName);
           say(online.state.game.winner !== null
             ? (viewGoal === 0 ? `You win! ${callText(replay.label || 'GOAL', scorerName)}${honourText(0)}` : `${them} wins. ${callText(replay.label || 'GOAL', scorerName)}${honourText(1)}`)
             : `${viewGoal === 0 ? 'You score!' : `${them} scores.`} ${callText(replay.label || 'GOAL', scorerName)} Ready for the next kickoff.`
