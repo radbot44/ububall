@@ -1,4 +1,5 @@
-/* uburoom's slate theme and control sizes. */
+/* Shared ububall look: uburoom's slate palette, Uburoom Sans for anything a player
+   taps or reads at a glance, Inter for running text and small numbers. */
 @font-face {
   font-family: 'Uburoom Sans';
   src: url('assets/UburoomSans-Regular.woff2') format('woff2');
@@ -12,12 +13,25 @@
   --text: #F8F7F4; --muted: #AAB0BC; --primary: #FF9954; --secondary: #FF7197;
   --team-home: #E8CA48; --team-away: #AA54D3;
   --hover: color-mix(in srgb, var(--elevated), var(--text) 8%);
-  color-scheme: dark; font: 14px/1.4 Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Uburoom Sans', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-body: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Raised controls: a lit top edge and a darker base that flattens when pressed. */
+  --bevel: inset 0 1px 0 rgb(255 255 255 / .1), inset 0 -3px 0 rgb(0 0 0 / .3);
+  --bevel-pressed: inset 0 2px 0 rgb(0 0 0 / .3);
+  --panel-shadow: 0 1px 0 rgb(255 255 255 / .04) inset, 0 12px 32px rgb(0 0 0 / .32);
+  color-scheme: dark; font: 14px/1.4 var(--font-body);
   color: var(--text); background: var(--background);
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; }
+body {
+  margin: 0; min-height: 100dvh;
+  background: radial-gradient(ellipse 90% 60% at 50% -10%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 70%) no-repeat, var(--background);
+}
+/* Uburoom Sans has a single heavy weight; never let the browser fake a bolder one. */
+h1, h2, h3, legend, summary, button, .button, .site-nav, .display {
+  font-family: var(--font-display); font-weight: 400; font-synthesis: none; letter-spacing: .01em;
+}
 main { width: min(1040px, calc(100% - 48px)); margin: 0 auto 48px; }
 a { color: inherit; text-decoration: none; }
 
@@ -235,24 +249,24 @@ a { color: inherit; text-decoration: none; }
 
 button, .button, .quiet, .primary {
   display: inline-flex; align-items: center; justify-content: center; min-height: 40px;
-  padding: 10px 16px; border: 0; border-radius: 12px; background: var(--elevated);
-  color: var(--text); font: inherit; cursor: pointer; touch-action: manipulation;
+  padding: 10px 16px 11px; border: 0; border-radius: 12px; background: var(--elevated);
+  color: var(--text); font-size: 14.5px; line-height: 1.2;
+  cursor: pointer; touch-action: manipulation; transition: background .15s ease, transform .08s ease, box-shadow .08s ease;
 }
 button:hover, .button:hover, .quiet:hover { background: var(--hover); }
+/* Plain and shared action buttons are raised; component buttons with their own class stay flat. */
+:is(button:not([class]), .button, .quiet, .primary, .stadium-tool-btn, .stadium-super-btn) { box-shadow: var(--bevel); }
+:is(button:not([class]), .button, .quiet, .primary, .stadium-tool-btn, .stadium-super-btn):active:not(:disabled) { transform: translateY(1px); box-shadow: var(--bevel-pressed); }
 button:disabled { opacity: .4; cursor: default; }
-.primary { background: var(--primary); color: var(--background); font-weight: 600; }
-.primary:hover { background: color-mix(in srgb, var(--primary), white 10%); }
+.primary { background: linear-gradient(color-mix(in srgb, var(--primary), white 14%), var(--primary)); color: #2B1608; }
+.primary:hover { background: linear-gradient(color-mix(in srgb, var(--primary), white 24%), color-mix(in srgb, var(--primary), white 8%)); }
 #login { min-height: 40px; }
 :focus-visible, .button:focus-within { outline: 2px solid var(--text); outline-offset: 2px; }
 .icon-button { width: 40px; height: 40px; flex: none; padding: 8px; border-radius: 10px; color: var(--muted); }
 .icon-button svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
-h1, h2, dialog h2, .panel h2, .account-dialog h2 {
-  font-family: 'Uburoom Sans', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  font-weight: 400;
-}
-h1 { font-size: 24px; letter-spacing: normal; margin: 0; }
+h1 { font-size: 26px; letter-spacing: normal; margin: 0; }
 h2 { font-size: 18px; margin: 0; }
-.pack-shop { background: var(--card); border-radius: 22px; padding: 20px; text-align: center; overflow: hidden; }
+.pack-shop { background: var(--card); border: 1px solid var(--border); border-radius: 22px; padding: 20px; text-align: center; overflow: hidden; box-shadow: var(--panel-shadow); }
 #pack-title { text-align: left; font-size: 17px; letter-spacing: 0; }
 #status { color: var(--muted); font-size: 12px; margin: 12px auto 0; min-height: 17px; max-width: 560px; }
 #status:empty { min-height: 0; margin: 0; }
