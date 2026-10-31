@@ -3,7 +3,7 @@
 
 /* Game labels and scores use the display face (see site.css). */
 .toggle-switch, .column-heading, .card-titles strong, .super-name-badge, .mint-entry-badge, .mint-entry-cta,
-.scoreboard-content > span, .phase-info > span {
+.bug-team, .bug-status, .bug-tab {
   font-family: var(--font-display); font-weight: 400; font-synthesis: none; letter-spacing: .01em;
 }
 .stadium, .team .team-card, .mint-entry { box-shadow: var(--panel-shadow); }
@@ -100,18 +100,7 @@ body:not(.in-match) .play-home { margin-top: 14px; }
     grid-template-columns: minmax(0, 1fr) minmax(150px, 26%); grid-template-areas: "field score" "field status" "field actions";
   }
   body.in-match .stadium:not(.portrait-mode) .stadium-stage-area { grid-area: field; padding: 4px; }
-  body.in-match .stadium:not(.portrait-mode) .scoreboard {
-    grid-area: score; display: grid; grid-template-columns: auto 1fr; grid-template-areas: "pause tools" "board board";
-    gap: 12px; padding: 10px; border-bottom: 0;
-  }
-  body.in-match .stadium:not(.portrait-mode) #pause { grid-area: pause; }
-  body.in-match .stadium:not(.portrait-mode) .stadium-toolbar { grid-area: tools; position: static; transform: none; justify-self: end; }
-  body.in-match .stadium:not(.portrait-mode) .scoreboard-content {
-    grid-area: board; display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: "home away" "phase phase"; gap: 8px;
-  }
-  body.in-match .stadium:not(.portrait-mode) .scoreboard-content > .home { grid-area: home; justify-content: center; }
-  body.in-match .stadium:not(.portrait-mode) .scoreboard-content > .away { grid-area: away; justify-content: center; }
-  body.in-match .stadium:not(.portrait-mode) .phase-info { grid-area: phase; }
+  body.in-match .stadium:not(.portrait-mode) .scoreboard { grid-area: score; border-bottom: 0; }
   body.in-match .stadium:not(.portrait-mode) #game-status { grid-area: status; align-self: start; margin: 0; padding: 0 10px; font-size: 11px; }
   body.in-match .stadium:not(.portrait-mode) .knob-dock.knob-dock { grid-area: status; align-self: center; display: grid; gap: 8px; padding: 0 8px; }
   body.in-match .stadium:not(.portrait-mode) .team-selector { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 0; }
@@ -474,36 +463,6 @@ button.super-panel.armed .super-pct { color: #ffffff; font-weight: 800; }
   border: 1px solid var(--border);
   transition: max-width 0.2s ease, border-radius 0.2s ease;
 }
-.scoreboard {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.scoreboard-content {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 32px;
-}
-.scoreboard-content > span {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-weight: 500;
-}
-.scoreboard strong { font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; }
-/* Online names can be long: each side shrinks and cuts its name off so the score and turn stay on one line. */
-.scoreboard-content { min-width: 0; }
-.scoreboard-content > span { min-width: 0; }
-#home-label, #opponent-label { min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.phase-info { flex: none; white-space: nowrap; }
-.home { color: var(--team-home); }
-.away { color: var(--team-away); }
-.phase-info { text-align: center; font-size: 14px; }
-.scoreboard small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
 
 .stadium-toolbar {
   position: absolute;
@@ -714,11 +673,6 @@ body.stadium-fullscreen-active {
 }
 @media (max-width: 650px) {
   .ball-page { width: calc(100% - 24px); }
-  .scoreboard { padding: 10px 12px; }
-  .scoreboard-content { gap: 14px; }
-  .scoreboard-content > span { gap: 6px; }
-  .scoreboard strong { font-size: 22px; }
-  .phase-info { font-size: 12px; }
   .stadium-toolbar { right: 8px; gap: 4px; }
   .stadium-tool-btn { width: 30px; height: 30px; padding: 5px; border-radius: 6px; }
   .stadium-tool-btn svg { width: 16px; height: 16px; }
@@ -754,10 +708,6 @@ body.stadium-fullscreen-active {
   .home-column, .away-column { display: flex; }
   .team { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
-@media (max-width: 650px) {
-  .scoreboard { flex-wrap: wrap; gap: 10px; }
-  .stadium-toolbar { position: static; transform: none; margin-left: auto; }
-}
 
 /* Prominent ability art and touch-friendly spin control outside the aiming area. */
 .super-icon, .stadium-super-btn .super-icon { width: 36px; height: 36px; padding: 2px; }
@@ -784,12 +734,7 @@ body.stadium-fullscreen-active {
   height: min(920px, 100svh);
   min-height: 540px;
 }
-.stadium.portrait-mode .scoreboard { grid-area: score; flex-wrap: nowrap; gap: 4px; padding: 6px 8px; }
-.stadium.portrait-mode .scoreboard-content { flex: 1; gap: 10px; min-width: 0; }
-.stadium.portrait-mode .scoreboard-content > span { gap: 5px; font-size: 12px; }
-.stadium.portrait-mode .scoreboard strong { font-size: 24px; }
-.stadium.portrait-mode .phase-info { font-size: 12px; }
-.stadium.portrait-mode .scoreboard small { font-size: 10px; margin-top: 2px; }
+.stadium.portrait-mode .scoreboard { grid-area: score; }
 .stadium.portrait-mode .stadium-toolbar { position: static; transform: none; margin: 0; gap: 0; }
 .stadium.portrait-mode .stadium-tool-btn { width: 44px; height: 44px; border: 0; background: transparent; box-shadow: none; }
 .stadium.portrait-mode .stadium-stage-area { grid-area: field; height: auto; min-height: 0; padding: 0; }
@@ -838,21 +783,13 @@ body.stadium-fullscreen-active {
 
 /* Fixed portrait chrome prevents text/phase changes from resizing the playfield. */
 #aim-mode { position: static; flex: none; min-height: 44px; max-width: 96px; padding: 4px 8px; font-size: 11px; }
-.scoreboard { gap: 8px; }
-.scoreboard .stadium-toolbar { position: static; transform: none; }
-.scoreboard-content { flex: 1; }
 .stadium.portrait-mode {
   grid-template-areas: "score" "field" "actions";
   grid-template-rows: 64px minmax(0, 1fr) 76px;
   grid-template-columns: minmax(0, 1fr);
   align-content: stretch;
 }
-.stadium.portrait-mode .scoreboard { min-width: 0; height: 64px; box-sizing: border-box; overflow: hidden; }
-.stadium.portrait-mode .scoreboard-content { gap: 6px; }
-.stadium.portrait-mode .scoreboard-content > span { font-size: 10px; gap: 3px; }
-.stadium.portrait-mode .scoreboard strong { font-size: 20px; }
-.stadium.portrait-mode .phase-info { font-size: 10px; }
-.stadium.portrait-mode .scoreboard small { display: none; }
+.stadium.portrait-mode .scoreboard { min-width: 0; height: 64px; box-sizing: border-box; }
 .stadium.portrait-mode .stadium-tool-btn { width: 36px; }
 .stadium.portrait-mode #aim-mode { width: 68px; }
 .stadium.portrait-mode .stadium-actions { height: 76px; min-height: 0; box-sizing: border-box; }
@@ -1128,3 +1065,137 @@ body.demo-match:not(.in-match) .demo-badge { display: block; }
   body.in-match .stadium.portrait-mode .knob-dock .knob-row { flex: 1; margin: 0; }
   body.in-match .stadium.portrait-mode .knob-dock .knob svg { width: 40px; height: 40px; }
 }
+
+/* Scorebug, broadcast style (see index.html). The score cells sit centred over the rink, the logo and
+   rules cells to their left and the turn cell to their right; the menu and tools keep to the corners.
+   fitScorebug picks the largest size (data-size) whose sides clear the menu and tools: full, then
+   rules as letters, then "T3" for "Turn 3", then a smaller bug, then tighter still; and it holds the turn cell at the
+   widest text this mode can show, so nothing shifts. Text is centred on its capitals where the
+   browser can trim to them. On phones the logo and rules move up beside the menu and tools, and the
+   turn cell sits between the scores. Event tabs drop from under it over the rink. */
+.scoreboard {
+  position: relative; z-index: 20; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center;
+  padding: 12px 58px; border-bottom: 1px solid var(--border);
+}
+.scoreboard #pause { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); }
+.bug-left { justify-self: end; display: flex; min-width: 0; }
+.bug-center { display: flex; }
+.bug-right { justify-self: start; display: flex; }
+.bug-brand, .bug-modes, .bug-team, .bug-status { display: flex; align-items: center; height: 40px; box-sizing: border-box; overflow: hidden; }
+.bug-brand, .bug-modes, .bug-status { background: var(--background); border: 1px solid var(--border); }
+.bug-brand { padding: 0 11px; border-radius: 6px 0 0 6px; }
+.bug-brand img { height: 20px; width: auto; display: block; }
+.bug-modes { gap: 9px; padding: 0 11px; border-left: 0; }
+.bug-modes:empty { display: none; }
+.bug-mode { color: var(--mode); font-family: var(--font-display); font-size: 16px; line-height: 1; }
+.bug-mode[data-rule="classic"] { --mode: #E8CA48; }
+.bug-mode[data-rule="pulse"] { --mode: #DA4DB5; }
+.bug-mode[data-rule="blitz"] { --mode: #0066FF; }
+.bug-mode b, .turn-short { display: none; font-weight: inherit; font-style: normal; }
+.turn-long { font-style: normal; }
+.home { color: var(--team-home); }
+.away { color: var(--team-away); }
+.bug-team { min-width: 0; font-size: 16px; line-height: 1; text-transform: uppercase; letter-spacing: .04em; }
+body.online-match .bug-team { text-transform: none; letter-spacing: .01em; }
+.bug-team > span:not(.bug-score) { min-width: 0; max-width: 12ch; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bug-score { align-self: stretch; display: flex; align-items: center; justify-content: center; min-width: 42px; padding: 0 8px; background: #00000047; color: #fff; }
+.bug-score strong { font-size: 24px; line-height: 1; font-weight: 400; font-variant-numeric: tabular-nums; }
+.bug-home { background: var(--team-home); color: #1d1600; }
+.bug-away { background: var(--team-away); color: #fff; }
+.bug-status { position: relative; justify-content: center; gap: 7px; min-width: var(--status-width, 0); padding: 0 12px; border-left: 0; border-radius: 0 6px 6px 0; color: var(--muted); font-size: 14px; line-height: 1; white-space: nowrap; }
+.bug-status b { color: var(--text); font-weight: 400; }
+#blitz-clock { color: #5b9bff; font-variant-numeric: tabular-nums; }
+.bug-clock { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: #ffffff14; }
+.bug-clock i { display: block; height: 100%; width: 100%; background: #0066FF; transform-origin: left; }
+@supports (text-box: trim-both cap alphabetic) {
+  .bug-mode, .bug-team > span, .bug-score strong, .bug-status > :is(b, span) { text-box: trim-both cap alphabetic; }
+}
+.scoreboard:is([data-size="letters"], [data-size="short"], [data-size="small"], [data-size="tiny"]) .bug-mode span { display: none; }
+.scoreboard:is([data-size="letters"], [data-size="short"], [data-size="small"], [data-size="tiny"]) .bug-mode b { display: inline; }
+.scoreboard:is([data-size="short"], [data-size="small"], [data-size="tiny"]) .turn-long { display: none; }
+.scoreboard:is([data-size="short"], [data-size="small"], [data-size="tiny"]) .turn-short { display: inline; }
+.scoreboard:is([data-size="small"], [data-size="tiny"]) :is(.bug-brand, .bug-modes, .bug-team, .bug-status) { height: 32px; }
+.scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-brand { padding: 0 8px; }
+.scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-brand img { height: 16px; }
+.scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-modes { gap: 5px; padding: 0 8px; }
+.scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-mode { font-size: 13px; }
+.scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-team { font-size: 13px; }
+.scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-team > span:not(.bug-score) { padding: 0 8px; }
+.scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-score { min-width: 32px; padding: 0 6px; }
+.scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-score strong { font-size: 19px; }
+.scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-status { gap: 5px; padding: 0 9px; font-size: 12px; }
+/* Tiny: the narrowest desktop (team columns beside a small window) tightens the cell edges too. */
+.scoreboard[data-size="tiny"] :is(.bug-brand, .bug-modes) { padding: 0 6px; }
+.scoreboard[data-size="tiny"] .bug-modes { gap: 4px; }
+.scoreboard[data-size="tiny"] .bug-team > span:not(.bug-score) { padding: 0 6px; letter-spacing: .02em; }
+.scoreboard[data-size="tiny"] .bug-status { gap: 4px; padding: 0 6px; font-size: 11px; }
+/* Event tabs: cards, warnings, power plays, match point. */
+.bug-tab {
+  position: absolute; top: 100%; left: 50%; z-index: 30; padding: 4px 14px; border-radius: 0 0 8px 8px;
+  background: var(--tab, #ffb020); color: var(--tab-ink, #2a1a00); font-size: 12px; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap;
+  transform: translate(-50%, -110%); opacity: 0; pointer-events: none; transition: transform .25s ease, opacity .25s ease;
+}
+.bug-tab.show { transform: translate(-50%, 0); opacity: 1; }
+.bug-tab[data-tone="home"] { --tab: var(--team-home); --tab-ink: #1d1600; }
+.bug-tab[data-tone="away"] { --tab: var(--team-away); --tab-ink: #fff; }
+@media (prefers-reduced-motion: reduce) { .bug-tab { transition: opacity .2s; transform: translate(-50%, 0); } }
+/* Compact: phones in landscape (the sidebar) and portrait. */
+@media (orientation: landscape) and (max-height: 600px) {
+  body.in-match .stadium:not(.portrait-mode) .scoreboard {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-rows: 28px 30px; gap: 4px 0;
+    grid-template-areas: "pause left tools" "home status away"; padding: 6px;
+  }
+}
+@media (orientation: landscape) and (max-height: 600px) {
+  body.in-match .stadium:not(.portrait-mode) :is(.bug-center, .bug-right) { display: contents; }
+  body.in-match .stadium:not(.portrait-mode) #pause { grid-area: pause; justify-self: start; position: static; transform: none; width: 28px; height: 28px; min-height: 0; padding: 5px; }
+  body.in-match .stadium:not(.portrait-mode) .stadium-toolbar { grid-area: tools; position: static; transform: none; justify-self: end; gap: 2px; }
+  body.in-match .stadium:not(.portrait-mode) .stadium-toolbar .stadium-tool-btn { width: 28px; height: 28px; min-height: 0; padding: 5px; }
+  body.in-match .stadium:not(.portrait-mode) .bug-left { grid-area: left; justify-self: center; align-items: center; gap: 6px; }
+  body.in-match .stadium:not(.portrait-mode) :is(.bug-brand, .bug-modes) { height: auto; padding: 0; background: none; border: 0; gap: 4px; }
+  body.in-match .stadium:not(.portrait-mode) .bug-brand img { height: 14px; }
+  body.in-match .stadium:not(.portrait-mode) .bug-mode { font-size: 12px; }
+  body.in-match .stadium:not(.portrait-mode) .bug-mode span { display: none; }
+  body.in-match .stadium:not(.portrait-mode) .bug-mode b { display: inline; }
+  body.in-match .stadium:not(.portrait-mode) .bug-team { height: 30px; justify-content: space-between; font-size: 12px; }
+  body.in-match .stadium:not(.portrait-mode) .bug-team > span:not(.bug-score) { padding: 0 6px; }
+  body.in-match .stadium:not(.portrait-mode) .bug-score { min-width: 26px; padding: 0 5px; }
+  body.in-match .stadium:not(.portrait-mode) .bug-score strong { font-size: 17px; }
+  body.in-match .stadium:not(.portrait-mode) .turn-long { display: none; }
+  body.in-match .stadium:not(.portrait-mode) .turn-short { display: inline; }
+  body.in-match .stadium:not(.portrait-mode) .bug-home { grid-area: home; border-radius: 6px 0 0 6px; }
+  body.in-match .stadium:not(.portrait-mode) .bug-away { grid-area: away; border-radius: 0 6px 6px 0; }
+  body.in-match .stadium:not(.portrait-mode) .bug-status {
+    grid-area: status; height: 30px; border: 1px solid var(--border); border-left: 0; border-right: 0; border-radius: 0;
+    flex-wrap: wrap; justify-content: center; align-content: center; gap: 0 4px; padding: 0 4px; font-size: 10px; line-height: 12px;
+  }
+  body.in-match .stadium:not(.portrait-mode) #blitz-clock { flex-basis: 100%; margin: 0; text-align: center; }
+}
+@media (max-width: 1000px) {
+  .stadium.portrait-mode .scoreboard {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-rows: 24px 30px; gap: 4px 0;
+    grid-template-areas: "pause left tools" "home status away"; padding: 3px 8px;
+  }
+  .stadium.portrait-mode :is(.bug-center, .bug-right) { display: contents; }
+  .stadium.portrait-mode #pause { grid-area: pause; justify-self: start; position: static; transform: none; width: 24px; height: 24px; min-height: 0; padding: 3px; }
+  .stadium.portrait-mode .stadium-toolbar { grid-area: tools; justify-self: end; gap: 2px; }
+  .stadium.portrait-mode .stadium-toolbar .stadium-tool-btn { width: 24px; height: 24px; min-height: 0; padding: 3px; }
+  .stadium.portrait-mode .bug-left { grid-area: left; justify-self: center; align-items: center; gap: 6px; }
+  .stadium.portrait-mode :is(.bug-brand, .bug-modes) { height: auto; padding: 0; background: none; border: 0; gap: 4px; }
+  .stadium.portrait-mode .bug-brand img { height: 14px; }
+  .stadium.portrait-mode .bug-mode { font-size: 12px; }
+  .stadium.portrait-mode .bug-mode span { display: none; }
+  .stadium.portrait-mode .bug-mode b { display: inline; }
+  .stadium.portrait-mode .bug-team { height: 30px; justify-content: space-between; font-size: 12px; }
+  .stadium.portrait-mode .bug-team > span:not(.bug-score) { padding: 0 6px; }
+  .stadium.portrait-mode .bug-score { min-width: 28px; padding: 0 6px; }
+  .stadium.portrait-mode .bug-score strong { font-size: 17px; }
+  .stadium.portrait-mode .bug-home { grid-area: home; border-radius: 6px 0 0 6px; }
+  .stadium.portrait-mode .bug-away { grid-area: away; border-radius: 0 6px 6px 0; }
+  .stadium.portrait-mode .bug-status { grid-area: status; height: 30px; border-left: 0; border-right: 0; border-radius: 0; padding: 0 8px; font-size: 12px; }
+  /* The score cells stop at a sensible width on wider portrait screens. */
+  .stadium.portrait-mode .bug-home { justify-self: end; width: 100%; max-width: 150px; }
+  .stadium.portrait-mode .bug-away { justify-self: start; width: 100%; max-width: 150px; }
+}
+/* Wide portrait keeps the one-row bug, with the tools in the corner. */
+@media (min-width: 1001px) { .stadium.portrait-mode .scoreboard .stadium-toolbar { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); } }

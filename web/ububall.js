@@ -42,13 +42,76 @@
     if (online?.active) {
       const s = online.state, clock = $('blitz-clock');
       clock.hidden = !blitzMode() || s?.phase !== 'plan';
-      if (!clock.hidden) clock.textContent = Math.max(0, Math.ceil((s.deadline === null ? s.remaining : s.deadline - online.now()) / 1000)) + 's';
+      const left = clock.hidden ? 0 : Math.max(0, s.deadline === null ? s.remaining : s.deadline - online.now());
+      if (!clock.hidden) clock.textContent = Math.ceil(left / 1000) + 's';
+      drainClock(clock.hidden, left);
       const other = s ? 1 - s.seat : 1;
       $('online-forfeit').hidden = !s || s.phase === 'over' || !s.connected[s.seat] || s.connected[other] || s.disconnectedAt[other] === null || online.now() - s.disconnectedAt[other] < 60000;
       return;
     }
     const clock = $('blitz-clock'); clock.hidden = !blitzMode() || phase !== 'plan';
-    if (!clock.hidden) clock.textContent = Math.max(0, Math.ceil((planDeadline - performance.now()) / 1000)) + 's';
+    const left = clock.hidden ? 0 : Math.max(0, planDeadline - performance.now());
+    if (!clock.hidden) clock.textContent = Math.ceil(left / 1000) + 's';
+    drainClock(clock.hidden, left);
+  }
+  // The scorebug's Blitz strip: the share of planning time left.
+  function drainClock(hidden, left) {
+    const strip = $('clock-strip'); strip.hidden = hidden;
+    if (!hidden) strip.firstChild.style.transform = `scaleX(${Math.min(1, left / ububallMatch.planningMilliseconds('blitz'))})`;
+  }
+  // The scorebug's rules, in order, each in its colour (a letter on narrow scorebugs).
+  let bugMode = 'standard';
+  function showMode(mode) {
+    bugMode = mode;
+    $('mode-tags').replaceChildren(...ububallMatch.RULES.filter(rule => ububallMatch.rule(mode, rule)).map(rule => {
+      const tag = document.createElement('span'); tag.className = 'bug-mode'; tag.dataset.rule = rule; tag.title = rule[0].toUpperCase() + rule.slice(1);
+      tag.append(Object.assign(document.createElement('span'), { textContent: tag.title }), Object.assign(document.createElement('b'), { textContent: rule[0].toUpperCase() }));
+      return tag;
+    }));
+    fitScorebug();
+  }
+  // The largest scorebug size whose sides clear the menu and tools (see the scorebug CSS); phone
+  // layouts are fixed. Then the turn cell holds the widest text this match can show (two-digit turns,
+  // its phases, and Blitz seconds), so text changes never move the score.
+  const BUG_SIZES = ['full', 'letters', 'short', 'small', 'tiny'];
+  function fitScorebug() {
+    const board = document.querySelector('.scoreboard'), status = board.querySelector('.bug-status');
+    if (!board.offsetWidth) return;
+    const compact = getComputedStyle(board.querySelector('.bug-center')).display === 'contents';
+    const edge = (node, side) => node.offsetWidth ? node.getBoundingClientRect()[side] : board.getBoundingClientRect()[side === 'right' ? 'left' : 'right'];
+    for (const size of compact ? ['compact'] : BUG_SIZES) {
+      board.dataset.size = size;
+      fitStatus(status);
+      const left = board.querySelector('.bug-left').getBoundingClientRect().left, right = board.querySelector('.bug-right').getBoundingClientRect().right;
+      if (compact || (left >= edge($('pause'), 'right') + 8 && right <= edge(board.querySelector('.stadium-toolbar'), 'left') - 8)) break;
+    }
+  }
+  function fitStatus(status) {
+    const turnNode = $('turn-label'), phaseNode = $('phase'), clock = $('blitz-clock');
+    const saved = [turnNode.textContent, phaseNode.textContent, clock.textContent, clock.hidden];
+    const blitz = ububallMatch.rule(bugMode, 'blitz');
+    status.style.removeProperty('--status-width'); status.style.width = 'max-content';
+    let widest = 0;
+    for (const phaseText of ['Plan', 'In play', 'Goal', 'Final', online?.active ? 'Waiting' : 'CPU']) {
+      turnNode.textContent = '88'; phaseNode.textContent = phaseText; clock.textContent = '5s'; clock.hidden = !blitz;
+      widest = Math.max(widest, status.getBoundingClientRect().width);
+    }
+    [turnNode.textContent, phaseNode.textContent, clock.textContent, clock.hidden] = saved;
+    status.style.width = ''; status.style.setProperty('--status-width', Math.ceil(widest) + 'px');
+  }
+  // Event tabs drop from under the scorebug one at a time: cards, warnings, power plays, match point.
+  // `tone` colours a tab for a side (home or away); untoned tabs are amber.
+  const bugTabs = [];
+  let bugTabTimer = 0;
+  function bugTab(text, tone = '') {
+    bugTabs.push({ text, tone });
+    if (!bugTabTimer) nextBugTab();
+  }
+  function nextBugTab() {
+    const tab = $('bug-tab'), next = bugTabs.shift();
+    if (!next) { tab.classList.remove('show'); bugTabTimer = 0; return; }
+    tab.textContent = next.text; tab.dataset.tone = next.tone; tab.classList.add('show');
+    bugTabTimer = setTimeout(() => { tab.classList.remove('show'); bugTabTimer = setTimeout(nextBugTab, 300); }, 2600);
   }
   let arrowGrab = null, dragStart = null, dragMoved = false;
   let pullBehind = false;
@@ -63,6 +126,12 @@
   stageArea.append(spinLayer); spinLayer.append($('field-spin'));
   // Without team columns (phones and narrow windows), the ubu picker and the selected ubu's knobs sit
   // together in a dock beside or below the rink.
+  let scoreboardWidth = 0;
+  new ResizeObserver(([entry]) => {
+    if (Math.round(entry.contentRect.width) === scoreboardWidth) return;
+    scoreboardWidth = Math.round(entry.contentRect.width); fitScorebug();
+  }).observe(document.querySelector('.scoreboard'));
+  document.fonts?.ready.then(() => fitScorebug());
   const knobDock = document.createElement('div'); knobDock.className = 'knob-dock';
   $('game-status').after(knobDock); knobDock.append($('team-selector'));
   const rinkStage = document.querySelector('.rink-stage');
@@ -83,6 +152,8 @@
   let play = ububallMatch.newPlay(), tally = ububallMatch.newTally(), scoringPlayer = null, roundTurns = 0;
   // Goal camping and corner stalling warnings and cards, as this view sees them (see ububallMatch.FOULS).
   let fouls = ububallMatch.newFouls();
+  // Scores as the scorebug last showed them, to call match point once.
+  const shownScores = [0, 0];
   // The status line's wording for each goal call.
   const GOAL_WORDS = { 'OWN GOAL': 'Own goal', 'HAT TRICK!': 'Hat trick', 'ACE!': 'Ace', 'BANK SHOT!': 'Bank shot', GOAL: 'Goal' };
   const callText = (label, name) => label === 'OWN GOAL' ? 'Own goal!' : `${GOAL_WORDS[label]} by ${name}!`;
@@ -474,7 +545,7 @@
   }
   // Drawn above bodies: ripples, post flashes, the goal light sweep and the Pulse turn timer.
   function drawFieldOver(colors) {
-    const { primary, border, text, home, away } = colors;
+    const { border, text, home, away } = colors;
     for (const r of ripples) {
       // Drawing only: the physics walls never move. The bulge follows the wall's own shape, easing
       // to zero at both ends of its stretch so it stays on the wall around corners and nets.
@@ -498,7 +569,7 @@
       const progress = phase !== 'play' ? 0 : online?.active ? (onlineReplay?.currentTick ?? 0) * P.DT / turnSeconds : elapsed / turnSeconds;
       ctx.save(); ctx.lineCap = 'round';
       ctx.globalAlpha = .25; line(160, 556, 840, 556, border, 4);
-      if (progress > 0) { ctx.globalAlpha = .9; line(160, 556, 160 + 680 * Math.min(1, progress), 556, primary, 4); }
+      if (progress > 0) { ctx.globalAlpha = .9; line(160, 556, 160 + 680 * Math.min(1, progress), 556, '#DA4DB5', 4); }
       ctx.restore();
     }
   }
@@ -636,7 +707,17 @@
   // Calls out the cards and the corner reset just given.
   function announceFouls() {
     for (const i of fouls.cards) popup(bodies[i], 'Yellow card');
-    if (fouls.faceoff) banner('Corner stalling', 1200);
+    for (const team of [0, 1]) {
+      const carded = fouls.cards.filter(i => bodies[i].team === team);
+      if (carded.length === 1) bugTab(`Yellow card · ${bodies[carded[0]].name || sideName(team)}`);
+      else if (carded.length) bugTab(`${carded.length} yellow cards · ${sideName(team)}`);
+    }
+    for (const team of [0, 1]) if (fouls.crease[team]) bugTab(`Goal camping · ${sideName(team)}`);
+    if (fouls.cornerTurns === ububallMatch.FOULS.stallTurns) bugTab('Corner stalling');
+    if (fouls.faceoff) bugTab('Corner reset');
+    // The side with more ubus on the ice for the coming turn is on the power play.
+    const out = [0, 1].map(team => bodies.slice(0, 6).filter(b => b.team === team && b.carded).length);
+    if (out[0] !== out[1]) { const team = out[0] < out[1] ? 0 : 1; bugTab(`Power play · ${sideName(team)}`, team ? 'away' : 'home'); }
     // A card whistles; a warning only just given sounds its alert.
     if (fouls.cards.length) gameAudio()?.playFoul('card');
     else if (fouls.crease[0] || fouls.crease[1] || fouls.cornerTurns === ububallMatch.FOULS.stallTurns) gameAudio()?.playFoul('warning');
@@ -1292,8 +1373,14 @@
     updateClock();
     const planning = phase === 'plan';
     const isGoal = phase === 'goal';
-    $('phase').textContent = phase === 'over' ? 'Match complete' : `${planning ? 'Plan' : isGoal ? 'Goal' : phase === 'cpu-wait' ? 'CPU planning' : 'In play'} · Turn ${turn}`;
-    $('home-score').textContent = scores[0]; $('away-score').textContent = scores[1];
+    $('phase').textContent = phase === 'over' ? 'Final' : planning ? 'Plan' : isGoal ? 'Goal' : phase === 'cpu-wait' ? 'CPU' : phase === 'waiting' ? 'Waiting' : 'In play';
+    $('turn-label').textContent = turn;
+    for (const team of [0, 1]) {
+      // A side reaching 4 goals is on match point.
+      if (scores[team] === 4 && shownScores[team] === 3 && phase !== 'over') bugTab(`Match point · ${sideName(team)}`, team ? 'away' : 'home');
+      shownScores[team] = scores[team];
+      $(team ? 'away-score' : 'home-score').textContent = scores[team];
+    }
     const curB = bodies[selected];
     const isStunned = Boolean(curB?.stunned);
     if (isStunned) {
@@ -1479,7 +1566,7 @@
     endGoalReplay(); playSegments = [];
     matchMode = cpuMode;
     document.body.classList.toggle('classic-match', classicMode());
-    $('mode-label').textContent = ububallMatch.modeName(matchMode);
+    showMode(matchMode);
     stats = [...draft, ...practice.slice(3)].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
     stopFanfare(); gameAudio()?.stop();
     roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
@@ -2502,7 +2589,7 @@
   const portraitScreen = matchMedia('(orientation: portrait)');
   function setPortrait(value) { if (isPortrait !== value) toggleRotate(); }
   function fitOrientation() { if (inMatch) setPortrait(portraitScreen.matches); }
-  function matchInProgress() { return !demo && phase !== 'over' && ($('home-score').textContent !== '0' || $('away-score').textContent !== '0' || !/Turn 1$/.test($('phase').textContent)); }
+  function matchInProgress() { return !demo && phase !== 'over' && ($('home-score').textContent !== '0' || $('away-score').textContent !== '0' || turn > 1); }
   function updateHome() { $('home-play').textContent = online?.active ? 'Back to online match' : matchInProgress() ? 'Resume match' : 'Play vs CPU'; }
   function enterMatch() {
     if (location.pathname !== '/') return;
@@ -2731,7 +2818,7 @@
       $('home-label').textContent = me; $('opponent-label').textContent = them; $('opponent-heading').textContent = `${them}'s team`;
       $('online-match-status').hidden = false; $('new-match').disabled = true;
       matchMode = s.mode; document.body.classList.toggle('classic-match', classicMode());
-      $('mode-label').textContent = 'Online · ' + ububallMatch.modeName(s.mode);
+      showMode(s.mode);
       updateRematch(s);
       if (onlinePhase === 'over' && s.phase !== 'over') closeSummary();
       $('online-match-status').textContent = s.phase === 'lobby' ? 'Choosing teams' : s.phase === 'over' ? (s.left[1 - s.seat] ? `${them} left the match.` : s.rematch[s.seat] ? `Rematch requested · waiting for ${them}` :
@@ -2826,7 +2913,6 @@
   // at random each game. Saffron's planning is acted out with a pointer, as a how-to for new players.
   const demoClient = createCPUClient(), DEMO_STOP = Symbol('demo stopped');
   let demoRun = 0, demoGame = 0;
-  const capital = text => text[0].toUpperCase() + text.slice(1);
   function demoPaused() { return inMatch || document.hidden || Boolean(foulInfo) || $('field-banner').closest('[data-screen]').hidden || Boolean(document.querySelector('dialog[open]')); }
   // Waits count only while the demo is on screen; a stopped demo ends its walkthrough.
   async function demoWait(run, ms, until = null) {
@@ -2841,7 +2927,7 @@
     demoLevels = Math.random() < .5 ? ['hard', 'medium'] : ['medium', 'hard'];
     demoGame++; hideFinger(); newMatch();
     $('home-label').textContent = 'Saffron'; $('opponent-label').textContent = 'Amethyst';
-    $('mode-label').textContent = `${capital(demoLevels[0])} vs ${capital(demoLevels[1])}`;
+    showMode(matchMode);
   }
   function startDemo() {
     if (demo || inMatch || online?.active) return;
