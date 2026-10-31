@@ -82,11 +82,14 @@
     body.strength = multiplier(raw.strength ?? 127);
     body.stability = multiplier(raw.stability ?? 127);
   }
+  // Kickoff position of a team's ubu (slot 0–2); carded ubus return here.
+  function spawn(team, slot) {
+    return { x: team ? (slot === 0 ? 820 : 690) : (slot === 0 ? 180 : 310), y: slot === 0 ? 300 : slot === 1 ? 180 : 420 };
+  }
   function kickoff() {
     const bodies = [];
     for (let team = 0; team < 2; team++) for (let i = 0; i < 3; i++) {
-      bodies.push({ x: team ? (i === 0 ? 820 : 690) : (i === 0 ? 180 : 310),
-        y: i === 0 ? 300 : i === 1 ? 180 : 420, vx: 0, vy: 0,
+      bodies.push({ ...spawn(team, i), vx: 0, vy: 0,
         radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 10, omega: 0, rotation: 0, team, slot: i });
     }
     bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1 });
@@ -172,7 +175,7 @@
   function triggerShockwave(source, bodies, onShockwave) {
     const radius = SUPER.shockRadius;
     for (const b of bodies) {
-      if (b === source || b.superActive === 'stalwart') continue;
+      if (b === source || b.superActive === 'stalwart' || b.carded) continue;
       const dx = b.x - source.x, dy = b.y - source.y, d2 = dx * dx + dy * dy;
       if (d2 > 0 && d2 < radius * radius) {
         const d = Math.sqrt(d2);
@@ -197,6 +200,8 @@
   }
   function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, onSuper = null) {
     const isBall = a.team === -1 || b.team === -1;
+    // A carded ubu sits out its turn at its spawn, touching nothing.
+    if (a.carded || b.carded) return;
     if (!isBall && a.team !== b.team && (a.superActive === 'ghost' || b.superActive === 'ghost')) return;
 
     if (isBall) {
@@ -226,7 +231,7 @@
         closeSpin = -player.spinStrike * player.omega * small * (player.curveMult || 1);
         strikeBoost = small * STRIKE_POWER * (player.spinStrike - STRIKE_GAIN) * Math.min(1, Math.abs(player.omega) / player.maxSpin) * Math.hypot(player.vx, player.vy);
       }
-      if (closeSpin && allBodies?.some(other => other.team >= 0 && other !== player &&
+      if (closeSpin && allBodies?.some(other => other.team >= 0 && other !== player && !other.carded &&
           (other.x - ball.x) ** 2 + (other.y - ball.y) ** 2 <= (ballHitRadius(other) + ball.radius) ** 2)) closeSpin = strikeBoost = 0;
       ball.openingShot = false;
     } else a.spinStrike = b.spinStrike = 0; // Touching another ubu first spends both strikes.
@@ -381,7 +386,7 @@
       // A different ubu already touching also invalidates a close setup.
       let touching = 0, b = null;
       for (const other of bodies) {
-        if (other.team >= 0 && (other.x - ball.x) ** 2 + (other.y - ball.y) ** 2 <= (ballHitRadius(other) + ball.radius) ** 2) { touching++; b = other; }
+        if (other.team >= 0 && !other.carded && (other.x - ball.x) ** 2 + (other.y - ball.y) ** 2 <= (ballHitRadius(other) + ball.radius) ** 2) { touching++; b = other; }
       }
       if (touching > 1 || (touching === 1 && !b.spinStrike)) ball.openingShot = false;
       if (touching === 1) {
@@ -839,6 +844,6 @@
     }
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS };
   }
-  const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, dazeSlow, multiplier, launchSpeed, applyStats, kickoff, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

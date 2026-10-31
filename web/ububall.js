@@ -77,6 +77,8 @@
   let stats = practice.map(p => ({ ...(p.model.stats || normalStats()) }));
   let teamEntries = [...roster, ...practice.slice(3)];
   let play = ububallMatch.newPlay(), tally = ububallMatch.newTally(), scoringPlayer = null, roundTurns = 0;
+  // Goal camping and corner stalling warnings and cards, as this view sees them (see ububallMatch.FOULS).
+  let fouls = ububallMatch.newFouls();
   // The status line's wording for each goal call.
   const GOAL_WORDS = { 'OWN GOAL': 'Own goal', 'HAT TRICK!': 'Hat trick', 'ACE!': 'Ace', 'BANK SHOT!': 'Bank shot', GOAL: 'Goal' };
   const callText = (label, name) => label === 'OWN GOAL' ? 'Own goal!' : `${GOAL_WORDS[label]} by ${name}!`;
@@ -538,6 +540,174 @@
       badgeCtx.restore();
     }
   }
+  // The ubus a standing warning would card: a warned team's ubus in its crease, and the larger
+  // team's ubus in a stalled corner.
+  function offenders() {
+    const list = bodies.slice(0, 6).filter(b => fouls.crease[b.team] && ububallMatch.inCrease(P, b, b.team));
+    if (stalling()) {
+      const [home, away] = cornerTeams();
+      if (home.length !== away.length) list.push(...(home.length > away.length ? home : away).filter(b => !list.includes(b)));
+    }
+    return list;
+  }
+  const stalling = () => fouls.corner !== null && fouls.cornerTurns >= ububallMatch.FOULS.stallTurns;
+  // Each team's ubus overlapping the stalled corner.
+  function cornerTeams() {
+    const inside = bodies.slice(0, 6).filter(b => ububallMatch.cornerOf(P, b.x, b.y, b.radius) === fouls.corner);
+    return [0, 1].map(team => inside.filter(b => b.team === team));
+  }
+  const foulsShowing = () => fouls.crease[0] || fouls.crease[1] || stalling() || bodies.some(b => b.carded);
+  // Lucide alert-triangle, on its 24-unit grid.
+  const ALERT = new Path2D('M21.73 18l-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z M12 9v4 M12 17h.01');
+  function drawAlert(x, y, size, alpha = 1) {
+    badgeCtx.save(); badgeCtx.translate(x, y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
+    badgeCtx.globalAlpha = alpha; badgeCtx.scale(size / 24, size / 24); badgeCtx.translate(-12, -12);
+    badgeCtx.fillStyle = '#0b0d10d9'; badgeCtx.fill(ALERT);
+    badgeCtx.lineWidth = 2; badgeCtx.lineCap = badgeCtx.lineJoin = 'round'; badgeCtx.strokeStyle = '#ffb020'; badgeCtx.stroke(ALERT);
+    badgeCtx.restore();
+  }
+  // A warning sits just outside the boards by the goal or corner it is about, its name beneath.
+  function drawFieldWarning(x, y, words, color) {
+    drawAlert(isPortrait ? x + 13 : x, isPortrait ? y : y - 13, 24);
+    badgeCtx.save(); badgeCtx.translate(x, y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
+    badgeCtx.font = '700 11px system-ui, sans-serif'; badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle'; badgeCtx.fillStyle = color;
+    words.forEach((word, i) => badgeCtx.fillText(word, 0, 7 + i * 12));
+    badgeCtx.restore();
+  }
+  // A yellow card, tilted, on the ubu's top right.
+  function drawCard(b) {
+    const r = b.radius * .7;
+    badgeCtx.save(); badgeCtx.translate(b.x + r, isPortrait ? b.y + r : b.y - r); badgeCtx.rotate((isPortrait ? Math.PI / 2 : 0) + .2);
+    badgeCtx.beginPath(); badgeCtx.roundRect(-6, -8, 12, 16, 2); badgeCtx.fillStyle = '#ffd60a'; badgeCtx.fill();
+    badgeCtx.lineWidth = 1.5; badgeCtx.strokeStyle = '#0b0d10'; badgeCtx.stroke();
+    badgeCtx.restore();
+  }
+  function drawFouls(text) {
+    for (const team of [0, 1]) if (fouls.crease[team]) drawFieldWarning(team ? 970 : 30, 180, ['Goal', 'Camping'], text);
+    if (stalling()) drawFieldWarning(fouls.corner % 2 ? 970 : 30, fouls.corner > 1 ? 570 : 30, ['Corner', 'Stalling'], text);
+    const flash = reducedMotion.matches ? 1 : .35 + .65 * (.5 + .5 * Math.cos(performance.now() / 1000 * Math.PI * 2.4));
+    for (const b of offenders()) if (!b.carded) drawAlert(b.x + b.radius * .8, isPortrait ? b.y + b.radius * .8 : b.y - b.radius * .8, 26, flash);
+    for (const b of bodies.slice(0, 6)) if (b.carded) drawCard(b);
+  }
+  // Calls out the cards and the corner reset just given.
+  function announceFouls() {
+    for (const i of fouls.cards) popup(bodies[i], 'Yellow card');
+    if (fouls.faceoff) banner('Corner stalling', 1200);
+  }
+  function foulText() {
+    const notes = [];
+    if (fouls.faceoff) notes.push('Corner stalling: the ball is reset to centre ice.');
+    for (const team of [0, 1]) {
+      const carded = fouls.cards.filter(i => bodies[i].team === team).length;
+      if (carded) notes.push(`Yellow card: ${sideHas(team)} ${ubuCount(carded)} out for a turn.`);
+    }
+    for (const team of [0, 1]) if (fouls.crease[team]) notes.push(`Goal camping: ${sideName(team)} must thin out the crease this turn.`);
+    if (stalling()) notes.push('Corner stalling: clear the ball from the corner this turn.');
+    return notes.join(' ');
+  }
+  // Tapping a warning beside the boards explains that foul (`foulInfo`, null when closed): who is
+  // offending, what must happen to clear it and what happens if it is not, with its areas lit on the
+  // rink. The box sits in the unrotated stage, on the side away from the foul, and closes once the
+  // warning lapses.
+  let foulInfo = null, foulInfoKey = '';
+  const foulBox = document.createElement('section'); foulBox.className = 'foul-info'; foulBox.hidden = true;
+  foulBox.setAttribute('role', 'dialog'); foulBox.setAttribute('aria-labelledby', 'foul-info-title');
+  foulBox.innerHTML = '<h3 id="foul-info-title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.73 18l-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z M12 9v4 M12 17h.01"/></svg><span></span></h3>' +
+    '<div></div><button type="button">Got it</button>';
+  stageArea.append(foulBox);
+  foulBox.querySelector('button').onclick = () => closeFoulInfo();
+  // The warning drawn beside the boards at a field point, if any (see drawFouls).
+  function warningAt(p) {
+    const near = (x, y) => Math.abs(p.x - x) < 32 && Math.abs(p.y - y) < 34;
+    for (const team of [0, 1]) if (fouls.crease[team] && near(team ? 970 : 30, 180)) return { kind: 'crease', team };
+    if (stalling() && near(fouls.corner % 2 ? 970 : 30, fouls.corner > 1 ? 570 : 30)) return { kind: 'corner' };
+    return null;
+  }
+  function openFoulInfo(info) { foulInfo = info; foulInfoKey = ''; foulBox.hidden = false; draw(); }
+  function closeFoulInfo() { if (!foulInfo) return; foulInfo = null; foulBox.hidden = true; draw(); }
+  const ubuCount = n => `${n} ubu${n === 1 ? '' : 's'}`;
+  // Each side by its scoreboard name (You, CPU, an opponent's or a demo team's), so every view reads
+  // right; "You" takes the plural verb.
+  const sideName = team => $(team ? 'opponent-label' : 'home-label').textContent;
+  const sideHas = team => sideName(team) + (sideName(team) === 'You' ? ' have' : ' has');
+  const CARD_TEXT = 'no meter, back to spawn, out for a turn';
+  // The explanation as paragraphs; `act` marks what must happen to clear the warning.
+  function foulInfoLines() {
+    const ubus = bodies.slice(0, 6);
+    if (foulInfo.kind === 'corner') {
+      const [home, away] = cornerTeams().map(list => list.length);
+      return ['Corner stalling', [
+        { text: `The ball has been in this corner for ${fouls.cornerTurns} turns.` },
+        { text: 'Clear it out this turn.', act: true },
+        { text: `Otherwise it resets to centre ice and the side with more ubus here is yellow-carded: ${CARD_TEXT}.` },
+        { text: home !== away ? `${sideName(home > away ? 0 : 1)} would be carded (${Math.max(home, away)} to ${Math.min(home, away)}).`
+          : home ? `Even at ${home} each, so nobody would be carded.` : 'Nobody is here, so nobody would be carded.' }]];
+    }
+    const t = foulInfo.team, crease = ubus.filter(b => b.team === t && ububallMatch.inCrease(P, b, t)).length;
+    const allowed = Math.max(1, ubus.filter(b => b.team === 1 - t && ububallMatch.inAttackZone(P, b, t)).length);
+    return ['Goal camping', [
+      { text: `${sideHas(t)} ${ubuCount(crease)} in the crease. Only ${allowed} ${allowed === 1 ? 'is' : 'are'} allowed: one per opponent in the attack zone, at least one.` },
+      { text: `${sideName(t)} must move ${Math.max(1, crease - allowed)} out this turn.`, act: true },
+      { text: `Otherwise every ubu left in the crease is yellow-carded: ${CARD_TEXT}.` }
+    ]];
+  }
+  // Keeps the open box current with the field, or closes it once its warning has lapsed.
+  function updateFoulInfo() {
+    if (!foulInfo) return;
+    if (foulInfo.kind === 'crease' ? !fouls.crease[foulInfo.team] : !stalling()) { foulInfo = null; foulBox.hidden = true; return; }
+    const [title, lines] = foulInfoLines(), key = title + JSON.stringify(lines);
+    if (key !== foulInfoKey) {
+      foulInfoKey = key;
+      foulBox.querySelector('span').textContent = title;
+      foulBox.querySelector('div').replaceChildren(...lines.map(line => {
+        const p = document.createElement('p'); p.textContent = line.text; if (line.act) p.className = 'act'; return p;
+      }));
+    }
+    // Over the field's far half from the foul, so the lit areas stay in view.
+    const f = fieldBox, far = foulInfo.kind === 'crease' ? foulInfo.team === 0 : fouls.corner % 2 === 0;
+    const along = isPortrait ? (far ? .27 : .73) : (far ? .7 : .3);
+    foulBox.style.width = Math.min(340, isPortrait ? f.width - 24 : f.width * .46) + 'px';
+    foulBox.style.maxHeight = (isPortrait ? f.height * .5 : f.height) - 12 + 'px';
+    foulBox.style.left = f.left + f.width * (isPortrait ? .5 : along) + 'px';
+    foulBox.style.top = f.top + f.height * (isPortrait ? along : .5) + 'px';
+  }
+  // The open foul's areas, lit under the ubus: the crease and attack zone, or the corner, with the
+  // ubus that count ringed (the side that would be carded in amber).
+  function drawFoulFocus(text) {
+    if (!foulInfo) return;
+    const amber = '#ffb020', ring = (list, dashed) => list.forEach(b => {
+      ctx.save(); if (dashed) ctx.setLineDash([4, 5]); circle(b.x, b.y, Math.max(b.radius, b.reach || b.radius) + 7, dashed ? text : amber, 2.5); ctx.restore();
+    });
+    const label = (words, x, y) => {
+      ctx.save(); ctx.translate(x, y); if (isPortrait) ctx.rotate(Math.PI / 2);
+      ctx.font = '800 14px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = 4; ctx.strokeStyle = '#101217'; ctx.strokeText(words, 0, 0); ctx.fillStyle = amber; ctx.fillText(words, 0, 0); ctx.restore();
+    };
+    const ubus = bodies.slice(0, 6);
+    ctx.save();
+    if (foulInfo.kind === 'crease') {
+      const t = foulInfo.team, mouth = t ? 940 : 60, zone = ububallMatch.attackZoneLine(P, t), from = t ? Math.PI / 2 : -Math.PI / 2;
+      inRink(() => { ctx.globalAlpha = .1; ctx.fillStyle = amber; ctx.fillRect(Math.min(mouth, zone), 60, Math.abs(zone - mouth), 480); });
+      ctx.globalAlpha = .8; line(zone, 60, zone, 540, amber, 2);
+      ctx.beginPath(); ctx.moveTo(mouth, 300); ctx.arc(mouth, 300, ububallMatch.FOULS.crease, from, from + Math.PI); ctx.closePath();
+      ctx.globalAlpha = .22; ctx.fillStyle = amber; ctx.fill(); ctx.globalAlpha = .9; ctx.strokeStyle = amber; ctx.lineWidth = 2; ctx.stroke();
+      ctx.globalAlpha = 1;
+      label('Attack zone', (mouth + zone) / 2, isPortrait ? 112 : 80);
+      label('Crease', mouth + (t ? -40 : 40), 300 - ububallMatch.FOULS.crease - 16);
+      ring(ubus.filter(b => b.team === t && ububallMatch.inCrease(P, b, t)), false);
+      ring(ubus.filter(b => b.team === 1 - t && ububallMatch.inAttackZone(P, b, t)), true);
+    } else {
+      const c = fouls.corner, x = c % 2 ? 840 : 60, y = c > 1 ? 440 : 60;
+      inRink(() => { ctx.globalAlpha = .16; ctx.fillStyle = amber; ctx.fillRect(x, y, 100, 100); });
+      ctx.globalAlpha = .8; ctx.setLineDash([6, 6]);
+      line(c % 2 ? 840 : 160, y, c % 2 ? 840 : 160, y + 100, amber, 2); line(x, c > 1 ? 440 : 160, x + 100, c > 1 ? 440 : 160, amber, 2);
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+      label('Corner', c % 2 ? 790 : 210, c > 1 ? 430 : 170);
+      const [home, away] = cornerTeams();
+      ring(home, home.length <= away.length); ring(away, away.length <= home.length);
+    }
+    ctx.restore();
+  }
   // Faint arcs on a hard-spinning ball, turning with it.
   function drawBallSpin(ball, text) {
     const spin = Math.abs(ball.omega);
@@ -740,7 +910,7 @@
   }
   function kickoff(isNewMatch = false) {
     clearEffects(); kickoffGlow = 1;
-    play = ububallMatch.newPlay(); scoringPlayer = null; roundTurns = 0;
+    play = ububallMatch.newPlay(); scoringPlayer = null; roundTurns = 0; fouls = ububallMatch.newFouls();
     netFire = null;
     if (isNewMatch) { tally = ububallMatch.newTally(); closeSummary(); }
     const oldBodies = bodies;
@@ -860,7 +1030,7 @@
     cpuClient.cancel();
     if (online?.active) return;
     cpu = P.cpuPlans(bodies, () => .5, scores);
-    cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn },
+    cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn, fouls },
       { level: demo ? demoLevels[1] : cpuLevel, seed: turn }).then(result => {
       if (generation !== cpuGeneration || !result || online?.active) return;
       if (result.error) console.warn('CPU search unavailable; using baseline plan.');
@@ -999,7 +1169,7 @@
     [...$('team-selector').children].forEach((button, i) => {
       button.setAttribute('aria-pressed', String(i === selected));
       button.disabled = !planning;
-      button.querySelector('span').textContent = `${bodies[i].stunned ? 'Stunned' : plans[i].guard ? 'Guard' : plans[i].power > 0 ? Math.round(plans[i].power * 100) + '%' : 'Hold'}${bodies[i].superArm ? ' · Armed' : ''}`;
+      button.querySelector('span').textContent = `${bodies[i].carded ? 'Carded' : bodies[i].stunned ? 'Stunned' : plans[i].guard ? 'Guard' : plans[i].power > 0 ? Math.round(plans[i].power * 100) + '%' : 'Hold'}${bodies[i].superArm ? ' · Armed' : ''}`;
     });
     const spinValue = Math.round((plans[selected].spin || 0) * 100);
     $('shot-spin').value = spinValue;
@@ -1013,7 +1183,8 @@
       select.setAttribute('aria-pressed', String(i === selected)); select.disabled = !planning;
       const small = button.querySelector('small');
       if (small) {
-        if (bodies[i]?.stunned) small.textContent = '💫 Stunned this turn';
+        if (bodies[i]?.carded) small.textContent = 'Yellow card · sits out this turn';
+        else if (bodies[i]?.stunned) small.textContent = '💫 Stunned this turn';
         else if (plans[i].guard) small.textContent = 'Guarding';
         else if (bodies[i] && P.dazeSlow(bodies[i]) > 0) small.textContent = `Dazed · launch −${Math.round(P.dazeSlow(bodies[i]) * 100)}%`;
         else small.textContent = `${Math.round(plans[i].power * 100)}% power · ${Math.round((plans[i].spin || 0) * 100)}% spin`;
@@ -1037,7 +1208,7 @@
         if (armBtn) {
           armBtn.disabled = !planning || (b.meter < 100) || Boolean(b.stunned);
           armBtn.classList.toggle('armed', Boolean(b.superArm));
-          armBtn.textContent = b.stunned ? '💫 STUNNED' : b.superArm ? '⚡ ARMED' : 'ARM SUPER';
+          armBtn.textContent = b.carded ? 'CARDED' : b.stunned ? '💫 STUNNED' : b.superArm ? '⚡ ARMED' : 'ARM SUPER';
         }
       }
     });
@@ -1056,7 +1227,9 @@
       hudSuperBtn.setAttribute('aria-pressed', String(Boolean(curB.superArm)));
       hudSuperBtn.classList.toggle('armed', Boolean(curB.superArm));
       if (hudSuperText) {
-        if (curB.stunned) {
+        if (curB.carded) {
+          hudSuperText.textContent = 'CARDED';
+        } else if (curB.stunned) {
           hudSuperText.textContent = '💫 STUNNED';
         } else if (curB.superArm) {
           hudSuperText.textContent = '⚡ ARMED';
@@ -1419,6 +1592,14 @@
       const w = 110, h = w * rinkLogo.naturalHeight / rinkLogo.naturalWidth;
       ctx.globalAlpha = .08; ctx.drawImage(rinkLogo, 500 - w / 2, 300 - h / 2, w, h); ctx.globalAlpha = 1;
     }
+    // Each goal's crease and the line closing its attack zone (see ububallMatch.FOULS).
+    ctx.setLineDash([6, 10]);
+    for (const team of [0, 1]) {
+      const x = team ? 940 : 60, from = team ? Math.PI / 2 : -Math.PI / 2, zone = ububallMatch.attackZoneLine(P, team);
+      ctx.beginPath(); ctx.arc(x, 300, ububallMatch.FOULS.crease, from, from + Math.PI); ctx.strokeStyle = border; ctx.lineWidth = 2; ctx.stroke();
+      line(zone, 60, zone, 540, border);
+    }
+    ctx.setLineDash([]);
     // Goal pockets interrupt the boundary at the same positions used by physics.
     const depth = P.rink.goalDepth;
     for (const [x, accent] of [[60 - depth, home], [940, away]]) {
@@ -1431,6 +1612,7 @@
     }
     ctx.drawImage(rinkCache.layer, 0, 0, 1000, 600);
     drawFieldUnder(themeColors);
+    drawFoulFocus(text);
     if (phase === 'plan') drawPrediction(home, away);
     drawTrails(home, away);
     shockwaves.forEach(s => {
@@ -1464,7 +1646,7 @@
         drawSuperBadge(b, activeKey);
       }
 
-      circle(b.x, b.y, reachR + 2, i < 3 ? home : away, 4);
+      if (!b.carded) circle(b.x, b.y, reachR + 2, i < 3 ? home : away, 4);
 
       if ((phase === 'goal' || (onlineReplay?.goalPlayed && phase === 'play')) && b === scoringPlayer) {
         const goalAccent = b.team === 0 ? home : away;
@@ -1492,7 +1674,7 @@
         for (let a = 0; a <= Math.PI * 3.5; a += .2) { const r = 1 + a * (.7 + .4 * depth); a ? ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r) : ctx.moveTo(r, 0); }
         ctx.stroke(); ctx.restore();
       }
-      if (b.stunned || b.stunnedNext) {
+      if ((b.stunned || b.stunnedNext) && !b.carded) {
         ctx.save();
         ctx.font = '16px system-ui';
         ctx.textAlign = 'center';
@@ -1518,8 +1700,9 @@
       }
       const style = skaters[i].style;
       const width = b.radius / 5 + '%';
-      const opacity = b.superActive === 'ghost' ? '0.45' : '1';
-      const filter = b.stunned || b.stunnedNext ? 'grayscale(0.8) brightness(0.7)' : '';
+      // A carded ubu fades out of play.
+      const opacity = b.carded ? '0.3' : b.superActive === 'ghost' ? '0.45' : '1';
+      const filter = (b.stunned || b.stunnedNext) && !b.carded ? 'grayscale(0.8) brightness(0.7)' : '';
       const transform = `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${b.rotation + (isPortrait ? Math.PI / 2 : 0)}rad)`;
 
       if (style.width !== width) style.width = width;
@@ -1550,6 +1733,8 @@
     drawBallSpin(ball, text);
     drawParticles(home, away);
     drawFieldOver(themeColors);
+    drawFouls(text);
+    updateFoulInfo();
     drawPopups(home, away);
     drawParticles(home, away, true);
     if (goalReplay) {
@@ -1623,7 +1808,9 @@
     // A goal on the round's first turn is an ace, earning its scorer extra meter (not for an own goal).
     const ace = goal !== null && !roundTurns, call = goal === null ? null : ububallMatch.callGoal(bodies, play, tally, goal, ace);
     if (goal !== null && ballOnFire()) lightNet(goal); else quench();
-    ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null });
+    ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null }, fouls);
+    if (fouls.faceoff) play = ububallMatch.newPlay();
+    announceFouls();
     if (goal !== null) ububallMatch.noteScore(tally, scores);
     roundTurns++;
     matchTicks += ticks;
@@ -1647,7 +1834,7 @@
       if (phase === 'goal') { $('launch').disabled = false; $('launch').textContent = 'Next kickoff'; }
     } else {
       turn++; phase = 'plan'; resetPlans(true);
-      say(pulseMode() && !P.settled(bodies) ? 'Pulse paused. Adjust your launches or guard to brake.' : 'Field settled. Plan your next three launches.');
+      say(foulText() || (pulseMode() && !P.settled(bodies) ? 'Pulse paused. Adjust your launches or guard to brake.' : 'Field settled. Plan your next three launches.'));
     }
     draw();
   }
@@ -1720,6 +1907,10 @@
   let tapGuards = false;
   canvas.onpointerdown = event => {
     gameAudio()?.getAudioContext();
+    // A warning's explanation opens on a tap; a tap elsewhere only closes it.
+    const warning = warningAt(point(event));
+    if (warning) { openFoulInfo(warning); return; }
+    if (foulInfo) { closeFoulInfo(); return; }
     if (phase !== 'plan') return;
     const p = point(event);
     const target = fieldTarget(event);
@@ -1740,7 +1931,8 @@
   canvas.onpointermove = event => {
     const p = point(event);
     if (drag !== event.pointerId || phase !== 'plan') {
-      if (phase === 'plan') {
+      if (warningAt(p)) canvas.style.cursor = 'pointer';
+      else if (phase === 'plan') {
         const target = fieldTarget(event);
         canvas.style.cursor = target.index < 0 ? 'default' : target.mode === 'super' ? 'pointer' : target.mode === 'arrow' ? 'grab' : 'crosshair';
       }
@@ -1888,6 +2080,7 @@
       let steps = 0;
       while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
         const tick = ububallMatch.playTick(P, bodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
+        ububallMatch.lapseFouls(P, bodies, fouls);
         for (const save of tick.saves) creditSave(bodies[save.index], save.own);
         if (tick.struck) popup(bodies[6], 'Spin strike!');
         if (tick.stop) { impact(tick.stop); accumulator = 0; }
@@ -1897,7 +2090,7 @@
       if (phase === 'play') emitSkaterEffects(delta);
       draw();
     } else if (goalReplay && active && !online?.active) advanceGoalReplay(delta);
-    else if (active && (hadEffects || (!reducedMotion.matches && bodies.some(b => b.meter >= 100 || b.superArm || b.superActive)))) draw();
+    else if (active && (hadEffects || (!reducedMotion.matches && (foulsShowing() || bodies.some(b => b.meter >= 100 || b.superArm || b.superActive))))) draw();
     flushMeters();
     requestAnimationFrame(frame);
   }
@@ -2141,7 +2334,8 @@
       document.body.classList.remove('stadium-fullscreen-active');
       updateFullscreenUI();
       draw();
-    } else if (e.key === 'Escape' && inMatch && !document.querySelector('dialog[open]')) openPause();
+    } else if (e.key === 'Escape' && foulInfo) closeFoulInfo();
+    else if (e.key === 'Escape' && inMatch && !document.querySelector('dialog[open]')) openPause();
   });
 
   // Match mode: the field fills the screen and the site chrome hides. Entering adds a history
@@ -2222,6 +2416,12 @@
   }
   // Maps simulation bodies (server seat-0 order and coordinates) onto the displayed bodies.
   const viewIndex = (i, seat) => seat ? (i < 3 ? i + 3 : i < 6 ? i - 3 : 6) : i;
+  // The server's fouls as this seat sees them: teams swapped and the rink turned half round.
+  function viewFouls(f, seat) {
+    if (!f) return ububallMatch.newFouls();
+    if (!seat) return structuredClone(f);
+    return { ...f, crease: [f.crease[1], f.crease[0]], corner: f.corner === null ? null : 3 - f.corner, cards: f.cards.map(i => viewIndex(i, seat)) };
+  }
   function toViewBody(cb, sim = onlineReplay?.simBodies, seat = online?.state?.seat) {
     if (!cb) return null;
     const idx = sim?.indexOf(cb);
@@ -2247,7 +2447,7 @@
         vb.meter = cb.meter ?? 0;
         vb.guarding = Boolean(cb.guarding); vb.daze = cb.daze || 0;
         vb.superActive = cb.superActive || null;
-        vb.stunned = Boolean(cb.stunned || cb.stunnedNext);
+        vb.stunned = Boolean(cb.stunned || cb.stunnedNext); vb.carded = Boolean(cb.carded);
         vb.stuckTo = cb.stuckTo ? toViewBody(cb.stuckTo, sim, seat) : null;
         dirtyMeters.add(vb);
       }
@@ -2277,16 +2477,20 @@
     const targetTick = Math.min(replay.ticks, Math.floor(elapsedSec / P.DT));
     if (replay.currentTick === undefined) replay.currentTick = 0;
 
+    // Warnings lapse during the replay as they did on the server.
+    const simFouls = viewFouls(fouls, online.state.seat);
     if (targetTick - replay.currentTick > 60) {
       while (replay.currentTick < targetTick - 8) {
         P.step(replay.simBodies, P.DT);
         replay.currentTick++;
+        ububallMatch.lapseFouls(P, replay.simBodies, simFouls);
       }
     }
 
     while (replay.currentTick < targetTick) {
       P.step(replay.simBodies, P.DT, replayCollision, replayWall, replayShockwave, replaySuper);
       replay.currentTick++;
+      ububallMatch.lapseFouls(P, replay.simBodies, simFouls);
       const now = replay.currentTick, saves = (replay.saves || []).filter(s => s.tick === now), struck = replay.struck?.includes(now);
       if (saves.length || struck) syncViewBodies();
       for (const s of saves) popup(toViewBody(replay.simBodies[s.index]), s.own ? 'Save...' : 'Save!');
@@ -2296,6 +2500,7 @@
       if (stop) { replay.paused = (replay.paused || 0) + stop; impact(stop); break; }
     }
     syncViewBodies();
+    if (!replay.fouled) fouls = viewFouls(simFouls, online.state.seat);
 
     if (replay.goal !== null) {
       const preScores = online.state.seat ? [...online.state.game.scores].reverse() : [...online.state.game.scores];
@@ -2334,6 +2539,10 @@
         Object.assign(bodies[i], sample);
         dirtyMeters.add(bodies[i]);
       });
+      if (!replay.fouled) {
+        replay.fouled = true; fouls = viewFouls(online.state.game.fouls, online.state.seat); announceFouls();
+        if (replay.goal === null && foulText()) say(foulText());
+      }
     }
 
     recordTrails(); emitSkaterEffects(Math.min(.05, 1 / 60)); draw();
@@ -2377,6 +2586,7 @@
       }
       if (s.phase !== 'resolving') { endGoalReplay(); stopFanfare(); }
       bodies = viewBodies(s.game.bodies, s.seat);
+      if (!s.replay) fouls = viewFouls(s.game.fouls, s.seat);
       // A running goal replay keeps the display; the server state becomes what it restores.
       if (goalReplay) { goalReplay.real = bodies; bodies = goalReplay.display; }
       stats = onlineOrder(s.game.stats, s.seat);
@@ -2504,7 +2714,7 @@
   // the player's own ubus arrive after sign-in), it stops and the loop starts the new turn's.
   async function demoPlanTurn(run) {
     const game = demoGame, t = turn, current = () => game === demoGame && phase === 'plan' && turn === t;
-    const planning = demoClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn },
+    const planning = demoClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn, fouls },
       { level: demoLevels[0], seed: turn }, 0);
     await planBanner; await demoWait(run, 600);
     const result = await planning;

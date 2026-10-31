@@ -413,3 +413,73 @@ test('a Cannonball hit always earns big-shot hit-stop', () => {
   const first=r=>r.replay.stops[0]?.tick ?? Infinity, cannon=M.resolveTurn(P,state,moves);
   assert.ok(first(cannon)<first(plain) && cannon.replay.stops[0].ms>=M.HIT_STOP.hit);
 });
+// Fouls: places ubus (by index) and the ball, then ends a quiet turn.
+function foulTurn(fouls, place, ball = {x:500,y:300}) {
+  const bodies=P.kickoff(); bodies.slice(0,6).forEach(b=>{P.applyStats(b);b.meter=100;});
+  Object.assign(bodies[6],ball);
+  for (const [i,at] of Object.entries(place)) Object.assign(bodies[i],at);
+  M.finishTurn(P,bodies,[],[0,0],null,'standard',{},fouls);
+  return bodies;
+}
+test('goal camping warns a crowded crease, then cards its defenders if it stays crowded', () => {
+  const fouls=M.newFouls(), crowd={0:{x:80,y:270},1:{x:80,y:330}};
+  // A lone goalie is fine, and each attacker past the zone line (crease or not) allows a defender.
+  foulTurn(fouls,{0:{x:80,y:300}}); assert.deepEqual(fouls.crease,[false,false]);
+  foulTurn(fouls,{...crowd,3:{x:160,y:150},4:{x:165,y:450}}); assert.deepEqual(fouls.crease,[false,false]);
+  foulTurn(fouls,{...crowd,3:{x:160,y:150},4:{x:200,y:450}}); assert.deepEqual(fouls.crease,[true,false]);
+  M.lapseFouls(P,foulTurn(M.newFouls(),{}),fouls); assert.deepEqual(fouls.crease,[false,false]);
+  // Only a ubu with its centre in the crease counts.
+  foulTurn(fouls,{0:{x:80,y:300},1:{x:150,y:300}}); assert.deepEqual(fouls.crease,[false,false]);
+  foulTurn(fouls,crowd); assert.deepEqual(fouls.crease,[true,false]); assert.deepEqual(fouls.cards,[]);
+  // Fully leaving clears the warning.
+  foulTurn(fouls,{0:{x:80,y:300}}); assert.deepEqual(fouls.crease,[false,false]);
+  foulTurn(fouls,crowd);
+  const bodies=foulTurn(fouls,{...crowd,2:{x:120,y:300}});
+  assert.deepEqual(fouls.cards,[0,1,2]); assert.deepEqual(fouls.crease,[false,false]);
+  for (const i of [0,1,2]) {
+    const b=bodies[i]; assert.deepEqual({x:b.x,y:b.y},P.spawn(0,i));
+    assert.equal(b.meter,0); assert.ok(b.carded && b.stunned); assert.ok(!M.inCrease(P,b,0));
+  }
+  // The card lasts one turn.
+  M.finishTurn(P,bodies,[],[0,0],null,'standard',{},fouls); assert.ok(bodies.every(b=>!b.carded));
+});
+test('corner stalling warns after four turns, then cards the larger team there and resets the ball', () => {
+  const fouls=M.newFouls(), corner={x:90,y:90}, place={0:{x:120,y:75},3:{x:75,y:125},4:{x:135,y:130}};
+  for (let n=1;n<=4;n++) { foulTurn(fouls,place,corner); assert.equal(fouls.cornerTurns,n); }
+  assert.equal(fouls.corner,0); assert.ok(!fouls.faceoff);
+  // The ball leaving its corner during play ends the count at once.
+  const lapsed=structuredClone(fouls); M.lapseFouls(P,P.kickoff(),lapsed); assert.equal(lapsed.corner,null); assert.equal(lapsed.cornerTurns,0);
+  const bodies=foulTurn(fouls,{...place,0:{x:500,y:300}},corner);
+  assert.ok(fouls.faceoff); assert.deepEqual(fouls.cards,[3,4]); assert.equal(fouls.corner,null);
+  // Centre ice was taken, so the ball sits at the nearest clear spot on the centre line.
+  assert.equal(bodies[6].x,500); assert.equal(bodies[6].y,240); assert.ok(!bodies[0].carded);
+  // An even corner cards nobody; moving the ball to another corner restarts the count.
+  const tie=M.newFouls();
+  for (let n=0;n<5;n++) foulTurn(tie,{0:{x:120,y:75},3:{x:75,y:125}},corner);
+  assert.ok(tie.faceoff); assert.deepEqual(tie.cards,[]);
+  const moved=M.newFouls(); for (let n=0;n<3;n++) foulTurn(moved,{},corner);
+  foulTurn(moved,{},{x:910,y:510}); assert.equal(moved.corner,3); assert.equal(moved.cornerTurns,1);
+});
+test('a camping warning lapses during play once a defender leaves the crease, and the turn end only warns again', () => {
+  const state=shotState({x:500,y:300},{0:{x:80,y:270},1:{x:80,y:330}},{fouls:{...M.newFouls(),crease:[true,false]}});
+  const leave={angle:0,power:1,spin:0,superArm:false,guard:false};
+  // One leaves; the warning lapses and nobody is carded.
+  const left=M.resolveTurn(P,state,[still(),leave,still(),still(),still(),still()]).state;
+  assert.deepEqual(left.fouls.crease,[false,false]); assert.deepEqual(left.fouls.cards,[]);
+  // Staying put keeps the warning, and the turn end cards both.
+  const stayed=M.resolveTurn(P,state,Array.from({length:6},still)).state;
+  assert.deepEqual(stayed.fouls.cards,[0,1]);
+  // Lapsed during play then crowded again by the turn's end: a fresh warning, not a card.
+  const fouls={...M.newFouls(),crease:[true,false]}; M.lapseFouls(P,P.kickoff(),fouls);
+  foulTurn(fouls,{0:{x:80,y:270},1:{x:80,y:330}}); assert.deepEqual(fouls.crease,[true,false]); assert.deepEqual(fouls.cards,[]);
+});
+test('a carded ubu touches nothing, and a corner reset starts a fresh play', () => {
+  const bodies=P.kickoff(); bodies.slice(0,6).forEach(b=>P.applyStats(b));
+  Object.assign(bodies[0],{x:400,y:300,carded:true}); Object.assign(bodies[6],{x:460,y:300,vx:-600});
+  for (let t=0;t<80;t++) P.step(bodies,P.DT);
+  assert.ok(bodies[6].x<330); assert.equal(bodies[0].x,400);
+  const state=shotState({x:90,y:90},{3:{x:120,y:75}},{fouls:{...M.newFouls(),corner:0,cornerTurns:4},lastTouch:[null,3],credit:{3:1}});
+  const next=M.resolveTurn(P,state,Array.from({length:6},still)).state;
+  assert.ok(next.fouls.faceoff); assert.deepEqual(next.fouls.cards,[3]);
+  assert.deepEqual(next.lastTouch,[null,null]); assert.deepEqual(next.credit,{});
+});

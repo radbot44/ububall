@@ -233,15 +233,85 @@
   function honours(tally, scores, winner) {
     return { comeback: tally.deficit[winner] >= 3, shutout: scores[1 - winner] === 0 };
   }
+  // Fouls (owner decisions 2026-10-31), called at the end of every turn without a goal.
+  // Goal camping: each end has an attack zone, from the end boards to a line across the rink at the
+  // rear kickoff spot. A team is camping when more of its ubus have their centres in its own crease
+  // than the larger of one and the opposing ubus with their centres in that zone. Camping warns the
+  // team; if the next turn also ends with it camping, its ubus in the crease are carded. Corner
+  // stalling: when the ball ends `stallTurns` turns in a row in one corner the field is warned; if the
+  // next turn ends with it still there, the team with more ubus in that corner has them carded (a tie
+  // cards nobody) and the ball is reset to centre ice. A warning lapses the moment it stops applying
+  // during play, and a corner count ends once the ball leaves its corner (see `lapseFouls`). A carded
+  // ubu loses its meter, returns to its spawn and sits out the next turn, touching nothing. The crease
+  // radius around the goal mouth's centre is tuning.
+  const FOULS = Object.freeze({ crease: 80, stallTurns: 4 });
+  function newFouls() { return { crease: [false, false], corner: null, cornerTurns: 0, cards: [], faceoff: false }; }
+  function inCrease(P, b, team) {
+    return Math.hypot(b.x - (team ? P.rink.right : P.rink.left), b.y - (P.rink.goalTop + P.rink.goalBottom) / 2) < FOULS.crease;
+  }
+  // The line closing the attack zone in front of a team's goal runs across the rink at its rear kickoff spot.
+  function attackZoneLine(P, team) { return P.spawn(team, 0).x; }
+  function inAttackZone(P, b, team) { return team ? b.x > attackZoneLine(P, team) : b.x < attackZoneLine(P, team); }
+  function camping(P, bodies, team) {
+    const ubus = bodies.slice(0, 6);
+    return ubus.filter(b => b.team === team && inCrease(P, b, team)).length > Math.max(1, ubus.filter(b => b.team === 1 - team && inAttackZone(P, b, team)).length);
+  }
+  // The corner (0 top left, 1 top right, 2 bottom left, 3 bottom right) whose square, grown by
+  // `margin`, holds the point, or null.
+  function cornerOf(P, x, y, margin = 0) {
+    const k = P.rink, span = k.corner + margin;
+    const side = x < k.left + span ? 0 : x > k.right - span ? 1 : null, end = y < k.top + span ? 0 : y > k.bottom - span ? 2 : null;
+    return side === null || end === null ? null : side + end;
+  }
+  // Every tick of play: a crease warning lapses once its team stops camping, and the corner count
+  // (with any warning) ends once the ball leaves its corner, until the turn's end calls them again.
+  function lapseFouls(P, bodies, fouls) {
+    for (const team of [0, 1]) if (fouls.crease[team] && !camping(P, bodies, team)) fouls.crease[team] = false;
+    const ball = bodies[6];
+    if (fouls.corner !== null && cornerOf(P, ball.x, ball.y) !== fouls.corner) { fouls.corner = null; fouls.cornerTurns = 0; }
+  }
+  function callFouls(P, bodies, fouls) {
+    const ubus = bodies.slice(0, 6), ball = bodies[6], carded = new Set();
+    for (const team of [0, 1]) {
+      const now = camping(P, bodies, team);
+      if (now && fouls.crease[team]) ubus.filter(b => b.team === team && inCrease(P, b, team)).forEach(b => carded.add(b));
+      fouls.crease[team] = now && !fouls.crease[team];
+    }
+    const corner = cornerOf(P, ball.x, ball.y);
+    fouls.cornerTurns = corner === null ? 0 : corner === fouls.corner ? fouls.cornerTurns + 1 : 1;
+    fouls.corner = corner;
+    fouls.faceoff = fouls.cornerTurns > FOULS.stallTurns;
+    if (fouls.faceoff) {
+      const inside = ubus.filter(b => cornerOf(P, b.x, b.y, b.radius) === corner);
+      const count = [0, 1].map(team => inside.filter(b => b.team === team).length);
+      if (count[0] !== count[1]) inside.filter(b => b.team === (count[0] > count[1] ? 0 : 1)).forEach(b => carded.add(b));
+      fouls.corner = null; fouls.cornerTurns = 0;
+    }
+    for (const b of carded) {
+      P.endSuper(b, bodies);
+      Object.assign(b, P.spawn(b.team, b.slot), { vx: 0, vy: 0, omega: 0, meter: 0, daze: 0, guarding: false, superArm: false, stunned: true, carded: true });
+    }
+    if (fouls.faceoff) {
+      // Centre ice, or the nearest clear spot along the centre line.
+      const clear = y => ubus.every(b => b.carded || Math.hypot(b.x - 500, b.y - y) >= b.radius + ball.radius);
+      const y = [300, 240, 360, 180, 420, 120, 480].find(clear) ?? 300;
+      Object.assign(ball, { x: 500, y, vx: 0, vy: 0, omega: 0, stuckTo: null, stickOffset: null });
+    }
+    fouls.cards = ubus.flatMap((b, i) => carded.has(b) ? [i] : []);
+  }
   // `bonus` names who earns goal bonuses (by index): `ace` for a goal (not an own goal) on the round's
-  // first turn, and `assist`.
-  function finishTurn(P, bodies, stats, scores, goal, mode, bonus = {}) {
+  // first turn, and `assist`. `fouls` (see `callFouls`) is updated in place.
+  function finishTurn(P, bodies, stats, scores, goal, mode, bonus = {}, fouls = newFouls()) {
     const classic = rule(mode, 'classic');
     // Turn effects end every turn; in Pulse, momentum carries into the next one.
     P.stop(bodies, rule(mode, 'pulse') && goal === null);
     for (const b of bodies.slice(0, 6)) {
       if (b.stunnedNext) { b.stunned = true; delete b.stunnedNext; }
+      // A card lasts the turn after it is given.
+      b.carded = false;
     }
+    if (goal === null) callFouls(P, bodies, fouls);
+    else Object.assign(fouls, newFouls());
     if (goal !== null) {
       scores[goal]++;
       for (const b of bodies.filter(b => b.team === 1 - goal)) gainMeter(P, bodies, stats, b, METER.conceded, classic);
@@ -271,11 +341,13 @@
     // The match clock counts simulated ticks across turns for meter cooldowns.
     const clock = state.clock || 0;
     let goal = null, ticks = 0;
+    next.fouls ||= newFouls();
     const saved = [], struck = [], stops = [], tally = state.tally ? structuredClone(state.tally) : newTally();
     for (let tick = 1; tick <= limit; tick++) {
       const result = playTick(P, bodies, play, { collide: (a, b, speed) => { contactMeter(P, bodies, next.stats, a, b, speed, clock + tick, classic); watch?.collide?.(a, b, speed); },
         wall: watch?.wall }, tally, effects);
       goal = result.goal;
+      lapseFouls(P, bodies, next.fouls);
       for (const save of result.saves) {
         saved.push({ tick, ...save });
         if (!save.own) gainMeter(P, bodies, next.stats, bodies[save.index], METER.save, classic);
@@ -289,16 +361,17 @@
     // A round runs from kickoff to goal; scoring on its first turn is an ace.
     const ace = goal !== null && !state.roundTurns;
     const call = goal === null ? { scorer: null, assist: null, own: false, label: null } : callGoal(bodies, play, tally, goal, ace);
-    next.winner = finishTurn(P, bodies, next.stats, next.scores, goal, state.mode, { ace: ace && !call.own ? call.scorer : null, assist: call.assist });
+    next.winner = finishTurn(P, bodies, next.stats, next.scores, goal, state.mode, { ace: ace && !call.own ? call.scorer : null, assist: call.assist }, next.fouls);
     if (goal !== null) noteScore(tally, next.scores);
     next.roundTurns = goal === null ? (state.roundTurns || 0) + 1 : 0;
     next.clock = clock + ticks;
-    Object.assign(next, goal === null ? play : newPlay(), { tally });
+    // A goal or a corner reset starts a fresh play.
+    Object.assign(next, goal === null && !next.fouls.faceoff ? play : newPlay(), { tally });
     next.turn++;
     next.phase = next.winner !== null ? 'over' : goal !== null ? 'goal' : 'plan';
     return { state: next, replay: { version: VERSION, turn: state.turn, plans, ticks, goal, scorer: call.scorer, assist: call.assist,
       label: call.label, saves: saved, struck, stops, initialBodies } };
   }
-  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, replaySpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, SAVE, BIG_SHOT, HIT_STOP, gainMeter, contactMeter, toucher, saves, credit, responsibleTeam, newPlay, newTally, playTick, callGoal, noteScore, honours, finishTurn, resolveTurn };
+  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, replaySpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, SAVE, FOULS, newFouls, inCrease, attackZoneLine, inAttackZone, cornerOf, lapseFouls, BIG_SHOT, HIT_STOP, gainMeter, contactMeter, toucher, saves, credit, responsibleTeam, newPlay, newTally, playTick, callGoal, noteScore, honours, finishTurn, resolveTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallMatch = api;
 })(globalThis);

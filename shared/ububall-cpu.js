@@ -13,7 +13,8 @@
     hard: Object.freeze({ candidates: 120, opponents: 3, risk: .55, temperature: 25 })
   });
   // `role` rewards each ubu that keeps to its job on the field (see `roles`).
-  const WEIGHTS = Object.freeze({ goal: 10000, progress: 1, access: .35, cover: .3, meter: .35, role: 40 });
+  // `card` and `warning` count against yellow cards and standing goal camping warnings (see M.FOULS).
+  const WEIGHTS = Object.freeze({ goal: 10000, progress: 1, access: .35, cover: .3, meter: .35, role: 40, card: 400, warning: 150 });
   // Human-like play (initial tuning, not owner decisions). A plan must still work when aimed a little
   // off: it is also scored with every launch turned by ±`angle` and its power changed by ∓`power`,
   // against the expected response. A goal loses a share of its value for each board bounce or extra
@@ -133,7 +134,10 @@
     const access = players => Math.min(...players.map(b => Math.hypot(b.x - ball.x, b.y - ball.y) + (b.stunned ? 250 : 0)));
     const cover = Math.min(...own.map(b => Math.hypot(b.x - (ownGoal + direction * 75), b.y - 300)));
     const meter = own.reduce((sum, b) => sum + (b.meter || 0), 0) - other.reduce((sum, b) => sum + (b.meter || 0), 0);
-    return direction * (ball.x - 500) * weights.progress + (access(other) - access(own)) * weights.access - cover * weights.cover + meter * weights.meter;
+    const cards = own.filter(b => b.carded).length - other.filter(b => b.carded).length;
+    const warned = (state.fouls?.crease[team] ? 1 : 0) - (state.fouls?.crease[1 - team] ? 1 : 0);
+    return direction * (ball.x - 500) * weights.progress + (access(other) - access(own)) * weights.access - cover * weights.cover + meter * weights.meter -
+      cards * weights.card - warned * weights.warning;
   }
   function plan(input, team = 1, config = {}) {
     if (team !== 0 && team !== 1) throw new Error('Invalid CPU team.');

@@ -1008,6 +1008,24 @@ body:has(#online-dialog[open]) { overflow: hidden; }
   font-family: var(--font-display); font-size: clamp(32px, 12cqmin, 76px); line-height: 1; text-align: center; color: var(--text);
   -webkit-text-stroke: .08em #101217; paint-order: stroke fill; text-shadow: 0 6px 18px #000a; opacity: 0;
 }
+/* A foul's explanation, opened from its warning beside the boards; placed by updateFoulInfo. */
+.foul-info {
+  position: absolute; z-index: 40; transform: translate(-50%, -50%); box-sizing: border-box;
+  overflow: auto; padding: 14px 16px 12px;
+  background: var(--elevated); color: var(--text); border: 2px solid #ffb020;
+  border-radius: 12px; box-shadow: 0 16px 40px rgb(0 0 0 / .45); font: 13px/1.45 var(--font-body);
+}
+.foul-info[hidden] { display: none; }
+.foul-info h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font: 400 18px/1.2 var(--font-display); }
+.foul-info h3 svg { flex: none; width: 20px; height: 20px; fill: none; stroke: #ffb020; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.foul-info p { margin: 0 0 8px; color: var(--muted); }
+.foul-info p:last-child { margin-bottom: 0; }
+.foul-info p.act { color: #ffb020; font-weight: 700; }
+.foul-info button {
+  display: block; width: 100%; margin-top: 12px; padding: 9px 12px; border: 0; border-radius: 8px;
+  background: #ffb020; color: #101217; font: 400 15px/1 var(--font-display); cursor: pointer;
+}
+.foul-info button:hover { background: #ffc24d; }
 .rink-stage { container-type: size; }
 .field-banner[data-tone="launch"] { color: var(--primary); }
 .field-banner[data-tone="home"] { color: var(--team-home); }
