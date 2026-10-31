@@ -30,6 +30,9 @@
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const cpuClient = createCPUClient();
   let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuLevel = 'medium';
+  // The home screen demo (CPU against CPU) plays silently.
+  let demo = false;
+  const gameAudio = () => demo ? null : window.ubuAudio;
   const classicMode = () => ububallMatch.rule(matchMode, 'classic');
   const blitzMode = () => ububallMatch.rule(matchMode, 'blitz');
   const pulseMode = () => ububallMatch.rule(matchMode, 'pulse');
@@ -139,7 +142,7 @@
   function sparkBall(ball, dt) {
     const speed = Math.hypot(ball.vx, ball.vy), share = speed / P.MAX_SPEED;
     fireTime = share > HEAT.fire && !ball.stuckTo ? fireTime + dt : 0;
-    if (ballOnFire() && !sizzle) sizzle = window.ubuAudio?.playSizzle?.() || null;
+    if (ballOnFire() && !sizzle) sizzle = gameAudio()?.playSizzle?.() || null;
     else if (!ballOnFire()) quench();
     const level = Math.max(ballFlare, (share - HEAT.red) / (HEAT.redHot - HEAT.red));
     const ux = speed ? ball.vx / speed : 0, uy = speed ? ball.vy / speed : -1;
@@ -169,7 +172,7 @@
     for (const y of [P.rink.goalTop, P.rink.goalBottom]) flames((netFire.mouth + back) / 2, y, 30, 0, 0, dt * 15);
     const ball = bodies[6];
     if (ball) flames(ball.x, ball.y, ball.radius * 1.2, 0, 0, dt * 60);
-    if (!sizzle) sizzle = window.ubuAudio?.playSizzle?.() || null;
+    if (!sizzle) sizzle = gameAudio()?.playSizzle?.() || null;
   }
   function lightNet(team) { netFire = { mouth: team ? P.rink.left : P.rink.right, lit: true }; }
   // A burning ball scorches a dark streak into the ice along its path.
@@ -237,7 +240,7 @@
   let fanfareLoop = null;
   function loopFanfare(voice) {
     stopFanfare();
-    if (voice && window.ubuAudio) fanfareLoop = window.ubuAudio.playFanfare(voice, null, null, { loop: true });
+    if (voice && gameAudio()) fanfareLoop = gameAudio().playFanfare(voice, null, null, { loop: true });
   }
   function stopFanfare() {
     fanfareLoop?.stop(); fanfareLoop = null;
@@ -792,7 +795,7 @@
     if (summaryDialog?.open) summaryDialog.close();
   }
   function openSummary() {
-    if (!summaryPending) return;
+    if (!summaryPending || demo) return;
     summaryPending = false; clearTimeout(summaryTimer);
     const { tally: t, scores: sc } = viewTally(), winner = sc[0] > sc[1] ? 0 : 1, h = ububallMatch.honours(t, sc, winner);
     const them = online?.active ? 'Opponent' : 'CPU';
@@ -1151,10 +1154,10 @@
     document.body.classList.toggle('classic-match', classicMode());
     $('mode-label').textContent = ububallMatch.modeName(matchMode);
     stats = [...draft, ...practice.slice(3)].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
-    stopFanfare(); window.ubuAudio?.stop();
+    stopFanfare(); gameAudio()?.stop();
     roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     resetPlans(); say('Drag from an ubu toward your target to aim. Drag its arrowhead to adjust power and direction.'); draw();
-    if (playJingle) window.ubuAudio?.playGameStart?.();
+    if (playJingle) gameAudio()?.playGameStart?.();
   }
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
   function line(x1, y1, x2, y2, color, width = 2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
@@ -1652,9 +1655,9 @@
       if (isFullscreenActive()) await toggleFullscreen();
       $('new-match').click(); return;
     }
-    window.ubuAudio?.getAudioContext();
+    gameAudio()?.getAudioContext();
     if (phase === 'goal') {
-      stopFanfare(); window.ubuAudio?.stop();
+      stopFanfare(); gameAudio()?.stop();
       endGoalReplay();
       bodies = kickoff(); turn++; phase = 'plan'; resetPlans(); say('Kickoff. Plan your next three launches.'); draw(); return;
     }
@@ -1664,7 +1667,7 @@
     await cpuReady;
     if (generation !== cpuGeneration || phase !== 'cpu-wait' || online?.active) return;
     if ($('field-spin').contains(document.activeElement)) document.activeElement.blur();
-    window.ubuAudio?.stop();
+    gameAudio()?.stop();
     lastPlans = structuredClone(plans);
     drag = null;
     const turnPlans = [...plans, ...($('cpu-hold').checked ? [] : cpu)];
@@ -1711,7 +1714,7 @@
   }
   let tapGuards = false;
   canvas.onpointerdown = event => {
-    window.ubuAudio?.getAudioContext();
+    gameAudio()?.getAudioContext();
     if (phase !== 'plan') return;
     const p = point(event);
     const target = fieldTarget(event);
@@ -1779,21 +1782,21 @@
       const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
       if (!player._lastHitSound || (now - player._lastHitSound) > 55) {
         player._lastHitSound = now;
-        if (player.voice && window.ubuAudio) {
-          window.ubuAudio.playCollision(player.voice, { volume });
+        if (player.voice && gameAudio()) {
+          gameAudio().playCollision(player.voice, { volume });
         }
-        if (window.ubuAudio) {
-          window.ubuAudio.playBallHit({ volume });
+        if (gameAudio()) {
+          gameAudio().playBallHit({ volume });
         }
       }
     } else if (a.team !== -1 && b.team !== -1) {
       const norm = Math.min(1.0, Math.max(0.0, (speed - 40) / 600));
       const volume = Math.min(1.0, 0.12 + 0.75 * (norm ** 0.8));
       const primary = (Math.hypot(a.vx, a.vy) * a.mass >= Math.hypot(b.vx, b.vy) * b.mass) ? a : b;
-      if (primary.voice && window.ubuAudio) {
+      if (primary.voice && gameAudio()) {
         if (!primary._lastHitSound || (now - primary._lastHitSound) > 65) {
           primary._lastHitSound = now;
-          window.ubuAudio.playCollision(primary.voice, { volume });
+          gameAudio().playCollision(primary.voice, { volume });
         }
       }
     }
@@ -1808,13 +1811,13 @@
       Math.min(1, velocity / 500), false, Math.atan2(ny, nx) + Math.PI / 2);
     const norm = Math.min(1.0, Math.max(0.0, (velocity - 20) / 480));
     const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
-    if (!window.ubuAudio) return;
+    if (!gameAudio()) return;
     if (wallType === 'post') {
-      window.ubuAudio.playGoalHit('post', { volume: Math.min(1.0, volume * 1.1) });
+      gameAudio().playGoalHit('post', { volume: Math.min(1.0, volume * 1.1) });
     } else if (wallType === 'net') {
-      window.ubuAudio.playGoalHit('net', { volume });
+      gameAudio().playGoalHit('net', { volume });
     } else {
-      window.ubuAudio.playWallHit({ volume });
+      gameAudio().playWallHit({ volume });
     }
   }
   const superImpactTimes = new WeakMap();
@@ -1841,15 +1844,15 @@
           maxRadius: key === 'cannonball' ? 48 : 36, team: body.team, color, life: .24, duration: .24 });
       }
     }
-    window.ubuAudio?.playSuper?.(key, phase);
+    gameAudio()?.playSuper?.(key, phase);
   }
   function handleShockwave(source, radius) {
     burst(source.x, source.y, source.team, 1, false, 0, '#ff7197');
     burst(source.x, source.y, source.team, 1, false, 0, '#9d467a');
     shockwaves.push({ x: source.x, y: source.y, currentRadius: 10, maxRadius: radius, team: source.team, color: '#ff7197', life: 0.35, duration: 0.35 });
     shockwaves.push({ x: source.x, y: source.y, currentRadius: 6, maxRadius: radius * 0.88, team: source.team, color: '#9d467a', life: 0.30, duration: 0.30 });
-    if (window.ubuAudio) {
-      window.ubuAudio.playSuper?.('shockwave', 'impact', { volume: 0.8 });
+    if (gameAudio()) {
+      gameAudio().playSuper?.('shockwave', 'impact', { volume: 0.8 });
     }
   }
   const liveFx = { collide: handleCollision, wall: handleWall, shockwave: handleShockwave, super: handleSuper };
@@ -1889,100 +1892,100 @@
     requestAnimationFrame(frame);
   }
   function updateRosterSuperPicker() {
-    const picker = $('roster-super');
     const grid = $('roster-super-grid');
-    if (!picker) return;
-    picker.replaceChildren();
-    if (grid) grid.replaceChildren();
+    grid.replaceChildren();
     const entry = draft[rosterSlot];
     if (!entry) return;
-    const available = entry?.model?.supers
-      ? Array.from(new Set(entry.model.supers.map(s => s % 8)))
-      : [0, 1, 2, 3, 4, 5, 6, 7];
+    const available = entry.model?.supers ? Array.from(new Set(entry.model.supers.map(s => s % 8))) : [0, 1, 2, 3, 4, 5, 6, 7];
     const list = available.length ? available.map(id => P.SUPERS[id]) : P.SUPERS;
-    const currentId = (entry.equippedSuper?.id ?? ((entry.model?.supers?.[0] ?? rosterSlot) % 8));
-    list.forEach(s => {
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      opt.textContent = `${s.name}: ${s.desc}`;
-      if (s.id === currentId) opt.selected = true;
-      picker.append(opt);
-
-      if (grid) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'super-picker-btn';
-        btn.setAttribute('aria-pressed', String(s.id === currentId));
-        btn.title = `${s.name}: ${s.desc}`;
-        const img = document.createElement('img');
-        img.src = s.icon;
-        img.alt = s.name;
-        const txt = document.createElement('span');
-        txt.textContent = s.name;
-        btn.append(img, txt);
-        btn.onclick = () => {
-          draft[rosterSlot].equippedSuper = s;
-          rosterSlots();
-        };
-        grid.append(btn);
-      }
-    });
-    picker.onchange = () => {
-      draft[rosterSlot].equippedSuper = P.SUPERS[Number(picker.value)];
-      rosterSlots();
-    };
+    const currentId = entry.equippedSuper?.id ?? ((entry.model?.supers?.[0] ?? rosterSlot) % 8);
+    $('roster-super-name').textContent = P.SUPERS[currentId].name + ': ' + P.SUPERS[currentId].desc;
+    for (const s of list) {
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'super-picker-btn'; btn.title = `${s.name}: ${s.desc}`;
+      btn.setAttribute('aria-pressed', String(s.id === currentId));
+      btn.append(Object.assign(document.createElement('img'), { src: s.icon, alt: '' }), Object.assign(document.createElement('span'), { textContent: s.name }));
+      btn.onclick = () => { draft[rosterSlot] = { ...draft[rosterSlot], equippedSuper: s }; rosterSlots(); };
+      grid.append(btn);
+    }
   }
   function rosterSlots() {
     $('roster-slots').replaceChildren();
     draft.forEach((entry, i) => {
       const button = document.createElement('button');
+      button.type = 'button'; button.className = 'roster-slot';
       const superObj = entry.equippedSuper || P.SUPERS[(entry.model?.supers?.[0] ?? i) % 8];
-      const icon = document.createElement('img');
-      icon.className = 'slot-super-icon';
-      icon.src = superObj.icon;
-      icon.alt = superObj.name;
-      const text = document.createElement('span');
-      text.textContent = `${entry.model.parts.fullName} · ${superObj.name} `;
-      button.append(text, icon);
+      const superLabel = document.createElement('small');
+      superLabel.append(Object.assign(document.createElement('img'), { src: superObj.icon, alt: '' }), superObj.name);
+      button.append(ubuRender(entry.model, 'roster-slot-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }), superLabel);
       button.setAttribute('aria-pressed', String(i === rosterSlot));
+      button.setAttribute('aria-label', `Slot ${i + 1}: ${entry.model.parts.fullName}`);
       button.onclick = () => { rosterSlot = i; rosterSlots(); };
       $('roster-slots').append(button);
     });
+    for (const option of document.querySelectorAll('.roster-option')) option.setAttribute('aria-pressed', String(draft.some(d => d.key === option.dataset.key)));
     updateRosterSuperPicker();
   }
-  function addOption(entry) {
-    const button = document.createElement('button'), label = document.createElement('span'); label.textContent = entry.model.parts.fullName + ' · ' + entry.label;
-    button.append(ubuRender(entry.model, 'ball-thumb'), label);
+  // Each choosable ubu gets a key so the same ubu cannot fill two slots.
+  function addOption(entry, container) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'roster-option'; button.dataset.key = entry.key;
+    button.append(ubuRender(entry.model, 'roster-option-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }),
+      Object.assign(document.createElement('small'), { textContent: entry.label }));
     button.onclick = () => {
-      const other = draft.indexOf(entry);
-      if (other >= 0 && other !== rosterSlot) { $('roster-status').textContent = 'That ubu is already on your team. Choose another character.'; return; }
-      draft[rosterSlot] = entry; rosterSlot = (rosterSlot + 1) % 3; rosterSlots(); $('roster-status').textContent = 'Team updated. Select a slot to change it.';
-    }; $('roster-options').append(button);
+      const other = draft.findIndex(d => d.key === entry.key);
+      if (other >= 0 && other !== rosterSlot) { rosterSlot = other; rosterSlots(); $('roster-status').textContent = 'That ubu is already on your team.'; return; }
+      draft[rosterSlot] = entry; rosterSlot = (rosterSlot + 1) % 3; rosterSlots(); $('roster-status').textContent = '';
+    };
+    $(container).append(button);
   }
+  practice.forEach((entry, i) => { entry.key = 'practice-' + i; });
   async function api(path) { const response = await fetch(path); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Could not load collection.'); return data; }
-  async function loadCollection() {
-    $('load-collection').disabled = $('more-collection').disabled = true; $('roster-status').textContent = 'Loading your collection…';
-    try {
-      const config = await api('/api/config');
-      const data = await api('/api/ubus?sort=recent' + (next ? '&after=' + encodeURIComponent(next) : ''));
-      const keys = new Map(); let count = 0;
-      const entries = [];
-      for (const entry of data.ubus) {
-        if (!entry.certificate) continue;
-        const result = await ubuFile.read(entry.certificate, { allowUnsigned: false, resolveKey: async (mint, id) => {
-          if (!config.ready || mint !== config.mint || !Object.hasOwn(config.keys, id)) return null;
-          if (!keys.has(id)) keys.set(id, crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: config.keys[id], ext: true }, 'Ed25519', false, ['verify']));
-          return keys.get(id);
-        } });
-        entries.push({ model: ubu.decode(ubu.fromCode(result.dna)), label: '#' + entry.serial }); count++;
-      }
-      entries.forEach(addOption); next = data.next || '';
-      $('more-collection').hidden = !next; $('load-collection').hidden = true;
-      $('roster-status').textContent = count ? `Added ${count} ubus. Select a slot, then choose its character.` : 'No ready ubus on this page. Practice ubus are available below.';
-    } catch (error) { $('roster-status').textContent = error.message + ' You can play with practice ubus, or sign in from the mint page.'; }
-    finally { $('load-collection').disabled = $('more-collection').disabled = false; }
+  // One page of the signed-in player's verified ubus.
+  async function fetchCollectionPage(sort, after) {
+    const config = await api('/api/config');
+    const data = await api('/api/ubus?sort=' + sort + (after ? '&after=' + encodeURIComponent(after) : ''));
+    const keys = new Map(), entries = [];
+    for (const entry of data.ubus) {
+      if (!entry.certificate) continue;
+      const result = await ubuFile.read(entry.certificate, { allowUnsigned: false, resolveKey: async (mint, id) => {
+        if (!config.ready || mint !== config.mint || !Object.hasOwn(config.keys, id)) return null;
+        if (!keys.has(id)) keys.set(id, crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: config.keys[id], ext: true }, 'Ed25519', false, ['verify']));
+        return keys.get(id);
+      } });
+      entries.push({ model: ubu.decode(ubu.fromCode(result.dna)), label: '#' + entry.serial, key: entry.serial });
+    }
+    return { entries, next: data.next || '' };
   }
-  $('load-collection').onclick = $('more-collection').onclick = loadCollection;
+  // The picker lists the collection page by page as the player scrolls; nothing to click.
+  let collectionState = 'idle';
+  async function loadCollection() {
+    if (collectionState === 'loading' || collectionState === 'done') return;
+    if (!window.getUbuSession?.()?.owner) { $('roster-signin').hidden = false; return; }
+    $('roster-signin').hidden = true;
+    collectionState = 'loading'; $('roster-collection-status').textContent = 'Loading your ubus…';
+    try {
+      const page = await fetchCollectionPage('favorite', next);
+      page.entries.forEach(entry => addOption(entry, 'roster-options')); next = page.next;
+      collectionState = next ? 'idle' : 'done';
+      $('roster-collection-status').textContent = !next && !$('roster-options').childElementCount ? 'No ubus yet. Open packs in Ubu Mint to get some.' : '';
+      rosterSlots();
+    } catch (error) { collectionState = 'idle'; $('roster-collection-status').textContent = error.message; }
+  }
+  new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting) && $('roster-dialog').open) void loadCollection(); },
+    { root: $('roster-dialog').querySelector('.team-sheet-body'), rootMargin: '400px' }).observe($('roster-sentinel'));
+  $('roster-signin-btn').onclick = () => window.openDiscordLogin?.();
+  // Signed-in players start with their own ubus (favorites first) until they choose a team.
+  window.addEventListener('ubu:session', async event => {
+    if (!event.detail?.owner || !roster.every(entry => practice.includes(entry))) return;
+    try {
+      const { entries } = await fetchCollectionPage('favorite', '');
+      if (entries.length < 3 || !roster.every(entry => practice.includes(entry))) return;
+      draft = entries.slice(0, 3);
+      if (demo) newMatch(); else if (!matchInProgress()) newMatch(); else roster = [...draft];
+      updateHome();
+    } catch {}
+  });
   const toggleFull = $('toggle-full-stats');
   if (toggleFull) {
     toggleFull.onchange = () => {
@@ -1993,10 +1996,12 @@
   $('new-match').onclick = () => {
     for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(matchMode, rule);
     $('cpu-level').value = cpuLevel;
-    draft = [...roster]; rosterSlot = 0; rosterSlots(); $('roster-status').textContent = 'Test stats stay with their team slots when changing characters.'; $('roster-dialog').showModal();
+    draft = [...roster]; rosterSlot = 0; rosterSlots(); $('roster-status').textContent = ''; $('roster-dialog').showModal();
+    void loadCollection();
   };
   $('start-match').onclick = () => {
     $('roster-dialog').close();
+    stopDemo();
     roster = draft.map(d => ({ ...d }));
     cpuLevel = $('cpu-level').value;
     newMatch(true);
@@ -2066,7 +2071,7 @@
   function resetField() {
     endGoalReplay(); playSegments = [];
     startPlanClock();
-    stopFanfare(); window.ubuAudio?.stop();
+    stopFanfare(); gameAudio()?.stop();
     bodies = kickoff(); scores = [0, 0]; tally = ububallMatch.newTally(); closeSummary(); turn = 1; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     buildTeam();
     prepareCPU(); sync(); previewStats(); draw(); say('Field reset. Your planned launches are preserved.');
@@ -2171,11 +2176,13 @@
   // entry, so the system back button opens the menu instead of leaving the match.
   let inMatch = false;
   const portraitScreen = matchMedia('(orientation: portrait)');
-  function fitOrientation() { if (inMatch && isPortrait !== portraitScreen.matches) toggleRotate(); }
-  function matchInProgress() { return $('home-score').textContent !== '0' || $('away-score').textContent !== '0' || !/Turn 1$/.test($('phase').textContent); }
+  function setPortrait(value) { if (isPortrait !== value) toggleRotate(); }
+  function fitOrientation() { if (inMatch) setPortrait(portraitScreen.matches); }
+  function matchInProgress() { return !demo && phase !== 'over' && ($('home-score').textContent !== '0' || $('away-score').textContent !== '0' || !/Turn 1$/.test($('phase').textContent)); }
   function updateHome() { $('home-play').textContent = online?.active ? 'Back to online match' : matchInProgress() ? 'Resume match' : 'Play vs CPU'; }
   function enterMatch() {
     if (location.pathname !== '/') return;
+    if (demo) { stopDemo(); newMatch(true); }
     if (!history.state?.match) history.pushState({ match: true }, '', location.href);
     if (inMatch) return;
     inMatch = true; document.body.classList.add('in-match');
@@ -2185,7 +2192,8 @@
     if ($('pause-menu').open) $('pause-menu').close();
     if (!inMatch) return;
     inMatch = false; document.body.classList.remove('in-match');
-    layoutDirty = true; updateHome();
+    setPortrait(false); layoutDirty = true; updateHome();
+    if (!matchInProgress()) startDemo();
   }
   function openPause() {
     $('pause-title').textContent = online?.active ? 'Menu' : 'Paused';
@@ -2196,7 +2204,7 @@
   $('pause-resume').onclick = () => $('pause-menu').close();
   $('pause-restart').onclick = () => { $('pause-menu').close(); $('new-match').click(); };
   $('pause-leave').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
-  $('home-play').onclick = enterMatch;
+  $('home-play').onclick = () => { if (phase === 'over' && !online?.active) newMatch(true); enterMatch(); };
   portraitScreen.addEventListener('change', () => { fitOrientation(); draw(); });
   window.addEventListener('popstate', () => {
     if (location.pathname !== '/') return;
@@ -2222,7 +2230,7 @@
   const resizeField = () => { layoutDirty = true; draw(); };
   window.addEventListener('resize', resizeField);
   window.visualViewport?.addEventListener('resize', resizeField);
-  practice.slice(0, 3).forEach(addOption); newMatch(); requestAnimationFrame(frame);
+  practice.slice(0, 3).forEach(entry => addOption(entry, 'roster-practice')); newMatch(); requestAnimationFrame(frame);
   function networkMoves() {
     return plans.map((p, i) => ({ angle: p.angle + (online?.state?.seat ? Math.PI : 0), power: p.power,
       spin: p.spin || 0, superArm: Boolean(bodies[i].superArm), guard: Boolean(p.guard) }));
@@ -2362,7 +2370,7 @@
   }
   online = ububallOnline({
     onState(s) {
-      if (!document.body.classList.contains('online-match')) enterMatch();
+      if (!document.body.classList.contains('online-match')) { stopDemo(); enterMatch(); }
       document.body.classList.add('online-match');
       $('online-open').textContent = 'Online match';
       $('opponent-label').textContent = 'Opponent'; $('opponent-heading').textContent = 'Opponent team';
@@ -2464,6 +2472,25 @@
   }
   openRosterFromLink();
   window.addEventListener('ubu:screen', openRosterFromLink);
-  // A reload during a match returns to match mode.
-  if (history.state?.match) enterMatch();
+  // The phone's top edge in landscape, so the match sidebar can sit there.
+  function updateTopSide() { const angle = screen.orientation?.angle ?? window.orientation; document.body.dataset.topSide = angle === 270 || angle === -90 ? 'right' : 'left'; }
+  updateTopSide(); screen.orientation?.addEventListener('change', updateTopSide);
+  // Home screen demo: when no match is under way, the CPU plays both teams on the home rink.
+  const demoClient = createCPUClient();
+  let demoBusy = false, demoGoalAt = 0;
+  function startDemo() { if (demo || inMatch || online?.active) return; demo = true; setPortrait(false); newMatch(); updateHome(); }
+  function stopDemo() { if (!demo) return; demo = false; demoBusy = false; demoGoalAt = 0; demoClient.cancel(); }
+  setInterval(async () => {
+    if (!demo || inMatch || document.hidden || document.querySelector('[data-screen="play"]').hidden || document.querySelector('dialog[open]')) return;
+    if (phase === 'over') { newMatch(); return; }
+    if (phase === 'goal') { demoGoalAt ||= performance.now(); if (performance.now() - demoGoalAt > 2500) { demoGoalAt = 0; $('launch').click(); } return; }
+    if (phase !== 'plan' || demoBusy) return;
+    demoBusy = true;
+    const result = await demoClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn }, { level: 'easy', seed: turn }, 0);
+    demoBusy = false;
+    if (!demo || phase !== 'plan' || !result || result.error) return;
+    plans = result.plans; $('launch').click();
+  }, 400);
+  // A reload during a match returns to match mode; otherwise the home rink plays a demo.
+  if (history.state?.match) enterMatch(); else startDemo();
 })();

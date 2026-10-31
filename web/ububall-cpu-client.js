@@ -7,7 +7,7 @@
     let cancel = () => {}, idle = null;
     return {
       cancel() { cancel(); },
-      plan(state, config) {
+      plan(state, config, team = 1) {
         cancel();
         const snapshot = structuredClone(state);
         for (const b of snapshot.bodies) { b.superArm = false; b.superActive = null; }
@@ -26,7 +26,7 @@
             worker.onmessage = ({ data }) => data.result ? finish(data.result, true) : failed();
             worker.onerror = failed;
             timer = setTimeout(failed, 10000);
-            worker.postMessage({ state: snapshot, config });
+            worker.postMessage({ state: snapshot, config, team });
           } catch { failed(); }
         });
       }

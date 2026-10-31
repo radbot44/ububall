@@ -160,7 +160,31 @@ SOFTWARE.
     </div>
     <nav class="pause-links" aria-label="Leave to"><a href="/mint">Ubu Mint</a><a href="/collection">Collection</a></nav>
   </dialog>
-  <dialog id="roster-dialog"><h2>Choose your team</h2><div class="match-settings"><label>CPU difficulty <select id="cpu-level"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></label><label><input type="checkbox" id="rule-classic"> Classic</label><label><input type="checkbox" id="rule-blitz"> Blitz</label><label><input type="checkbox" id="rule-pulse"> Pulse</label></div><p>Ububall plays with stats and supers. Add any rules: Classic uses equal default stats with no supers. Blitz gives 5 seconds to plan. Pulse runs each turn for 1 second and momentum carries into the next. Launching while moving steers toward the arrow, never past full launch speed.</p><p>Choose a character for each slot. Empty slots use practice ubus.</p><div id="roster-slots"></div><div id="roster-super-picker" style="margin: 8px 0;"><label>Equipped Super <select id="roster-super"></select></label><div id="roster-super-grid" class="super-picker-grid"></div></div><p id="roster-status" role="status"></p><button id="load-collection">Load my collection</button><button id="more-collection" hidden>Load more</button><div id="roster-options"></div><div class="actions"><button id="start-match" class="primary">Start match</button><button id="cancel-roster">Cancel</button></div></dialog>
+  <dialog id="roster-dialog" class="team-sheet" aria-labelledby="roster-title">
+    <header class="team-sheet-head"><h2 id="roster-title">Choose your team</h2><button id="cancel-roster" class="icon-button" type="button" aria-label="Close">&#10005;</button></header>
+    <div class="team-sheet-body">
+      <div id="roster-slots" class="roster-slots" aria-label="Your team"></div>
+      <div class="roster-super">
+        <div id="roster-super-grid" class="super-picker-grid" aria-label="Super for the selected ubu"></div>
+        <p id="roster-super-name" class="roster-super-name"></p>
+      </div>
+      <fieldset class="match-settings"><legend>Match</legend>
+        <label class="setting-chip">CPU <select id="cpu-level"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select></label>
+        <label class="setting-chip"><input type="checkbox" id="rule-classic"><span>Classic<small>Equal stats, no supers</small></span></label>
+        <label class="setting-chip"><input type="checkbox" id="rule-blitz"><span>Blitz<small>5 seconds to plan</small></span></label>
+        <label class="setting-chip"><input type="checkbox" id="rule-pulse"><span>Pulse<small>1-second turns</small></span></label>
+      </fieldset>
+      <p id="roster-status" class="roster-status" role="status"></p>
+      <h3 class="roster-heading">Your ubus</h3>
+      <div id="roster-signin" class="roster-signin" hidden><p>Sign in to play with the ubus in your collection.</p><button id="roster-signin-btn" type="button" class="primary">Sign in with Discord</button></div>
+      <div id="roster-options" class="roster-grid"></div>
+      <p id="roster-collection-status" class="roster-status" role="status"></p>
+      <div id="roster-sentinel" aria-hidden="true"></div>
+      <h3 class="roster-heading">Practice ubus</h3>
+      <div id="roster-practice" class="roster-grid"></div>
+    </div>
+    <footer class="team-sheet-foot"><button id="start-match" class="primary" type="button">Start match</button></footer>
+  </dialog>
   <dialog id="online-dialog" aria-labelledby="online-title"><div class="online-heading"><div><h2 id="online-title">Online Ububall</h2><p>One opponent. Three ubus. First to five.</p></div><button id="online-close" class="icon-button" aria-label="Close online settings">&#10005;</button></div>
     <div id="online-create-controls">
       <fieldset><legend>Rules</legend><div id="online-mode" class="online-options">
