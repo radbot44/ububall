@@ -252,8 +252,9 @@
   }
   // `effects: false` resolves the same turn without presentation-only work (hit-stop look-aheads,
   // the replay's starting snapshot), for fast CPU search. CPU search may also end a turn early: after
-  // `ticks`, or once `decided(bodies)` reports its outcome is clear. Matches never pass either.
-  function resolveTurn(P, state, moves, { effects = true, ticks: maxTicks = Infinity, decided = null } = {}) {
+  // `ticks`, or once `decided(bodies)` reports its outcome is clear, and may `watch` contacts and
+  // board hits (step callbacks). Matches pass none of these.
+  function resolveTurn(P, state, moves, { effects = true, ticks: maxTicks = Infinity, decided = null, watch = null } = {}) {
     if (state.version !== VERSION || !MODES.includes(state.mode)) throw new Error('Unsupported match rules.');
     if (!Array.isArray(moves) || moves.length !== 6) throw new Error('Both teams must submit.');
     const plans = [...validatePlans(moves.slice(0, 3)), ...validatePlans(moves.slice(3))];
@@ -272,7 +273,8 @@
     let goal = null, ticks = 0;
     const saved = [], struck = [], stops = [], tally = state.tally ? structuredClone(state.tally) : newTally();
     for (let tick = 1; tick <= limit; tick++) {
-      const result = playTick(P, bodies, play, { collide: (a, b, speed) => contactMeter(P, bodies, next.stats, a, b, speed, clock + tick, classic) }, tally, effects);
+      const result = playTick(P, bodies, play, { collide: (a, b, speed) => { contactMeter(P, bodies, next.stats, a, b, speed, clock + tick, classic); watch?.collide?.(a, b, speed); },
+        wall: watch?.wall }, tally, effects);
       goal = result.goal;
       for (const save of result.saves) {
         saved.push({ tick, ...save });

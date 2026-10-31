@@ -14,7 +14,8 @@ test('CPU search is reproducible, bounded and leaves public state unchanged', ()
   assert.deepEqual(first.plans, second.plans);
   assert.deepEqual(state, before);
   assert.equal(first.diagnostics.candidates, 18);
-  assert.equal(first.diagnostics.simulations, 18);
+  // Each plan runs once per response, plus twice aimed a little off unless it trails or repeats.
+  assert.ok(first.diagnostics.simulations >= 1 && first.diagnostics.simulations <= 18 * 3);
   assert.ok(state.bodies.slice(0, 6).every(b => Number.isFinite(b.meter)));
   M.validatePlans(first.plans);
   assert.throws(() => C.plan(state, 1, { candidates: Infinity }));
@@ -34,7 +35,7 @@ test('Hard converts an open shot and defends the goal-threat fixture', () => {
   const results = S.scenarioReport('hard');
   assert.ok(results[0].outcomes.every(o => o.goal === 1));
   assert.ok(results[1].outcomes.every(o => o.goal !== 0));
-  assert.ok(results.every(r => r.diagnostics.simulations === 360));
+  assert.ok(results.every(r => r.diagnostics.candidates === 120 && r.diagnostics.simulations <= 120 * (3 + 2)));
 });
 test('CPU supers are legal and full simulations include guard and meter rules', () => {
   const state = S.initialState(17);
@@ -84,7 +85,12 @@ test('worker client snapshots public state, cancels stale work and reports failu
   workers[0].onmessage({ data: { result: { plans: ['stale'] } } });
   workers[1].onmessage({ data: { result: { plans: ['current'] } } });
   assert.deepEqual(await second, { plans: ['current'] });
-  const failed = client.plan(state, {}); workers[2].onerror();
+  // A worker that finished is reused; one that fails is terminated and replaced next time.
+  const failed = client.plan(state, {});
+  assert.equal(workers.length, 2);
+  workers[1].onerror();
   assert.deepEqual(await failed, { error: true });
-  assert.equal(workers[2].terminated, true);
+  assert.equal(workers[1].terminated, true);
+  client.plan(state, {});
+  assert.equal(workers.length, 3);
 });

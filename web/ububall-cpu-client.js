@@ -2,7 +2,9 @@
 (function(root) {
   'use strict';
   function createCPUClient(makeWorker = () => new Worker('ububall-cpu-worker.js')) {
-    let cancel = () => {};
+    // A worker that finished its plan is kept for the next one, so its scripts stay loaded and its
+    // search code stays optimized. A cancelled or failed worker is terminated and later replaced.
+    let cancel = () => {}, idle = null;
     return {
       cancel() { cancel(); },
       plan(state, config) {
@@ -11,15 +13,17 @@
         for (const b of snapshot.bodies) { b.superArm = false; b.superActive = null; }
         return new Promise(resolve => {
           let worker, timer, done = false;
-          const finish = value => {
+          const finish = (value, keep = false) => {
             if (done) return;
-            done = true; clearTimeout(timer); worker?.terminate(); resolve(value);
+            done = true; clearTimeout(timer);
+            if (keep) idle = worker; else worker?.terminate();
+            resolve(value);
           };
           cancel = () => finish(null);
           const failed = () => finish({ error: true });
           try {
-            worker = makeWorker();
-            worker.onmessage = ({ data }) => finish(data.result || { error: true });
+            worker = idle || makeWorker(); idle = null;
+            worker.onmessage = ({ data }) => data.result ? finish(data.result, true) : failed();
             worker.onerror = failed;
             timer = setTimeout(failed, 10000);
             worker.postMessage({ state: snapshot, config });
