@@ -468,7 +468,7 @@ test('a camping warning lapses during play once a defender leaves the crease, an
   assert.deepEqual(left.fouls.crease,[false,false]); assert.deepEqual(left.fouls.cards,[]);
   // Staying put keeps the warning, and the turn end cards both.
   const stayed=M.resolveTurn(P,state,Array.from({length:6},still)).state;
-  assert.deepEqual(stayed.fouls.cards,[0,1]);
+  assert.deepEqual(stayed.fouls.cards,[0,1]); assert.deepEqual(stayed.tally.cards,[1,1,0,0,0,0]);
   // Lapsed during play then crowded again by the turn's end: a fresh warning, not a card.
   const fouls={...M.newFouls(),crease:[true,false]}; M.lapseFouls(P,P.kickoff(),fouls);
   foulTurn(fouls,{0:{x:80,y:270},1:{x:80,y:330}}); assert.deepEqual(fouls.crease,[true,false]); assert.deepEqual(fouls.cards,[]);

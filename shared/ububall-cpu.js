@@ -13,7 +13,8 @@
     hard: Object.freeze({ candidates: 120, opponents: 3, risk: .55, temperature: 25 })
   });
   // `role` rewards each ubu that keeps to its job on the field (see `roles`).
-  // `card` and `warning` count against yellow cards and standing goal camping warnings (see M.FOULS).
+  // `card` and `warning` count against yellow cards and standing goal camping warnings (see M.FOULS);
+  // a corner stall counts against the side with more ubus in that corner, up to `warning` once warned.
   const WEIGHTS = Object.freeze({ goal: 10000, progress: 1, access: .35, cover: .3, meter: .35, role: 40, card: 400, warning: 150 });
   // Human-like play (initial tuning, not owner decisions). A plan must still work when aimed a little
   // off: it is also scored with every launch turned by ±`angle` and its power changed by ∓`power`,
@@ -136,8 +137,13 @@
     const meter = own.reduce((sum, b) => sum + (b.meter || 0), 0) - other.reduce((sum, b) => sum + (b.meter || 0), 0);
     const cards = own.filter(b => b.carded).length - other.filter(b => b.carded).length;
     const warned = (state.fouls?.crease[team] ? 1 : 0) - (state.fouls?.crease[1 - team] ? 1 : 0);
+    let stall = 0;
+    if (state.fouls && state.fouls.corner !== null) {
+      const inside = list => list.filter(b => M.cornerOf(P, b.x, b.y, b.radius) === state.fouls.corner).length, mine = inside(own), theirs = inside(other);
+      if (mine !== theirs) stall = Math.sign(mine - theirs) * Math.min(1, state.fouls.cornerTurns / M.FOULS.stallTurns);
+    }
     return direction * (ball.x - 500) * weights.progress + (access(other) - access(own)) * weights.access - cover * weights.cover + meter * weights.meter -
-      cards * weights.card - warned * weights.warning;
+      cards * weights.card - (warned + stall) * weights.warning;
   }
   function plan(input, team = 1, config = {}) {
     if (team !== 0 && team !== 1) throw new Error('Invalid CPU team.');

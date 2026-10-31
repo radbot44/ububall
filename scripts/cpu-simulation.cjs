@@ -46,6 +46,9 @@ function match({ seed = 1, mode = 'standard', profiles = ['medium', 'legacy'], m
     profiles = [...profiles].reverse();
   }
   const timing = [[], []], simulations = [0, 0], turns = [];
+  // Fouls by the team that committed them (as profiles are listed): camping warnings, corner
+  // warnings (counted once per stall), cards and corner resets.
+  const fouls = { campingWarnings: [0, 0], cornerWarnings: 0, cards: [0, 0], cornerResets: 0 };
   let count = 0;
   while (state.winner === null && count < maxTurns) {
     const decisions = profiles.map((p, team) => choose(state, team, p, seed + count * 17 + (swapped ? 1 - team : team)));
@@ -54,9 +57,14 @@ function match({ seed = 1, mode = 'standard', profiles = ['medium', 'legacy'], m
     const result = M.resolveTurn(P, state, moves);
     if (trace) turns.push({ turn: state.turn, plans: moves, goal: result.replay.goal, ticks: result.replay.ticks });
     state = result.state; count++;
+    const side = team => swapped ? 1 - team : team, f = state.fouls;
+    for (const team of [0, 1]) if (f.crease[team]) fouls.campingWarnings[side(team)]++;
+    if (f.cornerTurns === M.FOULS.stallTurns) fouls.cornerWarnings++;
+    for (const i of f.cards) fouls.cards[side(state.bodies[i].team)]++;
+    if (f.faceoff) fouls.cornerResets++;
     if (state.phase === 'goal') kickoff(state);
   }
-  return { seed, mode, swapped, profiles, scores: state.scores, winner: state.winner, turns: count,
+  return { seed, mode, swapped, profiles, scores: state.scores, winner: state.winner, turns: count, fouls,
     capped: state.winner === null, simulations, timing: timing.map(values => {
       values.sort((a, b) => a - b);
       return { meanMs: values.reduce((a, b) => a + b, 0) / values.length,
@@ -107,7 +115,13 @@ if (require.main === module) {
   const report = values.scenarios ? scenarioReport(profiles[0]) : {
     profiles, games: results.length,
     wins: [0, 1].map(p => results.filter(r => r.winner === (r.swapped ? 1 - p : p)).length),
-    capped: results.filter(r => r.capped).length, results
+    capped: results.filter(r => r.capped).length,
+    fouls: (() => {
+      const turns = results.reduce((n, r) => n + r.turns, 0), sum = key => results.reduce((n, r) => n + r.fouls[key], 0);
+      const pair = key => [0, 1].map(p => results.reduce((n, r) => n + r.fouls[key][p], 0));
+      return { turns, campingWarnings: pair('campingWarnings'), cornerWarnings: sum('cornerWarnings'), cards: pair('cards'), cornerResets: sum('cornerResets') };
+    })(),
+    results
   };
   const json = JSON.stringify(report, null, 2) + '\n';
   if (values.output) fs.writeFileSync(values.output, json); else process.stdout.write(json);

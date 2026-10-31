@@ -113,7 +113,11 @@ body:not(.in-match) .play-home { margin-top: 14px; }
   body.in-match .stadium:not(.portrait-mode) .scoreboard-content > .away { grid-area: away; justify-content: center; }
   body.in-match .stadium:not(.portrait-mode) .phase-info { grid-area: phase; }
   body.in-match .stadium:not(.portrait-mode) #game-status { grid-area: status; align-self: start; margin: 0; padding: 0 10px; font-size: 11px; }
-  body.in-match .stadium:not(.portrait-mode) .team-selector { display: none; }
+  body.in-match .stadium:not(.portrait-mode) .knob-dock.knob-dock { grid-area: status; align-self: center; display: grid; gap: 8px; padding: 0 8px; }
+  body.in-match .stadium:not(.portrait-mode) .team-selector { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 0; }
+  body.in-match .stadium:not(.portrait-mode) .team-selector button { flex-direction: column; gap: 2px; min-width: 0; padding: 4px 2px; font-size: 10px; }
+  body.in-match .stadium:not(.portrait-mode) .team-selector button svg { width: 24px; height: 24px; }
+  body.in-match .stadium:not(.portrait-mode) .knob-dock .knob svg { width: 44px; height: 44px; }
   body.in-match .stadium:not(.portrait-mode) .stadium-actions { grid-area: actions; display: grid; gap: 8px; padding: 10px; }
   body.in-match .stadium:not(.portrait-mode) :is(.stadium-super-btn, .team-launch, #launch) { width: 100%; min-width: 0; }
 }
@@ -125,7 +129,7 @@ body:not(.in-match) .play-home { margin-top: 14px; }
 .pause-menu h2 { font-size: 28px; margin-bottom: 16px; }
 .pause-actions { display: grid; gap: 10px; }
 .pause-actions button { min-height: 52px; font-size: 18px; border-radius: 14px; }
-.pause-settings { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0 12px; padding-top: 16px; border-top: 1px solid var(--border); }
+.pause-settings { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0 12px; padding-top: 16px; border-top: 1px solid var(--border); }
 .pause-menu #aim-mode { position: static; width: auto; max-width: none; min-height: 40px; padding: 8px 14px; font-size: 13px; }
 .pause-links { display: flex; justify-content: center; gap: 20px; font-family: var(--font-display); }
 .pause-links a { color: var(--muted); }
@@ -374,6 +378,38 @@ body.show-full-stats .full-stats { display: flex; }
   border-radius: 3px;
   background: linear-gradient(90deg, #ff7197, #ff9954);
   transition: width 0.2s ease;
+}
+/* On the home team the super panel is the arm toggle: quiet while charging, lit when ready, filled
+   when armed. */
+button.super-panel {
+  align-items: stretch; justify-content: flex-start; min-height: 0;
+  margin-top: 8px; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+button.super-panel:disabled { opacity: 1; cursor: default; }
+button.super-panel:not(:disabled) { border-color: #ff7197; background: color-mix(in srgb, #ff7197 14%, var(--card)); box-shadow: 0 0 10px rgba(255, 113, 151, 0.35); }
+button.super-panel:not(:disabled) .super-pct { color: #ffffff; }
+button.super-panel.armed { background: color-mix(in srgb, #ff7197 45%, var(--card)); border-color: #ffffff; box-shadow: 0 0 16px rgba(255, 113, 151, 0.8); }
+button.super-panel.armed .super-pct { color: #ffffff; font-weight: 800; }
+/* Launch knobs (see makeKnob): a team card holds its ubu's three; the dock holds the selected ubu's. */
+.knob-row { display: flex; justify-content: space-around; gap: 4px; margin-top: 8px; }
+.knob { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; touch-action: none; user-select: none; -webkit-user-select: none; }
+.knob svg { width: 56px; height: 56px; cursor: grab; overflow: visible; }
+.knob svg:active { cursor: grabbing; }
+.knob svg:focus { outline: none; }
+.knob svg:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 50%; }
+.knob-track { fill: none; stroke: var(--background); stroke-width: 8; }
+.knob-value { fill: none; stroke: var(--primary); stroke-width: 8; stroke-linecap: round; }
+.knob-face { fill: var(--elevated); stroke: var(--border); stroke-width: 1.5; }
+.knob-needle { stroke: var(--text); stroke-width: 6; stroke-linecap: round; }
+.knob b { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text); }
+.knob small { font-size: 10px; color: var(--muted); }
+.knob.disabled { opacity: .45; }
+.knob.disabled svg { cursor: default; }
+.knob-dock { display: none; }
+@media (max-width: 1000px) {
+  body.in-match .stadium:not(.portrait-mode) .knob-dock { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  body.in-match .knob-dock .knob-row { margin-top: 0; }
 }
 .super-arm-btn {
   margin-top: 4px;
@@ -788,7 +824,7 @@ body.stadium-fullscreen-active {
 .stadium.portrait-mode #game-status { min-height: 29px; box-sizing: border-box; }
 
 /* The action area contains only its two actions. Keep status available to assistive technology. */
-#team-selector, #plan-summary { display: none !important; }
+#plan-summary { display: none !important; }
 #game-status { position: absolute !important; width: 1px; height: 1px; min-height: 0 !important; padding: 0 !important; margin: -1px !important; overflow: hidden; clip-path: inset(50%); }
 #aim-mode { position: absolute; left: 8px; top: 8px; z-index: 35; min-height: 44px; padding: 8px 12px; font-size: 12px; }
 .stadium.portrait-mode { grid-template-areas: "score" "field" "actions" "controls"; grid-template-rows: auto minmax(0, 1fr) auto auto; }

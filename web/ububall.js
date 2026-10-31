@@ -61,6 +61,10 @@
   const stageArea = document.querySelector('.stadium-stage-area');
   const spinLayer = document.createElement('div'); spinLayer.className = 'spin-layer';
   stageArea.append(spinLayer); spinLayer.append($('field-spin'));
+  // Without team columns (phones and narrow windows), the ubu picker and the selected ubu's knobs sit
+  // together in a dock beside or below the rink.
+  const knobDock = document.createElement('div'); knobDock.className = 'knob-dock';
+  $('game-status').after(knobDock); knobDock.append($('team-selector'));
   const rinkStage = document.querySelector('.rink-stage');
   const rinkWrap = document.querySelector('.rink-wrap');
   const badgeCanvas = document.createElement('canvas'); badgeCanvas.className = 'field-badges';
@@ -567,8 +571,9 @@
     badgeCtx.restore();
   }
   // A warning sits just outside the boards by the goal or corner it is about, its name beneath.
-  function drawFieldWarning(x, y, words, color) {
-    drawAlert(isPortrait ? x + 13 : x, isPortrait ? y : y - 13, 24);
+  function drawFieldWarning(x, y, words, color, cleared = false) {
+    if (cleared) drawCheck(isPortrait ? x + 13 : x, isPortrait ? y : y - 13, 24);
+    else drawAlert(isPortrait ? x + 13 : x, isPortrait ? y : y - 13, 24);
     badgeCtx.save(); badgeCtx.translate(x, y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
     badgeCtx.font = '700 11px system-ui, sans-serif'; badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle'; badgeCtx.fillStyle = color;
     words.forEach((word, i) => badgeCtx.fillText(word, 0, 7 + i * 12));
@@ -582,17 +587,59 @@
     badgeCtx.lineWidth = 1.5; badgeCtx.strokeStyle = '#0b0d10'; badgeCtx.stroke();
     badgeCtx.restore();
   }
+  // Lucide check, on its 24-unit grid, on a dark disc: a warning the planned turn is predicted to clear.
+  const CHECK = new Path2D('M20 6 9 17l-5-5');
+  function drawCheck(x, y, size) {
+    badgeCtx.save(); badgeCtx.translate(x, y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
+    badgeCtx.scale(size / 24, size / 24);
+    badgeCtx.beginPath(); badgeCtx.arc(0, 0, 12, 0, Math.PI * 2); badgeCtx.fillStyle = '#0b0d10d9'; badgeCtx.fill();
+    badgeCtx.translate(-12, -12); badgeCtx.scale(.8, .8); badgeCtx.translate(3, 3);
+    badgeCtx.lineWidth = 3; badgeCtx.lineCap = badgeCtx.lineJoin = 'round'; badgeCtx.strokeStyle = '#3ddc84'; badgeCtx.stroke(CHECK);
+    badgeCtx.restore();
+  }
+  // What the planned turn is predicted to do to the standing warnings (opponents held, as the
+  // prediction plays them): which lapse along the way, and which crease offenders' centres leave.
+  function predictFouls(prediction) {
+    const result = { crease: [false, false], corner: false, left: new Set() };
+    if (!fouls.crease[0] && !fouls.crease[1] && !stalling()) return result;
+    const copy = structuredClone(fouls), samples = Math.max(...prediction.paths.map(path => path.length));
+    for (let k = 1; k < samples; k++) {
+      const field = bodies.map((b, i) => {
+        const path = prediction.paths[i], at = path[Math.min(k, path.length - 1)];
+        return { team: b.team, radius: b.radius, x: at.x, y: at.y };
+      });
+      ububallMatch.lapseFouls(P, field, copy);
+      field.slice(0, 6).forEach((b, i) => {
+        if (fouls.crease[b.team] && ububallMatch.inCrease(P, bodies[i], b.team) && !ububallMatch.inCrease(P, b, b.team)) result.left.add(i);
+      });
+    }
+    result.crease = [0, 1].map(team => fouls.crease[team] && !copy.crease[team]);
+    result.corner = stalling() && copy.corner === null;
+    return result;
+  }
   function drawFouls(text) {
-    for (const team of [0, 1]) if (fouls.crease[team]) drawFieldWarning(team ? 970 : 30, 180, ['Goal', 'Camping'], text);
-    if (stalling()) drawFieldWarning(fouls.corner % 2 ? 970 : 30, fouls.corner > 1 ? 570 : 30, ['Corner', 'Stalling'], text);
+    // While planning, a warning the plan is predicted to clear (and each offender predicted to get
+    // out) shows a green check in place of its alert.
+    const predicted = phase === 'plan' ? predictionCache?.fouls : null;
+    for (const team of [0, 1]) if (fouls.crease[team]) drawFieldWarning(team ? 970 : 30, 180, ['Goal', 'Camping'], text, predicted?.crease[team]);
+    if (stalling()) drawFieldWarning(fouls.corner % 2 ? 970 : 30, fouls.corner > 1 ? 570 : 30, ['Corner', 'Stalling'], text, predicted?.corner);
     const flash = reducedMotion.matches ? 1 : .35 + .65 * (.5 + .5 * Math.cos(performance.now() / 1000 * Math.PI * 2.4));
-    for (const b of offenders()) if (!b.carded) drawAlert(b.x + b.radius * .8, isPortrait ? b.y + b.radius * .8 : b.y - b.radius * .8, 26, flash);
+    const creasing = new Set(bodies.slice(0, 6).filter(b => fouls.crease[b.team] && ububallMatch.inCrease(P, b, b.team)));
+    for (const b of offenders()) {
+      if (b.carded) continue;
+      const x = b.x + b.radius * .8, y = isPortrait ? b.y + b.radius * .8 : b.y - b.radius * .8;
+      if (predicted && (creasing.has(b) ? predicted.left.has(bodies.indexOf(b)) : predicted.corner)) drawCheck(x, y, 24);
+      else drawAlert(x, y, 26, flash);
+    }
     for (const b of bodies.slice(0, 6)) if (b.carded) drawCard(b);
   }
   // Calls out the cards and the corner reset just given.
   function announceFouls() {
     for (const i of fouls.cards) popup(bodies[i], 'Yellow card');
     if (fouls.faceoff) banner('Corner stalling', 1200);
+    // A card whistles; a warning only just given sounds its alert.
+    if (fouls.cards.length) gameAudio()?.playFoul('card');
+    else if (fouls.crease[0] || fouls.crease[1] || fouls.cornerTurns === ububallMatch.FOULS.stallTurns) gameAudio()?.playFoul('warning');
   }
   function foulText() {
     const notes = [];
@@ -948,7 +995,7 @@
     if (!online?.active) return { tally, scores };
     const t = online.state.game?.tally || ububallMatch.newTally(), seat = online.state.seat;
     const order = items => onlineOrder(items, seat);
-    return { tally: { goals: order(t.goals), assists: order(t.assists), saves: order(t.saves), topSpeed: order(t.topSpeed),
+    return { tally: { goals: order(t.goals), assists: order(t.assists), saves: order(t.saves), topSpeed: order(t.topSpeed), cards: order(t.cards),
       deficit: seat ? [...t.deficit].reverse() : t.deficit }, scores };
   }
   function honourText(winner) {
@@ -983,17 +1030,17 @@
     const mvp = [0, 1, 2, 3, 4, 5].reduce((best, i) => rating(i) > rating(best) ? i : best, 0);
     const table = document.createElement('table');
     const head = table.createTHead().insertRow();
-    for (const label of ['Ubu', 'Goals', 'Assists', 'Saves', 'Top shot']) { const th = document.createElement('th'); th.textContent = label; head.append(th); }
+    for (const label of ['Ubu', 'Goals', 'Assists', 'Saves', 'Fouls', 'Top shot']) { const th = document.createElement('th'); th.textContent = label; head.append(th); }
     const body = table.createTBody();
     bodies.slice(0, 6).forEach((b, i) => {
       const row = body.insertRow(); row.className = `team-${b.team}${i === mvp ? ' mvp' : ''}`;
       const name = row.insertCell(); name.textContent = b.name || (b.team ? `${them} ubu` : 'Your ubu');
       if (i === mvp) { const badge = document.createElement('span'); badge.className = 'mvp-badge'; badge.textContent = 'MVP'; name.append(' ', badge); }
-      for (const value of [t.goals[i], t.assists[i], t.saves[i], t.topSpeed[i] ? Math.round(t.topSpeed[i]) : '–']) row.insertCell().textContent = value;
+      for (const value of [t.goals[i], t.assists[i], t.saves[i], t.cards[i], t.topSpeed[i] ? Math.round(t.topSpeed[i]) : '–']) row.insertCell().textContent = value;
     });
     const close = document.createElement('button'); close.type = 'button'; close.className = 'primary'; close.textContent = 'Close';
     close.onclick = () => summaryDialog.close();
-    const note = document.createElement('p'); note.className = 'summary-note'; note.textContent = 'Top shot is the ball speed off that ubu\'s fastest touch.';
+    const note = document.createElement('p'); note.className = 'summary-note'; note.textContent = 'Fouls are yellow cards. Top shot is the ball speed off that ubu\'s fastest touch.';
     summaryDialog.replaceChildren(title, honour, table, note, close);
     if (!summaryDialog.open) summaryDialog.showModal();
   }
@@ -1110,8 +1157,9 @@
     details.open = Boolean($('toggle-full-stats')?.checked);
     return wrap;
   }
+  // An ubu's super: its name, meter and charge. On the home team the whole panel is the arm toggle.
   function renderSuperPanel(playerIndex, isCpu = false) {
-    const wrap = document.createElement('div'); wrap.className = 'super-panel';
+    const wrap = document.createElement(isCpu ? 'div' : 'button'); wrap.className = 'super-panel';
     const topRow = document.createElement('div'); topRow.className = 'super-row';
     const label = document.createElement('span'); label.className = 'super-name-badge'; label.id = `super-name-${playerIndex}`;
     const initialSuper = bodies?.[playerIndex]?.equippedSuper || teamEntries[playerIndex]?.equippedSuper || P.SUPERS[0];
@@ -1134,8 +1182,7 @@
     meterTrack.append(meterFill);
     wrap.append(topRow, meterTrack);
     if (!isCpu) {
-      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'super-arm-btn'; btn.id = `super-arm-${playerIndex}`;
-      btn.textContent = 'ARM SUPER'; btn.disabled = true;
+      const btn = wrap; btn.type = 'button'; btn.id = `super-arm-${playerIndex}`; btn.disabled = true;
       btn.onclick = e => {
         e.stopPropagation();
         const b = bodies[playerIndex];
@@ -1144,9 +1191,92 @@
           sync(); draw();
         }
       };
-      wrap.append(btn);
     }
     return wrap;
+  }
+  // Knobs set a launch finely. Angle turns like a dial, relative to where it is grabbed so a tap never
+  // jumps, and its needle points the way the launch arrow does on screen. Power and spin rise as the
+  // pointer moves up or right and fall down or left, a full sweep over KNOB_SWEEP px (a quarter as
+  // fast with Shift). The wheel and arrow keys step 1° or 1% (10 with Shift); double-clicking spin
+  // centres it. A knob with no fixed ubu follows the selected one.
+  const KNOB_SWEEP = 150, knobs = [];
+  const KNOB_RANGE = { angle: [0, 360], power: [0, 100], spin: [-100, 100] };
+  // Screen degrees, clockwise from up, of a field angle in radians (portrait turns the rink a quarter).
+  const screenDegrees = angle => ((angle * 180 / Math.PI + 90 - (isPortrait ? 90 : 0)) % 360 + 360) % 360;
+  function knobValue(kind, i) {
+    const plan = plans[i];
+    return kind === 'angle' ? screenDegrees(plan.angle) : kind === 'power' ? plan.power * 100 : (plan.spin || 0) * 100;
+  }
+  const knobEditable = i => phase === 'plan' && !bodies[i]?.stunned;
+  function setKnob(kind, i, value) {
+    if (!knobEditable(i)) return;
+    const plan = plans[i], [min, max] = KNOB_RANGE[kind];
+    if (kind === 'angle') plan.angle = (((value - 90 + (isPortrait ? 90 : 0)) % 360 + 360) % 360) * Math.PI / 180;
+    else plan[kind] = Math.max(min, Math.min(max, value)) / 100;
+    plan.guard = false;
+    sync(); draw();
+  }
+  function makeKnob(kind, fixed = null) {
+    const wrap = document.createElement('div'); wrap.className = 'knob';
+    wrap.innerHTML = '<svg viewBox="0 0 100 100" role="slider" tabindex="0"><circle class="knob-track" cx="50" cy="50" r="40"/>' +
+      '<path class="knob-value"/><circle class="knob-face" cx="50" cy="50" r="29"/><line class="knob-needle" x1="50" y1="50" x2="50" y2="26"/></svg>' +
+      `<b></b><small>${kind[0].toUpperCase() + kind.slice(1)}</small>`;
+    const svg = wrap.querySelector('svg'), index = () => fixed ?? selected;
+    const [min, max] = KNOB_RANGE[kind];
+    svg.setAttribute('aria-valuemin', min); svg.setAttribute('aria-valuemax', max);
+    let grab = null;
+    const turnOf = e => { const r = svg.getBoundingClientRect(); return Math.atan2(e.clientX - r.left - r.width / 2, r.top + r.height / 2 - e.clientY) * 180 / Math.PI; };
+    svg.onpointerdown = e => {
+      const i = index();
+      if (!knobEditable(i)) return;
+      e.preventDefault(); svg.setPointerCapture(e.pointerId);
+      if (fixed !== null && selected !== i) { selected = i; sync(); draw(); }
+      grab = { x: e.clientX, y: e.clientY, value: knobValue(kind, i), turn: turnOf(e) };
+    };
+    svg.onpointermove = e => {
+      if (!grab) return;
+      const i = index();
+      if (kind === 'angle') {
+        const turn = turnOf(e), delta = ((turn - grab.turn + 540) % 360) - 180;
+        grab.turn = turn; setKnob(kind, i, knobValue(kind, i) + delta * (e.shiftKey ? .25 : 1));
+      } else setKnob(kind, i, grab.value + ((e.clientX - grab.x) - (e.clientY - grab.y)) / KNOB_SWEEP * (max - min) * (e.shiftKey ? .25 : 1));
+    };
+    svg.onpointerup = svg.onpointercancel = () => { grab = null; };
+    svg.onwheel = e => { e.preventDefault(); setKnob(kind, index(), knobValue(kind, index()) - Math.sign(e.deltaY) * (e.shiftKey ? 10 : 1)); };
+    svg.onkeydown = e => {
+      const step = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key];
+      if (!step) return;
+      e.preventDefault(); setKnob(kind, index(), knobValue(kind, index()) + step * (e.shiftKey ? 10 : 1));
+    };
+    if (kind === 'spin') svg.ondblclick = () => setKnob(kind, index(), 0);
+    knobs.push({ kind, wrap, svg, index });
+    return wrap;
+  }
+  function knobArc(from, to) {
+    const point = a => [50 + 40 * Math.sin(a * Math.PI / 180), 50 - 40 * Math.cos(a * Math.PI / 180)];
+    const [x0, y0] = point(from), [x1, y1] = point(to);
+    return `M${x0} ${y0}A40 40 0 ${to - from > 180 ? 1 : 0} 1 ${x1} ${y1}`;
+  }
+  function renderKnobs() {
+    for (const knob of knobs) {
+      const i = knob.index(), b = bodies[i];
+      if (!b || !plans[i]) continue;
+      const value = knobValue(knob.kind, i);
+      // Power sweeps 270° from lower left; spin runs either way from the top; angle is all needle.
+      const needle = knob.kind === 'angle' ? value : knob.kind === 'power' ? -135 + 2.7 * value : 1.35 * value;
+      const [from, to] = knob.kind === 'power' ? [-135, needle] : knob.kind === 'spin' ? [Math.min(0, needle), Math.max(0, needle)] : [0, 0];
+      knob.wrap.querySelector('.knob-value').setAttribute('d', to - from > .5 ? knobArc(from, to) : '');
+      knob.wrap.querySelector('.knob-needle').setAttribute('transform', `rotate(${needle} 50 50)`);
+      const shown = Math.round(value) % (knob.kind === 'angle' ? 360 : Infinity);
+      knob.wrap.querySelector('b').textContent = knob.kind === 'angle' ? `${shown}°` : knob.kind === 'spin' && shown > 0 ? `+${shown}` : knob.kind === 'power' ? `${shown}%` : `${shown}`;
+      const editable = knobEditable(i);
+      knob.wrap.classList.toggle('disabled', !editable);
+      knob.svg.setAttribute('aria-disabled', String(!editable));
+      knob.svg.setAttribute('aria-label', `${knob.kind[0].toUpperCase() + knob.kind.slice(1)} for ${teamEntries[i]?.model?.parts.fullName || 'ubu'}`);
+      knob.svg.setAttribute('aria-valuenow', Math.round(value));
+      knob.svg.setAttribute('aria-valuetext', knob.kind === 'angle' ? `${shown} degrees` : knob.kind === 'power' ? `${shown}% power` :
+        shown === 0 ? 'No spin' : `${Math.abs(shown)}% ${shown < 0 ? 'counterclockwise' : 'clockwise'}`);
+    }
   }
   function sync() {
     updateClock();
@@ -1208,7 +1338,7 @@
         if (armBtn) {
           armBtn.disabled = !planning || (b.meter < 100) || Boolean(b.stunned);
           armBtn.classList.toggle('armed', Boolean(b.superArm));
-          armBtn.textContent = b.carded ? 'CARDED' : b.stunned ? '💫 STUNNED' : b.superArm ? '⚡ ARMED' : 'ARM SUPER';
+          if (pctNode) pctNode.textContent = b.carded ? 'Carded' : b.stunned ? 'Stunned' : b.superArm ? 'Armed' : b.meter >= 100 ? 'Tap to arm' : `${Math.round(b.meter || 0)}%`;
         }
       }
     });
@@ -1240,6 +1370,7 @@
         }
       }
     }
+    renderKnobs();
     if (online?.active) {
       $('launch').disabled = phase !== 'plan';
       $('launch').textContent = phase === 'plan' ? 'Lock moves' : phase === 'play' ? 'In motion…' : phase === 'over' ? 'Match complete' : 'Waiting…';
@@ -1249,6 +1380,11 @@
   }
   function buildTeam() {
     if (!online?.active) teamEntries = [...roster, ...practice.slice(3)];
+    if (!knobDock.querySelector('.knob-row')) {
+      const row = document.createElement('div'); row.className = 'knob-row';
+      row.append(...['angle', 'power', 'spin'].map(kind => makeKnob(kind)));
+      knobDock.append(row);
+    }
     materialEmitters = teamEntries.map(entry => {
       const seen = new Set();
       const styles = [];
@@ -1261,6 +1397,7 @@
       return { styles, time: 0 };
     });
     $('team').replaceChildren();
+    for (let k = knobs.length - 1; k >= 0; k--) if (!knobs[k].wrap.isConnected || $('team').contains(knobs[k].wrap)) knobs.splice(k, 1);
     $('team-selector').replaceChildren();
     $('home-lineup').replaceChildren();
     if ($('cpu-team')) $('cpu-team').replaceChildren();
@@ -1293,7 +1430,9 @@
       titles.append(strong, small);
       header.append(ubuRender(entry.model, 'ball-thumb'), titles);
       select.append(header);
-      button.append(select, renderStatsBox(stats[i] || entry.model.stats || {}), renderSuperPanel(i, false));
+      const cardKnobs = document.createElement('div'); cardKnobs.className = 'knob-row';
+      cardKnobs.append(...['angle', 'power', 'spin'].map(kind => makeKnob(kind, i)));
+      button.append(select, renderStatsBox(stats[i] || entry.model.stats || {}), renderSuperPanel(i, false), cardKnobs);
       select.onclick = () => { selected = i; sync(); draw(); };
       $('team').append(button);
       const shortcut = document.createElement('button'); shortcut.type = 'button';
@@ -1409,7 +1548,7 @@
   function positionSpinControl() {
     const control = $('field-spin');
     control.hidden = false;
-    const visible = phase === 'plan' && drag === null;
+    const visible = phase === 'plan' && drag === null && $('toggle-spin-slider').checked;
     control.style.visibility = visible ? 'visible' : 'hidden';
     control.inert = !visible;
     if (!visible) return;
@@ -1435,8 +1574,11 @@
   const predictionLayer = {};
   function drawPrediction(home, away) {
     // Include all state and all plans: changing any teammate invalidates the one simulation.
-    const key = JSON.stringify([bodies, plans]);
-    if (predictionCache?.key !== key) predictionCache = { key, data: P.predictTurn(bodies, plans) };
+    const key = JSON.stringify([bodies, plans, fouls]);
+    if (predictionCache?.key !== key) {
+      const data = P.predictTurn(bodies, plans);
+      predictionCache = { key, data, fouls: predictFouls(data) };
+    }
     cachedLayer(predictionLayer, [canvas.width, canvas.height, home, away, isPortrait, key].join(), () => paintPrediction(predictionCache.data, home, away));
   }
   function paintPrediction(prediction, home, away) {
@@ -1808,7 +1950,7 @@
     // A goal on the round's first turn is an ace, earning its scorer extra meter (not for an own goal).
     const ace = goal !== null && !roundTurns, call = goal === null ? null : ububallMatch.callGoal(bodies, play, tally, goal, ace);
     if (goal !== null && ballOnFire()) lightNet(goal); else quench();
-    ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null }, fouls);
+    ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null }, fouls, tally);
     if (fouls.faceoff) play = ububallMatch.newPlay();
     announceFouls();
     if (goal !== null) ububallMatch.noteScore(tally, scores);
@@ -2058,7 +2200,8 @@
   function impact(ms) { hitStopUntil = performance.now() + ms; if (!reducedMotion.matches) shake = 1; }
   function frame(time) {
     const delta = lastTime ? Math.max(0, (time - lastTime) / 1000) : 0; lastTime = time;
-    const active = !$('roster-dialog').open && !$('pause-menu').open && !document.hidden;
+    // An open foul explanation holds local play (and the demo) still while it is read.
+    const active = !$('roster-dialog').open && !$('pause-menu').open && !document.hidden && !(foulInfo && !online?.active);
     updateClock();
     if (online?.active) {
       if (phase === 'plan') online.send(networkMoves());
@@ -2189,6 +2332,11 @@
       updateHome();
     } catch {}
   });
+  // The floating spin slider is a preference kept per device.
+  const spinToggle = $('toggle-spin-slider');
+  try { spinToggle.checked = (localStorage.getItem('ububall-spin-slider') ?? (matchMedia('(pointer: coarse)').matches ? 'off' : 'on')) === 'on'; }
+  catch { spinToggle.checked = !matchMedia('(pointer: coarse)').matches; }
+  spinToggle.onchange = () => { try { localStorage.setItem('ububall-spin-slider', spinToggle.checked ? 'on' : 'off'); } catch {} draw(); };
   const toggleFull = $('toggle-full-stats');
   if (toggleFull) {
     toggleFull.onchange = () => {
@@ -2661,7 +2809,7 @@
   const demoClient = createCPUClient(), DEMO_STOP = Symbol('demo stopped');
   let demoRun = 0, demoGame = 0;
   const capital = text => text[0].toUpperCase() + text.slice(1);
-  function demoPaused() { return inMatch || document.hidden || $('field-banner').closest('[data-screen]').hidden || Boolean(document.querySelector('dialog[open]')); }
+  function demoPaused() { return inMatch || document.hidden || Boolean(foulInfo) || $('field-banner').closest('[data-screen]').hidden || Boolean(document.querySelector('dialog[open]')); }
   // Waits count only while the demo is on screen; a stopped demo ends its walkthrough.
   async function demoWait(run, ms, until = null) {
     let left = ms;

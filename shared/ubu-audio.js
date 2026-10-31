@@ -1117,6 +1117,46 @@
     return handle;
   }
 
+  // Fouls: a soft two-note "doot doot" when a warning first appears, like a system alert, and a light
+  // referee's whistle for a yellow card. Both stay short and quiet so a stalled scrum never nags.
+  function playFoul(kind = 'warning', options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx), now = ctx.currentTime + 0.01, volume = options.volume ?? 1;
+    if (kind === 'warning') {
+      for (const [at, freq] of [[0, 784], [0.16, 659]]) {
+        const start = now + at, gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.12 * volume, start + 0.012);
+        gain.gain.setValueAtTime(0.12 * volume, start + 0.06);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.14);
+        gain.connect(master);
+        for (const [type, ratio, level] of [['sine', 1, 1], ['triangle', 2, 0.12]]) {
+          const osc = ctx.createOscillator(), part = ctx.createGain();
+          osc.type = type; osc.frequency.setValueAtTime(freq * ratio, start);
+          part.gain.setValueAtTime(level, start);
+          osc.connect(part); part.connect(gain);
+          osc.start(start); osc.stop(start + 0.16);
+        }
+      }
+      return;
+    }
+    // The whistle: a high tone rising slightly, trilled by the pea, with a breath of air under it.
+    const osc = ctx.createOscillator(), trill = ctx.createOscillator(), depth = ctx.createGain(), gain = ctx.createGain(), end = now + 0.34;
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(2050, now);
+    osc.frequency.linearRampToValueAtTime(2250, now + 0.06);
+    trill.frequency.setValueAtTime(26, now); depth.gain.setValueAtTime(55, now);
+    trill.connect(depth); depth.connect(osc.frequency);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.08 * volume, now + 0.025);
+    gain.gain.setValueAtTime(0.08 * volume, now + 0.24);
+    gain.gain.exponentialRampToValueAtTime(0.0001, end);
+    osc.connect(gain); gain.connect(master);
+    osc.start(now); trill.start(now); osc.stop(end + 0.02); trill.stop(end + 0.02);
+    noiseGrain(ctx, master, now, 0.3, { freq: 2200, q: 1.5, level: 0.02 * volume });
+  }
+
   function playGameStart(options = {}) {
     const isCtx = options && typeof options.createOscillator === 'function';
     const opts = isCtx ? { ctx: options } : (options || {});
@@ -1591,6 +1631,7 @@
     playWallHit,
     playSizzle,
     playGoalHit,
+    playFoul,
     playSuper,
     playGameStart,
     playFanfare,

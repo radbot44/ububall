@@ -127,10 +127,10 @@
       assist: from.assist ? [...from.assist] : [null, null], shotX: from.shotX ? [...from.shotX] : [null, null],
       credit: { ...from.credit }, banked: Boolean(from.banked), saved: from.saved ? { ...from.saved } : null, big: Boolean(from.big) };
   }
-  // Per-ubu match totals (by index) for the summary, and each team's deepest deficit.
+  // Per-ubu match totals (by index) for the summary (yellow cards included), and each team's deepest deficit.
   function newTally() {
     const six = () => [0, 0, 0, 0, 0, 0];
-    return { goals: six(), assists: six(), saves: six(), topSpeed: six(), deficit: [0, 0] };
+    return { goals: six(), assists: six(), saves: six(), topSpeed: six(), cards: six(), deficit: [0, 0] };
   }
   // A big shot is a lone touch by an ubu driving into the ball at `share` or more of its own
   // full-launch speed; the ball's own speed does not count, so a fast ball off a still ubu is not one.
@@ -300,8 +300,9 @@
     fouls.cards = ubus.flatMap((b, i) => carded.has(b) ? [i] : []);
   }
   // `bonus` names who earns goal bonuses (by index): `ace` for a goal (not an own goal) on the round's
-  // first turn, and `assist`. `fouls` (see `callFouls`) is updated in place.
-  function finishTurn(P, bodies, stats, scores, goal, mode, bonus = {}, fouls = newFouls()) {
+  // first turn, and `assist`. `fouls` (see `callFouls`) is updated in place, and its cards are counted
+  // in `tally` when given.
+  function finishTurn(P, bodies, stats, scores, goal, mode, bonus = {}, fouls = newFouls(), tally = null) {
     const classic = rule(mode, 'classic');
     // Turn effects end every turn; in Pulse, momentum carries into the next one.
     P.stop(bodies, rule(mode, 'pulse') && goal === null);
@@ -312,6 +313,7 @@
     }
     if (goal === null) callFouls(P, bodies, fouls);
     else Object.assign(fouls, newFouls());
+    if (tally) for (const i of fouls.cards) tally.cards[i]++;
     if (goal !== null) {
       scores[goal]++;
       for (const b of bodies.filter(b => b.team === 1 - goal)) gainMeter(P, bodies, stats, b, METER.conceded, classic);
@@ -361,7 +363,7 @@
     // A round runs from kickoff to goal; scoring on its first turn is an ace.
     const ace = goal !== null && !state.roundTurns;
     const call = goal === null ? { scorer: null, assist: null, own: false, label: null } : callGoal(bodies, play, tally, goal, ace);
-    next.winner = finishTurn(P, bodies, next.stats, next.scores, goal, state.mode, { ace: ace && !call.own ? call.scorer : null, assist: call.assist }, next.fouls);
+    next.winner = finishTurn(P, bodies, next.stats, next.scores, goal, state.mode, { ace: ace && !call.own ? call.scorer : null, assist: call.assist }, next.fouls, tally);
     if (goal !== null) noteScore(tally, next.scores);
     next.roundTurns = goal === null ? (state.roundTurns || 0) + 1 : 0;
     next.clock = clock + ticks;
@@ -372,6 +374,6 @@
     return { state: next, replay: { version: VERSION, turn: state.turn, plans, ticks, goal, scorer: call.scorer, assist: call.assist,
       label: call.label, saves: saved, struck, stops, initialBodies } };
   }
-  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, replaySpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, SAVE, FOULS, newFouls, inCrease, attackZoneLine, inAttackZone, cornerOf, lapseFouls, BIG_SHOT, HIT_STOP, gainMeter, contactMeter, toucher, saves, credit, responsibleTeam, newPlay, newTally, playTick, callGoal, noteScore, honours, finishTurn, resolveTurn };
+  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, replaySpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, SAVE, FOULS, newFouls, inCrease, attackZoneLine, inAttackZone, camping, cornerOf, lapseFouls, BIG_SHOT, HIT_STOP, gainMeter, contactMeter, toucher, saves, credit, responsibleTeam, newPlay, newTally, playTick, callGoal, noteScore, honours, finishTurn, resolveTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallMatch = api;
 })(globalThis);
