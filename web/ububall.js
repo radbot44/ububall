@@ -30,7 +30,7 @@
   let theater = null, recording = null, recordingOnline = false;
   // While a video export renders, effects and sounds run on its clock (ms) instead of the wall clock,
   // sounds go to its offline audio, and the field draws at its size.
-  let videoClock = null, videoAudio = null, videoField = null;
+  let videoClock = null, videoAudio = null, videoField = null, cardShot = false;
   const clockNow = () => videoClock ?? performance.now();
   let matchTicks = 0; // Simulated ticks played locally, for meter cooldowns.
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
@@ -586,7 +586,7 @@
     }
     if (goalSweep) drawGoalSweep(goalSweep, goalSweep.team ? away : home);
     if (goalCall) drawGoalCall(goalCall, goalCall.team ? away : home);
-    if (pulseMode() && !goalReplay) {
+    if (pulseMode() && !goalReplay && !cardShot) {
       const turnSeconds = ububallMatch.turnTicks(matchMode) * P.DT;
       const progress = theater ? theater.tick * P.DT / turnSeconds : phase !== 'play' ? 0 : online?.active ? (onlineReplay?.currentTick ?? 0) * P.DT / turnSeconds : elapsed / turnSeconds;
       ctx.save(); ctx.lineCap = 'round';
@@ -873,13 +873,21 @@
     }
     ctx.restore();
   }
-  // Faint arcs on a hard-spinning ball, turning with it.
-  function drawBallSpin(ball, text) {
-    const spin = Math.abs(ball.omega);
-    if (spin < 3 || reducedMotion.matches) return;
-    ctx.save(); ctx.globalAlpha = Math.min(.7, spin / 20); ctx.strokeStyle = text; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
-    for (const k of [0, Math.PI]) {
-      ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius + 4, ball.rotation + k, ball.rotation + k + .9 * Math.sign(ball.omega), ball.omega < 0); ctx.stroke();
+  // Arcs around a spinning ubu or ball, turning with it. Harder spins (up to 16 rad/s; ubus top out at
+  // 10, the ball at 24) draw more, longer and bolder arcs, and an outer ring past halfway.
+  function drawSpin(b, color) {
+    const spin = Math.abs(b.omega);
+    if (spin < 2.5 || reducedMotion.matches) return;
+    const power = Math.min(1, (spin - 2.5) / 13.5), arcs = spin >= 8 ? 3 : 2, sweep = (.8 + 1.2 * power) * Math.sign(b.omega), back = b.omega < 0;
+    ctx.save(); ctx.strokeStyle = color; ctx.lineCap = 'round';
+    for (let k = 0; k < arcs; k++) {
+      const start = b.rotation + k * 2 * Math.PI / arcs;
+      ctx.globalAlpha = .2 + .6 * power; ctx.lineWidth = 1.5 + 2.5 * power;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 4, start, start + sweep, back); ctx.stroke();
+      if (power > .5) {
+        ctx.globalAlpha = power - .5; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 10, start + sweep * .4, start + sweep, back); ctx.stroke();
+      }
     }
     ctx.restore();
   }
@@ -2018,7 +2026,8 @@
       const size = ball.radius * 1.7;
       ctx.drawImage(ballMark, -size / 2, -size / 2, size, size); ctx.restore();
     }
-    drawBallSpin(ball, text);
+    bodies.slice(0, 6).forEach(b => { if (!b.carded) drawSpin(b, b.team ? away : home); });
+    drawSpin(ball, text);
     drawParticles(home, away);
     drawFieldOver(themeColors);
     drawFouls(text);
@@ -2222,10 +2231,28 @@
     let k = 0;
     while (k + 1 < turns.length && th.starts[k + 1] <= at) k++;
     loadReplayTurn(k, false);
-    while (th.tick < Math.min(at - th.starts[k], turns[k].ticks)) stepReplay(false);
-    th.holdUntil = 0; th.steps = 0; fouls = viewFouls(th.fouls, th.seat);
-    clearEffects(); syncReplay(); shownScores.splice(0, 2, ...scores); sync(); updateReplayBar(); draw();
+    const target = Math.min(at - th.starts[k], turns[k].ticks), span = Math.min(target, Math.round(SEEK_EFFECTS / P.DT));
+    while (th.tick < target - span) stepReplay(false);
+    th.holdUntil = 0; th.steps = 0;
+    clearEffects(); syncReplay();
+    // The last moment before `at` plays with its effects, silently, so the field shows its motion trails,
+    // contact effects and spin as they were then.
+    if (span) {
+      const audio = videoAudio, clock = videoClock, dt = 1 / 60;
+      videoAudio = silentAudio; videoClock = clockNow() - span * P.DT * 1000;
+      try {
+        while (th.tick < target) {
+          for (let n = 0; n < dt / P.DT && th.tick < target; n++) { stepReplay(true); syncReplay(); recordTrails(); }
+          fouls = viewFouls(th.fouls, th.seat); emitSkaterEffects(dt);
+          videoClock += dt * 1000; updateEffects(dt);
+        }
+      } finally { videoAudio = audio; videoClock = clock; }
+    }
+    fouls = viewFouls(th.fouls, th.seat);
+    shownScores.splice(0, 2, ...scores); sync(); updateReplayBar(); draw();
   }
+  const SEEK_EFFECTS = .4;
+  const silentAudio = new Proxy({}, { get: () => () => null });
   // At a turn's end its goal is called and held a moment; at the replay's end it pauses. False stops this frame's steps.
   function endReplayTurn() {
     const th = theater, t = th.replay.turns[th.index];
@@ -2566,48 +2593,53 @@
   $('replay-export-video').hidden = !('VideoEncoder' in window && 'OfflineAudioContext' in window);
   $('replay-export-video').onclick = () => openExport('video');
   $('replay-export-file').onclick = () => openExport('replay');
-  // Share: the moment on screen as a 1080×960 card, the scorebug over the field (cropped to y 42–564,
-  // as videos are) with any moves or trails, a watermark and a line inviting others to play. It draws
-  // straight into the dialog's canvas and is encoded only when shared or saved.
-  const CARD = { width: 1080, height: 960, field: 146, cta: 'Think you can do better? Play at' };
+  // Share: the moment on screen as a 1080×980 card, the scorebug over the field (cropped to the boards
+  // and goals, y 42–550, leaving out the Pulse timer) with its effects and any moves or trails, and a
+  // line inviting others to play over the logo and what ububall is. It draws straight into the dialog's canvas and is
+  // encoded only when shared or saved.
+  const CARD = { width: 1080, height: 980, field: 146, crop: [42, 550], cta: 'Collect & Collide at', tagline: '3v3 turn-based hockey' };
   let cardImage = null;
   function drawShareCard(hidden) {
     const th = theater, out = $('share-card'), g = out.getContext('2d'), { home, away, text, surface, background } = themeColors;
     const restoreNames = hidden && !th.replay.anonymous ? showAnonymous() : null, portrait = isPortrait;
     const names = [$('home-label').textContent, $('opponent-label').textContent], font = getComputedStyle(document.body).fontFamily;
+    const k = CARD.width / 1000, [cropTop, cropBottom] = CARD.crop, fieldBottom = CARD.field + (cropBottom - cropTop) * k;
     g.fillStyle = background; g.fillRect(0, 0, CARD.width, CARD.height);
     try {
-      isPortrait = false; videoField = { width: CARD.width, height: CARD.width * .6 }; draw();
-      const top = CARD.field - 42 * CARD.width / 1000;
-      g.save(); g.beginPath(); g.rect(0, CARD.field, CARD.width, 522 * CARD.width / 1000); g.clip();
-      paintField(g, 0, top, CARD.width, CARD.width * .6);
+      isPortrait = false; cardShot = true; videoField = { width: CARD.width, height: 600 * k }; draw();
+      g.save(); g.beginPath(); g.rect(0, CARD.field, CARD.width, fieldBottom - CARD.field); g.clip();
+      paintField(g, 0, CARD.field - cropTop * k, CARD.width, 600 * k);
       g.restore();
     } finally {
-      videoField = null; isPortrait = portrait; restoreNames?.(); layoutDirty = true; draw();
+      videoField = null; cardShot = false; isPortrait = portrait; restoreNames?.(); layoutDirty = true; draw();
     }
-    // Scorebug: each team's name and score, the turn between them.
+    // Scorebug, as wide as the rink's flat top (x 160–840): each team's name and score, the turn between them.
+    const bugLeft = 160 * k, bugWidth = 680 * k, middle = 110, side = (bugWidth - middle) / 2;
     g.textBaseline = 'middle';
-    g.save(); g.beginPath(); g.roundRect(36, 36, 1008, 90, 18); g.clip();
+    g.save(); g.beginPath(); g.roundRect(bugLeft, 36, bugWidth, 90, 18); g.clip();
     for (const team of [0, 1]) {
-      const left = team ? 600 : 36;
-      g.fillStyle = team ? away : home; g.fillRect(left, 36, 444, 90);
+      const left = team ? bugLeft + side + middle : bugLeft;
+      g.fillStyle = team ? away : home; g.fillRect(left, 36, side, 90);
       g.fillStyle = team ? '#ffffff' : '#1b1e26';
-      g.font = `800 30px ${font}`; g.textAlign = team ? 'right' : 'left';
-      g.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 424 : left + 22, 82);
       g.font = `800 52px ${font}`; g.textAlign = 'center';
-      g.fillText(String(scores[team]), team ? left + 50 : left + 394, 83);
+      g.fillText(String(scores[team]), team ? left + 42 : left + side - 42, 83);
+      // Names shrink to fit beside the score.
+      const name = names[team].toUpperCase().slice(0, 16), room = side - 100;
+      let size = 28;
+      do g.font = `800 ${size}px ${font}`; while (g.measureText(name).width > room && --size > 14);
+      g.textAlign = team ? 'right' : 'left';
+      g.fillText(name, team ? left + side - 18 : left + 18, 82, room);
     }
-    g.fillStyle = surface; g.fillRect(480, 36, 120, 90);
-    g.fillStyle = text; g.font = `800 28px ${font}`; g.fillText(`T${turn}`, 540, 82);
+    g.fillStyle = surface; g.fillRect(bugLeft + side, 36, middle, 90);
+    g.fillStyle = text; g.textAlign = 'center'; g.font = `800 28px ${font}`; g.fillText(`T${turn}`, CARD.width / 2, 82);
     g.restore();
-    // Watermark in the field's corner, and the invitation under it.
-    const fieldBottom = CARD.field + 522 * CARD.width / 1000;
-    g.font = `800 30px ${font}`; g.textAlign = 'right'; g.textBaseline = 'alphabetic';
-    g.fillStyle = '#ffffff'; g.globalAlpha = .4; g.fillText('ububall.com', CARD.width - 28, fieldBottom - 24); g.globalAlpha = 1;
-    g.fillStyle = text; g.textAlign = 'center'; g.font = `700 32px ${font}`;
-    g.fillText(CARD.cta, CARD.width / 2, fieldBottom + 58);
-    const logo = videoLogoImage;
-    if (logo?.naturalWidth) { const h = 420 * logo.naturalHeight / logo.naturalWidth; g.drawImage(logo, CARD.width / 2 - 210, fieldBottom + 82, 420, h); }
+    // The invitation, the logo and what the game is.
+    g.textBaseline = 'alphabetic'; g.textAlign = 'center'; g.fillStyle = text; g.font = `700 32px ${font}`;
+    g.fillText(CARD.cta, CARD.width / 2, fieldBottom + 60);
+    const logo = videoLogoImage, logoWidth = 500, logoHeight = logo?.naturalWidth ? logoWidth * logo.naturalHeight / logo.naturalWidth : 0;
+    if (logoHeight) g.drawImage(logo, (CARD.width - logoWidth) / 2, fieldBottom + 80, logoWidth, logoHeight);
+    g.font = `400 40px 'Uburoom Sans', ${font}`; g.fillStyle = text;
+    g.fillText(CARD.tagline, CARD.width / 2, fieldBottom + 100 + logoHeight + 30);
     // Encoding starts now so sharing does not wait on it.
     const name = `${replayFileName(th.replay.recorded, hidden ? null : th.replay.title)}-turn-${turn}.png`;
     cardImage = new Promise(resolve => out.toBlob(blob => resolve(new File([blob], name, { type: 'image/png' })), 'image/png'));
@@ -2615,7 +2647,7 @@
   async function openShare() {
     const th = theater;
     if (!th || th.exporting) return;
-    await videoLogo();
+    await Promise.all([videoLogo(), document.fonts.load(`40px 'Uburoom Sans'`).catch(() => {})]);
     $('share-private').closest('label').hidden = th.replay.anonymous;
     try { $('share-private').checked = localStorage.getItem('ububall-export-private') === 'on'; } catch {}
     $('share-status').textContent = '';
@@ -3209,7 +3241,8 @@
     if (!active) { lastTime = 0; accumulator = 0; }
     const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length || goalCall ||
       ripples.length || pings.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
-    if (active) updateEffects(delta);
+    // Effects pause with the replay viewer.
+    if (active && !theater?.paused) updateEffects(delta);
     if (theater) { if (active && !theater.exporting) advanceReplay(delta); }
     else if (phase === 'play' && active && !online?.active) {
       if (performance.now() < hitStopUntil) accumulator = 0; else accumulator += delta;

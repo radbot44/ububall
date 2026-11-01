@@ -26,10 +26,11 @@ Re-simulation is exact within one JavaScript engine. JSON keeps every number exc
 ## Viewer
 
 Beside playback and the timeline, the viewer offers (owner requests 2026-10-31):
+- Effects (motion trails, contact sparks, wall ripples, spin arcs) pause with the viewer. Seeking plays the last 0.4 s before the new moment silently with effects, so a paused or scrubbed field shows its motion as it was.
 - **Moves** and **Trails**, remembered on the device: Moves draws each ubu's launch from where the turn started (faded when it guarded), with its guard shield and armed super; Trails draws the path each body has taken so far this turn. Both show in videos and share cards.
 - **Stats**, worked out by playing the replay through once without effects: each ubu's goals, assists, saves, ball touches (a touch counts once until another ubu touches the ball or half a second passes), top shot and distance skated, each team's share of the time it last touched the ball, and a map of where each ubu touched the ball, a star marking each scoring touch.
 - **Play from here**: a match against the CPU from the start of the turn on screen, playing the left team, with the score, fouls and round so far; meter cooldowns start afresh. It is recorded as a new match.
-- **Share**: the moment on screen as a 1080×960 PNG card: the scorebug, the field cropped as videos are with any moves or trails, an ububall.com watermark and a line inviting others to play. It shows at once in the dialog and is encoded only when shared (the device's share sheet, where it can share files) or saved. Hide names redraws it.
+- **Share**: the moment on screen as a 1080×980 PNG card: a scorebug as wide as the rink's flat top, the field cropped to the boards and goals (no Pulse timer) with its effects and any moves or trails, then "Collect & Collide at" over the ububall.com logo and "3v3 turn-based hockey" in Uburoom Sans. It shows at once in the dialog and is encoded only when shared (the device's share sheet, where it can share files) or saved. Hide names redraws it.
 
 Videos and share cards carry the ububall.com logo (`web/assets/ububall-logo-com.svg`).
 
