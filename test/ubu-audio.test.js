@@ -12,7 +12,7 @@ function recordedContext() {
   const node = kind => {
     const n = { kind, outputs: [], connect(to) { this.outputs.push(to); }, disconnect() {},
       start(time) { this.started = time; }, stop(time) { this.stopped = time; } };
-    for (const key of ['gain', 'frequency', 'detune', 'Q', 'threshold', 'knee', 'ratio', 'attack', 'release', 'pan']) n[key] = param();
+    for (const key of ['gain', 'frequency', 'detune', 'Q', 'threshold', 'knee', 'ratio', 'attack', 'release', 'pan', 'offset']) n[key] = param();
     nodes.push(n);
     return n;
   };
@@ -20,7 +20,7 @@ function recordedContext() {
     createGain: () => node('gain'), createOscillator: () => node('oscillator'),
     createBiquadFilter: () => node('filter'), createDynamicsCompressor: () => node('compressor'),
     createStereoPanner: () => node('panner'), createBufferSource: () => node('buffer'),
-    createConvolver: () => node('room'),
+    createConvolver: () => node('room'), createConstantSource: () => node('constant'),
     createBuffer: (channels, length, sampleRate) => {
       const data = Array.from({ length: channels }, () => new Float32Array(length));
       return { sampleRate, getChannelData: channel => data[channel] };
@@ -251,6 +251,7 @@ test('audio: mock AudioContext synthesis and scheduling', () => {
       this.attack = new MockParam(0.003);
       this.release = new MockParam(0.25);
       this.pan = new MockParam(0);
+      this.offset = new MockParam(1);
     }
     connect() {}
     disconnect() {}
@@ -270,6 +271,7 @@ test('audio: mock AudioContext synthesis and scheduling', () => {
     createStereoPanner() { return new MockNode(); },
     createBufferSource() { return new MockNode(); },
     createConvolver() { convolvers++; return new MockNode(); },
+    createConstantSource() { return new MockNode(); },
     createBuffer(channels, length, sampleRate) {
       const data = Array.from({ length: channels }, () => new Float32Array(length));
       return { sampleRate, getChannelData: channel => data[channel] };
@@ -403,4 +405,20 @@ test('fanfare chords follow the melody and loops vary deterministically from the
     assert.deepEqual(varied.map(n => n.beats).sort(), notes.map(n => n.beats).sort()); // same rhythm values
     for (const n of varied) if (!n.isRest) assert.ok(pitches.includes(((n.semi % 12) + 12) % 12)); // stays in key
   }
+});
+
+test('short sounds let their chain go once rung out, and a shared chain replaces one per sound', () => {
+  const ctx = recordedContext(), voice = { instrument: 0, rootPitch: 30, decay: 4, timbreMod: 0 };
+  audio.playCollision(voice, { ctx });
+  const timer = ctx.nodes.find(n => n.kind === 'constant');
+  assert.ok(timer && typeof timer.onended === 'function' && timer.stopped > ctx.currentTime);
+  const latest = Math.max(...ctx.nodes.filter(n => n.kind === 'oscillator').map(n => n.stopped));
+  assert.ok(timer.stopped >= latest, 'the chain outlasts the sound');
+  const shared = recordedContext();
+  audio.shareMasterChain(shared);
+  const before = shared.nodes.filter(n => n.kind === 'compressor').length;
+  for (let i = 0; i < 5; i++) { audio.playCollision(voice, { ctx: shared }); audio.playBallHit({ ctx: shared }); audio.playWallHit({ ctx: shared }); }
+  assert.equal(before, 1);
+  assert.equal(shared.nodes.filter(n => n.kind === 'compressor').length, 1);
+  assert.ok(!shared.nodes.some(n => n.kind === 'constant'));
 });

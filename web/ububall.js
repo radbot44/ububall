@@ -1847,7 +1847,7 @@
       measureField();
       layoutDirty = false;
     }
-    positionSpinControl();
+    if (!videoField) positionSpinControl();
     const ratio = Math.min(devicePixelRatio || 1, 2);
     const width = videoField?.width ?? Math.max(1, Math.round(renderWidth * ratio));
     const height = videoField?.height ?? Math.max(1, Math.round(renderHeight * ratio));
@@ -1984,6 +1984,9 @@
           ctx.restore();
         }
       }
+      if (i < 3 && phase === 'plan') drawImpulse(b, plans[i], home);
+      // A video export draws the ubus itself (see composeFrame).
+      if (videoField) return;
       const style = skaters[i].style;
       const width = b.radius / 5 + '%';
       // A carded ubu fades out of play.
@@ -1995,7 +1998,6 @@
       if (style.opacity !== opacity) style.opacity = opacity;
       if (style.filter !== filter) style.filter = filter;
       if (style.transform !== transform) style.transform = transform;
-      if (i < 3 && phase === 'plan') drawImpulse(b, plans[i], home);
     });
     if (bodies[6]?.stuckTo) drawStickyTether(bodies[6].stuckTo, bodies[6]);
 
@@ -2250,7 +2252,8 @@
       fouls = viewFouls(th.fouls, th.seat);
       emitSkaterEffects(delta);
     }
-    updateReplayBar(); draw();
+    if (!th.exporting) updateReplayBar();
+    draw();
   }
   function updateReplayBar() {
     const th = theater, at = th.starts[th.index] + th.tick, seek = $('replay-seek'), play = $('replay-play');
@@ -2320,34 +2323,44 @@
     const A = window.ubuAudio, ctx = new Proxy(offline, {
       get: (target, key) => key === 'currentTime' ? seconds() : typeof target[key] === 'function' ? target[key].bind(target) : target[key]
     });
+    // One compressor for the export's mix: a chain per sound made the render several times slower,
+    // and changes loudness by well under a decibel.
+    A.shareMasterChain(ctx);
     const into = (options = {}) => ({ ...options, ctx });
     return { getAudioContext: () => ctx, stop() {}, playCollision: (voice, o) => A.playCollision(voice, into(o)), playBallHit: o => A.playBallHit(into(o)),
       playWallHit: o => A.playWallHit(into(o)), playGoalHit: (type, o) => A.playGoalHit(type, into(o)), playSuper: (key, phase, o) => A.playSuper(key, phase, into(o)),
       playSizzle: o => A.playSizzle(into(o)), playFoul: (kind, o) => A.playFoul(kind, into(o)) };
   }
-  // A frame: the scorebug over the field, its ubus and their badges, as the stadium shows them.
+  // A frame: the scorebug over the field, its ubus and their badges, as the stadium shows them. The
+  // background and scorebug only change with a score or turn, so they are drawn once each and reused.
+  let videoBase = null;
   function composeFrame(v) {
-    const { home, away, text, surface, background } = themeColors, f = VIDEO.field, scale = f.width / 1000, cx = 960;
-    v.setTransform(VIDEO.width / 1920, 0, 0, VIDEO.width / 1920, 0, 0);
-    const font = getComputedStyle(document.body).fontFamily;
-    v.fillStyle = background; v.fillRect(0, 0, 1920, 1080);
-    v.save();
-    v.beginPath(); v.roundRect(cx - 640, 36, 1280, 76, 16); v.fillStyle = surface; v.fill();
-    if (rinkLogo.complete && rinkLogo.naturalWidth) v.drawImage(rinkLogo, cx - 615, 52, 150, 150 * rinkLogo.naturalHeight / rinkLogo.naturalWidth);
-    const names = [$('home-label').textContent, $('opponent-label').textContent];
-    v.textBaseline = 'middle';
-    for (const team of [0, 1]) {
-      const left = team ? cx : cx - 420;
-      v.fillStyle = team ? away : home; v.fillRect(left, 36, 420, 76);
-      v.fillStyle = team ? '#ffffff' : '#1b1e26';
-      v.font = `800 30px ${font}`; v.textAlign = team ? 'right' : 'left';
-      v.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 400 : left + 20, 75);
-      v.font = `800 46px ${font}`; v.textAlign = 'center';
-      v.fillText(String(scores[team]), team ? left + 50 : left + 370, 76);
+    const f = VIDEO.field, scale = f.width / 1000, names = [$('home-label').textContent, $('opponent-label').textContent];
+    const key = `${names}|${scores}|${turn}`;
+    if (videoBase?.key !== key) {
+      const { home, away, text, surface, background } = themeColors, cx = 960, font = videoBase?.font || getComputedStyle(document.body).fontFamily;
+      const layer = videoBase?.layer || Object.assign(document.createElement('canvas'), { width: VIDEO.width, height: VIDEO.height }), b = layer.getContext('2d');
+      b.setTransform(VIDEO.width / 1920, 0, 0, VIDEO.width / 1920, 0, 0);
+      b.fillStyle = background; b.fillRect(0, 0, 1920, 1080);
+      b.beginPath(); b.roundRect(cx - 640, 36, 1280, 76, 16); b.fillStyle = surface; b.fill();
+      if (rinkLogo.complete && rinkLogo.naturalWidth) b.drawImage(rinkLogo, cx - 615, 52, 150, 150 * rinkLogo.naturalHeight / rinkLogo.naturalWidth);
+      b.textBaseline = 'middle';
+      for (const team of [0, 1]) {
+        const left = team ? cx : cx - 420;
+        b.fillStyle = team ? away : home; b.fillRect(left, 36, 420, 76);
+        b.fillStyle = team ? '#ffffff' : '#1b1e26';
+        b.font = `800 30px ${font}`; b.textAlign = team ? 'right' : 'left';
+        b.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 400 : left + 20, 75);
+        b.font = `800 46px ${font}`; b.textAlign = 'center';
+        b.fillText(String(scores[team]), team ? left + 50 : left + 370, 76);
+      }
+      b.fillStyle = text; b.textAlign = 'center'; b.font = `800 28px ${font}`;
+      b.fillText(`T${turn}  REPLAY`, cx + 530, 75);
+      videoBase = { key, font, layer };
     }
-    v.fillStyle = text; v.textAlign = 'center'; v.font = `800 28px ${font}`;
-    v.fillText(`T${turn}  REPLAY`, cx + 530, 75);
-    v.restore();
+    v.setTransform(1, 0, 0, 1, 0, 0);
+    v.drawImage(videoBase.layer, 0, 0);
+    v.setTransform(VIDEO.width / 1920, 0, 0, VIDEO.width / 1920, 0, 0);
     v.drawImage(canvas, f.x, f.y, f.width, f.height);
     bodies.slice(0, 6).forEach((b, i) => {
       const sprite = skaters[i]?.firstChild;
@@ -2424,21 +2437,28 @@
       th.exporting = true; th.speed = 1; th.paused = false; isPortrait = false;
       videoClock = 0; videoField = { width: Math.round(VIDEO.field.width * VIDEO.width / 1920), height: Math.round(VIDEO.field.height * VIDEO.width / 1920) };
       videoAudio = offlineAudio(offline, () => videoClock / 1000);
-      gameAudio()?.stop(); resetSoundThrottles(); seekReplay(0);
+      // The sound renders alongside the video, a second behind it: it pauses at each second until the
+      // video has scheduled every sound up to the next, so nothing is scheduled where it has already rendered.
+      let waiting = null, videoDone = false;
+      const pump = () => { if (waiting !== null && (videoDone || videoClock / 1000 >= waiting + 1)) { waiting = null; offline.resume(); } };
+      for (let mark = 1; mark < offline.length / rate; mark++) offline.suspend(mark).then(() => { waiting = mark; pump(); });
+      const rendering = offline.startRendering();
+      videoBase = null; gameAudio()?.stop(); resetSoundThrottles(); seekReplay(0);
       for (let f = 0; f < frames && !videoCancelled && !failure; f++) {
         if (f) { videoClock += 1000 / VIDEO.fps; updateEffects(1 / VIDEO.fps); advanceReplay(1 / VIDEO.fps); }
         composeFrame(v);
         const frame = new VideoFrame(out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
         encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
+        pump();
         while (encoder.encodeQueueSize > 4) await new Promise(resolve => encoder.addEventListener('dequeue', resolve, { once: true }));
         if (f % 15 === 0) { progress.value = .9 * f / frames; status.textContent = `Rendering ${replayClock(f / VIDEO.fps / P.DT)} of ${replayClock(seconds / P.DT)}…`; await yieldTask(); }
       }
       await encoder.flush();
       if (failure) throw failure;
       if (!videoCancelled) {
-        videoAudio = null;
+        videoAudio = null; videoDone = true; pump();
         status.textContent = 'Mixing sound…';
-        const audio = await encodeAudio(await offline.startRendering());
+        const audio = await encodeAudio(await rendering);
         blob = new Blob(ububallMP4.write({ width: VIDEO.width, height: VIDEO.height, timescale: 90000, description, samples }, audio), { type: 'video/mp4' });
         if (!audio) status.textContent = 'This browser cannot encode sound, so the video is silent.';
       }

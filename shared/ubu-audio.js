@@ -124,8 +124,13 @@
   }
 
   // In-game sounds: a gentle high-cut takes the edge off bright transients, and moderate compression
-  // keeps hits even without squashing them.
-  function createMasterChain(ctx, cleanup = null) {
+  // keeps hits even without squashing them. Given a short sound's length in `seconds`, the chain lets
+  // go once it has rung out (plus the compressor's release): a chain left connected keeps costing
+  // the audio graph every block, and a match plays thousands of hits.
+  // A context can share one chain among its sounds (see shareMasterChain).
+  const sharedChains = new WeakMap();
+  function createMasterChain(ctx, cleanup = null, seconds = 0) {
+    if (sharedChains.has(ctx)) return sharedChains.get(ctx);
     const soften = ctx.createBiquadFilter();
     soften.type = 'lowpass';
     soften.frequency.setValueAtTime(7500, ctx.currentTime);
@@ -145,7 +150,21 @@
     compressor.connect(masterGain);
     masterGain.connect(ctx.destination);
     if (cleanup) cleanup.push(soften, compressor, masterGain);
+    if (seconds) {
+      const timer = ctx.createConstantSource();
+      timer.offset.value = 0; timer.connect(masterGain);
+      timer.onended = () => { for (const node of [timer, soften, compressor, masterGain]) node.disconnect(); };
+      timer.start(ctx.currentTime); timer.stop(ctx.currentTime + seconds + 0.3);
+    }
     return soften;
+  }
+
+  // Sends every later sound on `ctx` through one chain, compressing their mix rather than each sound:
+  // far cheaper where thousands are rendered at once (a video export), where a chain per sound
+  // dominated the render.
+  function shareMasterChain(ctx) {
+    sharedChains.delete(ctx);
+    sharedChains.set(ctx, createMasterChain(ctx));
   }
 
   function playTone(ctx, dest, params) {
@@ -611,7 +630,7 @@
     if (!ctx) return { stop() {} };
 
     const parsed = parseVoiceInfo(voice);
-    const master = createMasterChain(ctx);
+    const master = createMasterChain(ctx, null, parsed.decaySeconds * 1.5 + 0.1);
     const now = ctx.currentTime;
     const volume = options.volume ?? 1.0;
 
@@ -642,7 +661,7 @@
     if (!ctx) return { stop() {} };
 
     const parsed = parseVoiceInfo(voice);
-    const master = createMasterChain(ctx);
+    const master = createMasterChain(ctx, null, Math.min(parsed.decaySeconds, 0.22) * 1.5 + 0.1);
     const now = ctx.currentTime;
     const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 1.0));
 
@@ -672,7 +691,7 @@
   function playBallHit(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx);
+    const master = createMasterChain(ctx, null, 0.08);
     const now = ctx.currentTime;
     const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.8));
 
@@ -749,7 +768,7 @@
   function playPack(kind, options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx);
+    const master = createMasterChain(ctx, null, 0.4);
     const now = ctx.currentTime;
     if (kind === 'deal') {
       for (let i = 0; i < 3; i++) noiseGrain(ctx, master, now + i * 0.12, 0.09, { freq: 2600, to: 900, level: 0.5, pan: (i - 1) * 0.5 });
@@ -863,7 +882,7 @@
   function playCoin(kind = 'land', options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx);
+    const master = createMasterChain(ctx, null, 0.4);
     const now = ctx.currentTime;
     const base = kind === 'flick' ? 2600 : 2300;
     const hits = kind === 'flick' ? [[0, 0.5]] : [[0, 0.7], [0.13, 0.38], [0.22, 0.2], [0.28, 0.1]];
@@ -920,7 +939,7 @@
   function playWallHit(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx);
+    const master = createMasterChain(ctx, null, 0.09);
     const now = ctx.currentTime;
     const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.6));
 
@@ -947,7 +966,7 @@
   function playGoalHit(type = 'post', options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx);
+    const master = createMasterChain(ctx, null, 0.3);
     const now = ctx.currentTime;
     const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.8));
 
@@ -1122,7 +1141,7 @@
   function playFoul(kind = 'warning', options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx), now = ctx.currentTime + 0.01, volume = options.volume ?? 1;
+    const master = createMasterChain(ctx, null, 0.4), now = ctx.currentTime + 0.01, volume = options.volume ?? 1;
     if (kind === 'warning') {
       for (const [at, freq] of [[0, 784], [0.16, 659]]) {
         const start = now + at, gain = ctx.createGain();
@@ -1622,6 +1641,7 @@
     scaleDegreeSemitones,
     parseVoiceInfo,
     getAudioContext,
+    shareMasterChain,
     playVoice,
     playCollision,
     playBallHit,
