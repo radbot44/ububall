@@ -388,7 +388,7 @@ test('spin strike is single use, with no bonus on simultaneous or separating tou
 test('Sticky leaves a point-blank spin strike next turn; held and stunned ubus get no bonus', () => {
   const bodies = closeSpinSetup(); bodies[0].superActive = 'sticky';
   strikeCloseSpin(bodies);
-  assert.equal(bodies[6].stuckTo, bodies[0]);
+  assert.equal(P.holder(bodies), bodies[0]);
   P.stop(bodies);
   P.startTurn(bodies, [{ angle: 0, power: .6, spin: 1 }]);
   assert.equal(bodies[0].spinStrike, 2);
@@ -541,11 +541,11 @@ test('Sticky grabs the ball on contact and carries it along with skater movement
   Object.assign(b[0], { x: 460, y: 300, vx: 400, vy: 0 });
   Object.assign(b[6], { x: 500, y: 300, vx: 0, vy: 0 });
   P.step(b, 0);
-  assert.equal(b[6].stuckTo, b[0]);
+  assert.equal(P.holder(b), b[0]);
   const initialBallX = b[6].x;
   for (let i = 0; i < 20; i++) P.step(b, P.DT);
   assert.ok(b[6].x > initialBallX);
-  assert.equal(b[6].stuckTo, b[0]);
+  assert.equal(P.holder(b), b[0]);
 });
 
 test('Cannonball amplifies impulse imparted to the ball on contact', () => {
@@ -673,7 +673,7 @@ test('Sticky with high reach does not self-collide or propel carrier backwards',
   Object.assign(b[6], { x: 500, y: 300, vx: 0, vy: 0 });
   let collisions = 0;
   for (let i = 0; i < 30; i++) P.step(b, P.DT, () => { collisions++; });
-  assert.equal(b[6].stuckTo, b[0]);
+  assert.equal(P.holder(b), b[0]);
   assert.equal(collisions, 1);
   assert.ok(b[0].vx > 0 && b[0].x > 455);
 });
@@ -724,12 +724,12 @@ test('shared prediction preserves Sticky references and accounts for a holding t
   const bodies = P.kickoff();
   Object.assign(bodies[0], { x: 350, y: 300 });
   Object.assign(bodies[1], { x: 430, y: 300 });
-  Object.assign(bodies[6], { x: 473, y: 300, stuckTo: bodies[1], stickOffset: { x: 43, y: 0 } });
+  Object.assign(bodies[6], { x: 473, y: 300, stickOffset: { x: 43, y: 0 } }); bodies[1].holding = true;
   const plans = [{ angle: 0, power: 1, spin: .3 }];
   const original = structuredClone(bodies);
   const prediction = P.predictTurn(bodies, plans);
   assert.deepEqual(bodies, original);
-  assert.equal(bodies[6].stuckTo, bodies[1]);
+  assert.equal(P.holder(bodies), bodies[1]);
   assert.ok(prediction.paths[1].some(p => p.x !== 430));
   assert.ok(prediction.paths[6].some(p => p.x !== 473));
   const held = P.predictTurn(bodies, []);
@@ -812,7 +812,7 @@ test('Magnet pull event only fires inside its active range with a free ball', ()
     const all = P.kickoff(), a = all[0], ball = all[6];
     Object.assign(a, { x: 400, y: 250, superActive: 'magnet' });
     Object.assign(ball, { x: 400 + distance, y: 250 });
-    if (stuck) ball.stuckTo = a;
+    if (stuck) a.holding = true;
     const bodies = [a, ball], control = structuredClone(bodies), events = [];
     P.step(bodies, P.DT, null, null, null, key => events.push(key));
     P.step(control, P.DT);
@@ -948,11 +948,11 @@ test('Sticky lets go after its hold time or when an opponent hits the carrier, w
     Object.assign(b[6], { x: 442, y: 300 }); P.step(b, 0);
     return b;
   };
-  const held = grab(); assert.equal(held[6].stuckTo, held[0]);
+  const held = grab(); assert.equal(P.holder(held), held[0]);
   for (let i = 0; i < P.SUPER.holdTicks; i++) P.step(held);
-  assert.equal(held[6].stuckTo, null); assert.equal(held[0].superActive, null);
+  assert.equal(P.holder(held), null); assert.equal(held[0].superActive, null);
   const hit = grab(); Object.assign(hit[3], { x: hit[0].x - 49, y: 300, vx: 400 }); P.step(hit, 0);
-  assert.equal(hit[6].stuckTo, null);
+  assert.equal(P.holder(hit), null);
   const free = P.kickoff(); P.applyStats(free[0], normal); Object.assign(free[0], { x: 400, y: 300, vx: 200 });
   const carrier = grab(); Object.assign(carrier[0], { vx: 200, vy: 0 });
   P.step(free); P.step(carrier);

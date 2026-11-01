@@ -246,8 +246,11 @@
       if (b.baseMass) b.mass = b.baseMass;
       b.colossusApplied = false;
     }
-    const ball = bodies?.find(o => o.team === -1);
-    if (ball?.stuckTo === b) { ball.stuckTo = null; ball.stickOffset = null; }
+    if (b.holding) {
+      b.holding = false;
+      const ball = bodies?.find(o => o.team === -1);
+      if (ball) ball.stickOffset = null;
+    }
     if ((b.superActive || b.usedSuperThisTurn) && !b.superRefunded) {
       b.superRefunded = true;
       const bonusRefund = b.equippedSuper?.bonusRefund ?? b.superBonusRefund ?? 0;
@@ -266,7 +269,7 @@
     if (isBall) {
       const player = a.team !== -1 ? a : b;
       const ball = a.team === -1 ? a : b;
-      if (ball.stuckTo === player) return;
+      if (player.holding) return;
     }
 
     const ra = (isBall && a.team !== -1) ? ballHitRadius(a) : a.radius;
@@ -307,8 +310,8 @@
       if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; onSuper?.('knockout', 'impact', a, b); knockoutChecker = a; }
       if (b.superActive === 'knockout') { a.stunnedNext = true; b.superActive = null; onSuper?.('knockout', 'impact', b, a); knockoutChecker = b; }
       // An opponent's hit knocks a Sticky ball loose.
-      if (a.superActive === 'sticky' && allBodies?.find(o => o.team === -1)?.stuckTo === a) endSuper(a, allBodies);
-      if (b.superActive === 'sticky' && allBodies?.find(o => o.team === -1)?.stuckTo === b) endSuper(b, allBodies);
+      if (a.superActive === 'sticky' && a.holding) endSuper(a, allBodies);
+      if (b.superActive === 'sticky' && b.holding) endSuper(b, allBodies);
     }
 
     const nx = d ? dx / d : 1, ny = d ? dy / d : 0;
@@ -325,7 +328,8 @@
       const player = a.team !== -1 ? a : b;
       const ball = a.team === -1 ? a : b;
       if (player.superActive === 'sticky') {
-        ball.stuckTo = player; ball.stuckTicks = 0;
+        for (const o of allBodies || []) o.holding = false;
+        player.holding = true; ball.stuckTicks = 0;
         onSuper?.('sticky', 'impact', player, ball);
         const ox = ball.x - player.x, oy = ball.y - player.y, od = Math.sqrt(ox * ox + oy * oy) || 1;
         const targetDist = player.radius + ball.radius;
@@ -543,7 +547,9 @@
         if ((ball.vx - b.vx) * (ball.x - b.x) + (ball.vy - b.vy) * (ball.y - b.y) >= 0) ball.openingShot = false;
       }
     }
-    if (ball && !ball.stuckTo) {
+    // Who holds the ball changes only in a collision (or as the hold times out, below).
+    let host = ball && holder(bodies);
+    if (ball && !host) {
       for (const b of bodies) {
         if (b.team !== -1 && b.superActive === 'magnet') {
           const dx = b.x - ball.x, dy = b.y - ball.y, d2 = dx * dx + dy * dy;
@@ -592,10 +598,9 @@
         }
       }
     }
-    if (ball?.stuckTo && ++ball.stuckTicks >= (ball.stuckTo.superHoldTicks || SUPER.holdTicks)) endSuper(ball.stuckTo, bodies);
+    if (host && ++ball.stuckTicks >= (host.superHoldTicks || SUPER.holdTicks)) { endSuper(host, bodies); host = null; }
     for (const b of bodies) {
-      if (b.team === -1 && b.stuckTo) {
-        const host = b.stuckTo;
+      if (b === ball && host) {
         const off = b.stickOffset || { x: host.radius + b.radius, y: 0 };
         b.x = host.x + off.x; b.y = host.y + off.y;
         b.vx = host.vx; b.vy = host.vy; b.omega = host.omega;
@@ -610,7 +615,7 @@
       b.rotation += b.omega * dt;
       b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - SPIN_DECAY * dt);
       b.x += b.vx * dt; b.y += b.vy * dt;
-      const carrying = ball?.stuckTo === b ? SUPER.carryFriction : (b.superActive === 'stalwart' ? SUPER.stalwartFriction : 1);
+      const carrying = b.holding ? SUPER.carryFriction : (b.superActive === 'stalwart' ? SUPER.stalwartFriction : 1);
       const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = (b.friction * carrying + (b.team === -1 ? AIR_DRAG * speed2 : 0)) * dt;
       if (speed2 <= deceleration * deceleration) {
         b.vx = b.vy = 0;
@@ -623,7 +628,7 @@
     if (ball) {
       const ballSpeed = Math.hypot(ball.vx, ball.vy);
       const ballShare = ballSpeed / MAX_SPEED;
-      if (ball.stuckTo) {
+      if (host) {
         ball.fireTicks = 0;
         ball.onFire = false;
       } else if (ball.onFire) {
@@ -659,8 +664,8 @@
         }
       }
       if (ball) {
-        if (ball.stuckTo) {
-          const host = ball.stuckTo;
+        if (resolved !== resolvedBefore) host = holder(bodies);
+        if (host) {
           const off = ball.stickOffset || { x: host.radius + ball.radius, y: 0 };
           const ex = host.x + off.x, ey = host.y + off.y;
           ball.x = ex; ball.y = ey;
@@ -743,6 +748,12 @@
       ball.openingShot = bodies.some(b => b.spinStrike);
     }
   }
+  // The ubu holding the ball with Sticky, or null. Held is a flag on the ubu, not a reference on the
+  // ball, so the field survives JSON (online state and its storage).
+  function holder(bodies) {
+    for (const b of bodies) if (b.holding) return b;
+    return null;
+  }
   function settled(bodies) { return bodies.every(b => b.vx * b.vx + b.vy * b.vy < 4 && Math.abs(b.omega) < .05); }
   // Ends turn effects; keepMotion leaves velocities for a Pulse turn that ends mid-motion.
   function stop(bodies, keepMotion = false) {
@@ -759,7 +770,7 @@
     }
     const ball = bodies.find(b => b.team === -1);
     if (ball && !keepMotion) {
-      ball.stuckTo = null; ball.stickOffset = null;
+      ball.stickOffset = null;
       ball.fireTicks = 0; ball.onFire = false;
       ball.strikerPower = 1; ball.strikerTeam = -1;
     }
@@ -769,7 +780,7 @@
   // `ticks` run out. Returns the goal it enters cleanly (as step reports it) or null, and how far it
   // travelled untouched.
   function ballRun(bodies, { removed = null, boards = false, ticks = 960 } = {}) {
-    const sim = bodies.filter(b => b !== removed).map(b => ({ ...b, stuckTo: null }));
+    const sim = bodies.filter(b => b !== removed).map(b => ({ ...b, holding: false }));
     const ball = sim.find(b => b.team === -1);
     let clean = Boolean(ball), distance = 0;
     for (let t = 0; t < ticks && clean; t++) {
@@ -1038,6 +1049,6 @@
     }
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS };
   }
-  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, ballOnFire, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, superMastery, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, ballOnFire, holder, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, superMastery, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

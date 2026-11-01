@@ -4,20 +4,20 @@
   const node = typeof module === 'object' && module.exports;
   const P = node ? require('../web/ububall-physics.js') : root.ububallPhysics;
   const M = node ? require('./ububall-match.js') : root.ububallMatch;
-  const FORMAT = 4, MAX_BYTES = 8 << 20, MAX_TEXT = 64 << 20, MAX_TURNS = 5000;
+  const FORMAT = 5, MAX_BYTES = 8 << 20, MAX_TEXT = 64 << 20, MAX_TURNS = 5000;
   // Automatically saved matches kept on this device; the oldest unpinned go first.
   const KEEP = 25, MAX_TITLE = 80;
   // Body fields a snapshot keeps, in file order: everything a turn's simulation reads or writes.
   const NUMBERS = ['x', 'y', 'vx', 'vy', 'omega', 'rotation', 'radius', 'mass', 'friction', 'grip', 'maxSpin', 'team', 'slot', 'curveFactor',
     'sizeMult', 'baseMass', 'baseRadius', 'impulse', 'curveMult', 'bounciness', 'wallBounce', 'power', 'reach', 'strength', 'stability',
     'meter', 'meterTick', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'strikerPower', 'strikerTeam'];
-  const FLAGS = ['superArm', 'guarding', 'usedSuperThisTurn', 'superHit', 'superRefunded', 'openingShot', 'spinStruck', 'shockwaveFired', 'carded', 'colossusApplied', 'stunned', 'stunnedNext', 'onFire'];
+  const FLAGS = ['superArm', 'guarding', 'usedSuperThisTurn', 'superHit', 'superRefunded', 'openingShot', 'spinStruck', 'shockwaveFired', 'carded', 'colossusApplied', 'stunned', 'stunnedNext', 'onFire', 'holding'];
   const GUARD = ['reach', 'friction', 'strength', 'stability', 'bounciness'];
-  const BODY = [...NUMBERS, ...FLAGS, 'superActive', 'equippedSuper', 'guardBase', 'stuckTo', 'stickOffset'];
+  const BODY = [...NUMBERS, ...FLAGS, 'superActive', 'equippedSuper', 'guardBase', 'stickOffset'];
   const REQUIRED = ['x', 'y', 'vx', 'vy', 'omega', 'radius', 'mass', 'team'];
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
-  // A plain copy of the field: references become indexes, the equipped super its id.
+  // A plain copy of the field: the equipped super becomes its id.
   function snapshot(bodies) {
     return bodies.map(b => {
       const out = {};
@@ -25,7 +25,6 @@
         const value = b[key];
         if (value === undefined) continue;
         if (key === 'equippedSuper') out[key] = value ? value.id : null;
-        else if (key === 'stuckTo') out[key] = value ? bodies.indexOf(value) : null;
         else if (key === 'stickOffset') out[key] = value && { x: value.x, y: value.y };
         else if (key === 'guardBase') out[key] = value && Object.fromEntries(GUARD.filter(k => value[k] !== undefined).map(k => [k, value[k]]));
         else out[key] = value;
@@ -34,7 +33,7 @@
     });
   }
   function restore(snap) {
-    const bodies = snap.map(b => {
+    return snap.map(b => {
       const out = { ...b };
       if (b.equippedSuper != null) {
         out.equippedSuper = { ...P.SUPERS[b.equippedSuper], bonusTicks: b.superBonusTicks || 0, bonusRefund: b.superBonusRefund || 0 };
@@ -43,8 +42,6 @@
       if (b.stickOffset) out.stickOffset = { ...b.stickOffset };
       return out;
     });
-    for (const b of bodies) if (b.stuckTo != null) b.stuckTo = bodies[b.stuckTo];
-    return bodies;
   }
   // Moves exactly as the turn started with them (angles are not normalised: that would change the launch).
   const plan = p => ({ angle: p.angle, power: p.power, spin: p.spin || 0, superArm: Boolean(p.superArm), guard: Boolean(p.guard) });
@@ -108,7 +105,6 @@
       if (NUMBERS.includes(key) ? !Number.isFinite(v) : FLAGS.includes(key) ? typeof v !== 'boolean'
         : key === 'superActive' ? v !== null && !P.SUPERS.some(s => s.key === v)
         : key === 'equippedSuper' ? v !== null && !int(v, 0, P.SUPERS.length - 1)
-        : key === 'stuckTo' ? v !== null && !int(v, 0, 5)
         : key === 'stickOffset' ? v !== null && (exact(v, ['x', 'y']), !Number.isFinite(v.x) || !Number.isFinite(v.y))
         : v !== null && (!object(v) || Object.keys(v).some(k => !GUARD.includes(k) || !Number.isFinite(v[k])))) fail();
       out[key] = key === 'guardBase' && v ? Object.fromEntries(GUARD.filter(k => Object.hasOwn(v, k)).map(k => [k, v[k]])) : v;

@@ -91,7 +91,7 @@
   // `own` marks a save from a ball the saver's own team was most responsible for (see `credit`).
   function saves(P, before, after, touched, credit = {}) {
     const ball = before.find(b => b.team === -1);
-    if (touched.size !== 1 || !ball || ball.stuckTo) return [];
+    if (touched.size !== 1 || !ball || P.holder(before)) return [];
     const [i] = touched, team = before[i].team, mouth = team ? P.rink.right : P.rink.left;
     if (team < 0 || (team ? ball.vx <= 0 : ball.vx >= 0)) return [];
     if (Math.hypot(ball.x - mouth, ball.y - (P.rink.goalTop + P.rink.goalBottom) / 2) > SAVE.range) return [];
@@ -148,8 +148,9 @@
   const BIG_SHOT = Object.freeze({ share: .8 });
   // Hit-stop in ms (tuning): `hit` for a real save, a spin strike or a big shot; `long` for a save of
   // a big shot, a spin strike that is also a big shot, or a big shot that will travel a rink height
-  // untouched; `goal` for a big shot whose own path (no bounces, no ubus) goes into a goal.
-  const HIT_STOP = Object.freeze({ hit: 60, long: 100, goal: 150 });
+  // untouched; `goal` for a big shot whose own path (no bounces, no ubus) goes into a goal; `iron` at
+  // least, for an Iron Save.
+  const HIT_STOP = Object.freeze({ hit: 60, long: 100, goal: 150, iron: 150 });
   function bigShot(P, before, touched, ball) {
     if (touched.size !== 1) return false;
     const [i] = touched, b = before[i], dx = ball.x - b.x, dy = ball.y - b.y, d = Math.hypot(dx, dy) || 1;
@@ -205,9 +206,10 @@
   // hit-stop it earns (ms, 0 for none). `fx` receives the step callbacks. Without `effects` (CPU
   // search), the presentation-only hit-stop look-aheads are skipped; rules are unchanged.
   function playTick(P, bodies, play, fx = {}, tally = null, effects = true) {
-    // Each tick records only motion; the full pre-tick field is rebuilt from it when the ball was
-    // touched, which is all the save and big-shot checks need. Copying every body each tick was the
-    // single largest cost of CPU search.
+    // Each tick records only motion and who held the ball; the pre-tick field is rebuilt from them when
+    // the ball was touched, which is all the save and big-shot checks need. Copying every body each tick
+    // was the single largest cost of CPU search. Other fields in the rebuilt field are as after the
+    // tick: the checks must not depend on them (a spent Cannonball is known by its impact instead).
     const t = spareTick || { motion: new Float64Array(35), touched: new Set() }, outer = activeTick;
     spareTick = null; activeTick = t;
     if (t.motion.length < bodies.length * 5) t.motion = new Float64Array(bodies.length * 5);
@@ -217,7 +219,7 @@
       const b = bodies[i];
       motion[i * 5] = b.x; motion[i * 5 + 1] = b.y; motion[i * 5 + 2] = b.vx; motion[i * 5 + 3] = b.vy; motion[i * 5 + 4] = b.omega;
     }
-    const stuck = ball.stuckTo;
+    const held = P.holder(bodies);
     play.age++;
     const onShockwave = (source, radius) => {
       if (ball && source) {
@@ -248,7 +250,7 @@
     const goal = P.step(bodies, P.DT, tickTouch, tickWall, onShockwave, onSuper);
     activeTick = outer;
     const before = touched.size ? bodies.map((b, i) => ({ ...b, x: motion[i * 5], y: motion[i * 5 + 1], vx: motion[i * 5 + 2],
-      vy: motion[i * 5 + 3], omega: motion[i * 5 + 4], stuckTo: b === ball ? stuck : b.stuckTo })) : null;
+      vy: motion[i * 5 + 3], omega: motion[i * 5 + 4], holding: b === held })) : null;
     const ballBefore = before?.[bodies.indexOf(ball)], tickSaves = touched.size ? saves(P, before, bodies, touched, play.credit) : [];
     const ironIndex = t.ironSaver ?? null; t.ironSaver = null;
     if (ironIndex !== null) {
@@ -260,7 +262,7 @@
     // A Cannonball hit always counts as a big shot.
     const speed = Math.hypot(ball.vx, ball.vy), big = cannon || bigShot(P, before, touched, ball), struck = Boolean(ball.spinStruck);
     const hasIron = tickSaves.some(s => s.iron);
-    const stop = effects ? Math.max(hasIron ? 150 : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big)) : 0;
+    const stop = effects ? Math.max(hasIron ? HIT_STOP.iron : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big)) : 0;
     if (touched.size) play.big = big;
     if (tally) {
       const speedBefore = ballBefore ? Math.hypot(ballBefore.vx, ballBefore.vy) : 0;
@@ -381,7 +383,9 @@
       // Centre ice, or the nearest clear spot along the centre line.
       const clear = y => ubus.every(b => b.carded || Math.hypot(b.x - 500, b.y - y) >= b.radius + ball.radius);
       const y = [300, 240, 360, 180, 420, 120, 480].find(clear) ?? 300;
-      Object.assign(ball, { x: 500, y, vx: 0, vy: 0, omega: 0, stuckTo: null, stickOffset: null });
+      Object.assign(ball, { x: 500, y, vx: 0, vy: 0, omega: 0, stickOffset: null });
+      const holding = P.holder(bodies);
+      if (holding) holding.holding = false;
     }
     fouls.cards = ubus.flatMap((b, i) => carded.has(b) ? [i] : []);
   }

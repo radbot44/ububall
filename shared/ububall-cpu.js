@@ -35,7 +35,7 @@
   // the ball on its own momentum (a straight-line stopping distance; knock-ons are not followed).
   function decided(bodies) {
     const ball = bodies[6];
-    if (ball.vx || ball.vy || ball.stuckTo) return false;
+    if (ball.vx || ball.vy || P.holder(bodies)) return false;
     for (let i = 0; i < 6; i++) {
       const b = bodies[i];
       if (b.superActive) return false;
@@ -122,7 +122,8 @@
   function strike(body, ball, x, y, superKey = null) {
     let leadX = ball.x, leadY = ball.y;
     const ballSpeed = Math.hypot(ball.vx || 0, ball.vy || 0);
-    if (!ball.stuckTo && ballSpeed > 20) {
+    // A held ball (it keeps a stick offset) moves with its carrier, so only a free one is led.
+    if (!ball.stickOffset && ballSpeed > 20) {
       const tLead = Math.min(0.32, Math.hypot(ball.x - body.x, ball.y - body.y) / Math.max(180, P.launchSpeed(body)));
       const friction = ball.friction ?? 85;
       const drag = P.AIR_DRAG ?? 0.00015;
@@ -153,7 +154,7 @@
     if (ROLE_INTENTS[job]?.includes(intent)) return true;
     if (job === 'attack' && intent === 'check') {
       const sKey = body?.equippedSuper?.key?.toLowerCase();
-      const carrier = state?.bodies?.[6]?.stuckTo;
+      const carrier = state?.bodies && P.holder(state.bodies);
       const opponentHasBall = carrier && carrier.team >= 0 && carrier.team !== body?.team;
       if (opponentHasBall) return true;
       if (move.superArm && (sKey === 'knockout' || sKey === 'shockwave')) return true;
@@ -232,7 +233,7 @@
       }
 
       const opponents = state.bodies.slice((1 - team) * 3, (1 - team) * 3 + 3);
-      const carrier = ball.stuckTo && opponents.includes(ball.stuckTo) ? ball.stuckTo : null;
+      const carrier = opponents.find(b => b.holding) || null;
       const eligible = opponents.filter(b => !b.stunned && !b.carded);
       const threat = carrier || (eligible.length ? eligible.reduce((best, b) =>
         Math.hypot(b.x - ball.x, b.y - ball.y) < Math.hypot(best.x - ball.x, best.y - ball.y) ? b : best

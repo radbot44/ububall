@@ -245,7 +245,7 @@
   function sparkBall(ball, dt) {
     const speed = Math.hypot(ball.vx, ball.vy), share = speed / P.MAX_SPEED;
     if (P.ballOnFire?.(ball)) fireTime = Math.max(fireTime, FIRE_TICKS * P.DT);
-    else fireTime = share > HEAT.fire && !ball.stuckTo ? fireTime + dt : 0;
+    else fireTime = share > HEAT.fire && !P.holder(bodies) ? fireTime + dt : 0;
     if (ballOnFire() && !sizzle) sizzle = gameAudio()?.playSizzle?.() || null;
     else if (!ballOnFire()) quench();
     const level = Math.max(ballFlare, (share - HEAT.red) / (HEAT.redHot - HEAT.red));
@@ -429,8 +429,8 @@
   // glowing brighter. Side 0 is the left goal (defended by the home team in every view), side 1 the right.
   function goalThreat() {
     const ball = bodies[6];
-    if (!ball || ball.stuckTo || Math.hypot(ball.vx, ball.vy) < 120) return null;
-    const sim = [{ ...ball, stuckTo: null }], limit = Math.round(.9 / P.DT);
+    if (!ball || P.holder(bodies) || Math.hypot(ball.vx, ball.vy) < 120) return null;
+    const sim = [{ ...ball }], limit = Math.round(.9 / P.DT);
     let boards = false;
     for (let t = 1; t <= limit && !boards; t++) {
       const goal = P.step(sim, P.DT, null, (b, v, type) => { if (type === 'wall') boards = true; });
@@ -2055,7 +2055,8 @@
       if (style.filter !== filter) style.filter = filter;
       if (style.transform !== transform) style.transform = transform;
     });
-    if (bodies[6]?.stuckTo) drawStickyTether(bodies[6].stuckTo, bodies[6]);
+    const holding = P.holder(bodies);
+    if (holding && bodies[6]) drawStickyTether(holding, bodies[6]);
 
     if (phase === 'plan') {
       const b = bodies[selected];
@@ -3723,7 +3724,7 @@
         vb.guarding = Boolean(cb.guarding); vb.daze = cb.daze || 0;
         vb.superActive = cb.superActive || null;
         vb.stunned = Boolean(cb.stunned || cb.stunnedNext); vb.carded = Boolean(cb.carded);
-        vb.stuckTo = cb.stuckTo ? toViewBody(cb.stuckTo, sim, seat) : null;
+        vb.holding = Boolean(cb.holding);
         dirtyMeters.add(vb);
       }
     });

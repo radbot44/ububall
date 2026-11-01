@@ -614,7 +614,7 @@ test('Ubu with Knockout ready near opposing threat prefers stunning opponent ove
   state.bodies[1].x = 100; state.bodies[1].y = 100;
   state.bodies[2].x = 100; state.bodies[2].y = 500;
   state.bodies[6].x = 380; state.bodies[6].y = 150; state.bodies[6].vx = state.bodies[6].vy = 0;
-  state.bodies[6].stuckTo = state.bodies[0];
+  state.bodies[0].holding = true;
   state.bodies[6].stickOffset = { x: -40, y: 0 };
 
   const decision = C.plan(state, 1, { level: 'hard', seed: 8 });

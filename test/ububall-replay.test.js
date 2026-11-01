@@ -77,14 +77,59 @@ test('a saved replay re-simulates every turn exactly, through the .ububall file'
   }
 });
 
+// Scripted turns for what CPU matches may rarely reach: every super armed into a shot and into a
+// check, fire hits head-on and glancing, an Iron Save, and a Sticky hold carried across a Pulse turn
+// through JSON, as online state is. Returns each turn's end field.
+const still = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
+function field(mode, place) {
+  const bodies = P.kickoff();
+  bodies.slice(0, 6).forEach(b => { M.applyStats(P, b, {}, mode); b.meter = 0; });
+  for (const [i, at] of Object.entries(place)) Object.assign(bodies[i], at);
+  return { version: M.VERSION, mode, bodies, stats: [], scores: [0, 0], turn: 1, phase: 'plan', winner: null };
+}
+const armed = (state, key) => Object.assign(state.bodies[0], { equippedSuper: { ...P.SUPERS.find(s => s.key === key) }, meter: 100 });
+function scripted() {
+  const ends = [], play = (state, moves) => {
+    const { state: next } = M.resolveTurn(P, state, moves, { effects: false });
+    ends.push(R.snapshot(next.bodies));
+    return next;
+  };
+  const shoot = [{ ...still, power: 1, superArm: true }, still, still, still, still, still];
+  for (const { key } of P.SUPERS) {
+    for (const place of [{ 0: { x: 400, y: 300 }, 6: { x: 450, y: 300 }, 3: { x: 600, y: 300 } }, { 0: { x: 400, y: 300 }, 3: { x: 520, y: 300 }, 6: { x: 500, y: 480 } }]) {
+      const state = field('standard', place); armed(state, key); play(state, shoot);
+    }
+  }
+  for (const [offset, guard] of [[0, false], [36, false], [0, true]]) {
+    play(field('standard', { 3: { x: 600, y: 300 + offset }, 6: { x: 450, y: 300, vx: 720, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: guard ? .5 : 1 } }),
+      [still, still, still, { ...still, guard }, still, still]);
+  }
+  const pulse = field('pulse', { 0: { x: 440, y: 300 } }); armed(pulse, 'sticky');
+  const held = play(pulse, [{ ...still, power: .5, superArm: true }, still, still, still, still, still]);
+  play(JSON.parse(JSON.stringify(held)), [{ ...still, angle: Math.PI / 2, power: .6 }, still, still, still, still, still]);
+  return ends;
+}
+
 // The physics this version of the replay format plays back. A change to how turns play out must
 // bump P.VERSION, which makes older replays refuse to play; then record the new fingerprint here.
-const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'eb2bbf254e147d0c' };
+const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e' };
 test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
-  const ends = [...replay.turns, ...standard.turns].map(replayTurn);
+  const ends = [...[...replay.turns, ...standard.turns].map(replayTurn), ...scripted()];
   const print = createHash('sha256').update(JSON.stringify(ends)).digest('hex').slice(0, 16);
   assert.equal(print, FINGERPRINTS[P.VERSION], `Physics changed: bump VERSION in web/ububall-physics.js and record ${print} for it.`);
+});
+
+// Online state crosses JSON (the server's storage and every client update), so a Sticky hold must
+// carry into the next Pulse turn from a JSON copy exactly as it does in memory.
+test('a Sticky hold survives JSON into the next Pulse turn', () => {
+  const pulse = field('pulse', { 0: { x: 440, y: 300 } }); armed(pulse, 'sticky');
+  const held = M.resolveTurn(P, pulse, [{ ...still, power: .5, superArm: true }, still, still, still, still, still]).state;
+  assert.equal(P.holder(held.bodies), held.bodies[0], 'the turn ends with the ball held');
+  const moves = [{ ...still, angle: Math.PI / 2, power: .6 }, still, still, still, still, still];
+  const memory = M.resolveTurn(P, structuredClone(held), moves).state, json = M.resolveTurn(P, JSON.parse(JSON.stringify(held)), moves).state;
+  assert.equal(JSON.stringify(R.snapshot(json.bodies)), JSON.stringify(R.snapshot(memory.bodies)));
+  assert.ok(Math.abs(memory.bodies[6].y - 300) > 50, 'the ball went with its carrier');
 });
 
 test('replays refuse other versions and any file a writer would not produce', async () => {
@@ -99,7 +144,7 @@ test('replays refuse other versions and any file a writer would not produce', as
   const forged = structuredClone(good);
   forged.turns[0].bodies[0].__proto__ = 1;
   await assert.rejects(R.read(await gzip(JSON.stringify(forged).replace('"x":', '"__proto__":{"polluted":1},"x":'))), /not a valid/);
-  for (const patch of [t => { t.bodies[0].x = 'a'; }, t => { t.bodies[6].team = 0; }, t => { t.plans[0].power = 2; }, t => { t.ticks = 0; }, t => { t.bodies[1].stuckTo = 9; },
+  for (const patch of [t => { t.bodies[0].x = 'a'; }, t => { t.bodies[6].team = 0; }, t => { t.plans[0].power = 2; }, t => { t.ticks = 0; }, t => { t.bodies[1].holding = 1; },
     t => { t.stops = [{ tick: 0, ms: 60 }]; }, t => { t.stops = [{ tick: 2, ms: 60 }, { tick: 1, ms: 60 }]; }, t => { t.saves = [{ tick: 1, index: 0, own: false }]; }]) {
     const bad = structuredClone(good); patch(bad.turns[0]);
     await assert.rejects(R.read(await gzip(JSON.stringify(bad))), /not a valid/);
