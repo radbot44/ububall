@@ -103,10 +103,19 @@
   // touched the ball, the part of its new velocity carried over from its old one stays with whoever
   // gave it; the rest is split among that tick's touchers. A glancing deflection leaves the shot with
   // the shooter, while a ubu that stops or redirects the ball takes it over.
-  function credit(shares, before, ball, touched) {
+  function credit(shares, before, ball, touched, bodiesBefore = null) {
     if (!touched.size) return shares;
     const speed2 = ball.vx * ball.vx + ball.vy * ball.vy;
-    const kept = speed2 ? Math.min(1, Math.max(0, (before.vx * ball.vx + before.vy * ball.vy) / speed2)) : 0;
+    let kept = speed2 ? Math.min(1, Math.max(0, (before.vx * ball.vx + before.vy * ball.vy) / speed2)) : 0;
+    if (bodiesBefore && touched.size === 1) {
+      const [i] = touched, b = bodiesBefore[i];
+      if (b && b.team >= 0) {
+        const ballToOwnBefore = b.team === 0 ? before.vx < -50 : before.vx > 50;
+        const ballToOwnAfter = b.team === 0 ? ball.vx < -20 : ball.vx > 20;
+        const driveToOwn = b.team === 0 ? -b.vx : b.vx;
+        if (ballToOwnBefore && ballToOwnAfter && driveToOwn < 60) kept = Math.max(kept, 0.75);
+      }
+    }
     const next = {};
     for (const [i, share] of Object.entries(shares)) if (share * kept >= .01) next[i] = share * kept;
     for (const i of touched) next[i] = (next[i] || 0) + (1 - kept) / touched.size;
@@ -125,12 +134,14 @@
   function newPlay(from = {}) {
     return { age: from.age || 0, last: from.last ?? null, lastTouch: from.lastTouch ? [...from.lastTouch] : [null, null],
       assist: from.assist ? [...from.assist] : [null, null], shotX: from.shotX ? [...from.shotX] : [null, null],
-      credit: { ...from.credit }, banked: Boolean(from.banked), saved: from.saved ? { ...from.saved } : null, big: Boolean(from.big) };
+      credit: { ...from.credit }, banked: Boolean(from.banked),
+      saved: from.saved ? { ...from.saved } : null, big: Boolean(from.big),
+      lastPass: from.lastPass ? { ...from.lastPass } : null };
   }
   // Per-ubu match totals (by index) for the summary (yellow cards included), and each team's deepest deficit.
   function newTally() {
     const six = () => [0, 0, 0, 0, 0, 0];
-    return { goals: six(), assists: six(), saves: six(), topSpeed: six(), cards: six(), deficit: [0, 0] };
+    return { goals: six(), assists: six(), saves: six(), bigSaves: six(), shots: six(), checks: six(), topSpeed: six(), cards: six(), deficit: [0, 0] };
   }
   // A big shot is a lone touch by an ubu driving into the ball at `share` or more of its own
   // full-launch speed; the ball's own speed does not count, so a fast ball off a still ubu is not one.
@@ -154,21 +165,39 @@
   // Per-tick scratch and the tick in progress, which the step callbacks below read, so neither is
   // rebuilt every tick. A nested tick would take fresh scratch and restore the outer tick after.
   let spareTick = null, activeTick = null;
-  function tickTouch(a, b, speed, impulse, plow = false, iron = false) {
+  function tickTouch(a, b, speed, impulse, plow = false, iron = false, checker = null) {
     const t = activeTick, player = toucher(a, b, speed);
     if (player && !plow) {
-      // A touch passed from a teammate makes that teammate the assist; an opponent's touch clears it.
+      // A touch passed from a teammate makes that teammate the assist; an opponent's touch clears it unless a light graze.
       const { bodies, play } = t, i = bodies.indexOf(player), team = player.team, last = play.last;
-      if (last !== i) play.assist[team] = last !== null && bodies[last].team === team ? last : null;
-      play.last = i; play.lastTouch[team] = i; play.shotX[team] = t.ball.x; play.banked = false;
+      if (last !== i) {
+        if (last !== null && bodies[last].team === team) {
+          play.assist[team] = last;
+          play.lastPass = { from: last, at: play.age, speed };
+        } else if (last !== null && bodies[last].team !== team) {
+          if (impulse >= 35) {
+            play.assist[team] = null;
+            play.lastPass = null;
+          }
+        }
+      }
+      play.last = i; play.lastTouch[team] = i; play.shotX[team] = t.ball.x;
+      if (last === null || bodies[last].team === team || impulse >= 35) play.banked = false;
       t.touched.add(i);
       if (iron) t.ironSaver = i;
     }
-    t.fx.collide?.(a, b, speed, impulse, plow, iron);
+    if (checker !== null && t.tally) {
+      const ci = t.bodies.indexOf(checker);
+      if (ci >= 0) t.tally.checks[ci]++;
+    }
+    t.fx.collide?.(a, b, speed, impulse, plow, iron, checker);
   }
   function tickWall(body, velocity, type, nx, ny) {
     const t = activeTick;
-    if (body === t.ball && type === 'wall') t.play.banked = true;
+    if (body === t.ball && type === 'wall') {
+      t.play.banked = true;
+
+    }
     t.fx.wall?.(body, velocity, type, nx, ny);
   }
   // Steps the field one tick and keeps the play (and the tally, if given) current. Returns the goal
@@ -183,14 +212,37 @@
     spareTick = null; activeTick = t;
     if (t.motion.length < bodies.length * 5) t.motion = new Float64Array(bodies.length * 5);
     const { motion, touched } = t, ball = bodies.find(b => b.team === -1);
-    touched.clear(); t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx;
+    touched.clear(); t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx; t.tally = tally;
     for (let i = 0; i < bodies.length; i++) {
       const b = bodies[i];
       motion[i * 5] = b.x; motion[i * 5 + 1] = b.y; motion[i * 5 + 2] = b.vx; motion[i * 5 + 3] = b.vy; motion[i * 5 + 4] = b.omega;
     }
     const stuck = ball.stuckTo;
     play.age++;
-    const goal = P.step(bodies, P.DT, tickTouch, tickWall, fx.shockwave, fx.super);
+    const onShockwave = (source, radius) => {
+      if (ball && source) {
+        const dx = ball.x - source.x, dy = ball.y - source.y;
+        if (dx * dx + dy * dy < radius * radius) {
+          const si = bodies.indexOf(source);
+          if (si >= 0) {
+            play.last = si; play.lastTouch[source.team] = si;
+            play.credit = { [si]: 1 }; play.shotX[source.team] = ball.x;
+          }
+        }
+      }
+      fx.shockwave?.(source, radius);
+    };
+    const onSuper = (key, action, body, target) => {
+      if (key === 'magnet' && action === 'pull' && body && ball) {
+        const bi = bodies.indexOf(body);
+        if (bi >= 0) {
+          play.last = bi; play.lastTouch[body.team] = bi;
+          play.credit = { [bi]: 1 }; play.shotX[body.team] = ball.x;
+        }
+      }
+      fx.super?.(key, action, body, target);
+    };
+    const goal = P.step(bodies, P.DT, tickTouch, tickWall, onShockwave, onSuper);
     activeTick = outer;
     const before = touched.size ? bodies.map((b, i) => ({ ...b, x: motion[i * 5], y: motion[i * 5 + 1], vx: motion[i * 5 + 2],
       vy: motion[i * 5 + 3], omega: motion[i * 5 + 4], stuckTo: b === ball ? stuck : b.stuckTo })) : null;
@@ -200,7 +252,7 @@
       const existing = tickSaves.find(s => s.index === ironIndex);
       if (existing) existing.iron = true; else tickSaves.push({ index: ironIndex, own: false, iron: true });
     }
-    play.credit = credit(play.credit, ballBefore, ball, touched);
+    play.credit = credit(play.credit, ballBefore, ball, touched, before);
     for (const save of tickSaves) play.saved = { at: play.age, team: bodies[save.index].team };
     // A Cannonball hit always counts as a big shot.
     const cannon = touched.size > 0 && [...touched].some(i => before[i].superActive === 'cannonball' && bodies[i].superActive !== 'cannonball');
@@ -209,11 +261,28 @@
     const stop = effects ? Math.max(hasIron ? 150 : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big)) : 0;
     if (touched.size) play.big = big;
     if (tally) {
-      for (const i of touched) tally.topSpeed[i] = Math.max(tally.topSpeed[i], speed);
-      for (const save of tickSaves) if (!save.own) tally.saves[save.index]++;
+      const speedBefore = ballBefore ? Math.hypot(ballBefore.vx, ballBefore.vy) : 0;
+      for (const i of touched) {
+        const b = before ? before[i] : null;
+        let striker = true;
+        if (b && ballBefore) {
+          const dx = ballBefore.x - b.x, dy = ballBefore.y - b.y, d = Math.hypot(dx, dy) || 1;
+          const drive = (b.vx * dx + b.vy * dy) / d;
+          striker = drive > 10 || speed > speedBefore + 5;
+        }
+        if (striker) tally.topSpeed[i] = Math.max(tally.topSpeed[i], speed);
+      }
+      for (const save of tickSaves) {
+        if (!save.own) {
+          tally.saves[save.index]++;
+          if (save.iron || play.big) tally.bigSaves[save.index]++;
+          const shooter = play.lastTouch[1 - bodies[save.index].team];
+          if (shooter !== null) tally.shots[shooter]++;
+        }
+      }
     }
     if (struck) ball.spinStruck = false;
-    t.bodies = t.play = t.ball = t.fx = null; spareTick = t;
+    t.bodies = t.play = t.ball = t.fx = t.tally = null; spareTick = t;
     return { goal, saves: tickSaves, struck, stop };
   }
   // A rebound is a goal within this many ticks of the conceding team's save.
@@ -225,12 +294,19 @@
     const own = responsibleTeam(bodies, play.credit) === 1 - goal, scorer = play.lastTouch[goal];
     const assist = own || scorer === null ? null : play.assist[goal];
     let hatTrick = false;
-    if (!own && scorer !== null) hatTrick = ++tally.goals[scorer] === 3;
+    if (!own && scorer !== null) {
+      hatTrick = ++tally.goals[scorer] === 3;
+      tally.shots[scorer]++;
+    }
     if (assist !== null) tally.assists[assist]++;
     const shotX = play.shotX[goal], snipe = shotX !== null && (goal === 0 ? shotX < 500 : shotX > 500);
     const rebound = play.saved?.team === 1 - goal && play.age - play.saved.at <= REBOUND_TICKS;
-    const label = own ? 'OWN GOAL' : hatTrick ? 'HAT TRICK!' : play.banked ? 'BANK SHOT!' : snipe ? 'SNIPE!' : rebound ? 'REBOUND!' : ace ? 'ACE!' : 'GOAL';
-    return { scorer, assist, own, label };
+    const banked = Boolean(play.banked);
+    const fireball = Boolean(bodies[6]?.onFire);
+    const oneTimer = Boolean(assist !== null && play.lastPass && play.lastPass.from === assist && play.age - play.lastPass.at <= 288 && play.lastPass.speed >= 180);
+    const label = own ? 'OWN GOAL' : hatTrick ? 'HAT TRICK!' : fireball ? 'FIREBALL!' : oneTimer ? 'ONE-TIMER!' : banked ? 'BANK SHOT!' : snipe ? 'SNIPE!' : rebound ? 'REBOUND!' : ace ? 'ACE!' : 'GOAL';
+    const badges = [hatTrick && 'HAT TRICK!', ace && 'ACE!'].filter(Boolean);
+    return { scorer, assist, own, label, badges };
   }
   // After each goal: each team's deepest deficit so far, for the comeback call.
   function noteScore(tally, scores) {

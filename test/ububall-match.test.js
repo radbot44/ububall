@@ -524,3 +524,58 @@ test('a carded ubu touches nothing, and a corner reset starts a fresh play', () 
   assert.ok(next.fouls.faceoff); assert.deepEqual(next.fouls.cards,[3]);
   assert.deepEqual(next.lastTouch,[null,null]); assert.deepEqual(next.credit,{});
 });
+
+test('deflections off defending ubus stay credited to attacker, topSpeed rejects passive hits, and fireball/one-timer calls trigger', () => {
+  const bodies = P.kickoff();
+  bodies.slice(0, 6).forEach(b => P.applyStats(b));
+  // 1. Passive deflection in credit() with bodiesBefore
+  const before = [
+    { ...bodies[0], team: 0 },
+    { ...bodies[1], team: 0 },
+    { ...bodies[2], team: 0 },
+    { ...bodies[3], team: 1 },
+    { ...bodies[4], team: 1, vx: 0, vy: 0 },
+    { ...bodies[5], team: 1 },
+    { team: -1, vx: 500, vy: 0 }
+  ];
+  const ballAfter = { vx: 50, vy: 400 };
+  const shares = { 2: 1 };
+  const resultCredit = M.credit(shares, before[6], ballAfter, new Set([4]), before);
+  assert.ok(resultCredit[2] >= 0.75, 'Attacker retains >= 75% share on deflection');
+  assert.equal(M.responsibleTeam(bodies, resultCredit), 0, 'Responsible team remains attacker team 0');
+
+  // 2. Active hit into own net remains an own goal
+  const beforeOwn = [
+    ...before.slice(0, 4),
+    { ...before[4], vx: 200, vy: 0 },
+    before[5],
+    { team: -1, vx: 50, vy: 0 }
+  ];
+  const ownCredit = M.credit(shares, beforeOwn[6], { vx: 300, vy: 0 }, new Set([4]), beforeOwn);
+  assert.equal(M.responsibleTeam(bodies, ownCredit), 1, 'Active drive to own goal credits defender');
+
+  // 3. Goal calls: Fireball, One-Timer, and Hat Trick precedence
+  const play = M.newPlay();
+  const tally = M.newTally();
+  const testBodies = P.kickoff();
+  testBodies[6].onFire = true;
+  play.lastTouch = [2, null];
+  play.credit = { 2: 1 };
+  const fireCall = M.callGoal(testBodies, play, tally, 0, false);
+  assert.equal(fireCall.label, 'FIREBALL!');
+
+  // One-timer call
+  testBodies[6].onFire = false;
+  play.assist = [1, null];
+  play.lastPass = { from: 1, at: 10, speed: 250 };
+  play.age = 50;
+  const otCall = M.callGoal(testBodies, play, tally, 0, false);
+  assert.equal(otCall.label, 'ONE-TIMER!');
+
+  // Hat trick priority over fireball
+  tally.goals[2] = 2;
+  testBodies[6].onFire = true;
+  const hatCall = M.callGoal(testBodies, play, tally, 0, false);
+  assert.equal(hatCall.label, 'HAT TRICK!');
+  assert.deepEqual(hatCall.badges, ['HAT TRICK!']);
+});

@@ -180,8 +180,8 @@
   // Scores as the scorebug last showed them, to pop a goal and call match point once.
   const shownScores = [0, 0];
   // The status line's wording for each goal call.
-  const GOAL_WORDS = { 'OWN GOAL': 'Own goal', 'HAT TRICK!': 'Hat trick', 'ACE!': 'Ace', 'BANK SHOT!': 'Bank shot', GOAL: 'Goal' };
-  const callText = (label, name) => label === 'OWN GOAL' ? 'Own goal!' : `${GOAL_WORDS[label]} by ${name}!`;
+  const GOAL_WORDS = { 'OWN GOAL': 'Own goal', 'HAT TRICK!': 'Hat trick', 'FIREBALL!': 'Fireball', 'ONE-TIMER!': 'One-timer', 'BANK SHOT!': 'Bank shot', 'SNIPE!': 'Snipe', 'REBOUND!': 'Rebound', 'ACE!': 'Ace', GOAL: 'Goal' };
+  const callText = (label, name) => label === 'OWN GOAL' ? 'Own goal!' : `${GOAL_WORDS[label] || label.replace(/!$/, '')} by ${name}!`;
   const trails = Array.from({ length: 7 }, () => []), particles = [], fireworks = [], shockwaves = [];
   const materialStyles = {
     metallic: ['spark', '#e1eaff'], glossy: ['bubble', '#ffffff'], iridescent: ['spark', 'rainbow'],
@@ -1160,22 +1160,22 @@
     title.textContent = `${winner ? `${them} wins` : 'You win'} ${sc[0]}–${sc[1]}`;
     const honour = document.createElement('p'); honour.className = 'summary-honours';
     honour.textContent = [h.comeback && 'Comeback from 3 down!', h.shutout && 'Shutout!'].filter(Boolean).join(' ');
-    // MVP: goals count most, then assists and saves; the fastest shot breaks ties.
-    const rating = i => t.goals[i] * 3 + t.assists[i] * 2 + t.saves[i] * 2 + t.topSpeed[i] / 10000;
+    // MVP: goals count most, then assists and saves; big saves and hard checks also contribute. The fastest shot breaks ties.
+    const rating = i => t.goals[i] * 3 + t.assists[i] * 2 + t.saves[i] * 2 + (t.bigSaves?.[i] || 0) * 1 + (t.checks?.[i] || 0) * 0.5 + t.topSpeed[i] / 10000;
     const mvp = [0, 1, 2, 3, 4, 5].reduce((best, i) => rating(i) > rating(best) ? i : best, 0);
     const table = document.createElement('table');
     const head = table.createTHead().insertRow();
-    for (const label of ['Ubu', 'Goals', 'Assists', 'Saves', 'Fouls', 'Top shot']) { const th = document.createElement('th'); th.textContent = label; head.append(th); }
+    for (const label of ['Ubu', 'Goals', 'Assists', 'Shots', 'Saves', 'Checks', 'Fouls', 'Top shot']) { const th = document.createElement('th'); th.textContent = label; head.append(th); }
     const body = table.createTBody();
     bodies.slice(0, 6).forEach((b, i) => {
       const row = body.insertRow(); row.className = `team-${b.team}${i === mvp ? ' mvp' : ''}`;
       const name = row.insertCell(); name.textContent = b.name || (b.team ? `${them} ubu` : 'Your ubu');
       if (i === mvp) { const badge = document.createElement('span'); badge.className = 'mvp-badge'; badge.textContent = 'MVP'; name.append(' ', badge); }
-      for (const value of [t.goals[i], t.assists[i], t.saves[i], t.cards[i], t.topSpeed[i] ? Math.round(t.topSpeed[i]) : '–']) row.insertCell().textContent = value;
+      for (const value of [t.goals[i], t.assists[i], t.shots?.[i] || 0, t.saves[i], t.checks?.[i] || 0, t.cards[i], t.topSpeed[i] ? Math.round(t.topSpeed[i]) : '–']) row.insertCell().textContent = value;
     });
     const close = document.createElement('button'); close.type = 'button'; close.className = 'primary'; close.textContent = 'Close';
     close.onclick = () => summaryDialog.close();
-    const note = document.createElement('p'); note.className = 'summary-note'; note.textContent = 'Fouls are yellow cards. Top shot is the ball speed off that ubu\'s fastest touch.';
+    const note = document.createElement('p'); note.className = 'summary-note'; note.textContent = 'Shots are on-goal attempts. Checks are hard hits inflicting daze or stuns. Fouls are yellow cards. Top shot is the ball speed off that ubu\'s fastest strike.';
     if (online?.active) {
       const rematch = document.createElement('button'); rematch.type = 'button'; rematch.className = 'primary summary-rematch';
       rematch.onclick = () => online.rematch();
@@ -2830,7 +2830,7 @@
         play = ububallMatch.newPlay(); last = null;
       }
     }
-    return { ...out, saves: onlineOrder(tally.saves, th.seat), topShot: onlineOrder(tally.topSpeed, th.seat), cards: onlineOrder(r.turns.reduce((n, t) => { t.cards.forEach(c => n[c]++); return n; }, six()), th.seat) };
+    return { ...out, saves: onlineOrder(tally.saves, th.seat), topShot: onlineOrder(tally.topSpeed, th.seat), cards: onlineOrder(r.turns.reduce((n, t) => { t.cards.forEach(c => n[c]++); return n; }, six()), th.seat), shots: onlineOrder(tally.shots, th.seat), checks: onlineOrder(tally.checks, th.seat) };
   }
   function openStats() {
     const th = theater;
@@ -2844,13 +2844,13 @@
       return part;
     }));
     const table = document.createElement('table'), head = table.createTHead().insertRow();
-    for (const label of ['Ubu', 'Goals', 'Assists', 'Saves', 'Touches', 'Top shot', 'Skated', 'Fouls']) { const cell = document.createElement('th'); cell.textContent = label; head.append(cell); }
+    for (const label of ['Ubu', 'Goals', 'Assists', 'Shots', 'Saves', 'Checks', 'Touches', 'Top shot', 'Skated', 'Fouls']) { const cell = document.createElement('th'); cell.textContent = label; head.append(cell); }
     const rows = table.createTBody();
     teamEntries.slice(0, 6).forEach((entry, i) => {
       const row = rows.insertRow(); row.className = `team-${i < 3 ? 0 : 1}`;
       row.insertCell().textContent = entry.model.parts.fullName;
       // Distance in rink lengths (880 between the end boards).
-      for (const value of [s.goals[i], s.assists[i], s.saves[i], s.touches[i], s.topShot[i] ? Math.round(s.topShot[i]) : '–', (s.skated[i] / 880).toFixed(1), s.cards[i]]) row.insertCell().textContent = value;
+      for (const value of [s.goals[i], s.assists[i], s.shots?.[i] || 0, s.saves[i], s.checks?.[i] || 0, s.touches[i], s.topShot[i] ? Math.round(s.topShot[i]) : '–', (s.skated[i] / 880).toFixed(1), s.cards[i]]) row.insertCell().textContent = value;
     });
     $('stats-table').replaceChildren(table);
     // Where each ubu touched the ball, in its team's colour; a star marks the touch that scored.

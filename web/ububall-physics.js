@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 2;
+  const VERSION = 3;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -41,16 +41,18 @@
   // teammates feel shockTeammate of it. Cannonball adds cannonball × the ball impulse. Colossus
   // grows by colossusRadius and colossusMass.
   const SUPER = Object.freeze({ ticks: 720, holdTicks: 480, carryFriction: 1.5, magnetRadius: 190, magnetPull: 1000,
-    shockRadius: 170, shockForce: 1100, shockTeammate: .4, cannonball: 1, colossusRadius: 1.8, colossusMass: 1.8 });
+    shockRadius: 170, shockForce: 1100, shockTeammate: .4, shockRepel: 550, cannonball: 1,
+    colossusRadius: 1.8, colossusMass: 1.8, colossusLaunch: 0.75,
+    stalwartLaunch: 0.5, stalwartFriction: 3.0, whiffRefund: 25 });
   function ballHitRadius(body) { return Math.max(body.radius, body.reach || body.radius, 18); }
   const SUPERS = Object.freeze([
-    { id: 0, key: 'stalwart', name: 'Stalwart', desc: 'Become an immovable anchor for this turn.', icon: 'assets/00_stalwart.png' },
+    { id: 0, key: 'stalwart', name: 'Stalwart', desc: 'Slide to an unmovable anchor, immune to dazes, checks, blasts and goal camping.', icon: 'assets/00_stalwart.png' },
     { id: 1, key: 'knockout', name: 'Knockout', desc: 'Knock out the next opponent touched; they cannot move next turn.', icon: 'assets/01_knockout.png' },
     { id: 2, key: 'sticky', name: 'Sticky', desc: 'Grab the ball on contact and carry it for up to 2 seconds, until an opponent hits you.', icon: 'assets/02_sticky.png' },
     { id: 3, key: 'cannonball', name: 'Cannonball', desc: 'Blast the ball with explosive impulse on contact.', icon: 'assets/03_cannonball.png' },
     { id: 4, key: 'magnet', name: 'Magnet', desc: 'Pull the ball strongly toward you for 3 seconds when it comes close.', icon: 'assets/04_magnet.png' },
     { id: 5, key: 'colossus', name: 'Colossus', desc: 'Swell in size and mass for massive coverage, moving slower while big.', icon: 'assets/05_colossus.png' },
-    { id: 6, key: 'shockwave', name: 'Shockwave', desc: 'Blast nearby players and the ball away when you hit an opponent, or when time runs out.', icon: 'assets/06_shockwave.png' },
+    { id: 6, key: 'shockwave', name: 'Shockwave', desc: 'Blast nearby opponents away when one comes close, then repel opposing skaters for the rest of the 3 seconds.', icon: 'assets/06_shockwave.png' },
     { id: 7, key: 'ghost', name: 'Ghost', desc: 'Phase through opposing players without collision.', icon: 'assets/07_ghost.png' }
   ]);
   function multiplier(raw) {
@@ -63,7 +65,9 @@
   // momentum into the ball and opponents. Only weight added on top of its own (Colossus) slows it.
   // Smaller ubus launch a little faster, and a daze from heavy checks slows the next launch.
   function launchSpeed(body) {
-    return (body.impulse || IMPULSE) / 3 * (body.baseMass || body.mass) / body.mass * (body.sizeMult || 1) ** SIZE.launch * (1 - dazeSlow(body));
+    const superScale = (body.colossusApplied || body.superActive === 'colossus') ? SUPER.colossusLaunch
+      : (body.superActive === 'stalwart' ? SUPER.stalwartLaunch : 1);
+    return (body.impulse || IMPULSE) / 3 * superScale * (body.sizeMult || 1) ** SIZE.launch * (1 - dazeSlow(body));
   }
   function applyStats(body, raw = {}) {
     // Mass spans a narrower range than other stats (0.82–1.22×, tuning): weight helps every shot,
@@ -193,11 +197,11 @@
   function triggerShockwave(source, bodies, onShockwave) {
     const radius = SUPER.shockRadius;
     for (const b of bodies) {
-      if (b === source || b.superActive === 'stalwart' || b.carded) continue;
+      if (b === source || b.team < 0 || b.team === source.team || b.superActive === 'stalwart' || b.carded) continue;
       const dx = b.x - source.x, dy = b.y - source.y, d2 = dx * dx + dy * dy;
       if (d2 > 0 && d2 < radius * radius) {
         const d = Math.sqrt(d2);
-        const force = (1 - d / radius) * SUPER.shockForce * (b.team === source.team ? SUPER.shockTeammate : 1);
+        const force = (1 - d / radius) * SUPER.shockForce;
         const m = b.mass || 1;
         b.vx += (dx / d) * force / m;
         b.vy += (dy / d) * force / m;
@@ -221,7 +225,7 @@
     }
     if (typeof onShockwave === 'function') onShockwave(source, radius, 'iron');
   }
-  // Ends a ubu's super: Colossus shrinks back and a Sticky ball is let go.
+  // Ends a ubu's super: Colossus shrinks back, Sticky ball is let go, and whiff refund is awarded if unspent.
   function endSuper(b, bodies) {
     if (b.colossusApplied) {
       if (b.baseRadius) b.radius = b.baseRadius;
@@ -230,7 +234,10 @@
     }
     const ball = bodies?.find(o => o.team === -1);
     if (ball?.stuckTo === b) { ball.stuckTo = null; ball.stickOffset = null; }
-    b.superActive = null; b.superTicks = 0; b.shockwaveFired = false;
+    if ((b.superActive || b.usedSuperThisTurn) && !b.superHit) {
+      b.meter = Math.min(100, (b.meter || 0) + SUPER.whiffRefund);
+    }
+    b.superActive = null; b.superTicks = 0; b.shockwaveFired = false; b.superHit = false;
   }
   function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, onSuper = null) {
     const isBall = a.team === -1 || b.team === -1;
@@ -260,6 +267,11 @@
     let closeSpin = 0, strikeBoost = 0;
     if (isBall) {
       const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
+      if (player.superActive && !ball.plowed?.has(player)) {
+        if (['cannonball', 'sticky', 'magnet', 'ghost', 'stalwart', 'colossus'].includes(player.superActive)) {
+          player.superHit = true;
+        }
+      }
       if (ball.openingShot && player.spinStrike) {
         // Smaller ubus strike harder; Curve passes on more spin.
         const small = (player.sizeMult || 1) ** SIZE.strike;
@@ -271,15 +283,15 @@
       ball.openingShot = false;
     } else a.spinStrike = b.spinStrike = 0; // Touching another ubu first spends both strikes.
 
+    let knockoutChecker = null;
     if (!isBall && a.team !== b.team) {
-      if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; onSuper?.('knockout', 'impact', a, b); }
-      if (b.superActive === 'knockout') { a.stunnedNext = true; b.superActive = null; onSuper?.('knockout', 'impact', b, a); }
+      if (['knockout', 'stalwart', 'colossus'].includes(a.superActive)) a.superHit = true;
+      if (['knockout', 'stalwart', 'colossus'].includes(b.superActive)) b.superHit = true;
+      if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; onSuper?.('knockout', 'impact', a, b); knockoutChecker = a; }
+      if (b.superActive === 'knockout') { a.stunnedNext = true; b.superActive = null; onSuper?.('knockout', 'impact', b, a); knockoutChecker = b; }
       // An opponent's hit knocks a Sticky ball loose.
       if (a.superActive === 'sticky' && allBodies?.find(o => o.team === -1)?.stuckTo === a) endSuper(a, allBodies);
       if (b.superActive === 'sticky' && allBodies?.find(o => o.team === -1)?.stuckTo === b) endSuper(b, allBodies);
-      // Shockwave goes off on contact with an opponent.
-      if (allBodies && a.superActive === 'shockwave' && !a.shockwaveFired) { a.shockwaveFired = true; triggerShockwave(a, allBodies, onShockwave); }
-      if (allBodies && b.superActive === 'shockwave' && !b.shockwaveFired) { b.shockwaveFired = true; triggerShockwave(b, allBodies, onShockwave); }
     }
 
     const nx = d ? dx / d : 1, ny = d ? dy / d : 0;
@@ -372,14 +384,21 @@
       }
     }
 
-    const invA = a.superActive === 'stalwart' ? 0 : 1 / a.mass;
-    const invB = b.superActive === 'stalwart' ? 0 : 1 / b.mass;
+    const invA = 1 / a.mass;
+    const invB = 1 / b.mass;
     const inverse = invA + invB;
     if (inverse === 0) return;
 
-    const correction = (radius - d) / inverse;
-    if (invA > 0) { a.x -= nx * correction * invA; a.y -= ny * correction * invA; }
-    if (invB > 0) { b.x += nx * correction * invB; b.y += ny * correction * invB; }
+    const overlap = radius - d;
+    if (a.superActive === 'stalwart' && b.superActive !== 'stalwart') {
+      b.x += nx * overlap; b.y += ny * overlap;
+    } else if (b.superActive === 'stalwart' && a.superActive !== 'stalwart') {
+      a.x -= nx * overlap; a.y -= ny * overlap;
+    } else {
+      const correction = overlap / inverse;
+      if (invA > 0) { a.x -= nx * correction * invA; a.y -= ny * correction * invA; }
+      if (invB > 0) { b.x += nx * correction * invB; b.y += ny * correction * invB; }
+    }
 
     if (closing >= 0) return;
     if (!isBall) {
@@ -424,19 +443,23 @@
       else if (b.team !== -1 && b.superActive === 'cannonball') { cannon = b; cannonImpulse = -SUPER.cannonball * impulseA; }
     }
 
-    if (invA > 0) {
+    if (invA > 0 && a.superActive !== 'stalwart') {
       a.vx -= impulseA * nx * invA; a.vy -= impulseA * ny * invA;
-    } else { a.vx = a.vy = a.omega = 0; }
-    if (invB > 0) {
+    }
+    if (invB > 0 && b.superActive !== 'stalwart') {
       b.vx += impulseB * nx * invB; b.vy += impulseB * ny * invB;
-    } else { b.vx = b.vy = b.omega = 0; }
+    }
     // A hard check between opponents dazes the ubu that was hit, if knocked hard enough (see DAZE).
     // Whichever drove into the contact faster is the attacker and is not dazed by its own check; in
     // an even head-on crash both are.
+    let checker = knockoutChecker;
     if (!isBall && a.team !== b.team) {
       const driveA = normalA, driveB = -normalB;
-      if (driveB >= driveA) daze(a, Math.abs(impulseA * invA));
-      if (driveA >= driveB) daze(b, Math.abs(impulseB * invB));
+      const knockA = Math.abs(impulseA * invA), knockB = Math.abs(impulseB * invB);
+      if (driveB >= driveA && knockA >= DAZE.speed && !(a.superActive === 'stalwart' || a.superActive === 'colossus')) checker = b;
+      else if (driveA >= driveB && knockB >= DAZE.speed && !(b.superActive === 'stalwart' || b.superActive === 'colossus')) checker = a;
+      if (driveB >= driveA) daze(a, knockA);
+      if (driveA >= driveB) daze(b, knockB);
     }
 
     const tx = -ny, ty = nx;
@@ -444,11 +467,11 @@
     const limit = Math.sqrt(a.grip * b.grip) * baseImpulse;
     const tangent = Math.max(-limit, Math.min(limit, -slip / (3 * inverse)));
 
-    if (invA > 0) {
+    if (invA > 0 && a.superActive !== 'stalwart') {
       a.vx -= tangent * tx * invA; a.vy -= tangent * ty * invA;
       a.omega -= 2 * tangent * invA / a.radius;
     }
-    if (invB > 0) {
+    if (invB > 0 && b.superActive !== 'stalwart') {
       b.vx += tangent * tx * invB; b.vy += tangent * ty * invB;
       b.omega -= 2 * tangent * invB / b.radius;
     }
@@ -486,7 +509,7 @@
       const isIron = Boolean(isBall && (a.ironSave || b.ironSave));
       if (a.ironSave) a.ironSave = false;
       if (b.ironSave) b.ironSave = false;
-      onCollide(a, b, -closing, baseImpulse, false, isIron);
+      onCollide(a, b, -closing, baseImpulse, false, isIron, checker);
     }
   }
   let spareRadii = new Float64Array(7); // Broad-phase scratch, taken while a step uses it.
@@ -519,13 +542,38 @@
         }
       }
     }
-    // Supers run on play time: each lasts SUPER.ticks; an unspent Shockwave goes off as it ends. (A
-    // super set without a timer runs until the turn ends.)
+    // Supers run on play time: each lasts SUPER.ticks.
     for (const b of bodies) {
       if (!b.superActive || b.team < 0 || !b.superTicks) continue;
       if (--b.superTicks > 0) continue;
-      if (b.superActive === 'shockwave' && !b.shockwaveFired) { b.shockwaveFired = true; triggerShockwave(b, bodies, onShockwave); }
       endSuper(b, bodies);
+    }
+    // Shockwave: opponent-only burst on first proximity, then continuous repulsion aura.
+    for (const b of bodies) {
+      if (b.team >= 0 && b.superActive === 'shockwave') {
+        const inRange = [];
+        for (const opp of bodies) {
+          if (opp.team >= 0 && opp.team !== b.team && !opp.carded && opp.superActive !== 'stalwart') {
+            const dx = opp.x - b.x, dy = opp.y - b.y, d2 = dx * dx + dy * dy;
+            if (d2 > 0 && d2 < SUPER.shockRadius * SUPER.shockRadius) {
+              inRange.push({ opp, d: Math.sqrt(d2), dx, dy });
+            }
+          }
+        }
+        if (!b.shockwaveFired) {
+          if (inRange.length > 0) {
+            b.shockwaveFired = true;
+            b.superHit = true;
+            triggerShockwave(b, bodies, onShockwave);
+          }
+        } else {
+          for (const { opp, d, dx, dy } of inRange) {
+            const repel = SUPER.shockRepel * (1 - d / SUPER.shockRadius);
+            opp.vx += (dx / d) * repel * dt;
+            opp.vy += (dy / d) * repel * dt;
+          }
+        }
+      }
     }
     if (ball?.stuckTo && ++ball.stuckTicks >= SUPER.holdTicks) endSuper(ball.stuckTo, bodies);
     for (const b of bodies) {
