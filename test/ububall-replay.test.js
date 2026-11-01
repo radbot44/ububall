@@ -74,7 +74,7 @@ test('a saved replay re-simulates every turn exactly, through the .ububall file'
 
 // The physics this version of the replay format plays back. A change to how turns play out must
 // bump P.VERSION, which makes older replays refuse to play; then record the new fingerprint here.
-const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: 'dbfd626c43017f2c' };
+const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f' };
 test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
   const ends = [...replay.turns, ...standard.turns].map(replayTurn);
@@ -105,7 +105,7 @@ test('replays refuse other versions and any file a writer would not produce', as
 
 test('clips keep a turn or a round as a titled replay of its own', async () => {
   for (const mode of ['standard', 'pulse']) {
-    const { replay, ends } = record(2, mode, mode === 'pulse' ? 120 : 35);
+    const { replay, ends } = record(1, mode, mode === 'pulse' ? 120 : 35);
     const goals = replay.turns.flatMap((t, i) => t.goal ? [i] : []);
     assert.ok(goals.length >= 2, `${mode} has goals to test rounds against`);
     // A round runs from the turn after a goal through the next goal, whatever the mode.

@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const M = require('../shared/ububall-match.js');
 const P = require('../web/ububall-physics.js');
+const C = require('../shared/ububall-cpu.js');
+const S = require('../scripts/cpu-simulation.cjs');
 test('network move validation rejects forged state and non-finite or out-of-range moves', () => {
   const moves = () => Array.from({length:3}, () => ({angle:0,power:.5,spin:0,superArm:false,guard:false}));
   assert.equal(M.validatePlans(moves()).length,3);
@@ -579,3 +581,57 @@ test('deflections off defending ubus stay credited to attacker, topSpeed rejects
   assert.equal(hatCall.label, 'HAT TRICK!');
   assert.deepEqual(hatCall.badges, ['HAT TRICK!']);
 });
+
+test('Goal-Camping-warned CPU defender in its own crease exits the crease rather than holding or guarding', () => {
+  const state = S.initialState(5, 'standard');
+  state.bodies[3].x = 930; state.bodies[3].y = 300; state.bodies[3].vx = state.bodies[3].vy = 0;
+  state.bodies[4].x = 750; state.bodies[4].y = 200;
+  state.bodies[5].x = 750; state.bodies[5].y = 400;
+  state.bodies[6].x = 500; state.bodies[6].y = 300; state.bodies[6].vx = state.bodies[6].vy = 0;
+  state.fouls = { crease: [false, true], corner: null, cornerTurns: 0, cards: [] };
+
+  assert.equal(M.inCrease(P, state.bodies[3], 1), true);
+
+  const decision = C.plan(state, 1, { level: 'medium', seed: 5 });
+  const plan = decision.plans[0];
+  assert.ok(plan.power > 0, 'Defender launches rather than holding');
+  assert.equal(plan.guard, false, 'Defender does not guard inside crease');
+
+  const resolved = M.resolveTurn(P, state, [C.HOLD, C.HOLD, C.HOLD, ...decision.plans]);
+  assert.equal(M.inCrease(P, resolved.state.bodies[3], 1), false, 'Defender exited the crease');
+  assert.equal(resolved.state.fouls.cards.includes(3), false, 'Defender avoided a yellow card');
+});
+
+test('Ubu with Knockout ready near opposing threat prefers stunning opponent over whiffing for 25% refund', () => {
+  const state = S.initialState(8, 'standard');
+  state.bodies[3].meter = 100;
+  state.bodies[3].equippedSuper = P.SUPERS.find(s => s.key === 'knockout');
+  state.bodies[3].x = 500; state.bodies[3].y = 150; state.bodies[3].vx = state.bodies[3].vy = 0;
+  state.bodies[0].x = 420; state.bodies[0].y = 150; state.bodies[0].vx = state.bodies[0].vy = 0;
+  state.bodies[1].x = 100; state.bodies[1].y = 100;
+  state.bodies[2].x = 100; state.bodies[2].y = 500;
+  state.bodies[6].x = 380; state.bodies[6].y = 150; state.bodies[6].vx = state.bodies[6].vy = 0;
+  state.bodies[6].stuckTo = state.bodies[0];
+  state.bodies[6].stickOffset = { x: -40, y: 0 };
+
+  const decision = C.plan(state, 1, { level: 'hard', seed: 8 });
+  const plan = decision.plans[0];
+  assert.equal(plan.superArm, true, 'Arms Knockout');
+
+  const resolved = M.resolveTurn(P, state, [C.HOLD, C.HOLD, C.HOLD, ...decision.plans]);
+  assert.equal(resolved.state.bodies[0].stunned, true, 'Opposing threat is stunned');
+});
+
+test('Ubu positioned ahead of the ball wraps around rather than shooting into own goal', () => {
+  const state = S.initialState(3, 'classic');
+  state.bodies[0].x = 420; state.bodies[0].y = 300; state.bodies[0].vx = state.bodies[0].vy = 0;
+  state.bodies[6].x = 350; state.bodies[6].y = 300; state.bodies[6].vx = state.bodies[6].vy = 0;
+
+  assert.equal(C.behindBall(state.bodies[0], state.bodies[6], 0), false);
+  const decision = C.plan(state, 0, { level: 'medium', seed: 3 });
+
+  const resolved = M.resolveTurn(P, state, [...decision.plans, C.HOLD, C.HOLD, C.HOLD]);
+  assert.equal(resolved.replay.goal, null, 'No own goal conceded');
+  assert.ok(resolved.state.bodies[6].x > 350, 'Ball carried or driven forward');
+});
+

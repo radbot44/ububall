@@ -2,7 +2,7 @@
 
 The local CPU evaluates complete three-player plans through `ububallMatch.resolveTurn`, using the gameplay physics, 240 Hz timestep, 12-second turn cap (1 second in Pulse), explicit guard braking, supers, stun and meter rules. It never receives the human's planned arrows or super arming choices. Browser planning runs in a Web Worker from the public state captured at the start of the turn. Launch waits for that plan; a reset cancels old work. Worker failure or a ten-second timeout falls back to the previous heuristic planner.
 
-The existing heuristic supplies the initial plan and preserves personality-dependent role selection. Search tries direct shots at different powers and goal positions, defensive holds and clears, banks and spin based on creativity, and paired pass/receiver moves based on teamwork. It evaluates whole teams, then refines angle/power/spin and tries a few joint alternatives. Armed and unarmed candidates are compared when a super is available. DNA and game physics are unchanged.
+The existing heuristic supplies the initial plan and preserves personality-dependent role selection. Search tries direct shots at different powers and goal positions, defensive holds and clears, banks and spin based on creativity, point-blank spin strikes when within two ball diameters, body checks targeting primary opposing threats, wrap-around recoveries when ahead of the ball, defensive crease exits when warned for goal camping, and paired pass/receiver moves based on teamwork. It evaluates whole teams, then refines angle/power/spin and tries a few joint alternatives. Armed and unarmed candidates are compared when a super is available. DNA and game physics are unchanged.
 
 ## Initial difficulty presets
 
@@ -10,11 +10,11 @@ Choose a CPU difficulty in **New match**. The initial default is Medium. These a
 
 | Level | Team candidates | Opponent scenarios | Maximum turn simulations |
 | --- | ---: | --- | ---: |
-| Easy | 18 | Previous heuristic | 18 |
-| Medium | 60 | Heuristic, defensive hold | 120 |
-| Hard | 120 | Heuristic, hold, direct attack | 360 |
+| Easy | 18 | Heuristic | 18 |
+| Medium | 60 | Heuristic, defensive guard braking | 120 |
+| Hard | 120 | Heuristic, defensive guard braking, backside-aware attack | 360 |
 
-Each candidate uses a blend of its average and worst outcome across the scenarios. The worst-outcome weight is .15/.35/.55 respectively. Evaluation prioritizes goals, then ball advancement, relative ball access, defensive coverage and meter. Aggression and clutch currently influence the heuristic seed; creativity and teamwork also influence search candidates. Search can override the seed when simulated outcomes are better.
+Each candidate uses a blend of its average and worst outcome across the scenarios. The worst-outcome weight is .15/.35/.55 respectively. Evaluation prioritizes goals, then ball advancement, relative ball access, defensive coverage, meter, stuns and daze slow. In addition to the heuristic seed, team personality traits (`aggression`, `creativity`, `teamwork`, `clutch`) and match pressure modulate evaluation weights and risk tolerance dynamically. Multi-touch passing goals benefit from high roster teamwork by mitigating complexity decay. Search can override the seed when simulated outcomes are better.
 
 ## Run comparisons
 
