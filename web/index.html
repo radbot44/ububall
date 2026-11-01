@@ -166,9 +166,10 @@ SOFTWARE.
       <button id="pause-leave" type="button">Leave match</button>
     </div>
     <div class="pause-settings">
-      <button id="aim-mode" type="button" aria-pressed="false">Aim: drag arrow</button>
-      <label class="toggle-switch" title="Toggle between compact and full stat profiles"><input type="checkbox" id="toggle-full-stats"><span class="toggle-track"></span><span>Full stats</span></label>
-      <label class="toggle-switch" title="Show the spin slider beside the selected ubu"><input type="checkbox" id="toggle-spin-slider"><span class="toggle-track"></span><span>Spin slider</span></label>
+      <button id="setting-aim" class="setting" type="button" title="Switch how dragging on the rink aims a launch"><span>Aim by</span><span class="setting-value">Drag arrow</span></button>
+      <button id="setting-spin" class="setting" type="button" aria-pressed="false" title="Turn the spin slider beside the selected ubu on or off"><span>Spin slider</span><span class="setting-value">Off</span></button>
+      <button id="guide-moves" class="setting" type="button" aria-pressed="false" title="Turn on or off each ubu's launch arrow while a turn plays"><span>Show moves</span><span class="setting-value">Off</span></button>
+      <button id="guide-trails" class="setting" type="button" aria-pressed="false" title="Turn on or off the path each ubu and the ball takes in a turn"><span>Show trails</span><span class="setting-value">Off</span></button>
     </div>
     <nav class="pause-links" aria-label="Leave to"><a href="/mint">Ubu Mint</a><a href="/collection">Collection</a></nav>
   </dialog>
@@ -177,9 +178,8 @@ SOFTWARE.
     <div class="replays-tools">
       <!-- Tabler upload icon (MIT), as in uburoom web/icons.js. -->
       <label class="button quiet file-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 9l5 -5l5 5"/><path d="M12 4l0 12"/></svg>Import .ububall<input id="replays-import" type="file" accept=".ububall" multiple></label>
-      <div id="replays-undo" class="replays-undo" role="status" hidden><span></span></div>
+      <div id="replays-undo" class="replays-undo idle"><span></span></div>
     </div>
-    <p id="replays-status" role="status"></p>
     <ul id="replays-list" class="replays-list"></ul>
   </dialog>
   <dialog id="export-dialog" class="export-dialog" aria-labelledby="export-title">
@@ -191,7 +191,7 @@ SOFTWARE.
       <button type="button" data-range="turn"><strong>Export turn</strong><small></small></button>
       <label class="export-private"><input id="export-private" type="checkbox"><span><strong>Hide names</strong><small>Teams become Saffron and Amethyst, and the ubus lose their names.</small></span></label>
     </div>
-    <p id="export-status" role="status"></p>
+    <p id="export-status"></p>
     <progress id="export-progress" max="1" value="0" hidden></progress>
     <div class="export-actions"><button id="export-close" type="button">Cancel</button></div>
   </dialog>
@@ -199,7 +199,6 @@ SOFTWARE.
     <div class="online-heading"><h2 id="share-title">Share</h2><button id="share-close" class="icon-button" type="button" aria-label="Close share">&#10005;</button></div>
     <canvas id="share-card" class="share-card" width="1080" height="980" aria-label="Share card of the moment on screen"></canvas>
     <label class="export-private"><input id="share-private" type="checkbox"><span><strong>Hide names</strong></span></label>
-    <p id="share-status" role="status"></p>
     <div class="export-actions"><button id="share-save" type="button">Save</button><button id="share-send" class="primary" type="button">Share</button></div>
   </dialog>
   <dialog id="stats-dialog" class="stats-dialog" aria-labelledby="stats-title">

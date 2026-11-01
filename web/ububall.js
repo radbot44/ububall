@@ -128,10 +128,17 @@
   }
   let arrowGrab = null, dragStart = null, dragMoved = false;
   let pullBehind = false;
-  $('aim-mode').onclick = () => {
+  // The floating spin slider: on by default with a mouse, off on touch screens.
+  let spinSlider = !matchMedia('(pointer: coarse)').matches;
+  try { spinSlider = (localStorage.getItem('ububall-spin-slider') ?? (spinSlider ? 'on' : 'off')) === 'on'; } catch {}
+  // Pause menu settings: each button shows its name and current value, and pressing it switches the value.
+  function showSetting(id, on) {
+    $(id).setAttribute('aria-pressed', String(Boolean(on)));
+    $(id).querySelector('.setting-value').textContent = on ? 'On' : 'Off';
+  }
+  $('setting-aim').onclick = () => {
     pullBehind = !pullBehind;
-    $('aim-mode').textContent = pullBehind ? 'Aim: pull back' : 'Aim: drag arrow';
-    $('aim-mode').setAttribute('aria-pressed', String(pullBehind));
+    $('setting-aim').querySelector('.setting-value').textContent = pullBehind ? 'Pull back' : 'Drag arrow';
   };
   const stadium = document.querySelector('.stadium');
   const stageArea = document.querySelector('.stadium-stage-area');
@@ -1295,7 +1302,6 @@
     compactBox.setAttribute('aria-label', 'Category averages');
     compactBox.title = 'Category averages · 0–255';
     details.append(fullBox); wrap.append(compactBox, details);
-    details.open = Boolean($('toggle-full-stats')?.checked);
     return wrap;
   }
   // An ubu's super: its name, meter and charge. On the home team the whole panel is the arm toggle.
@@ -1699,7 +1705,7 @@
   function positionSpinControl() {
     const control = $('field-spin');
     control.hidden = false;
-    const visible = phase === 'plan' && drag === null && $('toggle-spin-slider').checked;
+    const visible = phase === 'plan' && drag === null && spinSlider;
     control.style.visibility = visible ? 'visible' : 'hidden';
     control.inert = !visible;
     if (!visible) return;
@@ -1908,7 +1914,7 @@
     drawFoulFocus(text);
     if (phase === 'plan') drawPrediction(home, away);
     drawTrails(home, away);
-    if (theater) drawReplayGuides(home, away, text);
+    drawGuides(home, away, text);
     shockwaves.forEach(s => {
       const progress = 1 - Math.max(0, s.life / s.duration);
       const r = s.currentRadius + (s.maxRadius - s.currentRadius) * progress;
@@ -2209,7 +2215,7 @@
   function loadReplayTurn(k, fx) {
     const th = theater, t = th.replay.turns[k];
     th.index = k; th.tick = 0; th.called = th.crowned = false; th.sim = ububallReplay.restore(t.bodies);
-    viewTurnStart(th, t);
+    beginGuide(ububallReplay.restore(t.bodies), t.plans, th.seat);
     th.fouls = { ...ububallMatch.newFouls(), ...structuredClone(t.fouls) };
     scores = th.seat ? [...t.scores].reverse() : [...t.scores]; turn = t.turn;
     // The home cards show the moves this turn was played with.
@@ -2223,7 +2229,7 @@
     if (sim[6].spinStruck) { sim[6].spinStruck = false; if (fx) { syncReplay(); popup(bodies[6], 'Spin strike!'); } }
     ububallMatch.lapseFouls(P, sim, th.fouls);
     th.tick++;
-    if (th.tick % 3 === 0 || th.tick === th.replay.turns[th.index].ticks) tracePaths(th);
+    traceGuide(sim);
   }
   function seekReplay(at) {
     const th = theater, turns = th.replay.turns;
@@ -2634,7 +2640,7 @@
     g.fillStyle = text; g.textAlign = 'center'; g.font = `800 28px ${font}`; g.fillText(`T${turn}`, CARD.width / 2, 82);
     g.restore();
     // The invitation, the logo and what the game is.
-    g.textBaseline = 'alphabetic'; g.textAlign = 'center'; g.fillStyle = text; g.font = `700 32px ${font}`;
+    g.textBaseline = 'alphabetic'; g.textAlign = 'center'; g.fillStyle = text; g.font = `400 34px 'Uburoom Sans', ${font}`;
     g.fillText(CARD.cta, CARD.width / 2, fieldBottom + 60);
     const logo = videoLogoImage, logoWidth = 500, logoHeight = logo?.naturalWidth ? logoWidth * logo.naturalHeight / logo.naturalWidth : 0;
     if (logoHeight) g.drawImage(logo, (CARD.width - logoWidth) / 2, fieldBottom + 80, logoWidth, logoHeight);
@@ -2650,7 +2656,6 @@
     await Promise.all([videoLogo(), document.fonts.load(`40px 'Uburoom Sans'`).catch(() => {})]);
     $('share-private').closest('label').hidden = th.replay.anonymous;
     try { $('share-private').checked = localStorage.getItem('ububall-export-private') === 'on'; } catch {}
-    $('share-status').textContent = '';
     drawShareCard($('share-private').checked);
     $('share-dialog').showModal();
   }
@@ -2664,50 +2669,61 @@
     drawShareCard(event.target.checked);
   };
   $('share-send').onclick = async () => {
-    try { await navigator.share({ files: [await cardImage], text: 'A moment from ububall. Play at https://ububall.com' }); $('share-status').textContent = 'Shared.'; }
-    catch (error) { if (error.name !== 'AbortError') $('share-status').textContent = error.message; }
+    try { await navigator.share({ files: [await cardImage], text: 'A moment from ububall. Play at https://ububall.com' }); } catch {}
   };
   $('share-save').onclick = async () => {
     const file = await cardImage, link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: file.name });
     link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
-    $('share-status').textContent = `Saved ${file.name}.`;
   };
   $('share-close').onclick = () => $('share-dialog').close();
   // Closing while a video renders cancels it.
   $('export-close').onclick = () => { if (theater?.exporting) videoCancelled = true; else $('export-dialog').close(); };
   $('export-dialog').addEventListener('cancel', event => { if (theater?.exporting) { event.preventDefault(); videoCancelled = true; } });
-  // Viewer guides, remembered on this device: Moves draws each ubu's launch (its guard and armed super)
-  // from where the turn started; Trails draws the path each body has taken so far this turn. Both
-  // show in exported videos and share cards.
+  // Guides, remembered on this device and set from the pause menu or the replay viewer: Moves draws each
+  // ubu's launch (its guard and armed super) from where the turn started; Trails draws the path each body
+  // has taken this turn. In play, Moves shows while the turn plays and Trails until the next launch (not
+  // across a goal); in replays, videos and share cards, both show for the turn on screen.
   const guides = { moves: false, trails: false };
-  try { Object.assign(guides, JSON.parse(localStorage.getItem('ububall-replay-guides') || '{}')); } catch {}
+  try { Object.assign(guides, JSON.parse(localStorage.getItem('ububall-guides') || '{}')); } catch {}
   function showGuides() {
-    for (const key of ['moves', 'trails']) $(`replay-${key}`).setAttribute('aria-pressed', String(Boolean(guides[key])));
+    for (const key of ['moves', 'trails']) {
+      $(`replay-${key}`).setAttribute('aria-pressed', String(Boolean(guides[key])));
+      showSetting(`guide-${key}`, guides[key]);
+    }
   }
   for (const key of ['moves', 'trails']) {
-    $(`replay-${key}`).onclick = () => {
+    $(`replay-${key}`).onclick = $(`guide-${key}`).onclick = () => {
       guides[key] = !guides[key]; showGuides();
-      try { localStorage.setItem('ububall-replay-guides', JSON.stringify(guides)); } catch {}
-      if (theater) draw();
+      try { localStorage.setItem('ububall-guides', JSON.stringify(guides)); } catch {}
+      draw();
     };
   }
   showGuides();
-  // The turn's start, moves and paths in this view's order and orientation.
-  function viewTurnStart(th, t) {
-    const flip = th.seat ? b => Object.assign(b, { x: 1000 - b.x, y: 600 - b.y }) : b => b;
-    th.start = onlineOrder(ububallReplay.restore(t.bodies), th.seat).map(flip);
-    th.moves = onlineOrder(t.plans, th.seat).map(p => ({ ...p, angle: p.angle + (th.seat ? Math.PI : 0) }));
-    th.paths = th.start.map(b => [b.x, b.y]);
+  // The turn's start, moves and paths in this view's order and orientation, from the simulation's
+  // bodies (before P.startTurn) and plans; `seat` 1 sees the field turned around.
+  let guide = null;
+  function beginGuide(sim, plans, seat) {
+    const flip = seat ? b => Object.assign(b, { x: 1000 - b.x, y: 600 - b.y }) : b => b;
+    const start = onlineOrder(sim.map(b => ({ ...b })), seat).map(flip);
+    guide = { turn, goals: scores[0] + scores[1], seat, ticks: 0, start, paths: start.map(b => [b.x, b.y]),
+      moves: onlineOrder(plans, seat).map(p => ({ ...p, angle: p.angle + (seat ? Math.PI : 0) })) };
   }
   // Every third tick, each body's place joins its path.
-  function tracePaths(th) {
-    th.sim.forEach((b, c) => th.paths[viewIndex(c, th.seat)].push(th.seat ? 1000 - b.x : b.x, th.seat ? 600 - b.y : b.y));
+  function traceGuide(sim) {
+    if (!guide || ++guide.ticks % 3) return;
+    sim.forEach((b, c) => guide.paths[viewIndex(c, guide.seat)].push(guide.seat ? 1000 - b.x : b.x, guide.seat ? 600 - b.y : b.y));
   }
-  function drawReplayGuides(home, away, text) {
-    const th = theater;
-    if (guides.trails && th.paths) {
+  function guideShown(key) {
+    if (!guides[key] || !guide) return false;
+    if (theater) return true;
+    if (demo || goalReplay) return false;
+    if (phase === 'play') return guide.turn === turn;
+    return key === 'trails' && guide.turn === turn - 1 && guide.goals === scores[0] + scores[1];
+  }
+  function drawGuides(home, away, text) {
+    if (guideShown('trails')) {
       ctx.save(); ctx.lineCap = ctx.lineJoin = 'round';
-      th.paths.forEach((path, i) => {
+      guide.paths.forEach((path, i) => {
         const color = i < 3 ? home : i < 6 ? away : text;
         ctx.globalAlpha = .6; ctx.lineWidth = i < 6 ? 3 : 2; ctx.strokeStyle = color;
         ctx.beginPath(); ctx.moveTo(path[0], path[1]);
@@ -2717,9 +2733,9 @@
       });
       ctx.restore();
     }
-    if (guides.moves && th.start) {
-      th.start.slice(0, 6).forEach((b, i) => {
-        const plan = th.moves[i], color = i < 3 ? home : away;
+    if (guideShown('moves')) {
+      guide.start.slice(0, 6).forEach((b, i) => {
+        const plan = guide.moves[i], color = i < 3 ? home : away;
         ctx.save(); ctx.globalAlpha = .7; ctx.setLineDash([4, 6]); circle(b.x, b.y, b.radius, color, 2); ctx.restore();
         drawImpulse(b, plan, color);
         if (plan.guard && !b.stunned) {
@@ -2850,13 +2866,13 @@
     link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
   async function openReplay(id) {
-    if (online?.active) { $('replays-status').textContent = 'Leave your online match to watch a replay.'; return; }
+    if (online?.active) { replaysNote('Leave your online match to watch a replay.'); return; }
     if (matchInProgress() && !theater && !confirm('Watching a replay ends your current match.')) return;
     try {
       const entry = await replayStore.get(id), replay = await ububallReplay.read(entry.file);
       if ($('replays-dialog').open) $('replays-dialog').close();
       watchReplay(replay, entry.file);
-    } catch (error) { $('replays-status').textContent = error.message; }
+    } catch (error) { replaysNote(error.message); }
   }
   // Tabler outline icons (MIT), as in uburoom web/icons.js.
   const ICONS = {
@@ -2885,24 +2901,28 @@
   // The library: pinned first, then newest first. Replays from another physics or file version can
   // never play again (see P.VERSION), so they are removed.
   async function openReplays() {
-    $('replays-note').textContent = `Your latest ${ububallReplay.KEEP} matches are kept automatically. Pinned and imported replays stay until you delete them.`;
-    deletedReplays.length = 0; $('replays-status').textContent = '';
+    deletedReplays.length = 0; replaysNote();
     if (!$('replays-dialog').open) $('replays-dialog').showModal();
     await listReplays();
   }
-  async function listReplays(message = '') {
-    const list = $('replays-list'), status = $('replays-status');
+  // The note under the title, or a problem in its place.
+  function replaysNote(problem = '') {
+    $('replays-note').textContent = problem || `Your latest ${ububallReplay.KEEP} matches are kept automatically. Pinned and imported replays stay until you delete them.`;
+    $('replays-note').classList.toggle('problem', Boolean(problem));
+  }
+  async function listReplays(problem = '') {
+    const list = $('replays-list');
     let entries;
-    try { entries = await replayStore.all(); } catch { status.textContent = 'Replays cannot be saved in this browser.'; return; }
+    try { entries = await replayStore.all(); } catch { replaysNote('Replays cannot be saved in this browser.'); return; }
     const stale = entries.filter(e => e.physics !== P.VERSION || e.format !== ububallReplay.FORMAT);
     await Promise.all(stale.map(e => replayStore.remove(e.id)));
     entries = entries.filter(e => !stale.includes(e)).sort((a, b) => b.pinned - a.pinned || b.id - a.id);
-    status.textContent = [message, stale.length && `Removed ${stale.length} replay${stale.length === 1 ? '' : 's'} from an older version of ububall.`,
-      !entries.length && 'No replays yet. Matches are saved here automatically.'].filter(Boolean).join(' ');
+    replaysNote(problem);
     const undo = $('replays-undo'), last = deletedReplays.at(-1);
-    undo.hidden = !last;
+    undo.classList.toggle('idle', !last);
     if (last) undo.querySelector('span').textContent = last.title ? `Deleted “${last.title}”.` : `Deleted a ${last.clip ? 'clip' : 'replay'}.`;
-    list.replaceChildren(...entries.map(replayItem));
+    const empty = Object.assign(document.createElement('li'), { className: 'replays-empty', textContent: 'No replays yet. Matches are saved here automatically.' });
+    list.replaceChildren(...(entries.length ? entries.map(replayItem) : [empty]));
   }
   function replayItem(e) {
     const names = e.seat ? [...e.names].reverse() : e.names, sc = e.seat ? [...e.scores].reverse() : e.scores, score = `${names[0]} ${sc[0]}–${sc[1]} ${names[1]}`;
@@ -2950,15 +2970,14 @@
   $('replays-import').onchange = async event => {
     const files = [...event.target.files], problems = [];
     event.target.value = '';
-    let added = 0;
     for (const file of files) {
       try {
         if (file.size > 8 << 20) throw new Error('This replay is too large.');
         const bytes = new Uint8Array(await file.arrayBuffer());
-        await replayStore.add(libraryEntry(await ububallReplay.read(bytes), bytes, false)); added++;
+        await replayStore.add(libraryEntry(await ububallReplay.read(bytes), bytes, false));
       } catch (error) { problems.push(`${file.name}: ${error.message}`); }
     }
-    listReplays([added && `Imported ${added} replay${added === 1 ? '' : 's'}.`, ...problems].filter(Boolean).join(' '));
+    listReplays(problems.join(' '));
   };
   $('replays-open').onclick = openReplays;
   $('replays-close').onclick = () => $('replays-dialog').close();
@@ -3027,7 +3046,7 @@
     gameAudio()?.stop();
     drag = null;
     const turnPlans = [...plans, ...cpu];
-    recordSegment(bodies, turnPlans);
+    recordSegment(bodies, turnPlans); beginGuide(bodies, turnPlans, 0);
     if (recording) ububallReplay.addTurn(recording, { turn, scores, fouls, bodies, plans: turnPlans });
     P.startTurn(bodies, turnPlans, handleSuper); elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
     if (!demo) banner('Launch!', 800, 'launch');
@@ -3249,7 +3268,7 @@
       let steps = 0;
       while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
         const tick = ububallMatch.playTick(P, bodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
-        ububallMatch.lapseFouls(P, bodies, fouls);
+        ububallMatch.lapseFouls(P, bodies, fouls); traceGuide(bodies);
         for (const save of tick.saves) creditSave(bodies[save.index], save.own);
         if (tick.struck) popup(bodies[6], 'Spin strike!');
         if (tick.stop) { impact(tick.stop); accumulator = 0; }
@@ -3359,17 +3378,12 @@
     } catch {}
   });
   // The floating spin slider is a preference kept per device.
-  const spinToggle = $('toggle-spin-slider');
-  try { spinToggle.checked = (localStorage.getItem('ububall-spin-slider') ?? (matchMedia('(pointer: coarse)').matches ? 'off' : 'on')) === 'on'; }
-  catch { spinToggle.checked = !matchMedia('(pointer: coarse)').matches; }
-  spinToggle.onchange = () => { try { localStorage.setItem('ububall-spin-slider', spinToggle.checked ? 'on' : 'off'); } catch {} draw(); };
-  const toggleFull = $('toggle-full-stats');
-  if (toggleFull) {
-    toggleFull.onchange = () => {
-      document.body.classList.toggle('show-full-stats', toggleFull.checked);
-      document.querySelectorAll('.stat-details').forEach(node => { node.open = toggleFull.checked; });
-    };
-  }
+  showSetting('setting-spin', spinSlider);
+  $('setting-spin').onclick = () => {
+    spinSlider = !spinSlider; showSetting('setting-spin', spinSlider);
+    try { localStorage.setItem('ububall-spin-slider', spinSlider ? 'on' : 'off'); } catch {}
+    draw();
+  };
   // Match setup: a mode screen (rules and CPU level), then a team screen where only the ubu list scrolls.
   // Online play borrows the mode screen, then continues to its own match settings.
   let setupFor = 'cpu';
@@ -3656,14 +3670,14 @@
     const simFouls = viewFouls(fouls, online.state.seat);
     if (targetTick - replay.currentTick > 60) {
       while (replay.currentTick < targetTick - 8) {
-        P.step(replay.simBodies, P.DT);
+        P.step(replay.simBodies, P.DT); traceGuide(replay.simBodies);
         replay.currentTick++;
         ububallMatch.lapseFouls(P, replay.simBodies, simFouls);
       }
     }
 
     while (replay.currentTick < targetTick) {
-      P.step(replay.simBodies, P.DT, replayCollision, replayWall, replayShockwave, replaySuper);
+      P.step(replay.simBodies, P.DT, replayCollision, replayWall, replayShockwave, replaySuper); traceGuide(replay.simBodies);
       replay.currentTick++;
       ububallMatch.lapseFouls(P, replay.simBodies, simFouls);
       const now = replay.currentTick, saves = (replay.saves || []).filter(s => s.tick === now), struck = replay.struck?.includes(now);
@@ -3808,7 +3822,7 @@
           }
         });
         recordSegment(onlineReplay.simBodies, onlineReplay.plans, s.replay.ticks);
-        recordOnlineTurn(s);
+        recordOnlineTurn(s); beginGuide(onlineReplay.simBodies, onlineReplay.plans, s.seat);
         P.startTurn(onlineReplay.simBodies, onlineReplay.plans, replaySuper);
         syncViewBodies();
       }
