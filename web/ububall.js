@@ -28,13 +28,17 @@
   let playSegments = [], goalReplay = null, goalReplayAt = 0;
   // The replay viewer (see watchReplay), and the match being recorded for the replay library.
   let theater = null, recording = null, recordingOnline = false;
+  // While a video export renders, effects and sounds run on its clock (ms) instead of the wall clock,
+  // sounds go to its offline audio, and the field draws at its size.
+  let videoClock = null, videoAudio = null, videoField = null;
+  const clockNow = () => videoClock ?? performance.now();
   let matchTicks = 0; // Simulated ticks played locally, for meter cooldowns.
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const cpuClient = createCPUClient();
   let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuLevel = 'medium', cpuMode = 'standard';
   // The home screen demo (CPU against CPU) plays silently.
   let demo = false, demoLevels = ['medium', 'hard'];
-  const gameAudio = () => demo ? null : window.ubuAudio;
+  const gameAudio = () => videoAudio || (demo ? null : window.ubuAudio);
   const classicMode = () => ububallMatch.rule(matchMode, 'classic');
   const blitzMode = () => ububallMatch.rule(matchMode, 'blitz');
   const pulseMode = () => ububallMatch.rule(matchMode, 'pulse');
@@ -727,7 +731,7 @@
     const predicted = phase === 'plan' ? predictionCache?.fouls : null;
     for (const team of [0, 1]) if (fouls.crease[team]) drawFieldWarning(team ? 970 : 30, 180, ['Goal', 'Camping'], text, predicted?.crease[team]);
     if (stalling()) drawFieldWarning(fouls.corner % 2 ? 970 : 30, fouls.corner > 1 ? 570 : 30, ['Corner', 'Stalling'], text, predicted?.corner);
-    const flash = reducedMotion.matches ? 1 : .35 + .65 * (.5 + .5 * Math.cos(performance.now() / 1000 * Math.PI * 2.4));
+    const flash = reducedMotion.matches ? 1 : .35 + .65 * (.5 + .5 * Math.cos(clockNow() / 1000 * Math.PI * 2.4));
     const creasing = new Set(bodies.slice(0, 6).filter(b => fouls.crease[b.team] && ububallMatch.inCrease(P, b, b.team)));
     for (const b of offenders()) {
       if (b.carded) continue;
@@ -984,7 +988,7 @@
   function drawSuperAura(b, key, reach) {
     const [c1, c2] = SUPER_AURA_THEMES[key] || ['#ff7197', '#ff9954'];
     const level = b.superActive || b.superArm ? 2 : 1, still = reducedMotion.matches;
-    const t = still ? 0 : performance.now() / 1000, spin = t * (.6 + level * 1.2);
+    const t = still ? 0 : clockNow() / 1000, spin = t * (.6 + level * 1.2);
     const ringR = reach + 6 + level * 2;
     ctx.save();
     const haloR = ringR + 10 + level * 4 + (still ? 0 : Math.sin(t * 3) * 2);
@@ -1845,8 +1849,8 @@
     }
     positionSpinControl();
     const ratio = Math.min(devicePixelRatio || 1, 2);
-    const width = Math.max(1, Math.round(renderWidth * ratio));
-    const height = Math.max(1, Math.round(renderHeight * ratio));
+    const width = videoField?.width ?? Math.max(1, Math.round(renderWidth * ratio));
+    const height = videoField?.height ?? Math.max(1, Math.round(renderHeight * ratio));
     if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
     if (badgeCanvas.width !== width || badgeCanvas.height !== height) { badgeCanvas.width = width; badgeCanvas.height = height; }
     badgeCtx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); badgeCtx.clearRect(0, 0, 1000, 600);
@@ -1947,7 +1951,7 @@
       // deeper the daze.
       const slow = P.dazeSlow(b);
       if (slow > 0 && !b.stunned) {
-        const depth = slow / P.DAZE.max, spin = reducedMotion.matches ? 0 : performance.now() / 300;
+        const depth = slow / P.DAZE.max, spin = reducedMotion.matches ? 0 : clockNow() / 300;
         ctx.save();
         ctx.translate(isPortrait ? b.x + b.radius + 12 : b.x, isPortrait ? b.y : b.y - b.radius - 12);
         ctx.rotate(spin); ctx.globalAlpha = .55 + .45 * depth;
@@ -2223,7 +2227,7 @@
   function endReplayTurn() {
     const th = theater, t = th.replay.turns[th.index];
     if (t.goal && !th.called) {
-      th.called = true; th.steps = 0; th.holdUntil = performance.now() + 2500;
+      th.called = true; th.steps = 0; th.holdUntil = clockNow() + 2500;
       const team = th.seat ? 1 - t.goal.team : t.goal.team, scorer = t.goal.scorer === null ? null : bodies[viewIndex(t.goal.scorer, th.seat)];
       scores[team]++; sync();
       celebrate(team, bodies[6], t.goal.label, scorer);
@@ -2237,7 +2241,7 @@
   }
   function advanceReplay(delta) {
     const th = theater;
-    if (!th.paused && performance.now() >= th.holdUntil) {
+    if (!th.paused && clockNow() >= th.holdUntil) {
       th.steps += delta / P.DT * th.speed;
       for (let n = 0; th.steps >= 1 && n < 240; n++) {
         if (th.tick >= th.replay.turns[th.index].ticks) { if (!endReplayTurn()) break; continue; }
@@ -2299,6 +2303,167 @@
   }
   $('replay-clip-turn').onclick = () => { if (theater) saveClip(false); };
   $('replay-clip-play').onclick = () => { if (theater) saveClip(true); };
+  // Video export: the replay renders frame by frame on its own clock, faster than real time, into a
+  // 1080p60 H.264 MP4 (web/mp4.js) at a constant 1.5 Mb/s: the flat field needs little, and the
+  // encoder's variable mode overshot low targets several times over. Its sounds are scheduled into an offline audio context at each
+  // frame's time, then encoded as AAC, or Opus where AAC is unavailable.
+  // The frame is laid out in 1920×1080 units (`field` among them) and scaled to `width`.
+  const VIDEO = Object.freeze({ width: 1920, height: 1080, fps: 60, bitrate: 1.5e6, keySeconds: 5, field: { x: 210, y: 150, width: 1500, height: 900 }, hold: 1 });
+  const yieldTask = () => new Promise(resolve => { const channel = new MessageChannel(); channel.port1.onmessage = () => resolve(); channel.port2.postMessage(0); });
+  const ownBytes = d => d instanceof ArrayBuffer ? new Uint8Array(d.slice(0)) : new Uint8Array(d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength));
+  function resetSoundThrottles() {
+    for (const b of bodies) { delete b._lastHitSound; delete b._lastWallSound; }
+    superImpactTimes = new WeakMap();
+  }
+  // The game's sound calls, played into `offline` at `seconds()` on the video's timeline.
+  function offlineAudio(offline, seconds) {
+    const A = window.ubuAudio, ctx = new Proxy(offline, {
+      get: (target, key) => key === 'currentTime' ? seconds() : typeof target[key] === 'function' ? target[key].bind(target) : target[key]
+    });
+    const into = (options = {}) => ({ ...options, ctx });
+    return { getAudioContext: () => ctx, stop() {}, playCollision: (voice, o) => A.playCollision(voice, into(o)), playBallHit: o => A.playBallHit(into(o)),
+      playWallHit: o => A.playWallHit(into(o)), playGoalHit: (type, o) => A.playGoalHit(type, into(o)), playSuper: (key, phase, o) => A.playSuper(key, phase, into(o)),
+      playSizzle: o => A.playSizzle(into(o)), playFoul: (kind, o) => A.playFoul(kind, into(o)) };
+  }
+  // A frame: the scorebug over the field, its ubus and their badges, as the stadium shows them.
+  function composeFrame(v) {
+    const { home, away, text, surface, background } = themeColors, f = VIDEO.field, scale = f.width / 1000, cx = 960;
+    v.setTransform(VIDEO.width / 1920, 0, 0, VIDEO.width / 1920, 0, 0);
+    const font = getComputedStyle(document.body).fontFamily;
+    v.fillStyle = background; v.fillRect(0, 0, 1920, 1080);
+    v.save();
+    v.beginPath(); v.roundRect(cx - 640, 36, 1280, 76, 16); v.fillStyle = surface; v.fill();
+    if (rinkLogo.complete && rinkLogo.naturalWidth) v.drawImage(rinkLogo, cx - 615, 52, 150, 150 * rinkLogo.naturalHeight / rinkLogo.naturalWidth);
+    const names = [$('home-label').textContent, $('opponent-label').textContent];
+    v.textBaseline = 'middle';
+    for (const team of [0, 1]) {
+      const left = team ? cx : cx - 420;
+      v.fillStyle = team ? away : home; v.fillRect(left, 36, 420, 76);
+      v.fillStyle = team ? '#ffffff' : '#1b1e26';
+      v.font = `800 30px ${font}`; v.textAlign = team ? 'right' : 'left';
+      v.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 400 : left + 20, 75);
+      v.font = `800 46px ${font}`; v.textAlign = 'center';
+      v.fillText(String(scores[team]), team ? left + 50 : left + 370, 76);
+    }
+    v.fillStyle = text; v.textAlign = 'center'; v.font = `800 28px ${font}`;
+    v.fillText(`T${turn}  REPLAY`, cx + 530, 75);
+    v.restore();
+    v.drawImage(canvas, f.x, f.y, f.width, f.height);
+    bodies.slice(0, 6).forEach((b, i) => {
+      const sprite = skaters[i]?.firstChild;
+      if (!(sprite instanceof HTMLCanvasElement)) return;
+      const size = 2 * b.radius * scale;
+      v.save();
+      v.globalAlpha = b.carded ? .3 : b.superActive === 'ghost' ? .45 : 1;
+      if ((b.stunned || b.stunnedNext) && !b.carded) v.filter = 'grayscale(0.8) brightness(0.7)';
+      v.translate(f.x + b.x * scale, f.y + b.y * scale); v.rotate(b.rotation);
+      v.drawImage(sprite, -size / 2, -size / 2, size, size);
+      v.restore();
+    });
+    v.drawImage(badgeCanvas, f.x, f.y, f.width, f.height);
+  }
+  async function encodeAudio(buffer) {
+    if (!('AudioEncoder' in window)) return null;
+    const rate = buffer.sampleRate;
+    for (const [codec, bitrate, frame] of [['mp4a.40.2', 160000, 1024], ['opus', 128000, 960]]) {
+      const config = { codec, bitrate, sampleRate: rate, numberOfChannels: 2 };
+      if (!(await AudioEncoder.isConfigSupported(config).catch(() => ({}))).supported) continue;
+      const samples = [];
+      let description = null, failure = null;
+      const encoder = new AudioEncoder({ error: error => { failure = error; }, output: (chunk, meta) => {
+        if (meta?.decoderConfig?.description) description = ownBytes(meta.decoderConfig.description);
+        const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
+        samples.push({ data, duration: chunk.duration ? Math.round(chunk.duration * rate / 1e6) : frame });
+      } });
+      encoder.configure(config);
+      const left = buffer.getChannelData(0), right = buffer.getChannelData(1);
+      for (let at = 0; at < buffer.length; at += 4800) {
+        const n = Math.min(4800, buffer.length - at), data = new Float32Array(n * 2);
+        data.set(left.subarray(at, at + n)); data.set(right.subarray(at, at + n), n);
+        const audio = new AudioData({ format: 'f32-planar', sampleRate: rate, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(at * 1e6 / rate), data });
+        encoder.encode(audio); audio.close();
+      }
+      await encoder.flush(); encoder.close();
+      if (failure) throw failure;
+      const opus = codec === 'opus';
+      // AAC-LC at 48 kHz in stereo, should the encoder not describe itself.
+      return { codec: opus ? 'opus' : 'mp4a', channels: 2, sampleRate: rate, timescale: rate, bitrate, samples,
+        description: opus ? null : description || Uint8Array.of(0x11, 0x90), preSkip: opus ? ububallMP4.opusPreSkip(description) : undefined };
+    }
+    return null;
+  }
+  let videoCancelled = false;
+  async function exportVideo() {
+    const th = theater, dialog = $('video-dialog'), status = $('video-status'), progress = $('video-progress'), close = $('video-cancel');
+    if (!th || th.exporting) return;
+    videoCancelled = false; progress.value = 0; close.textContent = 'Cancel'; status.textContent = 'Preparing…';
+    dialog.showModal();
+    let config = null;
+    search: for (const codec of ['avc1.64002A', 'avc1.4D402A', 'avc1.42E02A']) {
+      for (const bitrateMode of ['constant', 'variable']) {
+        const option = { codec, width: VIDEO.width, height: VIDEO.height, bitrate: VIDEO.bitrate, bitrateMode, framerate: VIDEO.fps, avc: { format: 'avc' } };
+        if ((await VideoEncoder.isConfigSupported(option).catch(() => ({}))).supported) { config = option; break search; }
+      }
+    }
+    if (!config) { status.textContent = 'This browser cannot encode MP4 video.'; close.textContent = 'Close'; return; }
+    // Every turn at full speed, each goal's hold, then a moment on the final field.
+    const seconds = th.total * P.DT + th.replay.turns.filter(t => t.goal).length * 2.5 + VIDEO.hold;
+    const frames = Math.ceil(seconds * VIDEO.fps), rate = 48000;
+    const offline = new OfflineAudioContext(2, Math.ceil(frames / VIDEO.fps * rate), rate);
+    const resume = { at: th.starts[th.index] + th.tick, paused: th.paused, speed: th.speed, portrait: isPortrait };
+    const out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
+    const v = out.getContext('2d'), samples = [];
+    let description = null, failure = null, blob = null;
+    const encoder = new VideoEncoder({ error: error => { failure = error; }, output: (chunk, meta) => {
+      if (meta?.decoderConfig?.description) description = ownBytes(meta.decoderConfig.description);
+      const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
+      samples.push({ data, duration: 90000 / VIDEO.fps, key: chunk.type === 'key' });
+    } });
+    try {
+      encoder.configure(config);
+      th.exporting = true; th.speed = 1; th.paused = false; isPortrait = false;
+      videoClock = 0; videoField = { width: Math.round(VIDEO.field.width * VIDEO.width / 1920), height: Math.round(VIDEO.field.height * VIDEO.width / 1920) };
+      videoAudio = offlineAudio(offline, () => videoClock / 1000);
+      gameAudio()?.stop(); resetSoundThrottles(); seekReplay(0);
+      for (let f = 0; f < frames && !videoCancelled && !failure; f++) {
+        if (f) { videoClock += 1000 / VIDEO.fps; updateEffects(1 / VIDEO.fps); advanceReplay(1 / VIDEO.fps); }
+        composeFrame(v);
+        const frame = new VideoFrame(out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
+        encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
+        while (encoder.encodeQueueSize > 4) await new Promise(resolve => encoder.addEventListener('dequeue', resolve, { once: true }));
+        if (f % 15 === 0) { progress.value = .9 * f / frames; status.textContent = `Rendering ${replayClock(f / VIDEO.fps / P.DT)} of ${replayClock(seconds / P.DT)}…`; await yieldTask(); }
+      }
+      await encoder.flush();
+      if (failure) throw failure;
+      if (!videoCancelled) {
+        videoAudio = null;
+        status.textContent = 'Mixing sound…';
+        const audio = await encodeAudio(await offline.startRendering());
+        blob = new Blob(ububallMP4.write({ width: VIDEO.width, height: VIDEO.height, timescale: 90000, description, samples }, audio), { type: 'video/mp4' });
+        if (!audio) status.textContent = 'This browser cannot encode sound, so the video is silent.';
+      }
+    } catch (error) {
+      status.textContent = `The video could not be made: ${error.message}`;
+    } finally {
+      if (encoder.state !== 'closed') encoder.close();
+      th.exporting = false; th.speed = resume.speed; isPortrait = resume.portrait;
+      videoClock = null; videoAudio = null; videoField = null;
+      resetSoundThrottles(); seekReplay(resume.at); th.paused = resume.paused; layoutDirty = true; draw();
+    }
+    close.textContent = 'Close';
+    if (videoCancelled) { dialog.close(); return; }
+    if (!blob) return;
+    progress.value = 1;
+    const name = replayFileName(th.replay.recorded, th.replay.title) + '.mp4';
+    const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+    status.textContent = `${status.textContent.startsWith('This browser') ? status.textContent + ' ' : ''}Saved ${name} (${(blob.size / 1e6).toFixed(1)} MB).`;
+  }
+  $('replay-video').hidden = !('VideoEncoder' in window && 'OfflineAudioContext' in window);
+  $('replay-video').onclick = exportVideo;
+  // Closing while it renders cancels the export.
+  $('video-cancel').onclick = () => { videoCancelled = true; if (!theater?.exporting) $('video-dialog').close(); };
+  $('video-dialog').addEventListener('cancel', event => { if (theater?.exporting) { event.preventDefault(); videoCancelled = true; } });
   $('replay-exit').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
   // Space plays and pauses and the arrows step by turn, unless a control has focus.
   document.addEventListener('keydown', event => {
@@ -2307,11 +2472,13 @@
     if (button) { event.preventDefault(); $(button).click(); }
   });
   // A file name from the replay's name, or the time it was recorded.
-  function downloadReplay(file, recorded, title = null) {
+  function replayFileName(recorded, title = null) {
     const d = new Date(recorded), two = n => String(n).padStart(2, '0');
-    const name = title?.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60) ||
+    return title?.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60) ||
       `ububall-${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}`;
-    const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([file], { type: 'application/gzip' })), download: `${name}.ububall` });
+  }
+  function downloadReplay(file, recorded, title = null) {
+    const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([file], { type: 'application/gzip' })), download: `${replayFileName(recorded, title)}.ububall` });
     link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
   async function openReplay(id) {
@@ -2371,9 +2538,9 @@
   }
   function replayItem(e) {
     const names = e.seat ? [...e.names].reverse() : e.names, sc = e.seat ? [...e.scores].reverse() : e.scores, score = `${names[0]} ${sc[0]}–${sc[1]} ${names[1]}`;
-    const item = document.createElement('li'), heading = document.createElement('strong'), meta = document.createElement('small');
+    const item = document.createElement('li'), heading = document.createElement('div'), name = document.createElement('strong'), meta = document.createElement('small');
     item.classList.toggle('pinned', Boolean(e.pinned));
-    heading.textContent = e.title || score;
+    heading.className = 'replay-heading'; name.textContent = e.title || score;
     meta.textContent = [e.title && score, e.clip ? 'Clip' : ububallMatch.modeName(e.mode), new Date(e.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }),
       `${e.turns} turn${e.turns === 1 ? '' : 's'}`, !e.clip && !e.final && 'Unfinished'].filter(Boolean).join(' · ');
     const pin = iconButton('pin', e.pinned ? 'Unpin' : 'Pin', async () => { await replayStore.put({ ...e, pinned: !e.pinned }); listReplays(); });
@@ -2397,11 +2564,12 @@
       };
       input.onblur = () => finish(true);
     };
+    // Watch leads the row; the name carries its own small rename button.
+    heading.append(name, iconButton('edit', 'Rename', rename, 'icon-button replay-rename'));
     const actions = document.createElement('div'); actions.className = 'replay-actions';
-    actions.append(iconButton('play', 'Watch', () => openReplay(e.id), 'icon-button primary'), pin, iconButton('edit', 'Rename', rename),
-      iconButton('download', 'Export .ububall', () => downloadReplay(e.file, e.recorded, e.title)),
+    actions.append(pin, iconButton('download', 'Export .ububall', () => downloadReplay(e.file, e.recorded, e.title)),
       iconButton('trash', 'Delete', async () => { await replayStore.remove(e.id); deletedReplays.push(e); listReplays(); }));
-    item.append(heading, meta, actions);
+    item.append(iconButton('play', 'Watch', () => openReplay(e.id), 'icon-button primary replay-watch'), heading, meta, actions);
     return item;
   }
   $('replays-undo').append(iconButton('undo', 'Undo delete', async () => {
@@ -2601,7 +2769,7 @@
     burst(x, y, a.team, Math.min(1, speed / 600), false, tangent);
     if (a.team !== b.team) burst(x, y, b.team, Math.min(1, speed / 600), false, tangent);
     const isBall = a.team === -1 || b.team === -1;
-    const now = performance.now();
+    const now = clockNow();
     contactMeter(a, b, speed);
     if (isBall) {
       const player = a.team !== -1 ? a : b;
@@ -2631,7 +2799,7 @@
   function handleWall(body, velocity, wallType, nx, ny) {
     if (velocity < 20) return;
     addWallEffect(body, velocity, wallType, nx, ny);
-    const now = performance.now();
+    const now = clockNow();
     if (body._lastWallSound && (now - body._lastWallSound) < 60) return;
     body._lastWallSound = now;
     burst(body.x + nx * body.radius, body.y + ny * body.radius, body.team,
@@ -2647,11 +2815,11 @@
       gameAudio().playWallHit({ volume });
     }
   }
-  const superImpactTimes = new WeakMap();
+  let superImpactTimes = new WeakMap();
   function handleSuper(key, phase, body, target = null) {
     // Sustained contact can resolve repeatedly within one animation frame.
     if (key === 'stalwart' && phase === 'impact') {
-      const now = performance.now();
+      const now = clockNow();
       if (now - (superImpactTimes.get(body) ?? -Infinity) < 100) return;
       superImpactTimes.set(body, now);
     }
@@ -2706,7 +2874,7 @@
     const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length || goalCall ||
       ripples.length || pings.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
     if (active) updateEffects(delta);
-    if (theater) { if (active) advanceReplay(delta); }
+    if (theater) { if (active && !theater.exporting) advanceReplay(delta); }
     else if (phase === 'play' && active && !online?.active) {
       if (performance.now() < hitStopUntil) accumulator = 0; else accumulator += delta;
       let steps = 0;

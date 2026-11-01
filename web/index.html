@@ -5,7 +5,7 @@
   <meta name="color-scheme" content="dark"><title>Ububall</title>
   <link rel="stylesheet" href="site.css"><link rel="stylesheet" href="ububall.css">
   <script src="site-header.js" defer></script><script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script>
-  <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-replay.js" defer></script><script src="ububall-cpu-client.js" defer></script><script src="ububall-online.js" defer></script><script src="ububall.js" defer></script><script src="app.js" defer></script>
+  <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-replay.js" defer></script><script src="mp4.js" defer></script><script src="ububall-cpu-client.js" defer></script><script src="ububall-online.js" defer></script><script src="ububall.js" defer></script><script src="app.js" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -135,7 +135,7 @@ SOFTWARE.
         <div id="replay-bar" class="replay-bar">
           <div class="replay-track"><input id="replay-seek" type="range" min="0" max="1" step="1" value="0" aria-label="Replay position"><div id="replay-marks" class="replay-marks"></div></div>
           <div class="replay-controls">
-            <!-- Tabler player and scissors icons (MIT), as in uburoom web/icons.js. -->
+            <!-- Tabler player, scissors, download and movie icons (MIT), as in uburoom web/icons.js. -->
             <button id="replay-prev" class="icon-button" type="button" aria-label="Previous turn" title="Previous turn (Left arrow)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5v14l-12 -7l12 -7"/><path d="M4 5l0 14"/></svg></button>
             <button id="replay-play" class="icon-button primary" type="button" aria-label="Pause" title="Play or pause (Space)"><svg viewBox="0 0 24 24" aria-hidden="true"><g class="icon-pause"><path d="M6 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12"/><path d="M14 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12"/></g><path class="icon-play" d="M7 4v16l13 -8l-13 -8"/></svg></button>
             <button id="replay-next" class="icon-button" type="button" aria-label="Next turn" title="Next turn (Right arrow)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v14l12 -7l-12 -7"/><path d="M20 5l0 14"/></svg></button>
@@ -144,6 +144,7 @@ SOFTWARE.
             <button id="replay-clip-turn" class="replay-clip" type="button" title="Save this turn to Replays"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M3 17a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M8.6 8.6l10.4 10.4"/><path d="M8.6 15.4l10.4 -10.4"/></svg>Clip turn</button>
             <button id="replay-clip-play" class="replay-clip" type="button" title="Save this play (the motion since the field last rested) to Replays"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M3 17a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M8.6 8.6l10.4 10.4"/><path d="M8.6 15.4l10.4 -10.4"/></svg>Clip play</button>
             <button id="replay-export" class="icon-button" type="button" aria-label="Export .ububall" title="Export .ububall"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 11l5 5l5 -5"/><path d="M12 4l0 12"/></svg></button>
+            <button id="replay-video" class="icon-button" type="button" aria-label="Export MP4 video" title="Export MP4 video"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12"/><path d="M8 4l0 16"/><path d="M16 4l0 16"/><path d="M4 8l4 0"/><path d="M4 16l4 0"/><path d="M4 12l16 0"/><path d="M16 8l4 0"/><path d="M16 16l4 0"/></svg></button>
             <button id="replay-exit" type="button">Exit replay</button>
           </div>
         </div>
@@ -177,6 +178,12 @@ SOFTWARE.
     </div>
     <p id="replays-status" role="status"></p>
     <ul id="replays-list" class="replays-list"></ul>
+  </dialog>
+  <dialog id="video-dialog" class="video-dialog" aria-labelledby="video-title">
+    <h2 id="video-title">Export video</h2>
+    <p id="video-status" role="status"></p>
+    <progress id="video-progress" max="1" value="0"></progress>
+    <div class="video-actions"><button id="video-cancel" type="button">Cancel</button></div>
   </dialog>
   <dialog id="roster-dialog" class="team-sheet" data-step="mode" aria-labelledby="roster-title">
     <button id="cancel-roster" class="icon-button team-sheet-close" type="button" aria-label="Close">&#10005;</button>

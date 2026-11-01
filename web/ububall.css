@@ -1235,11 +1235,15 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 .replays-dialog::backdrop { background: #000b; }
 #replays-status:empty { display: none; }
 .replays-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.replays-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--elevated); }
-.replays-list strong { overflow-wrap: anywhere; }
-.replays-list small { grid-column: 1; color: var(--muted); }
-.replays-list .replay-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; }
-.replays-list .replay-actions .primary { color: var(--primary-text, #1b1e26); }
+.replays-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--elevated); }
+.replays-list .replay-watch { grid-column: 1; grid-row: 1 / span 2; }
+.replays-list .replay-heading, .replays-list .replay-name { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.replays-list strong { min-width: 0; overflow-wrap: anywhere; }
+.replays-list .replay-rename { width: auto; height: auto; min-height: 0; padding: 2px; border-radius: 6px; line-height: 0; }
+.replays-list .replay-rename svg { width: 1em; height: 1em; }
+.replays-list small { grid-column: 2; grid-row: 2; color: var(--muted); }
+.replays-list .replay-actions { grid-column: 3; grid-row: 1 / span 2; display: flex; gap: 6px; }
+.replays-list .replay-watch { color: var(--primary-text, #1b1e26); }
 .replays-list [aria-pressed="true"] { color: var(--primary); }
 .replays-list li.pinned { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
 .replay-name { min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; font-weight: 700; }
@@ -1250,6 +1254,12 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 .replays-undo button { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 480px) {
   .replays-dialog { padding: 16px; }
-  .replays-list li { grid-template-columns: minmax(0, 1fr); }
-  .replays-list .replay-actions { grid-column: 1; grid-row: auto; }
+  .replays-list .replay-actions { grid-column: 2; grid-row: 3; }
 }
+
+/* Video export progress. */
+.video-dialog { width: min(420px, calc(100% - 24px)); padding: 24px; border: 1px solid var(--border); border-radius: 22px; background: var(--card); color: var(--text); }
+.video-dialog::backdrop { background: #000b; }
+.video-dialog h2 { margin: 0 0 8px; }
+#video-progress { width: 100%; height: 10px; margin: 8px 0 16px; accent-color: var(--primary); }
+.video-actions { display: flex; justify-content: flex-end; }
