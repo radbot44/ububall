@@ -154,16 +154,17 @@
   // Per-tick scratch and the tick in progress, which the step callbacks below read, so neither is
   // rebuilt every tick. A nested tick would take fresh scratch and restore the outer tick after.
   let spareTick = null, activeTick = null;
-  function tickTouch(a, b, speed) {
+  function tickTouch(a, b, speed, impulse, plow = false, iron = false) {
     const t = activeTick, player = toucher(a, b, speed);
-    if (player) {
+    if (player && !plow) {
       // A touch passed from a teammate makes that teammate the assist; an opponent's touch clears it.
       const { bodies, play } = t, i = bodies.indexOf(player), team = player.team, last = play.last;
       if (last !== i) play.assist[team] = last !== null && bodies[last].team === team ? last : null;
       play.last = i; play.lastTouch[team] = i; play.shotX[team] = t.ball.x; play.banked = false;
       t.touched.add(i);
+      if (iron) t.ironSaver = i;
     }
-    t.fx.collide?.(a, b, speed);
+    t.fx.collide?.(a, b, speed, impulse, plow, iron);
   }
   function tickWall(body, velocity, type, nx, ny) {
     const t = activeTick;
@@ -194,12 +195,18 @@
     const before = touched.size ? bodies.map((b, i) => ({ ...b, x: motion[i * 5], y: motion[i * 5 + 1], vx: motion[i * 5 + 2],
       vy: motion[i * 5 + 3], omega: motion[i * 5 + 4], stuckTo: b === ball ? stuck : b.stuckTo })) : null;
     const ballBefore = before?.[bodies.indexOf(ball)], tickSaves = touched.size ? saves(P, before, bodies, touched, play.credit) : [];
+    const ironIndex = t.ironSaver ?? null; t.ironSaver = null;
+    if (ironIndex !== null) {
+      const existing = tickSaves.find(s => s.index === ironIndex);
+      if (existing) existing.iron = true; else tickSaves.push({ index: ironIndex, own: false, iron: true });
+    }
     play.credit = credit(play.credit, ballBefore, ball, touched);
     for (const save of tickSaves) play.saved = { at: play.age, team: bodies[save.index].team };
     // A Cannonball hit always counts as a big shot.
     const cannon = touched.size > 0 && [...touched].some(i => before[i].superActive === 'cannonball' && bodies[i].superActive !== 'cannonball');
     const speed = Math.hypot(ball.vx, ball.vy), big = cannon || bigShot(P, before, touched, ball), struck = Boolean(ball.spinStruck);
-    const stop = effects ? hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big) : 0;
+    const hasIron = tickSaves.some(s => s.iron);
+    const stop = effects ? Math.max(hasIron ? 150 : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big)) : 0;
     if (touched.size) play.big = big;
     if (tally) {
       for (const i of touched) tally.topSpeed[i] = Math.max(tally.topSpeed[i], speed);
@@ -346,7 +353,7 @@
     next.fouls ||= newFouls();
     const saved = [], struck = [], stops = [], tally = state.tally ? structuredClone(state.tally) : newTally();
     for (let tick = 1; tick <= limit; tick++) {
-      const result = playTick(P, bodies, play, { collide: (a, b, speed) => { contactMeter(P, bodies, next.stats, a, b, speed, clock + tick, classic); watch?.collide?.(a, b, speed); },
+      const result = playTick(P, bodies, play, { collide: (a, b, speed, impulse, plow, iron) => { if (!plow) contactMeter(P, bodies, next.stats, a, b, speed, clock + tick, classic); watch?.collide?.(a, b, speed, impulse, plow, iron); },
         wall: watch?.wall }, tally, effects);
       goal = result.goal;
       lapseFouls(P, bodies, next.fouls);

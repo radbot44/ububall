@@ -1136,6 +1136,32 @@
     return handle;
   }
 
+  // An iron save: a heavy metallic clank with a sharp hiss of steam rushing through it.
+  function playIronSave(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx, null, 0.4), now = ctx.currentTime + 0.005, volume = options.volume ?? 1;
+    for (const [hz, level, decay] of [[587, .25, .45], [1480, .15, .32], [2480, .09, .22]]) {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = 'sine'; osc.frequency.setValueAtTime(hz, now);
+      gain.gain.setValueAtTime(level * volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + decay);
+      osc.connect(gain); gain.connect(master);
+      osc.start(now); osc.stop(now + decay + 0.01);
+    }
+    try {
+      const noiseSource = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), steamGain = ctx.createGain();
+      noiseSource.buffer = grainNoise(ctx);
+      filter.type = 'bandpass'; filter.Q.setValueAtTime(1.8, now);
+      filter.frequency.setValueAtTime(3600, now); filter.frequency.exponentialRampToValueAtTime(800, now + 0.35);
+      steamGain.gain.setValueAtTime(0.001, now);
+      steamGain.gain.linearRampToValueAtTime(0.35 * volume, now + 0.015);
+      steamGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+      noiseSource.connect(filter); filter.connect(steamGain); steamGain.connect(master);
+      noiseSource.start(now); noiseSource.stop(now + 0.36);
+    } catch {}
+  }
+
   // Fouls: a soft two-note "doot doot" when a warning first appears, like a system alert, and a light
   // referee's whistle for a yellow card. Both stay short and quiet so a stalled scrum never nags.
   function playFoul(kind = 'warning', options = {}) {
@@ -1652,6 +1678,7 @@
     playSizzle,
     playGoalHit,
     playFoul,
+    playIronSave,
     playSuper,
     playGameStart,
     playFanfare,

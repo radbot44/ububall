@@ -224,18 +224,19 @@
   // Ball heat by speed, as a share of full-launch speed (initial thresholds): a faint orange from
   // 75%, sparks and a muted red from 85%, red hot at 95%. Held past 99.5% for FIRE_TICKS of play it
   // catches fire, runs fully red and scorches the ice; dropping back below puts it out.
-  const HEAT = { orange: .75, red: .85, redHot: .95, fire: .995 };
-  const FIRE_TICKS = 140;
+  const HEAT = P.HEAT || { orange: .75, red: .85, redHot: .95, fire: .98, sustain: .70 };
+  const FIRE_TICKS = P.FIRE_TICKS || 40;
   const BURN_LIFE = 20; // Seconds of play before a burn mark fades out.
   const speedShare = b => Math.hypot(b.vx, b.vy) / P.MAX_SPEED;
   let fireTime = 0, sizzle = null;
   // A burning ball that scores sets that goal alight and keeps burning in the net until kickoff.
   let netFire = null;
-  const ballOnFire = () => Boolean(netFire?.lit) || fireTime >= FIRE_TICKS * P.DT;
+  const ballOnFire = () => Boolean(netFire?.lit) || Boolean(P.ballOnFire?.(bodies?.[6])) || fireTime >= FIRE_TICKS * P.DT;
   // A burning ball sizzles softly until it goes out.
   function quench() { sizzle?.stop(); sizzle = null; }
   // 0 is white, 1 orange, 2 red hot and 3 on fire. A Cannonball flare runs it orange.
   function ballHeat(b) {
+    if (b.team === -1 && P.ballOnFire?.(b)) return 3;
     if (ballOnFire()) return 3;
     const s = speedShare(b);
     const level = s < HEAT.red ? (s - HEAT.orange) / (HEAT.red - HEAT.orange) : 1 + (s - HEAT.red) / (HEAT.redHot - HEAT.red);
@@ -243,7 +244,8 @@
   }
   function sparkBall(ball, dt) {
     const speed = Math.hypot(ball.vx, ball.vy), share = speed / P.MAX_SPEED;
-    fireTime = share > HEAT.fire && !ball.stuckTo ? fireTime + dt : 0;
+    if (P.ballOnFire?.(ball)) fireTime = Math.max(fireTime, FIRE_TICKS * P.DT);
+    else fireTime = share > HEAT.fire && !ball.stuckTo ? fireTime + dt : 0;
     if (ballOnFire() && !sizzle) sizzle = gameAudio()?.playSizzle?.() || null;
     else if (!ballOnFire()) quench();
     const level = Math.max(ballFlare, (share - HEAT.red) / (HEAT.redHot - HEAT.red));
@@ -1192,9 +1194,29 @@
     }
     if (!summaryDialog.open) summaryDialog.showModal();
   }
+  function steamRing(x, y, r) {
+    if (reducedMotion.matches) return;
+    for (let i = 0; i < 24 && particles.length < 380; i++) {
+      const angle = (i / 24) * Math.PI * 2 + (Math.random() - .5) * 0.2;
+      const dist = r * (0.8 + Math.random() * 0.4);
+      const px = x + Math.cos(angle) * dist, py = y + Math.sin(angle) * dist;
+      const speed = 70 + Math.random() * 90;
+      const life = 0.35 + Math.random() * 0.25;
+      particles.push({
+        x: px, y: py, px, py,
+        vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+        team: -1, color: Math.random() < 0.6 ? '#ffffff' : '#d2f2ff',
+        life, duration: life, size: 2 + Math.random() * 3
+      });
+    }
+  }
   // A save from a ball the saver's own team was most responsible for is a sheepish "Save..." with no meter.
-  function creditSave(body, own) {
-    popup(body, own ? 'Save...' : 'Save!');
+  function creditSave(body, own, iron = false) {
+    popup(body, iron ? 'Big save!' : own ? 'Save...' : 'Save!');
+    if (iron) {
+      steamRing(body.x, body.y, body.radius);
+      gameAudio()?.playIronSave?.();
+    }
     if (own || online?.active || goalReplay || theater) return;
     for (const changed of ububallMatch.gainMeter(P, bodies, stats, body, ububallMatch.METER.save, classicMode())) dirtyMeters.add(changed);
   }
@@ -3148,16 +3170,17 @@
     dragMode = null;
     draw();
   };
-  function handleCollision(a, b, speed) {
+  function handleCollision(a, b, speed, impulse, plow = false, iron = false) {
     if (speed < 15) return;
     const distance = Math.hypot(b.x - a.x, b.y - a.y) || 1;
     const x = a.x + (b.x - a.x) * a.radius / distance, y = a.y + (b.y - a.y) * a.radius / distance;
     const tangent = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
     burst(x, y, a.team, Math.min(1, speed / 600), false, tangent);
     if (a.team !== b.team) burst(x, y, b.team, Math.min(1, speed / 600), false, tangent);
+    if (plow) flames(x, y, 40, (b.vx || a.vx) * 0.1, (b.vy || a.vy) * 0.1, 15);
     const isBall = a.team === -1 || b.team === -1;
     const now = clockNow();
-    contactMeter(a, b, speed);
+    if (!plow) contactMeter(a, b, speed);
     if (isBall) {
       const player = a.team !== -1 ? a : b;
       const norm = Math.min(1.0, Math.max(0.0, (speed - 25) / 550));
@@ -3228,7 +3251,13 @@
     }
     gameAudio()?.playSuper?.(key, phase);
   }
-  function handleShockwave(source, radius) {
+  function handleShockwave(source, radius, type = null) {
+    if (type === 'iron') {
+      burst(source.x, source.y, source.team, 0.7, false, 0, '#ffffff');
+      burst(source.x, source.y, source.team, 0.7, false, 0, '#d2f2ff');
+      shockwaves.push({ x: source.x, y: source.y, currentRadius: 8, maxRadius: radius, team: source.team, color: '#e3faff', life: 0.25, duration: 0.25 });
+      return;
+    }
     burst(source.x, source.y, source.team, 1, false, 0, '#ff7197');
     burst(source.x, source.y, source.team, 1, false, 0, '#9d467a');
     shockwaves.push({ x: source.x, y: source.y, currentRadius: 10, maxRadius: radius, team: source.team, color: '#ff7197', life: 0.35, duration: 0.35 });
@@ -3269,7 +3298,7 @@
       while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
         const tick = ububallMatch.playTick(P, bodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
         ububallMatch.lapseFouls(P, bodies, fouls); traceGuide(bodies);
-        for (const save of tick.saves) creditSave(bodies[save.index], save.own);
+        for (const save of tick.saves) creditSave(bodies[save.index], save.own, Boolean(save.iron));
         if (tick.struck) popup(bodies[6], 'Spin strike!');
         if (tick.stop) { impact(tick.stop); accumulator = 0; }
         recordTrails();

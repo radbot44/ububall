@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 1;
+  const VERSION = 2;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -16,6 +16,12 @@
   // Size trade-offs (tuning): as powers of the size multiplier, small ubus launch faster, curve and
   // re-steer more and strike spin harder; big ubus lose more speed off the boards.
   const SIZE = Object.freeze({ launch: -.28, agility: -.5, strike: -.5, boards: -.5 });
+  // Heat and Fire tuning: ignition threshold, duration ticks (~0.167 s), and sustain floor.
+  const HEAT = Object.freeze({ orange: .75, red: .85, redHot: .95, fire: .98, sustain: .70 });
+  const FIRE_TICKS = 40;
+  function ballOnFire(ball) {
+    return Boolean(ball && (ball.onFire || (ball.fireTicks && ball.fireTicks >= FIRE_TICKS)));
+  }
   // Daze (tuning): a check that knocks an ubu by more than `speed` px/s dazes it by the excess over
   // `scale` (a neutral full-power check: 15%), divided by its Stability and at most `hit` per check.
   // Dazes stack up to `max`. Up to `free` a daze has no effect; beyond it the next launch's speed is
@@ -95,7 +101,7 @@
       bodies.push({ ...spawn(team, i), vx: 0, vy: 0,
         radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 10, omega: 0, rotation: 0, team, slot: i });
     }
-    bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1 });
+    bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1, fireTicks: 0, onFire: false, strikerPower: 1, strikerTeam: -1 });
     return bodies;
   }
   // Counts boards and contacts resolved, so a collision pass that resolved nothing ends the passes.
@@ -106,6 +112,8 @@
     const velocity = b.vx * nx + b.vy * ny;
     if (velocity > 0) {
       b.spinStrike = 0; // A wall bounce spends a launching ubu's spin strike.
+      const isMeteor = b.team === -1 && ballOnFire(b) && (wallType === 'wall' || wallType === 'post');
+      const preSpeed = isMeteor ? Math.hypot(b.vx, b.vy) : 0;
       const rebound = 1 + (b.wallBounce ?? WALL_BOUNCE);
       b.vx -= rebound * velocity * nx; b.vy -= rebound * velocity * ny;
       const tx = -ny, ty = nx;
@@ -115,6 +123,13 @@
       b.vx += impulse * tx / b.mass; b.vy += impulse * ty / b.mass;
       b.omega += 2 * impulse / (b.mass * b.radius);
       b.omega *= 0.5; // Dampen spin on wall contact so balls don't curve right back into the wall
+      if (isMeteor && preSpeed > 0) {
+        const postSpeed = Math.hypot(b.vx, b.vy);
+        if (postSpeed > 0) {
+          const scale = preSpeed / postSpeed;
+          b.vx *= scale; b.vy *= scale;
+        }
+      }
       if (typeof onWall === 'function') onWall(b, velocity, wallType, nx, ny);
     }
   }
@@ -190,6 +205,22 @@
     }
     if (typeof onShockwave === 'function') onShockwave(source, radius);
   }
+  function triggerIronShockwave(source, bodies, onShockwave) {
+    const radius = SUPER.shockRadius * 0.5;
+    const force = 400;
+    for (const b of bodies) {
+      if (b === source || b.superActive === 'stalwart' || b.carded) continue;
+      const dx = b.x - source.x, dy = b.y - source.y, d2 = dx * dx + dy * dy;
+      if (d2 > 0 && d2 < radius * radius) {
+        const d = Math.sqrt(d2);
+        const impulse = (1 - d / radius) * force * (b.team === source.team ? SUPER.shockTeammate : 1);
+        const m = b.mass || 1;
+        b.vx += (dx / d) * impulse / m;
+        b.vy += (dy / d) * impulse / m;
+      }
+    }
+    if (typeof onShockwave === 'function') onShockwave(source, radius, 'iron');
+  }
   // Ends a ubu's super: Colossus shrinks back and a Sticky ball is let go.
   function endSuper(b, bodies) {
     if (b.colossusApplied) {
@@ -211,6 +242,7 @@
       const player = a.team !== -1 ? a : b;
       const ball = a.team === -1 ? a : b;
       if (ball.stuckTo === player) return;
+      if (ball.plowed?.has(player)) return;
     }
 
     const ra = (isBall && a.team !== -1) ? ballHitRadius(a) : a.radius;
@@ -274,6 +306,69 @@
         ball.omega = player.omega;
         if (typeof onCollide === 'function') onCollide(a, b, Math.max(0, -closing), 0);
         return;
+      }
+    }
+
+    if (isBall) {
+      const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
+      if (ballOnFire(ball) && player.superActive !== 'cannonball' && closing < 0) {
+        const pbx = ball.x - player.x, pby = ball.y - player.y;
+        const pbDist = Math.hypot(pbx, pby) || 1;
+        const pnx = pbx / pbDist, pny = pby / pbDist;
+        const ballSpeed = Math.hypot(ball.vx, ball.vy);
+        if (ballSpeed > 50) {
+          const bux = ball.vx / ballSpeed, buy = ball.vy / ballSpeed;
+          let delta = Math.max(0, -(bux * pnx + buy * pny));
+          if (pbDist > player.radius + ball.radius) delta = 0;
+
+          let R = 0;
+          if (player.superActive === 'stalwart') {
+            R = Infinity;
+          } else {
+            const normMass = (player.baseMass || player.mass) / 3;
+            const baseStab = player.guardBase ? player.guardBase.stability : (player.stability || 1);
+            const guardMult = player.guarding ? 1.5 : 1.0;
+            const colossusMult = player.superActive === 'colossus' ? 1.8 : 1.0;
+            R = normMass * baseStab * (1 + delta * delta) * guardMult * colossusMult;
+          }
+
+          const strikerPow = ball.strikerPower || 1;
+          const E = (ballSpeed / MAX_SPEED) * strikerPow * 2.8;
+
+          if (E > R) {
+            if (!ball.plowed) ball.plowed = new Set();
+            ball.plowed.add(player);
+
+            const rho = Math.min(1, Math.max(0, R / E));
+            const retain = 1 - 0.5 * rho;
+            ball.vx *= retain;
+            ball.vy *= retain;
+
+            const lostSpeed = ballSpeed * (1 - retain);
+            const normMass = (player.baseMass || player.mass) / 3;
+            const knock = Math.max(280, (lostSpeed * 0.9) / (normMass || 1));
+            player.vx += bux * knock;
+            player.vy += buy * knock;
+            daze(player, knock);
+
+            const overlap = radius - d;
+            if (overlap > 0) {
+              player.x -= pnx * overlap;
+              player.y -= pny * overlap;
+            }
+
+            if (typeof onCollide === 'function') onCollide(a, b, ballSpeed, knock, true, false);
+            return;
+          } else {
+            const opposing = ball.strikerTeam !== undefined && ball.strikerTeam >= 0 && ball.strikerTeam !== player.team;
+            if (player.guarding && opposing) {
+              ball.onFire = false;
+              ball.fireTicks = 0;
+              player.ironSave = true;
+              if (allBodies) triggerIronShockwave(player, allBodies, onShockwave);
+            }
+          }
+        }
       }
     }
 
@@ -363,7 +458,15 @@
       ball.vx += cannonImpulse * nx / ball.mass;
       ball.vy += cannonImpulse * ny / ball.mass;
       cannon.superActive = null;
+      ball.fireTicks = FIRE_TICKS;
+      ball.onFire = true;
+      ball.strikerPower = cannon.power || 1;
+      ball.strikerTeam = cannon.team;
       onSuper?.('cannonball', 'impact', cannon, ball);
+    } else if (isBall && closing < 0) {
+      const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
+      ball.strikerPower = player.power || 1;
+      ball.strikerTeam = player.team;
     }
 
     // The ball curves as the ubu that last struck it would: Curve shapes shots too.
@@ -379,7 +482,12 @@
       if (strikeBoost) ball.spinStruck = true; // Read and cleared by the caller, for a callout.
     }
 
-    if (typeof onCollide === 'function') onCollide(a, b, -closing, baseImpulse);
+    if (typeof onCollide === 'function') {
+      const isIron = Boolean(isBall && (a.ironSave || b.ironSave));
+      if (a.ironSave) a.ironSave = false;
+      if (b.ironSave) b.ironSave = false;
+      onCollide(a, b, -closing, baseImpulse, false, isIron);
+    }
   }
   let spareRadii = new Float64Array(7); // Broad-phase scratch, taken while a step uses it.
   function step(bodies, dt = DT, onCollide = null, onWall = null, onShockwave = null, onSuper = null) {
@@ -449,6 +557,35 @@
         const speed = Math.sqrt(speed2);
         const factor = Math.max(0, speed - deceleration) / speed;
         b.vx *= factor; b.vy *= factor;
+      }
+    }
+    if (ball) {
+      const ballSpeed = Math.hypot(ball.vx, ball.vy);
+      const ballShare = ballSpeed / MAX_SPEED;
+      if (ball.stuckTo) {
+        ball.fireTicks = 0;
+        ball.onFire = false;
+      } else if (ball.onFire) {
+        if (ballShare <= HEAT.sustain) {
+          ball.onFire = false;
+          ball.fireTicks = 0;
+        }
+      } else {
+        if (ballShare > HEAT.fire) {
+          ball.fireTicks = (ball.fireTicks || 0) + 1;
+          if (ball.fireTicks >= FIRE_TICKS) ball.onFire = true;
+        } else if (ballShare <= HEAT.sustain) {
+          ball.fireTicks = 0;
+        }
+      }
+      if (ball.plowed?.size) {
+        for (const p of ball.plowed) {
+          const reach = ballHitRadius(p) + ball.radius;
+          const dx = ball.x - p.x, dy = ball.y - p.y;
+          if (dx * dx + dy * dy > reach * reach || !ballOnFire(ball)) {
+            ball.plowed.delete(p);
+          }
+        }
       }
     }
     // Contact radii never grow during a step (Colossus only shrinks back), so radii taken once
@@ -567,6 +704,7 @@
       b.spinStrike = 0;
       b.openingShot = false;
       b.spinStruck = false;
+      b.ironSave = false;
       if (b.guardBase) Object.assign(b, b.guardBase);
       b.guardBase = null; b.guarding = false;
       if (!keepMotion) b.vx = b.vy = b.omega = 0;
@@ -574,7 +712,11 @@
       if (!keepMotion) endSuper(b, bodies);
     }
     const ball = bodies.find(b => b.team === -1);
-    if (ball && !keepMotion) { ball.stuckTo = null; ball.stickOffset = null; }
+    if (ball && !keepMotion) {
+      ball.stuckTo = null; ball.stickOffset = null;
+      ball.fireTicks = 0; ball.onFire = false; ball.plowed = null;
+      ball.strikerPower = 1; ball.strikerTeam = -1;
+    }
   }
   // Follows the ball ahead on a copy of the field (with `removed` taken off it) until it touches an
   // ubu, or the boards unless `boards` allows them (posts and net always count as clear), stops or
@@ -847,6 +989,6 @@
     }
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS };
   }
-  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, ballOnFire, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

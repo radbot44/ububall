@@ -974,3 +974,47 @@ test('knocked-out ubus cannot guard, and Colossus launches at a slower pace', ()
   P.launch(c, [{ angle: 0, power: 1 }]);
   assert.ok(Math.abs(c[0].vx - 720 / P.SUPER.colossusMass) < 1e-9);
 });
+test('flaming ball plows through vulnerable ubus and dazes them', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  const ball = b[6], defender = b[3];
+  Object.assign(defender, { x: 500, y: 300, vx: 0, vy: 0 });
+  Object.assign(ball, { x: 460, y: 300, vx: 800, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerPower: 1, strikerTeam: 0 });
+  let plowed = false;
+  P.step(b, 0, (bodyA, bodyB, speed, impulse, isPlow) => { if (isPlow) plowed = true; });
+  assert.equal(plowed, true);
+  assert.ok(ball.vx > 400, 'ball continues forward after plow-through');
+  assert.ok(defender.vx > 250, 'defender takes knockback along shot line');
+  assert.ok(defender.daze > 0, 'defender is dazed from plow-through');
+});
+test('Cannonball instantly sets ball on fire', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  b[0].superActive = 'cannonball';
+  Object.assign(b[0], { x: 457, y: 300, vx: 720, vy: 0 });
+  Object.assign(b[6], { x: 500, y: 300, vx: 0, vy: 0 });
+  P.step(b, 0);
+  assert.equal(P.ballOnFire(b[6]), true);
+  assert.ok(b[6].fireTicks >= P.FIRE_TICKS);
+});
+test('Meteor Bank preserves ball speed on board rebound while on fire', () => {
+  const b = P.kickoff();
+  const ball = b[6];
+  Object.assign(ball, { x: P.rink.right - 10, y: 300, vx: 600, vy: 300, onFire: true, fireTicks: P.FIRE_TICKS });
+  const preSpeed = Math.hypot(ball.vx, ball.vy);
+  P.step(b, 0);
+  const postSpeed = Math.hypot(ball.vx, ball.vy);
+  assert.ok(Math.abs(preSpeed - postSpeed) < 1e-4, 'Meteor Bank keeps 100% velocity');
+});
+test('Iron Save triggers when an opposing Guard blocks a flaming shot', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  const ball = b[6], defender = b[3];
+  defender.guarding = true;
+  Object.assign(defender, { x: 500, y: 300, vx: 0, vy: 0 });
+  // Incoming fiery shot with moderate speed so defender resistance R > E
+  Object.assign(ball, { x: 460, y: 300, vx: 520, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerPower: 0.8, strikerTeam: 0 });
+  let shockwaveTriggered = false;
+  P.step(b, 0, null, null, (src, rad, type) => {
+    if (type === 'iron') shockwaveTriggered = true;
+  });
+  assert.equal(P.ballOnFire(ball), false, 'fire is quenched on Iron Save');
+  assert.equal(shockwaveTriggered, true, 'minor shockwave is emitted');
+});
