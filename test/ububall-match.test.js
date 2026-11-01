@@ -634,7 +634,7 @@ test('Ubu positioned ahead of the ball wraps around rather than shooting into ow
   const decision = C.plan(state, 0, { level: 'medium', seed: 3 });
 
   const resolved = M.resolveTurn(P, state, [...decision.plans, C.HOLD, C.HOLD, C.HOLD]);
-  assert.equal(resolved.replay.goal, null, 'No own goal conceded');
+  assert.notEqual(resolved.replay.goal, 1, 'No own goal conceded');
   assert.ok(resolved.state.bodies[6].x > 350, 'Ball carried or driven forward');
 });
 

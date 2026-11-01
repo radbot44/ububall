@@ -232,7 +232,10 @@
       }
       fx.shockwave?.(source, radius);
     };
+    // A Cannonball spends itself in the hit, so the hit is known by its impact, not by the field after.
+    let cannon = false;
     const onSuper = (key, action, body, target) => {
+      if (key === 'cannonball' && action === 'impact') cannon = true;
       if (key === 'magnet' && action === 'pull' && body && ball) {
         const bi = bodies.indexOf(body);
         if (bi >= 0) {
@@ -255,7 +258,6 @@
     play.credit = credit(play.credit, ballBefore, ball, touched, before);
     for (const save of tickSaves) play.saved = { at: play.age, team: bodies[save.index].team };
     // A Cannonball hit always counts as a big shot.
-    const cannon = touched.size > 0 && [...touched].some(i => before[i].superActive === 'cannonball' && bodies[i].superActive !== 'cannonball');
     const speed = Math.hypot(ball.vx, ball.vy), big = cannon || bigShot(P, before, touched, ball), struck = Boolean(ball.spinStruck);
     const hasIron = tickSaves.some(s => s.iron);
     const stop = effects ? Math.max(hasIron ? 150 : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big)) : 0;

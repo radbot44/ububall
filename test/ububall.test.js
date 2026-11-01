@@ -2,6 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const P = require('../web/ububall-physics.js');
+const M = require('../shared/ububall-match.js');
 const normal = { mass: 127, size: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 };
 test('exponential stat curve preserves endpoints and spreads mid-range stats evenly', () => {
   assert.ok(Math.abs(P.multiplier(0) - 2 / 3) < 1e-12);
@@ -984,17 +985,36 @@ test('knocked-out ubus cannot guard, and Colossus launches at a slower pace', ()
   P.launch(c, [{ angle: 0, power: 1 }]);
   assert.ok(Math.abs(c[0].vx - 720 * P.SUPER.colossusLaunch) < 1e-9);
 });
-test('flaming ball plows through vulnerable ubus and dazes them', () => {
+// A fireball that beats an ubu's resistance hits as the heavier body and deflects it; it never
+// passes through it, and the hit adds no energy.
+function fireballInto(offset) {
   const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
   const ball = b[6], defender = b[3];
-  Object.assign(defender, { x: 500, y: 300, vx: 0, vy: 0 });
+  Object.assign(defender, { x: 560, y: 300 + offset, vx: 0, vy: 0 });
   Object.assign(ball, { x: 460, y: 300, vx: 800, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerPower: 1, strikerTeam: 0 });
-  let plowed = false;
-  P.step(b, 0, (bodyA, bodyB, speed, impulse, isPlow) => { if (isPlow) plowed = true; });
-  assert.equal(plowed, true);
-  assert.ok(ball.vx > 400, 'ball continues forward after plow-through');
-  assert.ok(defender.vx > 250, 'defender takes knockback along shot line');
-  assert.ok(defender.daze > 0, 'defender is dazed from plow-through');
+  let hit = null;
+  for (let t = 0; t < 120 && !hit; t++) {
+    const before = kineticEnergy(b);
+    P.step(b, P.DT, (bodyA, bodyB, speed, impulse, plow) => { hit = { plow, before }; });
+  }
+  assert.ok(hit?.plow, 'the hit is a winning fire hit');
+  assert.ok(kineticEnergy(b) <= hit.before * (1 + 1e-10), 'the hit adds no energy');
+  return { b, ball, defender };
+}
+test('a winning fireball shoves a head-on ubu ahead and follows behind it', () => {
+  const { b, ball, defender } = fireballInto(0);
+  assert.ok(ball.vx > 0, 'ball carries on forward');
+  assert.ok(defender.vx > ball.vx, 'defender leaves faster than the ball follows');
+  assert.ok(defender.daze > 0, 'defender is dazed');
+  assert.equal(ball.strikerTeam, 0, 'the overpowered ubu does not become the striker');
+  for (let t = 0; t < 120; t++) { P.step(b, P.DT); assert.ok(defender.x > ball.x, `ball stays behind the defender (tick ${t})`); }
+});
+test('a winning fireball glances off an ubu, keeping close to its line and its fire', () => {
+  const { b, ball, defender } = fireballInto(38);
+  assert.ok(Math.abs(Math.atan2(ball.vy, ball.vx)) < Math.PI / 6, 'ball keeps close to its line');
+  assert.ok(ball.vy < 0 && defender.vy > 0, 'ball and ubu part across the line of contact');
+  assert.ok(P.ballOnFire(ball), 'ball keeps its fire');
+  for (let t = 0; t < 120; t++) { P.step(b, P.DT); assert.ok(Math.hypot(ball.x - defender.x, ball.y - defender.y) > defender.radius, `ball stays outside the ubu (tick ${t})`); }
 });
 test('Cannonball instantly sets ball on fire', () => {
   const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
@@ -1027,6 +1047,28 @@ test('Iron Save triggers when an opposing Guard blocks a flaming shot', () => {
   });
   assert.equal(P.ballOnFire(ball), false, 'fire is quenched on Iron Save');
   assert.equal(shockwaveTriggered, true, 'minor shockwave is emitted');
+});
+
+test('flaming ball retains onFire when scoring into goal and callGoal awards FIREBALL!', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  b[0].superActive = 'cannonball';
+  Object.assign(b[0], { x: 457, y: 300, vx: 720, vy: 0 });
+  Object.assign(b[6], { x: 500, y: 300, vx: 0, vy: 0 });
+  // The goalie stands off the shot's line.
+  Object.assign(b[3], { y: 480 });
+  P.step(b, 0);
+  assert.equal(P.ballOnFire(b[6]), true);
+
+  let goal = null;
+  for (let t = 0; t < 120; t++) {
+    goal = P.step(b, P.DT);
+    if (goal !== null) break;
+  }
+  assert.equal(goal, 0, 'goal scored for team 0');
+  assert.equal(b[6].onFire, true, 'ball remains on fire in goal');
+  const play = M.newPlay(), tally = M.newTally();
+  const call = M.callGoal(b, play, tally, goal, false);
+  assert.equal(call.label, 'FIREBALL!', 'goal callout is FIREBALL!');
 });
 
 test('Stalwart performs short anchor slide with 0.5x launch and 3.0x friction and has camping immunity', () => {

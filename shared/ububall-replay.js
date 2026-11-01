@@ -4,7 +4,7 @@
   const node = typeof module === 'object' && module.exports;
   const P = node ? require('../web/ububall-physics.js') : root.ububallPhysics;
   const M = node ? require('./ububall-match.js') : root.ububallMatch;
-  const FORMAT = 3, MAX_BYTES = 8 << 20, MAX_TEXT = 64 << 20, MAX_TURNS = 5000;
+  const FORMAT = 4, MAX_BYTES = 8 << 20, MAX_TEXT = 64 << 20, MAX_TURNS = 5000;
   // Automatically saved matches kept on this device; the oldest unpinned go first.
   const KEEP = 25, MAX_TITLE = 80;
   // Body fields a snapshot keeps, in file order: everything a turn's simulation reads or writes.
@@ -83,7 +83,7 @@
   // A turn starting from `bodies` (before P.startTurn) with all six moves. `scores` and `fouls` are as the turn begins.
   function addTurn(replay, { turn, scores, fouls, bodies, plans }) {
     const entry = { turn, scores: [...scores], fouls: { crease: [...fouls.crease], corner: fouls.corner, cornerTurns: fouls.cornerTurns },
-      bodies: snapshot(bodies), plans: plans.map(plan), ticks: 0, goal: null, cards: [] };
+      bodies: snapshot(bodies), plans: plans.map(plan), ticks: 0, goal: null, cards: [], saves: [], stops: [] };
     replay.turns.push(entry);
     return entry;
   }
@@ -124,7 +124,7 @@
   }
   const index = v => v === null || int(v, 0, 5);
   function turn(t) {
-    exact(t, ['turn', 'scores', 'fouls', 'bodies', 'plans', 'ticks', 'goal', 'cards']);
+    exact(t, ['turn', 'scores', 'fouls', 'bodies', 'plans', 'ticks', 'goal', 'cards', 'saves', 'stops']);
     const f = t.fouls;
     exact(f, ['crease', 'corner', 'cornerTurns']);
     if (!int(t.turn, 1, 1e6) || !Array.isArray(t.scores) || t.scores.length !== 2 || !t.scores.every(s => int(s, 0, 4)) ||
@@ -139,8 +139,14 @@
       if (!int(g.team, 0, 1) || typeof g.label !== 'string' || g.label.length > 24 || !index(g.scorer) || !index(g.assist)) fail();
       goal = { team: g.team, label: g.label, scorer: g.scorer, assist: g.assist };
     }
+    // Saves and hit-stops as live play showed them, by tick (1 is the turn's first), in tick order.
+    const at = (list, i) => int(list[i].tick, i ? list[i - 1].tick : 1, t.ticks);
+    if (!Array.isArray(t.saves) || !t.saves.every((s, i) => (exact(s, ['tick', 'index', 'own', 'iron']), at(t.saves, i) && int(s.index, 0, 5) &&
+        typeof s.own === 'boolean' && typeof s.iron === 'boolean')) ||
+        !Array.isArray(t.stops) || !t.stops.every((s, i) => (exact(s, ['tick', 'ms']), at(t.stops, i) && int(s.ms, 1, 1000)))) fail();
     return { turn: t.turn, scores: [...t.scores], fouls: { crease: [...f.crease], corner: f.corner, cornerTurns: f.cornerTurns },
-      bodies: t.bodies.map(body), plans: t.plans.map(move), ticks: t.ticks, goal, cards: [...t.cards] };
+      bodies: t.bodies.map(body), plans: t.plans.map(move), ticks: t.ticks, goal, cards: [...t.cards],
+      saves: t.saves.map(s => ({ tick: s.tick, index: s.index, own: s.own, iron: s.iron })), stops: t.stops.map(s => ({ tick: s.tick, ms: s.ms })) };
   }
   // The replay in file order, or an error naming why it cannot be played.
   function canonical(r) {

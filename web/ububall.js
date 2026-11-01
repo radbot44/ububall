@@ -2090,9 +2090,28 @@
       ctx.restore();
     }
   }
-  function recordSegment(source, turnPlans, ticks = 0) {
+  function recordSegment(source, turnPlans, ticks = 0, saves = [], stops = []) {
     if (P.settled(source)) playSegments = [];
-    playSegments.push({ bodies: structuredClone(source), plans: structuredClone(turnPlans), ticks });
+    playSegments.push({ bodies: structuredClone(source), plans: structuredClone(turnPlans), ticks, saves, stops });
+  }
+  // A save as a replay keeps it: `tick` counts from 1 at the turn's first.
+  const saveEvent = (tick, s) => ({ tick, index: s.index, own: s.own, iron: Boolean(s.iron) });
+  // Notes the live tick's saves and hit-stop for the goal replay and the recording.
+  function noteEvents(tick, saves, stop) {
+    for (const turn of [playSegments.at(-1), recording?.turns.at(-1)]) {
+      if (!turn) continue;
+      for (const s of saves) turn.saves.push(saveEvent(tick, s));
+      if (stop) turn.stops.push({ tick, ms: stop });
+    }
+  }
+  // A replayed tick's saves, spin strike and hit-stop, shown as live play showed them.
+  function replayEvents(turn, tick, sim) {
+    const saves = turn.saves.filter(s => s.tick === tick), stop = turn.stops.find(s => s.tick === tick)?.ms, struck = sim[6].spinStruck;
+    sim[6].spinStruck = false;
+    if (saves.length || struck) syncReplay();
+    for (const s of saves) creditSave(replayView(sim[s.index]), s.own, s.iron);
+    if (struck) popup(bodies[6], 'Spin strike!');
+    if (stop) impact(stop);
   }
   // Replays re-simulate each recorded turn from its exact starting state on a display copy.
   // The goal replay and the replay viewer share these.
@@ -2100,9 +2119,9 @@
   const replayView = cb => toViewBody(cb, shown().sim, shown().seat);
   const syncReplay = () => syncViewBodies(shown().sim, shown().seat);
   const replayFx = {
-    hit: (a, b, speed) => { syncReplay(); handleCollision(replayView(a), replayView(b), speed); },
+    hit: (a, b, speed, impulse, plow = false, iron = false) => { syncReplay(); handleCollision(replayView(a), replayView(b), speed, impulse, plow, iron); },
     wall: (body, velocity, wallType, nx, ny) => { syncReplay(); handleWall(replayView(body), velocity, wallType, shown().seat ? -nx : nx, shown().seat ? -ny : ny); },
-    shock: (source, radius) => { syncReplay(); handleShockwave(replayView(source), radius); },
+    shock: (source, radius, type = null) => { syncReplay(); handleShockwave(replayView(source), radius, type); },
     super: (key, stage, body, target = null) => { syncReplay(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
   };
   function restartGoalReplay() {
@@ -2128,6 +2147,7 @@
   // The replay loops until the next kickoff (or, online, until the server moves on).
   function advanceGoalReplay(delta) {
     const r = goalReplay;
+    if (clockNow() < hitStopUntil) { draw(); return; }
     if (r.played >= r.total) {
       if (performance.now() >= r.doneAt) { if (summaryPending) openSummary(); restartGoalReplay(); }
       draw(); return;
@@ -2137,7 +2157,9 @@
       if (r.tick >= r.segments[r.index].ticks) nextReplaySegment();
       if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && fireTime >= FIRE_TICKS * P.DT && netFire) netFire.lit = true;
       r.tick++; r.played++; r.steps--;
+      replayEvents(r.segments[r.index], r.tick, r.sim);
       syncReplay(); recordTrails();
+      if (clockNow() < hitStopUntil) { r.steps = 0; break; }
     }
     if (r.played >= r.total) r.doneAt = performance.now() + ububallMatch.GOAL_REPLAY_HOLD;
     emitSkaterEffects(delta); draw();
@@ -2219,7 +2241,7 @@
     if (!recordingOnline) return;
     const r = s.replay, scores = s.game.scores.map((n, team) => team === r.goal ? n - 1 : n);
     const t = ububallReplay.addTurn(recording, { turn: r.turn, scores, fouls: onlinePlanFouls || ububallMatch.newFouls(), bodies: r.initialBodies, plans: r.plans });
-    Object.assign(t, { ticks: r.ticks, cards: [...(s.game.fouls?.cards || [])],
+    Object.assign(t, { ticks: r.ticks, cards: [...(s.game.fouls?.cards || [])], saves: r.saves.map(e => saveEvent(e.tick, e)), stops: structuredClone(r.stops),
       goal: r.goal === null ? null : { team: r.goal, label: r.label, scorer: r.label === 'OWN GOAL' ? null : r.scorer, assist: r.assist } });
   }
   function finishOnlineRecording(s) {
@@ -2268,9 +2290,9 @@
   function stepReplay(fx) {
     const th = theater, sim = th.sim;
     if (fx) P.step(sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super); else P.step(sim, P.DT);
-    if (sim[6].spinStruck) { sim[6].spinStruck = false; if (fx) { syncReplay(); popup(bodies[6], 'Spin strike!'); } }
     ububallMatch.lapseFouls(P, sim, th.fouls);
     th.tick++;
+    if (fx) replayEvents(th.replay.turns[th.index], th.tick, sim); else sim[6].spinStruck = false;
     traceGuide(sim);
   }
   function seekReplay(at) {
@@ -2296,6 +2318,8 @@
         }
       } finally { videoAudio = audio; videoClock = clock; }
     }
+    // A hit-stop met on the way (or left from play, on another clock) does not hold the new moment.
+    hitStopUntil = 0;
     fouls = viewFouls(th.fouls, th.seat);
     shownScores.splice(0, 2, ...scores); sync(); updateReplayBar(); draw();
   }
@@ -2332,11 +2356,12 @@
   const winningTurn = t => Boolean(t.goal) && t.scores[t.goal.team] + 1 >= 5;
   function advanceReplay(delta) {
     const th = theater;
-    if (!th.paused && clockNow() >= th.holdUntil) {
+    if (!th.paused && clockNow() >= th.holdUntil && clockNow() >= hitStopUntil) {
       th.steps += delta / P.DT * th.speed;
       for (let n = 0; th.steps >= 1 && n < 240; n++) {
         if (th.tick >= th.replay.turns[th.index].ticks) { if (!endReplayTurn()) break; continue; }
         stepReplay(true); th.steps--; syncReplay(); recordTrails();
+        if (clockNow() < hitStopUntil) { th.steps = 0; break; }
       }
       fouls = viewFouls(th.fouls, th.seat);
       emitSkaterEffects(delta);
@@ -3289,7 +3314,7 @@
   const liveFx = { collide: handleCollision, wall: handleWall, shockwave: handleShockwave, super: handleSuper };
   // Hit-stop: play freezes for the tick's earned ms (see ububallMatch.HIT_STOP), and the rink gives
   // a tiny shake.
-  function impact(ms) { hitStopUntil = performance.now() + ms; if (!reducedMotion.matches) shake = 1; }
+  function impact(ms) { hitStopUntil = clockNow() + ms; if (!reducedMotion.matches) shake = 1; }
   function frame(time) {
     const delta = lastTime ? Math.max(0, (time - lastTime) / 1000) : 0; lastTime = time;
     // An open foul explanation holds local play (and the demo) still while it is read.
@@ -3313,7 +3338,7 @@
     if (active && !theater?.paused) updateEffects(delta);
     if (theater) { if (active && !theater.exporting) advanceReplay(delta); }
     else if (phase === 'play' && active && !online?.active) {
-      if (performance.now() < hitStopUntil) accumulator = 0; else accumulator += delta;
+      if (clockNow() < hitStopUntil) accumulator = 0; else accumulator += delta;
       let steps = 0;
       while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
         const tick = ububallMatch.playTick(P, bodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
@@ -3321,6 +3346,7 @@
         for (const save of tick.saves) creditSave(bodies[save.index], save.own, Boolean(save.iron));
         if (tick.struck) popup(bodies[6], 'Spin strike!');
         if (tick.stop) { impact(tick.stop); accumulator = 0; }
+        noteEvents(Math.round(elapsed / P.DT), tick.saves, tick.stop);
         recordTrails();
         if (goal !== null || P.settled(bodies) || Math.round(elapsed / P.DT) >= ububallMatch.turnTicks(matchMode)) finishTurn(goal);
       }
@@ -3702,18 +3728,18 @@
       }
     });
   }
-  function replayCollision(a, b, speed) {
+  function replayCollision(a, b, speed, impulse, plow = false, iron = false) {
     syncViewBodies();
-    handleCollision(toViewBody(a), toViewBody(b), speed);
+    handleCollision(toViewBody(a), toViewBody(b), speed, impulse, plow, iron);
   }
   function replayWall(body, velocity, wallType, nx, ny) {
     syncViewBodies();
     const seat = online?.state?.seat;
     handleWall(toViewBody(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny);
   }
-  function replayShockwave(source, radius) {
+  function replayShockwave(source, radius, type = null) {
     syncViewBodies();
-    handleShockwave(toViewBody(source), radius);
+    handleShockwave(toViewBody(source), radius, type);
   }
   function replaySuper(key, phase, body, target = null) {
     syncViewBodies();
@@ -3742,7 +3768,7 @@
       ububallMatch.lapseFouls(P, replay.simBodies, simFouls);
       const now = replay.currentTick, saves = (replay.saves || []).filter(s => s.tick === now), struck = replay.struck?.includes(now);
       if (saves.length || struck) syncViewBodies();
-      for (const s of saves) popup(toViewBody(replay.simBodies[s.index]), s.own ? 'Save...' : 'Save!');
+      for (const s of saves) creditSave(toViewBody(replay.simBodies[s.index]), s.own, Boolean(s.iron));
       if (struck) popup(bodies[6], 'Spin strike!');
       // Hit-stop holds the replay clock back so the rest of the turn plays on after the pause.
       const stop = replay.stops?.find(s => s.tick === now)?.ms;
@@ -3888,7 +3914,7 @@
             }
           }
         });
-        recordSegment(onlineReplay.simBodies, onlineReplay.plans, s.replay.ticks);
+        recordSegment(onlineReplay.simBodies, onlineReplay.plans, s.replay.ticks, s.replay.saves.map(e => saveEvent(e.tick, e)), structuredClone(s.replay.stops));
         recordOnlineTurn(s); beginGuide(onlineReplay.simBodies, onlineReplay.plans, s.seat);
         P.startTurn(onlineReplay.simBodies, onlineReplay.plans, replaySuper);
         syncViewBodies();

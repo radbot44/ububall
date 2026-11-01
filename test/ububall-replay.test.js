@@ -52,6 +52,8 @@ function record(seed, mode, turns) {
     entry.ticks = ticks; ends.push(R.snapshot(live));
     if (result.replay.goal !== null) entry.goal = { team: result.replay.goal, label: result.replay.label, scorer: result.replay.scorer, assist: result.replay.assist };
     entry.cards = [...result.state.fouls.cards];
+    entry.saves = result.replay.saves.map(e => ({ tick: e.tick, index: e.index, own: e.own, iron: Boolean(e.iron) }));
+    entry.stops = result.replay.stops;
     state = result.state;
   }
   return { replay, ends };
@@ -77,7 +79,7 @@ test('a saved replay re-simulates every turn exactly, through the .ububall file'
 
 // The physics this version of the replay format plays back. A change to how turns play out must
 // bump P.VERSION, which makes older replays refuse to play; then record the new fingerprint here.
-const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8' };
+const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'eb2bbf254e147d0c' };
 test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
   const ends = [...replay.turns, ...standard.turns].map(replayTurn);
@@ -97,7 +99,8 @@ test('replays refuse other versions and any file a writer would not produce', as
   const forged = structuredClone(good);
   forged.turns[0].bodies[0].__proto__ = 1;
   await assert.rejects(R.read(await gzip(JSON.stringify(forged).replace('"x":', '"__proto__":{"polluted":1},"x":'))), /not a valid/);
-  for (const patch of [t => { t.bodies[0].x = 'a'; }, t => { t.bodies[6].team = 0; }, t => { t.plans[0].power = 2; }, t => { t.ticks = 0; }, t => { t.bodies[1].stuckTo = 9; }]) {
+  for (const patch of [t => { t.bodies[0].x = 'a'; }, t => { t.bodies[6].team = 0; }, t => { t.plans[0].power = 2; }, t => { t.ticks = 0; }, t => { t.bodies[1].stuckTo = 9; },
+    t => { t.stops = [{ tick: 0, ms: 60 }]; }, t => { t.stops = [{ tick: 2, ms: 60 }, { tick: 1, ms: 60 }]; }, t => { t.saves = [{ tick: 1, index: 0, own: false }]; }]) {
     const bad = structuredClone(good); patch(bad.turns[0]);
     await assert.rejects(R.read(await gzip(JSON.stringify(bad))), /not a valid/);
   }

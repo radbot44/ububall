@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 4;
+  const VERSION = 5;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -267,7 +267,6 @@
       const player = a.team !== -1 ? a : b;
       const ball = a.team === -1 ? a : b;
       if (ball.stuckTo === player) return;
-      if (ball.plowed?.has(player)) return;
     }
 
     const ra = (isBall && a.team !== -1) ? ballHitRadius(a) : a.radius;
@@ -285,7 +284,7 @@
     let closeSpin = 0, strikeBoost = 0;
     if (isBall) {
       const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
-      if (player.superActive && !ball.plowed?.has(player)) {
+      if (player.superActive) {
         if (['cannonball', 'sticky', 'magnet', 'ghost', 'stalwart', 'colossus'].includes(player.superActive)) {
           player.superHit = true;
         }
@@ -314,6 +313,13 @@
 
     const nx = d ? dx / d : 1, ny = d ? dy / d : 0;
     const closing = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+    // Restitution describes the rebound, not the entire stopping impulse. Bounciness acts only on
+    // the boards, so every body and ball contact shares one sub-elastic rebound.
+    const restitution = .88;
+    // A flaming ball that beats the ubu's resistance hits as the heavier body: in the collision it
+    // weighs the ubu's mass × E / R. It deflects the ubu rather than passing through, and the
+    // ordinary energy bound still holds.
+    let fireWin = null;
 
     if (isBall) {
       const player = a.team !== -1 ? a : b;
@@ -366,29 +372,7 @@
           const E = (ballSpeed / MAX_SPEED) * strikerPow * 2.8;
 
           if (E > R) {
-            if (!ball.plowed) ball.plowed = new Set();
-            ball.plowed.add(player);
-
-            const rho = Math.min(1, Math.max(0, R / E));
-            const retain = 1 - 0.5 * rho;
-            ball.vx *= retain;
-            ball.vy *= retain;
-
-            const lostSpeed = ballSpeed * (1 - retain);
-            const normMass = (player.baseMass || player.mass) / 3;
-            const knock = Math.max(280, (lostSpeed * 0.9) / (normMass || 1));
-            player.vx += bux * knock;
-            player.vy += buy * knock;
-            daze(player, knock);
-
-            const overlap = radius - d;
-            if (overlap > 0) {
-              player.x -= pnx * overlap;
-              player.y -= pny * overlap;
-            }
-
-            if (typeof onCollide === 'function') onCollide(a, b, ballSpeed, knock, true, false);
-            return;
+            fireWin = R / E;
           } else {
             const opposing = ball.strikerTeam !== undefined && ball.strikerTeam >= 0 && ball.strikerTeam !== player.team;
             if (player.guarding && opposing) {
@@ -402,8 +386,8 @@
       }
     }
 
-    const invA = 1 / a.mass;
-    const invB = 1 / b.mass;
+    const invA = fireWin !== null && a.team === -1 ? fireWin / b.mass : 1 / a.mass;
+    const invB = fireWin !== null && b.team === -1 ? fireWin / a.mass : 1 / b.mass;
     const inverse = invA + invB;
     if (inverse === 0) return;
 
@@ -424,9 +408,6 @@
       if (b.superActive === 'stalwart') onSuper?.('stalwart', 'impact', b, a);
     }
 
-    // Restitution describes the rebound, not the entire stopping impulse. Bounciness acts only on
-    // the boards, so every body and ball contact shares one sub-elastic rebound.
-    const restitution = .88;
     const baseImpulse = -(1 + restitution) * closing / inverse;
 
     let impulseA = baseImpulse, impulseB = baseImpulse;
@@ -479,19 +460,25 @@
       if (driveB >= driveA) daze(a, knockA);
       if (driveA >= driveB) daze(b, knockB);
     }
+    // The fireball's hit dazes the ubu it knocks aside.
+    if (fireWin !== null) {
+      if (a.team === -1) daze(b, Math.abs(impulseB * invB)); else daze(a, Math.abs(impulseA * invA));
+    }
 
-    const tx = -ny, ty = nx;
+    // Friction works at the bodies' real masses (a fireball's extra weight is for the hit only), so
+    // it can only take energy away.
+    const tx = -ny, ty = nx, frictionA = 1 / a.mass, frictionB = 1 / b.mass;
     const slip = (b.vx - a.vx) * tx + (b.vy - a.vy) * ty - a.omega * a.radius - b.omega * b.radius;
     const limit = Math.sqrt(a.grip * b.grip) * baseImpulse;
-    const tangent = Math.max(-limit, Math.min(limit, -slip / (3 * inverse)));
+    const tangent = Math.max(-limit, Math.min(limit, -slip / (3 * (frictionA + frictionB))));
 
-    if (invA > 0 && a.superActive !== 'stalwart') {
-      a.vx -= tangent * tx * invA; a.vy -= tangent * ty * invA;
-      a.omega -= 2 * tangent * invA / a.radius;
+    if (frictionA > 0 && a.superActive !== 'stalwart') {
+      a.vx -= tangent * tx * frictionA; a.vy -= tangent * ty * frictionA;
+      a.omega -= 2 * tangent * frictionA / a.radius;
     }
-    if (invB > 0 && b.superActive !== 'stalwart') {
-      b.vx += tangent * tx * invB; b.vy += tangent * ty * invB;
-      b.omega -= 2 * tangent * invB / b.radius;
+    if (frictionB > 0 && b.superActive !== 'stalwart') {
+      b.vx += tangent * tx * frictionB; b.vy += tangent * ty * frictionB;
+      b.omega -= 2 * tangent * frictionB / b.radius;
     }
 
     if (cannon) {
@@ -504,14 +491,15 @@
       ball.strikerPower = cannon.power || 1;
       ball.strikerTeam = cannon.team;
       onSuper?.('cannonball', 'impact', cannon, ball);
-    } else if (isBall && closing < 0) {
+    } else if (isBall && closing < 0 && fireWin === null) {
       const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
       ball.strikerPower = player.power || 1;
       ball.strikerTeam = player.team;
     }
 
-    // The ball curves as the ubu that last struck it would: Curve shapes shots too.
-    if (isBall) (a.team === -1 ? a : b).curveFactor = BALL_CURVE * ((a.team === -1 ? b : a).curveMult || 1);
+    // The ball curves as the ubu that last struck it would: Curve shapes shots too. An ubu the
+    // fireball overpowered did not strike it, so the shot keeps its striker and curve.
+    if (isBall && fireWin === null) (a.team === -1 ? a : b).curveFactor = BALL_CURVE * ((a.team === -1 ? b : a).curveMult || 1);
 
     if (closeSpin) {
       const ball = a.team === -1 ? a : b, away = ball === b ? 1 : -1;
@@ -527,7 +515,7 @@
       const isIron = Boolean(isBall && (a.ironSave || b.ironSave));
       if (a.ironSave) a.ironSave = false;
       if (b.ironSave) b.ironSave = false;
-      onCollide(a, b, -closing, baseImpulse, false, isIron, checker);
+      onCollide(a, b, -closing, baseImpulse, fireWin !== null, isIron, checker);
     }
   }
   let spareRadii = new Float64Array(7); // Broad-phase scratch, taken while a step uses it.
@@ -651,15 +639,6 @@
           ball.fireTicks = 0;
         }
       }
-      if (ball.plowed?.size) {
-        for (const p of ball.plowed) {
-          const reach = ballHitRadius(p) + ball.radius;
-          const dx = ball.x - p.x, dy = ball.y - p.y;
-          if (dx * dx + dy * dy > reach * reach || !ballOnFire(ball)) {
-            ball.plowed.delete(p);
-          }
-        }
-      }
     }
     // Contact radii never grow during a step (Colossus only shrinks back), so radii taken once
     // stay a safe bound for the broad phase.
@@ -781,7 +760,7 @@
     const ball = bodies.find(b => b.team === -1);
     if (ball && !keepMotion) {
       ball.stuckTo = null; ball.stickOffset = null;
-      ball.fireTicks = 0; ball.onFire = false; ball.plowed = null;
+      ball.fireTicks = 0; ball.onFire = false;
       ball.strikerPower = 1; ball.strikerTeam = -1;
     }
   }
