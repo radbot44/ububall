@@ -2094,7 +2094,7 @@
   }
   // Replays (shared/ububall-replay.js): every match is recorded turn by turn and saved on this
   // device when it ends or is left. The library keeps the latest ububallReplay.KEEP of these
-  // automatic saves that are not pinned; clips and imports stay until deleted. Each entry holds the
+  // automatic saves that are not pinned; imports stay until deleted. Each entry holds the
   // .ububall file and a summary for the list, with names and scores in rink order.
   const replayStore = (() => {
     let db = null;
@@ -2181,6 +2181,8 @@
     theater = { replay, file, seat, ...ububallReplay.timeline(replay), speed: Number($('replay-speed').value), paused: false, steps: 0, holdUntil: 0, index: 0, tick: 0, called: false };
     matchMode = replay.mode; document.body.classList.toggle('classic-match', classicMode()); showMode(matchMode);
     teamEntries = onlineOrder(replay.ubus.map(u => ({ model: ubu.decode(ubu.fromCode(u.dna)), dna: u.dna, equippedSuper: u.super === null ? null : P.SUPERS[u.super] })), seat);
+    // A replay without names calls its ubus by team and place.
+    if (replay.anonymous) teamEntries.forEach((entry, i) => { entry.model.parts = { ...entry.model.parts, fullName: anonymousName(i) }; });
     stats = teamEntries.map(entry => classicMode() ? normalStats() : { ...entry.model.stats });
     $('home-label').textContent = names[0]; $('opponent-label').textContent = names[1]; $('opponent-heading').textContent = `${names[1]}'s team`;
     bodies = kickoff(true); buildTeam(); phase = 'replay'; selected = 0; drag = null;
@@ -2197,10 +2199,7 @@
   }
   function loadReplayTurn(k, fx) {
     const th = theater, t = th.replay.turns[k];
-    th.index = k; th.tick = 0; th.called = false; th.sim = ububallReplay.restore(t.bodies);
-    // A play longer than its turn (in Pulse) can be clipped whole.
-    const [from, to] = ububallReplay.playRange(th.replay, k);
-    $('replay-clip-play').hidden = from === to;
+    th.index = k; th.tick = 0; th.called = th.crowned = false; th.sim = ububallReplay.restore(t.bodies);
     th.fouls = { ...ububallMatch.newFouls(), ...structuredClone(t.fouls) };
     scores = th.seat ? [...t.scores].reverse() : [...t.scores]; turn = t.turn;
     // The home cards show the moves this turn was played with.
@@ -2236,11 +2235,24 @@
       goalTab(team, t.goal.label, scorer?.name || null);
       return false;
     }
+    // The match's winning goal: once its call clears, the winner is called before the replay goes on.
+    if (winningTurn(t) && !th.crowned) {
+      th.crowned = true; th.steps = 0; th.holdUntil = clockNow() + WIN_SECONDS * 1000;
+      const team = th.seat ? 1 - t.goal.team : t.goal.team, name = [$('home-label').textContent, $('opponent-label').textContent][team];
+      // A comeback from 3 or more down, or a shutout, as at full time.
+      const deficit = Math.max(...th.replay.turns.map(r => r.scores[1 - t.goal.team] - r.scores[t.goal.team]));
+      celebrate(team, bodies[6], name === 'You' ? 'YOU WIN!' : `${name.toUpperCase().slice(0, 16)} WINS!`);
+      goalCall.name = [`${scores[0]}–${scores[1]}`, deficit >= 3 && 'Comeback from 3 down!', !scores[1 - team] && 'Shutout!'].filter(Boolean).join(' · ');
+      return false;
+    }
     if (th.index + 1 >= th.replay.turns.length) { th.paused = true; th.steps = 0; return false; }
     if (t.goal) clearEffects();
     loadReplayTurn(th.index + 1, true); syncReplay(); sync();
     return true;
   }
+  // The winner's call holds as long as a goal's call shows.
+  const WIN_SECONDS = GOAL_CALL_SECONDS + .6;
+  const winningTurn = t => Boolean(t.goal) && t.scores[t.goal.team] + 1 >= 5;
   function advanceReplay(delta) {
     const th = theater;
     if (!th.paused && clockNow() >= th.holdUntil) {
@@ -2293,25 +2305,15 @@
   $('replay-prev').onclick = () => { const th = theater; if (th) seekReplay(th.starts[Math.max(0, th.tick > 120 ? th.index : th.index - 1)]); };
   $('replay-next').onclick = () => { const th = theater; if (th && th.index + 1 < th.replay.turns.length) seekReplay(th.starts[th.index + 1]); };
   $('replay-speed').onchange = event => { if (theater) theater.speed = Number(event.target.value); };
-  $('replay-export').onclick = () => { if (theater) downloadReplay(theater.file, theater.replay.recorded, theater.replay.title); };
-  // Clips save the current turn, or the play around it, to the library as replays of their own.
-  async function saveClip(whole) {
-    const th = theater, r = th.replay, [from, to] = whole ? ububallReplay.playRange(r, th.index) : [th.index, th.index];
-    const names = th.seat ? [...r.names].reverse() : r.names, turns = from === to ? `Turn ${r.turns[from].turn}` : `Turns ${r.turns[from].turn}–${r.turns[to].turn}`;
-    const clip = ububallReplay.clip(r, from, to, `${turns} · ${names[0]} vs ${names[1]}`.slice(0, ububallReplay.MAX_TITLE).trim());
-    try {
-      await replayStore.add(libraryEntry(clip, await ububallReplay.write(clip), false));
-      bugTab(whole ? 'Play saved to Replays' : 'Turn saved to Replays');
-    } catch { bugTab('Clip not saved'); }
-  }
-  $('replay-clip-turn').onclick = () => { if (theater) saveClip(false); };
-  $('replay-clip-play').onclick = () => { if (theater) saveClip(true); };
   // Video export: the replay renders frame by frame on its own clock, faster than real time, into a
   // 1080p60 H.264 MP4 (web/mp4.js) at a constant 1.5 Mb/s: the flat field needs little, and the
-  // encoder's variable mode overshot low targets several times over. Its sounds are scheduled into an offline audio context at each
-  // frame's time, then encoded as AAC, or Opus where AAC is unavailable.
-  // The frame is laid out in 1920×1080 units (`field` among them) and scaled to `width`.
-  const VIDEO = Object.freeze({ width: 1920, height: 1080, fps: 60, bitrate: 1.5e6, keySeconds: 5, field: { x: 210, y: 150, width: 1500, height: 900 }, hold: 1 });
+  // encoder's variable mode overshot low targets several times over. Its sounds are scheduled into
+  // an offline audio context at each frame's time, then encoded as AAC, or Opus where AAC is unavailable.
+  // The frame is laid out in 1920×1080 units and scaled to `width`. The field fills the width, cropped
+  // to the boards, goals and Pulse strip (field y 42–564), under a scorebug band `bug` high: the
+  // field's empty margin above the boards runs beneath the band.
+  const VIDEO = Object.freeze({ width: 1920, height: 1080, fps: 60, bitrate: 1.5e6, keySeconds: 5, hold: 1, bug: 78,
+    field: { x: 0, y: 78 - 42 * 1.92, width: 1920, height: 1152 } });
   const yieldTask = () => new Promise(resolve => { const channel = new MessageChannel(); channel.port1.onmessage = () => resolve(); channel.port2.postMessage(0); });
   const ownBytes = d => d instanceof ArrayBuffer ? new Uint8Array(d.slice(0)) : new Uint8Array(d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength));
   function resetSoundThrottles() {
@@ -2331,36 +2333,35 @@
       playWallHit: o => A.playWallHit(into(o)), playGoalHit: (type, o) => A.playGoalHit(type, into(o)), playSuper: (key, phase, o) => A.playSuper(key, phase, into(o)),
       playSizzle: o => A.playSizzle(into(o)), playFoul: (kind, o) => A.playFoul(kind, into(o)) };
   }
-  // A frame: the scorebug over the field, its ubus and their badges, as the stadium shows them. The
-  // background and scorebug only change with a score or turn, so they are drawn once each and reused.
-  let videoBase = null;
+  // A frame: the field, its ubus and their badges, as the stadium shows them, under the scorebug. The
+  // scorebug only changes with a score or turn, so it is drawn once each and reused.
+  let videoBug = null;
   function composeFrame(v) {
-    const f = VIDEO.field, scale = f.width / 1000, names = [$('home-label').textContent, $('opponent-label').textContent];
+    const f = VIDEO.field, scale = f.width / 1000, k = VIDEO.width / 1920, names = [$('home-label').textContent, $('opponent-label').textContent];
     const key = `${names}|${scores}|${turn}`;
-    if (videoBase?.key !== key) {
-      const { home, away, text, surface, background } = themeColors, cx = 960, font = videoBase?.font || getComputedStyle(document.body).fontFamily;
-      const layer = videoBase?.layer || Object.assign(document.createElement('canvas'), { width: VIDEO.width, height: VIDEO.height }), b = layer.getContext('2d');
-      b.setTransform(VIDEO.width / 1920, 0, 0, VIDEO.width / 1920, 0, 0);
-      b.fillStyle = background; b.fillRect(0, 0, 1920, 1080);
-      b.beginPath(); b.roundRect(cx - 640, 36, 1280, 76, 16); b.fillStyle = surface; b.fill();
-      if (rinkLogo.complete && rinkLogo.naturalWidth) b.drawImage(rinkLogo, cx - 615, 52, 150, 150 * rinkLogo.naturalHeight / rinkLogo.naturalWidth);
+    if (videoBug?.key !== key) {
+      const { home, away, text, surface } = themeColors, cx = 960, font = videoBug?.font || getComputedStyle(document.body).fontFamily;
+      const layer = videoBug?.layer || Object.assign(document.createElement('canvas'), { width: VIDEO.width, height: Math.ceil(VIDEO.bug * k) }), b = layer.getContext('2d');
+      b.setTransform(k, 0, 0, k, 0, 0); b.clearRect(0, 0, 1920, VIDEO.bug);
+      b.beginPath(); b.roundRect(cx - 560, 9, 1120, 60, 14); b.fillStyle = surface; b.fill();
+      if (rinkLogo.complete && rinkLogo.naturalWidth) b.drawImage(rinkLogo, cx - 540, 22, 120, 120 * rinkLogo.naturalHeight / rinkLogo.naturalWidth);
       b.textBaseline = 'middle';
       for (const team of [0, 1]) {
-        const left = team ? cx : cx - 420;
-        b.fillStyle = team ? away : home; b.fillRect(left, 36, 420, 76);
+        const left = team ? cx : cx - 360;
+        b.fillStyle = team ? away : home; b.fillRect(left, 9, 360, 60);
         b.fillStyle = team ? '#ffffff' : '#1b1e26';
-        b.font = `800 30px ${font}`; b.textAlign = team ? 'right' : 'left';
-        b.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 400 : left + 20, 75);
-        b.font = `800 46px ${font}`; b.textAlign = 'center';
-        b.fillText(String(scores[team]), team ? left + 50 : left + 370, 76);
+        b.font = `800 25px ${font}`; b.textAlign = team ? 'right' : 'left';
+        b.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 344 : left + 16, 40);
+        b.font = `800 38px ${font}`; b.textAlign = 'center';
+        b.fillText(String(scores[team]), team ? left + 40 : left + 320, 40);
       }
-      b.fillStyle = text; b.textAlign = 'center'; b.font = `800 28px ${font}`;
-      b.fillText(`T${turn}  REPLAY`, cx + 530, 75);
-      videoBase = { key, font, layer };
+      b.fillStyle = text; b.textAlign = 'center'; b.font = `800 23px ${font}`;
+      b.fillText(`T${turn}  REPLAY`, cx + 460, 40);
+      videoBug = { key, font, layer };
     }
     v.setTransform(1, 0, 0, 1, 0, 0);
-    v.drawImage(videoBase.layer, 0, 0);
-    v.setTransform(VIDEO.width / 1920, 0, 0, VIDEO.width / 1920, 0, 0);
+    v.fillStyle = themeColors.background; v.fillRect(0, 0, VIDEO.width, VIDEO.height);
+    v.setTransform(k, 0, 0, k, 0, 0);
     v.drawImage(canvas, f.x, f.y, f.width, f.height);
     bodies.slice(0, 6).forEach((b, i) => {
       const sprite = skaters[i]?.firstChild;
@@ -2374,6 +2375,8 @@
       v.restore();
     });
     v.drawImage(badgeCanvas, f.x, f.y, f.width, f.height);
+    v.setTransform(1, 0, 0, 1, 0, 0);
+    v.drawImage(videoBug.layer, 0, 0);
   }
   async function encodeAudio(buffer) {
     if (!('AudioEncoder' in window)) return null;
@@ -2406,11 +2409,10 @@
     return null;
   }
   let videoCancelled = false;
-  async function exportVideo() {
-    const th = theater, dialog = $('video-dialog'), status = $('video-status'), progress = $('video-progress'), close = $('video-cancel');
-    if (!th || th.exporting) return;
-    videoCancelled = false; progress.value = 0; close.textContent = 'Cancel'; status.textContent = 'Preparing…';
-    dialog.showModal();
+  // Renders `slice` (see exportSlice) in the export dialog, which is already open.
+  async function exportVideo(slice) {
+    const th = theater, dialog = $('export-dialog'), status = $('export-status'), progress = $('export-progress'), close = $('export-close');
+    videoCancelled = false; progress.value = 0; progress.hidden = false; status.textContent = 'Preparing…';
     let config = null;
     search: for (const codec of ['avc1.64002A', 'avc1.4D402A', 'avc1.42E02A']) {
       for (const bitrateMode of ['constant', 'variable']) {
@@ -2418,12 +2420,16 @@
         if ((await VideoEncoder.isConfigSupported(option).catch(() => ({}))).supported) { config = option; break search; }
       }
     }
-    if (!config) { status.textContent = 'This browser cannot encode MP4 video.'; close.textContent = 'Close'; return; }
-    // Every turn at full speed, each goal's hold, then a moment on the final field.
-    const seconds = th.total * P.DT + th.replay.turns.filter(t => t.goal).length * 2.5 + VIDEO.hold;
+    if (!config) { status.textContent = 'This browser cannot encode MP4 video.'; progress.hidden = true; close.textContent = 'Close'; return; }
+    const resume = { at: th.starts[th.index] + th.tick, paused: th.paused, speed: th.speed, portrait: isPortrait },
+      whole = { replay: th.replay, starts: th.starts, total: th.total };
+    // The viewer plays just the slice while it renders.
+    Object.assign(th, { replay: slice.replay, ...ububallReplay.timeline(slice.replay) });
+    const restoreNames = slice.hidden ? showAnonymous() : null;
+    // Every turn at full speed, each goal's hold and the winner's, then a moment on the final field.
+    const seconds = th.total * P.DT + th.replay.turns.filter(t => t.goal).length * 2.5 + (winningTurn(th.replay.turns.at(-1)) ? WIN_SECONDS : 0) + VIDEO.hold;
     const frames = Math.ceil(seconds * VIDEO.fps), rate = 48000;
     const offline = new OfflineAudioContext(2, Math.ceil(frames / VIDEO.fps * rate), rate);
-    const resume = { at: th.starts[th.index] + th.tick, paused: th.paused, speed: th.speed, portrait: isPortrait };
     const out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
     const v = out.getContext('2d'), samples = [];
     let description = null, failure = null, blob = null;
@@ -2443,7 +2449,7 @@
       const pump = () => { if (waiting !== null && (videoDone || videoClock / 1000 >= waiting + 1)) { waiting = null; offline.resume(); } };
       for (let mark = 1; mark < offline.length / rate; mark++) offline.suspend(mark).then(() => { waiting = mark; pump(); });
       const rendering = offline.startRendering();
-      videoBase = null; gameAudio()?.stop(); resetSoundThrottles(); seekReplay(0);
+      videoBug = null; gameAudio()?.stop(); resetSoundThrottles(); seekReplay(0);
       for (let f = 0; f < frames && !videoCancelled && !failure; f++) {
         if (f) { videoClock += 1000 / VIDEO.fps; updateEffects(1 / VIDEO.fps); advanceReplay(1 / VIDEO.fps); }
         composeFrame(v);
@@ -2466,7 +2472,7 @@
       status.textContent = `The video could not be made: ${error.message}`;
     } finally {
       if (encoder.state !== 'closed') encoder.close();
-      th.exporting = false; th.speed = resume.speed; isPortrait = resume.portrait;
+      Object.assign(th, whole, { exporting: false, speed: resume.speed }); isPortrait = resume.portrait; restoreNames?.();
       videoClock = null; videoAudio = null; videoField = null;
       resetSoundThrottles(); seekReplay(resume.at); th.paused = resume.paused; layoutDirty = true; draw();
     }
@@ -2474,16 +2480,78 @@
     if (videoCancelled) { dialog.close(); return; }
     if (!blob) return;
     progress.value = 1;
-    const name = replayFileName(th.replay.recorded, th.replay.title) + '.mp4';
+    const name = replayFileName(slice.replay.recorded, slice.replay.title) + '.mp4';
     const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
     link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
     status.textContent = `${status.textContent.startsWith('This browser') ? status.textContent + ' ' : ''}Saved ${name} (${(blob.size / 1e6).toFixed(1)} MB).`;
   }
-  $('replay-video').hidden = !('VideoEncoder' in window && 'OfflineAudioContext' in window);
-  $('replay-video').onclick = exportVideo;
-  // Closing while it renders cancels the export.
-  $('video-cancel').onclick = () => { videoCancelled = true; if (!theater?.exporting) $('video-dialog').close(); };
-  $('video-dialog').addEventListener('cancel', event => { if (theater?.exporting) { event.preventDefault(); videoCancelled = true; } });
+  // Export: the whole replay, the round around the current turn (from its kickoff through its goal;
+  // see ububallReplay.roundRange) or the turn alone, as an MP4 video or a .ububall file. With names
+  // hidden, the teams become Saffron and Amethyst and the ubus lose their names (ububallReplay.anonymize).
+  let exportKind = 'video';
+  const anonymousName = i => `${ububallReplay.ANONYMOUS[i < 3 ? 0 : 1]} ${i % 3 + 1}`;
+  function exportRange(range) {
+    const th = theater, last = th.replay.turns.length - 1;
+    return range === 'match' ? [0, last] : range === 'round' ? ububallReplay.roundRange(th.replay, th.index) : [th.index, th.index];
+  }
+  // Rounds are numbered by the goals before them.
+  function rangeLabel(r, range, from, to) {
+    const turns = from === to ? `Turn ${r.turns[from].turn}` : `Turns ${r.turns[from].turn}–${r.turns[to].turn}`;
+    return range === 'round' ? `Round ${r.turns[from].scores[0] + r.turns[from].scores[1] + 1} · ${turns}` : turns;
+  }
+  // The replay to export, with its stored file when that is exactly it; a part becomes a clip named after its turns.
+  function exportSlice(range, hidden) {
+    const th = theater, r = th.replay, [from, to] = exportRange(range), whole = from === 0 && to === r.turns.length - 1;
+    hidden &&= !r.anonymous;
+    const names = hidden ? ububallReplay.ANONYMOUS : th.seat ? [...r.names].reverse() : r.names;
+    const title = whole ? (hidden ? null : r.title) : `${rangeLabel(r, range, from, to)} · ${names[0]} vs ${names[1]}`.slice(0, ububallReplay.MAX_TITLE).trim();
+    const replay = whole ? r : ububallReplay.clip(r, from, to, title);
+    return { replay: hidden ? ububallReplay.anonymize(replay, title) : replay, file: whole && !hidden ? th.file : null, hidden };
+  }
+  // While a video renders with names hidden, the scorebug and calls use the stand-in names.
+  function showAnonymous() {
+    const labels = [$('home-label').textContent, $('opponent-label').textContent], names = bodies.map(b => b.name);
+    [$('home-label').textContent, $('opponent-label').textContent] = ububallReplay.ANONYMOUS;
+    bodies.slice(0, 6).forEach((b, i) => { b.name = anonymousName(i); });
+    return () => {
+      [$('home-label').textContent, $('opponent-label').textContent] = labels;
+      bodies.forEach((b, i) => { b.name = names[i]; });
+    };
+  }
+  function openExport(kind) {
+    const th = theater;
+    if (!th || th.exporting) return;
+    exportKind = kind;
+    $('export-title').textContent = kind === 'video' ? 'Export video' : 'Export replay';
+    for (const button of $('export-options').querySelectorAll('button')) {
+      const [from, to] = exportRange(button.dataset.range);
+      button.querySelector('small').textContent = `${rangeLabel(th.replay, button.dataset.range, from, to)} · ${replayClock(th.replay.turns.slice(from, to + 1).reduce((n, t) => n + t.ticks, 0))}`;
+    }
+    // A replay already without names has none to hide.
+    $('export-private').closest('label').hidden = th.replay.anonymous;
+    try { $('export-private').checked = localStorage.getItem('ububall-export-private') === 'on'; } catch {}
+    $('export-options').hidden = false; $('export-progress').hidden = true; $('export-status').textContent = ''; $('export-close').textContent = 'Cancel';
+    $('export-dialog').showModal();
+  }
+  $('export-private').onchange = event => { try { localStorage.setItem('ububall-export-private', event.target.checked ? 'on' : 'off'); } catch {} };
+  $('export-options').onclick = async event => {
+    const range = event.target.closest('button')?.dataset.range;
+    if (!range || !theater) return;
+    $('export-options').hidden = true;
+    const slice = exportSlice(range, $('export-private').checked);
+    if (exportKind === 'video') { await exportVideo(slice); return; }
+    try {
+      downloadReplay(slice.file || await ububallReplay.write(slice.replay), slice.replay.recorded, slice.replay.title);
+      $('export-status').textContent = `Saved ${replayFileName(slice.replay.recorded, slice.replay.title)}.ububall.`;
+    } catch (error) { $('export-status').textContent = error.message; }
+    $('export-close').textContent = 'Close';
+  };
+  $('replay-export-video').hidden = !('VideoEncoder' in window && 'OfflineAudioContext' in window);
+  $('replay-export-video').onclick = () => openExport('video');
+  $('replay-export-file').onclick = () => openExport('replay');
+  // Closing while a video renders cancels it.
+  $('export-close').onclick = () => { if (theater?.exporting) videoCancelled = true; else $('export-dialog').close(); };
+  $('export-dialog').addEventListener('cancel', event => { if (theater?.exporting) { event.preventDefault(); videoCancelled = true; } });
   $('replay-exit').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
   // Space plays and pauses and the arrows step by turn, unless a control has focus.
   document.addEventListener('keydown', event => {
@@ -2537,7 +2605,7 @@
   // The library: pinned first, then newest first. Replays from another physics or file version can
   // never play again (see P.VERSION), so they are removed.
   async function openReplays() {
-    $('replays-note').textContent = `Your latest ${ububallReplay.KEEP} matches are kept automatically. Pinned replays, clips and imports stay until you delete them.`;
+    $('replays-note').textContent = `Your latest ${ububallReplay.KEEP} matches are kept automatically. Pinned and imported replays stay until you delete them.`;
     deletedReplays.length = 0; $('replays-status').textContent = '';
     if (!$('replays-dialog').open) $('replays-dialog').showModal();
     await listReplays();

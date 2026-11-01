@@ -32,9 +32,13 @@ function record(seed, mode, turns) {
     }
     const moves = [0, 1].flatMap(team => C.plan(state, team, { level: 'easy', seed: seed + n }).plans);
     moves.forEach((m, i) => { if (i % 3 === 0 && state.bodies[i].meter >= 100 && !state.bodies[i].stunned) m.superArm = true; });
-    const entry = R.addTurn(replay, { turn: state.turn, scores: state.scores, fouls: state.fouls || M.newFouls(), bodies: state.bodies, plans: moves });
+    // As resolveTurn does, arming comes from the moves alone.
+    state.bodies.forEach(b => { if (b.team >= 0) b.superArm = false; });
+    // The moves exactly as resolveTurn plays them (it normalises angles again, which can move a launch by a bit).
+    const plans = [...M.validatePlans(moves.slice(0, 3)), ...M.validatePlans(moves.slice(3))];
+    const entry = R.addTurn(replay, { turn: state.turn, scores: state.scores, fouls: state.fouls || M.newFouls(), bodies: state.bodies, plans });
     const live = structuredClone(state.bodies), play = M.newPlay();
-    P.startTurn(live, moves);
+    P.startTurn(live, plans);
     let ticks = 0;
     for (let tick = 1; tick <= M.turnTicks(mode); tick++) {
       ticks = tick;
@@ -70,7 +74,7 @@ test('a saved replay re-simulates every turn exactly, through the .ububall file'
 
 // The physics this version of the replay format plays back. A change to how turns play out must
 // bump P.VERSION, which makes older replays refuse to play; then record the new fingerprint here.
-const FINGERPRINTS = { 1: '76e12a09412e2b11' };
+const FINGERPRINTS = { 1: '25fc28df601f6fcd' };
 test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
   const ends = [...replay.turns, ...standard.turns].map(replayTurn);
@@ -99,19 +103,38 @@ test('replays refuse other versions and any file a writer would not produce', as
   assert.deepEqual(await R.read(await gzip(JSON.stringify(good))), good);
 });
 
-test('clips keep a turn or a play as a titled replay of its own', async () => {
-  const standard = record(5, 'standard', 6).replay;
-  for (let k = 0; k < standard.turns.length; k++) assert.deepEqual(R.playRange(standard, k), [k, k]);
-  const { replay, ends } = record(9, 'pulse', 60);
-  const k = replay.turns.findIndex((t, i) => i > 0 && !P.settled(t.bodies) && !replay.turns[i - 1].goal);
-  const [from, to] = R.playRange(replay, k);
-  assert.ok(from < k && (from === 0 || P.settled(replay.turns[from].bodies) || replay.turns[from - 1].goal));
-  assert.ok(to === replay.turns.length - 1 || replay.turns[to].goal || P.settled(replay.turns[to + 1].bodies));
-  const back = await R.read(await R.write(R.clip({ ...replay, final: { scores: [5, 0], winner: 0 } }, from, to, 'Big save')));
-  assert.equal(back.clip, true); assert.equal(back.title, 'Big save'); assert.equal(back.final, null);
-  back.turns.forEach((t, i) => assert.equal(JSON.stringify(replayTurn(t)), JSON.stringify(ends[from + i])));
-  const good = R.canonical({ type: 'ububall-replay', format: R.FORMAT, physics: P.VERSION, ...back });
-  for (const patch of [{ final: { scores: [1, 0], winner: 0 } }, { title: ' padded' }, { title: '' }, { title: 'x'.repeat(R.MAX_TITLE + 1) }, { clip: 1 }]) {
+test('clips keep a turn or a round as a titled replay of its own', async () => {
+  for (const mode of ['standard', 'pulse']) {
+    const { replay, ends } = record(1, mode, mode === 'pulse' ? 120 : 30);
+    const goals = replay.turns.flatMap((t, i) => t.goal ? [i] : []);
+    assert.ok(goals.length >= 2, `${mode} has goals to test rounds against`);
+    // A round runs from the turn after a goal through the next goal, whatever the mode.
+    const k = goals[0] + 1 + Math.floor((goals[1] - goals[0] - 1) / 2);
+    assert.deepEqual(R.roundRange(replay, k), [goals[0] + 1, goals[1]]);
+    assert.deepEqual(R.roundRange(replay, 0), [0, goals[0]]);
+    const back = await R.read(await R.write(R.clip({ ...replay, final: { scores: [5, 0], winner: 0 } }, goals[0] + 1, goals[1], 'Round 2')));
+    assert.equal(back.clip, true); assert.equal(back.title, 'Round 2'); assert.equal(back.final, null);
+    back.turns.forEach((t, i) => assert.equal(JSON.stringify(replayTurn(t)), JSON.stringify(ends[goals[0] + 1 + i])));
+  }
+  const { replay } = record(9, 'standard', 4);
+  const good = R.canonical({ type: 'ububall-replay', format: R.FORMAT, physics: P.VERSION, ...R.clip(replay, 0, 1, 'Two turns') });
+  for (const patch of [{ final: { scores: [1, 0], winner: 0 } }, { title: ' padded' }, { title: '' }, { title: 'x'.repeat(R.MAX_TITLE + 1) }, { clip: 1 }, { anonymous: true }]) {
     assert.throws(() => R.canonical({ ...good, ...patch }), /not a valid/);
   }
+});
+
+test('privacy keeps the play, looks and voices but drops every name', async () => {
+  const { replay, ends } = record(4, 'standard', 6);
+  const hidden = await R.read(await R.write(R.anonymize({ ...replay, seat: 1, title: 'Me vs Bob' })));
+  assert.equal(hidden.anonymous, true); assert.equal(hidden.title, null);
+  assert.deepEqual(hidden.names, ['Amethyst', 'Saffron'], 'Saffron is the team shown on the left');
+  hidden.ubus.forEach((u, i) => {
+    const before = U.fromCode(replay.ubus[i].dna), after = U.fromCode(u.dna);
+    assert.deepEqual([...after.subarray(0, 8)], [0, 0, 0, 0, 0, 0, 0, 0]);
+    assert.deepEqual(after.subarray(8), before.subarray(8));
+    const a = U.decode(before), b = U.decode(after);
+    assert.notEqual(b.parts.fullName, a.parts.fullName);
+    assert.deepEqual([b.attributes, b.voice, b.stats], [a.attributes, a.voice, a.stats]);
+  });
+  hidden.turns.forEach((t, i) => assert.equal(JSON.stringify(replayTurn(t)), JSON.stringify(ends[i])));
 });

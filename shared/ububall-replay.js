@@ -4,7 +4,7 @@
   const node = typeof module === 'object' && module.exports;
   const P = node ? require('../web/ububall-physics.js') : root.ububallPhysics;
   const M = node ? require('./ububall-match.js') : root.ububallMatch;
-  const FORMAT = 2, MAX_BYTES = 8 << 20, MAX_TEXT = 64 << 20, MAX_TURNS = 5000;
+  const FORMAT = 3, MAX_BYTES = 8 << 20, MAX_TEXT = 64 << 20, MAX_TURNS = 5000;
   // Automatically saved matches kept on this device; the oldest unpinned go first.
   const KEEP = 25, MAX_TITLE = 80;
   // Body fields a snapshot keeps, in file order: everything a turn's simulation reads or writes.
@@ -50,21 +50,33 @@
   // A recording in progress. `seat` is the team shown on the left; `names` and `ubus` (DNA code and
   // equipped super id) are in rink order, the left team first when seat is 0.
   function create({ mode, seat = 0, names, ubus }) {
-    return { mode, seat, title: null, clip: false, names: [...names], ubus: ubus.map(u => ({ dna: u.dna, super: u.super })),
+    return { mode, seat, title: null, clip: false, anonymous: false, names: [...names], ubus: ubus.map(u => ({ dna: u.dna, super: u.super })),
       recorded: Date.now(), final: null, turns: [] };
   }
   // A clip of turns `from` to `to` (inclusive): a replay of its own, starting from the first one's field.
   function clip(replay, from, to, title = null) {
     return { ...replay, title, clip: true, final: null, turns: replay.turns.slice(from, to + 1) };
   }
-  // The play around turn `k`: the unbroken motion from the field last at rest (or a kickoff) to a goal
-  // or the field resting again. Every Ububall turn but Pulse's starts at rest, so it is one turn there.
-  function playRange(replay, k) {
-    const turns = replay.turns, rests = i => P.settled(turns[i].bodies);
+  // The round around turn `k`: every turn from the kickoff before it (the replay's start, or the
+  // turn after a goal) through the turn that scored, or the replay's end.
+  function roundRange(replay, k) {
+    const turns = replay.turns;
     let from = k, to = k;
-    while (from > 0 && !rests(from) && !turns[from - 1].goal) from--;
-    while (to + 1 < turns.length && !turns[to].goal && !rests(to + 1)) to++;
+    while (from > 0 && !turns[from - 1].goal) from--;
+    while (to + 1 < turns.length && !turns[to].goal) to++;
     return [from, to];
+  }
+  // A copy without its players' names: the teams become Saffron (shown on the left) and Amethyst, and
+  // each ubu's 64-bit name seed is zeroed, so its name is gone while its looks, voice and stats stay.
+  // Play is unchanged: turns carry their own fields.
+  const ANONYMOUS = ['Saffron', 'Amethyst'];
+  function anonymize(replay, title = null) {
+    const unnamed = dna => {
+      const bytes = Uint8Array.from(atob(dna.replace(/-/g, '+').replace(/_/g, '/') + '='), c => c.charCodeAt(0)).fill(0, 0, 8);
+      return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    };
+    return { ...replay, title, anonymous: true, names: replay.seat ? [...ANONYMOUS].reverse() : [...ANONYMOUS],
+      ubus: replay.ubus.map(u => ({ dna: unnamed(u.dna), super: u.super })) };
   }
   // A turn starting from `bodies` (before P.startTurn) with all six moves. `scores` and `fouls` are as the turn begins.
   function addTurn(replay, { turn, scores, fouls, bodies, plans }) {
@@ -135,8 +147,8 @@
       fail(r.format > FORMAT || r.physics > P.VERSION ? 'This replay is from a newer version of ububall.'
         : 'This replay is from an older version of ububall and can no longer be played.');
     }
-    exact(r, ['type', 'format', 'physics', 'mode', 'seat', 'title', 'clip', 'names', 'ubus', 'recorded', 'final', 'turns']);
-    if (!M.MODES.includes(r.mode) || !int(r.seat, 0, 1) || !int(r.recorded, 0, 8.64e15) || typeof r.clip !== 'boolean' ||
+    exact(r, ['type', 'format', 'physics', 'mode', 'seat', 'title', 'clip', 'anonymous', 'names', 'ubus', 'recorded', 'final', 'turns']);
+    if (!M.MODES.includes(r.mode) || !int(r.seat, 0, 1) || !int(r.recorded, 0, 8.64e15) || typeof r.clip !== 'boolean' || typeof r.anonymous !== 'boolean' ||
         !(r.title === null || (typeof r.title === 'string' && r.title.length <= MAX_TITLE && r.title.trim() === r.title && r.title)) ||
         !Array.isArray(r.names) || r.names.length !== 2 || !r.names.every(n => typeof n === 'string' && n.length <= 64) ||
         !Array.isArray(r.ubus) || r.ubus.length !== 6 || !Array.isArray(r.turns) || !r.turns.length || r.turns.length > MAX_TURNS) fail();
@@ -144,7 +156,7 @@
     const ubus = r.ubus.map(u => {
       exact(u, ['dna', 'super']);
       // Canonical unpadded base64url for 128 bytes: the last character ends in two zero padding bits.
-      if (typeof u.dna !== 'string' || !/^[A-Za-z0-9_-]{170}[AEIMQUYcgkosw048]$/.test(u.dna) || (classic ? u.super !== null : !int(u.super, 0, P.SUPERS.length - 1))) fail();
+      if (typeof u.dna !== 'string' || !/^[A-Za-z0-9_-]{170}[AEIMQUYcgkosw048]$/.test(u.dna) || (r.anonymous && !/^A{10}[A-P]/.test(u.dna)) || (classic ? u.super !== null : !int(u.super, 0, P.SUPERS.length - 1))) fail();
       return { dna: u.dna, super: u.super };
     });
     let final = null;
@@ -154,7 +166,7 @@
       if (!Array.isArray(r.final.scores) || r.final.scores.length !== 2 || !r.final.scores.every(s => int(s, 0, 5)) || !int(r.final.winner, 0, 1)) fail();
       final = { scores: [...r.final.scores], winner: r.final.winner };
     }
-    return { type: 'ububall-replay', format: FORMAT, physics: P.VERSION, mode: r.mode, seat: r.seat, title: r.title, clip: r.clip, names: [...r.names], ubus,
+    return { type: 'ububall-replay', format: FORMAT, physics: P.VERSION, mode: r.mode, seat: r.seat, title: r.title, clip: r.clip, anonymous: r.anonymous, names: [...r.names], ubus,
       recorded: r.recorded, final, turns: r.turns.map(turn) };
   }
   async function pipe(bytes, stream, limit) {
@@ -173,7 +185,7 @@
   }
   // The .ububall file: gzip of the replay's canonical UTF-8 JSON.
   async function write(r) {
-    const data = { type: 'ububall-replay', format: FORMAT, physics: P.VERSION, mode: r.mode, seat: r.seat, title: r.title, clip: r.clip, names: r.names, ubus: r.ubus,
+    const data = { type: 'ububall-replay', format: FORMAT, physics: P.VERSION, mode: r.mode, seat: r.seat, title: r.title, clip: r.clip, anonymous: Boolean(r.anonymous), names: r.names, ubus: r.ubus,
       recorded: r.recorded, final: r.final, turns: r.turns };
     return pipe(encoder.encode(JSON.stringify(canonical(data))), new CompressionStream('gzip'), Infinity);
   }
@@ -188,6 +200,6 @@
     if (JSON.stringify(replay) !== text) fail();
     return replay;
   }
-  const api = { FORMAT, KEEP, MAX_TITLE, snapshot, restore, create, clip, playRange, addTurn, timeline, canonical, write, read };
+  const api = { FORMAT, KEEP, MAX_TITLE, ANONYMOUS, snapshot, restore, create, clip, roundRange, anonymize, addTurn, timeline, canonical, write, read };
   if (node) module.exports = api; else root.ububallReplay = api;
 })(globalThis);
