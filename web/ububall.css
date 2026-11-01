@@ -1222,10 +1222,10 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 .replay-mark.card { top: 2px; width: 6px; height: 9px; margin-left: -3px; border: 0; border-radius: 1px; background: #ffd166; pointer-events: none; }
 .replay-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
 .replay-controls .icon-button { color: var(--text); }
-.replay-controls .icon-button svg { fill: currentColor; }
 #replay-play .icon-play, #replay-play.paused .icon-pause { display: none; }
 #replay-play.paused .icon-play { display: inline; }
-#replay-play .icon-pause { fill: none; stroke-width: 3; }
+.replay-clip { display: inline-flex; align-items: center; gap: 6px; }
+.replay-clip svg, .replays-tools svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .replay-time { min-width: 92px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; text-align: center; }
 #replay-speed { padding: 6px; background: var(--elevated); color: var(--text); border: 1px solid var(--border); border-radius: 8px; }
 .home-actions #replays-open { grid-column: 1 / -1; min-height: 48px; font-size: 18px; }
@@ -1239,6 +1239,15 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 .replays-list strong { overflow-wrap: anywhere; }
 .replays-list small { grid-column: 1; color: var(--muted); }
 .replays-list .replay-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; }
+.replays-list .replay-actions .primary { color: var(--primary-text, #1b1e26); }
+.replays-list [aria-pressed="true"] { color: var(--primary); }
+.replays-list li.pinned { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
+.replay-name { min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; font-weight: 700; }
+.replays-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
+.replays-tools .file-btn { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.replays-tools .file-btn input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.replays-undo { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.replays-undo button { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 480px) {
   .replays-dialog { padding: 16px; }
   .replays-list li { grid-template-columns: minmax(0, 1fr); }

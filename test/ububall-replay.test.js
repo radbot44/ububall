@@ -98,3 +98,20 @@ test('replays refuse other versions and any file a writer would not produce', as
   await assert.rejects(R.read(await gzip(JSON.stringify(badDna))), /not a valid/);
   assert.deepEqual(await R.read(await gzip(JSON.stringify(good))), good);
 });
+
+test('clips keep a turn or a play as a titled replay of its own', async () => {
+  const standard = record(5, 'standard', 6).replay;
+  for (let k = 0; k < standard.turns.length; k++) assert.deepEqual(R.playRange(standard, k), [k, k]);
+  const { replay, ends } = record(9, 'pulse', 60);
+  const k = replay.turns.findIndex((t, i) => i > 0 && !P.settled(t.bodies) && !replay.turns[i - 1].goal);
+  const [from, to] = R.playRange(replay, k);
+  assert.ok(from < k && (from === 0 || P.settled(replay.turns[from].bodies) || replay.turns[from - 1].goal));
+  assert.ok(to === replay.turns.length - 1 || replay.turns[to].goal || P.settled(replay.turns[to + 1].bodies));
+  const back = await R.read(await R.write(R.clip({ ...replay, final: { scores: [5, 0], winner: 0 } }, from, to, 'Big save')));
+  assert.equal(back.clip, true); assert.equal(back.title, 'Big save'); assert.equal(back.final, null);
+  back.turns.forEach((t, i) => assert.equal(JSON.stringify(replayTurn(t)), JSON.stringify(ends[from + i])));
+  const good = R.canonical({ type: 'ububall-replay', format: R.FORMAT, physics: P.VERSION, ...back });
+  for (const patch of [{ final: { scores: [1, 0], winner: 0 } }, { title: ' padded' }, { title: '' }, { title: 'x'.repeat(R.MAX_TITLE + 1) }, { clip: 1 }]) {
+    assert.throws(() => R.canonical({ ...good, ...patch }), /not a valid/);
+  }
+});

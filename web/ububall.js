@@ -2087,8 +2087,9 @@
     clearEffects(); sync(); draw();
   }
   // Replays (shared/ububall-replay.js): every match is recorded turn by turn and saved on this
-  // device when it ends or is left, keeping the latest ububallReplay.KEEP. Each saved entry holds
-  // the .ububall file and a summary for the list, with names and scores in rink order.
+  // device when it ends or is left. The library keeps the latest ububallReplay.KEEP of these
+  // automatic saves that are not pinned; clips and imports stay until deleted. Each entry holds the
+  // .ububall file and a summary for the list, with names and scores in rink order.
   const replayStore = (() => {
     let db = null;
     const open = () => db ||= new Promise((resolve, reject) => {
@@ -2102,12 +2103,13 @@
       return new Promise((resolve, reject) => { tx.oncomplete = () => resolve(request.result); tx.onerror = tx.onabort = () => reject(tx.error); });
     }
     return {
-      // Ids rise with age, so adding one drops the oldest beyond the limit.
+      // Ids rise with age, so adding one drops the oldest automatic saves beyond the limit.
       add: entry => run('readwrite', store => {
         const request = store.add(entry);
-        store.getAllKeys().onsuccess = event => event.target.result.slice(0, -ububallReplay.KEEP).forEach(id => store.delete(id));
+        store.getAll().onsuccess = event => event.target.result.filter(e => e.auto && !e.pinned).slice(0, -ububallReplay.KEEP).forEach(e => store.delete(e.id));
         return request;
       }),
+      put: entry => run('readwrite', store => store.put(entry)),
       all: () => run('readonly', store => store.getAll()),
       get: id => run('readonly', store => store.get(id)),
       remove: id => run('readwrite', store => store.delete(id))
@@ -2122,11 +2124,16 @@
     if (!r) return lastSaved;
     r.turns = r.turns.filter(t => t.ticks);
     if (!r.turns.length) return lastSaved;
-    const last = r.turns.at(-1), endScores = r.final?.scores || last.scores.map((n, team) => n + (last.goal?.team === team ? 1 : 0));
-    lastSaved = ububallReplay.write(r).then(file => replayStore.add({ format: ububallReplay.FORMAT, physics: P.VERSION, recorded: r.recorded,
-      mode: r.mode, seat: r.seat, names: r.names, scores: endScores, final: Boolean(r.final), turns: r.turns.length, file }))
+    lastSaved = ububallReplay.write(r).then(file => replayStore.add(libraryEntry(r, file, true)))
       .catch(error => { console.warn('Replay not saved.', error); return null; });
     return lastSaved;
+  }
+  // `auto` marks a match saved automatically, which may be dropped for newer ones.
+  function libraryEntry(r, file, auto) {
+    const last = r.turns.at(-1);
+    return { format: ububallReplay.FORMAT, physics: P.VERSION, recorded: r.recorded, mode: r.mode, seat: r.seat, title: r.title, clip: r.clip,
+      names: r.names, scores: r.final?.scores || last.scores.map((n, team) => n + (last.goal?.team === team ? 1 : 0)),
+      final: Boolean(r.final), turns: r.turns.length, auto, pinned: false, file };
   }
   addEventListener('pagehide', () => void saveRecording());
   // Completes the local turn just played.
@@ -2185,6 +2192,9 @@
   function loadReplayTurn(k, fx) {
     const th = theater, t = th.replay.turns[k];
     th.index = k; th.tick = 0; th.called = false; th.sim = ububallReplay.restore(t.bodies);
+    // A play longer than its turn (in Pulse) can be clipped whole.
+    const [from, to] = ububallReplay.playRange(th.replay, k);
+    $('replay-clip-play').hidden = from === to;
     th.fouls = { ...ububallMatch.newFouls(), ...structuredClone(t.fouls) };
     scores = th.seat ? [...t.scores].reverse() : [...t.scores]; turn = t.turn;
     // The home cards show the moves this turn was played with.
@@ -2276,7 +2286,19 @@
   $('replay-prev').onclick = () => { const th = theater; if (th) seekReplay(th.starts[Math.max(0, th.tick > 120 ? th.index : th.index - 1)]); };
   $('replay-next').onclick = () => { const th = theater; if (th && th.index + 1 < th.replay.turns.length) seekReplay(th.starts[th.index + 1]); };
   $('replay-speed').onchange = event => { if (theater) theater.speed = Number(event.target.value); };
-  $('replay-export').onclick = () => { if (theater) downloadReplay(theater.file, theater.replay.recorded); };
+  $('replay-export').onclick = () => { if (theater) downloadReplay(theater.file, theater.replay.recorded, theater.replay.title); };
+  // Clips save the current turn, or the play around it, to the library as replays of their own.
+  async function saveClip(whole) {
+    const th = theater, r = th.replay, [from, to] = whole ? ububallReplay.playRange(r, th.index) : [th.index, th.index];
+    const names = th.seat ? [...r.names].reverse() : r.names, turns = from === to ? `Turn ${r.turns[from].turn}` : `Turns ${r.turns[from].turn}–${r.turns[to].turn}`;
+    const clip = ububallReplay.clip(r, from, to, `${turns} · ${names[0]} vs ${names[1]}`.slice(0, ububallReplay.MAX_TITLE).trim());
+    try {
+      await replayStore.add(libraryEntry(clip, await ububallReplay.write(clip), false));
+      bugTab(whole ? 'Play saved to Replays' : 'Turn saved to Replays');
+    } catch { bugTab('Clip not saved'); }
+  }
+  $('replay-clip-turn').onclick = () => { if (theater) saveClip(false); };
+  $('replay-clip-play').onclick = () => { if (theater) saveClip(true); };
   $('replay-exit').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
   // Space plays and pauses and the arrows step by turn, unless a control has focus.
   document.addEventListener('keydown', event => {
@@ -2284,10 +2306,12 @@
     const button = { ' ': 'replay-play', ArrowLeft: 'replay-prev', ArrowRight: 'replay-next' }[event.key];
     if (button) { event.preventDefault(); $(button).click(); }
   });
-  function downloadReplay(file, recorded) {
+  // A file name from the replay's name, or the time it was recorded.
+  function downloadReplay(file, recorded, title = null) {
     const d = new Date(recorded), two = n => String(n).padStart(2, '0');
-    const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([file], { type: 'application/gzip' })),
-      download: `ububall-${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}.ububall` });
+    const name = title?.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60) ||
+      `ububall-${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}`;
+    const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([file], { type: 'application/gzip' })), download: `${name}.ububall` });
     link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
   async function openReplay(id) {
@@ -2299,36 +2323,107 @@
       watchReplay(replay, entry.file);
     } catch (error) { $('replays-status').textContent = error.message; }
   }
-  // The library, newest first. Replays from another physics version can never play again (see
-  // P.VERSION), so opening it removes them.
+  // Tabler outline icons (MIT), as in uburoom web/icons.js.
+  const ICONS = {
+    play: ['M7 4v16l13 -8l-13 -8'],
+    edit: ['M7 7h-1a2 2 0 0 0 -2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2 -2v-1', 'M20.385 6.585a2.1 2.1 0 0 0 -2.97 -2.97l-8.415 8.385v3h3l8.385 -8.415', 'M16 5l3 3'],
+    download: ['M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2', 'M7 11l5 5l5 -5', 'M12 4l0 12'],
+    trash: ['M4 7l16 0', 'M10 11l0 6', 'M14 11l0 6', 'M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12', 'M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3'],
+    undo: ['M9 14l-4 -4l4 -4', 'M5 10h11a4 4 0 1 1 0 8h-1'],
+    pin: ['M15 4.5l-4 4l-4 1.5l-1.5 1.5l7 7l1.5 -1.5l1.5 -4l4 -4', 'M9 15l-4.5 4.5', 'M14.5 4l5.5 5.5']
+  };
+  function iconButton(name, label, run, className = 'icon-button') {
+    const button = document.createElement('button'); button.type = 'button'; button.className = className; button.title = label;
+    button.setAttribute('aria-label', label); button.onclick = run;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    for (const d of ICONS[name]) { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', d); svg.append(path); }
+    button.append(svg);
+    return button;
+  }
+  // Deleted entries, newest last, for undo while the library stays open.
+  const deletedReplays = [];
+  // Renaming rewrites the file too, so an export carries the name.
+  async function renameReplay(entry, title) {
+    const replay = await ububallReplay.read(entry.file);
+    await replayStore.put({ ...entry, title, file: await ububallReplay.write({ ...replay, title }) });
+  }
+  // The library: pinned first, then newest first. Replays from another physics or file version can
+  // never play again (see P.VERSION), so they are removed.
   async function openReplays() {
-    const list = $('replays-list'), status = $('replays-status');
-    $('replays-note').textContent = `Your latest ${ububallReplay.KEEP} matches, saved on this device.`;
-    status.textContent = 'Loading…'; list.replaceChildren();
+    $('replays-note').textContent = `Your latest ${ububallReplay.KEEP} matches are kept automatically. Pinned replays, clips and imports stay until you delete them.`;
+    deletedReplays.length = 0; $('replays-status').textContent = '';
     if (!$('replays-dialog').open) $('replays-dialog').showModal();
+    await listReplays();
+  }
+  async function listReplays(message = '') {
+    const list = $('replays-list'), status = $('replays-status');
     let entries;
     try { entries = await replayStore.all(); } catch { status.textContent = 'Replays cannot be saved in this browser.'; return; }
     const stale = entries.filter(e => e.physics !== P.VERSION || e.format !== ububallReplay.FORMAT);
     await Promise.all(stale.map(e => replayStore.remove(e.id)));
-    entries = entries.filter(e => !stale.includes(e)).reverse();
-    status.textContent = [stale.length && `Removed ${stale.length} replay${stale.length === 1 ? '' : 's'} from an older version of ububall.`,
+    entries = entries.filter(e => !stale.includes(e)).sort((a, b) => b.pinned - a.pinned || b.id - a.id);
+    status.textContent = [message, stale.length && `Removed ${stale.length} replay${stale.length === 1 ? '' : 's'} from an older version of ububall.`,
       !entries.length && 'No replays yet. Matches are saved here automatically.'].filter(Boolean).join(' ');
-    for (const e of entries) {
-      const names = e.seat ? [...e.names].reverse() : e.names, sc = e.seat ? [...e.scores].reverse() : e.scores;
-      const item = document.createElement('li'), title = document.createElement('strong'), meta = document.createElement('small');
-      title.textContent = `${names[0]} ${sc[0]}–${sc[1]} ${names[1]}`;
-      meta.textContent = [ububallMatch.modeName(e.mode), new Date(e.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }),
-        `${e.turns} turn${e.turns === 1 ? '' : 's'}`, !e.final && 'Unfinished'].filter(Boolean).join(' · ');
-      const actions = document.createElement('div'); actions.className = 'replay-actions';
-      for (const [label, run, primary] of [['Watch', () => openReplay(e.id), true], ['Export', () => downloadReplay(e.file, e.recorded)],
-        ['Delete', async () => { await replayStore.remove(e.id); item.remove(); }]]) {
-        const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.onclick = run;
-        if (primary) button.className = 'primary';
-        actions.append(button);
-      }
-      item.append(title, meta, actions); list.append(item);
-    }
+    const undo = $('replays-undo'), last = deletedReplays.at(-1);
+    undo.hidden = !last;
+    if (last) undo.querySelector('span').textContent = last.title ? `Deleted “${last.title}”.` : `Deleted a ${last.clip ? 'clip' : 'replay'}.`;
+    list.replaceChildren(...entries.map(replayItem));
   }
+  function replayItem(e) {
+    const names = e.seat ? [...e.names].reverse() : e.names, sc = e.seat ? [...e.scores].reverse() : e.scores, score = `${names[0]} ${sc[0]}–${sc[1]} ${names[1]}`;
+    const item = document.createElement('li'), heading = document.createElement('strong'), meta = document.createElement('small');
+    item.classList.toggle('pinned', Boolean(e.pinned));
+    heading.textContent = e.title || score;
+    meta.textContent = [e.title && score, e.clip ? 'Clip' : ububallMatch.modeName(e.mode), new Date(e.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }),
+      `${e.turns} turn${e.turns === 1 ? '' : 's'}`, !e.clip && !e.final && 'Unfinished'].filter(Boolean).join(' · ');
+    const pin = iconButton('pin', e.pinned ? 'Unpin' : 'Pin', async () => { await replayStore.put({ ...e, pinned: !e.pinned }); listReplays(); });
+    pin.setAttribute('aria-pressed', String(Boolean(e.pinned)));
+    const rename = () => {
+      const input = Object.assign(document.createElement('input'), { value: e.title || '', maxLength: ububallReplay.MAX_TITLE, placeholder: score, className: 'replay-name' });
+      input.setAttribute('aria-label', 'Replay name');
+      heading.replaceWith(input); input.focus(); input.select();
+      let done = false;
+      const finish = async save => {
+        if (done) return;
+        done = true;
+        const title = input.value.trim() || null;
+        let message = '';
+        try { if (save && title !== e.title) await renameReplay(e, title); } catch (error) { message = error.message; }
+        listReplays(message);
+      };
+      input.onkeydown = event => {
+        if (event.key === 'Enter') finish(true);
+        else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+      };
+      input.onblur = () => finish(true);
+    };
+    const actions = document.createElement('div'); actions.className = 'replay-actions';
+    actions.append(iconButton('play', 'Watch', () => openReplay(e.id), 'icon-button primary'), pin, iconButton('edit', 'Rename', rename),
+      iconButton('download', 'Export .ububall', () => downloadReplay(e.file, e.recorded, e.title)),
+      iconButton('trash', 'Delete', async () => { await replayStore.remove(e.id); deletedReplays.push(e); listReplays(); }));
+    item.append(heading, meta, actions);
+    return item;
+  }
+  $('replays-undo').append(iconButton('undo', 'Undo delete', async () => {
+    const entry = deletedReplays.pop();
+    if (entry) await replayStore.put(entry);
+    listReplays();
+  }, 'quiet'));
+  $('replays-undo').lastChild.append('Undo');
+  // Imported replays are checked like any other and stay until deleted.
+  $('replays-import').onchange = async event => {
+    const files = [...event.target.files], problems = [];
+    event.target.value = '';
+    let added = 0;
+    for (const file of files) {
+      try {
+        if (file.size > 8 << 20) throw new Error('This replay is too large.');
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        await replayStore.add(libraryEntry(await ububallReplay.read(bytes), bytes, false)); added++;
+      } catch (error) { problems.push(`${file.name}: ${error.message}`); }
+    }
+    listReplays([added && `Imported ${added} replay${added === 1 ? '' : 's'}.`, ...problems].filter(Boolean).join(' '));
+  };
   $('replays-open').onclick = openReplays;
   $('replays-close').onclick = () => $('replays-dialog').close();
   function finishTurn(goal) {
