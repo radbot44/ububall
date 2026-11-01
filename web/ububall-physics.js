@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 6;
+  const VERSION = 7;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -360,8 +360,9 @@
         const ballSpeed = Math.hypot(ball.vx, ball.vy);
         if (ballSpeed > 50) {
           const bux = ball.vx / ballSpeed, buy = ball.vy / ballSpeed;
-          let delta = Math.max(0, -(bux * pnx + buy * pny));
-          if (pbDist > player.radius + ball.radius) delta = 0;
+          // How squarely the ball meets the ubu, from its heading against the line to the ubu's centre (1 head-on).
+          // It is taken at first contact, wherever that is: Guard's longer reach must not hide it.
+          const delta = Math.max(0, -(bux * pnx + buy * pny));
 
           let R = 0;
           if (player.superActive === 'stalwart') {
@@ -369,7 +370,7 @@
           } else {
             const normMass = (player.baseMass || player.mass) / 3;
             const baseStab = player.guardBase ? player.guardBase.stability : (player.stability || 1);
-            const guardMult = player.guarding ? 1.5 : 1.0;
+            const guardMult = player.guarding ? 2.0 : 1.0;
             const colossusMult = player.superActive === 'colossus' ? 1.8 : 1.0;
             R = normMass * baseStab * (1 + delta * delta) * guardMult * colossusMult;
           }

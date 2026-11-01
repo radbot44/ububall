@@ -100,8 +100,8 @@ function scripted() {
       const state = field('standard', place); armed(state, key); play(state, shoot);
     }
   }
-  for (const [offset, guard] of [[0, false], [36, false], [0, true]]) {
-    play(field('standard', { 3: { x: 600, y: 300 + offset }, 6: { x: 450, y: 300, vx: 720, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: guard ? .5 : 1 } }),
+  for (const [offset, guard] of [[0, false], [36, false], [0, true], [20, true]]) {
+    play(field('standard', { 3: { x: 600, y: 300 + offset }, 6: { x: 450, y: 300, vx: 720, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1 } }),
       [still, still, still, { ...still, guard }, still, still]);
   }
   const pulse = field('pulse', { 0: { x: 440, y: 300 } }); armed(pulse, 'sticky');
@@ -112,7 +112,7 @@ function scripted() {
 
 // The physics this version of the replay format plays back. A change to how turns play out must
 // bump P.VERSION, which makes older replays refuse to play; then record the new fingerprint here.
-const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31' };
+const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31', 7: '37a23456c784360a' };
 test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
   const ends = [...[...replay.turns, ...standard.turns].map(replayTurn), ...scripted()];
@@ -156,7 +156,7 @@ test('replays refuse other versions and any file a writer would not produce', as
 
 test('clips keep a turn or a round as a titled replay of its own', async () => {
   for (const mode of ['standard', 'pulse']) {
-    const { replay, ends } = record(1, mode, mode === 'pulse' ? 120 : 35);
+    const { replay, ends } = record(1, mode, mode === 'pulse' ? 120 : 50);
     const goals = replay.turns.flatMap((t, i) => t.goal ? [i] : []);
     assert.ok(goals.length >= 2, `${mode} has goals to test rounds against`);
     // A round runs from the turn after a goal through the next goal, whatever the mode.

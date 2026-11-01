@@ -1034,21 +1034,31 @@ test('Meteor Bank preserves ball speed on board rebound while on fire', () => {
   const postSpeed = Math.hypot(ball.vx, ball.vy);
   assert.ok(Math.abs(preSpeed - postSpeed) < 1e-4, 'Meteor Bank keeps 100% velocity');
 });
-test('Iron Save triggers when an opposing Guard blocks a flaming shot', () => {
+// A Guard move squared up to a default-power fireball stops it at full speed; a glancing hit beats it.
+function guardAgainstFireball(offset) {
   const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
-  const ball = b[6], defender = b[3];
-  defender.guarding = true;
-  Object.assign(defender, { x: 500, y: 300, vx: 0, vy: 0 });
-  // Incoming fiery shot with moderate speed so defender resistance R > E
-  Object.assign(ball, { x: 460, y: 300, vx: 520, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerPower: 0.8, strikerTeam: 0 });
-  let shockwaveTriggered = false;
-  P.step(b, 0, null, null, (src, rad, type) => {
-    if (type === 'iron') shockwaveTriggered = true;
-  });
+  const still = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
+  Object.assign(b[3], { x: 600, y: 300 + offset });
+  P.startTurn(b, [still, still, still, { ...still, guard: true }, still, still]);
+  Object.assign(b[6], { x: 540, y: 300, vx: 1000, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerPower: 1, strikerTeam: 0 });
+  let iron = false, beaten = false, shockwave = false;
+  for (let t = 0; t < 60 && !iron && !beaten; t++) {
+    P.step(b, P.DT, (bodyA, bodyB, speed, impulse, plow, isIron) => { if (isIron) iron = true; else if (plow) beaten = true; }, null, (src, rad, type) => { if (type === 'iron') shockwave = true; });
+  }
+  return { ball: b[6], iron, beaten, shockwave };
+}
+test('Iron Save triggers when an opposing Guard squares up to a full-speed fireball', () => {
+  const { ball, iron, shockwave } = guardAgainstFireball(0);
+  assert.equal(iron, true, 'the Guard makes an Iron Save');
   assert.equal(P.ballOnFire(ball), false, 'fire is quenched on Iron Save');
-  assert.equal(shockwaveTriggered, true, 'minor shockwave is emitted');
+  assert.equal(shockwave, true, 'minor shockwave is emitted');
 });
-
+test('a glancing full-speed fireball beats a Guard', () => {
+  const { ball, iron, beaten } = guardAgainstFireball(20);
+  assert.equal(iron, false);
+  assert.equal(beaten, true, 'the fireball overpowers the Guard');
+  assert.equal(P.ballOnFire(ball), true, 'and keeps its fire');
+});
 test('flaming ball retains onFire when scoring into goal and callGoal awards FIREBALL!', () => {
   const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
   b[0].superActive = 'cannonball';
