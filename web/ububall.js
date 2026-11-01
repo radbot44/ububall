@@ -1522,7 +1522,6 @@
     }
   }
   function buildTeam() {
-    if (!online?.active && !theater) teamEntries = [...roster, ...practice.slice(3)];
     if (!knobDock.querySelector('.knob-row')) {
       const row = document.createElement('div'); row.className = 'knob-row';
       row.append(...['angle', 'power', 'spin'].map(kind => makeKnob(kind)));
@@ -1901,6 +1900,7 @@
     drawFoulFocus(text);
     if (phase === 'plan') drawPrediction(home, away);
     drawTrails(home, away);
+    if (theater) drawReplayGuides(home, away, text);
     shockwaves.forEach(s => {
       const progress = 1 - Math.max(0, s.life / s.duration);
       const r = s.currentRadius + (s.maxRadius - s.currentRadius) * progress;
@@ -1939,7 +1939,7 @@
         circle(b.x, b.y, b.radius + 9, goalAccent, 4);
         circle(b.x, b.y, b.radius + 15, goalAccent, 2);
       }
-      if ((phase === 'play' && b.guarding) || (phase === 'plan' && i < 3 && plans[i]?.guard)) {
+      if (((phase === 'play' || phase === 'replay') && b.guarding) || (phase === 'plan' && i < 3 && plans[i]?.guard)) {
         badgeCtx.save();
         const p = isPortrait ? { x: b.x - b.radius * .65, y: b.y + b.radius * .65 } : { x: b.x + b.radius * .65, y: b.y + b.radius * .65 };
         badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
@@ -2200,6 +2200,7 @@
   function loadReplayTurn(k, fx) {
     const th = theater, t = th.replay.turns[k];
     th.index = k; th.tick = 0; th.called = th.crowned = false; th.sim = ububallReplay.restore(t.bodies);
+    viewTurnStart(th, t);
     th.fouls = { ...ububallMatch.newFouls(), ...structuredClone(t.fouls) };
     scores = th.seat ? [...t.scores].reverse() : [...t.scores]; turn = t.turn;
     // The home cards show the moves this turn was played with.
@@ -2213,6 +2214,7 @@
     if (sim[6].spinStruck) { sim[6].spinStruck = false; if (fx) { syncReplay(); popup(bodies[6], 'Spin strike!'); } }
     ububallMatch.lapseFouls(P, sim, th.fouls);
     th.tick++;
+    if (th.tick % 3 === 0 || th.tick === th.replay.turns[th.index].ticks) tracePaths(th);
   }
   function seekReplay(at) {
     const th = theater, turns = th.replay.turns;
@@ -2333,6 +2335,13 @@
       playWallHit: o => A.playWallHit(into(o)), playGoalHit: (type, o) => A.playGoalHit(type, into(o)), playSuper: (key, phase, o) => A.playSuper(key, phase, into(o)),
       playSizzle: o => A.playSizzle(into(o)), playFoul: (kind, o) => A.playFoul(kind, into(o)) };
   }
+  // Videos and share cards carry the ububall.com logo, loaded the first time one is made.
+  let videoLogoImage = null;
+  function videoLogo() {
+    videoLogoImage ||= Object.assign(new Image(), { src: 'assets/ububall-logo-com.svg' });
+    return videoLogoImage.decode().catch(() => {});
+  }
+  const videoFieldSize = () => ({ width: Math.round(VIDEO.field.width * VIDEO.width / 1920), height: Math.round(VIDEO.field.height * VIDEO.width / 1920) });
   // A frame: the field, its ubus and their badges, as the stadium shows them, under the scorebug. The
   // scorebug only changes with a score or turn, so it is drawn once each and reused.
   let videoBug = null;
@@ -2344,7 +2353,8 @@
       const layer = videoBug?.layer || Object.assign(document.createElement('canvas'), { width: VIDEO.width, height: Math.ceil(VIDEO.bug * k) }), b = layer.getContext('2d');
       b.setTransform(k, 0, 0, k, 0, 0); b.clearRect(0, 0, 1920, VIDEO.bug);
       b.beginPath(); b.roundRect(cx - 560, 9, 1120, 60, 14); b.fillStyle = surface; b.fill();
-      if (rinkLogo.complete && rinkLogo.naturalWidth) b.drawImage(rinkLogo, cx - 540, 22, 120, 120 * rinkLogo.naturalHeight / rinkLogo.naturalWidth);
+      const logo = videoLogoImage?.naturalWidth ? videoLogoImage : rinkLogo, logoHeight = logo.naturalWidth ? 170 * logo.naturalHeight / logo.naturalWidth : 0;
+      if (logoHeight) b.drawImage(logo, cx - 548, 39 - logoHeight / 2, 170, logoHeight);
       b.textBaseline = 'middle';
       for (const team of [0, 1]) {
         const left = team ? cx : cx - 360;
@@ -2426,6 +2436,7 @@
     // The viewer plays just the slice while it renders.
     Object.assign(th, { replay: slice.replay, ...ububallReplay.timeline(slice.replay) });
     const restoreNames = slice.hidden ? showAnonymous() : null;
+    await videoLogo();
     // Every turn at full speed, each goal's hold and the winner's, then a moment on the final field.
     const seconds = th.total * P.DT + th.replay.turns.filter(t => t.goal).length * 2.5 + (winningTurn(th.replay.turns.at(-1)) ? WIN_SECONDS : 0) + VIDEO.hold;
     const frames = Math.ceil(seconds * VIDEO.fps), rate = 48000;
@@ -2441,7 +2452,7 @@
     try {
       encoder.configure(config);
       th.exporting = true; th.speed = 1; th.paused = false; isPortrait = false;
-      videoClock = 0; videoField = { width: Math.round(VIDEO.field.width * VIDEO.width / 1920), height: Math.round(VIDEO.field.height * VIDEO.width / 1920) };
+      videoClock = 0; videoField = videoFieldSize();
       videoAudio = offlineAudio(offline, () => videoClock / 1000);
       // The sound renders alongside the video, a second behind it: it pauses at each second until the
       // video has scheduled every sound up to the next, so nothing is scheduled where it has already rendered.
@@ -2522,8 +2533,11 @@
     const th = theater;
     if (!th || th.exporting) return;
     exportKind = kind;
-    $('export-title').textContent = kind === 'video' ? 'Export video' : 'Export replay';
+    $('export-title').textContent = { video: 'Export video', replay: 'Export replay', card: 'Share card' }[kind];
     for (const button of $('export-options').querySelectorAll('button')) {
+      // A share card is the moment on screen, not a range of turns.
+      button.hidden = (button.dataset.range === 'card') !== (kind === 'card');
+      if (button.hidden || kind === 'card') continue;
       const [from, to] = exportRange(button.dataset.range);
       button.querySelector('small').textContent = `${rangeLabel(th.replay, button.dataset.range, from, to)} · ${replayClock(th.replay.turns.slice(from, to + 1).reduce((n, t) => n + t.ticks, 0))}`;
     }
@@ -2538,6 +2552,7 @@
     const range = event.target.closest('button')?.dataset.range;
     if (!range || !theater) return;
     $('export-options').hidden = true;
+    if (range === 'card') { await shareCard($('export-private').checked); return; }
     const slice = exportSlice(range, $('export-private').checked);
     if (exportKind === 'video') { await exportVideo(slice); return; }
     try {
@@ -2549,9 +2564,191 @@
   $('replay-export-video').hidden = !('VideoEncoder' in window && 'OfflineAudioContext' in window);
   $('replay-export-video').onclick = () => openExport('video');
   $('replay-export-file').onclick = () => openExport('replay');
+  $('replay-card').onclick = () => openExport('card');
+  // A share card: the moment on screen, framed as a video frame is, as a PNG shared where the device
+  // can share files (a phone's share sheet) and saved otherwise.
+  async function shareCard(hidden) {
+    const th = theater, status = $('export-status');
+    status.textContent = 'Drawing…';
+    await videoLogo();
+    const restoreNames = hidden && !th.replay.anonymous ? showAnonymous() : null, portrait = isPortrait;
+    const out = Object.assign(document.createElement('canvas'), { width: VIDEO.width, height: VIDEO.height });
+    try {
+      isPortrait = false; videoField = videoFieldSize(); videoBug = null;
+      draw(); composeFrame(out.getContext('2d'));
+    } finally {
+      videoField = null; videoBug = null; isPortrait = portrait; restoreNames?.(); layoutDirty = true; draw();
+    }
+    const name = `${replayFileName(th.replay.recorded, hidden ? null : th.replay.title)}-turn-${turn}.png`;
+    const file = new File([await new Promise(resolve => out.toBlob(resolve, 'image/png'))], name, { type: 'image/png' });
+    $('export-close').textContent = 'Close';
+    if (navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); status.textContent = 'Shared.'; return; }
+      catch (error) { if (error.name === 'AbortError') { status.textContent = ''; return; } }
+    }
+    const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: name });
+    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+    status.textContent = `Saved ${name}.`;
+  }
   // Closing while a video renders cancels it.
   $('export-close').onclick = () => { if (theater?.exporting) videoCancelled = true; else $('export-dialog').close(); };
   $('export-dialog').addEventListener('cancel', event => { if (theater?.exporting) { event.preventDefault(); videoCancelled = true; } });
+  // Viewer guides, remembered on this device: Moves draws each ubu's launch (its guard and armed super)
+  // from where the turn started; Trails draws the path each body has taken so far this turn. Both
+  // show in exported videos and share cards.
+  const guides = { moves: false, trails: false };
+  try { Object.assign(guides, JSON.parse(localStorage.getItem('ububall-replay-guides') || '{}')); } catch {}
+  function showGuides() {
+    for (const key of ['moves', 'trails']) $(`replay-${key}`).setAttribute('aria-pressed', String(Boolean(guides[key])));
+  }
+  for (const key of ['moves', 'trails']) {
+    $(`replay-${key}`).onclick = () => {
+      guides[key] = !guides[key]; showGuides();
+      try { localStorage.setItem('ububall-replay-guides', JSON.stringify(guides)); } catch {}
+      if (theater) draw();
+    };
+  }
+  showGuides();
+  // The turn's start, moves and paths in this view's order and orientation.
+  function viewTurnStart(th, t) {
+    const flip = th.seat ? b => Object.assign(b, { x: 1000 - b.x, y: 600 - b.y }) : b => b;
+    th.start = onlineOrder(ububallReplay.restore(t.bodies), th.seat).map(flip);
+    th.moves = onlineOrder(t.plans, th.seat).map(p => ({ ...p, angle: p.angle + (th.seat ? Math.PI : 0) }));
+    th.paths = th.start.map(b => [b.x, b.y]);
+  }
+  // Every third tick, each body's place joins its path.
+  function tracePaths(th) {
+    th.sim.forEach((b, c) => th.paths[viewIndex(c, th.seat)].push(th.seat ? 1000 - b.x : b.x, th.seat ? 600 - b.y : b.y));
+  }
+  function drawReplayGuides(home, away, text) {
+    const th = theater;
+    if (guides.trails && th.paths) {
+      ctx.save(); ctx.lineCap = ctx.lineJoin = 'round';
+      th.paths.forEach((path, i) => {
+        const color = i < 3 ? home : i < 6 ? away : text;
+        ctx.globalAlpha = .6; ctx.lineWidth = i < 6 ? 3 : 2; ctx.strokeStyle = color;
+        ctx.beginPath(); ctx.moveTo(path[0], path[1]);
+        for (let k = 2; k < path.length; k += 2) ctx.lineTo(path[k], path[k + 1]);
+        ctx.stroke();
+        ctx.globalAlpha = .9; ctx.beginPath(); ctx.arc(path[0], path[1], i < 6 ? 4 : 3, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+      });
+      ctx.restore();
+    }
+    if (guides.moves && th.start) {
+      th.start.slice(0, 6).forEach((b, i) => {
+        const plan = th.moves[i], color = i < 3 ? home : away;
+        ctx.save(); ctx.globalAlpha = .7; ctx.setLineDash([4, 6]); circle(b.x, b.y, b.radius, color, 2); ctx.restore();
+        drawImpulse(b, plan, color);
+        if (plan.guard && !b.stunned) {
+          badgeCtx.save(); badgeCtx.translate(b.x + b.radius * .65, b.y + b.radius * .65); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
+          badgeCtx.globalAlpha = .85; badgeCtx.translate(-12, -12); badgeCtx.fillStyle = '#4798ff'; badgeCtx.fill(GUARD_SHIELD);
+          badgeCtx.restore();
+        }
+        if ((plan.superArm || b.superArm) && b.equippedSuper && b.meter >= 100 && !b.stunned) drawSuperBadge({ ...b, superArm: true }, b.equippedSuper.key);
+      });
+    }
+  }
+  // Play from here: a match against the CPU from the start of the turn on screen, playing the left team.
+  function playFromHere() {
+    const th = theater;
+    if (!th || th.exporting) return;
+    const t = th.replay.turns[th.index], [roundStart] = ububallReplay.roundRange(th.replay, th.index), entries = teamEntries;
+    const field = onlineOrder(ububallReplay.restore(t.bodies), th.seat);
+    field.forEach((b, i) => {
+      if (th.seat) {
+        Object.assign(b, { x: 1000 - b.x, y: 600 - b.y, vx: -b.vx, vy: -b.vy, rotation: b.rotation + Math.PI });
+        if (b.stickOffset) b.stickOffset = { x: -b.stickOffset.x, y: -b.stickOffset.y };
+      }
+      // Meter cooldowns counted the recorded match's clock; this match starts its own.
+      b.team = i < 3 ? 0 : i < 6 ? 1 : -1; delete b.meterTick;
+      if (i < 6) {
+        b.slot = i % 3; b.playerIndex = i;
+        Object.assign(b, { name: entries[i].model.parts.fullName, voice: entries[i].model.voice, personality: entries[i].model.personality });
+      }
+    });
+    stopFanfare(); gameAudio()?.stop();
+    theater = null; document.body.classList.remove('replay-match'); clearEffects();
+    $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
+    roster = entries.slice(0, 3); bodies = field;
+    scores = th.seat ? [...t.scores].reverse() : [...t.scores]; turn = t.turn;
+    fouls = viewFouls({ ...ububallMatch.newFouls(), ...structuredClone(t.fouls) }, th.seat);
+    play = ububallMatch.newPlay(); tally = ububallMatch.newTally(); roundTurns = th.index - roundStart; matchTicks = 0; playSegments = [];
+    selected = 0; drag = null; elapsed = accumulator = 0; phase = 'plan';
+    recording = ububallReplay.create({ mode: matchMode, names: ['You', 'CPU'], ubus: field.slice(0, 6).map((b, i) => ({ dna: entries[i].dna, super: b.equippedSuper?.id ?? null })) });
+    buildTeam(); resetPlans(); say('Playing from the replay. Plan your launches.'); draw();
+  }
+  $('replay-take-over').onclick = playFromHere;
+  // Stats for the whole replay, worked out by playing it through once without effects: goals,
+  // assists, saves, ball touches, the hardest shot and distance skated for each ubu, where each touched
+  // the ball, and each team's share of the time it last touched the ball.
+  function replayStats(th) {
+    const r = th.replay, view = c => viewIndex(c, th.seat), six = () => [0, 0, 0, 0, 0, 0];
+    const out = { goals: six(), assists: six(), touches: six(), skated: six(), control: [0, 0], marks: [] }, tally = ububallMatch.newTally();
+    let play = ububallMatch.newPlay(), last = null, lastTick = -Infinity, tick = 0;
+    for (const t of r.turns) {
+      const sim = ububallReplay.restore(t.bodies), ball = sim[6];
+      P.startTurn(sim, t.plans);
+      for (let k = 0; k < t.ticks; k++, tick++) {
+        const before = sim.slice(0, 6).map(b => [b.x, b.y]), touched = [];
+        ububallMatch.playTick(P, sim, play, { collide: (a, b, speed) => { const who = ububallMatch.toucher(a, b, speed); if (who) touched.push(sim.indexOf(who)); } }, tally, false);
+        sim.slice(0, 6).forEach((b, i) => { out.skated[view(i)] += Math.hypot(b.x - before[i][0], b.y - before[i][1]); });
+        // A touch counts once until another ubu touches the ball or half a second passes.
+        for (const c of touched) {
+          if (c !== last || tick - lastTick > 120) { out.touches[view(c)]++; out.marks.push({ x: th.seat ? 1000 - ball.x : ball.x, y: th.seat ? 600 - ball.y : ball.y, i: view(c), goal: false }); }
+          last = c; lastTick = tick;
+        }
+        if (last !== null) out.control[view(last) < 3 ? 0 : 1]++;
+      }
+      if (t.goal) {
+        if (t.goal.scorer !== null) {
+          out.goals[view(t.goal.scorer)]++;
+          const shot = out.marks.findLast(m => m.i === view(t.goal.scorer));
+          if (shot) shot.goal = true;
+        }
+        if (t.goal.assist !== null) out.assists[view(t.goal.assist)]++;
+        play = ububallMatch.newPlay(); last = null;
+      }
+    }
+    return { ...out, saves: onlineOrder(tally.saves, th.seat), topShot: onlineOrder(tally.topSpeed, th.seat), cards: onlineOrder(r.turns.reduce((n, t) => { t.cards.forEach(c => n[c]++); return n; }, six()), th.seat) };
+  }
+  function openStats() {
+    const th = theater;
+    if (!th || th.exporting) return;
+    th.stats ||= replayStats(th);
+    const s = th.stats, names = [$('home-label').textContent, $('opponent-label').textContent], total = s.control[0] + s.control[1] || 1;
+    const { home, away, surface, border, text } = themeColors;
+    $('stats-control').replaceChildren(...[0, 1].map(team => {
+      const part = document.createElement('span'); part.className = team ? 'away' : 'home';
+      part.style.flexGrow = String(s.control[team] || .001); part.textContent = `${names[team]} ${Math.round(s.control[team] / total * 100)}%`;
+      return part;
+    }));
+    const table = document.createElement('table'), head = table.createTHead().insertRow();
+    for (const label of ['Ubu', 'Goals', 'Assists', 'Saves', 'Touches', 'Top shot', 'Skated', 'Fouls']) { const cell = document.createElement('th'); cell.textContent = label; head.append(cell); }
+    const rows = table.createTBody();
+    teamEntries.slice(0, 6).forEach((entry, i) => {
+      const row = rows.insertRow(); row.className = `team-${i < 3 ? 0 : 1}`;
+      row.insertCell().textContent = entry.model.parts.fullName;
+      // Distance in rink lengths (880 between the end boards).
+      for (const value of [s.goals[i], s.assists[i], s.saves[i], s.touches[i], s.topShot[i] ? Math.round(s.topShot[i]) : '–', (s.skated[i] / 880).toFixed(1), s.cards[i]]) row.insertCell().textContent = value;
+    });
+    $('stats-table').replaceChildren(table);
+    // Where each ubu touched the ball, in its team's colour; a star marks the touch that scored.
+    const map = $('stats-map'), g = map.getContext('2d'), k = map.width / 1000;
+    g.setTransform(k, 0, 0, k, 0, 0); g.clearRect(0, 0, 1000, 600);
+    g.beginPath(); g.roundRect(60, 60, 880, 480, 100); g.fillStyle = surface; g.fill(); g.lineWidth = 4; g.strokeStyle = border; g.stroke();
+    g.setLineDash([6, 10]); g.beginPath(); g.moveTo(500, 60); g.lineTo(500, 540); g.stroke(); g.setLineDash([]);
+    for (const [x, color] of [[60 - P.rink.goalDepth, home], [940, away]]) { g.strokeStyle = color; g.strokeRect(x, 230, P.rink.goalDepth, 140); }
+    for (const m of s.marks) {
+      g.fillStyle = m.i < 3 ? home : away;
+      g.globalAlpha = m.goal ? 1 : .55;
+      if (m.goal) { g.font = '900 34px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.strokeStyle = text; g.lineWidth = 3; g.strokeText('★', m.x, m.y); g.fillText('★', m.x, m.y); }
+      else { g.beginPath(); g.arc(m.x, m.y, 6, 0, Math.PI * 2); g.fill(); }
+    }
+    g.globalAlpha = 1;
+    $('stats-dialog').showModal();
+  }
+  $('replay-stats').onclick = openStats;
+  $('stats-close').onclick = () => $('stats-dialog').close();
   $('replay-exit').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
   // Space plays and pauses and the arrows step by turn, unless a control has focus.
   document.addEventListener('keydown', event => {

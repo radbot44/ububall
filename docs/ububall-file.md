@@ -23,6 +23,16 @@ Re-simulation is exact within one JavaScript engine. JSON keeps every number exc
 - `bodies`: the seven bodies (six ubus in rink order, then the ball) before `P.startTurn`, each with only the fields the simulation uses, in the order of `BODY` in `shared/ububall-replay.js`. References are indexes (`stuckTo`), the equipped super its id; presentation fields (names, voices) are left out.
 - `plans`: six `{"angle","power","spin","superArm","guard"}` as the turn started with them. Angles are kept as given, not normalised, because normalising changes the launch.
 
+## Viewer
+
+Beside playback and the timeline, the viewer offers (owner requests 2026-10-31):
+- **Moves** and **Trails**, remembered on the device: Moves draws each ubu's launch from where the turn started (faded when it guarded), with its guard shield and armed super; Trails draws the path each body has taken so far this turn. Both show in videos and share cards.
+- **Stats**, worked out by playing the replay through once without effects: each ubu's goals, assists, saves, ball touches (a touch counts once until another ubu touches the ball or half a second passes), top shot and distance skated, each team's share of the time it last touched the ball, and a map of where each ubu touched the ball, a star marking each scoring touch.
+- **Play from here**: a match against the CPU from the start of the turn on screen, playing the left team, with the score, fouls and round so far; meter cooldowns start afresh. It is recorded as a new match.
+- **Share card**: the moment on screen as a 1920×1080 PNG framed as a video frame is, through the device's share sheet where it can share files and saved otherwise. Hide names applies as for exports.
+
+Videos and share cards carry the ububall.com logo (`web/assets/ububall-logo-com.svg`).
+
 ## Clips
 
 A clip is a replay of consecutive turns of another, starting from its first turn's snapshot: one turn, or the round around a turn (`roundRange`): every turn from the kickoff before it (the replay's start, or the turn after a goal) through the turn that scored, in any mode. The viewer exports the whole replay, the round or the turn (Export replay or Export video, then match, round or turn); a part is written as a clip named after its round or turns and teams. Clips are not saved to the library; imported ones are listed there.

@@ -16,7 +16,7 @@ const sharedFiles = [
   'ububall-match.js', 'ububall-replay.js', 'ububall-cpu.js', 'ubu.js', 'ubu-file.js', 'ubu-render.js', 'ubu-audio.js', 'rarity.js'
 ];
 const assetFiles = [
-  'uburoom-wordmark-brand.svg', 'uburoom-oomark-brand.svg', 'oomark-pattern.svg', 'ububall-logo.svg', 'UburoomSans-Regular.woff2',
+  'uburoom-wordmark-brand.svg', 'uburoom-oomark-brand.svg', 'oomark-pattern.svg', 'ububall-logo.svg', 'ububall-logo-com.svg', 'UburoomSans-Regular.woff2',
   '00_stalwart.png', '01_knockout.png', '02_sticky.png', '03_cannonball.png',
   '04_magnet.png', '05_colossus.png', '06_shockwave.png', '07_ghost.png'
 ];
