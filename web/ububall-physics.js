@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 7;
+  const VERSION = 8;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -21,6 +21,9 @@
   // catches fire, and burns until it drops to 504.
   const HEAT = Object.freeze({ orange: 540 / MAX_SPEED, red: 720 / MAX_SPEED, redHot: 800 / MAX_SPEED, fire: 840 / MAX_SPEED, sustain: .70 });
   const FIRE_TICKS = 60;
+  // An Iron Save leaves the ball with this share of its speed off the Guard, dead at its feet
+  // (owner decision 2026-11-01), so the shooter gets no fast rebound.
+  const IRON_KEEP = .1;
   function ballOnFire(ball) {
     return Boolean(ball && (ball.onFire || (ball.fireTicks && ball.fireTicks >= FIRE_TICKS)));
   }
@@ -324,7 +327,7 @@
     // A flaming ball that beats the ubu's resistance hits as the heavier body: in the collision it
     // weighs the ubu's mass × E / R. It deflects the ubu rather than passing through, and the
     // ordinary energy bound still holds.
-    let fireWin = null;
+    let fireWin = null, ironSave = false;
 
     if (isBall) {
       const player = a.team !== -1 ? a : b;
@@ -385,7 +388,7 @@
             if (player.guarding && opposing) {
               ball.onFire = false;
               ball.fireTicks = 0;
-              player.ironSave = true;
+              ironSave = true;
               if (allBodies) triggerIronShockwave(player, allBodies, onShockwave);
             }
           }
@@ -517,12 +520,13 @@
       ball.vy += (speed ? ball.vy / speed : ny * away) * strikeBoost;
       if (strikeBoost) ball.spinStruck = true; // Read and cleared by the caller, for a callout.
     }
+    if (ironSave) {
+      const ball = a.team === -1 ? a : b;
+      ball.vx *= IRON_KEEP; ball.vy *= IRON_KEEP; ball.omega *= IRON_KEEP;
+    }
 
     if (typeof onCollide === 'function') {
-      const isIron = Boolean(isBall && (a.ironSave || b.ironSave));
-      if (a.ironSave) a.ironSave = false;
-      if (b.ironSave) b.ironSave = false;
-      onCollide(a, b, -closing, baseImpulse, fireWin !== null, isIron, checker);
+      onCollide(a, b, -closing, baseImpulse, fireWin !== null, ironSave, checker);
     }
   }
   let spareRadii = new Float64Array(7); // Broad-phase scratch, taken while a step uses it.
@@ -764,7 +768,6 @@
       b.spinStrike = 0;
       b.openingShot = false;
       b.spinStruck = false;
-      b.ironSave = false;
       if (b.guardBase) Object.assign(b, b.guardBase);
       b.guardBase = null; b.guarding = false;
       if (!keepMotion) b.vx = b.vy = b.omega = 0;

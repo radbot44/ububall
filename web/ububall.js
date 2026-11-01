@@ -2155,7 +2155,7 @@
     r.steps += delta / P.DT * ububallMatch.replaySpeed(r.total - r.played);
     for (let n = 0; r.steps >= 1 && r.played < r.total && n < 48; n++) {
       if (r.tick >= r.segments[r.index].ticks) nextReplaySegment();
-      if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && fireTime >= FIRE_TICKS * P.DT && netFire) netFire.lit = true;
+      if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && P.ballOnFire(r.sim[6]) && netFire) netFire.lit = true;
       r.tick++; r.played++; r.steps--;
       replayEvents(r.segments[r.index], r.tick, r.sim);
       syncReplay(); recordTrails();
@@ -3724,6 +3724,8 @@
         vb.superActive = cb.superActive || null;
         vb.stunned = Boolean(cb.stunned || cb.stunnedNext); vb.carded = Boolean(cb.carded);
         vb.holding = Boolean(cb.holding);
+        // The ball burns as the simulation says, not by the display's own speed timer.
+        if (cb.team === -1) { vb.onFire = Boolean(cb.onFire); vb.fireTicks = cb.fireTicks || 0; }
         dirtyMeters.add(vb);
       }
     });

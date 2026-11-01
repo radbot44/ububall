@@ -79,7 +79,8 @@ test('a saved replay re-simulates every turn exactly, through the .ububall file'
 
 // Scripted turns for what CPU matches may rarely reach: every super armed into a shot and into a
 // check, fire hits head-on and glancing, an Iron Save, and a Sticky hold carried across a Pulse turn
-// through JSON, as online state is. Returns each turn's end field.
+// through JSON, as online state is. Returns each turn's end field; `each` also gets the turn's starting
+// state as JSON, its moves and its result.
 const still = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
 function field(mode, place) {
   const bodies = P.kickoff();
@@ -88,11 +89,12 @@ function field(mode, place) {
   return { version: M.VERSION, mode, bodies, stats: [], scores: [0, 0], turn: 1, phase: 'plan', winner: null };
 }
 const armed = (state, key) => Object.assign(state.bodies[0], { equippedSuper: { ...P.SUPERS.find(s => s.key === key) }, meter: 100 });
-function scripted() {
+function scripted(each = () => {}) {
   const ends = [], play = (state, moves) => {
-    const { state: next } = M.resolveTurn(P, state, moves, { effects: false });
-    ends.push(R.snapshot(next.bodies));
-    return next;
+    const json = JSON.stringify(state), result = M.resolveTurn(P, state, moves, { effects: false });
+    each(json, moves, result);
+    ends.push(R.snapshot(result.state.bodies));
+    return result.state;
   };
   const shoot = [{ ...still, power: 1, superArm: true }, still, still, still, still, still];
   for (const { key } of P.SUPERS) {
@@ -112,12 +114,23 @@ function scripted() {
 
 // The physics this version of the replay format plays back. A change to how turns play out must
 // bump P.VERSION, which makes older replays refuse to play; then record the new fingerprint here.
-const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31', 7: '37a23456c784360a' };
+const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31', 7: '37a23456c784360a', 8: '83873175fc525045' };
 test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
   const ends = [...[...replay.turns, ...standard.turns].map(replayTurn), ...scripted()];
   const print = createHash('sha256').update(JSON.stringify(ends)).digest('hex').slice(0, 16);
   assert.equal(print, FINGERPRINTS[P.VERSION], `Physics changed: bump VERSION in web/ububall-physics.js and record ${print} for it.`);
+});
+
+// Online state crosses JSON (the server's storage and every client update), so no turn may play out
+// differently from a JSON copy of its state: no references, Sets or other values JSON cannot keep.
+test('every scripted turn plays the same from a JSON copy of its state', () => {
+  let turns = 0;
+  scripted((json, moves, result) => {
+    turns++;
+    assert.equal(JSON.stringify(M.resolveTurn(P, JSON.parse(json), moves, { effects: false })), JSON.stringify(result), `scripted turn ${turns}`);
+  });
+  assert.ok(turns > 20);
 });
 
 // Online state crosses JSON (the server's storage and every client update), so a Sticky hold must
