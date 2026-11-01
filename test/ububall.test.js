@@ -1059,6 +1059,21 @@ test('a glancing full-speed fireball beats a Guard', () => {
   assert.equal(beaten, true, 'the fireball overpowers the Guard');
   assert.equal(P.ballOnFire(ball), true, 'and keeps its fire');
 });
+// Planning marks where the predicted ball catches fire: not for a soft shot, nor a ball already burning.
+test('the planning prediction marks where the ball ignites', () => {
+  const still = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
+  const shot = (power, burning = false) => {
+    const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+    b.slice(1, 6).forEach(x => Object.assign(x, { y: x.team ? 520 : 80 }));
+    Object.assign(b[0], { x: 300, y: 300 }); Object.assign(b[6], { x: 350, y: 300 });
+    if (burning) Object.assign(b[6], { onFire: true, fireTicks: P.FIRE_TICKS });
+    return P.predictTurn(b, [{ ...still, power }, still, still]).ignition;
+  };
+  const full = shot(1);
+  assert.ok(full && full.tick >= P.FIRE_TICKS && full.x > 350, 'a full-power shot catches fire along its path');
+  assert.equal(shot(.6), null, 'a soft shot does not');
+  assert.equal(shot(1, true), null, 'a burning ball has no ignition point');
+});
 // Planning shows each guarding ubu a burning ball would hit in the predicted turn, and whether it holds.
 test('the planning prediction tells which Guards hold a burning ball', () => {
   const still = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };

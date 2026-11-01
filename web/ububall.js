@@ -1777,7 +1777,7 @@
       const data = P.predictTurn(bodies, plans);
       predictionCache = { key, data, fouls: predictFouls(data) };
     }
-    cachedLayer(predictionLayer, [canvas.width, canvas.height, home, away, isPortrait, key].join(), () => paintPrediction(predictionCache.data, home, away));
+    cachedLayer(predictionLayer, [canvas.width, canvas.height, home, away, isPortrait, matchMode, key].join(), () => paintPrediction(predictionCache.data, home, away));
   }
   function paintPrediction(prediction, home, away) {
     prediction.paths.forEach((points, index) => {
@@ -1796,6 +1796,27 @@
       }
       ctx.restore();
     });
+    // In Pulse, a short tick across each moving path marks where the turn is expected to end.
+    const end = pulseMode() ? ububallMatch.turnTicks(matchMode) : 0;
+    prediction.paths.forEach((points, index) => {
+      const k = end ? points.findIndex(p => p.tick >= end) : -1;
+      if (k < 1) return;
+      const from = points[k - 1], to = points[k], dx = to.x - from.x, dy = to.y - from.y, d = Math.hypot(dx, dy);
+      if (!d) return;
+      const t = (end - from.tick) / (to.tick - from.tick), x = from.x + dx * t, y = from.y + dy * t;
+      const isBall = bodies[index].team === -1, half = isBall ? 6 : 8, nx = -dy / d * half, ny = dx / d * half;
+      ctx.save(); ctx.globalAlpha = isBall ? .95 : .8;
+      line(x - nx, y - ny, x + nx, y + ny, isBall ? '#f2efe9' : bodies[index].team === 0 ? home : away, 2.5);
+      ctx.restore();
+    });
+    // Where the predicted ball catches fire: a small flame on its path.
+    if (prediction.ignition) {
+      const { x, y } = prediction.ignition;
+      ctx.save(); ctx.translate(x, y); if (isPortrait) ctx.rotate(Math.PI / 2);
+      ctx.globalAlpha = .95; ctx.fillStyle = '#ff6a1a'; ctx.strokeStyle = '#fff3b0'; ctx.lineWidth = 1.5;
+      ctx.fill(IGNITION_FLAME); ctx.stroke(IGNITION_FLAME);
+      ctx.restore();
+    }
     for (const stop of prediction.stops) {
       if (!stop.stopped || !prediction.paths[stop.index].some(p => Math.hypot(p.x - stop.x, p.y - stop.y) > 3)) continue;
       const color = bodies[stop.index].team < 0 ? '#fff' : bodies[stop.index].team === 0 ? home : away;
@@ -1819,6 +1840,7 @@
     }
     ctx.restore();
   }
+  const IGNITION_FLAME = new Path2D('M0 -9C4 -4 7 -1 7 3A7 7 0 0 1 -7 3C-7 -1 -4 -4 0 -9Z');
   const GUARD_SHIELD = new Path2D('M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3');
   let themeColors = null;
   const themeObserver = new MutationObserver(() => { themeColors = null; if (skaters.length) draw(); });

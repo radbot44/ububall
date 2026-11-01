@@ -1037,8 +1037,9 @@
     const paths = sim.map(b => [{ x: b.x, y: b.y, tick: 0 }]);
     // Each guarding ubu a burning ball first hits, by index: true if it holds (an Iron Save, or a
     // teammate's fireball it is not overpowered by), false if the fireball beats it.
-    const impacts = [], lastImpact = new Map(), guards = new Map();
-    let goal = null, ticks = 0;
+    const impacts = [], lastImpact = new Map(), guards = new Map(), ball = sim.find(b => b.team === -1);
+    // Where and when the ball catches fire, if it is not already burning.
+    let goal = null, ticks = 0, ignition = null, burning = ballOnFire(ball);
     function recordImpact(b) {
       const index = sim.indexOf(b), last = lastImpact.get(index);
       if (last && (ticks - last.tick < 12 || Math.hypot(b.x - last.x, b.y - last.y) < 8)) return;
@@ -1050,10 +1051,11 @@
       ticks = tick;
       goal = step(sim, DT, (a, b, speed, impulse, plow, iron) => {
         recordImpact(a); recordImpact(b);
-        const ball = a.team === -1 ? a : b.team === -1 ? b : null, ubu = ball && (ball === a ? b : a), index = sim.indexOf(ubu);
+        const ubu = a === ball ? b : b === ball ? a : null, index = sim.indexOf(ubu);
         // A hit the fireball neither wins nor quenches leaves its fire as it was before the hit.
         if (ubu?.guarding && !guards.has(index) && (plow || iron || ballOnFire(ball))) guards.set(index, !plow);
       }, recordImpact);
+      if (ball && !burning && ballOnFire(ball)) { burning = true; ignition = { x: ball.x, y: ball.y, tick }; }
       const done = goal !== null || settled(sim) || tick === PREDICTION_TICKS;
       if (tick % 4 === 0 || done) {
         sim.forEach((b, i) => paths[i].push({ x: b.x, y: b.y, tick }));
@@ -1061,7 +1063,7 @@
       if (done) break;
     }
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS,
-      guards: [...guards].map(([index, held]) => ({ index, held })) };
+      guards: [...guards].map(([index, held]) => ({ index, held })), ignition };
   }
   const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, ballOnFire, holder, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, superMastery, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
