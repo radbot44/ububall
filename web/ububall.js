@@ -2176,7 +2176,7 @@
   const replayClock = ticks => { const sec = Math.floor(ticks * P.DT); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
   function watchReplay(replay, file) {
     saveRecording(); stopDemo(); closeSummary(); endGoalReplay(); stopFanfare(); gameAudio()?.stop();
-    cpuGeneration++; cpuClient.cancel();
+    cpuGeneration++; cpuClient.cancel(); videoLogo();
     const seat = replay.seat, names = seat ? [...replay.names].reverse() : replay.names;
     theater = { replay, file, seat, ...ububallReplay.timeline(replay), speed: Number($('replay-speed').value), paused: false, steps: 0, holdUntil: 0, index: 0, tick: 0, called: false };
     matchMode = replay.mode; document.body.classList.toggle('classic-match', classicMode()); showMode(matchMode);
@@ -2346,7 +2346,7 @@
   // scorebug only changes with a score or turn, so it is drawn once each and reused.
   let videoBug = null;
   function composeFrame(v) {
-    const f = VIDEO.field, scale = f.width / 1000, k = VIDEO.width / 1920, names = [$('home-label').textContent, $('opponent-label').textContent];
+    const f = VIDEO.field, k = VIDEO.width / 1920, names = [$('home-label').textContent, $('opponent-label').textContent];
     const key = `${names}|${scores}|${turn}`;
     if (videoBug?.key !== key) {
       const { home, away, text, surface } = themeColors, cx = 960, font = videoBug?.font || getComputedStyle(document.body).fontFamily;
@@ -2372,7 +2372,14 @@
     v.setTransform(1, 0, 0, 1, 0, 0);
     v.fillStyle = themeColors.background; v.fillRect(0, 0, VIDEO.width, VIDEO.height);
     v.setTransform(k, 0, 0, k, 0, 0);
-    v.drawImage(canvas, f.x, f.y, f.width, f.height);
+    paintField(v, f.x, f.y, f.width, f.height);
+    v.setTransform(1, 0, 0, 1, 0, 0);
+    v.drawImage(videoBug.layer, 0, 0);
+  }
+  // The field, its ubus and their badges, the whole 1000×600 field at (x, y) in `width`×`height`.
+  function paintField(v, x, y, width, height) {
+    const scale = width / 1000;
+    v.drawImage(canvas, x, y, width, height);
     bodies.slice(0, 6).forEach((b, i) => {
       const sprite = skaters[i]?.firstChild;
       if (!(sprite instanceof HTMLCanvasElement)) return;
@@ -2380,13 +2387,11 @@
       v.save();
       v.globalAlpha = b.carded ? .3 : b.superActive === 'ghost' ? .45 : 1;
       if ((b.stunned || b.stunnedNext) && !b.carded) v.filter = 'grayscale(0.8) brightness(0.7)';
-      v.translate(f.x + b.x * scale, f.y + b.y * scale); v.rotate(b.rotation);
+      v.translate(x + b.x * scale, y + b.y * scale); v.rotate(b.rotation);
       v.drawImage(sprite, -size / 2, -size / 2, size, size);
       v.restore();
     });
-    v.drawImage(badgeCanvas, f.x, f.y, f.width, f.height);
-    v.setTransform(1, 0, 0, 1, 0, 0);
-    v.drawImage(videoBug.layer, 0, 0);
+    v.drawImage(badgeCanvas, x, y, width, height);
   }
   async function encodeAudio(buffer) {
     if (!('AudioEncoder' in window)) return null;
@@ -2533,11 +2538,9 @@
     const th = theater;
     if (!th || th.exporting) return;
     exportKind = kind;
-    $('export-title').textContent = { video: 'Export video', replay: 'Export replay', card: 'Share card' }[kind];
+    $('export-title').textContent = kind === 'video' ? 'Export video' : 'Export replay';
+    $('export-note').textContent = kind === 'video' ? 'Saves an MP4 video with sound.' : 'Saves a .ububall file to watch in ububall.';
     for (const button of $('export-options').querySelectorAll('button')) {
-      // A share card is the moment on screen, not a range of turns.
-      button.hidden = (button.dataset.range === 'card') !== (kind === 'card');
-      if (button.hidden || kind === 'card') continue;
       const [from, to] = exportRange(button.dataset.range);
       button.querySelector('small').textContent = `${rangeLabel(th.replay, button.dataset.range, from, to)} · ${replayClock(th.replay.turns.slice(from, to + 1).reduce((n, t) => n + t.ticks, 0))}`;
     }
@@ -2552,7 +2555,6 @@
     const range = event.target.closest('button')?.dataset.range;
     if (!range || !theater) return;
     $('export-options').hidden = true;
-    if (range === 'card') { await shareCard($('export-private').checked); return; }
     const slice = exportSlice(range, $('export-private').checked);
     if (exportKind === 'video') { await exportVideo(slice); return; }
     try {
@@ -2564,32 +2566,81 @@
   $('replay-export-video').hidden = !('VideoEncoder' in window && 'OfflineAudioContext' in window);
   $('replay-export-video').onclick = () => openExport('video');
   $('replay-export-file').onclick = () => openExport('replay');
-  $('replay-card').onclick = () => openExport('card');
-  // A share card: the moment on screen, framed as a video frame is, as a PNG shared where the device
-  // can share files (a phone's share sheet) and saved otherwise.
-  async function shareCard(hidden) {
-    const th = theater, status = $('export-status');
-    status.textContent = 'Drawing…';
-    await videoLogo();
+  // Share: the moment on screen as a 1080×960 card, the scorebug over the field (cropped to y 42–564,
+  // as videos are) with any moves or trails, a watermark and a line inviting others to play. It draws
+  // straight into the dialog's canvas and is encoded only when shared or saved.
+  const CARD = { width: 1080, height: 960, field: 146, cta: 'Think you can do better? Play at' };
+  let cardImage = null;
+  function drawShareCard(hidden) {
+    const th = theater, out = $('share-card'), g = out.getContext('2d'), { home, away, text, surface, background } = themeColors;
     const restoreNames = hidden && !th.replay.anonymous ? showAnonymous() : null, portrait = isPortrait;
-    const out = Object.assign(document.createElement('canvas'), { width: VIDEO.width, height: VIDEO.height });
+    const names = [$('home-label').textContent, $('opponent-label').textContent], font = getComputedStyle(document.body).fontFamily;
+    g.fillStyle = background; g.fillRect(0, 0, CARD.width, CARD.height);
     try {
-      isPortrait = false; videoField = videoFieldSize(); videoBug = null;
-      draw(); composeFrame(out.getContext('2d'));
+      isPortrait = false; videoField = { width: CARD.width, height: CARD.width * .6 }; draw();
+      const top = CARD.field - 42 * CARD.width / 1000;
+      g.save(); g.beginPath(); g.rect(0, CARD.field, CARD.width, 522 * CARD.width / 1000); g.clip();
+      paintField(g, 0, top, CARD.width, CARD.width * .6);
+      g.restore();
     } finally {
-      videoField = null; videoBug = null; isPortrait = portrait; restoreNames?.(); layoutDirty = true; draw();
+      videoField = null; isPortrait = portrait; restoreNames?.(); layoutDirty = true; draw();
     }
+    // Scorebug: each team's name and score, the turn between them.
+    g.textBaseline = 'middle';
+    g.save(); g.beginPath(); g.roundRect(36, 36, 1008, 90, 18); g.clip();
+    for (const team of [0, 1]) {
+      const left = team ? 600 : 36;
+      g.fillStyle = team ? away : home; g.fillRect(left, 36, 444, 90);
+      g.fillStyle = team ? '#ffffff' : '#1b1e26';
+      g.font = `800 30px ${font}`; g.textAlign = team ? 'right' : 'left';
+      g.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 424 : left + 22, 82);
+      g.font = `800 52px ${font}`; g.textAlign = 'center';
+      g.fillText(String(scores[team]), team ? left + 50 : left + 394, 83);
+    }
+    g.fillStyle = surface; g.fillRect(480, 36, 120, 90);
+    g.fillStyle = text; g.font = `800 28px ${font}`; g.fillText(`T${turn}`, 540, 82);
+    g.restore();
+    // Watermark in the field's corner, and the invitation under it.
+    const fieldBottom = CARD.field + 522 * CARD.width / 1000;
+    g.font = `800 30px ${font}`; g.textAlign = 'right'; g.textBaseline = 'alphabetic';
+    g.fillStyle = '#ffffff'; g.globalAlpha = .4; g.fillText('ububall.com', CARD.width - 28, fieldBottom - 24); g.globalAlpha = 1;
+    g.fillStyle = text; g.textAlign = 'center'; g.font = `700 32px ${font}`;
+    g.fillText(CARD.cta, CARD.width / 2, fieldBottom + 58);
+    const logo = videoLogoImage;
+    if (logo?.naturalWidth) { const h = 420 * logo.naturalHeight / logo.naturalWidth; g.drawImage(logo, CARD.width / 2 - 210, fieldBottom + 82, 420, h); }
+    // Encoding starts now so sharing does not wait on it.
     const name = `${replayFileName(th.replay.recorded, hidden ? null : th.replay.title)}-turn-${turn}.png`;
-    const file = new File([await new Promise(resolve => out.toBlob(resolve, 'image/png'))], name, { type: 'image/png' });
-    $('export-close').textContent = 'Close';
-    if (navigator.canShare?.({ files: [file] })) {
-      try { await navigator.share({ files: [file] }); status.textContent = 'Shared.'; return; }
-      catch (error) { if (error.name === 'AbortError') { status.textContent = ''; return; } }
-    }
-    const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: name });
-    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
-    status.textContent = `Saved ${name}.`;
+    cardImage = new Promise(resolve => out.toBlob(blob => resolve(new File([blob], name, { type: 'image/png' })), 'image/png'));
   }
+  async function openShare() {
+    const th = theater;
+    if (!th || th.exporting) return;
+    await videoLogo();
+    $('share-private').closest('label').hidden = th.replay.anonymous;
+    try { $('share-private').checked = localStorage.getItem('ububall-export-private') === 'on'; } catch {}
+    $('share-status').textContent = '';
+    drawShareCard($('share-private').checked);
+    $('share-dialog').showModal();
+  }
+  // Devices that can share files get Share and Save; others only Save.
+  const canShareFiles = Boolean(navigator.canShare?.({ files: [new File([], 'card.png', { type: 'image/png' })] }));
+  $('share-send').hidden = !canShareFiles;
+  $('share-save').classList.toggle('primary', !canShareFiles);
+  $('replay-card').onclick = openShare;
+  $('share-private').onchange = event => {
+    try { localStorage.setItem('ububall-export-private', event.target.checked ? 'on' : 'off'); } catch {}
+    drawShareCard(event.target.checked);
+  };
+  $('share-send').onclick = async () => {
+    try { await navigator.share({ files: [await cardImage], text: 'A moment from ububall. Play at https://ububall.com' }); $('share-status').textContent = 'Shared.'; }
+    catch (error) { if (error.name !== 'AbortError') $('share-status').textContent = error.message; }
+  };
+  $('share-save').onclick = async () => {
+    const file = await cardImage, link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: file.name });
+    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+    $('share-status').textContent = `Saved ${file.name}.`;
+  };
+  $('share-close').onclick = () => $('share-dialog').close();
   // Closing while a video renders cancels it.
   $('export-close').onclick = () => { if (theater?.exporting) videoCancelled = true; else $('export-dialog').close(); };
   $('export-dialog').addEventListener('cancel', event => { if (theater?.exporting) { event.preventDefault(); videoCancelled = true; } });
