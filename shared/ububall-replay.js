@@ -11,7 +11,7 @@
   const NUMBERS = ['x', 'y', 'vx', 'vy', 'omega', 'rotation', 'radius', 'mass', 'friction', 'grip', 'maxSpin', 'team', 'slot', 'curveFactor',
     'sizeMult', 'baseMass', 'baseRadius', 'impulse', 'curveMult', 'bounciness', 'wallBounce', 'power', 'reach', 'strength', 'stability',
     'meter', 'meterTick', 'daze', 'spinStrike', 'superTicks', 'stuckTicks', 'fireTicks', 'strikerPower', 'strikerTeam'];
-  const FLAGS = ['superArm', 'guarding', 'usedSuperThisTurn', 'openingShot', 'spinStruck', 'shockwaveFired', 'carded', 'colossusApplied', 'stunned', 'stunnedNext', 'onFire'];
+  const FLAGS = ['superArm', 'guarding', 'usedSuperThisTurn', 'superHit', 'openingShot', 'spinStruck', 'shockwaveFired', 'carded', 'colossusApplied', 'stunned', 'stunnedNext', 'onFire'];
   const GUARD = ['reach', 'friction', 'strength', 'stability', 'bounciness'];
   const BODY = [...NUMBERS, ...FLAGS, 'superActive', 'equippedSuper', 'guardBase', 'stuckTo', 'stickOffset'];
   const REQUIRED = ['x', 'y', 'vx', 'vy', 'omega', 'radius', 'mass', 'team'];

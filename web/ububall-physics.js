@@ -66,7 +66,8 @@
   // Smaller ubus launch a little faster, and a daze from heavy checks slows the next launch.
   function launchSpeed(body) {
     const superScale = (body.colossusApplied || body.superActive === 'colossus') ? SUPER.colossusLaunch
-      : (body.superActive === 'stalwart' ? SUPER.stalwartLaunch : 1);
+      : (body.superActive === 'stalwart' ? SUPER.stalwartLaunch
+      : (body.baseMass || body.mass) / body.mass);
     return (body.impulse || IMPULSE) / 3 * superScale * (body.sizeMult || 1) ** SIZE.launch * (1 - dazeSlow(body));
   }
   function applyStats(body, raw = {}) {
@@ -196,8 +197,10 @@
   }
   function triggerShockwave(source, bodies, onShockwave) {
     const radius = SUPER.shockRadius;
+    const sourceTeam = source.team;
     for (const b of bodies) {
-      if (b === source || b.team < 0 || b.team === source.team || b.superActive === 'stalwart' || b.carded) continue;
+      const isTeammate = sourceTeam !== undefined && b.team !== undefined && b.team === sourceTeam;
+      if (b === source || b.team === -1 || isTeammate || b.superActive === 'stalwart' || b.carded) continue;
       const dx = b.x - source.x, dy = b.y - source.y, d2 = dx * dx + dy * dy;
       if (d2 > 0 && d2 < radius * radius) {
         const d = Math.sqrt(d2);
@@ -514,6 +517,16 @@
   }
   let spareRadii = new Float64Array(7); // Broad-phase scratch, taken while a step uses it.
   function step(bodies, dt = DT, onCollide = null, onWall = null, onShockwave = null, onSuper = null) {
+    let stalwartHits = null;
+    const guardedOnSuper = onSuper ? (key, action, a, b) => {
+      if (key === 'stalwart' && action === 'impact') {
+        const id = bodies.indexOf(a) * 10 + bodies.indexOf(b);
+        if (stalwartHits?.has(id)) return;
+        stalwartHits ??= new Set();
+        stalwartHits.add(id);
+      }
+      onSuper(key, action, a, b);
+    } : null;
     const ball = bodies.find(b => b.team === -1);
     if (ball?.openingShot) {
       // Existing contact must count before motion can separate the bodies.
@@ -535,6 +548,7 @@
           if (d2 > minDist * minDist && d2 < SUPER.magnetRadius ** 2) {
             const d = Math.sqrt(d2);
             onSuper?.('magnet', 'pull', b);
+            b.superHit = true;
             const pull = SUPER.magnetPull * (1 - d / SUPER.magnetRadius);
             ball.vx += (dx / d) * pull * dt;
             ball.vy += (dy / d) * pull * dt;
@@ -577,10 +591,6 @@
     }
     if (ball?.stuckTo && ++ball.stuckTicks >= SUPER.holdTicks) endSuper(ball.stuckTo, bodies);
     for (const b of bodies) {
-      if (b.superActive === 'stalwart') {
-        b.vx = b.vy = b.omega = 0;
-        continue;
-      }
       if (b.team === -1 && b.stuckTo) {
         const host = b.stuckTo;
         const off = b.stickOffset || { x: host.radius + b.radius, y: 0 };
@@ -597,7 +607,7 @@
       b.rotation += b.omega * dt;
       b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - SPIN_DECAY * dt);
       b.x += b.vx * dt; b.y += b.vy * dt;
-      const carrying = ball?.stuckTo === b ? SUPER.carryFriction : 1;
+      const carrying = ball?.stuckTo === b ? SUPER.carryFriction : (b.superActive === 'stalwart' ? SUPER.stalwartFriction : 1);
       const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = (b.friction * carrying + (b.team === -1 ? AIR_DRAG * speed2 : 0)) * dt;
       if (speed2 <= deceleration * deceleration) {
         b.vx = b.vy = 0;
@@ -647,12 +657,10 @@
         // Bodies further apart than both contact radii cannot touch; collide would return untouched.
         const a = bodies[i], c = bodies[j], reach = hit[i] + hit[j], dx = a.x - c.x, dy = a.y - c.y;
         if (dx * dx + dy * dy > reach * reach) continue;
-        collide(a, c, onCollide, bodies, onShockwave, onSuper);
+        collide(a, c, onCollide, bodies, onShockwave, guardedOnSuper);
       }
       for (const b of bodies) {
-        if (b.superActive === 'stalwart') {
-          b.vx = b.vy = b.omega = 0;
-        } else if (b.team !== -1) {
+        if (b.team !== -1) {
           walls(b, onWall);
         }
       }
@@ -702,10 +710,6 @@
       if (b.stunned) {
         b.vx = 0; b.vy = 0; b.omega = 0;
         b.stunned = false; b.daze = 0;
-        return;
-      }
-      if (b.superActive === 'stalwart') {
-        b.vx = 0; b.vy = 0; b.omega = 0; b.daze = 0;
         return;
       }
       if (b.superActive === 'colossus' && !b.colossusApplied) {
@@ -949,12 +953,10 @@
         }
       }
 
-      if (superArm && sKey === 'stalwart') {
-        return { angle: 0, power: 0, spin: 0, superArm: true, guard: false };
-      }
-
       const dx = tx - b.x, dy = ty - b.y, distance = Math.hypot(dx, dy);
-      const maxV = launchSpeed(b) / (superArm && sKey === 'colossus' && !b.colossusApplied ? SUPER.colossusMass : 1);
+      const superLaunchScale = (superArm && sKey === 'colossus' && !b.colossusApplied) ? SUPER.colossusLaunch
+        : (superArm && sKey === 'stalwart' && b.superActive !== 'stalwart' ? SUPER.stalwartLaunch : 1);
+      const maxV = launchSpeed(b) * superLaunchScale;
       let angle = Math.atan2(dy, dx);
       const power = distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * b.friction * Math.max(0, distance + extraDrive)) / maxV);
 
@@ -994,6 +996,7 @@
         b.meter = 0;
         b.superActive = b.equippedSuper.key; b.superTicks = SUPER.ticks;
         b.superArm = false;
+        b.superHit = false;
         if (['stalwart', 'colossus', 'ghost'].includes(b.superActive)) onSuper?.(b.superActive, 'launch', b);
       }
     });

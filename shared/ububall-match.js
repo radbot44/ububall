@@ -330,6 +330,7 @@
   const FOULS = Object.freeze({ crease: 80, stallTurns: 4 });
   function newFouls() { return { crease: [false, false], corner: null, cornerTurns: 0, cards: [], faceoff: false }; }
   function inCrease(P, b, team) {
+    if (b.superActive === 'stalwart') return false;
     return Math.hypot(b.x - (team ? P.rink.right : P.rink.left), b.y - (P.rink.goalTop + P.rink.goalBottom) / 2) < FOULS.crease;
   }
   // The line closing the attack zone in front of a team's goal runs across the rink at its rear kickoff spot.

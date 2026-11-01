@@ -661,10 +661,17 @@
       badgeCtx.restore();
     }
   }
+  function isCreasing(b, team) {
+    const i = bodies.indexOf(b);
+    const plan = phase === 'plan' && i >= 0 ? plans[i] : null;
+    const stalwartArmed = Boolean(plan?.superArm || b.superArm) && (b.meter ?? 0) >= 100 && (b.equippedSuper?.key === 'stalwart' || b.superKey === 'stalwart');
+    if (b.superActive === 'stalwart' || stalwartArmed) return false;
+    return ububallMatch.inCrease(P, b, team);
+  }
   // The ubus a standing warning would card: a warned team's ubus in its crease, and the larger
   // team's ubus in a stalled corner.
   function offenders() {
-    const list = bodies.slice(0, 6).filter(b => fouls.crease[b.team] && ububallMatch.inCrease(P, b, b.team));
+    const list = bodies.slice(0, 6).filter(b => fouls.crease[b.team] && isCreasing(b, b.team));
     if (stalling()) {
       const [home, away] = cornerTeams();
       if (home.length !== away.length) list.push(...(home.length > away.length ? home : away).filter(b => !list.includes(b)));
@@ -723,11 +730,14 @@
     for (let k = 1; k < samples; k++) {
       const field = bodies.map((b, i) => {
         const path = prediction.paths[i], at = path[Math.min(k, path.length - 1)];
-        return { team: b.team, radius: b.radius, x: at.x, y: at.y };
+        const plan = plans[i];
+        const stalwartArmed = Boolean(plan?.superArm || b.superArm) && (b.meter ?? 0) >= 100 && (b.equippedSuper?.key === 'stalwart' || b.superKey === 'stalwart');
+        const superActive = b.superActive === 'stalwart' || stalwartArmed ? 'stalwart' : b.superActive;
+        return { team: b.team, radius: b.radius, x: at.x, y: at.y, superActive };
       });
       ububallMatch.lapseFouls(P, field, copy);
       field.slice(0, 6).forEach((b, i) => {
-        if (fouls.crease[b.team] && ububallMatch.inCrease(P, bodies[i], b.team) && !ububallMatch.inCrease(P, b, b.team)) result.left.add(i);
+        if (fouls.crease[b.team] && isCreasing(bodies[i], b.team) && !isCreasing(b, b.team)) result.left.add(i);
       });
     }
     result.crease = [0, 1].map(team => fouls.crease[team] && !copy.crease[team]);
@@ -741,7 +751,7 @@
     for (const team of [0, 1]) if (fouls.crease[team]) drawFieldWarning(team ? 970 : 30, 180, ['Goal', 'Camping'], text, predicted?.crease[team]);
     if (stalling()) drawFieldWarning(fouls.corner % 2 ? 970 : 30, fouls.corner > 1 ? 570 : 30, ['Corner', 'Stalling'], text, predicted?.corner);
     const flash = reducedMotion.matches ? 1 : .35 + .65 * (.5 + .5 * Math.cos(clockNow() / 1000 * Math.PI * 2.4));
-    const creasing = new Set(bodies.slice(0, 6).filter(b => fouls.crease[b.team] && ububallMatch.inCrease(P, b, b.team)));
+    const creasing = new Set(bodies.slice(0, 6).filter(b => fouls.crease[b.team] && isCreasing(b, b.team)));
     for (const b of offenders()) {
       if (b.carded) continue;
       const x = b.x + b.radius * .8, y = isPortrait ? b.y + b.radius * .8 : b.y - b.radius * .8;
@@ -817,7 +827,7 @@
         { text: home !== away ? `${sideName(home > away ? 0 : 1)} would be carded (${Math.max(home, away)} to ${Math.min(home, away)}).`
           : home ? `Even at ${home} each, so nobody would be carded.` : 'Nobody is here, so nobody would be carded.' }]];
     }
-    const t = foulInfo.team, crease = ubus.filter(b => b.team === t && ububallMatch.inCrease(P, b, t)).length;
+    const t = foulInfo.team, crease = ubus.filter(b => b.team === t && isCreasing(b, t)).length;
     const allowed = Math.max(1, ubus.filter(b => b.team === 1 - t && ububallMatch.inAttackZone(P, b, t)).length);
     return ['Goal camping', [
       { text: `${sideHas(t)} ${ubuCount(crease)} in the crease. Only ${allowed} ${allowed === 1 ? 'is' : 'are'} allowed: one per opponent in the attack zone, at least one.` },
@@ -868,7 +878,7 @@
       ctx.globalAlpha = 1;
       label('Attack zone', (mouth + zone) / 2, isPortrait ? 112 : 80);
       label('Crease', mouth + (t ? -40 : 40), 300 - ububallMatch.FOULS.crease - 16);
-      ring(ubus.filter(b => b.team === t && ububallMatch.inCrease(P, b, t)), false);
+      ring(ubus.filter(b => b.team === t && isCreasing(b, t)), false);
       ring(ubus.filter(b => b.team === 1 - t && ububallMatch.inAttackZone(P, b, t)), true);
     } else {
       const c = fouls.corner, x = c % 2 ? 840 : 60, y = c > 1 ? 440 : 60;
@@ -1660,13 +1670,15 @@
   function circle(x, y, r, color, width = 2) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
   function impulseGeometry(body, plan) {
     const activeSuper = body.superActive || ((body.superArm && (body.meter ?? 0) >= 100) ? body.equippedSuper?.key : null);
-    const isColossus = activeSuper === 'colossus' && !body.colossusApplied;
-    const effRadius = body.radius * (isColossus ? 1.8 : 1);
-    const scale = 110 * ((body.impulse || P.IMPULSE) / P.IMPULSE) / (isColossus ? 2.5 : 1);
+    const isColossus = activeSuper === 'colossus' || body.colossusApplied;
+    const isStalwart = activeSuper === 'stalwart';
+    const effRadius = body.radius * (activeSuper === 'colossus' && !body.colossusApplied ? (P.SUPER?.colossusRadius || 1.8) : 1);
+    const superScale = isColossus ? (P.SUPER?.colossusLaunch || 0.75) : (isStalwart ? (P.SUPER?.stalwartLaunch || 0.5) : 1);
+    const scale = 110 * ((body.impulse || P.IMPULSE) / P.IMPULSE) * superScale;
     const ringR = Math.max(effRadius, body.reach || effRadius, 18) + 2;
     const distance = ringR + scale * plan.power;
     return { ringR, scale, distance, x: body.x + Math.cos(plan.angle) * distance, y: body.y + Math.sin(plan.angle) * distance,
-      visible: plan.power > 0 && !body.stunned && activeSuper !== 'stalwart' };
+      visible: plan.power > 0 && !body.stunned };
   }
   function drawImpulse(body, plan, color) {
     if (!plan) return;

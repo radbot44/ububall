@@ -80,16 +80,21 @@ Before each match, players equip one active super per ubu from their unlocked sl
 
 | ID | Super | Archetype | Tactical Use | In-Game Mechanics |
 | :--- | :--- | :--- | :--- | :--- |
-| `0` | **Stalwart** | Anchor / Defense | Crease blocking, impenetrable screening | Body position locks at 0 velocity with infinite mass ($1/\text{mass} = 0$). Cannot be moved or deflected by any collision. Lasts 3 s of play. |
+| `0` | **Stalwart** | Anchor / Defense | Crease blocking, impenetrable screening | Slides to an unmovable anchor (launches at 0.5× speed with 3× braking friction), immune to dazes, checks, blasts and goal camping. Momentum resistant without infinite collision mass (100% overlap push to non-Stalwart bodies, 0% impulse or spin applied to Stalwart). Lasts 3 s of play. |
 | `1` | **Knockout** | Enforcer / CC | Neutralizing key opposing threats | First opposing skater touched is stunned for the subsequent turn: frozen, and unable to guard. Armed for 3 s of play. |
 | `2` | **Sticky** | Carrier / Possession | Puck recovery and controlled breakouts | On ball contact, the ball welds to the skater's body and travels with them. It lets go after 2 s of play, or when an opponent hits the carrier; the carrier skates with 1.5× friction meanwhile. Armed for 3 s. |
 | `3` | **Cannonball** | Striker / Finisher | Long-range laser shots and blistering rebounds | Imparts $2\times$ base impulse to the ball on contact, instantly ignites it on fire, and always counts as a big shot for hit-stop. Armed for 3 s of play. |
 | `4` | **Magnet** | Playmaker / Interceptor | Puck retrieval and pass interception | Pulls the ball within 190 px for 3 s of play, up to 1000 px/s² close in, fading to nothing at the edge. |
-| `5` | **Colossus** | Titan / Space Control | Wide zone coverage, heavy checking | Increases radius and mass by $1.8\times$ for 3 s of play (or until the turn settles); the extra weight slows its launch to about 55%. |
-| `6` | **Shockwave** | Disrupter / Scrum Breaker | Clearing the crease and board pile-ups | Goes off on contact with an opponent, or when its 3 s run out: a radial blast repelling bodies and the ball within 170 px (teammates feel 40% of it). |
+| `5` | **Colossus** | Titan / Space Control | Wide zone coverage, heavy checking | Increases radius and mass by $1.8\times$ for 3 s of play (or until the turn settles); launch speed scaled by 0.75× (25% reduction). |
+| `6` | **Shockwave** | Disrupter / Scrum Breaker | Clearing the crease and board pile-ups | Opponent-only repulsion field (never affects the ball or teammates): triggers a radial burst repelling opposing skaters within 170 px on first proximity, followed by a continuous repulsion aura (550 px/s²) for the remainder of its 3 s duration. |
 | `7` | **Ghost** | Infiltrator / Skater | Bypassing screens and heavy checks | Phases straight through opposing skaters without collision for 3 s of play, while still interacting with the ball and rink boards. |
 
 Super timing (tuning in `SUPER`): every super lasts 3 s of play (720 ticks) or until spent, and ends when a turn settles; in Pulse it carries across the 1-second turns until its time runs out. Each super has a short, soft sound: Stalwart clanks like steel, Knockout lands a hard hit, Sticky squishes, Cannonball explodes, Magnet hums like a wobbling tractor beam while it pulls, Colossus crashes like thunder, Shockwave zaps, Ghost wobbles high and fast.
+
+Whiff refund (physics v3): if a super ends without connecting (`superHit = false`), a 25% meter refund (`SUPER.whiffRefund = 25`) is awarded in `endSuper()`. Connecting requirements by category:
+- **Ball Contact:** `Cannonball`, `Sticky`, `Magnet`, `Ghost` (non-plowed contact with the ball, or Magnet tractor pull).
+- **Opponent Interaction:** `Knockout` (touching an opponent) and `Shockwave` (triggering proximity burst on an opposing skater).
+- **Either (Ball or Opponent):** `Stalwart` and `Colossus` (contact with either the ball or an opposing skater).
 
 ### Ball Responsibility & Goal Calls
 - **Responsibility** (`credit` in `shared/ububall-match.js`): each ubu holds a share of responsibility for the ball's current velocity. After a tick in which ubus touch the ball, the part of the new velocity carried over from the old one (its projection, as a fraction) stays with whoever gave it, and the rest is split among that tick's touchers. A glancing deflection leaves a shot with its shooter; stopping or redirecting the ball takes it over. When an incoming shot on goal deflects off a passive defender without that defender actively driving the ball toward their own net, responsibility remains with the shooter, preventing false own goals. Directing the ball with Shockwave or Magnet also assigns credit. Boards do not change it. The responsible team is the one with the larger share. It resets at kickoff and carries across Pulse turns.

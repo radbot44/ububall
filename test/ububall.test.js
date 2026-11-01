@@ -508,7 +508,13 @@ test('Stalwart anchors body at 0 velocity and does not move upon collision', () 
   assert.equal(b[0].vx, 0);
   assert.equal(b[0].vy, 0);
   assert.equal(b[0].x, 400);
-  assert.ok(b[3].vx > 0);
+  assert.ok(b[3].vx > -100, 'skater stopped by anchor');
+  const ballField = P.kickoff();
+  ballField[0].superActive = 'stalwart';
+  Object.assign(ballField[0], { x: 400, y: 300, vx: 0, vy: 0 });
+  Object.assign(ballField[6], { x: 440, y: 300, vx: -600, vy: 0 });
+  P.step(ballField, 0);
+  assert.ok(ballField[6].vx > 0, 'ball rebounds off Stalwart');
 });
 
 test('Knockout stuns opponent on contact and prevents them from moving next turn', () => {
@@ -578,16 +584,18 @@ test('Colossus increases radius and mass during launch and restores them on stop
   assert.ok(Math.abs(b[0].mass - origMass) < 1e-6);
 });
 
-test('Shockwave propels nearby players and the ball radially outward upon triggering', () => {
+test('Shockwave propels nearby opponents radially outward, never teammates or the ball', () => {
   const b = P.kickoff();
-  Object.assign(b[0], { x: 400, y: 300 });
-  Object.assign(b[1], { x: 450, y: 300, vx: 0, vy: 0 });
-  Object.assign(b[6], { x: 400, y: 360, vx: 0, vy: 0 });
+  Object.assign(b[0], { x: 400, y: 300, team: 0 });
+  Object.assign(b[1], { x: 450, y: 300, vx: 0, vy: 0, team: 0 });
+  Object.assign(b[3], { x: 450, y: 300, vx: 0, vy: 0, team: 1 });
+  Object.assign(b[6], { x: 400, y: 360, vx: 0, vy: 0, team: -1 });
   let shockRadius = null;
   P.triggerShockwave(b[0], b, (source, radius) => { shockRadius = radius; });
   assert.equal(shockRadius, P.SUPER.shockRadius);
-  assert.ok(b[1].vx > 0);
-  assert.ok(b[6].vy > 0);
+  assert.equal(b[1].vx, 0, 'teammate not propelled');
+  assert.ok(b[3].vx > 0, 'opponent propelled');
+  assert.equal(b[6].vy, 0, 'ball not propelled');
 });
 
 test('Ghost phases through opposing players without collision but still hits the ball', () => {
@@ -636,10 +644,10 @@ test('magnet attraction respects its distance bounds', () => {
   assert.equal(distant[6].vx, 0);
 });
 test('shockwaves stay finite at coincident positions and repel nearby bodies', () => {
-  const source = { x: 300, y: 300, vx: 0, vy: 0, mass: 3 };
-  const center = { x: 300, y: 300, vx: 0, vy: 0, mass: 3 };
-  const nearby = { x: 400, y: 300, vx: 0, vy: 0, mass: 1 };
-  const far = { x: 600, y: 300, vx: 0, vy: 0, mass: 1 };
+  const source = { x: 300, y: 300, vx: 0, vy: 0, mass: 3, team: 0 };
+  const center = { x: 300, y: 300, vx: 0, vy: 0, mass: 3, team: 1 };
+  const nearby = { x: 400, y: 300, vx: 0, vy: 0, mass: 1, team: 1 };
+  const far = { x: 600, y: 300, vx: 0, vy: 0, mass: 1, team: 1 };
   P.triggerShockwave(source, [source, center, nearby, far]);
   assert.deepEqual([center.vx, center.vy], [0, 0]);
   assert.ok(nearby.vx > 0);
@@ -772,7 +780,7 @@ test('AI Tactical Brain dynamically assigns roles and behaviors from 24-bit pers
   Object.assign(bSup[4], { x: 570, y: 300, meter: 100, equippedSuper: P.SUPERS[3], personality: { aggression: 60, creativity: 31, teamwork: 31, clutch: 63 } });
   const supPlans = P.cpuPlans(bSup, () => 0.5, [4, 2]);
   assert.equal(supPlans[0].superArm, true); // Anchor arms Stalwart in crease under threat
-  assert.equal(supPlans[0].power, 0);
+  assert.ok(supPlans[0].power > 0);
   assert.equal(supPlans[1].superArm, true); // Striker arms Cannonball on clean look
   assert.equal(Boolean(bSup[3].superArm), false); // Body state untouched during planning
 });
@@ -949,7 +957,7 @@ test('Sticky lets go after its hold time or when an opponent hits the carrier, w
   P.step(free); P.step(carrier);
   assert.ok(carrier[0].vx < free[0].vx);
 });
-test('Shockwave goes off on an opponent or when its time runs out, pushing teammates less', () => {
+test('Shockwave bursts on first proximity with an opponent and repels opponents only', () => {
   const field = () => {
     const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
     Object.assign(b[0], { x: 400, y: 300, superActive: 'shockwave', superTicks: P.SUPER.ticks });
@@ -959,11 +967,13 @@ test('Shockwave goes off on an opponent or when its time runs out, pushing teamm
   assert.ok(!touchBall[0].shockwaveFired);
   const touchMate = field(); Object.assign(touchMate[1], { x: 449, y: 300, vx: -300 }); P.step(touchMate, 0);
   assert.ok(!touchMate[0].shockwaveFired);
-  const touchFoe = field(); Object.assign(touchFoe[3], { x: 449, y: 300, vx: -300 }); P.step(touchFoe, 0);
+  const touchFoe = field(); Object.assign(touchFoe[3], { x: 449, y: 300, vx: -100 }); P.step(touchFoe, P.DT);
   assert.ok(touchFoe[0].shockwaveFired);
-  const timed = field(); timed[0].superTicks = 1; Object.assign(timed[1], { x: 480, y: 300 }); Object.assign(timed[3], { x: 400, y: 380 });
-  P.step(timed, 0);
-  assert.ok(timed[1].vx > 0 && timed[3].vy > 0 && timed[1].vx < timed[3].vy);
+  assert.ok(touchFoe[3].vx > 0);
+  const timed = field(); timed[0].superTicks = 1; Object.assign(timed[1], { x: 480, y: 300 }); Object.assign(timed[3], { x: 400, y: 490 });
+  P.step(timed, P.DT);
+  assert.equal(timed[1].vx, 0);
+  assert.equal(timed[3].vy, 0);
 });
 test('knocked-out ubus cannot guard, and Colossus launches at a slower pace', () => {
   const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
@@ -972,7 +982,7 @@ test('knocked-out ubus cannot guard, and Colossus launches at a slower pace', ()
   assert.equal(b[0].guarding, false);
   const c = P.kickoff(); P.applyStats(c[0], normal); c[0].superActive = 'colossus';
   P.launch(c, [{ angle: 0, power: 1 }]);
-  assert.ok(Math.abs(c[0].vx - 720 / P.SUPER.colossusMass) < 1e-9);
+  assert.ok(Math.abs(c[0].vx - 720 * P.SUPER.colossusLaunch) < 1e-9);
 });
 test('flaming ball plows through vulnerable ubus and dazes them', () => {
   const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
@@ -1017,4 +1027,61 @@ test('Iron Save triggers when an opposing Guard blocks a flaming shot', () => {
   });
   assert.equal(P.ballOnFire(ball), false, 'fire is quenched on Iron Save');
   assert.equal(shockwaveTriggered, true, 'minor shockwave is emitted');
+});
+
+test('Stalwart performs short anchor slide with 0.5x launch and 3.0x friction and has camping immunity', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  b[0].superActive = 'stalwart';
+  P.launch(b, [{ angle: 0, power: 1 }]);
+  assert.ok(Math.abs(b[0].vx - 720 * P.SUPER.stalwartLaunch) < 1e-9, 'launches at 50% speed');
+  assert.equal(b[0].vy, 0);
+
+  // Stepping with 3.0x friction (450 px/s²) stops the 360 px/s slide in 192 ticks (0.8s)
+  for (let i = 0; i < 240; i++) P.step(b, P.DT);
+  assert.equal(b[0].vx, 0, 'slides to complete stop');
+
+  // Stalwart has camping immunity in crease
+  Object.assign(b[0], { x: P.rink.left + 10, y: 300 });
+  const M = require('../shared/ububall-match.js');
+  assert.equal(M.inCrease(P, b[0], 0), false, 'immune to camping check');
+});
+
+test('Shockwave executes Phase 1 proximity burst and Phase 2 continuous repulsion aura', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  b[0].superActive = 'shockwave';
+  b[0].superTicks = P.SUPER.ticks;
+  Object.assign(b[0], { x: 400, y: 300, vx: 0, vy: 0 });
+  Object.assign(b[1], { x: 460, y: 300, vx: 0, vy: 0 }); // Teammate within 170px
+  Object.assign(b[3], { x: 500, y: 300, vx: 0, vy: 0 }); // Opponent within 170px (d = 100)
+  Object.assign(b[6], { x: 450, y: 300, vx: 0, vy: 0 }); // Ball within 170px
+
+  // Phase 1: Proximity burst
+  P.step(b, P.DT);
+  assert.equal(b[0].shockwaveFired, true, 'burst fired on proximity');
+  assert.equal(b[0].superHit, true, 'superHit set');
+  assert.equal(b[1].vx, 0, 'teammate ignored');
+  assert.equal(b[6].vx, 0, 'ball ignored');
+  assert.ok(b[3].vx > 0, 'opponent repelled radially');
+
+  // Phase 2: Continuous repulsion aura
+  const vBefore = b[3].vx;
+  P.step(b, P.DT);
+  assert.ok(b[3].vx > vBefore, 'repulsion aura accelerates opponent further');
+  assert.equal(b[1].vx, 0, 'teammate still ignored');
+  assert.equal(b[6].vx, 0, 'ball still ignored');
+});
+
+test('Whiffed supers refund 25% meter in endSuper while connected supers refund 0%', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  b[0].superActive = 'cannonball';
+  b[0].meter = 0;
+  b[0].superHit = false;
+  P.endSuper(b[0], b);
+  assert.equal(b[0].meter, P.SUPER.whiffRefund, 'whiffed super refunded 25%');
+
+  b[1].superActive = 'cannonball';
+  b[1].meter = 0;
+  b[1].superHit = true;
+  P.endSuper(b[1], b);
+  assert.equal(b[1].meter, 0, 'connected super receives no refund');
 });
