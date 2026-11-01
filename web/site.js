@@ -417,8 +417,11 @@
     const supersCaption = document.createElement('span'), supersIcons = document.createElement('div');
     supersCaption.textContent = 'Supers';
     for (const id of new Set(item.model.supers.map(slot => slot % 8))) {
+      const mastery = ububallPhysics.superMastery(item.model.supers, id);
       const power = ububallPhysics.SUPERS[id], icon = document.createElement('img');
-      icon.src = power.icon; icon.alt = power.name; icon.title = `${power.name}: ${power.desc}`;
+      icon.src = power.icon; icon.alt = mastery.displayName;
+      const masteryDesc = mastery.copies > 1 ? ` (+${(mastery.bonusTicks / 240).toFixed(1)}s duration, +${mastery.bonusRefund}% refund)` : '';
+      icon.title = `${mastery.displayName}: ${power.desc}${masteryDesc}`;
       supersIcons.append(icon);
     }
     supers.append(supersCaption, supersIcons);

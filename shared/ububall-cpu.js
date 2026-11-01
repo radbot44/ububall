@@ -162,7 +162,7 @@
     for (const b of state.bodies) {
       b.superArm = false; b.superActive = null;
       delete b.voice; delete b.name;
-      if (b.equippedSuper) b.equippedSuper = { id: b.equippedSuper.id, key: b.equippedSuper.key };
+      if (b.equippedSuper) b.equippedSuper = { id: b.equippedSuper.id, key: b.equippedSuper.key, bonusTicks: b.equippedSuper.bonusTicks, bonusRefund: b.equippedSuper.bonusRefund };
     }
     let best = legacy(state, team), simulations = 0, ticks = 0, evaluated = 0;
     const opponent = legacy(state, 1 - team);

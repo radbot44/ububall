@@ -84,7 +84,10 @@ class MatchRoom {
       stats.push(classic ? {} : model.stats);
       rules.applyStats(P, b, stats[i], s.mode);
       b.playerIndex = i;
-      b.equippedSuper = classic ? null : P.SUPERS[entry.superId];
+      const mastery = classic ? null : P.superMastery(model.supers, entry.superId);
+      b.equippedSuper = classic ? null : { ...P.SUPERS[entry.superId], ...mastery };
+      b.superBonusTicks = mastery?.bonusTicks || 0;
+      b.superBonusRefund = mastery?.bonusRefund || 0;
       b.meter = classic ? 0 : previous ? previous[i].meter : Math.min(100, model.rating / 1020 * 100);
       b.stunned = previous ? Boolean(previous[i].stunned) : false;
       b.superArm = false;

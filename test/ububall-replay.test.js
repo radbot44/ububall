@@ -13,7 +13,10 @@ function setup(seed, mode) {
     const dna = Uint8Array.from({ length: 128 }, () => Math.floor(random() * 256)), model = U.decode(dna);
     const classic = M.rule(mode, 'classic'), raw = classic ? {} : model.stats;
     stats.push(raw); M.applyStats(P, b, raw, mode);
-    b.equippedSuper = classic ? null : P.SUPERS[model.supers[0] % 8];
+    const mastery = classic ? null : P.superMastery(model.supers, model.supers[0] % 8);
+    b.equippedSuper = classic ? null : { ...P.SUPERS[model.supers[0] % 8], ...mastery };
+    b.superBonusTicks = mastery?.bonusTicks || 0;
+    b.superBonusRefund = mastery?.bonusRefund || 0;
     // Full meters, so supers are armed and replayed too.
     b.meter = classic ? 0 : 100;
     ubus.push({ dna: U.toCode(dna), super: b.equippedSuper?.id ?? null });
@@ -74,7 +77,7 @@ test('a saved replay re-simulates every turn exactly, through the .ububall file'
 
 // The physics this version of the replay format plays back. A change to how turns play out must
 // bump P.VERSION, which makes older replays refuse to play; then record the new fingerprint here.
-const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: 'dbfd626c43017f2c' };
+const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: 'dbfd626c43017f2c', 4: '7d5ec9c25498d34c' };
 test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
   const ends = [...replay.turns, ...standard.turns].map(replayTurn);

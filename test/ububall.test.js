@@ -1085,3 +1085,78 @@ test('Whiffed supers refund 25% meter in endSuper while connected supers refund 
   P.endSuper(b[1], b);
   assert.equal(b[1].meter, 0, 'connected super receives no refund');
 });
+
+test('Super Mastery derives level, suffix, duration and refund bonus from DNA duplicates', () => {
+  // 1 copy = Base
+  const base = P.superMastery([0, 1, 2, 3], 0);
+  assert.equal(base.level, 1);
+  assert.equal(base.suffix, '');
+  assert.equal(base.displayName, 'Stalwart');
+  assert.equal(base.bonusTicks, 0);
+  assert.equal(base.bonusRefund, 0);
+
+  // 2 copies = Level 2 (II)
+  const l2 = P.superMastery([3, 1, 3, 2], 3);
+  assert.equal(l2.level, 2);
+  assert.equal(l2.suffix, ' II');
+  assert.equal(l2.displayName, 'Cannonball II');
+  assert.equal(l2.bonusTicks, 120);
+  assert.equal(l2.bonusRefund, 5);
+
+  // 3 copies = Level 3 (III)
+  const l3 = P.superMastery([4, 4, 1, 4], 4);
+  assert.equal(l3.level, 3);
+  assert.equal(l3.suffix, ' III');
+  assert.equal(l3.displayName, 'Magnet III');
+  assert.equal(l3.bonusTicks, 240);
+  assert.equal(l3.bonusRefund, 10);
+
+  // 4 copies = Master
+  const master = P.superMastery([5, 5, 5, 5], 5);
+  assert.equal(master.level, 4);
+  assert.equal(master.suffix, ' Master');
+  assert.equal(master.displayName, 'Colossus Master');
+  assert.equal(master.bonusTicks, 480);
+  assert.equal(master.bonusRefund, 20);
+});
+
+test('Super Mastery extends super duration and Sticky hold duration', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  b[0].meter = 100;
+  const mastery = P.superMastery([4, 4, 1, 2], 4); // 2 copies -> +120 ticks
+  b[0].equippedSuper = { ...P.SUPERS[4], ...mastery };
+  P.startTurn(b, [{ angle: 0, power: 0, spin: 0, superArm: true }]);
+  assert.equal(b[0].superActive, 'magnet');
+  assert.equal(b[0].superTicks, P.SUPER.ticks + 120);
+
+  // Sticky hold duration
+  const stickyMaster = P.superMastery([2, 2, 2, 2], 2); // 4 copies -> +480 ticks
+  const bs = P.kickoff(); bs.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  bs[0].meter = 100;
+  bs[0].equippedSuper = { ...P.SUPERS[2], ...stickyMaster };
+  P.startTurn(bs, [{ angle: 0, power: 0, spin: 0, superArm: true }]);
+  assert.equal(bs[0].superHoldTicks, P.SUPER.holdTicks + 480);
+});
+
+test('Super Mastery grants refund on hit and stacks with whiff refund, without double refunding', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  // Level 2 (5% bonus refund): connected super gets 5%
+  b[0].superActive = 'cannonball';
+  b[0].meter = 0;
+  b[0].superHit = true;
+  b[0].equippedSuper = { ...P.SUPERS[3], bonusRefund: 5 };
+  P.endSuper(b[0], b);
+  assert.equal(b[0].meter, 5, 'connected Level 2 super refunded 5% mastery bonus');
+
+  // Second endSuper call does not grant duplicate refund
+  P.endSuper(b[0], b);
+  assert.equal(b[0].meter, 5, 'duplicate endSuper call does not grant double refund');
+
+  // Master Level (20% bonus refund): whiffed super gets 20% + 25% = 45%
+  b[1].superActive = 'cannonball';
+  b[1].meter = 0;
+  b[1].superHit = false;
+  b[1].equippedSuper = { ...P.SUPERS[3], bonusRefund: 20 };
+  P.endSuper(b[1], b);
+  assert.equal(b[1].meter, 45, 'whiffed Master super refunded 45% (25% whiff + 20% mastery)');
+});

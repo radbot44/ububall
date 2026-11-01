@@ -73,7 +73,10 @@ function ububallOnline(hooks) {
         const model = ubu.decode(ubu.fromCode(entry.dna)), previous = choices[i];
         choices[i] = { ...entry, superId: previous?.dna === entry.dna ? previous.superId : model.supers[0] % 8 };
         portrait.append(ubuRender(model, 'ball-thumb'));
-        for (const superId of new Set(model.supers.map(n => n % 8))) supers.add(new Option(ububallPhysics.SUPERS[superId].name, String(superId)));
+        for (const superId of new Set(model.supers.map(n => n % 8))) {
+          const mastery = ububallPhysics.superMastery(model.supers, superId);
+          supers.add(new Option(mastery.displayName, String(superId)));
+        }
         supers.value = choices[i].superId;
       }
       select.onchange = selected; selected();

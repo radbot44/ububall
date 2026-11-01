@@ -484,11 +484,14 @@ test('goal camping warns a crowded crease, then cards its defenders if it stays 
   // The card lasts one turn.
   M.finishTurn(P,bodies,[],[0,0],null,'standard',{},fouls); assert.ok(bodies.every(b=>!b.carded));
 });
-test('corner stalling warns after four turns, then cards the larger team there and resets the ball', () => {
+test('corner stalling warns after two turns, then cards the larger team there and resets the ball on the third turn', () => {
   const fouls=M.newFouls(), corner={x:90,y:90}, place={0:{x:120,y:75},3:{x:75,y:125},4:{x:135,y:130}};
-  for (let n=1;n<=4;n++) { foulTurn(fouls,place,corner); assert.equal(fouls.cornerTurns,n); }
+  for (let n=1;n<=2;n++) { foulTurn(fouls,place,corner); assert.equal(fouls.cornerTurns,n); }
   assert.equal(fouls.corner,0); assert.ok(!fouls.faceoff);
-  // The ball leaving its corner during play ends the count at once.
+  // Ball bouncing within cornerExit hysteresis margin (145 px from boards) does not lapse corner count.
+  const bounce=structuredClone(fouls); const bounceBodies=P.kickoff(); bounceBodies[6].x=190; bounceBodies[6].y=90;
+  M.lapseFouls(P,bounceBodies,bounce); assert.equal(bounce.corner,0); assert.equal(bounce.cornerTurns,2);
+  // The ball leaving beyond cornerExit hysteresis during play ends the count at once.
   const lapsed=structuredClone(fouls); M.lapseFouls(P,P.kickoff(),lapsed); assert.equal(lapsed.corner,null); assert.equal(lapsed.cornerTurns,0);
   const bodies=foulTurn(fouls,{...place,0:{x:500,y:300}},corner);
   assert.ok(fouls.faceoff); assert.deepEqual(fouls.cards,[3,4]); assert.equal(fouls.corner,null);
@@ -496,9 +499,9 @@ test('corner stalling warns after four turns, then cards the larger team there a
   assert.equal(bodies[6].x,500); assert.equal(bodies[6].y,240); assert.ok(!bodies[0].carded);
   // An even corner cards nobody; moving the ball to another corner restarts the count.
   const tie=M.newFouls();
-  for (let n=0;n<5;n++) foulTurn(tie,{0:{x:120,y:75},3:{x:75,y:125}},corner);
+  for (let n=0;n<3;n++) foulTurn(tie,{0:{x:120,y:75},3:{x:75,y:125}},corner);
   assert.ok(tie.faceoff); assert.deepEqual(tie.cards,[]);
-  const moved=M.newFouls(); for (let n=0;n<3;n++) foulTurn(moved,{},corner);
+  const moved=M.newFouls(); for (let n=0;n<2;n++) foulTurn(moved,{},corner);
   foulTurn(moved,{},{x:910,y:510}); assert.equal(moved.corner,3); assert.equal(moved.cornerTurns,1);
 });
 test('a camping warning lapses during play once a defender leaves the crease, and the turn end only warns again', () => {
@@ -519,7 +522,7 @@ test('a carded ubu touches nothing, and a corner reset starts a fresh play', () 
   Object.assign(bodies[0],{x:400,y:300,carded:true}); Object.assign(bodies[6],{x:460,y:300,vx:-600});
   for (let t=0;t<80;t++) P.step(bodies,P.DT);
   assert.ok(bodies[6].x<330); assert.equal(bodies[0].x,400);
-  const state=shotState({x:90,y:90},{3:{x:120,y:75}},{fouls:{...M.newFouls(),corner:0,cornerTurns:4},lastTouch:[null,3],credit:{3:1}});
+  const state=shotState({x:90,y:90},{3:{x:120,y:75}},{fouls:{...M.newFouls(),corner:0,cornerTurns:2},lastTouch:[null,3],credit:{3:1}});
   const next=M.resolveTurn(P,state,Array.from({length:6},still)).state;
   assert.ok(next.fouls.faceoff); assert.deepEqual(next.fouls.cards,[3]);
   assert.deepEqual(next.lastTouch,[null,null]); assert.deepEqual(next.credit,{});

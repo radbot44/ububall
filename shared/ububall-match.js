@@ -324,10 +324,10 @@
   // stalling: when the ball ends `stallTurns` turns in a row in one corner the field is warned; if the
   // next turn ends with it still there, the team with more ubus in that corner has them carded (a tie
   // cards nobody) and the ball is reset to centre ice. A warning lapses the moment it stops applying
-  // during play, and a corner count ends once the ball leaves its corner (see `lapseFouls`). A carded
-  // ubu loses its meter, returns to its spawn and sits out the next turn, touching nothing. The crease
-  // radius around the goal mouth's centre is tuning.
-  const FOULS = Object.freeze({ crease: 80, stallTurns: 4 });
+  // during play, and a corner count ends once the ball leaves its corner beyond the `cornerExit` hysteresis
+  // margin (see `lapseFouls`). A carded ubu loses its meter, returns to its spawn and sits out the next
+  // turn, touching nothing. The crease radius around the goal mouth's centre is tuning.
+  const FOULS = Object.freeze({ crease: 80, stallTurns: 2, cornerExit: 45 });
   function newFouls() { return { crease: [false, false], corner: null, cornerTurns: 0, cards: [], faceoff: false }; }
   function inCrease(P, b, team) {
     if (b.superActive === 'stalwart') return false;
@@ -352,7 +352,7 @@
   function lapseFouls(P, bodies, fouls) {
     for (const team of [0, 1]) if (fouls.crease[team] && !camping(P, bodies, team)) fouls.crease[team] = false;
     const ball = bodies[6];
-    if (fouls.corner !== null && cornerOf(P, ball.x, ball.y) !== fouls.corner) { fouls.corner = null; fouls.cornerTurns = 0; }
+    if (fouls.corner !== null && cornerOf(P, ball.x, ball.y, FOULS.cornerExit) !== fouls.corner) { fouls.corner = null; fouls.cornerTurns = 0; }
   }
   function callFouls(P, bodies, fouls) {
     const ubus = bodies.slice(0, 6), ball = bodies[6], carded = new Set();

@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 3;
+  const VERSION = 4;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -55,6 +55,17 @@
     { id: 6, key: 'shockwave', name: 'Shockwave', desc: 'Blast nearby opponents away when one comes close, then repel opposing skaters for the rest of the 3 seconds.', icon: 'assets/06_shockwave.png' },
     { id: 7, key: 'ghost', name: 'Ghost', desc: 'Phase through opposing players without collision.', icon: 'assets/07_ghost.png' }
   ]);
+  // Super Mastery (duplicate DNA super slots): 1 copy = Base (no suffix, +0s, +0%), 2 copies = Level 2 (' II', +0.5s, +5%),
+  // 3 copies = Level 3 (' III', +1.0s, +10%), 4 copies = Master (' Master', +2.0s, +20%).
+  function superMastery(supers, superId) {
+    if (superId == null) return { level: 1, copies: 1, suffix: '', displayName: '', bonusTicks: 0, bonusRefund: 0 };
+    const copies = Array.isArray(supers) ? supers.filter(s => (s % 8) === superId).length : 1;
+    const base = SUPERS[superId] || { name: 'Super' };
+    if (copies >= 4) return { level: 4, copies, suffix: ' Master', displayName: base.name + ' Master', bonusTicks: 480, bonusRefund: 20 };
+    if (copies === 3) return { level: 3, copies, suffix: ' III', displayName: base.name + ' III', bonusTicks: 240, bonusRefund: 10 };
+    if (copies === 2) return { level: 2, copies, suffix: ' II', displayName: base.name + ' II', bonusTicks: 120, bonusRefund: 5 };
+    return { level: 1, copies: Math.max(1, copies), suffix: '', displayName: base.name, bonusTicks: 0, bonusRefund: 0 };
+  }
   function multiplier(raw) {
     if (!Number.isInteger(raw) || raw < 0 || raw > 255) throw new RangeError('Stat must be an integer from 0 to 255.');
     // Exponential: every stat point changes the result by the same percentage, so mid-range
@@ -228,7 +239,7 @@
     }
     if (typeof onShockwave === 'function') onShockwave(source, radius, 'iron');
   }
-  // Ends a ubu's super: Colossus shrinks back, Sticky ball is let go, and whiff refund is awarded if unspent.
+  // Ends a ubu's super: Colossus shrinks back, Sticky ball is let go, and mastery/whiff refunds are awarded.
   function endSuper(b, bodies) {
     if (b.colossusApplied) {
       if (b.baseRadius) b.radius = b.baseRadius;
@@ -237,10 +248,14 @@
     }
     const ball = bodies?.find(o => o.team === -1);
     if (ball?.stuckTo === b) { ball.stuckTo = null; ball.stickOffset = null; }
-    if ((b.superActive || b.usedSuperThisTurn) && !b.superHit) {
-      b.meter = Math.min(100, (b.meter || 0) + SUPER.whiffRefund);
+    if ((b.superActive || b.usedSuperThisTurn) && !b.superRefunded) {
+      b.superRefunded = true;
+      const bonusRefund = b.equippedSuper?.bonusRefund ?? b.superBonusRefund ?? 0;
+      const whiff = !b.superHit ? SUPER.whiffRefund : 0;
+      const refund = bonusRefund + whiff;
+      if (refund > 0) b.meter = Math.min(100, (b.meter || 0) + refund);
     }
-    b.superActive = null; b.superTicks = 0; b.shockwaveFired = false; b.superHit = false;
+    b.superActive = null; b.superTicks = 0; b.superHoldTicks = 0; b.shockwaveFired = false; b.superHit = false;
   }
   function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, onSuper = null) {
     const isBall = a.team === -1 || b.team === -1;
@@ -589,7 +604,7 @@
         }
       }
     }
-    if (ball?.stuckTo && ++ball.stuckTicks >= SUPER.holdTicks) endSuper(ball.stuckTo, bodies);
+    if (ball?.stuckTo && ++ball.stuckTicks >= (ball.stuckTo.superHoldTicks || SUPER.holdTicks)) endSuper(ball.stuckTo, bodies);
     for (const b of bodies) {
       if (b.team === -1 && b.stuckTo) {
         const host = b.stuckTo;
@@ -994,9 +1009,13 @@
       if (!b.stunned && (b.superArm || plans[i]?.superArm) && b.meter >= 100) {
         b.usedSuperThisTurn = true;
         b.meter = 0;
-        b.superActive = b.equippedSuper.key; b.superTicks = SUPER.ticks;
+        b.superActive = b.equippedSuper.key;
+        const bonusTicks = b.equippedSuper?.bonusTicks ?? b.superBonusTicks ?? 0;
+        b.superTicks = SUPER.ticks + bonusTicks;
+        b.superHoldTicks = SUPER.holdTicks + bonusTicks;
         b.superArm = false;
         b.superHit = false;
+        b.superRefunded = false;
         if (['stalwart', 'colossus', 'ghost'].includes(b.superActive)) onSuper?.(b.superActive, 'launch', b);
       }
     });
@@ -1040,6 +1059,6 @@
     }
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS };
   }
-  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, ballOnFire, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, ballOnFire, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, superMastery, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

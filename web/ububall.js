@@ -1115,7 +1115,10 @@
         b.voice = entry.model.voice;
         b.personality = entry.model.personality;
         b.name = entry.model.parts?.fullName;
-        b.equippedSuper = entry.equippedSuper || P.SUPERS[(entry.model.supers?.[0] ?? i) % 8];
+        const sObj = entry.equippedSuper || resolveEquippedSuper(entry, i);
+        b.equippedSuper = sObj;
+        b.superBonusTicks = sObj?.bonusTicks || 0;
+        b.superBonusRefund = sObj?.bonusRefund || 0;
         if (isNewMatch) {
           const rating = entry.model.rating ?? 511;
           b.meter = Math.min(100, Math.max(0, (rating / 1020) * 100));
@@ -1124,7 +1127,7 @@
           b.meter = oldBodies?.[i]?.meter ?? 0;
           b.stunned = oldBodies?.[i]?.stunned || false;
         }
-        if (classicMode()) { b.meter = 0; b.equippedSuper = null; }
+        if (classicMode()) { b.meter = 0; b.equippedSuper = null; b.superBonusTicks = 0; b.superBonusRefund = 0; }
         b.superArm = false;
         b.superActive = null;
       }
@@ -1515,12 +1518,14 @@
       const fillNode = $(`super-fill-${i}`);
       if (fillNode) setMeterFill(fillNode, b.meter);
       const textNode = $(`super-name-text-${i}`);
-      if (textNode) textNode.textContent = b.equippedSuper?.name || 'Stalwart';
+      const superTitle = b.equippedSuper?.displayName || b.equippedSuper?.name || 'Stalwart';
+      if (textNode) textNode.textContent = superTitle;
       const iconNode = $(`super-icon-${i}`);
       if (iconNode && b.equippedSuper?.icon) {
         iconNode.src = b.equippedSuper.icon;
-        iconNode.alt = b.equippedSuper.name;
-        iconNode.title = `${b.equippedSuper.name}: ${b.equippedSuper.desc}`;
+        iconNode.alt = superTitle;
+        const masteryBonus = b.equippedSuper?.copies > 1 ? ` (+${(b.equippedSuper.bonusTicks / 240).toFixed(1)}s duration, +${b.equippedSuper.bonusRefund}% refund)` : '';
+        iconNode.title = `${superTitle}: ${b.equippedSuper.desc}${masteryBonus}`;
       }
       if (i < 3) {
         const armBtn = $(`super-arm-${i}`);
@@ -1536,10 +1541,13 @@
     const hudSuperIcon = $('stadium-super-icon');
     if (hudSuperBtn && curB) {
       const s = curB.equippedSuper || P.SUPERS[0];
+      const sName = s.displayName || s.name;
+      if (hudSuperText) hudSuperText.textContent = sName;
       if (hudSuperIcon && s?.icon) {
         hudSuperIcon.src = s.icon;
-        hudSuperIcon.alt = s.name;
-        hudSuperIcon.title = `${s.name}: ${s.desc}`;
+        hudSuperIcon.alt = sName;
+        const masteryBonus = s.copies > 1 ? ` (+${(s.bonusTicks / 240).toFixed(1)}s duration, +${s.bonusRefund}% refund)` : '';
+        hudSuperIcon.title = `${sName}: ${s.desc}${masteryBonus}`;
       }
       const canArm = planning && (curB.meter >= 100) && !curB.stunned;
       hudSuperBtn.disabled = !canArm;
@@ -1630,10 +1638,10 @@
       $('team-selector').append(shortcut);
       const lineup = document.createElement('div'); lineup.className = 'home-ubu';
       lineup.append(ubuRender(entry.model, 'home-ubu-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }));
-      const superInfo = classicMode() ? null : entry.equippedSuper || P.SUPERS[(entry.model.supers?.[0] ?? i) % 8];
+      const superInfo = classicMode() ? null : entry.equippedSuper || resolveEquippedSuper(entry, i);
       if (superInfo) {
         const superLabel = document.createElement('small');
-        superLabel.append(Object.assign(document.createElement('img'), { src: superInfo.icon, alt: '' }), superInfo.name);
+        superLabel.append(Object.assign(document.createElement('img'), { src: superInfo.icon, alt: '' }), superInfo.displayName || superInfo.name);
         lineup.append(superLabel);
       }
       $('home-lineup').append(lineup);
@@ -3323,6 +3331,12 @@
     flushMeters();
     requestAnimationFrame(frame);
   }
+  function resolveEquippedSuper(entry, slotIndex = 0) {
+    if (!entry) return P.SUPERS[0];
+    const id = entry.equippedSuper?.id ?? ((entry.model?.supers?.[0] ?? slotIndex) % 8);
+    const mastery = P.superMastery(entry.model?.supers, id);
+    return { ...P.SUPERS[id], ...mastery };
+  }
   function updateRosterSuperPicker() {
     const grid = $('roster-super-grid');
     grid.replaceChildren();
@@ -3330,14 +3344,19 @@
     if (!entry) return;
     const available = entry.model?.supers ? Array.from(new Set(entry.model.supers.map(s => s % 8))) : [0, 1, 2, 3, 4, 5, 6, 7];
     const list = available.length ? available.map(id => P.SUPERS[id]) : P.SUPERS;
-    const currentId = entry.equippedSuper?.id ?? ((entry.model?.supers?.[0] ?? rosterSlot) % 8);
-    $('roster-super-name').textContent = P.SUPERS[currentId].name + ': ' + P.SUPERS[currentId].desc;
+    const currentSuper = resolveEquippedSuper(entry, rosterSlot);
+    const currentId = currentSuper.id;
+    const currentBonus = currentSuper.copies > 1 ? ` (+${(currentSuper.bonusTicks / 240).toFixed(1)}s duration, +${currentSuper.bonusRefund}% refund)` : '';
+    $('roster-super-name').textContent = currentSuper.displayName + ': ' + currentSuper.desc + currentBonus;
     for (const s of list) {
+      const sObj = resolveEquippedSuper({ model: entry.model, equippedSuper: s }, rosterSlot);
       const btn = document.createElement('button');
-      btn.type = 'button'; btn.className = 'super-picker-btn'; btn.title = `${s.name}: ${s.desc}`;
+      btn.type = 'button'; btn.className = 'super-picker-btn';
+      const bonus = sObj.copies > 1 ? ` (+${(sObj.bonusTicks / 240).toFixed(1)}s duration, +${sObj.bonusRefund}% refund)` : '';
+      btn.title = `${sObj.displayName}: ${s.desc}${bonus}`;
       btn.setAttribute('aria-pressed', String(s.id === currentId));
-      btn.append(Object.assign(document.createElement('img'), { src: s.icon, alt: '' }), Object.assign(document.createElement('span'), { textContent: s.name }));
-      btn.onclick = () => { draft[rosterSlot] = { ...draft[rosterSlot], equippedSuper: s }; rosterSlots(); };
+      btn.append(Object.assign(document.createElement('img'), { src: s.icon, alt: '' }), Object.assign(document.createElement('span'), { textContent: sObj.displayName }));
+      btn.onclick = () => { draft[rosterSlot] = { ...draft[rosterSlot], equippedSuper: sObj }; rosterSlots(); };
       grid.append(btn);
     }
   }
@@ -3346,9 +3365,9 @@
     draft.forEach((entry, i) => {
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'roster-slot';
-      const superObj = entry.equippedSuper || P.SUPERS[(entry.model?.supers?.[0] ?? i) % 8];
+      const superObj = resolveEquippedSuper(entry, i);
       const superLabel = document.createElement('small');
-      superLabel.append(Object.assign(document.createElement('img'), { src: superObj.icon, alt: '' }), Object.assign(document.createElement('span'), { textContent: superObj.name }));
+      superLabel.append(Object.assign(document.createElement('img'), { src: superObj.icon, alt: '' }), Object.assign(document.createElement('span'), { textContent: superObj.displayName }));
       button.append(ubuRender(entry.model, 'roster-slot-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }), superLabel);
       button.setAttribute('aria-pressed', String(i === rosterSlot));
       button.setAttribute('aria-label', `Slot ${i + 1}: ${entry.model.parts.fullName}`);
@@ -3814,7 +3833,11 @@
       const rosterKey = JSON.stringify(s.rosters);
       if (rosterKey !== onlineRoster) {
         onlineRoster = rosterKey;
-        teamEntries = onlineOrder(s.rosters.flat(), s.seat).map(entry => ({ model: ubu.decode(ubu.fromCode(entry.dna)), dna: entry.dna, equippedSuper: P.SUPERS[entry.superId] }));
+        teamEntries = onlineOrder(s.rosters.flat(), s.seat).map(entry => {
+          const model = ubu.decode(ubu.fromCode(entry.dna));
+          const mastery = P.superMastery(model.supers, entry.superId);
+          return { model, dna: entry.dna, equippedSuper: { ...P.SUPERS[entry.superId], ...mastery } };
+        });
         roster = teamEntries.slice(0, 3); buildTeam();
       }
       recordOnline(s);
@@ -3858,7 +3881,10 @@
               const model = ubu.decode(ubu.fromCode(entry.dna));
               b.voice = model.voice;
               b.name = model.parts?.fullName;
-              b.equippedSuper = classic ? null : P.SUPERS[entry.superId];
+              const mastery = classic ? null : P.superMastery(model.supers, entry.superId);
+              b.equippedSuper = classic ? null : { ...P.SUPERS[entry.superId], ...mastery };
+              b.superBonusTicks = mastery?.bonusTicks || 0;
+              b.superBonusRefund = mastery?.bonusRefund || 0;
             }
           }
         });

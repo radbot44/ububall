@@ -10,8 +10,8 @@
   // Body fields a snapshot keeps, in file order: everything a turn's simulation reads or writes.
   const NUMBERS = ['x', 'y', 'vx', 'vy', 'omega', 'rotation', 'radius', 'mass', 'friction', 'grip', 'maxSpin', 'team', 'slot', 'curveFactor',
     'sizeMult', 'baseMass', 'baseRadius', 'impulse', 'curveMult', 'bounciness', 'wallBounce', 'power', 'reach', 'strength', 'stability',
-    'meter', 'meterTick', 'daze', 'spinStrike', 'superTicks', 'stuckTicks', 'fireTicks', 'strikerPower', 'strikerTeam'];
-  const FLAGS = ['superArm', 'guarding', 'usedSuperThisTurn', 'superHit', 'openingShot', 'spinStruck', 'shockwaveFired', 'carded', 'colossusApplied', 'stunned', 'stunnedNext', 'onFire'];
+    'meter', 'meterTick', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'strikerPower', 'strikerTeam'];
+  const FLAGS = ['superArm', 'guarding', 'usedSuperThisTurn', 'superHit', 'superRefunded', 'openingShot', 'spinStruck', 'shockwaveFired', 'carded', 'colossusApplied', 'stunned', 'stunnedNext', 'onFire'];
   const GUARD = ['reach', 'friction', 'strength', 'stability', 'bounciness'];
   const BODY = [...NUMBERS, ...FLAGS, 'superActive', 'equippedSuper', 'guardBase', 'stuckTo', 'stickOffset'];
   const REQUIRED = ['x', 'y', 'vx', 'vy', 'omega', 'radius', 'mass', 'team'];
@@ -36,7 +36,9 @@
   function restore(snap) {
     const bodies = snap.map(b => {
       const out = { ...b };
-      if (b.equippedSuper != null) out.equippedSuper = P.SUPERS[b.equippedSuper];
+      if (b.equippedSuper != null) {
+        out.equippedSuper = { ...P.SUPERS[b.equippedSuper], bonusTicks: b.superBonusTicks || 0, bonusRefund: b.superBonusRefund || 0 };
+      }
       if (b.guardBase) out.guardBase = { ...b.guardBase };
       if (b.stickOffset) out.stickOffset = { ...b.stickOffset };
       return out;
