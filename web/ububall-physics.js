@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 5;
+  const VERSION = 6;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -16,9 +16,11 @@
   // Size trade-offs (tuning): as powers of the size multiplier, small ubus launch faster, curve and
   // re-steer more and strike spin harder; big ubus lose more speed off the boards.
   const SIZE = Object.freeze({ launch: -.28, agility: -.5, strike: -.5, boards: -.5 });
-  // Heat and Fire tuning: ignition threshold, duration ticks (~0.167 s), and sustain floor.
-  const HEAT = Object.freeze({ orange: .75, red: .85, redHot: .95, fire: .98, sustain: .70 });
-  const FIRE_TICKS = 40;
+  // Heat and fire tuning, as shares of MAX_SPEED (owner decision 2026-11-01): the ball glows orange
+  // from 540 px/s, red from 720 and red hot from 800; held above 840 for FIRE_TICKS (0.25 s) it
+  // catches fire, and burns until it drops to 504.
+  const HEAT = Object.freeze({ orange: 540 / MAX_SPEED, red: 720 / MAX_SPEED, redHot: 800 / MAX_SPEED, fire: 840 / MAX_SPEED, sustain: .70 });
+  const FIRE_TICKS = 60;
   function ballOnFire(ball) {
     return Boolean(ball && (ball.onFire || (ball.fireTicks && ball.fireTicks >= FIRE_TICKS)));
   }

@@ -221,11 +221,10 @@
     }
     s.path.points.push({ x: b.x, y: b.y, depth }); s.path.age = 0;
   }
-  // Ball heat by speed, as a share of full-launch speed (initial thresholds): a faint orange from
-  // 75%, sparks and a muted red from 85%, red hot at 95%. Held past 99.5% for FIRE_TICKS of play it
-  // catches fire, runs fully red and scorches the ice; dropping back below puts it out.
-  const HEAT = P.HEAT || { orange: .75, red: .85, redHot: .95, fire: .98, sustain: .70 };
-  const FIRE_TICKS = P.FIRE_TICKS || 40;
+  // Ball heat by speed (P.HEAT): a faint orange, then sparks and a muted red, then red hot. Held past
+  // the fire speed for FIRE_TICKS of play it catches fire, runs fully red and scorches the ice; it goes
+  // out when it slows to the sustain speed.
+  const { HEAT, FIRE_TICKS } = P;
   const BURN_LIFE = 20; // Seconds of play before a burn mark fades out.
   const speedShare = b => Math.hypot(b.vx, b.vy) / P.MAX_SPEED;
   let fireTime = 0, sizzle = null;
