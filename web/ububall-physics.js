@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 8;
+  const VERSION = 9;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -21,8 +21,9 @@
   // catches fire, and burns until it drops to 504.
   const HEAT = Object.freeze({ orange: 540 / MAX_SPEED, red: 720 / MAX_SPEED, redHot: 800 / MAX_SPEED, fire: 840 / MAX_SPEED, sustain: .70 });
   const FIRE_TICKS = 60;
-  // An Iron Save leaves the ball with this share of its speed off the Guard, dead at its feet
-  // (owner decision 2026-11-01), so the shooter gets no fast rebound.
+  // An Iron Save leaves the ball and the Guard each with this share of their speed off the hit
+  // (owner decision 2026-11-01): the ball dies at the Guard's feet and the Guard holds its ground,
+  // so the shooter gets no rebound and the save stays with the defence.
   const IRON_KEEP = .1;
   function ballOnFire(ball) {
     return Boolean(ball && (ball.onFire || (ball.fireTicks && ball.fireTicks >= FIRE_TICKS)));
@@ -521,8 +522,7 @@
       if (strikeBoost) ball.spinStruck = true; // Read and cleared by the caller, for a callout.
     }
     if (ironSave) {
-      const ball = a.team === -1 ? a : b;
-      ball.vx *= IRON_KEEP; ball.vy *= IRON_KEEP; ball.omega *= IRON_KEEP;
+      for (const body of [a, b]) { body.vx *= IRON_KEEP; body.vy *= IRON_KEEP; body.omega *= IRON_KEEP; }
     }
 
     if (typeof onCollide === 'function') {
@@ -1035,7 +1035,9 @@
     });
     startTurn(sim, predictedPlans);
     const paths = sim.map(b => [{ x: b.x, y: b.y, tick: 0 }]);
-    const impacts = [], lastImpact = new Map();
+    // Each guarding ubu a burning ball first hits, by index: true if it holds (an Iron Save, or a
+    // teammate's fireball it is not overpowered by), false if the fireball beats it.
+    const impacts = [], lastImpact = new Map(), guards = new Map();
     let goal = null, ticks = 0;
     function recordImpact(b) {
       const index = sim.indexOf(b), last = lastImpact.get(index);
@@ -1046,14 +1048,20 @@
     }
     for (let tick = 1; tick <= PREDICTION_TICKS; tick++) {
       ticks = tick;
-      goal = step(sim, DT, (a, b) => { recordImpact(a); recordImpact(b); }, recordImpact);
+      goal = step(sim, DT, (a, b, speed, impulse, plow, iron) => {
+        recordImpact(a); recordImpact(b);
+        const ball = a.team === -1 ? a : b.team === -1 ? b : null, ubu = ball && (ball === a ? b : a), index = sim.indexOf(ubu);
+        // A hit the fireball neither wins nor quenches leaves its fire as it was before the hit.
+        if (ubu?.guarding && !guards.has(index) && (plow || iron || ballOnFire(ball))) guards.set(index, !plow);
+      }, recordImpact);
       const done = goal !== null || settled(sim) || tick === PREDICTION_TICKS;
       if (tick % 4 === 0 || done) {
         sim.forEach((b, i) => paths[i].push({ x: b.x, y: b.y, tick }));
       }
       if (done) break;
     }
-    return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS };
+    return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS,
+      guards: [...guards].map(([index, held]) => ({ index, held })) };
   }
   const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, ballOnFire, holder, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, superMastery, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;

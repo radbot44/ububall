@@ -1059,6 +1059,23 @@ test('a glancing full-speed fireball beats a Guard', () => {
   assert.equal(beaten, true, 'the fireball overpowers the Guard');
   assert.equal(P.ballOnFire(ball), true, 'and keeps its fire');
 });
+// Planning shows each guarding ubu a burning ball would hit in the predicted turn, and whether it holds.
+test('the planning prediction tells which Guards hold a burning ball', () => {
+  const still = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
+  const incoming = offset => {
+    const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+    Object.assign(b[0], { x: 400, y: 300 + offset });
+    Object.assign(b[6], { x: 460, y: 300, vx: -1000, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerPower: 1, strikerTeam: 1 });
+    return P.predictTurn(b, [{ ...still, guard: true }, still, still]).guards;
+  };
+  assert.deepEqual(incoming(0), [{ index: 0, held: true }], 'squared up, the Guard makes an Iron Save');
+  assert.deepEqual(incoming(-20), [{ index: 0, held: false }], 'a glancing fireball beats it');
+  // A teammate's Cannonball into a guarded ubu: no Iron Save, but the Guard holds it.
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  Object.assign(b[0], { x: 300, y: 300, superActive: 'cannonball', superTicks: P.SUPER.ticks });
+  Object.assign(b[6], { x: 345, y: 300 }); Object.assign(b[1], { x: 520, y: 300 });
+  assert.deepEqual(P.predictTurn(b, [{ ...still, power: .3 }, { ...still, guard: true }, still]).guards, [{ index: 1, held: true }]);
+});
 test('flaming ball retains onFire when scoring into goal and callGoal awards FIREBALL!', () => {
   const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
   b[0].superActive = 'cannonball';

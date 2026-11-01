@@ -1998,7 +1998,9 @@
         badgeCtx.save();
         const p = isPortrait ? { x: b.x - b.radius * .65, y: b.y + b.radius * .65 } : { x: b.x + b.radius * .65, y: b.y + b.radius * .65 };
         badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
-        badgeCtx.scale(1.1, 1.1); badgeCtx.translate(-12, -12); badgeCtx.fillStyle = '#4798ff';
+        // While planning, a Guard the predicted turn's burning ball would not beat turns iron.
+        const iron = phase === 'plan' && predictionCache?.data.guards.some(g => g.index === i && g.held);
+        badgeCtx.scale(1.1, 1.1); badgeCtx.translate(-12, -12); badgeCtx.fillStyle = iron ? '#c3ccd6' : '#4798ff';
         badgeCtx.fill(GUARD_SHIELD);
         badgeCtx.restore();
       }
