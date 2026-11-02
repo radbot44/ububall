@@ -399,8 +399,8 @@
   // in `tally` when given.
   function finishTurn(P, bodies, stats, scores, goal, mode, bonus = {}, fouls = newFouls(), tally = null) {
     const classic = rule(mode, 'classic');
-    // Turn effects end every turn; in Pulse, momentum carries into the next one.
-    P.stop(bodies, rule(mode, 'pulse') && goal === null);
+    // Turn effects end every turn; in Pulse or when keeping motion, momentum carries forward.
+    P.stop(bodies, (rule(mode, 'pulse') && goal === null) || Boolean(bonus.keepMotion));
     for (const b of bodies.slice(0, 6)) {
       if (b.stunnedNext) { b.stunned = true; delete b.stunnedNext; }
       // A card lasts the turn after it is given.

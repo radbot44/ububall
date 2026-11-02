@@ -2235,25 +2235,17 @@
     const speed = post ? 0.5 : ububallMatch.replaySpeed(r.total - r.played);
     r.steps += delta / P.DT * speed;
     for (let n = 0; r.steps >= 1 && n < 48; n++) {
+      r.steps--;
       if (r.played < r.total) {
         if (r.tick >= r.segments[r.index].ticks) nextReplaySegment();
         if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && P.ballOnFire(r.sim[6]) && netFire) netFire.lit = true;
-        r.tick++; r.played++; r.steps--;
+        r.tick++; r.played++;
         replayEvents(r.segments[r.index], r.tick, r.sim);
         syncReplay(); recordTrails();
-        if (r.played >= r.total) {
-          r.doneAt = performance.now() + ububallMatch.GOAL_REPLAY_HOLD;
-          r.ballX = r.sim[6].x; r.ballY = r.sim[6].y;
-          r.sim[6].vx = 0; r.sim[6].vy = 0; r.sim[6].omega = 0;
-        }
+        if (r.played >= r.total) r.doneAt = performance.now() + ububallMatch.GOAL_REPLAY_HOLD;
         if (clockNow() < hitStopUntil) { r.steps = 0; break; }
       } else {
-        r.steps--;
-        r.sim[6].x = r.ballX; r.sim[6].y = r.ballY;
-        r.sim[6].vx = 0; r.sim[6].vy = 0; r.sim[6].omega = 0;
-        P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super);
-        r.sim[6].x = r.ballX; r.sim[6].y = r.ballY;
-        r.sim[6].vx = 0; r.sim[6].vy = 0; r.sim[6].omega = 0;
+        P.stepPostGoal(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super);
         syncReplay(); recordTrails();
         if (P.settled(r.sim.slice(0, 6))) { P.stop(r.sim); r.steps = 0; break; }
         if (clockNow() < hitStopUntil) { r.steps = 0; break; }
@@ -3152,15 +3144,7 @@
     // A goal on the round's first turn is an ace, earning its scorer extra meter (not for an own goal).
     const ace = goal !== null && !roundTurns, call = goal === null ? null : ububallMatch.callGoal(bodies, play, tally, goal, ace);
     if (goal !== null && ballOnFire()) lightNet(goal); else quench();
-    const savedMotion = goal !== null ? bodies.slice(0, 6).map(b => ({ vx: b.vx, vy: b.vy, omega: b.omega })) : null;
-    ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null }, fouls, tally);
-    if (savedMotion) {
-      bodies.slice(0, 6).forEach((b, i) => {
-        b.vx = savedMotion[i].vx;
-        b.vy = savedMotion[i].vy;
-        b.omega = savedMotion[i].omega;
-      });
-    }
+    ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null, keepMotion: goal !== null }, fouls, tally);
     if (fouls.faceoff) play = ububallMatch.newPlay();
     noteTurn(ticks, goal === null ? null : { team: goal, label: call.label, scorer: call.own ? null : call.scorer, assist: call.assist }, fouls.cards);
     announceFouls();
@@ -3179,8 +3163,7 @@
       }
       const scorer = bodies[call.scorer] || bodies.slice(goal * 3, goal * 3 + 3)[0];
       goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY + 800;
-      postGoal = { ballX: bodies[6].x, ballY: bodies[6].y, ticks: 0 };
-      bodies[6].vx = 0; bodies[6].vy = 0; bodies[6].omega = 0;
+      postGoal = { ticks: 0 };
       scoringPlayer = scorer;
       const scorerName = scorer?.name || (goal === 0 ? 'Your ubu' : 'CPU ubu');
       goalTab(goal, call.label, call.own ? null : scorerName);
@@ -3463,11 +3446,7 @@
         if (postGoal) {
           elapsed += P.DT; accumulator -= P.DT;
           postGoal.ticks++;
-          bodies[6].x = postGoal.ballX; bodies[6].y = postGoal.ballY;
-          bodies[6].vx = 0; bodies[6].vy = 0; bodies[6].omega = 0;
-          P.step(bodies, P.DT, liveFx.collide, liveFx.wall, liveFx.shockwave, liveFx.super);
-          bodies[6].x = postGoal.ballX; bodies[6].y = postGoal.ballY;
-          bodies[6].vx = 0; bodies[6].vy = 0; bodies[6].omega = 0;
+          P.stepPostGoal(bodies, P.DT, liveFx.collide, liveFx.wall, liveFx.shockwave, liveFx.super);
           traceGuide(bodies);
           recordTrails();
           if (P.settled(bodies.slice(0, 6))) { P.stop(bodies); postGoal = null; break; }
