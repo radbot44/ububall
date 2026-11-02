@@ -3957,6 +3957,7 @@
   $('pause-restart').onclick = () => { $('pause-menu').close(); endReplay(); openSetup('mode'); };
   $('pause-leave').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
   $('home-play').onclick = () => { if (online?.active || matchInProgress()) enterMatch(); else openSetup('mode'); };
+  $('demo-play').onclick = () => $('home-play').click();
   portraitScreen.addEventListener('change', () => { fitOrientation(); draw(); });
   window.addEventListener('popstate', () => {
     if (location.pathname !== '/') return;
