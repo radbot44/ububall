@@ -1174,3 +1174,24 @@ body:has(#reveal[open]) { overflow: hidden; }
 }
 .ubu-tile-main[data-tile-grade="UBU"]::after { animation-duration: 3s; }
 @keyframes foil-sweep { 60%, to { background-position: 0 0; } }
+
+@media (min-aspect-ratio: 16/9), (min-width: 64em) {
+  /* Landscape text readability: floor at 0.8125rem (13 design px), body and labels >= 0.875rem */
+  #status, .collection-status, .ubu-query-note, .ubu-help,
+  .ubu-grid > p, .ubu-grid > p button, .ubu-tile.is-pending p,
+  #reveal-progress { font-size: .875rem; }
+
+  .ubu-tile-main { font-size: .875rem; }
+  .ubu-tile-name { font-size: .9375rem; }
+  .ubu-tile-meta, .ubu-tile-meta span { font-size: .8125rem; }
+  .ubu-tile-meta { gap: .25rem .5rem; }
+  .ubu-tile-grade { font-size: .875rem; }
+  .ubu-tile-value { font-size: .8125rem; }
+  .ubu-tile-supers small { font-size: .8125rem; padding: .0625rem .25rem; border-radius: .3125rem; }
+
+  #details, #authenticity { font-size: .875rem; }
+  .viewer-stat-group h4 { font-size: .8125rem; }
+  .viewer-stat-lbl, .viewer-stat-val { font-size: .875rem; }
+  .viewer-stat-track { height: .5rem; }
+  .game-select-group > span { font-size: .8125rem; }
+}

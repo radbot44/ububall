@@ -1362,3 +1362,75 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 .stats-table tr.team-1 td:first-child { color: var(--team-away); }
 .stats-map { display: block; width: 100%; height: auto; }
 .stats-note { margin: .5rem 0 0; color: var(--muted); font-size: .6875rem; }
+
+@media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
+  /* Readable text: at least 0.8125rem (13 design px), body/labels >= 0.875rem */
+  .card-titles strong { font-size: 1rem; }
+  .card-titles small { font-size: .8125rem; }
+
+  .stat-group-title { font-size: .8125rem; }
+  .stat-row { font-size: .8125rem; }
+  .stat-lbl { width: 5.25rem; font-size: .8125rem; }
+  .stat-val { width: 1.75rem; font-size: .8125rem; }
+  .stat-track { height: .5rem; }
+
+  .super-row { font-size: .875rem; }
+  .super-name-badge { font-size: .875rem; }
+  .super-pct { font-size: .8125rem; }
+  .super-arm-btn { font-size: .8125rem; }
+  .super-select { font-size: .8125rem; }
+  .stunned-badge { font-size: .8125rem; }
+
+  .knob b { font-size: .875rem; }
+  .knob small { font-size: .8125rem; }
+
+  .team-selector button { font-size: .875rem; }
+  #plan-summary { font-size: .8125rem; }
+  #game-status { font-size: .875rem; }
+  .setting-value { font-size: .8125rem; }
+  .bug-tab { font-size: .8125rem; }
+  .scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-status { font-size: .8125rem; }
+  .bug-mode { font-size: .8125rem; }
+  .bug-team { font-size: .8125rem; }
+
+  .stat-drawer .card-titles strong { font-size: 1.25rem; }
+  .stat-drawer .card-titles small { font-size: .875rem; }
+  .stat-drawer .stat-group-title { font-size: .8125rem; }
+  .stat-drawer .stat-row, .stat-drawer .stat-lbl, .stat-drawer .stat-val { font-size: .875rem; }
+  .stat-drawer .stat-lbl { width: 5.75rem; }
+  .stat-drawer .stat-val { width: 2rem; }
+  .stat-drawer .stat-track { height: .5rem; }
+
+  .home-ubu small { font-size: .875rem; }
+  .mint-entry-badge { font-size: .875rem; }
+  .mint-entry-text { font-size: .875rem; }
+
+  .formation-pos { font-size: .8125rem; }
+  .formation-name strong { font-size: 1rem; }
+  .formation-name small { font-size: .8125rem; }
+  .formation-super { font-size: .875rem; }
+  .formation-super span { font-size: .875rem; }
+  .super-choice strong { font-size: .9375rem; }
+  .super-choice small { font-size: .8125rem; }
+  .lobby-note { font-size: .8125rem; }
+  .roster-status { font-size: .8125rem; }
+  .ubu-tile-badge { font-size: .8125rem; }
+
+  .online-options button small { font-size: .8125rem; }
+  .online-hint { font-size: .875rem; }
+  .online-account { font-size: .875rem; }
+
+  #match-summary th { font-size: .8125rem; }
+  #match-summary td { font-size: .875rem; }
+  #match-summary .mvp-badge { font-size: .8125rem; }
+  #match-summary .summary-note { font-size: .8125rem; }
+
+  .stats-label { font-size: .8125rem; }
+  .stats-table th { font-size: .8125rem; }
+  .stats-table td { font-size: .875rem; }
+  .stats-note { font-size: .8125rem; }
+
+  .replay-time { font-size: .8125rem; }
+  .export-note { font-size: .875rem; }
+  .export-options small { font-size: .8125rem; }
+}
