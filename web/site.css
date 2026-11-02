@@ -51,6 +51,12 @@ body {
     overflow-x: hidden;
     overflow-y: auto;
   }
+  .site-header { width: min(114rem, calc(100% - 3rem)); }
+  main[data-screen="mint"] { width: min(92rem, calc(100% - 3rem)); margin: 0 auto; }
+  main[data-screen="mint"] .pack-shop::before { width: min(80rem, 100%); }
+  main[data-screen="collection"] { width: min(114rem, calc(100% - 3rem)); margin: 0 auto; }
+  .viewer { width: min(60rem, calc(100% - 2rem)); height: min(54rem, calc(100dvh - 2rem)); }
+  #reveal { width: min(62rem, calc(100% - 1.5rem)); }
 }
 /* The arena backdrop: faint ice scratches under a vignette, fixed across the whole window
    (including pillarbox and letterbox bars outside the 16:9 frame) while the page scrolls. */
