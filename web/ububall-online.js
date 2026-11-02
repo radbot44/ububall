@@ -217,7 +217,7 @@ function ububallOnline(hooks) {
     loadingCollection = true;
     $('online-load').disabled = true;
     try {
-      const data = await api('/api/ubus?sort=recent' + (cursor ? '&after=' + cursor : ''));
+      const data = await api('/api/ubus' + (cursor ? '?after=' + cursor : ''));
       for (const entry of data.ubus) if (entry.certificate && !collection.some(c => c.serial === entry.serial)) {
         collection.push({ serial: entry.serial, dna: JSON.parse(entry.certificate).dna });
       }

@@ -36,7 +36,7 @@
     btn.className = 'card-heart';
     btn.type = 'button';
     btn.title = 'Favorite';
-    btn.setAttribute('aria-label', `Favorite #${serial}`);
+    btn.setAttribute('aria-label', `Favorite ${ubuList.serialLabel(serial)}`);
     btn.dataset.serial = serial;
     btn.classList.toggle('is-favorite', isFavorite(serial));
     btn.setAttribute('aria-pressed', String(isFavorite(serial)));
@@ -286,7 +286,7 @@
     const brand = document.createElement('img'); brand.src = 'assets/uburoom-wordmark-brand.svg'; brand.alt = 'uburoom';
     const serialNum = item.result.certificate?.serial || '';
     const favBtn = createHeartButton(serialNum);
-    const serial = document.createElement('span'); serial.textContent = serialNum ? '#' + serialNum : '';
+    const serial = document.createElement('span'); serial.textContent = serialNum ? ubuList.serialLabel(serialNum) : '';
     top.append(brand, favBtn, serial);
     // A two-sided coin: the face, and the stamped back that shows when a dance turns it round.
     // Stacked discs between them form a ridged edge, so it turns as a solid disc, not a flat circle.
@@ -506,7 +506,7 @@
     $('ubunym').textContent = model.parts.fullName;
     const rarityText = r ? ` · Rarity ${r.percentile.toFixed(3)} / 100 (${r.bits.toFixed(6)} bits)` : '';
     const grade = document.createElement('strong'); grade.dataset.grade = model.grade; grade.textContent = model.grade;
-    $('details').replaceChildren('Ubuquity ', grade, rarityText + (serial ? ` · #${serial}` : ''));
+    $('details').replaceChildren('Ubuquity ', grade, rarityText + (serial ? ' · ' + ubuList.serialLabel(serial) : ''));
     $('authenticity').textContent = result.type === 'signed' ? 'Verified mint certificate' : 'Custom · unsigned';
     $('download').hidden = false;
     window.ubuAudio?.stop();

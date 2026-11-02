@@ -331,6 +331,7 @@ h2 { font-size: 18px; margin: 0; }
   text-align: center;
   box-sizing: border-box;
 }
+.viewer:not([open]) { display: none; }
 .viewer::backdrop { background: #000b; }
 body:has(.viewer[open]) { overflow: hidden; }
 .viewer-toolbar {
@@ -658,6 +659,8 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 /* Favorite heart icon buttons */
 .card-heart {
   display: inline-flex;
+  flex: none;
+  min-height: 0;
   align-items: center;
   justify-content: center;
   width: 36px;
@@ -747,7 +750,22 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
   min-height: 36px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 10px;
   background: var(--card); color: var(--text); font: 13px var(--font-body);
 }
-.ubu-search { flex: 1 1 180px; min-width: 0; }
+.ubu-search-box { position: relative; display: flex; flex: 1 1 220px; min-width: 0; }
+.ubu-search { flex: 1; min-width: 0; padding-right: 40px; }
+.ubu-help-toggle {
+  position: absolute; top: 50%; right: 5px; width: 26px; height: 26px; min-height: 0; padding: 0; transform: translateY(-50%);
+  border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--muted); font-size: 13px; box-shadow: none;
+}
+.ubu-help-toggle[aria-expanded="true"] { color: var(--text); border-color: var(--muted); }
+.ubu-direction svg { width: 16px; height: 16px; margin-right: 5px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ubu-query-note { margin: 0; color: var(--secondary); font-size: 12px; }
+.ubu-help { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; align-items: baseline; margin: 0; padding: 10px 12px; border-radius: 14px; background: var(--elevated); font-size: 12px; }
+.ubu-help dt { margin: 0; }
+.ubu-help dd { margin: 0; color: var(--muted); }
+.ubu-help-example {
+  min-height: 0; padding: 2px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card);
+  color: var(--text); font: 12px ui-monospace, Consolas, monospace; box-shadow: none; white-space: pre;
+}
 .ubu-toolbar select { cursor: pointer; }
 .ubu-direction, .ubu-filters-toggle { box-shadow: none; white-space: nowrap; }
 .ubu-filters-toggle[aria-expanded="true"] { border-color: var(--muted); }
@@ -767,7 +785,9 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .ubu-clear { margin-left: auto; color: var(--muted); }
 /* Phones: search takes the first row; sort, direction, favorites and filters share the second. */
 @media (max-width: 520px) {
-  .ubu-search { flex-basis: 100%; }
+  .ubu-search-box { flex-basis: 100%; }
+  .ubu-help { grid-template-columns: 1fr; }
+  .ubu-help dd { margin-bottom: 4px; }
   .ubu-toolbar select { flex: 1 1 0; min-width: 0; }
   .ubu-toolbar select, .ubu-direction, .ubu-filters-toggle { padding-inline: 10px; }
 }
@@ -798,11 +818,11 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .ubu-tile:hover .ubu-tile-heart, .ubu-tile-heart.is-favorite { opacity: 1; }
 .ubu-tile-heart svg { width: 18px; height: 18px; }
 .ubu-tile-inspect {
-  position: absolute; top: 8px; left: 8px; z-index: 1; display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
-  border: 1px solid var(--border); border-radius: 50%; background: var(--card); color: var(--muted);
-  font: italic 600 13px Georgia, serif; box-shadow: none;
+  position: absolute; top: 6px; left: 6px; z-index: 1; width: 30px; height: 30px; min-height: 0; padding: 5px;
+  border-radius: 50%; background: transparent; color: var(--muted); box-shadow: none; opacity: .7;
 }
-.ubu-tile-inspect:hover { color: var(--text); border-color: var(--muted); }
+.ubu-tile-inspect svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ubu-tile-inspect:hover { color: var(--text); opacity: 1; }
 .collection-status { text-align: center; font-size: 12px; color: var(--muted); margin: 16px 0; }
 
 #reveal { overflow-x: hidden; width: min(900px, calc(100% - 24px)); max-height: calc(100dvh - 24px); padding: 20px; border: 1px solid var(--border); border-radius: 22px; background: var(--card); color: var(--text); text-align: center; }

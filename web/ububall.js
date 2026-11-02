@@ -3448,7 +3448,7 @@
   function entryFor(item) {
     let entry = collectionEntries.get(item.serial);
     if (entry?.dna !== item.result.dna) {
-      entry = { model: item.model, dna: item.result.dna, label: '#' + item.serial, key: item.serial };
+      entry = { model: item.model, dna: item.result.dna, label: ubuList.serialLabel(item.serial), key: item.serial };
       collectionEntries.set(item.serial, entry);
     }
     return entry;
