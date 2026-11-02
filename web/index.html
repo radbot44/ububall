@@ -216,10 +216,11 @@ SOFTWARE.
       <h2 id="roster-title" class="mode-logo"><img src="assets/ububall-logo.svg" alt="ububall"><span class="visually-hidden">: choose a mode</span></h2>
       <p class="mode-intro">Turn rules on to mix them. All off plays standard ububall.</p>
       <fieldset class="mode-options"><legend class="visually-hidden">Rules</legend>
-        <label class="mode-option" data-rule="classic"><input type="checkbox" id="rule-classic"><strong>Classic</strong><small>Equal stats, no supers</small><span class="mode-state" aria-hidden="true"></span></label>
-        <label class="mode-option" data-rule="pulse"><input type="checkbox" id="rule-pulse"><strong>Pulse</strong><small>1-second turns, momentum carries</small><span class="mode-state" aria-hidden="true"></span></label>
-        <label class="mode-option" data-rule="blitz"><input type="checkbox" id="rule-blitz"><strong>Blitz</strong><small>5 seconds to plan each turn</small><span class="mode-state" aria-hidden="true"></span></label>
+        <label class="mode-option" data-rule="classic"><input type="checkbox" id="rule-classic"><strong>Classic</strong><small>Equal stats, no supers</small><span class="mode-check" aria-hidden="true"><i data-icon="check"></i></span></label>
+        <label class="mode-option" data-rule="pulse"><input type="checkbox" id="rule-pulse"><strong>Pulse</strong><small>1-second turns, momentum carries</small><span class="mode-check" aria-hidden="true"><i data-icon="check"></i></span></label>
+        <label class="mode-option" data-rule="blitz"><input type="checkbox" id="rule-blitz"><strong>Blitz</strong><small>5 seconds to plan each turn</small><span class="mode-check" aria-hidden="true"><i data-icon="check"></i></span></label>
       </fieldset>
+      <p id="mode-summary" class="mode-summary" role="status"></p>
       <fieldset id="cpu-levels" class="cpu-levels"><legend>CPU</legend>
         <label><input type="radio" name="cpu-level" value="easy"><span>Easy</span></label>
         <label><input type="radio" name="cpu-level" value="medium" checked><span>Medium</span></label>

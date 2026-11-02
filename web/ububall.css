@@ -846,15 +846,18 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .mode-option input, .cpu-levels input { position: absolute; opacity: 0; pointer-events: none; }
 .mode-option strong { color: var(--mode); font-family: var(--font-display); font-size: clamp(22px, 30cqi, 60px); font-weight: 400; line-height: 1; }
 .mode-option small { color: var(--muted); font-family: var(--font-display); font-size: clamp(13px, 8cqi, 20px); line-height: 1.2; }
-.mode-state {
-  margin-top: 4px; min-width: 64px; padding: 5px 14px; border: 2px solid var(--border); border-radius: 999px;
-  background: var(--card); color: var(--muted); font-family: var(--font-display); font-size: clamp(14px, 9cqi, 20px); line-height: 1;
+/* The whole card is the toggle; a rule that is on glows in its colour and wears a check badge on
+   its corner. */
+.mode-check {
+  position: absolute; top: -9px; right: -9px; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--mode); color: var(--mode-ink); box-shadow: 0 2px 0 rgb(0 0 0 / .3); scale: 0; transition: scale .18s cubic-bezier(.2, .9, .3, 1.4);
 }
-.mode-state::before { content: "Off"; }
+.mode-check .icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .mode-option:has(input:checked) { border-color: var(--mode); background: color-mix(in srgb, var(--elevated), var(--mode) 16%); box-shadow: var(--bevel), 0 0 18px color-mix(in srgb, var(--mode), transparent 65%); }
 .mode-option:has(input:checked) small { color: var(--text); }
-.mode-option:has(input:checked) .mode-state { border-color: var(--mode); background: var(--mode); color: var(--mode-ink); }
-.mode-option:has(input:checked) .mode-state::before { content: "On"; }
+.mode-option:has(input:checked) .mode-check { scale: 1; }
+@media (max-width: 520px) { .mode-check { top: -7px; right: -7px; width: 22px; height: 22px; } .mode-check .icon { width: 14px; height: 14px; } }
+.mode-summary { margin: 0; color: var(--text); font-family: var(--font-display); font-size: clamp(16px, 2.8vw, 22px); text-align: center; }
 .mode-option:has(input:focus-visible), .cpu-levels label:has(input:focus-visible) { outline: 2px solid var(--mode, var(--primary)); outline-offset: 2px; }
 .cpu-levels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; }
 .cpu-levels legend { margin-bottom: 8px; padding: 0; font-size: 18px; }
@@ -1014,7 +1017,8 @@ body:has(#online-dialog[open]) { overflow: hidden; }
   .mode-logo img { max-height: 16dvh; }
   .mode-option { padding-block: 8px; gap: 3px; }
   .mode-option strong { font-size: clamp(20px, 10dvh, 44px); }
-  .mode-state { margin-top: 0; padding-block: 3px; }
+  .mode-check { top: -7px; right: -7px; width: 22px; height: 22px; }
+  .mode-check .icon { width: 14px; height: 14px; }
   .roster-tabs { margin: 4px 0 6px; padding: 3px; }
   .roster-tabs button { min-height: 32px; font-size: 14px; }
   .cpu-levels legend { margin-bottom: 4px; font-size: 15px; }

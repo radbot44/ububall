@@ -13,6 +13,7 @@
     'arrows-sort': ['M3 9l4 -4l4 4m-4 -4v14', 'M21 15l-4 4l-4 -4m4 4v-14'],
     'arrow-left': ['M5 12l14 0', 'M5 12l6 6', 'M5 12l6 -6'],
     'arrow-narrow-right': ['M5 12l14 0', 'M15 16l4 -4', 'M15 8l4 4'],
+    check: ['M5 12l5 5l10 -10'],
     'chevron-down': ['M6 9l6 6l6 -6'],
     'chevron-left': ['M15 6l-6 6l6 6'],
     'chevron-right': ['M9 6l6 6l-6 6'],

@@ -30,8 +30,9 @@
     if (!MODES.includes(mode)) throw new Error('Invalid mode.');
     return mode.split('-').includes(name);
   }
+  // "Standard ububall" with no rules on, otherwise the rules in play: "Pulse + Blitz".
   function modeName(mode) {
-    return ['Ububall', ...RULES.filter(r => rule(mode, r)).map(r => r[0].toUpperCase() + r.slice(1))].join(' ');
+    return RULES.filter(r => rule(mode, r)).map(r => r[0].toUpperCase() + r.slice(1)).join(' + ') || 'Standard ububall';
   }
   function planningMilliseconds(mode) { return rule(mode, 'blitz') ? BLITZ_MILLISECONDS : null; }
   // Pulse turns stop after one second of simulation instead of waiting for the field to settle.

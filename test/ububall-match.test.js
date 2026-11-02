@@ -18,7 +18,7 @@ test('Classic, Pulse and Blitz combine independently', () => {
   assert.equal(M.MODES.length,8);
   assert.ok(['standard','classic','blitz','pulse','classic-pulse','classic-blitz','pulse-blitz','classic-pulse-blitz'].every(m=>M.MODES.includes(m)));
   assert.throws(()=>M.rule('blitz-pulse','pulse'));
-  assert.equal(M.modeName('standard'),'Ububall'); assert.equal(M.modeName('classic-pulse-blitz'),'Ububall Classic Pulse Blitz');
+  assert.equal(M.modeName('standard'),'Standard ububall'); assert.equal(M.modeName('pulse'),'Pulse'); assert.equal(M.modeName('classic-pulse-blitz'),'Classic + Pulse + Blitz');
   assert.equal(M.planningMilliseconds('blitz'),5000); assert.equal(M.planningMilliseconds('pulse-blitz'),5000);
   assert.equal(M.planningMilliseconds('classic-pulse'),null);
   assert.equal(M.turnTicks('standard'),2880); assert.equal(M.turnTicks('classic-pulse'),240);

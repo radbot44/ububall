@@ -3721,6 +3721,8 @@
   // invite on top and Ready in place of Start.
   let setupFor = 'cpu';
   const chosenMode = () => ububallMatch.RULES.filter(rule => $('rule-' + rule).checked).join('-') || 'standard';
+  const modeSummary = () => { $('mode-summary').textContent = ububallMatch.modeName(chosenMode()); };
+  for (const rule of ububallMatch.RULES) $('rule-' + rule).addEventListener('change', modeSummary);
   function setupStep(step) {
     const sheet = $('roster-dialog');
     sheet.dataset.step = step; sheet.dataset.for = setupFor;
@@ -3745,6 +3747,7 @@
   function openSetup(step, purpose = 'cpu', mode = cpuMode) {
     setupFor = purpose;
     for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(mode, rule);
+    modeSummary();
     document.querySelector(`input[name="cpu-level"][value="${cpuLevel}"]`).checked = true;
     draft = [...roster]; rosterSlot = 0; $('roster-status').textContent = '';
     rosterTab(signedIn() ? 'yours' : 'practice');
