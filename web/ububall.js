@@ -2161,7 +2161,7 @@
     if (goalReplay) {
       ctx.save(); ctx.translate(isPortrait ? 30 : 500, isPortrait ? 300 : 32); if (isPortrait) ctx.rotate(Math.PI / 2);
       ctx.font = 'bold 18px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = text;
-      const slow = goalReplay.played < goalReplay.total && ububallMatch.replaySpeed(goalReplay.total - goalReplay.played) < 1;
+      const slow = goalReplay.played >= goalReplay.total || ububallMatch.replaySpeed(goalReplay.total - goalReplay.played) < 1;
       ctx.fillText(slow ? 'REPLAY · SLOW MOTION' : 'REPLAY', 0, 0);
       ctx.restore();
     }
@@ -2225,21 +2225,40 @@
   function advanceGoalReplay(delta) {
     const r = goalReplay;
     if (clockNow() < hitStopUntil) { draw(); return; }
-    if (r.played >= r.total) {
-      if (performance.now() >= r.doneAt) { if (summaryPending) openSummary(); restartGoalReplay(); }
-      draw(); return;
+    if (r.doneAt && performance.now() >= r.doneAt) {
+      if (summaryPending) openSummary();
+      restartGoalReplay();
+      draw();
+      return;
     }
-    const speed = ububallMatch.replaySpeed(r.total - r.played);
+    const post = r.played >= r.total;
+    const speed = post ? 0.5 : ububallMatch.replaySpeed(r.total - r.played);
     r.steps += delta / P.DT * speed;
-    for (let n = 0; r.steps >= 1 && r.played < r.total && n < 48; n++) {
-      if (r.tick >= r.segments[r.index].ticks) nextReplaySegment();
-      if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && P.ballOnFire(r.sim[6]) && netFire) netFire.lit = true;
-      r.tick++; r.played++; r.steps--;
-      replayEvents(r.segments[r.index], r.tick, r.sim);
-      syncReplay(); recordTrails();
-      if (clockNow() < hitStopUntil) { r.steps = 0; break; }
+    for (let n = 0; r.steps >= 1 && n < 48; n++) {
+      if (r.played < r.total) {
+        if (r.tick >= r.segments[r.index].ticks) nextReplaySegment();
+        if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && P.ballOnFire(r.sim[6]) && netFire) netFire.lit = true;
+        r.tick++; r.played++; r.steps--;
+        replayEvents(r.segments[r.index], r.tick, r.sim);
+        syncReplay(); recordTrails();
+        if (r.played >= r.total) {
+          r.doneAt = performance.now() + ububallMatch.GOAL_REPLAY_HOLD;
+          r.ballX = r.sim[6].x; r.ballY = r.sim[6].y;
+          r.sim[6].vx = 0; r.sim[6].vy = 0; r.sim[6].omega = 0;
+        }
+        if (clockNow() < hitStopUntil) { r.steps = 0; break; }
+      } else {
+        r.steps--;
+        r.sim[6].x = r.ballX; r.sim[6].y = r.ballY;
+        r.sim[6].vx = 0; r.sim[6].vy = 0; r.sim[6].omega = 0;
+        P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super);
+        r.sim[6].x = r.ballX; r.sim[6].y = r.ballY;
+        r.sim[6].vx = 0; r.sim[6].vy = 0; r.sim[6].omega = 0;
+        syncReplay(); recordTrails();
+        if (P.settled(r.sim.slice(0, 6))) { P.stop(r.sim); r.steps = 0; break; }
+        if (clockNow() < hitStopUntil) { r.steps = 0; break; }
+      }
     }
-    if (r.played >= r.total) r.doneAt = performance.now() + ububallMatch.GOAL_REPLAY_HOLD;
     emitSkaterEffects(delta * speed); draw();
   }
   function endGoalReplay() {
