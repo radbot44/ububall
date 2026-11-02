@@ -1009,7 +1009,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .roster-toolbar { position: sticky; top: 0; z-index: 2; margin: 0 -16px; padding: 0 16px; background: var(--card); }
 .roster-toolbar .ubu-toolbar { margin: 0 0 8px; padding-top: 2px; }
 .roster-grid { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; margin: 0; }
-.roster-grid .ubu-tile-main { gap: 4px; padding: 12px 4px 8px; border-radius: 14px; background: var(--elevated); }
+.roster-grid .ubu-tile-main { gap: 4px; padding: 12px 4px 8px; border-radius: 14px; background-color: var(--elevated); }
 .roster-grid .ubu-tile-art { width: 56px; height: 56px; }
 @media (max-width: 640px), (max-height: 560px) {
   .team-sheet { width: 100%; height: 100dvh; max-width: none; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top); }

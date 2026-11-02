@@ -378,6 +378,7 @@
     const main = el('button', { type: 'button', className: 'ubu-tile-main' }, artBox,
       el('span', { className: 'ubu-tile-name', textContent: model.parts.fullName }),
       el('span', { className: 'ubu-tile-meta' }, grade, el('span', { textContent: caption })), supers, value);
+    main.dataset.tileGrade = model.grade;
     return { main, artBox, value };
   }
   // A picker tile's role: a badge for an ubu already chosen (its position) or the action a

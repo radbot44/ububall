@@ -1013,7 +1013,7 @@ body:has(#reveal[open]) { overflow: hidden; }
 [data-grade="A"] .grade-lettering { background: linear-gradient(var(--foil-angle), #ffd7d7, #ee7a85 40%, #af3748 52%, #ffb8ba); background-clip: text; color: transparent; filter: drop-shadow(0 2px 1px #30151b); }
 [data-grade="S"] .grade-lettering { background: linear-gradient(var(--foil-angle), #fff0d4 12%, #ffc885 34%, #ae6331 48%, #ffe0ad 52%, #ff9954 80%); background-clip: text; color: transparent; filter: drop-shadow(0 2px 0 #693e27) drop-shadow(0 3px 2px #0006); }
 [data-grade="S+"] .grade-lettering { background: linear-gradient(var(--foil-angle), #fff3dd 10%, #ffbd89 38%, #aa4f54 48%, #ffe3cf 51%, #ff8dac 76%, #ffc48b); background-clip: text; color: transparent; filter: drop-shadow(0 2px 0 #7f4350) drop-shadow(0 4px 2px #0006); }
-[data-grade="U"] .grade-lettering { background: linear-gradient(var(--foil-angle), #fff5e7 12%, #f4c9ef 32%, #9a758e 46%, #fff1db 50%, #ff98be 68%, #ffdab6 90%); background-clip: text; color: transparent; filter: drop-shadow(0 1px 0 #ffe6cf) drop-shadow(0 3px 0 #7a4d69) drop-shadow(0 5px 3px #0006); }
+[data-grade="U"] .grade-lettering { background: linear-gradient(var(--foil-angle), var(--foil-u)); background-clip: text; color: transparent; filter: drop-shadow(0 1px 0 #ffe6cf) drop-shadow(0 3px 0 #7a4d69) drop-shadow(0 5px 3px #0006); }
 [data-grade="UBU"] .grade-lettering { font-size: 7.4cqw; letter-spacing: -.04em; background: linear-gradient(var(--foil-angle), #fff9e8 8%, #f6d2ac 26%, #c8a6c8 40%, #756b85 46%, #fff4da 49%, #f8d5aa 57%, #dca7b6 74%, #fff0d0 94%); background-clip: text; color: transparent; filter: drop-shadow(0 1px 0 #fff0d4) drop-shadow(0 3px 0 #886579) drop-shadow(0 5px 0 #453b4b) drop-shadow(0 6px 4px #0005); }
 .card-ubuquity .grade-lettering { background-size: 180% 180%; background-position: var(--light-x) var(--light-y); }
 .stat-bar i { position: absolute; inset: 0 auto 0 0; display: block; height: 100%; border-radius: inherit; background: linear-gradient(180deg, #ffffff45, transparent 60%), var(--stat-color); box-shadow: 0 0 6px color-mix(in srgb, var(--stat-color) 55%, transparent); }
@@ -1027,8 +1027,8 @@ body:has(#reveal[open]) { overflow: hidden; }
 [data-grade="B"] .grade-lettering { background: linear-gradient(var(--foil-angle), #ddffdc, #61e791 38%, #229956 49%, #bcffcb 54%, #42c66b); background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 2px 1px #153b28); }
 .card-ubuquity[data-grade="S"] { --grade-glow: #ff99542b; }
 .card-ubuquity[data-grade="S+"] { --grade-glow: #ff71973b; }
-.card-ubuquity[data-grade="U"] { --grade-glow: #ef8fff40; }
-.card-ubuquity[data-grade="UBU"] { --grade-glow: #ffa9db50; }
+.card-ubuquity[data-grade="U"] { --grade-glow: var(--glow-u); }
+.card-ubuquity[data-grade="UBU"] { --grade-glow: var(--glow-ubu); }
 :is([data-grade="S"], [data-grade="S+"], [data-grade="U"], [data-grade="UBU"]) .grade-lettering::after { content: '✦'; position: absolute; top: -.05em; right: .02em; font-size: .23em; line-height: 1; color: #fff5dc; text-shadow: 0 0 5px #fff1ce, 0 0 10px #ffa3c7; opacity: var(--foil-glint, .65); pointer-events: none; }
 :is([data-grade="U"], [data-grade="UBU"]) .grade-lettering::before { content: '✦'; position: absolute; bottom: .02em; left: .05em; font-size: .16em; line-height: 1; color: #effaff; text-shadow: 0 0 5px #d1f3ff, 0 0 10px #b5a2ff; opacity: var(--foil-glint, .65); pointer-events: none; }
 /* Grade treatment belongs to the substrate, below the material stripes. */
@@ -1056,7 +1056,7 @@ body:has(#reveal[open]) { overflow: hidden; }
   --card-base: linear-gradient(var(--foil-angle), transparent 20%, #f3d2ff18 46%, transparent 61%), conic-gradient(from 25deg at 20% 30%, #da87ff16, #0000 65deg 140deg, #64e4ff14 190deg, #0000 240deg, #ffba701a), radial-gradient(ellipse at 90% 85%, #c64d8b42, transparent 65%), linear-gradient(140deg, #4b345b, #202d42 48%, #3e2449 78%, #554034);
 }
 .trading-card[data-finish="UBU"] {
-  --foil-tint: #f4bfdd;
+  --foil-tint: #f4bfdd; --foil-ink: linear-gradient(var(--foil-angle), var(--foil-ubu));
   --card-base: radial-gradient(circle at 16% 20%, #fff1ce99 0 .6px, #fff0 1.8px), radial-gradient(circle at 84% 72%, #d3f7ff88 0 .6px, #fff0 1.8px), linear-gradient(var(--foil-angle), transparent 20%, #ffe8bf28 45%, #fff0 53%, #b1f3ff12 72%, transparent 80%), conic-gradient(from 35deg at 50% 45%, #ffce5924 0deg 55deg, #c36aff08 55deg 120deg, #51ffe91c 120deg 185deg, #6793ff08 185deg 245deg, #ed65c224 245deg 305deg, #ffce5912 305deg), radial-gradient(ellipse at 90% 85%, #ed56874a, transparent 65%), linear-gradient(135deg, #56412f, #34284b 28%, #203846 52%, #442346 78%, #684233);
 }
 .card-hologram { --holo-strength: 0.0175; --holo-spectrum: #a9b9cc, #eef4ff, #8296ad; position: absolute; inset: 10px; z-index: 1; pointer-events: none; opacity: var(--holo-strength); background-image: linear-gradient(var(--foil-angle), transparent 28%, #ffffff05 40%, #fff 48%, transparent 55%), linear-gradient(var(--foil-angle), var(--holo-spectrum)); background-size: 220% 220%, 180% 180%; background-position: var(--light-x) var(--light-y); mask: url('assets/oomark-pattern.svg') 3% 3% / 48cqw 20.785cqw repeat; mix-blend-mode: screen; }
@@ -1114,10 +1114,43 @@ body:has(#reveal[open]) { overflow: hidden; }
 @media (max-height: 720px) { .card-stage, .viewer-card-stage { width: min(720px, 100%, calc((100dvh - 220px) * 1.5)); }.reveal-toolbar, .viewer-toolbar { margin-bottom: 12px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
-[data-grade] { --grade-color: #ff7197; color: var(--grade-color) !important; }
-[data-grade="C"] { --grade-color: #477ae7; }
-[data-grade="B"] { --grade-color: #42c66b; }
-[data-grade="A"] { --grade-color: #ee4455; }
-[data-grade="S"], [data-grade="S+"] { --grade-color: #ff9954; }
+/* Grade colours, for grade text and for ubu tiles (data-tile-grade), which take their colour from it.
+   The U and UBU foil inks and glows are shared by cards and tiles; UBU's foil is S's gold with UBU's
+   pinks through it. */
+:root {
+  --foil-u: #fff5e7 12%, #f4c9ef 32%, #9a758e 46%, #fff1db 50%, #ff98be 68%, #ffdab6 90%;
+  --foil-ubu: #fff0d4 12%, #ffc885 30%, #f4bfdd 40%, #ae6331 48%, #ffe0ad 52%, #ff7197 66%, #ff9954 82%;
+  --glow-u: #ef8fff40; --glow-ubu: #ffa9db50;
+}
+[data-grade], [data-tile-grade] { --grade-color: #ff7197; }
+[data-grade] { color: var(--grade-color) !important; }
+[data-grade="C"], [data-tile-grade="C"] { --grade-color: #477ae7; }
+[data-grade="B"], [data-tile-grade="B"] { --grade-color: #42c66b; }
+[data-grade="A"], [data-tile-grade="A"] { --grade-color: #ee4455; }
+[data-grade="S"], [data-grade="S+"], [data-tile-grade="S"], [data-tile-grade="S+"] { --grade-color: #ff9954; }
 [data-grade="S+"] { -webkit-text-stroke: .6px #ff7197; paint-order: stroke fill; }
 [data-grade="UBU"] { -webkit-text-stroke: .6px #ff9954; paint-order: stroke fill; }
+/* Ubu tiles wear their Ubuquity: C and B plain, A a soft tint, S and S+ a glow, U and UBU a foil rim
+   with a shimmer passing over. A picked tile keeps its team border. */
+.ubu-tile-main:is([data-tile-grade="S"], [data-tile-grade="S+"]) { background-image: linear-gradient(color-mix(in srgb, var(--grade-color) 11%, transparent) 0 0); }
+.ubu-tile-main[data-tile-grade="A"] { background-image: linear-gradient(color-mix(in srgb, var(--grade-color) 5%, transparent) 0 0); }
+.ubu-tile-main[data-tile-grade="A"]:not([aria-pressed="true"]) { border-color: color-mix(in srgb, var(--grade-color) 18%, transparent); }
+.ubu-tile-main:is([data-tile-grade="S"], [data-tile-grade="S+"]):not([aria-pressed="true"]) { border-color: color-mix(in srgb, var(--grade-color) 70%, transparent); }
+.ubu-tile-main[data-tile-grade="S"] { box-shadow: var(--bevel), 0 0 18px color-mix(in srgb, var(--grade-color) 40%, transparent); }
+.ubu-tile-main[data-tile-grade="S+"] { box-shadow: var(--bevel), 0 0 14px #ff995470, 0 0 28px #ff719750; }
+.ubu-tile-main:is([data-tile-grade="U"], [data-tile-grade="UBU"]) {
+  position: relative; overflow: hidden; box-shadow: var(--bevel), 0 0 20px var(--glow-u);
+  background: linear-gradient(color-mix(in srgb, var(--card), #ff98be 10%) 0 0) padding-box, linear-gradient(125deg, var(--foil-u)) border-box;
+}
+.ubu-tile-main[data-tile-grade="UBU"] {
+  box-shadow: var(--bevel), 0 0 16px var(--glow-ubu), 0 0 32px #ff995440;
+  background: linear-gradient(color-mix(in srgb, var(--card), #ffc885 10%) 0 0) padding-box, linear-gradient(125deg, var(--foil-ubu)) border-box;
+}
+.ubu-tile-main:is([data-tile-grade="U"], [data-tile-grade="UBU"]):not([aria-pressed="true"]) { border-color: transparent; }
+.ubu-tile-main:is([data-tile-grade="U"], [data-tile-grade="UBU"])::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(110deg, transparent 35%, rgb(255 240 250 / .16) 45%, rgb(255 214 176 / .12) 50%, rgb(238 200 255 / .14) 55%, transparent 65%) 100% 0 / 300% 100% no-repeat;
+  animation: foil-sweep 4.5s ease-in-out infinite;
+}
+.ubu-tile-main[data-tile-grade="UBU"]::after { animation-duration: 3s; }
+@keyframes foil-sweep { 60%, to { background-position: 0 0; } }
