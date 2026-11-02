@@ -3432,7 +3432,7 @@
     let speed = 1;
     if (!active || clockNow() < hitStopUntil || pulseFrozen) speed = 0;
     else if (theater) speed = theater.paused ? 0 : theater.speed;
-    else if (goalReplay) speed = goalReplay.played >= goalReplay.total ? 1 : ububallMatch.replaySpeed(goalReplay.total - goalReplay.played);
+    else if (goalReplay) speed = goalReplay.played >= goalReplay.total ? 0 : ububallMatch.replaySpeed(goalReplay.total - goalReplay.played);
     else if (postGoal) speed = ububallMatch.postGoalSpeed(postGoal.ticks);
     const simDelta = delta * speed;
     if (active && !theater?.paused && !pulseFrozen) updateEffects(simDelta);
