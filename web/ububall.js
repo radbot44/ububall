@@ -221,30 +221,29 @@
     }
     s.path.points.push({ x: b.x, y: b.y, depth }); s.path.age = 0;
   }
-  // Ball heat by speed (P.HEAT): a faint orange, then sparks and a muted red, then red hot. Held past
-  // the fire speed for FIRE_TICKS of play it catches fire, runs fully red and scorches the ice; it goes
-  // out when it slows to the sustain speed.
-  const { HEAT, FIRE_TICKS } = P;
+  // Ball heat by pace (P.HEAT): a faint orange, then sparks and a muted red, then red hot, so a ball
+  // its own team has trapped still shows how hot it is. On fire (as the physics says) it runs fully
+  // red and scorches the ice until it goes out.
+  const { HEAT } = P;
   const BURN_LIFE = 20; // Seconds of play before a burn mark fades out.
-  const speedShare = b => Math.hypot(b.vx, b.vy) / P.MAX_SPEED;
-  let fireTime = 0, sizzle = null;
+  const paceShare = ball => Math.max(Math.hypot(ball.vx, ball.vy), ball.pace || 0) / P.MAX_SPEED;
+  let fireTime = 0, sizzle = null; // How long the ball has been burning.
   // A burning ball that scores sets that goal alight and keeps burning in the net until kickoff.
   let netFire = null;
-  const ballOnFire = () => Boolean(netFire?.lit) || Boolean(P.ballOnFire?.(bodies?.[6])) || fireTime >= FIRE_TICKS * P.DT;
+  const ballOnFire = () => Boolean(netFire?.lit) || P.ballOnFire(bodies?.[6]);
   // A burning ball sizzles softly until it goes out.
   function quench() { sizzle?.stop(); sizzle = null; }
   // 0 is white, 1 orange, 2 red hot and 3 on fire. A Cannonball flare runs it orange.
   function ballHeat(b) {
     if (b.team === -1 && P.ballOnFire?.(b)) return 3;
     if (ballOnFire()) return 3;
-    const s = speedShare(b);
+    const s = paceShare(b);
     const level = s < HEAT.red ? (s - HEAT.orange) / (HEAT.red - HEAT.orange) : 1 + (s - HEAT.red) / (HEAT.redHot - HEAT.red);
     return Math.max(ballFlare, Math.min(2, Math.max(0, level)));
   }
   function sparkBall(ball, dt) {
-    const speed = Math.hypot(ball.vx, ball.vy), share = speed / P.MAX_SPEED;
-    if (P.ballOnFire?.(ball)) fireTime = Math.max(fireTime, FIRE_TICKS * P.DT);
-    else fireTime = share > HEAT.fire && !P.holder(bodies) ? fireTime + dt : 0;
+    const speed = Math.hypot(ball.vx, ball.vy), share = paceShare(ball);
+    fireTime = P.ballOnFire(ball) ? fireTime + dt : 0;
     if (ballOnFire() && !sizzle) sizzle = gameAudio()?.playSizzle?.() || null;
     else if (!ballOnFire()) quench();
     const level = Math.max(ballFlare, (share - HEAT.red) / (HEAT.redHot - HEAT.red));
@@ -290,7 +289,7 @@
     }
     const points = burnState.path.points, previous = points.at(-1);
     // A fresh burn starts faint and deepens over its first half second, like a fire taking hold.
-    const depth = .2 + .8 * Math.min(1, (fireTime - FIRE_TICKS * P.DT) / .5);
+    const depth = .2 + .8 * Math.min(1, fireTime / .5);
     if (!previous || Math.hypot(ball.x - previous.x, ball.y - previous.y) >= 3) points.push({ x: ball.x, y: ball.y, depth });
     burnState.path.age = 0;
   }
@@ -3749,7 +3748,7 @@
         vb.stunned = Boolean(cb.stunned || cb.stunnedNext); vb.carded = Boolean(cb.carded);
         vb.holding = Boolean(cb.holding);
         // The ball burns as the simulation says, not by the display's own speed timer.
-        if (cb.team === -1) { vb.onFire = Boolean(cb.onFire); vb.fireTicks = cb.fireTicks || 0; }
+        if (cb.team === -1) { vb.onFire = Boolean(cb.onFire); vb.fireTicks = cb.fireTicks || 0; vb.pace = cb.pace || 0; }
         dirtyMeters.add(vb);
       }
     });

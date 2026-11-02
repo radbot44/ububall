@@ -451,11 +451,14 @@ test('Cannonball boosts the ball once without boosting its shooter or subsequent
   assert.equal(bodies[0].vx, ordinary[0].vx);
   assert.ok(Math.abs(bodies[6].vx - ordinary[6].vx * (1 + P.SUPER.cannonball)) < 1e-9);
   assert.equal(bodies[0].superActive, null);
+  // A hot shot (the striking team driving into its own burning ball) is the one other designed source.
   let previous = kineticEnergy(bodies), ricochets = 0;
   for (let tick = 0; tick < 2880; tick++) {
-    const goal = P.step(bodies, P.DT, () => { ricochets++; }, null, null, key => { if (key === 'cannonball') activations++; });
+    const ball = bodies[6], hot = P.ballOnFire(ball), team = ball.strikerTeam;
+    let hotShot = false;
+    const goal = P.step(bodies, P.DT, (a, b) => { ricochets++; if (hot && (a === ball ? b : a).team === team) hotShot = true; }, null, null, key => { if (key === 'cannonball') activations++; });
     const energy = kineticEnergy(bodies);
-    assert.ok(energy <= previous * (1 + 1e-10) + 1e-8, `Ricochet gained energy at tick ${tick}`);
+    assert.ok(hotShot || energy <= previous * (1 + 1e-10) + 1e-8, `Ricochet gained energy at tick ${tick}`);
     previous = energy;
     if (goal !== null || P.settled(bodies)) break;
   }
@@ -1058,6 +1061,62 @@ test('a glancing full-speed fireball beats a Guard', () => {
   assert.equal(iron, false);
   assert.equal(beaten, true, 'the fireball overpowers the Guard');
   assert.equal(P.ballOnFire(ball), true, 'and keeps its fire');
+});
+// Pace: slowing by the striking team's own ubus does not count against the ball's fire; anyone else's does.
+// A Guard (team 0 at index 1, or team 1 at index 4) stops a 1000 px/s fireball struck by team 0.
+function fireballStopped(guard) {
+  const still = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  b.slice(0, 6).forEach(x => Object.assign(x, { x: x.team ? 900 : 100, y: 80 + x.slot * 60 }));
+  Object.assign(b[guard], { x: 600, y: 300 });
+  const plans = Array.from({ length: 6 }, () => still); plans[guard] = { ...still, guard: true };
+  P.startTurn(b, plans);
+  Object.assign(b[6], { x: 520, y: 300, vx: 1000, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1, pace: 1000 });
+  for (let t = 0; t < 120; t++) P.step(b, P.DT);
+  return b;
+}
+test('a teammate stopping a fireball keeps it lit at its pace; an opponent stopping it puts it out', () => {
+  const own = fireballStopped(1), ball = own[6];
+  assert.ok(Math.hypot(ball.vx, ball.vy) < 504 && ball.pace > 840, 'slowed by a teammate, its pace stays high');
+  assert.equal(P.ballOnFire(ball), true);
+  assert.equal(P.ballOnFire(fireballStopped(4)[6]), false, 'an opponent Guard Iron Saves it');
+});
+test('a teammate driving into a trapped fireball fires it at its pace; a passive or opposing touch does not', () => {
+  const touch = (index, vx) => {
+    const b = fireballStopped(1), ball = b[6], pace = ball.pace;
+    Object.assign(b[index], { x: ball.x - 80, y: ball.y, vx, vy: 0 });
+    let after = null;
+    for (let t = 0; t < 60 && after === null; t++) P.step(b, P.DT, (x, y) => { if (x === ball || y === ball) after = Math.hypot(ball.vx, ball.vy); });
+    return { after, pace, ball };
+  };
+  const shot = touch(2, 300);
+  assert.ok(Math.abs(shot.after - shot.pace) < 15, "a hot shot leaves at the ball's pace");
+  assert.ok(touch(2, 60).after < 300, 'a passive teammate touch adds nothing');
+  const poke = touch(5, 300);
+  assert.equal(poke.ball.strikerTeam, 1);
+  assert.ok(Math.abs(poke.ball.pace - Math.hypot(poke.ball.vx, poke.ball.vy)) < 1, 'an opponent takes it over at its real speed');
+});
+test("a teammate's Sticky keeps a fireball lit; an opponent's smothers it", () => {
+  for (const [index, lit] of [[1, true], [4, false]]) {
+    const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+    Object.assign(b[index], { x: 600, y: 300, superActive: 'sticky', superTicks: P.SUPER.ticks });
+    Object.assign(b[6], { x: 540, y: 300, vx: 900, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1, pace: 900 });
+    for (let t = 0; t < 30; t++) P.step(b, P.DT);
+    assert.equal(P.holder(b), b[index]);
+    assert.equal(P.ballOnFire(b[6]), lit);
+  }
+});
+test("the boards take their share of a hot ball's pace; a burning ball banks free (Meteor Bank)", () => {
+  const bounce = onFire => {
+    const b = P.kickoff();
+    Object.assign(b[6], { x: P.rink.right - 30, y: 150, vx: 300, vy: 0, onFire, fireTicks: onFire ? P.FIRE_TICKS : 30, strikerTeam: 0, pace: 900 });
+    b.splice(0, 6);
+    for (let t = 0; t < 40; t++) P.step(b, P.DT);
+    assert.ok(b[0].vx < 0, 'it bounced');
+    return b[0].pace;
+  };
+  assert.ok(bounce(false) < 800, 'the bounce cost pace as well as speed');
+  assert.ok(bounce(true) > 850, 'a burning ball keeps its pace off the boards');
 });
 // Planning marks where the predicted ball catches fire: not for a soft shot, nor a ball already burning.
 test('the planning prediction marks where the ball ignites', () => {

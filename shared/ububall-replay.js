@@ -4,13 +4,13 @@
   const node = typeof module === 'object' && module.exports;
   const P = node ? require('../web/ububall-physics.js') : root.ububallPhysics;
   const M = node ? require('./ububall-match.js') : root.ububallMatch;
-  const FORMAT = 5, MAX_BYTES = 8 << 20, MAX_TEXT = 64 << 20, MAX_TURNS = 5000;
+  const FORMAT = 6, MAX_BYTES = 8 << 20, MAX_TEXT = 64 << 20, MAX_TURNS = 5000;
   // Automatically saved matches kept on this device; the oldest unpinned go first.
   const KEEP = 25, MAX_TITLE = 80;
   // Body fields a snapshot keeps, in file order: everything a turn's simulation reads or writes.
   const NUMBERS = ['x', 'y', 'vx', 'vy', 'omega', 'rotation', 'radius', 'mass', 'friction', 'grip', 'maxSpin', 'team', 'slot', 'curveFactor',
     'sizeMult', 'baseMass', 'baseRadius', 'impulse', 'curveMult', 'bounciness', 'wallBounce', 'power', 'reach', 'strength', 'stability',
-    'meter', 'meterTick', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'strikerPower', 'strikerTeam'];
+    'meter', 'meterTick', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'pace', 'strikerPower', 'strikerTeam'];
   const FLAGS = ['superArm', 'guarding', 'usedSuperThisTurn', 'superHit', 'superRefunded', 'openingShot', 'spinStruck', 'shockwaveFired', 'carded', 'colossusApplied', 'stunned', 'stunnedNext', 'onFire', 'holding'];
   const GUARD = ['reach', 'friction', 'strength', 'stability', 'bounciness'];
   const BODY = [...NUMBERS, ...FLAGS, 'superActive', 'equippedSuper', 'guardBase', 'stickOffset'];

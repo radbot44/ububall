@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 9;
+  const VERSION = 10;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -16,17 +16,30 @@
   // Size trade-offs (tuning): as powers of the size multiplier, small ubus launch faster, curve and
   // re-steer more and strike spin harder; big ubus lose more speed off the boards.
   const SIZE = Object.freeze({ launch: -.28, agility: -.5, strike: -.5, boards: -.5 });
-  // Heat and fire tuning, as shares of MAX_SPEED (owner decision 2026-11-01): the ball glows orange
-  // from 540 px/s, red from 720 and red hot from 800; held above 840 for FIRE_TICKS (0.25 s) it
-  // catches fire, and burns until it drops to 504.
+  // Heat and fire tuning, as shares of MAX_SPEED (owner decisions 2026-11-01). Fire follows the ball's
+  // pace: its speed with any slowing by its striking team's own ubus left out. Friction and drag slow
+  // the pace as they would a free ball; boards, posts, net and an opponent's Magnet take their share
+  // off it; an opponent's touch takes the ball over, leaving its pace at its real speed; it never falls
+  // below the ball's real speed. The ball glows orange from a pace of 540 px/s,
+  // red from 720 and red hot from 800. Heat builds while the pace is above 840 (pausing between 504 and
+  // 840, lost at 504); at FIRE_TICKS (0.25 s) of heat the ball catches fire once it really moves above
+  // 840, and burns until its pace drops to 504.
   const HEAT = Object.freeze({ orange: 540 / MAX_SPEED, red: 720 / MAX_SPEED, redHot: 800 / MAX_SPEED, fire: 840 / MAX_SPEED, sustain: .70 });
   const FIRE_TICKS = 60;
   // An Iron Save leaves the ball and the Guard each with this share of their speed off the hit
   // (owner decision 2026-11-01): the ball dies at the Guard's feet and the Guard holds its ground,
   // so the shooter gets no rebound and the save stays with the defence.
   const IRON_KEEP = .1;
+  // A hot shot: a teammate of the striker driving into a burning ball at this speed or more (px/s,
+  // toward the ball) sends it off at its pace at least, so a trapped fireball fires back at full pace.
+  const HOT_DRIVE = 100;
   function ballOnFire(ball) {
-    return Boolean(ball && (ball.onFire || (ball.fireTicks && ball.fireTicks >= FIRE_TICKS)));
+    return Boolean(ball?.onFire);
+  }
+  // A slowing that counts against the pace takes the same share off it.
+  function countSlowing(ball, before) {
+    const after = Math.hypot(ball.vx, ball.vy);
+    if (after < before) ball.pace = (ball.pace || 0) * after / before;
   }
   // Daze (tuning): a check that knocks an ubu by more than `speed` px/s dazes it by the excess over
   // `scale` (a neutral full-power check: 15%), divided by its Stability and at most `hit` per check.
@@ -123,7 +136,7 @@
       bodies.push({ ...spawn(team, i), vx: 0, vy: 0,
         radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 10, omega: 0, rotation: 0, team, slot: i });
     }
-    bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1, fireTicks: 0, onFire: false, strikerPower: 1, strikerTeam: -1 });
+    bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1, fireTicks: 0, onFire: false, pace: 0, strikerPower: 1, strikerTeam: -1 });
     return bodies;
   }
   // Counts boards and contacts resolved, so a collision pass that resolved nothing ends the passes.
@@ -160,7 +173,7 @@
     // Clear of every board, post and corner arc: nothing below can apply.
     if (b.x >= k.left + r && b.x <= k.right - r && b.y >= k.top + r && b.y <= k.bottom - r &&
         ((b.x >= k.left + k.corner && b.x <= k.right - k.corner) || (b.y >= k.top + k.corner && b.y <= k.bottom - k.corner))) return;
-    const inGoalY = b.y > k.goalTop && b.y < k.goalBottom;
+    const inGoalY = b.y > k.goalTop && b.y < k.goalBottom, before = b.team === -1 ? Math.hypot(b.vx, b.vy) : 0;
 
     if (inGoalY) {
       if (b.x < k.left) {
@@ -211,6 +224,7 @@
         if (limit < 0 || d2 > limit * limit) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, d - limit, 'wall', onWall); }
       }
     }
+    if (before) countSlowing(b, before);
   }
   function triggerShockwave(source, bodies, onShockwave) {
     const radius = SUPER.shockRadius;
@@ -285,6 +299,10 @@
     if (d2 > radius * radius) return;
     resolved++;
     const d = Math.sqrt(d2);
+    // Pace (see HEAT): only the striking team's own ubus slow the ball without it counting.
+    const ballBody = isBall ? (a.team === -1 ? a : b) : null, ubu = ballBody && (ballBody === a ? b : a);
+    const own = Boolean(ubu) && ubu.team === ballBody.strikerTeam, hot = ballOnFire(ballBody);
+    const drive = ubu ? (ubu.vx * (ballBody.x - ubu.x) + ubu.vy * (ballBody.y - ubu.y)) / (d || 1) : 0;
     // Any ubu contact consumes the opening shot, even a stationary touch. Capture the striker's
     // remaining spin before contact friction changes it; no rebound can re-arm it. The bonus spins
     // the ball against the ubu, the way contact friction already does, like meshing gears.
@@ -337,6 +355,8 @@
         for (const o of allBodies || []) o.holding = false;
         player.holding = true; ball.stuckTicks = 0;
         onSuper?.('sticky', 'impact', player, ball);
+        // An opponent's Sticky smothers the ball; a teammate's keeps it as hot as it was.
+        if (!own) { ball.onFire = false; ball.fireTicks = 0; ball.pace = 0; }
         const ox = ball.x - player.x, oy = ball.y - player.y, od = Math.sqrt(ox * ox + oy * oy) || 1;
         const targetDist = player.radius + ball.radius;
         ball.stickOffset = { x: (ox / od) * targetDist, y: (oy / od) * targetDist };
@@ -524,6 +544,15 @@
     if (ironSave) {
       for (const body of [a, b]) { body.vx *= IRON_KEEP; body.vy *= IRON_KEEP; body.omega *= IRON_KEEP; }
     }
+    if (ballBody) {
+      const speed = Math.hypot(ballBody.vx, ballBody.vy), pace = ballBody.pace || 0;
+      if (!own) ballBody.pace = speed;
+      else if (hot && drive >= HOT_DRIVE && pace > speed) {
+        // A hot shot leaves at the ball's pace, along its new heading or straight off the ubu.
+        const ux = speed ? ballBody.vx / speed : (ballBody.x - ubu.x) / (d || 1), uy = speed ? ballBody.vy / speed : (ballBody.y - ubu.y) / (d || 1);
+        ballBody.vx = ux * pace; ballBody.vy = uy * pace;
+      }
+    }
 
     if (typeof onCollide === 'function') {
       onCollide(a, b, -closing, baseImpulse, fireWin !== null, ironSave, checker);
@@ -565,9 +594,10 @@
             const d = Math.sqrt(d2);
             onSuper?.('magnet', 'pull', b);
             b.superHit = true;
-            const pull = SUPER.magnetPull * (1 - d / SUPER.magnetRadius);
+            const pull = SUPER.magnetPull * (1 - d / SUPER.magnetRadius), before = Math.hypot(ball.vx, ball.vy);
             ball.vx += (dx / d) * pull * dt;
             ball.vy += (dy / d) * pull * dt;
+            if (b.team !== ball.strikerTeam) countSlowing(ball, before);
           }
         }
       }
@@ -633,23 +663,15 @@
       }
     }
     if (ball) {
-      const ballSpeed = Math.hypot(ball.vx, ball.vy);
-      const ballShare = ballSpeed / MAX_SPEED;
-      if (host) {
-        ball.fireTicks = 0;
-        ball.onFire = false;
-      } else if (ball.onFire) {
-        if (ballShare <= HEAT.sustain) {
-          ball.onFire = false;
-          ball.fireTicks = 0;
-        }
+      const speed = Math.hypot(ball.vx, ball.vy), pace = ball.pace || 0;
+      ball.pace = Math.max(speed, pace - (ball.friction + AIR_DRAG * pace * pace) * dt);
+      const share = ball.pace / MAX_SPEED;
+      if (ball.onFire) {
+        if (share <= HEAT.sustain) { ball.onFire = false; ball.fireTicks = 0; }
       } else {
-        if (ballShare > HEAT.fire) {
-          ball.fireTicks = (ball.fireTicks || 0) + 1;
-          if (ball.fireTicks >= FIRE_TICKS) ball.onFire = true;
-        } else if (ballShare <= HEAT.sustain) {
-          ball.fireTicks = 0;
-        }
+        if (share > HEAT.fire) ball.fireTicks = Math.min(FIRE_TICKS, (ball.fireTicks || 0) + 1);
+        else if (share <= HEAT.sustain) ball.fireTicks = 0;
+        if (ball.fireTicks >= FIRE_TICKS && speed > HEAT.fire * MAX_SPEED) ball.onFire = true;
       }
     }
     // Contact radii never grow during a step (Colossus only shrinks back), so radii taken once
@@ -777,7 +799,7 @@
     const ball = bodies.find(b => b.team === -1);
     if (ball && !keepMotion) {
       ball.stickOffset = null;
-      ball.fireTicks = 0; ball.onFire = false;
+      ball.fireTicks = 0; ball.onFire = false; ball.pace = 0;
       ball.strikerPower = 1; ball.strikerTeam = -1;
     }
   }
