@@ -367,7 +367,8 @@
       const info = root.ububallPhysics?.SUPERS[id];
       if (!info) continue;
       const mastery = root.ububallPhysics.superMastery(model.supers, id);
-      const badge = el('span', { title: mastery.displayName }, el('img', { src: info.icon, alt: mastery.displayName }));
+      const badge = el('span', {}, el('img', { src: info.icon, alt: mastery.displayName }));
+      badge.dataset.tip = mastery.displayName;
       if (mastery.level > 1) badge.append(el('small', { textContent: mastery.level === 4 ? 'M' : 'I'.repeat(mastery.level) }));
       supers.append(badge);
     }

@@ -6,7 +6,7 @@
 .bug-team, .bug-status, .bug-tab {
   font-family: var(--font-display); font-weight: 400; font-synthesis: none; letter-spacing: .01em;
 }
-.stadium, .team .team-card, .mint-entry { box-shadow: var(--panel-shadow); }
+.stadium, .team .team-card, .mint-entry, .pause-menu, .team-sheet, #online-dialog, #match-summary, .replays-dialog, .export-dialog, .stats-dialog { box-shadow: var(--panel-shadow); }
 
 /* Play home: the lineup, the way into a match and the way to Ubu Mint. */
 .play-home { display: grid; gap: 14px; width: min(880px, 100%); margin: 4px auto 24px; }
@@ -112,7 +112,7 @@ body:not(.in-match) .play-home { margin-top: 14px; }
 }
 .pause-menu {
   width: min(380px, calc(100% - 24px)); padding: 22px; border: 1px solid var(--border); border-radius: 22px;
-  background: var(--card); color: var(--text); box-shadow: 0 20px 50px #000a; text-align: center;
+  background: var(--card); color: var(--text); text-align: center;
 }
 .pause-menu::backdrop { background: rgb(0 0 0 / .65); backdrop-filter: blur(3px); }
 .pause-menu h2 { font-size: 28px; margin-bottom: 16px; }
@@ -302,7 +302,7 @@ body:not(.in-match) .play-home { margin-top: 14px; }
 .super-picker-btn[aria-pressed="true"] {
   border-color: #ff7197;
   background: color-mix(in srgb, #ff7197 20%, var(--elevated));
-  box-shadow: 0 0 10px rgba(255, 113, 151, 0.4);
+  box-shadow: var(--bevel), 0 0 10px rgba(255, 113, 151, 0.4);
 }
 .super-pct {
   font-size: 10px;
@@ -379,14 +379,14 @@ button.super-panel.armed .super-pct { color: #ffffff; font-weight: 800; }
   background: color-mix(in srgb, #ff7197 22%, var(--card));
   border-color: #ff7197;
   color: #ffffff;
-  box-shadow: 0 0 10px rgba(255, 113, 151, 0.4);
+  box-shadow: var(--bevel), 0 0 10px rgba(255, 113, 151, 0.4);
   cursor: pointer;
 }
 .super-arm-btn.armed {
   background: #ff7197;
   color: #0b0d10;
   border-color: #ffffff;
-  box-shadow: 0 0 16px rgba(255, 113, 151, 0.85);
+  box-shadow: var(--bevel), 0 0 16px rgba(255, 113, 151, 0.85);
   font-weight: 800;
 }
 .super-select {
@@ -447,9 +447,6 @@ button.super-panel.armed .super-pct { color: #ffffff; font-weight: 800; }
   background: var(--hover);
   color: var(--text);
   border-color: var(--border);
-}
-.stadium-tool-btn:active {
-  transform: scale(0.94);
 }
 .stadium-tool-btn[aria-pressed="true"] {
   color: var(--primary);
@@ -525,14 +522,14 @@ button.super-panel.armed .super-pct { color: #ffffff; font-weight: 800; }
   background: color-mix(in srgb, #ff7197 22%, var(--card));
   border-color: #ff7197;
   color: #ffffff;
-  box-shadow: 0 0 12px rgba(255, 113, 151, 0.45);
+  box-shadow: var(--bevel), 0 0 12px rgba(255, 113, 151, 0.45);
   cursor: pointer;
 }
 .stadium-super-btn.armed {
   background: #ff7197;
   color: #0b0d10;
   border-color: #ffffff;
-  box-shadow: 0 0 18px rgba(255, 113, 151, 0.9);
+  box-shadow: var(--bevel), 0 0 18px rgba(255, 113, 151, 0.9);
 }
 .stadium.goal-phase #stadium-super-btn {
   display: none;
@@ -543,12 +540,12 @@ button.super-panel.armed .super-pct { color: #ffffff; font-weight: 800; }
   font-size: 15px;
   font-weight: 700;
   border-radius: 21px;
-  box-shadow: 0 4px 16px rgba(255, 153, 84, 0.35);
+  box-shadow: var(--bevel), 0 4px 16px rgba(255, 153, 84, 0.35);
   transition: all 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
-#launch:hover:not(:disabled) {
+#launch:hover:not(:disabled, :active) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(255, 153, 84, 0.5);
+  box-shadow: var(--bevel), 0 6px 20px rgba(255, 153, 84, 0.5);
 }
 
 /* Goal phase: the kickoff button stays below the rink so the goal and its replay stay visible */
@@ -821,7 +818,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .team-sheet {
   position: relative; display: none; width: min(760px, calc(100% - 24px)); height: min(860px, calc(100dvh - 24px)); max-height: none; padding: 0;
   flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 22px;
-  background: var(--card); color: var(--text); box-shadow: 0 24px 60px #000b;
+  background: var(--card); color: var(--text);
 }
 .team-sheet[open] { display: flex; }
 .team-sheet::backdrop { background: rgb(0 0 0 / .65); backdrop-filter: blur(3px); }
@@ -854,7 +851,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
   background: var(--card); color: var(--muted); font-family: var(--font-display); font-size: clamp(14px, 9cqi, 20px); line-height: 1;
 }
 .mode-state::before { content: "Off"; }
-.mode-option:has(input:checked) { border-color: var(--mode); background: color-mix(in srgb, var(--elevated), var(--mode) 16%); box-shadow: 0 0 18px color-mix(in srgb, var(--mode), transparent 65%); }
+.mode-option:has(input:checked) { border-color: var(--mode); background: color-mix(in srgb, var(--elevated), var(--mode) 16%); box-shadow: var(--bevel), 0 0 18px color-mix(in srgb, var(--mode), transparent 65%); }
 .mode-option:has(input:checked) small { color: var(--text); }
 .mode-option:has(input:checked) .mode-state { border-color: var(--mode); background: var(--mode); color: var(--mode-ink); }
 .mode-option:has(input:checked) .mode-state::before { content: "On"; }
@@ -875,13 +872,24 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .team-heading { display: grid; min-width: 0; }
 .team-step-head h2 { margin: 0; font-size: 22px; line-height: 1.1; white-space: nowrap; }
 .team-mode { overflow: hidden; color: var(--muted); font-family: var(--font-display); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-/* Kickoff formation: Back by your goal on the left, Top and Bottom ahead of it. */
+/* Kickoff formation on your half of the rink, marked as in a match: boards with your goal and its
+   dashed crease on the left, the dashed centre line and half the face-off circle on the right.
+   Back stands by the goal, Top and Bottom ahead of it. */
 .formation {
-  position: relative; display: grid; grid-template: "back top" auto "back bottom" auto / minmax(0, 1fr) minmax(0, 1fr); gap: 8px;
-  padding: 8px 8px 8px 14px; border: 1px solid var(--border); border-radius: 16px;
-  background: linear-gradient(90deg, transparent calc(100% - 1px), var(--border) 0) right / 50% 100% no-repeat, color-mix(in srgb, var(--card), var(--background) 40%);
+  --crease: 34px;
+  position: relative; display: grid; grid-template: "back top" auto "back bottom" auto / minmax(0, 1fr) minmax(0, 1fr); gap: 10px;
+  margin-left: 14px; padding: 12px 22px 12px calc(var(--crease) + 10px);
+  border: 3px solid var(--border); border-right: 2px dashed var(--border); border-radius: 44px 0 0 44px;
+  background: radial-gradient(circle at 100% 50%, transparent 52px, var(--border) 52px 54px, transparent 54px), color-mix(in srgb, var(--card), var(--background) 40%);
 }
-.formation::before { content: ''; position: absolute; left: 0; top: 30%; bottom: 30%; width: 5px; border-radius: 0 4px 4px 0; background: var(--team-home); opacity: .7; }
+.formation::before {
+  content: ''; position: absolute; right: calc(100% + 3px); top: 50%; width: 11px; height: 29%; translate: 0 -50%;
+  border: 3px solid var(--team-home); border-right: 0; border-radius: 3px 0 0 3px; background: var(--background);
+}
+.formation::after {
+  content: ''; position: absolute; left: calc(-1 * var(--crease)); top: 50%; width: calc(2 * var(--crease)); aspect-ratio: 1; translate: 0 -50%;
+  border: 2px dashed var(--border); border-radius: 50%; clip-path: inset(0 0 0 50%); pointer-events: none;
+}
 .formation-slot {
   position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; min-width: 0; padding: 6px;
   border: 2px solid var(--border); border-radius: 14px; background: var(--elevated); transition: border-color .15s, background .15s;
@@ -908,7 +916,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .formation-name small { color: var(--muted); font: 11px var(--font-body); }
 .formation-super {
   grid-column: 1; justify-self: start; display: inline-flex; align-items: center; gap: 4px; min-height: 0; max-width: 100%; padding: 3px 8px 3px 4px;
-  border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--secondary); font: 12px var(--font-body); box-shadow: none;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--secondary); font: 12px var(--font-body);
 }
 .formation-super img { flex: none; width: 20px; height: 20px; }
 .formation-super span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -920,15 +928,27 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .formation-tool { width: 24px; height: 24px; min-height: 0; padding: 0; border: 0; background: none; color: var(--muted); box-shadow: none; }
 .formation-tool svg { width: 20px; height: 20px; }
 .formation-tool:hover, .formation-tool:focus-visible { background: none; color: var(--text); }
+/* Back fills its tall card: a large ubu, centred, with its tools in the corner. */
+.formation-slot[data-position="back"] { grid-template-columns: minmax(0, 1fr); justify-items: center; }
+.formation-slot[data-position="back"] .formation-pick { grid-template-columns: minmax(0, 1fr); justify-items: center; row-gap: 4px; text-align: center; }
+.formation-slot[data-position="back"] .formation-art { width: 76px; height: 76px; }
+.formation-slot[data-position="back"] .formation-name { justify-items: center; max-width: 100%; }
+.formation-slot[data-position="back"] .formation-super { justify-self: center; max-width: 100%; }
+.formation-slot[data-position="back"] .formation-tools { position: absolute; top: 6px; right: 6px; bottom: auto; }
 [data-locked] .roster-scroll { opacity: .55; pointer-events: none; }
-/* Phones: position tools sit beside the super button so names keep the width. */
-@media (max-width: 520px) {
-  .formation { gap: 6px; padding: 6px 6px 6px 12px; }
+/* Phones and short, wide screens: position tools sit in the corner beside the position label, so
+   names and supers keep the width. */
+@media (max-width: 520px), (max-height: 560px) and (min-width: 560px) {
+  .formation { --crease: 22px; gap: 6px; margin-left: 11px; padding: 8px 14px 8px calc(var(--crease) + 6px); border-radius: 32px 0 0 32px; }
+  .formation::before { width: 8px; }
   .formation-slot { grid-template-columns: minmax(0, 1fr); padding: 5px; }
-  .formation-tools { position: absolute; right: 4px; bottom: 5px; display: flex; gap: 3px; }
+  .formation-tools { position: absolute; top: 2px; right: 4px; display: flex; gap: 3px; }
+  .formation-pos { line-height: 24px; }
+  .formation-slot[data-position="back"] .formation-pos { justify-self: start; }
   .formation-art { width: 36px; height: 36px; }
+  .formation-slot[data-position="back"] .formation-art { width: 56px; height: 56px; }
   .formation-name strong { font-size: 13px; line-height: 1.15; white-space: normal; overflow-wrap: anywhere; }
-  .formation-super { max-width: calc(100% - 56px); padding: 2px 6px 2px 3px; font-size: 11px; }
+  .formation-super { max-width: 100%; padding: 2px 6px 2px 3px; font-size: 11px; }
   .formation-super img { width: 18px; height: 18px; }
 }
 /* A position's super choices: icon, name with mastery, and what it does. */
@@ -941,7 +961,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 @media (max-width: 600px) { .super-choice-grid { grid-template-columns: repeat(var(--cols-narrow, 2), minmax(0, 1fr)); } }
 .super-choice {
   display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; justify-items: start;
-  min-height: 0; padding: 6px 8px; border: 2px solid transparent; border-radius: 12px; background: var(--card); text-align: left; box-shadow: none;
+  min-height: 0; padding: 6px 8px; border: 2px solid transparent; border-radius: 12px; background: var(--card); text-align: left;
 }
 .super-choice img { grid-row: span 2; width: 36px; height: 36px; }
 .super-choice strong { font-size: 14px; font-weight: 400; }
@@ -975,7 +995,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .roster-status:empty { display: none; }
 .roster-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin: 6px 0 8px; padding: 4px; border-radius: 14px; background: var(--elevated); }
 .roster-tabs button { min-height: 40px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: 16px; }
-.roster-tabs button[aria-selected="true"] { background: var(--card); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+.roster-tabs button[aria-selected="true"] { background: var(--card); color: var(--text); }
 .roster-scroll { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -16px; padding: 0 16px 12px; overscroll-behavior: contain; }
 .roster-signin { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border-radius: 14px; background: var(--elevated); }
 .roster-signin p { margin: 0; font-size: 13px; }
@@ -1002,9 +1022,27 @@ body:has(#online-dialog[open]) { overflow: hidden; }
   .team-sheet-foot { padding-block: 8px calc(8px + env(safe-area-inset-bottom)); }
   .team-sheet-foot button { min-height: 44px; font-size: 18px; }
   .team-step-head { margin-bottom: 6px; }
+  .formation { gap: 6px; padding-block: 5px; }
   .formation-art { width: 32px; height: 32px; }
+  .formation-slot[data-position="back"] .formation-art { width: 48px; height: 48px; }
   .formation-pos { display: none; }
   .roster-hint { margin-top: 4px; font-size: 12px; }
+}
+
+/* Wide, short screens (a 16:9 Discord tile): the team on the left, the ubu list beside it. The left
+   column scrolls with the sheet if a saved-team bar or lobby makes it taller than the screen. */
+@media (max-height: 560px) and (min-width: 560px) {
+  .team-step { display: grid; grid-template: repeat(6, auto) minmax(0, 1fr) / minmax(0, 1.5fr) minmax(0, 1fr); column-gap: 12px; align-content: start; overflow-y: auto; }
+  .team-step > * { grid-column: 1; }
+  .team-step > .roster-tabs { grid-column: 2; grid-row: 1; align-self: start; margin: 0 48px 6px 0; }
+  .team-step > .roster-scroll { grid-column: 2; grid-row: 2 / -1; margin-right: -16px; margin-left: 0; padding-left: 0; }
+  .team-step .roster-toolbar { margin-left: 0; padding-left: 0; }
+  .team-step { padding-top: 6px; }
+  .team-step-head { margin-bottom: 4px; }
+  .formation { gap: 4px; padding-block: 3px; }
+  .formation-pos { display: block; line-height: 20px; }
+  .roster-tabs button { padding-inline: 8px; white-space: nowrap; }
+  .roster-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
 }
 
 /* Announcements over the rink ("Plan your shot…", "Launch!", the winner). */

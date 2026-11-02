@@ -15,10 +15,12 @@
   --hover: color-mix(in srgb, var(--elevated), var(--text) 8%);
   --font-display: 'Uburoom Sans', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-body: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  /* Raised controls: a lit top edge and a darker base that flattens when pressed. */
-  --bevel: inset 0 1px 0 rgb(255 255 255 / .1), inset 0 -3px 0 rgb(0 0 0 / .3);
-  --bevel-pressed: inset 0 2px 0 rgb(0 0 0 / .3);
-  --panel-shadow: 0 1px 0 rgb(255 255 255 / .04) inset, 0 12px 32px rgb(0 0 0 / .32);
+  /* Raised depth: a lit top edge over a chunky lip, drawn inside the face so the lip is always a
+     darker shade of it. Pressing sinks the face onto the lip; panels keep a heavier, still base. */
+  --bevel: inset 0 1px 0 rgb(255 255 255 / .14), inset 0 -4px 0 rgb(0 0 0 / .32), 0 3px 8px rgb(0 0 0 / .28);
+  --bevel-pressed: inset 0 2px 0 rgb(0 0 0 / .28), inset 0 -1px 0 rgb(0 0 0 / .32), 0 1px 2px rgb(0 0 0 / .28);
+  --panel-shadow: inset 0 1px 0 rgb(255 255 255 / .07), inset 0 -5px 0 rgb(0 0 0 / .24), 0 14px 32px rgb(0 0 0 / .4);
+  --scroll-thumb: color-mix(in srgb, var(--border), var(--text) 18%);
   color-scheme: dark; font: 14px/1.4 var(--font-body);
   color: var(--text); background: var(--background);
 }
@@ -30,6 +32,22 @@ body {
   display: flow-root; margin: 0; min-height: 100dvh;
   background: radial-gradient(ellipse 90% 60% at 50% -10%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 70%) no-repeat, var(--background);
 }
+/* The arena backdrop: faint ice scratches under a vignette, fixed while the page scrolls. */
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(ellipse 110% 85% at 50% 35%, transparent 50%, rgb(0 0 0 / .55)),
+    repeating-linear-gradient(118deg, rgb(255 255 255 / .018) 0 1px, transparent 1px 9px),
+    repeating-linear-gradient(32deg, rgb(255 255 255 / .012) 0 1px, transparent 1px 13px);
+}
+/* Slim game scrollbars everywhere; the browser's own never show. Chromium and Safari take the
+   ::-webkit-scrollbar styles, which the standard properties would override, so those are for Firefox. */
+@supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; } }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 99px; background: var(--scroll-thumb) padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--muted); }
 /* Uburoom Sans has a single heavy weight; never let the browser fake a bolder one. */
 h1, h2, h3, legend, summary, button, .button, .site-nav, .display {
   font-family: var(--font-display); font-weight: 400; font-synthesis: none; letter-spacing: .01em;
@@ -116,7 +134,7 @@ a { color: inherit; text-decoration: none; }
 .more-menu {
   position: fixed; inset: 64px max(16px, calc((100% - 1520px) / 2)) auto auto; margin: 0;
   min-width: 180px; padding: 6px; border: 1px solid var(--border); border-radius: 14px;
-  background: var(--card); color: var(--text); box-shadow: 0 16px 40px #0009;
+  background: var(--card); color: var(--text); box-shadow: var(--panel-shadow);
 }
 .more-menu:popover-open { display: grid; }
 .more-menu a { padding: 10px 14px; border-radius: 10px; color: var(--muted); }
@@ -180,7 +198,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: 22px;
   background: var(--card);
   color: var(--text);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--panel-shadow);
 }
 .account-dialog::backdrop {
   background: rgba(0, 0, 0, 0.7);
@@ -252,14 +270,22 @@ a { color: inherit; text-decoration: none; }
 
 button, .button, .quiet, .primary {
   display: inline-flex; align-items: center; justify-content: center; min-height: 40px;
-  padding: 10px 16px 11px; border: 0; border-radius: 12px; background: var(--elevated);
+  padding: 9px 16px 13px; border: 0; border-radius: 12px; background: var(--elevated);
   color: var(--text); font-size: 14.5px; line-height: 1.2;
   cursor: pointer; touch-action: manipulation; transition: background .15s ease, transform .08s ease, box-shadow .08s ease;
 }
 button:hover, .button:hover, .quiet:hover { background: var(--hover); }
-/* Plain and shared action buttons are raised; component buttons with their own class stay flat. */
-:is(button:not([class]), .button, .quiet, .primary, .stadium-tool-btn, .stadium-super-btn) { box-shadow: var(--bevel); }
-:is(button:not([class]), .button, .quiet, .primary, .stadium-tool-btn, .stadium-super-btn):active:not(:disabled) { transform: translateY(1px); box-shadow: var(--bevel-pressed); }
+/* Everything a player presses is raised and sinks onto its lip when pressed: buttons, pills and
+   tiles. Menu items and plain icon actions stay flat. */
+:is(button:not([class]), .button, .quiet, .primary, .mint-entry-cta, .game-dialog-danger, .stadium-tool-btn, .stadium-super-btn, .super-arm-btn,
+  .super-picker-btn, .super-choice, .formation-super, .setting, .game-select, .ubu-direction, .ubu-filters-toggle, .ubu-chip, .voice-play-btn,
+  .ubu-tile-main, .mode-option, .cpu-levels span) { box-shadow: var(--bevel); }
+.roster-tabs [aria-selected="true"], .viewer-tabs [aria-selected="true"] { box-shadow: var(--bevel); }
+:is(button:not([class]), .button, .quiet, .primary, .mint-entry-cta, .stadium-tool-btn, .stadium-super-btn, .super-arm-btn,
+  .super-picker-btn, .super-choice, .formation-super, .setting, .game-select, .ubu-direction, .ubu-filters-toggle, .ubu-chip, .voice-play-btn,
+  .ubu-tile-main, .mode-option, .cpu-levels span):active:not(:disabled) { transform: translateY(2px); box-shadow: var(--bevel-pressed); }
+/* Tiles and inner panels that hold controls are raised but do not press. */
+.home-ubu, .formation-slot, .lobby-panel, .roster-signin, .replays-list li, .viewer-stat-group, .viewer-voice { box-shadow: var(--bevel); }
 button:disabled { opacity: .4; cursor: default; }
 .primary { background: linear-gradient(color-mix(in srgb, var(--primary), white 14%), var(--primary)); color: #2B1608; }
 .primary:hover { background: linear-gradient(color-mix(in srgb, var(--primary), white 24%), color-mix(in srgb, var(--primary), white 8%)); }
@@ -330,6 +356,7 @@ h2 { font-size: 18px; margin: 0; }
   color: var(--text);
   text-align: center;
   box-sizing: border-box;
+  box-shadow: var(--panel-shadow);
 }
 .viewer:not([open]) { display: none; }
 .viewer::backdrop { background: #000b; }
@@ -769,7 +796,7 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
   min-height: 0; padding: 2px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card);
   color: var(--text); font: 12px ui-monospace, Consolas, monospace; box-shadow: none; white-space: pre;
 }
-.ubu-direction, .ubu-filters-toggle { box-shadow: none; white-space: nowrap; }
+.ubu-direction, .ubu-filters-toggle { white-space: nowrap; }
 .ubu-filters-toggle[aria-expanded="true"] { border-color: var(--muted); }
 .ubu-toolbar :is(input, button):hover { border-color: var(--muted); }
 .ubu-toolbar :is(input, button):focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
@@ -779,7 +806,7 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .ubu-chip-group { display: flex; flex-wrap: wrap; gap: 6px; }
 .ubu-chip {
   display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 3px 10px; border: 1px solid var(--border);
-  border-radius: 999px; background: var(--card); color: var(--text); font: 12px var(--font-body); box-shadow: none;
+  border-radius: 999px; background: var(--card); color: var(--text); font: 12px var(--font-body);
 }
 .ubu-chip img { width: 20px; height: 20px; }
 .ubu-chip[aria-pressed="true"] { border-color: currentColor; background: color-mix(in srgb, var(--card), currentColor 16%); }
@@ -800,9 +827,15 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 #team-back, .mint-entry-cta { gap: 6px; }
 .game-popover {
   position: fixed; inset: auto; margin: 0; padding: 6px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow: auto;
-  border: 1px solid var(--border); border-radius: 14px; background: var(--elevated); color: var(--text); box-shadow: 0 18px 44px #000b;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--elevated); color: var(--text); box-shadow: var(--panel-shadow);
 }
-.game-select { justify-content: space-between; gap: 8px; min-width: 0; text-align: left; box-shadow: none; }
+.game-tip {
+  position: fixed; inset: auto; margin: 0; max-width: min(240px, calc(100vw - 16px)); padding: 5px 10px 6px; pointer-events: none;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--elevated); color: var(--text); box-shadow: var(--panel-shadow);
+  font: 12px/1.35 var(--font-body);
+}
+[data-tip] { -webkit-touch-callout: none; user-select: none; }
+.game-select { justify-content: space-between; gap: 8px; min-width: 0; text-align: left; }
 .game-select-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .game-select .icon { width: 16px; height: 16px; color: var(--muted); }
 .game-select[aria-expanded="true"] { border-color: var(--muted); }
@@ -827,7 +860,7 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
   background: var(--background); color: var(--text); font: 16px var(--font-body);
 }
 .game-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.game-dialog-danger { background: #d9434b; color: #fff; box-shadow: var(--bevel); }
+.game-dialog-danger { background: #d9434b; color: #fff; }
 .game-dialog-danger:hover { background: #e5555c; }
 .ubu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin: 0 0 16px; }
 .ubu-grid > p { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
@@ -837,8 +870,8 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .ubu-tile-main {
   display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; height: 100%; padding: 16px 8px 12px;
   border: 2px solid transparent; border-radius: 16px; background: var(--card); color: var(--text); text-align: center;
-  font: 12px var(--font-body); cursor: pointer; touch-action: manipulation; box-shadow: none;
-  transition: background .2s ease, transform .2s ease;
+  font: 12px var(--font-body); cursor: pointer; touch-action: manipulation;
+  transition: background .2s ease, transform .12s ease, box-shadow .12s ease;
 }
 .ubu-tile-main:hover { background: var(--hover); transform: translateY(-2px); }
 .ubu-tile-main[aria-pressed="true"] { border-color: var(--team-home); }
@@ -863,7 +896,7 @@ input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .ubu-tile-inspect:hover { color: var(--text); opacity: 1; }
 .collection-status { text-align: center; font-size: 12px; color: var(--muted); margin: 16px 0; }
 
-#reveal { overflow-x: hidden; width: min(900px, calc(100% - 24px)); max-height: calc(100dvh - 24px); padding: 20px; border: 1px solid var(--border); border-radius: 22px; background: var(--card); color: var(--text); text-align: center; }
+#reveal { overflow-x: hidden; width: min(900px, calc(100% - 24px)); max-height: calc(100dvh - 24px); padding: 20px; border: 1px solid var(--border); border-radius: 22px; background: var(--card); color: var(--text); text-align: center; box-shadow: var(--panel-shadow); }
 #reveal::backdrop { background: #000b; }
 body:has(#reveal[open]) { overflow: hidden; }
 .reveal-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }

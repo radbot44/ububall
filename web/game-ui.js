@@ -143,6 +143,50 @@
     return { button, sync };
   }
 
+  // Tooltips: any element with data-tip names itself on hover, keyboard focus or a long press on
+  // touch, above the element (below when there is no room). A long press swallows the tap that
+  // ends it, so naming a super on a tile never picks the tile.
+  let tip = null, tipFor = null, pressTimer = 0, hideTimer = 0, pressed = null, swallow = false;
+  function showTip(target) {
+    tip ||= document.body.appendChild(el('div', { className: 'game-tip', popover: 'manual' }));
+    clearTimeout(hideTimer);
+    tip.textContent = target.dataset.tip; tipFor = target;
+    if (tip.matches(':popover-open')) tip.hidePopover();
+    tip.showPopover();
+    tip.style.left = tip.style.top = '0';
+    const a = target.getBoundingClientRect(), gap = 6, margin = 8, width = tip.offsetWidth, height = tip.offsetHeight;
+    const top = a.top - gap - height >= margin ? a.top - gap - height : a.bottom + gap;
+    tip.style.left = Math.max(margin, Math.min(a.left + a.width / 2 - width / 2, innerWidth - margin - width)) + 'px';
+    tip.style.top = Math.max(margin, Math.min(top, innerHeight - margin - height)) + 'px';
+  }
+  function hideTip(delay = 0) {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => { if (tip?.matches(':popover-open')) tip.hidePopover(); tipFor = null; }, delay);
+  }
+  const tipTarget = event => event.target.closest?.('[data-tip]');
+  addEventListener('pointerover', event => { const t = tipTarget(event); if (event.pointerType === 'mouse' && t && t !== tipFor) showTip(t); });
+  addEventListener('pointerout', event => { const t = tipTarget(event); if (event.pointerType === 'mouse' && t && !t.contains(event.relatedTarget)) hideTip(); });
+  addEventListener('focusin', event => { const t = tipTarget(event); if (t?.matches(':focus-visible')) showTip(t); });
+  addEventListener('focusout', event => { if (tipTarget(event) === tipFor) hideTip(); });
+  addEventListener('pointerdown', event => {
+    swallow = false; clearTimeout(pressTimer);
+    const t = tipTarget(event);
+    if (tipFor && tipFor !== t) hideTip();
+    if (event.pointerType === 'mouse' || !t) return;
+    pressed = { x: event.clientX, y: event.clientY };
+    pressTimer = setTimeout(() => { swallow = true; showTip(t); }, 450);
+  });
+  addEventListener('pointermove', event => {
+    if (pressed && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > 10) { clearTimeout(pressTimer); pressed = null; }
+  });
+  for (const type of ['pointerup', 'pointercancel']) addEventListener(type, event => {
+    clearTimeout(pressTimer); pressed = null;
+    if (swallow && event.pointerType !== 'mouse') hideTip(1500);
+  });
+  addEventListener('click', event => { if (swallow) { swallow = false; event.preventDefault(); event.stopPropagation(); } }, true);
+  addEventListener('contextmenu', event => { if (swallow || tipTarget(event)) event.preventDefault(); }, true);
+  for (const type of ['scroll', 'resize']) addEventListener(type, () => { if (tipFor) hideTip(); }, true);
+
   root.gameUi = { ICONS, icon, fillIcons, dropdown, place, confirm, ask, select };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => fillIcons());
   else fillIcons();

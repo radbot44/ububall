@@ -3450,7 +3450,7 @@
       const current = resolveEquippedSuper(entry, i);
       const button = node('button', { type: 'button', className: 'formation-super', disabled: locked },
         node('img', { src: current.icon, alt: '' }), node('span', { textContent: current.displayName }), gameUi.icon('chevron-down'));
-      button.title = current.displayName + ': ' + current.desc + superBonus(current);
+      button.dataset.tip = current.displayName + ': ' + current.desc + superBonus(current);
       button.setAttribute('aria-label', `Super for ${entry.model.parts.fullName}: ${current.displayName}. Change super`);
       // The super choices drop down from this button, for this position. Selection updates in
       // place, since rebuilding the cards would detach the button that opens the dropdown.
@@ -3466,14 +3466,16 @@
     }
     const tools = node('span', { className: 'formation-tools' });
     if (!locked && !fixed && i !== rosterSlot && (entry || draft[rosterSlot])) {
-      const swap = node('button', { type: 'button', className: 'formation-tool', title: `Swap with ${POSITIONS[rosterSlot]}` }, gameUi.icon('arrows-left-right'));
+      const swap = node('button', { type: 'button', className: 'formation-tool' }, gameUi.icon('arrows-left-right'));
       swap.setAttribute('aria-label', `Swap ${POSITIONS[i]} with ${POSITIONS[rosterSlot]}`);
+      swap.dataset.tip = `Swap with ${POSITIONS[rosterSlot]}`;
       swap.onclick = () => swapSlots(i, rosterSlot);
       tools.append(swap);
     }
     if (entry && !locked && !fixed) {
-      const clear = node('button', { type: 'button', className: 'formation-tool', title: 'Remove' }, gameUi.icon('x'));
+      const clear = node('button', { type: 'button', className: 'formation-tool' }, gameUi.icon('x'));
       clear.setAttribute('aria-label', `Remove ${entry.model.parts.fullName} from ${POSITIONS[i]}`);
+      clear.dataset.tip = 'Remove';
       clear.onclick = () => { draft[i] = null; rosterSlot = i; changed(i); };
       tools.append(clear);
     }
