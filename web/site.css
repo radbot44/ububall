@@ -304,8 +304,19 @@ button:disabled { opacity: .4; cursor: default; }
 .icon-button svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 h1 { font-size: 26px; letter-spacing: normal; margin: 0; }
 h2 { font-size: 18px; margin: 0; }
-.pack-shop { background: var(--card); border: 1px solid var(--border); border-radius: 22px; padding: 20px; text-align: center; overflow: hidden; box-shadow: var(--panel-shadow); }
-#pack-title { text-align: left; font-size: 17px; letter-spacing: 0; }
+/* Packs float on a stage under a spotlight shining from above the screen, with a pool of light on
+   the floor beneath them. */
+.pack-shop { position: relative; isolation: isolate; padding: 6px 0 20px; text-align: center; }
+.pack-shop::before {
+  content: ''; position: absolute; top: -140px; left: 50%; z-index: -1; width: min(920px, 100%); height: 600px; translate: -50% 0; pointer-events: none;
+  background: radial-gradient(ellipse 50% 100% at 50% 0%, rgb(255 236 210 / .13), rgb(255 236 210 / .04) 55%, transparent);
+}
+#pack-title {
+  font-size: clamp(30px, 6vw, 52px); line-height: 1.05; -webkit-text-stroke: .06em #101217; paint-order: stroke fill;
+  text-shadow: 0 6px 18px #000a;
+}
+.pack-subtitle { margin: 6px 0 0; color: var(--muted); font-family: var(--font-display); font-size: clamp(15px, 2.6vw, 20px); }
+.pack-shop:has(#pack-choices:is([hidden], .choosing)) .pack-subtitle { display: none; }
 #status { color: var(--muted); font-size: 12px; margin: 12px auto 0; min-height: 17px; max-width: 560px; }
 #status:empty { min-height: 0; margin: 0; }
 .pack-prompt { margin: 4px 0 0; font-family: 'Uburoom Sans', Inter, sans-serif; font-size: 22px; color: var(--primary); animation: prompt-pulse 1.6s ease-in-out infinite; }
@@ -320,7 +331,10 @@ h2 { font-size: 18px; margin: 0; }
 .candy-pack:disabled { opacity: .65; }
 .candy-pack.unwrapping { opacity: 1; }
 .candy-pack canvas { display: block; width: 100%; height: 100%; }
-.pack-choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.pack-choices {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 12px 0 8px;
+  background: radial-gradient(ellipse 52% 16% at 50% 88%, rgb(255 236 210 / .1), transparent 72%);
+}
 /* Dealt packs bob out of step, lift toward the pointer and glow in their lead colour. */
 .pack-option { position: relative; min-width: 0; padding: 12px 4px 18px; transition: opacity .35s, translate .35s cubic-bezier(.5, 0, .8, .4), scale .25s; }
 /* A transparent resting shadow gives the glow the same filter shape, so it fades in as well as out. */
@@ -344,7 +358,8 @@ h2 { font-size: 18px; margin: 0; }
 .pack-choices.choosing { grid-template-columns: 1fr; }
 .pack-choices.choosing .pack-option:not(.selected) { display: none; }
 .pack-choices.choosing .pack-option::after, .pack-choices.choosing .pack-sparkle { display: none; }
-@media (max-width: 700px) {
+/* Portrait phones stack the packs; landscape (a 16:9 tile) keeps all three side by side. */
+@media (max-width: 700px) and (orientation: portrait) {
   .pack-choices { grid-template-columns: 1fr; }
   .pack-option .candy-pack { max-width: 380px; }
 }
@@ -1083,7 +1098,7 @@ body:has(#reveal[open]) { overflow: hidden; }
 @media (max-width: 520px) {
   main { width: calc(100% - 16px); margin-top: 12px; }
   .brand img { width: 130px; } header { gap: 12px; } nav { gap: 6px; }
-  .pack-shop { padding: 16px; }.candy-pack { margin-top: 24px; }
+  .candy-pack { margin-top: 24px; }
   .viewer { padding: 16px 12px; }
   /* The card takes the full width; the arrows move beneath it. */
   #reveal { width: calc(100% - 16px); max-width: none; padding: 12px; }

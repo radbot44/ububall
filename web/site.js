@@ -93,7 +93,7 @@
     const label = pack ? 'Continue pack' : 'Try again';
     $('mint').textContent = label;
     $('mint').hidden = busy || !(pack || (canDeal && !offer && !outOfPacks));
-    $('pack-hint').textContent = busy && !offer ? 'Shuffling packs…' : offer && !pack && !busy ? 'Pick a pack!' : '';
+    $('pack-hint').textContent = busy && !offer ? 'Shuffling packs…' : '';
     for (const view of choiceViews) view.button.disabled = busy || !offer || Boolean(pack);
   }
   // Short dances a clicked ubu performs, picked at random.
@@ -833,7 +833,6 @@
       view.card.style.setProperty('--pack-glow', option.hints[0].background);
       const description = `Pack ${i + 1}: backgrounds ${option.hints.map(h => h.background).join(', ')}${hasSpecial ? '; special finish in pack' : '; matte finishes'}`;
       view.button.setAttribute('aria-label', description);
-      view.button.title = description;
       if (!still) view.card.animate([
         { transform: `translateY(-70px) rotate(${(i - 1) * 14}deg) scale(.7)`, opacity: 0 },
         { transform: 'translateY(8px) rotate(0deg) scale(1.04)', opacity: 1, offset: .7 },

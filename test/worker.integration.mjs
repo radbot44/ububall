@@ -63,7 +63,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(new URL(oldMint.headers.get('Location')).pathname + new URL(oldMint.headers.get('Location')).search, '/mint?sort=favorite');
     assert.equal(await (await fetch('/collection')).text(), home);
     const mint = await (await fetch('/mint')).text();
-    assert.match(mint, /Packs/);
+    assert.match(mint, /Choose your pack/);
     assert.match(mint, /id="pack-choices"/);
     assert.match(mint, /id="collection"/);
     assert.match(mint, /id="play-with-ubus"/);
