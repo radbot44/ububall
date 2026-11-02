@@ -1,8 +1,7 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id);
-  let config = { ready: false }, session = null, current = null, next = null, busy = false;
-  const keys = new Map();
+  let config = { ready: false }, session = null, current = null, busy = false;
   let packScene = null, offer = null;
   const choiceViews = Array.from({ length: 3 }, (_, i) => {
     const card = document.createElement('article'); card.className = 'pack-option';
@@ -22,25 +21,15 @@
     });
     return { card, button, scene };
   });
-  // Sounds need a page gesture first; packs dealt on page load stay silent.
-  const sound = (kind, name) => { if (navigator.userActivation?.hasBeenActive) window.ubuAudio?.[kind]?.(name); };
+  // Sounds need a page gesture first; packs dealt on page load, or while another screen is up, stay silent.
+  const sound = (kind, name) => { if (navigator.userActivation?.hasBeenActive && !$('pack-choices').closest('[data-screen]').hidden) window.ubuAudio?.[kind]?.(name); };
   let outOfPacks = false;
-  let pack = null, packKey = '', pendingKey = '', collectionVersion = 0, revealIndex = 0;
+  let pack = null, packKey = '', pendingKey = '', revealIndex = 0;
   let viewerView = 'ubu';
-  const collectionMap = new Map();
-
   const FAV_STORAGE_KEY = 'ubumint:favorites';
-  const cardMap = new Map();
-  const changingFavorites = new Set();
-  const isFavorite = serial => collectionMap.get(serial)?.favorite === true;
-  function createHeartSvg() {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('aria-hidden', 'true');
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', 'M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572');
-    svg.append(path);
-    return svg;
+  const isFavorite = serial => ubuList.get(serial)?.favorite === true;
+  function toggleFavorite(serial) {
+    ubuList.setFavorite(serial, !isFavorite(serial)).catch(error => status('Could not update favorite: ' + error.message));
   }
   function createHeartButton(serial) {
     const btn = document.createElement('button');
@@ -49,46 +38,29 @@
     btn.title = 'Favorite';
     btn.setAttribute('aria-label', `Favorite #${serial}`);
     btn.dataset.serial = serial;
-    const fav = isFavorite(serial);
-    if (fav) {
-      btn.classList.add('is-favorite');
-      btn.setAttribute('aria-pressed', 'true');
-    } else {
-      btn.setAttribute('aria-pressed', 'false');
-    }
-    btn.append(createHeartSvg());
+    btn.classList.toggle('is-favorite', isFavorite(serial));
+    btn.setAttribute('aria-pressed', String(isFavorite(serial)));
+    btn.append(ubuList.heartIcon());
     btn.addEventListener('click', event => {
       event.stopPropagation();
       toggleFavorite(serial);
     });
     return btn;
   }
-  function syncFavoriteButtons(serial) {
-    const favorite = isFavorite(serial);
-    for (const btn of document.querySelectorAll('.card-heart[data-serial="' + serial + '"]')) {
+  // Reveal and viewer hearts follow the shared list; its tiles update themselves.
+  function syncFavoriteButtons() {
+    for (const btn of document.querySelectorAll('.card-heart[data-serial]')) {
+      const favorite = isFavorite(btn.dataset.serial);
       btn.classList.toggle('is-favorite', favorite);
       btn.setAttribute('aria-pressed', String(favorite));
     }
-    if (current?.serial === serial) {
-      $('viewer-fav').classList.toggle('is-favorite', favorite);
-      $('viewer-fav').setAttribute('aria-pressed', String(favorite));
+    if (current?.serial) {
+      $('viewer-fav').hidden = !ubuList.get(current.serial);
+      $('viewer-fav').classList.toggle('is-favorite', isFavorite(current.serial));
+      $('viewer-fav').setAttribute('aria-pressed', String(isFavorite(current.serial)));
     }
   }
-  async function toggleFavorite(serial) {
-    const item = collectionMap.get(serial);
-    if (!item || changingFavorites.has(serial)) return;
-    changingFavorites.add(serial);
-    try {
-      const result = await api('/api/favorites', post({ serial, favorite: !item.favorite }));
-      item.favorite = result.favorite;
-      syncFavoriteButtons(serial);
-      if ($('sort-ubus').value === 'favorite') insertCard(item);
-    } catch (error) {
-      status('Could not update favorite: ' + error.message);
-    } finally {
-      changingFavorites.delete(serial);
-    }
-  }
+  window.addEventListener('ubu-list:change', syncFavoriteButtons);
   async function migrateBrowserFavorites() {
     let serials;
     try { serials = JSON.parse(localStorage.getItem(FAV_STORAGE_KEY) || '[]'); } catch { return; }
@@ -123,13 +95,6 @@
     $('mint').hidden = busy || !(pack || (canDeal && !offer && !outOfPacks));
     $('pack-hint').textContent = busy && !offer ? 'Shuffling packs…' : offer && !pack && !busy ? 'Pick a pack!' : '';
     for (const view of choiceViews) view.button.disabled = busy || !offer || Boolean(pack);
-  }
-  // Above 99 a run of nines extends the display to the first other digit, so rounding never
-  // carries into them; six or more nines may round up.
-  function rarityScore(percentile) {
-    if (percentile <= 99) return percentile.toFixed(2);
-    const nines = percentile.toFixed(12).split('.')[1].match(/^9*/)[0].length;
-    return percentile.toFixed(nines >= 6 ? 3 : Math.max(3, nines + 1));
   }
   // Short dances a clicked ubu performs, picked at random.
   // Every pose uses the same transform functions, so rotations interpolate by angle (a full
@@ -411,7 +376,7 @@
     const targets = [[statFlip, flipStats], [art, dance]];
     const rarity = document.createElement('div'); rarity.className = 'card-rarity';
     const rarityCaption = document.createElement('span'), rarityValue = document.createElement('strong');
-    rarityCaption.textContent = 'Rarity'; rarityValue.textContent = rarityScore(item.rarity.percentile);
+    rarityCaption.textContent = 'Rarity'; rarityValue.textContent = ubuList.rarityScore(item.rarity.percentile);
     rarity.append(rarityCaption, rarityValue);
     const supers = document.createElement('section'); supers.className = 'card-supers'; supers.setAttribute('aria-label', 'Supers');
     const supersCaption = document.createElement('span'), supersIcons = document.createElement('div');
@@ -531,12 +496,7 @@
     const note = packOnly ? '' : text;
     $('collection-status').textContent = note; $('collection-status').hidden = !note;
   };
-  async function trustedKey(mint, id) {
-    if (!config.ready || mint !== config.mint || !Object.hasOwn(config.keys, id)) return null;
-    if (!keys.has(id)) keys.set(id, crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: config.keys[id], ext: true }, 'Ed25519', false, ['verify']));
-    return keys.get(id);
-  }
-  async function inspect(text) { return ubuFile.read(text, { resolveKey: trustedKey }); }
+  async function inspect(text) { return ubuFile.read(text, { resolveKey: ubuList.trustedKey }); }
   function display(text, result, openModal = false) {
     const model = ubu.decode(ubu.fromCode(result.dna));
     const r = window.rarity ? rarity.scoreRarity(model) : null;
@@ -553,14 +513,8 @@
     renderViewerVoice(model.voice);
     setViewerView(viewerView);
 
-    if (serial && collectionMap.has(serial)) {
-      $('viewer-fav').hidden = false;
-      const fav = isFavorite(serial);
-      $('viewer-fav').classList.toggle('is-favorite', fav);
-      $('viewer-fav').setAttribute('aria-pressed', String(fav));
-    } else {
-      $('viewer-fav').hidden = true;
-    }
+    $('viewer-fav').hidden = true;
+    syncFavoriteButtons();
 
     if (openModal && !$('viewer').open) {
       $('viewer').showModal();
@@ -805,165 +759,49 @@
   }
   const post = data => ({ method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf }, body: JSON.stringify(data) });
 
-  function compareItems(a, b) {
-    if (a.pending !== b.pending) return Number(Boolean(a.pending)) - Number(Boolean(b.pending));
-    const sort = $('sort-ubus')?.value || 'recent';
-    if (sort === 'serial') return a.serial.localeCompare(b.serial);
-    if (sort === 'rarity') return (b.rarity?.bits || 0) - (a.rarity?.bits || 0) || b.serial.localeCompare(a.serial);
-    if (sort === 'favorite' && a.favorite !== b.favorite) return Number(b.favorite) - Number(a.favorite);
-    if (sort === 'old') return (a.issuedAt || 0) - (b.issuedAt || 0) || a.serial.localeCompare(b.serial);
-    return (b.issuedAt || 0) - (a.issuedAt || 0) || b.serial.localeCompare(a.serial);
-  }
-
-  function collectionCard(item) {
-    if (item.pending) {
-      const pending = document.createElement('p');
-      pending.textContent = `#${item.serial} · Certificate pending`;
-      pending.dataset.serial = item.serial;
-      return pending;
+  // A pack's ubus join the collection as they are revealed; nothing redraws while a pick is in flight.
+  const choosing = () => Boolean(pendingKey && localStorage.getItem(pendingKey + ':choice'));
+  const collectionList = ubuList.mount({
+    surface: 'collection', toolbarHost: $('collection-toolbar'), grid: $('ubus'),
+    status: $('collection-status'),
+    inspect: item => { display(item.certificate, item.result, true); status(''); },
+    hidden: item => unseen(item.serial), paused: choosing,
+    onEmpty: reason => {
+      if (!reason) return;
+      const note = document.createElement('p');
+      note.textContent = reason === 'filtered' ? 'No ubus match. ' : reason === 'loading' ? 'Loading your ubus…' : 'No revealed ubus.';
+      if (reason === 'filtered') {
+        const clear = Object.assign(document.createElement('button'), { type: 'button', className: 'quiet', textContent: 'Clear filters' });
+        clear.onclick = () => collectionList.clearFilters();
+        note.append(clear);
+      }
+      $('ubus').replaceChildren(note);
     }
-    const card = document.createElement('button');
-    card.className = 'card';
-    card.dataset.serial = item.serial;
-    const favBtn = createHeartButton(item.serial);
-    const thumb = ubuRender(item.model, 'ubu-thumb');
-    const name = document.createElement('span'); name.textContent = item.model.parts.fullName;
-    const serial = document.createElement('span'); serial.textContent = '#' + item.serial;
-    card.append(favBtn, thumb, name, serial);
-    card.addEventListener('click', () => {
-      display(item.certificate, item.result, true);
-      status('');
-    });
-    return card;
-  }
-
-  // Preserve thumbnail DOM nodes and move only the card whose ordering changed.
-  function insertCard(item) {
-    const grid = $('ubus');
-    let node = cardMap.get(item.serial);
-    if (!node) {
-      node = collectionCard(item);
-      cardMap.set(item.serial, node);
-    }
-    if (grid.firstElementChild && !grid.firstElementChild.dataset.serial) grid.replaceChildren();
-    // Binary search among existing DOM nodes; no sorting or thumbnail regeneration.
-    let low = 0, high = grid.children.length;
-    while (low < high) {
-      const mid = (low + high) >> 1;
-      const other = collectionMap.get(grid.children[mid].dataset.serial);
-      if (other && compareItems(other, item) < 0) low = mid + 1;
-      else high = mid;
-    }
-    const before = grid.children[low] || null;
-    if (before !== node) grid.insertBefore(node, before);
-  }
+  });
+  window.showUbuViewer = serial => {
+    const item = ubuList.get(serial);
+    if (item?.certificate) display(item.certificate, item.result, true);
+  };
 
   function showMintedItem(item) {
     const serial = item.result.certificate.serial;
-    const old = collectionMap.get(serial);
-    if (old?.certificate === item.text) return;
-    if (old?.pending) { cardMap.get(serial)?.remove(); cardMap.delete(serial); }
-    const record = {
+    const old = ubuList.get(serial);
+    if (old?.certificate === item.text) { collectionList.render(); return; }
+    ubuList.add({
       serial, certificate: item.text, result: item.result, model: item.model,
       rarity: item.rarity, issuedAt: item.result.certificate.issuedAt, favorite: old?.favorite || false
-    };
-    collectionMap.set(serial, record);
-    if (document.querySelector('#ubus > p:not([data-serial])')) $('ubus').replaceChildren();
-    insertCard(record);
-    if (current?.serial === serial) {
-      $('viewer-fav').hidden = false;
-      syncFavoriteButtons(serial);
-    }
+    });
     $('collection').hidden = false;
   }
 
-  const certCache = new Map();
-  let pageLoading = false;
-  async function collection(reset = false) {
-    if (pendingKey && localStorage.getItem(pendingKey + ':choice')) return;
-    if (!reset && (pageLoading || !next)) return;
-    const version = reset ? ++collectionVersion : collectionVersion;
-    const sort = $('sort-ubus').value || 'recent';
-    const cursor = reset ? '' : next;
-    pageLoading = true;
+  async function collection() {
+    if (choosing()) return;
     try {
-      const data = await api('/api/ubus?sort=' + encodeURIComponent(sort) +
-        (cursor ? '&after=' + encodeURIComponent(cursor) : ''));
-      const items = await Promise.all(data.ubus.map(async entry => {
-        if (unseen(entry.serial)) return null;
-        if (!entry.certificate) return { serial: entry.serial, favorite: entry.favorite, pending: true };
-        let cached = certCache.get(entry.certificate);
-        if (!cached) {
-          const result = await inspect(entry.certificate);
-          const model = ubu.decode(ubu.fromCode(result.dna));
-          cached = { result, model, rarity: rarity.scoreRarity(model), issuedAt: result.certificate.issuedAt };
-          certCache.set(entry.certificate, cached);
-        }
-        return { serial: entry.serial, certificate: entry.certificate, favorite: entry.favorite,
-          result: cached.result, model: cached.model, rarity: cached.rarity, issuedAt: cached.issuedAt };
-      }));
-      if (version !== collectionVersion || sort !== $('sort-ubus').value ||
-          (pendingKey && localStorage.getItem(pendingKey + ':choice'))) return;
-
-      // Replace the page in one synchronous update on explicit sort/initial load.
-      if (reset) {
-        collectionMap.clear();
-        cardMap.clear();
-        $('ubus').replaceChildren();
-      }
-      for (const item of items) {
-        if (!item) continue;
-        const previous = collectionMap.get(item.serial);
-        if (previous?.pending && !item.pending) {
-          cardMap.get(item.serial)?.remove();
-          cardMap.delete(item.serial);
-        }
-        collectionMap.set(item.serial, item);
-        insertCard(item);
-        if (current?.serial === item.serial) syncFavoriteButtons(item.serial);
-      }
-      next = data.next;
-      // A first-page refresh must retain already revealed pack items not on that page.
-      if (reset && pack) for (const item of pack.items.slice(0, pack.seen)) showMintedItem(item);
-      if (!collectionMap.size && !next) {
-        const empty = document.createElement('p');
-        empty.textContent = 'No revealed ubus.';
-        $('ubus').append(empty);
-      }
-      $('collection-sentinel').hidden = !next;
-      $('more').hidden = !next || Boolean(observer);
+      await ubuList.load({ refresh: true });
+      collectionList.render();
       $('collection').hidden = false;
-    } catch (error) {
-      if (version === collectionVersion) {
-        status('Could not load collection: ' + error.message);
-        if (error.message.startsWith('Preparing rarity sorting')) {
-          setTimeout(() => {
-            if (version === collectionVersion && $('sort-ubus').value === sort) void collection(reset);
-          }, 1200);
-        }
-      }
-    } finally {
-      if (version === collectionVersion) pageLoading = false;
-    }
+    } catch (error) { status('Could not load collection: ' + error.message); }
   }
-
-  function loadMore() { return collection(false); }
-
-  let observer = null;
-  if ('IntersectionObserver' in window) {
-    observer = new IntersectionObserver(entries => {
-      for (const entry of entries) {
-        if (entry.isIntersecting && next && !pageLoading && !busy) {
-          void loadMore();
-        }
-      }
-    }, { rootMargin: '300px' });
-    const sentinel = $('collection-sentinel');
-    if (sentinel) observer.observe(sentinel);
-  }
-
-  $('sort-ubus').addEventListener('change', () => { void collection(true); });
-  $('more').addEventListener('click', () => { void loadMore(); });
 
   $('import').addEventListener('change', async event => {
     const file = event.target.files[0]; if (!file) return;
@@ -1041,7 +879,6 @@
     sound('playPack', 'pick');
     try {
       localStorage.setItem(pendingKey + ':choice', JSON.stringify(selection));
-      ++collectionVersion;
       const [data] = await Promise.all([api('/api/mint', post(selection)), new Promise(resolve => setTimeout(resolve, 380))]);
       await acceptPack(data);
       packScene = choiceViews[index].scene;
@@ -1075,7 +912,7 @@
   });
   (async () => {
     try {
-      config = await api('/api/config');
+      config = await ubuList.config();
       $('login').hidden = !config.login;
       if (config.login) {
         $('login').href = '/auth/discord?return=' + encodeURIComponent((location.pathname === '/index.html' ? '/' : location.pathname) + location.search);
@@ -1098,7 +935,7 @@
           if (config.ready) {
             try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
             if (!pack && (config.lifetimeLimit || localStorage.getItem(pendingKey))) await loadChoices();
-            await collection(true);
+            await collection();
           }
         } else { $('pack-hint').textContent = ''; status(config.login ? 'Sign in to open packs and see your collection.' : 'Minting closed', !config.login); }
       }

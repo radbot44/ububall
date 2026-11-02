@@ -9,7 +9,7 @@ mkdirSync(targetAssets, { recursive: true });
 // Explicit public files only; repository contents and secrets are never an asset root.
 const webFiles = [
   'ububall.html', 'ububall.css', 'ububall.js', 'ububall-physics.js', 'mp4.js', 'ububall-online.js', 'ububall-cpu-worker.js', 'ububall-cpu-client.js',
-  'index.html', 'app.js', 'site.css', 'site.js', 'site-header.js', 'pack-scene.js',
+  'index.html', 'app.js', 'site.css', 'site.js', 'site-header.js', 'pack-scene.js', 'ubu-list.js',
   'voice.html', 'demo.html', 'demo.js', 'auth-complete.html'
 ];
 const sharedFiles = [

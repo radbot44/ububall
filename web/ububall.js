@@ -21,7 +21,7 @@
   const practice = Array.from({ length: 6 }, () => { const dna = ubu.randomDNA(); return { model: ubu.decode(dna), dna: ubu.toCode(dna), label: 'Practice ubu' }; });
   let roster = practice.slice(0, 3), draft = [...roster], rosterSlot = 0;
   let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
-  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [], next = '';
+  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [];
   let isPortrait = false;
   let matchMode = 'standard', planDeadline = 0;
   // Each turn of the current play (motion since the field last rested), for goal replays.
@@ -3424,62 +3424,68 @@
       $('roster-slots').append(button);
     });
     for (const option of document.querySelectorAll('.roster-option')) option.setAttribute('aria-pressed', String(draft.some(d => d.key === option.dataset.key)));
+    rosterList.render();
     updateRosterSuperPicker();
   }
   // Each choosable ubu gets a key so the same ubu cannot fill two slots.
+  function choose(entry) {
+    const other = draft.findIndex(d => d.key === entry.key);
+    if (other >= 0 && other !== rosterSlot) { rosterSlot = other; rosterSlots(); $('roster-status').textContent = 'That ubu is already on your team.'; return; }
+    draft[rosterSlot] = entry; rosterSlot = (rosterSlot + 1) % 3; rosterSlots(); $('roster-status').textContent = '';
+  }
   function addOption(entry, container) {
-    const button = document.createElement('button');
-    button.type = 'button'; button.className = 'roster-option'; button.dataset.key = entry.key;
-    button.append(ubuRender(entry.model, 'roster-option-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }),
-      Object.assign(document.createElement('small'), { textContent: entry.label }));
-    button.onclick = () => {
-      const other = draft.findIndex(d => d.key === entry.key);
-      if (other >= 0 && other !== rosterSlot) { rosterSlot = other; rosterSlots(); $('roster-status').textContent = 'That ubu is already on your team.'; return; }
-      draft[rosterSlot] = entry; rosterSlot = (rosterSlot + 1) % 3; rosterSlots(); $('roster-status').textContent = '';
-    };
-    $(container).append(button);
+    const { main, artBox } = ubuList.tileMain(entry.model, entry.label);
+    artBox.prepend(ubuRender(entry.model, 'ubu-tile-svg'));
+    main.classList.add('roster-option'); main.dataset.key = entry.key;
+    main.onclick = () => choose(entry);
+    const tile = document.createElement('div'); tile.className = 'ubu-tile';
+    tile.append(main);
+    $(container).append(tile);
   }
   practice.forEach((entry, i) => { entry.key = 'practice-' + i; });
-  async function api(path) { const response = await fetch(path); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Could not load collection.'); return data; }
-  // One page of the signed-in player's verified ubus.
-  async function fetchCollectionPage(sort, after) {
-    const config = await api('/api/config');
-    const data = await api('/api/ubus?sort=' + sort + (after ? '&after=' + encodeURIComponent(after) : ''));
-    const keys = new Map(), entries = [];
-    for (const entry of data.ubus) {
-      if (!entry.certificate) continue;
-      const result = await ubuFile.read(entry.certificate, { allowUnsigned: false, resolveKey: async (mint, id) => {
-        if (!config.ready || mint !== config.mint || !Object.hasOwn(config.keys, id)) return null;
-        if (!keys.has(id)) keys.set(id, crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: config.keys[id], ext: true }, 'Ed25519', false, ['verify']));
-        return keys.get(id);
-      } });
-      entries.push({ model: ubu.decode(ubu.fromCode(result.dna)), dna: result.dna, label: '#' + entry.serial, key: entry.serial });
+  // The player's collection, keyed by serial, as team entries; one entry per ubu keeps keys stable.
+  const collectionEntries = new Map();
+  function entryFor(item) {
+    let entry = collectionEntries.get(item.serial);
+    if (entry?.dna !== item.result.dna) {
+      entry = { model: item.model, dna: item.result.dna, label: '#' + item.serial, key: item.serial };
+      collectionEntries.set(item.serial, entry);
     }
-    return { entries, next: data.next || '' };
+    return entry;
   }
-  // The picker lists the collection page by page as the player scrolls; nothing to click.
-  let collectionState = 'idle';
+  function collectionNote(text, clear = false) {
+    const note = $('roster-collection-status');
+    note.textContent = text;
+    if (clear) {
+      const button = Object.assign(document.createElement('button'), { type: 'button', className: 'quiet', textContent: 'Clear filters' });
+      button.onclick = () => rosterList.clearFilters();
+      note.append(' ', button);
+    }
+  }
+  const rosterList = ubuList.mount({
+    surface: 'picker', toolbarHost: $('roster-toolbar'), grid: $('roster-options'), scrollRoot: $('roster-scroll'),
+    status: $('roster-collection-status'),
+    pick: item => choose(entryFor(item)),
+    // The viewer belongs to the Collection screen's script, loaded on first use.
+    inspect: async item => {
+      try { await window.loadMintScripts(); window.showUbuViewer(item.serial); } catch { collectionNote('Could not open the ubu viewer.'); }
+    },
+    pressed: item => draft.some(d => d.key === item.serial),
+    onEmpty: reason => collectionNote(reason === 'filtered' ? 'No ubus match.' : reason === 'loading' ? 'Loading your ubus…' :
+      reason === 'empty' ? 'No ubus yet. Open packs in Ubu Mint to get some.' : '', reason === 'filtered')
+  });
   async function loadCollection() {
-    if (collectionState === 'loading' || collectionState === 'done') return;
     if (!window.getUbuSession?.()?.owner) { $('roster-signin').hidden = false; return; }
     $('roster-signin').hidden = true;
-    collectionState = 'loading'; $('roster-collection-status').textContent = 'Loading your ubus…';
-    try {
-      const page = await fetchCollectionPage('favorite', next);
-      page.entries.forEach(entry => addOption(entry, 'roster-options')); next = page.next;
-      collectionState = next ? 'idle' : 'done';
-      $('roster-collection-status').textContent = !next && !$('roster-options').childElementCount ? 'No ubus yet. Open packs in Ubu Mint to get some.' : '';
-      rosterSlots();
-    } catch (error) { collectionState = 'idle'; $('roster-collection-status').textContent = error.message; }
+    try { await ubuList.load(); rosterList.render(); } catch (error) { collectionNote(error.message); }
   }
-  new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting) && $('roster-dialog').open) void loadCollection(); },
-    { root: $('roster-scroll'), rootMargin: '400px' }).observe($('roster-sentinel'));
   $('roster-signin-btn').onclick = () => window.openDiscordLogin?.();
   // Signed-in players start with their own ubus (favorites first) until they choose a team.
   window.addEventListener('ubu:session', async event => {
     if (!event.detail?.owner || !roster.every(entry => practice.includes(entry))) return;
     try {
-      const { entries } = await fetchCollectionPage('favorite', '');
+      await ubuList.load();
+      const entries = ubuList.view(ubuList.items(), { sort: 'favorite' }).filter(item => item.model).slice(0, 3).map(entryFor);
       if (entries.length < 3 || !roster.every(entry => practice.includes(entry))) return;
       draft = entries.slice(0, 3);
       if (demo) newDemoGame(); else if (!matchInProgress()) newMatch(); else roster = [...draft];

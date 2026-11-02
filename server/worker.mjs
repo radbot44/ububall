@@ -4,6 +4,7 @@ import * as auth from './auth.mjs';
 export { UbuballMatch } from './ububall-object.mjs';
 const { Mint } = mintModule;
 const ID = /^[A-Za-z0-9_-]{21}[AQgw]$/;
+const COLLECTION_PAGE = 200;
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers
 } });
@@ -64,18 +65,15 @@ export class MintRegistry extends DurableObject {
       !(state.prepared === state.size && state.next_serial + this.config.batchSize - 1 > 999999999999);
   }
   async ensureBatch() {
-    if ((this.needsPreparation() || this.mint.needsRarityBackfill()) &&
-        await this.ctx.storage.getAlarm() === null) {
+    if (this.needsPreparation() && await this.ctx.storage.getAlarm() === null) {
       await this.ctx.storage.setAlarm(Date.now() + 1000);
     }
   }
   async alarm() {
-    if (!this.needsPreparation() && !this.mint.needsRarityBackfill()) return;
+    if (!this.needsPreparation()) return;
     await this.ctx.storage.setAlarm(Date.now() + 1000);
-    // Don't let a large historical rarity migration block mint inventory preparation.
-    if (this.needsPreparation()) this.mint.prepare({ batchSize: this.config.batchSize, minimumPacks: 3 });
-    else if (this.mint.needsRarityBackfill()) this.mint.backfillRarity();
-    if (!this.needsPreparation() && !this.mint.needsRarityBackfill()) await this.ctx.storage.deleteAlarm();
+    this.mint.prepare({ batchSize: this.config.batchSize, minimumPacks: 3 });
+    if (!this.needsPreparation()) await this.ctx.storage.deleteAlarm();
   }
   async offer(owner, request) {
     try {
@@ -105,21 +103,10 @@ export class MintRegistry extends DurableObject {
       throw error;
     } finally { await this.ensureBatch(); }
   }
-  async collection(owner, sort = 'recent', cursor = '') {
-    const keys = {
-      recent: [['(certificate IS NULL)', 'ASC'], ['issued_at', 'DESC'], ['serial', 'DESC']],
-      old: [['(certificate IS NULL)', 'ASC'], ['issued_at', 'ASC'], ['serial', 'ASC']],
-      rarity: [['(certificate IS NULL)', 'ASC'], ['rarity_bits', 'DESC'], ['serial', 'DESC']],
-      serial: [['(certificate IS NULL)', 'ASC'], ['serial', 'ASC']],
-      favorite: [['(certificate IS NULL)', 'ASC'], ['favorite', 'DESC'], ['issued_at', 'DESC'], ['serial', 'DESC']]
-    }[sort];
-    if (!keys || (cursor && !/^[0-9]{12}$/.test(cursor))) return { error: 'Invalid collection sort or cursor.', status: 400 };
-    if (this.mint.needsRarityBackfill() && await this.ctx.storage.getAlarm() === null) {
-      await this.ctx.storage.setAlarm(Date.now() + 1000);
-    }
-    if (sort === 'rarity' && this.mint.needsRarityBackfill()) {
-      return { error: 'Preparing rarity sorting. Try again shortly.', status: 503 };
-    }
+  // Newest first, pending certificates last. Browsers sort and filter the full list themselves.
+  collection(owner, cursor = '') {
+    const keys = [['(certificate IS NULL)', 'ASC'], ['issued_at', 'DESC'], ['serial', 'DESC']];
+    if (cursor && !/^[0-9]{12}$/.test(cursor)) return { error: 'Invalid collection cursor.', status: 400 };
     const binds = [owner];
     let after = '';
     if (cursor) {
@@ -137,12 +124,12 @@ export class MintRegistry extends DurableObject {
     }
     const order = keys.map(([expression, direction]) => expression + ' ' + direction).join(', ');
     const rows = this.mint.exec('SELECT serial, certificate, favorite FROM issued WHERE owner=?' + after +
-      ' ORDER BY ' + order + ' LIMIT 51', ...binds);
+      ' ORDER BY ' + order + ' LIMIT ' + (COLLECTION_PAGE + 1), ...binds);
     return {
-      ubus: rows.slice(0, 50).map(row => ({
+      ubus: rows.slice(0, COLLECTION_PAGE).map(row => ({
         serial: row.serial, certificate: row.certificate, favorite: Boolean(row.favorite)
       })),
-      next: rows.length > 50 ? rows[49].serial : null
+      next: rows.length > COLLECTION_PAGE ? rows[COLLECTION_PAGE - 1].serial : null
     };
   }
   favorite(owner, data) {
@@ -231,7 +218,7 @@ export default {
       const config = configuration(env);
       const registry = env.MINT.get(env.MINT.idFromName(config.mint));
       if (path === '/api/ubus' && request.method === 'GET') {
-        const result = await registry.collection(session.owner, url.searchParams.get('sort') || 'recent', url.searchParams.get('after') || '');
+        const result = await registry.collection(session.owner, url.searchParams.get('after') || '');
         return json(result, result.status || 200);
       }
       if (path === '/api/favorites' && request.method === 'POST') {

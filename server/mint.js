@@ -95,23 +95,17 @@ class Mint {
           certificate TEXT, UNIQUE(owner, request, id)) STRICT`);
       }
 
-      // Add account-scoped favorites and persistent rarity sort keys without touching certificates.
-      // ALTER is transactional and safe on an existing Durable Object or local SQLite database.
+      // Add account-scoped favorites without touching certificates. ALTER is transactional and
+      // safe on an existing Durable Object or local SQLite database.
       const columns = this.exec('PRAGMA table_info(issued)').map(column => column.name);
       if (!columns.includes('favorite')) this.exec('ALTER TABLE issued ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0 CHECK(favorite IN (0,1))');
-      if (!columns.includes('rarity_bits')) this.exec('ALTER TABLE issued ADD COLUMN rarity_bits REAL');
-      // Invalidate legacy scores once; existing bounded alarm backfill recalculates them.
-      this.exec('CREATE TABLE IF NOT EXISTS rarity_revision (singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL) STRICT');
-      if (!this.exec('SELECT 1 FROM rarity_revision WHERE singleton=1 AND revision=3').length) {
-        this.exec('UPDATE issued SET rarity_bits=NULL');
-        this.exec('INSERT OR REPLACE INTO rarity_revision VALUES (1, 3)');
+      // Browsers sort collections themselves; drop the retired server sort keys and their indexes.
+      for (const index of ['issued_old_sort', 'issued_rarity_sort', 'issued_serial_sort', 'issued_favorite_sort', 'issued_rarity_backfill']) {
+        this.exec('DROP INDEX IF EXISTS ' + index);
       }
+      if (columns.includes('rarity_bits')) this.exec('ALTER TABLE issued DROP COLUMN rarity_bits');
+      this.exec('DROP TABLE IF EXISTS rarity_revision');
       this.exec('CREATE INDEX IF NOT EXISTS issued_recent_sort ON issued(owner, (certificate IS NULL), issued_at DESC, serial DESC)');
-      this.exec('CREATE INDEX IF NOT EXISTS issued_old_sort ON issued(owner, (certificate IS NULL), issued_at ASC, serial ASC)');
-      this.exec('CREATE INDEX IF NOT EXISTS issued_rarity_sort ON issued(owner, (certificate IS NULL), rarity_bits DESC, serial DESC)');
-      this.exec('CREATE INDEX IF NOT EXISTS issued_serial_sort ON issued(owner, (certificate IS NULL), serial ASC)');
-      this.exec('CREATE INDEX IF NOT EXISTS issued_favorite_sort ON issued(owner, (certificate IS NULL), favorite DESC, issued_at DESC, serial DESC)');
-      this.exec('CREATE INDEX IF NOT EXISTS issued_rarity_backfill ON issued(id) WHERE rarity_bits IS NULL');
       this.exec('CREATE INDEX IF NOT EXISTS issued_owner ON issued(owner)');
       this.exec('CREATE INDEX IF NOT EXISTS issued_request ON issued(owner, request)');
       this.exec('INSERT OR IGNORE INTO mint_state VALUES (1, ?, 1, 0, 0, 0, 0, 0)', mint);
@@ -132,20 +126,6 @@ class Mint {
   exec(sql, ...bindings) { return Array.from(this.storage.exec(sql, ...bindings)); }
   transaction(callback) { return this.storage.transactionSync(callback); }
   state() { return this.exec('SELECT * FROM mint_state WHERE singleton=1')[0]; }
-  needsRarityBackfill() { return this.exec('SELECT 1 FROM issued WHERE rarity_bits IS NULL LIMIT 1').length > 0; }
-  // Bounded, resumable migration: no rewriting of signed certificates or mint records.
-  backfillRarity(chunkSize = 100) {
-    integer(chunkSize, 1000, 'rarity migration chunk');
-    return this.transaction(() => {
-      const rows = this.exec('SELECT id, dna FROM issued WHERE rarity_bits IS NULL LIMIT ?', chunkSize);
-      for (const row of rows) {
-        this.exec('UPDATE issued SET rarity_bits=? WHERE id=?',
-          scoreRarity(decode(fromCode(row.dna))).bits, row.id);
-      }
-      return rows.length;
-    });
-  }
-
   // Each call commits one bounded chunk; an interrupted batch resumes on the next call.
   prepare({ batchSize = DEFAULT_BATCH_SIZE, chunkSize = 100, minimumPacks = 1 } = {}) {
     integer(batchSize, 1000000, 'batch size');
@@ -278,10 +258,9 @@ class Mint {
 
       for (const item of packItems) {
         this.exec(`INSERT INTO issued
-          (id, serial, dna, batch, owner, revision, request, pack_id, quintile, issued_at, key, certificate, favorite, rarity_bits)
-          VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, 0, ?)`,
-          item.id, item.serial, item.dna, item.batch, owner, request, packId, item.quintile, issuedAt, this.key,
-          scoreRarity(decode(fromCode(item.dna))).bits);
+          (id, serial, dna, batch, owner, revision, request, pack_id, quintile, issued_at, key, certificate, favorite)
+          VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, 0)`,
+          item.id, item.serial, item.dna, item.batch, owner, request, packId, item.quintile, issuedAt, this.key);
       }
 
       this.exec('DELETE FROM inventory WHERE pack_slot=?', chosenPack);

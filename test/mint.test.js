@@ -9,7 +9,6 @@ const { Mint, DEFAULT_BATCH_SIZE, PACK_SIZE } = require('../server/mint.js');
 const { openStorage } = require('../server/mint-local.js');
 const file = require('../shared/ubu-file.js');
 const ubu = require('../shared/ubu.js');
-const rarity = require('../shared/rarity.js');
 
 const mintID = 'A'.repeat(22);
 const owner = '123456789012345678';
@@ -159,20 +158,14 @@ test('existing issued records migrate automatically without rewriting certificat
     'historical-id', '000000000001', historicalDna, owner, request(1), 'historical-pack',
     1792700000, 'test-1', 'original-signed-certificate');
   let mint = new Mint(storage, f.options);
-  assert.equal(mint.needsRarityBackfill(), true);
-  assert.deepEqual(storage.exec('SELECT favorite, rarity_bits, certificate FROM issued').map(r => ({ ...r })), [
-    { favorite: 0, rarity_bits: null, certificate: 'original-signed-certificate' }
+  assert.deepEqual(storage.exec('SELECT favorite, certificate FROM issued').map(r => ({ ...r })), [
+    { favorite: 0, certificate: 'original-signed-certificate' }
   ]);
-  assert.equal(mint.backfillRarity(1), 1);
-  assert.equal(mint.backfillRarity(1), 0);
-  const migrated = storage.exec('SELECT favorite, rarity_bits, certificate FROM issued')[0];
-  assert.equal(migrated.favorite, 0);
-  assert.ok(Number.isFinite(migrated.rarity_bits));
-  assert.equal(migrated.certificate, 'original-signed-certificate');
   storage.close(); f.stores[0] = null;
   mint = new Mint(f.open(), f.options);
-  assert.equal(mint.needsRarityBackfill(), false);
-  assert.deepEqual(mint.exec('SELECT favorite, rarity_bits, certificate FROM issued')[0], migrated);
+  assert.deepEqual(mint.exec('SELECT favorite, certificate FROM issued').map(r => ({ ...r })), [
+    { favorite: 0, certificate: 'original-signed-certificate' }
+  ]);
 });
 
 test('default 1000 batch prepares packs across quintiles, resumes after reopen and hides incomplete inventory', async t => {
@@ -208,9 +201,7 @@ test('default 1000 batch prepares packs across quintiles, resumes after reopen a
   assert.deepEqual(retry.certificates, result.certificates);
   assert.equal(mint.state().remaining, 199);
   assert.equal(storage.exec('SELECT COUNT(*) AS count FROM issued WHERE owner=?', owner)[0].count, 5);
-  const indexed = storage.exec('SELECT favorite, rarity_bits FROM issued WHERE owner=?', owner);
-  assert.ok(indexed.every(row => row.favorite === 0 && Number.isFinite(row.rarity_bits)));
-  assert.equal(mint.needsRarityBackfill(), false);
+  assert.ok(storage.exec('SELECT favorite FROM issued WHERE owner=?', owner).every(row => row.favorite === 0));
 
   // Check that the issued pack contains one ubu from each quintile (1 through 5)
   const issuedRows = storage.exec('SELECT quintile, dna FROM issued WHERE owner=? AND request=? ORDER BY quintile', owner, request(1));
@@ -389,24 +380,36 @@ test('seamlessly migrates legacy pre-pack database schema on initialization', as
   assert.equal(result.certificates.length, 5);
 });
 
-test('name rarity upgrade invalidates old non-null scores once and preserves issued state', async t => {
+test('retired server sort keys are dropped without touching issued ubus or inventory', async t => {
   const f = await fixture(t), mint = new Mint(f.open(), f.options);
   mint.prepare({ batchSize: 15 });
   const offer = mint.offer({ owner, request: request(1) });
   await mint.issue({ owner, request: offer.request, choice: offer.choices[0].choice });
-  mint.exec('UPDATE issued SET favorite=1, rarity_bits=-99');
-  const before = mint.exec('SELECT id, dna, serial, certificate, favorite FROM issued ORDER BY id');
-  const inventory = mint.exec('SELECT * FROM inventory ORDER BY id');
-  mint.exec('UPDATE rarity_revision SET revision=2');
-  const upgraded = new Mint(f.open(), f.options);
-  assert.equal(upgraded.needsRarityBackfill(), true);
-  assert.equal(upgraded.backfillRarity(2), 2);
+  mint.exec('UPDATE issued SET favorite=1');
+  // Recreate the schema that kept rarity sort keys on the server.
+  mint.exec('ALTER TABLE issued ADD COLUMN rarity_bits REAL');
+  mint.exec('UPDATE issued SET rarity_bits=-99');
+  mint.exec('CREATE TABLE rarity_revision (singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL) STRICT');
+  mint.exec('INSERT INTO rarity_revision VALUES (1, 3)');
+  mint.exec('CREATE INDEX issued_old_sort ON issued(owner, (certificate IS NULL), issued_at ASC, serial ASC)');
+  mint.exec('CREATE INDEX issued_rarity_sort ON issued(owner, (certificate IS NULL), rarity_bits DESC, serial DESC)');
+  mint.exec('CREATE INDEX issued_serial_sort ON issued(owner, (certificate IS NULL), serial ASC)');
+  mint.exec('CREATE INDEX issued_favorite_sort ON issued(owner, (certificate IS NULL), favorite DESC, issued_at DESC, serial DESC)');
+  mint.exec('CREATE INDEX issued_rarity_backfill ON issued(id) WHERE rarity_bits IS NULL');
+  const rows = (m, table) => m.exec(`SELECT * FROM ${table} ORDER BY id`).map(row => ({ ...row }));
+  const before = rows(mint, 'issued').map(({ rarity_bits, ...row }) => row), inventory = rows(mint, 'inventory');
+  const schema = m => ({
+    columns: m.exec('PRAGMA table_info(issued)').map(c => c.name),
+    indexes: m.exec("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='issued' AND sql IS NOT NULL ORDER BY name").map(r => r.name),
+    tables: m.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").map(r => r.name)
+  });
+  const upgraded = new Mint(f.open(), f.options), migrated = schema(upgraded);
+  assert.ok(!migrated.columns.includes('rarity_bits'));
+  assert.deepEqual(migrated.indexes, ['issued_owner', 'issued_recent_sort', 'issued_request']);
+  assert.ok(!migrated.tables.includes('rarity_revision'));
+  assert.deepEqual(rows(upgraded, 'issued'), before);
+  assert.deepEqual(rows(upgraded, 'inventory'), inventory);
   const reopened = new Mint(f.open(), f.options);
-  assert.equal(reopened.exec('SELECT COUNT(*) AS n FROM issued WHERE rarity_bits IS NOT NULL')[0].n, 2);
-  assert.equal(reopened.backfillRarity(), 3);
-  assert.equal(reopened.needsRarityBackfill(), false);
-  assert.deepEqual(reopened.exec('SELECT id, dna, serial, certificate, favorite FROM issued ORDER BY id'), before);
-  assert.deepEqual(reopened.exec('SELECT * FROM inventory ORDER BY id'), inventory);
-  for (const row of reopened.exec('SELECT dna, rarity_bits FROM issued'))
-    assert.equal(row.rarity_bits, rarity.scoreRarity(ubu.decode(ubu.fromCode(row.dna))).bits);
+  assert.deepEqual(schema(reopened), migrated);
+  assert.deepEqual(rows(reopened, 'issued'), before);
 });

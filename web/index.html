@@ -4,8 +4,8 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark"><title>Ububall</title>
   <link rel="stylesheet" href="site.css"><link rel="stylesheet" href="ububall.css">
-  <script src="site-header.js" defer></script><script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script>
-  <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-replay.js" defer></script><script src="mp4.js" defer></script><script src="ububall-cpu-client.js" defer></script><script src="ububall-online.js" defer></script><script src="ububall.js" defer></script><script src="app.js" defer></script>
+  <script src="site-header.js" defer></script><script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script><script src="rarity.js" defer></script>
+  <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-replay.js" defer></script><script src="mp4.js" defer></script><script src="ububall-cpu-client.js" defer></script><script src="ububall-online.js" defer></script><script src="ubu-list.js" defer></script><script src="ububall.js" defer></script><script src="app.js" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -241,11 +241,11 @@ SOFTWARE.
       <div id="roster-scroll" class="roster-scroll">
         <div id="roster-yours" role="tabpanel" aria-labelledby="tab-yours">
           <div id="roster-signin" class="roster-signin" hidden><p>Sign in to play with the ubus in your collection.</p><button id="roster-signin-btn" type="button" class="primary">Sign in with Discord</button></div>
-          <div id="roster-options" class="roster-grid"></div>
+          <div id="roster-toolbar" class="roster-toolbar"></div>
           <p id="roster-collection-status" class="roster-status" role="status"></p>
-          <div id="roster-sentinel" aria-hidden="true"></div>
+          <div id="roster-options" class="ubu-grid roster-grid"></div>
         </div>
-        <div id="roster-practice" class="roster-grid" role="tabpanel" aria-labelledby="tab-practice" hidden></div>
+        <div id="roster-practice" class="ubu-grid roster-grid" role="tabpanel" aria-labelledby="tab-practice" hidden></div>
       </div>
     </section>
     <footer class="team-sheet-foot"><button id="sheet-next" class="primary" type="button">Next: choose team</button><button id="start-match" class="primary" type="button">Start match</button></footer>
@@ -285,21 +285,10 @@ SOFTWARE.
         <div class="collection-actions">
           <label class="button quiet file-btn">Open .ubu<input id="import" type="file" accept=".ubu,application/json"></label>
           <a id="play-with-ubus" class="button primary" href="/?roster=1">Play with my ubus</a>
-          <label for="sort-ubus" class="sort-control">
-            <span>Sort</span>
-            <select id="sort-ubus">
-              <option value="recent">Recent</option>
-              <option value="old">Old</option>
-              <option value="rarity">Rarity</option>
-              <option value="serial">Serial number</option>
-              <option value="favorite">Favorite</option>
-            </select>
-          </label>
         </div>
       </div>
-      <div id="ubus" class="grid"></div>
-      <div id="collection-sentinel" class="collection-sentinel" aria-hidden="true"></div>
-      <button id="more" hidden>Load more</button>
+      <div id="collection-toolbar"></div>
+      <div id="ubus" class="ubu-grid"></div>
     </section>
   </main>
   <dialog id="viewer" class="viewer" aria-labelledby="ubunym">

@@ -6,15 +6,17 @@
   const screenOf = path => Object.hasOwn(screens, path) ? screens[path] : null;
   let mintScripts = null;
 
-  // Ubu Mint and Collection share site.js; load it on the first visit to either screen.
+  // Ubu Mint and Collection share site.js; load it on the first visit to either screen, or when
+  // the team picker opens the ubu viewer.
   function loadMintScripts() {
-    mintScripts ||= Promise.all(['rarity.js', 'pack-scene.js', 'site.js'].map(src => new Promise((resolve, reject) => {
+    mintScripts ||= Promise.all(['pack-scene.js', 'site.js'].map(src => new Promise((resolve, reject) => {
       const script = Object.assign(document.createElement('script'), { src, async: false });
       script.onload = resolve; script.onerror = reject;
       document.head.append(script);
     })));
     return mintScripts;
   }
+  window.loadMintScripts = loadMintScripts;
 
   function show() {
     const screen = screenOf(location.pathname) || 'play';
