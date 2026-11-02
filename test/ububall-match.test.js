@@ -261,6 +261,10 @@ test('goal replays re-simulate a chained Pulse play exactly and ease to half spe
   assert.equal(goal,segments.at(-1).goal);
   assert.equal(M.replaySpeed(500),1); assert.equal(M.replaySpeed(240),1); assert.equal(M.replaySpeed(40),.5);
   assert.ok(M.replaySpeed(150)>.5 && M.replaySpeed(150)<1);
+  assert.equal(M.postGoalSpeed(0), 1);
+  assert.equal(M.postGoalSpeed(36), 0.75);
+  assert.equal(M.postGoalSpeed(72), 0.5);
+  assert.equal(M.postGoalSpeed(120), 0.5);
   const ms=M.replayMilliseconds(P,480)-M.GOAL_REPLAY_DELAY-M.GOAL_REPLAY_HOLD;
   assert.ok(ms>2000 && ms<3000);
 });

@@ -2229,7 +2229,8 @@
       if (performance.now() >= r.doneAt) { if (summaryPending) openSummary(); restartGoalReplay(); }
       draw(); return;
     }
-    r.steps += delta / P.DT * ububallMatch.replaySpeed(r.total - r.played);
+    const speed = ububallMatch.replaySpeed(r.total - r.played);
+    r.steps += delta / P.DT * speed;
     for (let n = 0; r.steps >= 1 && r.played < r.total && n < 48; n++) {
       if (r.tick >= r.segments[r.index].ticks) nextReplaySegment();
       if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && P.ballOnFire(r.sim[6]) && netFire) netFire.lit = true;
@@ -2239,7 +2240,7 @@
       if (clockNow() < hitStopUntil) { r.steps = 0; break; }
     }
     if (r.played >= r.total) r.doneAt = performance.now() + ububallMatch.GOAL_REPLAY_HOLD;
-    emitSkaterEffects(delta); draw();
+    emitSkaterEffects(delta * speed); draw();
   }
   function endGoalReplay() {
     goalReplayAt = 0;
@@ -2441,7 +2442,7 @@
         if (clockNow() < hitStopUntil) { th.steps = 0; break; }
       }
       fouls = viewFouls(th.fouls, th.seat);
-      emitSkaterEffects(delta);
+      emitSkaterEffects(delta * th.speed);
     }
     if (!th.exporting) updateReplayBar();
     draw();
@@ -3159,7 +3160,7 @@
       }
       const scorer = bodies[call.scorer] || bodies.slice(goal * 3, goal * 3 + 3)[0];
       goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY + 800;
-      postGoal = { ballX: bodies[6].x, ballY: bodies[6].y, scoredAt: clockNow(), hitStopDoneAt: hitStopUntil };
+      postGoal = { ballX: bodies[6].x, ballY: bodies[6].y, ticks: 0 };
       bodies[6].vx = 0; bodies[6].vy = 0; bodies[6].omega = 0;
       scoringPlayer = scorer;
       const scorerName = scorer?.name || (goal === 0 ? 'Your ubu' : 'CPU ubu');
@@ -3428,20 +3429,21 @@
       ripples.length || pings.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
     // Effects pause with the replay viewer, and in Pulse mode when time freezes between turns.
     const pulseFrozen = pulseMode() && roundTurns > 0 && (phase === 'plan' || phase === 'cpu-wait' || phase === 'waiting');
-    if (active && !theater?.paused && !pulseFrozen) updateEffects(delta);
+    let speed = 1;
+    if (!active || clockNow() < hitStopUntil || pulseFrozen) speed = 0;
+    else if (theater) speed = theater.paused ? 0 : theater.speed;
+    else if (goalReplay) speed = goalReplay.played >= goalReplay.total ? 1 : ububallMatch.replaySpeed(goalReplay.total - goalReplay.played);
+    else if (postGoal) speed = ububallMatch.postGoalSpeed(postGoal.ticks);
+    const simDelta = delta * speed;
+    if (active && !theater?.paused && !pulseFrozen) updateEffects(simDelta);
     if (theater) { if (active && !theater.exporting) advanceReplay(delta); }
     else if ((phase === 'play' || postGoal) && active && !online?.active) {
-      let effectiveDelta = delta;
-      if (postGoal) {
-        const postElapsed = Math.max(0, (clockNow() - postGoal.hitStopDoneAt) / 1000);
-        const speedFactor = postElapsed >= 0.3 ? 0.5 : 1 - (postElapsed / 0.3) * 0.5;
-        effectiveDelta = delta * speedFactor;
-      }
-      if (clockNow() < hitStopUntil) accumulator = 0; else accumulator += effectiveDelta;
+      if (clockNow() < hitStopUntil) accumulator = 0; else accumulator += simDelta;
       let steps = 0;
       while (steps++ < 48 && accumulator >= P.DT && (phase === 'play' || postGoal)) {
         if (postGoal) {
           elapsed += P.DT; accumulator -= P.DT;
+          postGoal.ticks++;
           bodies[6].x = postGoal.ballX; bodies[6].y = postGoal.ballY;
           bodies[6].vx = 0; bodies[6].vy = 0; bodies[6].omega = 0;
           P.step(bodies, P.DT, liveFx.collide, liveFx.wall, liveFx.shockwave, liveFx.super);
@@ -3467,7 +3469,7 @@
           }
         }
       }
-      if (phase === 'play' || postGoal) emitSkaterEffects(delta);
+      if (phase === 'play' || postGoal) emitSkaterEffects(simDelta);
       draw();
     } else if (goalReplay && active && !online?.active) advanceGoalReplay(delta);
     else if (active && (hadEffects || (!reducedMotion.matches && (foulsShowing() || bodies.some(b => b.meter >= 100 || b.superArm || b.superActive))))) draw();

@@ -9,6 +9,8 @@
   const GOAL_REPLAY_DELAY = 1600, GOAL_REPLAY_HOLD = 1200;
   // Goal replays run in real time, then ease to half speed over the last second before the goal.
   function replaySpeed(ticksLeft) { return .5 + .5 * Math.min(1, Math.max(0, (ticksLeft - 72) / 168)); }
+  // Post-goal motion eases from full speed down to half speed over 300 ms (72 ticks).
+  function postGoalSpeed(ticksElapsed) { return Math.max(.5, 1 - .5 * Math.min(1, ticksElapsed / 72)); }
   // Wall-clock length of a goal's celebration delay, replay and closing hold.
   function replayMilliseconds(P, ticks) {
     let ms = GOAL_REPLAY_DELAY + GOAL_REPLAY_HOLD;
@@ -467,6 +469,6 @@
     return { state: next, replay: { version: VERSION, turn: state.turn, plans, ticks, goal, scorer: call.scorer, assist: call.assist,
       label: call.label, saves: saved, struck, stops, initialBodies } };
   }
-  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, replaySpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, SAVE, FOULS, newFouls, inCrease, attackZoneLine, inAttackZone, camping, cornerOf, lapseFouls, BIG_SHOT, HIT_STOP, SCREEN_SHAKE, gainMeter, contactMeter, toucher, saves, credit, responsibleTeam, newPlay, newTally, playTick, callGoal, noteScore, honours, finishTurn, resolveTurn };
+  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, replaySpeed, postGoalSpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, SAVE, FOULS, newFouls, inCrease, attackZoneLine, inAttackZone, camping, cornerOf, lapseFouls, BIG_SHOT, HIT_STOP, SCREEN_SHAKE, gainMeter, contactMeter, toucher, saves, credit, responsibleTeam, newPlay, newTally, playTick, callGoal, noteScore, honours, finishTurn, resolveTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallMatch = api;
 })(globalThis);
