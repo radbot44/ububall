@@ -164,7 +164,7 @@ a { color: inherit; text-decoration: none; }
 
 /* Portrait screens (phones, narrow windows): the main navigation becomes a bottom tab bar.
    Landscape keeps it in the top bar, leaving short 16:9 screens their height. */
-@media (orientation: portrait) and (max-width: 1024px) {
+@media (orientation: portrait) {
   body { padding-bottom: calc(4.25rem + env(safe-area-inset-bottom)); }
   .site-header { flex-wrap: nowrap; }
   .site-nav {
@@ -179,13 +179,6 @@ a { color: inherit; text-decoration: none; }
   .site-nav a[aria-current="page"], .site-nav .active { background: none; color: var(--primary); box-shadow: none; }
   .site-nav a[aria-current="page"] svg, .site-nav .active svg { filter: drop-shadow(0 0 .5rem color-mix(in srgb, var(--primary) 60%, transparent)); }
   .more-menu { inset: auto max(.5rem, env(safe-area-inset-right)) calc(4.75rem + env(safe-area-inset-bottom)) auto; }
-}
-
-/* Narrow landscape (a small 16:9 tile): the top bar keeps one row with icon-only tabs; the labels
-   stay for screen readers. */
-@media (orientation: landscape) and (max-width: 760px) {
-  .site-nav a, .site-nav button { padding: .375rem .625rem; }
-  .site-nav span { position: absolute; width: .0625rem; height: .0625rem; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 
 .site-header-actions, .actions {
@@ -380,7 +373,7 @@ h2 { font-size: 1.125rem; margin: 0; }
 .pack-choices.choosing .pack-option:not(.selected) { display: none; }
 .pack-choices.choosing .pack-option::after, .pack-choices.choosing .pack-sparkle { display: none; }
 /* Portrait phones stack the packs; landscape (a 16:9 tile) keeps all three side by side. */
-@media (max-width: 700px) and (orientation: portrait) {
+@media (orientation: portrait) and (max-width: 700px) {
   .pack-choices { grid-template-columns: 1fr; }
   .pack-option .candy-pack { max-width: 23.75rem; }
 }
@@ -539,7 +532,7 @@ body:has(.viewer[open]) { overflow: hidden; }
   margin: .875rem auto;
   text-align: left;
 }
-@media (max-width: 580px) {
+@media (orientation: portrait) and (max-width: 580px) {
   .viewer-stats {
     grid-template-columns: 1fr;
     gap: .625rem;
@@ -859,7 +852,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .ubu-chip[aria-pressed="false"]:not([data-grade]) { color: var(--muted); }
 .ubu-clear { margin-left: auto; color: var(--muted); }
 /* Phones: search takes the first row; sort, direction, favorites and filters share the second. */
-@media (max-width: 520px) {
+@media (orientation: portrait) and (max-width: 520px) {
   .ubu-search-box { flex-basis: 100%; }
   .ubu-help { grid-template-columns: 1fr; }
   .ubu-help dd { margin-bottom: .25rem; }
@@ -1116,7 +1109,7 @@ body:has(#reveal[open]) { overflow: hidden; }
   0% { transform: translateZ(var(--float-min, .6875rem)) translateY(0); }
   100% { transform: translateZ(var(--float-max, 1.0625rem)) translateY(var(--float-y, -.125rem)); }
 }
-@media (max-width: 520px) {
+@media (orientation: portrait) and (max-width: 520px) {
   main { width: calc(100% - 1rem); margin-top: .75rem; }
   .brand img { width: 8.125rem; } header { gap: .75rem; } nav { gap: .375rem; }
   .candy-pack { margin-top: 1.5rem; }
@@ -1132,7 +1125,7 @@ body:has(#reveal[open]) { overflow: hidden; }
   .card-top .card-heart svg { width: .875rem; height: .875rem; }
   .card-stats, .card-fanfare { border-radius: .375rem; }
 }
-@media (max-height: 720px) { .card-stage, .viewer-card-stage { width: min(45rem, 100%, calc((100dvh - 13.75rem) * 1.5)); }.reveal-toolbar, .viewer-toolbar { margin-bottom: .75rem; } }
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) { .card-stage, .viewer-card-stage { width: min(45rem, 100%, calc((100dvh - 13.75rem) * 1.5)); }.reveal-toolbar, .viewer-toolbar { margin-bottom: .75rem; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
 /* Grade colours, for grade text and for ubu tiles (data-tile-grade), which take their colour from it.

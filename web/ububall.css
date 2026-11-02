@@ -46,7 +46,7 @@
   background: var(--elevated); color: var(--text); font-family: var(--font-display); font-size: .90625rem;
 }
 .mint-entry-link:hover { background: var(--hover); }
-@media (max-width: 640px) {
+@media (orientation: portrait) and (max-width: 640px) {
   .home-team { padding: .875rem .625rem; }
   .home-lineup { gap: .375rem; }
   .home-ubu { padding: .75rem .25rem .625rem; }
@@ -72,29 +72,39 @@ body.in-match .team-column { max-height: 100%; overflow-y: auto; }
 body.in-match .stadium { display: flex; flex-direction: column; height: 100%; }
 body.in-match .stadium-stage-area { flex: 1 1 0; min-height: 0; padding: .25rem .5rem; }
 body.in-match .stadium.portrait-mode { display: grid; height: 100%; min-height: 0; }
-@media (max-width: 1000px) {
+/* Landscape match layout: the dock and the actions share one row under the rink. */
+body.in-match .stadium:not(.portrait-mode) {
+  display: grid; grid-template: "score score" auto "field field" minmax(0, 1fr) "status status" auto "dock actions" auto / minmax(0, 1fr) auto;
+}
+body.in-match .stadium:not(.portrait-mode) .scoreboard { grid-area: score; }
+body.in-match .stadium:not(.portrait-mode) .stadium-stage-area { grid-area: field; }
+body.in-match .stadium:not(.portrait-mode) #game-status { grid-area: status; }
+body.in-match .stadium:not(.portrait-mode) .knob-dock { grid-area: dock; justify-content: flex-start; padding: .5rem 1rem; }
+body.in-match .stadium:not(.portrait-mode) .stadium-actions { grid-area: actions; }
+body.in-match.replay-match .stadium:not(.portrait-mode) .stadium-actions { grid-column: 1 / -1; }
+@media (orientation: portrait) {
   body.in-match .team-column { display: none; }
-  body.in-match .arena-layout { padding: 0; }
+  body.in-match .arena-layout { grid-template-columns: 1fr; padding: 0; }
   body.in-match .stadium { border: 0; border-radius: 0; box-shadow: none; }
 }
-/* Home: the demo match plays on a rink above the lineup, for watching rather than touching. */
-body:not(.in-match) .ball-page { display: flex; flex-direction: column; }
-body:not(.in-match) .arena-layout { order: -1; display: block; width: min(55rem, 100%); margin: .25rem auto 0; pointer-events: none; }
+/* Home: in landscape, the demo match plays beside the lineup; in portrait and phone sideways, above it. */
+body:not(.in-match) .ball-page { display: grid; grid-template-columns: minmax(0, 1fr) 25rem; gap: 0 1.125rem; align-items: start; width: min(87.5rem, calc(100% - 2rem)); }
+body:not(.in-match) .arena-layout { grid-area: 1 / 1; display: block; width: 100%; margin: 0; pointer-events: none; }
 body:not(.in-match) :is(.team-column, #pause, .stadium-toolbar, #game-status, .team-selector, .stadium-actions, #field-spin) { display: none; }
-body:not(.in-match) .play-home { margin-top: .875rem; }
-@media (min-width: 1100px) {
-  body:not(.in-match) .ball-page { display: grid; grid-template-columns: minmax(0, 1fr) 25rem; gap: 0 1.125rem; align-items: start; width: min(87.5rem, calc(100% - 2rem)); }
-  body:not(.in-match) .arena-layout { grid-area: 1 / 1; width: 100%; margin: 0; }
-  body:not(.in-match) .play-home { grid-area: 1 / 2; width: 100%; margin: 0; }
-  body:not(.in-match) .play-home .home-actions { grid-template-columns: 1fr; }
-  .play-home :is(.mint-entry, .mint-entry-content) { flex-direction: column; align-items: stretch; text-align: center; gap: .625rem; }
-  .play-home .mint-entry-badge { align-self: center; }
-  .play-home .mint-entry-links { justify-content: center; }
+body:not(.in-match) .play-home { grid-area: 1 / 2; width: 100%; margin: 0; }
+body:not(.in-match) .play-home .home-actions { grid-template-columns: 1fr; }
+body:not(.in-match) .play-home :is(.mint-entry, .mint-entry-content) { flex-direction: column; align-items: stretch; text-align: center; gap: .625rem; }
+body:not(.in-match) .play-home .mint-entry-badge { align-self: center; }
+body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
+@media (orientation: portrait), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
+  body:not(.in-match) .ball-page { display: flex; flex-direction: column; width: min(95rem, calc(100% - 2rem)); }
+  body:not(.in-match) .arena-layout { order: -1; width: min(55rem, 100%); margin: .25rem auto 0; }
+  body:not(.in-match) .play-home { width: min(55rem, 100%); margin: .875rem auto 1.5rem; }
 }
 /* Short landscape screens (phones on their side): the rink runs top to bottom and the scoreboard
    and controls move to a sidebar on the side where the top of the phone is. */
-@media (orientation: landscape) and (max-height: 600px) {
-  body.in-match .arena-layout { padding: 0; }
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
+  body.in-match .arena-layout { grid-template-columns: 1fr; padding: 0; }
   body.in-match .team-column { display: none; }
   body.in-match .stadium:not(.portrait-mode) {
     display: grid; grid-template-columns: minmax(9.375rem, 26%) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto;
@@ -111,7 +121,7 @@ body:not(.in-match) .play-home { margin-top: .875rem; }
   body.in-match .stadium:not(.portrait-mode) .team-selector button { flex-direction: column; gap: .125rem; min-width: 0; padding: .25rem .125rem; font-size: .625rem; }
   body.in-match .stadium:not(.portrait-mode) .team-selector button svg { width: 1.5rem; height: 1.5rem; }
   body.in-match .stadium:not(.portrait-mode) .knob-dock .knob svg { width: 2.75rem; height: 2.75rem; }
-  body.in-match .stadium:not(.portrait-mode) .stadium-actions { grid-area: actions; display: grid; gap: .5rem; padding: .625rem; }
+  body.in-match .stadium:not(.portrait-mode) .stadium-actions { grid-area: actions; grid-column: auto; display: grid; gap: .5rem; padding: .625rem; }
   body.in-match .stadium:not(.portrait-mode) :is(.stadium-super-btn, .team-launch, #launch) { width: 100%; min-width: 0; }
 }
 .pause-menu {
@@ -184,6 +194,10 @@ body:not(.in-match) .play-home { margin-top: .875rem; }
   background: var(--card); color: var(--text); box-shadow: var(--panel-shadow); animation: drawer-in-left .2s ease-out;
 }
 .stat-drawer[data-side="away"] { inset: 0 0 0 auto; border-right: 0; border-left: .0625rem solid var(--border); border-radius: 1.125rem 0 0 1.125rem; animation-name: drawer-in-right; }
+@media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
+  .stat-drawer { top: calc((100dvh - 67.5rem) / 2); left: calc((100vw - 120rem) / 2); height: 67.5rem; }
+  .stat-drawer[data-side="away"] { left: auto; right: calc((100vw - 120rem) / 2); }
+}
 .stat-drawer::backdrop { background: rgb(0 0 0 / .35); }
 @keyframes drawer-in-left { from { translate: -100% 0; } }
 @keyframes drawer-in-right { from { translate: 100% 0; } }
@@ -199,19 +213,7 @@ body:not(.in-match) .play-home { margin-top: .875rem; }
 /* Hiding the sidebars gives the rink the whole width; the toggle shows only where sidebars do. */
 body.in-match.sidebars-hidden .team-column { display: none; }
 body.in-match.sidebars-hidden .arena-layout { grid-template-columns: minmax(0, 1fr); }
-@media (max-width: 1000px), (orientation: landscape) and (max-height: 600px) { #btn-sidebars { display: none; } }
-/* Wide screens: the dock and the actions share one row under the rink. */
-@media (min-width: 1300px) and (min-height: 601px) {
-  body.in-match .stadium:not(.portrait-mode) {
-    display: grid; grid-template: "score score" auto "field field" minmax(0, 1fr) "status status" auto "dock actions" auto / minmax(0, 1fr) auto;
-  }
-  body.in-match .stadium:not(.portrait-mode) .scoreboard { grid-area: score; }
-  body.in-match .stadium:not(.portrait-mode) .stadium-stage-area { grid-area: field; }
-  body.in-match .stadium:not(.portrait-mode) #game-status { grid-area: status; }
-  body.in-match .stadium:not(.portrait-mode) .knob-dock { grid-area: dock; justify-content: flex-start; padding: .5rem 1rem; }
-  body.in-match .stadium:not(.portrait-mode) .stadium-actions { grid-area: actions; }
-  body.in-match.replay-match .stadium:not(.portrait-mode) .stadium-actions { grid-column: 1 / -1; }
-}
+@media (orientation: portrait), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) { #btn-sidebars { display: none; } }
 .card-titles { min-width: 0; flex: 1; }
 .card-titles strong {
   display: block;
@@ -649,15 +651,7 @@ body.stadium-fullscreen-active {
 
 
 
-@media (max-width: 1300px) {
-  .arena-layout { grid-template-columns: 12.5rem 1fr 12.5rem; }
-}
-@media (max-width: 1000px) {
-  .arena-layout { grid-template-columns: 1fr; }
-  .stadium { order: -1; }
-  .home-column, .away-column { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; }
-}
-@media (max-width: 650px) {
+@media (orientation: portrait) and (max-width: 650px) {
   .ball-page { width: calc(100% - 1.5rem); }
   .stadium-toolbar { right: .5rem; gap: .25rem; }
   .stadium-tool-btn { width: 1.875rem; height: 1.875rem; padding: .3125rem; border-radius: .375rem; }
@@ -690,10 +684,6 @@ body.stadium-fullscreen-active {
 .ubu-stats-wrap:not(:has(.stat-details[open])) > .compact-stats { display: flex; }
 .ubu-stats-wrap:has(.stat-details[open]) > .compact-stats { display: none; }
 .stat-details[open] > .full-stats { display: flex; }
-@media (min-width: 651px) and (max-width: 1000px) {
-  .home-column, .away-column { display: flex; }
-  .team { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
 
 /* Prominent ability art and touch-friendly spin control outside the aiming area. */
 .super-icon, .stadium-super-btn .super-icon { width: 2.25rem; height: 2.25rem; padding: .125rem; }
@@ -721,7 +711,7 @@ body.stadium-fullscreen-active {
   min-height: 33.75rem;
 }
 .stadium.portrait-mode .scoreboard { grid-area: score; }
-.stadium.portrait-mode .stadium-toolbar { position: static; transform: none; margin: 0; gap: 0; }
+.stadium.portrait-mode .stadium-toolbar { margin: 0; gap: 0; }
 .stadium.portrait-mode .stadium-tool-btn { width: 2.75rem; height: 2.75rem; border: 0; background: transparent; box-shadow: none; }
 .stadium.portrait-mode .stadium-stage-area { grid-area: field; height: auto; min-height: 0; padding: 0; }
 .stadium.portrait-mode #game-status { grid-area: status; margin: 0; padding: .25rem .625rem; font-size: .6875rem; line-height: 1.3; }
@@ -742,7 +732,7 @@ body.stadium-fullscreen-active {
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   box-sizing: border-box;
 }
-@media (max-width: 650px) {
+@media (orientation: portrait) and (max-width: 650px) {
   .ball-page:has(.portrait-mode) { width: calc(100% - .75rem); }
   .stadium.portrait-mode { border-radius: .75rem; }
   .stadium.portrait-mode:fullscreen, .stadium.portrait-mode.stadium-fullscreen { border-radius: 0; }
@@ -817,7 +807,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 #online-create { width: 100%; }
 #online-status:empty { display: none; }
 .online-account { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; margin-top: 1.25rem; padding-top: 1rem; border-top: .0625rem solid var(--border); color: var(--muted); font-size: .75rem; }
-@media (max-width: 400px) { #online-dialog { padding: 1rem; } .online-options { grid-template-columns: 1fr; } }
+@media (orientation: portrait) and (max-width: 400px) { #online-dialog { padding: 1rem; } .online-options { grid-template-columns: 1fr; } }
 
 /* Super meter: a glint at the growing end on each gain, and a shimmer when full. */
 .super-meter-fill { position: relative; }
@@ -845,7 +835,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 #match-summary .summary-rematch-status { margin: 0 0 .75rem; font-weight: 700; }
 #match-summary .summary-rematch-status:empty { display: none; }
 #match-summary .summary-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-@media (max-width: 420px) { #match-summary { padding: 1rem; } #match-summary th, #match-summary td { padding: .375rem .1875rem; } }
+@media (orientation: portrait) and (max-width: 420px) { #match-summary { padding: 1rem; } #match-summary th, #match-summary td { padding: .375rem .1875rem; } }
 
 /* Match setup: a mode screen, then a team screen where only the ubu list scrolls. Full screen on
    phones. */
@@ -890,7 +880,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .mode-option:has(input:checked) { border-color: var(--mode); background: color-mix(in srgb, var(--elevated), var(--mode) 16%); box-shadow: var(--bevel), 0 0 1.125rem color-mix(in srgb, var(--mode), transparent 65%); }
 .mode-option:has(input:checked) small { color: var(--text); }
 .mode-option:has(input:checked) .mode-check { scale: 1; }
-@media (max-width: 520px) { .mode-check { top: -.4375rem; right: -.4375rem; width: 1.375rem; height: 1.375rem; } .mode-check .icon { width: .875rem; height: .875rem; } }
+@media (orientation: portrait) and (max-width: 520px) { .mode-check { top: -.4375rem; right: -.4375rem; width: 1.375rem; height: 1.375rem; } .mode-check .icon { width: .875rem; height: .875rem; } }
 .mode-summary { margin: 0; color: var(--text); font-family: var(--font-display); font-size: clamp(1rem, 2.8vw, 1.375rem); text-align: center; }
 .mode-option:has(input:focus-visible), .cpu-levels label:has(input:focus-visible) { outline: .125rem solid var(--mode, var(--primary)); outline-offset: .125rem; }
 .cpu-levels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; margin: 0; padding: 0; border: 0; }
@@ -973,9 +963,8 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .formation-slot[data-position="back"] .formation-super { justify-self: center; max-width: 100%; }
 .formation-slot[data-position="back"] .formation-tools { position: absolute; top: .375rem; right: .375rem; bottom: auto; }
 [data-locked] .roster-scroll { opacity: .55; pointer-events: none; }
-/* Phones and short, wide screens: position tools sit in the corner beside the position label, so
-   names and supers keep the width. */
-@media (max-width: 520px), (max-height: 560px) and (min-width: 560px) {
+/* Phones: position tools sit in the corner beside the position label, so names and supers keep the width. */
+@media (orientation: portrait) and (max-width: 520px), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
   .formation { --crease: 1.375rem; gap: .375rem; margin-left: .6875rem; padding: .5rem .875rem .5rem calc(var(--crease) + .375rem); border-radius: 2rem 0 0 2rem; }
   .formation::before { width: .5rem; }
   .formation-slot { grid-template-columns: minmax(0, 1fr); padding: .3125rem; }
@@ -995,7 +984,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 
 /* Up to four choices a row; phones take two. */
 .super-choice-grid { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 13.125rem)); gap: .375rem; }
-@media (max-width: 600px) { .super-choice-grid { grid-template-columns: repeat(var(--cols-narrow, 2), minmax(0, 1fr)); } }
+@media (orientation: portrait) and (max-width: 600px) { .super-choice-grid { grid-template-columns: repeat(var(--cols-narrow, 2), minmax(0, 1fr)); } }
 .super-choice {
   display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: .5rem; justify-items: start;
   min-height: 0; padding: .375rem .5rem; border: .125rem solid transparent; border-radius: .75rem; background: var(--card); text-align: left;
@@ -1042,45 +1031,8 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .roster-grid { grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: .5rem; margin: 0; }
 .roster-grid .ubu-tile-main { gap: .25rem; padding: .75rem .25rem .5rem; border-radius: .875rem; background-color: var(--elevated); }
 .roster-grid .ubu-tile-art { width: 3.5rem; height: 3.5rem; }
-@media (max-width: 640px), (max-height: 560px) {
+@media (orientation: portrait) and (max-width: 640px), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
   .team-sheet { width: 100%; height: 100dvh; max-width: none; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top); }
-}
-/* Short screens keep the team compact so the ubu list still has room. */
-@media (max-height: 560px) {
-  .mode-step { gap: .375rem; padding-block: .25rem; }
-  .mode-logo img { max-height: 16dvh; }
-  .mode-option { padding-block: .5rem; gap: .1875rem; }
-  .mode-option strong { font-size: clamp(1.25rem, 10dvh, 2.75rem); }
-  .mode-check { top: -.4375rem; right: -.4375rem; width: 1.375rem; height: 1.375rem; }
-  .mode-check .icon { width: .875rem; height: .875rem; }
-  .roster-tabs { margin: .25rem 0 .375rem; padding: .1875rem; }
-  .roster-tabs button { min-height: 2rem; font-size: .875rem; }
-  .cpu-levels legend { margin-bottom: .25rem; font-size: .9375rem; }
-  .cpu-levels span { min-height: 2.5rem; }
-  .team-sheet-foot { padding-block: .5rem calc(.5rem + env(safe-area-inset-bottom)); }
-  .team-sheet-foot button { min-height: 2.75rem; font-size: 1.125rem; }
-  .team-step-head { margin-bottom: .375rem; }
-  .formation { gap: .375rem; padding-block: .3125rem; }
-  .formation-art { width: 2rem; height: 2rem; }
-  .formation-slot[data-position="back"] .formation-art { width: 3rem; height: 3rem; }
-  .formation-pos { display: none; }
-  .roster-hint { margin-top: .25rem; font-size: .75rem; }
-}
-
-/* Wide, short screens (a 16:9 Discord tile): the team on the left, the ubu list beside it. The left
-   column scrolls with the sheet if a saved-team bar or lobby makes it taller than the screen. */
-@media (max-height: 560px) and (min-width: 560px) {
-  .team-step { display: grid; grid-template: repeat(6, auto) minmax(0, 1fr) / minmax(0, 1.5fr) minmax(0, 1fr); column-gap: .75rem; align-content: start; overflow-y: auto; }
-  .team-step > * { grid-column: 1; }
-  .team-step > .roster-tabs { grid-column: 2; grid-row: 1; align-self: start; margin: 0 3rem .375rem 0; }
-  .team-step > .roster-scroll { grid-column: 2; grid-row: 2 / -1; margin-right: -1rem; margin-left: 0; padding-left: 0; }
-  .team-step .roster-toolbar { margin-left: 0; padding-left: 0; }
-  .team-step { padding-top: .375rem; }
-  .team-step-head { margin-bottom: .25rem; }
-  .formation { gap: .25rem; padding-block: .1875rem; }
-  .formation-pos { display: block; line-height: 1.25rem; }
-  .roster-tabs button { padding-inline: .5rem; white-space: nowrap; }
-  .roster-grid { grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr)); }
 }
 
 /* Announcements over the rink ("Plan your shot…", "Launch!", the winner). */
@@ -1239,13 +1191,13 @@ body.online-match .bug-team { text-transform: none; letter-spacing: .01em; }
 .bug-tab[data-tone="away"] { --tab: var(--team-away); --tab-ink: #fff; }
 @media (prefers-reduced-motion: reduce) { .bug-tab { transition: opacity .2s; transform: translate(-50%, 0); } }
 /* Compact: phones in landscape (the sidebar) and portrait. */
-@media (orientation: landscape) and (max-height: 600px) {
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
   body.in-match .stadium:not(.portrait-mode) .scoreboard {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-rows: 1.75rem 1.875rem; gap: .25rem 0;
     grid-template-areas: "pause left tools" "home status away"; padding: .375rem;
   }
 }
-@media (orientation: landscape) and (max-height: 600px) {
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
   body.in-match .stadium:not(.portrait-mode) :is(.bug-center, .bug-right) { display: contents; }
   body.in-match .stadium:not(.portrait-mode) #pause { grid-area: pause; justify-self: start; position: static; transform: none; width: 1.75rem; height: 1.75rem; min-height: 0; padding: .3125rem; }
   body.in-match .stadium:not(.portrait-mode) .stadium-toolbar { grid-area: tools; position: static; transform: none; justify-self: end; gap: .125rem; }
@@ -1270,14 +1222,14 @@ body.online-match .bug-team { text-transform: none; letter-spacing: .01em; }
   }
   body.in-match .stadium:not(.portrait-mode) #blitz-clock { flex-basis: 100%; margin: 0; text-align: center; }
 }
-@media (max-width: 1000px) {
+@media (orientation: portrait) {
   .stadium.portrait-mode .scoreboard {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-rows: 1.5rem 1.875rem; gap: .25rem 0;
     grid-template-areas: "pause left tools" "home status away"; padding: .1875rem .5rem;
   }
   .stadium.portrait-mode :is(.bug-center, .bug-right) { display: contents; }
   .stadium.portrait-mode #pause { grid-area: pause; justify-self: start; position: static; transform: none; width: 1.5rem; height: 1.5rem; min-height: 0; padding: .1875rem; }
-  .stadium.portrait-mode .stadium-toolbar { grid-area: tools; justify-self: end; gap: .125rem; }
+  .stadium.portrait-mode .stadium-toolbar { grid-area: tools; position: static; transform: none; justify-self: end; gap: .125rem; }
   .stadium.portrait-mode .stadium-toolbar .stadium-tool-btn { width: 1.5rem; height: 1.5rem; min-height: 0; padding: .1875rem; }
   .stadium.portrait-mode .bug-left { grid-area: left; justify-self: center; align-items: center; gap: .375rem; }
   .stadium.portrait-mode :is(.bug-brand, .bug-modes) { height: auto; padding: 0; background: none; border: 0; gap: .25rem; }
@@ -1296,8 +1248,6 @@ body.online-match .bug-team { text-transform: none; letter-spacing: .01em; }
   .stadium.portrait-mode .bug-home { justify-self: end; width: 100%; max-width: 9.375rem; }
   .stadium.portrait-mode .bug-away { justify-self: start; width: 100%; max-width: 9.375rem; }
 }
-/* Wide portrait keeps the one-row bug, with the tools in the corner. */
-@media (min-width: 1001px) { .stadium.portrait-mode .scoreboard .stadium-toolbar { position: absolute; right: .75rem; top: 50%; transform: translateY(-50%); } }
 
 /* Replay viewer: the timeline (goal and card marks above it) over the playback controls, in place
    of the planning controls. */
@@ -1350,7 +1300,7 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 .replays-undo.idle { visibility: hidden; }
 .replays-undo span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .replays-undo button { display: inline-flex; align-items: center; gap: .375rem; }
-@media (max-width: 480px) {
+@media (orientation: portrait) and (max-width: 480px) {
   .replays-dialog { padding: 1rem; }
   .replays-list .replay-actions { grid-column: 2; grid-row: 3; }
 }
