@@ -149,6 +149,8 @@ export class MintRegistry extends DurableObject {
     }
     return { error: 'Invalid favorite request.', status: 400 };
   }
+  teams(owner) { return this.mint.teams(owner); }
+  saveTeams(owner, data) { return this.mint.saveTeams(owner, data); }
   ububallTeam(owner, serials) {
     if (!Array.isArray(serials) || serials.length !== 3 || new Set(serials).size !== 3 ||
         serials.some(s => typeof s !== 'string' || !/^[0-9]{12}$/.test(s))) return { error: 'Choose three different owned ubus.' };
@@ -219,6 +221,13 @@ export default {
       const registry = env.MINT.get(env.MINT.idFromName(config.mint));
       if (path === '/api/ubus' && request.method === 'GET') {
         const result = await registry.collection(session.owner, url.searchParams.get('after') || '');
+        return json(result, result.status || 200);
+      }
+      if (path === '/api/teams' && request.method === 'GET') return json(await registry.teams(session.owner));
+      if (path === '/api/teams' && request.method === 'POST') {
+        let data;
+        try { data = await body(request, 8192); } catch { return json({ error: 'Invalid saved teams body.' }, 400); }
+        const result = await registry.saveTeams(session.owner, data);
         return json(result, result.status || 200);
       }
       if (path === '/api/favorites' && request.method === 'POST') {

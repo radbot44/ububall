@@ -224,14 +224,19 @@
     return loading;
   }
   function add(item) { items.set(item.serial, item); changed(); }
+  async function post(path, data) {
+    const session = root.getUbuSession?.() || await request('/api/session');
+    return request(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf }, body: JSON.stringify(data) });
+  }
+  // The account's saved ububall teams: { teams: [{ name, slots }], last }, each slot { serial, super }.
+  const teams = () => request('/api/teams');
+  const saveTeams = data => post('/api/teams', data);
   async function setFavorite(serial, favorite) {
     const item = items.get(serial);
     if (!item || changing.has(serial)) return;
     changing.add(serial);
     try {
-      const session = root.getUbuSession?.() || await request('/api/session');
-      const result = await request('/api/favorites', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf },
-        body: JSON.stringify({ serial, favorite }) });
+      const result = await post('/api/favorites', { serial, favorite });
       const current = items.get(serial);
       if (current) { current.favorite = result.favorite; changed(); }
     } finally { changing.delete(serial); }
@@ -386,6 +391,20 @@
       el('span', { className: 'ubu-tile-meta' }, grade, el('span', { textContent: caption })), supers, value);
     return { main, artBox, value };
   }
+  // A picker tile's role: a badge for an ubu already chosen (its position) or the action a
+  // click takes, shown on hover and read out with the name.
+  function describeTile(main, name, { badge = '', action = '' } = {}) {
+    let mark = main.querySelector('.ubu-tile-badge');
+    if (!mark) { mark = el('span', { className: 'ubu-tile-badge' }); main.append(mark); }
+    mark.textContent = badge || action; mark.classList.toggle('is-action', !badge);
+    main.setAttribute('aria-pressed', String(Boolean(badge)));
+    main.setAttribute('aria-label', name + ', ' + (badge ? badge + ' on your team' : action));
+  }
+  // Desktop tiles drag onto team positions; the key is the ubu's serial (or practice key).
+  function draggable(main, key) {
+    main.draggable = true;
+    main.addEventListener('dragstart', event => { event.dataTransfer.setData('application/x-ubu-key', key); event.dataTransfer.effectAllowed = 'copyMove'; });
+  }
 
   // Art is drawn the first time a tile scrolls near view, so large collections stay cheap.
   function lazyArt(scrollRoot) {
@@ -402,7 +421,7 @@
 
   // One list surface: a toolbar over a grid of tiles. `pick` makes a click choose the ubu (the
   // team picker) and adds an inspect button; otherwise a click inspects it.
-  function mount({ surface, toolbarHost, grid, scrollRoot, status, inspect, pick, pressed, hidden, paused, onEmpty }) {
+  function mount({ surface, toolbarHost, grid, scrollRoot, status, inspect, pick, describe, drag, hidden, paused, onEmpty }) {
     const state = savedState(surface);
     const tiles = new Map(), art = lazyArt(scrollRoot);
     let shown = [];
@@ -422,6 +441,7 @@
       const name = item.model.parts.fullName;
       const { main, artBox, value } = tileMain(item.model, serialLabel(item.serial));
       main.onclick = () => (pick || inspect)(item);
+      if (drag) draggable(main, item.serial);
       wrap.append(main);
       const heart = el('button', { type: 'button', className: 'card-heart ubu-tile-heart', title: 'Favorite' }, heartIcon());
       heart.setAttribute('aria-label', `Favorite ${name}`);
@@ -449,7 +469,7 @@
         if (!main) continue;
         const favorite = items.get(item.serial)?.favorite === true;
         heart.setAttribute('aria-pressed', String(favorite)); heart.classList.toggle('is-favorite', favorite);
-        if (pressed) main.setAttribute('aria-pressed', String(pressed(item)));
+        if (describe) describeTile(main, item.model.parts.fullName, describe(item));
         value.hidden = !key;
         if (key) [value.textContent, value.style.color] = chipValue(item, key);
       }
@@ -462,7 +482,7 @@
   }
 
   root.ubuList = Object.assign(api, {
-    config, trustedKey, load, add, setFavorite, heartIcon, tileMain, mount,
+    config, trustedKey, load, add, setFavorite, teams, saveTeams, heartIcon, tileMain, describeTile, draggable, mount,
     get: serial => items.get(serial), items: () => [...items.values()], loading: () => Boolean(loading)
   });
 })(globalThis);

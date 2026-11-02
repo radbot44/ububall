@@ -228,13 +228,29 @@ SOFTWARE.
     </section>
     <section class="sheet-step team-step" aria-labelledby="team-title">
       <header class="team-step-head"><button id="team-back" class="quiet" type="button">&larr; Mode</button><div class="team-heading"><h2 id="team-title">Your team</h2><span id="team-mode" class="team-mode"></span></div></header>
-      <div id="roster-slots" class="roster-slots" aria-label="Your team"></div>
-      <div class="roster-super">
-        <div id="roster-super-grid" class="super-picker-grid" aria-label="Super for the selected ubu"></div>
-        <p id="roster-super-name" class="roster-super-name"></p>
+      <div id="lobby-panel" class="lobby-panel" hidden>
+        <div class="lobby-invite"><input id="online-invite" readonly aria-label="Invite link"><button id="online-copy" type="button">Copy invite</button><button id="online-share" type="button" hidden>Share</button></div>
+        <p id="lobby-status" class="lobby-status" role="status"></p>
+        <p id="lobby-note" class="lobby-note"></p>
+        <div class="lobby-actions"><a id="lobby-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a><button id="lobby-leave" class="quiet" type="button">Leave match</button></div>
       </div>
+      <div id="team-bar" class="team-bar" hidden>
+        <button id="team-prev" class="team-step-btn" type="button" aria-label="Previous saved team">&lsaquo;</button>
+        <select id="team-select" aria-label="Saved team"></select>
+        <button id="team-next" class="team-step-btn" type="button" aria-label="Next saved team">&rsaquo;</button>
+        <button id="team-save" type="button">Save team</button>
+        <button id="team-more" class="team-step-btn" type="button" popovertarget="team-menu" aria-label="More team actions">&hellip;</button>
+        <div id="team-menu" class="team-menu" popover><button id="team-save-new" type="button">Save as new team</button><button id="team-rename" type="button">Rename</button><button id="team-delete" type="button">Delete</button></div>
+        <form id="team-name-form" class="team-name-form" hidden><input id="team-name" maxlength="40" required aria-label="Team name" placeholder="Team name"><button class="primary" type="submit">Save</button><button id="team-name-cancel" class="quiet" type="button">Cancel</button></form>
+      </div>
+      <div id="roster-slots" class="formation" aria-label="Your team in kickoff formation"></div>
+      <div id="roster-super" class="roster-super" hidden>
+        <div class="roster-super-head"><h3 id="roster-super-title"></h3><button id="roster-super-close" class="quiet" type="button">Done</button></div>
+        <div id="roster-super-grid" class="super-choice-grid"></div>
+      </div>
+      <p id="roster-hint" class="roster-hint" role="status"></p>
       <p id="roster-status" class="roster-status" role="status"></p>
-      <div class="roster-tabs" role="tablist" aria-label="Ubus to choose from">
+      <div id="roster-tabs" class="roster-tabs" role="tablist" aria-label="Ubus to choose from">
         <button id="tab-yours" role="tab" type="button" aria-selected="true" aria-controls="roster-yours">Your ubus</button>
         <button id="tab-practice" role="tab" type="button" aria-selected="false" aria-controls="roster-practice">Practice</button>
       </div>
@@ -260,10 +276,7 @@ SOFTWARE.
       <p class="online-hint">Invite a friend with a private link. Moves stay private until launch; Blitz uses your latest saved moves.</p>
       <button id="online-create" class="primary" disabled>Create invite match</button>
     </div>
-    <div id="online-lobby" hidden><label>Invite link <input id="online-invite" readonly></label><button id="online-copy">Copy invite</button><button id="online-share" hidden>Share invite</button>
-      <p id="online-team-note"></p><div id="online-team"></div><button id="online-load" hidden>Load my collection</button><button id="online-ready" class="primary">Ready to play</button>
-      <p>Disconnects pause planning. After 60 seconds your opponent can claim a forfeit. Leaving a match in progress concedes it.</p><button id="online-leave">Leave online match</button>
-    </div>
+    <div id="online-ended" hidden><button id="online-leave">Leave online match</button></div>
     <p id="online-status" role="status"></p><div class="online-account"><span id="online-account-status" role="status">Checking session…</span><a id="online-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a><button id="online-guest" hidden>Play as guest</button></div>
   </dialog>
 </main>

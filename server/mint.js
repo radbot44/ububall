@@ -6,6 +6,7 @@ const { scoreRarity } = require('../shared/rarity.js');
 const MAX_SERIAL = 999999999999;
 const DEFAULT_BATCH_SIZE = 1000;
 const PACK_SIZE = 5;
+const TEAM_LIMIT = 30, TEAM_NAME_LIMIT = 40;
 
 const randomCode = size => {
   const bytes = crypto.getRandomValues(new Uint8Array(size));
@@ -121,6 +122,8 @@ class Mint {
         anchor TEXT NOT NULL UNIQUE, UNIQUE(owner, position)) STRICT`);
       this.exec(`CREATE TABLE IF NOT EXISTS pack_selections (
         owner TEXT NOT NULL, request TEXT NOT NULL, choice TEXT NOT NULL, PRIMARY KEY(owner, request)) STRICT`);
+      // Each account's saved ububall teams, as one validated JSON document.
+      this.exec('CREATE TABLE IF NOT EXISTS saved_teams (owner TEXT PRIMARY KEY, data TEXT NOT NULL) STRICT');
     });
   }
   exec(sql, ...bindings) { return Array.from(this.storage.exec(sql, ...bindings)); }
@@ -294,6 +297,33 @@ class Mint {
     }
     return { certificates };
   }
+
+  teams(owner) {
+    const row = this.exec('SELECT data FROM saved_teams WHERE owner=?', owner)[0];
+    return row ? JSON.parse(row.data) : { teams: [], last: null };
+  }
+  // Replaces the account's saved teams: named three-ubu lineups (Back, Top, Bottom) of owned,
+  // signed ubus with an optional equipped super each, plus the last team played.
+  saveTeams(owner, data) {
+    const plain = value => value && typeof value === 'object' && !Array.isArray(value);
+    const slots = value => Array.isArray(value) && value.length === 3 && new Set(value.map(slot => slot?.serial)).size === 3 &&
+      value.every(slot => plain(slot) && Object.keys(slot).length === 2 && /^[0-9]{12}$/.test(slot.serial) &&
+        (slot.super === null || (Number.isInteger(slot.super) && slot.super >= 0 && slot.super < 8)));
+    const named = team => plain(team) && Object.keys(team).length === 2 && typeof team.name === 'string' &&
+      team.name === team.name.trim() && team.name.length >= 1 && team.name.length <= TEAM_NAME_LIMIT &&
+      !/[\u0000-\u001f\u007f]/.test(team.name) && slots(team.slots);
+    if (!plain(data) || Object.keys(data).length !== 2 || !Array.isArray(data.teams) || data.teams.length > TEAM_LIMIT ||
+        !data.teams.every(named) || !(data.last === null || slots(data.last))) return { error: 'Invalid saved teams.', status: 400 };
+    const serials = [...new Set([...data.teams.flatMap(team => team.slots), ...(data.last || [])].map(slot => slot.serial))];
+    return this.transaction(() => {
+      const owned = serials.length ? this.exec('SELECT COUNT(*) AS n FROM issued WHERE owner=? AND certificate IS NOT NULL AND serial IN (' +
+        serials.map(() => '?').join(',') + ')', owner, ...serials)[0].n : 0;
+      if (owned !== serials.length) return { error: 'Teams can only use signed ubus in your collection.', status: 400 };
+      const document = { teams: data.teams.map(({ name, slots }) => ({ name, slots })), last: data.last };
+      this.exec('INSERT INTO saved_teams VALUES (?, ?) ON CONFLICT(owner) DO UPDATE SET data=excluded.data', owner, JSON.stringify(document));
+      return document;
+    });
+  }
 }
 
-module.exports = { Mint, DEFAULT_BATCH_SIZE, PACK_SIZE };
+module.exports = { Mint, DEFAULT_BATCH_SIZE, PACK_SIZE, TEAM_LIMIT };

@@ -3,8 +3,9 @@ function ububallOnline(hooks) {
   const $ = id => document.getElementById(id);
   const invite = new URL(location.href).searchParams.get('match');
   let id = null, socket = null, session = null, state = null, retry = null, heartbeat = null;
-  let stopped = false, lastPong = 0, offset = 0, choices = [], collection = [], cursor = '', lastDraft = '', sentAt = 0;
-  const status = text => { $('online-status').textContent = text; };
+  let stopped = false, lastPong = 0, offset = 0, lastDraft = '', sentAt = 0;
+  // The lobby shows on the team screen; the dialog only creates, joins and ends matches.
+  const status = text => { $('online-status').textContent = text; $('lobby-status').textContent = text; };
   const playable = () => Boolean(session?.owner || session?.guest);
   function account() {
     $('online-login').hidden = Boolean(session?.owner);
@@ -24,7 +25,7 @@ function ububallOnline(hooks) {
     session = await response.json();
     account();
     const returnDest = invite ? '/?match=' + encodeURIComponent(invite) : (id ? '/?match=' + encodeURIComponent(id) : ((location.pathname === '/index.html' ? '/' : location.pathname) + location.search));
-    $('online-login').href = '/auth/discord?return=' + encodeURIComponent(returnDest);
+    $('online-login').href = $('lobby-login').href = '/auth/discord?return=' + encodeURIComponent(returnDest);
   }
   window.addEventListener('ubu:session', event => {
     if (!event.detail?.owner || session?.owner === event.detail.owner) return;
@@ -44,81 +45,35 @@ function ububallOnline(hooks) {
     if (!response.ok) throw new Error(result.error || 'Could not reach the match.');
     return result;
   }
-  function teamPicker() {
-    const container = $('online-team'); container.replaceChildren();
-    if (!state || state.phase !== 'lobby') return;
-    const practice = Boolean(state.practice), entries = practice ? state.practice : collection, kept = state.rosters[state.seat];
-    // After a rematch (or a reload) the last team stays selected.
-    if (!choices.length && kept) {
-      choices = kept.map(entry => ({ ...entry }));
-      if (!practice) for (const entry of kept) if (!collection.some(c => c.serial === entry.serial)) collection.push({ serial: entry.serial, dna: entry.dna });
-    }
-    for (let i = 0; i < 3; i++) {
-      const row = document.createElement('div'); row.className = 'online-team-slot';
-      const select = document.createElement('select'); select.setAttribute('aria-label', 'Team character');
-      const available = practice ? [entries[i]] : entries;
-      if (!available.length) select.add(new Option('Load your collection', ''));
-      available.forEach((entry, index) => {
-        const model = ubu.decode(ubu.fromCode(entry.dna));
-        select.add(new Option(model.parts.fullName, String(index)));
-      });
-      if (choices[i] && !practice) select.value = String(Math.max(0, entries.findIndex(e => e.serial === choices[i].serial)));
-      else if (!practice && entries[i]) select.value = String(i);
-      const portrait = document.createElement('div'), supers = document.createElement('select');
-      supers.setAttribute('aria-label', 'Equipped super');
-      function selected() {
-        const entry = available[Number(select.value)];
-        portrait.replaceChildren(); supers.replaceChildren();
-        if (!entry) return;
-        const model = ubu.decode(ubu.fromCode(entry.dna)), previous = choices[i];
-        choices[i] = { ...entry, superId: previous?.dna === entry.dna ? previous.superId : model.supers[0] % 8 };
-        portrait.append(ubuRender(model, 'ball-thumb'));
-        for (const superId of new Set(model.supers.map(n => n % 8))) {
-          const mastery = ububallPhysics.superMastery(model.supers, superId);
-          supers.add(new Option(mastery.displayName, String(superId)));
-        }
-        supers.value = choices[i].superId;
-      }
-      select.onchange = selected; selected();
-      supers.onchange = () => { choices[i].superId = Number(supers.value); };
-      supers.hidden = state.mode.includes('classic');
-      select.dataset.fixed = practice ? '1' : '';
-      row.append(portrait, select, supers); container.append(row);
-    }
-  }
-  function receive(next) {
+  function receive(next, reopen = false) {
     if (state && next.revision < state.revision) return;
     const before = state; state = next; offset = next.now - Date.now();
     $('online-create-controls').hidden = true;
-    $('online-lobby').hidden = false;
+    $('online-ended').hidden = true;
     $('online-invite').value = location.origin + '/?match=' + id;
     const other = 1 - next.seat, them = next.names[other] || (next.occupied[other] ? 'Your opponent' : 'Opponent'), ready = next.ready[next.seat];
-    $('online-ready').hidden = next.phase !== 'lobby';
-    $('online-load').hidden = next.phase !== 'lobby' || Boolean(next.practice) || ready;
-    $('online-ready').disabled = false;
-    $('online-ready').textContent = ready ? 'Change team' : 'Ready to play';
-    $('online-ready').classList.toggle('primary', !ready);
-    $('online-team-note').textContent = next.phase !== 'lobby' ? '' : next.teams === 'practice' ? 'This match uses random practice teams.' :
-      next.practice ? 'Guests play with a random practice team. Sign in with Discord below to use your own ubus; you keep your seat.' : '';
-    if (before && Boolean(before.practice) !== Boolean(next.practice)) choices = [];
-    if (!before || before.phase !== next.phase || (!choices.length && next.phase === 'lobby')) teamPicker();
-    for (const select of $('online-team').querySelectorAll('select')) select.disabled = ready || select.dataset.fixed === '1';
-    if (next.phase === 'lobby' && !next.practice && !collection.length && !loadingCollection) loadCollection();
     if (before && !before.occupied[other] && next.occupied[other]) nudge(`${them} joined`);
     if (before && !before.rematch[other] && next.rematch[other]) nudge(`${them} wants a rematch`);
     if (before?.phase === 'lobby' && next.phase === 'plan') nudge('Kickoff');
     if (next.phase === 'lobby') {
-      // A rematch brings both players back here to keep or change their teams.
-      if (before && before.phase !== 'lobby' && !$('online-dialog').open) $('online-dialog').showModal();
+      // Entering the lobby (a new match or a rematch) brings up the team screen.
+      const note = next.teams === 'practice' ? 'This match uses random practice teams.' :
+        next.practice ? 'Guests play with a random practice team. Sign in with Discord to use your own ubus; you keep your seat.' : '';
+      hooks.lobby({ state: next, ready, practice: next.practice, guest: Boolean(session?.guest),
+        note: note + (note ? ' ' : '') + 'Disconnects pause planning; after 60 seconds your opponent can claim a forfeit.' }, reopen || !before || before.phase !== 'lobby');
       status(!next.occupied[other] ? 'Share the invite link with your opponent.' : ready ? `Team ready. Waiting for ${them}${next.ready[other] ? ' to connect' : ' to choose a team'}.` :
         next.ready[other] ? `${them} is ready. Choose your team, then ready up.` : `${them} joined. Choose your team, then ready up.`);
     } else if (!next.game) {
-      // The host left before kickoff: nothing to play, so the dialog stays to explain and offer Leave.
+      // The host left before kickoff: nothing to play, so the dialog explains and offers Leave.
+      hooks.closeLobby();
+      $('online-ended').hidden = false;
+      if (!$('online-dialog').open) $('online-dialog').showModal();
       status(`${them} closed this match.`);
       return;
     } else {
+      hooks.closeLobby();
       $('online-dialog').close();
-      $('online-status').textContent = '';
+      status('');
     }
     hooks.onState(next);
   }
@@ -147,7 +102,8 @@ function ububallOnline(hooks) {
     };
   }
   async function enter(matchId, initial) {
-    id = matchId; state = null; choices = []; stopped = false; lastDraft = '';
+    id = matchId; state = null; stopped = false; lastDraft = '';
+    $('online-dialog').close();
     const url = new URL(location.href); url.pathname = '/'; url.searchParams.set('match', id); history.replaceState(null, '', url);
     receive(initial); connect();
     clearInterval(heartbeat);
@@ -164,9 +120,10 @@ function ububallOnline(hooks) {
     if (live && !confirm(`Leaving ends the match and gives ${state.names[1 - state.seat] || 'your opponent'} the win. Leave?`)) return;
     stopped = true;
     if (id) await api('/api/ububall/' + id + '/leave', {}).catch(() => {});
-    clearTimeout(retry); clearInterval(heartbeat); socket?.close(); socket = null; id = null; state = null; choices = [];
+    clearTimeout(retry); clearInterval(heartbeat); socket?.close(); socket = null; id = null; state = null;
+    hooks.closeLobby();
     const url = new URL(location.href); url.pathname = '/'; url.searchParams.delete('match'); history.replaceState(null, '', url);
-    $('online-create-controls').hidden = false; $('online-lobby').hidden = true; $('online-dialog').close();
+    $('online-create-controls').hidden = false; $('online-ended').hidden = true; $('online-dialog').close();
     hooks.onLeave();
   }
   const settings = { policy: 'practice' };
@@ -182,7 +139,7 @@ function ububallOnline(hooks) {
     $('online-dialog').showModal();
     refreshSession().catch(error => status(error.message));
   }
-  $('online-open').onclick = () => { if (id) showDialog(); else hooks.chooseMode(createMode); };
+  $('online-open').onclick = () => { if (!id) hooks.chooseMode(createMode); else if (state?.phase === 'lobby') receive(state, true); else showDialog(); };
   $('online-mode-change').onclick = () => { $('online-dialog').close(); hooks.chooseMode(createMode); };
   $('online-close').onclick = () => $('online-dialog').close();
   $('online-leave').onclick = leave;
@@ -201,32 +158,6 @@ function ububallOnline(hooks) {
     try { await navigator.clipboard.writeText($('online-invite').value); status('Invite copied.'); }
     catch { $('online-invite').select(); status('Copy the selected invite link.'); }
   };
-  $('online-ready').onclick = async () => {
-    $('online-ready').disabled = true;
-    try {
-      if (state.ready[state.seat]) { receive(await api('/api/ububall/' + id + '/unready', {})); return; }
-      if (choices.length !== 3 || choices.some(c => !c)) throw new Error('Choose three ubus first.');
-      receive(await api('/api/ububall/' + id + '/team', {
-        ...(!state.practice ? { serials: choices.map(c => c.serial) } : {}), supers: choices.map(c => c.superId)
-      }));
-    } catch (error) { status(error.message); $('online-ready').disabled = false; }
-  };
-  let loadingCollection = false;
-  async function loadCollection() {
-    if (loadingCollection) return;
-    loadingCollection = true;
-    $('online-load').disabled = true;
-    try {
-      const data = await api('/api/ubus' + (cursor ? '?after=' + cursor : ''));
-      for (const entry of data.ubus) if (entry.certificate && !collection.some(c => c.serial === entry.serial)) {
-        collection.push({ serial: entry.serial, dna: JSON.parse(entry.certificate).dna });
-      }
-      cursor = data.next || ''; teamPicker();
-      $('online-load').textContent = cursor ? 'Load more ubus' : 'Refresh collection';
-    } catch (error) { status(error.message); }
-    finally { loadingCollection = false; $('online-load').disabled = false; }
-  }
-  $('online-load').onclick = loadCollection;
   $('online-forfeit').onclick = async () => {
     try { receive(await api('/api/ububall/' + id + '/forfeit', {})); }
     catch (error) { hooks.onError(error.message); }
@@ -248,6 +179,10 @@ function ububallOnline(hooks) {
   }
   return {
     get active() { return Boolean(id); }, get state() { return state; },
+    leave,
+    // Locks in a team: owned seats send serials in Back, Top, Bottom order; every seat sends supers.
+    async ready(team) { receive(await api('/api/ububall/' + id + '/team', team)); },
+    async unready() { receive(await api('/api/ububall/' + id + '/unready', {})); },
     create(mode) { createMode = mode; $('online-mode-name').textContent = ububallMatch.modeName(mode); showDialog(); },
     now: () => Date.now() + offset,
     rematch() {

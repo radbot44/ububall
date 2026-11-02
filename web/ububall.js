@@ -3386,58 +3386,159 @@
     const mastery = P.superMastery(entry.model?.supers, id);
     return { ...P.SUPERS[id], ...mastery };
   }
-  function updateRosterSuperPicker() {
-    const grid = $('roster-super-grid');
-    grid.replaceChildren();
-    const entry = draft[rosterSlot];
-    if (!entry) return;
-    const available = entry.model?.supers ? Array.from(new Set(entry.model.supers.map(s => s % 8))) : [0, 1, 2, 3, 4, 5, 6, 7];
-    const list = available.length ? available.map(id => P.SUPERS[id]) : P.SUPERS;
-    const currentSuper = resolveEquippedSuper(entry, rosterSlot);
-    const currentId = currentSuper.id;
-    const currentBonus = currentSuper.copies > 1 ? ` (+${(currentSuper.bonusTicks / 240).toFixed(1)}s duration, +${currentSuper.bonusRefund}% refund)` : '';
-    $('roster-super-name').textContent = currentSuper.displayName + ': ' + currentSuper.desc + currentBonus;
-    for (const s of list) {
-      const sObj = resolveEquippedSuper({ model: entry.model, equippedSuper: s }, rosterSlot);
-      const btn = document.createElement('button');
-      btn.type = 'button'; btn.className = 'super-picker-btn';
-      const bonus = sObj.copies > 1 ? ` (+${(sObj.bonusTicks / 240).toFixed(1)}s duration, +${sObj.bonusRefund}% refund)` : '';
-      btn.title = `${sObj.displayName}: ${s.desc}${bonus}`;
-      btn.setAttribute('aria-pressed', String(s.id === currentId));
-      btn.append(Object.assign(document.createElement('img'), { src: s.icon, alt: '' }), Object.assign(document.createElement('span'), { textContent: sObj.displayName }));
-      btn.onclick = () => { draft[rosterSlot] = { ...draft[rosterSlot], equippedSuper: sObj }; rosterSlots(); };
-      grid.append(btn);
+  // The team screen: three positions in kickoff formation (Back by your goal, Top and Bottom
+  // ahead), each with its ubu and equipped super. Picks fill empty positions in order; once the
+  // team is full, a pick replaces the selected position and stays there.
+  const POSITIONS = ['Back', 'Top', 'Bottom'];
+  const canDrag = matchMedia('(pointer: fine)').matches;
+  const node = (tag, props = {}, ...children) => { const n = Object.assign(document.createElement(tag), props); n.append(...children); return n; };
+  let superOpen = false, changedSlot = -1, lobbyView = null, savedTeams = null, teamIndex = -1, nameMode = '';
+  const teamLocked = () => setupFor === 'lobby' && Boolean(lobbyView?.ready);
+  const fixedTeam = () => setupFor === 'lobby' && Boolean(lobbyView?.practice);
+  const setupClassic = () => ububallMatch.rule(setupFor === 'lobby' && lobbyView ? lobbyView.state.mode : chosenMode(), 'classic');
+  const superBonus = s => s.copies > 1 ? ` (+${(s.bonusTicks / 240).toFixed(1)} s, +${s.bonusRefund}% meter refund)` : '';
+  const nextEmpty = from => { for (let i = 1; i <= 3; i++) if (!draft[(from + i) % 3]) return (from + i) % 3; return from; };
+  function changed(slot) { changedSlot = slot; rosterSlots(); }
+  function swapSlots(a, b) {
+    if (a === b || teamLocked() || fixedTeam()) return;
+    [draft[a], draft[b]] = [draft[b], draft[a]]; rosterSlot = b; superOpen = false; changed(b);
+  }
+  // A pick for a position: a teammate already elsewhere trades places with what is there.
+  function place(entry, slot = rosterSlot) {
+    if (teamLocked() || fixedTeam() || !entry) return;
+    const other = draft.findIndex(d => d?.key === entry.key);
+    if (other === slot) return;
+    if (other >= 0) [draft[other], draft[slot]] = [draft[slot], draft[other]];
+    else draft[slot] = entry;
+    rosterSlot = draft.some(d => !d) ? nextEmpty(slot) : slot; superOpen = false;
+    changed(slot);
+  }
+  // A click on a teammate selects its position; any other ubu goes into the selected position.
+  function choose(entry) {
+    const other = draft.findIndex(d => d?.key === entry.key);
+    if (other >= 0) { rosterSlot = other; superOpen = false; rosterSlots(); }
+    else place(entry);
+  }
+  function describe(key) {
+    const at = draft.findIndex(d => d?.key === key), current = draft[rosterSlot];
+    if (at >= 0) return { badge: POSITIONS[at] };
+    if (teamLocked() || fixedTeam()) return { action: '' };
+    return { action: current ? `Swap in for ${current.model.parts.fullName}` : `Put in ${POSITIONS[rosterSlot]}` };
+  }
+  function entryForKey(key) {
+    if (key.startsWith('practice-')) return practice[Number(key.slice(9))];
+    const item = ubuList.get(key);
+    return item?.model ? entryFor(item) : null;
+  }
+  function slotView(entry, i, classic, locked, fixed) {
+    const slot = node('div', { className: 'formation-slot' });
+    slot.dataset.position = POSITIONS[i].toLowerCase();
+    slot.classList.toggle('is-selected', i === rosterSlot);
+    slot.classList.toggle('is-empty', !entry);
+    slot.classList.toggle('just-changed', i === changedSlot);
+    const pick = node('button', { type: 'button', className: 'formation-pick' }, node('span', { className: 'formation-pos', textContent: POSITIONS[i] }));
+    if (entry) pick.append(ubuRender(entry.model, 'formation-art'), node('span', { className: 'formation-name' },
+      node('strong', { textContent: entry.model.parts.fullName }), node('small', { textContent: entry.label })));
+    else pick.append(node('span', { className: 'formation-art formation-empty-art' }), node('span', { className: 'formation-name' },
+      node('strong', { textContent: 'Empty' }), node('small', { textContent: i === rosterSlot ? 'Pick an ubu below' : 'Select to fill' })));
+    pick.setAttribute('aria-pressed', String(i === rosterSlot));
+    pick.setAttribute('aria-label', `${POSITIONS[i]}: ${entry ? entry.model.parts.fullName : 'empty'}`);
+    pick.onclick = () => { rosterSlot = i; superOpen = false; rosterSlots(); };
+    slot.append(pick);
+    if (entry && !classic) {
+      const current = resolveEquippedSuper(entry, i);
+      const button = node('button', { type: 'button', className: 'formation-super', disabled: locked },
+        node('img', { src: current.icon, alt: '' }), node('span', { textContent: current.displayName }), node('span', { className: 'formation-caret', textContent: '▾' }));
+      button.title = current.displayName + ': ' + current.desc + superBonus(current);
+      button.setAttribute('aria-label', `Super for ${entry.model.parts.fullName}: ${current.displayName}. Change super`);
+      button.setAttribute('aria-expanded', String(superOpen && i === rosterSlot));
+      button.onclick = () => { superOpen = !(superOpen && rosterSlot === i); rosterSlot = i; rosterSlots(); };
+      slot.append(button);
     }
+    const tools = node('span', { className: 'formation-tools' });
+    if (!locked && !fixed && i !== rosterSlot && (entry || draft[rosterSlot])) {
+      const swap = node('button', { type: 'button', className: 'formation-tool', textContent: '⇄', title: `Swap with ${POSITIONS[rosterSlot]}` });
+      swap.setAttribute('aria-label', `Swap ${POSITIONS[i]} with ${POSITIONS[rosterSlot]}`);
+      swap.onclick = () => swapSlots(i, rosterSlot);
+      tools.append(swap);
+    }
+    if (entry && !locked && !fixed) {
+      const clear = node('button', { type: 'button', className: 'formation-tool', textContent: '×', title: 'Remove' });
+      clear.setAttribute('aria-label', `Remove ${entry.model.parts.fullName} from ${POSITIONS[i]}`);
+      clear.onclick = () => { draft[i] = null; rosterSlot = i; superOpen = false; changed(i); };
+      tools.append(clear);
+    }
+    slot.append(tools);
+    // Desktop: drag ubus from the list onto a position, or positions onto each other.
+    if (canDrag && !locked) {
+      if (entry && !fixed) {
+        pick.draggable = true;
+        pick.addEventListener('dragstart', event => { event.dataTransfer.setData('application/x-ubu-slot', String(i)); event.dataTransfer.effectAllowed = 'move'; });
+      }
+      slot.addEventListener('dragover', event => {
+        const types = event.dataTransfer.types;
+        if (!types.includes('application/x-ubu-slot') && (fixed || !types.includes('application/x-ubu-key'))) return;
+        event.preventDefault(); slot.classList.add('drop-target');
+      });
+      slot.addEventListener('dragleave', () => slot.classList.remove('drop-target'));
+      slot.addEventListener('drop', event => {
+        event.preventDefault(); slot.classList.remove('drop-target');
+        const from = event.dataTransfer.getData('application/x-ubu-slot');
+        if (from !== '') swapSlots(Number(from), i);
+        else place(entryForKey(event.dataTransfer.getData('application/x-ubu-key')), i);
+      });
+    }
+    return slot;
+  }
+  function superPanel(classic) {
+    const entry = draft[rosterSlot];
+    $('roster-super').hidden = !(superOpen && entry && !classic && !teamLocked());
+    if ($('roster-super').hidden) return;
+    const current = resolveEquippedSuper(entry, rosterSlot);
+    $('roster-super-title').textContent = `Super for ${entry.model.parts.fullName} (${POSITIONS[rosterSlot]})`;
+    $('roster-super-grid').replaceChildren(...[...new Set(entry.model.supers.map(s => s % 8))].map(id => {
+      const choice = resolveEquippedSuper({ model: entry.model, equippedSuper: P.SUPERS[id] });
+      const button = node('button', { type: 'button', className: 'super-choice' }, node('img', { src: choice.icon, alt: '' }),
+        node('strong', { textContent: choice.displayName }), node('small', { textContent: choice.desc + superBonus(choice) }));
+      button.setAttribute('aria-pressed', String(choice.id === current.id));
+      button.onclick = () => { draft[rosterSlot] = { ...entry, equippedSuper: choice }; superOpen = false; changed(rosterSlot); };
+      return button;
+    }));
+  }
+  function teamHint(classic) {
+    const entry = draft[rosterSlot], position = POSITIONS[rosterSlot];
+    let text = teamLocked() ? 'Your team is locked in. Choose Change team to edit it.' :
+      fixedTeam() ? (classic ? 'This match gives you a practice team.' : 'This match gives you a practice team. Pick each ubu’s super with its super button.') :
+      !entry ? `Pick an ubu for ${position}.` : `Picking an ubu puts it in ${position}, replacing ${entry.model.parts.fullName}.`;
+    if (!teamLocked() && !fixedTeam()) {
+      if (canDrag) text += ' You can also drag ubus onto any position.';
+      if (classic) text += ' Classic: supers are off.';
+    }
+    $('roster-hint').textContent = text;
   }
   function rosterSlots() {
-    $('roster-slots').replaceChildren();
-    draft.forEach((entry, i) => {
-      const button = document.createElement('button');
-      button.type = 'button'; button.className = 'roster-slot';
-      const superObj = resolveEquippedSuper(entry, i);
-      const superLabel = document.createElement('small');
-      superLabel.append(Object.assign(document.createElement('img'), { src: superObj.icon, alt: '' }), Object.assign(document.createElement('span'), { textContent: superObj.displayName }));
-      button.append(ubuRender(entry.model, 'roster-slot-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }), superLabel);
-      button.setAttribute('aria-pressed', String(i === rosterSlot));
-      button.setAttribute('aria-label', `Slot ${i + 1}: ${entry.model.parts.fullName}`);
-      button.onclick = () => { rosterSlot = i; rosterSlots(); };
-      $('roster-slots').append(button);
-    });
-    for (const option of document.querySelectorAll('.roster-option')) option.setAttribute('aria-pressed', String(draft.some(d => d.key === option.dataset.key)));
+    const classic = setupClassic(), locked = teamLocked(), fixed = fixedTeam();
+    $('roster-dialog').toggleAttribute('data-locked', locked);
+    $('roster-slots').replaceChildren(...draft.map((entry, i) => slotView(entry, i, classic, locked, fixed)));
+    changedSlot = -1;
+    superPanel(classic); teamHint(classic);
     rosterList.render();
-    updateRosterSuperPicker();
+    for (const option of document.querySelectorAll('#roster-practice .roster-option')) {
+      describePractice(option);
+    }
+    $('start-match').disabled = draft.some(d => !d);
+    updateTeamBar();
   }
-  // Each choosable ubu gets a key so the same ubu cannot fill two slots.
-  function choose(entry) {
-    const other = draft.findIndex(d => d.key === entry.key);
-    if (other >= 0 && other !== rosterSlot) { rosterSlot = other; rosterSlots(); $('roster-status').textContent = 'That ubu is already on your team.'; return; }
-    draft[rosterSlot] = entry; rosterSlot = (rosterSlot + 1) % 3; rosterSlots(); $('roster-status').textContent = '';
+  function describePractice(option) {
+    const entry = practice[Number(option.dataset.key.slice(9))];
+    ubuList.describeTile(option, entry.model.parts.fullName, describe(entry.key));
   }
   function addOption(entry, container) {
     const { main, artBox } = ubuList.tileMain(entry.model, entry.label);
     artBox.prepend(ubuRender(entry.model, 'ubu-tile-svg'));
     main.classList.add('roster-option'); main.dataset.key = entry.key;
     main.onclick = () => choose(entry);
+    if (canDrag) ubuList.draggable(main, entry.key);
     const tile = document.createElement('div'); tile.className = 'ubu-tile';
     tile.append(main);
     $(container).append(tile);
@@ -3470,7 +3571,7 @@
     inspect: async item => {
       try { await window.loadMintScripts(); window.showUbuViewer(item.serial); } catch { collectionNote('Could not open the ubu viewer.'); }
     },
-    pressed: item => draft.some(d => d.key === item.serial),
+    describe: item => describe(item.serial), drag: canDrag,
     onEmpty: reason => collectionNote(reason === 'filtered' ? 'No ubus match.' : reason === 'loading' ? 'Loading your ubus…' :
       reason === 'empty' ? 'No ubus yet. Open packs in Ubu Mint to get some.' : '', reason === 'filtered')
   });
@@ -3480,14 +3581,124 @@
     try { await ubuList.load(); rosterList.render(); } catch (error) { collectionNote(error.message); }
   }
   $('roster-signin-btn').onclick = () => window.openDiscordLogin?.();
-  // Signed-in players start with their own ubus (favorites first) until they choose a team.
+
+  // Saved teams belong to the signed-in account. A team saves only when every position holds
+  // one of the player's own ubus (practice ubus change every visit). A null super means the
+  // ubu's default.
+  const signedIn = () => Boolean(window.getUbuSession?.()?.owner);
+  const teamSlotsOf = team => team.every(e => e && ubuList.get(e.key)?.model) ? team.map(e => ({ serial: e.key, super: e.equippedSuper?.id ?? null })) : null;
+  const sameSlots = (a, b) => Boolean(a && b) && a.every((s, i) => s.serial === b[i].serial && s.super === b[i].super);
+  function restoreTeam(slots) {
+    const missing = [];
+    const team = slots.map(slot => {
+      const item = ubuList.get(slot.serial);
+      if (!item?.model) { missing.push(ubuList.serialLabel(slot.serial)); return null; }
+      const entry = entryFor(item);
+      return slot.super !== null && item.model.supers.some(s => s % 8 === slot.super)
+        ? { ...entry, equippedSuper: resolveEquippedSuper({ model: item.model, equippedSuper: P.SUPERS[slot.super] }) } : entry;
+    });
+    return { team, missing };
+  }
+  async function loadTeams() {
+    if (!signedIn()) { savedTeams = null; teamIndex = -1; updateTeamBar(); return null; }
+    try { savedTeams ||= await ubuList.teams(); } catch (error) { $('roster-status').textContent = 'Could not load saved teams: ' + error.message; }
+    updateTeamBar();
+    return savedTeams;
+  }
+  async function persistTeams(next) {
+    try { savedTeams = await ubuList.saveTeams(next); $('roster-status').textContent = ''; return true; }
+    catch (error) { $('roster-status').textContent = 'Could not save teams: ' + error.message; return false; }
+    finally { updateTeamBar(); }
+  }
+  async function useSavedTeam(index) {
+    if (!savedTeams?.teams[index] || teamLocked()) return;
+    try { await ubuList.load(); } catch (error) { $('roster-status').textContent = error.message; return; }
+    const { team, missing } = restoreTeam(savedTeams.teams[index].slots);
+    draft = team; teamIndex = index; rosterSlot = Math.max(0, draft.findIndex(d => !d)); superOpen = false;
+    rosterSlots();
+    $('roster-status').textContent = missing.length ? `${missing.join(', ')} ${missing.length > 1 ? 'are' : 'is'} no longer in your collection.` : '';
+  }
+  // The team played last opens next time, on any device.
+  function rememberTeam() {
+    const slots = teamSlotsOf(draft);
+    if (savedTeams && slots && !sameSlots(slots, savedTeams.last)) void persistTeams({ ...savedTeams, last: slots });
+  }
+  function updateTeamBar() {
+    const show = Boolean(savedTeams) && !fixedTeam();
+    $('team-bar').hidden = !show;
+    if (!show) return;
+    const locked = teamLocked(), slots = teamSlotsOf(draft), saved = savedTeams.teams[teamIndex];
+    const edited = !saved || !sameSlots(slots, saved.slots), count = savedTeams.teams.length;
+    const select = $('team-select');
+    select.replaceChildren(...(edited ? [new Option(saved ? saved.name + ' (edited)' : count ? 'Unsaved team' : 'No saved teams yet', 'current')] : []),
+      ...savedTeams.teams.map((team, i) => new Option(team.name, String(i))));
+    select.value = edited ? 'current' : String(teamIndex);
+    select.disabled = locked || !count;
+    $('team-prev').disabled = $('team-next').disabled = locked || !count || (count === 1 && !edited);
+    $('team-save').textContent = saved ? 'Save changes' : 'Save team';
+    $('team-save').disabled = locked || !slots || !edited || (!saved && count >= 30);
+    $('team-save').title = slots ? '' : 'Fill every position with your own ubus to save the team';
+    $('team-save-new').disabled = locked || !slots || count >= 30;
+    $('team-rename').disabled = $('team-delete').disabled = locked || !saved;
+  }
+  function askName(mode) {
+    nameMode = mode; $('team-menu').hidePopover?.();
+    $('team-name-form').hidden = false;
+    $('team-name').value = mode === 'rename' ? savedTeams.teams[teamIndex].name : `Team ${savedTeams.teams.length + 1}`;
+    $('team-name').select();
+  }
+  $('team-select').onchange = () => { if ($('team-select').value !== 'current') void useSavedTeam(Number($('team-select').value)); };
+  const stepTeam = step => { const n = savedTeams?.teams.length; if (n) void useSavedTeam(teamIndex < 0 ? (step > 0 ? 0 : n - 1) : (teamIndex + step + n) % n); };
+  $('team-prev').onclick = () => stepTeam(-1);
+  $('team-next').onclick = () => stepTeam(1);
+  $('team-save').onclick = async () => {
+    const slots = teamSlotsOf(draft);
+    if (!slots) return;
+    if (teamIndex < 0) { askName('new'); return; }
+    await persistTeams({ ...savedTeams, teams: savedTeams.teams.map((team, i) => i === teamIndex ? { ...team, slots } : team) });
+  };
+  $('team-save-new').onclick = () => askName('new');
+  $('team-rename').onclick = () => askName('rename');
+  $('team-delete').onclick = async () => {
+    $('team-menu').hidePopover?.();
+    const team = savedTeams?.teams[teamIndex];
+    if (!team || !confirm(`Delete the saved team “${team.name}”? Your ubus stay in your collection.`)) return;
+    if (await persistTeams({ ...savedTeams, teams: savedTeams.teams.filter((_, i) => i !== teamIndex) })) teamIndex = -1;
+    updateTeamBar();
+  };
+  $('team-name-cancel').onclick = () => { $('team-name-form').hidden = true; };
+  $('team-name-form').onsubmit = async event => {
+    event.preventDefault();
+    const name = $('team-name').value.trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (!name) return;
+    const slots = teamSlotsOf(draft);
+    const teams = nameMode === 'rename' ? savedTeams.teams.map((team, i) => i === teamIndex ? { ...team, name } : team)
+      : slots ? [...savedTeams.teams, { name, slots }] : null;
+    if (!teams) return;
+    if (await persistTeams({ ...savedTeams, teams })) {
+      if (nameMode === 'new') teamIndex = savedTeams.teams.length - 1;
+      $('team-name-form').hidden = true; updateTeamBar();
+    }
+  };
+  $('roster-super-close').onclick = () => { superOpen = false; rosterSlots(); };
+
+  // Signed-in players start with the team they played last, else their top three favorites.
+  async function accountTeam() {
+    const [teamsDoc] = await Promise.all([loadTeams(), ubuList.load()]);
+    if (teamsDoc?.last) {
+      const { team } = restoreTeam(teamsDoc.last);
+      if (team.every(Boolean)) { teamIndex = teamsDoc.teams.findIndex(t => sameSlots(t.slots, teamsDoc.last)); return team; }
+    }
+    const favorites = ubuList.view(ubuList.items(), { sort: 'favorite' }).filter(item => item.model).slice(0, 3).map(entryFor);
+    return favorites.length === 3 ? favorites : null;
+  }
   window.addEventListener('ubu:session', async event => {
+    savedTeams = null; teamIndex = -1; updateTeamBar();
     if (!event.detail?.owner || !roster.every(entry => practice.includes(entry))) return;
     try {
-      await ubuList.load();
-      const entries = ubuList.view(ubuList.items(), { sort: 'favorite' }).filter(item => item.model).slice(0, 3).map(entryFor);
-      if (entries.length < 3 || !roster.every(entry => practice.includes(entry))) return;
-      draft = entries.slice(0, 3);
+      const entries = await accountTeam();
+      if (!entries || !roster.every(entry => practice.includes(entry))) return;
+      draft = entries;
       if (demo) newDemoGame(); else if (!matchInProgress()) newMatch(); else roster = [...draft];
       updateHome();
     } catch {}
@@ -3499,15 +3710,24 @@
     try { localStorage.setItem('ububall-spin-slider', spinSlider ? 'on' : 'off'); } catch {}
     draw();
   };
-  // Match setup: a mode screen (rules and CPU level), then a team screen where only the ubu list scrolls.
-  // Online play borrows the mode screen, then continues to its own match settings.
+  // Match setup: a mode screen (rules and CPU level), then the team screen where only the ubu list
+  // scrolls. Online play borrows the mode screen, and its lobby is the same team screen with the
+  // invite on top and Ready in place of Start.
   let setupFor = 'cpu';
   const chosenMode = () => ububallMatch.RULES.filter(rule => $('rule-' + rule).checked).join('-') || 'standard';
   function setupStep(step) {
     const sheet = $('roster-dialog');
     sheet.dataset.step = step; sheet.dataset.for = setupFor;
     $('sheet-next').textContent = setupFor === 'online' ? 'Next: online match' : 'Next: choose team';
-    if (step === 'team') { $('team-mode').textContent = ububallMatch.modeName(chosenMode()); void loadCollection(); }
+    $('lobby-panel').hidden = setupFor !== 'lobby';
+    $('team-title').textContent = setupFor === 'lobby' ? 'Online match' : 'Your team';
+    if (step === 'team') {
+      $('team-mode').textContent = ububallMatch.modeName(setupFor === 'lobby' ? lobbyView.state.mode : chosenMode());
+      $('team-name-form').hidden = true;
+      if (!fixedTeam()) { void loadCollection(); void loadTeams(); }
+      rosterSlots();
+    }
+    $('start-match').textContent = setupFor !== 'lobby' ? 'Start match' : lobbyView?.ready ? 'Change team' : 'Ready to play';
   }
   function rosterTab(tab) {
     for (const name of ['yours', 'practice']) {
@@ -3518,13 +3738,49 @@
     if (tab === 'yours') void loadCollection();
   }
   function openSetup(step, purpose = 'cpu', mode = cpuMode) {
-    setupFor = purpose;
+    setupFor = purpose; superOpen = false;
     for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(mode, rule);
     document.querySelector(`input[name="cpu-level"][value="${cpuLevel}"]`).checked = true;
-    draft = [...roster]; rosterSlot = 0; rosterSlots(); $('roster-status').textContent = '';
-    rosterTab(window.getUbuSession?.()?.owner ? 'yours' : 'practice');
+    draft = [...roster]; rosterSlot = 0; $('roster-status').textContent = '';
+    rosterTab(signedIn() ? 'yours' : 'practice');
     setupStep(step);
     if (!$('roster-dialog').open) $('roster-dialog').showModal();
+  }
+  // The online lobby. A practice seat fields the room's own three ubus; otherwise the player
+  // picks from their collection, starting from their current, last or favorite team.
+  const lobbyEntries = practiceTeam => practiceTeam.map((p, i) => {
+    const model = ubu.decode(ubu.fromCode(p.dna));
+    return { model, dna: p.dna, label: 'Practice ubu', key: 'online-' + i };
+  });
+  async function showLobby(view, open) {
+    const before = lobbyView, entering = setupFor !== 'lobby';
+    lobbyView = view;
+    const practiceChanged = JSON.stringify(before?.practice || null) !== JSON.stringify(view.practice || null);
+    if (entering || practiceChanged) {
+      setupFor = 'lobby'; superOpen = false; rosterSlot = 0;
+      if (view.practice) draft = lobbyEntries(view.practice);
+      else {
+        draft = roster.every(entry => ubuList.get(entry.key)?.model) ? roster.map(entry => ({ ...entry })) : [null, null, null];
+        if (draft.some(d => !d) && signedIn()) {
+          try { const team = await accountTeam(); if (team && lobbyView === view && draft.some(d => !d)) draft = team; } catch {}
+        }
+      }
+    }
+    // Owned-ubu matches take only the player's collection.
+    $('roster-tabs').hidden = $('roster-scroll').hidden = Boolean(view.practice);
+    $('tab-practice').hidden = true;
+    if (!view.practice) rosterTab('yours');
+    $('lobby-note').textContent = view.note;
+    $('lobby-login').hidden = !view.guest;
+    setupStep('team');
+    if (open && !$('roster-dialog').open) $('roster-dialog').showModal();
+  }
+  function closeLobby() {
+    if (setupFor !== 'lobby') return;
+    if ($('roster-dialog').dataset.for === 'lobby') $('roster-dialog').close();
+    setupFor = 'cpu'; lobbyView = null;
+    $('roster-tabs').hidden = $('roster-scroll').hidden = $('tab-practice').hidden = false; $('lobby-panel').hidden = true;
+    $('roster-dialog').removeAttribute('data-locked');
   }
   $('new-match').onclick = () => openSetup('team');
   $('sheet-next').onclick = () => {
@@ -3536,18 +3792,36 @@
   $('tab-practice').onclick = () => rosterTab('practice');
   // Back (Escape, or a phone's back gesture) steps from the team screen to the mode screen.
   $('roster-dialog').addEventListener('cancel', event => {
-    if ($('roster-dialog').dataset.step === 'team') { event.preventDefault(); setupStep('mode'); }
+    if ($('roster-dialog').dataset.step === 'team' && setupFor !== 'lobby') { event.preventDefault(); setupStep('mode'); }
   });
-  $('start-match').onclick = () => {
+  $('start-match').onclick = async () => {
+    if (setupFor === 'lobby') {
+      const button = $('start-match');
+      button.disabled = true;
+      try {
+        if (lobbyView.ready) await online.unready();
+        else {
+          if (draft.some(d => !d)) return;
+          const supers = draft.map((d, i) => resolveEquippedSuper(d, i).id);
+          await online.ready(lobbyView.practice ? { supers } : { serials: draft.map(d => d.key), supers });
+          if (!lobbyView.practice) rememberTeam();
+        }
+      } catch (error) { $('roster-status').textContent = error.message; }
+      finally { button.disabled = draft.some(d => !d); }
+      return;
+    }
+    if (draft.some(d => !d)) return;
     $('roster-dialog').close();
     stopDemo();
     roster = draft.map(d => ({ ...d }));
+    rememberTeam();
     cpuMode = chosenMode();
     cpuLevel = document.querySelector('input[name="cpu-level"]:checked').value;
     newMatch(true);
     enterMatch();
   };
   $('cancel-roster').onclick = () => $('roster-dialog').close();
+  $('lobby-leave').onclick = () => online.leave();
   // A modal pauses the simulation; cancelling preserves the current turn.
   const hudSuperBtn = $('stadium-super-btn');
   if (hudSuperBtn) {
@@ -3872,6 +4146,8 @@
   }
   online = ububallOnline({
     chooseMode(mode) { openSetup('mode', 'online', mode); },
+    lobby(view, open) { void showLobby(view, open); },
+    closeLobby,
     onState(s) {
       if (!document.body.classList.contains('online-match')) { stopDemo(); enterMatch(); }
       document.body.classList.add('online-match');

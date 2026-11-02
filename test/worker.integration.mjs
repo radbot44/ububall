@@ -203,7 +203,15 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await fetch('/api/ubus', { headers: outsider })).status, 200);
     assert.equal((await favorite({ serial: target, favorite: false }, { ...headers, 'X-Ubu-CSRF': 'wrong' })).status, 403);
     assert.equal((await favorite({ serials: [target, 'not-a-serial'] })).status, 400);
+    const teams = { teams: [{ name: 'First', slots: serials.slice(0, 3).map(serial => ({ serial, super: null })) }], last: null };
+    const postTeams = (data, h = headers) => fetch('/api/teams', { method: 'POST', headers: h, body: JSON.stringify(data) });
+    assert.deepEqual(await (await fetch('/api/teams', { headers })).json(), { teams: [], last: null });
+    assert.equal((await postTeams(teams)).status, 200);
+    assert.equal((await postTeams(teams, outsider)).status, 400);
+    assert.equal((await postTeams(teams, { ...headers, 'X-Ubu-CSRF': 'wrong' })).status, 403);
+    assert.deepEqual(await (await fetch('/api/teams', { headers: outsider })).json(), { teams: [], last: null });
     await server.getWorker().evictDurableObject('MINT', { name: env.MINT_ID });
+    assert.deepEqual(await (await fetch('/api/teams', { headers })).json(), teams);
     favorites = await readCollection();
     assert.equal(favorites.ubus.filter(row => row.favorite).length, 2);
     assert.equal((await favorite({ serial: target, favorite: false })).status, 200);

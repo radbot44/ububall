@@ -413,3 +413,35 @@ test('retired server sort keys are dropped without touching issued ubus or inven
   assert.deepEqual(schema(reopened), migrated);
   assert.deepEqual(rows(reopened, 'issued'), before);
 });
+
+test('saved teams accept only owned signed ubus and replace the whole document', async t => {
+  const f = await fixture(t), mint = new Mint(f.open(), f.options);
+  mint.prepare({ batchSize: 15 });
+  const offer = mint.offer({ owner, request: request(1) });
+  await mint.issue({ owner, request: offer.request, choice: offer.choices[0].choice });
+  const serials = mint.exec('SELECT serial FROM issued WHERE owner=? ORDER BY serial', owner).map(row => row.serial);
+  const slots = (a, b, c, s = null) => [a, b, c].map(serial => ({ serial, super: s }));
+  assert.deepEqual(mint.teams(owner), { teams: [], last: null });
+  const saved = { teams: [{ name: 'Wall', slots: slots(serials[0], serials[1], serials[2], 3) }], last: slots(serials[2], serials[3], serials[4]) };
+  assert.deepEqual(mint.saveTeams(owner, saved), saved);
+  assert.deepEqual(mint.teams(owner), saved);
+  assert.deepEqual(mint.teams('someone-else'), { teams: [], last: null });
+  const invalid = [
+    null, [], { teams: [] }, { teams: [], last: null, extra: 1 },
+    { teams: [{ name: ' Wall', slots: saved.teams[0].slots }], last: null },
+    { teams: [{ name: '', slots: saved.teams[0].slots }], last: null },
+    { teams: [{ name: 'x'.repeat(41), slots: saved.teams[0].slots }], last: null },
+    { teams: [{ name: 'Tab\tName', slots: saved.teams[0].slots }], last: null },
+    { teams: [{ name: 'Dup', slots: slots(serials[0], serials[0], serials[1]) }], last: null },
+    { teams: [{ name: 'Two', slots: slots(serials[0], serials[1]).slice(0, 2) }], last: null },
+    { teams: [{ name: 'Super', slots: slots(serials[0], serials[1], serials[2], 8) }], last: null },
+    { teams: Array.from({ length: 31 }, (_, i) => ({ name: 'T' + i, slots: saved.teams[0].slots })), last: null }
+  ];
+  for (const data of invalid) assert.equal(mint.saveTeams(owner, data).status, 400, JSON.stringify(data));
+  const foreign = mint.saveTeams('someone-else', saved);
+  assert.equal(foreign.status, 400);
+  assert.match(foreign.error, /your collection/);
+  assert.deepEqual(mint.teams(owner), saved);
+  assert.deepEqual(mint.saveTeams(owner, { teams: [], last: null }), { teams: [], last: null });
+  assert.deepEqual(new Mint(f.open(), f.options).teams(owner), { teams: [], last: null });
+});

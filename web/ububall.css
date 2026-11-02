@@ -765,10 +765,6 @@ body.stadium-fullscreen-active {
 /* Online lobby stays outside the rink's sizing and rotation containers. */
 #online-dialog { width: min(560px, 94vw); max-height: 90dvh; overflow: auto; }
 #online-dialog label { display: block; margin: 12px 0; }
-#online-dialog select, #online-invite { max-width: 100%; }
-#online-invite { width: 100%; }
-.online-team-slot { display: flex; align-items: center; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
-.online-team-slot select { min-width: 0; flex: 1; }
 #online-match-status { font-size: .85rem; color: var(--muted, #aeb7c6); }
 .online-match .stadium-actions { flex-wrap: wrap; }
 
@@ -789,17 +785,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .online-hint { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 12px 0 20px; }
 #online-create { width: 100%; }
 #online-status:empty { display: none; }
-#online-team-note { margin: 12px 0 0; color: var(--muted); }
-#online-team-note:empty { display: none; }
 .online-account { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-#online-invite, .online-team-slot select { background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px; font: inherit; }
-.online-team-slot .ball-thumb { width: 56px; height: 56px; }
-/* Narrow phones stack each slot's ubu and super pickers beside the portrait so names stay readable. */
-@media (max-width: 480px) {
-  .online-team-slot { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; }
-  .online-team-slot .ball-thumb { grid-row: span 2; width: 48px; height: 48px; }
-  .online-team-slot select { padding: 8px 10px; }
-}
 @media (max-width: 400px) { #online-dialog { padding: 16px; } .online-options { grid-template-columns: 1fr; } }
 
 /* Super meter: a glint at the growing end on each gain, and a shimmer when full. */
@@ -889,24 +875,106 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .team-heading { display: grid; min-width: 0; }
 .team-step-head h2 { margin: 0; font-size: 22px; line-height: 1.1; white-space: nowrap; }
 .team-mode { overflow: hidden; color: var(--muted); font-family: var(--font-display); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.roster-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.roster-slot {
-  display: grid; justify-items: center; align-content: start; gap: 3px; min-width: 0; padding: 10px 6px 8px;
-  border: 2px solid var(--border); border-radius: 16px; background: var(--elevated); text-align: center;
+/* Kickoff formation: Back by your goal on the left, Top and Bottom ahead of it. */
+.formation {
+  position: relative; display: grid; grid-template: "back top" auto "back bottom" auto / minmax(0, 1fr) minmax(0, 1fr); gap: 8px;
+  padding: 8px 8px 8px 14px; border: 1px solid var(--border); border-radius: 16px;
+  background: linear-gradient(90deg, transparent calc(100% - 1px), var(--border) 0) right / 50% 100% no-repeat, color-mix(in srgb, var(--card), var(--background) 40%);
 }
-.roster-slot[aria-pressed="true"] { border-color: var(--primary); background: color-mix(in srgb, var(--elevated), var(--primary) 12%); }
-.roster-slot-art { width: 56px; height: 56px; }
-.roster-slot strong { max-width: 100%; font-size: 14px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.roster-slot small { font-family: var(--font-body); font-size: 11px; }
-.roster-slot small { display: flex; align-items: center; gap: 3px; max-width: 100%; min-width: 0; color: var(--secondary); }
-.roster-slot small img { flex: none; width: 16px; }
-.roster-slot small span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.roster-super { margin: 8px 0 0; }
-.roster-super .super-picker-grid { margin: 0; }
-.roster-super-name { margin: 6px 0 0; min-height: 2.6em; color: var(--muted); font-size: 12px; }
+.formation::before { content: ''; position: absolute; left: 0; top: 30%; bottom: 30%; width: 5px; border-radius: 0 4px 4px 0; background: var(--team-home); opacity: .7; }
+.formation-slot {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; min-width: 0; padding: 6px;
+  border: 2px solid var(--border); border-radius: 14px; background: var(--elevated); transition: border-color .15s, background .15s;
+}
+.formation-slot[data-position="back"] { grid-area: back; align-content: center; }
+.formation-slot[data-position="top"] { grid-area: top; }
+.formation-slot[data-position="bottom"] { grid-area: bottom; }
+.formation-slot.is-selected { border-color: var(--primary); background: color-mix(in srgb, var(--elevated), var(--primary) 12%); }
+.formation-slot.is-empty { border-style: dashed; }
+.formation-slot.drop-target { border-color: var(--team-home); background: color-mix(in srgb, var(--elevated), var(--team-home) 18%); }
+.formation-slot.just-changed { animation: slot-changed .6s ease-out; }
+@keyframes slot-changed { from { box-shadow: 0 0 0 4px color-mix(in srgb, var(--team-home) 70%, transparent); } to { box-shadow: 0 0 0 0 transparent; } }
+.formation-pick {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; column-gap: 8px;
+  min-width: 0; min-height: 0; padding: 0; border: 0; background: none; color: var(--text); text-align: left; box-shadow: none;
+}
+.formation-pick:hover { background: none; }
+.formation-pos { grid-column: 1 / -1; color: var(--muted); font: 600 10px var(--font-body); letter-spacing: .12em; text-transform: uppercase; }
+.formation-slot.is-selected .formation-pos { color: var(--primary); }
+.formation-art { width: 44px; height: 44px; }
+.formation-empty-art { display: block; border: 2px dashed var(--border); border-radius: 50%; }
+.formation-name { display: grid; min-width: 0; }
+.formation-name strong { overflow: hidden; font-size: 15px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.formation-name small { color: var(--muted); font: 11px var(--font-body); }
+.formation-super {
+  grid-column: 1; justify-self: start; display: inline-flex; align-items: center; gap: 4px; min-height: 0; max-width: 100%; padding: 3px 8px 3px 4px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--secondary); font: 12px var(--font-body); box-shadow: none;
+}
+.formation-super img { flex: none; width: 20px; height: 20px; }
+.formation-super span:not(.formation-caret) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.formation-caret { color: var(--muted); font-size: 10px; }
+.formation-super[aria-expanded="true"] { border-color: var(--secondary); }
+.formation-tools { grid-column: 2; grid-row: 1 / span 2; align-self: start; display: grid; gap: 4px; }
+.formation-tool {
+  width: 28px; height: 28px; min-height: 0; padding: 0; border: 1px solid var(--border); border-radius: 50%;
+  background: var(--card); color: var(--muted); font-size: 15px; line-height: 1; box-shadow: none;
+}
+.formation-tool:hover { color: var(--text); }
+[data-locked] .roster-scroll { opacity: .55; pointer-events: none; }
+/* Phones: position tools sit beside the super button so names keep the width. */
+@media (max-width: 520px) {
+  .formation { gap: 6px; padding: 6px 6px 6px 12px; }
+  .formation-slot { grid-template-columns: minmax(0, 1fr); padding: 5px; }
+  .formation-tools { position: absolute; right: 4px; bottom: 5px; display: flex; gap: 3px; }
+  .formation-tool { width: 24px; height: 24px; font-size: 13px; }
+  .formation-art { width: 36px; height: 36px; }
+  .formation-name strong { font-size: 13px; line-height: 1.15; white-space: normal; overflow-wrap: anywhere; }
+  .formation-super { max-width: calc(100% - 56px); padding: 2px 6px 2px 3px; font-size: 11px; }
+  .formation-super img { width: 18px; height: 18px; }
+}
+/* A position's super choices: icon, name with mastery, and what it does. */
+.roster-super { margin: 8px 0 0; padding: 10px; border: 1px solid var(--secondary); border-radius: 14px; background: var(--elevated); }
+.roster-super-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.roster-super-head h3 { margin: 0; font-size: 15px; }
+.roster-super-head button { min-height: 32px; padding: 4px 12px; font-size: 13px; }
+.super-choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px; }
+.super-choice {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; justify-items: start;
+  min-height: 0; padding: 6px 8px; border: 2px solid transparent; border-radius: 12px; background: var(--card); text-align: left; box-shadow: none;
+}
+.super-choice img { grid-row: span 2; width: 36px; height: 36px; }
+.super-choice strong { font-size: 14px; font-weight: 400; }
+.super-choice small { color: var(--muted); font: 11px/1.3 var(--font-body); }
+.super-choice[aria-pressed="true"] { border-color: var(--secondary); }
+.roster-hint { margin: 8px 0 0; color: var(--text); font-size: 13px; }
+/* Saved teams: step through them, pick from the list, save or manage. */
+.team-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.team-bar select { flex: 1 1 140px; min-width: 0; min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text); font: 14px var(--font-body); }
+.team-bar > button { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+.team-step-btn { width: 36px; padding: 0 !important; font-size: 20px !important; }
+.team-menu { margin: 0; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--elevated); color: var(--text); inset: auto; }
+.team-menu:popover-open { display: grid; gap: 4px; }
+.team-menu button { justify-content: flex-start; min-height: 36px; font-size: 14px; }
+.team-name-form { display: flex; flex: 1 1 100%; gap: 6px; }
+.team-name-form input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--text); font: 14px var(--font-body); }
+.team-name-form button { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+/* The online lobby's invite and status sit above the same team screen. */
+.lobby-panel { display: grid; gap: 6px; margin-bottom: 8px; padding: 10px; border-radius: 14px; background: var(--elevated); }
+.lobby-invite { display: flex; gap: 6px; }
+.lobby-invite input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--text); font: 13px var(--font-body); }
+.lobby-invite button, .lobby-actions .button, .lobby-actions button { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+.lobby-status { margin: 0; font-size: 14px; }
+.lobby-note { margin: 0; color: var(--muted); font-size: 12px; }
+.lobby-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
+[data-for="lobby"] #team-back, [data-for="lobby"] .team-step-head .quiet { display: none; }
+/* Picker tiles say what a click does; teammates show their position. */
+.ubu-tile-badge { padding: 1px 8px; border-radius: 999px; background: var(--team-home); color: #1f1a06; font: 600 11px var(--font-body); }
+.ubu-tile-badge.is-action { background: none; color: var(--muted); font-weight: 400; opacity: 0; transition: opacity .15s; }
+.ubu-tile-badge:empty { display: none; }
+.ubu-tile-main:hover .ubu-tile-badge.is-action, .ubu-tile-main:focus-visible .ubu-tile-badge.is-action { opacity: 1; }
 .roster-status { margin: 4px 0; color: var(--muted); font-size: 12px; }
 .roster-status:empty { display: none; }
-.roster-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0 8px; padding: 4px; border-radius: 14px; background: var(--elevated); }
+.roster-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin: 6px 0 8px; padding: 4px; border-radius: 14px; background: var(--elevated); }
 .roster-tabs button { min-height: 40px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: 16px; }
 .roster-tabs button[aria-selected="true"] { background: var(--card); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
 .roster-scroll { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -16px; padding: 0 16px 12px; overscroll-behavior: contain; }
@@ -928,8 +996,6 @@ body:has(#online-dialog[open]) { overflow: hidden; }
   .mode-option { padding-block: 8px; gap: 3px; }
   .mode-option strong { font-size: clamp(20px, 10dvh, 44px); }
   .mode-state { margin-top: 0; padding-block: 3px; }
-  .roster-super .super-picker-btn { padding: 3px 4px; font-size: 11px; }
-  .roster-super .super-picker-btn img { width: 26px; height: 26px; }
   .roster-tabs { margin: 4px 0 6px; padding: 3px; }
   .roster-tabs button { min-height: 32px; font-size: 14px; }
   .cpu-levels legend { margin-bottom: 4px; font-size: 15px; }
@@ -937,15 +1003,9 @@ body:has(#online-dialog[open]) { overflow: hidden; }
   .team-sheet-foot { padding-block: 8px calc(8px + env(safe-area-inset-bottom)); }
   .team-sheet-foot button { min-height: 44px; font-size: 18px; }
   .team-step-head { margin-bottom: 6px; }
-  .roster-slot { padding: 6px 4px; }
-  .roster-slot-art { width: 36px; height: 36px; }
-  .roster-super-name { display: none; }
-}
-/* Short and wide: the slot art sits beside its name. Narrow phones keep it stacked so names fit. */
-@media (max-height: 560px) and (min-width: 520px) {
-  .roster-slot { grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: center; column-gap: 8px; padding: 6px 8px; text-align: left; }
-  .roster-slot-art { grid-row: span 2; }
-  .roster-super .super-picker-btn { flex-direction: row; justify-content: center; padding: 3px 6px; font-size: 12px; }
+  .formation-art { width: 32px; height: 32px; }
+  .formation-pos { display: none; }
+  .roster-hint { margin-top: 4px; font-size: 12px; }
 }
 
 /* Announcements over the rink ("Plan your shot…", "Launch!", the winner). */
