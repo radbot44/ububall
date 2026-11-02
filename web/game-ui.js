@@ -39,10 +39,14 @@
 
   let uiScale = 1;
   function updateScale() {
-    uiScale = parseFloat(getComputedStyle(document.documentElement).fontSize) / 16 || 1;
+    uiScale = (typeof document !== 'undefined' && parseFloat(getComputedStyle(document.documentElement).fontSize) / 16) || 1;
+    return uiScale;
   }
   updateScale();
-  addEventListener('resize', updateScale);
+  if (typeof addEventListener === 'function') addEventListener('resize', updateScale);
+  if (typeof matchMedia === 'function') {
+    try { matchMedia('(orientation: portrait)').addEventListener('change', updateScale); } catch {}
+  }
 
   // A popover placed under its anchor (or above, when there is no room below), kept on screen.
   // `align: 'end'` lines its right edge up with the anchor's.
@@ -196,7 +200,7 @@
   addEventListener('contextmenu', event => { if (swallow || tipTarget(event)) event.preventDefault(); }, true);
   for (const type of ['scroll', 'resize']) addEventListener(type, () => { if (tipFor) hideTip(); }, true);
 
-  root.gameUi = { ICONS, icon, fillIcons, dropdown, place, confirm, ask, select, scale: () => uiScale };
+  root.gameUi = { ICONS, icon, fillIcons, dropdown, place, confirm, ask, select, scale: () => uiScale, updateScale };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => fillIcons());
   else fillIcons();
 })(globalThis);

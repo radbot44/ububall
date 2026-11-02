@@ -21,6 +21,7 @@
   --bevel-pressed: inset 0 .125rem 0 rgb(0 0 0 / .28), inset 0 -.0625rem 0 rgb(0 0 0 / .32), 0 .0625rem .125rem rgb(0 0 0 / .28);
   --panel-shadow: inset 0 .0625rem 0 rgb(255 255 255 / .07), inset 0 -.3125rem 0 rgb(0 0 0 / .24), 0 .875rem 2rem rgb(0 0 0 / .4);
   --scroll-thumb: color-mix(in srgb, var(--border), var(--text) 18%);
+  --frame-w: 100vw; --frame-h: 100dvh;
   color-scheme: dark;
   color: var(--text); background: var(--background);
 }
@@ -37,6 +38,10 @@ body {
 /* Landscape 16:9 frame: the page is a centred 16:9 box and 1rem scales with it (16px at 1920×1080).
    Portrait and short coarse-pointer landscape (phones on their side) keep fluid layout at 1rem = 16px. */
 @media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
+  :root {
+    --frame-w: 120rem;
+    --frame-h: 67.5rem;
+  }
   html {
     display: grid;
     place-items: center;
@@ -55,7 +60,7 @@ body {
   main[data-screen="mint"] { width: min(92rem, calc(100% - 3rem)); margin: 0 auto; }
   main[data-screen="mint"] .pack-shop::before { width: min(80rem, 100%); }
   main[data-screen="collection"] { width: min(114rem, calc(100% - 3rem)); margin: 0 auto; }
-  .viewer { width: min(60rem, calc(100% - 2rem)); height: min(54rem, calc(100dvh - 2rem)); }
+  .viewer { width: min(60rem, calc(100% - 2rem)); height: min(54rem, calc(var(--frame-h) - 2rem)); }
   #reveal { width: min(62rem, calc(100% - 1.5rem)); }
 }
 /* The arena backdrop: faint ice scratches under a vignette, fixed across the whole window
@@ -332,10 +337,10 @@ h2 { font-size: 1.125rem; margin: 0; }
   background: radial-gradient(ellipse 50% 100% at 50% 0%, rgb(255 236 210 / .13), rgb(255 236 210 / .04) 55%, transparent);
 }
 #pack-title {
-  font-size: clamp(1.875rem, 6vw, 3.25rem); line-height: 1.05; -webkit-text-stroke: .06em #101217; paint-order: stroke fill;
+  font-size: clamp(1.875rem, calc(var(--frame-w) * 0.06), 3.25rem); line-height: 1.05; -webkit-text-stroke: .06em #101217; paint-order: stroke fill;
   text-shadow: 0 .375rem 1.125rem #000a;
 }
-.pack-subtitle { margin: .375rem 0 0; color: var(--muted); font-family: var(--font-display); font-size: clamp(.9375rem, 2.6vw, 1.25rem); }
+.pack-subtitle { margin: .375rem 0 0; color: var(--muted); font-family: var(--font-display); font-size: clamp(.9375rem, calc(var(--frame-w) * 0.026), 1.25rem); }
 .pack-shop:has(#pack-choices:is([hidden], .choosing)) .pack-subtitle { display: none; }
 #status { color: var(--muted); font-size: .75rem; margin: .75rem auto 0; min-height: 1.0625rem; max-width: 35rem; }
 #status:empty { min-height: 0; margin: 0; }
@@ -392,7 +397,7 @@ h2 { font-size: 1.125rem; margin: 0; }
   flex-direction: column;
   overflow: hidden;
   width: min(50rem, calc(100% - 1.5rem));
-  height: min(45rem, calc(100dvh - 1.5rem));
+  height: min(45rem, calc(var(--frame-h) - 1.5rem));
   padding: 1.25rem;
   border: .0625rem solid var(--border);
   border-radius: 1.375rem;
@@ -832,7 +837,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .ubu-direction { gap: .375rem; }
 .ubu-direction .icon { width: 1rem; height: 1rem; }
 .ubu-query-note { margin: 0; color: var(--secondary); font-size: .75rem; }
-.ubu-help { max-width: min(35rem, calc(100vw - 1rem)); margin: 0; padding: .625rem .75rem; font-size: .75rem; }
+.ubu-help { max-width: min(35rem, calc(var(--frame-w) - 1rem)); margin: 0; padding: .625rem .75rem; font-size: .75rem; }
 .ubu-help:popover-open { display: grid; grid-template-columns: max-content 1fr; gap: .25rem .75rem; align-items: baseline; }
 .ubu-help dt { margin: 0; }
 .ubu-help dd { margin: 0; color: var(--muted); }
@@ -845,7 +850,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .ubu-toolbar :is(input, button):hover { border-color: var(--muted); }
 .ubu-toolbar :is(input, button):focus-visible { outline: .125rem solid var(--text); outline-offset: .0625rem; }
 .ubu-favorites-only { flex: none; border: .0625rem solid var(--border); border-radius: .625rem; }
-.ubu-chips { width: min(32.5rem, calc(100vw - 1rem)); padding: .625rem; }
+.ubu-chips { width: min(32.5rem, calc(var(--frame-w) - 1rem)); padding: .625rem; }
 .ubu-chips:popover-open { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .875rem; }
 .ubu-chip-group { display: flex; flex-wrap: wrap; gap: .375rem; }
 .ubu-chip {
@@ -870,11 +875,11 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .icon-button .icon { width: 1.5rem; height: 1.5rem; }
 #team-back, .mint-entry-cta { gap: .375rem; }
 .game-popover {
-  position: fixed; inset: auto; margin: 0; padding: .375rem; max-width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); overflow: auto;
+  position: fixed; inset: auto; margin: 0; padding: .375rem; max-width: calc(var(--frame-w) - 1rem); max-height: calc(var(--frame-h) - 1rem); overflow: auto;
   border: .0625rem solid var(--border); border-radius: .875rem; background: var(--elevated); color: var(--text); box-shadow: var(--panel-shadow);
 }
 .game-tip {
-  position: fixed; inset: auto; margin: 0; max-width: min(15rem, calc(100vw - 1rem)); padding: .3125rem .625rem .375rem; pointer-events: none;
+  position: fixed; inset: auto; margin: 0; max-width: min(15rem, calc(var(--frame-w) - 1rem)); padding: .3125rem .625rem .375rem; pointer-events: none;
   border: .0625rem solid var(--border); border-radius: .625rem; background: var(--elevated); color: var(--text); box-shadow: var(--panel-shadow);
   font: .75rem/1.35 var(--font-body);
 }
@@ -940,7 +945,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .ubu-tile-inspect:hover { color: var(--text); opacity: 1; }
 .collection-status { text-align: center; font-size: .75rem; color: var(--muted); margin: 1rem 0; }
 
-#reveal { overflow-x: hidden; width: min(56.25rem, calc(100% - 1.5rem)); max-height: calc(100dvh - 1.5rem); padding: 1.25rem; border: .0625rem solid var(--border); border-radius: 1.375rem; background: var(--card); color: var(--text); text-align: center; box-shadow: var(--panel-shadow); }
+#reveal { overflow-x: hidden; width: min(56.25rem, calc(100% - 1.5rem)); max-height: calc(var(--frame-h) - 1.5rem); padding: 1.25rem; border: .0625rem solid var(--border); border-radius: 1.375rem; background: var(--card); color: var(--text); text-align: center; box-shadow: var(--panel-shadow); }
 #reveal::backdrop { background: #000b; }
 body:has(#reveal[open]) { overflow: hidden; }
 .reveal-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
