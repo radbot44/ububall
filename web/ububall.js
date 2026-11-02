@@ -1337,9 +1337,9 @@
     details.append(fullBox); wrap.append(compactBox, details);
     return wrap;
   }
-  // An ubu's super: its name, meter and charge. On the home team the whole panel is the arm toggle.
-  function renderSuperPanel(playerIndex, isCpu = false) {
-    const wrap = document.createElement(isCpu ? 'div' : 'button'); wrap.className = 'super-panel';
+  // An ubu's super: its name, meter and charge. Arming is done from the dock.
+  function renderSuperPanel(playerIndex) {
+    const wrap = document.createElement('div'); wrap.className = 'super-panel'; wrap.id = `super-panel-${playerIndex}`;
     const topRow = document.createElement('div'); topRow.className = 'super-row';
     const label = document.createElement('span'); label.className = 'super-name-badge'; label.id = `super-name-${playerIndex}`;
     const initialSuper = bodies?.[playerIndex]?.equippedSuper || teamEntries[playerIndex]?.equippedSuper || P.SUPERS[0];
@@ -1348,7 +1348,7 @@
     icon.id = `super-icon-${playerIndex}`;
     icon.src = initialSuper.icon;
     icon.alt = initialSuper.name;
-    icon.title = `${initialSuper.name}: ${initialSuper.desc}`;
+    icon.dataset.tip = `${initialSuper.name}: ${initialSuper.desc}`;
     const nameSpan = document.createElement('span');
     nameSpan.id = `super-name-text-${playerIndex}`;
     nameSpan.textContent = initialSuper.name;
@@ -1361,17 +1361,6 @@
     setMeterFill(meterFill, bodies?.[playerIndex]?.meter ?? 0);
     meterTrack.append(meterFill);
     wrap.append(topRow, meterTrack);
-    if (!isCpu) {
-      const btn = wrap; btn.type = 'button'; btn.id = `super-arm-${playerIndex}`; btn.disabled = true;
-      btn.onclick = e => {
-        e.stopPropagation();
-        const b = bodies[playerIndex];
-        if (!classicMode() && b && b.meter >= 100 && phase === 'plan' && !b.stunned) {
-          b.superArm = !b.superArm;
-          sync(); draw();
-        }
-      };
-    }
     return wrap;
   }
   // Knobs set a launch finely. Angle turns like a dial, relative to where it is grabbed so a tap never
@@ -1523,16 +1512,12 @@
         iconNode.src = b.equippedSuper.icon;
         iconNode.alt = superTitle;
         const masteryBonus = b.equippedSuper?.copies > 1 ? ` (+${(b.equippedSuper.bonusTicks / 240).toFixed(1)}s duration, +${b.equippedSuper.bonusRefund}% refund)` : '';
-        iconNode.title = `${superTitle}: ${b.equippedSuper.desc}${masteryBonus}`;
+        iconNode.dataset.tip = `${superTitle}: ${b.equippedSuper.desc}${masteryBonus}`;
       }
-      if (i < 3) {
-        const armBtn = $(`super-arm-${i}`);
-        if (armBtn) {
-          armBtn.disabled = !planning || (b.meter < 100) || Boolean(b.stunned);
-          armBtn.classList.toggle('armed', Boolean(b.superArm));
-          if (pctNode) pctNode.textContent = b.carded ? 'Carded' : b.stunned ? 'Stunned' : b.superArm ? 'Armed' : b.meter >= 100 ? 'Tap to arm' : `${Math.round(b.meter || 0)}%`;
-        }
-      }
+      const panel = $(`super-panel-${i}`);
+      panel?.classList.toggle('armed', Boolean(b.superArm));
+      panel?.classList.toggle('ready', !b.superArm && b.meter >= 100);
+      if (pctNode) pctNode.textContent = b.carded ? 'Carded' : b.stunned ? 'Stunned' : b.superArm ? 'Armed' : b.meter >= 100 ? 'Ready' : `${Math.round(b.meter || 0)}%`;
     });
     const hudSuperBtn = $('stadium-super-btn');
     const hudSuperText = $('stadium-super-text');
@@ -1545,7 +1530,7 @@
         hudSuperIcon.src = s.icon;
         hudSuperIcon.alt = sName;
         const masteryBonus = s.copies > 1 ? ` (+${(s.bonusTicks / 240).toFixed(1)}s duration, +${s.bonusRefund}% refund)` : '';
-        hudSuperIcon.title = `${sName}: ${s.desc}${masteryBonus}`;
+        hudSuperIcon.dataset.tip = `${sName}: ${s.desc}${masteryBonus}`;
       }
       const canArm = planning && (curB.meter >= 100) && !curB.stunned;
       hudSuperBtn.disabled = !canArm;
@@ -1573,7 +1558,50 @@
       $('launch').hidden = phase === 'over';
     }
   }
+  // A sidebar card's portrait opens that ubu's stats in a drawer from its team's side of the screen.
+  // Light dismiss closes it; tapping the same portrait again leaves it closed.
+  const statDrawer = Object.assign(document.createElement('aside'), { className: 'stat-drawer', popover: 'auto' });
+  document.body.append(statDrawer);
+  let drawerClosed = { player: -1, at: 0 };
+  statDrawer.addEventListener('toggle', event => {
+    if (event.newState === 'closed') drawerClosed = { player: Number(statDrawer.dataset.player), at: performance.now() };
+  });
+  function cardPortrait(entry, i) {
+    const portrait = document.createElement('button'); portrait.type = 'button'; portrait.className = 'card-portrait';
+    portrait.setAttribute('aria-label', `Stats for ${entry.model.parts.fullName}`);
+    portrait.append(ubuRender(entry.model, 'ball-thumb'));
+    portrait.onclick = () => openStatDrawer(i);
+    return portrait;
+  }
+  function openStatDrawer(i) {
+    if (drawerClosed.player === i && performance.now() - drawerClosed.at < 400) return;
+    const entry = teamEntries[i], close = document.createElement('button');
+    close.type = 'button'; close.className = 'icon-button'; close.setAttribute('aria-label', 'Close stats'); close.append(gameUi.icon('x'));
+    close.onclick = () => statDrawer.hidePopover();
+    const titles = document.createElement('div'); titles.className = 'card-titles';
+    titles.append(Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }),
+      Object.assign(document.createElement('small'), { textContent: $(i < 3 ? 'home-label' : 'opponent-label').textContent }));
+    const head = document.createElement('div'); head.className = 'stat-drawer-head';
+    head.append(ubuRender(entry.model, 'stat-drawer-art'), titles, close);
+    const box = renderStatsBox(stats[i] || entry.model.stats || {});
+    box.querySelector('.stat-details').open = true;
+    statDrawer.dataset.player = i; statDrawer.dataset.side = i < 3 ? 'home' : 'away';
+    statDrawer.replaceChildren(head, box);
+    if (!statDrawer.matches(':popover-open')) statDrawer.showPopover();
+  }
+  // Sidebars can be hidden for a bigger rink; each device remembers the choice.
+  function showSidebars(shown) {
+    document.body.classList.toggle('sidebars-hidden', !shown);
+    $('btn-sidebars').setAttribute('aria-pressed', String(!shown));
+    $('btn-sidebars').dataset.tip = shown ? 'Hide sidebars' : 'Show sidebars';
+    try { localStorage.setItem('ububall.sidebars', shown ? 'shown' : 'hidden'); } catch {}
+  }
+  let sidebarsShown = true;
+  try { sidebarsShown = localStorage.getItem('ububall.sidebars') !== 'hidden'; } catch {}
+  showSidebars(sidebarsShown);
+  $('btn-sidebars').onclick = () => showSidebars(document.body.classList.contains('sidebars-hidden'));
   function buildTeam() {
+    if (statDrawer.matches(':popover-open')) statDrawer.hidePopover();
     if (!knobDock.querySelector('.knob-row')) {
       const row = document.createElement('div'); row.className = 'knob-row';
       row.append(...['angle', 'power', 'spin'].map(kind => makeKnob(kind)));
@@ -1617,16 +1645,13 @@
     teamEntries.slice(0, 3).forEach((entry, i) => {
       const button = document.createElement('div'); button.className = 'team-card'; button.id = `player-${i}`;
       const select = document.createElement('button'); select.type = 'button'; select.className = 'card-select';
-      const header = document.createElement('div'); header.className = 'card-header';
       const titles = document.createElement('div'); titles.className = 'card-titles';
       const strong = document.createElement('strong'); strong.textContent = entry.model.parts.fullName;
       const small = document.createElement('small'); small.textContent = '0% power · 0% spin';
-      titles.append(strong, small);
-      header.append(ubuRender(entry.model, 'ball-thumb'), titles);
-      select.append(header);
-      const cardKnobs = document.createElement('div'); cardKnobs.className = 'knob-row';
-      cardKnobs.append(...['angle', 'power', 'spin'].map(kind => makeKnob(kind, i)));
-      button.append(select, renderStatsBox(stats[i] || entry.model.stats || {}), renderSuperPanel(i, false), cardKnobs);
+      titles.append(strong, small); select.append(titles);
+      const header = document.createElement('div'); header.className = 'card-header';
+      header.append(cardPortrait(entry, i), select);
+      button.append(header, renderSuperPanel(i));
       select.onclick = () => { selected = i; sync(); draw(); };
       $('team').append(button);
       const shortcut = document.createElement('button'); shortcut.type = 'button';
@@ -1653,8 +1678,8 @@
         const strong = document.createElement('strong'); strong.textContent = entry.model.parts.fullName;
         const small = document.createElement('small'); small.className = 'away'; small.textContent = $('opponent-label').textContent;
         titles.append(strong, small);
-        header.append(ubuRender(entry.model, 'ball-thumb'), titles);
-        card.append(header, renderStatsBox(stats[i] || entry.model.stats || {}), renderSuperPanel(i, true));
+        header.append(cardPortrait(entry, i), titles);
+        card.append(header, renderSuperPanel(i));
         $('cpu-team').append(card);
       });
     }
