@@ -190,7 +190,7 @@ body:not(.in-match) .play-home { margin-top: 14px; }
   border-top: 1px solid #ffffff12;
   width: 100%;
 }
-.full-stats { display: none; }
+.stat-details:not([open]) > .full-stats { display: none; }
 .stat-group-title {
   font-size: 9px;
   font-weight: 700;
