@@ -40,6 +40,7 @@
     if (url.href !== location.href) history.pushState(null, '', url);
     show();
     scrollTo(0, 0);
+    document.body.scrollTo(0, 0);
   });
   window.addEventListener('popstate', show);
   show();

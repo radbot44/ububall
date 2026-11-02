@@ -60,10 +60,11 @@
 
 /* Match mode: the stadium fills the screen; the home screen and site chrome step aside. */
 body.in-match .play-home,
-body.in-match .site-header, body.in-match .site-nav { display: none; }
+body.in-match .site-nav, body.in-match .site-header { display: none; }
+:where(body.in-match) { height: 100dvh; }
 body.in-match { padding-bottom: 0; overflow: hidden; }
 body.in-match .ball-page {
-  width: 100%; max-width: none; height: 100dvh; margin: 0;
+  width: 100%; max-width: none; height: 100%; margin: 0;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 body.in-match .arena-layout { height: 100%; padding: 12px; grid-template-rows: minmax(0, 1fr); }

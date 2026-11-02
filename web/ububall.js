@@ -3,7 +3,7 @@
   const $ = id => document.getElementById(id), P = ububallPhysics;
   const canvas = $('rink');
   let ctx = canvas.getContext('2d');
-  let layoutDirty = true, renderWidth = 1, renderHeight = 1;
+  let layoutDirty = true, renderWidth = 1, renderHeight = 1, deviceWidth = 0, deviceHeight = 0;
   const dirtyMeters = new Set();
   let rinkCache = null;
   const ballMark = new Image();
@@ -1942,15 +1942,19 @@
   }
   function draw() {
     if (layoutDirty) {
+      const w0 = canvas.clientWidth, h0 = canvas.clientHeight;
       fitStadium();
       renderWidth = canvas.clientWidth; renderHeight = canvas.clientHeight;
+      if (renderWidth !== w0 || renderHeight !== h0) { deviceWidth = 0; deviceHeight = 0; }
       measureField();
       layoutDirty = false;
     }
     if (!videoField) positionSpinControl();
-    const ratio = Math.min(devicePixelRatio || 1, 2);
-    const width = videoField?.width ?? Math.max(1, Math.round(renderWidth * ratio));
-    const height = videoField?.height ?? Math.max(1, Math.round(renderHeight * ratio));
+    const dpr = devicePixelRatio || 1;
+    const rawW = deviceWidth || Math.round(renderWidth * dpr), rawH = deviceHeight || Math.round(renderHeight * dpr);
+    const cap = Math.min(1, 3840 / Math.max(1, rawW, rawH));
+    const width = videoField?.width ?? Math.max(1, Math.round(rawW * cap));
+    const height = videoField?.height ?? Math.max(1, Math.round(rawH * cap));
     if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
     if (badgeCanvas.width !== width || badgeCanvas.height !== height) { badgeCanvas.width = width; badgeCanvas.height = height; }
     badgeCtx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); badgeCtx.clearRect(0, 0, 1000, 600);
@@ -3998,8 +4002,18 @@
   } catch {}
 
   document.addEventListener('visibilitychange', () => { lastTime = 0; accumulator = 0; });
-  const ro = new ResizeObserver(() => { layoutDirty = true; draw(); });
-  ro.observe(canvas);
+  const ro = new ResizeObserver(entries => {
+    for (const entry of entries) {
+      if (entry.target === canvas) {
+        const box = entry.devicePixelContentBoxSize?.[0];
+        deviceWidth = box ? box.inlineSize : 0;
+        deviceHeight = box ? box.blockSize : 0;
+      }
+    }
+    layoutDirty = true;
+    draw();
+  });
+  try { ro.observe(canvas, { box: 'device-pixel-content-box' }); } catch { ro.observe(canvas); }
   if (stadium) ro.observe(stadium);
   if (stageArea) ro.observe(stageArea);
   ro.observe($('field-spin')); // Its size places it; it has none until first shown.

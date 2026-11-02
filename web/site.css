@@ -21,19 +21,40 @@
   --bevel-pressed: inset 0 2px 0 rgb(0 0 0 / .28), inset 0 -1px 0 rgb(0 0 0 / .32), 0 1px 2px rgb(0 0 0 / .28);
   --panel-shadow: inset 0 1px 0 rgb(255 255 255 / .07), inset 0 -5px 0 rgb(0 0 0 / .24), 0 14px 32px rgb(0 0 0 / .4);
   --scroll-thumb: color-mix(in srgb, var(--border), var(--text) 18%);
-  color-scheme: dark; font: 14px/1.4 var(--font-body);
+  color-scheme: dark;
   color: var(--text); background: var(--background);
 }
+html { font-size: 16px; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body {
   /* flow-root keeps the header margin inside the body, so no strip of page shows above it and
      the page is never taller than the screen. */
   display: flow-root; margin: 0; min-height: 100dvh;
-  background: radial-gradient(ellipse 90% 60% at 50% -10%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 70%) no-repeat, var(--background);
+  font: 14px/1.4 var(--font-body);
+  background: radial-gradient(ellipse 90% 60% at 50% -10%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 70%) no-repeat;
 }
-/* The arena backdrop: faint ice scratches under a vignette, fixed while the page scrolls. */
-body::before {
+/* Landscape 16:9 frame: the page is a centred 16:9 box and 1rem scales with it (16px at 1920×1080).
+   Portrait and short coarse-pointer landscape (phones on their side) keep fluid layout at 1rem = 16px. */
+@media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
+  html {
+    display: grid;
+    place-items: center;
+    height: 100dvh;
+    overflow: hidden;
+    font-size: min(calc(100vw / 120), calc(100dvh * 16 / 1080));
+  }
+  body {
+    width: min(100vw, calc(100dvh * 16 / 9));
+    height: min(100dvh, calc(100vw * 9 / 16));
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+}
+/* The arena backdrop: faint ice scratches under a vignette, fixed across the whole window
+   (including pillarbox and letterbox bars outside the 16:9 frame) while the page scrolls. */
+html::before {
   content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background:
     radial-gradient(ellipse 110% 85% at 50% 35%, transparent 50%, rgb(0 0 0 / .55)),
