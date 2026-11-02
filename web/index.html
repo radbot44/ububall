@@ -305,9 +305,10 @@ SOFTWARE.
   <dialog id="viewer" class="viewer" aria-labelledby="ubunym">
     <div class="viewer-toolbar">
       <div class="viewer-tabs" role="tablist" aria-label="Ubu view">
-        <button id="view-ubu" type="button" role="tab" aria-selected="true" aria-controls="preview" data-view="ubu">Ubu</button>
+        <button id="view-ubu" type="button" role="tab" aria-selected="true" aria-controls="viewer-stats-stage" data-view="ubu">Ubu Stats</button>
         <button id="view-card" type="button" role="tab" aria-selected="false" aria-controls="viewer-card-stage" data-view="card" tabindex="-1">Card</button>
         <button id="view-token" type="button" role="tab" aria-selected="false" aria-controls="viewer-token-stage" data-view="token" tabindex="-1">Token</button>
+        <button id="view-sound" type="button" role="tab" aria-selected="false" aria-controls="viewer-sound-stage" data-view="sound" tabindex="-1">Sound</button>
       </div>
       <div class="viewer-actions">
         <button id="viewer-fav" class="icon-button card-heart" type="button" aria-label="Favorite" title="Favorite">
@@ -318,27 +319,32 @@ SOFTWARE.
     </div>
     <div class="viewer-body">
       <div id="viewer-display" class="viewer-display">
-        <div id="preview" class="viewer-preview" role="tabpanel" aria-labelledby="view-ubu"></div>
+        <div id="viewer-stats-stage" class="viewer-stats-stage" role="tabpanel" aria-labelledby="view-ubu">
+          <div id="preview" class="viewer-preview"></div>
+          <h2 id="ubunym"></h2>
+          <p id="details"></p>
+          <p id="authenticity"></p>
+          <div id="viewer-stats" class="viewer-stats"></div>
+          <a id="download" class="secondary" download="ubu.ubu">Download .ubu</a>
+        </div>
         <div id="viewer-card-stage" class="viewer-card-stage" role="tabpanel" aria-labelledby="view-card" hidden></div>
         <div id="viewer-token-stage" class="viewer-token-stage" role="tabpanel" aria-labelledby="view-token" hidden></div>
-      </div>
-      <h2 id="ubunym"></h2>
-      <p id="details"></p>
-      <p id="authenticity"></p>
-      <div id="viewer-voice" class="viewer-voice">
-        <div class="viewer-voice-bar">
-          <button id="viewer-voice-tone" class="voice-play-btn" type="button" title="Play signature voice tone">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
-            <span>Voice</span>
-          </button>
-          <button id="viewer-voice-fanfare" class="voice-play-btn" type="button" title="Play goal fanfare">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-            <span>Fanfare</span>
-          </button>
+        <div id="viewer-sound-stage" class="viewer-sound-stage" role="tabpanel" aria-labelledby="view-sound" hidden>
+          <div id="viewer-voice" class="viewer-voice">
+            <div class="viewer-voice-bar">
+              <button id="viewer-voice-tone" class="voice-play-btn" type="button" title="Play signature voice tone">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                <span>Voice</span>
+              </button>
+              <button id="viewer-voice-fanfare" class="voice-play-btn" type="button" title="Play goal fanfare">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                <span>Fanfare</span>
+              </button>
+            </div>
+            <div id="viewer-voice-info" class="viewer-voice-info"></div>
+          </div>
         </div>
-        <div id="viewer-voice-info" class="viewer-voice-info"></div>
       </div>
-      <a id="download" class="secondary" download="ubu.ubu">Download .ubu</a>
     </div>
   </dialog>
   <dialog id="reveal" aria-labelledby="reveal-title">

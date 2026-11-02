@@ -543,7 +543,6 @@
     const serial = result.certificate ? result.certificate.serial : null;
     current = { text, result, model, rarity: r, name: model.parts.fullName, serial };
 
-    setViewerView(viewerView);
     $('ubunym').textContent = model.parts.fullName;
     const rarityText = r ? ` · Rarity ${r.percentile.toFixed(3)} / 100 (${r.bits.toFixed(6)} bits)` : '';
     const grade = document.createElement('strong'); grade.dataset.grade = model.grade; grade.textContent = model.grade;
@@ -552,6 +551,7 @@
     $('download').hidden = false;
     window.ubuAudio?.stop();
     renderViewerVoice(model.voice);
+    setViewerView(viewerView);
 
     if (serial && collectionMap.has(serial)) {
       $('viewer-fav').hidden = false;
@@ -567,6 +567,57 @@
     }
   }
 
+  function renderViewerStats(model) {
+    const container = $('viewer-stats');
+    if (!container) return;
+    container.replaceChildren();
+    const groups = [
+      ['Movement', '#76b9ef', ['impulse', 'traction', 'spin', 'curve']],
+      ['Physical', '#42c66b', ['size', 'mass', 'bounciness', 'grip']],
+      ['Engagement', '#ff9954', ['power', 'reach', 'strength', 'stability']],
+      ['Super', '#ff7197', ['efficiency', 'synergy', 'chemistry']]
+    ];
+    for (const [groupName, color, keys] of groups) {
+      const groupEl = document.createElement('div');
+      groupEl.className = 'viewer-stat-group';
+      const heading = document.createElement('h4');
+      heading.textContent = groupName;
+      heading.style.color = color;
+      groupEl.append(heading);
+      if (groupName === 'Super') {
+        const row = document.createElement('div'), name = document.createElement('span'),
+          bar = document.createElement('div'), fill = document.createElement('i'), val = document.createElement('b');
+        row.className = 'viewer-stat-row';
+        row.style.setProperty('--stat-color', color);
+        name.textContent = 'Ubuquity';
+        bar.className = 'viewer-stat-track';
+        fill.style.width = `${(model.rating / 1023 * 100).toFixed(1)}%`;
+        bar.append(fill);
+        val.textContent = String(model.rating);
+        const gradeTag = document.createElement('em');
+        gradeTag.dataset.grade = model.grade;
+        gradeTag.textContent = model.grade;
+        row.append(name, bar, gradeTag, val);
+        groupEl.append(row);
+      }
+      for (const key of keys) {
+        const value = model.stats[key] ?? 127;
+        const row = document.createElement('div'), name = document.createElement('span'),
+          bar = document.createElement('div'), fill = document.createElement('i'), val = document.createElement('b');
+        row.className = 'viewer-stat-row';
+        row.style.setProperty('--stat-color', color);
+        name.textContent = key[0].toUpperCase() + key.slice(1);
+        bar.className = 'viewer-stat-track';
+        fill.style.width = `${(value / 255 * 100).toFixed(1)}%`;
+        bar.append(fill);
+        val.textContent = String(value);
+        row.append(name, bar, val);
+        groupEl.append(row);
+      }
+      container.append(groupEl);
+    }
+  }
+
   function setViewerView(view) {
     if (!current) return;
     viewerView = view;
@@ -575,10 +626,30 @@
       tab.setAttribute('aria-selected', String(selected));
       tab.tabIndex = selected ? 0 : -1;
       const panel = $(tab.getAttribute('aria-controls'));
+      if (!panel) continue;
       panel.hidden = !selected;
-      panel.replaceChildren();
-      if (selected) panel.append(view === 'card' ? tradingCard(current)
-        : view === 'token' ? tokenCoin(current.model) : ubuRender(current.model));
+      if (selected) {
+        if (view === 'card') {
+          panel.replaceChildren(tradingCard(current));
+        } else if (view === 'token') {
+          panel.replaceChildren(tokenCoin(current.model));
+        } else if (view === 'ubu') {
+          $('preview').replaceChildren(ubuRender(current.model));
+          renderViewerStats(current.model);
+        } else if (view === 'sound') {
+          window.ubuAudio?.stop();
+        }
+      } else {
+        if (tab.dataset.view === 'card' || tab.dataset.view === 'token') {
+          panel.replaceChildren();
+        }
+        if (tab.dataset.view === 'sound') {
+          window.ubuAudio?.stop();
+          viewerNoteChips.forEach(chip => chip.classList.remove('is-playing-note'));
+          $('viewer-voice-tone')?.classList.remove('is-active');
+          $('viewer-voice-fanfare')?.classList.remove('is-active');
+        }
+      }
     }
   }
   // Rim tones for the token's edge, matching each grade's enamel metal (satin nickel otherwise).
