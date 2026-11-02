@@ -261,21 +261,21 @@
     const dur = 0.58 + Math.random() * 0.14, rest = 20 + Math.random() * 4;
     card.style.setProperty('--wobble-rx', `${((7 + Math.random() * 5) * signX).toFixed(1)}deg`);
     card.style.setProperty('--wobble-ry', `${((6 + Math.random() * 6) * signY).toFixed(1)}deg`);
-    card.style.setProperty('--wobble-y', `${(22 + Math.random() * 8).toFixed(1)}px`);
+    card.style.setProperty('--wobble-y', `${((22 + Math.random() * 8) / 16).toFixed(4)}rem`);
     card.style.setProperty('--wobble-dur', `${dur.toFixed(2)}s`);
-    card.style.setProperty('--popout-peak', `${(40 + Math.random() * 10).toFixed(1)}px`);
-    card.style.setProperty('--popout-rest', `${rest.toFixed(1)}px`);
-    card.style.setProperty('--float-min', `${(17 + Math.random() * 3).toFixed(1)}px`);
-    card.style.setProperty('--float-max', `${(24 + Math.random() * 4).toFixed(1)}px`);
-    card.style.setProperty('--float-y', `${(-1.5 - Math.random() * 1.5).toFixed(1)}px`);
+    card.style.setProperty('--popout-peak', `${((40 + Math.random() * 10) / 16).toFixed(4)}rem`);
+    card.style.setProperty('--popout-rest', `${(rest / 16).toFixed(4)}rem`);
+    card.style.setProperty('--float-min', `${((17 + Math.random() * 3) / 16).toFixed(4)}rem`);
+    card.style.setProperty('--float-max', `${((24 + Math.random() * 4) / 16).toFixed(4)}rem`);
+    card.style.setProperty('--float-y', `${((-1.5 - Math.random() * 1.5) / 16).toFixed(4)}rem`);
     card.style.setProperty('--float-dur', `${(3.0 + Math.random() * 1.2).toFixed(2)}s`);
     card.style.setProperty('--float-delay', `${dur.toFixed(2)}s`);
     const cardEffects = [];
     // Share the renderer's smoothed light source with every printed foil surface.
     cardEffects.push((x, y) => {
       card.style.setProperty('--foil-angle', `${125 + x * 30 - y * 20}deg`);
-      card.style.setProperty('--foil-shadow-x', `${-x * 1.5}px`);
-      card.style.setProperty('--foil-shadow-y', `${2 - y}px`);
+      card.style.setProperty('--foil-shadow-x', `${(-x * 1.5 / 16).toFixed(4)}rem`);
+      card.style.setProperty('--foil-shadow-y', `${((2 - y) / 16).toFixed(4)}rem`);
       card.style.setProperty('--foil-glint', String(.45 + .5 * Math.abs(x * .7 - y * .3)));
     });
     const cardBg = ubuRender.cardMaterials?.(item.model, cardEffects);
@@ -834,8 +834,8 @@
       const description = `Pack ${i + 1}: backgrounds ${option.hints.map(h => h.background).join(', ')}${hasSpecial ? '; special finish in pack' : '; matte finishes'}`;
       view.button.setAttribute('aria-label', description);
       if (!still) view.card.animate([
-        { transform: `translateY(-70px) rotate(${(i - 1) * 14}deg) scale(.7)`, opacity: 0 },
-        { transform: 'translateY(8px) rotate(0deg) scale(1.04)', opacity: 1, offset: .7 },
+        { transform: `translateY(-4.375rem) rotate(${(i - 1) * 14}deg) scale(.7)`, opacity: 0 },
+        { transform: 'translateY(.5rem) rotate(0deg) scale(1.04)', opacity: 1, offset: .7 },
         { transform: 'none', opacity: 1 }
       ], { duration: 520, delay: i * 120, easing: 'cubic-bezier(.2, .8, .3, 1)', fill: 'backwards' });
     });

@@ -37,10 +37,17 @@
 
   const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
 
+  let uiScale = 1;
+  function updateScale() {
+    uiScale = parseFloat(getComputedStyle(document.documentElement).fontSize) / 16 || 1;
+  }
+  updateScale();
+  addEventListener('resize', updateScale);
+
   // A popover placed under its anchor (or above, when there is no room below), kept on screen.
   // `align: 'end'` lines its right edge up with the anchor's.
   function place(popover, anchor, align = 'start') {
-    const a = anchor.getBoundingClientRect(), gap = 6, margin = 8;
+    const a = anchor.getBoundingClientRect(), gap = 6 * uiScale, margin = 8 * uiScale;
     if (popover.classList.contains('game-select-list')) popover.style.minWidth = a.width + 'px';
     const width = Math.min(popover.offsetWidth, innerWidth - margin * 2), height = popover.offsetHeight;
     let left = align === 'end' ? a.right - width : a.left;
@@ -156,7 +163,7 @@
     if (tip.matches(':popover-open')) tip.hidePopover();
     tip.showPopover();
     tip.style.left = tip.style.top = '0';
-    const a = target.getBoundingClientRect(), gap = 6, margin = 8, width = tip.offsetWidth, height = tip.offsetHeight;
+    const a = target.getBoundingClientRect(), gap = 6 * uiScale, margin = 8 * uiScale, width = tip.offsetWidth, height = tip.offsetHeight;
     const top = a.top - gap - height >= margin ? a.top - gap - height : a.bottom + gap;
     tip.style.left = Math.max(margin, Math.min(a.left + a.width / 2 - width / 2, innerWidth - margin - width)) + 'px';
     tip.style.top = Math.max(margin, Math.min(top, innerHeight - margin - height)) + 'px';
@@ -179,7 +186,7 @@
     pressTimer = setTimeout(() => { swallow = true; showTip(t); }, 450);
   });
   addEventListener('pointermove', event => {
-    if (pressed && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > 10) { clearTimeout(pressTimer); pressed = null; }
+    if (pressed && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > 10 * uiScale) { clearTimeout(pressTimer); pressed = null; }
   });
   for (const type of ['pointerup', 'pointercancel']) addEventListener(type, event => {
     clearTimeout(pressTimer); pressed = null;
@@ -189,7 +196,7 @@
   addEventListener('contextmenu', event => { if (swallow || tipTarget(event)) event.preventDefault(); }, true);
   for (const type of ['scroll', 'resize']) addEventListener(type, () => { if (tipFor) hideTip(); }, true);
 
-  root.gameUi = { ICONS, icon, fillIcons, dropdown, place, confirm, ask, select };
+  root.gameUi = { ICONS, icon, fillIcons, dropdown, place, confirm, ask, select, scale: () => uiScale };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => fillIcons());
   else fillIcons();
 })(globalThis);

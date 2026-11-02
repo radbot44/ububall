@@ -3,6 +3,11 @@
   const $ = id => document.getElementById(id), P = ububallPhysics;
   const canvas = $('rink');
   let ctx = canvas.getContext('2d');
+  let uiScale = 1;
+  function updateUiScale() {
+    uiScale = parseFloat(getComputedStyle(document.documentElement).fontSize) / 16 || 1;
+  }
+  updateUiScale();
   let layoutDirty = true, renderWidth = 1, renderHeight = 1, deviceWidth = 0, deviceHeight = 0;
   const dirtyMeters = new Set();
   let rinkCache = null;
@@ -89,7 +94,7 @@
       board.dataset.size = size;
       fitStatus(status);
       const left = board.querySelector('.bug-left').getBoundingClientRect(), right = compact ? left : board.querySelector('.bug-right').getBoundingClientRect();
-      if (left.left >= edge($('pause'), 'right') + 8 && right.right <= edge(board.querySelector('.stadium-toolbar'), 'left') - 8) break;
+      if (left.left >= edge($('pause'), 'right') + 8 * uiScale && right.right <= edge(board.querySelector('.stadium-toolbar'), 'left') - 8 * uiScale) break;
     }
   }
   function fitStatus(status) {
@@ -414,8 +419,8 @@
     for (const side of [0, 1]) danger[side] += ((threat?.side === side ? threat.level : 0) - danger[side]) * Math.min(1, dt * 10);
     burnNet(dt);
     shake = Math.max(0, shake - dt / .2);
-    shakeX = shake ? Number(((Math.random() - .5) * 5 * shake).toFixed(2)) : 0;
-    shakeY = shake ? Number(((Math.random() - .5) * 5 * shake).toFixed(2)) : 0;
+    shakeX = shake ? Number(((Math.random() - .5) * 5 * uiScale * shake).toFixed(2)) : 0;
+    shakeY = shake ? Number(((Math.random() - .5) * 5 * uiScale * shake).toFixed(2)) : 0;
     rinkWrap.style.translate = shake ? `${shakeX}px ${shakeY}px` : '';
     ballFlare = Math.max(0, ballFlare - dt / .8);
     kickoffGlow = Math.max(0, kickoffGlow - dt / 1.5);
@@ -848,8 +853,8 @@
     // Over the field's far half from the foul, so the lit areas stay in view.
     const f = fieldBox, far = foulInfo.kind === 'crease' ? foulInfo.team === 0 : fouls.corner % 2 === 0;
     const along = isPortrait ? (far ? .27 : .73) : (far ? .7 : .3);
-    foulBox.style.width = Math.min(340, isPortrait ? f.width - 24 : f.width * .46) + 'px';
-    foulBox.style.maxHeight = (isPortrait ? f.height * .5 : f.height) - 12 + 'px';
+    foulBox.style.width = Math.min(340 * uiScale, isPortrait ? f.width - 24 * uiScale : f.width * .46) + 'px';
+    foulBox.style.maxHeight = (isPortrait ? f.height * .5 : f.height) - 12 * uiScale + 'px';
     foulBox.style.left = f.left + f.width * (isPortrait ? .5 : along) + 'px';
     foulBox.style.top = f.top + f.height * (isPortrait ? along : .5) + 'px';
   }
@@ -1408,7 +1413,7 @@
       if (kind === 'angle') {
         const turn = turnOf(e), delta = ((turn - grab.turn + 540) % 360) - 180;
         grab.turn = turn; setKnob(kind, i, knobValue(kind, i) + delta * (e.shiftKey ? .25 : 1));
-      } else setKnob(kind, i, grab.value + ((e.clientX - grab.x) - (e.clientY - grab.y)) / KNOB_SWEEP * (max - min) * (e.shiftKey ? .25 : 1));
+      } else setKnob(kind, i, grab.value + ((e.clientX - grab.x) - (e.clientY - grab.y)) / (KNOB_SWEEP * uiScale) * (max - min) * (e.shiftKey ? .25 : 1));
     };
     svg.onpointerup = svg.onpointercancel = () => { grab = null; };
     svg.onwheel = e => { e.preventDefault(); setKnob(kind, index(), knobValue(kind, index()) - Math.sign(e.deltaY) * (e.shiftKey ? 10 : 1)); };
@@ -1746,7 +1751,7 @@
     return isPortrait ? { x: b.x - b.radius * .65, y: b.y - b.radius * .65 } : { x: b.x - b.radius * .65, y: b.y + b.radius * .65 };
   }
   function fieldTarget(event) {
-    const near = p => { const q = screenPoint(p); return Math.hypot(q.x - event.clientX, q.y - event.clientY) <= 22; };
+    const near = p => { const q = screenPoint(p); return Math.hypot(q.x - event.clientX, q.y - event.clientY) <= 22 * uiScale; };
     const own = bodies.slice(0, 3);
     const arrow = own.findIndex((b, i) => { const a = impulseGeometry(b, plans[i]); return a.visible && near(a); });
     if (arrow >= 0) return { mode: 'arrow', index: arrow };
@@ -1779,9 +1784,9 @@
     const width = r.controlWidth, height = r.controlHeight;
     const arrow = stagePoint(impulseGeometry(b, plans[selected]));
     // Prefer the side opposite the arrow, then clamp inside the stage near the edges.
-    let y = arrow.y > center.y + 8 ? center.y - radius - height - 24 : center.y + radius + 5;
-    const x = Math.max(6, Math.min(r.stageWidth - width - 6, center.x - width / 2));
-    y = Math.max(6, Math.min(r.stageHeight - height - 6, y));
+    let y = arrow.y > center.y + 8 * uiScale ? center.y - radius - height - 24 * uiScale : center.y + radius + 5 * uiScale;
+    const x = Math.max(6 * uiScale, Math.min(r.stageWidth - width - 6 * uiScale, center.x - width / 2));
+    y = Math.max(6 * uiScale, Math.min(r.stageHeight - height - 6 * uiScale, y));
     control.style.transform = `translate3d(${x}px, ${y}px, 0)`;
   }
   const impactStamps = new Map();
@@ -3987,7 +3992,7 @@
   $('pause-leave').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
   $('home-play').onclick = () => { if (online?.active || matchInProgress()) enterMatch(); else openSetup('mode'); };
   $('demo-play').onclick = () => $('home-play').click();
-  portraitScreen.addEventListener('change', () => { fitOrientation(); draw(); });
+  portraitScreen.addEventListener('change', () => { updateUiScale(); fitOrientation(); draw(); });
   window.addEventListener('popstate', () => {
     if (location.pathname !== '/') return;
     if (history.state?.match) enterMatch();
@@ -4003,6 +4008,7 @@
 
   document.addEventListener('visibilitychange', () => { lastTime = 0; accumulator = 0; });
   const ro = new ResizeObserver(entries => {
+    updateUiScale();
     for (const entry of entries) {
       if (entry.target === canvas) {
         const box = entry.devicePixelContentBoxSize?.[0];
@@ -4017,7 +4023,7 @@
   if (stadium) ro.observe(stadium);
   if (stageArea) ro.observe(stageArea);
   ro.observe($('field-spin')); // Its size places it; it has none until first shown.
-  const resizeField = () => { layoutDirty = true; draw(); };
+  const resizeField = () => { updateUiScale(); layoutDirty = true; draw(); };
   window.addEventListener('resize', resizeField);
   window.visualViewport?.addEventListener('resize', resizeField);
   practice.slice(0, 3).forEach(entry => addOption(entry, 'roster-practice')); newMatch(); requestAnimationFrame(frame);
