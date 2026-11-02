@@ -402,7 +402,7 @@
       const s = shockwaves[i]; s.life -= dt;
       if (s.life <= 0) { shockwaves.splice(i, 1); }
     }
-    const moving = phase === 'play' || Boolean(goalReplay) || Boolean(theater && !theater.paused);
+    const moving = phase === 'play' || Boolean(postGoal) || Boolean(goalReplay) || Boolean(theater && !theater.paused);
     if (moving) for (const s of skids) s.age += dt;
     for (let i = skids.length - 1; i >= 0; i--) if (skids[i].age >= SKID_LIFE) skids.splice(i, 1);
     if (moving) for (const s of burns) s.age += dt;
@@ -2211,7 +2211,7 @@
     syncReplay();
   }
   function startGoalReplay() {
-    postGoal = null;
+    if (postGoal) { P.stop(bodies); postGoal = null; }
     const segments = playSegments.filter(s => s.ticks);
     if (!segments.length || (online?.active && online.state?.phase !== 'resolving')) return;
     endGoalReplay();
@@ -3132,7 +3132,15 @@
     // A goal on the round's first turn is an ace, earning its scorer extra meter (not for an own goal).
     const ace = goal !== null && !roundTurns, call = goal === null ? null : ububallMatch.callGoal(bodies, play, tally, goal, ace);
     if (goal !== null && ballOnFire()) lightNet(goal); else quench();
+    const savedMotion = goal !== null ? bodies.slice(0, 6).map(b => ({ vx: b.vx, vy: b.vy, omega: b.omega })) : null;
     ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null }, fouls, tally);
+    if (savedMotion) {
+      bodies.slice(0, 6).forEach((b, i) => {
+        b.vx = savedMotion[i].vx;
+        b.vy = savedMotion[i].vy;
+        b.omega = savedMotion[i].omega;
+      });
+    }
     if (fouls.faceoff) play = ububallMatch.newPlay();
     noteTurn(ticks, goal === null ? null : { team: goal, label: call.label, scorer: call.own ? null : call.scorer, assist: call.assist }, fouls.cards);
     announceFouls();
@@ -3150,7 +3158,7 @@
         if (recording) { recording.final = { scores: [...scores], winner: goal }; saveRecording(); }
       }
       const scorer = bodies[call.scorer] || bodies.slice(goal * 3, goal * 3 + 3)[0];
-      goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY + 400;
+      goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY + 800;
       postGoal = { ballX: bodies[6].x, ballY: bodies[6].y, scoredAt: clockNow(), hitStopDoneAt: hitStopUntil };
       bodies[6].vx = 0; bodies[6].vy = 0; bodies[6].omega = 0;
       scoringPlayer = scorer;
@@ -3180,7 +3188,7 @@
     }
     gameAudio()?.getAudioContext();
     if (phase === 'goal') {
-      postGoal = null;
+      if (postGoal) { P.stop(bodies); postGoal = null; }
       stopFanfare(); gameAudio()?.stop();
       endGoalReplay();
       bodies = kickoff(); turn++; phase = 'plan'; resetPlans(); say('Kickoff. Plan your next three launches.'); draw(); return;
@@ -3436,12 +3444,12 @@
           elapsed += P.DT; accumulator -= P.DT;
           bodies[6].x = postGoal.ballX; bodies[6].y = postGoal.ballY;
           bodies[6].vx = 0; bodies[6].vy = 0; bodies[6].omega = 0;
-          P.step(bodies, P.DT, liveFx.collide, liveFx.wall, liveFx.shock, liveFx.super);
+          P.step(bodies, P.DT, liveFx.collide, liveFx.wall, liveFx.shockwave, liveFx.super);
           bodies[6].x = postGoal.ballX; bodies[6].y = postGoal.ballY;
           bodies[6].vx = 0; bodies[6].vy = 0; bodies[6].omega = 0;
           traceGuide(bodies);
           recordTrails();
-          if (P.settled(bodies.slice(0, 6))) { postGoal = null; break; }
+          if (P.settled(bodies.slice(0, 6))) { P.stop(bodies); postGoal = null; break; }
         } else {
           const tick = ububallMatch.playTick(P, bodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
           ububallMatch.lapseFouls(P, bodies, fouls); traceGuide(bodies);
