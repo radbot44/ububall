@@ -911,33 +911,34 @@ body:has(#online-dialog[open]) { overflow: hidden; }
   border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--secondary); font: 12px var(--font-body); box-shadow: none;
 }
 .formation-super img { flex: none; width: 20px; height: 20px; }
-.formation-super span:not(.formation-caret) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.formation-caret { color: var(--muted); font-size: 10px; }
+.formation-super span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.formation-super svg { flex: none; width: 14px; height: 14px; color: var(--muted); }
+.formation-super svg, .formation-tool svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .formation-super[aria-expanded="true"] { border-color: var(--secondary); }
 .formation-tools { grid-column: 2; grid-row: 1 / span 2; align-self: start; display: grid; gap: 4px; }
-.formation-tool {
-  width: 28px; height: 28px; min-height: 0; padding: 0; border: 1px solid var(--border); border-radius: 50%;
-  background: var(--card); color: var(--muted); font-size: 15px; line-height: 1; box-shadow: none;
-}
-.formation-tool:hover { color: var(--text); }
+/* Position tools are bare icons: no button chrome, only a color change on hover. */
+.formation-tool { width: 24px; height: 24px; min-height: 0; padding: 0; border: 0; background: none; color: var(--muted); box-shadow: none; }
+.formation-tool svg { width: 20px; height: 20px; }
+.formation-tool:hover, .formation-tool:focus-visible { background: none; color: var(--text); }
 [data-locked] .roster-scroll { opacity: .55; pointer-events: none; }
 /* Phones: position tools sit beside the super button so names keep the width. */
 @media (max-width: 520px) {
   .formation { gap: 6px; padding: 6px 6px 6px 12px; }
   .formation-slot { grid-template-columns: minmax(0, 1fr); padding: 5px; }
   .formation-tools { position: absolute; right: 4px; bottom: 5px; display: flex; gap: 3px; }
-  .formation-tool { width: 24px; height: 24px; font-size: 13px; }
   .formation-art { width: 36px; height: 36px; }
   .formation-name strong { font-size: 13px; line-height: 1.15; white-space: normal; overflow-wrap: anywhere; }
   .formation-super { max-width: calc(100% - 56px); padding: 2px 6px 2px 3px; font-size: 11px; }
   .formation-super img { width: 18px; height: 18px; }
 }
 /* A position's super choices: icon, name with mastery, and what it does. */
-.roster-super { margin: 8px 0 0; padding: 10px; border: 1px solid var(--secondary); border-radius: 14px; background: var(--elevated); }
+.super-popover { padding: 10px; border-color: var(--secondary); }
 .roster-super-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .roster-super-head h3 { margin: 0; font-size: 15px; }
-.roster-super-head button { min-height: 32px; padding: 4px 12px; font-size: 13px; }
-.super-choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px; }
+
+/* Up to four choices a row; phones take two. */
+.super-choice-grid { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 210px)); gap: 6px; }
+@media (max-width: 600px) { .super-choice-grid { grid-template-columns: repeat(var(--cols-narrow, 2), minmax(0, 1fr)); } }
 .super-choice {
   display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; justify-items: start;
   min-height: 0; padding: 6px 8px; border: 2px solid transparent; border-radius: 12px; background: var(--card); text-align: left; box-shadow: none;
@@ -949,15 +950,13 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .roster-hint { margin: 8px 0 0; color: var(--text); font-size: 13px; }
 /* Saved teams: step through them, pick from the list, save or manage. */
 .team-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
-.team-bar select { flex: 1 1 140px; min-width: 0; min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text); font: 14px var(--font-body); }
 .team-bar > button { min-height: 36px; padding: 6px 12px; font-size: 14px; }
-.team-step-btn { width: 36px; padding: 0 !important; font-size: 20px !important; }
-.team-menu { margin: 0; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--elevated); color: var(--text); inset: auto; }
-.team-menu:popover-open { display: grid; gap: 4px; }
-.team-menu button { justify-content: flex-start; min-height: 36px; font-size: 14px; }
-.team-name-form { display: flex; flex: 1 1 100%; gap: 6px; }
-.team-name-form input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--text); font: 14px var(--font-body); }
-.team-name-form button { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+.team-step-btn { width: 36px; padding: 0 !important; }
+.team-step-btn .icon { width: 20px; height: 20px; }
+.team-bar .game-select { flex: 1 1 140px; min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); font: 14px var(--font-body); }
+.team-menu:popover-open { display: grid; gap: 2px; min-width: 180px; }
+.team-menu button { justify-content: flex-start; min-height: 36px; border-radius: 8px; background: none; font-size: 14px; box-shadow: none; }
+.team-menu button:hover { background: var(--hover); }
 /* The online lobby's invite and status sit above the same team screen. */
 .lobby-panel { display: grid; gap: 6px; margin-bottom: 8px; padding: 10px; border-radius: 14px; background: var(--elevated); }
 .lobby-invite { display: flex; gap: 6px; }
@@ -1235,7 +1234,7 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 .replay-export { display: inline-flex; align-items: center; gap: 6px; }
 .replay-export svg, .replays-tools svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .replay-time { min-width: 92px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; text-align: center; }
-#replay-speed { padding: 6px; background: var(--elevated); color: var(--text); border: 1px solid var(--border); border-radius: 8px; }
+.game-select[data-for="replay-speed"] { min-height: 0; padding: 6px 8px; background: var(--elevated); color: var(--text); border: 1px solid var(--border); border-radius: 8px; }
 .home-actions #replays-open { grid-column: 1 / -1; min-height: 48px; font-size: 18px; }
 
 /* Replay library. */

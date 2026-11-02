@@ -117,7 +117,8 @@ function ububallOnline(hooks) {
   // Leaving tells the server, so the opponent isn't left waiting to claim a forfeit.
   async function leave() {
     const live = state && ['plan', 'resolving'].includes(state.phase);
-    if (live && !confirm(`Leaving ends the match and gives ${state.names[1 - state.seat] || 'your opponent'} the win. Leave?`)) return;
+    if (live && !await gameUi.confirm({ title: 'Leave match?', message: `Leaving ends the match and gives ${state.names[1 - state.seat] || 'your opponent'} the win.`,
+      confirmLabel: 'Leave', cancelLabel: 'Keep playing', danger: true })) return;
     stopped = true;
     if (id) await api('/api/ububall/' + id + '/leave', {}).catch(() => {});
     clearTimeout(retry); clearInterval(heartbeat); socket?.close(); socket = null; id = null; state = null;

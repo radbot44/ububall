@@ -23,6 +23,15 @@
 - Approved batch policy: default 1,000, configurable for subsequent batches. Prepare private random DNA/IDs/serials, distribute uniformly without replacement, sign on authorized allocation and start the next batch after exhaustion. Serial order is creation order. mint.js supplies atomic/idempotent allocation; mint-local.js is the Node SQLite adapter. worker.mjs supplies Durable Object storage and alarm scheduling, Discord OAuth and a configurable lifetime allowance (default 0). Enforce allowances in the allocation transaction. Never expose the internal service without authentication; see docs/mint.md and docs/worker.md.
 - Ed25519 and exact signing bytes are implemented; production trust distribution, key rotation and mint allowances remain design work. A public verification key must not grant minting authority. Test private keys remain ephemeral and must never be committed or configured as official mint keys.
 
+## This is a game: custom UI only
+
+- Owner requirement (2026-11-01): ububall is a game, played inside Discord Activities and shipped as a phone app, not a website. Every menu, dialog, dropdown, picker and confirmation must be custom-built and game-styled.
+- Never use browser UI: no `confirm()`, `alert()`, `prompt()`, native `<select>` popups or other browser-styled pickers. Use the shared components in `web/game-ui.js` (dialogs, anchored dropdowns, selects).
+- Dropdowns, menus and pickers overlay and drop down from their trigger. Never insert them inline so content moves.
+- Icons are Tabler icons from uburoom's set (`uburoom/web/icons.js`), shown as plain icons for small actions. Never use font or text symbols (arrows, ×, ✕, ▾, …) as icons. If a needed icon is missing, ask the owner, who adds icons and decides which to use. Use arrows on navigation buttons where they carry meaning.
+- Grids of choices show at most four per row.
+- The designer pages (`demo.html`, `voice.html`) are tools and are exempt for now.
+
 ## Implementation hygiene
 
 - Owner requirement: a lean mint with zero fluff in code, UI, dependencies, tooling and documentation. Every addition must serve a current requirement; do not build speculative functionality or extension infrastructure.

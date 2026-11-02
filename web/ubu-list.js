@@ -261,21 +261,7 @@
   }
 
   const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
-  // Tabler outline icons (MIT), as in uburoom's icon set.
-  const ICONS = {
-    heart: ['M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572'],
-    'info-circle': ['M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0', 'M12 9h.01', 'M11 12h1v4h1'],
-    'arrows-shuffle': ['M18 4l3 3l-3 3', 'M18 20l3 -3l-3 -3', 'M3 7h3a5 5 0 0 1 5 5a5 5 0 0 0 5 5h5', 'M21 7h-5a4.978 4.978 0 0 0 -3 1m-4 8a4.984 4.984 0 0 1 -3 1h-3']
-  };
-  function icon(name) {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
-    for (const d of ICONS[name]) {
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', d); svg.append(path);
-    }
-    return svg;
-  }
+  const icon = name => gameUi.icon(name);
   const heartIcon = () => icon('heart');
   const SORT_CHOICES = ['recent', 'favorite', 'rarity', 'ubuquity', 'serial', 'name', 'random', 'all', 'movement', 'physical', 'engagement', 'super', ...STATS];
   const NO_CHIP = ['recent', 'favorite', 'serial', 'name', 'random', 'grade'];
@@ -293,7 +279,7 @@
   function toolbar(state, onChange) {
     const search = el('input', { type: 'search', placeholder: 'Search, e.g. power>200 sort:size', className: 'ubu-search' });
     search.setAttribute('aria-label', 'Search ubus');
-    const help = el('button', { type: 'button', className: 'ubu-help-toggle', textContent: '?', title: 'Search help' });
+    const help = el('button', { type: 'button', className: 'ubu-help-toggle', title: 'Search help' }, icon('help'));
     help.setAttribute('aria-label', 'Search help');
     const select = el('select', { className: 'ubu-sort' });
     select.setAttribute('aria-label', 'Sort by');
@@ -324,37 +310,33 @@
     const gradeGroup = el('div', { className: 'ubu-chip-group' }, ...gradeChips), superGroup = el('div', { className: 'ubu-chip-group' }, ...superChips);
     gradeGroup.setAttribute('role', 'group'); gradeGroup.setAttribute('aria-label', 'Grade');
     superGroup.setAttribute('role', 'group'); superGroup.setAttribute('aria-label', 'Supers');
-    const panel = el('div', { className: 'ubu-chips', hidden: true }, gradeGroup, superGroup, clear);
+    const panel = el('div', { className: 'ubu-chips' }, gradeGroup, superGroup, clear);
     // Help examples add themselves to the search.
-    const helpPanel = el('dl', { className: 'ubu-help', hidden: true }, ...SEARCH_HELP.flatMap(([example, text]) => {
+    const helpPanel = el('dl', { className: 'ubu-help' }, ...SEARCH_HELP.flatMap(([example, text]) => {
       const button = el('button', { type: 'button', className: 'ubu-help-example', textContent: example });
       button.onclick = () => { state.query = (state.query.trim() + ' ' + example.split('  ')[0]).trim(); changed(false); search.focus(); };
       return [el('dt', {}, button), el('dd', { textContent: text })];
     }));
     const note = el('p', { className: 'ubu-query-note', hidden: true });
     note.setAttribute('role', 'status');
-    filters.onclick = () => { panel.hidden = !panel.hidden; update(); };
-    help.onclick = () => { helpPanel.hidden = !helpPanel.hidden; update(); };
     function update() {
       const query = parseQuery(state.query);
-      select.value = state.sort;
+      select.value = state.sort; sortUi?.sync();
       if (search.value !== state.query) search.value = state.query;
       if (shuffling(state, query)) {
         direction.replaceChildren(icon('arrows-shuffle'), 'Shuffle');
         direction.setAttribute('aria-label', 'Shuffle again');
       } else {
         const words = METRICS[state.sort].words || ['High–low', 'Low–high'], word = words[state.reverse ? 1 : 0];
-        direction.textContent = '⇅ ' + word;
+        direction.replaceChildren(icon('arrows-sort'), word);
         direction.setAttribute('aria-label', 'Order: ' + word + '. Reverse order');
       }
       favorites.setAttribute('aria-pressed', String(state.favoritesOnly));
       const count = state.grades.length + state.supers.length;
       filters.textContent = count ? `Filters (${count})` : 'Filters';
-      filters.setAttribute('aria-expanded', String(!panel.hidden));
-      help.setAttribute('aria-expanded', String(!helpPanel.hidden));
       for (const button of [...gradeChips, ...superChips]) button.update();
       note.hidden = !query.errors.length;
-      note.textContent = query.errors.length ? 'Not understood: ' + query.errors.join(' ') + ' (see ? for search terms)' : '';
+      note.textContent = query.errors.length ? 'Not understood: ' + query.errors.join(' ') + ' (see search help)' : '';
     }
     function changed(persist) { update(); onChange(persist); }
     let typing = 0;
@@ -365,9 +347,15 @@
       changed(true);
     };
     favorites.onclick = () => { state.favoritesOnly = !state.favoritesOnly; changed(true); };
-    update();
-    return el('div', { className: 'ubu-toolbar' }, el('div', { className: 'ubu-toolbar-row' }, el('span', { className: 'ubu-search-box' }, search, help),
+    // Filters and search help drop down over the list; the sort menu is a game dropdown too.
+    const bar = el('div', { className: 'ubu-toolbar' }, el('div', { className: 'ubu-toolbar-row' }, el('span', { className: 'ubu-search-box' }, search, help),
       select, direction, favorites, filters), note, helpPanel, panel);
+    let sortUi = null;
+    sortUi = gameUi.select(select);
+    gameUi.dropdown(filters, panel, { align: 'end' });
+    gameUi.dropdown(help, helpPanel);
+    update();
+    return bar;
   }
 
   // A tile's face: art box (empty, for the caller to fill), name, grade and caption, distinct

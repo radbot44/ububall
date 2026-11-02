@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark"><title>Ububall</title>
   <link rel="stylesheet" href="site.css"><link rel="stylesheet" href="ububall.css">
-  <script src="site-header.js" defer></script><script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script><script src="rarity.js" defer></script>
+  <script src="site-header.js" defer></script><script src="game-ui.js" defer></script><script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script><script src="rarity.js" defer></script>
   <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-replay.js" defer></script><script src="mp4.js" defer></script><script src="ububall-cpu-client.js" defer></script><script src="ububall-online.js" defer></script><script src="ubu-list.js" defer></script><script src="ububall.js" defer></script><script src="app.js" defer></script>
 </head>
 <body>
@@ -41,7 +41,7 @@
         <span class="mint-entry-badge">Ubu Mint</span>
         <p class="mint-entry-text">Discover new ubus, open packs, and build a collection for use in ububall.</p>
       </div>
-      <div class="mint-entry-links"><a class="mint-entry-cta" href="/mint">Open packs &rarr;</a><a class="mint-entry-link" href="/collection">Your collection</a></div>
+      <div class="mint-entry-links"><a class="mint-entry-cta" href="/mint">Open packs<i data-icon="arrow-narrow-right"></i></a><a class="mint-entry-link" href="/collection">Your collection</a></div>
     </aside>
   </section>
   <div class="arena-layout">
@@ -174,7 +174,7 @@ SOFTWARE.
     <nav class="pause-links" aria-label="Leave to"><a href="/mint">Ubu Mint</a><a href="/collection">Collection</a></nav>
   </dialog>
   <dialog id="replays-dialog" class="replays-dialog" aria-labelledby="replays-title">
-    <div class="online-heading"><div><h2 id="replays-title">Replays</h2><p id="replays-note"></p></div><button id="replays-close" class="icon-button" type="button" aria-label="Close replays">&#10005;</button></div>
+    <div class="online-heading"><div><h2 id="replays-title">Replays</h2><p id="replays-note"></p></div><button id="replays-close" class="icon-button" type="button" aria-label="Close replays"><i data-icon="x"></i></button></div>
     <div class="replays-tools">
       <!-- Tabler upload icon (MIT), as in uburoom web/icons.js. -->
       <label class="button quiet file-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 9l5 -5l5 5"/><path d="M12 4l0 12"/></svg>Import .ububall<input id="replays-import" type="file" accept=".ububall" multiple></label>
@@ -196,13 +196,13 @@ SOFTWARE.
     <div class="export-actions"><button id="export-close" type="button">Cancel</button></div>
   </dialog>
   <dialog id="share-dialog" class="export-dialog share-dialog" aria-labelledby="share-title">
-    <div class="online-heading"><h2 id="share-title">Share</h2><button id="share-close" class="icon-button" type="button" aria-label="Close share">&#10005;</button></div>
+    <div class="online-heading"><h2 id="share-title">Share</h2><button id="share-close" class="icon-button" type="button" aria-label="Close share"><i data-icon="x"></i></button></div>
     <canvas id="share-card" class="share-card" width="1080" height="980" aria-label="Share card of the moment on screen"></canvas>
     <label class="export-private"><input id="share-private" type="checkbox"><span><strong>Hide names</strong></span></label>
     <div class="export-actions"><button id="share-save" type="button">Save</button><button id="share-send" class="primary" type="button">Share</button></div>
   </dialog>
   <dialog id="stats-dialog" class="stats-dialog" aria-labelledby="stats-title">
-    <div class="online-heading"><h2 id="stats-title">Replay stats</h2><button id="stats-close" class="icon-button" type="button" aria-label="Close stats">&#10005;</button></div>
+    <div class="online-heading"><h2 id="stats-title">Replay stats</h2><button id="stats-close" class="icon-button" type="button" aria-label="Close stats"><i data-icon="x"></i></button></div>
     <p class="stats-label">Last touch on the ball</p>
     <div id="stats-control" class="stats-control"></div>
     <div id="stats-table" class="stats-table"></div>
@@ -211,7 +211,7 @@ SOFTWARE.
     <p class="stats-note">Top shot is the ball speed off that ubu's fastest touch. Skated is in rink lengths.</p>
   </dialog>
   <dialog id="roster-dialog" class="team-sheet" data-step="mode" aria-labelledby="roster-title">
-    <button id="cancel-roster" class="icon-button team-sheet-close" type="button" aria-label="Close">&#10005;</button>
+    <button id="cancel-roster" class="icon-button team-sheet-close" type="button" aria-label="Close"><i data-icon="x"></i></button>
     <section class="sheet-step mode-step" aria-labelledby="roster-title">
       <h2 id="roster-title" class="mode-logo"><img src="assets/ububall-logo.svg" alt="ububall"><span class="visually-hidden">: choose a mode</span></h2>
       <p class="mode-intro">Turn rules on to mix them. All off plays standard ububall.</p>
@@ -227,7 +227,7 @@ SOFTWARE.
       </fieldset>
     </section>
     <section class="sheet-step team-step" aria-labelledby="team-title">
-      <header class="team-step-head"><button id="team-back" class="quiet" type="button">&larr; Mode</button><div class="team-heading"><h2 id="team-title">Your team</h2><span id="team-mode" class="team-mode"></span></div></header>
+      <header class="team-step-head"><button id="team-back" class="quiet" type="button"><i data-icon="arrow-left"></i>Mode</button><div class="team-heading"><h2 id="team-title">Your team</h2><span id="team-mode" class="team-mode"></span></div></header>
       <div id="lobby-panel" class="lobby-panel" hidden>
         <div class="lobby-invite"><input id="online-invite" readonly aria-label="Invite link"><button id="online-copy" type="button">Copy invite</button><button id="online-share" type="button" hidden>Share</button></div>
         <p id="lobby-status" class="lobby-status" role="status"></p>
@@ -235,17 +235,16 @@ SOFTWARE.
         <div class="lobby-actions"><a id="lobby-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a><button id="lobby-leave" class="quiet" type="button">Leave match</button></div>
       </div>
       <div id="team-bar" class="team-bar" hidden>
-        <button id="team-prev" class="team-step-btn" type="button" aria-label="Previous saved team">&lsaquo;</button>
+        <button id="team-prev" class="team-step-btn" type="button" aria-label="Previous saved team"><i data-icon="chevron-left"></i></button>
         <select id="team-select" aria-label="Saved team"></select>
-        <button id="team-next" class="team-step-btn" type="button" aria-label="Next saved team">&rsaquo;</button>
+        <button id="team-next" class="team-step-btn" type="button" aria-label="Next saved team"><i data-icon="chevron-right"></i></button>
         <button id="team-save" type="button">Save team</button>
-        <button id="team-more" class="team-step-btn" type="button" popovertarget="team-menu" aria-label="More team actions">&hellip;</button>
-        <div id="team-menu" class="team-menu" popover><button id="team-save-new" type="button">Save as new team</button><button id="team-rename" type="button">Rename</button><button id="team-delete" type="button">Delete</button></div>
-        <form id="team-name-form" class="team-name-form" hidden><input id="team-name" maxlength="40" required aria-label="Team name" placeholder="Team name"><button class="primary" type="submit">Save</button><button id="team-name-cancel" class="quiet" type="button">Cancel</button></form>
+        <button id="team-more" class="team-step-btn" type="button" aria-label="More team actions"><i data-icon="dots"></i></button>
+        <div id="team-menu" class="team-menu"><button id="team-save-new" type="button">Save as new team</button><button id="team-rename" type="button">Rename</button><button id="team-delete" type="button">Delete</button></div>
       </div>
       <div id="roster-slots" class="formation" aria-label="Your team in kickoff formation"></div>
-      <div id="roster-super" class="roster-super" hidden>
-        <div class="roster-super-head"><h3 id="roster-super-title"></h3><button id="roster-super-close" class="quiet" type="button">Done</button></div>
+      <div id="roster-super" class="super-popover">
+        <div class="roster-super-head"><h3 id="roster-super-title"></h3><button class="formation-tool" type="button" popovertarget="roster-super" popovertargetaction="hide" aria-label="Close super choices"><i data-icon="x"></i></button></div>
         <div id="roster-super-grid" class="super-choice-grid"></div>
       </div>
       <p id="roster-hint" class="roster-hint" role="status"></p>
@@ -266,7 +265,7 @@ SOFTWARE.
     </section>
     <footer class="team-sheet-foot"><button id="sheet-next" class="primary" type="button">Next: choose team</button><button id="start-match" class="primary" type="button">Start match</button></footer>
   </dialog>
-  <dialog id="online-dialog" aria-labelledby="online-title"><div class="online-heading"><div><h2 id="online-title">Online Ububall</h2><p>One opponent. Three ubus. First to five.</p></div><button id="online-close" class="icon-button" aria-label="Close online settings">&#10005;</button></div>
+  <dialog id="online-dialog" aria-labelledby="online-title"><div class="online-heading"><div><h2 id="online-title">Online Ububall</h2><p>One opponent. Three ubus. First to five.</p></div><button id="online-close" class="icon-button" aria-label="Close online settings"><i data-icon="x"></i></button></div>
     <div id="online-create-controls">
       <p class="online-mode-line">Mode: <strong id="online-mode-name">Ububall</strong> <button id="online-mode-change" class="quiet" type="button">Change</button></p>
       <fieldset><legend>Teams</legend><div id="online-policy" class="online-options">
@@ -316,7 +315,7 @@ SOFTWARE.
         <button id="viewer-fav" class="icon-button card-heart" type="button" aria-label="Favorite" title="Favorite">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572"/></svg>
         </button>
-        <button id="close-viewer" class="icon-button" type="button" aria-label="Close viewer">×</button>
+        <button id="close-viewer" class="icon-button" type="button" aria-label="Close viewer"><i data-icon="x"></i></button>
       </div>
     </div>
     <div class="viewer-body">
@@ -350,7 +349,7 @@ SOFTWARE.
     </div>
   </dialog>
   <dialog id="reveal" aria-labelledby="reveal-title">
-    <div class="reveal-toolbar"><h2 id="reveal-title">Pack</h2><button id="pause-reveal" class="icon-button" aria-label="Close pack">×</button></div>
+    <div class="reveal-toolbar"><h2 id="reveal-title">Pack</h2><button id="pause-reveal" class="icon-button" aria-label="Close pack"><i data-icon="x"></i></button></div>
     <div class="reveal-layout">
       <button id="prev-ubu" class="icon-button" aria-label="Previous ubu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button>
       <div id="card-stage" class="card-stage"></div>
@@ -363,7 +362,7 @@ SOFTWARE.
   <dialog id="account-dialog" class="account-dialog" aria-labelledby="account-dialog-title">
     <div class="account-dialog-header">
       <h2 id="account-dialog-title">Account</h2>
-      <button id="account-close" class="icon-button" type="button" aria-label="Close account dialog">✕</button>
+      <button id="account-close" class="icon-button" type="button" aria-label="Close account dialog"><i data-icon="x"></i></button>
     </div>
     <div class="account-identities">
       <div class="account-provider-row">
