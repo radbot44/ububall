@@ -836,6 +836,16 @@ test('prediction stops at goals or its tick budget and respects stun and super c
   while (scored === null && goalTick < 480) { scored = P.step(live, P.DT); goalTick++; }
   assert.equal(goal.ticks, goalTick);
   assert.equal(goal.paths[6].at(-1).tick, goalTick);
+  assert.ok(goal.goalTargets);
+  assert.equal(goal.goalTargets.length, 7);
+  assert.equal(goal.goalTargets[6].index, 6);
+  // An ubu launched when a goal is scored continues its path past the goal tick
+  const movingUbu = P.kickoff();
+  Object.assign(movingUbu[6], { x: 945, y: 300, vx: 400 });
+  const movingPrediction = P.predictTurn(movingUbu, [{ angle: 0, power: 1, spin: 0 }]);
+  assert.equal(movingPrediction.goal, 0);
+  assert.equal(movingPrediction.paths[6].at(-1).tick, goalTick);
+  assert.ok(movingPrediction.paths[0].at(-1).tick > goalTick);
   const drifting = P.kickoff();
   Object.assign(drifting[6], { vx: 20, friction: 0 });
   assert.equal(P.predictTurn(drifting, []).ticks, 480);

@@ -150,8 +150,9 @@
   // Hit-stop in ms (tuning): `hit` for a real save, a spin strike or a big shot; `long` for a save of
   // a big shot, a spin strike that is also a big shot, or a big shot that will travel a rink height
   // untouched; `goal` for a big shot whose own path (no bounces, no ubus) goes into a goal; `iron` at
-  // least, for an Iron Save.
-  const HIT_STOP = Object.freeze({ hit: 60, long: 100, goal: 150, iron: 150 });
+  // least, for an Iron Save; `scoredGoal` for a scored goal.
+  const HIT_STOP = Object.freeze({ hit: 60, long: 100, goal: 150, iron: 150, scoredGoal: 200 });
+  const SCREEN_SHAKE = Object.freeze({ default: 1, goal: 2 });
   function bigShot(P, before, touched, ball) {
     if (touched.size !== 1) return false;
     const [i] = touched, b = before[i], dx = ball.x - b.x, dy = ball.y - b.y, d = Math.hypot(dx, dy) || 1;
@@ -263,7 +264,8 @@
     // A Cannonball hit always counts as a big shot.
     const speed = Math.hypot(ball.vx, ball.vy), big = cannon || bigShot(P, before, touched, ball), struck = Boolean(ball.spinStruck);
     const hasIron = tickSaves.some(s => s.iron);
-    const stop = effects ? Math.max(hasIron ? HIT_STOP.iron : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big)) : 0;
+    let stop = effects ? Math.max(hasIron ? HIT_STOP.iron : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big)) : 0;
+    if (effects && goal !== null) stop = Math.max(stop, HIT_STOP.scoredGoal);
     if (touched.size) play.big = big;
     if (tally) {
       const speedBefore = ballBefore ? Math.hypot(ballBefore.vx, ballBefore.vy) : 0;
@@ -465,6 +467,6 @@
     return { state: next, replay: { version: VERSION, turn: state.turn, plans, ticks, goal, scorer: call.scorer, assist: call.assist,
       label: call.label, saves: saved, struck, stops, initialBodies } };
   }
-  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, replaySpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, SAVE, FOULS, newFouls, inCrease, attackZoneLine, inAttackZone, camping, cornerOf, lapseFouls, BIG_SHOT, HIT_STOP, gainMeter, contactMeter, toucher, saves, credit, responsibleTeam, newPlay, newTally, playTick, callGoal, noteScore, honours, finishTurn, resolveTurn };
+  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, replaySpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, SAVE, FOULS, newFouls, inCrease, attackZoneLine, inAttackZone, camping, cornerOf, lapseFouls, BIG_SHOT, HIT_STOP, SCREEN_SHAKE, gainMeter, contactMeter, toucher, saves, credit, responsibleTeam, newPlay, newTally, playTick, callGoal, noteScore, honours, finishTurn, resolveTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallMatch = api;
 })(globalThis);

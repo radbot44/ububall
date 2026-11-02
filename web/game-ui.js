@@ -19,7 +19,8 @@
     'chevron-left': ['M15 6l-6 6l6 6'],
     'chevron-right': ['M9 6l6 6l-6 6'],
     dots: ['M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0', 'M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0', 'M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0'],
-    x: ['M18 6l-12 12', 'M6 6l12 12']
+    x: ['M18 6l-12 12', 'M6 6l12 12'],
+    target: ['M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0', 'M7 12a5 5 0 1 0 10 0a5 5 0 1 0 -10 0', 'M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0']
   };
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

@@ -430,6 +430,13 @@ test('hit-stop comes from the hitting ubu, longer for shots that travel or head 
   // A fast ball off a still ubu is not a big shot either.
   const ping=M.resolveTurn(P,shotState({x:400,y:200,vx:1000},{3:{x:520,y:200}}),Array.from({length:6},still));
   assert.deepEqual(ping.replay.stops,[]);
+  assert.equal(M.HIT_STOP.scoredGoal, 200);
+  assert.deepEqual(M.SCREEN_SHAKE, { default: 1, goal: 2 });
+  // Scoring a goal awards 200 ms hit-stop
+  const goalState = shotState({ x: 945, y: 300, vx: 400 });
+  const scored = M.resolveTurn(P, goalState, Array.from({ length: 6 }, still));
+  assert.equal(scored.replay.goal, 0);
+  assert.ok(scored.replay.stops.some(s => s.ms === M.HIT_STOP.scoredGoal));
 });
 
 test('resolving a turn without presentation effects gives the same match state', () => {

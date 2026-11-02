@@ -1062,6 +1062,7 @@
     const impacts = [], lastImpact = new Map(), guards = new Map(), ball = sim.find(b => b.team === -1);
     // Where and when the ball catches fire, if it is not already burning.
     let goal = null, ticks = 0, ignition = null, burning = ballOnFire(ball);
+    let goalTargets = null, goalTick = null;
     function recordImpact(b) {
       const index = sim.indexOf(b), last = lastImpact.get(index);
       if (last && (ticks - last.tick < 12 || Math.hypot(b.x - last.x, b.y - last.y) < 8)) return;
@@ -1071,21 +1072,41 @@
     }
     for (let tick = 1; tick <= PREDICTION_TICKS; tick++) {
       ticks = tick;
-      goal = step(sim, DT, (a, b, speed, impulse, plow, iron) => {
+      const stepGoal = step(sim, DT, (a, b, speed, impulse, plow, iron) => {
         recordImpact(a); recordImpact(b);
         const ubu = a === ball ? b : b === ball ? a : null, index = sim.indexOf(ubu);
         // A hit the fireball neither wins nor quenches leaves its fire as it was before the hit.
         if (ubu?.guarding && !guards.has(index) && (plow || iron || ballOnFire(ball))) guards.set(index, !plow);
       }, recordImpact);
+      if (goal === null && stepGoal !== null) {
+        goal = stepGoal;
+        goalTick = tick;
+        const ballIndex = sim.indexOf(ball);
+        goalTargets = sim.map((b, i) => ({ x: b.x, y: b.y, index: i, team: b.team }));
+        if (ball) {
+          ball.vx = 0; ball.vy = 0; ball.omega = 0;
+          if (ballIndex >= 0) paths[ballIndex].push({ x: ball.x, y: ball.y, tick });
+        }
+      }
+      if (goal !== null && ball && goalTargets) {
+        const ballTarget = goalTargets[sim.indexOf(ball)];
+        if (ballTarget) {
+          ball.vx = 0; ball.vy = 0; ball.omega = 0;
+          ball.x = ballTarget.x; ball.y = ballTarget.y;
+        }
+      }
       if (ball && !burning && ballOnFire(ball)) { burning = true; ignition = { x: ball.x, y: ball.y, tick }; }
-      const done = goal !== null || settled(sim) || tick === PREDICTION_TICKS;
+      const done = (goal !== null ? settled(sim.slice(0, 6)) : settled(sim)) || tick === PREDICTION_TICKS;
       if (tick % 4 === 0 || done) {
-        sim.forEach((b, i) => paths[i].push({ x: b.x, y: b.y, tick }));
+        sim.forEach((b, i) => {
+          if (goal !== null && b === ball) return;
+          paths[i].push({ x: b.x, y: b.y, tick });
+        });
       }
       if (done) break;
     }
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS,
-      guards: [...guards].map(([index, held]) => ({ index, held })), ignition };
+      guards: [...guards].map(([index, held]) => ({ index, held })), ignition, goalTargets, goalTick };
   }
   const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, ballOnFire, holder, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, superMastery, step, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;

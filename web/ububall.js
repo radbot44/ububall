@@ -25,7 +25,7 @@
   let isPortrait = false;
   let matchMode = 'standard', planDeadline = 0;
   // Each turn of the current play (motion since the field last rested), for goal replays.
-  let playSegments = [], goalReplay = null, goalReplayAt = 0;
+  let playSegments = [], goalReplay = null, goalReplayAt = 0, postGoal = null;
   // The replay viewer (see watchReplay), and the match being recorded for the replay library.
   let theater = null, recording = null, recordingOnline = false;
   // While a video export renders, effects and sounds run on its clock (ms) instead of the wall clock,
@@ -319,6 +319,7 @@
   }
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   function clearEffects() {
+    postGoal = null;
     trails.forEach(trail => { trail.length = 0; });
     particles.length = fireworks.length = shockwaves.length = 0;
     skids.length = skidState.length = burns.length = ripples.length = pings.length = popups.length = 0; burnState.path = null; fireTime = 0; quench();
@@ -1841,8 +1842,30 @@
       ctx.fill(IGNITION_FLAME); ctx.stroke(IGNITION_FLAME);
       ctx.restore();
     }
+    if (prediction.goalTargets) {
+      for (const target of prediction.goalTargets) {
+        if (target.team >= 0 && !prediction.paths[target.index].some(p => Math.hypot(p.x - prediction.paths[target.index][0].x, p.y - prediction.paths[target.index][0].y) > 3)) continue;
+        const isBall = target.team < 0;
+        const color = isBall ? '#f2efe9' : target.team === 0 ? home : away;
+        ctx.save();
+        ctx.translate(target.x, target.y);
+        if (isPortrait) ctx.rotate(Math.PI / 2);
+        ctx.beginPath();
+        ctx.arc(0, 0, 7.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(11, 13, 16, 0.75)';
+        ctx.fill();
+        ctx.scale(13 / 24, 13 / 24);
+        ctx.translate(-12, -12);
+        ctx.lineWidth = 1.8;
+        ctx.lineCap = ctx.lineJoin = 'round';
+        ctx.strokeStyle = color;
+        ctx.stroke(TARGET_ICON);
+        ctx.restore();
+      }
+    }
     for (const stop of prediction.stops) {
       if (!stop.stopped || !prediction.paths[stop.index].some(p => Math.hypot(p.x - stop.x, p.y - stop.y) > 3)) continue;
+      if (prediction.goalTargets?.some(t => t.index === stop.index && Math.hypot(t.x - stop.x, t.y - stop.y) < 5)) continue;
       const color = bodies[stop.index].team < 0 ? '#fff' : bodies[stop.index].team === 0 ? home : away;
       line(stop.x - 4, stop.y - 4, stop.x + 4, stop.y + 4, color, 2);
       line(stop.x + 4, stop.y - 4, stop.x - 4, stop.y + 4, color, 2);
@@ -1866,6 +1889,7 @@
   }
   const IGNITION_FLAME = new Path2D('M0 -9C4 -4 7 -1 7 3A7 7 0 0 1 -7 3C-7 -1 -4 -4 0 -9Z');
   const GUARD_SHIELD = new Path2D('M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3');
+  const TARGET_ICON = new Path2D('M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M7 12a5 5 0 1 0 10 0a5 5 0 1 0 -10 0 M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0');
   let themeColors = null;
   const themeObserver = new MutationObserver(() => { themeColors = null; if (skaters.length) draw(); });
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
@@ -2163,7 +2187,7 @@
     if (saves.length || struck) syncReplay();
     for (const s of saves) creditSave(replayView(sim[s.index]), s.own, s.iron);
     if (struck) popup(bodies[6], 'Spin strike!');
-    if (stop) impact(stop);
+    if (stop) impact(stop, stop >= (ububallMatch.HIT_STOP?.scoredGoal ?? 200) ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1));
   }
   // Replays re-simulate each recorded turn from its exact starting state on a display copy.
   // The goal replay and the replay viewer share these.
@@ -2187,6 +2211,7 @@
     syncReplay();
   }
   function startGoalReplay() {
+    postGoal = null;
     const segments = playSegments.filter(s => s.ticks);
     if (!segments.length || (online?.active && online.state?.phase !== 'resolving')) return;
     endGoalReplay();
@@ -3125,7 +3150,9 @@
         if (recording) { recording.final = { scores: [...scores], winner: goal }; saveRecording(); }
       }
       const scorer = bodies[call.scorer] || bodies.slice(goal * 3, goal * 3 + 3)[0];
-      goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
+      goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY + 400;
+      postGoal = { ballX: bodies[6].x, ballY: bodies[6].y, scoredAt: clockNow(), hitStopDoneAt: hitStopUntil };
+      bodies[6].vx = 0; bodies[6].vy = 0; bodies[6].omega = 0;
       scoringPlayer = scorer;
       const scorerName = scorer?.name || (goal === 0 ? 'Your ubu' : 'CPU ubu');
       goalTab(goal, call.label, call.own ? null : scorerName);
@@ -3153,6 +3180,7 @@
     }
     gameAudio()?.getAudioContext();
     if (phase === 'goal') {
+      postGoal = null;
       stopFanfare(); gameAudio()?.stop();
       endGoalReplay();
       bodies = kickoff(); turn++; phase = 'plan'; resetPlans(); say('Kickoff. Plan your next three launches.'); draw(); return;
@@ -3366,8 +3394,11 @@
   }
   const liveFx = { collide: handleCollision, wall: handleWall, shockwave: handleShockwave, super: handleSuper };
   // Hit-stop: play freezes for the tick's earned ms (see ububallMatch.HIT_STOP), and the rink gives
-  // a tiny shake.
-  function impact(ms) { hitStopUntil = clockNow() + ms; if (!reducedMotion.matches) shake = 1; }
+  // a tiny shake (or double shake for a scored goal).
+  function impact(ms, shakeLevel = (ububallMatch.SCREEN_SHAKE?.default ?? 1)) {
+    hitStopUntil = clockNow() + ms;
+    if (!reducedMotion.matches) shake = shakeLevel;
+  }
   function frame(time) {
     const delta = lastTime ? Math.max(0, (time - lastTime) / 1000) : 0; lastTime = time;
     // An open foul explanation holds local play (and the demo) still while it is read.
@@ -3387,23 +3418,48 @@
     if (!active) { lastTime = 0; accumulator = 0; }
     const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length || goalCall ||
       ripples.length || pings.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
-    // Effects pause with the replay viewer.
-    if (active && !theater?.paused) updateEffects(delta);
+    // Effects pause with the replay viewer, and in Pulse mode when time freezes between turns.
+    const pulseFrozen = pulseMode() && roundTurns > 0 && (phase === 'plan' || phase === 'cpu-wait' || phase === 'waiting');
+    if (active && !theater?.paused && !pulseFrozen) updateEffects(delta);
     if (theater) { if (active && !theater.exporting) advanceReplay(delta); }
-    else if (phase === 'play' && active && !online?.active) {
-      if (clockNow() < hitStopUntil) accumulator = 0; else accumulator += delta;
-      let steps = 0;
-      while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
-        const tick = ububallMatch.playTick(P, bodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
-        ububallMatch.lapseFouls(P, bodies, fouls); traceGuide(bodies);
-        for (const save of tick.saves) creditSave(bodies[save.index], save.own, Boolean(save.iron));
-        if (tick.struck) popup(bodies[6], 'Spin strike!');
-        if (tick.stop) { impact(tick.stop); accumulator = 0; }
-        noteEvents(Math.round(elapsed / P.DT), tick.saves, tick.stop);
-        recordTrails();
-        if (goal !== null || P.settled(bodies) || Math.round(elapsed / P.DT) >= ububallMatch.turnTicks(matchMode)) finishTurn(goal);
+    else if ((phase === 'play' || postGoal) && active && !online?.active) {
+      let effectiveDelta = delta;
+      if (postGoal) {
+        const postElapsed = Math.max(0, (clockNow() - postGoal.hitStopDoneAt) / 1000);
+        const speedFactor = postElapsed >= 0.3 ? 0.5 : 1 - (postElapsed / 0.3) * 0.5;
+        effectiveDelta = delta * speedFactor;
       }
-      if (phase === 'play') emitSkaterEffects(delta);
+      if (clockNow() < hitStopUntil) accumulator = 0; else accumulator += effectiveDelta;
+      let steps = 0;
+      while (steps++ < 48 && accumulator >= P.DT && (phase === 'play' || postGoal)) {
+        if (postGoal) {
+          elapsed += P.DT; accumulator -= P.DT;
+          bodies[6].x = postGoal.ballX; bodies[6].y = postGoal.ballY;
+          bodies[6].vx = 0; bodies[6].vy = 0; bodies[6].omega = 0;
+          P.step(bodies, P.DT, liveFx.collide, liveFx.wall, liveFx.shock, liveFx.super);
+          bodies[6].x = postGoal.ballX; bodies[6].y = postGoal.ballY;
+          bodies[6].vx = 0; bodies[6].vy = 0; bodies[6].omega = 0;
+          traceGuide(bodies);
+          recordTrails();
+          if (P.settled(bodies.slice(0, 6))) { postGoal = null; break; }
+        } else {
+          const tick = ububallMatch.playTick(P, bodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
+          ububallMatch.lapseFouls(P, bodies, fouls); traceGuide(bodies);
+          for (const save of tick.saves) creditSave(bodies[save.index], save.own, Boolean(save.iron));
+          if (tick.struck) popup(bodies[6], 'Spin strike!');
+          if (tick.stop) {
+            impact(tick.stop, goal !== null ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1));
+            accumulator = 0;
+          }
+          noteEvents(Math.round(elapsed / P.DT), tick.saves, tick.stop);
+          recordTrails();
+          if (goal !== null || P.settled(bodies) || Math.round(elapsed / P.DT) >= ububallMatch.turnTicks(matchMode)) {
+            finishTurn(goal);
+            if (goal !== null) break;
+          }
+        }
+      }
+      if (phase === 'play' || postGoal) emitSkaterEffects(delta);
       draw();
     } else if (goalReplay && active && !online?.active) advanceGoalReplay(delta);
     else if (active && (hadEffects || (!reducedMotion.matches && (foulsShowing() || bodies.some(b => b.meter >= 100 || b.superArm || b.superActive))))) draw();
@@ -4126,7 +4182,7 @@
       if (struck) popup(bodies[6], 'Spin strike!');
       // Hit-stop holds the replay clock back so the rest of the turn plays on after the pause.
       const stop = replay.stops?.find(s => s.tick === now)?.ms;
-      if (stop) { replay.paused = (replay.paused || 0) + stop; impact(stop); break; }
+      if (stop) { replay.paused = (replay.paused || 0) + stop; impact(stop, stop >= (ububallMatch.HIT_STOP?.scoredGoal ?? 200) ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1)); break; }
     }
     syncViewBodies();
     if (!replay.fouled) fouls = viewFouls(simFouls, online.state.seat);
