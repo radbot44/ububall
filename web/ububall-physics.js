@@ -226,19 +226,28 @@
     }
     if (before) countSlowing(b, before);
   }
-  function triggerShockwave(source, bodies, onShockwave) {
+  function triggerShockwave(source, bodies, onShockwave, inRange = null) {
     const radius = SUPER.shockRadius;
-    const sourceTeam = source.team;
-    for (const b of bodies) {
-      const isTeammate = sourceTeam !== undefined && b.team !== undefined && b.team === sourceTeam;
-      if (b === source || b.team === -1 || isTeammate || b.superActive === 'stalwart' || b.carded) continue;
-      const dx = b.x - source.x, dy = b.y - source.y, d2 = dx * dx + dy * dy;
-      if (d2 > 0 && d2 < radius * radius) {
-        const d = Math.sqrt(d2);
+    if (inRange) {
+      for (const { opp, d, dx, dy } of inRange) {
         const force = (1 - d / radius) * SUPER.shockForce;
-        const m = b.mass || 1;
-        b.vx += (dx / d) * force / m;
-        b.vy += (dy / d) * force / m;
+        const m = opp.mass || 1;
+        opp.vx += (dx / d) * force / m;
+        opp.vy += (dy / d) * force / m;
+      }
+    } else {
+      const sourceTeam = source.team;
+      for (const b of bodies) {
+        const isTeammate = sourceTeam !== undefined && b.team !== undefined && b.team === sourceTeam;
+        if (b === source || b.team === -1 || isTeammate || b.superActive === 'stalwart' || b.carded) continue;
+        const dx = b.x - source.x, dy = b.y - source.y, d2 = dx * dx + dy * dy;
+        if (d2 > 0 && d2 < radius * radius) {
+          const d = Math.sqrt(d2);
+          const force = (1 - d / radius) * SUPER.shockForce;
+          const m = b.mass || 1;
+          b.vx += (dx / d) * force / m;
+          b.vy += (dy / d) * force / m;
+        }
       }
     }
     if (typeof onShockwave === 'function') onShockwave(source, radius);
@@ -286,11 +295,9 @@
     if (a.carded || b.carded) return;
     if (!isBall && a.team !== b.team && (a.superActive === 'ghost' || b.superActive === 'ghost')) return;
 
-    if (isBall) {
-      const player = a.team !== -1 ? a : b;
-      const ball = a.team === -1 ? a : b;
-      if (player.holding) return;
-    }
+    const ball = isBall ? (a.team === -1 ? a : b) : null;
+    const player = isBall ? (ball === a ? b : a) : null;
+    if (player?.holding) return;
 
     const ra = (isBall && a.team !== -1) ? ballHitRadius(a) : a.radius;
     const rb = (isBall && b.team !== -1) ? ballHitRadius(b) : b.radius;
@@ -300,24 +307,16 @@
     resolved++;
     const d = Math.sqrt(d2);
     // Pace (see HEAT): only the striking team's own ubus slow the ball without it counting.
-    const ballBody = isBall ? (a.team === -1 ? a : b) : null, ubu = ballBody && (ballBody === a ? b : a);
-    const own = Boolean(ubu) && ubu.team === ballBody.strikerTeam, hot = ballOnFire(ballBody);
-    const drive = ubu ? (ubu.vx * (ballBody.x - ubu.x) + ubu.vy * (ballBody.y - ubu.y)) / (d || 1) : 0;
-    // Any ubu contact consumes the opening shot, even a stationary touch. Capture the striker's
-    // remaining spin before contact friction changes it; no rebound can re-arm it. The bonus spins
-    // the ball against the ubu, the way contact friction already does, like meshing gears.
-    // Close in, the strike also drives the ball harder, in proportion to the ubu's spin and speed,
-    // so a heavily spun shot still travels.
+    const own = Boolean(player) && player.team === ball.strikerTeam, hot = ballOnFire(ball);
+    const drive = player ? (player.vx * (ball.x - player.x) + player.vy * (ball.y - player.y)) / (d || 1) : 0;
     let closeSpin = 0, strikeBoost = 0;
     if (isBall) {
-      const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
       if (player.superActive) {
         if (['cannonball', 'sticky', 'magnet', 'ghost', 'stalwart', 'colossus'].includes(player.superActive)) {
           player.superHit = true;
         }
       }
       if (ball.openingShot && player.spinStrike) {
-        // Smaller ubus strike harder; Curve passes on more spin.
         const small = (player.sizeMult || 1) ** SIZE.strike;
         closeSpin = -player.spinStrike * player.omega * small * (player.curveMult || 1);
         strikeBoost = small * STRIKE_POWER * (player.spinStrike - STRIKE_GAIN) * Math.min(1, Math.abs(player.omega) / player.maxSpin) * Math.hypot(player.vx, player.vy);
@@ -325,7 +324,7 @@
       if (closeSpin && allBodies?.some(other => other.team >= 0 && other !== player && !other.carded &&
           (other.x - ball.x) ** 2 + (other.y - ball.y) ** 2 <= (ballHitRadius(other) + ball.radius) ** 2)) closeSpin = strikeBoost = 0;
       ball.openingShot = false;
-    } else a.spinStrike = b.spinStrike = 0; // Touching another ubu first spends both strikes.
+    } else a.spinStrike = b.spinStrike = 0;
 
     let knockoutChecker = null;
     if (!isBall && a.team !== b.team) {
@@ -348,43 +347,38 @@
     // ordinary energy bound still holds.
     let fireWin = null, ironSave = false;
 
-    if (isBall) {
-      const player = a.team !== -1 ? a : b;
-      const ball = a.team === -1 ? a : b;
-      if (player.superActive === 'sticky') {
-        for (const o of allBodies || []) o.holding = false;
-        player.holding = true; ball.stuckTicks = 0;
-        onSuper?.('sticky', 'impact', player, ball);
-        // An opponent's Sticky smothers the ball; a teammate's keeps it as hot as it was.
-        if (!own) { ball.onFire = false; ball.fireTicks = 0; ball.pace = 0; }
-        const ox = ball.x - player.x, oy = ball.y - player.y, od = Math.sqrt(ox * ox + oy * oy) || 1;
-        const targetDist = player.radius + ball.radius;
-        ball.stickOffset = { x: (ox / od) * targetDist, y: (oy / od) * targetDist };
-        ball.x = player.x + ball.stickOffset.x;
-        ball.y = player.y + ball.stickOffset.y;
-        if (player.superActive !== 'stalwart') {
-          const totalMass = player.mass + ball.mass;
-          player.vx = (player.vx * player.mass + ball.vx * ball.mass) / totalMass;
-          player.vy = (player.vy * player.mass + ball.vy * ball.mass) / totalMass;
-        }
-        ball.vx = player.vx;
-        ball.vy = player.vy;
-        ball.omega = player.omega;
-        if (typeof onCollide === 'function') onCollide(a, b, Math.max(0, -closing), 0);
-        return;
+    if (isBall && player.superActive === 'sticky') {
+      for (const o of allBodies || []) o.holding = false;
+      player.holding = true; ball.stuckTicks = 0;
+      onSuper?.('sticky', 'impact', player, ball);
+      // An opponent's Sticky smothers the ball; a teammate's keeps it as hot as it was.
+      if (!own) { ball.onFire = false; ball.fireTicks = 0; ball.pace = 0; }
+      const ox = ball === b ? dx : -dx, oy = ball === b ? dy : -dy, od = d || 1;
+      const targetDist = player.radius + ball.radius;
+      ball.stickOffset = { x: (ox / od) * targetDist, y: (oy / od) * targetDist };
+      ball.x = player.x + ball.stickOffset.x;
+      ball.y = player.y + ball.stickOffset.y;
+      if (player.superActive !== 'stalwart') {
+        const totalMass = player.mass + ball.mass;
+        player.vx = (player.vx * player.mass + ball.vx * ball.mass) / totalMass;
+        player.vy = (player.vy * player.mass + ball.vy * ball.mass) / totalMass;
       }
+      ball.vx = player.vx;
+      ball.vy = player.vy;
+      ball.omega = player.omega;
+      if (typeof onCollide === 'function') onCollide(a, b, Math.max(0, -closing), 0);
+      return;
     }
 
     if (isBall) {
-      const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
       const isFire = ballOnFire(ball);
+      const ballSpeed = Math.hypot(ball.vx, ball.vy);
       const isTeammate = ball.strikerTeam !== undefined && ball.strikerTeam >= 0 && ball.strikerTeam === player.team;
-      const isFriendlyPass = isTeammate && !isFire && (Math.hypot(ball.vx, ball.vy) >= 175 || (ball.pace || 0) >= 175);
+      const isFriendlyPass = isTeammate && !isFire && (ballSpeed >= 175 || (ball.pace || 0) >= 175);
       if ((isFire || isFriendlyPass) && player.superActive !== 'cannonball' && closing < 0) {
         const pbx = ball.x - player.x, pby = ball.y - player.y;
         const pbDist = Math.hypot(pbx, pby) || 1;
         const pnx = pbx / pbDist, pny = pby / pbDist;
-        const ballSpeed = Math.hypot(ball.vx, ball.vy);
         if (ballSpeed > 50) {
           const bux = ball.vx / ballSpeed, buy = ball.vy / ballSpeed;
           // How squarely the ball meets the ubu, from its heading against the line to the ubu's centre (1 head-on).
@@ -517,7 +511,6 @@
     }
 
     if (cannon) {
-      const ball = a.team === -1 ? a : b;
       ball.vx += cannonImpulse * nx / ball.mass;
       ball.vy += cannonImpulse * ny / ball.mass;
       cannon.superActive = null;
@@ -527,17 +520,16 @@
       ball.strikerTeam = cannon.team;
       onSuper?.('cannonball', 'impact', cannon, ball);
     } else if (isBall && closing < 0 && fireWin === null) {
-      const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
       ball.strikerPower = player.power || 1;
       ball.strikerTeam = player.team;
     }
 
     // The ball curves as the ubu that last struck it would: Curve shapes shots too. An ubu the
     // fireball overpowered did not strike it, so the shot keeps its striker and curve.
-    if (isBall && fireWin === null) (a.team === -1 ? a : b).curveFactor = BALL_CURVE * ((a.team === -1 ? b : a).curveMult || 1);
+    if (isBall && fireWin === null) ball.curveFactor = BALL_CURVE * (player.curveMult || 1);
 
     if (closeSpin) {
-      const ball = a.team === -1 ? a : b, away = ball === b ? 1 : -1;
+      const away = ball === b ? 1 : -1;
       ball.omega = Math.max(-24, Math.min(24, ball.omega + closeSpin));
       // The boost follows the ball's new heading, or straight off the ubu if it was stopped dead.
       const speed = Math.hypot(ball.vx, ball.vy);
@@ -548,13 +540,13 @@
     if (ironSave) {
       for (const body of [a, b]) { body.vx *= IRON_KEEP; body.vy *= IRON_KEEP; body.omega *= IRON_KEEP; }
     }
-    if (ballBody) {
-      const speed = Math.hypot(ballBody.vx, ballBody.vy), pace = ballBody.pace || 0;
-      if (!own) ballBody.pace = speed;
+    if (ball) {
+      const speed = Math.hypot(ball.vx, ball.vy), pace = ball.pace || 0;
+      if (!own) ball.pace = speed;
       else if (hot && drive >= HOT_DRIVE && pace > speed) {
         // A hot shot leaves at the ball's pace, along its new heading or straight off the ubu.
-        const ux = speed ? ballBody.vx / speed : (ballBody.x - ubu.x) / (d || 1), uy = speed ? ballBody.vy / speed : (ballBody.y - ubu.y) / (d || 1);
-        ballBody.vx = ux * pace; ballBody.vy = uy * pace;
+        const ux = speed ? ball.vx / speed : (ball.x - player.x) / (d || 1), uy = speed ? ball.vy / speed : (ball.y - player.y) / (d || 1);
+        ball.vx = ux * pace; ball.vy = uy * pace;
       }
     }
 
@@ -628,7 +620,7 @@
           if (inRange.length > 0) {
             b.shockwaveFired = true;
             b.superHit = true;
-            triggerShockwave(b, bodies, onShockwave);
+            triggerShockwave(b, bodies, onShockwave, inRange);
           }
         } else {
           for (const { opp, d, dx, dy } of inRange) {
@@ -787,7 +779,9 @@
     for (const b of bodies) if (b.holding) return b;
     return null;
   }
-  function settled(bodies) { return bodies.every(b => b.vx * b.vx + b.vy * b.vy < 4 && Math.abs(b.omega) < .05); }
+  function settled(bodies, ignoreBall = false) {
+    return bodies.every(b => (ignoreBall && b.team === -1) || (b.vx * b.vx + b.vy * b.vy < 4 && Math.abs(b.omega) < .05));
+  }
   // Ends turn effects; keepMotion leaves velocities for a Pulse turn that ends mid-motion.
   function stop(bodies, keepMotion = false) {
     for (const b of bodies) {
@@ -882,7 +876,8 @@
       const d = Math.hypot(b.x - ball.x, b.y - ball.y);
       return -d + (b.x >= ball.x - 10 ? 75 : -45) + (agg - 0.5) * 110 + Math.max(0, surge) * 35 - (b.stunned ? 10000 : 0);
     };
-    const strikerIdx = [0, 1, 2].reduce((best, i) => strikeScore(i) > strikeScore(best) ? i : best, 0);
+    const s0 = strikeScore(0), s1 = strikeScore(1), s2 = strikeScore(2);
+    const strikerIdx = s1 > s0 ? (s2 > s1 ? 2 : 1) : (s2 > s0 ? 2 : 0);
     const rem = [0, 1, 2].filter(i => i !== strikerIdx);
 
     const anchorScore = i => {
@@ -902,7 +897,7 @@
       const { agg, cre, tmw, surge } = traits[idx];
       const sKey = b.equippedSuper?.key || b.superKey;
       const canSuper = (b.meter ?? 0) >= 100 && !b.stunned;
-      const reachR = Math.max(b.radius, b.reach || b.radius, 18);
+      const reachR = ballHitRadius(b);
       const contactDist = reachR + ball.radius - 2;
       const dBall = Math.hypot(b.x - ball.x, b.y - ball.y);
 
@@ -922,7 +917,7 @@
           }
         } else {
           const humanGoalie = humans.reduce((best, h) =>
-            Math.hypot(h.x - 120, h.y - 300) < Math.hypot(best.x - 120, best.y - 300) ? h : best, humans[0]);
+            (h.x - 120) ** 2 + (h.y - 300) ** 2 < (best.x - 120) ** 2 + (best.y - 300) ** 2 ? h : best, humans[0]);
           const cornerY = humanGoalie && humanGoalie.y >= 300 ? 252 : 348;
           const baseGoalY = 300 + Math.max(-34, Math.min(34, (ball.y - 300) * 0.22));
           const goalY = baseGoalY + (cornerY - baseGoalY) * Math.max(0, Math.min(1, surge * 0.75 + cre * 0.25));
@@ -989,7 +984,7 @@
         }
       } else {
         const nearestThreat = humans.reduce((best, h) =>
-          Math.hypot(h.x - ball.x, h.y - ball.y) < Math.hypot(best.x - ball.x, best.y - ball.y) ? h : best, humans[0]);
+          (h.x - ball.x) ** 2 + (h.y - ball.y) ** 2 < (best.x - ball.x) ** 2 + (best.y - ball.y) ** 2 ? h : best, humans[0]);
         const dThreat = nearestThreat ? Math.hypot(b.x - nearestThreat.x, b.y - nearestThreat.y) : 999;
 
         if (nearestThreat && (agg > tmw + 0.18 || (canSuper && (sKey === 'knockout' || sKey === 'shockwave'))) && dThreat < 280 && nearestThreat.x > 280) {
@@ -1081,8 +1076,7 @@
     const paths = sim.map(b => [{ x: b.x, y: b.y, tick: 0 }]);
     // Each guarding ubu a burning ball first hits, by index: true if it holds (an Iron Save, or a
     // teammate's fireball it is not overpowered by), false if the fireball beats it.
-    const impacts = [], lastImpact = new Map(), guards = new Map(), ball = sim.find(b => b.team === -1);
-    // Where and when the ball catches fire, if it is not already burning.
+    const impacts = [], lastImpact = new Map(), guards = new Map(), ball = sim.find(b => b.team === -1), ballIndex = sim.indexOf(ball);
     let goal = null, ticks = 0, ignition = null, burning = ballOnFire(ball);
     let goalTargets = null, goalTick = null;
     function recordImpact(b) {
@@ -1092,14 +1086,13 @@
       lastImpact.set(index, marker);
       impacts.push(marker);
     }
+    const onCollide = (a, b, speed, impulse, plow, iron) => {
+      recordImpact(a); recordImpact(b);
+      const ubu = a === ball ? b : b === ball ? a : null, index = sim.indexOf(ubu);
+      if (ubu?.guarding && !guards.has(index) && (plow || iron || ballOnFire(ball))) guards.set(index, !plow);
+    };
     for (let tick = 1; tick <= PREDICTION_TICKS; tick++) {
       ticks = tick;
-      const onCollide = (a, b, speed, impulse, plow, iron) => {
-        recordImpact(a); recordImpact(b);
-        const ubu = a === ball ? b : b === ball ? a : null, index = sim.indexOf(ubu);
-        // A hit the fireball neither wins nor quenches leaves its fire as it was before the hit.
-        if (ubu?.guarding && !guards.has(index) && (plow || iron || ballOnFire(ball))) guards.set(index, !plow);
-      };
       if (goal !== null) {
         stepPostGoal(sim, DT, onCollide, recordImpact);
       } else {
@@ -1107,13 +1100,12 @@
         if (stepGoal !== null) {
           goal = stepGoal;
           goalTick = tick;
-          const ballIndex = sim.indexOf(ball);
           goalTargets = sim.map((b, i) => ({ x: b.x, y: b.y, index: i, team: b.team }));
           if (ball && ballIndex >= 0) paths[ballIndex].push({ x: ball.x, y: ball.y, tick });
         }
       }
       if (ball && !burning && ballOnFire(ball)) { burning = true; ignition = { x: ball.x, y: ball.y, tick, team: ball.strikerTeam }; }
-      const done = (goal !== null ? settled(sim.slice(0, 6)) : settled(sim)) || tick === PREDICTION_TICKS;
+      const done = settled(sim, goal !== null) || tick === PREDICTION_TICKS;
       if (tick % 4 === 0 || done) {
         sim.forEach((b, i) => {
           if (goal !== null && b === ball) return;

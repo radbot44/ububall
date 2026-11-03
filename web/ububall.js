@@ -420,8 +420,7 @@
     if (moving) for (const s of burns) s.age += dt;
     for (let i = burns.length - 1; i >= 0; i--) if (burns[i].age >= BURN_LIFE) burns.splice(i, 1);
     for (const list of [ripples, pings]) {
-      for (const e of list) e.life -= dt;
-      for (let i = list.length - 1; i >= 0; i--) if (list[i].life <= 0) list.splice(i, 1);
+      for (let i = list.length - 1; i >= 0; i--) if ((list[i].life -= dt) <= 0) list.splice(i, 1);
     }
     const threat = moving ? goalThreat() : null;
     for (const side of [0, 1]) danger[side] += ((threat?.side === side ? threat.level : 0) - danger[side]) * Math.min(1, dt * 10);
@@ -673,8 +672,7 @@
   }
   function updatePopups(dt) {
     if (reducedMotion.matches) { popups.length = 0; return; }
-    for (const p of popups) p.life -= dt;
-    for (let i = popups.length - 1; i >= 0; i--) if (popups[i].life <= 0) popups.splice(i, 1);
+    for (let i = popups.length - 1; i >= 0; i--) if ((popups[i].life -= dt) <= 0) popups.splice(i, 1);
   }
   function drawPopups(home, away) {
     for (const p of popups) {
@@ -755,18 +753,25 @@
     const result = { crease: [false, false], corner: false, left: new Set() };
     if (!fouls.crease[0] && !fouls.crease[1] && !stalling()) return result;
     const copy = structuredClone(fouls), samples = Math.max(...prediction.paths.map(path => path.length));
+    const meta = bodies.map((b, i) => {
+      const plan = plans[i];
+      const stalwartArmed = Boolean(plan?.superArm || b.superArm) && (b.meter ?? 0) >= 100 && (b.equippedSuper?.key === 'stalwart' || b.superKey === 'stalwart');
+      return {
+        team: b.team,
+        radius: b.radius,
+        superActive: b.superActive === 'stalwart' || stalwartArmed ? 'stalwart' : b.superActive,
+        wasCreasing: i < 6 && fouls.crease[b.team] && isCreasing(b, b.team)
+      };
+    });
     for (let k = 1; k < samples; k++) {
-      const field = bodies.map((b, i) => {
+      const field = meta.map((m, i) => {
         const path = prediction.paths[i], at = path[Math.min(k, path.length - 1)];
-        const plan = plans[i];
-        const stalwartArmed = Boolean(plan?.superArm || b.superArm) && (b.meter ?? 0) >= 100 && (b.equippedSuper?.key === 'stalwart' || b.superKey === 'stalwart');
-        const superActive = b.superActive === 'stalwart' || stalwartArmed ? 'stalwart' : b.superActive;
-        return { team: b.team, radius: b.radius, x: at.x, y: at.y, superActive };
+        return { team: m.team, radius: m.radius, x: at.x, y: at.y, superActive: m.superActive };
       });
       ububallMatch.lapseFouls(P, field, copy);
-      field.slice(0, 6).forEach((b, i) => {
-        if (fouls.crease[b.team] && isCreasing(bodies[i], b.team) && !isCreasing(b, b.team)) result.left.add(i);
-      });
+      for (let i = 0; i < 6; i++) {
+        if (meta[i].wasCreasing && !isCreasing(field[i], meta[i].team)) result.left.add(i);
+      }
     }
     result.crease = [0, 1].map(team => fouls.crease[team] && !copy.crease[team]);
     result.corner = stalling() && copy.corner === null;
@@ -1056,7 +1061,7 @@
           const s = length > 0 ? positions[k] / length : k / m;
           const f = k === 0 && S0.origIndex === 0 ? 0 : L[k].fade;
           if (b.team === -1) {
-            const h = sec[k].isHead ? ballHeat(b) : L[k].heat;
+            const h = L[k].heat;
             const base = 0.23 + Math.min(2, h) * 0.05 + Math.max(0, h - 2) * 0.3;
             const alpha = 1 - Math.pow(1 - Math.min(0.99, base * f), 18 * f);
             grad.addColorStop(s, heatColor(h, alpha));
@@ -1470,19 +1475,22 @@
       ['Engagement', '#ff9954', ['power', 'reach', 'strength', 'stability']],
       ['Super', '#ff7197', ['efficiency', 'synergy', 'chemistry']]
     ];
-    const compactBox = document.createElement('div'); compactBox.className = 'ubu-stats compact-stats';
-    for (const [label, color, keys] of groups) {
-      const avg = Math.round(keys.reduce((sum, k) => sum + (statSource[k] ?? 127), 0) / keys.length);
+    const makeStatRow = (label, val, color) => {
       const row = document.createElement('div'); row.className = 'stat-row';
       const name = document.createElement('span'); name.className = 'stat-lbl'; name.textContent = label;
       const track = document.createElement('div'); track.className = 'stat-track';
       const fill = document.createElement('i');
-      fill.style.width = `${Math.min(100, Math.max(0, Math.round(avg / 255 * 100)))}%`;
+      fill.style.width = `${Math.min(100, Math.max(0, Math.round(val / 255 * 100)))}%`;
       fill.style.backgroundColor = color;
       track.append(fill);
-      const valSpan = document.createElement('span'); valSpan.className = 'stat-val'; valSpan.textContent = String(avg);
+      const valSpan = document.createElement('span'); valSpan.className = 'stat-val'; valSpan.textContent = String(val);
       row.append(name, track, valSpan);
-      compactBox.append(row);
+      return row;
+    };
+    const compactBox = document.createElement('div'); compactBox.className = 'ubu-stats compact-stats';
+    for (const [label, color, keys] of groups) {
+      const avg = Math.round(keys.reduce((sum, k) => sum + (statSource[k] ?? 127), 0) / keys.length);
+      compactBox.append(makeStatRow(label, avg, color));
     }
     const fullBox = document.createElement('div'); fullBox.className = 'ubu-stats full-stats';
     for (const [groupName, color, keys] of groups) {
@@ -1492,18 +1500,7 @@
       groupHeading.style.color = color;
       fullBox.append(groupHeading);
       for (const k of keys) {
-        const val = statSource[k] ?? 127;
-        const row = document.createElement('div'); row.className = 'stat-row';
-        const name = document.createElement('span'); name.className = 'stat-lbl';
-        name.textContent = k[0].toUpperCase() + k.slice(1);
-        const track = document.createElement('div'); track.className = 'stat-track';
-        const fill = document.createElement('i');
-        fill.style.width = `${Math.min(100, Math.max(0, Math.round(val / 255 * 100)))}%`;
-        fill.style.backgroundColor = color;
-        track.append(fill);
-        const valSpan = document.createElement('span'); valSpan.className = 'stat-val'; valSpan.textContent = String(val);
-        row.append(name, track, valSpan);
-        fullBox.append(row);
+        fullBox.append(makeStatRow(k[0].toUpperCase() + k.slice(1), statSource[k] ?? 127, color));
       }
     }
     compactBox.setAttribute('aria-label', 'Category averages');
@@ -1675,7 +1672,6 @@
     });
     bodies.slice(0, 6).forEach((b, i) => {
       const pctNode = $(`super-pct-${i}`);
-      if (pctNode) pctNode.textContent = `${Math.round(b.meter || 0)}%`;
       const fillNode = $(`super-fill-${i}`);
       if (fillNode) setMeterFill(fillNode, b.meter);
       const textNode = $(`super-name-text-${i}`);
@@ -1699,7 +1695,6 @@
     if (hudSuperBtn && curB) {
       const s = curB.equippedSuper || P.SUPERS[0];
       const sName = s.displayName || s.name;
-      if (hudSuperText) hudSuperText.textContent = sName;
       if (hudSuperIcon && s?.icon) {
         if (hudSuperIcon.getAttribute('src') !== s.icon) hudSuperIcon.src = s.icon;
         if (hudSuperIcon.alt !== sName) hudSuperIcon.alt = sName;
@@ -2040,11 +2035,11 @@
     ctx.restore();
 
   }
-  function screenPoint(p) {
-    const r = canvas.getBoundingClientRect();
+  function boxPoint(r, p) {
     return isPortrait ? { x: r.left + p.y / 600 * r.width, y: r.top + (1 - p.x / 1000) * r.height }
       : { x: r.left + p.x / 1000 * r.width, y: r.top + p.y / 600 * r.height };
   }
+  const screenPoint = p => boxPoint(canvas.getBoundingClientRect(), p);
   function badgePoint(b) {
     return isPortrait ? { x: b.x - b.radius * .65, y: b.y - b.radius * .65 } : { x: b.x - b.radius * .65, y: b.y + b.radius * .65 };
   }
@@ -2065,11 +2060,7 @@
       stageWidth: stage.width, stageHeight: stage.height, controlWidth: control.offsetWidth, controlHeight: control.offsetHeight };
   }
   // A field point in the stage's coordinates (screenPoint, without reading the page).
-  function stagePoint(p) {
-    const r = fieldBox;
-    return isPortrait ? { x: r.left + p.y / 600 * r.width, y: r.top + (1 - p.x / 1000) * r.height }
-      : { x: r.left + p.x / 1000 * r.width, y: r.top + p.y / 600 * r.height };
-  }
+  const stagePoint = p => boxPoint(fieldBox, p);
   function positionSpinControl() {
     const control = $('field-spin');
     control.hidden = false;
@@ -2249,42 +2240,26 @@
     availW = Math.max(120, availW);
     availH = Math.max(120, availH);
 
+    const targetRatio = isPortrait ? 3 / 5 : 5 / 3;
+    let stageW, stageH;
+    if (availW / availH > targetRatio) {
+      stageH = Math.floor(availH);
+      stageW = Math.floor(stageH * targetRatio);
+    } else {
+      stageW = Math.floor(availW);
+      stageH = Math.floor(stageW / targetRatio);
+    }
+
+    rinkStage.style.width = stageW + 'px';
+    rinkStage.style.height = stageH + 'px';
+
     if (isPortrait) {
-      const targetRatio = 3 / 5;
-      let stageW, stageH;
-      if (availW / availH > targetRatio) {
-        stageH = Math.floor(availH);
-        stageW = Math.floor(stageH * targetRatio);
-      } else {
-        stageW = Math.floor(availW);
-        stageH = Math.floor(stageW / targetRatio);
-      }
-
-      const wrapW = stageH;
-      const wrapH = stageW;
-
-      rinkStage.style.width = stageW + 'px';
-      rinkStage.style.height = stageH + 'px';
-
-      rinkWrap.style.width = wrapW + 'px';
-      rinkWrap.style.height = wrapH + 'px';
+      rinkWrap.style.width = stageH + 'px';
+      rinkWrap.style.height = stageW + 'px';
       rinkWrap.style.top = '50%';
       rinkWrap.style.left = '50%';
       rinkWrap.style.transform = 'translate(-50%, -50%) rotate(-90deg)';
     } else {
-      const targetRatio = 5 / 3;
-      let stageW, stageH;
-      if (availW / availH > targetRatio) {
-        stageH = Math.floor(availH);
-        stageW = Math.floor(stageH * targetRatio);
-      } else {
-        stageW = Math.floor(availW);
-        stageH = Math.floor(stageW / targetRatio);
-      }
-
-      rinkStage.style.width = stageW + 'px';
-      rinkStage.style.height = stageH + 'px';
-
       rinkWrap.style.width = '100%';
       rinkWrap.style.height = '100%';
       rinkWrap.style.top = '';
@@ -2564,12 +2539,13 @@
   }
   // Replays re-simulate each recorded turn from its exact starting state on a display copy.
   // The goal replay and the replay viewer share these.
-  const shown = () => goalReplay || theater;
-  const replayView = cb => toViewBody(cb, shown().sim, shown().seat);
-  const syncReplay = () => syncViewBodies(shown().sim, shown().seat);
+  const shownSim = () => (goalReplay || theater)?.sim ?? onlineReplay?.simBodies;
+  const shownSeat = () => (goalReplay || theater ? (goalReplay || theater).seat : online?.state?.seat);
+  const replayView = cb => toViewBody(cb, shownSim(), shownSeat());
+  const syncReplay = () => syncViewBodies(shownSim(), shownSeat());
   const replayFx = {
     hit: (a, b, speed, impulse, plow = false, iron = false) => { syncReplay(); handleCollision(replayView(a), replayView(b), speed, impulse, plow, iron); },
-    wall: (body, velocity, wallType, nx, ny) => { syncReplay(); handleWall(replayView(body), velocity, wallType, shown().seat ? -nx : nx, shown().seat ? -ny : ny); },
+    wall: (body, velocity, wallType, nx, ny) => { syncReplay(); const seat = shownSeat(); handleWall(replayView(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny); },
     shock: (source, radius, type = null) => { syncReplay(); handleShockwave(replayView(source), radius, type); },
     super: (key, stage, body, target = null) => { syncReplay(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
   };
@@ -4554,23 +4530,6 @@
       }
     });
   }
-  function replayCollision(a, b, speed, impulse, plow = false, iron = false) {
-    syncViewBodies();
-    handleCollision(toViewBody(a), toViewBody(b), speed, impulse, plow, iron);
-  }
-  function replayWall(body, velocity, wallType, nx, ny) {
-    syncViewBodies();
-    const seat = online?.state?.seat;
-    handleWall(toViewBody(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny);
-  }
-  function replayShockwave(source, radius, type = null) {
-    syncViewBodies();
-    handleShockwave(toViewBody(source), radius, type);
-  }
-  function replaySuper(key, phase, body, target = null) {
-    syncViewBodies();
-    handleSuper(key, phase, toViewBody(body), target ? toViewBody(target) : null);
-  }
   function playOnlineReplay() {
     const replay = onlineReplay;
     if (!replay || !replay.simBodies) return;
@@ -4589,7 +4548,7 @@
     }
 
     while (replay.currentTick < targetTick) {
-      P.step(replay.simBodies, P.DT, replayCollision, replayWall, replayShockwave, replaySuper); traceGuide(replay.simBodies);
+      P.step(replay.simBodies, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super); traceGuide(replay.simBodies);
       replay.currentTick++;
       ububallMatch.lapseFouls(P, replay.simBodies, simFouls);
       const now = replay.currentTick, saves = (replay.saves || []).filter(s => s.tick === now), struck = replay.struck?.includes(now);
@@ -4614,12 +4573,12 @@
         if (!replay.goalPlayed) {
           replay.goalPlayed = true;
           goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
-          const toView = index => index === null || index === undefined ? null : online.state.seat ? (index < 3 ? index + 3 : index - 3) : index;
+          const toView = index => index == null ? null : viewIndex(index, online.state.seat);
           celebrate(viewGoal, bodies[6], replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : bodies[toView(replay.scorer)] || null);
           if (ballOnFire()) lightNet(viewGoal);
           if (toView(replay.assist) !== null) popup(bodies[toView(replay.assist)], 'Assist');
           if (online.state.game.winner !== null) queueSummary();
-          const viewScorerIndex = replay.scorer === null ? null : (online.state.seat ? (replay.scorer < 3 ? replay.scorer + 3 : replay.scorer - 3) : replay.scorer);
+          const viewScorerIndex = toView(replay.scorer);
           const scorer = viewScorerIndex !== null ? bodies[viewScorerIndex] : bodies[viewGoal * 3];
           scoringPlayer = scorer;
           const them = onlineNames(online.state)[1], scorerName = scorer?.name || (viewGoal === 0 ? 'Your ubu' : `${them}'s ubu`);
@@ -4748,7 +4707,7 @@
         });
         recordSegment(onlineReplay.simBodies, onlineReplay.plans, s.replay.ticks, s.replay.saves.map(e => saveEvent(e.tick, e)), structuredClone(s.replay.stops));
         recordOnlineTurn(s); beginGuide(onlineReplay.simBodies, onlineReplay.plans, s.seat);
-        P.startTurn(onlineReplay.simBodies, onlineReplay.plans, replaySuper);
+        P.startTurn(onlineReplay.simBodies, onlineReplay.plans, replayFx.super);
         syncViewBodies();
       }
       finishOnlineRecording(s);
@@ -4858,10 +4817,8 @@
   }
   // The pointer's fingertip sits on a field point, through the inverse of the pointer-input mapping.
   function placeFinger(x, y) {
-    const finger = $('demo-finger'), stage = finger.parentElement.getBoundingClientRect(), r = canvas.getBoundingClientRect();
-    const px = isPortrait ? r.left + r.width / 2 + (y - 300) * r.width / 600 : r.left + x * r.width / 1000;
-    const py = isPortrait ? r.top + r.height / 2 + (500 - x) * r.height / 1000 : r.top + y * r.height / 600;
-    finger.style.left = px - stage.left + 'px'; finger.style.top = py - stage.top + 'px';
+    const finger = $('demo-finger'), stage = finger.parentElement.getBoundingClientRect(), p = screenPoint({ x, y });
+    finger.style.left = p.x - stage.left + 'px'; finger.style.top = p.y - stage.top + 'px';
   }
   function hideFinger() { $('demo-finger').toggleAttribute('hidden', true); $('demo-finger').classList.remove('pressed'); }
   async function demoAim(run, i, target, current) {
