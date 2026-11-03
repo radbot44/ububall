@@ -182,7 +182,7 @@
   // The status line's wording for each goal call.
   const GOAL_WORDS = { 'OWN GOAL': 'Own goal', 'HAT TRICK!': 'Hat trick', 'FIREBALL!': 'Fireball', 'ONE-TIMER!': 'One-timer', 'BANK SHOT!': 'Bank shot', 'SNIPE!': 'Snipe', 'REBOUND!': 'Rebound', 'ACE!': 'Ace', GOAL: 'Goal' };
   const callText = (label, name) => label === 'OWN GOAL' ? 'Own goal!' : `${GOAL_WORDS[label] || label.replace(/!$/, '')} by ${name}!`;
-  const trails = Array.from({ length: 7 }, () => []), particles = [], fireworks = [], shockwaves = [];
+  const trails = Array.from({ length: 7 }, () => []), detachedTrailHeads = Array(7).fill(false), particles = [], fireworks = [], shockwaves = [];
   const materialStyles = {
     metallic: ['spark', '#e1eaff'], glossy: ['bubble', '#ffffff'], iridescent: ['spark', 'rainbow'],
     crystalline: ['shard', '#a8eaff'], pearlescent: ['bubble', '#ffe5ed'], marble: ['dust', '#e5ddd1'],
@@ -320,7 +320,7 @@
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   function clearEffects() {
     postGoal = null;
-    trails.forEach(trail => { trail.length = 0; });
+    trails.forEach((trail, i) => { trail.length = 0; detachedTrailHeads[i] = false; });
     particles.length = fireworks.length = shockwaves.length = 0;
     skids.length = skidState.length = burns.length = ripples.length = pings.length = popups.length = 0; burnState.path = null; fireTime = 0; quench();
     if (netFire) netFire.lit = false;
@@ -933,16 +933,27 @@
     }
     ctx.restore();
   }
+  // Only call at discrete state changes (fouls, faceoffs or authoritative snapshots),
+  // never after physics ticks. A moved body starts a new trail section, while the
+  // old section stays where it was and fades normally.
+  const trailPositions = () => bodies.map(b => ({ x: b.x, y: b.y }));
+  function cutDiscontinuousTrails(before) {
+    bodies.forEach((b, i) => {
+      if (before[i] && (before[i].x !== b.x || before[i].y !== b.y)) detachedTrailHeads[i] = true;
+    });
+  }
   function recordTrails() {
     if (reducedMotion.matches) return;
     bodies.forEach((b, i) => {
       if (b.vx * b.vx + b.vy * b.vy < 625) return;
-      const trail = trails[i], previous = trail[trail.length - 1];
-      if (!previous || (b.x - previous.x) ** 2 + (b.y - previous.y) ** 2 >= 25) {
+      const trail = trails[i], previous = trail[trail.length - 1], detached = detachedTrailHeads[i];
+      if (detached || !previous || (b.x - previous.x) ** 2 + (b.y - previous.y) ** 2 >= 25) {
         const duration = .24; // Fixed lifetime makes trail length follow speed, not body size.
         // The ball's trail heats from white to orange with speed, and flares after a Cannonball.
         const heat = b.team === -1 ? ballHeat(b) : 0;
-        trail.push({ x: b.x, y: b.y, life: duration, duration, heat });
+        const point = { x: b.x, y: b.y, life: duration, duration, heat };
+        if (detached) { point.breakBefore = true; detachedTrailHeads[i] = false; }
+        trail.push(point);
         if (trail.length > 40) trail.shift();
       }
     });
@@ -953,8 +964,8 @@
     trails.forEach((trail, index) => {
       if (!trail.length) return;
       const b = bodies[index], color = b.team === -1 ? '#ffffff' : b.team === 0 ? home : away;
-      const last = trail[trail.length - 1];
-      const near = (b.x - last.x) ** 2 + (b.y - last.y) ** 2 < 4;
+      const last = trail[trail.length - 1], detached = detachedTrailHeads[index];
+      const near = !detached && (b.x - last.x) ** 2 + (b.y - last.y) ** 2 < 4;
       const count = near ? trail.length - 1 : trail.length;
       const pts = [];
       for (let j = 0; j < count; j++) {
@@ -962,7 +973,8 @@
         trail[j].isHead = false;
         pts.push(trail[j]);
       }
-      pts.push({ x: b.x, y: b.y, radius: b.radius, life: .24, duration: .24, heat: b.team === -1 ? ballHeat(b) : 0, origIndex: trail.length, isHead: true });
+      if (!detached) pts.push({ x: b.x, y: b.y, radius: b.radius, life: .24, duration: .24, heat: b.team === -1 ? ballHeat(b) : 0, origIndex: trail.length, isHead: true, breakBefore: near && Boolean(last.breakBefore) });
+      if (pts.length < 2) return;
 
       const u = [];
       for (let j = 0; j < pts.length - 1; j++) {
@@ -973,8 +985,13 @@
       const sections = [];
       let cur = [pts[0]];
       for (let j = 0; j < pts.length - 1; j++) {
+        if (pts[j + 1].breakBefore) {
+          if (cur.length >= 2) sections.push(cur);
+          cur = [pts[j + 1]];
+          continue;
+        }
         cur.push(pts[j + 1]);
-        if (j < pts.length - 2) {
+        if (j < pts.length - 2 && !pts[j + 2].breakBefore) {
           const dot = u[j].x * u[j + 1].x + u[j].y * u[j + 1].y;
           if (dot < 0.2) {
             if (cur.length >= 2) sections.push(cur);
@@ -988,6 +1005,7 @@
         const m = sec.length - 1;
         if (m < 1) continue;
         const S0 = sec[0], Sm = sec[m];
+        if (m === 1 && S0.x === Sm.x && S0.y === Sm.y) continue;
 
         const L = [], R = [];
         for (let k = 0; k <= m; k++) {
@@ -2387,10 +2405,12 @@
     clearEffects(); nextReplaySegment();
   }
   function nextReplaySegment() {
+    const before = trailPositions();
     const r = goalReplay, segment = r.segments[++r.index];
     r.sim = structuredClone(segment.bodies); r.tick = 0;
     P.startTurn(r.sim, segment.plans, replayFx.super);
     syncReplay();
+    cutDiscontinuousTrails(before);
   }
   function startGoalReplay() {
     if (postGoal) { P.stop(bodies); postGoal = null; }
@@ -2619,7 +2639,10 @@
     }
     if (th.index + 1 >= th.replay.turns.length) { th.paused = true; th.steps = 0; return false; }
     if (t.goal) clearEffects();
-    loadReplayTurn(th.index + 1, true); syncReplay(); sync();
+    const before = trailPositions();
+    loadReplayTurn(th.index + 1, true); syncReplay();
+    cutDiscontinuousTrails(before);
+    sync();
     return true;
   }
   // The winner's call holds as long as a goal's call shows.
@@ -3326,7 +3349,9 @@
     // A goal on the round's first turn is an ace, earning its scorer extra meter (not for an own goal).
     const ace = goal !== null && !roundTurns, call = goal === null ? null : ububallMatch.callGoal(bodies, play, tally, goal, ace);
     if (goal !== null && ballOnFire()) lightNet(goal); else quench();
+    const before = trailPositions();
     ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null, keepMotion: goal !== null }, fouls, tally);
+    cutDiscontinuousTrails(before);
     if (fouls.faceoff) play = ububallMatch.newPlay();
     noteTurn(ticks, goal === null ? null : { team: goal, label: call.label, scorer: call.own ? null : call.scorer, assist: call.assist }, fouls.cards);
     announceFouls();
@@ -4411,10 +4436,12 @@
     }
 
     if (replay.currentTick >= replay.ticks) {
+      const before = trailPositions();
       viewBodies(online.state.game.bodies, online.state.seat).forEach((sample, i) => {
         Object.assign(bodies[i], sample);
         dirtyMeters.add(bodies[i]);
       });
+      cutDiscontinuousTrails(before);
       if (!replay.fouled) {
         replay.fouled = true; fouls = viewFouls(online.state.game.fouls, online.state.seat); announceFouls();
         if (replay.goal === null && foulText()) say(foulText());
@@ -4480,7 +4507,9 @@
         if (s.phase === 'plan' && ball.x === 500 && ball.y === 300) kickoffGlow = 1;
       }
       if (s.phase !== 'resolving') { endGoalReplay(); stopFanfare(); }
+      const before = !fresh && !s.replay && !goalReplay ? trailPositions() : null;
       bodies = viewBodies(s.game.bodies, s.seat);
+      if (before) cutDiscontinuousTrails(before);
       if (!s.replay) fouls = viewFouls(s.game.fouls, s.seat);
       // A running goal replay keeps the display; the server state becomes what it restores.
       if (goalReplay) { goalReplay.real = bodies; bodies = goalReplay.display; }
