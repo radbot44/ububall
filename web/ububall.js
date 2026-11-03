@@ -440,14 +440,15 @@
   // glowing brighter. Side 0 is the left goal (defended by the home team in every view), side 1 the right.
   function goalThreat() {
     const ball = bodies[6];
-    if (!ball || P.holder(bodies) || Math.hypot(ball.vx, ball.vy) < 120) return null;
-    if (ball.vx >= 0 ? ball.x + ball.vx * .9 < 900 : ball.x + ball.vx * .9 > 100) return null;
+    if (!ball || P.holder(bodies)) return null;
+    const speed = Math.hypot(ball.vx, ball.vy);
+    if (speed < 120 || (ball.x - speed * .9 > 60 && ball.x + speed * .9 < 940)) return null;
     const sim = [{ ...ball }], limit = Math.round(.9 / P.DT);
     let boards = false;
     const onWall = (b, v, type) => { if (type === 'wall') boards = true; };
     for (let t = 1; t <= limit && !boards; t++) {
       const goal = P.step(sim, P.DT, null, onWall);
-      if (goal !== null) return { side: goal === 1 ? 0 : 1, level: Math.min(1, Math.hypot(ball.vx, ball.vy) / 500) * (1 - t / limit) };
+      if (goal !== null) return { side: goal === 1 ? 0 : 1, level: Math.min(1, speed / 500) * (1 - t / limit) };
     }
     return null;
   }
@@ -1131,9 +1132,13 @@
     const spriteKey = `${key}:${radius}:${lineWidth}`;
     if (conicRingSprites.has(spriteKey)) return conicRingSprites.get(spriteKey);
     const [c1, c2] = SUPER_AURA_THEMES[key] || ['#ff7197', '#ff9954'];
-    const pad = 16, size = Math.ceil((radius + lineWidth + pad) * 2);
-    const sprite = document.createElement('canvas'); sprite.width = sprite.height = size;
-    const c = sprite.getContext('2d'), cx = size / 2, cy = size / 2;
+    const pad = 16, size = Math.ceil((radius + lineWidth + pad) * 2), scale = 2;
+    const sprite = document.createElement('canvas');
+    sprite.width = sprite.height = size * scale;
+    sprite.size = size;
+    const c = sprite.getContext('2d');
+    c.scale(scale, scale);
+    const cx = size / 2, cy = size / 2;
     const sweep = c.createConicGradient(0, cx, cy);
     sweep.addColorStop(0, hexToRgba(c2, 0)); sweep.addColorStop(.3, hexToRgba(c2, .9));
     sweep.addColorStop(.36, hexToRgba(c1, 0)); sweep.addColorStop(1, hexToRgba(c1, 0));
@@ -1158,9 +1163,9 @@
     circle(b.x, b.y, ringR, c1, level === 2 ? 2.5 : 2);
     ctx.globalAlpha = level === 2 ? 1 : .85;
     for (const [radius, dir] of level === 2 ? [[ringR, 1], [ringR + 5, -1]] : [[ringR, 1]]) {
-      const sprite = conicRingSprite(key, radius, level === 2 ? 3.5 : 3);
+      const sprite = conicRingSprite(key, radius, level === 2 ? 3.5 : 3), size = sprite.size;
       ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(spin * dir);
-      ctx.drawImage(sprite, -sprite.width / 2, -sprite.height / 2);
+      ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
       ctx.restore();
     }
     if (level === 2 && !still) for (let k = 0; k < 2; k++) {
