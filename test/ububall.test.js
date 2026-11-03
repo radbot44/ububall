@@ -706,7 +706,7 @@ test('shared prediction matches live ticks for team plans and every super withou
     const prediction = P.predictTurn(bodies, plans);
     assert.deepEqual({ bodies, plans }, original, ability.key + ' leaves live state untouched');
     const live = structuredClone(bodies);
-    live[3].superArm = false; live[3].superActive = null;
+    live[3].superArm = false;
     P.startTurn(live, plans);
     let goal = null;
     for (let tick = 1; tick <= prediction.ticks; tick++) {
@@ -720,6 +720,40 @@ test('shared prediction matches live ticks for team plans and every super withou
     assert.equal(prediction.goal, goal);
     assert.equal(prediction.paths.length, 7);
     assert.ok(prediction.ticks <= 480);
+  }
+});
+
+test('prediction preserves opponents active supers from Pulse mode while clearing secret superArm', () => {
+  const bodies = P.kickoff();
+  bodies.slice(0, 6).forEach((b, i) => P.applyStats(b, { ...normal }));
+  // Opponent has Colossus active from previous turn
+  bodies[3].superActive = 'colossus';
+  bodies[3].colossusApplied = true;
+  bodies[3].radius *= P.SUPER.colossusRadius;
+  bodies[3].mass *= P.SUPER.colossusMass;
+  bodies[3].superTicks = 400;
+  // Opponent has secret unlaunched superArm
+  bodies[4].superArm = true;
+  bodies[4].meter = 100;
+  bodies[4].equippedSuper = P.SUPERS[4]; // magnet
+
+  const plans = [{ angle: 0, power: 0.8, spin: 0 }];
+  const prediction = P.predictTurn(bodies, plans);
+
+  // Live simulation comparison confirms parity
+  const live = structuredClone(bodies);
+  live[4].superArm = false; // secret arm cleared
+  P.startTurn(live, plans);
+  assert.equal(live[3].superActive, 'colossus');
+  assert.equal(Boolean(live[4].superActive), false); // unlaunched arm was ignored
+
+  // Step live simulation and verify prediction matches live paths
+  for (let tick = 1; tick <= prediction.ticks; tick++) {
+    P.step(live, P.DT);
+    for (let i = 0; i < live.length; i++) {
+      const point = prediction.paths[i].find(p => p.tick === tick);
+      if (point) assert.deepEqual([point.x, point.y], [live[i].x, live[i].y], `body ${i} tick ${tick}`);
+    }
   }
 });
 

@@ -424,3 +424,96 @@ test('active match save and restore enforces matching matchVersion and physicsVe
   assert.equal(env.restoreActiveMatch(), false);
   assert.equal(store['ububall-active-match'], undefined);
 });
+
+test('contactMeter and creditSave reject meter awards outside phase === play', () => {
+  const code = section('function creditSave(body, own, iron = false) {', 'function setMeterFill(fill, meter) {');
+  const P = require('../web/ububall-physics.js');
+  let calledGain = 0, calledContact = 0;
+  const ububallMatch = {
+    METER: { save: 6 },
+    gainMeter() { calledGain++; return []; },
+    contactMeter() { calledContact++; return []; }
+  };
+  const dirtyMeters = new Set();
+  const env = vm.runInNewContext(code + '\n;({ creditSave, contactMeter, setPhase: p => { phase = p; } });', {
+    phase: 'goal', online: null, goalReplay: null, theater: null,
+    bodies: [], stats: [], classicMode: () => false, matchTicks: 0, elapsed: 0,
+    P, ububallMatch, dirtyMeters, popup: () => {}, steamRing: () => {}, gameAudio: () => null
+  });
+
+  // 1. Outside play phase (e.g. 'goal', 'over', 'plan'), no meter calls occur
+  env.contactMeter({}, {}, 100);
+  assert.equal(calledContact, 0, 'contact meter rejected during post-goal / non-play phase');
+
+  env.creditSave({}, false);
+  assert.equal(calledGain, 0, 'save meter rejected during post-goal / non-play phase');
+
+  // 2. In active play phase, meter functions proceed
+  env.setPhase('play');
+  env.contactMeter({}, {}, 100);
+  assert.equal(calledContact, 1, 'contact meter allowed during active play');
+
+  env.creditSave({}, false);
+  assert.equal(calledGain, 1, 'save meter allowed during active play');
+});
+
+test('post-goal celebration simulation cannot alter the next kickoffs meter or gameplay state', () => {
+  const code = section('function kickoff(isNewMatch = false) {', 'function creditSave(') +
+    '\n' + section('function finishTurn(goal) {', '$(\'launch\').onclick =');
+  const P = require('../web/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const ubu = require('../shared/ubu.js');
+  const normal = { mass: 127, size: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 };
+  const practice = Array.from({ length: 6 }, () => {
+    const dna = ubu.randomDNA();
+    return { model: ubu.decode(dna), dna: ubu.toCode(dna), label: 'Practice ubu' };
+  });
+
+  const bodies = P.kickoff();
+  bodies.slice(0, 6).forEach((b, i) => P.applyStats(b, normal));
+  bodies[0].meter = 50;
+  bodies[1].meter = 30;
+  bodies[3].meter = 20;
+
+  const dummy = () => {};
+  const context = {
+    P, ububallMatch, structuredClone,
+    clearEffects: dummy, kickoffGlow: 0, netFire: null, stats: Array.from({ length: 6 }, () => normal),
+    matchMode: 'standard', teamEntries: practice, practice, classicMode: () => false,
+    resolveEquippedSuper: () => null,
+    playSegments: [], elapsed: 10, roundTurns: 1, play: ububallMatch.newPlay(),
+    tally: ububallMatch.newTally(), ballOnFire: () => false, lightNet: dummy, quench: dummy,
+    trailPositions: () => [], clearDiscontinuousTrails: dummy, fouls: ububallMatch.newFouls(),
+    noteTurn: dummy, announceFouls: dummy, matchTicks: 0, dirtyMeters: new Set(),
+    celebrate: dummy, popup: dummy, queueSummary: dummy, recording: null, clearActiveMatch: dummy,
+    goalTab: dummy, say: dummy, loopFanfare: dummy, sync: dummy, draw: dummy, callText: () => '',
+    $: () => ({ disabled: false, textContent: '', onclick: null }),
+    scores: [0, 0], bodies, authoritativeBodies: null, phase: 'play', performance
+  };
+
+  const env = vm.runInNewContext(code + '\n;({ finishTurn, kickoff, getAuthoritative: () => authoritativeBodies, getBodies: () => bodies, setBodies: b => { bodies = b; } });', context);
+
+  // 1. Goal scored: finishTurn runs
+  env.finishTurn(0);
+
+  // Authoritative bodies were preserved immediately after finishTurn
+  const auth = env.getAuthoritative();
+  assert.ok(auth, 'authoritativeBodies snapshot was preserved');
+  assert.equal(auth[0].meter, 50);
+
+  // 2. Post-goal celebration simulation occurs on live bodies:
+  // Skaters collide, mutates bodies, runs stepPostGoal, etc.
+  const liveBodies = env.getBodies();
+  liveBodies[0].meter = 99; // Corrupted / altered during post-goal celebration
+  liveBodies[1].meter = 88;
+  liveBodies[0].stunned = true;
+
+  // 3. Next kickoff is triggered
+  const nextKickoffBodies = env.kickoff();
+
+  // The next kickoff inherits ONLY the authoritative meter, completely ignoring post-goal mutations!
+  assert.equal(nextKickoffBodies[0].meter, 50, 'kickoff meter matches authoritative finishTurn state');
+  assert.equal(nextKickoffBodies[1].meter, 30, 'kickoff meter was not corrupted by celebration mutations');
+  assert.equal(nextKickoffBodies[0].stunned, false, 'kickoff stunned state matches authoritative state');
+  assert.equal(env.getAuthoritative(), null, 'authoritativeBodies cleared after consumption');
+});

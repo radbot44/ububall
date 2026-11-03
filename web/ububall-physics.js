@@ -1078,13 +1078,7 @@
     const held = { angle: 0, power: 0, spin: 0 };
     const predictedPlans = sim.map((b, i) => {
       if (b.team === 0) return plans[i] || held;
-      if (b.team > 0) {
-        b.superArm = false;
-        b.superActive = null;
-        if (b.colossusApplied) {
-          b.radius = b.baseRadius; b.mass = b.baseMass; b.colossusApplied = false;
-        }
-      }
+      if (b.team > 0) b.superArm = false;
       return held;
     });
     startTurn(sim, predictedPlans);

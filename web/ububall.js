@@ -25,7 +25,7 @@
   let isPortrait = false;
   let matchMode = 'standard', planDeadline = 0;
   // Each turn of the current play (motion since the field last rested), for goal replays.
-  let playSegments = [], goalReplay = null, goalReplayAt = 0, postGoal = null;
+  let playSegments = [], goalReplay = null, goalReplayAt = 0, postGoal = null, authoritativeBodies = null;
   // The replay viewer (see watchReplay), and the match being recorded for the replay library.
   let theater = null, recording = null, recordingOnline = false, restoredMatch = false;
   // While a video export renders, effects and sounds run on its clock (ms) instead of the wall clock,
@@ -1281,7 +1281,8 @@
     play = ububallMatch.newPlay(); scoringPlayer = null; roundTurns = 0; fouls = ububallMatch.newFouls();
     netFire = null;
     if (isNewMatch) { tally = ububallMatch.newTally(); closeSummary(); }
-    const oldBodies = bodies;
+    const oldBodies = authoritativeBodies || bodies;
+    authoritativeBodies = null;
     const result = P.kickoff();
     result.slice(0, 6).forEach((b, i) => {
       ububallMatch.applyStats(P, b, stats[i], matchMode);
@@ -1407,12 +1408,12 @@
       steamRing(body.x, body.y, body.radius);
       gameAudio()?.playIronSave?.();
     }
-    if (own || online?.active || goalReplay || theater) return;
+    if ((typeof phase !== 'undefined' && phase !== 'play') || own || online?.active || goalReplay || theater) return;
     for (const changed of ububallMatch.gainMeter(P, bodies, stats, body, ububallMatch.METER.save, classicMode())) dirtyMeters.add(changed);
   }
   // Online meters come from the server; replays never earn meter.
   function contactMeter(a, b, speed) {
-    if (online?.active || goalReplay || theater) return;
+    if ((typeof phase !== 'undefined' && phase !== 'play') || online?.active || goalReplay || theater) return;
     const tick = matchTicks + Math.round(elapsed / P.DT);
     for (const changed of ububallMatch.contactMeter(P, bodies, stats, a, b, speed, tick, classicMode())) dirtyMeters.add(changed);
   }
@@ -1927,6 +1928,7 @@
         clearActiveMatch();
         return false;
       }
+      authoritativeBodies = null;
       endGoalReplay();
       playSegments = [];
       cpuMode = saved.mode || 'standard';
@@ -1998,6 +2000,7 @@
     }
   }
   function newMatch(playJingle = false) {
+    authoritativeBodies = null;
     endGoalReplay(); playSegments = []; saveRecording();
     matchMode = cpuMode;
     document.body.classList.toggle('classic-match', classicMode());
@@ -3607,6 +3610,8 @@
     bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
     accumulator = 0; layoutDirty = true;
     if (goal !== null) {
+      authoritativeBodies = structuredClone(bodies);
+      P.stop(authoritativeBodies);
       phase = scores[goal] >= 5 ? 'over' : 'goal';
       celebrate(goal, bodies[6], call.label, call.own ? null : bodies[call.scorer] || null);
       if (call.assist !== null) popup(bodies[call.assist], 'Assist');
