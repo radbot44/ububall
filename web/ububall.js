@@ -3676,12 +3676,12 @@
     const pulseFrozen = pulseMode() && roundTurns > 0 && (phase === 'plan' || phase === 'cpu-wait' || phase === 'waiting');
     let speed = 1;
     if (!active || clockNow() < hitStopUntil || pulseFrozen) speed = 0;
-    else if (theater) speed = theater.paused ? 0 : theater.speed;
+    else if (theater) speed = theater.paused || theater.exporting ? 0 : theater.speed;
     else if (goalReplay) speed = goalReplay.played >= goalReplay.total ? 0.5 : ububallMatch.replaySpeed(goalReplay.total - goalReplay.played);
     else if (postGoal) speed = ububallMatch.postGoalSpeed(postGoal.ticks);
     const simDelta = delta * speed;
-    if (active && !theater?.paused) updatePopups(delta);
-    if (active && !theater?.paused && !pulseFrozen) updateEffects(simDelta);
+    if (active && !theater?.paused && !theater?.exporting) updatePopups(delta);
+    if (active && !theater?.paused && !theater?.exporting && !pulseFrozen) updateEffects(simDelta);
     if (theater) { if (active && !theater.exporting) advanceReplay(delta); }
     else if ((phase === 'play' || postGoal) && active && !online?.active) {
       if (clockNow() < hitStopUntil) accumulator = 0; else accumulator += simDelta;

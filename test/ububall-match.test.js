@@ -649,3 +649,94 @@ test('Ubu positioned ahead of the ball wraps around rather than shooting into ow
   assert.ok(resolved.state.bodies[6].x > 350, 'Ball carried or driven forward');
 });
 
+test('opposing Iron Save awards defensive save statistics, save meter, and arms rebound tracking', () => {
+  const state = shotState(
+    { x: 550, y: 300, vx: 600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1 },
+    { 0: { x: 300, y: 300 }, 3: { x: 600, y: 300 } },
+    { credit: { 0: 1 }, last: 0, lastTouch: [0, null], stats: Array.from({ length: 6 }, () => ({})) }
+  );
+  const moves = Array.from({ length: 6 }, still);
+  moves[3] = { ...still(), guard: true };
+
+  const result = M.resolveTurn(P, state, moves);
+  const saves = result.replay.saves;
+  assert.equal(saves.length, 1, 'an Iron Save is registered');
+  assert.equal(saves[0].index, 3, 'defender 3 made the save');
+  assert.equal(saves[0].iron, true, 'classified as an Iron Save');
+  assert.equal(saves[0].own, false, 'opposing shot classified as own === false (defensive save)');
+
+  assert.equal(result.state.tally.saves[3], 1, 'defensive save credited to defender');
+  assert.equal(result.state.tally.bigSaves[3], 1, 'big save stat recorded');
+  assert.ok(result.state.bodies[3].meter >= M.METER.save * M.METER.rate, 'meter includes save award');
+  assert.ok(result.state.saved, 'play.saved is recorded');
+  assert.equal(result.state.saved.team, 1, 'play.saved team is defending team');
+});
+
+test('friendly Iron Save (trap) classifies as own save with no defensive stats or meter, and preserves credit', () => {
+  const state = shotState(
+    { x: 550, y: 300, vx: 250, vy: 0, onFire: false, strikerTeam: 0, strikerPower: 1 },
+    { 0: { x: 300, y: 300 }, 1: { x: 600, y: 300 } },
+    { credit: { 0: 1 }, last: 0, lastTouch: [0, null], assist: [null, null], stats: Array.from({ length: 6 }, () => ({})) }
+  );
+  const moves = Array.from({ length: 6 }, still);
+  moves[1] = { ...still(), guard: true };
+
+  const result = M.resolveTurn(P, state, moves);
+  const saves = result.replay.saves;
+  assert.equal(saves.length, 1, 'a friendly trap is registered');
+  assert.equal(saves[0].index, 1, 'teammate 1 trapped the ball');
+  assert.equal(saves[0].iron, true, 'classified as an Iron Save');
+  assert.equal(saves[0].own, true, 'friendly trap classified as own === true');
+
+  assert.equal(result.state.tally.saves[1] || 0, 0, 'no defensive save credited for friendly trap');
+  assert.equal(result.state.stats[1]?.bigSaves || 0, 0, 'no big save stat for friendly trap');
+  assert.ok(Math.abs(result.state.bodies[1].meter - M.METER.ball * M.METER.rate) < 1e-9 || result.state.bodies[1].meter === 0, 'no save meter awarded for friendly trap');
+  assert.equal(result.state.saved, null, 'friendly trap does not arm play.saved');
+  assert.equal(M.responsibleTeam(result.state.bodies, result.state.credit), 0, 'team 0 retained possession');
+  assert.equal(result.state.assist[0], 0, 'passer credited with assist');
+});
+
+test('Iron Save ownership attribution survives strikerTeam change on contact', () => {
+  const play = M.newPlay();
+  play.credit = { 0: 1 };
+  play.lastTouch = [0, null];
+  const bodies = P.kickoff();
+  bodies.slice(0, 6).forEach(b => P.applyStats(b));
+  Object.assign(bodies[3], { x: 600, y: 300, guarding: true });
+  Object.assign(bodies[6], { x: 558, y: 300, vx: 600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1 });
+
+  const tick = M.playTick(P, bodies, play);
+  assert.equal(tick.saves.length, 1);
+  assert.equal(tick.saves[0].index, 3);
+  assert.equal(tick.saves[0].iron, true);
+  assert.equal(tick.saves[0].own, false, 'opposing save attributed as own: false despite strikerTeam mutating during collision');
+  assert.equal(bodies[6].strikerTeam, 1, 'ball strikerTeam mutated to guard team on contact');
+});
+
+test('opposing Iron Save leads to REBOUND! callout on quick follow-up goal', () => {
+  const state = shotState(
+    { x: 550, y: 300, vx: 600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1 },
+    { 0: { x: 300, y: 300 }, 3: { x: 600, y: 300 } },
+    { credit: { 0: 1 }, last: 0, lastTouch: [0, null], roundTurns: 1, stats: Array.from({ length: 6 }, () => ({})) }
+  );
+  const moves = Array.from({ length: 6 }, still);
+  moves[3] = { ...still(), guard: true };
+  const turn1 = M.resolveTurn(P, state, moves);
+  assert.ok(turn1.state.saved, 'play.saved was set by opposing iron save');
+  assert.equal(turn1.state.saved.team, 1);
+
+  const goalState = {
+    ...turn1.state,
+    bodies: structuredClone(turn1.state.bodies),
+    credit: { 0: 1 },
+    lastTouch: [0, null],
+    last: 0,
+    shotX: [900, null]
+  };
+  Object.assign(goalState.bodies[6], { x: 930, y: 300, vx: 600, vy: 0 });
+  const turn2 = M.resolveTurn(P, goalState, Array.from({ length: 6 }, still));
+  assert.equal(turn2.replay.goal, 0, 'Team 0 scores');
+  assert.equal(turn2.replay.label, 'REBOUND!', 'Goal labeled as REBOUND! following opposing iron save');
+});
+
+

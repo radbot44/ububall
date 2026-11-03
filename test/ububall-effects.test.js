@@ -258,3 +258,55 @@ test('iron guard shield receives #6b7785 border stroke with lineWidth 1.5', () =
   assert.equal(lineWidth, 1.5, 'border lineWidth is 1.5');
   assert.equal(strokePath, GUARD_SHIELD);
 });
+
+test('theater.exporting suppresses popup and effect aging in animation frame loop', () => {
+  let popupsUpdated = 0, effectsUpdated = 0, replayAdvanced = 0;
+  const updatePopups = () => { popupsUpdated++; };
+  const updateEffects = () => { effectsUpdated++; };
+  const advanceReplay = () => { replayAdvanced++; };
+  const pulseMode = () => false, clockNow = () => 1000, hitStopUntil = 0;
+  const delta = 0.016;
+  const active = true, roundTurns = 0, phase = 'replay';
+  const code = section("const pulseFrozen = pulseMode() && roundTurns > 0 && (phase === 'plan' || phase === 'cpu-wait' || phase === 'waiting');", "else if ((phase === 'play' || postGoal) && active && !online?.active) {");
+
+  // 1. During video export: theater.exporting is true. Animation loop must NOT age popups or effects.
+  let theater = { paused: false, exporting: true, speed: 1 };
+  vm.runInNewContext(code, {
+    pulseMode, roundTurns, phase, active, clockNow, hitStopUntil, theater,
+    delta, updatePopups, updateEffects, advanceReplay, ububallMatch: {}, goalReplay: null, postGoal: null
+  });
+  assert.equal(popupsUpdated, 0, 'popups must not update during RAF while exporting');
+  assert.equal(effectsUpdated, 0, 'effects must not update during RAF while exporting');
+  assert.equal(replayAdvanced, 0, 'replay must not advance during RAF while exporting');
+
+  // 2. Normal replay playback: theater.exporting is false. Animation loop updates popups and effects.
+  theater = { paused: false, exporting: false, speed: 1 };
+  vm.runInNewContext(code, {
+    pulseMode, roundTurns, phase, active, clockNow, hitStopUntil, theater,
+    delta, updatePopups, updateEffects, advanceReplay, ububallMatch: {}, goalReplay: null, postGoal: null
+  });
+  assert.equal(popupsUpdated, 1, 'popups update during normal replay playback');
+  assert.equal(effectsUpdated, 1, 'effects update during normal replay playback');
+  assert.equal(replayAdvanced, 1, 'replay advances during normal replay playback');
+
+  // 3. Normal gameplay: theater is null. Animation loop updates popups and effects.
+  theater = null;
+  vm.runInNewContext(code, {
+    pulseMode, roundTurns, phase: 'play', active, clockNow, hitStopUntil, theater,
+    delta, updatePopups, updateEffects, advanceReplay, ububallMatch: {}, goalReplay: null, postGoal: null
+  });
+  assert.equal(popupsUpdated, 2, 'popups update during gameplay');
+  assert.equal(effectsUpdated, 2, 'effects update during gameplay');
+});
+
+test('exported video timing advances popups strictly once per export frame', () => {
+  const popups = [{ text: 'Big save!', life: 1.0, duration: 1.2 }];
+  const code = section('function updatePopups(dt) {', 'function drawPopups(home, away) {');
+  const fps = 60;
+  const dt = 1 / fps;
+  for (let f = 1; f <= 30; f++) {
+    vm.runInNewContext(code + '\nupdatePopups(dt);', { popups, reducedMotion: { matches: false }, dt });
+  }
+  assert.equal(popups.length, 1);
+  assert.ok(Math.abs(popups[0].life - (1.0 - 30 * dt)) < 1e-6, 'popups advance deterministically by export-frame delta');
+});

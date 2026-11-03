@@ -223,10 +223,12 @@
       const b = bodies[i];
       motion[i * 5] = b.x; motion[i * 5 + 1] = b.y; motion[i * 5 + 2] = b.vx; motion[i * 5 + 3] = b.vy; motion[i * 5 + 4] = b.omega;
     }
+    const incomingStrikerTeam = ball?.strikerTeam ?? -1;
+    const incomingCredit = { ...play.credit };
     const held = P.holder(bodies);
     play.age++;
-    const onShockwave = (source, radius) => {
-      if (ball && source) {
+    const onShockwave = (source, radius, type = null) => {
+      if (type !== 'iron' && ball && source) {
         const dx = ball.x - source.x, dy = ball.y - source.y;
         if (dx * dx + dy * dy < radius * radius) {
           const si = bodies.indexOf(source);
@@ -236,7 +238,7 @@
           }
         }
       }
-      fx.shockwave?.(source, radius);
+      fx.shockwave?.(source, radius, type);
     };
     // A Cannonball spends itself in the hit, so the hit is known by its impact, not by the field after.
     let cannon = false;
@@ -254,13 +256,20 @@
     const goal = P.step(bodies, P.DT, tickTouch, tickWall, onShockwave, onSuper);
     activeTick = outer;
     const before = touched.size ? bodies.map((b, i) => ({ ...b, x: motion[i * 5], y: motion[i * 5 + 1], vx: motion[i * 5 + 2],
-      vy: motion[i * 5 + 3], omega: motion[i * 5 + 4], holding: b === held })) : null;
-    const ballBefore = before?.[bodies.indexOf(ball)], tickSaves = touched.size ? saves(P, before, bodies, touched, play.credit) : [];
+      vy: motion[i * 5 + 3], omega: motion[i * 5 + 4], holding: b === held,
+      strikerTeam: b.team === -1 ? incomingStrikerTeam : b.strikerTeam })) : null;
+    const ballBefore = before?.[bodies.indexOf(ball)], tickSaves = touched.size ? saves(P, before, bodies, touched, incomingCredit) : [];
     const ironIndex = t.ironSaver ?? null; t.ironSaver = null;
     if (ironIndex !== null) {
       const existing = tickSaves.find(s => s.index === ironIndex);
-      const isOwn = ballBefore && ballBefore.strikerTeam !== undefined && ballBefore.strikerTeam >= 0 && bodies[ironIndex].team === ballBefore.strikerTeam;
-      if (existing) existing.iron = true; else tickSaves.push({ index: ironIndex, own: Boolean(isOwn), iron: true });
+      const saverTeam = bodies[ironIndex].team;
+      const isOwn = incomingStrikerTeam >= 0 ? saverTeam === incomingStrikerTeam : responsibleTeam(before, incomingCredit) === saverTeam;
+      if (existing) {
+        existing.iron = true;
+        existing.own = Boolean(isOwn);
+      } else {
+        tickSaves.push({ index: ironIndex, own: Boolean(isOwn), iron: true });
+      }
     }
     play.credit = credit(play.credit, ballBefore, ball, touched, before);
     for (const save of tickSaves) if (!save.own) play.saved = { at: play.age, team: bodies[save.index].team };
