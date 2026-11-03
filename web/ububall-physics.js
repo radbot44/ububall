@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 11;
+  const VERSION = 12;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -377,7 +377,10 @@
 
     if (isBall) {
       const ball = a.team === -1 ? a : b, player = a.team === -1 ? b : a;
-      if (ballOnFire(ball) && player.superActive !== 'cannonball' && closing < 0) {
+      const isFire = ballOnFire(ball);
+      const isTeammate = ball.strikerTeam !== undefined && ball.strikerTeam >= 0 && ball.strikerTeam === player.team;
+      const isFriendlyPass = isTeammate && !isFire && (Math.hypot(ball.vx, ball.vy) >= 175 || (ball.pace || 0) >= 175);
+      if ((isFire || isFriendlyPass) && player.superActive !== 'cannonball' && closing < 0) {
         const pbx = ball.x - player.x, pby = ball.y - player.y;
         const pbDist = Math.hypot(pbx, pby) || 1;
         const pnx = pbx / pbDist, pny = pby / pbDist;
@@ -402,9 +405,9 @@
           const strikerPow = ball.strikerPower || 1;
           const E = (ballSpeed / MAX_SPEED) * strikerPow * 2.8;
 
-          if (E > R) {
+          if (isFire && E > R) {
             fireWin = R / E;
-          } else if (player.guarding) {
+          } else if (player.guarding && (isFriendlyPass || E <= R)) {
             const opposing = ball.strikerTeam !== undefined && ball.strikerTeam >= 0 && ball.strikerTeam !== player.team;
             if (opposing) {
               ball.onFire = false;

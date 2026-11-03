@@ -1081,6 +1081,35 @@ test('Iron Save triggers for a teammate pass without extinguishing the fireball'
   assert.equal(P.ballOnFire(b[6]), true, 'the fireball is not extinguished on teammate Iron Save');
   assert.ok(b[6].pace > 840, 'pace remains high');
 });
+test('Iron Save triggers for a non-flaming teammate pass at or above 180 px/s, but not below or from opponents', () => {
+  const check = (speed, strikerTeam, guardIndex = 1) => {
+    const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+    const still = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
+    b.slice(0, 6).forEach(x => Object.assign(x, { x: x.team ? 900 : 100, y: 80 + x.slot * 60 }));
+    Object.assign(b[guardIndex], { x: 600, y: 300 });
+    const plans = Array.from({ length: 6 }, () => still); plans[guardIndex] = { ...still, guard: true };
+    P.startTurn(b, plans);
+    Object.assign(b[6], { x: 550, y: 300, vx: speed, vy: 0, onFire: false, fireTicks: 0, strikerPower: 1, strikerTeam, pace: speed });
+    let iron = false, shockwave = false;
+    for (let t = 0; t < 60 && !iron; t++) {
+      P.step(b, P.DT, (bodyA, bodyB, spd, impulse, plow, isIron) => { if (isIron) iron = true; }, null, (src, rad, type) => { if (type === 'iron') shockwave = true; });
+    }
+    return { iron, shockwave, ball: b[6] };
+  };
+  const pass180 = check(180, 0);
+  assert.equal(pass180.iron, true, 'teammate pass at 180 px/s triggers Iron Save');
+  assert.equal(pass180.shockwave, true, 'iron shockwave triggered');
+  assert.ok(Math.hypot(pass180.ball.vx, pass180.ball.vy) < 20, 'ball is trapped at guard feet');
+
+  const passFast = check(400, 0);
+  assert.equal(passFast.iron, true, 'fast teammate pass triggers Iron Save');
+
+  const passSlow = check(170, 0);
+  assert.equal(passSlow.iron, false, 'teammate pass below 180 px/s does not trigger Iron Save');
+
+  const oppShot = check(400, 1);
+  assert.equal(oppShot.iron, false, 'opponent non-flaming shot does not trigger Iron Save');
+});
 test('a glancing full-speed fireball beats a Guard', () => {
   const { ball, iron, beaten } = guardAgainstFireball(20);
   assert.equal(iron, false);

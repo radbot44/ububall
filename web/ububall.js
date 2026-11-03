@@ -419,7 +419,7 @@
     for (let i = skids.length - 1; i >= 0; i--) if (skids[i].age >= SKID_LIFE) skids.splice(i, 1);
     if (moving) for (const s of burns) s.age += dt;
     for (let i = burns.length - 1; i >= 0; i--) if (burns[i].age >= BURN_LIFE) burns.splice(i, 1);
-    for (const list of [ripples, pings, popups]) {
+    for (const list of [ripples, pings]) {
       for (const e of list) e.life -= dt;
       for (let i = list.length - 1; i >= 0; i--) if (list[i].life <= 0) list.splice(i, 1);
     }
@@ -670,6 +670,11 @@
   // Short callouts ("Save!") that pop in over an ubu and drift up as they fade.
   function popup(body, text) {
     if (!reducedMotion.matches && popups.length < 8) popups.push({ x: body.x, y: body.y - body.radius - 20, text, team: body.team, life: 1.2, duration: 1.2 });
+  }
+  function updatePopups(dt) {
+    if (reducedMotion.matches) { popups.length = 0; return; }
+    for (const p of popups) p.life -= dt;
+    for (let i = popups.length - 1; i >= 0; i--) if (popups[i].life <= 0) popups.splice(i, 1);
   }
   function drawPopups(home, away) {
     for (const p of popups) {
@@ -1391,7 +1396,7 @@
   }
   // A save from a ball the saver's own team was most responsible for is a sheepish "Save..." with no meter.
   function creditSave(body, own, iron = false) {
-    popup(body, iron ? 'Big save!' : own ? 'Save...' : 'Save!');
+    popup(body, iron ? (own ? 'Trap!' : 'Big save!') : own ? 'Save...' : 'Save!');
     if (iron) {
       steamRing(body.x, body.y, body.radius);
       gameAudio()?.playIronSave?.();
@@ -2290,6 +2295,11 @@
         const iron = phase === 'plan' && predictionCache?.data.guards.some(g => g.index === i && g.held);
         badgeCtx.scale(1.1, 1.1); badgeCtx.translate(-12, -12); badgeCtx.fillStyle = iron ? '#c3ccd6' : '#4798ff';
         badgeCtx.fill(GUARD_SHIELD);
+        if (iron) {
+          badgeCtx.strokeStyle = '#6b7785';
+          badgeCtx.lineWidth = 1.5;
+          badgeCtx.stroke(GUARD_SHIELD);
+        }
         badgeCtx.restore();
       }
       // Dazed enough to slow its launch: a dizzy swirl turns above the ubu, larger and stronger the
@@ -2631,7 +2641,7 @@
         while (th.tick < target) {
           for (let n = 0; n < dt / P.DT && th.tick < target; n++) { stepReplay(true); syncReplay(); recordTrails(); }
           fouls = viewFouls(th.fouls, th.seat); emitSkaterEffects(dt);
-          videoClock += dt * 1000; updateEffects(dt);
+          videoClock += dt * 1000; updatePopups(dt); updateEffects(dt);
         }
       } finally { videoAudio = audio; videoClock = clock; }
     }
@@ -2888,7 +2898,7 @@
       const rendering = offline.startRendering();
       videoBug = null; gameAudio()?.stop(); resetSoundThrottles(); seekReplay(0);
       for (let f = 0; f < frames && !videoCancelled && !failure; f++) {
-        if (f) { videoClock += 1000 / VIDEO.fps; updateEffects(1 / VIDEO.fps); advanceReplay(1 / VIDEO.fps); }
+        if (f) { videoClock += 1000 / VIDEO.fps; updatePopups(1 / VIDEO.fps); updateEffects(1 / VIDEO.fps); advanceReplay(1 / VIDEO.fps); }
         composeFrame(v);
         const frame = new VideoFrame(out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
         encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
@@ -3661,7 +3671,7 @@
     }
     if (!active) { lastTime = 0; accumulator = 0; }
     const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length || goalCall ||
-      ripples.length || pings.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
+      ripples.length || pings.length || popups.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
     // Effects pause with the replay viewer, and in Pulse mode when time freezes between turns.
     const pulseFrozen = pulseMode() && roundTurns > 0 && (phase === 'plan' || phase === 'cpu-wait' || phase === 'waiting');
     let speed = 1;
@@ -3670,6 +3680,7 @@
     else if (goalReplay) speed = goalReplay.played >= goalReplay.total ? 0.5 : ububallMatch.replaySpeed(goalReplay.total - goalReplay.played);
     else if (postGoal) speed = ububallMatch.postGoalSpeed(postGoal.ticks);
     const simDelta = delta * speed;
+    if (active && !theater?.paused) updatePopups(delta);
     if (active && !theater?.paused && !pulseFrozen) updateEffects(simDelta);
     if (theater) { if (active && !theater.exporting) advanceReplay(delta); }
     else if ((phase === 'play' || postGoal) && active && !online?.active) {

@@ -263,7 +263,7 @@
       if (existing) existing.iron = true; else tickSaves.push({ index: ironIndex, own: Boolean(isOwn), iron: true });
     }
     play.credit = credit(play.credit, ballBefore, ball, touched, before);
-    for (const save of tickSaves) play.saved = { at: play.age, team: bodies[save.index].team };
+    for (const save of tickSaves) if (!save.own) play.saved = { at: play.age, team: bodies[save.index].team };
     // A Cannonball hit always counts as a big shot.
     const speed = Math.hypot(ball.vx, ball.vy), big = cannon || bigShot(P, before, touched, ball), struck = Boolean(ball.spinStruck);
     const hasIron = tickSaves.some(s => s.iron);

@@ -208,3 +208,53 @@ test('prediction ignition indicator fills with team color', () => {
   assert.equal(fills[0], '#AA54D3', 'away team color is used for team 1 ignition');
   assert.equal(strokes[0], '#ffffff', 'white outline is used for ignition flame');
 });
+
+test('creditSave generates Trap! callout for friendly iron saves and Big save! for opposing', () => {
+  const popups = [];
+  const popup = (body, text) => popups.push({ text, own: body.team });
+  const code = section('function creditSave(body, own, iron = false) {', 'function contactMeter(');
+  const context = {
+    popup, steamRing() {}, gameAudio: () => ({ playIronSave() {} }),
+    online: null, goalReplay: null, theater: null,
+    ububallMatch: { gainMeter: () => [], METER: { save: 6 } },
+    classicMode: () => true, dirtyMeters: new Set(), P: {}, bodies: [], stats: {}
+  };
+  vm.runInNewContext(code + '\ncreditSave({ team: 0, x: 0, y: 0, radius: 10 }, true, true);\ncreditSave({ team: 1, x: 0, y: 0, radius: 10 }, false, true);\ncreditSave({ team: 0, x: 0, y: 0, radius: 10 }, false, false);', context);
+  assert.equal(popups[0].text, 'Trap!');
+  assert.equal(popups[1].text, 'Big save!');
+  assert.equal(popups[2].text, 'Save!');
+});
+
+test('updatePopups ages popups independently and prunes expired ones', () => {
+  const popups = [
+    { text: 'Trap!', life: 0.5 },
+    { text: 'Spin strike!', life: 0.1 }
+  ];
+  const code = section('function updatePopups(dt) {', 'function drawPopups(home, away) {');
+  vm.runInNewContext(code + '\nupdatePopups(0.2);', { popups, reducedMotion: { matches: false } });
+  assert.equal(popups.length, 1);
+  assert.equal(popups[0].text, 'Trap!');
+  assert.ok(Math.abs(popups[0].life - 0.3) < 1e-6);
+});
+
+test('iron guard shield receives #6b7785 border stroke with lineWidth 1.5', () => {
+  let strokeStyle = null, lineWidth = null, strokePath = null, fillStyle = null;
+  const GUARD_SHIELD = Symbol('GUARD_SHIELD');
+  const badgeCtx = {
+    save() {}, restore() {}, translate() {}, rotate() {}, scale() {},
+    fill(p) { fillStyle = this.fillStyle; },
+    stroke(p) { strokeStyle = this.strokeStyle; lineWidth = this.lineWidth; strokePath = p; },
+    set fillStyle(val) { this._fillStyle = val; }, get fillStyle() { return this._fillStyle; },
+    set strokeStyle(val) { this._strokeStyle = val; }, get strokeStyle() { return this._strokeStyle; },
+    set lineWidth(val) { this._lineWidth = val; }, get lineWidth() { return this._lineWidth; }
+  };
+  const b = { guarding: true, radius: 25, x: 100, y: 100 };
+  const phase = 'plan', i = 0, plans = [{ guard: true }], isPortrait = false;
+  const predictionCache = { data: { guards: [{ index: 0, held: true }] } };
+  const code = section('if (((phase === \'play\' || phase === \'replay\') && b.guarding) || (phase === \'plan\' && i < 3 && plans[i]?.guard)) {', 'const slow = P.dazeSlow(b);');
+  vm.runInNewContext(code, { badgeCtx, b, phase, i, plans, isPortrait, predictionCache, GUARD_SHIELD });
+  assert.equal(fillStyle, '#c3ccd6', 'iron fill is metallic grey');
+  assert.equal(strokeStyle, '#6b7785', 'border stroke is darker grey');
+  assert.equal(lineWidth, 1.5, 'border lineWidth is 1.5');
+  assert.equal(strokePath, GUARD_SHIELD);
+});
