@@ -11,7 +11,8 @@ function recordedContext() {
     linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} });
   const node = kind => {
     const n = { kind, outputs: [], connect(to) { this.outputs.push(to); }, disconnect() {},
-      start(time) { this.started = time; }, stop(time) { this.stopped = time; } };
+      start(time) { this.started = time; }, stop(time) { this.stopped = time; },
+      setPeriodicWave(wave) { this.type = 'custom'; this.periodicWave = wave; } };
     for (const key of ['gain', 'frequency', 'detune', 'Q', 'threshold', 'knee', 'ratio', 'attack', 'release', 'pan', 'offset']) n[key] = param();
     nodes.push(n);
     return n;
@@ -21,11 +22,28 @@ function recordedContext() {
     createBiquadFilter: () => node('filter'), createDynamicsCompressor: () => node('compressor'),
     createStereoPanner: () => node('panner'), createBufferSource: () => node('buffer'),
     createConvolver: () => node('room'), createConstantSource: () => node('constant'),
+    createPeriodicWave: (real, imag) => ({ real: Float32Array.from(real), imag: Float32Array.from(imag) }),
     createBuffer: (channels, length, sampleRate) => {
       const data = Array.from({ length: channels }, () => new Float32Array(length));
       return { sampleRate, getChannelData: channel => data[channel] };
     }
   };
+}
+
+function reaches(node, match, seen = new Set()) {
+  if (seen.has(node)) return false;
+  seen.add(node);
+  return match(node) || node.outputs.some(to => reaches(to, match, seen));
+}
+
+// Each melody note has its own panner. Find its fundamental independently of the
+// instrument's waveform or extra harmonic/breath sources.
+function leadNotes(ctx) {
+  return ctx.nodes.filter(n => n.kind === 'panner').map(panner => {
+    const tones = ctx.nodes.filter(n => n.kind === 'oscillator' && reaches(n, to => to === panner));
+    assert.ok(tones.length, 'each lead note has a pitched source');
+    return tones.reduce((lowest, n) => n.frequency.value < lowest.frequency.value ? n : lowest);
+  });
 }
 
 test('fanfare sustains a dry bass pulse under a merged chord, with wet lead and pad', () => {
@@ -39,13 +57,15 @@ test('fanfare sustains a dry bass pulse under a merged chord, with wet lead and 
     assert.equal(bass.length, 8, 'merged eight-beat chord still has eight bass pulses');
     assert.deepEqual(bass.map(n => n.started), Array.from({ length: 8 }, (_, i) => 0.05 + i * 0.5));
     for (let i = 0; i < bass.length - 1; i++) assert.ok(bass[i].stopped < bass[i + 1].started);
-    const reachesRoom = (n, seen = new Set()) => {
-      if (seen.has(n)) return false;
-      seen.add(n);
-      return n.kind === 'room' || n.outputs.some(to => reachesRoom(to, seen));
-    };
-    for (const n of oscillators) assert.equal(reachesRoom(n), n.type === 'triangle' || n.type === 'sawtooth');
-    for (const n of ctx.nodes.filter(n => n.kind === 'buffer')) assert.equal(reachesRoom(n), false);
+    const kicks = oscillators.filter(n => n.frequency.value === 150);
+    for (const n of oscillators) {
+      assert.equal(reaches(n, to => to.kind === 'room'), !bass.includes(n) && !kicks.includes(n));
+    }
+    const buffers = ctx.nodes.filter(n => n.kind === 'buffer');
+    const breaths = buffers.filter(n => reaches(n, to => to.kind === 'panner'));
+    assert.equal(breaths.length, 8, 'flute breath follows each lead note');
+    assert.ok(buffers.length > breaths.length, 'dry percussion is also present');
+    for (const n of buffers) assert.equal(reaches(n, to => to.kind === 'room'), breaths.includes(n));
   } finally { handle.stop(); }
 });
 
@@ -62,7 +82,8 @@ test('victory accents follow sounding endpoints, preserve modes and stop with pl
       const voice = { instrument: 14, pitch: 24, decay: 6, timbreMod: 0, scale, tempo: 7, groove: 2, notes };
       const handle = audio.playFanfare(voice, ctx);
       const brass = ctx.nodes.filter(n => n.kind === 'oscillator' && n.type === 'sawtooth');
-      const lead = ctx.nodes.filter(n => n.kind === 'oscillator' && n.type === 'triangle' && !n.detune.events.length);
+      const lead = leadNotes(ctx);
+      assert.equal(lead.length, notes.filter(n => n.duration !== 3).length);
       const beat = 60 / 168;
       if (!lead.length) assert.equal(brass.length, 0, 'all rests do not invent a victory melody');
       else {
@@ -96,7 +117,7 @@ test('fanfare preserves lead pitches, rests and groove timing while pad voices m
     const original = JSON.stringify(voice), handle = audio.playFanfare(voice, ctx);
     try {
       const triangles = ctx.nodes.filter(n => n.kind === 'oscillator' && n.type === 'triangle');
-      const lead = triangles.filter(n => n.detune.events.length === 0);
+      const lead = leadNotes(ctx);
       const parsed = audio.parseVoiceInfo(voice);
       let at = 0.05, index = 0;
       parsed.notes.forEach((note, i) => {
@@ -257,6 +278,7 @@ test('audio: mock AudioContext synthesis and scheduling', () => {
     disconnect() {}
     start() {}
     stop() {}
+    setPeriodicWave(wave) { this.type = 'custom'; this.periodicWave = wave; }
   }
 
   let convolvers = 0;
@@ -272,6 +294,12 @@ test('audio: mock AudioContext synthesis and scheduling', () => {
     createBufferSource() { return new MockNode(); },
     createConvolver() { convolvers++; return new MockNode(); },
     createConstantSource() { return new MockNode(); },
+    createPeriodicWave(real, imag) {
+      assert.equal(real.length, imag.length);
+      assert.ok(real.length > 1);
+      assert.ok([...real, ...imag].every(Number.isFinite));
+      return { real: Float32Array.from(real), imag: Float32Array.from(imag) };
+    },
     createBuffer(channels, length, sampleRate) {
       const data = Array.from({ length: channels }, () => new Float32Array(length));
       return { sampleRate, getChannelData: channel => data[channel] };
