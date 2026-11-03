@@ -667,7 +667,7 @@ test('opposing Iron Save awards defensive save statistics, save meter, and arms 
 
   assert.equal(result.state.tally.saves[3], 1, 'defensive save credited to defender');
   assert.equal(result.state.tally.bigSaves[3], 1, 'big save stat recorded');
-  assert.ok(result.state.bodies[3].meter >= M.METER.save * M.METER.rate, 'meter includes save award');
+  assert.ok(Math.abs(result.state.bodies[3].meter - (M.METER.ball + M.METER.save) * M.METER.rate) < 1e-9, 'defender receives both contact and save meter');
   assert.ok(result.state.saved, 'play.saved is recorded');
   assert.equal(result.state.saved.team, 1, 'play.saved team is defending team');
 });
@@ -688,9 +688,9 @@ test('friendly Iron Save (trap) classifies as own save with no defensive stats o
   assert.equal(saves[0].iron, true, 'classified as an Iron Save');
   assert.equal(saves[0].own, true, 'friendly trap classified as own === true');
 
-  assert.equal(result.state.tally.saves[1] || 0, 0, 'no defensive save credited for friendly trap');
-  assert.equal(result.state.stats[1]?.bigSaves || 0, 0, 'no big save stat for friendly trap');
-  assert.ok(Math.abs(result.state.bodies[1].meter - M.METER.ball * M.METER.rate) < 1e-9 || result.state.bodies[1].meter === 0, 'no save meter awarded for friendly trap');
+  assert.equal(result.state.tally.saves[1], 0, 'no defensive save credited for friendly trap');
+  assert.equal(result.state.tally.bigSaves[1], 0, 'no big save stat for friendly trap');
+  assert.ok(Math.abs(result.state.bodies[1].meter - M.METER.ball * M.METER.rate) < 1e-9, 'friendly trap receives only contact meter, not save meter');
   assert.equal(result.state.saved, null, 'friendly trap does not arm play.saved');
   assert.equal(M.responsibleTeam(result.state.bodies, result.state.credit), 0, 'team 0 retained possession');
   assert.equal(result.state.assist[0], 0, 'passer credited with assist');
