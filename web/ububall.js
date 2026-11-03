@@ -914,23 +914,107 @@
     bodies.forEach((b, i) => {
       if (b.vx * b.vx + b.vy * b.vy < 625) return;
       const trail = trails[i], previous = trail[trail.length - 1];
-      if (!previous || (b.x - previous.x) ** 2 + (b.y - previous.y) ** 2 >= 9) {
+      if (!previous || (b.x - previous.x) ** 2 + (b.y - previous.y) ** 2 >= 64) {
         const duration = .24; // Fixed lifetime makes trail length follow speed, not body size.
         // The ball's trail heats from white to orange with speed, and flares after a Cannonball.
         const heat = b.team === -1 ? ballHeat(b) : 0;
         trail.push({ x: b.x, y: b.y, life: duration, duration, heat });
-        if (trail.length > 40) trail.shift();
+        if (trail.length > 20) trail.shift();
       }
     });
   }
   function drawTrails(home, away) {
-    ctx.save(); ctx.lineCap = 'round';
+    ctx.save();
     trails.forEach((trail, index) => {
+      if (!trail.length) return;
       const b = bodies[index], color = b.team === -1 ? '#ffffff' : b.team === 0 ? home : away;
-      for (let i = 0; i < trail.length; i++) {
-        const p = trail[i], end = trail[i + 1] || b, fade = Math.max(0, p.life / p.duration);
-        ctx.globalAlpha = fade * (.23 + Math.min(2, p.heat || 0) * .05 + Math.max(0, (p.heat || 0) - 2) * .3);
-        line(p.x, p.y, end.x, end.y, b.team === -1 ? heatColor(p.heat || 0) : color, b.radius * 2 * fade);
+      const pts = trail.map((p, idx) => ({ ...p, origIndex: idx }))
+        .concat([{ x: b.x, y: b.y, radius: b.radius, life: .24, duration: .24, heat: b.team === -1 ? ballHeat(b) : 0, origIndex: trail.length, isHead: true }]);
+
+      const u = [];
+      for (let j = 0; j < pts.length - 1; j++) {
+        const dx = pts[j + 1].x - pts[j].x, dy = pts[j + 1].y - pts[j].y, len = Math.hypot(dx, dy);
+        u.push(len > 0.001 ? { x: dx / len, y: dy / len } : (j > 0 ? u[j - 1] : { x: 1, y: 0 }));
+      }
+
+      const sections = [];
+      let cur = [pts[0]];
+      for (let j = 0; j < pts.length - 1; j++) {
+        cur.push(pts[j + 1]);
+        if (j < pts.length - 2) {
+          const dot = u[j].x * u[j + 1].x + u[j].y * u[j + 1].y;
+          if (dot < 0.2) {
+            if (cur.length >= 2) sections.push(cur);
+            cur = [pts[j + 1]];
+          }
+        }
+      }
+      if (cur.length >= 2) sections.push(cur);
+
+      for (const sec of sections) {
+        const m = sec.length - 1;
+        if (m < 1) continue;
+        const S0 = sec[0], Sm = sec[m];
+        if (Math.hypot(Sm.x - S0.x, Sm.y - S0.y) < 1) continue;
+
+        const L = [], R = [];
+        for (let k = 0; k <= m; k++) {
+          const pt = sec[k];
+          let dx, dy;
+          if (k === 0) { dx = sec[1].x - sec[0].x; dy = sec[1].y - sec[0].y; }
+          else if (k === m) { dx = sec[m].x - sec[m - 1].x; dy = sec[m].y - sec[m - 1].y; }
+          else { dx = sec[k + 1].x - sec[k - 1].x; dy = sec[k + 1].y - sec[k - 1].y; }
+
+          let tx = 1, ty = 0;
+          const d = Math.hypot(dx, dy);
+          if (d > 0.001) { tx = dx / d; ty = dy / d; }
+          else if (k > 0 && L[k - 1]) { tx = L[k - 1].tx; ty = L[k - 1].ty; }
+
+          const nx = -ty, ny = tx;
+          const lifeFade = pt.isHead ? 1 : Math.max(0, pt.life / pt.duration);
+          const posTaper = pt.isHead ? 1 : Math.min(1, (pt.origIndex + 0.5) / Math.min(trail.length, 5));
+          const fade = lifeFade * posTaper;
+          const w = b.radius * fade;
+          L.push({ x: pt.x + nx * w, y: pt.y + ny * w, tx, ty, w, fade });
+          R.push({ x: pt.x - nx * w, y: pt.y - ny * w, tx, ty, w, fade });
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(L[0].x, L[0].y);
+        for (let k = 1; k <= m; k++) ctx.lineTo(L[k].x, L[k].y);
+        ctx.lineTo(R[m].x, R[m].y);
+        for (let k = m - 1; k >= 0; k--) ctx.lineTo(R[k].x, R[k].y);
+
+        const w0 = L[0].w;
+        if (w0 > 0.5) {
+          const angR = Math.atan2(R[0].y - S0.y, R[0].x - S0.x);
+          const angL = Math.atan2(L[0].y - S0.y, L[0].x - S0.x);
+          ctx.arc(S0.x, S0.y, w0, angR, angL, true);
+        }
+        ctx.closePath();
+
+        const grad = ctx.createLinearGradient(S0.x, S0.y, Sm.x, Sm.y);
+        if (b.team === -1) {
+          const ballAlpha = (f, h) => f * (.23 + Math.min(2, h) * .05 + Math.max(0, h - 2) * .3);
+          const heat0 = S0.heat || 0, alpha0 = S0.origIndex === 0 ? 0 : ballAlpha(L[0].fade, heat0);
+          grad.addColorStop(0, colorWithAlpha(heatColor(heat0), alpha0));
+          if (m >= 2) {
+            const midIdx = Math.floor(m / 2), mid = sec[midIdx];
+            const heatMid = mid.heat || 0, alphaMid = ballAlpha(L[midIdx].fade, heatMid);
+            grad.addColorStop(0.5, colorWithAlpha(heatColor(heatMid), alphaMid));
+          }
+          const heatM = Sm.isHead ? ballHeat(b) : (Sm.heat || 0);
+          const alphaM = ballAlpha(L[m].fade, heatM);
+          grad.addColorStop(1, colorWithAlpha(heatColor(heatM), alphaM));
+        } else {
+          const alpha0 = S0.origIndex === 0 ? 0 : L[0].fade * 0.23;
+          const alphaM = L[m].fade * 0.23;
+          grad.addColorStop(0, colorWithAlpha(color, alpha0));
+          grad.addColorStop(1, colorWithAlpha(color, alphaM));
+        }
+
+        ctx.fillStyle = grad;
+        ctx.fill();
       }
     });
     ctx.restore();
@@ -988,6 +1072,12 @@
     if (c.length === 3) c = c.split('').map(x => x + x).join('');
     const num = parseInt(c, 16);
     return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${alpha})`;
+  }
+  function colorWithAlpha(color, alpha) {
+    if (color.startsWith('#')) return hexToRgba(color, alpha);
+    if (color.startsWith('rgba(')) return color.replace(/,[\s\d.]+\)$/, `, ${alpha})`);
+    if (color.startsWith('rgb(')) return color.replace('rgb(', 'rgba(').replace(')', `, ${alpha})`);
+    return color;
   }
   function superGlowSprite(key) {
     if (superGlowSprites.has(key)) return superGlowSprites.get(key);
