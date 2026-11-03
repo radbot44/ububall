@@ -121,7 +121,7 @@ function scripted(each = () => {}) {
 
 // The physics this version of the replay format plays back. A change to how turns play out must
 // bump P.VERSION, which makes older replays refuse to play; then record the new fingerprint here.
-const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31', 7: '37a23456c784360a', 8: '83873175fc525045', 9: '09b47d9873e6c0d2', 10: 'c4a526d87f85f50d', 11: 'c149d32f71adb8f2', 12: 'a685065b99430f89' };
+const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31', 7: '37a23456c784360a', 8: '83873175fc525045', 9: '09b47d9873e6c0d2', 10: 'c4a526d87f85f50d', 11: 'c149d32f71adb8f2', 12: 'a685065b99430f89', 13: 'dc91a880c4ee68be' };
 test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
   const ends = [...[...replay.turns, ...standard.turns].map(replayTurn), ...scripted()];
@@ -194,6 +194,20 @@ test('clips keep a turn or a round as a titled replay of its own', async () => {
   for (const patch of [{ final: { scores: [1, 0], winner: 0 } }, { title: ' padded' }, { title: '' }, { title: 'x'.repeat(R.MAX_TITLE + 1) }, { clip: 1 }, { anonymous: true }]) {
     assert.throws(() => R.canonical({ ...good, ...patch }), /not a valid/);
   }
+});
+
+test('replay snapshot and restore preserves ironGuard flag', () => {
+  const bodies = P.kickoff();
+  bodies[0].guarding = true;
+  bodies[0].ironGuard = true;
+  bodies[1].guarding = true;
+  bodies[1].ironGuard = false;
+  const snap = R.snapshot(bodies);
+  const restored = R.restore(snap);
+  assert.equal(restored[0].guarding, true);
+  assert.equal(restored[0].ironGuard, true);
+  assert.equal(restored[1].guarding, true);
+  assert.equal(restored[1].ironGuard, false);
 });
 
 test('privacy keeps the play, looks and voices but drops every name', async () => {

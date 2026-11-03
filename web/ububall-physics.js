@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 12;
+  const VERSION = 13;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -111,7 +111,7 @@
     // Traction spans a narrower range than most stats (0.75–1.33×, tuning): stopping where you aim
     // was the strongest stat.
     body.friction = 150 * multiplier(raw.traction ?? 127) ** .7;
-    body.maxSpin = 10 * multiplier(raw.spin ?? 127);
+    body.maxSpin = 15 * multiplier(raw.spin ?? 127);
     body.grip = .3 * multiplier(raw.grip ?? 127);
     body.impulse = IMPULSE * multiplier(raw.impulse ?? 127);
     // Curve bends the ubu's own path (more for small ubus) and the path of the ball it strikes, and
@@ -134,7 +134,7 @@
     const bodies = [];
     for (let team = 0; team < 2; team++) for (let i = 0; i < 3; i++) {
       bodies.push({ ...spawn(team, i), vx: 0, vy: 0,
-        radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 10, omega: 0, rotation: 0, team, slot: i });
+        radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 15, omega: 0, rotation: 0, ironGuard: false, team, slot: i });
     }
     bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1, fireTicks: 0, onFire: false, pace: 0, strikerPower: 1, strikerTeam: -1 });
     return bodies;
@@ -414,6 +414,7 @@
               ball.fireTicks = 0;
             }
             ironSave = true;
+            player.ironGuard = true;
             if (allBodies) triggerIronShockwave(player, allBodies, onShockwave);
           }
         }
@@ -794,7 +795,7 @@
       b.openingShot = false;
       b.spinStruck = false;
       if (b.guardBase) Object.assign(b, b.guardBase);
-      b.guardBase = null; b.guarding = false;
+      b.guardBase = null; b.guarding = false; b.ironGuard = false;
       if (!keepMotion) b.vx = b.vy = b.omega = 0;
       // In Pulse, a running super carries into the next turn until its time runs out.
       if (!keepMotion) endSuper(b, bodies);
@@ -1014,7 +1015,7 @@
       const power = distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * b.friction * Math.max(0, distance + extraDrive)) / maxV);
 
       if (Math.abs(spin) > 0.01 && power > 0.05) {
-        const omega0 = spin * (b.maxSpin || 10);
+        const omega0 = spin * (b.maxSpin || 15);
         const curveF = b.curveFactor ?? SKATER_CURVE;
         const v0 = Math.max(60, power * maxV);
         const estT = Math.min(1.2, distance / (v0 * 0.72));
@@ -1035,6 +1036,7 @@
       b.guardBase = null;
       // A stunned (knocked-out) ubu is simply frozen: it cannot guard.
       b.guarding = Boolean(plans[i]?.guard) && !b.stunned;
+      b.ironGuard = false;
       if (b.guarding) {
         b.guardBase = { reach: b.reach, friction: b.friction, strength: b.strength, stability: b.stability, bounciness: b.bounciness };
         b.reach = Math.max(b.radius, Math.min(37.5, (b.reach || b.radius) * 1.25));

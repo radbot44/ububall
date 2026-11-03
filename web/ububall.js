@@ -27,7 +27,7 @@
   // Each turn of the current play (motion since the field last rested), for goal replays.
   let playSegments = [], goalReplay = null, goalReplayAt = 0, postGoal = null;
   // The replay viewer (see watchReplay), and the match being recorded for the replay library.
-  let theater = null, recording = null, recordingOnline = false;
+  let theater = null, recording = null, recordingOnline = false, restoredMatch = false;
   // While a video export renders, effects and sounds run on its clock (ms) instead of the wall clock,
   // sounds go to its offline audio, and the field draws at its size.
   let videoClock = null, videoAudio = null, videoField = null, cardShot = false;
@@ -920,12 +920,12 @@
     }
     ctx.restore();
   }
-  // Arcs around a spinning ubu or ball, turning with it. Harder spins (up to 16 rad/s; ubus top out at
-  // 10, the ball at 24) draw more, longer and bolder arcs, and an outer ring past halfway.
+  // Arcs around a spinning ubu or ball, turning with it. Harder spins (up to 24 rad/s; ubus top out at
+  // 22.5, the ball at 24) draw more, longer and bolder arcs, and an outer ring past halfway.
   function drawSpin(b, color) {
     const spin = Math.abs(b.omega);
     if (spin < 2.5 || reducedMotion.matches) return;
-    const power = Math.min(1, (spin - 2.5) / 13.5), arcs = spin >= 8 ? 3 : 2, sweep = (.8 + 1.2 * power) * Math.sign(b.omega), back = b.omega < 0;
+    const power = Math.min(1, (spin - 2.5) / 20), arcs = spin >= 8 ? 3 : 2, sweep = (.8 + 1.2 * power) * Math.sign(b.omega), back = b.omega < 0;
     ctx.save(); ctx.strokeStyle = color; ctx.lineCap = 'round';
     for (let k = 0; k < arcs; k++) {
       const start = b.rotation + k * 2 * Math.PI / arcs;
@@ -1396,6 +1396,7 @@
   }
   // A save from a ball the saver's own team was most responsible for is a sheepish "Save..." with no meter.
   function creditSave(body, own, iron = false) {
+    if (iron && body) body.ironGuard = true;
     popup(body, iron ? (own ? 'Trap!' : 'Big save!') : own ? 'Save...' : 'Save!');
     if (iron) {
       steamRing(body.x, body.y, body.radius);
@@ -1857,6 +1858,132 @@
       });
     }
   }
+  function restoreEntry(saved) {
+    if (!saved || !saved.dna) return null;
+    if (typeof saved.key === 'string' && saved.key.startsWith('practice-')) {
+      const idx = Number(saved.key.slice(9));
+      if (practice[idx]) {
+        return {
+          ...practice[idx],
+          equippedSuper: saved.equippedSuper?.id ? P.SUPERS[saved.equippedSuper.id] : null
+        };
+      }
+    }
+    const rawDNA = ubu.fromCode(saved.dna);
+    const model = ubu.decode(rawDNA);
+    return {
+      key: saved.key || ('custom-' + saved.dna.slice(0, 8)),
+      dna: saved.dna,
+      label: saved.label || model.parts.fullName,
+      model,
+      equippedSuper: saved.equippedSuper?.id ? P.SUPERS[saved.equippedSuper.id] : null
+    };
+  }
+  function clearActiveMatch() {
+    try { localStorage.removeItem('ububall-active-match'); } catch {}
+  }
+  function saveActiveMatch(launchState = null) {
+    if (demo || online?.active || phase === 'over' || !recording) {
+      clearActiveMatch();
+      return;
+    }
+    try {
+      const entryData = e => e ? {
+        key: e.key,
+        dna: e.dna,
+        label: e.label,
+        equippedSuper: e.equippedSuper ? { id: e.equippedSuper.id } : null
+      } : null;
+      const data = {
+        version: ububallMatch.VERSION,
+        mode: matchMode,
+        level: cpuLevel,
+        scores: [...scores],
+        turn,
+        phase: launchState ? 'play' : phase,
+        fouls: { crease: [...fouls.crease], corner: fouls.corner, cornerTurns: fouls.cornerTurns, cards: [...(fouls.cards || [])] },
+        tally: structuredClone(tally),
+        roster: roster.map(entryData),
+        teamEntries: teamEntries.map(entryData),
+        bodies: ububallReplay.snapshot(launchState ? launchState.bodies : bodies),
+        turnPlans: launchState ? launchState.turnPlans : null,
+        plans: launchState ? null : plans.map(p => ({ angle: p.angle, power: p.power, spin: p.spin || 0, superArm: Boolean(p.superArm), guard: Boolean(p.guard) })),
+        recording: recording ? structuredClone(recording) : null
+      };
+      localStorage.setItem('ububall-active-match', JSON.stringify(data));
+    } catch {}
+  }
+  function restoreActiveMatch() {
+    try {
+      const raw = localStorage.getItem('ububall-active-match');
+      if (!raw) return false;
+      const saved = JSON.parse(raw);
+      if (!saved || saved.version !== ububallMatch.VERSION || !saved.bodies || !saved.roster || !saved.teamEntries) {
+        clearActiveMatch();
+        return false;
+      }
+      endGoalReplay();
+      playSegments = [];
+      cpuMode = saved.mode || 'standard';
+      cpuLevel = saved.level || 'medium';
+      matchMode = cpuMode;
+      const radio = document.querySelector(`input[name="cpu-level"][value="${cpuLevel}"]`);
+      if (radio) radio.checked = true;
+      document.body.classList.toggle('classic-match', classicMode());
+      showMode(matchMode);
+
+      roster = saved.roster.map(restoreEntry);
+      draft = [...roster];
+      teamEntries = saved.teamEntries.map(restoreEntry);
+      stats = teamEntries.map(entry => classicMode() ? normalStats() : { ...(entry?.model?.stats || normalStats()) });
+      stopFanfare();
+      gameAudio()?.stop();
+
+      scores = [...saved.scores];
+      turn = saved.turn;
+      fouls = { ...ububallMatch.newFouls(), ...saved.fouls };
+      tally = saved.tally || ububallMatch.newTally();
+      recording = saved.recording || ububallReplay.create({ mode: matchMode, names: ['You', 'CPU'], ubus: teamEntries.map(e => ({ dna: e.dna, super: e.equippedSuper?.id ?? null })) });
+      bodies = ububallReplay.restore(saved.bodies);
+      buildTeam();
+      bodies.slice(0, 6).forEach((b, i) => {
+        const entry = teamEntries[i];
+        if (entry?.model) {
+          b.name = entry.model.parts?.fullName;
+          b.voice = entry.model.voice;
+          b.personality = entry.model.personality;
+          b.equippedSuper = classicMode() ? null : (entry.equippedSuper || b.equippedSuper);
+        }
+        dirtyMeters.add(b);
+      });
+      selected = 0;
+      drag = null;
+
+      if (saved.phase === 'play' && Array.isArray(saved.turnPlans) && saved.turnPlans.length === 6) {
+        plans = saved.turnPlans.slice(0, 3);
+        recordSegment(bodies, saved.turnPlans);
+        beginGuide(bodies, saved.turnPlans, 0);
+        P.startTurn(bodies, saved.turnPlans, handleSuper);
+        elapsed = accumulator = 0;
+        phase = 'play';
+        say('Turn in motion…');
+      } else {
+        phase = 'plan';
+        if (Array.isArray(saved.plans) && saved.plans.length === 3) {
+          plans = saved.plans;
+        } else {
+          resetPlans();
+        }
+        say('Plan your next three launches.');
+      }
+      sync();
+      draw();
+      return true;
+    } catch {
+      clearActiveMatch();
+      return false;
+    }
+  }
   function newMatch(playJingle = false) {
     endGoalReplay(); playSegments = []; saveRecording();
     matchMode = cpuMode;
@@ -1865,7 +1992,10 @@
     stats = [...draft, ...practice.slice(3)].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
     stopFanfare(); gameAudio()?.stop();
     roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
-    if (!demo) recording = ububallReplay.create({ mode: matchMode, names: ['You', 'CPU'], ubus: bodies.slice(0, 6).map((b, i) => ({ dna: teamEntries[i].dna, super: b.equippedSuper?.id ?? null })) });
+    if (!demo) {
+      recording = ububallReplay.create({ mode: matchMode, names: ['You', 'CPU'], ubus: bodies.slice(0, 6).map((b, i) => ({ dna: teamEntries[i].dna, super: b.equippedSuper?.id ?? null })) });
+      saveActiveMatch();
+    }
     resetPlans(); say('Drag from an ubu toward your target to aim. Drag its arrowhead to adjust power and direction.'); draw();
     if (playJingle) gameAudio()?.playGameStart?.();
   }
@@ -2287,12 +2417,16 @@
         circle(b.x, b.y, b.radius + 9, goalAccent, 4);
         circle(b.x, b.y, b.radius + 15, goalAccent, 2);
       }
-      if (((phase === 'play' || phase === 'replay') && b.guarding) || (phase === 'plan' && i < 3 && plans[i]?.guard)) {
+      const inAction = phase === 'play' || phase === 'replay' || Boolean(goalReplay);
+      if ((inAction && b.guarding) || (phase === 'plan' && i < 3 && plans[i]?.guard)) {
         badgeCtx.save();
         const p = isPortrait ? { x: b.x - b.radius * .65, y: b.y + b.radius * .65 } : { x: b.x + b.radius * .65, y: b.y + b.radius * .65 };
         badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
         // While planning, a Guard the predicted turn's burning ball would not beat turns iron.
-        const iron = phase === 'plan' && predictionCache?.data.guards.some(g => g.index === i && g.held);
+        // During play and replays, guards start blue and turn iron once an iron save successfully occurs.
+        const iron = phase === 'plan'
+          ? Boolean(predictionCache?.data.guards.some(g => g.index === i && g.held))
+          : Boolean(b.ironGuard);
         badgeCtx.scale(1.1, 1.1); badgeCtx.translate(-12, -12); badgeCtx.fillStyle = iron ? '#c3ccd6' : '#4798ff';
         badgeCtx.fill(GUARD_SHIELD);
         if (iron) {
@@ -2421,7 +2555,10 @@
     const saves = turn.saves.filter(s => s.tick === tick), stop = turn.stops.find(s => s.tick === tick)?.ms, struck = sim[6].spinStruck;
     sim[6].spinStruck = false;
     if (saves.length || struck) syncReplay();
-    for (const s of saves) creditSave(replayView(sim[s.index]), s.own, s.iron);
+    for (const s of saves) {
+      if (s.iron && sim[s.index]) sim[s.index].ironGuard = true;
+      creditSave(replayView(sim[s.index]), s.own, s.iron);
+    }
     if (struck) popup(bodies[6], 'Spin strike!');
     if (stop) impact(stop, stop >= (ububallMatch.HIT_STOP?.scoredGoal ?? 200) ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1));
   }
@@ -2547,7 +2684,9 @@
       names: r.names, scores: r.final?.scores || last.scores.map((n, team) => n + (last.goal?.team === team ? 1 : 0)),
       final: Boolean(r.final), turns: r.turns.length, auto, pinned: false, file };
   }
-  addEventListener('pagehide', () => void saveRecording());
+  addEventListener('pagehide', () => {
+    if (online?.active || phase === 'over' || !recording) saveRecording();
+  });
   // Completes the local turn just played.
   function noteTurn(ticks, goal, cards) {
     const t = recording?.turns.at(-1);
@@ -3138,7 +3277,14 @@
         drawImpulse(b, plan, color);
         if (plan.guard && !b.stunned) {
           badgeCtx.save(); badgeCtx.translate(b.x + b.radius * .65, b.y + b.radius * .65); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
-          badgeCtx.globalAlpha = .85; badgeCtx.translate(-12, -12); badgeCtx.fillStyle = '#4798ff'; badgeCtx.fill(GUARD_SHIELD);
+          const guideIron = Boolean(b.ironGuard);
+          badgeCtx.globalAlpha = .85; badgeCtx.scale(1.1, 1.1); badgeCtx.translate(-12, -12);
+          badgeCtx.fillStyle = guideIron ? '#c3ccd6' : '#4798ff'; badgeCtx.fill(GUARD_SHIELD);
+          if (guideIron) {
+            badgeCtx.strokeStyle = '#6b7785';
+            badgeCtx.lineWidth = 1.5;
+            badgeCtx.stroke(GUARD_SHIELD);
+          }
           badgeCtx.restore();
         }
         if ((plan.superArm || b.superArm) && b.equippedSuper && b.meter >= 100 && !b.stunned) drawSuperBadge({ ...b, superArm: true }, b.equippedSuper.key);
@@ -3403,6 +3549,7 @@
       if (phase === 'over') {
         queueSummary();
         if (recording) { recording.final = { scores: [...scores], winner: goal }; saveRecording(); }
+        clearActiveMatch();
       }
       const scorer = bodies[call.scorer] || bodies.slice(goal * 3, goal * 3 + 3)[0];
       goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY + 800;
@@ -3419,6 +3566,7 @@
       if (phase === 'goal') { $('launch').disabled = false; $('launch').textContent = 'Next kickoff'; }
     } else {
       turn++; phase = 'plan'; resetPlans(true);
+      saveActiveMatch();
       say(foulText() || (pulseMode() && !P.settled(bodies) ? 'Pulse paused. Adjust your launches or guard to brake.' : 'Field settled. Plan your next three launches.'));
     }
     draw();
@@ -3437,7 +3585,9 @@
       if (postGoal) { P.stop(bodies); postGoal = null; }
       stopFanfare(); gameAudio()?.stop();
       endGoalReplay();
-      bodies = kickoff(); turn++; phase = 'plan'; resetPlans(); say('Kickoff. Plan your next three launches.'); draw(); return;
+      bodies = kickoff(); turn++; phase = 'plan'; resetPlans(); say('Kickoff. Plan your next three launches.');
+      saveActiveMatch();
+      draw(); return;
     }
     if (phase !== 'plan') return;
     const generation = cpuGeneration;
@@ -3450,6 +3600,7 @@
     const turnPlans = [...plans, ...cpu];
     recordSegment(bodies, turnPlans); beginGuide(bodies, turnPlans, 0);
     if (recording) ububallReplay.addTurn(recording, { turn, scores, fouls, bodies, plans: turnPlans });
+    saveActiveMatch({ bodies, turnPlans });
     P.startTurn(bodies, turnPlans, handleSuper); elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
     if (!demo) banner('Launch!', 800, 'launch');
   };
@@ -3551,6 +3702,10 @@
     draw();
   };
   function handleCollision(a, b, speed, impulse, plow = false, iron = false) {
+    if (iron) {
+      if (a?.guarding) a.ironGuard = true;
+      if (b?.guarding) b.ironGuard = true;
+    }
     if (speed < 15) return;
     const distance = Math.hypot(b.x - a.x, b.y - a.y) || 1;
     const x = a.x + (b.x - a.x) * a.radius / distance, y = a.y + (b.y - a.y) * a.radius / distance;
@@ -4042,7 +4197,7 @@
       const entries = await accountTeam();
       if (!entries || !roster.every(entry => practice.includes(entry))) return;
       draft = entries;
-      if (demo) newDemoGame(); else if (!matchInProgress()) newMatch(); else roster = [...draft];
+      if (demo) newDemoGame(); else if (!matchInProgress()) newMatch();
       updateHome();
     } catch {}
   });
@@ -4266,7 +4421,7 @@
   const portraitScreen = matchMedia('(orientation: portrait)');
   function setPortrait(value) { if (isPortrait !== value) toggleRotate(); }
   function fitOrientation() { if (inMatch) setPortrait(portraitScreen.matches); }
-  function matchInProgress() { return !demo && phase !== 'over' && ($('home-score').textContent !== '0' || $('away-score').textContent !== '0' || turn > 1); }
+  function matchInProgress() { return !demo && phase !== 'over' && Boolean(recording && !online?.active); }
   function updateHome() { $('home-play').textContent = online?.active ? 'Back to online match' : matchInProgress() ? 'Resume match' : 'Play vs CPU'; }
   function enterMatch() {
     if (location.pathname !== '/') return;
@@ -4291,7 +4446,7 @@
   }
   $('pause').onclick = openPause;
   $('pause-resume').onclick = () => $('pause-menu').close();
-  $('pause-restart').onclick = () => { $('pause-menu').close(); endReplay(); openSetup('mode'); };
+  $('pause-restart').onclick = () => { $('pause-menu').close(); endReplay(); clearActiveMatch(); openSetup('mode'); };
   $('pause-leave').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
   $('home-play').onclick = () => { if (online?.active || matchInProgress()) enterMatch(); else openSetup('mode'); };
   $('demo-play').onclick = () => $('home-play').click();
@@ -4329,7 +4484,10 @@
   const resizeField = () => { gameUi.updateScale?.(); layoutDirty = true; draw(); };
   window.addEventListener('resize', resizeField);
   window.visualViewport?.addEventListener('resize', resizeField);
-  practice.slice(0, 3).forEach(entry => addOption(entry, 'roster-practice')); newMatch(); requestAnimationFrame(frame);
+  practice.slice(0, 3).forEach(entry => addOption(entry, 'roster-practice'));
+  restoredMatch = restoreActiveMatch();
+  if (!restoredMatch) newMatch();
+  requestAnimationFrame(frame);
   function networkMoves() {
     return plans.map((p, i) => ({ angle: p.angle + (online?.state?.seat ? Math.PI : 0), power: p.power,
       spin: p.spin || 0, superArm: Boolean(bodies[i].superArm), guard: Boolean(p.guard) }));
@@ -4383,7 +4541,7 @@
         }
         vb.omega = cb.omega;
         vb.meter = cb.meter ?? 0;
-        vb.guarding = Boolean(cb.guarding); vb.daze = cb.daze || 0;
+        vb.guarding = Boolean(cb.guarding); vb.ironGuard = Boolean(cb.ironGuard); vb.daze = cb.daze || 0;
         vb.superActive = cb.superActive || null;
         vb.stunned = Boolean(cb.stunned || cb.stunnedNext); vb.carded = Boolean(cb.carded);
         vb.holding = Boolean(cb.holding);
@@ -4738,5 +4896,10 @@
     await demoWait(run, 300);
   }
   // A reload during a match returns to match mode; otherwise the home rink plays a demo.
-  if (history.state?.match) enterMatch(); else startDemo();
+  if (restoredMatch || history.state?.match) {
+    if (matchInProgress()) enterMatch();
+    else startDemo();
+  } else {
+    startDemo();
+  }
 })();

@@ -308,7 +308,7 @@ function strikeCloseSpin(bodies) {
 
 test('spin strike counter-rotates the ball 1x from range, ramping to 2x spin and a power boost within 2 ball diameters', () => {
   for (const spin of [-1, 0, 1]) {
-    [10, 10, 15, 20].forEach((gain, i) => {
+    [15, 15, 22.5, 30].forEach((gain, i) => {
       const gap = [300, 72, 36, 0][i];
       const bodies = closeSpinSetup(gap, spin), control = structuredClone(bodies);
       control[6].openingShot = false;
@@ -899,7 +899,7 @@ test('curve strengthens spin strikes and bends the ball its ubu strikes', () => 
   const shot = curve => {
     const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal)); P.applyStats(b[0], { ...normal, curve });
     Object.assign(b[0], { x: 400, y: 300 }); Object.assign(b[6], { x: 443, y: 300 });
-    P.startTurn(b, [{ angle: 0, power: .6, spin: 1 }]);
+    P.startTurn(b, [{ angle: 0, power: .6, spin: .5 }]);
     b[6].x = 442.9; P.step(b, 0);
     return b[6];
   };
@@ -1356,4 +1356,51 @@ test('Super Mastery grants refund on hit and stacks with whiff refund, without d
   b[1].equippedSuper = { ...P.SUPERS[3], bonusRefund: 20 };
   P.endSuper(b[1], b);
   assert.equal(b[1].meter, 45, 'whiffed Master super refunded 45% (25% whiff + 20% mastery)');
+});
+
+test('launch spin scales with base maxSpin of 15 rad/s and DNA spin stat', () => {
+  const b = P.kickoff();
+  P.applyStats(b[0], { ...normal, spin: 127 });
+  assert.equal(b[0].maxSpin, 15, 'base stat 127 yields maxSpin 15 rad/s');
+
+  P.applyStats(b[1], { ...normal, spin: 0 });
+  assert.ok(Math.abs(b[1].maxSpin - 10) < 1e-6, 'min spin stat 0 yields 10 rad/s (2/3x)');
+
+  P.applyStats(b[2], { ...normal, spin: 255 });
+  assert.ok(Math.abs(b[2].maxSpin - 22.5) < 1e-6, 'max spin stat 255 yields 22.5 rad/s (1.5x)');
+
+  P.launch([b[0]], [{ angle: 0, power: 1, spin: 1 }]);
+  assert.equal(b[0].omega, 15, 'launch with spin 1 applies full maxSpin 15 rad/s');
+
+  b[0].omega = 0;
+  P.launch([b[0]], [{ angle: 0, power: 1, spin: -0.5 }]);
+  assert.equal(b[0].omega, -7.5, 'launch from rest with spin -0.5 applies -7.5 rad/s');
+});
+
+test('iron guard status starts false on play start, turns true upon iron save, and persists', () => {
+  const b = P.kickoff();
+  b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  P.startTurn(b, [{ angle: 0, power: 0, spin: 0, guard: true }]);
+  assert.equal(b[0].guarding, true);
+  assert.equal(b[0].ironGuard, false, 'guard starts as blue guard (ironGuard false) on play start');
+
+  const ball = b[6];
+  ball.x = b[0].x + 40;
+  ball.y = b[0].y;
+  ball.vx = -600;
+  ball.vy = 0;
+  ball.onFire = true;
+  ball.fireTicks = 60;
+  ball.strikerTeam = 1;
+
+  let shockType = null;
+  P.step(b, P.DT, null, null, (src, r, type) => { shockType = type; });
+  assert.equal(shockType, 'iron', 'iron shockwave triggered');
+  assert.equal(b[0].ironGuard, true, 'ironGuard becomes true upon successful iron save');
+
+  P.step(b, P.DT);
+  assert.equal(b[0].ironGuard, true, 'ironGuard remains true for the rest of the play');
+
+  P.stop(b);
+  assert.equal(b[0].ironGuard, false, 'ironGuard resets when turn stops');
 });

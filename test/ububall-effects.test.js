@@ -251,8 +251,8 @@ test('iron guard shield receives #6b7785 border stroke with lineWidth 1.5', () =
   const b = { guarding: true, radius: 25, x: 100, y: 100 };
   const phase = 'plan', i = 0, plans = [{ guard: true }], isPortrait = false;
   const predictionCache = { data: { guards: [{ index: 0, held: true }] } };
-  const code = section('if (((phase === \'play\' || phase === \'replay\') && b.guarding) || (phase === \'plan\' && i < 3 && plans[i]?.guard)) {', 'const slow = P.dazeSlow(b);');
-  vm.runInNewContext(code, { badgeCtx, b, phase, i, plans, isPortrait, predictionCache, GUARD_SHIELD });
+  const code = section('const inAction = phase === \'play\' || phase === \'replay\' || Boolean(goalReplay);', 'const slow = P.dazeSlow(b);');
+  vm.runInNewContext(code, { badgeCtx, b, phase, i, plans, isPortrait, predictionCache, GUARD_SHIELD, goalReplay: null });
   assert.equal(fillStyle, '#c3ccd6', 'iron fill is metallic grey');
   assert.equal(strokeStyle, '#6b7785', 'border stroke is darker grey');
   assert.equal(lineWidth, 1.5, 'border lineWidth is 1.5');
