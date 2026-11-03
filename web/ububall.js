@@ -441,9 +441,14 @@
   function goalThreat() {
     const ball = bodies[6];
     if (!ball || P.holder(bodies)) return null;
-    const speed = Math.hypot(ball.vx, ball.vy);
-    if (speed < 120 || (ball.x - speed * .9 > 60 && ball.x + speed * .9 < 940)) return null;
-    const sim = [{ ...ball }], limit = Math.round(.9 / P.DT);
+    const speed = Math.hypot(ball.vx, ball.vy), horizon = .9;
+    if (speed < 120) return null;
+    // Spin may curve the shot, but vertical motion alone cannot reach a goal.
+    // |delta vx| <= speed * angular travel before a collision or drag slows the ball.
+    const turn = Math.abs(ball.omega || 0) * Math.abs(ball.curveFactor ?? 1) * horizon;
+    const horizontalReach = horizon * (Math.abs(ball.vx) + speed * Math.min(1, turn));
+    if (ball.x - horizontalReach > 60 && ball.x + horizontalReach < 940) return null;
+    const sim = [{ ...ball }], limit = Math.round(horizon / P.DT);
     let boards = false;
     const onWall = (b, v, type) => { if (type === 'wall') boards = true; };
     for (let t = 1; t <= limit && !boards; t++) {
@@ -1026,16 +1031,19 @@
         ctx.closePath();
 
         const grad = ctx.createLinearGradient(backX, backY, Sm.x, Sm.y);
-        const fStart = S0.origIndex === 0 ? 0 : L[0].fade;
-        const fEnd = Sm.isHead ? 1 : L[m].fade;
-        const hStart = S0.heat || 0;
-        const hEnd = Sm.isHead ? (b.team === -1 ? ballHeat(b) : 0) : (Sm.heat || 0);
-
-        for (let step = 0; step <= 10; step++) {
-          const s = step / 10;
-          const f = fStart + (fEnd - fStart) * s;
+        // Preserve each recorded heat value, including a brief hot spot between cool ends.
+        // Distance-based stops avoid stretching closely spaced samples over the whole trail.
+        const positions = [0];
+        let length = 0;
+        for (let k = 1; k <= m; k++) {
+          length += Math.hypot(sec[k].x - sec[k - 1].x, sec[k].y - sec[k - 1].y);
+          positions.push(length);
+        }
+        for (let k = 0; k <= m; k++) {
+          const s = length > 0 ? positions[k] / length : k / m;
+          const f = k === 0 && S0.origIndex === 0 ? 0 : L[k].fade;
           if (b.team === -1) {
-            const h = hStart + (hEnd - hStart) * s;
+            const h = sec[k].isHead ? ballHeat(b) : L[k].heat;
             const base = 0.23 + Math.min(2, h) * 0.05 + Math.max(0, h - 2) * 0.3;
             const alpha = 1 - Math.pow(1 - Math.min(0.99, base * f), 18 * f);
             grad.addColorStop(s, heatColor(h, alpha));
@@ -1125,11 +1133,18 @@
     superGlowSprites.set(key, sprite); return sprite;
   }
   const conicRingSprites = new Map();
+  const MAX_CONIC_RING_SPRITES = 48;
   function conicRingSprite(key, radius, lineWidth) {
-    const spriteKey = `${key}:${radius}:${lineWidth}`;
-    if (conicRingSprites.has(spriteKey)) return conicRingSprites.get(spriteKey);
+    const ringRadius = Math.round(radius);
+    const spriteKey = `${key}:${ringRadius}:${lineWidth}`;
+    const cached = conicRingSprites.get(spriteKey);
+    if (cached) {
+      conicRingSprites.delete(spriteKey);
+      conicRingSprites.set(spriteKey, cached);
+      return cached;
+    }
     const [c1, c2] = SUPER_AURA_THEMES[key] || ['#ff7197', '#ff9954'];
-    const pad = 16, size = Math.ceil((radius + lineWidth + pad) * 2), scale = 2;
+    const pad = 16, size = Math.ceil((ringRadius + lineWidth + pad) * 2), scale = 2;
     const sprite = document.createElement('canvas');
     sprite.width = sprite.height = size * scale;
     sprite.size = size;
@@ -1141,8 +1156,10 @@
     sweep.addColorStop(.36, hexToRgba(c1, 0)); sweep.addColorStop(1, hexToRgba(c1, 0));
     c.strokeStyle = sweep; c.lineWidth = lineWidth;
     c.shadowBlur = 6; c.shadowColor = c1;
-    c.beginPath(); c.arc(cx, cy, radius, 0, Math.PI * 2); c.stroke();
-    conicRingSprites.set(spriteKey, sprite); return sprite;
+    c.beginPath(); c.arc(cx, cy, ringRadius, 0, Math.PI * 2); c.stroke();
+    conicRingSprites.set(spriteKey, sprite);
+    if (conicRingSprites.size > MAX_CONIC_RING_SPRITES) conicRingSprites.delete(conicRingSprites.keys().next().value);
+    return sprite;
   }
   // Super aura: ready = a ring with a steady sweep and a faint halo; armed and active = full halo,
   // a counter ring and two orbiting sparks. The icon badge names the super.
@@ -1229,6 +1246,7 @@
       if (p.celebration) c.drawImage(glowSprite(color), p.x - 24, p.y - 24, 48, 48);
       const px = p.px === p.x && p.py === p.y ? p.x - 0.01 : p.px;
       c.beginPath(); c.moveTo(px, p.py); c.lineTo(p.x, p.y); c.strokeStyle = color; c.lineWidth = p.celebration ? 2.5 : 1.3; c.stroke();
+      c.fillStyle = color; c.beginPath(); c.arc(p.x, p.y, p.celebration ? 1.8 : .9, 0, Math.PI * 2); c.fill();
     }
     if (flames.length) {
       c.save(); c.globalCompositeOperation = 'lighter';
