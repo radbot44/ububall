@@ -25,7 +25,7 @@ function setup(seed, mode) {
 }
 // Plays CPU turns, recording each as a match does, and returns the replay with each turn's
 // end-of-play field as the live loop left it (before the turn's end rules).
-function record(seed, mode, turns) {
+function record(seed, mode, turns, each = null) {
   let { state, ubus } = setup(seed, mode);
   const replay = R.create({ mode, names: ['Left', 'Right'], ubus }), ends = [];
   for (let n = 0; n < turns && state.winner === null; n++) {
@@ -33,6 +33,7 @@ function record(seed, mode, turns) {
       const spots = P.kickoff();
       state.bodies.forEach((b, i) => Object.assign(b, { x: spots[i].x, y: spots[i].y, vx: 0, vy: 0, omega: 0 }));
     }
+    if (each) each(state, n);
     const moves = [0, 1].flatMap(team => C.plan(state, team, { level: 'easy', seed: seed + n }).plans);
     moves.forEach((m, i) => { if (i % 3 === 0 && state.bodies[i].meter >= 100 && !state.bodies[i].stunned) m.superArm = true; });
     // As resolveTurn does, arming comes from the moves alone.
@@ -175,7 +176,9 @@ test('replays refuse other versions and any file a writer would not produce', as
 
 test('clips keep a turn or a round as a titled replay of its own', async () => {
   for (const mode of ['standard', 'pulse']) {
-    const { replay, ends } = record(1, mode, mode === 'pulse' ? 120 : 50);
+    const { replay, ends } = record(1, mode, 4, (s, n) => {
+      if (n === 0 || n === 2) Object.assign(s.bodies[6], { x: 920, y: 300, vx: 500, vy: 0 });
+    });
     const goals = replay.turns.flatMap((t, i) => t.goal ? [i] : []);
     assert.ok(goals.length >= 2, `${mode} has goals to test rounds against`);
     // A round runs from the turn after a goal through the next goal, whatever the mode.
