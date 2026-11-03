@@ -2,9 +2,10 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 13;
+  const VERSION = 14;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
+  const IRON_COOLDOWN_TICKS = 48; // ~200 ms at 240 Hz DT: cooldown after an Iron Save
   const IMPULSE = 3 * MAX_SPEED;
   const SKATER_CURVE = .06, BALL_CURVE = .045;
   const AIR_DRAG = .00015; // Quadratic drag on the ball, strongest on fast shots; ubus have none.
@@ -134,7 +135,7 @@
     const bodies = [];
     for (let team = 0; team < 2; team++) for (let i = 0; i < 3; i++) {
       bodies.push({ ...spawn(team, i), vx: 0, vy: 0,
-        radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 15, omega: 0, rotation: 0, ironGuard: false, team, slot: i });
+        radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 15, omega: 0, rotation: 0, ironGuard: false, ironCooldownTicks: 0, team, slot: i });
     }
     bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1, fireTicks: 0, onFire: false, pace: 0, strikerPower: 1, strikerTeam: -1 });
     return bodies;
@@ -268,6 +269,16 @@
     }
     if (typeof onShockwave === 'function') onShockwave(source, radius, 'iron');
   }
+  // Doubled effects of regular guard when an Iron Save hits, for the rest of the turn.
+  function applyDoubledGuard(b) {
+    if (!b.guardBase) return;
+    const base = b.guardBase;
+    b.reach = Math.max(b.radius, Math.min(37.5, (base.reach || b.radius) * 1.5));
+    b.friction = Math.min(270, (base.friction || 150) * 1.5);
+    b.strength = Math.min(2.0, (base.strength || 1) * 1.5);
+    b.stability = Math.min(2.0, (base.stability || 1) * 1.5);
+    b.bounciness = Math.max(0.4, (base.bounciness || 1) * 0.5);
+  }
   // Ends a ubu's super: Colossus shrinks back, Sticky ball is let go, and mastery/whiff refunds are awarded.
   function endSuper(b, bodies) {
     if (b.colossusApplied) {
@@ -391,7 +402,7 @@
           } else {
             const normMass = (player.baseMass || player.mass) / 3;
             const baseStab = player.guardBase ? player.guardBase.stability : (player.stability || 1);
-            const guardMult = player.guarding ? 2.0 : 1.0;
+            const guardMult = player.guarding ? (player.ironGuard ? 4.0 : 2.0) : 1.0;
             const colossusMult = player.superActive === 'colossus' ? 1.8 : 1.0;
             R = normMass * baseStab * (1 + delta * delta) * guardMult * colossusMult;
           }
@@ -401,7 +412,7 @@
 
           if (isFire && E > R) {
             fireWin = R / E;
-          } else if (player.guarding && (isFriendlyPass || E <= R)) {
+          } else if (player.guarding && (!player.ironCooldownTicks || player.ironCooldownTicks <= 0) && (isFriendlyPass || E <= R)) {
             const opposing = ball.strikerTeam !== undefined && ball.strikerTeam >= 0 && ball.strikerTeam !== player.team;
             if (opposing) {
               ball.onFire = false;
@@ -409,6 +420,8 @@
             }
             ironSave = true;
             player.ironGuard = true;
+            player.ironCooldownTicks = IRON_COOLDOWN_TICKS;
+            applyDoubledGuard(player);
             if (allBodies) triggerIronShockwave(player, allBodies, onShockwave);
           }
         }
@@ -600,6 +613,7 @@
     }
     // Supers run on play time: each lasts SUPER.ticks.
     for (const b of bodies) {
+      if (b.ironCooldownTicks > 0) b.ironCooldownTicks--;
       if (!b.superActive || b.team < 0 || !b.superTicks) continue;
       if (--b.superTicks > 0) continue;
       endSuper(b, bodies);
@@ -789,7 +803,7 @@
       b.openingShot = false;
       b.spinStruck = false;
       if (b.guardBase) Object.assign(b, b.guardBase);
-      b.guardBase = null; b.guarding = false; b.ironGuard = false;
+      b.guardBase = null; b.guarding = false; b.ironGuard = false; b.ironCooldownTicks = 0;
       if (!keepMotion) b.vx = b.vy = b.omega = 0;
       // In Pulse, a running super carries into the next turn until its time runs out.
       if (!keepMotion) endSuper(b, bodies);
@@ -1032,6 +1046,7 @@
       // A stunned (knocked-out) ubu is simply frozen: it cannot guard.
       b.guarding = Boolean(plans[i]?.guard) && !b.stunned;
       b.ironGuard = false;
+      b.ironCooldownTicks = 0;
       if (b.guarding) {
         b.guardBase = { reach: b.reach, friction: b.friction, strength: b.strength, stability: b.stability, bounciness: b.bounciness };
         b.reach = Math.max(b.radius, Math.min(37.5, (b.reach || b.radius) * 1.25));
@@ -1117,6 +1132,6 @@
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS,
       guards: [...guards].map(([index, held]) => ({ index, held })), ignition, goalTargets, goalTick };
   }
-  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, ballOnFire, holder, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, IRON_COOLDOWN_TICKS, ballOnFire, holder, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

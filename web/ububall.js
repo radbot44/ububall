@@ -2113,6 +2113,53 @@
     }
     cachedLayer(predictionLayer, [canvas.width, canvas.height, home, away, isPortrait, matchMode, key].join(), () => paintPrediction(predictionCache.data, home, away));
   }
+  function drawPredictedGoalGlow(home, away) {
+    const data = predictionCache?.data;
+    if (!data || data.goal === null || data.goalTick == null) return;
+    const defendingSide = data.goal === 1 ? 0 : 1;
+    const color = defendingSide === 0 ? home : away;
+
+    const arrival = data.goalTick * P.DT;
+    const horizon = (data.horizon || 480) * P.DT;
+    const u = Math.max(0, Math.min(1, 1 - arrival / horizon));
+
+    // Rate: slow and steady at first (1.2 Hz), speeding up to 5.5 Hz as expected arrival shortens
+    const freq = 1.2 + 4.3 * u;
+    const now = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(now * Math.PI * 2 * freq);
+
+    // Intensity: steady soft glow when far, ramping up to bright beacon pulses when near
+    const baseAlpha = 0.25 + 0.15 * (1 - u);
+    const peakAlpha = 0.45 + 0.55 * u;
+    const alpha = baseAlpha + (peakAlpha - baseAlpha) * pulse;
+    const blur = (8 + 20 * u * (0.6 + 0.4 * pulse)) * (canvas.width / 1000);
+
+    const depth = P.rink.goalDepth;
+    const mouthX = defendingSide ? 940 : 60;
+    const backX = defendingSide ? 940 + depth : 60 - depth;
+    const minX = Math.min(mouthX, backX);
+
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = (0.04 + 0.16 * u) * (0.6 + 0.4 * pulse);
+    ctx.fillRect(minX, 230, depth, 140);
+
+    ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = blur;
+    ctx.globalAlpha = Math.min(1, alpha);
+    ctx.lineWidth = 4 + 3 * u;
+    ctx.beginPath();
+    ctx.moveTo(mouthX, 230);
+    ctx.lineTo(backX, 230);
+    ctx.lineTo(backX, 370);
+    ctx.lineTo(mouthX, 370);
+    ctx.stroke();
+
+    ctx.lineWidth = 5 + 4 * u;
+    line(mouthX, 230, mouthX, 370, color, 5 + 4 * u);
+    ctx.restore();
+  }
   function paintPrediction(prediction, home, away) {
     prediction.paths.forEach((points, index) => {
       if (points.length < 2) return;
@@ -2367,7 +2414,10 @@
     ctx.drawImage(rinkCache.layer, 0, 0, 1000, 600);
     drawFieldUnder(themeColors);
     drawFoulFocus(text);
-    if (phase === 'plan') drawPrediction(home, away);
+    if (phase === 'plan') {
+      drawPrediction(home, away);
+      drawPredictedGoalGlow(home, away);
+    }
     drawTrails(home, away);
     drawGuides(home, away, text);
     shockwaves.forEach(s => {
@@ -3865,7 +3915,7 @@
       if (phase === 'play' || postGoal) emitSkaterEffects(simDelta);
       draw();
     } else if (goalReplay && active && !online?.active) advanceGoalReplay(delta);
-    else if (active && (hadEffects || (!reducedMotion.matches && (foulsShowing() || bodies.some(b => b.meter >= 100 || b.superArm || b.superActive))))) draw();
+    else if (active && (hadEffects || (phase === 'plan' && predictionCache?.data?.goal !== null) || (!reducedMotion.matches && (foulsShowing() || bodies.some(b => b.meter >= 100 || b.superArm || b.superActive))))) draw();
     flushMeters();
     requestAnimationFrame(frame);
   }

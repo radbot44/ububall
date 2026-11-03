@@ -109,11 +109,29 @@
 
   // Audio synthesis engine
   let sharedContext = null;
+  let userUnlocked = false;
 
-  function getAudioContext() {
+  function hasUserGesture() {
+    if (typeof window === 'undefined') return false;
+    return userUnlocked || Boolean(window.navigator?.userActivation?.hasBeenActive);
+  }
+
+  if (typeof window !== 'undefined') {
+    const unlock = () => {
+      userUnlocked = true;
+      if (sharedContext && sharedContext.state === 'suspended') {
+        sharedContext.resume().catch(() => {});
+      }
+    };
+    window.addEventListener('pointerdown', unlock, { capture: true, passive: true });
+    window.addEventListener('keydown', unlock, { capture: true, passive: true });
+  }
+
+  function getAudioContext(force = false) {
     if (typeof window === 'undefined') return null;
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return null;
+    if (!force && !hasUserGesture()) return null;
     if (!sharedContext || sharedContext.state === 'closed') {
       sharedContext = new AudioCtx();
     }
@@ -902,25 +920,31 @@
     }
   }
 
-  // A burning ball: a faint, steady hiss with small crackles popping through it, until stopped.
+  // A burning ball: a slight, subtle hiss bed with crisp, snappy crackles popping through it, until stopped.
   function playSizzle(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return { stop() {} };
     const master = createMasterChain(ctx), volume = options.volume ?? 1;
     const hiss = ctx.createBufferSource(), band = ctx.createBiquadFilter(), level = ctx.createGain();
     hiss.buffer = grainNoise(ctx); hiss.loop = true;
-    band.type = 'bandpass'; band.frequency.setValueAtTime(5200, ctx.currentTime); band.Q.setValueAtTime(0.7, ctx.currentTime);
+    band.type = 'bandpass'; band.frequency.setValueAtTime(3600, ctx.currentTime); band.Q.setValueAtTime(0.5, ctx.currentTime);
     level.gain.setValueAtTime(0.0001, ctx.currentTime);
-    level.gain.exponentialRampToValueAtTime(0.09 * volume, ctx.currentTime + 0.12);
+    level.gain.exponentialRampToValueAtTime(0.018 * volume, ctx.currentTime + 0.12);
     hiss.connect(band); band.connect(level); level.connect(master);
     hiss.start();
     const crackles = setInterval(() => {
       const now = ctx.currentTime;
-      for (let k = Math.floor(Math.random() * 3); k > 0; k--) {
-        noiseGrain(ctx, master, now + Math.random() * 0.06, 0.006 + Math.random() * 0.012,
-          { freq: 2500 + Math.random() * 4500, q: 2, level: (0.12 + Math.random() * 0.18) * volume, pan: (Math.random() - 0.5) * 0.6 });
+      const count = 1 + Math.floor(Math.random() * 3);
+      for (let k = 0; k < count; k++) {
+        const isPop = Math.random() < 0.25;
+        const freq = isPop ? 900 + Math.random() * 1200 : 2600 + Math.random() * 4600;
+        const q = isPop ? 2.0 + Math.random() * 1.5 : 3.0 + Math.random() * 3.0;
+        const len = isPop ? 0.003 + Math.random() * 0.005 : 0.002 + Math.random() * 0.005;
+        const grainLevel = (0.16 + Math.random() * 0.18) * volume;
+        noiseGrain(ctx, master, now + Math.random() * 0.025, len,
+          { freq, q, level: grainLevel, pan: (Math.random() - 0.5) * 0.6 });
       }
-    }, 60);
+    }, 30);
     const handle = {
       stop() {
         if (!superPlayback.delete(handle)) return;
@@ -928,8 +952,8 @@
         const now = ctx.currentTime;
         level.gain.cancelScheduledValues(now);
         level.gain.setValueAtTime(Math.max(0.0001, level.gain.value), now);
-        level.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
-        hiss.stop(now + 0.16);
+        level.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+        hiss.stop(now + 0.13);
       }
     };
     superPlayback.add(handle);

@@ -422,3 +422,20 @@ test('short sounds let their chain go once rung out, and a shared chain replaces
   assert.equal(shared.nodes.filter(n => n.kind === 'compressor').length, 1);
   assert.ok(!shared.nodes.some(n => n.kind === 'constant'));
 });
+
+test('getAudioContext returns null in environments without user gesture and handles silent no-op playback', () => {
+  assert.equal(audio.getAudioContext(), null);
+
+  const voice = { instrument: 0, rootPitch: 30, decay: 4, timbreMod: 0 };
+  const h1 = audio.playCollision(voice);
+  assert.equal(typeof h1?.stop, 'function');
+  assert.doesNotThrow(() => h1.stop());
+
+  assert.doesNotThrow(() => audio.playBallHit());
+  assert.doesNotThrow(() => audio.playWallHit());
+  assert.doesNotThrow(() => audio.playGoalHit());
+
+  const h5 = audio.playSuper('shockwave', 'impact');
+  assert.equal(typeof h5?.stop, 'function');
+  assert.doesNotThrow(() => h5.stop());
+});

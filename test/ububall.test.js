@@ -1404,3 +1404,75 @@ test('iron guard status starts false on play start, turns true upon iron save, a
   P.stop(b);
   assert.equal(b[0].ironGuard, false, 'ironGuard resets when turn stops');
 });
+
+test('iron save triggers ~200 ms cooldown and doubles guard effects for the rest of the turn', () => {
+  const b = P.kickoff();
+  b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  P.startTurn(b, [{ angle: 0, power: 0, spin: 0, guard: true }]);
+
+  const baseReach = b[0].guardBase.reach;
+  const baseFriction = b[0].guardBase.friction;
+  const baseStrength = b[0].guardBase.strength;
+  const baseStability = b[0].guardBase.stability;
+  const baseBounciness = b[0].guardBase.bounciness;
+
+  // Regular guard starts at 1.25x (+25%)
+  assert.equal(b[0].reach, Math.min(37.5, baseReach * 1.25));
+  assert.equal(b[0].friction, baseFriction * 1.25);
+  assert.equal(b[0].strength, baseStrength * 1.25);
+  assert.equal(b[0].stability, baseStability * 1.25);
+  assert.equal(b[0].bounciness, baseBounciness * 0.75);
+  assert.equal(b[0].ironCooldownTicks, 0);
+
+  const ball = b[6];
+  ball.x = b[0].x + 40; ball.y = b[0].y;
+  ball.vx = -600; ball.vy = 0;
+  ball.onFire = true; ball.fireTicks = 60; ball.strikerTeam = 1;
+
+  let shockCount = 0;
+  P.step(b, P.DT, null, null, (src, r, type) => { if (type === 'iron') shockCount++; });
+  assert.equal(shockCount, 1, 'first hit triggers iron save shockwave');
+  assert.equal(b[0].ironGuard, true);
+  assert.equal(b[0].ironCooldownTicks, P.IRON_COOLDOWN_TICKS, 'iron cooldown is 48 ticks (~200 ms)');
+
+  // Guard effects are doubled (+50% over base)
+  assert.equal(b[0].reach, Math.min(37.5, baseReach * 1.5));
+  assert.equal(b[0].friction, baseFriction * 1.5);
+  assert.equal(b[0].strength, baseStrength * 1.5);
+  assert.equal(b[0].stability, baseStability * 1.5);
+  assert.equal(b[0].bounciness, baseBounciness * 0.5);
+
+  // During cooldown: second fireball hit does not trigger an iron save
+  ball.x = b[0].x + 40; ball.y = b[0].y;
+  ball.vx = -600; ball.vy = 0;
+  ball.onFire = true; ball.fireTicks = 60; ball.strikerTeam = 1;
+  let secondIron = false;
+  P.step(b, P.DT, (bodyA, bodyB, spd, imp, plow, isIron) => { if (isIron) secondIron = true; }, null, (src, r, type) => { if (type === 'iron') shockCount++; });
+  assert.equal(secondIron, false, 'no iron save during cooldown');
+  assert.equal(shockCount, 1, 'no second iron shockwave during cooldown');
+  assert.equal(ball.onFire, true, 'fire is not quenched during cooldown');
+
+  // Advance remaining cooldown ticks
+  const remaining = b[0].ironCooldownTicks;
+  for (let t = 0; t < remaining; t++) P.step(b, P.DT);
+  assert.equal(b[0].ironCooldownTicks, 0, 'cooldown elapsed');
+
+  // After cooldown: subsequent fireball hit CAN trigger iron save again
+  ball.x = b[0].x + 40; ball.y = b[0].y;
+  ball.vx = -600; ball.vy = 0;
+  ball.onFire = true; ball.fireTicks = 60; ball.strikerTeam = 1;
+  let thirdIron = false;
+  P.step(b, P.DT, (bodyA, bodyB, spd, imp, plow, isIron) => { if (isIron) thirdIron = true; }, null, (src, r, type) => { if (type === 'iron') shockCount++; });
+  assert.equal(thirdIron, true, 'iron save triggers again after cooldown');
+  assert.equal(shockCount, 2, 'second iron shockwave triggers');
+  assert.equal(ball.onFire, false, 'fire quenched by new iron save');
+
+  P.stop(b);
+  assert.equal(b[0].reach, baseReach, 'reach restored on turn stop');
+  assert.equal(b[0].friction, baseFriction, 'friction restored on turn stop');
+  assert.equal(b[0].strength, baseStrength, 'strength restored on turn stop');
+  assert.equal(b[0].stability, baseStability, 'stability restored on turn stop');
+  assert.equal(b[0].bounciness, baseBounciness, 'bounciness restored on turn stop');
+  assert.equal(b[0].ironGuard, false);
+  assert.equal(b[0].ironCooldownTicks, 0);
+});
