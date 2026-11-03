@@ -384,7 +384,12 @@
     }
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i]; p.life -= dt;
-      if (p.life <= 0) { particles.splice(i, 1); if (p.crackle) crackle(p); continue; }
+      if (p.life <= 0) {
+        particles[i] = particles[particles.length - 1];
+        particles.pop();
+        if (p.crackle) crackle(p);
+        continue;
+      }
       p.px = p.x; p.py = p.y;
       const drag = Math.exp(-dt * (p.celebration ? 1.2 : 4));
       p.vx *= drag; p.vy = p.vy * drag + (p.celebration ? 95 : 0) * dt;
@@ -396,11 +401,18 @@
       f.y += f.vy * dt; f.vy += 320 * dt; f.fuse -= dt;
       if (particles.length < 700) particles.push({ x: f.x, y: f.y, px: f.x, py: f.y, vx: (Math.random() - .5) * 30, vy: 30,
         team: f.team, color: '#ffe9b0', life: .3, duration: .3, overlay: true });
-      if (f.fuse <= 0) { explodeShell(f); fireworks.splice(i, 1); }
+      if (f.fuse <= 0) {
+        explodeShell(f);
+        fireworks[i] = fireworks[fireworks.length - 1];
+        fireworks.pop();
+      }
     }
     for (let i = shockwaves.length - 1; i >= 0; i--) {
       const s = shockwaves[i]; s.life -= dt;
-      if (s.life <= 0) { shockwaves.splice(i, 1); }
+      if (s.life <= 0) {
+        shockwaves[i] = shockwaves[shockwaves.length - 1];
+        shockwaves.pop();
+      }
     }
     const moving = phase === 'play' || Boolean(postGoal) || Boolean(goalReplay) || Boolean(theater && !theater.paused);
     if (moving) for (const s of skids) s.age += dt;
@@ -429,10 +441,12 @@
   function goalThreat() {
     const ball = bodies[6];
     if (!ball || P.holder(bodies) || Math.hypot(ball.vx, ball.vy) < 120) return null;
+    if (ball.vx >= 0 ? ball.x + ball.vx * .9 < 900 : ball.x + ball.vx * .9 > 100) return null;
     const sim = [{ ...ball }], limit = Math.round(.9 / P.DT);
     let boards = false;
+    const onWall = (b, v, type) => { if (type === 'wall') boards = true; };
     for (let t = 1; t <= limit && !boards; t++) {
-      const goal = P.step(sim, P.DT, null, (b, v, type) => { if (type === 'wall') boards = true; });
+      const goal = P.step(sim, P.DT, null, onWall);
       if (goal !== null) return { side: goal === 1 ? 0 : 1, level: Math.min(1, Math.hypot(ball.vx, ball.vy) / 500) * (1 - t / limit) };
     }
     return null;
@@ -490,8 +504,9 @@
       const len = Math.hypot(b.x - a.x, b.y - a.y) || 1, nx = -(b.y - a.y) / len, ny = (b.x - a.x) / len, half = widthAt(p) / 2;
       left.push([p.x + nx * half, p.y + ny * half]); right.push([p.x - nx * half, p.y - ny * half]);
     });
-    ctx.beginPath(); ctx.moveTo(...left[0]);
-    for (const q of [...left, ...right.reverse()]) ctx.lineTo(...q);
+    ctx.beginPath(); ctx.moveTo(left[0][0], left[0][1]);
+    for (let i = 1; i < left.length; i++) ctx.lineTo(left[i][0], left[i][1]);
+    for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
     ctx.closePath(); ctx.fill();
   }
   // A ribbon with a Gaussian edge. Canvas shadows blur in every browser, so the shape is drawn far
@@ -506,9 +521,10 @@
   }
   // Muted tints up to red hot (heat 2); only a burning ball (heat 3) runs fully red.
   const HEAT_COLORS = [[255, 255, 255], [255, 214, 170], [255, 158, 120], [255, 70, 30]];
-  function heatColor(h) {
+  function heatColor(h, alpha = 1) {
     const k = Math.min(2, Math.floor(h)), t = Math.min(1, h - k), [a, b] = [HEAT_COLORS[k], HEAT_COLORS[k + 1]];
-    return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(', ')})`;
+    const [r, g, bl] = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+    return `rgba(${r}, ${g}, ${bl}, ${alpha})`;
   }
   function inRink(paint) { ctx.save(); rounded(60, 60, 880, 480, 100); ctx.clip(); paint(); ctx.restore(); }
   // A layer over the rink canvas, repainted only when `key` changes and otherwise drawn as one image.
@@ -540,9 +556,9 @@
     // unit at most (half resolution on a 2× screen): the blur costs a quarter, with no visible change.
     if (skids.length || burns.length) {
       let key = canvas.width + ',' + canvas.height;
-      for (const s of skids) key += ',' + s.age + ':' + s.points.length;
+      for (const s of skids) key += ',' + Math.floor(s.age * 4) + ':' + s.points.length;
       key += '|';
-      for (const s of burns) key += ',' + s.age + ':' + s.points.length;
+      for (const s of burns) key += ',' + Math.floor(s.age * 4) + ':' + s.points.length;
       cachedLayer(iceCache, key, paintIce, Math.min(1, 1000 / canvas.width));
     }
     if (phase === 'plan' && pulseMode() && !P.settled(bodies)) inRink(() => { ctx.fillStyle = 'rgba(120,170,255,.07)'; ctx.fillRect(60, 60, 880, 480); });
@@ -557,7 +573,8 @@
     for (const s of skids) {
       // A blurred body and a tighter blurred core darken the ice: soft edges, deepest where braking
       // was hardest. Fading also thins the mark, so its 8-bit opacity steps never show as one jump.
-      const t = s.age / SKID_LIFE, fade = 1 - t * t * (3 - 2 * t), thin = .6 + .4 * fade;
+      const age = Math.floor(s.age * 4) / 4;
+      const t = age / SKID_LIFE, fade = 1 - t * t * (3 - 2 * t), thin = .6 + .4 * fade;
       ctx.globalAlpha = .12 * fade;
       softRibbon(s.points, p => s.width * .7 * (.4 + .6 * p.depth) * thin, s.width * .45, '#000000');
       ctx.globalAlpha = .08 * fade;
@@ -565,7 +582,8 @@
     }
     for (const s of burns) {
       if (s.points.length < 2) continue;
-      const t = s.age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
+      const age = Math.floor(s.age * 4) / 4;
+      const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
       ctx.globalAlpha = .3 * fade;
       softRibbon(s.points, p => s.width * (.5 + .5 * p.depth), s.width * .35, '#2b1206');
       ctx.globalAlpha = .22 * fade;
@@ -928,8 +946,16 @@
     trails.forEach((trail, index) => {
       if (!trail.length) return;
       const b = bodies[index], color = b.team === -1 ? '#ffffff' : b.team === 0 ? home : away;
-      const pts = trail.map((p, idx) => ({ ...p, origIndex: idx }))
-        .concat([{ x: b.x, y: b.y, radius: b.radius, life: .24, duration: .24, heat: b.team === -1 ? ballHeat(b) : 0, origIndex: trail.length, isHead: true }]);
+      const last = trail[trail.length - 1];
+      const near = (b.x - last.x) ** 2 + (b.y - last.y) ** 2 < 4;
+      const count = near ? trail.length - 1 : trail.length;
+      const pts = [];
+      for (let j = 0; j < count; j++) {
+        trail[j].origIndex = j;
+        trail[j].isHead = false;
+        pts.push(trail[j]);
+      }
+      pts.push({ x: b.x, y: b.y, radius: b.radius, life: .24, duration: .24, heat: b.team === -1 ? ballHeat(b) : 0, origIndex: trail.length, isHead: true });
 
       const u = [];
       for (let j = 0; j < pts.length - 1; j++) {
@@ -960,15 +986,19 @@
         const L = [], R = [];
         for (let k = 0; k <= m; k++) {
           const pt = sec[k];
-          let dx, dy;
-          if (k === 0) { dx = sec[1].x - sec[0].x; dy = sec[1].y - sec[0].y; }
-          else if (k === m) { dx = sec[m].x - sec[m - 1].x; dy = sec[m].y - sec[m - 1].y; }
-          else { dx = sec[k + 1].x - sec[k - 1].x; dy = sec[k + 1].y - sec[k - 1].y; }
-
           let tx = 1, ty = 0;
-          const d = Math.hypot(dx, dy);
-          if (d > 0.001) { tx = dx / d; ty = dy / d; }
-          else if (k > 0 && L[k - 1]) { tx = L[k - 1].tx; ty = L[k - 1].ty; }
+          if (k === m && pt.isHead && b.vx * b.vx + b.vy * b.vy > 1) {
+            const vlen = Math.hypot(b.vx, b.vy);
+            tx = b.vx / vlen; ty = b.vy / vlen;
+          } else {
+            let dx, dy;
+            if (k === 0) { dx = sec[1].x - sec[0].x; dy = sec[1].y - sec[0].y; }
+            else if (k === m) { dx = sec[m].x - sec[m - 1].x; dy = sec[m].y - sec[m - 1].y; }
+            else { dx = sec[k + 1].x - sec[k - 1].x; dy = sec[k + 1].y - sec[k - 1].y; }
+            const d = Math.hypot(dx, dy);
+            if (d > 0.001) { tx = dx / d; ty = dy / d; }
+            else if (k > 0 && L[k - 1]) { tx = L[k - 1].tx; ty = L[k - 1].ty; }
+          }
 
           const nx = -ty, ny = tx;
           const lifeFade = pt.isHead ? 1 : Math.max(0, pt.life / pt.duration);
@@ -997,20 +1027,20 @@
         if (b.team === -1) {
           const ballAlpha = (f, h) => f * (.23 + Math.min(2, h) * .05 + Math.max(0, h - 2) * .3);
           const heat0 = S0.heat || 0, alpha0 = S0.origIndex === 0 ? 0 : ballAlpha(L[0].fade, heat0);
-          grad.addColorStop(0, colorWithAlpha(heatColor(heat0), alpha0));
+          grad.addColorStop(0, heatColor(heat0, alpha0));
           if (m >= 2) {
             const midIdx = Math.floor(m / 2), mid = sec[midIdx];
             const heatMid = mid.heat || 0, alphaMid = ballAlpha(L[midIdx].fade, heatMid);
-            grad.addColorStop(0.5, colorWithAlpha(heatColor(heatMid), alphaMid));
+            grad.addColorStop(0.5, heatColor(heatMid, alphaMid));
           }
           const heatM = Sm.isHead ? ballHeat(b) : (Sm.heat || 0);
           const alphaM = ballAlpha(L[m].fade, heatM);
-          grad.addColorStop(1, colorWithAlpha(heatColor(heatM), alphaM));
+          grad.addColorStop(1, heatColor(heatM, alphaM));
         } else {
           const alpha0 = S0.origIndex === 0 ? 0 : L[0].fade * 0.23;
           const alphaM = L[m].fade * 0.23;
-          grad.addColorStop(0, colorWithAlpha(color, alpha0));
-          grad.addColorStop(1, colorWithAlpha(color, alphaM));
+          grad.addColorStop(0, hexToRgba(color, alpha0));
+          grad.addColorStop(1, hexToRgba(color, alphaM));
         }
 
         ctx.fillStyle = grad;
@@ -1073,12 +1103,6 @@
     const num = parseInt(c, 16);
     return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${alpha})`;
   }
-  function colorWithAlpha(color, alpha) {
-    if (color.startsWith('#')) return hexToRgba(color, alpha);
-    if (color.startsWith('rgba(')) return color.replace(/,[\s\d.]+\)$/, `, ${alpha})`);
-    if (color.startsWith('rgb(')) return color.replace('rgb(', 'rgba(').replace(')', `, ${alpha})`);
-    return color;
-  }
   function superGlowSprite(key) {
     if (superGlowSprites.has(key)) return superGlowSprites.get(key);
     const [c1, c2] = SUPER_AURA_THEMES[key] || ['#ff7197', '#ff9954'];
@@ -1099,6 +1123,22 @@
     c.beginPath(); c.arc(128, 128, 124, 0, Math.PI * 2); c.fill();
     superGlowSprites.set(key, sprite); return sprite;
   }
+  const conicRingSprites = new Map();
+  function conicRingSprite(key, radius, lineWidth) {
+    const spriteKey = `${key}:${radius}:${lineWidth}`;
+    if (conicRingSprites.has(spriteKey)) return conicRingSprites.get(spriteKey);
+    const [c1, c2] = SUPER_AURA_THEMES[key] || ['#ff7197', '#ff9954'];
+    const pad = 16, size = Math.ceil((radius + lineWidth + pad) * 2);
+    const sprite = document.createElement('canvas'); sprite.width = sprite.height = size;
+    const c = sprite.getContext('2d'), cx = size / 2, cy = size / 2;
+    const sweep = c.createConicGradient(0, cx, cy);
+    sweep.addColorStop(0, hexToRgba(c2, 0)); sweep.addColorStop(.3, hexToRgba(c2, .9));
+    sweep.addColorStop(.36, hexToRgba(c1, 0)); sweep.addColorStop(1, hexToRgba(c1, 0));
+    c.strokeStyle = sweep; c.lineWidth = lineWidth;
+    c.shadowBlur = 6; c.shadowColor = c1;
+    c.beginPath(); c.arc(cx, cy, radius, 0, Math.PI * 2); c.stroke();
+    conicRingSprites.set(spriteKey, sprite); return sprite;
+  }
   // Super aura: ready = a ring with a steady sweep and a faint halo; armed and active = full halo,
   // a counter ring and two orbiting sparks. The icon badge names the super.
   function drawSuperAura(b, key, reach) {
@@ -1114,15 +1154,12 @@
     ctx.globalAlpha = level === 2 ? .75 : .55;
     circle(b.x, b.y, ringR, c1, level === 2 ? 2.5 : 2);
     ctx.globalAlpha = level === 2 ? 1 : .85;
-    ctx.shadowBlur = 6 * canvas.width / 1000; ctx.shadowColor = c1;
     for (const [radius, dir] of level === 2 ? [[ringR, 1], [ringR + 5, -1]] : [[ringR, 1]]) {
-      const sweep = ctx.createConicGradient(spin * dir, b.x, b.y);
-      sweep.addColorStop(0, hexToRgba(c2, 0)); sweep.addColorStop(.3, hexToRgba(c2, .9));
-      sweep.addColorStop(.36, hexToRgba(c1, 0)); sweep.addColorStop(1, hexToRgba(c1, 0));
-      ctx.strokeStyle = sweep; ctx.lineWidth = level === 2 ? 3.5 : 3;
-      ctx.beginPath(); ctx.arc(b.x, b.y, radius, 0, Math.PI * 2); ctx.stroke();
+      const sprite = conicRingSprite(key, radius, level === 2 ? 3.5 : 3);
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(spin * dir);
+      ctx.drawImage(sprite, -sprite.width / 2, -sprite.height / 2);
+      ctx.restore();
     }
-    ctx.shadowBlur = 0;
     if (level === 2 && !still) for (let k = 0; k < 2; k++) {
       const head = spin * 1.5 + k * Math.PI;
       for (let s = 4; s >= 0; s--) {
@@ -1152,6 +1189,7 @@
   function drawParticles(home, away, overlay = false) {
     const c = overlay ? badgeCtx : ctx;
     c.save(); c.lineCap = 'round';
+    const flames = [];
     for (const p of particles) {
       if (Boolean(p.overlay) !== overlay) continue;
       const color = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? home : away), fade = p.life / p.duration;
@@ -1180,12 +1218,20 @@
         c.restore(); continue;
       }
       if (p.flame) {
-        c.save(); c.globalCompositeOperation = 'lighter'; c.fillStyle = color;
-        c.beginPath(); c.arc(p.x, p.y, p.flame * .45 * (.4 + .6 * fade), 0, Math.PI * 2); c.fill(); c.restore(); continue;
+        flames.push({ x: p.x, y: p.y, r: p.flame * .45 * (.4 + .6 * fade), color, alpha: c.globalAlpha });
+        continue;
       }
       if (p.celebration) c.drawImage(glowSprite(color), p.x - 24, p.y - 24, 48, 48);
-      c.beginPath(); c.moveTo(p.px, p.py); c.lineTo(p.x, p.y); c.strokeStyle = color; c.lineWidth = p.celebration ? 2.5 : 1.3; c.stroke();
-      c.fillStyle = color; c.beginPath(); c.arc(p.x, p.y, p.celebration ? 1.8 : .9, 0, Math.PI * 2); c.fill();
+      const px = p.px === p.x && p.py === p.y ? p.x - 0.01 : p.px;
+      c.beginPath(); c.moveTo(px, p.py); c.lineTo(p.x, p.y); c.strokeStyle = color; c.lineWidth = p.celebration ? 2.5 : 1.3; c.stroke();
+    }
+    if (flames.length) {
+      c.save(); c.globalCompositeOperation = 'lighter';
+      for (const f of flames) {
+        c.globalAlpha = f.alpha; c.fillStyle = f.color;
+        c.beginPath(); c.arc(f.x, f.y, f.r, 0, Math.PI * 2); c.fill();
+      }
+      c.restore();
     }
     c.restore();
   }
@@ -1600,8 +1646,8 @@
       if (textNode) textNode.textContent = superTitle;
       const iconNode = $(`super-icon-${i}`);
       if (iconNode && b.equippedSuper?.icon) {
-        iconNode.src = b.equippedSuper.icon;
-        iconNode.alt = superTitle;
+        if (iconNode.getAttribute('src') !== b.equippedSuper.icon) iconNode.src = b.equippedSuper.icon;
+        if (iconNode.alt !== superTitle) iconNode.alt = superTitle;
         const masteryBonus = b.equippedSuper?.copies > 1 ? ` (+${(b.equippedSuper.bonusTicks / 240).toFixed(1)}s duration, +${b.equippedSuper.bonusRefund}% refund)` : '';
         iconNode.dataset.tip = `${superTitle}: ${b.equippedSuper.desc}${masteryBonus}`;
       }
@@ -1618,8 +1664,8 @@
       const sName = s.displayName || s.name;
       if (hudSuperText) hudSuperText.textContent = sName;
       if (hudSuperIcon && s?.icon) {
-        hudSuperIcon.src = s.icon;
-        hudSuperIcon.alt = sName;
+        if (hudSuperIcon.getAttribute('src') !== s.icon) hudSuperIcon.src = s.icon;
+        if (hudSuperIcon.alt !== sName) hudSuperIcon.alt = sName;
         const masteryBonus = s.copies > 1 ? ` (+${(s.bonusTicks / 240).toFixed(1)}s duration, +${s.bonusRefund}% refund)` : '';
         hudSuperIcon.dataset.tip = `${sName}: ${s.desc}${masteryBonus}`;
       }
@@ -1896,18 +1942,41 @@
   }
   function paintPrediction(prediction, home, away) {
     prediction.paths.forEach((points, index) => {
+      if (points.length < 2) return;
       const isBall = bodies[index].team === -1;
       const color = isBall ? '#f2efe9' : bodies[index].team === 0 ? home : away;
+      const baseAlpha = isBall ? .9 : .65;
       ctx.save();
       ctx.setLineDash(isBall ? [3, 4] : [4, 4]);
       ctx.strokeStyle = color;
       ctx.lineWidth = isBall ? 2.5 : 2;
-      for (let i = 1; i < points.length; i++) {
-        const from = points[i - 1], to = points[i];
-        if (from.x === to.x && from.y === to.y) continue;
-        const fade = Math.min(1, (prediction.horizon - to.tick) / 240);
-        ctx.globalAlpha = fade * (isBall ? .9 : .65);
-        ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.stroke();
+
+      let splitIdx = 0;
+      while (splitIdx < points.length && prediction.horizon - points[splitIdx].tick >= 240) splitIdx++;
+      const solidEnd = Math.min(points.length - 1, splitIdx);
+      if (solidEnd >= 1) {
+        ctx.globalAlpha = baseAlpha;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i <= solidEnd; i++) ctx.lineTo(points[i].x, points[i].y);
+        ctx.stroke();
+      }
+
+      if (solidEnd < points.length - 1) {
+        const remaining = points.length - 1 - solidEnd;
+        const BUCKETS = 5, step = Math.ceil(remaining / BUCKETS);
+        for (let b = 0; b < BUCKETS; b++) {
+          const start = solidEnd + b * step;
+          if (start >= points.length - 1) break;
+          const end = Math.min(points.length - 1, start + step);
+          const midTick = points[Math.floor((start + end) / 2)].tick;
+          const fade = Math.max(0, Math.min(1, (prediction.horizon - midTick) / 240));
+          ctx.globalAlpha = fade * baseAlpha;
+          ctx.beginPath();
+          ctx.moveTo(points[start].x, points[start].y);
+          for (let i = start + 1; i <= end; i++) ctx.lineTo(points[i].x, points[i].y);
+          ctx.stroke();
+        }
       }
       ctx.restore();
     });
