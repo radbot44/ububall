@@ -62,10 +62,8 @@ test('fanfare sustains a dry bass pulse under a merged chord, with wet lead and 
       assert.equal(reaches(n, to => to.kind === 'room'), !bass.includes(n) && !kicks.includes(n));
     }
     const buffers = ctx.nodes.filter(n => n.kind === 'buffer');
-    const breaths = buffers.filter(n => reaches(n, to => to.kind === 'panner'));
-    assert.equal(breaths.length, 8, 'flute breath follows each lead note');
-    assert.ok(buffers.length > breaths.length, 'dry percussion is also present');
-    for (const n of buffers) assert.equal(reaches(n, to => to.kind === 'room'), breaths.includes(n));
+    assert.ok(buffers.length > 0, 'dry percussion is present');
+    for (const n of buffers) assert.equal(reaches(n, to => to.kind === 'room'), false);
   } finally { handle.stop(); }
 });
 

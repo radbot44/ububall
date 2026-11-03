@@ -15,7 +15,7 @@
     'Brass Ping',     // 11: Sawtooth with envelope filter swell
     'Electric Piano', // 12: Bell transient + Rhodes tine warmth
     'Synth Bass',     // 13: Punchy filtered saw/square bite
-    'Flute',          // 14: Breathy smooth tone
+    'Robot Vowel',    // 14: Hollow talking pulse with moving vowel resonances
     'Space Zap'       // 15: Retro arcade downward pitch drop
   ];
 
@@ -558,28 +558,28 @@
         break;
       }
 
-      // 14: Flute (a blown sine-led tone, with a tiny breath onset and held body)
+      // 14: Robot Vowel (steady pitch under two moving vowel resonances: a short "yow")
       case 14: {
-        const body = ctx.createOscillator(), harmonic = ctx.createOscillator(), harmonicGain = ctx.createGain();
-        body.type = 'sine'; harmonic.type = 'sine';
-        body.frequency.setValueAtTime(freq, startTime);
-        harmonic.frequency.setValueAtTime(freq * 2, startTime);
-        harmonicGain.gain.value = 0.12;
-        body.connect(envGain); harmonic.connect(harmonicGain); harmonicGain.connect(envGain);
-        const breath = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), breathGain = ctx.createGain();
-        breath.buffer = grainNoise(ctx);
-        filter.type = 'bandpass'; filter.frequency.value = Math.min(6000, Math.max(1000, freq * 2)); filter.Q.value = 0.7;
-        breathGain.gain.setValueAtTime(0.025, startTime);
-        breathGain.gain.exponentialRampToValueAtTime(0.0001, startTime + Math.min(0.09, targetDecay * 0.6));
-        breath.connect(filter); filter.connect(breathGain); breathGain.connect(envGain);
-        breath.onended = () => { breath.disconnect(); filter.disconnect(); breathGain.disconnect(); };
-        const attack = Math.min(0.04, targetDecay * 0.25);
-        envGain.gain.linearRampToValueAtTime(0.45, startTime + attack);
-        envGain.gain.linearRampToValueAtTime(0.36, startTime + targetDecay * 0.65);
+        const osc = ctx.createOscillator(), body = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(freq, startTime);
+        body.gain.value = 0.12;
+        osc.connect(body); body.connect(envGain);
+        // Keep a little dry fundamental so high notes retain their melody even when
+        // their harmonics sit above the vowel bands.
+        const vowelEnd = startTime + targetDecay * 0.65;
+        for (const [from, to, level] of [[450, 900, 0.8], [2200, 1200, 0.4]]) {
+          const filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+          filter.type = 'bandpass'; filter.Q.value = 3 + resonanceBoost * 0.25;
+          filter.frequency.setValueAtTime(from, startTime);
+          filter.frequency.exponentialRampToValueAtTime(to, vowelEnd);
+          gain.gain.value = level;
+          osc.connect(filter); filter.connect(gain); gain.connect(envGain);
+        }
+        envGain.gain.linearRampToValueAtTime(0.65, startTime + 0.008);
+        envGain.gain.linearRampToValueAtTime(0.45, vowelEnd);
         envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay);
-        body.start(startTime); harmonic.start(startTime); breath.start(startTime);
-        body.stop(endTime); harmonic.stop(endTime); breath.stop(startTime + Math.min(0.1, targetDecay));
-        stopNodes.push(body, harmonic, breath);
+        osc.start(startTime); osc.stop(endTime); stopNodes.push(osc);
         break;
       }
 
