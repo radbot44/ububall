@@ -32,7 +32,7 @@ test('trail gradient retains a hot sample between cool endpoints', () => {
     ({ x, y: 300, life: .2, duration: .24, heat: i === 1 ? 3 : 0 }));
   vm.runInNewContext(section('function drawTrails(home, away) {', 'function drawStickyTether(') +
     '\ndrawTrails("#fff", "#000");', {
-      ctx, bodies, trails, ballHeat: () => 0,
+      ctx, bodies, trails, detachedTrailHeads: Array(7).fill(false), ballHeat: () => 0,
       heatColor: (heat, alpha) => heat + ':' + alpha,
       hexToRgba: (color, alpha) => color + ':' + alpha
     });
@@ -84,4 +84,90 @@ test('straight vertical shots skip threat simulation, but curved shots do not', 
   ball.omega = 24;
   vm.runInNewContext(code + '\ngoalThreat();', { P, bodies });
   assert.ok(steps > 0, 'curved ball was incorrectly rejected');
+});
+
+function trailHarness() {
+  const gradients = [];
+  const ctx = {
+    save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {},
+    arc() {}, closePath() {}, fill() {},
+    createLinearGradient(x0, y0, x1, y1) {
+      gradients.push({ x0, y0, x1, y1 });
+      return { addColorStop() {} };
+    }
+  };
+  const bodies = Array.from({ length: 7 }, (_, i) =>
+    ({ team: i === 6 ? -1 : 0, x: 500, y: 300, vx: 0, vy: 0, radius: 18 }));
+  const trails = Array.from({ length: 7 }, () => []);
+  const detachedTrailHeads = Array(7).fill(false);
+  const api = vm.runInNewContext(
+    section('const trailPositions = () =>', 'function drawStickyTether(') +
+    '\n({ trailPositions, cutDiscontinuousTrails, recordTrails, drawTrails });',
+    { bodies, trails, detachedTrailHeads, ctx, reducedMotion: { matches: false },
+      ballHeat: () => 0, heatColor: () => '#fff', hexToRgba: () => '#fff' });
+  return { ...api, bodies, trails, detachedTrailHeads, gradients };
+}
+const trailPoint = (x, y) => ({ x, y, life: .24, duration: .24, heat: 0 });
+const spansTeleport = gradients => gradients.some(g => Math.hypot(g.x1 - g.x0, g.y1 - g.y0) > 200);
+
+test('rule-driven player repositioning preserves old trail but never connects to spawn', () => {
+  const h = trailHarness();
+  h.trails[0].push(trailPoint(760, 200), trailPoint(770, 200));
+  Object.assign(h.bodies[0], { x: 770, y: 200 });
+  const before = h.trailPositions();
+  Object.assign(h.bodies[0], { x: 180, y: 300 });
+  h.cutDiscontinuousTrails(before);
+  h.drawTrails('#fff', '#000');
+  assert.equal(h.detachedTrailHeads[0], true);
+  assert.equal(h.gradients.length, 1, 'the old trail should still be visible until it fades');
+  assert.equal(spansTeleport(h.gradients), false);
+  // The next physical movement starts a separate section instead of erasing the old one.
+  h.gradients.length = 0;
+  Object.assign(h.bodies[0], { x: 190, vx: 600 });
+  h.recordTrails();
+  assert.equal(h.trails[0][2].breakBefore, true);
+  h.bodies[0].x = 200;
+  h.recordTrails();
+  h.drawTrails('#fff', '#000');
+  assert.equal(h.detachedTrailHeads[0], false);
+  assert.equal(h.gradients.length, 2, 'old and new motion should be separate ribbons');
+  assert.equal(spansTeleport(h.gradients), false);
+});
+
+test('corner faceoff detaches the ball trail without affecting teammates', () => {
+  const h = trailHarness();
+  h.trails[6].push(trailPoint(840, 280), trailPoint(880, 280));
+  h.trails[0].push(trailPoint(300, 300), trailPoint(320, 300));
+  Object.assign(h.bodies[6], { x: 880, y: 280 });
+  Object.assign(h.bodies[0], { x: 320, y: 300 });
+  const before = h.trailPositions();
+  Object.assign(h.bodies[6], { x: 500, y: 300 });
+  h.cutDiscontinuousTrails(before);
+  h.drawTrails('#fff', '#000');
+  assert.equal(h.detachedTrailHeads[6], true);
+  assert.equal(h.detachedTrailHeads[0], false);
+  assert.equal(h.gradients.length, 2);
+  assert.equal(spansTeleport(h.gradients), false);
+});
+
+test('legitimate high-speed movement remains continuous', () => {
+  const h = trailHarness();
+  h.trails[0].push(trailPoint(100, 300));
+  Object.assign(h.bodies[0], { x: 800, y: 300, vx: 700 });
+  h.recordTrails();
+  h.drawTrails('#fff', '#000');
+  assert.equal(h.detachedTrailHeads[0], false);
+  assert.ok(h.gradients.some(g => Math.abs(g.x1 - g.x0) > 600));
+});
+
+test('local, online, and saved replay state boundaries all signal trail discontinuities', () => {
+  for (const [start, end] of [
+    ['function finishTurn(goal) {', "$('launch').onclick"],
+    ['function nextReplaySegment() {', 'function startGoalReplay()'],
+    ['function endReplayTurn() {', 'const WIN_SECONDS'],
+    ['function playOnlineReplay() {', '// Each side\'s Discord'],
+    ['const before = !fresh && !s.replay && !goalReplay', 'if (!s.replay) fouls =']
+  ]) {
+    assert.match(section(start, end), /cutDiscontinuousTrails\(before\)/);
+  }
 });
