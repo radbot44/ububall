@@ -328,3 +328,99 @@ test('video export isolates playback session from interactive theater object', (
   assert.equal(env.shownSim(), session.sim, 'shownSim reads export session simulation');
   assert.equal(theater.replay.title, 'match', 'interactive theater replay object is preserved untouched');
 });
+
+test('restoreEntry restores Stalwart ID 0 and mastery metadata, preserving null for unsaved', () => {
+  const code = section('function restoreEntry(saved) {', 'function clearActiveMatch() {') +
+    '\n' + section('function resolveEquippedSuper(entry, slotIndex = 0) {', 'const POSITIONS = [');
+  const P = require('../web/ububall-physics.js');
+  const ubu = require('../shared/ubu.js');
+  const practice = [{ model: ubu.decode(ubu.fromCode(ubu.toCode(ubu.randomDNA()))), dna: 'dummy', label: 'Practice' }];
+  const env = vm.runInNewContext(code + '\n;({ restoreEntry, resolveEquippedSuper });', {
+    P, ubu, practice
+  });
+
+  const sampleDna = ubu.toCode(ubu.randomDNA());
+  // 1. Stalwart (id: 0) restored with full mastery object
+  const restoredStalwart = env.restoreEntry({
+    dna: sampleDna,
+    label: 'Ubu 1',
+    equippedSuper: { id: 0 }
+  });
+  assert.ok(restoredStalwart);
+  assert.ok(restoredStalwart.equippedSuper);
+  assert.equal(restoredStalwart.equippedSuper.id, 0);
+  assert.equal(restoredStalwart.equippedSuper.key, 'stalwart');
+  assert.equal(typeof restoredStalwart.equippedSuper.bonusTicks, 'number');
+
+  // 2. Unsaved super (null or missing id) preserves null
+  const restoredNull = env.restoreEntry({
+    dna: sampleDna,
+    label: 'Ubu 2',
+    equippedSuper: null
+  });
+  assert.ok(restoredNull);
+  assert.equal(restoredNull.equippedSuper, null);
+
+  // 3. Practice ubu with Stalwart
+  const practiceDna = practice[0].dna;
+  const restoredPractice = env.restoreEntry({
+    key: 'practice-0',
+    dna: practiceDna,
+    equippedSuper: { id: 0 }
+  });
+  assert.ok(restoredPractice);
+  assert.ok(restoredPractice.equippedSuper);
+  assert.equal(restoredPractice.equippedSuper.id, 0);
+  assert.equal(restoredPractice.equippedSuper.key, 'stalwart');
+});
+
+test('active match save and restore enforces matching matchVersion and physicsVersion', () => {
+  const code = section('function clearActiveMatch() {', 'function newMatch(playJingle = false) {');
+  const P = require('../web/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const ububallReplay = require('../shared/ububall-replay.js');
+  let store = {};
+  const localStorage = {
+    getItem(k) { return store[k] || null; },
+    setItem(k, v) { store[k] = String(v); },
+    removeItem(k) { delete store[k]; }
+  };
+  const dummy = () => {};
+  const env = vm.runInNewContext(code + '\n;({ saveActiveMatch, restoreActiveMatch, clearActiveMatch });', {
+    P, ububallMatch, ububallReplay, localStorage, structuredClone,
+    demo: false, online: null, phase: 'plan', recording: { turns: [] },
+    matchMode: 'standard', cpuLevel: 'medium', scores: [0, 0], turn: 1,
+    fouls: { crease: [false, false], corner: null, cornerTurns: 0, cards: [] },
+    tally: {}, roster: [{ dna: 'a', label: 'a' }], teamEntries: [{ dna: 'a', label: 'a' }],
+    bodies: P.kickoff(), plans: [], cpu: [], cpuDone: false,
+    endGoalReplay: dummy, showMode: dummy, classicMode: () => false,
+    stopFanfare: dummy, gameAudio: () => null, buildTeam: dummy,
+    normalStats: () => ({}), idlePlan: () => ({ angle: 0, power: 0, spin: 0 }),
+    document: { body: { classList: { toggle: dummy } }, querySelector: () => null },
+    restoreEntry: e => e, dirtyMeters: new Set(), startPlanClock: dummy, prepareCPU: dummy,
+    sync: dummy, draw: dummy, say: dummy
+  });
+
+  // Save active match: verify physics is written
+  env.saveActiveMatch();
+  assert.ok(store['ububall-active-match']);
+  const parsed = JSON.parse(store['ububall-active-match']);
+  assert.equal(parsed.version, ububallMatch.VERSION);
+  assert.equal(parsed.physics, P.VERSION);
+
+  // Restore with matching versions succeeds
+  const ok = env.restoreActiveMatch();
+  assert.equal(ok, true);
+
+  // Restore with mismatched physics version fails and clears storage
+  parsed.physics = P.VERSION + 1;
+  store['ububall-active-match'] = JSON.stringify(parsed);
+  assert.equal(env.restoreActiveMatch(), false);
+  assert.equal(store['ububall-active-match'], undefined);
+
+  // Restore with missing physics version (legacy save) fails and clears storage
+  delete parsed.physics;
+  store['ububall-active-match'] = JSON.stringify(parsed);
+  assert.equal(env.restoreActiveMatch(), false);
+  assert.equal(store['ububall-active-match'], undefined);
+});

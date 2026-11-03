@@ -1861,12 +1861,13 @@
   }
   function restoreEntry(saved) {
     if (!saved || !saved.dna) return null;
+    const hasSuper = saved.equippedSuper?.id != null;
     if (typeof saved.key === 'string' && saved.key.startsWith('practice-')) {
       const idx = Number(saved.key.slice(9));
       if (practice[idx]) {
         return {
           ...practice[idx],
-          equippedSuper: saved.equippedSuper?.id ? P.SUPERS[saved.equippedSuper.id] : null
+          equippedSuper: hasSuper ? resolveEquippedSuper({ model: practice[idx].model, equippedSuper: saved.equippedSuper }) : null
         };
       }
     }
@@ -1877,7 +1878,7 @@
       dna: saved.dna,
       label: saved.label || model.parts.fullName,
       model,
-      equippedSuper: saved.equippedSuper?.id ? P.SUPERS[saved.equippedSuper.id] : null
+      equippedSuper: hasSuper ? resolveEquippedSuper({ model, equippedSuper: saved.equippedSuper }) : null
     };
   }
   function clearActiveMatch() {
@@ -1897,6 +1898,7 @@
       } : null;
       const data = {
         version: ububallMatch.VERSION,
+        physics: P.VERSION,
         mode: matchMode,
         level: cpuLevel,
         scores: [...scores],
@@ -1921,7 +1923,7 @@
       const raw = localStorage.getItem('ububall-active-match');
       if (!raw) return false;
       const saved = JSON.parse(raw);
-      if (!saved || saved.version !== ububallMatch.VERSION || !saved.bodies || !saved.roster || !saved.teamEntries) {
+      if (!saved || saved.version !== ububallMatch.VERSION || saved.physics !== P.VERSION || !saved.bodies || !saved.roster || !saved.teamEntries) {
         clearActiveMatch();
         return false;
       }
