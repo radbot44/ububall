@@ -2026,9 +2026,12 @@
     });
     // Where the predicted ball catches fire: a small flame on its path.
     if (prediction.ignition) {
-      const { x, y } = prediction.ignition;
+      const { x, y, team } = prediction.ignition;
+      const ignitionColor = team === 1 ? away : home;
       ctx.save(); ctx.translate(x, y); if (isPortrait) ctx.rotate(Math.PI / 2);
-      ctx.globalAlpha = .95; ctx.fillStyle = '#ff6a1a'; ctx.strokeStyle = '#fff3b0'; ctx.lineWidth = 1.5;
+      ctx.translate(-12, -12);
+      ctx.globalAlpha = .95; ctx.fillStyle = ignitionColor; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
+      ctx.lineJoin = 'round';
       ctx.fill(IGNITION_FLAME); ctx.stroke(IGNITION_FLAME);
       ctx.restore();
     }
@@ -2077,7 +2080,7 @@
     }
     ctx.restore();
   }
-  const IGNITION_FLAME = new Path2D('M0 -9C4 -4 7 -1 7 3A7 7 0 0 1 -7 3C-7 -1 -4 -4 0 -9Z');
+  const IGNITION_FLAME = new Path2D('M12 10.941c2.333 -3.308 .167 -7.823 -1 -8.941c0 3.395 -2.235 5.299 -3.667 6.706c-1.43 1.408 -2.333 3.294 -2.333 5.588c0 3.704 3.134 6.706 7 6.706c3.866 0 7 -3.002 7 -6.706c0 -1.712 -1.232 -4.403 -2.333 -5.588c-2.084 3.353 -3.257 3.353 -4.667 2.235Z');
   const GUARD_SHIELD = new Path2D('M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3');
   const TARGET_ICON = new Path2D('M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M7 12a5 5 0 1 0 10 0a5 5 0 1 0 -10 0 M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0');
   let themeColors = null;
@@ -2153,6 +2156,27 @@
       rinkWrap.style.left = '';
       rinkWrap.style.transform = '';
     }
+  }
+  // The oomark face on the ball: eyes and mouth match brand SVG, recoloured with team colors on fire.
+  function drawBallFace(size, eyeColor, mouthColor) {
+    const scale = size / 298.99;
+    ctx.save();
+    ctx.scale(scale, scale);
+    ctx.lineCap = 'butt';
+    ctx.strokeStyle = eyeColor;
+    ctx.lineWidth = 35.3374;
+    for (const cx of [-59.445, 59.445]) {
+      ctx.beginPath();
+      ctx.arc(cx, -34.503, 48.3813, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = mouthColor;
+    ctx.lineWidth = 53.0061;
+    ctx.beginPath();
+    ctx.moveTo(-75.9575, 74.0501);
+    ctx.lineTo(75.9575, 74.0501);
+    ctx.stroke();
+    ctx.restore();
   }
   function draw() {
     if (layoutDirty) {
@@ -2335,10 +2359,22 @@
       ctx.save(); ctx.globalAlpha = .75 * glow; ctx.shadowColor = heatColor(heat); ctx.shadowBlur = 16 * glow * canvas.width / 1000;
       ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); ctx.fillStyle = heatColor(heat); ctx.fill(); ctx.restore();
     }
-    if (ballMark.complete && ballMark.naturalWidth) {
+    const size = ball.radius * 1.7;
+    const hot = ballOnFire(ball) || (ball.team === -1 && P.ballOnFire?.(ball));
+    const paceTeam = ball.strikerTeam;
+    if (hot && paceTeam !== undefined && paceTeam >= 0) {
+      const teamColor = paceTeam === 0 ? home : away;
       ctx.save(); ctx.translate(ball.x, ball.y); ctx.rotate(ball.rotation + (isPortrait ? Math.PI / 2 : 0));
-      const size = ball.radius * 1.7;
-      ctx.drawImage(ballMark, -size / 2, -size / 2, size, size); ctx.restore();
+      drawBallFace(size, teamColor, teamColor);
+      ctx.restore();
+    } else if (ballMark.complete && ballMark.naturalWidth) {
+      ctx.save(); ctx.translate(ball.x, ball.y); ctx.rotate(ball.rotation + (isPortrait ? Math.PI / 2 : 0));
+      ctx.drawImage(ballMark, -size / 2, -size / 2, size, size);
+      ctx.restore();
+    } else {
+      ctx.save(); ctx.translate(ball.x, ball.y); ctx.rotate(ball.rotation + (isPortrait ? Math.PI / 2 : 0));
+      drawBallFace(size, '#F8F7F4', '#FF7197');
+      ctx.restore();
     }
     bodies.slice(0, 6).forEach(b => { if (!b.carded) drawSpin(b, b.team ? away : home); });
     drawSpin(ball, text);
@@ -4292,6 +4328,9 @@
     return onlineOrder(structuredClone(items), seat).map((b, i) => {
       if (seat) { b.x = 1000 - b.x; b.y = 600 - b.y; b.vx = -b.vx; b.vy = -b.vy; b.rotation += Math.PI; }
       b.playerIndex = i; b.team = i < 3 ? 0 : i < 6 ? 1 : -1;
+      if (b.team === -1 && b.strikerTeam !== undefined && b.strikerTeam >= 0) {
+        b.strikerTeam = seat ? 1 - b.strikerTeam : b.strikerTeam;
+      }
       const entry = teamEntries[i];
       if (entry?.model) {
         b.name = entry.model.parts?.fullName;
@@ -4338,7 +4377,10 @@
         vb.stunned = Boolean(cb.stunned || cb.stunnedNext); vb.carded = Boolean(cb.carded);
         vb.holding = Boolean(cb.holding);
         // The ball burns as the simulation says, not by the display's own speed timer.
-        if (cb.team === -1) { vb.onFire = Boolean(cb.onFire); vb.fireTicks = cb.fireTicks || 0; vb.pace = cb.pace || 0; }
+        if (cb.team === -1) {
+          vb.onFire = Boolean(cb.onFire); vb.fireTicks = cb.fireTicks || 0; vb.pace = cb.pace || 0;
+          vb.strikerTeam = cb.strikerTeam < 0 || cb.strikerTeam === undefined ? -1 : (seat ? 1 - cb.strikerTeam : cb.strikerTeam);
+        }
         dirtyMeters.add(vb);
       }
     });

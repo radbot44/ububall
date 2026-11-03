@@ -259,7 +259,8 @@
     const ironIndex = t.ironSaver ?? null; t.ironSaver = null;
     if (ironIndex !== null) {
       const existing = tickSaves.find(s => s.index === ironIndex);
-      if (existing) existing.iron = true; else tickSaves.push({ index: ironIndex, own: false, iron: true });
+      const isOwn = ballBefore && ballBefore.strikerTeam !== undefined && ballBefore.strikerTeam >= 0 && bodies[ironIndex].team === ballBefore.strikerTeam;
+      if (existing) existing.iron = true; else tickSaves.push({ index: ironIndex, own: Boolean(isOwn), iron: true });
     }
     play.credit = credit(play.credit, ballBefore, ball, touched, before);
     for (const save of tickSaves) play.saved = { at: play.age, team: bodies[save.index].team };

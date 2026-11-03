@@ -174,3 +174,37 @@ test('local, online, and saved replay state boundaries clear repositioned trails
     assert.match(section(start, end), /clearDiscontinuousTrails\(before\)/);
   }
 });
+
+test('drawBallFace applies team colors to the ball face', () => {
+  const strokes = [];
+  const ctx = {
+    save() {}, restore() {}, scale() {}, beginPath() {}, arc() {}, moveTo() {}, lineTo() {},
+    stroke() { strokes.push(this.strokeStyle); },
+    set strokeStyle(val) { this._strokeStyle = val; },
+    get strokeStyle() { return this._strokeStyle; }
+  };
+  const code = section('function drawBallFace(size, eyeColor, mouthColor) {', 'function draw() {');
+  vm.runInNewContext(code + '\ndrawBallFace(30.6, "#E8CA48", "#AA54D3");', { ctx });
+  assert.deepEqual(strokes, ['#E8CA48', '#E8CA48', '#AA54D3']);
+});
+
+test('prediction ignition indicator fills with team color', () => {
+  const fills = [], strokes = [];
+  const ctx = {
+    save() {}, restore() {}, translate() {}, rotate() {}, beginPath() {}, arc() {}, rect() {}, clip() {},
+    fill() { fills.push(this.fillStyle); },
+    stroke() { strokes.push(this.strokeStyle); },
+    set fillStyle(val) { this._fillStyle = val; }, get fillStyle() { return this._fillStyle; },
+    set strokeStyle(val) { this._strokeStyle = val; }, get strokeStyle() { return this._strokeStyle; }
+  };
+  const prediction = { paths: [], impacts: [], stops: [], horizon: 240, ignition: { x: 450, y: 300, tick: 60, team: 1 } };
+  const bodies = [{ team: 0 }, { team: 0 }, { team: 0 }, { team: 1 }, { team: 1 }, { team: 1 }, { team: -1 }];
+  const IGNITION_FLAME = {};
+  const code = section('function paintPrediction(prediction, home, away) {', 'const IGNITION_FLAME =');
+  vm.runInNewContext(code + '\npaintPrediction(prediction, "#E8CA48", "#AA54D3");', {
+    ctx, bodies, prediction, isPortrait: false, pulseMode: () => false, ububallMatch: { turnTicks: () => 240 },
+    line() {}, impactStamp: () => ({}), IGNITION_FLAME, rounded() {}, P: { rink: { goalDepth: 38 } }
+  });
+  assert.equal(fills[0], '#AA54D3', 'away team color is used for team 1 ignition');
+  assert.equal(strokes[0], '#ffffff', 'white outline is used for ignition flame');
+});

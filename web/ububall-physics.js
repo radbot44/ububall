@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 10;
+  const VERSION = 11;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IMPULSE = 3 * MAX_SPEED;
@@ -404,14 +404,14 @@
 
           if (E > R) {
             fireWin = R / E;
-          } else {
+          } else if (player.guarding) {
             const opposing = ball.strikerTeam !== undefined && ball.strikerTeam >= 0 && ball.strikerTeam !== player.team;
-            if (player.guarding && opposing) {
+            if (opposing) {
               ball.onFire = false;
               ball.fireTicks = 0;
-              ironSave = true;
-              if (allBodies) triggerIronShockwave(player, allBodies, onShockwave);
             }
+            ironSave = true;
+            if (allBodies) triggerIronShockwave(player, allBodies, onShockwave);
           }
         }
       }
@@ -1107,7 +1107,7 @@
           if (ball && ballIndex >= 0) paths[ballIndex].push({ x: ball.x, y: ball.y, tick });
         }
       }
-      if (ball && !burning && ballOnFire(ball)) { burning = true; ignition = { x: ball.x, y: ball.y, tick }; }
+      if (ball && !burning && ballOnFire(ball)) { burning = true; ignition = { x: ball.x, y: ball.y, tick, team: ball.strikerTeam }; }
       const done = (goal !== null ? settled(sim.slice(0, 6)) : settled(sim)) || tick === PREDICTION_TICKS;
       if (tick % 4 === 0 || done) {
         sim.forEach((b, i) => {

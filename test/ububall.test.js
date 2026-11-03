@@ -1066,6 +1066,21 @@ test('Iron Save triggers when an opposing Guard squares up to a full-speed fireb
   assert.equal(P.ballOnFire(ball), false, 'fire is quenched on Iron Save');
   assert.equal(shockwave, true, 'minor shockwave is emitted');
 });
+test('Iron Save triggers for a teammate pass without extinguishing the fireball', () => {
+  const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  const still = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
+  Object.assign(b[1], { x: 600, y: 300 });
+  P.startTurn(b, [still, { ...still, guard: true }, still, still, still, still]);
+  Object.assign(b[6], { x: 540, y: 300, vx: 1000, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerPower: 1, strikerTeam: 0, pace: 1000 });
+  let iron = false, shockwave = false;
+  for (let t = 0; t < 60 && !iron; t++) {
+    P.step(b, P.DT, (bodyA, bodyB, speed, impulse, plow, isIron) => { if (isIron) iron = true; }, null, (src, rad, type) => { if (type === 'iron') shockwave = true; });
+  }
+  assert.equal(iron, true, 'the teammate Guard makes an Iron Save');
+  assert.equal(shockwave, true, 'iron shockwave is triggered');
+  assert.equal(P.ballOnFire(b[6]), true, 'the fireball is not extinguished on teammate Iron Save');
+  assert.ok(b[6].pace > 840, 'pace remains high');
+});
 test('a glancing full-speed fireball beats a Guard', () => {
   const { ball, iron, beaten } = guardAgainstFireball(20);
   assert.equal(iron, false);
@@ -1093,11 +1108,11 @@ test('a teammate stopping a fireball keeps it lit at its pace; an opponent stopp
 });
 test('a teammate driving into a trapped fireball fires it at its pace; a passive or opposing touch does not', () => {
   const touch = (index, vx) => {
-    const b = fireballStopped(1), ball = b[6], pace = ball.pace;
+    const b = fireballStopped(1), ball = b[6];
     Object.assign(b[index], { x: ball.x - 80, y: ball.y, vx, vy: 0 });
-    let after = null;
-    for (let t = 0; t < 60 && after === null; t++) P.step(b, P.DT, (x, y) => { if (x === ball || y === ball) after = Math.hypot(ball.vx, ball.vy); });
-    return { after, pace, ball };
+    let after = null, pace = null;
+    for (let t = 0; t < 60 && after === null; t++) P.step(b, P.DT, (x, y) => { if (x === ball || y === ball) { after = Math.hypot(ball.vx, ball.vy); pace = ball.pace; } });
+    return { after, pace: pace ?? ball.pace, ball };
   };
   const shot = touch(2, 300);
   assert.ok(Math.abs(shot.after - shot.pace) < 15, "a hot shot leaves at the ball's pace");
