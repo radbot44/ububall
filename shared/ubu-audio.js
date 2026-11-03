@@ -920,40 +920,65 @@
     }
   }
 
-  // A burning ball: a slight, subtle hiss bed with crisp, snappy crackles popping through it, until stopped.
+  // A burning ball: warm, shifting flame noise with scattered dry snaps and deeper pops.
   function playSizzle(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return { stop() {} };
-    const master = createMasterChain(ctx), volume = options.volume ?? 1;
+    const cleanup = [], master = createMasterChain(ctx, cleanup), volume = Math.max(0, options.volume ?? 1);
     const hiss = ctx.createBufferSource(), band = ctx.createBiquadFilter(), level = ctx.createGain();
+    const air = ctx.createBiquadFilter(), airLevel = ctx.createGain(), output = ctx.createGain();
     hiss.buffer = grainNoise(ctx); hiss.loop = true;
-    band.type = 'bandpass'; band.frequency.setValueAtTime(3600, ctx.currentTime); band.Q.setValueAtTime(0.5, ctx.currentTime);
-    level.gain.setValueAtTime(0.0001, ctx.currentTime);
-    level.gain.exponentialRampToValueAtTime(0.018 * volume, ctx.currentTime + 0.12);
-    hiss.connect(band); band.connect(level); level.connect(master);
-    hiss.start();
-    const crackles = setInterval(() => {
+    band.type = 'lowpass'; band.frequency.setValueAtTime(650, ctx.currentTime); band.Q.value = 0.5;
+    level.gain.setValueAtTime(0.14, ctx.currentTime);
+    air.type = 'bandpass'; air.frequency.value = 2400; air.Q.value = 0.5;
+    airLevel.gain.value = 0.012;
+    output.gain.setValueAtTime(0, ctx.currentTime);
+    output.gain.linearRampToValueAtTime(volume, ctx.currentTime + 0.12);
+    hiss.connect(band); band.connect(level); level.connect(output);
+    hiss.connect(air); air.connect(airLevel); airLevel.connect(output); output.connect(master);
+    hiss.onended = () => {
+      for (const node of [hiss, band, level, air, airLevel, output, ...cleanup]) node.disconnect();
+    };
+    hiss.start(ctx.currentTime, Math.random() * 0.9);
+    // Slow, irregular swells give the flame body without a repeating oscillator pulse.
+    let flicker, crackles;
+    const breathe = () => {
       const now = ctx.currentTime;
-      const count = 1 + Math.floor(Math.random() * 3);
+      level.gain.setTargetAtTime(0.09 + Math.random() * 0.1, now, 0.09);
+      band.frequency.setTargetAtTime(400 + Math.random() * 600, now, 0.12);
+      airLevel.gain.setTargetAtTime(0.008 + Math.random() * 0.012, now, 0.07);
+      flicker = setTimeout(breathe, 120 + Math.random() * 230);
+    };
+    const crackle = () => {
+      const now = ctx.currentTime;
+      const count = Math.random() < 0.3 ? 2 + Math.floor(Math.random() * 2) : 1;
       for (let k = 0; k < count; k++) {
         const isPop = Math.random() < 0.25;
-        const freq = isPop ? 900 + Math.random() * 1200 : 2600 + Math.random() * 4600;
-        const q = isPop ? 2.0 + Math.random() * 1.5 : 3.0 + Math.random() * 3.0;
-        const len = isPop ? 0.003 + Math.random() * 0.005 : 0.002 + Math.random() * 0.005;
-        const grainLevel = (0.16 + Math.random() * 0.18) * volume;
-        noiseGrain(ctx, master, now + Math.random() * 0.025, len,
-          { freq, q, level: grainLevel, pan: (Math.random() - 0.5) * 0.6 });
+        const start = now + k * (0.012 + Math.random() * 0.025);
+        const len = isPop ? 0.025 + Math.random() * 0.045 : 0.006 + Math.random() * 0.012;
+        const source = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+        source.buffer = grainNoise(ctx);
+        filter.type = 'bandpass'; filter.Q.value = isPop ? 0.7 : 1;
+        filter.frequency.value = isPop ? 500 + Math.random() * 900 : 1800 + Math.random() * 2600;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime((isPop ? 0.24 : 0.12) * (0.5 + Math.random()), start + 0.001);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + len);
+        source.connect(filter); filter.connect(gain); gain.connect(output);
+        source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
+        source.start(start, Math.random() * 0.8); source.stop(start + len + 0.01);
       }
-    }, 30);
+      crackles = setTimeout(crackle, 90 + Math.random() * 260);
+    };
+    breathe();
+    crackles = setTimeout(crackle, 60);
     const handle = {
       stop() {
         if (!superPlayback.delete(handle)) return;
-        clearInterval(crackles);
+        clearTimeout(crackles); clearTimeout(flicker);
         const now = ctx.currentTime;
-        level.gain.cancelScheduledValues(now);
-        level.gain.setValueAtTime(Math.max(0.0001, level.gain.value), now);
-        level.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
-        hiss.stop(now + 0.13);
+        output.gain.cancelAndHoldAtTime(now);
+        output.gain.linearRampToValueAtTime(0, now + 0.15);
+        hiss.stop(now + 0.16);
       }
     };
     superPlayback.add(handle);
