@@ -142,7 +142,7 @@ Four 6-bit axes (`0–63`, neutral `31.5`) determining autonomous CPU behavior:
 Enables full Web Audio synthesis of procedural voice and an 8-note personal goal fanfare jingle.
 
 ### Voice Synthesizer Profile (16 Bits)
-- **`Instrument` (Bits 534–537, 4 bits: 0–15):** 16 synthesis sound profiles (Soft Bell, Woodblock, Metallic Ping, Crystal Chime, Square Chip, Sub-bass, etc.).
+- **`Instrument` (Bits 534–537, 4 bits: 0–15):** 16 synthesis sound profiles (Soft Bell, Woodblock, Resonant Pluck, Crystal Chime, Square Chip, Pulse Pluck, etc.).
 - **`Root Pitch` (Bits 538–543, 6 bits: 0–63):** 64 base chromatic pitches spanning 5+ octaves (C2 to D#7).
 - **`Decay` (Bits 544–547, 4 bits: 0–15):** 16 envelope sustain lengths (40ms staccato to 1.2s resonant ringing).
 - **`Timbre Mod` (Bits 548–549, 2 bits: 0–3):** Chorus/warmth modulation depth.

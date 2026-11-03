@@ -1,17 +1,17 @@
 'use strict';
 (() => {
   const INSTRUMENTS = [
-    'Soft Bell',      // 0: Warm sine/harmonic chime
-    'Woodblock',      // 1: Snappy triangle percussive click
-    'Metal Ping',     // 2: Metallic FM resonant ring
+    'Soft Bell',      // 0: Rounded bell with a lingering inharmonic ring
+    'Woodblock',      // 1: Dry, hollow wooden knock
+    'Resonant Pluck', // 2: Resonant sawtooth filter sweep
     'Crystal Chime',  // 3: Glassy dual sine with shimmer
     'Square Chip',    // 4: Retro 8-bit square wave with vibrato
-    'Pulse Pluck',    // 5: Resonant lowpass filter sweep pluck
-    'Warm Pad',       // 6: Soft swell sine + fifth harmonic
+    'Pulse Pluck',    // 5: Narrow pulse with a crisp, closing filter
+    'Warm Pad',       // 6: Soft sine swell with a quiet octave
     'Sub Pluck',      // 7: Deep punchy sine with transient
-    'Kalimba',        // 8: Acoustic thumb piano with overtone ping
+    'Kalimba',        // 8: Plucked tine with a brief, bright buzz
     'Marimba',        // 9: Hollow wooden mallet pop
-    'Vibraphone',     // 10: Sine with warm tremolo wobble
+    'Vibraphone',     // 10: Metallic mallet tone with tremolo
     'Brass Ping',     // 11: Sawtooth with envelope filter swell
     'Electric Piano', // 12: Bell transient + Rhodes tine warmth
     'Synth Bass',     // 13: Punchy filtered saw/square bite
@@ -185,6 +185,7 @@
     sharedChains.set(ctx, createMasterChain(ctx));
   }
 
+  const pulseWaves = new WeakMap();
   function playTone(ctx, dest, params) {
     const {
       instrument = 0,
@@ -226,28 +227,30 @@
     const resonanceBoost = timbreMod === 2 ? 4 : 0;
 
     switch (instrument) {
-      // 0: Soft Bell (warm sine with octave chime)
+      // 0: Soft Bell (rounded strike with a gently lingering, inharmonic ring)
       case 0: {
         const osc1 = ctx.createOscillator();
         const osc2 = ctx.createOscillator();
         osc1.type = 'sine';
         osc2.type = 'sine';
         osc1.frequency.setValueAtTime(freq, startTime);
-        osc2.frequency.setValueAtTime(freq * 2, startTime);
+        osc2.frequency.setValueAtTime(freq * 2.76, startTime);
         if (pitchBend) {
-          osc1.frequency.exponentialRampToValueAtTime(freq, startTime + 0.05);
           osc1.frequency.setValueAtTime(freq * Math.pow(2, pitchBend / 12), startTime);
+          osc1.frequency.exponentialRampToValueAtTime(freq, startTime + 0.05);
+          osc2.frequency.setValueAtTime(freq * 2.76 * Math.pow(2, pitchBend / 12), startTime);
+          osc2.frequency.exponentialRampToValueAtTime(freq * 2.76, startTime + 0.05);
         }
 
         const g2 = ctx.createGain();
-        g2.gain.setValueAtTime(0.35, startTime);
-        g2.gain.exponentialRampToValueAtTime(0.001, startTime + targetDecay * 0.4);
+        g2.gain.setValueAtTime(0.22, startTime);
+        g2.gain.exponentialRampToValueAtTime(0.025, startTime + targetDecay);
 
         osc1.connect(envGain);
         osc2.connect(g2);
         g2.connect(envGain);
 
-        envGain.gain.linearRampToValueAtTime(0.7, startTime + 0.008);
+        envGain.gain.linearRampToValueAtTime(0.65, startTime + 0.012);
         envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay);
 
         osc1.start(startTime);
@@ -258,57 +261,46 @@
         break;
       }
 
-      // 1: Woodblock (triangle through bandpass with rapid drop)
+      // 1: Woodblock (two short cavity resonances, with almost no pitch sweep)
       case 1: {
+        const ring = Math.min(0.11, targetDecay * 0.55);
+        for (const [ratio, level, length] of [[1, 0.65, ring], [2.35, 0.3, ring * 0.45]]) {
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq * ratio * 1.04, startTime);
+          osc.frequency.exponentialRampToValueAtTime(freq * ratio, startTime + 0.008);
+          gain.gain.setValueAtTime(level, startTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, startTime + length);
+          osc.connect(gain); gain.connect(envGain);
+          osc.start(startTime); osc.stop(endTime); stopNodes.push(osc);
+        }
+        envGain.gain.linearRampToValueAtTime(0.8, startTime + 0.002);
+        envGain.gain.setValueAtTime(0.8, startTime + ring);
+        envGain.gain.linearRampToValueAtTime(0, startTime + ring + 0.005);
+        break;
+      }
+
+      // 2: Resonant Pluck (saw wave with resonant lowpass filter sweep)
+      case 2: {
         const osc = ctx.createOscillator();
         const filter = ctx.createBiquadFilter();
-        osc.type = 'triangle';
-        filter.type = 'bandpass';
-        filter.frequency.setValueAtTime(Math.max(400, Math.min(2200, freq * 1.5)), startTime);
-        filter.Q.setValueAtTime(3.5 + resonanceBoost, startTime);
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, startTime);
 
-        osc.frequency.setValueAtTime(freq * 1.9, startTime);
-        osc.frequency.exponentialRampToValueAtTime(freq, startTime + 0.025);
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(Math.min(4800, freq * 6), startTime);
+        filter.frequency.exponentialRampToValueAtTime(Math.max(150, freq * 0.8), startTime + targetDecay * 0.7);
+        filter.Q.setValueAtTime(4.0 + resonanceBoost, startTime);
 
         osc.connect(filter);
         filter.connect(envGain);
 
-        envGain.gain.linearRampToValueAtTime(0.85, startTime + 0.003);
-        envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + Math.min(0.18, targetDecay * 0.5));
+        envGain.gain.linearRampToValueAtTime(0.5, startTime + 0.006);
+        envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay);
 
         osc.start(startTime);
         osc.stop(endTime);
         stopNodes.push(osc);
-        break;
-      }
-
-      // 2: Metal Ping (FM synthesis)
-      case 2: {
-        const carrier = ctx.createOscillator();
-        const mod = ctx.createOscillator();
-        const modGain = ctx.createGain();
-
-        carrier.type = 'sine';
-        mod.type = 'sine';
-        carrier.frequency.setValueAtTime(freq, startTime);
-        mod.frequency.setValueAtTime(freq * 2.756, startTime);
-
-        modGain.gain.setValueAtTime(freq * (1.8 + resonanceBoost * 0.5), startTime);
-        modGain.gain.exponentialRampToValueAtTime(0.1, startTime + targetDecay * 0.35);
-
-        mod.connect(modGain);
-        modGain.connect(carrier.frequency);
-
-        carrier.connect(envGain);
-
-        envGain.gain.linearRampToValueAtTime(0.65, startTime + 0.005);
-        envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay);
-
-        carrier.start(startTime);
-        mod.start(startTime);
-        carrier.stop(endTime);
-        mod.stop(endTime);
-        stopNodes.push(carrier, mod);
         break;
       }
 
@@ -323,6 +315,7 @@
 
         const g2 = ctx.createGain();
         g2.gain.setValueAtTime(0.4, startTime);
+        g2.gain.exponentialRampToValueAtTime(0.025, startTime + targetDecay * 0.6);
 
         o1.connect(envGain);
         o2.connect(g2);
@@ -348,7 +341,9 @@
         const lfoGain = ctx.createGain();
         lfo.type = 'sine';
         lfo.frequency.setValueAtTime(6.0, startTime);
-        lfoGain.gain.setValueAtTime(freq * 0.015, startTime);
+        lfoGain.gain.setValueAtTime(0, startTime);
+        lfoGain.gain.setValueAtTime(0, startTime + Math.min(0.06, targetDecay * 0.5));
+        lfoGain.gain.linearRampToValueAtTime(freq * 0.012, startTime + Math.min(0.18, targetDecay));
         lfo.connect(lfoGain);
         lfoGain.connect(osc.frequency);
 
@@ -363,117 +358,97 @@
         break;
       }
 
-      // 5: Pulse Pluck (saw wave with resonant lowpass filter sweep)
+      // 5: Pulse Pluck (25% duty pulse, with a short, modest filter closure)
       case 5: {
-        const osc = ctx.createOscillator();
-        const filter = ctx.createBiquadFilter();
-        osc.type = 'sawtooth';
+        if (!pulseWaves.has(ctx)) {
+          const real = new Float32Array(33), imag = new Float32Array(33);
+          for (let n = 1; n < real.length; n++) {
+            real[n] = Math.sin(n * Math.PI / 2) / n;
+            imag[n] = (1 - Math.cos(n * Math.PI / 2)) / n;
+          }
+          pulseWaves.set(ctx, ctx.createPeriodicWave(real, imag));
+        }
+        const osc = ctx.createOscillator(), filter = ctx.createBiquadFilter();
+        osc.setPeriodicWave(pulseWaves.get(ctx));
         osc.frequency.setValueAtTime(freq, startTime);
-
         filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(Math.min(4800, freq * 6), startTime);
-        filter.frequency.exponentialRampToValueAtTime(Math.max(150, freq * 0.8), startTime + targetDecay * 0.7);
-        filter.Q.setValueAtTime(4.0 + resonanceBoost, startTime);
-
-        osc.connect(filter);
-        filter.connect(envGain);
-
-        envGain.gain.linearRampToValueAtTime(0.5, startTime + 0.006);
-        envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay);
-
-        osc.start(startTime);
-        osc.stop(endTime);
-        stopNodes.push(osc);
+        filter.frequency.setValueAtTime(Math.min(6500, freq * 9), startTime);
+        filter.frequency.exponentialRampToValueAtTime(Math.max(180, freq * 2), startTime + targetDecay * 0.4);
+        filter.Q.value = 0.7 + resonanceBoost * 0.15;
+        osc.connect(filter); filter.connect(envGain);
+        envGain.gain.linearRampToValueAtTime(0.42, startTime + 0.003);
+        envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay * 0.8);
+        osc.start(startTime); osc.stop(endTime); stopNodes.push(osc);
         break;
       }
 
-      // 6: Warm Pad (sine + fifth harmonic with soft attack)
+      // 6: Warm Pad (a rounded swell; the quiet octave adds colour without a second chord tone)
       case 6: {
-        const o1 = ctx.createOscillator(), o2 = ctx.createOscillator();
-        o1.type = 'sine'; o2.type = 'triangle';
+        const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), overtone = ctx.createGain();
+        o1.type = 'sine'; o2.type = 'sine';
         o1.frequency.setValueAtTime(freq, startTime);
-        o2.frequency.setValueAtTime(freq * 1.498, startTime); // Fifth harmonic
-
-        o1.connect(envGain);
-        o2.connect(envGain);
-
-        const attack = 0.035;
-        envGain.gain.linearRampToValueAtTime(0.4, startTime + attack);
+        o2.frequency.setValueAtTime(freq * 2, startTime);
+        overtone.gain.value = 0.18;
+        o1.connect(envGain); o2.connect(overtone); overtone.connect(envGain);
+        const attack = Math.min(0.09, targetDecay * 0.3);
+        envGain.gain.linearRampToValueAtTime(0.5, startTime + attack);
+        envGain.gain.linearRampToValueAtTime(0.38, startTime + targetDecay * 0.6);
         envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay);
-
         o1.start(startTime); o2.start(startTime);
-        o1.stop(endTime); o2.stop(endTime);
-        stopNodes.push(o1, o2);
+        o1.stop(endTime); o2.stop(endTime); stopNodes.push(o1, o2);
         break;
       }
 
-      // 7: Sub Pluck (deep round punch)
+      // 7: Sub Pluck (a rounded low knock with a tiny pitch transient, no bell overtones)
       case 7: {
         const osc = ctx.createOscillator();
         osc.type = 'sine';
-        // Drop an octave if too high for bass
         const subFreq = freq > 320 ? freq * 0.5 : freq;
-        osc.frequency.setValueAtTime(subFreq, startTime);
-
+        osc.frequency.setValueAtTime(subFreq * 1.35, startTime);
+        osc.frequency.exponentialRampToValueAtTime(subFreq, startTime + 0.018);
         osc.connect(envGain);
-
-        envGain.gain.linearRampToValueAtTime(0.75, startTime + 0.006);
-        envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay);
-
-        osc.start(startTime);
-        osc.stop(endTime);
-        stopNodes.push(osc);
+        envGain.gain.linearRampToValueAtTime(0.8, startTime + 0.004);
+        envGain.gain.exponentialRampToValueAtTime(0.2, startTime + targetDecay * 0.18);
+        envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay * 0.75);
+        osc.start(startTime); osc.stop(endTime); stopNodes.push(osc);
         break;
       }
 
-      // 8: Kalimba (sine with high wooden tine ping)
+      // 8: Kalimba (a bright, brief tine buzz followed by a small, clean pluck)
       case 8: {
-        const osc1 = ctx.createOscillator(), osc2 = ctx.createOscillator();
-        osc1.type = 'sine'; osc2.type = 'sine';
-        osc1.frequency.setValueAtTime(freq, startTime);
-        osc2.frequency.setValueAtTime(freq * 3.85, startTime);
-
-        const g2 = ctx.createGain();
-        g2.gain.setValueAtTime(0.45, startTime);
-        g2.gain.exponentialRampToValueAtTime(0.001, startTime + 0.035);
-
-        osc1.connect(envGain);
-        osc2.connect(g2);
-        g2.connect(envGain);
-
-        envGain.gain.linearRampToValueAtTime(0.65, startTime + 0.004);
+        const body = ctx.createOscillator(), tine = ctx.createOscillator(), tineGain = ctx.createGain();
+        body.type = 'sine'; tine.type = 'triangle';
+        body.frequency.setValueAtTime(freq, startTime);
+        tine.frequency.setValueAtTime(freq * 5.4, startTime);
+        tineGain.gain.setValueAtTime(0.32, startTime);
+        tineGain.gain.exponentialRampToValueAtTime(0.0001, startTime + Math.min(0.028, targetDecay * 0.3));
+        body.connect(envGain); tine.connect(tineGain); tineGain.connect(envGain);
+        envGain.gain.linearRampToValueAtTime(0.6, startTime + 0.002);
+        envGain.gain.exponentialRampToValueAtTime(0.16, startTime + targetDecay * 0.18);
         envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay);
-
-        osc1.start(startTime); osc2.start(startTime);
-        osc1.stop(endTime); osc2.stop(endTime);
-        stopNodes.push(osc1, osc2);
+        body.start(startTime); tine.start(startTime);
+        body.stop(endTime); tine.stop(endTime); stopNodes.push(body, tine);
         break;
       }
 
-      // 9: Marimba (triangle through resonant wooden bandpass)
+      // 9: Marimba (soft wooden mallet body with a rapidly fading fourth-harmonic knock)
       case 9: {
-        const osc = ctx.createOscillator();
-        const filter = ctx.createBiquadFilter();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, startTime);
-
-        filter.type = 'bandpass';
-        filter.frequency.setValueAtTime(freq, startTime);
-        filter.Q.setValueAtTime(4.5 + resonanceBoost, startTime);
-
-        osc.connect(filter);
-        filter.connect(envGain);
-
-        envGain.gain.linearRampToValueAtTime(0.7, startTime + 0.004);
-        envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + Math.min(0.3, targetDecay * 0.6));
-
-        osc.start(startTime);
-        osc.stop(endTime);
-        stopNodes.push(osc);
+        const body = ctx.createOscillator(), strike = ctx.createOscillator(), strikeGain = ctx.createGain();
+        body.type = 'sine'; strike.type = 'sine';
+        body.frequency.setValueAtTime(freq, startTime);
+        strike.frequency.setValueAtTime(freq * 4, startTime);
+        strikeGain.gain.setValueAtTime(0.38, startTime);
+        strikeGain.gain.exponentialRampToValueAtTime(0.0001, startTime + Math.min(0.045, targetDecay * 0.4));
+        body.connect(envGain); strike.connect(strikeGain); strikeGain.connect(envGain);
+        const ring = Math.min(0.32, targetDecay * 0.7);
+        envGain.gain.linearRampToValueAtTime(0.7, startTime + 0.006);
+        envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + ring);
+        body.start(startTime); strike.start(startTime);
+        body.stop(endTime); strike.stop(endTime); stopNodes.push(body, strike);
         break;
       }
 
-      // 10: Vibraphone (sine with tremolo)
+      // 10: Vibraphone (a metallic upper partial and a rounded tremolo ring)
       case 10: {
         const osc = ctx.createOscillator();
         const trem = ctx.createGain();
@@ -482,6 +457,13 @@
 
         osc.type = 'sine';
         osc.frequency.setValueAtTime(freq, startTime);
+
+        const overtone = ctx.createOscillator(), overtoneGain = ctx.createGain();
+        overtone.type = 'sine';
+        overtone.frequency.setValueAtTime(freq * 3, startTime);
+        overtoneGain.gain.setValueAtTime(0.24, startTime);
+        overtoneGain.gain.exponentialRampToValueAtTime(0.015, startTime + targetDecay * 0.55);
+        overtone.connect(overtoneGain); overtoneGain.connect(trem);
 
         lfo.type = 'sine';
         lfo.frequency.setValueAtTime(5.4, startTime);
@@ -495,8 +477,10 @@
         trem.connect(envGain);
 
         envGain.gain.linearRampToValueAtTime(0.6, startTime + 0.01);
+        envGain.gain.exponentialRampToValueAtTime(0.18, startTime + targetDecay * 0.5);
         envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay);
 
+        overtone.start(startTime); overtone.stop(endTime); stopNodes.push(overtone);
         osc.start(startTime); lfo.start(startTime);
         osc.stop(endTime); lfo.stop(endTime);
         stopNodes.push(osc, lfo);
@@ -528,27 +512,20 @@
         break;
       }
 
-      // 12: Electric Piano (bell transient + warm Rhodes body)
+      // 12: Electric Piano (a restrained FM tine attack settling into a mellow body)
       case 12: {
-        const o1 = ctx.createOscillator(), o2 = ctx.createOscillator();
-        o1.type = 'sine'; o2.type = 'triangle';
-        o1.frequency.setValueAtTime(freq, startTime);
-        o2.frequency.setValueAtTime(freq * 2, startTime);
-
-        const g2 = ctx.createGain();
-        g2.gain.setValueAtTime(0.3, startTime);
-        g2.gain.exponentialRampToValueAtTime(0.001, startTime + 0.1);
-
-        o1.connect(envGain);
-        o2.connect(g2);
-        g2.connect(envGain);
-
-        envGain.gain.linearRampToValueAtTime(0.6, startTime + 0.008);
+        const carrier = ctx.createOscillator(), tine = ctx.createOscillator(), depth = ctx.createGain();
+        carrier.type = 'sine'; tine.type = 'sine';
+        carrier.frequency.setValueAtTime(freq, startTime);
+        tine.frequency.setValueAtTime(freq * 3, startTime);
+        depth.gain.setValueAtTime(freq * 0.65, startTime);
+        depth.gain.exponentialRampToValueAtTime(freq * 0.035, startTime + targetDecay * 0.4);
+        tine.connect(depth); depth.connect(carrier.frequency); carrier.connect(envGain);
+        envGain.gain.linearRampToValueAtTime(0.62, startTime + 0.005);
+        envGain.gain.exponentialRampToValueAtTime(0.2, startTime + targetDecay * 0.3);
         envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay);
-
-        o1.start(startTime); o2.start(startTime);
-        o1.stop(endTime); o2.stop(endTime);
-        stopNodes.push(o1, o2);
+        carrier.start(startTime); tine.start(startTime);
+        carrier.stop(endTime); tine.stop(endTime); stopNodes.push(carrier, tine);
         break;
       }
 
@@ -564,10 +541,12 @@
         filter.type = 'lowpass';
         filter.frequency.setValueAtTime(Math.min(3200, freq * 5), startTime);
         filter.frequency.exponentialRampToValueAtTime(Math.max(120, freq * 0.9), startTime + targetDecay * 0.6);
-        filter.Q.setValueAtTime(5.0 + resonanceBoost, startTime);
+        filter.Q.setValueAtTime(2.5 + resonanceBoost * 0.5, startTime);
 
         o1.connect(filter);
-        o2.connect(filter);
+        const squareLevel = ctx.createGain();
+        squareLevel.gain.value = 0.4;
+        o2.connect(squareLevel); squareLevel.connect(filter);
         filter.connect(envGain);
 
         envGain.gain.linearRampToValueAtTime(0.42, startTime + 0.008);
@@ -579,20 +558,28 @@
         break;
       }
 
-      // 14: Flute (gentle breathy sine/triangle)
+      // 14: Flute (a blown sine-led tone, with a tiny breath onset and held body)
       case 14: {
-        const osc = ctx.createOscillator();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, startTime);
-
-        osc.connect(envGain);
-
-        envGain.gain.linearRampToValueAtTime(0.5, startTime + 0.035);
+        const body = ctx.createOscillator(), harmonic = ctx.createOscillator(), harmonicGain = ctx.createGain();
+        body.type = 'sine'; harmonic.type = 'sine';
+        body.frequency.setValueAtTime(freq, startTime);
+        harmonic.frequency.setValueAtTime(freq * 2, startTime);
+        harmonicGain.gain.value = 0.12;
+        body.connect(envGain); harmonic.connect(harmonicGain); harmonicGain.connect(envGain);
+        const breath = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), breathGain = ctx.createGain();
+        breath.buffer = grainNoise(ctx);
+        filter.type = 'bandpass'; filter.frequency.value = Math.min(6000, Math.max(1000, freq * 2)); filter.Q.value = 0.7;
+        breathGain.gain.setValueAtTime(0.025, startTime);
+        breathGain.gain.exponentialRampToValueAtTime(0.0001, startTime + Math.min(0.09, targetDecay * 0.6));
+        breath.connect(filter); filter.connect(breathGain); breathGain.connect(envGain);
+        breath.onended = () => { breath.disconnect(); filter.disconnect(); breathGain.disconnect(); };
+        const attack = Math.min(0.04, targetDecay * 0.25);
+        envGain.gain.linearRampToValueAtTime(0.45, startTime + attack);
+        envGain.gain.linearRampToValueAtTime(0.36, startTime + targetDecay * 0.65);
         envGain.gain.exponentialRampToValueAtTime(0.0001, startTime + targetDecay);
-
-        osc.start(startTime);
-        osc.stop(endTime);
-        stopNodes.push(osc);
+        body.start(startTime); harmonic.start(startTime); breath.start(startTime);
+        body.stop(endTime); harmonic.stop(endTime); breath.stop(startTime + Math.min(0.1, targetDecay));
+        stopNodes.push(body, harmonic, breath);
         break;
       }
 
@@ -1319,7 +1306,7 @@
       schedule(inst, midi, s, len, dec, vol, mod);
     }
 
-    // 4. Woodblock (1) face-off ticks + Metal Ping (2) & Crystal Chime (3) finale shimmer
+    // 4. Woodblock (1) face-off ticks + Resonant Pluck (2) & Crystal Chime (3) finale accents
     for (const [s, midi] of [[0, 72], [2, 76], [4, 79], [7, 81]]) {
       schedule(1, midi, s, 0.5, 0.09, 0.45, 2);
     }
@@ -1393,7 +1380,7 @@
 
   // Conservative fanfare-only trims for the brighter/layered voices. The shared voice and
   // collision synthesizer, DNA envelopes and instrument identities are unchanged.
-  const FANFARE_LEVELS = [1, 1, 0.85, 0.9, 0.8, 0.9, 0.9, 1, 1, 1, 1, 0.85, 1, 0.8, 1, 0.9];
+  const FANFARE_LEVELS = [1, 1, 0.9, 0.9, 0.8, 0.9, 0.9, 1, 1, 1, 1, 0.85, 1, 0.8, 1, 0.9];
 
   // Keep three ordered pad voices near their previous pitches, choosing octave placements
   // without changing chord pitch classes. Bounded register prevents drift over long loops.
