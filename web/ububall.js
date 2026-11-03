@@ -933,6 +933,14 @@
     }
     ctx.restore();
   }
+  // Discrete rule and snapshot updates may move bodies without physics.
+  // Clear only the trails whose bodies were repositioned; normal motion keeps its trail.
+  const trailPositions = () => bodies.map(b => ({ x: b.x, y: b.y }));
+  function clearDiscontinuousTrails(before) {
+    bodies.forEach((b, i) => {
+      if (before[i] && (before[i].x !== b.x || before[i].y !== b.y)) trails[i].length = 0;
+    });
+  }
   function recordTrails() {
     if (reducedMotion.matches) return;
     bodies.forEach((b, i) => {
@@ -2387,10 +2395,12 @@
     clearEffects(); nextReplaySegment();
   }
   function nextReplaySegment() {
+    const before = trailPositions();
     const r = goalReplay, segment = r.segments[++r.index];
     r.sim = structuredClone(segment.bodies); r.tick = 0;
     P.startTurn(r.sim, segment.plans, replayFx.super);
     syncReplay();
+    clearDiscontinuousTrails(before);
   }
   function startGoalReplay() {
     if (postGoal) { P.stop(bodies); postGoal = null; }
@@ -2619,7 +2629,10 @@
     }
     if (th.index + 1 >= th.replay.turns.length) { th.paused = true; th.steps = 0; return false; }
     if (t.goal) clearEffects();
-    loadReplayTurn(th.index + 1, true); syncReplay(); sync();
+    const before = trailPositions();
+    loadReplayTurn(th.index + 1, true); syncReplay();
+    clearDiscontinuousTrails(before);
+    sync();
     return true;
   }
   // The winner's call holds as long as a goal's call shows.
@@ -3326,7 +3339,9 @@
     // A goal on the round's first turn is an ace, earning its scorer extra meter (not for an own goal).
     const ace = goal !== null && !roundTurns, call = goal === null ? null : ububallMatch.callGoal(bodies, play, tally, goal, ace);
     if (goal !== null && ballOnFire()) lightNet(goal); else quench();
+    const before = trailPositions();
     ububallMatch.finishTurn(P, bodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null, keepMotion: goal !== null }, fouls, tally);
+    clearDiscontinuousTrails(before);
     if (fouls.faceoff) play = ububallMatch.newPlay();
     noteTurn(ticks, goal === null ? null : { team: goal, label: call.label, scorer: call.own ? null : call.scorer, assist: call.assist }, fouls.cards);
     announceFouls();
@@ -4411,10 +4426,12 @@
     }
 
     if (replay.currentTick >= replay.ticks) {
+      const before = trailPositions();
       viewBodies(online.state.game.bodies, online.state.seat).forEach((sample, i) => {
         Object.assign(bodies[i], sample);
         dirtyMeters.add(bodies[i]);
       });
+      clearDiscontinuousTrails(before);
       if (!replay.fouled) {
         replay.fouled = true; fouls = viewFouls(online.state.game.fouls, online.state.seat); announceFouls();
         if (replay.goal === null && foulText()) say(foulText());
@@ -4480,7 +4497,9 @@
         if (s.phase === 'plan' && ball.x === 500 && ball.y === 300) kickoffGlow = 1;
       }
       if (s.phase !== 'resolving') { endGoalReplay(); stopFanfare(); }
+      const before = !fresh && !s.replay && !goalReplay ? trailPositions() : null;
       bodies = viewBodies(s.game.bodies, s.seat);
+      if (before) clearDiscontinuousTrails(before);
       if (!s.replay) fouls = viewFouls(s.game.fouls, s.seat);
       // A running goal replay keeps the display; the server state becomes what it restores.
       if (goalReplay) { goalReplay.real = bodies; bodies = goalReplay.display; }
