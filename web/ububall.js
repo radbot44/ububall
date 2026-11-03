@@ -20,7 +20,7 @@
   });
   const practice = Array.from({ length: 6 }, () => { const dna = ubu.randomDNA(); return { model: ubu.decode(dna), dna: ubu.toCode(dna), label: 'Practice ubu' }; });
   let roster = practice.slice(0, 3), draft = [...roster], rosterSlot = 0;
-  let bodies = P.kickoff(), plans, cpu, selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
+  let bodies = P.kickoff(), plans = [], cpu = [], selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [];
   let isPortrait = false;
   let matchMode = 'standard', planDeadline = 0;
@@ -35,7 +35,7 @@
   let matchTicks = 0; // Simulated ticks played locally, for meter cooldowns.
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const cpuClient = createCPUClient();
-  let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuLevel = 'medium', cpuMode = 'standard';
+  let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuDone = false, cpuLevel = 'medium', cpuMode = 'standard';
   // The home screen demo (CPU against CPU) plays silently.
   let demo = false, demoLevels = ['medium', 'hard'];
   const gameAudio = () => videoAudio || (demo ? null : window.ubuAudio);
@@ -1432,16 +1432,21 @@
     dirtyMeters.clear();
   }
   function say(message) { $('game-status').textContent = message; }
-  function prepareCPU() {
+  function prepareCPU(initialPlans = null) {
     const generation = ++cpuGeneration;
+    cpuDone = false;
     cpuClient.cancel();
     if (online?.active) return;
-    cpu = P.cpuPlans(bodies, () => .5, scores);
+    cpu = Array.isArray(initialPlans) && initialPlans.length === 3 ? initialPlans : P.cpuPlans(bodies, () => .5, scores);
     cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies, stats, scores, turn, fouls },
       { level: demo ? demoLevels[1] : cpuLevel, seed: turn }).then(result => {
       if (generation !== cpuGeneration || !result || online?.active) return;
       if (result.error) console.warn('CPU search unavailable; using baseline plan.');
-      else cpu = result.plans;
+      else {
+        cpu = result.plans;
+        cpuDone = true;
+        if (phase === 'plan') saveActiveMatch();
+      }
     });
   }
   // Big announcements over the rink. The promise settles once the banner has gone, or as soon as
@@ -1581,14 +1586,15 @@
         grab.turn = turn; setKnob(kind, i, knobValue(kind, i) + delta * (e.shiftKey ? .25 : 1));
       } else setKnob(kind, i, grab.value + ((e.clientX - grab.x) - (e.clientY - grab.y)) / (KNOB_SWEEP * gameUi.scale()) * (max - min) * (e.shiftKey ? .25 : 1));
     };
-    svg.onpointerup = svg.onpointercancel = () => { grab = null; };
-    svg.onwheel = e => { e.preventDefault(); setKnob(kind, index(), knobValue(kind, index()) - Math.sign(e.deltaY) * (e.shiftKey ? 10 : 1)); };
+    svg.onpointerup = svg.onpointercancel = () => { grab = null; if (phase === 'plan') saveActiveMatch(); };
+    svg.onwheel = e => { e.preventDefault(); setKnob(kind, index(), knobValue(kind, index()) - Math.sign(e.deltaY) * (e.shiftKey ? 10 : 1)); if (phase === 'plan') saveActiveMatch(); };
     svg.onkeydown = e => {
       const step = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key];
       if (!step) return;
       e.preventDefault(); setKnob(kind, index(), knobValue(kind, index()) + step * (e.shiftKey ? 10 : 1));
+      if (phase === 'plan') saveActiveMatch();
     };
-    if (kind === 'spin') svg.ondblclick = () => setKnob(kind, index(), 0);
+    if (kind === 'spin') svg.ondblclick = () => { setKnob(kind, index(), 0); if (phase === 'plan') saveActiveMatch(); };
     knobs.push({ kind, wrap, svg, index });
     return wrap;
   }
@@ -1902,7 +1908,9 @@
         teamEntries: teamEntries.map(entryData),
         bodies: ububallReplay.snapshot(launchState ? launchState.bodies : bodies),
         turnPlans: launchState ? launchState.turnPlans : null,
-        plans: launchState ? null : plans.map(p => ({ angle: p.angle, power: p.power, spin: p.spin || 0, superArm: Boolean(p.superArm), guard: Boolean(p.guard) })),
+        plans: launchState ? null : (Array.isArray(plans) ? plans.map((p, i) => ({ angle: p.angle, power: p.power, spin: p.spin || 0, superArm: Boolean(bodies[i]?.superArm || p.superArm), guard: Boolean(p.guard) })) : null),
+        cpu: launchState ? null : (Array.isArray(cpu) ? cpu.map(p => ({ angle: p.angle, power: p.power, spin: p.spin || 0, superArm: Boolean(p.superArm), guard: Boolean(p.guard) })) : null),
+        cpuDone: launchState ? false : Boolean(cpuDone),
         recording: recording ? structuredClone(recording) : null
       };
       localStorage.setItem('ububall-active-match', JSON.stringify(data));
@@ -1967,7 +1975,15 @@
         if (Array.isArray(saved.plans) && saved.plans.length === 3) {
           plans = saved.plans;
         } else {
-          resetPlans();
+          plans = Array.from({ length: 3 }, () => idlePlan());
+        }
+        startPlanClock();
+        if (saved.cpuDone && Array.isArray(saved.cpu) && saved.cpu.length === 3) {
+          cpu = saved.cpu;
+          cpuDone = true;
+          cpuReady = Promise.resolve();
+        } else {
+          prepareCPU(Array.isArray(saved.cpu) && saved.cpu.length === 3 ? saved.cpu : null);
         }
         say('Plan your next three launches.');
       }
@@ -3585,6 +3601,7 @@
       if (phase !== 'plan' || bodies[selected].stunned) return;
       plans[selected][key] = Number($(id).value) * scale; plans[selected].guard = false;
       sync(); draw();
+      saveActiveMatch();
     };
   }
   for (const [id, delta] of [['spin-less', -.1], ['spin-more', .1]]) {
@@ -3592,6 +3609,7 @@
       if (phase !== 'plan' || bodies[selected].stunned) return;
       plans[selected].spin = Math.max(-1, Math.min(1, Math.round(((plans[selected].spin || 0) + delta) * 10) / 10)); plans[selected].guard = false;
       sync(); draw();
+      saveActiveMatch();
     };
   }
   // Guarding replaces the launch and brakes the ubu. The arrow stays (faded), so clearing guard
@@ -3600,6 +3618,7 @@
     if (phase !== 'plan' || bodies[i].stunned) return;
     plans[i] = { ...plans[i], guard: !plans[i].guard };
     sync(); draw();
+    saveActiveMatch();
   }
   function point(event) {
     const r = canvas.getBoundingClientRect();
@@ -3675,6 +3694,7 @@
     arrowGrab = null;
     drag = null;
     dragMode = null;
+    if (phase === 'plan') saveActiveMatch();
     draw();
   };
   function handleCollision(a, b, speed, impulse, plow = false, iron = false) {
@@ -4306,6 +4326,7 @@
       if (!classicMode() && b && b.meter >= 100 && phase === 'plan' && !b.stunned) {
         b.superArm = !b.superArm;
         sync(); draw();
+        saveActiveMatch();
       }
     };
   }
