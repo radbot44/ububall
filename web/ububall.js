@@ -944,8 +944,6 @@
   }
   function drawTrails(home, away) {
     ctx.save();
-    const ubuAlpha = fade => 1 - Math.pow(1 - 0.23 * fade, 7.5);
-    const ballAlpha = (fade, h) => 1 - Math.pow(1 - fade * (0.23 + Math.min(2, h) * 0.05 + Math.max(0, h - 2) * 0.3), 7.5);
 
     trails.forEach((trail, index) => {
       if (!trail.length) return;
@@ -986,69 +984,68 @@
         if (m < 1) continue;
         const S0 = sec[0], Sm = sec[m];
 
-        for (const [wScale, aScale] of [[1, .65], [.68, .55]]) {
-          const L = [], R = [];
-          for (let k = 0; k <= m; k++) {
-            const pt = sec[k];
-            let tx = 1, ty = 0;
-            if (k === m && pt.isHead && b.vx * b.vx + b.vy * b.vy > 1) {
-              const vlen = Math.hypot(b.vx, b.vy);
-              tx = b.vx / vlen; ty = b.vy / vlen;
-            } else {
-              let dx, dy;
-              if (k === 0) { dx = sec[1].x - sec[0].x; dy = sec[1].y - sec[0].y; }
-              else if (k === m) { dx = sec[m].x - sec[m - 1].x; dy = sec[m].y - sec[m - 1].y; }
-              else { dx = sec[k + 1].x - sec[k - 1].x; dy = sec[k + 1].y - sec[k - 1].y; }
-              const d = Math.hypot(dx, dy);
-              if (d > 0.001) { tx = dx / d; ty = dy / d; }
-              else if (k > 0 && L[k - 1]) { tx = L[k - 1].tx; ty = L[k - 1].ty; }
-            }
-
-            const nx = -ty, ny = tx;
-            const fade = pt.isHead ? 1 : Math.max(0, pt.life / pt.duration);
-            const w = b.radius * fade * wScale;
-            L.push({ x: pt.x + nx * w, y: pt.y + ny * w, tx, ty, w, fade, heat: pt.heat || 0 });
-            R.push({ x: pt.x - nx * w, y: pt.y - ny * w, tx, ty, w, fade, heat: pt.heat || 0 });
+        const L = [], R = [];
+        for (let k = 0; k <= m; k++) {
+          const pt = sec[k];
+          let tx = 1, ty = 0;
+          if (k === m && pt.isHead && b.vx * b.vx + b.vy * b.vy > 1) {
+            const vlen = Math.hypot(b.vx, b.vy);
+            tx = b.vx / vlen; ty = b.vy / vlen;
+          } else {
+            let dx, dy;
+            if (k === 0) { dx = sec[1].x - sec[0].x; dy = sec[1].y - sec[0].y; }
+            else if (k === m) { dx = sec[m].x - sec[m - 1].x; dy = sec[m].y - sec[m - 1].y; }
+            else { dx = sec[k + 1].x - sec[k - 1].x; dy = sec[k + 1].y - sec[k - 1].y; }
+            const d = Math.hypot(dx, dy);
+            if (d > 0.001) { tx = dx / d; ty = dy / d; }
+            else if (k > 0 && L[k - 1]) { tx = L[k - 1].tx; ty = L[k - 1].ty; }
           }
 
-          const w0 = L[0].w, tx0 = L[0].tx, ty0 = L[0].ty;
-          const tailX = S0.x - tx0 * w0, tailY = S0.y - ty0 * w0;
-          if (Math.hypot(Sm.x - tailX, Sm.y - tailY) < 1) continue;
-
-          ctx.beginPath();
-          ctx.moveTo(L[0].x, L[0].y);
-          for (let k = 1; k <= m; k++) ctx.lineTo(L[k].x, L[k].y);
-          ctx.lineTo(R[m].x, R[m].y);
-          for (let k = m - 1; k >= 0; k--) ctx.lineTo(R[k].x, R[k].y);
-
-          if (w0 > 0.5) {
-            const angR = Math.atan2(R[0].y - S0.y, R[0].x - S0.x);
-            const angL = Math.atan2(L[0].y - S0.y, L[0].x - S0.x);
-            ctx.arc(S0.x, S0.y, w0, angR, angL, true);
-          }
-          ctx.closePath();
-
-          const grad = ctx.createLinearGradient(tailX, tailY, Sm.x, Sm.y);
-          const getAlpha = (fade, heat) => (b.team === -1 ? ballAlpha(fade, heat) : ubuAlpha(fade)) * aScale;
-          const getColor = (alpha, heat) => (b.team === -1 ? heatColor(heat, alpha) : hexToRgba(color, alpha));
-
-          const a0 = getAlpha(L[0].fade * 0.35, L[0].heat);
-          const a15 = getAlpha(L[0].fade, L[0].heat);
-          const midIdx = Math.floor(m * 0.5);
-          const a50 = getAlpha(L[midIdx].fade, L[midIdx].heat);
-          const idx80 = Math.floor(m * 0.8);
-          const a80 = getAlpha(L[idx80].fade, L[idx80].heat);
-          const a100 = getAlpha(L[m].fade, L[m].heat);
-
-          grad.addColorStop(0, getColor(a0, L[0].heat));
-          grad.addColorStop(0.15, getColor(a15, L[0].heat));
-          grad.addColorStop(0.5, getColor(a50, L[midIdx].heat));
-          grad.addColorStop(0.8, getColor(a80, L[idx80].heat));
-          grad.addColorStop(1, getColor(a100, L[m].heat));
-
-          ctx.fillStyle = grad;
-          ctx.fill();
+          const nx = -ty, ny = tx;
+          const fade = pt.isHead ? 1 : Math.max(0, pt.life / pt.duration);
+          const w = b.radius * fade;
+          L.push({ x: pt.x + nx * w, y: pt.y + ny * w, tx, ty, w, fade, heat: pt.heat || 0 });
+          R.push({ x: pt.x - nx * w, y: pt.y - ny * w, tx, ty, w, fade, heat: pt.heat || 0 });
         }
+
+        const w0 = L[0].w;
+        const backX = S0.x - L[0].tx * w0, backY = S0.y - L[0].ty * w0;
+        if (Math.hypot(Sm.x - backX, Sm.y - backY) < 1) continue;
+
+        ctx.beginPath();
+        ctx.moveTo(L[0].x, L[0].y);
+        for (let k = 1; k <= m; k++) ctx.lineTo(L[k].x, L[k].y);
+        ctx.lineTo(R[m].x, R[m].y);
+        for (let k = m - 1; k >= 0; k--) ctx.lineTo(R[k].x, R[k].y);
+
+        if (w0 > 0.5) {
+          const angR = Math.atan2(R[0].y - S0.y, R[0].x - S0.x);
+          const angL = Math.atan2(L[0].y - S0.y, L[0].x - S0.x);
+          ctx.arc(S0.x, S0.y, w0, angR, angL, true);
+        }
+        ctx.closePath();
+
+        const grad = ctx.createLinearGradient(backX, backY, Sm.x, Sm.y);
+        const fStart = S0.origIndex === 0 ? 0 : L[0].fade;
+        const fEnd = Sm.isHead ? 1 : L[m].fade;
+        const hStart = S0.heat || 0;
+        const hEnd = Sm.isHead ? (b.team === -1 ? ballHeat(b) : 0) : (Sm.heat || 0);
+
+        for (let step = 0; step <= 10; step++) {
+          const s = step / 10;
+          const f = fStart + (fEnd - fStart) * s;
+          if (b.team === -1) {
+            const h = hStart + (hEnd - hStart) * s;
+            const base = 0.23 + Math.min(2, h) * 0.05 + Math.max(0, h - 2) * 0.3;
+            const alpha = 1 - Math.pow(1 - Math.min(0.99, base * f), 18 * f);
+            grad.addColorStop(s, heatColor(h, alpha));
+          } else {
+            const alpha = 1 - Math.pow(1 - 0.23 * f, 18 * f);
+            grad.addColorStop(s, hexToRgba(color, alpha));
+          }
+        }
+        ctx.fillStyle = grad;
+        ctx.fill();
       }
     });
     ctx.restore();
