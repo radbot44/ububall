@@ -2605,8 +2605,10 @@
   }
   // Replays re-simulate each recorded turn from its exact starting state on a display copy.
   // The goal replay and the replay viewer share these.
-  const shownSim = () => (goalReplay || theater)?.sim ?? onlineReplay?.simBodies;
-  const shownSeat = () => (goalReplay || theater ? (goalReplay || theater).seat : online?.state?.seat);
+  let activePlayback = null;
+  const currentReplay = () => activePlayback || theater;
+  const shownSim = () => (goalReplay || currentReplay())?.sim ?? onlineReplay?.simBodies;
+  const shownSeat = () => (goalReplay || currentReplay() ? (goalReplay || currentReplay()).seat : online?.state?.seat);
   const replayView = cb => toViewBody(cb, shownSim(), shownSeat());
   const syncReplay = () => syncViewBodies(shownSim(), shownSeat());
   const replayFx = {
@@ -2632,10 +2634,10 @@
     const segments = playSegments.filter(s => s.ticks);
     if (!segments.length || (online?.active && online.state?.phase !== 'resolving')) return;
     endGoalReplay();
-    const real = bodies, scorer = real.indexOf(scoringPlayer);
+    const scorer = bodies.indexOf(scoringPlayer);
     goalReplay = { segments, total: segments.reduce((n, s) => n + s.ticks, 0),
-      real, display: structuredClone(real), seat: online?.active ? online.state.seat : 0, scorer };
-    bodies = goalReplay.display; scoringPlayer = bodies[scorer] || null;
+      seat: online?.active ? online.state.seat : 0, scorer };
+    scoringPlayer = bodies[scorer] || null;
     restartGoalReplay(); draw();
   }
   // The replay loops until the next kickoff (or, online, until the server moves on).
@@ -2673,7 +2675,8 @@
   function endGoalReplay() {
     goalReplayAt = 0;
     if (!goalReplay) return;
-    bodies = goalReplay.real; scoringPlayer = bodies[goalReplay.scorer] || null; goalReplay = null;
+    scoringPlayer = bodies[goalReplay.scorer] || null;
+    goalReplay = null;
     bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
     clearEffects(); sync(); draw();
   }
@@ -2785,7 +2788,7 @@
     newMatch();
   }
   function loadReplayTurn(k, fx) {
-    const th = theater, t = th.replay.turns[k];
+    const th = currentReplay(), t = th.replay.turns[k];
     th.index = k; th.tick = 0; th.called = th.crowned = false; th.sim = ububallReplay.restore(t.bodies);
     beginGuide(ububallReplay.restore(t.bodies), t.plans, th.seat);
     th.fouls = { ...ububallMatch.newFouls(), ...structuredClone(t.fouls) };
@@ -2796,7 +2799,7 @@
     fouls = viewFouls(th.fouls, th.seat);
   }
   function stepReplay(fx) {
-    const th = theater, sim = th.sim;
+    const th = currentReplay(), sim = th.sim;
     if (fx) P.step(sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super); else P.step(sim, P.DT);
     ububallMatch.lapseFouls(P, sim, th.fouls);
     th.tick++;
@@ -2804,7 +2807,7 @@
     traceGuide(sim);
   }
   function seekReplay(at) {
-    const th = theater, turns = th.replay.turns;
+    const th = currentReplay(), turns = th.replay.turns;
     at = Math.max(0, Math.min(th.total, Math.round(at)));
     let k = 0;
     while (k + 1 < turns.length && th.starts[k + 1] <= at) k++;
@@ -2835,7 +2838,7 @@
   const silentAudio = new Proxy({}, { get: () => () => null });
   // At a turn's end its goal is called and held a moment; at the replay's end it pauses. False stops this frame's steps.
   function endReplayTurn() {
-    const th = theater, t = th.replay.turns[th.index];
+    const th = currentReplay(), t = th.replay.turns[th.index];
     if (t.goal && !th.called) {
       th.called = true; th.steps = 0; th.holdUntil = clockNow() + 2500;
       const team = th.seat ? 1 - t.goal.team : t.goal.team, scorer = t.goal.scorer === null ? null : bodies[viewIndex(t.goal.scorer, th.seat)];
@@ -2866,7 +2869,7 @@
   const WIN_SECONDS = GOAL_CALL_SECONDS + .6;
   const winningTurn = t => Boolean(t.goal) && t.scores[t.goal.team] + 1 >= 5;
   function advanceReplay(delta) {
-    const th = theater;
+    const th = currentReplay();
     if (!th.paused && clockNow() >= th.holdUntil && clockNow() >= hitStopUntil) {
       th.steps += delta / P.DT * th.speed;
       for (let n = 0; th.steps >= 1 && n < 240; n++) {
@@ -2881,7 +2884,7 @@
     draw();
   }
   function updateReplayBar() {
-    const th = theater, at = th.starts[th.index] + th.tick, seek = $('replay-seek'), play = $('replay-play');
+    const th = currentReplay(), at = th.starts[th.index] + th.tick, seek = $('replay-seek'), play = $('replay-play');
     seek.max = th.total;
     if (!seek.matches(':active')) seek.value = at;
     $('replay-time').textContent = `${replayClock(at)} / ${replayClock(th.total)}`;
@@ -3048,27 +3051,41 @@
       }
     }
     if (!config) { status.textContent = 'This browser cannot encode MP4 video.'; progress.hidden = true; close.textContent = 'Close'; return; }
-    const resume = { at: th.starts[th.index] + th.tick, paused: th.paused, speed: th.speed, portrait: isPortrait },
-      whole = { replay: th.replay, starts: th.starts, total: th.total };
-    // The viewer plays just the slice while it renders.
-    Object.assign(th, { replay: slice.replay, ...ububallReplay.timeline(slice.replay) });
-    const restoreNames = slice.hidden ? showAnonymous() : null;
-    await videoLogo();
-    // Every turn at full speed, each goal's hold and the winner's, then a moment on the final field.
-    const seconds = th.total * P.DT + th.replay.turns.filter(t => t.goal).length * 2.5 + (winningTurn(th.replay.turns.at(-1)) ? WIN_SECONDS : 0) + VIDEO.hold;
-    const frames = Math.ceil(seconds * VIDEO.fps), rate = 48000;
-    const offline = new OfflineAudioContext(2, Math.ceil(frames / VIDEO.fps * rate), rate);
-    const out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
-    const v = out.getContext('2d'), samples = [];
-    let description = null, failure = null, blob = null;
-    const encoder = new VideoEncoder({ error: error => { failure = error; }, output: (chunk, meta) => {
-      if (meta?.decoderConfig?.description) description = ownBytes(meta.decoderConfig.description);
-      const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
-      samples.push({ data, duration: 90000 / VIDEO.fps, key: chunk.type === 'key' });
-    } });
+    const resume = { at: th.starts[th.index] + th.tick, paused: th.paused, speed: th.speed, portrait: isPortrait };
+    const session = {
+      replay: slice.replay,
+      file: null,
+      seat: slice.replay.seat,
+      ...ububallReplay.timeline(slice.replay),
+      speed: 1,
+      paused: false,
+      steps: 0,
+      holdUntil: 0,
+      index: 0,
+      tick: 0,
+      called: false,
+      exporting: true
+    };
+    let restoreNames = null, encoder = null, blob = null;
     try {
+      activePlayback = session;
+      th.exporting = true;
+      restoreNames = slice.hidden ? showAnonymous() : null;
+      await videoLogo();
+      // Every turn at full speed, each goal's hold and the winner's, then a moment on the final field.
+      const seconds = session.total * P.DT + session.replay.turns.filter(t => t.goal).length * 2.5 + (winningTurn(session.replay.turns.at(-1)) ? WIN_SECONDS : 0) + VIDEO.hold;
+      const frames = Math.ceil(seconds * VIDEO.fps), rate = 48000;
+      const offline = new OfflineAudioContext(2, Math.ceil(frames / VIDEO.fps * rate), rate);
+      const out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
+      const v = out.getContext('2d'), samples = [];
+      let description = null, failure = null;
+      encoder = new VideoEncoder({ error: error => { failure = error; }, output: (chunk, meta) => {
+        if (meta?.decoderConfig?.description) description = ownBytes(meta.decoderConfig.description);
+        const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
+        samples.push({ data, duration: 90000 / VIDEO.fps, key: chunk.type === 'key' });
+      } });
       encoder.configure(config);
-      th.exporting = true; th.speed = 1; th.paused = false; isPortrait = false;
+      isPortrait = false;
       videoClock = 0; videoField = videoFieldSize();
       videoAudio = offlineAudio(offline, () => videoClock / 1000);
       // The sound renders alongside the video, a second behind it: it pauses at each second until the
@@ -3099,8 +3116,11 @@
     } catch (error) {
       status.textContent = `The video could not be made: ${error.message}`;
     } finally {
-      if (encoder.state !== 'closed') encoder.close();
-      Object.assign(th, whole, { exporting: false, speed: resume.speed }); isPortrait = resume.portrait; restoreNames?.();
+      if (encoder && encoder.state !== 'closed') encoder.close();
+      activePlayback = null;
+      th.exporting = false;
+      isPortrait = resume.portrait;
+      restoreNames?.();
       videoClock = null; videoAudio = null; videoField = null;
       resetSoundThrottles(); seekReplay(resume.at); th.paused = resume.paused; layoutDirty = true; draw();
     }
@@ -4739,11 +4759,9 @@
       }
       if (s.phase !== 'resolving') { endGoalReplay(); stopFanfare(); }
       const before = !fresh && !s.replay && !goalReplay ? trailPositions() : null;
-      bodies = viewBodies(s.game.bodies, s.seat);
+      if (!goalReplay) bodies = viewBodies(s.game.bodies, s.seat);
       if (before) clearDiscontinuousTrails(before);
       if (!s.replay) fouls = viewFouls(s.game.fouls, s.seat);
-      // A running goal replay keeps the display; the server state becomes what it restores.
-      if (goalReplay) { goalReplay.real = bodies; bodies = goalReplay.display; }
       stats = onlineOrder(s.game.stats, s.seat);
       const rawScores = (s.phase === 'resolving' && s.replay?.goal !== null && !s.replay.goalPlayed)
         ? s.game.scores.map((sc, gi) => gi === s.replay.goal ? sc - 1 : sc)

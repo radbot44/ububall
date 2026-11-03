@@ -310,3 +310,21 @@ test('exported video timing advances popups strictly once per export frame', () 
   assert.equal(popups.length, 1);
   assert.ok(Math.abs(popups[0].life - (1.0 - 30 * dt)) < 1e-6, 'popups advance deterministically by export-frame delta');
 });
+
+test('video export isolates playback session from interactive theater object', () => {
+  const code = section('let activePlayback = null;', 'const replayFx = {');
+  const theater = { replay: { title: 'match' }, starts: [0], total: 100, index: 0, tick: 10, sim: [{ x: 100 }] };
+  const context = {
+    theater, goalReplay: null, onlineReplay: null,
+    toViewBody: cb => cb,
+    syncViewBodies: () => {}
+  };
+  const env = vm.runInNewContext(code + '\n;({ setPlayback: p => { activePlayback = p; }, currentReplay, shownSim });', context);
+  assert.equal(env.currentReplay(), theater, 'interactive theater is active by default');
+
+  const session = { replay: { title: 'slice' }, sim: [{ x: 500 }] };
+  env.setPlayback(session);
+  assert.equal(env.currentReplay(), session, 'export session routes replay simulation');
+  assert.equal(env.shownSim(), session.sim, 'shownSim reads export session simulation');
+  assert.equal(theater.replay.title, 'match', 'interactive theater replay object is preserved untouched');
+});
