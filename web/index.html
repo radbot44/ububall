@@ -204,13 +204,31 @@ SOFTWARE.
     <div class="export-actions"><button id="share-save" type="button">Save</button><button id="share-send" class="primary" type="button">Share</button></div>
   </dialog>
   <dialog id="stats-dialog" class="stats-dialog" aria-labelledby="stats-title">
-    <div class="online-heading"><h2 id="stats-title">Replay stats</h2><button id="stats-close" class="icon-button" type="button" aria-label="Close stats"><i data-icon="x"></i></button></div>
-    <p class="stats-label">Last touch on the ball</p>
-    <div id="stats-control" class="stats-control"></div>
+    <div class="stats-heading">
+      <h2 id="stats-title">Game stats</h2>
+      <div class="stats-header-actions">
+        <button id="stats-watch-replay" type="button">Watch replay</button>
+        <button id="stats-details-toggle" type="button">More details</button>
+        <button id="stats-close" class="icon-button" type="button" aria-label="Close stats"><i data-icon="x"></i></button>
+      </div>
+    </div>
+    <p id="stats-honours" class="summary-honours"></p>
     <div id="stats-table" class="stats-table"></div>
-    <p class="stats-label">Ball touches <span>&#9733; scoring touch</span></p>
-    <canvas id="stats-map" class="stats-map" width="1000" height="600" aria-label="Where each ubu touched the ball"></canvas>
-    <p class="stats-note">Top shot is the ball speed off that ubu's fastest touch. Skated is in rink lengths.</p>
+    <div id="stats-more-details" class="stats-more-details" hidden>
+      <p class="stats-label">Possession</p>
+      <div id="stats-control" class="stats-control"></div>
+      <p class="stats-label">Time on side</p>
+      <div id="stats-side" class="stats-control"></div>
+      <p class="stats-label">Ball touches <span>&#9733; scoring touch</span></p>
+      <canvas id="stats-map" class="stats-map" width="1000" height="600" aria-label="Where each ubu touched the ball"></canvas>
+    </div>
+    <p id="stats-note" class="stats-note"></p>
+    <p id="stats-rematch-status" class="summary-rematch-status" role="status"></p>
+    <div id="stats-actions" class="summary-actions">
+      <button id="stats-play-again" class="primary" type="button">Play again</button>
+      <button id="stats-rematch" class="primary summary-rematch" type="button">Rematch</button>
+      <button id="stats-leave" type="button">Leave match</button>
+    </div>
   </dialog>
   <dialog id="roster-dialog" class="team-sheet" data-step="mode" aria-labelledby="roster-title">
     <button id="cancel-roster" class="icon-button team-sheet-close" type="button" aria-label="Close"><i data-icon="x"></i></button>

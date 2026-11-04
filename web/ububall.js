@@ -1321,7 +1321,8 @@
   // A save pops a callout over the saver; offline it also earns meter (online, the server credits it).
   // Full time: a summary of the result (with any comeback or shutout) and each ubu's goals, assists,
   // saves and fastest shot, naming the MVP. It opens after the final goal's replay has played once.
-  let summaryPending = false, summaryTimer = 0, summaryDialog = null;
+  let summaryPending = false, summaryTimer = 0;
+  let statsMoreDetails = false, activeStatsContext = null;
   // The tally and scores as this view sees them (the home team first).
   function viewTally() {
     if (!online?.active) return { tally, scores };
@@ -1341,55 +1342,12 @@
   }
   function closeSummary() {
     summaryPending = false; clearTimeout(summaryTimer);
-    if (summaryDialog?.open) summaryDialog.close();
+    if ($('stats-dialog')?.open) $('stats-dialog').close();
   }
   function openSummary() {
     if (!summaryPending || demo) return;
     summaryPending = false; clearTimeout(summaryTimer);
-    const { tally: t, scores: sc } = viewTally(), winner = sc[0] > sc[1] ? 0 : 1, h = ububallMatch.honours(t, sc, winner);
-    const them = $('opponent-label').textContent;
-    if (!summaryDialog) {
-      summaryDialog = document.createElement('dialog'); summaryDialog.id = 'match-summary';
-      summaryDialog.setAttribute('aria-labelledby', 'match-summary-title');
-      document.body.append(summaryDialog);
-    }
-    const title = document.createElement('h2'); title.id = 'match-summary-title';
-    title.textContent = `${winner ? `${them} wins` : 'You win'} ${sc[0]}–${sc[1]}`;
-    const honour = document.createElement('p'); honour.className = 'summary-honours';
-    honour.textContent = [h.comeback && 'Comeback from 3 down!', h.shutout && 'Shutout!'].filter(Boolean).join(' ');
-    // MVP: goals count most, then assists and saves; big saves and hard checks also contribute. The fastest shot breaks ties.
-    const rating = i => t.goals[i] * 3 + t.assists[i] * 2 + t.saves[i] * 2 + (t.bigSaves?.[i] || 0) * 1 + (t.checks?.[i] || 0) * 0.5 + t.topSpeed[i] / 10000;
-    const mvp = [0, 1, 2, 3, 4, 5].reduce((best, i) => rating(i) > rating(best) ? i : best, 0);
-    const table = document.createElement('table');
-    const head = table.createTHead().insertRow();
-    for (const label of ['Ubu', 'Goals', 'Assists', 'Shots', 'Saves', 'Checks', 'Fouls', 'Top shot']) { const th = document.createElement('th'); th.textContent = label; head.append(th); }
-    const body = table.createTBody();
-    bodies.slice(0, 6).forEach((b, i) => {
-      const row = body.insertRow(); row.className = `team-${b.team}${i === mvp ? ' mvp' : ''}`;
-      const name = row.insertCell(); name.textContent = b.name || (b.team ? `${them} ubu` : 'Your ubu');
-      if (i === mvp) { const badge = document.createElement('span'); badge.className = 'mvp-badge'; badge.textContent = 'MVP'; name.append(' ', badge); }
-      for (const value of [t.goals[i], t.assists[i], t.shots?.[i] || 0, t.saves[i], t.checks?.[i] || 0, t.cards[i], t.topSpeed[i] ? Math.round(t.topSpeed[i]) : '–']) row.insertCell().textContent = value;
-    });
-    const close = document.createElement('button'); close.type = 'button'; close.className = 'primary'; close.textContent = 'Close';
-    close.onclick = () => summaryDialog.close();
-    const note = document.createElement('p'); note.className = 'summary-note'; note.textContent = 'Shots are on-goal attempts. Checks are hard hits inflicting daze or stuns. Fouls are yellow cards. Top shot is the ball speed off that ubu\'s fastest strike.';
-    if (online?.active) {
-      const rematch = document.createElement('button'); rematch.type = 'button'; rematch.className = 'primary summary-rematch';
-      rematch.onclick = () => online.rematch();
-      const leave = document.createElement('button'); leave.type = 'button'; leave.textContent = 'Leave match';
-      leave.onclick = () => $('online-leave').click();
-      close.className = '';
-      const status = document.createElement('p'); status.className = 'summary-rematch-status'; status.setAttribute('role', 'status');
-      const actions = document.createElement('div'); actions.className = 'summary-actions'; actions.append(rematch, close, leave);
-      summaryDialog.replaceChildren(title, honour, table, note, status, actions);
-      updateRematch(online.state);
-    } else {
-      const watch = document.createElement('button'); watch.type = 'button'; watch.textContent = 'Watch replay';
-      watch.onclick = async () => { const id = await lastSaved; if (id) openReplay(id); };
-      const actions = document.createElement('div'); actions.className = 'summary-actions'; actions.append(close, watch);
-      summaryDialog.replaceChildren(title, honour, table, note, actions);
-    }
-    if (!summaryDialog.open) summaryDialog.showModal();
+    openMatchStats('game');
   }
   function steamRing(x, y, r) {
     if (reducedMotion.matches) return;
@@ -2757,6 +2715,7 @@
   })();
   // The id of the replay saved last, or null.
   let lastSaved = Promise.resolve(null);
+  let lastCompletedReplay = null;
   // Saves the recording, an unfinished match up to its last whole turn, and stops it.
   function saveRecording() {
     const r = recording;
@@ -2764,6 +2723,7 @@
     if (!r) return lastSaved;
     r.turns = r.turns.filter(t => t.ticks);
     if (!r.turns.length) return lastSaved;
+    lastCompletedReplay = r;
     lastSaved = ububallReplay.write(r).then(file => replayStore.add(libraryEntry(r, file, true)))
       .catch(error => { console.warn('Replay not saved.', error); return null; });
     return lastSaved;
@@ -3672,10 +3632,10 @@
   $('replay-take-over').onclick = playFromHere;
   // Stats for the whole replay, worked out by playing it through once without effects: goals,
   // assists, saves, ball touches, the hardest shot and distance skated for each ubu, where each touched
-  // the ball, and each team's share of the time it last touched the ball.
+  // the ball, each team's share of the time it last touched the ball, and time on each team's side.
   function replayStats(th) {
     const r = th.replay, view = c => viewIndex(c, th.seat), six = () => [0, 0, 0, 0, 0, 0];
-    const out = { goals: six(), assists: six(), touches: six(), skated: six(), control: [0, 0], marks: [] }, tally = ububallMatch.newTally();
+    const out = { goals: six(), assists: six(), touches: six(), skated: six(), control: [0, 0], side: [0, 0], marks: [] }, tally = ububallMatch.newTally();
     let play = ububallMatch.newPlay(), last = null, lastTick = -Infinity, tick = 0;
     for (const t of r.turns) {
       const sim = ububallReplay.restore(t.bodies), ball = sim[6];
@@ -3689,11 +3649,17 @@
           if (c !== last || tick - lastTick > 120) { out.touches[view(c)]++; out.marks.push({ x: th.seat ? 1000 - ball.x : ball.x, y: th.seat ? 600 - ball.y : ball.y, i: view(c), goal: false }); }
           last = c; lastTick = tick;
         }
-        if (last !== null) out.control[view(last) < 3 ? 0 : 1]++;
+        if (last !== null) {
+          out.control[view(last) < 3 ? 0 : 1]++;
+          const vx = th.seat ? 1000 - ball.x : ball.x;
+          if (vx < 500) out.side[0]++;
+          else if (vx > 500) out.side[1]++;
+        }
       }
       if (t.goal) {
         if (t.goal.scorer !== null) {
           out.goals[view(t.goal.scorer)]++;
+          tally.shots[t.goal.scorer]++;
           const shot = out.marks.findLast(m => m.i === view(t.goal.scorer));
           if (shot) shot.goal = true;
         }
@@ -3701,46 +3667,241 @@
         play = ububallMatch.newPlay(); last = null;
       }
     }
-    return { ...out, saves: onlineOrder(tally.saves, th.seat), topShot: onlineOrder(tally.topSpeed, th.seat), cards: onlineOrder(r.turns.reduce((n, t) => { t.cards.forEach(c => n[c]++); return n; }, six()), th.seat), shots: onlineOrder(tally.shots, th.seat), checks: onlineOrder(tally.checks, th.seat) };
+    return { ...out, saves: onlineOrder(tally.saves, th.seat), topShot: onlineOrder(tally.topSpeed, th.seat), cards: onlineOrder(r.turns.reduce((n, t) => { t.cards.forEach(c => n[c]++); return n; }, six()), th.seat), shots: onlineOrder(tally.shots, th.seat), checks: onlineOrder(tally.checks, th.seat), tally };
   }
-  function openStats() {
-    const th = theater;
-    if (!th || th.exporting) return;
-    th.stats ||= replayStats(th);
-    const s = th.stats, names = [$('home-label').textContent, $('opponent-label').textContent], total = s.control[0] + s.control[1] || 1;
+  function updateStatsRinkWidth() {
+    const rw = $('rink')?.getBoundingClientRect().width || 1000;
+    $('stats-dialog').style.setProperty('--rink-w', `${rw}px`);
+  }
+  function getStatsForContext(ctx) {
+    if (ctx.type === 'replay') {
+      const th = ctx.theater;
+      th.stats ||= replayStats(th);
+      return th.stats;
+    }
+    if (ctx.stats) return ctx.stats;
+    const replay = ctx.replay || lastCompletedReplay;
+    if (replay) {
+      ctx.stats = replayStats({ replay, seat: online?.active ? online.state.seat : 0 });
+      return ctx.stats;
+    }
+    const { tally: t } = viewTally();
+    const six = () => [0, 0, 0, 0, 0, 0];
+    ctx.stats = {
+      goals: [...t.goals], assists: [...t.assists], saves: [...t.saves],
+      shots: [...(t.shots || six())], checks: [...(t.checks || six())],
+      touches: six(), topShot: [...t.topSpeed], skated: six(),
+      cards: [...t.cards], control: [50, 50], side: [50, 50], marks: [],
+      tally: t
+    };
+    return ctx.stats;
+  }
+  function renderStats(ctx = activeStatsContext) {
+    if (!ctx) return;
+    activeStatsContext = ctx;
+    updateStatsRinkWidth();
+
+    const s = getStatsForContext(ctx);
+    const isGame = ctx.type === 'game';
+    const names = [$('home-label').textContent, $('opponent-label').textContent];
     const { home, away, surface, border, text } = themeColors;
-    $('stats-control').replaceChildren(...[0, 1].map(team => {
-      const part = document.createElement('span'); part.className = team ? 'away' : 'home';
-      part.style.flexGrow = String(s.control[team] || .001); part.textContent = `${names[team]} ${Math.round(s.control[team] / total * 100)}%`;
-      return part;
-    }));
+
+    $('stats-title').textContent = 'Game stats';
+    $('stats-watch-replay').hidden = !isGame;
+    $('stats-details-toggle').textContent = statsMoreDetails ? 'Fewer details' : 'More details';
+
+    const honoursEl = $('stats-honours');
+    if (isGame) {
+      const { tally: t, scores: sc } = viewTally();
+      const w = sc[0] > sc[1] ? 0 : 1;
+      const h = ububallMatch.honours(t, sc, w);
+      honoursEl.textContent = [h.comeback && 'Comeback from 3 down!', h.shutout && 'Shutout!'].filter(Boolean).join(' ');
+      honoursEl.hidden = !honoursEl.textContent;
+    } else {
+      honoursEl.textContent = '';
+      honoursEl.hidden = true;
+    }
+
+    let winner = null;
+    if (isGame) {
+      winner = scores[0] > scores[1] ? 0 : scores[1] > scores[0] ? 1 : null;
+    } else if (ctx.theater?.replay?.final) {
+      const fin = ctx.theater.replay.final;
+      winner = ctx.theater.seat ? 1 - fin.winner : fin.winner;
+    } else {
+      winner = scores[0] > scores[1] ? 0 : scores[1] > scores[0] ? 1 : null;
+    }
+
+    const rating = i => s.goals[i] * 3 + s.assists[i] * 2 + s.saves[i] * 2 + (s.tally?.bigSaves?.[i] || 0) * 1 + (s.checks?.[i] || 0) * 0.5 + (s.topShot?.[i] || 0) / 10000;
+    const mvp = [0, 1, 2, 3, 4, 5].reduce((best, i) => rating(i) > rating(best) ? i : best, 0);
+    const hasMvp = rating(mvp) > 0;
+
     const table = document.createElement('table'), head = table.createTHead().insertRow();
-    for (const label of ['Ubu', 'Goals', 'Assists', 'Shots', 'Saves', 'Checks', 'Touches', 'Top shot', 'Skated', 'Fouls']) { const cell = document.createElement('th'); cell.textContent = label; head.append(cell); }
+    const headers = statsMoreDetails
+      ? ['', 'Ubu', 'Goals', 'Assists', 'Shots', 'Saves', 'Checks', 'Touches', 'Top shot', 'Distance', 'Fouls']
+      : ['', 'Ubu', 'G', 'A', 'Sh', 'Sa', 'C', 'T', 'TS', 'D', 'F'];
+    for (const label of headers) {
+      const th = document.createElement('th');
+      th.textContent = label;
+      head.append(th);
+    }
+
     const rows = table.createTBody();
     teamEntries.slice(0, 6).forEach((entry, i) => {
-      const row = rows.insertRow(); row.className = `team-${i < 3 ? 0 : 1}`;
-      row.insertCell().textContent = entry.model.parts.fullName;
-      // Distance in rink lengths (880 between the end boards).
-      for (const value of [s.goals[i], s.assists[i], s.shots?.[i] || 0, s.saves[i], s.checks?.[i] || 0, s.touches[i], s.topShot[i] ? Math.round(s.topShot[i]) : '–', (s.skated[i] / 880).toFixed(1), s.cards[i]]) row.insertCell().textContent = value;
+      const team = i < 3 ? 0 : 1;
+      const isWinner = winner !== null && team === winner;
+      const row = rows.insertRow();
+      row.className = `team-${team}`;
+
+      const trophyCell = row.insertCell();
+      trophyCell.className = `col-trophy${isWinner ? ` team-${team}-win` : ''}`;
+      if (isWinner) trophyCell.append(gameUi.icon('trophy'));
+
+      const nameCell = row.insertCell();
+      nameCell.className = `col-name team-${team}`;
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'ubu-name';
+      nameSpan.textContent = entry.model.parts.fullName;
+      nameCell.append(nameSpan);
+      if (hasMvp && i === mvp) {
+        const badge = document.createElement('span');
+        badge.className = 'mvp-badge';
+        badge.textContent = 'MVP';
+        nameCell.append(' ', badge);
+      }
+
+      const values = [
+        s.goals[i],
+        s.assists[i],
+        s.shots?.[i] || 0,
+        s.saves[i],
+        s.checks?.[i] || 0,
+        s.touches[i],
+        s.topShot[i] ? Math.round(s.topShot[i]) : '–',
+        (s.skated[i] / 880).toFixed(1),
+        s.cards[i]
+      ];
+      for (const val of values) {
+        row.insertCell().textContent = val;
+      }
     });
     $('stats-table').replaceChildren(table);
-    // Where each ubu touched the ball, in its team's colour; a star marks the touch that scored.
-    const map = $('stats-map'), g = map.getContext('2d'), k = map.width / 1000;
-    g.setTransform(k, 0, 0, k, 0, 0); g.clearRect(0, 0, 1000, 600);
-    g.beginPath(); g.roundRect(60, 60, 880, 480, 100); g.fillStyle = surface; g.fill(); g.lineWidth = 4; g.strokeStyle = border; g.stroke();
-    g.setLineDash([6, 10]); g.beginPath(); g.moveTo(500, 60); g.lineTo(500, 540); g.stroke(); g.setLineDash([]);
-    for (const [x, color] of [[60 - P.rink.goalDepth, home], [940, away]]) { g.strokeStyle = color; g.strokeRect(x, 230, P.rink.goalDepth, 140); }
-    for (const m of s.marks) {
-      g.fillStyle = m.i < 3 ? home : away;
-      g.globalAlpha = m.goal ? 1 : .55;
-      if (m.goal) { g.font = '900 34px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.strokeStyle = text; g.lineWidth = 3; g.strokeText('★', m.x, m.y); g.fillText('★', m.x, m.y); }
-      else { g.beginPath(); g.arc(m.x, m.y, 6, 0, Math.PI * 2); g.fill(); }
+
+    const moreDetailsEl = $('stats-more-details');
+    moreDetailsEl.hidden = !statsMoreDetails;
+    if (statsMoreDetails) {
+      const totalControl = s.control[0] + s.control[1] || 1;
+      $('stats-control').replaceChildren(...[0, 1].map(team => {
+        const part = document.createElement('span');
+        part.className = team ? 'away' : 'home';
+        part.style.flexGrow = String(s.control[team] || 0.001);
+        part.textContent = `${names[team]} ${Math.round(s.control[team] / totalControl * 100)}%`;
+        return part;
+      }));
+
+      const totalSide = s.side[0] + s.side[1] || 1;
+      $('stats-side').replaceChildren(...[0, 1].map(team => {
+        const part = document.createElement('span');
+        part.className = team ? 'away' : 'home';
+        part.style.flexGrow = String(s.side[team] || 0.001);
+        part.textContent = `${names[team]} ${Math.round(s.side[team] / totalSide * 100)}%`;
+        return part;
+      }));
+
+      const map = $('stats-map'), g = map.getContext('2d'), k = map.width / 1000;
+      g.setTransform(k, 0, 0, k, 0, 0); g.clearRect(0, 0, 1000, 600);
+      g.beginPath(); g.roundRect(60, 60, 880, 480, 100); g.fillStyle = surface; g.fill(); g.lineWidth = 4; g.strokeStyle = border; g.stroke();
+      g.setLineDash([6, 10]); g.beginPath(); g.moveTo(500, 60); g.lineTo(500, 540); g.stroke(); g.setLineDash([]);
+      for (const [x, color] of [[60 - P.rink.goalDepth, home], [940, away]]) {
+        g.strokeStyle = color;
+        g.strokeRect(x, 230, P.rink.goalDepth, 140);
+      }
+      for (const m of s.marks) {
+        g.fillStyle = m.i < 3 ? home : away;
+        g.globalAlpha = m.goal ? 1 : 0.55;
+        if (m.goal) {
+          g.font = '900 34px system-ui';
+          g.textAlign = 'center';
+          g.textBaseline = 'middle';
+          g.strokeStyle = text;
+          g.lineWidth = 3;
+          g.strokeText('★', m.x, m.y);
+          g.fillText('★', m.x, m.y);
+        } else {
+          g.beginPath();
+          g.arc(m.x, m.y, 6, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+      g.globalAlpha = 1;
     }
-    g.globalAlpha = 1;
-    $('stats-dialog').showModal();
+
+    $('stats-note').textContent = statsMoreDetails
+      ? "Top shot is the ball speed off that ubu's fastest touch. Distance is in rink lengths. Shots are on-goal attempts. Checks are hard hits inflicting daze or stuns. Fouls are yellow cards."
+      : "G: Goals · A: Assists · Sh: Shots · Sa: Saves · C: Checks · T: Touches · TS: Top shot · D: Distance · F: Fouls";
+
+    const actionsEl = $('stats-actions');
+    if (isGame) {
+      actionsEl.hidden = false;
+      if (online?.active) {
+        $('stats-play-again').hidden = true;
+        $('stats-rematch').hidden = false;
+        $('stats-leave').hidden = false;
+        updateRematch(online.state);
+      } else {
+        $('stats-play-again').hidden = false;
+        $('stats-rematch').hidden = true;
+        $('stats-leave').hidden = false;
+        $('stats-rematch-status').textContent = '';
+      }
+    } else {
+      actionsEl.hidden = true;
+      $('stats-rematch-status').textContent = '';
+    }
+  }
+  function openMatchStats(type) {
+    if (type === 'replay') {
+      const th = theater;
+      if (!th || th.exporting) return;
+      renderStats({ type: 'replay', theater: th });
+    } else {
+      renderStats({ type: 'game', replay: lastCompletedReplay });
+    }
+    if (!$('stats-dialog').open) $('stats-dialog').showModal();
+  }
+  function openStats() {
+    openMatchStats('replay');
   }
   $('replay-stats').onclick = openStats;
   $('stats-close').onclick = () => $('stats-dialog').close();
+  $('stats-details-toggle').onclick = () => {
+    statsMoreDetails = !statsMoreDetails;
+    if (activeStatsContext) renderStats(activeStatsContext);
+  };
+  $('stats-watch-replay').onclick = async () => {
+    const id = await lastSaved;
+    if (id) {
+      closeSummary();
+      openReplay(id);
+    }
+  };
+  $('stats-play-again').onclick = () => {
+    closeSummary();
+    newMatch(true);
+  };
+  $('stats-rematch').onclick = () => {
+    if (online?.active) online.rematch();
+  };
+  $('stats-leave').onclick = () => {
+    closeSummary();
+    if (online?.active) {
+      $('online-leave').click();
+    } else {
+      exitMatchMode();
+      if (history.state?.match) history.back();
+    }
+  };
+  addEventListener('resize', updateStatsRinkWidth);
   $('replay-exit').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
   // Space plays and pauses and the arrows step by turn, unless a control has focus.
   document.addEventListener('keydown', event => {
@@ -5036,12 +5197,12 @@
   // The stadium and the full-time summary both offer the rematch; one tap asks, the other accepts.
   function updateRematch(s) {
     const them = onlineNames(s)[1], mine = s.rematch[s.seat], theirs = s.rematch[1 - s.seat];
-    for (const button of [$('online-rematch'), summaryDialog?.querySelector('.summary-rematch')]) {
+    for (const button of [$('online-rematch'), $('stats-rematch')]) {
       if (!button) continue;
       button.hidden = s.phase !== 'over' || s.left.some(Boolean); button.disabled = mine;
       button.textContent = mine ? 'Rematch requested' : theirs ? 'Accept rematch' : 'Rematch';
     }
-    const note = summaryDialog?.querySelector('.summary-rematch-status');
+    const note = $('stats-rematch-status');
     if (note) note.textContent = s.phase !== 'over' ? '' : s.left[1 - s.seat] ? `${them} left the match.` :
       mine && !s.connected[1 - s.seat] ? `${them} is offline. They can accept when they return.` : mine ? `Waiting for ${them} to accept.` : theirs ? `${them} wants a rematch.` : '';
   }
