@@ -3,10 +3,23 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const { createEffectsState, updateParticles } = require('../web/ububall-presentation.js');
 
 // Browser-only effects live inside the game closure. Exercise their real source
 // with a small canvas stub instead of introducing a production-facing test API.
 const source = fs.readFileSync(require.resolve('../web/ububall.js'), 'utf8');
+function runInNewContext(code, context) {
+  // Existing fixtures expose individual live effect values for assertions.
+  const fixtureState = (aliases = {}) => new Proxy({}, {
+    get: (_, key) => context[aliases[key] ?? key],
+    set: (_, key, value) => { context[aliases[key] ?? key] = value; return true; }
+  });
+  context.fieldEffects = fixtureState();
+  Object.assign(context, { createEffectsState, updateParticles });
+  context.fieldView = fixtureState({ mode: 'matchMode', entries: 'teamEntries', anonymous: 'anonymousNames',
+    portrait: 'isPortrait', field: 'videoField' });
+  return vm.runInNewContext(code, context);
+}
 function section(start, end) {
   const a = source.indexOf(start);
   const b = source.indexOf(end, a);
@@ -30,8 +43,8 @@ test('trail gradient retains a hot sample between cool endpoints', () => {
   const trails = Array.from({ length: 7 }, () => []);
   trails[6] = [100, 150, 200].map((x, i) =>
     ({ x, y: 300, life: .2, duration: .24, heat: i === 1 ? 3 : 0 }));
-  vm.runInNewContext(section('function drawTrails(home, away) {', 'function drawStickyTether(') +
-    '\ndrawTrails("#fff", "#000");', {
+  runInNewContext(section('function drawTrails(ctx, trails, bodies, home, away) {', 'function drawStickyTether(') +
+    '\ndrawTrails(ctx, trails, bodies, "#fff", "#000");', {
       ctx, bodies, trails, ballHeat: () => 0,
       heatColor: (heat, alpha) => heat + ':' + alpha,
       hexToRgba: (color, alpha) => color + ':' + alpha
@@ -46,7 +59,7 @@ test('ordinary particles keep their filled endpoint', () => {
     save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
     arc(x, y, radius) { radii.push(radius); }, fill() {}
   };
-  vm.runInNewContext(section('function drawParticles(home, away, overlay = false) {', 'function kickoff(') +
+  runInNewContext(section('function drawParticles(home, away, overlay = false) {', 'function kickoff(') +
     '\ndrawParticles("#fff", "#000");', {
       ctx, badgeCtx: ctx,
       particles: [{ x: 20, y: 40, px: 20, py: 40, life: 1, duration: 1, team: 0 }]
@@ -62,7 +75,7 @@ test('aura sprites reuse rounded radii and evict stale entries', () => {
     };
     return { getContext() { return c; } };
   } };
-  const result = vm.runInNewContext(
+  const result = runInNewContext(
     section('const conicRingSprites = new Map();', '// Super aura: ready') +
     '\nconst first = conicRingSprite("stalwart", 24.1, 3);' +
     '\nconst same = conicRingSprite("stalwart", 24.4, 3);' +
@@ -79,10 +92,10 @@ test('straight vertical shots skip threat simulation, but curved shots do not', 
   const bodies = Array.from({ length: 6 }, () => ({})).concat(ball);
   const P = { ...require('../web/ububall-physics.js'), step() { steps++; return null; } };
   const code = section('function goalThreat() {', '// Net ripples and board flex');
-  vm.runInNewContext(code + '\ngoalThreat();', { P, bodies });
+  runInNewContext(code + '\ngoalThreat();', { P, bodies });
   assert.equal(steps, 0);
   ball.omega = 24;
-  vm.runInNewContext(code + '\ngoalThreat();', { P, bodies });
+  runInNewContext(code + '\ngoalThreat();', { P, bodies });
   assert.ok(steps > 0, 'curved ball was incorrectly rejected');
 });
 
@@ -99,12 +112,12 @@ function trailHarness() {
   const bodies = Array.from({ length: 7 }, (_, i) =>
     ({ team: i === 6 ? -1 : 0, x: 500, y: 300, vx: 0, vy: 0, radius: 18 }));
   const trails = Array.from({ length: 7 }, () => []);
-  const api = vm.runInNewContext(
+  const api = runInNewContext(
     section('const trailPositions = () =>', 'function drawStickyTether(') +
     '\n({ trailPositions, clearDiscontinuousTrails, recordTrails, drawTrails });',
     { bodies, trails, ctx, reducedMotion: { matches: false },
       ballHeat: () => 0, heatColor: () => '#fff', hexToRgba: () => '#fff' });
-  return { ...api, bodies, trails, gradients };
+  return { ...api, bodies, trails, gradients, drawTrails: (home, away) => api.drawTrails(ctx, trails, bodies, home, away) };
 }
 const trailPoint = (x, y) => ({ x, y, life: .24, duration: .24, heat: 0 });
 
@@ -183,8 +196,8 @@ test('drawBallFace applies team colors to the ball face', () => {
     set strokeStyle(val) { this._strokeStyle = val; },
     get strokeStyle() { return this._strokeStyle; }
   };
-  const code = section('function drawBallFace(size, eyeColor, mouthColor) {', 'function draw() {');
-  vm.runInNewContext(code + '\ndrawBallFace(30.6, "#E8CA48", "#AA54D3");', { ctx });
+  const code = section('function drawBallFace(size, eyeColor, mouthColor) {', 'function draw(exportSession = null) {');
+  runInNewContext(code + '\ndrawBallFace(30.6, "#E8CA48", "#AA54D3");', { ctx });
   assert.deepEqual(strokes, ['#E8CA48', '#E8CA48', '#AA54D3']);
 });
 
@@ -201,7 +214,7 @@ test('prediction ignition indicator fills with team color', () => {
   const bodies = [{ team: 0 }, { team: 0 }, { team: 0 }, { team: 1 }, { team: 1 }, { team: 1 }, { team: -1 }];
   const IGNITION_FLAME = {};
   const code = section('function paintPrediction(prediction, home, away) {', 'const IGNITION_FLAME =');
-  vm.runInNewContext(code + '\npaintPrediction(prediction, "#E8CA48", "#AA54D3");', {
+  runInNewContext(code + '\npaintPrediction(prediction, "#E8CA48", "#AA54D3");', {
     ctx, bodies, prediction, isPortrait: false, pulseMode: () => false, ububallMatch: { turnTicks: () => 240 },
     line() {}, impactStamp: () => ({}), IGNITION_FLAME, rounded() {}, P: { rink: { goalDepth: 38 } }
   });
@@ -219,7 +232,7 @@ test('creditSave generates Trap! callout for friendly iron saves and Big save! f
     ububallMatch: { gainMeter: () => [], METER: { save: 6 } },
     classicMode: () => true, dirtyMeters: new Set(), P: {}, bodies: [], simBodies: [], stats: {}
   };
-  vm.runInNewContext(code + '\ncreditSave({ team: 0, x: 0, y: 0, radius: 10 }, true, true);\ncreditSave({ team: 1, x: 0, y: 0, radius: 10 }, false, true);\ncreditSave({ team: 0, x: 0, y: 0, radius: 10 }, false, false);', context);
+  runInNewContext(code + '\ncreditSave({ team: 0, x: 0, y: 0, radius: 10 }, true, true);\ncreditSave({ team: 1, x: 0, y: 0, radius: 10 }, false, true);\ncreditSave({ team: 0, x: 0, y: 0, radius: 10 }, false, false);', context);
   assert.equal(popups[0].text, 'Trap!');
   assert.equal(popups[1].text, 'Big save!');
   assert.equal(popups[2].text, 'Save!');
@@ -230,8 +243,8 @@ test('updatePopups ages popups independently and prunes expired ones', () => {
     { text: 'Trap!', life: 0.5 },
     { text: 'Spin strike!', life: 0.1 }
   ];
-  const code = section('function updatePopups(dt) {', 'function drawPopups(home, away) {');
-  vm.runInNewContext(code + '\nupdatePopups(0.2);', { popups, reducedMotion: { matches: false } });
+  const code = section('function updatePopups(dt, popups) {', 'function drawPopups(badgeCtx, popups, isPortrait, width, home, away) {');
+  runInNewContext(code + '\nupdatePopups(0.2, popups);', { popups, reducedMotion: { matches: false } });
   assert.equal(popups.length, 1);
   assert.equal(popups[0].text, 'Trap!');
   assert.ok(Math.abs(popups[0].life - 0.3) < 1e-6);
@@ -249,10 +262,10 @@ test('iron guard shield receives #6b7785 border stroke with lineWidth 1.5', () =
     set lineWidth(val) { this._lineWidth = val; }, get lineWidth() { return this._lineWidth; }
   };
   const b = { guarding: true, radius: 25, x: 100, y: 100 };
-  const phase = 'plan', i = 0, plans = [{ guard: true }], isPortrait = false;
+  const phase = 'plan', i = 0, fieldPlans = [{ guard: true }], isPortrait = false;
   const predictionCache = { data: { guards: [{ index: 0, held: true }] } };
   const code = section('const inAction = phase === \'play\' || phase === \'replay\' || Boolean(goalReplay);', 'const slow = P.dazeSlow(b);');
-  vm.runInNewContext(code, { badgeCtx, b, phase, i, plans, isPortrait, predictionCache, GUARD_SHIELD, goalReplay: null });
+  runInNewContext(code, { badgeCtx, b, phase, i, fieldPlans, isPortrait, predictionCache, GUARD_SHIELD, goalReplay: null });
   assert.equal(fillStyle, '#c3ccd6', 'iron fill is metallic grey');
   assert.equal(strokeStyle, '#6b7785', 'border stroke is darker grey');
   assert.equal(lineWidth, 1.5, 'border lineWidth is 1.5');
@@ -271,9 +284,9 @@ test('theater.exporting suppresses popup and effect aging in animation frame loo
 
   // 1. During video export: theater.exporting is true. Animation loop must NOT age popups or effects.
   let theater = { paused: false, exporting: true, speed: 1 };
-  vm.runInNewContext(code, {
+  runInNewContext(code, {
     pulseMode, roundTurns, phase, active, clockNow, hitStopUntil, theater,
-    delta, updatePopups, updateEffects, advanceReplay, ububallMatch: {}, goalReplay: null, postGoal: null
+    delta, popups: [], updatePopups, updateEffects, advanceReplay, ububallMatch: {}, goalReplay: null, postGoal: null
   });
   assert.equal(popupsUpdated, 0, 'popups must not update during RAF while exporting');
   assert.equal(effectsUpdated, 0, 'effects must not update during RAF while exporting');
@@ -281,9 +294,9 @@ test('theater.exporting suppresses popup and effect aging in animation frame loo
 
   // 2. Normal replay playback: theater.exporting is false. Animation loop updates popups and effects.
   theater = { paused: false, exporting: false, speed: 1 };
-  vm.runInNewContext(code, {
+  runInNewContext(code, {
     pulseMode, roundTurns, phase, active, clockNow, hitStopUntil, theater,
-    delta, updatePopups, updateEffects, advanceReplay, ububallMatch: {}, goalReplay: null, postGoal: null
+    delta, popups: [], updatePopups, updateEffects, advanceReplay, ububallMatch: {}, goalReplay: null, postGoal: null
   });
   assert.equal(popupsUpdated, 1, 'popups update during normal replay playback');
   assert.equal(effectsUpdated, 1, 'effects update during normal replay playback');
@@ -291,9 +304,9 @@ test('theater.exporting suppresses popup and effect aging in animation frame loo
 
   // 3. Normal gameplay: theater is null. Animation loop updates popups and effects.
   theater = null;
-  vm.runInNewContext(code, {
+  runInNewContext(code, {
     pulseMode, roundTurns, phase: 'play', active, clockNow, hitStopUntil, theater,
-    delta, updatePopups, updateEffects, advanceReplay, ububallMatch: {}, goalReplay: null, postGoal: null
+    delta, popups: [], updatePopups, updateEffects, advanceReplay, ububallMatch: {}, goalReplay: null, postGoal: null
   });
   assert.equal(popupsUpdated, 2, 'popups update during gameplay');
   assert.equal(effectsUpdated, 2, 'effects update during gameplay');
@@ -301,11 +314,11 @@ test('theater.exporting suppresses popup and effect aging in animation frame loo
 
 test('exported video timing advances popups strictly once per export frame', () => {
   const popups = [{ text: 'Big save!', life: 1.0, duration: 1.2 }];
-  const code = section('function updatePopups(dt) {', 'function drawPopups(home, away) {');
+  const code = section('function updatePopups(dt, popups) {', 'function drawPopups(badgeCtx, popups, isPortrait, width, home, away) {');
   const fps = 60;
   const dt = 1 / fps;
   for (let f = 1; f <= 30; f++) {
-    vm.runInNewContext(code + '\nupdatePopups(dt);', { popups, reducedMotion: { matches: false }, dt });
+    runInNewContext(code + '\nupdatePopups(dt, popups);', { popups, reducedMotion: { matches: false }, dt });
   }
   assert.equal(popups.length, 1);
   assert.ok(Math.abs(popups[0].life - (1.0 - 30 * dt)) < 1e-6, 'popups advance deterministically by export-frame delta');
@@ -319,7 +332,7 @@ test('video export isolates playback session from interactive theater object', (
     toViewBody: cb => cb,
     syncViewBodies: () => {}
   };
-  const env = vm.runInNewContext(code + '\n;({ setPlayback: p => { activePlayback = p; }, currentReplay, shownSim });', context);
+  const env = runInNewContext(code + '\n;({ setPlayback: p => { activePlayback = p; }, currentReplay, shownSim });', context);
   assert.equal(env.currentReplay(), theater, 'interactive theater is active by default');
 
   const session = { replay: { title: 'slice' }, sim: [{ x: 500 }] };
@@ -335,7 +348,7 @@ test('restoreEntry restores Stalwart ID 0 and mastery metadata, preserving null 
   const P = require('../web/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
   const practice = [{ model: ubu.decode(ubu.fromCode(ubu.toCode(ubu.randomDNA()))), dna: 'dummy', label: 'Practice' }];
-  const env = vm.runInNewContext(code + '\n;({ restoreEntry, resolveEquippedSuper });', {
+  const env = runInNewContext(code + '\n;({ restoreEntry, resolveEquippedSuper });', {
     P, ubu, practice
   });
 
@@ -386,7 +399,7 @@ test('local Blitz preserves the deadline across blocked frames and hidden time',
     foulInfo: null, online: null, phase: 'plan', matchMode: 'blitz', blitzMode: () => true,
     ububallMatch: { planningMilliseconds: () => 5000 }, planDeadline: 0, planPausedAt: null
   };
-  const { startPlanClock, refresh } = vm.runInNewContext(code +
+  const { startPlanClock, refresh } = runInNewContext(code +
     '\n;({ startPlanClock, refresh: () => updateLocalPlanClock(localPlayBlocked()) });', context);
   startPlanClock();
   now = 1100; dialog.open = true; refresh();
@@ -421,7 +434,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
     removeItem(k) { delete store[k]; }
   };
   const dummy = () => {};
-  const env = vm.runInNewContext(code + '\n;({ saveActiveMatch, restoreActiveMatch, clearActiveMatch, newMatch });', {
+  const env = runInNewContext(code + '\n;({ saveActiveMatch, restoreActiveMatch, clearActiveMatch, newMatch });', {
     Object, Array, Set, Math, Number, String, Boolean,
     P, ububallMatch, ububallReplay, localStorage, structuredClone,
     demo: false, online: null, phase: 'plan', recording: { turns: [] },
@@ -516,7 +529,7 @@ test('contactMeter and creditSave reject meter awards outside phase === play', (
     contactMeter() { calledContact++; return []; }
   };
   const dirtyMeters = new Set();
-  const env = vm.runInNewContext(code + '\n;({ creditSave, contactMeter, setPhase: p => { phase = p; } });', {
+  const env = runInNewContext(code + '\n;({ creditSave, contactMeter, setPhase: p => { phase = p; } });', {
     phase: 'goal', online: null, goalReplay: null, theater: null,
     bodies: [], simBodies: [], stats: [], classicMode: () => false, matchTicks: 0, elapsed: 0,
     P, ububallMatch, dirtyMeters, popup: () => {}, steamRing: () => {}, gameAudio: () => null
@@ -576,7 +589,7 @@ test('post-goal celebration simulation cannot alter the next kickoffs meter or g
     scores: [0, 0], bodies, simBodies, authoritativeBodies: null, postGoal: null, scoringPlayer: null, phase: 'play', performance
   };
 
-  const env = vm.runInNewContext(code + '\n;({ finishTurn, kickoff, getAuthoritative: () => authoritativeBodies, getBodies: () => bodies, getPostGoal: () => postGoal });', context);
+  const env = runInNewContext(code + '\n;({ finishTurn, kickoff, getAuthoritative: () => authoritativeBodies, getBodies: () => bodies, getPostGoal: () => postGoal });', context);
 
   // 1. Goal scored: finishTurn runs
   env.finishTurn(0);
@@ -621,7 +634,7 @@ test('predictionKey invalidates on micro angle/power adjustments, fouls, and car
   const fouls = ububallMatch.newFouls();
 
   const context = { bodies, plans, turn, matchMode, fouls };
-  const env = vm.runInNewContext(code + '\n;({ predictionKey, dirtyPrediction });', context);
+  const env = runInNewContext(code + '\n;({ predictionKey, dirtyPrediction });', context);
 
   const initialKey = env.predictionKey();
 
@@ -709,7 +722,7 @@ test('display projection boundary: seat transforms, gameplay fields, presentatio
   };
   Object.defineProperty(context, 'anonymousNames', { get: () => anonymousNames });
 
-  const env = vm.runInNewContext(
+  const env = runInNewContext(
     projCode + '\n;({ stripPresentation, projectBody, viewBodies, syncViewBodies, toViewBody, viewIndex });',
     context
   );
@@ -893,7 +906,7 @@ test('local gameplay and goal replay maintain separate authoritative simBodies a
     theater: null, online: null, onlineReplay: null, scoringPlayer: null
   };
 
-  const env = vm.runInNewContext(
+  const env = runInNewContext(
     code + '\n;({ kickoff, finishTurn, creditSave, contactMeter, startGoalReplay, endGoalReplay, shownSim });',
     context
   );
@@ -1007,7 +1020,7 @@ test('replay takeover (watchReplay -> playFromHere -> local turn) transforms sim
     bodies: P.kickoff(), simBodies: P.kickoff()
   };
 
-  const env = vm.runInNewContext(
+  const env = runInNewContext(
     code + '\n;({ watchReplay, playFromHere, syncViewBodies });',
     context
   );
@@ -1156,7 +1169,7 @@ test('online seat 1 transition (resolving -> playOnlineReplay -> next plan phase
     online: { active: true, now: () => nowMs, state: null }
   };
 
-  const env = vm.runInNewContext(
+  const env = runInNewContext(
     code + '\n;({ onState: onlineCallbacks.onState, playOnlineReplay });',
     context
   );
@@ -1264,6 +1277,7 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
   const ububallMP4 = require('../web/mp4.js');
 
   const code =
+    section('function popup(body, text) {', 'function drawPopups(') + '\n' +
     section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
     section('function creditSave(body, own, iron = false) {', 'function setMeterFill(fill, meter) {') + '\n' +
     section('function replayEvents(turn, tick, sim) {', 'const replayStore = (() => {') + '\n' +
@@ -1271,7 +1285,7 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
     section('const VIDEO = Object.freeze(', '$(\'replay-export-video\').hidden =') + '\n' +
     section('const CARD = {', 'async function openShare() {') + '\n' +
     section('$(\'export-close\').onclick =', '// Guides, remembered on this device') + '\n' +
-    section('let guide = null;', 'function drawGuides(home, away, text) {') + '\n' +
+    section('let guide = null;', 'function drawGuides(home, away, text, guide) {') + '\n' +
     section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
 
   const ubus = Array.from({ length: 6 }, (_, i) => {
@@ -1581,8 +1595,8 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
     videoAudio: null,
     videoField: null,
     cardShot: false,
-    clockNow: () => context.videoClock ?? wallClock,
-    gameAudio: () => context.videoAudio || context.window.ubuAudio,
+    clockNow: () => context.videoClock ?? env.currentReplay()?.clock ?? wallClock,
+    gameAudio: () => context.videoAudio || env.currentReplay()?.audio || context.window.ubuAudio,
     classicMode: () => ububallMatch.rule(context.matchMode, 'classic'),
     pulseMode: () => ububallMatch.rule(context.matchMode, 'pulse'),
     normalStats: () => ({
@@ -1607,42 +1621,39 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
     downloadReplay: dummy,
     trailPositions: () => context.bodies.map(b => ({ x: b.x, y: b.y })),
     clearDiscontinuousTrails: before => {
-      context.bodies.forEach((b, i) => {
-        if (before[i] && (before[i].x !== b.x || before[i].y !== b.y)) context.trails[i].length = 0;
+      context.fieldView.bodies.forEach((b, i) => {
+        if (before[i] && (before[i].x !== b.x || before[i].y !== b.y)) (env.currentReplay()?.fx?.trails ?? context.trails)[i].length = 0;
       });
     },
     recordTrails: () => {
-      context.bodies.forEach((b, i) => {
-        context.trails[i].push({ x: b.x, y: b.y, life: 0.24, duration: 0.24 });
+      context.fieldView.bodies.forEach((b, i) => {
+        (env.currentReplay()?.fx?.trails ?? context.trails)[i].push({ x: b.x, y: b.y, life: 0.24, duration: 0.24 });
       });
     },
     emitSkaterEffects: dummy,
-    updatePopups: dt => {
-      for (let i = context.popups.length - 1; i >= 0; i--) {
-        if ((context.popups[i].life -= dt) <= 0) context.popups.splice(i, 1);
-      }
-    },
     updateEffects: dt => {
-      for (const trail of context.trails) {
+      for (const trail of env.currentReplay()?.fx?.trails ?? context.trails) {
         for (const pt of trail) pt.life -= dt;
       }
-      if (context.goalCall && (context.goalCall.t += dt) >= context.GOAL_CALL_SECONDS) context.goalCall = null;
+      if (context.fieldEffects.goalCall && (context.fieldEffects.goalCall.t += dt) >= context.GOAL_CALL_SECONDS) context.fieldEffects.goalCall = null;
     },
     clearEffects: () => {
-      if (!context.videoField) context.postGoal = null;
-      context.trails.forEach(t => { t.length = 0; });
-      context.particles.length = context.fireworks.length = context.shockwaves.length = 0;
-      context.skids.length = context.skidState.length = context.burns.length = context.ripples.length = context.pings.length = context.popups.length = 0;
-      context.goalSweep = context.goalCall = null;
-    },
-    popup: (body, text) => {
-      if (body) context.popups.push({ x: body.x, y: body.y, text, team: body.team, life: 1.2, duration: 1.2 });
+      if (!context.fieldView.field) context.postGoal = null;
+      (env.currentReplay()?.fx?.trails ?? context.trails).forEach(t => { t.length = 0; });
+      context.fieldEffects.particles.length = context.fieldEffects.fireworks.length = context.fieldEffects.shockwaves.length = 0;
+      context.fieldEffects.skids.length = context.fieldEffects.skidState.length = context.fieldEffects.burns.length = context.fieldEffects.ripples.length = context.fieldEffects.pings.length = 0;
+      (env.currentReplay()?.fx?.popups ?? context.popups).length = 0;
+      context.fieldEffects.goalSweep = context.fieldEffects.goalCall = null;
     },
     steamRing: dummy,
-    impact: ms => { context.hitStopUntil = context.clockNow() + ms; },
+    impact: ms => {
+      const fx = env.currentReplay()?.fx;
+      if (fx) fx.hitStopUntil = context.clockNow() + ms;
+      else context.hitStopUntil = context.clockNow() + ms;
+    },
     celebrate: (team, ball, label = 'GOAL', scorer = null) => {
-      context.goalCall = { team, label, scorer: scorer ? context.bodies.indexOf(scorer) : -1, name: scorer?.name || '', t: 0 };
-      context.fireworks.push({ team, label });
+      context.fieldEffects.goalCall = { team, label, scorer: scorer ? context.fieldView.bodies.indexOf(scorer) : -1, name: scorer?.name || '', t: 0 };
+      context.fieldEffects.fireworks.push({ team, label });
     },
     goalTab: (team, label, scorer) => { tabCalls.push({ team, label, scorer }); },
     handleCollision: dummy,
@@ -1654,7 +1665,7 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
     setClock: ms => { wallClock = ms; }
   };
 
-  const env = vm.runInNewContext(
+  const env = runInNewContext(
     code + '\n;({ watchReplay, endReplay, createReplaySession, withPlaybackContext, loadReplayTurn, stepReplay, seekReplay, endReplayTurn, advanceReplay, updateReplayBar, exportSlice, exportVideo, drawShareCard, composeFrame, currentReplay, shownSim, shownSeat, syncViewBodies, cancelExport: () => { videoCancelled = true; }, isExporting });',
     context
   );

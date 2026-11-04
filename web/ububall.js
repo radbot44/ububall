@@ -1,17 +1,18 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id), P = ububallPhysics;
-  let canvas = $('rink');
-  let ctx = canvas.getContext('2d');
+  const liveField = {};
+  let fieldView = liveField;
+  fieldView.canvas = $('rink');
+  fieldView.ctx = fieldView.canvas.getContext('2d');
   let layoutDirty = true, renderWidth = 1, renderHeight = 1, deviceWidth = 0, deviceHeight = 0;
   const dirtyMeters = new Set();
-  let rinkCache = null;
   const ballMark = new Image();
   ballMark.src = 'assets/uburoom-oomark-brand.svg';
   ballMark.onload = () => { if (skaters.length) draw(); };
   const rinkLogo = new Image();
   rinkLogo.src = 'assets/ububall-logo.svg';
-  rinkLogo.onload = () => { rinkCache = null; if (skaters.length) draw(); };
+  rinkLogo.onload = () => { fieldEffects.rinkCache = null; if (skaters.length) draw(); };
   const superImages = P.SUPERS.map(s => {
     const img = new Image();
     img.src = s.icon;
@@ -21,32 +22,35 @@
   const practice = Array.from({ length: 6 }, () => { const dna = ubu.randomDNA(); return { model: ubu.decode(dna), dna: ubu.toCode(dna), label: 'Practice ubu' }; });
   let roster = practice.slice(0, 3), draft = [...roster], rosterSlot = 0;
   const idlePlan = () => ({ angle: 0, power: 0, spin: 0, guard: false });
-  let bodies = P.kickoff(), simBodies = P.kickoff(), plans = Array.from({ length: 3 }, idlePlan), cpu = [], selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
+  fieldView.bodies = P.kickoff();
+  let simBodies = P.kickoff(), plans = Array.from({ length: 3 }, idlePlan), cpu = [], selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [];
-  let isPortrait = false;
-  let matchMode = 'standard', planDeadline = 0, planPausedAt = null;
+  fieldView.portrait = false;
+  fieldView.mode = 'standard';
+  let planDeadline = 0, planPausedAt = null;
   // Each turn of the current play (motion since the field last rested), for goal replays.
   let playSegments = [], goalReplay = null, goalReplayAt = 0, postGoal = null, authoritativeBodies = null;
-  let anonymousNames = false;
+  fieldView.anonymous = false;
   // The replay viewer (see watchReplay), and the match being recorded for the replay library.
   let theater = null, recording = null, recordingOnline = false, restoredMatch = false;
   // While a video export renders, effects and sounds run on its clock (ms) instead of the wall clock,
   // sounds go to its offline audio, and the field draws at its size.
-  let videoClock = null, videoAudio = null, videoField = null, cardShot = false;
-  const clockNow = () => videoClock ?? performance.now();
+  let videoClock = null, videoAudio = null, cardShot = false;
+  fieldView.field = null;
+  const clockNow = () => videoClock ?? activePlayback?.clock ?? performance.now();
   let matchTicks = 0; // Simulated ticks played locally, for meter cooldowns.
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const cpuClient = createCPUClient();
   let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuDone = false, cpuLevel = 'medium', cpuMode = 'standard';
   // The home screen demo (CPU against CPU) plays silently.
   let demo = false, demoLevels = ['medium', 'hard'];
-  const gameAudio = () => videoAudio || (demo ? null : window.ubuAudio);
-  const classicMode = () => ububallMatch.rule(matchMode, 'classic');
-  const blitzMode = () => ububallMatch.rule(matchMode, 'blitz');
-  const pulseMode = () => ububallMatch.rule(matchMode, 'pulse');
+  const gameAudio = () => videoAudio || activePlayback?.audio || (demo ? null : window.ubuAudio);
+  const classicMode = () => ububallMatch.rule(fieldView.mode, 'classic');
+  const blitzMode = () => ububallMatch.rule(fieldView.mode, 'blitz');
+  const pulseMode = () => ububallMatch.rule(fieldView.mode, 'pulse');
   function startPlanClock() {
     const now = performance.now();
-    planDeadline = now + (ububallMatch.planningMilliseconds(matchMode) ?? Infinity);
+    planDeadline = now + (ububallMatch.planningMilliseconds(fieldView.mode) ?? Infinity);
     planPausedAt = localPlayBlocked() ? now : null;
   }
   function localPlayBlocked() {
@@ -170,9 +174,9 @@
   const knobRow = document.querySelector('.stadium-actions .knob-row');
   const rinkStage = document.querySelector('.rink-stage');
   const rinkWrap = document.querySelector('.rink-wrap');
-  let badgeCanvas = document.createElement('canvas'); badgeCanvas.className = 'field-badges';
-  badgeCanvas.setAttribute('aria-hidden', 'true'); rinkWrap.append(badgeCanvas);
-  let badgeCtx = badgeCanvas.getContext('2d');
+  fieldView.badgeCanvas = document.createElement('canvas'); fieldView.badgeCanvas.className = 'field-badges';
+  fieldView.badgeCanvas.setAttribute('aria-hidden', 'true'); rinkWrap.append(fieldView.badgeCanvas);
+  fieldView.badgeCtx = fieldView.badgeCanvas.getContext('2d');
   const btnFullscreen = $('btn-fullscreen'), btnRotate = $('btn-rotate');
   const radians = value => value * Math.PI / 180;
   const normalStats = () => ({
@@ -182,7 +186,7 @@
     efficiency: 127, synergy: 127, chemistry: 127
   });
   let stats = practice.map(p => ({ ...(p.model.stats || normalStats()) }));
-  let teamEntries = [...roster, ...practice.slice(3)];
+  fieldView.entries = [...roster, ...practice.slice(3)];
   let play = ububallMatch.newPlay(), tally = ububallMatch.newTally(), scoringPlayer = null, roundTurns = 0;
   // Goal camping and corner stalling warnings and cards, as this view sees them (see ububallMatch.FOULS).
   let fouls = ububallMatch.newFouls();
@@ -196,7 +200,6 @@
   // The status line's wording for each goal call.
   const GOAL_WORDS = { 'OWN GOAL': 'Own goal', 'HAT TRICK!': 'Hat trick', 'FIREBALL!': 'Fireball', 'ONE-TIMER!': 'One-timer', 'BANK SHOT!': 'Bank shot', 'SNIPE!': 'Snipe', 'REBOUND!': 'Rebound', 'ACE!': 'Ace', GOAL: 'Goal' };
   const callText = (label, name) => label === 'OWN GOAL' ? 'Own goal!' : `${GOAL_WORDS[label] || label.replace(/!$/, '')} by ${name}!`;
-  let trails = Array.from({ length: 7 }, () => []), particles = [], fireworks = [], shockwaves = [];
   const materialStyles = {
     metallic: ['spark', '#e1eaff'], glossy: ['bubble', '#ffffff'], iridescent: ['spark', 'rainbow'],
     crystalline: ['shard', '#a8eaff'], pearlescent: ['bubble', '#ffe5ed'], marble: ['dust', '#e5ddd1'],
@@ -210,17 +213,17 @@
     quartz: ['shard', '#f4d7ff'], kintsugi: ['streak', '#ffd36b'], lava: ['spark', '#ff843e'],
     starfield: ['spark', '#e4d5ff']
   };
-  let materialEmitters = [];
+  const { createEffectsState, updateParticles } = ububallPresentation;
+  let fieldEffects = createEffectsState([], materialStyles);
   // Field details. All are cosmetic and cleared with the other effects; reduced motion disables them.
-  let skids = [], skidState = [], burns = [], burnState = {}, ripples = [], pings = [], popups = [], danger = [0, 0];
-  let ballFlare = 0, kickoffGlow = 0, goalSweep = null, goalCall = null, hitStopUntil = 0, shake = 0, shakeX = 0, shakeY = 0;
+  let hitStopUntil = 0;
   const SKID_LIFE = 12; // Seconds of play before a skid mark fades out.
   // A sharp loss of speed (hard guard braking or a heavy hit) starts a short skid: an ubu-wide mark
   // whose depth at each point follows how hard the ubu slowed there. Friction and drag slow an ubu by
   // only a few px/s per frame and gentle stops stay under the threshold, so only sharp stops skid.
   const SKID_SLOWDOWN = 220;
   function markIce(b, i, dt) {
-    const s = skidState[i] ||= { time: 0 }, prev = s.prev;
+    const s = fieldEffects.skidState[i] ||= { time: 0 }, prev = s.prev;
     s.prev = { x: b.x, y: b.y, vx: b.vx, vy: b.vy };
     if (!prev || dt <= 0) return;
     if (Math.hypot(b.x - prev.x, b.y - prev.y) > 60) { s.time = 0; s.path = null; return; }
@@ -231,7 +234,7 @@
     s.time -= dt;
     if (!s.path) {
       s.path = { points: [{ x: prev.x, y: prev.y, depth }], width: b.radius * 1.7, age: 0 };
-      skids.push(s.path); if (skids.length > 30) skids.shift();
+      fieldEffects.skids.push(s.path); if (fieldEffects.skids.length > 30) fieldEffects.skids.shift();
     }
     s.path.points.push({ x: b.x, y: b.y, depth }); s.path.age = 0;
   }
@@ -241,91 +244,89 @@
   const { HEAT } = P;
   const BURN_LIFE = 20; // Seconds of play before a burn mark fades out.
   const paceShare = ball => Math.max(Math.hypot(ball.vx, ball.vy), ball.pace || 0) / P.MAX_SPEED;
-  let fireTime = 0, sizzle = null; // How long the ball has been burning.
   // A burning ball that scores sets that goal alight and keeps burning in the net until kickoff.
-  let netFire = null;
-  const ballOnFire = () => Boolean(netFire?.lit) || P.ballOnFire(bodies?.[6]);
+  const ballOnFire = () => Boolean(fieldEffects.netFire?.lit) || P.ballOnFire(fieldView.bodies?.[6]);
   // A burning ball sizzles softly until it goes out.
-  function quench() { sizzle?.stop(); sizzle = null; }
+  function quench() { fieldEffects.sizzle?.stop(); fieldEffects.sizzle = null; }
   // 0 is white, 1 orange, 2 red hot and 3 on fire. A Cannonball flare runs it orange.
   function ballHeat(b) {
     if (b.team === -1 && P.ballOnFire?.(b)) return 3;
     if (ballOnFire()) return 3;
     const s = paceShare(b);
     const level = s < HEAT.red ? (s - HEAT.orange) / (HEAT.red - HEAT.orange) : 1 + (s - HEAT.red) / (HEAT.redHot - HEAT.red);
-    return Math.max(ballFlare, Math.min(2, Math.max(0, level)));
+    return Math.max(fieldEffects.ballFlare, Math.min(2, Math.max(0, level)));
   }
   function sparkBall(ball, dt) {
     const speed = Math.hypot(ball.vx, ball.vy), share = paceShare(ball);
-    fireTime = P.ballOnFire(ball) ? fireTime + dt : 0;
-    if (ballOnFire() && !sizzle) sizzle = gameAudio()?.playSizzle?.() || null;
+    fieldEffects.fireTime = P.ballOnFire(ball) ? fieldEffects.fireTime + dt : 0;
+    if (ballOnFire() && !fieldEffects.sizzle) fieldEffects.sizzle = gameAudio()?.playSizzle?.() || null;
     else if (!ballOnFire()) quench();
-    const level = Math.max(ballFlare, (share - HEAT.red) / (HEAT.redHot - HEAT.red));
+    const level = Math.max(fieldEffects.ballFlare, (share - HEAT.red) / (HEAT.redHot - HEAT.red));
     const ux = speed ? ball.vx / speed : 0, uy = speed ? ball.vy / speed : -1;
     if (ballOnFire()) flames(ball.x - ux * ball.radius * .5, ball.y - uy * ball.radius * .5, ball.radius * 1.4, -ball.vx * .12, -ball.vy * .12, dt * 120);
     if (level <= 0 || speed < 1) return;
     const count = Math.ceil(dt * 90 * Math.min(1, level));
-    for (let k = 0; k < count && particles.length < 360; k++) {
+    for (let k = 0; k < count && fieldEffects.particles.length < 360; k++) {
       const x = ball.x - ux * ball.radius, y = ball.y - uy * ball.radius, life = .2 + Math.random() * .2;
-      particles.push({ x, y, px: x, py: y, vx: -ball.vx * .25 + (Math.random() - .5) * 160, vy: -ball.vy * .25 + (Math.random() - .5) * 160,
+      fieldEffects.particles.push({ x, y, px: x, py: y, vx: -ball.vx * .25 + (Math.random() - .5) * 160, vy: -ball.vy * .25 + (Math.random() - .5) * 160,
         team: -1, color: Math.random() < .5 ? '#ffb347' : '#fff1c1', life, duration: life });
     }
   }
   // Flickering flames around (x, y) within `spread`, drifting with (vx, vy).
   function flames(x, y, spread, vx, vy, amount) {
-    for (let k = Math.ceil(amount); k > 0 && particles.length < 380; k--) {
+    for (let k = Math.ceil(amount); k > 0 && fieldEffects.particles.length < 380; k--) {
       const fx = x + (Math.random() - .5) * spread, fy = y + (Math.random() - .5) * spread, life = .18 + Math.random() * .22;
-      particles.push({ x: fx, y: fy, px: fx, py: fy, vx: vx + (Math.random() - .5) * 50, vy: vy + (Math.random() - .5) * 50,
+      fieldEffects.particles.push({ x: fx, y: fy, px: fx, py: fy, vx: vx + (Math.random() - .5) * 50, vy: vy + (Math.random() - .5) * 50,
         team: -1, color: ['#fff3b0', '#ffc43d', '#ff7a1a', '#ff3b1a'][Math.floor(Math.random() * 4)], life, duration: life, flame: 10 + Math.random() * 12 });
     }
   }
   // The burning net: flames all along it, with the sizzle kept going.
   function burnNet(dt) {
-    if (!netFire?.lit || reducedMotion.matches) return;
-    const back = netFire.mouth < 500 ? netFire.mouth - P.rink.goalDepth : netFire.mouth + P.rink.goalDepth;
-    flames((netFire.mouth + back) / 2, 300, P.rink.goalDepth, 0, 0, dt * 40);
-    flames(netFire.mouth, 300, 30, 0, 0, dt * 20);
-    for (const y of [P.rink.goalTop, P.rink.goalBottom]) flames((netFire.mouth + back) / 2, y, 30, 0, 0, dt * 15);
-    const ball = bodies[6];
+    if (!fieldEffects.netFire?.lit || reducedMotion.matches) return;
+    const back = fieldEffects.netFire.mouth < 500 ? fieldEffects.netFire.mouth - P.rink.goalDepth : fieldEffects.netFire.mouth + P.rink.goalDepth;
+    flames((fieldEffects.netFire.mouth + back) / 2, 300, P.rink.goalDepth, 0, 0, dt * 40);
+    flames(fieldEffects.netFire.mouth, 300, 30, 0, 0, dt * 20);
+    for (const y of [P.rink.goalTop, P.rink.goalBottom]) flames((fieldEffects.netFire.mouth + back) / 2, y, 30, 0, 0, dt * 15);
+    const ball = fieldView.bodies[6];
     if (ball) flames(ball.x, ball.y, ball.radius * 1.2, 0, 0, dt * 60);
-    if (!sizzle) sizzle = gameAudio()?.playSizzle?.() || null;
+    if (!fieldEffects.sizzle) fieldEffects.sizzle = gameAudio()?.playSizzle?.() || null;
   }
-  function lightNet(team) { netFire = { mouth: team ? P.rink.left : P.rink.right, lit: true }; }
+  function lightNet(team) { fieldEffects.netFire = { mouth: team ? P.rink.left : P.rink.right, lit: true }; }
   // A burning ball scorches a dark streak into the ice along its path.
   function burnIce(ball) {
-    const last = burnState.path?.points.at(-1);
-    if (netFire?.lit) return;
-    if (!ballOnFire() || (last && Math.hypot(ball.x - last.x, ball.y - last.y) > 60)) burnState.path = null;
+    const last = fieldEffects.burnState.path?.points.at(-1);
+    if (fieldEffects.netFire?.lit) return;
+    if (!ballOnFire() || (last && Math.hypot(ball.x - last.x, ball.y - last.y) > 60)) fieldEffects.burnState.path = null;
     if (!ballOnFire()) return;
-    if (!burnState.path) {
-      burnState.path = { points: [], width: ball.radius * 1.3, age: 0 };
-      burns.push(burnState.path); if (burns.length > 30) burns.shift();
+    if (!fieldEffects.burnState.path) {
+      fieldEffects.burnState.path = { points: [], width: ball.radius * 1.3, age: 0 };
+      fieldEffects.burns.push(fieldEffects.burnState.path); if (fieldEffects.burns.length > 30) fieldEffects.burns.shift();
     }
-    const points = burnState.path.points, previous = points.at(-1);
+    const points = fieldEffects.burnState.path.points, previous = points.at(-1);
     // A fresh burn starts faint and deepens over its first half second, like a fire taking hold.
-    const depth = .2 + .8 * Math.min(1, fireTime / .5);
+    const depth = .2 + .8 * Math.min(1, fieldEffects.fireTime / .5);
     if (!previous || Math.hypot(ball.x - previous.x, ball.y - previous.y) >= 3) points.push({ x: ball.x, y: ball.y, depth });
-    burnState.path.age = 0;
+    fieldEffects.burnState.path.age = 0;
   }
   function emitSkaterEffects(dt) {
     if (reducedMotion.matches) return;
-    bodies.slice(0, 6).forEach((b, i) => markIce(b, i, dt));
-    sparkBall(bodies[6], dt);
-    burnIce(bodies[6]);
-    materialEmitters.forEach((emitter, i) => {
-      const b = bodies[i], speed = Math.hypot(b.vx, b.vy);
+    fieldView.bodies.slice(0, 6).forEach((b, i) => markIce(b, i, dt));
+    sparkBall(fieldView.bodies[6], dt);
+    burnIce(fieldView.bodies[6]);
+    fieldEffects.materialEmitters.forEach((emitter, i) => {
+      const b = fieldView.bodies[i], speed = Math.hypot(b.vx, b.vy);
       if (speed < 25 || !emitter.styles.length) { emitter.time = 0; return; }
       emitter.time += dt;
       if (emitter.time < 1 / 24) return;
       emitter.time %= 1 / 24;
       for (const effect of emitter.styles) {
-        if (particles.length >= 300) break;
+        if (fieldEffects.particles.length >= 300) break;
         const spread = (Math.random() - .5) * b.radius * 1.4;
         const x = b.x - b.vx / speed * b.radius - b.vy / speed * spread;
         const y = b.y - b.vy / speed * b.radius + b.vx / speed * spread;
         const life = .3 + Math.random() * .3;
         const color = effect.color === 'rainbow' ? `hsl(${Math.floor(Math.random() * 360)} 85% 78%)` : effect.color;
-        particles.push({ x, y, px: x, py: y, vx: -b.vx * .06 + (Math.random() - .5) * 28,
+        fieldEffects.particles.push({ x, y, px: x, py: y, vx: -b.vx * .06 + (Math.random() - .5) * 28,
           vy: -b.vy * .06 + (Math.random() - .5) * 28, team: b.team, color, life, duration: life,
           materialShape: effect.shape, size: 1.5 + Math.random() * 2, angle: Math.random() * Math.PI });
       }
@@ -333,23 +334,25 @@
   }
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   function clearEffects() {
-    if (!videoField) postGoal = null;
-    trails.forEach(trail => { trail.length = 0; });
-    particles.length = fireworks.length = shockwaves.length = 0;
-    skids.length = skidState.length = burns.length = ripples.length = pings.length = popups.length = 0; burnState.path = null; fireTime = 0; quench();
-    if (netFire) netFire.lit = false;
-    shake = shakeX = shakeY = 0; if (!videoField && rinkWrap) rinkWrap.style.translate = '';
-    danger[0] = danger[1] = ballFlare = kickoffGlow = 0; goalSweep = goalCall = null;
+    if (!fieldView.field) postGoal = null;
+    fieldEffects.trails.forEach(trail => { trail.length = 0; });
+    fieldEffects.particles.length = fieldEffects.fireworks.length = fieldEffects.shockwaves.length = 0;
+    fieldEffects.skids.length = fieldEffects.skidState.length = fieldEffects.burns.length = fieldEffects.ripples.length = fieldEffects.pings.length = 0;
+    fieldEffects.popups.length = 0;
+    fieldEffects.burnState.path = null; fieldEffects.fireTime = 0; quench();
+    if (fieldEffects.netFire) fieldEffects.netFire.lit = false;
+    fieldEffects.shake = fieldEffects.shakeX = fieldEffects.shakeY = 0; if (!fieldView.field && rinkWrap) rinkWrap.style.translate = '';
+    fieldEffects.danger[0] = fieldEffects.danger[1] = fieldEffects.ballFlare = fieldEffects.kickoffGlow = 0; fieldEffects.goalSweep = fieldEffects.goalCall = null;
   }
   function burst(x, y, team, strength, celebration = false, tangent = 0, color = null) {
     if (reducedMotion.matches) return;
     const count = celebration ? 64 : Math.round(3 + strength * 4);
-    for (let i = 0; i < count && particles.length < 400; i++) {
+    for (let i = 0; i < count && fieldEffects.particles.length < 400; i++) {
       const angle = celebration ? Math.random() * Math.PI * 2
         : tangent + (i % 2 ? Math.PI : 0) + (Math.random() - .5) * .6;
       const speed = celebration ? 60 + Math.random() * 190 : 20 + Math.max(0, strength - 1) * 20 + Math.random() * (35 + strength * 65);
       const life = celebration ? .8 + Math.random() * .8 : .14 + Math.random() * .16 + Math.max(0, strength - 1) * .05;
-      particles.push({ x, y, px: x, py: y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+      fieldEffects.particles.push({ x, y, px: x, py: y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
         team: i % 5 === 0 ? -1 : team, life, duration: life, celebration, color, overlay: celebration });
     }
   }
@@ -366,95 +369,47 @@
   // scoring half that break into peony and ring shells in the team colour, white and gold.
   // `scorer` is the scoring ubu's body, or null (an own goal names no one).
   function celebrate(team, ball, label = 'GOAL', scorer = null) {
-    goalCall = { team, label, scorer: scorer ? bodies.indexOf(scorer) : -1, name: scorer?.name || '', t: 0 };
+    fieldEffects.goalCall = { team, label, scorer: scorer ? fieldView.bodies.indexOf(scorer) : -1, name: scorer?.name || '', t: 0 };
     if (reducedMotion.matches) return;
     burst(ball.x, ball.y, team, 1, true);
-    goalSweep = { team, p: 0 };
-    for (let i = 0; i < 9; i++) fireworks.push({ x: team === 0 ? 560 + Math.random() * 340 : 100 + Math.random() * 340, y: 560,
+    fieldEffects.goalSweep = { team, p: 0 };
+    for (let i = 0; i < 9; i++) fieldEffects.fireworks.push({ x: team === 0 ? 560 + Math.random() * 340 : 100 + Math.random() * 340, y: 560,
       vy: -(430 + Math.random() * 160), fuse: .55 + Math.random() * .3, delay: .1 + i * .17, team, ring: i % 3 === 2 });
   }
-  function explodeShell(f) {
-    particles.push({ x: f.x, y: f.y, px: f.x, py: f.y, vx: 0, vy: 0, team: f.team, life: .3, duration: .3, flash: true, overlay: true });
-    for (let k = 0; k < 72 && particles.length < 700; k++) {
-      const angle = f.ring ? k / 72 * Math.PI * 2 : Math.random() * Math.PI * 2;
-      const speed = f.ring ? 210 : 60 + Math.random() * 200, life = 1 + Math.random() * .7;
-      particles.push({ x: f.x, y: f.y, px: f.x, py: f.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, team: f.team,
-        color: k % 4 === 0 ? '#ffffff' : k % 5 === 0 ? '#ffd76b' : null, life, duration: life,
-        celebration: true, overlay: true, crackle: Math.random() < .3 });
-    }
-  }
-  function crackle(p) {
-    for (let k = 0; k < 3 && particles.length < 700; k++) {
-      const angle = Math.random() * Math.PI * 2, life = .12 + Math.random() * .1;
-      particles.push({ x: p.x, y: p.y, px: p.x, py: p.y, vx: Math.cos(angle) * 60, vy: Math.sin(angle) * 60,
-        team: -1, color: '#ffffff', life, duration: life, overlay: true });
-    }
-  }
-  function updateEffects(dt) {
+  function updateEffects(dt, fx = fieldEffects) {
     if (reducedMotion.matches) { clearEffects(); return; }
-    for (const trail of trails) {
+    for (const trail of fx.trails) {
       for (const point of trail) point.life -= dt;
       while (trail.length && trail[0].life <= 0) trail.shift();
     }
-    for (let i = particles.length - 1; i >= 0; i--) {
-      const p = particles[i]; p.life -= dt;
-      if (p.life <= 0) {
-        particles[i] = particles[particles.length - 1];
-        particles.pop();
-        if (p.crackle) crackle(p);
-        continue;
-      }
-      p.px = p.x; p.py = p.y;
-      const drag = Math.exp(-dt * (p.celebration ? 1.2 : 4));
-      p.vx *= drag; p.vy = p.vy * drag + (p.celebration ? 95 : 0) * dt;
-      p.x += p.vx * dt; p.y += p.vy * dt;
-    }
-    for (let i = fireworks.length - 1; i >= 0; i--) {
-      const f = fireworks[i];
-      if ((f.delay -= dt) > 0) continue;
-      f.y += f.vy * dt; f.vy += 320 * dt; f.fuse -= dt;
-      if (particles.length < 700) particles.push({ x: f.x, y: f.y, px: f.x, py: f.y, vx: (Math.random() - .5) * 30, vy: 30,
-        team: f.team, color: '#ffe9b0', life: .3, duration: .3, overlay: true });
-      if (f.fuse <= 0) {
-        explodeShell(f);
-        fireworks[i] = fireworks[fireworks.length - 1];
-        fireworks.pop();
-      }
-    }
-    for (let i = shockwaves.length - 1; i >= 0; i--) {
-      const s = shockwaves[i]; s.life -= dt;
-      if (s.life <= 0) {
-        shockwaves[i] = shockwaves[shockwaves.length - 1];
-        shockwaves.pop();
-      }
-    }
+    updateParticles(dt, fx.particles, fx.fireworks, fx.shockwaves);
     const activeReplay = typeof currentReplay === 'function' ? currentReplay() : theater;
     const moving = phase === 'play' || Boolean(postGoal) || Boolean(goalReplay) || Boolean(activeReplay && !activeReplay.paused);
-    if (moving) for (const s of skids) s.age += dt;
-    for (let i = skids.length - 1; i >= 0; i--) if (skids[i].age >= SKID_LIFE) skids.splice(i, 1);
-    if (moving) for (const s of burns) s.age += dt;
-    for (let i = burns.length - 1; i >= 0; i--) if (burns[i].age >= BURN_LIFE) burns.splice(i, 1);
-    for (const list of [ripples, pings]) {
+    if (moving) for (const s of fieldEffects.skids) s.age += dt;
+    for (let i = fieldEffects.skids.length - 1; i >= 0; i--) if (fieldEffects.skids[i].age >= SKID_LIFE) fieldEffects.skids.splice(i, 1);
+    if (moving) for (const s of fieldEffects.burns) s.age += dt;
+    for (let i = fieldEffects.burns.length - 1; i >= 0; i--) if (fieldEffects.burns[i].age >= BURN_LIFE) fieldEffects.burns.splice(i, 1);
+    for (const list of [fieldEffects.ripples, fieldEffects.pings]) {
       for (let i = list.length - 1; i >= 0; i--) if ((list[i].life -= dt) <= 0) list.splice(i, 1);
     }
     const threat = moving ? goalThreat() : null;
-    for (const side of [0, 1]) danger[side] += ((threat?.side === side ? threat.level : 0) - danger[side]) * Math.min(1, dt * 10);
+    for (const side of [0, 1]) fieldEffects.danger[side] += ((threat?.side === side ? threat.level : 0) - fieldEffects.danger[side]) * Math.min(1, dt * 10);
     burnNet(dt);
-    shake = Math.max(0, shake - dt / .2);
-    shakeX = shake ? Number(((Math.random() - .5) * 5 * gameUi.scale() * shake).toFixed(2)) : 0;
-    shakeY = shake ? Number(((Math.random() - .5) * 5 * gameUi.scale() * shake).toFixed(2)) : 0;
-    if (!videoField && rinkWrap) rinkWrap.style.translate = shake ? `${shakeX}px ${shakeY}px` : '';
-    ballFlare = Math.max(0, ballFlare - dt / .8);
-    kickoffGlow = Math.max(0, kickoffGlow - dt / 1.5);
-    if (goalSweep && (goalSweep.p += dt / 1.5) >= 1) goalSweep = null;
-    if (goalCall && (goalCall.t += dt) >= GOAL_CALL_SECONDS) goalCall = null;
+    fieldEffects.shake = Math.max(0, fieldEffects.shake - dt / .2);
+    fieldEffects.shakeX = fieldEffects.shake ? Number(((Math.random() - .5) * 5 * gameUi.scale() * fieldEffects.shake).toFixed(2)) : 0;
+    fieldEffects.shakeY = fieldEffects.shake ? Number(((Math.random() - .5) * 5 * gameUi.scale() * fieldEffects.shake).toFixed(2)) : 0;
+    if (!fieldView.field && rinkWrap) rinkWrap.style.translate = fieldEffects.shake ? `${fieldEffects.shakeX}px ${fieldEffects.shakeY}px` : '';
+    fieldEffects.ballFlare = Math.max(0, fieldEffects.ballFlare - dt / .8);
+    fieldEffects.kickoffGlow = Math.max(0, fieldEffects.kickoffGlow - dt / 1.5);
+    if (fieldEffects.goalSweep && (fieldEffects.goalSweep.p += dt / 1.5) >= 1) fieldEffects.goalSweep = null;
+    if (fieldEffects.goalCall && (fieldEffects.goalCall.t += dt) >= GOAL_CALL_SECONDS) fieldEffects.goalCall = null;
   }
   // Which goal the ball really threatens, and how strongly: its own path (curve and slowing
   // included, off nothing but posts and net) carries it in within ~0.9 seconds, faster and sooner
   // glowing brighter. Side 0 is the left goal (defended by the home team in every view), side 1 the right.
   function goalThreat() {
-    const ball = bodies[6];
-    if (!ball || P.holder(bodies)) return null;
+    const ball = fieldView.bodies[6];
+    if (!ball || P.holder(fieldView.bodies)) return null;
     const speed = Math.hypot(ball.vx, ball.vy), horizon = .9;
     if (speed < 120) return null;
     // Spin may curve the shot, but vertical motion alone cannot reach a goal.
@@ -478,8 +433,8 @@
     const x = body.x + nx * body.radius, y = body.y + ny * body.radius;
     if (wallType === 'post') {
       const px = x < 500 ? 60 : 940, py = y < 300 ? 230 : 370;
-      if (pings.length < 12) pings.push({ x: px, y: py, life: .4, duration: .4 });
-    } else if ((wallType === 'net' || velocity > 220) && ripples.length < 24) {
+      if (fieldEffects.pings.length < 12) fieldEffects.pings.push({ x: px, y: py, life: .4, duration: .4 });
+    } else if ((wallType === 'net' || velocity > 220) && fieldEffects.ripples.length < 24) {
       // Find the hit on the drawn wall, then bulge only that stretch, never past its ends.
       const net = wallType === 'net', half = (net ? 26 : 60) / WALL_STEP;
       let best = null;
@@ -487,7 +442,7 @@
         const d = (p.x - x) ** 2 + (p.y - y) ** 2;
         if (!best || d < best.d) best = { d, run, k };
       });
-      ripples.push({ run: best.run, lo: Math.max(0, best.k - half), hi: Math.min(best.run.length - 1, best.k + half),
+      fieldEffects.ripples.push({ run: best.run, lo: Math.max(0, best.k - half), hi: Math.min(best.run.length - 1, best.k + half),
         net, side: x < 500 ? 0 : 1, amp: Math.min(1, velocity / 500), life: .6, duration: .6 });
     }
   }
@@ -525,20 +480,20 @@
       const len = Math.hypot(b.x - a.x, b.y - a.y) || 1, nx = -(b.y - a.y) / len, ny = (b.x - a.x) / len, half = widthAt(p) / 2;
       left.push([p.x + nx * half, p.y + ny * half]); right.push([p.x - nx * half, p.y - ny * half]);
     });
-    ctx.beginPath(); ctx.moveTo(left[0][0], left[0][1]);
-    for (let i = 1; i < left.length; i++) ctx.lineTo(left[i][0], left[i][1]);
-    for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
-    ctx.closePath(); ctx.fill();
+    fieldView.ctx.beginPath(); fieldView.ctx.moveTo(left[0][0], left[0][1]);
+    for (let i = 1; i < left.length; i++) fieldView.ctx.lineTo(left[i][0], left[i][1]);
+    for (let i = right.length - 1; i >= 0; i--) fieldView.ctx.lineTo(right[i][0], right[i][1]);
+    fieldView.ctx.closePath(); fieldView.ctx.fill();
   }
   // A ribbon with a Gaussian edge. Canvas shadows blur in every browser, so the shape is drawn far
   // off-canvas and only its blurred shadow lands back on the ice.
   function softRibbon(points, widthAt, blur, color) {
-    const scale = ctx.getTransform().a, offset = 4000;
-    ctx.save();
-    ctx.shadowColor = color; ctx.shadowBlur = blur * scale; ctx.shadowOffsetX = offset;
-    ctx.translate(-offset / scale, 0);
+    const scale = fieldView.ctx.getTransform().a, offset = 4000;
+    fieldView.ctx.save();
+    fieldView.ctx.shadowColor = color; fieldView.ctx.shadowBlur = blur * scale; fieldView.ctx.shadowOffsetX = offset;
+    fieldView.ctx.translate(-offset / scale, 0);
     ribbon(points, widthAt);
-    ctx.restore();
+    fieldView.ctx.restore();
   }
   // Muted tints up to red hot (heat 2); only a burning ball (heat 3) runs fully red.
   const HEAT_COLORS = [[255, 255, 255], [255, 214, 170], [255, 158, 120], [255, 70, 30]];
@@ -547,100 +502,99 @@
     const [r, g, bl] = a.map((v, i) => Math.round(v + (b[i] - v) * t));
     return `rgba(${r}, ${g}, ${bl}, ${alpha})`;
   }
-  function inRink(paint) { ctx.save(); rounded(60, 60, 880, 480, 100); ctx.clip(); paint(); ctx.restore(); }
+  function inRink(paint) { fieldView.ctx.save(); rounded(60, 60, 880, 480, 100); fieldView.ctx.clip(); paint(); fieldView.ctx.restore(); }
   // A layer over the rink canvas, repainted only when `key` changes and otherwise drawn as one image.
   // For content that stays still across many frames, such as the plan-phase prediction. `scale`
   // paints soft, heavily blurred content at a fraction of the canvas resolution.
   function cachedLayer(cache, key, paint, scale = 1) {
     if (cache.key !== key) {
-      const width = Math.max(1, Math.round(canvas.width * scale)), height = Math.max(1, Math.round(canvas.height * scale)), main = ctx;
+      const width = Math.max(1, Math.round(fieldView.canvas.width * scale)), height = Math.max(1, Math.round(fieldView.canvas.height * scale)), main = fieldView.ctx;
       cache.layer ||= document.createElement('canvas');
       if (cache.layer.width !== width || cache.layer.height !== height) { cache.layer.width = width; cache.layer.height = height; }
-      ctx = cache.layer.getContext('2d');
-      ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); ctx.clearRect(0, 0, 1000, 600);
-      ctx.save();
-      try { paint(); } finally { ctx.restore(); ctx = main; }
+      fieldView.ctx = cache.layer.getContext('2d');
+      fieldView.ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); fieldView.ctx.clearRect(0, 0, 1000, 600);
+      fieldView.ctx.save();
+      try { paint(); } finally { fieldView.ctx.restore(); fieldView.ctx = main; }
       cache.key = key;
     }
-    ctx.drawImage(cache.layer, 0, 0, 1000, 600);
+    fieldView.ctx.drawImage(cache.layer, 0, 0, 1000, 600);
   }
-  let iceCache = {};
   // Drawn on the ice beneath bodies and trails.
   function drawFieldUnder(colors) {
     const { primary, home, away } = colors;
-    if (kickoffGlow) {
-      ctx.save(); ctx.globalAlpha = kickoffGlow; ctx.shadowColor = primary; ctx.shadowBlur = 12 * canvas.width / 1000;
-      circle(500, 300, 70 + (1 - kickoffGlow) * 10, primary, 3); ctx.restore();
+    if (fieldEffects.kickoffGlow) {
+      fieldView.ctx.save(); fieldView.ctx.globalAlpha = fieldEffects.kickoffGlow; fieldView.ctx.shadowColor = primary; fieldView.ctx.shadowBlur = 12 * fieldView.canvas.width / 1000;
+      circle(500, 300, 70 + (1 - fieldEffects.kickoffGlow) * 10, primary, 3); fieldView.ctx.restore();
     }
     // Skid and burn marks only change while play runs, so planning reuses one painted layer. Their
     // edges are blurred far wider than a field unit, so the layer is painted at one pixel per field
     // unit at most (half resolution on a 2× screen): the blur costs a quarter, with no visible change.
-    if (skids.length || burns.length) {
-      let key = canvas.width + ',' + canvas.height;
-      for (const s of skids) key += ',' + Math.floor(s.age * 4) + ':' + s.points.length;
+    if (fieldEffects.skids.length || fieldEffects.burns.length) {
+      let key = fieldView.canvas.width + ',' + fieldView.canvas.height;
+      for (const s of fieldEffects.skids) key += ',' + Math.floor(s.age * 4) + ':' + s.points.length;
       key += '|';
-      for (const s of burns) key += ',' + Math.floor(s.age * 4) + ':' + s.points.length;
-      cachedLayer(iceCache, key, paintIce, Math.min(1, 1000 / canvas.width));
+      for (const s of fieldEffects.burns) key += ',' + Math.floor(s.age * 4) + ':' + s.points.length;
+      cachedLayer(fieldEffects.iceCache, key, paintIce, Math.min(1, 1000 / fieldView.canvas.width));
     }
-    if (phase === 'plan' && pulseMode() && !P.settled(bodies)) inRink(() => { ctx.fillStyle = 'rgba(120,170,255,.07)'; ctx.fillRect(60, 60, 880, 480); });
-    danger.forEach((glow, side) => {
+    if (phase === 'plan' && pulseMode() && !P.settled(fieldView.bodies)) inRink(() => { fieldView.ctx.fillStyle = 'rgba(120,170,255,.07)'; fieldView.ctx.fillRect(60, 60, 880, 480); });
+    fieldEffects.danger.forEach((glow, side) => {
       if (glow < .02) return;
       const x = side ? 940 : 60, color = side ? away : home;
-      ctx.save(); ctx.globalAlpha = Math.min(1, glow) * .4; ctx.shadowColor = color; ctx.shadowBlur = 8 * glow * canvas.width / 1000;
-      line(x, 230, x, 370, color, 5); ctx.restore();
+      fieldView.ctx.save(); fieldView.ctx.globalAlpha = Math.min(1, glow) * .4; fieldView.ctx.shadowColor = color; fieldView.ctx.shadowBlur = 8 * glow * fieldView.canvas.width / 1000;
+      line(x, 230, x, 370, color, 5); fieldView.ctx.restore();
     });
   }
   function paintIce() {
-    for (const s of skids) {
+    for (const s of fieldEffects.skids) {
       // A blurred body and a tighter blurred core darken the ice: soft edges, deepest where braking
       // was hardest. Fading also thins the mark, so its 8-bit opacity steps never show as one jump.
       const age = Math.floor(s.age * 4) / 4;
       const t = age / SKID_LIFE, fade = 1 - t * t * (3 - 2 * t), thin = .6 + .4 * fade;
-      ctx.globalAlpha = .12 * fade;
+      fieldView.ctx.globalAlpha = .12 * fade;
       softRibbon(s.points, p => s.width * .7 * (.4 + .6 * p.depth) * thin, s.width * .45, '#000000');
-      ctx.globalAlpha = .08 * fade;
+      fieldView.ctx.globalAlpha = .08 * fade;
       softRibbon(s.points, p => s.width * .3 * p.depth * thin, s.width * .2, '#000000');
     }
-    for (const s of burns) {
+    for (const s of fieldEffects.burns) {
       if (s.points.length < 2) continue;
       const age = Math.floor(s.age * 4) / 4;
       const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
-      ctx.globalAlpha = .3 * fade;
+      fieldView.ctx.globalAlpha = .3 * fade;
       softRibbon(s.points, p => s.width * (.5 + .5 * p.depth), s.width * .35, '#2b1206');
-      ctx.globalAlpha = .22 * fade;
+      fieldView.ctx.globalAlpha = .22 * fade;
       softRibbon(s.points, p => s.width * .35 * p.depth, s.width * .15, '#000000');
     }
   }
   // Drawn above bodies: ripples, post flashes, the goal light sweep and the Pulse turn timer.
   function drawFieldOver(colors) {
     const { border, text, home, away } = colors;
-    for (const r of ripples) {
+    for (const r of fieldEffects.ripples) {
       // Drawing only: the physics walls never move. The bulge follows the wall's own shape, easing
       // to zero at both ends of its stretch so it stays on the wall around corners and nets.
       const p = 1 - r.life / r.duration, bulge = r.amp * (r.net ? 9 : 8) * (1 - p) * Math.cos(p * Math.PI * 5);
-      ctx.save(); ctx.globalAlpha = (1 - p) * .9; ctx.lineCap = ctx.lineJoin = 'round';
-      ctx.beginPath();
+      fieldView.ctx.save(); fieldView.ctx.globalAlpha = (1 - p) * .9; fieldView.ctx.lineCap = fieldView.ctx.lineJoin = 'round';
+      fieldView.ctx.beginPath();
       for (let k = r.lo; k <= r.hi; k++) {
         const w = r.run[k], d = bulge * Math.sin(Math.PI * (k - r.lo) / Math.max(1, r.hi - r.lo)) ** 2;
-        ctx.lineTo(w.x + w.nx * d, w.y + w.ny * d);
+        fieldView.ctx.lineTo(w.x + w.nx * d, w.y + w.ny * d);
       }
-      ctx.strokeStyle = r.net ? (r.side ? away : home) : border; ctx.lineWidth = 4; ctx.stroke(); ctx.restore();
+      fieldView.ctx.strokeStyle = r.net ? (r.side ? away : home) : border; fieldView.ctx.lineWidth = 4; fieldView.ctx.stroke(); fieldView.ctx.restore();
     }
-    for (const g of pings) {
+    for (const g of fieldEffects.pings) {
       const p = 1 - g.life / g.duration;
-      ctx.save(); ctx.globalAlpha = 1 - p; circle(g.x, g.y, 4 + p * 16, text, 2);
-      ctx.fillStyle = text; ctx.beginPath(); ctx.arc(g.x, g.y, 3 * (1 - p) + 1, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      fieldView.ctx.save(); fieldView.ctx.globalAlpha = 1 - p; circle(g.x, g.y, 4 + p * 16, text, 2);
+      fieldView.ctx.fillStyle = text; fieldView.ctx.beginPath(); fieldView.ctx.arc(g.x, g.y, 3 * (1 - p) + 1, 0, Math.PI * 2); fieldView.ctx.fill(); fieldView.ctx.restore();
     }
-    if (goalSweep) drawGoalSweep(goalSweep, goalSweep.team ? away : home);
-    if (goalCall) drawGoalCall(goalCall, goalCall.team ? away : home);
+    if (fieldEffects.goalSweep) drawGoalSweep(fieldEffects.goalSweep, fieldEffects.goalSweep.team ? away : home);
+    if (fieldEffects.goalCall) drawGoalCall(fieldEffects.goalCall, fieldEffects.goalCall.team ? away : home);
     if (pulseMode() && !goalReplay && !cardShot) {
-      const turnSeconds = ububallMatch.turnTicks(matchMode) * P.DT;
+      const turnSeconds = ububallMatch.turnTicks(fieldView.mode) * P.DT;
       const activeReplay = typeof currentReplay === 'function' ? currentReplay() : theater;
       const progress = activeReplay ? activeReplay.tick * P.DT / turnSeconds : phase !== 'play' ? 0 : online?.active ? (onlineReplay?.currentTick ?? 0) * P.DT / turnSeconds : elapsed / turnSeconds;
-      ctx.save(); ctx.lineCap = 'round';
-      ctx.globalAlpha = .25; line(160, 556, 840, 556, border, 4);
-      if (progress > 0) { ctx.globalAlpha = .9; line(160, 556, 160 + 680 * Math.min(1, progress), 556, '#DA4DB5', 4); }
-      ctx.restore();
+      fieldView.ctx.save(); fieldView.ctx.lineCap = 'round';
+      fieldView.ctx.globalAlpha = .25; line(160, 556, 840, 556, border, 4);
+      if (progress > 0) { fieldView.ctx.globalAlpha = .9; line(160, 556, 160 + 680 * Math.min(1, progress), 556, '#DA4DB5', 4); }
+      fieldView.ctx.restore();
     }
   }
   // Goal light: a team-colour wash and a wide glowing band with a white core sweeping out from the
@@ -648,17 +602,17 @@
   function drawGoalSweep(sweep, color) {
     const p = sweep.p, x = sweep.team ? 60 + p * 880 : 940 - p * 880;
     inRink(() => {
-      ctx.fillStyle = hexToRgba(color, .12 * Math.sin(Math.PI * p)); ctx.fillRect(60, 60, 880, 480);
-      const band = ctx.createLinearGradient(x - 220, 0, x + 220, 0);
+      fieldView.ctx.fillStyle = hexToRgba(color, .12 * Math.sin(Math.PI * p)); fieldView.ctx.fillRect(60, 60, 880, 480);
+      const band = fieldView.ctx.createLinearGradient(x - 220, 0, x + 220, 0);
       band.addColorStop(0, hexToRgba(color, 0)); band.addColorStop(.4, hexToRgba(color, .32));
       band.addColorStop(.5, 'rgba(255,255,255,.5)'); band.addColorStop(.6, hexToRgba(color, .32)); band.addColorStop(1, hexToRgba(color, 0));
-      ctx.globalAlpha = 1 - p * .6; ctx.fillStyle = band; ctx.fillRect(60, 60, 880, 480);
+      fieldView.ctx.globalAlpha = 1 - p * .6; fieldView.ctx.fillStyle = band; fieldView.ctx.fillRect(60, 60, 880, 480);
     });
     const mouth = sweep.team ? 60 : 940, back = sweep.team ? mouth - P.rink.goalDepth : mouth + P.rink.goalDepth;
-    ctx.save(); ctx.globalAlpha = 1 - p; ctx.shadowColor = color; ctx.shadowBlur = 24 * canvas.width / 1000;
+    fieldView.ctx.save(); fieldView.ctx.globalAlpha = 1 - p; fieldView.ctx.shadowColor = color; fieldView.ctx.shadowBlur = 24 * fieldView.canvas.width / 1000;
     line(mouth, 230, back, 230, color, 6); line(back, 230, back, 370, color, 6); line(mouth, 370, back, 370, color, 6);
     line(mouth, 230, mouth, 370, '#ffffff', 3);
-    ctx.restore();
+    fieldView.ctx.restore();
   }
   // The goal call over the rink: the scorer's face in a ring of the team's colour, the call ("GOAL",
   // "BANK SHOT!"...) and the scorer's name. It pops in (still, with reduced motion) and fades at the end.
@@ -667,106 +621,107 @@
     const pop = reducedMotion.matches ? 1 : Math.min(1, call.t / .27), scale = 1 + 2.70158 * (pop - 1) ** 3 + 1.70158 * (pop - 1) ** 2;
     const face = skaters[call.scorer]?.querySelector('canvas'), top = face ? 40 : 0;
     const write = (text, y, size) => {
-      badgeCtx.font = `900 ${size}px system-ui, sans-serif`; badgeCtx.lineWidth = size / 14; badgeCtx.strokeStyle = color;
-      badgeCtx.strokeText(text, 0, y); badgeCtx.fillStyle = '#ffffff'; badgeCtx.fillText(text, 0, y);
+      fieldView.badgeCtx.font = `900 ${size}px system-ui, sans-serif`; fieldView.badgeCtx.lineWidth = size / 14; fieldView.badgeCtx.strokeStyle = color;
+      fieldView.badgeCtx.strokeText(text, 0, y); fieldView.badgeCtx.fillStyle = '#ffffff'; fieldView.badgeCtx.fillText(text, 0, y);
     };
-    badgeCtx.save(); badgeCtx.translate(500, 300); if (isPortrait) badgeCtx.rotate(Math.PI / 2); badgeCtx.scale(scale, scale);
-    badgeCtx.globalAlpha = Math.max(0, Math.min(1, (GOAL_CALL_SECONDS - call.t) / .5));
-    badgeCtx.shadowColor = color; badgeCtx.shadowBlur = 30 * canvas.width / 1000;
+    fieldView.badgeCtx.save(); fieldView.badgeCtx.translate(500, 300); if (fieldView.portrait) fieldView.badgeCtx.rotate(Math.PI / 2); fieldView.badgeCtx.scale(scale, scale);
+    fieldView.badgeCtx.globalAlpha = Math.max(0, Math.min(1, (GOAL_CALL_SECONDS - call.t) / .5));
+    fieldView.badgeCtx.shadowColor = color; fieldView.badgeCtx.shadowBlur = 30 * fieldView.canvas.width / 1000;
     if (face) {
-      badgeCtx.beginPath(); badgeCtx.arc(0, -82, 74, 0, Math.PI * 2); badgeCtx.fillStyle = color; badgeCtx.fill();
-      badgeCtx.shadowBlur = 0; badgeCtx.drawImage(face, -66, -148, 132, 132);
-      badgeCtx.shadowBlur = 30 * canvas.width / 1000;
+      fieldView.badgeCtx.beginPath(); fieldView.badgeCtx.arc(0, -82, 74, 0, Math.PI * 2); fieldView.badgeCtx.fillStyle = color; fieldView.badgeCtx.fill();
+      fieldView.badgeCtx.shadowBlur = 0; fieldView.badgeCtx.drawImage(face, -66, -148, 132, 132);
+      fieldView.badgeCtx.shadowBlur = 30 * fieldView.canvas.width / 1000;
     }
-    badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle';
-    const callLabel = anonymousNames && call.scorer < 0 && call.label.endsWith(' WINS!')
+    fieldView.badgeCtx.textAlign = 'center'; fieldView.badgeCtx.textBaseline = 'middle';
+    const callLabel = fieldView.anonymous && call.scorer < 0 && call.label.endsWith(' WINS!')
       ? `${ububallReplay.ANONYMOUS[call.team].toUpperCase()} WINS!`
       : call.label;
-    const callName = anonymousNames && call.scorer >= 0 ? anonymousName(call.scorer) : call.name;
+    const callName = fieldView.anonymous && call.scorer >= 0 ? anonymousName(call.scorer) : call.name;
     write(callLabel, top, 88);
     if (callName) write(callName, top + 66, 34);
-    badgeCtx.restore();
+    fieldView.badgeCtx.restore();
   }
   // Short callouts ("Save!") that pop in over an ubu and drift up as they fade.
   function popup(body, text) {
+    const popups = fieldEffects.popups;
     if (!reducedMotion.matches && popups.length < 8) popups.push({ x: body.x, y: body.y - body.radius - 20, text, team: body.team, life: 1.2, duration: 1.2 });
   }
-  function updatePopups(dt) {
+  function updatePopups(dt, popups) {
     if (reducedMotion.matches) { popups.length = 0; return; }
     for (let i = popups.length - 1; i >= 0; i--) if ((popups[i].life -= dt) <= 0) popups.splice(i, 1);
   }
-  function drawPopups(home, away) {
+  function drawPopups(badgeCtx, popups, isPortrait, width, home, away) {
     for (const p of popups) {
       const age = 1 - p.life / p.duration, t = Math.min(1, age / .2), scale = 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2;
       const color = p.team ? away : home;
       badgeCtx.save(); badgeCtx.translate(p.x, p.y - age * 22); if (isPortrait) badgeCtx.rotate(Math.PI / 2); badgeCtx.scale(scale, scale);
       badgeCtx.globalAlpha = age < .7 ? 1 : (1 - age) / .3;
       badgeCtx.font = '900 26px system-ui, sans-serif'; badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle';
-      badgeCtx.shadowColor = color; badgeCtx.shadowBlur = 12 * canvas.width / 1000;
+      badgeCtx.shadowColor = color; badgeCtx.shadowBlur = 12 * width / 1000;
       badgeCtx.lineWidth = 4; badgeCtx.strokeStyle = color; badgeCtx.strokeText(p.text, 0, 0);
       badgeCtx.fillStyle = '#ffffff'; badgeCtx.fillText(p.text, 0, 0);
       badgeCtx.restore();
     }
   }
   function isCreasing(b, team) {
-    const i = bodies.indexOf(b);
-    const plan = phase === 'plan' && i >= 0 ? plans[i] : null;
+    const i = fieldView.bodies.indexOf(b);
+    const plan = phase === 'plan' && i >= 0 ? (activePlayback?.plans ?? plans)[i] : null;
     const stalwartArmed = Boolean(plan?.superArm || b.superArm) && (b.meter ?? 0) >= 100 && (b.equippedSuper?.key === 'stalwart' || b.superKey === 'stalwart');
     if (b.superActive === 'stalwart' || stalwartArmed) return false;
     return ububallMatch.inCrease(P, b, team);
   }
   // The ubus a standing warning would card: a warned team's ubus in its crease, and the larger
   // team's ubus in a stalled corner.
-  function offenders() {
-    const list = bodies.slice(0, 6).filter(b => fouls.crease[b.team] && isCreasing(b, b.team));
-    if (stalling()) {
-      const [home, away] = cornerTeams();
+  function offenders(fieldFouls = fouls) {
+    const list = fieldView.bodies.slice(0, 6).filter(b => fieldFouls.crease[b.team] && isCreasing(b, b.team));
+    if (stalling(fieldFouls)) {
+      const [home, away] = cornerTeams(fieldFouls);
       if (home.length !== away.length) list.push(...(home.length > away.length ? home : away).filter(b => !list.includes(b)));
     }
     return list;
   }
-  const stalling = () => fouls.corner !== null && fouls.cornerTurns >= ububallMatch.FOULS.stallTurns;
+  const stalling = (fieldFouls = fouls) => fieldFouls.corner !== null && fieldFouls.cornerTurns >= ububallMatch.FOULS.stallTurns;
   // Each team's ubus overlapping the stalled corner.
-  function cornerTeams() {
-    const inside = bodies.slice(0, 6).filter(b => ububallMatch.cornerOf(P, b.x, b.y, b.radius) === fouls.corner);
+  function cornerTeams(fieldFouls = fouls) {
+    const inside = fieldView.bodies.slice(0, 6).filter(b => ububallMatch.cornerOf(P, b.x, b.y, b.radius) === fieldFouls.corner);
     return [0, 1].map(team => inside.filter(b => b.team === team));
   }
-  const foulsShowing = () => fouls.crease[0] || fouls.crease[1] || stalling() || bodies.some(b => b.carded);
+  const foulsShowing = () => fouls.crease[0] || fouls.crease[1] || stalling() || fieldView.bodies.some(b => b.carded);
   // Lucide alert-triangle, on its 24-unit grid.
   const ALERT = new Path2D('M21.73 18l-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z M12 9v4 M12 17h.01');
   function drawAlert(x, y, size, alpha = 1) {
-    badgeCtx.save(); badgeCtx.translate(x, y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
-    badgeCtx.globalAlpha = alpha; badgeCtx.scale(size / 24, size / 24); badgeCtx.translate(-12, -12);
-    badgeCtx.fillStyle = '#0b0d10d9'; badgeCtx.fill(ALERT);
-    badgeCtx.lineWidth = 2; badgeCtx.lineCap = badgeCtx.lineJoin = 'round'; badgeCtx.strokeStyle = '#ffb020'; badgeCtx.stroke(ALERT);
-    badgeCtx.restore();
+    fieldView.badgeCtx.save(); fieldView.badgeCtx.translate(x, y); if (fieldView.portrait) fieldView.badgeCtx.rotate(Math.PI / 2);
+    fieldView.badgeCtx.globalAlpha = alpha; fieldView.badgeCtx.scale(size / 24, size / 24); fieldView.badgeCtx.translate(-12, -12);
+    fieldView.badgeCtx.fillStyle = '#0b0d10d9'; fieldView.badgeCtx.fill(ALERT);
+    fieldView.badgeCtx.lineWidth = 2; fieldView.badgeCtx.lineCap = fieldView.badgeCtx.lineJoin = 'round'; fieldView.badgeCtx.strokeStyle = '#ffb020'; fieldView.badgeCtx.stroke(ALERT);
+    fieldView.badgeCtx.restore();
   }
   // A warning sits just outside the boards by the goal or corner it is about, its name beneath.
   function drawFieldWarning(x, y, words, color, cleared = false) {
-    if (cleared) drawCheck(isPortrait ? x + 13 : x, isPortrait ? y : y - 13, 24);
-    else drawAlert(isPortrait ? x + 13 : x, isPortrait ? y : y - 13, 24);
-    badgeCtx.save(); badgeCtx.translate(x, y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
-    badgeCtx.font = '700 11px system-ui, sans-serif'; badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle'; badgeCtx.fillStyle = color;
-    words.forEach((word, i) => badgeCtx.fillText(word, 0, 7 + i * 12));
-    badgeCtx.restore();
+    if (cleared) drawCheck(fieldView.portrait ? x + 13 : x, fieldView.portrait ? y : y - 13, 24);
+    else drawAlert(fieldView.portrait ? x + 13 : x, fieldView.portrait ? y : y - 13, 24);
+    fieldView.badgeCtx.save(); fieldView.badgeCtx.translate(x, y); if (fieldView.portrait) fieldView.badgeCtx.rotate(Math.PI / 2);
+    fieldView.badgeCtx.font = '700 11px system-ui, sans-serif'; fieldView.badgeCtx.textAlign = 'center'; fieldView.badgeCtx.textBaseline = 'middle'; fieldView.badgeCtx.fillStyle = color;
+    words.forEach((word, i) => fieldView.badgeCtx.fillText(word, 0, 7 + i * 12));
+    fieldView.badgeCtx.restore();
   }
   // A yellow card, tilted, on the ubu's top right.
   function drawCard(b) {
     const r = b.radius * .7;
-    badgeCtx.save(); badgeCtx.translate(b.x + r, isPortrait ? b.y + r : b.y - r); badgeCtx.rotate((isPortrait ? Math.PI / 2 : 0) + .2);
-    badgeCtx.beginPath(); badgeCtx.roundRect(-6, -8, 12, 16, 2); badgeCtx.fillStyle = '#ffd60a'; badgeCtx.fill();
-    badgeCtx.lineWidth = 1.5; badgeCtx.strokeStyle = '#0b0d10'; badgeCtx.stroke();
-    badgeCtx.restore();
+    fieldView.badgeCtx.save(); fieldView.badgeCtx.translate(b.x + r, fieldView.portrait ? b.y + r : b.y - r); fieldView.badgeCtx.rotate((fieldView.portrait ? Math.PI / 2 : 0) + .2);
+    fieldView.badgeCtx.beginPath(); fieldView.badgeCtx.roundRect(-6, -8, 12, 16, 2); fieldView.badgeCtx.fillStyle = '#ffd60a'; fieldView.badgeCtx.fill();
+    fieldView.badgeCtx.lineWidth = 1.5; fieldView.badgeCtx.strokeStyle = '#0b0d10'; fieldView.badgeCtx.stroke();
+    fieldView.badgeCtx.restore();
   }
   // Lucide check, on its 24-unit grid, on a dark disc: a warning the planned turn is predicted to clear.
   const CHECK = new Path2D('M20 6 9 17l-5-5');
   function drawCheck(x, y, size) {
-    badgeCtx.save(); badgeCtx.translate(x, y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
-    badgeCtx.scale(size / 24, size / 24);
-    badgeCtx.beginPath(); badgeCtx.arc(0, 0, 12, 0, Math.PI * 2); badgeCtx.fillStyle = '#0b0d10d9'; badgeCtx.fill();
-    badgeCtx.translate(-12, -12); badgeCtx.scale(.8, .8); badgeCtx.translate(3, 3);
-    badgeCtx.lineWidth = 3; badgeCtx.lineCap = badgeCtx.lineJoin = 'round'; badgeCtx.strokeStyle = '#3ddc84'; badgeCtx.stroke(CHECK);
-    badgeCtx.restore();
+    fieldView.badgeCtx.save(); fieldView.badgeCtx.translate(x, y); if (fieldView.portrait) fieldView.badgeCtx.rotate(Math.PI / 2);
+    fieldView.badgeCtx.scale(size / 24, size / 24);
+    fieldView.badgeCtx.beginPath(); fieldView.badgeCtx.arc(0, 0, 12, 0, Math.PI * 2); fieldView.badgeCtx.fillStyle = '#0b0d10d9'; fieldView.badgeCtx.fill();
+    fieldView.badgeCtx.translate(-12, -12); fieldView.badgeCtx.scale(.8, .8); fieldView.badgeCtx.translate(3, 3);
+    fieldView.badgeCtx.lineWidth = 3; fieldView.badgeCtx.lineCap = fieldView.badgeCtx.lineJoin = 'round'; fieldView.badgeCtx.strokeStyle = '#3ddc84'; fieldView.badgeCtx.stroke(CHECK);
+    fieldView.badgeCtx.restore();
   }
   // What the planned turn is predicted to do to the standing warnings (opponents held, as the
   // prediction plays them): which lapse along the way, and which crease offenders' centres leave.
@@ -774,7 +729,7 @@
     const result = { crease: [false, false], corner: false, left: new Set() };
     if (!fouls.crease[0] && !fouls.crease[1] && !stalling()) return result;
     const copy = structuredClone(fouls), samples = Math.max(...prediction.paths.map(path => path.length));
-    const meta = bodies.map((b, i) => {
+    const meta = fieldView.bodies.map((b, i) => {
       const plan = plans[i];
       const stalwartArmed = Boolean(plan?.superArm || b.superArm) && (b.meter ?? 0) >= 100 && (b.equippedSuper?.key === 'stalwart' || b.superKey === 'stalwart');
       return {
@@ -798,39 +753,39 @@
     result.corner = stalling() && copy.corner === null;
     return result;
   }
-  function cornerWarningY() {
-    const inset = !isPortrait && !videoField && visibleRinkHeight < 600 ? 60 : 30;
-    return fouls.corner > 1 ? 600 - inset : inset;
+  function cornerWarningY(fieldFouls = fouls) {
+    const inset = !fieldView.portrait && !fieldView.field && visibleRinkHeight < 600 ? 60 : 30;
+    return fieldFouls.corner > 1 ? 600 - inset : inset;
   }
-  function drawFouls(text) {
+  function drawFouls(text, fieldFouls) {
     // While planning, a warning the plan is predicted to clear (and each offender predicted to get
     // out) shows a green check in place of its alert.
     const predicted = phase === 'plan' ? predictionCache?.fouls : null;
-    for (const team of [0, 1]) if (fouls.crease[team]) drawFieldWarning(team ? 970 : 30, 180, ['Goal', 'Camping'], text, predicted?.crease[team]);
-    if (stalling()) drawFieldWarning(fouls.corner % 2 ? 970 : 30, cornerWarningY(), ['Corner', 'Stalling'], text, predicted?.corner);
+    for (const team of [0, 1]) if (fieldFouls.crease[team]) drawFieldWarning(team ? 970 : 30, 180, ['Goal', 'Camping'], text, predicted?.crease[team]);
+    if (stalling(fieldFouls)) drawFieldWarning(fieldFouls.corner % 2 ? 970 : 30, cornerWarningY(fieldFouls), ['Corner', 'Stalling'], text, predicted?.corner);
     const flash = reducedMotion.matches ? 1 : .35 + .65 * (.5 + .5 * Math.cos(clockNow() / 1000 * Math.PI * 2.4));
-    const creasing = new Set(bodies.slice(0, 6).filter(b => fouls.crease[b.team] && isCreasing(b, b.team)));
-    for (const b of offenders()) {
+    const creasing = new Set(fieldView.bodies.slice(0, 6).filter(b => fieldFouls.crease[b.team] && isCreasing(b, b.team)));
+    for (const b of offenders(fieldFouls)) {
       if (b.carded) continue;
-      const x = b.x + b.radius * .8, y = isPortrait ? b.y + b.radius * .8 : b.y - b.radius * .8;
-      if (predicted && (creasing.has(b) ? predicted.left.has(bodies.indexOf(b)) : predicted.corner)) drawCheck(x, y, 24);
+      const x = b.x + b.radius * .8, y = fieldView.portrait ? b.y + b.radius * .8 : b.y - b.radius * .8;
+      if (predicted && (creasing.has(b) ? predicted.left.has(fieldView.bodies.indexOf(b)) : predicted.corner)) drawCheck(x, y, 24);
       else drawAlert(x, y, 26, flash);
     }
-    for (const b of bodies.slice(0, 6)) if (b.carded) drawCard(b);
+    for (const b of fieldView.bodies.slice(0, 6)) if (b.carded) drawCard(b);
   }
   // Calls out the cards and the corner reset just given.
   function announceFouls() {
-    for (const i of fouls.cards) popup(bodies[i], 'Yellow card');
+    for (const i of fouls.cards) popup(fieldView.bodies[i], 'Yellow card');
     for (const team of [0, 1]) {
-      const carded = fouls.cards.filter(i => bodies[i].team === team);
-      if (carded.length === 1) bugTab(`Yellow card · ${bodies[carded[0]].name || sideName(team)}`, { team });
+      const carded = fouls.cards.filter(i => fieldView.bodies[i].team === team);
+      if (carded.length === 1) bugTab(`Yellow card · ${fieldView.bodies[carded[0]].name || sideName(team)}`, { team });
       else if (carded.length) bugTab(`${carded.length} yellow cards · ${sideName(team)}`, { team });
     }
     for (const team of [0, 1]) if (fouls.crease[team]) bugTab(`Goal camping · ${sideName(team)}`, { team });
     if (fouls.cornerTurns === ububallMatch.FOULS.stallTurns) bugTab('Corner stalling');
     if (fouls.faceoff) bugTab('Corner reset');
     // The side with more ubus on the ice for the coming turn is on the power play.
-    const out = [0, 1].map(team => bodies.slice(0, 6).filter(b => b.team === team && b.carded).length);
+    const out = [0, 1].map(team => fieldView.bodies.slice(0, 6).filter(b => b.team === team && b.carded).length);
     if (out[0] !== out[1]) { const team = out[0] < out[1] ? 0 : 1; bugTab(`Power play · ${sideName(team)}`, { team, colour: true }); }
     // A card whistles; a warning only just given sounds its alert.
     if (fouls.cards.length) gameAudio()?.playFoul('card');
@@ -840,7 +795,7 @@
     const notes = [];
     if (fouls.faceoff) notes.push('Corner stalling: the ball is reset to centre ice.');
     for (const team of [0, 1]) {
-      const carded = fouls.cards.filter(i => bodies[i].team === team).length;
+      const carded = fouls.cards.filter(i => fieldView.bodies[i].team === team).length;
       if (carded) notes.push(`Yellow card: ${sideHas(team)} ${ubuCount(carded)} out for a turn.`);
     }
     for (const team of [0, 1]) if (fouls.crease[team]) notes.push(`Goal camping: ${sideName(team)} must thin out the crease this turn.`);
@@ -875,7 +830,7 @@
   const CARD_TEXT = 'no meter, back to spawn, out for a turn';
   // The explanation as paragraphs; `act` marks what must happen to clear the warning.
   function foulInfoLines() {
-    const ubus = bodies.slice(0, 6);
+    const ubus = fieldView.bodies.slice(0, 6);
     if (foulInfo.kind === 'corner') {
       const [home, away] = cornerTeams().map(list => list.length);
       return ['Corner stalling', [
@@ -907,48 +862,48 @@
     }
     // Over the field's far half from the foul, so the lit areas stay in view.
     const f = fieldBox, far = foulInfo.kind === 'crease' ? foulInfo.team === 0 : fouls.corner % 2 === 0;
-    const along = isPortrait ? (far ? .27 : .73) : (far ? .7 : .3);
-    foulBox.style.width = Math.min(340 * gameUi.scale(), isPortrait ? f.width - 24 * gameUi.scale() : f.width * .46) + 'px';
-    foulBox.style.maxHeight = (isPortrait ? f.height * .5 : f.height) - 12 * gameUi.scale() + 'px';
-    foulBox.style.left = f.left + f.width * (isPortrait ? .5 : along) + 'px';
-    foulBox.style.top = f.top + f.height * (isPortrait ? along : .5) + 'px';
+    const along = fieldView.portrait ? (far ? .27 : .73) : (far ? .7 : .3);
+    foulBox.style.width = Math.min(340 * gameUi.scale(), fieldView.portrait ? f.width - 24 * gameUi.scale() : f.width * .46) + 'px';
+    foulBox.style.maxHeight = (fieldView.portrait ? f.height * .5 : f.height) - 12 * gameUi.scale() + 'px';
+    foulBox.style.left = f.left + f.width * (fieldView.portrait ? .5 : along) + 'px';
+    foulBox.style.top = f.top + f.height * (fieldView.portrait ? along : .5) + 'px';
   }
   // The open foul's areas, lit under the ubus: the crease and attack zone, or the corner, with the
   // ubus that count ringed (the side that would be carded in amber).
   function drawFoulFocus(text) {
     if (!foulInfo) return;
     const amber = '#ffb020', ring = (list, dashed) => list.forEach(b => {
-      ctx.save(); if (dashed) ctx.setLineDash([4, 5]); circle(b.x, b.y, Math.max(b.radius, b.reach || b.radius) + 7, dashed ? text : amber, 2.5); ctx.restore();
+      fieldView.ctx.save(); if (dashed) fieldView.ctx.setLineDash([4, 5]); circle(b.x, b.y, Math.max(b.radius, b.reach || b.radius) + 7, dashed ? text : amber, 2.5); fieldView.ctx.restore();
     });
     const label = (words, x, y) => {
-      ctx.save(); ctx.translate(x, y); if (isPortrait) ctx.rotate(Math.PI / 2);
-      ctx.font = '800 14px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.lineWidth = 4; ctx.strokeStyle = '#101217'; ctx.strokeText(words, 0, 0); ctx.fillStyle = amber; ctx.fillText(words, 0, 0); ctx.restore();
+      fieldView.ctx.save(); fieldView.ctx.translate(x, y); if (fieldView.portrait) fieldView.ctx.rotate(Math.PI / 2);
+      fieldView.ctx.font = '800 14px system-ui, sans-serif'; fieldView.ctx.textAlign = 'center'; fieldView.ctx.textBaseline = 'middle';
+      fieldView.ctx.lineWidth = 4; fieldView.ctx.strokeStyle = '#101217'; fieldView.ctx.strokeText(words, 0, 0); fieldView.ctx.fillStyle = amber; fieldView.ctx.fillText(words, 0, 0); fieldView.ctx.restore();
     };
-    const ubus = bodies.slice(0, 6);
-    ctx.save();
+    const ubus = fieldView.bodies.slice(0, 6);
+    fieldView.ctx.save();
     if (foulInfo.kind === 'crease') {
       const t = foulInfo.team, mouth = t ? 940 : 60, zone = ububallMatch.attackZoneLine(P, t), from = t ? Math.PI / 2 : -Math.PI / 2;
-      inRink(() => { ctx.globalAlpha = .1; ctx.fillStyle = amber; ctx.fillRect(Math.min(mouth, zone), 60, Math.abs(zone - mouth), 480); });
-      ctx.globalAlpha = .8; line(zone, 60, zone, 540, amber, 2);
-      ctx.beginPath(); ctx.moveTo(mouth, 300); ctx.arc(mouth, 300, ububallMatch.FOULS.crease, from, from + Math.PI); ctx.closePath();
-      ctx.globalAlpha = .22; ctx.fillStyle = amber; ctx.fill(); ctx.globalAlpha = .9; ctx.strokeStyle = amber; ctx.lineWidth = 2; ctx.stroke();
-      ctx.globalAlpha = 1;
-      label('Attack zone', (mouth + zone) / 2, isPortrait ? 112 : 80);
+      inRink(() => { fieldView.ctx.globalAlpha = .1; fieldView.ctx.fillStyle = amber; fieldView.ctx.fillRect(Math.min(mouth, zone), 60, Math.abs(zone - mouth), 480); });
+      fieldView.ctx.globalAlpha = .8; line(zone, 60, zone, 540, amber, 2);
+      fieldView.ctx.beginPath(); fieldView.ctx.moveTo(mouth, 300); fieldView.ctx.arc(mouth, 300, ububallMatch.FOULS.crease, from, from + Math.PI); fieldView.ctx.closePath();
+      fieldView.ctx.globalAlpha = .22; fieldView.ctx.fillStyle = amber; fieldView.ctx.fill(); fieldView.ctx.globalAlpha = .9; fieldView.ctx.strokeStyle = amber; fieldView.ctx.lineWidth = 2; fieldView.ctx.stroke();
+      fieldView.ctx.globalAlpha = 1;
+      label('Attack zone', (mouth + zone) / 2, fieldView.portrait ? 112 : 80);
       label('Crease', mouth + (t ? -40 : 40), 300 - ububallMatch.FOULS.crease - 16);
       ring(ubus.filter(b => b.team === t && isCreasing(b, t)), false);
       ring(ubus.filter(b => b.team === 1 - t && ububallMatch.inAttackZone(P, b, t)), true);
     } else {
       const c = fouls.corner, x = c % 2 ? 840 : 60, y = c > 1 ? 440 : 60;
-      inRink(() => { ctx.globalAlpha = .16; ctx.fillStyle = amber; ctx.fillRect(x, y, 100, 100); });
-      ctx.globalAlpha = .8; ctx.setLineDash([6, 6]);
+      inRink(() => { fieldView.ctx.globalAlpha = .16; fieldView.ctx.fillStyle = amber; fieldView.ctx.fillRect(x, y, 100, 100); });
+      fieldView.ctx.globalAlpha = .8; fieldView.ctx.setLineDash([6, 6]);
       line(c % 2 ? 840 : 160, y, c % 2 ? 840 : 160, y + 100, amber, 2); line(x, c > 1 ? 440 : 160, x + 100, c > 1 ? 440 : 160, amber, 2);
-      ctx.setLineDash([]); ctx.globalAlpha = 1;
+      fieldView.ctx.setLineDash([]); fieldView.ctx.globalAlpha = 1;
       label('Corner', c % 2 ? 790 : 210, c > 1 ? 430 : 170);
       const [home, away] = cornerTeams();
       ring(home, home.length <= away.length); ring(away, away.length <= home.length);
     }
-    ctx.restore();
+    fieldView.ctx.restore();
   }
   // Arcs around a spinning ubu or ball, turning with it. Harder spins (up to 24 rad/s; ubus top out at
   // 22.5, the ball at 24) draw more, longer and bolder arcs, and an outer ring past halfway.
@@ -956,29 +911,29 @@
     const spin = Math.abs(b.omega);
     if (spin < 2.5 || reducedMotion.matches) return;
     const power = Math.min(1, (spin - 2.5) / 20), arcs = spin >= 8 ? 3 : 2, sweep = (.8 + 1.2 * power) * Math.sign(b.omega), back = b.omega < 0;
-    ctx.save(); ctx.strokeStyle = color; ctx.lineCap = 'round';
+    fieldView.ctx.save(); fieldView.ctx.strokeStyle = color; fieldView.ctx.lineCap = 'round';
     for (let k = 0; k < arcs; k++) {
       const start = b.rotation + k * 2 * Math.PI / arcs;
-      ctx.globalAlpha = .2 + .6 * power; ctx.lineWidth = 1.5 + 2.5 * power;
-      ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 4, start, start + sweep, back); ctx.stroke();
+      fieldView.ctx.globalAlpha = .2 + .6 * power; fieldView.ctx.lineWidth = 1.5 + 2.5 * power;
+      fieldView.ctx.beginPath(); fieldView.ctx.arc(b.x, b.y, b.radius + 4, start, start + sweep, back); fieldView.ctx.stroke();
       if (power > .5) {
-        ctx.globalAlpha = power - .5; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 10, start + sweep * .4, start + sweep, back); ctx.stroke();
+        fieldView.ctx.globalAlpha = power - .5; fieldView.ctx.lineWidth = 1.5;
+        fieldView.ctx.beginPath(); fieldView.ctx.arc(b.x, b.y, b.radius + 10, start + sweep * .4, start + sweep, back); fieldView.ctx.stroke();
       }
     }
-    ctx.restore();
+    fieldView.ctx.restore();
   }
   // Discrete rule and snapshot updates may move bodies without physics.
   // Clear only the trails whose bodies were repositioned; normal motion keeps its trail.
-  const trailPositions = () => bodies.map(b => ({ x: b.x, y: b.y }));
-  function clearDiscontinuousTrails(before) {
-    bodies.forEach((b, i) => {
+  const trailPositions = () => fieldView.bodies.map(b => ({ x: b.x, y: b.y }));
+  function clearDiscontinuousTrails(before, trails = fieldEffects.trails) {
+    fieldView.bodies.forEach((b, i) => {
       if (before[i] && (before[i].x !== b.x || before[i].y !== b.y)) trails[i].length = 0;
     });
   }
-  function recordTrails() {
+  function recordTrails(trails = fieldEffects.trails) {
     if (reducedMotion.matches) return;
-    bodies.forEach((b, i) => {
+    fieldView.bodies.forEach((b, i) => {
       if (b.vx * b.vx + b.vy * b.vy < 625) return;
       const trail = trails[i], previous = trail[trail.length - 1];
       if (!previous || (b.x - previous.x) ** 2 + (b.y - previous.y) ** 2 >= 25) {
@@ -990,7 +945,7 @@
       }
     });
   }
-  function drawTrails(home, away) {
+  function drawTrails(ctx, trails, bodies, home, away) {
     ctx.save();
 
     trails.forEach((trail, index) => {
@@ -1113,20 +1068,20 @@
       return { ax: host.x + nx * host.radius, ay: host.y + ny * host.radius,
         bx: ball.x + nx * ball.radius, by: ball.y + ny * ball.radius };
     });
-    ctx.save();
+    fieldView.ctx.save();
     const pulse = reducedMotion.matches ? .65 : .65 + .15 * Math.sin(elapsed * 14);
-    ctx.globalAlpha = pulse;
-    ctx.beginPath(); ctx.moveTo(ends[0].ax, ends[0].ay);
-    ctx.lineTo(ends[0].bx, ends[0].by); ctx.lineTo(ends[1].bx, ends[1].by);
-    ctx.lineTo(ends[1].ax, ends[1].ay); ctx.closePath();
-    ctx.fillStyle = '#44dd662b'; ctx.fill();
-    ctx.lineCap = 'round'; ctx.shadowColor = '#44dd66';
-    ctx.shadowBlur = reducedMotion.matches ? 0 : 8 * canvas.width / 1000;
+    fieldView.ctx.globalAlpha = pulse;
+    fieldView.ctx.beginPath(); fieldView.ctx.moveTo(ends[0].ax, ends[0].ay);
+    fieldView.ctx.lineTo(ends[0].bx, ends[0].by); fieldView.ctx.lineTo(ends[1].bx, ends[1].by);
+    fieldView.ctx.lineTo(ends[1].ax, ends[1].ay); fieldView.ctx.closePath();
+    fieldView.ctx.fillStyle = '#44dd662b'; fieldView.ctx.fill();
+    fieldView.ctx.lineCap = 'round'; fieldView.ctx.shadowColor = '#44dd66';
+    fieldView.ctx.shadowBlur = reducedMotion.matches ? 0 : 8 * fieldView.canvas.width / 1000;
     for (const e of ends) {
       line(e.ax, e.ay, e.bx, e.by, '#44dd66', 3);
       line(e.ax, e.ay, e.bx, e.by, '#d9ffe3', 1);
     }
-    ctx.restore();
+    fieldView.ctx.restore();
   }
   const glowSprites = new Map();
   function glowSprite(color) {
@@ -1211,30 +1166,30 @@
     const level = b.superActive || b.superArm ? 2 : 1, still = reducedMotion.matches;
     const t = still ? 0 : clockNow() / 1000, spin = t * (.6 + level * 1.2);
     const ringR = reach + 6 + level * 2;
-    ctx.save();
+    fieldView.ctx.save();
     const haloR = ringR + 10 + level * 4 + (still ? 0 : Math.sin(t * 3) * 2);
-    ctx.globalAlpha = level === 2 ? .45 : .22;
-    ctx.drawImage(superGlowSprite(key), b.x - haloR, b.y - haloR, haloR * 2, haloR * 2);
-    ctx.lineCap = 'round';
-    ctx.globalAlpha = level === 2 ? .75 : .55;
+    fieldView.ctx.globalAlpha = level === 2 ? .45 : .22;
+    fieldView.ctx.drawImage(superGlowSprite(key), b.x - haloR, b.y - haloR, haloR * 2, haloR * 2);
+    fieldView.ctx.lineCap = 'round';
+    fieldView.ctx.globalAlpha = level === 2 ? .75 : .55;
     circle(b.x, b.y, ringR, c1, level === 2 ? 2.5 : 2);
-    ctx.globalAlpha = level === 2 ? 1 : .85;
+    fieldView.ctx.globalAlpha = level === 2 ? 1 : .85;
     for (const [radius, dir] of level === 2 ? [[ringR, 1], [ringR + 5, -1]] : [[ringR, 1]]) {
       const sprite = conicRingSprite(key, radius, level === 2 ? 3.5 : 3), size = sprite.size;
-      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(spin * dir);
-      ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
-      ctx.restore();
+      fieldView.ctx.save(); fieldView.ctx.translate(b.x, b.y); fieldView.ctx.rotate(spin * dir);
+      fieldView.ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
+      fieldView.ctx.restore();
     }
     if (level === 2 && !still) for (let k = 0; k < 2; k++) {
       const head = spin * 1.5 + k * Math.PI;
       for (let s = 4; s >= 0; s--) {
         const angle = head - s * .08;
-        ctx.globalAlpha = (1 - s / 5) * .8;
-        ctx.fillStyle = s ? (k ? c2 : c1) : '#ffffff';
-        ctx.beginPath(); ctx.arc(b.x + Math.cos(angle) * ringR, b.y + Math.sin(angle) * ringR, 2.2 - s * .3, 0, Math.PI * 2); ctx.fill();
+        fieldView.ctx.globalAlpha = (1 - s / 5) * .8;
+        fieldView.ctx.fillStyle = s ? (k ? c2 : c1) : '#ffffff';
+        fieldView.ctx.beginPath(); fieldView.ctx.arc(b.x + Math.cos(angle) * ringR, b.y + Math.sin(angle) * ringR, 2.2 - s * .3, 0, Math.PI * 2); fieldView.ctx.fill();
       }
     }
-    ctx.restore();
+    fieldView.ctx.restore();
   }
   // Small upright icon badge naming the ready, armed or active super.
   function drawSuperBadge(b, key) {
@@ -1242,20 +1197,20 @@
     if (!icon?.complete || !icon.naturalWidth) return;
     const [c1] = SUPER_AURA_THEMES[key] || ['#ff7197'];
     const size = b.superActive || b.superArm ? 24 : 20, p = badgePoint(b);
-    badgeCtx.save();
-    badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
-    badgeCtx.beginPath(); badgeCtx.arc(0, 0, size / 2 + 2, 0, Math.PI * 2);
-    badgeCtx.fillStyle = '#0b0d10d9'; badgeCtx.fill();
-    badgeCtx.lineWidth = 1.5; badgeCtx.strokeStyle = c1; badgeCtx.stroke();
-    badgeCtx.drawImage(icon, -size / 2, -size / 2, size, size);
-    badgeCtx.restore();
+    fieldView.badgeCtx.save();
+    fieldView.badgeCtx.translate(p.x, p.y); if (fieldView.portrait) fieldView.badgeCtx.rotate(Math.PI / 2);
+    fieldView.badgeCtx.beginPath(); fieldView.badgeCtx.arc(0, 0, size / 2 + 2, 0, Math.PI * 2);
+    fieldView.badgeCtx.fillStyle = '#0b0d10d9'; fieldView.badgeCtx.fill();
+    fieldView.badgeCtx.lineWidth = 1.5; fieldView.badgeCtx.strokeStyle = c1; fieldView.badgeCtx.stroke();
+    fieldView.badgeCtx.drawImage(icon, -size / 2, -size / 2, size, size);
+    fieldView.badgeCtx.restore();
   }
   // Overlay particles (fireworks) draw on the badge layer, above the ubu sprites.
   function drawParticles(home, away, overlay = false) {
-    const c = overlay ? badgeCtx : ctx;
+    const c = overlay ? fieldView.badgeCtx : fieldView.ctx;
     c.save(); c.lineCap = 'round';
     const flames = [];
-    for (const p of particles) {
+    for (const p of fieldEffects.particles) {
       if (Boolean(p.overlay) !== overlay) continue;
       const color = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? home : away), fade = p.life / p.duration;
       c.globalAlpha = Math.min(1, fade * 2) * (p.celebration ? 1 : .65);
@@ -1302,16 +1257,16 @@
     c.restore();
   }
   function kickoff(isNewMatch = false) {
-    clearEffects(); kickoffGlow = 1;
+    clearEffects(); fieldEffects.kickoffGlow = 1;
     play = ububallMatch.newPlay(); scoringPlayer = null; roundTurns = 0; fouls = ububallMatch.newFouls();
-    netFire = null;
+    fieldEffects.netFire = null;
     if (isNewMatch) { matchTicks = 0; tally = ububallMatch.newTally(); closeSummary(); }
     const oldBodies = authoritativeBodies || simBodies;
     authoritativeBodies = null;
     const result = P.kickoff();
     result.slice(0, 6).forEach((b, i) => {
-      ububallMatch.applyStats(P, b, stats[i], matchMode);
-      const entry = teamEntries[i] || practice[i];
+      ububallMatch.applyStats(P, b, stats[i], fieldView.mode);
+      const entry = fieldView.entries[i] || practice[i];
       if (entry?.model) {
         b.personality = entry.model.personality;
         const sObj = entry.equippedSuper || resolveEquippedSuper(entry, i);
@@ -1333,8 +1288,8 @@
     });
     simBodies = result;
     syncViewBodies(simBodies, 0);
-    bodies.slice(0, 6).forEach(b => { b.superArm = false; });
-    return bodies;
+    fieldView.bodies.slice(0, 6).forEach(b => { b.superArm = false; });
+    return fieldView.bodies;
   }
   let activeStatsContext = null;
   // The tally and scores as this view sees them (the home team first).
@@ -1367,7 +1322,7 @@
     $('summary-winner').textContent = winner === 0 ? 'You win!' : `${winnerName} wins!`;
     $('summary-honours').textContent = s && s.game.winner == null ? (s.left.some(Boolean) ? 'Opponent left' : 'Won by forfeit') :
       [h.comeback && 'Comeback from 3 down!', h.shutout && 'Shutout!'].filter(Boolean).join(' ');
-    $('summary-mvp').textContent = mvp === null ? 'No MVP awarded' : `MVP · ${teamEntries[mvp].model.parts.fullName}`;
+    $('summary-mvp').textContent = mvp === null ? 'No MVP awarded' : `MVP · ${fieldView.entries[mvp].model.parts.fullName}`;
     $('summary-play-again').hidden = Boolean(s);
     $('summary-rematch').hidden = !s;
     if (s) updateRematch(s);
@@ -1376,13 +1331,13 @@
   }
   function steamRing(x, y, r) {
     if (reducedMotion.matches) return;
-    for (let i = 0; i < 24 && particles.length < 380; i++) {
+    for (let i = 0; i < 24 && fieldEffects.particles.length < 380; i++) {
       const angle = (i / 24) * Math.PI * 2 + (Math.random() - .5) * 0.2;
       const dist = r * (0.8 + Math.random() * 0.4);
       const px = x + Math.cos(angle) * dist, py = y + Math.sin(angle) * dist;
       const speed = 70 + Math.random() * 90;
       const life = 0.35 + Math.random() * 0.25;
-      particles.push({
+      fieldEffects.particles.push({
         x: px, y: py, px, py,
         vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
         team: -1, color: Math.random() < 0.6 ? '#ffffff' : '#d2f2ff',
@@ -1399,11 +1354,11 @@
       gameAudio()?.playIronSave?.();
     }
     if ((typeof phase !== 'undefined' && phase !== 'play') || own || online?.active || goalReplay || theater || (typeof activePlayback !== 'undefined' && activePlayback)) return;
-    const idx = bodies.indexOf(body);
+    const idx = fieldView.bodies.indexOf(body);
     const simBody = idx >= 0 && simBodies[idx] ? simBodies[idx] : body;
     for (const changed of ububallMatch.gainMeter(P, simBodies, stats, simBody, ububallMatch.METER.save, classicMode())) {
       const cIdx = simBodies.indexOf(changed);
-      const vb = cIdx >= 0 && bodies[cIdx] ? bodies[cIdx] : changed;
+      const vb = cIdx >= 0 && fieldView.bodies[cIdx] ? fieldView.bodies[cIdx] : changed;
       vb.meter = changed.meter;
       dirtyMeters.add(vb);
     }
@@ -1412,12 +1367,12 @@
   function contactMeter(a, b, speed) {
     if ((typeof phase !== 'undefined' && phase !== 'play') || online?.active || goalReplay || theater || (typeof activePlayback !== 'undefined' && activePlayback)) return;
     const tick = matchTicks + Math.round(elapsed / P.DT);
-    const ia = bodies.indexOf(a), ib = bodies.indexOf(b);
+    const ia = fieldView.bodies.indexOf(a), ib = fieldView.bodies.indexOf(b);
     const sa = ia >= 0 && simBodies[ia] ? simBodies[ia] : a;
     const sb = ib >= 0 && simBodies[ib] ? simBodies[ib] : b;
     for (const changed of ububallMatch.contactMeter(P, simBodies, stats, sa, sb, speed, tick, classicMode())) {
       const cIdx = simBodies.indexOf(changed);
-      const vb = cIdx >= 0 && bodies[cIdx] ? bodies[cIdx] : changed;
+      const vb = cIdx >= 0 && fieldView.bodies[cIdx] ? fieldView.bodies[cIdx] : changed;
       vb.meter = changed.meter;
       dirtyMeters.add(vb);
     }
@@ -1444,7 +1399,7 @@
     cpuClient.cancel();
     if (online?.active) return;
     cpu = Array.isArray(initialPlans) && initialPlans.length === 3 ? initialPlans : P.cpuPlans(simBodies, () => .5, scores);
-    cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies: simBodies, stats, scores, turn, fouls },
+    cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: fieldView.mode, bodies: simBodies, stats, scores, turn, fouls },
       { level: demo ? demoLevels[1] : cpuLevel, seed: turn }).then(result => {
       if (generation !== cpuGeneration || !result || online?.active) return;
       if (result.error) console.warn('CPU search unavailable; using baseline plan.');
@@ -1525,7 +1480,7 @@
     const wrap = document.createElement('div'); wrap.className = 'super-panel'; wrap.id = `super-panel-${playerIndex}`;
     const topRow = document.createElement('div'); topRow.className = 'super-row';
     const label = document.createElement('span'); label.className = 'super-name-badge'; label.id = `super-name-${playerIndex}`;
-    const initialSuper = bodies?.[playerIndex]?.equippedSuper || teamEntries[playerIndex]?.equippedSuper || P.SUPERS[0];
+    const initialSuper = fieldView.bodies?.[playerIndex]?.equippedSuper || fieldView.entries[playerIndex]?.equippedSuper || P.SUPERS[0];
     const icon = document.createElement('img');
     icon.className = 'super-icon';
     icon.id = `super-icon-${playerIndex}`;
@@ -1537,11 +1492,11 @@
     nameSpan.textContent = initialSuper.name;
     label.append(icon, nameSpan);
     const pct = document.createElement('span'); pct.className = 'super-pct'; pct.id = `super-pct-${playerIndex}`;
-    pct.textContent = `${Math.round(bodies?.[playerIndex]?.meter ?? 0)}%`;
+    pct.textContent = `${Math.round(fieldView.bodies?.[playerIndex]?.meter ?? 0)}%`;
     topRow.append(label, pct);
     const meterTrack = document.createElement('div'); meterTrack.className = 'super-meter-track';
     const meterFill = document.createElement('i'); meterFill.className = 'super-meter-fill'; meterFill.id = `super-fill-${playerIndex}`;
-    setMeterFill(meterFill, bodies?.[playerIndex]?.meter ?? 0);
+    setMeterFill(meterFill, fieldView.bodies?.[playerIndex]?.meter ?? 0);
     meterTrack.append(meterFill);
     wrap.append(topRow, meterTrack);
     return wrap;
@@ -1550,16 +1505,16 @@
   const KNOB_SWEEP = 150, knobs = [];
   const KNOB_RANGE = { angle: [0, 360], power: [0, 100], spin: [-100, 100] };
   // Screen degrees, clockwise from up, of a field angle in radians (portrait turns the rink a quarter).
-  const screenDegrees = angle => ((angle * 180 / Math.PI + 90 - (isPortrait ? 90 : 0)) % 360 + 360) % 360;
+  const screenDegrees = angle => ((angle * 180 / Math.PI + 90 - (fieldView.portrait ? 90 : 0)) % 360 + 360) % 360;
   function knobValue(kind, i) {
     const plan = plans[i];
     return kind === 'angle' ? screenDegrees(plan.angle) : kind === 'power' ? plan.power * 100 : (plan.spin || 0) * 100;
   }
-  const knobEditable = i => phase === 'plan' && Boolean(plans[i] && bodies[i] && !bodies[i].stunned && !bodies[i].carded);
+  const knobEditable = i => phase === 'plan' && Boolean(plans[i] && fieldView.bodies[i] && !fieldView.bodies[i].stunned && !fieldView.bodies[i].carded);
   function setKnob(kind, i, value) {
     if (!knobEditable(i)) return;
     const plan = plans[i], [min, max] = KNOB_RANGE[kind];
-    if (kind === 'angle') plan.angle = (((value - 90 + (isPortrait ? 90 : 0)) % 360 + 360) % 360) * Math.PI / 180;
+    if (kind === 'angle') plan.angle = (((value - 90 + (fieldView.portrait ? 90 : 0)) % 360 + 360) % 360) * Math.PI / 180;
     else plan[kind] = Math.max(min, Math.min(max, value)) / 100;
     plan.guard = false;
     sync(); draw();
@@ -1609,7 +1564,7 @@
   knobRow.append(...['angle', 'power', 'spin'].map(makeKnob));
   function renderKnobs() {
     for (const knob of knobs) {
-      const i = selected, b = bodies[i];
+      const i = selected, b = fieldView.bodies[i];
       if (!b || !plans[i]) continue;
       const value = knobValue(knob.kind, i);
       // Power sweeps 270° from lower left; spin runs either way from the top; angle is all needle.
@@ -1622,7 +1577,7 @@
       const editable = knobEditable(i);
       knob.wrap.classList.toggle('disabled', !editable);
       knob.svg.setAttribute('aria-disabled', String(!editable));
-      knob.svg.setAttribute('aria-label', `${knob.kind[0].toUpperCase() + knob.kind.slice(1)} for ${teamEntries[i]?.model?.parts.fullName || 'ubu'}`);
+      knob.svg.setAttribute('aria-label', `${knob.kind[0].toUpperCase() + knob.kind.slice(1)} for ${fieldView.entries[i]?.model?.parts.fullName || 'ubu'}`);
       knob.svg.setAttribute('aria-valuenow', Math.round(value));
       knob.svg.setAttribute('aria-valuetext', knob.kind === 'angle' ? `${shown} degrees` : knob.kind === 'power' ? `${shown}% power` :
         shown === 0 ? 'No spin' : `${Math.abs(shown)}% ${shown < 0 ? 'counterclockwise' : 'clockwise'}`);
@@ -1644,7 +1599,7 @@
       shownScores[team] = scores[team];
       $(team ? 'away-score' : 'home-score').textContent = scores[team];
     }
-    const curB = bodies[selected];
+    const curB = fieldView.bodies[selected];
     const isStunned = Boolean(curB?.stunned);
     if (isStunned) {
       plans[selected].power = plans[selected].spin = 0;
@@ -1658,21 +1613,21 @@
     $('shot-spin').style.setProperty('--spin-start', Math.min(50, (spinValue + 100) / 2) + '%');
     $('shot-spin').style.setProperty('--spin-end', Math.max(50, (spinValue + 100) / 2) + '%');
     $('shot-spin').setAttribute('aria-valuetext', spinValue === 0 ? 'No spin' : `${Math.abs(spinValue)}% ${spinValue < 0 ? 'counterclockwise' : 'clockwise'}`);
-    $('shot-spin').setAttribute('aria-label', `Spin for ${teamEntries[selected].model.parts.fullName}`);
+    $('shot-spin').setAttribute('aria-label', `Spin for ${fieldView.entries[selected].model.parts.fullName}`);
     [...$('team').children].forEach((button, i) => {
       button.classList.toggle('selected', i === selected);
       const select = button.querySelector('.card-select');
       select.setAttribute('aria-pressed', String(i === selected)); select.disabled = !planning;
       const small = button.querySelector('small');
       if (small) {
-        if (bodies[i]?.carded) small.textContent = 'Yellow card · sits out this turn';
-        else if (bodies[i]?.stunned) small.textContent = '💫 Stunned this turn';
+        if (fieldView.bodies[i]?.carded) small.textContent = 'Yellow card · sits out this turn';
+        else if (fieldView.bodies[i]?.stunned) small.textContent = '💫 Stunned this turn';
         else if (plans[i].guard) small.textContent = 'Guarding';
-        else if (bodies[i] && P.dazeSlow(bodies[i]) > 0) small.textContent = `Dazed · launch −${Math.round(P.dazeSlow(bodies[i]) * 100)}%`;
+        else if (fieldView.bodies[i] && P.dazeSlow(fieldView.bodies[i]) > 0) small.textContent = `Dazed · launch −${Math.round(P.dazeSlow(fieldView.bodies[i]) * 100)}%`;
         else small.textContent = `${Math.round(plans[i].power * 100)}% power · ${Math.round((plans[i].spin || 0) * 100)}% spin`;
       }
     });
-    bodies.slice(0, 6).forEach((b, i) => {
+    fieldView.bodies.slice(0, 6).forEach((b, i) => {
       const pctNode = $(`super-pct-${i}`);
       const fillNode = $(`super-fill-${i}`);
       if (fillNode) setMeterFill(fillNode, b.meter);
@@ -1746,7 +1701,7 @@
   }
   function openStatDrawer(i) {
     if (drawerClosed.player === i && performance.now() - drawerClosed.at < 400) return;
-    const entry = teamEntries[i], close = document.createElement('button');
+    const entry = fieldView.entries[i], close = document.createElement('button');
     close.type = 'button'; close.className = 'icon-button'; close.setAttribute('aria-label', 'Close stats'); close.append(gameUi.icon('x'));
     close.onclick = () => statDrawer.hidePopover();
     const titles = document.createElement('div'); titles.className = 'card-titles';
@@ -1777,7 +1732,7 @@
   };
   function buildTeam() {
     if (statDrawer.matches(':popover-open')) statDrawer.hidePopover();
-    materialEmitters = teamEntries.map(entry => {
+    fieldEffects.materialEmitters = fieldView.entries.map(entry => {
       const seen = new Set();
       const styles = [];
       for (const attribute of Object.values(entry.model.attributes)) {
@@ -1792,10 +1747,10 @@
     $('home-lineup').replaceChildren();
     if ($('cpu-team')) $('cpu-team').replaceChildren();
     $('skaters').replaceChildren();
-    teamEntries.forEach((entry, i) => {
+    fieldView.entries.forEach((entry, i) => {
       if (entry.model && entry.model.stats) stats[i] = classicMode() ? normalStats() : { ...entry.model.stats };
     });
-    skaters = teamEntries.map((entry, i) => {
+    skaters = fieldView.entries.map((entry, i) => {
       const node = document.createElement('div'); node.className = 'skater';
       const svg = ubuRender(entry.model, 'ball-ubu'); node.append(svg); $('skaters').append(node);
       // Rasterize once per roster; retain the SVG if decoding is unavailable.
@@ -1810,7 +1765,7 @@
       image.src = url;
       return node;
     });
-    teamEntries.slice(0, 3).forEach((entry, i) => {
+    fieldView.entries.slice(0, 3).forEach((entry, i) => {
       const button = document.createElement('div'); button.className = 'team-card'; button.id = `player-${i}`;
       const select = document.createElement('button'); select.type = 'button'; select.className = 'card-select';
       const titles = document.createElement('div'); titles.className = 'card-titles';
@@ -1833,7 +1788,7 @@
       $('home-lineup').append(lineup);
     });
     if ($('cpu-team')) {
-      teamEntries.slice(3, 6).forEach((entry, idx) => {
+      fieldView.entries.slice(3, 6).forEach((entry, idx) => {
         const i = idx + 3;
         const card = document.createElement('div'); card.className = 'team-card cpu-card'; card.id = `player-${i}`;
         const header = document.createElement('div'); header.className = 'card-header';
@@ -1879,7 +1834,7 @@
       const data = {
         version: ububallMatch.VERSION,
         physics: P.VERSION,
-        mode: matchMode,
+        mode: fieldView.mode,
         level: cpuLevel,
         scores: [...scores],
         turn,
@@ -1890,10 +1845,10 @@
         roundTurns,
         matchTicks,
         roster: roster.map(entryData),
-        teamEntries: teamEntries.map(entryData),
+        teamEntries: fieldView.entries.map(entryData),
         bodies: ububallReplay.snapshot(activeSim),
         turnPlans: launchState ? launchState.turnPlans : null,
-        plans: launchState ? null : (Array.isArray(plans) ? plans.map((p, i) => ({ angle: p.angle, power: p.power, spin: p.spin || 0, superArm: Boolean(bodies[i]?.superArm || p.superArm), guard: Boolean(p.guard) })) : null),
+        plans: launchState ? null : (Array.isArray(plans) ? plans.map((p, i) => ({ angle: p.angle, power: p.power, spin: p.spin || 0, superArm: Boolean(fieldView.bodies[i]?.superArm || p.superArm), guard: Boolean(p.guard) })) : null),
         cpu: launchState ? null : (Array.isArray(cpu) ? cpu.map(p => ({ angle: p.angle, power: p.power, spin: p.spin || 0, superArm: Boolean(p.superArm), guard: Boolean(p.guard) })) : null),
         cpuDone: launchState ? false : Boolean(cpuDone),
         recording: recording ? structuredClone(recording) : null
@@ -1915,16 +1870,16 @@
       playSegments = [];
       cpuMode = saved.mode || 'standard';
       cpuLevel = saved.level || 'medium';
-      matchMode = cpuMode;
+      fieldView.mode = cpuMode;
       const radio = document.querySelector(`input[name="cpu-level"][value="${cpuLevel}"]`);
       if (radio) radio.checked = true;
       document.body.classList.toggle('classic-match', classicMode());
-      showMode(matchMode);
+      showMode(fieldView.mode);
 
       roster = saved.roster.map(restoreEntry);
       draft = [...roster];
-      teamEntries = saved.teamEntries.map(restoreEntry);
-      stats = teamEntries.map(entry => classicMode() ? normalStats() : { ...(entry?.model?.stats || normalStats()) });
+      fieldView.entries = saved.teamEntries.map(restoreEntry);
+      stats = fieldView.entries.map(entry => classicMode() ? normalStats() : { ...(entry?.model?.stats || normalStats()) });
       stopFanfare();
       gameAudio()?.stop();
 
@@ -1932,7 +1887,7 @@
       turn = saved.turn;
       fouls = { ...ububallMatch.newFouls(), ...saved.fouls };
       tally = saved.tally || ububallMatch.newTally();
-      recording = saved.recording || ububallReplay.create({ mode: matchMode, names: ['You', 'CPU'], ubus: teamEntries.map(e => ({ dna: e.dna, super: e.equippedSuper?.id ?? null })) });
+      recording = saved.recording || ububallReplay.create({ mode: fieldView.mode, names: ['You', 'CPU'], ubus: fieldView.entries.map(e => ({ dna: e.dna, super: e.equippedSuper?.id ?? null })) });
       play = ububallMatch.newPlay(saved.play);
       // Older snapshots lack attribution. Use completed turns for the clock and round position.
       matchTicks = saved.matchTicks ?? 0;
@@ -1953,7 +1908,7 @@
       }
       buildTeam();
       restored.slice(0, 6).forEach((b, i) => {
-        const entry = teamEntries[i];
+        const entry = fieldView.entries[i];
         if (entry?.model) {
           b.personality = entry.model.personality;
           const sObj = classicMode() ? null : (entry.equippedSuper || b.equippedSuper || resolveEquippedSuper(entry, i));
@@ -2005,23 +1960,23 @@
   function newMatch(playJingle = false) {
     authoritativeBodies = null;
     endGoalReplay(); playSegments = []; saveRecording();
-    matchMode = cpuMode;
+    fieldView.mode = cpuMode;
     document.body.classList.toggle('classic-match', classicMode());
-    showMode(matchMode);
+    showMode(fieldView.mode);
     stats = [...draft, ...practice.slice(3)].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
     stopFanfare(); gameAudio()?.stop();
-    roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
+    roster = [...draft]; fieldView.entries = [...roster, ...practice.slice(3)]; fieldView.bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     if (!demo) {
-      recording = ububallReplay.create({ mode: matchMode, names: ['You', 'CPU'], ubus: bodies.slice(0, 6).map((b, i) => ({ dna: teamEntries[i].dna, super: b.equippedSuper?.id ?? null })) });
+      recording = ububallReplay.create({ mode: fieldView.mode, names: ['You', 'CPU'], ubus: fieldView.bodies.slice(0, 6).map((b, i) => ({ dna: fieldView.entries[i].dna, super: b.equippedSuper?.id ?? null })) });
     }
     resetPlans();
     if (!demo) saveActiveMatch();
     say('Drag from an ubu toward your target to aim. Drag its arrowhead to adjust power and direction.'); draw();
     if (playJingle) gameAudio()?.playGameStart?.();
   }
-  function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
-  function line(x1, y1, x2, y2, color, width = 2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
-  function circle(x, y, r, color, width = 2) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
+  function rounded(x, y, width, height, radius) { fieldView.ctx.beginPath(); fieldView.ctx.roundRect(x, y, width, height, radius); }
+  function line(x1, y1, x2, y2, color, width = 2) { fieldView.ctx.beginPath(); fieldView.ctx.moveTo(x1, y1); fieldView.ctx.lineTo(x2, y2); fieldView.ctx.strokeStyle = color; fieldView.ctx.lineWidth = width; fieldView.ctx.stroke(); }
+  function circle(x, y, r, color, width = 2) { fieldView.ctx.beginPath(); fieldView.ctx.arc(x, y, r, 0, Math.PI * 2); fieldView.ctx.strokeStyle = color; fieldView.ctx.lineWidth = width; fieldView.ctx.stroke(); }
   function impulseGeometry(body, plan) {
     if (!body || !plan) return { ringR: 0, scale: 0, distance: 0, x: body?.x || 0, y: body?.y || 0, visible: false };
     const activeSuper = body.superActive || ((body.superArm && (body.meter ?? 0) >= 100) ? body.equippedSuper?.key : null);
@@ -2043,35 +1998,35 @@
     const startY = body.y + Math.sin(plan.angle) * arrow.ringR;
     const endX = arrow.x, endY = arrow.y;
 
-    ctx.save();
-    if (plan.guard) ctx.globalAlpha = .25; // Kept while guarding, ready to come back.
-    ctx.beginPath();
-    ctx.moveTo(startX, startY);
-    ctx.lineTo(endX, endY);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
-    ctx.stroke();
+    fieldView.ctx.save();
+    if (plan.guard) fieldView.ctx.globalAlpha = .25; // Kept while guarding, ready to come back.
+    fieldView.ctx.beginPath();
+    fieldView.ctx.moveTo(startX, startY);
+    fieldView.ctx.lineTo(endX, endY);
+    fieldView.ctx.strokeStyle = color;
+    fieldView.ctx.lineWidth = 4;
+    fieldView.ctx.lineCap = 'round';
+    fieldView.ctx.stroke();
 
     // Arrowhead at the tip of the impulse arrow
     const tipAngle = plan.angle;
     for (const offset of [-0.55, 0.55]) {
       line(endX, endY, endX - Math.cos(tipAngle + offset) * 14, endY - Math.sin(tipAngle + offset) * 14, color, 4);
     }
-    ctx.restore();
+    fieldView.ctx.restore();
 
   }
   function boxPoint(r, p) {
-    return isPortrait ? { x: r.left + p.y / 600 * r.width, y: r.top + (1 - p.x / 1000) * r.height }
+    return fieldView.portrait ? { x: r.left + p.y / 600 * r.width, y: r.top + (1 - p.x / 1000) * r.height }
       : { x: r.left + p.x / 1000 * r.width, y: r.top + p.y / 600 * r.height };
   }
-  const screenPoint = p => boxPoint(canvas.getBoundingClientRect(), p);
+  const screenPoint = p => boxPoint(fieldView.canvas.getBoundingClientRect(), p);
   function badgePoint(b) {
-    return isPortrait ? { x: b.x - b.radius * .65, y: b.y - b.radius * .65 } : { x: b.x - b.radius * .65, y: b.y + b.radius * .65 };
+    return fieldView.portrait ? { x: b.x - b.radius * .65, y: b.y - b.radius * .65 } : { x: b.x - b.radius * .65, y: b.y + b.radius * .65 };
   }
   function fieldTarget(event) {
     const near = p => { const q = screenPoint(p); return Math.hypot(q.x - event.clientX, q.y - event.clientY) <= 22 * gameUi.scale(); };
-    const own = bodies.slice(0, 3);
+    const own = fieldView.bodies.slice(0, 3);
     const arrow = own.findIndex((b, i) => { const a = impulseGeometry(b, plans[i]); return a.visible && near(a); });
     if (arrow >= 0) return { mode: 'arrow', index: arrow };
     const p = point(event);
@@ -2081,8 +2036,8 @@
   // (and without the rink shake), so placing the control never forces the page to lay out again.
   let fieldBox = null;
   function measureField() {
-    const r = canvas.getBoundingClientRect(), stage = stageArea.getBoundingClientRect(), control = $('field-spin');
-    fieldBox = { left: r.left - stage.left - shakeX, top: r.top - stage.top - shakeY, width: r.width, height: r.height,
+    const r = fieldView.canvas.getBoundingClientRect(), stage = stageArea.getBoundingClientRect(), control = $('field-spin');
+    fieldBox = { left: r.left - stage.left - fieldEffects.shakeX, top: r.top - stage.top - fieldEffects.shakeY, width: r.width, height: r.height,
       stageWidth: stage.width, stageHeight: stage.height, controlWidth: control.offsetWidth, controlHeight: control.offsetHeight };
   }
   // A field point in the stage's coordinates (screenPoint, without reading the page).
@@ -2094,8 +2049,8 @@
     control.style.visibility = visible ? 'visible' : 'hidden';
     control.inert = !visible;
     if (!visible) return;
-    const b = bodies[selected], center = stagePoint(b), r = fieldBox;
-    const radius = b.radius * (isPortrait ? r.height / 1000 : r.width / 1000);
+    const b = fieldView.bodies[selected], center = stagePoint(b), r = fieldBox;
+    const radius = b.radius * (fieldView.portrait ? r.height / 1000 : r.width / 1000);
     const width = r.controlWidth, height = r.controlHeight;
     const arrow = stagePoint(impulseGeometry(b, plans[selected]));
     // Prefer the side opposite the arrow, then clamp inside the stage near the edges.
@@ -2115,10 +2070,10 @@
   let predictionCache = null, predictionRev = 0;
   function dirtyPrediction() { predictionRev++; }
   function predictionKey() {
-    const ball = bodies[6];
-    let k = `${predictionRev}|${turn}|${matchMode}|${fouls.crease[0] ? 1 : 0},${fouls.crease[1] ? 1 : 0}|${ball ? ball.x + ',' + ball.y : ''}`;
+    const ball = fieldView.bodies[6];
+    let k = `${predictionRev}|${turn}|${fieldView.mode}|${fouls.crease[0] ? 1 : 0},${fouls.crease[1] ? 1 : 0}|${ball ? ball.x + ',' + ball.y : ''}`;
     for (let i = 0; i < 3; i++) {
-      const p = plans[i], b = bodies[i];
+      const p = plans[i], b = fieldView.bodies[i];
       if (p) k += `|${p.angle},${p.power},${p.spin || 0},${p.guard ? 1 : 0},${b?.superArm || p.superArm ? 1 : 0},${b?.carded ? 1 : 0}`;
     }
     return k;
@@ -2127,10 +2082,10 @@
   function drawPrediction(home, away) {
     const key = predictionKey();
     if (predictionCache?.key !== key) {
-      const data = P.predictTurn(bodies, plans);
+      const data = P.predictTurn(fieldView.bodies, plans);
       predictionCache = { key, data, fouls: predictFouls(data) };
     }
-    cachedLayer(predictionLayer, [canvas.width, canvas.height, home, away, isPortrait, matchMode, key].join(), () => paintPrediction(predictionCache.data, home, away));
+    cachedLayer(predictionLayer, [fieldView.canvas.width, fieldView.canvas.height, home, away, fieldView.portrait, fieldView.mode, key].join(), () => paintPrediction(predictionCache.data, home, away));
   }
   function drawPredictedGoalGlow(home, away) {
     const data = predictionCache?.data;
@@ -2151,54 +2106,54 @@
     const baseAlpha = 0.25 + 0.15 * (1 - u);
     const peakAlpha = 0.45 + 0.55 * u;
     const alpha = baseAlpha + (peakAlpha - baseAlpha) * pulse;
-    const blur = (8 + 20 * u * (0.6 + 0.4 * pulse)) * (canvas.width / 1000);
+    const blur = (8 + 20 * u * (0.6 + 0.4 * pulse)) * (fieldView.canvas.width / 1000);
 
     const depth = P.rink.goalDepth;
     const mouthX = defendingSide ? 940 : 60;
     const backX = defendingSide ? 940 + depth : 60 - depth;
     const minX = Math.min(mouthX, backX);
 
-    ctx.save();
-    ctx.fillStyle = color;
-    ctx.globalAlpha = (0.04 + 0.16 * u) * (0.6 + 0.4 * pulse);
-    ctx.fillRect(minX, 230, depth, 140);
+    fieldView.ctx.save();
+    fieldView.ctx.fillStyle = color;
+    fieldView.ctx.globalAlpha = (0.04 + 0.16 * u) * (0.6 + 0.4 * pulse);
+    fieldView.ctx.fillRect(minX, 230, depth, 140);
 
-    ctx.strokeStyle = color;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = blur;
-    ctx.globalAlpha = Math.min(1, alpha);
-    ctx.lineWidth = 4 + 3 * u;
-    ctx.beginPath();
-    ctx.moveTo(mouthX, 230);
-    ctx.lineTo(backX, 230);
-    ctx.lineTo(backX, 370);
-    ctx.lineTo(mouthX, 370);
-    ctx.stroke();
+    fieldView.ctx.strokeStyle = color;
+    fieldView.ctx.shadowColor = color;
+    fieldView.ctx.shadowBlur = blur;
+    fieldView.ctx.globalAlpha = Math.min(1, alpha);
+    fieldView.ctx.lineWidth = 4 + 3 * u;
+    fieldView.ctx.beginPath();
+    fieldView.ctx.moveTo(mouthX, 230);
+    fieldView.ctx.lineTo(backX, 230);
+    fieldView.ctx.lineTo(backX, 370);
+    fieldView.ctx.lineTo(mouthX, 370);
+    fieldView.ctx.stroke();
 
-    ctx.lineWidth = 5 + 4 * u;
+    fieldView.ctx.lineWidth = 5 + 4 * u;
     line(mouthX, 230, mouthX, 370, color, 5 + 4 * u);
-    ctx.restore();
+    fieldView.ctx.restore();
   }
   function paintPrediction(prediction, home, away) {
     prediction.paths.forEach((points, index) => {
       if (points.length < 2) return;
-      const isBall = bodies[index].team === -1;
-      const color = isBall ? '#f2efe9' : bodies[index].team === 0 ? home : away;
+      const isBall = fieldView.bodies[index].team === -1;
+      const color = isBall ? '#f2efe9' : fieldView.bodies[index].team === 0 ? home : away;
       const baseAlpha = isBall ? .9 : .65;
-      ctx.save();
-      ctx.setLineDash(isBall ? [3, 4] : [4, 4]);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = isBall ? 2.5 : 2;
+      fieldView.ctx.save();
+      fieldView.ctx.setLineDash(isBall ? [3, 4] : [4, 4]);
+      fieldView.ctx.strokeStyle = color;
+      fieldView.ctx.lineWidth = isBall ? 2.5 : 2;
 
       let splitIdx = 0;
       while (splitIdx < points.length && prediction.horizon - points[splitIdx].tick >= 240) splitIdx++;
       const solidEnd = Math.min(points.length - 1, splitIdx);
       if (solidEnd >= 1) {
-        ctx.globalAlpha = baseAlpha;
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i <= solidEnd; i++) ctx.lineTo(points[i].x, points[i].y);
-        ctx.stroke();
+        fieldView.ctx.globalAlpha = baseAlpha;
+        fieldView.ctx.beginPath();
+        fieldView.ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i <= solidEnd; i++) fieldView.ctx.lineTo(points[i].x, points[i].y);
+        fieldView.ctx.stroke();
       }
 
       if (solidEnd < points.length - 1) {
@@ -2210,83 +2165,83 @@
           const end = Math.min(points.length - 1, start + step);
           const midTick = points[Math.floor((start + end) / 2)].tick;
           const fade = Math.max(0, Math.min(1, (prediction.horizon - midTick) / 240));
-          ctx.globalAlpha = fade * baseAlpha;
-          ctx.beginPath();
-          ctx.moveTo(points[start].x, points[start].y);
-          for (let i = start + 1; i <= end; i++) ctx.lineTo(points[i].x, points[i].y);
-          ctx.stroke();
+          fieldView.ctx.globalAlpha = fade * baseAlpha;
+          fieldView.ctx.beginPath();
+          fieldView.ctx.moveTo(points[start].x, points[start].y);
+          for (let i = start + 1; i <= end; i++) fieldView.ctx.lineTo(points[i].x, points[i].y);
+          fieldView.ctx.stroke();
         }
       }
-      ctx.restore();
+      fieldView.ctx.restore();
     });
     // In Pulse, a short tick across each moving path marks where the turn is expected to end.
-    const end = pulseMode() ? ububallMatch.turnTicks(matchMode) : 0;
+    const end = pulseMode() ? ububallMatch.turnTicks(fieldView.mode) : 0;
     prediction.paths.forEach((points, index) => {
       const k = end ? points.findIndex(p => p.tick >= end) : -1;
       if (k < 1) return;
       const from = points[k - 1], to = points[k], dx = to.x - from.x, dy = to.y - from.y, d = Math.hypot(dx, dy);
       if (!d) return;
       const t = (end - from.tick) / (to.tick - from.tick), x = from.x + dx * t, y = from.y + dy * t;
-      const isBall = bodies[index].team === -1, half = isBall ? 6 : 8, nx = -dy / d * half, ny = dx / d * half;
-      ctx.save(); ctx.globalAlpha = isBall ? .95 : .8;
-      line(x - nx, y - ny, x + nx, y + ny, isBall ? '#f2efe9' : bodies[index].team === 0 ? home : away, 2.5);
-      ctx.restore();
+      const isBall = fieldView.bodies[index].team === -1, half = isBall ? 6 : 8, nx = -dy / d * half, ny = dx / d * half;
+      fieldView.ctx.save(); fieldView.ctx.globalAlpha = isBall ? .95 : .8;
+      line(x - nx, y - ny, x + nx, y + ny, isBall ? '#f2efe9' : fieldView.bodies[index].team === 0 ? home : away, 2.5);
+      fieldView.ctx.restore();
     });
     // Where the predicted ball catches fire: a small flame on its path.
     if (prediction.ignition) {
       const { x, y, team } = prediction.ignition;
       const ignitionColor = team === 1 ? away : home;
-      ctx.save(); ctx.translate(x, y); if (isPortrait) ctx.rotate(Math.PI / 2);
-      ctx.translate(-12, -12);
-      ctx.globalAlpha = .95; ctx.fillStyle = ignitionColor; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
-      ctx.lineJoin = 'round';
-      ctx.fill(IGNITION_FLAME); ctx.stroke(IGNITION_FLAME);
-      ctx.restore();
+      fieldView.ctx.save(); fieldView.ctx.translate(x, y); if (fieldView.portrait) fieldView.ctx.rotate(Math.PI / 2);
+      fieldView.ctx.translate(-12, -12);
+      fieldView.ctx.globalAlpha = .95; fieldView.ctx.fillStyle = ignitionColor; fieldView.ctx.strokeStyle = '#ffffff'; fieldView.ctx.lineWidth = 1.5;
+      fieldView.ctx.lineJoin = 'round';
+      fieldView.ctx.fill(IGNITION_FLAME); fieldView.ctx.stroke(IGNITION_FLAME);
+      fieldView.ctx.restore();
     }
     if (prediction.goalTargets) {
       for (const target of prediction.goalTargets) {
         if (target.team >= 0 && !prediction.paths[target.index].some(p => Math.hypot(p.x - prediction.paths[target.index][0].x, p.y - prediction.paths[target.index][0].y) > 3)) continue;
         const isBall = target.team < 0;
         const color = isBall ? '#f2efe9' : target.team === 0 ? home : away;
-        ctx.save();
-        ctx.translate(target.x, target.y);
-        if (isPortrait) ctx.rotate(Math.PI / 2);
-        ctx.beginPath();
-        ctx.arc(0, 0, 7.5, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(11, 13, 16, 0.75)';
-        ctx.fill();
-        ctx.scale(13 / 24, 13 / 24);
-        ctx.translate(-12, -12);
-        ctx.lineWidth = 1.8;
-        ctx.lineCap = ctx.lineJoin = 'round';
-        ctx.strokeStyle = color;
-        ctx.stroke(TARGET_ICON);
-        ctx.restore();
+        fieldView.ctx.save();
+        fieldView.ctx.translate(target.x, target.y);
+        if (fieldView.portrait) fieldView.ctx.rotate(Math.PI / 2);
+        fieldView.ctx.beginPath();
+        fieldView.ctx.arc(0, 0, 7.5, 0, Math.PI * 2);
+        fieldView.ctx.fillStyle = 'rgba(11, 13, 16, 0.75)';
+        fieldView.ctx.fill();
+        fieldView.ctx.scale(13 / 24, 13 / 24);
+        fieldView.ctx.translate(-12, -12);
+        fieldView.ctx.lineWidth = 1.8;
+        fieldView.ctx.lineCap = fieldView.ctx.lineJoin = 'round';
+        fieldView.ctx.strokeStyle = color;
+        fieldView.ctx.stroke(TARGET_ICON);
+        fieldView.ctx.restore();
       }
     }
     for (const stop of prediction.stops) {
       if (!stop.stopped || !prediction.paths[stop.index].some(p => Math.hypot(p.x - stop.x, p.y - stop.y) > 3)) continue;
       if (prediction.goalTargets?.some(t => t.index === stop.index && Math.hypot(t.x - stop.x, t.y - stop.y) < 5)) continue;
-      const color = bodies[stop.index].team < 0 ? '#fff' : bodies[stop.index].team === 0 ? home : away;
+      const color = fieldView.bodies[stop.index].team < 0 ? '#fff' : fieldView.bodies[stop.index].team === 0 ? home : away;
       line(stop.x - 4, stop.y - 4, stop.x + 4, stop.y + 4, color, 2);
       line(stop.x + 4, stop.y - 4, stop.x - 4, stop.y + 4, color, 2);
     }
     // Keep wall-contact markers inside the playable ice and goal pockets, not spilling past the boards.
-    ctx.save(); rounded(60, 60, 880, 480, 100);
-    ctx.rect(60 - P.rink.goalDepth, 230, P.rink.goalDepth, 140); ctx.rect(940, 230, P.rink.goalDepth, 140); ctx.clip();
+    fieldView.ctx.save(); rounded(60, 60, 880, 480, 100);
+    fieldView.ctx.rect(60 - P.rink.goalDepth, 230, P.rink.goalDepth, 140); fieldView.ctx.rect(940, 230, P.rink.goalDepth, 140); fieldView.ctx.clip();
     for (const hit of prediction.impacts) {
-      const team = bodies[hit.index].team;
+      const team = fieldView.bodies[hit.index].team;
       const color = team < 0 ? '#ffffff' : team === 0 ? home : away;
-      ctx.save();
-      ctx.translate(hit.x, hit.y);
-      if (isPortrait) ctx.rotate(Math.PI / 2);
+      fieldView.ctx.save();
+      fieldView.ctx.translate(hit.x, hit.y);
+      if (fieldView.portrait) fieldView.ctx.rotate(Math.PI / 2);
       const fade = Math.min(1, (prediction.horizon - hit.tick) / 240);
-      ctx.globalAlpha = .2 * fade;
+      fieldView.ctx.globalAlpha = .2 * fade;
       const size = hit.reach * 128 / 60;
-      ctx.drawImage(impactStamp(color), -size / 2, -size / 2, size, size);
-      ctx.restore();
+      fieldView.ctx.drawImage(impactStamp(color), -size / 2, -size / 2, size, size);
+      fieldView.ctx.restore();
     }
-    ctx.restore();
+    fieldView.ctx.restore();
   }
   const IGNITION_FLAME = new Path2D('M12 10.941c2.333 -3.308 .167 -7.823 -1 -8.941c0 3.395 -2.235 5.299 -3.667 6.706c-1.43 1.408 -2.333 3.294 -2.333 5.588c0 3.704 3.134 6.706 7 6.706c3.866 0 7 -3.002 7 -6.706c0 -1.712 -1.232 -4.403 -2.333 -5.588c-2.084 3.353 -3.257 3.353 -4.667 2.235Z');
   const GUARD_SHIELD = new Path2D('M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3');
@@ -2402,7 +2357,7 @@
     if (!stageArea || !rinkStage || !rinkWrap) return;
     const isFs = isFullscreenActive() || document.body.classList.contains('in-match');
 
-    if (!isPortrait && !isFs) {
+    if (!fieldView.portrait && !isFs) {
       visibleRinkHeight = 600;
       rinkStage.style.width = '';
       rinkStage.style.height = '';
@@ -2417,24 +2372,24 @@
     let availW = stageArea.clientWidth || stadium?.clientWidth || 360;
     let availH = stageArea.clientHeight;
 
-    if (!availH || (!isFs && !isPortrait)) {
+    if (!availH || (!isFs && !fieldView.portrait)) {
       const vh = window.innerHeight || document.documentElement.clientHeight || 600;
-      availH = isPortrait ? Math.min(vh * 0.72, 680) : Math.min(vh * 0.8, 600);
+      availH = fieldView.portrait ? Math.min(vh * 0.72, 680) : Math.min(vh * 0.8, 600);
     }
 
     availW = Math.max(120, availW);
     availH = Math.max(120, availH);
 
     // Fit the playable view and trim only the vertical gutters in compact layouts.
-    visibleRinkHeight = isPortrait ? 600 : Number(getComputedStyle(stageArea).getPropertyValue('--visible-rink-height')) || 600;
-    const scale = isPortrait ? Math.min(availW / 600, availH / 1000) : Math.min(availW / 1000, availH / visibleRinkHeight);
-    const stageW = Math.floor(scale * (isPortrait ? 600 : 1000));
-    const stageH = Math.floor(scale * (isPortrait ? 1000 : 600));
+    visibleRinkHeight = fieldView.portrait ? 600 : Number(getComputedStyle(stageArea).getPropertyValue('--visible-rink-height')) || 600;
+    const scale = fieldView.portrait ? Math.min(availW / 600, availH / 1000) : Math.min(availW / 1000, availH / visibleRinkHeight);
+    const stageW = Math.floor(scale * (fieldView.portrait ? 600 : 1000));
+    const stageH = Math.floor(scale * (fieldView.portrait ? 1000 : 600));
 
     rinkStage.style.width = stageW + 'px';
     rinkStage.style.height = stageH + 'px';
 
-    if (isPortrait) {
+    if (fieldView.portrait) {
       rinkWrap.style.width = stageH + 'px';
       rinkWrap.style.height = stageW + 'px';
       rinkWrap.style.top = '50%';
@@ -2451,75 +2406,80 @@
   // The oomark face on the ball: eyes and mouth match brand SVG, recoloured with team colors on fire.
   function drawBallFace(size, eyeColor, mouthColor) {
     const scale = size / 298.99;
-    ctx.save();
-    ctx.scale(scale, scale);
-    ctx.lineCap = 'butt';
-    ctx.strokeStyle = eyeColor;
-    ctx.lineWidth = 35.3374;
+    fieldView.ctx.save();
+    fieldView.ctx.scale(scale, scale);
+    fieldView.ctx.lineCap = 'butt';
+    fieldView.ctx.strokeStyle = eyeColor;
+    fieldView.ctx.lineWidth = 35.3374;
     for (const cx of [-59.445, 59.445]) {
-      ctx.beginPath();
-      ctx.arc(cx, -34.503, 48.3813, 0, Math.PI * 2);
-      ctx.stroke();
+      fieldView.ctx.beginPath();
+      fieldView.ctx.arc(cx, -34.503, 48.3813, 0, Math.PI * 2);
+      fieldView.ctx.stroke();
     }
-    ctx.strokeStyle = mouthColor;
-    ctx.lineWidth = 53.0061;
-    ctx.beginPath();
-    ctx.moveTo(-75.9575, 74.0501);
-    ctx.lineTo(75.9575, 74.0501);
-    ctx.stroke();
-    ctx.restore();
+    fieldView.ctx.strokeStyle = mouthColor;
+    fieldView.ctx.lineWidth = 53.0061;
+    fieldView.ctx.beginPath();
+    fieldView.ctx.moveTo(-75.9575, 74.0501);
+    fieldView.ctx.lineTo(75.9575, 74.0501);
+    fieldView.ctx.stroke();
+    fieldView.ctx.restore();
   }
-  function draw() {
-    if (layoutDirty && !videoField) {
-      const w0 = canvas.clientWidth, h0 = canvas.clientHeight;
-      fitStadium();
-      renderWidth = canvas.clientWidth; renderHeight = canvas.clientHeight;
-      if (renderWidth !== w0 || renderHeight !== h0) { deviceWidth = 0; deviceHeight = 0; }
-      measureField();
-      layoutDirty = false;
-    }
-    if (!videoField) positionSpinControl();
-    const dpr = devicePixelRatio || 1;
-    const rawW = deviceWidth || Math.round(renderWidth * dpr), rawH = deviceHeight || Math.round(renderHeight * dpr);
-    const cap = Math.min(1, 3840 / Math.max(1, rawW, rawH));
-    const width = videoField?.width ?? Math.max(1, Math.round(rawW * cap));
-    const height = videoField?.height ?? Math.max(1, Math.round(rawH * cap));
-    if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
-    if (badgeCanvas.width !== width || badgeCanvas.height !== height) { badgeCanvas.width = width; badgeCanvas.height = height; }
-    badgeCtx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); badgeCtx.clearRect(0, 0, 1000, 600);
-    ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); ctx.clearRect(0, 0, 1000, 600);
-    const colors = getThemeColors();
-    const { text, home, away, background } = colors;
-    const rinkKey = width + ',' + height + JSON.stringify(colors);
-    if (rinkCache?.key !== rinkKey) {
+  function drawRinkLayer(ctx, width, height, colors, cache) {
+    const key = width + ',' + height + JSON.stringify(colors);
+    if (cache?.key !== key) {
       const layer = document.createElement('canvas'); layer.width = width; layer.height = height;
       const layerCtx = layer.getContext('2d');
       layerCtx.setTransform(width / 1000, 0, 0, height / 600, 0, 0);
       drawRinkSurface(layerCtx, colors);
-      rinkCache = { key: rinkKey, layer };
+      cache = { key, layer };
     }
-    ctx.drawImage(rinkCache.layer, 0, 0, 1000, 600);
+    ctx.drawImage(cache.layer, 0, 0, 1000, 600);
+    return cache;
+  }
+  function draw(exportSession = null) {
+    const fieldPlans = exportSession?.plans ?? plans;
+    if (layoutDirty && !fieldView.field) {
+      const w0 = fieldView.canvas.clientWidth, h0 = fieldView.canvas.clientHeight;
+      fitStadium();
+      renderWidth = fieldView.canvas.clientWidth; renderHeight = fieldView.canvas.clientHeight;
+      if (renderWidth !== w0 || renderHeight !== h0) { deviceWidth = 0; deviceHeight = 0; }
+      measureField();
+      layoutDirty = false;
+    }
+    if (!fieldView.field) positionSpinControl();
+    const dpr = devicePixelRatio || 1;
+    const rawW = deviceWidth || Math.round(renderWidth * dpr), rawH = deviceHeight || Math.round(renderHeight * dpr);
+    const cap = Math.min(1, 3840 / Math.max(1, rawW, rawH));
+    const width = fieldView.field?.width ?? Math.max(1, Math.round(rawW * cap));
+    const height = fieldView.field?.height ?? Math.max(1, Math.round(rawH * cap));
+    if (fieldView.canvas.width !== width || fieldView.canvas.height !== height) { fieldView.canvas.width = width; fieldView.canvas.height = height; }
+    if (fieldView.badgeCanvas.width !== width || fieldView.badgeCanvas.height !== height) { fieldView.badgeCanvas.width = width; fieldView.badgeCanvas.height = height; }
+    fieldView.badgeCtx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); fieldView.badgeCtx.clearRect(0, 0, 1000, 600);
+    fieldView.ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); fieldView.ctx.clearRect(0, 0, 1000, 600);
+    const colors = getThemeColors();
+    const { text, home, away, background } = colors;
+    fieldEffects.rinkCache = drawRinkLayer(exportSession?.ctx ?? fieldView.ctx, width, height, colors, fieldEffects.rinkCache);
     drawFieldUnder(themeColors);
-    if (!videoField) drawFoulFocus(text);
+    if (!fieldView.field) drawFoulFocus(text);
     if (phase === 'plan') {
       drawPrediction(home, away);
       drawPredictedGoalGlow(home, away);
     }
-    drawTrails(home, away);
-    drawGuides(home, away, text);
-    shockwaves.forEach(s => {
+    drawTrails(exportSession?.ctx ?? fieldView.ctx, exportSession?.fx.trails ?? fieldEffects.trails, exportSession?.bodies ?? fieldView.bodies, home, away);
+    drawGuides(home, away, text, exportSession ? exportSession.guide : guide);
+    fieldEffects.shockwaves.forEach(s => {
       const progress = 1 - Math.max(0, s.life / s.duration);
       const r = s.currentRadius + (s.maxRadius - s.currentRadius) * progress;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-      ctx.strokeStyle = s.color || (s.team === 0 ? home : away);
-      ctx.lineWidth = Math.max(1, 6 * (1 - progress));
-      ctx.globalAlpha = Math.max(0, 1 - progress);
-      ctx.stroke();
-      ctx.restore();
+      fieldView.ctx.save();
+      fieldView.ctx.beginPath();
+      fieldView.ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      fieldView.ctx.strokeStyle = s.color || (s.team === 0 ? home : away);
+      fieldView.ctx.lineWidth = Math.max(1, 6 * (1 - progress));
+      fieldView.ctx.globalAlpha = Math.max(0, 1 - progress);
+      fieldView.ctx.stroke();
+      fieldView.ctx.restore();
     });
-    bodies.slice(0, 6).forEach((b, i) => {
+    fieldView.bodies.slice(0, 6).forEach((b, i) => {
       const reachR = Math.max(b.radius, b.reach || b.radius, 18);
       const isSuperReady = (b.meter >= 100) || Boolean(b.superArm) || Boolean(b.superActive);
 
@@ -2529,10 +2489,10 @@
         drawSuperAura(b, activeKey, reachR);
 
         if (phase === 'plan' && b.superArm && activeKey === 'colossus') {
-          ctx.save();
-          ctx.setLineDash([5, 5]);
+          fieldView.ctx.save();
+          fieldView.ctx.setLineDash([5, 5]);
           circle(b.x, b.y, b.radius * 1.8, '#ffe043cc', 2);
-          ctx.restore();
+          fieldView.ctx.restore();
         }
 
         drawSuperBadge(b, activeKey);
@@ -2546,122 +2506,123 @@
         circle(b.x, b.y, b.radius + 15, goalAccent, 2);
       }
       const inAction = phase === 'play' || phase === 'replay' || Boolean(goalReplay);
-      if ((inAction && b.guarding) || (phase === 'plan' && i < 3 && plans[i]?.guard)) {
-        badgeCtx.save();
-        const p = isPortrait ? { x: b.x - b.radius * .65, y: b.y + b.radius * .65 } : { x: b.x + b.radius * .65, y: b.y + b.radius * .65 };
-        badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
+      if ((inAction && b.guarding) || (phase === 'plan' && i < 3 && fieldPlans[i]?.guard)) {
+        fieldView.badgeCtx.save();
+        const p = fieldView.portrait ? { x: b.x - b.radius * .65, y: b.y + b.radius * .65 } : { x: b.x + b.radius * .65, y: b.y + b.radius * .65 };
+        fieldView.badgeCtx.translate(p.x, p.y); if (fieldView.portrait) fieldView.badgeCtx.rotate(Math.PI / 2);
         // While planning, a Guard the predicted turn's burning ball would not beat turns iron.
         // During play and replays, guards start blue and turn iron once an iron save successfully occurs.
         const iron = phase === 'plan'
           ? Boolean(predictionCache?.data.guards.some(g => g.index === i && g.held))
           : Boolean(b.ironGuard);
-        badgeCtx.scale(1.1, 1.1); badgeCtx.translate(-12, -12); badgeCtx.fillStyle = iron ? '#c3ccd6' : '#4798ff';
-        badgeCtx.fill(GUARD_SHIELD);
+        fieldView.badgeCtx.scale(1.1, 1.1); fieldView.badgeCtx.translate(-12, -12); fieldView.badgeCtx.fillStyle = iron ? '#c3ccd6' : '#4798ff';
+        fieldView.badgeCtx.fill(GUARD_SHIELD);
         if (iron) {
-          badgeCtx.strokeStyle = '#6b7785';
-          badgeCtx.lineWidth = 1.5;
-          badgeCtx.stroke(GUARD_SHIELD);
+          fieldView.badgeCtx.strokeStyle = '#6b7785';
+          fieldView.badgeCtx.lineWidth = 1.5;
+          fieldView.badgeCtx.stroke(GUARD_SHIELD);
         }
-        badgeCtx.restore();
+        fieldView.badgeCtx.restore();
       }
       // Dazed enough to slow its launch: a dizzy swirl turns above the ubu, larger and stronger the
       // deeper the daze.
       const slow = P.dazeSlow(b);
       if (slow > 0 && !b.stunned) {
         const depth = slow / P.DAZE.max, spin = reducedMotion.matches ? 0 : clockNow() / 300;
-        ctx.save();
-        ctx.translate(isPortrait ? b.x + b.radius + 12 : b.x, isPortrait ? b.y : b.y - b.radius - 12);
-        ctx.rotate(spin); ctx.globalAlpha = .55 + .45 * depth;
-        ctx.strokeStyle = '#c3cbff'; ctx.lineWidth = 2; ctx.lineCap = 'round';
-        ctx.beginPath();
-        for (let a = 0; a <= Math.PI * 3.5; a += .2) { const r = 1 + a * (.7 + .4 * depth); a ? ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r) : ctx.moveTo(r, 0); }
-        ctx.stroke(); ctx.restore();
+        fieldView.ctx.save();
+        fieldView.ctx.translate(fieldView.portrait ? b.x + b.radius + 12 : b.x, fieldView.portrait ? b.y : b.y - b.radius - 12);
+        fieldView.ctx.rotate(spin); fieldView.ctx.globalAlpha = .55 + .45 * depth;
+        fieldView.ctx.strokeStyle = '#c3cbff'; fieldView.ctx.lineWidth = 2; fieldView.ctx.lineCap = 'round';
+        fieldView.ctx.beginPath();
+        for (let a = 0; a <= Math.PI * 3.5; a += .2) { const r = 1 + a * (.7 + .4 * depth); a ? fieldView.ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r) : fieldView.ctx.moveTo(r, 0); }
+        fieldView.ctx.stroke(); fieldView.ctx.restore();
       }
       if ((b.stunned || b.stunnedNext) && !b.carded) {
-        ctx.save();
-        ctx.font = '16px system-ui';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        if (isPortrait) {
-          ctx.translate(b.x + b.radius + 14, b.y);
-          ctx.rotate(Math.PI / 2);
+        fieldView.ctx.save();
+        fieldView.ctx.font = '16px system-ui';
+        fieldView.ctx.textAlign = 'center';
+        fieldView.ctx.textBaseline = 'middle';
+        if (fieldView.portrait) {
+          fieldView.ctx.translate(b.x + b.radius + 14, b.y);
+          fieldView.ctx.rotate(Math.PI / 2);
         } else {
-          ctx.translate(b.x, b.y - b.radius - 8);
+          fieldView.ctx.translate(b.x, b.y - b.radius - 8);
         }
-        ctx.fillText('💫', 0, 0);
-        ctx.restore();
+        fieldView.ctx.fillText('💫', 0, 0);
+        fieldView.ctx.restore();
       }
       if (b.superActive === 'magnet') {
-        const ball = bodies[6];
+        const ball = fieldView.bodies[6];
         const dx = b.x - ball.x, dy = b.y - ball.y;
         if (dx * dx + dy * dy < 260 * 260) {
-          ctx.save();
-          ctx.setLineDash([4, 6]);
+          fieldView.ctx.save();
+          fieldView.ctx.setLineDash([4, 6]);
           line(b.x, b.y, ball.x, ball.y, '#3388ffcc', 2.5);
-          ctx.restore();
+          fieldView.ctx.restore();
         }
       }
-      if (i < 3 && phase === 'plan') drawImpulse(b, plans[i], home);
+      if (i < 3 && phase === 'plan') drawImpulse(b, fieldPlans[i], home);
       // A video export draws the ubus itself (see composeFrame).
-      if (videoField) return;
+      if (fieldView.field) return;
       const style = skaters[i].style;
       const width = b.radius / 5 + '%';
       // A carded ubu fades out of play.
       const opacity = b.carded ? '0.3' : b.superActive === 'ghost' ? '0.45' : '1';
       const filter = (b.stunned || b.stunnedNext) && !b.carded ? 'grayscale(0.8) brightness(0.7)' : '';
-      const transform = `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${b.rotation + (isPortrait ? Math.PI / 2 : 0)}rad)`;
+      const transform = `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${b.rotation + (fieldView.portrait ? Math.PI / 2 : 0)}rad)`;
 
       if (style.width !== width) style.width = width;
       if (style.opacity !== opacity) style.opacity = opacity;
       if (style.filter !== filter) style.filter = filter;
       if (style.transform !== transform) style.transform = transform;
     });
-    const holding = P.holder(bodies);
-    if (holding && bodies[6]) drawStickyTether(holding, bodies[6]);
+    const holding = P.holder(fieldView.bodies);
+    if (holding && fieldView.bodies[6]) drawStickyTether(holding, fieldView.bodies[6]);
 
     if (phase === 'plan') {
-      const b = bodies[selected];
+      const b = fieldView.bodies[selected];
       circle(b.x, b.y, b.radius + 8, text, 2);
     }
-    const ball = bodies[6];
-    ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); ctx.fillStyle = background; ctx.fill(); circle(ball.x, ball.y, ball.radius, text, 2);
+    const ball = fieldView.bodies[6];
+    fieldView.ctx.beginPath(); fieldView.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); fieldView.ctx.fillStyle = background; fieldView.ctx.fill(); circle(ball.x, ball.y, ball.radius, text, 2);
     // From red, the ball itself glows with its heat, faintly until it catches fire.
     const heat = ballHeat(ball), glow = Math.max(0, heat - 1) / 2;
     if (glow > 0) {
-      ctx.save(); ctx.globalAlpha = .75 * glow; ctx.shadowColor = heatColor(heat); ctx.shadowBlur = 16 * glow * canvas.width / 1000;
-      ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); ctx.fillStyle = heatColor(heat); ctx.fill(); ctx.restore();
+      fieldView.ctx.save(); fieldView.ctx.globalAlpha = .75 * glow; fieldView.ctx.shadowColor = heatColor(heat); fieldView.ctx.shadowBlur = 16 * glow * fieldView.canvas.width / 1000;
+      fieldView.ctx.beginPath(); fieldView.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); fieldView.ctx.fillStyle = heatColor(heat); fieldView.ctx.fill(); fieldView.ctx.restore();
     }
     const size = ball.radius * 1.7;
     const hot = ballOnFire(ball) || (ball.team === -1 && P.ballOnFire?.(ball));
     const paceTeam = ball.strikerTeam;
     if (hot && paceTeam !== undefined && paceTeam >= 0) {
       const teamColor = paceTeam === 0 ? home : away;
-      ctx.save(); ctx.translate(ball.x, ball.y); ctx.rotate(ball.rotation + (isPortrait ? Math.PI / 2 : 0));
+      fieldView.ctx.save(); fieldView.ctx.translate(ball.x, ball.y); fieldView.ctx.rotate(ball.rotation + (fieldView.portrait ? Math.PI / 2 : 0));
       drawBallFace(size, teamColor, teamColor);
-      ctx.restore();
+      fieldView.ctx.restore();
     } else if (ballMark.complete && ballMark.naturalWidth) {
-      ctx.save(); ctx.translate(ball.x, ball.y); ctx.rotate(ball.rotation + (isPortrait ? Math.PI / 2 : 0));
-      ctx.drawImage(ballMark, -size / 2, -size / 2, size, size);
-      ctx.restore();
+      fieldView.ctx.save(); fieldView.ctx.translate(ball.x, ball.y); fieldView.ctx.rotate(ball.rotation + (fieldView.portrait ? Math.PI / 2 : 0));
+      fieldView.ctx.drawImage(ballMark, -size / 2, -size / 2, size, size);
+      fieldView.ctx.restore();
     } else {
-      ctx.save(); ctx.translate(ball.x, ball.y); ctx.rotate(ball.rotation + (isPortrait ? Math.PI / 2 : 0));
+      fieldView.ctx.save(); fieldView.ctx.translate(ball.x, ball.y); fieldView.ctx.rotate(ball.rotation + (fieldView.portrait ? Math.PI / 2 : 0));
       drawBallFace(size, '#F8F7F4', '#FF7197');
-      ctx.restore();
+      fieldView.ctx.restore();
     }
-    bodies.slice(0, 6).forEach(b => { if (!b.carded) drawSpin(b, b.team ? away : home); });
+    fieldView.bodies.slice(0, 6).forEach(b => { if (!b.carded) drawSpin(b, b.team ? away : home); });
     drawSpin(ball, text);
     drawParticles(home, away);
     drawFieldOver(themeColors);
-    drawFouls(text);
-    if (!videoField) updateFoulInfo();
-    drawPopups(home, away);
+    drawFouls(text, exportSession?.viewFouls ?? fouls);
+    if (!fieldView.field) updateFoulInfo();
+    drawPopups(exportSession?.badgeCtx ?? fieldView.badgeCtx, exportSession?.fx.popups ?? fieldEffects.popups,
+      exportSession?.portrait ?? fieldView.portrait, width, home, away);
     drawParticles(home, away, true);
     if (goalReplay) {
-      ctx.save(); ctx.translate(isPortrait ? 30 : 500, isPortrait ? 300 : 32); if (isPortrait) ctx.rotate(Math.PI / 2);
-      ctx.font = 'bold 18px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = text;
+      fieldView.ctx.save(); fieldView.ctx.translate(fieldView.portrait ? 30 : 500, fieldView.portrait ? 300 : 32); if (fieldView.portrait) fieldView.ctx.rotate(Math.PI / 2);
+      fieldView.ctx.font = 'bold 18px system-ui'; fieldView.ctx.textAlign = 'center'; fieldView.ctx.textBaseline = 'middle'; fieldView.ctx.fillStyle = text;
       const slow = goalReplay.played >= goalReplay.total || ububallMatch.replaySpeed(goalReplay.total - goalReplay.played) < 1;
-      ctx.fillText(slow ? 'REPLAY · SLOW MOTION' : 'REPLAY', 0, 0);
-      ctx.restore();
+      fieldView.ctx.fillText(slow ? 'REPLAY · SLOW MOTION' : 'REPLAY', 0, 0);
+      fieldView.ctx.restore();
     }
   }
   function recordSegment(source, turnPlans, ticks = 0, saves = [], stops = []) {
@@ -2687,18 +2648,19 @@
       if (s.iron && sim[s.index]) sim[s.index].ironGuard = true;
       creditSave(replayView(sim[s.index]), s.own, s.iron);
     }
-    if (struck) popup(bodies[6], 'Spin strike!');
+    if (struck) popup(fieldView.bodies[6], 'Spin strike!');
     if (stop) impact(stop, stop >= (ububallMatch.HIT_STOP?.scoredGoal ?? 200) ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1));
   }
   // Replays re-simulate each recorded turn from its exact starting state on a display copy.
   // The goal replay and the replay viewer share these.
   let activePlayback = null;
+  const replayHitStop = th => th.fx?.hitStopUntil ?? hitStopUntil;
   const currentReplay = () => activePlayback || theater;
   const activeOnlineSim = () => (onlineReplay && (onlineReplay.currentTick ?? 0) < onlineReplay.ticks) ? onlineReplay.simBodies : (online?.state?.game?.bodies ?? onlineReplay?.simBodies);
   const shownSim = () => (goalReplay || currentReplay())?.sim ?? (online?.active ? activeOnlineSim() : (postGoal?.sim ?? simBodies));
   const shownSeat = () => (goalReplay || currentReplay() ? (goalReplay || currentReplay()).seat : (online?.active ? (online.state?.seat ?? 0) : 0));
-  const replayView = (cb, th = currentReplay()) => toViewBody(cb, th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof bodies !== 'undefined' ? bodies : null));
-  const syncReplay = (th = currentReplay()) => syncViewBodies(th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof bodies !== 'undefined' ? bodies : null), th ? th.anonymous : undefined, th?.exporting ? null : undefined, th?.entries);
+  const replayView = (cb, th = currentReplay()) => toViewBody(cb, th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : null));
+  const syncReplay = (th = currentReplay()) => syncViewBodies(th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : null), th ? th.anonymous : undefined, th?.exporting ? null : undefined, th?.entries);
   const replayFx = {
     hit: (a, b, speed, impulse, plow = false, iron = false) => { syncReplay(); handleCollision(replayView(a), replayView(b), speed, impulse, plow, iron); },
     wall: (body, velocity, wallType, nx, ny) => { syncReplay(); const seat = shownSeat(); handleWall(replayView(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny); },
@@ -2718,17 +2680,17 @@
     clearDiscontinuousTrails(before);
   }
   function startGoalReplay() {
-    if (postGoal) { if (postGoal.sim) P.stop(postGoal.sim); P.stop(bodies); postGoal = null; }
+    if (postGoal) { if (postGoal.sim) P.stop(postGoal.sim); P.stop(fieldView.bodies); postGoal = null; }
     const segments = playSegments.filter(s => s.ticks);
     if (!segments.length || (online?.active && online.state?.phase !== 'resolving')) {
       if (!online?.active && phase === 'over') openSummary();
       return;
     }
     endGoalReplay();
-    const scorer = bodies.indexOf(scoringPlayer);
+    const scorer = fieldView.bodies.indexOf(scoringPlayer);
     goalReplay = { segments, total: segments.reduce((n, s) => n + s.ticks, 0),
       seat: online?.active ? online.state.seat : 0, scorer, started: performance.now() };
-    scoringPlayer = bodies[scorer] || null;
+    scoringPlayer = fieldView.bodies[scorer] || null;
     restartGoalReplay(); draw();
   }
   // The replay loops until the next kickoff (or, online, until the server moves on).
@@ -2747,7 +2709,7 @@
       r.steps--;
       if (r.played < r.total) {
         if (r.tick >= r.segments[r.index].ticks) nextReplaySegment();
-        if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && P.ballOnFire(r.sim[6]) && netFire) netFire.lit = true;
+        if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && P.ballOnFire(r.sim[6]) && fieldEffects.netFire) fieldEffects.netFire.lit = true;
         r.tick++; r.played++;
         replayEvents(r.segments[r.index], r.tick, r.sim);
         syncReplay(); recordTrails();
@@ -2765,11 +2727,11 @@
   function endGoalReplay() {
     goalReplayAt = 0;
     if (!goalReplay) return;
-    scoringPlayer = bodies[goalReplay.scorer] || null;
+    scoringPlayer = fieldView.bodies[goalReplay.scorer] || null;
     goalReplay = null;
     clearEffects();
     syncReplay();
-    bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
+    fieldView.bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
     sync(); draw();
   }
   // Replays (shared/ububall-replay.js): every match is recorded turn by turn and saved on this
@@ -2863,15 +2825,15 @@
     saveRecording(); stopDemo(); closeSummary(); endGoalReplay(); stopFanfare(); gameAudio()?.stop();
     cpuGeneration++; cpuClient.cancel(); videoLogo();
     const seat = replay.seat, names = seat ? [...replay.names].reverse() : replay.names;
-    matchMode = replay.mode; document.body.classList.toggle('classic-match', classicMode()); showMode(matchMode);
-    teamEntries = onlineOrder(replay.ubus.map(u => ({ model: ubu.decode(ubu.fromCode(u.dna)), dna: u.dna, equippedSuper: u.super === null ? null : P.SUPERS[u.super] })), seat);
+    fieldView.mode = replay.mode; document.body.classList.toggle('classic-match', classicMode()); showMode(fieldView.mode);
+    fieldView.entries = onlineOrder(replay.ubus.map(u => ({ model: ubu.decode(ubu.fromCode(u.dna)), dna: u.dna, equippedSuper: u.super === null ? null : P.SUPERS[u.super] })), seat);
     // A replay without names calls its ubus by team and place.
-    if (replay.anonymous) teamEntries.forEach((entry, i) => { entry.model.parts = { ...entry.model.parts, fullName: anonymousName(i) }; });
-    stats = teamEntries.map(entry => classicMode() ? normalStats() : { ...entry.model.stats });
+    if (replay.anonymous) fieldView.entries.forEach((entry, i) => { entry.model.parts = { ...entry.model.parts, fullName: anonymousName(i) }; });
+    stats = fieldView.entries.map(entry => classicMode() ? normalStats() : { ...entry.model.stats });
     $('home-label').textContent = names[0]; $('opponent-label').textContent = names[1]; $('opponent-heading').textContent = `${names[1]}'s team`;
-    bodies = kickoff(true); buildTeam(); phase = 'replay'; selected = 0; drag = null;
+    fieldView.bodies = kickoff(true); buildTeam(); phase = 'replay'; selected = 0; drag = null;
     theater = createReplaySession(replay, { file, speed: Number($('replay-speed').value), anonymous: Boolean(replay.anonymous) });
-    theater.bodies = bodies;
+    theater.bodies = fieldView.bodies;
     document.body.classList.add('replay-match');
     say(`Replay · ${names[0]} vs ${names[1]} · ${new Date(replay.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`);
     replayMarks(); enterMatch(); seekReplay(0, theater);
@@ -2883,52 +2845,11 @@
     $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
     newMatch();
   }
-  function createEffectsState(entries = typeof teamEntries !== 'undefined' ? teamEntries : null) {
-    const stylesMap = typeof materialStyles !== 'undefined' ? materialStyles : {};
-    return {
-      trails: Array.from({ length: 7 }, () => []),
-      particles: [],
-      fireworks: [],
-      shockwaves: [],
-      skids: [],
-      skidState: [],
-      burns: [],
-      burnState: {},
-      ripples: [],
-      pings: [],
-      popups: [],
-      danger: [0, 0],
-      ballFlare: 0,
-      kickoffGlow: 0,
-      goalSweep: null,
-      goalCall: null,
-      hitStopUntil: 0,
-      shake: 0,
-      shakeX: 0,
-      shakeY: 0,
-      fireTime: 0,
-      sizzle: null,
-      netFire: null,
-      superImpactTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
-      materialEmitters: (entries || []).map(entry => {
-        const seen = new Set(), styles = [];
-        for (const attribute of Object.values(entry?.model?.attributes || {})) {
-          const style = stylesMap[attribute.texture];
-          if (!style || seen.has(attribute.texture)) continue;
-          seen.add(attribute.texture);
-          styles.push({ shape: style[0], color: style[1] || attribute.hex });
-        }
-        return { styles, time: 0 };
-      }),
-      iceCache: {},
-      rinkCache: null
-    };
-  }
   function createReplaySession(replay, { file = null, speed = 1, paused = false, anonymous = false, exporting = false, clock = null, audio = null, field = null } = {}) {
     const seat = replay.seat ?? 0, anon = Boolean(anonymous || replay.anonymous);
     const names = anon ? [...ububallReplay.ANONYMOUS] : (seat ? [...replay.names].reverse() : [...replay.names]);
     const orderedUbus = Array.isArray(replay.ubus) ? onlineOrder(replay.ubus, seat) : [];
-    const liveEntries = typeof teamEntries !== 'undefined' ? teamEntries : null;
+    const liveEntries = typeof fieldView.entries !== 'undefined' ? fieldView.entries : null;
     const reuseLive = Array.isArray(liveEntries) && liveEntries.length === orderedUbus.length && orderedUbus.every((u, i) => liveEntries[i]?.dna === u.dna && (liveEntries[i]?.equippedSuper?.id ?? null) === (u.super ?? null));
     const entries = reuseLive ? liveEntries.map((entry, i) => {
       if (!anon) return entry;
@@ -2945,7 +2866,7 @@
       replay,
       file,
       seat,
-      mode: replay.mode || (typeof matchMode !== 'undefined' ? matchMode : 'standard'),
+      mode: replay.mode || (typeof fieldView.mode !== 'undefined' ? fieldView.mode : 'standard'),
       ...ububallReplay.timeline(replay),
       speed,
       paused,
@@ -2959,7 +2880,7 @@
       anonymous: anon,
       names,
       entries,
-      bodies: exporting ? P.kickoff() : (typeof bodies !== 'undefined' ? bodies : P.kickoff()),
+      bodies: exporting ? P.kickoff() : (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : P.kickoff()),
       sim: null,
       fouls: ububallMatch.newFouls(),
       viewFouls: ububallMatch.newFouls(),
@@ -2975,144 +2896,43 @@
       ctx: offscreen ? offscreen.getContext('2d') : null,
       badgeCanvas: offscreenBadges,
       badgeCtx: offscreenBadges ? offscreenBadges.getContext('2d') : null,
-      fx: exporting ? createEffectsState(entries) : null,
-      _live: {}
+      fx: exporting ? createEffectsState(entries, typeof materialStyles === 'undefined' ? {} : materialStyles) : null
     };
   }
   function withPlaybackContext(th, fn) {
     if (!th || activePlayback === th) return fn();
-    if (th === theater && !th.exporting) {
-      const prev = activePlayback;
-      activePlayback = th;
-      try {
-        return fn();
-      } finally {
-        activePlayback = prev;
-      }
-    }
-    const saved = th._live || (th._live = {});
-    saved.activePlayback = activePlayback;
-    saved.bodies = bodies;
-    saved.scores = scores;
-    saved.turn = turn;
-    saved.fouls = fouls;
-    saved.plans = typeof plans !== 'undefined' ? plans : undefined;
-    saved.guide = typeof guide !== 'undefined' ? guide : undefined;
-    saved.matchMode = typeof matchMode !== 'undefined' ? matchMode : undefined;
-    saved.teamEntries = typeof teamEntries !== 'undefined' ? teamEntries : undefined;
-    saved.anonymousNames = typeof anonymousNames !== 'undefined' ? anonymousNames : undefined;
-    saved.isPortrait = typeof isPortrait !== 'undefined' ? isPortrait : undefined;
-    saved.videoClock = videoClock;
-    saved.videoAudio = videoAudio;
-    saved.videoField = typeof videoField !== 'undefined' ? videoField : undefined;
-    saved.hitStopUntil = typeof hitStopUntil !== 'undefined' ? hitStopUntil : undefined;
-    const swapCanvas = Boolean(th.canvas && typeof canvas !== 'undefined');
-    if (swapCanvas) {
-      saved.canvas = canvas; saved.ctx = ctx;
-      saved.badgeCanvas = badgeCanvas; saved.badgeCtx = badgeCtx;
-    }
-    const fx = th.fx, swapFx = Boolean(fx && typeof trails !== 'undefined');
-    if (swapFx) {
-      saved.trails = trails; saved.particles = particles; saved.fireworks = fireworks; saved.shockwaves = shockwaves;
-      saved.skids = skids; saved.skidState = skidState; saved.burns = burns; saved.burnState = burnState;
-      saved.ripples = ripples; saved.pings = pings; saved.popups = popups; saved.danger = danger;
-      saved.ballFlare = ballFlare; saved.kickoffGlow = kickoffGlow; saved.goalSweep = goalSweep; saved.goalCall = goalCall;
-      saved.shake = shake; saved.shakeX = shakeX; saved.shakeY = shakeY;
-      saved.fireTime = fireTime; saved.sizzle = sizzle; saved.netFire = netFire;
-      saved.superImpactTimes = superImpactTimes; saved.materialEmitters = materialEmitters;
-      saved.iceCache = iceCache; saved.rinkCache = rinkCache;
-    }
+    const previousPlayback = activePlayback, previousView = fieldView, previousEffects = fieldEffects;
     activePlayback = th;
-    if (th.bodies) bodies = th.bodies;
-    if (th.scores) scores = th.scores;
-    if (th.turn !== undefined) turn = th.turn;
-    if (th.viewFouls) fouls = th.viewFouls;
-    if (th.plans && typeof plans !== 'undefined') plans = th.plans;
-    if (typeof guide !== 'undefined') guide = th.guide ?? null;
-    if (th.mode && typeof matchMode !== 'undefined') matchMode = th.mode;
-    if (th.entries && typeof teamEntries !== 'undefined') teamEntries = th.entries;
-    if (typeof anonymousNames !== 'undefined') anonymousNames = Boolean(th.anonymous);
-    if (typeof isPortrait !== 'undefined') isPortrait = Boolean(th.portrait);
-    if (th.clock !== undefined) videoClock = th.clock;
-    if (th.audio !== undefined) videoAudio = th.audio;
-    if (th.field !== undefined && typeof videoField !== 'undefined') videoField = th.field;
-    if (fx && typeof hitStopUntil !== 'undefined') hitStopUntil = fx.hitStopUntil;
-    if (swapCanvas) {
-      canvas = th.canvas; ctx = th.ctx;
-      badgeCanvas = th.badgeCanvas; badgeCtx = th.badgeCtx;
-    }
-    if (swapFx) {
-      trails = fx.trails; particles = fx.particles; fireworks = fx.fireworks; shockwaves = fx.shockwaves;
-      skids = fx.skids; skidState = fx.skidState; burns = fx.burns; burnState = fx.burnState;
-      ripples = fx.ripples; pings = fx.pings; popups = fx.popups; danger = fx.danger;
-      ballFlare = fx.ballFlare; kickoffGlow = fx.kickoffGlow; goalSweep = fx.goalSweep; goalCall = fx.goalCall;
-      shake = fx.shake; shakeX = fx.shakeX; shakeY = fx.shakeY;
-      fireTime = fx.fireTime; sizzle = fx.sizzle; netFire = fx.netFire;
-      superImpactTimes = fx.superImpactTimes; materialEmitters = fx.materialEmitters;
-      iceCache = fx.iceCache; rinkCache = fx.rinkCache;
+    if (th.exporting) {
+      fieldView = th;
+      fieldEffects = th.fx;
     }
     try {
       return fn();
     } finally {
-      th.bodies = bodies;
-      th.scores = scores;
-      th.turn = turn;
-      th.viewFouls = fouls;
-      if (typeof plans !== 'undefined') th.plans = plans;
-      if (typeof guide !== 'undefined') th.guide = guide;
-      if (th.clock !== undefined) th.clock = videoClock;
-      if (th.audio !== undefined) th.audio = videoAudio;
-      if (th.field !== undefined && typeof videoField !== 'undefined') th.field = videoField;
-      if (fx && typeof hitStopUntil !== 'undefined') fx.hitStopUntil = hitStopUntil;
-      if (swapFx) {
-        fx.ballFlare = ballFlare; fx.kickoffGlow = kickoffGlow; fx.goalSweep = goalSweep; fx.goalCall = goalCall;
-        fx.shake = shake; fx.shakeX = shakeX; fx.shakeY = shakeY;
-        fx.fireTime = fireTime; fx.sizzle = sizzle; fx.netFire = netFire;
-        fx.superImpactTimes = superImpactTimes; fx.materialEmitters = materialEmitters;
-        fx.iceCache = iceCache; fx.rinkCache = rinkCache;
-        trails = saved.trails; particles = saved.particles; fireworks = saved.fireworks; shockwaves = saved.shockwaves;
-        skids = saved.skids; skidState = saved.skidState; burns = saved.burns; burnState = saved.burnState;
-        ripples = saved.ripples; pings = saved.pings; popups = saved.popups; danger = saved.danger;
-        ballFlare = saved.ballFlare; kickoffGlow = saved.kickoffGlow; goalSweep = saved.goalSweep; goalCall = saved.goalCall;
-        shake = saved.shake; shakeX = saved.shakeX; shakeY = saved.shakeY;
-        fireTime = saved.fireTime; sizzle = saved.sizzle; netFire = saved.netFire;
-        superImpactTimes = saved.superImpactTimes; materialEmitters = saved.materialEmitters;
-        iceCache = saved.iceCache; rinkCache = saved.rinkCache;
-      }
-      if (swapCanvas) {
-        canvas = saved.canvas; ctx = saved.ctx;
-        badgeCanvas = saved.badgeCanvas; badgeCtx = saved.badgeCtx;
-      }
-      if (typeof hitStopUntil !== 'undefined') hitStopUntil = saved.hitStopUntil;
-      if (typeof videoField !== 'undefined') videoField = saved.videoField;
-      videoAudio = saved.videoAudio;
-      videoClock = saved.videoClock;
-      if (typeof isPortrait !== 'undefined') isPortrait = saved.isPortrait;
-      if (typeof anonymousNames !== 'undefined') anonymousNames = saved.anonymousNames;
-      if (typeof teamEntries !== 'undefined') teamEntries = saved.teamEntries;
-      if (typeof matchMode !== 'undefined') matchMode = saved.matchMode;
-      if (typeof guide !== 'undefined') guide = saved.guide;
-      if (typeof plans !== 'undefined') plans = saved.plans;
-      fouls = saved.fouls;
-      turn = saved.turn;
-      scores = saved.scores;
-      bodies = saved.bodies;
-      activePlayback = saved.activePlayback;
+      activePlayback = previousPlayback;
+      fieldView = previousView;
+      fieldEffects = previousEffects;
     }
+  }
+  function updateReplayFouls(th) {
+    th.viewFouls = viewFouls(th.fouls, th.seat);
+    if (!th.exporting) fouls = th.viewFouls;
   }
   function loadReplayTurn(k, fx, th = currentReplay()) {
     return withPlaybackContext(th, () => {
       const t = th.replay.turns[k];
       th.index = k; th.tick = 0; th.called = th.crowned = false; th.sim = ububallReplay.restore(t.bodies);
-      beginGuide(ububallReplay.restore(t.bodies), t.plans, th.seat);
-      th.guide = typeof guide !== 'undefined' ? guide : null;
       th.fouls = { ...ububallMatch.newFouls(), ...structuredClone(t.fouls) };
-      th.scores = scores = th.seat ? [...t.scores].reverse() : [...t.scores];
-      th.turn = turn = t.turn;
+      th.scores = th.seat ? [...t.scores].reverse() : [...t.scores];
+      th.turn = t.turn;
+      if (!th.exporting) { scores = th.scores; turn = th.turn; }
+      th.guide = makeGuide(th.sim, t.plans, th.seat, th.turn, th.scores);
       // The home cards show the moves this turn was played with.
-      th.plans = plans = onlineOrder(t.plans, th.seat).slice(0, 3).map(p => ({ ...p, angle: p.angle + (th.seat ? Math.PI : 0) }));
+      th.plans = th.guide.moves.slice(0, 3);
+      if (!th.exporting) { plans = th.plans; guide = th.guide; }
       P.startTurn(th.sim, t.plans, fx ? replayFx.super : null);
-      th.viewFouls = fouls = viewFouls(th.fouls, th.seat);
+      updateReplayFouls(th);
     });
   }
   function stepReplay(fx, th = currentReplay()) {
@@ -3122,7 +2942,7 @@
       ububallMatch.lapseFouls(P, sim, th.fouls);
       th.tick++;
       if (fx) replayEvents(th.replay.turns[th.index], th.tick, sim); else sim[6].spinStruck = false;
-      traceGuide(sim);
+      traceGuide(sim, th.guide);
     });
   }
   function seekReplay(at, th = currentReplay(), turnIndex = null) {
@@ -3144,20 +2964,20 @@
         try {
           while (th.tick < target) {
             for (let n = 0; n < dt / P.DT && th.tick < target; n++) { stepReplay(true, th); syncReplay(th); recordTrails(); }
-            th.viewFouls = fouls = viewFouls(th.fouls, th.seat); emitSkaterEffects(dt);
-            videoClock += dt * 1000; updatePopups(dt); updateEffects(dt);
+            updateReplayFouls(th); emitSkaterEffects(dt);
+            videoClock += dt * 1000; updatePopups(dt, fieldEffects.popups); updateEffects(dt);
           }
         } finally { videoAudio = audio; videoClock = clock; }
       }
       // A hit-stop met on the way (or left from play, on another clock) does not hold the new moment.
-      hitStopUntil = 0;
       if (th.fx) th.fx.hitStopUntil = 0;
-      th.viewFouls = fouls = viewFouls(th.fouls, th.seat);
+      else hitStopUntil = 0;
+      updateReplayFouls(th);
       if (!th.exporting) {
         if (typeof shownScores !== 'undefined') shownScores.splice(0, 2, ...scores);
         sync(); updateReplayBar();
       }
-      draw();
+      draw(th.exporting ? th : null);
     });
   }
   const SEEK_EFFECTS = .4;
@@ -3171,11 +2991,10 @@
     const t = th.replay.turns[th.index];
     if (t.goal && !th.called) {
       th.called = true; th.steps = 0; th.holdUntil = clockNow() + 2500;
-      const team = th.seat ? 1 - t.goal.team : t.goal.team, scorer = t.goal.scorer === null ? null : bodies[viewIndex(t.goal.scorer, th.seat)];
-      scores[team]++;
-      if (th.scores && th.scores !== scores) th.scores[team] = scores[team];
+      const team = th.seat ? 1 - t.goal.team : t.goal.team, scorer = t.goal.scorer === null ? null : fieldView.bodies[viewIndex(t.goal.scorer, th.seat)];
+      th.scores[team]++;
       if (!th.exporting) sync();
-      celebrate(team, bodies[6], t.goal.label, scorer);
+      celebrate(team, fieldView.bodies[6], t.goal.label, scorer);
       if (!th.exporting) goalTab(team, t.goal.label, scorer?.name || null);
       return false;
     }
@@ -3185,8 +3004,8 @@
       const team = th.seat ? 1 - t.goal.team : t.goal.team, name = (th.names || [$('home-label').textContent, $('opponent-label').textContent])[team];
       // A comeback from 3 or more down, or a shutout, as at full time.
       const deficit = Math.max(...th.replay.turns.map(r => r.scores[1 - t.goal.team] - r.scores[t.goal.team]));
-      celebrate(team, bodies[6], name === 'You' ? 'YOU WIN!' : `${name.toUpperCase().slice(0, 16)} WINS!`);
-      goalCall.name = [`${scores[0]}–${scores[1]}`, deficit >= 3 && 'Comeback from 3 down!', !scores[1 - team] && 'Shutout!'].filter(Boolean).join(' · ');
+      celebrate(team, fieldView.bodies[6], name === 'You' ? 'YOU WIN!' : `${name.toUpperCase().slice(0, 16)} WINS!`);
+      fieldEffects.goalCall.name = [`${th.scores[0]}–${th.scores[1]}`, deficit >= 3 && 'Comeback from 3 down!', !th.scores[1 - team] && 'Shutout!'].filter(Boolean).join(' · ');
       return false;
     }
     if (th.index + 1 >= th.replay.turns.length) { th.paused = true; th.steps = 0; return false; }
@@ -3202,18 +3021,18 @@
   const winningTurn = t => Boolean(t.goal) && t.scores[t.goal.team] + 1 >= 5;
   function advanceReplay(delta, th = currentReplay()) {
     return withPlaybackContext(th, () => {
-      if (!th.paused && clockNow() >= th.holdUntil && clockNow() >= hitStopUntil) {
+      if (!th.paused && clockNow() >= th.holdUntil && clockNow() >= replayHitStop(th)) {
         th.steps += delta / P.DT * th.speed;
         for (let n = 0; th.steps >= 1 && n < 240; n++) {
           if (th.tick >= th.replay.turns[th.index].ticks) { if (!endReplayTurn(th)) break; continue; }
           stepReplay(true, th); th.steps--; syncReplay(th); recordTrails();
-          if (clockNow() < hitStopUntil) { th.steps = 0; break; }
+          if (clockNow() < replayHitStop(th)) { th.steps = 0; break; }
         }
-        th.viewFouls = fouls = viewFouls(th.fouls, th.seat);
+        updateReplayFouls(th);
         emitSkaterEffects(delta * th.speed);
       }
       if (!th.exporting) updateReplayBar();
-      draw();
+      draw(th.exporting ? th : null);
     });
   }
   function updateReplayBar() {
@@ -3230,7 +3049,7 @@
     th.replay.turns.forEach((t, k) => {
       const end = th.starts[k] + t.ticks, left = `${end / th.total * 100}%`;
       if (t.goal) {
-        const team = th.seat ? 1 - t.goal.team : t.goal.team, scorer = t.goal.scorer === null ? null : teamEntries[viewIndex(t.goal.scorer, th.seat)];
+        const team = th.seat ? 1 - t.goal.team : t.goal.team, scorer = t.goal.scorer === null ? null : fieldView.entries[viewIndex(t.goal.scorer, th.seat)];
         const mark = document.createElement('button'); mark.type = 'button'; mark.className = `replay-mark ${team ? 'away' : 'home'}`; mark.style.left = left;
         mark.title = [t.goal.label, scorer?.model.parts.fullName].filter(Boolean).join(' · ');
         mark.setAttribute('aria-label', mark.title);
@@ -3288,15 +3107,13 @@
   const videoFieldSize = () => ({ width: Math.round(VIDEO.field.width * VIDEO.width / 1920), height: Math.round(VIDEO.field.height * VIDEO.width / 1920) });
   // A frame: the field, its ubus and their badges, as the stadium shows them, under the scorebug. The
   // scorebug only changes with a score or turn, so it is drawn once each and reused.
-  let videoBug = null;
-  function composeFrame(v, th = currentReplay()) {
+  function composeFrame(v, session) {
     const f = VIDEO.field, k = VIDEO.width / 1920;
-    const names = th?.names || [$('home-label').textContent, $('opponent-label').textContent];
-    const frameScores = th?.scores || scores, frameTurn = th?.turn ?? turn;
+    const { names, scores: frameScores, turn: frameTurn, scorebug } = session;
     const key = `${names}|${frameScores}|${frameTurn}`;
-    if (videoBug?.key !== key) {
-      const { home, away, text, surface } = themeColors, cx = 960, font = videoBug?.font || getComputedStyle(document.body).fontFamily;
-      const layer = videoBug?.layer || Object.assign(document.createElement('canvas'), { width: VIDEO.width, height: Math.ceil(VIDEO.bug * k) }), b = layer.getContext('2d');
+    if (scorebug?.key !== key) {
+      const { home, away, text, surface } = themeColors, cx = 960, font = scorebug?.font || getComputedStyle(document.body).fontFamily;
+      const layer = scorebug?.layer || Object.assign(document.createElement('canvas'), { width: VIDEO.width, height: Math.ceil(VIDEO.bug * k) }), b = layer.getContext('2d');
       b.setTransform(k, 0, 0, k, 0, 0); b.clearRect(0, 0, 1920, VIDEO.bug);
       b.beginPath(); b.roundRect(cx - 560, 9, 1120, 60, 14); b.fillStyle = surface; b.fill();
       const logo = videoLogoImage?.naturalWidth ? videoLogoImage : rinkLogo, logoHeight = logo.naturalWidth ? 170 * logo.naturalHeight / logo.naturalWidth : 0;
@@ -3313,18 +3130,18 @@
       }
       b.fillStyle = text; b.textAlign = 'center'; b.font = `800 23px ${font}`;
       b.fillText(`T${frameTurn}  REPLAY`, cx + 460, 40);
-      videoBug = { key, font, layer };
+      session.scorebug = { key, font, layer };
     }
     v.setTransform(1, 0, 0, 1, 0, 0);
     v.fillStyle = themeColors.background; v.fillRect(0, 0, VIDEO.width, VIDEO.height);
     v.setTransform(k, 0, 0, k, 0, 0);
-    paintField(v, f.x, f.y, f.width, f.height, th);
+    paintField(v, f.x, f.y, f.width, f.height, session);
     v.setTransform(1, 0, 0, 1, 0, 0);
-    v.drawImage(videoBug.layer, 0, 0);
+    v.drawImage(session.scorebug.layer, 0, 0);
   }
   // The field, its ubus and their badges, the whole 1000×600 field at (x, y) in `width`×`height`.
   function paintField(v, x, y, width, height, th = currentReplay()) {
-    const scale = width / 1000, fieldCanvas = th?.canvas || canvas, fieldBadges = th?.badgeCanvas || badgeCanvas, view = th?.bodies || bodies;
+    const scale = width / 1000, fieldCanvas = th?.canvas || fieldView.canvas, fieldBadges = th?.badgeCanvas || fieldView.badgeCanvas, view = th?.bodies || fieldView.bodies;
     v.drawImage(fieldCanvas, x, y, width, height);
     view.slice(0, 6).forEach((b, i) => {
       const sprite = skaters[i]?.firstChild;
@@ -3432,20 +3249,20 @@
         for (let mark = 1; mark < offline.length / rate; mark++) offline.suspend(mark).then(() => { waiting = mark; pump(); }, () => {});
         const rendering = offline.startRendering();
         rendering?.catch?.(() => {});
-        videoBug = null; gameAudio()?.stop();
+        gameAudio()?.stop();
         seekReplay(0, session);
         let frames = 0, endFrame = Infinity;
         for (; frames < endFrame && !videoCancelled && !failure; frames++) {
           const f = frames;
-          withPlaybackContext(session, () => {
-            if (f) {
-              videoClock = session.clock = f * 1000 / VIDEO.fps;
-              updatePopups(1 / VIDEO.fps);
-              updateEffects(1 / VIDEO.fps);
+          if (f) {
+            session.clock = f * 1000 / VIDEO.fps;
+            updatePopups(1 / VIDEO.fps, session.fx.popups);
+            withPlaybackContext(session, () => {
+              updateEffects(1 / VIDEO.fps, session.fx);
               advanceReplay(1 / VIDEO.fps, session);
-            }
-            composeFrame(v, session);
-          });
+            });
+          }
+          composeFrame(v, session);
           if (session.paused && endFrame === Infinity) endFrame = f + holdFrames;
           const frame = new VideoFrame(out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
           encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
@@ -3547,19 +3364,19 @@
   let cardImage = null;
   function drawShareCard(hidden) {
     const th = theater, out = $('share-card'), g = out.getContext('2d'), { home, away, text, surface, background } = themeColors;
-    const anon = Boolean(hidden || th.replay.anonymous), portrait = isPortrait, prevAnon = anonymousNames;
+    const anon = Boolean(hidden || th.replay.anonymous), portrait = fieldView.portrait, prevAnon = fieldView.anonymous;
     const names = anon ? ububallReplay.ANONYMOUS : (th.names || [$('home-label').textContent, $('opponent-label').textContent]);
     const cardScores = th.scores || scores, cardTurn = th.turn ?? turn;
     const font = getComputedStyle(document.body).fontFamily;
     const k = CARD.width / 1000, [cropTop, cropBottom] = CARD.crop, fieldBottom = CARD.field + (cropBottom - cropTop) * k;
     g.fillStyle = background; g.fillRect(0, 0, CARD.width, CARD.height);
     try {
-      isPortrait = false; cardShot = true; anonymousNames = anon; videoField = { width: CARD.width, height: 600 * k }; draw();
+      fieldView.portrait = false; cardShot = true; fieldView.anonymous = anon; fieldView.field = { width: CARD.width, height: 600 * k }; draw();
       g.save(); g.beginPath(); g.rect(0, CARD.field, CARD.width, fieldBottom - CARD.field); g.clip();
       paintField(g, 0, CARD.field - cropTop * k, CARD.width, 600 * k, th);
       g.restore();
     } finally {
-      videoField = null; cardShot = false; anonymousNames = prevAnon; isPortrait = portrait; layoutDirty = true; draw();
+      fieldView.field = null; cardShot = false; fieldView.anonymous = prevAnon; fieldView.portrait = portrait; layoutDirty = true; draw();
     }
     // Scorebug, as wide as the rink's flat top (x 160–840): each team's name and score, the turn between them.
     const bugLeft = 160 * k, bugWidth = 680 * k, middle = 110, side = (bugWidth - middle) / 2;
@@ -3644,52 +3461,54 @@
   // The turn's start, moves and paths in this view's order and orientation, from the simulation's
   // bodies (before P.startTurn) and plans; `seat` 1 sees the field turned around.
   let guide = null;
-  function beginGuide(sim, plans, seat) {
+  function makeGuide(sim, plans, seat, guideTurn, guideScores) {
     const start = viewBodies(sim, seat);
-    guide = { turn, goals: scores[0] + scores[1], seat, ticks: 0, start, paths: start.map(b => [b.x, b.y]),
+    return { turn: guideTurn, goals: guideScores[0] + guideScores[1], seat, ticks: 0, start, paths: start.map(b => [b.x, b.y]),
       moves: onlineOrder(plans, seat).map(p => ({ ...p, angle: p.angle + (seat ? Math.PI : 0) })) };
   }
+  function beginGuide(sim, plans, seat) { guide = makeGuide(sim, plans, seat, turn, scores); }
   // Every third tick, each body's place joins its path.
-  function traceGuide(sim) {
-    if (!guide || ++guide.ticks % 3) return;
-    sim.forEach((b, c) => guide.paths[viewIndex(c, guide.seat)].push(guide.seat ? 1000 - b.x : b.x, guide.seat ? 600 - b.y : b.y));
+  function traceGuide(sim, pathGuide = guide) {
+    if (!pathGuide || ++pathGuide.ticks % 3) return;
+    const { seat, paths } = pathGuide;
+    sim.forEach((b, c) => paths[viewIndex(c, seat)].push(seat ? 1000 - b.x : b.x, seat ? 600 - b.y : b.y));
   }
-  function guideShown(key) {
+  function guideShown(key, guide) {
     if (!guides[key] || !guide) return false;
     if (theater || (typeof activePlayback !== 'undefined' && activePlayback)) return true;
     if (demo || goalReplay) return false;
     if (phase === 'play') return guide.turn === turn;
     return key === 'trails' && guide.turn === turn - 1 && guide.goals === scores[0] + scores[1];
   }
-  function drawGuides(home, away, text) {
-    if (guideShown('trails')) {
-      ctx.save(); ctx.lineCap = ctx.lineJoin = 'round';
+  function drawGuides(home, away, text, guide) {
+    if (guideShown('trails', guide)) {
+      fieldView.ctx.save(); fieldView.ctx.lineCap = fieldView.ctx.lineJoin = 'round';
       guide.paths.forEach((path, i) => {
         const color = i < 3 ? home : i < 6 ? away : text;
-        ctx.globalAlpha = .6; ctx.lineWidth = i < 6 ? 3 : 2; ctx.strokeStyle = color;
-        ctx.beginPath(); ctx.moveTo(path[0], path[1]);
-        for (let k = 2; k < path.length; k += 2) ctx.lineTo(path[k], path[k + 1]);
-        ctx.stroke();
-        ctx.globalAlpha = .9; ctx.beginPath(); ctx.arc(path[0], path[1], i < 6 ? 4 : 3, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+        fieldView.ctx.globalAlpha = .6; fieldView.ctx.lineWidth = i < 6 ? 3 : 2; fieldView.ctx.strokeStyle = color;
+        fieldView.ctx.beginPath(); fieldView.ctx.moveTo(path[0], path[1]);
+        for (let k = 2; k < path.length; k += 2) fieldView.ctx.lineTo(path[k], path[k + 1]);
+        fieldView.ctx.stroke();
+        fieldView.ctx.globalAlpha = .9; fieldView.ctx.beginPath(); fieldView.ctx.arc(path[0], path[1], i < 6 ? 4 : 3, 0, Math.PI * 2); fieldView.ctx.fillStyle = color; fieldView.ctx.fill();
       });
-      ctx.restore();
+      fieldView.ctx.restore();
     }
-    if (guideShown('moves')) {
+    if (guideShown('moves', guide)) {
       guide.start.slice(0, 6).forEach((b, i) => {
         const plan = guide.moves[i], color = i < 3 ? home : away;
-        ctx.save(); ctx.globalAlpha = .7; ctx.setLineDash([4, 6]); circle(b.x, b.y, b.radius, color, 2); ctx.restore();
+        fieldView.ctx.save(); fieldView.ctx.globalAlpha = .7; fieldView.ctx.setLineDash([4, 6]); circle(b.x, b.y, b.radius, color, 2); fieldView.ctx.restore();
         drawImpulse(b, plan, color);
         if (plan.guard && !b.stunned) {
-          badgeCtx.save(); badgeCtx.translate(b.x + b.radius * .65, b.y + b.radius * .65); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
+          fieldView.badgeCtx.save(); fieldView.badgeCtx.translate(b.x + b.radius * .65, b.y + b.radius * .65); if (fieldView.portrait) fieldView.badgeCtx.rotate(Math.PI / 2);
           const guideIron = Boolean(b.ironGuard);
-          badgeCtx.globalAlpha = .85; badgeCtx.scale(1.1, 1.1); badgeCtx.translate(-12, -12);
-          badgeCtx.fillStyle = guideIron ? '#c3ccd6' : '#4798ff'; badgeCtx.fill(GUARD_SHIELD);
+          fieldView.badgeCtx.globalAlpha = .85; fieldView.badgeCtx.scale(1.1, 1.1); fieldView.badgeCtx.translate(-12, -12);
+          fieldView.badgeCtx.fillStyle = guideIron ? '#c3ccd6' : '#4798ff'; fieldView.badgeCtx.fill(GUARD_SHIELD);
           if (guideIron) {
-            badgeCtx.strokeStyle = '#6b7785';
-            badgeCtx.lineWidth = 1.5;
-            badgeCtx.stroke(GUARD_SHIELD);
+            fieldView.badgeCtx.strokeStyle = '#6b7785';
+            fieldView.badgeCtx.lineWidth = 1.5;
+            fieldView.badgeCtx.stroke(GUARD_SHIELD);
           }
-          badgeCtx.restore();
+          fieldView.badgeCtx.restore();
         }
         if ((plan.superArm || b.superArm) && b.equippedSuper && b.meter >= 100 && !b.stunned) drawSuperBadge({ ...b, superArm: true }, b.equippedSuper.key);
       });
@@ -3699,7 +3518,7 @@
   function playFromHere() {
     const th = theater;
     if (!th || (typeof isExporting === 'function' ? isExporting() : th.exporting)) return;
-    const t = th.replay.turns[th.index], [roundStart] = ububallReplay.roundRange(th.replay, th.index), entries = teamEntries;
+    const t = th.replay.turns[th.index], [roundStart] = ububallReplay.roundRange(th.replay, th.index), entries = fieldView.entries;
     const field = stripPresentation(transformSimSeat(ububallReplay.restore(t.bodies), th.seat));
     field.forEach((b, i) => {
       // Meter cooldowns counted the recorded match's clock; this match starts its own.
@@ -3722,7 +3541,7 @@
     fouls = viewFouls({ ...ububallMatch.newFouls(), ...structuredClone(t.fouls) }, th.seat);
     play = ububallMatch.newPlay(); tally = ububallMatch.newTally(); roundTurns = th.index - roundStart; matchTicks = 0; playSegments = [];
     selected = 0; drag = null; elapsed = accumulator = 0; phase = 'plan';
-    recording = ububallReplay.create({ mode: matchMode, names: ['You', 'CPU'], ubus: simBodies.slice(0, 6).map((b, i) => ({ dna: entries[i].dna, super: b.equippedSuper?.id ?? null })) });
+    recording = ububallReplay.create({ mode: fieldView.mode, names: ['You', 'CPU'], ubus: simBodies.slice(0, 6).map((b, i) => ({ dna: entries[i].dna, super: b.equippedSuper?.id ?? null })) });
     buildTeam(); resetPlans(); say('Playing from the replay. Plan your launches.'); draw();
   }
   $('replay-take-over').onclick = playFromHere;
@@ -3779,7 +3598,7 @@
     return detail ? `${event.type} (${detail})` : event.type;
   }
   function statsEventText(event, names) {
-    const name = i => teamEntries[i]?.model.parts.fullName;
+    const name = i => fieldView.entries[i]?.model.parts.fullName;
     const actor = event.actor === null ? names[event.team] : name(event.actor);
     const target = event.target == null ? '' : ` → ${name(event.target)}`;
     return `${statsEventLabel(event)} · ${actor}${target}`;
@@ -3819,7 +3638,7 @@
     const g = map.getContext('2d');
     const { home, away, text } = getThemeColors();
     const rows = new Map();
-    const portraits = ctx.portraits ??= teamEntries.slice(0, 6).map(entry => {
+    const portraits = ctx.portraits ??= fieldView.entries.slice(0, 6).map(entry => {
       const svg = new XMLSerializer().serializeToString(ubuRender(entry.model));
       return `data:image/svg+xml,${encodeURIComponent(svg)}`;
     });
@@ -3829,7 +3648,7 @@
       player.dataset.team = index < 3 ? 0 : 1;
       image.alt = '';
       image.src = portraits[index];
-      player.append(image, teamEntries[index].model.parts.fullName);
+      player.append(image, fieldView.entries[index].model.parts.fullName);
       return player;
     }
     let visible, shown, hovered = null, preview = [], marked = [];
@@ -4097,7 +3916,7 @@
     }
 
     const rows = table.createTBody();
-    teamEntries.slice(0, 6).forEach((entry, i) => {
+    fieldView.entries.slice(0, 6).forEach((entry, i) => {
       const team = i < 3 ? 0 : 1;
       const isWinner = winner !== null && team === winner;
       const row = rows.insertRow();
@@ -4343,7 +4162,7 @@
     const ace = goal !== null && !roundTurns, call = goal === null ? null : ububallMatch.callGoal(simBodies, play, tally, goal, ace);
     if (goal !== null && ballOnFire()) lightNet(goal); else quench();
     const before = trailPositions();
-    ububallMatch.finishTurn(P, simBodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null, keepMotion: goal !== null }, fouls, tally);
+    ububallMatch.finishTurn(P, simBodies, stats, scores, goal, fieldView.mode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null, keepMotion: goal !== null }, fouls, tally);
     syncViewBodies(simBodies, 0);
     clearDiscontinuousTrails(before);
     if (fouls.faceoff) play = ububallMatch.newPlay();
@@ -4352,20 +4171,20 @@
     if (goal !== null) ububallMatch.noteScore(tally, scores);
     roundTurns++;
     matchTicks += ticks;
-    bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
+    fieldView.bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
     accumulator = 0; layoutDirty = true;
     if (goal !== null) {
       const celebSim = structuredClone(simBodies);
       P.stop(simBodies);
       authoritativeBodies = structuredClone(simBodies);
       phase = scores[goal] >= 5 ? 'over' : 'goal';
-      celebrate(goal, bodies[6], call.label, call.own ? null : bodies[call.scorer] || null);
-      if (call.assist !== null) popup(bodies[call.assist], 'Assist');
+      celebrate(goal, fieldView.bodies[6], call.label, call.own ? null : fieldView.bodies[call.scorer] || null);
+      if (call.assist !== null) popup(fieldView.bodies[call.assist], 'Assist');
       if (phase === 'over') {
         if (recording) { recording.final = { scores: [...scores], winner: goal }; saveRecording(); }
         clearActiveMatch();
       }
-      const scorer = bodies[call.scorer] || bodies.slice(goal * 3, goal * 3 + 3)[0];
+      const scorer = fieldView.bodies[call.scorer] || fieldView.bodies.slice(goal * 3, goal * 3 + 3)[0];
       goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY + 800;
       postGoal = { ticks: 0, sim: celebSim };
       scoringPlayer = scorer;
@@ -4396,10 +4215,10 @@
     }
     gameAudio()?.getAudioContext();
     if (phase === 'goal') {
-      if (postGoal) { if (postGoal.sim) P.stop(postGoal.sim); P.stop(bodies); postGoal = null; }
+      if (postGoal) { if (postGoal.sim) P.stop(postGoal.sim); P.stop(fieldView.bodies); postGoal = null; }
       stopFanfare(); gameAudio()?.stop();
       endGoalReplay();
-      bodies = kickoff(); turn++; phase = 'plan'; resetPlans(); say('Kickoff. Plan your next three launches.');
+      fieldView.bodies = kickoff(); turn++; phase = 'plan'; resetPlans(); say('Kickoff. Plan your next three launches.');
       saveActiveMatch();
       draw(); return;
     }
@@ -4411,8 +4230,8 @@
     if ($('field-spin').contains(document.activeElement)) document.activeElement.blur();
     gameAudio()?.stop();
     drag = null;
-    const turnPlans = [...plans.map((p, i) => ({ ...p, superArm: Boolean(bodies[i]?.superArm || p.superArm) })), ...cpu];
-    bodies.slice(0, 3).forEach(b => { b.superArm = false; });
+    const turnPlans = [...plans.map((p, i) => ({ ...p, superArm: Boolean(fieldView.bodies[i]?.superArm || p.superArm) })), ...cpu];
+    fieldView.bodies.slice(0, 3).forEach(b => { b.superArm = false; });
     recordSegment(simBodies, turnPlans); beginGuide(simBodies, turnPlans, 0);
     if (recording) ububallReplay.addTurn(recording, { turn, scores, fouls, bodies: simBodies, plans: turnPlans });
     saveActiveMatch({ bodies: simBodies, turnPlans });
@@ -4423,7 +4242,7 @@
   };
   for (const [id, key, scale] of [['shot-spin', 'spin', .01]]) {
     $(id).oninput = () => {
-      if (phase !== 'plan' || bodies[selected].stunned) return;
+      if (phase !== 'plan' || fieldView.bodies[selected].stunned) return;
       plans[selected][key] = Number($(id).value) * scale; plans[selected].guard = false;
       sync(); draw();
       saveActiveMatch();
@@ -4431,7 +4250,7 @@
   }
   for (const [id, delta] of [['spin-less', -.1], ['spin-more', .1]]) {
     $(id).onclick = () => {
-      if (phase !== 'plan' || bodies[selected].stunned) return;
+      if (phase !== 'plan' || fieldView.bodies[selected].stunned) return;
       plans[selected].spin = Math.max(-1, Math.min(1, Math.round(((plans[selected].spin || 0) + delta) * 10) / 10)); plans[selected].guard = false;
       sync(); draw();
       saveActiveMatch();
@@ -4440,14 +4259,14 @@
   // Guarding replaces the launch and brakes the ubu. The arrow stays (faded), so clearing guard
   // brings the launch back.
   function toggleGuard(i) {
-    if (phase !== 'plan' || bodies[i].stunned) return;
+    if (phase !== 'plan' || fieldView.bodies[i].stunned) return;
     plans[i] = { ...plans[i], guard: !plans[i].guard };
     sync(); draw();
     saveActiveMatch();
   }
   function point(event) {
-    const r = canvas.getBoundingClientRect();
-    if (isPortrait) {
+    const r = fieldView.canvas.getBoundingClientRect();
+    if (fieldView.portrait) {
       const cx = r.left + r.width / 2;
       const cy = r.top + r.height / 2;
       const dx = event.clientX - cx;
@@ -4462,11 +4281,11 @@
       y: (event.clientY - r.top) * 600 / r.height
     };
   }
-  canvas.addEventListener('wheel', e => {
+  fieldView.canvas.addEventListener('wheel', e => {
     if (inMatch && !foulInfo && !e.ctrlKey) wheelKnob(e, 'spin', selected);
   }, { passive: false });
   let tapGuards = false;
-  canvas.onpointerdown = event => {
+  fieldView.canvas.onpointerdown = event => {
     gameAudio()?.getAudioContext();
     // A warning's explanation opens on a tap; a tap elsewhere only closes it.
     const warning = warningAt(point(event));
@@ -4483,23 +4302,23 @@
     dragMode = target.mode;
     dragStart = p; dragMoved = false;
     if (dragMode === 'arrow') {
-      const arrow = impulseGeometry(bodies[selected], plans[selected]);
+      const arrow = impulseGeometry(fieldView.bodies[selected], plans[selected]);
       arrowGrab = { x: p.x - arrow.x, y: p.y - arrow.y, distance: arrow.distance, power: plans[selected].power };
     }
-    canvas.setPointerCapture(drag);
+    fieldView.canvas.setPointerCapture(drag);
     sync(); draw();
   };
-  canvas.onpointermove = event => {
+  fieldView.canvas.onpointermove = event => {
     const p = point(event);
     if (drag !== event.pointerId || phase !== 'plan') {
-      if (warningAt(p)) canvas.style.cursor = 'pointer';
+      if (warningAt(p)) fieldView.canvas.style.cursor = 'pointer';
       else if (phase === 'plan') {
         const target = fieldTarget(event);
-        canvas.style.cursor = target.index < 0 ? 'default' : target.mode === 'super' ? 'pointer' : target.mode === 'arrow' ? 'grab' : 'crosshair';
+        fieldView.canvas.style.cursor = target.index < 0 ? 'default' : target.mode === 'super' ? 'pointer' : target.mode === 'arrow' ? 'grab' : 'crosshair';
       }
       return;
     }
-    const b = bodies[selected];
+    const b = fieldView.bodies[selected];
     // A tap toggles guard; aiming starts once the pointer leaves the tap radius.
     if (!dragMoved && Math.hypot(p.x - dragStart.x, p.y - dragStart.y) < 6) return;
     dragMoved = true; plans[selected].guard = false;
@@ -4517,7 +4336,7 @@
 
     sync(); draw();
   };
-  canvas.onpointerup = canvas.onpointercancel = event => {
+  fieldView.canvas.onpointerup = fieldView.canvas.onpointercancel = event => {
     if (event.type === 'pointerup' && drag === event.pointerId && dragMode === 'aim' && !dragMoved && tapGuards) toggleGuard(selected);
     arrowGrab = null;
     drag = null;
@@ -4584,13 +4403,12 @@
       gameAudio().playWallHit({ volume });
     }
   }
-  let superImpactTimes = new WeakMap();
   function handleSuper(key, phase, body, target = null) {
     // Sustained contact can resolve repeatedly within one animation frame.
     if (key === 'stalwart' && phase === 'impact') {
       const now = clockNow();
-      if (now - (superImpactTimes.get(body) ?? -Infinity) < 100) return;
-      superImpactTimes.set(body, now);
+      if (now - (fieldEffects.superImpactTimes.get(body) ?? -Infinity) < 100) return;
+      fieldEffects.superImpactTimes.set(body, now);
     }
     if (phase === 'impact' && target && !reducedMotion.matches) {
       const dx = target.x - body.x, dy = target.y - body.y;
@@ -4602,9 +4420,9 @@
         burst(x, y, target.team, 3, false, tangent, '#ee2b47');
       } else if (key === 'cannonball' || key === 'stalwart') {
         const color = key === 'cannonball' ? '#ff634d' : '#ffd166';
-        if (key === 'cannonball') ballFlare = 1;
+        if (key === 'cannonball') fieldEffects.ballFlare = 1;
         burst(x, y, body.team, 3.5, false, tangent, color);
-        if (shockwaves.length < 32) shockwaves.push({ x, y, currentRadius: 4,
+        if (fieldEffects.shockwaves.length < 32) fieldEffects.shockwaves.push({ x, y, currentRadius: 4,
           maxRadius: key === 'cannonball' ? 48 : 36, team: body.team, color, life: .24, duration: .24 });
       }
     }
@@ -4614,13 +4432,13 @@
     if (type === 'iron') {
       burst(source.x, source.y, source.team, 0.7, false, 0, '#ffffff');
       burst(source.x, source.y, source.team, 0.7, false, 0, '#d2f2ff');
-      shockwaves.push({ x: source.x, y: source.y, currentRadius: 8, maxRadius: radius, team: source.team, color: '#e3faff', life: 0.25, duration: 0.25 });
+      fieldEffects.shockwaves.push({ x: source.x, y: source.y, currentRadius: 8, maxRadius: radius, team: source.team, color: '#e3faff', life: 0.25, duration: 0.25 });
       return;
     }
     burst(source.x, source.y, source.team, 1, false, 0, '#ff7197');
     burst(source.x, source.y, source.team, 1, false, 0, '#9d467a');
-    shockwaves.push({ x: source.x, y: source.y, currentRadius: 10, maxRadius: radius, team: source.team, color: '#ff7197', life: 0.35, duration: 0.35 });
-    shockwaves.push({ x: source.x, y: source.y, currentRadius: 6, maxRadius: radius * 0.88, team: source.team, color: '#9d467a', life: 0.30, duration: 0.30 });
+    fieldEffects.shockwaves.push({ x: source.x, y: source.y, currentRadius: 10, maxRadius: radius, team: source.team, color: '#ff7197', life: 0.35, duration: 0.35 });
+    fieldEffects.shockwaves.push({ x: source.x, y: source.y, currentRadius: 6, maxRadius: radius * 0.88, team: source.team, color: '#9d467a', life: 0.30, duration: 0.30 });
     if (gameAudio()) {
       gameAudio().playSuper?.('shockwave', 'impact', { volume: 0.8 });
     }
@@ -4637,8 +4455,10 @@
   // Hit-stop: play freezes for the tick's earned ms (see ububallMatch.HIT_STOP), and the rink gives
   // a tiny shake (or double shake for a scored goal).
   function impact(ms, shakeLevel = (ububallMatch.SCREEN_SHAKE?.default ?? 1)) {
-    hitStopUntil = clockNow() + ms;
-    if (!reducedMotion.matches) shake = shakeLevel;
+    const until = clockNow() + ms, fx = activePlayback?.fx;
+    if (fx) fx.hitStopUntil = until;
+    else hitStopUntil = until;
+    if (!reducedMotion.matches) fieldEffects.shake = shakeLevel;
   }
   const replaySkip = $('skip-goal-replay'), replaySkipHint = replaySkip.firstElementChild;
   function updateReplaySkip(replay) {
@@ -4685,8 +4505,8 @@
     }
     if ((goalReplay && !demo) || !replaySkip.hidden) updateReplaySkip(goalReplay);
     if (!active) { lastTime = 0; accumulator = 0; }
-    const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length || goalCall ||
-      ripples.length || pings.length || popups.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
+    const hadEffects = fieldEffects.particles.length || fieldEffects.fireworks.length || fieldEffects.trails.some(trail => trail.length) || fieldEffects.shockwaves.length || fieldEffects.goalCall ||
+      fieldEffects.ripples.length || fieldEffects.pings.length || fieldEffects.popups.length || fieldEffects.kickoffGlow || fieldEffects.goalSweep || fieldEffects.danger[0] > .02 || fieldEffects.danger[1] > .02;
     // Effects pause with the replay viewer, and in Pulse mode when time freezes between turns.
     const pulseFrozen = pulseMode() && roundTurns > 0 && (phase === 'plan' || phase === 'cpu-wait' || phase === 'waiting');
     const exporting = typeof isExporting === 'function' ? isExporting() : Boolean(theater?.exporting);
@@ -4696,7 +4516,7 @@
     else if (goalReplay) speed = goalReplay.played >= goalReplay.total ? 0.5 : ububallMatch.replaySpeed(goalReplay.total - goalReplay.played);
     else if (postGoal) speed = ububallMatch.postGoalSpeed(postGoal.ticks);
     const simDelta = delta * speed;
-    if (active && !theater?.paused && !exporting) updatePopups(delta);
+    if (active && !theater?.paused && !exporting) updatePopups(delta, fieldEffects.popups);
     if (active && !theater?.paused && !exporting && !pulseFrozen) updateEffects(simDelta);
     if (theater) { if (active && !exporting) advanceReplay(delta); }
     else if ((phase === 'play' || postGoal) && active && !online?.active) {
@@ -4716,15 +4536,15 @@
           const tick = ububallMatch.playTick(P, simBodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
           ububallMatch.lapseFouls(P, simBodies, fouls); traceGuide(simBodies);
           syncViewBodies(simBodies, 0);
-          for (const save of tick.saves) creditSave(bodies[save.index], save.own, Boolean(save.iron));
-          if (tick.struck) popup(bodies[6], 'Spin strike!');
+          for (const save of tick.saves) creditSave(fieldView.bodies[save.index], save.own, Boolean(save.iron));
+          if (tick.struck) popup(fieldView.bodies[6], 'Spin strike!');
           if (tick.stop) {
             impact(tick.stop, goal !== null ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1));
             accumulator = 0;
           }
           noteEvents(Math.round(elapsed / P.DT), tick.saves, tick.stop);
           recordTrails();
-          if (goal !== null || P.settled(simBodies) || Math.round(elapsed / P.DT) >= ububallMatch.turnTicks(matchMode)) {
+          if (goal !== null || P.settled(simBodies) || Math.round(elapsed / P.DT) >= ububallMatch.turnTicks(fieldView.mode)) {
             finishTurn(goal);
             if (goal !== null) break;
           }
@@ -4733,7 +4553,7 @@
       if (phase === 'play' || postGoal) emitSkaterEffects(simDelta);
       draw();
     } else if (goalReplay && active && !online?.active) advanceGoalReplay(delta);
-    else if (active && (hadEffects || (phase === 'plan' && predictionCache?.data?.goal !== null) || (!reducedMotion.matches && (foulsShowing() || bodies.some(b => b.meter >= 100 || b.superArm || b.superActive))))) draw();
+    else if (active && (hadEffects || (phase === 'plan' && predictionCache?.data?.goal !== null) || (!reducedMotion.matches && (foulsShowing() || fieldView.bodies.some(b => b.meter >= 100 || b.superArm || b.superActive))))) draw();
     flushMeters();
     requestAnimationFrame(frame);
   }
@@ -5190,7 +5010,7 @@
   const hudSuperBtn = $('stadium-super-btn');
   if (hudSuperBtn) {
     hudSuperBtn.onclick = () => {
-      const b = bodies[selected];
+      const b = fieldView.bodies[selected];
       if (!classicMode() && b && b.meter >= 100 && phase === 'plan' && !b.stunned) {
         b.superArm = !b.superArm;
         dirtyPrediction();
@@ -5256,17 +5076,17 @@
 
   function toggleRotate() {
     layoutDirty = true;
-    isPortrait = !isPortrait;
-    stadium?.classList.toggle('portrait-mode', isPortrait);
+    fieldView.portrait = !fieldView.portrait;
+    stadium?.classList.toggle('portrait-mode', fieldView.portrait);
     if (btnRotate) {
-      btnRotate.setAttribute('aria-pressed', String(isPortrait));
-      btnRotate.title = isPortrait ? 'Switch to landscape orientation' : 'Switch to portrait orientation';
-      btnRotate.setAttribute('aria-label', isPortrait ? 'Switch to landscape orientation' : 'Switch to portrait orientation');
+      btnRotate.setAttribute('aria-pressed', String(fieldView.portrait));
+      btnRotate.title = fieldView.portrait ? 'Switch to landscape orientation' : 'Switch to portrait orientation';
+      btnRotate.setAttribute('aria-label', fieldView.portrait ? 'Switch to landscape orientation' : 'Switch to portrait orientation');
     }
     try {
-      localStorage.setItem('ububall-orientation', isPortrait ? 'portrait' : 'landscape');
+      localStorage.setItem('ububall-orientation', fieldView.portrait ? 'portrait' : 'landscape');
       if (document.fullscreenElement && screen.orientation?.lock) {
-        screen.orientation.lock(isPortrait ? 'portrait' : 'landscape').catch(() => {});
+        screen.orientation.lock(fieldView.portrait ? 'portrait' : 'landscape').catch(() => {});
       }
     } catch {}
     draw();
@@ -5292,7 +5112,7 @@
   // entry, so the system back button opens the menu instead of leaving the match.
   let inMatch = false;
   const portraitScreen = matchMedia('(orientation: portrait)');
-  function setPortrait(value) { if (isPortrait !== value) toggleRotate(); }
+  function setPortrait(value) { if (fieldView.portrait !== value) toggleRotate(); }
   function fitOrientation() { if (inMatch) setPortrait(portraitScreen.matches); }
   function matchInProgress() { return !demo && phase !== 'over' && Boolean(recording && !online?.active); }
   function updateHome() { $('home-play').textContent = online?.active ? 'Back to online match' : matchInProgress() ? 'Resume match' : 'Play vs CPU'; }
@@ -5333,7 +5153,7 @@
   window.addEventListener('ubu:screen', event => { if (event.detail !== 'play') exitMatchMode(); else updateHome(); });
   function networkMoves() {
     return plans.map((p, i) => ({ angle: p.angle + (online?.state?.seat ? Math.PI : 0), power: p.power,
-      spin: p.spin || 0, superArm: Boolean(bodies[i].superArm), guard: Boolean(p.guard) }));
+      spin: p.spin || 0, superArm: Boolean(fieldView.bodies[i].superArm), guard: Boolean(p.guard) }));
   }
   // Presentation-only and internal-simulation body keys. Presentation keys live only on display
   // bodies (`bodies`); internal simulation keys stay out of display bodies. All other simulation
@@ -5384,7 +5204,7 @@
   function transformSimSeat(sim, seat = 0) {
     return onlineOrder(structuredClone(sim), seat).map((b, i) => applySeatTransform(b, b, i, seat));
   }
-  function projectBody(cb, vb, i, seat = 0, entries = typeof teamEntries !== 'undefined' ? teamEntries : null, anonymous = typeof anonymousNames !== 'undefined' && anonymousNames) {
+  function projectBody(cb, vb, i, seat = 0, entries = typeof fieldView.entries !== 'undefined' ? fieldView.entries : null, anonymous = typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous) {
     const armed = vb.superArm;
     for (const k of Object.keys(vb)) {
       if (!PRESENTATION_KEYS.has(k) && (SIM_INTERNAL_KEYS.has(k) || !(k in cb))) delete vb[k];
@@ -5423,7 +5243,7 @@
     }
     return vb;
   }
-  function viewBodies(items, seat = 0, entries = typeof teamEntries !== 'undefined' ? teamEntries : null, anonymous = typeof anonymousNames !== 'undefined' && anonymousNames) {
+  function viewBodies(items, seat = 0, entries = typeof fieldView.entries !== 'undefined' ? fieldView.entries : null, anonymous = typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous) {
     if (!items) return [];
     return onlineOrder(items, seat).map((cb, i) => projectBody(cb, {}, i, seat, entries, anonymous));
   }
@@ -5433,13 +5253,13 @@
     if (!seat) return structuredClone(f);
     return { ...f, crease: [f.crease[1], f.crease[0]], corner: f.corner === null ? null : 3 - f.corner, cards: f.cards.map(i => viewIndex(i, seat)) };
   }
-  function toViewBody(cb, sim = shownSim(), seat = shownSeat(), targetBodies = bodies) {
+  function toViewBody(cb, sim = shownSim(), seat = shownSeat(), targetBodies = fieldView.bodies) {
     if (!cb) return null;
     const idx = sim?.indexOf(cb);
     if (idx === undefined || idx < 0) return cb;
     return targetBodies[viewIndex(idx, seat)] || cb;
   }
-  function syncViewBodies(sim = shownSim(), seat = shownSeat(), targetBodies = bodies, anonymous = typeof anonymousNames !== 'undefined' && anonymousNames, meters = dirtyMeters, entries = typeof teamEntries !== 'undefined' ? teamEntries : null) {
+  function syncViewBodies(sim = shownSim(), seat = shownSeat(), targetBodies = fieldView.bodies, anonymous = typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous, meters = dirtyMeters, entries = typeof fieldView.entries !== 'undefined' ? fieldView.entries : null) {
     if (!sim) return targetBodies;
     for (let i = 0; i < sim.length; i++) {
       const vi = viewIndex(i, seat);
@@ -5476,7 +5296,7 @@
         if (s.iron && replay.simBodies[s.index]) replay.simBodies[s.index].ironGuard = true;
         creditSave(toViewBody(replay.simBodies[s.index], replay.simBodies, online.state.seat), s.own, Boolean(s.iron));
       }
-      if (struck) popup(bodies[6], 'Spin strike!');
+      if (struck) popup(fieldView.bodies[6], 'Spin strike!');
       // Hit-stop holds the replay clock back so the rest of the turn plays on after the pause.
       const stop = replay.stops?.find(s => s.tick === now)?.ms;
       if (stop) { replay.paused = (replay.paused || 0) + stop; impact(stop, stop >= (ububallMatch.HIT_STOP?.scoredGoal ?? 200) ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1)); break; }
@@ -5496,11 +5316,11 @@
           replay.goalPlayed = true;
           goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
           const toView = index => index == null ? null : viewIndex(index, online.state.seat);
-          celebrate(viewGoal, bodies[6], replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : bodies[toView(replay.scorer)] || null);
+          celebrate(viewGoal, fieldView.bodies[6], replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : fieldView.bodies[toView(replay.scorer)] || null);
           if (ballOnFire()) lightNet(viewGoal);
-          if (toView(replay.assist) !== null) popup(bodies[toView(replay.assist)], 'Assist');
+          if (toView(replay.assist) !== null) popup(fieldView.bodies[toView(replay.assist)], 'Assist');
           const viewScorerIndex = toView(replay.scorer);
-          const scorer = viewScorerIndex !== null ? bodies[viewScorerIndex] : bodies[viewGoal * 3];
+          const scorer = viewScorerIndex !== null ? fieldView.bodies[viewScorerIndex] : fieldView.bodies[viewGoal * 3];
           scoringPlayer = scorer;
           const them = onlineNames(online.state)[1], scorerName = scorer?.name || (viewGoal === 0 ? 'Your ubu' : `${them}'s ubu`);
           goalTab(viewGoal, replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : scorerName);
@@ -5555,7 +5375,7 @@
       const [me, them] = onlineNames(s);
       $('home-label').textContent = me; $('opponent-label').textContent = them; $('opponent-heading').textContent = `${them}'s team`;
       $('online-match-status').hidden = false; $('new-match').disabled = true;
-      matchMode = s.mode; document.body.classList.toggle('classic-match', classicMode());
+      fieldView.mode = s.mode; document.body.classList.toggle('classic-match', classicMode());
       showMode(s.mode);
       updateRematch(s);
       if (onlinePhase === 'over' && s.phase !== 'over') closeSummary();
@@ -5566,25 +5386,25 @@
       const rosterKey = JSON.stringify(s.rosters);
       if (rosterKey !== onlineRoster) {
         onlineRoster = rosterKey;
-        teamEntries = onlineOrder(s.rosters.flat(), s.seat).map(entry => {
+        fieldView.entries = onlineOrder(s.rosters.flat(), s.seat).map(entry => {
           const model = ubu.decode(ubu.fromCode(entry.dna));
           const mastery = P.superMastery(model.supers, entry.superId);
           return { model, dna: entry.dna, equippedSuper: { ...P.SUPERS[entry.superId], ...mastery } };
         });
-        roster = teamEntries.slice(0, 3); buildTeam();
+        roster = fieldView.entries.slice(0, 3); buildTeam();
       }
       recordOnline(s);
       const fresh = onlineTurn !== s.turn || onlineDisconnected || (s.phase === 'plan' && onlinePhase !== 'plan');
       const justFinished = s.phase === 'over' && onlinePhase !== 'over' && s.winner !== null;
       onlinePhase = s.phase;
       onlineDisconnected = false;
-      const armed = bodies.slice(0, 3).map(b => Boolean(b.superArm));
+      const armed = fieldView.bodies.slice(0, 3).map(b => Boolean(b.superArm));
       if (fresh || !s.connected.every(Boolean) || s.locked[s.seat]) drag = null;
       if (fresh) {
         dirtyPrediction();
         onlineTurn = s.turn; scoringPlayer = null; clearEffects();
         const ball = s.game.bodies[6];
-        if (s.phase === 'plan' && ball.x === 500 && ball.y === 300) kickoffGlow = 1;
+        if (s.phase === 'plan' && ball.x === 500 && ball.y === 300) fieldEffects.kickoffGlow = 1;
       }
       if (s.phase !== 'resolving') { endGoalReplay(); stopFanfare(); }
       const before = !fresh && !s.replay && !goalReplay ? trailPositions() : null;
@@ -5601,7 +5421,7 @@
         ...p,
         angle: p.power === 0 ? 0 : (((p.angle + (s.seat ? Math.PI : 0)) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
       }));
-      plans.forEach((p, i) => { bodies[i].superArm = fresh ? s.moves[i].superArm : armed[i]; });
+      plans.forEach((p, i) => { fieldView.bodies[i].superArm = fresh ? s.moves[i].superArm : armed[i]; });
       if (!s.replay) {
         onlineReplay = null;
       } else if (onlineReplay?.turn !== s.replay.turn) {
@@ -5660,7 +5480,7 @@
   const ro = new ResizeObserver(entries => {
     gameUi.updateScale?.();
     for (const entry of entries) {
-      if (entry.target === canvas) {
+      if (entry.target === fieldView.canvas) {
         const box = entry.devicePixelContentBoxSize?.[0];
         deviceWidth = box ? box.inlineSize : 0;
         deviceHeight = box ? box.blockSize : 0;
@@ -5669,7 +5489,7 @@
     layoutDirty = true;
     draw();
   });
-  try { ro.observe(canvas, { box: 'device-pixel-content-box' }); } catch { ro.observe(canvas); }
+  try { ro.observe(fieldView.canvas, { box: 'device-pixel-content-box' }); } catch { ro.observe(fieldView.canvas); }
   if (stadium) ro.observe(stadium);
   if (stageArea) ro.observe(stageArea);
   ro.observe($('field-spin')); // Its size places it; it has none until first shown.
@@ -5724,7 +5544,7 @@
     demoLevels = Math.random() < .5 ? ['hard', 'medium'] : ['medium', 'hard'];
     demoGame++; hideFinger(); newMatch();
     $('home-label').textContent = 'Saffron'; $('opponent-label').textContent = 'Amethyst';
-    showMode(matchMode);
+    showMode(fieldView.mode);
   }
   function startDemo() {
     if (demo || inMatch || online?.active) return;
@@ -5763,7 +5583,7 @@
   // the player's own ubus arrive after sign-in), it stops and the loop starts the new turn's.
   async function demoPlanTurn(run) {
     const game = demoGame, t = turn, current = () => game === demoGame && phase === 'plan' && turn === t;
-    const planning = demoClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies: simBodies, stats, scores, turn, fouls },
+    const planning = demoClient.plan({ version: ububallMatch.VERSION, mode: fieldView.mode, bodies: simBodies, stats, scores, turn, fouls },
       { level: demoLevels[0], seed: turn }, 0);
     await planBanner; await demoWait(run, 600);
     const result = await planning;
@@ -5786,7 +5606,7 @@
   }
   function hideFinger() { $('demo-finger').toggleAttribute('hidden', true); $('demo-finger').classList.remove('pressed'); }
   async function demoAim(run, i, target, current) {
-    const b = bodies[i];
+    const b = fieldView.bodies[i];
     selected = i; sync(); draw();
     if (b.stunned || target.guard || !(target.power > 0)) { plans[i] = { ...target }; sync(); draw(); await demoWait(run, 500); return; }
     plans[i] = { ...target, power: 0 };
