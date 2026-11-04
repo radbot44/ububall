@@ -206,13 +206,13 @@
   function stats(replay) {
     const six = () => Array(6).fill(0);
     const out = { goals: six(), assists: six(), shots: six(), saves: six(), checks: six(), cards: six(),
-      touches: six(), passes: six(), skated: six(), control: [0, 0], side: [0, 0], rounds: [], events: [] };
+      touches: six(), passes: six(), skated: six(), control: [0, 0], side: [0, 0], rounds: [], events: [], trails: [] };
     const counts = { Goal: out.goals, Assist: out.assists, Shot: out.shots, Save: out.saves,
       Check: out.checks, Touch: out.touches, Pass: out.passes, Foul: out.cards };
     // The engine also tallies its baseline events for top speed and big saves.
     const engine = M.newTally(), origins = Array(6).fill(null);
-    let play = M.newPlay(), last = null, lastTick = -Infinity, clock = 0, tick, turn, flight = null;
-    const where = body => ({ x: body.x, y: body.y, tick, turn });
+    let play = M.newPlay(), last = null, lastTick = -Infinity, clock = 0, tick, turn, turnIndex, flight = null;
+    const where = body => ({ x: body.x, y: body.y, tick, turn, turnIndex });
     const add = (type, actor, point, detail = {}) => {
       const event = { ...point, type, actor, team: actor === null ? null : Math.floor(actor / 3), round: out.rounds.length, ...detail };
       out.events.push(event);
@@ -228,10 +228,11 @@
       }
     };
     let unscored = false;
-    for (const t of replay.turns) {
+    for (const [index, t] of replay.turns.entries()) {
       if (!t.ticks) break;
       unscored = true;
       turn = t.turn;
+      turnIndex = index;
       const sim = restore(t.bodies), ball = sim[6], fouls = { ...t.fouls, crease: [...t.fouls.crease] };
       let contact, post;
       const fx = {
@@ -255,6 +256,18 @@
         }
       };
       P.startTurn(sim, t.plans);
+      // Thirty samples per second, including both ends of every turn. Keep turns
+      // separate so kickoffs, penalties and resets never draw a connecting line.
+      const stride = sim.length * 2, samples = new Float32Array((Math.ceil(t.ticks / 8) + 1) * stride);
+      let offset = 0;
+      const sample = () => {
+        for (const body of sim) {
+          samples[offset++] = body.x;
+          samples[offset++] = body.y;
+        }
+      };
+      out.trails.push({ round: out.rounds.length, samples });
+      sample();
       let saveIndex = 0;
       const before = new Float64Array(12);
       for (let k = 1; k <= t.ticks; k++) {
@@ -262,6 +275,7 @@
         contact = post = null;
         for (let i = 0; i < 6; i++) { before[i * 2] = sim[i].x; before[i * 2 + 1] = sim[i].y; }
         const result = M.playTick(P, sim, play, fx, engine, false);
+        if (k % 8 === 0 || k === t.ticks) sample();
         if (contact) {
           contact.big = result.big;
           flight = contact;

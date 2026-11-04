@@ -3106,12 +3106,12 @@
       traceGuide(sim);
     });
   }
-  function seekReplay(at, th = currentReplay()) {
+  function seekReplay(at, th = currentReplay(), turnIndex = null) {
     return withPlaybackContext(th, () => {
       const turns = th.replay.turns;
       at = Math.max(0, Math.min(th.total, Math.round(at)));
-      let k = 0;
-      while (k + 1 < turns.length && th.starts[k + 1] <= at) k++;
+      let k = turnIndex ?? 0;
+      if (turnIndex === null) while (k + 1 < turns.length && th.starts[k + 1] <= at) k++;
       loadReplayTurn(k, false, th);
       const target = Math.min(at - th.starts[k], turns[k].ticks), span = Math.min(target, Math.round(SEEK_EFFECTS / P.DT));
       while (th.tick < target - span) stepReplay(false, th);
@@ -3702,6 +3702,7 @@
   $('replay-take-over').onclick = playFromHere;
   function replayStats({ replay, seat }) {
     const s = ububallReplay.stats(replay);
+    s.seat = seat;
     for (const key of ['goals', 'assists', 'shots', 'saves', 'bigSaves', 'checks', 'touches', 'passes', 'topShot', 'skated', 'cards']) {
       s[key] = onlineOrder(s[key], seat);
     }
@@ -3741,18 +3742,21 @@
       goals: [...t.goals], assists: [...t.assists], saves: [...t.saves],
       shots: [...(t.shots || six())], checks: [...(t.checks || six())],
       touches: six(), passes: six(), topShot: [...t.topSpeed], skated: six(),
-      cards: [...t.cards], control: [50, 50], side: [50, 50], events: [], rounds: [],
+      cards: [...t.cards], control: [50, 50], side: [50, 50], events: [], rounds: [], trails: [],
       bigSaves: t.bigSaves
     };
     return ctx.stats;
   }
   const statsMajor = new Set(['Goal', 'Shot', 'Save', 'Foul']);
+  function statsEventLabel(event) {
+    const detail = event.outcome || (event.label?.toLowerCase() !== event.type.toLowerCase() ? event.label : null);
+    return detail ? `${event.type} (${detail})` : event.type;
+  }
   function statsEventText(event, names) {
     const name = i => teamEntries[i]?.model.parts.fullName;
     const actor = event.actor === null ? names[event.team] : name(event.actor);
     const target = event.target == null ? '' : ` → ${name(event.target)}`;
-    const detail = event.outcome || (event.label?.toLowerCase() !== event.type.toLowerCase() ? event.label : null);
-    return `${event.type}${detail ? ` (${detail})` : ''} · ${actor}${target}`;
+    return `${statsEventLabel(event)} · ${actor}${target}`;
   }
   function statsEventTime(event) {
     const tenths = Math.floor(event.tick * P.DT * 10);
@@ -3769,7 +3773,7 @@
     if (log) renderGameLog(ctx);
   }
   function renderGameLog(ctx) {
-    const { events, rounds } = getStatsForContext(ctx);
+    const { events, rounds, trails, seat } = getStatsForContext(ctx);
     const { names } = ctx;
     const roundName = round => round.team === null ? 'Unscored' : `${names[round.team]} #${round.score}`;
     const filters = $('stats-rounds');
@@ -3778,18 +3782,54 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = label;
+      const team = rounds[index - 1]?.team;
+      if (team != null) button.dataset.team = team;
       button.onclick = () => { ctx.round = index - 1; updateLog(); };
       filters.append(button);
     }
-    const map = $('stats-map'), detail = $('stats-map-detail');
+    const map = $('stats-map'), detail = $('stats-map-detail'), log = $('stats-events');
     const g = map.getContext('2d');
     const { home, away, text } = getThemeColors();
-    let visible;
+    const rows = new Map();
+    const portraits = ctx.portraits ??= teamEntries.slice(0, 6).map(entry => {
+      const svg = new XMLSerializer().serializeToString(ubuRender(entry.model));
+      return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    });
+    function pill(index) {
+      const player = document.createElement('span'), image = document.createElement('img');
+      player.className = 'stats-player';
+      player.dataset.team = index < 3 ? 0 : 1;
+      image.alt = '';
+      image.src = portraits[index];
+      player.append(image, teamEntries[index].model.parts.fullName);
+      return player;
+    }
+    let visible, hovered = null, highlighted = [];
     const active = event => ctx.round == null || ctx.round < 0 || event.round === ctx.round;
     const radius = event => event.type === 'Goal' ? 11 : statsMajor.has(event.type) ? 8 : 4;
     function drawMap() {
       g.clearRect(0, 0, map.width, map.height);
       drawRinkSurface(g, themeColors);
+      if (ctx.ballTrail || ctx.ubuTrails) {
+        g.save();
+        if (seat) g.transform(-1, 0, 0, -1, map.width, map.height);
+        g.lineCap = g.lineJoin = 'round';
+        for (let i = 0; i < 7; i++) {
+          if (i === 6 ? !ctx.ballTrail : !ctx.ubuTrails) continue;
+          g.strokeStyle = i === 6 ? text : ((i < 3) !== Boolean(seat) ? home : away);
+          g.globalAlpha = i === 6 ? 0.8 : 0.45;
+          g.lineWidth = i === 6 ? 3 : 2;
+          g.beginPath();
+          for (const trail of trails) {
+            if (!active(trail)) continue;
+            const { samples } = trail, start = i * 2;
+            g.moveTo(samples[start], samples[start + 1]);
+            for (let n = start + 14; n < samples.length; n += 14) g.lineTo(samples[n], samples[n + 1]);
+          }
+          g.stroke();
+        }
+        g.restore();
+      }
       for (const layer of [events.filter(event => !active(event)), visible.filter(event => !statsMajor.has(event.type)), visible.filter(event => statsMajor.has(event.type))]) {
         for (const event of layer) {
           g.globalAlpha = active(event) ? statsMajor.has(event.type) ? 1 : 0.65 : 0.13;
@@ -3811,7 +3851,9 @@
       visible = events.filter(active);
       drawMap();
       detail.textContent = 'Hover or tap a mark for details.';
-      const log = $('stats-events');
+      rows.clear();
+      hovered = null;
+      highlighted = [];
       const content = document.createDocumentFragment();
       if (!visible.length) {
         const empty = document.createElement('p');
@@ -3828,13 +3870,34 @@
           list.className = 'stats-events';
           content.append(heading, list);
         }
-        const row = document.createElement('li'), time = document.createElement('span');
+        const row = document.createElement('li'), time = document.createElement(ctx.theater ? 'button' : 'span');
         row.classList.toggle('major', statsMajor.has(event.type));
+        time.className = 'stats-event-time';
         time.textContent = statsEventTime(event);
-        row.append(time, statsEventText(event, names));
+        if (ctx.theater) {
+          time.type = 'button';
+          time.onclick = () => {
+            const th = ctx.theater;
+            $('stats-dialog').close();
+            th.paused = true;
+            seekReplay(event.tick, th, event.turnIndex);
+          };
+        }
+        const entry = document.createElement('span');
+        entry.className = 'stats-event-entry';
+        entry.append(statsEventLabel(event), event.actor === null ? names[event.team] : pill(event.actor));
+        if (event.target != null) entry.append('→', pill(event.target));
+        row.append(time, entry);
+        rows.set(event, row);
         list.append(row);
       }
       log.replaceChildren(content);
+      log.scrollTop = 0;
+    }
+    function highlight(marks) {
+      for (const event of highlighted) rows.get(event)?.classList.remove('highlighted');
+      highlighted = marks;
+      for (const event of marks) rows.get(event)?.classList.add('highlighted');
     }
     function inspectMark(pointer) {
       const rect = map.getBoundingClientRect();
@@ -3845,13 +3908,34 @@
         const gap = Math.hypot(event.x - x, event.y - y);
         if (gap <= distance) { closest = event; distance = gap; }
       }
-      const marks = closest ? visible.filter(event => event.x === closest.x && event.y === closest.y) : [];
-      const message = marks.length ? marks.map(event => `${statsEventText(event, names)} · ${statsEventTime(event)}`).join('\n') : 'Hover or tap a mark for details.';
-      if (detail.textContent !== message) detail.textContent = message;
+      if (closest !== hovered) {
+        hovered = closest;
+        const marks = closest ? visible.filter(event => event.x === closest.x && event.y === closest.y) : [];
+        highlight(marks);
+        detail.textContent = marks.length ? marks.map(event => `${statsEventText(event, names)} · ${statsEventTime(event)}`).join('\n') : 'Hover or tap a mark for details.';
+      }
+      const row = rows.get(closest);
+      if (pointer.type === 'click' && row) {
+        const viewport = log.getBoundingClientRect(), bounds = row.getBoundingClientRect();
+        log.scrollTo({ top: log.scrollTop + bounds.top - viewport.top - (log.clientHeight - bounds.height) / 2, behavior: 'smooth' });
+      }
     }
     map.onpointermove = inspectMark;
     map.onclick = inspectMark;
-    map.onpointerleave = () => { detail.textContent = 'Hover or tap a mark for details.'; };
+    map.onpointerleave = () => {
+      hovered = null;
+      highlight([]);
+      detail.textContent = 'Hover or tap a mark for details.';
+    };
+    for (const [id, key] of [['stats-ball-trail', 'ballTrail'], ['stats-ubu-trails', 'ubuTrails']]) {
+      const button = $(id);
+      button.setAttribute('aria-pressed', String(Boolean(ctx[key])));
+      button.onclick = () => {
+        ctx[key] = !ctx[key];
+        button.setAttribute('aria-pressed', String(ctx[key]));
+        drawMap();
+      };
+    }
     updateLog();
   }
   $('stats-box-tab').onclick = () => { activeStatsContext.tab = 'box'; showStatsTab(activeStatsContext); };

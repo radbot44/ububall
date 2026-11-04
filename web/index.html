@@ -229,9 +229,15 @@ SOFTWARE.
     <p id="stats-note" class="stats-note"></p>
     </section>
     <section id="stats-log" aria-labelledby="stats-log-tab" hidden>
-      <canvas id="stats-map" class="stats-map" width="1000" height="600" aria-label="Rink event map. Event details are also listed below."></canvas>
-      <p id="stats-map-detail" class="stats-map-detail" aria-live="polite"></p>
-      <div id="stats-rounds" class="stats-rounds" role="group" aria-label="Rounds"></div>
+      <div class="stats-map-panel">
+        <canvas id="stats-map" class="stats-map" width="1000" height="600" aria-label="Rink event map. Event details are also listed below."></canvas>
+        <p id="stats-map-detail" class="stats-map-detail" aria-live="polite"></p>
+        <div class="stats-trails" role="group" aria-label="Map trails">
+          <button id="stats-ball-trail" type="button" aria-pressed="false">Ball Trail</button>
+          <button id="stats-ubu-trails" type="button" aria-pressed="false">Ubu Trails</button>
+        </div>
+        <div id="stats-rounds" class="stats-rounds" role="group" aria-label="Rounds"></div>
+      </div>
       <div id="stats-events"></div>
     </section>
     <p id="stats-rematch-status" class="summary-rematch-status" role="status"></p>
