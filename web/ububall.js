@@ -24,7 +24,7 @@
   let bodies = P.kickoff(), simBodies = P.kickoff(), plans = Array.from({ length: 3 }, idlePlan), cpu = [], selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [];
   let isPortrait = false;
-  let matchMode = 'standard', planDeadline = 0;
+  let matchMode = 'standard', planDeadline = 0, planPausedAt = null;
   // Each turn of the current play (motion since the field last rested), for goal replays.
   let playSegments = [], goalReplay = null, goalReplayAt = 0, postGoal = null, authoritativeBodies = null;
   let anonymousNames = false;
@@ -44,7 +44,23 @@
   const classicMode = () => ububallMatch.rule(matchMode, 'classic');
   const blitzMode = () => ububallMatch.rule(matchMode, 'blitz');
   const pulseMode = () => ububallMatch.rule(matchMode, 'pulse');
-  function startPlanClock() { planDeadline = performance.now() + (ububallMatch.planningMilliseconds(matchMode) ?? Infinity); }
+  function startPlanClock() {
+    const now = performance.now();
+    planDeadline = now + (ububallMatch.planningMilliseconds(matchMode) ?? Infinity);
+    planPausedAt = localPlayBlocked() ? now : null;
+  }
+  function localPlayBlocked() {
+    return document.hidden || $('roster-dialog').open || $('pause-menu').open || $('stats-dialog').open || Boolean(foulInfo && !online?.active);
+  }
+  function updateLocalPlanClock(blocked) {
+    if (online?.active || phase !== 'plan' || !blitzMode()) return;
+    const now = performance.now();
+    if (blocked) planPausedAt ??= now;
+    else if (planPausedAt !== null) {
+      planDeadline += now - planPausedAt;
+      planPausedAt = null;
+    }
+  }
   function updateClock() {
     if (online?.active) {
       const s = online.state, clock = $('blitz-clock');
@@ -57,7 +73,7 @@
       return;
     }
     const clock = $('blitz-clock'); clock.hidden = !blitzMode() || phase !== 'plan';
-    const left = clock.hidden ? 0 : Math.max(0, planDeadline - performance.now());
+    const left = clock.hidden ? 0 : Math.max(0, planDeadline - (planPausedAt ?? performance.now()));
     if (!clock.hidden) clock.textContent = Math.ceil(left / 1000) + 's';
     drainClock(clock.hidden, left);
   }
@@ -1289,7 +1305,7 @@
     clearEffects(); kickoffGlow = 1;
     play = ububallMatch.newPlay(); scoringPlayer = null; roundTurns = 0; fouls = ububallMatch.newFouls();
     netFire = null;
-    if (isNewMatch) { tally = ububallMatch.newTally(); closeSummary(); }
+    if (isNewMatch) { matchTicks = 0; tally = ububallMatch.newTally(); closeSummary(); }
     const oldBodies = authoritativeBodies || simBodies;
     authoritativeBodies = null;
     const result = P.kickoff();
@@ -1834,15 +1850,6 @@
   function restoreEntry(saved) {
     if (!saved || !saved.dna) return null;
     const hasSuper = saved.equippedSuper?.id != null;
-    if (typeof saved.key === 'string' && saved.key.startsWith('practice-')) {
-      const idx = Number(saved.key.slice(9));
-      if (practice[idx]) {
-        return {
-          ...practice[idx],
-          equippedSuper: hasSuper ? resolveEquippedSuper({ model: practice[idx].model, equippedSuper: saved.equippedSuper }) : null
-        };
-      }
-    }
     const rawDNA = ubu.fromCode(saved.dna);
     const model = ubu.decode(rawDNA);
     return {
@@ -1879,6 +1886,9 @@
         phase: launchState ? 'play' : phase,
         fouls: { crease: [...fouls.crease], corner: fouls.corner, cornerTurns: fouls.cornerTurns, cards: [...(fouls.cards || [])] },
         tally: structuredClone(tally),
+        play: ububallMatch.newPlay(play),
+        roundTurns,
+        matchTicks,
         roster: roster.map(entryData),
         teamEntries: teamEntries.map(entryData),
         bodies: ububallReplay.snapshot(activeSim),
@@ -1923,7 +1933,24 @@
       fouls = { ...ububallMatch.newFouls(), ...saved.fouls };
       tally = saved.tally || ububallMatch.newTally();
       recording = saved.recording || ububallReplay.create({ mode: matchMode, names: ['You', 'CPU'], ubus: teamEntries.map(e => ({ dna: e.dna, super: e.equippedSuper?.id ?? null })) });
+      play = ububallMatch.newPlay(saved.play);
+      // Older snapshots lack attribution. Use completed turns for the clock and round position.
+      matchTicks = saved.matchTicks ?? 0;
+      roundTurns = saved.roundTurns ?? 0;
+      if (saved.matchTicks == null || saved.roundTurns == null) {
+        let ticks = 0, turns = 0;
+        for (const entry of recording.turns) {
+          if (!entry.ticks) continue;
+          ticks += entry.ticks;
+          turns = entry.goal ? 0 : turns + 1;
+        }
+        matchTicks = saved.matchTicks ?? ticks;
+        roundTurns = saved.roundTurns ?? turns;
+      }
       const restored = ububallReplay.restore(saved.bodies);
+      if (saved.matchTicks == null) {
+        for (const b of restored) if (b.meterTick > matchTicks) delete b.meterTick;
+      }
       buildTeam();
       restored.slice(0, 6).forEach((b, i) => {
         const entry = teamEntries[i];
@@ -1986,9 +2013,10 @@
     roster = [...draft]; teamEntries = [...roster, ...practice.slice(3)]; bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     if (!demo) {
       recording = ububallReplay.create({ mode: matchMode, names: ['You', 'CPU'], ubus: bodies.slice(0, 6).map((b, i) => ({ dna: teamEntries[i].dna, super: b.equippedSuper?.id ?? null })) });
-      saveActiveMatch();
     }
-    resetPlans(); say('Drag from an ubu toward your target to aim. Drag its arrowhead to adjust power and direction.'); draw();
+    resetPlans();
+    if (!demo) saveActiveMatch();
+    say('Drag from an ubu toward your target to aim. Drag its arrowhead to adjust power and direction.'); draw();
     if (playJingle) gameAudio()?.playGameStart?.();
   }
   function rounded(x, y, width, height, radius) { ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); }
@@ -3311,7 +3339,7 @@
     });
     v.drawImage(fieldBadges, x, y, width, height);
   }
-  async function encodeAudio(buffer) {
+  async function encodeAudio(buffer, length) {
     if (!('AudioEncoder' in window)) return null;
     const rate = buffer.sampleRate;
     for (const [codec, bitrate, frame] of [['mp4a.40.2', 160000, 1024], ['opus', 128000, 960]]) {
@@ -3326,8 +3354,8 @@
       } });
       encoder.configure(config);
       const left = buffer.getChannelData(0), right = buffer.getChannelData(1);
-      for (let at = 0; at < buffer.length; at += 4800) {
-        const n = Math.min(4800, buffer.length - at), data = new Float32Array(n * 2);
+      for (let at = 0; at < length; at += 4800) {
+        const n = Math.min(4800, length - at), data = new Float32Array(n * 2);
         data.set(left.subarray(at, at + n)); data.set(right.subarray(at, at + n), n);
         const audio = new AudioData({ format: 'f32-planar', sampleRate: rate, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(at * 1e6 / rate), data });
         encoder.encode(audio); audio.close();
@@ -3369,10 +3397,14 @@
           clock: 0,
           field: videoFieldSize()
         });
-        // Every turn at full speed, each goal's hold and the winner's, then a moment on the final field.
-        const seconds = session.total * P.DT + session.replay.turns.filter(t => t.goal).length * 2.5 + (winningTurn(session.replay.turns.at(-1)) ? WIN_SECONDS : 0) + VIDEO.hold;
-        const frames = Math.ceil(seconds * VIDEO.fps), rate = 48000;
-        const offline = new OfflineAudioContext(2, Math.ceil(frames / VIDEO.fps * rate), rate);
+        // Reserve audio for the full replay, including rounded holds and frames split by hit-stop.
+        const holdFrames = Math.ceil(VIDEO.hold * VIDEO.fps), rate = 48000;
+        const frameBudget = 1 + holdFrames + session.replay.turns.reduce((frames, t) => frames +
+          Math.ceil(t.ticks * P.DT * VIDEO.fps) + 1 +
+          t.stops.reduce((extra, stop) => extra + Math.ceil(stop.ms * VIDEO.fps / 1000) + 1, 0) +
+          (t.goal ? Math.ceil(2.5 * VIDEO.fps) + 1 : 0) +
+          (winningTurn(t) ? Math.ceil(WIN_SECONDS * VIDEO.fps) + 1 : 0), 0);
+        const offline = new OfflineAudioContext(2, Math.ceil(frameBudget / VIDEO.fps * rate), rate);
         const out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
         const v = out.getContext('2d'), samples = [];
         let description = null, failure = null;
@@ -3402,30 +3434,33 @@
         rendering?.catch?.(() => {});
         videoBug = null; gameAudio()?.stop();
         seekReplay(0, session);
-        for (let f = 0; f < frames && !videoCancelled && !failure; f++) {
+        let frames = 0, endFrame = Infinity;
+        for (; frames < endFrame && !videoCancelled && !failure; frames++) {
+          const f = frames;
           withPlaybackContext(session, () => {
             if (f) {
-              videoClock = session.clock += 1000 / VIDEO.fps;
+              videoClock = session.clock = f * 1000 / VIDEO.fps;
               updatePopups(1 / VIDEO.fps);
               updateEffects(1 / VIDEO.fps);
               advanceReplay(1 / VIDEO.fps, session);
             }
             composeFrame(v, session);
           });
+          if (session.paused && endFrame === Infinity) endFrame = f + holdFrames;
           const frame = new VideoFrame(out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
           encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
           pump();
           while (encoder.encodeQueueSize > 4 && !videoCancelled && !failure) {
             await new Promise(resolve => encoder.addEventListener('dequeue', resolve, { once: true }));
           }
-          if (f % 15 === 0) { progress.value = .9 * f / frames; status.textContent = `Rendering ${replayClock(f / VIDEO.fps / P.DT)} of ${replayClock(seconds / P.DT)}…`; await yieldTask(); }
+          if (f % 15 === 0) { progress.value = .9 * f / Math.min(endFrame, frameBudget); status.textContent = `Rendering ${replayClock(f / VIDEO.fps / P.DT)}…`; await yieldTask(); }
         }
         if (!videoCancelled && !failure) await encoder.flush();
         if (failure) throw failure;
         if (!videoCancelled) {
           stopAudio();
           status.textContent = 'Mixing sound…';
-          const audio = await encodeAudio(await rendering);
+          const audio = await encodeAudio(await rendering, Math.round(frames / VIDEO.fps * rate));
           if (!videoCancelled) {
             blob = new Blob(ububallMP4.write({ width: VIDEO.width, height: VIDEO.height, timescale: 90000, description, samples }, audio), { type: 'video/mp4' });
             if (!audio) status.textContent = 'This browser cannot encode sound, so the video is silent.';
@@ -4634,14 +4669,14 @@
   };
   function frame(time) {
     const delta = lastTime ? Math.max(0, (time - lastTime) / 1000) : 0; lastTime = time;
-    // An open foul explanation holds local play (and the demo) still while it is read.
-    const active = !$('roster-dialog').open && !$('pause-menu').open && !$('stats-dialog').open && !document.hidden && !(foulInfo && !online?.active);
+    const active = !localPlayBlocked();
+    updateLocalPlanClock(!active);
     updateClock();
     if (online?.active) {
       if (phase === 'plan') online.send(networkMoves());
       if (goalReplay) { if (active) advanceGoalReplay(delta); }
       else if (onlineReplay && active) playOnlineReplay();
-    } else if (blitzMode() && phase === 'plan' && performance.now() >= planDeadline) $('launch').click();
+    } else if (active && blitzMode() && phase === 'plan' && performance.now() >= planDeadline) $('launch').click();
     if (goalReplayAt && performance.now() >= goalReplayAt) {
       goalReplayAt = 0;
       // The winner is announced once the goal call has cleared (the demo does so after its replays).
@@ -5618,7 +5653,10 @@
       toggleRotate();
     }
   } catch {}
-  document.addEventListener('visibilitychange', () => { lastTime = 0; accumulator = 0; });
+  document.addEventListener('visibilitychange', () => {
+    updateLocalPlanClock(localPlayBlocked());
+    lastTime = 0; accumulator = 0;
+  });
   const ro = new ResizeObserver(entries => {
     gameUi.updateScale?.();
     for (const entry of entries) {

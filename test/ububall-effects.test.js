@@ -362,16 +362,43 @@ test('restoreEntry restores Stalwart ID 0 and mastery metadata, preserving null 
   assert.equal(restoredNull.equippedSuper, null);
 
   // 3. Practice ubu with Stalwart
-  const practiceDna = practice[0].dna;
+  const practiceDna = sampleDna;
   const restoredPractice = env.restoreEntry({
     key: 'practice-0',
     dna: practiceDna,
     equippedSuper: { id: 0 }
   });
   assert.ok(restoredPractice);
+  assert.equal(restoredPractice.dna, practiceDna);
+  assert.equal(restoredPractice.model.parts.fullName, ubu.decode(ubu.fromCode(practiceDna)).parts.fullName);
   assert.ok(restoredPractice.equippedSuper);
   assert.equal(restoredPractice.equippedSuper.id, 0);
   assert.equal(restoredPractice.equippedSuper.key, 'stalwart');
+});
+
+test('local Blitz preserves the deadline across blocked frames and hidden time', () => {
+  const code = section('function startPlanClock() {', 'function updateClock() {');
+  let now = 100;
+  const dialog = { open: false };
+  const context = {
+    performance: { now: () => now }, document: { hidden: false },
+    $: id => id === 'pause-menu' ? dialog : { open: false },
+    foulInfo: null, online: null, phase: 'plan', matchMode: 'blitz', blitzMode: () => true,
+    ububallMatch: { planningMilliseconds: () => 5000 }, planDeadline: 0, planPausedAt: null
+  };
+  const { startPlanClock, refresh } = vm.runInNewContext(code +
+    '\n;({ startPlanClock, refresh: () => updateLocalPlanClock(localPlayBlocked()) });', context);
+  startPlanClock();
+  now = 1100; dialog.open = true; refresh();
+  now = 6100; context.document.hidden = true; dialog.open = false; refresh();
+  now = 8100; context.document.hidden = false; refresh();
+  assert.equal(context.planDeadline - now, 4000);
+  now = 9100; context.foulInfo = { kind: 'crease' }; refresh();
+  now = 10100; context.foulInfo = null; refresh();
+  assert.equal(context.planDeadline - now, 3000);
+  context.online = { active: true };
+  dialog.open = true; refresh();
+  assert.equal(context.planPausedAt, null);
 });
 
 test('active match save and restore enforces matching matchVersion and physicsVersion', () => {
@@ -405,7 +432,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
     fouls: { crease: [false, false], corner: null, cornerTurns: 0, cards: [] },
     tally: {}, roster: [{ dna: 'a', label: 'a' }], teamEntries: [{ dna: 'a', label: 'a' }], stats: [],
     bodies: P.kickoff(), simBodies: P.kickoff(), plans: [], cpu: [], cpuDone: false,
-    authoritativeBodies: null, kickoffGlow: 0, netFire: null, scoringPlayer: null, roundTurns: 0, play: {},
+    authoritativeBodies: null, kickoffGlow: 0, netFire: null, scoringPlayer: null, roundTurns: 0, matchTicks: 0, play: {},
     clearEffects: dummy, closeSummary: dummy, saveRecording: dummy, resetPlans: dummy,
     resolveEquippedSuper: () => P.SUPERS[0], anonymousName: i => `Anon ${i}`, anonymousNames: false,
     shownSim: () => P.kickoff(), shownSeat: () => 0,
@@ -414,7 +441,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
     normalStats: () => ({}), idlePlan: () => ({ angle: 0, power: 0, spin: 0 }),
     document: { body: { classList: { toggle: dummy } }, querySelector: () => null },
     restoreEntry: e => e, dirtyMeters: new Set(), startPlanClock: dummy, prepareCPU: dummy,
-    sync: dummy, draw: dummy, say: dummy
+    sync: dummy, draw: dummy, say: dummy, recordSegment: dummy, beginGuide: dummy, liveFx: { super: dummy }
   });
   env.newMatch();
 
@@ -426,8 +453,45 @@ test('active match save and restore enforces matching matchVersion and physicsVe
   assert.equal(parsed.physics, P.VERSION);
 
   // Restore with matching versions succeeds
+  parsed.play.last = 2;
+  parsed.play.assist[0] = 1;
+  parsed.play.credit[2] = 1;
+  parsed.roundTurns = 3;
+  parsed.matchTicks = 701;
+  parsed.bodies[2].meterTick = 700;
+  store['ububall-active-match'] = JSON.stringify(parsed);
   const ok = env.restoreActiveMatch();
   assert.equal(ok, true);
+  env.saveActiveMatch();
+  const resaved = JSON.parse(store['ububall-active-match']);
+  assert.deepEqual(resaved.play, parsed.play);
+  assert.equal(resaved.roundTurns, 3);
+  assert.equal(resaved.matchTicks, 701);
+  assert.equal(resaved.bodies[2].meterTick, 700);
+
+  const turnPlans = Array.from({ length: 6 }, () => ({ angle: 0, power: 0.25 }));
+  const launch = { ...parsed, phase: 'play', turnPlans };
+  store['ububall-active-match'] = JSON.stringify(launch);
+  assert.equal(env.restoreActiveMatch(), true);
+  env.saveActiveMatch({ bodies: P.kickoff(), turnPlans });
+  const resumed = JSON.parse(store['ububall-active-match']);
+  assert.equal(resumed.phase, 'play');
+  assert.deepEqual(resumed.play, parsed.play);
+  assert.equal(resumed.roundTurns, 3);
+  assert.equal(resumed.matchTicks, 701);
+
+  const legacy = { ...parsed, recording: { turns: [{ ticks: 240 }, { ticks: 80, goal: { team: 0 } }, { ticks: 120 }] } };
+  delete legacy.play;
+  delete legacy.roundTurns;
+  delete legacy.matchTicks;
+  store['ububall-active-match'] = JSON.stringify(legacy);
+  assert.equal(env.restoreActiveMatch(), true);
+  env.saveActiveMatch();
+  const recovered = JSON.parse(store['ububall-active-match']);
+  assert.equal(recovered.play.last, null);
+  assert.equal(recovered.roundTurns, 1);
+  assert.equal(recovered.matchTicks, 440);
+  assert.equal(recovered.bodies[2].meterTick, undefined);
 
   // Restore with mismatched physics version fails and clears storage
   parsed.physics = P.VERSION + 1;
@@ -1600,6 +1664,10 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
 
 test('video export completion, cancellation, and failure preserve interactive replay state without seeking theater back', async () => {
   const { rec, context, env, elements, encoderState, syncCalls, tabCalls } = createReplayExportHarness({ seat: 0 });
+  // Force more hit-stop than the original frame budget could absorb before the final goal.
+  rec.turns[1].stops = [{ tick: 1, ms: 1000 }, { tick: 5, ms: 1000 }, { tick: 12, ms: 1000 }];
+  rec.turns[1].scores = [4, 0];
+  rec.turns[1].goal = { team: 0, label: 'GOAL!', scorer: 0, assist: null };
   const sourceSnapshot = structuredClone(rec);
 
   env.watchReplay(rec, new Uint8Array([9, 9, 9]));
@@ -1669,7 +1737,7 @@ test('video export completion, cancellation, and failure preserve interactive re
   assert.equal(syncCalls.length, 0, 'export does not trigger live DOM sync()');
   assert.equal(tabCalls.length, 0, 'export does not trigger live scorebug goalTab()');
   assert.equal(encoderState.instances.at(-1).closed, true, 'encoder closed after completion');
-  assert.ok(encoderState.instances.at(-1).frames > 60, 'export rendered video frames');
+  assert.ok(encoderState.instances.at(-1).frames >= (3 + 5 + 1) * 60, 'export includes hit-stops, goal and winner holds, and the final field');
   assert.equal(encoderState.audioInstances.at(-1).state, 'closed', 'offline audio completed after normal export');
   assert.equal(encoderState.audioInstances.at(-1).renderingDone, true, 'offline audio rendering settled');
 

@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 19;
+  const VERSION = 20;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IRON_COOLDOWN_TICKS = 48; // ~200 ms at 240 Hz DT: cooldown after an Iron Save
@@ -55,7 +55,7 @@
   // cut, rising evenly to `max` at the cap, so one hard check shrugs off but repeated ones tell.
   const DAZE = Object.freeze({ speed: 250, scale: 2850, hit: .2, free: .15, max: .4 });
   function daze(body, knock) {
-    if (knock > DAZE.speed) body.daze = Math.min(DAZE.max, (body.daze || 0) + Math.min(DAZE.hit, (knock - DAZE.speed) / DAZE.scale / (body.stability || 1)));
+    if (body.superActive !== 'stalwart' && knock > DAZE.speed) body.daze = Math.min(DAZE.max, (body.daze || 0) + Math.min(DAZE.hit, (knock - DAZE.speed) / DAZE.scale / (body.stability || 1)));
   }
   function dazeSlow(body) {
     const daze = body.daze || 0;
@@ -824,7 +824,7 @@
       b.guarding = false; b.ironGuard = false; b.ironCooldownTicks = 0;
       if (!keepMotion) b.vx = b.vy = b.omega = 0;
       // In Pulse, a running super carries into the next turn until its time runs out.
-      if (!keepMotion) endSuper(b, bodies);
+      if (!keepMotion || (!b.superActive && b.usedSuperThisTurn && !b.superRefunded)) endSuper(b, bodies);
       syncEffectiveStats(b);
     }
     const ball = bodies.find(b => b.team === -1);

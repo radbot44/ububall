@@ -538,6 +538,30 @@ test('Knockout stuns opponent on contact and prevents them from moving next turn
   assert.equal(b[3].stunned, false);
 });
 
+test('consumed supers refund mastery exactly once at standard and Pulse turn boundaries', () => {
+  for (const key of ['cannonball', 'knockout']) {
+    for (const keepMotion of [false, true]) {
+      for (const bonusRefund of [0, 5, 10, 20]) {
+        const bodies = P.kickoff(), source = bodies[0];
+        const target = key === 'cannonball' ? bodies[6] : bodies[3];
+        const moves = Array.from({ length: 6 }, () => ({ angle: 0, power: 0 }));
+        Object.assign(source, { x: 400, y: 300, meter: 100, superArm: true, equippedSuper: { key, bonusRefund } });
+        Object.assign(target, { x: 435, y: 300, vx: 0, vy: 0 });
+        P.startTurn(bodies, moves);
+        source.vx = 500;
+        P.step(bodies, 0);
+        assert.equal(source.superActive, null);
+        P.stop(bodies, keepMotion);
+        assert.equal(source.meter, bonusRefund);
+        P.endSuper(source, bodies);
+        P.startTurn(bodies, moves);
+        P.stop(bodies);
+        assert.equal(source.meter, bonusRefund);
+      }
+    }
+  }
+});
+
 test('Sticky grabs the ball on contact and carries it along with skater movement', () => {
   const b = P.kickoff();
   b[0].superActive = 'sticky';
@@ -941,14 +965,16 @@ test('curve strengthens spin strikes and bends the ball its ubu strikes', () => 
   assert.ok(P.ballCurveFactor(high) > P.ballCurveFactor(low));
 });
 test('hard checks daze the next launch, stack, and Stability resists them', () => {
-  const check = (stability, hits) => {
+  const check = (stability, hits, superActive = null) => {
     const b = P.kickoff(); P.applyStats(b[0], normal); P.applyStats(b[3], { ...normal, stability });
+    Object.assign(b[3], { superActive, superTicks: 720 });
     for (let i = 0; i < hits; i++) { Object.assign(b[0], { x: 300, y: 300, vx: 720, vy: 0 }); Object.assign(b[3], { x: 349, y: 300, vx: 0, vy: 0 }); P.step(b, 0); }
     return b;
   };
   const once = check(127, 1)[3].daze, twice = check(127, 2)[3].daze;
   assert.ok(Math.abs(once - .15) < .005 && twice > once && check(127, 4)[3].daze === P.DAZE.max);
   assert.ok(!check(127, 1)[0].daze); // The attacker is not dazed by its own check.
+  assert.ok(!check(127, 4, 'stalwart')[3].daze);
   const crash = P.kickoff(); P.applyStats(crash[0], normal); P.applyStats(crash[3], normal);
   Object.assign(crash[0], { x: 300, y: 300, vx: 720 }); Object.assign(crash[3], { x: 349, y: 300, vx: -720 }); P.step(crash, 0);
   assert.equal(crash[0].daze, P.DAZE.hit); assert.equal(crash[3].daze, P.DAZE.hit); // Head-on: both, capped per hit.
