@@ -1325,6 +1325,7 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 .replay-toggle[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); }
 /* Game & replay stats. */
 .stats-dialog {
+  --stats-selection: color-mix(in srgb, var(--text) 15%, var(--card));
   display: flex;
   flex-direction: column;
   width: min(var(--rink-w, 62.5rem), calc(100% - 1.5rem));
@@ -1408,29 +1409,32 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
   letter-spacing: .02em;
   vertical-align: middle;
 }
-.stats-more-details[hidden] { display: none; }
 .stats-more-details { display: flex; flex-direction: column; gap: .375rem; margin: .75rem 0; }
-.stats-tabs, .stats-rounds, .stats-trails, .stats-event-filters { display: flex; gap: .375rem; margin: .375rem 0; }
-.stats-trails { flex-wrap: wrap; }
+.stats-tabs, .stats-rounds, .stats-map-controls { display: flex; gap: .375rem; }
+.stats-rounds, .stats-map-controls { margin: .375rem 0; }
+.stats-map-controls { overflow-x: auto; }
+.stats-map-controls button { flex: 0 0 9em; white-space: nowrap; padding-inline: .375rem; }
+#stats-highlights { margin-right: auto; }
 .stats-rounds { overflow-x: auto; }
-.stats-rounds button { white-space: nowrap; }
-.stats-tabs button[aria-pressed=true], .stats-rounds button[aria-pressed=true], .stats-trails button[aria-pressed=true],
-.stats-event-filters button[aria-pressed=true], .stats-path-button[aria-pressed=true] {
-  border-color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 14%, var(--card));
+.stats-rounds button { flex: 1 0 auto; white-space: nowrap; }
+.stats-dialog button[aria-pressed=true] {
+  border-color: var(--muted);
+  background: var(--stats-selection);
 }
 .stats-dialog [data-team="0"] { --stats-team: var(--team-home); --stats-ink: #000; }
 .stats-dialog [data-team="1"] { --stats-team: var(--team-away); --stats-ink: #fff; }
 .stats-rounds button[data-team] { border-color: var(--stats-team); color: var(--stats-team); }
 .stats-rounds button[data-team][aria-pressed=true], .stats-player { background: var(--stats-team); color: var(--stats-ink); }
-.stats-map { display: block; width: min(100%, 38rem, 53dvh); height: auto; margin: .25rem auto 0; }
+.stats-map { display: block; width: min(80%, 94dvh); height: auto; margin: .25rem auto 0; }
+@media (max-height: 30rem) and (orientation: landscape) {
+  .stats-map { width: min(80%, 53dvh); }
+}
 .stats-map-detail { height: 2.75em; overflow: auto; margin: .25rem 0; color: var(--muted); font-size: .8125rem; text-align: center; white-space: pre-line; }
 #stats-events h3 { margin: .875rem 0 .25rem; font-size: .9375rem; }
 .stats-events { list-style: none; margin: 0; padding: 0; }
 .stats-events li { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .75rem; padding: .375rem .5rem; font-size: .8125rem; }
 .stats-events li.major { background: var(--card); border-radius: .375rem; font-weight: 700; }
-.stats-events li:is(.highlighted, .path-selected, :focus-within, :hover) { background: color-mix(in srgb, var(--primary) 24%, var(--card)); border-radius: .375rem; }
-.stats-path-button { margin-left: auto; padding: .125rem .5rem; font-size: inherit; }
+.stats-events li:is(.highlighted, :focus-within, :hover) { background: var(--stats-selection); border-radius: .375rem; }
 .stats-event-time { min-width: 7.5rem; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; text-align: left; }
 button.stats-event-time { padding: 0; min-height: 0; border: 0; background: none; color: var(--primary); font: inherit; font-weight: 400; text-decoration: underline; }
 .stats-event-entry { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
@@ -1443,7 +1447,8 @@ button.stats-event-time { padding: 0; min-height: 0; border: 0; background: none
 @media (orientation: portrait) and (max-width: 420px) {
   .stats-dialog { padding: 1rem; }
   .stats-table th, .stats-table td { padding: .375rem .1875rem; }
-  .stats-heading { flex-direction: column; align-items: flex-start; gap: .5rem; }
+  .stats-heading { flex-wrap: wrap; gap: .5rem; }
+  .stats-header-actions { margin-left: auto; }
 }
 
 @media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {

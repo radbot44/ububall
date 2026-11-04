@@ -324,6 +324,20 @@
       }
     }
     if (unscored) out.rounds.push({ team: null });
+    // Events without an attributed strike show the half-second of ball motion leading into them.
+    for (const event of out.events) {
+      if (event.path) continue;
+      const { turnIndex, tick } = event;
+      const { startTick, endTick, samples } = out.trails[turnIndex];
+      const ballAt = at => {
+        const frame = Math.floor((at - startTick) / 8), offset = frame * 14 + 12;
+        const previous = startTick + frame * 8, next = Math.min(previous + 8, endTick);
+        const mix = next > previous ? (at - previous) / (next - previous) : 0;
+        const coord = i => mix ? samples[i] + mix * (samples[i + 14] - samples[i]) : samples[i];
+        return { x: coord(offset), y: coord(offset + 1), tick: at, turnIndex };
+      };
+      event.path = path(ballAt(Math.max(startTick, tick - 120)), ballAt(tick));
+    }
     out.events.sort((a, b) => a.tick - b.tick);
     out.topShot = engine.topSpeed;
     out.bigSaves = engine.bigSaves;

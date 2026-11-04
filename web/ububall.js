@@ -1322,7 +1322,7 @@
   // Full time: a summary of the result (with any comeback or shutout) and each ubu's goals, assists,
   // saves and fastest shot, naming the MVP. It opens after the final goal's replay has played once.
   let summaryPending = false, summaryTimer = 0;
-  let statsMoreDetails = false, activeStatsContext = null;
+  let activeStatsContext = null;
   // The tally and scores as this view sees them (the home team first).
   function viewTally() {
     if (!online?.active) return { tally, scores };
@@ -3769,7 +3769,6 @@
     $('stats-log').hidden = !log;
     $('stats-box-tab').setAttribute('aria-pressed', String(!log));
     $('stats-log-tab').setAttribute('aria-pressed', String(log));
-    $('stats-details-toggle').hidden = log;
     if (log) renderGameLog(ctx);
   }
   function renderGameLog(ctx) {
@@ -3787,8 +3786,8 @@
       button.onclick = () => { ctx.round = index - 1; updateLog(); };
       filters.append(button);
     }
-    const map = $('stats-map'), detail = $('stats-map-detail'), log = $('stats-events'), choices = $('stats-map-choices');
-    const clearPath = $('stats-clear-path');
+    const map = $('stats-map'), detail = $('stats-map-detail'), log = $('stats-events');
+    const highlights = $('stats-highlights');
     const g = map.getContext('2d');
     const { home, away, text } = getThemeColors();
     const rows = new Map();
@@ -3805,34 +3804,18 @@
       player.append(image, teamEntries[index].model.parts.fullName);
       return player;
     }
-    let visible, shown, hovered = null, rowMark = null, highlighted = [];
+    let visible, shown, hovered = null, preview = [], marked = [];
+    ctx.pinned ??= [];
     const active = event => ctx.round == null || ctx.round < 0 || event.round === ctx.round;
     const radius = event => event.type === 'Goal' ? 11 : statsMajor.has(event.type) ? 8 : 4;
     function drawMap() {
       g.clearRect(0, 0, map.width, map.height);
       drawRinkSurface(g, themeColors);
-      if (ctx.path || ctx.ballTrail || ctx.ubuTrails) {
+      if (marked.length || ctx.ballTrail || ctx.ubuTrails) {
         g.save();
         if (seat) g.transform(-1, 0, 0, -1, map.width, map.height);
         g.lineCap = g.lineJoin = 'round';
-        if (ctx.path) {
-          const { from, to } = ctx.path.path;
-          g.strokeStyle = text;
-          g.lineWidth = 4;
-          g.beginPath();
-          for (let i = from.turnIndex; i <= to.turnIndex; i++) {
-            const { startTick, endTick, samples } = trails[i];
-            if (i === from.turnIndex) g.moveTo(from.x, from.y);
-            else g.moveTo(samples[12], samples[13]);
-            for (let n = 26, k = 1; n < samples.length; n += 14, k++) {
-              const tick = Math.min(endTick, startTick + k * 8);
-              if (tick > from.tick && tick < to.tick) g.lineTo(samples[n], samples[n + 1]);
-            }
-            if (i === to.turnIndex) g.lineTo(to.x, to.y);
-          }
-          g.stroke();
-        }
-        for (let i = 0; !ctx.path && i < 7; i++) {
+        for (let i = 0; i < 7; i++) {
           if (i === 6 ? !ctx.ballTrail : !ctx.ubuTrails) continue;
           g.strokeStyle = i === 6 ? text : ((i < 3) !== Boolean(seat) ? home : away);
           g.globalAlpha = i === 6 ? 0.8 : 0.45;
@@ -3846,11 +3829,34 @@
           }
           g.stroke();
         }
+        for (const event of marked) {
+          if (!event.path) continue;
+          const { from, to } = event.path;
+          g.strokeStyle = event.team === 0 ? home : away;
+          g.globalAlpha = 1;
+          g.lineWidth = 4;
+          g.beginPath();
+          for (let i = from.turnIndex; i <= to.turnIndex; i++) {
+            const { startTick, endTick, samples } = trails[i];
+            if (i === from.turnIndex) g.moveTo(from.x, from.y);
+            else g.moveTo(samples[12], samples[13]);
+            for (let n = 26, k = 1; n < samples.length; n += 14, k++) {
+              const tick = Math.min(endTick, startTick + k * 8);
+              if (tick > from.tick && tick < to.tick) g.lineTo(samples[n], samples[n + 1]);
+            }
+            if (i === to.turnIndex) g.lineTo(to.x, to.y);
+          }
+          g.stroke();
+          g.fillStyle = g.strokeStyle;
+          g.beginPath();
+          g.arc(to.x, to.y, 3, 0, Math.PI * 2);
+          g.fill();
+        }
         g.restore();
       }
       for (const layer of [shown.filter(event => !active(event)), visible.filter(event => !statsMajor.has(event.type)), visible.filter(event => statsMajor.has(event.type))]) {
         for (const event of layer) {
-          g.globalAlpha = !active(event) ? 0.13 : ctx.path && event !== ctx.path ? 0.22 : statsMajor.has(event.type) ? 1 : 0.65;
+          g.globalAlpha = !active(event) ? 0.13 : statsMajor.has(event.type) ? 1 : 0.65;
           g.fillStyle = event.team === 0 ? home : away;
           g.beginPath();
           g.arc(event.x, event.y, radius(event), 0, Math.PI * 2);
@@ -3863,40 +3869,36 @@
         }
       }
       g.globalAlpha = 1;
-      const marked = rowMark || ctx.path;
-      if (marked) {
+      for (const event of marked) {
         g.strokeStyle = text;
         g.lineWidth = 3;
         g.beginPath();
-        g.arc(marked.x, marked.y, radius(marked) + 6, 0, Math.PI * 2);
+        g.arc(event.x, event.y, radius(event) + 6, 0, Math.PI * 2);
         g.stroke();
       }
     }
-    function selectPath(event) {
-      rows.get(ctx.path)?.classList.remove('path-selected');
-      rows.get(ctx.path)?.querySelector('.stats-path-button')?.setAttribute('aria-pressed', 'false');
-      ctx.path = event;
-      rows.get(event)?.classList.add('path-selected');
-      rows.get(event)?.querySelector('.stats-path-button')?.setAttribute('aria-pressed', 'true');
-      clearPath.hidden = !event;
+    function updateMarks() {
+      for (const event of marked) rows.get(event)?.classList.remove('highlighted');
+      marked = [...new Set([...ctx.pinned, ...preview])];
+      for (const event of marked) rows.get(event)?.classList.add('highlighted');
       drawMap();
+    }
+    function pin(events) {
+      const same = events.length === ctx.pinned.length && events.every((event, i) => event === ctx.pinned[i]);
+      ctx.pinned = same ? [] : events;
+      updateMarks();
     }
     function updateLog() {
       [...filters.children].forEach((button, i) => button.setAttribute('aria-pressed', String(i - 1 === (ctx.round ?? -1))));
-      $('stats-highlights').setAttribute('aria-pressed', String(Boolean(ctx.highlights)));
-      $('stats-all-events').setAttribute('aria-pressed', String(!ctx.highlights));
+      highlights.setAttribute('aria-pressed', String(Boolean(ctx.highlights)));
+      highlights.textContent = ctx.highlights ? 'Highlights only' : 'All events';
       shown = ctx.highlights ? events.filter(event => statsMajor.has(event.type)) : events;
       visible = shown.filter(active);
-      if (!visible.includes(ctx.path)) ctx.path = null;
-      clearPath.hidden = !ctx.path;
-      rowMark = null;
-      drawMap();
-      detail.textContent = 'Hover or tap a mark for details.';
-      choices.hidden = true;
-      choices.replaceChildren();
-      rows.clear();
+      ctx.pinned = ctx.pinned.filter(event => visible.includes(event));
+      preview = [];
       hovered = null;
-      highlighted = [];
+      detail.textContent = 'Hover to preview. Click to pin or unpin.';
+      rows.clear();
       const content = document.createDocumentFragment();
       if (!visible.length) {
         const empty = document.createElement('p');
@@ -3915,16 +3917,26 @@
         }
         const row = document.createElement('li'), time = document.createElement(ctx.theater ? 'button' : 'span');
         row.classList.toggle('major', statsMajor.has(event.type));
-        row.classList.toggle('path-selected', event === ctx.path);
         row.tabIndex = 0;
-        const markRow = () => { rowMark = event; drawMap(); };
-        const unmarkRow = () => { if (rowMark === event) { rowMark = null; drawMap(); } };
+        const markRow = () => { preview = [event]; updateMarks(); };
+        const unmarkRow = () => {
+          if (preview[0] === event) { preview = []; updateMarks(); }
+        };
         row.onpointerenter = markRow;
         row.onpointerleave = () => { if (!row.contains(document.activeElement)) unmarkRow(); };
         row.addEventListener('focusin', markRow);
         row.addEventListener('focusout', focus => {
           if (!row.contains(focus.relatedTarget) && !row.matches(':hover')) unmarkRow();
         });
+        row.onclick = click => {
+          if (!click.target.closest('button')) pin([event]);
+        };
+        row.onkeydown = key => {
+          if (key.target === row && (key.key === 'Enter' || key.key === ' ')) {
+            key.preventDefault();
+            pin([event]);
+          }
+        };
         time.className = 'stats-event-time';
         time.textContent = statsEventTime(event);
         if (ctx.theater) {
@@ -3938,95 +3950,65 @@
         }
         const entry = document.createElement('span');
         entry.className = 'stats-event-entry';
-        entry.append(statsEventLabel(event), event.actor === null ? names[event.team] : pill(event.actor));
+        entry.append(statsEventLabel(event), event.actor === null ? document.createElement('span') : pill(event.actor));
+        if (event.actor === null) entry.lastChild.textContent = names[event.team];
         if (event.target != null) entry.append('→', pill(event.target));
         row.append(time, entry);
-        if (event.path) {
-          row.onclick = click => {
-            if (!click.target.closest('button')) selectPath(event === ctx.path ? null : event);
-          };
-          const preview = document.createElement('button');
-          preview.type = 'button';
-          preview.className = 'stats-path-button';
-          preview.textContent = 'Ball path';
-          preview.setAttribute('aria-pressed', String(event === ctx.path));
-          preview.onclick = () => selectPath(event === ctx.path ? null : event);
-          row.append(preview);
-        }
         rows.set(event, row);
         list.append(row);
       }
       log.replaceChildren(content);
       log.scrollTop = 0;
-    }
-    function highlight(marks) {
-      for (const event of highlighted) rows.get(event)?.classList.remove('highlighted');
-      highlighted = marks;
-      for (const event of marks) rows.get(event)?.classList.add('highlighted');
+      updateMarks();
     }
     function inspectMark(pointer) {
       const rect = map.getBoundingClientRect();
       const x = (pointer.clientX - rect.left) * map.width / rect.width;
       const y = (pointer.clientY - rect.top) * map.height / rect.height;
       const hitRadius = 12 * map.width / rect.width;
-      const nearby = pointer.type === 'click' ? [] : null;
       let closest = null, distance = hitRadius;
       for (const event of visible) {
         const gap = Math.hypot(event.x - x, event.y - y);
-        if (nearby && gap <= hitRadius) nearby.push({ event, gap });
         if (gap <= distance) { closest = event; distance = gap; }
       }
-      if (closest !== hovered) {
+      if (closest !== hovered || pointer.type === 'click') {
         hovered = closest;
-        const marks = closest ? visible.filter(event => event.x === closest.x && event.y === closest.y) : [];
-        highlight(marks);
-        detail.textContent = marks.length ? marks.map(event => `${statsEventText(event, names)} · ${statsEventTime(event)}`).join('\n') : 'Hover or tap a mark for details.';
+        preview = closest ? visible.filter(event =>
+          Math.hypot(event.x - closest.x, event.y - closest.y) <= radius(event) + radius(closest)
+        ) : [];
+        detail.textContent = preview.length ? preview.map(event => `${statsEventText(event, names)} · ${statsEventTime(event)}`).join('\n') : 'Hover to preview. Click to pin or unpin.';
+        if (pointer.type === 'click') {
+          pin(preview);
+          const row = rows.get(preview[0]);
+          if (row) {
+            const viewport = log.getBoundingClientRect(), bounds = row.getBoundingClientRect();
+            log.scrollTo({ top: log.scrollTop + bounds.top - viewport.top - (log.clientHeight - bounds.height) / 2, behavior: 'smooth' });
+          }
+        } else {
+          updateMarks();
+        }
       }
-      if (!nearby) return;
-      choices.replaceChildren();
-      choices.hidden = true;
-      const matches = nearby.filter(mark => mark.gap <= distance + hitRadius / 2);
-      if (matches.length === 1) selectMark(closest);
-      if (matches.length < 2) return;
-      for (const { event } of matches) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = `${statsEventText(event, names)} · ${statsEventTime(event)}`;
-        button.onclick = () => {
-          choices.hidden = true;
-          selectMark(event);
-        };
-        choices.append(button);
-      }
-      choices.hidden = false;
-    }
-    function selectMark(event) {
-      const row = rows.get(event);
-      const viewport = log.getBoundingClientRect(), bounds = row.getBoundingClientRect();
-      row.focus({ preventScroll: true });
-      log.scrollTo({ top: log.scrollTop + bounds.top - viewport.top - (log.clientHeight - bounds.height) / 2, behavior: 'smooth' });
-      if (event.path) selectPath(event);
     }
     map.onpointermove = inspectMark;
     map.onclick = inspectMark;
     map.onpointerleave = () => {
       hovered = null;
-      highlight([]);
-      detail.textContent = 'Hover or tap a mark for details.';
+      preview = [];
+      updateMarks();
+      detail.textContent = 'Hover to preview. Click to pin or unpin.';
     };
-    $('stats-highlights').onclick = () => { ctx.highlights = true; updateLog(); };
-    $('stats-all-events').onclick = () => { ctx.highlights = false; updateLog(); };
-    clearPath.onclick = () => {
-      $('stats-ball-trail').focus();
-      selectPath(null);
-    };
-    for (const [id, key] of [['stats-ball-trail', 'ballTrail'], ['stats-ubu-trails', 'ubuTrails']]) {
+    highlights.onclick = () => { ctx.highlights = !ctx.highlights; updateLog(); };
+    for (const [id, key, label] of [['stats-ball-trail', 'ballTrail', 'ball trail'], ['stats-ubu-trails', 'ubuTrails', 'ubu trails']]) {
       const button = $(id);
-      button.setAttribute('aria-pressed', String(Boolean(ctx[key])));
+      const update = () => {
+        button.setAttribute('aria-pressed', String(Boolean(ctx[key])));
+        button.textContent = `${ctx[key] ? 'Hide' : 'Show'} ${label}`;
+      };
+      update();
       button.onclick = () => {
         ctx[key] = !ctx[key];
-        button.setAttribute('aria-pressed', String(ctx[key]));
-        selectPath(null);
+        update();
+        drawMap();
       };
     }
     updateLog();
@@ -4046,7 +4028,6 @@
 
     $('stats-title').textContent = 'Game stats';
     $('stats-watch-replay').hidden = !isGame;
-    $('stats-details-toggle').textContent = statsMoreDetails ? 'Fewer details' : 'More details';
 
     const honoursEl = $('stats-honours');
     if (isGame) {
@@ -4075,9 +4056,7 @@
     const hasMvp = rating(mvp) > 0;
 
     const table = document.createElement('table'), head = table.createTHead().insertRow();
-    const headers = statsMoreDetails
-      ? ['', 'Ubu', 'Goals', 'Assists', 'Shots', 'Saves', 'Checks', 'Touches', 'Passes', 'Top shot', 'Distance', 'Fouls']
-      : ['', 'Ubu', 'G', 'A', 'Sh', 'Sa', 'C', 'T', 'P', 'TS', 'D', 'F'];
+    const headers = ['', 'Ubu', 'Goals', 'Assists', 'Shots', 'Saves', 'Checks', 'Touches', 'Passes', 'Top shot', 'Distance', 'Fouls'];
     for (const label of headers) {
       const th = document.createElement('th');
       th.textContent = label;
@@ -4126,32 +4105,25 @@
     });
     $('stats-table').replaceChildren(table);
 
-    const moreDetailsEl = $('stats-more-details');
-    moreDetailsEl.hidden = !statsMoreDetails;
-    if (statsMoreDetails) {
-      const totalControl = s.control[0] + s.control[1] || 1;
-      $('stats-control').replaceChildren(...[0, 1].map(team => {
-        const part = document.createElement('span');
-        part.className = team ? 'away' : 'home';
-        part.style.flexGrow = String(s.control[team] || 0.001);
-        part.textContent = `${names[team]} ${Math.round(s.control[team] / totalControl * 100)}%`;
-        return part;
-      }));
+    const totalControl = s.control[0] + s.control[1] || 1;
+    $('stats-control').replaceChildren(...[0, 1].map(team => {
+      const part = document.createElement('span');
+      part.className = team ? 'away' : 'home';
+      part.style.flexGrow = String(s.control[team] || 0.001);
+      part.textContent = `${names[team]} ${Math.round(s.control[team] / totalControl * 100)}%`;
+      return part;
+    }));
 
-      const totalSide = s.side[0] + s.side[1] || 1;
-      $('stats-side').replaceChildren(...[0, 1].map(team => {
-        const part = document.createElement('span');
-        part.className = team ? 'away' : 'home';
-        part.style.flexGrow = String(s.side[team] || 0.001);
-        part.textContent = `${names[team]} ${Math.round(s.side[team] / totalSide * 100)}%`;
-        return part;
-      }));
+    const totalSide = s.side[0] + s.side[1] || 1;
+    $('stats-side').replaceChildren(...[0, 1].map(team => {
+      const part = document.createElement('span');
+      part.className = team ? 'away' : 'home';
+      part.style.flexGrow = String(s.side[team] || 0.001);
+      part.textContent = `${names[team]} ${Math.round(s.side[team] / totalSide * 100)}%`;
+      return part;
+    }));
 
-    }
-
-    $('stats-note').textContent = statsMoreDetails
-      ? "Top shot is the ball speed off that ubu's fastest touch. Distance is in rink lengths. Shots include goals, saved attempts and high-power strikes off the post. Checks are hard hits inflicting daze or stuns. Fouls are yellow cards."
-      : "G: Goals · A: Assists · Sh: Shots · Sa: Saves · C: Checks · T: Touches · P: Passes · TS: Top shot · D: Distance · F: Fouls";
+    $('stats-note').textContent = "Top shot is the ball speed off that ubu's fastest touch. Distance is in rink lengths. Shots include goals, saved attempts and high-power strikes off the post. Checks are hard hits inflicting daze or stuns. Fouls are yellow cards.";
 
     const actionsEl = $('stats-actions');
     if (isGame) {
@@ -4188,10 +4160,6 @@
   }
   $('replay-stats').onclick = openStats;
   $('stats-close').onclick = () => $('stats-dialog').close();
-  $('stats-details-toggle').onclick = () => {
-    statsMoreDetails = !statsMoreDetails;
-    if (activeStatsContext) renderStats(activeStatsContext);
-  };
   $('stats-watch-replay').onclick = async () => {
     const id = await lastSaved;
     if (id) {

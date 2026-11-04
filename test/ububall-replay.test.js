@@ -129,6 +129,9 @@ test('Game Log counts big post shots once and credits passes to the teammate who
   assert.equal(event.target, 1);
   assert.ok(event.tick > 0);
   assert.equal(event.turnIndex, 0);
+  assert.ok(pass.events.every(({ path, tick }) => path.from.tick < path.to.tick && path.to.tick >= tick));
+  assert.equal(event.path.to.tick, event.tick);
+  assert.ok(event.tick - event.path.from.tick <= 120);
   const [{ samples }] = pass.trails;
   assert.deepEqual([...samples.slice(12, 14)], [775, 300]);
   assert.ok(samples.some((value, index) => index % 14 === 12 && value > 775));

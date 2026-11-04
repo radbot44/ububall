@@ -209,18 +209,17 @@ SOFTWARE.
       <h2 id="stats-title">Game stats</h2>
       <div class="stats-header-actions">
         <button id="stats-watch-replay" type="button">Watch replay</button>
-        <button id="stats-details-toggle" type="button">More details</button>
+        <div class="stats-tabs" role="group" aria-label="Stats view">
+          <button id="stats-box-tab" type="button" aria-pressed="true" aria-controls="stats-box">Box score</button>
+          <button id="stats-log-tab" type="button" aria-pressed="false" aria-controls="stats-log">Game log</button>
+        </div>
         <button id="stats-close" class="icon-button" type="button" aria-label="Close stats"><i data-icon="x"></i></button>
       </div>
     </div>
     <p id="stats-honours" class="summary-honours"></p>
-    <div class="stats-tabs" role="group" aria-label="Stats view">
-      <button id="stats-box-tab" type="button" aria-pressed="true" aria-controls="stats-box">Box score</button>
-      <button id="stats-log-tab" type="button" aria-pressed="false" aria-controls="stats-log">Game Log</button>
-    </div>
     <section id="stats-box" aria-labelledby="stats-box-tab">
     <div id="stats-table" class="stats-table"></div>
-    <div id="stats-more-details" class="stats-more-details" hidden>
+    <div class="stats-more-details">
       <p class="stats-label">Possession</p>
       <div id="stats-control" class="stats-control"></div>
       <p class="stats-label">Time on side</p>
@@ -232,15 +231,10 @@ SOFTWARE.
       <div class="stats-map-panel">
         <canvas id="stats-map" class="stats-map" width="1000" height="600" aria-label="Rink event map. Event details are also listed below."></canvas>
         <p id="stats-map-detail" class="stats-map-detail" aria-live="polite"></p>
-        <div id="stats-map-choices" class="stats-rounds" role="group" aria-label="Events at this spot" hidden></div>
-        <div class="stats-trails" role="group" aria-label="Map trails">
-          <button id="stats-ball-trail" type="button" aria-pressed="false">Ball Trail</button>
-          <button id="stats-ubu-trails" type="button" aria-pressed="false">Ubu Trails</button>
-          <button id="stats-clear-path" type="button" hidden>Clear ball path</button>
-        </div>
-        <div class="stats-event-filters" role="group" aria-label="Event filter">
-          <button id="stats-highlights" type="button" aria-pressed="false">Highlights</button>
-          <button id="stats-all-events" type="button" aria-pressed="true">All events</button>
+        <div class="stats-map-controls" role="group" aria-label="Map and event filters">
+          <button id="stats-highlights" type="button" aria-pressed="false">All events</button>
+          <button id="stats-ball-trail" type="button" aria-pressed="false">Show ball trail</button>
+          <button id="stats-ubu-trails" type="button" aria-pressed="false">Show ubu trails</button>
         </div>
         <div id="stats-rounds" class="stats-rounds" role="group" aria-label="Rounds"></div>
       </div>
