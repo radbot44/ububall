@@ -20,7 +20,8 @@
   });
   const practice = Array.from({ length: 6 }, () => { const dna = ubu.randomDNA(); return { model: ubu.decode(dna), dna: ubu.toCode(dna), label: 'Practice ubu' }; });
   let roster = practice.slice(0, 3), draft = [...roster], rosterSlot = 0;
-  let bodies = P.kickoff(), simBodies = P.kickoff(), plans = [], cpu = [], selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
+  const idlePlan = () => ({ angle: 0, power: 0, spin: 0, guard: false });
+  let bodies = P.kickoff(), simBodies = P.kickoff(), plans = Array.from({ length: 3 }, idlePlan), cpu = [], selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
   let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [];
   let isPortrait = false;
   let matchMode = 'standard', planDeadline = 0;
@@ -43,7 +44,6 @@
   const classicMode = () => ububallMatch.rule(matchMode, 'classic');
   const blitzMode = () => ububallMatch.rule(matchMode, 'blitz');
   const pulseMode = () => ububallMatch.rule(matchMode, 'pulse');
-  const idlePlan = () => ({ angle: 0, power: 0, spin: 0, guard: false });
   function startPlanClock() { planDeadline = performance.now() + (ububallMatch.planningMilliseconds(matchMode) ?? Infinity); }
   function updateClock() {
     if (online?.active) {
@@ -2047,6 +2047,7 @@
   function line(x1, y1, x2, y2, color, width = 2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
   function circle(x, y, r, color, width = 2) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
   function impulseGeometry(body, plan) {
+    if (!body || !plan) return { ringR: 0, scale: 0, distance: 0, x: body?.x || 0, y: body?.y || 0, visible: false };
     const activeSuper = body.superActive || ((body.superArm && (body.meter ?? 0) >= 100) ? body.equippedSuper?.key : null);
     const isColossus = activeSuper === 'colossus';
     const isStalwart = activeSuper === 'stalwart';
@@ -4830,37 +4831,6 @@
     else if (inMatch) { history.pushState({ match: true }, '', location.href); openPause(); }
   });
   window.addEventListener('ubu:screen', event => { if (event.detail !== 'play') exitMatchMode(); else updateHome(); });
-
-  try {
-    if (localStorage.getItem('ububall-orientation') === 'portrait') {
-      toggleRotate();
-    }
-  } catch {}
-
-  document.addEventListener('visibilitychange', () => { lastTime = 0; accumulator = 0; });
-  const ro = new ResizeObserver(entries => {
-    gameUi.updateScale?.();
-    for (const entry of entries) {
-      if (entry.target === canvas) {
-        const box = entry.devicePixelContentBoxSize?.[0];
-        deviceWidth = box ? box.inlineSize : 0;
-        deviceHeight = box ? box.blockSize : 0;
-      }
-    }
-    layoutDirty = true;
-    draw();
-  });
-  try { ro.observe(canvas, { box: 'device-pixel-content-box' }); } catch { ro.observe(canvas); }
-  if (stadium) ro.observe(stadium);
-  if (stageArea) ro.observe(stageArea);
-  ro.observe($('field-spin')); // Its size places it; it has none until first shown.
-  const resizeField = () => { gameUi.updateScale?.(); layoutDirty = true; draw(); };
-  window.addEventListener('resize', resizeField);
-  window.visualViewport?.addEventListener('resize', resizeField);
-  practice.slice(0, 3).forEach(entry => addOption(entry, 'roster-practice'));
-  restoredMatch = restoreActiveMatch();
-  if (!restoredMatch) newMatch();
-  requestAnimationFrame(frame);
   function networkMoves() {
     return plans.map((p, i) => ({ angle: p.angle + (online?.state?.seat ? Math.PI : 0), power: p.power,
       spin: p.spin || 0, superArm: Boolean(bodies[i].superArm), guard: Boolean(p.guard) }));
@@ -5174,6 +5144,35 @@
     }
   });
   $('online-rematch').onclick = () => online.rematch();
+  practice.slice(0, 3).forEach(entry => addOption(entry, 'roster-practice'));
+  restoredMatch = restoreActiveMatch();
+  if (!restoredMatch) newMatch();
+  try {
+    if (localStorage.getItem('ububall-orientation') === 'portrait') {
+      toggleRotate();
+    }
+  } catch {}
+  document.addEventListener('visibilitychange', () => { lastTime = 0; accumulator = 0; });
+  const ro = new ResizeObserver(entries => {
+    gameUi.updateScale?.();
+    for (const entry of entries) {
+      if (entry.target === canvas) {
+        const box = entry.devicePixelContentBoxSize?.[0];
+        deviceWidth = box ? box.inlineSize : 0;
+        deviceHeight = box ? box.blockSize : 0;
+      }
+    }
+    layoutDirty = true;
+    draw();
+  });
+  try { ro.observe(canvas, { box: 'device-pixel-content-box' }); } catch { ro.observe(canvas); }
+  if (stadium) ro.observe(stadium);
+  if (stageArea) ro.observe(stageArea);
+  ro.observe($('field-spin')); // Its size places it; it has none until first shown.
+  const resizeField = () => { gameUi.updateScale?.(); layoutDirty = true; draw(); };
+  window.addEventListener('resize', resizeField);
+  window.visualViewport?.addEventListener('resize', resizeField);
+  requestAnimationFrame(frame);
   // "Play with my ubus" arrives as /?roster=1, on load or from the Collection screen.
   function openRosterFromLink() {
     const url = new URL(location.href);

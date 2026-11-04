@@ -375,7 +375,15 @@ test('restoreEntry restores Stalwart ID 0 and mastery metadata, preserving null 
 });
 
 test('active match save and restore enforces matching matchVersion and physicsVersion', () => {
-  const code = section('function clearActiveMatch() {', 'function newMatch(playJingle = false) {');
+  assert.ok(
+    source.indexOf('const PRESENTATION_KEYS =') < source.indexOf('restoredMatch = restoreActiveMatch();') &&
+    source.indexOf('const viewIndex =') < source.indexOf('restoredMatch = restoreActiveMatch();'),
+    'projection constants and viewIndex must initialize before startup match restore/newMatch'
+  );
+  const code =
+    section('function kickoff(isNewMatch = false) {', 'let summaryPending') + '\n' +
+    section('function clearActiveMatch() {', 'function rounded(x, y, width, height, radius) {') + '\n' +
+    section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
   const P = require('../web/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const ububallReplay = require('../shared/ububall-replay.js');
@@ -386,14 +394,21 @@ test('active match save and restore enforces matching matchVersion and physicsVe
     removeItem(k) { delete store[k]; }
   };
   const dummy = () => {};
-  const env = vm.runInNewContext(code + '\n;({ saveActiveMatch, restoreActiveMatch, clearActiveMatch });', {
+  const env = vm.runInNewContext(code + '\n;({ saveActiveMatch, restoreActiveMatch, clearActiveMatch, newMatch });', {
+    Object, Array, Set, Math, Number, String, Boolean,
     P, ububallMatch, ububallReplay, localStorage, structuredClone,
     demo: false, online: null, phase: 'plan', recording: { turns: [] },
-    matchMode: 'standard', cpuLevel: 'medium', scores: [0, 0], turn: 1,
+    matchMode: 'standard', cpuMode: 'standard', cpuLevel: 'medium', scores: [0, 0], turn: 1, selected: 0,
+    elapsed: 0, accumulator: 0, drag: null, playSegments: [],
+     practice: Array.from({ length: 6 }, () => ({ dna: 'a', label: 'a', model: { stats: {} } })),
+    draft: Array.from({ length: 3 }, () => ({ dna: 'a', label: 'a', model: { stats: {} } })),
     fouls: { crease: [false, false], corner: null, cornerTurns: 0, cards: [] },
-    tally: {}, roster: [{ dna: 'a', label: 'a' }], teamEntries: [{ dna: 'a', label: 'a' }],
+    tally: {}, roster: [{ dna: 'a', label: 'a' }], teamEntries: [{ dna: 'a', label: 'a' }], stats: [],
     bodies: P.kickoff(), simBodies: P.kickoff(), plans: [], cpu: [], cpuDone: false,
-    stripPresentation: s => s, syncViewBodies: s => s,
+    authoritativeBodies: null, kickoffGlow: 0, netFire: null, scoringPlayer: null, roundTurns: 0, play: {},
+    clearEffects: dummy, closeSummary: dummy, saveRecording: dummy, resetPlans: dummy,
+    resolveEquippedSuper: () => P.SUPERS[0], anonymousName: i => `Anon ${i}`, anonymousNames: false,
+    shownSim: () => P.kickoff(), shownSeat: () => 0,
     endGoalReplay: dummy, showMode: dummy, classicMode: () => false,
     stopFanfare: dummy, gameAudio: () => null, buildTeam: dummy,
     normalStats: () => ({}), idlePlan: () => ({ angle: 0, power: 0, spin: 0 }),
@@ -401,6 +416,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
     restoreEntry: e => e, dirtyMeters: new Set(), startPlanClock: dummy, prepareCPU: dummy,
     sync: dummy, draw: dummy, say: dummy
   });
+  env.newMatch();
 
   // Save active match: verify physics is written
   env.saveActiveMatch();
