@@ -1412,10 +1412,12 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 .stats-more-details { display: flex; flex-direction: column; gap: .375rem; margin: .75rem 0; }
 .stats-tabs, .stats-rounds, .stats-map-controls { display: flex; gap: .375rem; }
 .stats-rounds, .stats-map-controls { margin: .375rem 0; }
-.stats-map-controls { overflow-x: auto; }
+.stats-rounds, .stats-map-controls { overflow: auto hidden; }
+.stats-dialog :is(.stats-rounds, .stats-map-controls, .stats-header-actions) button:active:not(:disabled) {
+  transform: none;
+}
 .stats-map-controls button { flex: 0 0 9em; white-space: nowrap; padding-inline: .375rem; }
 #stats-highlights { margin-right: auto; }
-.stats-rounds { overflow-x: auto; }
 .stats-rounds button { flex: 1 0 auto; white-space: nowrap; }
 .stats-dialog button[aria-pressed=true] {
   border-color: var(--muted);

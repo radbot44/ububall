@@ -3787,6 +3787,8 @@
       filters.append(button);
     }
     const map = $('stats-map'), detail = $('stats-map-detail'), log = $('stats-events');
+    // Crop the rink's vertical gutter while keeping marks and trails in field coordinates.
+    const mapTop = (P.rink.top + P.rink.bottom - map.height) / 2;
     const highlights = $('stats-highlights');
     const g = map.getContext('2d');
     const { home, away, text } = getThemeColors();
@@ -3809,11 +3811,13 @@
     const active = event => ctx.round == null || ctx.round < 0 || event.round === ctx.round;
     const radius = event => event.type === 'Goal' ? 11 : statsMajor.has(event.type) ? 8 : 4;
     function drawMap() {
+      g.resetTransform();
       g.clearRect(0, 0, map.width, map.height);
+      g.translate(0, -mapTop);
       drawRinkSurface(g, themeColors);
       if (marked.length || ctx.ballTrail || ctx.ubuTrails) {
         g.save();
-        if (seat) g.transform(-1, 0, 0, -1, map.width, map.height);
+        if (seat) g.transform(-1, 0, 0, -1, map.width, P.rink.top + P.rink.bottom);
         g.lineCap = g.lineJoin = 'round';
         for (let i = 0; i < 7; i++) {
           if (i === 6 ? !ctx.ballTrail : !ctx.ubuTrails) continue;
@@ -3964,7 +3968,7 @@
     function inspectMark(pointer) {
       const rect = map.getBoundingClientRect();
       const x = (pointer.clientX - rect.left) * map.width / rect.width;
-      const y = (pointer.clientY - rect.top) * map.height / rect.height;
+      const y = mapTop + (pointer.clientY - rect.top) * map.height / rect.height;
       const hitRadius = 12 * map.width / rect.width;
       let closest = null, distance = hitRadius;
       for (const event of visible) {
@@ -4148,6 +4152,9 @@
     if (type === 'replay') {
       const th = theater;
       if (!th || th.exporting) return;
+      th.paused = true;
+      th.steps = 0;
+      updateReplayBar();
       renderStats({ type: 'replay', theater: th });
     } else {
       const replay = type === 'pause' && phase !== 'over' ? recording : lastCompletedReplay;
