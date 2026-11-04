@@ -126,32 +126,37 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
   body:not(.in-match) .arena-layout { order: -1; width: min(55rem, 100%); margin: .25rem auto 0; }
   body:not(.in-match) .play-home { width: min(55rem, 100%); margin: .875rem auto 1.5rem; }
 }
-/* Keep the controls in a narrow column and let the goal extend into its inner gutter. */
-.sidebar-position { display: none; }
+/* The stage borrows the sidebar's inner gutter. The goal fits there between the score and controls. */
+body.in-match.sidebars-hidden .stadium:not(.portrait-mode) > .stadium-stage-area { --visible-rink-height: 536; }
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
   body.in-match .arena-layout { grid-template-columns: 1fr; padding: 0; }
   body.in-match .team-column { display: none; }
   body.in-match .stadium { grid-column: 1; border: 0; border-radius: 0; box-shadow: none; }
   body.in-match .stadium:not(.portrait-mode) {
     --controls-width: clamp(9.5rem, 24vw, 14rem);
-    grid-template: "score field" auto "position field" minmax(0, 1fr) "actions field" auto / var(--controls-width) minmax(0, 1fr);
+    --controls-inset: 1.75rem;
+    --controls-shift: var(--controls-inset);
+    grid-template: "score field" auto ". field" minmax(0, 1fr) "actions field" auto / var(--controls-width) minmax(0, 1fr);
   }
   body.in-match .stadium:not(.portrait-mode)[data-controls-side="right"] {
-    grid-template: "field score" auto "field position" minmax(0, 1fr) "field actions" auto / minmax(0, 1fr) var(--controls-width);
+    --controls-shift: calc(-1 * var(--controls-inset));
+    grid-template: "field score" auto "field ." minmax(0, 1fr) "field actions" auto / minmax(0, 1fr) var(--controls-width);
   }
-  body.in-match .stadium:not(.portrait-mode) > .stadium-stage-area { grid-area: field; width: auto; height: 100%; margin-inline-start: -1rem; }
-  body.in-match .stadium:not(.portrait-mode)[data-controls-side="right"] > .stadium-stage-area { margin-inline: 0 -1rem; }
+  body.in-match .stadium:not(.portrait-mode) > .stadium-stage-area {
+    --visible-rink-height: 536;
+    grid-area: field; width: auto; height: 100%; margin-inline-start: -1rem; justify-content: flex-start;
+  }
+  body.in-match .stadium:not(.portrait-mode)[data-controls-side="right"] > .stadium-stage-area {
+    margin-inline: 0 -1rem; justify-content: flex-end;
+  }
+  body.in-match .stadium:not(.portrait-mode) > :is(.scoreboard, .stadium-actions) { translate: var(--controls-shift) 0; }
   body.in-match .stadium:not(.portrait-mode) > .scoreboard { grid-area: score; border-bottom: 0; }
-  body.in-match .stadium:not(.portrait-mode) > .sidebar-position {
-    grid-area: position; display: flex; justify-content: center; align-self: end; gap: .375rem; z-index: 1;
-  }
   body.in-match .stadium:not(.portrait-mode) > .stadium-actions {
     grid-area: actions; grid-template-columns: minmax(0, 1fr); padding: .375rem 1rem .5rem;
     z-index: 1;
   }
   body.in-match .stadium:not(.portrait-mode) .knob svg { width: 2.625rem; }
-  body.in-match .stadium:not(.portrait-mode) .knob-row { grid-column: 1; }
-  body.in-match.replay-match .stadium:not(.portrait-mode) .sidebar-position { align-self: center; }
+  body.in-match .stadium:not(.portrait-mode) .knob-row { grid-column: 1; width: min(100%, 8rem); justify-self: center; }
 }
 .pause-menu {
   width: min(23.75rem, calc(100% - 1.5rem)); padding: 1.375rem; border: .0625rem solid var(--border); border-radius: 1.375rem;
@@ -162,6 +167,18 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
 .pause-actions { display: grid; gap: .625rem; }
 .pause-actions button { min-height: 3.25rem; font-size: 1.125rem; border-radius: .875rem; }
 .pause-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(11.875rem, 1fr)); gap: .5rem; margin: 1rem 0 .75rem; padding-top: 1rem; border-top: .0625rem solid var(--border); }
+#setting-sidebar { display: none; }
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
+  .pause-menu[open] {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    align-items: start; gap: .625rem 1rem;
+    width: min(34rem, calc(100% - 2rem)); max-height: calc(100dvh - 1.5rem); overflow: auto;
+    padding: .875rem;
+  }
+  .pause-menu :is(h2, .pause-links) { grid-column: 1 / -1; margin: 0; }
+  .pause-settings { grid-template-columns: minmax(0, 1fr); margin: 0; padding: 0; border: 0; }
+  body:has(.stadium:not(.portrait-mode)) #setting-sidebar { display: flex; }
+}
 /* A setting: its name, then its current value; pressing it switches the value. */
 .setting { display: flex; align-items: center; justify-content: space-between; gap: .625rem; min-height: 2.75rem; padding: .5rem .625rem .5rem .875rem; border-radius: .75rem; font-size: .875rem; text-align: left; }
 .setting-value { flex: none; min-width: 6.25rem; padding: .1875rem .625rem; text-align: center; border-radius: 62.4375rem; background: var(--background); color: var(--muted); font-size: .75rem; }

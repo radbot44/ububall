@@ -782,12 +782,16 @@
     result.corner = stalling() && copy.corner === null;
     return result;
   }
+  function cornerWarningY() {
+    const inset = !isPortrait && !videoField && visibleRinkHeight < 600 ? 60 : 30;
+    return fouls.corner > 1 ? 600 - inset : inset;
+  }
   function drawFouls(text) {
     // While planning, a warning the plan is predicted to clear (and each offender predicted to get
     // out) shows a green check in place of its alert.
     const predicted = phase === 'plan' ? predictionCache?.fouls : null;
     for (const team of [0, 1]) if (fouls.crease[team]) drawFieldWarning(team ? 970 : 30, 180, ['Goal', 'Camping'], text, predicted?.crease[team]);
-    if (stalling()) drawFieldWarning(fouls.corner % 2 ? 970 : 30, fouls.corner > 1 ? 570 : 30, ['Corner', 'Stalling'], text, predicted?.corner);
+    if (stalling()) drawFieldWarning(fouls.corner % 2 ? 970 : 30, cornerWarningY(), ['Corner', 'Stalling'], text, predicted?.corner);
     const flash = reducedMotion.matches ? 1 : .35 + .65 * (.5 + .5 * Math.cos(clockNow() / 1000 * Math.PI * 2.4));
     const creasing = new Set(bodies.slice(0, 6).filter(b => fouls.crease[b.team] && isCreasing(b, b.team)));
     for (const b of offenders()) {
@@ -842,7 +846,7 @@
   function warningAt(p) {
     const near = (x, y) => Math.abs(p.x - x) < 32 && Math.abs(p.y - y) < 34;
     for (const team of [0, 1]) if (fouls.crease[team] && near(team ? 970 : 30, 180)) return { kind: 'crease', team };
-    if (stalling() && near(fouls.corner % 2 ? 970 : 30, fouls.corner > 1 ? 570 : 30)) return { kind: 'corner' };
+    if (stalling() && near(fouls.corner % 2 ? 970 : 30, cornerWarningY())) return { kind: 'corner' };
     return null;
   }
   function openFoulInfo(info) { foulInfo = info; foulInfoKey = ''; foulBox.hidden = false; draw(); }
@@ -1743,7 +1747,11 @@
   let sidebarsShown = true;
   try { sidebarsShown = localStorage.getItem('ububall.sidebars') !== 'hidden'; } catch {}
   showSidebars(sidebarsShown);
-  $('btn-sidebars').onclick = () => showSidebars(document.body.classList.contains('sidebars-hidden'));
+  $('btn-sidebars').onclick = () => {
+    showSidebars(document.body.classList.contains('sidebars-hidden'));
+    layoutDirty = true;
+    draw();
+  };
   function buildTeam() {
     if (statDrawer.matches(':popover-open')) statDrawer.hidePopover();
     materialEmitters = teamEntries.map(entry => {
@@ -2354,11 +2362,13 @@
       g.stroke();
     }
   }
+  let visibleRinkHeight = 600;
   function fitStadium() {
     if (!stageArea || !rinkStage || !rinkWrap) return;
     const isFs = isFullscreenActive() || document.body.classList.contains('in-match');
 
     if (!isPortrait && !isFs) {
+      visibleRinkHeight = 600;
       rinkStage.style.width = '';
       rinkStage.style.height = '';
       rinkWrap.style.width = '';
@@ -2380,15 +2390,11 @@
     availW = Math.max(120, availW);
     availH = Math.max(120, availH);
 
-    const targetRatio = isPortrait ? 3 / 5 : 5 / 3;
-    let stageW, stageH;
-    if (availW / availH > targetRatio) {
-      stageH = Math.floor(availH);
-      stageW = Math.floor(stageH * targetRatio);
-    } else {
-      stageW = Math.floor(availW);
-      stageH = Math.floor(stageW / targetRatio);
-    }
+    // Fit the playable view and trim only the vertical gutters in compact layouts.
+    visibleRinkHeight = isPortrait ? 600 : Number(getComputedStyle(stageArea).getPropertyValue('--visible-rink-height')) || 600;
+    const scale = isPortrait ? Math.min(availW / 600, availH / 1000) : Math.min(availW / 1000, availH / visibleRinkHeight);
+    const stageW = Math.floor(scale * (isPortrait ? 600 : 1000));
+    const stageH = Math.floor(scale * (isPortrait ? 1000 : 600));
 
     rinkStage.style.width = stageW + 'px';
     rinkStage.style.height = stageH + 'px';
@@ -5623,23 +5629,20 @@
   // Default to the phone’s top edge in landscape until the player chooses a side.
   let sidebarSide;
   try { sidebarSide = localStorage.getItem('ububall.controls-side'); } catch {}
-  const sidebarButtons = { left: $('sidebar-left'), right: $('sidebar-right') };
+  const sidebarSetting = $('setting-sidebar');
   function updateTopSide() {
     const angle = screen.orientation?.angle ?? window.orientation;
     const topSide = angle === 270 || angle === -90 ? 'right' : 'left';
-    const side = Object.hasOwn(sidebarButtons, sidebarSide) ? sidebarSide : topSide;
+    const side = sidebarSide === 'left' || sidebarSide === 'right' ? sidebarSide : topSide;
     stadium.dataset.controlsSide = side;
-    for (const [position, button] of Object.entries(sidebarButtons)) {
-      button.setAttribute('aria-pressed', String(position === side));
-    }
+    layoutDirty = true;
+    sidebarSetting.querySelector('.setting-value').textContent = side === 'left' ? 'Left' : 'Right';
   }
-  for (const [side, button] of Object.entries(sidebarButtons)) {
-    button.onclick = () => {
-      sidebarSide = side;
-      try { localStorage.setItem('ububall.controls-side', side); } catch {}
-      updateTopSide();
-    };
-  }
+  sidebarSetting.onclick = () => {
+    sidebarSide = stadium.dataset.controlsSide === 'left' ? 'right' : 'left';
+    try { localStorage.setItem('ububall.controls-side', sidebarSide); } catch {}
+    updateTopSide();
+  };
   updateTopSide(); screen.orientation?.addEventListener('change', updateTopSide);
   // Home screen demo: Saffron (the home team) against Amethyst, one hard CPU and one medium, chosen
   // at random each game. Saffron's planning is acted out with a pointer, as a how-to for new players.
