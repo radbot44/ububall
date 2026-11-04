@@ -1,7 +1,7 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id), P = ububallPhysics;
-  const canvas = $('rink');
+  let canvas = $('rink');
   let ctx = canvas.getContext('2d');
   let layoutDirty = true, renderWidth = 1, renderHeight = 1, deviceWidth = 0, deviceHeight = 0;
   const dirtyMeters = new Set();
@@ -157,9 +157,9 @@
   $('game-status').after(knobDock); knobDock.append($('team-selector'));
   const rinkStage = document.querySelector('.rink-stage');
   const rinkWrap = document.querySelector('.rink-wrap');
-  const badgeCanvas = document.createElement('canvas'); badgeCanvas.className = 'field-badges';
+  let badgeCanvas = document.createElement('canvas'); badgeCanvas.className = 'field-badges';
   badgeCanvas.setAttribute('aria-hidden', 'true'); rinkWrap.append(badgeCanvas);
-  const badgeCtx = badgeCanvas.getContext('2d');
+  let badgeCtx = badgeCanvas.getContext('2d');
   const btnFullscreen = $('btn-fullscreen'), btnRotate = $('btn-rotate');
   const radians = value => value * Math.PI / 180;
   const normalStats = () => ({
@@ -183,7 +183,7 @@
   // The status line's wording for each goal call.
   const GOAL_WORDS = { 'OWN GOAL': 'Own goal', 'HAT TRICK!': 'Hat trick', 'FIREBALL!': 'Fireball', 'ONE-TIMER!': 'One-timer', 'BANK SHOT!': 'Bank shot', 'SNIPE!': 'Snipe', 'REBOUND!': 'Rebound', 'ACE!': 'Ace', GOAL: 'Goal' };
   const callText = (label, name) => label === 'OWN GOAL' ? 'Own goal!' : `${GOAL_WORDS[label] || label.replace(/!$/, '')} by ${name}!`;
-  const trails = Array.from({ length: 7 }, () => []), particles = [], fireworks = [], shockwaves = [];
+  let trails = Array.from({ length: 7 }, () => []), particles = [], fireworks = [], shockwaves = [];
   const materialStyles = {
     metallic: ['spark', '#e1eaff'], glossy: ['bubble', '#ffffff'], iridescent: ['spark', 'rainbow'],
     crystalline: ['shard', '#a8eaff'], pearlescent: ['bubble', '#ffe5ed'], marble: ['dust', '#e5ddd1'],
@@ -199,7 +199,7 @@
   };
   let materialEmitters = [];
   // Field details. All are cosmetic and cleared with the other effects; reduced motion disables them.
-  const skids = [], skidState = [], burns = [], burnState = {}, ripples = [], pings = [], popups = [], danger = [0, 0];
+  let skids = [], skidState = [], burns = [], burnState = {}, ripples = [], pings = [], popups = [], danger = [0, 0];
   let ballFlare = 0, kickoffGlow = 0, goalSweep = null, goalCall = null, hitStopUntil = 0, shake = 0, shakeX = 0, shakeY = 0;
   const SKID_LIFE = 12; // Seconds of play before a skid mark fades out.
   // A sharp loss of speed (hard guard braking or a heavy hit) starts a short skid: an ubu-wide mark
@@ -320,12 +320,12 @@
   }
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   function clearEffects() {
-    postGoal = null;
+    if (!videoField) postGoal = null;
     trails.forEach(trail => { trail.length = 0; });
     particles.length = fireworks.length = shockwaves.length = 0;
     skids.length = skidState.length = burns.length = ripples.length = pings.length = popups.length = 0; burnState.path = null; fireTime = 0; quench();
     if (netFire) netFire.lit = false;
-    shake = shakeX = shakeY = 0; rinkWrap.style.translate = '';
+    shake = shakeX = shakeY = 0; if (!videoField && rinkWrap) rinkWrap.style.translate = '';
     danger[0] = danger[1] = ballFlare = kickoffGlow = 0; goalSweep = goalCall = null;
   }
   function burst(x, y, team, strength, celebration = false, tangent = 0, color = null) {
@@ -415,7 +415,8 @@
         shockwaves.pop();
       }
     }
-    const moving = phase === 'play' || Boolean(postGoal) || Boolean(goalReplay) || Boolean(theater && !theater.paused);
+    const activeReplay = typeof currentReplay === 'function' ? currentReplay() : theater;
+    const moving = phase === 'play' || Boolean(postGoal) || Boolean(goalReplay) || Boolean(activeReplay && !activeReplay.paused);
     if (moving) for (const s of skids) s.age += dt;
     for (let i = skids.length - 1; i >= 0; i--) if (skids[i].age >= SKID_LIFE) skids.splice(i, 1);
     if (moving) for (const s of burns) s.age += dt;
@@ -429,7 +430,7 @@
     shake = Math.max(0, shake - dt / .2);
     shakeX = shake ? Number(((Math.random() - .5) * 5 * gameUi.scale() * shake).toFixed(2)) : 0;
     shakeY = shake ? Number(((Math.random() - .5) * 5 * gameUi.scale() * shake).toFixed(2)) : 0;
-    rinkWrap.style.translate = shake ? `${shakeX}px ${shakeY}px` : '';
+    if (!videoField && rinkWrap) rinkWrap.style.translate = shake ? `${shakeX}px ${shakeY}px` : '';
     ballFlare = Math.max(0, ballFlare - dt / .8);
     kickoffGlow = Math.max(0, kickoffGlow - dt / 1.5);
     if (goalSweep && (goalSweep.p += dt / 1.5) >= 1) goalSweep = null;
@@ -549,7 +550,7 @@
     }
     ctx.drawImage(cache.layer, 0, 0, 1000, 600);
   }
-  const iceCache = {};
+  let iceCache = {};
   // Drawn on the ice beneath bodies and trails.
   function drawFieldUnder(colors) {
     const { primary, home, away } = colors;
@@ -620,7 +621,8 @@
     if (goalCall) drawGoalCall(goalCall, goalCall.team ? away : home);
     if (pulseMode() && !goalReplay && !cardShot) {
       const turnSeconds = ububallMatch.turnTicks(matchMode) * P.DT;
-      const progress = theater ? theater.tick * P.DT / turnSeconds : phase !== 'play' ? 0 : online?.active ? (onlineReplay?.currentTick ?? 0) * P.DT / turnSeconds : elapsed / turnSeconds;
+      const activeReplay = typeof currentReplay === 'function' ? currentReplay() : theater;
+      const progress = activeReplay ? activeReplay.tick * P.DT / turnSeconds : phase !== 'play' ? 0 : online?.active ? (onlineReplay?.currentTick ?? 0) * P.DT / turnSeconds : elapsed / turnSeconds;
       ctx.save(); ctx.lineCap = 'round';
       ctx.globalAlpha = .25; line(160, 556, 840, 556, border, 4);
       if (progress > 0) { ctx.globalAlpha = .9; line(160, 556, 160 + 680 * Math.min(1, progress), 556, '#DA4DB5', 4); }
@@ -663,8 +665,12 @@
       badgeCtx.shadowBlur = 30 * canvas.width / 1000;
     }
     badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle';
-    write(call.label, top, 88);
-    if (call.name) write(call.name, top + 66, 34);
+    const callLabel = anonymousNames && call.scorer < 0 && call.label.endsWith(' WINS!')
+      ? `${ububallReplay.ANONYMOUS[call.team].toUpperCase()} WINS!`
+      : call.label;
+    const callName = anonymousNames && call.scorer >= 0 ? anonymousName(call.scorer) : call.name;
+    write(callLabel, top, 88);
+    if (callName) write(callName, top + 66, 34);
     badgeCtx.restore();
   }
   // Short callouts ("Save!") that pop in over an ubu and drift up as they fade.
@@ -1409,7 +1415,7 @@
       steamRing(body.x, body.y, body.radius);
       gameAudio()?.playIronSave?.();
     }
-    if ((typeof phase !== 'undefined' && phase !== 'play') || own || online?.active || goalReplay || theater) return;
+    if ((typeof phase !== 'undefined' && phase !== 'play') || own || online?.active || goalReplay || theater || (typeof activePlayback !== 'undefined' && activePlayback)) return;
     const idx = bodies.indexOf(body);
     const simBody = idx >= 0 && simBodies[idx] ? simBodies[idx] : body;
     for (const changed of ububallMatch.gainMeter(P, simBodies, stats, simBody, ububallMatch.METER.save, classicMode())) {
@@ -1421,7 +1427,7 @@
   }
   // Online meters come from the server; replays never earn meter.
   function contactMeter(a, b, speed) {
-    if ((typeof phase !== 'undefined' && phase !== 'play') || online?.active || goalReplay || theater) return;
+    if ((typeof phase !== 'undefined' && phase !== 'play') || online?.active || goalReplay || theater || (typeof activePlayback !== 'undefined' && activePlayback)) return;
     const tick = matchTicks + Math.round(elapsed / P.DT);
     const ia = bodies.indexOf(a), ib = bodies.indexOf(b);
     const sa = ia >= 0 && simBodies[ia] ? simBodies[ia] : a;
@@ -2388,7 +2394,7 @@
     ctx.restore();
   }
   function draw() {
-    if (layoutDirty) {
+    if (layoutDirty && !videoField) {
       const w0 = canvas.clientWidth, h0 = canvas.clientHeight;
       fitStadium();
       renderWidth = canvas.clientWidth; renderHeight = canvas.clientHeight;
@@ -2449,7 +2455,7 @@
     }
     ctx.drawImage(rinkCache.layer, 0, 0, 1000, 600);
     drawFieldUnder(themeColors);
-    drawFoulFocus(text);
+    if (!videoField) drawFoulFocus(text);
     if (phase === 'plan') {
       drawPrediction(home, away);
       drawPredictedGoalGlow(home, away);
@@ -2602,7 +2608,7 @@
     drawParticles(home, away);
     drawFieldOver(themeColors);
     drawFouls(text);
-    updateFoulInfo();
+    if (!videoField) updateFoulInfo();
     drawPopups(home, away);
     drawParticles(home, away, true);
     if (goalReplay) {
@@ -2646,8 +2652,8 @@
   const activeOnlineSim = () => (onlineReplay && (onlineReplay.currentTick ?? 0) < onlineReplay.ticks) ? onlineReplay.simBodies : (online?.state?.game?.bodies ?? onlineReplay?.simBodies);
   const shownSim = () => (goalReplay || currentReplay())?.sim ?? (online?.active ? activeOnlineSim() : (postGoal?.sim ?? simBodies));
   const shownSeat = () => (goalReplay || currentReplay() ? (goalReplay || currentReplay()).seat : (online?.active ? (online.state?.seat ?? 0) : 0));
-  const replayView = cb => toViewBody(cb, shownSim(), shownSeat());
-  const syncReplay = () => syncViewBodies(shownSim(), shownSeat());
+  const replayView = (cb, th = currentReplay()) => toViewBody(cb, th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof bodies !== 'undefined' ? bodies : null));
+  const syncReplay = (th = currentReplay()) => syncViewBodies(th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof bodies !== 'undefined' ? bodies : null), th ? th.anonymous : undefined, th?.exporting ? null : undefined, th?.entries);
   const replayFx = {
     hit: (a, b, speed, impulse, plow = false, iron = false) => { syncReplay(); handleCollision(replayView(a), replayView(b), speed, impulse, plow, iron); },
     wall: (body, velocity, wallType, nx, ny) => { syncReplay(); const seat = shownSeat(); handleWall(replayView(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny); },
@@ -2807,7 +2813,6 @@
     saveRecording(); stopDemo(); closeSummary(); endGoalReplay(); stopFanfare(); gameAudio()?.stop();
     cpuGeneration++; cpuClient.cancel(); videoLogo();
     const seat = replay.seat, names = seat ? [...replay.names].reverse() : replay.names;
-    theater = { replay, file, seat, ...ububallReplay.timeline(replay), speed: Number($('replay-speed').value), paused: false, steps: 0, holdUntil: 0, index: 0, tick: 0, called: false };
     matchMode = replay.mode; document.body.classList.toggle('classic-match', classicMode()); showMode(matchMode);
     teamEntries = onlineOrder(replay.ubus.map(u => ({ model: ubu.decode(ubu.fromCode(u.dna)), dna: u.dna, equippedSuper: u.super === null ? null : P.SUPERS[u.super] })), seat);
     // A replay without names calls its ubus by team and place.
@@ -2815,9 +2820,11 @@
     stats = teamEntries.map(entry => classicMode() ? normalStats() : { ...entry.model.stats });
     $('home-label').textContent = names[0]; $('opponent-label').textContent = names[1]; $('opponent-heading').textContent = `${names[1]}'s team`;
     bodies = kickoff(true); buildTeam(); phase = 'replay'; selected = 0; drag = null;
+    theater = createReplaySession(replay, { file, speed: Number($('replay-speed').value), anonymous: Boolean(replay.anonymous) });
+    theater.bodies = bodies;
     document.body.classList.add('replay-match');
     say(`Replay · ${names[0]} vs ${names[1]} · ${new Date(replay.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`);
-    replayMarks(); enterMatch(); seekReplay(0);
+    replayMarks(); enterMatch(); seekReplay(0, theater);
   }
   // Leaves the viewer for a fresh match.
   function endReplay() {
@@ -2826,70 +2833,306 @@
     $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
     newMatch();
   }
-  function loadReplayTurn(k, fx) {
-    const th = currentReplay(), t = th.replay.turns[k];
-    th.index = k; th.tick = 0; th.called = th.crowned = false; th.sim = ububallReplay.restore(t.bodies);
-    beginGuide(ububallReplay.restore(t.bodies), t.plans, th.seat);
-    th.fouls = { ...ububallMatch.newFouls(), ...structuredClone(t.fouls) };
-    scores = th.seat ? [...t.scores].reverse() : [...t.scores]; turn = t.turn;
-    // The home cards show the moves this turn was played with.
-    plans = onlineOrder(t.plans, th.seat).slice(0, 3).map(p => ({ ...p, angle: p.angle + (th.seat ? Math.PI : 0) }));
-    P.startTurn(th.sim, t.plans, fx ? replayFx.super : null);
-    fouls = viewFouls(th.fouls, th.seat);
-  }
-  function stepReplay(fx) {
-    const th = currentReplay(), sim = th.sim;
-    if (fx) P.step(sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super); else P.step(sim, P.DT);
-    ububallMatch.lapseFouls(P, sim, th.fouls);
-    th.tick++;
-    if (fx) replayEvents(th.replay.turns[th.index], th.tick, sim); else sim[6].spinStruck = false;
-    traceGuide(sim);
-  }
-  function seekReplay(at) {
-    const th = currentReplay(), turns = th.replay.turns;
-    at = Math.max(0, Math.min(th.total, Math.round(at)));
-    let k = 0;
-    while (k + 1 < turns.length && th.starts[k + 1] <= at) k++;
-    loadReplayTurn(k, false);
-    const target = Math.min(at - th.starts[k], turns[k].ticks), span = Math.min(target, Math.round(SEEK_EFFECTS / P.DT));
-    while (th.tick < target - span) stepReplay(false);
-    th.holdUntil = 0; th.steps = 0;
-    clearEffects(); syncReplay();
-    // The last moment before `at` plays with its effects, silently, so the field shows its motion trails,
-    // contact effects and spin as they were then.
-    if (span) {
-      const audio = videoAudio, clock = videoClock, dt = 1 / 60;
-      videoAudio = silentAudio; videoClock = clockNow() - span * P.DT * 1000;
-      try {
-        while (th.tick < target) {
-          for (let n = 0; n < dt / P.DT && th.tick < target; n++) { stepReplay(true); syncReplay(); recordTrails(); }
-          fouls = viewFouls(th.fouls, th.seat); emitSkaterEffects(dt);
-          videoClock += dt * 1000; updatePopups(dt); updateEffects(dt);
+  function createEffectsState(entries = typeof teamEntries !== 'undefined' ? teamEntries : null) {
+    const stylesMap = typeof materialStyles !== 'undefined' ? materialStyles : {};
+    return {
+      trails: Array.from({ length: 7 }, () => []),
+      particles: [],
+      fireworks: [],
+      shockwaves: [],
+      skids: [],
+      skidState: [],
+      burns: [],
+      burnState: {},
+      ripples: [],
+      pings: [],
+      popups: [],
+      danger: [0, 0],
+      ballFlare: 0,
+      kickoffGlow: 0,
+      goalSweep: null,
+      goalCall: null,
+      hitStopUntil: 0,
+      shake: 0,
+      shakeX: 0,
+      shakeY: 0,
+      fireTime: 0,
+      sizzle: null,
+      netFire: null,
+      superImpactTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
+      materialEmitters: (entries || []).map(entry => {
+        const seen = new Set(), styles = [];
+        for (const attribute of Object.values(entry?.model?.attributes || {})) {
+          const style = stylesMap[attribute.texture];
+          if (!style || seen.has(attribute.texture)) continue;
+          seen.add(attribute.texture);
+          styles.push({ shape: style[0], color: style[1] || attribute.hex });
         }
-      } finally { videoAudio = audio; videoClock = clock; }
+        return { styles, time: 0 };
+      }),
+      iceCache: {},
+      rinkCache: null
+    };
+  }
+  function createReplaySession(replay, { file = null, speed = 1, paused = false, anonymous = false, exporting = false, clock = null, audio = null, field = null } = {}) {
+    const seat = replay.seat ?? 0, anon = Boolean(anonymous || replay.anonymous);
+    const names = anon ? [...ububallReplay.ANONYMOUS] : (seat ? [...replay.names].reverse() : [...replay.names]);
+    const orderedUbus = Array.isArray(replay.ubus) ? onlineOrder(replay.ubus, seat) : [];
+    const liveEntries = typeof teamEntries !== 'undefined' ? teamEntries : null;
+    const reuseLive = Array.isArray(liveEntries) && liveEntries.length === orderedUbus.length && orderedUbus.every((u, i) => liveEntries[i]?.dna === u.dna && (liveEntries[i]?.equippedSuper?.id ?? null) === (u.super ?? null));
+    const entries = reuseLive ? liveEntries.map((entry, i) => {
+      if (!anon) return entry;
+      return { ...entry, model: { ...entry.model, parts: { ...entry.model.parts, fullName: anonymousName(i) } } };
+    }) : orderedUbus.map((u, i) => {
+      const model = typeof ubu !== 'undefined' && u.dna ? ubu.decode(ubu.fromCode(u.dna)) : { parts: { fullName: `Ubu ${i + 1}` }, attributes: {}, stats: typeof normalStats === 'function' ? normalStats() : {} };
+      if (anon) model.parts = { ...model.parts, fullName: anonymousName(i) };
+      return { model, dna: u.dna, equippedSuper: u.super === null || u.super === undefined ? null : P.SUPERS[u.super] };
+    });
+    const canCanvas = exporting && typeof document !== 'undefined' && typeof document.createElement === 'function';
+    const offscreen = canCanvas ? document.createElement('canvas') : null;
+    const offscreenBadges = canCanvas ? document.createElement('canvas') : null;
+    return {
+      replay,
+      file,
+      seat,
+      mode: replay.mode || (typeof matchMode !== 'undefined' ? matchMode : 'standard'),
+      ...ububallReplay.timeline(replay),
+      speed,
+      paused,
+      steps: 0,
+      holdUntil: 0,
+      index: 0,
+      tick: 0,
+      called: false,
+      crowned: false,
+      exporting: Boolean(exporting),
+      anonymous: anon,
+      names,
+      entries,
+      bodies: exporting ? P.kickoff() : (typeof bodies !== 'undefined' ? bodies : P.kickoff()),
+      sim: null,
+      fouls: ububallMatch.newFouls(),
+      viewFouls: ububallMatch.newFouls(),
+      scores: [0, 0],
+      turn: replay.turns?.[0]?.turn ?? 1,
+      plans: Array.from({ length: 3 }, () => (typeof idlePlan === 'function' ? idlePlan() : { angle: 0, power: 0, spin: 0, guard: false })),
+      guide: null,
+      portrait: false,
+      clock,
+      audio,
+      field,
+      canvas: offscreen,
+      ctx: offscreen ? offscreen.getContext('2d') : null,
+      badgeCanvas: offscreenBadges,
+      badgeCtx: offscreenBadges ? offscreenBadges.getContext('2d') : null,
+      fx: exporting ? createEffectsState(entries) : null,
+      _live: {}
+    };
+  }
+  function withPlaybackContext(th, fn) {
+    if (!th || activePlayback === th) return fn();
+    if (th === theater && !th.exporting) {
+      const prev = activePlayback;
+      activePlayback = th;
+      try {
+        return fn();
+      } finally {
+        activePlayback = prev;
+      }
     }
-    // A hit-stop met on the way (or left from play, on another clock) does not hold the new moment.
-    hitStopUntil = 0;
-    fouls = viewFouls(th.fouls, th.seat);
-    shownScores.splice(0, 2, ...scores); sync(); updateReplayBar(); draw();
+    const saved = th._live || (th._live = {});
+    saved.activePlayback = activePlayback;
+    saved.bodies = bodies;
+    saved.scores = scores;
+    saved.turn = turn;
+    saved.fouls = fouls;
+    saved.plans = typeof plans !== 'undefined' ? plans : undefined;
+    saved.guide = typeof guide !== 'undefined' ? guide : undefined;
+    saved.matchMode = typeof matchMode !== 'undefined' ? matchMode : undefined;
+    saved.teamEntries = typeof teamEntries !== 'undefined' ? teamEntries : undefined;
+    saved.anonymousNames = typeof anonymousNames !== 'undefined' ? anonymousNames : undefined;
+    saved.isPortrait = typeof isPortrait !== 'undefined' ? isPortrait : undefined;
+    saved.videoClock = videoClock;
+    saved.videoAudio = videoAudio;
+    saved.videoField = typeof videoField !== 'undefined' ? videoField : undefined;
+    saved.hitStopUntil = typeof hitStopUntil !== 'undefined' ? hitStopUntil : undefined;
+    const swapCanvas = Boolean(th.canvas && typeof canvas !== 'undefined');
+    if (swapCanvas) {
+      saved.canvas = canvas; saved.ctx = ctx;
+      saved.badgeCanvas = badgeCanvas; saved.badgeCtx = badgeCtx;
+    }
+    const fx = th.fx, swapFx = Boolean(fx && typeof trails !== 'undefined');
+    if (swapFx) {
+      saved.trails = trails; saved.particles = particles; saved.fireworks = fireworks; saved.shockwaves = shockwaves;
+      saved.skids = skids; saved.skidState = skidState; saved.burns = burns; saved.burnState = burnState;
+      saved.ripples = ripples; saved.pings = pings; saved.popups = popups; saved.danger = danger;
+      saved.ballFlare = ballFlare; saved.kickoffGlow = kickoffGlow; saved.goalSweep = goalSweep; saved.goalCall = goalCall;
+      saved.shake = shake; saved.shakeX = shakeX; saved.shakeY = shakeY;
+      saved.fireTime = fireTime; saved.sizzle = sizzle; saved.netFire = netFire;
+      saved.superImpactTimes = superImpactTimes; saved.materialEmitters = materialEmitters;
+      saved.iceCache = iceCache; saved.rinkCache = rinkCache;
+    }
+    activePlayback = th;
+    if (th.bodies) bodies = th.bodies;
+    if (th.scores) scores = th.scores;
+    if (th.turn !== undefined) turn = th.turn;
+    if (th.viewFouls) fouls = th.viewFouls;
+    if (th.plans && typeof plans !== 'undefined') plans = th.plans;
+    if (typeof guide !== 'undefined') guide = th.guide ?? null;
+    if (th.mode && typeof matchMode !== 'undefined') matchMode = th.mode;
+    if (th.entries && typeof teamEntries !== 'undefined') teamEntries = th.entries;
+    if (typeof anonymousNames !== 'undefined') anonymousNames = Boolean(th.anonymous);
+    if (typeof isPortrait !== 'undefined') isPortrait = Boolean(th.portrait);
+    if (th.clock !== undefined) videoClock = th.clock;
+    if (th.audio !== undefined) videoAudio = th.audio;
+    if (th.field !== undefined && typeof videoField !== 'undefined') videoField = th.field;
+    if (fx && typeof hitStopUntil !== 'undefined') hitStopUntil = fx.hitStopUntil;
+    if (swapCanvas) {
+      canvas = th.canvas; ctx = th.ctx;
+      badgeCanvas = th.badgeCanvas; badgeCtx = th.badgeCtx;
+    }
+    if (swapFx) {
+      trails = fx.trails; particles = fx.particles; fireworks = fx.fireworks; shockwaves = fx.shockwaves;
+      skids = fx.skids; skidState = fx.skidState; burns = fx.burns; burnState = fx.burnState;
+      ripples = fx.ripples; pings = fx.pings; popups = fx.popups; danger = fx.danger;
+      ballFlare = fx.ballFlare; kickoffGlow = fx.kickoffGlow; goalSweep = fx.goalSweep; goalCall = fx.goalCall;
+      shake = fx.shake; shakeX = fx.shakeX; shakeY = fx.shakeY;
+      fireTime = fx.fireTime; sizzle = fx.sizzle; netFire = fx.netFire;
+      superImpactTimes = fx.superImpactTimes; materialEmitters = fx.materialEmitters;
+      iceCache = fx.iceCache; rinkCache = fx.rinkCache;
+    }
+    try {
+      return fn();
+    } finally {
+      th.bodies = bodies;
+      th.scores = scores;
+      th.turn = turn;
+      th.viewFouls = fouls;
+      if (typeof plans !== 'undefined') th.plans = plans;
+      if (typeof guide !== 'undefined') th.guide = guide;
+      if (th.clock !== undefined) th.clock = videoClock;
+      if (th.audio !== undefined) th.audio = videoAudio;
+      if (th.field !== undefined && typeof videoField !== 'undefined') th.field = videoField;
+      if (fx && typeof hitStopUntil !== 'undefined') fx.hitStopUntil = hitStopUntil;
+      if (swapFx) {
+        fx.ballFlare = ballFlare; fx.kickoffGlow = kickoffGlow; fx.goalSweep = goalSweep; fx.goalCall = goalCall;
+        fx.shake = shake; fx.shakeX = shakeX; fx.shakeY = shakeY;
+        fx.fireTime = fireTime; fx.sizzle = sizzle; fx.netFire = netFire;
+        fx.superImpactTimes = superImpactTimes; fx.materialEmitters = materialEmitters;
+        fx.iceCache = iceCache; fx.rinkCache = rinkCache;
+        trails = saved.trails; particles = saved.particles; fireworks = saved.fireworks; shockwaves = saved.shockwaves;
+        skids = saved.skids; skidState = saved.skidState; burns = saved.burns; burnState = saved.burnState;
+        ripples = saved.ripples; pings = saved.pings; popups = saved.popups; danger = saved.danger;
+        ballFlare = saved.ballFlare; kickoffGlow = saved.kickoffGlow; goalSweep = saved.goalSweep; goalCall = saved.goalCall;
+        shake = saved.shake; shakeX = saved.shakeX; shakeY = saved.shakeY;
+        fireTime = saved.fireTime; sizzle = saved.sizzle; netFire = saved.netFire;
+        superImpactTimes = saved.superImpactTimes; materialEmitters = saved.materialEmitters;
+        iceCache = saved.iceCache; rinkCache = saved.rinkCache;
+      }
+      if (swapCanvas) {
+        canvas = saved.canvas; ctx = saved.ctx;
+        badgeCanvas = saved.badgeCanvas; badgeCtx = saved.badgeCtx;
+      }
+      if (typeof hitStopUntil !== 'undefined') hitStopUntil = saved.hitStopUntil;
+      if (typeof videoField !== 'undefined') videoField = saved.videoField;
+      videoAudio = saved.videoAudio;
+      videoClock = saved.videoClock;
+      if (typeof isPortrait !== 'undefined') isPortrait = saved.isPortrait;
+      if (typeof anonymousNames !== 'undefined') anonymousNames = saved.anonymousNames;
+      if (typeof teamEntries !== 'undefined') teamEntries = saved.teamEntries;
+      if (typeof matchMode !== 'undefined') matchMode = saved.matchMode;
+      if (typeof guide !== 'undefined') guide = saved.guide;
+      if (typeof plans !== 'undefined') plans = saved.plans;
+      fouls = saved.fouls;
+      turn = saved.turn;
+      scores = saved.scores;
+      bodies = saved.bodies;
+      activePlayback = saved.activePlayback;
+    }
+  }
+  function loadReplayTurn(k, fx, th = currentReplay()) {
+    return withPlaybackContext(th, () => {
+      const t = th.replay.turns[k];
+      th.index = k; th.tick = 0; th.called = th.crowned = false; th.sim = ububallReplay.restore(t.bodies);
+      beginGuide(ububallReplay.restore(t.bodies), t.plans, th.seat);
+      th.guide = typeof guide !== 'undefined' ? guide : null;
+      th.fouls = { ...ububallMatch.newFouls(), ...structuredClone(t.fouls) };
+      th.scores = scores = th.seat ? [...t.scores].reverse() : [...t.scores];
+      th.turn = turn = t.turn;
+      // The home cards show the moves this turn was played with.
+      th.plans = plans = onlineOrder(t.plans, th.seat).slice(0, 3).map(p => ({ ...p, angle: p.angle + (th.seat ? Math.PI : 0) }));
+      P.startTurn(th.sim, t.plans, fx ? replayFx.super : null);
+      th.viewFouls = fouls = viewFouls(th.fouls, th.seat);
+    });
+  }
+  function stepReplay(fx, th = currentReplay()) {
+    return withPlaybackContext(th, () => {
+      const sim = th.sim;
+      if (fx) P.step(sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super); else P.step(sim, P.DT);
+      ububallMatch.lapseFouls(P, sim, th.fouls);
+      th.tick++;
+      if (fx) replayEvents(th.replay.turns[th.index], th.tick, sim); else sim[6].spinStruck = false;
+      traceGuide(sim);
+    });
+  }
+  function seekReplay(at, th = currentReplay()) {
+    return withPlaybackContext(th, () => {
+      const turns = th.replay.turns;
+      at = Math.max(0, Math.min(th.total, Math.round(at)));
+      let k = 0;
+      while (k + 1 < turns.length && th.starts[k + 1] <= at) k++;
+      loadReplayTurn(k, false, th);
+      const target = Math.min(at - th.starts[k], turns[k].ticks), span = Math.min(target, Math.round(SEEK_EFFECTS / P.DT));
+      while (th.tick < target - span) stepReplay(false, th);
+      th.holdUntil = 0; th.steps = 0;
+      clearEffects(); syncReplay(th);
+      // The last moment before `at` plays with its effects, silently, so the field shows its motion trails,
+      // contact effects and spin as they were then.
+      if (span) {
+        const audio = videoAudio, clock = videoClock, dt = 1 / 60;
+        videoAudio = silentAudio; videoClock = clockNow() - span * P.DT * 1000;
+        try {
+          while (th.tick < target) {
+            for (let n = 0; n < dt / P.DT && th.tick < target; n++) { stepReplay(true, th); syncReplay(th); recordTrails(); }
+            th.viewFouls = fouls = viewFouls(th.fouls, th.seat); emitSkaterEffects(dt);
+            videoClock += dt * 1000; updatePopups(dt); updateEffects(dt);
+          }
+        } finally { videoAudio = audio; videoClock = clock; }
+      }
+      // A hit-stop met on the way (or left from play, on another clock) does not hold the new moment.
+      hitStopUntil = 0;
+      if (th.fx) th.fx.hitStopUntil = 0;
+      th.viewFouls = fouls = viewFouls(th.fouls, th.seat);
+      if (!th.exporting) {
+        if (typeof shownScores !== 'undefined') shownScores.splice(0, 2, ...scores);
+        sync(); updateReplayBar();
+      }
+      draw();
+    });
   }
   const SEEK_EFFECTS = .4;
   const silentAudio = new Proxy({}, { get: () => () => null });
   // At a turn's end its goal is called and held a moment; at the replay's end it pauses. False stops this frame's steps.
   function endReplayTurn() {
-    const th = currentReplay(), t = th.replay.turns[th.index];
+    const th = arguments[0] || currentReplay();
+    if (typeof withPlaybackContext === 'function' && th && activePlayback !== th && (th !== theater || th.exporting)) {
+      return withPlaybackContext(th, () => endReplayTurn(th));
+    }
+    const t = th.replay.turns[th.index];
     if (t.goal && !th.called) {
       th.called = true; th.steps = 0; th.holdUntil = clockNow() + 2500;
       const team = th.seat ? 1 - t.goal.team : t.goal.team, scorer = t.goal.scorer === null ? null : bodies[viewIndex(t.goal.scorer, th.seat)];
-      scores[team]++; sync();
+      scores[team]++;
+      if (th.scores && th.scores !== scores) th.scores[team] = scores[team];
+      if (!th.exporting) sync();
       celebrate(team, bodies[6], t.goal.label, scorer);
-      goalTab(team, t.goal.label, scorer?.name || null);
+      if (!th.exporting) goalTab(team, t.goal.label, scorer?.name || null);
       return false;
     }
     // The match's winning goal: once its call clears, the winner is called before the replay goes on.
     if (winningTurn(t) && !th.crowned) {
       th.crowned = true; th.steps = 0; th.holdUntil = clockNow() + WIN_SECONDS * 1000;
-      const team = th.seat ? 1 - t.goal.team : t.goal.team, name = [$('home-label').textContent, $('opponent-label').textContent][team];
+      const team = th.seat ? 1 - t.goal.team : t.goal.team, name = (th.names || [$('home-label').textContent, $('opponent-label').textContent])[team];
       // A comeback from 3 or more down, or a shutout, as at full time.
       const deficit = Math.max(...th.replay.turns.map(r => r.scores[1 - t.goal.team] - r.scores[t.goal.team]));
       celebrate(team, bodies[6], name === 'You' ? 'YOU WIN!' : `${name.toUpperCase().slice(0, 16)} WINS!`);
@@ -2901,29 +3144,30 @@
     const before = trailPositions();
     loadReplayTurn(th.index + 1, true); syncReplay();
     clearDiscontinuousTrails(before);
-    sync();
+    if (!th.exporting) sync();
     return true;
   }
   // The winner's call holds as long as a goal's call shows.
   const WIN_SECONDS = GOAL_CALL_SECONDS + .6;
   const winningTurn = t => Boolean(t.goal) && t.scores[t.goal.team] + 1 >= 5;
-  function advanceReplay(delta) {
-    const th = currentReplay();
-    if (!th.paused && clockNow() >= th.holdUntil && clockNow() >= hitStopUntil) {
-      th.steps += delta / P.DT * th.speed;
-      for (let n = 0; th.steps >= 1 && n < 240; n++) {
-        if (th.tick >= th.replay.turns[th.index].ticks) { if (!endReplayTurn()) break; continue; }
-        stepReplay(true); th.steps--; syncReplay(); recordTrails();
-        if (clockNow() < hitStopUntil) { th.steps = 0; break; }
+  function advanceReplay(delta, th = currentReplay()) {
+    return withPlaybackContext(th, () => {
+      if (!th.paused && clockNow() >= th.holdUntil && clockNow() >= hitStopUntil) {
+        th.steps += delta / P.DT * th.speed;
+        for (let n = 0; th.steps >= 1 && n < 240; n++) {
+          if (th.tick >= th.replay.turns[th.index].ticks) { if (!endReplayTurn(th)) break; continue; }
+          stepReplay(true, th); th.steps--; syncReplay(th); recordTrails();
+          if (clockNow() < hitStopUntil) { th.steps = 0; break; }
+        }
+        th.viewFouls = fouls = viewFouls(th.fouls, th.seat);
+        emitSkaterEffects(delta * th.speed);
       }
-      fouls = viewFouls(th.fouls, th.seat);
-      emitSkaterEffects(delta * th.speed);
-    }
-    if (!th.exporting) updateReplayBar();
-    draw();
+      if (!th.exporting) updateReplayBar();
+      draw();
+    });
   }
   function updateReplayBar() {
-    const th = currentReplay(), at = th.starts[th.index] + th.tick, seek = $('replay-seek'), play = $('replay-play');
+    const th = theater || currentReplay(), at = th.starts[th.index] + th.tick, seek = $('replay-seek'), play = $('replay-play');
     seek.max = th.total;
     if (!seek.matches(':active')) seek.value = at;
     $('replay-time').textContent = `${replayClock(at)} / ${replayClock(th.total)}`;
@@ -2972,10 +3216,6 @@
     field: { x: 0, y: 78 - 42 * 1.92, width: 1920, height: 1152 } });
   const yieldTask = () => new Promise(resolve => { const channel = new MessageChannel(); channel.port1.onmessage = () => resolve(); channel.port2.postMessage(0); });
   const ownBytes = d => d instanceof ArrayBuffer ? new Uint8Array(d.slice(0)) : new Uint8Array(d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength));
-  function resetSoundThrottles() {
-    for (const b of bodies) { delete b._lastHitSound; delete b._lastWallSound; }
-    superImpactTimes = new WeakMap();
-  }
   // The game's sound calls, played into `offline` at `seconds()` on the video's timeline.
   function offlineAudio(offline, seconds) {
     const A = window.ubuAudio, ctx = new Proxy(offline, {
@@ -2999,9 +3239,11 @@
   // A frame: the field, its ubus and their badges, as the stadium shows them, under the scorebug. The
   // scorebug only changes with a score or turn, so it is drawn once each and reused.
   let videoBug = null;
-  function composeFrame(v) {
-    const f = VIDEO.field, k = VIDEO.width / 1920, names = [$('home-label').textContent, $('opponent-label').textContent];
-    const key = `${names}|${scores}|${turn}`;
+  function composeFrame(v, th = currentReplay()) {
+    const f = VIDEO.field, k = VIDEO.width / 1920;
+    const names = th?.names || [$('home-label').textContent, $('opponent-label').textContent];
+    const frameScores = th?.scores || scores, frameTurn = th?.turn ?? turn;
+    const key = `${names}|${frameScores}|${frameTurn}`;
     if (videoBug?.key !== key) {
       const { home, away, text, surface } = themeColors, cx = 960, font = videoBug?.font || getComputedStyle(document.body).fontFamily;
       const layer = videoBug?.layer || Object.assign(document.createElement('canvas'), { width: VIDEO.width, height: Math.ceil(VIDEO.bug * k) }), b = layer.getContext('2d');
@@ -3017,24 +3259,24 @@
         b.font = `800 25px ${font}`; b.textAlign = team ? 'right' : 'left';
         b.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 344 : left + 16, 40);
         b.font = `800 38px ${font}`; b.textAlign = 'center';
-        b.fillText(String(scores[team]), team ? left + 40 : left + 320, 40);
+        b.fillText(String(frameScores[team]), team ? left + 40 : left + 320, 40);
       }
       b.fillStyle = text; b.textAlign = 'center'; b.font = `800 23px ${font}`;
-      b.fillText(`T${turn}  REPLAY`, cx + 460, 40);
+      b.fillText(`T${frameTurn}  REPLAY`, cx + 460, 40);
       videoBug = { key, font, layer };
     }
     v.setTransform(1, 0, 0, 1, 0, 0);
     v.fillStyle = themeColors.background; v.fillRect(0, 0, VIDEO.width, VIDEO.height);
     v.setTransform(k, 0, 0, k, 0, 0);
-    paintField(v, f.x, f.y, f.width, f.height);
+    paintField(v, f.x, f.y, f.width, f.height, th);
     v.setTransform(1, 0, 0, 1, 0, 0);
     v.drawImage(videoBug.layer, 0, 0);
   }
   // The field, its ubus and their badges, the whole 1000×600 field at (x, y) in `width`×`height`.
-  function paintField(v, x, y, width, height) {
-    const scale = width / 1000;
-    v.drawImage(canvas, x, y, width, height);
-    bodies.slice(0, 6).forEach((b, i) => {
+  function paintField(v, x, y, width, height, th = currentReplay()) {
+    const scale = width / 1000, fieldCanvas = th?.canvas || canvas, fieldBadges = th?.badgeCanvas || badgeCanvas, view = th?.bodies || bodies;
+    v.drawImage(fieldCanvas, x, y, width, height);
+    view.slice(0, 6).forEach((b, i) => {
       const sprite = skaters[i]?.firstChild;
       if (!(sprite instanceof HTMLCanvasElement)) return;
       const size = 2 * b.radius * scale;
@@ -3045,7 +3287,7 @@
       v.drawImage(sprite, -size / 2, -size / 2, size, size);
       v.restore();
     });
-    v.drawImage(badgeCanvas, x, y, width, height);
+    v.drawImage(fieldBadges, x, y, width, height);
   }
   async function encodeAudio(buffer) {
     if (!('AudioEncoder' in window)) return null;
@@ -3077,10 +3319,11 @@
     }
     return null;
   }
-  let videoCancelled = false;
+  let videoCancelled = false, exportingVideo = false;
+  const isExporting = () => exportingVideo || Boolean(theater?.exporting);
   // Renders `slice` (see exportSlice) in the export dialog, which is already open.
   async function exportVideo(slice) {
-    const th = theater, dialog = $('export-dialog'), status = $('export-status'), progress = $('export-progress'), close = $('export-close');
+    const dialog = $('export-dialog'), status = $('export-status'), progress = $('export-progress'), close = $('export-close');
     videoCancelled = false; progress.value = 0; progress.hidden = false; status.textContent = 'Preparing…';
     let config = null;
     search: for (const codec of ['avc1.64002A', 'avc1.4D402A', 'avc1.42E02A']) {
@@ -3090,27 +3333,19 @@
       }
     }
     if (!config) { status.textContent = 'This browser cannot encode MP4 video.'; progress.hidden = true; close.textContent = 'Close'; return; }
-    const resume = { at: th.starts[th.index] + th.tick, paused: th.paused, speed: th.speed, portrait: isPortrait };
-    const session = {
-      replay: slice.replay,
-      file: null,
-      seat: slice.replay.seat,
-      ...ububallReplay.timeline(slice.replay),
-      speed: 1,
-      paused: false,
-      steps: 0,
-      holdUntil: 0,
-      index: 0,
-      tick: 0,
-      called: false,
-      exporting: true
-    };
-    let restoreNames = null, encoder = null, blob = null;
+    let session = null, encoder = null, blob = null;
     try {
-      activePlayback = session;
-      th.exporting = true;
-      restoreNames = slice.hidden ? showAnonymous() : null;
+      exportingVideo = true;
       await videoLogo();
+      session = createReplaySession(slice.replay, {
+        file: slice.file,
+        speed: 1,
+        paused: false,
+        anonymous: Boolean(slice.hidden || slice.replay.anonymous),
+        exporting: true,
+        clock: 0,
+        field: videoFieldSize()
+      });
       // Every turn at full speed, each goal's hold and the winner's, then a moment on the final field.
       const seconds = session.total * P.DT + session.replay.turns.filter(t => t.goal).length * 2.5 + (winningTurn(session.replay.turns.at(-1)) ? WIN_SECONDS : 0) + VIDEO.hold;
       const frames = Math.ceil(seconds * VIDEO.fps), rate = 48000;
@@ -3124,19 +3359,25 @@
         samples.push({ data, duration: 90000 / VIDEO.fps, key: chunk.type === 'key' });
       } });
       encoder.configure(config);
-      isPortrait = false;
-      videoClock = 0; videoField = videoFieldSize();
-      videoAudio = offlineAudio(offline, () => videoClock / 1000);
+      session.audio = offlineAudio(offline, () => session.clock / 1000);
       // The sound renders alongside the video, a second behind it: it pauses at each second until the
       // video has scheduled every sound up to the next, so nothing is scheduled where it has already rendered.
       let waiting = null, videoDone = false;
-      const pump = () => { if (waiting !== null && (videoDone || videoClock / 1000 >= waiting + 1)) { waiting = null; offline.resume(); } };
+      const pump = () => { if (waiting !== null && (videoDone || session.clock / 1000 >= waiting + 1)) { waiting = null; offline.resume(); } };
       for (let mark = 1; mark < offline.length / rate; mark++) offline.suspend(mark).then(() => { waiting = mark; pump(); });
       const rendering = offline.startRendering();
-      videoBug = null; gameAudio()?.stop(); resetSoundThrottles(); seekReplay(0);
+      videoBug = null; gameAudio()?.stop();
+      seekReplay(0, session);
       for (let f = 0; f < frames && !videoCancelled && !failure; f++) {
-        if (f) { videoClock += 1000 / VIDEO.fps; updatePopups(1 / VIDEO.fps); updateEffects(1 / VIDEO.fps); advanceReplay(1 / VIDEO.fps); }
-        composeFrame(v);
+        withPlaybackContext(session, () => {
+          if (f) {
+            videoClock = session.clock += 1000 / VIDEO.fps;
+            updatePopups(1 / VIDEO.fps);
+            updateEffects(1 / VIDEO.fps);
+            advanceReplay(1 / VIDEO.fps, session);
+          }
+          composeFrame(v, session);
+        });
         const frame = new VideoFrame(out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
         encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
         pump();
@@ -3146,7 +3387,7 @@
       await encoder.flush();
       if (failure) throw failure;
       if (!videoCancelled) {
-        videoAudio = null; videoDone = true; pump();
+        session.audio = null; videoDone = true; pump();
         status.textContent = 'Mixing sound…';
         const audio = await encodeAudio(await rendering);
         blob = new Blob(ububallMP4.write({ width: VIDEO.width, height: VIDEO.height, timescale: 90000, description, samples }, audio), { type: 'video/mp4' });
@@ -3156,12 +3397,8 @@
       status.textContent = `The video could not be made: ${error.message}`;
     } finally {
       if (encoder && encoder.state !== 'closed') encoder.close();
-      activePlayback = null;
-      th.exporting = false;
-      isPortrait = resume.portrait;
-      restoreNames?.();
-      videoClock = null; videoAudio = null; videoField = null;
-      resetSoundThrottles(); seekReplay(resume.at); th.paused = resume.paused; layoutDirty = true; draw();
+      if (session?.fx?.sizzle) { session.fx.sizzle.stop?.(); session.fx.sizzle = null; }
+      exportingVideo = false;
     }
     close.textContent = 'Close';
     if (videoCancelled) { dialog.close(); return; }
@@ -3195,21 +3432,9 @@
     const replay = whole ? r : ububallReplay.clip(r, from, to, title);
     return { replay: hidden ? ububallReplay.anonymize(replay, title) : replay, file: whole && !hidden ? th.file : null, hidden };
   }
-  // While a video renders with names hidden, the scorebug and calls use the stand-in names.
-  function showAnonymous() {
-    const labels = [$('home-label').textContent, $('opponent-label').textContent], names = bodies.map(b => b.name);
-    anonymousNames = true;
-    [$('home-label').textContent, $('opponent-label').textContent] = ububallReplay.ANONYMOUS;
-    bodies.slice(0, 6).forEach((b, i) => { b.name = anonymousName(i); });
-    return () => {
-      anonymousNames = false;
-      [$('home-label').textContent, $('opponent-label').textContent] = labels;
-      bodies.forEach((b, i) => { b.name = names[i]; });
-    };
-  }
   function openExport(kind) {
     const th = theater;
-    if (!th || th.exporting) return;
+    if (!th || isExporting()) return;
     exportKind = kind;
     $('export-title').textContent = kind === 'video' ? 'Export video' : 'Export replay';
     $('export-note').textContent = kind === 'video' ? 'Saves an MP4 video with sound.' : 'Saves a .ububall file to watch in ububall.';
@@ -3247,17 +3472,19 @@
   let cardImage = null;
   function drawShareCard(hidden) {
     const th = theater, out = $('share-card'), g = out.getContext('2d'), { home, away, text, surface, background } = themeColors;
-    const restoreNames = hidden && !th.replay.anonymous ? showAnonymous() : null, portrait = isPortrait;
-    const names = [$('home-label').textContent, $('opponent-label').textContent], font = getComputedStyle(document.body).fontFamily;
+    const anon = Boolean(hidden || th.replay.anonymous), portrait = isPortrait, prevAnon = anonymousNames;
+    const names = anon ? ububallReplay.ANONYMOUS : (th.names || [$('home-label').textContent, $('opponent-label').textContent]);
+    const cardScores = th.scores || scores, cardTurn = th.turn ?? turn;
+    const font = getComputedStyle(document.body).fontFamily;
     const k = CARD.width / 1000, [cropTop, cropBottom] = CARD.crop, fieldBottom = CARD.field + (cropBottom - cropTop) * k;
     g.fillStyle = background; g.fillRect(0, 0, CARD.width, CARD.height);
     try {
-      isPortrait = false; cardShot = true; videoField = { width: CARD.width, height: 600 * k }; draw();
+      isPortrait = false; cardShot = true; anonymousNames = anon; videoField = { width: CARD.width, height: 600 * k }; draw();
       g.save(); g.beginPath(); g.rect(0, CARD.field, CARD.width, fieldBottom - CARD.field); g.clip();
-      paintField(g, 0, CARD.field - cropTop * k, CARD.width, 600 * k);
+      paintField(g, 0, CARD.field - cropTop * k, CARD.width, 600 * k, th);
       g.restore();
     } finally {
-      videoField = null; cardShot = false; isPortrait = portrait; restoreNames?.(); layoutDirty = true; draw();
+      videoField = null; cardShot = false; anonymousNames = prevAnon; isPortrait = portrait; layoutDirty = true; draw();
     }
     // Scorebug, as wide as the rink's flat top (x 160–840): each team's name and score, the turn between them.
     const bugLeft = 160 * k, bugWidth = 680 * k, middle = 110, side = (bugWidth - middle) / 2;
@@ -3268,7 +3495,7 @@
       g.fillStyle = team ? away : home; g.fillRect(left, 36, side, 90);
       g.fillStyle = team ? '#ffffff' : '#1b1e26';
       g.font = `800 52px ${font}`; g.textAlign = 'center';
-      g.fillText(String(scores[team]), team ? left + 42 : left + side - 42, 83);
+      g.fillText(String(cardScores[team]), team ? left + 42 : left + side - 42, 83);
       // Names shrink to fit beside the score.
       const name = names[team].toUpperCase().slice(0, 16), room = side - 100;
       let size = 28;
@@ -3277,7 +3504,7 @@
       g.fillText(name, team ? left + side - 18 : left + 18, 82, room);
     }
     g.fillStyle = surface; g.fillRect(bugLeft + side, 36, middle, 90);
-    g.fillStyle = text; g.textAlign = 'center'; g.font = `800 28px ${font}`; g.fillText(`T${turn}`, CARD.width / 2, 82);
+    g.fillStyle = text; g.textAlign = 'center'; g.font = `800 28px ${font}`; g.fillText(`T${cardTurn}`, CARD.width / 2, 82);
     g.restore();
     // The invitation, the logo and what the game is.
     g.textBaseline = 'alphabetic'; g.textAlign = 'center'; g.fillStyle = text; g.font = `400 34px 'Uburoom Sans', ${font}`;
@@ -3287,12 +3514,12 @@
     g.font = `400 40px 'Uburoom Sans', ${font}`; g.fillStyle = text;
     g.fillText(CARD.tagline, CARD.width / 2, fieldBottom + 100 + logoHeight + 30);
     // Encoding starts now so sharing does not wait on it.
-    const name = `${replayFileName(th.replay.recorded, hidden ? null : th.replay.title)}-turn-${turn}.png`;
+    const name = `${replayFileName(th.replay.recorded, hidden ? null : th.replay.title)}-turn-${cardTurn}.png`;
     cardImage = new Promise(resolve => out.toBlob(blob => resolve(new File([blob], name, { type: 'image/png' })), 'image/png'));
   }
   async function openShare() {
     const th = theater;
-    if (!th || th.exporting) return;
+    if (!th || isExporting()) return;
     await Promise.all([videoLogo(), document.fonts.load(`40px 'Uburoom Sans'`).catch(() => {})]);
     $('share-private').closest('label').hidden = th.replay.anonymous;
     try { $('share-private').checked = localStorage.getItem('ububall-export-private') === 'on'; } catch {}
@@ -3317,8 +3544,8 @@
   };
   $('share-close').onclick = () => $('share-dialog').close();
   // Closing while a video renders cancels it.
-  $('export-close').onclick = () => { if (theater?.exporting) videoCancelled = true; else $('export-dialog').close(); };
-  $('export-dialog').addEventListener('cancel', event => { if (theater?.exporting) { event.preventDefault(); videoCancelled = true; } });
+  $('export-close').onclick = () => { if (isExporting()) videoCancelled = true; else $('export-dialog').close(); };
+  $('export-dialog').addEventListener('cancel', event => { if (isExporting()) { event.preventDefault(); videoCancelled = true; } });
   // Guides, remembered on this device and set from the pause menu or the replay viewer: Moves draws each
   // ubu's launch (its guard and armed super) from where the turn started; Trails draws the path each body
   // has taken this turn. In play, Moves shows while the turn plays and Trails until the next launch (not
@@ -3354,7 +3581,7 @@
   }
   function guideShown(key) {
     if (!guides[key] || !guide) return false;
-    if (theater) return true;
+    if (theater || (typeof activePlayback !== 'undefined' && activePlayback)) return true;
     if (demo || goalReplay) return false;
     if (phase === 'play') return guide.turn === turn;
     return key === 'trails' && guide.turn === turn - 1 && guide.goals === scores[0] + scores[1];
@@ -3396,7 +3623,7 @@
   // Play from here: a match against the CPU from the start of the turn on screen, playing the left team.
   function playFromHere() {
     const th = theater;
-    if (!th || th.exporting) return;
+    if (!th || (typeof isExporting === 'function' ? isExporting() : th.exporting)) return;
     const t = th.replay.turns[th.index], [roundStart] = ububallReplay.roundRange(th.replay, th.index), entries = teamEntries;
     const field = stripPresentation(transformSimSeat(ububallReplay.restore(t.bodies), th.seat));
     field.forEach((b, i) => {
@@ -3951,15 +4178,16 @@
       ripples.length || pings.length || popups.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
     // Effects pause with the replay viewer, and in Pulse mode when time freezes between turns.
     const pulseFrozen = pulseMode() && roundTurns > 0 && (phase === 'plan' || phase === 'cpu-wait' || phase === 'waiting');
+    const exporting = typeof isExporting === 'function' ? isExporting() : Boolean(theater?.exporting);
     let speed = 1;
     if (!active || clockNow() < hitStopUntil || pulseFrozen) speed = 0;
-    else if (theater) speed = theater.paused || theater.exporting ? 0 : theater.speed;
+    else if (theater) speed = theater.paused || exporting ? 0 : theater.speed;
     else if (goalReplay) speed = goalReplay.played >= goalReplay.total ? 0.5 : ububallMatch.replaySpeed(goalReplay.total - goalReplay.played);
     else if (postGoal) speed = ububallMatch.postGoalSpeed(postGoal.ticks);
     const simDelta = delta * speed;
-    if (active && !theater?.paused && !theater?.exporting) updatePopups(delta);
-    if (active && !theater?.paused && !theater?.exporting && !pulseFrozen) updateEffects(simDelta);
-    if (theater) { if (active && !theater.exporting) advanceReplay(delta); }
+    if (active && !theater?.paused && !exporting) updatePopups(delta);
+    if (active && !theater?.paused && !exporting && !pulseFrozen) updateEffects(simDelta);
+    if (theater) { if (active && !exporting) advanceReplay(delta); }
     else if ((phase === 'play' || postGoal) && active && !online?.active) {
       if (clockNow() < hitStopUntil) accumulator = 0; else accumulator += simDelta;
       let steps = 0;
@@ -4668,7 +4896,7 @@
   function transformSimSeat(sim, seat = 0) {
     return onlineOrder(structuredClone(sim), seat).map((b, i) => applySeatTransform(b, b, i, seat));
   }
-  function projectBody(cb, vb, i, seat = 0) {
+  function projectBody(cb, vb, i, seat = 0, entries = typeof teamEntries !== 'undefined' ? teamEntries : null, anonymous = typeof anonymousNames !== 'undefined' && anonymousNames) {
     const armed = vb.superArm;
     for (const k of Object.keys(vb)) {
       if (!PRESENTATION_KEYS.has(k) && (SIM_INTERNAL_KEYS.has(k) || !(k in cb))) delete vb[k];
@@ -4689,14 +4917,14 @@
       vb.stunned = Boolean(cb.stunned || cb.stunnedNext);
       vb.carded = Boolean(cb.carded);
       vb.holding = Boolean(cb.holding);
-      const entry = typeof teamEntries !== 'undefined' ? teamEntries[i] : null;
+      const entry = entries ? entries[i] : null;
       if (entry?.model) {
-        vb.name = (typeof anonymousNames !== 'undefined' && anonymousNames) ? anonymousName(i) : entry.model.parts?.fullName;
+        vb.name = anonymous ? anonymousName(i) : entry.model.parts?.fullName;
         vb.voice = entry.model.voice;
         vb.personality = cloneSimValue(entry.model.personality);
         const sObj = entry.equippedSuper || (cb.equippedSuper ? { ...P.SUPERS[cb.equippedSuper.id], ...cb.equippedSuper } : resolveEquippedSuper(entry, i));
         vb.equippedSuper = classicMode() ? null : cloneSimValue(sObj || null);
-      } else if (typeof anonymousNames !== 'undefined' && anonymousNames) {
+      } else if (anonymous) {
         vb.name = anonymousName(i);
       }
     } else {
@@ -4707,9 +4935,9 @@
     }
     return vb;
   }
-  function viewBodies(items, seat = 0) {
+  function viewBodies(items, seat = 0, entries = typeof teamEntries !== 'undefined' ? teamEntries : null, anonymous = typeof anonymousNames !== 'undefined' && anonymousNames) {
     if (!items) return [];
-    return onlineOrder(items, seat).map((cb, i) => projectBody(cb, {}, i, seat));
+    return onlineOrder(items, seat).map((cb, i) => projectBody(cb, {}, i, seat, entries, anonymous));
   }
   // The server's fouls as this seat sees them: teams swapped and the rink turned half round.
   function viewFouls(f, seat) {
@@ -4717,21 +4945,21 @@
     if (!seat) return structuredClone(f);
     return { ...f, crease: [f.crease[1], f.crease[0]], corner: f.corner === null ? null : 3 - f.corner, cards: f.cards.map(i => viewIndex(i, seat)) };
   }
-  function toViewBody(cb, sim = shownSim(), seat = shownSeat()) {
+  function toViewBody(cb, sim = shownSim(), seat = shownSeat(), targetBodies = bodies) {
     if (!cb) return null;
     const idx = sim?.indexOf(cb);
     if (idx === undefined || idx < 0) return cb;
-    return bodies[viewIndex(idx, seat)] || cb;
+    return targetBodies[viewIndex(idx, seat)] || cb;
   }
-  function syncViewBodies(sim = shownSim(), seat = shownSeat()) {
-    if (!sim) return bodies;
+  function syncViewBodies(sim = shownSim(), seat = shownSeat(), targetBodies = bodies, anonymous = typeof anonymousNames !== 'undefined' && anonymousNames, meters = dirtyMeters, entries = typeof teamEntries !== 'undefined' ? teamEntries : null) {
+    if (!sim) return targetBodies;
     for (let i = 0; i < sim.length; i++) {
       const vi = viewIndex(i, seat);
-      const vb = bodies[vi] ||= {};
-      projectBody(sim[i], vb, vi, seat);
-      dirtyMeters.add(vb);
+      const vb = targetBodies[vi] ||= {};
+      projectBody(sim[i], vb, vi, seat, entries, anonymous);
+      if (meters) meters.add(vb);
     }
-    return bodies;
+    return targetBodies;
   }
   function playOnlineReplay() {
     const replay = onlineReplay;

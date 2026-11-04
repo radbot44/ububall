@@ -1175,3 +1175,551 @@ test('online seat 1 transition (resolving -> playOnlineReplay -> next plan phase
     assert.equal(context.bodies[i], displayRefs[i], `bodies[${i}] reference stable into next plan phase`);
   }
 });
+
+function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
+  const P = require('../web/ububall-physics.js');
+  const ubu = require('../shared/ubu.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const ububallReplay = require('../shared/ububall-replay.js');
+  const ububallMP4 = require('../web/mp4.js');
+
+  const code =
+    section('function kickoff(isNewMatch = false) {', 'let summaryPending') + '\n' +
+    section('function creditSave(body, own, iron = false) {', 'function setMeterFill(fill, meter) {') + '\n' +
+    section('function replayEvents(turn, tick, sim) {', 'const replayStore = (() => {') + '\n' +
+    section('const replayClock = ticks =>', '$(\'replay-seek\').oninput =') + '\n' +
+    section('const VIDEO = Object.freeze(', '$(\'replay-export-video\').hidden =') + '\n' +
+    section('const CARD = {', 'async function openShare() {') + '\n' +
+    section('let guide = null;', 'function drawGuides(home, away, text) {') + '\n' +
+    section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+
+  const ubus = Array.from({ length: 6 }, (_, i) => {
+    const dna = ubu.toCode(ubu.randomDNA());
+    return { dna, super: i % 8 };
+  });
+  const rec = ububallReplay.create({ mode, seat, names: ['Solaris', 'Nebula'], ubus });
+  rec.title = 'Championship Clip';
+
+  const t1Bodies = P.kickoff();
+  t1Bodies[0].x = 240; t1Bodies[0].y = 300; t1Bodies[0].meter = 40;
+  t1Bodies[3].x = 760; t1Bodies[3].y = 300; t1Bodies[3].meter = 60;
+  t1Bodies[6].x = 480; t1Bodies[6].y = 300;
+  const t1Plans = [
+    { angle: 0, power: 0.8, spin: 0.2, superArm: false, guard: false },
+    { angle: 0.2, power: 0.4, spin: 0, superArm: false, guard: true },
+    { angle: -0.2, power: 0.4, spin: 0, superArm: false, guard: false },
+    { angle: Math.PI, power: 0.7, spin: -0.1, superArm: false, guard: false },
+    { angle: Math.PI, power: 0.3, spin: 0, superArm: false, guard: false },
+    { angle: Math.PI, power: 0.3, spin: 0, superArm: false, guard: false }
+  ];
+  const turn1 = ububallReplay.addTurn(rec, {
+    turn: 1,
+    scores: [0, 0],
+    fouls: { ...ububallMatch.newFouls(), crease: [true, false], corner: 0, cornerTurns: 2 },
+    bodies: t1Bodies,
+    plans: t1Plans
+  });
+  turn1.ticks = 16;
+  turn1.saves = [{ tick: 4, index: 1, own: false, iron: true }];
+  turn1.stops = [{ tick: 8, ms: 80 }];
+  turn1.goal = { team: 0, label: 'SNIPE!', scorer: 0, assist: 1 };
+
+  const t2Bodies = P.kickoff();
+  t2Bodies[0].meter = 55;
+  t2Bodies[3].meter = 70;
+  const turn2 = ububallReplay.addTurn(rec, {
+    turn: 2,
+    scores: [1, 0],
+    fouls: ububallMatch.newFouls(),
+    bodies: t2Bodies,
+    plans: t1Plans
+  });
+  turn2.ticks = 12;
+  turn2.goal = null;
+
+  const dummy = () => {};
+  const makeCtx = () => {
+    const calls = { fillTexts: [], strokeTexts: [], drawImages: 0, clearRects: 0 };
+    return new Proxy(calls, {
+      get(target, prop) {
+        if (prop === 'fillText') return text => { calls.fillTexts.push(String(text)); };
+        if (prop === 'strokeText') return text => { calls.strokeTexts.push(String(text)); };
+        if (prop === 'drawImage') return () => { calls.drawImages++; };
+        if (prop === 'clearRect') return () => { calls.clearRects++; };
+        if (prop in target) return target[prop];
+        if (prop === 'measureText') return text => ({ width: String(text).length * 10 });
+        if (prop === 'getTransform') return () => ({ a: 1 });
+        if (prop === 'createLinearGradient' || prop === 'createRadialGradient' || prop === 'createConicGradient') {
+          return () => ({ addColorStop: dummy });
+        }
+        return dummy;
+      },
+      set(target, prop, value) {
+        target[prop] = value;
+        return true;
+      }
+    });
+  };
+  const makeCanvas = () => {
+    const c = { width: 1000, height: 600, _ctx: makeCtx(), toBlob: cb => cb(new Uint8Array([1, 2, 3])) };
+    c.getContext = () => c._ctx;
+    return c;
+  };
+  const elements = new Map();
+  const $ = id => {
+    if (!elements.has(id)) {
+      const base = id === 'share-card' ? makeCanvas() : {};
+      elements.set(id, Object.assign(base, {
+        value: '1', max: 0, textContent: '', hidden: false, disabled: false, checked: false,
+        classList: { toggle: dummy, add: dummy, remove: dummy, contains: () => false },
+        setAttribute: dummy, replaceChildren: dummy, matches: () => false,
+        closest: () => ({ hidden: false }),
+        querySelectorAll: () => [],
+        showModal: dummy, close: dummy, click: dummy
+      }));
+    }
+    return elements.get(id);
+  };
+
+  let wallClock = 5000;
+  const liveCanvas = makeCanvas(), liveBadges = makeCanvas();
+  const encoderState = { instances: [], failWith: null, onEncode: null, audioFailWith: null };
+
+  class MockVideoEncoder {
+    constructor({ output, error }) {
+      this.output = output;
+      this.error = error;
+      this.state = 'unconfigured';
+      this.encodeQueueSize = 0;
+      this.frames = 0;
+      this.closed = false;
+      encoderState.instances.push(this);
+    }
+    static async isConfigSupported(config) { return { supported: true, config }; }
+    configure() { this.state = 'configured'; }
+    encode(frame, opts) {
+      this.frames++;
+      if (encoderState.onEncode) encoderState.onEncode(this.frames, this);
+      if (encoderState.failWith) {
+        this.error(encoderState.failWith);
+        return;
+      }
+      const bytes = new Uint8Array([this.frames & 0xff]);
+      this.output({
+        byteLength: bytes.byteLength,
+        type: opts?.keyFrame ? 'key' : 'delta',
+        copyTo: dst => dst.set(bytes)
+      }, { decoderConfig: { description: new Uint8Array([1, 2, 3, 4]) } });
+    }
+    async flush() {
+      if (encoderState.failWith) throw encoderState.failWith;
+    }
+    close() {
+      this.state = 'closed';
+      this.closed = true;
+    }
+    addEventListener() {}
+  }
+
+  class MockOfflineAudioContext {
+    constructor(channels, length, sampleRate) {
+      this.length = length;
+      this.sampleRate = sampleRate;
+      this.currentTime = 0;
+      this.destination = {};
+    }
+    suspend() { return Promise.resolve(); }
+    resume() {}
+    async startRendering() {
+      if (encoderState.audioFailWith) throw encoderState.audioFailWith;
+      return {
+        sampleRate: this.sampleRate,
+        length: 480,
+        getChannelData: () => new Float32Array(480)
+      };
+    }
+  }
+
+  const seekCalls = [];
+  const syncCalls = [];
+  const barCalls = [];
+  const tabCalls = [];
+
+  const context = {
+    Object, Array, Set, Map, WeakMap, Date, Math, Number, String, Boolean, Promise, Proxy, Uint8Array, Float32Array, ArrayBuffer,
+    P, ubu, ububallMatch, ububallReplay, ububallMP4, structuredClone,
+    setTimeout: () => 1, clearTimeout: dummy,
+    MessageChannel: class {
+      constructor() {
+        this.port1 = { onmessage: null };
+        this.port2 = { postMessage: () => Promise.resolve().then(() => this.port1.onmessage?.()) };
+      }
+    },
+    Blob: class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; this.size = 1024; } },
+    File: class { constructor(parts, name, opts) { this.parts = parts; this.name = name; this.type = opts?.type; } },
+    Image: class { constructor() { this.naturalWidth = 100; this.naturalHeight = 40; } decode() { return Promise.resolve(); } },
+    URL: { createObjectURL: () => 'blob:mock', revokeObjectURL: dummy },
+    HTMLCanvasElement: class {},
+    VideoEncoder: MockVideoEncoder,
+    OfflineAudioContext: MockOfflineAudioContext,
+    VideoFrame: class { constructor(src, opts) { this.src = src; this.opts = opts; } close() {} },
+    window: {
+      ubuAudio: {
+        stop: dummy,
+        shareMasterChain: dummy,
+        playCollision: dummy,
+        playBallHit: dummy,
+        playWallHit: dummy,
+        playGoalHit: dummy,
+        playSuper: dummy,
+        playSizzle: () => ({ stop: dummy }),
+        playFoul: dummy
+      }
+    },
+    document: {
+      body: { classList: { toggle: dummy, add: dummy, remove: dummy } },
+      createElement: tag => tag === 'canvas' ? makeCanvas() : { href: '', download: '', click: dummy, style: {}, setAttribute: dummy },
+      fonts: { load: () => Promise.resolve() }
+    },
+    getComputedStyle: () => ({ fontFamily: 'sans-serif' }),
+    localStorage: { getItem: () => 'off', setItem: dummy },
+    $,
+    canvas: liveCanvas,
+    ctx: liveCanvas._ctx,
+    badgeCanvas: liveBadges,
+    badgeCtx: liveBadges._ctx,
+    rinkWrap: { style: { translate: '' } },
+    rinkLogo: { naturalWidth: 100, naturalHeight: 40 },
+    skaters: Array.from({ length: 6 }, () => ({ firstChild: null, querySelector: () => null })),
+    themeColors: {
+      primary: '#76b9ef', secondary: '#ff9954', home: '#e8ca48', away: '#aa54d3',
+      text: '#f8f6f2', border: '#3a3f4b', surface: '#1b1e26', background: '#0b0d10'
+    },
+    GOAL_CALL_SECONDS: 2.4,
+    reducedMotion: { matches: false },
+    materialStyles: {},
+    materialEmitters: [],
+    trails: Array.from({ length: 7 }, () => []),
+    particles: [], fireworks: [], shockwaves: [],
+    skids: [], skidState: [], burns: [], burnState: {},
+    ripples: [], pings: [], popups: [], danger: [0, 0],
+    ballFlare: 0, kickoffGlow: 0, goalSweep: null, goalCall: null,
+    hitStopUntil: 0, shake: 0, shakeX: 0, shakeY: 0,
+    fireTime: 0, sizzle: null, netFire: null,
+    superImpactTimes: new WeakMap(),
+    iceCache: {}, rinkCache: null,
+    shownScores: [0, 0],
+    dirtyMeters: new Set(),
+    practice: [],
+    teamEntries: [],
+    stats: [],
+    bodies: P.kickoff(),
+    simBodies: P.kickoff(),
+    authoritativeBodies: null,
+    play: ububallMatch.newPlay(),
+    tally: ububallMatch.newTally(),
+    fouls: ububallMatch.newFouls(),
+    scores: [0, 0],
+    turn: 1,
+    phase: 'plan',
+    selected: 0,
+    drag: null,
+    plans: Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, guard: false })),
+    isPortrait: false,
+    layoutDirty: false,
+    matchMode: mode,
+    anonymousNames: false,
+    theater: null,
+    goalReplay: null,
+    postGoal: null,
+    online: null,
+    onlineReplay: null,
+    scoringPlayer: null,
+    demo: false,
+    matchTicks: 0,
+    elapsed: 0,
+    roundTurns: 0,
+    cpuGeneration: 0,
+    cpuClient: { cancel: dummy },
+    videoClock: null,
+    videoAudio: null,
+    videoField: null,
+    cardShot: false,
+    clockNow: () => context.videoClock ?? wallClock,
+    gameAudio: () => context.videoAudio || context.window.ubuAudio,
+    classicMode: () => ububallMatch.rule(context.matchMode, 'classic'),
+    pulseMode: () => ububallMatch.rule(context.matchMode, 'pulse'),
+    normalStats: () => ({
+      impulse: 127, traction: 127, spin: 127, curve: 127,
+      size: 127, mass: 127, bounciness: 127, grip: 127,
+      power: 127, reach: 127, strength: 127, stability: 127,
+      efficiency: 127, synergy: 127, chemistry: 127
+    }),
+    idlePlan: () => ({ angle: 0, power: 0, spin: 0, guard: false }),
+    resolveEquippedSuper: (entry, i) => entry?.equippedSuper || P.SUPERS[i % P.SUPERS.length],
+    saveRecording: dummy,
+    stopDemo: dummy,
+    closeSummary: dummy,
+    endGoalReplay: dummy,
+    stopFanfare: dummy,
+    showMode: dummy,
+    buildTeam: dummy,
+    say: dummy,
+    enterMatch: dummy,
+    newMatch: dummy,
+    replayFileName: (recorded, title) => title ? title.toLowerCase().replace(/\s+/g, '-') : `replay-${recorded}`,
+    downloadReplay: dummy,
+    trailPositions: () => context.bodies.map(b => ({ x: b.x, y: b.y })),
+    clearDiscontinuousTrails: before => {
+      context.bodies.forEach((b, i) => {
+        if (before[i] && (before[i].x !== b.x || before[i].y !== b.y)) context.trails[i].length = 0;
+      });
+    },
+    recordTrails: () => {
+      context.bodies.forEach((b, i) => {
+        context.trails[i].push({ x: b.x, y: b.y, life: 0.24, duration: 0.24 });
+      });
+    },
+    emitSkaterEffects: dummy,
+    updatePopups: dt => {
+      for (let i = context.popups.length - 1; i >= 0; i--) {
+        if ((context.popups[i].life -= dt) <= 0) context.popups.splice(i, 1);
+      }
+    },
+    updateEffects: dt => {
+      for (const trail of context.trails) {
+        for (const pt of trail) pt.life -= dt;
+      }
+      if (context.goalCall && (context.goalCall.t += dt) >= context.GOAL_CALL_SECONDS) context.goalCall = null;
+    },
+    clearEffects: () => {
+      if (!context.videoField) context.postGoal = null;
+      context.trails.forEach(t => { t.length = 0; });
+      context.particles.length = context.fireworks.length = context.shockwaves.length = 0;
+      context.skids.length = context.skidState.length = context.burns.length = context.ripples.length = context.pings.length = context.popups.length = 0;
+      context.goalSweep = context.goalCall = null;
+    },
+    popup: (body, text) => {
+      if (body) context.popups.push({ x: body.x, y: body.y, text, team: body.team, life: 1.2, duration: 1.2 });
+    },
+    steamRing: dummy,
+    impact: ms => { context.hitStopUntil = context.clockNow() + ms; },
+    celebrate: (team, ball, label = 'GOAL', scorer = null) => {
+      context.goalCall = { team, label, scorer: scorer ? context.bodies.indexOf(scorer) : -1, name: scorer?.name || '', t: 0 };
+      context.fireworks.push({ team, label });
+    },
+    goalTab: (team, label, scorer) => { tabCalls.push({ team, label, scorer }); },
+    handleCollision: dummy,
+    handleWall: dummy,
+    handleShockwave: dummy,
+    handleSuper: dummy,
+    sync: () => { syncCalls.push({ scores: [...context.scores], turn: context.turn }); },
+    draw: () => { context.ctx.clearRect(0, 0, 1000, 600); },
+    setClock: ms => { wallClock = ms; }
+  };
+
+  const env = vm.runInNewContext(
+    code + '\n;({ watchReplay, endReplay, createReplaySession, withPlaybackContext, loadReplayTurn, stepReplay, seekReplay, endReplayTurn, advanceReplay, updateReplayBar, exportSlice, exportVideo, drawShareCard, composeFrame, currentReplay, shownSim, shownSeat, syncViewBodies, cancelExport: () => { videoCancelled = true; }, isExporting });',
+    context
+  );
+
+  return { P, ubu, ububallMatch, ububallReplay, rec, context, env, elements, encoderState, seekCalls, syncCalls, barCalls, tabCalls };
+}
+
+test('video export completion, cancellation, and failure preserve interactive replay state without seeking theater back', async () => {
+  const { rec, context, env, elements, encoderState, syncCalls, tabCalls } = createReplayExportHarness({ seat: 0 });
+  const sourceSnapshot = structuredClone(rec);
+
+  env.watchReplay(rec, new Uint8Array([9, 9, 9]));
+  // Advance interactive theater midway into turn 1 and pause with custom speed and portrait mode
+  env.seekReplay(10);
+  const authoritativeSnapshot = structuredClone(context.simBodies);
+  context.theater.paused = true;
+  context.theater.speed = 2;
+  context.isPortrait = true;
+  context.popups.push({ x: 300, y: 200, text: 'Interactive popup', team: 0, life: 0.9, duration: 1.2 });
+  context.trails[0].push({ x: 250, y: 300, life: 0.2, duration: 0.24 });
+
+  const captureTheaterState = () => ({
+    index: context.theater.index,
+    tick: context.theater.tick,
+    paused: context.theater.paused,
+    speed: context.theater.speed,
+    steps: context.theater.steps,
+    holdUntil: context.theater.holdUntil,
+    called: context.theater.called,
+    crowned: context.theater.crowned,
+    sim: structuredClone(context.theater.sim),
+    bodies: structuredClone(context.bodies),
+    bodyRefs: [...context.bodies],
+    scores: [...context.scores],
+    turn: context.turn,
+    fouls: structuredClone(context.fouls),
+    plans: structuredClone(context.plans),
+    guide: structuredClone(context.guide),
+    popups: structuredClone(context.popups),
+    trail0: structuredClone(context.trails[0]),
+    isPortrait: context.isPortrait,
+    homeLabel: elements.get('home-label').textContent,
+    awayLabel: elements.get('opponent-label').textContent,
+    seekSlider: elements.get('replay-seek').value
+  });
+
+  const before = captureTheaterState();
+  syncCalls.length = 0;
+  tabCalls.length = 0;
+
+  // 1. Complete a full anonymized clip export while interactive theater is paused at tick 10
+  const slice = env.exportSlice('match', true);
+  await env.exportVideo(slice);
+
+  const afterComplete = captureTheaterState();
+  assert.deepEqual(afterComplete.sim, before.sim, 'interactive theater.sim untouched after export completion');
+  assert.deepEqual(afterComplete.bodies, before.bodies, 'interactive display bodies untouched after export completion');
+  for (let i = 0; i < 7; i++) {
+    assert.equal(afterComplete.bodyRefs[i], before.bodyRefs[i], `display body[${i}] identity preserved`);
+  }
+  assert.equal(afterComplete.index, 0);
+  assert.equal(afterComplete.tick, 10);
+  assert.equal(afterComplete.paused, true);
+  assert.equal(afterComplete.speed, 2);
+  assert.equal(afterComplete.isPortrait, true, 'isPortrait preserved during and after export');
+  assert.deepEqual(afterComplete.scores, before.scores, 'interactive scores preserved');
+  assert.equal(afterComplete.turn, before.turn, 'interactive turn preserved');
+  assert.deepEqual(afterComplete.fouls, before.fouls, 'interactive fouls preserved');
+  assert.deepEqual(afterComplete.plans, before.plans, 'interactive plans preserved');
+  assert.deepEqual(afterComplete.guide, before.guide, 'interactive guide preserved');
+  assert.deepEqual(afterComplete.popups, before.popups, 'interactive popups preserved');
+  assert.deepEqual(afterComplete.trail0, before.trail0, 'interactive trails preserved');
+  assert.equal(afterComplete.homeLabel, 'Solaris', 'interactive home DOM label not overwritten by anonymous export');
+  assert.equal(afterComplete.awayLabel, 'Nebula', 'interactive opponent DOM label not overwritten by anonymous export');
+  assert.equal(afterComplete.seekSlider, before.seekSlider, 'interactive seek bar not reset to 0 during export');
+  assert.equal(syncCalls.length, 0, 'export does not trigger live DOM sync()');
+  assert.equal(tabCalls.length, 0, 'export does not trigger live scorebug goalTab()');
+  assert.equal(encoderState.instances.at(-1).closed, true, 'encoder closed after completion');
+  assert.ok(encoderState.instances.at(-1).frames > 60, 'export rendered video frames');
+
+  // 2. Cancel an export mid-way and verify interactive replay is untouched
+  encoderState.onEncode = frameCount => {
+    if (frameCount === 10) env.cancelExport();
+  };
+  await env.exportVideo(env.exportSlice('match', false));
+  encoderState.onEncode = null;
+
+  const afterCancel = captureTheaterState();
+  assert.deepEqual(afterCancel.sim, before.sim, 'interactive theater.sim untouched after export cancellation');
+  assert.deepEqual(afterCancel.bodies, before.bodies, 'interactive display bodies untouched after export cancellation');
+  assert.equal(afterCancel.tick, 10);
+  assert.equal(afterCancel.paused, true);
+  assert.equal(afterCancel.speed, 2);
+  assert.equal(afterCancel.isPortrait, true);
+  assert.equal(encoderState.instances.at(-1).frames, 10, 'export stopped immediately on cancellation');
+  assert.equal(encoderState.instances.at(-1).closed, true, 'encoder closed on cancellation');
+
+  // 3. Encoding failure and audio failure preserve interactive replay state and release encoder
+  encoderState.failWith = new Error('GPU encode failed');
+  await env.exportVideo(env.exportSlice('match', false));
+  encoderState.failWith = null;
+
+  assert.match(elements.get('export-status').textContent, /GPU encode failed/);
+  assert.equal(encoderState.instances.at(-1).closed, true, 'encoder closed on VideoEncoder error');
+  assert.deepEqual(captureTheaterState().sim, before.sim, 'interactive theater.sim untouched after VideoEncoder failure');
+
+  encoderState.audioFailWith = new Error('OfflineAudio failed');
+  await env.exportVideo(env.exportSlice('match', false));
+  encoderState.audioFailWith = null;
+
+  assert.match(elements.get('export-status').textContent, /OfflineAudio failed/);
+  assert.equal(encoderState.instances.at(-1).closed, true, 'encoder closed on audio rendering failure');
+  assert.deepEqual(captureTheaterState().sim, before.sim, 'interactive theater.sim untouched after audio failure');
+  assert.equal(env.isExporting(), false, 'exporting flag cleared in finally block');
+
+  // 4. Source replay data and authoritative local simBodies are never mutated
+  assert.deepEqual(structuredClone(rec), sourceSnapshot, 'replay source data is never mutated by replay or export');
+  assert.deepEqual(structuredClone(context.simBodies), authoritativeSnapshot, 'local authoritative simBodies is never mutated by replay or export');
+});
+
+test('interactive replay and export session advance through identical deterministic physics states, holds, and seat orientations', () => {
+  for (const seat of [0, 1]) {
+    const { P, rec, context, env, elements } = createReplayExportHarness({ seat });
+    env.watchReplay(rec, null);
+
+    // Verify seat orientation in interactive replay
+    assert.equal(elements.get('home-label').textContent, seat ? 'Nebula' : 'Solaris');
+    assert.equal(elements.get('opponent-label').textContent, seat ? 'Solaris' : 'Nebula');
+    const expectedHomeX = seat ? 1000 - 760 : 240;
+    assert.ok(Math.abs(context.bodies[0].x - expectedHomeX) < 1e-6, `seat ${seat} home body x oriented correctly`);
+
+    // Create an isolated export session for the same replay
+    const exportSession = env.createReplaySession(rec, {
+      speed: 1,
+      paused: false,
+      anonymous: true,
+      exporting: true,
+      clock: 5000
+    });
+    env.seekReplay(0, exportSession);
+    env.seekReplay(0, context.theater);
+
+    assert.deepEqual(exportSession.sim, context.theater.sim, `seat ${seat} initial simulation state matches exactly`);
+    assert.equal(exportSession.bodies[0].x, context.bodies[0].x, `seat ${seat} initial display x matches`);
+    assert.equal(exportSession.bodies[0].name, 'Saffron 1', 'export session uses anonymized ubu names');
+    assert.notEqual(context.bodies[0].name, 'Saffron 1', 'interactive session retains real ubu names');
+
+    // Step both sessions frame-by-frame through turn 1 (including save at tick 4, hit-stop at tick 8, and goal at tick 16)
+    const dt = 1 / 60;
+    for (let step = 0; step < 30; step++) {
+      const now = 5000 + (step + 1) * (1000 / 60);
+      context.setClock(now);
+      env.advanceReplay(dt, context.theater);
+
+      exportSession.clock = now;
+      env.withPlaybackContext(exportSession, () => {
+        env.advanceReplay(dt, exportSession);
+      });
+
+      assert.equal(exportSession.index, context.theater.index, `seat ${seat} frame ${step} turn index matches`);
+      assert.equal(exportSession.tick, context.theater.tick, `seat ${seat} frame ${step} tick matches`);
+      assert.equal(exportSession.called, context.theater.called, `seat ${seat} frame ${step} goal called state matches`);
+      assert.equal(exportSession.holdUntil, context.theater.holdUntil, `seat ${seat} frame ${step} holdUntil matches`);
+      assert.equal(exportSession.fx.hitStopUntil, context.hitStopUntil, `seat ${seat} frame ${step} hitStopUntil matches`);
+      assert.deepEqual(exportSession.scores, context.scores, `seat ${seat} frame ${step} scores match`);
+      assert.deepEqual(exportSession.viewFouls, context.fouls, `seat ${seat} frame ${step} viewFouls match`);
+      assert.deepEqual(exportSession.sim, context.theater.sim, `seat ${seat} frame ${step} sim bodies match deterministically`);
+    }
+
+    // Both sessions should now be holding on turn 1's goal celebration (holdUntil = clock + 2500)
+    assert.equal(context.theater.called, true, 'turn 1 goal called');
+    assert.ok(context.theater.holdUntil > 5000, 'goal hold active');
+    assert.deepEqual([...context.scores], seat ? [0, 1] : [1, 0], `seat ${seat} goal score incremented for scoring side`);
+
+    // Advance clock past the 2500ms goal hold so both sessions transition to turn 2 and play to completion
+    for (let step = 0; step < 20; step++) {
+      const now = 8500 + step * (1000 / 60);
+      context.setClock(now);
+      env.advanceReplay(dt, context.theater);
+
+      exportSession.clock = now;
+      env.withPlaybackContext(exportSession, () => {
+        env.advanceReplay(dt, exportSession);
+      });
+
+      assert.equal(exportSession.index, context.theater.index, `seat ${seat} post-hold step ${step} index matches`);
+      assert.equal(exportSession.tick, context.theater.tick, `seat ${seat} post-hold step ${step} tick matches`);
+      assert.equal(exportSession.paused, context.theater.paused, `seat ${seat} post-hold step ${step} paused state matches`);
+      assert.deepEqual(exportSession.sim, context.theater.sim, `seat ${seat} post-hold step ${step} sim matches`);
+    }
+
+    assert.equal(context.theater.index, 1, 'advanced into turn 2');
+    assert.equal(context.theater.paused, true, 'paused at end of final turn');
+    assert.equal(exportSession.paused, true, 'export session also paused at end of final turn');
+
+    // Share card anonymization does not mutate interactive names or DOM labels
+    const homeBefore = elements.get('home-label').textContent;
+    const bodyNameBefore = context.bodies[0].name;
+    env.drawShareCard(true);
+    assert.equal(elements.get('home-label').textContent, homeBefore, 'drawShareCard(true) preserves home DOM label');
+    assert.equal(context.bodies[0].name, bodyNameBefore, 'drawShareCard(true) preserves interactive display body name');
+  }
+});
+
