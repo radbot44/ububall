@@ -25,11 +25,24 @@ test('search ignores private arming flags and handles either team and stunned pl
   const state = S.initialState(9);
   state.bodies[1].stunned = true;
   const first = C.plan(state, 0, { level: 'easy' });
-  for (const b of state.bodies.slice(3, 6)) { b.superArm = true; b.superActive = 'magnet'; }
+  for (const b of state.bodies.slice(3, 6)) b.superArm = true;
   const second = C.plan(state, 0, { level: 'easy' });
   assert.deepEqual(first.plans, second.plans);
   assert.equal(first.plans[1].power, 0);
   assert.equal(first.plans[1].superArm, false);
+});
+test('CPU search accounts for a carried Pulse super', () => {
+  const state = S.initialState(9, 'pulse'), active = state.bodies[3];
+  active.superActive = 'colossus';
+  active.superTicks = P.SUPER.ticks;
+  P.syncEffectiveStats(active);
+  const expired = structuredClone(state);
+  expired.bodies[3].superActive = null;
+  expired.bodies[3].superTicks = 0;
+  P.syncEffectiveStats(expired.bodies[3]);
+  const withSuper = C.plan(state, 1, { level: 'easy', candidates: 1, seed: 9 });
+  const withoutSuper = C.plan(expired, 1, { level: 'easy', candidates: 1, seed: 9 });
+  assert.notEqual(withSuper.diagnostics.score, withoutSuper.diagnostics.score);
 });
 test('Hard converts an open shot and defends the goal-threat fixture', () => {
   const results = S.scenarioReport('hard');
@@ -75,10 +88,13 @@ test('worker client snapshots public state, cancels stale work and reports failu
     workers.push(worker); return worker;
   });
   const state = S.initialState(); state.bodies[0].superArm = true;
+  state.bodies[0].superActive = 'magnet'; state.bodies[0].superTicks = 400;
   const first = client.plan(state, { level: 'hard' });
   state.bodies[0].x = 999;
   assert.notEqual(workers[0].data.state.bodies[0].x, 999);
   assert.equal(workers[0].data.state.bodies[0].superArm, false);
+  assert.equal(workers[0].data.state.bodies[0].superActive, 'magnet');
+  assert.equal(workers[0].data.state.bodies[0].superTicks, 400);
   const second = client.plan(state, { level: 'easy' });
   assert.equal(await first, null);
   assert.equal(workers[0].terminated, true);

@@ -240,7 +240,7 @@
   // The old planner attacks left. Reflect the complete graph for the other team.
   function legacy(state, team, random = () => .5) {
     const bodies = structuredClone(state.bodies);
-    for (const b of bodies) { b.superArm = false; b.superActive = null; }
+    for (const b of bodies) b.superArm = false;
     if (team === 0) {
       for (const b of bodies) {
         b.x = 1000 - b.x; b.vx = -b.vx; b.omega = -b.omega;
@@ -496,11 +496,11 @@
         !Number.isFinite(settings.temperature) || settings.temperature <= 0 ||
         Object.values(rawWeights).some(v => !Number.isFinite(v) || v < 0)) throw new Error('Invalid CPU search settings.');
     const started = performance.now(), random = randomSource(config.seed ?? 1);
-    // Only public state crosses this boundary. Discard any UI arming flags.
+    // Only public state crosses this boundary. Discard UI arming flags, not running supers.
     const state = structuredClone(input);
     // Every candidate copies the state, so presentation fields (voice, name, super descriptions) go.
     for (const b of state.bodies) {
-      b.superArm = false; b.superActive = null;
+      b.superArm = false;
       delete b.voice; delete b.name;
       if (b.equippedSuper) b.equippedSuper = { id: b.equippedSuper.id, key: b.equippedSuper.key, bonusTicks: b.equippedSuper.bonusTicks, bonusRefund: b.equippedSuper.bonusRefund };
     }
@@ -562,7 +562,7 @@
         },
         wall(body, velocity, type) { if (body.team === -1 && touches && type !== 'net') boards++; }
       };
-      const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false, ticks: SEARCH_TICKS, decided, watch });
+      const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false, ticks: SEARCH_TICKS, decided, watch, preservePartial: true });
       simulations++; ticks += result.replay.ticks;
       return evaluate(result.state, team, result.replay.goal, weights, boards + Math.max(0, touches - 1), toucher, teammatesTouched.size > 1, tmw);
     }
