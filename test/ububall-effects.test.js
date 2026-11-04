@@ -566,3 +566,277 @@ test('predictionKey invalidates on micro angle/power adjustments, fouls, and car
   const dirtyKey = env.predictionKey();
   assert.notEqual(dirtyKey, initialKey, 'dirtyPrediction increments key revision');
 });
+
+test('display projection boundary: seat transforms, gameplay fields, presentation separation, and stable identities', () => {
+  const P = require('../web/ububall-physics.js');
+  const ubu = require('../shared/ubu.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const projCode = section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+
+  const teamEntries = Array.from({ length: 6 }, (_, i) => {
+    const dna = ubu.randomDNA();
+    const model = ubu.decode(dna);
+    const s = P.SUPERS[i % P.SUPERS.length];
+    return {
+      model,
+      dna: ubu.toCode(dna),
+      equippedSuper: { ...s, bonusTicks: 24, bonusRefund: 10, copies: 2 }
+    };
+  });
+
+  const sim = P.kickoff();
+  sim.slice(0, 6).forEach((b, i) => {
+    ububallMatch.applyStats(P, b, teamEntries[i].model.stats, 'standard');
+    b.meter = 10 * (i + 1);
+  });
+  // Populate rich gameplay, special ability, and temporary state on simulation bodies
+  sim[0].x = 220; sim[0].y = 180; sim[0].vx = 45; sim[0].vy = -30; sim[0].rotation = 0.5;
+  sim[0].guarding = true; sim[0].ironGuard = true; sim[0].daze = 0.35;
+  sim[0].superActive = 'colossus'; sim[0].stunnedNext = true; sim[0].holding = true;
+  sim[0].futureGameplayField = 42;
+  sim[0].meterTick = 120; // internal simulation cooldown tick
+
+  sim[3].x = 760; sim[3].y = 410; sim[3].vx = -60; sim[3].vy = 25; sim[3].rotation = 1.25;
+  sim[3].carded = true; sim[3].superActive = 'magnet';
+
+  sim[6].x = 640; sim[6].y = 250; sim[6].vx = 310; sim[6].vy = -90; sim[6].rotation = 2.0;
+  sim[6].onFire = true; sim[6].fireTicks = 90; sim[6].pace = 420; sim[6].strikerTeam = 0;
+  sim[6].curveFactor = 1.18;
+  sim[6].stickOffset = { x: 18, y: -12 };
+  sim[6].pinX = 950; sim[6].pinY = 300; // internal post-goal pin coordinates
+
+  const initialDisplay = P.kickoff();
+  const dirtyMeters = new Set();
+  let anonymousNames = false;
+  const context = {
+    Object, Array, Set,
+    P, ububallMatch, structuredClone, teamEntries,
+    bodies: initialDisplay, dirtyMeters,
+    classicMode: () => false,
+    resolveEquippedSuper: (entry, i) => entry?.equippedSuper || P.SUPERS[i % P.SUPERS.length],
+    anonymousName: i => `${i < 3 ? 'Saffron' : 'Amethyst'} ${(i % 3) + 1}`,
+    shownSim: () => sim,
+    shownSeat: () => 0
+  };
+  Object.defineProperty(context, 'anonymousNames', { get: () => anonymousNames });
+
+  const env = vm.runInNewContext(
+    projCode + '\n;({ stripPresentation, projectBody, viewBodies, syncViewBodies, toViewBody, viewIndex });',
+    context
+  );
+
+  // 1. Stable display-body references across syncViewBodies (seat 0 and seat 1)
+  const refsBefore = [...initialDisplay];
+  refsBefore[0]._lastHitSound = 1234;
+  refsBefore[0]._lastWallSound = 5678;
+  refsBefore[0].superArm = true;
+
+  env.syncViewBodies(sim, 0);
+  for (let i = 0; i < 7; i++) {
+    assert.equal(context.bodies[i], refsBefore[i], `bodies[${i}] reference stays stable on seat 0 sync`);
+    assert.ok(dirtyMeters.has(context.bodies[i]), `bodies[${i}] added to dirtyMeters`);
+  }
+  assert.equal(context.bodies[0]._lastHitSound, 1234, 'audio hit throttle preserved on display body');
+  assert.equal(context.bodies[0]._lastWallSound, 5678, 'audio wall throttle preserved on display body');
+  assert.equal(context.bodies[0].superArm, true, 'local armed super preserved when sim body omits superArm');
+
+  // 2. Equivalent display output between viewBodies and syncViewBodies (ignoring transient audio throttles/superArm)
+  delete sim[0].superArm;
+  refsBefore[0].superArm = false;
+  delete refsBefore[0]._lastHitSound;
+  delete refsBefore[0]._lastWallSound;
+  env.syncViewBodies(sim, 0);
+  const projected0 = env.viewBodies(sim, 0);
+  assert.deepEqual(structuredClone(context.bodies), structuredClone(projected0), 'syncViewBodies and viewBodies produce identical display state for seat 0');
+
+  // 3. Gameplay properties, special abilities, temporary state, and future gameplay fields are projected
+  assert.equal(context.bodies[0].reach, sim[0].reach);
+  assert.equal(context.bodies[0].impulse, sim[0].impulse);
+  assert.equal(context.bodies[0].guarding, true);
+  assert.equal(context.bodies[0].ironGuard, true);
+  assert.equal(context.bodies[0].daze, 0.35);
+  assert.equal(context.bodies[0].superActive, 'colossus');
+  assert.equal(context.bodies[0].stunned, true, 'stunnedNext projects as stunned on display body');
+  assert.equal(context.bodies[0].holding, true);
+  assert.equal(context.bodies[0].futureGameplayField, 42, 'future gameplay fields automatically project without allowlist edits');
+  assert.equal(context.bodies[6].onFire, true);
+  assert.equal(context.bodies[6].fireTicks, 90);
+  assert.equal(context.bodies[6].pace, 420);
+  assert.equal(context.bodies[6].curveFactor, 1.18);
+  assert.deepEqual({ ...context.bodies[6].stickOffset }, { x: 18, y: -12 });
+  assert.notEqual(context.bodies[6].stickOffset, sim[6].stickOffset, 'nested stickOffset is cloned across boundary');
+
+  // 4. Simulation-internal fields (meterTick, pinX, pinY) stay out of display bodies, and presentation fields stay out of sim
+  assert.equal('meterTick' in context.bodies[0], false, 'meterTick excluded from display body');
+  assert.equal('pinX' in context.bodies[6], false, 'pinX excluded from display ball');
+  assert.equal('pinY' in context.bodies[6], false, 'pinY excluded from display ball');
+  assert.equal(context.bodies[0].name, teamEntries[0].model.parts.fullName);
+  assert.equal(context.bodies[0].voice, teamEntries[0].model.voice);
+  assert.equal(context.bodies[0].playerIndex, 0);
+  assert.equal('name' in sim[0], false, 'name never written to simulation body');
+  assert.equal('voice' in sim[0], false, 'voice never written to simulation body');
+  assert.equal('playerIndex' in sim[0], false, 'playerIndex never written to simulation body');
+
+  // Mutating display body does not mutate simulation body
+  context.bodies[0].x = 999;
+  context.bodies[0]._lastHitSound = 9999;
+  context.bodies[6].stickOffset.x = -999;
+  assert.equal(sim[0].x, 220);
+  assert.equal('_lastHitSound' in sim[0], false);
+  assert.equal(sim[6].stickOffset.x, 18);
+
+  // Clearing a transient property on sim body (e.g. delete stunnedNext after finishTurn) removes it from display body
+  delete sim[0].stunnedNext;
+  sim[0].stunned = false;
+  env.syncViewBodies(sim, 0);
+  assert.equal(context.bodies[0].stunned, false);
+  assert.equal('stunnedNext' in context.bodies[0], false, 'deleted transient sim key is removed from display body');
+
+  // 5. Seat 1 orientation: team ordering, coordinate & velocity negation, rotation + PI, stickOffset & strikerTeam flip
+  delete context.bodies[0]._lastHitSound;
+  env.syncViewBodies(sim, 1);
+  const projected1 = env.viewBodies(sim, 1);
+  assert.deepEqual(structuredClone(context.bodies), structuredClone(projected1), 'syncViewBodies and viewBodies produce identical display state for seat 1');
+  for (let i = 0; i < 7; i++) {
+    assert.equal(context.bodies[i], refsBefore[i], `bodies[${i}] reference stays stable on seat 1 sync`);
+  }
+  // In seat 1, sim[3] (team 1 in server order) is projected to display index 0 (team 0 in viewer order)
+  assert.equal(context.bodies[0].x, 1000 - sim[3].x);
+  assert.equal(context.bodies[0].y, 600 - sim[3].y);
+  assert.equal(context.bodies[0].vx, -sim[3].vx);
+  assert.equal(context.bodies[0].vy, -sim[3].vy);
+  assert.equal(context.bodies[0].rotation, sim[3].rotation + Math.PI);
+  assert.equal(context.bodies[0].team, 0);
+  assert.equal(context.bodies[0].slot, 0);
+  assert.equal(context.bodies[0].playerIndex, 0);
+  assert.equal(context.bodies[0].carded, true);
+  assert.equal(context.bodies[0].superActive, 'magnet');
+  assert.equal(env.toViewBody(sim[3], sim, 1), context.bodies[0]);
+
+  // And sim[0] (team 0 in server order) is projected to display index 3 (team 1 in viewer order)
+  assert.equal(context.bodies[3].x, 1000 - sim[0].x);
+  assert.equal(context.bodies[3].y, 600 - sim[0].y);
+  assert.equal(context.bodies[3].vx, -sim[0].vx);
+  assert.equal(context.bodies[3].vy, -sim[0].vy);
+  assert.equal(context.bodies[3].rotation, sim[0].rotation + Math.PI);
+  assert.equal(context.bodies[3].team, 1);
+  assert.equal(context.bodies[3].slot, 0);
+  assert.equal(context.bodies[3].playerIndex, 3);
+  assert.equal(env.toViewBody(sim[0], sim, 1), context.bodies[3]);
+
+  // Ball in seat 1: coordinates, velocity, stickOffset, and strikerTeam flipped
+  assert.equal(context.bodies[6].x, 1000 - sim[6].x);
+  assert.equal(context.bodies[6].y, 600 - sim[6].y);
+  assert.equal(context.bodies[6].vx, -sim[6].vx);
+  assert.equal(context.bodies[6].vy, -sim[6].vy);
+  assert.equal(context.bodies[6].rotation, sim[6].rotation + Math.PI);
+  assert.deepEqual({ ...context.bodies[6].stickOffset }, { x: -18, y: 12 });
+  assert.equal(context.bodies[6].strikerTeam, 1, 'strikerTeam 0 flips to 1 for seat 1');
+
+  // 6. Anonymous names mode is preserved across syncViewBodies
+  anonymousNames = true;
+  env.syncViewBodies(sim, 1);
+  assert.equal(context.bodies[0].name, 'Saffron 1');
+  assert.equal(context.bodies[3].name, 'Amethyst 1');
+  anonymousNames = false;
+  env.syncViewBodies(sim, 1);
+  assert.equal(context.bodies[0].name, teamEntries[0].model.parts.fullName);
+
+  // 7. stripPresentation removes presentation keys from any tainted array
+  const tainted = [{ x: 100, name: 'Test', voice: {}, playerIndex: 2, _lastHitSound: 10, _lastWallSound: 20 }];
+  env.stripPresentation(tainted);
+  assert.deepEqual(tainted, [{ x: 100 }]);
+});
+
+test('local gameplay and goal replay maintain separate authoritative simBodies and stable display bodies', () => {
+  const P = require('../web/ububall-physics.js');
+  const ubu = require('../shared/ubu.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const code =
+    section('function kickoff(isNewMatch = false) {', 'let summaryPending') + '\n' +
+    section('function creditSave(body, own, iron = false) {', 'function setMeterFill(fill, meter) {') + '\n' +
+    section('let activePlayback = null;', 'const replayStore = (() => {') + '\n' +
+    section('function finishTurn(goal) {', '$(\'launch\').onclick =') + '\n' +
+    section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+
+  const normal = { mass: 127, size: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 };
+  const practice = Array.from({ length: 6 }, () => {
+    const dna = ubu.randomDNA();
+    return { model: ubu.decode(dna), dna: ubu.toCode(dna), label: 'Practice ubu' };
+  });
+  const dummy = () => {};
+  const context = {
+    Object, Array, Set, clearTimeout, setTimeout,
+    P, ububallMatch, structuredClone, performance,
+    clearEffects() { context.postGoal = null; },
+    kickoffGlow: 0, netFire: null,
+    stats: Array.from({ length: 6 }, () => normal),
+    matchMode: 'standard', teamEntries: practice, practice,
+    classicMode: () => false, pulseMode: () => false,
+    resolveEquippedSuper: (entry, i) => P.SUPERS[i % P.SUPERS.length],
+    anonymousName: i => `Anon ${i}`, anonymousNames: false,
+    playSegments: [], elapsed: 1, roundTurns: 0, matchTicks: 0,
+    play: ububallMatch.newPlay(), tally: ububallMatch.newTally(), fouls: ububallMatch.newFouls(),
+    ballOnFire: () => false, lightNet: dummy, quench: dummy,
+    trailPositions: () => context.bodies.map(b => ({ x: b.x, y: b.y })),
+    clearDiscontinuousTrails: dummy,
+    noteTurn: dummy, announceFouls: dummy, foulText: () => '',
+    dirtyMeters: new Set(),
+    celebrate: dummy, popup: dummy, steamRing: dummy, gameAudio: () => null,
+    queueSummary: dummy, closeSummary: dummy, recording: null, clearActiveMatch: dummy, saveActiveMatch: dummy,
+    goalTab: dummy, say: dummy, loopFanfare: dummy, sync: dummy, draw: dummy, resetPlans: dummy,
+    callText: () => '', honourText: () => '',
+    $: () => ({ disabled: false, textContent: '', onclick: null }),
+    handleCollision: dummy, handleWall: dummy, handleShockwave: dummy, handleSuper: dummy,
+    replayEvents: dummy, recordTrails: dummy, emitSkaterEffects: dummy,
+    clockNow: () => 0, hitStopUntil: 0, summaryPending: false, openSummary: dummy,
+    scores: [0, 0], turn: 1, phase: 'play',
+    bodies: P.kickoff(), simBodies: P.kickoff(),
+    authoritativeBodies: null, postGoal: null, goalReplay: null, goalReplayAt: 0,
+    theater: null, online: null, onlineReplay: null, scoringPlayer: null
+  };
+
+  const env = vm.runInNewContext(
+    code + '\n;({ kickoff, finishTurn, creditSave, contactMeter, startGoalReplay, endGoalReplay, shownSim });',
+    context
+  );
+
+  const initialDisplayRefs = [...context.bodies];
+
+  // 1. kickoff initializes simBodies without presentation keys and projects into existing display bodies in-place
+  const returned = env.kickoff(true);
+  assert.equal(returned, context.bodies);
+  for (let i = 0; i < 7; i++) {
+    assert.equal(context.bodies[i], initialDisplayRefs[i], `kickoff preserves bodies[${i}] reference`);
+  }
+  assert.notEqual(context.simBodies, context.bodies, 'simBodies and bodies are distinct arrays');
+  assert.notEqual(context.simBodies[0], context.bodies[0], 'simBodies[0] and bodies[0] are distinct objects');
+  assert.equal('name' in context.simBodies[0], false, 'simBodies[0] has no presentation name');
+  assert.equal('voice' in context.simBodies[0], false, 'simBodies[0] has no presentation voice');
+  assert.equal(context.bodies[0].name, practice[0].model.parts.fullName, 'display body has presentation name');
+
+  // 2. creditSave updates authoritative simBodies meter and projects to display body
+  const beforeMeter = context.simBodies[0].meter;
+  env.creditSave(context.bodies[0], false, true);
+  assert.ok(context.simBodies[0].meter > beforeMeter, 'creditSave increments meter on authoritative simBodies');
+  assert.equal(context.bodies[0].meter, context.simBodies[0].meter, 'display body meter matches simBodies meter');
+  assert.ok(context.dirtyMeters.has(context.bodies[0]), 'dirtyMeters holds stable display body reference');
+
+  // 3. Goal finishTurn creates isolated postGoal.sim and stops authoritative simBodies
+  context.simBodies[0].x = 410;
+  context.simBodies[0].vx = 180;
+  context.playSegments = [{ bodies: structuredClone(context.simBodies), plans: Array.from({ length: 6 }, () => ({ angle: 0, power: 0.5, spin: 0 })), ticks: 10, saves: [], stops: [] }];
+  env.finishTurn(0);
+
+  assert.equal(context.simBodies[0].vx, 0, 'authoritative simBodies is stopped at finishTurn');
+  assert.ok(context.postGoal?.sim, 'postGoal has isolated celebration simulation copy');
+  assert.notEqual(context.postGoal.sim, context.simBodies, 'postGoal.sim is distinct from simBodies');
+
+  // 4. Starting and ending goalReplay restores display bodies to authoritative simBodies
+  env.startGoalReplay();
+  assert.ok(context.goalReplay, 'goalReplay started');
+  context.goalReplay.sim[0].x = 123;
+  env.endGoalReplay();
+  assert.equal(context.goalReplay, null);
+  assert.equal(context.bodies[0].x, 410, 'ending goalReplay re-projects authoritative simBodies onto display bodies');
+});
