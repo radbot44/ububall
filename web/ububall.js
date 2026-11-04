@@ -2473,7 +2473,7 @@
     badgeCtx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); badgeCtx.clearRect(0, 0, 1000, 600);
     ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); ctx.clearRect(0, 0, 1000, 600);
     const colors = getThemeColors();
-    const { text, home, away } = colors;
+    const { text, home, away, background } = colors;
     const rinkKey = width + ',' + height + JSON.stringify(colors);
     if (rinkCache?.key !== rinkKey) {
       const layer = document.createElement('canvas'); layer.width = width; layer.height = height;
