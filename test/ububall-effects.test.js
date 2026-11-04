@@ -217,7 +217,7 @@ test('creditSave generates Trap! callout for friendly iron saves and Big save! f
     popup, steamRing() {}, gameAudio: () => ({ playIronSave() {} }),
     online: null, goalReplay: null, theater: null,
     ububallMatch: { gainMeter: () => [], METER: { save: 6 } },
-    classicMode: () => true, dirtyMeters: new Set(), P: {}, bodies: [], stats: {}
+    classicMode: () => true, dirtyMeters: new Set(), P: {}, bodies: [], simBodies: [], stats: {}
   };
   vm.runInNewContext(code + '\ncreditSave({ team: 0, x: 0, y: 0, radius: 10 }, true, true);\ncreditSave({ team: 1, x: 0, y: 0, radius: 10 }, false, true);\ncreditSave({ team: 0, x: 0, y: 0, radius: 10 }, false, false);', context);
   assert.equal(popups[0].text, 'Trap!');
@@ -392,7 +392,8 @@ test('active match save and restore enforces matching matchVersion and physicsVe
     matchMode: 'standard', cpuLevel: 'medium', scores: [0, 0], turn: 1,
     fouls: { crease: [false, false], corner: null, cornerTurns: 0, cards: [] },
     tally: {}, roster: [{ dna: 'a', label: 'a' }], teamEntries: [{ dna: 'a', label: 'a' }],
-    bodies: P.kickoff(), plans: [], cpu: [], cpuDone: false,
+    bodies: P.kickoff(), simBodies: P.kickoff(), plans: [], cpu: [], cpuDone: false,
+    stripPresentation: s => s, syncViewBodies: s => s,
     endGoalReplay: dummy, showMode: dummy, classicMode: () => false,
     stopFanfare: dummy, gameAudio: () => null, buildTeam: dummy,
     normalStats: () => ({}), idlePlan: () => ({ angle: 0, power: 0, spin: 0 }),
@@ -437,7 +438,7 @@ test('contactMeter and creditSave reject meter awards outside phase === play', (
   const dirtyMeters = new Set();
   const env = vm.runInNewContext(code + '\n;({ creditSave, contactMeter, setPhase: p => { phase = p; } });', {
     phase: 'goal', online: null, goalReplay: null, theater: null,
-    bodies: [], stats: [], classicMode: () => false, matchTicks: 0, elapsed: 0,
+    bodies: [], simBodies: [], stats: [], classicMode: () => false, matchTicks: 0, elapsed: 0,
     P, ububallMatch, dirtyMeters, popup: () => {}, steamRing: () => {}, gameAudio: () => null
   });
 
@@ -458,8 +459,9 @@ test('contactMeter and creditSave reject meter awards outside phase === play', (
 });
 
 test('post-goal celebration simulation cannot alter the next kickoffs meter or gameplay state', () => {
-  const code = section('function kickoff(isNewMatch = false) {', 'function creditSave(') +
-    '\n' + section('function finishTurn(goal) {', '$(\'launch\').onclick =');
+  const code = section('function kickoff(isNewMatch = false) {', 'let summaryPending') +
+    '\n' + section('function finishTurn(goal) {', '$(\'launch\').onclick =') +
+    '\n' + section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
   const P = require('../web/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const ubu = require('../shared/ubu.js');
@@ -469,18 +471,21 @@ test('post-goal celebration simulation cannot alter the next kickoffs meter or g
     return { model: ubu.decode(dna), dna: ubu.toCode(dna), label: 'Practice ubu' };
   });
 
+  const simBodies = P.kickoff();
+  simBodies.slice(0, 6).forEach(b => P.applyStats(b, normal));
+  simBodies[0].meter = 50;
+  simBodies[1].meter = 30;
+  simBodies[3].meter = 20;
   const bodies = P.kickoff();
-  bodies.slice(0, 6).forEach((b, i) => P.applyStats(b, normal));
-  bodies[0].meter = 50;
-  bodies[1].meter = 30;
-  bodies[3].meter = 20;
 
   const dummy = () => {};
   const context = {
+    Object, Array, Set,
     P, ububallMatch, structuredClone,
     clearEffects: dummy, kickoffGlow: 0, netFire: null, stats: Array.from({ length: 6 }, () => normal),
     matchMode: 'standard', teamEntries: practice, practice, classicMode: () => false,
-    resolveEquippedSuper: () => null,
+    resolveEquippedSuper: () => null, anonymousName: i => `Anon ${i}`, anonymousNames: false,
+    shownSim: () => context.simBodies, shownSeat: () => 0,
     playSegments: [], elapsed: 10, roundTurns: 1, play: ububallMatch.newPlay(),
     tally: ububallMatch.newTally(), ballOnFire: () => false, lightNet: dummy, quench: dummy,
     trailPositions: () => [], clearDiscontinuousTrails: dummy, fouls: ububallMatch.newFouls(),
@@ -488,10 +493,10 @@ test('post-goal celebration simulation cannot alter the next kickoffs meter or g
     celebrate: dummy, popup: dummy, queueSummary: dummy, recording: null, clearActiveMatch: dummy,
     goalTab: dummy, say: dummy, loopFanfare: dummy, sync: dummy, draw: dummy, callText: () => '',
     $: () => ({ disabled: false, textContent: '', onclick: null }),
-    scores: [0, 0], bodies, authoritativeBodies: null, phase: 'play', performance
+    scores: [0, 0], bodies, simBodies, authoritativeBodies: null, postGoal: null, scoringPlayer: null, phase: 'play', performance
   };
 
-  const env = vm.runInNewContext(code + '\n;({ finishTurn, kickoff, getAuthoritative: () => authoritativeBodies, getBodies: () => bodies, setBodies: b => { bodies = b; } });', context);
+  const env = vm.runInNewContext(code + '\n;({ finishTurn, kickoff, getAuthoritative: () => authoritativeBodies, getBodies: () => bodies, getPostGoal: () => postGoal });', context);
 
   // 1. Goal scored: finishTurn runs
   env.finishTurn(0);
@@ -501,12 +506,15 @@ test('post-goal celebration simulation cannot alter the next kickoffs meter or g
   assert.ok(auth, 'authoritativeBodies snapshot was preserved');
   assert.equal(auth[0].meter, 50);
 
-  // 2. Post-goal celebration simulation occurs on live bodies:
-  // Skaters collide, mutates bodies, runs stepPostGoal, etc.
+  // 2. Post-goal celebration simulation occurs on live display bodies and postGoal.sim:
+  // Skaters collide, mutates bodies / postGoal.sim, runs stepPostGoal, etc.
   const liveBodies = env.getBodies();
   liveBodies[0].meter = 99; // Corrupted / altered during post-goal celebration
   liveBodies[1].meter = 88;
   liveBodies[0].stunned = true;
+  env.getPostGoal().sim[0].meter = 99;
+  env.getPostGoal().sim[1].meter = 88;
+  env.getPostGoal().sim[0].stunned = true;
 
   // 3. Next kickoff is triggered
   const nextKickoffBodies = env.kickoff();
@@ -594,6 +602,7 @@ test('display projection boundary: seat transforms, gameplay fields, presentatio
   sim[0].guarding = true; sim[0].ironGuard = true; sim[0].daze = 0.35;
   sim[0].superActive = 'colossus'; sim[0].stunnedNext = true; sim[0].holding = true;
   sim[0].futureGameplayField = 42;
+  sim[0].nestedArray = [1, { tag: 'combo', values: [3, 4] }];
   sim[0].meterTick = 120; // internal simulation cooldown tick
 
   sim[3].x = 760; sim[3].y = 410; sim[3].vx = -60; sim[3].vy = 25; sim[3].rotation = 1.25;
@@ -659,6 +668,14 @@ test('display projection boundary: seat transforms, gameplay fields, presentatio
   assert.equal(context.bodies[0].stunned, true, 'stunnedNext projects as stunned on display body');
   assert.equal(context.bodies[0].holding, true);
   assert.equal(context.bodies[0].futureGameplayField, 42, 'future gameplay fields automatically project without allowlist edits');
+  assert.equal(Array.isArray(context.bodies[0].nestedArray), true, 'array-valued gameplay field stays an Array');
+  assert.deepEqual(structuredClone(context.bodies[0].nestedArray), [1, { tag: 'combo', values: [3, 4] }]);
+  assert.notEqual(context.bodies[0].nestedArray, sim[0].nestedArray, 'array reference is cloned across boundary');
+  assert.notEqual(context.bodies[0].nestedArray[1], sim[0].nestedArray[1], 'nested object inside array is cloned across boundary');
+  assert.notEqual(context.bodies[0].nestedArray[1].values, sim[0].nestedArray[1].values, 'nested inner array is cloned across boundary');
+  context.bodies[0].nestedArray[1].values.push(99);
+  assert.deepEqual(sim[0].nestedArray[1].values, [3, 4], 'mutating nested display array does not mutate simulation state');
+  delete sim[0].nestedArray;
   assert.equal(context.bodies[6].onFire, true);
   assert.equal(context.bodies[6].fireTicks, 90);
   assert.equal(context.bodies[6].pace, 420);
@@ -839,4 +856,322 @@ test('local gameplay and goal replay maintain separate authoritative simBodies a
   env.endGoalReplay();
   assert.equal(context.goalReplay, null);
   assert.equal(context.bodies[0].x, 410, 'ending goalReplay re-projects authoritative simBodies onto display bodies');
+});
+
+test('replay takeover (watchReplay -> playFromHere -> local turn) transforms simulation state without display contamination', () => {
+  const P = require('../web/ububall-physics.js');
+  const ubu = require('../shared/ubu.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const ububallReplay = require('../shared/ububall-replay.js');
+  const code =
+    section('function kickoff(isNewMatch = false) {', 'let summaryPending') + '\n' +
+    section('let activePlayback = null;', 'const replayStore = (() => {') + '\n' +
+    section('function watchReplay(replay, file) {', 'function endReplayTurn() {') + '\n' +
+    section('let guide = null;', '$(\'replay-take-over\').onclick = playFromHere;') + '\n' +
+    section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+
+  const ubus = Array.from({ length: 6 }, (_, i) => {
+    const dna = ubu.toCode(ubu.randomDNA());
+    return { dna, super: i % 8 };
+  });
+  const rec = ububallReplay.create({ mode: 'standard', seat: 1, names: ['Host', 'Challenger'], ubus });
+  const initialSim = P.kickoff();
+  initialSim[0].x = 210; initialSim[0].y = 190; initialSim[0].meter = 25;
+  initialSim[3].x = 770; initialSim[3].y = 420; initialSim[3].meter = 65; initialSim[3].stunnedNext = true; initialSim[3].carded = true;
+  initialSim[6].x = 520; initialSim[6].y = 280; initialSim[6].strikerTeam = 1;
+  const turnPlans = Array.from({ length: 6 }, () => ({ angle: 0, power: 0.4, spin: 0, superArm: false, guard: false }));
+  const t = ububallReplay.addTurn(rec, {
+    turn: 3,
+    scores: [1, 2],
+    fouls: { ...ububallMatch.newFouls(), crease: [true, false], corner: 0, cornerTurns: 1 },
+    bodies: initialSim,
+    plans: turnPlans
+  });
+  t.ticks = 30;
+
+  const dummy = () => {};
+  const elements = new Map();
+  const $ = id => {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        value: '1', textContent: '', hidden: false, disabled: false,
+        classList: { toggle: dummy, add: dummy, remove: dummy },
+        setAttribute: dummy, replaceChildren: dummy
+      });
+    }
+    return elements.get(id);
+  };
+  const context = {
+    Object, Array, Set, Date, Math, Number, String, Boolean,
+    P, ubu, ububallMatch, ububallReplay, structuredClone,
+    $,
+    document: { body: { classList: { toggle: dummy, add: dummy, remove: dummy } } },
+    saveRecording: dummy, stopDemo: dummy, closeSummary: dummy, endGoalReplay: dummy,
+    stopFanfare: dummy, gameAudio: () => null,
+    cpuGeneration: 0, cpuClient: { cancel: dummy }, videoLogo: dummy,
+    showMode: dummy, classicMode: () => false, normalStats: () => ({}),
+    resolveEquippedSuper: (entry, i) => entry?.equippedSuper || P.SUPERS[i % P.SUPERS.length],
+    anonymousName: i => `Anon ${i}`, anonymousNames: false,
+    buildTeam: dummy, replayMarks: dummy, enterMatch: dummy, updateReplayBar: dummy,
+    clearEffects: dummy, resetPlans: dummy, say: dummy, sync: dummy, draw: dummy,
+    recordTrails: dummy, emitSkaterEffects: dummy, updatePopups: dummy, updateEffects: dummy,
+    replayEvents: dummy,
+    replayFx: { hit: dummy, wall: dummy, shock: dummy, super: dummy },
+    videoAudio: null, videoClock: null, clockNow: () => 1000, hitStopUntil: 0,
+    shownScores: [0, 0], scores: [0, 0], turn: 1, phase: 'plan',
+    matchMode: 'standard', roster: [], teamEntries: [], practice: [], stats: [], plans: [],
+    fouls: ububallMatch.newFouls(), play: ububallMatch.newPlay(), tally: ububallMatch.newTally(),
+    roundTurns: 0, matchTicks: 0, playSegments: [], selected: 0, drag: null, elapsed: 0, accumulator: 0,
+    recording: null, theater: null, online: null, onlineReplay: null, goalReplay: null, postGoal: null,
+    authoritativeBodies: null, kickoffGlow: 0, netFire: null, dirtyMeters: new Set(),
+    bodies: P.kickoff(), simBodies: P.kickoff()
+  };
+
+  const env = vm.runInNewContext(
+    code + '\n;({ watchReplay, playFromHere, syncViewBodies });',
+    context
+  );
+
+  const displayRefs = [...context.bodies];
+
+  // 1. Watch seat-1 replay
+  env.watchReplay(rec, null);
+  assert.equal(context.phase, 'replay');
+  assert.ok(context.theater, 'theater active during watchReplay');
+  assert.equal(context.theater.seat, 1);
+
+  // 2. Take over from replay (playFromHere)
+  env.playFromHere();
+  assert.equal(context.theater, null, 'theater cleared on takeover');
+  assert.equal(context.phase, 'plan');
+  assert.deepEqual([...context.scores], [2, 1], 'scores flipped from seat 1 to local seat 0');
+  assert.deepEqual([...context.fouls.crease], [false, true], 'crease fouls flipped to local seat 0');
+  assert.equal(context.fouls.corner, 3, 'corner flipped to local seat 0');
+  assert.equal(context.simBodies[0].carded, true, 'carded skater index 3 mapped to local simBodies[0]');
+
+  // Display references remain identical
+  for (let i = 0; i < 7; i++) {
+    assert.equal(context.bodies[i], displayRefs[i], `bodies[${i}] reference preserved across watchReplay -> playFromHere`);
+  }
+
+  // Authoritative simBodies is pure simulation state in seat-0 coordinates (never passed through projectBody)
+  assert.notEqual(context.simBodies, context.bodies);
+  assert.equal(context.simBodies[0].x, 1000 - 770, 'seat-1 skater 3 transformed to seat-0 simBodies[0].x');
+  assert.equal(context.simBodies[0].y, 600 - 420, 'seat-1 skater 3 transformed to seat-0 simBodies[0].y');
+  assert.equal(context.simBodies[0].meter, 65);
+  assert.equal(context.simBodies[0].stunnedNext, true, 'stunnedNext preserved on simBodies[0]');
+  assert.equal(context.simBodies[3].x, 1000 - 210, 'seat-1 skater 0 transformed to seat-0 simBodies[3].x');
+  assert.equal(context.simBodies[6].x, 1000 - 520, 'ball x transformed to local seat-0 simBodies[6].x');
+  assert.equal(context.simBodies[6].strikerTeam, 0, 'ball strikerTeam 1 flipped to 0');
+
+  // Verify no display-only keys leaked into simBodies
+  for (let i = 0; i < 7; i++) {
+    assert.equal('name' in context.simBodies[i], false, `simBodies[${i}] has no name`);
+    assert.equal('voice' in context.simBodies[i], false, `simBodies[${i}] has no voice`);
+    assert.equal('playerIndex' in context.simBodies[i], false, `simBodies[${i}] has no playerIndex`);
+    assert.equal('meterTick' in context.simBodies[i], false, `simBodies[${i}] has no meterTick`);
+  }
+  assert.deepEqual(
+    Object.keys(context.simBodies[0].equippedSuper).sort(),
+    ['bonusRefund', 'bonusTicks', 'id', 'key'],
+    'simBodies equippedSuper carries only minimal simulation fields, not full UI description/label'
+  );
+
+  // 3. Play a local turn from the taken-over state
+  const launchPlans = Array.from({ length: 6 }, (_, i) => ({
+    angle: i === 1 ? 0 : 0.5,
+    power: i === 1 ? 0.8 : 0.2,
+    spin: 0,
+    superArm: false,
+    guard: false
+  }));
+  P.startTurn(context.simBodies, launchPlans);
+  const tick = ububallMatch.playTick(P, context.simBodies, context.play, {}, context.tally);
+  env.syncViewBodies(context.simBodies, 0);
+  assert.equal(tick.goal, null);
+  assert.equal(context.bodies[1].x, context.simBodies[1].x, 'display body tracks stepped simulation body after takeover');
+  assert.equal('name' in context.simBodies[1], false, 'simulation body remains free of presentation keys during play');
+});
+
+test('online seat 1 transition (resolving -> playOnlineReplay -> next plan phase) preserves stable display bodies and clean simulation state', () => {
+  const P = require('../web/ububall-physics.js');
+  const ubu = require('../shared/ubu.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const ububallReplay = require('../shared/ububall-replay.js');
+  const onStateCode = section('function onlineNames(s) {', '});\n  $(\'online-rematch\').onclick')
+    .replace('online = ububallOnline({', 'const onlineCallbacks = ({') + '});';
+  const code =
+    section('let lastSaved = Promise.resolve(null);', 'const replayClock =') + '\n' +
+    section('let guide = null;', 'function playFromHere() {') + '\n' +
+    section('const PRESENTATION_KEYS =', 'function onlineNames(s) {') + '\n' +
+    onStateCode;
+
+  const rosters = [
+    Array.from({ length: 3 }, (_, i) => ({ dna: ubu.toCode(ubu.randomDNA()), superId: i })),
+    Array.from({ length: 3 }, (_, i) => ({ dna: ubu.toCode(ubu.randomDNA()), superId: i + 3 }))
+  ];
+  const initialServerBodies = P.kickoff();
+  initialServerBodies.slice(0, 6).forEach((b, i) => {
+    const entry = i < 3 ? rosters[0][i] : rosters[1][i - 3];
+    const model = ubu.decode(ubu.fromCode(entry.dna));
+    ububallMatch.applyStats(P, b, model.stats, 'standard');
+    b.meter = 20;
+  });
+  const serverPlans = Array.from({ length: 6 }, (_, i) => ({
+    angle: i === 3 ? Math.PI : 0,
+    power: 0.5,
+    spin: 0,
+    superArm: false,
+    guard: false
+  }));
+  const postTurnBodies = structuredClone(initialServerBodies);
+  P.startTurn(postTurnBodies, serverPlans);
+  const ticks = 10;
+  for (let t = 0; t < ticks; t++) P.step(postTurnBodies, P.DT);
+  P.stop(postTurnBodies);
+
+  let nowMs = 1000;
+  const dummy = () => {};
+  const elements = new Map();
+  const $ = id => {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        value: '1', textContent: '', hidden: false, disabled: false,
+        classList: { toggle: dummy, add: dummy, remove: dummy },
+        setAttribute: dummy, replaceChildren: dummy
+      });
+    }
+    return elements.get(id);
+  };
+  const context = {
+    Object, Array, Set, Math, Number, String, Boolean, JSON, Promise, console,
+    addEventListener: dummy,
+    P, ubu, ububallMatch, ububallReplay, structuredClone, performance: { now: () => nowMs },
+    $,
+    document: { body: { classList: { contains: () => true, toggle: dummy, add: dummy, remove: dummy } } },
+    summaryDialog: null,
+    closeLobby: dummy, stopDemo: dummy, enterMatch: dummy, showMode: dummy, closeSummary: dummy,
+    classicMode: () => false, buildTeam: dummy, dirtyPrediction: dummy,
+    endGoalReplay: dummy, stopFanfare: dummy, clearEffects: dummy,
+    trailPositions: () => context.bodies.map(b => ({ x: b.x, y: b.y })),
+    clearDiscontinuousTrails: dummy,
+    recordSegment: dummy, saveEvent: (tick, e) => ({ tick, ...e }),
+    sync: dummy, draw: dummy, recordTrails: dummy, emitSkaterEffects: dummy,
+    announceFouls: dummy, foulText: () => '', say: dummy, popup: dummy, impact: dummy,
+    creditSave: dummy, celebrate: dummy, ballOnFire: () => false, lightNet: dummy,
+    queueSummary: dummy, goalTab: dummy, callText: () => '', honourText: () => '', loopFanfare: dummy,
+    resolveEquippedSuper: (entry, i) => entry?.equippedSuper || P.SUPERS[i % P.SUPERS.length],
+    anonymousName: i => `Anon ${i}`, anonymousNames: false,
+    replayStore: { add: () => Promise.resolve(1) },
+    replayFx: { hit: dummy, wall: dummy, shock: dummy, super: dummy },
+    guides: { moves: false, trails: false },
+    onlinePhase: 'plan', onlineRoster: '', onlineTurn: 1, onlineDisconnected: false,
+    onlineReplay: null, recording: null, recordingOnline: false,
+    goalReplay: null, goalReplayAt: 0, scoringPlayer: null, theater: null, postGoal: null,
+    matchMode: 'standard', roster: [], teamEntries: [], stats: [],
+    plans: Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false })),
+    scores: [0, 0], turn: 1, phase: 'plan', drag: null, kickoffGlow: 0,
+    fouls: ububallMatch.newFouls(), dirtyMeters: new Set(),
+    bodies: P.kickoff(), simBodies: P.kickoff(),
+    online: { active: true, now: () => nowMs, state: null }
+  };
+
+  const env = vm.runInNewContext(
+    code + '\n;({ onState: onlineCallbacks.onState, playOnlineReplay });',
+    context
+  );
+
+  const displayRefs = [...context.bodies];
+
+  // 1. Server sends resolving state for turn 1 to player in seat 1
+  const resolvingState = {
+    seat: 1,
+    mode: 'standard',
+    phase: 'resolving',
+    turn: 1,
+    winner: null,
+    names: ['Alice', 'Bob'],
+    occupied: [true, true],
+    connected: [true, true],
+    locked: [true, true],
+    left: [false, false],
+    rematch: [false, false],
+    rosters,
+    moves: [
+      { angle: Math.PI, power: 0.5, spin: 0, superArm: false, guard: false },
+      { angle: 0, power: 0.5, spin: 0, superArm: false, guard: false },
+      { angle: 0, power: 0.5, spin: 0, superArm: false, guard: false }
+    ],
+    game: {
+      scores: [0, 0],
+      bodies: structuredClone(postTurnBodies),
+      fouls: { ...ububallMatch.newFouls(), crease: [true, false], corner: 0, cornerTurns: 1, cards: [] },
+      stats: Array.from({ length: 6 }, () => ({}))
+    },
+    replay: {
+      turn: 1,
+      startedAt: 1000,
+      ticks,
+      initialBodies: structuredClone(initialServerBodies),
+      plans: structuredClone(serverPlans),
+      saves: [],
+      stops: [],
+      struck: [],
+      goal: null,
+      label: null,
+      scorer: null,
+      assist: null
+    }
+  };
+  context.online.state = resolvingState;
+  env.onState(resolvingState);
+
+  assert.equal(context.phase, 'play');
+  assert.ok(context.onlineReplay?.simBodies, 'onlineReplay.simBodies initialized on resolving state');
+  assert.equal(context.onlineReplay.currentTick, 0, 'at t=startedAt, 0 ticks have elapsed');
+  for (let i = 0; i < 7; i++) {
+    assert.equal('name' in context.onlineReplay.simBodies[i], false, `onlineReplay.simBodies[${i}] has no presentation keys`);
+    assert.equal(context.bodies[i], displayRefs[i], `bodies[${i}] reference stable on resolving start`);
+  }
+  // Seat 1 sees server body 3 at display index 0, mirrored across the rink
+  assert.equal(context.bodies[0].x, 1000 - context.onlineReplay.simBodies[3].x);
+  assert.equal(context.bodies[0].y, 600 - context.onlineReplay.simBodies[3].y);
+
+  // 2. Advance online clock past all replay ticks and run playOnlineReplay()
+  nowMs = 1000 + Math.ceil((ticks + 2) * P.DT * 1000);
+  env.playOnlineReplay();
+
+  assert.equal(context.onlineReplay.currentTick, ticks, 'onlineReplay stepped to completion');
+  // At completion, playOnlineReplay syncs to online.state.game.bodies with seat-1 transform
+  assert.equal(context.bodies[0].x, 1000 - postTurnBodies[3].x);
+  assert.equal(context.bodies[0].y, 600 - postTurnBodies[3].y);
+  assert.equal(context.bodies[3].x, 1000 - postTurnBodies[0].x);
+  assert.deepEqual([...context.fouls.crease], [false, true], 'fouls.crease flipped for seat 1 after replay completion');
+  assert.equal(context.fouls.corner, 3, 'fouls.corner flipped for seat 1 after replay completion');
+
+  // 3. Server transitions to next turn's plan phase (turn 2)
+  const nextPlanState = {
+    ...resolvingState,
+    phase: 'plan',
+    turn: 2,
+    locked: [false, false],
+    moves: [
+      { angle: Math.PI / 2, power: 0.75, spin: 0, superArm: true, guard: false },
+      { angle: 0, power: 0, spin: 0, superArm: false, guard: false },
+      { angle: 0, power: 0, spin: 0, superArm: false, guard: false }
+    ],
+    replay: null
+  };
+  context.online.state = nextPlanState;
+  env.onState(nextPlanState);
+
+  assert.equal(context.phase, 'plan');
+  assert.equal(context.turn, 2);
+  assert.equal(context.onlineReplay, null, 'onlineReplay cleared on next plan phase');
+  // Seat 1 move angles are rotated by +PI in local plan view
+  assert.ok(Math.abs(context.plans[0].angle - 1.5 * Math.PI) < 1e-9, 'seat 1 plan angle rotated by PI');
+  assert.equal(context.bodies[0].superArm, true, 'fresh turn move superArm applied to display body');
+  for (let i = 0; i < 7; i++) {
+    assert.equal(context.bodies[i], displayRefs[i], `bodies[${i}] reference stable into next plan phase`);
+  }
 });

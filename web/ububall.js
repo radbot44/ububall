@@ -1282,8 +1282,7 @@
     play = ububallMatch.newPlay(); scoringPlayer = null; roundTurns = 0; fouls = ububallMatch.newFouls();
     netFire = null;
     if (isNewMatch) { tally = ububallMatch.newTally(); closeSummary(); }
-    const hasSim = typeof simBodies !== 'undefined' && simBodies && typeof syncViewBodies === 'function';
-    const oldBodies = authoritativeBodies || (hasSim ? simBodies : bodies);
+    const oldBodies = authoritativeBodies || simBodies;
     authoritativeBodies = null;
     const result = P.kickoff();
     result.slice(0, 6).forEach((b, i) => {
@@ -1306,21 +1305,12 @@
         if (classicMode()) { b.meter = 0; b.equippedSuper = null; b.superBonusTicks = 0; b.superBonusRefund = 0; }
         b.superArm = false;
         b.superActive = null;
-        if (!hasSim) {
-          b.playerIndex = i;
-          b.voice = entry.model.voice;
-          b.name = entry.model.parts?.fullName;
-          b.equippedSuper = classicMode() ? null : sObj;
-        }
       }
     });
-    if (hasSim) {
-      simBodies = result;
-      syncViewBodies(simBodies, 0);
-      bodies.slice(0, 6).forEach(b => { b.superArm = false; });
-      return bodies;
-    }
-    return result;
+    simBodies = result;
+    syncViewBodies(simBodies, 0);
+    bodies.slice(0, 6).forEach(b => { b.superArm = false; });
+    return bodies;
   }
   // A save pops a callout over the saver; offline it also earns meter (online, the server credits it).
   // Full time: a summary of the result (with any comeback or shutout) and each ubu's goals, assists,
@@ -1420,11 +1410,10 @@
       gameAudio()?.playIronSave?.();
     }
     if ((typeof phase !== 'undefined' && phase !== 'play') || own || online?.active || goalReplay || theater) return;
-    const target = typeof simBodies !== 'undefined' && simBodies ? simBodies : bodies;
     const idx = bodies.indexOf(body);
-    const simBody = idx >= 0 && target[idx] ? target[idx] : body;
-    for (const changed of ububallMatch.gainMeter(P, target, stats, simBody, ububallMatch.METER.save, classicMode())) {
-      const cIdx = target.indexOf(changed);
+    const simBody = idx >= 0 && simBodies[idx] ? simBodies[idx] : body;
+    for (const changed of ububallMatch.gainMeter(P, simBodies, stats, simBody, ububallMatch.METER.save, classicMode())) {
+      const cIdx = simBodies.indexOf(changed);
       const vb = cIdx >= 0 && bodies[cIdx] ? bodies[cIdx] : changed;
       vb.meter = changed.meter;
       dirtyMeters.add(vb);
@@ -1434,12 +1423,11 @@
   function contactMeter(a, b, speed) {
     if ((typeof phase !== 'undefined' && phase !== 'play') || online?.active || goalReplay || theater) return;
     const tick = matchTicks + Math.round(elapsed / P.DT);
-    const target = typeof simBodies !== 'undefined' && simBodies ? simBodies : bodies;
     const ia = bodies.indexOf(a), ib = bodies.indexOf(b);
-    const sa = ia >= 0 && target[ia] ? target[ia] : a;
-    const sb = ib >= 0 && target[ib] ? target[ib] : b;
-    for (const changed of ububallMatch.contactMeter(P, target, stats, sa, sb, speed, tick, classicMode())) {
-      const cIdx = target.indexOf(changed);
+    const sa = ia >= 0 && simBodies[ia] ? simBodies[ia] : a;
+    const sb = ib >= 0 && simBodies[ib] ? simBodies[ib] : b;
+    for (const changed of ububallMatch.contactMeter(P, simBodies, stats, sa, sb, speed, tick, classicMode())) {
+      const cIdx = simBodies.indexOf(changed);
       const vb = cIdx >= 0 && bodies[cIdx] ? bodies[cIdx] : changed;
       vb.meter = changed.meter;
       dirtyMeters.add(vb);
@@ -1466,9 +1454,8 @@
     cpuDone = false;
     cpuClient.cancel();
     if (online?.active) return;
-    const sim = typeof simBodies !== 'undefined' && simBodies ? simBodies : bodies;
-    cpu = Array.isArray(initialPlans) && initialPlans.length === 3 ? initialPlans : P.cpuPlans(sim, () => .5, scores);
-    cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies: sim, stats, scores, turn, fouls },
+    cpu = Array.isArray(initialPlans) && initialPlans.length === 3 ? initialPlans : P.cpuPlans(simBodies, () => .5, scores);
+    cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies: simBodies, stats, scores, turn, fouls },
       { level: demo ? demoLevels[1] : cpuLevel, seed: turn }).then(result => {
       if (generation !== cpuGeneration || !result || online?.active) return;
       if (result.error) console.warn('CPU search unavailable; using baseline plan.');
@@ -1927,7 +1914,7 @@
         label: e.label,
         equippedSuper: e.equippedSuper ? { id: e.equippedSuper.id } : null
       } : null;
-      const activeSim = launchState ? launchState.bodies : (typeof simBodies !== 'undefined' && simBodies ? simBodies : bodies);
+      const activeSim = launchState ? launchState.bodies : simBodies;
       const data = {
         version: ububallMatch.VERSION,
         physics: P.VERSION,
@@ -1984,38 +1971,27 @@
       recording = saved.recording || ububallReplay.create({ mode: matchMode, names: ['You', 'CPU'], ubus: teamEntries.map(e => ({ dna: e.dna, super: e.equippedSuper?.id ?? null })) });
       const restored = ububallReplay.restore(saved.bodies);
       buildTeam();
-      const hasSim = typeof simBodies !== 'undefined' && simBodies && typeof syncViewBodies === 'function';
       restored.slice(0, 6).forEach((b, i) => {
         const entry = teamEntries[i];
         if (entry?.model) {
           b.personality = entry.model.personality;
           const sObj = classicMode() ? null : (entry.equippedSuper || b.equippedSuper || resolveEquippedSuper(entry, i));
-          b.equippedSuper = hasSim ? (sObj ? { id: sObj.id, key: sObj.key, bonusTicks: sObj.bonusTicks || 0, bonusRefund: sObj.bonusRefund || 0 } : null) : sObj;
+          b.equippedSuper = sObj ? { id: sObj.id, key: sObj.key, bonusTicks: sObj.bonusTicks || 0, bonusRefund: sObj.bonusRefund || 0 } : null;
           b.superBonusTicks = sObj?.bonusTicks || 0;
           b.superBonusRefund = sObj?.bonusRefund || 0;
-          if (!hasSim) {
-            b.name = entry.model.parts?.fullName;
-            b.voice = entry.model.voice;
-          }
         }
-        if (!hasSim) dirtyMeters.add(b);
       });
-      if (hasSim) {
-        simBodies = stripPresentation(restored);
-        syncViewBodies(simBodies, 0);
-      } else {
-        bodies = restored;
-      }
+      simBodies = stripPresentation(restored);
+      syncViewBodies(simBodies, 0);
       selected = 0;
       drag = null;
 
-      const target = hasSim ? simBodies : bodies;
       if (saved.phase === 'play' && Array.isArray(saved.turnPlans) && saved.turnPlans.length === 6) {
         plans = saved.turnPlans.slice(0, 3);
-        recordSegment(target, saved.turnPlans);
-        beginGuide(target, saved.turnPlans, 0);
-        P.startTurn(target, saved.turnPlans, typeof liveFx !== 'undefined' ? liveFx.super : handleSuper);
-        if (hasSim) syncViewBodies(simBodies, 0);
+        recordSegment(simBodies, saved.turnPlans);
+        beginGuide(simBodies, saved.turnPlans, 0);
+        P.startTurn(simBodies, saved.turnPlans, typeof liveFx !== 'undefined' ? liveFx.super : handleSuper);
+        syncViewBodies(simBodies, 0);
         elapsed = accumulator = 0;
         phase = 'play';
         say('Turn in motion…');
@@ -3422,12 +3398,13 @@
     const th = theater;
     if (!th || th.exporting) return;
     const t = th.replay.turns[th.index], [roundStart] = ububallReplay.roundRange(th.replay, th.index), entries = teamEntries;
-    const field = viewBodies(ububallReplay.restore(t.bodies), th.seat);
+    const field = stripPresentation(transformSimSeat(ububallReplay.restore(t.bodies), th.seat));
     field.forEach((b, i) => {
       // Meter cooldowns counted the recorded match's clock; this match starts its own.
       delete b.meterTick;
       if (i < 6) {
-        const sObj = classicMode() ? null : (entries[i]?.equippedSuper || b.equippedSuper);
+        b.personality = entries[i]?.model?.personality;
+        const sObj = classicMode() ? null : (entries[i]?.equippedSuper || resolveEquippedSuper(entries[i], i));
         b.equippedSuper = sObj ? { id: sObj.id, key: sObj.key, bonusTicks: sObj.bonusTicks || 0, bonusRefund: sObj.bonusRefund || 0 } : null;
         b.superBonusTicks = sObj?.bonusTicks || 0;
         b.superBonusRefund = sObj?.bonusRefund || 0;
@@ -3437,7 +3414,7 @@
     theater = null; document.body.classList.remove('replay-match'); clearEffects();
     $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
     roster = entries.slice(0, 3);
-    simBodies = stripPresentation(field);
+    simBodies = field;
     syncViewBodies(simBodies, 0);
     scores = th.seat ? [...t.scores].reverse() : [...t.scores]; turn = t.turn;
     fouls = viewFouls({ ...ububallMatch.newFouls(), ...structuredClone(t.fouls) }, th.seat);
@@ -3654,14 +3631,12 @@
   function finishTurn(goal) {
     const ticks = Math.round(elapsed / P.DT);
     if (playSegments.length) playSegments[playSegments.length - 1].ticks = ticks;
-    const hasSim = typeof simBodies !== 'undefined' && simBodies && typeof syncViewBodies === 'function';
-    const target = hasSim ? simBodies : bodies;
     // A goal on the round's first turn is an ace, earning its scorer extra meter (not for an own goal).
-    const ace = goal !== null && !roundTurns, call = goal === null ? null : ububallMatch.callGoal(target, play, tally, goal, ace);
+    const ace = goal !== null && !roundTurns, call = goal === null ? null : ububallMatch.callGoal(simBodies, play, tally, goal, ace);
     if (goal !== null && ballOnFire()) lightNet(goal); else quench();
     const before = trailPositions();
-    ububallMatch.finishTurn(P, target, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null, keepMotion: goal !== null }, fouls, tally);
-    if (hasSim) syncViewBodies(simBodies, 0);
+    ububallMatch.finishTurn(P, simBodies, stats, scores, goal, matchMode, { ace: ace && !call.own ? call.scorer : null, assist: call?.assist ?? null, keepMotion: goal !== null }, fouls, tally);
+    syncViewBodies(simBodies, 0);
     clearDiscontinuousTrails(before);
     if (fouls.faceoff) play = ububallMatch.newPlay();
     noteTurn(ticks, goal === null ? null : { team: goal, label: call.label, scorer: call.own ? null : call.scorer, assist: call.assist }, fouls.cards);
@@ -3672,10 +3647,9 @@
     bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
     accumulator = 0; layoutDirty = true;
     if (goal !== null) {
-      const celebSim = structuredClone(target);
-      if (hasSim) P.stop(simBodies);
-      authoritativeBodies = structuredClone(target);
-      P.stop(authoritativeBodies);
+      const celebSim = structuredClone(simBodies);
+      P.stop(simBodies);
+      authoritativeBodies = structuredClone(simBodies);
       phase = scores[goal] >= 5 ? 'over' : 'goal';
       celebrate(goal, bodies[6], call.label, call.own ? null : bodies[call.scorer] || null);
       if (call.assist !== null) popup(bodies[call.assist], 'Assist');
@@ -3700,7 +3674,7 @@
     } else {
       turn++; phase = 'plan'; resetPlans(true);
       saveActiveMatch();
-      say(foulText() || (pulseMode() && !P.settled(target) ? 'Pulse paused. Adjust your launches or guard to brake.' : 'Field settled. Plan your next three launches.'));
+      say(foulText() || (pulseMode() && !P.settled(simBodies) ? 'Pulse paused. Adjust your launches or guard to brake.' : 'Field settled. Plan your next three launches.'));
     }
     draw();
   }
@@ -4658,9 +4632,42 @@
     }
     return sim;
   }
+  function cloneSimValue(v) {
+    if (!v || typeof v !== 'object') return v;
+    if (Array.isArray(v)) return v.map(cloneSimValue);
+    const out = {};
+    for (const [k, item] of Object.entries(v)) out[k] = cloneSimValue(item);
+    return out;
+  }
   function onlineOrder(items, seat) { return seat ? [...items.slice(3, 6), ...items.slice(0, 3), ...items.slice(6)] : items; }
   // Maps simulation bodies (server seat-0 order and coordinates) onto the displayed bodies.
   const viewIndex = (i, seat) => seat ? (i < 3 ? i + 3 : i < 6 ? i - 3 : 6) : i;
+  function applySeatTransform(src, dst, i, seat = 0) {
+    if (seat) {
+      dst.x = 1000 - src.x; dst.y = 600 - src.y;
+      dst.vx = -src.vx; dst.vy = -src.vy;
+      dst.rotation = (src.rotation || 0) + Math.PI;
+      if (src.stickOffset) dst.stickOffset = { x: -src.stickOffset.x, y: -src.stickOffset.y };
+    } else {
+      dst.x = src.x; dst.y = src.y;
+      dst.vx = src.vx; dst.vy = src.vy;
+      dst.rotation = src.rotation;
+      if (src.stickOffset) dst.stickOffset = { x: src.stickOffset.x, y: src.stickOffset.y };
+    }
+    dst.team = i < 3 ? 0 : i < 6 ? 1 : -1;
+    if (i < 6) dst.slot = i % 3;
+    else {
+      delete dst.slot;
+      if (src.strikerTeam !== undefined || dst.strikerTeam !== undefined) {
+        dst.strikerTeam = src.strikerTeam === undefined || src.strikerTeam < 0 ? -1 : (seat ? 1 - src.strikerTeam : src.strikerTeam);
+      }
+    }
+    return dst;
+  }
+  // Pure simulation-to-simulation seat transform (used when taking over a replay from seat 1).
+  function transformSimSeat(sim, seat = 0) {
+    return onlineOrder(structuredClone(sim), seat).map((b, i) => applySeatTransform(b, b, i, seat));
+  }
   function projectBody(cb, vb, i, seat = 0) {
     const armed = vb.superArm;
     for (const k of Object.keys(vb)) {
@@ -4668,23 +4675,11 @@
     }
     for (const [k, v] of Object.entries(cb)) {
       if (PRESENTATION_KEYS.has(k) || SIM_INTERNAL_KEYS.has(k)) continue;
-      vb[k] = v && typeof v === 'object' ? { ...v } : v;
+      vb[k] = cloneSimValue(v);
     }
-    if (seat) {
-      vb.x = 1000 - cb.x; vb.y = 600 - cb.y;
-      vb.vx = -cb.vx; vb.vy = -cb.vy;
-      vb.rotation = (cb.rotation || 0) + Math.PI;
-      if (cb.stickOffset) vb.stickOffset = { x: -cb.stickOffset.x, y: -cb.stickOffset.y };
-    } else {
-      vb.x = cb.x; vb.y = cb.y;
-      vb.vx = cb.vx; vb.vy = cb.vy;
-      vb.rotation = cb.rotation;
-      if (cb.stickOffset) vb.stickOffset = { x: cb.stickOffset.x, y: cb.stickOffset.y };
-    }
+    applySeatTransform(cb, vb, i, seat);
     vb.playerIndex = i;
-    vb.team = i < 3 ? 0 : i < 6 ? 1 : -1;
     if (i < 6) {
-      vb.slot = i % 3;
       vb.meter = cb.meter ?? 0;
       vb.guarding = Boolean(cb.guarding);
       vb.ironGuard = Boolean(cb.ironGuard);
@@ -4698,14 +4693,13 @@
       if (entry?.model) {
         vb.name = (typeof anonymousNames !== 'undefined' && anonymousNames) ? anonymousName(i) : entry.model.parts?.fullName;
         vb.voice = entry.model.voice;
-        vb.personality = entry.model.personality;
+        vb.personality = cloneSimValue(entry.model.personality);
         const sObj = entry.equippedSuper || (cb.equippedSuper ? { ...P.SUPERS[cb.equippedSuper.id], ...cb.equippedSuper } : resolveEquippedSuper(entry, i));
-        vb.equippedSuper = classicMode() ? null : (sObj ? { ...sObj } : null);
+        vb.equippedSuper = classicMode() ? null : cloneSimValue(sObj || null);
       } else if (typeof anonymousNames !== 'undefined' && anonymousNames) {
         vb.name = anonymousName(i);
       }
     } else {
-      delete vb.slot;
       vb.onFire = Boolean(cb.onFire);
       vb.fireTicks = cb.fireTicks || 0;
       vb.pace = cb.pace || 0;
@@ -5005,8 +4999,7 @@
   // the player's own ubus arrive after sign-in), it stops and the loop starts the new turn's.
   async function demoPlanTurn(run) {
     const game = demoGame, t = turn, current = () => game === demoGame && phase === 'plan' && turn === t;
-    const sim = typeof simBodies !== 'undefined' && simBodies ? simBodies : bodies;
-    const planning = demoClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies: sim, stats, scores, turn, fouls },
+    const planning = demoClient.plan({ version: ububallMatch.VERSION, mode: matchMode, bodies: simBodies, stats, scores, turn, fouls },
       { level: demoLevels[0], seed: turn }, 0);
     await planBanner; await demoWait(run, 600);
     const result = await planning;
