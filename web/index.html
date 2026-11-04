@@ -232,9 +232,15 @@ SOFTWARE.
       <div class="stats-map-panel">
         <canvas id="stats-map" class="stats-map" width="1000" height="600" aria-label="Rink event map. Event details are also listed below."></canvas>
         <p id="stats-map-detail" class="stats-map-detail" aria-live="polite"></p>
+        <div id="stats-map-choices" class="stats-rounds" role="group" aria-label="Events at this spot" hidden></div>
         <div class="stats-trails" role="group" aria-label="Map trails">
           <button id="stats-ball-trail" type="button" aria-pressed="false">Ball Trail</button>
           <button id="stats-ubu-trails" type="button" aria-pressed="false">Ubu Trails</button>
+          <button id="stats-clear-path" type="button" hidden>Clear ball path</button>
+        </div>
+        <div class="stats-event-filters" role="group" aria-label="Event filter">
+          <button id="stats-highlights" type="button" aria-pressed="false">Highlights</button>
+          <button id="stats-all-events" type="button" aria-pressed="true">All events</button>
         </div>
         <div id="stats-rounds" class="stats-rounds" role="group" aria-label="Rounds"></div>
       </div>

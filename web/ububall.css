@@ -1410,10 +1410,12 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 }
 .stats-more-details[hidden] { display: none; }
 .stats-more-details { display: flex; flex-direction: column; gap: .375rem; margin: .75rem 0; }
-.stats-tabs, .stats-rounds, .stats-trails { display: flex; gap: .375rem; margin: .375rem 0; }
+.stats-tabs, .stats-rounds, .stats-trails, .stats-event-filters { display: flex; gap: .375rem; margin: .375rem 0; }
+.stats-trails { flex-wrap: wrap; }
 .stats-rounds { overflow-x: auto; }
 .stats-rounds button { white-space: nowrap; }
-.stats-tabs button[aria-pressed=true], .stats-rounds button[aria-pressed=true], .stats-trails button[aria-pressed=true] {
+.stats-tabs button[aria-pressed=true], .stats-rounds button[aria-pressed=true], .stats-trails button[aria-pressed=true],
+.stats-event-filters button[aria-pressed=true], .stats-path-button[aria-pressed=true] {
   border-color: var(--primary);
   background: color-mix(in srgb, var(--primary) 14%, var(--card));
 }
@@ -1427,7 +1429,8 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 .stats-events { list-style: none; margin: 0; padding: 0; }
 .stats-events li { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .75rem; padding: .375rem .5rem; font-size: .8125rem; }
 .stats-events li.major { background: var(--card); border-radius: .375rem; font-weight: 700; }
-.stats-events li.highlighted { background: color-mix(in srgb, var(--primary) 24%, var(--card)); border-radius: .375rem; }
+.stats-events li:is(.highlighted, .path-selected, :focus-within, :hover) { background: color-mix(in srgb, var(--primary) 24%, var(--card)); border-radius: .375rem; }
+.stats-path-button { margin-left: auto; padding: .125rem .5rem; font-size: inherit; }
 .stats-event-time { min-width: 7.5rem; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; text-align: left; }
 button.stats-event-time { padding: 0; min-height: 0; border: 0; background: none; color: var(--primary); font: inherit; font-weight: 400; text-decoration: underline; }
 .stats-event-entry { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .25rem; }

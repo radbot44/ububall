@@ -109,11 +109,17 @@ test('Game Log counts big post shots once and credits passes to the teammate who
   const post = gameLog(235, 1);
   assert.equal(post.shots[0], 1);
   assert.equal(post.events.find(event => event.type === 'Shot').outcome, 'Post');
+  const postPath = post.events.find(event => event.type === 'Shot').path;
+  assert.ok(postPath.from.tick < postPath.to.tick);
+  assert.ok(postPath.from.x < postPath.to.x);
   assert.deepEqual(post.rounds, [{ team: null }]);
   assert.equal(gameLog(235, .6).shots[0], 0);
   const goal = gameLog(244, 1);
   assert.equal(goal.shots[0], 1);
   assert.equal(goal.goals[0], 1);
+  const scoringPath = goal.events.find(event => event.type === 'Goal').path;
+  assert.deepEqual(goal.events.find(event => event.type === 'Shot').path, scoringPath);
+  assert.equal(scoringPath.to.tick, goal.trails[0].endTick);
   assert.deepEqual(goal.rounds, [{ team: 0, score: 1 }]);
   const pass = gameLog(300, 1, true);
   const sent = pass.events.filter(event => event.type === 'Pass' && event.actor === 0);

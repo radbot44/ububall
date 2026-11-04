@@ -3787,7 +3787,8 @@
       button.onclick = () => { ctx.round = index - 1; updateLog(); };
       filters.append(button);
     }
-    const map = $('stats-map'), detail = $('stats-map-detail'), log = $('stats-events');
+    const map = $('stats-map'), detail = $('stats-map-detail'), log = $('stats-events'), choices = $('stats-map-choices');
+    const clearPath = $('stats-clear-path');
     const g = map.getContext('2d');
     const { home, away, text } = getThemeColors();
     const rows = new Map();
@@ -3804,17 +3805,34 @@
       player.append(image, teamEntries[index].model.parts.fullName);
       return player;
     }
-    let visible, hovered = null, highlighted = [];
+    let visible, shown, hovered = null, rowMark = null, highlighted = [];
     const active = event => ctx.round == null || ctx.round < 0 || event.round === ctx.round;
     const radius = event => event.type === 'Goal' ? 11 : statsMajor.has(event.type) ? 8 : 4;
     function drawMap() {
       g.clearRect(0, 0, map.width, map.height);
       drawRinkSurface(g, themeColors);
-      if (ctx.ballTrail || ctx.ubuTrails) {
+      if (ctx.path || ctx.ballTrail || ctx.ubuTrails) {
         g.save();
         if (seat) g.transform(-1, 0, 0, -1, map.width, map.height);
         g.lineCap = g.lineJoin = 'round';
-        for (let i = 0; i < 7; i++) {
+        if (ctx.path) {
+          const { from, to } = ctx.path.path;
+          g.strokeStyle = text;
+          g.lineWidth = 4;
+          g.beginPath();
+          for (let i = from.turnIndex; i <= to.turnIndex; i++) {
+            const { startTick, endTick, samples } = trails[i];
+            if (i === from.turnIndex) g.moveTo(from.x, from.y);
+            else g.moveTo(samples[12], samples[13]);
+            for (let n = 26, k = 1; n < samples.length; n += 14, k++) {
+              const tick = Math.min(endTick, startTick + k * 8);
+              if (tick > from.tick && tick < to.tick) g.lineTo(samples[n], samples[n + 1]);
+            }
+            if (i === to.turnIndex) g.lineTo(to.x, to.y);
+          }
+          g.stroke();
+        }
+        for (let i = 0; !ctx.path && i < 7; i++) {
           if (i === 6 ? !ctx.ballTrail : !ctx.ubuTrails) continue;
           g.strokeStyle = i === 6 ? text : ((i < 3) !== Boolean(seat) ? home : away);
           g.globalAlpha = i === 6 ? 0.8 : 0.45;
@@ -3830,9 +3848,9 @@
         }
         g.restore();
       }
-      for (const layer of [events.filter(event => !active(event)), visible.filter(event => !statsMajor.has(event.type)), visible.filter(event => statsMajor.has(event.type))]) {
+      for (const layer of [shown.filter(event => !active(event)), visible.filter(event => !statsMajor.has(event.type)), visible.filter(event => statsMajor.has(event.type))]) {
         for (const event of layer) {
-          g.globalAlpha = active(event) ? statsMajor.has(event.type) ? 1 : 0.65 : 0.13;
+          g.globalAlpha = !active(event) ? 0.13 : ctx.path && event !== ctx.path ? 0.22 : statsMajor.has(event.type) ? 1 : 0.65;
           g.fillStyle = event.team === 0 ? home : away;
           g.beginPath();
           g.arc(event.x, event.y, radius(event), 0, Math.PI * 2);
@@ -3845,19 +3863,44 @@
         }
       }
       g.globalAlpha = 1;
+      const marked = rowMark || ctx.path;
+      if (marked) {
+        g.strokeStyle = text;
+        g.lineWidth = 3;
+        g.beginPath();
+        g.arc(marked.x, marked.y, radius(marked) + 6, 0, Math.PI * 2);
+        g.stroke();
+      }
+    }
+    function selectPath(event) {
+      rows.get(ctx.path)?.classList.remove('path-selected');
+      rows.get(ctx.path)?.querySelector('.stats-path-button')?.setAttribute('aria-pressed', 'false');
+      ctx.path = event;
+      rows.get(event)?.classList.add('path-selected');
+      rows.get(event)?.querySelector('.stats-path-button')?.setAttribute('aria-pressed', 'true');
+      clearPath.hidden = !event;
+      drawMap();
     }
     function updateLog() {
       [...filters.children].forEach((button, i) => button.setAttribute('aria-pressed', String(i - 1 === (ctx.round ?? -1))));
-      visible = events.filter(active);
+      $('stats-highlights').setAttribute('aria-pressed', String(Boolean(ctx.highlights)));
+      $('stats-all-events').setAttribute('aria-pressed', String(!ctx.highlights));
+      shown = ctx.highlights ? events.filter(event => statsMajor.has(event.type)) : events;
+      visible = shown.filter(active);
+      if (!visible.includes(ctx.path)) ctx.path = null;
+      clearPath.hidden = !ctx.path;
+      rowMark = null;
       drawMap();
       detail.textContent = 'Hover or tap a mark for details.';
+      choices.hidden = true;
+      choices.replaceChildren();
       rows.clear();
       hovered = null;
       highlighted = [];
       const content = document.createDocumentFragment();
       if (!visible.length) {
         const empty = document.createElement('p');
-        empty.textContent = ctx.type === 'pause' ? 'Events appear here after the first completed turn.' : 'No events in this selection.';
+        empty.textContent = ctx.type === 'pause' && !events.length ? 'Events appear here after the first completed turn.' : 'No events in this selection.';
         content.append(empty);
       }
       let currentRound = -1, list;
@@ -3872,6 +3915,16 @@
         }
         const row = document.createElement('li'), time = document.createElement(ctx.theater ? 'button' : 'span');
         row.classList.toggle('major', statsMajor.has(event.type));
+        row.classList.toggle('path-selected', event === ctx.path);
+        row.tabIndex = 0;
+        const markRow = () => { rowMark = event; drawMap(); };
+        const unmarkRow = () => { if (rowMark === event) { rowMark = null; drawMap(); } };
+        row.onpointerenter = markRow;
+        row.onpointerleave = () => { if (!row.contains(document.activeElement)) unmarkRow(); };
+        row.addEventListener('focusin', markRow);
+        row.addEventListener('focusout', focus => {
+          if (!row.contains(focus.relatedTarget) && !row.matches(':hover')) unmarkRow();
+        });
         time.className = 'stats-event-time';
         time.textContent = statsEventTime(event);
         if (ctx.theater) {
@@ -3888,6 +3941,18 @@
         entry.append(statsEventLabel(event), event.actor === null ? names[event.team] : pill(event.actor));
         if (event.target != null) entry.append('→', pill(event.target));
         row.append(time, entry);
+        if (event.path) {
+          row.onclick = click => {
+            if (!click.target.closest('button')) selectPath(event === ctx.path ? null : event);
+          };
+          const preview = document.createElement('button');
+          preview.type = 'button';
+          preview.className = 'stats-path-button';
+          preview.textContent = 'Ball path';
+          preview.setAttribute('aria-pressed', String(event === ctx.path));
+          preview.onclick = () => selectPath(event === ctx.path ? null : event);
+          row.append(preview);
+        }
         rows.set(event, row);
         list.append(row);
       }
@@ -3903,9 +3968,12 @@
       const rect = map.getBoundingClientRect();
       const x = (pointer.clientX - rect.left) * map.width / rect.width;
       const y = (pointer.clientY - rect.top) * map.height / rect.height;
-      let closest = null, distance = 12 * map.width / rect.width;
+      const hitRadius = 12 * map.width / rect.width;
+      const nearby = pointer.type === 'click' ? [] : null;
+      let closest = null, distance = hitRadius;
       for (const event of visible) {
         const gap = Math.hypot(event.x - x, event.y - y);
+        if (nearby && gap <= hitRadius) nearby.push({ event, gap });
         if (gap <= distance) { closest = event; distance = gap; }
       }
       if (closest !== hovered) {
@@ -3914,11 +3982,30 @@
         highlight(marks);
         detail.textContent = marks.length ? marks.map(event => `${statsEventText(event, names)} · ${statsEventTime(event)}`).join('\n') : 'Hover or tap a mark for details.';
       }
-      const row = rows.get(closest);
-      if (pointer.type === 'click' && row) {
-        const viewport = log.getBoundingClientRect(), bounds = row.getBoundingClientRect();
-        log.scrollTo({ top: log.scrollTop + bounds.top - viewport.top - (log.clientHeight - bounds.height) / 2, behavior: 'smooth' });
+      if (!nearby) return;
+      choices.replaceChildren();
+      choices.hidden = true;
+      const matches = nearby.filter(mark => mark.gap <= distance + hitRadius / 2);
+      if (matches.length === 1) selectMark(closest);
+      if (matches.length < 2) return;
+      for (const { event } of matches) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = `${statsEventText(event, names)} · ${statsEventTime(event)}`;
+        button.onclick = () => {
+          choices.hidden = true;
+          selectMark(event);
+        };
+        choices.append(button);
       }
+      choices.hidden = false;
+    }
+    function selectMark(event) {
+      const row = rows.get(event);
+      const viewport = log.getBoundingClientRect(), bounds = row.getBoundingClientRect();
+      row.focus({ preventScroll: true });
+      log.scrollTo({ top: log.scrollTop + bounds.top - viewport.top - (log.clientHeight - bounds.height) / 2, behavior: 'smooth' });
+      if (event.path) selectPath(event);
     }
     map.onpointermove = inspectMark;
     map.onclick = inspectMark;
@@ -3927,13 +4014,19 @@
       highlight([]);
       detail.textContent = 'Hover or tap a mark for details.';
     };
+    $('stats-highlights').onclick = () => { ctx.highlights = true; updateLog(); };
+    $('stats-all-events').onclick = () => { ctx.highlights = false; updateLog(); };
+    clearPath.onclick = () => {
+      $('stats-ball-trail').focus();
+      selectPath(null);
+    };
     for (const [id, key] of [['stats-ball-trail', 'ballTrail'], ['stats-ubu-trails', 'ubuTrails']]) {
       const button = $(id);
       button.setAttribute('aria-pressed', String(Boolean(ctx[key])));
       button.onclick = () => {
         ctx[key] = !ctx[key];
         button.setAttribute('aria-pressed', String(ctx[key]));
-        drawMap();
+        selectPath(null);
       };
     }
     updateLog();

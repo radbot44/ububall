@@ -213,6 +213,11 @@
     const engine = M.newTally(), origins = Array(6).fill(null);
     let play = M.newPlay(), last = null, lastTick = -Infinity, clock = 0, tick, turn, turnIndex, flight = null;
     const where = body => ({ x: body.x, y: body.y, tick, turn, turnIndex });
+    const path = (origin, end) => {
+      if (!origin || origin.tick >= end.tick) return null;
+      const { x, y, tick, turnIndex } = origin;
+      return { from: { x, y, tick, turnIndex }, to: end };
+    };
     const add = (type, actor, point, detail = {}) => {
       const event = { ...point, type, actor, team: actor === null ? null : Math.floor(actor / 3), round: out.rounds.length, ...detail };
       out.events.push(event);
@@ -223,8 +228,9 @@
       const origin = origins[actor];
       if (origin?.post?.outcome === 'Post') {
         origin.post.outcome = `Post, ${outcome.toLowerCase()}`;
+        origin.post.path = path(origin, point);
       } else {
-        add('Shot', actor, origin || point, { outcome });
+        add('Shot', actor, origin || point, { outcome, path: path(origin, point) });
       }
     };
     let unscored = false;
@@ -266,7 +272,7 @@
           samples[offset++] = body.y;
         }
       };
-      out.trails.push({ round: out.rounds.length, samples });
+      out.trails.push({ round: out.rounds.length, startTick: clock, endTick: clock + t.ticks, samples });
       sample();
       let saveIndex = 0;
       const before = new Float64Array(12);
@@ -275,20 +281,22 @@
         contact = post = null;
         for (let i = 0; i < 6; i++) { before[i * 2] = sim[i].x; before[i * 2 + 1] = sim[i].y; }
         const result = M.playTick(P, sim, play, fx, engine, false);
+        const incoming = flight;
         if (k % 8 === 0 || k === t.ticks) sample();
         if (contact) {
           contact.big = result.big;
           flight = contact;
         }
         if (post?.origin.big && !post.origin.post) {
-          post.origin.post = add('Shot', post.origin.actor, post.point, { outcome: 'Post' });
+          post.origin.post = add('Shot', post.origin.actor, post.point, { outcome: 'Post', path: path(post.origin, post.point) });
         }
         while (t.saves[saveIndex]?.tick === k) {
           const save = t.saves[saveIndex++];
           if (save.own) continue;
-          add('Save', save.index, where(ball), { label: save.iron ? 'Iron save' : null });
           const shooter = play.lastTouch[1 - sim[save.index].team];
-          if (shooter !== null) shot(shooter, where(ball), 'Saved');
+          const point = where(ball);
+          add('Save', save.index, point, { label: save.iron ? 'Iron save' : null, path: path(shooter === null ? incoming : origins[shooter], point) });
+          if (shooter !== null) shot(shooter, point, 'Saved');
         }
         for (let i = 0; i < 6; i++) out.skated[i] += Math.hypot(sim[i].x - before[i * 2], sim[i].y - before[i * 2 + 1]);
         if (last !== null) {
@@ -300,8 +308,9 @@
       for (const actor of t.cards) add('Foul', actor, where(sim[actor]), { label: 'Yellow card' });
       if (t.goal) {
         const { team, scorer, assist, label } = t.goal;
-        if (scorer !== null) shot(scorer, where(ball), 'Goal');
-        add('Goal', scorer, where(ball), { team, label, score: t.scores[team] + 1 });
+        const point = where(ball);
+        if (scorer !== null) shot(scorer, point, 'Goal');
+        add('Goal', scorer, point, { team, label, score: t.scores[team] + 1, path: path(scorer === null ? flight : origins[scorer], point) });
         if (assist !== null) add('Assist', assist, where(ball), { target: scorer });
         out.rounds.push({ team, score: t.scores[team] + 1 });
         unscored = false;
