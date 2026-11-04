@@ -504,10 +504,8 @@ body:has(.viewer[open]) { overflow: hidden; }
   width: 100%;
 }
 .viewer-card-stage {
-  width: min(45rem, 100%);
-  container-type: inline-size;
-  margin: auto;
-  perspective: 50rem;
+  display: block;
+  flex: none;
 }
 
 /* Each view owns its renderer and light controller; switching is immediate. */
@@ -816,8 +814,8 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
   font-weight: 600;
   text-decoration: none;
 }
-.card-top .card-heart { width: 1.75rem; height: 1.75rem; padding: .25rem; }
-.card-top .card-heart svg { width: 1.125rem; height: 1.125rem; }
+.card-top .card-heart { width: 3.9cqw; height: 3.9cqw; padding: .55cqw; }
+.card-top .card-heart svg { width: 2.5cqw; height: 2.5cqw; }
 
 /* Ubu lists (Collection and the team picker): a toolbar over a grid of tiles. */
 .ubu-toolbar { display: grid; gap: .5rem; margin: .75rem 0; }
@@ -951,21 +949,22 @@ body:has(#reveal[open]) { overflow: hidden; }
 .reveal-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
 #pause-reveal { font-size: 1.625rem; font-weight: 300; }
 .reveal-layout { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem; align-items: center; gap: 1.25rem; }
-.card-stage { width: min(45rem, 100%); margin: auto; perspective: 50rem; container-type: inline-size; }
+.card-stage, .viewer-card-stage { width: min(45rem, 100%); margin: auto; perspective: 50rem; container-type: inline-size; }
 .trading-card {
   --foil-angle: 125deg; --foil-shadow-x: 0rem; --foil-shadow-y: .125rem;
   --foil-tint: #aab0bc; --foil-ink: linear-gradient(var(--foil-angle), #515b6a 0%, var(--foil-tint) 18%, #697487 32%, #eefaff 48%, var(--foil-tint) 63%, #fff2dd 80%, #626d7e 100%);
   --card-hue: 30; --light-x: 50%; --light-y: 30%; position: relative; overflow: hidden; touch-action: none;
-  padding: 3cqw; border: .0625rem solid #777a81; border-radius: 1rem;
-  aspect-ratio: 3 / 2; display: grid; grid-template-columns: 15% 46% 1fr;
-  grid-template-rows: auto 1fr auto; column-gap: 2%;
+  width: 100%; padding: 3cqw; border: .14cqw solid #777a81; border-radius: 2.22cqw;
+  aspect-ratio: 3 / 2; display: grid; grid-template-columns: 15% 46% minmax(0, 1fr);
+  grid-template-rows: 6cqw 46cqw minmax(0, 1fr); column-gap: 2%;
+  line-height: 1.2;
   background: var(--card-polish, linear-gradient(transparent, transparent)), var(--card-base, linear-gradient(145deg, #333843, #202530 55%, #2b303c));
   box-shadow: inset 0 0 0 .25rem #ffffff09, 0 .75rem 1.5rem #0005;
   transform-style: preserve-3d;
   animation: card-arrive var(--wobble-dur, .65s) cubic-bezier(.22, 1, .36, 1); will-change: transform;
 }
 .card-materials { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; border-radius: 1rem; overflow: hidden; z-index: 0; }
-.card-top { grid-column: 1 / -1; position: relative; z-index: 2; display: flex; align-items: center; gap: .5rem; }
+.card-top { grid-column: 1 / -1; position: relative; z-index: 2; display: flex; align-items: center; gap: 1.1cqw; }
 .card-top img { width: 16cqw; height: auto; margin-right: auto; }
 .card-top > span { font-size: 1.4cqw; color: var(--muted); font-variant-numeric: tabular-nums; }
 .card-art { grid-column: 2; grid-row: 2; align-self: center; position: relative; z-index: 2; transform-style: preserve-3d; display: grid; place-items: center; aspect-ratio: 1; margin: 0; transform: translateY(-2.5cqw); border-radius: 50%; background: radial-gradient(circle, #ffffff0a, transparent 70%); }
@@ -983,10 +982,10 @@ body:has(#reveal[open]) { overflow: hidden; }
 /* Edge discs sit just inside the faces' r176 outline; alternating shades read as a milled rim. */
 .coin-edge { position: absolute; inset: 1.2%; border-radius: 50%; background: color-mix(in srgb, var(--coin-color) 58%, #000); transform: translateZ(calc(var(--coin-depth) * var(--depth))); }
 .coin-edge:nth-child(even) { background: color-mix(in srgb, var(--coin-color) 74%, #000); }
-.trading-card h3 { grid-column: 2; grid-row: 3; position: relative; z-index: 2; text-align: center; transform: translateY(-2.6cqw); font-size: 5.2cqw; font-weight: 400; line-height: 1.1; letter-spacing: 0; margin: 0; align-self: center; overflow-wrap: anywhere; color: #eee7de; text-shadow: 0 .125rem .1875rem #0006; }
+.trading-card h3 { grid-column: 2; grid-row: 3; position: relative; z-index: 2; text-align: center; font-size: 5.2cqw; font-weight: 400; line-height: 1.1; letter-spacing: 0; margin: 0; align-self: end; overflow-wrap: anywhere; color: #eee7de; text-shadow: 0 .125rem .1875rem #0006; }
 .trading-card { font-family: 'Uburoom Sans', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
 /* Glass panel: the card material shows through, framed like the card's inner rule. */
-.card-side { grid-column: 3; grid-row: 2; align-self: center; position: relative; z-index: 2; display: grid; gap: 1.2cqw; }
+.card-side { grid-column: 3; grid-row: 2; position: relative; z-index: 2; display: grid; grid-template-rows: 33cqw auto; align-content: start; gap: 1.2cqw; }
 .card-stats { display: grid; gap: 1.3cqw; padding: 1.8cqw 2.2cqw 2.2cqw; }
 /* Both faces share one grid cell; clicking the panel turns it over. */
 .stat-flip { display: grid; perspective: 56.25rem; cursor: pointer; border-radius: .5rem; }
@@ -1012,7 +1011,7 @@ body:has(#reveal[open]) { overflow: hidden; }
 .staff-note { transition: color .15s; }
 .staff-note.is-playing { color: #ffd9b8; }
 .staff-note.is-playing .staff-marker { opacity: .5; transition-duration: .05s; }
-.card-fanfare svg { display: block; width: 100%; height: auto; margin-top: .4cqw; overflow: visible; filter: drop-shadow(0 .0625rem .0625rem #0007); }
+.card-fanfare svg { display: block; width: 100%; height: 8cqw; margin-top: .4cqw; overflow: visible; filter: drop-shadow(0 .0625rem .0625rem #0007); }
 .card-fanfare h4 span { float: right; letter-spacing: .06em; text-transform: none; color: var(--muted); }
 .card-stats, .card-fanfare { position: relative; text-align: left; border: .0625rem solid #e6d8ce40; border-radius: .5rem; background: radial-gradient(ellipse at var(--light-x) var(--light-y), #ffffff12, transparent 70%), linear-gradient(160deg, #ffffff10, #ffffff03 45%, #10121726); backdrop-filter: blur(.3125rem) saturate(1.15); box-shadow: inset 0 .0625rem #ffffff1a, inset 0 -.0625rem #0000002e, 0 .25rem .75rem #00000024; }
 .card-side h4 { font-size: 1.3cqw; font-weight: 400; text-transform: uppercase; letter-spacing: .18em; color: #eee7de; text-shadow: 0 .0625rem .125rem #0008; margin: 0; }
@@ -1024,7 +1023,7 @@ body:has(#reveal[open]) { overflow: hidden; }
 .card-rarity span { display: block; font-size: 1.15cqw; text-transform: uppercase; letter-spacing: .16em; color: #2c2f38d9; }
 .card-rarity strong { display: block; font-size: 2.7cqw; line-height: 1.1; font-weight: 400; font-variant-numeric: tabular-nums; }
 .card-supers span { display: block; color: var(--muted); font-size: 1.2cqw; }
-.card-supers { grid-column: 3; grid-row: 3; position: relative; z-index: 2; align-self: center; text-align: right; }
+.card-supers { grid-column: 3; grid-row: 3; position: relative; z-index: 2; align-self: end; text-align: right; }
 .card-supers div { display: flex; justify-content: flex-end; gap: .6cqw; margin-top: .5cqw; }
 .card-supers img { width: 4.8cqw; height: 4.8cqw; padding: .15cqw; border-radius: 50%; background: #10121752; box-shadow: inset 0 .0625rem .125rem #0007, 0 .0625rem #ffffff14; }
 .card-top > span { font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
@@ -1132,9 +1131,6 @@ body:has(#reveal[open]) { overflow: hidden; }
   #prev-ubu { grid-area: prev; justify-self: end; }
   #next-ubu { grid-area: next; justify-self: start; }
   #reveal-progress { margin-top: .75rem; }
-  .card-top .card-heart { width: 1.25rem; height: 1.25rem; }
-  .card-top .card-heart svg { width: .875rem; height: .875rem; }
-  .card-stats, .card-fanfare { border-radius: .375rem; }
 }
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) { .card-stage, .viewer-card-stage { width: min(45rem, 100%, calc((100dvh - 13.75rem) * 1.5)); }.reveal-toolbar, .viewer-toolbar { margin-bottom: .75rem; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

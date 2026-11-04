@@ -199,7 +199,7 @@ export default {
         const result = await response.json();
         return json(response.ok ? { id, ...result } : result, response.status);
       }
-      const match = path.match(/^\/api\/ububall\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(join|team|unready|state|socket|forfeit|rematch|leave)$/);
+      const match = path.match(/^\/api\/ububall\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(join|team|unready|state|socket|forfeit|rematch|skip-replay|leave)$/);
       if (match) {
         const [, id, action] = match, get = action === 'state' || action === 'socket';
         if (request.method !== (get ? 'GET' : 'POST')) return json({ error: 'Method not allowed.' }, 405);

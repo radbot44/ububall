@@ -112,10 +112,21 @@ class MatchRoom {
       s.game = result.state; s.replay = result.replay;
       s.turn = s.game.turn;
       // A play is the unbroken motion since the field last rested; a goal waits for its replay.
-      s.playTicks = (P.settled(s.replay.initialBodies) ? 0 : s.playTicks || 0) + s.replay.ticks;
-      s.playUntil = now + Math.ceil(s.replay.ticks * P.DT * 1000) + (s.replay.goal !== null ? rules.replayMilliseconds(P, s.playTicks) : 750);
+      const settled = P.settled(s.replay.initialBodies);
+      const stops = s.replay.stops.reduce((ms, stop) => ms + stop.ms, 0);
+      s.playTicks = (settled ? 0 : s.playTicks || 0) + s.replay.ticks;
+      s.playStops = (settled ? 0 : s.playStops || 0) + stops;
+      s.playUntil = s.replay.goal === null ? now + Math.ceil(s.replay.ticks * P.DT * 1000) + 750 : null;
       s.replay.startedAt = now;
     }
+  }
+  skipReplay(owner, startedAt, now) {
+    this.seat(owner);
+    const s = this.state;
+    if (s.phase !== 'resolving' || s.replay?.goal == null || s.replay.startedAt !== startedAt || s.playUntil !== null) return;
+    const stops = s.replay.stops.reduce((ms, stop) => ms + stop.ms, 0);
+    const firstCycleEnd = startedAt + Math.ceil(s.replay.ticks * P.DT * 1000) + stops + rules.replayMilliseconds(P, s.playTicks) + (s.playStops || 0);
+    s.playUntil = Math.max(now, firstCycleEnd);
   }
   connect(owner, now) {
     const s = this.state, i = this.seat(owner);
@@ -165,6 +176,7 @@ class MatchRoom {
     if (s.phase === 'over' || !s.players[other] || !s.connected[i] || s.connected[other] ||
         s.disconnectedAt[other] === null || now - s.disconnectedAt[other] < 60000) throw new Error('Forfeit is not available.');
     s.phase = 'over'; s.winner = i; s.deadline = null;
+    s.playUntil = null; s.replay = null;
   }
   rematch(owner, now) {
     const s = this.state, i = this.seat(owner);

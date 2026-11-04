@@ -381,7 +381,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
     'projection constants and viewIndex must initialize before startup match restore/newMatch'
   );
   const code =
-    section('function kickoff(isNewMatch = false) {', 'let summaryPending') + '\n' +
+    section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
     section('function clearActiveMatch() {', 'function rounded(x, y, width, height, radius) {') + '\n' +
     section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
   const P = require('../web/ububall-physics.js');
@@ -475,7 +475,7 @@ test('contactMeter and creditSave reject meter awards outside phase === play', (
 });
 
 test('post-goal celebration simulation cannot alter the next kickoffs meter or gameplay state', () => {
-  const code = section('function kickoff(isNewMatch = false) {', 'let summaryPending') +
+  const code = section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') +
     '\n' + section('function finishTurn(goal) {', '$(\'launch\').onclick =') +
     '\n' + section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
   const P = require('../web/ububall-physics.js');
@@ -786,7 +786,7 @@ test('local gameplay and goal replay maintain separate authoritative simBodies a
   const ubu = require('../shared/ubu.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const code =
-    section('function kickoff(isNewMatch = false) {', 'let summaryPending') + '\n' +
+    section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
     section('function creditSave(body, own, iron = false) {', 'function setMeterFill(fill, meter) {') + '\n' +
     section('let activePlayback = null;', 'const replayStore = (() => {') + '\n' +
     section('function finishTurn(goal) {', '$(\'launch\').onclick =') + '\n' +
@@ -880,7 +880,7 @@ test('replay takeover (watchReplay -> playFromHere -> local turn) transforms sim
   const ububallMatch = require('../shared/ububall-match.js');
   const ububallReplay = require('../shared/ububall-replay.js');
   const code =
-    section('function kickoff(isNewMatch = false) {', 'let summaryPending') + '\n' +
+    section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
     section('let activePlayback = null;', 'const replayStore = (() => {') + '\n' +
     section('function watchReplay(replay, file) {', 'function endReplayTurn() {') + '\n' +
     section('let guide = null;', '$(\'replay-take-over\').onclick = playFromHere;') + '\n' +
@@ -1200,7 +1200,7 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
   const ububallMP4 = require('../web/mp4.js');
 
   const code =
-    section('function kickoff(isNewMatch = false) {', 'let summaryPending') + '\n' +
+    section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
     section('function creditSave(body, own, iron = false) {', 'function setMeterFill(fill, meter) {') + '\n' +
     section('function replayEvents(turn, tick, sim) {', 'const replayStore = (() => {') + '\n' +
     section('const replayClock = ticks =>', '$(\'replay-seek\').oninput =') + '\n' +

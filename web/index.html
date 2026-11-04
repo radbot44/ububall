@@ -122,6 +122,7 @@ SOFTWARE.
           </div>
           <div id="field-banner" class="field-banner" role="status" aria-live="polite"></div>
           <div class="demo-badge" aria-hidden="true">DEMO</div>
+          <button id="skip-goal-replay" type="button" aria-label="Skip goal replay" hidden><span class="demo-badge"></span></button>
           <button id="demo-play" class="demo-play" type="button" aria-label="Play vs CPU"><span class="demo-hook">3v3 turn-based hockey</span></button>
           <!-- Tabler hand-finger-down icon (MIT), as in uburoom web/icons.js. -->
           <svg id="demo-finger" class="demo-finger" viewBox="0 0 24 24" aria-hidden="true" hidden><g><path d="M8 12v8.5a1.5 1.5 0 0 0 3 0v-7.5"/><path d="M11 13.5v2a1.5 1.5 0 0 0 3 0v-2.5"/><path d="M14 14.5a1.5 1.5 0 0 0 3 0v-1.5"/><path d="M17 13.5a1.5 1.5 0 0 0 3 0v-4.5a6 6 0 0 0 -6 -6h-2h.208a6 6 0 0 0 -5.012 2.7l-.196 .3q -.468 .718 -3.286 5.728a1.5 1.5 0 0 0 .536 2.022c.734 .44 1.674 .325 2.28 -.28l1.47 -1.47"/></g></svg>
@@ -210,6 +211,20 @@ SOFTWARE.
     <label class="export-private"><input id="share-private" type="checkbox"><span><strong>Hide names</strong></span></label>
     <div class="export-actions"><button id="share-save" type="button">Save</button><button id="share-send" class="primary" type="button">Share</button></div>
   </dialog>
+  <dialog id="match-summary" class="export-dialog" aria-labelledby="summary-title">
+    <h2 id="summary-title">Full time</h2>
+    <p id="summary-score" class="summary-score"></p>
+    <p id="summary-winner" class="summary-winner"></p>
+    <p id="summary-honours"></p>
+    <p id="summary-mvp"></p>
+    <p id="summary-rematch-status" class="summary-rematch-status" role="status"></p>
+    <div class="summary-actions">
+      <button id="summary-play-again" class="primary" type="button">Play again</button>
+      <button id="summary-rematch" class="primary" type="button">Rematch</button>
+      <button id="summary-leave" type="button">Leave match</button>
+      <button id="summary-stats" type="button">Stats</button>
+    </div>
+  </dialog>
   <dialog id="stats-dialog" class="stats-dialog" aria-labelledby="stats-title">
     <div class="stats-heading">
       <h2 id="stats-title">Game stats</h2>
@@ -246,12 +261,6 @@ SOFTWARE.
       </div>
       <div id="stats-events"></div>
     </section>
-    <p id="stats-rematch-status" class="summary-rematch-status" role="status"></p>
-    <div id="stats-actions" class="summary-actions">
-      <button id="stats-play-again" class="primary" type="button">Play again</button>
-      <button id="stats-rematch" class="primary summary-rematch" type="button">Rematch</button>
-      <button id="stats-leave" type="button">Leave match</button>
-    </div>
   </dialog>
   <dialog id="roster-dialog" class="team-sheet" data-step="mode" aria-labelledby="roster-title">
     <button id="cancel-roster" class="icon-button team-sheet-close" type="button" aria-label="Close"><i data-icon="x"></i></button>

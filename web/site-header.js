@@ -8,6 +8,14 @@
 
   function openDiscordLogin(event) {
     if (event && event.preventDefault) event.preventDefault();
+    const returnPath = (location.pathname === '/index.html' ? '/' : location.pathname) + location.search + location.hash;
+    const redirect = () => {
+      location.assign('/auth/discord?return=' + encodeURIComponent(returnPath));
+    };
+    if (document.fullscreenElement || document.body.classList.contains('stadium-fullscreen-active')) {
+      redirect();
+      return;
+    }
     if (authPopup && !authPopup.closed) {
       authPopup.focus();
       return;
@@ -26,7 +34,7 @@
     );
 
     if (!authPopup || authPopup.closed || typeof authPopup.closed === 'undefined') {
-      window.location.href = authUrl;
+      redirect();
       return;
     }
 
@@ -136,9 +144,8 @@
       loginBtn.addEventListener('click', openDiscordLogin);
     }
 
-    const onlineLogin = $('online-login');
-    if (onlineLogin) {
-      onlineLogin.addEventListener('click', openDiscordLogin);
+    for (const id of ['online-login', 'lobby-login']) {
+      $(id)?.addEventListener('click', openDiscordLogin);
     }
 
     const identityBtn = $('identity');

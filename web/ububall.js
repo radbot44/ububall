@@ -1320,10 +1320,6 @@
     bodies.slice(0, 6).forEach(b => { b.superArm = false; });
     return bodies;
   }
-  // A save pops a callout over the saver; offline it also earns meter (online, the server credits it).
-  // Full time: a summary of the result (with any comeback or shutout) and each ubu's goals, assists,
-  // saves and fastest shot, naming the MVP. It opens after the final goal's replay has played once.
-  let summaryPending = false, summaryTimer = 0;
   let activeStatsContext = null;
   // The tally and scores as this view sees them (the home team first).
   function viewTally() {
@@ -1331,25 +1327,36 @@
     const t = online.state.game?.tally || ububallMatch.newTally(), seat = online.state.seat;
     const order = items => onlineOrder(items, seat);
     return { tally: { goals: order(t.goals), assists: order(t.assists), saves: order(t.saves), topSpeed: order(t.topSpeed), cards: order(t.cards),
+      bigSaves: order(t.bigSaves || Array(6).fill(0)), checks: order(t.checks || Array(6).fill(0)), shots: order(t.shots || Array(6).fill(0)),
       deficit: seat ? [...t.deficit].reverse() : t.deficit }, scores };
   }
   function honourText(winner) {
     const { tally: t, scores: sc } = viewTally(), h = ububallMatch.honours(t, sc, winner);
     return (h.comeback ? ' A comeback from 3 down!' : '') + (h.shutout ? ' A shutout!' : '');
   }
-  function queueSummary() {
-    summaryPending = true; clearTimeout(summaryTimer);
-    // Without a replay to wait for, it opens on its own.
-    summaryTimer = setTimeout(openSummary, 9000);
-  }
   function closeSummary() {
-    summaryPending = false; clearTimeout(summaryTimer);
     if ($('stats-dialog')?.open) $('stats-dialog').close();
+    if ($('match-summary')?.open) $('match-summary').close();
   }
   function openSummary() {
-    if (!summaryPending || demo) return;
-    summaryPending = false; clearTimeout(summaryTimer);
-    openMatchStats('game');
+    const summary = $('match-summary');
+    if (demo || summary.open) return;
+    const s = online?.state;
+    const winner = s ? (s.winner === s.seat ? 0 : 1) : (scores[0] > scores[1] ? 0 : 1);
+    const winnerName = $(winner ? 'opponent-label' : 'home-label').textContent;
+    const { tally: t } = viewTally();
+    const h = ububallMatch.honours(t, scores, winner);
+    const mvp = matchMvp({ ...t, topShot: t.topSpeed });
+    $('summary-score').textContent = scores.join(' – ');
+    $('summary-winner').textContent = winner === 0 ? 'You win!' : `${winnerName} wins!`;
+    $('summary-honours').textContent = s && s.game.winner == null ? (s.left.some(Boolean) ? 'Opponent left' : 'Won by forfeit') :
+      [h.comeback && 'Comeback from 3 down!', h.shutout && 'Shutout!'].filter(Boolean).join(' ');
+    $('summary-mvp').textContent = mvp === null ? 'No MVP awarded' : `MVP · ${teamEntries[mvp].model.parts.fullName}`;
+    $('summary-play-again').hidden = Boolean(s);
+    $('summary-rematch').hidden = !s;
+    if (s) updateRematch(s);
+    else $('summary-rematch-status').textContent = '';
+    summary.showModal();
   }
   function steamRing(x, y, r) {
     if (reducedMotion.matches) return;
@@ -2685,11 +2692,14 @@
   function startGoalReplay() {
     if (postGoal) { if (postGoal.sim) P.stop(postGoal.sim); P.stop(bodies); postGoal = null; }
     const segments = playSegments.filter(s => s.ticks);
-    if (!segments.length || (online?.active && online.state?.phase !== 'resolving')) return;
+    if (!segments.length || (online?.active && online.state?.phase !== 'resolving')) {
+      if (!online?.active && phase === 'over') openSummary();
+      return;
+    }
     endGoalReplay();
     const scorer = bodies.indexOf(scoringPlayer);
     goalReplay = { segments, total: segments.reduce((n, s) => n + s.ticks, 0),
-      seat: online?.active ? online.state.seat : 0, scorer };
+      seat: online?.active ? online.state.seat : 0, scorer, started: performance.now() };
     scoringPlayer = bodies[scorer] || null;
     restartGoalReplay(); draw();
   }
@@ -2698,7 +2708,6 @@
     const r = goalReplay;
     if (clockNow() < hitStopUntil) { draw(); return; }
     if (r.doneAt && performance.now() >= r.doneAt) {
-      if (summaryPending) openSummary();
       restartGoalReplay();
       draw();
       return;
@@ -2800,6 +2809,7 @@
     if (s.phase === 'plan') onlinePlanFouls = structuredClone(s.game.fouls);
     if (recordingOnline || s.phase === 'over') return;
     saveRecording();
+    lastCompletedReplay = null;
     const [me, them] = onlineNames(s), classic = ububallMatch.rule(s.mode, 'classic');
     recording = ububallReplay.create({ mode: s.mode, seat: s.seat, names: s.seat ? [them, me] : [me, them],
       ubus: s.rosters.flat().map(entry => ({ dna: entry.dna, super: classic ? null : entry.superId })) });
@@ -2815,7 +2825,7 @@
   function finishOnlineRecording(s) {
     if (!recordingOnline || s.phase !== 'over') return;
     // A match left early has no winner from play.
-    if (s.game.winner !== null) recording.final = { scores: [...s.game.scores], winner: s.game.winner };
+    if (s.game.winner != null) recording.final = { scores: [...s.game.scores], winner: s.game.winner };
     saveRecording();
   }
   // The replay viewer re-simulates each turn from its recorded start, as goal replays do. Seeking
@@ -4000,6 +4010,11 @@
   }
   $('stats-box-tab').onclick = () => { activeStatsContext.tab = 'box'; showStatsTab(activeStatsContext); };
   $('stats-log-tab').onclick = () => { activeStatsContext.tab = 'log'; showStatsTab(activeStatsContext); };
+  function matchMvp(s) {
+    const rating = i => s.goals[i] * 3 + s.assists[i] * 2 + s.saves[i] * 2 + (s.bigSaves?.[i] || 0) + (s.checks?.[i] || 0) * 0.5 + (s.topShot?.[i] || 0) / 10000;
+    const mvp = [0, 1, 2, 3, 4, 5].reduce((best, i) => rating(i) > rating(best) ? i : best, 0);
+    return rating(mvp) > 0 ? mvp : null;
+  }
   function renderStats(ctx = activeStatsContext) {
     if (!ctx) return;
     activeStatsContext = ctx;
@@ -4012,10 +4027,10 @@
     showStatsTab(ctx);
 
     $('stats-title').textContent = 'Game stats';
-    $('stats-watch-replay').hidden = !isGame;
+    $('stats-watch-replay').hidden = !isGame || online?.active;
 
     const honoursEl = $('stats-honours');
-    if (isGame) {
+    if (isGame && (!online?.active || online.state.game.winner != null)) {
       const { tally: t, scores: sc } = viewTally();
       const w = sc[0] > sc[1] ? 0 : 1;
       const h = ububallMatch.honours(t, sc, w);
@@ -4028,7 +4043,7 @@
 
     let winner = null;
     if (isGame) {
-      winner = scores[0] > scores[1] ? 0 : scores[1] > scores[0] ? 1 : null;
+      winner = online?.active ? (online.state.winner === online.state.seat ? 0 : 1) : (scores[0] > scores[1] ? 0 : 1);
     } else if (ctx.theater?.replay?.final) {
       const fin = ctx.theater.replay.final;
       winner = ctx.theater.seat ? 1 - fin.winner : fin.winner;
@@ -4036,9 +4051,7 @@
       winner = scores[0] > scores[1] ? 0 : scores[1] > scores[0] ? 1 : null;
     }
 
-    const rating = i => s.goals[i] * 3 + s.assists[i] * 2 + s.saves[i] * 2 + (s.bigSaves?.[i] || 0) + (s.checks?.[i] || 0) * 0.5 + (s.topShot?.[i] || 0) / 10000;
-    const mvp = [0, 1, 2, 3, 4, 5].reduce((best, i) => rating(i) > rating(best) ? i : best, 0);
-    const hasMvp = rating(mvp) > 0;
+    const mvp = matchMvp(s);
 
     const table = document.createElement('table'), head = table.createTHead().insertRow();
     const headers = ['', 'Ubu', 'Goals', 'Assists', 'Shots', 'Saves', 'Checks', 'Touches', 'Passes', 'Top shot', 'Distance', 'Fouls'];
@@ -4065,7 +4078,7 @@
       nameSpan.className = 'ubu-name';
       nameSpan.textContent = entry.model.parts.fullName;
       nameCell.append(nameSpan);
-      if (hasMvp && i === mvp) {
+      if (i === mvp) {
         const badge = document.createElement('span');
         badge.className = 'mvp-badge';
         badge.textContent = 'MVP';
@@ -4109,25 +4122,6 @@
     }));
 
     $('stats-note').textContent = "Top shot is the ball speed off that ubu's fastest touch. Distance is in rink lengths. Shots include goals, saved attempts and high-power strikes off the post. Checks are hard hits inflicting daze or stuns. Fouls are yellow cards.";
-
-    const actionsEl = $('stats-actions');
-    if (isGame) {
-      actionsEl.hidden = false;
-      if (online?.active) {
-        $('stats-play-again').hidden = true;
-        $('stats-rematch').hidden = false;
-        $('stats-leave').hidden = false;
-        updateRematch(online.state);
-      } else {
-        $('stats-play-again').hidden = false;
-        $('stats-rematch').hidden = true;
-        $('stats-leave').hidden = false;
-        $('stats-rematch-status').textContent = '';
-      }
-    } else {
-      actionsEl.hidden = true;
-      $('stats-rematch-status').textContent = '';
-    }
   }
   function openMatchStats(type) {
     if (type === 'replay') {
@@ -4155,21 +4149,23 @@
       openReplay(id);
     }
   };
-  $('stats-play-again').onclick = () => {
+  $('match-summary').addEventListener('cancel', event => event.preventDefault());
+  $('summary-stats').onclick = () => openMatchStats('game');
+  $('summary-play-again').onclick = () => {
     closeSummary();
     newMatch(true);
   };
-  $('stats-rematch').onclick = () => {
+  $('summary-rematch').onclick = () => {
     if (online?.active) online.rematch();
   };
-  $('stats-leave').onclick = () => {
+  $('summary-leave').onclick = async () => {
     closeSummary();
+    if (isFullscreenActive()) await toggleFullscreen();
     if (online?.active) {
-      $('online-leave').click();
-    } else {
-      exitMatchMode();
-      if (history.state?.match) history.back();
+      await online.leave();
     }
+    exitMatchMode();
+    if (history.state?.match) history.back();
   };
   addEventListener('resize', updateStatsRinkWidth);
   $('replay-exit').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
@@ -4331,7 +4327,6 @@
       celebrate(goal, bodies[6], call.label, call.own ? null : bodies[call.scorer] || null);
       if (call.assist !== null) popup(bodies[call.assist], 'Assist');
       if (phase === 'over') {
-        queueSummary();
         if (recording) { recording.final = { scores: [...scores], winner: goal }; saveRecording(); }
         clearActiveMatch();
       }
@@ -4342,7 +4337,7 @@
       const scorerName = scorer?.name || (goal === 0 ? 'Your ubu' : 'CPU ubu');
       goalTab(goal, call.label, call.own ? null : scorerName);
       say(phase === 'over'
-        ? (goal === 0 ? `You win! ${callText(call.label, scorerName)}${honourText(0)} Start a new match for a rematch.` : `CPU wins. ${callText(call.label, scorerName)}${honourText(1)} Start a new match to try again.`)
+        ? `${goal === 0 ? 'You win!' : 'CPU wins.'} ${callText(call.label, scorerName)}${honourText(goal)} Tap the replay for results.`
         : `${goal === 0 ? 'You score!' : 'CPU scores.'} ${callText(call.label, scorerName)} Ready for the next kickoff.`
       );
       loopFanfare(scorer?.voice);
@@ -4610,6 +4605,33 @@
     hitStopUntil = clockNow() + ms;
     if (!reducedMotion.matches) shake = shakeLevel;
   }
+  const replaySkip = $('skip-goal-replay'), replaySkipHint = replaySkip.firstElementChild;
+  function updateReplaySkip(replay) {
+    if (!replay || demo) {
+      replaySkip.hidden = true;
+      return;
+    }
+    if (replaySkip.hidden) replaySkip.hidden = false;
+    const requested = online?.active && online.state.playUntil !== null;
+    const final = online?.active ? online.state.game.winner !== null : phase === 'over';
+    const label = requested ? 'Continuing after replay…' : final ? 'Tap for results' : 'Tap for next round';
+    const hideHint = !requested && replay.loops < 2 && performance.now() - replay.started < 3000;
+    if (replaySkipHint.hidden !== hideHint) replaySkipHint.hidden = hideHint;
+    if (replaySkipHint.textContent !== label) replaySkipHint.textContent = label;
+  }
+  replaySkip.onclick = async () => {
+    if (!goalReplay || demo) return;
+    if (online?.active) {
+      try { await online.skipReplay(); } catch (error) { say(error.message); }
+    } else if (phase === 'over') {
+      endGoalReplay();
+      stopFanfare();
+      gameAudio()?.stop();
+      openSummary();
+    } else {
+      $('launch').click();
+    }
+  };
   function frame(time) {
     const delta = lastTime ? Math.max(0, (time - lastTime) / 1000) : 0; lastTime = time;
     // An open foul explanation holds local play (and the demo) still while it is read.
@@ -4626,6 +4648,7 @@
       if (phase === 'over' && !demo && !online?.active) banner(scores[0] > scores[1] ? 'You win!' : 'CPU wins!', 3500, scores[0] > scores[1] ? 'home' : 'away');
       startGoalReplay();
     }
+    if ((goalReplay && !demo) || !replaySkip.hidden) updateReplaySkip(goalReplay);
     if (!active) { lastTime = 0; accumulator = 0; }
     const hadEffects = particles.length || fireworks.length || trails.some(trail => trail.length) || shockwaves.length || goalCall ||
       ripples.length || pings.length || popups.length || kickoffGlow || goalSweep || danger[0] > .02 || danger[1] > .02;
@@ -5441,7 +5464,6 @@
           celebrate(viewGoal, bodies[6], replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : bodies[toView(replay.scorer)] || null);
           if (ballOnFire()) lightNet(viewGoal);
           if (toView(replay.assist) !== null) popup(bodies[toView(replay.assist)], 'Assist');
-          if (online.state.game.winner !== null) queueSummary();
           const viewScorerIndex = toView(replay.scorer);
           const scorer = viewScorerIndex !== null ? bodies[viewScorerIndex] : bodies[viewGoal * 3];
           scoringPlayer = scorer;
@@ -5478,12 +5500,12 @@
   // The stadium and the full-time summary both offer the rematch; one tap asks, the other accepts.
   function updateRematch(s) {
     const them = onlineNames(s)[1], mine = s.rematch[s.seat], theirs = s.rematch[1 - s.seat];
-    for (const button of [$('online-rematch'), $('stats-rematch')]) {
+    for (const button of [$('online-rematch'), $('summary-rematch')]) {
       if (!button) continue;
       button.hidden = s.phase !== 'over' || s.left.some(Boolean); button.disabled = mine;
       button.textContent = mine ? 'Rematch requested' : theirs ? 'Accept rematch' : 'Rematch';
     }
-    const note = $('stats-rematch-status');
+    const note = $('summary-rematch-status');
     if (note) note.textContent = s.phase !== 'over' ? '' : s.left[1 - s.seat] ? `${them} left the match.` :
       mine && !s.connected[1 - s.seat] ? `${them} is offline. They can accept when they return.` : mine ? `Waiting for ${them} to accept.` : theirs ? `${them} wants a rematch.` : '';
   }
@@ -5518,6 +5540,7 @@
       }
       recordOnline(s);
       const fresh = onlineTurn !== s.turn || onlineDisconnected || (s.phase === 'plan' && onlinePhase !== 'plan');
+      const justFinished = s.phase === 'over' && onlinePhase !== 'over' && s.winner !== null;
       onlinePhase = s.phase;
       onlineDisconnected = false;
       const armed = bodies.slice(0, 3).map(b => Boolean(b.superArm));
@@ -5570,7 +5593,8 @@
       }
       finishOnlineRecording(s);
       phase = s.phase === 'over' ? 'over' : s.phase === 'resolving' ? 'play' : s.connected.every(Boolean) && !s.locked[s.seat] ? 'plan' : 'waiting';
-      sync(); if (onlineReplay) playOnlineReplay(); else draw();
+      sync(); if (onlineReplay && !goalReplay) playOnlineReplay(); else draw();
+      if (justFinished) openSummary();
     },
     onDisconnect() { onlineDisconnected = true; phase = 'waiting'; drag = null; $('online-match-status').textContent = 'Reconnecting · planning paused'; sync(); draw(); },
     onError(message) { $('online-match-status').textContent = message; },

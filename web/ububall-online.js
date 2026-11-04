@@ -186,6 +186,12 @@ function ububallOnline(hooks) {
     async unready() { receive(await api('/api/ububall/' + id + '/unready', {})); },
     create(mode) { createMode = mode; $('online-mode-name').textContent = ububallMatch.modeName(mode); showDialog(); },
     now: () => Date.now() + offset,
+    async skipReplay() {
+      if (state?.phase !== 'resolving' || state.replay?.goal == null || state.playUntil !== null) return;
+      const match = id;
+      const next = await api('/api/ububall/' + match + '/skip-replay', { startedAt: state.replay.startedAt });
+      if (id === match) receive(next);
+    },
     rematch() {
       if (!state || state.phase !== 'over') return;
       if (socket?.readyState === WebSocket.OPEN) {

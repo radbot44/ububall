@@ -106,6 +106,7 @@ export class UbuballMatch extends DurableObject {
           this.room.leave(owner, now);
         }
         if (path === '/rematch') this.room.rematch(owner, now);
+        if (path === '/skip-replay') this.room.skipReplay(owner, (await request.json())?.startedAt, now);
         this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);
         return json(path === '/leave' ? { left: true } : this.snapshot(owner, now));
       } catch (error) { return json({ error: error.message }, 400); }

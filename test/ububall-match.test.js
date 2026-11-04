@@ -116,6 +116,46 @@ test('goal resolution awards victory once', () => {
   assert.equal(result.state.phase,'over');assert.ok(result.state.bodies.slice(0,6).every(b=>b.meter===0));
 });
 
+test('online goal replays wait for either player and protect the first cycle', () => {
+  const room = new MatchRoom('host', 'classic', 'practice');
+  room.join('guest');
+  room.connect('host', 0);
+  room.connect('guest', 0);
+  const ubu = require('../shared/ubu.js');
+  for (const owner of ['host', 'guest']) {
+    const team = room.practiceTeam(owner);
+    room.selectTeam(owner, team, team.map(entry => ubu.decode(ubu.fromCode(entry.dna)).supers[0] % 8));
+  }
+  for (const [start, scores, afterSkip] of [[1000, [0, 0], 'plan'], [20000, [4, 0], 'over']]) {
+    const bodies = P.kickoff();
+    Object.assign(bodies[6], { x: 959, y: 300, vx: 400 });
+    Object.assign(room.state, {
+      phase: 'plan', turn: 1, locked: [true, true],
+      game: { version: M.VERSION, mode: 'classic', bodies, stats: [], scores, turn: 1 }
+    });
+    room.advance(start);
+    assert.equal(room.state.replay.goal, 0);
+    assert.equal(room.state.playUntil, null);
+    const requestedAt = start + (afterSkip === 'over' ? 10000 : 2000);
+    room.advance(requestedAt);
+    assert.equal(room.state.phase, 'resolving');
+    assert.throws(() => room.skipReplay('stranger', start, requestedAt));
+    room.skipReplay('host', start - 1, requestedAt);
+    assert.equal(room.state.playUntil, null);
+    room.skipReplay('guest', start, requestedAt);
+    const cycleEnd = room.state.playUntil;
+    if (afterSkip === 'plan') {
+      assert.ok(cycleEnd > requestedAt);
+      room.advance(cycleEnd - 1);
+      assert.equal(room.state.phase, 'resolving');
+    } else {
+      assert.equal(cycleEnd, requestedAt);
+    }
+    room.advance(cycleEnd);
+    assert.equal(room.state.phase, afterSkip);
+  }
+});
+
 test('authoritative supers consume meter and preserve the no-gain rule through settlement', () => {
   for (const { key } of P.SUPERS) {
     const bodies=P.kickoff();bodies.slice(0,6).forEach(b=>{P.applyStats(b);b.meter=100;});

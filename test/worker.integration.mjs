@@ -416,6 +416,10 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await fetch(base + '/state', { headers: g })).status, 400);
     const rematch = await post(base + '/rematch', {}, d);
     assert.equal(rematch.status, 400); assert.match((await rematch.json()).error, /not over/);
+    const skip = await post(base + '/skip-replay', { startedAt: 1000 }, d);
+    assert.equal(skip.status, 200);
+    assert.equal((await skip.json()).phase, 'lobby');
+    assert.equal((await post(base + '/skip-replay', { startedAt: 1000 }, g)).status, 400);
     assert.deepEqual(claimed.names, ['Ubu Fan', null]);
     // The lobby opponent leaving frees their seat; the host leaving closes the match.
     assert.deepEqual(await (await post(base + '/leave', {}, headers)).json(), { left: true });
