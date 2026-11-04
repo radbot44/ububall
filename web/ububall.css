@@ -1398,7 +1398,7 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 }
 .stats-more-details[hidden] { display: none; }
 .stats-more-details { display: flex; flex-direction: column; gap: .375rem; margin: .75rem 0; }
-.stats-map { display: block; width: 100%; height: auto; }
+.stats-map { display: block; width: 66.7%; max-width: 100%; height: auto; margin: .375rem auto; }
 .stats-note { margin: .5rem 0 0; color: var(--muted); font-size: .6875rem; }
 .stats-dialog .summary-rematch-status { margin: .5rem 0 .75rem; font-weight: 700; }
 .stats-dialog .summary-rematch-status:empty { display: none; }

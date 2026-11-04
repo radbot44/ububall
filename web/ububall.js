@@ -2278,6 +2278,107 @@
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
   if (document.body) themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { themeColors = null; if (skaters.length) draw(); });
+  function getThemeColors() {
+    if (!themeColors) {
+      const theme = getComputedStyle(document.documentElement);
+      const color = name => theme.getPropertyValue('--' + name).trim();
+      themeColors = {
+        primary: color('primary'),
+        secondary: color('secondary'),
+        home: color('team-home') || '#E8CA48',
+        away: color('team-away') || '#AA54D3',
+        text: color('text'),
+        border: color('border'),
+        surface: color('elevated'),
+        background: color('background')
+      };
+    }
+    return themeColors;
+  }
+  function drawRinkSurface(g, colors = getThemeColors()) {
+    const { surface, border, background, home, away } = colors;
+    g.beginPath();
+    g.roundRect(60, 60, 880, 480, 100);
+    g.fillStyle = surface;
+    g.fill();
+    g.strokeStyle = border;
+    g.lineWidth = 4;
+    g.stroke();
+
+    g.setLineDash([6, 10]);
+    g.beginPath();
+    g.moveTo(500, 60);
+    g.lineTo(500, 540);
+    g.strokeStyle = border;
+    g.lineWidth = 2;
+    g.stroke();
+    g.setLineDash([]);
+
+    // Centre ice: face-off circle and faint logo.
+    g.fillStyle = surface;
+    g.beginPath();
+    g.arc(500, 300, 70, 0, Math.PI * 2);
+    g.fill();
+    g.beginPath();
+    g.arc(500, 300, 70, 0, Math.PI * 2);
+    g.strokeStyle = border;
+    g.lineWidth = 2;
+    g.stroke();
+    if (rinkLogo.complete && rinkLogo.naturalWidth) {
+      const w = 110, h = w * rinkLogo.naturalHeight / rinkLogo.naturalWidth;
+      g.save();
+      g.globalAlpha = .08;
+      g.drawImage(rinkLogo, 500 - w / 2, 300 - h / 2, w, h);
+      g.restore();
+    }
+
+    // Each goal's crease and attack zone line.
+    g.setLineDash([6, 10]);
+    for (const team of [0, 1]) {
+      const x = team ? 940 : 60, from = team ? Math.PI / 2 : -Math.PI / 2, zone = ububallMatch.attackZoneLine(P, team);
+      g.beginPath();
+      g.arc(x, 300, ububallMatch.FOULS.crease, from, from + Math.PI);
+      g.strokeStyle = border;
+      g.lineWidth = 2;
+      g.stroke();
+
+      g.beginPath();
+      g.moveTo(zone, 60);
+      g.lineTo(zone, 540);
+      g.strokeStyle = border;
+      g.lineWidth = 2;
+      g.stroke();
+    }
+    g.setLineDash([]);
+
+    // Goal pockets: board cutout with open mouth, 3-sided net frame.
+    const depth = P.rink.goalDepth;
+    for (const [x, accent] of [[60 - depth, home], [940, away]]) {
+      g.fillStyle = background;
+      g.fillRect(x, 230, depth, 140);
+      g.beginPath();
+      g.moveTo(x, 230);
+      g.lineTo(x + depth, 230);
+      g.strokeStyle = accent;
+      g.lineWidth = 4;
+      g.stroke();
+
+      g.beginPath();
+      g.moveTo(x, 370);
+      g.lineTo(x + depth, 370);
+      g.strokeStyle = accent;
+      g.lineWidth = 4;
+      g.stroke();
+
+      const backX = x === 60 - depth ? x : x + depth;
+      g.beginPath();
+      g.moveTo(backX, 230);
+      g.lineTo(backX, 370);
+      g.strokeStyle = accent;
+      g.lineWidth = 4;
+      g.stroke();
+    }
+  }
   function fitStadium() {
     if (!stageArea || !rinkStage || !rinkWrap) return;
     const isFs = isFullscreenActive() || document.body.classList.contains('in-match');
@@ -2371,46 +2472,15 @@
     if (badgeCanvas.width !== width || badgeCanvas.height !== height) { badgeCanvas.width = width; badgeCanvas.height = height; }
     badgeCtx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); badgeCtx.clearRect(0, 0, 1000, 600);
     ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); ctx.clearRect(0, 0, 1000, 600);
-    if (!themeColors) {
-      const theme = getComputedStyle(document.documentElement);
-      const color = name => theme.getPropertyValue('--' + name).trim();
-      themeColors = { primary: color('primary'), secondary: color('secondary'),
-        home: color('team-home') || '#E8CA48', away: color('team-away') || '#AA54D3',
-        text: color('text'), border: color('border'), surface: color('elevated'), background: color('background') };
-    }
-    const { primary, secondary, home, away, text, border, surface, background } = themeColors;
-    const rinkKey = width + ',' + height + JSON.stringify(themeColors);
+    const colors = getThemeColors();
+    const { text, home, away } = colors;
+    const rinkKey = width + ',' + height + JSON.stringify(colors);
     if (rinkCache?.key !== rinkKey) {
       const layer = document.createElement('canvas'); layer.width = width; layer.height = height;
-      const mainContext = ctx; ctx = layer.getContext('2d');
-      ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0);
-    rounded(60, 60, 880, 480, 100); ctx.fillStyle = surface; ctx.fill();
-    ctx.strokeStyle = border; ctx.lineWidth = 4; ctx.stroke();
-    ctx.setLineDash([6, 10]); line(500, 60, 500, 540, border); ctx.setLineDash([]);
-    // Centre ice: a face-off circle and a faint logo.
-    ctx.fillStyle = surface; ctx.beginPath(); ctx.arc(500, 300, 70, 0, Math.PI * 2); ctx.fill();
-    circle(500, 300, 70, border, 2);
-    if (rinkLogo.complete && rinkLogo.naturalWidth) {
-      const w = 110, h = w * rinkLogo.naturalHeight / rinkLogo.naturalWidth;
-      ctx.globalAlpha = .08; ctx.drawImage(rinkLogo, 500 - w / 2, 300 - h / 2, w, h); ctx.globalAlpha = 1;
-    }
-    // Each goal's crease and the line closing its attack zone (see ububallMatch.FOULS).
-    ctx.setLineDash([6, 10]);
-    for (const team of [0, 1]) {
-      const x = team ? 940 : 60, from = team ? Math.PI / 2 : -Math.PI / 2, zone = ububallMatch.attackZoneLine(P, team);
-      ctx.beginPath(); ctx.arc(x, 300, ububallMatch.FOULS.crease, from, from + Math.PI); ctx.strokeStyle = border; ctx.lineWidth = 2; ctx.stroke();
-      line(zone, 60, zone, 540, border);
-    }
-    ctx.setLineDash([]);
-    // Goal pockets interrupt the boundary at the same positions used by physics.
-    const depth = P.rink.goalDepth;
-    for (const [x, accent] of [[60 - depth, home], [940, away]]) {
-      ctx.fillStyle = background; ctx.fillRect(x, 230, depth, 140);
-      line(x, 230, x + depth, 230, accent, 4);
-      line(x, 370, x + depth, 370, accent, 4);
-      line(x === 60 - depth ? x : x + depth, 230, x === 60 - depth ? x : x + depth, 370, accent, 4);
-    }
-      ctx = mainContext; rinkCache = { key: rinkKey, layer };
+      const layerCtx = layer.getContext('2d');
+      layerCtx.setTransform(width / 1000, 0, 0, height / 600, 0, 0);
+      drawRinkSurface(layerCtx, colors);
+      rinkCache = { key: rinkKey, layer };
     }
     ctx.drawImage(rinkCache.layer, 0, 0, 1000, 600);
     drawFieldUnder(themeColors);
@@ -3704,7 +3774,7 @@
     const s = getStatsForContext(ctx);
     const isGame = ctx.type === 'game';
     const names = [$('home-label').textContent, $('opponent-label').textContent];
-    const { home, away, surface, border, text } = themeColors;
+    const { home, away, surface, border, text } = getThemeColors();
 
     $('stats-title').textContent = 'Game stats';
     $('stats-watch-replay').hidden = !isGame;
@@ -3810,12 +3880,7 @@
 
       const map = $('stats-map'), g = map.getContext('2d'), k = map.width / 1000;
       g.setTransform(k, 0, 0, k, 0, 0); g.clearRect(0, 0, 1000, 600);
-      g.beginPath(); g.roundRect(60, 60, 880, 480, 100); g.fillStyle = surface; g.fill(); g.lineWidth = 4; g.strokeStyle = border; g.stroke();
-      g.setLineDash([6, 10]); g.beginPath(); g.moveTo(500, 60); g.lineTo(500, 540); g.stroke(); g.setLineDash([]);
-      for (const [x, color] of [[60 - P.rink.goalDepth, home], [940, away]]) {
-        g.strokeStyle = color;
-        g.strokeRect(x, 230, P.rink.goalDepth, 140);
-      }
+      drawRinkSurface(g, themeColors);
       for (const m of s.marks) {
         g.fillStyle = m.i < 3 ? home : away;
         g.globalAlpha = m.goal ? 1 : 0.55;
