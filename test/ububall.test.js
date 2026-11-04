@@ -294,7 +294,7 @@ function kineticEnergy(bodies) {
 function closeSpinSetup(gap = 0, spin = 1, reach = 25) {
   const bodies = P.kickoff();
   bodies.slice(0, 6).forEach(b => P.applyStats(b));
-  Object.assign(bodies[0], { x: 400, y: 300, reach });
+  Object.assign(bodies[0], { x: 400, y: 300, reach, baseReach: reach });
   Object.assign(bodies[6], { x: 400 + reach + 18 + gap, y: 300 });
   P.startTurn(bodies, [{ angle: 0, power: .6, spin }]);
   return bodies;
@@ -728,9 +728,7 @@ test('prediction preserves opponents active supers from Pulse mode while clearin
   bodies.slice(0, 6).forEach((b, i) => P.applyStats(b, { ...normal }));
   // Opponent has Colossus active from previous turn
   bodies[3].superActive = 'colossus';
-  bodies[3].colossusApplied = true;
-  bodies[3].radius *= P.SUPER.colossusRadius;
-  bodies[3].mass *= P.SUPER.colossusMass;
+  P.syncEffectiveStats(bodies[3]);
   bodies[3].superTicks = 400;
   // Opponent has secret unlaunched superArm
   bodies[4].superArm = true;
@@ -1444,11 +1442,11 @@ test('iron save triggers ~200 ms cooldown and doubles guard effects for the rest
   b.slice(0, 6).forEach(x => P.applyStats(x, normal));
   P.startTurn(b, [{ angle: 0, power: 0, spin: 0, guard: true }]);
 
-  const baseReach = b[0].guardBase.reach;
-  const baseFriction = b[0].guardBase.friction;
-  const baseStrength = b[0].guardBase.strength;
-  const baseStability = b[0].guardBase.stability;
-  const baseBounciness = b[0].guardBase.bounciness;
+  const baseReach = b[0].baseReach;
+  const baseFriction = b[0].baseFriction;
+  const baseStrength = b[0].baseStrength;
+  const baseStability = b[0].baseStability;
+  const baseBounciness = b[0].baseBounciness;
 
   // Regular guard starts at 1.25x (+25%)
   assert.equal(b[0].reach, Math.min(37.5, baseReach * 1.25));
@@ -1509,4 +1507,83 @@ test('iron save triggers ~200 ms cooldown and doubles guard effects for the rest
   assert.equal(b[0].bounciness, baseBounciness, 'bounciness restored on turn stop');
   assert.equal(b[0].ironGuard, false);
   assert.equal(b[0].ironCooldownTicks, 0);
+});
+
+test('stat model: repeated guard toggles and iron guard preserve immutable base stats without drift', () => {
+  const b = P.kickoff();
+  P.applyStats(b[0], normal);
+  const { baseReach, baseFriction, baseStrength, baseStability, baseBounciness, baseRadius, baseMass } = b[0];
+
+  for (let i = 0; i < 10; i++) {
+    P.startTurn(b, [{ angle: 0, power: 0, spin: 0, guard: true }]);
+    assert.equal(b[0].guarding, true);
+    assert.equal(b[0].baseReach, baseReach);
+    assert.equal(b[0].baseFriction, baseFriction);
+    assert.equal(b[0].friction, Math.min(225, baseFriction * 1.25));
+
+    if (i === 5) {
+      P.applyDoubledGuard(b[0]);
+      assert.equal(b[0].ironGuard, true);
+      assert.equal(b[0].friction, Math.min(270, baseFriction * 1.5));
+    }
+
+    P.stop(b);
+    assert.equal(b[0].guarding, false);
+    assert.equal(b[0].ironGuard, false);
+    assert.equal(b[0].reach, baseReach);
+    assert.equal(b[0].friction, baseFriction);
+    assert.equal(b[0].strength, baseStrength);
+    assert.equal(b[0].stability, baseStability);
+    assert.equal(b[0].bounciness, baseBounciness);
+    assert.equal(b[0].radius, baseRadius);
+    assert.equal(b[0].mass, baseMass);
+  }
+});
+
+test('stat model: colossus scales effective radius and mass without altering base stats, and restores on expiration', () => {
+  const b = P.kickoff();
+  P.applyStats(b[0], normal);
+  const { baseRadius, baseMass } = b[0];
+
+  b[0].superActive = 'colossus';
+  P.syncEffectiveStats(b[0]);
+
+  assert.equal(b[0].radius, Math.min(60, baseRadius * P.SUPER.colossusRadius));
+  assert.equal(b[0].mass, baseMass * P.SUPER.colossusMass);
+  assert.equal(b[0].baseRadius, baseRadius);
+  assert.equal(b[0].baseMass, baseMass);
+
+  P.endSuper(b[0], b);
+  assert.equal(b[0].radius, baseRadius);
+  assert.equal(b[0].mass, baseMass);
+  assert.equal(b[0].superActive, null);
+});
+
+test('stat model: colossus and guard compose correctly without compound drift', () => {
+  const b = P.kickoff();
+  P.applyStats(b[0], normal);
+  const { baseRadius, baseMass, baseReach, baseFriction } = b[0];
+
+  b[0].superActive = 'colossus';
+  b[0].guarding = true;
+  P.syncEffectiveStats(b[0]);
+
+  assert.equal(b[0].radius, Math.min(60, baseRadius * P.SUPER.colossusRadius));
+  assert.equal(b[0].mass, baseMass * P.SUPER.colossusMass);
+  assert.equal(b[0].friction, Math.min(225, baseFriction * 1.25));
+  assert.equal(b[0].reach, Math.max(b[0].radius, Math.min(37.5, baseReach * 1.25)));
+
+  // End colossus while maintaining guard
+  b[0].superActive = null;
+  P.syncEffectiveStats(b[0]);
+  assert.equal(b[0].radius, baseRadius);
+  assert.equal(b[0].mass, baseMass);
+  assert.equal(b[0].friction, Math.min(225, baseFriction * 1.25));
+
+  // Stop turn
+  P.stop(b);
+  assert.equal(b[0].radius, baseRadius);
+  assert.equal(b[0].mass, baseMass);
+  assert.equal(b[0].friction, baseFriction);
+  assert.equal(b[0].reach, baseReach);
 });

@@ -517,3 +517,52 @@ test('post-goal celebration simulation cannot alter the next kickoffs meter or g
   assert.equal(nextKickoffBodies[0].stunned, false, 'kickoff stunned state matches authoritative state');
   assert.equal(env.getAuthoritative(), null, 'authoritativeBodies cleared after consumption');
 });
+
+test('predictionKey invalidates on micro angle/power adjustments, fouls, and carded changes', () => {
+  const P = require('../web/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const code = section('let predictionCache = null', 'const predictionLayer = {};');
+  const bodies = P.kickoff();
+  const plans = [
+    { angle: 1.234567, power: 0.876543, spin: 0, guard: false },
+    { angle: 0, power: 0, spin: 0, guard: false },
+    { angle: 0, power: 0, spin: 0, guard: false }
+  ];
+  let turn = 1;
+  const matchMode = 'standard';
+  const fouls = ububallMatch.newFouls();
+
+  const context = { bodies, plans, turn, matchMode, fouls };
+  const env = vm.runInNewContext(code + '\n;({ predictionKey, dirtyPrediction });', context);
+
+  const initialKey = env.predictionKey();
+
+  // 1. Micro angle change (< 0.0001, which toFixed(4) would have missed)
+  plans[0].angle += 0.00001;
+  const microAngleKey = env.predictionKey();
+  assert.notEqual(microAngleKey, initialKey, 'micro angle change invalidates key');
+  plans[0].angle -= 0.00001;
+
+  // 2. Micro power change (< 0.0001)
+  plans[0].power += 0.00001;
+  const microPowerKey = env.predictionKey();
+  assert.notEqual(microPowerKey, initialKey, 'micro power change invalidates key');
+  plans[0].power -= 0.00001;
+
+  // 3. Crease foul change
+  fouls.crease[0] = true;
+  const foulKey = env.predictionKey();
+  assert.notEqual(foulKey, initialKey, 'crease foul change invalidates key');
+  fouls.crease[0] = false;
+
+  // 4. Skater carded change
+  bodies[0].carded = true;
+  const cardKey = env.predictionKey();
+  assert.notEqual(cardKey, initialKey, 'carded change invalidates key');
+  bodies[0].carded = false;
+
+  // 5. dirtyPrediction()
+  env.dirtyPrediction();
+  const dirtyKey = env.predictionKey();
+  assert.notEqual(dirtyKey, initialKey, 'dirtyPrediction increments key revision');
+});

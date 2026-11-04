@@ -217,7 +217,7 @@
       }
 
       const dx = tx - b.x, dy = ty - b.y, distance = Math.hypot(dx, dy);
-      const superLaunchScale = (superArm && sKey === 'colossus' && !b.colossusApplied) ? P.SUPER.colossusLaunch
+      const superLaunchScale = (superArm && sKey === 'colossus' && b.superActive !== 'colossus') ? P.SUPER.colossusLaunch
         : (superArm && sKey === 'stalwart' && b.superActive !== 'stalwart' ? P.SUPER.stalwartLaunch : 1);
       const maxV = P.launchSpeed(b) * superLaunchScale;
       let angle = Math.atan2(dy, dx);
@@ -257,7 +257,7 @@
   function aim(body, x, y, drive = 0, superKey = null) {
     const dx = x - body.x, dy = y - body.y;
     const distance = Math.hypot(dx, dy);
-    const superScale = superKey === 'colossus' && !body.colossusApplied ? (P.SUPER.colossusLaunch ?? (1 / P.SUPER.colossusMass))
+    const superScale = superKey === 'colossus' && body.superActive !== 'colossus' ? (P.SUPER.colossusLaunch ?? (1 / P.SUPER.colossusMass))
       : superKey === 'stalwart' ? (P.SUPER.stalwartLaunch ?? 0.5) : 1;
     const maxV = P.launchSpeed(body) * superScale;
     const speed = distance < 2 ? 0 : Math.min(maxV, Math.sqrt(2 * body.friction * Math.max(0, distance + drive)));

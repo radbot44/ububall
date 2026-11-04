@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 14;
+  const VERSION = 15;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IRON_COOLDOWN_TICKS = 48; // ~200 ms at 240 Hz DT: cooldown after an Iron Save
@@ -96,59 +96,53 @@
   // momentum into the ball and opponents. Only weight added on top of its own (Colossus) slows it.
   // Smaller ubus launch a little faster, and a daze from heavy checks slows the next launch.
   function launchSpeed(body) {
-    const superScale = (body.colossusApplied || body.superActive === 'colossus') ? SUPER.colossusLaunch
+    const isColossus = body.superActive === 'colossus';
+    const superScale = isColossus ? SUPER.colossusLaunch
       : (body.superActive === 'stalwart' ? SUPER.stalwartLaunch
       : (body.baseMass || body.mass) / body.mass);
     return (body.impulse || IMPULSE) / 3 * superScale * (body.sizeMult || 1) ** SIZE.launch * (1 - dazeSlow(body));
   }
-  function applyGuard(b, active, iron = false) {
-    if (active) {
-      if (!b.guardBase) {
-        b.guardBase = { reach: b.reach, friction: b.friction, strength: b.strength, stability: b.stability, bounciness: b.bounciness };
-      }
-      const base = b.guardBase;
-      const mult = iron ? 1.5 : 1.25;
-      b.reach = Math.max(b.radius, Math.min(37.5, (base.reach || b.radius) * mult));
-      b.friction = Math.min(iron ? 270 : 225, (base.friction || 150) * mult);
-      b.strength = Math.min(iron ? 2.0 : 1.5, (base.strength || 1) * mult);
-      b.stability = Math.min(iron ? 2.0 : 1.5, (base.stability || 1) * mult);
-      b.bounciness = iron ? Math.max(0.4, (base.bounciness || 1) * 0.5) : Math.max(2 / 3, (base.bounciness || 1) * 0.75);
+  // Recomputes live physical stats from immutable base stats and active temporary effects (Guard, Iron Guard, Colossus).
+  function syncEffectiveStats(b) {
+    if (b.team < 0) return; // The ball has fixed physical properties
+    const isColossus = b.superActive === 'colossus';
+    b.radius = isColossus ? Math.min(60, (b.baseRadius ?? b.radius) * SUPER.colossusRadius) : (b.baseRadius ?? b.radius);
+    b.mass = isColossus ? (b.baseMass ?? b.mass) * SUPER.colossusMass : (b.baseMass ?? b.mass);
+
+    if (b.guarding) {
+      const mult = b.ironGuard ? 1.5 : 1.25;
+      b.reach = Math.max(b.radius, Math.min(37.5, (b.baseReach || b.radius) * mult));
+      b.friction = Math.min(b.ironGuard ? 270 : 225, (b.baseFriction || 150) * mult);
+      b.strength = Math.min(b.ironGuard ? 2.0 : 1.5, (b.baseStrength || 1) * mult);
+      b.stability = Math.min(b.ironGuard ? 2.0 : 1.5, (b.baseStability || 1) * mult);
+      b.bounciness = b.ironGuard ? Math.max(0.4, (b.baseBounciness || 1) * 0.5) : Math.max(2 / 3, (b.baseBounciness || 1) * 0.75);
     } else {
-      if (b.guardBase) {
-        b.reach = b.guardBase.reach;
-        b.friction = b.guardBase.friction;
-        b.strength = b.guardBase.strength;
-        b.stability = b.guardBase.stability;
-        b.bounciness = b.guardBase.bounciness;
-      }
-      b.guardBase = null;
+      b.reach = b.baseReach ?? b.radius;
+      b.friction = b.baseFriction ?? 150;
+      b.strength = b.baseStrength ?? 1;
+      b.stability = b.baseStability ?? 1;
+      b.bounciness = b.baseBounciness ?? 1;
     }
   }
   function applyStats(body, raw = {}) {
     // Mass spans a narrower range than other stats (0.82–1.22×, tuning): weight helps every shot,
     // check and block without a launch-speed cost, so a full 2/3–1.5× span dominated.
-    body.mass = 3 * Math.sqrt(multiplier(raw.mass ?? 127));
     body.sizeMult = multiplier(raw.size ?? 127);
-    body.radius = 25 * body.sizeMult;
-    body.baseMass = body.mass;
-    body.baseRadius = body.radius;
-    // Traction spans a narrower range than most stats (0.75–1.33×, tuning): stopping where you aim
-    // was the strongest stat.
-    body.friction = 150 * multiplier(raw.traction ?? 127) ** .7;
+    body.baseMass = 3 * Math.sqrt(multiplier(raw.mass ?? 127));
+    body.baseRadius = 25 * body.sizeMult;
+    body.baseFriction = 150 * multiplier(raw.traction ?? 127) ** .7;
     body.maxSpin = 15 * multiplier(raw.spin ?? 127);
     body.grip = .3 * multiplier(raw.grip ?? 127);
     body.impulse = IMPULSE * multiplier(raw.impulse ?? 127);
-    // Curve bends the ubu's own path (more for small ubus) and the path of the ball it strikes, and
-    // strengthens its spin strike.
     body.curveMult = multiplier(raw.curve ?? 127);
     body.curveFactor = SKATER_CURVE * body.curveMult * body.sizeMult ** SIZE.agility;
-    body.bounciness = multiplier(raw.bounciness ?? 127);
-    // Bounciness acts on the boards only; big ubus lose more speed off them.
-    body.wallBounce = Math.min(.95, WALL_BOUNCE * body.bounciness * body.sizeMult ** SIZE.boards);
+    body.baseBounciness = multiplier(raw.bounciness ?? 127);
+    body.wallBounce = Math.min(.95, WALL_BOUNCE * body.baseBounciness * body.sizeMult ** SIZE.boards);
     body.power = multiplier(raw.power ?? 127);
-    body.reach = Math.max(body.radius, 25 * multiplier(raw.reach ?? 127), 18);
-    body.strength = multiplier(raw.strength ?? 127);
-    body.stability = multiplier(raw.stability ?? 127);
+    body.baseReach = Math.max(body.baseRadius, 25 * multiplier(raw.reach ?? 127), 18);
+    body.baseStrength = multiplier(raw.strength ?? 127);
+    body.baseStability = multiplier(raw.stability ?? 127);
+    syncEffectiveStats(body);
   }
   // Kickoff position of a team's ubu (slot 0–2); carded ubus return here.
   function spawn(team, slot) {
@@ -158,7 +152,9 @@
     const bodies = [];
     for (let team = 0; team < 2; team++) for (let i = 0; i < 3; i++) {
       bodies.push({ ...spawn(team, i), vx: 0, vy: 0,
-        radius: 25, mass: 3, friction: 150, grip: .3, maxSpin: 15, omega: 0, rotation: 0, ironGuard: false, ironCooldownTicks: 0, team, slot: i });
+        radius: 25, mass: 3, friction: 150, reach: 25, strength: 1, stability: 1, bounciness: 1,
+        baseRadius: 25, baseMass: 3, baseFriction: 150, baseReach: 25, baseStrength: 1, baseStability: 1, baseBounciness: 1,
+        grip: .3, maxSpin: 15, omega: 0, rotation: 0, ironGuard: false, ironCooldownTicks: 0, team, slot: i });
     }
     bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1, fireTicks: 0, onFire: false, pace: 0, strikerPower: 1, strikerTeam: -1 });
     return bodies;
@@ -296,15 +292,10 @@
   function applyDoubledGuard(b) {
     if (!b.guarding) return;
     b.ironGuard = true;
-    applyGuard(b, true, true);
+    syncEffectiveStats(b);
   }
   // Ends a ubu's super: Colossus shrinks back, Sticky ball is let go, and mastery/whiff refunds are awarded.
   function endSuper(b, bodies) {
-    if (b.colossusApplied) {
-      if (b.baseRadius) b.radius = b.baseRadius;
-      if (b.baseMass) b.mass = b.baseMass;
-      b.colossusApplied = false;
-    }
     if (b.holding) {
       b.holding = false;
       const ball = bodies?.find(o => o.team === -1);
@@ -318,6 +309,7 @@
       if (refund > 0) b.meter = Math.min(100, (b.meter || 0) + refund);
     }
     b.superActive = null; b.superTicks = 0; b.superHoldTicks = 0; b.shockwaveFired = false; b.superHit = false;
+    syncEffectiveStats(b);
   }
   function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, onSuper = null) {
     const isBall = a.team === -1 || b.team === -1;
@@ -420,7 +412,7 @@
             R = Infinity;
           } else {
             const normMass = (player.baseMass || player.mass) / 3;
-            const baseStab = player.baseStability ?? (player.guardBase ? player.guardBase.stability : (player.stability || 1));
+            const baseStab = player.baseStability ?? player.stability ?? 1;
             const guardMult = player.guarding ? (player.ironGuard ? 4.0 : 2.0) : 1.0;
             const colossusMult = player.superActive === 'colossus' ? 1.8 : 1.0;
             R = normMass * baseStab * (1 + delta * delta) * guardMult * colossusMult;
@@ -587,9 +579,9 @@
     }
   }
   let spareRadii = new Float64Array(7); // Broad-phase scratch, taken while a step uses it.
-  // Advances the fixed-step simulation by one discrete tick (DT = 1/240 s). Timers
-  // (superTicks, fireTicks, ironCooldownTicks, stuckTicks) decrement per tick; dt
-  // defaults to DT (passing dt = 0 resolves contacts and constraints instantaneously).
+  // Advances the fixed-step simulation by one discrete tick (DT = 1/240 s). Note: dt = 0 executes
+  // a zero-motion simulation tick (contacts and constraints are solved in place, while integer tick
+  // timers such as cooldowns and supers still decrement by 1).
   function step(bodies, dt = DT, onCollide = null, onWall = null, onShockwave = null, onSuper = null) {
     let stalwartHits = null;
     const guardedOnSuper = onSuper ? (key, action, a, b) => {
@@ -766,16 +758,12 @@
     for (const b of bodies) b.spinStrike = 0;
     bodies.forEach((b, i) => {
       if (b.team < 0) return;
+      syncEffectiveStats(b);
       // A daze lasts until the ubu's next turn starts, whether or not it launches.
       if (b.stunned) {
         b.vx = 0; b.vy = 0; b.omega = 0;
         b.stunned = false; b.daze = 0;
         return;
-      }
-      if (b.superActive === 'colossus' && !b.colossusApplied) {
-        b.colossusApplied = true;
-        b.radius *= SUPER.colossusRadius;
-        b.mass *= SUPER.colossusMass;
       }
       if (b.guarding) {
         b.vx *= GUARD_BRAKE; b.vy *= GUARD_BRAKE; b.omega *= GUARD_BRAKE; b.daze = 0;
@@ -825,10 +813,10 @@
       b.openingShot = false;
       b.spinStruck = false;
       b.guarding = false; b.ironGuard = false; b.ironCooldownTicks = 0;
-      applyGuard(b, false);
       if (!keepMotion) b.vx = b.vy = b.omega = 0;
       // In Pulse, a running super carries into the next turn until its time runs out.
       if (!keepMotion) endSuper(b, bodies);
+      syncEffectiveStats(b);
     }
     const ball = bodies.find(b => b.team === -1);
     if (ball) {
@@ -883,12 +871,10 @@
   function startTurn(bodies, plans, onSuper = null) {
     bodies.forEach((b, i) => {
       if (b.team < 0) return;
-      applyGuard(b, false);
       // A stunned (knocked-out) ubu is simply frozen: it cannot guard.
       b.guarding = Boolean(plans[i]?.guard) && !b.stunned;
       b.ironGuard = false;
       b.ironCooldownTicks = 0;
-      if (b.guarding) applyGuard(b, true, false);
       b.usedSuperThisTurn = Boolean(b.superActive) && !b.stunned;
       if (!b.stunned && (b.superArm || plans[i]?.superArm) && b.meter >= 100) {
         b.usedSuperThisTurn = true;
@@ -902,6 +888,7 @@
         b.superRefunded = false;
         if (['stalwart', 'colossus', 'ghost'].includes(b.superActive)) onSuper?.(b.superActive, 'launch', b);
       }
+      syncEffectiveStats(b);
     });
     launch(bodies, plans);
   }
@@ -960,6 +947,6 @@
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS,
       guards: [...guards].map(([index, held]) => ({ index, held })), ignition, goalTargets, goalTick };
   }
-  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, IRON_COOLDOWN_TICKS, ballOnFire, holder, dazeSlow, multiplier, launchSpeed, applyStats, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, IRON_COOLDOWN_TICKS, ballOnFire, holder, dazeSlow, multiplier, launchSpeed, syncEffectiveStats, applyStats, applyDoubledGuard, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

@@ -9,11 +9,10 @@
   const KEEP = 25, MAX_TITLE = 80;
   // Body fields a snapshot keeps, in file order: everything a turn's simulation reads or writes.
   const NUMBERS = ['x', 'y', 'vx', 'vy', 'omega', 'rotation', 'radius', 'mass', 'friction', 'grip', 'maxSpin', 'team', 'slot', 'curveFactor',
-    'sizeMult', 'baseMass', 'baseRadius', 'impulse', 'curveMult', 'bounciness', 'wallBounce', 'power', 'reach', 'strength', 'stability',
+    'sizeMult', 'baseMass', 'baseRadius', 'baseFriction', 'baseReach', 'baseStrength', 'baseStability', 'baseBounciness', 'impulse', 'curveMult', 'bounciness', 'wallBounce', 'power', 'reach', 'strength', 'stability',
     'meter', 'meterTick', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'ironCooldownTicks', 'pace', 'strikerPower', 'strikerTeam'];
-  const FLAGS = ['superArm', 'guarding', 'ironGuard', 'usedSuperThisTurn', 'superHit', 'superRefunded', 'openingShot', 'spinStruck', 'shockwaveFired', 'carded', 'colossusApplied', 'stunned', 'stunnedNext', 'onFire', 'holding'];
-  const GUARD = ['reach', 'friction', 'strength', 'stability', 'bounciness'];
-  const BODY = [...NUMBERS, ...FLAGS, 'superActive', 'equippedSuper', 'guardBase', 'stickOffset'];
+  const FLAGS = ['superArm', 'guarding', 'ironGuard', 'usedSuperThisTurn', 'superHit', 'superRefunded', 'openingShot', 'spinStruck', 'shockwaveFired', 'carded', 'stunned', 'stunnedNext', 'onFire', 'holding'];
+  const BODY = [...NUMBERS, ...FLAGS, 'superActive', 'equippedSuper', 'stickOffset'];
   const REQUIRED = ['x', 'y', 'vx', 'vy', 'omega', 'radius', 'mass', 'team'];
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
@@ -26,7 +25,6 @@
         if (value === undefined) continue;
         if (key === 'equippedSuper') out[key] = value ? value.id : null;
         else if (key === 'stickOffset') out[key] = value && { x: value.x, y: value.y };
-        else if (key === 'guardBase') out[key] = value && Object.fromEntries(GUARD.filter(k => value[k] !== undefined).map(k => [k, value[k]]));
         else out[key] = value;
       }
       return out;
@@ -38,8 +36,8 @@
       if (b.equippedSuper != null) {
         out.equippedSuper = { ...P.SUPERS[b.equippedSuper], bonusTicks: b.superBonusTicks || 0, bonusRefund: b.superBonusRefund || 0 };
       }
-      if (b.guardBase) out.guardBase = { ...b.guardBase };
       if (b.stickOffset) out.stickOffset = { ...b.stickOffset };
+      P.syncEffectiveStats(out);
       return out;
     });
   }
@@ -106,8 +104,8 @@
         : key === 'superActive' ? v !== null && !P.SUPERS.some(s => s.key === v)
         : key === 'equippedSuper' ? v !== null && !int(v, 0, P.SUPERS.length - 1)
         : key === 'stickOffset' ? v !== null && (exact(v, ['x', 'y']), !Number.isFinite(v.x) || !Number.isFinite(v.y))
-        : v !== null && (!object(v) || Object.keys(v).some(k => !GUARD.includes(k) || !Number.isFinite(v[k])))) fail();
-      out[key] = key === 'guardBase' && v ? Object.fromEntries(GUARD.filter(k => Object.hasOwn(v, k)).map(k => [k, v[k]])) : v;
+        : true) fail();
+      out[key] = v;
     }
     if (out.team !== (i < 3 ? 0 : i < 6 ? 1 : -1)) fail();
     return out;

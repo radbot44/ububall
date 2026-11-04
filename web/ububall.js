@@ -2022,9 +2022,9 @@
   function circle(x, y, r, color, width = 2) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
   function impulseGeometry(body, plan) {
     const activeSuper = body.superActive || ((body.superArm && (body.meter ?? 0) >= 100) ? body.equippedSuper?.key : null);
-    const isColossus = activeSuper === 'colossus' || body.colossusApplied;
+    const isColossus = activeSuper === 'colossus';
     const isStalwart = activeSuper === 'stalwart';
-    const effRadius = body.radius * (activeSuper === 'colossus' && !body.colossusApplied ? (P.SUPER?.colossusRadius || 1.8) : 1);
+    const effRadius = body.radius * (isColossus && body.superActive !== 'colossus' ? (P.SUPER?.colossusRadius || 1.8) : 1);
     const superScale = isColossus ? (P.SUPER?.colossusLaunch || 0.75) : (isStalwart ? (P.SUPER?.stalwartLaunch || 0.5) : 1);
     const scale = 110 * ((body.impulse || P.IMPULSE) / P.IMPULSE) * superScale;
     const ringR = Math.max(effRadius, body.reach || effRadius, 18) + 2;
@@ -2113,10 +2113,10 @@
   function dirtyPrediction() { predictionRev++; }
   function predictionKey() {
     const ball = bodies[6];
-    let k = `${predictionRev}|${turn}|${matchMode}|${ball ? ball.x.toFixed(1) + ',' + ball.y.toFixed(1) : ''}`;
+    let k = `${predictionRev}|${turn}|${matchMode}|${fouls.crease[0] ? 1 : 0},${fouls.crease[1] ? 1 : 0}|${ball ? ball.x + ',' + ball.y : ''}`;
     for (let i = 0; i < 3; i++) {
       const p = plans[i], b = bodies[i];
-      if (p) k += `|${p.angle.toFixed(4)},${p.power.toFixed(4)},${p.spin || 0},${p.guard ? 1 : 0},${b?.superArm || p.superArm ? 1 : 0}`;
+      if (p) k += `|${p.angle},${p.power},${p.spin || 0},${p.guard ? 1 : 0},${b?.superArm || p.superArm ? 1 : 0},${b?.carded ? 1 : 0}`;
     }
     return k;
   }
