@@ -1465,6 +1465,7 @@
   }
   // Between turns, guarding ubus stay on guard (keeping their faded arrow); otherwise plans clear.
   function resetPlans(keepGuard = false) {
+    dirtyPrediction();
     startPlanClock();
     if (!online?.active) planBanner = banner('Plan your shot…', 1300);
     plans = Array.from({ length: 3 }, (_, i) => keepGuard && plans?.[i]?.guard ? { ...plans[i] } : idlePlan());
@@ -1976,6 +1977,7 @@
         say('Turn in motion…');
       } else {
         phase = 'plan';
+        if (typeof dirtyPrediction === 'function') dirtyPrediction();
         if (Array.isArray(saved.plans) && saved.plans.length === 3) {
           plans = saved.plans;
         } else {
@@ -2107,11 +2109,20 @@
     c.beginPath(); c.arc(64, 64, 60, 0, Math.PI * 2); c.fill();
     impactStamps.set(color, stamp); return stamp;
   }
-  let predictionCache = null;
+  let predictionCache = null, predictionRev = 0;
+  function dirtyPrediction() { predictionRev++; }
+  function predictionKey() {
+    const ball = bodies[6];
+    let k = `${predictionRev}|${turn}|${matchMode}|${ball ? ball.x.toFixed(1) + ',' + ball.y.toFixed(1) : ''}`;
+    for (let i = 0; i < 3; i++) {
+      const p = plans[i], b = bodies[i];
+      if (p) k += `|${p.angle.toFixed(4)},${p.power.toFixed(4)},${p.spin || 0},${p.guard ? 1 : 0},${b?.superArm || p.superArm ? 1 : 0}`;
+    }
+    return k;
+  }
   const predictionLayer = {};
   function drawPrediction(home, away) {
-    // Include all state and all plans: changing any teammate invalidates the one simulation.
-    const key = JSON.stringify([bodies, plans, fouls]);
+    const key = predictionKey();
     if (predictionCache?.key !== key) {
       const data = P.predictTurn(bodies, plans);
       predictionCache = { key, data, fouls: predictFouls(data) };
@@ -4402,6 +4413,7 @@
       const b = bodies[selected];
       if (!classicMode() && b && b.meter >= 100 && phase === 'plan' && !b.stunned) {
         b.superArm = !b.superArm;
+        dirtyPrediction();
         sync(); draw();
         saveActiveMatch();
       }
@@ -4760,6 +4772,7 @@
       const armed = bodies.slice(0, 3).map(b => Boolean(b.superArm));
       if (fresh || !s.connected.every(Boolean) || s.locked[s.seat]) drag = null;
       if (fresh) {
+        dirtyPrediction();
         onlineTurn = s.turn; scoringPlayer = null; clearEffects();
         const ball = s.game.bodies[6];
         if (s.phase === 'plan' && ball.x === 500 && ball.y === 300) kickoffGlow = 1;

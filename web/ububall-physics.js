@@ -101,6 +101,29 @@
       : (body.baseMass || body.mass) / body.mass);
     return (body.impulse || IMPULSE) / 3 * superScale * (body.sizeMult || 1) ** SIZE.launch * (1 - dazeSlow(body));
   }
+  function applyGuard(b, active, iron = false) {
+    if (active) {
+      if (!b.guardBase) {
+        b.guardBase = { reach: b.reach, friction: b.friction, strength: b.strength, stability: b.stability, bounciness: b.bounciness };
+      }
+      const base = b.guardBase;
+      const mult = iron ? 1.5 : 1.25;
+      b.reach = Math.max(b.radius, Math.min(37.5, (base.reach || b.radius) * mult));
+      b.friction = Math.min(iron ? 270 : 225, (base.friction || 150) * mult);
+      b.strength = Math.min(iron ? 2.0 : 1.5, (base.strength || 1) * mult);
+      b.stability = Math.min(iron ? 2.0 : 1.5, (base.stability || 1) * mult);
+      b.bounciness = iron ? Math.max(0.4, (base.bounciness || 1) * 0.5) : Math.max(2 / 3, (base.bounciness || 1) * 0.75);
+    } else {
+      if (b.guardBase) {
+        b.reach = b.guardBase.reach;
+        b.friction = b.guardBase.friction;
+        b.strength = b.guardBase.strength;
+        b.stability = b.guardBase.stability;
+        b.bounciness = b.guardBase.bounciness;
+      }
+      b.guardBase = null;
+    }
+  }
   function applyStats(body, raw = {}) {
     // Mass spans a narrower range than other stats (0.82–1.22×, tuning): weight helps every shot,
     // check and block without a launch-speed cost, so a full 2/3–1.5× span dominated.
@@ -271,13 +294,9 @@
   }
   // Doubled effects of regular guard when an Iron Save hits, for the rest of the turn.
   function applyDoubledGuard(b) {
-    if (!b.guardBase) return;
-    const base = b.guardBase;
-    b.reach = Math.max(b.radius, Math.min(37.5, (base.reach || b.radius) * 1.5));
-    b.friction = Math.min(270, (base.friction || 150) * 1.5);
-    b.strength = Math.min(2.0, (base.strength || 1) * 1.5);
-    b.stability = Math.min(2.0, (base.stability || 1) * 1.5);
-    b.bounciness = Math.max(0.4, (base.bounciness || 1) * 0.5);
+    if (!b.guarding) return;
+    b.ironGuard = true;
+    applyGuard(b, true, true);
   }
   // Ends a ubu's super: Colossus shrinks back, Sticky ball is let go, and mastery/whiff refunds are awarded.
   function endSuper(b, bodies) {
@@ -401,7 +420,7 @@
             R = Infinity;
           } else {
             const normMass = (player.baseMass || player.mass) / 3;
-            const baseStab = player.guardBase ? player.guardBase.stability : (player.stability || 1);
+            const baseStab = player.baseStability ?? (player.guardBase ? player.guardBase.stability : (player.stability || 1));
             const guardMult = player.guarding ? (player.ironGuard ? 4.0 : 2.0) : 1.0;
             const colossusMult = player.superActive === 'colossus' ? 1.8 : 1.0;
             R = normMass * baseStab * (1 + delta * delta) * guardMult * colossusMult;
@@ -568,6 +587,9 @@
     }
   }
   let spareRadii = new Float64Array(7); // Broad-phase scratch, taken while a step uses it.
+  // Advances the fixed-step simulation by one discrete tick (DT = 1/240 s). Timers
+  // (superTicks, fireTicks, ironCooldownTicks, stuckTicks) decrement per tick; dt
+  // defaults to DT (passing dt = 0 resolves contacts and constraints instantaneously).
   function step(bodies, dt = DT, onCollide = null, onWall = null, onShockwave = null, onSuper = null) {
     let stalwartHits = null;
     const guardedOnSuper = onSuper ? (key, action, a, b) => {
@@ -802,8 +824,8 @@
       b.spinStrike = 0;
       b.openingShot = false;
       b.spinStruck = false;
-      if (b.guardBase) Object.assign(b, b.guardBase);
-      b.guardBase = null; b.guarding = false; b.ironGuard = false; b.ironCooldownTicks = 0;
+      b.guarding = false; b.ironGuard = false; b.ironCooldownTicks = 0;
+      applyGuard(b, false);
       if (!keepMotion) b.vx = b.vy = b.omega = 0;
       // In Pulse, a running super carries into the next turn until its time runs out.
       if (!keepMotion) endSuper(b, bodies);
@@ -852,209 +874,21 @@
   }
   // The goal the ball would enter with one body taken off the field, touching no ubu and no boards.
   function wouldScore(bodies, removed, ticks = 960) { return ballRun(bodies, { removed, ticks }).goal; }
-  function segmentBlocked(ax, ay, bx, by, obstacles, clearance = 38) {
-    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
-    if (len2 < 1) return null;
-    let best = null, bestT = 2;
-    for (const ob of obstacles) {
-      const t = Math.max(0, Math.min(1, ((ob.x - ax) * dx + (ob.y - ay) * dy) / len2));
-      if (t <= 0.05 || t >= 0.98) continue;
-      const px = ax + t * dx, py = ay + t * dy;
-      const dist = Math.hypot(ob.x - px, ob.y - py);
-      if (dist < (ob.radius || 25) + clearance && t < bestT) {
-        bestT = t;
-        best = { body: ob, dist, side: (dx * (ob.y - ay) - dy * (ob.x - ax)) >= 0 ? 1 : -1 };
-      }
-    }
-    return best;
-  }
+  // Baseline CPU planner moves: delegated to ububallCPU (shared/ububall-cpu.js).
   function cpuPlans(bodies, random = Math.random, scores = [0, 0]) {
-    const ball = bodies[6], humans = bodies.slice(0, 3), players = bodies.slice(3, 6);
-    const homeScore = scores?.[0] ?? 0, cpuScore = scores?.[1] ?? 0;
-    const deficit = Math.max(0, homeScore - cpuScore);
-    const matchPt = (homeScore >= 4 && cpuScore >= 4) ? 1 : (homeScore >= 4 || cpuScore >= 4) ? 0.85 : 0;
-    const pressure = Math.min(1, Math.max(deficit === 1 ? 0.45 : deficit === 2 ? 0.75 : deficit >= 3 ? 1 : 0, matchPt));
-
-    const traits = players.map(b => {
-      const p = b.personality || {};
-      const agg = Math.max(0, Math.min(1, (p.aggression ?? 31.5) / 63));
-      const cre = Math.max(0, Math.min(1, (p.creativity ?? 31.5) / 63));
-      const tmw = Math.max(0, Math.min(1, (p.teamwork ?? 31.5) / 63));
-      const clu = Math.max(0, Math.min(1, (p.clutch ?? 31.5) / 63));
-      const surge = pressure * (clu - 0.5) * 2;
-      return { agg, cre, tmw, clu, surge };
-    });
-
-    const strikeScore = i => {
-      const b = players[i], { agg, surge } = traits[i];
-      const d = Math.hypot(b.x - ball.x, b.y - ball.y);
-      return -d + (b.x >= ball.x - 10 ? 75 : -45) + (agg - 0.5) * 110 + Math.max(0, surge) * 35 - (b.stunned ? 10000 : 0);
-    };
-    const s0 = strikeScore(0), s1 = strikeScore(1), s2 = strikeScore(2);
-    const strikerIdx = s1 > s0 ? (s2 > s1 ? 2 : 1) : (s2 > s0 ? 2 : 0);
-    const rem = [0, 1, 2].filter(i => i !== strikerIdx);
-
-    const anchorScore = i => {
-      const b = players[i], { agg, surge } = traits[i];
-      const sKey = b.equippedSuper?.key || b.superKey;
-      const dGoal = Math.hypot(b.x - 850, b.y - 300);
-      return (1 - agg) * 170 - dGoal * 0.45 - surge * 40 + (sKey === 'stalwart' ? 60 : 0) + (b.slot === 0 ? 8 : 0);
-    };
-    const anchorIdx = anchorScore(rem[0]) >= anchorScore(rem[1]) ? rem[0] : rem[1];
-    const wingIdx = rem.find(i => i !== anchorIdx);
-    const wing = players[wingIdx], wTrait = traits[wingIdx];
-    const wingOpenY = ball.y < 300 ? 390 : 210;
-    const wingOpenX = Math.max(200, Math.min(760, ball.x - 90 + (1 - wTrait.agg) * 180 - Math.max(0, wTrait.surge) * 70));
-
-    return players.map((b, idx) => {
-      if (b.stunned) return { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
-      const { agg, cre, tmw, surge } = traits[idx];
-      const sKey = b.equippedSuper?.key || b.superKey;
-      const canSuper = (b.meter ?? 0) >= 100 && !b.stunned;
-      const reachR = ballHitRadius(b);
-      const contactDist = reachR + ball.radius - 2;
-      const dBall = Math.hypot(b.x - ball.x, b.y - ball.y);
-
-      let tx = b.x, ty = b.y, spin = 0, superArm = false, extraDrive = 0;
-
-      if (idx === strikerIdx) {
-        if (b.x < ball.x - 14) {
-          if (canSuper && sKey === 'magnet' && dBall < 180) {
-            superArm = true;
-            tx = 60; ty = 300 + (b.y >= ball.y ? 45 : -45);
-            extraDrive = 160;
-          } else {
-            const sideY = b.y < ball.y ? -48 : 48;
-            tx = Math.min(890, ball.x + 68);
-            ty = Math.max(95, Math.min(505, ball.y + sideY * (1 - Math.abs(b.x - ball.x) / 400)));
-            if (cre > 0.3) spin = (sideY < 0 ? 0.55 : -0.55) * cre;
-          }
-        } else {
-          const humanGoalie = humans.reduce((best, h) =>
-            (h.x - 120) ** 2 + (h.y - 300) ** 2 < (best.x - 120) ** 2 + (best.y - 300) ** 2 ? h : best, humans[0]);
-          const cornerY = humanGoalie && humanGoalie.y >= 300 ? 252 : 348;
-          const baseGoalY = 300 + Math.max(-34, Math.min(34, (ball.y - 300) * 0.22));
-          const goalY = baseGoalY + (cornerY - baseGoalY) * Math.max(0, Math.min(1, surge * 0.75 + cre * 0.25));
-          const goalX = 60;
-
-          const shotBlock = segmentBlocked(ball.x, ball.y, goalX, goalY, humans, 24);
-          const approachBlock = segmentBlocked(b.x, b.y, ball.x, ball.y, humans, 20);
-
-          let aimBallX = goalX, aimBallY = goalY;
-          if (tmw >= 0.58 && surge < 0.45 && (shotBlock || ball.x > 640) && wing.x < ball.x + 40) {
-            aimBallX = Math.max(150, wing.x - 45);
-            aimBallY = Math.max(110, Math.min(490, wing.y + (wing.y < 300 ? 25 : -25)));
-          } else if (cre >= 0.55 && shotBlock && !(canSuper && (sKey === 'cannonball' || sKey === 'shockwave'))) {
-            if (cre >= 0.72 && Math.abs(ball.y - 300) > 45) {
-              aimBallX = (ball.x + goalX) * 0.5;
-              aimBallY = ball.y < 300 ? 78 : 522;
-            } else {
-              spin = -shotBlock.side * Math.min(1, 0.45 + cre * 0.55);
-            }
-          }
-          if (spin === 0 && cre > 0.35) {
-            spin = Math.max(-1, Math.min(1, ((b.y - ball.y) / 180) * cre * 0.75));
-          }
-
-          const bdx = aimBallX - ball.x, bdy = aimBallY - ball.y, bd = Math.hypot(bdx, bdy) || 1;
-          const jitterScale = Math.max(0.15, 1 - Math.max(0, -surge) * 0.75);
-          const jitter = (random() - 0.5) * 10 * jitterScale;
-          tx = ball.x - (bdx / bd) * contactDist;
-          ty = ball.y - (bdy / bd) * contactDist + jitter;
-          extraDrive = 220 + agg * 50 + surge * 75;
-
-          if (canSuper) {
-            if (sKey === 'cannonball' && dBall < 340) superArm = true;
-            else if (sKey === 'sticky' && dBall < 300) superArm = true;
-            else if (sKey === 'ghost' && (approachBlock || dBall < 280)) superArm = true;
-            else if (sKey === 'magnet' && dBall < 230) superArm = true;
-            else if (sKey === 'shockwave' && dBall < 260 && (shotBlock || approachBlock)) superArm = true;
-            else if (sKey === 'knockout' && approachBlock && dBall < 280) superArm = true;
-            else if (sKey === 'colossus' && dBall < 220 && (agg > 0.55 || surge > 0.3)) superArm = true;
-          }
-        }
-      } else if (idx === anchorIdx) {
-        const anchorX = Math.max(700, Math.min(875, 855 - agg * 65 - Math.max(0, surge) * 95 + Math.max(0, -surge) * 18));
-        const ySpan = 55 + agg * 25;
-        const anchorY = Math.max(300 - ySpan, Math.min(300 + ySpan, ball.y));
-
-        if (ball.x > 740 && b.x >= ball.x - 8 && dBall < 170 && (agg > 0.25 || ball.x > 810)) {
-          const clearY = ball.y < 300 ? 140 : 460;
-          const bdx = 200 - ball.x, bdy = clearY - ball.y, bd = Math.hypot(bdx, bdy) || 1;
-          tx = ball.x - (bdx / bd) * contactDist;
-          ty = ball.y - (bdy / bd) * contactDist;
-          extraDrive = 190;
-        } else {
-          tx = anchorX; ty = anchorY;
-        }
-
-        if (canSuper) {
-          const inCrease = b.x >= 770 && b.y >= 220 && b.y <= 380;
-          const threat = ball.x > 480 || pressure >= 0.45;
-          if (sKey === 'stalwart' && inCrease && threat && Math.hypot(tx - b.x, ty - b.y) < 45) superArm = true;
-          else if (sKey === 'colossus' && (inCrease || ball.x > 580)) superArm = true;
-          else if ((sKey === 'shockwave' || sKey === 'sticky') && ball.x > 680 && dBall < 220) superArm = true;
-          else if (sKey === 'magnet' && ball.x > 650 && dBall < 190) superArm = true;
-        }
-      } else {
-        const nearestThreat = humans.reduce((best, h) =>
-          (h.x - ball.x) ** 2 + (h.y - ball.y) ** 2 < (best.x - ball.x) ** 2 + (best.y - ball.y) ** 2 ? h : best, humans[0]);
-        const dThreat = nearestThreat ? Math.hypot(b.x - nearestThreat.x, b.y - nearestThreat.y) : 999;
-
-        if (nearestThreat && (agg > tmw + 0.18 || (canSuper && (sKey === 'knockout' || sKey === 'shockwave'))) && dThreat < 280 && nearestThreat.x > 280) {
-          tx = nearestThreat.x; ty = nearestThreat.y;
-          extraDrive = 150 + agg * 70;
-          if (canSuper && (sKey === 'knockout' || sKey === 'shockwave' || sKey === 'colossus')) superArm = true;
-        } else {
-          tx = wingOpenX; ty = wingOpenY;
-          if (cre > 0.5) spin = (ty < 300 ? 0.35 : -0.35) * cre;
-          if (canSuper) {
-            if (sKey === 'magnet' && dBall < 190) superArm = true;
-            else if (sKey === 'ghost' && segmentBlocked(b.x, b.y, tx, ty, humans, 18)) superArm = true;
-            else if (sKey === 'colossus' && (dBall < 220 || surge > 0.4)) superArm = true;
-          }
-        }
-      }
-
-      const dx = tx - b.x, dy = ty - b.y, distance = Math.hypot(dx, dy);
-      const superLaunchScale = (superArm && sKey === 'colossus' && !b.colossusApplied) ? SUPER.colossusLaunch
-        : (superArm && sKey === 'stalwart' && b.superActive !== 'stalwart' ? SUPER.stalwartLaunch : 1);
-      const maxV = launchSpeed(b) * superLaunchScale;
-      let angle = Math.atan2(dy, dx);
-      const power = distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * b.friction * Math.max(0, distance + extraDrive)) / maxV);
-
-      if (Math.abs(spin) > 0.01 && power > 0.05) {
-        const omega0 = spin * (b.maxSpin || 15);
-        const curveF = b.curveFactor ?? SKATER_CURVE;
-        const v0 = Math.max(60, power * maxV);
-        const estT = Math.min(1.2, distance / (v0 * 0.72));
-        const avgOmega = Math.sign(omega0) * Math.max(0, Math.abs(omega0) - SPIN_DECAY / 2 * estT);
-        angle -= avgOmega * curveF * estT * 0.5;
-      }
-
-      // A baseline ubu with nowhere to go brakes in place.
-      if (!power) return { angle: 0, power: 0, spin: 0, superArm: Boolean(superArm), guard: true };
-      return { angle, power, spin: Math.max(-1, Math.min(1, spin)), superArm: Boolean(superArm), guard: false };
-    });
+    const CPU = typeof module === 'object' && module.exports ? require('../shared/ububall-cpu.js') : root.ububallCPU;
+    return (CPU?.cpuPlans || CPU?.baseline)(bodies, random, scores);
   }
   // Shared turn preparation for gameplay and prediction. Supers activate before launch.
   function startTurn(bodies, plans, onSuper = null) {
     bodies.forEach((b, i) => {
       if (b.team < 0) return;
-      if (b.guardBase) Object.assign(b, b.guardBase);
-      b.guardBase = null;
+      applyGuard(b, false);
       // A stunned (knocked-out) ubu is simply frozen: it cannot guard.
       b.guarding = Boolean(plans[i]?.guard) && !b.stunned;
       b.ironGuard = false;
       b.ironCooldownTicks = 0;
-      if (b.guarding) {
-        b.guardBase = { reach: b.reach, friction: b.friction, strength: b.strength, stability: b.stability, bounciness: b.bounciness };
-        b.reach = Math.max(b.radius, Math.min(37.5, (b.reach || b.radius) * 1.25));
-        b.friction = Math.min(225, b.friction * 1.25);
-        b.strength = Math.min(1.5, (b.strength || 1) * 1.25);
-        b.stability = Math.min(1.5, (b.stability || 1) * 1.25);
-        b.bounciness = Math.max(2 / 3, (b.bounciness || 1) * .75);
-      }
+      if (b.guarding) applyGuard(b, true, false);
       b.usedSuperThisTurn = Boolean(b.superActive) && !b.stunned;
       if (!b.stunned && (b.superArm || plans[i]?.superArm) && b.meter >= 100) {
         b.usedSuperThisTurn = true;
