@@ -430,8 +430,8 @@
   // `effects: false` resolves the same turn without presentation-only work (hit-stop look-aheads,
   // the replay's starting snapshot), for fast CPU search. CPU search may also end a turn early: after
   // `ticks`, or once `decided(bodies)` reports its outcome is clear, and may `watch` contacts and
-  // board hits (step callbacks). Matches pass none of these.
-  function resolveTurn(P, state, moves, { effects = true, ticks: maxTicks = Infinity, decided = null, watch = null } = {}) {
+  // board hits (step callbacks). `preservePartial` leaves unfinished search states unfinalized.
+  function resolveTurn(P, state, moves, { effects = true, ticks: maxTicks = Infinity, decided = null, watch = null, preservePartial = false } = {}) {
     if (state.version !== VERSION || !MODES.includes(state.mode)) throw new Error('Unsupported match rules.');
     if (!Array.isArray(moves) || moves.length !== 6) throw new Error('Both teams must submit.');
     const plans = [...validatePlans(moves.slice(0, 3)), ...validatePlans(moves.slice(3))];
@@ -468,14 +468,18 @@
     // A round runs from kickoff to goal; scoring on its first turn is an ace.
     const ace = goal !== null && !state.roundTurns;
     const call = goal === null ? { scorer: null, assist: null, own: false, label: null } : callGoal(bodies, play, tally, goal, ace);
-    next.winner = finishTurn(P, bodies, next.stats, next.scores, goal, state.mode, { ace: ace && !call.own ? call.scorer : null, assist: call.assist }, next.fouls, tally);
-    if (goal !== null) noteScore(tally, next.scores);
-    next.roundTurns = goal === null ? (state.roundTurns || 0) + 1 : 0;
+    // A search cutoff is not a real turn end: keep live velocity and supers, and do not call fouls.
+    const partial = preservePartial && goal === null && ticks < turnTicks(state.mode) && !P.settled(bodies);
+    if (!partial) {
+      next.winner = finishTurn(P, bodies, next.stats, next.scores, goal, state.mode, { ace: ace && !call.own ? call.scorer : null, assist: call.assist }, next.fouls, tally);
+      if (goal !== null) noteScore(tally, next.scores);
+      next.roundTurns = goal === null ? (state.roundTurns || 0) + 1 : 0;
+      next.turn++;
+      next.phase = next.winner !== null ? 'over' : goal !== null ? 'goal' : 'plan';
+    }
     next.clock = clock + ticks;
     // A goal or a corner reset starts a fresh play.
     Object.assign(next, goal === null && !next.fouls.faceoff ? play : newPlay(), { tally });
-    next.turn++;
-    next.phase = next.winner !== null ? 'over' : goal !== null ? 'goal' : 'plan';
     return { state: next, replay: { version: VERSION, turn: state.turn, plans, ticks, goal, scorer: call.scorer, assist: call.assist,
       label: call.label, saves: saved, struck, stops, initialBodies } };
   }

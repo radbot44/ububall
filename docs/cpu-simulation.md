@@ -52,7 +52,7 @@ Pass `--config personal/cpu-experiment.json` with an `a` and/or `b` profile. Eac
 
 Omitted values inherit the preset and default weights in `shared/ububall-cpu.js`. Config profiles override `--a`/`--b`. Candidate counts are bounded to 1–1000, opponent scenarios to 1–3, risk to 0–1 and weights to nonnegative finite values. Use identical seed ranges, both sides and both modes when comparing changes. Validate changes on additional seeds not used for tuning. Avoid treating repeated kickoff wins or a small sweep against the old CPU as proof of a balanced difficulty ladder.
 
-The search is one turn deep. It does not yet model a human's habits, optimize multi-turn combinations, or prove that a pass is received. It judges those candidate plays by their actual team outcome. More search is not guaranteed to improve results against every unseen opponent.
+The search is one turn deep. It does not yet model a human's habits, optimize multi-turn combinations, or prove that a pass is received. It judges those candidate plays by their simulated team outcome. A Standard or Classic search truncated at two seconds evaluates an in-flight physics snapshot without applying end-of-turn stopping, super expiry or fouls; completed turns still receive normal cleanup. More search is not guaranteed to improve results against every unseen opponent.
 
 ## Measure stat value
 

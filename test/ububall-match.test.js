@@ -229,6 +229,40 @@ test('Pulse turns stop after one second and carry momentum into the next turn', 
   const standard=M.resolveTurn(P,flat,moves);
   assert.ok(standard.replay.ticks>240); assert.equal(standard.state.bodies[1].vx,0);
 });
+test('search horizon snapshots do not stop motion or issue end-of-turn fouls', () => {
+  const state = pulseState('standard');
+  Object.assign(state.bodies[0], { x: 90, y: 255 });
+  Object.assign(state.bodies[1], { x: 90, y: 345 });
+  const moves = Array.from({ length: 6 }, idle);
+  moves[2] = { ...idle(), angle: 0, power: 1 };
+  const interim = M.resolveTurn(P, state, moves, { effects: false, ticks: 480, preservePartial: true });
+  const forcedEnd = M.resolveTurn(P, state, moves, { effects: false, ticks: 480 });
+  assert.equal(interim.replay.ticks, 480);
+  assert.equal(interim.state.turn, state.turn);
+  assert.ok(Math.hypot(interim.state.bodies[2].vx, interim.state.bodies[2].vy) > 10);
+  assert.deepEqual(interim.state.fouls.crease, [false, false]);
+  assert.equal(forcedEnd.state.turn, state.turn + 1);
+  assert.equal(forcedEnd.state.bodies[2].vx, 0);
+  assert.equal(forcedEnd.state.fouls.crease[0], true);
+});
+test('search snapshots keep active supers until the actual Pulse turn boundary', () => {
+  const state = pulseState('pulse'), body = state.bodies[2];
+  body.equippedSuper = P.SUPERS[5];
+  body.superActive = 'colossus';
+  body.superTicks = 600;
+  P.syncEffectiveStats(body);
+  const moves = Array.from({ length: 6 }, idle);
+  moves[2] = { ...idle(), angle: 0, power: 1 };
+  const interim = M.resolveTurn(P, state, moves, { effects: false, ticks: 120, preservePartial: true });
+  assert.equal(interim.state.turn, state.turn);
+  assert.equal(interim.state.bodies[2].superActive, 'colossus');
+  assert.equal(interim.state.bodies[2].superTicks, 480);
+  const complete = M.resolveTurn(P, state, moves, { effects: false, ticks: 480, preservePartial: true });
+  assert.equal(complete.replay.ticks, 240);
+  assert.equal(complete.state.turn, state.turn + 1);
+  assert.equal(complete.state.bodies[2].superActive, 'colossus');
+  assert.equal(complete.state.bodies[2].superTicks, 360);
+});
 test('guard is explicit and brakes a moving ubu', () => {
   const state=pulseState('pulse'); Object.assign(state.bodies[1],{vx:300,vy:-200});
   const guard=Array.from({length:6},idle); guard[1].guard=true;

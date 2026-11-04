@@ -10,7 +10,7 @@
       plan(state, config, team = 1) {
         cancel();
         const snapshot = structuredClone(state);
-        for (const b of snapshot.bodies) { b.superArm = false; b.superActive = null; }
+        for (const b of snapshot.bodies) b.superArm = false;
         return new Promise(resolve => {
           let worker, timer, done = false;
           const finish = (value, keep = false) => {
