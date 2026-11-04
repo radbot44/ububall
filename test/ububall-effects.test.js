@@ -75,9 +75,9 @@ test('aura sprites reuse rounded radii and evict stale entries', () => {
 
 test('straight vertical shots skip threat simulation, but curved shots do not', () => {
   let steps = 0;
-  const ball = { x: 500, y: 300, vx: 0, vy: 600, omega: 0, curveFactor: .045 };
+  const ball = { x: 500, y: 300, vx: 0, vy: 600, omega: 0 };
   const bodies = Array.from({ length: 6 }, () => ({})).concat(ball);
-  const P = { holder: () => false, DT: 1 / 240, step() { steps++; return null; } };
+  const P = { ...require('../web/ububall-physics.js'), step() { steps++; return null; } };
   const code = section('function goalThreat() {', '// Net ripples and board flex');
   vm.runInNewContext(code + '\ngoalThreat();', { P, bodies });
   assert.equal(steps, 0);

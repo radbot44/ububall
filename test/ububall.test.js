@@ -938,7 +938,7 @@ test('curve strengthens spin strikes and bends the ball its ubu strikes', () => 
   const [low, high] = [shot(0), shot(255)];
   assert.ok(Math.abs(high.omega) > Math.abs(low.omega));
   assert.equal(Math.sign(high.omega), Math.sign(low.omega)); // Still counter-rotating, never reversed.
-  assert.ok(high.curveFactor > low.curveFactor);
+  assert.ok(P.ballCurveFactor(high) > P.ballCurveFactor(low));
 });
 test('hard checks daze the next launch, stack, and Stability resists them', () => {
   const check = (stability, hits) => {

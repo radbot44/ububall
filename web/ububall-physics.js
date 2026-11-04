@@ -2,18 +2,22 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 15;
+  const VERSION = 19;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IRON_COOLDOWN_TICKS = 48; // ~200 ms at 240 Hz DT: cooldown after an Iron Save
   const IMPULSE = 3 * MAX_SPEED;
-  const SKATER_CURVE = .06, BALL_CURVE = .045;
+  const SKATER_CURVE = .06, BALL_CURVE = .06, BURNING_BALL_CURVE = .08;
   const AIR_DRAG = .00015; // Quadratic drag on the ball, strongest on fast shots; ubus have none.
   const SPIN_DECAY = 5; // Rad/s of spin every body loses each second.
   const STRIKE_GAIN = 1, CLOSE_SPIN_GAIN = 2; // Spin strike multiplier from range and at point blank.
   const STRIKE_POWER = .5; // Point-blank strike's extra ball speed at full spin, as a share of the ubu's speed.
   const GUARD_BRAKE = .25; // Share of velocity and spin a guarding ubu keeps when its turn starts.
-  const WALL_BOUNCE = .82; // Share of speed into the boards that comes back out.
+  const SURFACES = Object.freeze({
+    wall: { restitution: .82, ubuRestitutionCap: .95, gripScale: 1, meteorBank: true },
+    post: { restitution: .96, ubuRestitutionCap: 1, gripScale: 1, meteorBank: true },
+    net: { restitution: .60, ubuRestitutionCap: .95, gripScale: 1, meteorBank: false },
+  });
   // Size trade-offs (tuning): as powers of the size multiplier, small ubus launch faster, curve and
   // re-steer more and strike spin harder; big ubus lose more speed off the boards.
   const SIZE = Object.freeze({ launch: -.28, agility: -.5, strike: -.5, boards: -.5 });
@@ -36,6 +40,9 @@
   const HOT_DRIVE = 100;
   function ballOnFire(ball) {
     return Boolean(ball?.onFire);
+  }
+  function ballCurveFactor(ball, burning = ballOnFire(ball)) {
+    return (burning ? BURNING_BALL_CURVE : BALL_CURVE) * (ball.curveMult ?? 1);
   }
   // A slowing that counts against the pace takes the same share off it.
   function countSlowing(ball, before) {
@@ -137,7 +144,6 @@
     body.curveMult = multiplier(raw.curve ?? 127);
     body.curveFactor = SKATER_CURVE * body.curveMult * body.sizeMult ** SIZE.agility;
     body.baseBounciness = multiplier(raw.bounciness ?? 127);
-    body.wallBounce = Math.min(.95, WALL_BOUNCE * body.baseBounciness * body.sizeMult ** SIZE.boards);
     body.power = multiplier(raw.power ?? 127);
     body.baseReach = Math.max(body.baseRadius, 25 * multiplier(raw.reach ?? 127), 18);
     body.baseStrength = multiplier(raw.strength ?? 127);
@@ -156,7 +162,7 @@
         baseRadius: 25, baseMass: 3, baseFriction: 150, baseReach: 25, baseStrength: 1, baseStability: 1, baseBounciness: 1,
         grip: .3, maxSpin: 15, omega: 0, rotation: 0, ironGuard: false, ironCooldownTicks: 0, team, slot: i });
     }
-    bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveFactor: BALL_CURVE, omega: 0, rotation: 0, team: -1, fireTicks: 0, onFire: false, pace: 0, strikerPower: 1, strikerTeam: -1 });
+    bodies.push({ x: 500, y: 300, vx: 0, vy: 0, radius: 18, mass: 1, friction: 85, grip: .3, maxSpin: 8, curveMult: 1, omega: 0, rotation: 0, team: -1, fireTicks: 0, onFire: false, pace: 0, strikerPower: 1, strikerTeam: -1 });
     return bodies;
   }
   // Counts boards and contacts resolved, so a collision pass that resolved nothing ends the passes.
@@ -167,13 +173,16 @@
     const velocity = b.vx * nx + b.vy * ny;
     if (velocity > 0) {
       b.spinStrike = 0; // A wall bounce spends a launching ubu's spin strike.
-      const isMeteor = b.team === -1 && ballOnFire(b) && (wallType === 'wall' || wallType === 'post');
+      const surface = SURFACES[wallType];
+      const isMeteor = b.team === -1 && ballOnFire(b) && surface.meteorBank;
       const preSpeed = isMeteor ? Math.hypot(b.vx, b.vy) : 0;
-      const rebound = 1 + (b.wallBounce ?? WALL_BOUNCE);
+      const restitution = b.team === -1 ? surface.restitution
+        : Math.min(surface.ubuRestitutionCap, surface.restitution * (b.bounciness ?? 1) * (b.sizeMult ?? 1) ** SIZE.boards);
+      const rebound = 1 + restitution;
       b.vx -= rebound * velocity * nx; b.vy -= rebound * velocity * ny;
       const tx = -ny, ty = nx;
       const slip = b.vx * tx + b.vy * ty + b.omega * b.radius;
-      const limit = b.grip * rebound * velocity * b.mass;
+      const limit = (b.grip * surface.gripScale) * rebound * velocity * b.mass;
       const impulse = Math.max(-limit, Math.min(limit, -slip * b.mass / 3));
       b.vx += impulse * tx / b.mass; b.vy += impulse * ty / b.mass;
       b.omega += 2 * impulse / (b.mass * b.radius);
@@ -550,7 +559,7 @@
 
     // The ball curves as the ubu that last struck it would: Curve shapes shots too. An ubu the
     // fireball overpowered did not strike it, so the shot keeps its striker and curve.
-    if (isBall && fireWin === null) ball.curveFactor = BALL_CURVE * (player.curveMult || 1);
+    if (isBall && fireWin === null) ball.curveMult = player.curveMult ?? 1;
 
     if (closeSpin) {
       const away = ball === b ? 1 : -1;
@@ -668,8 +677,8 @@
         continue;
       }
       // Experimental curve: rotate velocity without adding translational energy.
-      const curve = b.curveFactor !== undefined ? b.curveFactor : (b.team === -1 ? BALL_CURVE : SKATER_CURVE);
       if (b.omega !== 0) {
+        const curve = b.team === -1 ? ballCurveFactor(b) : (b.curveFactor ?? SKATER_CURVE);
         const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
         b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
       }
@@ -947,6 +956,6 @@
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS,
       guards: [...guards].map(([index, held]) => ({ index, held })), ignition, goalTargets, goalTick };
   }
-  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, IRON_COOLDOWN_TICKS, ballOnFire, holder, dazeSlow, multiplier, launchSpeed, syncEffectiveStats, applyStats, applyDoubledGuard, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, IRON_COOLDOWN_TICKS, ballOnFire, ballCurveFactor, holder, dazeSlow, multiplier, launchSpeed, syncEffectiveStats, applyStats, applyDoubledGuard, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

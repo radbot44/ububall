@@ -539,6 +539,8 @@
       return aim(b, oppCoverX, 300);
     });
     const responses = [opponent, guardOpponents, attack].slice(0, settings.opponents);
+    // A warned team can leave the crease and return later in the same turn.
+    const searchTicks = state.fouls?.crease?.[team] ? M.turnTicks(state.mode) : SEARCH_TICKS;
     // One simulated turn, valued with its goal's complexity: board and post bounces after the first
     // touch, plus each change of the ubu touching the ball after the first. A turn is a pure function
     // of its moves, so a repeat (a plan tried twice, or a plan with no launch to aim off) is reused.
@@ -563,7 +565,7 @@
         },
         wall(body, velocity, type) { if (body.team === -1 && touches && type !== 'net') boards++; }
       };
-      const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false, ticks: SEARCH_TICKS, decided, watch, preservePartial: true });
+      const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false, ticks: searchTicks, decided, watch, preservePartial: true });
       simulations++; ticks += result.replay.ticks;
       return evaluate(result.state, team, result.replay.goal, weights, boards + Math.max(0, touches - 1), toucher, teammatesTouched.size > 1, tmw);
     }

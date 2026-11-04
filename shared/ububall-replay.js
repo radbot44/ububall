@@ -9,7 +9,7 @@
   const KEEP = 25, MAX_TITLE = 80;
   // Body fields a snapshot keeps, in file order: everything a turn's simulation reads or writes.
   const NUMBERS = ['x', 'y', 'vx', 'vy', 'omega', 'rotation', 'radius', 'mass', 'friction', 'grip', 'maxSpin', 'team', 'slot', 'curveFactor',
-    'sizeMult', 'baseMass', 'baseRadius', 'baseFriction', 'baseReach', 'baseStrength', 'baseStability', 'baseBounciness', 'impulse', 'curveMult', 'bounciness', 'wallBounce', 'power', 'reach', 'strength', 'stability',
+    'sizeMult', 'baseMass', 'baseRadius', 'baseFriction', 'baseReach', 'baseStrength', 'baseStability', 'baseBounciness', 'impulse', 'curveMult', 'bounciness', 'power', 'reach', 'strength', 'stability',
     'meter', 'meterTick', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'ironCooldownTicks', 'pace', 'strikerPower', 'strikerTeam'];
   const FLAGS = ['superArm', 'guarding', 'ironGuard', 'usedSuperThisTurn', 'superHit', 'superRefunded', 'openingShot', 'spinStruck', 'shockwaveFired', 'carded', 'stunned', 'stunnedNext', 'onFire', 'holding'];
   const BODY = [...NUMBERS, ...FLAGS, 'superActive', 'equippedSuper', 'stickOffset'];

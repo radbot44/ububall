@@ -446,7 +446,8 @@
     if (speed < 120) return null;
     // Spin may curve the shot, but vertical motion alone cannot reach a goal.
     // |delta vx| <= speed * angular travel before a collision or drag slows the ball.
-    const turn = Math.abs(ball.omega || 0) * Math.abs(ball.curveFactor ?? 1) * horizon;
+    // Allow for ignition during the prediction window.
+    const turn = Math.abs(ball.omega || 0) * P.ballCurveFactor(ball, true) * horizon;
     const horizontalReach = horizon * (Math.abs(ball.vx) + speed * Math.min(1, turn));
     if (ball.x - horizontalReach > 60 && ball.x + horizontalReach < 940) return null;
     const sim = [{ ...ball }], limit = Math.round(horizon / P.DT);
