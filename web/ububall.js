@@ -90,7 +90,7 @@
       board.dataset.size = size;
       fitStatus(status);
       const left = board.querySelector('.bug-left').getBoundingClientRect(), right = compact ? left : board.querySelector('.bug-right').getBoundingClientRect();
-      if (left.left >= edge($('pause'), 'right') + 8 * gameUi.scale() && right.right <= edge(board.querySelector('.stadium-toolbar'), 'left') - 8 * gameUi.scale()) break;
+      if (left.left >= edge(board.querySelector('.match-tools'), 'right') + 8 * gameUi.scale() && right.right <= edge(board.querySelector('.stadium-toolbar'), 'left') - 8 * gameUi.scale()) break;
     }
   }
   function fitStatus(status) {
@@ -145,16 +145,13 @@
   const stageArea = document.querySelector('.stadium-stage-area');
   const spinLayer = document.createElement('div'); spinLayer.className = 'spin-layer';
   stageArea.append(spinLayer); spinLayer.append($('field-spin'));
-  // Without team columns (phones and narrow windows), the ubu picker and the selected ubu's knobs sit
-  // together in a dock beside or below the rink.
   let scoreboardWidth = 0;
   new ResizeObserver(([entry]) => {
     if (Math.round(entry.contentRect.width) === scoreboardWidth) return;
     scoreboardWidth = Math.round(entry.contentRect.width); fitScorebug();
   }).observe(document.querySelector('.scoreboard'));
   document.fonts?.ready.then(() => fitScorebug());
-  const knobDock = document.createElement('div'); knobDock.className = 'knob-dock';
-  $('game-status').after(knobDock); knobDock.append($('team-selector'));
+  const knobRow = document.querySelector('.stadium-actions .knob-row');
   const rinkStage = document.querySelector('.rink-stage');
   const rinkWrap = document.querySelector('.rink-wrap');
   let badgeCanvas = document.createElement('canvas'); badgeCanvas.className = 'field-badges';
@@ -1522,11 +1519,7 @@
     wrap.append(topRow, meterTrack);
     return wrap;
   }
-  // Knobs set a launch finely. Angle turns like a dial, relative to where it is grabbed so a tap never
-  // jumps, and its needle points the way the launch arrow does on screen. Power and spin rise as the
-  // pointer moves up or right and fall down or left, a full sweep over KNOB_SWEEP px (a quarter as
-  // fast with Shift). The wheel and arrow keys step 1° or 1% (10 with Shift); double-clicking spin
-  // centres it. A knob with no fixed ubu follows the selected one.
+  // Up and right increase each knob. Angle wraps and its needle follows the launch direction.
   const KNOB_SWEEP = 150, knobs = [];
   const KNOB_RANGE = { angle: [0, 360], power: [0, 100], spin: [-100, 100] };
   // Screen degrees, clockwise from up, of a field angle in radians (portrait turns the rink a quarter).
@@ -1535,7 +1528,7 @@
     const plan = plans[i];
     return kind === 'angle' ? screenDegrees(plan.angle) : kind === 'power' ? plan.power * 100 : (plan.spin || 0) * 100;
   }
-  const knobEditable = i => phase === 'plan' && !bodies[i]?.stunned;
+  const knobEditable = i => phase === 'plan' && Boolean(plans[i] && bodies[i] && !bodies[i].stunned && !bodies[i].carded);
   function setKnob(kind, i, value) {
     if (!knobEditable(i)) return;
     const plan = plans[i], [min, max] = KNOB_RANGE[kind];
@@ -1544,41 +1537,41 @@
     plan.guard = false;
     sync(); draw();
   }
-  function makeKnob(kind, fixed = null) {
+  function wheelKnob(e, kind, i) {
+    if (!e.deltaY || !knobEditable(i)) return;
+    e.preventDefault();
+    setKnob(kind, i, knobValue(kind, i) - Math.sign(e.deltaY) * (e.shiftKey ? 10 : 1));
+    saveActiveMatch();
+  }
+  function makeKnob(kind) {
     const wrap = document.createElement('div'); wrap.className = 'knob';
     wrap.innerHTML = '<svg viewBox="0 0 100 100" role="slider" tabindex="0"><circle class="knob-track" cx="50" cy="50" r="40"/>' +
       '<path class="knob-value"/><circle class="knob-face" cx="50" cy="50" r="29"/><line class="knob-needle" x1="50" y1="50" x2="50" y2="26"/></svg>' +
       `<b></b><small>${kind[0].toUpperCase() + kind.slice(1)}</small>`;
-    const svg = wrap.querySelector('svg'), index = () => fixed ?? selected;
+    const svg = wrap.querySelector('svg');
     const [min, max] = KNOB_RANGE[kind];
     svg.setAttribute('aria-valuemin', min); svg.setAttribute('aria-valuemax', max);
     let grab = null;
-    const turnOf = e => { const r = svg.getBoundingClientRect(); return Math.atan2(e.clientX - r.left - r.width / 2, r.top + r.height / 2 - e.clientY) * 180 / Math.PI; };
     svg.onpointerdown = e => {
-      const i = index();
-      if (!knobEditable(i)) return;
+      if (grab || e.button !== 0 || !knobEditable(selected)) return;
       e.preventDefault(); svg.setPointerCapture(e.pointerId);
-      if (fixed !== null && selected !== i) { selected = i; sync(); draw(); }
-      grab = { x: e.clientX, y: e.clientY, value: knobValue(kind, i), turn: turnOf(e) };
+      grab = { id: e.pointerId, index: selected, x: e.clientX, y: e.clientY, value: knobValue(kind, selected) };
     };
     svg.onpointermove = e => {
-      if (!grab) return;
-      const i = index();
-      if (kind === 'angle') {
-        const turn = turnOf(e), delta = ((turn - grab.turn + 540) % 360) - 180;
-        grab.turn = turn; setKnob(kind, i, knobValue(kind, i) + delta * (e.shiftKey ? .25 : 1));
-      } else setKnob(kind, i, grab.value + ((e.clientX - grab.x) - (e.clientY - grab.y)) / (KNOB_SWEEP * gameUi.scale()) * (max - min) * (e.shiftKey ? .25 : 1));
+      if (grab?.id !== e.pointerId) return;
+      const distance = (e.clientX - grab.x) - (e.clientY - grab.y);
+      setKnob(kind, grab.index, grab.value + distance / (KNOB_SWEEP * gameUi.scale()) * (max - min) * (e.shiftKey ? .25 : 1));
     };
-    svg.onpointerup = svg.onpointercancel = () => { grab = null; if (phase === 'plan') saveActiveMatch(); };
-    svg.onwheel = e => { e.preventDefault(); setKnob(kind, index(), knobValue(kind, index()) - Math.sign(e.deltaY) * (e.shiftKey ? 10 : 1)); if (phase === 'plan') saveActiveMatch(); };
+    svg.onlostpointercapture = () => { grab = null; if (phase === 'plan') saveActiveMatch(); };
+    svg.addEventListener('wheel', e => wheelKnob(e, kind, selected), { passive: false });
     svg.onkeydown = e => {
       const step = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key];
       if (!step) return;
-      e.preventDefault(); setKnob(kind, index(), knobValue(kind, index()) + step * (e.shiftKey ? 10 : 1));
+      e.preventDefault(); setKnob(kind, selected, knobValue(kind, selected) + step * (e.shiftKey ? 10 : 1));
       if (phase === 'plan') saveActiveMatch();
     };
-    if (kind === 'spin') svg.ondblclick = () => { setKnob(kind, index(), 0); if (phase === 'plan') saveActiveMatch(); };
-    knobs.push({ kind, wrap, svg, index });
+    if (kind === 'spin') svg.ondblclick = () => { setKnob(kind, selected, 0); if (phase === 'plan') saveActiveMatch(); };
+    knobs.push({ kind, wrap, svg });
     return wrap;
   }
   function knobArc(from, to) {
@@ -1586,9 +1579,10 @@
     const [x0, y0] = point(from), [x1, y1] = point(to);
     return `M${x0} ${y0}A40 40 0 ${to - from > 180 ? 1 : 0} 1 ${x1} ${y1}`;
   }
+  knobRow.append(...['angle', 'power', 'spin'].map(makeKnob));
   function renderKnobs() {
     for (const knob of knobs) {
-      const i = knob.index(), b = bodies[i];
+      const i = selected, b = bodies[i];
       if (!b || !plans[i]) continue;
       const value = knobValue(knob.kind, i);
       // Power sweeps 270° from lower left; spin runs either way from the top; angle is all needle.
@@ -1632,14 +1626,6 @@
     $('launch').disabled = phase === 'play' || phase === 'cpu-wait';
     document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
     $('launch').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : phase === 'cpu-wait' ? 'CPU planning…' : 'Launch team';
-    const launching = plans.filter((p, i) => p.power > 0 && !bodies[i].stunned && !(bodies[i].superArm && bodies[i].equippedSuper?.key === 'stalwart')).length;
-    const guarding = plans.filter((p, i) => p.guard && !bodies[i].stunned).length;
-    $('plan-summary').textContent = planning ? `${launching} launching · ${guarding} guarding` : '';
-    [...$('team-selector').children].forEach((button, i) => {
-      button.setAttribute('aria-pressed', String(i === selected));
-      button.disabled = !planning;
-      button.querySelector('span').textContent = `${bodies[i].carded ? 'Carded' : bodies[i].stunned ? 'Stunned' : plans[i].guard ? 'Guard' : plans[i].power > 0 ? Math.round(plans[i].power * 100) + '%' : 'Hold'}${bodies[i].superArm ? ' · Armed' : ''}`;
-    });
     const spinValue = Math.round((plans[selected].spin || 0) * 100);
     $('shot-spin').value = spinValue;
     $('shot-spin').style.setProperty('--spin-start', Math.min(50, (spinValue + 100) / 2) + '%');
@@ -1696,15 +1682,15 @@
       hudSuperBtn.classList.toggle('armed', Boolean(curB.superArm));
       if (hudSuperText) {
         if (curB.carded) {
-          hudSuperText.textContent = 'CARDED';
+          hudSuperText.textContent = 'Carded';
         } else if (curB.stunned) {
-          hudSuperText.textContent = '💫 STUNNED';
+          hudSuperText.textContent = 'Stunned';
         } else if (curB.superArm) {
-          hudSuperText.textContent = '⚡ ARMED';
+          hudSuperText.textContent = 'Armed';
         } else if (curB.meter >= 100) {
           hudSuperText.textContent = `Arm ${s.name}`;
         } else {
-          hudSuperText.textContent = `${s.name} charging ${Math.floor(curB.meter || 0)}%`;
+          hudSuperText.textContent = `${s.name} ${Math.floor(curB.meter || 0)}%`;
         }
       }
     }
@@ -1760,11 +1746,6 @@
   $('btn-sidebars').onclick = () => showSidebars(document.body.classList.contains('sidebars-hidden'));
   function buildTeam() {
     if (statDrawer.matches(':popover-open')) statDrawer.hidePopover();
-    if (!knobDock.querySelector('.knob-row')) {
-      const row = document.createElement('div'); row.className = 'knob-row';
-      row.append(...['angle', 'power', 'spin'].map(kind => makeKnob(kind)));
-      knobDock.append(row);
-    }
     materialEmitters = teamEntries.map(entry => {
       const seen = new Set();
       const styles = [];
@@ -1777,8 +1758,6 @@
       return { styles, time: 0 };
     });
     $('team').replaceChildren();
-    for (let k = knobs.length - 1; k >= 0; k--) if (!knobs[k].wrap.isConnected || $('team').contains(knobs[k].wrap)) knobs.splice(k, 1);
-    $('team-selector').replaceChildren();
     $('home-lineup').replaceChildren();
     if ($('cpu-team')) $('cpu-team').replaceChildren();
     $('skaters').replaceChildren();
@@ -1812,11 +1791,6 @@
       button.append(header, renderSuperPanel(i));
       select.onclick = () => { selected = i; sync(); draw(); };
       $('team').append(button);
-      const shortcut = document.createElement('button'); shortcut.type = 'button';
-      shortcut.setAttribute('aria-label', `Select ${entry.model.parts.fullName}`);
-      shortcut.append(ubuRender(entry.model, 'ball-thumb'), document.createElement('span'));
-      shortcut.onclick = select.onclick;
-      $('team-selector').append(shortcut);
       const lineup = document.createElement('div'); lineup.className = 'home-ubu';
       lineup.append(ubuRender(entry.model, 'home-ubu-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }));
       const superInfo = classicMode() ? null : entry.equippedSuper || resolveEquippedSuper(entry, i);
@@ -4452,6 +4426,9 @@
       y: (event.clientY - r.top) * 600 / r.height
     };
   }
+  canvas.addEventListener('wheel', e => {
+    if (inMatch && !foulInfo && !e.ctrlKey) wheelKnob(e, 'spin', selected);
+  }, { passive: false });
   let tapGuards = false;
   canvas.onpointerdown = event => {
     gameAudio()?.getAudioContext();
@@ -4630,7 +4607,7 @@
   function frame(time) {
     const delta = lastTime ? Math.max(0, (time - lastTime) / 1000) : 0; lastTime = time;
     // An open foul explanation holds local play (and the demo) still while it is read.
-    const active = !$('roster-dialog').open && !$('pause-menu').open && !document.hidden && !(foulInfo && !online?.active);
+    const active = !$('roster-dialog').open && !$('pause-menu').open && !$('stats-dialog').open && !document.hidden && !(foulInfo && !online?.active);
     updateClock();
     if (online?.active) {
       if (phase === 'plan') online.send(networkMoves());
@@ -5166,6 +5143,13 @@
   function updateFullscreenUI() {
     layoutDirty = true;
     const active = isFullscreenActive();
+    const inside = document.fullscreenElement === stadium || stadium.classList.contains('stadium-fullscreen');
+    const home = document.querySelector('.home-column'), away = document.querySelector('.away-column');
+    if (inside && home.parentElement !== stadium) {
+      stadium.prepend(home); stadium.append(away);
+    } else if (!inside && home.parentElement === stadium) {
+      stadium.before(home); stadium.after(away);
+    }
     if (btnFullscreen) {
       btnFullscreen.setAttribute('aria-pressed', String(active));
       btnFullscreen.title = active ? 'Exit fullscreen' : 'Toggle fullscreen';
@@ -5267,11 +5251,10 @@
   function openPause() {
     $('pause-title').textContent = online?.active ? 'Menu' : 'Paused';
     $('pause-restart').disabled = $('new-match').disabled;
-    $('pause-stats').hidden = demo && !theater;
     $('pause-menu').showModal();
   }
   $('pause').onclick = openPause;
-  $('pause-stats').onclick = () => theater ? openStats() : openMatchStats('pause');
+  $('match-stats').onclick = () => theater ? openStats() : openMatchStats('pause');
   $('pause-resume').onclick = () => $('pause-menu').close();
   $('pause-restart').onclick = () => { $('pause-menu').close(); endReplay(); clearActiveMatch(); openSetup('mode'); };
   $('pause-leave').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
@@ -5637,8 +5620,26 @@
   }
   openRosterFromLink();
   window.addEventListener('ubu:screen', openRosterFromLink);
-  // The phone's top edge in landscape, so the match sidebar can sit there.
-  function updateTopSide() { const angle = screen.orientation?.angle ?? window.orientation; document.body.dataset.topSide = angle === 270 || angle === -90 ? 'right' : 'left'; }
+  // Default to the phone’s top edge in landscape until the player chooses a side.
+  let sidebarSide;
+  try { sidebarSide = localStorage.getItem('ububall.controls-side'); } catch {}
+  const sidebarButtons = { left: $('sidebar-left'), right: $('sidebar-right') };
+  function updateTopSide() {
+    const angle = screen.orientation?.angle ?? window.orientation;
+    const topSide = angle === 270 || angle === -90 ? 'right' : 'left';
+    const side = Object.hasOwn(sidebarButtons, sidebarSide) ? sidebarSide : topSide;
+    stadium.dataset.controlsSide = side;
+    for (const [position, button] of Object.entries(sidebarButtons)) {
+      button.setAttribute('aria-pressed', String(position === side));
+    }
+  }
+  for (const [side, button] of Object.entries(sidebarButtons)) {
+    button.onclick = () => {
+      sidebarSide = side;
+      try { localStorage.setItem('ububall.controls-side', side); } catch {}
+      updateTopSide();
+    };
+  }
   updateTopSide(); screen.orientation?.addEventListener('change', updateTopSide);
   // Home screen demo: Saffron (the home team) against Amethyst, one hard CPU and one medium, chosen
   // at random each game. Saffron's planning is acted out with a pointer, as a how-to for new players.
