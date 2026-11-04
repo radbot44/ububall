@@ -1190,6 +1190,7 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
     section('const replayClock = ticks =>', '$(\'replay-seek\').oninput =') + '\n' +
     section('const VIDEO = Object.freeze(', '$(\'replay-export-video\').hidden =') + '\n' +
     section('const CARD = {', 'async function openShare() {') + '\n' +
+    section('$(\'export-close\').onclick =', '// Guides, remembered on this device') + '\n' +
     section('let guide = null;', 'function drawGuides(home, away, text) {') + '\n' +
     section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
 
@@ -1270,12 +1271,15 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
     if (!elements.has(id)) {
       const base = id === 'share-card' ? makeCanvas() : {};
       elements.set(id, Object.assign(base, {
-        value: '1', max: 0, textContent: '', hidden: false, disabled: false, checked: false,
+        value: '1', max: 0, textContent: '', hidden: false, disabled: false, checked: false, closed: false,
         classList: { toggle: dummy, add: dummy, remove: dummy, contains: () => false },
         setAttribute: dummy, replaceChildren: dummy, matches: () => false,
+        addEventListener: dummy,
         closest: () => ({ hidden: false }),
         querySelectorAll: () => [],
-        showModal: dummy, close: dummy, click: dummy
+        showModal() { this.closed = false; },
+        close() { this.closed = true; },
+        click: dummy
       }));
     }
     return elements.get(id);
@@ -1283,7 +1287,14 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
 
   let wallClock = 5000;
   const liveCanvas = makeCanvas(), liveBadges = makeCanvas();
-  const encoderState = { instances: [], failWith: null, onEncode: null, audioFailWith: null };
+  const encoderState = {
+    instances: [],
+    audioInstances: [],
+    failWith: null,
+    onEncode: null,
+    onConfigCheck: null,
+    audioFailWith: null
+  };
 
   class MockVideoEncoder {
     constructor({ output, error }) {
@@ -1295,7 +1306,10 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
       this.closed = false;
       encoderState.instances.push(this);
     }
-    static async isConfigSupported(config) { return { supported: true, config }; }
+    static async isConfigSupported(config) {
+      if (encoderState.onConfigCheck) await encoderState.onConfigCheck(config);
+      return { supported: true, config };
+    }
     configure() { this.state = 'configured'; }
     encode(frame, opts) {
       this.frames++;
@@ -1327,16 +1341,58 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
       this.sampleRate = sampleRate;
       this.currentTime = 0;
       this.destination = {};
+      this.state = 'suspended';
+      this.suspends = [];
+      this.resumeCount = 0;
+      this._finishRender = null;
+      this._rejectRender = null;
+      this.renderingDone = false;
+      encoderState.audioInstances.push(this);
     }
-    suspend() { return Promise.resolve(); }
-    resume() {}
-    async startRendering() {
-      if (encoderState.audioFailWith) throw encoderState.audioFailWith;
-      return {
-        sampleRate: this.sampleRate,
-        length: 480,
-        getChannelData: () => new Float32Array(480)
-      };
+    suspend(mark) {
+      return new Promise(resolve => {
+        this.suspends.push({ mark, resolve });
+        this.suspends.sort((a, b) => a.mark - b.mark);
+      });
+    }
+    _advance() {
+      if (this.suspends.length > 0) {
+        const next = this.suspends.shift();
+        this.currentTime = next.mark;
+        this.state = 'suspended';
+        next.resolve();
+        return;
+      }
+      this.state = 'closed';
+      this.renderingDone = true;
+      if (this._finishRender) {
+        const finish = this._finishRender;
+        this._finishRender = null;
+        finish({
+          sampleRate: this.sampleRate,
+          length: 480,
+          getChannelData: () => new Float32Array(480)
+        });
+      }
+    }
+    resume() {
+      this.resumeCount++;
+      this.state = 'running';
+      Promise.resolve().then(() => this._advance());
+      return Promise.resolve();
+    }
+    startRendering() {
+      if (encoderState.audioFailWith) {
+        this.state = 'closed';
+        this.renderingDone = true;
+        return Promise.reject(encoderState.audioFailWith);
+      }
+      this.state = 'running';
+      return new Promise((resolve, reject) => {
+        this._finishRender = resolve;
+        this._rejectRender = reject;
+        Promise.resolve().then(() => this._advance());
+      });
     }
   }
 
@@ -1598,13 +1654,39 @@ test('video export completion, cancellation, and failure preserve interactive re
   assert.equal(tabCalls.length, 0, 'export does not trigger live scorebug goalTab()');
   assert.equal(encoderState.instances.at(-1).closed, true, 'encoder closed after completion');
   assert.ok(encoderState.instances.at(-1).frames > 60, 'export rendered video frames');
+  assert.equal(encoderState.audioInstances.at(-1).state, 'closed', 'offline audio completed after normal export');
+  assert.equal(encoderState.audioInstances.at(-1).renderingDone, true, 'offline audio rendering settled');
 
-  // 2. Cancel an export mid-way and verify interactive replay is untouched
+  // 2. Cancel an export during async codec preparation before rendering starts
+  const instancesBeforePrepCancel = encoderState.instances.length;
+  const audioBeforePrepCancel = encoderState.audioInstances.length;
+  let exportingDuringPrep = false;
+  elements.get('export-dialog').showModal();
+  encoderState.onConfigCheck = async () => {
+    exportingDuringPrep = env.isExporting();
+    elements.get('export-close').onclick();
+  };
+  await env.exportVideo(env.exportSlice('match', false));
+  encoderState.onConfigCheck = null;
+
+  assert.equal(exportingDuringPrep, true, 'exportingVideo is true before first await during codec preparation');
+  assert.equal(encoderState.instances.length, instancesBeforePrepCancel, 'cancellation during preparation prevents VideoEncoder creation');
+  assert.equal(encoderState.audioInstances.length, audioBeforePrepCancel, 'cancellation during preparation prevents OfflineAudioContext creation');
+  assert.equal(elements.get('export-dialog').closed, true, 'export dialog closed after preparation cancellation');
+  assert.equal(env.isExporting(), false, 'exportingVideo cleared after preparation cancellation');
+  assert.deepEqual(captureTheaterState().sim, before.sim, 'interactive theater.sim untouched after preparation cancellation');
+
+  // 3. Cancel an export mid-way while OfflineAudioContext is suspended and verify audio is unblocked
+  let suspendedOnCancel = null;
   encoderState.onEncode = frameCount => {
-    if (frameCount === 10) env.cancelExport();
+    if (frameCount === 10) {
+      suspendedOnCancel = encoderState.audioInstances.at(-1).state;
+      elements.get('export-close').onclick();
+    }
   };
   await env.exportVideo(env.exportSlice('match', false));
   encoderState.onEncode = null;
+  await new Promise(resolve => setImmediate(resolve));
 
   const afterCancel = captureTheaterState();
   assert.deepEqual(afterCancel.sim, before.sim, 'interactive theater.sim untouched after export cancellation');
@@ -1615,14 +1697,28 @@ test('video export completion, cancellation, and failure preserve interactive re
   assert.equal(afterCancel.isPortrait, true);
   assert.equal(encoderState.instances.at(-1).frames, 10, 'export stopped immediately on cancellation');
   assert.equal(encoderState.instances.at(-1).closed, true, 'encoder closed on cancellation');
+  assert.equal(suspendedOnCancel, 'suspended', 'OfflineAudioContext was suspended at mark when export was canceled');
+  assert.equal(encoderState.audioInstances.at(-1).state, 'closed', 'OfflineAudioContext unblocked and drained on cancellation');
+  assert.equal(encoderState.audioInstances.at(-1).renderingDone, true, 'OfflineAudioContext rendering settled on cancellation');
 
-  // 3. Encoding failure and audio failure preserve interactive replay state and release encoder
-  encoderState.failWith = new Error('GPU encode failed');
+  // 4. Encoding failure while OfflineAudioContext is suspended unblocks offline audio and releases encoder
+  let suspendedOnFailure = null;
+  encoderState.onEncode = frameCount => {
+    if (frameCount === 10) {
+      suspendedOnFailure = encoderState.audioInstances.at(-1).state;
+      encoderState.failWith = new Error('GPU encode failed');
+    }
+  };
   await env.exportVideo(env.exportSlice('match', false));
+  encoderState.onEncode = null;
   encoderState.failWith = null;
+  await new Promise(resolve => setImmediate(resolve));
 
   assert.match(elements.get('export-status').textContent, /GPU encode failed/);
   assert.equal(encoderState.instances.at(-1).closed, true, 'encoder closed on VideoEncoder error');
+  assert.equal(suspendedOnFailure, 'suspended', 'OfflineAudioContext was suspended at mark when VideoEncoder failed');
+  assert.equal(encoderState.audioInstances.at(-1).state, 'closed', 'OfflineAudioContext unblocked and drained on VideoEncoder failure');
+  assert.equal(encoderState.audioInstances.at(-1).renderingDone, true, 'OfflineAudioContext rendering settled on VideoEncoder failure');
   assert.deepEqual(captureTheaterState().sim, before.sim, 'interactive theater.sim untouched after VideoEncoder failure');
 
   encoderState.audioFailWith = new Error('OfflineAudio failed');
@@ -1634,7 +1730,7 @@ test('video export completion, cancellation, and failure preserve interactive re
   assert.deepEqual(captureTheaterState().sim, before.sim, 'interactive theater.sim untouched after audio failure');
   assert.equal(env.isExporting(), false, 'exporting flag cleared in finally block');
 
-  // 4. Source replay data and authoritative local simBodies are never mutated
+  // 5. Source replay data and authoritative local simBodies are never mutated
   assert.deepEqual(structuredClone(rec), sourceSnapshot, 'replay source data is never mutated by replay or export');
   assert.deepEqual(structuredClone(context.simBodies), authoritativeSnapshot, 'local authoritative simBodies is never mutated by replay or export');
 });

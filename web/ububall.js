@@ -3324,78 +3324,96 @@
   // Renders `slice` (see exportSlice) in the export dialog, which is already open.
   async function exportVideo(slice) {
     const dialog = $('export-dialog'), status = $('export-status'), progress = $('export-progress'), close = $('export-close');
-    videoCancelled = false; progress.value = 0; progress.hidden = false; status.textContent = 'Preparing…';
-    let config = null;
-    search: for (const codec of ['avc1.64002A', 'avc1.4D402A', 'avc1.42E02A']) {
-      for (const bitrateMode of ['constant', 'variable']) {
-        const option = { codec, width: VIDEO.width, height: VIDEO.height, bitrate: VIDEO.bitrate, bitrateMode, framerate: VIDEO.fps, avc: { format: 'avc' } };
-        if ((await VideoEncoder.isConfigSupported(option).catch(() => ({}))).supported) { config = option; break search; }
-      }
-    }
-    if (!config) { status.textContent = 'This browser cannot encode MP4 video.'; progress.hidden = true; close.textContent = 'Close'; return; }
-    let session = null, encoder = null, blob = null;
+    videoCancelled = false; exportingVideo = true; progress.value = 0; progress.hidden = false; status.textContent = 'Preparing…';
+    let session = null, encoder = null, blob = null, stopAudio = null;
     try {
-      exportingVideo = true;
-      await videoLogo();
-      session = createReplaySession(slice.replay, {
-        file: slice.file,
-        speed: 1,
-        paused: false,
-        anonymous: Boolean(slice.hidden || slice.replay.anonymous),
-        exporting: true,
-        clock: 0,
-        field: videoFieldSize()
-      });
-      // Every turn at full speed, each goal's hold and the winner's, then a moment on the final field.
-      const seconds = session.total * P.DT + session.replay.turns.filter(t => t.goal).length * 2.5 + (winningTurn(session.replay.turns.at(-1)) ? WIN_SECONDS : 0) + VIDEO.hold;
-      const frames = Math.ceil(seconds * VIDEO.fps), rate = 48000;
-      const offline = new OfflineAudioContext(2, Math.ceil(frames / VIDEO.fps * rate), rate);
-      const out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
-      const v = out.getContext('2d'), samples = [];
-      let description = null, failure = null;
-      encoder = new VideoEncoder({ error: error => { failure = error; }, output: (chunk, meta) => {
-        if (meta?.decoderConfig?.description) description = ownBytes(meta.decoderConfig.description);
-        const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
-        samples.push({ data, duration: 90000 / VIDEO.fps, key: chunk.type === 'key' });
-      } });
-      encoder.configure(config);
-      session.audio = offlineAudio(offline, () => session.clock / 1000);
-      // The sound renders alongside the video, a second behind it: it pauses at each second until the
-      // video has scheduled every sound up to the next, so nothing is scheduled where it has already rendered.
-      let waiting = null, videoDone = false;
-      const pump = () => { if (waiting !== null && (videoDone || session.clock / 1000 >= waiting + 1)) { waiting = null; offline.resume(); } };
-      for (let mark = 1; mark < offline.length / rate; mark++) offline.suspend(mark).then(() => { waiting = mark; pump(); });
-      const rendering = offline.startRendering();
-      videoBug = null; gameAudio()?.stop();
-      seekReplay(0, session);
-      for (let f = 0; f < frames && !videoCancelled && !failure; f++) {
-        withPlaybackContext(session, () => {
-          if (f) {
-            videoClock = session.clock += 1000 / VIDEO.fps;
-            updatePopups(1 / VIDEO.fps);
-            updateEffects(1 / VIDEO.fps);
-            advanceReplay(1 / VIDEO.fps, session);
-          }
-          composeFrame(v, session);
-        });
-        const frame = new VideoFrame(out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
-        encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
-        pump();
-        while (encoder.encodeQueueSize > 4) await new Promise(resolve => encoder.addEventListener('dequeue', resolve, { once: true }));
-        if (f % 15 === 0) { progress.value = .9 * f / frames; status.textContent = `Rendering ${replayClock(f / VIDEO.fps / P.DT)} of ${replayClock(seconds / P.DT)}…`; await yieldTask(); }
+      let config = null;
+      search: for (const codec of ['avc1.64002A', 'avc1.4D402A', 'avc1.42E02A']) {
+        for (const bitrateMode of ['constant', 'variable']) {
+          if (videoCancelled) break search;
+          const option = { codec, width: VIDEO.width, height: VIDEO.height, bitrate: VIDEO.bitrate, bitrateMode, framerate: VIDEO.fps, avc: { format: 'avc' } };
+          if ((await VideoEncoder.isConfigSupported(option).catch(() => ({}))).supported) { config = option; break search; }
+        }
       }
-      await encoder.flush();
-      if (failure) throw failure;
+      if (!videoCancelled && !config) { status.textContent = 'This browser cannot encode MP4 video.'; progress.hidden = true; close.textContent = 'Close'; return; }
+      if (!videoCancelled) await videoLogo();
       if (!videoCancelled) {
-        session.audio = null; videoDone = true; pump();
-        status.textContent = 'Mixing sound…';
-        const audio = await encodeAudio(await rendering);
-        blob = new Blob(ububallMP4.write({ width: VIDEO.width, height: VIDEO.height, timescale: 90000, description, samples }, audio), { type: 'video/mp4' });
-        if (!audio) status.textContent = 'This browser cannot encode sound, so the video is silent.';
+        session = createReplaySession(slice.replay, {
+          file: slice.file,
+          speed: 1,
+          paused: false,
+          anonymous: Boolean(slice.hidden || slice.replay.anonymous),
+          exporting: true,
+          clock: 0,
+          field: videoFieldSize()
+        });
+        // Every turn at full speed, each goal's hold and the winner's, then a moment on the final field.
+        const seconds = session.total * P.DT + session.replay.turns.filter(t => t.goal).length * 2.5 + (winningTurn(session.replay.turns.at(-1)) ? WIN_SECONDS : 0) + VIDEO.hold;
+        const frames = Math.ceil(seconds * VIDEO.fps), rate = 48000;
+        const offline = new OfflineAudioContext(2, Math.ceil(frames / VIDEO.fps * rate), rate);
+        const out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
+        const v = out.getContext('2d'), samples = [];
+        let description = null, failure = null;
+        encoder = new VideoEncoder({ error: error => { failure = error; }, output: (chunk, meta) => {
+          if (meta?.decoderConfig?.description) description = ownBytes(meta.decoderConfig.description);
+          const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
+          samples.push({ data, duration: 90000 / VIDEO.fps, key: chunk.type === 'key' });
+        } });
+        encoder.configure(config);
+        session.audio = offlineAudio(offline, () => session.clock / 1000);
+        // The sound renders alongside the video, a second behind it: it pauses at each second until the
+        // video has scheduled every sound up to the next, so nothing is scheduled where it has already rendered.
+        let waiting = null, videoDone = false;
+        const pump = () => {
+          if (waiting !== null && (videoDone || session.clock / 1000 >= waiting + 1)) {
+            waiting = null;
+            try { offline.resume()?.catch?.(() => {}); } catch {}
+          }
+        };
+        stopAudio = () => {
+          if (session) session.audio = null;
+          videoDone = true;
+          pump();
+        };
+        for (let mark = 1; mark < offline.length / rate; mark++) offline.suspend(mark).then(() => { waiting = mark; pump(); }, () => {});
+        const rendering = offline.startRendering();
+        rendering?.catch?.(() => {});
+        videoBug = null; gameAudio()?.stop();
+        seekReplay(0, session);
+        for (let f = 0; f < frames && !videoCancelled && !failure; f++) {
+          withPlaybackContext(session, () => {
+            if (f) {
+              videoClock = session.clock += 1000 / VIDEO.fps;
+              updatePopups(1 / VIDEO.fps);
+              updateEffects(1 / VIDEO.fps);
+              advanceReplay(1 / VIDEO.fps, session);
+            }
+            composeFrame(v, session);
+          });
+          const frame = new VideoFrame(out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
+          encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
+          pump();
+          while (encoder.encodeQueueSize > 4 && !videoCancelled && !failure) {
+            await new Promise(resolve => encoder.addEventListener('dequeue', resolve, { once: true }));
+          }
+          if (f % 15 === 0) { progress.value = .9 * f / frames; status.textContent = `Rendering ${replayClock(f / VIDEO.fps / P.DT)} of ${replayClock(seconds / P.DT)}…`; await yieldTask(); }
+        }
+        if (!videoCancelled && !failure) await encoder.flush();
+        if (failure) throw failure;
+        if (!videoCancelled) {
+          stopAudio();
+          status.textContent = 'Mixing sound…';
+          const audio = await encodeAudio(await rendering);
+          if (!videoCancelled) {
+            blob = new Blob(ububallMP4.write({ width: VIDEO.width, height: VIDEO.height, timescale: 90000, description, samples }, audio), { type: 'video/mp4' });
+            if (!audio) status.textContent = 'This browser cannot encode sound, so the video is silent.';
+          }
+        }
       }
     } catch (error) {
       status.textContent = `The video could not be made: ${error.message}`;
     } finally {
+      stopAudio?.();
       if (encoder && encoder.state !== 'closed') encoder.close();
       if (session?.fx?.sizzle) { session.fx.sizzle.stop?.(); session.fx.sizzle = null; }
       exportingVideo = false;
