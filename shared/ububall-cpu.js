@@ -474,7 +474,8 @@
     const meter = own.reduce((sum, b) => sum + (b.meter || 0), 0) - other.reduce((sum, b) => sum + (b.meter || 0), 0);
     const cards = own.filter(b => b.carded).length - other.filter(b => b.carded).length;
     const warned = (state.fouls?.crease?.[team] ? 1 : 0) - (state.fouls?.crease?.[1 - team] ? 1 : 0);
-    const stuns = other.filter(b => b.stunned && !b.carded).length - own.filter(b => b.stunned && !b.carded).length;
+    // Before a truncated turn finishes, Knockout's next-turn stun is still pending.
+    const stuns = other.filter(b => (b.stunned || b.stunnedNext) && !b.carded).length - own.filter(b => (b.stunned || b.stunnedNext) && !b.carded).length;
     const dazes = (other.reduce((s, b) => s + P.dazeSlow(b), 0) - own.reduce((s, b) => s + P.dazeSlow(b), 0)) / P.DAZE.max;
     let stall = 0;
     if (state.fouls && state.fouls.corner !== null) {
