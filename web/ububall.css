@@ -1398,7 +1398,18 @@ body.replay-match .stadium.portrait-mode .stadium-actions { height: auto; grid-t
 }
 .stats-more-details[hidden] { display: none; }
 .stats-more-details { display: flex; flex-direction: column; gap: .375rem; margin: .75rem 0; }
-.stats-map { display: block; width: 66.7%; max-width: 100%; height: auto; margin: .375rem auto; }
+.stats-tabs, .stats-rounds { display: flex; flex-wrap: wrap; gap: .375rem; margin: .5rem 0; }
+.stats-tabs button[aria-pressed=true], .stats-rounds button[aria-pressed=true] {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, var(--card));
+}
+.stats-map { display: block; width: min(100%, 38rem); height: auto; margin: .5rem auto 0; }
+.stats-map-detail { min-height: 2.5em; margin: .25rem 0; color: var(--muted); font-size: .8125rem; text-align: center; white-space: pre-line; }
+#stats-events h3 { margin: .875rem 0 .25rem; font-size: .9375rem; }
+.stats-events { list-style: none; margin: 0; padding: 0; }
+.stats-events li { display: flex; flex-wrap: wrap; gap: .25rem .75rem; padding: .375rem .5rem; font-size: .8125rem; }
+.stats-events li.major { background: var(--card); border-radius: .375rem; font-weight: 700; }
+.stats-events li span { min-width: 7.5rem; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; }
 .stats-note { margin: .5rem 0 0; color: var(--muted); font-size: .6875rem; }
 .stats-dialog .summary-rematch-status { margin: .5rem 0 .75rem; font-weight: 700; }
 .stats-dialog .summary-rematch-status:empty { display: none; }

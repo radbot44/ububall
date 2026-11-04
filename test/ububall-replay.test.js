@@ -90,6 +90,40 @@ function field(mode, place) {
   return { version: M.VERSION, mode, bodies, stats: [], scores: [0, 0], turn: 1, phase: 'plan', winner: null };
 }
 const armed = (state, key) => Object.assign(state.bodies[0], { equippedSuper: { ...P.SUPERS.find(s => s.key === key) }, meter: 100 });
+
+test('Game Log counts big post shots once and credits passes to the teammate who sent the ball', () => {
+  function gameLog(y, power, teammate = false) {
+    const state = field('standard', {
+      0: { x: 720, y }, 1: teammate ? { x: 850, y } : { x: 265, y: 430 },
+      2: { x: 350, y: 430 }, 3: { x: 435, y: 430 }, 4: { x: 520, y: 430 }, 5: { x: 605, y: 430 },
+      6: { x: 775, y }
+    });
+    const replay = { turns: [] }, plans = [{ ...still, power }, still, still, still, still, still];
+    const t = R.addTurn(replay, { ...state, fouls: M.newFouls(), plans });
+    const { replay: result } = M.resolveTurn(P, state, plans);
+    t.ticks = result.ticks;
+    t.saves = result.saves;
+    if (result.goal !== null) t.goal = { team: result.goal, scorer: result.scorer, assist: result.assist, label: result.label };
+    return R.stats(replay);
+  }
+  const post = gameLog(235, 1);
+  assert.equal(post.shots[0], 1);
+  assert.equal(post.events.find(event => event.type === 'Shot').outcome, 'Post');
+  assert.deepEqual(post.rounds, [{ team: null }]);
+  assert.equal(gameLog(235, .6).shots[0], 0);
+  const goal = gameLog(244, 1);
+  assert.equal(goal.shots[0], 1);
+  assert.equal(goal.goals[0], 1);
+  assert.deepEqual(goal.rounds, [{ team: 0, score: 1 }]);
+  const pass = gameLog(300, 1, true);
+  const sent = pass.events.filter(event => event.type === 'Pass' && event.actor === 0);
+  assert.ok(sent.length > 0);
+  assert.equal(pass.passes[0], sent.length);
+  const event = pass.events.find(event => event.type === 'Pass');
+  assert.equal(event.target, 1);
+  assert.ok(event.tick > 0);
+});
+
 function scripted(each = () => {}) {
   const ends = [], play = (state, moves) => {
     const json = JSON.stringify(state), result = M.resolveTurn(P, state, moves, { effects: false });

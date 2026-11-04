@@ -3700,44 +3700,24 @@
     buildTeam(); resetPlans(); say('Playing from the replay. Plan your launches.'); draw();
   }
   $('replay-take-over').onclick = playFromHere;
-  // Stats for the whole replay, worked out by playing it through once without effects: goals,
-  // assists, saves, ball touches, the hardest shot and distance skated for each ubu, where each touched
-  // the ball, each team's share of the time it last touched the ball, and time on each team's side.
-  function replayStats(th) {
-    const r = th.replay, view = c => viewIndex(c, th.seat), six = () => [0, 0, 0, 0, 0, 0];
-    const out = { goals: six(), assists: six(), touches: six(), skated: six(), control: [0, 0], side: [0, 0], marks: [] }, tally = ububallMatch.newTally();
-    let play = ububallMatch.newPlay(), last = null, lastTick = -Infinity, tick = 0;
-    for (const t of r.turns) {
-      const sim = ububallReplay.restore(t.bodies), ball = sim[6];
-      P.startTurn(sim, t.plans);
-      for (let k = 0; k < t.ticks; k++, tick++) {
-        const before = sim.slice(0, 6).map(b => [b.x, b.y]), touched = [];
-        ububallMatch.playTick(P, sim, play, { collide: (a, b, speed) => { const who = ububallMatch.toucher(a, b, speed); if (who) touched.push(sim.indexOf(who)); } }, tally, false);
-        sim.slice(0, 6).forEach((b, i) => { out.skated[view(i)] += Math.hypot(b.x - before[i][0], b.y - before[i][1]); });
-        // A touch counts once until another ubu touches the ball or half a second passes.
-        for (const c of touched) {
-          if (c !== last || tick - lastTick > 120) { out.touches[view(c)]++; out.marks.push({ x: th.seat ? 1000 - ball.x : ball.x, y: th.seat ? 600 - ball.y : ball.y, i: view(c), goal: false }); }
-          last = c; lastTick = tick;
-        }
-        if (last !== null) {
-          out.control[view(last) < 3 ? 0 : 1]++;
-          const vx = th.seat ? 1000 - ball.x : ball.x;
-          if (vx < 500) out.side[0]++;
-          else if (vx > 500) out.side[1]++;
-        }
-      }
-      if (t.goal) {
-        if (t.goal.scorer !== null) {
-          out.goals[view(t.goal.scorer)]++;
-          tally.shots[t.goal.scorer]++;
-          const shot = out.marks.findLast(m => m.i === view(t.goal.scorer));
-          if (shot) shot.goal = true;
-        }
-        if (t.goal.assist !== null) out.assists[view(t.goal.assist)]++;
-        play = ububallMatch.newPlay(); last = null;
+  function replayStats({ replay, seat }) {
+    const s = ububallReplay.stats(replay);
+    for (const key of ['goals', 'assists', 'shots', 'saves', 'bigSaves', 'checks', 'touches', 'passes', 'topShot', 'skated', 'cards']) {
+      s[key] = onlineOrder(s[key], seat);
+    }
+    if (seat) {
+      s.control.reverse();
+      s.side.reverse();
+      for (const round of s.rounds) if (round.team !== null) round.team = 1 - round.team;
+      for (const event of s.events) {
+        if (event.actor !== null) event.actor = viewIndex(event.actor, seat);
+        if (event.target != null) event.target = viewIndex(event.target, seat);
+        if (event.team !== null) event.team = 1 - event.team;
+        event.x = 1000 - event.x;
+        event.y = 600 - event.y;
       }
     }
-    return { ...out, saves: onlineOrder(tally.saves, th.seat), topShot: onlineOrder(tally.topSpeed, th.seat), cards: onlineOrder(r.turns.reduce((n, t) => { t.cards.forEach(c => n[c]++); return n; }, six()), th.seat), shots: onlineOrder(tally.shots, th.seat), checks: onlineOrder(tally.checks, th.seat), tally };
+    return s;
   }
   function updateStatsRinkWidth() {
     const rw = $('rink')?.getBoundingClientRect().width || 1000;
@@ -3750,9 +3730,9 @@
       return th.stats;
     }
     if (ctx.stats) return ctx.stats;
-    const replay = ctx.replay || lastCompletedReplay;
+    const replay = ctx.replay;
     if (replay) {
-      ctx.stats = replayStats({ replay, seat: online?.active ? online.state.seat : 0 });
+      ctx.stats = replayStats({ replay, seat: replay.seat });
       return ctx.stats;
     }
     const { tally: t } = viewTally();
@@ -3760,12 +3740,122 @@
     ctx.stats = {
       goals: [...t.goals], assists: [...t.assists], saves: [...t.saves],
       shots: [...(t.shots || six())], checks: [...(t.checks || six())],
-      touches: six(), topShot: [...t.topSpeed], skated: six(),
-      cards: [...t.cards], control: [50, 50], side: [50, 50], marks: [],
-      tally: t
+      touches: six(), passes: six(), topShot: [...t.topSpeed], skated: six(),
+      cards: [...t.cards], control: [50, 50], side: [50, 50], events: [], rounds: [],
+      bigSaves: t.bigSaves
     };
     return ctx.stats;
   }
+  const statsMajor = new Set(['Goal', 'Shot', 'Save', 'Foul']);
+  function statsEventText(event, names) {
+    const name = i => teamEntries[i]?.model.parts.fullName;
+    const actor = event.actor === null ? names[event.team] : name(event.actor);
+    const target = event.target == null ? '' : ` → ${name(event.target)}`;
+    const detail = event.outcome || (event.label?.toLowerCase() !== event.type.toLowerCase() ? event.label : null);
+    return `${event.type}${detail ? ` (${detail})` : ''} · ${actor}${target}`;
+  }
+  function statsEventTime(event) {
+    const tenths = Math.floor(event.tick * P.DT * 10);
+    const seconds = String(Math.floor(tenths / 10) % 60).padStart(2, '0');
+    return `${Math.floor(tenths / 600)}:${seconds}.${tenths % 10} · Turn ${event.turn}`;
+  }
+  function showStatsTab(ctx) {
+    const log = ctx.tab === 'log';
+    $('stats-box').hidden = log;
+    $('stats-log').hidden = !log;
+    $('stats-box-tab').setAttribute('aria-pressed', String(!log));
+    $('stats-log-tab').setAttribute('aria-pressed', String(log));
+    $('stats-details-toggle').hidden = log;
+    if (log) renderGameLog(ctx);
+  }
+  function renderGameLog(ctx) {
+    const { events, rounds } = getStatsForContext(ctx);
+    const { names } = ctx;
+    const roundName = round => round.team === null ? 'Unscored' : `${names[round.team]} #${round.score}`;
+    const filters = $('stats-rounds');
+    filters.replaceChildren();
+    for (const [index, label] of ['ALL', ...rounds.map(roundName)].entries()) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.onclick = () => { ctx.round = index - 1; updateLog(); };
+      filters.append(button);
+    }
+    const map = $('stats-map'), detail = $('stats-map-detail');
+    const g = map.getContext('2d');
+    const { home, away, text } = getThemeColors();
+    let visible;
+    const active = event => ctx.round == null || ctx.round < 0 || event.round === ctx.round;
+    const radius = event => event.type === 'Goal' ? 11 : statsMajor.has(event.type) ? 8 : 4;
+    function drawMap() {
+      g.clearRect(0, 0, map.width, map.height);
+      drawRinkSurface(g, themeColors);
+      for (const layer of [events.filter(event => !active(event)), visible.filter(event => !statsMajor.has(event.type)), visible.filter(event => statsMajor.has(event.type))]) {
+        for (const event of layer) {
+          g.globalAlpha = active(event) ? statsMajor.has(event.type) ? 1 : 0.65 : 0.13;
+          g.fillStyle = event.team === 0 ? home : away;
+          g.beginPath();
+          g.arc(event.x, event.y, radius(event), 0, Math.PI * 2);
+          g.fill();
+          if (statsMajor.has(event.type)) {
+            g.strokeStyle = text;
+            g.lineWidth = event.type === 'Goal' ? 4 : 2;
+            g.stroke();
+          }
+        }
+      }
+      g.globalAlpha = 1;
+    }
+    function updateLog() {
+      [...filters.children].forEach((button, i) => button.setAttribute('aria-pressed', String(i - 1 === (ctx.round ?? -1))));
+      visible = events.filter(active);
+      drawMap();
+      detail.textContent = 'Hover or tap a mark for details.';
+      const log = $('stats-events');
+      const content = document.createDocumentFragment();
+      if (!visible.length) {
+        const empty = document.createElement('p');
+        empty.textContent = ctx.type === 'pause' ? 'Events appear here after the first completed turn.' : 'No events in this selection.';
+        content.append(empty);
+      }
+      let currentRound = -1, list;
+      for (const event of visible) {
+        if (event.round !== currentRound) {
+          currentRound = event.round;
+          const heading = document.createElement('h3');
+          heading.textContent = roundName(rounds[currentRound]);
+          list = document.createElement('ol');
+          list.className = 'stats-events';
+          content.append(heading, list);
+        }
+        const row = document.createElement('li'), time = document.createElement('span');
+        row.classList.toggle('major', statsMajor.has(event.type));
+        time.textContent = statsEventTime(event);
+        row.append(time, statsEventText(event, names));
+        list.append(row);
+      }
+      log.replaceChildren(content);
+    }
+    function inspectMark(pointer) {
+      const rect = map.getBoundingClientRect();
+      const x = (pointer.clientX - rect.left) * map.width / rect.width;
+      const y = (pointer.clientY - rect.top) * map.height / rect.height;
+      let closest = null, distance = 12 * map.width / rect.width;
+      for (const event of visible) {
+        const gap = Math.hypot(event.x - x, event.y - y);
+        if (gap <= distance) { closest = event; distance = gap; }
+      }
+      const marks = closest ? visible.filter(event => event.x === closest.x && event.y === closest.y) : [];
+      const message = marks.length ? marks.map(event => `${statsEventText(event, names)} · ${statsEventTime(event)}`).join('\n') : 'Hover or tap a mark for details.';
+      if (detail.textContent !== message) detail.textContent = message;
+    }
+    map.onpointermove = inspectMark;
+    map.onclick = inspectMark;
+    map.onpointerleave = () => { detail.textContent = 'Hover or tap a mark for details.'; };
+    updateLog();
+  }
+  $('stats-box-tab').onclick = () => { activeStatsContext.tab = 'box'; showStatsTab(activeStatsContext); };
+  $('stats-log-tab').onclick = () => { activeStatsContext.tab = 'log'; showStatsTab(activeStatsContext); };
   function renderStats(ctx = activeStatsContext) {
     if (!ctx) return;
     activeStatsContext = ctx;
@@ -3774,7 +3864,8 @@
     const s = getStatsForContext(ctx);
     const isGame = ctx.type === 'game';
     const names = [$('home-label').textContent, $('opponent-label').textContent];
-    const { home, away, surface, border, text } = getThemeColors();
+    ctx.names = names;
+    showStatsTab(ctx);
 
     $('stats-title').textContent = 'Game stats';
     $('stats-watch-replay').hidden = !isGame;
@@ -3802,14 +3893,14 @@
       winner = scores[0] > scores[1] ? 0 : scores[1] > scores[0] ? 1 : null;
     }
 
-    const rating = i => s.goals[i] * 3 + s.assists[i] * 2 + s.saves[i] * 2 + (s.tally?.bigSaves?.[i] || 0) * 1 + (s.checks?.[i] || 0) * 0.5 + (s.topShot?.[i] || 0) / 10000;
+    const rating = i => s.goals[i] * 3 + s.assists[i] * 2 + s.saves[i] * 2 + (s.bigSaves?.[i] || 0) + (s.checks?.[i] || 0) * 0.5 + (s.topShot?.[i] || 0) / 10000;
     const mvp = [0, 1, 2, 3, 4, 5].reduce((best, i) => rating(i) > rating(best) ? i : best, 0);
     const hasMvp = rating(mvp) > 0;
 
     const table = document.createElement('table'), head = table.createTHead().insertRow();
     const headers = statsMoreDetails
-      ? ['', 'Ubu', 'Goals', 'Assists', 'Shots', 'Saves', 'Checks', 'Touches', 'Top shot', 'Distance', 'Fouls']
-      : ['', 'Ubu', 'G', 'A', 'Sh', 'Sa', 'C', 'T', 'TS', 'D', 'F'];
+      ? ['', 'Ubu', 'Goals', 'Assists', 'Shots', 'Saves', 'Checks', 'Touches', 'Passes', 'Top shot', 'Distance', 'Fouls']
+      : ['', 'Ubu', 'G', 'A', 'Sh', 'Sa', 'C', 'T', 'P', 'TS', 'D', 'F'];
     for (const label of headers) {
       const th = document.createElement('th');
       th.textContent = label;
@@ -3847,6 +3938,7 @@
         s.saves[i],
         s.checks?.[i] || 0,
         s.touches[i],
+        s.passes[i],
         s.topShot[i] ? Math.round(s.topShot[i]) : '–',
         (s.skated[i] / 880).toFixed(1),
         s.cards[i]
@@ -3878,32 +3970,11 @@
         return part;
       }));
 
-      const map = $('stats-map'), g = map.getContext('2d'), k = map.width / 1000;
-      g.setTransform(k, 0, 0, k, 0, 0); g.clearRect(0, 0, 1000, 600);
-      drawRinkSurface(g, themeColors);
-      for (const m of s.marks) {
-        g.fillStyle = m.i < 3 ? home : away;
-        g.globalAlpha = m.goal ? 1 : 0.55;
-        if (m.goal) {
-          g.font = '900 34px system-ui';
-          g.textAlign = 'center';
-          g.textBaseline = 'middle';
-          g.strokeStyle = text;
-          g.lineWidth = 3;
-          g.strokeText('★', m.x, m.y);
-          g.fillText('★', m.x, m.y);
-        } else {
-          g.beginPath();
-          g.arc(m.x, m.y, 6, 0, Math.PI * 2);
-          g.fill();
-        }
-      }
-      g.globalAlpha = 1;
     }
 
     $('stats-note').textContent = statsMoreDetails
-      ? "Top shot is the ball speed off that ubu's fastest touch. Distance is in rink lengths. Shots are on-goal attempts. Checks are hard hits inflicting daze or stuns. Fouls are yellow cards."
-      : "G: Goals · A: Assists · Sh: Shots · Sa: Saves · C: Checks · T: Touches · TS: Top shot · D: Distance · F: Fouls";
+      ? "Top shot is the ball speed off that ubu's fastest touch. Distance is in rink lengths. Shots include goals, saved attempts and high-power strikes off the post. Checks are hard hits inflicting daze or stuns. Fouls are yellow cards."
+      : "G: Goals · A: Assists · Sh: Shots · Sa: Saves · C: Checks · T: Touches · P: Passes · TS: Top shot · D: Distance · F: Fouls";
 
     const actionsEl = $('stats-actions');
     if (isGame) {
@@ -3930,7 +4001,8 @@
       if (!th || th.exporting) return;
       renderStats({ type: 'replay', theater: th });
     } else {
-      renderStats({ type: 'game', replay: lastCompletedReplay });
+      const replay = type === 'pause' && phase !== 'over' ? recording : lastCompletedReplay;
+      renderStats({ type, replay });
     }
     if (!$('stats-dialog').open) $('stats-dialog').showModal();
   }
@@ -5042,9 +5114,11 @@
   function openPause() {
     $('pause-title').textContent = online?.active ? 'Menu' : 'Paused';
     $('pause-restart').disabled = $('new-match').disabled;
+    $('pause-stats').hidden = demo && !theater;
     $('pause-menu').showModal();
   }
   $('pause').onclick = openPause;
+  $('pause-stats').onclick = () => theater ? openStats() : openMatchStats('pause');
   $('pause-resume').onclick = () => $('pause-menu').close();
   $('pause-restart').onclick = () => { $('pause-menu').close(); endReplay(); clearActiveMatch(); openSetup('mode'); };
   $('pause-leave').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };

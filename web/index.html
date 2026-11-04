@@ -164,6 +164,7 @@ SOFTWARE.
     <h2 id="pause-title">Paused</h2>
     <div class="pause-actions">
       <button id="pause-resume" class="primary" type="button">Resume</button>
+      <button id="pause-stats" type="button">Stats</button>
       <button id="pause-restart" type="button">New match</button>
       <button id="pause-leave" type="button">Leave match</button>
     </div>
@@ -213,16 +214,26 @@ SOFTWARE.
       </div>
     </div>
     <p id="stats-honours" class="summary-honours"></p>
+    <div class="stats-tabs" role="group" aria-label="Stats view">
+      <button id="stats-box-tab" type="button" aria-pressed="true" aria-controls="stats-box">Box score</button>
+      <button id="stats-log-tab" type="button" aria-pressed="false" aria-controls="stats-log">Game Log</button>
+    </div>
+    <section id="stats-box" aria-labelledby="stats-box-tab">
     <div id="stats-table" class="stats-table"></div>
     <div id="stats-more-details" class="stats-more-details" hidden>
       <p class="stats-label">Possession</p>
       <div id="stats-control" class="stats-control"></div>
       <p class="stats-label">Time on side</p>
       <div id="stats-side" class="stats-control"></div>
-      <p class="stats-label">Ball touches <span>&#9733; scoring touch</span></p>
-      <canvas id="stats-map" class="stats-map" width="1000" height="600" aria-label="Where each ubu touched the ball"></canvas>
     </div>
     <p id="stats-note" class="stats-note"></p>
+    </section>
+    <section id="stats-log" aria-labelledby="stats-log-tab" hidden>
+      <canvas id="stats-map" class="stats-map" width="1000" height="600" aria-label="Rink event map. Event details are also listed below."></canvas>
+      <p id="stats-map-detail" class="stats-map-detail" aria-live="polite"></p>
+      <div id="stats-rounds" class="stats-rounds" role="group" aria-label="Rounds"></div>
+      <div id="stats-events"></div>
+    </section>
     <p id="stats-rematch-status" class="summary-rematch-status" role="status"></p>
     <div id="stats-actions" class="summary-actions">
       <button id="stats-play-again" class="primary" type="button">Play again</button>

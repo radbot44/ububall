@@ -202,6 +202,110 @@
     if (JSON.stringify(replay) !== text) fail();
     return replay;
   }
-  const api = { FORMAT, KEEP, MAX_TITLE, ANONYMOUS, snapshot, restore, create, clip, roundRange, anonymize, addTurn, timeline, canonical, write, read };
+  // Rebuild the box score and Game Log together, in the recording's rink order.
+  function stats(replay) {
+    const six = () => Array(6).fill(0);
+    const out = { goals: six(), assists: six(), shots: six(), saves: six(), checks: six(), cards: six(),
+      touches: six(), passes: six(), skated: six(), control: [0, 0], side: [0, 0], rounds: [], events: [] };
+    const counts = { Goal: out.goals, Assist: out.assists, Shot: out.shots, Save: out.saves,
+      Check: out.checks, Touch: out.touches, Pass: out.passes, Foul: out.cards };
+    // The engine also tallies its baseline events for top speed and big saves.
+    const engine = M.newTally(), origins = Array(6).fill(null);
+    let play = M.newPlay(), last = null, lastTick = -Infinity, clock = 0, tick, turn, flight = null;
+    const where = body => ({ x: body.x, y: body.y, tick, turn });
+    const add = (type, actor, point, detail = {}) => {
+      const event = { ...point, type, actor, team: actor === null ? null : Math.floor(actor / 3), round: out.rounds.length, ...detail };
+      out.events.push(event);
+      if (actor !== null) counts[type][actor]++;
+      return event;
+    };
+    const shot = (actor, point, outcome) => {
+      const origin = origins[actor];
+      if (origin?.post?.outcome === 'Post') {
+        origin.post.outcome = `Post, ${outcome.toLowerCase()}`;
+      } else {
+        add('Shot', actor, origin || point, { outcome });
+      }
+    };
+    let unscored = false;
+    for (const t of replay.turns) {
+      if (!t.ticks) break;
+      unscored = true;
+      turn = t.turn;
+      const sim = restore(t.bodies), ball = sim[6], fouls = { ...t.fouls, crease: [...t.fouls.crease] };
+      let contact, post;
+      const fx = {
+        collide(a, b, speed, impulse, plow, iron, checker) {
+          if (checker) add('Check', sim.indexOf(checker), where(checker), { target: sim.indexOf(checker === a ? b : a) });
+          const player = !plow && M.toucher(a, b, speed);
+          if (!player) return;
+          const actor = sim.indexOf(player);
+          contact = { ...where(ball), actor };
+          origins[actor] = contact;
+          if (actor !== last || tick - lastTick > 120) add('Touch', actor, contact);
+          last = actor;
+          lastTick = tick;
+        },
+        pass(from, to, body) { add('Pass', from, where(body), { target: to }); },
+        wall(body, velocity, type) {
+          if (body === ball && type === 'post') {
+            const origin = contact || flight;
+            if (origin && Math.floor(origin.actor / 3) === (body.x > 500 ? 0 : 1)) post ??= { origin, point: where(body) };
+          }
+        }
+      };
+      P.startTurn(sim, t.plans);
+      let saveIndex = 0;
+      const before = new Float64Array(12);
+      for (let k = 1; k <= t.ticks; k++) {
+        tick = ++clock;
+        contact = post = null;
+        for (let i = 0; i < 6; i++) { before[i * 2] = sim[i].x; before[i * 2 + 1] = sim[i].y; }
+        const result = M.playTick(P, sim, play, fx, engine, false);
+        if (contact) {
+          contact.big = result.big;
+          flight = contact;
+        }
+        if (post?.origin.big && !post.origin.post) {
+          post.origin.post = add('Shot', post.origin.actor, post.point, { outcome: 'Post' });
+        }
+        while (t.saves[saveIndex]?.tick === k) {
+          const save = t.saves[saveIndex++];
+          if (save.own) continue;
+          add('Save', save.index, where(ball), { label: save.iron ? 'Iron save' : null });
+          const shooter = play.lastTouch[1 - sim[save.index].team];
+          if (shooter !== null) shot(shooter, where(ball), 'Saved');
+        }
+        for (let i = 0; i < 6; i++) out.skated[i] += Math.hypot(sim[i].x - before[i * 2], sim[i].y - before[i * 2 + 1]);
+        if (last !== null) {
+          out.control[Math.floor(last / 3)]++;
+          if (ball.x !== 500) out.side[ball.x < 500 ? 0 : 1]++;
+        }
+        M.lapseFouls(P, sim, fouls);
+      }
+      for (const actor of t.cards) add('Foul', actor, where(sim[actor]), { label: 'Yellow card' });
+      if (t.goal) {
+        const { team, scorer, assist, label } = t.goal;
+        if (scorer !== null) shot(scorer, where(ball), 'Goal');
+        add('Goal', scorer, where(ball), { team, label, score: t.scores[team] + 1 });
+        if (assist !== null) add('Assist', assist, where(ball), { target: scorer });
+        out.rounds.push({ team, score: t.scores[team] + 1 });
+        unscored = false;
+      }
+      const corner = M.cornerOf(P, ball.x, ball.y);
+      const faceoff = corner !== null && corner === fouls.corner && fouls.cornerTurns >= M.FOULS.stallTurns;
+      if (t.goal || faceoff) {
+        play = M.newPlay();
+        origins.fill(null);
+        last = flight = null;
+      }
+    }
+    if (unscored) out.rounds.push({ team: null });
+    out.events.sort((a, b) => a.tick - b.tick);
+    out.topShot = engine.topSpeed;
+    out.bigSaves = engine.bigSaves;
+    return out;
+  }
+  const api = { FORMAT, KEEP, MAX_TITLE, ANONYMOUS, snapshot, restore, create, clip, roundRange, anonymize, addTurn, timeline, canonical, write, read, stats };
   if (node) module.exports = api; else root.ububallReplay = api;
 })(globalThis);

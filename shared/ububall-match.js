@@ -179,6 +179,7 @@
         if (last !== null && bodies[last].team === team) {
           play.assist[team] = last;
           play.lastPass = { from: last, at: play.age, speed };
+          t.fx.pass?.(last, i, t.ball);
         } else if (last !== null && bodies[last].team !== team) {
           if (impulse >= 35) {
             play.assist[team] = null;
@@ -302,7 +303,7 @@
     }
     if (struck) ball.spinStruck = false;
     t.bodies = t.play = t.ball = t.fx = t.tally = null; spareTick = t;
-    return { goal, saves: tickSaves, struck, stop };
+    return { goal, saves: tickSaves, struck, stop, big };
   }
   // A rebound is a goal within this many ticks of the conceding team's save.
   const REBOUND_TICKS = 240;
