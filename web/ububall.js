@@ -154,7 +154,7 @@
   let firstTurnSeen = false;
   let superHintSeen = false, superHintFor = null;
   try { superHintSeen = localStorage.getItem('ububall-super-hint') === 'seen'; } catch {}
-  let firstTurnStep = null;
+  let firstTurnStep = null, firstTurnStarted = null;
   try { firstTurnSeen = localStorage.getItem(firstTurnKey) === 'seen'; } catch {}
   // The floating spin slider: on by default with a mouse, off on touch screens.
   let spinSlider = !matchMedia('(pointer: coarse)').matches;
@@ -1411,18 +1411,58 @@
     $('first-turn-guide').hidden = !visible;
     if (!visible) return;
     if (!drag && plans.some(plan => plan.power > 0)) firstTurnStep = 'launch';
-    $('first-turn-labels').hidden = firstTurnStep === 'launch';
     const tip = firstTurnStep === 'launch'
-      ? 'Aim your other ubus if you like, then press Launch team. Both teams move at the same time.'
-      : 'First to 5 goals wins. ' + aimHelp();
+      ? 'Aim any other ubus, then press Launch team. Both teams move together.'
+      : pullBehind ? 'Pull back from an ubu to aim. Pull farther for more power.'
+        : 'Drag from an ubu to aim. Drag farther for more power.';
     if ($('first-turn-tip').textContent !== tip) $('first-turn-tip').textContent = tip;
+    positionFirstTurnGuide();
+  }
+  function positionFirstTurnGuide() {
+    if (!firstTurnStep || !fieldBox) return;
+    const guide = $('first-turn-guide');
+    const top = stagePoint(fieldView.portrait ? { x: P.rink.right, y: 300 } : { x: 500, y: P.rink.top });
+    guide.style.setProperty('--tip-x', top.x + 'px');
+    guide.style.setProperty('--tip-y', Math.max(8, top.y + 10) + 'px');
+    guide.style.setProperty('--tip-width', Math.max(130, fieldBox.width * .8) + 'px');
+  }
+  function animateFirstTurnGuide(time, active) {
+    const arrow = $('first-turn-arrow');
+    if (!active || firstTurnStep !== 'aim' || phase !== 'plan' || drag !== null || online?.active || !fieldBox) {
+      if (firstTurnStarted !== null) {
+        firstTurnStarted = null; arrow.removeAttribute('d'); hideFinger();
+      }
+      return;
+    }
+    const body = fieldView.bodies[selected];
+    if (!body) return;
+    firstTurnStarted ??= time;
+    const still = reducedMotion.matches, age = still ? 1550 : (time - firstTurnStarted) % 2500;
+    if (age >= 2000) { arrow.removeAttribute('d'); hideFinger(); return; }
+    const progress = Math.max(0, Math.min(1, (age - 450) / 850));
+    const eased = 1 - (1 - progress) ** 3;
+    const sample = impulseGeometry(body, { angle: 0, power: .65 });
+    const distance = (pullBehind ? 84 : sample.distance) * eased;
+    const impulse = impulseGeometry(body, { angle: 0, power: aimPower(distance, sample) });
+    placeFinger(body.x + (pullBehind ? -distance : distance), body.y);
+    const finger = $('demo-finger');
+    finger.toggleAttribute('hidden', false);
+    finger.classList.toggle('pressed', !still && age >= 300 && age < 1400);
+    if (!impulse.visible) { arrow.removeAttribute('d'); return; }
+    const from = stagePoint({ x: body.x + impulse.ringR, y: body.y }), to = stagePoint(impulse);
+    const top = stagePoint({ x: impulse.x - 13, y: impulse.y - 8 });
+    const bottom = stagePoint({ x: impulse.x - 13, y: impulse.y + 8 });
+    arrow.setAttribute('d', `M${from.x} ${from.y} L${to.x} ${to.y} M${top.x} ${top.y} L${to.x} ${to.y} L${bottom.x} ${bottom.y}`);
   }
   function closeFirstTurnGuide(remember = false) {
     if (remember && firstTurnStep !== null) {
       firstTurnSeen = true;
       try { localStorage.setItem(firstTurnKey, 'seen'); } catch {}
     }
-    firstTurnStep = null;
+    if (firstTurnStep !== null) {
+      firstTurnStep = null;
+      animateFirstTurnGuide(0, false);
+    }
     $('first-turn-guide').hidden = true;
   }
   $('skip-first-turn-guide').onclick = () => {
@@ -1463,7 +1503,7 @@
   function resetPlans(keepGuard = false) {
     dirtyPrediction();
     startPlanClock();
-    if (!online?.active) planBanner = banner('Plan your shot…', 1300);
+    if (!online?.active) planBanner = banner('Plan your shot…', 1300, 'plan');
     plans = Array.from({ length: 3 }, (_, i) => keepGuard && plans?.[i]?.guard ? { ...plans[i] } : idlePlan());
     prepareCPU(); // Snapshot before any human planning input.
     sync();
@@ -2068,6 +2108,10 @@
     return { ringR, scale, distance, x: body.x + Math.cos(plan.angle) * distance, y: body.y + Math.sin(plan.angle) * distance,
       visible: plan.power > 0 && !body.stunned };
   }
+  function aimPower(distance, arrow) {
+    const power = pullBehind ? (distance - 6) / 120 : (distance - arrow.ringR) / arrow.scale;
+    return Math.max(0, Math.min(1, power));
+  }
   function drawImpulse(body, plan, color) {
     if (!plan) return;
     const arrow = impulseGeometry(body, plan);
@@ -2117,6 +2161,7 @@
     const r = fieldView.canvas.getBoundingClientRect(), stage = stageArea.getBoundingClientRect(), control = $('field-spin');
     fieldBox = { left: r.left - stage.left - fieldEffects.shakeX, top: r.top - stage.top - fieldEffects.shakeY, width: r.width, height: r.height,
       stageWidth: stage.width, stageHeight: stage.height, controlWidth: control.offsetWidth, controlHeight: control.offsetHeight };
+    positionFirstTurnGuide();
   }
   // A field point in the stage's coordinates (screenPoint, without reading the page).
   const stagePoint = p => boxPoint(fieldBox, p);
@@ -4419,7 +4464,7 @@
       const dx = p.x - b.x, dy = p.y - b.y;
       const arrow = impulseGeometry(b, plans[selected]);
       plans[selected].angle = Math.atan2(pullBehind ? -dy : dy, pullBehind ? -dx : dx);
-      plans[selected].power = Math.max(0, Math.min(1, pullBehind ? (Math.hypot(dx, dy) - 6) / 120 : (Math.hypot(dx, dy) - arrow.ringR) / arrow.scale));
+      plans[selected].power = aimPower(Math.hypot(dx, dy), arrow);
     }
 
     sync(); draw();
@@ -4643,6 +4688,7 @@
       draw();
     } else if (goalReplay && active && !online?.active) advanceGoalReplay(delta);
     else if (active && (hadEffects || (phase === 'plan' && predictionCache?.data?.goal !== null) || (!reducedMotion.matches && (foulsShowing() || fieldView.bodies.some(b => b.meter >= 100 || b.superArm || b.superActive))))) draw();
+    if (firstTurnStep !== null) animateFirstTurnGuide(time, active);
     flushMeters();
     requestAnimationFrame(frame);
   }

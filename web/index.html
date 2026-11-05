@@ -139,21 +139,18 @@ SOFTWARE.
             <div id="skaters" aria-hidden="true"></div>
           </div>
           <div id="field-banner" class="field-banner" role="status" aria-live="polite"></div>
-          <div id="first-turn-guide" class="first-turn-guide" hidden>
-            <div id="first-turn-labels" aria-hidden="true">
-              <span class="guide-team">Your team</span>
-              <span class="guide-goal">Goal to attack</span>
-            </div>
-            <div class="first-turn-prompt">
-              <p id="first-turn-tip" role="status"></p>
-              <button id="skip-first-turn-guide" type="button">Skip guide</button>
-            </div>
-          </div>
           <div class="demo-badge" aria-hidden="true">DEMO</div>
           <button id="skip-goal-replay" type="button" aria-label="Skip goal replay" hidden><span class="demo-badge"></span></button>
           <button id="demo-play" class="demo-play" type="button" aria-label="Play vs CPU"><span class="demo-hook">3v3 turn-based hockey</span></button>
           <!-- Tabler hand-finger-down icon (MIT), as in uburoom web/icons.js. -->
           <svg id="demo-finger" class="demo-finger" viewBox="0 0 24 24" aria-hidden="true" hidden><g><path d="M8 12v8.5a1.5 1.5 0 0 0 3 0v-7.5"/><path d="M11 13.5v2a1.5 1.5 0 0 0 3 0v-2.5"/><path d="M14 14.5a1.5 1.5 0 0 0 3 0v-1.5"/><path d="M17 13.5a1.5 1.5 0 0 0 3 0v-4.5a6 6 0 0 0 -6 -6h-2h.208a6 6 0 0 0 -5.012 2.7l-.196 .3q -.468 .718 -3.286 5.728a1.5 1.5 0 0 0 .536 2.022c.734 .44 1.674 .325 2.28 -.28l1.47 -1.47"/></g></svg>
+        </div>
+        <div id="first-turn-guide" class="first-turn-guide" hidden>
+          <svg aria-hidden="true"><path id="first-turn-arrow"/></svg>
+          <div class="first-turn-prompt">
+            <p id="first-turn-tip" role="status"></p>
+            <button id="skip-first-turn-guide" type="button">Skip guide</button>
+          </div>
         </div>
       </div>
       <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
