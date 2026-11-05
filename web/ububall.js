@@ -1,6 +1,7 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id), P = ububallPhysics;
+  const inDiscord = Boolean(window.ubuActivity);
   const liveField = {};
   let fieldView = liveField;
   fieldView.canvas = $('rink');
@@ -1787,14 +1788,17 @@
     $('btn-sidebars').dataset.tip = shown ? 'Hide sidebars' : 'Show sidebars';
     try { localStorage.setItem('ububall.sidebars', shown ? 'shown' : 'hidden'); } catch {}
   }
-  let sidebarsShown = true;
-  try { sidebarsShown = localStorage.getItem('ububall.sidebars') !== 'hidden'; } catch {}
-  showSidebars(sidebarsShown);
-  $('btn-sidebars').onclick = () => {
-    showSidebars(document.body.classList.contains('sidebars-hidden'));
-    layoutDirty = true;
-    draw();
-  };
+  if (inDiscord) $('btn-sidebars').hidden = true;
+  else {
+    let sidebarsShown = true;
+    try { sidebarsShown = localStorage.getItem('ububall.sidebars') !== 'hidden'; } catch {}
+    showSidebars(sidebarsShown);
+    $('btn-sidebars').onclick = () => {
+      showSidebars(document.body.classList.contains('sidebars-hidden'));
+      layoutDirty = true;
+      draw();
+    };
+  }
   function buildTeam() {
     if (statDrawer.matches(':popover-open')) statDrawer.hidePopover();
     fieldEffects.materialEmitters = fieldView.entries.map(entry => {
@@ -5135,7 +5139,7 @@
   }
 
   function isFullscreenActive() {
-    return Boolean(document.fullscreenElement || stadium?.classList.contains('stadium-fullscreen'));
+    return !inDiscord && Boolean(document.fullscreenElement || stadium?.classList.contains('stadium-fullscreen'));
   }
 
   function updateFullscreenUI() {
@@ -5206,12 +5210,17 @@
     draw();
   }
 
-  if (btnFullscreen) btnFullscreen.onclick = toggleFullscreen;
+  if (btnFullscreen) {
+    if (inDiscord) btnFullscreen.hidden = true;
+    else btnFullscreen.onclick = toggleFullscreen;
+  }
   if (btnRotate) btnRotate.onclick = toggleRotate;
-  document.addEventListener('fullscreenchange', () => {
-    updateFullscreenUI();
-    draw();
-  });
+  if (!inDiscord) {
+    document.addEventListener('fullscreenchange', () => {
+      updateFullscreenUI();
+      draw();
+    });
+  }
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && stadium?.classList.contains('stadium-fullscreen')) {
       stadium.classList.remove('stadium-fullscreen');

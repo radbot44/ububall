@@ -129,6 +129,11 @@ body.in-match .stadium:is(:fullscreen, .stadium-fullscreen) { grid-template-rows
   body.in-match .arena-layout { grid-template-columns: 1fr; padding: 0; }
   body.in-match .stadium { grid-column: 1; border: 0; border-radius: 0; box-shadow: none; }
 }
+@media (orientation: landscape) and (max-width: 720px) {
+  .discord-activity body.in-match .team-column { display: none; }
+  .discord-activity body.in-match .arena-layout { grid-template-columns: minmax(0, 1fr); }
+  .discord-activity body.in-match .stadium { grid-column: 1; }
+}
 /* Home: in landscape, the demo match plays beside the lineup; in portrait and phone sideways, above it. */
 body:not(.in-match) .ball-page { display: grid; grid-template-columns: minmax(0, 1fr) 28.5rem; gap: 0 1.25rem; align-items: stretch; width: min(114rem, calc(100% - 3rem)); max-width: none; margin: 0 auto; }
 @media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
