@@ -54,7 +54,7 @@
     planPausedAt = localPlayBlocked() ? now : null;
   }
   function localPlayBlocked() {
-    return document.hidden || $('roster-dialog').open || $('pause-menu').open || $('stats-dialog').open || Boolean(foulInfo && !online?.active);
+    return document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(foulInfo && !online?.active);
   }
   function updateLocalPlanClock(blocked) {
     if (online?.active || phase !== 'plan' || !blitzMode()) return;
@@ -149,6 +149,10 @@
   }
   let arrowGrab = null, dragStart = null, dragMoved = false;
   let pullBehind = false;
+  const firstTurnKey = 'ububall-first-turn-guide';
+  let firstTurnSeen = false;
+  let firstTurnStep = null;
+  try { firstTurnSeen = localStorage.getItem(firstTurnKey) === 'seen'; } catch {}
   // The floating spin slider: on by default with a mouse, off on touch screens.
   let spinSlider = !matchMedia('(pointer: coarse)').matches;
   try { spinSlider = (localStorage.getItem('ububall-spin-slider') ?? (spinSlider ? 'on' : 'off')) === 'on'; } catch {}
@@ -160,6 +164,7 @@
   $('setting-aim').onclick = () => {
     pullBehind = !pullBehind;
     $('setting-aim').querySelector('.setting-value').textContent = pullBehind ? 'Pull back' : 'Drag arrow';
+    updateFirstTurnGuide();
   };
   const stadium = document.querySelector('.stadium');
   const stageArea = document.querySelector('.stadium-stage-area');
@@ -1393,6 +1398,34 @@
     dirtyMeters.clear();
   }
   function say(message) { $('game-status').textContent = message; }
+  function aimHelp() {
+    return pullBehind
+      ? 'Pull back from an ubu to aim in the opposite direction. Pull farther for more power.'
+      : 'Drag from an ubu toward your target. Drag farther for more power.';
+  }
+  function updateFirstTurnGuide() {
+    const visible = firstTurnStep !== null && phase === 'plan' && !online?.active;
+    $('first-turn-guide').hidden = !visible;
+    if (!visible) return;
+    if (!drag && plans.some(plan => plan.power > 0)) firstTurnStep = 'launch';
+    $('first-turn-labels').hidden = firstTurnStep === 'launch';
+    const tip = firstTurnStep === 'launch'
+      ? 'Aim your other ubus if you like, then press Launch team. Both teams move at the same time.'
+      : 'First to 5 goals wins. ' + aimHelp();
+    if ($('first-turn-tip').textContent !== tip) $('first-turn-tip').textContent = tip;
+  }
+  function closeFirstTurnGuide(remember = false) {
+    if (remember && firstTurnStep !== null) {
+      firstTurnSeen = true;
+      try { localStorage.setItem(firstTurnKey, 'seen'); } catch {}
+    }
+    firstTurnStep = null;
+    $('first-turn-guide').hidden = true;
+  }
+  $('skip-first-turn-guide').onclick = () => {
+    closeFirstTurnGuide(true);
+    $('launch').focus();
+  };
   function prepareCPU(initialPlans = null) {
     const generation = ++cpuGeneration;
     cpuDone = false;
@@ -1584,6 +1617,7 @@
     }
   }
   function sync() {
+    updateFirstTurnGuide();
     updateClock();
     const planning = phase === 'plan';
     const isGoal = phase === 'goal';
@@ -1607,7 +1641,10 @@
     for (const id of ['shot-spin', 'spin-less', 'spin-more']) $(id).disabled = !planning || isStunned;
     $('launch').disabled = phase === 'play' || phase === 'cpu-wait';
     document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
-    $('launch').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : phase === 'cpu-wait' ? 'CPU planning…' : 'Launch team';
+    $('launch-label').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : phase === 'cpu-wait' ? 'CPU planning…' : 'Launch team';
+    $('shot-guard').disabled = $('shot-reset').disabled = !knobEditable(selected);
+    $('shot-guard').setAttribute('aria-pressed', String(planning && Boolean(plans[selected]?.guard)));
+    const actions = { aimed: 0, guarding: 0, idle: 0 };
     const spinValue = Math.round((plans[selected].spin || 0) * 100);
     $('shot-spin').value = spinValue;
     $('shot-spin').style.setProperty('--spin-start', Math.min(50, (spinValue + 100) / 2) + '%');
@@ -1618,16 +1655,33 @@
       button.classList.toggle('selected', i === selected);
       const select = button.querySelector('.card-select');
       select.setAttribute('aria-pressed', String(i === selected)); select.disabled = !planning;
+      const body = fieldView.bodies[i], plan = plans[i];
+      const canAct = body && !body.carded && !body.stunned;
+      const guarded = canAct && (planning ? plan.guard : phase === 'play' && body.guarding);
+      const aimed = canAct && (plan.power > 0 || plan.spin || body.superArm);
+      actions[guarded ? 'guarding' : aimed ? 'aimed' : 'idle']++;
+      const shield = button.querySelector('.card-guard');
+      shield.disabled = !knobEditable(i);
+      shield.setAttribute('aria-pressed', String(Boolean(guarded)));
       const small = button.querySelector('small');
       if (small) {
-        if (fieldView.bodies[i]?.carded) small.textContent = 'Yellow card · sits out this turn';
-        else if (fieldView.bodies[i]?.stunned) small.textContent = '💫 Stunned this turn';
-        else if (plans[i].guard) small.textContent = 'Guarding';
-        else if (fieldView.bodies[i] && P.dazeSlow(fieldView.bodies[i]) > 0) small.textContent = `Dazed · launch −${Math.round(P.dazeSlow(fieldView.bodies[i]) * 100)}%`;
-        else small.textContent = `${Math.round(plans[i].power * 100)}% power · ${Math.round((plans[i].spin || 0) * 100)}% spin`;
+        const spin = Math.round((plan.spin || 0) * 100);
+        if (body?.carded) small.textContent = 'Yellow card · sits out this turn';
+        else if (body?.stunned) small.textContent = '💫 Stunned this turn';
+        else if (guarded) small.textContent = 'Guarding';
+        else if (!aimed) small.textContent = 'Idle';
+        else small.textContent = `${Math.round(plan.power * 100)}% power · ${spin ? spin + '% spin' : 'no spin'}`;
       }
     });
+    const hasMoves = Boolean(actions.aimed || actions.guarding);
+    $('launch-plan').hidden = !planning || !hasMoves;
+    $('launch-plan').textContent = planning && hasMoves
+      ? Object.entries(actions).filter(([, count]) => count).map(([action, count]) => count + ' ' + action).join(' · ') : '';
+    if (planning && !hasMoves) $('launch').dataset.tip = 'No moves are planned.';
+    else delete $('launch').dataset.tip;
     fieldView.bodies.slice(0, 6).forEach((b, i) => {
+      const shield = i >= 3 && $(`player-${i}`)?.querySelector('.card-guard');
+      if (shield) shield.hidden = phase !== 'play' || !b.guarding;
       const pctNode = $(`super-pct-${i}`);
       const fillNode = $(`super-fill-${i}`);
       if (fillNode) setMeterFill(fillNode, b.meter);
@@ -1679,7 +1733,7 @@
     renderKnobs();
     if (online?.active) {
       $('launch').disabled = phase !== 'plan';
-      $('launch').textContent = phase === 'plan' ? 'Lock moves' : phase === 'play' ? 'In motion…' : phase === 'over' ? 'Match complete' : 'Waiting…';
+      $('launch-label').textContent = phase === 'plan' ? 'Lock moves' : phase === 'play' ? 'In motion…' : phase === 'over' ? 'Match complete' : 'Waiting…';
       $('new-match').disabled = true;
       $('launch').hidden = phase === 'over';
     }
@@ -1770,10 +1824,15 @@
       const select = document.createElement('button'); select.type = 'button'; select.className = 'card-select';
       const titles = document.createElement('div'); titles.className = 'card-titles';
       const strong = document.createElement('strong'); strong.textContent = entry.model.parts.fullName;
-      const small = document.createElement('small'); small.textContent = '0% power · 0% spin';
-      titles.append(strong, small); select.append(titles);
+      const small = document.createElement('small'); small.textContent = 'Idle';
+      select.append(strong, small);
+      const shield = document.createElement('button'); shield.type = 'button'; shield.className = 'card-guard guard-toggle';
+      shield.setAttribute('aria-label', 'Guard with ' + entry.model.parts.fullName);
+      shield.append(gameUi.icon('shield'));
+      shield.onclick = () => toggleGuard(i);
+      titles.append(select, shield);
       const header = document.createElement('div'); header.className = 'card-header';
-      header.append(cardPortrait(entry, i), select);
+      header.append(cardPortrait(entry, i), titles);
       button.append(header, renderSuperPanel(i));
       select.onclick = () => { selected = i; sync(); draw(); };
       $('team').append(button);
@@ -1795,7 +1854,10 @@
         const titles = document.createElement('div'); titles.className = 'card-titles';
         const strong = document.createElement('strong'); strong.textContent = entry.model.parts.fullName;
         const small = document.createElement('small'); small.className = 'away'; small.textContent = $('opponent-label').textContent;
-        titles.append(strong, small);
+        const name = document.createElement('div'); name.className = 'card-select'; name.append(strong, small);
+        const shield = document.createElement('span'); shield.className = 'card-guard'; shield.hidden = true;
+        shield.setAttribute('role', 'img'); shield.setAttribute('aria-label', 'Guarding'); shield.append(gameUi.icon('shield'));
+        titles.append(name, shield);
         header.append(cardPortrait(entry, i), titles);
         card.append(header, renderSuperPanel(i));
         $('cpu-team').append(card);
@@ -4045,6 +4107,7 @@
     try {
       const entry = await replayStore.get(id), replay = await ububallReplay.read(entry.file);
       if ($('replays-dialog').open) $('replays-dialog').close();
+      closeFirstTurnGuide();
       watchReplay(replay, entry.file);
     } catch (error) { replaysNote(error.message); }
   }
@@ -4196,7 +4259,7 @@
       );
       loopFanfare(scorer?.voice);
       sync();
-      if (phase === 'goal') { $('launch').disabled = false; $('launch').textContent = 'Next kickoff'; }
+      if (phase === 'goal') { $('launch').disabled = false; $('launch-label').textContent = 'Next kickoff'; }
     } else {
       turn++; phase = 'plan'; resetPlans(true);
       saveActiveMatch();
@@ -4223,6 +4286,7 @@
       draw(); return;
     }
     if (phase !== 'plan') return;
+    closeFirstTurnGuide(true);
     const generation = cpuGeneration;
     phase = 'cpu-wait'; drag = null; sync(); say('CPU is finishing its plan…');
     await cpuReady;
@@ -4259,11 +4323,19 @@
   // Guarding replaces the launch and brakes the ubu. The arrow stays (faded), so clearing guard
   // brings the launch back.
   function toggleGuard(i) {
-    if (phase !== 'plan' || fieldView.bodies[i].stunned) return;
+    if (!knobEditable(i)) return;
     plans[i] = { ...plans[i], guard: !plans[i].guard };
     sync(); draw();
     saveActiveMatch();
   }
+  $('shot-guard').onclick = () => toggleGuard(selected);
+  $('shot-reset').onclick = () => {
+    if (!knobEditable(selected)) return;
+    plans[selected] = idlePlan();
+    fieldView.bodies[selected].superArm = false;
+    sync(); draw();
+    saveActiveMatch();
+  };
   function point(event) {
     const r = fieldView.canvas.getBoundingClientRect();
     if (fieldView.portrait) {
@@ -4342,6 +4414,7 @@
     drag = null;
     dragMode = null;
     if (phase === 'plan') saveActiveMatch();
+    updateFirstTurnGuide();
     draw();
   };
   function handleCollision(a, b, speed, impulse, plow = false, iron = false) {
@@ -4896,6 +4969,16 @@
   // scrolls. Online play borrows the mode screen, and its lobby is the same team screen with the
   // invite on top and Ready in place of Start.
   let setupFor = 'cpu';
+  const quickPlayKey = 'ububall-last-cpu-setup';
+  let lastCpuSetup = null;
+  try {
+    const saved = JSON.parse(localStorage.getItem(quickPlayKey));
+    if (saved && ['easy', 'medium', 'hard'].includes(saved.level) &&
+        (saved.mode === 'standard' || typeof saved.mode === 'string' &&
+          saved.mode.split('-').every(rule => ububallMatch.RULES.includes(rule))) &&
+        Array.isArray(saved.team) && saved.team.length === 3 &&
+        saved.team.every(entry => entry && typeof entry.key === 'string')) lastCpuSetup = saved;
+  } catch {}
   const chosenMode = () => ububallMatch.RULES.filter(rule => $('rule-' + rule).checked).join('-') || 'standard';
   const modeSummary = () => { $('mode-summary').textContent = ububallMatch.modeName(chosenMode()); };
   for (const rule of ububallMatch.RULES) $('rule-' + rule).addEventListener('change', modeSummary);
@@ -4920,11 +5003,11 @@
     $('roster-scroll').scrollTop = 0;
     if (tab === 'yours') void loadCollection();
   }
-  function openSetup(step, purpose = 'cpu', mode = cpuMode) {
+  function openSetup(step, purpose = 'cpu', mode = cpuMode, level = cpuLevel) {
     setupFor = purpose;
     for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(mode, rule);
     modeSummary();
-    document.querySelector(`input[name="cpu-level"][value="${cpuLevel}"]`).checked = true;
+    document.querySelector(`input[name="cpu-level"][value="${level}"]`).checked = true;
     draft = [...roster]; rosterSlot = 0; $('roster-status').textContent = '';
     rosterTab(signedIn() ? 'yours' : 'practice');
     setupStep(step);
@@ -4996,14 +5079,29 @@
     }
     if (draft.some(d => !d)) return;
     $('roster-dialog').close();
+    startCpuMatch(draft, chosenMode(), document.querySelector('input[name="cpu-level"]:checked').value);
+  };
+  function startCpuMatch(team, mode, level) {
     stopDemo();
-    roster = draft.map(d => ({ ...d }));
+    draft = team.map(entry => ({ ...entry }));
+    roster = [...draft];
     rememberTeam();
-    cpuMode = chosenMode();
-    cpuLevel = document.querySelector('input[name="cpu-level"]:checked').value;
+    cpuMode = mode;
+    cpuLevel = level;
+    lastCpuSetup = {
+      mode, level,
+      team: draft.map(({ key, dna, label, equippedSuper }) => ({
+        key, dna: key.startsWith('practice-') ? dna : undefined, label, equippedSuper: equippedSuper ? { id: equippedSuper.id } : null
+      }))
+    };
+    try { localStorage.setItem(quickPlayKey, JSON.stringify(lastCpuSetup)); } catch {}
     newMatch(true);
     enterMatch();
-  };
+    if (!firstTurnSeen) {
+      firstTurnStep = 'aim';
+      updateFirstTurnGuide();
+    }
+  }
   $('cancel-roster').onclick = () => $('roster-dialog').close();
   $('lobby-leave').onclick = () => online.leave();
   // A modal pauses the simulation; cancelling preserves the current turn.
@@ -5115,7 +5213,14 @@
   function setPortrait(value) { if (fieldView.portrait !== value) toggleRotate(); }
   function fitOrientation() { if (inMatch) setPortrait(portraitScreen.matches); }
   function matchInProgress() { return !demo && phase !== 'over' && Boolean(recording && !online?.active); }
-  function updateHome() { $('home-play').textContent = online?.active ? 'Back to online match' : matchInProgress() ? 'Resume match' : 'Play vs CPU'; }
+  function updateHome() {
+    const active = online?.active || matchInProgress();
+    $('home-play-label').textContent = online?.active ? 'Back to online match' : active ? 'Resume match' : 'Quick play';
+    $('home-customize').hidden = $('quick-play-setup').hidden = Boolean(active);
+    const { mode, level, team } = lastCpuSetup || { mode: 'standard', level: 'easy' };
+    $('quick-play-setup').textContent = [ububallMatch.modeName(mode), level[0].toUpperCase() + level.slice(1),
+      team ? 'Last team' : 'Starter team'].join(' · ');
+  }
   function enterMatch() {
     if (location.pathname !== '/') return;
     if (demo) { stopDemo(); newMatch(true); }
@@ -5125,6 +5230,8 @@
     fitOrientation(); layoutDirty = true; draw();
   }
   function exitMatchMode() {
+    closeFirstTurnGuide();
+    if ($('match-help').open) $('match-help').close();
     if ($('pause-menu').open) $('pause-menu').close();
     endReplay();
     if (!inMatch) return;
@@ -5138,11 +5245,46 @@
     $('pause-menu').showModal();
   }
   $('pause').onclick = openPause;
+  $('pause-help').onclick = () => {
+    $('match-help-aim').textContent = aimHelp();
+    $('pause-menu').close();
+    $('match-help').showModal();
+  };
+  $('match-help-back').onclick = () => {
+    $('match-help').close();
+    openPause();
+    $('pause-help').focus();
+  };
+  $('match-help').addEventListener('cancel', event => {
+    event.preventDefault();
+    $('match-help-back').click();
+  });
   $('match-stats').onclick = () => theater ? openStats() : openMatchStats('pause');
   $('pause-resume').onclick = () => $('pause-menu').close();
   $('pause-restart').onclick = () => { $('pause-menu').close(); endReplay(); clearActiveMatch(); openSetup('mode'); };
   $('pause-leave').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
-  $('home-play').onclick = () => { if (online?.active || matchInProgress()) enterMatch(); else openSetup('mode'); };
+  $('home-customize').onclick = () => openSetup('mode', 'cpu', lastCpuSetup?.mode, lastCpuSetup?.level);
+  $('home-play').onclick = async () => {
+    if (online?.active || matchInProgress()) { enterMatch(); return; }
+    const saved = lastCpuSetup;
+    if (!saved) { startCpuMatch(practice.slice(0, 3), 'standard', 'easy'); return; }
+    const button = $('home-play');
+    button.disabled = true;
+    try {
+      const needsCollection = saved.team.some(entry => !entry.key.startsWith('practice-'));
+      if (needsCollection && signedIn()) await ubuList.load({ refresh: true });
+      if (online?.active || matchInProgress() || location.pathname !== '/' || $('roster-dialog').open) return;
+      const team = saved.team.map(entry => entry.key.startsWith('practice-') ? restoreEntry(entry)
+        : signedIn() ? restoreTeam([{ serial: entry.key, super: entry.equippedSuper?.id ?? null }]).team[0] : null);
+      if (team.some(entry => !entry)) throw new Error('Last team unavailable');
+      startCpuMatch(team, saved.mode, saved.level);
+    } catch {
+      if (location.pathname === '/' && !online?.active && !matchInProgress() && !$('roster-dialog').open) {
+        openSetup('team', 'cpu', saved.mode, saved.level);
+        $('roster-status').textContent = 'Your last team is unavailable. Choose a team to start.';
+      }
+    } finally { button.disabled = false; }
+  };
   $('demo-play').onclick = () => $('home-play').click();
   portraitScreen.addEventListener('change', () => { gameUi.updateScale?.(); fitOrientation(); draw(); });
   window.addEventListener('popstate', () => {

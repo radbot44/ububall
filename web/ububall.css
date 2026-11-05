@@ -24,7 +24,12 @@
 .home-ubu small img { width: 1.125rem; }
 .home-actions { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: .75rem; }
 .home-actions button { min-height: 4.25rem; border-radius: 1.125rem; font-size: 1.375rem; }
-#home-play { box-shadow: var(--bevel), 0 .625rem 1.75rem color-mix(in srgb, var(--primary) 30%, transparent); }
+#home-play {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: .125rem;
+  box-shadow: var(--bevel), 0 .625rem 1.75rem color-mix(in srgb, var(--primary) 30%, transparent);
+}
+#quick-play-setup { font-size: .8125rem; font-weight: normal; }
 .mint-entry {
   display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .875rem 1rem; border-radius: 1.125rem;
   background: color-mix(in srgb, var(--card) 90%, var(--primary) 10%);
@@ -260,6 +265,13 @@ body.in-match.sidebars-hidden .stadium:not(.portrait-mode) > .stadium-stage-area
 body.in-match.sidebars-hidden .team-column { display: none; }
 @media (orientation: portrait), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) { #btn-sidebars { display: none; } }
 .card-titles { min-width: 0; flex: 1; }
+.card-titles:has(> .card-guard) { display: flex; align-items: center; gap: .25rem; }
+.card-titles > .card-select { display: block; }
+.card-guard { flex: none; margin-left: auto; }
+button.card-guard { background: transparent; border: 0; box-shadow: none; padding: .25rem; }
+.card-header .card-guard svg, .shot-buttons svg { width: 1rem; height: 1rem; }
+.guard-toggle svg { color: #b8bcc3; }
+.guard-toggle[aria-pressed="true"] svg, .cpu-card .card-guard svg { color: #4798ff; fill: currentColor; }
 .card-titles strong {
   display: block;
   font-size: .875rem;
@@ -512,6 +524,25 @@ body.in-match.sidebars-hidden .team-column { display: none; }
 }
 #rink { display: block; width: 100%; height: 100%; touch-action: none; }
 #skaters { position: absolute; inset: 0; pointer-events: none; }
+.first-turn-guide { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.first-turn-prompt, .first-turn-guide span {
+  position: absolute; background: var(--card); color: var(--text);
+  border: .0625rem solid var(--border); border-radius: .75rem; padding: .375rem .625rem;
+  font-size: .875rem; text-align: center;
+}
+.first-turn-prompt {
+  bottom: .5rem; left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: calc(100% - 1rem);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .25rem .625rem;
+}
+.first-turn-prompt p { margin: 0; }
+.first-turn-prompt button { pointer-events: auto; min-height: 2rem; }
+.guide-team { left: .5rem; top: 24%; }
+.guide-goal { right: .5rem; top: 24%; }
+.portrait-mode .guide-team { top: auto; bottom: 24%; left: .5rem; }
+.portrait-mode .guide-goal { top: 12%; right: .5rem; }
+.match-help[open] { display: block; }
+.match-help ol { display: grid; gap: .625rem; padding-left: 1.5rem; margin-bottom: 1rem; text-align: left; }
 .skater { position: absolute; width: 5%; aspect-ratio: 1; transform: translate(-50%, -50%); }
 .skater svg { width: 100%; height: 100%; display: block; }
 #game-status { margin: .625rem 0 .25rem; padding: 0 1rem; color: var(--muted); text-align: center; font-size: .8125rem; }
@@ -536,6 +567,16 @@ body.in-match.sidebars-hidden .team-column { display: none; }
   font-size: .75rem;
 }
 .stadium-actions > #launch, #stadium-super-text { overflow: hidden; text-overflow: ellipsis; }
+.stadium-actions > #launch:not([hidden]) {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.shot-controls { min-width: 0; }
+.shot-buttons { display: flex; justify-content: center; gap: .25rem; margin-top: .25rem; }
+.shot-buttons button {
+  display: flex; align-items: center; gap: .125rem; min-height: 1.75rem;
+  padding: 0 .25rem; font-size: .625rem;
+}
+#launch-plan:not([hidden]) { display: block; font-size: .625rem; }
 #stadium-super-text { min-width: 0; }
 .online-match-actions {
   grid-column: 1 / -1; display: flex; justify-content: center; align-items: center; gap: .5rem;

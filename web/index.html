@@ -31,7 +31,11 @@
   <main class="ball-page" data-screen="play">
 
   <section class="play-home" aria-labelledby="home-title">
-    <div class="home-actions"><button id="home-play" class="primary" type="button">Play vs CPU</button><button id="online-open" type="button">Play online</button><button id="replays-open" type="button">Replays</button></div>
+    <div class="home-actions">
+      <button id="home-play" class="primary" type="button"><span id="home-play-label">Quick play</span><small id="quick-play-setup">Standard · Easy · Starter team</small></button>
+      <button id="home-customize" type="button">Customize match</button>
+      <button id="online-open" type="button">Play online</button><button id="replays-open" type="button">Replays</button>
+    </div>
     <div class="home-team">
       <div class="home-team-head"><h1 id="home-title">Your team</h1><button id="new-match" type="button">Change team</button></div>
       <div id="home-lineup" class="home-lineup"></div>
@@ -121,6 +125,16 @@ SOFTWARE.
             <div id="skaters" aria-hidden="true"></div>
           </div>
           <div id="field-banner" class="field-banner" role="status" aria-live="polite"></div>
+          <div id="first-turn-guide" class="first-turn-guide" hidden>
+            <div id="first-turn-labels" aria-hidden="true">
+              <span class="guide-team">Your team</span>
+              <span class="guide-goal">Goal to attack</span>
+            </div>
+            <div class="first-turn-prompt">
+              <p id="first-turn-tip" role="status"></p>
+              <button id="skip-first-turn-guide" type="button">Skip guide</button>
+            </div>
+          </div>
           <div class="demo-badge" aria-hidden="true">DEMO</div>
           <button id="skip-goal-replay" type="button" aria-label="Skip goal replay" hidden><span class="demo-badge"></span></button>
           <button id="demo-play" class="demo-play" type="button" aria-label="Play vs CPU"><span class="demo-hook">3v3 turn-based hockey</span></button>
@@ -135,12 +149,18 @@ SOFTWARE.
           <button id="online-rematch" class="primary" hidden>Rematch</button>
           <button id="online-forfeit" hidden>Claim forfeit</button>
         </div>
-        <div class="knob-row" role="group" aria-label="Shot controls"></div>
+        <div class="shot-controls">
+          <div class="knob-row" role="group" aria-label="Shot controls"></div>
+          <div class="shot-buttons">
+            <button id="shot-guard" class="guard-toggle" type="button" aria-pressed="false" data-tip="Guard makes your ubu brake and brace for hits this turn."><i data-icon="shield"></i>Guard</button>
+            <button id="shot-reset" type="button"><i data-icon="rotate"></i>Reset</button>
+          </div>
+        </div>
         <button id="stadium-super-btn" type="button" class="stadium-super-btn" aria-label="Arm super for selected ubu">
           <img id="stadium-super-icon" class="super-icon" alt="" src="assets/00_stalwart.png">
           <span id="stadium-super-text">Super 0%</span>
         </button>
-        <button class="primary" id="launch">Launch team</button>
+        <button class="primary" id="launch"><span id="launch-label">Launch team</span><small id="launch-plan" hidden></small></button>
         <div id="replay-bar" class="replay-bar">
           <div class="replay-track"><input id="replay-seek" type="range" min="0" max="1" step="1" value="0" aria-label="Replay position"><div id="replay-marks" class="replay-marks"></div></div>
           <div class="replay-controls">
@@ -171,6 +191,7 @@ SOFTWARE.
     <h2 id="pause-title">Paused</h2>
     <div class="pause-actions">
       <button id="pause-resume" class="primary" type="button">Resume</button>
+      <button id="pause-help" type="button">How to play</button>
       <button id="pause-restart" type="button">New match</button>
       <button id="pause-leave" type="button">Leave match</button>
     </div>
@@ -182,6 +203,16 @@ SOFTWARE.
       <button id="setting-sidebar" class="setting" type="button"><span>Controls side</span><span class="setting-value">Left</span></button>
     </div>
     <nav class="pause-links" aria-label="Leave to"><a href="/mint">Ubu Mint</a><a href="/collection">Collection</a></nav>
+  </dialog>
+  <dialog id="match-help" class="pause-menu match-help" aria-labelledby="match-help-title">
+    <h2 id="match-help-title">How to play</h2>
+    <ol>
+      <li>Send the ball into the goal at the far end from your team. First to 5 goals wins.</li>
+      <li id="match-help-aim"></li>
+      <li>Guard makes your ubu brake and brace for hits this turn. Tap the selected ubu on the rink or press <strong>Guard</strong> to toggle it.</li>
+      <li>Set up moves for any of your three ubus, then press <strong>Launch team</strong>. Both teams move at the same time.</li>
+    </ol>
+    <button id="match-help-back" class="primary" type="button">Back to menu</button>
   </dialog>
   <dialog id="replays-dialog" class="replays-dialog" aria-labelledby="replays-title">
     <div class="online-heading"><div><h2 id="replays-title">Replays</h2><p id="replays-note"></p></div><button id="replays-close" class="icon-button" type="button" aria-label="Close replays"><i data-icon="x"></i></button></div>
