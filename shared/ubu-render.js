@@ -5,6 +5,86 @@
   const DESIGNED = new Set(['metallic', 'glossy', 'iridescent', 'crystalline', 'pearlescent', 'damascus', 'marble', 'lacquered',
     'velvet', 'frosted', 'woodgrain', 'holographic', 'terrazzo', 'crackle', 'plush', 'opalescent', 'granite', 'satin', 'sandstone', 'starfield', 'quartz', 'obsidian', 'mosaic', 'hammered-metal', 'kintsugi', 'leather', 'carbon-fiber', 'denim', 'bubbled', 'lava', 'circuitry', 'liquid']);
   let serial = 0;
+  let liquidShades = null;
+  let liquidTileDataUrl = null;
+  let liquidTilePending = false;
+
+  function getLiquidShades() {
+    if (liquidShades) return liquidShades;
+    const tau = Math.PI * 2;
+    const sinY = new Float32Array(180), cosY = new Float32Array(180);
+    const sinX1 = new Float32Array(180), sinX2 = new Float32Array(180);
+    for (let y = 0; y < 360; y += 2) {
+      sinY[y >> 1] = 18 * Math.sin(tau * y / 180);
+      cosY[y >> 1] = 7 * Math.cos(tau * y / 90);
+    }
+    for (let x = 0; x < 360; x += 2) {
+      sinX1[x >> 1] = 9 * Math.sin(tau * x / 120);
+      sinX2[x >> 1] = 24 * Math.sin(tau * x / 360);
+    }
+    const shades = Array.from({ length: 32 }, () => '');
+    const waves = [[2, 1, 1.4, .3], [1, 3, .9, 1.3], [4, -2, .6, 2.1], [9, 3, .25, .6], [13, -7, .12, 1.8]];
+    for (let y = 0; y < 360; y += 2) {
+      const sy = sinY[y >> 1], cy = cosY[y >> 1];
+      for (let x = 0; x < 360; x += 2) {
+        const wx = x + sy + sinX1[x >> 1];
+        const wy = y + cy + sinX2[x >> 1];
+        let dx = 0, dy = 0, height = 0;
+        for (let w = 0; w < 5; w++) {
+          const kx = waves[w][0], ky = waves[w][1], amp = waves[w][2], phase = waves[w][3];
+          const wave = tau * (kx * wx + ky * wy) / 360 + phase;
+          height += amp * Math.sin(wave);
+          const c = amp * Math.cos(wave) * tau / 360;
+          dx += kx * c; dy += ky * c;
+        }
+        const length = Math.hypot(dx, dy, 1);
+        const spec = Math.pow(Math.max(0, (-dx * .12 + dy * .45 + .885) / length), 64);
+        const tone = Math.max(0, Math.min(31, Math.round(8 + spec * 12 + Math.exp(-height * height * 2) * 18 - (dx + dy) * 6)));
+        shades[tone] += `M${x} ${y}h2v2h-2Z`;
+      }
+    }
+    liquidShades = shades;
+    return shades;
+  }
+
+  function prepareLiquidTile(onReady) {
+    if (liquidTileDataUrl) {
+      if (onReady) onReady(liquidTileDataUrl);
+      return liquidTileDataUrl;
+    }
+    if (typeof document === 'undefined' || typeof Image === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined') return null;
+    if (liquidTilePending) return null;
+    liquidTilePending = true;
+    try {
+      const shades = getLiquidShades();
+      const svgStr = `<svg xmlns="${NS}" width="360" height="360" viewBox="0 0 360 360">` +
+        `<defs><filter id="b" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="0.35"/></filter></defs>` +
+        `<g filter="url(#b)">` +
+        shades.map((d, i) => `<path d="${d}" fill="${i < 9 ? '#000' : '#fff'}" opacity="${i < 9 ? (9 - i) * .025 : (i - 9) * .035}"/>`).join('') +
+        `</g></svg>`;
+      const blob = new Blob([svgStr], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = 360;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            liquidTileDataUrl = canvas.toDataURL('image/png');
+            if (onReady) onReady(liquidTileDataUrl);
+          }
+        } catch {}
+        URL.revokeObjectURL(url);
+      };
+      img.onerror = () => URL.revokeObjectURL(url);
+      img.src = url;
+    } catch {
+      liquidTilePending = false;
+    }
+    return liquidTileDataUrl;
+  }
   function svgNode(tag, attrs = {}) {
     const element = document.createElementNS(NS, tag);
     for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
@@ -485,20 +565,38 @@
     } else if (attribute.texture === 'mosaic') {
       // Small hand-cut tesserae with inset faces, exposed bevels and recessed grout.
       cover('rgba(25,23,21,0.4)');
-      const glaze=svgNode('linearGradient',{id:id+'-glaze',x1:'0%',y1:'0%',x2:'75%',y2:'100%'});
-      for(const [offset,color,opacity] of [[0,'#fff',.3],[.3,'#fff',.04],[.75,'#000',.04],[1,'#000',.16]])
-        glaze.append(svgNode('stop',{offset,'stop-color':color,'stop-opacity':opacity}));
+      const glaze = svgNode('linearGradient', { id: id + '-glaze', x1: '0%', y1: '0%', x2: '75%', y2: '100%' });
+      for (const [offset, color, opacity] of [[0, '#fff', .3], [.3, '#fff', .04], [.75, '#000', .04], [1, '#000', .16]])
+        glaze.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
       defs.append(glaze);
-      for(let row=-10;row<28;row++) for(let col=-10;col<28;col++) {
-        const x=col*20+(row%2)*8,y=row*20;
-        const pts=[[x+1+roll(),y+1+roll()],[x+18-roll(),y+1+roll()],[x+18-roll(),y+18-roll()],[x+1+roll(),y+18-roll()]];
-        const points=pts.map(p=>p.join(',')).join(' ');
-        pattern.append(svgNode('polygon',{points,fill:attribute.hex}));
-        pattern.append(svgNode('polygon',{points,fill:roll()>.5?'#fff':'#000',opacity:.04+roll()*.14}));
-        pattern.append(svgNode('polygon',{points,fill:`url(#${id}-glaze)`}));
-        pattern.append(svgNode('path',{d:`M${pts[3]}L${pts[0]}L${pts[1]}`,fill:'none',stroke:'#fff','stroke-width':.85,opacity:.3}));
-        pattern.append(svgNode('path',{d:`M${pts[1]}L${pts[2]}L${pts[3]}`,fill:'none',stroke:'#000','stroke-width':1.1,opacity:.4}));
+      let tiles = '', topBevels = '', bottomBevels = '';
+      const whiteShades = ['', '', '', ''], blackShades = ['', '', '', ''];
+      for (let row = -10; row < 28; row++) for (let col = -10; col < 28; col++) {
+        const x = col * 20 + (row % 2) * 8, y = row * 20;
+        const p0 = `${(x + 1 + roll()).toFixed(1)} ${(y + 1 + roll()).toFixed(1)}`;
+        const p1 = `${(x + 18 - roll()).toFixed(1)} ${(y + 1 + roll()).toFixed(1)}`;
+        const p2 = `${(x + 18 - roll()).toFixed(1)} ${(y + 18 - roll()).toFixed(1)}`;
+        const p3 = `${(x + 1 + roll()).toFixed(1)} ${(y + 18 - roll()).toFixed(1)}`;
+        const poly = `M${p0}L${p1}L${p2}L${p3}Z`;
+        tiles += poly;
+        const isWhite = roll() > .5;
+        const bucket = Math.min(3, Math.floor(roll() * 4));
+        if (isWhite) whiteShades[bucket] += poly;
+        else blackShades[bucket] += poly;
+        topBevels += `M${p3}L${p0}L${p1}`;
+        bottomBevels += `M${p1}L${p2}L${p3}`;
       }
+      pattern.append(svgNode('path', { d: tiles, fill: attribute.hex }));
+      const shadeOpacities = [0.055, 0.09, 0.125, 0.16];
+      for (let i = 0; i < 4; i++) {
+        if (whiteShades[i]) pattern.append(svgNode('path', { d: whiteShades[i], fill: '#fff', opacity: shadeOpacities[i] }));
+        if (blackShades[i]) pattern.append(svgNode('path', { d: blackShades[i], fill: '#000', opacity: shadeOpacities[i] }));
+      }
+      pattern.append(
+        svgNode('path', { d: tiles, fill: `url(#${id}-glaze)` }),
+        svgNode('path', { d: topBevels, fill: 'none', stroke: '#fff', 'stroke-width': .85, opacity: .3 }),
+        svgNode('path', { d: bottomBevels, fill: 'none', stroke: '#000', 'stroke-width': 1.1, opacity: .4 })
+      );
     } else if (attribute.texture === 'hammered-metal') {
       lighting('hammered-base', [[0,'#000',.25],[.25,'#fff',.08],[.48,'#fff',.3],[.7,'#000',.08],[1,'#000',.3]]);
       const dent = svgNode('linearGradient', { id:id+'-dent', x1:'10%', y1:'0%', x2:'85%', y2:'100%' });
@@ -763,32 +861,21 @@
     } else if (attribute.texture === 'liquid') {
       lighting('liquid-depth', [[0,'#fff',.12],[.4,'#000',.02],[1,'#000',.3]], true);
       // Sample one periodic wave surface; shared normals produce connected reflections.
-      const ripples=svgNode('pattern',{id:id+'-ripples',patternUnits:'userSpaceOnUse',width:360,height:360});
-      const shades=Array.from({length:32},()=> '');
-      const tau=Math.PI*2;
-      for(let y=0;y<360;y+=2) for(let x=0;x<360;x+=2) {
-        let dx=0,dy=0,height=0;
-        for(const [kx,ky,amplitude,phase] of [[2,1,1.4,.3],[1,3,.9,1.3],[4,-2,.6,2.1],[9,3,.25,.6],[13,-7,.12,1.8]]) {
-          const wx=x+18*Math.sin(tau*y/180)+9*Math.sin(tau*x/120);
-          const wy=y+24*Math.sin(tau*x/360)+7*Math.cos(tau*y/90);
-          const wave=tau*(kx*wx+ky*wy)/360+phase;
-          height+=amplitude*Math.sin(wave);
-          const c=amplitude*Math.cos(wave)*tau/360;
-          dx+=kx*c;dy+=ky*c;
-        }
-        const length=Math.hypot(dx,dy,1);
-        const spec=Math.pow(Math.max(0,(-dx*.12+dy*.45+.885)/length),64);
-        const tone=Math.max(0,Math.min(31,Math.round(8+spec*12+Math.exp(-height*height*2)*18-(dx+dy)*6)));
-        shades[tone]+=`M${x} ${y}h2v2h-2Z`;
+      const ripples = svgNode('pattern', { id: id + '-ripples', patternUnits: 'userSpaceOnUse', width: 360, height: 360 });
+      const tileUrl = prepareLiquidTile();
+      if (tileUrl) {
+        ripples.append(svgNode('image', { width: 360, height: 360, href: tileUrl }));
+      } else {
+        const shades = getLiquidShades();
+        const soften = svgNode('filter', { id: id + '-ripple-soften', x: '-5%', y: '-5%', width: '110%', height: '110%' });
+        soften.append(svgNode('feGaussianBlur', { stdDeviation: .35 })); defs.append(soften);
+        const waterSurface = svgNode('g', { filter: `url(#${id}-ripple-soften)` });
+        shades.forEach((d, i) => waterSurface.append(svgNode('path', { d, fill: i < 9 ? '#000' : '#fff', opacity: i < 9 ? (9 - i) * .025 : (i - 9) * .035 })));
+        ripples.append(waterSurface);
       }
-      const soften=svgNode('filter',{id:id+'-ripple-soften',x:'-5%',y:'-5%',width:'110%',height:'110%'});
-      soften.append(svgNode('feGaussianBlur',{stdDeviation:.35}));defs.append(soften);
-      const waterSurface=svgNode('g',{filter:`url(#${id}-ripple-soften)`});
-      shades.forEach((d,i)=>waterSurface.append(svgNode('path',{d,fill:i<9?'#000':'#fff',opacity:i<9?(9-i)*.025:(i-9)*.035})));
-      ripples.append(waterSurface);
-      defs.append(ripples);cover(`url(#${id}-ripples)`);
-      animate((x,y,time) => ripples.setAttribute('patternTransform', `translate(${Math.sin(time*.22)*7+x*3} ${Math.cos(time*.17)*9+y*3}) scale(${1+Math.sin(time*.19)*.025} ${1+Math.cos(time*.23)*.025})`));
-      lighting('liquid-reflection',[[0,'#fff',.03],[.4,'#fff',.13],[.7,'#fff',.02],[1,'#fff',0]],true);
+      defs.append(ripples); cover(`url(#${id}-ripples)`);
+      animate((x, y, time) => ripples.setAttribute('patternTransform', `translate(${Math.sin(time * .22) * 7 + x * 3} ${Math.cos(time * .17) * 9 + y * 3}) scale(${1 + Math.sin(time * .19) * .025} ${1 + Math.cos(time * .23) * .025})`));
+      lighting('liquid-reflection', [[0, '#fff', .03], [.4, '#fff', .13], [.7, '#fff', .02], [1, '#fff', 0]], true);
 
     }
     if (['crackle', 'hammered-metal'].includes(attribute.texture)) {
@@ -1421,5 +1508,6 @@
   renderSVG.tokenBack = renderTokenBack;
   renderSVG.back = renderBack;
   renderSVG.cardMaterials = renderCardMaterials;
+  if (typeof queueMicrotask === 'function') queueMicrotask(() => { prepareLiquidTile(); });
   globalThis.ubuRender = renderSVG;
 })();
