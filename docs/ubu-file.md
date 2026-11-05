@@ -1,6 +1,6 @@
 # .ubu file format
 
-Status: working development profile implemented in ubu-file.js under owner authorization. This does not freeze the certificate protocol or alter the 1024-bit DNA. No production keys, trusted mint configuration, ownership registry or cloud resources have been created.
+Implemented in `shared/ubu-file.js`. This profile defines the format and does not alter the 1024-bit DNA.
 
 Old 256-bit beta and 512-bit files are rejected without conversion.
 
@@ -43,7 +43,7 @@ Angle-bracket values are explanatory placeholders, not valid certificate data.
 | key | Mint-scoped signing-key ID: 1-32 ASCII letters, digits, hyphen or underscore |
 | signature | Ed25519 signature: canonical base64url of 64 bytes, 86 characters |
 
-The mint ID is independent of the current domain and signing key. Moving from mint.ubu.tch.one to mint.uburoom.com does not change the issuer or invalidate old certificates. Key IDs are immutable and never reused for different public keys.
+The mint ID is independent of the current domain and signing key. Moving between host domains does not change the issuer or invalidate old certificates. Key IDs are immutable and never reused for different public keys.
 
 Certificate identity is the pair (mint, id). Duplicate-looking ubus need not have the same identity. Copying a certificate copies the same ubu identity; it does not create another minted ubu. The registry must associate that identity with these exact issuance fields and DNA.
 
@@ -51,7 +51,7 @@ Serials are permanent, sequential and unique within a mint, starting at 00000000
 
 ## Mint batches
 
-Owner-approved issuance policy: prepare a private inventory of random ubus in batches, defaulting to 1,000. Batch size is configurable for subsequent batches; changing it does not resize an existing batch or change any DNA.
+Issuance policy: prepare a private inventory of random ubus in batches, defaulting to 1,000. Batch size is configurable for subsequent batches; changing it does not resize an existing batch or change any DNA.
 
 - Generate DNA and allocate permanent IDs and sequential serials while preparing the batch. Persist progress so preparation can resume after interruption. Do not expose unfinished batches for allocation.
 - Draw uniformly at random from the remaining inventory, without replacement. Serial numbers reflect creation order, not distribution order: the first default batch holds 000000000001–000000001000, the second 000000001001–000000002000.
@@ -60,7 +60,7 @@ Owner-approved issuance policy: prepare a private inventory of random ubus in ba
 - Exhaust the current batch before allocating from the next one. Prepare the next batch in resumable chunks after exhaustion; requests may wait or receive a retry response while preparation completes.
 - Keep unallocated DNA private. Batch allocation does not replace authentication, mint allowances or protection against repeated requests to hunt for traits.
 
-This policy is approved. Persistent preparation, allocation and signing recovery are implemented; see [mint.md](mint.md). Cloudflare alarm scheduling, Discord OAuth and configurable lifetime allowances are implemented locally; see [worker.md](worker.md). Production credentials and deployment are not configured. Serial reservation is durable and numbers are never reused after a committed reservation, including after interrupted batch preparation.
+Persistent preparation, allocation and signing recovery are implemented; see [mint.md](mint.md). Cloudflare alarm scheduling, Discord OAuth and configurable lifetime allowances are implemented; see [worker.md](worker.md). Serial reservation is durable and numbers are never reused after a committed reservation, including after interrupted batch preparation.
 
 ## Exact signing bytes
 
@@ -112,4 +112,4 @@ ubu-file.js is shared plain JavaScript using platform Web Crypto, with no depend
 
 The designer exports custom files, accepts valid unsigned files and rejects signed files because no mint keys are configured. It contains no signing UI. Existing DNA favorites/history and all rendering remain unchanged.
 
-Verification, 2026-10-26: core and isolated Worker suites pass for the 1024-bit profile. File tests cover complete 128-byte preservation, rejection of old beta and 512-bit DNA before trust lookup, exact signing bytes, independent Ed25519 verification, signed-field tampering, wrong/untrusted keys, strict canonical encoding, serial boundaries and no unsigned fallback. Tests use ephemeral keys only. The canonical custom file is 194 bytes; the example signed certificate is 425 bytes. No production keys or deployment state were changed.
+Verification: core and isolated Worker suites pass for the 1024-bit profile. File tests cover complete 128-byte preservation, rejection of old beta and 512-bit DNA before trust lookup, exact signing bytes, independent Ed25519 verification, signed-field tampering, wrong/untrusted keys, strict canonical encoding, serial boundaries and no unsigned fallback. Tests use ephemeral keys only. The canonical custom file is 194 bytes; the example signed certificate is 425 bytes.

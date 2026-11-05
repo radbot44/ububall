@@ -71,7 +71,7 @@ Options: `--pairs`, `--seed`, `--level` (CPU preset, default `easy` for throughp
 
 CPU search calls `resolveTurn` with `effects: false`, which skips presentation-only work (hit-stop look-aheads and the replay's starting snapshot) without changing any rule.
 
-## Initial validation (2026-10-29)
+## Baseline validation
 
 These initial match results predate the collision-energy fix. They are historical baseline measurements, not win-rate claims for the corrected physics. Re-run comparisons when tuning levels against the updated engine.
 

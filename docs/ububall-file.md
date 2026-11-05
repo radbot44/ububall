@@ -1,6 +1,6 @@
 # Match replays and the .ububall file
 
-Status: working development profile implemented in `shared/ububall-replay.js` (owner requests 2026-10-31: replays of past matches and of single turns in regular and Pulse play, stored locally, renamed and exported as `.ububall`; refuse files from another physics version). The format is not frozen.
+Implemented in `shared/ububall-replay.js` for replays of past matches and single turns in regular and Pulse play, stored locally and exported as `.ububall`. Replays refuse files from another physics version.
 
 ## How a replay plays
 
@@ -26,7 +26,7 @@ Re-simulation is exact within one JavaScript engine. JSON keeps every number exc
 
 ## Viewer
 
-Beside playback and the timeline, the viewer offers (owner requests 2026-10-31):
+Beside playback and the timeline, the viewer provides:
 - Effects (motion trails, contact sparks, wall ripples, spin arcs) pause with the viewer. Seeking plays the last 0.4 s before the new moment silently with effects, so a paused or scrubbed field shows its motion as it was.
 - **Moves** and **Trails**, remembered on the device: Moves draws each ubu's launch from where the turn started (faded when it guarded), with its guard shield and armed super; Trails draws the path each body has taken so far this turn. Both show in videos and share cards. The same two settings (Show moves, Show trails) are in the pause menu and apply in play too: Moves while a turn plays, Trails until the next launch (not across a goal).
 - **Stats**, worked out by playing the replay through once without effects: each ubu's goals, assists, saves, ball touches (a touch counts once until another ubu touches the ball or half a second passes), top shot and distance skated, each team's share of the time it last touched the ball, and a map of where each ubu touched the ball, a star marking each scoring touch.
@@ -41,7 +41,7 @@ A clip is a replay of consecutive turns of another, starting from its first turn
 
 ## Hidden names
 
-Exporting with Hide names writes an anonymous replay (`anonymize`, owner request 2026-10-31): the teams become Saffron (the side shown on the left) and Amethyst, and each ubu's 64-bit name seed (the first 8 DNA bytes, docs/dna.md) is zeroed, so its name is gone while its looks, voice and stats stay; any custom title is dropped. Play is unchanged, since turns carry their own fields. Readers require the zeroed seeds when `anonymous` is true, and the viewer calls the ubus Saffron 1–3 and Amethyst 1–3. A video exported with names hidden shows the same names. The rest of the DNA is kept, so a party holding a registry of minted DNA could still match the ubus; hidden names keep them from viewers, not from the mint.
+Exporting with Hide names writes an anonymous replay (`anonymize`): the teams become Saffron (the side shown on the left) and Amethyst, and each ubu's 64-bit name seed (the first 8 DNA bytes, docs/dna.md) is zeroed, so its name is gone while its looks, voice and stats stay; any custom title is dropped. Play is unchanged, since turns carry their own fields. Readers require the zeroed seeds when `anonymous` is true, and the viewer calls the ubus Saffron 1–3 and Amethyst 1–3. A video exported with names hidden shows the same names. The rest of the DNA is kept, so a party holding a registry of minted DNA could still match the ubus; hidden names keep them from viewers, not from the mint.
 
 ## Storage
 
@@ -49,5 +49,5 @@ Local and online matches are recorded turn by turn (online, from the server's pe
 
 ## Video export
 
-The viewer exports a replay, play or turn as an MP4 (owner decision 2026-10-31: MP4 over WebM, for playback on phones and in sharing apps): 1920×1080 at 60 fps, H.264 at a constant 1.5 Mb/s (about 11 MB a minute; the encoders' variable mode overshot low targets several times over, so constant is asked for first), with AAC sound, or Opus where the browser cannot encode AAC, or no sound where it can encode neither. It renders faster than real time: the replay advances on the export's own clock frame by frame, each frame is drawn (the field filling the width, cropped to the boards, goals and Pulse strip, its ubus and their badges, under a slim scorebug band) and encoded with WebCodecs, and the game's sounds are scheduled into an offline audio context at each frame's time. That context renders alongside the video, pausing a second behind it, and sends every sound through one shared compressor instead of one per sound (the per-sound chains made the render several times slower; the mix differs by well under a decibel). The background and scorebug are drawn once per score or turn, and the page's own field and controls are left alone until the export ends. Turns play at full speed, each goal holds 2.5 s, the match's winning goal is followed by the winner's call (with a comeback or shutout), and the final field holds 1 s, as in the viewer. `web/mp4.js` writes the file with the movie box first; it holds the encoded samples in memory until the end. Browsers without `VideoEncoder` hide the button.
+The viewer exports a replay, play or turn as an MP4 (optimized for playback on phones and in sharing apps): 1920×1080 at 60 fps, H.264 at a constant 1.5 Mb/s (about 11 MB a minute; the encoders' variable mode overshot low targets several times over, so constant is asked for first), with AAC sound, or Opus where the browser cannot encode AAC, or no sound where it can encode neither. It renders faster than real time: the replay advances on the export's own clock frame by frame, each frame is drawn (the field filling the width, cropped to the boards, goals and Pulse strip, its ubus and their badges, under a slim scorebug band) and encoded with WebCodecs, and the game's sounds are scheduled into an offline audio context at each frame's time. That context renders alongside the video, pausing a second behind it, and sends every sound through one shared compressor instead of one per sound (the per-sound chains made the render several times slower; the mix differs by well under a decibel). The background and scorebug are drawn once per score or turn, and the page's own field and controls are left alone until the export ends. Turns play at full speed, each goal holds 2.5 s, the match's winning goal is followed by the winner's call (with a comeback or shutout), and the final field holds 1 s, as in the viewer. `web/mp4.js` writes the file with the movie box first; it holds the encoded samples in memory until the end. Browsers without `VideoEncoder` hide the button.
 

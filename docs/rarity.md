@@ -18,8 +18,8 @@ The total is an interpretable rarity index in bits. It is not presented as a lit
 
 ### Finishes
 Each of the 5 body-part slots has a texture:
-- Matte (default): probability $63/64$ ($\approx 0.0227$ bits)
-- Each of the sixteen assigned special materials: probability $1/1024$ ($10.0$ bits each). Pending material designs are scored by their assigned IDs, even while they display default matte.
+- Matte (default): probability $31/32$ ($\approx 0.0458$ bits)
+- Each of the thirty-two assigned special materials: probability $1/1024$ ($10.0$ bits each).
 
 Texture rotation angles are uniformly distributed and intentionally excluded.
 
@@ -89,7 +89,7 @@ All six 10-bit mouth/eye parameters now contribute `0.4 × (-log2(tailProbabilit
 These are small, continuously graded appearance modifiers, not literal independent rarity probabilities.
 
 ### Name structure
-The owner-approved 2026-10-28 visibility rules use joint word-count/length categories, scored once as `-log2(p)`. Placement before or after the nomen affects scoring only when both surrounding words are visible.
+The visibility rules use joint word-count/length categories, scored once as `-log2(p)`. Placement before or after the nomen affects scoring only when both surrounding words are visible.
 
 | Visible structure | Probability | Bits |
 | --- | --- | --- |
@@ -113,6 +113,6 @@ Percentile lookup is monotonically non-decreasing.
 
 ## 3. Independence from Ubuquity
 
-Ubuquity (grades C through UBU) is determined solely by the final ten DNA bits (502–511). Appearance rarity is completely separate from Ubuquity. Both are presented independently:
+Ubuquity (grades C through UBU) is determined solely by the final ten DNA bits (1014–1023). Appearance rarity is completely separate from Ubuquity. Both are presented independently:
 - **Ubuquity:** `UBU`
 - **Appearance rarity:** `97.0 / 100` (`12.3 bits`)

@@ -1,10 +1,10 @@
 # The uburithm
 
-Owner-approved naming algorithm update on 2026-10-25 (America/New_York). ubu.js implements this permanent naming algorithm. The owner approved independent surrounding-word visibility rolls and 1/8 front placement of visible cognomens on 2026-10-28. The later packed-stream approval below supersedes the original draw schedule.
+The uburithm is the permanent naming algorithm for Ububall, implemented in `web/app.js` and `shared/ubu.js`. It features independent surrounding-word visibility rolls and front placement of visible cognomens (1/8 odds).
 
-## Source review
+## Architecture
 
-Reviewed the supplied standalone generator and uburoom's web/ubumfa.js. The relevant reference functions are patternForLength, vowelYAllowed, followsVowelPair, consonantPair, generateWord, randomForSeed and ubunym (ubunymParts in the standalone generator). Source comments and implementation details are evidence, not additional owner instructions.
+The reference generator uses `patternForLength`, `vowelYAllowed`, `followsVowelPair`, `consonantPair`, `generateWord`, `randomForSeed` and `ubunym`.
 
 ## Fixed naming rules
 
@@ -20,13 +20,13 @@ Reviewed the supplied standalone generator and uburoom's web/ubumfa.js. The rele
 - For CC, X may only follow one of HLNRSWYXZ. Immediately after VV, a CC pair cannot start with H, W or Y. Each allowed pair (c1, c2) is weighted by w(c1) Ã— w(c2) across the complete ordered pair pool, rather than drawing the first and second characters independently.
 - A standalone consonant immediately after VV cannot be Y.
 
-## Packed naming stream (owner approved 2026-10-28)
+## Packed naming stream
 
-The owner authorized promotion of the benchmark Gemini hybrid to the real generator. This replaces the former seed-to-name mapping for all DNA, including issued ubus. Letter weights, contextual rules, structural odds and the first 64-bit DNA seed remain unchanged. No DNA or certificate bytes change. Future optimizations must preserve this packed mapping.
+The packed generator replaces the former seed-to-name mapping for all DNA, including issued ubus. Letter weights, contextual rules, structural odds and the first 64-bit DNA seed remain unchanged. No DNA or certificate bytes change. Future optimizations must preserve this packed mapping.
 
 ### SplitMix64 and initial flags
 
-Read DNA bits 0–63 as an unsigned, MSB-first 64-bit seed. For every mix:
+Read DNA bits 0â€“63 as an unsigned, MSB-first 64-bit seed. For every mix:
 
 1. Increment state by `0x9e3779b97f4a7c15` modulo 2^64.
 2. Set `z = ((state XOR (state >> 30)) * 0xbf58476d1ce4e5b9)` modulo 2^64.
@@ -37,11 +37,11 @@ Mix once at initialization. Let `lo` and `hi` be its low and high unsigned 32-bi
 
 | Flag bits (least significant first) | Meaning |
 | --- | --- |
-| 0–1 | Extra length index into [2, 3, 4, 6] |
+| 0â€“1 | Extra length index into [2, 3, 4, 6] |
 | 2 | Extra word before nomen when zero |
 | 3 | Show praenomen when zero |
 | 4 | Show cognomen when zero |
-| 5–7 | Put visible cognomen immediately before nomen when all zero |
+| 5â€“7 | Put visible cognomen immediately before nomen when all zero |
 
 Initialize the quotient pool with `value = lo >>> 8`, `range = 2^24`. Queue `hi` as the first 32-bit refill. Later mixes supply high then low 32-bit halves, preserving unused halves between requests.
 
@@ -58,13 +58,13 @@ Use exact integer values in IEEE-754 binary64. The largest bound is 11,171, so r
 
 ### Weighted chunk tables and draw order
 
-Construct tables using the alphabets and weights above. A cross product A×B iterates A outside B, preserving repeated weighted entries. Capitalize only the first letter of the assembled word; all other letters are lowercase. Define:
+Construct tables using the alphabets and weights above. A cross product AÃ—B iterates A outside B, preserving repeated weighted entries. Capitalize only the first letter of the assembled word; all other letters are lowercase. Define:
 
 - C: weighted 106-entry consonant pool; C1: C without Y (103 entries).
 - Y: weighted 31-entry vowel pool (six copies of each AEIOU, then Y); V: ordinary AEIOU.
 - VV: all 25 ordered ordinary-vowel pairs, vowel-major order.
 - CC: 11,171-entry weighted pair pool; CC1: 9,581-entry pool immediately after VV. First-character order is the consonant alphabet; second-character order is the permitted consonant alphabet. Repeat each pair by the product of character weights.
-- CV = C×Y, VC = Y×C, CVV = C×VV, VVC1 = VV×C1, C1V = C1×Y, V5C = V×C.
+- CV = CÃ—Y, VC = YÃ—C, CVV = CÃ—VV, VVC1 = VVÃ—C1, C1V = C1Ã—Y, V5C = VÃ—C.
 
 For every six-letter word, draw `int(8)` then follow this table left to right. Each chunk is one bounded draw unless noted. Use a capitalized variant only for the first chunk.
 
@@ -74,16 +74,16 @@ For every six-letter word, draw `int(8)` then follow this table left to right. E
 | 1 | CVCVVC | CV + C + VVC1 |
 | 2 | CVVCCV | CVV + CC1 + Y |
 | 3 | CVVCVC | CVV + C1V + C |
-| 4 | VCCVCV | Draw Y×Y once; first vowel + CC + V5C + second vowel |
+| 4 | VCCVCV | Draw YÃ—Y once; first vowel + CC + V5C + second vowel |
 | 5 | VCCVVC | Y + CC + VVC1 |
-| 6 | VCVCCV | Draw V×Y once; VC + first vowel + CC + second vowel |
+| 6 | VCVCCV | Draw VÃ—Y once; VC + first vowel + CC + second vowel |
 | 7 | VCVCVC | VC + VC + VC |
 
 A two-letter word draws once from concatenated capitalized CV then VC tables (6,572 entries).
 
 A three-letter word draws `int(2)`: zero selects CV + C; one selects VC + Y.
 
-A four-letter word draws `int(4)`: zero selects CV + CV; one draws Y×Y once and assembles first vowel + CC + second vowel; two selects CVV + C1; three selects VC + VC.
+A four-letter word draws `int(4)`: zero selects CV + CV; one draws YÃ—Y once and assembles first vowel + CC + second vowel; two selects CVV + C1; three selects VC + VC.
 
 Generate the six-letter nomen first, then the extra word of the flag-selected length, then an opposite word of length `6 - extraLength` unless zero. Assign slots using the orientation flag; apply visibility flags without redistributing letters. For a visible front cognomen, order slots P-C-N; otherwise P-N-C. Omit empty slots and join with one ASCII space. Set `cognomenBeforeNomen` true only when the cognomen is visible and its front flag succeeds.
 
@@ -93,4 +93,4 @@ Generate the six-letter nomen first, then the extra word of the flag-selected le
 
 The optimization adds pre-cased lookup tables and startup work in exchange for reduced per-name CPU. The benchmark observed two mixes per name; this is not a guaranteed bound. `node scripts/bench-name-rolls.cjs` compares the saved historical naming baseline, combined flags, packed recycling and Gemini hybrid using the current decoder/rarity code. Benchmark fixtures are never public assets.
 
-Rarity uses the unchanged structural category probabilities. The changed mapping requires recalculating stored scores (revision 3) and recalibrating percentiles; existing assembled packs retain contents and quintile labels. Deployment remains separately authorized.
+Rarity uses the unchanged structural category probabilities. The changed mapping requires recalculating stored scores (revision 3) and recalibrating percentiles; existing assembled packs retain contents and quintile labels.

@@ -1,6 +1,6 @@
 # Local mint service
 
-`server/mint.js` implements batch preparation and issuance. `server/mint-local.js` persists it with Node's built-in SQLite, without packages or an HTTP listener. The local runtime is Node 22.13+; SQLite is experimental in the installed Node 22 runtime. `server/worker.mjs` supplies the Cloudflare storage adapter, API and scheduling; see [worker.md](worker.md). No cloud deployment has been performed.
+`server/mint.js` implements batch preparation and issuance. `server/mint-local.js` persists it with Node's built-in SQLite, without packages or an HTTP listener. The local runtime is Node 22.13+; SQLite is experimental in the installed Node 22 runtime. `server/worker.mjs` supplies the Cloudflare storage adapter, API and scheduling; see [worker.md](worker.md).
 
 ## Use from trusted server code
 
@@ -54,10 +54,10 @@ Run `npm test`. Tests use disposable temporary databases and ephemeral keys. The
 
 ## Starter packs
 
-Owner requirement (2026-11-05): an account gets one signup pack and one daily pack per UTC day. Each holds three ubus, one from each of the three rarest [rarity](rarity.md) deciles (percentiles 70–80, 80–90 and 90–100), revealed commonest first. Daily packs do not carry over. The daily pack must be opened before regular packs are offered.
+An account receives one signup pack and one daily pack per UTC day. Each holds three ubus, one from each of the three rarest [rarity](rarity.md) deciles (percentiles 70–80, 80–90 and 90–100), revealed commonest first. Daily packs do not carry over. The daily pack must be opened before regular packs are offered.
 
 - `claimStarter({ owner, kind })` issues a pack under the reserved request `starter:signup` or `starter:daily:<UTC day number>`, so it is exactly-once per owner and retries return the same certificates. The colon cannot appear in a caller's request ID.
-- Starter ubus are an owner-approved exception to batch distribution. Each is ordinary random DNA, kept only if it lands in its decile, so regular packs keep their rare slots. Serials come from `next_serial` after the reserved batch ranges.
+- Starter ubus are an exception to batch distribution. Each is ordinary random DNA, kept only if it lands in its decile, so regular packs keep their rare slots. Serials come from `next_serial` after the reserved batch ranges.
 - A pack exists only once opened: `starterStatus(owner)` derives what is available from `issued`, with no record of missed days. Starter packs do not count against the lifetime limit.
 - Each claim also signs any starter pack left unsigned by an interrupted claim, even one from an earlier day.
 - `matchTeam(owner)` picks the team when a match skips selection: the last team, otherwise favorites and newest ubus.

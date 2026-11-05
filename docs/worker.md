@@ -2,7 +2,7 @@
 
 One Worker serves the website and API. Its `MintRegistry` Durable Object stores the mint inventory and issuance records in SQLite. No separate database service, frontend framework or runtime package is required. Wrangler is a pinned development dependency for bundling and testing the actual Workers runtime.
 
-The local application is implemented. Nothing has been deployed or provisioned, and no production keys or Discord application have been created. Transfers/trading, public ownership proofs and key revocation remain separate work.
+The application can run locally or deployed to Cloudflare Workers. Transfers/trading, public ownership proofs and key revocation remain separate work.
 
 ## Local use
 
@@ -55,7 +55,7 @@ The first authorized offer attempt schedules preparation if fewer than three com
 
 Ubu Mint shows the daily pack first, or a countdown to the next one, and a dot marks the Ubu Mint tab and home button while it waits. An unopened signup pack replaces the team on the home screen. Once the daily pack is opened, the website deals three packs automatically, with no request button. Each pack's wrapper is independently random (cellophane, foil, blob, gumball capsule, egg, gift box, fortune cookie or wax-sealed envelope; the egg is cracked open with three taps), derived from its choice token so it stays the same while the offer lasts; each is colored from the background colors of its actual five ubus. Texture presence is integrated into each design when a special finish is in the pack: a pearlescent heat-sealed seam in cellophane, an impressed seal in foil, and embedded pearly flecks throughout the blob. These cues indicate whether a pack contains a special finish without disclosing which ubu has it or the actual pattern. Accessible descriptions identify the hinted background colors and whether a special finish is inside. Selection expands the chosen animation before the existing signed-card reveal. Local storage retains the request and any interrupted selection; the server remains authoritative across refreshes, tabs and devices. Collection browsing remains available while considering an offer.
 
-The choice-system upgrade adds an inventory `batch` column and reservation/selection tables automatically on Durable Object initialization, without modifying existing DNA, serials, certificates or keys. No mint reset or production configuration change is required. **Rollback:** older source with positional inventory inserts cannot run against the added column; deploy a forward fix rather than unmodified older code. See [mint.md](mint.md) for expiry, atomicity and recovery rules. Deployment remains a separate owner-authorized action.
+The choice-system upgrade adds an inventory `batch` column and reservation/selection tables automatically on Durable Object initialization, without modifying existing DNA, serials, certificates or keys. No mint reset or production configuration change is required. **Rollback:** older source with positional inventory inserts cannot run against the added column; deploy a forward fix rather than unmodified older code. See [mint.md](mint.md) for expiry, atomicity and recovery rules. Deployment remains an explicit operator action.
 
 Signing and persistent retry recovery use the existing [mint service](mint.md). Worker key import selects explicit Ed25519 curve/key material to avoid Node/workerd differences in optional JWK algorithm labels. Old signing keys must remain available until pending allocations using them are signed; retain old public keys to verify old certificates. A complete rotation/revocation policy is not implemented.
 
@@ -63,13 +63,13 @@ Signing and persistent retry recovery use the existing [mint service](mint.md). 
 
 An updated Worker adds `favorite INTEGER NOT NULL DEFAULT 0` to the existing `issued` table on the **first Durable Object access**, with the `issued_recent_sort` index the collection endpoint pages by. Existing issuance rows, serials, owner records, signatures, mint identity, keys and inventory are left unchanged. A transaction-scoped `PRAGMA table_info` check makes the ALTER operations idempotent across restarts and normal deployments. **Do not run `-ResetMint` or create a new mint identity.**
 
-The 2026-11-01 browser-side collection sorting retires the server's sort keys. The same initialization drops the `issued_old_sort`, `issued_rarity_sort`, `issued_serial_sort`, `issued_favorite_sort` and `issued_rarity_backfill` indexes, then the `issued.rarity_bits` column and the `rarity_revision` table, if present. No data is lost: rarity is recomputed from DNA wherever it is shown. Pack assembly scores inventory separately and is unaffected. **Rollback note:** older source inserts `rarity_bits`, so after this migration it cannot issue packs; roll forward with a fix instead.
+Browser-side collection sorting handles ordering in the client. The initialization drops obsolete server sort indexes, the `issued.rarity_bits` column and the `rarity_revision` table, if present. No data is lost: rarity is recomputed from DNA wherever it is shown. Pack assembly scores inventory separately and is unaffected. **Rollback note:** older source inserts `rarity_bits`, so after this migration it cannot issue packs; roll forward with a fix instead.
 
-To deploy after merging this PR, update the source checkout and run `./install.ps1 -DryRun` (PowerShell: `.\\install.ps1 -DryRun`) to run the suites before any upload. Then run `.\\install.ps1` to install and deploy as usual with your existing `%LOCALAPPDATA%\\ubumint\\settings.json`; first access performs the migration without an operator-run SQL script. Preserve backups of production settings and registry state before changing production code. **Rollback note:** the pre-upgrade source uses positional inserts into `issued`, so simply redeploying an older version after new columns exist would break new mint issuance. Roll forward with a fix rather than deploying unmodified old code; never reset the mint to undo this update.
+To deploy, run `.\install.ps1 -DryRun` to run the test suites before upload. Then run `.\install.ps1` to install and deploy with your existing `%LOCALAPPDATA%\ubumint\settings.json`; first access performs the migration without an operator-run SQL script. Preserve backups of production settings and registry state before changing production code. **Rollback note:** the pre-upgrade source uses positional inserts into `issued`, so simply redeploying an older version after new columns exist would break new mint issuance. Roll forward with a fix rather than deploying unmodified old code; never reset the mint to undo this update.
 
 ## First setup and updates
 
-On Windows, use PowerShell with Node 22.13+ and Git installed. From `C:\dev\ububall` (or legacy `C:\dev\ubumint`), run:
+On Windows, use PowerShell with Node 22.13+ and Git installed. From the repository root, run:
 
 ```powershell
 .\install.ps1                 # install current local source, test, deploy
@@ -101,7 +101,7 @@ Setup prompts for the Worker name, origin and Discord credentials (the secret is
 
 ### Fresh mint reset
 
-To keep the installation, domain, Discord credentials, batch size and allowance but start a new mint, run `C:\dev\ubumint-cloudflare\deploy.ps1 -ResetMint`. To install current source updates and reset in one step, run `C:\dev\ububall\install.ps1 -ResetMint` instead. Reset is an explicit operation, never part of a normal update. It cannot be combined with Setup, DryRun or InstallOnly.
+To keep the installation, domain, Discord credentials, batch size and allowance but start a new mint, run `.\deploy.ps1 -ResetMint` from the deployment folder. To install current source updates and reset in one step, run `.\install.ps1 -ResetMint` from the source repository instead. Reset is an explicit operation, never part of a normal update. It cannot be combined with Setup, DryRun or InstallOnly.
 
 Dependencies and both test suites must pass before reset changes settings. Reset then backs up the previous settings under `%LOCALAPPDATA%\ubumint\backups\reset-*`, generates a new mint ID, signing keys and session secret, and deploys. The different mint ID selects a fresh Durable Object registry: empty collections, unused lifetime allowances and serial allocation starting at 1. Previous sessions expire and previous certificates are no longer trusted by the new mint. This preserves permanent serial uniqueness within each mint identity. The old Cloudflare database is retained separately, not physically deleted; saved settings backups are not database backups.
 
@@ -109,12 +109,12 @@ If upload or verification fails after reset is prepared, rerun `deploy.ps1` **wi
 
 `npm test` covers the 1024-bit DNA schema, files, mint transactions, lifetime limits and OAuth/session checks. `npm run test:worker` uses Wrangler's local test harness with isolated storage and ephemeral keys. It verifies frontend asset boundaries, private API access, CSRF/body validation, public-key-only configuration, signed issuance, concurrent retries, lifetime-limit rejection, collection isolation, real alarm-driven batch rollover and unfinished preparation recovery after object eviction. Browser checks cover custom import and the shared renderer/designer.
 
-`wrangler.jsonc` has no account, domain route or production identity, disables workers.dev/preview URLs, and preserves dashboard variables. Production deployments use the generated config described above. Deployment requires owner authorization; running tests never deploys.
+`wrangler.jsonc` has no account, domain route or production identity, disables workers.dev/preview URLs, and preserves dashboard variables. Production deployments use the generated config described above. Deployment requires explicit operator action; running tests never deploys.
 
 Official references: [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/), [Durable Object SQLite](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), [alarms](https://developers.cloudflare.com/durable-objects/api/alarms/), [Discord OAuth2](https://docs.discord.com/developers/topics/oauth2).
 
-The 2026-10-28 name visibility update changed rarity categories; certificates, favorites, DNA, offers and assembled inventory remain intact, and subsequent pack assembly uses the new categories.
 
-The cognomen placement update leaves existing assembled packs intact. P-C-N is scored separately from P-N-C; two-word placement is rarity-neutral.
 
-The owner-approved packed name generator changes existing names on the next deployment. DNA, signatures, favorites, mint identity and existing pack contents are preserved; no mint reset is needed. Percentiles were recalibrated for the new mapping.
+
+
+
