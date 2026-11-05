@@ -392,9 +392,10 @@ test('restoreEntry restores Stalwart ID 0 and mastery metadata, preserving null 
 test('local Blitz preserves the deadline across blocked frames and hidden time', () => {
   const code = section('function startPlanClock() {', 'function updateClock() {');
   let now = 100;
+  let gameDialog = false;
   const dialog = { open: false };
   const context = {
-    performance: { now: () => now }, document: { hidden: false },
+    performance: { now: () => now }, document: { hidden: false, querySelector: () => gameDialog ? {} : null },
     $: id => id === 'pause-menu' ? dialog : { open: false },
     foulInfo: null, online: null, phase: 'plan', matchMode: 'blitz', blitzMode: () => true,
     ububallMatch: { planningMilliseconds: () => 5000 }, planDeadline: 0, planPausedAt: null
@@ -409,6 +410,9 @@ test('local Blitz preserves the deadline across blocked frames and hidden time',
   now = 9100; context.foulInfo = { kind: 'crease' }; refresh();
   now = 10100; context.foulInfo = null; refresh();
   assert.equal(context.planDeadline - now, 3000);
+  now = 11100; gameDialog = true; refresh();
+  now = 15100; gameDialog = false; refresh();
+  assert.equal(context.planDeadline - now, 2000, 'match offers preserve the CPU planning clock');
   context.online = { active: true };
   dialog.open = true; refresh();
   assert.equal(context.planPausedAt, null);

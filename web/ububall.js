@@ -55,7 +55,7 @@
     planPausedAt = localPlayBlocked() ? now : null;
   }
   function localPlayBlocked() {
-    return document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(foulInfo && !online?.active);
+    return document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(document.querySelector('.game-dialog[open]')) || Boolean(foulInfo && !online?.active);
   }
   function updateLocalPlanClock(blocked) {
     if (online?.active || phase !== 'plan' || !blitzMode()) return;
@@ -5192,6 +5192,7 @@
     try { localStorage.setItem(quickPlayKey, JSON.stringify(lastCpuSetup)); } catch {}
     newMatch(true);
     enterMatch();
+    online?.contextChanged();
     if (!firstTurnSeen) {
       firstTurnStep = 'aim';
       updateFirstTurnGuide();
@@ -5354,10 +5355,28 @@
     if (!matchInProgress()) startDemo();
   }
   function openPause() {
-    $('pause-title').textContent = online?.active ? 'Menu' : 'Paused';
+    $('pause-title').textContent = online?.spectating ? 'Watching' : online?.active ? online.state.matchKind === 'online' ? 'Online match' : 'Friend match' : 'CPU match';
+    $('pause-resume').textContent = online?.spectating ? 'Resume watching' : online?.active ? 'Resume match' : 'Resume CPU match';
     $('pause-leave').textContent = online?.spectating ? 'Stop watching' : 'Leave match';
     $('pause-restart').disabled = $('new-match').disabled;
+    $('pause-restart').hidden = Boolean(online?.active);
+    if (inDiscord) {
+      $('pause-menu').classList.add('has-activity-lobby');
+      $('pause-lobby').hidden = false;
+      $('pause-lobby').append($('activity-play'));
+      online?.contextChanged();
+    }
     $('pause-menu').showModal();
+  }
+  $('pause-menu').addEventListener('close', () => {
+    if (inDiscord && !$('pause-menu').open) document.querySelector('.play-home').prepend($('activity-play'));
+    online?.contextChanged();
+  });
+  function finishCpuMatch() {
+    saveRecording(); clearActiveMatch();
+    cpuGeneration++; cpuClient.cancel();
+    phase = 'over'; drag = null;
+    closeFirstTurnGuide(); endGoalReplay(); stopFanfare(); gameAudio()?.stop();
   }
   $('pause').onclick = openPause;
   $('pause-help').onclick = () => {
@@ -5384,10 +5403,7 @@
       if (online?.active) {
         if (!await online.leave()) return;
       } else if (inDiscord) {
-        saveRecording(); clearActiveMatch();
-        cpuGeneration++; cpuClient.cancel();
-        phase = 'over'; drag = null;
-        endGoalReplay(); stopFanfare(); gameAudio()?.stop();
+        finishCpuMatch();
       }
       exitMatchMode();
       if (history.state?.match) history.back();
@@ -5646,6 +5662,12 @@
   }
   online = ububallOnline({
     playCpu() { startCpuMatch(practice.slice(0, 3), 'standard', 'easy'); },
+    cpuActive() { return inDiscord && inMatch && matchInProgress(); },
+    resumeCpu() { $('pause-menu').close(); },
+    prepareOnline() {
+      if (inDiscord && inMatch && !online?.active && !demo) finishCpuMatch();
+      $('pause-menu').close(); closeSummary();
+    },
     chooseMode(mode) { openSetup('mode', 'online', mode); },
     editRules(mode) { openSetup('mode', 'rules', mode); },
     onNewGame() {

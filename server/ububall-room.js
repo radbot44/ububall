@@ -253,6 +253,7 @@ class MatchRoom {
       game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
       playUntil: s.playUntil, disconnectedAt: [...s.disconnectedAt], rematch: [...s.rematch],
       paired: Boolean(s.paired), quickStart: Boolean(s.quickStart), gameNumber: s.gameNumber || 0,
+      matchKind: s.matchKind || 'friend',
       canChangeRules: this.canChangeRules(), watchAllowed: s.watch?.allowed[seat] ?? false, watchKey: s.watch?.key ?? null };
   }
 }

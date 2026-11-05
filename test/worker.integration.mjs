@@ -439,6 +439,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const lobby = await (await post(path + '/join', {}, embedded)).json();
     assert.equal(lobby.seat, 1);
     assert.equal(lobby.teams, 'practice');
+    assert.equal(lobby.matchKind, 'online');
     assert.deepEqual(lobby.occupied, [true, true]);
     const embeddedSocket = await fetch(path + '/socket', { headers: { ...embedded, Upgrade: 'websocket' } });
     assert.equal(embeddedSocket.status, 101, embeddedSocket.status === 101 ? '' : await embeddedSocket.text());
@@ -484,8 +485,15 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(first.users[0].avatar, 'a'.repeat(32));
     await checked(await lobby(b)); await checked(await lobby(c));
     assert.equal((await checked(await lobby(outsider))).users.length, 1);
+    const cpuReady = await checked(await lobby(a, 'ready', { cpu: true }));
+    assert.equal(cpuReady.users.find(user => user.owner === a.owner).status, 'ready');
+    const cpuWaiting = await checked(await lobby(a, 'poll', { cpu: true }));
+    assert.equal(cpuWaiting.users.find(user => user.owner === a.owner).status, 'ready');
+    await checked(await lobby(a, 'unready', { cpu: true }));
     assert.equal((await lobby(a, 'challenge', { target: outsider.owner })).status, 409);
-    let pending = await checked(await lobby(a, 'challenge', { target: b.owner }));
+    let pending = await checked(await lobby(a, 'challenge', { target: b.owner, cpu: true }));
+    const cpuChallenge = await checked(await lobby(a, 'poll', { cpu: true }));
+    assert.equal(cpuChallenge.challenges[0].id, pending.challenges[0].id);
     const expired = pending.challenges[0].id;
     assert.equal((await lobby(c, 'accept', { id: expired })).status, 409);
     assert.equal((await lobby(a, 'accept', { id: expired })).status, 409);

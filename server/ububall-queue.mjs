@@ -198,19 +198,19 @@ export class UbuballQueue extends DurableObject {
           if (reported === 'balling') { activeMatch = data.match; status = reported; }
           else if (!activeMatch && reported === 'spectating') { status = reported; watching = data.match; }
         }
-        if (!activeMatch && data.cpu) status = 'balling';
+        if (!activeMatch && data.cpu) status = 'cpu';
         this.sql.exec('UPDATE lobby_connections SET matches = ? WHERE owner = ?', JSON.stringify([activeMatch, watching].filter(Boolean)), owner);
         this.sql.exec(`INSERT INTO lobby_members VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(owner) DO UPDATE SET name=excluded.name, avatar=excluded.avatar, expires=excluded.expires,
           match=excluded.match, status=excluded.status, watching=excluded.watching`, owner, scope, profile.name, profile.avatar, now + waitingMs, activeMatch, status, watching);
-        if (status !== 'idle') {
+        if (!['idle', 'cpu'].includes(status)) {
           this.clearChallenges(owner);
           if (assignment && !assignment.match) { this.sql.exec('DELETE FROM queue WHERE owner = ?', owner); assignment = null; }
         }
         if (data.action === 'ack') {
           this.sql.exec('DELETE FROM queue WHERE owner = ? AND scope = ? AND match = ?', owner, scope, data.id);
         } else if (data.action === 'ready') {
-          if (status !== 'idle') throw new Error('Leave the current game before readying up.');
+          if (!['idle', 'cpu'].includes(status)) throw new Error('Leave the current game before readying up.');
           this.clearChallenges(owner);
           const result = await this.updateQueue(owner, false, scope, 'enter');
           if (result.status === 'busy') throw new Error('You are already in another queue.');
@@ -227,8 +227,8 @@ export class UbuballQueue extends DurableObject {
         } else if (data.action === 'challenge') {
           const target = this.sql.exec('SELECT * FROM lobby_members WHERE owner = ? AND scope = ?', data.target, scope).toArray()[0];
           const targetQueue = this.sql.exec('SELECT match FROM queue WHERE owner = ?', data.target).toArray()[0];
-          if (status !== 'idle' || assignment?.match || assignment && assignment.scope !== scope || !target || target.owner === owner ||
-              target.status !== 'idle' || target.match || targetQueue?.match) throw new Error('This player is no longer available.');
+          if (!['idle', 'cpu'].includes(status) || assignment?.match || assignment && assignment.scope !== scope || !target || target.owner === owner ||
+              !['idle', 'cpu'].includes(target.status) || target.match || targetQueue?.match) throw new Error('This player is no longer available.');
           if (this.sql.exec('SELECT id FROM challenges WHERE sender = ? OR target = ?', owner, owner).toArray().length) {
             throw new Error('Finish your pending challenge first.');
           }
@@ -248,7 +248,7 @@ export class UbuballQueue extends DurableObject {
             const available = players.every(player => {
               const member = this.sql.exec('SELECT * FROM lobby_members WHERE owner = ? AND scope = ?', player, scope).toArray()[0];
               const queued = this.sql.exec('SELECT * FROM queue WHERE owner = ?', player).toArray()[0];
-              return member && member.status === 'idle' && !member.match && !queued?.match;
+              return member && ['idle', 'cpu'].includes(member.status) && !member.match && !queued?.match;
             });
             if (!available) throw new Error('A player is no longer available.');
             this.reserveChallenge(challenge.id, players, scope, now);
@@ -268,8 +268,9 @@ export class UbuballQueue extends DurableObject {
             JSON.stringify([assignment.match]), assignment.match);
         }
         await this.expire(now);
-        const users = this.sql.exec(`SELECT m.owner, m.name, m.avatar, m.match, CASE WHEN m.status != 'idle' THEN m.status
-          WHEN q.owner IS NOT NULL AND q.match IS NULL THEN 'ready' ELSE 'idle' END AS status
+        const users = this.sql.exec(`SELECT m.owner, m.name, m.avatar, m.match, m.status = 'cpu' AS cpu,
+          CASE WHEN m.status NOT IN ('idle', 'cpu') THEN m.status
+          WHEN q.owner IS NOT NULL AND q.match IS NULL THEN 'ready' WHEN m.status = 'cpu' THEN 'balling' ELSE 'idle' END AS status
           FROM lobby_members m LEFT JOIN queue q ON q.owner = m.owner
           WHERE m.scope = ? ORDER BY m.rowid LIMIT 200`, scope).toArray();
         const challenges = this.sql.exec('SELECT * FROM challenges WHERE scope = ? AND (sender = ? OR target = ?)', scope, owner, owner).toArray();

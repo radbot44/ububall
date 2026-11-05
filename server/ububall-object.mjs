@@ -94,6 +94,7 @@ export class UbuballMatch extends DurableObject {
           this.room.join(second.owner, Boolean(second.guest));
           if (challenge) for (const player of [first, second]) this.room.practiceTeam(player.owner);
           this.room.state.paired = true;
+          this.room.state.matchKind = activity ? 'friend' : 'online';
           if (activity) { this.room.state.activity = activity; this.room.state.watch = { allowed: [true, true], key: null }; }
           if (quickStart) this.room.readyPracticePair();
           this.save();

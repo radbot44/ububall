@@ -10,6 +10,7 @@ function ububallOnline(hooks) {
   let watchKey = null, queue = null, queueTimer, queueTask, leaveTask, switching = false;
   let lobby = null, lobbyTimer, lobbyTask, lobbyStarting = false, lobbyBusy = false;
   let disposed = false, connecting = false, lobbyReady, reconcileTimer;
+  let pendingMatch = null, offerBusy = false;
   const connection = crypto.randomUUID(), requests = new AbortController();
   const userCards = new Map(), matchCards = new Map();
   const showLoading = () => {
@@ -193,6 +194,7 @@ function ububallOnline(hooks) {
   }
   async function enter(matchId, initial, key = null) {
     if (disposed) return;
+    hooks.prepareOnline();
     id = matchId; watchKey = key; state = null; stopped = false; lastDraft = '';
     $('online-dialog').close();
     const url = new URL(location.href); url.pathname = '/';
@@ -209,6 +211,66 @@ function ububallOnline(hooks) {
       }
     }, 10000);
   }
+  async function takeMatch(match, initial, ack) {
+    if (disposed || pendingMatch?.id === match) return;
+    if (initial.phase === 'over') { await ack(); status('Your opponent left before the match started.', true); return; }
+    if (hooks.cpuActive()) {
+      pendingMatch = { id: match, ack };
+      $('activity-match-offer-error').hidden = true;
+      $('activity-match-offer').showModal();
+      if (lobby) renderLobby(lobby);
+      return;
+    }
+    await enter(match, initial);
+    await ack();
+  }
+  async function checkOffer() {
+    const offer = pendingMatch;
+    if (!offer || offerBusy) return;
+    try {
+      const fresh = await api('/api/ububall/' + offer.id + '/state');
+      if (offer !== pendingMatch || offerBusy || fresh.phase !== 'over') return;
+      pendingMatch = null; $('activity-match-offer').close();
+      await offer.ack();
+      status('Your opponent left before the match started.', true);
+    } catch (error) {
+      if (offer !== pendingMatch || offerBusy) return;
+      pendingMatch = null; $('activity-match-offer').close();
+      status(error.message, true);
+    }
+  }
+  async function decideOffer(join) {
+    const offer = pendingMatch;
+    if (!offer || offerBusy) return;
+    offerBusy = true;
+    $('activity-match-join').disabled = $('activity-match-keep-cpu').disabled = true;
+    try {
+      if (join) {
+        const fresh = await api('/api/ububall/' + offer.id + '/state');
+        if (fresh.phase === 'over') throw new Error('Your opponent left before the match started.');
+        pendingMatch = null; $('activity-match-offer').close();
+        await enter(offer.id, fresh);
+      } else {
+        await api('/api/ububall/' + offer.id + '/leave', {});
+        pendingMatch = null; $('activity-match-offer').close();
+        hooks.resumeCpu();
+      }
+      await offer.ack();
+    } catch (error) {
+      if (pendingMatch === offer) {
+        $('activity-match-offer-error').textContent = error.message;
+        $('activity-match-offer-error').hidden = false;
+      } else status(error.message, true);
+    } finally {
+      offerBusy = false;
+      $('activity-match-join').disabled = $('activity-match-keep-cpu').disabled = false;
+      if (lobby) renderLobby(lobby);
+      void lobbyRequest();
+    }
+  }
+  $('activity-match-join').onclick = () => decideOffer(true);
+  $('activity-match-keep-cpu').onclick = () => decideOffer(false);
+  $('activity-match-offer').addEventListener('cancel', event => { event.preventDefault(); void decideOffer(false); });
   // Leaving tells the server, so the opponent isn't left waiting to claim a forfeit.
   function leave() {
     leaveTask ||= finishLeave().finally(() => { leaveTask = null; });
@@ -218,8 +280,8 @@ function ububallOnline(hooks) {
     if (!id) return true;
     const historyState = watchKey ? history.state : null;
     const live = !watchKey && state && ['plan', 'resolving'].includes(state.phase);
-    if (live && !await gameUi.confirm({ title: 'Leave match?', message: `Leaving ends the match and gives ${state.names[1 - state.seat] || 'your opponent'} the win.`,
-      confirmLabel: 'Leave', cancelLabel: 'Keep playing', danger: true })) return false;
+    if (live && !await gameUi.confirm({ title: 'Forfeit match?', message: `Leaving will forfeit this match and give ${state.names[1 - state.seat] || 'your opponent'} the win.`,
+      confirmLabel: 'Forfeit match', cancelLabel: 'Keep playing', danger: true })) return false;
     const wasStopped = stopped;
     stopped = true;
     if (!watchKey) {
@@ -323,8 +385,7 @@ function ububallOnline(hooks) {
         const initial = await api('/api/ububall/' + result.id + '/join', {});
         if (switching) return;
         setQueue(null);
-        await enter(result.id, initial);
-        void ack().catch(() => {});
+        await takeMatch(result.id, initial, ack);
       } else if (result.status === 'waiting') {
         status('');
         queueTimer = setTimeout(() => queueRequest('poll'), 2500);
@@ -353,19 +414,27 @@ function ububallOnline(hooks) {
   $('activity-play').hidden = !activity;
   $('online-private').hidden = Boolean(activity);
   async function switchActivity(next) {
-    if (switching || (id && (!state?.quickStart || state.game)) || queue === next) return false;
+    if (disposed || switching || pendingMatch || queue === next) return false;
+    if (next === 'cpu' && hooks.cpuActive()) { hooks.resumeCpu(); return true; }
     switching = true;
-    clearTimeout(queueTimer);
     try {
       if (id && !await leave()) return false;
+      if (next === 'cpu') { hooks.playCpu(); status(''); return true; }
+      if (next === 'watch' && hooks.cpuActive() && !await gameUi.confirm({ title: 'Watch this match?',
+        message: 'Watching will end your CPU match.', confirmLabel: 'Watch match', cancelLabel: 'Keep playing CPU' })) return false;
+      clearTimeout(queueTimer);
       if (activity && session?.owner && !await lobbyRequest('unready')) return false;
-      if (next === 'cpu') hooks.playCpu();
       await queueTask;
       if (queue && playable()) await queueRequest('cancel');
       setQueue(null);
       status('');
-    } finally { switching = false; }
+    } finally {
+      switching = false;
+      if (queue) { clearTimeout(queueTimer); queueTimer = setTimeout(() => queueRequest('poll'), 2500); }
+      if (lobby) renderLobby(lobby);
+    }
     if (next === 'friends' || next === 'public') startQueue(next);
+    if (hooks.cpuActive() && next === 'public') hooks.resumeCpu();
     return true;
   }
   const labels = { idle: 'Not ready', ready: 'Ready', balling: 'Balling', spectating: 'Spectating' };
@@ -374,11 +443,14 @@ function ububallOnline(hooks) {
     const me = result.users.find(user => user.owner === session.owner);
     $('activity-online-count').textContent = result.users.length + ' online';
     const challenge = result.challenges[0];
-    const available = !id && !lobbyBusy && !challenge && (!me || ['idle', 'ready'].includes(me.status));
+    const available = !pendingMatch && !lobbyBusy && !switching && !challenge;
     const readyButton = $('online-friends');
     readyButton.disabled = !available;
-    readyButton.textContent = me?.status === 'ready' ? 'Cancel ready' : 'Ready to play';
+    readyButton.textContent = id && !watchKey && state?.phase !== 'over' ? 'Find another match' : me?.status === 'ready' ? 'Cancel ready' : 'Ready to play';
     readyButton.setAttribute('aria-pressed', String(me?.status === 'ready'));
+    $('activity-cpu').textContent = hooks.cpuActive() ? 'Resume CPU' : 'Play vs CPU';
+    $('activity-public').textContent = queue === 'public' ? 'Cancel online search' : 'Find Online Match';
+    $('activity-cpu').disabled = $('activity-public').disabled = Boolean(pendingMatch || lobbyBusy || switching);
     const present = new Set(), pairs = new Set(), placed = new Set(), nodes = [];
     const focused = document.activeElement, list = $('activity-users');
     const users = result.users.filter(user => !activity.participants || activity.participants.has(user.owner));
@@ -394,9 +466,10 @@ function ububallOnline(hooks) {
         card.onclick = async () => {
           const target = lobby?.users.find(player => player.owner === user.owner);
           if (card.getAttribute('aria-disabled') === 'true' || !target) return;
-          if (target.status === 'balling') { await watchPlayer(target); return; }
-          if (await gameUi.confirm({ title: 'Challenge ' + target.name + '?', confirmLabel: 'Challenge' })) {
-            if (await switchActivity('off')) void lobbyRequest('challenge', { target: target.owner });
+          if (target.status === 'balling' && !target.cpu) { await watchPlayer(target); return; }
+          if (await switchActivity('challenge')) {
+            const sent = await lobbyRequest('challenge', { target: target.owner });
+            if (sent && hooks.cpuActive()) hooks.resumeCpu();
           }
         };
         userCards.set(user.owner, card);
@@ -414,7 +487,7 @@ function ububallOnline(hooks) {
       card.children[1].textContent = name; card.children[2].textContent = labels[user.status];
       card.dataset.status = user.status; card.dataset.self = String(own);
       const watching = user.status === 'balling' && result.matches?.[user.match]?.watchable;
-      const disabled = own || !available || (!watching && !['idle', 'ready'].includes(user.status));
+      const disabled = own || !available || (!watching && !user.cpu && !['idle', 'ready'].includes(user.status));
       card.setAttribute('aria-disabled', String(disabled));
       card.setAttribute('aria-label', `${name}${own ? ', you' : ''}, ${labels[user.status]}${disabled ? '' : watching ? '. Watch match' : '. Challenge player'}`);
       card.title = name + (disabled ? '' : watching ? ' · Watch match' : ' · Challenge');
@@ -465,19 +538,22 @@ function ububallOnline(hooks) {
     if (lobby) renderLobby(lobby);
     lobbyTask = (async () => {
       try {
-        const cpu = !id && document.body.classList.contains('in-match');
+        const cpu = !id && hooks.cpuActive();
+        const reportedMatch = id || pendingMatch?.id;
         const result = await api('/api/ububall/lobby', { action, instance: activity.instance, connection, ...extra,
-          ...(id ? { match: id, ...(watchKey && watchKey !== 'activity' ? { watch: watchKey } : {}) } : {}), ...(cpu ? { cpu: true } : {}) });
+          ...(reportedMatch ? { match: reportedMatch, ...(watchKey && watchKey !== 'activity' ? { watch: watchKey } : {}) } : {}), ...(cpu ? { cpu: true } : {}) });
         if (disposed) return false;
         renderLobby(result);
-        if (result.assignment && !id && !switching) {
+        if (result.assignment && !id && !pendingMatch && !switching) {
           clearTimeout(queueTimer);
           await queueTask;
           if (switching) return true;
           setQueue(null);
           const initial = await api('/api/ububall/' + result.assignment + '/join', {});
-          await enter(result.assignment, initial);
+          await takeMatch(result.assignment, initial, () => api('/api/ububall/lobby', {
+            action: 'ack', instance: activity.instance, connection, id: result.assignment, match: result.assignment }));
         }
+        if (pendingMatch && !offerBusy) await checkOffer();
         if (result.assignment && id === result.assignment && !watchKey) {
           await api('/api/ububall/lobby', { action: 'ack', instance: activity.instance, connection, id: result.assignment, match: result.assignment });
         }
@@ -512,6 +588,7 @@ function ububallOnline(hooks) {
   function dispose() {
     if (disposed) return;
     disposed = true; stopped = true;
+    pendingMatch = null; $('activity-match-offer').close();
     clearTimeout(lobbyTimer); clearTimeout(queueTimer); clearTimeout(retry); clearTimeout(reconcileTimer); clearInterval(heartbeat);
     requests.abort();
     try { if (socket?.readyState === WebSocket.OPEN) socket.send('{"type":"leave"}'); } catch { /* socket may already be closing */ }
@@ -539,15 +616,18 @@ function ububallOnline(hooks) {
     })();
   }, { signal: requests.signal });
   $('online-friends').onclick = async () => {
-    const wasReady = lobby?.users.find(user => user.owner === session?.owner)?.status === 'ready';
+    const wasReady = !id && lobby?.users.find(user => user.owner === session?.owner)?.status === 'ready';
     if (!await switchActivity('off')) return;
-    if (!wasReady) void lobbyRequest('ready');
+    if (!wasReady) {
+      const ready = await lobbyRequest('ready');
+      if (ready && hooks.cpuActive() && !pendingMatch) hooks.resumeCpu();
+    }
   };
   for (const action of ['accept', 'decline', 'cancel']) $('activity-challenge-' + action).onclick = () => {
     if (lobby?.challenges[0]) void lobbyRequest(action, { id: lobby.challenges[0].id });
   };
   $('online-change-rules').onclick = () => { if (state?.canChangeRules) hooks.editRules(state.mode); };
-  $('activity-public').onclick = () => switchActivity('public');
+  $('activity-public').onclick = () => switchActivity(queue === 'public' ? 'off' : 'public');
   $('activity-cpu').onclick = () => switchActivity('cpu');
   $('activity-cancel').onclick = () => switchActivity('off');
   $('online-public').onclick = () => startQueue('public');
@@ -620,6 +700,7 @@ function ububallOnline(hooks) {
   }
   return {
     get active() { return Boolean(id); }, get state() { return state; }, get spectating() { return Boolean(watchKey); },
+    contextChanged() { if (!disposed && lobby) renderLobby(lobby); },
     leave,
     // Locks in a team: owned seats send serials in Back, Top, Bottom order; every seat sends supers.
     async ready(team) { receive(await api('/api/ububall/' + id + '/team', { ...team, gameNumber: state.gameNumber })); },

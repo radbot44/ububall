@@ -34,14 +34,14 @@
   <section class="play-home" aria-label="Play Ububall">
     <div id="activity-play" class="activity-play" hidden>
       <section class="activity-friends" aria-labelledby="activity-lobby-title">
-        <header class="activity-lobby-heading"><h1 id="activity-lobby-title">Lobby</h1><span id="activity-online-count"></span></header>
+        <header class="activity-lobby-heading"><div class="activity-lobby-title"><h1 id="activity-lobby-title">Lobby</h1><span class="activity-loading-slot"><span id="activity-loading" class="online-spinner" role="status" aria-label="Loading"></span></span></div><span id="activity-online-count"></span></header>
         <div id="activity-users" class="activity-users" aria-label="Players in this Activity"></div>
         <section id="activity-challenge" class="activity-challenge" aria-label="Challenge" hidden>
           <p id="activity-challenge-message" role="status"></p>
           <div class="activity-friend-actions"><button id="activity-challenge-accept" class="primary" type="button">Accept</button><button id="activity-challenge-decline" type="button">Decline</button><button id="activity-challenge-cancel" type="button">Cancel challenge</button></div>
         </section>
         <button id="online-friends" class="primary" type="button" disabled>Ready to play</button>
-        <span id="activity-loading" class="online-spinner" role="status" aria-label="Loading"></span><p id="activity-status" role="alert" hidden></p>
+        <p id="activity-status" role="alert" hidden></p>
         <div class="activity-friend-actions">
           <button id="online-invite-friends" type="button">Invite a friend</button>
           <button id="activity-cancel" class="quiet" type="button" hidden>Leave queue</button>
@@ -159,7 +159,7 @@ SOFTWARE.
       </div>
       <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
       <div class="stadium-actions">
-        <span id="online-loading" class="online-spinner" role="status" aria-label="Loading" hidden></span>
+        <span class="online-loading-slot"><span id="online-loading" class="online-spinner" role="status" aria-label="Loading" hidden></span></span>
         <button id="online-change-rules" class="primary" type="button" hidden>Change rules</button>
         <div class="online-match-actions">
           <button id="online-rematch" class="primary" hidden>Rematch</button>
@@ -209,6 +209,7 @@ SOFTWARE.
     </aside>
   </div>
   <dialog id="pause-menu" class="pause-menu" aria-labelledby="pause-title">
+    <div class="pause-menu-main">
     <h2 id="pause-title">Paused</h2>
     <div class="pause-actions">
       <button id="pause-resume" class="primary" type="button">Resume</button>
@@ -228,6 +229,14 @@ SOFTWARE.
       <button id="setting-sidebar" class="setting" type="button"><span>Controls side</span><span class="setting-value">Left</span></button>
     </div>
     <nav class="pause-links" aria-label="Leave to"><a href="/mint">Ubu Mint</a><a href="/collection">Collection</a></nav>
+    </div>
+    <div id="pause-lobby" hidden></div>
+  </dialog>
+  <dialog id="activity-match-offer" class="game-dialog" aria-labelledby="activity-match-offer-title">
+    <h2 id="activity-match-offer-title">Match found</h2>
+    <p>Join this match? Your CPU match will end.</p>
+    <p id="activity-match-offer-error" role="alert" hidden></p>
+    <div class="game-dialog-actions"><button id="activity-match-keep-cpu" type="button">Keep playing CPU</button><button id="activity-match-join" class="primary" type="button">Join match</button></div>
   </dialog>
   <dialog id="match-help" class="pause-menu match-help" aria-labelledby="match-help-title">
     <h2 id="match-help-title">How to play</h2>
