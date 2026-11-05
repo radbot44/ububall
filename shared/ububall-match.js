@@ -42,14 +42,13 @@
   function applyStats(P, body, raw, mode) {
     P.applyStats(body, rule(mode, 'classic') ? {} : raw);
   }
-  // Meter values (owner decision 2026-10-30): meter comes from contact, conceding, aces (a goal on a
-  // round's first turn, to the scorer) and saves. The assist amount is a proposal, not yet decided.
+  // Meter values: meter comes from contact, conceding, aces (a goal on a
+  // round's first turn, to the scorer), saves and assists.
   // Contact counts only for real impacts against the ball or an opponent, at most once per
-  // cooldown per ubu, so pinging around the ball or an enemy cannot farm it (cooldown and
-  // impact speed are tuning, not owner decisions).
-  // Every gain is scaled by `rate` (owner decision 2026-10-30: slightly below the listed amounts).
+  // cooldown per ubu, so pinging around the ball or an enemy cannot farm it.
+  // Every gain is scaled by `rate` (slightly below the listed amounts).
   const METER = Object.freeze({ ball: 8, check: 4, conceded: 6, ace: 10, save: 6, assist: 4, teammate: .15, rate: .85, minSpeed: 60, cooldownTicks: 360 });
-  // Efficiency, Synergy and Chemistry swing harder than other stats (owner decision 2026-10-30): their
+  // Efficiency, Synergy and Chemistry swing harder than other stats: their
   // multiplier is squared, 0.44–2.25×, so good super stats matter and poor ones hold a ubu back.
   const superStat = (P, raw) => P.multiplier(raw ?? 127) ** 2;
   function gainMeter(P, bodies, stats, body, amount, classic = false) {
@@ -83,7 +82,7 @@
     if (speed < 15 || (a.team === -1) === (b.team === -1)) return null;
     return a.team === -1 ? b : a;
   }
-  // Save tuning (not an owner decision): the ball must be within `range` px of the goal mouth's
+  // Save tuning: the ball must be within `range` px of the goal mouth's
   // centre and, without the saver, due in within `ticks`.
   const SAVE = Object.freeze({ range: 300, ticks: 240 });
   // The save, if any, among the ubus (by index) that touched the ball in one tick. Only a lone touch
@@ -336,7 +335,7 @@
   function honours(tally, scores, winner) {
     return { comeback: tally.deficit[winner] >= 3, shutout: scores[1 - winner] === 0 };
   }
-  // Fouls (owner decisions 2026-10-31), called at the end of every turn without a goal.
+  // Fouls, called at the end of every turn without a goal.
   // Goal camping: each end has an attack zone, from the end boards to a line across the rink at the
   // rear kickoff spot. A team is camping when more of its ubus have their centres in its own crease
   // than the larger of one and the opposing ubus with their centres in that zone. Camping warns the

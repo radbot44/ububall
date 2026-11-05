@@ -4208,7 +4208,7 @@
   }
   // The note under the title, or a problem in its place.
   function replaysNote(problem = '') {
-    $('replays-note').textContent = problem || `Your latest ${ububallReplay.KEEP} matches are kept automatically. Pinned and imported replays stay until you delete them.`;
+    $('replays-note').textContent = problem || `Your latest ${ububallReplay.KEEP} matches are kept automatically. Pinned and imported replays stay for the current version until you delete them.`;
     $('replays-note').classList.toggle('problem', Boolean(problem));
   }
   async function listReplays(problem = '') {

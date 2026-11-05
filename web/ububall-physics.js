@@ -93,12 +93,11 @@
     if (copies === 2) return { level: 2, copies, suffix: ' II', displayName: base.name + ' II', bonusTicks: 120, bonusRefund: 5 };
     return { level: 1, copies: Math.max(1, copies), suffix: '', displayName: base.name, bonusTicks: 0, bonusRefund: 0 };
   }
-  function multiplier(raw) {
+  const ubu = typeof require === 'function' ? require('../shared/ubu.js') : root.ubu;
+  const multiplier = ubu ? ubu.statMultiplier : function multiplier(raw) {
     if (!Number.isInteger(raw) || raw < 0 || raw > 255) throw new RangeError('Stat must be an integer from 0 to 255.');
-    // Exponential: every stat point changes the result by the same percentage, so mid-range
-    // stats matter as much as extremes. 0 = 2/3×, 127 = 1×, 255 = 1.5×.
     return raw < 127 ? (2 / 3) ** ((127 - raw) / 127) : 1.5 ** ((raw - 127) / 128);
-  }
+  };
   // Full-launch speed comes from Impulse, not Mass, so a heavier ubu launches as fast and carries more
   // momentum into the ball and opponents. Only weight added on top of its own (Colossus) slows it.
   // Smaller ubus launch a little faster, and a daze from heavy checks slows the next launch.
