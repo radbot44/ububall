@@ -4137,11 +4137,9 @@
     if (online?.active) online.rematch();
   };
   $('summary-leave').onclick = async () => {
-    closeSummary();
     if (isFullscreenActive()) await toggleFullscreen();
-    if (online?.active) {
-      await online.leave();
-    }
+    if (online?.active && !await online.leave()) return;
+    closeSummary();
     exitMatchMode();
     if (history.state?.match) history.back();
   };
@@ -5346,9 +5344,20 @@
   $('pause-resume').onclick = () => $('pause-menu').close();
   $('pause-restart').onclick = () => { $('pause-menu').close(); endReplay(); clearActiveMatch(); openSetup('mode'); };
   $('pause-leave').onclick = async () => {
-    if (online?.spectating) await online.leave();
-    exitMatchMode();
-    if (history.state?.match) history.back();
+    const button = $('pause-leave');
+    button.disabled = true;
+    try {
+      if (online?.active) {
+        if (!await online.leave()) return;
+      } else if (inDiscord) {
+        saveRecording(); clearActiveMatch();
+        cpuGeneration++; cpuClient.cancel();
+        phase = 'over'; drag = null;
+        endGoalReplay(); stopFanfare(); gameAudio()?.stop();
+      }
+      exitMatchMode();
+      if (history.state?.match) history.back();
+    } finally { button.disabled = false; }
   };
   $('home-customize').onclick = () => openSetup('mode', 'cpu', lastCpuSetup?.mode, lastCpuSetup?.level);
   $('home-play').onclick = async () => {
@@ -5703,8 +5712,12 @@
       $('online-open-note').hidden = false;
       $('new-match').disabled = false; $('online-forfeit').hidden = true;
       $('online-rematch').hidden = true; $('launch').hidden = false; closeSummary();
-      $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
-      draft = practice.slice(0, 3); newMatch();
+      stopDemo();
+      phase = 'over'; drag = null;
+      endGoalReplay(); stopFanfare(); gameAudio()?.stop();
+      draft = practice.slice(0, 3);
+      exitMatchMode();
+      startDemo();
     }
   });
   $('online-rematch').onclick = () => online.rematch();

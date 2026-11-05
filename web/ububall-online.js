@@ -7,7 +7,7 @@ function ububallOnline(hooks) {
   const queueStorageKey = activity ? 'ububall-queue:' + activity.instance : 'ububall-queue';
   let id = null, socket = null, session = null, state = null, retry = null, heartbeat = null;
   let stopped = false, lastPong = 0, offset = 0, lastDraft = '', sentAt = 0;
-  let watchKey = null, queue = null, queueTimer, queueTask, switching = false;
+  let watchKey = null, queue = null, queueTimer, queueTask, leaveTask, switching = false;
   // The lobby shows on the team screen; the dialog only creates, joins and ends matches.
   const status = text => {
     $('online-status').textContent = text; $('lobby-status').textContent = text;
@@ -179,13 +179,21 @@ function ububallOnline(hooks) {
     }, 10000);
   }
   // Leaving tells the server, so the opponent isn't left waiting to claim a forfeit.
-  async function leave() {
+  function leave() {
+    leaveTask ||= finishLeave().finally(() => { leaveTask = null; });
+    return leaveTask;
+  }
+  async function finishLeave() {
+    if (!id) return true;
     const historyState = watchKey ? history.state : null;
     const live = !watchKey && state && ['plan', 'resolving'].includes(state.phase);
     if (live && !await gameUi.confirm({ title: 'Leave match?', message: `Leaving ends the match and gives ${state.names[1 - state.seat] || 'your opponent'} the win.`,
-      confirmLabel: 'Leave', cancelLabel: 'Keep playing', danger: true })) return;
+      confirmLabel: 'Leave', cancelLabel: 'Keep playing', danger: true })) return false;
+    if (!watchKey) {
+      try { await api('/api/ububall/' + id + '/leave', {}); }
+      catch (error) { hooks.onError(error.message); return false; }
+    }
     stopped = true;
-    if (id && !watchKey) await api('/api/ububall/' + id + '/leave', {}).catch(() => {});
     clearTimeout(retry); clearInterval(heartbeat); socket?.close(); socket = null; id = null; state = null; watchKey = null;
     hooks.closeLobby();
     const url = new URL(location.href); url.pathname = '/';
@@ -198,6 +206,7 @@ function ububallOnline(hooks) {
     $('online-create-controls').hidden = true; $('online-ended').hidden = true; $('online-dialog').close();
     hooks.onLeave();
     status('');
+    return true;
   }
   const settings = { policy: 'practice' };
   $('online-policy').onclick = event => {
@@ -316,7 +325,7 @@ function ububallOnline(hooks) {
     switching = true;
     clearTimeout(queueTimer);
     try {
-      if (id) await leave();
+      if (id && !await leave()) return false;
       if (next === 'cpu') hooks.playCpu();
       await queueTask;
       if (queue && playable()) await queueRequest('cancel');
