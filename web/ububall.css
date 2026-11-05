@@ -37,7 +37,6 @@
 }
 #quick-play-setup, #quick-play-signin, #online-open-note { font-size: .8125rem; font-weight: normal; }
 #online-open { display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.starter-note { grid-column: 1 / -1; margin: 0; color: var(--muted); }
 .availability-actions:not([hidden]) { display: flex; justify-content: center; flex-wrap: wrap; gap: .5rem; margin-block: .75rem; }
 body:has(#signed-out-panel:not([hidden])) { display: flex; flex-direction: column; }
 main:has(> #signed-out-panel:not([hidden])) {
@@ -71,6 +70,15 @@ main:has(> #signed-out-panel:not([hidden])) > :not(#signed-out-panel) { display:
   background: var(--elevated); color: var(--text); font-family: var(--font-display); font-size: .90625rem;
 }
 .mint-entry-link:hover { background: var(--hover); }
+.starter-pack .candy-pack { width: min(26rem, 100%); filter: drop-shadow(0 .5rem 1rem #0006); transition: scale .2s; }
+.starter-pack .candy-pack:not(:disabled):is(:hover, :focus-visible) { scale: 1.04; }
+.starter-pack .candy-pack:disabled { opacity: 1; }
+/* A pack is waiting: the dot sits over the tab or button that leads to it. */
+.has-notice { position: relative; }
+.has-notice::after {
+  content: ''; position: absolute; top: .25rem; right: .25rem; width: .625rem; height: .625rem; border-radius: 50%;
+  background: var(--primary); box-shadow: 0 0 0 .125rem var(--card), 0 0 .5rem var(--primary);
+}
 @media (orientation: portrait) and (max-width: 640px) {
   .home-team { padding: .875rem .625rem; }
   .home-lineup { gap: .375rem; }
@@ -161,9 +169,8 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
   body:not(.in-match) .play-home { width: min(55rem, 100%); margin: .875rem auto 1.5rem; }
 }
 /* The Discord Activity opens at the rink with the friends queue on the bench. */
-.discord-activity body:has(.ball-page:not([hidden])) { padding-bottom: 0; }
-.discord-activity body:has(.ball-page:not([hidden])) .site-header,
-.discord-activity .play-home > :not(.activity-play),
+.discord-activity :is(.nav-more, .site-header-actions),
+.discord-activity .play-home > :not(.activity-play, .home-team, .mint-entry),
 .discord-activity body.demo-match:not(.in-match) :is(.demo-play, .demo-finger, .field-banner) { display: none; }
 .discord-activity body:not(.in-match) .ball-page {
   gap: 1rem; height: auto; padding-block: max(.75rem, var(--safe-top)) max(.75rem, var(--safe-bottom));
@@ -198,8 +205,6 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
 .activity-user-avatar { position: relative; display: grid; place-items: center; width: 3rem; max-width: 100%; aspect-ratio: 1; flex: none; border-radius: 50%; background: var(--card); font: 1rem var(--font-display); }
 .activity-user-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; grid-area: 1 / 1; }
 .activity-user[data-self="true"] .activity-user-avatar::after { content: 'You'; position: absolute; bottom: -.125rem; right: -.125rem; border-radius: .25rem; padding: .0625rem .1875rem; background: var(--primary); color: #2b1608; font: 600 .5625rem Inter, sans-serif; }
-#lobby-team-source { justify-content: flex-start; }
-#lobby-team-source [aria-pressed="true"] { border-color: var(--primary); color: var(--primary); }
 .activity-user-name { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
 .activity-user-status { font: .6875rem/1.2 var(--font-body); color: var(--muted); overflow-wrap: anywhere; }
 .activity-user[data-status="ready"] { border-color: #42c66b; }
@@ -1116,9 +1121,6 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .ubu-tile-main:hover .ubu-tile-badge.is-action, .ubu-tile-main:focus-visible .ubu-tile-badge.is-action { opacity: 1; }
 .roster-status { margin: .25rem 0; color: var(--muted); font-size: .75rem; }
 .roster-status:empty { display: none; }
-.roster-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: .375rem; margin: .375rem 0 .5rem; padding: .25rem; border-radius: .875rem; background: var(--elevated); }
-.roster-tabs button { min-height: 2.5rem; border: 0; border-radius: .625rem; background: transparent; color: var(--muted); font-size: 1rem; }
-.roster-tabs button[aria-selected="true"] { background: var(--card); color: var(--text); }
 .roster-scroll { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -1rem; padding: 0 1rem .75rem; overscroll-behavior: contain; }
 .roster-signin { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .75rem; border-radius: .875rem; background: var(--elevated); }
 .roster-signin p { margin: 0; font-size: .8125rem; }

@@ -201,7 +201,18 @@
     return { bits, percentile: percentile(bits), breakdown };
   }
 
-  const api = { scoreRarity, tailProbability, percentile, TABLE };
+  // A starter pack, guest team or CPU team: one ubu from each of the three rarest deciles,
+  // commonest first. Each draw is ordinary random DNA, kept only if it lands in its decile.
+  function starterTeam(ubu) {
+    return [70, 80, 90].map(decile => {
+      for (;;) {
+        const dna = ubu.randomDNA();
+        if (Math.min(90, Math.floor(scoreRarity(ubu.decode(dna)).percentile / 10) * 10) === decile) return ubu.toCode(dna);
+      }
+    });
+  }
+
+  const api = { scoreRarity, tailProbability, percentile, starterTeam, TABLE };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.rarity = api;
 })(globalThis);

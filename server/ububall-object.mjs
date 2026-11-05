@@ -80,6 +80,7 @@ export class UbuballMatch extends DurableObject {
     server.send(JSON.stringify(this.watchSnapshot(now)));
     return new Response(null, { status: 101, webSocket: client });
   }
+  registry() { return this.env.MINT.get(this.env.MINT.idFromName(this.env.MINT_ID)); }
   async fetch(request) {
     return this.ctx.blockConcurrencyWhile(async () => {
       const now = Date.now(), path = new URL(request.url).pathname;
@@ -90,13 +91,17 @@ export class UbuballMatch extends DurableObject {
       if (path === '/pair') {
         if (!this.room) {
           const { players: [first, second], quickStart, challenge, activity } = await request.json();
-          this.room = new MatchRoom(first.owner, 'standard', challenge ? 'choice' : 'practice', Boolean(first.guest));
+          // A failure here keeps both queue assignments, so the queue retries this match.
+          let teams;
+          try { teams = await Promise.all([first, second].map(player => player.guest ? null : this.registry().matchTeam(player.owner))); }
+          catch { return json({ error: 'Could not prepare the teams.' }, 503); }
+          this.room = new MatchRoom(first.owner, 'standard', Boolean(first.guest));
           this.room.join(second.owner, Boolean(second.guest));
-          if (challenge) for (const player of [first, second]) this.room.practiceTeam(player.owner);
           this.room.state.paired = true;
+          this.room.state.challenge = Boolean(challenge);
           this.room.state.matchKind = activity ? 'friend' : 'online';
           if (activity) { this.room.state.activity = activity; this.room.state.watch = { allowed: [true, true], key: null }; }
-          if (quickStart) this.room.readyPracticePair();
+          if (quickStart) this.room.readyPair(teams);
           this.save();
           await this.schedule(now);
         }
@@ -144,7 +149,8 @@ export class UbuballMatch extends DurableObject {
         if (path === '/create') {
           if (this.room) throw new Error('Match already exists.');
           const data = await request.json();
-          this.room = new MatchRoom(owner, data.mode, data.teams, guest);
+          if (!guest) await this.registry().matchTeam(owner);
+          this.room = new MatchRoom(owner, data.mode, guest);
         } else if (!this.room || now >= this.room.state.expires) return json({ error: 'Match expired or not found.' }, 404);
         this.sweep(now);
         const alias = request.headers.get('X-Match-Alias');
@@ -154,7 +160,10 @@ export class UbuballMatch extends DurableObject {
             if (a.owner === alias) { a.owner = owner; ws.serializeAttachment(a); }
           }
         }
-        if (path === '/join') this.room.join(owner, guest);
+        if (path === '/join') {
+          if (!guest) await this.registry().matchTeam(owner);
+          this.room.join(owner, guest);
+        }
         else this.room.seat(owner);
         this.room.rename(owner, decodeURIComponent(request.headers.get('X-Match-Name') || ''));
         if (path === '/socket') {
@@ -174,20 +183,18 @@ export class UbuballMatch extends DurableObject {
           if (!data || Object.keys(data).some(k => !['serials', 'supers', 'gameNumber'].includes(k)) ||
               (data.gameNumber || 0) !== (this.room.state.gameNumber || 0)) throw new Error('The game changed. Choose your team again.');
           let entries;
-          if (!this.room.state.practice[this.room.seat(owner)]) {
-            const registry = this.env.MINT.get(this.env.MINT.idFromName(this.env.MINT_ID));
-            const result = await registry.ububallTeam(owner, data.serials);
+          if (!this.room.state.guestTeams[this.room.seat(owner)]) {
+            const result = await this.registry().ububallTeam(owner, data.serials);
             if (result.error) throw new Error(result.error);
             entries = result.entries;
           } else {
-            if (data.serials !== undefined) throw new Error('This seat uses a practice team.');
-            entries = this.room.practiceTeam(owner);
+            if (data.serials !== undefined) throw new Error('Guests play with their given team.');
+            entries = this.room.guestTeam(owner);
           }
           this.room.selectTeam(owner, entries, data.supers);
         }
         if (path === '/forfeit') this.room.claimForfeit(owner, now);
         if (path === '/unready') this.room.unready(owner);
-        if (path === '/team-source') this.room.teamSource(owner, (await request.json())?.practice);
         if (path === '/rules') {
           const data = await request.json();
           this.room.changeRules(owner, data?.mode, data?.gameNumber);

@@ -2,23 +2,24 @@
 const rules = require('../shared/ububall-match.js');
 const P = require('../web/ububall-physics.js');
 const ubu = require('../shared/ubu.js');
+const { starterTeam } = require('../shared/rarity.js');
 const idle = () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false });
 const hold = () => Array.from({ length: 3 }, idle);
 // Durable storage adapter will persist this object; no client-supplied owner identities.
 class MatchRoom {
-  constructor(host, mode, teams, guest = false) {
-    if (typeof host !== 'string' || !host || !rules.MODES.includes(mode) || !['owned', 'practice', 'choice'].includes(teams)) throw new Error('Invalid lobby.');
-    this.state = { version: rules.VERSION, mode, teams, players: [host, null], names: [null, null], phase: 'lobby', turn: 1,
+  constructor(host, mode, guest = false) {
+    if (typeof host !== 'string' || !host || !rules.MODES.includes(mode)) throw new Error('Invalid lobby.');
+    this.state = { version: rules.VERSION, mode, players: [host, null], names: [null, null], phase: 'lobby', turn: 1,
       drafts: [hold(), hold()], locked: [false, false], connected: [false, false],
       disconnectedAt: [null, null], deadline: null, remaining: null, winner: null, rematch: [false, false],
       ready: [false, false], left: [false, false] };
     this.state.rosters = [null, null];
-    this.state.practice = [null, null];
+    this.state.guestTeams = [null, null];
     this.state.game = null;
     this.state.replay = null;
     this.state.playUntil = null;
     this.state.expires = Date.now() + 86400000;
-    if (teams === 'practice' || guest) this.practiceTeam(host);
+    if (guest) this.guestTeam(host);
   }
   seat(owner) { const i = this.state.players.indexOf(owner); if (i < 0) throw new Error('Not a match player.'); return i; }
   join(owner, guest = false) {
@@ -27,31 +28,31 @@ class MatchRoom {
     if (s.players.includes(owner)) return this.seat(owner);
     if (s.phase !== 'lobby' || s.players[1]) throw new Error('Match is full.');
     s.players[1] = owner;
-    // Guests have no collection, so they always field a server-generated practice team.
-    if (s.teams === 'practice' || guest) this.practiceTeam(owner);
+    // Guests have no collection, so they field three server-generated ubus they cannot keep.
+    if (guest) this.guestTeam(owner);
     return 1;
   }
   claim(owner, alias) {
     const s = this.state, i = s.players.indexOf(alias);
     if (!alias || i < 0 || s.players.includes(owner)) return false;
     s.players[i] = owner;
-    // A former guest who hasn't readied yet in an owned match may now pick their own ubus.
-    if (s.phase === 'lobby' && s.teams === 'owned' && !s.ready[i]) { s.practice[i] = null; s.rosters[i] = null; }
+    // A former guest who hasn't readied yet may now pick their own ubus.
+    if (s.phase === 'lobby' && !s.ready[i]) { s.guestTeams[i] = null; s.rosters[i] = null; }
     return true;
   }
   // Discord display names label each side; guests have none.
   rename(owner, name) {
     this.state.names[this.seat(owner)] = typeof name === 'string' && name.trim() ? name.trim().slice(0, 32) : null;
   }
-  practiceTeam(owner) {
+  guestTeam(owner) {
     const i = this.seat(owner);
-    return this.state.practice[i] ||= Array.from({ length: 3 }, () => ({ dna: ubu.toCode(ubu.randomDNA()) }));
+    return this.state.guestTeams[i] ||= starterTeam(ubu).map(dna => ({ dna }));
   }
   selectTeam(owner, entries, supers) {
     const s = this.state, i = this.seat(owner);
     if (s.phase !== 'lobby' || !Array.isArray(entries) || entries.length !== 3 ||
         !Array.isArray(supers) || supers.length !== 3) throw new Error('Invalid team.');
-    // Entries come from the registry or the room's practice roster, never the browser.
+    // Entries come from the registry or the room's guest team, never the browser.
     const roster = entries.map((entry, index) => {
       const model = ubu.decode(ubu.fromCode(entry.dna)), id = supers[index];
       if (!Number.isInteger(id) || !model.supers.map(n => n % 8).includes(id)) throw new Error('Super not available to this ubu.');
@@ -59,12 +60,12 @@ class MatchRoom {
     });
     s.rosters[i] = roster; s.ready[i] = true;
   }
-  readyPracticePair() {
-    for (const owner of this.state.players) {
-      const entries = this.practiceTeam(owner);
-      const supers = entries.map(({ dna }) => ubu.decode(ubu.fromCode(dna)).supers[0] % 8);
-      this.selectTeam(owner, entries, supers);
-    }
+  // Both players start at once: each owned team comes from the registry, a null seat is a guest's.
+  readyPair(teams) {
+    this.state.players.forEach((owner, i) => {
+      const entries = teams[i]?.entries || this.state.guestTeams[i];
+      this.selectTeam(owner, entries, teams[i]?.supers || entries.map(({ dna }) => ubu.decode(ubu.fromCode(dna)).supers[0] % 8));
+    });
     this.state.quickStart = true;
   }
   // Until kickoff a ready player may go back and change their team.
@@ -72,13 +73,6 @@ class MatchRoom {
     const s = this.state, i = this.seat(owner);
     if (s.phase !== 'lobby') throw new Error('Match already started.');
     s.ready[i] = false;
-  }
-  teamSource(owner, practice) {
-    const s = this.state, i = this.seat(owner);
-    if (s.phase !== 'lobby' || s.teams !== 'choice' || typeof practice !== 'boolean') throw new Error('Cannot change team source.');
-    s.ready[i] = false; s.rosters[i] = null;
-    if (practice) this.practiceTeam(owner);
-    else s.practice[i] = null;
   }
   canChangeRules() {
     const s = this.state;
@@ -101,7 +95,7 @@ class MatchRoom {
   leave(owner, now) {
     const s = this.state, i = this.seat(owner);
     if (s.phase === 'lobby' && i === 1 && !s.paired) {
-      s.players[1] = null; s.names[1] = null; s.rosters[1] = null; s.practice[1] = null; s.ready[1] = false;
+      s.players[1] = null; s.names[1] = null; s.rosters[1] = null; s.guestTeams[1] = null; s.ready[1] = false;
       s.connected[1] = false; s.disconnectedAt[1] = null;
       if (s.watch) { s.watch.allowed[1] = false; s.watch.key = null; }
       return;
@@ -249,10 +243,10 @@ class MatchRoom {
       occupied: s.players.map(Boolean), names: [...s.names], connected: [...s.connected], locked: [...s.locked],
       moves: structuredClone(s.drafts[seat]), deadline: s.deadline, remaining: s.remaining, winner: s.winner,
       ready: [...s.ready], left: [...s.left], rosters: structuredClone(s.rosters),
-      practice: structuredClone(s.practice[seat]),
+      guestTeam: structuredClone(s.guestTeams[seat]),
       game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
       playUntil: s.playUntil, disconnectedAt: [...s.disconnectedAt], rematch: [...s.rematch],
-      paired: Boolean(s.paired), quickStart: Boolean(s.quickStart), gameNumber: s.gameNumber || 0,
+      paired: Boolean(s.paired), challenge: Boolean(s.challenge), quickStart: Boolean(s.quickStart), gameNumber: s.gameNumber || 0,
       matchKind: s.matchKind || 'friend',
       canChangeRules: this.canChangeRules(), watchAllowed: s.watch?.allowed[seat] ?? false, watchKey: s.watch?.key ?? null };
   }

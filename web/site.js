@@ -23,6 +23,48 @@
   });
   // Sounds need a page gesture first; packs dealt on page load, or while another screen is up, stay silent.
   const sound = (kind, name) => { if (navigator.userActivation?.hasBeenActive && !$('pack-choices').closest('[data-screen]').hidden) window.ubuAudio?.[kind]?.(name); };
+  // The signup and daily packs share one horizontal wrapper and the regular reveal.
+  function starterPack(id, kind, label) {
+    const button = $(id).querySelector('button'), canvas = button.querySelector('canvas');
+    let scene = null;
+    try { scene = createPackScene(canvas); scene.setStarter(label); } catch { canvas.hidden = true; button.textContent = label; }
+    const view = { button, scene };
+    button.addEventListener('click', () => openStarter(kind, view));
+    return view;
+  }
+  async function openStarter(kind, view) {
+    if (busy) return;
+    if (pack) { revealIndex = Math.max(0, pack.seen - 1); showReveal(); return; } // Finish the pack in progress first.
+    busy = true; view.button.disabled = true; updatePackButton();
+    try {
+      const data = await ubuStarter.claim(kind);
+      pack = await readPack(data.certificates);
+      savePack();
+      await view.scene?.play(pack.items.length, pack.items.map(item => item.model));
+      revealIndex = 0;
+      showReveal();
+      status('');
+    } catch (error) {
+      pack = null;
+      if (await gameUi.confirm({ title: 'Could not open your pack', message: error.message, confirmLabel: 'Retry' })) {
+        busy = false; view.button.disabled = false;
+        return openStarter(kind, view);
+      }
+    } finally {
+      busy = false; view.button.disabled = false; view.scene?.reset(); updatePackButton();
+    }
+    void ubuStarter.refresh().catch(() => {});
+  }
+  // The daily pack comes before the shop; regular packs are dealt once it is opened.
+  function syncDaily() {
+    const daily = Boolean(session?.owner && ubuStarter.status?.daily);
+    $('daily-pack').hidden = !daily || Boolean(pack);
+    $('pack-title').textContent = daily ? 'Your daily pack' : 'Choose your pack';
+    $('pack-subtitle').textContent = daily ? 'Tap it to crack it open!' : 'Pick a pack to crack open!';
+    if (daily) { $('pack-choices').hidden = true; status('', true); }
+    else if (ubuStarter.status && offer) $('pack-choices').hidden = false;
+    else if (ubuStarter.status && !pack && config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey))) void loadChoices();
+  }
   let outOfPacks = false;
   let pack = null, packKey = '', pendingKey = '', revealIndex = 0;
   let viewerView = 'ubu';
@@ -89,7 +131,7 @@
   }
   // The shop deals packs by itself; the one button only continues an unrevealed pack or retries.
   function updatePackButton() {
-    const canDeal = session?.owner && config.ready && (config.lifetimeLimit || (pendingKey && localStorage.getItem(pendingKey)));
+    const canDeal = session?.owner && !ubuStarter.status?.daily && config.ready && (config.lifetimeLimit || (pendingKey && localStorage.getItem(pendingKey)));
     const label = pack ? 'Continue pack' : 'Try again';
     $('mint').textContent = label;
     $('mint').hidden = busy || !(pack || (canDeal && !offer && !outOfPacks));
@@ -471,7 +513,7 @@
       packScene?.reset();
       status('');
       updatePackButton();
-      void loadChoices();
+      syncDaily();
       return true;
     } catch (error) {
       $('reveal-progress').textContent = error.message;
@@ -777,7 +819,7 @@
     hidden: item => unseen(item.serial), paused: choosing,
     onEmpty: reason => {
       if (session?.owner) {
-        if (reason === 'empty') collectionRecovery({ packs: Boolean(pack || offer) });
+        if (reason === 'empty') collectionRecovery({ packs: true });
         else $('collection-recovery').hidden = true;
       }
       if (!reason) return;
@@ -865,7 +907,7 @@
     offer = null;
   }
   async function loadChoices() {
-    if (busy || !session?.owner || pack) return;
+    if (busy || !session?.owner || pack || !ubuStarter.status || ubuStarter.status.daily) return;
     busy = true; updatePackButton();
     try {
       let request = localStorage.getItem(pendingKey);
@@ -946,8 +988,14 @@
     const signIn = $('signed-out-signin');
     signIn.hidden = !config.login;
     signIn.href = '/auth/discord?return=' + encodeURIComponent(path);
+    signIn.onclick = window.ubuActivity ? event => window.openDiscordLogin(event) : null;
   }
   window.addEventListener('ubu:screen', renderSignedOut);
+  // A match starting in the Activity takes over from a pack in progress; Continue pack resumes it.
+  window.addEventListener('ubu:screen', event => { if (event.detail === 'play' && $('reveal').open) $('reveal').close(); });
+  starterPack('daily-pack', 'daily', 'Daily pack');
+  starterPack('home-pack', 'signup', 'Signup bonus');
+  window.addEventListener('ubu:starter', () => { if (sessionChecked) syncDaily(); });
 
   (async () => {
     try {
@@ -978,7 +1026,7 @@
           $('mint-recovery').hidden = Boolean(canOpen);
           if (config.ready) {
             try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
-            if (!pack && (config.lifetimeLimit || localStorage.getItem(pendingKey))) await loadChoices();
+            await ubuStarter.refresh().catch(error => status(error.message));
             await collection();
           } else {
             collectionStatus('The collection is unavailable right now.');

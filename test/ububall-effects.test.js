@@ -347,9 +347,8 @@ test('restoreEntry restores Stalwart ID 0 and mastery metadata, preserving null 
     '\n' + section('function resolveEquippedSuper(entry, slotIndex = 0) {', 'const POSITIONS = [');
   const P = require('../web/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
-  const practice = [{ model: ubu.decode(ubu.fromCode(ubu.toCode(ubu.randomDNA()))), dna: 'dummy', label: 'Practice' }];
   const env = runInNewContext(code + '\n;({ restoreEntry, resolveEquippedSuper });', {
-    P, ubu, practice
+    P, ubu
   });
 
   const sampleDna = ubu.toCode(ubu.randomDNA());
@@ -377,7 +376,7 @@ test('restoreEntry restores Stalwart ID 0 and mastery metadata, preserving null 
   // 3. Practice ubu with Stalwart
   const practiceDna = sampleDna;
   const restoredPractice = env.restoreEntry({
-    key: 'practice-0',
+    key: 'guest-0',
     dna: practiceDna,
     equippedSuper: { id: 0 }
   });
@@ -444,7 +443,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
     inDiscord: false, demo: false, online: null, phase: 'plan', recording: { turns: [] },
     matchMode: 'standard', cpuMode: 'standard', cpuLevel: 'medium', scores: [0, 0], turn: 1, selected: 0,
     elapsed: 0, accumulator: 0, drag: null, playSegments: [],
-     practice: Array.from({ length: 6 }, () => ({ dna: 'a', label: 'a', model: { stats: {} } })),
+    cpuTeam: [], starterEntries: () => Array.from({ length: 3 }, () => ({ dna: 'a', label: 'a', model: { stats: {} } })),
     draft: Array.from({ length: 3 }, () => ({ dna: 'a', label: 'a', model: { stats: {} } })),
     fouls: { crease: [false, false], corner: null, cornerTurns: 0, cards: [] },
     tally: {}, roster: [{ dna: 'a', label: 'a' }], teamEntries: [{ dna: 'a', label: 'a' }], stats: [],
@@ -580,7 +579,7 @@ test('post-goal celebration simulation cannot alter the next kickoffs meter or g
     Object, Array, Set,
     P, ububallMatch, structuredClone,
     clearEffects: dummy, kickoffGlow: 0, netFire: null, stats: Array.from({ length: 6 }, () => normal),
-    matchMode: 'standard', teamEntries: practice, practice, classicMode: () => false,
+    matchMode: 'standard', teamEntries: practice, classicMode: () => false,
     resolveEquippedSuper: () => null, anonymousName: i => `Anon ${i}`, anonymousNames: false,
     shownSim: () => context.simBodies, shownSeat: () => 0,
     playSegments: [], elapsed: 10, roundTurns: 1, play: ububallMatch.newPlay(),
@@ -885,7 +884,7 @@ test('local gameplay and goal replay maintain separate authoritative simBodies a
     clearEffects() { context.postGoal = null; },
     kickoffGlow: 0, netFire: null,
     stats: Array.from({ length: 6 }, () => normal),
-    matchMode: 'standard', teamEntries: practice, practice,
+    matchMode: 'standard', teamEntries: practice,
     classicMode: () => false, pulseMode: () => false,
     resolveEquippedSuper: (entry, i) => P.SUPERS[i % P.SUPERS.length],
     anonymousName: i => `Anon ${i}`, anonymousNames: false,
@@ -1016,7 +1015,7 @@ test('replay takeover (watchReplay -> playFromHere -> local turn) transforms sim
     replayFx: { hit: dummy, wall: dummy, shock: dummy, super: dummy },
     videoAudio: null, videoClock: null, clockNow: () => 1000, hitStopUntil: 0,
     shownScores: [0, 0], scores: [0, 0], turn: 1, phase: 'plan',
-    matchMode: 'standard', roster: [], teamEntries: [], practice: [], stats: [], plans: [],
+    matchMode: 'standard', roster: [], teamEntries: [], stats: [], plans: [],
     fouls: ububallMatch.newFouls(), play: ububallMatch.newPlay(), tally: ububallMatch.newTally(),
     roundTurns: 0, matchTicks: 0, playSegments: [], selected: 0, drag: null, elapsed: 0, accumulator: 0,
     recording: null, theater: null, online: null, onlineReplay: null, goalReplay: null, postGoal: null,
@@ -1564,7 +1563,6 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
     iceCache: {}, rinkCache: null,
     shownScores: [0, 0],
     dirtyMeters: new Set(),
-    practice: [],
     teamEntries: [],
     stats: [],
     bodies: P.kickoff(),

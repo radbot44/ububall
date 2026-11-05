@@ -29,6 +29,9 @@
     logo.onload = requestPaint;
     mark.onload = () => { tokenCache.clear(); requestPaint(); };
     logo.src = 'assets/uburoom-wordmark-brand.svg'; mark.src = 'assets/uburoom-oomark-brand.svg';
+    const ububallLogo = new Image();
+    ububallLogo.onload = requestPaint;
+    ububallLogo.src = 'assets/ububall-logo.svg';
 
     // Fixed fine grain: generated once, so the material never sparkles at rest.
     const grain = document.createElement('canvas');
@@ -629,6 +632,73 @@
       }
     }
 
+    // --- Starter pack: a horizontal foil trading-card pack, crimped at both ends ---
+    const STARTER_W = 262, STARTER_H = 132, STARTER_CRIMP = 24;
+    let starterLabel = '', starterTear = [];
+    function setupStarter() {
+      const rolls = crypto.getRandomValues(new Uint8Array(13));
+      starterTear = Array.from(rolls, (roll, i) => ({ x: -STARTER_W + 48 + roll / 255 * 12, y: -STARTER_H + i * STARTER_H * 2 / 12 }));
+    }
+    function starterShape(target) {
+      const teeth = 11, step = STARTER_H * 2 / teeth;
+      target.beginPath(); target.moveTo(-STARTER_W, -STARTER_H); target.lineTo(STARTER_W, -STARTER_H);
+      for (let i = 0; i < teeth; i++) { target.lineTo(STARTER_W - 6, -STARTER_H + (i + .5) * step); target.lineTo(STARTER_W, -STARTER_H + (i + 1) * step); }
+      target.lineTo(-STARTER_W, STARTER_H);
+      for (let i = teeth; i > 0; i--) { target.lineTo(-STARTER_W + 6, -STARTER_H + (i - .5) * step); target.lineTo(-STARTER_W, -STARTER_H + (i - 1) * step); }
+      target.closePath();
+    }
+    function starterFace() {
+      ctx.save();
+      starterShape(ctx); ctx.clip();
+      ctx.fillStyle = gradient(ctx, -STARTER_W, -STARTER_H, STARTER_W, STARTER_H, [[0, tint(color, -.35)], [.3, color], [.48, tint(color, .34)], [.6, color], [1, tint(color, -.48)]]);
+      ctx.fillRect(-STARTER_W, -STARTER_H, STARTER_W * 2, STARTER_H * 2);
+      // A band of light follows the pointer across the foil, and fine ridges catch it.
+      const shine = pointer * 120;
+      ctx.fillStyle = gradient(ctx, shine - 170, -STARTER_H, shine + 170, STARTER_H, [[0, '#ffffff00'], [.5, '#ffffff42'], [1, '#ffffff00']]);
+      ctx.fillRect(-STARTER_W, -STARTER_H, STARTER_W * 2, STARTER_H * 2);
+      ctx.fillStyle = grainPattern; ctx.fillRect(-STARTER_W, -STARTER_H, STARTER_W * 2, STARTER_H * 2);
+      for (const side of [-1, 1]) {
+        const edge = side * STARTER_W, inner = edge - side * STARTER_CRIMP;
+        ctx.fillStyle = gradient(ctx, inner, 0, edge, 0, [[0, '#0000002e'], [.25, '#ffffff30'], [1, '#00000040']]);
+        ctx.fillRect(Math.min(edge, inner), -STARTER_H, STARTER_CRIMP, STARTER_H * 2);
+        ctx.strokeStyle = '#ffffff30'; ctx.lineWidth = 1;
+        for (let x = 4; x < STARTER_CRIMP; x += 4) { ctx.beginPath(); ctx.moveTo(edge - side * x, -STARTER_H); ctx.lineTo(edge - side * x, STARTER_H); ctx.stroke(); }
+      }
+      ctx.fillStyle = gradient(ctx, 0, -STARTER_H, 0, STARTER_H, [[0, '#ffffff38'], [.14, '#ffffff00'], [.86, '#00000000'], [1, '#00000052']]);
+      ctx.fillRect(-STARTER_W, -STARTER_H, STARTER_W * 2, STARTER_H * 2);
+      if (ububallLogo.complete && ububallLogo.naturalWidth) {
+        const width = 300, height = width * ububallLogo.naturalHeight / ububallLogo.naturalWidth;
+        ctx.save(); ctx.shadowColor = '#00000070'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 4;
+        ctx.drawImage(ububallLogo, pointer * 5 - width / 2, pointerY * 3 - height / 2 - 26, width, height);
+        ctx.restore();
+      }
+      ctx.font = "34px 'Uburoom Sans', Inter, sans-serif"; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#00000060'; ctx.fillText(starterLabel, pointer * 5, 79 + pointerY * 3);
+      ctx.fillStyle = '#fff'; ctx.fillText(starterLabel, pointer * 5, 77 + pointerY * 3);
+      ctx.restore();
+    }
+    function starterSide(strip) {
+      ctx.beginPath(); ctx.moveTo(strip ? -STARTER_W - 8 : STARTER_W + 8, -STARTER_H - 8);
+      for (const point of starterTear) ctx.lineTo(point.x, point.y);
+      ctx.lineTo(strip ? -STARTER_W - 8 : STARTER_W + 8, STARTER_H + 8); ctx.closePath(); ctx.clip();
+    }
+    function renderStarter(t) {
+      const rip = ease(.05, .3, t), slide = ease(.28, .72, t);
+      if (!rip) {
+        ctx.save(); ctx.beginPath(); ctx.ellipse(-pointer * 8, STARTER_H + 16, STARTER_W * .8, 11, 0, 0, Math.PI * 2);
+        ctx.shadowColor = '#00000070'; ctx.shadowBlur = 14; ctx.fillStyle = '#00000024'; ctx.fill(); ctx.restore();
+        starterFace();
+        return;
+      }
+      // The end strip tears away, then the open pack drops to let the ubus out.
+      ctx.save(); ctx.globalAlpha = 1 - ease(.25, .5, t);
+      ctx.translate(-rip * 70, -rip * 90); ctx.rotate(-rip * .45);
+      starterSide(true); starterFace(); ctx.restore();
+      ctx.save(); ctx.globalAlpha = 1 - ease(.62, .78, t);
+      ctx.translate(0, slide * 300);
+      starterSide(false); starterFace(); ctx.restore();
+    }
+
     // Compact-support metaballs merge into one surface, then pinch apart.
     // The small raster is reused; all colors and grain remain fixed per pack.
     function setupBlob() {
@@ -1206,7 +1276,8 @@
       { id: 'egg', name: 'Speckled Egg', setup: setupEgg, render: renderEgg, duration: 2600, reveal: .12, end: .96, taps: 3 },
       { id: 'gift', name: 'Gift Box', setup: setupGift, render: renderGift, duration: 3000, reveal: .38, end: .96 },
       { id: 'cookie', name: 'Fortune Cookie', setup: setupCookie, render: renderCookie, duration: 3200, reveal: .68, end: .96 },
-      { id: 'envelope', name: 'Wax-Sealed Envelope', setup: setupEnvelope, render: renderEnvelope, duration: 3000, reveal: null, end: 1 }
+      { id: 'envelope', name: 'Wax-Sealed Envelope', setup: setupEnvelope, render: renderEnvelope, duration: 3000, reveal: null, end: 1 },
+      { id: 'starter', name: 'Starter Pack', setup: setupStarter, render: renderStarter, duration: 2600, reveal: .26, end: .96, sound: 'foil' }
     ];
 
     function recolor(packTypeId) {
@@ -1222,7 +1293,7 @@
         currentType = PACK_TYPES.find(t => t.id === packTypeId) || PACK_TYPES[0];
       } else {
         const roll = crypto.getRandomValues(new Uint32Array(1))[0];
-        currentType = PACK_TYPES[roll % PACK_TYPES.length];
+        currentType = PACK_TYPES[roll % (PACK_TYPES.length - 1)]; // Starter packs are never dealt.
       }
       canvas.dataset.pack = currentType.id;
       currentType.setup();
@@ -1334,7 +1405,7 @@
         const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => Math.abs(b - (count - 1) / 2) - Math.abs(a - (count - 1) / 2));
         for (const i of order) {
           const slot = i - (count - 1) / 2;
-          candy(slot * 88 * fan, -26 * fan + Math.abs(slot) * 14 * fan, candyColors[i % 5], slot * .10 * fan);
+          candy(slot * (count === 3 ? 165 : 88) * fan, -26 * fan + Math.abs(slot) * 14 * fan, candyColors[i % 5], slot * .10 * fan);
         }
         ctx.restore();
       }
@@ -1374,13 +1445,14 @@
       async play(amount = 5, models = []) {
         count = amount; aimX = aimY = pointer = pointerY = 0;
         if (reduced.matches) return Promise.resolve();
+        if (currentType?.id === 'starter') candyColors = models.map(model => model.attributes.background.hex);
         if (currentType?.id === 'blob') blobFaces = await prepareBlobFaces(models);
         // Tap-to-open wrappers wait here until the player has tapped enough times.
         if (currentType?.taps && eggTaps < currentType.taps) await new Promise(resolve => { awaitTap = resolve; requestPaint(); });
         if (reduced.matches) return;
         started = performance.now(); progress = 0;
         // The opening sounds share this start, so each lands on its step of the animation.
-        if (navigator.userActivation?.hasBeenActive) globalThis.ubuAudio?.playUnwrap?.(currentType?.id, duration() / 1000);
+        if (navigator.userActivation?.hasBeenActive) globalThis.ubuAudio?.playUnwrap?.(currentType?.sound || currentType?.id, duration() / 1000);
         return new Promise(resolve => { finish = resolve; requestPaint(); });
       },
       // True while a tap-to-open wrapper is waiting for the player.
@@ -1399,6 +1471,7 @@
         else requestPaint();
       },
       setType(packTypeId) { recolor(packTypeId); },
+      setStarter(label) { starterLabel = label; recolor('starter'); },
       setHints(packTypeId, hints) {
         recolor(packTypeId);
         packHints = hints;

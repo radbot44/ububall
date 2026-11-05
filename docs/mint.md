@@ -36,6 +36,7 @@ Identifiers and key loading above come from trusted configuration, not request b
 - Offers do not issue, sign or consume allowance. Selecting a token checks its owner/request/expiry and the current allowance in the same transaction as allocation, records the winning choice, and releases both unchosen packs. Competing choices cannot win twice. A retry of the winning choice returns its original certificates, including after signing failure or an allowance reduction; a different token for that completed request is rejected.
 - The serial counter, preparation progress and each preparation chunk commit together. No serial is reused after committed reservation. The configured batch must fit within the remaining twelve-digit serial range; otherwise preparation fails without wrapping or silently changing batch size.
 - Allocation atomically inserts the issuance/owner records for all 5 ubus in the pack, removes its inventory pack slot and decrements the remaining pack count. Ownership starts at revision 1. There is no transfer implementation yet.
+- Starter packs follow the rules in [Starter packs](#starter-packs).
 - Request IDs are 16–128 ASCII letters/digits/underscores/hyphens, unique per authenticated owner. Reuse returns the original allocation across batches and restarts. A new request ID represents a new request; this is idempotency, not a mint allowance.
 - Signing happens after the allocation commit. The issuance time and signing-key ID are fixed by that commit. Signing failure leaves a recoverable allocation, rather than returning it to the pool. Retry with the same owner/request to finish it. Retain access to old signing keys while their allocated certificates are pending.
 - The exact signed certificate is persisted before return. Concurrent retries may compute the same signature, but return the single stored certificate. Completed retries do not require private-key access.
@@ -50,3 +51,13 @@ The core uses synchronous `exec(sql, ...bindings)` and `transactionSync(callback
 ## Verification
 
 Run `npm test`. Tests use disposable temporary databases and ephemeral keys. They cover a complete default batch, chunk resume after reopen, incomplete inventory exclusion, exhaustion, changed batch sizes, serial limits, preparation/allocation rollback, failed signing recovery, owner-scoped idempotency, lifetime limits, stored-certificate recovery and three concurrent SQLite connections. Issued certificates are verified with the existing file reader. DNA conformance tests remain unchanged. Run `npm run test:worker` for actual local Cloudflare runtime checks; see worker.md for their scope and remaining limits.
+
+## Starter packs
+
+Owner requirement (2026-11-05): an account gets one signup pack and one daily pack per UTC day. Each holds three ubus, one from each of the three rarest [rarity](rarity.md) deciles (percentiles 70–80, 80–90 and 90–100), revealed commonest first. Daily packs do not carry over. The daily pack must be opened before regular packs are offered.
+
+- `claimStarter({ owner, kind })` issues a pack under the reserved request `starter:signup` or `starter:daily:<UTC day number>`, so it is exactly-once per owner and retries return the same certificates. The colon cannot appear in a caller's request ID.
+- Starter ubus are an owner-approved exception to batch distribution. Each is ordinary random DNA, kept only if it lands in its decile, so regular packs keep their rare slots. Serials come from `next_serial` after the reserved batch ranges.
+- A pack exists only once opened: `starterStatus(owner)` derives what is available from `issued`, with no record of missed days. Starter packs do not count against the lifetime limit.
+- Each claim also signs any starter pack left unsigned by an interrupted claim, even one from an earlier day.
+- `matchTeam(owner)` picks the team when a match skips selection: the last team, otherwise favorites and newest ubus.
