@@ -448,6 +448,111 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.deepEqual(await (await queue('poll')).json(), paired);
     assert.deepEqual(await (await queue('ack', headers, { id: paired.id })).json(), { status: 'idle' });
   });
+  await t.test('Activity lobbies isolate members and reserve challenges and instant matches without double pairing', async () => {
+    const instance = 'lobby-fixture', origin = 'https://123.discordsays.com';
+    async function member(owner, lobby = instance) {
+      const response = await activityLogin(new Request(env.ORIGIN + '/auth/activity', { headers: { Origin: origin } }), env,
+        { code: 'fixture', instance: lobby }, async url => Response.json(url.endsWith('/token') ?
+          { access_token: 'fixture', token_type: 'Bearer' } : url.endsWith('/users/@me') ?
+            { id: owner, global_name: 'Player ' + owner, avatar: 'a'.repeat(32) } :
+            { application_id: '123', instance_id: lobby, users: [owner] }));
+      const Cookie = response.headers.get('Set-Cookie').split(';')[0];
+      const session = await (await fetch('/api/session', { headers: { Cookie } })).json();
+      return { owner, instance: lobby, headers: { Cookie, Origin: origin, 'X-Ubu-CSRF': session.csrf, 'Content-Type': 'application/json' } };
+    }
+    const a = await member('111111111111111111'), b = await member('222222222222222222');
+    const c = await member('333333333333333333'), outsider = await member('444444444444444444', 'other-lobby');
+    const post = (path, data, player) => fetch(path, { method: 'POST', headers: player.headers, body: JSON.stringify(data) });
+    const lobby = (player, action = 'poll', extra = {}) => post('/api/ububall/lobby', { instance: player.instance, action, ...extra }, player);
+    const checked = async response => { assert.equal(response.status, 200, await response.clone().text()); return response.json(); };
+    assert.equal((await post('/api/ububall/lobby', { action: 'poll', instance }, { headers })).status, 400);
+    assert.equal((await lobby(outsider, 'poll', { instance })).status, 400);
+    assert.equal((await lobby(a, 'poll', { target: a.owner, forged: true })).status, 400);
+    const first = await checked(await lobby(a));
+    assert.equal(first.users[0].status, 'idle'); assert.equal(first.assignment, null);
+    assert.equal(first.users[0].avatar, 'a'.repeat(32));
+    await checked(await lobby(b)); await checked(await lobby(c));
+    assert.equal((await checked(await lobby(outsider))).users.length, 1);
+    assert.equal((await lobby(a, 'challenge', { target: outsider.owner })).status, 409);
+    let pending = await checked(await lobby(a, 'challenge', { target: b.owner }));
+    const expired = pending.challenges[0].id;
+    assert.equal((await lobby(c, 'accept', { id: expired })).status, 409);
+    assert.equal((await lobby(a, 'accept', { id: expired })).status, 409);
+    const queueStorage = await server.getWorker().getDurableObjectStorage('QUEUE', { name: 'ububall' });
+    await queueStorage.exec('UPDATE challenges SET expires = 0 WHERE id = ?', expired);
+    assert.equal((await lobby(b, 'accept', { id: expired })).status, 409);
+    pending = await checked(await lobby(a, 'challenge', { target: b.owner }));
+    await checked(await lobby(b, 'decline', { id: pending.challenges[0].id }));
+    assert.equal((await lobby(b, 'accept', { id: expired })).status, 409);
+    pending = await checked(await lobby(a, 'challenge', { target: b.owner }));
+    await checked(await lobby(a, 'cancel', { id: pending.challenges[0].id }));
+    await checked(await post('/api/ububall/queue', { queue: 'public', action: 'enter' }, b));
+    assert.equal((await checked(await lobby(b))).users.find(user => user.owner === b.owner).status, 'ready');
+    pending = await checked(await lobby(a, 'challenge', { target: b.owner }));
+    const attempts = await Promise.all([lobby(b, 'accept', { id: pending.challenges[0].id }), lobby(b, 'accept', { id: pending.challenges[0].id })]);
+    assert.deepEqual(attempts.map(response => response.status).sort(), [200, 409]);
+    const accepted = await checked(attempts.find(response => response.ok));
+    assert.ok(accepted.assignment);
+    assert.equal((await checked(await lobby(a))).assignment, accepted.assignment);
+    const path = '/api/ububall/' + accepted.assignment;
+    let setup = await checked(await post(path + '/join', {}, a));
+    assert.equal(setup.phase, 'lobby'); assert.equal(setup.quickStart, false); assert.equal(setup.teams, 'choice');
+    assert.equal((await lobby(b, 'ready')).status, 409);
+    await checked(await lobby(a, 'ack', { id: accepted.assignment, match: accepted.assignment }));
+    await checked(await lobby(b, 'ack', { id: accepted.assignment, match: accepted.assignment }));
+    assert.equal((await lobby(c, 'challenge', { target: a.owner })).status, 409);
+    setup = await checked(await post(path + '/rules', { mode: 'classic-pulse', gameNumber: 0 }, a));
+    assert.equal(setup.mode, 'classic-pulse'); assert.equal(setup.gameNumber, 1);
+    assert.equal((await post(path + '/rules', { mode: 'blitz', gameNumber: 0 }, b)).status, 400);
+    assert.equal((await post(path + '/rules', { mode: 'standard', gameNumber: 1 }, c)).status, 400);
+    setup = await checked(await post(path + '/team-source', { practice: false }, a));
+    assert.equal(setup.practice, null);
+    assert.equal((await post(path + '/team', { serials: ['000000000001'], supers: [0, 0, 0], gameNumber: 1 }, a)).status, 400);
+    await checked(await post(path + '/leave', {}, a));
+    await checked(await lobby(a)); await checked(await lobby(b));
+    const waiting = await checked(await lobby(a, 'ready'));
+    assert.equal(waiting.users.find(user => user.owner === a.owner).status, 'ready');
+    const paired = await checked(await lobby(b, 'ready'));
+    const quickPath = '/api/ububall/' + paired.assignment;
+    assert.ok(paired.assignment); assert.notEqual(paired.assignment, accepted.assignment);
+    const quick = await checked(await post(quickPath + '/join', {}, a));
+    assert.equal(quick.quickStart, true); assert.deepEqual(quick.ready, [true, true]);
+    const sockets = [];
+    for (const player of [a, b]) {
+      const socket = await fetch(quickPath + '/socket', { headers: { ...player.headers, Upgrade: 'websocket' } });
+      assert.equal(socket.status, 101); socket.webSocket.accept(); sockets.push(socket.webSocket);
+    }
+    setup = await checked(await post(quickPath + '/rules', { mode: 'classic', gameNumber: 0 }, b));
+    assert.equal(setup.phase, 'plan'); assert.equal(setup.game.mode, 'classic');
+    assert.deepEqual(setup.game.scores, [0, 0]); assert.equal(setup.turn, 1);
+    assert.equal(setup.canChangeRules, true);
+    async function sendAndWait(socket, payload, predicate) {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { socket.removeEventListener('message', receive); reject(new Error('Socket response timed out.')); }, 5000);
+        function receive(event) {
+          const result = JSON.parse(event.data);
+          if (predicate(result)) { clearTimeout(timer); socket.removeEventListener('message', receive); resolve(result); }
+        }
+        socket.addEventListener('message', receive); socket.send(JSON.stringify(payload));
+      });
+    }
+    const moves = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false }));
+    const stale = await sendAndWait(sockets[0], { type: 'moves', turn: 1, gameNumber: 0, moves, lock: true }, result => result.type === 'error');
+    assert.match(stale.error, /game changed/);
+    await sendAndWait(sockets[0], { type: 'moves', turn: 1, gameNumber: 1, moves, lock: true }, result => result.type === 'state' && result.locked[0]);
+    assert.equal((await post(quickPath + '/rules', { mode: 'pulse', gameNumber: 1 }, b)).status, 400);
+    await checked(await post(quickPath + '/allow-watch', { allowed: true }, a));
+    const openWatch = await checked(await post(quickPath + '/allow-watch', { allowed: true }, b));
+    const watching = await checked(await lobby(c, 'poll', { match: paired.assignment, watch: openWatch.watchKey }));
+    assert.equal(watching.users.find(user => user.owner === c.owner).status, 'spectating');
+    await checked(await post(quickPath + '/allow-watch', { allowed: false }, a));
+    const revoked = await checked(await lobby(c, 'poll', { match: paired.assignment, watch: openWatch.watchKey }));
+    assert.equal(revoked.users.find(user => user.owner === c.owner).status, 'idle');
+    await queueStorage.exec('UPDATE lobby_members SET expires = 0 WHERE owner = ?', c.owner);
+    assert.equal((await checked(await lobby(a))).users.some(user => user.owner === c.owner), false);
+    assert.equal((await checked(await lobby(a))).assignment, paired.assignment);
+    for (const socket of sockets) socket.close();
+  });
   await t.test('guests play practice teams against Discord users, never reach the mint and keep their seat on sign-in', async () => {
     assert.equal((await fetch('/api/guest', { method: 'POST', headers: { Origin: 'https://evil.example' } })).status, 403);
     const start = await fetch('/api/guest', { method: 'POST', headers: { Origin: env.ORIGIN } });

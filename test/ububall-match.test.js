@@ -48,6 +48,24 @@ test('private drafts, turn locking, disconnect pause and latest-draft Blitz expi
   assert.equal(room.takeTurn(53001),null);
   assert.throws(()=>room.submit('host',1,moves,true,53001));
 });
+test('changing rules restarts instant play before launch and rejects stale editors and locked turns', () => {
+  const room = new MatchRoom('host', 'standard', 'practice'); room.join('guest'); room.readyPracticePair();
+  room.connect('host', 1000); room.connect('guest', 1000); room.advance(1000);
+  const roster = structuredClone(room.state.rosters);
+  room.changeRules('guest', 'classic-pulse-blitz', 0); room.advance(2000);
+  assert.equal(room.state.game.mode, 'classic-pulse-blitz'); assert.equal(room.state.turn, 1);
+  assert.equal(room.state.deadline, 7000); assert.deepEqual(room.state.rosters, roster);
+  assert.ok(room.state.game.bodies.slice(0, 6).every(body => body.equippedSuper === null));
+  assert.throws(() => room.changeRules('stranger', 'standard', 1), /Not a match player/);
+  assert.throws(() => room.changeRules('host', 'standard', 0), /game changed/);
+  const moves = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false }));
+  room.submit('host', 1, moves, true, 2100);
+  assert.equal(room.view('guest').canChangeRules, false);
+  assert.throws(() => room.changeRules('guest', 'standard', 1), /before the first launch/);
+  room.submit('guest', 1, moves, true, 2200); room.advance(2200);
+  assert.throws(() => room.changeRules('host', 'standard', 1), /before the first launch/);
+});
+
 test('forfeit requires a seated connected claimant and sixty disconnected seconds', () => {
   const room=new MatchRoom('host','classic','owned');room.join('guest');room.connect('host',0);room.connect('guest',0);
   room.disconnect('guest',100);

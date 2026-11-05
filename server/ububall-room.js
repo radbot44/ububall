@@ -7,7 +7,7 @@ const hold = () => Array.from({ length: 3 }, idle);
 // Durable storage adapter will persist this object; no client-supplied owner identities.
 class MatchRoom {
   constructor(host, mode, teams, guest = false) {
-    if (typeof host !== 'string' || !host || !rules.MODES.includes(mode) || !['owned', 'practice'].includes(teams)) throw new Error('Invalid lobby.');
+    if (typeof host !== 'string' || !host || !rules.MODES.includes(mode) || !['owned', 'practice', 'choice'].includes(teams)) throw new Error('Invalid lobby.');
     this.state = { version: rules.VERSION, mode, teams, players: [host, null], names: [null, null], phase: 'lobby', turn: 1,
       drafts: [hold(), hold()], locked: [false, false], connected: [false, false],
       disconnectedAt: [null, null], deadline: null, remaining: null, winner: null, rematch: [false, false],
@@ -72,6 +72,30 @@ class MatchRoom {
     const s = this.state, i = this.seat(owner);
     if (s.phase !== 'lobby') throw new Error('Match already started.');
     s.ready[i] = false;
+  }
+  teamSource(owner, practice) {
+    const s = this.state, i = this.seat(owner);
+    if (s.phase !== 'lobby' || s.teams !== 'choice' || typeof practice !== 'boolean') throw new Error('Cannot change team source.');
+    s.ready[i] = false; s.rosters[i] = null;
+    if (practice) this.practiceTeam(owner);
+    else s.practice[i] = null;
+  }
+  canChangeRules() {
+    const s = this.state;
+    return !s.left.some(Boolean) && (s.phase === 'lobby' ||
+      Boolean(s.quickStart && s.phase === 'plan' && s.turn === 1 && !s.locked.some(Boolean)));
+  }
+  changeRules(owner, mode, gameNumber) {
+    this.seat(owner);
+    const s = this.state;
+    if (!rules.MODES.includes(mode)) throw new Error('Invalid rules.');
+    if (gameNumber !== (s.gameNumber || 0)) throw new Error('The game changed. Reopen the rules to try again.');
+    if (!this.canChangeRules()) throw new Error('Rules can only change before the first launch.');
+    if (mode === s.mode) return;
+    s.mode = mode; s.gameNumber = (s.gameNumber || 0) + 1;
+    s.phase = 'lobby'; s.game = null; s.turn = 1; s.replay = null; s.playUntil = null;
+    s.deadline = null; s.remaining = null; s.drafts = [hold(), hold()]; s.locked = [false, false];
+    s.ready = s.quickStart ? [true, true] : [false, false];
   }
   // Leaving ends the match for both players: a lobby guest frees their seat, anyone else concedes.
   leave(owner, now) {
@@ -194,6 +218,7 @@ class MatchRoom {
     s.rematch[i] = true;
     // Keep the teams for a rematch. Quick-start players are already ready for kickoff.
     if (s.rematch.every(Boolean)) {
+      s.gameNumber = (s.gameNumber || 0) + 1;
       s.rematch = [false, false]; s.ready = s.quickStart ? [true, true] : [false, false]; s.winner = null; s.turn = 1; s.phase = 'lobby';
       s.game = null; s.replay = null; s.playUntil = null; s.expires = now + 86400000;
     }
@@ -222,7 +247,8 @@ class MatchRoom {
       practice: structuredClone(s.practice[seat]),
       game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
       playUntil: s.playUntil, disconnectedAt: [...s.disconnectedAt], rematch: [...s.rematch],
-      paired: Boolean(s.paired), quickStart: Boolean(s.quickStart), watchAllowed: s.watch?.allowed[seat] ?? false, watchKey: s.watch?.key ?? null };
+      paired: Boolean(s.paired), quickStart: Boolean(s.quickStart), gameNumber: s.gameNumber || 0,
+      canChangeRules: this.canChangeRules(), watchAllowed: s.watch?.allowed[seat] ?? false, watchKey: s.watch?.key ?? null };
   }
 }
 module.exports = { MatchRoom };

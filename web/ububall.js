@@ -5030,6 +5030,7 @@
   // scrolls. Online play borrows the mode screen, and its lobby is the same team screen with the
   // invite on top and Ready in place of Start.
   let setupFor = 'cpu';
+  let rulesGameNumber = 0;
   const quickPlayKey = 'ububall-last-cpu-setup';
   let lastCpuSetup = null;
   try {
@@ -5046,9 +5047,10 @@
   function setupStep(step) {
     const sheet = $('roster-dialog');
     sheet.dataset.step = step; sheet.dataset.for = setupFor;
-    $('sheet-next').textContent = setupFor === 'online' ? 'Next: online match' : 'Next: choose team';
+    $('sheet-next').textContent = setupFor === 'rules' ? 'Apply rules' : setupFor === 'online' ? 'Next: online match' : 'Next: choose team';
     $('lobby-panel').hidden = setupFor !== 'lobby';
     $('team-title').textContent = setupFor === 'lobby' ? 'Online match' : 'Your team';
+    $('team-back').hidden = setupFor === 'lobby' && !lobbyView?.state.canChangeRules;
     if (step === 'team') {
       $('team-mode').textContent = ububallMatch.modeName(setupFor === 'lobby' ? lobbyView.state.mode : chosenMode());
       if (!fixedTeam()) { void loadCollection(); void loadTeams(); }
@@ -5068,6 +5070,8 @@
     setupFor = purpose;
     for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(mode, rule);
     modeSummary();
+    $('rules-status').textContent = '';
+    if (purpose === 'rules') rulesGameNumber = online.state.gameNumber;
     document.querySelector(`input[name="cpu-level"][value="${level}"]`).checked = true;
     draft = [...roster]; rosterSlot = 0; $('roster-status').textContent = '';
     rosterTab(signedIn() ? 'yours' : 'practice');
@@ -5100,7 +5104,15 @@
     if (!view.practice) rosterTab('yours');
     $('lobby-note').textContent = view.note;
     $('lobby-login').hidden = !view.guest;
-    setupStep('team');
+    $('lobby-team-source').hidden = view.state.teams !== 'choice';
+    $('lobby-practice-team').setAttribute('aria-pressed', String(Boolean(view.practice)));
+    $('lobby-owned-team').setAttribute('aria-pressed', String(!view.practice));
+    if (entering || before?.state.mode !== view.state.mode) {
+      for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(view.state.mode, rule);
+      modeSummary();
+    }
+    if (entering) setupStep(view.state.teams === 'choice' ? 'mode' : 'team');
+    else setupStep($('roster-dialog').dataset.step);
     if (open && !$('roster-dialog').open) $('roster-dialog').showModal();
   }
   function closeLobby() {
@@ -5111,11 +5123,33 @@
     $('roster-dialog').removeAttribute('data-locked');
   }
   $('new-match').onclick = () => openSetup('team');
-  $('sheet-next').onclick = () => {
+  $('sheet-next').onclick = async () => {
     if (setupFor === 'cpu') { setupStep('team'); return; }
+    if (setupFor === 'lobby' || setupFor === 'rules') {
+      const button = $('sheet-next'), purpose = setupFor;
+      button.disabled = true; $('rules-status').textContent = '';
+      try {
+        const gameNumber = purpose === 'rules' ? rulesGameNumber : lobbyView.state.gameNumber;
+        await online.rules(chosenMode(), gameNumber);
+        if (purpose === 'rules') $('roster-dialog').close();
+        else setupStep('team');
+      } catch (error) { $('rules-status').textContent = error.message; }
+      finally { button.disabled = false; }
+      return;
+    }
     $('roster-dialog').close(); online.create(chosenMode());
   };
-  $('team-back').onclick = () => setupStep('mode');
+  $('team-back').onclick = async () => {
+    if (setupFor === 'lobby' && lobbyView.ready) {
+      try { await online.unready(); }
+      catch (error) { $('roster-status').textContent = error.message; return; }
+    }
+    setupStep('mode');
+  };
+  for (const source of ['practice', 'owned']) $('lobby-' + source + '-team').onclick = async () => {
+    try { await online.teamSource(source === 'practice'); }
+    catch (error) { $('roster-status').textContent = error.message; }
+  };
   $('tab-yours').onclick = () => rosterTab('yours');
   $('tab-practice').onclick = () => rosterTab('practice');
   // Back (Escape, or a phone's back gesture) steps from the team screen to the mode screen.
@@ -5613,6 +5647,11 @@
   online = ububallOnline({
     playCpu() { startCpuMatch(practice.slice(0, 3), 'standard', 'easy'); },
     chooseMode(mode) { openSetup('mode', 'online', mode); },
+    editRules(mode) { openSetup('mode', 'rules', mode); },
+    onNewGame() {
+      saveRecording(); onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = '';
+      closeSummary(); endGoalReplay(); stopFanfare();
+    },
     lobby(view, open) { void showLobby(view, open); },
     closeLobby,
     onState(s) {
@@ -5712,6 +5751,7 @@
       $('online-open-note').hidden = false;
       $('new-match').disabled = false; $('online-forfeit').hidden = true;
       $('online-rematch').hidden = true; $('launch').hidden = false; closeSummary();
+      $('online-change-rules').hidden = true;
       stopDemo();
       phase = 'over'; drag = null;
       endGoalReplay(); stopFanfare(); gameAudio()?.stop();

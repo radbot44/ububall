@@ -33,8 +33,14 @@
 
   <section class="play-home" aria-label="Play Ububall">
     <div id="activity-play" class="activity-play" hidden>
-      <section class="activity-friends" aria-labelledby="online-friends">
-        <button id="online-friends" class="primary" type="button">Play with Friends</button>
+      <section class="activity-friends" aria-labelledby="activity-lobby-title">
+        <header class="activity-lobby-heading"><h1 id="activity-lobby-title">Lobby</h1><span id="activity-online-count">Connecting…</span></header>
+        <div id="activity-users" class="activity-users" aria-label="Players in this Activity"></div>
+        <section id="activity-challenge" class="activity-challenge" aria-label="Challenge" hidden>
+          <p id="activity-challenge-message" role="status"></p>
+          <div class="activity-friend-actions"><button id="activity-challenge-accept" class="primary" type="button">Accept</button><button id="activity-challenge-decline" type="button">Decline</button><button id="activity-challenge-cancel" type="button">Cancel challenge</button></div>
+        </section>
+        <button id="online-friends" class="primary" type="button" disabled>Ready to play</button>
         <p id="activity-status" role="status">Connecting to Discord…</p>
         <div class="activity-friend-actions">
           <button id="online-invite-friends" type="button">Invite a friend</button>
@@ -155,6 +161,7 @@ SOFTWARE.
       </div>
       <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
       <div class="stadium-actions">
+        <button id="online-change-rules" class="primary" type="button" hidden>Change rules</button>
         <div class="online-match-actions">
           <button id="online-rematch" class="primary" hidden>Rematch</button>
           <button id="online-forfeit" hidden>Claim forfeit</button>
@@ -323,6 +330,7 @@ SOFTWARE.
         <label class="mode-option" data-rule="blitz"><input type="checkbox" id="rule-blitz"><strong>Blitz</strong><small>5 seconds to plan each turn</small><span class="mode-check" aria-hidden="true"><i data-icon="check"></i></span></label>
       </fieldset>
       <p id="mode-summary" class="mode-summary" role="status"></p>
+      <p id="rules-status" class="roster-status" role="status"></p>
       <fieldset id="cpu-levels" class="cpu-levels"><legend>CPU</legend>
         <label><input type="radio" name="cpu-level" value="easy"><span>Easy</span></label>
         <label><input type="radio" name="cpu-level" value="medium" checked><span>Medium</span></label>
@@ -335,6 +343,7 @@ SOFTWARE.
         <div id="lobby-invite" class="lobby-invite"><input id="online-invite" readonly aria-label="Invite link"><button id="online-copy" type="button">Copy invite</button><button id="online-share" type="button" hidden>Share</button></div>
         <p id="lobby-status" class="lobby-status" role="status"></p>
         <p id="lobby-note" class="lobby-note"></p>
+        <div id="lobby-team-source" class="lobby-actions" role="group" aria-label="Team source" hidden><button id="lobby-practice-team" type="button">Practice team</button><button id="lobby-owned-team" type="button">My ubus</button></div>
         <div class="lobby-actions"><a id="lobby-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a><button id="lobby-allow-watch" type="button" aria-pressed="false">Allow spectators</button><button id="lobby-copy-watch" type="button" hidden>Copy watch link</button><button id="lobby-leave" class="quiet" type="button">Leave match</button></div>
       </div>
       <div id="team-bar" class="team-bar" hidden>

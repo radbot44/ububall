@@ -99,7 +99,8 @@ async function exchange(env, code, redirect, fetchDiscord) {
   const user = await identity.json();
   if (typeof user.id !== 'string' || !discordId.test(user.id)) throw new Error('Invalid Discord account.');
   const name = [user.global_name, user.username].find(n => typeof n === 'string' && n.trim())?.trim().slice(0, 32);
-  return { owner: user.id, name, accessToken: token.access_token };
+  const avatar = typeof user.avatar === 'string' && /^(a_)?[0-9a-f]{32}$/.test(user.avatar) ? user.avatar : null;
+  return { owner: user.id, name, avatar, accessToken: token.access_token };
 }
 
 export async function activityMember(env, instance, owner, fetchDiscord = fetch) {
@@ -125,10 +126,10 @@ export async function activityLogin(request, env, data, fetchDiscord = fetch) {
     return json({ error: 'Invalid Activity sign-in request.' }, 400);
   }
   try {
-    const { owner, name, accessToken } = await exchange(env, code, null, fetchDiscord);
+    const { owner, name, avatar, accessToken } = await exchange(env, code, null, fetchDiscord);
     if (!await activityMember(env, instance, owner, fetchDiscord)) return json({ error: 'Join this Activity in Discord first.' }, 403);
     const seconds = 86400;
-    const token = await seal({ purpose: 'activity', owner, name, instance, csrf: random(),
+    const token = await seal({ purpose: 'activity', owner, name, avatar, instance, csrf: random(),
       expires: Math.floor(Date.now() / 1000) + seconds }, env.SESSION_SECRET);
     // Discord's RPC authenticate needs the access token once. The refresh token is discarded.
     return json({ access_token: accessToken }, 200, activityCookie(env, token, seconds));

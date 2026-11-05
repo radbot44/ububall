@@ -8,7 +8,7 @@ const ID = /^[A-Za-z0-9_-]{21}[AQgw]$/;
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const uuid = new RegExp('^' + UUID + '$');
 const watchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(watch-state|watch-socket)$');
-const matchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(join|team|unready|state|socket|forfeit|rematch|skip-replay|leave|allow-watch)$');
+const matchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(join|team|team-source|rules|unready|state|socket|forfeit|rematch|skip-replay|leave|allow-watch)$');
 const COLLECTION_PAGE = 200;
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers
@@ -202,7 +202,8 @@ export default {
       const session = await auth.session(request, env);
       if (path === '/api/session' && request.method === 'GET') return json(!session ? { owner: null } :
         session.guest ? { owner: null, guest: true, csrf: session.csrf } :
-          { owner: session.owner, name: session.name ?? null, csrf: session.csrf, ...(session.instance ? { instance: session.instance, site } : {}) });
+          { owner: session.owner, name: session.name ?? null, csrf: session.csrf,
+            ...(session.instance ? { instance: session.instance, site, avatar: session.avatar } : {}) });
       if (path === '/api/guest' && request.method === 'POST') {
         if (request.headers.get('Origin') !== auth.origin(env)) return json({ error: 'Invalid request origin.' }, 403);
         if (session) return json(session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, csrf: session.csrf });
@@ -212,6 +213,24 @@ export default {
       if (!session) return json({ error: 'Sign in with Discord or play as a guest first.' }, 401);
       if (request.method !== 'GET' && !auth.mutationAllowed(request, env, session)) return json({ error: 'Invalid request origin or token.' }, 403);
       if (path === '/api/logout' && request.method === 'POST') return json({ ok: true }, 200, { 'Set-Cookie': auth.logoutCookie(env, session) });
+      if (path === '/api/ububall/lobby' && request.method === 'POST') {
+        let data;
+        try { data = await body(request, 1024); } catch { return json({ error: 'Invalid lobby request.' }, 400); }
+        const actions = ['poll', 'ready', 'unready', 'challenge', 'accept', 'decline', 'cancel', 'ack', 'leave'];
+        if (!data || !actions.includes(data.action) || data.instance !== session.instance || !auth.validInstance(data.instance) ||
+            Object.keys(data).some(key => !['action', 'instance', 'target', 'id', 'match', 'watch', 'cpu'].includes(key)) ||
+            (data.cpu !== undefined && typeof data.cpu !== 'boolean') ||
+            (data.action === 'challenge' && !/^[1-9][0-9]{0,19}$/.test(data.target || '')) ||
+            (['accept', 'decline', 'cancel', 'ack'].includes(data.action) && !uuid.test(data.id || '')) ||
+            (data.match !== undefined && !uuid.test(data.match)) || (data.watch !== undefined && !uuid.test(data.watch))) {
+          return json({ error: 'Invalid lobby request.' }, 400);
+        }
+        // The signed Activity session was created only after Discord verified membership.
+        const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
+        try { return json(await queue.lobby(session.owner, 'activity:' + session.instance,
+          { name: session.name || 'Player', avatar: session.avatar || null }, data)); }
+        catch (error) { return json({ error: error.message }, 409); }
+      }
       if (path === '/api/ububall/queue' && request.method === 'POST') {
         let data;
         try { data = await body(request); } catch { return json({ error: 'Invalid queue request.' }, 400); }
@@ -222,7 +241,7 @@ export default {
         }
         let scope = 'public';
         if (data.queue === 'friends') {
-          if (!session.instance || !auth.validInstance(data.instance)) return json({ error: 'Open this queue inside a Discord Activity.' }, 403);
+          if (!session.instance || data.instance !== session.instance || !auth.validInstance(data.instance)) return json({ error: 'Open this queue inside a Discord Activity.' }, 403);
           if (data.action === 'enter' && !await auth.activityMember(env, data.instance, session.owner)) {
             return json({ error: 'Join this Activity in Discord first.' }, 403);
           }
@@ -233,7 +252,7 @@ export default {
       }
       if (path === '/api/ububall/activity-watch' && request.method === 'GET') {
         const instance = url.searchParams.get('instance');
-        if (!session.instance || !await auth.activityMember(env, instance, session.owner)) {
+        if (!session.instance || instance !== session.instance || !await auth.activityMember(env, instance, session.owner)) {
           return json({ error: 'Join this Activity in Discord first.' }, 403);
         }
         const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));

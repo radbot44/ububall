@@ -8,11 +8,13 @@ function ububallOnline(hooks) {
   let id = null, socket = null, session = null, state = null, retry = null, heartbeat = null;
   let stopped = false, lastPong = 0, offset = 0, lastDraft = '', sentAt = 0;
   let watchKey = null, queue = null, queueTimer, queueTask, leaveTask, switching = false;
+  let lobby = null, lobbyTimer, lobbyTask, lobbyStarting = false, lobbyBusy = false;
+  const userCards = new Map();
   // The lobby shows on the team screen; the dialog only creates, joins and ends matches.
   const status = text => {
     $('online-status').textContent = text; $('lobby-status').textContent = text;
     if (activity) {
-      const label = $('activity-status'), message = text || 'Same Activity. Straight to the rink.';
+      const label = $('activity-status'), message = text || 'Challenge a player or ready up to play anyone here.';
       if (label.textContent !== message) label.textContent = message;
     }
   };
@@ -77,6 +79,8 @@ function ububallOnline(hooks) {
     if (state && next.revision < state.revision) return;
     if (next.spectator) next.seat = 0; // Fixed rink orientation for viewers.
     const before = state; state = next; offset = next.now - Date.now();
+    $('online-change-rules').hidden = !next.quickStart || !next.canChangeRules || next.spectator;
+    if (before && before.gameNumber !== next.gameNumber) { lastDraft = ''; hooks.onNewGame(); }
     $('online-create-controls').hidden = true;
     $('online-ended').hidden = true;
     updateWatchControls(next);
@@ -103,6 +107,7 @@ function ububallOnline(hooks) {
     if (next.phase === 'lobby') {
       // Entering the lobby (a new match or a rematch) brings up the team screen.
       const note = next.teams === 'practice' ? 'This match uses random practice teams.' :
+        next.teams === 'choice' ? 'Choose a practice team or use the ubus in your collection.' :
         next.practice ? 'Guests play with a random practice team. Sign in with Discord to use your own ubus; you keep your seat.' : '';
       hooks.lobby({ state: next, ready, practice: next.practice, guest: Boolean(session?.guest),
         note: note + (note ? ' ' : '') + 'Disconnects pause planning; after 60 seconds your opponent can claim a forfeit.' }, reopen || !before || before.phase !== 'lobby');
@@ -206,6 +211,7 @@ function ububallOnline(hooks) {
     $('online-create-controls').hidden = true; $('online-ended').hidden = true; $('online-dialog').close();
     hooks.onLeave();
     status('');
+    if (activity) void lobbyRequest('poll');
     return true;
   }
   const settings = { policy: 'practice' };
@@ -246,8 +252,7 @@ function ububallOnline(hooks) {
   }
   async function ensureSession() {
     await refreshSession();
-    if (switching) return;
-    if (activity && (!session?.owner || session.instance !== activity.instance)) session = await activity.signIn();
+    if (activity && (!session?.owner || session.instance !== activity.instance || !Object.hasOwn(session, 'avatar'))) session = await activity.signIn();
     else if (!playable()) await guestSession();
   }
   function setQueue(value) {
@@ -326,6 +331,7 @@ function ububallOnline(hooks) {
     clearTimeout(queueTimer);
     try {
       if (id && !await leave()) return false;
+      if (activity && session?.owner && !await lobbyRequest('unready')) return false;
       if (next === 'cpu') hooks.playCpu();
       await queueTask;
       if (queue && playable()) await queueRequest('cancel');
@@ -335,7 +341,122 @@ function ububallOnline(hooks) {
     if (next === 'friends' || next === 'public') startQueue(next);
     return true;
   }
-  $('online-friends').onclick = () => switchActivity('friends');
+  const labels = { idle: 'Not ready', ready: 'Ready', balling: 'Balling', spectating: 'Spectating' };
+  function renderLobby(result) {
+    lobby = result;
+    const me = result.users.find(user => user.owner === session.owner);
+    $('activity-online-count').textContent = result.users.length + ' online';
+    const challenge = result.challenges[0];
+    const available = !id && !lobbyBusy && !challenge && (!me || ['idle', 'ready'].includes(me.status));
+    const readyButton = $('online-friends');
+    readyButton.disabled = !available;
+    readyButton.textContent = me?.status === 'ready' ? 'Cancel ready' : 'Ready to play';
+    readyButton.setAttribute('aria-pressed', String(me?.status === 'ready'));
+    const present = new Set();
+    for (const user of result.users) {
+      present.add(user.owner);
+      let card = userCards.get(user.owner);
+      if (!card) {
+        card = Object.assign(document.createElement('button'), { type: 'button', className: 'activity-user' });
+        card.append(Object.assign(document.createElement('span'), { className: 'activity-user-avatar' }),
+          Object.assign(document.createElement('span'), { className: 'activity-user-name' }),
+          Object.assign(document.createElement('span'), { className: 'activity-user-status' }));
+        card.onclick = async () => {
+          const target = lobby?.users.find(player => player.owner === user.owner);
+          if (card.getAttribute('aria-disabled') === 'true' || !target) return;
+          if (await gameUi.confirm({ title: 'Challenge ' + target.name + '?', message: 'Choose your rules and teams together before kickoff.', confirmLabel: 'Challenge' })) {
+            if (await switchActivity('off')) void lobbyRequest('challenge', { target: target.owner });
+          }
+        };
+        userCards.set(user.owner, card); $('activity-users').append(card);
+      }
+      const own = user.owner === session.owner, name = user.name || 'Player';
+      const avatar = card.children[0];
+      if (avatar.dataset.avatar !== (user.avatar || 'default')) {
+        avatar.dataset.avatar = user.avatar || 'default';
+        avatar.textContent = name.slice(0, 2).toUpperCase();
+        if (user.avatar) {
+          const image = Object.assign(document.createElement('img'), { alt: '', referrerPolicy: 'no-referrer',
+            src: `https://cdn.discordapp.com/avatars/${user.owner}/${user.avatar}.png?size=128` });
+          image.onerror = () => { avatar.textContent = name.slice(0, 2).toUpperCase(); };
+          avatar.replaceChildren(image);
+        }
+      }
+      card.children[1].textContent = name;
+      card.children[2].textContent = labels[user.status];
+      card.dataset.status = user.status;
+      card.dataset.self = String(own);
+      const disabled = own || !available || !['idle', 'ready'].includes(user.status);
+      card.setAttribute('aria-disabled', String(disabled));
+      card.setAttribute('aria-label', `${name}${own ? ', you' : ''}, ${labels[user.status]}${disabled ? '' : '. Challenge player'}`);
+      card.title = name + (disabled ? '' : ' · Challenge');
+    }
+    for (const [owner, card] of userCards) if (!present.has(owner)) { card.remove(); userCards.delete(owner); }
+    $('activity-challenge').hidden = !challenge;
+    for (const action of ['accept', 'decline', 'cancel']) $('activity-challenge-' + action).disabled = lobbyBusy;
+    if (challenge) {
+      const incoming = challenge.target === session.owner;
+      const other = result.users.find(user => user.owner === (incoming ? challenge.sender : challenge.target));
+      $('activity-challenge-message').textContent = incoming ? `${other?.name || 'A player'} challenged you!` : `Waiting for ${other?.name || 'your opponent'} to accept…`;
+      $('activity-challenge-accept').hidden = $('activity-challenge-decline').hidden = !incoming;
+      $('activity-challenge-cancel').hidden = incoming;
+    }
+  }
+  async function lobbyRequest(action = 'poll', extra = {}) {
+    if (!activity || !session?.owner) return;
+    // Mutations wait for the current heartbeat, so a click cannot get silently discarded.
+    if (lobbyTask) {
+      if (action === 'poll') return lobbyTask;
+      await lobbyTask;
+      return lobbyRequest(action, extra);
+    }
+    clearTimeout(lobbyTimer);
+    lobbyBusy = action !== 'poll';
+    if (lobby) renderLobby(lobby);
+    lobbyTask = (async () => {
+      try {
+        const cpu = !id && document.body.classList.contains('in-match');
+        const result = await api('/api/ububall/lobby', { action, instance: activity.instance, ...extra,
+          ...(id ? { match: id, ...(watchKey ? { watch: watchKey } : {}) } : {}), ...(cpu ? { cpu: true } : {}) });
+        renderLobby(result);
+        if (result.assignment && !id && !switching) {
+          clearTimeout(queueTimer);
+          await queueTask;
+          if (switching) return true;
+          setQueue(null);
+          const initial = await api('/api/ububall/' + result.assignment + '/join', {});
+          await enter(result.assignment, initial);
+        }
+        if (result.assignment && id === result.assignment && !watchKey) {
+          await api('/api/ububall/lobby', { action: 'ack', instance: activity.instance, id: result.assignment, match: result.assignment });
+        }
+        if (action !== 'poll' && !id) status('');
+        return true;
+      } catch (error) { status(error.message); return false; }
+      finally {
+        lobbyBusy = false; lobbyTask = null;
+        if (lobby) renderLobby(lobby);
+        lobbyTimer = setTimeout(() => lobbyRequest(), 2500);
+      }
+    })();
+    return lobbyTask;
+  }
+  async function startLobby() {
+    if (lobbyStarting) return;
+    lobbyStarting = true;
+    try { await ensureSession(); status(''); await lobbyRequest(); }
+    catch (error) { status(error.message); lobbyTimer = setTimeout(startLobby, 4000); }
+    finally { lobbyStarting = false; }
+  }
+  $('online-friends').onclick = async () => {
+    const wasReady = lobby?.users.find(user => user.owner === session?.owner)?.status === 'ready';
+    if (!await switchActivity('off')) return;
+    if (!wasReady) void lobbyRequest('ready');
+  };
+  for (const action of ['accept', 'decline', 'cancel']) $('activity-challenge-' + action).onclick = () => {
+    if (lobby?.challenges[0]) void lobbyRequest(action, { id: lobby.challenges[0].id });
+  };
+  $('online-change-rules').onclick = () => { if (state?.canChangeRules) hooks.editRules(state.mode); };
   $('activity-public').onclick = () => switchActivity('public');
   $('activity-cpu').onclick = () => switchActivity('cpu');
   $('activity-cancel').onclick = () => switchActivity('off');
@@ -431,20 +552,21 @@ function ububallOnline(hooks) {
   } else {
     let saved;
     try { saved = sessionStorage.getItem(queueStorageKey); } catch { /* storage can be disabled */ }
-    if (activity && (location.pathname === '/' || location.pathname === '/index.html')) {
-      startQueue(saved === 'public' ? 'public' : 'friends');
-    } else if (!activity && saved === 'public') {
+    if (!activity && saved === 'public') {
       setQueue(saved);
       showDialog();
       void queueRequest('poll');
     }
   }
+  if (activity) void startLobby();
   return {
     get active() { return Boolean(id); }, get state() { return state; }, get spectating() { return Boolean(watchKey); },
     leave,
     // Locks in a team: owned seats send serials in Back, Top, Bottom order; every seat sends supers.
-    async ready(team) { receive(await api('/api/ububall/' + id + '/team', team)); },
+    async ready(team) { receive(await api('/api/ububall/' + id + '/team', { ...team, gameNumber: state.gameNumber })); },
     async unready() { receive(await api('/api/ububall/' + id + '/unready', {})); },
+    async rules(mode, gameNumber) { receive(await api('/api/ububall/' + id + '/rules', { mode, gameNumber })); },
+    async teamSource(practice) { receive(await api('/api/ububall/' + id + '/team-source', { practice })); },
     create(mode) { createMode = mode; $('online-mode-name').textContent = ububallMatch.modeName(mode); showDialog(true); },
     now: () => Date.now() + offset,
     async skipReplay() {
@@ -463,7 +585,7 @@ function ububallOnline(hooks) {
     },
     send(moves, lock = false) {
       if (watchKey || !state || state.phase !== 'plan' || state.locked[state.seat] || !state.connected.every(Boolean) || socket?.readyState !== WebSocket.OPEN) return false;
-      const text = JSON.stringify({ type: 'moves', turn: state.turn, moves, lock });
+      const text = JSON.stringify({ type: 'moves', turn: state.turn, gameNumber: state.gameNumber, moves, lock });
       if (!lock && (text === lastDraft || Date.now() - sentAt < 120)) return false;
       socket.send(text); lastDraft = text; sentAt = Date.now(); return true;
     }

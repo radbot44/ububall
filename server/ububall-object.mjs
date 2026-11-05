@@ -79,9 +79,10 @@ export class UbuballMatch extends DurableObject {
       const now = Date.now(), path = new URL(request.url).pathname;
       if (path === '/pair') {
         if (!this.room) {
-          const { players: [first, second], quickStart } = await request.json();
-          this.room = new MatchRoom(first.owner, 'standard', 'practice', Boolean(first.guest));
+          const { players: [first, second], quickStart, challenge } = await request.json();
+          this.room = new MatchRoom(first.owner, 'standard', challenge ? 'choice' : 'practice', Boolean(first.guest));
           this.room.join(second.owner, Boolean(second.guest));
+          if (challenge) for (const player of [first, second]) this.room.practiceTeam(player.owner);
           this.room.state.paired = true;
           if (quickStart) this.room.readyPracticePair();
           this.save();
@@ -93,6 +94,14 @@ export class UbuballMatch extends DurableObject {
         const s = this.room?.state;
         if (!s?.watch?.key || !s.game || s.phase === 'over' || now >= s.expires) return json({}, 404);
         return json({ key: s.watch.key, names: s.names, scores: s.game.scores });
+      }
+      if (path === '/presence') {
+        const s = this.room?.state;
+        if (!s || now >= s.expires || s.phase === 'over') return json({ status: 'idle' });
+        const owner = request.headers.get('X-Match-Owner');
+        if (s.players.includes(owner) && !s.left[s.players.indexOf(owner)]) return json({ status: 'balling' });
+        if (s.watch?.key && request.headers.get('X-Match-Watch') === s.watch.key) return json({ status: 'spectating' });
+        return json({ status: 'idle' });
       }
       if (path === '/watch-state' || path === '/watch-socket') {
         const response = this.watch(request, path, now);
@@ -132,7 +141,8 @@ export class UbuballMatch extends DurableObject {
         if (path === '/team') {
           if (this.room.state.phase !== 'lobby') throw new Error('Match already started.');
           const data = await request.json();
-          if (!data || Object.keys(data).some(k => !['serials', 'supers'].includes(k))) throw new Error('Invalid team.');
+          if (!data || Object.keys(data).some(k => !['serials', 'supers', 'gameNumber'].includes(k)) ||
+              (data.gameNumber || 0) !== (this.room.state.gameNumber || 0)) throw new Error('The game changed. Choose your team again.');
           let entries;
           if (!this.room.state.practice[this.room.seat(owner)]) {
             const registry = this.env.MINT.get(this.env.MINT.idFromName(this.env.MINT_ID));
@@ -147,6 +157,11 @@ export class UbuballMatch extends DurableObject {
         }
         if (path === '/forfeit') this.room.claimForfeit(owner, now);
         if (path === '/unready') this.room.unready(owner);
+        if (path === '/team-source') this.room.teamSource(owner, (await request.json())?.practice);
+        if (path === '/rules') {
+          const data = await request.json();
+          this.room.changeRules(owner, data?.mode, data?.gameNumber);
+        }
         if (path === '/allow-watch') this.room.allowWatch(owner, (await request.json())?.allowed);
         if (path === '/leave') {
           for (const ws of this.ctx.getWebSockets()) if (ws.deserializeAttachment().owner === owner) this.retire(ws, now, 4003);
@@ -175,7 +190,8 @@ export class UbuballMatch extends DurableObject {
           this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);
           return;
         }
-        if (data.type !== 'moves' || Object.keys(data).some(k => !['type', 'turn', 'moves', 'lock'].includes(k))) throw new Error('Invalid message.');
+        if (data.type !== 'moves' || Object.keys(data).some(k => !['type', 'turn', 'moves', 'lock', 'gameNumber'].includes(k))) throw new Error('Invalid message.');
+        if ((data.gameNumber || 0) !== (this.room.state.gameNumber || 0)) throw new Error('The game changed. Plan your moves again.');
         this.room.submit(a.owner, data.turn, data.moves, data.lock, now);
         this.room.advance(now); this.save();
         if (data.lock === false && this.room.state.phase === 'plan') {

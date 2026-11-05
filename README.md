@@ -13,7 +13,7 @@ Design requirement: a lean application with zero fluff. Use the smallest practic
 
 ## Running and installing
 
-Run `npm run dev` to open the local Worker at http://127.0.0.1:8790/. Setup and verification are in the [Cloudflare application guide](docs/worker.md). The Worker has no runtime npm packages. The framework-free client loads the Embedded App SDK when connecting from Discord. See [online play](docs/ububall-online.md) for queues, spectating, and Activity setup.
+Run `npm run dev` to open the local Worker at http://127.0.0.1:8790/. Setup and verification are in the [Cloudflare application guide](docs/worker.md). The Worker has no runtime npm packages. The framework-free client loads the Embedded App SDK when connecting from Discord. See [online play](docs/ububall-online.md) for Activity lobbies, challenges, queues, spectating and setup.
 
 Install updates and deploy with **`.\install.ps1`** from either your local source checkout (`C:\dev\ububall` or legacy `C:\dev\ubumint`) or the deployment copy at `ubumint-cloudflare`. The installed copy automatically forwards to the source checkout. It copies the current source into sibling `ubumint-cloudflare`, installs dependencies, runs both test suites and deploys. Use **`.\install.ps1 -DryRun`** to check everything without uploading. Private settings and existing mint keys live outside either checkout in **`%LOCALAPPDATA%\ubumint\settings.json`**; reinstalling code does not replace them. No stashing or editing tracked Wrangler files is needed. For first-time setup, see [first setup](docs/worker.md#first-setup-and-updates). Both test commands use the compact dot reporter.
 
