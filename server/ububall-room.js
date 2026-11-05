@@ -59,6 +59,14 @@ class MatchRoom {
     });
     s.rosters[i] = roster; s.ready[i] = true;
   }
+  readyPracticePair() {
+    for (const owner of this.state.players) {
+      const entries = this.practiceTeam(owner);
+      const supers = entries.map(({ dna }) => ubu.decode(ubu.fromCode(dna)).supers[0] % 8);
+      this.selectTeam(owner, entries, supers);
+    }
+    this.state.quickStart = true;
+  }
   // Until kickoff a ready player may go back and change their team.
   unready(owner) {
     const s = this.state, i = this.seat(owner);
@@ -184,9 +192,9 @@ class MatchRoom {
     if (s.phase !== 'over') throw new Error('Match is not over.');
     if (s.left.some(Boolean)) throw new Error('Your opponent left the match.');
     s.rematch[i] = true;
-    // Both asked: back to the lobby with the same teams selected, so each player can swap or ready up.
+    // Keep the teams for a rematch. Quick-start players are already ready for kickoff.
     if (s.rematch.every(Boolean)) {
-      s.rematch = [false, false]; s.ready = [false, false]; s.winner = null; s.turn = 1; s.phase = 'lobby';
+      s.rematch = [false, false]; s.ready = s.quickStart ? [true, true] : [false, false]; s.winner = null; s.turn = 1; s.phase = 'lobby';
       s.game = null; s.replay = null; s.playUntil = null; s.expires = now + 86400000;
     }
   }
@@ -214,7 +222,7 @@ class MatchRoom {
       practice: structuredClone(s.practice[seat]),
       game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
       playUntil: s.playUntil, disconnectedAt: [...s.disconnectedAt], rematch: [...s.rematch],
-      paired: Boolean(s.paired), watchAllowed: s.watch?.allowed[seat] ?? false, watchKey: s.watch?.key ?? null };
+      paired: Boolean(s.paired), quickStart: Boolean(s.quickStart), watchAllowed: s.watch?.allowed[seat] ?? false, watchKey: s.watch?.key ?? null };
   }
 }
 module.exports = { MatchRoom };

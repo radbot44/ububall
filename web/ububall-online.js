@@ -4,11 +4,18 @@ function ububallOnline(hooks) {
   const params = new URL(location.href).searchParams;
   const watchInvite = params.get('watch'), invite = watchInvite ? null : params.get('match');
   const activity = window.ubuActivity;
+  const queueStorageKey = activity ? 'ububall-queue:' + activity.instance : 'ububall-queue';
   let id = null, socket = null, session = null, state = null, retry = null, heartbeat = null;
   let stopped = false, lastPong = 0, offset = 0, lastDraft = '', sentAt = 0;
-  let watchKey = null, queue = null, queueTimer, queueBusy = false;
+  let watchKey = null, queue = null, queueTimer, queueTask, switching = false;
   // The lobby shows on the team screen; the dialog only creates, joins and ends matches.
-  const status = text => { $('online-status').textContent = text; $('lobby-status').textContent = text; };
+  const status = text => {
+    $('online-status').textContent = text; $('lobby-status').textContent = text;
+    if (activity) {
+      const label = $('activity-status'), message = text || 'Same Activity. Straight to the rink.';
+      if (label.textContent !== message) label.textContent = message;
+    }
+  };
   const playable = () => Boolean(session?.owner || session?.guest);
   function account() {
     $('online-login').hidden = Boolean(session?.owner || queue);
@@ -85,6 +92,14 @@ function ububallOnline(hooks) {
     if (before && !before.occupied[other] && next.occupied[other]) nudge(`${them} joined`);
     if (before && !before.rematch[other] && next.rematch[other]) nudge(`${them} wants a rematch`);
     if (before?.phase === 'lobby' && next.phase === 'plan') nudge('Kickoff');
+    if (next.quickStart && next.phase === 'lobby') {
+      if (activity) {
+        $('online-friends').disabled = true;
+        $('activity-cancel').hidden = false;
+      }
+      status('Friend found. Getting the rink ready…');
+      return;
+    }
     if (next.phase === 'lobby') {
       // Entering the lobby (a new match or a rematch) brings up the team screen.
       const note = next.teams === 'practice' ? 'This match uses random practice teams.' :
@@ -94,6 +109,10 @@ function ububallOnline(hooks) {
       status(!next.occupied[other] ? 'Share the invite link with your opponent.' : ready ? `Team ready. Waiting for ${them}${next.ready[other] ? ' to connect' : ' to choose a team'}.` :
         next.ready[other] ? `${them} is ready. Choose your team, then ready up.` : `${them} joined. Choose your team, then ready up.`);
     } else if (!next.game) {
+      if (activity && next.quickStart) {
+        if (!stopped) void leave().then(() => status('Your friend left. Tap Play with Friends to queue again.'));
+        return;
+      }
       // The host left before kickoff: nothing to play, so the dialog explains and offers Leave.
       hooks.closeLobby();
       $('online-ended').hidden = false;
@@ -103,6 +122,7 @@ function ububallOnline(hooks) {
     } else {
       hooks.closeLobby();
       $('online-dialog').close();
+      if (activity) $('activity-cancel').hidden = true;
       status('');
     }
     hooks.onState(next);
@@ -170,8 +190,13 @@ function ububallOnline(hooks) {
     const url = new URL(location.href); url.pathname = '/';
     url.searchParams.delete('match'); url.searchParams.delete('watch'); history.replaceState(historyState, '', url);
     updateWatchControls(null);
+    if (activity) {
+      $('online-friends').disabled = false;
+      $('activity-cancel').hidden = true;
+    }
     $('online-create-controls').hidden = true; $('online-ended').hidden = true; $('online-dialog').close();
     hooks.onLeave();
+    status('');
   }
   const settings = { policy: 'practice' };
   $('online-policy').onclick = event => {
@@ -185,7 +210,6 @@ function ububallOnline(hooks) {
   function showDialog(create = false) {
     $('online-entry').hidden = Boolean(id || create || queue);
     $('online-create-controls').hidden = !create;
-    $('online-watch-list').hidden = true;
     $('online-ended').hidden = !id;
     $('online-leave').textContent = watchKey ? 'Stop watching' : 'Leave online match';
     if (!$('online-dialog').open) $('online-dialog').showModal();
@@ -212,61 +236,99 @@ function ububallOnline(hooks) {
   }
   async function ensureSession() {
     await refreshSession();
-    if (activity && !session?.owner) session = await activity.signIn();
+    if (switching) return;
+    if (activity && (!session?.owner || session.instance !== activity.instance)) session = await activity.signIn();
     else if (!playable()) await guestSession();
   }
   function setQueue(value) {
     queue = value;
     try {
-      if (value) sessionStorage.setItem('ububall-queue', value);
-      else sessionStorage.removeItem('ububall-queue');
+      if (value) sessionStorage.setItem(queueStorageKey, value);
+      else sessionStorage.removeItem(queueStorageKey);
     } catch { /* queue can still run */ }
     $('online-entry').hidden = Boolean(value || id);
-    $('online-watch-list').hidden = true;
+    if (value && $('online-watch-list').matches(':popover-open')) $('online-watch-list').hidePopover();
     $('online-cancel-queue').hidden = !value;
     $('online-close').disabled = Boolean(value);
+    $('online-friends').disabled = value === 'friends';
+    $('activity-cancel').hidden = !value;
     account();
   }
-  async function queueRequest(action) {
-    if (queueBusy || !queue) return;
+  function queueRequest(action) {
+    if (queueTask || !queue) return queueTask;
     clearTimeout(queueTimer);
-    queueBusy = true;
+    queueTask = runQueue(action).finally(() => { queueTask = null; });
+    return queueTask;
+  }
+  async function runQueue(action) {
     $('online-cancel-queue').disabled = true;
     const scope = queue;
     const destination = { queue: scope, ...(scope === 'friends' ? { instance: activity.instance } : {}) };
     try {
       if (action === 'enter') await ensureSession();
+      if (switching && action !== 'cancel') return;
       const result = await api('/api/ububall/queue', { ...destination, action });
+      if (switching && action !== 'cancel') return;
       if (result.status === 'matched') {
+        const ack = () => api('/api/ububall/queue', { ...destination, action: 'ack', id: result.id });
+        if (activity && action === 'cancel') {
+          await api('/api/ububall/' + result.id + '/leave', {});
+          await ack();
+          setQueue(null);
+          return;
+        }
         const initial = await api('/api/ububall/' + result.id + '/join', {});
+        if (switching) return;
         setQueue(null);
         await enter(result.id, initial);
-        void api('/api/ububall/queue', { ...destination, action: 'ack', id: result.id }).catch(() => {});
+        void ack().catch(() => {});
       } else if (result.status === 'waiting') {
-        status(scope === 'friends' ? 'Waiting for a friend to queue in this Activity…' : 'Finding an online opponent…');
+        status(scope === 'friends' ? 'Waiting for a friend to join this Activity…' : 'Finding an online opponent…');
         queueTimer = setTimeout(() => queueRequest('poll'), 2500);
+      } else if (scope === 'friends' && action === 'poll' && result.status === 'idle') {
+        queueTimer = setTimeout(() => queueRequest('enter'), 0);
       } else {
         setQueue(null);
         status(result.status === 'busy' ? 'You are already in another queue. Cancel it there to switch.' :
           action === 'cancel' ? 'Queue canceled.' : 'Your queue entry expired. Queue up again to play.');
       }
     } catch (error) {
+      if (switching) return;
       if (action === 'enter' || !playable()) setQueue(null);
       else queueTimer = setTimeout(() => queueRequest('poll'), 4000);
       status(error.message);
     } finally {
-      queueBusy = false; $('online-cancel-queue').disabled = false;
+      $('online-cancel-queue').disabled = false;
     }
   }
   function startQueue(scope) {
     if (queue || id) return;
     setQueue(scope);
-    status('Connecting…');
+    status(activity && !session?.owner ? 'Connecting to Discord…' :
+      scope === 'friends' ? 'Joining your friends’ queue…' : 'Finding an online opponent…');
     void queueRequest('enter');
   }
-  $('online-friends').hidden = $('online-invite-friends').hidden = $('online-watch').hidden = !activity;
+  $('activity-play').hidden = !activity;
   $('online-private').hidden = Boolean(activity);
-  $('online-friends').onclick = () => startQueue('friends');
+  async function switchActivity(next) {
+    if (switching || (id && (!state?.quickStart || state.game)) || queue === next) return false;
+    switching = true;
+    clearTimeout(queueTimer);
+    try {
+      if (id) await leave();
+      if (next === 'cpu') hooks.playCpu();
+      await queueTask;
+      if (queue && playable()) await queueRequest('cancel');
+      setQueue(null);
+      status('');
+    } finally { switching = false; }
+    if (next === 'friends' || next === 'public') startQueue(next);
+    return true;
+  }
+  $('online-friends').onclick = () => switchActivity('friends');
+  $('activity-public').onclick = () => switchActivity('public');
+  $('activity-cpu').onclick = () => switchActivity('cpu');
+  $('activity-cancel').onclick = () => switchActivity('off');
   $('online-public').onclick = () => startQueue('public');
   $('online-cancel-queue').onclick = () => queueRequest('cancel');
   $('online-dialog').addEventListener('cancel', event => { if (queue) event.preventDefault(); });
@@ -274,13 +336,17 @@ function ububallOnline(hooks) {
     try { await activity.invite(); }
     catch (error) { status(error.message); }
   };
-  $('online-watch').onclick = async () => {
+  async function listActivityMatches() {
     const list = $('online-watch-list');
-    $('online-watch').disabled = true;
-    list.replaceChildren(); list.hidden = true;
+    const note = Object.assign(document.createElement('p'), { textContent: 'Looking for live matches…' });
+    note.setAttribute('role', 'status');
+    list.replaceChildren(note);
     try {
+      if (!await switchActivity('watch')) { note.textContent = 'Try again in a moment.'; return; }
       await ensureSession();
       const matches = await api('/api/ububall/activity-watch?instance=' + encodeURIComponent(activity.instance));
+      if (!list.contains(note)) return;
+      note.textContent = matches.length ? 'Choose a match to watch.' : 'No matches are open to spectators in this Activity.';
       for (const { id: match, key, names, scores } of matches) {
         const label = names.map((name, i) => name || 'Player ' + (i + 1));
         const button = Object.assign(document.createElement('button'), { type: 'button',
@@ -289,18 +355,20 @@ function ububallOnline(hooks) {
           button.disabled = true;
           try {
             const initial = await watchState(match, key);
-            if (!id && !queue) await enter(match, initial, key);
+            if (!id && !queue && list.matches(':popover-open')) {
+              list.hidePopover();
+              await enter(match, initial, key);
+            }
           }
           catch (error) { status(error.message); }
           finally { button.disabled = false; }
         };
         list.append(button);
       }
-      list.hidden = !matches.length || Boolean(queue || id);
-      status(matches.length ? 'Choose a match to watch.' : 'No matches are open to spectators in this Activity.');
-    } catch (error) { status(error.message); }
-    finally { $('online-watch').disabled = false; }
-  };
+      if (list.matches(':popover-open')) gameUi.place(list, $('online-watch'), 'end');
+    } catch (error) { note.textContent = error.message; }
+  }
+  if (activity) gameUi.dropdown($('online-watch'), $('online-watch-list'), { align: 'end', prepare: listActivityMatches });
   async function toggleWatch(button) {
     if (!state || watchKey) return;
     button.disabled = true;
@@ -341,19 +409,21 @@ function ububallOnline(hooks) {
     finally { $('online-guest').disabled = false; }
   };
   if (watchInvite) {
-    showDialog();
+    if (!activity) showDialog();
     const match = /^([0-9a-f-]{36})\.([0-9a-f-]{36})$/.exec(watchInvite);
     if (!match) status('This watch link is invalid.');
     else watchState(match[1], match[2]).then(initial => enter(match[1], initial, match[2])).catch(error => status(error.message));
   } else if (invite) {
-    showDialog();
+    if (!activity) showDialog();
     $('online-entry').hidden = true;
     (activity ? ensureSession() : refreshSession())
       .then(() => playable() ? joinInvite() : status('Sign in with Discord or play as a guest to join this match.')).catch(error => status(error.message));
   } else {
     let saved;
-    try { saved = sessionStorage.getItem('ububall-queue'); } catch { /* storage can be disabled */ }
-    if (saved === 'public' || (activity && saved === 'friends')) {
+    try { saved = sessionStorage.getItem(queueStorageKey); } catch { /* storage can be disabled */ }
+    if (activity && (location.pathname === '/' || location.pathname === '/index.html')) {
+      startQueue(saved === 'public' ? 'public' : 'friends');
+    } else if (!activity && saved === 'public') {
       setQueue(saved);
       showDialog();
       void queueRequest('poll');

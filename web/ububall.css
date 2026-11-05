@@ -151,6 +151,50 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
   body:not(.in-match) .arena-layout { order: -1; width: min(55rem, 100%); margin: .25rem auto 0; }
   body:not(.in-match) .play-home { width: min(55rem, 100%); margin: .875rem auto 1.5rem; }
 }
+/* The Discord Activity opens at the rink with the friends queue on the bench. */
+.discord-activity body:has(.ball-page:not([hidden])) { padding-bottom: 0; }
+.discord-activity body:has(.ball-page:not([hidden])) .site-header,
+.discord-activity .play-home > :not(.activity-play),
+.discord-activity body.demo-match:not(.in-match) :is(.demo-play, .demo-finger, .field-banner) { display: none; }
+.discord-activity body:not(.in-match) .ball-page {
+  gap: 1rem; height: auto; padding-block: max(.75rem, var(--safe-top)) max(.75rem, var(--safe-bottom));
+}
+.discord-activity body:not(.in-match) .play-home { align-self: center; }
+.activity-play { display: grid; gap: .75rem; }
+.activity-friends {
+  display: grid; gap: .875rem; padding: clamp(.875rem, 2.5vw, 1.5rem);
+  border: .0625rem solid color-mix(in srgb, var(--primary) 55%, var(--border)); border-radius: 1.5rem;
+  background: radial-gradient(ellipse at top, color-mix(in srgb, var(--primary) 21%, var(--card)), var(--card) 78%);
+  box-shadow: var(--panel-shadow); text-align: center;
+}
+#online-friends {
+  min-height: 5.5rem; padding: .75rem; border-radius: 1rem;
+  font: 1.875rem/1.1 var(--font-display); color: #2b1608;
+}
+#online-friends:disabled { opacity: 1; cursor: default; }
+#activity-status { margin: 0; min-height: 2.5em; align-content: center; color: var(--text); font-size: 1.125rem; }
+.activity-friend-actions, .activity-other { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; }
+.activity-other > button { flex: 1 1 auto; min-height: 2.75rem; }
+.activity-watch-list:popover-open { display: grid; gap: .5rem; width: min(20rem, calc(100vw - 2rem)); }
+.activity-watch-list > p { margin: 0; }
+.activity-watch-list > button { overflow-wrap: anywhere; }
+@media (orientation: landscape) and (min-width: 600px) {
+  .discord-activity body:not(.in-match) .ball-page {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(16rem, 27%); align-items: center;
+    width: min(114rem, calc(100% - 2rem)); min-height: 100dvh;
+  }
+  .discord-activity body:not(.in-match) .arena-layout { order: 0; height: auto; max-width: none; margin: 0; }
+  .discord-activity body:not(.in-match) .stadium { height: auto; }
+  .discord-activity body:not(.in-match) .stadium-stage-area { flex: none; height: auto; container-type: normal; }
+  .discord-activity body:not(.in-match) .stadium:not(.portrait-mode) .rink-stage {
+    width: min(100%, max(12rem, calc((100dvh - 6rem) * 5 / 3))); height: auto;
+  }
+  .discord-activity body:not(.in-match) .play-home { width: 100%; margin: 0; }
+}
+@media (orientation: portrait), (max-width: 599px) {
+  .discord-activity body:not(.in-match) .arena-layout { order: 1; }
+  .discord-activity body:not(.in-match) .play-home { margin: 0 auto; }
+}
 /* The stage borrows the sidebar's inner gutter. The goal fits there between the score and controls. */
 body.in-match.sidebars-hidden .stadium:not(.portrait-mode) > .stadium-stage-area { --visible-rink-height: 536; }
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {

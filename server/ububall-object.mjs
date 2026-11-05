@@ -79,10 +79,11 @@ export class UbuballMatch extends DurableObject {
       const now = Date.now(), path = new URL(request.url).pathname;
       if (path === '/pair') {
         if (!this.room) {
-          const [first, second] = await request.json();
+          const { players: [first, second], quickStart } = await request.json();
           this.room = new MatchRoom(first.owner, 'standard', 'practice', Boolean(first.guest));
           this.room.join(second.owner, Boolean(second.guest));
           this.room.state.paired = true;
+          if (quickStart) this.room.readyPracticePair();
           this.save();
           await this.schedule(now);
         }

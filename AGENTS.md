@@ -26,6 +26,7 @@
 ## This is a game: custom UI only
 
 - Owner requirement (2026-11-01): ububall is a game, played inside Discord Activities and shipped as a phone app, not a website. Every menu, dialog, dropdown, picker and confirmation must be custom-built and game-styled.
+- In Discord, sign in and queue for friends on launch. Give Play with Friends the dominant right-hand section beside the rink. Keep the path to kickoff immediate, with CPU play and other modes available as secondary actions.
 - Never use browser UI: no `confirm()`, `alert()`, `prompt()`, native `<select>` popups or other browser-styled pickers. Use the shared components in `web/game-ui.js` (dialogs, anchored dropdowns, selects).
 - Dropdowns, menus and pickers overlay and drop down from their trigger. Never insert them inline so content moves.
 - Icons are Tabler icons from uburoom's set (`uburoom/web/icons.js`), shown as plain icons for small actions. Never use font or text symbols (arrows, ×, ✕, ▾, …) as icons. If a needed icon is missing, ask the owner, who adds icons and decides which to use. Use arrows on navigation buttons where they carry meaning.

@@ -170,6 +170,30 @@ test('authoritative supers consume meter and preserve the no-gain rule through s
   }
 });
 
+test('quick-start friends matches begin when both players connect and reuse their teams for a rematch', () => {
+  const room = new MatchRoom('host', 'standard', 'practice');
+  room.join('friend');
+  room.readyPracticePair();
+  assert.deepEqual(room.view('host').ready, [true, true]);
+  assert.equal(room.view('host').quickStart, true);
+  room.connect('host', 1000);
+  room.advance(1000);
+  assert.equal(room.state.phase, 'lobby');
+  room.connect('friend', 1100);
+  room.advance(1100);
+  assert.equal(room.state.phase, 'plan');
+  assert.deepEqual(room.state.game.scores, [0, 0]);
+  const rosters = structuredClone(room.state.rosters);
+  room.disconnect('friend', 1200);
+  room.claimForfeit('host', 61200);
+  room.connect('friend', 61300);
+  room.rematch('host', 61300);
+  room.rematch('friend', 61300);
+  room.advance(61300);
+  assert.equal(room.state.phase, 'plan');
+  assert.deepEqual(room.state.rosters, rosters);
+});
+
 test('MatchRoom rematch requires match over and agreement from both players', () => {
   const room = new MatchRoom('host', 'standard', 'practice');
   const ubu = require('../shared/ubu.js');

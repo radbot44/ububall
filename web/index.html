@@ -31,7 +31,23 @@
   </header>
   <main class="ball-page" data-screen="play">
 
-  <section class="play-home" aria-labelledby="home-title">
+  <section class="play-home" aria-label="Play Ububall">
+    <div id="activity-play" class="activity-play" hidden>
+      <section class="activity-friends" aria-labelledby="online-friends">
+        <button id="online-friends" class="primary" type="button">Play with Friends</button>
+        <p id="activity-status" role="status">Connecting to Discord…</p>
+        <div class="activity-friend-actions">
+          <button id="online-invite-friends" type="button">Invite a friend</button>
+          <button id="activity-cancel" class="quiet" type="button" hidden>Leave queue</button>
+        </div>
+      </section>
+      <div class="activity-other">
+        <button id="activity-cpu" type="button">Play vs CPU</button>
+        <button id="activity-public" type="button">Find Online Match</button>
+        <button id="online-watch" type="button">Watch</button>
+      </div>
+      <div id="online-watch-list" class="activity-watch-list" popover="auto" aria-label="Live friend matches"></div>
+    </div>
     <div class="home-actions">
       <button id="home-play" class="primary" type="button"><span id="home-play-label">Quick play</span><small id="quick-play-setup">Standard · Easy · Starter team</small><small id="quick-play-signin">No sign-in needed</small></button>
       <button id="home-customize" type="button">Customize match</button>
@@ -361,13 +377,9 @@ SOFTWARE.
   </dialog>
   <dialog id="online-dialog" aria-labelledby="online-title"><div class="online-heading"><div><h2 id="online-title">Online Ububall</h2><p>One opponent. Three ubus. First to five.</p></div><button id="online-close" class="icon-button" aria-label="Close online settings"><i data-icon="x"></i></button></div>
     <div id="online-entry" class="lobby-actions">
-      <button id="online-friends" class="primary" type="button" hidden>Play with friends</button>
-      <button id="online-invite-friends" type="button" hidden>Invite friends</button>
       <button id="online-public" type="button">Find online match</button>
       <button id="online-private" type="button">Create invite match</button>
-      <button id="online-watch" type="button" hidden>Watch</button>
     </div>
-    <div id="online-watch-list" class="lobby-actions" hidden></div>
     <button id="online-cancel-queue" type="button" hidden>Cancel queue</button>
     <div id="online-create-controls" hidden>
       <p class="online-mode-line">Mode: <strong id="online-mode-name">Ububall</strong> <button id="online-mode-change" class="quiet" type="button">Change</button></p>

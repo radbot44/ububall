@@ -3,6 +3,7 @@
   const appId = /^([1-9][0-9]{0,19})\.discordsays\.com$/.exec(location.hostname)?.[1];
   if (!appId || window.parent === window) return;
   const instance = new URLSearchParams(location.search).get('instance_id');
+  document.documentElement.classList.add('discord-activity');
 
   let sdk, login;
   async function connect() {

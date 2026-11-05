@@ -5545,6 +5545,7 @@
       mine && !s.connected[1 - s.seat] ? `${them} is offline. They can accept when they return.` : mine ? `Waiting for ${them} to accept.` : theirs ? `${them} wants a rematch.` : '';
   }
   online = ububallOnline({
+    playCpu() { startCpuMatch(practice.slice(0, 3), 'standard', 'easy'); },
     chooseMode(mode) { openSetup('mode', 'online', mode); },
     lobby(view, open) { void showLobby(view, open); },
     closeLobby,

@@ -20,7 +20,7 @@ Completed online play architecture:
 
 ## Queues and live spectating
 
-Inside Discord, **Play with friends** queues only against another player in the same Activity instance. **Find online match** uses a single shared practice-team queue for Activity and standalone players. An account can have one queue entry at a time. Waiting entries expire 20 seconds after the last poll and paired seats are reserved before either client enters the lobby.
+Launching in Discord signs the player in and queues them against friends in the same Activity. When both players connect, the match starts with practice teams. The rink stays visible while waiting, and **Play vs CPU**, **Find Online Match**, and **Watch** leave the friends queue when chosen. Public matchmaking uses a shared practice-team queue for Activity and standalone players. Waiting entries expire 20 seconds after the last poll, and an account can have one queue entry at a time.
 
 Both players can opt in to spectating from the team lobby or the match menu. Once both opt in, they can copy a separate watch link. Members of the Activity can also find its enabled friend matches under **Watch**. The viewer receives the public rink, scores and resolved turns. Draft moves, team selection and match controls stay with the players. Either player can revoke the link and end existing viewer connections.
 

@@ -63,7 +63,7 @@ export class UbuballQueue extends DurableObject {
       await this.expire(now);
       if (players.length === 2) {
         const response = await this.match(entry.match).fetch('https://match/pair', {
-          method: 'POST', body: JSON.stringify(players)
+          method: 'POST', body: JSON.stringify({ players, quickStart: scope !== 'public' })
         });
         if (!response.ok) throw new Error('Could not set up the match. Try again.');
         if (scope !== 'public') {
