@@ -19,7 +19,7 @@
     const redirect = () => {
       location.assign('/auth/discord?return=' + encodeURIComponent(returnPath));
     };
-    if (document.fullscreenElement || document.body.classList.contains('stadium-fullscreen-active')) {
+    if (document.fullscreenElement) {
       redirect();
       return;
     }

@@ -396,7 +396,7 @@ test('local Blitz preserves the deadline across blocked frames and hidden time',
   const context = {
     performance: { now: () => now }, document: { hidden: false, querySelector: () => gameDialog ? {} : null },
     $: id => id === 'pause-menu' ? dialog : { open: false },
-    foulInfo: null, online: null, phase: 'plan', matchMode: 'blitz', blitzMode: () => true,
+    foulInfo: null, online: null, inMatch: true, demo: false, phase: 'plan', matchMode: 'blitz', blitzMode: () => true,
     ububallMatch: { planningMilliseconds: () => 5000 }, planDeadline: 0, planPausedAt: null
   };
   const { startPlanClock, refresh } = runInNewContext(code +
@@ -412,6 +412,9 @@ test('local Blitz preserves the deadline across blocked frames and hidden time',
   now = 11100; gameDialog = true; refresh();
   now = 15100; gameDialog = false; refresh();
   assert.equal(context.planDeadline - now, 2000, 'match offers preserve the CPU planning clock');
+  now = 15600; context.inMatch = false; refresh();
+  now = 19600; context.inMatch = true; refresh();
+  assert.equal(context.planDeadline - now, 1500, 'returning home pauses the CPU planning clock');
   context.online = { active: true };
   dialog.open = true; refresh();
   assert.equal(context.planPausedAt, null);

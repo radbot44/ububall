@@ -58,7 +58,7 @@
     planPausedAt = localPlayBlocked() ? now : null;
   }
   function localPlayBlocked() {
-    return document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(document.querySelector('.game-dialog[open]')) || Boolean(foulInfo && !online?.active);
+    return (!inMatch && !demo) || document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(document.querySelector('.game-dialog[open]')) || Boolean(foulInfo && !online?.active);
   }
   function updateLocalPlanClock(blocked) {
     if (online?.active || phase !== 'plan' || !blitzMode()) return;
@@ -107,7 +107,7 @@
   function fitScorebug() {
     const board = document.querySelector('.scoreboard'), status = board.querySelector('.bug-status');
     if (!board.offsetWidth) return;
-    const compact = getComputedStyle(board.querySelector('.bug-center')).display === 'contents';
+    const compact = getComputedStyle(board.querySelector('.bug-center')).display !== 'flex';
     const edge = (node, side) => node.offsetWidth ? node.getBoundingClientRect()[side] : board.getBoundingClientRect()[side === 'right' ? 'left' : 'right'];
     // On phones the logo and rules sit between the menu and tools: rules in full when they fit there.
     for (const size of compact ? ['compact-words', 'compact'] : BUG_SIZES) {
@@ -147,7 +147,9 @@
     const cell = next.team === null ? null : tab.parentElement.querySelector(next.team ? '.bug-away' : '.bug-home').getBoundingClientRect();
     const x = cell ? cell.left - board.left + cell.width / 2 : board.width / 2;
     tab.style.left = Math.max(width / 2, Math.min(board.width - width / 2, x)) + 'px';
-    tab.style.top = tab.parentElement.querySelector('.bug-home').getBoundingClientRect().bottom - board.top + 'px';
+    const scoreBottom = tab.parentElement.querySelector('.bug-home').getBoundingClientRect().bottom;
+    const statusBottom = tab.parentElement.querySelector('.bug-status').getBoundingClientRect().bottom;
+    tab.style.top = Math.max(scoreBottom, statusBottom) - board.top + 'px';
     tab.classList.add('show');
     bugTabTimer = setTimeout(() => { tab.classList.remove('show'); bugTabTimer = setTimeout(nextBugTab, 300); }, 2600);
   }
@@ -2079,16 +2081,16 @@
       return false;
     }
   }
-  function newMatch(playJingle = false) {
+  function newMatch(playJingle = false, team = draft) {
     authoritativeBodies = null;
     endGoalReplay(); playSegments = []; saveRecording();
     fieldView.mode = cpuMode;
     document.body.classList.toggle('classic-match', classicMode());
     showMode(fieldView.mode);
     cpuTeam = starterEntries('cpu', 'CPU ubu');
-    stats = [...draft, ...cpuTeam].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
+    stats = [...team, ...cpuTeam].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
     stopFanfare(); gameAudio()?.stop();
-    roster = [...draft]; fieldView.entries = [...roster, ...cpuTeam]; fieldView.bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
+    roster = [...team]; fieldView.entries = [...roster, ...cpuTeam]; fieldView.bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     if (!demo) {
       recording = ububallReplay.create({ mode: fieldView.mode, names: ['You', 'CPU'], ubus: fieldView.bodies.slice(0, 6).map((b, i) => ({ dna: fieldView.entries[i].dna, super: b.equippedSuper?.id ?? null })) });
     }
@@ -2483,9 +2485,7 @@
   let visibleRinkHeight = 600;
   function fitStadium() {
     if (!stageArea || !rinkStage || !rinkWrap) return;
-    const isFs = isFullscreenActive() || document.body.classList.contains('in-match');
-
-    if (!fieldView.portrait && !isFs) {
+    if (!fieldView.portrait && !inMatch) {
       visibleRinkHeight = 600;
       rinkStage.style.width = '';
       rinkStage.style.height = '';
@@ -2500,7 +2500,7 @@
     let availW = stageArea.clientWidth || stadium?.clientWidth || 360;
     let availH = stageArea.clientHeight;
 
-    if (!availH || (!isFs && !fieldView.portrait)) {
+    if (!availH) {
       const vh = window.innerHeight || document.documentElement.clientHeight || 600;
       availH = fieldView.portrait ? Math.min(vh * 0.72, 680) : Math.min(vh * 0.8, 600);
     }
@@ -4141,7 +4141,6 @@
     if (online?.active) online.rematch();
   };
   $('summary-leave').onclick = async () => {
-    if (isFullscreenActive()) await toggleFullscreen();
     if (online?.active && !await online.leave()) return;
     closeSummary();
     exitMatchMode();
@@ -4171,6 +4170,7 @@
     try {
       const entry = await replayStore.get(id), replay = await ububallReplay.read(entry.file);
       if ($('replays-dialog').open) $('replays-dialog').close();
+      if (matchInProgress()) finishCpuMatch();
       closeFirstTurnGuide();
       watchReplay(replay, entry.file);
     } catch (error) { replaysNote(error.message); }
@@ -4337,7 +4337,6 @@
       return;
     }
     if (phase === 'over') {
-      if (isFullscreenActive()) await toggleFullscreen();
       openSetup('mode'); return;
     }
     gameAudio()?.getAudioContext();
@@ -4996,11 +4995,11 @@
   // Signing in, or gaining a first team, replaces a guest team with the account's own.
   const onGuestTeam = () => roster.every(entry => entry.key.startsWith('guest-'));
   async function adoptAccountTeam() {
-    if (!signedIn() || !onGuestTeam()) return;
+    if (!signedIn() || online?.active || !onGuestTeam()) return;
     const entries = await accountTeam();
-    if (!entries || !onGuestTeam()) return;
+    if (!entries || online?.active || !onGuestTeam()) return;
     draft = entries;
-    if (demo) newDemoGame(); else if (!matchInProgress() && !online?.active) newMatch();
+    if (demo) newDemoGame(entries); else if (!matchInProgress()) newMatch();
     updateHome();
   }
   // A signed-in player always fields their own ubus. Nothing starts until they have them.
@@ -5056,7 +5055,20 @@
   function setupStep(step) {
     const sheet = $('roster-dialog');
     sheet.dataset.step = step; sheet.dataset.for = setupFor;
-    $('sheet-next').textContent = setupFor === 'rules' ? 'Apply rules' : setupFor === 'online' ? 'Next: online match' : 'Next: choose team';
+    $('sheet-next').textContent = setupFor === 'rules' ? 'Apply rules' : setupFor === 'online' ? 'Next: online match' : 'Choose team';
+    $('sheet-next').classList.toggle('primary', setupFor !== 'cpu');
+    const shortcut = step === 'mode' && setupFor === 'cpu';
+    $('sheet-start').hidden = !shortcut;
+    if (shortcut) {
+      const complete = draft.length === 3 && draft.every(entry => entry?.model);
+      const slots = complete && signedIn() ? teamSlotsOf(draft) : null;
+      const selected = savedTeams?.teams[teamIndex];
+      const name = sameSlots(slots, selected?.slots) ? selected.name : savedTeams?.teams.find(team => sameSlots(slots, team.slots))?.name;
+      $('sheet-start').disabled = !complete || (signedIn() && !slots);
+      $('sheet-team-name').textContent = name || '';
+      $('sheet-team-name').hidden = !name;
+      $('sheet-team-preview').replaceChildren(...draft.filter(entry => entry?.model).map(entry => ubuRender(entry.model)));
+    }
     $('lobby-panel').hidden = setupFor !== 'lobby';
     $('team-title').textContent = setupFor === 'lobby' ? 'Online match' : 'Your team';
     $('team-back').hidden = setupFor === 'pick' || (setupFor === 'lobby' && !lobbyView?.state.canChangeRules);
@@ -5067,14 +5079,14 @@
     }
     $('start-match').textContent = setupFor === 'pick' ? 'Use team' : setupFor !== 'lobby' ? 'Start match' : lobbyView?.ready ? 'Change team' : 'Ready to play';
   }
-  function openSetup(step, purpose = 'cpu', mode = cpuMode, level = cpuLevel) {
+  function openSetup(step, purpose = 'cpu', mode = cpuMode, level = cpuLevel, team = roster) {
     setupFor = purpose;
     for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(mode, rule);
     modeSummary();
     $('rules-status').textContent = '';
     if (purpose === 'rules') rulesGameNumber = online.state.gameNumber;
     document.querySelector(`input[name="cpu-level"][value="${level}"]`).checked = true;
-    draft = [...roster]; rosterSlot = 0; $('roster-status').textContent = '';
+    draft = [...team]; rosterSlot = 0; $('roster-status').textContent = '';
     $('roster-scroll').scrollTop = 0;
     void loadCollection();
     setupStep(step);
@@ -5167,14 +5179,31 @@
       return;
     }
     if (draft.some(d => !d)) return;
-    $('roster-dialog').close();
     if (setupFor === 'pick') {
+      $('roster-dialog').close();
       rememberTeam();
-      if (demo) newDemoGame(); else if (!matchInProgress()) newMatch();
+      if (demo) newDemoGame(draft); else if (!matchInProgress()) newMatch();
       return;
     }
-    startCpuMatch(draft, chosenMode(), document.querySelector('input[name="cpu-level"]:checked').value);
+    await startFromSetup($('start-match'));
   };
+  $('sheet-start').onclick = () => startFromSetup($('sheet-start'));
+  async function startFromSetup(button) {
+    if (button.disabled || draft.some(entry => !entry)) return;
+    const team = [...draft], mode = chosenMode(), level = document.querySelector('input[name="cpu-level"]:checked').value;
+    button.disabled = true;
+    try {
+      if (online?.active) {
+        if (!await online.leave()) return;
+      } else if (matchInProgress()) {
+        if (!await confirmCpuEnd(true)) return;
+        finishCpuMatch();
+      }
+      $('roster-dialog').close();
+      $('pause-menu').close();
+      startCpuMatch(team, mode, level);
+    } finally { button.disabled = false; }
+  }
   function startCpuMatch(team, mode, level) {
     stopDemo();
     draft = team.map(entry => ({ ...entry }));
@@ -5218,59 +5247,50 @@
     };
   }
 
-  function isFullscreenActive() {
-    return !inDiscord && Boolean(document.fullscreenElement || stadium?.classList.contains('stadium-fullscreen'));
-  }
+  const fullscreenTarget = document.documentElement;
+  const fullscreenDisplay = matchMedia('(display-mode: fullscreen)');
+  let fullscreenRequest = null;
+  const ownsFullscreen = () => document.fullscreenElement === fullscreenTarget;
 
   function updateFullscreenUI() {
+    const owned = ownsFullscreen();
+    const active = Boolean(document.fullscreenElement) || fullscreenDisplay.matches;
+    document.body.classList.toggle('match-fullscreen', inMatch && active);
+    btnFullscreen.hidden = !inMatch || inDiscord || (!owned && (active || !document.fullscreenEnabled));
+    btnFullscreen.disabled = Boolean(fullscreenRequest);
+    const label = owned ? 'Exit fullscreen' : 'Enter fullscreen';
+    btnFullscreen.title = label;
+    btnFullscreen.setAttribute('aria-label', label);
+    btnFullscreen.setAttribute('aria-pressed', String(owned));
+    fitScorebug();
     layoutDirty = true;
-    const active = isFullscreenActive();
-    const inside = document.fullscreenElement === stadium || stadium.classList.contains('stadium-fullscreen');
-    const home = document.querySelector('.home-column'), away = document.querySelector('.away-column');
-    if (inside && home.parentElement !== stadium) {
-      stadium.prepend(home); stadium.append(away);
-    } else if (!inside && home.parentElement === stadium) {
-      stadium.before(home); stadium.after(away);
-    }
-    if (btnFullscreen) {
-      btnFullscreen.setAttribute('aria-pressed', String(active));
-      btnFullscreen.title = active ? 'Exit fullscreen' : 'Toggle fullscreen';
-      btnFullscreen.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Toggle fullscreen');
-      const enterIcon = $('icon-fs-enter');
-      const exitIcon = $('icon-fs-exit');
-      if (enterIcon && exitIcon) {
-        enterIcon.style.display = active ? 'none' : 'block';
-        exitIcon.style.display = active ? 'block' : 'none';
-      }
-    }
+    draw();
   }
 
-  async function toggleFullscreen() {
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else if (stadium?.classList.contains('stadium-fullscreen')) {
-        stadium.classList.remove('stadium-fullscreen');
-        document.body.classList.remove('stadium-fullscreen-active');
-        updateFullscreenUI();
-        draw();
-      } else if (stadium?.requestFullscreen) {
-        await stadium.requestFullscreen();
-      } else if (document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen();
-      } else {
-        stadium?.classList.add('stadium-fullscreen');
-        document.body.classList.add('stadium-fullscreen-active');
-        updateFullscreenUI();
-        draw();
-      }
-    } catch {
-      stadium?.classList.toggle('stadium-fullscreen');
-      document.body.classList.toggle('stadium-fullscreen-active');
-      updateFullscreenUI();
-      draw();
-    }
+  async function exitOwnedFullscreen() {
+    if (fullscreenRequest) fullscreenRequest.leaving = true;
+    if (ownsFullscreen()) await document.exitFullscreen().catch(() => {});
   }
+
+  btnFullscreen.onclick = async () => {
+    if (btnFullscreen.hidden || fullscreenRequest) return;
+    if (ownsFullscreen()) {
+      await exitOwnedFullscreen();
+      return;
+    }
+    const request = { leaving: false };
+    fullscreenRequest = request;
+    btnFullscreen.disabled = true;
+    try {
+      await fullscreenTarget.requestFullscreen();
+      if (request.leaving) await exitOwnedFullscreen();
+    } catch {
+      // The browser can deny fullscreen. Keep the layout tied to its actual state.
+    } finally {
+      fullscreenRequest = null;
+      updateFullscreenUI();
+    }
+  };
 
   function toggleRotate() {
     layoutDirty = true;
@@ -5283,32 +5303,16 @@
     }
     try {
       localStorage.setItem('ububall-orientation', fieldView.portrait ? 'portrait' : 'landscape');
-      if (document.fullscreenElement && screen.orientation?.lock) {
-        screen.orientation.lock(fieldView.portrait ? 'portrait' : 'landscape').catch(() => {});
-      }
     } catch {}
     draw();
   }
 
-  if (btnFullscreen) {
-    if (inDiscord) btnFullscreen.hidden = true;
-    else btnFullscreen.onclick = toggleFullscreen;
-  }
   if (btnRotate) btnRotate.onclick = toggleRotate;
-  if (!inDiscord) {
-    document.addEventListener('fullscreenchange', () => {
-      updateFullscreenUI();
-      draw();
-    });
-  }
+  document.addEventListener('fullscreenchange', updateFullscreenUI);
+  fullscreenDisplay.addEventListener('change', updateFullscreenUI);
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && stadium?.classList.contains('stadium-fullscreen')) {
-      stadium.classList.remove('stadium-fullscreen');
-      document.body.classList.remove('stadium-fullscreen-active');
-      updateFullscreenUI();
-      draw();
-    } else if (e.key === 'Escape' && foulInfo) closeFoulInfo();
-    else if (e.key === 'Escape' && inMatch && !document.querySelector('dialog[open]')) openPause();
+    if (e.key === 'Escape' && foulInfo) closeFoulInfo();
+    else if (e.key === 'Escape' && inMatch && !ownsFullscreen() && !document.querySelector('dialog[open]')) openPause();
   });
 
   // Match mode: the field fills the screen and the site chrome hides. Entering adds a history
@@ -5321,7 +5325,8 @@
   function updateHome() {
     const active = online?.active || matchInProgress();
     $('home-play-label').textContent = online?.active ? 'Back to online match' : active ? 'Resume match' : 'Quick play';
-    $('home-customize').hidden = $('quick-play-setup').hidden = Boolean(active);
+    $('home-end-match').hidden = !active || Boolean(online?.spectating);
+    $('quick-play-setup').hidden = Boolean(active);
     $('quick-play-signin').hidden = Boolean(active || signedIn());
     const { mode, level, team } = lastCpuSetup || { mode: 'standard', level: 'easy' };
     $('quick-play-setup').textContent = [ububallMatch.modeName(mode), level[0].toUpperCase() + level.slice(1),
@@ -5341,7 +5346,7 @@
     }
     if (inMatch) return;
     inMatch = true; document.body.classList.add('in-match');
-    fitOrientation(); layoutDirty = true; draw();
+    fitOrientation(); updateFullscreenUI();
   }
   function exitMatchMode() {
     closeFirstTurnGuide();
@@ -5350,13 +5355,14 @@
     endReplay();
     if (!inMatch) return;
     inMatch = false; document.body.classList.remove('in-match');
-    setPortrait(false); layoutDirty = true; updateHome();
+    void exitOwnedFullscreen();
+    setPortrait(false); updateFullscreenUI(); updateHome();
     if (!matchInProgress()) startDemo();
   }
   function openPause() {
     $('pause-title').textContent = online?.spectating ? 'Watching' : online?.active ? online.state.matchKind === 'online' ? 'Online match' : 'Friend match' : 'CPU match';
     $('pause-resume').textContent = online?.spectating ? 'Resume watching' : online?.active ? 'Resume match' : 'Resume CPU match';
-    $('pause-leave').textContent = online?.spectating ? 'Stop watching' : 'Leave match';
+    $('pause-end-match').hidden = online?.spectating || !(online?.active || matchInProgress());
     $('pause-restart').disabled = $('new-match').disabled;
     $('pause-restart').hidden = Boolean(online?.active);
     if (inDiscord) {
@@ -5374,8 +5380,16 @@
   function finishCpuMatch() {
     saveRecording(); clearActiveMatch();
     cpuGeneration++; cpuClient.cancel();
+    draft = [...roster];
     phase = 'over'; drag = null;
     closeFirstTurnGuide(); endGoalReplay(); stopFanfare(); gameAudio()?.stop();
+  }
+  function confirmCpuEnd(replacing = false) {
+    return gameUi.confirm({
+      title: replacing ? 'Start a new match?' : 'End match?',
+      message: replacing ? 'Starting a new match ends your current CPU match.' : 'You won’t be able to resume this CPU match.',
+      confirmLabel: replacing ? 'Start new match' : 'End match', cancelLabel: 'Keep match', danger: true
+    });
   }
   $('pause').onclick = openPause;
   $('pause-help').onclick = () => {
@@ -5394,21 +5408,39 @@
   });
   $('match-stats').onclick = () => theater ? openStats() : openMatchStats('pause');
   $('pause-resume').onclick = () => $('pause-menu').close();
-  $('pause-restart').onclick = () => { $('pause-menu').close(); endReplay(); clearActiveMatch(); openSetup('mode'); };
-  $('pause-leave').onclick = async () => {
-    const button = $('pause-leave');
+  async function leaveForHome(button, endMatch) {
+    if (button.disabled) return;
     button.disabled = true;
     try {
       if (online?.active) {
         if (!await online.leave()) return;
-      } else if (inDiscord) {
+      } else if ((endMatch || inDiscord) && matchInProgress()) {
+        if (!await confirmCpuEnd()) return;
         finishCpuMatch();
       }
       exitMatchMode();
       if (history.state?.match) history.back();
+      if (!matchInProgress()) startDemo();
     } finally { button.disabled = false; }
-  };
-  $('home-customize').onclick = async () => { if (await ownTeamReady()) openSetup('mode', 'cpu', lastCpuSetup?.mode, lastCpuSetup?.level); };
+  }
+  $('pause-leave').onclick = () => leaveForHome($('pause-leave'), false);
+  $('pause-end-match').onclick = () => leaveForHome($('pause-end-match'), true);
+  $('home-end-match').onclick = () => leaveForHome($('home-end-match'), true);
+  async function openNewMatch(event) {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      if (!await ownTeamReady()) return;
+      let team = roster;
+      if (online?.active || (signedIn() && onGuestTeam())) team = signedIn() ? await accountTeam() : guestTeam;
+      if (location.pathname === '/' && !$('roster-dialog').open) {
+        openSetup('mode', 'cpu', lastCpuSetup?.mode, lastCpuSetup?.level, team || [null, null, null]);
+      }
+    } catch (error) {
+      await gameUi.confirm({ title: 'Could not load your team', message: error.message, confirmLabel: 'OK' });
+    } finally { button.disabled = false; }
+  }
+  $('pause-restart').onclick = $('home-new-match').onclick = openNewMatch;
   $('home-play').onclick = async () => {
     if (online?.active || matchInProgress()) { enterMatch(); return; }
     if (!await ownTeamReady()) return;
@@ -5776,7 +5808,7 @@
       stopDemo();
       phase = 'over'; drag = null;
       endGoalReplay(); stopFanfare(); gameAudio()?.stop();
-      draft = [...guestTeam];
+      roster = [...guestTeam]; draft = [...roster];
       exitMatchMode();
       startDemo();
       // A match may have opened the signup pack on the server.
@@ -5862,9 +5894,9 @@
       if (!demoPaused()) left -= 100;
     }
   }
-  function newDemoGame() {
+  function newDemoGame(team = roster) {
     demoLevels = Math.random() < .5 ? ['hard', 'medium'] : ['medium', 'hard'];
-    demoGame++; hideFinger(); newMatch();
+    demoGame++; hideFinger(); newMatch(false, team);
     $('home-label').textContent = 'Saffron'; $('opponent-label').textContent = 'Amethyst';
     showMode(fieldView.mode);
   }

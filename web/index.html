@@ -54,14 +54,18 @@
     </div>
     <div class="home-actions">
       <button id="home-play" class="primary" type="button"><span id="home-play-label">Quick play</span><small id="quick-play-setup">Standard · Easy · Guest team</small><small id="quick-play-signin">No sign-in needed</small></button>
-      <button id="home-customize" type="button">Customize match</button>
-      <button id="online-open" type="button"><span id="online-open-label">Play online</span><small id="online-open-note">Play with friends or find a match</small></button><button id="replays-open" type="button">Replays</button>
+      <div class="match-action-pair">
+        <button id="home-new-match" type="button">New match</button>
+        <button id="home-end-match" type="button" hidden>End match</button>
+      </div>
+      <button id="online-open" type="button"><span id="online-open-label">Play online</span><small id="online-open-note">Play with friends or find a match</small></button>
     </div>
     <div class="home-team">
       <div class="home-team-head"><h1 id="home-title">Your team</h1><button id="new-match" type="button">Change team</button></div>
       <div id="home-lineup" class="home-lineup"></div>
       <div id="home-pack" class="starter-pack" hidden><button class="candy-pack" type="button" aria-label="Open your signup pack"><canvas aria-hidden="true"></canvas></button></div>
     </div>
+    <button id="replays-open" type="button">Replays</button>
     <aside class="mint-entry" aria-label="Ubu Mint">
       <div class="mint-entry-content">
         <span class="mint-entry-badge">Ubu Mint</span>
@@ -96,11 +100,11 @@
         <div class="bug-right"><div class="bug-status"><b><i class="turn-long">Turn </i><i class="turn-short">T</i><span id="turn-label">1</span></b><span id="phase">Plan</span><span id="blitz-clock" hidden></span><span class="bug-clock" id="clock-strip" aria-hidden="true" hidden><i></i></span></div></div>
         <div class="stadium-toolbar">
           <button id="btn-sidebars" class="stadium-tool-btn" type="button" aria-label="Hide team sidebars" aria-pressed="false"><i data-icon="columns-2"></i></button>
-          <button id="btn-fullscreen" class="stadium-tool-btn" type="button" aria-label="Toggle fullscreen" title="Toggle fullscreen">
+          <button id="btn-fullscreen" class="stadium-tool-btn" type="button" aria-label="Enter fullscreen" title="Enter fullscreen" aria-pressed="false" hidden>
             <svg id="icon-fs-enter" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
             </svg>
-            <svg id="icon-fs-exit" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display: none;">
+            <svg id="icon-fs-exit" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
             </svg>
           </button>
@@ -146,7 +150,7 @@ SOFTWARE.
           <div id="field-banner" class="field-banner" role="status" aria-live="polite"></div>
           <div class="demo-badge" aria-hidden="true">DEMO</div>
           <button id="skip-goal-replay" type="button" aria-label="Skip goal replay" hidden><span class="demo-badge"></span></button>
-          <button id="demo-play" class="demo-play" type="button" aria-label="Play vs CPU"><span class="demo-hook">3v3 turn-based hockey</span></button>
+          <button id="demo-play" class="demo-play" type="button" aria-label="Play vs CPU"><span class="demo-hook">3v3 turn-based hockey</span><span class="demo-cta">Click or tap to play</span></button>
           <!-- Tabler hand-finger-down icon (MIT), as in uburoom web/icons.js. -->
           <svg id="demo-finger" class="demo-finger" viewBox="0 0 24 24" aria-hidden="true" hidden><g><path d="M8 12v8.5a1.5 1.5 0 0 0 3 0v-7.5"/><path d="M11 13.5v2a1.5 1.5 0 0 0 3 0v-2.5"/><path d="M14 14.5a1.5 1.5 0 0 0 3 0v-1.5"/><path d="M17 13.5a1.5 1.5 0 0 0 3 0v-4.5a6 6 0 0 0 -6 -6h-2h.208a6 6 0 0 0 -5.012 2.7l-.196 .3q -.468 .718 -3.286 5.728a1.5 1.5 0 0 0 .536 2.022c.734 .44 1.674 .325 2.28 -.28l1.47 -1.47"/></g></svg>
         </div>
@@ -211,12 +215,17 @@ SOFTWARE.
   </div>
   <dialog id="pause-menu" class="pause-menu" aria-labelledby="pause-title">
     <div class="pause-menu-main">
-    <h2 id="pause-title">Paused</h2>
+    <div class="pause-heading">
+      <button id="pause-help" class="icon-button" type="button" aria-label="How to play" title="How to play"><i data-icon="help"></i></button>
+      <h2 id="pause-title">Paused</h2>
+    </div>
     <div class="pause-actions">
       <button id="pause-resume" class="primary" type="button">Resume</button>
-      <button id="pause-help" type="button">How to play</button>
       <button id="pause-restart" type="button">New match</button>
-      <button id="pause-leave" type="button">Leave match</button>
+      <div class="match-action-pair">
+        <button id="pause-leave" type="button">Back to home</button>
+        <button id="pause-end-match" type="button">End match</button>
+      </div>
     </div>
     <div id="pause-watch-controls" class="lobby-actions" hidden>
       <button id="pause-allow-watch" class="setting" type="button" aria-pressed="false"><span>Allow spectators</span><span class="setting-value">Off</span></button>
@@ -378,7 +387,13 @@ SOFTWARE.
         </div>
       </div>
     </section>
-    <footer class="team-sheet-foot"><button id="sheet-next" class="primary" type="button">Next: choose team</button><button id="start-match" class="primary" type="button">Start match</button></footer>
+    <footer class="team-sheet-foot">
+      <button id="sheet-start" class="primary" type="button" hidden>
+        <span>Start match with</span><span id="sheet-team-name" hidden></span><span id="sheet-team-preview" aria-hidden="true"></span>
+      </button>
+      <button id="sheet-next" class="primary" type="button">Choose team</button>
+      <button id="start-match" class="primary" type="button">Start match</button>
+    </footer>
   </dialog>
   <dialog id="online-dialog" aria-labelledby="online-title"><div class="online-heading"><div><h2 id="online-title">Online Ububall</h2><p>One opponent. Three ubus. First to five.</p></div><button id="online-close" class="icon-button" aria-label="Close online settings"><i data-icon="x"></i></button></div>
     <div id="online-entry" class="lobby-actions">
