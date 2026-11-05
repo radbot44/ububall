@@ -376,14 +376,13 @@ SOFTWARE.
       <p id="pack-hint" class="pack-prompt"></p>
       <button id="mint" class="primary" hidden>Continue pack</button>
       <p id="status" role="status" aria-live="polite">Connecting to the mint…</p>
-      <div class="availability-actions" id="mint-recovery" hidden><a id="mint-signin" class="button primary" href="/auth/discord?return=%2Fmint" hidden>Sign in with Discord</a><a class="button" href="/?starter=1">Play with starter ubus</a><button id="mint-retry" type="button" hidden>Retry</button></div>
+      <div class="availability-actions" id="mint-recovery" hidden><a class="button" href="/?starter=1">Play with starter ubus</a><button id="mint-retry" type="button" hidden>Retry</button></div>
     </section>
   </main>
   <main data-screen="collection" hidden>
     <h1 class="visually-hidden">Collection</h1>
-    <p class="collection-gate-title" aria-hidden="true">Collection</p>
     <p id="collection-status" class="collection-status" role="status" aria-live="polite">Connecting to the mint…</p>
-    <div class="availability-actions" id="collection-recovery" hidden><a id="collection-signin" class="button primary" hidden>Sign in with Discord</a><a class="button" href="/?starter=1">Play with starter ubus</a><a id="collection-packs" class="button" href="/mint" hidden>Open packs</a><button id="collection-retry" type="button" hidden>Retry</button></div>
+    <div class="availability-actions" id="collection-recovery" hidden><a class="button" href="/?starter=1">Play with starter ubus</a><a id="collection-packs" class="button" href="/mint" hidden>Open packs</a><button id="collection-retry" type="button" hidden>Retry</button></div>
     <section id="collection" hidden aria-labelledby="collection-title">
       <div class="collection-header">
         <h2 id="collection-title">Your ubus</h2>
@@ -396,6 +395,14 @@ SOFTWARE.
       <div id="ubus" class="ubu-grid"></div>
     </section>
   </main>
+  <section id="signed-out-panel" aria-labelledby="signed-out-title" hidden>
+    <h1 id="signed-out-title"></h1>
+    <p id="signed-out-message" role="status"></p>
+    <div class="availability-actions">
+      <a id="signed-out-signin" class="button primary" hidden>Sign in with Discord</a>
+      <a class="button" href="/?starter=1">Play with starter ubus</a>
+    </div>
+  </section>
   <dialog id="viewer" class="viewer" aria-labelledby="ubunym">
     <div class="viewer-toolbar">
       <div class="viewer-tabs" role="tablist" aria-label="Ubu view">

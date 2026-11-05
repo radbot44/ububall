@@ -499,9 +499,8 @@
     $('collection-status').textContent = note;
     $('collection-status').hidden = !note;
   }
-  function collectionRecovery({ signIn = false, packs = false, retry = false } = {}) {
+  function collectionRecovery({ packs = false, retry = false } = {}) {
     $('collection-recovery').hidden = false;
-    $('collection-signin').hidden = !signIn;
     $('collection-packs').hidden = !packs;
     $('collection-retry').hidden = !retry;
   }
@@ -931,21 +930,37 @@
   $('logout').addEventListener('click', async () => {
     try { await api('/api/logout', post({})); location.reload(); } catch (error) { status(error.message); }
   });
+  let sessionChecked = false;
+  function renderSignedOut() {
+    const panel = $('signed-out-panel');
+    const path = location.pathname;
+    const screen = path === '/mint' ? 'mint' : path === '/collection' ? 'collection' : null;
+    panel.hidden = !sessionChecked || Boolean(session?.owner) || !screen;
+    if (panel.hidden) return;
+    const host = document.querySelector(`main[data-screen="${screen}"]`);
+    if (panel.parentElement !== host) host.append(panel);
+    const title = screen === 'mint' ? 'Ubu Mint' : 'Collection';
+    $('signed-out-title').textContent = title;
+    $('signed-out-message').textContent = "You're not signed in. " + (config.login
+      ? `Sign in with Discord to access ${title}.` : 'Sign-in is unavailable here.');
+    const signIn = $('signed-out-signin');
+    signIn.hidden = !config.login;
+    signIn.href = '/auth/discord?return=' + encodeURIComponent(path);
+  }
+  window.addEventListener('ubu:screen', renderSignedOut);
+
   (async () => {
     try {
       config = await ubuList.config();
       $('login').hidden = !config.login;
       if (config.login) {
         $('login').href = '/auth/discord?return=' + encodeURIComponent((location.pathname === '/index.html' ? '/' : location.pathname) + location.search);
-        $('collection-signin').href = '/auth/discord?return=%2Fcollection';
         session = await api('/api/session');
       }
       async function handleSession(s) {
         session = s;
-        const signedOut = !session?.owner;
-        for (const screen of ['mint', 'collection']) document.querySelector(`[data-screen="${screen}"]`).classList.toggle('signed-out-screen', signedOut);
-        $('pack-title').textContent = signedOut ? 'Ubu Mint' : 'Choose your pack';
-        $('mint-signin').hidden = !signedOut || !config.login;
+        sessionChecked = true;
+        renderSignedOut();
         $('mint-retry').hidden = true;
         if (session?.owner) {
           $('login').hidden = true;
@@ -969,13 +984,6 @@
             collectionStatus('The collection is unavailable right now.');
             collectionRecovery();
           }
-        } else {
-          $('pack-hint').textContent = '';
-          const unavailable = 'Sign-in is unavailable here.';
-          status("You're not signed in. " + (config.login ? 'Sign in with Discord to access Ubu Mint.' : unavailable), true);
-          $('mint-recovery').hidden = false;
-          collectionStatus("You're not signed in. " + (config.login ? 'Sign in with Discord to see your ubus.' : unavailable));
-          collectionRecovery({ signIn: Boolean(config.login) });
         }
       }
       window.addEventListener('ubu:session', event => {
