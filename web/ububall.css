@@ -33,6 +33,22 @@
 #online-open { display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .starter-note { grid-column: 1 / -1; margin: 0; color: var(--muted); }
 .availability-actions:not([hidden]) { display: flex; justify-content: center; flex-wrap: wrap; gap: .5rem; margin-block: .75rem; }
+.collection-gate-title { display: none; }
+body:has(.signed-out-screen:not([hidden])) { display: flex; flex-direction: column; }
+main.signed-out-screen:not([hidden]) {
+  flex: 1; width: 100%; margin: 0; padding: 1.25rem;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center;
+  background: radial-gradient(ellipse at center, #29243a, transparent 72%);
+}
+.signed-out-screen .pack-shop { margin: 0; padding: 0; width: 100%; }
+.signed-out-screen .pack-shop::before, .signed-out-screen :is(.pack-subtitle, #pack-hint) { display: none; }
+.signed-out-screen .collection-gate-title { display: block; }
+.signed-out-screen :is(#pack-title, .collection-gate-title) {
+  margin: 0; font: clamp(2rem, 7vw, 4rem)/1.1 var(--font-display);
+}
+.signed-out-screen :is(#status, #collection-status) { margin: .75rem 0; font-size: 1rem; color: var(--text); }
+.signed-out-screen .availability-actions .button { min-height: 2.75rem; }
 .mint-entry {
   display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .875rem 1rem; border-radius: 1.125rem;
   background: color-mix(in srgb, var(--card) 90%, var(--primary) 10%);
