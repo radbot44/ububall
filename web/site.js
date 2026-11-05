@@ -58,6 +58,7 @@
   // The daily pack comes before the shop; regular packs are dealt once it is opened.
   function syncDaily() {
     const daily = Boolean(session?.owner && ubuStarter.status?.daily);
+    $('pack-title').parentElement.classList.toggle('settled', ubuStarter.known);
     $('daily-pack').hidden = !daily || Boolean(pack);
     $('pack-title').textContent = daily ? 'Your daily pack' : 'Choose your pack';
     $('pack-subtitle').textContent = daily ? 'Tap it to crack it open!' : 'Pick a pack to crack open!';
@@ -65,7 +66,7 @@
     else if (ubuStarter.status && offer) $('pack-choices').hidden = false;
     else if (ubuStarter.status && !pack && config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey))) void loadChoices();
   }
-  let outOfPacks = false;
+  let outOfPacks = false, dealFailed = false;
   let pack = null, packKey = '', pendingKey = '', revealIndex = 0;
   let viewerView = 'ubu';
   const FAV_STORAGE_KEY = 'ubumint:favorites';
@@ -131,11 +132,8 @@
   }
   // The shop deals packs by itself; the one button only continues an unrevealed pack or retries.
   function updatePackButton() {
-    const canDeal = session?.owner && !ubuStarter.status?.daily && config.ready && (config.lifetimeLimit || (pendingKey && localStorage.getItem(pendingKey)));
-    const label = pack ? 'Continue pack' : 'Try again';
-    $('mint').textContent = label;
-    $('mint').hidden = busy || !(pack || (canDeal && !offer && !outOfPacks));
-    $('pack-hint').textContent = busy && !offer ? 'Shuffling packs…' : '';
+    $('mint').textContent = pack ? 'Continue pack' : 'Try again';
+    $('mint').hidden = busy || !(pack || dealFailed);
     for (const view of choiceViews) view.button.disabled = busy || !offer || Boolean(pack);
   }
   // Short dances a clicked ubu performs, picked at random.
@@ -908,7 +906,7 @@
   }
   async function loadChoices() {
     if (busy || !session?.owner || pack || !ubuStarter.status || ubuStarter.status.daily) return;
-    busy = true; updatePackButton();
+    busy = true; dealFailed = false; updatePackButton();
     try {
       let request = localStorage.getItem(pendingKey);
       if (!request) { request = crypto.randomUUID(); localStorage.setItem(pendingKey, request); }
@@ -927,9 +925,8 @@
       collectionList.render();
     } catch (error) {
       outOfPacks = error.message === 'Lifetime mint limit reached.';
+      dealFailed = !outOfPacks;
       status(outOfPacks ? "You've opened every pack you can. Enjoy your ubus!" : error.message, outOfPacks);
-      $('mint-recovery').hidden = false;
-      $('mint-retry').hidden = outOfPacks;
     } finally { busy = false; updatePackButton(); }
   }
   async function selectPack(index) {
@@ -1000,7 +997,7 @@
   (async () => {
     try {
       config = await ubuList.config();
-      $('login').hidden = !config.login;
+      if (!config.login) $('login').hidden = true;
       if (config.login) {
         $('login').href = '/auth/discord?return=' + encodeURIComponent((location.pathname === '/index.html' ? '/' : location.pathname) + location.search);
         session = await api('/api/session');
@@ -1021,12 +1018,13 @@
             localStorage.removeItem(pendingKey + ':choice');
           }
           updatePackButton();
+          $('pack-title').parentElement.classList.toggle('settled', Boolean(pack));
           const canOpen = pack || (config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey)));
           status(canOpen ? '' : config.ready ? 'No packs are available for this account.' : 'Minting closed', true);
           $('mint-recovery').hidden = Boolean(canOpen);
           if (config.ready) {
             try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
-            await ubuStarter.refresh().catch(error => status(error.message));
+            await ubuStarter.refresh().catch(error => { status(error.message); $('pack-title').parentElement.classList.add('settled'); });
             await collection();
           } else {
             collectionStatus('The collection is unavailable right now.');
@@ -1037,7 +1035,7 @@
       window.addEventListener('ubu:session', event => {
         if (event.detail?.owner && (!session?.owner || session.owner !== event.detail.owner)) {
           handleSession(event.detail);
-        }
+        } else if (event.detail?.owner) session = event.detail; // A new Activity launch renews the CSRF token.
       });
       await handleSession(session);
     } catch (error) {

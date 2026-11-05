@@ -5023,7 +5023,8 @@
     $('home-lineup').hidden = $('new-match').hidden = signup;
     $('home-title').textContent = signup ? 'Signup bonus' : 'Your team';
     if (signup) void window.loadMintScripts();
-    else if (signedIn()) void ubuList.load({ refresh: true }).then(adoptAccountTeam).catch(() => {});
+    const adopted = !signup && signedIn() ? ubuList.load({ refresh: true }).then(adoptAccountTeam).catch(() => {}) : null;
+    if (window.ubuStarter.known) void Promise.resolve(adopted).then(() => $('home-pack').parentElement.classList.add('settled'));
   }
   window.addEventListener('ubu:starter', showSignupPack);
   document.addEventListener('DOMContentLoaded', showSignupPack); // The status may have come before this script.
