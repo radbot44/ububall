@@ -76,6 +76,8 @@ On Windows, use PowerShell with Node 22.13+ and Git installed. From `C:\dev\ubub
 .\install.ps1 -InstallOnly    # copy code only
 ```
 
+To deploy while developing, leave `npm run dev` running in the source checkout and run `.\install.ps1` from a second terminal there. The installer tests and deploys from the separate deployment copy, which has its own dependencies and built assets. Direct `deploy.ps1` reinstalls dependencies in the directory it runs from, so it requires Wrangler to be idle in that directory.
+
 The source checkout is authoritative, including current tracked working edits. You can also run `.\install.ps1` from `ubumint-cloudflare`: it forwards to the recorded source checkout (or sibling `ububall` / `ubumint` for unmanifested or renamed installations), retaining all switches. This does not pull GitHub or push anything. Update your source checkout first when you want newer code. The installed folder is a deployment copy: do not use `git pull` or stash there. Existing separate code edits stop installation before copying; changes already identical to source are accepted. Replaced files are backed up outside the checkout. Runtime state and ignored files stay in place. The old installation's `.\update.ps1` now invokes this installer; `.\deploy.ps1` tests and redeploys the already installed code without copying updates.
 
 Install and deploy stop before touching the installation when another Wrangler command is using it. Let an existing deployment finish, or close its local dev terminal, before retrying; this avoids Windows executable locks during dependency installation.

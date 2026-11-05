@@ -19,7 +19,9 @@ try {
         ($_.CommandLine -and $_.CommandLine.Replace('/', '\') -match $wranglerPath) -or
         ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($modulesPath, [StringComparison]::OrdinalIgnoreCase))
     })
-    if ($busy.Count) { throw "Wrangler is already using this installation (process IDs: $($busy.ProcessId -join ', ')). Let that command finish or close its dev terminal, then retry." }
+    if ($busy.Count) {
+        throw "Wrangler is using this directory (process IDs: $($busy.ProcessId -join ', ')). Deploying here would replace its node_modules. Keep npm run dev in the source checkout and run .\install.ps1 there to deploy from the separate installation."
+    }
     $SettingsDirectory = [IO.Path]::GetFullPath($SettingsDirectory)
     New-Item -ItemType Directory -Force -Path $SettingsDirectory | Out-Null
     # Restrict saved production credentials, generated secret payloads and backups.

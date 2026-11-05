@@ -1,17 +1,21 @@
 'use strict';
 function ububallOnline(hooks) {
   const $ = id => document.getElementById(id);
-  const invite = new URL(location.href).searchParams.get('match');
+  const params = new URL(location.href).searchParams;
+  const watchInvite = params.get('watch'), invite = watchInvite ? null : params.get('match');
+  const activity = window.ubuActivity;
   let id = null, socket = null, session = null, state = null, retry = null, heartbeat = null;
   let stopped = false, lastPong = 0, offset = 0, lastDraft = '', sentAt = 0;
+  let watchKey = null, queue = null, queueTimer, queueBusy = false;
   // The lobby shows on the team screen; the dialog only creates, joins and ends matches.
   const status = text => { $('online-status').textContent = text; $('lobby-status').textContent = text; };
   const playable = () => Boolean(session?.owner || session?.guest);
   function account() {
-    $('online-login').hidden = Boolean(session?.owner);
-    $('online-guest').hidden = playable();
+    $('online-login').hidden = Boolean(session?.owner || queue);
+    $('online-guest').hidden = playable() || Boolean(activity || queue);
     $('online-account-status').textContent = session?.owner ? 'Signed in with Discord' :
-      session?.guest ? 'Playing as a guest. Sign in with Discord to use your ubus; you keep your seat.' : 'Sign in with Discord or play as a guest.';
+      session?.guest ? 'Playing as a guest. Sign in with Discord to use your ubus; you keep your seat.' :
+        activity ? 'Connect your Discord account to play online.' : 'Sign in with Discord or play as a guest.';
     $('online-create').disabled = !playable();
   }
   async function joinInvite() {
@@ -32,7 +36,7 @@ function ububallOnline(hooks) {
     const wasGuest = Boolean(session?.guest);
     session = event.detail; account();
     // Reconnecting under the Discord session moves a former guest's seat to their Discord account.
-    if (id && wasGuest) { clearTimeout(retry); connect(); }
+    if (id && wasGuest && !watchKey) { clearTimeout(retry); connect(); }
     else joinInvite();
   });
   async function api(path, data) {
@@ -45,11 +49,37 @@ function ububallOnline(hooks) {
     if (!response.ok) throw new Error(result.error || 'Could not reach the match.');
     return result;
   }
+  async function watchState(match, key) {
+    const response = await fetch('/api/ububall/' + match + '/watch-state?key=' + encodeURIComponent(key));
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not reach the match.');
+    return result;
+  }
+  function updateWatchControls(next) {
+    $('pause-watch-controls').hidden = !next || Boolean(next.spectator);
+    for (const location of ['lobby', 'pause']) {
+      const toggle = $(location + '-allow-watch');
+      toggle.setAttribute('aria-pressed', String(Boolean(next?.watchAllowed)));
+      toggle.textContent = next?.watchAllowed ? next.watchKey ? 'Spectators allowed' : 'Waiting for opponent to allow spectators' : 'Allow spectators';
+      const copy = $(location + '-copy-watch');
+      copy.hidden = !next?.watchKey;
+      if (!next?.watchKey) copy.textContent = 'Copy watch link';
+    }
+  }
   function receive(next, reopen = false) {
     if (state && next.revision < state.revision) return;
+    if (next.spectator) next.seat = 0; // Fixed rink orientation for viewers.
     const before = state; state = next; offset = next.now - Date.now();
     $('online-create-controls').hidden = true;
     $('online-ended').hidden = true;
+    updateWatchControls(next);
+    if (next.spectator) {
+      if (next.game) { $('online-dialog').close(); hooks.onState(next); }
+      else if (!before) { showDialog(); status(next.phase === 'over' ? 'This match has ended.' : 'Waiting for kickoff…'); }
+      else hooks.onState(next);
+      return;
+    }
+    $('lobby-invite').hidden = next.paired;
     $('online-invite').value = location.origin + '/?match=' + id;
     const other = 1 - next.seat, them = next.names[other] || (next.occupied[other] ? 'Your opponent' : 'Opponent'), ready = next.ready[next.seat];
     if (before && !before.occupied[other] && next.occupied[other]) nudge(`${them} joined`);
@@ -83,7 +113,8 @@ function ububallOnline(hooks) {
   document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = title; });
   function connect() {
     if (stopped || !id) return;
-    const current = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/ububall/' + id + '/socket');
+    const path = watchKey ? '/watch-socket?key=' + encodeURIComponent(watchKey) : '/socket';
+    const current = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/ububall/' + id + path);
     socket = current;
     current.onopen = () => { lastPong = Date.now(); };
     current.onmessage = event => {
@@ -95,16 +126,28 @@ function ububallOnline(hooks) {
     current.onclose = event => {
       if (socket !== current || stopped) return;
       hooks.onDisconnect();
-      if (event.code === 4001 || event.code === 4002 || event.code === 4003) {
-        stopped = true; status(event.code === 4001 ? 'Match opened in another tab.' : event.code === 4002 ? 'Match expired.' : 'You left this match.'); return;
+      if ([4001, 4002, 4003].includes(event.code)) {
+        stopped = true;
+        const message = event.code === 4001 ? 'Match opened in another tab.' : event.code === 4002 ? 'Match expired.' :
+          watchKey ? 'Spectating has ended.' : 'You left this match.';
+        status(message); hooks.onError(message);
+        return;
       }
-      status('Reconnecting…'); retry = setTimeout(connect, 1500);
+      status('Reconnecting…');
+      retry = setTimeout(async () => {
+        try { if (watchKey) await watchState(id, watchKey); }
+        catch (error) { stopped = true; status(error.message); hooks.onError(error.message); return; }
+        connect();
+      }, 1500);
     };
   }
-  async function enter(matchId, initial) {
-    id = matchId; state = null; stopped = false; lastDraft = '';
+  async function enter(matchId, initial, key = null) {
+    id = matchId; watchKey = key; state = null; stopped = false; lastDraft = '';
     $('online-dialog').close();
-    const url = new URL(location.href); url.pathname = '/'; url.searchParams.set('match', id); history.replaceState(null, '', url);
+    const url = new URL(location.href); url.pathname = '/';
+    url.searchParams.delete(key ? 'match' : 'watch');
+    url.searchParams.set(key ? 'watch' : 'match', key ? id + '.' + key : id);
+    history.replaceState(null, '', url);
     receive(initial); connect();
     clearInterval(heartbeat);
     heartbeat = setInterval(() => {
@@ -116,15 +159,18 @@ function ububallOnline(hooks) {
   }
   // Leaving tells the server, so the opponent isn't left waiting to claim a forfeit.
   async function leave() {
-    const live = state && ['plan', 'resolving'].includes(state.phase);
+    const historyState = watchKey ? history.state : null;
+    const live = !watchKey && state && ['plan', 'resolving'].includes(state.phase);
     if (live && !await gameUi.confirm({ title: 'Leave match?', message: `Leaving ends the match and gives ${state.names[1 - state.seat] || 'your opponent'} the win.`,
       confirmLabel: 'Leave', cancelLabel: 'Keep playing', danger: true })) return;
     stopped = true;
-    if (id) await api('/api/ububall/' + id + '/leave', {}).catch(() => {});
-    clearTimeout(retry); clearInterval(heartbeat); socket?.close(); socket = null; id = null; state = null;
+    if (id && !watchKey) await api('/api/ububall/' + id + '/leave', {}).catch(() => {});
+    clearTimeout(retry); clearInterval(heartbeat); socket?.close(); socket = null; id = null; state = null; watchKey = null;
     hooks.closeLobby();
-    const url = new URL(location.href); url.pathname = '/'; url.searchParams.delete('match'); history.replaceState(null, '', url);
-    $('online-create-controls').hidden = false; $('online-ended').hidden = true; $('online-dialog').close();
+    const url = new URL(location.href); url.pathname = '/';
+    url.searchParams.delete('match'); url.searchParams.delete('watch'); history.replaceState(historyState, '', url);
+    updateWatchControls(null);
+    $('online-create-controls').hidden = true; $('online-ended').hidden = true; $('online-dialog').close();
     hooks.onLeave();
   }
   const settings = { policy: 'practice' };
@@ -136,11 +182,17 @@ function ububallOnline(hooks) {
   };
   // The rules come from the mode screen; this dialog then sets up the invite.
   let createMode = 'standard';
-  function showDialog() {
-    $('online-dialog').showModal();
+  function showDialog(create = false) {
+    $('online-entry').hidden = Boolean(id || create || queue);
+    $('online-create-controls').hidden = !create;
+    $('online-watch-list').hidden = true;
+    $('online-ended').hidden = !id;
+    $('online-leave').textContent = watchKey ? 'Stop watching' : 'Leave online match';
+    if (!$('online-dialog').open) $('online-dialog').showModal();
     refreshSession().catch(error => status(error.message));
   }
-  $('online-open').onclick = () => { if (!id) hooks.chooseMode(createMode); else if (state?.phase === 'lobby') receive(state, true); else showDialog(); };
+  $('online-open').onclick = () => { if (id && !watchKey && state?.phase === 'lobby') receive(state, true); else showDialog(); };
+  $('online-private').onclick = () => { $('online-dialog').close(); hooks.chooseMode(createMode); };
   $('online-mode-change').onclick = () => { $('online-dialog').close(); hooks.chooseMode(createMode); };
   $('online-close').onclick = () => $('online-dialog').close();
   $('online-leave').onclick = leave;
@@ -152,6 +204,124 @@ function ububallOnline(hooks) {
     } catch (error) { status(error.message); }
     finally { $('online-create').disabled = !playable(); }
   };
+  async function guestSession() {
+    const response = await fetch('/api/guest', { method: 'POST' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not start a guest session.');
+    session = result; account();
+  }
+  async function ensureSession() {
+    await refreshSession();
+    if (activity && !session?.owner) session = await activity.signIn();
+    else if (!playable()) await guestSession();
+  }
+  function setQueue(value) {
+    queue = value;
+    try {
+      if (value) sessionStorage.setItem('ububall-queue', value);
+      else sessionStorage.removeItem('ububall-queue');
+    } catch { /* queue can still run */ }
+    $('online-entry').hidden = Boolean(value || id);
+    $('online-watch-list').hidden = true;
+    $('online-cancel-queue').hidden = !value;
+    $('online-close').disabled = Boolean(value);
+    account();
+  }
+  async function queueRequest(action) {
+    if (queueBusy || !queue) return;
+    clearTimeout(queueTimer);
+    queueBusy = true;
+    $('online-cancel-queue').disabled = true;
+    const scope = queue;
+    const destination = { queue: scope, ...(scope === 'friends' ? { instance: activity.instance } : {}) };
+    try {
+      if (action === 'enter') await ensureSession();
+      const result = await api('/api/ububall/queue', { ...destination, action });
+      if (result.status === 'matched') {
+        const initial = await api('/api/ububall/' + result.id + '/join', {});
+        setQueue(null);
+        await enter(result.id, initial);
+        void api('/api/ububall/queue', { ...destination, action: 'ack', id: result.id }).catch(() => {});
+      } else if (result.status === 'waiting') {
+        status(scope === 'friends' ? 'Waiting for a friend to queue in this Activity…' : 'Finding an online opponent…');
+        queueTimer = setTimeout(() => queueRequest('poll'), 2500);
+      } else {
+        setQueue(null);
+        status(result.status === 'busy' ? 'You are already in another queue. Cancel it there to switch.' :
+          action === 'cancel' ? 'Queue canceled.' : 'Your queue entry expired. Queue up again to play.');
+      }
+    } catch (error) {
+      if (action === 'enter' || !playable()) setQueue(null);
+      else queueTimer = setTimeout(() => queueRequest('poll'), 4000);
+      status(error.message);
+    } finally {
+      queueBusy = false; $('online-cancel-queue').disabled = false;
+    }
+  }
+  function startQueue(scope) {
+    if (queue || id) return;
+    setQueue(scope);
+    status('Connecting…');
+    void queueRequest('enter');
+  }
+  $('online-friends').hidden = $('online-invite-friends').hidden = $('online-watch').hidden = !activity;
+  $('online-private').hidden = Boolean(activity);
+  $('online-friends').onclick = () => startQueue('friends');
+  $('online-public').onclick = () => startQueue('public');
+  $('online-cancel-queue').onclick = () => queueRequest('cancel');
+  $('online-dialog').addEventListener('cancel', event => { if (queue) event.preventDefault(); });
+  $('online-invite-friends').onclick = async () => {
+    try { await activity.invite(); }
+    catch (error) { status(error.message); }
+  };
+  $('online-watch').onclick = async () => {
+    const list = $('online-watch-list');
+    $('online-watch').disabled = true;
+    list.replaceChildren(); list.hidden = true;
+    try {
+      await ensureSession();
+      const matches = await api('/api/ububall/activity-watch?instance=' + encodeURIComponent(activity.instance));
+      for (const { id: match, key, names, scores } of matches) {
+        const label = names.map((name, i) => name || 'Player ' + (i + 1));
+        const button = Object.assign(document.createElement('button'), { type: 'button',
+          textContent: `${label[0]} ${scores[0]} – ${scores[1]} ${label[1]}` });
+        button.onclick = async () => {
+          button.disabled = true;
+          try {
+            const initial = await watchState(match, key);
+            if (!id && !queue) await enter(match, initial, key);
+          }
+          catch (error) { status(error.message); }
+          finally { button.disabled = false; }
+        };
+        list.append(button);
+      }
+      list.hidden = !matches.length || Boolean(queue || id);
+      status(matches.length ? 'Choose a match to watch.' : 'No matches are open to spectators in this Activity.');
+    } catch (error) { status(error.message); }
+    finally { $('online-watch').disabled = false; }
+  };
+  async function toggleWatch(button) {
+    if (!state || watchKey) return;
+    button.disabled = true;
+    try { receive(await api('/api/ububall/' + id + '/allow-watch', { allowed: !state.watchAllowed })); }
+    catch (error) { status(error.message); hooks.onError(error.message); }
+    finally { button.disabled = false; }
+  }
+  for (const location of ['lobby', 'pause']) {
+    const button = $(location + '-allow-watch'), copy = $(location + '-copy-watch');
+    button.onclick = () => toggleWatch(button);
+    copy.onclick = async () => {
+      if (!state?.watchKey) return;
+      const link = new URL('/', session?.site || window.location.origin);
+      link.searchParams.set('watch', id + '.' + state.watchKey);
+      try { await navigator.clipboard.writeText(link.href); copy.textContent = 'Watch link copied'; }
+      catch {
+        void gameUi.confirm({ title: 'Watch link', message: 'Copy this link to share the live match.', confirmLabel: 'Done',
+          input: { value: link.href, maxLength: link.href.length, readOnly: true } });
+      }
+    };
+  }
   // Phones get their share sheet, so the invite goes straight to a chat app.
   $('online-share').hidden = !navigator.share || !matchMedia('(pointer: coarse)').matches;
   $('online-share').onclick = () => navigator.share({ title: 'Ububall', text: 'Play me at Ububall', url: $('online-invite').value }).catch(() => {});
@@ -166,34 +336,45 @@ function ububallOnline(hooks) {
   $('online-guest').onclick = async () => {
     $('online-guest').disabled = true;
     try {
-      const response = await fetch('/api/guest', { method: 'POST' });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Could not start a guest session.');
-      session = result; account(); await joinInvite();
+      await guestSession(); await joinInvite();
     } catch (error) { status(error.message); }
     finally { $('online-guest').disabled = false; }
   };
-  if (invite) {
-    $('online-dialog').showModal();
-    refreshSession().then(() => playable() ? joinInvite() : status('Sign in with Discord or play as a guest to join this match.'))
-      .catch(error => status(error.message));
+  if (watchInvite) {
+    showDialog();
+    const match = /^([0-9a-f-]{36})\.([0-9a-f-]{36})$/.exec(watchInvite);
+    if (!match) status('This watch link is invalid.');
+    else watchState(match[1], match[2]).then(initial => enter(match[1], initial, match[2])).catch(error => status(error.message));
+  } else if (invite) {
+    showDialog();
+    $('online-entry').hidden = true;
+    (activity ? ensureSession() : refreshSession())
+      .then(() => playable() ? joinInvite() : status('Sign in with Discord or play as a guest to join this match.')).catch(error => status(error.message));
+  } else {
+    let saved;
+    try { saved = sessionStorage.getItem('ububall-queue'); } catch { /* storage can be disabled */ }
+    if (saved === 'public' || (activity && saved === 'friends')) {
+      setQueue(saved);
+      showDialog();
+      void queueRequest('poll');
+    }
   }
   return {
-    get active() { return Boolean(id); }, get state() { return state; },
+    get active() { return Boolean(id); }, get state() { return state; }, get spectating() { return Boolean(watchKey); },
     leave,
     // Locks in a team: owned seats send serials in Back, Top, Bottom order; every seat sends supers.
     async ready(team) { receive(await api('/api/ububall/' + id + '/team', team)); },
     async unready() { receive(await api('/api/ububall/' + id + '/unready', {})); },
-    create(mode) { createMode = mode; $('online-mode-name').textContent = ububallMatch.modeName(mode); showDialog(); },
+    create(mode) { createMode = mode; $('online-mode-name').textContent = ububallMatch.modeName(mode); showDialog(true); },
     now: () => Date.now() + offset,
     async skipReplay() {
-      if (state?.phase !== 'resolving' || state.replay?.goal == null || state.playUntil !== null) return;
+      if (watchKey || state?.phase !== 'resolving' || state.replay?.goal == null || state.playUntil !== null) return;
       const match = id;
       const next = await api('/api/ububall/' + match + '/skip-replay', { startedAt: state.replay.startedAt });
       if (id === match) receive(next);
     },
     rematch() {
-      if (!state || state.phase !== 'over') return;
+      if (watchKey || !state || state.phase !== 'over') return;
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'rematch' }));
       } else {
@@ -201,7 +382,7 @@ function ububallOnline(hooks) {
       }
     },
     send(moves, lock = false) {
-      if (!state || state.phase !== 'plan' || state.locked[state.seat] || !state.connected.every(Boolean) || socket?.readyState !== WebSocket.OPEN) return false;
+      if (watchKey || !state || state.phase !== 'plan' || state.locked[state.seat] || !state.connected.every(Boolean) || socket?.readyState !== WebSocket.OPEN) return false;
       const text = JSON.stringify({ type: 'moves', turn: state.turn, moves, lock });
       if (!lock && (text === lastDraft || Date.now() - sentAt < 120)) return false;
       socket.send(text); lastDraft = text; sentAt = Date.now(); return true;

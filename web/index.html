@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark"><title>Ububall</title>
   <link rel="stylesheet" href="site.css"><link rel="stylesheet" href="ububall.css">
-  <script src="site-header.js" defer></script><script src="game-ui.js" defer></script><script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script><script src="rarity.js" defer></script>
+  <script src="ububall-activity.js" defer></script><script src="site-header.js" defer></script><script src="game-ui.js" defer></script><script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script><script src="rarity.js" defer></script>
   <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-replay.js" defer></script><script src="mp4.js" defer></script><script src="ububall-cpu.js" defer></script><script src="ububall-cpu-client.js" defer></script><script src="ububall-online.js" defer></script><script src="ubu-list.js" defer></script><script src="ububall-presentation.js" defer></script><script src="ububall.js" defer></script><script src="app.js" defer></script>
 </head>
 <body>
@@ -34,7 +35,7 @@
     <div class="home-actions">
       <button id="home-play" class="primary" type="button"><span id="home-play-label">Quick play</span><small id="quick-play-setup">Standard · Easy · Starter team</small><small id="quick-play-signin">No sign-in needed</small></button>
       <button id="home-customize" type="button">Customize match</button>
-      <button id="online-open" type="button"><span id="online-open-label">Play online</span><small id="online-open-note">Private match by invite</small></button><button id="replays-open" type="button">Replays</button>
+      <button id="online-open" type="button"><span id="online-open-label">Play online</span><small id="online-open-note">Play with friends or find a match</small></button><button id="replays-open" type="button">Replays</button>
     </div>
     <div class="home-team">
       <div class="home-team-head"><h1 id="home-title">Your team</h1><button id="new-match" type="button">Change team</button></div>
@@ -200,6 +201,10 @@ SOFTWARE.
       <button id="pause-restart" type="button">New match</button>
       <button id="pause-leave" type="button">Leave match</button>
     </div>
+    <div id="pause-watch-controls" class="lobby-actions" hidden>
+      <button id="pause-allow-watch" type="button" aria-pressed="false">Allow spectators</button>
+      <button id="pause-copy-watch" type="button" hidden>Copy watch link</button>
+    </div>
     <div class="pause-settings">
       <button id="setting-aim" class="setting" type="button" title="Switch how dragging on the rink aims a launch"><span>Aim by</span><span class="setting-value">Drag arrow</span></button>
       <button id="setting-spin" class="setting" type="button" aria-pressed="false" title="Turn the spin slider beside the selected ubu on or off"><span>Spin slider</span><span class="setting-value">Off</span></button>
@@ -318,10 +323,10 @@ SOFTWARE.
     <section class="sheet-step team-step" aria-labelledby="team-title">
       <header class="team-step-head"><button id="team-back" class="quiet" type="button"><i data-icon="arrow-left"></i>Mode</button><div class="team-heading"><h2 id="team-title">Your team</h2><span id="team-mode" class="team-mode"></span></div></header>
       <div id="lobby-panel" class="lobby-panel" hidden>
-        <div class="lobby-invite"><input id="online-invite" readonly aria-label="Invite link"><button id="online-copy" type="button">Copy invite</button><button id="online-share" type="button" hidden>Share</button></div>
+        <div id="lobby-invite" class="lobby-invite"><input id="online-invite" readonly aria-label="Invite link"><button id="online-copy" type="button">Copy invite</button><button id="online-share" type="button" hidden>Share</button></div>
         <p id="lobby-status" class="lobby-status" role="status"></p>
         <p id="lobby-note" class="lobby-note"></p>
-        <div class="lobby-actions"><a id="lobby-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a><button id="lobby-leave" class="quiet" type="button">Leave match</button></div>
+        <div class="lobby-actions"><a id="lobby-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a><button id="lobby-allow-watch" type="button" aria-pressed="false">Allow spectators</button><button id="lobby-copy-watch" type="button" hidden>Copy watch link</button><button id="lobby-leave" class="quiet" type="button">Leave match</button></div>
       </div>
       <div id="team-bar" class="team-bar" hidden>
         <button id="team-prev" class="team-step-btn" type="button" aria-label="Previous saved team"><i data-icon="chevron-left"></i></button>
@@ -355,7 +360,16 @@ SOFTWARE.
     <footer class="team-sheet-foot"><button id="sheet-next" class="primary" type="button">Next: choose team</button><button id="start-match" class="primary" type="button">Start match</button></footer>
   </dialog>
   <dialog id="online-dialog" aria-labelledby="online-title"><div class="online-heading"><div><h2 id="online-title">Online Ububall</h2><p>One opponent. Three ubus. First to five.</p></div><button id="online-close" class="icon-button" aria-label="Close online settings"><i data-icon="x"></i></button></div>
-    <div id="online-create-controls">
+    <div id="online-entry" class="lobby-actions">
+      <button id="online-friends" class="primary" type="button" hidden>Play with friends</button>
+      <button id="online-invite-friends" type="button" hidden>Invite friends</button>
+      <button id="online-public" type="button">Find online match</button>
+      <button id="online-private" type="button">Create invite match</button>
+      <button id="online-watch" type="button" hidden>Watch</button>
+    </div>
+    <div id="online-watch-list" class="lobby-actions" hidden></div>
+    <button id="online-cancel-queue" type="button" hidden>Cancel queue</button>
+    <div id="online-create-controls" hidden>
       <p class="online-mode-line">Mode: <strong id="online-mode-name">Ububall</strong> <button id="online-mode-change" class="quiet" type="button">Change</button></p>
       <fieldset><legend>Teams</legend><div id="online-policy" class="online-options">
         <button data-value="practice" aria-pressed="true">Practice teams<small>Play with provided ubus</small></button>

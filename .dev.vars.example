@@ -3,6 +3,8 @@
 ORIGIN="http://127.0.0.1:8790"
 DISCORD_CLIENT_ID="<Discord application ID>"
 DISCORD_CLIENT_SECRET="<Discord application secret>"
+# Optional. Enable Activities with the bot token for the same application.
+# DISCORD_ACTIVITY_BOT_TOKEN="<Discord bot token>"
 SESSION_SECRET="<canonical base64url of 32 random bytes>"
 MINT_ID="<permanent canonical base64url of 16 random bytes>"
 MINT_KEY_ID="mint-1"

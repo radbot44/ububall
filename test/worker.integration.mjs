@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestHarness } from 'wrangler';
-import { login, callback } from '../server/auth.mjs';
+import { login, callback, activityLogin } from '../server/auth.mjs';
 import file from '../shared/ubu-file.js';
 import ubu from '../shared/ubu.js';
 
@@ -9,7 +9,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
   const keys = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
   const privateKey = await crypto.subtle.exportKey('jwk', keys.privateKey);
   const env = {
-    ORIGIN: 'http://127.0.0.1', DISCORD_CLIENT_ID: '123', DISCORD_CLIENT_SECRET: 'test-only',
+    ORIGIN: 'http://127.0.0.1', DISCORD_CLIENT_ID: '123', DISCORD_CLIENT_SECRET: 'test-only', DISCORD_ACTIVITY_BOT_TOKEN: 'test-bot',
     SESSION_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url'),
     MINT_ID: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url'), MINT_KEY_ID: 'test-1',
     MINT_PUBLIC_KEYS: JSON.stringify({ 'test-1': privateKey.x }), MINT_PRIVATE_KEYS: JSON.stringify({ 'test-1': privateKey }),
@@ -18,7 +18,8 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
   const server = createTestHarness({ workers: [{ configPath: './wrangler.jsonc', vars: {
     ORIGIN: env.ORIGIN, MINT_ID: env.MINT_ID, MINT_KEY_ID: env.MINT_KEY_ID, MINT_PUBLIC_KEYS: env.MINT_PUBLIC_KEYS,
     DISCORD_CLIENT_ID: env.DISCORD_CLIENT_ID, BATCH_SIZE: env.BATCH_SIZE, LIFETIME_MINT_LIMIT: env.LIFETIME_MINT_LIMIT
-  }, secrets: { SESSION_SECRET: env.SESSION_SECRET, MINT_PRIVATE_KEYS: env.MINT_PRIVATE_KEYS, DISCORD_CLIENT_SECRET: env.DISCORD_CLIENT_SECRET } }] });
+  }, secrets: { SESSION_SECRET: env.SESSION_SECRET, MINT_PRIVATE_KEYS: env.MINT_PRIVATE_KEYS, DISCORD_CLIENT_SECRET: env.DISCORD_CLIENT_SECRET,
+    DISCORD_ACTIVITY_BOT_TOKEN: env.DISCORD_ACTIVITY_BOT_TOKEN } }] });
   t.after(() => server.close());
   await server.listen();
   const fetch = (path, options) => server.fetch(env.ORIGIN + path, options);
@@ -72,7 +73,8 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(legacy.status, 200);
     const legacyText = await legacy.text();
     assert.match(legacyText, /location\.replace\('\/' \+ location\.search/);
-    for (const path of ['/ubu-render.js', '/demo.html', '/site.js', '/rarity.js', '/app.js', '/ububall.html', '/ububall.js', '/ububall.css']) assert.equal((await fetch(path)).status, 200);
+    for (const path of ['/ubu-render.js', '/demo.html', '/site.js', '/rarity.js', '/app.js', '/ububall.html', '/ububall.js', '/ububall.css',
+      '/ububall-activity.js', '/discord-sdk.js']) assert.equal((await fetch(path)).status, 200);
     for (const path of ['/worker.mjs', '/mint.js', '/auth.mjs', '/AGENTS.md', '/.dev.vars', '/state/mint.sqlite']) assert.equal((await fetch(path)).status, 404);
     const response = await fetch('/api/config'), config = await response.json();
     assert.equal(config.lifetimeLimit, 3); assert.equal(config.keys['test-1'], privateKey.x);
@@ -322,8 +324,8 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const outsider = await signedIn('567890123456789012');
     assert.equal((await post(base + '/join', {}, { ...headers, Cookie: outsider.cookie, 'X-Ubu-CSRF': outsider.csrf })).status, 400);
     assert.equal((await fetch(base + '/socket', { headers: { ...headers, Upgrade: 'websocket', Origin: 'https://evil.example' } })).status, 403);
-    async function connect(h) {
-      const response = await fetch(base + '/socket', { headers: { ...h, Upgrade: 'websocket' } });
+    async function connect(h, path = '/socket') {
+      const response = await fetch(base + path, { headers: { ...h, Upgrade: 'websocket' } });
       assert.equal(response.status, 101, response.status === 101 ? '' : await response.text());
       const ws = response.webSocket, messages = [];
       ws.addEventListener('message', event => messages.push(JSON.parse(event.data))); ws.accept();
@@ -347,18 +349,44 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
       assert.equal((await post(base + '/team', { supers }, h)).status, 200);
     }
     await hostSocket.wait(m => m.phase === 'plan');
+    const watchOff = await (await post(base + '/allow-watch', { allowed: true })).json();
+    assert.equal(watchOff.watchKey, null);
+    assert.equal((await fetch(base + '/watch-state?key=' + crypto.randomUUID())).status, 404);
+    const watchOn = await (await post(base + '/allow-watch', { allowed: true }, guestHeaders)).json();
+    assert.ok(watchOn.watchKey);
+    const watchQuery = '?key=' + watchOn.watchKey;
+    const viewer = await connect({ Origin: env.ORIGIN }, '/watch-socket' + watchQuery);
+    t.after(() => { try { viewer.ws.close(); } catch {} });
+    const watching = await viewer.wait(m => m.phase === 'plan');
+    assert.deepEqual(watching.connected, [true, true]);
+    assert.equal(watching.spectator, true);
+    assert.equal(Object.hasOwn(watching, 'moves'), false);
+    assert.equal(Object.hasOwn(watching, 'practice'), false);
+    assert.equal(Object.hasOwn(watching, 'seat'), false);
+    assert.ok(watching.rosters.flat().every(r => !Object.hasOwn(r, 'serial')));
     const moves = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false }));
     const hostMoves = structuredClone(moves); hostMoves[0].power = .25;
     hostSocket.ws.send(JSON.stringify({ type: 'moves', turn: 1, moves: hostMoves, lock: true }));
     const privateView = await guestSocket.wait(m => m.phase === 'plan' && m.locked[0]);
     assert.deepEqual(privateView.moves, moves); assert.equal(privateView.replay, null);
     assert.ok(!JSON.stringify(privateView).includes('123456789012345678'));
+    viewer.ws.send(JSON.stringify({ type: 'moves', turn: 1, moves, lock: true }));
+    const watchPlan = await viewer.wait(m => m.revision === privateView.revision);
+    assert.equal(watchPlan.replay, null);
+    assert.equal(Object.hasOwn(watchPlan, 'moves'), false);
     guestSocket.ws.send(JSON.stringify({ type: 'moves', turn: 1, moves, lock: true }));
     const result = await hostSocket.wait(m => m.phase === 'resolving');
     assert.equal(result.game.turn, 2); assert.equal(result.replay.plans.length, 6);
     assert.equal(result.replay.initialBodies.length, 7);
+    const observed = await viewer.wait(m => m.phase === 'resolving');
+    assert.deepEqual(observed.replay.plans, result.replay.plans);
     const nextTurn = await hostSocket.wait(m => m.phase === 'plan' && m.turn === 2);
     assert.equal(nextTurn.locked[0], false);
+    const viewerClosed = new Promise(resolve => viewer.ws.addEventListener('close', e => resolve(e.code), { once: true }));
+    const revoked = await (await post(base + '/allow-watch', { allowed: false })).json();
+    assert.deepEqual(revoked.connected, [true, true]);
+    assert.equal(await viewerClosed, 4003);
+    assert.equal((await fetch(base + '/watch-state' + watchQuery)).status, 404);
     guestSocket.ws.close();
     const paused = await hostSocket.wait(m => m.turn === 2 && m.connected[1] === false);
     assert.equal(paused.deadline, null); assert.ok(paused.remaining > 0);
@@ -377,6 +405,48 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await post(ownedBase + '/team', selection, guestHeaders)).status, 400);
     assert.equal((await post(ownedBase + '/team', { ...selection, serials: [selection.serials[0], selection.serials[0], selection.serials[0]] })).status, 400);
     assert.equal((await post(ownedBase + '/team', selection)).status, 200);
+  });
+  await t.test('public queue pairs Activity and standalone accounts with a persistent reserved match', async () => {
+    const owner = '789012345678901234', instance = 'i-test-activity', origin = 'https://123.discordsays.com';
+    const connected = await activityLogin(new Request(env.ORIGIN + '/auth/activity', { headers: { Origin: origin } }),
+      env, { code: 'fixture', instance }, async url => Response.json(url.endsWith('/token') ?
+        { access_token: 'test-only', token_type: 'Bearer' } : url.endsWith('/users/@me') ? { id: owner } :
+          { application_id: '123', instance_id: instance, users: [owner] }));
+    const cookie = connected.headers.get('Set-Cookie').split(';')[0];
+    const session = await (await fetch('/api/session', { headers: { Cookie: cookie } })).json();
+    assert.equal(session.instance, instance);
+    const embedded = { ...headers, Cookie: cookie, Origin: origin, 'X-Ubu-CSRF': session.csrf };
+    const post = (path, data, h) => fetch(path, { method: 'POST', headers: h, body: JSON.stringify(data) });
+    const queuePath = '/api/ububall/queue';
+    const queue = (action, h = headers, extra = {}) => post(queuePath, { action, queue: 'public', ...extra }, h);
+    assert.equal((await queue('enter', headers, { queue: 'friends' })).status, 403);
+    assert.equal((await queue('enter', { ...embedded, Origin: env.ORIGIN })).status, 401);
+    assert.deepEqual(await (await queue('enter')).json(), { status: 'waiting' });
+    assert.deepEqual(await (await queue('enter')).json(), { status: 'waiting' });
+    assert.deepEqual(await (await queue('cancel')).json(), { status: 'idle' });
+    assert.deepEqual(await (await queue('poll')).json(), { status: 'idle' });
+    assert.deepEqual(await (await queue('enter')).json(), { status: 'waiting' });
+    const response = await queue('enter', embedded);
+    assert.equal(response.status, 200, await response.clone().text());
+    const paired = await response.json();
+    assert.equal(paired.status, 'matched');
+    assert.deepEqual(await (await queue('poll', embedded, { queue: 'friends', instance })).json(), { status: 'busy' });
+    await server.getWorker().evictDurableObject('QUEUE', { name: 'ububall' });
+    assert.deepEqual(await (await queue('poll')).json(), paired);
+    const path = '/api/ububall/' + paired.id;
+    const lobby = await (await post(path + '/join', {}, embedded)).json();
+    assert.equal(lobby.seat, 1);
+    assert.equal(lobby.teams, 'practice');
+    assert.deepEqual(lobby.occupied, [true, true]);
+    const embeddedSocket = await fetch(path + '/socket', { headers: { ...embedded, Upgrade: 'websocket' } });
+    assert.equal(embeddedSocket.status, 101, embeddedSocket.status === 101 ? '' : await embeddedSocket.text());
+    embeddedSocket.webSocket.accept();
+    embeddedSocket.webSocket.close();
+    const outsider = await signedIn('890123456789012345');
+    assert.equal((await post(path + '/join', {}, { ...headers, Cookie: outsider.cookie, 'X-Ubu-CSRF': outsider.csrf })).status, 400);
+    assert.deepEqual(await (await queue('ack', embedded, { id: paired.id })).json(), { status: 'idle' });
+    assert.deepEqual(await (await queue('poll')).json(), paired);
+    assert.deepEqual(await (await queue('ack', headers, { id: paired.id })).json(), { status: 'idle' });
   });
   await t.test('guests play practice teams against Discord users, never reach the mint and keep their seat on sign-in', async () => {
     assert.equal((await fetch('/api/guest', { method: 'POST', headers: { Origin: 'https://evil.example' } })).status, 403);

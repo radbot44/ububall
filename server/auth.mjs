@@ -39,6 +39,12 @@ function cookie(request, name) {
 }
 const setCookie = (name, value, seconds) => `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${seconds}`;
 const sessionName = '__Host-ubu-session', stateName = '__Host-ubu-oauth';
+const activityName = '__Secure-ubu-activity';
+const discordId = /^[1-9][0-9]{0,19}$/;
+const activityId = /^[A-Za-z0-9_-]{1,200}$/;
+export const validInstance = value => typeof value === 'string' && activityId.test(value);
+const activityCookie = (env, value, seconds) =>
+  `${activityName}=${value}; Domain=${new URL(activityOrigin(env)).hostname}; Path=/; Secure; HttpOnly; SameSite=None; Partitioned; Max-Age=${seconds}`;
 export function configured(env) {
   return !!(env.ORIGIN && env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET && env.SESSION_SECRET);
 }
@@ -47,12 +53,24 @@ export function origin(env) {
   if (url.origin !== env.ORIGIN || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))) throw new Error('Invalid configured origin.');
   return url.origin;
 }
+export function activityOrigin(env) {
+  return discordId.test(env.DISCORD_CLIENT_ID || '') && env.DISCORD_ACTIVITY_BOT_TOKEN
+    ? `https://${env.DISCORD_CLIENT_ID}.discordsays.com` : null;
+}
+export function requestOrigin(env, value) {
+  return value?.instance ? activityOrigin(env) : origin(env);
+}
 const GUEST = /^g_[A-Za-z0-9_-]{43}$/;
 // Guest IDs can never match a Discord ID, so they can never reach a mint collection.
 export async function session(request, env) {
-  const value = await unseal(cookie(request, sessionName), env.SESSION_SECRET, 'session');
+  const embedded = activityOrigin(env);
+  const source = request.headers.get('Origin');
+  const activity = embedded && (source === embedded || (!source &&
+    (new URL(request.url).origin === embedded || cookie(request, activityName))));
+  const value = await unseal(cookie(request, activity ? activityName : sessionName), env.SESSION_SECRET, activity ? 'activity' : 'session');
   if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value.csrf)) return null;
-  const discord = value.guest === undefined && /^[1-9][0-9]{0,19}$/.test(value.owner) && (value.alias === undefined || GUEST.test(value.alias));
+  if (activity) return discordId.test(value.owner) && validInstance(value.instance) ? value : null;
+  const discord = value.guest === undefined && discordId.test(value.owner) && (value.alias === undefined || GUEST.test(value.alias));
   const guest = value.guest === true && GUEST.test(value.owner) && value.alias === undefined;
   return discord || guest ? value : null;
 }
@@ -61,9 +79,61 @@ export async function guest(env) {
   return { value, cookie: setCookie(sessionName, await seal(value, env.SESSION_SECRET), 604800) };
 }
 export function mutationAllowed(request, env, value) {
-  return request.headers.get('Origin') === origin(env) && request.headers.get('X-Ubu-CSRF') === value.csrf;
+  return request.headers.get('Origin') === requestOrigin(env, value) && request.headers.get('X-Ubu-CSRF') === value.csrf;
 }
-export function logoutCookie() { return setCookie(sessionName, '', 0); }
+export function logoutCookie(env, value) { return value?.instance ? activityCookie(env, '', 0) : setCookie(sessionName, '', 0); }
+
+const discordApi = 'https://discord.com/api/v10';
+async function exchange(env, code, redirect, fetchDiscord) {
+  const params = new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID, client_secret: env.DISCORD_CLIENT_SECRET,
+    grant_type: 'authorization_code', code });
+  if (redirect) params.set('redirect_uri', redirect);
+  const response = await fetchDiscord(discordApi + '/oauth2/token', { method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(10000), body: params });
+  if (!response.ok) throw new Error('Discord code exchange failed.');
+  const token = await response.json();
+  if (typeof token.access_token !== 'string' || token.token_type?.toLowerCase() !== 'bearer') throw new Error('Invalid Discord token.');
+  const identity = await fetchDiscord(discordApi + '/users/@me', {
+    headers: { Authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(10000) });
+  if (!identity.ok) throw new Error('Discord identity unavailable.');
+  const user = await identity.json();
+  if (typeof user.id !== 'string' || !discordId.test(user.id)) throw new Error('Invalid Discord account.');
+  const name = [user.global_name, user.username].find(n => typeof n === 'string' && n.trim())?.trim().slice(0, 32);
+  return { owner: user.id, name, accessToken: token.access_token };
+}
+
+export async function activityMember(env, instance, owner, fetchDiscord = fetch) {
+  if (!activityOrigin(env) || !validInstance(instance)) return false;
+  const response = await fetchDiscord(`${discordApi}/applications/${env.DISCORD_CLIENT_ID}/activity-instances/${instance}`, {
+    headers: { Authorization: `Bot ${env.DISCORD_ACTIVITY_BOT_TOKEN}` }, signal: AbortSignal.timeout(10000)
+  });
+  if (response.status === 404) return false;
+  if (!response.ok) throw new Error('Discord could not verify the Activity. Try again shortly.');
+  const data = await response.json();
+  return data.application_id === env.DISCORD_CLIENT_ID && data.instance_id === instance &&
+    Array.isArray(data.users) && data.users.includes(owner);
+}
+
+export async function activityLogin(request, env, data, fetchDiscord = fetch) {
+  const embedded = activityOrigin(env);
+  const json = (value, status, cookieHeader) => Response.json(value, { status, headers: {
+    'Cache-Control': 'no-store', ...(cookieHeader ? { 'Set-Cookie': cookieHeader } : {})
+  } });
+  if (!embedded || request.headers.get('Origin') !== embedded) return json({ error: 'Invalid Activity origin.' }, 403);
+  const { code, instance } = data || {};
+  if (typeof code !== 'string' || !code || code.length > 1024 || !validInstance(instance)) {
+    return json({ error: 'Invalid Activity sign-in request.' }, 400);
+  }
+  try {
+    const { owner, name, accessToken } = await exchange(env, code, null, fetchDiscord);
+    if (!await activityMember(env, instance, owner, fetchDiscord)) return json({ error: 'Join this Activity in Discord first.' }, 403);
+    const seconds = 86400;
+    const token = await seal({ purpose: 'activity', owner, name, instance, csrf: random(),
+      expires: Math.floor(Date.now() / 1000) + seconds }, env.SESSION_SECRET);
+    // Discord's RPC authenticate needs the access token once. The refresh token is discarded.
+    return json({ access_token: accessToken }, 200, activityCookie(env, token, seconds));
+  } catch { return json({ error: 'Could not sign in to the Discord Activity. Try again.' }, 502); }
+}
 
 export function safeReturnPath(raw, env) {
   if (!raw || typeof raw !== 'string' || /[\x00-\x1F\x7F]/.test(raw)) return '/';
@@ -98,24 +168,12 @@ export async function callback(request, env, fetchDiscord = fetch) {
     headers: { 'Set-Cookie': setCookie(stateName, '', 0), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
   if (!state || state.nonce !== url.searchParams.get('state') || !url.searchParams.get('code') || url.searchParams.has('error')) return failed();
   try {
-    const response = await fetchDiscord('https://discord.com/api/v10/oauth2/token', { method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(10000),
-      body: new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID, client_secret: env.DISCORD_CLIENT_SECRET,
-        grant_type: 'authorization_code', code: url.searchParams.get('code'), redirect_uri: origin(env) + '/auth/callback' }) });
-    if (!response.ok) return failed();
-    const token = await response.json();
-    if (typeof token.access_token !== 'string' || token.token_type?.toLowerCase() !== 'bearer') return failed();
-    const userResponse = await fetchDiscord('https://discord.com/api/v10/users/@me', {
-      headers: { Authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(10000) });
-    if (!userResponse.ok) return failed();
-    const user = await userResponse.json();
-    if (typeof user.id !== 'string' || !/^[1-9][0-9]{0,19}$/.test(user.id)) return failed();
+    const { owner, name } = await exchange(env, url.searchParams.get('code'), origin(env) + '/auth/callback', fetchDiscord);
     const returnTo = safeReturnPath(state.returnTo, env);
     // A guest signing in keeps their match seats: the Discord session names the guest ID it replaced.
     const previous = await session(request, env);
     // The display name is shown in the header; the ID never is.
-    const name = [user.global_name, user.username].find(n => typeof n === 'string' && n.trim())?.trim().slice(0, 32);
-    const sessionToken = await seal({ purpose: 'session', owner: user.id, ...(name ? { name } : {}), csrf: random(), expires: Math.floor(Date.now() / 1000) + 86400,
+    const sessionToken = await seal({ purpose: 'session', owner, ...(name ? { name } : {}), csrf: random(), expires: Math.floor(Date.now() / 1000) + 86400,
       ...(previous?.guest ? { alias: previous.owner } : {}) }, env.SESSION_SECRET);
     const headers = new Headers({ Location: origin(env) + returnTo, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
     headers.append('Set-Cookie', setCookie(stateName, '', 0));

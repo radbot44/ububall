@@ -8,6 +8,13 @@
 
   function openDiscordLogin(event) {
     if (event && event.preventDefault) event.preventDefault();
+    if (window.ubuActivity) {
+      return window.ubuActivity.signIn().catch(error => {
+        const status = $('online-status');
+        if (status && $('online-dialog')?.open) status.textContent = error.message;
+        else void gameUi.confirm({ title: 'Discord sign-in', message: error.message, confirmLabel: 'OK' });
+      });
+    }
     const returnPath = (location.pathname === '/index.html' ? '/' : location.pathname) + location.search + location.hash;
     const redirect = () => {
       location.assign('/auth/discord?return=' + encodeURIComponent(returnPath));

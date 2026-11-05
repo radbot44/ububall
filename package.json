@@ -13,6 +13,8 @@
     "node": ">=22.13.0"
   },
   "devDependencies": {
+    "@discord/embedded-app-sdk": "2.5.0",
+    "esbuild": "0.28.2",
     "wrangler": "4.152.0"
   }
 }

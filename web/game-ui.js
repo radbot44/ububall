@@ -91,7 +91,10 @@
   function panel({ title, message, input, confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false }) {
     dialog ||= document.body.appendChild(el('dialog', { className: 'game-dialog' }));
     const field = input ? el('input', { className: 'game-dialog-input', value: input.value || '', maxLength: input.maxLength || 40, required: true }) : null;
-    if (field) field.setAttribute('aria-label', input.label || title);
+    if (field) {
+      field.setAttribute('aria-label', input.label || title);
+      field.readOnly = Boolean(input.readOnly);
+    }
     const confirm = el('button', { type: 'submit', className: danger ? 'game-dialog-danger' : 'primary', textContent: confirmLabel });
     const cancel = el('button', { type: 'button', className: 'quiet', textContent: cancelLabel });
     const form = el('form', { method: 'dialog' }, el('h2', { textContent: title }), ...(message ? [el('p', { textContent: message })] : []),

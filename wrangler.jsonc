@@ -12,9 +12,9 @@
     "run_worker_first": ["/api/*", "/auth/*", "/mint", "/mint.html", "/collection"]
   },
   "durable_objects": {
-    "bindings": [{ "name": "MINT", "class_name": "MintRegistry" }, { "name": "UBUBALL", "class_name": "UbuballMatch" }]
+    "bindings": [{ "name": "MINT", "class_name": "MintRegistry" }, { "name": "UBUBALL", "class_name": "UbuballMatch" }, { "name": "QUEUE", "class_name": "UbuballQueue" }]
   },
-  "migrations": [{ "tag": "registry-1", "new_sqlite_classes": ["MintRegistry"] }, { "tag": "ububall-1", "new_sqlite_classes": ["UbuballMatch"] }],
+  "migrations": [{ "tag": "registry-1", "new_sqlite_classes": ["MintRegistry"] }, { "tag": "ububall-1", "new_sqlite_classes": ["UbuballMatch"] }, { "tag": "queue-1", "new_sqlite_classes": ["UbuballQueue"] }],
   "vars": {
     "BATCH_SIZE": "1000",
     "LIFETIME_MINT_LIMIT": "0"

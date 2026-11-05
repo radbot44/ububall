@@ -2,7 +2,7 @@
 
 Owner decisions: private invite matches; host chooses owned-ubu or practice teams; 60-second disconnect grace before the connected opponent may claim forfeit. Disconnects pause planning and preserve the remaining Blitz time. Blitz expiry uses the latest server-saved draft, even if not locked. Opponent drafts remain private until resolution.
 
-Implemented foundation: shared meter rules and Blitz duration calculation used by the local game; strict network move validation; a server-side match lifecycle with private drafts, locking, deadline expiry, pause/resume and forfeit authorization. These modules are not exposed through network routes yet.
+The online match shares the local game's meter and Blitz rules. Its server-side lifecycle handles move validation, private drafts, locking, deadline expiry, pause/resume and forfeit authorization.
 
 Authoritative turn resolution validates both teams' moves and super eligibility, runs the existing 240 Hz physics for at most 12 seconds (1 second in Pulse, whose replays chain turn to turn from each turn's moving initial state), and returns the resulting state plus replay frames sampled every eight ticks. Scoring, end-of-turn meter and stun rules are shared with the local game. Tests cover deterministic resolution, input immutability, bounded replay, victory and super meter consumption.
 
@@ -18,4 +18,16 @@ Completed online play architecture:
 - Reconnects and page reloads seamlessly restore active matches via `?match=<id>` URL parameters.
 - Comprehensive test coverage in `test/ububall-match.test.js` and `test/worker.integration.mjs`.
 
-Remaining: Deployment is separate authorization. Existing local matches continue to work.
+## Queues and live spectating
+
+Inside Discord, **Play with friends** queues only against another player in the same Activity instance. **Find online match** uses a single shared practice-team queue for Activity and standalone players. An account can have one queue entry at a time. Waiting entries expire 20 seconds after the last poll and paired seats are reserved before either client enters the lobby.
+
+Both players can opt in to spectating from the team lobby or the match menu. Once both opt in, they can copy a separate watch link. Members of the Activity can also find its enabled friend matches under **Watch**. The viewer receives the public rink, scores and resolved turns. Draft moves, team selection and match controls stay with the players. Either player can revoke the link and end existing viewer connections.
+
+## Discord test setup
+
+1. Use a private Discord Developer Portal application and an isolated HTTPS origin that reaches the test Worker. Set `ORIGIN` to that exact origin and map the Activity's root URL to it. Enable Activities and the target platforms, then add the test accounts.
+2. Set `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET` for that application. Set its bot token as `DISCORD_ACTIVITY_BOT_TOKEN` in ignored local configuration or the Worker secrets. The backend uses the token for Activity membership checks. The existing standalone OAuth flow still uses its configured `/auth/callback`.
+3. Launch through Discord and test with two players and a viewer. Confirm the embedded sign-in cookie and proxied WebSocket upgrade, test a mid-match join and revocation, and try backgrounding and resuming on mobile. Then queue one player inside Discord and one in standalone ububall.
+
+Activity launch through Discord's live proxy and deployment require separate verification. See [Discord's setup guide](https://docs.discord.com/developers/activities/building-an-activity) and [networking guide](https://docs.discord.com/developers/activities/development-guides/networking).

@@ -28,10 +28,18 @@ export class UbuballMatch extends DurableObject {
     await this.ctx.storage.setAlarm(Math.max(now + 1, Math.min(...deadlines.filter(v => v !== null))));
   }
   snapshot(owner, now) { return { type: 'state', now, revision: this.room.state.revision, ...this.room.view(owner) }; }
+  watchSnapshot(now) { return { type: 'state', now, revision: this.room.state.revision, ...this.room.watchView() }; }
   broadcast(now) {
+    let view;
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment();
-      if (a.live && this.room.state.players.includes(a.owner)) { try { ws.send(JSON.stringify(this.snapshot(a.owner, now))); } catch { /* close handler tracks presence */ } }
+      if (!a.live) continue;
+      try {
+        if (a.watch) {
+          if (a.watch !== this.room.state.watch?.key) this.retire(ws, now, 4003);
+          else ws.send(view ??= JSON.stringify(this.watchSnapshot(now)));
+        } else if (this.room.state.players.includes(a.owner)) ws.send(JSON.stringify(this.snapshot(a.owner, now)));
+      } catch { /* close handler tracks presence */ }
     }
   }
   retire(ws, now, code = 4000) {
@@ -39,7 +47,7 @@ export class UbuballMatch extends DurableObject {
     if (!a?.live) return;
     a.live = false; ws.serializeAttachment(a);
     ws.close(code, 'Reconnect to resume');
-    if (this.room.state.players.includes(a.owner) && !this.ctx.getWebSockets().some(other => {
+    if (!a.watch && this.room.state.players.includes(a.owner) && !this.ctx.getWebSockets().some(other => {
       const b = other.deserializeAttachment(); return b.live && b.owner === a.owner;
     })) this.room.disconnect(a.owner, now);
   }
@@ -50,9 +58,46 @@ export class UbuballMatch extends DurableObject {
       if (a.live && (now >= seen + 30000 || now >= a.expires)) this.retire(ws, Math.min(seen + 30000, a.expires));
     }
   }
+  watch(request, path, now) {
+    const s = this.room?.state, key = s?.watch?.key;
+    if (!s || now >= s.expires || !key || request.headers.get('X-Match-Watch') !== key) {
+      return json({ error: 'This match is unavailable to watch.' }, 404);
+    }
+    if (this.ctx.getWebSockets().filter(ws => ws.deserializeAttachment().watch && ws.deserializeAttachment().live).length >= 12) {
+      return json({ error: 'This match has reached its viewer limit.' }, 429);
+    }
+    if (path === '/watch-state') return json(this.watchSnapshot(now));
+    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return json({ error: 'WebSocket required.' }, 426);
+    const pair = new WebSocketPair(), client = pair[0], server = pair[1];
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ watch: key, live: true, lastSeen: now, expires: Number.MAX_SAFE_INTEGER });
+    server.send(JSON.stringify(this.watchSnapshot(now)));
+    return new Response(null, { status: 101, webSocket: client });
+  }
   async fetch(request) {
     return this.ctx.blockConcurrencyWhile(async () => {
       const now = Date.now(), path = new URL(request.url).pathname;
+      if (path === '/pair') {
+        if (!this.room) {
+          const [first, second] = await request.json();
+          this.room = new MatchRoom(first.owner, 'standard', 'practice', Boolean(first.guest));
+          this.room.join(second.owner, Boolean(second.guest));
+          this.room.state.paired = true;
+          this.save();
+          await this.schedule(now);
+        }
+        return json({ ok: true });
+      }
+      if (path === '/watch-info') {
+        const s = this.room?.state;
+        if (!s?.watch?.key || !s.game || s.phase === 'over' || now >= s.expires) return json({}, 404);
+        return json({ key: s.watch.key, names: s.names, scores: s.game.scores });
+      }
+      if (path === '/watch-state' || path === '/watch-socket') {
+        const response = this.watch(request, path, now);
+        if (response.status === 101) await this.schedule(now);
+        return response;
+      }
       const owner = request.headers.get('X-Match-Owner'), guest = request.headers.get('X-Match-Guest') === '1';
       if (!owner) return json({ error: 'Sign in first.' }, 401);
       try {
@@ -101,6 +146,7 @@ export class UbuballMatch extends DurableObject {
         }
         if (path === '/forfeit') this.room.claimForfeit(owner, now);
         if (path === '/unready') this.room.unready(owner);
+        if (path === '/allow-watch') this.room.allowWatch(owner, (await request.json())?.allowed);
         if (path === '/leave') {
           for (const ws of this.ctx.getWebSockets()) if (ws.deserializeAttachment().owner === owner) this.retire(ws, now, 4003);
           this.room.leave(owner, now);
@@ -115,7 +161,7 @@ export class UbuballMatch extends DurableObject {
   async webSocketMessage(ws, message) {
     return this.ctx.blockConcurrencyWhile(async () => {
       const now = Date.now(), a = ws.deserializeAttachment();
-      if (!this.room || !a.live) return;
+      if (!this.room || !a.live || a.watch) return;
       this.sweep(now);
       if (!ws.deserializeAttachment().live) { this.save(); await this.schedule(now); this.broadcast(now); return; }
       try {
@@ -146,7 +192,7 @@ export class UbuballMatch extends DurableObject {
   }
   async webSocketClose(ws) {
     return this.ctx.blockConcurrencyWhile(async () => {
-      if (!this.room) return;
+      if (!this.room || ws.deserializeAttachment()?.watch) return;
       const now = Date.now(); this.retire(ws, now); this.save(); this.broadcast(now); await this.schedule(now);
     });
   }

@@ -97,3 +97,36 @@ test('guest sessions are distinct from Discord identities and Discord login reco
   const upgraded = await auth.session(new Request(env.ORIGIN, { headers: { Cookie: discord } }), env);
   assert.equal(upgraded.owner, '123456789012345678'); assert.equal(upgraded.alias, value.owner); assert.equal(upgraded.guest, undefined);
 });
+
+test('Activity sign-in verifies Discord membership and creates a separate partitioned session', async () => {
+  const activity = { ...env, DISCORD_ACTIVITY_BOT_TOKEN: 'test-bot' };
+  const origin = 'https://123.discordsays.com', instance = 'i-test-instance', owner = '123456789012345678';
+  const login = source => new Request(env.ORIGIN + '/auth/activity', { method: 'POST', headers: { Origin: source } });
+  const mockDiscord = async (url, options) => {
+    if (url.endsWith('/token')) {
+      assert.equal(options.body.get('client_secret'), env.DISCORD_CLIENT_SECRET);
+      assert.equal(options.body.get('redirect_uri'), null);
+      return Response.json({ access_token: 'sdk-token', token_type: 'Bearer', refresh_token: 'private-refresh' });
+    }
+    if (url.endsWith('/users/@me')) return Response.json({ id: owner });
+    assert.equal(options.headers.Authorization, 'Bot test-bot');
+    return Response.json({ application_id: '123', instance_id: instance, users: [owner] });
+  };
+  const payload = { instance, code: 'test-code' };
+  assert.equal((await auth.activityLogin(login(env.ORIGIN), activity, payload, () => assert.fail())).status, 403);
+  assert.equal((await auth.activityLogin(login(origin), activity, { ...payload, instance: 'i-other' }, mockDiscord)).status, 403);
+  const result = await auth.activityLogin(login(origin), activity, payload, mockDiscord);
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), { access_token: 'sdk-token' });
+  const setCookie = result.headers.get('Set-Cookie');
+  assert.match(setCookie, /Domain=123\.discordsays\.com; Path=\/; Secure; HttpOnly; SameSite=None; Partitioned/);
+  const Cookie = setCookie.split(';')[0];
+  const session = await auth.session(new Request(env.ORIGIN + '/api/session', { headers: { Cookie } }), activity);
+  assert.equal(session.instance, instance);
+  assert.equal(session.owner, owner);
+  assert.equal(await auth.session(new Request(env.ORIGIN, { headers: { Cookie, Origin: env.ORIGIN } }), activity), null);
+  const request = new Request(env.ORIGIN, { headers: { Cookie, Origin: origin, 'X-Ubu-CSRF': session.csrf } });
+  assert.equal(auth.mutationAllowed(request, activity, session), true);
+  assert.equal(auth.mutationAllowed(login(env.ORIGIN), activity, session), false);
+  assert.match(auth.logoutCookie(activity, session), /Partitioned; Max-Age=0/);
+});

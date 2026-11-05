@@ -1,9 +1,14 @@
 import { DurableObject } from 'cloudflare:workers';
 import mintModule from './mint.js';
 import * as auth from './auth.mjs';
+export { UbuballQueue } from './ububall-queue.mjs';
 export { UbuballMatch } from './ububall-object.mjs';
 const { Mint } = mintModule;
 const ID = /^[A-Za-z0-9_-]{21}[AQgw]$/;
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+const uuid = new RegExp('^' + UUID + '$');
+const watchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(watch-state|watch-socket)$');
+const matchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(join|team|unready|state|socket|forfeit|rematch|skip-replay|leave|allow-watch)$');
 const COLLECTION_PAGE = 200;
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers
@@ -173,12 +178,31 @@ export default {
         return json({ ready: true, login: auth.configured(env), mint: config.mint, keys: config.keys, lifetimeLimit: config.limit });
       }
       if (!auth.configured(env)) return json({ error: 'Discord login is not configured yet.' }, 503);
-      if (url.origin !== auth.origin(env)) return json({ error: 'Invalid site origin.' }, 400);
-      if (path === '/auth/discord' && request.method === 'GET') return auth.login(request, env);
-      if (path === '/auth/callback' && request.method === 'GET') return auth.callback(request, env);
+      const site = auth.origin(env), embedded = auth.activityOrigin(env);
+      if (url.origin !== site && url.origin !== embedded) return json({ error: 'Invalid site origin.' }, 400);
+      if (path === '/auth/activity' && request.method === 'POST') {
+        let data;
+        try { data = await body(request, 1536); } catch { return json({ error: 'Invalid Activity sign-in request.' }, 400); }
+        return auth.activityLogin(request, env, data);
+      }
+      if (url.origin === site && request.method === 'GET') {
+        if (path === '/auth/discord') return auth.login(request, env);
+        if (path === '/auth/callback') return auth.callback(request, env);
+      }
+      const watch = path.match(watchRoute);
+      if (watch && request.method === 'GET') {
+        const [, id, action] = watch, key = url.searchParams.get('key');
+        const source = request.headers.get('Origin');
+        if (action === 'watch-socket' && source !== site && (!embedded || source !== embedded)) return json({ error: 'Invalid socket origin.' }, 403);
+        if (!uuid.test(key || '')) return json({ error: 'Invalid watch link.' }, 400);
+        return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + action, {
+          headers: { 'X-Match-Watch': key, ...(action === 'watch-socket' && request.headers.get('Upgrade')?.toLowerCase() === 'websocket' ? { Upgrade: 'websocket' } : {}) }
+        }));
+      }
       const session = await auth.session(request, env);
       if (path === '/api/session' && request.method === 'GET') return json(!session ? { owner: null } :
-        session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, name: session.name ?? null, csrf: session.csrf });
+        session.guest ? { owner: null, guest: true, csrf: session.csrf } :
+          { owner: session.owner, name: session.name ?? null, csrf: session.csrf, ...(session.instance ? { instance: session.instance, site } : {}) });
       if (path === '/api/guest' && request.method === 'POST') {
         if (request.headers.get('Origin') !== auth.origin(env)) return json({ error: 'Invalid request origin.' }, 403);
         if (session) return json(session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, csrf: session.csrf });
@@ -187,7 +211,34 @@ export default {
       }
       if (!session) return json({ error: 'Sign in with Discord or play as a guest first.' }, 401);
       if (request.method !== 'GET' && !auth.mutationAllowed(request, env, session)) return json({ error: 'Invalid request origin or token.' }, 403);
-      if (path === '/api/logout' && request.method === 'POST') return json({ ok: true }, 200, { 'Set-Cookie': auth.logoutCookie() });
+      if (path === '/api/logout' && request.method === 'POST') return json({ ok: true }, 200, { 'Set-Cookie': auth.logoutCookie(env, session) });
+      if (path === '/api/ububall/queue' && request.method === 'POST') {
+        let data;
+        try { data = await body(request); } catch { return json({ error: 'Invalid queue request.' }, 400); }
+        if (!['public', 'friends'].includes(data?.queue) || !['enter', 'poll', 'cancel', 'ack'].includes(data?.action) ||
+          (data.action === 'ack' ? typeof data.id !== 'string' || !uuid.test(data.id) : Object.hasOwn(data, 'id')) ||
+          Object.keys(data).some(key => !['queue', 'action', 'id', 'instance'].includes(key))) {
+          return json({ error: 'Invalid queue request.' }, 400);
+        }
+        let scope = 'public';
+        if (data.queue === 'friends') {
+          if (!session.instance || !auth.validInstance(data.instance)) return json({ error: 'Open this queue inside a Discord Activity.' }, 403);
+          if (data.action === 'enter' && !await auth.activityMember(env, data.instance, session.owner)) {
+            return json({ error: 'Join this Activity in Discord first.' }, 403);
+          }
+          scope = 'activity:' + data.instance;
+        }
+        const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
+        return json(await queue.update(session.owner, Boolean(session.guest), scope, data.action, data.id ?? null));
+      }
+      if (path === '/api/ububall/activity-watch' && request.method === 'GET') {
+        const instance = url.searchParams.get('instance');
+        if (!session.instance || !await auth.activityMember(env, instance, session.owner)) {
+          return json({ error: 'Join this Activity in Discord first.' }, 403);
+        }
+        const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
+        return json(await queue.watch('activity:' + instance));
+      }
       if (path === '/api/ububall' && request.method === 'POST') {
         let data;
         try { data = await body(request); } catch { return json({ error: 'Invalid match request.' }, 400); }
@@ -199,12 +250,12 @@ export default {
         const result = await response.json();
         return json(response.ok ? { id, ...result } : result, response.status);
       }
-      const match = path.match(/^\/api\/ububall\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(join|team|unready|state|socket|forfeit|rematch|skip-replay|leave)$/);
+      const match = path.match(matchRoute);
       if (match) {
         const [, id, action] = match, get = action === 'state' || action === 'socket';
         if (request.method !== (get ? 'GET' : 'POST')) return json({ error: 'Method not allowed.' }, 405);
         // Browser sockets cannot carry custom CSRF headers; enforce the exact Origin instead.
-        if (action === 'socket' && request.headers.get('Origin') !== auth.origin(env)) return json({ error: 'Invalid socket origin.' }, 403);
+        if (action === 'socket' && request.headers.get('Origin') !== auth.requestOrigin(env, session)) return json({ error: 'Invalid socket origin.' }, 403);
         let data;
         if (!get) { try { data = await body(request, 2048); } catch { return json({ error: 'Invalid match request.' }, 400); } }
         return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + action, {
@@ -249,7 +300,8 @@ export default {
       return json({ error: 'Endpoint not found.' }, 404);
     } catch (error) {
       console.error(error);
-      return json({ error: 'Mint service unavailable. Retry the same request.' }, 503, { 'Retry-After': '2' });
+      const service = path.startsWith('/api/ububall') ? 'Online play' : 'Mint service';
+      return json({ error: `${service} unavailable. Retry the same request.` }, 503, { 'Retry-After': '2' });
     }
   }
 };

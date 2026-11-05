@@ -73,7 +73,7 @@
       if (!clock.hidden) clock.textContent = Math.ceil(left / 1000) + 's';
       drainClock(clock.hidden, left);
       const other = s ? 1 - s.seat : 1;
-      $('online-forfeit').hidden = !s || s.phase === 'over' || !s.connected[s.seat] || s.connected[other] || s.disconnectedAt[other] === null || online.now() - s.disconnectedAt[other] < 60000;
+      $('online-forfeit').hidden = !s || s.spectator || s.phase === 'over' || !s.connected[s.seat] || s.connected[other] || s.disconnectedAt[other] === null || online.now() - s.disconnectedAt[other] < 60000;
       return;
     }
     const clock = $('blitz-clock'); clock.hidden = !blitzMode() || phase !== 'plan';
@@ -1326,8 +1326,8 @@
     const h = ububallMatch.honours(t, scores, winner);
     const mvp = matchMvp({ ...t, topShot: t.topSpeed });
     $('summary-score').textContent = scores.join(' – ');
-    $('summary-winner').textContent = winner === 0 ? 'You win!' : `${winnerName} wins!`;
-    $('summary-honours').textContent = s && s.game.winner == null ? (s.left.some(Boolean) ? 'Opponent left' : 'Won by forfeit') :
+    $('summary-winner').textContent = winner === 0 && !s?.spectator ? 'You win!' : `${winnerName} wins!`;
+    $('summary-honours').textContent = s && s.game.winner == null ? (s.left?.some(Boolean) ? 'Opponent left' : 'Won by forfeit') :
       [h.comeback && 'Comeback from 3 down!', h.shutout && 'Shutout!'].filter(Boolean).join(' ');
     $('summary-mvp').textContent = mvp === null ? 'No MVP awarded' : `MVP · ${fieldView.entries[mvp].model.parts.fullName}`;
     $('summary-play-again').hidden = Boolean(s);
@@ -1746,7 +1746,7 @@
       $('launch').disabled = phase !== 'plan';
       $('launch-label').textContent = phase === 'plan' ? 'Lock moves' : phase === 'play' ? 'In motion…' : phase === 'over' ? 'Match complete' : 'Waiting…';
       $('new-match').disabled = true;
-      $('launch').hidden = phase === 'over';
+      $('launch').hidden = online.spectating || phase === 'over';
     }
   }
   // A sidebar card's portrait opens that ubu's stats in a drawer from its team's side of the screen.
@@ -4546,7 +4546,7 @@
   }
   const replaySkip = $('skip-goal-replay'), replaySkipHint = replaySkip.firstElementChild;
   function updateReplaySkip(replay) {
-    if (!replay || demo) {
+    if (!replay || demo || online?.spectating) {
       replaySkip.hidden = true;
       return;
     }
@@ -5241,7 +5241,15 @@
   function enterMatch() {
     if (location.pathname !== '/') return;
     if (demo) { stopDemo(); newMatch(true); }
-    if (!history.state?.match) history.pushState({ match: true }, '', location.href);
+    if (!history.state?.match) {
+      const url = new URL(location.href);
+      if (online?.spectating) {
+        const home = new URL(url);
+        home.searchParams.delete('watch');
+        history.replaceState(null, '', home);
+      }
+      history.pushState({ match: true }, '', url);
+    }
     if (inMatch) return;
     inMatch = true; document.body.classList.add('in-match');
     fitOrientation(); layoutDirty = true; draw();
@@ -5258,6 +5266,7 @@
   }
   function openPause() {
     $('pause-title').textContent = online?.active ? 'Menu' : 'Paused';
+    $('pause-leave').textContent = online?.spectating ? 'Stop watching' : 'Leave match';
     $('pause-restart').disabled = $('new-match').disabled;
     $('pause-menu').showModal();
   }
@@ -5279,7 +5288,11 @@
   $('match-stats').onclick = () => theater ? openStats() : openMatchStats('pause');
   $('pause-resume').onclick = () => $('pause-menu').close();
   $('pause-restart').onclick = () => { $('pause-menu').close(); endReplay(); clearActiveMatch(); openSetup('mode'); };
-  $('pause-leave').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
+  $('pause-leave').onclick = async () => {
+    if (online?.spectating) await online.leave();
+    exitMatchMode();
+    if (history.state?.match) history.back();
+  };
   $('home-customize').onclick = () => openSetup('mode', 'cpu', lastCpuSetup?.mode, lastCpuSetup?.level);
   $('home-play').onclick = async () => {
     if (online?.active || matchInProgress()) { enterMatch(); return; }
@@ -5307,6 +5320,7 @@
   window.addEventListener('popstate', () => {
     if (location.pathname !== '/') return;
     if (history.state?.match) enterMatch();
+    else if (online?.spectating) void online.leave().then(exitMatchMode);
     else if (inMatch) { history.pushState({ match: true }, '', location.href); openPause(); }
   });
   window.addEventListener('ubu:screen', event => { if (event.detail !== 'play') exitMatchMode(); else updateHome(); });
@@ -5481,9 +5495,10 @@
           const viewScorerIndex = toView(replay.scorer);
           const scorer = viewScorerIndex !== null ? fieldView.bodies[viewScorerIndex] : fieldView.bodies[viewGoal * 3];
           scoringPlayer = scorer;
-          const them = onlineNames(online.state)[1], scorerName = scorer?.name || (viewGoal === 0 ? 'Your ubu' : `${them}'s ubu`);
+          const [home, them] = onlineNames(online.state), scoringTeam = viewGoal === 0 ? home : them;
+          const scorerName = scorer?.name || (online.spectating ? `${scoringTeam}'s ubu` : viewGoal === 0 ? 'Your ubu' : `${them}'s ubu`);
           goalTab(viewGoal, replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : scorerName);
-          say(online.state.game.winner !== null
+          say(online.spectating ? `${scoringTeam} ${online.state.game.winner !== null ? 'wins' : 'scores'}. ${callText(replay.label || 'GOAL', scorerName)}` : online.state.game.winner !== null
             ? (viewGoal === 0 ? `You win! ${callText(replay.label || 'GOAL', scorerName)}${honourText(0)}` : `${them} wins. ${callText(replay.label || 'GOAL', scorerName)}${honourText(1)}`)
             : `${viewGoal === 0 ? 'You score!' : `${them} scores.`} ${callText(replay.label || 'GOAL', scorerName)} Ready for the next kickoff.`
           );
@@ -5509,10 +5524,16 @@
   }
   // Each side's Discord display name, mine first; a guest has none.
   function onlineNames(s) {
+    if (s.spectator) return s.names.map((name, i) => name || 'Player ' + (i + 1));
     return [s.names[s.seat] || 'Guest', s.occupied[1 - s.seat] ? s.names[1 - s.seat] || 'Guest' : 'Opponent'];
   }
   // The stadium and the full-time summary both offer the rematch; one tap asks, the other accepts.
   function updateRematch(s) {
+    if (s.spectator) {
+      $('online-rematch').hidden = $('summary-rematch').hidden = true;
+      $('summary-rematch-status').textContent = '';
+      return;
+    }
     const them = onlineNames(s)[1], mine = s.rematch[s.seat], theirs = s.rematch[1 - s.seat];
     for (const button of [$('online-rematch'), $('summary-rematch')]) {
       if (!button) continue;
@@ -5530,7 +5551,7 @@
     onState(s) {
       if (!document.body.classList.contains('online-match')) { stopDemo(); enterMatch(); }
       document.body.classList.add('online-match');
-      $('online-open-label').textContent = 'Online match';
+      $('online-open-label').textContent = s.spectator ? 'Watching a match' : 'Online match';
       $('online-open-note').hidden = true;
       const [me, them] = onlineNames(s);
       $('home-label').textContent = me; $('opponent-label').textContent = them; $('opponent-heading').textContent = `${them}'s team`;
@@ -5539,7 +5560,9 @@
       showMode(s.mode);
       updateRematch(s);
       if (onlinePhase === 'over' && s.phase !== 'over') closeSummary();
-      $('online-match-status').textContent = s.phase === 'lobby' ? 'Choosing teams' : s.phase === 'over' ? (s.left[1 - s.seat] ? `${them} left the match.` : s.rematch[s.seat] ? `Rematch requested · waiting for ${them}` :
+      $('online-match-status').textContent = s.spectator ? (s.phase === 'over' && s.winner !== null ? `${s.winner ? them : me} wins · Spectating` :
+        s.phase === 'lobby' ? 'Waiting for kickoff · Spectating' : !s.connected.every(Boolean) ? 'Player disconnected · Spectating' : 'Spectating') :
+        s.phase === 'lobby' ? 'Choosing teams' : s.phase === 'over' ? (s.left[1 - s.seat] ? `${them} left the match.` : s.rematch[s.seat] ? `Rematch requested · waiting for ${them}` :
         s.rematch[1 - s.seat] ? `${them} wants a rematch!` : (s.winner === s.seat ? 'You win!' : `${them} wins.`)) : !s.connected.every(Boolean) ? `${them} disconnected · planning paused` :
         s.locked[s.seat] ? `Moves locked · waiting for ${them}` : s.phase === 'resolving' ? 'Turn in motion' : 'Plan your moves';
       if (!s.game) { phase = 'waiting'; onlineReplay = null; sync(); draw(); return; }
@@ -5553,13 +5576,13 @@
         });
         roster = fieldView.entries.slice(0, 3); buildTeam();
       }
-      recordOnline(s);
+      if (!s.spectator) recordOnline(s);
       const fresh = onlineTurn !== s.turn || onlineDisconnected || (s.phase === 'plan' && onlinePhase !== 'plan');
       const justFinished = s.phase === 'over' && onlinePhase !== 'over' && s.winner !== null;
       onlinePhase = s.phase;
       onlineDisconnected = false;
       const armed = fieldView.bodies.slice(0, 3).map(b => Boolean(b.superArm));
-      if (fresh || !s.connected.every(Boolean) || s.locked[s.seat]) drag = null;
+      if (s.spectator || fresh || !s.connected.every(Boolean) || s.locked[s.seat]) drag = null;
       if (fresh) {
         dirtyPrediction();
         onlineTurn = s.turn; scoringPlayer = null; clearEffects();
@@ -5577,11 +5600,12 @@
         : s.game.scores;
       scores = s.seat ? [...rawScores].reverse() : [...rawScores];
       turn = s.turn;
-      if (fresh) plans = s.moves.map(p => ({
+      if (s.spectator) plans = Array.from({ length: 3 }, idlePlan);
+      else if (fresh) plans = s.moves.map(p => ({
         ...p,
         angle: p.power === 0 ? 0 : (((p.angle + (s.seat ? Math.PI : 0)) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
       }));
-      plans.forEach((p, i) => { fieldView.bodies[i].superArm = fresh ? s.moves[i].superArm : armed[i]; });
+      if (!s.spectator) plans.forEach((p, i) => { fieldView.bodies[i].superArm = fresh ? s.moves[i].superArm : armed[i]; });
       if (!s.replay) {
         onlineReplay = null;
       } else if (onlineReplay?.turn !== s.replay.turn) {
@@ -5602,16 +5626,17 @@
           }
         });
         recordSegment(onlineReplay.simBodies, onlineReplay.plans, s.replay.ticks, s.replay.saves.map(e => saveEvent(e.tick, e)), structuredClone(s.replay.stops));
-        recordOnlineTurn(s); beginGuide(onlineReplay.simBodies, onlineReplay.plans, s.seat);
+        if (!s.spectator) recordOnlineTurn(s);
+        beginGuide(onlineReplay.simBodies, onlineReplay.plans, s.seat);
         P.startTurn(onlineReplay.simBodies, onlineReplay.plans, replayFx.super);
         syncViewBodies(onlineReplay.simBodies, s.seat);
       }
-      finishOnlineRecording(s);
-      phase = s.phase === 'over' ? 'over' : s.phase === 'resolving' ? 'play' : s.connected.every(Boolean) && !s.locked[s.seat] ? 'plan' : 'waiting';
+      if (!s.spectator) finishOnlineRecording(s);
+      phase = s.phase === 'over' ? 'over' : s.phase === 'resolving' ? 'play' : !s.spectator && s.connected.every(Boolean) && !s.locked[s.seat] ? 'plan' : 'waiting';
       sync(); if (onlineReplay && !goalReplay) playOnlineReplay(); else draw();
       if (justFinished) openSummary();
     },
-    onDisconnect() { onlineDisconnected = true; phase = 'waiting'; drag = null; $('online-match-status').textContent = 'Reconnecting · planning paused'; sync(); draw(); },
+    onDisconnect() { onlineDisconnected = true; phase = 'waiting'; drag = null; $('online-match-status').textContent = online.spectating ? 'Reconnecting spectator feed' : 'Reconnecting · planning paused'; sync(); draw(); },
     onError(message) { $('online-match-status').textContent = message; },
     onLeave() {
       saveRecording();

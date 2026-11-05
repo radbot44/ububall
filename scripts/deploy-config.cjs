@@ -8,6 +8,7 @@ const settingsPath = path.join(home, 'settings.json');
 const read = p => JSON.parse(fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, ''));
 const write = (p, value) => fs.writeFileSync(p, JSON.stringify(value, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
 const secretNames = ['DISCORD_CLIENT_SECRET', 'SESSION_SECRET', 'MINT_PRIVATE_KEYS'];
+const activityToken = 'DISCORD_ACTIVITY_BOT_TOKEN';
 function freshIdentity(s) {
   const jwk = generateKeyPairSync('ed25519').privateKey.export({ format: 'jwk' });
   Object.assign(s.vars, { MINT_ID: randomBytes(16).toString('base64url'), MINT_KEY_ID: 'mint-1', MINT_PUBLIC_KEYS: JSON.stringify({ 'mint-1': jwk.x }) });
@@ -21,6 +22,11 @@ function validate(s) {
   if (origin.protocol !== 'https:' || origin.origin !== v.ORIGIN) throw Error('ORIGIN must be an exact HTTPS origin without a trailing slash.');
   if (!/^\d+$/.test(v.DISCORD_CLIENT_ID)) throw Error('A Discord application ID is required.');
   for (const name of secretNames) if (!s.secrets[name] || s.secrets[name].includes('<')) throw Error(`Missing saved secret: ${name}`);
+  if (Object.hasOwn(v, activityToken)) throw Error(`Store ${activityToken} under secrets.`);
+  const token = s.secrets[activityToken];
+  if (Object.hasOwn(s.secrets, activityToken) && (typeof token !== 'string' || !token || token.includes('<'))) {
+    throw Error(`Invalid saved secret: ${activityToken}`);
+  }
   if (!/^[A-Za-z0-9_-]{43}$/.test(s.secrets.SESSION_SECRET)) throw Error('Invalid session secret.');
   if (!/^[A-Za-z0-9_-]{22}$/.test(v.MINT_ID)) throw Error('Invalid permanent mint ID.');
   for (const name of ['BATCH_SIZE', 'LIFETIME_MINT_LIMIT']) if (!/^\d+$/.test(String(v[name]))) throw Error(`Invalid ${name}.`);
@@ -42,7 +48,7 @@ try {
     for (const name of ['name', 'account_id', 'routes', 'workers_dev', 'preview_urls']) if (local[name] !== undefined) s[name] = local[name];
     s.vars = { ...env, ...local.vars };
     s.secrets = {};
-    for (const name of secretNames) {
+    for (const name of [...secretNames, activityToken]) {
       if (s.vars[name]) s.secrets[name] = s.vars[name];
       delete s.vars[name];
     }

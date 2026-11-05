@@ -68,9 +68,10 @@ class MatchRoom {
   // Leaving ends the match for both players: a lobby guest frees their seat, anyone else concedes.
   leave(owner, now) {
     const s = this.state, i = this.seat(owner);
-    if (s.phase === 'lobby' && i === 1) {
+    if (s.phase === 'lobby' && i === 1 && !s.paired) {
       s.players[1] = null; s.names[1] = null; s.rosters[1] = null; s.practice[1] = null; s.ready[1] = false;
       s.connected[1] = false; s.disconnectedAt[1] = null;
+      if (s.watch) { s.watch.allowed[1] = false; s.watch.key = null; }
       return;
     }
     if (s.phase !== 'over') { s.phase = 'over'; s.winner = s.game ? 1 - i : null; }
@@ -189,6 +190,21 @@ class MatchRoom {
       s.game = null; s.replay = null; s.playUntil = null; s.expires = now + 86400000;
     }
   }
+  allowWatch(owner, allowed) {
+    const seat = this.seat(owner);
+    if (typeof allowed !== 'boolean') throw new Error('Choose whether to allow spectators.');
+    const watch = this.state.watch ||= { allowed: [false, false], key: null };
+    watch.allowed[seat] = allowed;
+    watch.key = watch.allowed.every(Boolean) ? watch.key || crypto.randomUUID() : null;
+  }
+  watchView() {
+    const s = this.state;
+    return { spectator: true, mode: s.mode, phase: s.phase, turn: s.turn,
+      names: [...s.names], connected: [...s.connected], winner: s.winner, deadline: s.deadline, remaining: s.remaining,
+      rosters: s.game ? s.rosters.map(team => team.map(({ dna, superId }) => ({ dna, superId }))) : [null, null],
+      game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
+      playUntil: s.playUntil };
+  }
   view(owner) {
     const s = this.state, seat = this.seat(owner);
     return { version: s.version, seat, mode: s.mode, teams: s.teams, phase: s.phase, turn: s.turn,
@@ -197,7 +213,8 @@ class MatchRoom {
       ready: [...s.ready], left: [...s.left], rosters: structuredClone(s.rosters),
       practice: structuredClone(s.practice[seat]),
       game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
-      playUntil: s.playUntil, disconnectedAt: [...s.disconnectedAt], rematch: [...s.rematch] };
+      playUntil: s.playUntil, disconnectedAt: [...s.disconnectedAt], rematch: [...s.rematch],
+      paired: Boolean(s.paired), watchAllowed: s.watch?.allowed[seat] ?? false, watchKey: s.watch?.key ?? null };
   }
 }
 module.exports = { MatchRoom };
