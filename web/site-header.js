@@ -73,7 +73,7 @@
 
   async function checkSession() {
     try {
-      const res = await fetch('/api/session');
+      const res = await fetch('/api/session', { signal: window.ubuActivity?.signal });
       if (!res.ok) throw new Error('Session check failed');
       const data = await res.json();
       currentSession = data?.owner ? data : null;

@@ -10,6 +10,7 @@ export class UbuballMatch extends DurableObject {
     // Workerd answers heartbeats itself, so pings never wake a hibernating match.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS match_state (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL)');
+    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS retired_connections (connection TEXT PRIMARY KEY)');
     const row = ctx.storage.sql.exec('SELECT data FROM match_state WHERE id=1').toArray()[0];
     if (row) { this.room = Object.create(MatchRoom.prototype); this.room.state = JSON.parse(row.data); }
   }
@@ -36,7 +37,7 @@ export class UbuballMatch extends DurableObject {
       if (!a.live) continue;
       try {
         if (a.watch) {
-          if (a.watch !== this.room.state.watch?.key) this.retire(ws, now, 4003);
+          if (a.watch !== this.room.state.watch?.key && !(a.activity && a.activity === this.room.state.activity && this.room.state.watch?.allowed.every(Boolean))) this.retire(ws, now, 4003);
           else ws.send(view ??= JSON.stringify(this.watchSnapshot(now)));
         } else if (this.room.state.players.includes(a.owner)) ws.send(JSON.stringify(this.snapshot(a.owner, now)));
       } catch { /* close handler tracks presence */ }
@@ -46,9 +47,10 @@ export class UbuballMatch extends DurableObject {
     const a = ws.deserializeAttachment();
     if (!a?.live) return;
     a.live = false; ws.serializeAttachment(a);
+    try { ws.send(JSON.stringify({ type: 'ended', code })); } catch { /* peer may already have closed */ }
     ws.close(code, 'Reconnect to resume');
     if (!a.watch && this.room.state.players.includes(a.owner) && !this.ctx.getWebSockets().some(other => {
-      const b = other.deserializeAttachment(); return b.live && b.owner === a.owner;
+      const b = other.deserializeAttachment(); return b.live && !b.watch && b.owner === a.owner;
     })) this.room.disconnect(a.owner, now);
   }
   sweep(now) {
@@ -60,7 +62,9 @@ export class UbuballMatch extends DurableObject {
   }
   watch(request, path, now) {
     const s = this.room?.state, key = s?.watch?.key;
-    if (!s || now >= s.expires || !key || request.headers.get('X-Match-Watch') !== key) {
+    const activity = request.headers.get('X-Match-Activity');
+    const sameActivity = activity && activity === s?.activity && s.watch?.allowed.every(Boolean);
+    if (!s || now >= s.expires || (activity ? !sameActivity || !s.game || s.phase === 'over' : !key || request.headers.get('X-Match-Watch') !== key)) {
       return json({ error: 'This match is unavailable to watch.' }, 404);
     }
     if (this.ctx.getWebSockets().filter(ws => ws.deserializeAttachment().watch && ws.deserializeAttachment().live).length >= 12) {
@@ -70,20 +74,27 @@ export class UbuballMatch extends DurableObject {
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return json({ error: 'WebSocket required.' }, 426);
     const pair = new WebSocketPair(), client = pair[0], server = pair[1];
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ watch: key, live: true, lastSeen: now, expires: Number.MAX_SAFE_INTEGER });
+    server.serializeAttachment({ watch: sameActivity ? 'activity' : key, activity: sameActivity ? activity : null,
+      owner: request.headers.get('X-Match-Owner'), connection: request.headers.get('X-Match-Connection'),
+      live: true, lastSeen: now, expires: Number(request.headers.get('X-Match-Expires')) || Number.MAX_SAFE_INTEGER });
     server.send(JSON.stringify(this.watchSnapshot(now)));
     return new Response(null, { status: 101, webSocket: client });
   }
   async fetch(request) {
     return this.ctx.blockConcurrencyWhile(async () => {
       const now = Date.now(), path = new URL(request.url).pathname;
+      const connection = request.headers.get('X-Match-Connection');
+      if (path !== '/depart' && connection && this.ctx.storage.sql.exec('SELECT connection FROM retired_connections WHERE connection = ?', connection).toArray().length) {
+        return json({ error: 'This Activity connection has ended.' }, 409);
+      }
       if (path === '/pair') {
         if (!this.room) {
-          const { players: [first, second], quickStart, challenge } = await request.json();
+          const { players: [first, second], quickStart, challenge, activity } = await request.json();
           this.room = new MatchRoom(first.owner, 'standard', challenge ? 'choice' : 'practice', Boolean(first.guest));
           this.room.join(second.owner, Boolean(second.guest));
           if (challenge) for (const player of [first, second]) this.room.practiceTeam(player.owner);
           this.room.state.paired = true;
+          if (activity) { this.room.state.activity = activity; this.room.state.watch = { allowed: [true, true], key: null }; }
           if (quickStart) this.room.readyPracticePair();
           this.save();
           await this.schedule(now);
@@ -95,12 +106,30 @@ export class UbuballMatch extends DurableObject {
         if (!s?.watch?.key || !s.game || s.phase === 'over' || now >= s.expires) return json({}, 404);
         return json({ key: s.watch.key, names: s.names, scores: s.game.scores });
       }
+      if (path === '/lobby-info') {
+        const s = this.room?.state;
+        if (!s || s.activity !== request.headers.get('X-Match-Activity') || now >= s.expires) return json({}, 404);
+        return json({ players: s.players, watchable: Boolean(s.game && s.phase !== 'over' && s.watch?.allowed.every(Boolean)) });
+      }
+      if (path === '/depart') {
+        if (!this.room) return json({ left: true });
+        const owner = request.headers.get('X-Match-Owner'), connection = request.headers.get('X-Match-Connection');
+        if (connection) this.ctx.storage.sql.exec('INSERT OR IGNORE INTO retired_connections VALUES (?)', connection);
+        for (const ws of this.ctx.getWebSockets()) {
+          const a = ws.deserializeAttachment();
+          if (a.owner === owner && (!connection || !a.connection || a.connection === connection)) this.retire(ws, now, 4003);
+        }
+        if (this.room.state.players.includes(owner)) this.room.leave(owner, now);
+        this.save(); this.broadcast(now); await this.schedule(now);
+        return json({ left: true });
+      }
       if (path === '/presence') {
         const s = this.room?.state;
         if (!s || now >= s.expires || s.phase === 'over') return json({ status: 'idle' });
         const owner = request.headers.get('X-Match-Owner');
         if (s.players.includes(owner) && !s.left[s.players.indexOf(owner)]) return json({ status: 'balling' });
         if (s.watch?.key && request.headers.get('X-Match-Watch') === s.watch.key) return json({ status: 'spectating' });
+        if (s.activity && request.headers.get('X-Match-Activity') === s.activity && s.watch?.allowed.every(Boolean) && s.game) return json({ status: 'spectating' });
         return json({ status: 'idle' });
       }
       if (path === '/watch-state' || path === '/watch-socket') {
@@ -133,7 +162,7 @@ export class UbuballMatch extends DurableObject {
           for (const ws of this.ctx.getWebSockets()) if (ws.deserializeAttachment().owner === owner) this.retire(ws, now, 4001);
           const pair = new WebSocketPair(), client = pair[0], server = pair[1];
           this.ctx.acceptWebSocket(server);
-          server.serializeAttachment({ owner, live: true, lastSeen: now, expires: Number(request.headers.get('X-Match-Expires')) });
+          server.serializeAttachment({ owner, connection: request.headers.get('X-Match-Connection'), live: true, lastSeen: now, expires: Number(request.headers.get('X-Match-Expires')) });
           this.room.connect(owner, now); this.room.advance(now); this.save();
           this.broadcast(now); await this.schedule(now);
           return new Response(null, { status: 101, webSocket: client });
@@ -163,6 +192,7 @@ export class UbuballMatch extends DurableObject {
           this.room.changeRules(owner, data?.mode, data?.gameNumber);
         }
         if (path === '/allow-watch') this.room.allowWatch(owner, (await request.json())?.allowed);
+        if (path === '/share-watch') this.room.shareWatch(owner);
         if (path === '/leave') {
           for (const ws of this.ctx.getWebSockets()) if (ws.deserializeAttachment().owner === owner) this.retire(ws, now, 4003);
           this.room.leave(owner, now);
@@ -177,7 +207,14 @@ export class UbuballMatch extends DurableObject {
   async webSocketMessage(ws, message) {
     return this.ctx.blockConcurrencyWhile(async () => {
       const now = Date.now(), a = ws.deserializeAttachment();
-      if (!this.room || !a.live || a.watch) return;
+      if (!this.room || !a.live) return;
+      if (message === '{"type":"leave"}') {
+        this.retire(ws, now, 4003);
+        if (!a.watch) this.room.leave(a.owner, now);
+        this.save(); this.broadcast(now); await this.schedule(now);
+        return;
+      }
+      if (a.watch) return;
       this.sweep(now);
       if (!ws.deserializeAttachment().live) { this.save(); await this.schedule(now); this.broadcast(now); return; }
       try {
@@ -209,7 +246,7 @@ export class UbuballMatch extends DurableObject {
   }
   async webSocketClose(ws) {
     return this.ctx.blockConcurrencyWhile(async () => {
-      if (!this.room || ws.deserializeAttachment()?.watch) return;
+      if (!this.room) return;
       const now = Date.now(); this.retire(ws, now); this.save(); this.broadcast(now); await this.schedule(now);
     });
   }
@@ -219,8 +256,8 @@ export class UbuballMatch extends DurableObject {
       if (!this.room) return;
       const now = Date.now();
       if (now >= this.room.state.expires) {
-        for (const ws of this.ctx.getWebSockets()) ws.close(4002, 'Match expired');
-        this.ctx.storage.sql.exec('DELETE FROM match_state'); this.room = null; return;
+        for (const ws of this.ctx.getWebSockets()) this.retire(ws, now, 4002);
+        this.ctx.storage.sql.exec('DELETE FROM match_state'); this.ctx.storage.sql.exec('DELETE FROM retired_connections'); this.room = null; return;
       }
       this.sweep(now); this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);
     });

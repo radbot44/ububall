@@ -103,16 +103,20 @@ async function exchange(env, code, redirect, fetchDiscord) {
   return { owner: user.id, name, avatar, accessToken: token.access_token };
 }
 
-export async function activityMember(env, instance, owner, fetchDiscord = fetch) {
-  if (!activityOrigin(env) || !validInstance(instance)) return false;
+export async function activityParticipants(env, instance, fetchDiscord = fetch) {
+  if (!activityOrigin(env) || !validInstance(instance)) return null;
   const response = await fetchDiscord(`${discordApi}/applications/${env.DISCORD_CLIENT_ID}/activity-instances/${instance}`, {
     headers: { Authorization: `Bot ${env.DISCORD_ACTIVITY_BOT_TOKEN}` }, signal: AbortSignal.timeout(10000)
   });
-  if (response.status === 404) return false;
+  if (response.status === 404) return [];
   if (!response.ok) throw new Error('Discord could not verify the Activity. Try again shortly.');
   const data = await response.json();
-  return data.application_id === env.DISCORD_CLIENT_ID && data.instance_id === instance &&
-    Array.isArray(data.users) && data.users.includes(owner);
+  if (data.application_id !== env.DISCORD_CLIENT_ID || data.instance_id !== instance) return null;
+  if (!Array.isArray(data.users) || data.users.some(owner => typeof owner !== 'string' || !discordId.test(owner))) throw new Error('Invalid Activity participants.');
+  return data.users;
+}
+export async function activityMember(env, instance, owner, fetchDiscord = fetch) {
+  return (await activityParticipants(env, instance, fetchDiscord))?.includes(owner) ?? false;
 }
 
 export async function activityLogin(request, env, data, fetchDiscord = fetch) {
@@ -129,7 +133,7 @@ export async function activityLogin(request, env, data, fetchDiscord = fetch) {
     const { owner, name, avatar, accessToken } = await exchange(env, code, null, fetchDiscord);
     if (!await activityMember(env, instance, owner, fetchDiscord)) return json({ error: 'Join this Activity in Discord first.' }, 403);
     const seconds = 86400;
-    const token = await seal({ purpose: 'activity', owner, name, avatar, instance, csrf: random(),
+    const token = await seal({ purpose: 'activity', owner, name, avatar, instance, launch: crypto.randomUUID(), issued: Date.now(), csrf: random(),
       expires: Math.floor(Date.now() / 1000) + seconds }, env.SESSION_SECRET);
     // Discord's RPC authenticate needs the access token once. The refresh token is discarded.
     return json({ access_token: accessToken }, 200, activityCookie(env, token, seconds));

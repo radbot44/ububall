@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestHarness } from 'wrangler';
-import { login, callback, activityLogin } from '../server/auth.mjs';
+import { login, callback, activityLogin, session as activitySession } from '../server/auth.mjs';
 import file from '../shared/ubu-file.js';
 import ubu from '../shared/ubu.js';
 
@@ -415,7 +415,9 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const cookie = connected.headers.get('Set-Cookie').split(';')[0];
     const session = await (await fetch('/api/session', { headers: { Cookie: cookie } })).json();
     assert.equal(session.instance, instance);
-    const embedded = { ...headers, Cookie: cookie, Origin: origin, 'X-Ubu-CSRF': session.csrf };
+    const connection = crypto.randomUUID();
+    const embedded = { ...headers, Cookie: cookie, Origin: origin, 'X-Ubu-CSRF': session.csrf, 'X-Ubu-Connection': connection };
+    assert.equal((await fetch('/api/ububall/lobby', { method: 'POST', headers: embedded, body: JSON.stringify({ action: 'join', instance, connection }) })).status, 200);
     const post = (path, data, h) => fetch(path, { method: 'POST', headers: h, body: JSON.stringify(data) });
     const queuePath = '/api/ububall/queue';
     const queue = (action, h = headers, extra = {}) => post(queuePath, { action, queue: 'public', ...extra }, h);
@@ -450,7 +452,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
   });
   await t.test('Activity lobbies isolate members and reserve challenges and instant matches without double pairing', async () => {
     const instance = 'lobby-fixture', origin = 'https://123.discordsays.com';
-    async function member(owner, lobby = instance) {
+    async function member(owner, lobby = instance, join = true) {
       const response = await activityLogin(new Request(env.ORIGIN + '/auth/activity', { headers: { Origin: origin } }), env,
         { code: 'fixture', instance: lobby }, async url => Response.json(url.endsWith('/token') ?
           { access_token: 'fixture', token_type: 'Bearer' } : url.endsWith('/users/@me') ?
@@ -458,12 +460,21 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
             { application_id: '123', instance_id: lobby, users: [owner] }));
       const Cookie = response.headers.get('Set-Cookie').split(';')[0];
       const session = await (await fetch('/api/session', { headers: { Cookie } })).json();
-      return { owner, instance: lobby, headers: { Cookie, Origin: origin, 'X-Ubu-CSRF': session.csrf, 'Content-Type': 'application/json' } };
+      const connection = crypto.randomUUID();
+      const player = { owner, instance: lobby, connection,
+        profile: await activitySession(new Request(env.ORIGIN, { headers: { Cookie, Origin: origin } }), env),
+        headers: { Cookie, Origin: origin, 'X-Ubu-CSRF': session.csrf, 'X-Ubu-Connection': connection, 'Content-Type': 'application/json' } };
+      if (join) {
+        const joined = await fetch('/api/ububall/lobby', { method: 'POST', headers: player.headers,
+          body: JSON.stringify({ action: 'join', instance: lobby, connection }) });
+        assert.equal(joined.status, 200, await joined.clone().text());
+      }
+      return player;
     }
     const a = await member('111111111111111111'), b = await member('222222222222222222');
     const c = await member('333333333333333333'), outsider = await member('444444444444444444', 'other-lobby');
     const post = (path, data, player) => fetch(path, { method: 'POST', headers: player.headers, body: JSON.stringify(data) });
-    const lobby = (player, action = 'poll', extra = {}) => post('/api/ububall/lobby', { instance: player.instance, action, ...extra }, player);
+    const lobby = (player, action = 'poll', extra = {}) => post('/api/ububall/lobby', { instance: player.instance, connection: player.connection, action, ...extra }, player);
     const checked = async response => { assert.equal(response.status, 200, await response.clone().text()); return response.json(); };
     assert.equal((await post('/api/ububall/lobby', { action: 'poll', instance }, { headers })).status, 400);
     assert.equal((await lobby(outsider, 'poll', { instance })).status, 400);
@@ -543,14 +554,70 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await post(quickPath + '/rules', { mode: 'pulse', gameNumber: 1 }, b)).status, 400);
     await checked(await post(quickPath + '/allow-watch', { allowed: true }, a));
     const openWatch = await checked(await post(quickPath + '/allow-watch', { allowed: true }, b));
-    const watching = await checked(await lobby(c, 'poll', { match: paired.assignment, watch: openWatch.watchKey }));
+    assert.equal(openWatch.watchAllowed, true); assert.equal(openWatch.watchKey, null);
+    assert.equal((await fetch(quickPath + '/activity-watch-state', { headers: c.headers })).status, 200);
+    assert.equal((await fetch(quickPath + '/activity-watch-state', { headers: outsider.headers })).status, 404);
+    assert.equal((await fetch(quickPath + '/watch-state?key=' + crypto.randomUUID())).status, 404);
+    const shared = await checked(await post(quickPath + '/share-watch', {}, a));
+    assert.ok(shared.watchKey);
+    assert.equal((await fetch(quickPath + '/watch-state?key=' + shared.watchKey)).status, 200);
+    const viewerResponse = await fetch(quickPath + '/activity-watch-socket', { headers: { ...c.headers, Upgrade: 'websocket' } });
+    assert.equal(viewerResponse.status, 101);
+    const viewer = viewerResponse.webSocket;
+    const viewerClosed = new Promise(resolve => viewer.addEventListener('close', resolve, { once: true }));
+    const viewerEnded = new Promise(resolve => viewer.addEventListener('message', event => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'ended') resolve(message);
+    }));
+    viewer.accept();
+    await sendAndWait(viewer, { type: 'ping' }, result => result.type === 'pong');
+    const watching = await checked(await lobby(c, 'poll', { match: paired.assignment }));
     assert.equal(watching.users.find(user => user.owner === c.owner).status, 'spectating');
     await checked(await post(quickPath + '/allow-watch', { allowed: false }, a));
-    const revoked = await checked(await lobby(c, 'poll', { match: paired.assignment, watch: openWatch.watchKey }));
+    assert.equal((await viewerEnded).code, 4003);
+    try { viewer.close(); } catch { /* close handshake may already be complete */ }
+    await Promise.race([viewerClosed, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Viewer was not disconnected.')), 3000); timer.unref(); })]);
+    assert.equal((await fetch(quickPath + '/activity-watch-state', { headers: c.headers })).status, 404);
+    assert.equal((await fetch(quickPath + '/watch-state?key=' + shared.watchKey)).status, 404);
+    const revoked = await checked(await lobby(c, 'poll', { match: paired.assignment }));
     assert.equal(revoked.users.find(user => user.owner === c.owner).status, 'idle');
     await queueStorage.exec('UPDATE lobby_members SET expires = 0 WHERE owner = ?', c.owner);
     assert.equal((await checked(await lobby(a))).users.some(user => user.owner === c.owner), false);
     assert.equal((await checked(await lobby(a))).assignment, paired.assignment);
+    // Discord's verified membership list drives departure even if the closing client's request is lost.
+    await checked(await lobby(c, 'ready'));
+    const runtime = await server.getWorker().getEnv();
+    const coordinator = runtime.QUEUE.get(runtime.QUEUE.idFromName('ububall'));
+    const reconciled = await coordinator.lobby(b.owner, 'activity:' + instance,
+      { ...b.profile, name: b.profile.name || 'Player', avatar: b.profile.avatar || null, expires: b.profile.expires * 1000 },
+      { action: 'reconcile', connection: b.connection, match: paired.assignment }, { users: [a.owner, b.owner], checkedBefore: Date.now() });
+    assert.equal(reconciled.error, undefined);
+    assert.equal((await lobby(c)).status, 409);
+    assert.equal((await checked(await lobby(b))).users.some(user => user.owner === c.owner), false);
+    // A fresh verified Activity replaces the previous connection, forfeiting its game immediately.
+    const reopened = await member(a.owner, 'new-activity');
+    const ended = await checked(await fetch(quickPath + '/state', { headers: b.headers }));
+    assert.equal(ended.phase, 'over'); assert.equal(ended.winner, 1); assert.equal(ended.left[0], true);
+    assert.equal((await lobby(a)).status, 409);
+    assert.equal((await lobby(a, 'leave')).status, 409);
+    const staleQueue = await coordinator.update(a.owner, false, 'activity:' + instance, 'enter', null,
+      { instance, launch: a.profile.launch, connection: a.connection });
+    assert.equal(await staleQueue.status, 'closed');
+    assert.equal((await checked(await lobby(reopened))).users.some(user => user.owner === a.owner), true);
+    await checked(await lobby(reopened, 'leave'));
+    assert.equal((await lobby(reopened, 'join')).status, 409);
+    assert.equal((await fetch(quickPath + '/state', { headers: a.headers })).status, 409);
+    const canceledLaunch = await member('555555555555555555', instance, false);
+    await checked(await lobby(canceledLaunch, 'leave'));
+    await checked(await lobby(canceledLaunch, 'leave'));
+    assert.equal((await lobby(canceledLaunch, 'join')).status, 409);
+    const beforeReconnect = Date.now();
+    await new Promise(resolve => setTimeout(resolve, 2));
+    const reconnected = await member(c.owner);
+    await coordinator.lobby(b.owner, 'activity:' + instance,
+      { ...b.profile, name: b.profile.name, avatar: b.profile.avatar, expires: b.profile.expires * 1000 },
+      { action: 'reconcile', connection: b.connection }, { users: [b.owner], checkedBefore: beforeReconnect });
+    assert.equal((await lobby(reconnected)).status, 200, 'an older membership snapshot cannot evict a newer connection');
     for (const socket of sockets) socket.close();
   });
   await t.test('guests play practice teams against Discord users, never reach the mint and keep their seat on sign-in', async () => {

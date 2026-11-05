@@ -34,14 +34,14 @@
   <section class="play-home" aria-label="Play Ububall">
     <div id="activity-play" class="activity-play" hidden>
       <section class="activity-friends" aria-labelledby="activity-lobby-title">
-        <header class="activity-lobby-heading"><h1 id="activity-lobby-title">Lobby</h1><span id="activity-online-count">Connecting…</span></header>
+        <header class="activity-lobby-heading"><h1 id="activity-lobby-title">Lobby</h1><span id="activity-online-count"></span></header>
         <div id="activity-users" class="activity-users" aria-label="Players in this Activity"></div>
         <section id="activity-challenge" class="activity-challenge" aria-label="Challenge" hidden>
           <p id="activity-challenge-message" role="status"></p>
           <div class="activity-friend-actions"><button id="activity-challenge-accept" class="primary" type="button">Accept</button><button id="activity-challenge-decline" type="button">Decline</button><button id="activity-challenge-cancel" type="button">Cancel challenge</button></div>
         </section>
         <button id="online-friends" class="primary" type="button" disabled>Ready to play</button>
-        <p id="activity-status" role="status">Connecting to Discord…</p>
+        <span id="activity-loading" class="online-spinner" role="status" aria-label="Loading"></span><p id="activity-status" role="alert" hidden></p>
         <div class="activity-friend-actions">
           <button id="online-invite-friends" type="button">Invite a friend</button>
           <button id="activity-cancel" class="quiet" type="button" hidden>Leave queue</button>
@@ -50,9 +50,7 @@
       <div class="activity-other">
         <button id="activity-cpu" type="button">Play vs CPU</button>
         <button id="activity-public" type="button">Find Online Match</button>
-        <button id="online-watch" type="button">Watch</button>
       </div>
-      <div id="online-watch-list" class="activity-watch-list" popover="auto" aria-label="Live friend matches"></div>
     </div>
     <div class="home-actions">
       <button id="home-play" class="primary" type="button"><span id="home-play-label">Quick play</span><small id="quick-play-setup">Standard · Easy · Starter team</small><small id="quick-play-signin">No sign-in needed</small></button>
@@ -161,6 +159,7 @@ SOFTWARE.
       </div>
       <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
       <div class="stadium-actions">
+        <span id="online-loading" class="online-spinner" role="status" aria-label="Loading" hidden></span>
         <button id="online-change-rules" class="primary" type="button" hidden>Change rules</button>
         <div class="online-match-actions">
           <button id="online-rematch" class="primary" hidden>Rematch</button>
@@ -218,7 +217,7 @@ SOFTWARE.
       <button id="pause-leave" type="button">Leave match</button>
     </div>
     <div id="pause-watch-controls" class="lobby-actions" hidden>
-      <button id="pause-allow-watch" type="button" aria-pressed="false">Allow spectators</button>
+      <button id="pause-allow-watch" class="setting" type="button" aria-pressed="false"><span>Allow spectators</span><span class="setting-value">Off</span></button>
       <button id="pause-copy-watch" type="button" hidden>Copy watch link</button>
     </div>
     <div class="pause-settings">
@@ -344,7 +343,7 @@ SOFTWARE.
         <p id="lobby-status" class="lobby-status" role="status"></p>
         <p id="lobby-note" class="lobby-note"></p>
         <div id="lobby-team-source" class="lobby-actions" role="group" aria-label="Team source" hidden><button id="lobby-practice-team" type="button">Practice team</button><button id="lobby-owned-team" type="button">My ubus</button></div>
-        <div class="lobby-actions"><a id="lobby-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a><button id="lobby-allow-watch" type="button" aria-pressed="false">Allow spectators</button><button id="lobby-copy-watch" type="button" hidden>Copy watch link</button><button id="lobby-leave" class="quiet" type="button">Leave match</button></div>
+        <div class="lobby-actions"><a id="lobby-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a><button id="lobby-leave" class="quiet" type="button">Leave match</button></div>
       </div>
       <div id="team-bar" class="team-bar" hidden>
         <button id="team-prev" class="team-step-btn" type="button" aria-label="Previous saved team"><i data-icon="chevron-left"></i></button>

@@ -228,7 +228,12 @@ class MatchRoom {
     if (typeof allowed !== 'boolean') throw new Error('Choose whether to allow spectators.');
     const watch = this.state.watch ||= { allowed: [false, false], key: null };
     watch.allowed[seat] = allowed;
-    watch.key = watch.allowed.every(Boolean) ? watch.key || crypto.randomUUID() : null;
+    watch.key = watch.allowed.every(Boolean) ? this.state.activity ? watch.key : watch.key || crypto.randomUUID() : null;
+  }
+  shareWatch(owner) {
+    this.seat(owner);
+    if (!this.state.watch?.allowed.every(Boolean)) throw new Error('Spectating is disabled.');
+    this.state.watch.key ||= crypto.randomUUID();
   }
   watchView() {
     const s = this.state;

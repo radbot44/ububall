@@ -8,7 +8,7 @@ const ID = /^[A-Za-z0-9_-]{21}[AQgw]$/;
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const uuid = new RegExp('^' + UUID + '$');
 const watchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(watch-state|watch-socket)$');
-const matchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(join|team|team-source|rules|unready|state|socket|forfeit|rematch|skip-replay|leave|allow-watch)$');
+const matchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(join|team|team-source|rules|unready|state|socket|forfeit|rematch|skip-replay|leave|allow-watch|share-watch|activity-watch-state|activity-watch-socket)$');
 const COLLECTION_PAGE = 200;
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers
@@ -195,15 +195,25 @@ export default {
         const source = request.headers.get('Origin');
         if (action === 'watch-socket' && source !== site && (!embedded || source !== embedded)) return json({ error: 'Invalid socket origin.' }, 403);
         if (!uuid.test(key || '')) return json({ error: 'Invalid watch link.' }, 400);
+        const viewer = await auth.session(request, env);
+        let activityHeaders = {};
+        if (source === embedded || url.origin === embedded || viewer?.instance) {
+          const connection = request.headers.get('X-Ubu-Connection') || url.searchParams.get('connection');
+          const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
+          if (!viewer?.instance || !uuid.test(connection || '') || !await queue.current(viewer.owner, 'activity:' + viewer.instance, viewer.launch || '', connection)) {
+            return json({ error: 'This Activity connection has ended.' }, 409);
+          }
+          activityHeaders = { 'X-Match-Owner': viewer.owner, 'X-Match-Connection': connection, 'X-Match-Expires': String(viewer.expires * 1000) };
+        }
         return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + action, {
-          headers: { 'X-Match-Watch': key, ...(action === 'watch-socket' && request.headers.get('Upgrade')?.toLowerCase() === 'websocket' ? { Upgrade: 'websocket' } : {}) }
+          headers: { 'X-Match-Watch': key, ...activityHeaders, ...(action === 'watch-socket' && request.headers.get('Upgrade')?.toLowerCase() === 'websocket' ? { Upgrade: 'websocket' } : {}) }
         }));
       }
       const session = await auth.session(request, env);
       if (path === '/api/session' && request.method === 'GET') return json(!session ? { owner: null } :
         session.guest ? { owner: null, guest: true, csrf: session.csrf } :
           { owner: session.owner, name: session.name ?? null, csrf: session.csrf,
-            ...(session.instance ? { instance: session.instance, site, avatar: session.avatar } : {}) });
+            ...(session.instance ? { instance: session.instance, site, avatar: session.avatar, launch: session.launch } : {}) });
       if (path === '/api/guest' && request.method === 'POST') {
         if (request.headers.get('Origin') !== auth.origin(env)) return json({ error: 'Invalid request origin.' }, 403);
         if (session) return json(session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, csrf: session.csrf });
@@ -216,9 +226,10 @@ export default {
       if (path === '/api/ububall/lobby' && request.method === 'POST') {
         let data;
         try { data = await body(request, 1024); } catch { return json({ error: 'Invalid lobby request.' }, 400); }
-        const actions = ['poll', 'ready', 'unready', 'challenge', 'accept', 'decline', 'cancel', 'ack', 'leave'];
+        const actions = ['join', 'poll', 'reconcile', 'ready', 'unready', 'challenge', 'accept', 'decline', 'cancel', 'ack', 'leave'];
         if (!data || !actions.includes(data.action) || data.instance !== session.instance || !auth.validInstance(data.instance) ||
-            Object.keys(data).some(key => !['action', 'instance', 'target', 'id', 'match', 'watch', 'cpu'].includes(key)) ||
+            !uuid.test(data.connection || '') || !uuid.test(session.launch || '') || !Number.isSafeInteger(session.issued) ||
+            Object.keys(data).some(key => !['action', 'instance', 'connection', 'target', 'id', 'match', 'watch', 'cpu'].includes(key)) ||
             (data.cpu !== undefined && typeof data.cpu !== 'boolean') ||
             (data.action === 'challenge' && !/^[1-9][0-9]{0,19}$/.test(data.target || '')) ||
             (['accept', 'decline', 'cancel', 'ack'].includes(data.action) && !uuid.test(data.id || '')) ||
@@ -227,9 +238,27 @@ export default {
         }
         // The signed Activity session was created only after Discord verified membership.
         const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
-        try { return json(await queue.lobby(session.owner, 'activity:' + session.instance,
-          { name: session.name || 'Player', avatar: session.avatar || null }, data)); }
+        let participants;
+        if (data.action === 'reconcile') {
+          if (!await queue.current(session.owner, 'activity:' + session.instance, session.launch, data.connection)) return json({ error: 'This Activity connection has ended.' }, 409);
+          const checkedBefore = Date.now();
+          const users = await auth.activityParticipants(env, session.instance);
+          if (!users) return json({ error: 'Discord could not verify the Activity.' }, 503);
+          participants = { users, checkedBefore };
+        }
+        try {
+          const result = await queue.lobby(session.owner, 'activity:' + session.instance,
+            { name: session.name || 'Player', avatar: session.avatar || null, launch: session.launch, issued: session.issued, expires: session.expires * 1000 }, data, participants);
+          return json(result, result.error ? 409 : 200);
+        }
         catch (error) { return json({ error: error.message }, 409); }
+      }
+      if (path.startsWith('/api/ububall') && session.instance) {
+        const connection = request.headers.get('X-Ubu-Connection') || url.searchParams.get('connection');
+        const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
+        if (!uuid.test(connection || '') || !await queue.current(session.owner, 'activity:' + session.instance, session.launch || '', connection)) {
+          return json({ error: 'This Activity connection has ended.' }, 409);
+        }
       }
       if (path === '/api/ububall/queue' && request.method === 'POST') {
         let data;
@@ -248,7 +277,9 @@ export default {
           scope = 'activity:' + data.instance;
         }
         const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
-        return json(await queue.update(session.owner, Boolean(session.guest), scope, data.action, data.id ?? null));
+        const result = await queue.update(session.owner, Boolean(session.guest), scope, data.action, data.id ?? null,
+          session.instance ? { instance: session.instance, launch: session.launch, connection: request.headers.get('X-Ubu-Connection') } : null);
+        return result.status === 'closed' ? json({ error: 'This Activity connection has ended.' }, 409) : json(result);
       }
       if (path === '/api/ububall/activity-watch' && request.method === 'GET') {
         const instance = url.searchParams.get('instance');
@@ -271,18 +302,23 @@ export default {
       }
       const match = path.match(matchRoute);
       if (match) {
-        const [, id, action] = match, get = action === 'state' || action === 'socket';
+        const [, id, action] = match, activityWatch = action.startsWith('activity-watch-');
+        const socket = action === 'socket' || action === 'activity-watch-socket';
+        const get = action === 'state' || socket || activityWatch;
+        if (activityWatch && !session.instance) return json({ error: 'Open this match inside its Discord Activity.' }, 403);
         if (request.method !== (get ? 'GET' : 'POST')) return json({ error: 'Method not allowed.' }, 405);
         // Browser sockets cannot carry custom CSRF headers; enforce the exact Origin instead.
-        if (action === 'socket' && request.headers.get('Origin') !== auth.requestOrigin(env, session)) return json({ error: 'Invalid socket origin.' }, 403);
+        if (socket && request.headers.get('Origin') !== auth.requestOrigin(env, session)) return json({ error: 'Invalid socket origin.' }, 403);
         let data;
         if (!get) { try { data = await body(request, 2048); } catch { return json({ error: 'Invalid match request.' }, 400); } }
-        return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + action, {
+        return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + (activityWatch ? action.slice(9) : action), {
           method: request.method,
           headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Alias': session.alias || '',
             'X-Match-Name': encodeURIComponent(session.name || ''),
             'X-Match-Expires': String(session.expires * 1000),
-            'Content-Type': 'application/json', ...(action === 'socket' ? { Upgrade: 'websocket' } : {}) },
+            'X-Match-Connection': request.headers.get('X-Ubu-Connection') || url.searchParams.get('connection') || '',
+            ...(activityWatch ? { 'X-Match-Activity': session.instance } : {}),
+            'Content-Type': 'application/json', ...(socket ? { Upgrade: 'websocket' } : {}) },
           body: get ? undefined : JSON.stringify(data)
         }));
       }

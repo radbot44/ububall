@@ -5655,7 +5655,7 @@
     lobby(view, open) { void showLobby(view, open); },
     closeLobby,
     onState(s) {
-      if (!document.body.classList.contains('online-match')) { stopDemo(); enterMatch(); }
+      if (!document.body.classList.contains('online-match')) { stopDemo(); endGoalReplay(); stopFanfare(); enterMatch(); }
       document.body.classList.add('online-match');
       $('online-open-label').textContent = s.spectator ? 'Watching a match' : 'Online match';
       $('online-open-note').hidden = true;
@@ -5739,7 +5739,6 @@
     },
     onDisconnect(reconnecting) {
       onlineDisconnected = reconnecting; phase = 'waiting'; drag = null;
-      if (reconnecting) say('Reconnecting…');
       sync(); draw();
     },
     onError(message) { say(message); banner(message, 3000); },
