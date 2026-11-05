@@ -172,44 +172,48 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
 .activity-play { display: grid; gap: .75rem; }
 .activity-friends {
   position: relative;
-  display: grid; gap: .875rem; padding: clamp(.875rem, 2.5vw, 1.5rem);
-  border: .0625rem solid color-mix(in srgb, var(--primary) 55%, var(--border)); border-radius: 1.5rem;
-  background: radial-gradient(ellipse at top, color-mix(in srgb, var(--primary) 21%, var(--card)), var(--card) 78%);
-  box-shadow: var(--panel-shadow); text-align: center;
+  display: grid; gap: .875rem; padding: 1.125rem;
+  border: .0625rem solid var(--border); border-radius: 1.375rem;
+  background: var(--card); box-shadow: var(--panel-shadow); text-align: center;
 }
 #online-friends {
-  min-height: 3.75rem; padding: .75rem; border-radius: 1rem;
-  font: 1.5rem/1.1 var(--font-display); color: #2b1608;
+  min-height: 3.5rem; padding: .625rem .75rem .875rem; border-radius: .875rem;
+  font: 1.375rem/1.1 var(--font-display); color: #2b1608;
 }
-.activity-lobby-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-.activity-lobby-heading h1 { margin: 0; font: 1.75rem/1.1 var(--font-display); }
+.activity-lobby-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding-bottom: .75rem; border-bottom: .0625rem solid var(--border); }
+.activity-lobby-heading h1 { margin: 0; font: 1.5rem/1.1 var(--font-display); }
 .activity-lobby-title { display: flex; align-items: center; gap: .625rem; min-width: 0; }
 .activity-loading-slot { display: grid; place-items: center; flex: none; width: 1.25rem; height: 1.25rem; }
 #activity-online-count { color: var(--muted); font-size: .8125rem; }
 .activity-users { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-flow: row dense; gap: .5rem; max-height: 21rem; overflow-y: auto; padding: .125rem; }
 .activity-user {
   display: flex; flex-direction: column; align-items: center; gap: .375rem; min-width: 0;
-  padding: .625rem .25rem; border: .0625rem solid var(--border); border-radius: .75rem;
-  background: var(--elevated); color: var(--text); font-size: .8125rem;
+  padding: .75rem .25rem .875rem; border: .125rem solid var(--border); border-radius: .75rem;
+  background: var(--elevated); color: var(--text); font-size: .9375rem; box-shadow: var(--bevel);
 }
 .activity-user[aria-disabled="true"] { cursor: default; }
-.activity-user-avatar { position: relative; display: grid; place-items: center; width: clamp(2rem, 4vw, 3rem); max-width: 100%; aspect-ratio: 1; border-radius: 50%; background: var(--card); font: 1rem var(--font-display); }
+.activity-user[aria-disabled="true"]:hover { background: var(--elevated); }
+.activity-user:not([aria-disabled="true"]):hover { border-color: var(--primary); }
+.activity-user:not([aria-disabled="true"]):active { transform: translateY(.125rem); box-shadow: var(--bevel-pressed); }
+.activity-user-avatar { position: relative; display: grid; place-items: center; width: 3rem; max-width: 100%; aspect-ratio: 1; flex: none; border-radius: 50%; background: var(--card); font: 1rem var(--font-display); }
 .activity-user-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; grid-area: 1 / 1; }
 .activity-user[data-self="true"] .activity-user-avatar::after { content: 'You'; position: absolute; bottom: -.125rem; right: -.125rem; border-radius: .25rem; padding: .0625rem .1875rem; background: var(--primary); color: #2b1608; font: 600 .5625rem Inter, sans-serif; }
 #lobby-team-source { justify-content: flex-start; }
 #lobby-team-source [aria-pressed="true"] { border-color: var(--primary); color: var(--primary); }
-.activity-user-name { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.activity-user-status { font-size: .6875rem; color: var(--muted); overflow-wrap: anywhere; }
+.activity-user-name { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.activity-user-status { font: .6875rem/1.2 var(--font-body); color: var(--muted); overflow-wrap: anywhere; }
 .activity-user[data-status="ready"] { border-color: #42c66b; }
 .activity-user[data-status="ready"] .activity-user-status { color: #89d8b5; }
-.activity-user[data-status="balling"] .activity-user-status { color: var(--primary); }
-.activity-user[data-status="spectating"] .activity-user-status { color: #c5a3ff; }
-.activity-challenge { padding: .75rem; border: .0625rem solid var(--primary); border-radius: .75rem; background: var(--card); }
+.activity-challenge { padding: .75rem; border: .125rem solid var(--primary); border-radius: .75rem; background: var(--elevated); box-shadow: var(--bevel); }
 .activity-challenge p { margin: 0 0 .625rem; }
 #activity-status { position: absolute; top: 3.5rem; inset-inline: .875rem; z-index: 2; margin: 0; padding: .625rem; border: .0625rem solid var(--primary); border-radius: .625rem; background: var(--card); color: var(--text); font-size: .875rem; box-shadow: var(--panel-shadow); }
-.activity-match { position: relative; grid-column: span 2; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; min-width: 0; border: .0625rem solid var(--border); border-radius: .75rem; background: var(--elevated); }
-.activity-match .activity-user { border: 0; background: transparent; }
-.activity-versus { position: absolute; left: 50%; top: calc(.625rem + clamp(1rem, 2vw, 1.5rem)); transform: translate(-50%, -50%); padding: .125rem .375rem; border-radius: 1rem; background: var(--primary); color: #2b1608; font: .6875rem var(--font-display); pointer-events: none; }
+.activity-match { position: relative; grid-column: span 2; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; min-width: 0; border: .125rem solid var(--border); border-radius: .75rem; background: var(--elevated); box-shadow: var(--bevel); }
+.activity-match:has(.activity-user:not([aria-disabled="true"]):hover) { border-color: var(--primary); }
+.activity-match .activity-user { border-color: transparent; background: transparent; box-shadow: none; padding: .625rem .125rem .75rem; }
+.activity-match .activity-user:not([aria-disabled="true"]):hover { border-color: transparent; }
+.activity-match .activity-user:hover { background: transparent; }
+.activity-match .activity-user:active { box-shadow: none; }
+.activity-versus { position: absolute; left: 50%; top: 2.25rem; transform: translate(-50%, -50%); padding: .1875rem .3125rem; border: .0625rem solid var(--border); border-radius: .375rem; background: var(--background); color: var(--text); font: .75rem var(--font-display); pointer-events: none; }
 .online-spinner { display: inline-block; justify-self: center; width: 1.25rem; height: 1.25rem; border: .1875rem solid color-mix(in srgb, var(--primary) 25%, transparent); border-top-color: var(--primary); border-radius: 50%; animation: online-spin .8s linear infinite; }
 .stadium-actions { position: relative; }
 .online-loading-slot { position: absolute; right: .5rem; top: .375rem; width: 1.25rem; height: 1.25rem; pointer-events: none; }
@@ -218,6 +222,7 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
 
 #online-change-rules { grid-column: 1 / -1; min-height: 2.75rem; font: 1.125rem var(--font-display); }
 .activity-friend-actions, .activity-other { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; }
+.activity-friend-actions > button { flex: 1 1 auto; }
 .activity-other > button { flex: 1 1 auto; min-height: 2.75rem; }
 @media (orientation: landscape) and (min-width: 600px) {
   .discord-activity body:not(.in-match) .ball-page {
@@ -297,6 +302,7 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
 .pause-menu.has-activity-lobby[open] { display: grid; grid-template-columns: minmax(18rem, 23.75rem) minmax(20rem, 27rem); align-items: start; gap: 1.25rem; width: min(54rem, calc(100vw - 1.5rem)); max-height: calc(100dvh - 1.5rem); overflow-y: auto; }
 .has-activity-lobby .pause-menu-main { display: block; min-width: 0; }
 #pause-lobby { min-width: 0; }
+#pause-lobby .activity-friends { padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
 #activity-match-offer-error { position: absolute; inset-inline: 1rem; bottom: 3.75rem; z-index: 1; padding: .625rem; border: .0625rem solid var(--primary); border-radius: .625rem; background: var(--card); color: var(--text); box-shadow: var(--panel-shadow); }
 .has-activity-lobby .pause-settings { display: grid; gap: .5rem; margin: 1rem 0 .75rem; padding-top: 1rem; border-top: .0625rem solid var(--border); }
 @media (max-width: 44rem) {
