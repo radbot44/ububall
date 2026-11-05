@@ -70,6 +70,8 @@ main:has(> #signed-out-panel:not([hidden])) > :not(#signed-out-panel) { display:
   background: var(--elevated); color: var(--text); font-family: var(--font-display); font-size: .90625rem;
 }
 .mint-entry-link:hover { background: var(--hover); }
+/* The team waits for the session, so a signed-in player never sees a guest team first. */
+.home-team:not(.settled) > * { visibility: hidden; }
 .starter-pack .candy-pack { width: min(26rem, 100%); filter: drop-shadow(0 .5rem 1rem #0006); transition: scale .2s; }
 .starter-pack .candy-pack:not(:disabled):is(:hover, :focus-visible) { scale: 1.04; }
 .starter-pack .candy-pack:disabled { opacity: 1; }

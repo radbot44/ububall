@@ -3,7 +3,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const signedIn = () => Boolean(window.getUbuSession?.()?.owner);
-  let status = null, deadline = 0, signup = null;
+  let status = null, known = false, deadline = 0, signup = null;
 
   async function request(init) {
     const response = await fetch('/api/starter', init);
@@ -35,7 +35,7 @@
       const next = signedIn() ? await request() : null;
       status = next; deadline = Date.now() + (next?.seconds || 0) * 1000;
     } catch (error) { status = null; throw error; }
-    finally { publish(); }
+    finally { known = true; publish(); }
   }
   // Opening does not publish: the caller shows the pack first, then refreshes.
   async function claim(kind) {
@@ -54,7 +54,7 @@
     publish();
   }
 
-  window.ubuStarter = { get status() { return status; }, refresh, claim, ensureSignup };
+  window.ubuStarter = { get status() { return status; }, get known() { return known; }, refresh, claim, ensureSignup };
   window.addEventListener('ubu:session', () => { void refresh().catch(() => {}); });
   if (signedIn()) void refresh().catch(() => {});
   setInterval(tick, 1000);

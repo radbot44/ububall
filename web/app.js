@@ -45,4 +45,5 @@
   window.addEventListener('popstate', show);
   window.showUbuScreen = show;
   show();
+  document.documentElement.classList.remove('booting');
 })();
