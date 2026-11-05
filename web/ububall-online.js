@@ -121,10 +121,8 @@ function ububallOnline(hooks) {
     }
     if (next.phase === 'lobby') {
       // Entering the lobby (a new match or a rematch) brings up the team screen.
-      const note = next.teams === 'practice' ? 'This match uses random practice teams.' :
-        next.teams === 'choice' ? 'Choose a practice team or use the ubus in your collection.' :
-        next.practice ? 'Guests play with a random practice team. Sign in with Discord to use your own ubus; you keep your seat.' : '';
-      hooks.lobby({ state: next, ready, practice: next.practice, guest: Boolean(session?.guest),
+      const note = next.guestTeam ? 'Guests play with three given ubus. Sign in with Discord to use your own ubus; you keep your seat.' : '';
+      hooks.lobby({ state: next, ready, guestTeam: next.guestTeam, guest: Boolean(session?.guest),
         note: note + (note ? ' ' : '') + 'Disconnects pause planning; after 60 seconds your opponent can claim a forfeit.' }, reopen || !before || before.phase !== 'lobby');
       status('');
     } else if (!next.game) {
@@ -202,6 +200,7 @@ function ububallOnline(hooks) {
     if (key === 'activity') { url.searchParams.delete('match'); url.searchParams.delete('watch'); }
     else url.searchParams.set(key ? 'watch' : 'match', key ? id + '.' + key : id);
     history.replaceState(null, '', url);
+    window.showUbuScreen?.(); // A match can start while the Activity shows Ubu Mint or Collection.
     receive(initial); connect();
     clearInterval(heartbeat);
     heartbeat = setInterval(() => {
@@ -304,13 +303,6 @@ function ububallOnline(hooks) {
     if (activity) void lobbyRequest('poll');
     return true;
   }
-  const settings = { policy: 'practice' };
-  $('online-policy').onclick = event => {
-    const button = event.target.closest('button[data-value]');
-    if (!button) return;
-    settings.policy = button.dataset.value;
-    for (const option of $('online-policy').children) option.setAttribute('aria-pressed', String(option === button));
-  };
   // The rules come from the mode screen; this dialog then sets up the invite.
   let createMode = 'standard';
   function showDialog(create = false) {
@@ -329,7 +321,7 @@ function ububallOnline(hooks) {
   $('online-create').onclick = async () => {
     $('online-create').disabled = true;
     try {
-      const result = await api('/api/ububall', { mode: createMode, teams: settings.policy });
+      const result = await api('/api/ububall', { mode: createMode });
       await enter(result.id, result);
     } catch (error) { status(error.message, true); }
     finally { $('online-create').disabled = !playable(); }
@@ -515,6 +507,7 @@ function ububallOnline(hooks) {
     for (let index = 0; index < nodes.length; index++) if (list.children[index] !== nodes[index]) list.insertBefore(nodes[index], list.children[index] || null);
     if (focused?.isConnected && document.activeElement !== focused && list.contains(focused)) focused.focus({ preventScroll: true });
     $('activity-challenge').hidden = !challenge;
+    document.querySelector('.site-nav a[href="/"]').classList.toggle('has-notice', challenge?.target === session.owner);
     for (const action of ['accept', 'decline', 'cancel']) $('activity-challenge-' + action).disabled = lobbyBusy;
     if (challenge) {
       const incoming = challenge.target === session.owner;
@@ -706,7 +699,6 @@ function ububallOnline(hooks) {
     async ready(team) { receive(await api('/api/ububall/' + id + '/team', { ...team, gameNumber: state.gameNumber })); },
     async unready() { receive(await api('/api/ububall/' + id + '/unready', {})); },
     async rules(mode, gameNumber) { receive(await api('/api/ububall/' + id + '/rules', { mode, gameNumber })); },
-    async teamSource(practice) { receive(await api('/api/ububall/' + id + '/team-source', { practice })); },
     create(mode) { createMode = mode; $('online-mode-name').textContent = ububallMatch.modeName(mode); showDialog(true); },
     now: () => Date.now() + offset,
     async skipReplay() {

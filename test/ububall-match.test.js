@@ -4,6 +4,8 @@ const M = require('../shared/ububall-match.js');
 const P = require('../web/ububall-physics.js');
 const C = require('../shared/ububall-cpu.js');
 const S = require('../scripts/cpu-simulation.cjs');
+const ubu = require('../shared/ubu.js');
+const rarity = require('../shared/rarity.js');
 test('network move validation rejects forged state and non-finite or out-of-range moves', () => {
   const moves = () => Array.from({length:3}, () => ({angle:0,power:.5,spin:0,superArm:false,guard:false}));
   assert.equal(M.validatePlans(moves()).length,3);
@@ -34,7 +36,7 @@ test('shared meter rules exclude super users and the opposing team', () => {
 
 const { MatchRoom } = require('../server/ububall-room.js');
 test('private drafts, turn locking, disconnect pause and latest-draft Blitz expiry', () => {
-  const room = new MatchRoom('host','blitz','practice'); room.join('guest');
+  const room = new MatchRoom('host', 'blitz', true); room.join('guest', true);
   room.connect('host',0); room.connect('guest',0); room.beginPlanning(0);
   const moves=Array.from({length:3},()=>({angle:0,power:.8,spin:0,superArm:false,guard:false}));
   room.submit('host',1,moves,false,1000);
@@ -49,7 +51,7 @@ test('private drafts, turn locking, disconnect pause and latest-draft Blitz expi
   assert.throws(()=>room.submit('host',1,moves,true,53001));
 });
 test('changing rules restarts instant play before launch and rejects stale editors and locked turns', () => {
-  const room = new MatchRoom('host', 'standard', 'practice'); room.join('guest'); room.readyPracticePair();
+  const room = new MatchRoom('host', 'standard', true); room.join('guest', true); room.readyPair([null, null]);
   room.connect('host', 1000); room.connect('guest', 1000); room.advance(1000);
   const roster = structuredClone(room.state.rosters);
   room.changeRules('guest', 'classic-pulse-blitz', 0); room.advance(2000);
@@ -67,25 +69,26 @@ test('changing rules restarts instant play before launch and rejects stale edito
 });
 
 test('forfeit requires a seated connected claimant and sixty disconnected seconds', () => {
-  const room=new MatchRoom('host','classic','owned');room.join('guest');room.connect('host',0);room.connect('guest',0);
+  const room=new MatchRoom('host', 'classic');room.join('guest', true);room.connect('host',0);room.connect('guest',0);
   room.disconnect('guest',100);
   assert.throws(()=>room.claimForfeit('host',60099));assert.throws(()=>room.claimForfeit('stranger',60100));
   room.claimForfeit('host',60100);assert.equal(room.state.winner,0);
 });
 
 test('MatchRoom advance drives full lifecycle from lobby to resolving and next turn planning', () => {
-  const room = new MatchRoom('host', 'standard', 'practice');
+  const room = new MatchRoom('host', 'standard', true);
   const ubu = require('../shared/ubu.js');
-  room.join('guest');
+const rarity = require('../shared/rarity.js');
+  room.join('guest', true);
   room.connect('host', 1000);
   room.connect('guest', 1000);
   assert.equal(room.state.phase, 'lobby');
-  const hostSupers = room.state.practice[0].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
-  const guestSupers = room.state.practice[1].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
-  room.selectTeam('host', room.state.practice[0], hostSupers);
+  const hostSupers = room.state.guestTeams[0].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
+  const guestSupers = room.state.guestTeams[1].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
+  room.selectTeam('host', room.state.guestTeams[0], hostSupers);
   room.advance(1000);
   assert.equal(room.state.phase, 'lobby');
-  room.selectTeam('guest', room.state.practice[1], guestSupers);
+  room.selectTeam('guest', room.state.guestTeams[1], guestSupers);
   room.advance(1000);
   assert.equal(room.state.phase, 'plan');
   assert.equal(room.state.turn, 1);
@@ -135,13 +138,13 @@ test('goal resolution awards victory once', () => {
 });
 
 test('online goal replays wait for either player and protect the first cycle', () => {
-  const room = new MatchRoom('host', 'classic', 'practice');
-  room.join('guest');
+  const room = new MatchRoom('host', 'classic', true);
+  room.join('guest', true);
   room.connect('host', 0);
   room.connect('guest', 0);
   const ubu = require('../shared/ubu.js');
   for (const owner of ['host', 'guest']) {
-    const team = room.practiceTeam(owner);
+    const team = room.guestTeam(owner);
     room.selectTeam(owner, team, team.map(entry => ubu.decode(ubu.fromCode(entry.dna)).supers[0] % 8));
   }
   for (const [start, scores, afterSkip] of [[1000, [0, 0], 'plan'], [20000, [4, 0], 'over']]) {
@@ -189,9 +192,9 @@ test('authoritative supers consume meter and preserve the no-gain rule through s
 });
 
 test('quick-start friends matches begin when both players connect and reuse their teams for a rematch', () => {
-  const room = new MatchRoom('host', 'standard', 'practice');
-  room.join('friend');
-  room.readyPracticePair();
+  const room = new MatchRoom('host', 'standard', true);
+  room.join('friend', true);
+  room.readyPair([null, null]);
   assert.deepEqual(room.view('host').ready, [true, true]);
   assert.equal(room.view('host').quickStart, true);
   room.connect('host', 1000);
@@ -213,15 +216,15 @@ test('quick-start friends matches begin when both players connect and reuse thei
 });
 
 test('MatchRoom rematch requires match over and agreement from both players', () => {
-  const room = new MatchRoom('host', 'standard', 'practice');
+  const room = new MatchRoom('host', 'standard', true);
   const ubu = require('../shared/ubu.js');
-  room.join('guest');
+  room.join('guest', true);
   room.connect('host', 1000); room.connect('guest', 1000);
   assert.throws(() => room.rematch('host', 1000));
-  const hostSupers = room.state.practice[0].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
-  const guestSupers = room.state.practice[1].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
-  room.selectTeam('host', room.state.practice[0], hostSupers);
-  room.selectTeam('guest', room.state.practice[1], guestSupers);
+  const hostSupers = room.state.guestTeams[0].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
+  const guestSupers = room.state.guestTeams[1].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
+  room.selectTeam('host', room.state.guestTeams[0], hostSupers);
+  room.selectTeam('guest', room.state.guestTeams[1], guestSupers);
   room.advance(1000);
   assert.equal(room.state.phase, 'plan');
   assert.throws(() => room.rematch('host', 1000));
@@ -239,27 +242,27 @@ test('MatchRoom rematch requires match over and agreement from both players', ()
   assert.deepEqual(room.state.ready, [false, false]);
   assert.ok(room.state.rosters.every(Boolean));
   assert.equal(room.state.expires, 2000 + 86400000);
-  room.selectTeam('host', room.state.practice[0], hostSupers); room.advance(3000);
+  room.selectTeam('host', room.state.guestTeams[0], hostSupers); room.advance(3000);
   assert.equal(room.state.phase, 'lobby');
-  room.selectTeam('guest', room.state.practice[1], guestSupers); room.advance(3000);
+  room.selectTeam('guest', room.state.guestTeams[1], guestSupers); room.advance(3000);
   assert.equal(room.state.phase, 'plan');
   assert.deepEqual(room.state.game.scores, [0, 0]);
 });
 
 test('MatchRoom lets players change teams before kickoff and leave cleanly', () => {
-  const room = new MatchRoom('host', 'standard', 'practice');
+  const room = new MatchRoom('host', 'standard', true);
   const ubu = require('../shared/ubu.js');
-  const supers = i => room.state.practice[i].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
-  room.join('guest'); room.connect('host', 0); room.connect('guest', 0);
-  room.selectTeam('host', room.state.practice[0], supers(0)); room.unready('host');
-  room.selectTeam('guest', room.state.practice[1], supers(1)); room.advance(0);
+  const supers = i => room.state.guestTeams[i].map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
+  room.join('guest', true); room.connect('host', 0); room.connect('guest', 0);
+  room.selectTeam('host', room.state.guestTeams[0], supers(0)); room.unready('host');
+  room.selectTeam('guest', room.state.guestTeams[1], supers(1)); room.advance(0);
   assert.equal(room.state.phase, 'lobby');
   // A lobby guest leaving frees the seat for someone else.
   room.leave('guest', 0);
   assert.deepEqual(room.state.players, ['host', null]);
   assert.deepEqual(room.state.ready, [false, false]);
-  room.join('other'); room.connect('other', 0);
-  room.selectTeam('host', room.state.practice[0], supers(0)); room.selectTeam('other', room.state.practice[1], supers(1));
+  room.join('other', true); room.connect('other', 0);
+  room.selectTeam('host', room.state.guestTeams[0], supers(0)); room.selectTeam('other', room.state.guestTeams[1], supers(1));
   room.advance(0);
   assert.equal(room.state.phase, 'plan');
   assert.throws(() => room.unready('host'));
@@ -271,25 +274,37 @@ test('MatchRoom lets players change teams before kickoff and leave cleanly', () 
 });
 
 test('MatchRoom shows each seat its players\' display names', () => {
-  const room = new MatchRoom('host', 'standard', 'practice');
-  room.rename('host', '  Saffron  '); room.join('guest'); room.rename('guest', '');
+  const room = new MatchRoom('host', 'standard', true);
+  room.rename('host', '  Saffron  '); room.join('guest', true); room.rename('guest', '');
   assert.deepEqual(room.view('guest').names, ['Saffron', null]);
   room.rename('guest', 'x'.repeat(40));
   assert.equal(room.view('host').names[1].length, 32);
 });
 
-test('guest seats use practice teams in owned matches and carry over to Discord', () => {
-  const room = new MatchRoom('g_host', 'classic', 'owned', true);
+test('guest seats use given teams and carry over to Discord', () => {
+  const room = new MatchRoom('g_host', 'classic', true);
   room.join('111', false);
-  assert.equal(room.state.practice[0].length, 3); assert.equal(room.state.practice[1], null);
-  assert.equal(room.view('111').practice, null);
+  assert.equal(room.state.guestTeams[0].length, 3); assert.equal(room.state.guestTeams[1], null);
+  assert.equal(room.view('111').guestTeam, null);
   assert.throws(() => room.join('g_guest', true));
   assert.equal(room.claim('222', 'g_unknown'), false);
   assert.equal(room.claim('111', 'g_host'), false); // cannot take both seats
   assert.equal(room.claim('333', 'g_host'), true);
   assert.deepEqual(room.state.players, ['333', '111']);
-  assert.equal(room.state.practice[0], null);
+  assert.equal(room.state.guestTeams[0], null);
   assert.throws(() => room.seat('g_host'));
+});
+
+test('a quick start fields registry teams with their saved supers beside a guest team', () => {
+  const room = new MatchRoom('111', 'standard');
+  room.join('g_guest', true);
+  const entries = rarity.starterTeam(ubu).map((dna, i) => ({ dna, serial: String(i + 1).padStart(12, '0') }));
+  const supers = entries.map(({ dna }) => ubu.decode(ubu.fromCode(dna)).supers[1] % 8);
+  room.readyPair([{ entries, supers }, null]);
+  assert.deepEqual(room.state.ready, [true, true]);
+  assert.deepEqual(room.state.rosters[0].map(entry => entry.serial), entries.map(entry => entry.serial));
+  assert.deepEqual(room.state.rosters[0].map(entry => entry.superId), supers);
+  assert.deepEqual(room.state.rosters[1].map(entry => entry.dna), room.state.guestTeams[1].map(entry => entry.dna));
 });
 
 function pulseState(mode) {

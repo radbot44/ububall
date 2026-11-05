@@ -1,7 +1,8 @@
 'use strict';
 const { sign } = require('../shared/ubu-file.js');
-const { decode, fromCode } = require('../shared/ubu.js');
-const { scoreRarity } = require('../shared/rarity.js');
+const ubu = require('../shared/ubu.js');
+const { scoreRarity, starterTeam } = require('../shared/rarity.js');
+const { decode, fromCode } = ubu;
 
 const MAX_SERIAL = 999999999999;
 const DEFAULT_BATCH_SIZE = 1000;
@@ -21,11 +22,17 @@ function identity(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{21}[AQgw]$/.test(value);
 }
 
+const discordOwner = owner => typeof owner === 'string' && /^[1-9][0-9]{0,19}$/.test(owner);
+
 function issuanceRequest(owner, request, lifetimeLimit) {
-  if (typeof owner !== 'string' || !/^[1-9][0-9]{0,19}$/.test(owner) ||
-      typeof request !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(request)) throw new Error('Invalid issuance request.');
+  if (!discordOwner(owner) || typeof request !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(request)) throw new Error('Invalid issuance request.');
   if (lifetimeLimit !== undefined && (!Number.isSafeInteger(lifetimeLimit) || lifetimeLimit < 0)) throw new Error('Invalid lifetime limit.');
 }
+
+// Starter packs are recorded as issuance under reserved request IDs. The colon keeps them apart
+// from caller request IDs, and the day number makes each daily pack exactly-once per UTC day.
+const utcDay = () => Math.floor(Date.now() / 86400000);
+const starterRequest = kind => kind === 'signup' ? 'starter:signup' : 'starter:daily:' + utcDay();
 
 // A pack's wrapper comes from its random choice token, so each pack is independently random yet
 // stays the same when an offer is shown again. Summing the 6-bit digits keeps the bias negligible.
@@ -129,6 +136,11 @@ class Mint {
   exec(sql, ...bindings) { return Array.from(this.storage.exec(sql, ...bindings)); }
   transaction(callback) { return this.storage.transactionSync(callback); }
   state() { return this.exec('SELECT * FROM mint_state WHERE singleton=1')[0]; }
+  newId() {
+    let id;
+    do { id = randomCode(16); } while (this.exec('SELECT id FROM inventory WHERE id=? UNION ALL SELECT id FROM issued WHERE id=?', id, id).length);
+    return id;
+  }
   // Each call commits one bounded chunk; an interrupted batch resumes on the next call.
   prepare({ batchSize = DEFAULT_BATCH_SIZE, chunkSize = 100, minimumPacks = 1 } = {}) {
     integer(batchSize, 1000000, 'batch size');
@@ -146,9 +158,7 @@ class Mint {
       }
       const end = Math.min(state.size, state.prepared + chunkSize);
       for (let slot = state.prepared; slot < end; slot++) {
-        let id;
-        do { id = randomCode(16); } while (this.exec('SELECT id FROM inventory WHERE id=? UNION ALL SELECT id FROM issued WHERE id=?', id, id).length);
-        this.exec('INSERT INTO inventory (pack_slot, quintile, id, serial, dna, batch) VALUES (-1, 0, ?, ?, ?, ?)', id,
+        this.exec('INSERT INTO inventory (pack_slot, quintile, id, serial, dna, batch) VALUES (-1, 0, ?, ?, ?, ?)', this.newId(),
           String(state.start_serial + slot).padStart(12, '0'), randomCode(128), state.batch);
       }
       if (end === state.size) {
@@ -183,7 +193,7 @@ class Mint {
   }
 
   checkAllowance(owner, lifetimeLimit) {
-    if (lifetimeLimit !== undefined && this.exec('SELECT COUNT(DISTINCT request) AS count FROM issued WHERE owner=?', owner)[0].count >= lifetimeLimit) {
+    if (lifetimeLimit !== undefined && this.exec("SELECT COUNT(DISTINCT request) AS count FROM issued WHERE owner=? AND request NOT LIKE 'starter:%'", owner)[0].count >= lifetimeLimit) {
       throw new Error('Lifetime mint limit reached.');
     }
   }
@@ -279,6 +289,10 @@ class Mint {
       return this.exec('SELECT * FROM issued WHERE owner=? AND request=? ORDER BY quintile', owner, request);
     });
 
+    return { certificates: await this.certify(records) };
+  }
+
+  async certify(records) {
     const certificates = [];
     for (const record of records) {
       if (record.certificate) {
@@ -295,7 +309,44 @@ class Mint {
         certificates.push(cert);
       }
     }
-    return { certificates };
+    return certificates;
+  }
+
+  // What this account may open now, and the seconds until the next UTC day's daily pack.
+  starterStatus(owner) {
+    const open = kind => !this.exec('SELECT 1 FROM issued WHERE owner=? AND request=? LIMIT 1', owner, starterRequest(kind)).length;
+    return { signup: open('signup'), daily: open('daily'), seconds: Math.ceil((utcDay() + 1) * 86400 - Date.now() / 1000) };
+  }
+
+  // Starter ubus come straight from the rarity deciles, outside the batches: taking them from
+  // inventory would leave regular packs without their rare slots. Serials follow the reserved
+  // batch ranges. A pack exists only once opened, so a missed day has nothing to carry over.
+  async claimStarter({ owner, kind }) {
+    if (!discordOwner(owner) || !['signup', 'daily'].includes(kind)) throw new Error('Invalid issuance request.');
+    const request = starterRequest(kind);
+    this.transaction(() => {
+      if (this.exec('SELECT 1 FROM issued WHERE owner=? AND request=? LIMIT 1', owner, request).length) return;
+      const state = this.state(), team = starterTeam(ubu), issuedAt = Math.floor(Date.now() / 1000), packId = randomCode(16);
+      if (state.next_serial + team.length - 1 > MAX_SERIAL) throw new Error('Serial range exhausted.');
+      team.forEach((dna, i) => this.exec(`INSERT INTO issued
+        (id, serial, dna, batch, owner, revision, request, pack_id, quintile, issued_at, key, certificate, favorite)
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, 0)`, this.newId(), String(state.next_serial + i).padStart(12, '0'), dna,
+        state.batch, owner, request, packId, i + 1, issuedAt, this.key));
+      this.exec('UPDATE mint_state SET next_serial=next_serial+? WHERE singleton=1', team.length);
+    });
+    // Also finishes a pack whose signing was interrupted, even if its day has since ended.
+    await this.certify(this.exec("SELECT * FROM issued WHERE owner=? AND request LIKE 'starter:%' AND certificate IS NULL", owner));
+    return { certificates: this.exec('SELECT certificate FROM issued WHERE owner=? AND request=? ORDER BY quintile', owner, request).map(row => row.certificate) };
+  }
+
+  // The team a player fields when a match skips team selection: their last team, otherwise their
+  // favorites and newest ubus. A null super is the ubu's first.
+  matchTeam(owner) {
+    const row = serial => this.exec('SELECT serial, dna FROM issued WHERE owner=? AND serial=? AND certificate IS NOT NULL', owner, serial)[0];
+    const last = this.teams(owner).last, saved = last?.map(slot => row(slot.serial)), kept = saved?.every(Boolean);
+    const entries = kept ? saved : this.exec(`SELECT serial, dna FROM issued WHERE owner=? AND certificate IS NOT NULL
+      ORDER BY favorite DESC, issued_at DESC, serial DESC LIMIT 3`, owner);
+    return { entries, supers: entries.map((entry, i) => (kept ? last[i].super : null) ?? decode(fromCode(entry.dna)).supers[0] % 8) };
   }
 
   teams(owner) {

@@ -9,10 +9,88 @@ const { Mint, DEFAULT_BATCH_SIZE, PACK_SIZE } = require('../server/mint.js');
 const { openStorage } = require('../server/mint-local.js');
 const file = require('../shared/ubu-file.js');
 const ubu = require('../shared/ubu.js');
+const rarity = require('../shared/rarity.js');
 
 const mintID = 'A'.repeat(22);
 const owner = '123456789012345678';
 const request = n => `request_${String(n).padStart(12, '0')}`;
+
+test('starter packs hold one signed ubu from each rarest decile, once per account and UTC day', async t => {
+  const f = await fixture(t), mint = new Mint(f.open(), f.options);
+  mint.prepare({ batchSize: 30 });
+  const inventory = mint.exec('SELECT COUNT(*) AS n FROM inventory')[0].n, day = 86400000;
+  let now = 20000 * day + 3600000;
+  t.mock.method(Date, 'now', () => now);
+  assert.deepEqual(mint.starterStatus(owner), { signup: true, daily: true, seconds: 82800 });
+
+  const signup = await mint.claimStarter({ owner, kind: 'signup' });
+  assert.equal(signup.certificates.length, 3);
+  const verified = await Promise.all(signup.certificates.map(text => file.read(text, { resolveKey: () => f.keys.publicKey })));
+  assert.deepEqual(verified.map(item => Math.min(90, Math.floor(rarity.scoreRarity(ubu.decode(ubu.fromCode(item.dna))).percentile / 10) * 10)), [70, 80, 90]);
+  assert.deepEqual(verified.map(item => item.certificate.serial), ['000000000031', '000000000032', '000000000033']);
+  assert.deepEqual(await mint.claimStarter({ owner, kind: 'signup' }), signup);
+  assert.deepEqual(mint.starterStatus(owner), { signup: false, daily: true, seconds: 82800 });
+
+  // Signup and daily are separate packs, and a retry returns the same daily pack.
+  const daily = await mint.claimStarter({ owner, kind: 'daily' });
+  assert.notDeepEqual(daily, signup);
+  assert.deepEqual(await mint.claimStarter({ owner, kind: 'daily' }), daily);
+  assert.equal(mint.starterStatus(owner).daily, false);
+
+  // Skipped days leave nothing behind: only today's pack can be opened.
+  now += 3 * day;
+  assert.equal(mint.starterStatus(owner).daily, true);
+  await mint.claimStarter({ owner, kind: 'daily' });
+  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued WHERE owner=?', owner)[0].n, 9);
+
+  // Starter packs leave regular inventory and the lifetime limit alone.
+  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM inventory')[0].n, inventory);
+  assert.equal(mint.state().remaining, 6);
+  const offered = mint.offer({ owner, request: request(1) }, { lifetimeLimit: 1 });
+  await mint.issue({ owner, request: offered.request, choice: offered.choices[0].choice }, { lifetimeLimit: 1 });
+  assert.throws(() => mint.offer({ owner, request: request(2) }, { lifetimeLimit: 1 }), /Lifetime mint limit reached/);
+  await assert.rejects(mint.claimStarter({ owner: 'g_guest', kind: 'daily' }), /Invalid issuance request/);
+  await assert.rejects(mint.claimStarter({ owner, kind: 'bonus' }), /Invalid issuance request/);
+
+  // Serials stay unique when the next batch reserves its range.
+  mint.prepare({ batchSize: 30, minimumPacks: 3 });
+  const serials = mint.exec('SELECT serial FROM issued UNION ALL SELECT serial FROM inventory').map(row => row.serial);
+  assert.equal(new Set(serials).size, serials.length);
+});
+
+test('a starter pack interrupted before signing finishes on the next claim, even a day later', async t => {
+  const f = await fixture(t);
+  let fail = true, now = 20000 * 86400000;
+  t.mock.method(Date, 'now', () => now);
+  const mint = new Mint(f.open(), { ...f.options, resolveSigningKey: async id => {
+    if (fail) throw new Error('Signing unavailable.');
+    return f.options.resolveSigningKey(id);
+  } });
+  await assert.rejects(mint.claimStarter({ owner, kind: 'daily' }), /Signing unavailable/);
+  assert.equal(mint.starterStatus(owner).daily, false);
+  fail = false; now += 86400000;
+  await mint.claimStarter({ owner, kind: 'daily' });
+  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued WHERE certificate IS NULL')[0].n, 0);
+  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued')[0].n, 6);
+});
+
+test('a skipped team selection fields the last team, then favorites and newest ubus', async t => {
+  const f = await fixture(t), mint = new Mint(f.open(), f.options);
+  await mint.claimStarter({ owner, kind: 'signup' });
+  await mint.claimStarter({ owner, kind: 'daily' });
+  const rows = mint.exec('SELECT serial, dna FROM issued ORDER BY serial');
+  const first = dna => ubu.decode(ubu.fromCode(dna)).supers[0] % 8;
+  assert.deepEqual(mint.matchTeam(owner).entries.map(row => row.serial), rows.slice(3).reverse().map(row => row.serial));
+  mint.exec('UPDATE issued SET favorite=1 WHERE serial=?', rows[0].serial);
+  assert.equal(mint.matchTeam(owner).entries[0].serial, rows[0].serial);
+  const chosen = ubu.decode(ubu.fromCode(rows[1].dna)).supers[1] % 8;
+  const last = [{ serial: rows[1].serial, super: chosen }, { serial: rows[4].serial, super: null }, { serial: rows[2].serial, super: null }];
+  assert.ok(!mint.saveTeams(owner, { teams: [], last }).error);
+  const team = mint.matchTeam(owner);
+  assert.deepEqual(team.entries.map(row => row.serial), last.map(slot => slot.serial));
+  assert.deepEqual(team.supers, [chosen, first(rows[4].dna), first(rows[2].dna)]);
+  assert.deepEqual(mint.matchTeam('987654321098765432'), { entries: [], supers: [] });
+});
 
 test('pack hints are stable, private, and exactly match the selected issuance', async t => {
   const f = await fixture(t), mint = new Mint(f.open(), f.options);

@@ -36,8 +36,10 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
   const user = await signedIn('123456789012345678');
   const headers = { Cookie: user.cookie, Origin: env.ORIGIN, 'X-Ubu-CSRF': user.csrf, 'Content-Type': 'application/json' };
   const offer = (request, h = headers) => fetch('/api/packs', { method: 'POST', headers: h, body: JSON.stringify({ request }) });
+  const starter = (kind, h = headers) => fetch('/api/starter', { method: 'POST', headers: h, body: JSON.stringify({ kind }) });
   const select = (request, choice, h = headers) => fetch('/api/mint', { method: 'POST', headers: h, body: JSON.stringify({ request, choice }) });
   async function issue(request, h = headers) {
+    await starter('daily', h); // The daily pack comes before regular packs.
     const response = await offer(request, h);
     if (!response.ok) return response;
     const data = await response.json();
@@ -130,7 +132,25 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await offer('offer_request_0001', { ...headers, 'X-Ubu-CSRF': 'wrong' })).status, 403);
     assert.equal((await fetch('/api/packs', { method: 'POST', headers, body: JSON.stringify({ request: 'offer_request_0001', dna: 'forged' }) })).status, 400);
   });
-  let firstCertificates;
+  let firstCertificates, dailyCertificates;
+  await t.test('starter packs are private to the account, exactly-once and come before regular packs', async () => {
+    assert.equal((await fetch('/api/starter')).status, 401);
+    assert.equal((await starter('daily', { ...headers, 'X-Ubu-CSRF': 'wrong' })).status, 403);
+    assert.equal((await starter('bonus')).status, 400);
+    const status = await (await fetch('/api/starter', { headers })).json();
+    assert.equal(status.signup, true); assert.equal(status.daily, true);
+    assert.ok(status.seconds > 0 && status.seconds <= 86400);
+    const blocked = await offer('first_request_0001');
+    assert.equal(blocked.status, 409); assert.match((await blocked.json()).error, /daily pack/);
+    const attempts = await Promise.all(Array.from({ length: 4 }, () => starter('daily')));
+    const packs = await Promise.all(attempts.map(response => response.json()));
+    for (const pack of packs) assert.deepEqual(pack, packs[0]);
+    dailyCertificates = packs[0].certificates;
+    assert.equal(dailyCertificates.length, 3);
+    for (const text of dailyCertificates) assert.equal((await file.read(text, { resolveKey: () => keys.publicKey })).type, 'signed');
+    const after = await (await fetch('/api/starter', { headers })).json();
+    assert.equal(after.signup, true); assert.equal(after.daily, false);
+  });
   await t.test('alarms prepare batches and concurrent retries return one verified issuance', async () => {
     const preparing = await issue('first_request_0001');
     assert.equal(preparing.status, 503); assert.equal(preparing.headers.get('Retry-After'), '2');
@@ -164,10 +184,10 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const retries = await Promise.all(Array.from({ length: 8 }, () => issue('first_request_0001')));
     for (const retry of retries) assert.deepEqual((await retry.json()).certificates, firstCertificates);
     const collection = await (await fetch('/api/ubus', { headers })).json();
-    assert.equal(collection.ubus.length, 5);
+    assert.equal(collection.ubus.length, 8);
     const storage = await server.getWorker().getDurableObjectStorage('MINT', { name: env.MINT_ID });
     assert.equal((await storage.exec('SELECT remaining FROM mint_state'))[0].remaining, 3);
-    assert.equal((await storage.exec('SELECT COUNT(*) AS count FROM issued'))[0].count, 5);
+    assert.equal((await storage.exec('SELECT COUNT(*) AS count FROM issued'))[0].count, 8);
   });
   await t.test('collection pages and owner-backed favorites survive reloads and reject cross-account writes', async () => {
     const readCollection = async (after = '') => {
@@ -175,7 +195,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
       assert.equal(response.status, 200);
       return response.json();
     };
-    const serials = firstCertificates.map(text => JSON.parse(text).serial);
+    const serials = [...firstCertificates, ...dailyCertificates].map(text => JSON.parse(text).serial);
     const recent = await readCollection();
     assert.deepEqual(recent.ubus.map(row => row.serial), [...serials].sort().reverse());
     const middle = recent.ubus[2].serial;
@@ -245,7 +265,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.ok(results.every(r => r.status === 403));
     const otherResult = await issue('other_owner_request_1', otherHeaders);
     assert.equal(otherResult.status, 200);
-    const collection = await (await fetch('/api/ubus', { headers: otherHeaders })).json(); assert.equal(collection.ubus.length, 5);
+    const collection = await (await fetch('/api/ubus', { headers: otherHeaders })).json(); assert.equal(collection.ubus.length, 8);
     const logout = await fetch('/api/logout', { method: 'POST', headers });
     assert.equal(logout.status, 200); assert.match(logout.headers.get('Set-Cookie'), /Max-Age=0/);
   });
@@ -269,7 +289,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(ready.status, 200, await ready.clone().text());
     const record = (await storage.exec('SELECT prepared, remaining, next_serial FROM mint_state'))[0];
     assert.equal(record.prepared, 205); assert.equal(record.remaining, 40); // 205/5 = 41 packs, 1 issued -> 40 packs remaining
-    assert.equal(record.next_serial, 206);
+    assert.equal(record.next_serial, 209); // The daily pack took three serials ahead of the batch.
   });
   await t.test('pagination walks a collection larger than one page, newest first with pending last', async () => {
     await server.update(options => ({ workers: options.workers.map(worker => ({
@@ -281,7 +301,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     }
     const all = await server.getWorker().getDurableObjectStorage('MINT', { name:
       (await (await fetch('/api/config')).json()).mint });
-    assert.equal((await all.exec('SELECT COUNT(*) AS n FROM issued WHERE owner=?', '123456789012345678'))[0].n, 60);
+    assert.equal((await all.exec('SELECT COUNT(*) AS n FROM issued WHERE owner=?', '123456789012345678'))[0].n, 63);
     // Pad the collection past one 200-ubu page with stand-in rows (some pending, some sharing a
     // mint time) and remove them afterwards; the endpoint only orders and pages rows.
     for (let i = 0; i < 160; i++) {
@@ -292,7 +312,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     try {
       const expected = (await all.exec(`SELECT serial FROM issued WHERE owner=?
         ORDER BY (certificate IS NULL) ASC, issued_at DESC, serial DESC`, '123456789012345678')).map(row => row.serial);
-      assert.equal(expected.length, 220);
+      assert.equal(expected.length, 223);
       const results = [], sizes = [];
       let cursor = '';
       do {
@@ -303,7 +323,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
         results.push(...page.ubus.map(row => row.serial));
         cursor = page.next;
       } while (cursor);
-      assert.deepEqual(sizes, [200, 20]);
+      assert.deepEqual(sizes, [200, 23]);
       assert.deepEqual(results, expected);
     } finally {
       await all.exec("DELETE FROM issued WHERE pack_id='padding'");
@@ -314,13 +334,17 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const guestHeaders = { ...headers, Cookie: guest.cookie, 'X-Ubu-CSRF': guest.csrf };
     const post = (path, data, h = headers) => fetch(path, { method: 'POST', headers: h, body: JSON.stringify(data) });
     assert.equal((await fetch('/api/ububall', { method: 'POST' })).status, 401);
-    assert.equal((await post('/api/ububall', { mode: 'standard', teams: 'practice' }, { ...headers, 'X-Ubu-CSRF': 'wrong' })).status, 403);
-    assert.equal((await post('/api/ububall', { mode: 'standard', teams: 'practice', owner: 'forged' })).status, 400);
-    const created = await post('/api/ububall', { mode: 'blitz', teams: 'practice' });
+    assert.equal((await post('/api/ububall', { mode: 'standard' }, { ...headers, 'X-Ubu-CSRF': 'wrong' })).status, 403);
+    assert.equal((await post('/api/ububall', { mode: 'standard', owner: 'forged' })).status, 400);
+    assert.equal((await post('/api/ububall', { mode: 'standard', teams: 'owned' })).status, 400);
+    const created = await post('/api/ububall', { mode: 'blitz' });
     assert.equal(created.status, 200, await created.clone().text());
     const { id } = await created.json(), base = '/api/ububall/' + id;
     assert.equal((await fetch(base + '/state', { headers: guestHeaders })).status, 400);
     assert.equal((await post(base + '/join', {}, guestHeaders)).status, 200);
+    // Taking a seat opened the joining player's signup pack in the background.
+    assert.equal((await (await fetch('/api/starter', { headers: guestHeaders })).json()).signup, false);
+    assert.equal((await (await fetch('/api/ubus', { headers: guestHeaders })).json()).ubus.length, 3);
     const outsider = await signedIn('567890123456789012');
     assert.equal((await post(base + '/join', {}, { ...headers, Cookie: outsider.cookie, 'X-Ubu-CSRF': outsider.csrf })).status, 400);
     assert.equal((await fetch(base + '/socket', { headers: { ...headers, Upgrade: 'websocket', Origin: 'https://evil.example' } })).status, 403);
@@ -344,9 +368,12 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     await hostSocket.wait(m => m.type === 'pong');
     for (const h of [headers, guestHeaders]) {
       const lobby = await (await fetch(base + '/state', { headers: h })).json();
-      const supers = lobby.practice.map(e => ubu.decode(ubu.fromCode(e.dna)).supers[0] % 8);
-      assert.equal((await post(base + '/team', { supers, dna: 'forged' }, h)).status, 400);
-      assert.equal((await post(base + '/team', { supers }, h)).status, 200);
+      assert.equal(lobby.guestTeam, null);
+      const { ubus } = await (await fetch('/api/ubus', { headers: h })).json(), team = ubus.slice(0, 3);
+      const selection = { serials: team.map(e => e.serial), supers: team.map(e => ubu.decode(ubu.fromCode(JSON.parse(e.certificate).dna)).supers[0] % 8) };
+      assert.equal((await post(base + '/team', { ...selection, dna: 'forged' }, h)).status, 400);
+      assert.equal((await post(base + '/team', { supers: selection.supers }, h)).status, 400);
+      assert.equal((await post(base + '/team', selection, h)).status, 200);
     }
     await hostSocket.wait(m => m.phase === 'plan');
     const watchOff = await (await post(base + '/allow-watch', { allowed: true })).json();
@@ -361,7 +388,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.deepEqual(watching.connected, [true, true]);
     assert.equal(watching.spectator, true);
     assert.equal(Object.hasOwn(watching, 'moves'), false);
-    assert.equal(Object.hasOwn(watching, 'practice'), false);
+    assert.equal(Object.hasOwn(watching, 'guestTeam'), false);
     assert.equal(Object.hasOwn(watching, 'seat'), false);
     assert.ok(watching.rosters.flat().every(r => !Object.hasOwn(r, 'serial')));
     const moves = Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false }));
@@ -396,7 +423,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const recovered = await (await fetch(base + '/state', { headers })).json();
     assert.equal(recovered.turn, 2); assert.deepEqual(recovered.game.scores, [0, 0]);
 
-    const owned = await (await post('/api/ububall', { mode: 'classic', teams: 'owned' })).json();
+    const owned = await (await post('/api/ububall', { mode: 'classic' })).json();
     const ownedBase = '/api/ububall/' + owned.id;
     await post(ownedBase + '/join', {}, guestHeaders);
     const collection = await (await fetch('/api/ubus', { headers })).json();
@@ -438,7 +465,6 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const path = '/api/ububall/' + paired.id;
     const lobby = await (await post(path + '/join', {}, embedded)).json();
     assert.equal(lobby.seat, 1);
-    assert.equal(lobby.teams, 'practice');
     assert.equal(lobby.matchKind, 'online');
     assert.deepEqual(lobby.occupied, [true, true]);
     const embeddedSocket = await fetch(path + '/socket', { headers: { ...embedded, Upgrade: 'websocket' } });
@@ -515,7 +541,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await checked(await lobby(a))).assignment, accepted.assignment);
     const path = '/api/ububall/' + accepted.assignment;
     let setup = await checked(await post(path + '/join', {}, a));
-    assert.equal(setup.phase, 'lobby'); assert.equal(setup.quickStart, false); assert.equal(setup.teams, 'choice');
+    assert.equal(setup.phase, 'lobby'); assert.equal(setup.quickStart, false); assert.equal(setup.challenge, true);
     assert.equal((await lobby(b, 'ready')).status, 409);
     await checked(await lobby(a, 'ack', { id: accepted.assignment, match: accepted.assignment }));
     await checked(await lobby(b, 'ack', { id: accepted.assignment, match: accepted.assignment }));
@@ -524,8 +550,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(setup.mode, 'classic-pulse'); assert.equal(setup.gameNumber, 1);
     assert.equal((await post(path + '/rules', { mode: 'blitz', gameNumber: 0 }, b)).status, 400);
     assert.equal((await post(path + '/rules', { mode: 'standard', gameNumber: 1 }, c)).status, 400);
-    setup = await checked(await post(path + '/team-source', { practice: false }, a));
-    assert.equal(setup.practice, null);
+    assert.equal(setup.guestTeam, null);
     assert.equal((await post(path + '/team', { serials: ['000000000001'], supers: [0, 0, 0], gameNumber: 1 }, a)).status, 400);
     await checked(await post(path + '/leave', {}, a));
     await checked(await lobby(a)); await checked(await lobby(b));
@@ -536,6 +561,11 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.ok(paired.assignment); assert.notEqual(paired.assignment, accepted.assignment);
     const quick = await checked(await post(quickPath + '/join', {}, a));
     assert.equal(quick.quickStart, true); assert.deepEqual(quick.ready, [true, true]);
+    // Ready to play fields each player's own ubus, opening a signup pack that was left unopened.
+    for (const player of [a, b]) {
+      assert.equal((await (await fetch('/api/starter', { headers: player.headers })).json()).signup, false);
+      assert.ok((await (await fetch('/api/ubus', { headers: player.headers })).json()).ubus.length >= 3);
+    }
     const sockets = [];
     for (const player of [a, b]) {
       const socket = await fetch(quickPath + '/socket', { headers: { ...player.headers, Upgrade: 'websocket' } });
@@ -628,7 +658,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await lobby(reconnected)).status, 200, 'an older membership snapshot cannot evict a newer connection');
     for (const socket of sockets) socket.close();
   });
-  await t.test('guests play practice teams against Discord users, never reach the mint and keep their seat on sign-in', async () => {
+  await t.test('guests play given teams against Discord users, never reach the mint and keep their seat on sign-in', async () => {
     assert.equal((await fetch('/api/guest', { method: 'POST', headers: { Origin: 'https://evil.example' } })).status, 403);
     const start = await fetch('/api/guest', { method: 'POST', headers: { Origin: env.ORIGIN } });
     assert.equal(start.status, 200);
@@ -641,14 +671,16 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await post('/api/favorites', { serials: [] }, g)).status, 403);
     assert.equal((await post('/api/packs', { request: 'guest-request-000001' }, g)).status, 403);
     assert.equal((await post('/api/mint', { request: 'guest-request-000001' }, g)).status, 403);
+    assert.equal((await fetch('/api/starter', { headers: g })).status, 403);
+    assert.equal((await post('/api/starter', { kind: 'daily' }, g)).status, 403);
 
-    // A guest hosts an owned-team match; the Discord opponent picks owned ubus, the guest gets a practice team.
-    const created = await post('/api/ububall', { mode: 'classic', teams: 'owned' }, g);
+    // A guest hosts a match; the Discord opponent picks owned ubus, the guest gets a given team.
+    const created = await post('/api/ububall', { mode: 'classic' }, g);
     assert.equal(created.status, 200, await created.clone().text());
     const match = await created.json(), base = '/api/ububall/' + match.id;
-    assert.equal(match.practice.length, 3);
+    assert.equal(match.guestTeam.length, 3);
     const joined = await (await post(base + '/join', {}, headers)).json();
-    assert.equal(joined.practice, null);
+    assert.equal(joined.guestTeam, null);
     assert.equal((await post(base + '/team', { serials: ['000000000001', '000000000002', '000000000003'], supers: [0, 0, 0] }, g)).status, 400);
 
     // Discord sign-in from the guest's browser carries the seat over to the Discord account.
@@ -662,7 +694,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(discordSession.name, 'Ubu Fan');
     const d = { ...g, Cookie: discordCookie, 'X-Ubu-CSRF': discordSession.csrf };
     const claimed = await (await fetch(base + '/state', { headers: d })).json();
-    assert.equal(claimed.seat, 0); assert.equal(claimed.practice, null);
+    assert.equal(claimed.seat, 0); assert.equal(claimed.guestTeam, null);
     assert.equal((await fetch(base + '/state', { headers: g })).status, 400);
     const rematch = await post(base + '/rematch', {}, d);
     assert.equal(rematch.status, 400); assert.match((await rematch.json()).error, /not over/);

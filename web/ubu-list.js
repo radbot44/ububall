@@ -390,7 +390,7 @@
     main.setAttribute('aria-pressed', String(Boolean(badge)));
     main.setAttribute('aria-label', name + ', ' + (badge ? badge + ' on your team' : action));
   }
-  // Desktop tiles drag onto team positions; the key is the ubu's serial (or practice key).
+  // Desktop tiles drag onto team positions; the key is the ubu's serial.
   function draggable(main, key) {
     main.draggable = true;
     main.addEventListener('dragstart', event => { event.dataTransfer.setData('application/x-ubu-key', key); event.dataTransfer.effectAllowed = 'copyMove'; });

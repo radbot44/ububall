@@ -20,8 +20,11 @@
     img.onload = () => { if (skaters.length) draw(); };
     return img;
   });
-  const practice = Array.from({ length: 6 }, () => { const dna = ubu.randomDNA(); return { model: ubu.decode(dna), dna: ubu.toCode(dna), label: 'Practice ubu' }; });
-  let roster = practice.slice(0, 3), draft = [...roster], rosterSlot = 0;
+  // Guests field three ubus they cannot keep; the CPU gets a fresh three each match.
+  const starterEntries = (prefix, label) => rarity.starterTeam(ubu).map((dna, i) => ({ model: ubu.decode(ubu.fromCode(dna)), dna, label, key: prefix + '-' + i }));
+  const guestTeam = starterEntries('guest', 'Guest ubu');
+  let cpuTeam = starterEntries('cpu', 'CPU ubu');
+  let roster = guestTeam, draft = [...roster], rosterSlot = 0;
   const idlePlan = () => ({ angle: 0, power: 0, spin: 0, guard: false });
   fieldView.bodies = P.kickoff();
   let simBodies = P.kickoff(), plans = Array.from({ length: 3 }, idlePlan), cpu = [], selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
@@ -193,8 +196,8 @@
     power: 127, reach: 127, strength: 127, stability: 127,
     efficiency: 127, synergy: 127, chemistry: 127
   });
-  let stats = practice.map(p => ({ ...(p.model.stats || normalStats()) }));
-  fieldView.entries = [...roster, ...practice.slice(3)];
+  let stats = [...roster, ...cpuTeam].map(p => ({ ...(p.model.stats || normalStats()) }));
+  fieldView.entries = [...roster, ...cpuTeam];
   let play = ububallMatch.newPlay(), tally = ububallMatch.newTally(), scoringPlayer = null, roundTurns = 0;
   // Goal camping and corner stalling warnings and cards, as this view sees them (see ububallMatch.FOULS).
   let fouls = ububallMatch.newFouls();
@@ -1274,7 +1277,7 @@
     const result = P.kickoff();
     result.slice(0, 6).forEach((b, i) => {
       ububallMatch.applyStats(P, b, stats[i], fieldView.mode);
-      const entry = fieldView.entries[i] || practice[i];
+      const entry = fieldView.entries[i];
       if (entry?.model) {
         b.personality = entry.model.personality;
         const sObj = entry.equippedSuper || resolveEquippedSuper(entry, i);
@@ -2082,9 +2085,10 @@
     fieldView.mode = cpuMode;
     document.body.classList.toggle('classic-match', classicMode());
     showMode(fieldView.mode);
-    stats = [...draft, ...practice.slice(3)].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
+    cpuTeam = starterEntries('cpu', 'CPU ubu');
+    stats = [...draft, ...cpuTeam].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
     stopFanfare(); gameAudio()?.stop();
-    roster = [...draft]; fieldView.entries = [...roster, ...practice.slice(3)]; fieldView.bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
+    roster = [...draft]; fieldView.entries = [...roster, ...cpuTeam]; fieldView.bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
     if (!demo) {
       recording = ububallReplay.create({ mode: fieldView.mode, names: ['You', 'CPU'], ubus: fieldView.bodies.slice(0, 6).map((b, i) => ({ dna: fieldView.entries[i].dna, super: b.equippedSuper?.id ?? null })) });
     }
@@ -4705,7 +4709,7 @@
   const node = (tag, props = {}, ...children) => { const n = Object.assign(document.createElement(tag), props); n.append(...children); return n; };
   let changedSlot = -1, lobbyView = null, savedTeams = null, teamIndex = -1;
   const teamLocked = () => setupFor === 'lobby' && Boolean(lobbyView?.ready);
-  const fixedTeam = () => setupFor === 'lobby' && Boolean(lobbyView?.practice);
+  const fixedTeam = () => setupFor === 'lobby' ? Boolean(lobbyView?.guestTeam) : !signedIn();
   const setupClassic = () => ububallMatch.rule(setupFor === 'lobby' && lobbyView ? lobbyView.state.mode : chosenMode(), 'classic');
   const superBonus = s => s.copies > 1 ? ` (+${(s.bonusTicks / 240).toFixed(1)} s, +${s.bonusRefund}% meter refund)` : '';
   const nextEmpty = from => { for (let i = 1; i <= 3; i++) if (!draft[(from + i) % 3]) return (from + i) % 3; return from; };
@@ -4737,7 +4741,6 @@
     return { action: current ? `Swap in for ${current.model.parts.fullName}` : `Put in ${POSITIONS[rosterSlot]}` };
   }
   function entryForKey(key) {
-    if (key.startsWith('practice-')) return practice[Number(key.slice(9))];
     const item = ubuList.get(key);
     return item?.model ? entryFor(item) : null;
   }
@@ -4830,7 +4833,7 @@
   function teamHint(classic) {
     const entry = draft[rosterSlot], position = POSITIONS[rosterSlot];
     let text = teamLocked() ? 'Your team is locked in. Choose Change team to edit it.' :
-      fixedTeam() ? (classic ? 'This match gives you a practice team.' : 'This match gives you a practice team. Pick each ubu’s super with its super button.') :
+      fixedTeam() ? (classic ? 'Guests play with these three ubus.' : 'Guests play with these three ubus. Pick each ubu’s super with its super button.') :
       !entry ? `Pick an ubu for ${position}.` : `Picking an ubu puts it in ${position}, replacing ${entry.model.parts.fullName}.`;
     if (!teamLocked() && !fixedTeam()) {
       if (canDrag) text += ' You can also drag ubus onto any position.';
@@ -4845,27 +4848,9 @@
     changedSlot = -1;
     teamHint(classic);
     rosterList.render();
-    for (const option of document.querySelectorAll('#roster-practice .roster-option')) {
-      describePractice(option);
-    }
     $('start-match').disabled = draft.some(d => !d);
     updateTeamBar();
   }
-  function describePractice(option) {
-    const entry = practice[Number(option.dataset.key.slice(9))];
-    ubuList.describeTile(option, entry.model.parts.fullName, describe(entry.key));
-  }
-  function addOption(entry, container) {
-    const { main, artBox } = ubuList.tileMain(entry.model, entry.label);
-    artBox.prepend(ubuRender(entry.model, 'ubu-tile-svg'));
-    main.classList.add('roster-option'); main.dataset.key = entry.key;
-    main.onclick = () => choose(entry);
-    if (canDrag) ubuList.draggable(main, entry.key);
-    const tile = document.createElement('div'); tile.className = 'ubu-tile';
-    tile.append(main);
-    $(container).append(tile);
-  }
-  practice.forEach((entry, i) => { entry.key = 'practice-' + i; });
   // The player's collection, keyed by serial, as team entries; one entry per ubu keeps keys stable.
   const collectionEntries = new Map();
   function entryFor(item) {
@@ -4905,7 +4890,7 @@
   $('roster-signin-btn').onclick = () => window.openDiscordLogin?.();
 
   // Saved teams belong to the signed-in account. A team saves only when every position holds
-  // one of the player's own ubus (practice ubus change every visit). A null super means the
+  // one of the player's own ubus (guest ubus change every visit). A null super means the
   // ubu's default.
   const signedIn = () => Boolean(window.getUbuSession?.()?.owner);
   const teamSlotsOf = team => team.every(e => e && ubuList.get(e.key)?.model) ? team.map(e => ({ serial: e.key, super: e.equippedSuper?.id ?? null })) : null;
@@ -5008,17 +4993,40 @@
     const favorites = ubuList.view(ubuList.items(), { sort: 'favorite' }).filter(item => item.model).slice(0, 3).map(entryFor);
     return favorites.length === 3 ? favorites : null;
   }
+  // Signing in, or gaining a first team, replaces a guest team with the account's own.
+  const onGuestTeam = () => roster.every(entry => entry.key.startsWith('guest-'));
+  async function adoptAccountTeam() {
+    if (!signedIn() || !onGuestTeam()) return;
+    const entries = await accountTeam();
+    if (!entries || !onGuestTeam()) return;
+    draft = entries;
+    if (demo) newDemoGame(); else if (!matchInProgress() && !online?.active) newMatch();
+    updateHome();
+  }
+  // A signed-in player always fields their own ubus. Nothing starts until they have them.
+  async function ownTeamReady() {
+    for (;;) {
+      try { await window.ubuStarter.ensureSignup(); await adoptAccountTeam(); return true; }
+      catch (error) {
+        if (!await gameUi.confirm({ title: 'Could not get your ubus', message: error.message, confirmLabel: 'Retry' })) return false;
+      }
+    }
+  }
   window.addEventListener('ubu:session', async event => {
-    savedTeams = null; teamIndex = -1; updateTeamBar();
-    if (!event.detail?.owner || !roster.every(entry => practice.includes(entry))) return;
-    try {
-      const entries = await accountTeam();
-      if (!entries || !roster.every(entry => practice.includes(entry))) return;
-      draft = entries;
-      if (demo) newDemoGame(); else if (!matchInProgress()) newMatch();
-      updateHome();
-    } catch {}
+    savedTeams = null; teamIndex = -1; updateTeamBar(); updateHome();
+    if (event.detail?.owner) try { await adoptAccountTeam(); } catch {}
   });
+  // An unopened signup pack takes the place of the home team until it is opened.
+  function showSignupPack() {
+    const signup = Boolean(window.ubuStarter.status?.signup);
+    $('home-pack').hidden = !signup;
+    $('home-lineup').hidden = $('new-match').hidden = signup;
+    $('home-title').textContent = signup ? 'Signup bonus' : 'Your team';
+    if (signup) void window.loadMintScripts();
+    else if (signedIn()) void ubuList.load({ refresh: true }).then(adoptAccountTeam).catch(() => {});
+  }
+  window.addEventListener('ubu:starter', showSignupPack);
+  document.addEventListener('DOMContentLoaded', showSignupPack); // The status may have come before this script.
   // The floating spin slider is a preference kept per device.
   showSetting('setting-spin', spinSlider);
   $('setting-spin').onclick = () => {
@@ -5050,21 +5058,13 @@
     $('sheet-next').textContent = setupFor === 'rules' ? 'Apply rules' : setupFor === 'online' ? 'Next: online match' : 'Next: choose team';
     $('lobby-panel').hidden = setupFor !== 'lobby';
     $('team-title').textContent = setupFor === 'lobby' ? 'Online match' : 'Your team';
-    $('team-back').hidden = setupFor === 'lobby' && !lobbyView?.state.canChangeRules;
+    $('team-back').hidden = setupFor === 'pick' || (setupFor === 'lobby' && !lobbyView?.state.canChangeRules);
     if (step === 'team') {
       $('team-mode').textContent = ububallMatch.modeName(setupFor === 'lobby' ? lobbyView.state.mode : chosenMode());
       if (!fixedTeam()) { void loadCollection(); void loadTeams(); }
       rosterSlots();
     }
-    $('start-match').textContent = setupFor !== 'lobby' ? 'Start match' : lobbyView?.ready ? 'Change team' : 'Ready to play';
-  }
-  function rosterTab(tab) {
-    for (const name of ['yours', 'practice']) {
-      $('tab-' + name).setAttribute('aria-selected', String(name === tab));
-      $('roster-' + name).hidden = name !== tab;
-    }
-    $('roster-scroll').scrollTop = 0;
-    if (tab === 'yours') void loadCollection();
+    $('start-match').textContent = setupFor === 'pick' ? 'Use team' : setupFor !== 'lobby' ? 'Start match' : lobbyView?.ready ? 'Change team' : 'Ready to play';
   }
   function openSetup(step, purpose = 'cpu', mode = cpuMode, level = cpuLevel) {
     setupFor = purpose;
@@ -5074,24 +5074,26 @@
     if (purpose === 'rules') rulesGameNumber = online.state.gameNumber;
     document.querySelector(`input[name="cpu-level"][value="${level}"]`).checked = true;
     draft = [...roster]; rosterSlot = 0; $('roster-status').textContent = '';
-    rosterTab(signedIn() ? 'yours' : 'practice');
+    $('roster-scroll').scrollTop = 0;
+    void loadCollection();
     setupStep(step);
     if (!$('roster-dialog').open) $('roster-dialog').showModal();
   }
-  // The online lobby. A practice seat fields the room's own three ubus; otherwise the player
+  // The online lobby. A guest seat fields the room's own three ubus; otherwise the player
   // picks from their collection, starting from their current, last or favorite team.
-  const lobbyEntries = practiceTeam => practiceTeam.map((p, i) => {
+  const lobbyEntries = team => team.map((p, i) => {
     const model = ubu.decode(ubu.fromCode(p.dna));
-    return { model, dna: p.dna, label: 'Practice ubu', key: 'online-' + i };
+    return { model, dna: p.dna, label: 'Guest ubu', key: 'online-' + i };
   });
   async function showLobby(view, open) {
     const before = lobbyView, entering = setupFor !== 'lobby';
     lobbyView = view;
-    const practiceChanged = JSON.stringify(before?.practice || null) !== JSON.stringify(view.practice || null);
-    if (entering || practiceChanged) {
+    const teamChanged = JSON.stringify(before?.guestTeam || null) !== JSON.stringify(view.guestTeam || null);
+    if (entering || teamChanged) {
       setupFor = 'lobby'; rosterSlot = 0;
-      if (view.practice) draft = lobbyEntries(view.practice);
+      if (view.guestTeam) draft = lobbyEntries(view.guestTeam);
       else {
+        await ownTeamReady(); // The server opened any signup pack as this seat was taken.
         draft = roster.every(entry => ubuList.get(entry.key)?.model) ? roster.map(entry => ({ ...entry })) : [null, null, null];
         if (draft.some(d => !d) && signedIn()) {
           try { const team = await accountTeam(); if (team && lobbyView === view && draft.some(d => !d)) draft = team; } catch {}
@@ -5099,19 +5101,15 @@
       }
     }
     // Owned-ubu matches take only the player's collection.
-    $('roster-tabs').hidden = $('roster-scroll').hidden = Boolean(view.practice);
-    $('tab-practice').hidden = true;
-    if (!view.practice) rosterTab('yours');
+    $('roster-scroll').hidden = Boolean(view.guestTeam);
+    if (!view.guestTeam) void loadCollection();
     $('lobby-note').textContent = view.note;
     $('lobby-login').hidden = !view.guest;
-    $('lobby-team-source').hidden = view.state.teams !== 'choice';
-    $('lobby-practice-team').setAttribute('aria-pressed', String(Boolean(view.practice)));
-    $('lobby-owned-team').setAttribute('aria-pressed', String(!view.practice));
     if (entering || before?.state.mode !== view.state.mode) {
       for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(view.state.mode, rule);
       modeSummary();
     }
-    if (entering) setupStep(view.state.teams === 'choice' ? 'mode' : 'team');
+    if (entering) setupStep(view.state.challenge ? 'mode' : 'team');
     else setupStep($('roster-dialog').dataset.step);
     if (open && !$('roster-dialog').open) $('roster-dialog').showModal();
   }
@@ -5119,10 +5117,11 @@
     if (setupFor !== 'lobby') return;
     if ($('roster-dialog').dataset.for === 'lobby') $('roster-dialog').close();
     setupFor = 'cpu'; lobbyView = null;
-    $('roster-tabs').hidden = $('roster-scroll').hidden = $('tab-practice').hidden = false; $('lobby-panel').hidden = true;
+    $('roster-scroll').hidden = false; $('lobby-panel').hidden = true;
     $('roster-dialog').removeAttribute('data-locked');
   }
-  $('new-match').onclick = () => openSetup('team');
+  // In Discord, Ready to play fields the chosen team, so choosing one starts nothing.
+  $('new-match').onclick = async () => { if (await ownTeamReady()) openSetup('team', inDiscord ? 'pick' : 'cpu'); };
   $('sheet-next').onclick = async () => {
     if (setupFor === 'cpu') { setupStep('team'); return; }
     if (setupFor === 'lobby' || setupFor === 'rules') {
@@ -5146,15 +5145,9 @@
     }
     setupStep('mode');
   };
-  for (const source of ['practice', 'owned']) $('lobby-' + source + '-team').onclick = async () => {
-    try { await online.teamSource(source === 'practice'); }
-    catch (error) { $('roster-status').textContent = error.message; }
-  };
-  $('tab-yours').onclick = () => rosterTab('yours');
-  $('tab-practice').onclick = () => rosterTab('practice');
   // Back (Escape, or a phone's back gesture) steps from the team screen to the mode screen.
   $('roster-dialog').addEventListener('cancel', event => {
-    if ($('roster-dialog').dataset.step === 'team' && setupFor !== 'lobby') { event.preventDefault(); setupStep('mode'); }
+    if ($('roster-dialog').dataset.step === 'team' && setupFor !== 'lobby' && setupFor !== 'pick') { event.preventDefault(); setupStep('mode'); }
   });
   $('start-match').onclick = async () => {
     if (setupFor === 'lobby') {
@@ -5165,8 +5158,8 @@
         else {
           if (draft.some(d => !d)) return;
           const supers = draft.map((d, i) => resolveEquippedSuper(d, i).id);
-          await online.ready(lobbyView.practice ? { supers } : { serials: draft.map(d => d.key), supers });
-          if (!lobbyView.practice) rememberTeam();
+          await online.ready(lobbyView.guestTeam ? { supers } : { serials: draft.map(d => d.key), supers });
+          if (!lobbyView.guestTeam) rememberTeam();
         }
       } catch (error) { $('roster-status').textContent = error.message; }
       finally { button.disabled = draft.some(d => !d); }
@@ -5174,6 +5167,11 @@
     }
     if (draft.some(d => !d)) return;
     $('roster-dialog').close();
+    if (setupFor === 'pick') {
+      rememberTeam();
+      if (demo) newDemoGame(); else if (!matchInProgress()) newMatch();
+      return;
+    }
     startCpuMatch(draft, chosenMode(), document.querySelector('input[name="cpu-level"]:checked').value);
   };
   function startCpuMatch(team, mode, level) {
@@ -5186,7 +5184,7 @@
     lastCpuSetup = {
       mode, level,
       team: draft.map(({ key, dna, label, equippedSuper }) => ({
-        key, dna: key.startsWith('practice-') ? dna : undefined, label, equippedSuper: equippedSuper ? { id: equippedSuper.id } : null
+        key, dna: key.startsWith('guest-') ? dna : undefined, label, equippedSuper: equippedSuper ? { id: equippedSuper.id } : null
       }))
     };
     try { localStorage.setItem(quickPlayKey, JSON.stringify(lastCpuSetup)); } catch {}
@@ -5323,10 +5321,10 @@
     const active = online?.active || matchInProgress();
     $('home-play-label').textContent = online?.active ? 'Back to online match' : active ? 'Resume match' : 'Quick play';
     $('home-customize').hidden = $('quick-play-setup').hidden = Boolean(active);
-    $('quick-play-signin').hidden = Boolean(active || lastCpuSetup?.team.some(entry => !entry.key.startsWith('practice-')));
+    $('quick-play-signin').hidden = Boolean(active || signedIn());
     const { mode, level, team } = lastCpuSetup || { mode: 'standard', level: 'easy' };
     $('quick-play-setup').textContent = [ububallMatch.modeName(mode), level[0].toUpperCase() + level.slice(1),
-      team ? 'Last team' : 'Starter team'].join(' · ');
+      team ? 'Last team' : signedIn() ? 'Your team' : 'Guest team'].join(' · ');
   }
   function enterMatch() {
     if (location.pathname !== '/') return;
@@ -5409,18 +5407,19 @@
       if (history.state?.match) history.back();
     } finally { button.disabled = false; }
   };
-  $('home-customize').onclick = () => openSetup('mode', 'cpu', lastCpuSetup?.mode, lastCpuSetup?.level);
+  $('home-customize').onclick = async () => { if (await ownTeamReady()) openSetup('mode', 'cpu', lastCpuSetup?.mode, lastCpuSetup?.level); };
   $('home-play').onclick = async () => {
     if (online?.active || matchInProgress()) { enterMatch(); return; }
+    if (!await ownTeamReady()) return;
     const saved = lastCpuSetup;
-    if (!saved) { startCpuMatch(practice.slice(0, 3), 'standard', 'easy'); return; }
+    if (!saved) { startCpuMatch(roster, 'standard', 'easy'); return; }
     const button = $('home-play');
     button.disabled = true;
     try {
-      const needsCollection = saved.team.some(entry => !entry.key.startsWith('practice-'));
-      if (needsCollection && signedIn()) await ubuList.load({ refresh: true });
+      const guestSetup = saved.team.some(entry => entry.key.startsWith('guest-'));
+      if (!guestSetup && signedIn()) await ubuList.load({ refresh: true });
       if (online?.active || matchInProgress() || location.pathname !== '/' || $('roster-dialog').open) return;
-      const team = saved.team.map(entry => entry.key.startsWith('practice-') ? restoreEntry(entry)
+      const team = guestSetup && signedIn() ? roster : saved.team.map(entry => guestSetup ? restoreEntry(entry)
         : signedIn() ? restoreTeam([{ serial: entry.key, super: entry.equippedSuper?.id ?? null }]).team[0] : null);
       if (team.some(entry => !entry)) throw new Error('Last team unavailable');
       startCpuMatch(team, saved.mode, saved.level);
@@ -5661,7 +5660,7 @@
       mine && !s.connected[1 - s.seat] ? `${them} is offline. They can accept when they return.` : mine ? `Waiting for ${them} to accept.` : theirs ? `${them} wants a rematch.` : '';
   }
   online = ububallOnline({
-    playCpu() { startCpuMatch(practice.slice(0, 3), 'standard', 'easy'); },
+    async playCpu() { if (await ownTeamReady()) startCpuMatch(roster, 'standard', 'easy'); },
     cpuActive() { return inDiscord && inMatch && matchInProgress(); },
     resumeCpu() { $('pause-menu').close(); },
     prepareOnline() {
@@ -5776,13 +5775,15 @@
       stopDemo();
       phase = 'over'; drag = null;
       endGoalReplay(); stopFanfare(); gameAudio()?.stop();
-      draft = practice.slice(0, 3);
+      draft = [...guestTeam];
       exitMatchMode();
       startDemo();
+      // A match may have opened the signup pack on the server.
+      void window.ubuStarter.refresh().catch(() => {});
+      void adoptAccountTeam().catch(() => {});
     }
   });
   $('online-rematch').onclick = () => online.rematch();
-  practice.slice(0, 3).forEach(entry => addOption(entry, 'roster-practice'));
   if (!inDiscord) {
     restoredMatch = restoreActiveMatch();
     if (!restoredMatch) newMatch();
@@ -5821,13 +5822,6 @@
   // "Play with my ubus" arrives as /?roster=1, on load or from the Collection screen.
   function openRosterFromLink() {
     const url = new URL(location.href);
-    if (url.pathname === '/' && url.searchParams.has('starter')) {
-      url.searchParams.delete('starter');
-      history.replaceState(null, '', url);
-      if (online?.active || matchInProgress()) enterMatch();
-      else startCpuMatch(practice.slice(0, 3), 'standard', 'easy');
-      return;
-    }
     if (url.pathname !== '/' || !url.searchParams.has('roster')) return;
     url.searchParams.delete('roster');
     history.replaceState(null, '', url);

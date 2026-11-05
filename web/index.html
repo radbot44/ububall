@@ -5,7 +5,7 @@
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark"><title>Ububall</title>
   <link rel="stylesheet" href="site.css"><link rel="stylesheet" href="ububall.css">
-  <script src="ububall-activity.js" defer></script><script src="site-header.js" defer></script><script src="game-ui.js" defer></script><script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script><script src="rarity.js" defer></script>
+  <script src="ububall-activity.js" defer></script><script src="site-header.js" defer></script><script src="starter.js" defer></script><script src="game-ui.js" defer></script><script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script><script src="rarity.js" defer></script>
   <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-replay.js" defer></script><script src="mp4.js" defer></script><script src="ububall-cpu.js" defer></script><script src="ububall-cpu-client.js" defer></script><script src="ububall-online.js" defer></script><script src="ubu-list.js" defer></script><script src="ububall-presentation.js" defer></script><script src="ububall.js" defer></script><script src="app.js" defer></script>
 </head>
 <body>
@@ -53,20 +53,21 @@
       </div>
     </div>
     <div class="home-actions">
-      <button id="home-play" class="primary" type="button"><span id="home-play-label">Quick play</span><small id="quick-play-setup">Standard · Easy · Starter team</small><small id="quick-play-signin">No sign-in needed</small></button>
+      <button id="home-play" class="primary" type="button"><span id="home-play-label">Quick play</span><small id="quick-play-setup">Standard · Easy · Guest team</small><small id="quick-play-signin">No sign-in needed</small></button>
       <button id="home-customize" type="button">Customize match</button>
       <button id="online-open" type="button"><span id="online-open-label">Play online</span><small id="online-open-note">Play with friends or find a match</small></button><button id="replays-open" type="button">Replays</button>
     </div>
     <div class="home-team">
       <div class="home-team-head"><h1 id="home-title">Your team</h1><button id="new-match" type="button">Change team</button></div>
       <div id="home-lineup" class="home-lineup"></div>
+      <div id="home-pack" class="starter-pack" hidden><button class="candy-pack" type="button" aria-label="Open your signup pack"><canvas aria-hidden="true"></canvas></button></div>
     </div>
     <aside class="mint-entry" aria-label="Ubu Mint">
       <div class="mint-entry-content">
         <span class="mint-entry-badge">Ubu Mint</span>
         <p class="mint-entry-text">Discover new ubus, open packs, and build a collection for use in ububall.</p>
       </div>
-      <div class="mint-entry-links"><a class="mint-entry-cta" href="/mint">Open packs<i data-icon="arrow-narrow-right"></i></a><a class="mint-entry-link" href="/collection">Your collection</a></div>
+      <div class="mint-entry-links"><a class="mint-entry-cta" href="/mint"><span id="mint-cta-label">Open packs</span><i data-icon="arrow-narrow-right"></i></a><a class="mint-entry-link" href="/collection">Your collection</a></div>
     </aside>
   </section>
   <div class="arena-layout">
@@ -351,7 +352,6 @@ SOFTWARE.
         <div id="lobby-invite" class="lobby-invite"><input id="online-invite" readonly aria-label="Invite link"><button id="online-copy" type="button">Copy invite</button><button id="online-share" type="button" hidden>Share</button></div>
         <p id="lobby-status" class="lobby-status" role="status"></p>
         <p id="lobby-note" class="lobby-note"></p>
-        <div id="lobby-team-source" class="lobby-actions" role="group" aria-label="Team source" hidden><button id="lobby-practice-team" type="button">Practice team</button><button id="lobby-owned-team" type="button">My ubus</button></div>
         <div class="lobby-actions"><a id="lobby-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a><button id="lobby-leave" class="quiet" type="button">Leave match</button></div>
       </div>
       <div id="team-bar" class="team-bar" hidden>
@@ -369,18 +369,13 @@ SOFTWARE.
       </div>
       <p id="roster-hint" class="roster-hint" role="status"></p>
       <p id="roster-status" class="roster-status" role="status"></p>
-      <div id="roster-tabs" class="roster-tabs" role="tablist" aria-label="Ubus to choose from">
-        <button id="tab-yours" role="tab" type="button" aria-selected="true" aria-controls="roster-yours">Your ubus</button>
-        <button id="tab-practice" role="tab" type="button" aria-selected="false" aria-controls="roster-practice">Starter ubus</button>
-      </div>
       <div id="roster-scroll" class="roster-scroll">
-        <div id="roster-yours" role="tabpanel" aria-labelledby="tab-yours">
+        <div id="roster-yours">
           <div id="roster-signin" class="roster-signin" hidden><p>Sign in to play with the ubus in your collection.</p><button id="roster-signin-btn" type="button" class="primary">Sign in with Discord</button></div>
           <div id="roster-toolbar" class="roster-toolbar"></div>
           <p id="roster-collection-status" class="roster-status" role="status"></p>
           <div id="roster-options" class="ubu-grid roster-grid"></div>
         </div>
-        <div id="roster-practice" class="ubu-grid roster-grid" role="tabpanel" aria-labelledby="tab-practice" hidden><p class="starter-note">Starter ubus are free to play and separate from your collection.</p></div>
       </div>
     </section>
     <footer class="team-sheet-foot"><button id="sheet-next" class="primary" type="button">Next: choose team</button><button id="start-match" class="primary" type="button">Start match</button></footer>
@@ -393,10 +388,6 @@ SOFTWARE.
     <button id="online-cancel-queue" type="button" hidden>Cancel queue</button>
     <div id="online-create-controls" hidden>
       <p class="online-mode-line">Mode: <strong id="online-mode-name">Ububall</strong> <button id="online-mode-change" class="quiet" type="button">Change</button></p>
-      <fieldset><legend>Teams</legend><div id="online-policy" class="online-options">
-        <button data-value="practice" aria-pressed="true">Practice teams<small>Play with provided ubus</small></button>
-        <button data-value="owned" aria-pressed="false">Owned ubus<small>Choose from your collection</small></button>
-      </div></fieldset>
       <p class="online-hint">Invite a friend with a private link. Moves stay private until launch; Blitz uses your latest saved moves.</p>
       <button id="online-create" class="primary" disabled>Create invite match</button>
     </div>
@@ -407,18 +398,20 @@ SOFTWARE.
   <main data-screen="mint" hidden>
     <section class="pack-shop" aria-labelledby="pack-title">
       <h1 id="pack-title">Choose your pack</h1>
-      <p class="pack-subtitle">Pick a pack to crack open!</p>
+      <p id="pack-subtitle" class="pack-subtitle">Pick a pack to crack open!</p>
+      <div id="daily-pack" class="starter-pack" hidden><button class="candy-pack" type="button" aria-label="Open your daily pack"><canvas aria-hidden="true"></canvas></button></div>
       <div id="pack-choices" class="pack-choices" hidden></div>
       <p id="pack-hint" class="pack-prompt"></p>
+      <p id="daily-next" class="daily-next" role="timer" hidden></p>
       <button id="mint" class="primary" hidden>Continue pack</button>
       <p id="status" role="status" aria-live="polite">Connecting to the mint…</p>
-      <div class="availability-actions" id="mint-recovery" hidden><a class="button" href="/?starter=1">Play with starter ubus</a><button id="mint-retry" type="button" hidden>Retry</button></div>
+      <div class="availability-actions" id="mint-recovery" hidden><button id="mint-retry" type="button" hidden>Retry</button></div>
     </section>
   </main>
   <main data-screen="collection" hidden>
     <h1 class="visually-hidden">Collection</h1>
     <p id="collection-status" class="collection-status" role="status" aria-live="polite">Connecting to the mint…</p>
-    <div class="availability-actions" id="collection-recovery" hidden><a class="button" href="/?starter=1">Play with starter ubus</a><a id="collection-packs" class="button" href="/mint" hidden>Open packs</a><button id="collection-retry" type="button" hidden>Retry</button></div>
+    <div class="availability-actions" id="collection-recovery" hidden><a id="collection-packs" class="button" href="/mint" hidden>Open packs</a><button id="collection-retry" type="button" hidden>Retry</button></div>
     <section id="collection" hidden aria-labelledby="collection-title">
       <div class="collection-header">
         <h2 id="collection-title">Your ubus</h2>
@@ -436,7 +429,7 @@ SOFTWARE.
     <p id="signed-out-message" role="status"></p>
     <div class="availability-actions">
       <a id="signed-out-signin" class="button primary" hidden>Sign in with Discord</a>
-      <a class="button" href="/?starter=1">Play with starter ubus</a>
+      <a class="button" href="/">Play as a guest</a>
     </div>
   </section>
   <dialog id="viewer" class="viewer" aria-labelledby="ubunym">

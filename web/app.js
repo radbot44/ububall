@@ -43,5 +43,6 @@
     document.body.scrollTo(0, 0);
   });
   window.addEventListener('popstate', show);
+  window.showUbuScreen = show;
   show();
 })();

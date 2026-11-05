@@ -8,7 +8,7 @@ const ID = /^[A-Za-z0-9_-]{21}[AQgw]$/;
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const uuid = new RegExp('^' + UUID + '$');
 const watchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(watch-state|watch-socket)$');
-const matchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(join|team|team-source|rules|unready|state|socket|forfeit|rematch|skip-replay|leave|allow-watch|share-watch|activity-watch-state|activity-watch-socket)$');
+const matchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(join|team|rules|unready|state|socket|forfeit|rematch|skip-replay|leave|allow-watch|share-watch|activity-watch-state|activity-watch-socket)$');
 const COLLECTION_PAGE = 200;
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers
@@ -82,6 +82,7 @@ export class MintRegistry extends DurableObject {
   }
   async offer(owner, request) {
     try {
+      if (this.mint.starterStatus(owner).daily) return { error: 'Open your daily pack first.', status: 409 };
       return this.mint.offer({ owner, request }, { lifetimeLimit: this.config.limit });
     } catch (error) {
       if (error.message === 'Lifetime mint limit reached.') return { error: error.message, status: 403 };
@@ -107,6 +108,19 @@ export class MintRegistry extends DurableObject {
       if (error.message === 'Batch preparation required.') return { error: 'Preparing the next batch. Try again shortly.', status: 503 };
       throw error;
     } finally { await this.ensureBatch(); }
+  }
+  starterStatus(owner) { return this.mint.starterStatus(owner); }
+  async claimStarter(owner, kind) {
+    try { return await this.mint.claimStarter({ owner, kind }); }
+    catch (error) {
+      if (error.message === 'Invalid issuance request.') return { error: 'Choose a starter pack.', status: 400 };
+      throw error;
+    } finally { await this.ensureBatch(); } // Regular packs come next, so have them ready.
+  }
+  // Anyone entering a match has a team: an unopened signup pack opens in the background.
+  async matchTeam(owner) {
+    if (this.mint.starterStatus(owner).signup) await this.mint.claimStarter({ owner, kind: 'signup' });
+    return this.mint.matchTeam(owner);
   }
   // Newest first, pending certificates last. Browsers sort and filter the full list themselves.
   collection(owner, cursor = '') {
@@ -292,7 +306,7 @@ export default {
       if (path === '/api/ububall' && request.method === 'POST') {
         let data;
         try { data = await body(request); } catch { return json({ error: 'Invalid match request.' }, 400); }
-        if (!data || Object.keys(data).some(k => !['mode', 'teams'].includes(k))) return json({ error: 'Invalid match request.' }, 400);
+        if (!data || Object.keys(data).some(k => k !== 'mode')) return json({ error: 'Invalid match request.' }, 400);
         const id = crypto.randomUUID();
         const response = await env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/create', {
           method: 'POST', headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Name': encodeURIComponent(session.name || ''), 'Content-Type': 'application/json' }, body: JSON.stringify(data)
@@ -340,6 +354,13 @@ export default {
         let data;
         try { data = await body(request, 2048); } catch { return json({ error: 'Invalid favorite request body.' }, 400); }
         const result = await registry.favorite(session.owner, data);
+        return json(result, result.status || 200);
+      }
+      if (path === '/api/starter' && request.method === 'GET') return json(await registry.starterStatus(session.owner));
+      if (path === '/api/starter' && request.method === 'POST') {
+        let data;
+        try { data = await body(request); } catch { return json({ error: 'Choose a starter pack.' }, 400); }
+        const result = await registry.claimStarter(session.owner, data?.kind);
         return json(result, result.status || 200);
       }
       if ((path === '/api/packs' || path === '/api/mint') && request.method === 'POST') {
