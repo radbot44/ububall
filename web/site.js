@@ -493,9 +493,19 @@
   // Collection shares this status line except for pack-only messages.
   const status = (text, packOnly = false) => {
     $('status').textContent = text;
-    const note = packOnly ? '' : text;
-    $('collection-status').textContent = note; $('collection-status').hidden = !note;
+    if (!packOnly) collectionStatus(text);
   };
+  function collectionStatus(note) {
+    $('collection-status').textContent = note;
+    $('collection-status').hidden = !note;
+  }
+  function collectionRecovery({ signIn = false, packs = false, retry = false } = {}) {
+    $('collection-recovery').hidden = false;
+    $('collection-signin').hidden = !signIn;
+    $('collection-packs').hidden = !packs;
+    $('collection-retry').hidden = !retry;
+  }
+  for (const id of ['mint-retry', 'collection-retry']) $(id).onclick = () => location.reload();
   async function inspect(text) { return ubuFile.read(text, { resolveKey: ubuList.trustedKey }); }
   function display(text, result, openModal = false) {
     const model = ubu.decode(ubu.fromCode(result.dna));
@@ -767,6 +777,10 @@
     inspect: item => { display(item.certificate, item.result, true); status(''); },
     hidden: item => unseen(item.serial), paused: choosing,
     onEmpty: reason => {
+      if (session?.owner) {
+        if (reason === 'empty') collectionRecovery({ packs: Boolean(pack || offer) });
+        else $('collection-recovery').hidden = true;
+      }
       if (!reason) return;
       const note = document.createElement('p');
       note.textContent = reason === 'filtered' ? 'No ubus match. ' : reason === 'loading' ? 'Loading your ubus…' : 'No revealed ubus.';
@@ -798,9 +812,13 @@
     if (choosing()) return;
     try {
       await ubuList.load({ refresh: true });
+      collectionStatus('');
       collectionList.render();
       $('collection').hidden = false;
-    } catch (error) { status('Could not load collection: ' + error.message); }
+    } catch (error) {
+      collectionStatus('Could not load collection: ' + error.message);
+      collectionRecovery({ retry: true });
+    }
   }
 
   $('import').addEventListener('change', async event => {
@@ -864,9 +882,13 @@
         localStorage.removeItem(pendingKey + ':choice');
         showChoices(data);
       }
+      $('mint-recovery').hidden = true;
+      collectionList.render();
     } catch (error) {
       outOfPacks = error.message === 'Lifetime mint limit reached.';
       status(outOfPacks ? "You've opened every pack you can. Enjoy your ubus!" : error.message, outOfPacks);
+      $('mint-recovery').hidden = false;
+      $('mint-retry').hidden = outOfPacks;
     } finally { busy = false; updatePackButton(); }
   }
   async function selectPack(index) {
@@ -915,10 +937,13 @@
       $('login').hidden = !config.login;
       if (config.login) {
         $('login').href = '/auth/discord?return=' + encodeURIComponent((location.pathname === '/index.html' ? '/' : location.pathname) + location.search);
+        $('collection-signin').href = '/auth/discord?return=%2Fcollection';
         session = await api('/api/session');
       }
       async function handleSession(s) {
         session = s;
+        $('mint-signin').hidden = Boolean(session?.owner || !config.login || !config.ready);
+        $('mint-retry').hidden = true;
         if (session?.owner) {
           $('login').hidden = true;
           pendingKey = `ubumint:pending:${config.mint}:${session.owner}`;
@@ -930,13 +955,24 @@
             localStorage.removeItem(pendingKey + ':choice');
           }
           updatePackButton();
-          status(pack || (config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey))) ? '' : 'Minting closed', true);
+          const canOpen = pack || (config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey)));
+          status(canOpen ? '' : config.ready ? 'No packs are available for this account.' : 'Minting closed', true);
+          $('mint-recovery').hidden = Boolean(canOpen);
           if (config.ready) {
             try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
             if (!pack && (config.lifetimeLimit || localStorage.getItem(pendingKey))) await loadChoices();
             await collection();
+          } else {
+            collectionStatus('The collection is unavailable right now.');
+            collectionRecovery();
           }
-        } else { $('pack-hint').textContent = ''; status(config.login ? 'Sign in to open packs and see your collection.' : 'Minting closed', !config.login); }
+        } else {
+          $('pack-hint').textContent = '';
+          status(config.ready && config.login ? 'Sign in to open packs.' : 'Minting closed', true);
+          $('mint-recovery').hidden = false;
+          collectionStatus(config.login ? 'Sign in to see your collection.' : 'The collection is unavailable right now.');
+          collectionRecovery({ signIn: Boolean(config.login) });
+        }
       }
       window.addEventListener('ubu:session', event => {
         if (event.detail?.owner && (!session?.owner || session.owner !== event.detail.owner)) {
@@ -944,6 +980,10 @@
         }
       });
       await handleSession(session);
-    } catch (error) { status(error.message); }
+    } catch (error) {
+      status('Could not connect to the mint. Try again.');
+      $('mint-recovery').hidden = $('mint-retry').hidden = false;
+      collectionRecovery({ retry: true });
+    }
   })();
 })();

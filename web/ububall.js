@@ -151,6 +151,8 @@
   let pullBehind = false;
   const firstTurnKey = 'ububall-first-turn-guide';
   let firstTurnSeen = false;
+  let superHintSeen = false, superHintFor = null;
+  try { superHintSeen = localStorage.getItem('ububall-super-hint') === 'seen'; } catch {}
   let firstTurnStep = null;
   try { firstTurnSeen = localStorage.getItem(firstTurnKey) === 'seen'; } catch {}
   // The floating spin slider: on by default with a mouse, off on touch screens.
@@ -1706,6 +1708,15 @@
     if (hudSuperBtn && curB) {
       const s = curB.equippedSuper || P.SUPERS[0];
       const sName = s.displayName || s.name;
+      if (!superHintSeen && !demo && !theater && !classicMode() && planning && curB.meter >= 100 && !curB.superArm && knobEditable(selected)) {
+        superHintSeen = true;
+        superHintFor = curB;
+        try { localStorage.setItem('ububall-super-hint', 'seen'); } catch {}
+      }
+      if (!planning || curB.superArm) superHintFor = null;
+      const hint = $('super-ready-hint');
+      hint.hidden = superHintFor !== curB;
+      if (!hint.hidden) hint.textContent = 'Super ready';
       if (hudSuperIcon && s?.icon) {
         if (hudSuperIcon.getAttribute('src') !== s.icon) hudSuperIcon.src = s.icon;
         if (hudSuperIcon.alt !== sName) hudSuperIcon.alt = sName;
@@ -5106,6 +5117,11 @@
   $('lobby-leave').onclick = () => online.leave();
   // A modal pauses the simulation; cancelling preserves the current turn.
   const hudSuperBtn = $('stadium-super-btn');
+  gameUi.dropdown($('super-info'), $('super-info-panel'), { align: 'end', prepare: () => {
+    const ability = fieldView.bodies[selected]?.equippedSuper || P.SUPERS[0];
+    $('super-info-name').textContent = ability.displayName || ability.name;
+    $('super-info-description').textContent = ability.desc;
+  } });
   if (hudSuperBtn) {
     hudSuperBtn.onclick = () => {
       const b = fieldView.bodies[selected];
@@ -5217,6 +5233,7 @@
     const active = online?.active || matchInProgress();
     $('home-play-label').textContent = online?.active ? 'Back to online match' : active ? 'Resume match' : 'Quick play';
     $('home-customize').hidden = $('quick-play-setup').hidden = Boolean(active);
+    $('quick-play-signin').hidden = Boolean(active || lastCpuSetup?.team.some(entry => !entry.key.startsWith('practice-')));
     const { mode, level, team } = lastCpuSetup || { mode: 'standard', level: 'easy' };
     $('quick-play-setup').textContent = [ububallMatch.modeName(mode), level[0].toUpperCase() + level.slice(1),
       team ? 'Last team' : 'Starter team'].join(' · ');
@@ -5513,7 +5530,8 @@
     onState(s) {
       if (!document.body.classList.contains('online-match')) { stopDemo(); enterMatch(); }
       document.body.classList.add('online-match');
-      $('online-open').textContent = 'Online match';
+      $('online-open-label').textContent = 'Online match';
+      $('online-open-note').hidden = true;
       const [me, them] = onlineNames(s);
       $('home-label').textContent = me; $('opponent-label').textContent = them; $('opponent-heading').textContent = `${them}'s team`;
       $('online-match-status').hidden = false; $('new-match').disabled = true;
@@ -5599,7 +5617,8 @@
       saveRecording();
       onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = ''; scoringPlayer = null;
       document.body.classList.remove('online-match');
-      $('online-open').textContent = 'Play online';
+      $('online-open-label').textContent = 'Play online';
+      $('online-open-note').hidden = false;
       $('new-match').disabled = false; $('online-match-status').hidden = true; $('online-forfeit').hidden = true;
       $('online-rematch').hidden = true; $('launch').hidden = false; closeSummary();
       $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
@@ -5642,13 +5661,19 @@
   // "Play with my ubus" arrives as /?roster=1, on load or from the Collection screen.
   function openRosterFromLink() {
     const url = new URL(location.href);
+    if (url.pathname === '/' && url.searchParams.has('starter')) {
+      url.searchParams.delete('starter');
+      history.replaceState(null, '', url);
+      if (online?.active || matchInProgress()) enterMatch();
+      else startCpuMatch(practice.slice(0, 3), 'standard', 'easy');
+      return;
+    }
     if (url.pathname !== '/' || !url.searchParams.has('roster')) return;
     url.searchParams.delete('roster');
     history.replaceState(null, '', url);
     $('new-match').click();
     loadCollection();
   }
-  openRosterFromLink();
   window.addEventListener('ubu:screen', openRosterFromLink);
   // Default to the phone’s top edge in landscape until the player chooses a side.
   let sidebarSide;
@@ -5785,4 +5810,5 @@
   } else {
     startDemo();
   }
+  openRosterFromLink();
 })();

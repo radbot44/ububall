@@ -29,7 +29,10 @@
   gap: .125rem;
   box-shadow: var(--bevel), 0 .625rem 1.75rem color-mix(in srgb, var(--primary) 30%, transparent);
 }
-#quick-play-setup { font-size: .8125rem; font-weight: normal; }
+#quick-play-setup, #quick-play-signin, #online-open-note { font-size: .8125rem; font-weight: normal; }
+#online-open { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.starter-note { grid-column: 1 / -1; margin: 0; color: var(--muted); }
+.availability-actions:not([hidden]) { display: flex; justify-content: center; flex-wrap: wrap; gap: .5rem; margin-block: .75rem; }
 .mint-entry {
   display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .875rem 1rem; border-radius: 1.125rem;
   background: color-mix(in srgb, var(--card) 90%, var(--primary) 10%);
@@ -556,7 +559,7 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
   gap: clamp(.25rem, 1vw, .75rem);
   padding: .375rem .5rem .625rem;
 }
-.stadium-actions > :is(.stadium-super-btn, #launch) {
+.stadium-actions :is(.stadium-super-btn, #launch) {
   width: 100%;
   min-width: 0;
   height: 2.75rem;
@@ -566,6 +569,12 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
   white-space: nowrap;
   font-size: .75rem;
 }
+.stadium-super-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .125rem; }
+#super-info { padding: .125rem; min-width: 0; width: auto; }
+#super-info .icon { width: 1rem; height: 1rem; }
+#super-ready-hint { grid-column: 1 / -1; text-align: center; }
+.classic-match .stadium-super-controls { visibility: hidden; }
+.super-info-panel { max-width: min(18rem, calc(100vw - 2rem)); padding: .75rem; background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: .75rem; }
 .stadium-actions > #launch, #stadium-super-text { overflow: hidden; text-overflow: ellipsis; }
 .stadium-actions > #launch:not([hidden]) {
   display: flex; flex-direction: column; align-items: center; justify-content: center;

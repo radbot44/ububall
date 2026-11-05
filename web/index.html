@@ -32,9 +32,9 @@
 
   <section class="play-home" aria-labelledby="home-title">
     <div class="home-actions">
-      <button id="home-play" class="primary" type="button"><span id="home-play-label">Quick play</span><small id="quick-play-setup">Standard · Easy · Starter team</small></button>
+      <button id="home-play" class="primary" type="button"><span id="home-play-label">Quick play</span><small id="quick-play-setup">Standard · Easy · Starter team</small><small id="quick-play-signin">No sign-in needed</small></button>
       <button id="home-customize" type="button">Customize match</button>
-      <button id="online-open" type="button">Play online</button><button id="replays-open" type="button">Replays</button>
+      <button id="online-open" type="button"><span id="online-open-label">Play online</span><small id="online-open-note">Private match by invite</small></button><button id="replays-open" type="button">Replays</button>
     </div>
     <div class="home-team">
       <div class="home-team-head"><h1 id="home-title">Your team</h1><button id="new-match" type="button">Change team</button></div>
@@ -156,10 +156,15 @@ SOFTWARE.
             <button id="shot-reset" type="button"><i data-icon="rotate"></i>Reset</button>
           </div>
         </div>
+        <div class="stadium-super-controls">
         <button id="stadium-super-btn" type="button" class="stadium-super-btn" aria-label="Arm super for selected ubu">
           <img id="stadium-super-icon" class="super-icon" alt="" src="assets/00_stalwart.png">
           <span id="stadium-super-text">Super 0%</span>
         </button>
+        <button id="super-info" class="icon-button" type="button" aria-label="About this super"><i data-icon="info-circle"></i></button>
+        <div id="super-info-panel" class="super-info-panel" popover="auto"><strong id="super-info-name"></strong><p id="super-info-description"></p><p>Charge your meter by striking the ball, checking opponents, and making saves. At 100%, arm your super before launching. Its effect starts on launch or when its trigger happens during the turn.</p></div>
+        <small id="super-ready-hint" role="status" hidden></small>
+        </div>
         <button class="primary" id="launch"><span id="launch-label">Launch team</span><small id="launch-plan" hidden></small></button>
         <div id="replay-bar" class="replay-bar">
           <div class="replay-track"><input id="replay-seek" type="range" min="0" max="1" step="1" value="0" aria-label="Replay position"><div id="replay-marks" class="replay-marks"></div></div>
@@ -335,7 +340,7 @@ SOFTWARE.
       <p id="roster-status" class="roster-status" role="status"></p>
       <div id="roster-tabs" class="roster-tabs" role="tablist" aria-label="Ubus to choose from">
         <button id="tab-yours" role="tab" type="button" aria-selected="true" aria-controls="roster-yours">Your ubus</button>
-        <button id="tab-practice" role="tab" type="button" aria-selected="false" aria-controls="roster-practice">Practice</button>
+        <button id="tab-practice" role="tab" type="button" aria-selected="false" aria-controls="roster-practice">Starter ubus</button>
       </div>
       <div id="roster-scroll" class="roster-scroll">
         <div id="roster-yours" role="tabpanel" aria-labelledby="tab-yours">
@@ -344,7 +349,7 @@ SOFTWARE.
           <p id="roster-collection-status" class="roster-status" role="status"></p>
           <div id="roster-options" class="ubu-grid roster-grid"></div>
         </div>
-        <div id="roster-practice" class="ubu-grid roster-grid" role="tabpanel" aria-labelledby="tab-practice" hidden></div>
+        <div id="roster-practice" class="ubu-grid roster-grid" role="tabpanel" aria-labelledby="tab-practice" hidden><p class="starter-note">Starter ubus are free to play and separate from your collection.</p></div>
       </div>
     </section>
     <footer class="team-sheet-foot"><button id="sheet-next" class="primary" type="button">Next: choose team</button><button id="start-match" class="primary" type="button">Start match</button></footer>
@@ -371,11 +376,13 @@ SOFTWARE.
       <p id="pack-hint" class="pack-prompt"></p>
       <button id="mint" class="primary" hidden>Continue pack</button>
       <p id="status" role="status" aria-live="polite">Connecting to the mint…</p>
+      <div class="availability-actions" id="mint-recovery" hidden><a class="button" href="/?starter=1">Play with starter ubus</a><a id="mint-signin" class="button" href="/auth/discord?return=%2Fmint" hidden>Sign in</a><button id="mint-retry" type="button" hidden>Retry</button></div>
     </section>
   </main>
   <main data-screen="collection" hidden>
     <h1 class="visually-hidden">Collection</h1>
     <p id="collection-status" class="collection-status" role="status" aria-live="polite">Connecting to the mint…</p>
+    <div class="availability-actions" id="collection-recovery" hidden><a class="button" href="/?starter=1">Play with starter ubus</a><a id="collection-signin" class="button" hidden>Sign in</a><a id="collection-packs" class="button" href="/mint" hidden>Open packs</a><button id="collection-retry" type="button" hidden>Retry</button></div>
     <section id="collection" hidden aria-labelledby="collection-title">
       <div class="collection-header">
         <h2 id="collection-title">Your ubus</h2>
