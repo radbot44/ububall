@@ -21,7 +21,7 @@
   // Size trade-offs (tuning): as powers of the size multiplier, small ubus launch faster, curve and
   // re-steer more and strike spin harder; big ubus lose more speed off the boards.
   const SIZE = Object.freeze({ launch: -.28, agility: -.5, strike: -.5, boards: -.5 });
-  // Heat and fire tuning, as shares of MAX_SPEED (owner decisions 2026-11-01). Fire follows the ball's
+  // Heat and fire tuning, as shares of MAX_SPEED. Fire follows the ball's
   // pace: its speed with any slowing by its striking team's own ubus left out. Friction and drag slow
   // the pace as they would a free ball; boards, posts, net and an opponent's Magnet take their share
   // off it; an opponent's touch takes the ball over, leaving its pace at its real speed; it never falls
@@ -31,8 +31,8 @@
   // 840, and burns until its pace drops to 504.
   const HEAT = Object.freeze({ orange: 540 / MAX_SPEED, red: 720 / MAX_SPEED, redHot: 800 / MAX_SPEED, fire: 840 / MAX_SPEED, sustain: .70 });
   const FIRE_TICKS = 60;
-  // An Iron Save leaves the ball and the Guard each with this share of their speed off the hit
-  // (owner decision 2026-11-01): the ball dies at the Guard's feet and the Guard holds its ground,
+  // An Iron Save leaves the ball and the Guard each with this share of their speed off the hit:
+  // the ball dies at the Guard's feet and the Guard holds its ground,
   // so the shooter gets no rebound and the save stays with the defence.
   const IRON_KEEP = .1;
   // A hot shot: a teammate of the striker driving into a burning ball at this speed or more (px/s,

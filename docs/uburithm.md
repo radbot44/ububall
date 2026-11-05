@@ -91,6 +91,6 @@ Generate the six-letter nomen first, then the extra word of the flag-selected le
 
 `test/packed-name-vectors.json` captures outputs from the independently compiled benchmark candidate before promotion. `test/name-vectors.json` records historical outputs and is not rewritten. Production matched the benchmark candidate across 10,000 raw seeds; non-name decoded fields also matched the prior decoder. Protocol tests exercise quotient retention, rejection and large refills.
 
-The optimization adds pre-cased lookup tables and startup work in exchange for reduced per-name CPU. The benchmark observed two mixes per name; this is not a guaranteed bound. `node scripts/bench-name-rolls.cjs` compares the saved historical naming baseline, combined flags, packed recycling and Gemini hybrid using the current decoder/rarity code. Benchmark fixtures are never public assets.
+The optimization adds pre-cased lookup tables and startup work in exchange for reduced per-name CPU. The benchmark observed two mixes per name; this is not a guaranteed bound. `node scripts/bench-name-rolls.cjs` compares the saved historical naming baseline, combined flags, packed recycling and hybrid table variants using the current decoder/rarity code. Benchmark fixtures are never public assets.
 
 Rarity uses the unchanged structural category probabilities. The changed mapping requires recalculating stored scores (revision 3) and recalibrating percentiles; existing assembled packs retain contents and quintile labels.

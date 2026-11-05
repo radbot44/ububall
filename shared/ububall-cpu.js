@@ -20,7 +20,7 @@
     goal: 10000, progress: 1, access: .35, cover: .3, meter: .35,
     role: 40, card: 400, warning: 150, stun: 180, daze: 120
   });
-  // Human-like play (initial tuning, not owner decisions). A plan must still work when aimed a little
+  // Human-like play (tuning). A plan must still work when aimed a little
   // off: it is also scored with every launch turned by ±`angle` and its power changed by ∓`power`,
   // against the expected response. A goal loses a share of its value for each board bounce or extra
   // touch on the way, less for creative ubus: it keeps `simple` + `creative` × Creativity per step.
@@ -28,7 +28,7 @@
   const COMPLEX = Object.freeze({ simple: .45, creative: .4 });
   // The moves that fit each role. Supers keep their move's intent.
   const ROLE_INTENTS = Object.freeze({ attack: ['shoot', 'pass'], support: ['chase', 'clear', 'receive', 'check'], defend: ['cover', 'guard', 'hold'] });
-  // Each candidate is judged on at most 2 s of play (owner decision 2026-10-30), or sooner once its
+  // Each candidate is judged on at most 2 s of play (480 ticks), or sooner once its
   // result is clear.
   const SEARCH_TICKS = 480;
   // Clear: the ball is at rest and loose, no super is running, and no ubu still sliding could reach

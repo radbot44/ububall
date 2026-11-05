@@ -51,13 +51,13 @@ Serials are permanent, sequential and unique within a mint, starting at 00000000
 
 ## Mint batches
 
-Issuance policy: prepare a private inventory of random ubus in batches, defaulting to 1,000. Batch size is configurable for subsequent batches; changing it does not resize an existing batch or change any DNA.
+Issuance policy: prepare a private inventory of random ubus in batches, defaulting to 1,000, assembled into packs of five across five rarity quintiles. Batch size is configurable for subsequent batches; changing it does not resize an existing batch or change any DNA.
 
 - Generate DNA and allocate permanent IDs and sequential serials while preparing the batch. Persist progress so preparation can resume after interruption. Do not expose unfinished batches for allocation.
-- Draw uniformly at random from the remaining inventory, without replacement. Serial numbers reflect creation order, not distribution order: the first default batch holds 000000000001–000000001000, the second 000000001001–000000002000.
-- An authorized allocation atomically removes one available ubu and registers its owner. Retrying the same request returns the same allocation. Concurrent requests must never receive the same ubu.
-- Sign the issuance certificate on allocation, with issuedAt recording issuance to the first owner. Persist its exact issuance fields so retries remain consistent. Prepared inventory is not yet a signed issuance certificate.
-- Exhaust the current batch before allocating from the next one. Prepare the next batch in resumable chunks after exhaustion; requests may wait or receive a retry response while preparation completes.
+- Serials reflect creation order. Completed batches are partitioned into five rarity quintiles and assembled into packs of five (one random ubu from each quintile). Starter packs draw separate random DNA and sequential serials outside the batch ranges (see [mint.md](mint.md)).
+- An authorized pack allocation atomically registers five ubus for its owner. Retrying the same request returns the same allocation.
+- Sign issuance certificates on allocation, with issuedAt recording issuance to the first owner. Persist exact issuance fields so retries remain consistent. Prepared inventory is not yet a signed issuance certificate.
+- When fewer than three packs remain, the next batch is prepared in bounded chunks and appended to leftover inventory so three choices remain available.
 - Keep unallocated DNA private. Batch allocation does not replace authentication, mint allowances or protection against repeated requests to hunt for traits.
 
 Persistent preparation, allocation and signing recovery are implemented; see [mint.md](mint.md). Cloudflare alarm scheduling, Discord OAuth and configurable lifetime allowances are implemented; see [worker.md](worker.md). Serial reservation is durable and numbers are never reused after a committed reservation, including after interrupted batch preparation.
@@ -106,7 +106,7 @@ No ownership signature or OAuth token is stored in this certificate. If independ
 ubu-file.js is shared plain JavaScript using platform Web Crypto, with no dependencies:
 
 - `unsigned(dnaCode)` returns the canonical custom JSON string. Accepts canonical base64url DNA only.
-- `sign({ mint, id, serial, dna, issuedAt, key }, privateKey)` returns a signed file using an existing Ed25519 CryptoKey. This is a low-level serializer/signer, not an endpoint or authorization decision. A future mint endpoint must generate DNA and allocate identity and serial itself before calling it.
+- `sign({ mint, id, serial, dna, issuedAt, key }, privateKey)` returns a signed file using an existing Ed25519 CryptoKey. This is a low-level serializer/signer, not an endpoint or authorization decision. The mint service generates DNA and allocates identity and serial itself before calling it.
 - `read(textOrBytes, { allowUnsigned = true, resolveKey } = {})` validates before returning anything. The caller's trusted `resolveKey(mint, key)` supplies an Ed25519 public CryptoKey, or null for an untrusted pair. It must not use file-controlled URLs or keys to establish trust. The result is frozen: `{ type: 'unsigned', dna }` or `{ type: 'signed', dna, certificate }`. A signed result means verified issuance only, never current ownership.
 - `MAX_BYTES` is 1024. Browser imports check file size before reading and pass raw bytes so malformed UTF-8 is rejected.
 

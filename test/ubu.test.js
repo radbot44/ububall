@@ -263,7 +263,7 @@ test('decodes all 15 core stats, supers, AI personality, voice, and fanfare corr
   assert.equal(m.voice.groove, 3);
 });
 
-test('statMultiplier maps 8-bit values symmetrically across centered cubic curve', () => {
+test('statMultiplier maps 8-bit values across exponential multiplier curve', () => {
   assert.ok(Math.abs(ubu.statMultiplier(0) - 2 / 3) < 1e-12);
   assert.equal(ubu.statMultiplier(127), 1);
   assert.equal(ubu.statMultiplier(255), 1.5);

@@ -112,7 +112,7 @@ Whiff refund (physics v3): if a super ends without connecting (`superHit = false
 - **Goal replays and full time:** goal replays loop until a player taps the rink to continue. A prompt appears after one cycle or three seconds, whichever comes first. Online, either player can request to continue, and both advance once the first cycle is complete. Continuing after the winning goal opens the full-time screen with the score, winner, MVP, and actions to play again or rematch, leave, or open the box score and game log. MVP scoring is 3 per goal, 2 per assist or save, 1 per big/iron save, and 0.5 per check, with fastest shot breaking ties.
 
 ### Super Meter & Activation
-- **Starting Meter:** Initialized at kickoff from `Ubuquity` (Bits 1014–1023: $\text{Ubuquity} / 1020 \times 100\%$).
+- **Starting Meter:** Initialized at kickoff from `Ubuquity` (Bits 1014–1023: $\min\left(100, \frac{\text{Ubuquity}}{1020} \times 100\%\right)$).
 - **Meter Capacity:** 100% per ubu. Activating a super costs 100% meter for that turn.
 - **Meter Accumulation:**
   - Values in `METER` (`shared/ububall-match.js`). Every gain is scaled by `rate` (0.85), and the super stats use their multiplier squared (0.44–2.25×) so good ones matter and poor ones hold an ubu back. There is no passive per-turn gain.
