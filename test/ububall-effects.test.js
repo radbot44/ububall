@@ -437,7 +437,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
   const env = runInNewContext(code + '\n;({ saveActiveMatch, restoreActiveMatch, clearActiveMatch, newMatch });', {
     Object, Array, Set, Math, Number, String, Boolean,
     P, ububallMatch, ububallReplay, localStorage, structuredClone,
-    demo: false, online: null, phase: 'plan', recording: { turns: [] },
+    inDiscord: false, demo: false, online: null, phase: 'plan', recording: { turns: [] },
     matchMode: 'standard', cpuMode: 'standard', cpuLevel: 'medium', scores: [0, 0], turn: 1, selected: 0,
     elapsed: 0, accumulator: 0, drag: null, playSegments: [],
      practice: Array.from({ length: 6 }, () => ({ dna: 'a', label: 'a', model: { stats: {} } })),

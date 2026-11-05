@@ -1937,6 +1937,7 @@
     try { localStorage.removeItem('ububall-active-match'); } catch {}
   }
   function saveActiveMatch(launchState = null) {
+    if (inDiscord && (demo || online?.active)) return;
     if (demo || online?.active || phase === 'over' || !recording) {
       clearActiveMatch();
       return;
@@ -5708,13 +5709,17 @@
   });
   $('online-rematch').onclick = () => online.rematch();
   practice.slice(0, 3).forEach(entry => addOption(entry, 'roster-practice'));
-  restoredMatch = restoreActiveMatch();
-  if (!restoredMatch) newMatch();
-  try {
-    if (localStorage.getItem('ububall-orientation') === 'portrait') {
-      toggleRotate();
-    }
-  } catch {}
+  if (!inDiscord) {
+    restoredMatch = restoreActiveMatch();
+    if (!restoredMatch) newMatch();
+    try {
+      if (localStorage.getItem('ububall-orientation') === 'portrait') toggleRotate();
+    } catch {}
+  } else if (history.state?.match) {
+    // Discord opens the friends queue. Online matches and watch links resume through their URLs.
+    const { match, ...homeState } = history.state;
+    history.replaceState(homeState, '');
+  }
   document.addEventListener('visibilitychange', () => {
     updateLocalPlanClock(localPlayBlocked());
     lastTime = 0; accumulator = 0;
@@ -5884,12 +5889,8 @@
     hideFinger();
     await demoWait(run, 300);
   }
-  // A reload during a match returns to match mode; otherwise the home rink plays a demo.
-  if (restoredMatch || history.state?.match) {
-    if (matchInProgress()) enterMatch();
-    else startDemo();
-  } else {
-    startDemo();
-  }
+  // Standalone reloads can resume a CPU match. Discord starts at the Activity bench.
+  if (!inDiscord && (restoredMatch || history.state?.match) && matchInProgress()) enterMatch();
+  else startDemo();
   openRosterFromLink();
 })();
