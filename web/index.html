@@ -77,6 +77,10 @@
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
           </button>
           <button id="match-stats" class="stadium-tool-btn" type="button" aria-label="Match stats" aria-haspopup="dialog" title="Match stats"><i data-icon="chart-bar"></i></button>
+          <button id="btn-rotate" class="stadium-tool-btn" type="button" aria-pressed="false" aria-label="Switch to portrait orientation" title="Switch to portrait orientation">
+            <span class="rotate-option rotate-portrait" aria-hidden="true"><i data-icon="crop-portrait"></i><b>P</b></span>
+            <span class="rotate-option rotate-landscape" aria-hidden="true"><i data-icon="crop-landscape"></i><b>L</b></span>
+          </button>
         </div>
         <!-- Broadcast-style scorebug: the score sits centred over the rink, the logo and rules to its left, turn and phase to its right. -->
         <div class="bug-left"><div class="bug-brand"><img src="assets/ububall-logo.svg" alt="ububall"></div><div id="mode-tags" class="bug-modes"></div></div>
@@ -87,13 +91,6 @@
         <div class="bug-right"><div class="bug-status"><b><i class="turn-long">Turn </i><i class="turn-short">T</i><span id="turn-label">1</span></b><span id="phase">Plan</span><span id="blitz-clock" hidden></span><span class="bug-clock" id="clock-strip" aria-hidden="true" hidden><i></i></span></div></div>
         <div class="stadium-toolbar">
           <button id="btn-sidebars" class="stadium-tool-btn" type="button" aria-label="Hide team sidebars" aria-pressed="false"><i data-icon="columns-2"></i></button>
-          <button id="btn-rotate" class="stadium-tool-btn" type="button" aria-label="Rotate stadium orientation" title="Rotate orientation (Portrait / Landscape)">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="7" y="3" width="10" height="18" rx="2"/>
-              <path d="M3 10V6h4"/>
-              <path d="M21 14v4h-4"/>
-            </svg>
-          </button>
           <button id="btn-fullscreen" class="stadium-tool-btn" type="button" aria-label="Toggle fullscreen" title="Toggle fullscreen">
             <svg id="icon-fs-enter" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
@@ -162,7 +159,6 @@ SOFTWARE.
       <p id="game-status" role="status" aria-live="polite">Set a direction and power for each ubu, then launch.</p>
       <div class="stadium-actions">
         <div class="online-match-actions">
-          <span id="online-match-status" role="status" hidden></span>
           <button id="online-rematch" class="primary" hidden>Rematch</button>
           <button id="online-forfeit" hidden>Claim forfeit</button>
         </div>

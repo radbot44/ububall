@@ -120,7 +120,7 @@
     const blitz = ububallMatch.rule(bugMode, 'blitz');
     status.style.removeProperty('--status-width'); status.style.width = 'max-content';
     let widest = 0;
-    for (const phaseText of ['Plan', 'In play', 'Goal', 'Final', online?.active ? 'Waiting' : 'CPU']) {
+    for (const phaseText of ['Plan', 'In play', 'Goal', 'Final', 'Replay', ...(online?.active ? ['Waiting', 'Offline', 'Rejoining'] : ['CPU'])]) {
       turnNode.textContent = '88'; phaseNode.textContent = phaseText; clock.textContent = '5s'; clock.hidden = !blitz;
       widest = Math.max(widest, status.getBoundingClientRect().width);
     }
@@ -1624,7 +1624,8 @@
     updateClock();
     const planning = phase === 'plan';
     const isGoal = phase === 'goal';
-    $('phase').textContent = phase === 'replay' ? 'Replay' : phase === 'over' ? 'Final' : planning ? 'Plan' : isGoal ? 'Goal' : phase === 'cpu-wait' ? 'CPU' : phase === 'waiting' ? 'Waiting' : 'In play';
+    $('phase').textContent = phase === 'replay' ? 'Replay' : phase === 'over' ? 'Final' : planning ? 'Plan' : isGoal ? 'Goal' : phase === 'cpu-wait' ? 'CPU' :
+      phase === 'waiting' ? onlineDisconnected ? 'Rejoining' : online?.state?.connected.includes(false) ? 'Offline' : 'Waiting' : 'In play';
     $('turn-label').textContent = turn;
     for (const team of [0, 1]) {
       // A goal pops the score; a side reaching 4 goals is on match point.
@@ -5565,16 +5566,11 @@
       $('online-open-note').hidden = true;
       const [me, them] = onlineNames(s);
       $('home-label').textContent = me; $('opponent-label').textContent = them; $('opponent-heading').textContent = `${them}'s team`;
-      $('online-match-status').hidden = false; $('new-match').disabled = true;
+      $('new-match').disabled = true;
       fieldView.mode = s.mode; document.body.classList.toggle('classic-match', classicMode());
       showMode(s.mode);
       updateRematch(s);
       if (onlinePhase === 'over' && s.phase !== 'over') closeSummary();
-      $('online-match-status').textContent = s.spectator ? (s.phase === 'over' && s.winner !== null ? `${s.winner ? them : me} wins · Spectating` :
-        s.phase === 'lobby' ? 'Waiting for kickoff · Spectating' : !s.connected.every(Boolean) ? 'Player disconnected · Spectating' : 'Spectating') :
-        s.phase === 'lobby' ? 'Choosing teams' : s.phase === 'over' ? (s.left[1 - s.seat] ? `${them} left the match.` : s.rematch[s.seat] ? `Rematch requested · waiting for ${them}` :
-        s.rematch[1 - s.seat] ? `${them} wants a rematch!` : (s.winner === s.seat ? 'You win!' : `${them} wins.`)) : !s.connected.every(Boolean) ? `${them} disconnected · planning paused` :
-        s.locked[s.seat] ? `Moves locked · waiting for ${them}` : s.phase === 'resolving' ? 'Turn in motion' : 'Plan your moves';
       if (!s.game) { phase = 'waiting'; onlineReplay = null; sync(); draw(); return; }
       const rosterKey = JSON.stringify(s.rosters);
       if (rosterKey !== onlineRoster) {
@@ -5646,15 +5642,19 @@
       sync(); if (onlineReplay && !goalReplay) playOnlineReplay(); else draw();
       if (justFinished) openSummary();
     },
-    onDisconnect() { onlineDisconnected = true; phase = 'waiting'; drag = null; $('online-match-status').textContent = online.spectating ? 'Reconnecting spectator feed' : 'Reconnecting · planning paused'; sync(); draw(); },
-    onError(message) { $('online-match-status').textContent = message; },
+    onDisconnect(reconnecting) {
+      onlineDisconnected = reconnecting; phase = 'waiting'; drag = null;
+      if (reconnecting) say('Reconnecting…');
+      sync(); draw();
+    },
+    onError(message) { say(message); banner(message, 3000); },
     onLeave() {
       saveRecording();
       onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = ''; scoringPlayer = null;
       document.body.classList.remove('online-match');
       $('online-open-label').textContent = 'Play online';
       $('online-open-note').hidden = false;
-      $('new-match').disabled = false; $('online-match-status').hidden = true; $('online-forfeit').hidden = true;
+      $('new-match').disabled = false; $('online-forfeit').hidden = true;
       $('online-rematch').hidden = true; $('launch').hidden = false; closeSummary();
       $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
       draft = practice.slice(0, 3); newMatch();

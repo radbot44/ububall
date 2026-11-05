@@ -145,8 +145,9 @@ function ububallOnline(hooks) {
     };
     current.onclose = event => {
       if (socket !== current || stopped) return;
-      hooks.onDisconnect();
-      if ([4001, 4002, 4003].includes(event.code)) {
+      const ended = [4001, 4002, 4003].includes(event.code);
+      hooks.onDisconnect(!ended);
+      if (ended) {
         stopped = true;
         const message = event.code === 4001 ? 'Match opened in another tab.' : event.code === 4002 ? 'Match expired.' :
           watchKey ? 'Spectating has ended.' : 'You left this match.';
