@@ -462,7 +462,17 @@
         info.onclick = () => inspect(item);
         wrap.append(info);
       }
-      art.watch(artBox, () => { if (!artBox.querySelector('svg')) artBox.prepend(ubuRender(item.model, 'ubu-tile-svg')); });
+      art.watch(artBox, () => {
+        if (artBox.querySelector('.ubu-tile-svg')) return;
+        // Keep static artwork out of the page DOM. The data URL lives with the
+        // cached tile, so removing it needs no separate object-URL cleanup.
+        const svg = ubuRender(item.model, 'ubu-tile-svg');
+        const image = el('img', { className: 'ubu-tile-svg',
+          alt: svg.getAttribute('aria-label'), decoding: 'async', draggable: false });
+        image.src = 'data:image/svg+xml;charset=utf-8,' +
+          encodeURIComponent(new XMLSerializer().serializeToString(svg));
+        artBox.prepend(image);
+      });
       const entry = { item, wrap, main, heart, value };
       tiles.set(item.serial, entry);
       return entry;
