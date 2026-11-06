@@ -895,7 +895,8 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .ubu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.375rem, 1fr)); gap: .75rem; margin: 0 0 1rem; }
 .ubu-grid > p { grid-column: 1 / -1; color: var(--muted); font-size: .75rem; }
 .ubu-grid > p button { margin-left: .375rem; min-height: 1.875rem; padding: .25rem .625rem; font-size: .75rem; }
-.ubu-tile { position: relative; min-width: 0; }
+.ubu-tile { position: relative; min-width: 0; content-visibility: auto; contain-intrinsic-size: auto 150px auto 210px; }
+.ubu-sentinel { grid-column: 1 / -1; height: 1px; pointer-events: none; }
 .ubu-tile.is-pending p { margin: 0; padding: .75rem; color: var(--muted); font-size: .75rem; }
 .ubu-tile-main {
   display: flex; flex-direction: column; align-items: center; gap: .375rem; width: 100%; height: 100%; padding: 1rem .5rem .75rem;
@@ -1153,11 +1154,12 @@ body:has(#reveal[open]) { overflow: hidden; }
 .ubu-tile-main:is([data-tile-grade="U"], [data-tile-grade="UBU"]):not([aria-pressed="true"]) { border-color: transparent; }
 .ubu-tile-main:is([data-tile-grade="U"], [data-tile-grade="UBU"])::after {
   content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  background: linear-gradient(110deg, transparent 35%, rgb(255 240 250 / .16) 45%, rgb(255 214 176 / .12) 50%, rgb(238 200 255 / .14) 55%, transparent 65%) 100% 0 / 300% 100% no-repeat;
+  background: linear-gradient(110deg, transparent 20%, rgb(255 240 250 / .16) 45%, rgb(255 214 176 / .12) 50%, rgb(238 200 255 / .14) 55%, transparent 80%);
+  transform: translateX(100%);
   animation: foil-sweep 4.5s ease-in-out infinite;
 }
 .ubu-tile-main[data-tile-grade="UBU"]::after { animation-duration: 3s; }
-@keyframes foil-sweep { 60%, to { background-position: 0 0; } }
+@keyframes foil-sweep { 0% { transform: translateX(100%); } 60%, to { transform: translateX(-100%); } }
 
 @media (min-width: 48rem) {
   #status, .collection-status, .ubu-query-note, .ubu-help,

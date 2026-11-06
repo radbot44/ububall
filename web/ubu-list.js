@@ -396,25 +396,44 @@
     main.addEventListener('dragstart', event => { event.dataTransfer.setData('application/x-ubu-key', key); event.dataTransfer.effectAllowed = 'copyMove'; });
   }
 
-  // Art is drawn the first time a tile scrolls near view, so large collections stay cheap.
+  // Art is drawn cooperatively with a frame budget so large collections stay cheap.
   function lazyArt(scrollRoot) {
     if (!('IntersectionObserver' in root)) return { watch: (node, draw) => draw() };
-    const draws = new Map();
+    const draws = new Map(), queue = [];
+    let ticking = false;
+    function drain(time) {
+      ticking = false;
+      const budget = (time || performance.now()) + 5;
+      while (queue.length && performance.now() < budget) {
+        const target = queue.shift();
+        draws.get(target)?.();
+        draws.delete(target);
+      }
+      if (queue.length) { ticking = true; requestAnimationFrame(drain); }
+    }
     const observer = new IntersectionObserver(entries => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
-        observer.unobserve(entry.target); draws.get(entry.target)?.(); draws.delete(entry.target);
+        observer.unobserve(entry.target);
+        queue.push(entry.target);
       }
-    }, { root: scrollRoot || null, rootMargin: '300px' });
+      if (queue.length && !ticking) { ticking = true; requestAnimationFrame(drain); }
+    }, { root: scrollRoot || null, rootMargin: '400px' });
     return { watch(node, draw) { draws.set(node, draw); observer.observe(node); } };
   }
 
+  const BATCH = 120;
   // One list surface: a toolbar over a grid of tiles. `pick` makes a click choose the ubu (the
   // team picker) and adds an inspect button; otherwise a click inspects it.
   function mount({ surface, toolbarHost, grid, scrollRoot, status, inspect, pick, describe, drag, hidden, paused, onEmpty }) {
     const state = savedState(surface);
     const tiles = new Map(), art = lazyArt(scrollRoot);
-    let shown = [];
+    const sentinel = el('div', { className: 'ubu-sentinel' });
+    let visible = [], allView = [], limit = BATCH;
+    const sentinelObserver = ('IntersectionObserver' in root) ? new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting) && limit < allView.length) appendBatch();
+    }, { root: scrollRoot || null, rootMargin: '600px' }) : null;
+
     function tile(item) {
       const cached = tiles.get(item.serial);
       if (cached?.item === item) return cached;
@@ -443,27 +462,52 @@
         info.onclick = () => inspect(item);
         wrap.append(info);
       }
-      art.watch(artBox, () => artBox.prepend(ubuRender(item.model, 'ubu-tile-svg')));
+      art.watch(artBox, () => { if (!artBox.querySelector('svg')) artBox.prepend(ubuRender(item.model, 'ubu-tile-svg')); });
       const entry = { item, wrap, main, heart, value };
       tiles.set(item.serial, entry);
       return entry;
     }
+
+    function syncTile(entry, key) {
+      const { item, main, heart, value } = entry;
+      if (!main) return;
+      const favorite = items.get(item.serial)?.favorite === true;
+      heart.setAttribute('aria-pressed', String(favorite)); heart.classList.toggle('is-favorite', favorite);
+      if (describe) describeTile(main, item.model.parts.fullName, describe(item));
+      value.hidden = !key;
+      if (key) [value.textContent, value.style.color] = chipValue(item, key);
+    }
+
+    function appendBatch() {
+      const key = chipKey(state, parseQuery(state.query));
+      const nextBatch = allView.slice(limit, limit + BATCH).map(tile);
+      limit += BATCH;
+      for (const entry of nextBatch) syncTile(entry, key);
+      visible.push(...nextBatch);
+      if (limit < allView.length) {
+        sentinel.before(...nextBatch.map(entry => entry.wrap));
+      } else {
+        sentinelObserver?.unobserve(sentinel);
+        sentinel.replaceWith(...nextBatch.map(entry => entry.wrap));
+      }
+    }
+
     function render() {
       if (paused?.()) return;
       const all = [...items.values()].filter(item => !hidden?.(item) && !(pick && item.pending));
-      const next = view(all, state).map(tile);
-      if (next.length !== shown.length || next.some((entry, i) => entry !== shown[i])) grid.replaceChildren(...next.map(entry => entry.wrap));
-      shown = next;
+      allView = view(all, state);
+      limit = sentinelObserver ? BATCH : allView.length;
       const key = chipKey(state, parseQuery(state.query));
-      for (const { item, main, heart, value } of shown) {
-        if (!main) continue;
-        const favorite = items.get(item.serial)?.favorite === true;
-        heart.setAttribute('aria-pressed', String(favorite)); heart.classList.toggle('is-favorite', favorite);
-        if (describe) describeTile(main, item.model.parts.fullName, describe(item));
-        value.hidden = !key;
-        if (key) [value.textContent, value.style.color] = chipValue(item, key);
+      visible = allView.slice(0, limit).map(tile);
+      for (const entry of visible) syncTile(entry, key);
+      sentinelObserver?.disconnect();
+      if (allView.length > limit) {
+        grid.replaceChildren(...visible.map(entry => entry.wrap), sentinel);
+        sentinelObserver?.observe(sentinel);
+      } else {
+        grid.replaceChildren(...visible.map(entry => entry.wrap));
       }
-      if (!shown.length) onEmpty?.(all.length ? 'filtered' : loading ? 'loading' : 'empty');
+      if (!allView.length) onEmpty?.(all.length ? 'filtered' : loading ? 'loading' : 'empty');
       else onEmpty?.(null);
     }
     toolbarHost.append(toolbar(state, persist => { if (persist) saveState(surface, state); render(); }));
