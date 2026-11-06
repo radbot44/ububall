@@ -1006,7 +1006,7 @@ test('replay takeover (watchReplay -> playFromHere -> local turn) transforms sim
     $,
     document: { body: { classList: { toggle: dummy, add: dummy, remove: dummy } } },
     saveRecording: dummy, stopDemo: dummy, closeSummary: dummy, endGoalReplay: dummy,
-    stopFanfare: dummy, gameAudio: () => null,
+    stopFanfare: dummy, gameAudio: () => null, saveActiveMatch: dummy,
     cpuGeneration: 0, cpuClient: { cancel: dummy }, videoLogo: dummy,
     showMode: dummy, classicMode: () => false, normalStats: () => ({}),
     resolveEquippedSuper: (entry, i) => entry?.equippedSuper || P.SUPERS[i % P.SUPERS.length],

@@ -3285,7 +3285,7 @@
     v.drawImage(fieldBadges, x, y, width, height);
   }
   async function encodeAudio(buffer, length) {
-    if (!('AudioEncoder' in window)) return null;
+    if (!buffer || !('AudioEncoder' in window)) return null;
     const rate = buffer.sampleRate;
     for (const [codec, bitrate, frame] of [['mp4a.40.2', 160000, 1024], ['opus', 128000, 960]]) {
       const config = { codec, bitrate, sampleRate: rate, numberOfChannels: 2 };
@@ -3314,7 +3314,7 @@
     }
     return null;
   }
-  let videoCancelled = false, exportingVideo = false;
+  let videoCancelled = false, exportingVideo = false, cancelVideo = null;
   const isExporting = () => exportingVideo || Boolean(theater?.exporting);
   // Renders `slice` (see exportSlice) in the export dialog, which is already open.
   async function exportVideo(slice) {
@@ -3349,15 +3349,23 @@
           t.stops.reduce((extra, stop) => extra + Math.ceil(stop.ms * VIDEO.fps / 1000) + 1, 0) +
           (t.goal ? Math.ceil(2.5 * VIDEO.fps) + 1 : 0) +
           (winningTurn(t) ? Math.ceil(WIN_SECONDS * VIDEO.fps) + 1 : 0), 0);
+        const maxFrames = 5 * 60 * VIDEO.fps;
+        if (frameBudget > maxFrames) {
+          status.textContent = 'This replay is too long to export as an MP4 (5 minutes maximum). Export a single round or turn instead.';
+          progress.hidden = true; close.textContent = 'Close'; return;
+        }
         const offline = new OfflineAudioContext(2, Math.ceil(frameBudget / VIDEO.fps * rate), rate);
         const out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
         const v = out.getContext('2d'), samples = [];
-        let description = null, failure = null;
-        encoder = new VideoEncoder({ error: error => { failure = error; }, output: (chunk, meta) => {
+        let description = null, failure = null, wakeQueue = null;
+        const wake = () => { if (wakeQueue) { const fn = wakeQueue; wakeQueue = null; fn(); } };
+        cancelVideo = wake;
+        encoder = new VideoEncoder({ error: error => { failure = error; wake(); }, output: (chunk, meta) => {
           if (meta?.decoderConfig?.description) description = ownBytes(meta.decoderConfig.description);
           const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
           samples.push({ data, duration: 90000 / VIDEO.fps, key: chunk.type === 'key' });
         } });
+        encoder.addEventListener('dequeue', wake);
         encoder.configure(config);
         session.audio = offlineAudio(offline, () => session.clock / 1000);
         // The sound renders alongside the video, a second behind it: it pauses at each second until the
@@ -3396,7 +3404,10 @@
           encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
           pump();
           while (encoder.encodeQueueSize > 4 && !videoCancelled && !failure) {
-            await new Promise(resolve => encoder.addEventListener('dequeue', resolve, { once: true }));
+            await new Promise(resolve => {
+              wakeQueue = resolve;
+              setTimeout(wake, 3000);
+            });
           }
           if (f % 15 === 0) { progress.value = .9 * f / Math.min(endFrame, frameBudget); status.textContent = `Rendering ${replayClock(f / VIDEO.fps / P.DT)}…`; await yieldTask(); }
         }
@@ -3415,6 +3426,7 @@
     } catch (error) {
       status.textContent = `The video could not be made: ${error.message}`;
     } finally {
+      cancelVideo = null;
       stopAudio?.();
       if (encoder && encoder.state !== 'closed') encoder.close();
       if (session?.fx?.sizzle) { session.fx.sizzle.stop?.(); session.fx.sizzle = null; }
@@ -3491,7 +3503,9 @@
   const CARD = { width: 1080, height: 980, field: 146, crop: [42, 550], cta: 'Collect & Collide at', tagline: '3v3 turn-based hockey' };
   let cardImage = null;
   function drawShareCard(hidden) {
-    const th = theater, out = $('share-card'), g = out.getContext('2d'), { home, away, text, surface, background } = themeColors;
+    const th = theater;
+    if (!th) return;
+    const out = $('share-card'), g = out.getContext('2d'), { home, away, text, surface, background } = themeColors;
     const anon = Boolean(hidden || th.replay.anonymous), portrait = fieldView.portrait, prevAnon = fieldView.anonymous;
     const names = anon ? ububallReplay.ANONYMOUS : (th.names || [$('home-label').textContent, $('opponent-label').textContent]);
     const cardScores = th.scores || scores, cardTurn = th.turn ?? turn;
@@ -3541,6 +3555,7 @@
     const th = theater;
     if (!th || isExporting()) return;
     await Promise.all([videoLogo(), document.fonts.load(`40px 'Uburoom Sans'`).catch(() => {})]);
+    if (theater !== th || isExporting()) return;
     $('share-private').closest('label').hidden = th.replay.anonymous;
     try { $('share-private').checked = localStorage.getItem('ububall-export-private') === 'on'; } catch {}
     drawShareCard($('share-private').checked);
@@ -3564,8 +3579,8 @@
   };
   $('share-close').onclick = () => $('share-dialog').close();
   // Closing while a video renders cancels it.
-  $('export-close').onclick = () => { if (isExporting()) videoCancelled = true; else $('export-dialog').close(); };
-  $('export-dialog').addEventListener('cancel', event => { if (isExporting()) { event.preventDefault(); videoCancelled = true; } });
+  $('export-close').onclick = () => { if (isExporting()) { videoCancelled = true; cancelVideo?.(); } else $('export-dialog').close(); };
+  $('export-dialog').addEventListener('cancel', event => { if (isExporting()) { event.preventDefault(); videoCancelled = true; cancelVideo?.(); } });
   // Guides, remembered on this device and set from the pause menu or the replay viewer: Moves draws each
   // ubu's launch (its guard and armed super) from where the turn started; Trails draws the path each body
   // has taken this turn. In play, Moves shows while the turn plays and Trails until the next launch (not
@@ -3670,7 +3685,7 @@
     play = ububallMatch.newPlay(); tally = ububallMatch.newTally(); roundTurns = th.index - roundStart; matchTicks = 0; playSegments = [];
     selected = 0; drag = null; elapsed = accumulator = 0; phase = 'plan';
     recording = ububallReplay.create({ mode: fieldView.mode, names: ['You', 'CPU'], ubus: simBodies.slice(0, 6).map((b, i) => ({ dna: entries[i].dna, super: b.equippedSuper?.id ?? null })) });
-    buildTeam(); resetPlans(); say('Playing from the replay. Plan your launches.'); draw();
+    buildTeam(); resetPlans(); if (typeof saveActiveMatch === 'function') saveActiveMatch(); say('Playing from the replay. Plan your launches.'); draw();
   }
   $('replay-take-over').onclick = playFromHere;
   function replayStats({ replay, seat }) {
@@ -5098,7 +5113,9 @@
     const model = ubu.decode(ubu.fromCode(p.dna));
     return { model, dna: p.dna, label: 'Guest ubu', key: 'online-' + i };
   });
+  let lobbyGeneration = 0;
   async function showLobby(view, open) {
+    const gen = ++lobbyGeneration;
     const before = lobbyView, entering = setupFor !== 'lobby';
     lobbyView = view;
     const teamChanged = JSON.stringify(before?.guestTeam || null) !== JSON.stringify(view.guestTeam || null);
@@ -5107,12 +5124,18 @@
       if (view.guestTeam) draft = lobbyEntries(view.guestTeam);
       else {
         await ownTeamReady(); // The server opened any signup pack as this seat was taken.
+        if (gen !== lobbyGeneration || setupFor !== 'lobby' || lobbyView !== view) return;
         draft = roster.every(entry => ubuList.get(entry.key)?.model) ? roster.map(entry => ({ ...entry })) : [null, null, null];
         if (draft.some(d => !d) && signedIn()) {
-          try { const team = await accountTeam(); if (team && lobbyView === view && draft.some(d => !d)) draft = team; } catch {}
+          try {
+            const team = await accountTeam();
+            if (gen !== lobbyGeneration || setupFor !== 'lobby' || lobbyView !== view) return;
+            if (team && draft.some(d => !d)) draft = team;
+          } catch {}
         }
       }
     }
+    if (gen !== lobbyGeneration || setupFor !== 'lobby' || lobbyView !== view) return;
     // Owned-ubu matches take only the player's collection.
     $('roster-scroll').hidden = Boolean(view.guestTeam);
     if (!view.guestTeam) void loadCollection();
@@ -5127,6 +5150,7 @@
     if (open && !$('roster-dialog').open) $('roster-dialog').showModal();
   }
   function closeLobby() {
+    lobbyGeneration++;
     if (setupFor !== 'lobby') return;
     if ($('roster-dialog').dataset.for === 'lobby') $('roster-dialog').close();
     setupFor = 'cpu'; lobbyView = null;
