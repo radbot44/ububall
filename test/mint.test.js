@@ -523,3 +523,31 @@ test('saved teams accept only owned signed ubus and replace the whole document',
   assert.deepEqual(mint.saveTeams(owner, { teams: [], last: null }), { teams: [], last: null });
   assert.deepEqual(new Mint(f.open(), f.options).teams(owner), { teams: [], last: null });
 });
+
+test('approach B dispenses from oldest batch first and spills over seamlessly when unreserved packs drop below three', async t => {
+  const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
+  mint.prepare({ batchSize: 15 });
+  mint.prepare({ batchSize: 10, minimumPacks: 10 });
+  assert.equal(mint.state().remaining, 5);
+
+  const offer1 = mint.offer({ owner, request: request(1) });
+  const batchOfChoice = token => mint.exec('SELECT batch FROM inventory WHERE id=(SELECT anchor FROM pack_choices WHERE token=?)', token)[0].batch;
+  assert.ok(offer1.choices.every(c => batchOfChoice(c.choice) === 1));
+
+  await mint.issue({ owner, request: offer1.request, choice: offer1.choices[0].choice });
+  assert.ok(mint.exec('SELECT batch FROM issued WHERE request=?', offer1.request).every(r => r.batch === 1));
+
+  const otherOwner = '234567890123456789';
+  const offer2 = mint.offer({ owner: otherOwner, request: request(2) });
+  assert.equal(offer2.choices.length, 3);
+  const batches = offer2.choices.map(c => batchOfChoice(c.choice));
+  assert.deepEqual(batches, [1, 1, 2]);
+
+  const now = Math.floor(Date.now() / 1000);
+  assert.ok(offer2.expires >= now + 3590 && offer2.expires <= now + 3610);
+
+  mint.exec('UPDATE pack_offers SET expires=0 WHERE owner=?', otherOwner);
+  mint.expireOffers();
+  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM pack_choices WHERE owner=?', otherOwner)[0].n, 0);
+  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM pack_offers WHERE owner=?', otherOwner)[0].n, 0);
+});

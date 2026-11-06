@@ -146,7 +146,7 @@ class Mint {
     integer(batchSize, 1000000, 'batch size');
     if (batchSize % PACK_SIZE !== 0) throw new Error('Batch size must be a multiple of 5.');
     integer(chunkSize, 1000, 'chunk size');
-    integer(minimumPacks, 3, 'minimum pack inventory');
+    integer(minimumPacks, 200000, 'minimum pack inventory');
     return this.transaction(() => {
       let state = this.state();
       if (state.prepared === state.size) {
@@ -203,10 +203,14 @@ class Mint {
     this.exec('DELETE FROM pack_offers WHERE expires<=?', now);
   }
   availablePack() {
-    const where = 'quintile=1 AND pack_slot>=0 AND NOT EXISTS (SELECT 1 FROM pack_choices WHERE anchor=inventory.id)';
-    const size = this.exec('SELECT COUNT(*) AS count FROM inventory WHERE ' + where)[0].count;
-    if (!size) throw new Error('Pack choices unavailable.');
-    return this.exec('SELECT id, pack_slot FROM inventory WHERE ' + where + ' ORDER BY pack_slot LIMIT 1 OFFSET ?', randomBelow(size))[0];
+    const oldest = this.exec(`SELECT batch FROM inventory
+      WHERE quintile=1 AND pack_slot>=0 AND NOT EXISTS (SELECT 1 FROM pack_choices WHERE anchor=inventory.id)
+      ORDER BY batch ASC LIMIT 1`)[0];
+    if (!oldest) throw new Error('Pack choices unavailable.');
+
+    const where = 'quintile=1 AND pack_slot>=0 AND batch=? AND NOT EXISTS (SELECT 1 FROM pack_choices WHERE anchor=inventory.id)';
+    const size = this.exec('SELECT COUNT(*) AS count FROM inventory WHERE ' + where, oldest.batch)[0].count;
+    return this.exec('SELECT id, pack_slot FROM inventory WHERE ' + where + ' ORDER BY pack_slot LIMIT 1 OFFSET ?', oldest.batch, randomBelow(size))[0];
   }
   offer({ owner, request }, { lifetimeLimit } = {}) {
     issuanceRequest(owner, request, lifetimeLimit);
@@ -217,7 +221,7 @@ class Mint {
       let offer = this.exec('SELECT * FROM pack_offers WHERE owner=?', owner)[0];
       if (!offer) {
         if (this.state().remaining < 3) throw new Error('Batch preparation required.');
-        offer = { owner, request, expires: Math.floor(Date.now() / 1000) + 86400 };
+        offer = { owner, request, expires: Math.floor(Date.now() / 1000) + 3600 };
         this.exec('INSERT INTO pack_offers VALUES (?, ?, ?)', owner, request, offer.expires);
         for (let i = 0; i < 3; i++) {
           const pack = this.availablePack();

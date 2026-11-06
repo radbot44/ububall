@@ -66,7 +66,9 @@ export class MintRegistry extends DurableObject {
   }
   needsPreparation() {
     const state = this.mint.state();
-    return (!state.size || state.prepared < state.size || state.remaining < 3) &&
+    const batchPacks = Math.floor(this.config.batchSize / 5);
+    const targetBuffer = Math.max(batchPacks, 3);
+    return (!state.size || state.prepared < state.size || state.remaining <= targetBuffer) &&
       !(state.prepared === state.size && state.next_serial + this.config.batchSize - 1 > 999999999999);
   }
   async ensureBatch() {
@@ -77,7 +79,8 @@ export class MintRegistry extends DurableObject {
   async alarm() {
     if (!this.needsPreparation()) return;
     await this.ctx.storage.setAlarm(Date.now() + 1000);
-    this.mint.prepare({ batchSize: this.config.batchSize, minimumPacks: 3 });
+    const batchPacks = Math.floor(this.config.batchSize / 5);
+    this.mint.prepare({ batchSize: this.config.batchSize, minimumPacks: Math.max(batchPacks, 3) + 1 });
     if (!this.needsPreparation()) await this.ctx.storage.deleteAlarm();
   }
   async offer(owner, request) {
