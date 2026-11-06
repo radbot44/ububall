@@ -90,6 +90,512 @@
     for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
     return element;
   }
+  // Precomputed procedural material caches (lazy-evaluated once per session, 100% deterministic).
+  let cachedMosaicData = null;
+  function getMosaicData() {
+    if (cachedMosaicData) return cachedMosaicData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    let tiles = '', topBevels = '', bottomBevels = '';
+    const whiteShades = ['', '', '', ''], blackShades = ['', '', '', ''];
+    for (let row = -10; row < 28; row++) for (let col = -10; col < 28; col++) {
+      const x = col * 20 + (row % 2) * 8, y = row * 20;
+      const p0 = (x + 1 + roll()).toFixed(1) + ' ' + (y + 1 + roll()).toFixed(1);
+      const p1 = (x + 18 - roll()).toFixed(1) + ' ' + (y + 1 + roll()).toFixed(1);
+      const p2 = (x + 18 - roll()).toFixed(1) + ' ' + (y + 18 - roll()).toFixed(1);
+      const p3 = (x + 1 + roll()).toFixed(1) + ' ' + (y + 18 - roll()).toFixed(1);
+      const poly = 'M' + p0 + 'L' + p1 + 'L' + p2 + 'L' + p3 + 'Z';
+      tiles += poly;
+      const isWhite = roll() > .5;
+      const bucket = Math.min(3, Math.floor(roll() * 4));
+      if (isWhite) whiteShades[bucket] += poly;
+      else blackShades[bucket] += poly;
+      topBevels += 'M' + p3 + 'L' + p0 + 'L' + p1;
+      bottomBevels += 'M' + p1 + 'L' + p2 + 'L' + p3;
+    }
+    return (cachedMosaicData = { tiles, topBevels, bottomBevels, whiteShades, blackShades });
+  }
+
+  let cachedCrackleData = null;
+  function getCrackleData() {
+    if (cachedCrackleData) return cachedCrackleData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const seeds = [];
+    for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) {
+      seeds.push([-180 + (x + .2 + roll() * .6) * 80, -180 + (y + .2 + roll() * .6) * 80]);
+    }
+    let dCells = '';
+    const shades = ['', '', '', ''];
+    let chips0 = '', chips1 = '';
+    for (const seed of seeds) {
+      let cell = [[-180, -180], [540, -180], [540, 540], [-180, 540]];
+      for (const other of seeds) {
+        if (other === seed || !cell.length) continue;
+        const nx = other[0] - seed[0], ny = other[1] - seed[1];
+        const limit = (other[0] ** 2 + other[1] ** 2 - seed[0] ** 2 - seed[1] ** 2) / 2;
+        const clipped = [];
+        for (let i = 0; i < cell.length; i++) {
+          const a = cell[i], b = cell[(i + 1) % cell.length];
+          const da = a[0] * nx + a[1] * ny - limit, db = b[0] * nx + b[1] * ny - limit;
+          if (da <= 0) clipped.push(a);
+          if ((da <= 0) !== (db <= 0)) {
+            const t = da / (da - db);
+            clipped.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+          }
+        }
+        cell = clipped;
+      }
+      const rough = [];
+      for (let i = 0; i < cell.length; i++) {
+        const a = cell[i], b = cell[(i + 1) % cell.length];
+        const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 3));
+        for (let j = 0; j < steps; j++) {
+          const x = a[0] + (b[0] - a[0]) * j / steps, y = a[1] + (b[1] - a[1]) * j / steps;
+          rough.push([
+            (x + 3.5 * Math.sin(y / 7 + x / 19) + .9 * Math.sin(y * 1.7 + x)).toFixed(1),
+            (y + 3.5 * Math.sin(x / 8 - y / 23) + .9 * Math.sin(x * 1.5 - y)).toFixed(1)
+          ]);
+        }
+      }
+      const d = 'M' + rough.map(p => p[0] + ',' + p[1]).join('L') + 'Z';
+      dCells += d;
+      const bucket = Math.min(3, Math.floor(roll() * 4));
+      shades[bucket] += d;
+      for (let i = 2; i < rough.length; i += 5) {
+        const x = parseFloat(rough[i][0]), y = parseFloat(rough[i][1]);
+        const r = .5 + roll() * 1.8;
+        const chip = 'M' + (x - 2).toFixed(1) + ' ' + y.toFixed(1) + 'l' + r.toFixed(1) + ' ' + (-r).toFixed(1) + 'l' + (r * .7).toFixed(1) + ' ' + (r * 1.4).toFixed(1) + 'Z';
+        if (i % 3) chips0 += chip;
+        else chips1 += chip;
+        roll();
+      }
+    }
+    return (cachedCrackleData = { dCells, shades, chips0, chips1 });
+  }
+
+  let cachedHammeredData = null;
+  function getHammeredData() {
+    if (cachedHammeredData) return cachedHammeredData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const grid = Array.from({ length: 13 }, (_, y) => Array.from({ length: 13 }, (_, x) => [
+      (-16 + x * 16 + (roll() - .5) * 13), (-16 + y * 16 + (roll() - .5) * 13)
+    ]));
+    let dDents = '';
+    for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) {
+      const pts = [grid[y][x], grid[y][x + 1], grid[y + 1][x + 1], grid[y + 1][x]];
+      const mid = pts.map((p, i) => p.map((v, j) => (v + pts[(i + 1) % 4][j]) / 2));
+      let d = 'M' + mid[3][0].toFixed(1) + ' ' + mid[3][1].toFixed(1);
+      for (let i = 0; i < 4; i++) d += 'Q' + pts[i][0].toFixed(1) + ' ' + pts[i][1].toFixed(1) + ' ' + mid[i][0].toFixed(1) + ' ' + mid[i][1].toFixed(1);
+      dDents += d + 'Z';
+    }
+    return (cachedHammeredData = { dDents });
+  }
+
+  let cachedLavaData = null;
+  function getLavaData() {
+    if (cachedLavaData) return cachedLavaData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const seeds = [];
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      seeds.push([-180 + (x + 0.2 + roll() * 0.6) * 90, -180 + (y + 0.2 + roll() * 0.6) * 90]);
+    }
+    let platesDark = '', platesLight = '';
+    let platesOrange = '', platesYellow = '';
+    for (let s = 0; s < seeds.length; s++) {
+      const seed = seeds[s];
+      let cell = [[-180, -180], [540, -180], [540, 540], [-180, 540]];
+      for (const other of seeds) {
+        if (other === seed || !cell.length) continue;
+        const nx = other[0] - seed[0], ny = other[1] - seed[1];
+        const limit = (other[0] ** 2 + other[1] ** 2 - seed[0] ** 2 - seed[1] ** 2) / 2;
+        const clipped = [];
+        for (let i = 0; i < cell.length; i++) {
+          const a = cell[i], b = cell[(i + 1) % cell.length];
+          const da = a[0] * nx + a[1] * ny - limit, db = b[0] * nx + b[1] * ny - limit;
+          if (da <= 0) clipped.push(a);
+          if ((da <= 0) !== (db <= 0)) {
+            const t = da / (da - db);
+            clipped.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+          }
+        }
+        cell = clipped;
+      }
+      if (!cell.length) continue;
+      const edge = [];
+      for (let k = 0; k < cell.length; k++) {
+        const a = cell[k], b = cell[(k + 1) % cell.length], n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 4);
+        for (let j = 0; j < n; j++) {
+          const x = a[0] + (b[0] - a[0]) * j / n, y = a[1] + (b[1] - a[1]) * j / n;
+          edge.push([
+            (x + 4 * Math.sin(y * .12) + 1.6 * Math.sin(y * .57)).toFixed(1),
+            (y + 3 * Math.sin(x * .15) + 1.1 * Math.sin(x * .63)).toFixed(1)
+          ]);
+        }
+      }
+      const d = 'M' + edge.map(p => p[0] + ',' + p[1]).join('L') + 'Z';
+      if (s % 3) platesDark += d;
+      else platesLight += d;
+      roll();
+      platesOrange += d;
+      roll();
+      platesYellow += d;
+      roll(); roll();
+    }
+    const meltPockets = [];
+    for (let i = 0; i < seeds.length; i += 3) {
+      const [x, y] = seeds[i];
+      let other = null, distance = Infinity;
+      for (const candidate of seeds) if (candidate !== seeds[i]) {
+        const dist = Math.hypot(candidate[0] - x, candidate[1] - y);
+        if (dist < distance) { distance = dist; other = candidate; }
+      }
+      const px = (x + other[0]) / 2, py = (y + other[1]) / 2;
+      meltPockets.push({
+        cx: (px + 4 * Math.sin(py * .12) + 1.6 * Math.sin(py * .57)).toFixed(1),
+        cy: (py + 3 * Math.sin(px * .15) + 1.1 * Math.sin(px * .63)).toFixed(1),
+        rx: (5 + roll() * 9).toFixed(1),
+        ry: (4 + roll() * 6).toFixed(1)
+      });
+    }
+    const dust = ['', '', ''];
+    for (let i = 0; i < 1300; i++) {
+      const x = roll() * 96, y = roll() * 96, r = .3 + roll() * 1.6;
+      dust[i % 3] += 'M' + x.toFixed(1) + ' ' + y.toFixed(1) + 'l' + r.toFixed(1) + ' ' + (-r * .4).toFixed(1) + 'l' + (r * .5).toFixed(1) + ' ' + r.toFixed(1) + 'l' + (-r).toFixed(1) + ' ' + (r * .4).toFixed(1) + 'Z';
+    }
+    return (cachedLavaData = { platesDark, platesLight, platesOrange, platesYellow, meltPockets, dust });
+  }
+
+  let cachedCircuitryData = null;
+  function getCircuitryData() {
+    if (cachedCircuitryData) return cachedCircuitryData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const rotatePoint = (x, y, cx, cy, angleDeg) => {
+      const rad = angleDeg * Math.PI / 180;
+      const cos = Math.cos(rad), sin = Math.sin(rad);
+      const dx = x - cx, dy = y - cy;
+      return [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
+    };
+    let dTraceBacking = '', dTraceGold = '', dTraceSilver = '';
+    let dVias = '', dChips = '', dChipPins = '', dMarkings = '';
+    let dSmdGold = '', dSmdDark = '';
+    for (let row = 0; row < 7; row++) for (let col = 0; col < 7; col++) {
+      const cx = col * 52 + 5 + roll() * 10, cy = row * 52 + 5 + roll() * 10;
+      const w = 9 + roll() * 14, h = 8 + roll() * 18;
+      const rot = Math.floor(roll() * 4) * 90;
+      const transformPt = (x, y) => {
+        const [rx, ry] = rotatePoint(x, y, 18, 18, rot);
+        return [(cx + rx).toFixed(1), (cy + ry).toFixed(1)];
+      };
+      for (let pin = 0; pin < 5; pin++) {
+        const py = 3 + pin * 3.5, run = 8 + roll() * 13, step = 4 + Math.floor(roll() * 4) * 3;
+        const p1 = transformPt(w, py), p2 = transformPt(w + run, py);
+        const p3 = transformPt(w + run + step, py + step), p4 = transformPt(w + run + step, py + step + 10 + roll() * 16);
+        const pathStr = 'M' + p1[0] + ' ' + p1[1] + 'L' + p2[0] + ' ' + p2[1] + 'L' + p3[0] + ' ' + p3[1] + 'L' + p4[0] + ' ' + p4[1];
+        dTraceBacking += pathStr;
+        if (pin % 3) dTraceGold += pathStr; else dTraceSilver += pathStr;
+        const viaCenter = transformPt(w + run + step, py + step + 10);
+        const vx = parseFloat(viaCenter[0]), vy = parseFloat(viaCenter[1]);
+        dVias += 'M' + (vx - 1).toFixed(1) + ' ' + vy.toFixed(1) + 'A1 1 0 1 0 ' + (vx + 1).toFixed(1) + ' ' + vy.toFixed(1) + 'A1 1 0 1 0 ' + (vx - 1).toFixed(1) + ' ' + vy.toFixed(1);
+      }
+      const c0 = transformPt(0, 0), c1 = transformPt(w, 0), c2 = transformPt(w, h), c3 = transformPt(0, h);
+      dChips += 'M' + c0[0] + ' ' + c0[1] + 'L' + c1[0] + ' ' + c1[1] + 'L' + c2[0] + ' ' + c2[1] + 'L' + c3[0] + ' ' + c3[1] + 'Z';
+      for (let pin = 2; pin < h - 1; pin += 3) {
+        const l1 = transformPt(-3, pin), l2 = transformPt(0, pin);
+        const r1 = transformPt(w, pin), r2 = transformPt(w + 3, pin);
+        dChipPins += 'M' + l1[0] + ' ' + l1[1] + 'L' + l2[0] + ' ' + l2[1] + 'M' + r1[0] + ' ' + r1[1] + 'L' + r2[0] + ' ' + r2[1];
+      }
+      const m1 = transformPt(2, 2), m2 = transformPt(w - 2, 2);
+      dMarkings += 'M' + m1[0] + ' ' + m1[1] + 'L' + m2[0] + ' ' + m2[1];
+      for (let j = 0; j < 3; j++) {
+        const px = roll() * 35, py = h + 5 + j * 5, sw = 4 + roll() * 4, sh = 2;
+        const s0 = transformPt(px, py), s1 = transformPt(px + sw, py);
+        const s2 = transformPt(px + sw, py + sh), s3 = transformPt(px, py + sh);
+        const smdPoly = 'M' + s0[0] + ' ' + s0[1] + 'L' + s1[0] + ' ' + s1[1] + 'L' + s2[0] + ' ' + s2[1] + 'L' + s3[0] + ' ' + s3[1] + 'Z';
+        if (j % 2) dSmdGold += smdPoly; else dSmdDark += smdPoly;
+      }
+    }
+    return (cachedCircuitryData = { dTraceBacking, dTraceGold, dTraceSilver, dVias, dChips, dChipPins, dMarkings, dSmdGold, dSmdDark });
+  }
+
+  let cachedKintsugiData = null;
+  function getKintsugiData() {
+    if (cachedKintsugiData) return cachedKintsugiData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const seeds = [];
+    for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++) {
+      seeds.push([-180 + (x + 0.2 + roll() * 0.6) * 105, -180 + (y + 0.2 + roll() * 0.6) * 105]);
+    }
+    let dBacking = '', dGold = '';
+    const whiteTints = ['', ''], blackTints = ['', ''];
+    for (let s = 0; s < seeds.length; s++) {
+      const seed = seeds[s];
+      let cell = [[-180, -180], [540, -180], [540, 540], [-180, 540]];
+      for (const other of seeds) {
+        if (other === seed || !cell.length) continue;
+        const nx = other[0] - seed[0], ny = other[1] - seed[1];
+        const limit = (other[0] ** 2 + other[1] ** 2 - seed[0] ** 2 - seed[1] ** 2) / 2;
+        const clipped = [];
+        for (let i = 0; i < cell.length; i++) {
+          const a = cell[i], b = cell[(i + 1) % cell.length];
+          const da = a[0] * nx + a[1] * ny - limit, db = b[0] * nx + b[1] * ny - limit;
+          if (da <= 0) clipped.push(a);
+          if ((da <= 0) !== (db <= 0)) {
+            const t = da / (da - db);
+            clipped.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+          }
+        }
+        cell = clipped;
+      }
+      if (!cell.length) continue;
+      const rough = [];
+      for (let k = 0; k < cell.length; k++) {
+        const a = cell[k], b = cell[(k + 1) % cell.length], n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 7);
+        for (let j = 0; j < n; j++) {
+          const x = a[0] + (b[0] - a[0]) * j / n, y = a[1] + (b[1] - a[1]) * j / n;
+          rough.push([
+            (x + 1.4 * Math.sin(y * .23) + .7 * Math.sin(y * .67)).toFixed(1),
+            (y + 1.4 * Math.sin(x * .19)).toFixed(1)
+          ]);
+        }
+      }
+      const d = 'M' + rough.map(p => p[0] + ',' + p[1]).join('L') + 'Z';
+      const tintBucket = Math.min(1, Math.floor(roll() * 2));
+      if (s % 2) whiteTints[tintBucket] += d;
+      else blackTints[tintBucket] += d;
+      dBacking += d;
+      roll();
+      dGold += d;
+    }
+    return (cachedKintsugiData = { dBacking, dGold, whiteTints, blackTints });
+  }
+
+  let cachedPlushData = null;
+  function getPlushData() {
+    if (cachedPlushData) return cachedPlushData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const paths = ['', '', ''];
+    for (let i = 0; i < 1800; i++) {
+      const x = roll() * 96, y = roll() * 96, r = 1 + roll() * 2.4, lean = (roll() - .5) * 3;
+      for (const dx of [-96, 0, 96]) for (const dy of [-96, 0, 96]) {
+        if (x + dx < -5 || x + dx > 101 || y + dy < -5 || y + dy > 101) continue;
+        paths[i % 3] += 'M' + (x + dx).toFixed(1) + ' ' + (y + dy).toFixed(1) + 'q' + (-r).toFixed(1) + ' ' + (-r * 1.5).toFixed(1) + ' ' + lean.toFixed(1) + ' ' + (-r * 2).toFixed(1) + 'q' + r.toFixed(1) + ' ' + (-r * .4).toFixed(1) + ' ' + (r * .7).toFixed(1) + ' ' + r.toFixed(1);
+      }
+    }
+    return (cachedPlushData = { paths });
+  }
+
+  let cachedSandstoneData = null;
+  function getSandstoneData() {
+    if (cachedSandstoneData) return cachedSandstoneData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const strataLight = ['', ''], strataDark = ['', ''];
+    for (let band = -6; band < 27; band++) {
+      const y = band * 26 + Math.sin(band * 1.7) * 9;
+      const d = 'M-180 ' + (y).toFixed(1) + 'C60 ' + (y - 60).toFixed(1) + ' 300 ' + (y + 60).toFixed(1) + ' 540 ' + (y).toFixed(1) + 'L540 ' + (y + 26).toFixed(1) + 'C300 ' + (y + 86).toFixed(1) + ' 60 ' + (y - 34).toFixed(1) + ' -180 ' + (y + 26).toFixed(1) + 'Z';
+      const bucket = roll() > .5 ? 1 : 0;
+      if (band % 3) strataDark[bucket] += d;
+      else strataLight[bucket] += d;
+    }
+    const grains = ['', '', '', ''];
+    for (let i = 0; i < 7000; i++) {
+      const x = roll() * 96, y = roll() * 96, r = .4 + roll() * .65;
+      grains[i % 4] += 'M' + x.toFixed(1) + ' ' + y.toFixed(1) + 'h' + r.toFixed(1) + 'v' + r.toFixed(1) + 'h-' + r.toFixed(1) + 'Z';
+    }
+    return (cachedSandstoneData = { strataLight, strataDark, grains });
+  }
+
+  let cachedGraniteData = null;
+  function getGraniteData() {
+    if (cachedGraniteData) return cachedGraniteData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const minerals = ['', '', '', '', '', ''];
+    for (let y = -1; y < 49; y++) for (let x = -1; x < 49; x++) {
+      const px = x * 3 + roll() * 2, py = y * 3 + roll() * 2;
+      const r = 1.5 + roll() * 2.5;
+      let d = '';
+      for (let v = 0; v < 5; v++) {
+        const a = v * Math.PI * 2 / 5, size = r * (.65 + roll() * .35);
+        d += (v ? 'L' : 'M') + (px + Math.cos(a) * size).toFixed(1) + ' ' + (py + Math.sin(a) * size).toFixed(1);
+      }
+      minerals[Math.floor(roll() * 6)] += d + 'Z';
+    }
+    return (cachedGraniteData = { minerals });
+  }
+
+  let cachedTerrazzoData = null;
+  function getTerrazzoData() {
+    if (cachedTerrazzoData) return cachedTerrazzoData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const chips = ['', '', '', ''];
+    for (let i = 0; i < 440; i++) {
+      const cx = -180 + roll() * 720, cy = -180 + roll() * 720;
+      const radius = 2 + roll() * 8, count = 3 + Math.floor(roll() * 4);
+      let d = '';
+      for (let vertex = 0; vertex < count; vertex++) {
+        const angle = (vertex + roll() * .4) * Math.PI * 2 / count;
+        const r = radius * (.55 + roll() * .45);
+        d += (vertex ? 'L' : 'M') + (cx + Math.cos(angle) * r).toFixed(1) + ' ' + (cy + Math.sin(angle) * r).toFixed(1);
+      }
+      roll();
+      chips[i % 4] += d + 'Z';
+    }
+    return (cachedTerrazzoData = { chips });
+  }
+
+  let cachedLeatherData = null;
+  function getLeatherData() {
+    if (cachedLeatherData) return cachedLeatherData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const corners = Array.from({ length: 24 }, () => Array.from({ length: 24 }, () => [(roll() - .5) * 2.8, (roll() - .5) * 2.8]));
+    const corner = (x, y) => {
+      const jitter = corners[(y + 24) % 24][(x + 24) % 24];
+      return [x * 4 + jitter[0], y * 4 + jitter[1]];
+    };
+    const cells = ['', '', '', ''];
+    let grainGlints = '';
+    for (let row = -1; row <= 24; row++) {
+      for (let col = -1; col <= 24; col++) {
+        const points = [corner(col, row), corner(col + 1, row), corner(col + 1, row + 1), corner(col, row + 1)];
+        const center = points.reduce((a, p) => [a[0] + p[0] / 4, a[1] + p[1] / 4], [0, 0]);
+        const inset = points.map(p => p.map((v, i) => center[i] + (v - center[i]) * .9));
+        const mids = inset.map((p, i) => p.map((v, j) => (v + inset[(i + 1) % 4][j]) / 2));
+        let d = 'M' + mids[3][0].toFixed(1) + ' ' + mids[3][1].toFixed(1);
+        for (let i = 0; i < 4; i++) d += 'Q' + inset[i][0].toFixed(1) + ' ' + inset[i][1].toFixed(1) + ' ' + mids[i][0].toFixed(1) + ' ' + mids[i][0].toFixed(1);
+        cells[Math.floor(roll() * 4)] += d + 'Z';
+        grainGlints += 'M' + mids[3][0].toFixed(1) + ' ' + mids[3][1].toFixed(1) + 'Q' + inset[0][0].toFixed(1) + ' ' + inset[0][1].toFixed(1) + ' ' + mids[0][0].toFixed(1) + ' ' + mids[0][1].toFixed(1);
+      }
+    }
+    return (cachedLeatherData = { cells, grainGlints });
+  }
+
+  let cachedWoodgrainData = null;
+  function getWoodgrainData() {
+    if (cachedWoodgrainData) return cachedWoodgrainData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const fibersDark = ['', ''], fibersLight = ['', ''];
+    for (let fiber = -28; fiber <= 100; fiber++) {
+      const baseX = fiber * 6 + roll() * 3;
+      let d = '';
+      for (let y = -180; y <= 540; y += 8) {
+        const distance = baseX - 140;
+        const bend = Math.sign(distance) * 26 * Math.exp(-distance * distance / 1800 - (y - 180) ** 2 / 6500);
+        const x = baseX + bend + 3 * Math.sin(y / 65 + fiber * .16) + 1.2 * Math.sin(y / 19 + fiber);
+        d += (y === -180 ? 'M' : 'L') + x.toFixed(1) + ' ' + y;
+      }
+      roll(); roll();
+      if (fiber % 4) fibersDark[fiber % 2] += d;
+      else fibersLight[fiber % 2] += d;
+    }
+    return (cachedWoodgrainData = { fibersDark, fibersLight });
+  }
+
+  let cachedBubbledData = null;
+  function getBubbledData() {
+    if (cachedBubbledData) return cachedBubbledData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const bubbles = [];
+    for (let i = 0; i < 180; i++) {
+      const x = -150 + roll() * 660, y = -150 + roll() * 660, r = 7 + roll() ** 2 * 40;
+      if (bubbles.some(b => Math.hypot(x - b.x, y - b.y) < (r + b.r) * .83)) continue;
+      bubbles.push({ x: Number(x.toFixed(1)), y: Number(y.toFixed(1)), r: Number(r.toFixed(1)) });
+    }
+    return (cachedBubbledData = { bubbles });
+  }
+
+  let cachedObsidianData = null;
+  function getObsidianData() {
+    if (cachedObsidianData) return cachedObsidianData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    let dShells = '', dLips = '';
+    for (let row = -1; row < 5; row++) for (let col = -1; col < 5; col++) {
+      const x = col * 150 + (roll() - .5) * 80, y = row * 145 + (roll() - .5) * 70;
+      const w = 75 + roll() * 90, h = 55 + roll() * 85;
+      const lip = 'M' + (x - w).toFixed(1) + ' ' + y.toFixed(1) + 'C' + (x - w * .4).toFixed(1) + ' ' + (y - h * .9).toFixed(1) + ' ' + (x + w * .35).toFixed(1) + ' ' + (y - h * .6).toFixed(1) + ' ' + (x + w).toFixed(1) + ' ' + (y + h * .2).toFixed(1);
+      const d = lip + 'Q' + (x + w * .4).toFixed(1) + ' ' + (y + h * .85).toFixed(1) + ' ' + (x - w * .5).toFixed(1) + ' ' + (y + h).toFixed(1) + 'Q' + (x - w * .7).toFixed(1) + ' ' + (y + h * .25).toFixed(1) + ' ' + (x - w).toFixed(1) + ' ' + y.toFixed(1) + 'Z';
+      dShells += d;
+      if ((row + col) % 3 === 0) dLips += lip;
+    }
+    return (cachedObsidianData = { dShells, dLips });
+  }
+
+  let cachedQuartzData = null;
+  function getQuartzData() {
+    if (cachedQuartzData) return cachedQuartzData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    let dBody = '', dFace1 = '', dFace2 = '', dOutlines = '', dFractures = '';
+    const crystalTips = [];
+    for (let i = 0; i < 85; i++) {
+      const cx = -160 + roll() * 680, cy = -160 + roll() * 680, w = 10 + roll() * 20, h = 32 + roll() * 85;
+      const angle = (-45 + roll() * 90) * Math.PI / 180;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      const tf = (px, py) => [(cx + px * cos - py * sin).toFixed(1), (cy + px * sin + py * cos).toFixed(1)];
+      crystalTips.push([cx + h * Math.sin(angle), cy - h * Math.cos(angle), 1.4 + roll() * 1.7]);
+      const pTop = tf(0, -h), pTR = tf(w, -h + w), pMR = tf(w, h * .45), pBot = tf(0, h * .65), pML = tf(-w, h * .45), pTL = tf(-w, -h + w);
+      dBody += 'M' + pTop[0] + ' ' + pTop[1] + 'L' + pTR[0] + ' ' + pTR[1] + 'L' + pMR[0] + ' ' + pMR[1] + 'L' + pBot[0] + ' ' + pBot[1] + 'L' + pML[0] + ' ' + pML[1] + 'L' + pTL[0] + ' ' + pTL[1] + 'Z';
+      const pF1Mid = tf(w * .2, -h + w * 1.5), pF1Bot = tf(w * .2, h * .6);
+      roll();
+      dFace1 += 'M' + pTop[0] + ' ' + pTop[1] + 'L' + pF1Mid[0] + ' ' + pF1Mid[1] + 'L' + pF1Bot[0] + ' ' + pF1Bot[1] + 'L' + pML[0] + ' ' + pML[1] + 'L' + pTL[0] + ' ' + pTL[1] + 'Z';
+      roll();
+      dFace2 += 'M' + pTop[0] + ' ' + pTop[1] + 'L' + pF1Mid[0] + ' ' + pF1Mid[1] + 'L' + pTR[0] + ' ' + pTR[1] + 'Z';
+      const pOutBot = tf(-w, h * .3);
+      dOutlines += 'M' + pOutBot[0] + ' ' + pOutBot[1] + 'L' + pTL[0] + ' ' + pTL[1] + 'L' + pTop[0] + ' ' + pTop[1];
+      const frac = -h * .5 + roll() * h * .7;
+      const f0 = tf(-w * .8, frac), f1 = tf(w * .1, frac - w * .3), f2 = tf(w * .8, frac + w * .2);
+      dFractures += 'M' + f0[0] + ' ' + f0[1] + 'L' + f1[0] + ' ' + f1[1] + 'L' + f2[0] + ' ' + f2[1];
+    }
+    return (cachedQuartzData = { dBody, dFace1, dFace2, dOutlines, dFractures, crystalTips });
+  }
+
+  let cachedFrostedData = null;
+  function getFrostedData() {
+    if (cachedFrostedData) return cachedFrostedData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    let branchesWhite = '', branchesBlue = '';
+    for (let i = 0; i < 46; i++) {
+      const px = roll() * 120, py = roll() * 120, length = 5 + roll() * 15;
+      const angle = roll() * 360 * Math.PI / 180;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      const tf = (x, y) => [(px + x * cos - y * sin).toFixed(1), (py + x * sin + y * cos).toFixed(1)];
+      const p0 = tf(0, 0), p1 = tf(0, -length);
+      let d = 'M' + p0[0] + ' ' + p0[1] + 'L' + p1[0] + ' ' + p1[1];
+      for (let j = 1; j <= 5; j++) {
+        const yb = -length * j / 6, branch = length * (1 - j / 7) * .3;
+        const b0 = tf(0, yb), b1 = tf(branch, yb - branch), b2 = tf(-branch, yb - branch);
+        d += 'M' + b0[0] + ' ' + b0[1] + 'L' + b1[0] + ' ' + b1[1] + 'M' + b0[0] + ' ' + b0[1] + 'L' + b2[0] + ' ' + b2[1];
+      }
+      roll(); roll();
+      if (i % 4) branchesWhite += d;
+      else branchesBlue += d;
+    }
+    let diamonds = '';
+    for (let i = 0; i < 150; i++) {
+      const x = roll() * 120, y = roll() * 120, r = .5 + roll() * 1.3;
+      roll();
+      diamonds += 'M' + x.toFixed(1) + ' ' + (y - r).toFixed(1) + 'l' + (r * .5).toFixed(1) + ' ' + r.toFixed(1) + 'l' + (-r * .5).toFixed(1) + ' ' + r.toFixed(1) + 'l' + (-r * .5).toFixed(1) + ' ' + (-r).toFixed(1) + 'Z';
+    }
+    const sparkles = Array.from({ length: 85 }, () => [
+      Number((-160 + roll() * 680).toFixed(1)),
+      Number((-160 + roll() * 680).toFixed(1)),
+      Number((1 + roll() * 1.5).toFixed(1))
+    ]);
+    return (cachedFrostedData = { branchesWhite, branchesBlue, diamonds, sparkles });
+  }
+
   function material(defs, attribute, id, effects, cx = 180, cy = 180) {
     const rotate = `rotate(${attribute.angle} ${cx} ${cy})`;
     // One global material field: every detail rotates about the outer-circle center.
@@ -239,41 +745,30 @@
     } else if (attribute.texture === 'frosted') {
       lighting('ice-body', [[0, '#e3faff', .42], [.45, '#c9e9fa', .2], [1, '#84accb', .1]], true);
       const frost = svgNode('pattern', { id: id + '-frost', patternUnits: 'userSpaceOnUse', width: 120, height: 120 });
-      for (let i = 0; i < 46; i++) {
-        const x = roll() * 120, y = roll() * 120, length = 5 + roll() * 15;
-        let d = `M0 0V${-length}`;
-        for (let j = 1; j <= 5; j++) {
-          const yb = -length * j / 6, branch = length * (1 - j / 7) * .3;
-          d += `M0 ${yb}l${branch} ${-branch}m${-branch} ${branch}l${-branch} ${-branch}`;
-        }
-        frost.append(svgNode('path', { d, transform: `translate(${x} ${y}) rotate(${roll() * 360})`,
-          fill: 'none', stroke: i % 4 ? '#ecfcff' : '#648da9', 'stroke-width': .4 + roll() * .45,
-          'stroke-linecap': 'round', opacity: .2 + roll() * .28 }));
-      }
-      for (let i = 0; i < 150; i++) {
-        const x = roll() * 120, y = roll() * 120, r = .5 + roll() * 1.3;
-        frost.append(svgNode('path', { d: `M${x} ${y-r}l${r*.5} ${r}l${-r*.5} ${r}l${-r*.5} ${-r}Z`,
-          fill: '#e6faff', opacity: .12 + roll() * .3 }));
-      }
+      const data = getFrostedData();
+      frost.append(
+        svgNode('path', { d: data.branchesWhite, fill: 'none', stroke: '#ecfcff', 'stroke-width': .6, 'stroke-linecap': 'round', opacity: .35 }),
+        svgNode('path', { d: data.branchesBlue, fill: 'none', stroke: '#648da9', 'stroke-width': .6, 'stroke-linecap': 'round', opacity: .35 }),
+        svgNode('path', { d: data.diamonds, fill: '#e6faff', opacity: .25 })
+      );
       defs.append(frost); cover(`url(#${id}-frost)`);
       lighting('ice-glint', [[0, '#fff', 0], [.3, '#fff', .03], [.43, '#defaff', .3],
         [.49, '#fff', .04], [1, '#fff', 0]]);
-      sparkle(Array.from({length: 85}, () => [-160+roll()*680, -160+roll()*680, 1+roll()*1.5]), .85);
+      sparkle(data.sparkles, .85);
     } else if (attribute.texture === 'woodgrain') {
       lighting('wood-depth', [[0, '#fff', .2], [.5, '#fff', .02], [1, '#000', .24]], true);
       if (dark) pattern.append(svgNode('rect', { x:-180,y:-180,width:720,height:720,fill:'#b7a897',opacity:.075 }));
-      // Long fibers bend around a fixed knot; the palette color remains the stain.
-      for (let fiber = -28; fiber <= 100; fiber++) {
-        const baseX = fiber * 6 + roll() * 3;
-        let d = '';
-        for (let y = -180; y <= 540; y += 8) {
-          const distance = baseX - 140;
-          const bend = Math.sign(distance) * 26 * Math.exp(-distance * distance / 1800 - (y - 180) ** 2 / 6500);
-          const x = baseX + bend + 3 * Math.sin(y / 65 + fiber * .16) + 1.2 * Math.sin(y / 19 + fiber);
-          d += `${y === -180 ? 'M' : 'L'}${x.toFixed(2)} ${y}`;
-        }
-        pattern.append(svgNode('path', { d, fill: 'none', stroke: fiber % 4 ? (dark ? '#a69a8b' : '#000') : (dark ? '#000' : '#fff'),
-          'stroke-width': .5 + roll() * 1.4, opacity: (dark ? .055 : .1) + roll() * (dark ? .09 : .17) }));
+      const data = getWoodgrainData();
+      if (dark) {
+        pattern.append(
+          svgNode('path', { d: data.fibersDark[0] + data.fibersDark[1], fill: 'none', stroke: '#a69a8b', 'stroke-width': 1.2, opacity: .1 }),
+          svgNode('path', { d: data.fibersLight[0] + data.fibersLight[1], fill: 'none', stroke: '#000', 'stroke-width': 1.2, opacity: .1 })
+        );
+      } else {
+        pattern.append(
+          svgNode('path', { d: data.fibersDark[0] + data.fibersDark[1], fill: 'none', stroke: '#000', 'stroke-width': 1.2, opacity: .18 }),
+          svgNode('path', { d: data.fibersLight[0] + data.fibersLight[1], fill: 'none', stroke: '#fff', 'stroke-width': 1.2, opacity: .18 })
+        );
       }
       for (let ring = 1; ring <= 5; ring++) pattern.append(svgNode('ellipse', {
         cx: 140, cy: 180, rx: ring * 3, ry: ring * 9, fill: 'none', stroke: dark ? '#a69a8b' : '#000',
@@ -291,83 +786,30 @@
         [.5, '#fff', .12], [.57, '#fff', 0], [1, '#fff', 0]]);
     } else if (attribute.texture === 'terrazzo') {
       lighting('stone-matrix', [[0, '#fff', .17], [.5, '#fff', .03], [1, '#000', .18]], true);
-      for (let i = 0; i < 440; i++) {
-        const cx = -180 + roll() * 720, cy = -180 + roll() * 720;
-        const radius = 2 + roll() * 8, count = 3 + Math.floor(roll() * 4), points = [];
-        for (let vertex = 0; vertex < count; vertex++) {
-          const angle = (vertex + roll() * .4) * Math.PI * 2 / count;
-          const r = radius * (.55 + roll() * .45);
-          points.push(`${cx + Math.cos(angle) * r},${cy + Math.sin(angle) * r}`);
-        }
-        pattern.append(svgNode('polygon', { points: points.join(' '),
-          fill: ['#fff', '#000', '#ead9c5', '#a7b6b7'][i % 4], opacity: .22 + roll() * .4 }));
-      }
+      const data = getTerrazzoData();
+      const colors = ['#fff', '#000', '#ead9c5', '#a7b6b7'];
+      for (let i = 0; i < 4; i++) pattern.append(svgNode('path', { d: data.chips[i], fill: colors[i], opacity: .38 }));
       lighting('aggregate-polish', [[0, '#fff', .15], [.4, '#fff', .04], [1, '#fff', 0]], true);
     } else if (attribute.texture === 'crackle') {
       lighting('glaze-depth', [[0, '#fff', .2], [.5, '#fff', .02], [1, '#000', .22]], true);
-      // Voronoi cells share exact borders, making a connected, irregular glaze network.
-      const seeds = [];
-      for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) {
-        seeds.push([-180 + (x + .2 + roll() * .6) * 80, -180 + (y + .2 + roll() * .6) * 80]);
+      const data = getCrackleData();
+      const shadeOpacities = [0.015, 0.032, 0.048, 0.065];
+      for (let i = 0; i < 4; i++) {
+        if (data.shades[i]) pattern.append(svgNode('path', { d: data.shades[i], fill: '#fff', 'fill-opacity': shadeOpacities[i] }));
       }
-      for (const seed of seeds) {
-        let cell = [[-180, -180], [540, -180], [540, 540], [-180, 540]];
-        for (const other of seeds) {
-          if (other === seed || !cell.length) continue;
-          const nx = other[0] - seed[0], ny = other[1] - seed[1];
-          const limit = (other[0] ** 2 + other[1] ** 2 - seed[0] ** 2 - seed[1] ** 2) / 2;
-          const clipped = [];
-          for (let i = 0; i < cell.length; i++) {
-            const a = cell[i], b = cell[(i + 1) % cell.length];
-            const da = a[0] * nx + a[1] * ny - limit, db = b[0] * nx + b[1] * ny - limit;
-            if (da <= 0) clipped.push(a);
-            if ((da <= 0) !== (db <= 0)) {
-              const t = da / (da - db);
-              clipped.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-            }
-          }
-          cell = clipped;
-        }
-        // Sample a common displacement field so adjacent cracks retain matching ragged edges.
-        const rough = [];
-        for (let i = 0; i < cell.length; i++) {
-          const a = cell[i], b = cell[(i + 1) % cell.length];
-          const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 3));
-          for (let j = 0; j < steps; j++) {
-            const x = a[0] + (b[0] - a[0]) * j / steps, y = a[1] + (b[1] - a[1]) * j / steps;
-            rough.push([x + 3.5 * Math.sin(y / 7 + x / 19) + .9 * Math.sin(y * 1.7 + x),
-              y + 3.5 * Math.sin(x / 8 - y / 23) + .9 * Math.sin(x * 1.5 - y)]);
-          }
-        }
-        const d = 'M' + rough.map(p => p.map(v => v.toFixed(2)).join(',')).join('L') + 'Z';
-        pattern.append(svgNode('path', { d, fill: '#fff', 'fill-opacity': roll() * .07,
-          stroke: '#fff', 'stroke-opacity': .2, 'stroke-width': 2.5, 'stroke-linejoin': 'round' }),
-          svgNode('path', { d, fill: 'none', stroke: '#000', 'stroke-opacity': .48,
-            'stroke-width': 1.15, 'stroke-linejoin': 'round' }));
-        const chips = ['', ''];
-        for (let i = 2; i < rough.length; i += 5) {
-          const [x, y] = rough[i], r = .5 + roll() * 1.8;
-          chips[i % 3 ? 0 : 1] += `M${(x-2).toFixed(2)} ${y.toFixed(2)}l${r.toFixed(2)} ${(-r).toFixed(2)}l${(r*.7).toFixed(2)} ${(r*1.4).toFixed(2)}Z`;
-          roll();
-        }
-        chips.forEach((d,i) => pattern.append(svgNode('path', { d, fill:i?'#fff':'#000', opacity:.25 })));
-      }
+      pattern.append(
+        svgNode('path', { d: data.dCells, fill: 'none', stroke: '#fff', 'stroke-opacity': .2, 'stroke-width': 2.5, 'stroke-linejoin': 'round' }),
+        svgNode('path', { d: data.dCells, fill: 'none', stroke: '#000', 'stroke-opacity': .48, 'stroke-width': 1.15, 'stroke-linejoin': 'round' }),
+        svgNode('path', { d: data.chips0, fill: '#000', opacity: .25 }),
+        svgNode('path', { d: data.chips1, fill: '#fff', opacity: .25 })
+      );
       lighting('glaze-sheen', [[0, '#fff', 0], [.3, '#fff', .04], [.42, '#fff', .25],
         [.55, '#fff', .02], [1, '#fff', 0]]);
     } else if (attribute.texture === 'plush') {
       lighting('plush-depth', [[0, '#fff', .12], [.5, '#000', .04], [1, '#000', .25]], true);
-      // Overlapping rounded curls form a soft, deep pile, with no woven grid.
       const tufts = svgNode('pattern', { id: id + '-tufts', patternUnits: 'userSpaceOnUse', width: 96, height: 96 });
-      const paths = ['', '', ''];
-      for (let i = 0; i < 1800; i++) {
-        const x = roll() * 96, y = roll() * 96, r = 1 + roll() * 2.4, lean = (roll() - .5) * 3;
-        // Wrap curls across the tile boundary so no straight seams appear.
-        for (const dx of [-96, 0, 96]) for (const dy of [-96, 0, 96]) {
-          if (x + dx < -5 || x + dx > 101 || y + dy < -5 || y + dy > 101) continue;
-          paths[i % 3] += `M${x+dx} ${y+dy}q${-r} ${-r*1.5} ${lean} ${-r*2}q${r} ${-r*.4} ${r*.7} ${r}`;
-        }
-      }
-      for (let i = 0; i < 3; i++) tufts.append(svgNode('path', { d: paths[i], fill: 'none',
+      const data = getPlushData();
+      for (let i = 0; i < 3; i++) tufts.append(svgNode('path', { d: data.paths[i], fill: 'none',
         stroke: i ? '#fff' : '#000', 'stroke-width': i === 2 ? .55 : 1.2,
         'stroke-linecap': 'round', opacity: i === 0 ? .16 : i === 1 ? .12 : .2 }));
       defs.append(tufts); cover(`url(#${id}-tufts)`);
@@ -430,21 +872,10 @@
       }
       lighting('luster', [[0, '#fff', .3], [.4, '#fff', 0], [1, '#000', .3]], true);
     } else if (attribute.texture === 'granite') {
-      // A dense, multiscale mineral matrix, grouped into compound paths.
       const stone = svgNode('pattern', { id: id + '-minerals', patternUnits: 'userSpaceOnUse', width: 144, height: 144 });
-      const minerals = ['', '', '', '', '', ''];
-      for (let y = -1; y < 49; y++) for (let x = -1; x < 49; x++) {
-        const px = x*3 + roll()*2, py = y*3 + roll()*2;
-        const r = 1.5 + roll()*2.5;
-        let d = '';
-        for (let v=0;v<5;v++) {
-          const a = v*Math.PI*2/5, size = r*(.65+roll()*.35);
-          d += `${v ? 'L' : 'M'}${(px+Math.cos(a)*size).toFixed(2)} ${(py+Math.sin(a)*size).toFixed(2)}`;
-        }
-        minerals[Math.floor(roll()*6)] += d+'Z';
-      }
+      const data = getGraniteData();
       const colors = ['#fff', '#000', '#fff', '#000', '#e3cbbb', '#889098'];
-      minerals.forEach((d,i) => stone.append(svgNode('path', { d, fill: colors[i], opacity: [.22,.32,.4,.17,.18,.22][i] })));
+      data.minerals.forEach((d,i) => stone.append(svgNode('path', { d, fill: colors[i], opacity: [.22,.32,.4,.17,.18,.22][i] })));
       defs.append(stone); cover(`url(#${id}-minerals)`);
       lighting('granite-depth', [[0, '#fff', .06], [.5, '#fff', 0], [1, '#000', .13]], true);
     } else if (attribute.texture === 'satin') {
@@ -473,47 +904,45 @@
       }
       lighting('satin-sheen', [[0, '#fff', 0], [.28, '#fff', .025], [.5, '#fff', .1], [.72, '#fff', .025], [1, '#fff', 0]]);
     } else if (attribute.texture === 'sandstone') {
-      // Broad continuous strata share their curvature; fine grain supplies the surface.
-      for (let band=-6;band<27;band++) {
-        const y = band*26 + Math.sin(band*1.7)*9;
-        const d = `M-180 ${y}C60 ${y-60} 300 ${y+60} 540 ${y}L540 ${y+26}C300 ${y+86} 60 ${y-34} -180 ${y+26}Z`;
-        pattern.append(svgNode('path', { d, fill: band%3 ? '#000' : '#fff', opacity: .035+roll()*.075 }));
-      }
+      const data = getSandstoneData();
+      pattern.append(
+        svgNode('path', { d: data.strataDark[0], fill: '#000', opacity: .05 }),
+        svgNode('path', { d: data.strataDark[1], fill: '#000', opacity: .09 }),
+        svgNode('path', { d: data.strataLight[0], fill: '#fff', opacity: .05 }),
+        svgNode('path', { d: data.strataLight[1], fill: '#fff', opacity: .09 })
+      );
       const sand = svgNode('pattern', { id: id+'-sand', patternUnits: 'userSpaceOnUse', width: 96, height: 96 });
-      const grains = ['', '', '', ''];
-      for (let i=0;i<7000;i++) {
-        const x=roll()*96, y=roll()*96, r=.4+roll()*.65;
-        grains[i%4] += `M${x.toFixed(2)} ${y.toFixed(2)}h${r.toFixed(2)}v${r.toFixed(2)}h-${r.toFixed(2)}Z`;
-      }
-      grains.forEach((d,i) => sand.append(svgNode('path', { d, fill: i%2 ? '#fff' : '#000', opacity: i<2 ? .28 : .13 })));
+      data.grains.forEach((d,i) => sand.append(svgNode('path', { d, fill: i%2 ? '#fff' : '#000', opacity: i<2 ? .28 : .13 })));
       defs.append(sand); cover(`url(#${id}-sand)`);
       lighting('sandstone-depth', [[0, '#fff', .06], [.5, '#fff', 0], [1, '#000', .1]], true);
     } else if (attribute.texture === 'starfield') {
       lighting('starfield-space', [[0,'#040516',.35],[.6,'#030513',.6],[1,'#000',.8]], true);
       const far=svgNode('g'), near=svgNode('g'), stars=svgNode('g');
       const colors=['#526cbf','#b15add','#408ba8','#d28a9d'];
+      const data = getStarfieldData();
       for(let i=0;i<22;i++) {
-        const x=-150+roll()*650,y=-150+roll()*650,r=45+roll()*120;
+        const p = data.nebulae[i];
         const grad=svgNode('radialGradient',{id:id+'-nebula-'+i});
         for(const [offset,opacity] of [[0,.5],[.35,.23],[1,0]])grad.append(svgNode('stop',{offset,'stop-color':colors[i%4],'stop-opacity':opacity}));
-        defs.append(grad);far.append(svgNode('ellipse',{cx:x,cy:y,rx:r,ry:r*(.35+roll()*.5),transform:`rotate(${roll()*180} ${x} ${y})`,fill:`url(#${id}-nebula-${i})`}));
+        defs.append(grad);far.append(svgNode('ellipse',{cx:p.x,cy:p.y,rx:p.rx,ry:p.ry,transform:`rotate(${p.rot} ${p.x} ${p.y})`,fill:`url(#${id}-nebula-${i})`}));
       }
       const dust=svgNode('radialGradient',{id:id+'-depth-dust'});
       for(const [offset,opacity] of [[0,.8],[.45,.38],[1,0]])dust.append(svgNode('stop',{offset,'stop-color':'#030511','stop-opacity':opacity}));
       defs.append(dust);
-      for(let i=0;i<12;i++)near.append(svgNode('ellipse',{cx:-150+roll()*650,cy:-150+roll()*650,rx:80+roll()*100,ry:16+roll()*35,transform:'rotate(-28 180 180)',fill:`url(#${id}-depth-dust)`}));
-      const glints=[];
-      for(let i=0;i<220;i++) {
-        const x=-160+roll()*680,y=-160+roll()*680,r=.15+roll()**3*1.1;
-        stars.append(svgNode('circle',{cx:x,cy:y,r,fill:i%4?'#f4f7ff':'#aacbff',opacity:.2+roll()*.65}));
-        if(r>.65)glints.push([x,y,r*3]);
+      for(let i=0;i<12;i++) {
+        const d = data.dustEllipses[i];
+        near.append(svgNode('ellipse',{cx:d.cx,cy:d.cy,rx:d.rx,ry:d.ry,transform:'rotate(-28 180 180)',fill:`url(#${id}-depth-dust)`}));
       }
+      stars.append(
+        svgNode('path', { d: data.starsWhite, fill: '#f4f7ff', opacity: .55 }),
+        svgNode('path', { d: data.starsBlue, fill: '#aacbff', opacity: .55 })
+      );
       const wisps=svgNode('filter',{id:id+'-wisps',x:'-10%',y:'-10%',width:'120%',height:'120%','color-interpolation-filters':'sRGB'});
       wisps.append(svgNode('feTurbulence',{type:'fractalNoise',baseFrequency:'.012 .023',numOctaves:3,seed:67,result:'clouds'}),
         svgNode('feColorMatrix',{in:'clouds',type:'matrix',values:'0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 2 -.45',result:'density'}),
         svgNode('feComposite',{in:'SourceGraphic',in2:'density',operator:'in'}));
       defs.append(wisps);far.setAttribute('filter',`url(#${id}-wisps)`);
-      pattern.append(far,near,stars);const starSparkles=sparkle(glints,1.1);
+      pattern.append(far,near,stars);const starSparkles=sparkle(data.glints,1.1);
       if(effects)effects.push((x,y)=>{
         // Foreground dust moves most; the distant nebula remains almost fixed.
         far.setAttribute('transform',`translate(${-x*3} ${-y*3})`);
@@ -527,22 +956,15 @@
       for(const [offset,color,opacity] of [[0,'#fff',.32],[.24,'#fff',.04],[.55,'#000',.12],[.8,'#fff',.24],[1,'#fff',.06]])
         crystal.append(svgNode('stop',{offset,'stop-color':color,'stop-opacity':opacity}));
       defs.append(crystal);
-      const crystalTips = [];
-      // Unequal overlapping prisms, with long faces and pointed terminations.
-      for(let i=0;i<85;i++) {
-        const x=-160+roll()*680,y=-160+roll()*680,w=10+roll()*20,h=32+roll()*85;
-        const angle=-45+roll()*90;
-        const group=svgNode('g',{transform:`translate(${x} ${y}) rotate(${angle})`});
-        crystalTips.push([x+h*Math.sin(angle*Math.PI/180), y-h*Math.cos(angle*Math.PI/180), 1.4+roll()*1.7]);
-        group.append(svgNode('path',{d:`M0 ${-h}L${w} ${-h+w}V${h*.45}L0 ${h*.65}L${-w} ${h*.45}V${-h+w}Z`,fill:`url(#${id}-crystal)`}));
-        group.append(svgNode('path',{d:`M0 ${-h}L${w*.2} ${-h+w*1.5}V${h*.6}L${-w} ${h*.45}V${-h+w}Z`,fill:'#fff',opacity:.08+roll()*.13}));
-        group.append(svgNode('path',{d:`M0 ${-h}L${w*.2} ${-h+w*1.5}L${w} ${-h+w}Z`,fill:'#fff',opacity:.22+roll()*.2}));
-        group.append(svgNode('path',{d:`M${-w} ${h*.3}V${-h+w}L0 ${-h}`,fill:'none',stroke:'#e6f6ff','stroke-width':.65,opacity:.35}));
-        const fracture=-h*.5+roll()*h*.7;
-        group.append(svgNode('path',{d:`M${-w*.8} ${fracture}l${w*.9} ${-w*.3}l${w*.7} ${w*.5}`,fill:'none',stroke:'#fff','stroke-width':.5,opacity:.12}));
-        pattern.append(group);
-      }
-      sparkle(crystalTips);
+      const data = getQuartzData();
+      pattern.append(
+        svgNode('path', { d: data.dBody, fill: `url(#${id}-crystal)` }),
+        svgNode('path', { d: data.dFace1, fill: '#fff', opacity: .14 }),
+        svgNode('path', { d: data.dFace2, fill: '#fff', opacity: .32 }),
+        svgNode('path', { d: data.dOutlines, fill: 'none', stroke: '#e6f6ff', 'stroke-width': .65, opacity: .35 }),
+        svgNode('path', { d: data.dFractures, fill: 'none', stroke: '#fff', 'stroke-width': .5, opacity: .12 })
+      );
+      sparkle(data.crystalTips);
       lighting('quartz-glint',[[0,'#fff',0],[.3,'#fff',.02],[.45,'#e8faff',.2],[.6,'#fff',.02],[1,'#fff',0]]);
     } else if (attribute.texture === 'obsidian') {
       lighting('obsidian-glass', [[0, '#fff', .08], [.35, '#000', .12], [1, '#000', .55]], true);
@@ -552,50 +974,30 @@
         shell.append(svgNode('stop', { offset, 'stop-color':color, 'stop-opacity':opacity }));
       }
       defs.append(shell);
-      for (let row=-1;row<5;row++) for (let col=-1;col<5;col++) {
-        const x=col*150+(roll()-.5)*80, y=row*145+(roll()-.5)*70;
-        const w=75+roll()*90, h=55+roll()*85;
-        const lip=`M${x-w} ${y}C${x-w*.4} ${y-h*.9} ${x+w*.35} ${y-h*.6} ${x+w} ${y+h*.2}`;
-        const d=lip+`Q${x+w*.4} ${y+h*.85} ${x-w*.5} ${y+h}Q${x-w*.7} ${y+h*.25} ${x-w} ${y}Z`;
-        pattern.append(svgNode('path', { d, fill:`url(#${id}-shell)` }));
-        if ((row+col)%3===0) pattern.append(svgNode('path', { d:lip, fill:'none', stroke:'#fff', 'stroke-width':.65, opacity:.12 }));
-      }
+      const data = getObsidianData();
+      pattern.append(
+        svgNode('path', { d: data.dShells, fill: `url(#${id}-shell)` }),
+        svgNode('path', { d: data.dLips, fill: 'none', stroke: '#fff', 'stroke-width': .65, opacity: .12 })
+      );
       lighting('obsidian-reflection', [[0,'#fff',0],[.3,'#fff',.02],[.48,'#fff',.26],[.64,'#fff',.04],[1,'#fff',0]], true,
         { cx:65, cy:35, r:310, gradientTransform:'translate(30 -15) skewX(-25)' });
     } else if (attribute.texture === 'mosaic') {
-      // Small hand-cut tesserae with inset faces, exposed bevels and recessed grout.
       cover('rgba(25,23,21,0.4)');
       const glaze = svgNode('linearGradient', { id: id + '-glaze', x1: '0%', y1: '0%', x2: '75%', y2: '100%' });
       for (const [offset, color, opacity] of [[0, '#fff', .3], [.3, '#fff', .04], [.75, '#000', .04], [1, '#000', .16]])
         glaze.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
       defs.append(glaze);
-      let tiles = '', topBevels = '', bottomBevels = '';
-      const whiteShades = ['', '', '', ''], blackShades = ['', '', '', ''];
-      for (let row = -10; row < 28; row++) for (let col = -10; col < 28; col++) {
-        const x = col * 20 + (row % 2) * 8, y = row * 20;
-        const p0 = `${(x + 1 + roll()).toFixed(1)} ${(y + 1 + roll()).toFixed(1)}`;
-        const p1 = `${(x + 18 - roll()).toFixed(1)} ${(y + 1 + roll()).toFixed(1)}`;
-        const p2 = `${(x + 18 - roll()).toFixed(1)} ${(y + 18 - roll()).toFixed(1)}`;
-        const p3 = `${(x + 1 + roll()).toFixed(1)} ${(y + 18 - roll()).toFixed(1)}`;
-        const poly = `M${p0}L${p1}L${p2}L${p3}Z`;
-        tiles += poly;
-        const isWhite = roll() > .5;
-        const bucket = Math.min(3, Math.floor(roll() * 4));
-        if (isWhite) whiteShades[bucket] += poly;
-        else blackShades[bucket] += poly;
-        topBevels += `M${p3}L${p0}L${p1}`;
-        bottomBevels += `M${p1}L${p2}L${p3}`;
-      }
-      pattern.append(svgNode('path', { d: tiles, fill: attribute.hex }));
+      const data = getMosaicData();
+      pattern.append(svgNode('path', { d: data.tiles, fill: attribute.hex }));
       const shadeOpacities = [0.055, 0.09, 0.125, 0.16];
       for (let i = 0; i < 4; i++) {
-        if (whiteShades[i]) pattern.append(svgNode('path', { d: whiteShades[i], fill: '#fff', opacity: shadeOpacities[i] }));
-        if (blackShades[i]) pattern.append(svgNode('path', { d: blackShades[i], fill: '#000', opacity: shadeOpacities[i] }));
+        if (data.whiteShades[i]) pattern.append(svgNode('path', { d: data.whiteShades[i], fill: '#fff', opacity: shadeOpacities[i] }));
+        if (data.blackShades[i]) pattern.append(svgNode('path', { d: data.blackShades[i], fill: '#000', opacity: shadeOpacities[i] }));
       }
       pattern.append(
-        svgNode('path', { d: tiles, fill: `url(#${id}-glaze)` }),
-        svgNode('path', { d: topBevels, fill: 'none', stroke: '#fff', 'stroke-width': .85, opacity: .3 }),
-        svgNode('path', { d: bottomBevels, fill: 'none', stroke: '#000', 'stroke-width': 1.1, opacity: .4 })
+        svgNode('path', { d: data.tiles, fill: `url(#${id}-glaze)` }),
+        svgNode('path', { d: data.topBevels, fill: 'none', stroke: '#fff', 'stroke-width': .85, opacity: .3 }),
+        svgNode('path', { d: data.bottomBevels, fill: 'none', stroke: '#000', 'stroke-width': 1.1, opacity: .4 })
       );
     } else if (attribute.texture === 'hammered-metal') {
       lighting('hammered-base', [[0,'#000',.25],[.25,'#fff',.08],[.48,'#fff',.3],[.7,'#000',.08],[1,'#000',.3]]);
@@ -603,15 +1005,8 @@
       const dentStops = [[0,'#fff',.04],[.2,'#000',.16],[.5,'#000',.025],[.8,'#fff',.15],[1,'#fff',.025]];
       for (const [offset,color,opacity] of dentStops) dent.append(svgNode('stop', { offset, 'stop-color':color, 'stop-opacity':opacity }));
       defs.append(dent);
-      const tile=svgNode('pattern',{id:id+'-dents',patternUnits:'userSpaceOnUse',width:160,height:160});
-      const grid = Array.from({length:13}, (_,y) => Array.from({length:13}, (_,x) => [-16+x*16+(roll()-.5)*13,-16+y*16+(roll()-.5)*13]));
-      for (let y=0;y<12;y++) for (let x=0;x<12;x++) {
-        const pts=[grid[y][x],grid[y][x+1],grid[y+1][x+1],grid[y+1][x]];
-        const mid=pts.map((p,i)=>p.map((v,j)=>(v+pts[(i+1)%4][j])/2));
-        let d=`M${mid[3].join(' ')}`;
-        for (let i=0;i<4;i++) d+=`Q${pts[i].join(' ')} ${mid[i].join(' ')}`;
-        tile.append(svgNode('path', { d:d+'Z', fill:`url(#${id}-dent)` }));
-      }
+      const tile = svgNode('pattern', { id: id + '-dents', patternUnits: 'userSpaceOnUse', width: 160, height: 160 });
+      tile.append(svgNode('path', { d: getHammeredData().dDents, fill: `url(#${id}-dent)` }));
       defs.append(tile); cover(`url(#${id}-dents)`);
     } else if (attribute.texture === 'kintsugi') {
       lighting('kintsugi-glaze',[[0,'#fff',.12],[.5,'#fff',.02],[1,'#000',.2]],true);
@@ -620,68 +1015,22 @@
         gold.append(svgNode('stop',{offset,'stop-color':color}));
       defs.append(gold);
       if(effects) effects.push((x,y)=>gold.setAttribute('gradientTransform',`translate(${x*35} ${y*35})`));
-      const seeds = [];
-      for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++) {
-        seeds.push([-180 + (x + 0.2 + roll() * 0.6) * 105, -180 + (y + 0.2 + roll() * 0.6) * 105]);
-      }
-      for (let s = 0; s < seeds.length; s++) {
-        const seed = seeds[s];
-        let cell = [[-180, -180], [540, -180], [540, 540], [-180, 540]];
-        for (const other of seeds) {
-          if (other === seed || !cell.length) continue;
-          const nx = other[0] - seed[0], ny = other[1] - seed[1];
-          const limit = (other[0] ** 2 + other[1] ** 2 - seed[0] ** 2 - seed[1] ** 2) / 2;
-          const clipped = [];
-          for (let i = 0; i < cell.length; i++) {
-            const a = cell[i], b = cell[(i + 1) % cell.length];
-            const da = a[0] * nx + a[1] * ny - limit, db = b[0] * nx + b[1] * ny - limit;
-            if (da <= 0) clipped.push(a);
-            if ((da <= 0) !== (db <= 0)) {
-              const t = da / (da - db);
-              clipped.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-            }
-          }
-          cell = clipped;
-        }
-        if (!cell.length) continue;
-        const rough=[];
-        for(let k=0;k<cell.length;k++) {
-          const a=cell[k],b=cell[(k+1)%cell.length],n=Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])/7);
-          for(let j=0;j<n;j++) {
-            const x=a[0]+(b[0]-a[0])*j/n,y=a[1]+(b[1]-a[1])*j/n;
-            rough.push([x+1.4*Math.sin(y*.23)+.7*Math.sin(y*.67),y+1.4*Math.sin(x*.19)]);
-          }
-        }
-        const d='M'+rough.map(p=>p.join(',')).join('L')+'Z';
-        pattern.append(svgNode('path',{d,fill:s%2?'#fff':'#000','fill-opacity':.015+roll()*.035,stroke:'#382511','stroke-width':3.8,'stroke-linejoin':'round'}));
-        pattern.append(svgNode('path',{d,fill:'none',stroke:`url(#${id}-gold)`,'stroke-width':1.8+roll()*.9,'stroke-linejoin':'round'}));
-      }
+      const data = getKintsugiData();
+      pattern.append(
+        svgNode('path', { d: data.whiteTints[0], fill: '#fff', 'fill-opacity': .025 }),
+        svgNode('path', { d: data.whiteTints[1], fill: '#fff', 'fill-opacity': .045 }),
+        svgNode('path', { d: data.blackTints[0], fill: '#000', 'fill-opacity': .025 }),
+        svgNode('path', { d: data.blackTints[1], fill: '#000', 'fill-opacity': .045 }),
+        svgNode('path', { d: data.dBacking, fill: 'none', stroke: '#382511', 'stroke-width': 3.8, 'stroke-linejoin': 'round' }),
+        svgNode('path', { d: data.dGold, fill: 'none', stroke: `url(#${id}-gold)`, 'stroke-width': 2.25, 'stroke-linejoin': 'round' })
+      );
     } else if (attribute.texture === 'leather') {
       lighting('leather-depth', [[0, '#fff', .08], [.4, '#000', .03], [1, '#000', .2]], true);
       const grain = svgNode('pattern', { id: id + '-grain', patternUnits: 'userSpaceOnUse', width: 96, height: 96 });
       grain.append(svgNode('rect', { width: 96, height: 96, fill: '#000', opacity: .14 }));
-      // Shared jittered corners keep the fine pebbles packed, without a hexagonal grid.
-      const corners = Array.from({ length: 24 }, () => Array.from({ length: 24 }, () => [(roll()-.5)*2.8, (roll()-.5)*2.8]));
-      const corner = (x, y) => {
-        const jitter = corners[(y+24)%24][(x+24)%24];
-        return [x*4+jitter[0], y*4+jitter[1]];
-      };
-      const cells = ['', '', '', ''];
-      let grainGlints = '';
-      for (let row = -1; row <= 24; row++) {
-        for (let col = -1; col <= 24; col++) {
-          const points = [corner(col,row), corner(col+1,row), corner(col+1,row+1), corner(col,row+1)];
-          const center = points.reduce((a,p) => [a[0]+p[0]/4,a[1]+p[1]/4], [0,0]);
-          const inset = points.map(p => p.map((v,i) => center[i]+(v-center[i])*.9));
-          const mids = inset.map((p,i) => p.map((v,j) => (v+inset[(i+1)%4][j])/2));
-          let d = `M${mids[3].join(' ')}`;
-          for (let i=0;i<4;i++) d += `Q${inset[i].join(' ')} ${mids[i].join(' ')}`;
-          cells[Math.floor(roll()*4)] += d+'Z';
-          grainGlints += `M${mids[3].join(' ')}Q${inset[0].join(' ')} ${mids[0].join(' ')}`;
-        }
-      }
-      cells.forEach((d,i) => grain.append(svgNode('path', { d, fill: '#fff', opacity: .04+i*.02 })));
-      grain.append(svgNode('path', { d: grainGlints, fill: 'none', stroke: '#fff', 'stroke-width': .3, opacity: .07 }));
+      const data = getLeatherData();
+      data.cells.forEach((d,i) => grain.append(svgNode('path', { d, fill: '#fff', opacity: .04+i*.02 })));
+      grain.append(svgNode('path', { d: data.grainGlints, fill: 'none', stroke: '#fff', 'stroke-width': .3, opacity: .07 }));
       defs.append(grain); cover(`url(#${id}-grain)`);
       lighting('leather-sheen', [[0, '#fff', 0], [.3, '#fff', .02], [.5, '#fff', .07], [.7, '#fff', .02], [1, '#fff', 0]]);
     } else if (attribute.texture === 'carbon-fiber') {
@@ -744,12 +1093,9 @@
         reflection.setAttribute('transform', `translate(${x*.28} ${y*.28}) rotate(${x*18-y*12})`);
         film.setAttribute('cx', `${45+x*15}%`); film.setAttribute('cy', `${42+y*15}%`);
       });
-      const bubbles=[];
-      for(let i=0;i<180;i++) {
-        const x=-150+roll()*660,y=-150+roll()*660,r=7+roll()**2*40;
-        if(bubbles.some(b=>Math.hypot(x-b.x,y-b.y)<(r+b.r)*.83))continue;
-        bubbles.push({x,y,r});
-        pattern.append(svgNode('circle',{cx:x,cy:y,r,fill:`url(#${id}-film)`}));
+      const data = getBubbledData();
+      for (const { x, y, r } of data.bubbles) {
+        pattern.append(svgNode('circle', { cx: x, cy: y, r, fill: `url(#${id}-film)` }));
         pattern.append(svgNode('use', { href: `#${id}-reflection`, transform: `translate(${x} ${y}) scale(${r})`, opacity: .6 }));
       }
     } else if (attribute.texture === 'lava') {
@@ -758,105 +1104,35 @@
       for(const [offset,color,opacity] of [[0,'#ffd16c',.95],[.25,'#ff9c20',.9],[.5,'#ec3a04',.65],[1,'#b72304',0]])
         heat.append(svgNode('stop',{offset,'stop-color':color,'stop-opacity':opacity}));
       defs.append(heat);
-      // Dark volcanic crust plates separated by glowing incandescent magma rivers
-      const seeds = [];
-      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
-        seeds.push([-180 + (x + 0.2 + roll() * 0.6) * 90, -180 + (y + 0.2 + roll() * 0.6) * 90]);
-      }
-      for (let s = 0; s < seeds.length; s++) {
-        const seed = seeds[s];
-        let cell = [[-180, -180], [540, -180], [540, 540], [-180, 540]];
-        for (const other of seeds) {
-          if (other === seed || !cell.length) continue;
-          const nx = other[0] - seed[0], ny = other[1] - seed[1];
-          const limit = (other[0] ** 2 + other[1] ** 2 - seed[0] ** 2 - seed[1] ** 2) / 2;
-          const clipped = [];
-          for (let i = 0; i < cell.length; i++) {
-            const a = cell[i], b = cell[(i + 1) % cell.length];
-            const da = a[0] * nx + a[1] * ny - limit, db = b[0] * nx + b[1] * ny - limit;
-            if (da <= 0) clipped.push(a);
-            if ((da <= 0) !== (db <= 0)) {
-              const t = da / (da - db);
-              clipped.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-            }
-          }
-          cell = clipped;
-        }
-        if (!cell.length) continue;
-        const edge=[];
-        for(let k=0;k<cell.length;k++) {
-          const a=cell[k],b=cell[(k+1)%cell.length],n=Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])/4);
-          for(let j=0;j<n;j++) {
-            const x=a[0]+(b[0]-a[0])*j/n,y=a[1]+(b[1]-a[1])*j/n;
-            edge.push([x+4*Math.sin(y*.12)+1.6*Math.sin(y*.57),y+3*Math.sin(x*.15)+1.1*Math.sin(x*.63)]);
-          }
-        }
-        const pts=edge.map(p=>p.join(',')).join(' ');
-        pattern.append(svgNode('polygon', {
-          points: pts,
-          fill: '#000000',
-          'fill-opacity': s % 3 ? 0.22 : 0.12,
-          stroke: '#9e230b', 'stroke-width': 10+roll()*5, 'stroke-opacity': .8,
-          'stroke-linejoin': 'round'
-        }));
-        pattern.append(svgNode('polygon', {
-          points: pts,
-          fill: 'none',
-          stroke: '#f45b0b', 'stroke-width': 3+roll()*4, 'stroke-opacity': .95,
-          'stroke-linejoin': 'round'
-        }));
-        pattern.append(svgNode('polygon', {
-          points: pts,
-          fill: 'none',
-          stroke: '#ffc34e', 'stroke-width': .6+roll()*1.3, 'stroke-opacity': .65+roll()*.3,
-          'stroke-linejoin': 'round'
-        }));
-      }
-      // Local melt pockets widen some junctions instead of heating every edge equally.
-      for(let i=0;i<seeds.length;i+=3) {
-        const [x,y]=seeds[i];
-        // Find a nearby cell boundary midway to the nearest other seed.
-        let other=null,distance=Infinity;
-        for(const candidate of seeds) if(candidate!==seeds[i]) {
-          const d=Math.hypot(candidate[0]-x,candidate[1]-y);
-          if(d<distance){distance=d;other=candidate;}
-        }
-        const px=(x+other[0])/2,py=(y+other[1])/2;
-        pattern.append(svgNode('ellipse',{cx:px+4*Math.sin(py*.12)+1.6*Math.sin(py*.57),cy:py+3*Math.sin(px*.15)+1.1*Math.sin(px*.63),
-          rx:5+roll()*9,ry:4+roll()*6,fill:`url(#${id}-heat)`}));
+      const data = getLavaData();
+      pattern.append(
+        svgNode('path', { d: data.platesDark, fill: '#000000', 'fill-opacity': 0.22, stroke: '#9e230b', 'stroke-width': 12.5, 'stroke-opacity': .8, 'stroke-linejoin': 'round' }),
+        svgNode('path', { d: data.platesLight, fill: '#000000', 'fill-opacity': 0.12, stroke: '#9e230b', 'stroke-width': 12.5, 'stroke-opacity': .8, 'stroke-linejoin': 'round' }),
+        svgNode('path', { d: data.platesOrange, fill: 'none', stroke: '#f45b0b', 'stroke-width': 5, 'stroke-opacity': .95, 'stroke-linejoin': 'round' }),
+        svgNode('path', { d: data.platesYellow, fill: 'none', stroke: '#ffc34e', 'stroke-width': 1.25, 'stroke-opacity': .8, 'stroke-linejoin': 'round' })
+      );
+      for (const p of data.meltPockets) {
+        pattern.append(svgNode('ellipse', { cx: p.cx, cy: p.cy, rx: p.rx, ry: p.ry, fill: `url(#${id}-heat)` }));
       }
       const crust=svgNode('pattern',{id:id+'-crust',patternUnits:'userSpaceOnUse',width:96,height:96});
-      const dust=['','',''];
-      for(let i=0;i<1300;i++) {
-        const x=roll()*96,y=roll()*96,r=.3+roll()*1.6;
-        dust[i%3]+=`M${x} ${y}l${r} ${-r*.4}l${r*.5} ${r}l${-r} ${r*.4}Z`;
-      }
-      dust.forEach((d,i)=>crust.append(svgNode('path',{d,fill:i?'#000':'#b3a09a',opacity:i?.2:.14})));
+      data.dust.forEach((d,i)=>crust.append(svgNode('path',{d,fill:i?'#000':'#b3a09a',opacity:i?.2:.14})));
       defs.append(crust);cover(`url(#${id}-crust)`);
     } else if (attribute.texture === 'circuitry') {
       lighting('pcb-substrate', [[0,'#fff',.025],[.5,'#000',.04],[1,'#000',.16]], true);
-      const board=svgNode('pattern',{id:id+'-board',patternUnits:'userSpaceOnUse',width:360,height:360});
-      // Irregular component footprints and locally routed buses, with muted metal.
-      for(let row=0;row<7;row++) for(let col=0;col<7;col++) {
-        const x=col*52+5+roll()*10,y=row*52+5+roll()*10,w=9+roll()*14,h=8+roll()*18;
-        const cell=svgNode('g',{transform:`translate(${x} ${y}) rotate(${Math.floor(roll()*4)*90} 18 18)`});
-        for(let pin=0;pin<5;pin++) {
-          const py=3+pin*3.5, run=8+roll()*13, step=4+Math.floor(roll()*4)*3;
-          const d=`M${w} ${py}h${run}l${step} ${step}v${10+roll()*16}`;
-          cell.append(svgNode('path',{d,fill:'none',stroke:'#111513','stroke-width':1.8,opacity:.5}),
-            svgNode('path',{d,fill:'none',stroke:pin%3?'#958b70':'#b7b9ad','stroke-width':.6,opacity:.6}),
-            svgNode('circle',{cx:w+run+step,cy:py+step+10,r:1,fill:'#171b18',stroke:'#a49b80','stroke-width':.5}));
-        }
-        cell.append(svgNode('rect',{x:0,y:0,width:w,height:h,rx:.8,fill:'#1a1c1c',stroke:'#888b80','stroke-width':.55}));
-        for(let pin=2;pin<h-1;pin+=3)cell.append(svgNode('path',{d:`M-3 ${pin}h3M${w} ${pin}h3`,stroke:'#b1ae99','stroke-width':1.2}));
-        cell.append(svgNode('path',{d:`M2 2h${w-4}`,stroke:'#c7c7b4','stroke-width':.5,opacity:.35}));
-        for(let j=0;j<3;j++) {
-          const px=roll()*35,py=h+5+j*5;
-          cell.append(svgNode('rect',{x:px,y:py,width:4+roll()*4,height:2,fill:j%2?'#777469':'#292c29',stroke:'#c2b9a1','stroke-width':.4}));
-        }
-        board.append(cell);
-      }
-      defs.append(board);cover(`url(#${id}-board)`);
+      const board = svgNode('pattern', { id: id + '-board', patternUnits: 'userSpaceOnUse', width: 360, height: 360 });
+      const data = getCircuitryData();
+      board.append(
+        svgNode('path', { d: data.dTraceBacking, fill: 'none', stroke: '#111513', 'stroke-width': 1.8, opacity: .5 }),
+        svgNode('path', { d: data.dTraceGold, fill: 'none', stroke: '#958b70', 'stroke-width': .6, opacity: .6 }),
+        svgNode('path', { d: data.dTraceSilver, fill: 'none', stroke: '#b7b9ad', 'stroke-width': .6, opacity: .6 }),
+        svgNode('path', { d: data.dVias, fill: '#171b18', stroke: '#a49b80', 'stroke-width': .5 }),
+        svgNode('path', { d: data.dChips, fill: '#1a1c1c', stroke: '#888b80', 'stroke-width': .55 }),
+        svgNode('path', { d: data.dChipPins, stroke: '#b1ae99', 'stroke-width': 1.2 }),
+        svgNode('path', { d: data.dMarkings, stroke: '#c7c7b4', 'stroke-width': .5, opacity: .35 }),
+        svgNode('path', { d: data.dSmdGold, fill: '#777469', stroke: '#c2b9a1', 'stroke-width': .4 }),
+        svgNode('path', { d: data.dSmdDark, fill: '#292c29', stroke: '#c2b9a1', 'stroke-width': .4 })
+      );
+      defs.append(board); cover(`url(#${id}-board)`);
       lighting('pcb-sheen', [[0,'#fff',.07],[.5,'#fff',.015],[1,'#fff',0]], true);
     } else if (attribute.texture === 'liquid') {
       lighting('liquid-depth', [[0,'#fff',.12],[.4,'#000',.02],[1,'#000',.3]], true);
@@ -878,40 +1154,68 @@
       lighting('liquid-reflection', [[0, '#fff', .03], [.4, '#fff', .13], [.7, '#fff', .02], [1, '#fff', 0]], true);
 
     }
-    if (['crackle', 'hammered-metal'].includes(attribute.texture)) {
-      const frozen = svgNode('svg', { xmlns: NS, viewBox: '-180 -180 720 720', width:720, height:720 });
-      const localDefs = svgNode('defs');
-      for (const node of defs.children) if ((node.getAttribute('id') || '').startsWith(id+'-')) localDefs.append(node.cloneNode(true));
-      frozen.append(localDefs);
-      for (const node of [...pattern.children]) if (!lightLayers.includes(node)) frozen.append(node);
-      const image = svgNode('image', { x:-180,y:-180,width:720,height:720,
-        href: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(frozen)) });
-      pattern.replaceChildren(image, ...lightLayers);
-      // Rasterize the immutable detail once. A nested vector image alone still
-      // rerasterizes thousands of crack segments during gradient updates.
-      const source = new Image();
-      source.onload = () => {
-        if (!image.isConnected) return;
-        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 720;
-        const context = canvas.getContext('2d');
-        context.drawImage(source, 0, 0, 720, 720);
-        image.setAttribute('href', canvas.toDataURL('image/png'));
-      };
-      source.src = image.getAttribute('href');
-    }
     defs.append(pattern);
     return `url(#${id})`;
   }
-  function sandstoneEdge(defs, id) {
-    const grain = svgNode('pattern', { id, patternUnits: 'userSpaceOnUse', width: 48, height: 48 });
+  let cachedStarfieldData = null;
+  function getStarfieldData() {
+    if (cachedStarfieldData) return cachedStarfieldData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const nebulae = [];
+    for (let i = 0; i < 22; i++) {
+      const x = -150 + roll() * 650, y = -150 + roll() * 650, r = 45 + roll() * 120;
+      nebulae.push({
+        x: Number(x.toFixed(1)), y: Number(y.toFixed(1)),
+        rx: Number(r.toFixed(1)), ry: Number((r * (.35 + roll() * .5)).toFixed(1)),
+        rot: Number((roll() * 180).toFixed(1))
+      });
+    }
+    const dustEllipses = [];
+    for (let i = 0; i < 12; i++) {
+      dustEllipses.push({
+        cx: Number((-150 + roll() * 650).toFixed(1)),
+        cy: Number((-150 + roll() * 650).toFixed(1)),
+        rx: Number((80 + roll() * 100).toFixed(1)),
+        ry: Number((16 + roll() * 35).toFixed(1))
+      });
+    }
+    let starsWhite = '', starsBlue = '';
+    const glints = [];
+    for (let i = 0; i < 220; i++) {
+      const x = -160 + roll() * 680, y = -160 + roll() * 680, r = .15 + roll() ** 3 * 1.1;
+      const d = 'M' + (x - r).toFixed(1) + ' ' + y.toFixed(1) + 'a' + r.toFixed(1) + ' ' + r.toFixed(1) + ' 0 1 0 ' + (2 * r).toFixed(1) + ' 0a' + r.toFixed(1) + ' ' + r.toFixed(1) + ' 0 1 0 ' + (-2 * r).toFixed(1) + ' 0';
+      roll();
+      if (i % 4) starsWhite += d;
+      else starsBlue += d;
+      if (r > .65) glints.push([Number(x.toFixed(1)), Number(y.toFixed(1)), Number((r * 3).toFixed(1))]);
+    }
+    return (cachedStarfieldData = { nebulae, dustEllipses, starsWhite, starsBlue, glints });
+  }
+
+  let cachedSandstoneEdge = null;
+  function getSandstoneEdgeData() {
+    if (cachedSandstoneEdge) return cachedSandstoneEdge;
     let state = 317;
     const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
-    // Angular exposed grains and dark pores within the existing silhouette.
-    for (let i=0;i<260;i++) {
-      const x=roll()*48, y=roll()*48, r=.35+roll()*1.35;
-      grain.append(svgNode('path', { d:`M${x} ${y-r}l${r} ${r*.8}l${-r*.45} ${r}l${-r*1.2} ${-r*.35}Z`,
-        fill:i%3 ? '#000' : '#fff', opacity:.12+roll()*.28 }));
+    let dark = '', light = '';
+    for (let i = 0; i < 260; i++) {
+      const x = roll() * 48, y = roll() * 48, r = .35 + roll() * 1.35;
+      const d = 'M' + x.toFixed(1) + ' ' + (y - r).toFixed(1) + 'l' + r.toFixed(1) + ' ' + (r * .8).toFixed(1) + 'l' + (-r * .45).toFixed(1) + ' ' + r.toFixed(1) + 'l' + (-r * 1.2).toFixed(1) + ' ' + (-r * .35).toFixed(1) + 'Z';
+      roll();
+      if (i % 3) dark += d;
+      else light += d;
     }
+    return (cachedSandstoneEdge = { dark, light });
+  }
+
+  function sandstoneEdge(defs, id) {
+    const grain = svgNode('pattern', { id, patternUnits: 'userSpaceOnUse', width: 48, height: 48 });
+    const data = getSandstoneEdgeData();
+    grain.append(
+      svgNode('path', { d: data.dark, fill: '#000', opacity: .26 }),
+      svgNode('path', { d: data.light, fill: '#fff', opacity: .26 })
+    );
     defs.append(grain);
     return `url(#${id})`;
   }
