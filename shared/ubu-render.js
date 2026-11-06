@@ -174,24 +174,6 @@
     return (cachedCrackleData = { dCells, shades, chips0, chips1 });
   }
 
-  let cachedHammeredData = null;
-  function getHammeredData() {
-    if (cachedHammeredData) return cachedHammeredData;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
-    const grid = Array.from({ length: 13 }, (_, y) => Array.from({ length: 13 }, (_, x) => [
-      (-16 + x * 16 + (roll() - .5) * 13), (-16 + y * 16 + (roll() - .5) * 13)
-    ]));
-    let dDents = '';
-    for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) {
-      const pts = [grid[y][x], grid[y][x + 1], grid[y + 1][x + 1], grid[y + 1][x]];
-      const mid = pts.map((p, i) => p.map((v, j) => (v + pts[(i + 1) % 4][j]) / 2));
-      let d = 'M' + mid[3][0].toFixed(1) + ' ' + mid[3][1].toFixed(1);
-      for (let i = 0; i < 4; i++) d += 'Q' + pts[i][0].toFixed(1) + ' ' + pts[i][1].toFixed(1) + ' ' + mid[i][0].toFixed(1) + ' ' + mid[i][1].toFixed(1);
-      dDents += d + 'Z';
-    }
-    return (cachedHammeredData = { dDents });
-  }
 
   let cachedLavaData = null;
   function getLavaData() {
@@ -1006,7 +988,14 @@
       for (const [offset,color,opacity] of dentStops) dent.append(svgNode('stop', { offset, 'stop-color':color, 'stop-opacity':opacity }));
       defs.append(dent);
       const tile = svgNode('pattern', { id: id + '-dents', patternUnits: 'userSpaceOnUse', width: 160, height: 160 });
-      tile.append(svgNode('path', { d: getHammeredData().dDents, fill: `url(#${id}-dent)` }));
+      const grid = Array.from({ length: 13 }, (_, y) => Array.from({ length: 13 }, (_, x) => [-16 + x * 16 + (roll() - .5) * 13, -16 + y * 16 + (roll() - .5) * 13]));
+      for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) {
+        const pts = [grid[y][x], grid[y][x + 1], grid[y + 1][x + 1], grid[y + 1][x]];
+        const mid = pts.map((p, i) => p.map((v, j) => (v + pts[(i + 1) % 4][j]) / 2));
+        let d = `M${mid[3].join(' ')}`;
+        for (let i = 0; i < 4; i++) d += `Q${pts[i].join(' ')} ${mid[i].join(' ')}`;
+        tile.append(svgNode('path', { d: d + 'Z', fill: `url(#${id}-dent)` }));
+      }
       defs.append(tile); cover(`url(#${id}-dents)`);
     } else if (attribute.texture === 'kintsugi') {
       lighting('kintsugi-glaze',[[0,'#fff',.12],[.5,'#fff',.02],[1,'#000',.2]],true);
@@ -1153,6 +1142,33 @@
       animate((x, y, time) => ripples.setAttribute('patternTransform', `translate(${Math.sin(time * .22) * 7 + x * 3} ${Math.cos(time * .17) * 9 + y * 3}) scale(${1 + Math.sin(time * .19) * .025} ${1 + Math.cos(time * .23) * .025})`));
       lighting('liquid-reflection', [[0, '#fff', .03], [.4, '#fff', .13], [.7, '#fff', .02], [1, '#fff', 0]], true);
 
+    }
+    if (attribute.texture === 'hammered-metal') {
+      const frozen = svgNode('svg', { xmlns: NS, viewBox: '-180 -180 720 720', width: 720, height: 720 });
+      const localDefs = svgNode('defs');
+      for (const node of defs.children) if ((node.getAttribute('id') || '').startsWith(id + '-')) localDefs.append(node.cloneNode(true));
+      frozen.append(localDefs);
+      for (const node of [...pattern.children]) if (!lightLayers.includes(node)) frozen.append(node);
+      const image = svgNode('image', { x: -180, y: -180, width: 720, height: 720,
+        href: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(frozen)) });
+      if (typeof pattern.replaceChildren === 'function') {
+        pattern.replaceChildren(image, ...lightLayers);
+      } else {
+        pattern.children = [image, ...lightLayers];
+      }
+      if (typeof Image !== 'undefined') {
+        const source = new Image();
+        source.onload = () => {
+          if (!image.isConnected) return;
+          const canvas = document.createElement('canvas'); canvas.width = canvas.height = 720;
+          const context = canvas.getContext('2d');
+          if (context) {
+            context.drawImage(source, 0, 0, 720, 720);
+            image.setAttribute('href', canvas.toDataURL('image/png'));
+          }
+        };
+        source.src = image.getAttribute('href');
+      }
     }
     defs.append(pattern);
     return `url(#${id})`;
