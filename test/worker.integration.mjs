@@ -30,7 +30,9 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
       headers: { Cookie: start.headers.get('Set-Cookie').split(';')[0] }
     }), env, async url => Response.json(url.endsWith('/token') ? { access_token: 'test-only', token_type: 'Bearer' } : { id: owner }));
     const cookie = response.headers.getSetCookie().find(c => c.startsWith('__Host-ubu-session=')).split(';')[0];
-    const session = await (await fetch('/api/session', { headers: { Cookie: cookie } })).json();
+    const sessionRes = await fetch('/api/session', { headers: { Cookie: cookie } });
+    assert.match(sessionRes.headers.get('Set-Cookie') || '', /Max-Age=34560000/);
+    const session = await sessionRes.json();
     return { cookie, csrf: session.csrf };
   }
   const user = await signedIn('123456789012345678');

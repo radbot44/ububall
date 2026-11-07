@@ -172,7 +172,7 @@ export class UbuballMatch extends DurableObject {
           for (const ws of this.ctx.getWebSockets()) if (ws.deserializeAttachment().owner === owner) this.retire(ws, now, 4001);
           const pair = new WebSocketPair(), client = pair[0], server = pair[1];
           this.ctx.acceptWebSocket(server);
-          server.serializeAttachment({ owner, connection: request.headers.get('X-Match-Connection'), live: true, lastSeen: now, expires: Number(request.headers.get('X-Match-Expires')) });
+          server.serializeAttachment({ owner, connection: request.headers.get('X-Match-Connection'), live: true, lastSeen: now, expires: Number(request.headers.get('X-Match-Expires')) || Number.MAX_SAFE_INTEGER });
           this.room.connect(owner, now); this.room.advance(now); this.save();
           this.broadcast(now); await this.schedule(now);
           return new Response(null, { status: 101, webSocket: client });

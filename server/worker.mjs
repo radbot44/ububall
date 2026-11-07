@@ -220,17 +220,21 @@ export default {
           if (!viewer?.instance || !uuid.test(connection || '') || !await queue.current(viewer.owner, 'activity:' + viewer.instance, viewer.launch || '', connection)) {
             return json({ error: 'This Activity connection has ended.' }, 409);
           }
-          activityHeaders = { 'X-Match-Owner': viewer.owner, 'X-Match-Connection': connection, 'X-Match-Expires': String(viewer.expires * 1000) };
+          activityHeaders = { 'X-Match-Owner': viewer.owner, 'X-Match-Connection': connection, 'X-Match-Expires': viewer.expires ? String(viewer.expires * 1000) : '' };
         }
         return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + action, {
           headers: { 'X-Match-Watch': key, ...activityHeaders, ...(action === 'watch-socket' && request.headers.get('Upgrade')?.toLowerCase() === 'websocket' ? { Upgrade: 'websocket' } : {}) }
         }));
       }
       const session = await auth.session(request, env);
-      if (path === '/api/session' && request.method === 'GET') return json(!session ? { owner: null } :
-        session.guest ? { owner: null, guest: true, csrf: session.csrf } :
-          { owner: session.owner, name: session.name ?? null, csrf: session.csrf,
-            ...(session.instance ? { instance: session.instance, site, avatar: session.avatar, launch: session.launch } : {}) });
+      if (path === '/api/session' && request.method === 'GET') {
+        const refresh = session && !session.guest && !session.instance ? auth.refreshCookie(request) : null;
+        return json(!session ? { owner: null } :
+          session.guest ? { owner: null, guest: true, csrf: session.csrf } :
+            { owner: session.owner, name: session.name ?? null, csrf: session.csrf,
+              ...(session.instance ? { instance: session.instance, site, avatar: session.avatar, launch: session.launch } : {}) },
+          200, refresh ? { 'Set-Cookie': refresh } : {});
+      }
       if (path === '/api/guest' && request.method === 'POST') {
         if (request.headers.get('Origin') !== auth.origin(env)) return json({ error: 'Invalid request origin.' }, 403);
         if (session) return json(session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, csrf: session.csrf });
@@ -332,7 +336,7 @@ export default {
           method: request.method,
           headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Alias': session.alias || '',
             'X-Match-Name': encodeURIComponent(session.name || ''),
-            'X-Match-Expires': String(session.expires * 1000),
+            'X-Match-Expires': session.expires ? String(session.expires * 1000) : '',
             'X-Match-Connection': request.headers.get('X-Ubu-Connection') || url.searchParams.get('connection') || '',
             ...(activityWatch ? { 'X-Match-Activity': session.instance } : {}),
             'Content-Type': 'application/json', ...(socket ? { Upgrade: 'websocket' } : {}) },

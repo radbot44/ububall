@@ -19,7 +19,7 @@ function signingKey(secret) {
   }
   return cachedKey;
 }
-async function seal(value, secret) {
+export async function seal(value, secret) {
   const payload = encode(encoder.encode(JSON.stringify(value)));
   return payload + '.' + encode(new Uint8Array(await crypto.subtle.sign('HMAC', await signingKey(secret), encoder.encode(payload))));
 }
@@ -29,7 +29,8 @@ async function unseal(token, secret, purpose) {
     const pieces = token.split('.');
     if (pieces.length !== 2 || !await crypto.subtle.verify('HMAC', await signingKey(secret), decode(pieces[1]), encoder.encode(pieces[0]))) return null;
     const value = JSON.parse(decoder.decode(decode(pieces[0])));
-    if (value.purpose !== purpose || !Number.isSafeInteger(value.expires) || value.expires <= Date.now() / 1000) return null;
+    if (value.purpose !== purpose) return null;
+    if ((value.purpose !== 'session' || value.guest) && (!Number.isSafeInteger(value.expires) || value.expires <= Date.now() / 1000)) return null;
     return value;
   } catch { return null; }
 }
@@ -37,8 +38,13 @@ function cookie(request, name) {
   const matches = (request.headers.get('Cookie') || '').split(';').map(s => s.trim()).filter(s => s.startsWith(name + '='));
   return matches.length === 1 ? matches[0].slice(name.length + 1) : '';
 }
+const indefinite = 34560000;
 const setCookie = (name, value, seconds) => `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${seconds}`;
 const sessionName = '__Host-ubu-session', stateName = '__Host-ubu-oauth';
+export const refreshCookie = request => {
+  const token = cookie(request, sessionName);
+  return token ? setCookie(sessionName, token, indefinite) : null;
+};
 const activityName = '__Secure-ubu-activity';
 const discordId = /^[1-9][0-9]{0,19}$/;
 const activityId = /^[A-Za-z0-9_-]{1,200}$/;
@@ -178,11 +184,11 @@ export async function callback(request, env, fetchDiscord = fetch) {
     // A guest signing in keeps their match seats: the Discord session names the guest ID it replaced.
     const previous = await session(request, env);
     // The display name is shown in the header; the ID never is.
-    const sessionToken = await seal({ purpose: 'session', owner, ...(name ? { name } : {}), csrf: random(), expires: Math.floor(Date.now() / 1000) + 86400,
+    const sessionToken = await seal({ purpose: 'session', owner, ...(name ? { name } : {}), csrf: random(),
       ...(previous?.guest ? { alias: previous.owner } : {}) }, env.SESSION_SECRET);
     const headers = new Headers({ Location: origin(env) + returnTo, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
     headers.append('Set-Cookie', setCookie(stateName, '', 0));
-    headers.append('Set-Cookie', setCookie(sessionName, sessionToken, 86400));
+    headers.append('Set-Cookie', setCookie(sessionName, sessionToken, indefinite));
     return new Response(null, { status: 302, headers });
   } catch { return failed(); }
 }

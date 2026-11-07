@@ -22,10 +22,13 @@ test('Discord login validates state, exchanges credentials server-side and seals
   assert.equal(calls[0].options.body.get('redirect_uri'), env.ORIGIN + '/auth/callback');
   const cookie = result.headers.getSetCookie().find(value => value.startsWith('__Host-ubu-session='));
   assert.match(cookie, /Secure; HttpOnly; SameSite=Lax/);
+  assert.match(cookie, /Max-Age=34560000/);
   assert.ok(!cookie.includes('temporary'));
   const request = new Request(env.ORIGIN + '/api/session', { headers: { Cookie: cookie.split(';')[0] } });
   const session = await auth.session(request, env);
   assert.equal(session.owner, '123456789012345678');
+  assert.equal(session.expires, undefined);
+  assert.match(auth.refreshCookie(request), /Max-Age=34560000/);
   assert.equal(auth.mutationAllowed(new Request(env.ORIGIN, { headers: { Origin: env.ORIGIN, 'X-Ubu-CSRF': session.csrf } }), env, session), true);
   assert.equal(auth.mutationAllowed(new Request(env.ORIGIN, { headers: { Origin: 'https://evil.example', 'X-Ubu-CSRF': session.csrf } }), env, session), false);
   assert.equal(auth.mutationAllowed(new Request(env.ORIGIN), env, session), false);
@@ -96,6 +99,16 @@ test('guest sessions are distinct from Discord identities and Discord login reco
   const discord = result.headers.getSetCookie().find(c => c.startsWith('__Host-ubu-session=')).split(';')[0];
   const upgraded = await auth.session(new Request(env.ORIGIN, { headers: { Cookie: discord } }), env);
   assert.equal(upgraded.owner, '123456789012345678'); assert.equal(upgraded.alias, value.owner); assert.equal(upgraded.guest, undefined);
+});
+
+test('Discord logins last indefinitely while guest sessions and OAuth states expire', async () => {
+  const expiredDiscord = await auth.seal({ purpose: 'session', owner: '123456789012345678', csrf: 'A'.repeat(43), expires: 1000 }, env.SESSION_SECRET);
+  const discordSession = await auth.session(new Request(env.ORIGIN, { headers: { Cookie: `__Host-ubu-session=${expiredDiscord}` } }), env);
+  assert.equal(discordSession?.owner, '123456789012345678');
+
+  const expiredGuest = await auth.seal({ purpose: 'session', owner: 'g_' + 'A'.repeat(43), guest: true, csrf: 'A'.repeat(43), expires: 1000 }, env.SESSION_SECRET);
+  const guestSession = await auth.session(new Request(env.ORIGIN, { headers: { Cookie: `__Host-ubu-session=${expiredGuest}` } }), env);
+  assert.equal(guestSession, null);
 });
 
 test('Activity sign-in verifies Discord membership and creates a separate partitioned session', async () => {
