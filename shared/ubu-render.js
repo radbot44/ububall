@@ -578,6 +578,51 @@
     return (cachedFrostedData = { branchesWhite, branchesBlue, diamonds, sparkles });
   }
 
+  let cachedDenimData = null;
+  function getDenimData() {
+    if (cachedDenimData) return cachedDenimData;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    let weft0 = '', weft1 = '';
+    let dark0 = '', dark1 = '';
+    let light0 = '', light1 = '';
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 16; x++) {
+        const weft = (x + y) % 4 === 0;
+        if (weft) {
+          const d = 'M' + (x * 2 + .2).toFixed(1) + ' ' + (y * 2 + 1) + 'h1.6';
+          if (roll() > .5) weft1 += d; else weft0 += d;
+        } else {
+          const d = 'M' + (x * 2 + 1) + ' ' + (y * 2 + .15).toFixed(2) + 'v1.7';
+          const isDark = x % 3 !== 0;
+          const hi = roll() > .5;
+          if (isDark) { if (hi) dark1 += d; else dark0 += d; }
+          else { if (hi) light1 += d; else light0 += d; }
+        }
+      }
+    }
+    return (cachedDenimData = { weft0, weft1, dark0, dark1, light0, light1 });
+  }
+
+  let cachedHammeredDentPaths = null;
+  function getHammeredDentPaths() {
+    if (cachedHammeredDentPaths) return cachedHammeredDentPaths;
+    let state = 173;
+    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const grid = Array.from({ length: 13 }, (_, y) => Array.from({ length: 13 }, (_, x) => [-16 + x * 16 + (roll() - .5) * 13, -16 + y * 16 + (roll() - .5) * 13]));
+    const paths = [];
+    for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) {
+      const pts = [grid[y][x], grid[y][x + 1], grid[y + 1][x + 1], grid[y + 1][x]];
+      const mid = pts.map((p, i) => p.map((v, j) => (v + pts[(i + 1) % 4][j]) / 2));
+      let d = 'M' + mid[3].join(' ');
+      for (let i = 0; i < 4; i++) d += 'Q' + pts[i].join(' ') + ' ' + mid[i].join(' ');
+      paths.push(d + 'Z');
+    }
+    return (cachedHammeredDentPaths = paths);
+  }
+  let hammeredTileDataUrl = null;
+  let hammeredTilePending = false;
+
   function material(defs, attribute, id, effects, cx = 180, cy = 180) {
     const rotate = `rotate(${attribute.angle} ${cx} ${cy})`;
     // One global material field: every detail rotates about the outer-circle center.
@@ -988,14 +1033,8 @@
       for (const [offset,color,opacity] of dentStops) dent.append(svgNode('stop', { offset, 'stop-color':color, 'stop-opacity':opacity }));
       defs.append(dent);
       const tile = svgNode('pattern', { id: id + '-dents', patternUnits: 'userSpaceOnUse', width: 160, height: 160 });
-      const grid = Array.from({ length: 13 }, (_, y) => Array.from({ length: 13 }, (_, x) => [-16 + x * 16 + (roll() - .5) * 13, -16 + y * 16 + (roll() - .5) * 13]));
-      for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) {
-        const pts = [grid[y][x], grid[y][x + 1], grid[y + 1][x + 1], grid[y + 1][x]];
-        const mid = pts.map((p, i) => p.map((v, j) => (v + pts[(i + 1) % 4][j]) / 2));
-        let d = `M${mid[3].join(' ')}`;
-        for (let i = 0; i < 4; i++) d += `Q${pts[i].join(' ')} ${mid[i].join(' ')}`;
-        tile.append(svgNode('path', { d: d + 'Z', fill: `url(#${id}-dent)` }));
-      }
+      const dentFill = `url(#${id}-dent)`;
+      for (const d of getHammeredDentPaths()) tile.append(svgNode('path', { d, fill: dentFill }));
       defs.append(tile); cover(`url(#${id}-dents)`);
     } else if (attribute.texture === 'kintsugi') {
       lighting('kintsugi-glaze',[[0,'#fff',.12],[.5,'#fff',.02],[1,'#000',.2]],true);
@@ -1054,18 +1093,15 @@
     } else if (attribute.texture === 'denim') {
       lighting('denim-diffuse', [[0, '#fff', .06], [.5, '#000', .02], [1, '#000', .16]], true);
       const twill = svgNode('pattern', { id: id + '-denim', patternUnits: 'userSpaceOnUse', width: 32, height: 32 });
-      // Three colored warp crossings to one pale weft crossing, offset each row.
-      for (let y = 0; y < 16; y++) {
-        for (let x = 0; x < 16; x++) {
-          const weft = (x + y) % 4 === 0;
-          twill.append(svgNode('path', {
-            d: weft ? `M${x*2+.2} ${y*2+1}h1.6` : `M${x*2+1} ${y*2+.15}v1.7`,
-            stroke: weft ? '#fff' : (x % 3 ? '#000' : '#fff'),
-            'stroke-width': weft ? .65 : .8, 'stroke-linecap': 'round',
-            opacity: weft ? .14 + roll() * .08 : .035 + roll() * .055
-          }));
-        }
-      }
+      const data = getDenimData();
+      twill.append(
+        svgNode('path', { d: data.weft0, stroke: '#fff', 'stroke-width': .65, 'stroke-linecap': 'round', opacity: .16 }),
+        svgNode('path', { d: data.weft1, stroke: '#fff', 'stroke-width': .65, 'stroke-linecap': 'round', opacity: .20 }),
+        svgNode('path', { d: data.dark0, stroke: '#000', 'stroke-width': .8, 'stroke-linecap': 'round', opacity: .048 }),
+        svgNode('path', { d: data.dark1, stroke: '#000', 'stroke-width': .8, 'stroke-linecap': 'round', opacity: .075 }),
+        svgNode('path', { d: data.light0, stroke: '#fff', 'stroke-width': .8, 'stroke-linecap': 'round', opacity: .048 }),
+        svgNode('path', { d: data.light1, stroke: '#fff', 'stroke-width': .8, 'stroke-linecap': 'round', opacity: .075 })
+      );
       defs.append(twill); cover(`url(#${id}-denim)`);
     } else if (attribute.texture === 'bubbled') {
       lighting('bubble-depth', [[0,'#fff',.08],[.5,'#fff',0],[1,'#000',.18]], true);
@@ -1144,30 +1180,36 @@
 
     }
     if (attribute.texture === 'hammered-metal') {
-      const frozen = svgNode('svg', { xmlns: NS, viewBox: '-180 -180 720 720', width: 720, height: 720 });
-      const localDefs = svgNode('defs');
-      for (const node of defs.children) if ((node.getAttribute('id') || '').startsWith(id + '-')) localDefs.append(node.cloneNode(true));
-      frozen.append(localDefs);
-      for (const node of [...pattern.children]) if (!lightLayers.includes(node)) frozen.append(node);
-      const image = svgNode('image', { x: -180, y: -180, width: 720, height: 720,
-        href: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(frozen)) });
+      let href = hammeredTileDataUrl;
+      if (!href) {
+        const frozen = svgNode('svg', { xmlns: NS, viewBox: '-180 -180 720 720', width: 720, height: 720 });
+        const localDefs = svgNode('defs');
+        for (const node of defs.children) if ((node.getAttribute('id') || '').startsWith(id + '-')) localDefs.append(node.cloneNode(true));
+        frozen.append(localDefs);
+        for (const node of [...pattern.children]) if (!lightLayers.includes(node)) frozen.append(node);
+        href = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(frozen));
+      }
+      const image = svgNode('image', { x: -180, y: -180, width: 720, height: 720, href });
       if (typeof pattern.replaceChildren === 'function') {
         pattern.replaceChildren(image, ...lightLayers);
       } else {
         pattern.children = [image, ...lightLayers];
       }
-      if (typeof Image !== 'undefined') {
+      if (!hammeredTileDataUrl && !hammeredTilePending && typeof Image !== 'undefined') {
+        hammeredTilePending = true;
         const source = new Image();
         source.onload = () => {
-          if (!image.isConnected) return;
           const canvas = document.createElement('canvas'); canvas.width = canvas.height = 720;
           const context = canvas.getContext('2d');
           if (context) {
             context.drawImage(source, 0, 0, 720, 720);
-            image.setAttribute('href', canvas.toDataURL('image/png'));
+            hammeredTileDataUrl = canvas.toDataURL('image/png');
+            hammeredTilePending = false;
+            if (image.isConnected) image.setAttribute('href', hammeredTileDataUrl);
           }
         };
-        source.src = image.getAttribute('href');
+        source.onerror = () => { hammeredTilePending = false; };
+        source.src = href;
       }
     }
     defs.append(pattern);
