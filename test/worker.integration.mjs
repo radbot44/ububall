@@ -268,6 +268,11 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const otherResult = await issue('other_owner_request_1', otherHeaders);
     assert.equal(otherResult.status, 200);
     const collection = await (await fetch('/api/ubus', { headers: otherHeaders })).json(); assert.equal(collection.ubus.length, 8);
+    const refresh = await fetch('/api/session/refresh', { method: 'POST', headers: otherHeaders });
+    assert.equal(refresh.status, 200);
+    const refreshed = await refresh.json();
+    assert.equal(refreshed.owner, '234567890123456789');
+    assert.match(refresh.headers.get('Set-Cookie') || '', /Max-Age=34560000/);
     const logout = await fetch('/api/logout', { method: 'POST', headers });
     assert.equal(logout.status, 200); assert.match(logout.headers.get('Set-Cookie'), /Max-Age=0/);
   });

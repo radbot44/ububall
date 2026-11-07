@@ -5,6 +5,14 @@
   let currentSession = null;
   let authPopup = null;
   let authTimer = null;
+  const authChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('ubu:auth') : null;
+  if (authChannel) {
+    authChannel.onmessage = async event => {
+      if (event.data?.type === 'session-changed') {
+        await checkSession(false);
+      }
+    };
+  }
 
   function openDiscordLogin(event) {
     if (event && event.preventDefault) event.preventDefault();
@@ -67,23 +75,33 @@
       if (authPopup && !authPopup.closed) {
         try { authPopup.close(); } catch {}
       }
-      await checkSession();
+      await checkSession(true);
+      authChannel?.postMessage({ type: 'session-changed' });
     }
   });
 
-  async function checkSession() {
+  async function checkSession(broadcast = true) {
     try {
       const res = await fetch('/api/session', { signal: window.ubuActivity?.signal });
       if (!res.ok) throw new Error('Session check failed');
       const data = await res.json();
+      const prevOwner = currentSession?.owner;
+      const prevName = currentSession?.name;
       currentSession = data?.owner ? data : null;
       updateHeaderUI();
       window.dispatchEvent(new CustomEvent('ubu:session', { detail: currentSession }));
+      if (broadcast && (prevOwner !== currentSession?.owner || prevName !== currentSession?.name)) {
+        authChannel?.postMessage({ type: 'session-changed' });
+      }
       return currentSession;
     } catch {
+      const prevOwner = currentSession?.owner;
       currentSession = null;
       updateHeaderUI();
       window.dispatchEvent(new CustomEvent('ubu:session', { detail: null }));
+      if (broadcast && prevOwner) {
+        authChannel?.postMessage({ type: 'session-changed' });
+      }
       return null;
     }
   }
@@ -139,7 +157,8 @@
     if (accountDialog && accountDialog.open) {
       accountDialog.close();
     }
-    await checkSession();
+    await checkSession(true);
+    authChannel?.postMessage({ type: 'session-changed' });
     if (location.pathname === '/mint' || location.pathname === '/collection') {
       location.reload();
     }
@@ -159,6 +178,41 @@
     const accountDialog = $('account-dialog');
     const accountClose = $('account-close');
     const logoutBtn = $('logout') || $('account-logout');
+    const refreshBtn = $('account-refresh');
+
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', async () => {
+        if (!currentSession?.owner || currentSession.guest) return;
+        refreshBtn.disabled = true;
+        const originalText = refreshBtn.textContent;
+        refreshBtn.textContent = 'Refreshing…';
+        try {
+          const res = await fetch('/api/session/refresh', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Ubu-CSRF': currentSession.csrf || ''
+            },
+            body: JSON.stringify({})
+          });
+          if (res.ok) {
+            const data = await res.json();
+            currentSession = { ...currentSession, ...data };
+            updateHeaderUI();
+            window.dispatchEvent(new CustomEvent('ubu:session', { detail: currentSession }));
+            authChannel?.postMessage({ type: 'session-changed' });
+            refreshBtn.textContent = 'Refreshed';
+            setTimeout(() => {
+              refreshBtn.textContent = originalText;
+              refreshBtn.disabled = false;
+            }, 1200);
+            return;
+          }
+        } catch {}
+        refreshBtn.textContent = originalText;
+        refreshBtn.disabled = false;
+      });
+    }
 
     if (identityBtn && accountDialog) {
       identityBtn.addEventListener('click', () => {
@@ -188,6 +242,22 @@
     }
 
     checkSession();
+
+    let lastVisible = Date.now();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        const elapsed = Date.now() - lastVisible;
+        lastVisible = Date.now();
+        if (elapsed > 120000) {
+          void checkSession(false);
+        }
+      } else {
+        lastVisible = Date.now();
+      }
+    });
+    window.addEventListener('online', () => {
+      void checkSession(false);
+    });
   }
 
   if (document.readyState === 'loading') {

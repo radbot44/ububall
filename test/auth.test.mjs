@@ -143,3 +143,30 @@ test('Activity sign-in verifies Discord membership and creates a separate partit
   assert.equal(auth.mutationAllowed(login(env.ORIGIN), activity, session), false);
   assert.match(auth.logoutCookie(activity, session), /Partitioned; Max-Age=0/);
 });
+
+test('refreshProfile updates user identity via Discord bot API without re-auth', async () => {
+  const activityEnv = { ...env, DISCORD_ACTIVITY_BOT_TOKEN: 'test-bot' };
+  const session = { purpose: 'session', owner: '123456789012345678', name: 'Old Name', csrf: 'A'.repeat(43) };
+  let calledUrl = '', calledAuth = '';
+  const mockFetch = async (url, options) => {
+    calledUrl = url;
+    calledAuth = options.headers.Authorization;
+    return Response.json({ id: '123456789012345678', global_name: 'New Name' });
+  };
+  const result = await auth.refreshProfile(session, activityEnv, mockFetch);
+  assert.equal(result.session.name, 'New Name');
+  assert.equal(calledUrl, 'https://discord.com/api/v10/users/123456789012345678');
+  assert.equal(calledAuth, 'Bot test-bot');
+  assert.match(result.cookie, /Max-Age=34560000/);
+
+  // If Discord API fails or has no bot token, gracefully keeps existing name and refreshes cookie
+  const failingFetch = async () => Response.json({}, { status: 500 });
+  const fallback = await auth.refreshProfile(session, activityEnv, failingFetch);
+  assert.equal(fallback.session.name, 'Old Name');
+  assert.match(fallback.cookie, /Max-Age=34560000/);
+
+  const noBotEnv = { ...env, DISCORD_ACTIVITY_BOT_TOKEN: undefined };
+  const noBot = await auth.refreshProfile(session, noBotEnv);
+  assert.equal(noBot.session.name, 'Old Name');
+  assert.match(noBot.cookie, /Max-Age=34560000/);
+});

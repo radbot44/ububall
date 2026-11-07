@@ -244,6 +244,11 @@ export default {
       if (!session) return json({ error: 'Sign in with Discord or play as a guest first.' }, 401);
       if (request.method !== 'GET' && !auth.mutationAllowed(request, env, session)) return json({ error: 'Invalid request origin or token.' }, 403);
       if (path === '/api/logout' && request.method === 'POST') return json({ ok: true }, 200, { 'Set-Cookie': auth.logoutCookie(env, session) });
+      if (path === '/api/session/refresh' && request.method === 'POST') {
+        if (session.guest) return json({ error: 'Sign in with Discord first.' }, 403);
+        const { session: updated, cookie } = await auth.refreshProfile(session, env);
+        return json(updated, 200, { 'Set-Cookie': cookie });
+      }
       if (path === '/api/ububall/lobby' && request.method === 'POST') {
         let data;
         try { data = await body(request, 1024); } catch { return json({ error: 'Invalid lobby request.' }, 400); }

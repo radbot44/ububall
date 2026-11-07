@@ -124,6 +124,32 @@ export async function activityParticipants(env, instance, fetchDiscord = fetch) 
 export async function activityMember(env, instance, owner, fetchDiscord = fetch) {
   return (await activityParticipants(env, instance, fetchDiscord))?.includes(owner) ?? false;
 }
+export async function refreshProfile(session, env, fetchDiscord = fetch) {
+  if (!session || session.guest || !discordId.test(session.owner)) throw new Error('Invalid session.');
+  let name = session.name;
+  if (env.DISCORD_ACTIVITY_BOT_TOKEN) {
+    try {
+      const response = await fetchDiscord(`${discordApi}/users/${session.owner}`, {
+        headers: { Authorization: `Bot ${env.DISCORD_ACTIVITY_BOT_TOKEN}` }, signal: AbortSignal.timeout(5000)
+      });
+      if (response.ok) {
+        const user = await response.json();
+        const fresh = [user.global_name, user.username].find(n => typeof n === 'string' && n.trim())?.trim().slice(0, 32);
+        if (fresh) name = fresh;
+      }
+    } catch {}
+  }
+  const sessionToken = await seal({
+    purpose: session.instance ? 'activity' : 'session',
+    owner: session.owner,
+    ...(name ? { name } : {}),
+    csrf: session.csrf,
+    ...(session.alias ? { alias: session.alias } : {}),
+    ...(session.instance ? { instance: session.instance, avatar: session.avatar, launch: session.launch, issued: session.issued, expires: session.expires } : {})
+  }, env.SESSION_SECRET);
+  const cookie = session.instance ? activityCookie(env, sessionToken, 86400) : setCookie(sessionName, sessionToken, indefinite);
+  return { session: { owner: session.owner, name: name ?? null, csrf: session.csrf }, cookie };
+}
 
 export async function activityLogin(request, env, data, fetchDiscord = fetch) {
   const embedded = activityOrigin(env);

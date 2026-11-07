@@ -34,7 +34,11 @@ function ububallOnline(hooks) {
   }
   async function joinInvite() {
     if (!invite || id || !playable()) return;
-    try { const result = await api('/api/ububall/' + encodeURIComponent(invite) + '/join', {}); await enter(invite, result); }
+    try {
+      const result = await api('/api/ububall/' + encodeURIComponent(invite) + '/join', {});
+      $('online-dialog').close();
+      await enter(invite, result);
+    }
     catch (error) { status(error.message, true); }
   }
   async function refreshSession() {
@@ -46,7 +50,11 @@ function ububallOnline(hooks) {
     $('online-login').href = $('lobby-login').href = '/auth/discord?return=' + encodeURIComponent(returnDest);
   }
   window.addEventListener('ubu:session', event => {
-    if (!event.detail?.owner || session?.owner === event.detail.owner) return;
+    if (!event.detail?.owner) {
+      if (session?.owner) { session = null; account(); }
+      return;
+    }
+    if (session?.owner === event.detail.owner) return;
     const wasGuest = Boolean(session?.guest);
     session = event.detail; account();
     // Reconnecting under the Discord session moves a former guest's seat to their Discord account.
@@ -678,10 +686,17 @@ function ububallOnline(hooks) {
     if (!match) status('This watch link is invalid.', true);
     else watchState(match[1], match[2]).then(initial => enter(match[1], initial, match[2])).catch(error => status(error.message, true));
   } else if (invite) {
-    if (!activity) showDialog();
     $('online-entry').hidden = true;
     (activity ? ensureSession() : refreshSession())
-      .then(() => playable() ? joinInvite() : status('Sign in with Discord or play as a guest to join this match.', true)).catch(error => status(error.message, true));
+      .then(async () => {
+        if (playable()) {
+          $('online-dialog').close();
+          await joinInvite();
+        } else {
+          showDialog();
+          status('Sign in with Discord or play as a guest to join this match.', true);
+        }
+      }).catch(error => status(error.message, true));
   } else {
     let saved;
     try { saved = sessionStorage.getItem(queueStorageKey); } catch { /* storage can be disabled */ }

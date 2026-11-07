@@ -1035,7 +1035,11 @@
       window.addEventListener('ubu:session', event => {
         if (event.detail?.owner && (!session?.owner || session.owner !== event.detail.owner)) {
           handleSession(event.detail);
-        } else if (event.detail?.owner) session = event.detail; // A new Activity launch renews the CSRF token.
+        } else if (event.detail?.owner) {
+          session = event.detail; // A new Activity launch renews the CSRF token.
+        } else if (!event.detail?.owner && session?.owner) {
+          handleSession(null);
+        }
       });
       await handleSession(session);
     } catch (error) {
