@@ -452,7 +452,7 @@
         const inset = points.map(p => p.map((v, i) => center[i] + (v - center[i]) * .9));
         const mids = inset.map((p, i) => p.map((v, j) => (v + inset[(i + 1) % 4][j]) / 2));
         let d = 'M' + mids[3][0].toFixed(1) + ' ' + mids[3][1].toFixed(1);
-        for (let i = 0; i < 4; i++) d += 'Q' + inset[i][0].toFixed(1) + ' ' + inset[i][1].toFixed(1) + ' ' + mids[i][0].toFixed(1) + ' ' + mids[i][0].toFixed(1);
+        for (let i = 0; i < 4; i++) d += 'Q' + inset[i][0].toFixed(1) + ' ' + inset[i][1].toFixed(1) + ' ' + mids[i][0].toFixed(1) + ' ' + mids[i][1].toFixed(1);
         cells[Math.floor(roll() * 4)] += d + 'Z';
         grainGlints += 'M' + mids[3][0].toFixed(1) + ' ' + mids[3][1].toFixed(1) + 'Q' + inset[0][0].toFixed(1) + ' ' + inset[0][1].toFixed(1) + ' ' + mids[0][0].toFixed(1) + ' ' + mids[0][1].toFixed(1);
       }
