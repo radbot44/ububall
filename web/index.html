@@ -4,6 +4,10 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark"><title>Ububall</title>
+  <meta name="theme-color" content="#101112">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="site.css"><link rel="stylesheet" href="ububall.css">
   <script src="ububall-activity.js" defer></script><script src="site-header.js" defer></script><script src="starter.js" defer></script><script src="game-ui.js" defer></script><script src="ubu.js" defer></script><script src="ubu-file.js" defer></script><script src="ubu-render.js" defer></script><script src="ubu-audio.js" defer></script><script src="rarity.js" defer></script>
   <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-replay.js" defer></script><script src="mp4.js" defer></script><script src="ububall-cpu.js" defer></script><script src="ububall-cpu-client.js" defer></script><script src="ububall-online.js" defer></script><script src="ubu-list.js" defer></script><script src="ububall-presentation.js" defer></script><script src="ububall.js" defer></script><script src="app.js" defer></script>
@@ -232,6 +236,7 @@ SOFTWARE.
       <button id="pause-copy-watch" type="button" hidden>Copy watch link</button>
     </div>
     <div class="pause-settings">
+      <button id="setting-sound" class="setting" type="button" aria-pressed="true" title="Turn game sound effects and fanfare on or off"><span>Sound</span><span class="setting-value">On</span></button>
       <button id="setting-aim" class="setting" type="button" title="Switch how dragging on the rink aims a launch"><span>Aim by</span><span class="setting-value">Drag arrow</span></button>
       <button id="setting-spin" class="setting" type="button" aria-pressed="false" title="Turn the spin slider beside the selected ubu on or off"><span>Spin slider</span><span class="setting-value">Off</span></button>
       <button id="guide-moves" class="setting" type="button" aria-pressed="false" title="Turn on or off each ubu's launch arrow while a turn plays"><span>Show moves</span><span class="setting-value">Off</span></button>
@@ -256,6 +261,19 @@ SOFTWARE.
       <li>Guard makes your ubu brake and brace for hits this turn. Tap the selected ubu on the rink or press <strong>Guard</strong> to toggle it.</li>
       <li>Set up moves for any of your three ubus, then press <strong>Launch team</strong>. Both teams move at the same time.</li>
     </ol>
+    <div class="match-help-keyboard">
+      <h3>Keyboard controls</h3>
+      <ul class="match-help-keys">
+        <li><span><kbd>Space</kbd></span> Next skater</li>
+        <li><span><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></span> Select skater 1, 2, or 3</li>
+        <li><span><kbd>W</kbd> / <kbd>S</kbd></span> Increase / decrease power</li>
+        <li><span><kbd>A</kbd> / <kbd>D</kbd></span> Aim counterclockwise / clockwise</li>
+        <li><span><kbd>Q</kbd> / <kbd>E</kbd></span> Spin left / right</li>
+        <li><span><kbd>G</kbd></span> Toggle guard</li>
+        <li><span><kbd>Enter</kbd></span> Launch team / Next kickoff</li>
+        <li><span><kbd>Esc</kbd></span> Pause menu</li>
+      </ul>
+    </div>
     <button id="match-help-back" class="primary" type="button">Back to menu</button>
   </dialog>
   <dialog id="replays-dialog" class="replays-dialog" aria-labelledby="replays-title">

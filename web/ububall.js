@@ -48,7 +48,9 @@
   let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuDone = false, cpuLevel = 'medium', cpuMode = 'standard';
   // The home screen demo (CPU against CPU) plays silently.
   let demo = false, demoLevels = ['medium', 'hard'];
-  const gameAudio = () => videoAudio || activePlayback?.audio || (demo ? null : window.ubuAudio);
+  let soundEnabled = true;
+  try { soundEnabled = (localStorage.getItem('ububall-sound') ?? 'on') === 'on'; } catch {}
+  const gameAudio = () => videoAudio || activePlayback?.audio || (demo || !soundEnabled ? null : window.ubuAudio);
   const classicMode = () => ububallMatch.rule(fieldView.mode, 'classic');
   const blitzMode = () => ububallMatch.rule(fieldView.mode, 'blitz');
   const pulseMode = () => ububallMatch.rule(fieldView.mode, 'pulse');
@@ -155,6 +157,7 @@
   }
   let arrowGrab = null, dragStart = null, dragMoved = false;
   let pullBehind = false;
+  try { pullBehind = localStorage.getItem('ububall-aim-style') === 'pull'; } catch {}
   const firstTurnKey = 'ububall-first-turn-guide';
   let firstTurnSeen = false;
   let superHintSeen = false, superHintFor = null;
@@ -169,8 +172,10 @@
     $(id).setAttribute('aria-pressed', String(Boolean(on)));
     $(id).querySelector('.setting-value').textContent = on ? 'On' : 'Off';
   }
+  $('setting-aim').querySelector('.setting-value').textContent = pullBehind ? 'Pull back' : 'Drag arrow';
   $('setting-aim').onclick = () => {
     pullBehind = !pullBehind;
+    try { localStorage.setItem('ububall-aim-style', pullBehind ? 'pull' : 'drag'); } catch {}
     $('setting-aim').querySelector('.setting-value').textContent = pullBehind ? 'Pull back' : 'Drag arrow';
     updateFirstTurnGuide();
   };
@@ -5042,6 +5047,15 @@
   }
   window.addEventListener('ubu:starter', showSignupPack);
   document.addEventListener('DOMContentLoaded', showSignupPack); // The status may have come before this script.
+  showSetting('setting-sound', soundEnabled);
+  $('setting-sound').onclick = () => {
+    soundEnabled = !soundEnabled; showSetting('setting-sound', soundEnabled);
+    try { localStorage.setItem('ububall-sound', soundEnabled ? 'on' : 'off'); } catch {}
+    if (!soundEnabled) {
+      stopFanfare();
+      window.ubuAudio?.stop?.();
+    }
+  };
   // The floating spin slider is a preference kept per device.
   showSetting('setting-spin', spinSlider);
   $('setting-spin').onclick = () => {
@@ -5334,14 +5348,92 @@
   if (btnRotate) btnRotate.onclick = toggleRotate;
   document.addEventListener('fullscreenchange', updateFullscreenUI);
   fullscreenDisplay.addEventListener('change', updateFullscreenUI);
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && foulInfo) closeFoulInfo();
-    else if (e.key === 'Escape' && inMatch && !ownsFullscreen() && !document.querySelector('dialog[open]')) openPause();
-  });
-
   // Match mode: the field fills the screen and the site chrome hides. Entering adds a history
   // entry, so the system back button opens the menu instead of leaving the match.
   let inMatch = false;
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (foulInfo) closeFoulInfo();
+      else if (inMatch && !ownsFullscreen() && !document.querySelector('dialog[open]')) openPause();
+      return;
+    }
+    if (!inMatch || theater || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (document.querySelector('dialog[open]') || e.target.closest?.('input, select, textarea')) return;
+
+    if (e.key === ' ') {
+      e.preventDefault();
+      if (e.target.closest?.('button')) e.target.blur();
+      selected = (selected + 1) % 3;
+      sync(); draw();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.target.closest?.('button')) e.target.blur();
+      $('launch').click();
+      return;
+    }
+    if (e.key === '1' || e.key === '2' || e.key === '3') {
+      e.preventDefault();
+      selected = Number(e.key) - 1;
+      sync(); draw();
+      return;
+    }
+    if (e.key === 'g' || e.key === 'G') {
+      e.preventDefault();
+      toggleGuard(selected);
+      return;
+    }
+    if (e.key === 'w' || e.key === 'W') {
+      if (knobEditable(selected)) {
+        e.preventDefault();
+        setKnob('power', selected, knobValue('power', selected) + (e.shiftKey ? 10 : 5));
+        saveActiveMatch();
+      }
+      return;
+    }
+    if (e.key === 's' || e.key === 'S') {
+      if (knobEditable(selected)) {
+        e.preventDefault();
+        setKnob('power', selected, knobValue('power', selected) - (e.shiftKey ? 10 : 5));
+        saveActiveMatch();
+      }
+      return;
+    }
+    if (e.key === 'a' || e.key === 'A') {
+      if (knobEditable(selected)) {
+        e.preventDefault();
+        setKnob('angle', selected, knobValue('angle', selected) - (e.shiftKey ? 15 : 5));
+        saveActiveMatch();
+      }
+      return;
+    }
+    if (e.key === 'd' || e.key === 'D') {
+      if (knobEditable(selected)) {
+        e.preventDefault();
+        setKnob('angle', selected, knobValue('angle', selected) + (e.shiftKey ? 15 : 5));
+        saveActiveMatch();
+      }
+      return;
+    }
+    if (e.key === 'q' || e.key === 'Q') {
+      if (knobEditable(selected)) {
+        e.preventDefault();
+        setKnob('spin', selected, knobValue('spin', selected) - (e.shiftKey ? 20 : 10));
+        saveActiveMatch();
+      }
+      return;
+    }
+    if (e.key === 'e' || e.key === 'E') {
+      if (knobEditable(selected)) {
+        e.preventDefault();
+        setKnob('spin', selected, knobValue('spin', selected) + (e.shiftKey ? 20 : 10));
+        saveActiveMatch();
+      }
+      return;
+    }
+  });
   const portraitScreen = matchMedia('(orientation: portrait)');
   function setPortrait(value) { if (fieldView.portrait !== value) toggleRotate(); }
   function fitOrientation() { if (inMatch) setPortrait(portraitScreen.matches); }

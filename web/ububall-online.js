@@ -645,6 +645,27 @@ function ububallOnline(hooks) {
     catch (error) { status(error.message, true); hooks.onError(error.message); }
     finally { button.disabled = false; }
   }
+  function flashCopied(button, message = 'Copied!') {
+    const width = button.getBoundingClientRect().width;
+    if (width > 0) {
+      button.style.boxSizing = 'border-box';
+      button.style.minWidth = `${width}px`;
+      button.style.maxWidth = `${width}px`;
+      button.style.width = `${width}px`;
+    }
+    const previous = button.dataset.originalText || button.textContent;
+    button.dataset.originalText = previous;
+    button.textContent = message;
+    clearTimeout(button._copyTimer);
+    button._copyTimer = setTimeout(() => {
+      button.textContent = button.dataset.originalText || previous;
+      delete button.dataset.originalText;
+      button.style.minWidth = '';
+      button.style.maxWidth = '';
+      button.style.width = '';
+      button.style.boxSizing = '';
+    }, 1500);
+  }
   for (const location of ['pause']) {
     const button = $(location + '-allow-watch'), copy = $(location + '-copy-watch');
     button.onclick = () => toggleWatch(button);
@@ -654,7 +675,7 @@ function ububallOnline(hooks) {
       catch (error) { status(error.message, true); return; }
       const link = new URL('/', session?.site || window.location.origin);
       link.searchParams.set('watch', id + '.' + state.watchKey);
-      try { await navigator.clipboard.writeText(link.href); copy.textContent = 'Watch link copied'; }
+      try { await navigator.clipboard.writeText(link.href); flashCopied(copy, 'Copied!'); }
       catch {
         void gameUi.confirm({ title: 'Watch link', message: 'Copy this link to share the live match.', confirmLabel: 'Done',
           input: { value: link.href, maxLength: link.href.length, readOnly: true } });
@@ -665,7 +686,7 @@ function ububallOnline(hooks) {
   $('online-share').hidden = !navigator.share || !matchMedia('(pointer: coarse)').matches;
   $('online-share').onclick = () => navigator.share({ title: 'Ububall', text: 'Play me at Ububall', url: $('online-invite').value }).catch(() => {});
   $('online-copy').onclick = async () => {
-    try { await navigator.clipboard.writeText($('online-invite').value); status(''); }
+    try { await navigator.clipboard.writeText($('online-invite').value); flashCopied($('online-copy'), 'Copied!'); status(''); }
     catch { $('online-invite').select(); status('Could not copy the invite.', true); }
   };
   $('online-forfeit').onclick = async () => {
