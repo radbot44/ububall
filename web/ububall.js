@@ -4195,21 +4195,10 @@
       watchReplay(replay, entry.file);
     } catch (error) { replaysNote(error.message); }
   }
-  // Tabler outline icons (MIT), as in uburoom web/icons.js.
-  const ICONS = {
-    play: ['M7 4v16l13 -8l-13 -8'],
-    edit: ['M7 7h-1a2 2 0 0 0 -2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2 -2v-1', 'M20.385 6.585a2.1 2.1 0 0 0 -2.97 -2.97l-8.415 8.385v3h3l8.385 -8.415', 'M16 5l3 3'],
-    download: ['M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2', 'M7 11l5 5l5 -5', 'M12 4l0 12'],
-    trash: ['M4 7l16 0', 'M10 11l0 6', 'M14 11l0 6', 'M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12', 'M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3'],
-    undo: ['M9 14l-4 -4l4 -4', 'M5 10h11a4 4 0 1 1 0 8h-1'],
-    pin: ['M15 4.5l-4 4l-4 1.5l-1.5 1.5l7 7l1.5 -1.5l1.5 -4l4 -4', 'M9 15l-4.5 4.5', 'M14.5 4l5.5 5.5']
-  };
   function iconButton(name, label, run, className = 'icon-button') {
     const button = document.createElement('button'); button.type = 'button'; button.className = className; button.title = label;
     button.setAttribute('aria-label', label); button.onclick = run;
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
-    for (const d of ICONS[name]) { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', d); svg.append(path); }
-    button.append(svg);
+    button.append(gameUi.icon(name));
     return button;
   }
   // Deleted entries, newest last, for undo while the library stays open.

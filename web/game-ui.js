@@ -3,41 +3,18 @@
 // opens them (never pushing content), confirm and name dialogs, and a custom select. ububall
 // runs inside Discord Activities and as a phone app, so nothing here falls back to browser UI.
 (function(root) {
-  // Tabler outline icons (MIT), from uburoom's icon set.
-  const ICONS = {
-    shield: ['M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3'],
-    rotate: ['M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5'],
-    heart: ['M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572'],
-    'info-circle': ['M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0', 'M12 9h.01', 'M11 12h1v4h1'],
-    help: ['M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0', 'M12 17l0 .01', 'M12 13.5a1.5 1.5 0 0 1 1 -1.5a2.6 2.6 0 1 0 -3 -4'],
-    'arrows-shuffle': ['M18 4l3 3l-3 3', 'M18 20l3 -3l-3 -3', 'M3 7h3a5 5 0 0 1 5 5a5 5 0 0 0 5 5h5', 'M21 7h-5a4.978 4.978 0 0 0 -3 1m-4 8a4.984 4.984 0 0 1 -3 1h-3'],
-    'arrows-left-right': ['M21 17l-18 0', 'M6 10l-3 -3l3 -3', 'M3 7l18 0', 'M18 20l3 -3l-3 -3'],
-    'arrows-sort': ['M3 9l4 -4l4 4m-4 -4v14', 'M21 15l-4 4l-4 -4m4 4v-14'],
-    'chart-bar': ['M3 13a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -6', 'M15 9a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -10', 'M9 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -14', 'M4 20h14'],
-    'arrow-left': ['M5 12l14 0', 'M5 12l6 6', 'M5 12l6 -6'],
-    'arrow-narrow-right': ['M5 12l14 0', 'M15 16l4 -4', 'M15 8l4 4'],
-    check: ['M5 12l5 5l10 -10'],
-    'chevron-down': ['M6 9l6 6l6 -6'],
-    'columns-2': ['M3 4a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v16a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-16', 'M12 3v18'],
-    'crop-portrait': ['M6 6a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2l0 -12'],
-    'crop-landscape': ['M4 8a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -8'],
-    'chevron-left': ['M15 6l-6 6l6 6'],
-    'chevron-right': ['M9 6l6 6l-6 6'],
-    dots: ['M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0', 'M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0', 'M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0'],
-    x: ['M18 6l-12 12', 'M6 6l12 12'],
-    trophy: ['M8 21l8 0', 'M12 17l0 4', 'M7 4l10 0', 'M17 4v8a5 5 0 0 1 -10 0v-8', 'M3 9a2 2 0 1 0 4 0a2 2 0 1 0 -4 0', 'M17 9a2 2 0 1 0 4 0a2 2 0 1 0 -4 0'],
-    target: ['M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0', 'M7 12a5 5 0 1 0 10 0a5 5 0 1 0 -10 0', 'M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0']
-  };
+  const SVG_NS = 'http://www.w3.org/2000/svg';
   function icon(name) {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.classList.add('icon');
-    for (const d of ICONS[name]) {
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', d); svg.append(path);
-    }
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.classList.add('icon');
+    const use = document.createElementNS(SVG_NS, 'use');
+    use.setAttribute('href', '#icon-' + name);
+    svg.append(use);
     return svg;
   }
-  // Markup asks for an icon with <i data-icon="name"></i>.
+  // Markup asks for an icon with <i data-icon="name"></i> or pre-rendered <svg class="icon"><use href="#icon-name"></use></svg>.
   function fillIcons(scope = document) {
     for (const holder of scope.querySelectorAll('i[data-icon]')) holder.replaceWith(icon(holder.dataset.icon));
   }
@@ -210,7 +187,7 @@
   addEventListener('contextmenu', event => { if (swallow || tipTarget(event)) event.preventDefault(); }, true);
   for (const type of ['scroll', 'resize']) addEventListener(type, () => { if (tipFor) hideTip(); }, true);
 
-  root.gameUi = { ICONS, icon, fillIcons, dropdown, place, confirm, ask, select, scale: () => uiScale, updateScale };
+  root.gameUi = { ICONS: {}, icon, fillIcons, dropdown, place, confirm, ask, select, scale: () => uiScale, updateScale };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => fillIcons());
   else fillIcons();
 })(globalThis);

@@ -852,7 +852,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
   .ubu-toolbar .game-select, .ubu-direction, .ubu-filters-toggle { padding-inline: .625rem; }
 }
 /* Game UI: Tabler icons, dropdowns anchored to their control, custom selects and dialogs. */
-.icon { flex: none; width: 1.2em; height: 1.2em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.icon, i[data-icon] { flex: none; width: 1.2em; height: 1.2em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .icon-button .icon { width: 1.5rem; height: 1.5rem; }
 #team-back, .mint-entry-cta { gap: .375rem; }
 .game-popover {

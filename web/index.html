@@ -13,6 +13,46 @@
   <script src="ububall-match.js" defer></script><script src="ububall-physics.js" defer></script><script src="ububall-replay.js" defer></script><script src="mp4.js" defer></script><script src="ububall-cpu.js" defer></script><script src="ububall-cpu-client.js" defer></script><script src="ububall-online.js" defer></script><script src="ubu-list.js" defer></script><script src="ububall-presentation.js" defer></script><script src="ububall.js" defer></script><script src="app.js" defer></script>
 </head>
 <body>
+  <svg id="icon-sprite" style="display:none" aria-hidden="true">
+    <defs>
+      <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3"/></symbol>
+      <symbol id="icon-rotate" viewBox="0 0 24 24"><path d="M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5"/></symbol>
+      <symbol id="icon-rotate-clockwise" viewBox="0 0 24 24"><path d="M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5"/></symbol>
+      <symbol id="icon-heart" viewBox="0 0 24 24"><path d="M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572"/></symbol>
+      <symbol id="icon-info-circle" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 9h.01"/><path d="M11 12h1v4h1"/></symbol>
+      <symbol id="icon-help" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M12 17l0 .01"/><path d="M12 13.5a1.5 1.5 0 0 1 1 -1.5a2.6 2.6 0 1 0 -3 -4"/></symbol>
+      <symbol id="icon-arrows-shuffle" viewBox="0 0 24 24"><path d="M18 4l3 3l-3 3"/><path d="M18 20l3 -3l-3 -3"/><path d="M3 7h3a5 5 0 0 1 5 5a5 5 0 0 0 5 5h5"/><path d="M21 7h-5a4.978 4.978 0 0 0 -3 1m-4 8a4.984 4.984 0 0 1 -3 1h-3"/></symbol>
+      <symbol id="icon-arrows-left-right" viewBox="0 0 24 24"><path d="M21 17l-18 0"/><path d="M6 10l-3 -3l3 -3"/><path d="M3 7l18 0"/><path d="M18 20l3 -3l-3 -3"/></symbol>
+      <symbol id="icon-arrows-sort" viewBox="0 0 24 24"><path d="M3 9l4 -4l4 4m-4 -4v14"/><path d="M21 15l-4 4l-4 -4m4 4v-14"/></symbol>
+      <symbol id="icon-chart-bar" viewBox="0 0 24 24"><path d="M3 13a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -6"/><path d="M15 9a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -10"/><path d="M9 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -14"/><path d="M4 20h14"/></symbol>
+      <symbol id="icon-arrow-left" viewBox="0 0 24 24"><path d="M5 12l14 0"/><path d="M5 12l6 6"/><path d="M5 12l6 -6"/></symbol>
+      <symbol id="icon-arrow-narrow-right" viewBox="0 0 24 24"><path d="M5 12l14 0"/><path d="M15 16l4 -4"/><path d="M15 8l4 4"/></symbol>
+      <symbol id="icon-check" viewBox="0 0 24 24"><path d="M5 12l5 5l10 -10"/></symbol>
+      <symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6l6 -6"/></symbol>
+      <symbol id="icon-columns-2" viewBox="0 0 24 24"><path d="M3 4a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v16a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-16"/><path d="M12 3v18"/></symbol>
+      <symbol id="icon-crop-portrait" viewBox="0 0 24 24"><path d="M6 6a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2l0 -12"/></symbol>
+      <symbol id="icon-crop-landscape" viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -8"/></symbol>
+      <symbol id="icon-chevron-left" viewBox="0 0 24 24"><path d="M15 6l-6 6l6 6"/></symbol>
+      <symbol id="icon-chevron-right" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></symbol>
+      <symbol id="icon-dots" viewBox="0 0 24 24"><path d="M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/></symbol>
+      <symbol id="icon-x" viewBox="0 0 24 24"><path d="M18 6l-12 12"/><path d="M6 6l12 12"/></symbol>
+      <symbol id="icon-trophy" viewBox="0 0 24 24"><path d="M8 21l8 0"/><path d="M12 17l0 4"/><path d="M7 4l10 0"/><path d="M17 4v8a5 5 0 0 1 -10 0v-8"/><path d="M3 9a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M17 9a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/></symbol>
+      <symbol id="icon-target" viewBox="0 0 24 24"><path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M7 12a5 5 0 1 0 10 0a5 5 0 1 0 -10 0"/><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/></symbol>
+      <symbol id="icon-player-play" viewBox="0 0 24 24"><path d="M7 4v16l13 -8l-13 -8"/></symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24"><path d="M7 4v16l13 -8l-13 -8"/></symbol>
+      <symbol id="icon-player-pause" viewBox="0 0 24 24"><path d="M6 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12"/><path d="M14 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12"/></symbol>
+      <symbol id="icon-pause" viewBox="0 0 24 24"><path d="M6 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12"/><path d="M14 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12"/></symbol>
+      <symbol id="icon-player-skip-back" viewBox="0 0 24 24"><path d="M20 5v14l-12 -7l12 -7"/><path d="M4 5l0 14"/></symbol>
+      <symbol id="icon-player-skip-forward" viewBox="0 0 24 24"><path d="M4 5v14l12 -7l-12 -7"/><path d="M20 5l0 14"/></symbol>
+      <symbol id="icon-hand-finger-down" viewBox="0 0 24 24"><path d="M8 12v8.5a1.5 1.5 0 0 0 3 0v-7.5"/><path d="M11 13.5v2a1.5 1.5 0 0 0 3 0v-2.5"/><path d="M14 14.5a1.5 1.5 0 0 0 3 0v-1.5"/><path d="M17 13.5a1.5 1.5 0 0 0 3 0v-4.5a6 6 0 0 0 -6 -6h-2h.208a6 6 0 0 0 -5.012 2.7l-.196 .3q -.468 .718 -3.286 5.728a1.5 1.5 0 0 0 .536 2.022c.734 .44 1.674 .325 2.28 -.28l1.47 -1.47"/></symbol>
+      <symbol id="icon-edit" viewBox="0 0 24 24"><path d="M7 7h-1a2 2 0 0 0 -2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2 -2v-1"/><path d="M20.385 6.585a2.1 2.1 0 0 0 -2.97 -2.97l-8.415 8.385v3h3l8.385 -8.415"/><path d="M16 5l3 3"/></symbol>
+      <symbol id="icon-download" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 11l5 5l5 -5"/><path d="M12 4l0 12"/></symbol>
+      <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M4 7l16 0"/><path d="M10 11l0 6"/><path d="M14 11l0 6"/><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12"/><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3"/></symbol>
+      <symbol id="icon-undo" viewBox="0 0 24 24"><path d="M9 14l-4 -4l4 -4"/><path d="M5 10h11a4 4 0 1 1 0 8h-1"/></symbol>
+      <symbol id="icon-arrow-back-up" viewBox="0 0 24 24"><path d="M9 14l-4 -4l4 -4"/><path d="M5 10h11a4 4 0 1 1 0 8h-1"/></symbol>
+      <symbol id="icon-pin" viewBox="0 0 24 24"><path d="M15 4.5l-4 4l-4 1.5l-1.5 1.5l7 7l1.5 -1.5l1.5 -4l4 -4"/><path d="M9 15l-4.5 4.5"/><path d="M14.5 4l5.5 5.5"/></symbol>
+    </defs>
+  </svg>
   <header class="site-header">
     <a class="site-brand" href="/" aria-label="ububall"><img src="assets/ububall-logo.svg" alt="ububall"></a>
     <nav class="site-nav" aria-label="Main">
@@ -75,7 +115,7 @@
         <span class="mint-entry-badge">Ubu Mint</span>
         <p class="mint-entry-text">Discover new ubus, open packs, and build a collection for use in ububall.</p>
       </div>
-      <div class="mint-entry-links"><a class="mint-entry-cta" href="/mint"><span id="mint-cta-label">Open packs</span><i data-icon="arrow-narrow-right"></i></a><a class="mint-entry-link" href="/collection">Your collection</a></div>
+      <div class="mint-entry-links"><a class="mint-entry-cta" href="/mint"><span id="mint-cta-label">Open packs</span><svg class="icon" aria-hidden="true"><use href="#icon-arrow-narrow-right"/></svg></a><a class="mint-entry-link" href="/collection">Your collection</a></div>
     </aside>
   </section>
   <div class="arena-layout">
@@ -89,10 +129,10 @@
           <button id="pause" class="stadium-tool-btn" type="button" aria-label="Open match menu" aria-haspopup="dialog" title="Menu">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
           </button>
-          <button id="match-stats" class="stadium-tool-btn" type="button" aria-label="Match stats" aria-haspopup="dialog" title="Match stats"><i data-icon="chart-bar"></i></button>
+          <button id="match-stats" class="stadium-tool-btn" type="button" aria-label="Match stats" aria-haspopup="dialog" title="Match stats"><svg class="icon" aria-hidden="true"><use href="#icon-chart-bar"/></svg></button>
           <button id="btn-rotate" class="stadium-tool-btn" type="button" aria-pressed="false" aria-label="Switch to portrait orientation" title="Switch to portrait orientation">
-            <span class="rotate-option rotate-portrait" aria-hidden="true"><i data-icon="crop-portrait"></i><b>P</b></span>
-            <span class="rotate-option rotate-landscape" aria-hidden="true"><i data-icon="crop-landscape"></i><b>L</b></span>
+            <span class="rotate-option rotate-portrait" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#icon-crop-portrait"/></svg><b>P</b></span>
+            <span class="rotate-option rotate-landscape" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#icon-crop-landscape"/></svg><b>L</b></span>
           </button>
         </div>
         <!-- Broadcast-style scorebug: the score sits centred over the rink, the logo and rules to its left, turn and phase to its right. -->
@@ -103,7 +143,7 @@
         </div>
         <div class="bug-right"><div class="bug-status"><b><i class="turn-long">Turn </i><i class="turn-short">T</i><span id="turn-label">1</span></b><span id="phase">Plan</span><span id="blitz-clock" hidden></span><span class="bug-clock" id="clock-strip" aria-hidden="true" hidden><i></i></span></div></div>
         <div class="stadium-toolbar">
-          <button id="btn-sidebars" class="stadium-tool-btn" type="button" aria-label="Hide team sidebars" aria-pressed="false"><i data-icon="columns-2"></i></button>
+          <button id="btn-sidebars" class="stadium-tool-btn" type="button" aria-label="Hide team sidebars" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#icon-columns-2"/></svg></button>
           <button id="btn-fullscreen" class="stadium-tool-btn" type="button" aria-label="Enter fullscreen" title="Enter fullscreen" aria-pressed="false" hidden>
             <svg id="icon-fs-enter" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
@@ -141,9 +181,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
       -->
       <div class="spin-control" id="field-spin" hidden>
-        <button id="spin-less" type="button" aria-label="Decrease spin by 10 percent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5"/></svg></button>
+        <button id="spin-less" type="button" aria-label="Decrease spin by 10 percent"><svg class="icon" aria-hidden="true"><use href="#icon-rotate"/></svg></button>
         <input id="shot-spin" type="range" min="-100" max="100" step="1" value="0" aria-label="Selected ubu spin: counterclockwise to clockwise">
-        <button id="spin-more" type="button" aria-label="Increase spin by 10 percent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5"/></svg></button>
+        <button id="spin-more" type="button" aria-label="Increase spin by 10 percent"><svg class="icon" aria-hidden="true"><use href="#icon-rotate-clockwise"/></svg></button>
       </div>
 
         <div class="rink-stage">
@@ -156,7 +196,7 @@ SOFTWARE.
           <button id="skip-goal-replay" type="button" aria-label="Skip goal replay" hidden><span class="demo-badge"></span></button>
           <button id="demo-play" class="demo-play" type="button" aria-label="Play vs CPU"><span class="demo-hook">3v3 turn-based hockey</span><span class="demo-cta">Click or tap to play</span></button>
           <!-- Tabler hand-finger-down icon (MIT), as in uburoom web/icons.js. -->
-          <svg id="demo-finger" class="demo-finger" viewBox="0 0 24 24" aria-hidden="true" hidden><g><path d="M8 12v8.5a1.5 1.5 0 0 0 3 0v-7.5"/><path d="M11 13.5v2a1.5 1.5 0 0 0 3 0v-2.5"/><path d="M14 14.5a1.5 1.5 0 0 0 3 0v-1.5"/><path d="M17 13.5a1.5 1.5 0 0 0 3 0v-4.5a6 6 0 0 0 -6 -6h-2h.208a6 6 0 0 0 -5.012 2.7l-.196 .3q -.468 .718 -3.286 5.728a1.5 1.5 0 0 0 .536 2.022c.734 .44 1.674 .325 2.28 -.28l1.47 -1.47"/></g></svg>
+          <svg id="demo-finger" class="demo-finger" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="#icon-hand-finger-down"/></svg>
         </div>
         <div id="first-turn-guide" class="first-turn-guide" hidden>
           <svg aria-hidden="true"><path id="first-turn-arrow"/></svg>
@@ -177,8 +217,8 @@ SOFTWARE.
         <div class="shot-controls">
           <div class="knob-row" role="group" aria-label="Shot controls"></div>
           <div class="shot-buttons">
-            <button id="shot-guard" class="guard-toggle" type="button" aria-pressed="false" data-tip="Guard makes your ubu brake and brace for hits this turn."><i data-icon="shield"></i>Guard</button>
-            <button id="shot-reset" type="button"><i data-icon="rotate"></i>Reset</button>
+            <button id="shot-guard" class="guard-toggle" type="button" aria-pressed="false" data-tip="Guard makes your ubu brake and brace for hits this turn."><svg class="icon" aria-hidden="true"><use href="#icon-shield"/></svg>Guard</button>
+            <button id="shot-reset" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-rotate"/></svg>Reset</button>
           </div>
         </div>
         <div class="stadium-super-controls">
@@ -186,7 +226,7 @@ SOFTWARE.
           <img id="stadium-super-icon" class="super-icon" alt="" src="assets/00_stalwart.png">
           <span id="stadium-super-text">Super 0%</span>
         </button>
-        <button id="super-info" class="icon-button" type="button" aria-label="About this super"><i data-icon="info-circle"></i></button>
+        <button id="super-info" class="icon-button" type="button" aria-label="About this super"><svg class="icon" aria-hidden="true"><use href="#icon-info-circle"/></svg></button>
         <div id="super-info-panel" class="super-info-panel" popover="auto"><strong id="super-info-name"></strong><p id="super-info-description"></p><p>Charge your meter by striking the ball, checking opponents, and making saves. At 100%, arm your super before launching. Its effect starts on launch or when its trigger happens during the turn.</p></div>
         <small id="super-ready-hint" role="status" hidden></small>
         </div>
@@ -195,9 +235,9 @@ SOFTWARE.
           <div class="replay-track"><input id="replay-seek" type="range" min="0" max="1" step="1" value="0" aria-label="Replay position"><div id="replay-marks" class="replay-marks"></div></div>
           <div class="replay-controls">
             <!-- Tabler player, download, movie and share icons (MIT), as in uburoom web/icons.js. -->
-            <button id="replay-prev" class="icon-button" type="button" aria-label="Previous turn" title="Previous turn (Left arrow)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5v14l-12 -7l12 -7"/><path d="M4 5l0 14"/></svg></button>
-            <button id="replay-play" class="icon-button primary" type="button" aria-label="Pause" title="Play or pause (Space)"><svg viewBox="0 0 24 24" aria-hidden="true"><g class="icon-pause"><path d="M6 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12"/><path d="M14 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12"/></g><path class="icon-play" d="M7 4v16l13 -8l-13 -8"/></svg></button>
-            <button id="replay-next" class="icon-button" type="button" aria-label="Next turn" title="Next turn (Right arrow)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v14l12 -7l-12 -7"/><path d="M20 5l0 14"/></svg></button>
+            <button id="replay-prev" class="icon-button" type="button" aria-label="Previous turn" title="Previous turn (Left arrow)"><svg class="icon" aria-hidden="true"><use href="#icon-player-skip-back"/></svg></button>
+            <button id="replay-play" class="icon-button primary" type="button" aria-label="Pause" title="Play or pause (Space)"><svg viewBox="0 0 24 24" aria-hidden="true"><g class="icon-pause"><use href="#icon-player-pause"/></g><g class="icon-play"><use href="#icon-player-play"/></g></svg></button>
+            <button id="replay-next" class="icon-button" type="button" aria-label="Next turn" title="Next turn (Right arrow)"><svg class="icon" aria-hidden="true"><use href="#icon-player-skip-forward"/></svg></button>
             <span id="replay-time" class="replay-time">0:00 / 0:00</span>
             <select id="replay-speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
             <button id="replay-moves" class="replay-toggle" type="button" aria-pressed="false" title="Show each ubu's launch from where the turn started">Moves</button>
@@ -220,7 +260,7 @@ SOFTWARE.
   <dialog id="pause-menu" class="pause-menu" aria-labelledby="pause-title">
     <div class="pause-menu-main">
     <div class="pause-heading">
-      <button id="pause-help" class="icon-button" type="button" aria-label="How to play" title="How to play"><i data-icon="help"></i></button>
+      <button id="pause-help" class="icon-button" type="button" aria-label="How to play" title="How to play"><svg class="icon" aria-hidden="true"><use href="#icon-help"/></svg></button>
       <h2 id="pause-title">Paused</h2>
     </div>
     <div class="pause-actions">
@@ -277,7 +317,7 @@ SOFTWARE.
     <button id="match-help-back" class="primary" type="button">Back to menu</button>
   </dialog>
   <dialog id="replays-dialog" class="replays-dialog" aria-labelledby="replays-title">
-    <div class="online-heading"><div><h2 id="replays-title">Replays</h2><p id="replays-note"></p></div><button id="replays-close" class="icon-button" type="button" aria-label="Close replays"><i data-icon="x"></i></button></div>
+    <div class="online-heading"><div><h2 id="replays-title">Replays</h2><p id="replays-note"></p></div><button id="replays-close" class="icon-button" type="button" aria-label="Close replays"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button></div>
     <div class="replays-tools">
       <!-- Tabler upload icon (MIT), as in uburoom web/icons.js. -->
       <label class="button quiet file-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 9l5 -5l5 5"/><path d="M12 4l0 12"/></svg>Import .ububall<input id="replays-import" type="file" accept=".ububall" multiple></label>
@@ -299,7 +339,7 @@ SOFTWARE.
     <div class="export-actions"><button id="export-close" type="button">Cancel</button></div>
   </dialog>
   <dialog id="share-dialog" class="export-dialog share-dialog" aria-labelledby="share-title">
-    <div class="online-heading"><h2 id="share-title">Share</h2><button id="share-close" class="icon-button" type="button" aria-label="Close share"><i data-icon="x"></i></button></div>
+    <div class="online-heading"><h2 id="share-title">Share</h2><button id="share-close" class="icon-button" type="button" aria-label="Close share"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button></div>
     <canvas id="share-card" class="share-card" width="1080" height="980" aria-label="Share card of the moment on screen"></canvas>
     <label class="export-private"><input id="share-private" type="checkbox"><span><strong>Hide names</strong></span></label>
     <div class="export-actions"><button id="share-save" type="button">Save</button><button id="share-send" class="primary" type="button">Share</button></div>
@@ -327,7 +367,7 @@ SOFTWARE.
           <button id="stats-box-tab" type="button" aria-pressed="true" aria-controls="stats-box">Box score</button>
           <button id="stats-log-tab" type="button" aria-pressed="false" aria-controls="stats-log">Game log</button>
         </div>
-        <button id="stats-close" class="icon-button" type="button" aria-label="Close stats"><i data-icon="x"></i></button>
+        <button id="stats-close" class="icon-button" type="button" aria-label="Close stats"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button>
       </div>
     </div>
     <p id="stats-honours" class="summary-honours"></p>
@@ -356,14 +396,14 @@ SOFTWARE.
     </section>
   </dialog>
   <dialog id="roster-dialog" class="team-sheet" data-step="mode" aria-labelledby="roster-title">
-    <button id="cancel-roster" class="icon-button team-sheet-close" type="button" aria-label="Close"><i data-icon="x"></i></button>
+    <button id="cancel-roster" class="icon-button team-sheet-close" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button>
     <section class="sheet-step mode-step" aria-labelledby="roster-title">
       <h2 id="roster-title" class="mode-logo"><img src="assets/ububall-logo.svg" alt="ububall"><span class="visually-hidden">: choose a mode</span></h2>
       <p class="mode-intro">Turn rules on to mix them. All off plays standard ububall.</p>
       <fieldset class="mode-options"><legend class="visually-hidden">Rules</legend>
-        <label class="mode-option" data-rule="classic"><input type="checkbox" id="rule-classic"><strong>Classic</strong><small>Equal stats, no supers</small><span class="mode-check" aria-hidden="true"><i data-icon="check"></i></span></label>
-        <label class="mode-option" data-rule="pulse"><input type="checkbox" id="rule-pulse"><strong>Pulse</strong><small>1-second turns, momentum carries</small><span class="mode-check" aria-hidden="true"><i data-icon="check"></i></span></label>
-        <label class="mode-option" data-rule="blitz"><input type="checkbox" id="rule-blitz"><strong>Blitz</strong><small>5 seconds to plan each turn</small><span class="mode-check" aria-hidden="true"><i data-icon="check"></i></span></label>
+        <label class="mode-option" data-rule="classic"><input type="checkbox" id="rule-classic"><strong>Classic</strong><small>Equal stats, no supers</small><span class="mode-check" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#icon-check"/></svg></span></label>
+        <label class="mode-option" data-rule="pulse"><input type="checkbox" id="rule-pulse"><strong>Pulse</strong><small>1-second turns, momentum carries</small><span class="mode-check" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#icon-check"/></svg></span></label>
+        <label class="mode-option" data-rule="blitz"><input type="checkbox" id="rule-blitz"><strong>Blitz</strong><small>5 seconds to plan each turn</small><span class="mode-check" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#icon-check"/></svg></span></label>
       </fieldset>
       <p id="mode-summary" class="mode-summary" role="status"></p>
       <p id="rules-status" class="roster-status" role="status"></p>
@@ -374,7 +414,7 @@ SOFTWARE.
       </fieldset>
     </section>
     <section class="sheet-step team-step" aria-labelledby="team-title">
-      <header class="team-step-head"><button id="team-back" class="quiet" type="button"><i data-icon="arrow-left"></i>Mode</button><div class="team-heading"><h2 id="team-title">Your team</h2><span id="team-mode" class="team-mode"></span></div></header>
+      <header class="team-step-head"><button id="team-back" class="quiet" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-arrow-left"/></svg>Mode</button><div class="team-heading"><h2 id="team-title">Your team</h2><span id="team-mode" class="team-mode"></span></div></header>
       <div id="lobby-panel" class="lobby-panel" hidden>
         <div id="lobby-invite" class="lobby-invite"><input id="online-invite" readonly aria-label="Invite link"><button id="online-copy" type="button">Copy invite</button><button id="online-share" type="button" hidden>Share</button></div>
         <p id="lobby-status" class="lobby-status" role="status"></p>
@@ -382,16 +422,16 @@ SOFTWARE.
         <div class="lobby-actions"><a id="lobby-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a><button id="lobby-leave" class="quiet" type="button">Leave match</button></div>
       </div>
       <div id="team-bar" class="team-bar" hidden>
-        <button id="team-prev" class="team-step-btn" type="button" aria-label="Previous saved team"><i data-icon="chevron-left"></i></button>
+        <button id="team-prev" class="team-step-btn" type="button" aria-label="Previous saved team"><svg class="icon" aria-hidden="true"><use href="#icon-chevron-left"/></svg></button>
         <select id="team-select" aria-label="Saved team"></select>
-        <button id="team-next" class="team-step-btn" type="button" aria-label="Next saved team"><i data-icon="chevron-right"></i></button>
+        <button id="team-next" class="team-step-btn" type="button" aria-label="Next saved team"><svg class="icon" aria-hidden="true"><use href="#icon-chevron-right"/></svg></button>
         <button id="team-save" type="button">Save team</button>
-        <button id="team-more" class="team-step-btn" type="button" aria-label="More team actions"><i data-icon="dots"></i></button>
+        <button id="team-more" class="team-step-btn" type="button" aria-label="More team actions"><svg class="icon" aria-hidden="true"><use href="#icon-dots"/></svg></button>
         <div id="team-menu" class="team-menu"><button id="team-save-new" type="button">Save as new team</button><button id="team-rename" type="button">Rename</button><button id="team-delete" type="button">Delete</button></div>
       </div>
       <div id="roster-slots" class="formation" aria-label="Your team in kickoff formation"></div>
       <div id="roster-super" class="super-popover">
-        <div class="roster-super-head"><h3 id="roster-super-title"></h3><button class="formation-tool" type="button" popovertarget="roster-super" popovertargetaction="hide" aria-label="Close super choices"><i data-icon="x"></i></button></div>
+        <div class="roster-super-head"><h3 id="roster-super-title"></h3><button class="formation-tool" type="button" popovertarget="roster-super" popovertargetaction="hide" aria-label="Close super choices"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button></div>
         <div id="roster-super-grid" class="super-choice-grid"></div>
       </div>
       <p id="roster-hint" class="roster-hint" role="status"></p>
@@ -413,7 +453,7 @@ SOFTWARE.
       <button id="start-match" class="primary" type="button">Start match</button>
     </footer>
   </dialog>
-  <dialog id="online-dialog" aria-labelledby="online-title"><div class="online-heading"><div><h2 id="online-title">Online Ububall</h2><p>One opponent. Three ubus. First to five.</p></div><button id="online-close" class="icon-button" aria-label="Close online settings"><i data-icon="x"></i></button></div>
+  <dialog id="online-dialog" aria-labelledby="online-title"><div class="online-heading"><div><h2 id="online-title">Online Ububall</h2><p>One opponent. Three ubus. First to five.</p></div><button id="online-close" class="icon-button" aria-label="Close online settings"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button></div>
     <div id="online-entry" class="lobby-actions">
       <button id="online-public" type="button">Find online match</button>
       <button id="online-private" type="button">Create invite match</button>
@@ -477,7 +517,7 @@ SOFTWARE.
         <button id="viewer-fav" class="icon-button card-heart" type="button" aria-label="Favorite" title="Favorite">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572"/></svg>
         </button>
-        <button id="close-viewer" class="icon-button" type="button" aria-label="Close viewer"><i data-icon="x"></i></button>
+        <button id="close-viewer" class="icon-button" type="button" aria-label="Close viewer"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button>
       </div>
     </div>
     <div class="viewer-body">
@@ -511,7 +551,7 @@ SOFTWARE.
     </div>
   </dialog>
   <dialog id="reveal" aria-labelledby="reveal-title">
-    <div class="reveal-toolbar"><h2 id="reveal-title">Pack</h2><button id="pause-reveal" class="icon-button" aria-label="Close pack"><i data-icon="x"></i></button></div>
+    <div class="reveal-toolbar"><h2 id="reveal-title">Pack</h2><button id="pause-reveal" class="icon-button" aria-label="Close pack"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button></div>
     <div class="reveal-layout">
       <button id="prev-ubu" class="icon-button" aria-label="Previous ubu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button>
       <div id="card-stage" class="card-stage"></div>
@@ -524,7 +564,7 @@ SOFTWARE.
   <dialog id="account-dialog" class="account-dialog" aria-labelledby="account-dialog-title">
     <div class="account-dialog-header">
       <h2 id="account-dialog-title">Account</h2>
-      <button id="account-close" class="icon-button" type="button" aria-label="Close account dialog"><i data-icon="x"></i></button>
+      <button id="account-close" class="icon-button" type="button" aria-label="Close account dialog"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button>
     </div>
     <div class="account-identities">
       <div class="account-provider-row">
