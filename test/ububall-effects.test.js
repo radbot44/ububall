@@ -20,6 +20,46 @@ function runInNewContext(code, context) {
     portrait: 'isPortrait', field: 'videoField' });
   return vm.runInNewContext(code, context);
 }
+
+test('match shortcuts do not hijack focused buttons or other controls', () => {
+  let keydown, launches = 0, syncs = 0;
+  const context = {
+    document: {
+      addEventListener(type, listener) { if (type === 'keydown') keydown = listener; },
+      querySelector() { return null; }
+    },
+    inMatch: true, theater: null, foulInfo: null, selected: 0,
+    ownsFullscreen: () => false,
+    sync: () => { syncs++; }, draw() {},
+    $: id => {
+      assert.equal(id, 'launch');
+      return { click: () => { launches++; } };
+    }
+  };
+  runInNewContext(section("  document.addEventListener('keydown', e => {", '  const portraitScreen = matchMedia'), context);
+  const press = (key, control = null) => {
+    let prevented = false;
+    const target = {
+      closest: selector => control && selector.split(',').map(s => s.trim()).includes(control) ? {} : null,
+      blur: () => assert.fail('a shortcut must not blur a focused control')
+    };
+    keydown({ key, target, ctrlKey: false, altKey: false, metaKey: false,
+      preventDefault: () => { prevented = true; } });
+    return prevented;
+  };
+  for (const control of ['button', 'a', 'input', 'textarea', '[tabindex]', '[contenteditable]']) {
+    assert.equal(press('Enter', control), false, `${control} must keep Enter`);
+    assert.equal(press(' ', control), false, `${control} must keep Space`);
+  }
+  assert.equal(launches, 0);
+  assert.equal(context.selected, 0);
+  assert.equal(press('Enter'), true);
+  assert.equal(launches, 1, 'Enter still launches when the rink has focus');
+  assert.equal(press(' '), true);
+  assert.equal(context.selected, 1, 'Space still selects the next player');
+  assert.equal(syncs, 1);
+});
+
 function section(start, end) {
   const a = source.indexOf(start);
   const b = source.indexOf(end, a);
