@@ -5348,18 +5348,16 @@
       return;
     }
     if (!inMatch || theater || e.ctrlKey || e.altKey || e.metaKey) return;
-    if (document.querySelector('dialog[open]') || e.target.closest?.('input, select, textarea')) return;
+    if (document.querySelector('dialog[open]') || e.target.closest?.('button, a, input, select, textarea, [tabindex], [contenteditable]')) return;
 
     if (e.key === ' ') {
       e.preventDefault();
-      if (e.target.closest?.('button')) e.target.blur();
       selected = (selected + 1) % 3;
       sync(); draw();
       return;
     }
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (e.target.closest?.('button')) e.target.blur();
       $('launch').click();
       return;
     }
