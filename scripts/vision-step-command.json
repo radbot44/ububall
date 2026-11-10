@@ -1,5 +1,32 @@
 {
-  "initial": true,
-  "previous_run": null,
-  "actions": []
+  "initial": false,
+  "previous_run": 42865380343,
+  "actions": [
+    {
+      "type": "drag",
+      "x": 389,
+      "y": 434,
+      "to_x": 549,
+      "to_y": 434
+    },
+    {
+      "type": "drag",
+      "x": 523,
+      "y": 310,
+      "to_x": 638,
+      "to_y": 375
+    },
+    {
+      "type": "drag",
+      "x": 523,
+      "y": 558,
+      "to_x": 638,
+      "to_y": 490
+    },
+    {
+      "type": "click",
+      "x": 905,
+      "y": 850
+    }
+  ]
 }
