@@ -78,6 +78,44 @@ const summary={winner:state.winner===null?'capped':state.winner===0?'agent':'eas
   score:state.scores,turns:turns.length,goals:turns.filter(x=>x.result.goal!==null).length,
   tactics:Object.fromEntries(['press-for-goal','protect-own-goal','control-the-lead'].map(k=>[k,turns.filter(t=>t.tactic===k).length])),
   positiveTerritory:turns.filter(t=>t.result.progress>50).length,negativeTerritory:turns.filter(t=>t.result.progress< -50).length};
+
+const variations = [];
+for (const seed of [12, 13, 14, 15]) {
+  let game = S.initialState(seed, 'standard'), prior = null;
+  const history = [];
+  for (let n = 0; n < 100 && game.winner === null; n++) {
+    const config = strategy(game, prior);
+    const myDecision = C.plan(game, 0, config);
+    const cpuDecision = C.plan(game, 1, { level: 'easy', seed: game.turn });
+    const startX = game.bodies[6].x;
+    const result = M.resolveTurn(P, game, [...myDecision.plans, ...cpuDecision.plans]);
+    game = result.state;
+    const progress = game.bodies[6].x - startX;
+    prior = { progress, goal: result.replay.goal };
+    history.push({ turn: n + 1, scores: [...game.scores], tactic: config.tactic,
+      goal: result.replay.goal, progress: Math.round(progress),
+      plans: myDecision.plans.map(p => ({
+        angleDeg: Math.round(p.angle * 180 / Math.PI),
+        power: +p.power.toFixed(2), spin: +p.spin.toFixed(2),
+        guard: Boolean(p.guard), superArm: Boolean(p.superArm)
+      })) });
+    if (game.phase === 'goal') S.kickoff(game);
+  }
+  const item = { seed, winner: game.winner === null ? 'capped' : game.winner === 0 ? 'agent' : 'easy-cpu',
+    scores: [...game.scores], turns: history.length,
+    tactics: Object.fromEntries(['press-for-goal', 'protect-own-goal', 'control-the-lead']
+      .map(k => [k, history.filter(h => h.tactic === k).length])),
+    failedAttacks: history.filter(h => h.goal !== 0 && h.tactic === 'press-for-goal').length,
+    history };
+  variations.push(item);
+  console.log('ENGINE_EXTRA ' + JSON.stringify({ seed: item.seed, winner: item.winner,
+    scores: item.scores, turns: item.turns, tactics: item.tactics, failedAttacks: item.failedAttacks }));
+}
+console.log('ENGINE_SHOTS '+JSON.stringify(turns.map(t => ({ turn: t.turn,
+  tactic: t.tactic, plans: t.plans.map(p => ({
+    angleDeg: Math.round(p.angle * 180 / Math.PI), power: +p.power.toFixed(2),
+    spin: +p.spin.toFixed(2), guard: p.guard, superArm: p.superArm
+  })) }))));
 console.log('ENGINE_RESULT '+JSON.stringify(summary));
-fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({summary,turns},null,2)+'\n');
-if(summary.winner==='capped') process.exitCode=2;
+fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({summary,turns,variations},null,2)+'\n');
+if(summary.winner==='capped' || variations.some(v => v.winner==='capped')) process.exitCode=2;
