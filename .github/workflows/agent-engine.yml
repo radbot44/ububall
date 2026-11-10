@@ -1,0 +1,34 @@
+name: Agent deterministic engine match
+on:
+  push:
+    branches:
+      - agent/visual-easy-cpu-play-20261110
+    paths:
+      - scripts/agent-engine-match.cjs
+      - .github/workflows/agent-engine.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  match:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Play engine-level match against Easy CPU
+        run: node scripts/agent-engine-match.cjs
+      - name: Upload engine match log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ububall-agent-engine-match
+          path: artifacts/agent-engine/
+          if-no-files-found: warn
+          retention-days: 7
