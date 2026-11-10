@@ -176,7 +176,6 @@ async function run() {
     viewport: { width: WIDTH, height: HEIGHT },
     deviceScaleFactor: 1, reducedMotion: 'reduce', acceptDownloads: false
   });
-  ctx.on('page', p => { if (p !== page) void p.close(); });
   await ctx.route('**/*', route => {
     const url = route.request().url();
     return url.startsWith(SERVER) || url.startsWith('blob:') || url.startsWith('data:')
