@@ -30,7 +30,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       VISION_MODEL: ${{ inputs.model || 'gpt-4.1' }}
       VISION_MAX_STEPS: ${{ inputs.max_steps || '90' }}
     steps:
@@ -46,6 +45,7 @@ jobs:
         shell: bash
         env:
           TEST_MODE: ${{ inputs.mode || 'smoke' }}
+          OPENAI_API_KEY: ${{ inputs.mode == 'vision' && secrets.OPENAI_API_KEY || '' }}
         run: |
           if [ "$TEST_MODE" = "vision" ]; then
             node scripts/vision-only-play.cjs
