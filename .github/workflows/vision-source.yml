@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: tar --exclude=.git --exclude=node_modules --exclude=dist -czf source-ububall.tgz .
+      - run: tar --exclude=.git --exclude=node_modules --exclude=dist --exclude=source-ububall.tgz -czf /tmp/source-ububall.tgz . && mv /tmp/source-ububall.tgz .
       - uses: actions/upload-artifact@v4
         with:
           name: public-source-ububall
