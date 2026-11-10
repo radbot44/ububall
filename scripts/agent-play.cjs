@@ -84,12 +84,13 @@ function strategy(o, previous) {
 }
 let worker, browser;
 async function play() {
-  worker = spawn('npm', ['run', 'dev'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+  worker = spawn('npm', ['run', 'dev'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   let serverLogs = '';
   for (const stream of [worker.stdout, worker.stderr]) stream.on('data', chunk => {
     serverLogs = (serverLogs + chunk.toString()).slice(-10000);
   });
   await waitServer().catch(e => { throw Error(e.message + '\n' + serverLogs); });
+  emit({ event: 'server-ready' });
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 930 },
     deviceScaleFactor: 1, reducedMotion: 'reduce' });
@@ -98,6 +99,7 @@ async function play() {
   await page.goto('http://127.0.0.1:8790/', { waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.waitForFunction(() => Boolean(window.__ububallAgent), null, { timeout: 45000 });
   await page.evaluate(() => window.__ububallAgent.start());
+  emit({ event: 'game-loaded' });
   await page.waitForFunction(() => window.__ububallAgent.observe().phase === 'plan');
   emit({ event: 'started', cpu: 'easy', mode: 'standard',
     view: summary(await page.evaluate(() => window.__ububallAgent.observe())) });
@@ -158,6 +160,9 @@ play().catch(error => {
   process.exitCode = 1;
 }).finally(async () => {
   await browser?.close().catch(() => {});
-  if (worker) worker.kill('SIGTERM');
+  if (worker) {
+    try { process.kill(-worker.pid, 'SIGTERM'); } catch { worker.kill('SIGTERM'); }
+    worker.stdout?.destroy(); worker.stderr?.destroy();
+  }
   fs.writeFileSync(sourcePath, original);
 });
