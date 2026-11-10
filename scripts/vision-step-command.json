@@ -1,20 +1,20 @@
 {
   "initial": false,
-  "previous_run": 42866732126,
+  "previous_run": 42867069319,
   "actions": [
     {
       "type": "drag",
-      "x": 831,
-      "y": 418,
-      "to_x": 861,
-      "to_y": 260
+      "x": 1032,
+      "y": 232,
+      "to_x": 866,
+      "to_y": 232
     },
     {
       "type": "drag",
-      "x": 1045,
-      "y": 313,
-      "to_x": 1114,
-      "to_y": 423
+      "x": 1058,
+      "y": 470,
+      "to_x": 895,
+      "to_y": 470
     },
     {
       "type": "click",
