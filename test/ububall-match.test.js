@@ -14,7 +14,7 @@ test('network move validation rejects forged state and non-finite or out-of-rang
   }
   assert.throws(()=>M.validatePlans([]));
   const guarded=moves(); Object.assign(guarded[0],{guard:true,spin:.5});
-  assert.deepEqual(M.validatePlans(guarded)[0],{angle:0,power:0,spin:0,superArm:false,guard:true});
+  assert.deepEqual(M.validatePlans(guarded)[0],{angle:0,power:.5,spin:.5,superArm:false,guard:true});
 });
 test('Classic, Pulse and Blitz combine independently', () => {
   assert.equal(M.MODES.length,8);

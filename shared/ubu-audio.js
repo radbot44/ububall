@@ -926,12 +926,12 @@
     };
     hiss.start(ctx.currentTime, Math.random() * 0.9);
     let crackles;
-    const crackle = () => {
-      const now = ctx.currentTime;
+    const isOffline = (typeof OfflineAudioContext !== 'undefined' && ctx instanceof OfflineAudioContext) || ctx.constructor?.name === 'OfflineAudioContext';
+    const scheduleCrackle = (time) => {
       const count = Math.random() < 0.15 ? 2 : 1;
       for (let k = 0; k < count; k++) {
         const isPop = Math.random() < 0.25;
-        const start = now + k * (0.012 + Math.random() * 0.025);
+        const start = time + k * (0.012 + Math.random() * 0.025);
         const len = isPop ? 0.025 : 0.009;
         const source = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
         source.buffer = grainNoise(ctx);
@@ -944,15 +944,28 @@
         source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
         source.start(start, Math.random() * 0.8); source.stop(start + len + 0.01);
       }
-      crackles = setTimeout(crackle, 180 + Math.random() * 300);
     };
-    crackles = setTimeout(crackle, 60);
+    if (isOffline) {
+      let t = ctx.currentTime + 0.06;
+      const end = ctx.currentTime + (options.duration || 10);
+      while (t < end) {
+        scheduleCrackle(t);
+        t += 0.18 + Math.random() * 0.3;
+      }
+    } else {
+      const crackle = () => {
+        scheduleCrackle(ctx.currentTime);
+        crackles = setTimeout(crackle, 180 + Math.random() * 300);
+      };
+      crackles = setTimeout(crackle, 60);
+    }
     const handle = {
       stop() {
         if (!superPlayback.delete(handle)) return;
-        clearTimeout(crackles);
+        if (crackles) clearTimeout(crackles);
         const now = ctx.currentTime;
-        output.gain.cancelAndHoldAtTime(now);
+        output.gain.cancelScheduledValues(now);
+        output.gain.setValueAtTime(output.gain.value, now);
         output.gain.linearRampToValueAtTime(0, now + 0.15);
         hiss.stop(now + 0.16);
       }

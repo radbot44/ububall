@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 20;
+  const VERSION = 21;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IRON_COOLDOWN_TICKS = 48; // ~200 ms at 240 Hz DT: cooldown after an Iron Save
@@ -204,12 +204,12 @@
     const inGoalY = b.y > k.goalTop && b.y < k.goalBottom, before = b.team === -1 ? Math.hypot(b.vx, b.vy) : 0;
 
     if (inGoalY) {
+      const backX = k.left - k.goalDepth + r;
+      if (b.x < backX) {
+        reflect(b, -1, 0, backX - b.x, 'net', onWall);
+        if (b.team === -1) { b.vx *= 0.1; b.vy *= 0.1; }
+      }
       if (b.x < k.left) {
-        const backX = k.left - k.goalDepth + r;
-        if (b.x < backX) {
-          reflect(b, -1, 0, backX - b.x, 'net', onWall);
-          if (b.team === -1) { b.vx *= 0.1; b.vy *= 0.1; }
-        }
         if (b.y < k.goalTop + r) reflect(b, 0, -1, k.goalTop + r - b.y, 'net', onWall);
         if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall);
       } else if (b.x < k.left + r) {
@@ -223,12 +223,12 @@
     }
 
     if (inGoalY) {
+      const backX = k.right + k.goalDepth - r;
+      if (b.x > backX) {
+        reflect(b, 1, 0, b.x - backX, 'net', onWall);
+        if (b.team === -1) { b.vx *= 0.1; b.vy *= 0.1; }
+      }
       if (b.x > k.right) {
-        const backX = k.right + k.goalDepth - r;
-        if (b.x > backX) {
-          reflect(b, 1, 0, b.x - backX, 'net', onWall);
-          if (b.team === -1) { b.vx *= 0.1; b.vy *= 0.1; }
-        }
         if (b.y < k.goalTop + r) reflect(b, 0, -1, k.goalTop + r - b.y, 'net', onWall);
         if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall);
       } else if (b.x > k.right - r) {
@@ -284,7 +284,7 @@
     const radius = SUPER.shockRadius * 0.5;
     const force = 400;
     for (const b of bodies) {
-      if (b === source || b.superActive === 'stalwart' || b.carded) continue;
+      if (b === source || b.team === -1 || b.superActive === 'stalwart' || b.carded) continue;
       const dx = b.x - source.x, dy = b.y - source.y, d2 = dx * dx + dy * dy;
       if (d2 > 0 && d2 < radius * radius) {
         const d = Math.sqrt(d2);
@@ -356,19 +356,19 @@
       ball.openingShot = false;
     } else a.spinStrike = b.spinStrike = 0;
 
+    const nx = d ? dx / d : 1, ny = d ? dy / d : 0;
+    const closing = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+
     let knockoutChecker = null;
-    if (!isBall && a.team !== b.team) {
+    if (!isBall && a.team !== b.team && closing < 0) {
       if (['knockout', 'stalwart', 'colossus'].includes(a.superActive)) a.superHit = true;
       if (['knockout', 'stalwart', 'colossus'].includes(b.superActive)) b.superHit = true;
       if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; onSuper?.('knockout', 'impact', a, b); knockoutChecker = a; }
-      if (b.superActive === 'knockout') { a.stunnedNext = true; b.superActive = null; onSuper?.('knockout', 'impact', b, a); knockoutChecker = b; }
+      if (b.superActive === 'knockout') { a.stunnedNext = true; b.superActive = null; onSuper?.('knockout', 'impact', b, a); knockoutChecker = knockoutChecker || b; }
       // An opponent's hit knocks a Sticky ball loose.
       if (a.superActive === 'sticky' && a.holding) endSuper(a, allBodies);
       if (b.superActive === 'sticky' && b.holding) endSuper(b, allBodies);
     }
-
-    const nx = d ? dx / d : 1, ny = d ? dy / d : 0;
-    const closing = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
     // Restitution describes the rebound, not the entire stopping impulse. Bounciness acts only on
     // the boards, so every body and ball contact shares one sub-elastic rebound.
     const restitution = .88;
@@ -744,6 +744,7 @@
             ball.stickOffset = { x: (ox / od) * td, y: (oy / od) * td };
             ball.x = host.x + ball.stickOffset.x;
             ball.y = host.y + ball.stickOffset.y;
+            walls(ball, onWall);
           }
         } else {
           walls(ball, onWall);
@@ -770,7 +771,7 @@
       // A daze lasts until the ubu's next turn starts, whether or not it launches.
       if (b.stunned) {
         b.vx = 0; b.vy = 0; b.omega = 0;
-        b.stunned = false; b.daze = 0;
+        b.daze = 0;
         return;
       }
       if (b.guarding) {
@@ -821,6 +822,7 @@
       b.openingShot = false;
       b.spinStruck = false;
       b.guarding = false; b.ironGuard = false; b.ironCooldownTicks = 0;
+      b.stunned = false;
       if (!keepMotion) b.vx = b.vy = b.omega = 0;
       // In Pulse, a running super carries into the next turn until its time runs out.
       if (!keepMotion || (!b.superActive && b.usedSuperThisTurn && !b.superRefunded)) endSuper(b, bodies);

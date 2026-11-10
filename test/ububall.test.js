@@ -535,6 +535,8 @@ test('Knockout stuns opponent on contact and prevents them from moving next turn
   P.launch(b, Array.from({ length: 6 }, () => ({ angle: 0, power: 1 })));
   assert.equal(b[3].vx, 0);
   assert.equal(b[3].vy, 0);
+  assert.equal(b[3].stunned, true);
+  P.stop(b);
   assert.equal(b[3].stunned, false);
 });
 

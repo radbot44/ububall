@@ -1,7 +1,7 @@
 /* Shared match rules; callers supply authenticated, server-derived roster data. */
 (function(root) {
   'use strict';
-  const VERSION = 2;
+  const VERSION = 3;
   // Classic, Pulse and Blitz are independent rules, joined in this order; 'standard' has none.
   const RULES = ['classic', 'pulse', 'blitz'];
   const MODES = Array.from({ length: 8 }, (_, n) => RULES.filter((r, i) => n >> i & 1).join('-') || 'standard');
@@ -23,9 +23,8 @@
       if (!p || typeof p !== 'object' || Array.isArray(p) || Object.keys(p).some(k => !['angle', 'power', 'spin', 'superArm', 'guard'].includes(k)) ||
           !Number.isFinite(p.angle) || !Number.isFinite(p.power) || !Number.isFinite(p.spin) ||
           p.power < 0 || p.power > 1 || p.spin < -1 || p.spin > 1 || typeof p.superArm !== 'boolean' || typeof p.guard !== 'boolean') throw new Error('Invalid move.');
-      // A guarding ubu brakes instead of launching.
-      if (p.guard) return { angle: 0, power: 0, spin: 0, superArm: p.superArm, guard: true };
-      return { angle: ((p.angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI), power: p.power, spin: p.spin, superArm: p.superArm, guard: false };
+      // A guarding ubu brakes instead of launching, but preserves its aimed arrow.
+      return { angle: ((p.angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI), power: p.power, spin: p.spin, superArm: p.superArm, guard: p.guard };
     });
   }
   function rule(mode, name) {
@@ -97,6 +96,10 @@
     const [i] = touched, team = before[i].team, mouth = team ? P.rink.right : P.rink.left;
     if (team < 0 || (team ? ball.vx <= 0 : ball.vx >= 0)) return [];
     if (Math.hypot(ball.x - mouth, ball.y - (P.rink.goalTop + P.rink.goalBottom) / 2) > SAVE.range) return [];
+    const speed = Math.hypot(ball.vx, ball.vy), horizon = SAVE.ticks * P.DT;
+    const turn = Math.abs(ball.omega || 0) * P.ballCurveFactor(ball, true) * horizon;
+    const horizontalReach = horizon * (Math.abs(ball.vx) + speed * Math.min(1, turn));
+    if (Math.abs(ball.x - mouth) - ball.radius > horizontalReach) return [];
     if (P.wouldScore(before, before[i], SAVE.ticks) !== 1 - team) return [];
     if (P.ballRun(after, { boards: true, ticks: 2 * SAVE.ticks }).goal === 1 - team) return [];
     return [{ index: i, own: responsibleTeam(before, credit) !== 1 - team }];
@@ -217,8 +220,9 @@
     const t = spareTick || { motion: new Float64Array(35), touched: new Set() }, outer = activeTick;
     spareTick = null; activeTick = t;
     if (t.motion.length < bodies.length * 5) t.motion = new Float64Array(bodies.length * 5);
-    const { motion, touched } = t, ball = bodies.find(b => b.team === -1);
+    const { motion, touched } = t, ball = bodies[6]?.team === -1 ? bodies[6] : bodies.find(b => b.team === -1);
     touched.clear(); t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx; t.tally = tally;
+    t.cannon = false;
     for (let i = 0; i < bodies.length; i++) {
       const b = bodies[i];
       motion[i * 5] = b.x; motion[i * 5 + 1] = b.y; motion[i * 5 + 2] = b.vx; motion[i * 5 + 3] = b.vy; motion[i * 5 + 4] = b.omega;
@@ -227,33 +231,40 @@
     const incomingCredit = { ...play.credit };
     const held = P.holder(bodies);
     play.age++;
-    const onShockwave = (source, radius, type = null) => {
-      if (type !== 'iron' && ball && source) {
-        const dx = ball.x - source.x, dy = ball.y - source.y;
-        if (dx * dx + dy * dy < radius * radius) {
-          const si = bodies.indexOf(source);
-          if (si >= 0) {
-            play.last = si; play.lastTouch[source.team] = si;
-            play.credit = { [si]: 1 }; play.shotX[source.team] = ball.x;
+    t.onShockwave ??= (source, radius, type = null) => {
+      activeTick?.fx?.shockwave?.(source, radius, type);
+    };
+    // A Cannonball spends itself in the hit, so the hit is known by its impact, not by the field after.
+    t.onSuper ??= (key, action, body, target) => {
+      const at = activeTick;
+      if (!at) return;
+      if (key === 'cannonball' && action === 'impact') at.cannon = true;
+      if (key === 'magnet' && action === 'pull' && body && at.ball) {
+        const bi = at.bodies.indexOf(body);
+        if (bi >= 0) {
+          const strikerTeam = at.ball.strikerTeam ?? -1;
+          if (body.team === strikerTeam || strikerTeam < 0) {
+            at.play.last = bi; at.play.lastTouch[body.team] = bi;
+            at.play.credit = { [bi]: 1 }; at.play.shotX[body.team] = at.ball.x;
+          } else {
+            // Defending magnet: blend credit based on velocity projection with defense protection
+            const ballIdx = at.bodies.indexOf(at.ball);
+            const bvx = at.motion[ballIdx * 5 + 2], bvy = at.motion[ballIdx * 5 + 3];
+            const beforeSpeed = Math.hypot(bvx, bvy), curSpeed = Math.hypot(at.ball.vx, at.ball.vy);
+            let kept = beforeSpeed && curSpeed ? Math.max(0, (bvx * at.ball.vx + bvy * at.ball.vy) / (beforeSpeed * beforeSpeed)) : 0;
+            kept = Math.max(kept, 0.75);
+            const next = {};
+            for (const [idx, share] of Object.entries(at.play.credit)) if (share * kept >= 0.01) next[idx] = share * kept;
+            next[bi] = (next[bi] || 0) + (1 - kept);
+            at.play.credit = next;
+            if (1 - kept > 0.5) { at.play.last = bi; at.play.lastTouch[body.team] = bi; at.play.shotX[body.team] = at.ball.x; }
           }
         }
       }
-      fx.shockwave?.(source, radius, type);
+      at.fx?.super?.(key, action, body, target);
     };
-    // A Cannonball spends itself in the hit, so the hit is known by its impact, not by the field after.
-    let cannon = false;
-    const onSuper = (key, action, body, target) => {
-      if (key === 'cannonball' && action === 'impact') cannon = true;
-      if (key === 'magnet' && action === 'pull' && body && ball) {
-        const bi = bodies.indexOf(body);
-        if (bi >= 0) {
-          play.last = bi; play.lastTouch[body.team] = bi;
-          play.credit = { [bi]: 1 }; play.shotX[body.team] = ball.x;
-        }
-      }
-      fx.super?.(key, action, body, target);
-    };
-    const goal = P.step(bodies, P.DT, tickTouch, tickWall, onShockwave, onSuper);
+    const goal = P.step(bodies, P.DT, tickTouch, tickWall, t.onShockwave, t.onSuper);
+    const cannon = t.cannon;
     activeTick = outer;
     const before = touched.size ? bodies.map((b, i) => ({ ...b, x: motion[i * 5], y: motion[i * 5 + 1], vx: motion[i * 5 + 2],
       vy: motion[i * 5 + 3], omega: motion[i * 5 + 4], holding: b === held,
@@ -398,7 +409,8 @@
       // Centre ice, or the nearest clear spot along the centre line.
       const clear = y => ubus.every(b => b.carded || Math.hypot(b.x - 500, b.y - y) >= b.radius + ball.radius);
       const y = [300, 240, 360, 180, 420, 120, 480].find(clear) ?? 300;
-      Object.assign(ball, { x: 500, y, vx: 0, vy: 0, omega: 0, stickOffset: null });
+      Object.assign(ball, { x: 500, y, vx: 0, vy: 0, omega: 0, stickOffset: null,
+        fireTicks: 0, onFire: false, pace: 0, strikerPower: 1, strikerTeam: -1 });
       const holding = P.holder(bodies);
       if (holding) holding.holding = false;
     }
@@ -472,7 +484,7 @@
     const partial = preservePartial && goal === null && ticks < turnTicks(state.mode) && !P.settled(bodies);
     if (!partial) {
       next.winner = finishTurn(P, bodies, next.stats, next.scores, goal, state.mode, { ace: ace && !call.own ? call.scorer : null, assist: call.assist }, next.fouls, tally);
-      if (goal !== null) noteScore(tally, next.scores);
+      if (goal !== null && tally) noteScore(tally, next.scores);
       next.roundTurns = goal === null ? (state.roundTurns || 0) + 1 : 0;
       next.turn++;
       next.phase = next.winner !== null ? 'over' : goal !== null ? 'goal' : 'plan';

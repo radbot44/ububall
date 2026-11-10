@@ -361,8 +361,8 @@
     function generateMoves(superArmKey) {
       const arm = Boolean(superArmKey);
       const moves = [];
-      moves.push(tag({ ...HOLD, superArm: arm }, 'hold'));
-      moves.push(tag({ ...GUARD, superArm: arm }, 'guard'));
+      moves.push(tag({ ...HOLD, superArm: false }, 'hold'));
+      moves.push(tag({ ...GUARD, superArm: arm && superArmKey === 'stalwart' }, 'guard'));
 
       if (isBehind) {
         for (const y of [300, 250, 350]) {
@@ -565,7 +565,9 @@
         },
         wall(body, velocity, type) { if (body.team === -1 && touches && type !== 'net') boards++; }
       };
-      const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false, ticks: searchTicks, decided, watch, preservePartial: true });
+      const canDecide = !state.fouls?.crease?.[team];
+      const checkDecided = canDecide ? bodies => touches > 0 && decided(bodies) : null;
+      const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false, ticks: searchTicks, decided: checkDecided, watch, preservePartial: true });
       simulations++; ticks += result.replay.ticks;
       return evaluate(result.state, team, result.replay.goal, weights, boards + Math.max(0, touches - 1), toucher, teammatesTouched.size > 1, tmw);
     }
@@ -633,11 +635,13 @@
       });
     }
     while (evaluated < settings.candidates) {
-      const next = best.map(copy), i = Math.floor(random() * 3);
-      if (state.bodies[team * 3 + i].stunned || next[i].guard) { consider(next); continue; }
+      const next = best.map(copy);
       if (evaluated % 4 === 0) {
         next.splice(0, 3, ...teamPlan());
       } else {
+        const editable = [0, 1, 2].filter(idx => !state.bodies[team * 3 + idx].stunned && !next[idx].guard);
+        if (!editable.length) break;
+        const i = editable[Math.floor(random() * editable.length)];
         // Fine-tune one ubu within its current intent.
         next[i].angle += (random() - .5) * .28;
         next[i].power = Math.max(0, Math.min(1, next[i].power + (random() - .5) * .25));

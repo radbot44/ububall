@@ -143,7 +143,7 @@ class MatchRoom {
       const stops = s.replay.stops.reduce((ms, stop) => ms + stop.ms, 0);
       s.playTicks = (settled ? 0 : s.playTicks || 0) + s.replay.ticks;
       s.playStops = (settled ? 0 : s.playStops || 0) + stops;
-      s.playUntil = s.replay.goal === null ? now + Math.ceil(s.replay.ticks * P.DT * 1000) + 750 : null;
+      s.playUntil = s.replay.goal === null ? now + Math.ceil(s.replay.ticks * P.DT * 1000) + stops + 750 : null;
       s.replay.startedAt = now;
     }
   }
@@ -174,7 +174,7 @@ class MatchRoom {
     // Guarding ubus stay on guard into the next turn of the same round.
     const keepGuard = s.game?.phase === 'plan';
     s.phase = 'plan'; s.locked = [false, false];
-    s.drafts = keepGuard ? s.drafts.map(draft => draft.map(p => ({ ...idle(), guard: p.guard }))) : [hold(), hold()];
+    s.drafts = keepGuard ? s.drafts.map(draft => draft.map(p => ({ ...p, superArm: false }))) : [hold(), hold()];
     s.replay = null;
     const duration = rules.planningMilliseconds(s.mode);
     s.deadline = duration !== null && s.connected.every(Boolean) ? now + duration : null;

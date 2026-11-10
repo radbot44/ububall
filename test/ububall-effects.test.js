@@ -1569,7 +1569,9 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
         playGoalHit: dummy,
         playSuper: dummy,
         playSizzle: () => ({ stop: dummy }),
-        playFoul: dummy
+        playFoul: dummy,
+        playIronSave: dummy,
+        playFanfare: dummy
       }
     },
     document: {

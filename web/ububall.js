@@ -28,7 +28,7 @@
   const idlePlan = () => ({ angle: 0, power: 0, spin: 0, guard: false });
   fieldView.bodies = P.kickoff();
   let simBodies = P.kickoff(), plans = Array.from({ length: 3 }, idlePlan), cpu = [], selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
-  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, skaters = [];
+  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, dragDirty = false, skaters = [];
   fieldView.portrait = false;
   fieldView.mode = 'standard';
   let planDeadline = 0, planPausedAt = null;
@@ -1383,13 +1383,16 @@
   }
   // Online meters come from the server; replays never earn meter.
   function contactMeter(a, b, speed) {
-    if ((typeof phase !== 'undefined' && phase !== 'play') || online?.active || goalReplay || theater || (typeof activePlayback !== 'undefined' && activePlayback)) return;
-    const tick = matchTicks + Math.round(elapsed / P.DT);
+    if ((typeof phase !== 'undefined' && phase !== 'play' && !theater && !goalReplay && typeof activePlayback === 'undefined') || online?.active) return;
+    const th = (typeof activePlayback !== 'undefined' && activePlayback) || (typeof theater !== 'undefined' && theater);
+    const targetSim = th?.simBodies || simBodies;
+    const targetStats = th?.stats || stats;
+    const tick = (th?.currentTick || matchTicks) + Math.round((elapsed + P.DT) / P.DT);
     const ia = fieldView.bodies.indexOf(a), ib = fieldView.bodies.indexOf(b);
-    const sa = ia >= 0 && simBodies[ia] ? simBodies[ia] : a;
-    const sb = ib >= 0 && simBodies[ib] ? simBodies[ib] : b;
-    for (const changed of ububallMatch.contactMeter(P, simBodies, stats, sa, sb, speed, tick, classicMode())) {
-      const cIdx = simBodies.indexOf(changed);
+    const sa = ia >= 0 && targetSim[ia] ? targetSim[ia] : a;
+    const sb = ib >= 0 && targetSim[ib] ? targetSim[ib] : b;
+    for (const changed of ububallMatch.contactMeter(P, targetSim, targetStats, sa, sb, speed, tick, classicMode())) {
+      const cIdx = targetSim.indexOf(changed);
       const vb = cIdx >= 0 && fieldView.bodies[cIdx] ? fieldView.bodies[cIdx] : changed;
       vb.meter = changed.meter;
       dirtyMeters.add(vb);
@@ -1720,11 +1723,12 @@
       const small = button.querySelector('small');
       if (small) {
         const spin = Math.round((plan.spin || 0) * 100);
+        const dazeCut = body && P.dazeSlow ? Math.round(P.dazeSlow(body) * 100) : 0;
         if (body?.carded) small.textContent = 'Yellow card · sits out this turn';
         else if (body?.stunned) small.textContent = '💫 Stunned this turn';
-        else if (guarded) small.textContent = 'Guarding';
-        else if (!aimed) small.textContent = 'Idle';
-        else small.textContent = `${Math.round(plan.power * 100)}% power · ${spin ? spin + '% spin' : 'no spin'}`;
+        else if (guarded) small.textContent = dazeCut ? `Guarding · Dazed (-${dazeCut}%)` : 'Guarding';
+        else if (!aimed) small.textContent = dazeCut ? `Idle · Dazed (-${dazeCut}%)` : 'Idle';
+        else small.textContent = `${Math.round(plan.power * 100)}% power · ${spin ? spin + '% spin' : 'no spin'}${dazeCut ? ` · Dazed (-${dazeCut}%)` : ''}`;
       }
     });
     const hasMoves = Boolean(actions.aimed || actions.guarding);
@@ -2112,9 +2116,11 @@
     const activeSuper = body.superActive || ((body.superArm && (body.meter ?? 0) >= 100) ? body.equippedSuper?.key : null);
     const isColossus = activeSuper === 'colossus';
     const isStalwart = activeSuper === 'stalwart';
-    const effRadius = body.radius * (isColossus && body.superActive !== 'colossus' ? (P.SUPER?.colossusRadius || 1.8) : 1);
+    const effRadius = isColossus ? Math.min(60, body.radius * (body.superActive === 'colossus' ? 1 : (P.SUPER?.colossusRadius || 1.8))) : body.radius;
     const superScale = isColossus ? (P.SUPER?.colossusLaunch || 0.75) : (isStalwart ? (P.SUPER?.stalwartLaunch || 0.5) : 1);
-    const scale = 110 * ((body.impulse || P.IMPULSE) / P.IMPULSE) * superScale;
+    const agility = (body.sizeMult || 1) ** (P.SIZE?.launch ?? -0.28);
+    const daze = 1 - (P.dazeSlow ? P.dazeSlow(body) : 0);
+    const scale = 110 * ((body.impulse || P.IMPULSE) / P.IMPULSE) * superScale * agility * daze;
     const ringR = Math.max(effRadius, body.reach || effRadius, 18) + 2;
     const distance = ringR + scale * plan.power;
     return { ringR, scale, distance, x: body.x + Math.cos(plan.angle) * distance, y: body.y + Math.sin(plan.angle) * distance,
@@ -2624,7 +2630,7 @@
         if (phase === 'plan' && b.superArm && activeKey === 'colossus') {
           fieldView.ctx.save();
           fieldView.ctx.setLineDash([5, 5]);
-          circle(b.x, b.y, b.radius * 1.8, '#ffe043cc', 2);
+          circle(b.x, b.y, Math.min(60, b.radius * (P.SUPER?.colossusRadius || 1.8)), '#ffe043cc', 2);
           fieldView.ctx.restore();
         }
 
@@ -3128,6 +3134,12 @@
       th.scores[team]++;
       if (!th.exporting) sync();
       celebrate(team, fieldView.bodies[6], t.goal.label, scorer);
+      if (typeof loopFanfare === 'function' && scorer?.voice) loopFanfare(scorer.voice);
+      if (typeof lightNet === 'function' && (t.goal.fireball || (typeof ballOnFire === 'function' && ballOnFire()))) lightNet(team);
+      if (!th.exporting && typeof popup === 'function' && t.goal.assist !== null && t.goal.assist !== undefined) {
+        const assistUbu = fieldView.bodies[viewIndex(t.goal.assist, th.seat)];
+        if (assistUbu) popup(assistUbu, 'Assist');
+      }
       if (!th.exporting) goalTab(team, t.goal.label, scorer?.name || null);
       return false;
     }
@@ -3229,7 +3241,8 @@
     const into = (options = {}) => ({ ...options, ctx });
     return { getAudioContext: () => ctx, stop() {}, playCollision: (voice, o) => A.playCollision(voice, into(o)), playBallHit: o => A.playBallHit(into(o)),
       playWallHit: o => A.playWallHit(into(o)), playGoalHit: (type, o) => A.playGoalHit(type, into(o)), playSuper: (key, phase, o) => A.playSuper(key, phase, into(o)),
-      playSizzle: o => A.playSizzle(into(o)), playFoul: (kind, o) => A.playFoul(kind, into(o)) };
+      playSizzle: o => A.playSizzle(into(o)), playFoul: (kind, o) => A.playFoul(kind, into(o)),
+      playIronSave: o => A.playIronSave?.(into(o)), playFanfare: (voice, notes, time, o) => A.playFanfare?.(voice, notes, time, into(o)) };
   }
   // Videos and share cards carry the ububall.com logo, loaded the first time one is made.
   let videoLogoImage = null;
@@ -3278,13 +3291,19 @@
     v.drawImage(fieldCanvas, x, y, width, height);
     view.slice(0, 6).forEach((b, i) => {
       const sprite = skaters[i]?.firstChild;
-      if (!(sprite instanceof HTMLCanvasElement)) return;
       const size = 2 * b.radius * scale;
       v.save();
       v.globalAlpha = b.carded ? .3 : b.superActive === 'ghost' ? .45 : 1;
       if ((b.stunned || b.stunnedNext) && !b.carded) v.filter = 'grayscale(0.8) brightness(0.7)';
       v.translate(x + b.x * scale, y + b.y * scale); v.rotate(b.rotation);
-      v.drawImage(sprite, -size / 2, -size / 2, size, size);
+      if (sprite instanceof HTMLCanvasElement || (typeof HTMLImageElement !== 'undefined' && sprite instanceof HTMLImageElement)) {
+        v.drawImage(sprite, -size / 2, -size / 2, size, size);
+      } else {
+        v.beginPath();
+        v.arc(0, 0, size / 2, 0, Math.PI * 2);
+        v.fillStyle = i < 3 ? '#00e5ff' : '#ff4d6d';
+        v.fill();
+      }
       v.restore();
     });
     v.drawImage(fieldBadges, x, y, width, height);
@@ -4366,7 +4385,9 @@
     if ($('field-spin').contains(document.activeElement)) document.activeElement.blur();
     gameAudio()?.stop();
     drag = null;
-    const turnPlans = [...plans.map((p, i) => ({ ...p, superArm: Boolean(fieldView.bodies[i]?.superArm || p.superArm) })), ...cpu];
+    const userPlans = ububallMatch.validatePlans(plans.map((p, i) => ({ ...p, superArm: Boolean(fieldView.bodies[i]?.superArm || p.superArm) })));
+    const cpuPlans = ububallMatch.validatePlans(cpu);
+    const turnPlans = [...userPlans, ...cpuPlans];
     fieldView.bodies.slice(0, 3).forEach(b => { b.superArm = false; });
     recordSegment(simBodies, turnPlans); beginGuide(simBodies, turnPlans, 0);
     if (recording) ububallReplay.addTurn(recording, { turn, scores, fouls, bodies: simBodies, plans: turnPlans });
@@ -4478,16 +4499,17 @@
       plans[selected].power = aimPower(Math.hypot(dx, dy), arrow);
     }
 
-    sync(); draw();
+    dragDirty = true;
   };
   fieldView.canvas.onpointerup = fieldView.canvas.onpointercancel = event => {
     if (event.type === 'pointerup' && drag === event.pointerId && dragMode === 'aim' && !dragMoved && tapGuards) toggleGuard(selected);
     arrowGrab = null;
     drag = null;
     dragMode = null;
+    dragDirty = false;
     if (phase === 'plan') saveActiveMatch();
     updateFirstTurnGuide();
-    draw();
+    sync(); draw();
   };
   function handleCollision(a, b, speed, impulse, plow = false, iron = false) {
     if (iron) {
@@ -4698,7 +4720,10 @@
       if (phase === 'play' || postGoal) emitSkaterEffects(simDelta);
       draw();
     } else if (goalReplay && active && !online?.active) advanceGoalReplay(delta);
-    else if (active && (hadEffects || (phase === 'plan' && predictionCache?.data?.goal !== null) || (!reducedMotion.matches && (foulsShowing() || fieldView.bodies.some(b => b.meter >= 100 || b.superArm || b.superActive))))) draw();
+    else if (active && (dragDirty || hadEffects || (phase === 'plan' && predictionCache?.data?.goal !== null) || (!reducedMotion.matches && (foulsShowing() || fieldView.bodies.some(b => b.meter >= 100 || b.superArm || b.superActive || (P.dazeSlow && P.dazeSlow(b) > 0)))))) {
+      if (dragDirty) { dragDirty = false; sync(); }
+      draw();
+    }
     if (firstTurnStep !== null) animateFirstTurnGuide(time, active);
     flushMeters();
     requestAnimationFrame(frame);
@@ -5806,7 +5831,7 @@
     chooseMode(mode) { openSetup('mode', 'online', mode); },
     editRules(mode) { openSetup('mode', 'rules', mode); },
     onNewGame() {
-      saveRecording(); onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = '';
+      saveRecording(); onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = ''; onlinePlanFouls = null;
       closeSummary(); endGoalReplay(); stopFanfare();
     },
     lobby(view, open) { void showLobby(view, open); },
@@ -5871,15 +5896,29 @@
         onlineReplay.currentTick = 0;
         onlineReplay.simBodies = stripPresentation(structuredClone(s.replay.initialBodies));
         const classic = classicMode();
+        const simEntries = Array.isArray(fieldView.entries) && fieldView.entries.length >= 6 ? onlineOrder(fieldView.entries, s.seat) : null;
         onlineReplay.simBodies.forEach((b, i) => {
           if (i < 6) {
-            const entry = (i < 3 ? s.rosters[0]?.[i] : s.rosters[1]?.[i - 3]);
-            if (entry) {
-              const model = ubu.decode(ubu.fromCode(entry.dna));
-              const mastery = classic ? null : P.superMastery(model.supers, entry.superId);
-              b.equippedSuper = classic ? null : { id: entry.superId, key: P.SUPERS[entry.superId]?.key, bonusTicks: mastery?.bonusTicks || 0, bonusRefund: mastery?.bonusRefund || 0 };
+            const cached = simEntries?.[i];
+            if (cached) {
+              const mastery = classic ? null : (cached.equippedSuper?.bonusTicks !== undefined ? cached.equippedSuper : P.superMastery(cached.model?.supers, cached.equippedSuper?.id));
+              b.equippedSuper = classic || !cached.equippedSuper ? null : {
+                id: cached.equippedSuper.id,
+                key: cached.equippedSuper.key || P.SUPERS[cached.equippedSuper.id]?.key,
+                bonusTicks: mastery?.bonusTicks || 0,
+                bonusRefund: mastery?.bonusRefund || 0
+              };
               b.superBonusTicks = mastery?.bonusTicks || 0;
               b.superBonusRefund = mastery?.bonusRefund || 0;
+            } else {
+              const entry = (i < 3 ? s.rosters[0]?.[i] : s.rosters[1]?.[i - 3]);
+              if (entry) {
+                const model = ubu.decode(ubu.fromCode(entry.dna));
+                const mastery = classic ? null : P.superMastery(model.supers, entry.superId);
+                b.equippedSuper = classic ? null : { id: entry.superId, key: P.SUPERS[entry.superId]?.key, bonusTicks: mastery?.bonusTicks || 0, bonusRefund: mastery?.bonusRefund || 0 };
+                b.superBonusTicks = mastery?.bonusTicks || 0;
+                b.superBonusRefund = mastery?.bonusRefund || 0;
+              }
             }
           }
         });
@@ -5901,7 +5940,7 @@
     onError(message) { say(message); banner(message, 3000); },
     onLeave() {
       saveRecording();
-      onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = ''; scoringPlayer = null;
+      onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = ''; scoringPlayer = null; onlinePlanFouls = null;
       document.body.classList.remove('online-match');
       $('online-open-label').textContent = 'Play online';
       $('online-open-note').hidden = false;

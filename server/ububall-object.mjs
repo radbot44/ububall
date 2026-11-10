@@ -238,13 +238,14 @@ export class UbuballMatch extends DurableObject {
         if (data.type !== 'moves' || Object.keys(data).some(k => !['type', 'turn', 'moves', 'lock', 'gameNumber'].includes(k))) throw new Error('Invalid message.');
         if ((data.gameNumber || 0) !== (this.room.state.gameNumber || 0)) throw new Error('The game changed. Plan your moves again.');
         this.room.submit(a.owner, data.turn, data.moves, data.lock, now);
-        this.room.advance(now); this.save();
+        this.room.advance(now);
         if (data.lock === false && this.room.state.phase === 'plan') {
-          ws.send(JSON.stringify(this.snapshot(a.owner, now)));
+          // Keep unlocked drafts in memory; skip synchronous SQLite flush and full snapshot broadcast.
         } else {
+          this.save();
           this.broadcast(now);
+          await this.schedule(now);
         }
-        await this.schedule(now);
       } catch (error) {
         // Deadline may have passed before the alarm ran; resolve the last accepted draft.
         this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);
