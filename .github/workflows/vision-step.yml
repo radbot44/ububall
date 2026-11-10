@@ -2,7 +2,7 @@ name: Step vision-only match
 on:
   push:
     branches:
-      - agent/vision-only-controller-20261110
+      - agent/manual-vision-noapi-20261110
     paths:
       - scripts/vision-step-command.json
       - scripts/vision-step.cjs
