@@ -1,0 +1,33 @@
+name: Agent visual Easy CPU match
+on:
+  push:
+    branches:
+      - agent/visual-easy-cpu-play-20261110
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  play:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save --ignore-scripts playwright@1.57.0
+      - run: npx playwright install --with-deps chromium
+      - name: Play one match against Easy CPU
+        run: node scripts/agent-play.cjs
+      - name: Upload shot-by-shot log and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ububall-easy-cpu-play
+          path: artifacts/agent-play/
+          if-no-files-found: warn
+          retention-days: 7
