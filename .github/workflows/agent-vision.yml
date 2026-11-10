@@ -1,0 +1,57 @@
+name: Vision-only Ububall playtest
+on:
+  push:
+    branches:
+      - agent/vision-only-harness-20261110
+    paths:
+      - scripts/agent-vision-play.cjs
+      - .github/workflows/agent-vision.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vision:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save --ignore-scripts playwright@1.57.0
+      - run: npx playwright install --with-deps chromium
+      - name: Check for vision API credentials
+        id: key
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::OPENAI_API_KEY secret not configured. Only browser smoke test will run."
+          fi
+      - name: Real vision-only Easy CPU match
+        if: steps.key.outputs.available == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          VISION_MODEL: gpt-5.4-mini
+          VISION_MAX_STEPS: '140'
+          VISION_MAX_CALLS: '100'
+          VISION_MAX_MINUTES: '28'
+        run: node scripts/agent-vision-play.cjs
+      - name: Browser setup smoke test (no vision calls)
+        if: steps.key.outputs.available != 'true'
+        run: node scripts/agent-vision-play.cjs --smoke
+      - name: Upload screenshots, browser video and decisions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ububall-vision-only
+          path: artifacts/vision-only/
+          if-no-files-found: warn
+          retention-days: 7
