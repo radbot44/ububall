@@ -1225,7 +1225,7 @@
             life: .46, duration: .46
           });
         }
-      } else if ((wallType === 'net' || velocity > 220) && fx.ripples.length < 24) {
+      } else if ((wallType === 'net' || velocity > 220 || (body.team === -1 && Boolean(P.ballOnFire?.(body)) && velocity >= 60)) && fx.ripples.length < 24) {
         const net = wallType === 'net';
         const isMeteor = !net && body.team === -1 && Boolean(P.ballOnFire?.(body));
         const half = (net ? (velocity > 360 ? 42 : 30) : (isMeteor ? 72 : 60)) / WALL_STEP;
@@ -1248,7 +1248,9 @@
             duration: isMeteor ? .72 : .6
           });
           if (isMeteor) {
-            fx.burns.push({ poof: true, x, y, radius: 22, age: 0 });
+            const poofX = x - nx * (body.radius * 0.45);
+            const poofY = y - ny * (body.radius * 0.45);
+            fx.burns.push({ poof: true, x: poofX, y: poofY, radius: 30, age: 0 });
             if (fx.burns.length > 30) fx.burns.shift();
           }
         }
@@ -1333,14 +1335,14 @@
             const age = Math.floor(s.age * 4) / 4;
             const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
             if (fade <= 0.01) continue;
-            const r = (s.radius || 22) * 1.35;
+            const r = s.radius || 30;
             ctx.save();
             const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
-            grad.addColorStop(0, `rgba(0, 0, 0, ${(0.40 * fade).toFixed(3)})`);
-            grad.addColorStop(0.32, `rgba(0, 0, 0, ${(0.30 * fade).toFixed(3)})`);
-            grad.addColorStop(0.62, `rgba(43, 18, 6, ${(0.24 * fade).toFixed(3)})`);
-            grad.addColorStop(0.84, `rgba(43, 18, 6, ${(0.08 * fade).toFixed(3)})`);
-            grad.addColorStop(1, 'rgba(43, 18, 6, 0)');
+            grad.addColorStop(0, `rgba(0, 0, 0, ${(0.82 * fade).toFixed(3)})`);
+            grad.addColorStop(0.35, `rgba(12, 5, 2, ${(0.75 * fade).toFixed(3)})`);
+            grad.addColorStop(0.65, `rgba(45, 18, 6, ${(0.55 * fade).toFixed(3)})`);
+            grad.addColorStop(0.85, `rgba(45, 18, 6, ${(0.25 * fade).toFixed(3)})`);
+            grad.addColorStop(1, 'rgba(45, 18, 6, 0)');
             ctx.fillStyle = grad;
             ctx.beginPath();
             ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
