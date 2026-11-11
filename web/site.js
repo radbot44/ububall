@@ -810,11 +810,12 @@
 
   // A pack's ubus join the collection as they are revealed; nothing redraws while a pick is in flight.
   const choosing = () => Boolean(pendingKey && localStorage.getItem(pendingKey + ':choice'));
+  const collectionHidden = () => Boolean(document.querySelector('main[data-screen="collection"]')?.hidden);
   const collectionList = ubuList.mount({
     surface: 'collection', toolbarHost: $('collection-toolbar'), grid: $('ubus'),
     status: $('collection-status'),
     inspect: item => { display(item.certificate, item.result, true); status(''); },
-    hidden: item => unseen(item.serial), paused: choosing,
+    hidden: item => unseen(item.serial), paused: () => choosing() || collectionHidden(),
     onEmpty: reason => {
       if (session?.owner) {
         if (reason === 'empty') collectionRecovery({ packs: true });
@@ -831,6 +832,7 @@
       $('ubus').replaceChildren(note);
     }
   });
+  window.addEventListener('ubu:screen', event => { if (event.detail === 'collection') collectionList.render(); });
   window.showUbuViewer = serial => {
     const item = ubuList.get(serial);
     if (item?.certificate) display(item.certificate, item.result, true);

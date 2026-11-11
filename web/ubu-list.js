@@ -399,23 +399,29 @@
   // Art is drawn cooperatively with a frame budget so large collections stay cheap.
   function lazyArt(scrollRoot) {
     if (!('IntersectionObserver' in root)) return { watch: (node, draw) => draw() };
-    const draws = new Map(), queue = [];
+    const draws = new Map(), queue = [], queued = new Set();
     let ticking = false;
-    function drain(time) {
+    function drain() {
       ticking = false;
-      const budget = (time || performance.now()) + 5;
-      while (queue.length && performance.now() < budget) {
+      const deadline = performance.now() + 5;
+      do {
         const target = queue.shift();
+        if (!target) break;
+        queued.delete(target);
+        if (!target.isConnected) {
+          if (draws.has(target)) observer.observe(target);
+          continue;
+        }
         draws.get(target)?.();
         draws.delete(target);
-      }
+      } while (queue.length && performance.now() < deadline);
       if (queue.length) { ticking = true; requestAnimationFrame(drain); }
     }
     const observer = new IntersectionObserver(entries => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         observer.unobserve(entry.target);
-        queue.push(entry.target);
+        if (!queued.has(entry.target)) { queued.add(entry.target); queue.push(entry.target); }
       }
       if (queue.length && !ticking) { ticking = true; requestAnimationFrame(drain); }
     }, { root: scrollRoot || null, rootMargin: '400px' });
@@ -464,8 +470,12 @@
       }
       art.watch(artBox, () => {
         if (artBox.querySelector('.ubu-tile-svg')) return;
-        // Keep static artwork out of the page DOM. The data URL lives with the
-        // cached tile, so removing it needs no separate object-URL cleanup.
+        // Share one rasterized PNG Blob sprite per visual DNA across Collection,
+        // the team picker and match views, releasing intermediate SVG filter trees.
+        if (typeof ubuRender.spriteImg === 'function') {
+          artBox.prepend(ubuRender.spriteImg(item.model, 'ubu-tile-svg', 256));
+          return;
+        }
         const svg = ubuRender(item.model, 'ubu-tile-svg');
         const image = el('img', { className: 'ubu-tile-svg',
           alt: svg.getAttribute('aria-label'), decoding: 'async', draggable: false });

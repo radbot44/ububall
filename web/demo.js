@@ -54,22 +54,65 @@
     if (index >= 0) saved.splice(index, 1); else { saved.unshift(code); saved.length = Math.min(saved.length, LIMIT); }
     persist(); heart(); collections();
   }
-  function card(code, caption) {
+  const thumbDraws = new Map();
+  const thumbObserver = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      thumbObserver.unobserve(entry.target);
+      thumbDraws.get(entry.target)?.();
+      thumbDraws.delete(entry.target);
+    }
+  }, { rootMargin: '300px' }) : null;
+  function makeThumb(m) {
+    if (!thumbObserver || !renderSVG.spriteImg) return renderSVG.spriteImg ? renderSVG.spriteImg(m, 'ubu-thumb', 256) : renderSVG(m, 'ubu-thumb');
+    const slot = node('span', { class: 'ubu-thumb' });
+    thumbDraws.set(slot, () => {
+      slot.replaceWith(renderSVG.spriteImg(m, 'ubu-thumb', 256));
+    });
+    thumbObserver.observe(slot);
+    return slot;
+  }
+  const panelCards = { storage: new Map(), history: new Map() };
+  function syncCardSave(entry, code) {
+    const isSaved = saved.includes(code);
+    entry.save.className = 'card-heart' + (isSaved ? ' is-saved' : '');
+    entry.save.setAttribute('aria-label', isSaved ? 'Remove from Ubu Storage' : 'Save to Ubu Storage');
+    entry.save.textContent = isSaved ? '♥' : '♡';
+  }
+  function card(code, caption, cacheMap = null) {
+    if (cacheMap?.has(code)) {
+      const cached = cacheMap.get(code);
+      syncCardSave(cached, code);
+      return cached.article;
+    }
     const m = model(code);
     const article = node('article', { class: 'ubu-card' });
     const open = node('button', { type: 'button', class: 'ubu-card-main' });
-    open.append(renderSVG(m, 'ubu-thumb'), node('span', { class: 'ubu-card-name' }, caption || m.parts.fullName), node('span', { class: 'card-grade', 'data-grade': m.grade }, m.grade));
+    open.append(makeThumb(m), node('span', { class: 'ubu-card-name' }, caption || m.parts.fullName), node('span', { class: 'card-grade', 'data-grade': m.grade }, m.grade));
     open.addEventListener('click', () => show(code)); article.append(open);
     if (!caption) {
-      const save = node('button', { type: 'button', class: 'card-heart' + (saved.includes(code) ? ' is-saved' : ''), 'aria-label': saved.includes(code) ? 'Remove from Ubu Storage' : 'Save to Ubu Storage' }, saved.includes(code) ? '♥' : '♡');
+      const save = node('button', { type: 'button', class: 'card-heart' });
       save.addEventListener('click', () => toggle(code)); article.append(save);
+      const entry = { article, save };
+      syncCardSave(entry, code);
+      if (cacheMap) {
+        if (cacheMap.size >= LIMIT * 2) cacheMap.delete(cacheMap.keys().next().value);
+        cacheMap.set(code, entry);
+      }
     }
     return article;
+  }
+  function renderPanel(id, list) {
+    const panel = $(id + '-panel');
+    if (panel.hidden) { panel.dataset.dirty = '1'; return; }
+    delete panel.dataset.dirty;
+    const cacheMap = panelCards[id];
+    panel.replaceChildren(...(list.length ? list.map(code => card(code, undefined, cacheMap)) : [node('p', { class: 'empty-state' }, id === 'storage' ? 'No saved ubus yet.' : 'No history yet.')]));
   }
   function collections() {
     for (const [id, list] of [['storage', saved], ['history', history]]) {
       $(id + '-count').textContent = list.length;
-      $(id + '-panel').replaceChildren(...(list.length ? list.map(code => card(code)) : [node('p', { class: 'empty-state' }, id === 'storage' ? 'No saved ubus yet.' : 'No history yet.')]));
+      renderPanel(id, list);
     }
   }
   function show(code, push = true) {
@@ -179,6 +222,7 @@
       $(candidate + '-tab').classList.toggle('is-active', candidate === id);
       $(candidate + '-tab').setAttribute('aria-selected', String(candidate === id));
     }
+    if ($(id + '-panel').dataset.dirty) renderPanel(id, id === 'storage' ? saved : history);
   });
   $('copy-dna').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(current); $('input-error').textContent = 'DNA copied.'; } catch { $('dna-output').select(); $('input-error').textContent = 'Select and copy the DNA above.'; }

@@ -1816,7 +1816,7 @@
   function cardPortrait(entry, i) {
     const portrait = document.createElement('button'); portrait.type = 'button'; portrait.className = 'card-portrait';
     portrait.setAttribute('aria-label', `Stats for ${entry.model.parts.fullName}`);
-    portrait.append(ubuRender(entry.model, 'ball-thumb'));
+    portrait.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'ball-thumb', 256) : ubuRender(entry.model, 'ball-thumb'));
     portrait.onclick = () => openStatDrawer(i);
     return portrait;
   }
@@ -1829,7 +1829,7 @@
     titles.append(Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }),
       Object.assign(document.createElement('small'), { textContent: $(i < 3 ? 'home-label' : 'opponent-label').textContent }));
     const head = document.createElement('div'); head.className = 'stat-drawer-head';
-    head.append(ubuRender(entry.model, 'stat-drawer-art'), titles, close);
+    head.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'stat-drawer-art', 256) : ubuRender(entry.model, 'stat-drawer-art'), titles, close);
     const box = renderStatsBox(stats[i] || entry.model.stats || {});
     box.querySelector('.stat-details').open = true;
     statDrawer.dataset.player = i; statDrawer.dataset.side = i < 3 ? 'home' : 'away';
@@ -1876,6 +1876,22 @@
     });
     skaters = fieldView.entries.map((entry, i) => {
       const node = document.createElement('div'); node.className = 'skater';
+      if (typeof ubuRender.sprite === 'function') {
+        node.append(ubuRender.spriteImg(entry.model, 'ball-ubu', 256));
+        $('skaters').append(node);
+        ubuRender.sprite(entry.model, 256).then(url => {
+          if (!url || !node.isConnected) return;
+          const image = new Image();
+          image.onload = () => {
+            if (!node.isConnected) return;
+            const sprite = document.createElement('canvas'); sprite.width = sprite.height = 256;
+            sprite.getContext('2d').drawImage(image, 0, 0, 256, 256);
+            node.replaceChildren(sprite);
+          };
+          image.src = url;
+        });
+        return node;
+      }
       const svg = ubuRender(entry.model, 'ball-ubu'); node.append(svg); $('skaters').append(node);
       // Rasterize once per roster; retain the SVG if decoding is unavailable.
       const image = new Image();
@@ -1907,7 +1923,7 @@
       select.onclick = () => { selected = i; sync(); draw(); };
       $('team').append(button);
       const lineup = document.createElement('div'); lineup.className = 'home-ubu';
-      lineup.append(ubuRender(entry.model, 'home-ubu-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }));
+      lineup.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'home-ubu-art', 256) : ubuRender(entry.model, 'home-ubu-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }));
       const superInfo = classicMode() ? null : entry.equippedSuper || resolveEquippedSuper(entry, i);
       if (superInfo) {
         const superLabel = document.createElement('small');
@@ -3805,8 +3821,12 @@
     const g = map.getContext('2d');
     const { home, away, text } = getThemeColors();
     const rows = new Map();
-    const portraits = ctx.portraits ??= fieldView.entries.slice(0, 6).map(entry => {
-      const svg = new XMLSerializer().serializeToString(ubuRender(entry.model));
+    const portraits = ctx.portraits ??= fieldView.entries.slice(0, 6).map((entry, idx) => {
+      const sprite = skaters[idx]?.querySelector('canvas');
+      if (sprite && fieldView.entries[idx] === entry) {
+        try { return sprite.toDataURL('image/png'); } catch {}
+      }
+      const svg = new XMLSerializer().serializeToString(ubuRender(entry.model, 'stats-portrait'));
       return `data:image/svg+xml,${encodeURIComponent(svg)}`;
     });
     function pill(index) {
@@ -4784,7 +4804,7 @@
     slot.classList.toggle('is-empty', !entry);
     slot.classList.toggle('just-changed', i === changedSlot);
     const pick = node('button', { type: 'button', className: 'formation-pick' }, node('span', { className: 'formation-pos', textContent: POSITIONS[i] }));
-    if (entry) pick.append(ubuRender(entry.model, 'formation-art'), node('span', { className: 'formation-name' },
+    if (entry) pick.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'formation-art', 256) : ubuRender(entry.model, 'formation-art'), node('span', { className: 'formation-name' },
       node('strong', { textContent: entry.model.parts.fullName }), node('small', { textContent: entry.label })));
     else pick.append(node('span', { className: 'formation-art formation-empty-art' }), node('span', { className: 'formation-name' },
       node('strong', { textContent: 'Empty' }), node('small', { textContent: i === rosterSlot ? 'Pick an ubu below' : 'Select to fill' })));
@@ -4906,6 +4926,7 @@
   const rosterList = ubuList.mount({
     surface: 'picker', toolbarHost: $('roster-toolbar'), grid: $('roster-options'), scrollRoot: $('roster-scroll'),
     status: $('roster-collection-status'),
+    paused: () => !$('roster-dialog').open || $('roster-dialog').dataset.step !== 'team',
     pick: item => choose(entryFor(item)),
     // The viewer belongs to the Collection screen's script, loaded on first use.
     inspect: async item => {
@@ -5110,7 +5131,7 @@
       $('sheet-start').disabled = !complete || (signedIn() && !slots);
       $('sheet-team-name').textContent = name || '';
       $('sheet-team-name').hidden = !name;
-      $('sheet-team-preview').replaceChildren(...draft.filter(entry => entry?.model).map(entry => ubuRender(entry.model)));
+      $('sheet-team-preview').replaceChildren(...draft.filter(entry => entry?.model).map(entry => ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'sheet-team-art', 256) : ubuRender(entry.model, 'sheet-team-art')));
     }
     $('lobby-panel').hidden = setupFor !== 'lobby';
     $('team-title').textContent = setupFor === 'lobby' ? 'Online match' : 'Your team';
