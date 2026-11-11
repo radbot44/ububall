@@ -1,0 +1,62 @@
+name: Vision-only Ububall match
+on:
+  push:
+    branches:
+      - agent/vision-only-controller-20261110
+    paths:
+      - scripts/vision-only-play.cjs
+      - .github/workflows/vision-only.yml
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "smoke (no API) or vision (requires OPENAI_API_KEY repo secret)"
+        type: choice
+        options:
+          - smoke
+          - vision
+        default: smoke
+      model:
+        description: "Vision-capable OpenAI model"
+        type: string
+        default: gpt-4.1
+      max_steps:
+        description: "Maximum agent turns/actions (1–160)"
+        type: number
+        default: 90
+permissions:
+  contents: read
+jobs:
+  play:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      VISION_MODEL: ${{ inputs.model || 'gpt-4.1' }}
+      VISION_MAX_STEPS: ${{ inputs.max_steps || '90' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save --ignore-scripts playwright@1.57.0
+      - run: npx playwright install --with-deps chromium
+      - name: Play with screenshots and mouse only
+        shell: bash
+        env:
+          TEST_MODE: ${{ inputs.mode || 'smoke' }}
+          OPENAI_API_KEY: ${{ inputs.mode == 'vision' && secrets.OPENAI_API_KEY || '' }}
+        run: |
+          if [ "$TEST_MODE" = "vision" ]; then
+            node scripts/vision-only-play.cjs
+          else
+            node scripts/vision-only-play.cjs --smoke
+          fi
+      - name: Preserve screenshot evidence and agent decisions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ububall-vision-only
+          path: artifacts/vision-only/
+          retention-days: 7
+          if-no-files-found: warn

@@ -1,0 +1,47 @@
+name: Step vision-only match
+on:
+  push:
+    branches:
+      - agent/vision-only-controller-20261110
+    paths:
+      - scripts/vision-step-command.json
+      - scripts/vision-step.cjs
+      - .github/workflows/vision-step.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  step:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save --ignore-scripts playwright@1.57.0
+      - run: npx playwright install --with-deps chromium
+      - name: Restore prior browser storage opaquely
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          RUN_ID=$(node -p "JSON.parse(require('fs').readFileSync('scripts/vision-step-command.json','utf8')).previous_run || ''")
+          if [ -n "$RUN_ID" ]; then
+            if ! [[ "$RUN_ID" =~ ^[0-9]+$ ]]; then echo 'Bad previous run ID'; exit 1; fi
+            mkdir -p artifacts/vision-step/prior
+            gh run download "$RUN_ID" -R "${{ github.repository }}" -n ububall-vision-step -D /tmp/vision-prev
+            cp /tmp/vision-prev/storage.json artifacts/vision-step/prior/storage.json
+          fi
+      - name: Execute screenshot-to-mouse commands
+        run: node scripts/vision-step.cjs
+      - name: Save screenshot and opaque session checkpoint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ububall-vision-step
+          path: artifacts/vision-step/
+          retention-days: 7
+          if-no-files-found: warn
