@@ -181,7 +181,7 @@
           id: 'ubu-move-wobble',
           title: 'Moving Ubu Wobble (Speed, Mass & Size)',
           when: 'Skaters glide above 28 px/s (`playUbuMove` modulated by speed, mass, and radius).',
-          visual: 'Subtle speed-pitched wobble per skater: small light ubus flutter higher and faster; large heavy ubus hum deeper with warmer low-mid weight.',
+          visual: 'Speed-pitched movement wobble (+50% boost) per skater: inaudible at rest, fluttering higher and faster for small light ubus and humming deeper with warm low-mid weight for large heavy ubus.',
           soundLabel: 'Play ubu wobble',
           variants: [
             { id: 'six', label: '6-Ubu Live Mix' },
@@ -246,15 +246,16 @@
         {
           id: 'spin-wobble-taper',
           title: 'Spinning Wobble & Directional Tapered Arcs',
-          when: 'Skaters or ball spin with `|omega| >= 2.5 rad/s` (`drawSpin`, `playSpin`).',
-          visual: 'Spin blades taper from a vanishing tail to a bright forward-angled tip showing CW vs. CCW direction, paired with an upper-register gyroscopic spin wobble.',
+          when: 'Skaters or ball spin with `|omega| >= 2.5 rad/s` (`drawSpin`) and skaters spin above `2.8 rad/s` (`playSpin` modulated by spin speed and radius).',
+          visual: 'Spin blades taper from a vanishing tail to a bright forward-angled tip showing CW vs. CCW direction, paired with a continuous spin-speed-modulated wobble (inaudible below threshold, scaling smoothly in volume, pitch, and 3.2-16 Hz flutter rate at higher spin speeds without a start transient).',
           soundLabel: 'Play spin wobble',
           variants: [
             { id: 'compare', label: 'CW vs. CCW Direction' },
             { id: 'high-low', label: 'High Spin vs. Low Spin' }
           ],
           duration: 2.8,
-          playSound: ctx => ctx.audio()?.playSpin?.({ omega: 16, radius: 25, duration: 0.9, preview: true }),
+          playSound: (ctx, variant = 'compare') =>
+            ctx.audio()?.playSpin?.({ omega: variant === 'high-low' ? 18 : 14, radius: 25, duration: 0.95, preview: true }),
           run: (ctx, variant = 'compare') => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
             ctx.place(2, 180, 470);
@@ -383,21 +384,34 @@
         {
           id: 'body-check-daze',
           title: 'Body Check, Hip Clip & Daze Dizzy Swirl',
-          when: 'Hard check (`knock > 250 px/s`) dazes past 15% (`P.dazeSlow > 0`), or fast glancing Hip Clip spins a skater.',
-          visual: 'Dual-team collision sparks, rotating `#c3cbff` dizzy spiral above the dazed skater, and glancing spin-out curve.',
-          soundLabel: 'Play check chirp',
+          when: 'Opposing skaters collide (`isCheck` above 65 px/s, `knock > 250 px/s` dazes past 15%), or a glancing Hip Clip (`tangentImpulse >= 55`) shears past an opponent.',
+          visual: 'Strength-scaled dual-team check compression arcs & sparks (with `#c3cbff` daze spiral on heavy hits), or a strength-scaled Hip Clip rotational shear wave, tangential slip-streaks, and whip-whoosh sound (`crack: false`).',
+          soundLabel: 'Play check / whip',
           variants: [
             { id: 'daze', label: 'Heavy Check + Daze Swirl' },
-            { id: 'hip-clip', label: 'Glancing Hip Clip Spin-Out' }
+            { id: 'light-check', label: 'Light Check (Scaled Arc)' },
+            { id: 'hip-clip', label: 'Strong Hip Clip + Whip' },
+            { id: 'light-hip-clip', label: 'Light Hip Clip (Subtle Shear)' }
           ],
           duration: 2.5,
-          playSound: ctx => ctx.audio()?.playCollision(ctx.voice(), { volume: 0.9 }),
+          playSound: (ctx, variant = 'daze') => {
+            const isHip = variant === 'hip-clip' || variant === 'light-hip-clip';
+            const strong = variant === 'daze' || variant === 'hip-clip';
+            ctx.audio()?.playCollision(ctx.voice(), { volume: strong ? 0.9 : 0.45 });
+            if (isHip) ctx.audio()?.playSpinStrike?.({ volume: strong ? 0.85 : 0.48, spin: strong ? 16 : 8, crack: false });
+          },
           run: (ctx, variant = 'daze') => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
             ctx.place(6, 500, 110);
             if (variant === 'hip-clip') {
-              ctx.place(0, 330, 290, { vx: 620, vy: 0 });
-              ctx.place(3, 470, 326, { vx: -260, vy: 0 });
+              ctx.place(0, 330, 290, { vx: 640, vy: 0 });
+              ctx.place(3, 470, 326, { vx: -280, vy: 0 });
+            } else if (variant === 'light-hip-clip') {
+              ctx.place(0, 355, 292, { vx: 290, vy: 0 });
+              ctx.place(3, 455, 328, { vx: -110, vy: 0 });
+            } else if (variant === 'light-check') {
+              ctx.place(0, 360, 300, { vx: 210, vy: 0 });
+              ctx.place(3, 445, 300, { vx: -60, vy: 0 });
             } else {
               ctx.boostStats(0, { mass: 255, strength: 255, impulse: 240 });
               ctx.boostStats(3, { stability: 0, mass: 30 });
@@ -411,7 +425,7 @@
           id: 'spin-strike',
           title: 'Point-Blank Spin Strike (`"Spin strike!"`)',
           when: 'Skater launched with spin touches the ball first within 2 ball diameters (`tick.struck`, `playSpinStrike`).',
-          visual: 'Tight cord-whoosh into sharp supersonic whipcrack, tapered counter-rotating spin blades on the ball, extra shot speed + Magnus curve, hit-stop, and `"Spin strike!"` callout.',
+          visual: 'Accelerating bullwhip loop-unwind whoosh into a sharp supersonic N-wave whipcrack, tapered counter-rotating spin blades on the ball, extra shot speed + Magnus curve, hit-stop, and `"Spin strike!"` callout.',
           soundLabel: 'Play whipcrack',
           duration: 2.5,
           playSound: ctx => {
@@ -463,16 +477,22 @@
         {
           id: 'board-ripple',
           title: 'Board Flex Bulge & Hockey Wall Thock',
-          when: 'Body or ball hits rink boards above 220 px/s (`addWallEffect`, `handleWall`, `playWallHit`).',
-          visual: 'Damped outward cosine bulge along `BOARD_RUNS`, tangent spark burst, and a restrained hollow hockey dasher-board thock.',
-          soundLabel: 'Play board thock',
+          when: 'Body or ball hits rink boards (`addWallEffect` > 220 px/s, `playWallHit` hollow thock on hard hits >= 370 px/s).',
+          visual: 'Damped outward cosine bulge along `BOARD_RUNS`, tangent spark burst, restrained knock on light hits, and a deep hollow dasher-board "thock" reserved for truly hard impacts.',
+          soundLabel: 'Play board hit',
+          variants: [
+            { id: 'hard', label: 'Hard Hit (Deep Thock)' },
+            { id: 'light', label: 'Light Hit (No Thock)' }
+          ],
           duration: 2.2,
-          playSound: ctx => ctx.audio()?.playWallHit({ volume: 0.78 }),
-          run: ctx => {
+          playSound: (ctx, variant = 'hard') =>
+            ctx.audio()?.playWallHit(variant === 'light' ? { volume: 0.36, speed: 240 } : { volume: 0.82, speed: 600 }),
+          run: (ctx, variant = 'hard') => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
-            ctx.place(0, 380, 130, { vx: 220, vy: -580 });
-            ctx.place(3, 620, 470, { vx: -200, vy: 580 });
-            ctx.place(6, 500, 160, { vx: 180, vy: -620, pace: 620 });
+            const vy = variant === 'light' ? 255 : 590;
+            ctx.place(0, 380, 130, { vx: 160, vy: -vy });
+            ctx.place(3, 620, 470, { vx: -160, vy });
+            ctx.place(6, 500, 160, { vx: 140, vy: -(vy + 30), pace: vy + 30 });
           }
         },
         {
@@ -541,9 +561,9 @@
         },
         {
           id: 'fireball-plow',
-          title: 'Flaming Ball Impacts: Plow & Hot Shot Explosive Woosh',
-          when: 'Flaming ball strikes a skater, boards, or defender (`plow = true`, `HOT_DRIVE`, `playFireImpact`).',
-          visual: '15-particle flame scatter + firestarting explosive woosh (a compact cousin of Cannonball) on every flaming ball impact or Meteor Bank.',
+          title: 'Flaming Ball Impacts: Warp, Heat Mirage, Plow & Hot Shot',
+          when: 'Flaming ball strikes a skater, boards, or defender (`HIT_STOP.fire = 35ms`, `fx.fireWarp`, `plow = true`, `HOT_DRIVE`, `playFireImpact`).',
+          visual: '35ms minor hit-stop on ubu contact, damped squash-and-stretch warp on both the fireball and colliding ubu, contact glow + rising refractive heat-mirage depth distortion, 15-particle flame scatter, and explosive fire woosh.',
           soundLabel: 'Play fire impact woosh',
           variants: [
             { id: 'plow', label: 'Overpower Defender (Plow)' },
@@ -810,9 +830,9 @@
         },
         {
           id: 'super-shockwave',
-          title: '06 · Shockwave (Sonic Force-Repulsor & Blast Rings)',
-          when: 'Opponent enters 170 px of an active Shockwave skater (`handleShockwave`).',
-          visual: 'Rose & mulberry aura (`#ff7197` / `#9d467a`), twin concentric shockwave rings, vacuum pre-snap, sub-sonic boom & harmonic ring shimmer.',
+          title: '06 · Shockwave (Dramatic Blast & Repulsion Forcefield Rings)',
+          when: 'Opponent enters 170 px of an active Shockwave skater (`handleShockwave`), followed by active repulsion (`b.shockwaveFired`).',
+          visual: 'Charged conic-ring aura before trigger; dramatic 3-ring sonic blast, core flash, 26 radial streak shards & screen shake on trigger; then pulsing forcefield rings that continuously grow and fade while repelling opponents.',
           soundLabel: 'Play shockwave pulse',
           duration: 2.6,
           playSound: ctx => ctx.audio()?.playSuper('shockwave', 'impact'),
@@ -965,7 +985,7 @@
           id: 'goal-celebration',
           title: 'Goal Light Sweep, Fireworks, Call Banner & Fanfare',
           when: 'Ball crosses a goal line (`celebrate`, `drawGoalSweep`, `drawGoalCall`, `playFanfare`, `playFirework`).',
-          visual: '200ms hit-stop + double shake, sweeping light band, 9 peony/ring firework shells with stereo mortar pops & crackles, scorer double-ring & portrait call.',
+          visual: '200ms hit-stop + double shake, sweeping light band, 9 comet-tailed peony/ring firework shells with core flashes, glowing star tails, strobe micro-sparks & crisp pyrotechnic crackles, scorer double-ring & portrait call.',
           soundLabel: 'Play goal fanfare',
           variants: GOAL_CALL_VARIANTS,
           duration: 4.5,
@@ -988,7 +1008,7 @@
           id: 'burning-net-goal',
           title: 'Fireball Goal & Burning Net (`lightNet` / `burnNet`)',
           when: 'Scoring while the ball is on fire (`ballOnFire() === true` on goal).',
-          visual: 'Goal net catches fire (`burnNet`) with continuous additive flames along the mouth, posts, back frame, and ball alongside `"FIREBALL!"` call and fireworks.',
+          visual: 'Entire goal net catches fire (`burnNet`) with the fireball\'s additive flames and hot ember sparks (`#ffb347` / `#fff1c1`) evenly distributed across the full net depth and height alongside `"FIREBALL!"` call and fireworks.',
           soundLabel: 'Play sizzle + fanfare',
           duration: 4.5,
           playSound: ctx => {
@@ -1011,8 +1031,8 @@
         {
           id: 'goal-fireworks',
           title: 'Goal Fireworks & Aerial Shell Pops',
-          when: 'Post-goal firework shells reach fuse zero (`explodeShell`, `crackle`, `playFirework`).',
-          visual: 'Peony and ring firework bursts across the scoring half with synchronized stereo mortar pops, star-burst snaps, and sky crackles (fanfare omitted so pops are isolated).',
+          when: 'Post-goal firework shells ascend with ember trails and reach fuse zero (`explodeShell`, `crackle`, `playFirework`).',
+          visual: 'Comet-tailed shells burst with bright core flashes into dual-layer Peony or Ring + Pistil stars with glowing tails and secondary strobe crackle sparks, paired with mortar pops and discrete impulse star crackles.',
           soundLabel: 'Play firework pop',
           variants: [
             { id: 'peony', label: 'Peony Volley (Home)' },
@@ -2020,7 +2040,7 @@
       if (paused || doc.hidden) return false;
       if (autoLoop && activeDemo) return true;
       if (phase !== 'plan' || postGoal || goalReplay || timedCallbacks.length) return true;
-      if (fx.kickoffGlow > 0 || fx.particles.length || fx.shockwaves.length || fx.skids.length || fx.burns.length || fx.pings?.length || fx.popups?.length) return true;
+      if (fx.kickoffGlow > 0 || fx.fireWarp || fx.particles.length || fx.shockwaves.length || fx.skids.length || fx.burns.length || fx.pings?.length || fx.popups?.length) return true;
       if (fouls.crease.some(Boolean) || presenter.stalling(fouls)) return true;
       if (activeDemo) return true;
       return false;

@@ -34,7 +34,8 @@
 - Dropdowns, menus and pickers overlay and drop down from their trigger. Never insert them inline so content moves.
 - Icons are Tabler icons, shown as plain icons for small actions. Never use font or text symbols (arrows, ×, ✕, ▾, …) as icons. If a needed icon is missing, add it to the shared SVG icon set. Use arrows on navigation buttons where they carry meaning.
 - Grids of choices show at most four per row.
-- The designer pages (`demo.html`, `voice.html`) are tools and are exempt for now.
+- The designer and workbench pages (`demo.html`, `voice.html`, `effects.html`) are tools and are exempt for now.
+- Whenever visual effects or sound effects are added or modified (e.g. in `web/ububall-presentation.js`, `shared/ubu-audio.js`, `web/ububall-physics.js`, or `shared/ububall-match.js`), always check `web/effects.html` and `EFFECT_GROUPS` in `web/effects.js` and update the corresponding catalog descriptions (`title`, `when`, `visual`), variants, scenarios, and sound buttons so the Effects Demo stays accurate.
 
 ## Implementation hygiene
 
