@@ -773,7 +773,7 @@
         const now = clockNow(), map = (fx.carveTimes ||= new WeakMap());
         if (now - (map.get(b) ?? -Infinity) >= 180) {
           map.set(b, now);
-          gameAudio()?.playCarve?.({ volume: Math.min(0.55, 0.18 + 0.36 * strength) });
+          gameAudio()?.playCarve?.({ volume: Math.min(0.55, 0.18 + 0.36 * strength), x: b.x, y: b.y });
         }
       }
       if (s.time <= 0) { s.path = null; return; }
@@ -800,8 +800,10 @@
       const fx = getEffects();
       const speed = Math.hypot(ball.vx, ball.vy), share = paceShare(ball);
       fx.fireTime = P.ballOnFire(ball) ? fx.fireTime + dt : 0;
-      if (ballOnFire() && !fx.sizzle) fx.sizzle = gameAudio()?.playSizzle?.() || null;
-      else if (!ballOnFire()) quench();
+      if (ballOnFire()) {
+        if (!fx.sizzle) fx.sizzle = gameAudio()?.playSizzle?.({ x: ball.x, y: ball.y }) || null;
+        else if (fx.sizzle?.setCoords) fx.sizzle.setCoords(ball.x, ball.y);
+      } else if (!ballOnFire()) quench();
       const level = Math.max(fx.ballFlare, (share - HEAT.red) / (HEAT.redHot - HEAT.red));
       const ux = speed ? ball.vx / speed : 0, uy = speed ? ball.vy / speed : -1;
       if (ballOnFire()) flames(ball.x - ux * ball.radius * .5, ball.y - uy * ball.radius * .5, ball.radius * 1.4, -ball.vx * .12, -ball.vy * .12, dt * 120);
@@ -854,8 +856,8 @@
         if (!reduced) markIce(b, i, dt);
         const speed = Math.hypot(b.vx || 0, b.vy || 0);
         if (audio && !b.carded) {
-          audio.playUbuMove?.({ id: i, speed, mass: b.mass || 3, radius: b.radius || 25, slot: i });
-          audio.playSpin?.({ id: i, omega: b.omega || 0, radius: b.radius || 25, slot: i });
+          audio.playUbuMove?.({ id: i, speed, mass: b.mass || 3, radius: b.radius || 25, slot: i, x: b.x, y: b.y });
+          audio.playSpin?.({ id: i, omega: b.omega || 0, radius: b.radius || 25, slot: i, x: b.x, y: b.y });
         }
         const draft = P.tailgateFactor ? P.tailgateFactor(view.bodies, b) : 0;
         if (draft > 0.32) {
@@ -877,7 +879,7 @@
             const map = (fx.slipstreamTimes ||= new WeakMap());
             if (now - (map.get(b) ?? -Infinity) >= 85) {
               map.set(b, now);
-              audio.playSlipstream({ draft, volume: Math.min(0.75, 0.24 + 0.48 * draft), duration: 0.2 });
+              audio.playSlipstream({ draft, volume: Math.min(0.75, 0.24 + 0.48 * draft), duration: 0.2, x: b.x, y: b.y });
             }
           }
         }
@@ -890,7 +892,8 @@
           audio.playPuckSlide({
             speed: bSpeed,
             spin: ball.omega || 0,
-            pan: Math.max(-0.5, Math.min(0.5, ((ball.x - 500) / 500) * 0.35)),
+            x: ball.x,
+            y: ball.y,
             duration: 0.18
           });
         }
@@ -1029,7 +1032,8 @@
       updateParticles(dt, fx.particles, fx.fireworks, fx.shockwaves, f => {
         gameAudio()?.playFirework?.({
           ring: Boolean(f.ring),
-          pan: Math.max(-0.75, Math.min(0.75, ((f.x - 500) / 500) * 0.65)),
+          x: f.x,
+          y: f.y,
           volume: 0.55
         });
       });
@@ -2022,21 +2026,21 @@
           const sMap = (fx.spinStrikeTimes ||= new WeakMap());
           if (now - (sMap.get(ball) ?? -Infinity) > 50) {
             sMap.set(ball, now);
-            gameAudio().playSpinStrike({ volume: Math.min(1.0, 0.45 + 0.55 * (norm ** 0.8)), spin: ball.omega || player.omega || 14 });
+            gameAudio().playSpinStrike({ volume: Math.min(1.0, 0.45 + 0.55 * (norm ** 0.8)), spin: ball.omega || player.omega || 14, x, y });
           }
         }
         const fireHit = !iron && (plow || P.ballOnFire?.(ball)) && (now - (fx.lastCannonImpact ?? -Infinity) > 20);
         if (fireHit && gameAudio()?.playFireImpact && (now - (fx.lastFireHitSound ?? -Infinity) > 55)) {
           fx.lastFireHitSound = now;
-          gameAudio().playFireImpact({ volume: Math.min(1.0, 0.42 + 0.58 * (norm ** 0.8)) });
+          gameAudio().playFireImpact({ volume: Math.min(1.0, 0.42 + 0.58 * (norm ** 0.8)), x, y });
         }
         if (isSnap || isSpinStrike || !player._lastHitSound || (now - player._lastHitSound) > 55) {
           player._lastHitSound = now;
           if (player.voice && gameAudio()) {
-            gameAudio().playCollision(player.voice, { volume });
+            gameAudio().playCollision(player.voice, { volume, x, y });
           }
           if (gameAudio()) {
-            gameAudio().playBallHit({ volume: isSnap ? Math.min(1.0, volume * 1.15) : volume, snap: isSnap });
+            gameAudio().playBallHit({ volume: isSnap ? Math.min(1.0, volume * 1.15) : volume, snap: isSnap, x, y });
           }
         }
       } else if (a.team !== -1 && b.team !== -1) {
@@ -2046,7 +2050,7 @@
         if (primary.voice && gameAudio()) {
           if (!primary._lastHitSound || (now - primary._lastHitSound) > 65) {
             primary._lastHitSound = now;
-            gameAudio().playCollision(primary.voice, { volume });
+            gameAudio().playCollision(primary.voice, { volume, x, y });
           }
         }
       }
@@ -2078,7 +2082,7 @@
         if (now - (map.get(body) ?? -Infinity) >= 180) {
           map.set(body, now);
           const speed = Math.hypot(body.vx || 0, body.vy || 0);
-          gameAudio()?.playCarve?.({ volume: Math.min(0.55, 0.16 + 0.36 * Math.min(1, speed / 550)) });
+          gameAudio()?.playCarve?.({ volume: Math.min(0.55, 0.16 + 0.36 * Math.min(1, speed / 550)), x: cx, y: cy });
         }
         return;
       }
@@ -2100,14 +2104,14 @@
       if (!audio) return;
       if (body.team === -1 && P.ballOnFire?.(body) && velocity >= 90 && (now - (fx.lastFireHitSound ?? -Infinity) > 55)) {
         fx.lastFireHitSound = now;
-        audio.playFireImpact?.({ volume: Math.min(0.9, 0.32 + 0.55 * (norm ** 0.85)) });
+        audio.playFireImpact?.({ volume: Math.min(0.9, 0.32 + 0.55 * (norm ** 0.85)), x: cx, y: cy });
       }
       if (wallType === 'post') {
-        audio.playGoalHit('post', { volume: Math.min(1.0, volume * 1.1), spin: Math.abs(body.omega || 0), speed: velocity });
+        audio.playGoalHit('post', { volume: Math.min(1.0, volume * 1.1), spin: Math.abs(body.omega || 0), speed: velocity, x: cx, y: cy });
       } else if (wallType === 'net') {
-        audio.playGoalHit('net', { volume });
+        audio.playGoalHit('net', { volume, x: cx, y: cy });
       } else {
-        audio.playWallHit({ volume: Math.min(0.85, 0.1 + 0.68 * (norm ** 1.05)) });
+        audio.playWallHit({ volume: Math.min(0.85, 0.1 + 0.68 * (norm ** 1.05)), x: cx, y: cy });
       }
     }
 
@@ -2135,7 +2139,7 @@
             maxRadius: key === 'cannonball' ? 48 : 36, team: body.team, color, life: .24, duration: .24 });
         }
       }
-      gameAudio()?.playSuper?.(key, stage);
+      gameAudio()?.playSuper?.(key, stage, { x: body?.x, y: body?.y });
     }
 
     function handleShockwave(source, radius, type = null) {
@@ -2151,7 +2155,7 @@
       fx.shockwaves.push({ x: source.x, y: source.y, currentRadius: 10, maxRadius: radius, team: source.team, color: '#ff7197', life: 0.35, duration: 0.35 });
       fx.shockwaves.push({ x: source.x, y: source.y, currentRadius: 6, maxRadius: radius * 0.88, team: source.team, color: '#9d467a', life: 0.30, duration: 0.30 });
       if (gameAudio()) {
-        gameAudio().playSuper?.('shockwave', 'impact', { volume: 0.8 });
+        gameAudio().playSuper?.('shockwave', 'impact', { volume: 0.8, x: source?.x, y: source?.y });
       }
     }
 

@@ -278,7 +278,21 @@ SOFTWARE.
       <button id="pause-copy-watch" type="button" hidden>Copy watch link</button>
     </div>
     <div class="pause-settings">
-      <button id="setting-sound" class="setting" type="button" aria-pressed="true" title="Turn game sound effects and fanfare on or off"><span>Sound</span><span class="setting-value">On</span></button>
+      <div class="setting-slider" title="Adjust sound effects volume">
+        <div class="setting-slider-header">
+          <label for="setting-sound-volume">Sound</label>
+          <span id="setting-sound-val" class="setting-value">80%</span>
+        </div>
+        <input id="setting-sound-volume" class="game-slider" type="range" min="0" max="100" step="5" value="80" aria-label="Sound volume">
+      </div>
+      <div class="setting-slider" title="Adjust music and fanfare volume">
+        <div class="setting-slider-header">
+          <label for="setting-music-volume">Music</label>
+          <span id="setting-music-val" class="setting-value">80%</span>
+        </div>
+        <input id="setting-music-volume" class="game-slider" type="range" min="0" max="100" step="5" value="80" aria-label="Music volume">
+      </div>
+      <button id="setting-audio-mode" class="setting" type="button" aria-pressed="true" title="Switch between stereo and mono sound"><span>Audio</span><span class="setting-value">Stereo</span></button>
       <button id="setting-aim" class="setting" type="button" title="Switch how dragging on the rink aims a launch"><span>Aim by</span><span class="setting-value">Drag arrow</span></button>
       <button id="setting-spin" class="setting" type="button" aria-pressed="false" title="Turn the spin slider beside the selected ubu on or off"><span>Spin slider</span><span class="setting-value">Off</span></button>
       <button id="guide-moves" class="setting" type="button" aria-pressed="false" title="Turn on or off each ubu's launch arrow while a turn plays"><span>Show moves</span><span class="setting-value">Off</span></button>

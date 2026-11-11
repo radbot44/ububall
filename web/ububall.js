@@ -36,9 +36,21 @@
   let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuDone = false, cpuLevel = 'medium', cpuMode = 'standard';
   // The home screen demo (CPU against CPU) plays silently.
   let demo = false, demoLevels = ['medium', 'hard'];
-  let soundEnabled = true;
-  try { soundEnabled = (localStorage.getItem('ububall-sound') ?? 'on') === 'on'; } catch {}
-  const gameAudio = () => videoAudio || activePlayback?.audio || (demo || !soundEnabled ? null : window.ubuAudio);
+  let soundVolume = 80;
+  let musicVolume = 80;
+  let audioMode = 'stereo';
+  try {
+    const legacySound = localStorage.getItem('ububall-sound');
+    const savedSound = localStorage.getItem('ububall-sound-volume');
+    const savedMusic = localStorage.getItem('ububall-music-volume');
+    const savedMode = localStorage.getItem('ububall-audio-mode');
+    if (savedSound !== null) soundVolume = Math.max(0, Math.min(100, Number(savedSound) || 0));
+    else if (legacySound === 'off') soundVolume = 0;
+    if (savedMusic !== null) musicVolume = Math.max(0, Math.min(100, Number(savedMusic) || 0));
+    else if (legacySound === 'off') musicVolume = 0;
+    if (savedMode === 'mono' || savedMode === 'stereo') audioMode = savedMode;
+  } catch {}
+  const gameAudio = () => videoAudio || activePlayback?.audio || (demo ? null : window.ubuAudio);
   const classicMode = () => ububallMatch.rule(fieldView.mode, 'classic');
   const blitzMode = () => ububallMatch.rule(fieldView.mode, 'blitz');
   const pulseMode = () => ububallMatch.rule(fieldView.mode, 'pulse');
@@ -3489,15 +3501,78 @@
   }
   window.addEventListener('ubu:starter', showSignupPack);
   document.addEventListener('DOMContentLoaded', showSignupPack); // The status may have come before this script.
-  showSetting('setting-sound', soundEnabled);
-  $('setting-sound').onclick = () => {
-    soundEnabled = !soundEnabled; showSetting('setting-sound', soundEnabled);
-    try { localStorage.setItem('ububall-sound', soundEnabled ? 'on' : 'off'); } catch {}
-    if (!soundEnabled) {
-      stopFanfare();
-      window.ubuAudio?.stop?.();
+  function updateSoundUI() {
+    const slider = $('setting-sound-volume');
+    const badge = $('setting-sound-val');
+    if (slider) {
+      slider.value = soundVolume;
+      slider.style.setProperty('--fill-pct', `${soundVolume}%`);
     }
-  };
+    if (badge) badge.textContent = `${soundVolume}%`;
+  }
+  function updateMusicUI() {
+    const slider = $('setting-music-volume');
+    const badge = $('setting-music-val');
+    if (slider) {
+      slider.value = musicVolume;
+      slider.style.setProperty('--fill-pct', `${musicVolume}%`);
+    }
+    if (badge) badge.textContent = `${musicVolume}%`;
+  }
+  function updateAudioModeUI() {
+    const btn = $('setting-audio-mode');
+    if (btn) {
+      const isSt = audioMode === 'stereo';
+      btn.setAttribute('aria-pressed', isSt ? 'true' : 'false');
+      const val = btn.querySelector('.setting-value');
+      if (val) val.textContent = isSt ? 'Stereo' : 'Mono';
+    }
+  }
+  function applyAudioSettings() {
+    if (window.ubuAudio) {
+      window.ubuAudio.setSoundVolume?.(soundVolume / 100);
+      window.ubuAudio.setMusicVolume?.(musicVolume / 100);
+      window.ubuAudio.setAudioMode?.(audioMode);
+      window.ubuAudio.setOrientation?.(fieldView.portrait);
+    }
+  }
+
+  updateSoundUI();
+  updateMusicUI();
+  updateAudioModeUI();
+  applyAudioSettings();
+
+  const soundSlider = $('setting-sound-volume');
+  if (soundSlider) {
+    soundSlider.oninput = () => {
+      soundVolume = Math.max(0, Math.min(100, Number(soundSlider.value) || 0));
+      updateSoundUI();
+      window.ubuAudio?.setSoundVolume?.(soundVolume / 100);
+      try { localStorage.setItem('ububall-sound-volume', String(soundVolume)); } catch {}
+      if (soundVolume === 0) window.ubuAudio?.stopMotion?.();
+    };
+  }
+
+  const musicSlider = $('setting-music-volume');
+  if (musicSlider) {
+    musicSlider.oninput = () => {
+      musicVolume = Math.max(0, Math.min(100, Number(musicSlider.value) || 0));
+      updateMusicUI();
+      window.ubuAudio?.setMusicVolume?.(musicVolume / 100);
+      try { localStorage.setItem('ububall-music-volume', String(musicVolume)); } catch {}
+      if (musicVolume === 0) stopFanfare();
+    };
+  }
+
+  const audioModeBtn = $('setting-audio-mode');
+  if (audioModeBtn) {
+    audioModeBtn.onclick = () => {
+      audioMode = audioMode === 'stereo' ? 'mono' : 'stereo';
+      updateAudioModeUI();
+      window.ubuAudio?.setAudioMode?.(audioMode);
+      try { localStorage.setItem('ububall-audio-mode', audioMode); } catch {}
+    };
+  }
   // The floating spin slider is a preference kept per device.
   showSetting('setting-spin', spinSlider);
   $('setting-spin').onclick = () => {
@@ -3778,6 +3853,7 @@
     layoutDirty = true;
     fieldView.portrait = !fieldView.portrait;
     stadium?.classList.toggle('portrait-mode', fieldView.portrait);
+    window.ubuAudio?.setOrientation?.(fieldView.portrait);
     if (btnRotate) {
       btnRotate.setAttribute('aria-pressed', String(fieldView.portrait));
       btnRotate.title = fieldView.portrait ? 'Switch to landscape orientation' : 'Switch to portrait orientation';

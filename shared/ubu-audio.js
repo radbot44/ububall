@@ -128,6 +128,167 @@
     window.addEventListener('keydown', unlock, { capture: true, passive: true });
   }
 
+  let soundVolume = 0.8;
+  let musicVolume = 0.8;
+  let audioMode = 'stereo'; // 'stereo' or 'mono'
+  let currentOrientation = false; // false: landscape, true: portrait
+
+  const contextBuses = new WeakMap();
+  const registeredBusContexts = new Set();
+
+  function updateBusMode(masterGain, mode) {
+    if (!masterGain) return;
+    try {
+      if (mode === 'mono') {
+        masterGain.channelCount = 1;
+        masterGain.channelCountMode = 'explicit';
+        masterGain.channelInterpretation = 'speakers';
+      } else {
+        masterGain.channelCount = 2;
+        masterGain.channelCountMode = 'max';
+        masterGain.channelInterpretation = 'speakers';
+      }
+    } catch {}
+  }
+
+  function setupAudioBuses(ctx) {
+    if (!ctx) return null;
+    if (contextBuses.has(ctx)) return contextBuses.get(ctx);
+
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
+    updateBusMode(masterGain, audioMode);
+    masterGain.connect(ctx.destination);
+
+    const sfxGain = ctx.createGain();
+    sfxGain.gain.setValueAtTime(soundVolume, ctx.currentTime);
+    sfxGain.connect(masterGain);
+
+    const musicGain = ctx.createGain();
+    musicGain.gain.setValueAtTime(musicVolume, ctx.currentTime);
+    musicGain.connect(masterGain);
+
+    const buses = { masterGain, sfxGain, musicGain };
+    contextBuses.set(ctx, buses);
+    registeredBusContexts.add(ctx);
+    return buses;
+  }
+
+  function setSoundVolume(v) {
+    soundVolume = Math.max(0, Math.min(1, Number(v) || 0));
+    for (const ctx of registeredBusContexts) {
+      if (ctx.state === 'closed') { registeredBusContexts.delete(ctx); continue; }
+      if (contextBuses.has(ctx)) {
+        const buses = contextBuses.get(ctx);
+        try {
+          buses.sfxGain.gain.cancelScheduledValues(ctx.currentTime);
+          buses.sfxGain.gain.setValueAtTime(soundVolume, ctx.currentTime);
+        } catch {}
+      }
+    }
+    if (soundVolume === 0) stopMotion();
+  }
+
+  function getSoundVolume() { return soundVolume; }
+
+  function setMusicVolume(v) {
+    musicVolume = Math.max(0, Math.min(1, Number(v) || 0));
+    for (const ctx of registeredBusContexts) {
+      if (ctx.state === 'closed') { registeredBusContexts.delete(ctx); continue; }
+      if (contextBuses.has(ctx)) {
+        const buses = contextBuses.get(ctx);
+        try {
+          buses.musicGain.gain.cancelScheduledValues(ctx.currentTime);
+          buses.musicGain.gain.setValueAtTime(musicVolume, ctx.currentTime);
+        } catch {}
+      }
+    }
+    if (musicVolume === 0 && activePlayback) {
+      activePlayback.stop();
+      activePlayback = null;
+    }
+  }
+
+  function getMusicVolume() { return musicVolume; }
+
+  function setAudioMode(mode) {
+    audioMode = mode === 'mono' ? 'mono' : 'stereo';
+    for (const ctx of registeredBusContexts) {
+      if (ctx.state === 'closed') { registeredBusContexts.delete(ctx); continue; }
+      if (contextBuses.has(ctx)) {
+        const buses = contextBuses.get(ctx);
+        updateBusMode(buses.masterGain, audioMode);
+      }
+    }
+    if (audioMode === 'mono') {
+      for (const ctx of activeMotionContexts) {
+        const map = motionLoops.get(ctx);
+        if (map) {
+          for (const entry of map.values()) {
+            if (entry.panner) {
+              try {
+                entry.panner.pan.cancelScheduledValues(ctx.currentTime);
+                entry.panner.pan.setValueAtTime(0, ctx.currentTime);
+              } catch {}
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function getAudioMode() { return audioMode; }
+  function isStereo() { return audioMode === 'stereo'; }
+
+  function setOrientation(isPortrait) {
+    currentOrientation = Boolean(isPortrait);
+  }
+
+  function isPortrait() { return currentOrientation; }
+
+  // Calculates spatial stereo pan in [-0.85, 0.85].
+  // Landscape: x from 0 (home goal, left) to 1000 (away goal, right).
+  // Portrait: y from 0 (top boards, left of screen) to 600 (bottom boards, right of screen).
+  function panFromField(x, y, isPortrait = currentOrientation) {
+    if (audioMode === 'mono') return 0;
+    let raw = 0;
+    if (isPortrait) {
+      if (typeof y === 'number' && Number.isFinite(y)) {
+        raw = (y - 300) / 300;
+      }
+    } else {
+      if (typeof x === 'number' && Number.isFinite(x)) {
+        raw = (x - 500) / 500;
+      }
+    }
+    const clamped = Math.max(-1, Math.min(1, raw));
+    return clamped * 0.85;
+  }
+
+  function getPan(options = {}) {
+    if (audioMode === 'mono') return 0;
+    if (typeof options.pan === 'number' && Number.isFinite(options.pan)) {
+      return Math.max(-0.85, Math.min(0.85, options.pan));
+    }
+    const isP = options.portrait ?? currentOrientation;
+    if (typeof options.x === 'number' || typeof options.y === 'number') {
+      return panFromField(options.x, options.y, isP);
+    }
+    return 0;
+  }
+
+  function routePanner(ctx, targetDest, options = {}, cleanup = null) {
+    const pan = getPan(options);
+    if (pan !== 0 && ctx.createStereoPanner) {
+      const panner = ctx.createStereoPanner();
+      panner.pan.setValueAtTime(pan, ctx.currentTime);
+      panner.connect(targetDest);
+      if (cleanup) cleanup.push(panner);
+      return panner;
+    }
+    return targetDest;
+  }
+
   function getAudioContext(force = false) {
     if (typeof window === 'undefined') return null;
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -135,6 +296,7 @@
     if (!force && !hasUserGesture()) return null;
     if (!sharedContext || sharedContext.state === 'closed') {
       sharedContext = new AudioCtx();
+      setupAudioBuses(sharedContext);
     }
     if (sharedContext.state === 'suspended') {
       sharedContext.resume().catch(() => {});
@@ -148,7 +310,7 @@
   // the audio graph every block, and a match plays thousands of hits.
   // A context can share one chain among its sounds (see shareMasterChain).
   const sharedChains = new WeakMap();
-  function createMasterChain(ctx, cleanup = null, seconds = 0) {
+  function createMasterChain(ctx, cleanup = null, seconds = 0, bus = 'sfx') {
     if (sharedChains.has(ctx)) return sharedChains.get(ctx);
     const soften = ctx.createBiquadFilter();
     soften.type = 'lowpass';
@@ -163,11 +325,18 @@
     compressor.release.setValueAtTime(0.25, ctx.currentTime);
 
     const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.22, ctx.currentTime);
+    const buses = contextBuses.get(ctx);
+    const targetBus = buses ? (bus === 'music' ? buses.musicGain : buses.sfxGain) : null;
+    const initialGain = targetBus ? 0.22 : (0.22 * (bus === 'music' ? musicVolume : soundVolume));
+    masterGain.gain.setValueAtTime(initialGain, ctx.currentTime);
 
     soften.connect(compressor);
     compressor.connect(masterGain);
-    masterGain.connect(ctx.destination);
+    if (targetBus) {
+      masterGain.connect(targetBus);
+    } else {
+      masterGain.connect(ctx.destination);
+    }
     if (cleanup) cleanup.push(soften, compressor, masterGain);
     if (seconds) {
       const timer = ctx.createConstantSource();
@@ -711,11 +880,12 @@
 
     const parsed = parseVoiceInfo(voice);
     const master = createMasterChain(ctx, null, parsed.decaySeconds * 1.5 + 0.1);
+    const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
     const volume = options.volume ?? 1.0;
 
     // A friendly signature voice chirp / call
-    const toneHandle = playTone(ctx, master, {
+    const toneHandle = playTone(ctx, dest, {
       instrument: parsed.instrumentIndex,
       freq: parsed.rootFreq,
       startTime: now,
@@ -723,7 +893,8 @@
       decay: parsed.decaySeconds,
       timbreMod: parsed.timbreMod,
       pitchBend: 2.5, // subtle upward scoop into pitch gives personality!
-      volume
+      volume,
+      cleanupNode: dest !== master ? dest : null
     });
 
     const handle = {
@@ -742,12 +913,13 @@
 
     const parsed = parseVoiceInfo(voice);
     const master = createMasterChain(ctx, null, Math.min(parsed.decaySeconds, 0.22) * 1.5 + 0.1);
+    const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
     const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 1.0));
 
     // Collision sound: snappy, responsive impact chirp with scaled loudness
     const duration = Math.min(parsed.decaySeconds, 0.22);
-    const toneHandle = playTone(ctx, master, {
+    const toneHandle = playTone(ctx, dest, {
       instrument: parsed.instrumentIndex,
       freq: parsed.rootFreq,
       startTime: now,
@@ -756,7 +928,8 @@
       timbreMod: parsed.timbreMod,
       pitchBend: 1.8,
       volume,
-      soft: 0.005
+      soft: 0.005,
+      cleanupNode: dest !== master ? dest : null
     });
     return toneHandle;
   }
@@ -776,6 +949,7 @@
     if (!ctx) return;
     const snap = Boolean(options.snap);
     const master = createMasterChain(ctx, null, snap ? 0.11 : 0.08);
+    const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
     const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.8));
 
@@ -788,7 +962,7 @@
     strike(gain, 0.7 * volume, now, now + 0.07);
 
     osc.connect(gain);
-    gain.connect(master);
+    gain.connect(dest);
     osc.start(now);
     osc.stop(now + 0.08);
 
@@ -799,10 +973,10 @@
       crack.frequency.exponentialRampToValueAtTime(260, now + 0.042);
       strike(crackGain, 0.45 * volume, now, now + 0.048);
       crack.connect(crackGain);
-      crackGain.connect(master);
+      crackGain.connect(dest);
       crack.start(now);
       crack.stop(now + 0.055);
-      noiseGrain(ctx, master, now, 0.028, { freq: 2900, to: 1100, q: 1.8, level: 0.42 * volume });
+      noiseGrain(ctx, dest, now, 0.028, { freq: 2900, to: 1100, q: 1.8, level: 0.42 * volume });
     }
   }
 
@@ -1003,9 +1177,9 @@
   // A burning ball: a faint, narrow hiss with sparse little fire pops.
   function playSizzle(options = {}) {
     const volume = Number.isFinite(options.volume) ? Math.max(0, options.volume) : 1;
-    if (!volume) return { stop() {} };
+    if (!volume) return { stop() {}, setPan() {} };
     const ctx = options.ctx || getAudioContext();
-    if (!ctx) return { stop() {} };
+    if (!ctx) return { stop() {}, setPan() {} };
     const cleanup = [], master = createMasterChain(ctx, cleanup);
     const hiss = ctx.createBufferSource(), band = ctx.createBiquadFilter(), level = ctx.createGain();
     const output = ctx.createGain();
@@ -1015,7 +1189,17 @@
     output.gain.setValueAtTime(0, ctx.currentTime);
     output.gain.linearRampToValueAtTime(volume, ctx.currentTime + 0.12);
     hiss.connect(band); band.connect(level); level.connect(output);
-    output.connect(master);
+    let panner = null;
+    const initialPan = getPan(options);
+    if (ctx.createStereoPanner) {
+      panner = ctx.createStereoPanner();
+      panner.pan.setValueAtTime(initialPan, ctx.currentTime);
+      output.connect(panner);
+      panner.connect(master);
+      cleanup.push(panner);
+    } else {
+      output.connect(master);
+    }
     hiss.onended = () => {
       for (const node of [hiss, band, level, output, ...cleanup]) node.disconnect();
     };
@@ -1057,6 +1241,24 @@
       crackles = setTimeout(crackle, 60);
     }
     const handle = {
+      setPan(panVal) {
+        if (panner && audioMode !== 'mono') {
+          try {
+            const clamped = Math.max(-0.85, Math.min(0.85, Number(panVal) || 0));
+            panner.pan.cancelScheduledValues(ctx.currentTime);
+            panner.pan.setValueAtTime(clamped, ctx.currentTime);
+          } catch {}
+        }
+      },
+      setCoords(x, y) {
+        if (panner) {
+          try {
+            const pan = panFromField(x, y);
+            panner.pan.cancelScheduledValues(ctx.currentTime);
+            panner.pan.setValueAtTime(pan, ctx.currentTime);
+          } catch {}
+        }
+      },
       stop() {
         if (!superPlayback.delete(handle)) return;
         if (crackles) clearTimeout(crackles);
@@ -1155,14 +1357,24 @@
         filter.frequency.setValueAtTime(p.cutoff, now);
         filter.Q.setValueAtTime(p.q, now);
         outGain.gain.setValueAtTime(0, now);
-        lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
-        osc.connect(filter); filter.connect(outGain); outGain.connect(master);
+        let panner = null;
+        const initialPan = getPan(options);
+        if (ctx.createStereoPanner) {
+          panner = ctx.createStereoPanner();
+          panner.pan.setValueAtTime(initialPan, now);
+          lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
+          osc.connect(filter); filter.connect(outGain); outGain.connect(panner); panner.connect(master);
+          cleanup.push(panner);
+        } else {
+          lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
+          osc.connect(filter); filter.connect(outGain); outGain.connect(master);
+        }
         osc.onended = () => {
           for (const n of [osc, lfo, lfoGain, filter, outGain, ...cleanup]) { try { n.disconnect(); } catch {} }
         };
         osc.start(now); lfo.start(now);
         entry = {
-          stopped: false, timer: null, sources: [osc, lfo], osc, lfo, lfoGain, filter, outGain,
+          stopped: false, timer: null, sources: [osc, lfo], osc, lfo, lfoGain, filter, outGain, panner,
           freq0: p.freq, freq: p.freq, wobbleHz0: p.wobbleHz, wobbleHz: p.wobbleHz,
           wobbleDepth0: p.wobbleDepth, wobbleDepth: p.wobbleDepth, cutoff0: p.cutoff, cutoff: p.cutoff,
           paramT0: now, paramT1: now,
@@ -1171,6 +1383,7 @@
             if (entry.stopped) return;
             entry.stopped = true;
             if (entry.timer) clearTimeout(entry.timer);
+            if (entry.panner) { try { entry.panner.disconnect(); } catch {} }
             map.delete(loopKey);
             if (!map.size) activeMotionContexts.delete(ctx);
             try {
@@ -1189,6 +1402,11 @@
         const curWobble = interpRamp(entry.paramT0, entry.wobbleHz0, entry.paramT1, entry.wobbleHz, now);
         const curDepth = interpRamp(entry.paramT0, entry.wobbleDepth0, entry.paramT1, entry.wobbleDepth, now);
         const curCutoff = interpRamp(entry.paramT0, entry.cutoff0, entry.paramT1, entry.cutoff, now);
+        if (entry.panner) {
+          const curPan = getPan(options);
+          entry.panner.pan.cancelScheduledValues(now);
+          entry.panner.pan.setValueAtTime(curPan, now);
+        }
         entry.osc.frequency.cancelScheduledValues(now);
         entry.osc.frequency.setValueAtTime(curFreq, now);
         entry.osc.frequency.linearRampToValueAtTime(p.freq, rampEnd);
@@ -1242,13 +1460,14 @@
     filter.frequency.setValueAtTime(pPeak.cutoff, now);
     filter.Q.setValueAtTime(pPeak.q, now);
     // Audition plays gently at the same subtle scale as in-game movement
+    const dest = routePanner(ctx, master, options);
     const previewBoost = options.preview ? 1.6 : 1.3;
     outGain.gain.setValueAtTime(0.0001, now);
     outGain.gain.linearRampToValueAtTime(Math.min(0.09, pPeak.level * previewBoost), now + Math.min(0.08, duration * 0.2));
     outGain.gain.linearRampToValueAtTime(Math.min(0.075, pPeak.level * previewBoost * 0.8), now + duration * 0.72);
     outGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
-    osc.connect(filter); filter.connect(outGain); outGain.connect(master);
+    osc.connect(filter); filter.connect(outGain); outGain.connect(dest);
     osc.start(now); lfo.start(now);
     osc.stop(now + duration + 0.02); lfo.stop(now + duration + 0.02);
     return {
@@ -1317,16 +1536,28 @@
         filter.frequency.setValueAtTime(p.bandFreq, now);
         filter.Q.setValueAtTime(1.35, now);
         outGain.gain.setValueAtTime(0, now);
-        lfo.connect(lfoGain); lfoGain.connect(osc1.frequency); lfoGain.connect(osc2.frequency);
-        lfo.connect(filterLfo); filterLfo.connect(filter.frequency);
-        osc1.connect(filter); osc2.connect(g2); g2.connect(filter);
-        filter.connect(outGain); outGain.connect(master);
+        let panner = null;
+        const initialPan = getPan(options);
+        if (ctx.createStereoPanner) {
+          panner = ctx.createStereoPanner();
+          panner.pan.setValueAtTime(initialPan, now);
+          lfo.connect(lfoGain); lfoGain.connect(osc1.frequency); lfoGain.connect(osc2.frequency);
+          lfo.connect(filterLfo); filterLfo.connect(filter.frequency);
+          osc1.connect(filter); osc2.connect(g2); g2.connect(filter);
+          filter.connect(outGain); outGain.connect(panner); panner.connect(master);
+          cleanup.push(panner);
+        } else {
+          lfo.connect(lfoGain); lfoGain.connect(osc1.frequency); lfoGain.connect(osc2.frequency);
+          lfo.connect(filterLfo); filterLfo.connect(filter.frequency);
+          osc1.connect(filter); osc2.connect(g2); g2.connect(filter);
+          filter.connect(outGain); outGain.connect(master);
+        }
         osc1.onended = () => {
           for (const n of [osc1, osc2, g2, lfo, lfoGain, filterLfo, filter, outGain, ...cleanup]) { try { n.disconnect(); } catch {} }
         };
         osc1.start(now); osc2.start(now); lfo.start(now);
         entry = {
-          stopped: false, timer: null, sources: [osc1, osc2, lfo], osc1, osc2, lfo, lfoGain, filterLfo, filter, outGain,
+          stopped: false, timer: null, sources: [osc1, osc2, lfo], osc1, osc2, lfo, lfoGain, filterLfo, filter, outGain, panner,
           freq0: p.freq, freq: p.freq, swirlHz0: p.swirlHz, swirlHz: p.swirlHz,
           swirlDepth0: p.swirlDepth, swirlDepth: p.swirlDepth, bandFreq0: p.bandFreq, bandFreq: p.bandFreq,
           paramT0: now, paramT1: now,
@@ -1335,6 +1566,7 @@
             if (entry.stopped) return;
             entry.stopped = true;
             if (entry.timer) clearTimeout(entry.timer);
+            if (entry.panner) { try { entry.panner.disconnect(); } catch {} }
             map.delete(loopKey);
             if (!map.size) activeMotionContexts.delete(ctx);
             try {
@@ -1353,6 +1585,11 @@
         const curSwirl = interpRamp(entry.paramT0, entry.swirlHz0, entry.paramT1, entry.swirlHz, now);
         const curDepth = interpRamp(entry.paramT0, entry.swirlDepth0, entry.paramT1, entry.swirlDepth, now);
         const curBand = interpRamp(entry.paramT0, entry.bandFreq0, entry.paramT1, entry.bandFreq, now);
+        if (entry.panner) {
+          const curPan = getPan(options);
+          entry.panner.pan.cancelScheduledValues(now);
+          entry.panner.pan.setValueAtTime(curPan, now);
+        }
         entry.osc1.frequency.cancelScheduledValues(now);
         entry.osc1.frequency.setValueAtTime(curFreq, now);
         entry.osc1.frequency.linearRampToValueAtTime(p.freq, rampEnd);
@@ -1410,13 +1647,14 @@
     filter.type = 'bandpass';
     filter.frequency.setValueAtTime(pPeak.bandFreq, now);
     filter.Q.setValueAtTime(1.35, now);
+    const dest = routePanner(ctx, master, options);
     const previewBoost = options.preview ? 1.45 : 1.15;
     outGain.gain.setValueAtTime(0.0001, now);
     outGain.gain.linearRampToValueAtTime(Math.min(0.048, pPeak.level * previewBoost), now + Math.min(0.06, duration * 0.18));
     outGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     lfo.connect(lfoGain); lfoGain.connect(osc1.frequency); lfoGain.connect(osc2.frequency);
     osc1.connect(filter); osc2.connect(g2); g2.connect(filter);
-    filter.connect(outGain); outGain.connect(master);
+    filter.connect(outGain); outGain.connect(dest);
     osc1.start(now); osc2.start(now); lfo.start(now);
     osc1.stop(now + duration + 0.02); osc2.stop(now + duration + 0.02); lfo.stop(now + duration + 0.02);
     return {
@@ -1445,7 +1683,7 @@
     const s = Math.min(1, Math.max(0, (speed - 28) / 720));
     const spinShare = Math.min(1, Math.abs(options.spin || 0) / 20);
     const volume = Math.max(0.02, Math.min(1.2, options.volume ?? 1.0));
-    const pan = Math.max(-0.7, Math.min(0.7, Number(options.pan) || 0));
+    const pan = getPan(options);
     const iceFreq = 2100 + 1450 * s + 240 * spinShare;
     const bodyFreq = 780 + 380 * s;
     const boost = duration > 0.4 ? 1.15 : 1.0;
@@ -1465,6 +1703,7 @@
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
     const master = createMasterChain(ctx, null, 0.2);
+    const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
     const volume = Math.max(0.03, Math.min(1.0, options.volume ?? 0.42));
 
@@ -1480,17 +1719,17 @@
     sprayGain.gain.linearRampToValueAtTime(0.13 * volume, now + 0.012);
     sprayGain.gain.linearRampToValueAtTime(0.095 * volume, now + 0.05);
     sprayGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.165);
-    spray.connect(sprayFilter); sprayFilter.connect(sprayGain); sprayGain.connect(master);
+    spray.connect(sprayFilter); sprayFilter.connect(sprayGain); sprayGain.connect(dest);
     spray.start(now, Math.random() * 0.7);
     spray.stop(now + 0.18);
 
     // 2. Soft shaved-ice snow spray
-    noiseGrain(ctx, master, now + 0.006, 0.13, { freq: 2900, to: 1500, q: 1.0, level: 0.065 * volume });
+    noiseGrain(ctx, dest, now + 0.006, 0.13, { freq: 2900, to: 1500, q: 1.0, level: 0.065 * volume });
 
     // 3. Subtle ice-crystal shave texture in the initial bite
     for (let i = 0; i < 3; i++) {
       const t = now + i * 0.014 + Math.random() * 0.005;
-      noiseGrain(ctx, master, t, 0.014, {
+      noiseGrain(ctx, dest, t, 0.014, {
         freq: 1150 + i * 240 + Math.random() * 250,
         to: 900 + i * 140,
         q: 2.6,
@@ -1499,7 +1738,7 @@
     }
 
     // 4. Gentle low-mid skate pressure weight
-    noiseGrain(ctx, master, now, 0.075, { freq: 420, to: 250, q: 2.2, level: 0.07 * volume });
+    noiseGrain(ctx, dest, now, 0.075, { freq: 420, to: 250, q: 2.2, level: 0.07 * volume });
   }
 
   // Continuous tailgating wind: smooth overlapping rushing-air stream when triggered repeatedly
@@ -1513,18 +1752,19 @@
     const draft = Math.min(1, Math.max(0, Number(options.draft ?? 0.7)));
     const volume = Math.max(0.04, Math.min(1.0, options.volume ?? (0.3 + 0.42 * draft)));
     const boost = duration > 0.4 ? 1.35 : 1.0;
+    const pan = getPan(options);
 
     // Warm aerodynamic air-pocket rush
     const baseAir = 440 + 240 * draft;
     smoothNoise(ctx, master, now, duration, {
       freq: baseAir, mid: baseAir * 1.32, to: baseAir * 1.04,
-      q: 1.35, level: 0.17 * volume * boost
+      q: 1.35, level: 0.17 * volume * boost, pan
     });
     // Silky upper wind-sheath whistle
     const sheen = 1220 + 680 * draft;
     smoothNoise(ctx, master, now, duration, {
       freq: sheen * 0.92, mid: sheen * 1.24, to: sheen,
-      q: 2.35, level: 0.09 * volume * boost
+      q: 2.35, level: 0.09 * volume * boost, pan
     });
   }
 
@@ -1533,6 +1773,7 @@
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
     const master = createMasterChain(ctx, null, 0.17);
+    const dest = routePanner(ctx, master, options);
     if (!sharedChains.has(ctx)) master.frequency.setValueAtTime(12500, ctx.currentTime);
     const now = ctx.currentTime;
     const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.85));
@@ -1548,7 +1789,7 @@
     whooshGain.gain.setValueAtTime(0.0001, now);
     whooshGain.gain.exponentialRampToValueAtTime(0.24 * volume, now + 0.02);
     whooshGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.036);
-    whoosh.connect(whooshBand); whooshBand.connect(whooshGain); whooshGain.connect(master);
+    whoosh.connect(whooshBand); whooshBand.connect(whooshGain); whooshGain.connect(dest);
     whoosh.start(now, Math.random() * 0.7);
     whoosh.stop(now + 0.045);
 
@@ -1565,7 +1806,7 @@
     crackGain.gain.setValueAtTime(0.0001, crackAt);
     crackGain.gain.linearRampToValueAtTime(0.84 * volume, crackAt + 0.0008);
     crackGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.028);
-    crack.connect(crackBand); crackBand.connect(crackGain); crackGain.connect(master);
+    crack.connect(crackBand); crackBand.connect(crackGain); crackGain.connect(dest);
     crack.start(crackAt, Math.random() * 0.7);
     crack.stop(crackAt + 0.036);
 
@@ -1577,7 +1818,7 @@
     tipGain.gain.setValueAtTime(0.0001, crackAt);
     tipGain.gain.linearRampToValueAtTime(0.56 * volume, crackAt + 0.0007);
     tipGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.015);
-    tip.connect(tipHp); tipHp.connect(tipGain); tipGain.connect(master);
+    tip.connect(tipHp); tipHp.connect(tipGain); tipGain.connect(dest);
     tip.start(crackAt, Math.random() * 0.7);
     tip.stop(crackAt + 0.022);
 
@@ -1589,7 +1830,7 @@
     popGain.gain.setValueAtTime(0.0001, crackAt);
     popGain.gain.linearRampToValueAtTime(0.52 * volume, crackAt + 0.0008);
     popGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.013);
-    pop.connect(popGain); popGain.connect(master);
+    pop.connect(popGain); popGain.connect(dest);
     pop.start(crackAt);
     pop.stop(crackAt + 0.018);
 
@@ -1603,7 +1844,7 @@
     tailGain.gain.setValueAtTime(0.0001, crackAt + 0.004);
     tailGain.gain.linearRampToValueAtTime(0.19 * volume, crackAt + 0.009);
     tailGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.09);
-    tail.connect(tailFilter); tailFilter.connect(tailGain); tailGain.connect(master);
+    tail.connect(tailFilter); tailFilter.connect(tailGain); tailGain.connect(dest);
     tail.start(crackAt + 0.004, Math.random() * 0.7);
     tail.stop(crackAt + 0.105);
   }
@@ -1614,6 +1855,7 @@
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
     const master = createMasterChain(ctx, null, 0.1);
+    const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
     const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.5));
     const hard = Math.min(1, Math.max(0, (volume - 0.22) / 0.65));
@@ -1626,7 +1868,7 @@
     bodyFilter.type = 'lowpass';
     bodyFilter.frequency.setValueAtTime(640, now);
     strike(bodyGain, 0.36 * volume, now, now + 0.068);
-    body.connect(bodyFilter); bodyFilter.connect(bodyGain); bodyGain.connect(master);
+    body.connect(bodyFilter); bodyFilter.connect(bodyGain); bodyGain.connect(dest);
     body.start(now); body.stop(now + 0.08);
 
     // 2. Hollow HDPE board cavity "thock" partial
@@ -1635,13 +1877,13 @@
     cavity.frequency.setValueAtTime(435, now);
     cavity.frequency.exponentialRampToValueAtTime(230, now + 0.03);
     strike(cavityGain, (0.13 + 0.18 * hard) * volume, now, now + 0.036);
-    cavity.connect(cavityGain); cavityGain.connect(master);
+    cavity.connect(cavityGain); cavityGain.connect(dest);
     cavity.start(now); cavity.stop(now + 0.045);
 
     // 3. Crisp board/plexiglass slap transient on hard impacts
     if (hard > 0.05) {
-      noiseGrain(ctx, master, now, 0.026, { freq: 980, to: 470, q: 2.4, level: 0.26 * hard * volume });
-      noiseGrain(ctx, master, now, 0.014, { freq: 2150, to: 1150, q: 2.0, level: 0.14 * hard * volume });
+      noiseGrain(ctx, dest, now, 0.026, { freq: 980, to: 470, q: 2.4, level: 0.26 * hard * volume });
+      noiseGrain(ctx, dest, now, 0.014, { freq: 2150, to: 1150, q: 2.0, level: 0.14 * hard * volume });
     }
   }
 
@@ -1651,11 +1893,12 @@
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
     const master = createMasterChain(ctx, null, 0.38);
+    const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
     const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.8));
 
     // 1. Torch-ignition flare pop
-    noiseGrain(ctx, master, now, 0.042, { freq: 2900, to: 920, q: 1.25, level: 0.34 * volume });
+    noiseGrain(ctx, dest, now, 0.042, { freq: 2900, to: 920, q: 1.25, level: 0.34 * volume });
 
     // 2. Blooming firestarter woosh (opens fast then darkens like a smaller Cannonball)
     const src = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
@@ -1668,12 +1911,12 @@
     gain.gain.setValueAtTime(0.0001, now);
     gain.gain.linearRampToValueAtTime(0.35 * volume, now + 0.016);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
-    src.connect(filter); filter.connect(gain); gain.connect(master);
+    src.connect(filter); filter.connect(gain); gain.connect(dest);
     src.start(now, Math.random() * 0.6); src.stop(now + 0.36);
 
     // 3. Compact warm punch (tighter & lighter than Cannonball's 75->30 Hz boom)
-    blip(ctx, master, now, 0.22, 112, 44, 0.32 * volume);
-    blip(ctx, master, now, 0.085, 220, 82, 0.18 * volume);
+    blip(ctx, dest, now, 0.22, 112, 44, 0.32 * volume);
+    blip(ctx, dest, now, 0.085, 220, 82, 0.18 * volume);
   }
 
   // Goal-line save: a crisp, rewarding metallic blade "shing / tink" (gentler when saving an own-team touch).
@@ -1682,14 +1925,15 @@
     if (!ctx) return;
     const own = Boolean(options.own);
     const master = createMasterChain(ctx, null, own ? 0.2 : 0.32);
+    const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
     const volume = Math.max(0.05, Math.min(1.0, options.volume ?? (own ? 0.65 : 0.85)));
 
     if (own) {
       for (const [hz, part, decay] of [[1318, 0.26, 0.15], [2960, 0.13, 0.08]]) {
-        blip(ctx, master, now, decay, hz * 1.01, hz, part * volume);
+        blip(ctx, dest, now, decay, hz * 1.01, hz, part * volume);
       }
-      noiseGrain(ctx, master, now, 0.045, { freq: 3400, to: 2400, q: 4.0, level: 0.1 * volume });
+      noiseGrain(ctx, dest, now, 0.045, { freq: 3400, to: 2400, q: 4.0, level: 0.1 * volume });
       return;
     }
 
@@ -1705,10 +1949,10 @@
       osc.frequency.setValueAtTime(from, now);
       osc.frequency.exponentialRampToValueAtTime(to, now + 0.022);
       strike(gain, part * volume, now, now + decay);
-      osc.connect(gain); gain.connect(master);
+      osc.connect(gain); gain.connect(dest);
       osc.start(now); osc.stop(now + decay + 0.02);
     }
-    noiseGrain(ctx, master, now, 0.085, { freq: 3100, to: 6200, q: 4.8, level: 0.18 * volume });
+    noiseGrain(ctx, dest, now, 0.085, { freq: 3100, to: 6200, q: 4.8, level: 0.18 * volume });
   }
 
   // Goal firework shell burst: punchy outdoor mortar pop + bright star-crack + sky crackle tail.
@@ -1718,7 +1962,7 @@
     const master = createMasterChain(ctx, null, 0.3);
     const now = ctx.currentTime;
     const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.55));
-    const pan = Math.max(-0.8, Math.min(0.8, Number(options.pan) || 0));
+    const pan = getPan(options);
     const pitch = (0.9 + Math.random() * 0.22) * (options.ring ? 1.08 : 1.0);
 
     // 1. Aerial shell chest-pop + mid-snap
@@ -1730,7 +1974,8 @@
     const sparkles = options.ring ? 5 : 4;
     for (let i = 0; i < sparkles; i++) {
       const delay = 0.055 + i * 0.038 + Math.random() * 0.022;
-      const sparkPan = Math.max(-0.9, Math.min(0.9, pan + (Math.random() - 0.5) * 0.36));
+      const sparkSpread = audioMode === 'mono' ? 0 : (Math.random() - 0.5) * 0.36;
+      const sparkPan = Math.max(-0.85, Math.min(0.85, pan + sparkSpread));
       noiseGrain(ctx, master, now + delay, 0.006, {
         freq: 3600 + Math.random() * 3200,
         q: 2.6,
@@ -1748,6 +1993,7 @@
     const inflect = spinNorm * (0.4 + 0.6 * speedNorm);
     const postDecay = 0.28 + 0.12 * inflect;
     const master = createMasterChain(ctx, null, type === 'post' ? postDecay + 0.04 : 0.3);
+    const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
     const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.8));
 
@@ -1770,7 +2016,7 @@
       strike(gain, 0.5 * volume, now, now + postDecay);
 
       carrier.connect(gain);
-      gain.connect(master);
+      gain.connect(dest);
       carrier.start(now);
       mod.start(now);
       carrier.stop(now + postDecay + 0.02);
@@ -1785,7 +2031,7 @@
       strike(gain, 0.5 * volume, now, now + 0.12);
 
       osc.connect(gain);
-      gain.connect(master);
+      gain.connect(dest);
       osc.start(now);
       osc.stop(now + 0.13);
     }
@@ -1808,8 +2054,11 @@
       magnetTimes.set(ctx, now);
     }
     const nodes = [], oscillators = [];
-    const master = createMasterChain(ctx, nodes), bus = ctx.createGain();
-    bus.gain.setValueAtTime(volume, now); bus.connect(master);
+    const master = createMasterChain(ctx, nodes);
+    const dest = routePanner(ctx, master, options, nodes);
+    const bus = ctx.createGain();
+    bus.gain.setValueAtTime(volume, now);
+    bus.connect(dest);
     nodes.push(bus);
     let ended = 0, stopped = false;
     const handle = { stop() {
@@ -1952,12 +2201,13 @@
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
     const master = createMasterChain(ctx, null, 0.4), now = ctx.currentTime + 0.005;
+    const dest = routePanner(ctx, master, options);
     for (const [hz, level, decay] of [[587, .25, .45], [1480, .15, .32], [2480, .09, .22]]) {
       const osc = ctx.createOscillator(), gain = ctx.createGain();
       osc.type = 'sine'; osc.frequency.setValueAtTime(hz, now);
       gain.gain.setValueAtTime(level * volume, now);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + decay);
-      osc.connect(gain); gain.connect(master);
+      osc.connect(gain); gain.connect(dest);
       osc.start(now); osc.stop(now + decay + 0.01);
     }
     try {
@@ -1968,7 +2218,7 @@
       steamGain.gain.setValueAtTime(0.001, now);
       steamGain.gain.linearRampToValueAtTime(0.35 * volume, now + 0.015);
       steamGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
-      noiseSource.connect(filter); filter.connect(steamGain); steamGain.connect(master);
+      noiseSource.connect(filter); filter.connect(steamGain); steamGain.connect(dest);
       noiseSource.start(now); noiseSource.stop(now + 0.36);
     } catch {}
   }
@@ -1981,6 +2231,7 @@
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
     const master = createMasterChain(ctx, null, 0.4), now = ctx.currentTime + 0.01;
+    const dest = routePanner(ctx, master, options);
     if (kind === 'warning') {
       const peak = Math.max(0.0002, 0.12 * volume);
       for (const [at, freq] of [[0, 784], [0.16, 659]]) {
@@ -1989,7 +2240,7 @@
         gain.gain.exponentialRampToValueAtTime(peak, start + 0.012);
         gain.gain.setValueAtTime(peak, start + 0.06);
         gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.14);
-        gain.connect(master);
+        gain.connect(dest);
         for (const [type, ratio, level] of [['sine', 1, 1], ['triangle', 2, 0.12]]) {
           const osc = ctx.createOscillator(), part = ctx.createGain();
           osc.type = type; osc.frequency.setValueAtTime(freq * ratio, start);
@@ -2012,9 +2263,9 @@
     gain.gain.exponentialRampToValueAtTime(whistlePeak, now + 0.025);
     gain.gain.setValueAtTime(whistlePeak, now + 0.24);
     gain.gain.exponentialRampToValueAtTime(0.0001, end);
-    osc.connect(gain); gain.connect(master);
+    osc.connect(gain); gain.connect(dest);
     osc.start(now); trill.start(now); osc.stop(end + 0.02); trill.stop(end + 0.02);
-    noiseGrain(ctx, master, now, 0.3, { freq: 2200, q: 1.5, level: 0.02 * volume });
+    noiseGrain(ctx, dest, now, 0.3, { freq: 2200, q: 1.5, level: 0.02 * volume });
   }
 
   function playGameStart(options = {}) {
@@ -2028,7 +2279,7 @@
       ? Math.max(0.01, Math.min(1.5, opts.volume))
       : 0.95;
 
-    const master = createMasterChain(ctx, null, 2.2);
+    const master = createMasterChain(ctx, null, 2.2, 'music');
     const step = 60 / 150 / 4; // 16th-note grid at 150 BPM (0.10s per step)
     const now = ctx.currentTime + 0.03;
     const activeNodes = [];
@@ -2144,11 +2395,19 @@
     dry.gain.setValueAtTime(0.85, t); wet.gain.setValueAtTime(0.22, t);
     compressor.threshold.setValueAtTime(-18, t); compressor.knee.setValueAtTime(24, t);
     compressor.ratio.setValueAtTime(3, t); compressor.attack.setValueAtTime(0.01, t); compressor.release.setValueAtTime(0.3, t);
-    master.gain.setValueAtTime(0.24, t);
+    const buses = contextBuses.get(ctx);
+    const targetBus = buses ? buses.musicGain : null;
+    const initialGain = targetBus ? 0.24 : (0.24 * musicVolume);
+    master.gain.setValueAtTime(initialGain, t);
     input.connect(lowCut); lowCut.connect(highCut);
     highCut.connect(dry); dry.connect(compressor);
     roomLowCut.connect(roomHighCut); roomHighCut.connect(room); room.connect(wet); wet.connect(compressor);
-    compressor.connect(master); master.connect(ctx.destination);
+    compressor.connect(master);
+    if (targetBus) {
+      master.connect(targetBus);
+    } else {
+      master.connect(ctx.destination);
+    }
     // Each part shares the dry mix, but only lead and pad feed the filtered room.
     const part = amount => {
       const node = ctx.createGain();
@@ -2427,7 +2686,8 @@
           let dest = master.lead, panner = null;
           if (ctx.createStereoPanner) {
             panner = ctx.createStereoPanner();
-            panner.pan.setValueAtTime(i % 2 ? 0.15 : -0.15, noteStartTime);
+            const fanfarePan = audioMode === 'mono' ? 0 : (i % 2 ? 0.15 : -0.15);
+            panner.pan.setValueAtTime(fanfarePan, noteStartTime);
             panner.connect(master.lead);
             dest = panner;
           }
@@ -2548,6 +2808,17 @@
     scaleDegreeSemitones,
     parseVoiceInfo,
     getAudioContext,
+    setupAudioBuses,
+    setSoundVolume,
+    getSoundVolume,
+    setMusicVolume,
+    getMusicVolume,
+    setAudioMode,
+    getAudioMode,
+    isStereo,
+    setOrientation,
+    isPortrait,
+    panFromField,
     shareMasterChain,
     playVoice,
     playCollision,

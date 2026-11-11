@@ -616,3 +616,93 @@ test('movement wobble, spin wobble, puck slide, spin strike, fire impact, save s
   audio.playFirework({ ctx: shared, ring: true, pan: 0.4 });
   assert.equal(shared.nodes.filter(n => n.kind === 'compressor').length, 1, 'all new sounds share export master chain');
 });
+
+test('sound and music volume buses, mono/stereo toggle, and true left-right spatial audio', () => {
+  // 1. Bus setup & volume control
+  const ctx = recordedContext();
+  const buses = audio.setupAudioBuses(ctx);
+  assert.ok(buses.masterGain && buses.sfxGain && buses.musicGain, 'setupAudioBuses creates master, sfx, and music gains');
+  assert.ok(buses.sfxGain.outputs.includes(buses.masterGain), 'sfxGain connects to masterGain');
+  assert.ok(buses.musicGain.outputs.includes(buses.masterGain), 'musicGain connects to masterGain');
+  assert.ok(buses.masterGain.outputs.includes(ctx.destination), 'masterGain connects to destination');
+
+  audio.setSoundVolume(0.65);
+  assert.equal(audio.getSoundVolume(), 0.65);
+  assert.equal(buses.sfxGain.gain.value, 0.65);
+
+  audio.setMusicVolume(0.45);
+  assert.equal(audio.getMusicVolume(), 0.45);
+  assert.equal(buses.musicGain.gain.value, 0.45);
+
+  // 2. Mono / Stereo toggle
+  audio.setAudioMode('stereo');
+  assert.equal(audio.isStereo(), true);
+  assert.equal(audio.getAudioMode(), 'stereo');
+  assert.equal(buses.masterGain.channelCount, 2);
+
+  audio.setAudioMode('mono');
+  assert.equal(audio.isStereo(), false);
+  assert.equal(audio.getAudioMode(), 'mono');
+  assert.equal(buses.masterGain.channelCount, 1);
+  assert.equal(audio.panFromField(1000, 300), 0, 'mono clamps field pan to center');
+
+  audio.setAudioMode('stereo');
+  assert.equal(audio.isStereo(), true);
+
+  // 3. Landscape vs Portrait spatial math (0.85 soft stereo limit)
+  audio.setOrientation(false); // landscape
+  assert.equal(audio.isPortrait(), false);
+  assert.equal(Number(audio.panFromField(500, 300).toFixed(4)), 0);
+  assert.equal(Number(audio.panFromField(0, 300).toFixed(4)), -0.85, 'landscape home goal x=0 pans full left (-0.85)');
+  assert.equal(Number(audio.panFromField(1000, 300).toFixed(4)), 0.85, 'landscape away goal x=1000 pans full right (+0.85)');
+  assert.equal(Number(audio.panFromField(-200, 300).toFixed(4)), -0.85, 'landscape clamp beyond left');
+  assert.equal(Number(audio.panFromField(1200, 300).toFixed(4)), 0.85, 'landscape clamp beyond right');
+
+  audio.setOrientation(true); // portrait (rink rotated 90° clockwise in screen space: top boards y=0 is left, bottom y=600 is right)
+  assert.equal(audio.isPortrait(), true);
+  assert.equal(Number(audio.panFromField(500, 300).toFixed(4)), 0);
+  assert.equal(Number(audio.panFromField(500, 0).toFixed(4)), -0.85, 'portrait top boards y=0 pans screen left (-0.85)');
+  assert.equal(Number(audio.panFromField(500, 600).toFixed(4)), 0.85, 'portrait bottom boards y=600 pans screen right (+0.85)');
+  assert.equal(Number(audio.panFromField(500, -50).toFixed(4)), -0.85, 'portrait clamp beyond left');
+  assert.equal(Number(audio.panFromField(500, 750).toFixed(4)), 0.85, 'portrait clamp beyond right');
+  audio.setOrientation(false); // restore landscape
+
+  // 4. SFX vs Music bus routing
+  const busCtx = recordedContext();
+  const testBuses = audio.setupAudioBuses(busCtx);
+
+  // SFX sound routes to sfxGain
+  audio.playWallHit({ ctx: busCtx, volume: 0.8, x: 1000, y: 300 });
+  const wallPanner = busCtx.nodes.find(n => n.kind === 'panner');
+  assert.ok(wallPanner, 'spatial sound creates stereo panner');
+  assert.equal(Number(wallPanner.pan.value.toFixed(4)), 0.85, 'panner is panned right at x=1000');
+  assert.ok(reaches(wallPanner, n => n === testBuses.sfxGain), 'wall hit routes to sfxGain');
+
+  // Music sound routes to musicGain
+  const musicCtx = recordedContext();
+  const musicBuses = audio.setupAudioBuses(musicCtx);
+  audio.playGameStart({ ctx: musicCtx, volume: 0.8 });
+  const musicOsc = musicCtx.nodes.find(n => n.kind === 'oscillator');
+  assert.ok(musicOsc, 'game start jingle creates oscillators');
+  assert.ok(reaches(musicOsc, n => n === musicBuses.musicGain), 'game start jingle routes to musicGain');
+
+  // 5. Continuous motion loop dynamic panning and mono downmixing
+  const motionCtx = recordedContext();
+  audio.playUbuMove({ ctx: motionCtx, id: 1, speed: 400, mass: 3, radius: 25, x: 100, y: 300 });
+  const movePanner = motionCtx.nodes.find(n => n.kind === 'panner');
+  assert.ok(movePanner, 'motion loop creates panner node');
+  assert.equal(Number(movePanner.pan.value.toFixed(4)), -0.68, 'motion loop sets initial pan from field coordinate');
+
+  // Updating loop dynamically updates pan
+  motionCtx.currentTime = 0.016;
+  audio.playUbuMove({ ctx: motionCtx, id: 1, speed: 400, mass: 3, radius: 25, x: 900, y: 300 });
+  assert.equal(Number(movePanner.pan.value.toFixed(4)), 0.68, 'motion loop dynamically updates panner pan on frame update');
+
+  // Switching audio mode to mono zeroes out active motion loop panner
+  audio.setAudioMode('mono');
+  assert.equal(movePanner.pan.value, 0, 'switching to mono zeroes active loop panners');
+  audio.stopMotion(motionCtx);
+  audio.setAudioMode('stereo');
+  audio.setSoundVolume(0.8);
+  audio.setMusicVolume(0.8);
+});
