@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#101112">
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="ububall.css">
+  <link rel="stylesheet" href="effects.css">
+  <title>Effects Demo</title>
+</head>
+<body class="effects-page">
+  <main id="effects-app" class="effects-shell">
+    <aside class="effects-stage-column" aria-label="Live rink stage">
+      <div class="effects-stage-card">
+        <div class="scoreboard" data-size="small">
+          <div class="bug-main">
+            <div class="bug-left">
+              <img class="bug-logo" src="assets/ububall-logo.svg" alt="Ububall">
+              <div id="mode-tags" class="bug-modes"></div>
+            </div>
+            <div class="bug-center">
+              <div id="bug-home-cell" class="bug-team bug-home">
+                <span id="home-label">Home</span>
+                <span class="bug-score"><strong id="home-score">0</strong></span>
+              </div>
+              <div class="bug-status">
+                <span class="bug-turn">T<b id="turn-label">1</b></span>
+                <span id="phase" class="bug-phase">Idle</span>
+                <span id="blitz-clock" class="bug-clock" hidden>5s</span>
+                <span id="clock-strip" class="clock-strip" hidden><i></i></span>
+              </div>
+              <div id="bug-away-cell" class="bug-team bug-away">
+                <span class="bug-score"><strong id="away-score">0</strong></span>
+                <span id="opponent-label">Away</span>
+              </div>
+            </div>
+          </div>
+          <div id="bug-tab" class="bug-tab" aria-live="polite"></div>
+        </div>
+
+        <div id="stage-area" class="stadium-stage-area effects-stage-area">
+          <div id="rink-stage" class="rink-stage">
+            <div id="rink-wrap" class="rink-wrap">
+              <canvas id="rink" width="1000" height="600"></canvas>
+              <div id="skaters"></div>
+            </div>
+          </div>
+          <div id="field-banner" class="field-banner" aria-live="polite"></div>
+          <section id="foul-box" class="foul-info" role="dialog" aria-labelledby="foul-info-title" hidden>
+            <h3 id="foul-info-title">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.73 18l-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z M12 9v4 M12 17h.01"/></svg>
+              <span></span>
+            </h3>
+            <div></div>
+            <button id="foul-got-it" type="button">Got it</button>
+          </section>
+        </div>
+
+        <div class="effects-meters" aria-label="Home team super meters">
+          <div class="meter-cell">
+            <div class="meter-head"><span id="meter-name-0">Skater 1</span><b id="super-pct-0">0%</b></div>
+            <div class="super-meter-track"><div id="super-fill-0" class="super-meter-fill" data-value="0"></div></div>
+          </div>
+          <div class="meter-cell">
+            <div class="meter-head"><span id="meter-name-1">Skater 2</span><b id="super-pct-1">0%</b></div>
+            <div class="super-meter-track"><div id="super-fill-1" class="super-meter-fill" data-value="0"></div></div>
+          </div>
+          <div class="meter-cell">
+            <div class="meter-head"><span id="meter-name-2">Skater 3</span><b id="super-pct-2">0%</b></div>
+            <div class="super-meter-track"><div id="super-fill-2" class="super-meter-fill" data-value="0"></div></div>
+          </div>
+        </div>
+
+        <div class="effects-controls">
+          <div class="control-row transport-row">
+            <button id="btn-replay" class="fx-btn primary" type="button">Play scenario</button>
+            <button id="btn-pause" class="fx-btn" type="button" aria-pressed="false">Pause</button>
+            <button id="btn-step-1" class="fx-btn" type="button" title="Advance 1 physics tick (1/240s)">+1 tick</button>
+            <button id="btn-step-10" class="fx-btn" type="button" title="Advance 10 physics ticks (~42ms)">+10 ticks</button>
+            <button id="btn-launch-plan" class="fx-btn accent" type="button" hidden>Launch plan</button>
+            <button id="btn-reset" class="fx-btn" type="button">Reset rink</button>
+            <button id="btn-stop-audio" class="fx-btn" type="button">Stop sound</button>
+          </div>
+
+          <div class="control-row speed-toggle-row">
+            <div class="segmented" role="group" aria-label="Playback speed">
+              <button type="button" data-speed="0.1">0.1x</button>
+              <button type="button" data-speed="0.25">0.25x</button>
+              <button type="button" data-speed="0.5">0.5x</button>
+              <button type="button" data-speed="1" class="is-selected">1x</button>
+              <button type="button" data-speed="2">2x</button>
+            </div>
+            <div class="toggle-group">
+              <button id="btn-loop" class="fx-toggle" type="button" aria-pressed="false">Auto-loop</button>
+              <button id="btn-reduced" class="fx-toggle" type="button" aria-pressed="false">Reduced motion</button>
+              <button id="btn-mute" class="fx-toggle" type="button" aria-pressed="false">Mute sound</button>
+              <button id="btn-portrait" class="fx-toggle" type="button" aria-pressed="false">Portrait</button>
+            </div>
+          </div>
+
+          <div class="picker-grid">
+            <label class="picker-field">
+              <span>Material</span>
+              <select id="ctl-material"></select>
+            </label>
+            <label class="picker-field">
+              <span>Super</span>
+              <select id="ctl-super"></select>
+            </label>
+            <label class="picker-field">
+              <span>Mastery</span>
+              <select id="ctl-mastery">
+                <option value="1">Level I (3.0s)</option>
+                <option value="2">Level II (3.5s · +5%)</option>
+                <option value="3">Level III (4.0s · +10%)</option>
+                <option value="4">Master (5.0s · +20%)</option>
+              </select>
+            </label>
+            <div class="picker-field">
+              <span>Team colors</span>
+              <div class="color-pair">
+                <label class="color-chip" title="Home team color">
+                  <input id="ctl-home-color" type="color" value="#e8ca48">
+                  <span>Home</span>
+                </label>
+                <label class="color-chip" title="Away team color">
+                  <input id="ctl-away-color" type="color" value="#aa54d3">
+                  <span>Away</span>
+                </label>
+                <button id="btn-reset-colors" class="fx-btn mini" type="button">Reset</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="voice-bar">
+            <div class="voice-meta">
+              <strong id="voice-ubu-name">Featured Ubu</strong>
+              <span id="voice-summary">Synth profile</span>
+            </div>
+            <button id="btn-random-dna" class="fx-btn mini" type="button">Randomize Ubu DNA</button>
+          </div>
+
+          <div id="stage-telemetry" class="stage-telemetry" aria-live="off">Ready · Pick any effect to run on the live rink</div>
+        </div>
+      </div>
+    </aside>
+
+    <section class="effects-catalog-column" aria-label="Ububall effects catalog">
+      <div class="catalog-top">
+        <div class="catalog-heading">
+          <div>
+            <h1>Effects Demo</h1>
+            <p class="catalog-subtitle">Live testbench running Ububall's real physics, canvas presentation engine, and procedural Web Audio synthesizer.</p>
+          </div>
+          <input id="effect-search" class="catalog-search" type="search" placeholder="Filter effects or sounds..." aria-label="Filter effects or sounds">
+        </div>
+        <nav id="group-jumps" class="group-jumps" aria-label="Effect groups"></nav>
+      </div>
+      <div id="effects-groups" class="effects-groups"></div>
+    </section>
+  </main>
+
+  <script src="ubu.js"></script>
+  <script src="ubu-render.js"></script>
+  <script src="ubu-audio.js"></script>
+  <script src="rarity.js"></script>
+  <script src="ububall-match.js"></script>
+  <script src="ububall-physics.js"></script>
+  <script src="ububall-replay.js"></script>
+  <script src="ububall-presentation.js"></script>
+  <script src="effects.js"></script>
+</body>
+</html>

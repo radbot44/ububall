@@ -187,6 +187,11 @@ export default {
     // Ubu Mint and Collection are screens of the single-page app at /.
     if (path === '/mint.html') return Response.redirect(new URL('/mint' + url.search, url), 301);
     if (path === '/mint' || path === '/collection') return env.ASSETS.fetch(new Request(new URL('/', url), request));
+    if (path === '/effects.html') return Response.redirect(new URL('/effects' + url.search, url), 301);
+    if (path === '/effects') {
+      const asset = await env.ASSETS.fetch(request);
+      return asset.status === 404 ? env.ASSETS.fetch(new Request(new URL('/effects.html', url), request)) : asset;
+    }
     if (!path.startsWith('/api/') && !path.startsWith('/auth/')) return env.ASSETS.fetch(request);
     try {
       if (path === '/api/config' && request.method === 'GET') {

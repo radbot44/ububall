@@ -2,8 +2,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const vm = require('node:vm');
-const { createEffectsState, updateParticles } = require('../web/ububall-presentation.js');
+const ububallPresentation = require('../web/ububall-presentation.js');
+const {
+  createEffectsState, updateParticles, updatePopups, drawBallFace, drawTrails,
+  drawGuardShield, GUARD_SHIELD, conicRingSprites, conicRingSprite, createRinkPresenter
+} = ububallPresentation;
 
 // Browser-only effects live inside the game closure. Exercise their real source
 // with a small canvas stub instead of introducing a production-facing test API.
@@ -15,7 +20,7 @@ function runInNewContext(code, context) {
     set: (_, key, value) => { context[aliases[key] ?? key] = value; return true; }
   });
   context.fieldEffects = fixtureState();
-  Object.assign(context, { createEffectsState, updateParticles });
+  Object.assign(context, { createEffectsState, updateParticles, ububallPresentation });
   context.fieldView = fixtureState({ mode: 'matchMode', entries: 'teamEntries', anonymous: 'anonymousNames',
     portrait: 'isPortrait', field: 'videoField' });
   return vm.runInNewContext(code, context);
@@ -83,47 +88,40 @@ test('trail gradient retains a hot sample between cool endpoints', () => {
   const trails = Array.from({ length: 7 }, () => []);
   trails[6] = [100, 150, 200].map((x, i) =>
     ({ x, y: 300, life: .2, duration: .24, heat: i === 1 ? 3 : 0 }));
-  runInNewContext(section('function drawTrails(ctx, trails, bodies, home, away) {', 'function drawStickyTether(') +
-    '\ndrawTrails(ctx, trails, bodies, "#fff", "#000");', {
-      ctx, bodies, trails, ballHeat: () => 0,
-      heatColor: (heat, alpha) => heat + ':' + alpha,
-      hexToRgba: (color, alpha) => color + ':' + alpha
-    });
+  drawTrails(ctx, trails, bodies, '#fff', '#000', () => 0, (heat, alpha) => heat + ':' + alpha, (color, alpha) => color + ':' + alpha);
   assert.equal(gradients.length, 1);
   assert.ok(gradients[0].stops.some(stop => stop.color.startsWith('3:')), 'intermediate heat was discarded');
 });
 
 test('ordinary particles keep their filled endpoint', () => {
+  const P = require('../web/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
   const radii = [];
   const ctx = {
     save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
     arc(x, y, radius) { radii.push(radius); }, fill() {}
   };
-  runInNewContext(section('function drawParticles(home, away, overlay = false) {', 'function kickoff(') +
-    '\ndrawParticles("#fff", "#000");', {
-      ctx, badgeCtx: ctx,
-      particles: [{ x: 20, y: 40, px: 20, py: 40, life: 1, duration: 1, team: 0 }]
-    });
+  const fx = createEffectsState([], {});
+  fx.particles.push({ x: 20, y: 40, px: 20, py: 40, life: 1, duration: 1, team: 0 });
+  const presenter = createRinkPresenter({ P, ububallMatch, getView: () => ({ ctx, badgeCtx: ctx, bodies: P.kickoff() }), getEffects: () => fx });
+  presenter.drawParticles('#fff', '#000');
   assert.deepEqual(radii, [.9]);
 });
 
 test('aura sprites reuse rounded radii and evict stale entries', () => {
-  const document = { createElement() {
+  const doc = { createElement() {
     const c = {
       scale() {}, createConicGradient() { return { addColorStop() {} }; },
       beginPath() {}, arc() {}, stroke() {}
     };
     return { getContext() { return c; } };
   } };
-  const result = runInNewContext(
-    section('const conicRingSprites = new Map();', '// Super aura: ready') +
-    '\nconst first = conicRingSprite("stalwart", 24.1, 3);' +
-    '\nconst same = conicRingSprite("stalwart", 24.4, 3);' +
-    '\nfor (let r = 1; r <= 100; r++) conicRingSprite("stalwart", r, 3);' +
-    '\n({ same: first === same, size: conicRingSprites.size });',
-    { document, SUPER_AURA_THEMES: {}, hexToRgba: () => 'rgba(0,0,0,1)' });
-  assert.equal(result.same, true);
-  assert.ok(result.size <= 48);
+  conicRingSprites.clear();
+  const first = conicRingSprite('stalwart', 24.1, 3, doc);
+  const same = conicRingSprite('stalwart', 24.4, 3, doc);
+  for (let r = 1; r <= 100; r++) conicRingSprite('stalwart', r, 3, doc);
+  assert.equal(first === same, true);
+  assert.ok(conicRingSprites.size <= 48);
 });
 
 test('straight vertical shots skip threat simulation, but curved shots do not', () => {
@@ -131,15 +129,18 @@ test('straight vertical shots skip threat simulation, but curved shots do not', 
   const ball = { x: 500, y: 300, vx: 0, vy: 600, omega: 0 };
   const bodies = Array.from({ length: 6 }, () => ({})).concat(ball);
   const P = { ...require('../web/ububall-physics.js'), step() { steps++; return null; } };
-  const code = section('function goalThreat() {', '// Net ripples and board flex');
-  runInNewContext(code + '\ngoalThreat();', { P, bodies });
+  const ububallMatch = require('../shared/ububall-match.js');
+  const presenter = createRinkPresenter({ P, ububallMatch, getView: () => ({ bodies }), getEffects: () => createEffectsState([], {}) });
+  presenter.goalThreat();
   assert.equal(steps, 0);
   ball.omega = 24;
-  runInNewContext(code + '\ngoalThreat();', { P, bodies });
+  presenter.goalThreat();
   assert.ok(steps > 0, 'curved ball was incorrectly rejected');
 });
 
 function trailHarness() {
+  const P = require('../web/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
   const gradients = [];
   const ctx = {
     save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {},
@@ -151,13 +152,21 @@ function trailHarness() {
   };
   const bodies = Array.from({ length: 7 }, (_, i) =>
     ({ team: i === 6 ? -1 : 0, x: 500, y: 300, vx: 0, vy: 0, radius: 18 }));
-  const trails = Array.from({ length: 7 }, () => []);
-  const api = runInNewContext(
-    section('const trailPositions = () =>', 'function drawStickyTether(') +
-    '\n({ trailPositions, clearDiscontinuousTrails, recordTrails, drawTrails });',
-    { bodies, trails, ctx, reducedMotion: { matches: false },
-      ballHeat: () => 0, heatColor: () => '#fff', hexToRgba: () => '#fff' });
-  return { ...api, bodies, trails, gradients, drawTrails: (home, away) => api.drawTrails(ctx, trails, bodies, home, away) };
+  const fx = createEffectsState([], {});
+  const trails = fx.trails;
+  const presenter = createRinkPresenter({
+    P, ububallMatch,
+    getView: () => ({ ctx, badgeCtx: ctx, bodies }),
+    getEffects: () => fx,
+    isReducedMotion: () => false
+  });
+  return {
+    trailPositions: presenter.trailPositions,
+    clearDiscontinuousTrails: presenter.clearDiscontinuousTrails,
+    recordTrails: presenter.recordTrails,
+    bodies, trails, gradients,
+    drawTrails: (home, away) => drawTrails(ctx, trails, bodies, home, away, () => 0, () => '#fff', () => '#fff')
+  };
 }
 const trailPoint = (x, y) => ({ x, y, life: .24, duration: .24, heat: 0 });
 
@@ -236,15 +245,16 @@ test('drawBallFace applies team colors to the ball face', () => {
     set strokeStyle(val) { this._strokeStyle = val; },
     get strokeStyle() { return this._strokeStyle; }
   };
-  const code = section('function drawBallFace(size, eyeColor, mouthColor) {', 'function draw(exportSession = null) {');
-  runInNewContext(code + '\ndrawBallFace(30.6, "#E8CA48", "#AA54D3");', { ctx });
+  drawBallFace(ctx, 30.6, '#E8CA48', '#AA54D3');
   assert.deepEqual(strokes, ['#E8CA48', '#E8CA48', '#AA54D3']);
 });
 
 test('prediction ignition indicator fills with team color', () => {
+  const P = require('../web/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
   const fills = [], strokes = [];
   const ctx = {
-    save() {}, restore() {}, translate() {}, rotate() {}, beginPath() {}, arc() {}, rect() {}, clip() {},
+    save() {}, restore() {}, translate() {}, rotate() {}, beginPath() {}, roundRect() {}, arc() {}, rect() {}, clip() {},
     fill() { fills.push(this.fillStyle); },
     stroke() { strokes.push(this.strokeStyle); },
     set fillStyle(val) { this._fillStyle = val; }, get fillStyle() { return this._fillStyle; },
@@ -252,12 +262,12 @@ test('prediction ignition indicator fills with team color', () => {
   };
   const prediction = { paths: [], impacts: [], stops: [], horizon: 240, ignition: { x: 450, y: 300, tick: 60, team: 1 } };
   const bodies = [{ team: 0 }, { team: 0 }, { team: 0 }, { team: 1 }, { team: 1 }, { team: 1 }, { team: -1 }];
-  const IGNITION_FLAME = {};
-  const code = section('function paintPrediction(prediction, home, away) {', 'const IGNITION_FLAME =');
-  runInNewContext(code + '\npaintPrediction(prediction, "#E8CA48", "#AA54D3");', {
-    ctx, bodies, prediction, isPortrait: false, pulseMode: () => false, ububallMatch: { turnTicks: () => 240 },
-    line() {}, impactStamp: () => ({}), IGNITION_FLAME, rounded() {}, P: { rink: { goalDepth: 38 } }
+  const presenter = createRinkPresenter({
+    P, ububallMatch,
+    getView: () => ({ ctx, badgeCtx: ctx, bodies, mode: 'standard', portrait: false }),
+    getEffects: () => createEffectsState([], {})
   });
+  presenter.paintPrediction(prediction, '#E8CA48', '#AA54D3');
   assert.equal(fills[0], '#AA54D3', 'away team color is used for team 1 ignition');
   assert.equal(strokes[0], '#ffffff', 'white outline is used for ignition flame');
 });
@@ -283,8 +293,7 @@ test('updatePopups ages popups independently and prunes expired ones', () => {
     { text: 'Trap!', life: 0.5 },
     { text: 'Spin strike!', life: 0.1 }
   ];
-  const code = section('function updatePopups(dt, popups) {', 'function drawPopups(badgeCtx, popups, isPortrait, width, home, away) {');
-  runInNewContext(code + '\nupdatePopups(0.2, popups);', { popups, reducedMotion: { matches: false } });
+  updatePopups(0.2, popups, false);
   assert.equal(popups.length, 1);
   assert.equal(popups[0].text, 'Trap!');
   assert.ok(Math.abs(popups[0].life - 0.3) < 1e-6);
@@ -292,7 +301,6 @@ test('updatePopups ages popups independently and prunes expired ones', () => {
 
 test('iron guard shield receives #6b7785 border stroke with lineWidth 1.5', () => {
   let strokeStyle = null, lineWidth = null, strokePath = null, fillStyle = null;
-  const GUARD_SHIELD = Symbol('GUARD_SHIELD');
   const badgeCtx = {
     save() {}, restore() {}, translate() {}, rotate() {}, scale() {},
     fill(p) { fillStyle = this.fillStyle; },
@@ -302,10 +310,7 @@ test('iron guard shield receives #6b7785 border stroke with lineWidth 1.5', () =
     set lineWidth(val) { this._lineWidth = val; }, get lineWidth() { return this._lineWidth; }
   };
   const b = { guarding: true, radius: 25, x: 100, y: 100 };
-  const phase = 'plan', i = 0, fieldPlans = [{ guard: true }], isPortrait = false;
-  const predictionCache = { data: { guards: [{ index: 0, held: true }] } };
-  const code = section('const inAction = phase === \'play\' || phase === \'replay\' || Boolean(goalReplay);', 'const slow = P.dazeSlow(b);');
-  runInNewContext(code, { badgeCtx, b, phase, i, fieldPlans, isPortrait, predictionCache, GUARD_SHIELD, goalReplay: null });
+  drawGuardShield(badgeCtx, b, false, true);
   assert.equal(fillStyle, '#c3ccd6', 'iron fill is metallic grey');
   assert.equal(strokeStyle, '#6b7785', 'border stroke is darker grey');
   assert.equal(lineWidth, 1.5, 'border lineWidth is 1.5');
@@ -354,11 +359,10 @@ test('theater.exporting suppresses popup and effect aging in animation frame loo
 
 test('exported video timing advances popups strictly once per export frame', () => {
   const popups = [{ text: 'Big save!', life: 1.0, duration: 1.2 }];
-  const code = section('function updatePopups(dt, popups) {', 'function drawPopups(badgeCtx, popups, isPortrait, width, home, away) {');
   const fps = 60;
   const dt = 1 / fps;
   for (let f = 1; f <= 30; f++) {
-    runInNewContext(code + '\nupdatePopups(dt, popups);', { popups, reducedMotion: { matches: false }, dt });
+    updatePopups(dt, popups, false);
   }
   assert.equal(popups.length, 1);
   assert.ok(Math.abs(popups[0].life - (1.0 - 30 * dt)) < 1e-6, 'popups advance deterministically by export-frame delta');
@@ -468,7 +472,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
   );
   const code =
     section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
-    section('function clearActiveMatch() {', 'function rounded(x, y, width, height, radius) {') + '\n' +
+    section('function clearActiveMatch() {', 'function aimPower(distance, arrow) {') + '\n' +
     section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
   const P = require('../web/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
@@ -566,7 +570,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
 });
 
 test('contactMeter and creditSave reject meter awards outside phase === play', () => {
-  const code = section('function creditSave(body, own, iron = false) {', 'function setMeterFill(fill, meter) {');
+  const code = section('function creditSave(body, own, iron = false) {', 'function flushMeters() {');
   const P = require('../web/ububall-physics.js');
   let calledGain = 0, calledContact = 0;
   const ububallMatch = {
@@ -677,7 +681,6 @@ test('post-goal celebration simulation cannot alter the next kickoffs meter or g
 test('predictionKey invalidates on micro angle/power adjustments, fouls, and carded changes', () => {
   const P = require('../web/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
-  const code = section('let predictionCache = null', 'const predictionLayer = {};');
   const bodies = P.kickoff();
   const plans = [
     { angle: 1.234567, power: 0.876543, spin: 0, guard: false },
@@ -687,9 +690,14 @@ test('predictionKey invalidates on micro angle/power adjustments, fouls, and car
   let turn = 1;
   const matchMode = 'standard';
   const fouls = ububallMatch.newFouls();
-
-  const context = { bodies, plans, turn, matchMode, fouls };
-  const env = runInNewContext(code + '\n;({ predictionKey, dirtyPrediction });', context);
+  const env = createRinkPresenter({
+    P, ububallMatch,
+    getView: () => ({ bodies, mode: matchMode }),
+    getEffects: () => createEffectsState([], {}),
+    getPlans: () => plans,
+    getTurn: () => turn,
+    getFouls: () => fouls
+  });
 
   const initialKey = env.predictionKey();
 
@@ -919,7 +927,7 @@ test('local gameplay and goal replay maintain separate authoritative simBodies a
   const ububallMatch = require('../shared/ububall-match.js');
   const code =
     section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
-    section('function creditSave(body, own, iron = false) {', 'function setMeterFill(fill, meter) {') + '\n' +
+    section('function creditSave(body, own, iron = false) {', 'function flushMeters() {') + '\n' +
     section('let activePlayback = null;', 'const replayStore = (() => {') + '\n' +
     section('function finishTurn(goal) {', '$(\'launch\').onclick =') + '\n' +
     section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
@@ -1332,15 +1340,16 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
   const ububallMP4 = require('../web/mp4.js');
 
   const code =
-    section('function popup(body, text) {', 'function drawPopups(') + '\n' +
+    'function popup(body, text) { const p = fieldEffects.popups; if (!reducedMotion.matches && p.length < 8) p.push({ x: body.x, y: body.y - body.radius - 20, text, team: body.team, life: 1.2, duration: 1.2 }); }\n' +
+    'function updatePopups(dt, popups) { ububallPresentation.updatePopups(dt, popups, reducedMotion.matches); }\n' +
     section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
-    section('function creditSave(body, own, iron = false) {', 'function setMeterFill(fill, meter) {') + '\n' +
+    section('function creditSave(body, own, iron = false) {', 'function flushMeters() {') + '\n' +
     section('function replayEvents(turn, tick, sim) {', 'const replayStore = (() => {') + '\n' +
     section('const replayClock = ticks =>', '$(\'replay-seek\').oninput =') + '\n' +
     section('const VIDEO = Object.freeze(', '$(\'replay-export-video\').hidden =') + '\n' +
     section('const CARD = {', 'async function openShare() {') + '\n' +
     section('$(\'export-close\').onclick =', '// Guides, remembered on this device') + '\n' +
-    section('let guide = null;', 'function drawGuides(home, away, text, guide) {') + '\n' +
+    section('let guide = null;', '// Play from here:') + '\n' +
     section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
 
   const ubus = Array.from({ length: 6 }, (_, i) => {
@@ -1988,22 +1997,17 @@ test("Snap, Post English, Rim-Arounds, Tailgating and Hip Clips emit particles/s
   bodies.slice(0, 6).forEach((b, i) => { P.applyStats(b); b.voice = { instrument: i }; });
   const fx = createEffectsState([], {});
   const popups = fx.popups;
-  const context = {
-    ...fx,
-    P, bodies, popups,
-    HEAT: P.HEAT, SKID_SLOWDOWN: 220, WALL_STEP: 2, NET_RUNS: [], BOARD_RUNS: [],
-    reducedMotion: { matches: false },
+  const ububallMatch = require("../shared/ububall-match.js");
+  const env = createRinkPresenter({
+    P,
+    ububallMatch,
+    getView: () => ({ bodies, mode: "standard" }),
+    getEffects: () => fx,
+    isReducedMotion: () => false,
     clockNow: () => now,
     gameAudio: () => mockAudio,
-    contactMeter: () => {},
-    popup: (body, text) => popups.push({ body, text })
-  };
-  const code =
-    section("function markIce(b, i, dt) {", "const reducedMotion =") + "\n" +
-    section("function burst(x, y, team, strength, celebration = false, tangent = 0, color = null) {", "let fanfareLoop = null;") + "\n" +
-    section("function addWallEffect(body, velocity, wallType, nx, ny) {", "const WALL_STEP = 2;") + "\n" +
-    section("function handleCollision(", "function handleSuper(");
-  const env = runInNewContext(code + "\n;({ emitSkaterEffects, handleCollision, handleWall });", context);
+    contactMeter: () => {}
+  });
 
   // 1. Snap collision: warm directional sparks + playBallHit({ snap: true }), zero popups
   Object.assign(bodies[6], { x: 500, y: 300, vx: 650, vy: 0 });
@@ -2087,4 +2091,250 @@ test("Snap, Post English, Rim-Arounds, Tailgating and Hip Clips emit particles/s
   assert.deepEqual(forwarded.map(e => e[0]), ["ball", "goal", "carve", "slipstream"]);
   assert.equal(forwarded[0][1].snap, true);
   assert.equal(forwarded[1][2].spin, 16);
+});
+
+test('ububall.js shares ububall-presentation.js without duplicating effect implementations, and /effects is unlinked everywhere', () => {
+  assert.match(source, /createRinkPresenter\(/, 'ububall.js instantiates the shared createRinkPresenter');
+  for (const fn of [
+    'function drawTrails(', 'function drawParticles(', 'function drawSuperAura(',
+    'function drawStickyTether(', 'function handleCollision(', 'function handleWall(',
+    'function handleSuper(', 'function handleShockwave(', 'function drawGoalSweep(',
+    'function drawGoalCall(', 'function paintPrediction(', 'function drawBallFace('
+  ]) {
+    assert.equal(source.includes(fn), false, `ububall.js must not duplicate ${fn}`);
+  }
+
+  // Verify no existing page or script links to /effects or effects.html
+  for (const rel of ['web/index.html', 'web/demo.html', 'web/voice.html', 'web/ububall.html', 'web/site-header.js', 'web/app.js', 'web/ububall.js', 'web/site.js']) {
+    const content = fs.readFileSync(path.resolve(__dirname, '..', rel), 'utf8');
+    assert.equal(/\/effects(\.html)?\b/.test(content), false, `${rel} must not link to /effects`);
+  }
+
+  // Verify effects.html has no site header and loads the real game modules
+  const effectsHtml = fs.readFileSync(path.resolve(__dirname, '../web/effects.html'), 'utf8');
+  assert.equal(/class="site-header"/.test(effectsHtml), false, 'effects.html must not render the site header');
+  for (const script of ['ubu.js', 'ubu-render.js', 'ubu-audio.js', 'ububall-match.js', 'ububall-physics.js', 'ububall-presentation.js', 'effects.js']) {
+    assert.ok(effectsHtml.includes(`src="${script}"`), `effects.html loads ${script}`);
+  }
+});
+
+test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all supers, all materials, and executes every scenario through createRinkPresenter', () => {
+  const P = require('../web/ububall-physics.js');
+  const ubu = require('../shared/ubu.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const { EFFECT_GROUPS, GOAL_CALL_VARIANTS } = require('../web/effects.js');
+
+  assert.deepEqual(
+    EFFECT_GROUPS.map(g => g.id),
+    ['start', 'planning', 'movement', 'impacts', 'saves', 'supers', 'fouls', 'goals'],
+    'groups follow exact match occurrence order'
+  );
+
+  // Goal calls include every GOAL_WORDS entry
+  for (const label of Object.keys(ububallPresentation.GOAL_WORDS)) {
+    assert.ok(GOAL_CALL_VARIANTS.some(v => v.id === label), `goal call variant ${label} is registered`);
+  }
+
+  // Every canonical super in P.SUPERS has a dedicated scenario in the supers group
+  const superGroup = EFFECT_GROUPS.find(g => g.id === 'supers');
+  for (const s of P.SUPERS) {
+    assert.ok(superGroup.items.some(item => item.id === `super-${s.key}`), `super ${s.key} has a demo card`);
+  }
+
+  // Run every scenario and every variant + sound trigger against a real createRinkPresenter + physics harness
+  const audioHits = new Set();
+  const superPhases = new Set();
+  const mockAudio = {
+    playGameStart: () => { audioHits.add('playGameStart'); return { stop() {} }; },
+    playCollision: () => { audioHits.add('playCollision'); return { stop() {} }; },
+    playBallHit: opts => { audioHits.add(opts?.snap ? 'playBallHit:snap' : 'playBallHit'); },
+    playCarve: () => { audioHits.add('playCarve'); },
+    playSlipstream: () => { audioHits.add('playSlipstream'); },
+    playWallHit: () => { audioHits.add('playWallHit'); },
+    playGoalHit: type => { audioHits.add(`playGoalHit:${type}`); },
+    playSizzle: () => { audioHits.add('playSizzle'); return { stop() {} }; },
+    playIronSave: () => { audioHits.add('playIronSave'); },
+    playSuper: (key, stg) => { audioHits.add('playSuper'); superPhases.add(`${key}:${stg}`); return { stop() {} }; },
+    playFoul: kind => { audioHits.add(`playFoul:${kind}`); },
+    playVoice: () => { audioHits.add('playVoice'); return { stop() {} }; },
+    playFanfare: () => { audioHits.add('playFanfare'); return { stop() {} }; },
+    stop: () => {}
+  };
+
+  const makeMockCtx2d = () => ({
+    save() {}, restore() {}, setTransform() {}, clearRect() {}, beginPath() {}, closePath() {},
+    moveTo() {}, lineTo() {}, arc() {}, rect() {}, roundRect() {}, clip() {}, fill() {}, stroke() {},
+    fillRect() {}, fillText() {}, strokeText() {}, translate() {}, rotate() {}, scale() {},
+    setLineDash() {}, drawImage() {}, getTransform: () => ({ a: 1 }),
+    createLinearGradient: () => ({ addColorStop() {} }),
+    createRadialGradient: () => ({ addColorStop() {} }),
+    createConicGradient: () => ({ addColorStop() {} })
+  });
+  const docStub = {
+    createElement: () => ({ width: 128, height: 128, getContext: makeMockCtx2d })
+  };
+
+  const entries = Array.from({ length: 6 }, (_, i) => {
+    const dna = ubu.randomDNA();
+    const model = ubu.decode(dna);
+    return { key: 't-' + i, dna: ubu.toCode(dna), baseModel: model, model, equippedSuper: { ...P.SUPERS[i % 8] } };
+  });
+  const view = {
+    canvas: { width: 1000, height: 600, clientWidth: 1000, clientHeight: 600 },
+    ctx: makeMockCtx2d(),
+    badgeCanvas: { width: 1000, height: 600 },
+    badgeCtx: makeMockCtx2d(),
+    bodies: P.kickoff(),
+    entries,
+    mode: 'standard',
+    portrait: false,
+    anonymous: false,
+    field: null
+  };
+  const fx = createEffectsState(entries);
+  let phase = 'plan', plans = Array.from({ length: 6 }, () => ({ angle: 0, power: 0, spin: 0, guard: false }));
+  let fouls = ububallMatch.newFouls(), foulInfo = null, play = ububallMatch.newPlay(), tally = ububallMatch.newTally();
+  let clock = 1000, elapsed = 0, goalReplay = null, scoringPlayer = null;
+  const stats = entries.map(e => ({ ...e.model.stats }));
+
+  const presenter = createRinkPresenter({
+    P, ububallMatch,
+    getView: () => view,
+    getEffects: () => fx,
+    getPhase: () => phase,
+    getPlans: () => plans,
+    getFouls: () => fouls,
+    getFoulInfo: () => foulInfo,
+    getScoringPlayer: () => scoringPlayer,
+    getGoalReplay: () => goalReplay,
+    getElapsed: () => elapsed,
+    clockNow: () => clock,
+    gameAudio: () => mockAudio,
+    doc: docStub
+  });
+
+  const liveFx = {
+    collide: (a, b, spd, imp, plow, iron, checker, snapped, tang) => presenter.handleCollision(a, b, spd, imp, plow, iron, snapped, tang),
+    wall: (b, v, wt, nx, ny, rimmed) => presenter.handleWall(b, v, wt, nx, ny, rimmed),
+    shockwave: (srcBody, r, type) => presenter.handleShockwave(srcBody, r, type),
+    super: (k, stg, b, tgt) => presenter.handleSuper(k, stg, b, tgt)
+  };
+
+  let callbacks = [];
+  const ctx = {
+    P, ububallMatch, presenter,
+    get bodies() { return view.bodies; },
+    get entries() { return view.entries; },
+    get plans() { return plans; },
+    get fouls() { return fouls; },
+    get play() { return play; },
+    get stats() { return stats; },
+    get fx() { return fx; },
+    audio: () => mockAudio,
+    voice: () => entries[0].model.voice,
+    getSelectedMaterial: () => 'lava',
+    getSelectedSuperId: () => 3,
+    setSelected: () => {},
+    idlePlans: () => Array.from({ length: 6 }, () => ({ angle: 0, power: 0, spin: 0, guard: false })),
+    resetStage: ({ phase: nextPhase = 'plan', mode = 'standard', glow = 0 } = {}) => {
+      callbacks = [];
+      goalReplay = null; scoringPlayer = null; foulInfo = null;
+      view.mode = mode; phase = nextPhase; elapsed = 0;
+      fouls = ububallMatch.newFouls(); play = ububallMatch.newPlay(); tally = ububallMatch.newTally();
+      plans = Array.from({ length: 6 }, () => ({ angle: 0, power: 0, spin: 0, guard: false }));
+      view.bodies = P.kickoff();
+      view.bodies.slice(0, 6).forEach((b, i) => {
+        ububallMatch.applyStats(P, b, stats[i], mode);
+        b.name = entries[i].model.parts.fullName;
+        b.voice = entries[i].model.voice;
+        b.equippedSuper = { ...P.SUPERS[i % 8] };
+      });
+      presenter.clearEffects();
+      fx.kickoffGlow = glow;
+      presenter.dirtyPrediction();
+    },
+    place: (idx, x, y, extra = {}) => Object.assign(view.bodies[idx], { x, y }, extra),
+    boostStats: (idx, overrides) => ububallMatch.applyStats(P, view.bodies[idx], { ...stats[idx], ...overrides }, view.mode),
+    equipSuper: (idx, id) => { view.bodies[idx].equippedSuper = { ...P.SUPERS[id] }; },
+    setSkaterMaterial: (idx, mat) => {
+      const cloned = structuredClone(entries[idx].baseModel.attributes);
+      cloned.background.texture = mat;
+      entries[idx].model = { ...entries[idx].baseModel, dna: null, attributes: cloned };
+      fx.materialEmitters = ububallPresentation.createMaterialEmitters(entries);
+    },
+    launchPlans: turnPlans => {
+      plans = turnPlans; phase = 'play';
+      P.startTurn(view.bodies, plans, liveFx.super);
+    },
+    syncMeters: () => {},
+    bugTab: () => {},
+    banner: () => {},
+    openFoulInfo: info => { foulInfo = info; },
+    setForcedGoalLabel: () => {},
+    startGoalReplayDemo: () => {
+      phase = 'play';
+      goalReplay = { total: 40, played: 0, scored: false };
+      view.bodies[6].x = 880; view.bodies[6].vx = 520;
+    },
+    after: (sec, fn) => callbacks.push({ at: sec, fn }),
+    playTimedSizzle: () => { mockAudio.playSizzle(); },
+    playSampleFanfare: () => { mockAudio.playFanfare(); }
+  };
+
+  let totalScenarios = 0;
+  for (const group of EFFECT_GROUPS) {
+    assert.ok(group.items.length >= 1, `group ${group.id} has items`);
+    for (const item of group.items) {
+      const variants = item.variants?.length ? item.variants.map(v => v.id) : [undefined];
+      for (const variant of variants) {
+        totalScenarios++;
+        clock += 1000;
+        item.run(ctx, variant);
+        if (item.playSound) item.playSound(ctx, variant);
+        // Step 90 ticks (~0.375s) and render scene to verify live physics + presentation execution
+        for (let t = 0; t < 90; t++) {
+          clock += P.DT * 1000;
+          elapsed += P.DT;
+          for (let c = callbacks.length - 1; c >= 0; c--) {
+            if (elapsed >= callbacks[c].at) { const fn = callbacks[c].fn; callbacks.splice(c, 1); fn(); }
+          }
+          if (phase === 'play') {
+            const tick = ububallMatch.playTick(P, view.bodies, play, liveFx, tally);
+            for (const s of tick.saves) {
+              if (s.iron) mockAudio.playIronSave();
+              presenter.popup(view.bodies[s.index], s.iron ? (s.own ? 'Trap!' : 'Big save!') : s.own ? 'Save...' : 'Save!');
+            }
+            if (tick.struck) presenter.popup(view.bodies[6], 'Spin strike!');
+            presenter.recordTrails();
+            if (tick.goal !== null) {
+              scoringPlayer = view.bodies[0];
+              presenter.celebrate(tick.goal, view.bodies[6], 'GOAL', scoringPlayer);
+              phase = 'goal';
+            }
+          }
+        }
+        presenter.emitSkaterEffects(0.05);
+        presenter.updatePopups(0.05);
+        presenter.updateEffects(0.05);
+        presenter.drawScene();
+      }
+    }
+  }
+  assert.ok(totalScenarios >= 50, 'all scenarios and variants executed cleanly');
+
+  // Verify every single match audio entrypoint in ubuAudio was exercised!
+  for (const expected of [
+    'playGameStart', 'playCollision', 'playBallHit', 'playBallHit:snap',
+    'playCarve', 'playSlipstream', 'playWallHit', 'playGoalHit:post', 'playGoalHit:net',
+    'playSizzle', 'playIronSave', 'playSuper', 'playFoul:warning', 'playFoul:card',
+    'playVoice', 'playFanfare'
+  ]) {
+    assert.ok(audioHits.has(expected), `Effects Demo covers audio entrypoint ${expected}`);
+  }
+  for (const expectedSuper of [
+    'stalwart:launch', 'stalwart:impact', 'knockout:impact', 'sticky:impact',
+    'cannonball:impact', 'magnet:pull', 'colossus:launch', 'shockwave:impact', 'ghost:launch'
+  ]) {
+    assert.ok(superPhases.has(expectedSuper), `Effects Demo covers super sound ${expectedSuper}`);
+  }
 });

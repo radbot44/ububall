@@ -63,6 +63,14 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.match(home, /id="roster-dialog"/);
     assert.match(home, /class="mint-entry"/);
     assert.match(home, /src="app.js"/);
+    const effectsRedirect = await fetch('/effects.html?filter=fire', { redirect: 'manual' });
+    assert.equal(effectsRedirect.status, 301);
+    assert.equal(new URL(effectsRedirect.headers.get('Location')).pathname + new URL(effectsRedirect.headers.get('Location')).search, '/effects?filter=fire');
+    const effectsRes = await fetch('/effects');
+    assert.equal(effectsRes.status, 200);
+    const effectsHtml = await effectsRes.text();
+    assert.match(effectsHtml, /Effects Demo/);
+    assert.match(effectsHtml, /src="effects\.js"/);
     const oldMint = await fetch('/mint.html?sort=favorite', { redirect: 'manual' });
     assert.equal(oldMint.status, 301);
     assert.equal(new URL(oldMint.headers.get('Location')).pathname + new URL(oldMint.headers.get('Location')).search, '/mint?sort=favorite');
