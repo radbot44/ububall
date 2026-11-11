@@ -1841,6 +1841,32 @@
       ctx.globalAlpha = level === 2 ? .45 : .22;
       ctx.drawImage(superGlowSprite(key, doc), b.x - haloR, b.y - haloR, haloR * 2, haloR * 2);
       ctx.lineCap = 'round';
+      if (key === 'shockwave') {
+        const active = b.superActive === 'shockwave';
+        const ringCount = active ? 4 : 3;
+        const rate = active ? 1.35 : (level === 2 ? 1.05 : .78);
+        const startR = reach + 3;
+        const maxR = active ? reach + 86 : ringR + (level === 2 ? 44 : 28);
+        const peakAlpha = active ? .88 : (level === 2 ? .72 : .52);
+        for (let w = 0; w < ringCount; w++) {
+          const p = still ? (w + .3) / ringCount : (t * rate + w / ringCount) % 1;
+          const ease = 1 - (1 - p) ** 1.65;
+          const r = startR + (maxR - startR) * ease;
+          const fadeIn = Math.min(1, p / .14);
+          const fadeOut = (1 - p) ** 1.45;
+          const alpha = peakAlpha * fadeIn * fadeOut;
+          if (alpha <= .01) continue;
+          const width = (active ? 4.2 : (level === 2 ? 3.4 : 2.6)) * (1 - p * .62);
+          ctx.globalAlpha = alpha * .42;
+          circle(b.x, b.y, r, c2, width * 2.1);
+          ctx.globalAlpha = alpha;
+          circle(b.x, b.y, r, w % 2 === 0 ? c1 : '#ffb3c9', width);
+        }
+        ctx.globalAlpha = level === 2 ? .7 : .45;
+        circle(b.x, b.y, ringR, c1, level === 2 ? 2.2 : 1.6);
+        ctx.restore();
+        return;
+      }
       ctx.globalAlpha = level === 2 ? .75 : .55;
       circle(b.x, b.y, ringR, c1, level === 2 ? 2.5 : 2);
       ctx.globalAlpha = level === 2 ? 1 : .85;
@@ -2204,12 +2230,35 @@
         fx.shockwaves.push({ x: source.x, y: source.y, currentRadius: 8, maxRadius: radius, team: source.team, color: '#e3faff', life: 0.25, duration: 0.25 });
         return;
       }
-      burst(source.x, source.y, source.team, 1, false, 0, '#ff7197');
-      burst(source.x, source.y, source.team, 1, false, 0, '#9d467a');
-      fx.shockwaves.push({ x: source.x, y: source.y, currentRadius: 10, maxRadius: radius, team: source.team, color: '#ff7197', life: 0.35, duration: 0.35 });
-      fx.shockwaves.push({ x: source.x, y: source.y, currentRadius: 6, maxRadius: radius * 0.88, team: source.team, color: '#9d467a', life: 0.30, duration: 0.30 });
+      if (!isReducedMotion()) {
+        fx.shake = Math.max(fx.shake || 0, 0.85);
+        if (fx.particles.length < 850) {
+          fx.particles.push({ x: source.x, y: source.y, px: source.x, py: source.y, vx: 0, vy: 0, team: source.team, color: '#ff7197', life: 0.28, duration: 0.28, flash: true, flashSize: radius * 1.45, overlay: true });
+          fx.particles.push({ x: source.x, y: source.y, px: source.x, py: source.y, vx: 0, vy: 0, team: -1, color: '#ffffff', life: 0.14, duration: 0.14, flash: true, flashSize: radius * 0.8, overlay: true });
+        }
+        for (let k = 0; k < 26 && fx.particles.length < 850; k++) {
+          const angle = (k / 26) * Math.PI * 2 + (Math.random() - 0.5) * 0.14;
+          const speed = 260 + Math.random() * 240, life = 0.22 + Math.random() * 0.14;
+          const r0 = (source.radius || 25) * 0.7;
+          const sx = source.x + Math.cos(angle) * r0, sy = source.y + Math.sin(angle) * r0;
+          fx.particles.push({
+            x: sx, y: sy, px: sx, py: sy,
+            vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+            team: source.team,
+            color: k % 3 === 0 ? '#ffffff' : k % 2 === 0 ? '#ff7197' : '#9d467a',
+            life, duration: life,
+            materialShape: 'streak', angle, size: 5.5 + Math.random() * 3.5, snap: true, overlay: true
+          });
+        }
+      }
+      burst(source.x, source.y, source.team, 3.2, false, 0, '#ff7197');
+      burst(source.x, source.y, source.team, 2.4, false, 0, '#ffffff');
+      burst(source.x, source.y, source.team, 2.0, false, 0, '#9d467a');
+      fx.shockwaves.push({ x: source.x, y: source.y, currentRadius: 14, maxRadius: radius * 1.08, team: source.team, color: '#ff7197', life: 0.45, duration: 0.45, dramatic: true, width: 12, band: true });
+      fx.shockwaves.push({ x: source.x, y: source.y, currentRadius: 10, maxRadius: radius * 0.94, team: source.team, color: '#ffc2d6', life: 0.36, duration: 0.36, dramatic: true, width: 7.5 });
+      fx.shockwaves.push({ x: source.x, y: source.y, currentRadius: 6, maxRadius: radius * 0.80, team: source.team, color: '#9d467a', life: 0.50, duration: 0.50, dramatic: true, width: 5.5 });
       if (gameAudio()) {
-        gameAudio().playSuper?.('shockwave', 'impact', { volume: 0.8, x: source?.x, y: source?.y });
+        gameAudio().playSuper?.('shockwave', 'impact', { volume: 0.85, x: source?.x, y: source?.y });
       }
     }
 
@@ -2251,15 +2300,35 @@
       drawGuides(home, away, text, playback ? playback.guide : getGuide());
       fx.shockwaves.forEach(s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
-        const r = s.currentRadius + (s.maxRadius - s.currentRadius) * progress;
+        const expand = s.dramatic ? 1 - (1 - progress) ** 2.6 : progress;
+        const fade = s.dramatic ? (1 - progress) ** 1.25 : 1 - progress;
+        const r = s.currentRadius + (s.maxRadius - s.currentRadius) * expand;
         const targetCtx = s.overlay && view.badgeCtx ? view.badgeCtx : view.ctx;
+        const waveColor = s.color || (s.team === 0 ? home : away);
+        const baseW = s.width || (s.overlay ? 4.5 : 6);
         targetCtx.save();
+        if (s.band) {
+          targetCtx.beginPath();
+          targetCtx.arc(s.x, s.y, r, 0, Math.PI * 2);
+          targetCtx.strokeStyle = waveColor;
+          targetCtx.lineWidth = Math.max(2, baseW * 2.4 * fade);
+          targetCtx.globalAlpha = Math.max(0, fade * 0.28);
+          targetCtx.stroke();
+        }
         targetCtx.beginPath();
         targetCtx.arc(s.x, s.y, r, 0, Math.PI * 2);
-        targetCtx.strokeStyle = s.color || (s.team === 0 ? home : away);
-        targetCtx.lineWidth = Math.max(1, (s.overlay ? 4.5 : 6) * (1 - progress));
-        targetCtx.globalAlpha = Math.max(0, (1 - progress) * (s.overlay ? 0.92 : 1));
+        targetCtx.strokeStyle = waveColor;
+        targetCtx.lineWidth = Math.max(1, baseW * fade);
+        targetCtx.globalAlpha = Math.max(0, fade * (s.overlay ? 0.92 : 1));
         targetCtx.stroke();
+        if (s.band && fade > 0.15) {
+          targetCtx.beginPath();
+          targetCtx.arc(s.x, s.y, Math.max(1, r - baseW * 0.25 * fade), 0, Math.PI * 2);
+          targetCtx.strokeStyle = '#ffffff';
+          targetCtx.lineWidth = Math.max(1, baseW * 0.38 * fade);
+          targetCtx.globalAlpha = Math.max(0, fade * 0.85);
+          targetCtx.stroke();
+        }
         targetCtx.restore();
       });
 
