@@ -245,9 +245,9 @@
         },
         {
           id: 'spin-wobble-taper',
-          title: 'Spinning Wobble & Directional Tapered Arcs',
+          title: 'Spinning Wobble & Extended Crescent Swirls',
           when: 'Skaters or ball spin with `|omega| >= 2.5 rad/s` (`drawSpin`) and skaters spin above `2.8 rad/s` (`playSpin` modulated by spin speed and radius).',
-          visual: 'Spin blades taper from a vanishing tail to a bright forward-angled tip showing CW vs. CCW direction, paired with a continuous spin-speed-modulated wobble (inaudible below threshold, scaling smoothly in volume, pitch, and 3.2-16 Hz flutter rate at higher spin speeds without a start transient).',
+          visual: 'Long, sleek crescent spin swirls with a gentle tail fade and streamlined leading tip showing CW vs. CCW direction, paired with a continuous spin-speed-modulated wobble (inaudible below threshold, scaling smoothly in volume, pitch, and 3.2-16 Hz flutter rate at higher spin speeds without a start transient).',
           soundLabel: 'Play spin wobble',
           variants: [
             { id: 'compare', label: 'CW vs. CCW Direction' },
@@ -425,7 +425,7 @@
           id: 'spin-strike',
           title: 'Point-Blank Spin Strike (`"Spin strike!"`)',
           when: 'Skater launched with spin touches the ball first within 2 ball diameters (`tick.struck`, `playSpinStrike`).',
-          visual: 'Accelerating bullwhip loop-unwind whoosh into a sharp supersonic N-wave whipcrack, tapered counter-rotating spin blades on the ball, extra shot speed + Magnus curve, hit-stop, and `"Spin strike!"` callout.',
+          visual: 'Twin expanding team-colored rotating swirl-blade shockwaves (`s.spinStrike`), contact flash, 20 tangential spin-whip streaks & sparks, accelerating bullwhip loop-unwind whoosh into a supersonic whipcrack, extra shot speed + Magnus curve, hit-stop, and `"Spin strike!"` callout.',
           soundLabel: 'Play whipcrack',
           duration: 2.5,
           playSound: ctx => {

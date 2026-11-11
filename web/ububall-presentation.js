@@ -1643,51 +1643,55 @@
       ctx.restore();
     }
 
+    function fillTaperedSpinArc(targetCtx, cx, cy, radius, startAngle, arcSweep, maxWidth, color, peakAlpha) {
+      const steps = 18, dir = Math.sign(arcSweep) || 1, endAngle = startAngle + arcSweep;
+      const outer = [], inner = [];
+      for (let s = 0; s <= steps; s++) {
+        const u = s / steps;
+        const ang = startAngle + arcSweep * u;
+        const tailRamp = Math.pow(u, 0.42);
+        const noseTaper = u > 0.78 ? 1 - 0.58 * Math.pow((u - 0.78) / 0.22, 1.35) : 1;
+        const half = maxWidth * 0.5 * tailRamp * noseTaper;
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        outer.push([cx + ca * (radius + half), cy + sa * (radius + half)]);
+        inner.push([cx + ca * (radius - half), cy + sa * (radius - half)]);
+      }
+      const tipAng = endAngle + dir * Math.min(0.06, (maxWidth * 0.48) / Math.max(14, radius));
+      const tipX = cx + Math.cos(tipAng) * radius, tipY = cy + Math.sin(tipAng) * radius;
+      const tailX = outer[0][0], tailY = outer[0][1];
+      targetCtx.beginPath();
+      targetCtx.moveTo(tailX, tailY);
+      for (let s = 1; s <= steps; s++) targetCtx.lineTo(outer[s][0], outer[s][1]);
+      targetCtx.lineTo(tipX, tipY);
+      for (let s = steps; s >= 1; s--) targetCtx.lineTo(inner[s][0], inner[s][1]);
+      targetCtx.closePath();
+      if (Math.hypot(tipX - tailX, tipY - tailY) > 0.5) {
+        const grad = targetCtx.createLinearGradient(tailX, tailY, tipX, tipY);
+        grad.addColorStop(0, hexToRgba(color, peakAlpha * 0.10));
+        grad.addColorStop(0.15, hexToRgba(color, peakAlpha * 0.55));
+        grad.addColorStop(0.42, hexToRgba(color, peakAlpha * 0.84));
+        grad.addColorStop(0.78, hexToRgba(color, peakAlpha * 0.96));
+        grad.addColorStop(1, hexToRgba(color, peakAlpha));
+        targetCtx.fillStyle = grad;
+      } else {
+        targetCtx.fillStyle = hexToRgba(color, peakAlpha);
+      }
+      targetCtx.fill();
+    }
+
     function drawSpin(b, color) {
       const spin = Math.abs(b.omega);
       if (spin < 2.5 || isReducedMotion()) return;
       const ctx = getView().ctx;
       const power = Math.min(1, (spin - 2.5) / 20), arcs = spin >= 8 ? 3 : 2;
-      const dir = Math.sign(b.omega), sweep = (.92 + 1.22 * power) * dir;
-      const taperedArc = (radius, startAngle, arcSweep, maxWidth, peakAlpha) => {
-        const steps = 10, endAngle = startAngle + arcSweep;
-        const outer = [], inner = [];
-        for (let s = 0; s <= steps; s++) {
-          const u = s / steps;
-          const ang = startAngle + arcSweep * u;
-          const profile = Math.pow(u, 1.35) * (u > 0.86 ? 1 - 0.22 * ((u - 0.86) / 0.14) : 1);
-          const half = maxWidth * 0.5 * profile;
-          const ca = Math.cos(ang), sa = Math.sin(ang);
-          outer.push([b.x + ca * (radius + half), b.y + sa * (radius + half)]);
-          inner.push([b.x + ca * (radius - half), b.y + sa * (radius - half)]);
-        }
-        const tipAng = endAngle + dir * Math.min(0.16, (maxWidth * 1.15) / Math.max(12, radius));
-        const tipX = b.x + Math.cos(tipAng) * radius, tipY = b.y + Math.sin(tipAng) * radius;
-        const tailX = outer[0][0], tailY = outer[0][1];
-        ctx.beginPath();
-        ctx.moveTo(tailX, tailY);
-        for (let s = 1; s <= steps; s++) ctx.lineTo(outer[s][0], outer[s][1]);
-        ctx.lineTo(tipX, tipY);
-        for (let s = steps; s >= 1; s--) ctx.lineTo(inner[s][0], inner[s][1]);
-        ctx.closePath();
-        if (Math.hypot(tipX - tailX, tipY - tailY) > 0.5) {
-          const grad = ctx.createLinearGradient(tailX, tailY, tipX, tipY);
-          grad.addColorStop(0, hexToRgba(color, 0));
-          grad.addColorStop(0.35, hexToRgba(color, peakAlpha * 0.3));
-          grad.addColorStop(0.8, hexToRgba(color, peakAlpha * 0.85));
-          grad.addColorStop(1, hexToRgba(color, peakAlpha));
-          ctx.fillStyle = grad;
-        } else {
-          ctx.fillStyle = hexToRgba(color, peakAlpha);
-        }
-        ctx.fill();
-      };
+      const dir = Math.sign(b.omega);
+      const sweep = (arcs === 3 ? (1.28 + 0.56 * power) : (1.42 + 0.95 * power)) * dir;
       ctx.save();
       for (let k = 0; k < arcs; k++) {
         const start = b.rotation + k * 2 * Math.PI / arcs;
-        taperedArc(b.radius + 4.5, start, sweep, 1.8 + 3.0 * power, Math.min(0.95, 0.28 + 0.62 * power));
-        if (power > 0.45) {
-          taperedArc(b.radius + 10.5, start + sweep * 0.32, sweep * 0.68, 1.1 + 1.3 * power, Math.min(0.65, (power - 0.45) * 1.05));
+        fillTaperedSpinArc(ctx, b.x, b.y, b.radius + 4.5, start, sweep, 1.65 + 2.15 * power, color, Math.min(0.96, 0.36 + 0.58 * power));
+        if (power > 0.30) {
+          fillTaperedSpinArc(ctx, b.x, b.y, b.radius + 9.8, start + sweep * 0.14, sweep * 0.84, 1.15 + 1.15 * power, color, Math.min(0.76, 0.22 + (power - 0.30) * 0.76));
         }
       }
       ctx.restore();
@@ -2177,6 +2181,65 @@
           fx.particles.push(p);
         }
       }
+      if (isSpinStrike && !isReducedMotion()) {
+        const ball = a.team === -1 ? a : b;
+        const striker = a.team === -1 ? b : a;
+        const strikeTeam = striker?.team >= 0 ? striker.team : 0;
+        const heading = Math.atan2(ball.vy || 0, ball.vx || 0);
+        const spinVal = ball.omega || -(striker?.omega || 0) || 14;
+        const spinDir = Math.sign(spinVal) || 1;
+        const spinPower = Math.min(1, Math.max(0.35, Math.abs(spinVal) / 20));
+        if (fx.shockwaves.length < 30) {
+          fx.shockwaves.push({
+            x: ball.x, y: ball.y,
+            currentRadius: 18, maxRadius: 68 + 10 * spinPower,
+            team: strikeTeam, color: null,
+            spinStrike: true, spinDir, startAngle: heading, blades: 3,
+            width: 3.6 + 1.4 * spinPower,
+            life: 0.30, duration: 0.30, overlay: true
+          });
+          fx.shockwaves.push({
+            x, y,
+            currentRadius: 11, maxRadius: 46 + 8 * spinPower,
+            team: strikeTeam, color: null,
+            spinStrike: true, spinDir, startAngle: heading + spinDir * 0.55, blades: 2,
+            width: 2.8 + 1.0 * spinPower,
+            life: 0.23, duration: 0.23, overlay: true
+          });
+        }
+        if (fx.particles.length < 400) {
+          fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: strikeTeam, color: null, life: 0.22, duration: 0.22, flash: true, flashSize: 128, overlay: true });
+          fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ffffff', life: 0.12, duration: 0.12, flash: true, flashSize: 64, overlay: true });
+        }
+        for (let k = 0; k < 20 && fx.particles.length < 400; k++) {
+          const isSwirlWing = k < 12;
+          const radialAng = isSwirlWing
+            ? heading + (k / 12) * Math.PI * 2
+            : heading + (Math.random() - 0.5) * 0.52;
+          const moveAng = isSwirlWing
+            ? radialAng + spinDir * (1.05 + (Math.random() - 0.5) * 0.25)
+            : radialAng + spinDir * 0.22;
+          const spd = isSwirlWing ? 185 + Math.random() * 210 : 250 + Math.random() * 290;
+          const life = 0.20 + Math.random() * 0.14;
+          const spawnR = ball.radius * (isSwirlWing ? 0.85 : 0.65);
+          const sx = ball.x + Math.cos(radialAng) * spawnR;
+          const sy = ball.y + Math.sin(radialAng) * spawnR;
+          const p = {
+            x: sx, y: sy,
+            px: sx - Math.cos(moveAng) * 8, py: sy - Math.sin(moveAng) * 8,
+            vx: Math.cos(moveAng) * spd, vy: Math.sin(moveAng) * spd,
+            team: strikeTeam,
+            color: k % 4 === 0 ? '#ffffff' : null,
+            life, duration: life, snap: true, overlay: true
+          };
+          if (k < 8) {
+            p.materialShape = 'streak';
+            p.size = 2.8 + Math.random() * 1.8;
+            p.angle = moveAng;
+          }
+          fx.particles.push(p);
+        }
+      }
       if (plow) flames(x, y, 40, (b.vx || a.vx) * 0.1, (b.vy || a.vy) * 0.1, 15);
       const now = clockNow();
       if (!plow && speed >= 15) contactMeter?.(a, b, speed);
@@ -2411,13 +2474,30 @@
       drawGuides(home, away, text, playback ? playback.guide : getGuide());
       fx.shockwaves.forEach(s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
-        const expand = (s.dramatic || s.hipClip || s.check) ? 1 - (1 - progress) ** 2.6 : progress;
-        const fade = (s.dramatic || s.hipClip || s.check) ? (1 - progress) ** 1.25 : 1 - progress;
+        const expand = (s.dramatic || s.hipClip || s.check || s.spinStrike) ? 1 - (1 - progress) ** 2.6 : progress;
+        const fade = (s.dramatic || s.hipClip || s.check || s.spinStrike) ? (1 - progress) ** 1.25 : 1 - progress;
         const r = s.currentRadius + (s.maxRadius - s.currentRadius) * expand;
         const targetCtx = s.overlay && view.badgeCtx ? view.badgeCtx : view.ctx;
         const waveColor = s.color || (s.team === 0 ? home : away);
         const baseW = s.width || (s.overlay ? 4.5 : 6);
         targetCtx.save();
+        if (s.spinStrike) {
+          const blades = s.blades || 3;
+          const dir = s.spinDir || 1;
+          const rot = (s.startAngle || 0) + dir * (1 - (1 - progress) ** 1.75) * 2.55;
+          const arcSweep = (blades === 3 ? 1.42 : 1.72) * (0.78 + 0.22 * fade) * dir;
+          const bladeW = Math.max(1.4, baseW * (0.45 + 0.55 * fade));
+          const peakAlpha = Math.max(0, fade * 0.94);
+          for (let bIdx = 0; bIdx < blades; bIdx++) {
+            const a0 = rot + (bIdx * Math.PI * 2) / blades;
+            fillTaperedSpinArc(targetCtx, s.x, s.y, r, a0, arcSweep, bladeW, waveColor, peakAlpha);
+            if (fade > 0.2) {
+              fillTaperedSpinArc(targetCtx, s.x, s.y, Math.max(2, r - 1.2), a0 + arcSweep * 0.28, arcSweep * 0.68, bladeW * 0.48, '#ffffff', peakAlpha * 0.82);
+            }
+          }
+          targetCtx.restore();
+          return;
+        }
         if (s.hipClip || s.check) {
           const secondColor = (s.teamB ?? (1 - s.team)) === 0 ? home : away;
           const str = s.strength ?? 1;
