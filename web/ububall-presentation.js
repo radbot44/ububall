@@ -796,7 +796,7 @@
         const now = clockNow(), map = (fx.carveTimes ||= new WeakMap());
         if (now - (map.get(b) ?? -Infinity) >= 180) {
           map.set(b, now);
-          gameAudio()?.playCarve?.({ volume: Math.min(0.55, 0.18 + 0.36 * strength), x: b.x, y: b.y });
+          gameAudio()?.playCarve?.({ volume: Math.min(0.55, 0.18 + 0.36 * strength), speed: Math.hypot(prev.vx, prev.vy), x: b.x, y: b.y });
         }
       }
       if (s.time <= 0) { s.path = null; return; }
@@ -822,11 +822,62 @@
       if (!ball) return;
       const fx = getEffects();
       const speed = Math.hypot(ball.vx, ball.vy), share = paceShare(ball);
+      const burning = ballOnFire();
+      const wasBurning = fx.wasOnFire;
+      fx.wasOnFire = burning;
       fx.fireTime = P.ballOnFire(ball) ? fx.fireTime + dt : 0;
-      if (ballOnFire()) {
+      if (burning) {
+        if (wasBurning === false && !fx.netFire?.lit && (clockNow() - (fx.lastCannonImpact ?? -Infinity) > 40)) {
+          fx.ballFlare = 1;
+          if (!isReducedMotion()) {
+            if (fx.shockwaves.length < 30) {
+              fx.shockwaves.push({
+                x: ball.x, y: ball.y,
+                currentRadius: ball.radius * 0.85, maxRadius: ball.radius * 3.1,
+                team: -1, color: '#ff7a1a',
+                dramatic: true, band: true, width: 6.2,
+                life: 0.26, duration: 0.26, overlay: true
+              });
+              fx.shockwaves.push({
+                x: ball.x, y: ball.y,
+                currentRadius: ball.radius * 0.65, maxRadius: ball.radius * 2.1,
+                team: -1, color: '#fff3b0',
+                dramatic: true, width: 3.4,
+                life: 0.18, duration: 0.18, overlay: true
+              });
+            }
+            if (fx.particles.length < 400) {
+              fx.particles.push({ x: ball.x, y: ball.y, px: ball.x, py: ball.y, vx: 0, vy: 0, team: -1, color: '#ff7a1a', life: 0.20, duration: 0.20, flash: true, flashSize: 120, overlay: true });
+              fx.particles.push({ x: ball.x, y: ball.y, px: ball.x, py: ball.y, vx: 0, vy: 0, team: -1, color: '#fff3b0', life: 0.12, duration: 0.12, flash: true, flashSize: 64, overlay: true });
+            }
+            const backAng = Math.atan2(-(ball.vy || 0), -(ball.vx || 1));
+            for (let k = 0; k < 16 && fx.particles.length < 400; k++) {
+              const ang = backAng + (Math.random() - 0.5) * 1.9;
+              const spd = 120 + Math.random() * 210, life = 0.18 + Math.random() * 0.14;
+              const sx = ball.x + Math.cos(ang) * (ball.radius * 0.6);
+              const sy = ball.y + Math.sin(ang) * (ball.radius * 0.6);
+              fx.particles.push({
+                x: sx, y: sy, px: sx - Math.cos(ang) * 7, py: sy - Math.sin(ang) * 7,
+                vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+                team: -1, color: ['#fff3b0', '#ffc43d', '#ff7a1a', '#ff3b1a'][k % 4],
+                life, duration: life,
+                materialShape: k < 8 ? 'streak' : undefined,
+                size: k < 8 ? 2.6 + Math.random() * 1.6 : undefined,
+                angle: ang, snap: true, overlay: true
+              });
+            }
+          }
+          const now = clockNow();
+          if (gameAudio()?.playFireImpact && (now - (fx.lastFireHitSound ?? -Infinity) > 55)) {
+            fx.lastFireHitSound = now;
+            gameAudio().playFireImpact({ volume: 0.68, x: ball.x, y: ball.y });
+          }
+        }
         if (!fx.sizzle) fx.sizzle = gameAudio()?.playSizzle?.({ x: ball.x, y: ball.y }) || null;
         else if (fx.sizzle?.setCoords) fx.sizzle.setCoords(ball.x, ball.y);
-      } else if (!ballOnFire()) quench();
+      } else {
+        quench();
+      }
       const level = Math.max(fx.ballFlare, (share - HEAT.red) / (HEAT.redHot - HEAT.red));
       const ux = speed ? ball.vx / speed : 0, uy = speed ? ball.vy / speed : -1;
       if (ballOnFire() && !fx.netFire?.lit) flames(ball.x - ux * ball.radius * .5, ball.y - uy * ball.radius * .5, ball.radius * 1.4, -ball.vx * .12, -ball.vy * .12, dt * 120);
@@ -886,6 +937,61 @@
         if (audio && !b.carded) {
           audio.playUbuMove?.({ id: i, speed, mass: b.mass || 3, radius: b.radius || 25, slot: i, x: b.x, y: b.y });
           audio.playSpin?.({ id: i, omega: b.omega || 0, radius: b.radius || 25, slot: i, x: b.x, y: b.y });
+        }
+        if (b.superActive === 'ghost' && !b.carded) {
+          const gMap = (fx.ghostPhaseTimes ||= new Map());
+          for (let j = 0; j < 6; j++) {
+            if (j === i) continue;
+            const other = view.bodies[j];
+            if (!other || other.team === b.team || other.carded) continue;
+            const dist = Math.hypot(b.x - other.x, b.y - other.y);
+            if (dist < (b.radius || 25) + (other.radius || 25) - 2) {
+              const pairKey = i < j ? `${i}-${j}` : `${j}-${i}`;
+              if (now - (gMap.get(pairKey) ?? -Infinity) >= 420) {
+                gMap.set(pairKey, now);
+                const midX = (b.x + other.x) * 0.5, midY = (b.y + other.y) * 0.5;
+                if (!reduced) {
+                  if (fx.shockwaves.length < 30) {
+                    fx.shockwaves.push({
+                      x: midX, y: midY, currentRadius: 11, maxRadius: 56,
+                      team: b.team, color: '#33e0ff',
+                      dramatic: true, band: true, width: 4.5,
+                      life: 0.28, duration: 0.28, overlay: true
+                    });
+                    fx.shockwaves.push({
+                      x: midX, y: midY, currentRadius: 7, maxRadius: 38,
+                      team: b.team, color: '#f8f6f2',
+                      dramatic: true, width: 2.4,
+                      life: 0.20, duration: 0.20, overlay: true
+                    });
+                  }
+                  if (fx.particles.length < 400) {
+                    fx.particles.push({
+                      x: midX, y: midY, px: midX, py: midY, vx: 0, vy: 0,
+                      team: -1, color: '#33e0ff', life: 0.18, duration: 0.18,
+                      flash: true, flashSize: 88, overlay: true
+                    });
+                  }
+                  const passAng = Math.atan2(b.vy || (other.y - b.y), b.vx || (other.x - b.x));
+                  for (let k = 0; k < 12 && fx.particles.length < 400; k++) {
+                    const ang = passAng + (k / 12) * Math.PI * 2 + (Math.random() - 0.5) * 0.25;
+                    const spd = 95 + Math.random() * 140, life = 0.18 + Math.random() * 0.12;
+                    const sx = midX + Math.cos(ang) * 8, sy = midY + Math.sin(ang) * 8;
+                    fx.particles.push({
+                      x: sx, y: sy, px: sx - Math.cos(ang) * 6, py: sy - Math.sin(ang) * 6,
+                      vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+                      team: -1, color: k % 3 === 0 ? '#f8f6f2' : '#33e0ff',
+                      life, duration: life,
+                      materialShape: k % 2 === 0 ? 'streak' : undefined,
+                      size: k % 2 === 0 ? 2.2 + Math.random() * 1.4 : undefined,
+                      angle: ang, snap: true, overlay: true
+                    });
+                  }
+                }
+                audio?.playSuper?.('ghost', 'phase', { volume: 0.72, x: midX, y: midY });
+              }
+            }
+          }
         }
         const draft = P.tailgateFactor ? P.tailgateFactor(view.bodies, b) : 0;
         if (draft > 0.32) {
@@ -958,14 +1064,15 @@
       fx.particles.length = fx.fireworks.length = fx.shockwaves.length = 0;
       fx.skids.length = fx.skidState.length = fx.burns.length = fx.ripples.length = fx.pings.length = 0;
       fx.popups.length = 0;
-      fx.burnState.path = null; fx.fireTime = 0; quench();
+      fx.burnState.path = null; fx.fireTime = 0; fx.wasOnFire = null; quench();
       if (fx.netFire) fx.netFire.lit = false;
       fx.shake = fx.shakeX = fx.shakeY = 0; if (!view.field && rinkWrap) rinkWrap.style.translate = '';
-      fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.goalCall = fx.fireWarp = null;
+      fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.goalCall = fx.fireWarp = fx.koWarp = null;
       fx.puckSlideTime = -Infinity;
       fx.lastCannonImpact = -Infinity;
       fx.lastFireHitSound = -Infinity;
       fx.lastHipClipSound = -Infinity;
+      fx.ghostPhaseTimes = new Map();
       fx.superImpactTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.carveTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.slipstreamTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
@@ -1028,6 +1135,17 @@
       if (isReducedMotion()) return;
       burst(ball.x, ball.y, team, 1, true);
       fx.goalSweep = { team, p: 0 };
+      const netSide = team ? 0 : 1;
+      const netRun = NET_RUNS[netSide];
+      if (netRun && fx.ripples.length < 24) {
+        const shotSpeed = Math.hypot(ball.vx || 0, ball.vy || 0) || (ball.pace || 520);
+        fx.ripples.push({
+          run: netRun, lo: 0, hi: netRun.length - 1,
+          net: true, goalPocket: true, side: netSide,
+          amp: Math.min(1.45, Math.max(0.78, shotSpeed / 460)),
+          life: 0.85, duration: 0.85
+        });
+      }
       for (let i = 0; i < 9; i++) fx.fireworks.push({ x: team === 0 ? 560 + Math.random() * 340 : 100 + Math.random() * 340, y: 560,
         vx: (Math.random() - .5) * 64, vy: -(430 + Math.random() * 160), fuse: .55 + Math.random() * .3, delay: .1 + i * .17, team, ring: i % 3 === 2 });
     }
@@ -1084,6 +1202,7 @@
       if (!view.field && rinkWrap) rinkWrap.style.translate = fieldFx.shake ? `${fieldFx.shakeX}px ${fieldFx.shakeY}px` : '';
       fieldFx.ballFlare = Math.max(0, fieldFx.ballFlare - dt / .8);
       if (fieldFx.fireWarp && (fieldFx.fireWarp.life -= dt) <= 0) fieldFx.fireWarp = null;
+      if (fieldFx.koWarp && (fieldFx.koWarp.life -= dt) <= 0) fieldFx.koWarp = null;
       fieldFx.kickoffGlow = Math.max(0, fieldFx.kickoffGlow - dt / 1.5);
       if (fieldFx.goalSweep && (fieldFx.goalSweep.p += dt / 1.5) >= 1) fieldFx.goalSweep = null;
       if (fieldFx.goalCall && (fieldFx.goalCall.t += dt) >= GOAL_CALL_SECONDS) fieldFx.goalCall = null;
@@ -1095,17 +1214,35 @@
       const x = body.x + nx * body.radius, y = body.y + ny * body.radius;
       if (wallType === 'post') {
         const px = x < 500 ? 60 : 940, py = y < 300 ? 230 : 370;
-        if (fx.pings.length < 12) fx.pings.push({ x: px, y: py, life: .4, duration: .4 });
+        if (fx.pings.length < 12) {
+          fx.pings.push({
+            x: px, y: py, nx, ny,
+            amp: Math.min(1, Math.max(0.25, velocity / 520)),
+            spin: body.omega || 0,
+            life: .46, duration: .46
+          });
+        }
       } else if ((wallType === 'net' || velocity > 220) && fx.ripples.length < 24) {
-        const net = wallType === 'net', half = (net ? 26 : 60) / WALL_STEP;
+        const net = wallType === 'net';
+        const isMeteor = !net && body.team === -1 && Boolean(P.ballOnFire?.(body));
+        const half = (net ? (velocity > 360 ? 42 : 30) : (isMeteor ? 72 : 60)) / WALL_STEP;
         let best = null;
         for (const run of net ? NET_RUNS : BOARD_RUNS) run.forEach((p, k) => {
           const d = (p.x - x) ** 2 + (p.y - y) ** 2;
           if (!best || d < best.d) best = { d, run, k };
         });
         if (best) {
-          fx.ripples.push({ run: best.run, lo: Math.max(0, best.k - half), hi: Math.min(best.run.length - 1, best.k + half),
-            net, side: x < 500 ? 0 : 1, amp: Math.min(1, velocity / 500), life: .6, duration: .6 });
+          fx.ripples.push({
+            run: best.run,
+            lo: Math.max(0, best.k - half),
+            hi: Math.min(best.run.length - 1, best.k + half),
+            net,
+            meteor: isMeteor,
+            side: x < 500 ? 0 : 1,
+            amp: Math.min(net || isMeteor ? 1.25 : 1, velocity / (isMeteor ? 440 : 500)),
+            life: isMeteor ? .72 : .6,
+            duration: isMeteor ? .72 : .6
+          });
         }
       }
     }
@@ -1220,12 +1357,30 @@
     function drawGoalSweep(sweep, color) {
       const view = getView(), ctx = view.ctx;
       const p = sweep.p, x = sweep.team ? 60 + p * 880 : 940 - p * 880;
+      const dim = 0.14 * Math.sin(Math.PI * p);
+      const scorer = getScoringPlayer();
       inRink(() => {
+        if (dim > 0.005) {
+          ctx.fillStyle = `rgba(8, 10, 14, ${dim.toFixed(3)})`;
+          ctx.fillRect(60, 60, 880, 480);
+        }
         ctx.fillStyle = hexToRgba(color, .12 * Math.sin(Math.PI * p)); ctx.fillRect(60, 60, 880, 480);
         const band = ctx.createLinearGradient(x - 220, 0, x + 220, 0);
         band.addColorStop(0, hexToRgba(color, 0)); band.addColorStop(.4, hexToRgba(color, .32));
         band.addColorStop(.5, 'rgba(255,255,255,.5)'); band.addColorStop(.6, hexToRgba(color, .32)); band.addColorStop(1, hexToRgba(color, 0));
         ctx.globalAlpha = 1 - p * .6; ctx.fillStyle = band; ctx.fillRect(60, 60, 880, 480);
+        if (scorer && scorer.x != null && scorer.y != null) {
+          const spotR = (scorer.radius || 25) * 3.8;
+          const spot = ctx.createRadialGradient(scorer.x, scorer.y, (scorer.radius || 25) * 0.4, scorer.x, scorer.y, spotR);
+          spot.addColorStop(0, hexToRgba(color, 0.28 * (1 - p * 0.7)));
+          spot.addColorStop(0.55, hexToRgba(color, 0.11 * (1 - p * 0.7)));
+          spot.addColorStop(1, hexToRgba(color, 0));
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = spot;
+          ctx.beginPath();
+          ctx.arc(scorer.x, scorer.y, spotR, 0, Math.PI * 2);
+          ctx.fill();
+        }
       });
       const mouth = sweep.team ? 60 : 940, back = sweep.team ? mouth - P.rink.goalDepth : mouth + P.rink.goalDepth;
       ctx.save(); ctx.globalAlpha = 1 - p; ctx.shadowColor = color; ctx.shadowBlur = 24 * view.canvas.width / 1000;
@@ -1263,19 +1418,78 @@
     function drawFieldOver(colors) {
       const { border, text, home, away } = colors, fx = getEffects(), view = getView(), ctx = view.ctx;
       for (const r of fx.ripples) {
-        const p = 1 - r.life / r.duration, bulge = r.amp * (r.net ? 9 : 8) * (1 - p) * Math.cos(p * Math.PI * 5);
-        ctx.save(); ctx.globalAlpha = (1 - p) * .9; ctx.lineCap = ctx.lineJoin = 'round';
+        const p = 1 - r.life / r.duration;
+        const baseScale = r.goalPocket ? 13 : (r.net ? 9.5 : 8);
+        const freq = r.goalPocket ? 4.2 : 5;
+        const bulge = r.amp * baseScale * (1 - p) * Math.cos(p * Math.PI * freq);
+        ctx.save();
+        ctx.lineCap = ctx.lineJoin = 'round';
         ctx.beginPath();
         for (let k = r.lo; k <= r.hi; k++) {
-          const w = r.run[k], d = bulge * Math.sin(Math.PI * (k - r.lo) / Math.max(1, r.hi - r.lo)) ** 2;
+          const w = r.run[k], d = bulge * Math.sin(Math.PI * (k - r.lo) / Math.max(1, r.hi - r.lo)) ** (r.goalPocket ? 1.4 : 2);
           ctx.lineTo(w.x + w.nx * d, w.y + w.ny * d);
         }
-        ctx.strokeStyle = r.net ? (r.side ? away : home) : border; ctx.lineWidth = 4; ctx.stroke(); ctx.restore();
+        if (r.meteor) {
+          const charFade = (1 - p) ** 1.15;
+          ctx.globalAlpha = charFade * 0.55;
+          ctx.shadowColor = '#ff5500';
+          ctx.shadowBlur = 12 * (view.canvas.width / 1000);
+          ctx.strokeStyle = '#ff6a1a';
+          ctx.lineWidth = 8.5;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          ctx.globalAlpha = charFade * 0.92;
+          ctx.strokeStyle = '#ffb347';
+          ctx.lineWidth = 4.5;
+          ctx.stroke();
+          if (charFade > 0.3) {
+            ctx.globalAlpha = (charFade - 0.3) * 1.1;
+            ctx.strokeStyle = '#fff2b2';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+        } else {
+          const netColor = r.side ? away : home;
+          ctx.globalAlpha = (1 - p) * .9;
+          ctx.strokeStyle = r.net ? netColor : border;
+          ctx.lineWidth = r.goalPocket ? 5.2 : 4;
+          ctx.stroke();
+          if (r.goalPocket && p < 0.65) {
+            ctx.globalAlpha = (1 - p / 0.65) * 0.65;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
       }
       for (const g of fx.pings) {
         const p = 1 - g.life / g.duration;
-        ctx.save(); ctx.globalAlpha = 1 - p; circle(g.x, g.y, 4 + p * 16, text, 2);
-        ctx.fillStyle = text; ctx.beginPath(); ctx.arc(g.x, g.y, 3 * (1 - p) + 1, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        const fade = (1 - p) ** 1.15;
+        const amp = g.amp ?? 0.7;
+        const shiver = (1 - p) ** 1.6 * Math.sin(p * Math.PI * 18) * (2.6 * amp);
+        const sx = g.x + (g.nx || 0) * shiver * 0.5 - (g.ny || 0) * shiver;
+        const sy = g.y + (g.ny || 0) * shiver * 0.5 + (g.nx || 0) * shiver;
+        ctx.save();
+        ctx.globalAlpha = fade;
+        circle(g.x, g.y, 4 + p * (18 + 6 * amp), text, 2.2);
+        if (amp > 0.45) {
+          ctx.globalAlpha = fade * 0.72;
+          circle(g.x, g.y, 6 + p * (28 + 8 * amp), '#ffd76b', 1.6);
+        }
+        if (Math.abs(g.spin || 0) >= 6 && fade > 0.15) {
+          const spinDir = Math.sign(g.spin) || 1;
+          const spinPow = Math.min(1, Math.abs(g.spin) / 20);
+          const rot = p * spinDir * 4.2;
+          fillTaperedSpinArc(ctx, g.x, g.y, 8 + p * 18, rot, 1.45 * spinDir, 2.2 + 1.2 * spinPow, '#ffd76b', fade * 0.85);
+          fillTaperedSpinArc(ctx, g.x, g.y, 8 + p * 18, rot + Math.PI, 1.45 * spinDir, 2.2 + 1.2 * spinPow, '#ffffff', fade * 0.75);
+        }
+        ctx.globalAlpha = fade;
+        ctx.fillStyle = p < 0.35 ? '#ffd76b' : text;
+        ctx.beginPath();
+        ctx.arc(sx, sy, (3.6 + 1.4 * amp) * (1 - p * 0.65) + 1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
       }
       if (fx.goalSweep) drawGoalSweep(fx.goalSweep, fx.goalSweep.team ? away : home);
       if (fx.goalCall) drawGoalCall(fx.goalCall, fx.goalCall.team ? away : home);
@@ -2310,25 +2524,44 @@
       const tangent = Math.atan2(ny, nx) + Math.PI / 2;
       const now = clockNow();
       if (rimmed) {
+        const speed = Math.hypot(body.vx || 0, body.vy || 0);
+        const speedNorm = Math.min(1, Math.max(0, (speed - 60) / 480));
         if (!isReducedMotion()) {
           const idx = view.bodies?.indexOf(body) ?? -1;
           if (idx >= 0 && idx < 6) {
             const s = fx.skidState[idx] ||= { time: 0 };
-            Object.assign(s, { time: Math.max(s.time || 0, .22), strength: Math.max(s.time > 0 ? s.strength : 0, .55) });
+            Object.assign(s, { time: Math.max(s.time || 0, .25), strength: Math.max(s.time > 0 ? s.strength : 0, .62 + .35 * speedNorm) });
           }
-          for (let k = 0; k < 5 && fx.particles.length < 400; k++) {
-            const ang = tangent + (k % 2 ? Math.PI : 0) + (Math.random() - .5) * .45;
-            const spd = 45 + Math.random() * 85, life = .14 + Math.random() * .12;
-            fx.particles.push({ x: cx, y: cy, px: cx, py: cy,
-              vx: Math.cos(ang) * spd - nx * 25, vy: Math.sin(ang) * spd - ny * 25,
-              team: -1, color: k % 2 ? '#e8f7ff' : '#ffffff', life, duration: life });
+          const moveAng = Math.atan2(body.vy || 0, body.vx || 0);
+          const sprayBase = moveAng + Math.PI;
+          const inwardAngle = Math.atan2(-ny, -nx);
+          const count = 8 + Math.round(7 * speedNorm);
+          for (let k = 0; k < count && fx.particles.length < 450; k++) {
+            const frac = k / Math.max(1, count - 1);
+            const ang = sprayBase * (1 - frac * 0.42) + inwardAngle * (frac * 0.42) + (Math.random() - .5) * .36;
+            const spd = (55 + Math.random() * 115) * (0.7 + 0.55 * speedNorm);
+            const life = .15 + Math.random() * .15;
+            const p = {
+              x: cx, y: cy, px: cx, py: cy,
+              vx: Math.cos(ang) * spd - nx * (22 + 24 * frac),
+              vy: Math.sin(ang) * spd - ny * (22 + 24 * frac),
+              team: -1,
+              color: k % 3 === 0 ? '#9be7ff' : k % 2 ? '#e8f7ff' : '#ffffff',
+              life, duration: life
+            };
+            if (k % 3 === 0) {
+              p.materialShape = 'streak';
+              p.angle = ang;
+              p.size = 3.2 + Math.random() * 2.4;
+              p.snap = true;
+            }
+            fx.particles.push(p);
           }
         }
         const map = (fx.carveTimes ||= new WeakMap());
         if (now - (map.get(body) ?? -Infinity) >= 180) {
           map.set(body, now);
-          const speed = Math.hypot(body.vx || 0, body.vy || 0);
-          gameAudio()?.playCarve?.({ volume: Math.min(0.55, 0.16 + 0.36 * Math.min(1, speed / 550)), x: cx, y: cy });
+          gameAudio()?.playCarve?.({ volume: Math.min(0.58, 0.16 + 0.38 * Math.min(1, speed / 550)), speed, rimmed: true, x: cx, y: cy });
         }
         return;
       }
@@ -2336,12 +2569,20 @@
       body._lastWallSound = now;
       burst(cx, cy, body.team, Math.min(1, velocity / 500), false, tangent);
       if (wallType === 'post' && body.team === -1 && velocity >= 240 && !isReducedMotion()) {
-        for (let k = 0; k < 8 && fx.particles.length < 400; k++) {
-          const ang = tangent + (k % 2 ? Math.PI : 0) + (Math.random() - .5) * .4;
-          const spd = 80 + Math.random() * 140, life = .16 + Math.random() * .14;
-          fx.particles.push({ x: cx, y: cy, px: cx, py: cy,
+        const reflectAng = Math.atan2(-ny, -nx);
+        for (let k = 0; k < 12 && fx.particles.length < 450; k++) {
+          const ang = (k < 8 ? tangent + (k % 2 ? Math.PI : 0) : reflectAng) + (Math.random() - .5) * .42;
+          const spd = 85 + Math.random() * 165, life = .16 + Math.random() * .15;
+          const p = { x: cx, y: cy, px: cx, py: cy,
             vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
-            team: -1, color: k % 2 ? '#ffd76b' : '#ffffff', life, duration: life });
+            team: -1, color: k % 3 === 0 ? '#ffae33' : k % 2 ? '#ffd76b' : '#ffffff', life, duration: life };
+          if (k % 2 === 0) {
+            p.materialShape = 'streak';
+            p.angle = ang;
+            p.size = 3.6 + Math.random() * 2.4;
+            p.snap = true;
+          }
+          fx.particles.push(p);
         }
       }
       const norm = Math.min(1.0, Math.max(0.0, (velocity - 20) / 480));
@@ -2349,9 +2590,22 @@
       if (body.team === -1 && P.ballOnFire?.(body) && velocity >= 60) {
         fx.ballFlare = Math.max(fx.ballFlare || 0, 0.85);
         fx.fireWarp = { x: cx, y: cy, nx, ny, life: 0.28, duration: 0.28 };
-        if (!isReducedMotion() && fx.particles.length < 400) {
+        if (!isReducedMotion() && fx.particles.length < 450) {
           fx.particles.push({ x: cx, y: cy, px: cx, py: cy, vx: 0, vy: 0, team: -1, color: '#ff7a1a', life: 0.18, duration: 0.18, flash: true, flashSize: 115, overlay: true });
           fx.particles.push({ x: cx, y: cy, px: cx, py: cy, vx: 0, vy: 0, team: -1, color: '#fff3b0', life: 0.11, duration: 0.11, flash: true, flashSize: 60, overlay: true });
+          for (let k = 0; k < 10 && fx.particles.length < 450; k++) {
+            const side = k % 2 ? 1 : -1;
+            const ang = tangent + (side < 0 ? Math.PI : 0) + (Math.random() - 0.5) * 0.28;
+            const spd = 110 + Math.random() * 170, life = 0.18 + Math.random() * 0.14;
+            fx.particles.push({
+              x: cx, y: cy, px: cx, py: cy,
+              vx: Math.cos(ang) * spd - nx * 24, vy: Math.sin(ang) * spd - ny * 24,
+              team: -1,
+              color: k % 3 === 0 ? '#fff3b0' : k % 2 === 0 ? '#ff9f1c' : '#ff5400',
+              life, duration: life,
+              materialShape: 'streak', angle: ang, size: 3.8 + Math.random() * 2.6, snap: true, overlay: true
+            });
+          }
         }
       }
       const audio = gameAudio();
@@ -2370,7 +2624,7 @@
     }
 
     function handleSuper(key, stage, body, target = null) {
-      const fx = getEffects();
+      const fx = getEffects(), view = getView();
       if (key === 'cannonball' && stage === 'impact') fx.lastCannonImpact = clockNow();
       if (key === 'stalwart' && stage === 'impact') {
         const now = clockNow();
@@ -2380,11 +2634,45 @@
       if (stage === 'impact' && target && !isReducedMotion()) {
         const dx = target.x - body.x, dy = target.y - body.y;
         const distance = Math.hypot(dx, dy) || 1;
+        const nx = dx / distance, ny = dy / distance;
         const reach = target.team === -1 ? Math.max(body.radius, body.reach || body.radius, 18) : body.radius;
-        const x = body.x + dx / distance * reach, y = body.y + dy / distance * reach;
+        const x = body.x + nx * reach, y = body.y + ny * reach;
         const tangent = Math.atan2(dy, dx) + Math.PI / 2;
         if (key === 'knockout') {
           burst(x, y, target.team, 3, false, tangent, '#ee2b47');
+          const attackerIdx = body.playerIndex ?? (view.bodies?.indexOf(body) ?? -1);
+          const targetIdx = target.playerIndex ?? (view.bodies?.indexOf(target) ?? -1);
+          fx.koWarp = { attackerIdx, targetIdx, nx, ny, life: 0.26, duration: 0.26 };
+          const normalAngle = Math.atan2(dy, dx);
+          if (fx.shockwaves.length < 40) {
+            fx.shockwaves.push({
+              x, y, currentRadius: 12, maxRadius: 78,
+              team: body.team, color: '#ee2b47',
+              life: 0.30, duration: 0.30,
+              koCone: true, normalAngle, width: 6.5, overlay: true
+            });
+            fx.shockwaves.push({
+              x, y, currentRadius: 8, maxRadius: 56,
+              team: body.team, color: '#ff7197',
+              life: 0.22, duration: 0.22,
+              koCone: true, normalAngle, width: 4.2, overlay: true
+            });
+          }
+          if (fx.particles.length < 450) {
+            fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ee2b47', life: 0.18, duration: 0.18, flash: true, flashSize: 110, overlay: true });
+            for (let k = 0; k < 14 && fx.particles.length < 450; k++) {
+              const ang = normalAngle + (Math.random() - 0.5) * 1.05;
+              const spd = 180 + Math.random() * 240, life = 0.16 + Math.random() * 0.14;
+              fx.particles.push({
+                x: target.x, y: target.y, px: target.x, py: target.y,
+                vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+                team: body.team,
+                color: k % 3 === 0 ? '#ffffff' : k % 2 === 0 ? '#ee2b47' : '#ff7197',
+                life, duration: life,
+                materialShape: 'streak', angle: ang, size: 4.5 + Math.random() * 3.0, snap: true, overlay: true
+              });
+            }
+          }
         } else if (key === 'cannonball' || key === 'stalwart') {
           const color = key === 'cannonball' ? '#ff634d' : '#ffd166';
           if (key === 'cannonball') fx.ballFlare = 1;
@@ -2393,7 +2681,10 @@
             maxRadius: key === 'cannonball' ? 48 : 36, team: body.team, color, life: .24, duration: .24 });
         }
       }
-      gameAudio()?.playSuper?.(key, stage, { x: body?.x, y: body?.y });
+      const closeness = (key === 'magnet' && stage === 'pull' && body && target)
+        ? Math.max(0, Math.min(1, 1 - Math.hypot(target.x - body.x, target.y - body.y) / 190))
+        : 0.5;
+      gameAudio()?.playSuper?.(key, stage, { x: body?.x, y: body?.y, closeness });
     }
 
     function handleShockwave(source, radius, type = null) {
@@ -2474,13 +2765,34 @@
       drawGuides(home, away, text, playback ? playback.guide : getGuide());
       fx.shockwaves.forEach(s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
-        const expand = (s.dramatic || s.hipClip || s.check || s.spinStrike) ? 1 - (1 - progress) ** 2.6 : progress;
-        const fade = (s.dramatic || s.hipClip || s.check || s.spinStrike) ? (1 - progress) ** 1.25 : 1 - progress;
+        const expand = (s.dramatic || s.hipClip || s.check || s.spinStrike || s.koCone) ? 1 - (1 - progress) ** 2.6 : progress;
+        const fade = (s.dramatic || s.hipClip || s.check || s.spinStrike || s.koCone) ? (1 - progress) ** 1.25 : 1 - progress;
         const r = s.currentRadius + (s.maxRadius - s.currentRadius) * expand;
         const targetCtx = s.overlay && view.badgeCtx ? view.badgeCtx : view.ctx;
         const waveColor = s.color || (s.team === 0 ? home : away);
         const baseW = s.width || (s.overlay ? 4.5 : 6);
         targetCtx.save();
+        if (s.koCone) {
+          const dir = s.normalAngle || 0;
+          const halfArc = 0.56 + 0.24 * expand;
+          targetCtx.lineCap = 'round';
+          targetCtx.beginPath();
+          targetCtx.arc(s.x, s.y, r, dir - halfArc, dir + halfArc);
+          targetCtx.strokeStyle = waveColor;
+          targetCtx.lineWidth = Math.max(1.5, baseW * fade);
+          targetCtx.globalAlpha = Math.max(0, fade * 0.92);
+          targetCtx.stroke();
+          if (fade > 0.2) {
+            targetCtx.beginPath();
+            targetCtx.arc(s.x, s.y, Math.max(2, r - 2), dir - halfArc * 0.65, dir + halfArc * 0.65);
+            targetCtx.strokeStyle = '#ffffff';
+            targetCtx.lineWidth = Math.max(1, baseW * 0.42 * fade);
+            targetCtx.globalAlpha = Math.max(0, fade * 0.85);
+            targetCtx.stroke();
+          }
+          targetCtx.restore();
+          return;
+        }
         if (s.spinStrike) {
           const blades = s.blades || 3;
           const dir = s.spinDir || 1;
@@ -2556,19 +2868,23 @@
       const onlineReplay = getOnlineReplay();
       const skaters = getSkaters();
       const fwActive = fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion() ? fx.fireWarp : null;
+      const koActive = fx.koWarp && fx.koWarp.life > 0 && !isReducedMotion() ? fx.koWarp : null;
 
       view.bodies.slice(0, 6).forEach((b, i) => {
         const reachR = Math.max(b.radius, b.reach || b.radius, 18);
         const isSuperReady = (b.meter >= 100) || Boolean(b.superArm) || Boolean(b.superActive);
-        const ubuWarped = fwActive && fwActive.ubuIndex === i;
+        const isFwWarped = Boolean(fwActive && fwActive.ubuIndex === i);
+        const isKoWarped = Boolean(koActive && (koActive.attackerIdx === i || koActive.targetIdx === i));
+        const ubuWarped = isFwWarped || isKoWarped;
         let ubuWarpAngle = 0, ubuScaleX = 1, ubuScaleY = 1;
         if (ubuWarped) {
-          const wp = 1 - Math.max(0, fwActive.life / fwActive.duration);
+          const wSrc = isKoWarped ? koActive : fwActive;
+          const wp = 1 - Math.max(0, wSrc.life / wSrc.duration);
           const env = (1 - wp) * Math.cos(wp * Math.PI * 2.2);
-          const amt = env * 0.13;
+          const amt = env * (isKoWarped ? (koActive.targetIdx === i ? 0.16 : 0.11) : 0.13);
           ubuScaleX = 1 - amt;
           ubuScaleY = 1 + amt;
-          ubuWarpAngle = Math.atan2(fwActive.ny || 0, fwActive.nx || 1);
+          ubuWarpAngle = Math.atan2(wSrc.ny || 0, wSrc.nx || 1);
           view.ctx.save();
           view.ctx.translate(b.x, b.y);
           view.ctx.rotate(ubuWarpAngle);
@@ -2645,10 +2961,56 @@
         if (b.superActive === 'magnet') {
           const ball = view.bodies[6];
           const dx = b.x - ball.x, dy = b.y - ball.y;
-          if (dx * dx + dy * dy < 260 * 260) {
+          const distSq = dx * dx + dy * dy;
+          if (distSq < 260 * 260) {
+            const dist = Math.sqrt(distSq) || 1;
+            const closeness = Math.max(0, Math.min(1, 1 - dist / 260));
+            const ux = dx / dist, uy = dy / dist;
+            const px = -uy, py = ux;
+            const nowSec = isReducedMotion() ? 0 : clockNow() * 0.001;
             view.ctx.save();
             view.ctx.setLineDash([4, 6]);
-            line(b.x, b.y, ball.x, ball.y, '#3388ffcc', 2.5);
+            line(b.x, b.y, ball.x, ball.y, '#3388ffcc', 2.2 + closeness * 1.1);
+            view.ctx.setLineDash([]);
+            for (let side = -1; side <= 1; side += 2) {
+              const bow = side * (8 + 10 * closeness) * Math.sin(nowSec * 6 + side);
+              const mx = (ball.x + b.x) * 0.5 + px * bow;
+              const my = (ball.y + b.y) * 0.5 + py * bow;
+              view.ctx.beginPath();
+              view.ctx.moveTo(ball.x, ball.y);
+              if (typeof view.ctx.quadraticCurveTo === 'function') {
+                view.ctx.quadraticCurveTo(mx, my, b.x, b.y);
+              } else {
+                view.ctx.lineTo(b.x, b.y);
+              }
+              view.ctx.strokeStyle = side < 0 ? '#3388ff66' : '#ff334466';
+              view.ctx.lineWidth = 1.5;
+              view.ctx.stroke();
+            }
+            const chevCount = 4;
+            const pullAng = Math.atan2(dy, dx);
+            for (let c = 0; c < chevCount; c++) {
+              const t = ((c / chevCount) + nowSec * (1.8 + 1.4 * closeness)) % 1;
+              if (t < 0.12 || t > 0.88) continue;
+              const cx = ball.x + dx * t;
+              const cy = ball.y + dy * t;
+              const fade = Math.sin(t * Math.PI);
+              const span = 5.5 + 3.5 * (1 - t);
+              view.ctx.save();
+              view.ctx.translate(cx, cy);
+              view.ctx.rotate(pullAng);
+              view.ctx.beginPath();
+              view.ctx.moveTo(-span * 0.75, -span);
+              view.ctx.lineTo(span * 0.45, 0);
+              view.ctx.lineTo(-span * 0.75, span);
+              view.ctx.strokeStyle = c % 2 === 0 ? '#7ec8ff' : '#ff6b7a';
+              view.ctx.lineWidth = 2.1;
+              view.ctx.lineCap = 'round';
+              view.ctx.lineJoin = 'round';
+              view.ctx.globalAlpha = fade * (0.5 + 0.45 * closeness);
+              view.ctx.stroke();
+              view.ctx.restore();
+            }
             view.ctx.restore();
           }
         }

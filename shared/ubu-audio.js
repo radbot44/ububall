@@ -1722,15 +1722,18 @@
     const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
     const volume = Math.max(0.03, Math.min(1.0, options.volume ?? 0.42));
+    const speedNorm = Math.min(1, Math.max(0, (Number(options.speed) || 320) / 620));
+    const rimmed = Boolean(options.rimmed);
+    const pitchMul = 0.92 + 0.28 * speedNorm + (rimmed ? 0.08 : 0);
 
-    // 1. Restrained steel-blade edge shave sweep
+    // 1. Restrained steel-blade edge shave sweep (rises higher on fast corner rim-arounds)
     const spray = ctx.createBufferSource(), sprayFilter = ctx.createBiquadFilter(), sprayGain = ctx.createGain();
     spray.buffer = grainNoise(ctx);
     sprayFilter.type = 'bandpass';
-    sprayFilter.Q.setValueAtTime(1.6, now);
-    sprayFilter.frequency.setValueAtTime(1350, now);
-    sprayFilter.frequency.exponentialRampToValueAtTime(2350, now + 0.045);
-    sprayFilter.frequency.exponentialRampToValueAtTime(1050, now + 0.165);
+    sprayFilter.Q.setValueAtTime(rimmed ? 1.85 : 1.6, now);
+    sprayFilter.frequency.setValueAtTime(1350 * pitchMul, now);
+    sprayFilter.frequency.exponentialRampToValueAtTime((rimmed ? 2680 : 2350) * pitchMul, now + (rimmed ? 0.065 : 0.045));
+    sprayFilter.frequency.exponentialRampToValueAtTime((rimmed ? 1320 : 1050) * pitchMul, now + 0.165);
     sprayGain.gain.setValueAtTime(0.0001, now);
     sprayGain.gain.linearRampToValueAtTime(0.13 * volume, now + 0.012);
     sprayGain.gain.linearRampToValueAtTime(0.095 * volume, now + 0.05);
@@ -1740,21 +1743,21 @@
     spray.stop(now + 0.18);
 
     // 2. Soft shaved-ice snow spray
-    noiseGrain(ctx, dest, now + 0.006, 0.13, { freq: 2900, to: 1500, q: 1.0, level: 0.065 * volume });
+    noiseGrain(ctx, dest, now + 0.006, 0.13, { freq: 2900 * pitchMul, to: 1500 * pitchMul, q: 1.0, level: 0.065 * volume });
 
     // 3. Subtle ice-crystal shave texture in the initial bite
     for (let i = 0; i < 3; i++) {
       const t = now + i * 0.014 + Math.random() * 0.005;
       noiseGrain(ctx, dest, t, 0.014, {
-        freq: 1150 + i * 240 + Math.random() * 250,
-        to: 900 + i * 140,
+        freq: (1150 + i * 240 + Math.random() * 250) * pitchMul,
+        to: (900 + i * 140) * pitchMul,
         q: 2.6,
         level: (0.075 - i * 0.018) * volume
       });
     }
 
     // 4. Gentle low-mid skate pressure weight
-    noiseGrain(ctx, dest, now, 0.075, { freq: 420, to: 250, q: 2.2, level: 0.07 * volume });
+    noiseGrain(ctx, dest, now, 0.075, { freq: 420 * (0.95 + 0.15 * speedNorm), to: 250, q: 2.2, level: 0.07 * volume });
   }
 
   // Continuous tailgating wind: smooth overlapping rushing-air stream when triggered repeatedly
@@ -2222,10 +2225,16 @@
       const modGain = ctx.createGain();
       const gain = ctx.createGain();
 
+      const baseCarrier = 1650 * (1 + 0.14 * inflect);
+      const baseMod = 2780 * (1 + 0.18 * inflect);
       carrier.type = 'sine';
-      carrier.frequency.setValueAtTime(1650 * (1 + 0.14 * inflect), now);
+      carrier.frequency.setValueAtTime(baseCarrier, now);
+      if (inflect > 0.05) {
+        carrier.frequency.exponentialRampToValueAtTime(baseCarrier * (1 + 0.07 * inflect), now + 0.045);
+        carrier.frequency.exponentialRampToValueAtTime(baseCarrier * (1 + 0.02 * inflect), now + postDecay);
+      }
       mod.type = 'sine';
-      mod.frequency.setValueAtTime(2780 * (1 + 0.18 * inflect), now);
+      mod.frequency.setValueAtTime(baseMod, now);
 
       modGain.gain.setValueAtTime(900 + 350 * inflect, now);
       modGain.gain.exponentialRampToValueAtTime(0.1, now + 0.12 + 0.06 * inflect);
@@ -2240,6 +2249,22 @@
       mod.start(now);
       carrier.stop(now + postDecay + 0.02);
       mod.stop(now + postDecay + 0.02);
+
+      // Singing metallic "zing-ping" overtone shimmer when Post English spin bites
+      if (inflect > 0.1) {
+        const zing = ctx.createOscillator(), zingGain = ctx.createGain();
+        const zingFreq = 3520 * (1 + 0.12 * inflect);
+        const zingDecay = Math.min(postDecay, 0.18 + 0.10 * inflect);
+        zing.type = 'sine';
+        zing.frequency.setValueAtTime(zingFreq, now);
+        zing.frequency.exponentialRampToValueAtTime(zingFreq * (1 + 0.11 * inflect), now + 0.038);
+        zing.frequency.exponentialRampToValueAtTime(zingFreq * 0.99, now + zingDecay);
+        strike(zingGain, 0.18 * inflect * volume, now, now + zingDecay);
+        zing.connect(zingGain);
+        zingGain.connect(dest);
+        zing.start(now);
+        zing.stop(now + zingDecay + 0.02);
+      }
     } else {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -2260,7 +2285,7 @@
   const magnetTimes = new WeakMap();
   function playSuper(key, phase = key === 'magnet' ? 'pull' : 'impact', options = {}) {
     const phases = { stalwart: ['launch', 'impact'], knockout: ['impact'], sticky: ['impact'],
-      cannonball: ['impact'], magnet: ['pull'], colossus: ['launch'], shockwave: ['impact'], ghost: ['launch'] };
+      cannonball: ['impact'], magnet: ['pull'], colossus: ['launch'], shockwave: ['impact'], ghost: ['launch', 'phase'] };
     const silent = { stop() {} };
     if (!phases[key]?.includes(phase)) return silent;
     const volume = Number.isFinite(options.volume) ? Math.max(0, Math.min(1, options.volume)) : 0.8;
@@ -2376,10 +2401,12 @@
       noise(0, .7, .4, 'lowpass', 4200, 140, .7);
       tone('sine', 75, 30, .55, .5, .003);
     } else if (key === 'magnet') {
-      // A wobbling tractor beam: a hum with a slow vibrato (retriggered while it pulls).
-      const carrier = tone('sine', 220, 214, .24, .1, .035);
-      modulate(carrier, 'sine', 7, 22, .24);
-      tone('triangle', 330, 324, .24, .03, .035);
+      // A wobbling tractor beam: a hum with a slow vibrato that rises in pitch and pulse rate as the ball draws closer.
+      const closeness = Math.min(1, Math.max(0, Number(options.closeness) || 0));
+      const baseHz = 215 + 65 * closeness;
+      const carrier = tone('sine', baseHz, baseHz * (0.98 + 0.04 * closeness), .24, .1 + .035 * closeness, .035);
+      modulate(carrier, 'sine', 7 + 5 * closeness, 22 + 12 * closeness, .24);
+      tone('triangle', baseHz * 1.5, baseHz * 1.48, .24, .03 + .015 * closeness, .035);
     } else if (key === 'colossus') {
       // A thunderous titan awakening: sky-splitting lightning crack, audible low-brass/sub giant stomp,
       // and rolling multi-wave arena thunder rumble.
@@ -2404,10 +2431,18 @@
       modulate(r1, 'sine', 14, 18, .50, .018);
       modulate(r2, 'sine', 16, 24, .48, .024);
     } else if (key === 'ghost') {
-      // Like the magnet's beam, but faster and higher, drifting down as it fades.
-      const carrier = tone('sine', 700, 600, .7, .09, .05);
-      modulate(carrier, 'sine', 16, 55, .7);
-      tone('sine', 1050, 900, .7, .03, .06);
+      if (phase === 'phase') {
+        // Ectoplasmic pass-through shimmer when phasing through a blocker
+        const wisp = tone('sine', 880, 1320, .24, .075, .015);
+        modulate(wisp, 'sine', 22, 45, .24);
+        tone('triangle', 1320, 990, .22, .04, .02);
+        noise(0, .18, .09, 'bandpass', 1650, 2800, 2.8, .01);
+      } else {
+        // Like the magnet's beam, but faster and higher, drifting down as it fades.
+        const carrier = tone('sine', 700, 600, .7, .09, .05);
+        modulate(carrier, 'sine', 16, 55, .7);
+        tone('sine', 1050, 900, .7, .03, .06);
+      }
     }
     superPlayback.add(handle);
     return handle;

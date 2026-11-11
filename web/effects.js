@@ -301,12 +301,12 @@
         },
         {
           id: 'corner-carve',
-          title: 'Corner Rim-Around (Skate Edge Carve)',
+          title: 'Corner Rim-Around (Skate Edge Carve & Rooster-Tail Spray)',
           when: 'Skater skims a 100 px curved corner arc (`vn <= 190`, `|vt| >= 150`) with co-rotating spin (`rimmed = true`).',
-          visual: 'Fine ice-mist spray (`#e8f7ff` / `#ffffff`), curved corner skid mark, and the shared ice-hockey hard-brake edge shave sound.',
-          soundLabel: 'Play ice brake',
+          visual: 'Curved rooster-tail sheet of ice crystals & streak shards (`#9be7ff` / `#e8f7ff` / `#ffffff`) fanning backward and inward along the skate edge, stronger curved corner gouge, and speed-pitched edge-bite carve sound.',
+          soundLabel: 'Play edge-bite carve',
           duration: 2.4,
-          playSound: ctx => ctx.audio()?.playCarve({ volume: 0.5 }),
+          playSound: ctx => ctx.audio()?.playCarve({ volume: 0.55, speed: 500, rimmed: true }),
           run: ctx => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
             // Top-left corner (center 160,160, radius 100): moving left along top wall (vt > 0 -> negative omega co-rotates)
@@ -497,10 +497,10 @@
         },
         {
           id: 'post-ping',
-          title: 'Goalpost Ring, Flash Ping & Post English',
+          title: 'Goalpost Ring, Post Shiver & Post English Zing-Ping',
           when: 'Fast spinning shot strikes a goalpost (`wallType === "post"`, >=300 px/s triggers 40ms hit-stop).',
-          visual: 'Expanding post flash ring (`pings`), 8 gold/white metallic sparks (`#ffd76b`), 40ms hit-stop + shake, and 1.45x Post English bite.',
-          soundLabel: 'Play post ring',
+          visual: 'High-frequency damped goalpost shiver (`pings`), dual expanding metallic rings (`#ffffff` / `#ffd76b`), spinning Post English crescent flare, 12 directional gold/white metallic streak sparks, 40ms hit-stop + shake, 1.45x Post English bite, and upward-inflected metallic zing-ping.',
+          soundLabel: 'Play post zing-ping',
           duration: 2.4,
           playSound: ctx => ctx.audio()?.playGoalHit('post', { volume: 1.0, spin: 20, speed: 560 }),
           run: ctx => {
@@ -513,9 +513,9 @@
         },
         {
           id: 'net-ripple',
-          title: 'Goal Net Mesh Ripple',
-          when: 'Ball or skater hits the exterior/back goal net (`wallType === "net"`).',
-          visual: 'Team-colored outward ripple along `NET_RUNS` + contact sparks.',
+          title: 'Goal Net Mesh Tension & Ripple',
+          when: 'Ball or skater hits the exterior/back goal net (`wallType === "net"`) or scores into the net pocket (`goalPocket`).',
+          visual: 'Wider team-colored elastic mesh ripple along `NET_RUNS` + contact sparks on exterior hits, and full-pocket mesh billow with white tension highlight on goals.',
           soundLabel: 'Play net thud',
           duration: 2.2,
           playSound: ctx => ctx.audio()?.playGoalHit('net', { volume: 0.9 }),
@@ -528,12 +528,13 @@
         },
         {
           id: 'fireball-burn',
-          title: 'Ball Heat Stages, Fireball, Ice Burn & Meteor Bank',
-          when: 'Ball pace crosses 540 (orange) -> 720 (red + sparks) -> 800 (red-hot) -> 840+ on fire (`sparkBall`, `burnIce`).',
-          visual: 'Glowing heated ball, ember sparks, additive flames, team-colored ball face, scorched ice burn ribbon, elastic Meteor Bank, and goal threat glow.',
+          title: 'Ball Heat Stages, Ignition Burst, Ice Burn & Meteor Bank',
+          when: 'Ball pace crosses 540 (orange) -> 720 (red + sparks) -> 800 (red-hot) -> 840+ on fire (`sparkBall` ignition burst, `burnIce`, `r.meteor` board scorch).',
+          visual: 'Mid-flight ignition shockwave rings, flash, ember streaks & ignition whoof at 60 heat ticks; glowing fireball, additive flames, scorched ice burn ribbon, and Meteor Bank board flex with glowing `#ff6a1a`/`#fff2b2` char, heat-mirage warp & tangential ember streaks.',
           soundLabel: 'Play fire sizzle (1.5s)',
           variants: [
             { id: 'fire', label: 'Full Fireball + Meteor Bank' },
+            { id: 'ignite', label: 'Mid-Flight Ignition (60 Ticks)' },
             { id: 'redhot', label: 'Red-Hot (820 px/s)' },
             { id: 'red', label: 'Red + Sparks (750 px/s)' },
             { id: 'orange', label: 'Orange Glow (600 px/s)' }
@@ -551,6 +552,11 @@
               ctx.place(6, 180, 260, { vx: 735, vy: 110, pace: 750 });
             } else if (variant === 'redhot') {
               ctx.place(6, 180, 260, { vx: 805, vy: 120, pace: 820 });
+            } else if (variant === 'ignite') {
+              ctx.place(6, 220, 290, {
+                vx: 920, vy: -120, omega: 12,
+                onFire: false, fireTicks: 48, pace: 930, strikerPower: 1.35, strikerTeam: 0, strikerSlot: 0
+              });
             } else {
               ctx.place(6, 290, 150, {
                 vx: 820, vy: -480, omega: 10,
@@ -726,9 +732,9 @@
         },
         {
           id: 'super-knockout',
-          title: '01 · Knockout (Heavyweight POW & Stunned State)',
+          title: '01 · Knockout (Heavyweight POW, Directional Shock-Cone & Stunned State)',
           when: 'Touching an opposing skater while Knockout is active (`handleSuper("knockout", "impact")`).',
-          visual: 'Crimson & pink aura (`#ee2b47` / `#ff7197`), heavyweight arcade POW punch, crimson impact burst, and target dimmed with `💫` stun stars.',
+          visual: 'Crimson & pink aura (`#ee2b47` / `#ff7197`), heavyweight arcade POW punch, damped squash-and-stretch KO warp on attacker & target, directional crimson shock-cone & blow-through streak shards behind the target, and target dimmed with `💫` stun stars.',
           soundLabel: 'Play knockout POW',
           duration: 2.5,
           playSound: ctx => ctx.audio()?.playSuper('knockout', 'impact'),
@@ -789,12 +795,12 @@
         },
         {
           id: 'super-magnet',
-          title: '04 · Magnet (Tractor Beam Pull)',
+          title: '04 · Magnet (Tractor Beam & Flowing Polarity Chevrons)',
           when: 'Ball enters 190 px of an active Magnet skater (`handleSuper("magnet", "pull")`).',
-          visual: 'Blue & red polarity aura (`#3388ff` / `#ff3344`) and dashed `#3388ffcc` tractor-beam tether bending the ball inward.',
+          visual: 'Blue & red polarity aura (`#3388ff` / `#ff3344`), dual bowed field lines, animated inward-flowing polarity chevrons (`#7ec8ff` / `#ff6b7a`), and proximity-pitched tractor-beam hum.',
           soundLabel: 'Play magnet beam',
           duration: 2.8,
-          playSound: ctx => ctx.audio()?.playSuper('magnet', 'pull'),
+          playSound: ctx => ctx.audio()?.playSuper('magnet', 'pull', { closeness: 0.8 }),
           run: ctx => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
             ctx.equipSuper(0, 4);
@@ -852,12 +858,16 @@
         },
         {
           id: 'super-ghost',
-          title: '07 · Ghost (Translucent Phase Shift)',
-          when: 'Launching with Ghost armed (`handleSuper("ghost", "launch")`) to phase through opponents.',
-          visual: 'Cyan & alabaster aura (`#33e0ff` / `#f8f6f2`) and 45%-opacity body skating straight through blockers to hit the ball.',
+          title: '07 · Ghost (Translucent Phase Shift & Ectoplasmic Pass-Through)',
+          when: 'Launching with Ghost armed (`handleSuper("ghost", "launch")`) and phasing through opposing skaters (`playSuper("ghost", "phase")`).',
+          visual: 'Cyan & alabaster aura (`#33e0ff` / `#f8f6f2`), 45%-opacity body skating straight through blockers, and an ectoplasmic phase ripple + airy shimmer wisp as the Ghost passes through each defender.',
           soundLabel: 'Play ghost shimmer',
+          variants: [
+            { id: 'launch', label: 'Phase Through Blockers' },
+            { id: 'phase-sfx', label: 'Sound: Pass-Through Wisp' }
+          ],
           duration: 2.6,
-          playSound: ctx => ctx.audio()?.playSuper('ghost', 'launch'),
+          playSound: (ctx, variant) => ctx.audio()?.playSuper('ghost', variant === 'phase-sfx' ? 'phase' : 'launch'),
           run: ctx => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
             ctx.equipSuper(0, 7);
@@ -983,9 +993,9 @@
       items: [
         {
           id: 'goal-celebration',
-          title: 'Goal Light Sweep, Fireworks, Call Banner & Fanfare',
+          title: 'Goal Light Sweep, Scorer Spotlight, Fireworks & Fanfare',
           when: 'Ball crosses a goal line (`celebrate`, `drawGoalSweep`, `drawGoalCall`, `playFanfare`, `playFirework`).',
-          visual: '200ms hit-stop + double shake, sweeping light band, 9 comet-tailed peony/ring firework shells with core flashes, glowing star tails, strobe micro-sparks & crisp pyrotechnic crackles, scorer double-ring & portrait call.',
+          visual: '200ms hit-stop + double shake, full-pocket goal net mesh billow, sweeping light band with subtle arena dim & radial scorer spotlight, 9 comet-tailed peony/ring firework shells with core flashes, glowing star tails, strobe micro-sparks & crisp pyrotechnic crackles, scorer double-ring & portrait call.',
           soundLabel: 'Play goal fanfare',
           variants: GOAL_CALL_VARIANTS,
           duration: 4.5,
@@ -2040,7 +2050,7 @@
       if (paused || doc.hidden) return false;
       if (autoLoop && activeDemo) return true;
       if (phase !== 'plan' || postGoal || goalReplay || timedCallbacks.length) return true;
-      if (fx.kickoffGlow > 0 || fx.fireWarp || fx.particles.length || fx.shockwaves.length || fx.skids.length || fx.burns.length || fx.pings?.length || fx.popups?.length) return true;
+      if (fx.kickoffGlow > 0 || fx.fireWarp || fx.koWarp || fx.particles.length || fx.shockwaves.length || fx.skids.length || fx.burns.length || fx.pings?.length || fx.popups?.length) return true;
       if (fouls.crease.some(Boolean) || presenter.stalling(fouls)) return true;
       if (activeDemo) return true;
       return false;

@@ -3111,7 +3111,7 @@
     }
     if ((goalReplay && !demo) || !replaySkip.hidden) updateReplaySkip(goalReplay);
     if (!active) { lastTime = 0; accumulator = 0; }
-    const hadEffects = fieldEffects.particles.length || fieldEffects.fireworks.length || fieldEffects.trails.some(trail => trail.length) || fieldEffects.shockwaves.length || fieldEffects.goalCall || fieldEffects.fireWarp ||
+    const hadEffects = fieldEffects.particles.length || fieldEffects.fireworks.length || fieldEffects.trails.some(trail => trail.length) || fieldEffects.shockwaves.length || fieldEffects.goalCall || fieldEffects.fireWarp || fieldEffects.koWarp ||
       fieldEffects.ripples.length || fieldEffects.pings.length || fieldEffects.popups.length || fieldEffects.kickoffGlow || fieldEffects.goalSweep || fieldEffects.danger[0] > .02 || fieldEffects.danger[1] > .02;
     // Effects pause with the replay viewer, and in Pulse mode when time freezes between turns.
     const pulseFrozen = pulseMode() && roundTurns > 0 && (phase === 'plan' || phase === 'cpu-wait' || phase === 'waiting');

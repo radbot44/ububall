@@ -2248,7 +2248,7 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
 
   const makeMockCtx2d = () => ({
     save() {}, restore() {}, setTransform() {}, clearRect() {}, beginPath() {}, closePath() {},
-    moveTo() {}, lineTo() {}, arc() {}, rect() {}, roundRect() {}, clip() {}, fill() {}, stroke() {},
+    moveTo() {}, lineTo() {}, quadraticCurveTo() {}, bezierCurveTo() {}, arc() {}, rect() {}, roundRect() {}, clip() {}, fill() {}, stroke() {},
     fillRect() {}, fillText() {}, strokeText() {}, translate() {}, rotate() {}, scale() {},
     setLineDash() {}, drawImage() {}, getTransform: () => ({ a: 1 }),
     createLinearGradient: () => ({ addColorStop() {} }),
