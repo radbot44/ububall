@@ -620,8 +620,42 @@
 
   // Active playback tracker for stop()
   let activePlayback = null;
+  const motionLoops = new WeakMap();
+  const activeMotionContexts = new Set();
+
+  function isOfflineContext(ctx) {
+    return (typeof OfflineAudioContext !== 'undefined' && ctx instanceof OfflineAudioContext) ||
+      ctx?.constructor?.name === 'OfflineAudioContext';
+  }
+
+  function currentLoopGain(entry, now) {
+    if (now <= entry.t0) return entry.g0;
+    if (now <= entry.tPeak) {
+      const span = entry.tPeak - entry.t0;
+      return span > 0 ? entry.g0 + (entry.gPeak - entry.g0) * ((now - entry.t0) / span) : entry.gPeak;
+    }
+    if (now < entry.tZero) {
+      const span = entry.tZero - entry.tPeak;
+      return span > 0 ? entry.gPeak * (1 - (now - entry.tPeak) / span) : 0;
+    }
+    return 0;
+  }
+
+  function stopMotion(customCtx = null) {
+    if (customCtx) {
+      const map = motionLoops.get(customCtx);
+      if (map) for (const entry of [...map.values()]) entry.stop();
+      return;
+    }
+    for (const ctx of [...activeMotionContexts]) {
+      const map = motionLoops.get(ctx);
+      if (map) for (const entry of [...map.values()]) entry.stop();
+      activeMotionContexts.delete(ctx);
+    }
+  }
 
   function stopAll() {
+    stopMotion();
     for (const handle of superPlayback) handle.stop();
     if (activePlayback) {
       activePlayback.stop();
@@ -988,66 +1022,616 @@
     return handle;
   }
 
-  // Skate edge carving a curved corner: a brief (~85 ms), soft band-passed ice scrape.
+  // Smoothly crossfaded filtered noise grain for continuous wind and puck-on-ice glides.
+  function smoothNoise(ctx, dest, start, length, { freq, mid = freq, to = freq, q = 1.4, level, type = 'bandpass', pan = 0 }) {
+    const source = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    source.buffer = grainNoise(ctx);
+    if (length > 0.75) source.loop = true;
+    filter.type = type;
+    filter.Q.setValueAtTime(q, start);
+    filter.frequency.setValueAtTime(freq, start);
+    if (mid !== freq) filter.frequency.exponentialRampToValueAtTime(mid, start + length * 0.45);
+    if (to !== mid) filter.frequency.exponentialRampToValueAtTime(to, start + length);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.linearRampToValueAtTime(level, start + length * 0.45);
+    gain.gain.linearRampToValueAtTime(0.0001, start + length);
+    source.connect(filter);
+    filter.connect(gain);
+    let out = gain;
+    if (pan && ctx.createStereoPanner) {
+      out = ctx.createStereoPanner();
+      out.pan.setValueAtTime(pan, start);
+      gain.connect(out);
+    }
+    out.connect(dest);
+    source.start(start, Math.random() * 0.75);
+    source.stop(start + length + 0.02);
+    return source;
+  }
+
+  // Subtle moving-ubu wobble: pitch and loudness rise slightly with speed, while size lowers resonant
+  // pitch & slows wobble rate, and mass deepens FM excursion & low-mid harmonic warmth. Kept light so
+  // all 6 skaters can move simultaneously without muddying the mix.
+  function ubuMoveParams(speed, mass, radius, slot, volume) {
+    const s = Math.min(1, Math.max(0, (speed - 28) / 620));
+    const sizeRatio = Math.max(0.6, Math.min(2.4, (radius || 25) / 25));
+    const massRatio = Math.max(0.75, Math.min(2.2, (mass || 3) / 3));
+    const slotDetune = 1 + (((slot | 0) % 6) - 2.5) * 0.011;
+    const freq = (162 + 64 * s) * Math.pow(sizeRatio, -0.58) * Math.pow(massRatio, -0.22) * slotDetune;
+    const wobbleHz = (5.2 + 5.0 * s) * Math.pow(sizeRatio, -0.42);
+    const wobbleDepth = freq * (0.032 + 0.024 * s) * Math.pow(massRatio, 0.55) * Math.pow(sizeRatio, 0.22);
+    const cutoff = Math.min(2200, freq * (1.85 + 1.25 * Math.min(1.65, massRatio) + 0.85 * s));
+    const q = 1.15 + 0.85 * Math.max(0, Math.min(1.2, massRatio - 0.75));
+    const weightScale = 0.86 + 0.18 * Math.min(1.8, (massRatio + sizeRatio) * 0.5);
+    const level = (0.012 + 0.024 * Math.pow(s, 0.85)) * weightScale * Math.max(0, Math.min(1.5, volume));
+    return { freq, wobbleHz, wobbleDepth, cutoff, q, level };
+  }
+
+  function playUbuMove(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return { stop() {} };
+    const speed = Number(options.speed ?? 420);
+    const mass = Number(options.mass ?? 3);
+    const radius = Number(options.radius ?? 25);
+    const slot = options.slot ?? (typeof options.id === 'number' ? options.id : 0);
+    const volume = options.volume ?? 1;
+
+    if (options.id !== undefined && options.id !== null) {
+      const loopKey = 'move:' + options.id;
+      let map = motionLoops.get(ctx);
+      if (speed <= 28 || volume <= 0) {
+        map?.get(loopKey)?.stop();
+        return { stop() {} };
+      }
+      if (!map) { map = new Map(); motionLoops.set(ctx, map); }
+      activeMotionContexts.add(ctx);
+      const now = ctx.currentTime;
+      const p = ubuMoveParams(speed, mass, radius, slot, volume);
+      let entry = map.get(loopKey);
+      if (!entry || entry.stopped) {
+        const cleanup = [], master = createMasterChain(ctx, cleanup);
+        const osc = ctx.createOscillator(), lfo = ctx.createOscillator(), lfoGain = ctx.createGain();
+        const filter = ctx.createBiquadFilter(), outGain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(p.freq, now);
+        lfo.type = 'sine';
+        lfo.frequency.setValueAtTime(p.wobbleHz, now);
+        lfoGain.gain.setValueAtTime(p.wobbleDepth, now);
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(p.cutoff, now);
+        filter.Q.setValueAtTime(p.q, now);
+        outGain.gain.setValueAtTime(0, now);
+        lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
+        osc.connect(filter); filter.connect(outGain); outGain.connect(master);
+        osc.onended = () => {
+          for (const n of [osc, lfo, lfoGain, filter, outGain, ...cleanup]) { try { n.disconnect(); } catch {} }
+        };
+        osc.start(now); lfo.start(now);
+        entry = {
+          stopped: false, timer: null, sources: [osc, lfo], osc, lfo, lfoGain, filter, outGain,
+          freq: p.freq, wobbleHz: p.wobbleHz, wobbleDepth: p.wobbleDepth, cutoff: p.cutoff,
+          t0: now, g0: 0, tPeak: now, gPeak: 0, tZero: now,
+          stop() {
+            if (entry.stopped) return;
+            entry.stopped = true;
+            if (entry.timer) clearTimeout(entry.timer);
+            map.delete(loopKey);
+            if (!map.size) activeMotionContexts.delete(ctx);
+            try {
+              const t = ctx.currentTime, g = currentLoopGain(entry, t);
+              outGain.gain.cancelScheduledValues(t);
+              outGain.gain.setValueAtTime(g, t);
+              outGain.gain.linearRampToValueAtTime(0, t + 0.025);
+              osc.stop(t + 0.03); lfo.stop(t + 0.03);
+            } catch {}
+          }
+        };
+        map.set(loopKey, entry);
+      } else {
+        const rampEnd = now + 0.04;
+        entry.osc.frequency.cancelScheduledValues(now);
+        entry.osc.frequency.setValueAtTime(entry.freq, now);
+        entry.osc.frequency.linearRampToValueAtTime(p.freq, rampEnd);
+        entry.lfo.frequency.cancelScheduledValues(now);
+        entry.lfo.frequency.setValueAtTime(entry.wobbleHz, now);
+        entry.lfo.frequency.linearRampToValueAtTime(p.wobbleHz, rampEnd);
+        entry.lfoGain.gain.cancelScheduledValues(now);
+        entry.lfoGain.gain.setValueAtTime(entry.wobbleDepth, now);
+        entry.lfoGain.gain.linearRampToValueAtTime(p.wobbleDepth, rampEnd);
+        entry.filter.frequency.cancelScheduledValues(now);
+        entry.filter.frequency.setValueAtTime(entry.cutoff, now);
+        entry.filter.frequency.linearRampToValueAtTime(p.cutoff, rampEnd);
+        entry.filter.Q.setValueAtTime(p.q, now);
+        entry.freq = p.freq; entry.wobbleHz = p.wobbleHz;
+        entry.wobbleDepth = p.wobbleDepth; entry.cutoff = p.cutoff;
+      }
+      const cur = currentLoopGain(entry, now), tPeak = now + 0.035, tZero = now + 0.16;
+      entry.outGain.gain.cancelScheduledValues(now);
+      entry.outGain.gain.setValueAtTime(cur, now);
+      entry.outGain.gain.linearRampToValueAtTime(p.level, tPeak);
+      entry.outGain.gain.linearRampToValueAtTime(0, tZero);
+      entry.t0 = now; entry.g0 = cur; entry.tPeak = tPeak; entry.gPeak = p.level; entry.tZero = tZero;
+      if (!isOfflineContext(ctx)) {
+        if (entry.timer) clearTimeout(entry.timer);
+        entry.timer = setTimeout(() => entry.stop(), 220);
+      }
+      return { stop: () => entry.stop() };
+    }
+
+    // Standalone one-shot audition (e.g. Effects Demo button or direct test)
+    const duration = Math.max(0.18, Math.min(2.5, Number(options.duration) || 0.85));
+    const master = createMasterChain(ctx, null, duration + 0.06);
+    const now = ctx.currentTime;
+    const pLow = ubuMoveParams(Math.max(90, speed * 0.55), mass, radius, slot, volume);
+    const pPeak = ubuMoveParams(speed, mass, radius, slot, volume);
+    const osc = ctx.createOscillator(), lfo = ctx.createOscillator(), lfoGain = ctx.createGain();
+    const filter = ctx.createBiquadFilter(), outGain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(pLow.freq, now);
+    osc.frequency.linearRampToValueAtTime(pPeak.freq, now + duration * 0.45);
+    osc.frequency.linearRampToValueAtTime(pLow.freq, now + duration);
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(pLow.wobbleHz, now);
+    lfo.frequency.linearRampToValueAtTime(pPeak.wobbleHz, now + duration * 0.45);
+    lfo.frequency.linearRampToValueAtTime(pLow.wobbleHz, now + duration);
+    lfoGain.gain.setValueAtTime(pPeak.wobbleDepth, now);
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(pPeak.cutoff, now);
+    filter.Q.setValueAtTime(pPeak.q, now);
+    // Audition plays a touch clearer than a single background skater while keeping exact timbre
+    const previewBoost = options.preview ? 2.4 : 1.8;
+    outGain.gain.setValueAtTime(0.0001, now);
+    outGain.gain.linearRampToValueAtTime(Math.min(0.22, pPeak.level * previewBoost), now + Math.min(0.08, duration * 0.2));
+    outGain.gain.linearRampToValueAtTime(Math.min(0.18, pPeak.level * previewBoost * 0.8), now + duration * 0.72);
+    outGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
+    osc.connect(filter); filter.connect(outGain); outGain.connect(master);
+    osc.start(now); lfo.start(now);
+    osc.stop(now + duration + 0.02); lfo.stop(now + duration + 0.02);
+    return {
+      stop() {
+        try {
+          outGain.gain.cancelScheduledValues(ctx.currentTime);
+          outGain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.015);
+          osc.stop(ctx.currentTime + 0.02); lfo.stop(ctx.currentTime + 0.02);
+        } catch {}
+      }
+    };
+  }
+
+  // Spinning ubu wobble: related to the movement wobble, but pitched in an airier upper register
+  // with a fifth-harmonic gyroscopic shimmer and faster rotational swirl so spinning stands out.
+  function ubuSpinParams(omega, radius, slot, volume) {
+    const absSpin = Math.abs(omega || 0);
+    const p = Math.min(1, Math.max(0, (absSpin - 2.5) / 18));
+    const sizeRatio = Math.max(0.6, Math.min(2.4, (radius || 25) / 25));
+    const slotDetune = 1 + (((slot | 0) % 6) - 2.5) * 0.009;
+    const freq = (290 + 155 * p) * Math.pow(sizeRatio, -0.45) * slotDetune;
+    const swirlHz = (8.8 + 10.2 * p) * Math.pow(sizeRatio, -0.3);
+    const swirlDepth = freq * (0.045 + 0.028 * p);
+    const bandFreq = Math.min(3400, freq * (1.45 + 0.35 * p));
+    const level = (0.012 + 0.026 * Math.pow(p, 0.85)) * Math.max(0, Math.min(1.5, volume));
+    return { freq, swirlHz, swirlDepth, bandFreq, level };
+  }
+
+  function playSpin(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return { stop() {} };
+    const omega = Number(options.omega ?? 14);
+    const radius = Number(options.radius ?? 25);
+    const slot = options.slot ?? (typeof options.id === 'number' ? options.id : 0);
+    const volume = options.volume ?? 1;
+
+    if (options.id !== undefined && options.id !== null) {
+      const loopKey = 'spin:' + options.id;
+      let map = motionLoops.get(ctx);
+      if (Math.abs(omega) < 2.5 || volume <= 0) {
+        map?.get(loopKey)?.stop();
+        return { stop() {} };
+      }
+      if (!map) { map = new Map(); motionLoops.set(ctx, map); }
+      activeMotionContexts.add(ctx);
+      const now = ctx.currentTime;
+      const p = ubuSpinParams(omega, radius, slot, volume);
+      let entry = map.get(loopKey);
+      if (!entry || entry.stopped) {
+        const cleanup = [], master = createMasterChain(ctx, cleanup);
+        const osc1 = ctx.createOscillator(), osc2 = ctx.createOscillator(), g2 = ctx.createGain();
+        const lfo = ctx.createOscillator(), lfoGain = ctx.createGain(), filterLfo = ctx.createGain();
+        const filter = ctx.createBiquadFilter(), outGain = ctx.createGain();
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(p.freq, now);
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(p.freq * 1.5, now);
+        g2.gain.setValueAtTime(0.36, now);
+        lfo.type = 'sine';
+        lfo.frequency.setValueAtTime(p.swirlHz, now);
+        lfoGain.gain.setValueAtTime(p.swirlDepth, now);
+        filterLfo.gain.setValueAtTime(p.freq * 0.3, now);
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(p.bandFreq, now);
+        filter.Q.setValueAtTime(2.1, now);
+        outGain.gain.setValueAtTime(0, now);
+        lfo.connect(lfoGain); lfoGain.connect(osc1.frequency); lfoGain.connect(osc2.frequency);
+        lfo.connect(filterLfo); filterLfo.connect(filter.frequency);
+        osc1.connect(filter); osc2.connect(g2); g2.connect(filter);
+        filter.connect(outGain); outGain.connect(master);
+        osc1.onended = () => {
+          for (const n of [osc1, osc2, g2, lfo, lfoGain, filterLfo, filter, outGain, ...cleanup]) { try { n.disconnect(); } catch {} }
+        };
+        osc1.start(now); osc2.start(now); lfo.start(now);
+        entry = {
+          stopped: false, timer: null, sources: [osc1, osc2, lfo], osc1, osc2, lfo, lfoGain, filterLfo, filter, outGain,
+          freq: p.freq, swirlHz: p.swirlHz, swirlDepth: p.swirlDepth, bandFreq: p.bandFreq,
+          t0: now, g0: 0, tPeak: now, gPeak: 0, tZero: now,
+          stop() {
+            if (entry.stopped) return;
+            entry.stopped = true;
+            if (entry.timer) clearTimeout(entry.timer);
+            map.delete(loopKey);
+            if (!map.size) activeMotionContexts.delete(ctx);
+            try {
+              const t = ctx.currentTime, g = currentLoopGain(entry, t);
+              outGain.gain.cancelScheduledValues(t);
+              outGain.gain.setValueAtTime(g, t);
+              outGain.gain.linearRampToValueAtTime(0, t + 0.025);
+              osc1.stop(t + 0.03); osc2.stop(t + 0.03); lfo.stop(t + 0.03);
+            } catch {}
+          }
+        };
+        map.set(loopKey, entry);
+      } else {
+        const rampEnd = now + 0.04;
+        entry.osc1.frequency.cancelScheduledValues(now);
+        entry.osc1.frequency.setValueAtTime(entry.freq, now);
+        entry.osc1.frequency.linearRampToValueAtTime(p.freq, rampEnd);
+        entry.osc2.frequency.cancelScheduledValues(now);
+        entry.osc2.frequency.setValueAtTime(entry.freq * 1.5, now);
+        entry.osc2.frequency.linearRampToValueAtTime(p.freq * 1.5, rampEnd);
+        entry.lfo.frequency.cancelScheduledValues(now);
+        entry.lfo.frequency.setValueAtTime(entry.swirlHz, now);
+        entry.lfo.frequency.linearRampToValueAtTime(p.swirlHz, rampEnd);
+        entry.lfoGain.gain.cancelScheduledValues(now);
+        entry.lfoGain.gain.setValueAtTime(entry.swirlDepth, now);
+        entry.lfoGain.gain.linearRampToValueAtTime(p.swirlDepth, rampEnd);
+        entry.filterLfo.gain.setValueAtTime(p.freq * 0.3, now);
+        entry.filter.frequency.cancelScheduledValues(now);
+        entry.filter.frequency.setValueAtTime(entry.bandFreq, now);
+        entry.filter.frequency.linearRampToValueAtTime(p.bandFreq, rampEnd);
+        entry.freq = p.freq; entry.swirlHz = p.swirlHz;
+        entry.swirlDepth = p.swirlDepth; entry.bandFreq = p.bandFreq;
+      }
+      const cur = currentLoopGain(entry, now), tPeak = now + 0.035, tZero = now + 0.16;
+      entry.outGain.gain.cancelScheduledValues(now);
+      entry.outGain.gain.setValueAtTime(cur, now);
+      entry.outGain.gain.linearRampToValueAtTime(p.level, tPeak);
+      entry.outGain.gain.linearRampToValueAtTime(0, tZero);
+      entry.t0 = now; entry.g0 = cur; entry.tPeak = tPeak; entry.gPeak = p.level; entry.tZero = tZero;
+      if (!isOfflineContext(ctx)) {
+        if (entry.timer) clearTimeout(entry.timer);
+        entry.timer = setTimeout(() => entry.stop(), 220);
+      }
+      return { stop: () => entry.stop() };
+    }
+
+    // Standalone one-shot spin wobble audition
+    const duration = Math.max(0.18, Math.min(2.5, Number(options.duration) || 0.85));
+    const master = createMasterChain(ctx, null, duration + 0.06);
+    const now = ctx.currentTime;
+    const pPeak = ubuSpinParams(omega, radius, slot, volume);
+    const pTail = ubuSpinParams(Math.max(4, Math.abs(omega) * 0.45), radius, slot, volume);
+    const osc1 = ctx.createOscillator(), osc2 = ctx.createOscillator(), g2 = ctx.createGain();
+    const lfo = ctx.createOscillator(), lfoGain = ctx.createGain(), filter = ctx.createBiquadFilter(), outGain = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(pPeak.freq, now);
+    osc1.frequency.linearRampToValueAtTime(pTail.freq, now + duration);
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(pPeak.freq * 1.5, now);
+    osc2.frequency.linearRampToValueAtTime(pTail.freq * 1.5, now + duration);
+    g2.gain.setValueAtTime(0.36, now);
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(pPeak.swirlHz, now);
+    lfo.frequency.linearRampToValueAtTime(pTail.swirlHz, now + duration);
+    lfoGain.gain.setValueAtTime(pPeak.swirlDepth, now);
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(pPeak.bandFreq, now);
+    filter.Q.setValueAtTime(2.1, now);
+    const previewBoost = options.preview ? 2.4 : 1.9;
+    outGain.gain.setValueAtTime(0.0001, now);
+    outGain.gain.linearRampToValueAtTime(Math.min(0.22, pPeak.level * previewBoost), now + Math.min(0.06, duration * 0.18));
+    outGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    lfo.connect(lfoGain); lfoGain.connect(osc1.frequency); lfoGain.connect(osc2.frequency);
+    osc1.connect(filter); osc2.connect(g2); g2.connect(filter);
+    filter.connect(outGain); outGain.connect(master);
+    osc1.start(now); osc2.start(now); lfo.start(now);
+    osc1.stop(now + duration + 0.02); osc2.stop(now + duration + 0.02); lfo.stop(now + duration + 0.02);
+    return {
+      stop() {
+        try {
+          outGain.gain.cancelScheduledValues(ctx.currentTime);
+          outGain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.015);
+          osc1.stop(ctx.currentTime + 0.02); osc2.stop(ctx.currentTime + 0.02); lfo.stop(ctx.currentTime + 0.02);
+        } catch {}
+      }
+    };
+  }
+
+  // Hockey puck sliding on ice: crisp high-mid ice-grain hiss layered over a subtle vulcanized-rubber
+  // low-mid scrape resonance. Overlapping 180 ms grains create a continuous glide during play.
+  function playPuckSlide(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const speed = Number(options.speed ?? 480);
+    if (speed < 28) return;
+    const duration = Math.max(0.1, Math.min(2.0, Number(options.duration) || 0.18));
+    const master = createMasterChain(ctx, null, duration + 0.05);
+    const now = ctx.currentTime;
+    const s = Math.min(1, Math.max(0, (speed - 28) / 720));
+    const spinShare = Math.min(1, Math.abs(options.spin || 0) / 20);
+    const volume = Math.max(0.04, Math.min(1.2, options.volume ?? 1.0));
+    const pan = Math.max(-0.7, Math.min(0.7, Number(options.pan) || 0));
+    const iceFreq = 2450 + 1850 * s + 320 * spinShare;
+    const bodyFreq = 860 + 480 * s;
+    const boost = duration > 0.4 ? 1.5 : 1.0;
+    smoothNoise(ctx, master, now, duration, {
+      freq: iceFreq * 0.92, mid: iceFreq * 1.05, to: iceFreq * 0.86,
+      q: 1.75, level: (0.016 + 0.052 * Math.pow(s, 0.85)) * volume * boost, pan
+    });
+    smoothNoise(ctx, master, now, duration, {
+      freq: bodyFreq, mid: bodyFreq * 1.08, to: bodyFreq * 0.9,
+      q: 3.1, level: (0.008 + 0.024 * Math.pow(s, 0.85)) * volume * boost, pan
+    });
+  }
+
+  // Ice hockey hard brake & corner rim-around skate shave: crisp steel-edge bite, gritty shaved-ice
+  // crystals, and a snow-shower spray wash (~220 ms).
   function playCarve(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.11);
+    const master = createMasterChain(ctx, null, 0.25);
     const now = ctx.currentTime;
-    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.55));
-    noiseGrain(ctx, master, now, 0.085, { freq: 2400, to: 3800, q: 2.6, level: 0.22 * volume });
-    blip(ctx, master, now, 0.075, 1350, 1650, 0.045 * volume);
+    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.65));
+
+    // 1. Primary steel-blade edge dig & snow spray sweep
+    const spray = ctx.createBufferSource(), sprayFilter = ctx.createBiquadFilter(), sprayGain = ctx.createGain();
+    spray.buffer = grainNoise(ctx);
+    sprayFilter.type = 'bandpass';
+    sprayFilter.Q.setValueAtTime(1.5, now);
+    sprayFilter.frequency.setValueAtTime(1650, now);
+    sprayFilter.frequency.exponentialRampToValueAtTime(3100, now + 0.055);
+    sprayFilter.frequency.exponentialRampToValueAtTime(1350, now + 0.22);
+    sprayGain.gain.setValueAtTime(0.0001, now);
+    sprayGain.gain.linearRampToValueAtTime(0.32 * volume, now + 0.014);
+    sprayGain.gain.linearRampToValueAtTime(0.24 * volume, now + 0.065);
+    sprayGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+    spray.connect(sprayFilter); sprayFilter.connect(sprayGain); sprayGain.connect(master);
+    spray.start(now, Math.random() * 0.7);
+    spray.stop(now + 0.24);
+
+    // 2. Bright shaved-ice snow hiss
+    noiseGrain(ctx, master, now + 0.008, 0.17, { freq: 4200, to: 1950, q: 0.95, level: 0.2 * volume });
+
+    // 3. Gritty ice-crystal shave crunch in the initial bite
+    for (let i = 0; i < 5; i++) {
+      const t = now + i * 0.014 + Math.random() * 0.006;
+      noiseGrain(ctx, master, t, 0.016, {
+        freq: 1250 + i * 260 + Math.random() * 350,
+        to: 950 + i * 160,
+        q: 2.8,
+        level: (0.22 - i * 0.028) * volume
+      });
+    }
+
+    // 4. Low-mid ice pressure weight so the stop feels grounded
+    noiseGrain(ctx, master, now, 0.095, { freq: 460, to: 260, q: 2.2, level: 0.16 * volume });
   }
 
-  // Slipstream draft entry: a quiet, airy bandpass filter sweep (~110 ms).
+  // Continuous tailgating wind: smooth overlapping rushing-air stream when triggered repeatedly
+  // during slipstream drafting, or a sustained wind gust when auditioned standalone.
   function playSlipstream(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.14);
+    const duration = Math.max(0.14, Math.min(2.2, Number(options.duration) || 0.22));
+    const master = createMasterChain(ctx, null, duration + 0.05);
     const now = ctx.currentTime;
-    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.5));
-    const source = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
-    source.buffer = grainNoise(ctx);
-    filter.type = 'bandpass';
-    filter.Q.setValueAtTime(1.6, now);
-    filter.frequency.setValueAtTime(650, now);
-    filter.frequency.exponentialRampToValueAtTime(1550, now + 0.055);
-    filter.frequency.exponentialRampToValueAtTime(900, now + 0.11);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(0.14 * volume, now + 0.025);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
-    source.connect(filter);
-    filter.connect(gain);
-    gain.connect(master);
-    source.start(now, Math.random() * 0.8);
-    source.stop(now + 0.13);
+    const draft = Math.min(1, Math.max(0, Number(options.draft ?? 0.7)));
+    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? (0.3 + 0.42 * draft)));
+    const boost = duration > 0.4 ? 1.35 : 1.0;
+
+    // Warm aerodynamic air-pocket rush
+    const baseAir = 440 + 240 * draft;
+    smoothNoise(ctx, master, now, duration, {
+      freq: baseAir, mid: baseAir * 1.32, to: baseAir * 1.04,
+      q: 1.35, level: 0.17 * volume * boost
+    });
+    // Silky upper wind-sheath whistle
+    const sheen = 1220 + 680 * draft;
+    smoothNoise(ctx, master, now, duration, {
+      freq: sheen * 0.92, mid: sheen * 1.24, to: sheen,
+      q: 2.35, level: 0.09 * volume * boost
+    });
   }
 
+  // Spin strike: a spinny, swooshy rotational whip into crisp tip-crack.
+  function playSpinStrike(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx, null, 0.22);
+    const now = ctx.currentTime;
+    const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.85));
+    const spinNorm = Math.min(1, Math.max(0.25, (Math.abs(options.spin) || 14) / 18));
+
+    // 1. Rotational modulated air swoosh whipping upward into the strike
+    const swoosh = ctx.createBufferSource(), band = ctx.createBiquadFilter();
+    const mod = ctx.createGain(), lfo = ctx.createOscillator(), lfoDepth = ctx.createGain(), env = ctx.createGain();
+    swoosh.buffer = grainNoise(ctx);
+    band.type = 'bandpass';
+    band.Q.setValueAtTime(2.2, now);
+    band.frequency.setValueAtTime(420, now);
+    band.frequency.exponentialRampToValueAtTime(3400 * (0.82 + 0.22 * spinNorm), now + 0.055);
+    band.frequency.exponentialRampToValueAtTime(780, now + 0.175);
+    mod.gain.setValueAtTime(0.72, now);
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(26 + 10 * spinNorm, now);
+    lfoDepth.gain.setValueAtTime(0.28, now);
+    env.gain.setValueAtTime(0.0001, now);
+    env.gain.linearRampToValueAtTime(0.48 * volume, now + 0.042);
+    env.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+    lfo.connect(lfoDepth); lfoDepth.connect(mod.gain);
+    swoosh.connect(band); band.connect(mod); mod.connect(env); env.connect(master);
+    swoosh.start(now, Math.random() * 0.7); lfo.start(now);
+    swoosh.stop(now + 0.195); lfo.stop(now + 0.195);
+
+    // 2. Coiled tonal Doppler whip curve
+    const whip = ctx.createOscillator(), whipGain = ctx.createGain();
+    whip.type = 'triangle';
+    whip.frequency.setValueAtTime(240, now);
+    whip.frequency.exponentialRampToValueAtTime(1060 * (0.88 + 0.18 * spinNorm), now + 0.05);
+    whip.frequency.exponentialRampToValueAtTime(430, now + 0.125);
+    whipGain.gain.setValueAtTime(0.0001, now);
+    whipGain.gain.linearRampToValueAtTime(0.36 * volume, now + 0.038);
+    whipGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
+    whip.connect(whipGain); whipGain.connect(master);
+    whip.start(now); whip.stop(now + 0.14);
+
+    // 3. Crisp whip-tip snap at the apex of the swing
+    const snapAt = now + 0.044;
+    blip(ctx, master, snapAt, 0.032, 1950, 360, 0.36 * volume);
+    noiseGrain(ctx, master, snapAt, 0.034, { freq: 3500, to: 1250, q: 1.6, level: 0.44 * volume });
+  }
+
+  // Hockey dasher-board "thock": hollow woody/HDPE board cavity knock + restrained acrylic slap on
+  // hard hits, kept polite in loudness because board bounces happen constantly.
   function playWallHit(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.09);
+    const master = createMasterChain(ctx, null, 0.1);
     const now = ctx.currentTime;
-    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.6));
+    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.5));
+    const hard = Math.min(1, Math.max(0, (volume - 0.22) / 0.65));
 
-    const osc = ctx.createOscillator();
-    const filter = ctx.createBiquadFilter();
-    const gain = ctx.createGain();
+    // 1. Dasher board flex body
+    const body = ctx.createOscillator(), bodyFilter = ctx.createBiquadFilter(), bodyGain = ctx.createGain();
+    body.type = 'triangle';
+    body.frequency.setValueAtTime(185, now);
+    body.frequency.exponentialRampToValueAtTime(88, now + 0.056);
+    bodyFilter.type = 'lowpass';
+    bodyFilter.frequency.setValueAtTime(640, now);
+    strike(bodyGain, 0.36 * volume, now, now + 0.068);
+    body.connect(bodyFilter); bodyFilter.connect(bodyGain); bodyGain.connect(master);
+    body.start(now); body.stop(now + 0.08);
 
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(140, now);
-    osc.frequency.exponentialRampToValueAtTime(65, now + 0.06);
+    // 2. Hollow HDPE board cavity "thock" partial
+    const cavity = ctx.createOscillator(), cavityGain = ctx.createGain();
+    cavity.type = 'sine';
+    cavity.frequency.setValueAtTime(435, now);
+    cavity.frequency.exponentialRampToValueAtTime(230, now + 0.03);
+    strike(cavityGain, (0.13 + 0.18 * hard) * volume, now, now + 0.036);
+    cavity.connect(cavityGain); cavityGain.connect(master);
+    cavity.start(now); cavity.stop(now + 0.045);
 
+    // 3. Crisp board/plexiglass slap transient on hard impacts
+    if (hard > 0.05) {
+      noiseGrain(ctx, master, now, 0.026, { freq: 980, to: 470, q: 2.4, level: 0.26 * hard * volume });
+      noiseGrain(ctx, master, now, 0.014, { freq: 2150, to: 1150, q: 2.0, level: 0.14 * hard * volume });
+    }
+  }
+
+  // Flaming ball impact: a firestarting explosive woosh — like Cannonball's blast, scaled down so
+  // Cannonball stays king while every burning-ball hit or Meteor Bank blooms with fire.
+  function playFireImpact(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx, null, 0.38);
+    const now = ctx.currentTime;
+    const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.8));
+
+    // 1. Torch-ignition flare pop
+    noiseGrain(ctx, master, now, 0.042, { freq: 2900, to: 920, q: 1.25, level: 0.34 * volume });
+
+    // 2. Blooming firestarter woosh (opens fast then darkens like a smaller Cannonball)
+    const src = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+    src.buffer = grainNoise(ctx);
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(450, now);
+    filter.Q.setValueAtTime(0.95, now);
+    filter.frequency.setValueAtTime(850, now);
+    filter.frequency.exponentialRampToValueAtTime(3400, now + 0.024);
+    filter.frequency.exponentialRampToValueAtTime(185, now + 0.34);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.35 * volume, now + 0.016);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    src.connect(filter); filter.connect(gain); gain.connect(master);
+    src.start(now, Math.random() * 0.6); src.stop(now + 0.36);
 
-    strike(gain, 0.6 * volume, now, now + 0.08);
+    // 3. Compact warm punch (tighter & lighter than Cannonball's 75->30 Hz boom)
+    blip(ctx, master, now, 0.22, 112, 44, 0.32 * volume);
+    blip(ctx, master, now, 0.085, 220, 82, 0.18 * volume);
+  }
 
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(master);
-    osc.start(now);
-    osc.stop(now + 0.09);
+  // Goal-line save: a crisp, rewarding metallic blade "shing / tink" (gentler when saving an own-team touch).
+  function playSave(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const own = Boolean(options.own);
+    const master = createMasterChain(ctx, null, own ? 0.2 : 0.32);
+    const now = ctx.currentTime;
+    const volume = Math.max(0.05, Math.min(1.0, options.volume ?? (own ? 0.65 : 0.85)));
+
+    if (own) {
+      for (const [hz, part, decay] of [[1318, 0.26, 0.15], [2960, 0.13, 0.08]]) {
+        blip(ctx, master, now, decay, hz * 1.01, hz, part * volume);
+      }
+      noiseGrain(ctx, master, now, 0.045, { freq: 3400, to: 2400, q: 4.0, level: 0.1 * volume });
+      return;
+    }
+
+    // Bright steel "tink" partials + upward harmonic "shing" shimmer
+    for (const [from, to, part, decay] of [
+      [1740, 1760, 0.34, 0.26],
+      [2580, 2640, 0.24, 0.22],
+      [4787, 4760, 0.18, 0.14],
+      [7180, 7120, 0.09, 0.075]
+    ]) {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(from, now);
+      osc.frequency.exponentialRampToValueAtTime(to, now + 0.022);
+      strike(gain, part * volume, now, now + decay);
+      osc.connect(gain); gain.connect(master);
+      osc.start(now); osc.stop(now + decay + 0.02);
+    }
+    noiseGrain(ctx, master, now, 0.085, { freq: 3100, to: 6200, q: 4.8, level: 0.18 * volume });
+  }
+
+  // Goal firework shell burst: punchy outdoor mortar pop + bright star-crack + sky crackle tail.
+  function playFirework(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx, null, 0.3);
+    const now = ctx.currentTime;
+    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.55));
+    const pan = Math.max(-0.8, Math.min(0.8, Number(options.pan) || 0));
+    const pitch = (0.9 + Math.random() * 0.22) * (options.ring ? 1.08 : 1.0);
+
+    // 1. Aerial shell chest-pop + mid-snap
+    blip(ctx, master, now, 0.085, 225 * pitch, 56 * pitch, 0.48 * volume, pan);
+    noiseGrain(ctx, master, now, 0.048, { freq: 780 * pitch, to: 280, q: 1.3, level: 0.42 * volume, pan });
+    noiseGrain(ctx, master, now, 0.026, { freq: 2900 * pitch, to: 1150, q: 1.6, level: 0.3 * volume, pan });
+
+    // 2. Sparkling sky crackle pops
+    const sparkles = options.ring ? 5 : 4;
+    for (let i = 0; i < sparkles; i++) {
+      const delay = 0.055 + i * 0.038 + Math.random() * 0.022;
+      const sparkPan = Math.max(-0.9, Math.min(0.9, pan + (Math.random() - 0.5) * 0.36));
+      noiseGrain(ctx, master, now + delay, 0.006, {
+        freq: 3600 + Math.random() * 3200,
+        q: 2.6,
+        level: (0.16 - i * 0.02) * volume,
+        pan: sparkPan
+      });
+    }
   }
 
   function playGoalHit(type = 'post', options = {}) {
@@ -1131,11 +1715,11 @@
       for (const osc of oscillators) { try { osc.stop(ctx.currentTime + .02); } catch {} }
       superPlayback.delete(handle);
     } };
-    function oscillator(type, from, to, duration, dest, detune = 0) {
-      const osc = ctx.createOscillator(); osc.type = type;
-      osc.frequency.setValueAtTime(from, now);
-      osc.frequency.exponentialRampToValueAtTime(to, now + duration);
-      osc.detune.setValueAtTime(detune, now);
+    function oscillator(type, from, to, duration, dest, detune = 0, offset = 0) {
+      const start = now + offset, osc = ctx.createOscillator(); osc.type = type;
+      osc.frequency.setValueAtTime(from, start);
+      osc.frequency.exponentialRampToValueAtTime(to, start + duration);
+      osc.detune.setValueAtTime(detune, start);
       osc.connect(dest); nodes.push(osc); oscillators.push(osc);
       osc.onended = () => {
         if (++ended === oscillators.length) {
@@ -1143,23 +1727,26 @@
           superPlayback.delete(handle);
         }
       };
-      osc.start(now); osc.stop(now + duration + .01);
+      osc.start(start); osc.stop(start + duration + .01);
       return osc;
     }
-    function tone(type, from, to, duration, level, attack = .003, filter = null, detune = 0) {
-      const gain = ctx.createGain(); nodes.push(gain);
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(level, now + attack);
-      gain.gain.exponentialRampToValueAtTime(.0001, now + duration);
+    function toneAt(offset, type, from, to, duration, level, attack = .003, filter = null, detune = 0) {
+      const start = now + offset, gain = ctx.createGain(); nodes.push(gain);
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(level, start + attack);
+      gain.gain.exponentialRampToValueAtTime(.0001, start + duration);
       gain.connect(bus);
       let dest = gain;
       if (filter) {
         dest = ctx.createBiquadFilter(); nodes.push(dest);
-        dest.type = filter[0]; dest.frequency.setValueAtTime(filter[1], now);
-        dest.frequency.exponentialRampToValueAtTime(filter[2], now + duration);
-        dest.Q.setValueAtTime(filter[3], now); dest.connect(gain);
+        dest.type = filter[0]; dest.frequency.setValueAtTime(filter[1], start);
+        dest.frequency.exponentialRampToValueAtTime(filter[2], start + duration);
+        dest.Q.setValueAtTime(filter[3], start); dest.connect(gain);
       }
-      return oscillator(type, from, to, duration, dest, detune);
+      return oscillator(type, from, to, duration, dest, detune, offset);
+    }
+    function tone(type, from, to, duration, level, attack = .003, filter = null, detune = 0) {
+      return toneAt(0, type, from, to, duration, level, attack, filter, detune);
     }
     // Filtered noise from `offset` seconds in: the body of squishes, crackles, blasts and crashes.
     function noise(offset, duration, level, type, from, to, q = 1, attack = .002) {
@@ -1176,14 +1763,14 @@
       };
       source.start(start, Math.random() * .5); source.stop(start + duration + .01);
     }
-    function modulate(carrier, type, hz, depth, duration) {
-      const gain = ctx.createGain(); nodes.push(gain);
-      gain.gain.setValueAtTime(depth, now);
-      gain.gain.exponentialRampToValueAtTime(.01, now + duration);
+    function modulate(carrier, type, hz, depth, duration, offset = 0) {
+      const start = now + offset, gain = ctx.createGain(); nodes.push(gain);
+      gain.gain.setValueAtTime(depth, start);
+      gain.gain.exponentialRampToValueAtTime(.01, start + duration);
       gain.connect(carrier.frequency);
-      oscillator(type, hz, hz, duration, gain);
+      oscillator(type, hz, hz, duration, gain, 0, offset);
     }
-    // Each super's sound, kept soft and short.
+    // Each super's signature sound.
     if (key === 'stalwart') {
       // Clanking steel: inharmonic metal partials ringing off a sharp strike; a lighter clank on each hit.
       const hit = phase === 'impact', scale = hit ? .45 : 1;
@@ -1191,13 +1778,25 @@
         tone('sine', hz, hz * .995, decay * scale + .04, level * (hit ? .7 : 1), .001));
       noise(0, .03, hit ? .15 : .25, 'highpass', 3500, 2500, .7);
     } else if (key === 'knockout') {
-      // A hard collision: a heavy thud under a short crack.
-      tone('sine', 140, 45, .24, .75, .002);
-      noise(0, .06, .45, 'bandpass', 1800, 600, 1.4);
+      // A heavyweight arcade "POW!": deep gut-punch sub drop, upper-bass chest thump, leather-glove
+      // smack crack, and a punchy detuned power-bark sting.
+      toneAt(0, 'sine', 180, 36, .42, .94, .0015);
+      toneAt(0, 'triangle', 320, 58, .22, .68, .002, ['lowpass', 1150, 190, 2.2]);
+      toneAt(.005, 'sawtooth', 440, 116, .24, .34, .003, ['lowpass', 2800, 320, 3.0], -7);
+      toneAt(.005, 'sawtooth', 660, 174, .20, .24, .003, ['lowpass', 2800, 360, 2.8], 7);
+      noise(0, .085, .74, 'bandpass', 1150, 340, 1.15, .0015);
+      noise(0, .042, .54, 'bandpass', 2900, 950, 1.5, .001);
+      toneAt(.014, 'sine', 1320, 1280, .35, .075, .004);
     } else if (key === 'sticky') {
-      // A wet squish: a squelch sweeping down with a soft plop under it.
-      noise(0, .2, .4, 'bandpass', 900, 220, 4, .01);
-      tone('sine', 260, 110, .13, .3, .004);
+      // A playful, elastic slimy goop splat: warm rubbery glomp + upward suction scoop + bouncy jelly
+      // bubble pops, avoiding harsh high-kHz wet crackles.
+      toneAt(0, 'sine', 215, 76, .12, .58, .003);
+      noise(0, .11, .48, 'bandpass', 720, 240, 2.8, .004);
+      const glorp = toneAt(.02, 'triangle', 175, 520, .19, .42, .012, ['bandpass', 320, 980, 4.2]);
+      modulate(glorp, 'sine', 19, 28, .19, .02);
+      toneAt(.055, 'sine', 290, 640, .065, .3, .004);
+      toneAt(.115, 'sine', 390, 820, .055, .24, .004);
+      toneAt(.165, 'sine', 340, 710, .048, .16, .004);
     } else if (key === 'cannonball') {
       // An explosion: a burst that darkens as it fades, over a low boom.
       noise(0, .7, .4, 'lowpass', 4200, 140, .7);
@@ -1208,15 +1807,28 @@
       modulate(carrier, 'sine', 7, 22, .24);
       tone('triangle', 330, 324, .24, .03, .035);
     } else if (key === 'colossus') {
-      // A big thundering crash: a deep impact rolling into rumble.
-      noise(0, .9, .4, 'lowpass', 700, 70, .8, .006);
-      noise(.12, .75, .2, 'lowpass', 260, 60, .6, .08);
-      tone('sine', 58, 34, .85, .5, .006);
+      // A thunderous titan awakening: sky-splitting lightning crack, audible low-brass/sub giant stomp,
+      // and rolling multi-wave arena thunder rumble.
+      noise(0, .15, .68, 'bandpass', 2500, 380, .85, .002);
+      noise(.015, .11, .46, 'bandpass', 1200, 240, 1.1, .003);
+      toneAt(0, 'sine', 88, 31, .88, .88, .004);
+      toneAt(0, 'sawtooth', 112, 44, .78, .44, .008, ['lowpass', 720, 115, 2.4], -8);
+      toneAt(.01, 'triangle', 56, 28, .82, .48, .01, ['lowpass', 420, 85, 1.8], 8);
+      noise(.03, .88, .56, 'lowpass', 920, 75, .9, .012);
+      noise(.16, .76, .42, 'bandpass', 380, 88, 1.2, .055);
+      noise(.32, .60, .34, 'lowpass', 540, 68, .8, .07);
     } else if (key === 'shockwave') {
-      // An electric shock: a buzzing zap with crackles snapping through it.
-      const carrier = tone('sawtooth', 120, 70, .32, .16, .002, ['lowpass', 3200, 900, 2]);
-      modulate(carrier, 'square', 53, 70, .32);
-      for (let k = 0; k < 6; k++) noise(k * .045 + Math.random() * .02, .02, .22, 'highpass', 3000, 2400, .8);
+      // Kinetic sonic force-repulsor: tight vacuum pre-snap into a clean sub-sonic concussion drop,
+      // sleek air-pressure wave, and dispersive sci-fi harmonic ring shimmer.
+      toneAt(0, 'sine', 190, 960, .022, .42, .002);
+      toneAt(.014, 'sine', 360, 40, .46, .86, .002);
+      toneAt(.014, 'triangle', 540, 78, .28, .38, .003, ['lowpass', 1500, 160, 2.0]);
+      noise(.01, .40, .42, 'bandpass', 2400, 210, 2.4, .004);
+      const r1 = toneAt(.018, 'sine', 587, 392, .50, .20, .008);
+      const r2 = toneAt(.024, 'sine', 880, 587, .48, .16, .010, null, 7);
+      const r3 = toneAt(.030, 'sine', 1318, 880, .44, .11, .012, null, -7);
+      modulate(r1, 'sine', 14, 18, .50, .018);
+      modulate(r2, 'sine', 16, 24, .48, .024);
     } else if (key === 'ghost') {
       // Like the magnet's beam, but faster and higher, drifting down as it fades.
       const carrier = tone('sine', 700, 600, .7, .09, .05);
@@ -1765,9 +2377,16 @@
     playCoin,
     playPack,
     playUnwrap,
+    playUbuMove,
+    playSpin,
+    playPuckSlide,
     playCarve,
     playSlipstream,
+    playSpinStrike,
     playWallHit,
+    playFireImpact,
+    playSave,
+    playFirework,
     playSizzle,
     playGoalHit,
     playFoul,
@@ -1778,6 +2397,7 @@
     scalePitches,
     chordFor,
     loopVariations,
+    stopMotion,
     stop: stopAll
   };
 

@@ -1980,9 +1980,9 @@ test('interactive replay and export session advance through identical determinis
 });
 
 
-test("Snap, Post English, Rim-Arounds, Tailgating and Hip Clips emit particles/skids, gate audio cooldowns, wire MP4 offlineAudio, and never spawn popups", () => {
+test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim-Around shared sound, Tailgating wind cone, Puck Slide, Fireworks & MP4 offlineAudio", () => {
   const P = require("../web/ububall-physics.js");
-  const calls = { ball: [], goal: [], wall: [], carve: [], slip: [], collision: [] };
+  const calls = { ball: [], goal: [], wall: [], carve: [], slip: [], collision: [], move: [], spin: [], puck: [], whip: [], fire: [], firework: [] };
   let now = 1000;
   const mockAudio = {
     playBallHit: o => calls.ball.push(o),
@@ -1991,6 +1991,13 @@ test("Snap, Post English, Rim-Arounds, Tailgating and Hip Clips emit particles/s
     playCarve: o => calls.carve.push(o),
     playSlipstream: o => calls.slip.push(o),
     playCollision: (v, o) => calls.collision.push(o),
+    playUbuMove: o => calls.move.push(o),
+    playSpin: o => calls.spin.push(o),
+    playPuckSlide: o => calls.puck.push(o),
+    playSpinStrike: o => calls.whip.push(o),
+    playFireImpact: o => calls.fire.push(o),
+    playFirework: o => calls.firework.push(o),
+    stopMotion: () => {},
     playSizzle: () => null
   };
   const bodies = P.kickoff();
@@ -1998,10 +2005,17 @@ test("Snap, Post English, Rim-Arounds, Tailgating and Hip Clips emit particles/s
   const fx = createEffectsState([], {});
   const popups = fx.popups;
   const ububallMatch = require("../shared/ububall-match.js");
+  const drawCalls = { fills: 0, grads: 0 };
+  const mockCtx = {
+    save() {}, restore() {}, translate() {}, rotate() {}, beginPath() {}, closePath() {},
+    moveTo() {}, lineTo() {}, arc() {}, stroke() {},
+    fill() { drawCalls.fills++; },
+    createLinearGradient() { drawCalls.grads++; return { addColorStop() {} }; }
+  };
   const env = createRinkPresenter({
     P,
     ububallMatch,
-    getView: () => ({ bodies, mode: "standard" }),
+    getView: () => ({ bodies, ctx: mockCtx, badgeCtx: mockCtx, mode: "standard" }),
     getEffects: () => fx,
     isReducedMotion: () => false,
     clockNow: () => now,
@@ -2009,13 +2023,37 @@ test("Snap, Post English, Rim-Arounds, Tailgating and Hip Clips emit particles/s
     contactMeter: () => {}
   });
 
-  // 1. Snap collision: warm directional sparks + playBallHit({ snap: true }), zero popups
+  // 1. Snap collision: dramatic team-colored shockwave ring, flash & streaks (no white/gold), plus playBallHit({ snap: true })
   Object.assign(bodies[6], { x: 500, y: 300, vx: 650, vy: 0 });
   const pBeforeSnap = fx.particles.length;
-  env.handleCollision(bodies[1], bodies[6], 340, 500, false, false, true, 0);
+  const wBeforeSnap = fx.shockwaves.length;
+  env.handleCollision(bodies[4], bodies[6], 340, 500, false, false, true, 0); // Away team (team 1) Snap
   assert.equal(calls.ball.at(-1)?.snap, true, "Snap passes snap: true to playBallHit");
-  assert.ok(fx.particles.some(p => p.color === "#ffd76b"), "Snap emits warm gold sparks");
-  assert.ok(fx.particles.length > pBeforeSnap + 10);
+  assert.equal(fx.shockwaves.length, wBeforeSnap + 2, "Snap emits twin team-colored shockwave rings");
+  assert.equal(fx.shockwaves.at(-1).team, 1, "Snap shockwave uses redirecting skater team color");
+  assert.equal(fx.shockwaves.at(-1).color, null, "Snap shockwave dynamically resolves team color");
+  const snapParticles = fx.particles.slice(pBeforeSnap);
+  assert.ok(snapParticles.length >= 20, "Snap emits dramatic burst of team-colored particles");
+  assert.equal(snapParticles.some(p => p.color === "#ffd76b"), false, "Snap no longer uses hardcoded gold");
+  assert.ok(snapParticles.some(p => p.flash && p.team === 1), "Snap includes compact team-colored flash");
+  assert.ok(snapParticles.some(p => p.materialShape === "streak" && p.team === 1), "Snap includes team-colored directional streaks");
+
+  // 1b. Spin strike collision triggers playSpinStrike whip sound
+  now += 200;
+  Object.assign(bodies[6], { x: 460, y: 300, vx: 620, vy: -80, omega: -16, spinStruck: true });
+  env.handleCollision(bodies[0], bodies[6], 360, 480, false, false, false, 0);
+  bodies[6].spinStruck = false;
+  assert.equal(calls.whip.length, 1, "Spin strike triggers playSpinStrike whip sound");
+
+  // 1c. Flaming ball impacts trigger playFireImpact on skater hit and flaming wall bounce (but not on Cannonball ignition tick)
+  now += 200;
+  Object.assign(bodies[6], { onFire: true, fireTicks: 60, vx: 880, vy: 0 });
+  env.handleCollision(bodies[3], bodies[6], 520, 600, true, false, false, 0);
+  assert.equal(calls.fire.length, 1, "Flaming ball plow triggers playFireImpact");
+  now += 200;
+  env.handleWall(bodies[6], 420, "wall", 0, -1, false);
+  assert.equal(calls.fire.length, 2, "Flaming ball Meteor Bank board impact triggers playFireImpact");
+  bodies[6].onFire = false; bodies[6].fireTicks = 0;
 
   // 2. Post English hard hit: metallic sparks + spin/speed passed to playGoalHit("post")
   now += 200;
@@ -2027,7 +2065,7 @@ test("Snap, Post English, Rim-Arounds, Tailgating and Hip Clips emit particles/s
   assert.equal(calls.goal.at(-1)?.[1]?.speed, 380);
   assert.ok(fx.particles.length > pBeforePost + 8, "hard post hit emits metallic tangent sparks");
 
-  // 3. Rim-Around corner carve: ice-spray particles + skidState armed + 180 ms playCarve cooldown
+  // 3. Rim-Around corner carve AND Hard Braking share playCarve + 180 ms cooldown
   now += 200;
   Object.assign(bodies[0], { x: 106, y: 106, vx: 280, vy: -280, omega: -12 });
   env.handleWall(bodies[0], 95, "wall", -Math.SQRT1_2, -Math.SQRT1_2, true);
@@ -2037,25 +2075,46 @@ test("Snap, Post English, Rim-Arounds, Tailgating and Hip Clips emit particles/s
   now += 50; // within 180 ms cooldown
   env.handleWall(bodies[0], 80, "wall", -Math.SQRT1_2, -Math.SQRT1_2, true);
   assert.equal(calls.carve.length, 1, "playCarve is cooldown-gated across multi-tick corner carves");
-  now += 150; // past 180 ms cooldown
-  env.handleWall(bodies[0], 80, "wall", -Math.SQRT1_2, -Math.SQRT1_2, true);
-  assert.equal(calls.carve.length, 2, "playCarve fires again once cooldown elapses");
+  now += 200; // test Hard Braking in markIce sharing playCarve
+  Object.assign(bodies[1], { x: 250, y: 300, vx: 650, vy: 0 });
+  env.markIce(bodies[1], 1, 1 / 60);
+  bodies[1].x = 258; bodies[1].vx = 120; // slowed by 530 > SKID_SLOWDOWN (220)
+  env.markIce(bodies[1], 1, 1 / 60);
+  assert.equal(calls.carve.length, 2, "Hard braking triggers the shared playCarve hockey stop sound");
 
-  // 4. Tailgating: wake streak particles + 500 ms playSlipstream cooldown
-  Object.assign(bodies[0], { x: 300, y: 300, vx: 360, vy: 0 });
-  Object.assign(bodies[1], { x: 365, y: 300, vx: 520, vy: 0 });
-  now += 600;
+  // 4. Tailgating + Movement + Puck Slide: continuous 85 ms wind grains, front wind cone, ubu wobble, spin wobble, puck slide
+  Object.assign(bodies[0], { x: 300, y: 300, vx: 360, vy: 0, omega: 14 });
+  Object.assign(bodies[1], { x: 365, y: 300, vx: 520, vy: 0, omega: 0 });
+  Object.assign(bodies[6], { x: 500, y: 180, vx: 440, vy: 0 });
+  now += 300;
   env.emitSkaterEffects(0.1);
-  assert.equal(calls.slip.length, 1, "strong Tailgating triggers playSlipstream");
+  assert.equal(calls.slip.length, 1, "Tailgating triggers continuous playSlipstream wind grain");
+  assert.ok(calls.move.length >= 6, "emitSkaterEffects updates playUbuMove per skater");
+  assert.ok(calls.spin.length >= 6, "emitSkaterEffects updates playSpin per skater");
+  assert.equal(calls.puck.length, 1, "Moving ball triggers playPuckSlide");
   assert.ok(fx.particles.some(p => p.color === "#d6f6ff"), "Tailgating spawns pale-cyan wake streaks");
-  now += 200; // within 500 ms cooldown
+  now += 40; // within 85 ms continuous crossfade cadence
+  env.emitSkaterEffects(0.04);
+  assert.equal(calls.slip.length, 1, "playSlipstream is gated at 85 ms crossfade cadence");
+  now += 55; // past 85 ms -> next overlapping wind grain fires for continuous wind
   env.emitSkaterEffects(0.05);
-  assert.equal(calls.slip.length, 1, "playSlipstream is cooldown-gated per skater");
-  now += 350; // past 500 ms cooldown
-  env.emitSkaterEffects(0.05);
-  assert.equal(calls.slip.length, 2, "playSlipstream fires again after 500 ms cooldown");
+  assert.equal(calls.slip.length, 2, "playSlipstream fires next overlapping grain after 85 ms");
 
-  // 5. Hip Clip glancing check: scales spark burst and audio volume even when normal closing speed is modest
+  // Verify drawTailgateCone & tapered drawSpin execute clean gradient polygon fills
+  const fillsBefore = drawCalls.fills;
+  env.drawTailgateCone(bodies[0], 0.8);
+  assert.ok(drawCalls.fills >= fillsBefore + 3, "drawTailgateCone renders front shroud + bow streamlines");
+  const fillsBeforeSpin = drawCalls.fills;
+  env.drawSpin(bodies[0], "#e8ca48");
+  assert.ok(drawCalls.fills > fillsBeforeSpin, "drawSpin renders filled tapered directional spin blades");
+
+  // 5. Goal fireworks play synchronized playFirework pops when shells burst
+  fx.fireworks.push({ x: 640, y: 260, vy: -120, fuse: 0.02, delay: 0, team: 0, ring: true });
+  env.updateEffects(0.05);
+  assert.equal(calls.firework.length, 1, "Exploding firework shell triggers playFirework pop");
+  assert.equal(calls.firework[0].ring, true);
+
+  // 6. Hip Clip glancing check: scales spark burst and audio volume even when normal closing speed is modest
   now += 200;
   Object.assign(bodies[2], { x: 400, y: 300, vx: 450, vy: 0 });
   Object.assign(bodies[3], { x: 440, y: 330, vx: -100, vy: 0 });
@@ -2064,19 +2123,27 @@ test("Snap, Post English, Rim-Arounds, Tailgating and Hip Clips emit particles/s
   assert.equal(calls.collision.length, cBefore + 1);
   assert.ok(calls.collision.at(-1).volume > 0.35, "Hip Clip tangential spin impulse scales check audio volume");
 
-  // Strict scope invariant: zero popup banners for any of the five mechanics
-  assert.equal(popups.length, 0, "none of the five mechanics create floating text popups");
+  // Strict scope invariant: zero popup banners for any of these mechanics
+  assert.equal(popups.length, 0, "none of these mechanics create floating text popups");
 
-  // 6. Offline MP4 export audio adapter exposes playCarve and playSlipstream alongside updated options
+  // 7. Offline MP4 export audio adapter exposes all new movement, spin, impact, save, and firework methods
   const exportCode = section("function offlineAudio(offline, seconds) {", "let videoLogoImage = null;");
   let sharedCtx = null;
   const forwarded = [];
   const fakeUbuAudio = {
     shareMasterChain: ctx => { sharedCtx = ctx; },
+    stopMotion: ctx => forwarded.push(["stopMotion", Boolean(ctx)]),
     playCollision: (v, o) => forwarded.push(["collision", o]),
     playBallHit: o => forwarded.push(["ball", o]),
+    playUbuMove: o => forwarded.push(["move", o]),
+    playSpin: o => forwarded.push(["spin", o]),
+    playPuckSlide: o => forwarded.push(["puck", o]),
     playCarve: o => forwarded.push(["carve", o]),
     playSlipstream: o => forwarded.push(["slipstream", o]),
+    playSpinStrike: o => forwarded.push(["whip", o]),
+    playFireImpact: o => forwarded.push(["fire", o]),
+    playSave: o => forwarded.push(["save", o]),
+    playFirework: o => forwarded.push(["firework", o]),
     playWallHit: o => forwarded.push(["wall", o]),
     playGoalHit: (t, o) => forwarded.push(["goal", t, o]),
     playSuper: () => {}, playSizzle: () => {}, playFoul: () => {}, playIronSave: () => {}, playFanfare: () => {}
@@ -2086,9 +2153,19 @@ test("Snap, Post English, Rim-Arounds, Tailgating and Hip Clips emit particles/s
   assert.ok(sharedCtx && sharedCtx.currentTime === 2.5);
   adapter.playBallHit({ volume: 0.9, snap: true });
   adapter.playGoalHit("post", { volume: 0.9, spin: 16, speed: 480 });
+  adapter.playUbuMove({ id: 0, speed: 400 });
+  adapter.playSpin({ id: 0, omega: 12 });
+  adapter.playPuckSlide({ speed: 500 });
   adapter.playCarve({ volume: 0.6 });
   adapter.playSlipstream({ volume: 0.5 });
-  assert.deepEqual(forwarded.map(e => e[0]), ["ball", "goal", "carve", "slipstream"]);
+  adapter.playSpinStrike({ spin: 15 });
+  adapter.playFireImpact({ volume: 0.8 });
+  adapter.playSave({ own: false });
+  adapter.playFirework({ ring: false });
+  adapter.stop();
+  assert.deepEqual(forwarded.map(e => e[0]), [
+    "ball", "goal", "move", "spin", "puck", "carve", "slipstream", "whip", "fire", "save", "firework", "stopMotion"
+  ]);
   assert.equal(forwarded[0][1].snap, true);
   assert.equal(forwarded[1][2].spin, 16);
 });
@@ -2148,9 +2225,16 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
     playGameStart: () => { audioHits.add('playGameStart'); return { stop() {} }; },
     playCollision: () => { audioHits.add('playCollision'); return { stop() {} }; },
     playBallHit: opts => { audioHits.add(opts?.snap ? 'playBallHit:snap' : 'playBallHit'); },
+    playUbuMove: () => { audioHits.add('playUbuMove'); return { stop() {} }; },
+    playSpin: () => { audioHits.add('playSpin'); return { stop() {} }; },
+    playPuckSlide: () => { audioHits.add('playPuckSlide'); },
     playCarve: () => { audioHits.add('playCarve'); },
     playSlipstream: () => { audioHits.add('playSlipstream'); },
+    playSpinStrike: () => { audioHits.add('playSpinStrike'); },
     playWallHit: () => { audioHits.add('playWallHit'); },
+    playFireImpact: () => { audioHits.add('playFireImpact'); },
+    playSave: () => { audioHits.add('playSave'); },
+    playFirework: () => { audioHits.add('playFirework'); },
     playGoalHit: type => { audioHits.add(`playGoalHit:${type}`); },
     playSizzle: () => { audioHits.add('playSizzle'); return { stop() {} }; },
     playIronSave: () => { audioHits.add('playIronSave'); },
@@ -2158,6 +2242,7 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
     playFoul: kind => { audioHits.add(`playFoul:${kind}`); },
     playVoice: () => { audioHits.add('playVoice'); return { stop() {} }; },
     playFanfare: () => { audioHits.add('playFanfare'); return { stop() {} }; },
+    stopMotion: () => {},
     stop: () => {}
   };
 
@@ -2325,7 +2410,9 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
   // Verify every single match audio entrypoint in ubuAudio was exercised!
   for (const expected of [
     'playGameStart', 'playCollision', 'playBallHit', 'playBallHit:snap',
-    'playCarve', 'playSlipstream', 'playWallHit', 'playGoalHit:post', 'playGoalHit:net',
+    'playUbuMove', 'playSpin', 'playPuckSlide',
+    'playCarve', 'playSlipstream', 'playSpinStrike', 'playWallHit', 'playFireImpact',
+    'playSave', 'playFirework', 'playGoalHit:post', 'playGoalHit:net',
     'playSizzle', 'playIronSave', 'playSuper', 'playFoul:warning', 'playFoul:card',
     'playVoice', 'playFanfare'
   ]) {

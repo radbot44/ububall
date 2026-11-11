@@ -105,6 +105,10 @@
       superImpactTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       carveTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       slipstreamTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
+      spinStrikeTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
+      puckSlideTime: -Infinity,
+      lastCannonImpact: -Infinity,
+      lastFireHitSound: -Infinity,
       materialEmitters: createMaterialEmitters(entries, stylesMap),
       iceCache: {},
       rinkCache: null
@@ -130,7 +134,7 @@
     }
   }
 
-  function updateParticles(dt, particles, fireworks, shockwaves) {
+  function updateParticles(dt, particles, fireworks, shockwaves, onFirework = null) {
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i]; p.life -= dt;
       if (p.life <= 0) {
@@ -152,6 +156,7 @@
         team: f.team, color: '#ffe9b0', life: .3, duration: .3, overlay: true });
       if (f.fuse <= 0) {
         explodeShell(f, particles);
+        onFirework?.(f);
         fireworks[i] = fireworks[fireworks.length - 1];
         fireworks.pop();
       }
@@ -710,6 +715,7 @@
       const fx = getEffects();
       fx.sizzle?.stop();
       fx.sizzle = null;
+      gameAudio()?.stopMotion?.();
     }
 
     function ballHeat(b) {
@@ -728,7 +734,15 @@
       if (!prev || dt <= 0) return;
       if (Math.hypot(b.x - prev.x, b.y - prev.y) > 60) { s.time = 0; s.path = null; return; }
       const slowed = Math.hypot(prev.vx, prev.vy) - Math.hypot(b.vx, b.vy);
-      if (slowed > SKID_SLOWDOWN) Object.assign(s, { time: .3, strength: Math.max(s.time > 0 ? s.strength : 0, Math.min(1, slowed / 600)) });
+      if (slowed > SKID_SLOWDOWN) {
+        const strength = Math.min(1, slowed / 600);
+        Object.assign(s, { time: .3, strength: Math.max(s.time > 0 ? s.strength : 0, strength) });
+        const now = clockNow(), map = (fx.carveTimes ||= new WeakMap());
+        if (now - (map.get(b) ?? -Infinity) >= 180) {
+          map.set(b, now);
+          gameAudio()?.playCarve?.({ volume: Math.min(0.85, 0.3 + 0.55 * strength) });
+        }
+      }
       if (s.time <= 0) { s.path = null; return; }
       const depth = s.strength * s.time / .3;
       s.time -= dt;
@@ -801,35 +815,56 @@
     }
 
     function emitSkaterEffects(dt) {
-      if (isReducedMotion()) return;
-      const fx = getEffects(), view = getView();
+      const fx = getEffects(), view = getView(), audio = gameAudio(), reduced = isReducedMotion();
+      const now = clockNow();
       view.bodies.slice(0, 6).forEach((b, i) => {
-        markIce(b, i, dt);
+        if (!reduced) markIce(b, i, dt);
+        const speed = Math.hypot(b.vx || 0, b.vy || 0);
+        if (audio && !b.carded) {
+          audio.playUbuMove?.({ id: i, speed, mass: b.mass || 3, radius: b.radius || 25, slot: i });
+          audio.playSpin?.({ id: i, omega: b.omega || 0, radius: b.radius || 25, slot: i });
+        }
         const draft = P.tailgateFactor ? P.tailgateFactor(view.bodies, b) : 0;
-        if (draft > 0.35) {
-          const speed = Math.hypot(b.vx, b.vy) || 1, ux = b.vx / speed, uy = b.vy / speed;
-          const rate = dt * 42 * draft;
-          const count = Math.floor(rate) + (Math.random() < (rate % 1) ? 1 : 0);
-          for (let k = 0; k < count && fx.particles.length < 340; k++) {
-            const spread = (Math.random() - .5) * b.radius * 1.1;
-            const x = b.x - ux * (b.radius * .6) - uy * spread;
-            const y = b.y - uy * (b.radius * .6) + ux * spread;
-            const life = .12 + Math.random() * .09, wakeSpeed = 70 + speed * .22;
-            fx.particles.push({ x, y, px: x + ux * 6, py: y + uy * 6,
-              vx: -ux * wakeSpeed + (Math.random() - .5) * 20, vy: -uy * wakeSpeed + (Math.random() - .5) * 20,
-              team: -1, color: k % 2 ? '#d6f6ff' : '#ffffff', life, duration: life });
+        if (draft > 0.32) {
+          if (!reduced && draft > 0.35) {
+            const s = speed || 1, ux = b.vx / s, uy = b.vy / s;
+            const rate = dt * 36 * draft;
+            const count = Math.floor(rate) + (Math.random() < (rate % 1) ? 1 : 0);
+            for (let k = 0; k < count && fx.particles.length < 340; k++) {
+              const spread = (Math.random() - .5) * b.radius * 1.05;
+              const x = b.x - ux * (b.radius * .6) - uy * spread;
+              const y = b.y - uy * (b.radius * .6) + ux * spread;
+              const life = .12 + Math.random() * .09, wakeSpeed = 68 + s * .2;
+              fx.particles.push({ x, y, px: x + ux * 6, py: y + uy * 6,
+                vx: -ux * wakeSpeed + (Math.random() - .5) * 20, vy: -uy * wakeSpeed + (Math.random() - .5) * 20,
+                team: -1, color: k % 2 ? '#d6f6ff' : '#ffffff', life, duration: life });
+            }
           }
-          if (draft > 0.45 && gameAudio()?.playSlipstream) {
-            const now = clockNow(), map = (fx.slipstreamTimes ||= new WeakMap());
-            if (now - (map.get(b) ?? -Infinity) >= 500) {
+          if (draft > 0.35 && audio?.playSlipstream) {
+            const map = (fx.slipstreamTimes ||= new WeakMap());
+            if (now - (map.get(b) ?? -Infinity) >= 85) {
               map.set(b, now);
-              gameAudio().playSlipstream({ volume: Math.min(0.75, 0.25 + 0.5 * draft) });
+              audio.playSlipstream({ draft, volume: Math.min(0.75, 0.24 + 0.48 * draft), duration: 0.2 });
             }
           }
         }
       });
-      sparkBall(view.bodies[6], dt);
-      burnIce(view.bodies[6]);
+      const ball = view.bodies[6];
+      if (ball && audio?.playPuckSlide && !P.holder?.(view.bodies)) {
+        const bSpeed = Math.hypot(ball.vx || 0, ball.vy || 0);
+        if (bSpeed >= 30 && now - (fx.puckSlideTime ?? -Infinity) >= 80) {
+          fx.puckSlideTime = now;
+          audio.playPuckSlide({
+            speed: bSpeed,
+            spin: ball.omega || 0,
+            pan: Math.max(-0.5, Math.min(0.5, ((ball.x - 500) / 500) * 0.35)),
+            duration: 0.18
+          });
+        }
+      }
+      if (reduced) return;
+      sparkBall(ball, dt);
+      burnIce(ball);
       fx.materialEmitters.forEach((emitter, i) => {
         const b = view.bodies[i];
         if (!b) return;
@@ -943,7 +978,13 @@
         for (const point of trail) point.life -= dt;
         while (trail.length && trail[0].life <= 0) trail.shift();
       }
-      updateParticles(dt, fx.particles, fx.fireworks, fx.shockwaves);
+      updateParticles(dt, fx.particles, fx.fireworks, fx.shockwaves, f => {
+        gameAudio()?.playFirework?.({
+          ring: Boolean(f.ring),
+          pan: Math.max(-0.75, Math.min(0.75, ((f.x - 500) / 500) * 0.65)),
+          volume: 0.55
+        });
+      });
       const moving = isMoving();
       if (moving) for (const s of fieldFx.skids) s.age += dt;
       for (let i = fieldFx.skids.length - 1; i >= 0; i--) if (fieldFx.skids[i].age >= SKID_LIFE) fieldFx.skids.splice(i, 1);
@@ -1524,17 +1565,141 @@
       const spin = Math.abs(b.omega);
       if (spin < 2.5 || isReducedMotion()) return;
       const ctx = getView().ctx;
-      const power = Math.min(1, (spin - 2.5) / 20), arcs = spin >= 8 ? 3 : 2, sweep = (.8 + 1.2 * power) * Math.sign(b.omega), back = b.omega < 0;
-      ctx.save(); ctx.strokeStyle = color; ctx.lineCap = 'round';
+      const power = Math.min(1, (spin - 2.5) / 20), arcs = spin >= 8 ? 3 : 2;
+      const dir = Math.sign(b.omega), sweep = (.92 + 1.22 * power) * dir;
+      const taperedArc = (radius, startAngle, arcSweep, maxWidth, peakAlpha) => {
+        const steps = 10, endAngle = startAngle + arcSweep;
+        const outer = [], inner = [];
+        for (let s = 0; s <= steps; s++) {
+          const u = s / steps;
+          const ang = startAngle + arcSweep * u;
+          const profile = Math.pow(u, 1.35) * (u > 0.86 ? 1 - 0.22 * ((u - 0.86) / 0.14) : 1);
+          const half = maxWidth * 0.5 * profile;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          outer.push([b.x + ca * (radius + half), b.y + sa * (radius + half)]);
+          inner.push([b.x + ca * (radius - half), b.y + sa * (radius - half)]);
+        }
+        const tipAng = endAngle + dir * Math.min(0.16, (maxWidth * 1.15) / Math.max(12, radius));
+        const tipX = b.x + Math.cos(tipAng) * radius, tipY = b.y + Math.sin(tipAng) * radius;
+        const tailX = outer[0][0], tailY = outer[0][1];
+        ctx.beginPath();
+        ctx.moveTo(tailX, tailY);
+        for (let s = 1; s <= steps; s++) ctx.lineTo(outer[s][0], outer[s][1]);
+        ctx.lineTo(tipX, tipY);
+        for (let s = steps; s >= 1; s--) ctx.lineTo(inner[s][0], inner[s][1]);
+        ctx.closePath();
+        if (Math.hypot(tipX - tailX, tipY - tailY) > 0.5) {
+          const grad = ctx.createLinearGradient(tailX, tailY, tipX, tipY);
+          grad.addColorStop(0, hexToRgba(color, 0));
+          grad.addColorStop(0.35, hexToRgba(color, peakAlpha * 0.3));
+          grad.addColorStop(0.8, hexToRgba(color, peakAlpha * 0.85));
+          grad.addColorStop(1, hexToRgba(color, peakAlpha));
+          ctx.fillStyle = grad;
+        } else {
+          ctx.fillStyle = hexToRgba(color, peakAlpha);
+        }
+        ctx.fill();
+      };
+      ctx.save();
       for (let k = 0; k < arcs; k++) {
         const start = b.rotation + k * 2 * Math.PI / arcs;
-        ctx.globalAlpha = .2 + .6 * power; ctx.lineWidth = 1.5 + 2.5 * power;
-        ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 4, start, start + sweep, back); ctx.stroke();
-        if (power > .5) {
-          ctx.globalAlpha = power - .5; ctx.lineWidth = 1.5;
-          ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 10, start + sweep * .4, start + sweep, back); ctx.stroke();
+        taperedArc(b.radius + 4.5, start, sweep, 1.8 + 3.0 * power, Math.min(0.95, 0.28 + 0.62 * power));
+        if (power > 0.45) {
+          taperedArc(b.radius + 10.5, start + sweep * 0.32, sweep * 0.68, 1.1 + 1.3 * power, Math.min(0.65, (power - 0.45) * 1.05));
         }
       }
+      ctx.restore();
+    }
+
+    function drawTailgateCone(b, draft) {
+      if (draft <= 0.22 || isReducedMotion()) return;
+      const speed = Math.hypot(b.vx || 0, b.vy || 0);
+      if (speed < (P.TAILGATE?.minSpeed ?? 110)) return;
+      const ctx = getView().ctx;
+      const heading = Math.atan2(b.vy, b.vx);
+      const reachR = Math.max(b.radius, b.reach || b.radius, 18);
+      const strength = Math.min(1, (draft - 0.22) / 0.72);
+      const t = clockNow() / 1000, phaseShift = (b.playerIndex || 0) * 1.9;
+      const flutter = Math.sin(t * 20 + phaseShift) * 1.2;
+      const r = reachR + 4.5;
+      const noseX = r + 13 + 7 * strength + flutter * 0.6;
+      const backX = -r * 0.88;
+      const wingY = r + 16 + 7 * strength + flutter * 0.9;
+
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(heading);
+
+      // 1. Translucent aerodynamic mach-cone shroud wrapping the front nose and flaring past the flanks
+      ctx.beginPath();
+      ctx.moveTo(noseX, 0);
+      const coneSteps = 10;
+      for (let s = 1; s <= coneSteps; s++) {
+        const u = s / coneSteps;
+        const x = noseX + (backX - noseX) * Math.pow(u, 0.94);
+        const y = wingY * Math.pow(u, 0.72);
+        ctx.lineTo(x, y);
+      }
+      ctx.arc(0, 0, r + 1.2, 2.32, -2.32, true);
+      for (let s = coneSteps; s >= 1; s--) {
+        const u = s / coneSteps;
+        const x = noseX + (backX - noseX) * Math.pow(u, 0.94);
+        const y = -wingY * Math.pow(u, 0.72);
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      const shroudGrad = ctx.createLinearGradient(noseX, 0, backX, 0);
+      shroudGrad.addColorStop(0, "rgba(210, 248, 255, " + (0.28 + 0.22 * strength).toFixed(3) + ")");
+      shroudGrad.addColorStop(0.45, "rgba(170, 236, 255, " + (0.14 + 0.14 * strength).toFixed(3) + ")");
+      shroudGrad.addColorStop(1, 'rgba(170, 236, 255, 0)');
+      ctx.fillStyle = shroudGrad;
+      ctx.fill();
+
+      // 2. Crisp tapered V-cone bow streamlines parting from the nose tip around both sides
+      const bladeGrad = ctx.createLinearGradient(noseX, 0, backX, 0);
+      bladeGrad.addColorStop(0, "rgba(248, 254, 255, " + (0.65 + 0.3 * strength).toFixed(3) + ")");
+      bladeGrad.addColorStop(0.5, "rgba(182, 240, 255, " + (0.36 + 0.24 * strength).toFixed(3) + ")");
+      bladeGrad.addColorStop(1, 'rgba(182, 240, 255, 0)');
+      ctx.fillStyle = bladeGrad;
+
+      for (const sign of [-1, 1]) {
+        const outerPts = [], innerPts = [];
+        for (let s = 0; s <= coneSteps; s++) {
+          const u = s / coneSteps;
+          const x = noseX + (backX - noseX) * Math.pow(u, 0.94);
+          const y = sign * wingY * Math.pow(u, 0.72);
+          const w = (2.8 + 1.3 * strength) * (1 - u * 0.92) * (u < 0.1 ? 0.5 + 0.5 * (u / 0.1) : 1);
+          outerPts.push([x + w * 0.2, y + sign * w * 0.5]);
+          innerPts.push([x - w * 0.35, y - sign * w * 0.5]);
+        }
+        ctx.beginPath();
+        ctx.moveTo(outerPts[0][0], outerPts[0][1]);
+        for (let s = 1; s <= coneSteps; s++) ctx.lineTo(outerPts[s][0], outerPts[s][1]);
+        for (let s = coneSteps; s >= 0; s--) ctx.lineTo(innerPts[s][0], innerPts[s][1]);
+        ctx.closePath();
+        ctx.fill();
+
+        // Secondary inner airflow streamline skimming just outside the ubu's front ring
+        const innerNoseX = r + 5.5 + 2.5 * strength - flutter * 0.4;
+        const innerBackX = -r * 0.48;
+        const innerWingY = r + 8.5 + 3 * strength;
+        const iOut = [], iIn = [];
+        for (let s = 0; s <= 7; s++) {
+          const u = s / 7;
+          const x = innerNoseX + (innerBackX - innerNoseX) * u;
+          const y = sign * (2.5 + (innerWingY - 2.5) * Math.pow(u, 0.65));
+          const w = (1.5 + 0.7 * strength) * (1 - u);
+          iOut.push([x, y + sign * w * 0.5]);
+          iIn.push([x, y - sign * w * 0.5]);
+        }
+        ctx.beginPath();
+        ctx.moveTo(iOut[0][0], iOut[0][1]);
+        for (let s = 1; s <= 7; s++) ctx.lineTo(iOut[s][0], iOut[s][1]);
+        for (let s = 7; s >= 0; s--) ctx.lineTo(iIn[s][0], iIn[s][1]);
+        ctx.closePath();
+        ctx.fill();
+      }
+
       ctx.restore();
     }
 
@@ -1640,14 +1805,14 @@
       for (const p of fx.particles) {
         if (Boolean(p.overlay) !== overlay) continue;
         const color = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? home : away), fade = p.life / p.duration;
-        c.globalAlpha = Math.min(1, fade * 2) * (p.celebration ? 1 : .65);
+        c.globalAlpha = Math.min(1, fade * 2) * (p.celebration || p.snap ? .95 : .65);
         if (p.flash) {
-          const size = 170 * fade; c.globalAlpha = fade * .8;
+          const size = (p.flashSize || 170) * fade; c.globalAlpha = fade * .85;
           c.drawImage(glowSprite(color, doc), p.x - size / 2, p.y - size / 2, size, size); continue;
         }
         if (p.materialShape) {
           c.save(); c.translate(p.x, p.y); c.rotate(p.angle);
-          c.strokeStyle = c.fillStyle = color; c.lineWidth = 1;
+          c.strokeStyle = c.fillStyle = color; c.lineWidth = p.snap ? 2.4 : 1;
           const size = p.size * Math.min(1, fade * 2);
           c.beginPath();
           if (p.materialShape === 'spark') {
@@ -1670,8 +1835,8 @@
         }
         if (p.celebration) c.drawImage(glowSprite(color, doc), p.x - 24, p.y - 24, 48, 48);
         const px = p.px === p.x && p.py === p.y ? p.x - 0.01 : p.px;
-        c.beginPath(); c.moveTo(px, p.py); c.lineTo(p.x, p.y); c.strokeStyle = color; c.lineWidth = p.celebration ? 2.5 : 1.3; c.stroke();
-        c.fillStyle = color; c.beginPath(); c.arc(p.x, p.y, p.celebration ? 1.8 : .9, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.moveTo(px, p.py); c.lineTo(p.x, p.y); c.strokeStyle = color; c.lineWidth = p.celebration || p.snap ? 2.6 : 1.3; c.stroke();
+        c.fillStyle = color; c.beginPath(); c.arc(p.x, p.y, p.celebration || p.snap ? 1.9 : .9, 0, Math.PI * 2); c.fill();
       }
       if (flameDots.length) {
         c.save(); c.globalCompositeOperation = 'lighter';
@@ -1753,9 +1918,10 @@
       }
       const isBall = a.team === -1 || b.team === -1;
       const isSnap = isBall && Boolean(snapped || a?.snapStruck || b?.snapStruck);
+      const isSpinStrike = isBall && Boolean(a?.spinStruck || b?.spinStruck);
       const spinBoost = !isBall && a.team !== b.team ? (tangentImpulse || 0) * 0.45 : 0;
       const effSpeed = Math.max(speed, spinBoost);
-      if (effSpeed < 15 && !isSnap) return;
+      if (effSpeed < 15 && !isSnap && !isSpinStrike) return;
       const fx = getEffects();
       const distance = Math.hypot(b.x - a.x, b.y - a.y) || 1;
       const x = a.x + (b.x - a.x) * a.radius / distance, y = a.y + (b.y - a.y) * a.radius / distance;
@@ -1765,22 +1931,58 @@
       if (a.team !== b.team) burst(x, y, b.team, sparkStrength, false, tangent);
       if (isSnap && !isReducedMotion()) {
         const ball = a.team === -1 ? a : b;
+        const snapper = a.team === -1 ? b : a;
+        const snapTeam = snapper?.team >= 0 ? snapper.team : 0;
         const heading = Math.atan2(ball.vy || 0, ball.vx || 0);
-        for (let k = 0; k < 12 && fx.particles.length < 400; k++) {
-          const ang = heading + (Math.random() - .5) * .5, spd = 140 + Math.random() * 220, life = .16 + Math.random() * .14;
-          fx.particles.push({ x: ball.x, y: ball.y, px: ball.x, py: ball.y,
+        // Twin crisp team-colored redirect rings starting outside the ball silhouette so they are immediately visible
+        if (fx.shockwaves.length < 30) {
+          fx.shockwaves.push({ x: ball.x, y: ball.y, currentRadius: 19, maxRadius: 66, team: snapTeam, color: null, life: .28, duration: .28, overlay: true });
+          fx.shockwaves.push({ x: x, y: y, currentRadius: 12, maxRadius: 46, team: snapTeam, color: null, life: .22, duration: .22, overlay: true });
+        }
+        if (fx.particles.length < 400) {
+          fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: snapTeam, color: null, life: .22, duration: .22, flash: true, flashSize: 135, overlay: true });
+        }
+        for (let k = 0; k < 22 && fx.particles.length < 400; k++) {
+          const isWing = k >= 12;
+          const ang = isWing
+            ? heading + (k % 2 ? 1 : -1) * (0.65 + Math.random() * 0.48)
+            : heading + (Math.random() - .5) * .48;
+          const spd = isWing ? 210 + Math.random() * 200 : 260 + Math.random() * 310;
+          const life = .24 + Math.random() * .14;
+          const spawnR = ball.radius * 0.65;
+          const sx = ball.x + Math.cos(ang) * spawnR, sy = ball.y + Math.sin(ang) * spawnR;
+          const p = { x: sx, y: sy, px: sx - Math.cos(ang) * 8, py: sy - Math.sin(ang) * 8,
             vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
-            team: -1, color: k % 3 === 0 ? '#ffffff' : '#ffd76b', life, duration: life });
+            team: snapTeam, color: null, life, duration: life, snap: true, overlay: true };
+          if (k < 6) {
+            p.materialShape = 'streak';
+            p.size = 3.2 + Math.random() * 1.6;
+            p.angle = ang;
+          }
+          fx.particles.push(p);
         }
       }
       if (plow) flames(x, y, 40, (b.vx || a.vx) * 0.1, (b.vy || a.vy) * 0.1, 15);
       const now = clockNow();
       if (!plow && speed >= 15) contactMeter?.(a, b, speed);
       if (isBall) {
+        const ball = a.team === -1 ? a : b;
         const player = a.team !== -1 ? a : b;
         const norm = Math.min(1.0, Math.max(0.0, (speed - 25) / 550));
         const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
-        if (isSnap || !player._lastHitSound || (now - player._lastHitSound) > 55) {
+        if (isSpinStrike && gameAudio()?.playSpinStrike) {
+          const sMap = (fx.spinStrikeTimes ||= new WeakMap());
+          if (now - (sMap.get(ball) ?? -Infinity) > 50) {
+            sMap.set(ball, now);
+            gameAudio().playSpinStrike({ volume: Math.min(1.0, 0.45 + 0.55 * (norm ** 0.8)), spin: ball.omega || player.omega || 14 });
+          }
+        }
+        const fireHit = !iron && (plow || P.ballOnFire?.(ball)) && (now - (fx.lastCannonImpact ?? -Infinity) > 20);
+        if (fireHit && gameAudio()?.playFireImpact && (now - (fx.lastFireHitSound ?? -Infinity) > 55)) {
+          fx.lastFireHitSound = now;
+          gameAudio().playFireImpact({ volume: Math.min(1.0, 0.42 + 0.58 * (norm ** 0.8)) });
+        }
+        if (isSnap || isSpinStrike || !player._lastHitSound || (now - player._lastHitSound) > 55) {
           player._lastHitSound = now;
           if (player.voice && gameAudio()) {
             gameAudio().playCollision(player.voice, { volume });
@@ -1846,18 +2048,24 @@
       }
       const norm = Math.min(1.0, Math.max(0.0, (velocity - 20) / 480));
       const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
-      if (!gameAudio()) return;
+      const audio = gameAudio();
+      if (!audio) return;
+      if (body.team === -1 && P.ballOnFire?.(body) && velocity >= 90 && (now - (fx.lastFireHitSound ?? -Infinity) > 55)) {
+        fx.lastFireHitSound = now;
+        audio.playFireImpact?.({ volume: Math.min(0.9, 0.32 + 0.55 * (norm ** 0.85)) });
+      }
       if (wallType === 'post') {
-        gameAudio().playGoalHit('post', { volume: Math.min(1.0, volume * 1.1), spin: Math.abs(body.omega || 0), speed: velocity });
+        audio.playGoalHit('post', { volume: Math.min(1.0, volume * 1.1), spin: Math.abs(body.omega || 0), speed: velocity });
       } else if (wallType === 'net') {
-        gameAudio().playGoalHit('net', { volume });
+        audio.playGoalHit('net', { volume });
       } else {
-        gameAudio().playWallHit({ volume });
+        audio.playWallHit({ volume: Math.min(0.85, 0.1 + 0.68 * (norm ** 1.05)) });
       }
     }
 
     function handleSuper(key, stage, body, target = null) {
       const fx = getEffects();
+      if (key === 'cannonball' && stage === 'impact') fx.lastCannonImpact = clockNow();
       if (key === 'stalwart' && stage === 'impact') {
         const now = clockNow();
         if (now - (fx.superImpactTimes.get(body) ?? -Infinity) < 100) return;
@@ -1937,14 +2145,15 @@
       fx.shockwaves.forEach(s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
         const r = s.currentRadius + (s.maxRadius - s.currentRadius) * progress;
-        view.ctx.save();
-        view.ctx.beginPath();
-        view.ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-        view.ctx.strokeStyle = s.color || (s.team === 0 ? home : away);
-        view.ctx.lineWidth = Math.max(1, 6 * (1 - progress));
-        view.ctx.globalAlpha = Math.max(0, 1 - progress);
-        view.ctx.stroke();
-        view.ctx.restore();
+        const targetCtx = s.overlay && view.badgeCtx ? view.badgeCtx : view.ctx;
+        targetCtx.save();
+        targetCtx.beginPath();
+        targetCtx.arc(s.x, s.y, r, 0, Math.PI * 2);
+        targetCtx.strokeStyle = s.color || (s.team === 0 ? home : away);
+        targetCtx.lineWidth = Math.max(1, (s.overlay ? 4.5 : 6) * (1 - progress));
+        targetCtx.globalAlpha = Math.max(0, (1 - progress) * (s.overlay ? 0.92 : 1));
+        targetCtx.stroke();
+        targetCtx.restore();
       });
 
       const scoringPlayer = getScoringPlayer();
@@ -1977,6 +2186,10 @@
         }
 
         const inAction = phase === 'play' || phase === 'replay' || Boolean(goalReplay);
+        if (inAction && !b.carded && !isReducedMotion()) {
+          const draft = P.tailgateFactor ? P.tailgateFactor(view.bodies, b) : 0;
+          if (draft > 0.22) drawTailgateCone(b, draft);
+        }
         if ((inAction && b.guarding) || (phase === 'plan' && i < 3 && fieldPlans[i]?.guard)) {
           const iron = phase === 'plan'
             ? Boolean(predictionCache?.data.guards.some(g => g.index === i && g.held))
@@ -2140,6 +2353,7 @@
       drawFouls,
       drawFoulFocus,
       drawSpin,
+      drawTailgateCone,
       trailPositions,
       clearDiscontinuousTrails,
       recordTrails,

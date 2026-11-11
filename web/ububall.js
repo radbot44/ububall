@@ -436,6 +436,8 @@
     if (iron) {
       steamRing(body.x, body.y, body.radius);
       gameAudio()?.playIronSave?.();
+    } else {
+      gameAudio()?.playSave?.({ own: Boolean(own) });
     }
     if ((typeof phase !== 'undefined' && phase !== 'play') || own || online?.active || goalReplay || theater || (typeof activePlayback !== 'undefined' && activePlayback)) return;
     const idx = fieldView.bodies.indexOf(body);
@@ -1721,8 +1723,12 @@
     // and changes loudness by well under a decibel.
     A.shareMasterChain(ctx);
     const into = (options = {}) => ({ ...options, ctx });
-    return { getAudioContext: () => ctx, stop() {}, playCollision: (voice, o) => A.playCollision(voice, into(o)), playBallHit: o => A.playBallHit(into(o)),
+    return { getAudioContext: () => ctx, stop: () => A.stopMotion?.(ctx), stopMotion: () => A.stopMotion?.(ctx),
+      playCollision: (voice, o) => A.playCollision(voice, into(o)), playBallHit: o => A.playBallHit(into(o)),
+      playUbuMove: o => A.playUbuMove?.(into(o)), playSpin: o => A.playSpin?.(into(o)), playPuckSlide: o => A.playPuckSlide?.(into(o)),
       playCarve: o => A.playCarve?.(into(o)), playSlipstream: o => A.playSlipstream?.(into(o)),
+      playSpinStrike: o => A.playSpinStrike?.(into(o)), playFireImpact: o => A.playFireImpact?.(into(o)),
+      playSave: o => A.playSave?.(into(o)), playFirework: o => A.playFirework?.(into(o)),
       playWallHit: o => A.playWallHit(into(o)), playGoalHit: (type, o) => A.playGoalHit(type, into(o)), playSuper: (key, phase, o) => A.playSuper(key, phase, into(o)),
       playSizzle: o => A.playSizzle(into(o)), playFoul: (kind, o) => A.playFoul(kind, into(o)),
       playIronSave: o => A.playIronSave?.(into(o)), playFanfare: (voice, notes, time, o) => A.playFanfare?.(voice, notes, time, into(o)) };

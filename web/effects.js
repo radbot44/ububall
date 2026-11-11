@@ -66,9 +66,9 @@
       items: [
         {
           id: 'plan-aim',
-          title: 'Aim Impulse Arrow, Spin Arcs & Guard Fade',
+          title: 'Aim Impulse Arrow, Tapered Spin Arcs & Guard Fade',
           when: 'Selecting and aiming skaters during the `plan` phase (`drawImpulse`, `drawSpin`).',
-          visual: 'Selected skater highlight ring, Impulse/Size-scaled aim arrow, rotational spin arcs, and 25%-alpha guarded arrow with blue shield.',
+          visual: 'Selected skater highlight ring, Impulse/Size-scaled aim arrow, tapered directional spin blades pointing CW/CCW, and 25%-alpha guarded arrow with blue shield.',
           duration: 3.0,
           run: ctx => {
             ctx.resetStage({ phase: 'plan', mode: 'standard' });
@@ -159,8 +159,8 @@
     },
     {
       id: 'movement',
-      title: '3. Movement & Materials',
-      summary: 'Tapered motion ribbons, braking skids, corner rim-arounds, slipstream drafting, and 32 DNA materials.',
+      title: '3. Movement, Spin & Materials',
+      summary: 'Moving ubu wobbles, puck glides, tapered spin arcs & spin wobble, ice hockey braking, front wind cones, and 32 DNA materials.',
       items: [
         {
           id: 'motion-trails',
@@ -178,18 +178,117 @@
           }
         },
         {
+          id: 'ubu-move-wobble',
+          title: 'Moving Ubu Wobble (Speed, Mass & Size)',
+          when: 'Skaters glide above 28 px/s (`playUbuMove` modulated by speed, mass, and radius).',
+          visual: 'Subtle speed-pitched wobble per skater: small light ubus flutter higher and faster; large heavy ubus hum deeper with warmer low-mid weight.',
+          soundLabel: 'Play ubu wobble',
+          variants: [
+            { id: 'six', label: '6-Ubu Live Mix' },
+            { id: 'small', label: 'Small & Light Ubu' },
+            { id: 'heavy', label: 'Large & Heavy Ubu' }
+          ],
+          duration: 2.8,
+          playSound: (ctx, variant = 'six') => {
+            if (variant === 'small') ctx.audio()?.playUbuMove?.({ speed: 580, mass: 2.45, radius: 17, duration: 0.9, preview: true });
+            else if (variant === 'heavy') ctx.audio()?.playUbuMove?.({ speed: 520, mass: 4.8, radius: 38, duration: 0.95, preview: true });
+            else ctx.audio()?.playUbuMove?.({ speed: 540, mass: 3.0, radius: 25, duration: 0.9, preview: true });
+          },
+          run: (ctx, variant = 'six') => {
+            ctx.resetStage({ phase: 'play', mode: 'standard' });
+            ctx.place(6, 500, 88);
+            if (variant === 'small') {
+              ctx.boostStats(0, { size: 0, mass: 0 });
+              ctx.place(0, 160, 300, { vx: 640, vy: 0 });
+            } else if (variant === 'heavy') {
+              ctx.boostStats(0, { size: 255, mass: 255 });
+              ctx.place(0, 160, 300, { vx: 580, vy: 0 });
+            } else {
+              ctx.boostStats(0, { size: 10, mass: 20 });
+              ctx.boostStats(1, { size: 127, mass: 127 });
+              ctx.boostStats(2, { size: 250, mass: 250 });
+              ctx.place(0, 170, 170, { vx: 620, vy: 40 });
+              ctx.place(1, 170, 300, { vx: 520, vy: -30 });
+              ctx.place(2, 170, 430, { vx: 460, vy: -40 });
+              ctx.place(3, 830, 210, { vx: -560, vy: 50 });
+              ctx.place(4, 830, 350, { vx: -480, vy: -40 });
+              ctx.place(5, 500, 470, { vx: 390, vy: -80 });
+            }
+          }
+        },
+        {
+          id: 'ball-puck-slide',
+          title: 'Moving Ball Hockey Puck Slide',
+          when: 'Free ball glides across the ice above 30 px/s (`playPuckSlide`).',
+          visual: 'Continuous hockey-puck ice hiss layered with hard vulcanized-rubber scrape that brightens and pans across the rink with speed and spin.',
+          soundLabel: 'Play puck slide',
+          variants: [
+            { id: 'fast', label: 'Fast Crisp Glide' },
+            { id: 'curve', label: 'Spinning Curve Slide' }
+          ],
+          duration: 2.6,
+          playSound: (ctx, variant = 'fast') =>
+            ctx.audio()?.playPuckSlide?.({ speed: variant === 'curve' ? 620 : 540, spin: variant === 'curve' ? 20 : 0, duration: 0.95 }),
+          run: (ctx, variant = 'fast') => {
+            ctx.resetStage({ phase: 'play', mode: 'standard' });
+            ctx.place(0, 180, 130);
+            ctx.place(1, 180, 470);
+            ctx.place(3, 820, 130);
+            ctx.place(4, 820, 470);
+            ctx.place(5, 500, 480);
+            if (variant === 'curve') {
+              ctx.place(6, 170, 390, { vx: 650, vy: -190, omega: 20, pace: 650 });
+            } else {
+              ctx.place(6, 160, 300, { vx: 660, vy: 35, omega: 3, pace: 660 });
+            }
+          }
+        },
+        {
+          id: 'spin-wobble-taper',
+          title: 'Spinning Wobble & Directional Tapered Arcs',
+          when: 'Skaters or ball spin with `|omega| >= 2.5 rad/s` (`drawSpin`, `playSpin`).',
+          visual: 'Spin blades taper from a vanishing tail to a bright forward-angled tip showing CW vs. CCW direction, paired with an upper-register gyroscopic spin wobble.',
+          soundLabel: 'Play spin wobble',
+          variants: [
+            { id: 'compare', label: 'CW vs. CCW Direction' },
+            { id: 'high-low', label: 'High Spin vs. Low Spin' }
+          ],
+          duration: 2.8,
+          playSound: ctx => ctx.audio()?.playSpin?.({ omega: 16, radius: 25, duration: 0.9, preview: true }),
+          run: (ctx, variant = 'compare') => {
+            ctx.resetStage({ phase: 'play', mode: 'standard' });
+            ctx.place(2, 180, 470);
+            ctx.place(4, 820, 130);
+            ctx.place(5, 820, 470);
+            if (variant === 'high-low') {
+              ctx.place(0, 300, 230, { vx: 210, vy: 0, omega: 18 });
+              ctx.place(1, 300, 385, { vx: 210, vy: 0, omega: 5.5 });
+              ctx.place(3, 720, 300);
+              ctx.place(6, 560, 300, { vx: 90, vy: 0, omega: -18 });
+            } else {
+              // Skater 0 spins clockwise (+omega), Away Skater 3 spins counter-clockwise (-omega)
+              ctx.place(0, 330, 300, { vx: 90, vy: -30, omega: 16 });
+              ctx.place(3, 670, 300, { vx: -90, vy: 30, omega: -16 });
+              ctx.place(1, 500, 175, { vx: 0, vy: 0, omega: 12 });
+              ctx.place(6, 500, 425, { vx: 0, vy: 0, omega: -15 });
+            }
+          }
+        },
+        {
           id: 'ice-skids',
           title: 'Hard Braking & Ice Skid Marks',
-          when: 'Sharp speed drop (`slowed > 220 px/s`) from Guard braking or heavy collision (`markIce`, `paintIce`).',
-          visual: 'Dual-layer Gaussian-blurred dark ice gouges (`SKID_LIFE = 12s`) scaled by braking depth.',
+          when: 'Sharp speed drop (`slowed > 220 px/s`) from Guard braking or heavy collision (`markIce`, `paintIce`, `playCarve`).',
+          visual: 'Dual-layer Gaussian-blurred dark ice gouges (`SKID_LIFE = 12s`) paired with an ice-hockey blade shave & snow-spray stop sound.',
+          soundLabel: 'Play ice brake',
           duration: 2.5,
+          playSound: ctx => ctx.audio()?.playCarve({ volume: 0.85 }),
           run: ctx => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
             ctx.place(0, 210, 240, { vx: 700, vy: 40 });
             ctx.place(1, 210, 380, { vx: 680, vy: -35 });
             ctx.place(3, 520, 255, { vx: -420, vy: 0, guarding: true });
             ctx.P.syncEffectiveStats(ctx.bodies[3]);
-            // Schedule a sharp mid-stride brake on skater 1 to demonstrate pure braking skid
+            // Schedule a sharp mid-stride brake on skater 1 to demonstrate pure braking skid + ice stop sound
             ctx.after(0.18, () => {
               const b = ctx.bodies[1];
               b.guarding = true;
@@ -203,10 +302,10 @@
           id: 'corner-carve',
           title: 'Corner Rim-Around (Skate Edge Carve)',
           when: 'Skater skims a 100 px curved corner arc (`vn <= 190`, `|vt| >= 150`) with co-rotating spin (`rimmed = true`).',
-          visual: 'Fine ice-mist spray (`#e8f7ff` / `#ffffff`) and curved corner skid mark while hugging the glass and keeping spin strike.',
-          soundLabel: 'Play ice carve',
+          visual: 'Fine ice-mist spray (`#e8f7ff` / `#ffffff`), curved corner skid mark, and the shared ice-hockey hard-brake edge shave sound.',
+          soundLabel: 'Play ice brake',
           duration: 2.4,
-          playSound: ctx => ctx.audio()?.playCarve({ volume: 0.8 }),
+          playSound: ctx => ctx.audio()?.playCarve({ volume: 0.85 }),
           run: ctx => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
             // Top-left corner (center 160,160, radius 100): moving left along top wall (vt > 0 -> negative omega co-rotates)
@@ -218,12 +317,12 @@
         },
         {
           id: 'slipstream-draft',
-          title: 'Tailgating (Slipstream Wake Draft)',
-          when: 'Skater drafts in the wake cone behind any fast skater (`tailgateFactor > 0.35`).',
-          visual: 'Pale-cyan and white wake streak particles (`#d6f6ff` / `#ffffff`) with up to 40% reduced ice friction.',
-          soundLabel: 'Play slipstream',
-          duration: 2.4,
-          playSound: ctx => ctx.audio()?.playSlipstream({ volume: 0.7 }),
+          title: 'Tailgating (Front Wind Cone & Continuous Slipstream)',
+          when: 'Skater drafts behind any fast skater (`tailgateFactor > 0.22` cone, `> 0.35` continuous wind).',
+          visual: 'Translucent pale-cyan aerodynamic wind cone parting around the front of the drafting ubu, wake streaks, and continuous rushing wind.',
+          soundLabel: 'Play slipstream wind',
+          duration: 2.6,
+          playSound: ctx => ctx.audio()?.playSlipstream({ draft: 0.85, volume: 0.75, duration: 1.0 }),
           run: ctx => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
             ctx.place(1, 260, 260, { vx: 580, vy: 0 });
@@ -311,13 +410,13 @@
         {
           id: 'spin-strike',
           title: 'Point-Blank Spin Strike (`"Spin strike!"`)',
-          when: 'Skater launched with spin touches the ball first within 2 ball diameters (`tick.struck`).',
-          visual: 'Counter-rotating spin arcs on ball, extra shot speed + Magnus curve, 60-100ms hit-stop + shake, and `"Spin strike!"` callout.',
-          soundLabel: 'Play ball strike',
+          when: 'Skater launched with spin touches the ball first within 2 ball diameters (`tick.struck`, `playSpinStrike`).',
+          visual: 'Spinny, swooshy whip-crack sound, tapered counter-rotating spin blades on the ball, extra shot speed + Magnus curve, hit-stop, and `"Spin strike!"` callout.',
+          soundLabel: 'Play spin whip',
           duration: 2.5,
           playSound: ctx => {
-            ctx.audio()?.playCollision(ctx.voice(), { volume: 0.9 });
-            ctx.audio()?.playBallHit({ volume: 0.95, snap: false });
+            ctx.audio()?.playSpinStrike?.({ volume: 0.92, spin: 16 });
+            ctx.audio()?.playBallHit({ volume: 0.9, snap: false });
           },
           run: ctx => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
@@ -332,30 +431,43 @@
         },
         {
           id: 'snap-one-timer',
-          title: 'Snap One-Timer Redirect',
+          title: 'Snap One-Timer Redirect (Team Colors)',
           when: 'Non-guarding skater (>=140 px/s) redirects a live teammate pass (>=180 px/s, `snapped = true`).',
-          visual: '12 directional warm-gold & white sparks (`#ffd76b`), +30 fire pre-heat ticks, and 60-100ms hit-stop + shake.',
+          visual: 'Team-colored shockwave ring, contact flash, and 20 directional & V-wing team-colored streaks/sparks, +30 fire pre-heat ticks, and 60-100ms hit-stop.',
           soundLabel: 'Play snap crack',
+          variants: [
+            { id: 'home', label: 'Home Team Snap' },
+            { id: 'away', label: 'Away Team Snap' }
+          ],
           duration: 2.4,
           playSound: ctx => ctx.audio()?.playBallHit({ volume: 1.0, snap: true }),
-          run: ctx => {
+          run: (ctx, variant = 'home') => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
-            ctx.place(1, 430, 140, { vx: 40, vy: 40 });
-            ctx.place(6, 495, 225, { vx: 30, vy: 340, pace: 340, strikerTeam: 0, strikerSlot: 1 });
-            ctx.play.last = 1;
-            ctx.place(0, 405, 305, { vx: 540, vy: -20 });
-            ctx.place(3, 810, 150);
-            ctx.place(4, 810, 450);
+            if (variant === 'away') {
+              ctx.place(4, 570, 140, { vx: -40, vy: 40 });
+              ctx.place(6, 505, 225, { vx: -30, vy: 340, pace: 340, strikerTeam: 1, strikerSlot: 1 });
+              ctx.play.last = 4;
+              ctx.place(3, 595, 305, { vx: -540, vy: -20 });
+              ctx.place(0, 190, 150);
+              ctx.place(1, 190, 450);
+            } else {
+              ctx.place(1, 430, 140, { vx: 40, vy: 40 });
+              ctx.place(6, 495, 225, { vx: 30, vy: 340, pace: 340, strikerTeam: 0, strikerSlot: 1 });
+              ctx.play.last = 1;
+              ctx.place(0, 405, 305, { vx: 540, vy: -20 });
+              ctx.place(3, 810, 150);
+              ctx.place(4, 810, 450);
+            }
           }
         },
         {
           id: 'board-ripple',
-          title: 'Board Flex Bulge & Wall Impact',
-          when: 'Body or ball hits rink boards above 220 px/s (`addWallEffect`, `handleWall`).',
-          visual: 'Damped outward cosine bulge along `BOARD_RUNS` + tangent spark burst.',
-          soundLabel: 'Play board thud',
+          title: 'Board Flex Bulge & Hockey Wall Thock',
+          when: 'Body or ball hits rink boards above 220 px/s (`addWallEffect`, `handleWall`, `playWallHit`).',
+          visual: 'Damped outward cosine bulge along `BOARD_RUNS`, tangent spark burst, and a restrained hollow hockey dasher-board thock.',
+          soundLabel: 'Play board thock',
           duration: 2.2,
-          playSound: ctx => ctx.audio()?.playWallHit({ volume: 0.9 }),
+          playSound: ctx => ctx.audio()?.playWallHit({ volume: 0.78 }),
           run: ctx => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
             ctx.place(0, 380, 130, { vx: 220, vy: -580 });
@@ -429,19 +541,18 @@
         },
         {
           id: 'fireball-plow',
-          title: 'Fireball Overpower (Plow) & Teammate Hot Shot',
-          when: 'Fireball overpowers an unguarded defender (`E > R`, `plow = true`) or is trapped & re-fired (`HOT_DRIVE`).',
-          visual: '15-particle flame scatter on plow impact + defender daze, or a stationary burning ball keeping its high pace lit for a teammate one-timer.',
-          soundLabel: 'Play plow impact',
+          title: 'Flaming Ball Impacts: Plow & Hot Shot Explosive Woosh',
+          when: 'Flaming ball strikes a skater, boards, or defender (`plow = true`, `HOT_DRIVE`, `playFireImpact`).',
+          visual: '15-particle flame scatter + firestarting explosive woosh (a compact cousin of Cannonball) on every flaming ball impact or Meteor Bank.',
+          soundLabel: 'Play fire impact woosh',
           variants: [
             { id: 'plow', label: 'Overpower Defender (Plow)' },
             { id: 'hotshot', label: 'Teammate Trap + Hot Shot' }
           ],
           duration: 2.6,
           playSound: ctx => {
-            ctx.playTimedSizzle(0.9);
-            ctx.audio()?.playBallHit({ volume: 1.0, snap: false });
-            ctx.audio()?.playCollision(ctx.voice(), { volume: 1.0 });
+            ctx.audio()?.playFireImpact?.({ volume: 0.9 });
+            ctx.audio()?.playBallHit({ volume: 0.9, snap: false });
           },
           run: (ctx, variant = 'plow') => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
@@ -474,17 +585,16 @@
         {
           id: 'standard-save',
           title: 'Goal-Line Save (`"Save!"` & `"Save..."`)',
-          when: 'Skater intercepts a shot within 300 px of own goal that was heading in within 1s (`creditSave`).',
-          visual: 'Pop-in `"Save!"` callout (or `"Save..."` with zero meter when saving an own-team touch), 60-100ms hit-stop + shake, and meter glint.',
-          soundLabel: 'Play save impact',
+          when: 'Skater intercepts a shot within 300 px of own goal that was heading in within 1s (`creditSave`, `playSave`).',
+          visual: 'Crisp metallic blade shing/tink (gentler tink on `"Save..."`), pop-in `"Save!"` callout, 60-100ms hit-stop + shake, and meter glint.',
+          soundLabel: 'Play save shing',
           variants: [
             { id: 'save', label: 'Save! (Opponent Shot)' },
             { id: 'own', label: 'Save... (Own-Team Deflection)' }
           ],
           duration: 2.4,
-          playSound: ctx => {
-            ctx.audio()?.playCollision(ctx.voice(), { volume: 0.9 });
-            ctx.audio()?.playBallHit({ volume: 0.9 });
+          playSound: (ctx, variant = 'save') => {
+            ctx.audio()?.playSave?.({ own: variant === 'own' });
           },
           run: (ctx, variant = 'save') => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
@@ -596,10 +706,10 @@
         },
         {
           id: 'super-knockout',
-          title: '01 · Knockout (Crimson Hit & Stunned State)',
+          title: '01 · Knockout (Heavyweight POW & Stunned State)',
           when: 'Touching an opposing skater while Knockout is active (`handleSuper("knockout", "impact")`).',
-          visual: 'Crimson & pink aura (`#ee2b47` / `#ff7197`), large crimson impact burst, target dimmed grayscale with `💫` stun stars.',
-          soundLabel: 'Play knockout hit',
+          visual: 'Crimson & pink aura (`#ee2b47` / `#ff7197`), heavyweight arcade POW punch, crimson impact burst, and target dimmed with `💫` stun stars.',
+          soundLabel: 'Play knockout POW',
           duration: 2.5,
           playSound: ctx => ctx.audio()?.playSuper('knockout', 'impact'),
           run: ctx => {
@@ -617,10 +727,10 @@
         },
         {
           id: 'super-sticky',
-          title: '02 · Sticky (Ball Grab & Emerald Energy Tether)',
+          title: '02 · Sticky (Goop Splat Grab & Emerald Tether)',
           when: 'Touching the ball with Sticky active (`handleSuper("sticky", "impact")`, `drawStickyTether`).',
-          visual: 'Emerald aura (`#42c66b`) and pulsing external-tangent energy bridge (`#44dd66` / `#d9ffe3`) welding the ball to the carrier.',
-          soundLabel: 'Play sticky squish',
+          visual: 'Emerald aura (`#42c66b`), bouncy cartoon goop-splat & jelly bubble pops, and pulsing tangent energy bridge (`#44dd66` / `#d9ffe3`).',
+          soundLabel: 'Play goop splat',
           duration: 2.8,
           playSound: ctx => ctx.audio()?.playSuper('sticky', 'impact'),
           run: ctx => {
@@ -679,9 +789,9 @@
         },
         {
           id: 'super-colossus',
-          title: '05 · Colossus (1.8x Titan Growth & Thunder)',
+          title: '05 · Colossus (1.8x Titan Growth & Thunderclap)',
           when: 'Launching with Colossus armed (`handleSuper("colossus", "launch")`).',
-          visual: 'Golden titan aura (`#ffe043` / `#c8961e`), 1.8x physical radius & mass growth bowling defenders aside.',
+          visual: 'Golden titan aura (`#ffe043` / `#c8961e`), sky-splitting thunderclap & rolling giant rumble, and 1.8x size/mass bowling defenders aside.',
           soundLabel: 'Play colossus thunder',
           duration: 2.7,
           playSound: ctx => ctx.audio()?.playSuper('colossus', 'launch'),
@@ -700,10 +810,10 @@
         },
         {
           id: 'super-shockwave',
-          title: '06 · Shockwave (Proximity Blast & Repulsion Field)',
+          title: '06 · Shockwave (Sonic Force-Repulsor & Blast Rings)',
           when: 'Opponent enters 170 px of an active Shockwave skater (`handleShockwave`).',
-          visual: 'Rose & mulberry aura (`#ff7197` / `#9d467a`), twin concentric shockwave rings + bursts blasting opponents away.',
-          soundLabel: 'Play shockwave zap',
+          visual: 'Rose & mulberry aura (`#ff7197` / `#9d467a`), twin concentric shockwave rings, vacuum pre-snap, sub-sonic boom & harmonic ring shimmer.',
+          soundLabel: 'Play shockwave pulse',
           duration: 2.6,
           playSound: ctx => ctx.audio()?.playSuper('shockwave', 'impact'),
           run: ctx => {
@@ -854,8 +964,8 @@
         {
           id: 'goal-celebration',
           title: 'Goal Light Sweep, Fireworks, Call Banner & Fanfare',
-          when: 'Ball crosses a goal line (`celebrate`, `drawGoalSweep`, `drawGoalCall`, `playFanfare`).',
-          visual: '200ms hit-stop + double shake, scorebug pop + colored tab, sweeping light band, flaring net frame, 9 peony/ring firework shells + crackles, scorer double-ring & portrait call.',
+          when: 'Ball crosses a goal line (`celebrate`, `drawGoalSweep`, `drawGoalCall`, `playFanfare`, `playFirework`).',
+          visual: '200ms hit-stop + double shake, sweeping light band, 9 peony/ring firework shells with stereo mortar pops & crackles, scorer double-ring & portrait call.',
           soundLabel: 'Play goal fanfare',
           variants: GOAL_CALL_VARIANTS,
           duration: 4.5,
@@ -896,6 +1006,24 @@
             ctx.play.credit[0] = 1;
             ctx.play.last = 0;
             ctx.setForcedGoalLabel('FIREBALL!');
+          }
+        },
+        {
+          id: 'goal-fireworks',
+          title: 'Goal Fireworks & Aerial Shell Pops',
+          when: 'Post-goal firework shells reach fuse zero (`explodeShell`, `crackle`, `playFirework`).',
+          visual: 'Peony and ring firework bursts across the scoring half with synchronized stereo mortar pops, star-burst snaps, and sky crackles (fanfare omitted so pops are isolated).',
+          soundLabel: 'Play firework pop',
+          variants: [
+            { id: 'peony', label: 'Peony Volley (Home)' },
+            { id: 'ring', label: 'Ring Shell Volley (Away)' }
+          ],
+          duration: 3.6,
+          playSound: (ctx, variant = 'peony') => ctx.audio()?.playFirework?.({ ring: variant === 'ring', volume: 0.75 }),
+          run: (ctx, variant = 'peony') => {
+            ctx.resetStage({ phase: 'goal', mode: 'standard' });
+            const team = variant === 'ring' ? 1 : 0;
+            ctx.presenter.celebrate(team, ctx.bodies[6], variant === 'ring' ? 'SNIPE!' : 'GOAL', ctx.bodies[team ? 3 : 0]);
           }
         },
         {
@@ -1115,6 +1243,8 @@
       if (iron) {
         presenter.steamRing(body.x, body.y, body.radius);
         activeAudio()?.playIronSave?.();
+      } else {
+        activeAudio()?.playSave?.({ own: Boolean(own) });
       }
       if (phase === 'play' && !own && !goalReplay) {
         ububallMatch.gainMeter(P, view.bodies, stats, body, ububallMatch.METER.save, ububallMatch.rule(view.mode, 'classic'));
@@ -1798,7 +1928,7 @@
       if (activeDemo) runDemo(activeDemo, activeVariant);
       else runDemo(EFFECT_GROUPS[0].items[0]);
     };
-    $('btn-pause').onclick = () => { paused = !paused; updatePauseButton(); };
+    $('btn-pause').onclick = () => { paused = !paused; if (paused) ubuAudio?.stopMotion?.(); updatePauseButton(); };
     $('btn-step-1').onclick = () => stepManualTicks(1);
     $('btn-step-10').onclick = () => stepManualTicks(10);
     $('btn-launch-plan').onclick = () => { if (phase === 'plan') launchPlans(plans); };

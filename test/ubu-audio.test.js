@@ -499,3 +499,70 @@ test('quirk audio cues (Snap crack, spin-inflected post ring, corner carve, slip
   audio.playGoalHit('post', { ctx: shared, spin: 18, speed: 500 });
   assert.equal(shared.nodes.filter(n => n.kind === 'compressor').length, 1, 'all quirk sounds share single export compressor');
 });
+
+
+test('movement wobble, spin wobble, puck slide, spin strike, fire impact, save shing, and firework pop synthesize cleanly', () => {
+  // Silent no-op when no user gesture / AudioContext is active
+  assert.doesNotThrow(() => audio.playUbuMove({ speed: 450, mass: 3, radius: 25 }));
+  assert.doesNotThrow(() => audio.playSpin({ omega: 14, radius: 25 }));
+  assert.doesNotThrow(() => audio.playPuckSlide({ speed: 500 }));
+  assert.doesNotThrow(() => audio.playSpinStrike({ spin: 16 }));
+  assert.doesNotThrow(() => audio.playFireImpact({ volume: 0.8 }));
+  assert.doesNotThrow(() => audio.playSave({ own: false }));
+  assert.doesNotThrow(() => audio.playFirework({ ring: true, pan: -0.3 }));
+  assert.doesNotThrow(() => audio.stopMotion());
+
+  // 1. Moving ubu wobble: faster speed increases pitch & loudness; larger size lowers pitch; heavier mass deepens FM wobble
+  const slowCtx = recordedContext(), fastCtx = recordedContext();
+  const smallCtx = recordedContext(), giantCtx = recordedContext();
+  const lightCtx = recordedContext(), heavyCtx = recordedContext();
+
+  audio.playUbuMove({ ctx: slowCtx, id: 0, speed: 120, mass: 3, radius: 25 });
+  audio.playUbuMove({ ctx: fastCtx, id: 0, speed: 650, mass: 3, radius: 25 });
+  const slowCarrier = slowCtx.nodes.find(n => n.kind === 'oscillator' && n.type === 'triangle');
+  const fastCarrier = fastCtx.nodes.find(n => n.kind === 'oscillator' && n.type === 'triangle');
+  assert.ok(fastCarrier.frequency.value > slowCarrier.frequency.value, 'faster speed increases wobble carrier pitch');
+
+  audio.playUbuMove({ ctx: smallCtx, id: 0, speed: 400, mass: 3, radius: 17 });
+  audio.playUbuMove({ ctx: giantCtx, id: 0, speed: 400, mass: 3, radius: 42 });
+  const smallCarrier = smallCtx.nodes.find(n => n.kind === 'oscillator' && n.type === 'triangle');
+  const giantCarrier = giantCtx.nodes.find(n => n.kind === 'oscillator' && n.type === 'triangle');
+  assert.ok(smallCarrier.frequency.value > giantCarrier.frequency.value, 'larger ubu radius lowers resonant pitch');
+
+  audio.playUbuMove({ ctx: lightCtx, id: 0, speed: 400, mass: 2.4, radius: 25 });
+  audio.playUbuMove({ ctx: heavyCtx, id: 0, speed: 400, mass: 5.4, radius: 25 });
+  const lightFilter = lightCtx.nodes.filter(n => n.kind === 'filter' && n.type === 'lowpass').at(-1);
+  const heavyFilter = heavyCtx.nodes.filter(n => n.kind === 'filter' && n.type === 'lowpass').at(-1);
+  assert.ok(heavyFilter.Q.value > lightFilter.Q.value, 'heavier mass increases resonant low-mid body');
+
+  // Updating an existing continuous loop reuses its oscillator nodes, and speed <= 28 stops it cleanly
+  const countBeforeUpdate = fastCtx.nodes.filter(n => n.kind === 'oscillator').length;
+  fastCtx.currentTime = 0.05;
+  audio.playUbuMove({ ctx: fastCtx, id: 0, speed: 500, mass: 3, radius: 25 });
+  assert.equal(fastCtx.nodes.filter(n => n.kind === 'oscillator').length, countBeforeUpdate, 'continuous loop reuses oscillators');
+  fastCtx.currentTime = 0.1;
+  audio.playUbuMove({ ctx: fastCtx, id: 0, speed: 0, mass: 3, radius: 25 });
+  assert.ok(fastCarrier.stopped <= 0.135, 'dropping below threshold stops continuous loop');
+
+  // 2. Spinning wobble sits in a higher register than movement wobble and layers harmonic partial
+  const spinCtx = recordedContext();
+  audio.playSpin({ ctx: spinCtx, id: 0, omega: 15, radius: 25 });
+  const spinSines = spinCtx.nodes.filter(n => n.kind === 'oscillator');
+  assert.ok(spinSines.length >= 3, 'spin wobble uses dual harmonic oscillators + LFO');
+  assert.ok(spinSines[0].frequency.value > fastCarrier.frequency.value, 'spin wobble stands out in higher register');
+  audio.stopMotion();
+  assert.ok(spinSines[0].stopped !== undefined, 'stopMotion stops active spin loop');
+
+  // 3. Shared master chain compatibility across all new sounds (for MP4 video export)
+  const shared = recordedContext();
+  audio.shareMasterChain(shared);
+  audio.playUbuMove({ ctx: shared, speed: 480, mass: 3, radius: 25 });
+  audio.playSpin({ ctx: shared, omega: 14, radius: 25 });
+  audio.playPuckSlide({ ctx: shared, speed: 550, spin: 12 });
+  audio.playSpinStrike({ ctx: shared, spin: 18, volume: 0.9 });
+  audio.playFireImpact({ ctx: shared, volume: 0.85 });
+  audio.playSave({ ctx: shared, own: false });
+  audio.playSave({ ctx: shared, own: true });
+  audio.playFirework({ ctx: shared, ring: true, pan: 0.4 });
+  assert.equal(shared.nodes.filter(n => n.kind === 'compressor').length, 1, 'all new sounds share export master chain');
+});
