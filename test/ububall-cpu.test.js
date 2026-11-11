@@ -110,3 +110,23 @@ test('worker client snapshots public state, cancels stale work and reports failu
   client.plan(state, {});
   assert.equal(workers.length, 3);
 });
+
+test('decided() does not cut off search while ball sits in a corner or skater slides toward crease, and Colossus strike accounts for swollen radius', () => {
+  const bodies = P.kickoff();
+  bodies.slice(0, 6).forEach(b => P.applyStats(b));
+  Object.assign(bodies[6], { x: 95, y: 95, vx: 0, vy: 0 });
+  Object.assign(bodies[0], { x: 500, y: 300, vx: 10, vy: 0 });
+  assert.equal(C.decided(bodies), false, 'resting ball in corner is not prematurely marked decided');
+
+  Object.assign(bodies[6], { x: 500, y: 300, vx: 0, vy: 0 });
+  Object.assign(bodies[0], { x: 155, y: 300, vx: -200, vy: 0 });
+  assert.equal(C.decided(bodies), false, 'skater sliding toward own crease is not prematurely marked decided');
+
+  const shooter = P.kickoff()[0], ball = P.kickoff()[6];
+  P.applyStats(shooter);
+  Object.assign(shooter, { x: 400, y: 220 });
+  Object.assign(ball, { x: 500, y: 300 });
+  const normalAim = C.strike(shooter, ball, 940, 300, null);
+  const colossusAim = C.strike(shooter, ball, 940, 300, 'colossus');
+  assert.notEqual(normalAim.angle, colossusAim.angle, 'Colossus strike adjusts contact angle for 1.8x swollen radius');
+});

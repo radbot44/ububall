@@ -36,13 +36,20 @@
   function decided(bodies) {
     const ball = bodies[6];
     if (ball.vx || ball.vy || P.holder(bodies)) return false;
+    // Do not truncate when the resting ball sits in a corner (corner-stalling count/reset applies at turn end).
+    if (M.cornerOf(P, ball.x, ball.y) !== null) return false;
+    if (M.camping(P, bodies, 0) || M.camping(P, bodies, 1)) return false;
+    const goalY = (P.rink.goalTop + P.rink.goalBottom) / 2;
     for (let i = 0; i < 6; i++) {
       const b = bodies[i];
       if (b.superActive) return false;
       const speed2 = b.vx * b.vx + b.vy * b.vy;
       if (!speed2) continue;
+      const stopDist = speed2 / (2 * b.friction);
       const contact = Math.max(b.radius, b.reach || b.radius, 18) + ball.radius;
-      if (Math.hypot(b.x - ball.x, b.y - ball.y) - contact <= speed2 / (2 * b.friction)) return false;
+      if (Math.hypot(b.x - ball.x, b.y - ball.y) - contact <= stopDist) return false;
+      const ownGoalX = b.team ? P.rink.right : P.rink.left;
+      if (Math.hypot(b.x - ownGoalX, b.y - goalY) - M.FOULS.crease <= stopDist) return false;
     }
     return true;
   }
@@ -321,7 +328,10 @@
       leadY = Math.max(105, Math.min(495, ball.y + ((ball.vy || 0) / ballSpeed) * leadDist));
     }
     const d = Math.hypot(x - leadX, y - leadY) || 1;
-    const contact = Math.max(body.radius, body.reach || body.radius) + ball.radius - 1;
+    const effRadius = superKey === 'colossus' && body.superActive !== 'colossus'
+      ? Math.min(60, (body.baseRadius ?? body.radius) * P.SUPER.colossusRadius)
+      : body.radius;
+    const contact = Math.max(effRadius, body.reach || effRadius, 18) + ball.radius - 1;
     return aim(body, leadX - (x - leadX) / d * contact, leadY - (y - leadY) / d * contact, 260, superKey);
   }
   const creativityOf = body => (body.personality?.creativity ?? 31.5) / 63;
@@ -565,9 +575,9 @@
         },
         wall(body, velocity, type) { if (body.team === -1 && touches && type !== 'net') boards++; }
       };
-      const canDecide = !state.fouls?.crease?.[team];
+      const canDecide = !state.fouls?.crease?.[team] && !state.fouls?.crease?.[1 - team] && state.fouls?.corner === null;
       const checkDecided = canDecide ? bodies => touches > 0 && decided(bodies) : null;
-      const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false, ticks: searchTicks, decided: checkDecided, watch, preservePartial: true });
+      const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false, fastSearch: true, ticks: searchTicks, decided: checkDecided, watch, preservePartial: true });
       simulations++; ticks += result.replay.ticks;
       return evaluate(result.state, team, result.replay.goal, weights, boards + Math.max(0, touches - 1), toucher, teammatesTouched.size > 1, tmw);
     }

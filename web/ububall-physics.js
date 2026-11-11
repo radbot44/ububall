@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 21;
+  const VERSION = 22;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IRON_COOLDOWN_TICKS = 48; // ~200 ms at 240 Hz DT: cooldown after an Iron Save
@@ -64,8 +64,8 @@
   // Super tuning: every super lasts SUPER.ticks of play (3 s) or until spent, carrying across Pulse
   // turns. Sticky lets go after holdTicks or when an opponent hits the carrier, who skates with
   // carryFriction × friction meanwhile. Magnet pulls within magnetRadius, up to magnetPull px/s² at
-  // contact. Shockwave fires on an opponent or when its time runs out, pushing within shockRadius;
-  // teammates feel shockTeammate of it. Cannonball adds cannonball × the ball impulse. Colossus
+  // contact. Shockwave bursts on first opponent proximity within shockRadius, then repels opponents;
+  // Iron Save's minor blast scales teammates by shockTeammate. Cannonball adds cannonball × ball impulse. Colossus
   // grows by colossusRadius and colossusMass.
   const SUPER = Object.freeze({ ticks: 720, holdTicks: 480, carryFriction: 1.5, magnetRadius: 190, magnetPull: 1000,
     shockRadius: 170, shockForce: 1100, shockTeammate: .4, shockRepel: 550, cannonball: 1,
@@ -165,7 +165,7 @@
     return bodies;
   }
   // Counts boards and contacts resolved, so a collision pass that resolved nothing ends the passes.
-  let resolved = 0;
+  let resolved = 0, stickyWallHost = null;
   function reflect(b, nx, ny, penetration, wallType = 'wall', onWall = null) {
     resolved++;
     b.x -= nx * penetration; b.y -= ny * penetration;
@@ -173,18 +173,21 @@
     if (velocity > 0) {
       b.spinStrike = 0; // A wall bounce spends a launching ubu's spin strike.
       const surface = SURFACES[wallType];
-      const isMeteor = b.team === -1 && ballOnFire(b) && surface.meteorBank;
+      const carrier = b.team === -1 ? stickyWallHost : null;
+      const isMeteor = b.team === -1 && !carrier && ballOnFire(b) && surface.meteorBank;
       const preSpeed = isMeteor ? Math.hypot(b.vx, b.vy) : 0;
-      const restitution = b.team === -1 ? surface.restitution
-        : Math.min(surface.ubuRestitutionCap, surface.restitution * (b.bounciness ?? 1) * (b.sizeMult ?? 1) ** SIZE.boards);
+      const restitutionBody = carrier || b;
+      const restitution = restitutionBody.team === -1 ? surface.restitution
+        : Math.min(surface.ubuRestitutionCap, surface.restitution * (restitutionBody.bounciness ?? 1) * (restitutionBody.sizeMult ?? 1) ** SIZE.boards);
+      const effMass = carrier ? carrier.mass + b.mass : b.mass;
       const rebound = 1 + restitution;
       b.vx -= rebound * velocity * nx; b.vy -= rebound * velocity * ny;
       const tx = -ny, ty = nx;
       const slip = b.vx * tx + b.vy * ty + b.omega * b.radius;
-      const limit = (b.grip * surface.gripScale) * rebound * velocity * b.mass;
-      const impulse = Math.max(-limit, Math.min(limit, -slip * b.mass / 3));
-      b.vx += impulse * tx / b.mass; b.vy += impulse * ty / b.mass;
-      b.omega += 2 * impulse / (b.mass * b.radius);
+      const limit = (b.grip * surface.gripScale) * rebound * velocity * effMass;
+      const impulse = Math.max(-limit, Math.min(limit, -slip * effMass / 3));
+      b.vx += impulse * tx / effMass; b.vy += impulse * ty / effMass;
+      b.omega += 2 * impulse / (effMass * b.radius);
       b.omega *= 0.5; // Dampen spin on wall contact so balls don't curve right back into the wall
       if (isMeteor && preSpeed > 0) {
         const postSpeed = Math.hypot(b.vx, b.vy);
@@ -336,6 +339,38 @@
     if (d2 > radius * radius) return;
     resolved++;
     const d = Math.sqrt(d2);
+    const preNx = d ? dx / d : 1, preNy = d ? dy / d : 0;
+    const preClosing = (b.vx - a.vx) * preNx + (b.vy - a.vy) * preNy;
+    const carrier = isBall && allBodies ? holder(allBodies) : null;
+    if (carrier && carrier !== player) {
+      if (player.superActive === 'sticky' || (player.team !== carrier.team && preClosing < 0 && (ball.stuckTicks || 0) > 0)) {
+        // An opponent checking the held ball (or another Sticky grab) knocks the carrier's hold loose first.
+        endSuper(carrier, allBodies);
+      } else {
+        // Teammate or separating contact against a held ball transfers cleanly to the carrier+ball assembly.
+        const overlap = radius - d;
+        const pIsA = player === a, sign = pIsA ? 1 : -1;
+        const cMass = carrier.mass + ball.mass;
+        const invP = player.superActive === 'stalwart' ? 0 : 1 / player.mass;
+        const invC = carrier.superActive === 'stalwart' ? 0 : 1 / cMass;
+        const invSum = invP + invC;
+        if (invSum > 0) {
+          const corr = overlap / invSum;
+          if (invP > 0) { player.x -= sign * preNx * corr * invP; player.y -= sign * preNy * corr * invP; }
+          if (invC > 0) { carrier.x += sign * preNx * corr * invC; carrier.y += sign * preNy * corr * invC; }
+          if (preClosing < 0) {
+            const j = -(1 + .88) * preClosing / invSum;
+            if (invP > 0) { player.vx -= sign * j * preNx * invP; player.vy -= sign * j * preNy * invP; }
+            if (invC > 0) { carrier.vx += sign * j * preNx * invC; carrier.vy += sign * j * preNy * invC; }
+            if (typeof onCollide === 'function') onCollide(a, b, -preClosing, j, false, false, null);
+          }
+        }
+        const off = ball.stickOffset || { x: carrier.radius + ball.radius, y: 0 };
+        ball.x = carrier.x + off.x; ball.y = carrier.y + off.y;
+        ball.vx = carrier.vx; ball.vy = carrier.vy; ball.omega = carrier.omega;
+        return;
+      }
+    }
     // Pace (see HEAT): only the striking team's own ubus slow the ball without it counting.
     const own = Boolean(player) && player.team === ball.strikerTeam, hot = ballOnFire(ball);
     const drive = player ? (player.vx * (ball.x - player.x) + player.vy * (ball.y - player.y)) / (d || 1) : 0;
@@ -356,8 +391,8 @@
       ball.openingShot = false;
     } else a.spinStrike = b.spinStrike = 0;
 
-    const nx = d ? dx / d : 1, ny = d ? dy / d : 0;
-    const closing = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+    const nx = preNx, ny = preNy;
+    const closing = preClosing;
 
     let knockoutChecker = null;
     if (!isBall && a.team !== b.team && closing < 0) {
@@ -378,7 +413,7 @@
     let fireWin = null, ironSave = false;
 
     if (isBall && player.superActive === 'sticky') {
-      for (const o of allBodies || []) o.holding = false;
+      for (const o of allBodies || []) if (o.holding && o !== player) endSuper(o, allBodies);
       player.holding = true; ball.stuckTicks = 0;
       onSuper?.('sticky', 'impact', player, ball);
       // An opponent's Sticky smothers the ball; a teammate's keeps it as hot as it was.
@@ -516,8 +551,10 @@
     if (!isBall && a.team !== b.team) {
       const driveA = normalA, driveB = -normalB;
       const knockA = Math.abs(impulseA * invA), knockB = Math.abs(impulseB * invB);
-      if (driveB >= driveA && knockA >= DAZE.speed && !(a.superActive === 'stalwart' || a.superActive === 'colossus')) checker = b;
-      else if (driveA >= driveB && knockB >= DAZE.speed && !(b.superActive === 'stalwart' || b.superActive === 'colossus')) checker = a;
+      if (!checker) {
+        if (driveB > driveA && knockA > DAZE.speed && a.superActive !== 'stalwart') checker = b;
+        else if (driveA > driveB && knockB > DAZE.speed && b.superActive !== 'stalwart') checker = a;
+      }
       if (driveB >= driveA) daze(a, knockA);
       if (driveA >= driveB) daze(b, knockB);
     }
@@ -570,12 +607,15 @@
       if (strikeBoost) ball.spinStruck = true; // Read and cleared by the caller, for a callout.
     }
     if (ironSave) {
-      for (const body of [a, b]) { body.vx *= IRON_KEEP; body.vy *= IRON_KEEP; body.omega *= IRON_KEEP; }
+      for (const body of [a, b]) {
+        if (body.superActive === 'stalwart') continue;
+        body.vx *= IRON_KEEP; body.vy *= IRON_KEEP; body.omega *= IRON_KEEP;
+      }
     }
     if (ball) {
       const speed = Math.hypot(ball.vx, ball.vy), pace = ball.pace || 0;
       if (!own) ball.pace = speed;
-      else if (hot && drive >= HOT_DRIVE && pace > speed) {
+      else if (!ironSave && hot && drive >= HOT_DRIVE && pace > speed) {
         // A hot shot leaves at the ball's pace, along its new heading or straight off the ubu.
         const ux = speed ? ball.vx / speed : (ball.x - player.x) / (d || 1), uy = speed ? ball.vy / speed : (ball.y - player.y) / (d || 1);
         ball.vx = ux * pace; ball.vy = uy * pace;
@@ -601,12 +641,14 @@
       }
       onSuper(key, action, a, b);
     } : null;
-    const ball = bodies.find(b => b.team === -1);
+    const count = bodies.length;
+    const ball = count === 7 && bodies[6].team === -1 ? bodies[6] : bodies.find(b => b.team === -1);
     if (ball?.openingShot) {
       // Existing contact must count before motion can separate the bodies.
       // A different ubu already touching also invalidates a close setup.
       let touching = 0, b = null;
-      for (const other of bodies) {
+      for (let i = 0; i < count; i++) {
+        const other = bodies[i];
         if (other.team >= 0 && !other.carded && (other.x - ball.x) ** 2 + (other.y - ball.y) ** 2 <= (ballHitRadius(other) + ball.radius) ** 2) { touching++; b = other; }
       }
       if (touching > 1 || (touching === 1 && !b.spinStrike)) ball.openingShot = false;
@@ -614,10 +656,23 @@
         if ((ball.vx - b.vx) * (ball.x - b.x) + (ball.vy - b.vy) * (ball.y - b.y) >= 0) ball.openingShot = false;
       }
     }
-    // Who holds the ball changes only in a collision (or as the hold times out, below).
-    let host = ball && holder(bodies);
-    if (ball && !host) {
-      for (const b of bodies) {
+    // Single-pass scan for Sticky holder, cooldowns, and active supers (skips loops when none are active).
+    let host = null, hasMagnet = false, hasShockwave = false, hasTimedSuper = false;
+    for (let i = 0; i < count; i++) {
+      const b = bodies[i];
+      if (b.holding && !host) host = b;
+      if (b.ironCooldownTicks > 0) b.ironCooldownTicks--;
+      const sa = b.superActive;
+      if (sa) {
+        if (sa === 'magnet' && b.team !== -1) hasMagnet = true;
+        if (sa === 'shockwave' && b.team >= 0) hasShockwave = true;
+        if (b.team >= 0 && b.superTicks) hasTimedSuper = true;
+      }
+    }
+    if (!ball) host = null;
+    if (ball && !host && hasMagnet) {
+      for (let i = 0; i < count; i++) {
+        const b = bodies[i];
         if (b.team !== -1 && b.superActive === 'magnet') {
           const dx = b.x - ball.x, dy = b.y - ball.y, d2 = dx * dx + dy * dy;
           const minDist = b.radius + ball.radius;
@@ -634,68 +689,85 @@
       }
     }
     // Supers run on play time: each lasts SUPER.ticks.
-    for (const b of bodies) {
-      if (b.ironCooldownTicks > 0) b.ironCooldownTicks--;
-      if (!b.superActive || b.team < 0 || !b.superTicks) continue;
-      if (--b.superTicks > 0) continue;
-      endSuper(b, bodies);
+    if (hasTimedSuper) {
+      hasShockwave = false;
+      for (let i = 0; i < count; i++) {
+        const b = bodies[i];
+        if (!b.superActive || b.team < 0 || !b.superTicks) continue;
+        if (--b.superTicks > 0) {
+          if (b.superActive === 'shockwave') hasShockwave = true;
+          continue;
+        }
+        endSuper(b, bodies);
+        if (b === host) host = null;
+      }
     }
     // Shockwave: opponent-only burst on first proximity, then continuous repulsion aura.
-    for (const b of bodies) {
-      if (b.team >= 0 && b.superActive === 'shockwave') {
-        const inRange = [];
-        for (const opp of bodies) {
-          if (opp.team >= 0 && opp.team !== b.team && !opp.carded && opp.superActive !== 'stalwart') {
-            const dx = opp.x - b.x, dy = opp.y - b.y, d2 = dx * dx + dy * dy;
-            if (d2 > 0 && d2 < SUPER.shockRadius * SUPER.shockRadius) {
-              inRange.push({ opp, d: Math.sqrt(d2), dx, dy });
+    if (hasShockwave) {
+      for (let i = 0; i < count; i++) {
+        const b = bodies[i];
+        if (b.team >= 0 && b.superActive === 'shockwave') {
+          const inRange = [];
+          for (let j = 0; j < count; j++) {
+            const opp = bodies[j];
+            if (opp.team >= 0 && opp.team !== b.team && !opp.carded && opp.superActive !== 'stalwart') {
+              const dx = opp.x - b.x, dy = opp.y - b.y, d2 = dx * dx + dy * dy;
+              if (d2 > 0 && d2 < SUPER.shockRadius * SUPER.shockRadius) {
+                inRange.push({ opp, d: Math.sqrt(d2), dx, dy });
+              }
             }
           }
-        }
-        if (!b.shockwaveFired) {
-          if (inRange.length > 0) {
-            b.shockwaveFired = true;
-            b.superHit = true;
-            triggerShockwave(b, bodies, onShockwave, inRange);
-          }
-        } else {
-          for (const { opp, d, dx, dy } of inRange) {
-            const repel = SUPER.shockRepel * (1 - d / SUPER.shockRadius);
-            opp.vx += (dx / d) * repel * dt;
-            opp.vy += (dy / d) * repel * dt;
+          if (!b.shockwaveFired) {
+            if (inRange.length > 0) {
+              b.shockwaveFired = true;
+              b.superHit = true;
+              triggerShockwave(b, bodies, onShockwave, inRange);
+            }
+          } else {
+            for (const { opp, d, dx, dy } of inRange) {
+              const repel = SUPER.shockRepel * (1 - d / SUPER.shockRadius);
+              opp.vx += (dx / d) * repel * dt;
+              opp.vy += (dy / d) * repel * dt;
+            }
           }
         }
       }
     }
     if (host && ++ball.stuckTicks >= (host.superHoldTicks || SUPER.holdTicks)) { endSuper(host, bodies); host = null; }
-    for (const b of bodies) {
+    for (let i = 0; i < count; i++) {
+      const b = bodies[i];
       if (b === ball && host) {
         const off = b.stickOffset || { x: host.radius + b.radius, y: 0 };
         b.x = host.x + off.x; b.y = host.y + off.y;
         b.vx = host.vx; b.vy = host.vy; b.omega = host.omega;
         continue;
       }
+      if (b.vx === 0 && b.vy === 0 && b.omega === 0) continue;
       // Experimental curve: rotate velocity without adding translational energy.
       if (b.omega !== 0) {
-        const curve = b.team === -1 ? ballCurveFactor(b) : (b.curveFactor ?? SKATER_CURVE);
-        const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
-        b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
+        if (b.vx !== 0 || b.vy !== 0) {
+          const curve = b.team === -1 ? ballCurveFactor(b) : (b.curveFactor ?? SKATER_CURVE);
+          const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
+          b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
+        }
+        b.rotation += b.omega * dt;
+        b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - SPIN_DECAY * dt);
       }
-      b.rotation += b.omega * dt;
-      b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - SPIN_DECAY * dt);
-      b.x += b.vx * dt; b.y += b.vy * dt;
-      const carrying = b.holding ? SUPER.carryFriction : (b.superActive === 'stalwart' ? SUPER.stalwartFriction : 1);
-      const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = (b.friction * carrying + (b.team === -1 ? AIR_DRAG * speed2 : 0)) * dt;
-      if (speed2 <= deceleration * deceleration) {
-        b.vx = b.vy = 0;
-      } else {
-        const speed = Math.sqrt(speed2);
-        const factor = Math.max(0, speed - deceleration) / speed;
-        b.vx *= factor; b.vy *= factor;
+      if (b.vx !== 0 || b.vy !== 0) {
+        b.x += b.vx * dt; b.y += b.vy * dt;
+        const carrying = b.holding ? SUPER.carryFriction : (b.superActive === 'stalwart' ? SUPER.stalwartFriction : 1);
+        const speed2 = b.vx * b.vx + b.vy * b.vy, deceleration = (b.friction * carrying + (b.team === -1 ? AIR_DRAG * speed2 : 0)) * dt;
+        if (speed2 <= deceleration * deceleration) {
+          b.vx = b.vy = 0;
+        } else {
+          const speed = Math.sqrt(speed2);
+          const factor = Math.max(0, speed - deceleration) / speed;
+          b.vx *= factor; b.vy *= factor;
+        }
       }
     }
-    if (ball) {
-      const speed = Math.hypot(ball.vx, ball.vy), pace = ball.pace || 0;
+    if (ball && (ball.vx !== 0 || ball.vy !== 0 || ball.pace || ball.onFire || ball.fireTicks)) {
+      const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy), pace = ball.pace || 0;
       ball.pace = Math.max(speed, pace - (ball.friction + AIR_DRAG * pace * pace) * dt);
       const share = ball.pace / MAX_SPEED;
       if (ball.onFire) {
@@ -708,21 +780,126 @@
     }
     // Contact radii never grow during a step (Colossus only shrinks back), so radii taken once
     // stay a safe bound for the broad phase.
-    const count = bodies.length, hit = spareRadii?.length >= count ? spareRadii : new Float64Array(count);
+    const hit = spareRadii?.length >= count ? spareRadii : new Float64Array(count);
     spareRadii = null;
     for (let i = 0; i < count; i++) hit[i] = ballHitRadius(bodies[i]);
+    const ballIdx = ball ? (count === 7 && bodies[6] === ball ? 6 : bodies.indexOf(ball)) : -1;
     for (let pass = 0; pass < 3; pass++) {
       const resolvedBefore = resolved;
-      for (let i = 0; i < count; i++) for (let j = i + 1; j < count; j++) {
-        // Bodies further apart than both contact radii cannot touch; collide would return untouched.
-        const a = bodies[i], c = bodies[j], reach = hit[i] + hit[j], dx = a.x - c.x, dy = a.y - c.y;
-        if (dx * dx + dy * dy > reach * reach) continue;
-        collide(a, c, onCollide, bodies, onShockwave, guardedOnSuper);
-      }
-      for (const b of bodies) {
-        if (b.team !== -1) {
-          walls(b, onWall);
+      // 1. Skater-vs-skater contacts (using physical body radius, not ball reach).
+      for (let i = 0; i < count; i++) {
+        if (i === ballIdx) continue;
+        const a = bodies[i], ax = a.x, ay = a.y, ar = a.radius;
+        for (let j = i + 1; j < count; j++) {
+          if (j === ballIdx) continue;
+          const c = bodies[j], reach = ar + c.radius;
+          const dx = ax - c.x, dy = ay - c.y;
+          if (dx * dx + dy * dy > reach * reach) continue;
+          collide(a, c, onCollide, bodies, onShockwave, guardedOnSuper);
         }
+      }
+      // 2. Skater-vs-ball contacts: symmetric pinch resolution when 2+ skaters meet a free ball at once.
+      if (ball) {
+        if (resolved !== resolvedBefore) host = holder(bodies);
+        const bh = hit[ballIdx];
+        let firstIdx = -1, multi = null;
+        for (let i = 0; i < count; i++) {
+          if (i === ballIdx) continue;
+          const s = bodies[i];
+          if (s.carded || s.holding) continue;
+          const reach = hit[i] + bh, dx = s.x - ball.x, dy = s.y - ball.y;
+          if (dx * dx + dy * dy > reach * reach) continue;
+          if (firstIdx < 0) firstIdx = i;
+          else { (multi ??= [firstIdx]).push(i); }
+        }
+        if (multi && !host) {
+          // If opposing Sticky skaters arrive on the exact same tick, they cancel each other's grab.
+          const stickyTeams = new Set();
+          for (const idx of multi) if (bodies[idx].superActive === 'sticky') stickyTeams.add(bodies[idx].team);
+          if (stickyTeams.size > 1) {
+            for (const idx of multi) if (bodies[idx].superActive === 'sticky') { bodies[idx].superHit = true; endSuper(bodies[idx], bodies); }
+          }
+          const anySticky = multi.some(idx => bodies[idx].superActive === 'sticky');
+          if (anySticky) {
+            for (const idx of multi) {
+              const a = idx < ballIdx ? bodies[idx] : ball, c = idx < ballIdx ? ball : bodies[idx];
+              collide(a, c, onCollide, bodies, onShockwave, guardedOnSuper);
+            }
+          } else {
+            // Evaluate each touching skater against the same pre-pinch ball snapshot so team index order cannot bias 50/50 contests.
+            const bodyKE = b => 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy) + 0.25 * b.mass * b.radius * b.radius * b.omega * b.omega;
+            let keBudget = bodyKE(ball);
+            for (const idx of multi) if (bodies[idx].superActive !== 'stalwart') keBudget += bodyKE(bodies[idx]);
+            const ball0 = { ...ball };
+            let sumDx = 0, sumDy = 0, sumDvx = 0, sumDvy = 0, sumDomega = 0;
+            let energySource = false, anyFireOff = false, anyFireOn = false, maxPace = 0;
+            const strikerTeams = new Set();
+            let lastStrikerPower = ball0.strikerPower, lastCurveMult = ball0.curveMult;
+            const collideEvents = [], shockEvents = [], superEvents = [];
+            for (const idx of multi) {
+              const s = bodies[idx], bClone = { ...ball0 };
+              const a = idx < ballIdx ? s : bClone, c = idx < ballIdx ? bClone : s;
+              const hadCannon = s.superActive === 'cannonball';
+              const sDrive = (s.vx * (ball0.x - s.x) + s.vy * (ball0.y - s.y)) / (Math.hypot(ball0.x - s.x, ball0.y - s.y) || 1);
+              if (hadCannon || (ballOnFire(ball0) && s.team === ball0.strikerTeam && sDrive >= HOT_DRIVE)) energySource = true;
+              collide(
+                a, c,
+                onCollide ? (ca, cb, ...rest) => collideEvents.push([ca === bClone ? ball : ca, cb === bClone ? ball : cb, ...rest]) : null,
+                bodies,
+                onShockwave ? (...args) => shockEvents.push(args) : null,
+                guardedOnSuper ? (k, act, sa, sb) => superEvents.push([k, act, sa === bClone ? ball : sa, sb === bClone ? ball : sb]) : null
+              );
+              sumDx += bClone.x - ball0.x; sumDy += bClone.y - ball0.y;
+              sumDvx += bClone.vx - ball0.vx; sumDvy += bClone.vy - ball0.vy;
+              sumDomega += bClone.omega - ball0.omega;
+              if (ball0.onFire && !bClone.onFire) anyFireOff = true;
+              if (!ball0.onFire && bClone.onFire) anyFireOn = true;
+              if ((bClone.pace || 0) > maxPace) maxPace = bClone.pace || 0;
+              if (bClone.strikerTeam !== ball0.strikerTeam && bClone.strikerTeam >= 0) {
+                strikerTeams.add(bClone.strikerTeam);
+                lastStrikerPower = bClone.strikerPower;
+                lastCurveMult = bClone.curveMult;
+              }
+            }
+            ball.openingShot = false;
+            ball.x = ball0.x + sumDx; ball.y = ball0.y + sumDy;
+            ball.vx = ball0.vx + sumDvx; ball.vy = ball0.vy + sumDvy;
+            ball.omega = Math.max(-24, Math.min(24, ball0.omega + sumDomega));
+            if (!energySource) {
+              let skaterKEAfter = 0;
+              for (const idx of multi) if (bodies[idx].superActive !== 'stalwart') skaterKEAfter += bodyKE(bodies[idx]);
+              const maxBallKE = Math.max(0, keBudget - skaterKEAfter);
+              const curBallKE = bodyKE(ball);
+              if (curBallKE > maxBallKE && curBallKE > 0) {
+                const scale = Math.sqrt(maxBallKE / curBallKE);
+                ball.vx *= scale; ball.vy *= scale; ball.omega *= scale;
+              }
+            }
+            if (anyFireOff && !anyFireOn) { ball.onFire = false; ball.fireTicks = 0; }
+            else if (anyFireOn) { ball.onFire = true; ball.fireTicks = FIRE_TICKS; }
+            if (strikerTeams.size === 1) {
+              [ball.strikerTeam] = strikerTeams;
+              ball.strikerPower = lastStrikerPower;
+              ball.curveMult = lastCurveMult;
+            } else if (strikerTeams.size > 1) {
+              ball.strikerTeam = -1;
+              ball.strikerPower = 1;
+              ball.curveMult = 1;
+            }
+            const postSpeed = Math.hypot(ball.vx, ball.vy);
+            ball.pace = strikerTeams.size === 1 && ball.strikerTeam === ball0.strikerTeam ? Math.max(postSpeed, maxPace) : postSpeed;
+            for (const args of shockEvents) onShockwave(...args);
+            for (const args of superEvents) guardedOnSuper(...args);
+            for (const args of collideEvents) onCollide(...args);
+          }
+        } else if (firstIdx >= 0) {
+          const a = firstIdx < ballIdx ? bodies[firstIdx] : ball, c = firstIdx < ballIdx ? ball : bodies[firstIdx];
+          collide(a, c, onCollide, bodies, onShockwave, guardedOnSuper);
+        }
+      }
+      for (let i = 0; i < count; i++) {
+        const b = bodies[i];
+        if (b.team !== -1) walls(b, onWall);
       }
       if (ball) {
         if (resolved !== resolvedBefore) host = holder(bodies);
@@ -731,7 +908,9 @@
           const ex = host.x + off.x, ey = host.y + off.y;
           ball.x = ex; ball.y = ey;
           ball.vx = host.vx; ball.vy = host.vy; ball.omega = host.omega;
+          stickyWallHost = host;
           walls(ball, onWall);
+          stickyWallHost = null;
           const dx = ball.x - ex, dy = ball.y - ey;
           if (dx !== 0 || dy !== 0) {
             if (host.superActive !== 'stalwart') {
@@ -744,7 +923,9 @@
             ball.stickOffset = { x: (ox / od) * td, y: (oy / od) * td };
             ball.x = host.x + ball.stickOffset.x;
             ball.y = host.y + ball.stickOffset.y;
+            stickyWallHost = host;
             walls(ball, onWall);
+            stickyWallHost = null;
           }
         } else {
           walls(ball, onWall);
@@ -881,11 +1062,12 @@
   function startTurn(bodies, plans, onSuper = null) {
     bodies.forEach((b, i) => {
       if (b.team < 0) return;
-      // A stunned (knocked-out) ubu is simply frozen: it cannot guard.
+      // A stunned (knocked-out) ubu is frozen and drops any running super.
+      if (b.stunned && b.superActive) endSuper(b, bodies);
       b.guarding = Boolean(plans[i]?.guard) && !b.stunned;
       b.ironGuard = false;
       b.ironCooldownTicks = 0;
-      b.usedSuperThisTurn = Boolean(b.superActive) && !b.stunned;
+      b.usedSuperThisTurn = Boolean(b.superActive);
       if (!b.stunned && (b.superArm || plans[i]?.superArm) && b.meter >= 100) {
         b.usedSuperThisTurn = true;
         b.meter = 0;
@@ -904,8 +1086,12 @@
   }
   const PREDICTION_TICKS = 480;
   function predictTurn(bodies, plans) {
-    // Clone the whole graph so Sticky references point to cloned teammates.
-    const sim = structuredClone(bodies);
+    // Fast shallow clone of the 7 bodies (preserving nested stickOffset and equippedSuper).
+    const sim = bodies.map(b => ({
+      ...b,
+      stickOffset: b.stickOffset ? { x: b.stickOffset.x, y: b.stickOffset.y } : b.stickOffset,
+      equippedSuper: b.equippedSuper ? { ...b.equippedSuper } : b.equippedSuper
+    }));
     const held = { angle: 0, power: 0, spin: 0 };
     const predictedPlans = sim.map((b, i) => {
       if (b.team === 0) return plans[i] || held;
@@ -926,13 +1112,15 @@
       lastImpact.set(index, marker);
       impacts.push(marker);
     }
+    let preStepBallSpeed = 0;
     const onCollide = (a, b, speed, impulse, plow, iron) => {
       recordImpact(a); recordImpact(b);
-      const ubu = a === ball ? b : b === ball ? a : null, index = sim.indexOf(ubu);
-      if (ubu?.guarding && !guards.has(index) && (plow || iron || ballOnFire(ball))) guards.set(index, !plow);
+      const ubu = a === ball ? b : b === ball ? a : null, index = ubu ? sim.indexOf(ubu) : -1;
+      if (ubu?.guarding && !guards.has(index) && (plow || iron || (ballOnFire(ball) && preStepBallSpeed > 50))) guards.set(index, !plow);
     };
     for (let tick = 1; tick <= PREDICTION_TICKS; tick++) {
       ticks = tick;
+      preStepBallSpeed = ball ? Math.hypot(ball.vx, ball.vy) : 0;
       if (goal !== null) {
         stepPostGoal(sim, DT, onCollide, recordImpact);
       } else {
@@ -957,6 +1145,6 @@
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS,
       guards: [...guards].map(([index, held]) => ({ index, held })), ignition, goalTargets, goalTick };
   }
-  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, IRON_COOLDOWN_TICKS, ballOnFire, ballCurveFactor, holder, dazeSlow, multiplier, launchSpeed, syncEffectiveStats, applyStats, applyDoubledGuard, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, AIR_DRAG, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, IRON_COOLDOWN_TICKS, ballOnFire, ballCurveFactor, holder, dazeSlow, multiplier, launchSpeed, syncEffectiveStats, applyStats, applyDoubledGuard, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

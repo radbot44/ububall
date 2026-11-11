@@ -1615,3 +1615,90 @@ test('stat model: colossus and guard compose correctly without compound drift', 
   assert.equal(b[0].friction, baseFriction);
   assert.equal(b[0].reach, baseReach);
 });
+
+test('opponent checking a Sticky-held ball directly knocks it loose instead of bouncing off a phantom ball', () => {
+  const b = P.kickoff();
+  b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  const carrier = b[0], defender = b[3], ball = b[6];
+  Object.assign(carrier, { x: 400, y: 300, vx: 500, vy: 0, superActive: 'sticky', superTicks: P.SUPER.ticks, holding: true });
+  Object.assign(ball, { x: 443, y: 300, vx: 500, vy: 0, stickOffset: { x: 43, y: 0 }, stuckTicks: 10, strikerTeam: 0 });
+  Object.assign(defender, { x: 480, y: 300, vx: -400, vy: 0 });
+  const keBefore = kineticEnergy(b);
+  P.step(b, P.DT);
+  assert.equal(carrier.holding, false, 'Sticky hold is knocked loose when opponent checks the held ball');
+  assert.equal(carrier.superActive, null, 'Sticky super ends cleanly');
+  assert.ok(carrier.vx < 400, 'carrier absorbs real recoil from the pinched ball rather than coasting at 499 px/s');
+  assert.ok(kineticEnergy(b) <= keBefore * (1 + 1e-12), 'collision strictly preserves kinetic energy bound');
+
+  // Side poke-check cleanly strips the held ball in one single contact
+  const side = P.kickoff();
+  side.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  Object.assign(side[0], { x: 400, y: 300, vx: 300, vy: 0, superActive: 'sticky', superTicks: P.SUPER.ticks, holding: true });
+  Object.assign(side[6], { x: 443, y: 300, vx: 300, vy: 0, stickOffset: { x: 43, y: 0 }, stuckTicks: 10, strikerTeam: 0 });
+  Object.assign(side[3], { x: 443, y: 342, vx: 0, vy: -400 });
+  let sideHits = 0;
+  P.step(side, P.DT, () => { sideHits++; });
+  assert.equal(side[0].holding, false);
+  assert.equal(sideHits, 1, 'side poke-check strips held ball in a single clean contact');
+});
+
+test('a second Sticky skater stealing a held ball ends the first Sticky without multi-pass ping-pong', () => {
+  const b = P.kickoff();
+  b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  Object.assign(b[0], { x: 465, y: 300, vx: 100, superActive: 'sticky', superTicks: P.SUPER.ticks, holding: true });
+  Object.assign(b[6], { x: 508, y: 300, stickOffset: { x: 43, y: 0 } });
+  Object.assign(b[3], { x: 540, y: 300, vx: -100, superActive: 'sticky', superTicks: P.SUPER.ticks });
+  let stickyImpacts = 0;
+  P.step(b, P.DT, null, null, null, (k, act) => { if (k === 'sticky' && act === 'impact') stickyImpacts++; });
+  assert.equal(stickyImpacts, 1, 'exactly one Sticky transfer occurs in the tick');
+  assert.equal(b[0].superActive, null, 'previous holder Sticky is ended');
+  assert.equal(P.holder(b), b[3], 'new Sticky skater holds the ball');
+});
+
+test('mirror-symmetric 50/50 kickoff keeps the ball centered with zero team-index bias', () => {
+  const b = P.kickoff();
+  b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  Object.assign(b[0], { x: 440, y: 300 });
+  Object.assign(b[3], { x: 560, y: 300 });
+  const stillPlan = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
+  P.startTurn(b, [
+    { angle: 0, power: 1, spin: 0, superArm: false, guard: false }, stillPlan, stillPlan,
+    { angle: Math.PI, power: 1, spin: 0, superArm: false, guard: false }, stillPlan, stillPlan
+  ]);
+  for (let t = 0; t < 30; t++) P.step(b, P.DT);
+  assert.ok(Math.abs(b[6].x - 500) < 1e-9, `ball stays centered at x=500 (got ${b[6].x})`);
+  assert.ok(Math.abs(b[6].vx) < 1e-9, `ball vx cancels symmetrically (got ${b[6].vx})`);
+  assert.ok(Math.abs((b[0].x - 500) + (b[3].x - 500)) < 1e-9, 'skaters rebound symmetrically');
+});
+
+test('even head-on checks do not bias checker credit toward Team 1, and Colossus checks credit when dazed', () => {
+  const sym = P.kickoff();
+  sym.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  Object.assign(sym[0], { x: 480, y: 300, vx: 500 });
+  Object.assign(sym[3], { x: 520, y: 300, vx: -500 });
+  let symChecker = 'unset';
+  P.step(sym, P.DT, (a, c, spd, imp, plow, iron, chk) => { symChecker = chk; });
+  assert.equal(symChecker, null, 'symmetric head-on tie awards neither side a unilateral check');
+
+  const col = P.kickoff();
+  col.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  Object.assign(col[0], { x: 460, y: 300, vx: 0, superActive: 'colossus' });
+  P.syncEffectiveStats(col[0]);
+  Object.assign(col[3], { x: 525, y: 300, vx: -700, strength: 1.5 });
+  let colChecker = null;
+  P.step(col, P.DT, (a, c, spd, imp, plow, iron, chk) => { colChecker = chk; });
+  assert.ok(col[0].daze > 0 && colChecker === col[3], 'attacker dazing a Colossus receives check credit');
+});
+
+test('a moving Guard making a teammate Iron Save traps the fireball rather than firing a Hot Shot', () => {
+  const b = P.kickoff();
+  b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  Object.assign(b[0], { x: 400, y: 300, vx: 150, vy: 0, guarding: true });
+  P.syncEffectiveStats(b[0]);
+  Object.assign(b[6], { x: 440, y: 300, vx: -600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, pace: 950, strikerTeam: 0, strikerPower: 0.8 });
+  let iron = false;
+  P.step(b, P.DT, (a, c, spd, imp, plow, isIron) => { if (isIron) iron = true; });
+  assert.equal(iron, true, 'teammate Iron Save triggers');
+  assert.ok(Math.hypot(b[6].vx, b[6].vy) < 150, 'ball stays trapped at Iron Save speed instead of blasting at 950 px/s');
+  assert.ok(b[6].pace > 840 && P.ballOnFire(b[6]), 'fireball stays loaded for a follow-up Hot Shot');
+});

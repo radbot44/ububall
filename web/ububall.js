@@ -757,11 +757,12 @@
         wasCreasing: i < 6 && fouls.crease[b.team] && isCreasing(b, b.team)
       };
     });
+    const field = meta.map(m => ({ team: m.team, radius: m.radius, x: 0, y: 0, superActive: m.superActive }));
     for (let k = 1; k < samples; k++) {
-      const field = meta.map((m, i) => {
+      for (let i = 0; i < field.length; i++) {
         const path = prediction.paths[i], at = path[Math.min(k, path.length - 1)];
-        return { team: m.team, radius: m.radius, x: at.x, y: at.y, superActive: m.superActive };
-      });
+        field[i].x = at.x; field[i].y = at.y;
+      }
       ububallMatch.lapseFouls(P, field, copy);
       for (let i = 0; i < 6; i++) {
         if (meta[i].wasCreasing && !isCreasing(field[i], meta[i].team)) result.left.add(i);
@@ -1383,16 +1384,13 @@
   }
   // Online meters come from the server; replays never earn meter.
   function contactMeter(a, b, speed) {
-    if ((typeof phase !== 'undefined' && phase !== 'play' && !theater && !goalReplay && typeof activePlayback === 'undefined') || online?.active) return;
-    const th = (typeof activePlayback !== 'undefined' && activePlayback) || (typeof theater !== 'undefined' && theater);
-    const targetSim = th?.simBodies || simBodies;
-    const targetStats = th?.stats || stats;
-    const tick = (th?.currentTick || matchTicks) + Math.round((elapsed + P.DT) / P.DT);
+    if ((typeof phase !== 'undefined' && phase !== 'play') || online?.active || goalReplay || theater || (typeof activePlayback !== 'undefined' && activePlayback)) return;
+    const tick = matchTicks + Math.round((elapsed + P.DT) / P.DT);
     const ia = fieldView.bodies.indexOf(a), ib = fieldView.bodies.indexOf(b);
-    const sa = ia >= 0 && targetSim[ia] ? targetSim[ia] : a;
-    const sb = ib >= 0 && targetSim[ib] ? targetSim[ib] : b;
-    for (const changed of ububallMatch.contactMeter(P, targetSim, targetStats, sa, sb, speed, tick, classicMode())) {
-      const cIdx = targetSim.indexOf(changed);
+    const sa = ia >= 0 && simBodies[ia] ? simBodies[ia] : a;
+    const sb = ib >= 0 && simBodies[ib] ? simBodies[ib] : b;
+    for (const changed of ububallMatch.contactMeter(P, simBodies, stats, sa, sb, speed, tick, classicMode())) {
+      const cIdx = simBodies.indexOf(changed);
       const vb = cIdx >= 0 && fieldView.bodies[cIdx] ? fieldView.bodies[cIdx] : changed;
       vb.meter = changed.meter;
       dirtyMeters.add(vb);
@@ -4510,12 +4508,14 @@
     if (dragMode === 'arrow') {
       const dx = p.x - arrowGrab.x - b.x, dy = p.y - arrowGrab.y - b.y;
       const arrow = impulseGeometry(b, plans[selected]);
-      plans[selected].angle = Math.atan2(dy, dx);
+      const rawAngle = Math.atan2(dy, dx);
+      plans[selected].angle = ((rawAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
       plans[selected].power = Math.max(0, Math.min(1, arrowGrab.power + (Math.hypot(dx, dy) - arrowGrab.distance) / arrow.scale));
     } else if (dragMode === 'aim') {
       const dx = p.x - b.x, dy = p.y - b.y;
       const arrow = impulseGeometry(b, plans[selected]);
-      plans[selected].angle = Math.atan2(pullBehind ? -dy : dy, pullBehind ? -dx : dx);
+      const rawAngle = Math.atan2(pullBehind ? -dy : dy, pullBehind ? -dx : dx);
+      plans[selected].angle = ((rawAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
       plans[selected].power = aimPower(Math.hypot(dx, dy), arrow);
     }
 

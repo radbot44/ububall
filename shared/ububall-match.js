@@ -91,7 +91,7 @@
   // go on into that goal, even off the boards, before another ubu touches it.
   // `own` marks a save from a ball the saver's own team was most responsible for (see `credit`).
   function saves(P, before, after, touched, credit = {}) {
-    const ball = before.find(b => b.team === -1);
+    const ball = before.length === 7 && before[6].team === -1 ? before[6] : before.find(b => b.team === -1);
     if (touched.size !== 1 || !ball || P.holder(before)) return [];
     const [i] = touched, team = before[i].team, mouth = team ? P.rink.right : P.rink.left;
     if (team < 0 || (team ? ball.vx <= 0 : ball.vx >= 0)) return [];
@@ -100,6 +100,8 @@
     const turn = Math.abs(ball.omega || 0) * P.ballCurveFactor(ball, true) * horizon;
     const horizontalReach = horizon * (Math.abs(ball.vx) + speed * Math.min(1, turn));
     if (Math.abs(ball.x - mouth) - ball.radius > horizontalReach) return [];
+    const anyMagnet = before.some((b, idx) => idx !== i && b.team >= 0 && b.superActive === 'magnet');
+    if (!anyMagnet && P.ballRun([ball], { ticks: SAVE.ticks }).goal !== 1 - team) return [];
     if (P.wouldScore(before, before[i], SAVE.ticks) !== 1 - team) return [];
     if (P.ballRun(after, { boards: true, ticks: 2 * SAVE.ticks }).goal === 1 - team) return [];
     return [{ index: i, own: responsibleTeam(before, credit) !== 1 - team }];
@@ -212,7 +214,7 @@
   // (as P.step reports it), the tick's saves, whether a close-range spin strike landed and the
   // hit-stop it earns (ms, 0 for none). `fx` receives the step callbacks. Without `effects` (CPU
   // search), the presentation-only hit-stop look-aheads are skipped; rules are unchanged.
-  function playTick(P, bodies, play, fx = {}, tally = null, effects = true) {
+  function playTick(P, bodies, play, fx = {}, tally = null, effects = true, skipSaves = false) {
     // Each tick records only motion and who held the ball; the pre-tick field is rebuilt from them when
     // the ball was touched, which is all the save and big-shot checks need. Copying every body each tick
     // was the single largest cost of CPU search. Other fields in the rebuilt field are as after the
@@ -222,14 +224,14 @@
     if (t.motion.length < bodies.length * 5) t.motion = new Float64Array(bodies.length * 5);
     const { motion, touched } = t, ball = bodies[6]?.team === -1 ? bodies[6] : bodies.find(b => b.team === -1);
     touched.clear(); t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx; t.tally = tally;
-    t.cannon = false;
+    t.cannon = false; t.incomingCredit = null;
+    let held = null;
     for (let i = 0; i < bodies.length; i++) {
       const b = bodies[i];
+      if (b.holding && !held) held = b;
       motion[i * 5] = b.x; motion[i * 5 + 1] = b.y; motion[i * 5 + 2] = b.vx; motion[i * 5 + 3] = b.vy; motion[i * 5 + 4] = b.omega;
     }
     const incomingStrikerTeam = ball?.strikerTeam ?? -1;
-    const incomingCredit = { ...play.credit };
-    const held = P.holder(bodies);
     play.age++;
     t.onShockwave ??= (source, radius, type = null) => {
       activeTick?.fx?.shockwave?.(source, radius, type);
@@ -240,6 +242,7 @@
       if (!at) return;
       if (key === 'cannonball' && action === 'impact') at.cannon = true;
       if (key === 'magnet' && action === 'pull' && body && at.ball) {
+        at.incomingCredit ??= { ...at.play.credit };
         const bi = at.bodies.indexOf(body);
         if (bi >= 0) {
           const strikerTeam = at.ball.strikerTeam ?? -1;
@@ -269,9 +272,12 @@
     const before = touched.size ? bodies.map((b, i) => ({ ...b, x: motion[i * 5], y: motion[i * 5 + 1], vx: motion[i * 5 + 2],
       vy: motion[i * 5 + 3], omega: motion[i * 5 + 4], holding: b === held,
       strikerTeam: b.team === -1 ? incomingStrikerTeam : b.strikerTeam })) : null;
-    const ballBefore = before?.[bodies.indexOf(ball)], tickSaves = touched.size ? saves(P, before, bodies, touched, incomingCredit) : [];
+    const needCredit = (!skipSaves && touched.size > 0) || t.ironSaver != null;
+    const incomingCredit = needCredit ? (t.incomingCredit || { ...play.credit }) : null;
+    const ballIdx = ball === bodies[6] ? 6 : bodies.indexOf(ball);
+    const ballBefore = before?.[ballIdx], tickSaves = (!skipSaves && touched.size) ? saves(P, before, bodies, touched, incomingCredit) : [];
     const ironIndex = t.ironSaver ?? null; t.ironSaver = null;
-    if (ironIndex !== null) {
+    if (!skipSaves && ironIndex !== null) {
       const existing = tickSaves.find(s => s.index === ironIndex);
       const saverTeam = bodies[ironIndex].team;
       const isOwn = incomingStrikerTeam >= 0 ? saverTeam === incomingStrikerTeam : responsibleTeam(before, incomingCredit) === saverTeam;
@@ -285,7 +291,8 @@
     play.credit = credit(play.credit, ballBefore, ball, touched, before);
     for (const save of tickSaves) if (!save.own) play.saved = { at: play.age, team: bodies[save.index].team };
     // A Cannonball hit always counts as a big shot.
-    const speed = Math.hypot(ball.vx, ball.vy), big = cannon || bigShot(P, before, touched, ball), struck = Boolean(ball.spinStruck);
+    const speed = (tally && touched.size) ? Math.hypot(ball.vx, ball.vy) : 0;
+    const big = cannon || (touched.size ? bigShot(P, before, touched, ball) : false), struck = Boolean(ball.spinStruck);
     const hasIron = tickSaves.some(s => s.iron);
     let stop = effects ? Math.max(hasIron ? HIT_STOP.iron : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big)) : 0;
     if (effects && goal !== null) stop = Math.max(stop, HIT_STOP.scoredGoal);
@@ -324,11 +331,11 @@
     const own = responsibleTeam(bodies, play.credit) === 1 - goal, scorer = play.lastTouch[goal];
     const assist = own || scorer === null ? null : play.assist[goal];
     let hatTrick = false;
-    if (!own && scorer !== null) {
+    if (!own && scorer !== null && tally) {
       hatTrick = ++tally.goals[scorer] === 3;
       tally.shots[scorer]++;
     }
-    if (assist !== null) tally.assists[assist]++;
+    if (assist !== null && tally) tally.assists[assist]++;
     const shotX = play.shotX[goal], snipe = shotX !== null && (goal === 0 ? shotX < 500 : shotX > 500);
     const rebound = play.saved?.team === 1 - goal && play.age - play.saved.at <= REBOUND_TICKS;
     const banked = Boolean(play.banked);
@@ -367,8 +374,13 @@
   function attackZoneLine(P, team) { return P.spawn(team, 0).x; }
   function inAttackZone(P, b, team) { return team ? b.x > attackZoneLine(P, team) : b.x < attackZoneLine(P, team); }
   function camping(P, bodies, team) {
-    const ubus = bodies.slice(0, 6);
-    return ubus.filter(b => b.team === team && inCrease(P, b, team)).length > Math.max(1, ubus.filter(b => b.team === 1 - team && inAttackZone(P, b, team)).length);
+    let inC = 0, curAZ = 0, opp = 1 - team;
+    for (let i = 0; i < 6; i++) {
+      const b = bodies[i];
+      if (b.team === team) { if (inCrease(P, b, team)) inC++; }
+      else if (b.team === opp && inAttackZone(P, b, team)) curAZ++;
+    }
+    return inC > (curAZ > 1 ? curAZ : 1);
   }
   // The corner (0 top left, 1 top right, 2 bottom left, 3 bottom right) whose square, grown by
   // `margin`, holds the point, or null.
@@ -424,7 +436,11 @@
     // Turn effects end every turn; in Pulse or when keeping motion, momentum carries forward.
     P.stop(bodies, (rule(mode, 'pulse') && goal === null) || Boolean(bonus.keepMotion));
     for (const b of bodies.slice(0, 6)) {
-      if (b.stunnedNext) { b.stunned = true; delete b.stunnedNext; }
+      if (b.stunnedNext) {
+        if (b.superActive) P.endSuper(b, bodies);
+        b.stunned = true;
+        delete b.stunnedNext;
+      }
       // A card lasts the turn after it is given.
       b.carded = false;
     }
@@ -443,28 +459,53 @@
   // the replay's starting snapshot), for fast CPU search. CPU search may also end a turn early: after
   // `ticks`, or once `decided(bodies)` reports its outcome is clear, and may `watch` contacts and
   // board hits (step callbacks). `preservePartial` leaves unfinished search states unfinalized.
-  function resolveTurn(P, state, moves, { effects = true, ticks: maxTicks = Infinity, decided = null, watch = null, preservePartial = false } = {}) {
+  function cloneTally(t) {
+    if (!t) return newTally();
+    return {
+      goals: [...t.goals], assists: [...t.assists], saves: [...t.saves], bigSaves: [...t.bigSaves],
+      shots: [...t.shots], checks: [...t.checks], topSpeed: [...t.topSpeed], cards: [...t.cards], deficit: [...t.deficit]
+    };
+  }
+  function resolveTurn(P, state, moves, { effects = true, ticks: maxTicks = Infinity, decided = null, watch = null, preservePartial = false, fastSearch = false } = {}) {
     if (state.version !== VERSION || !MODES.includes(state.mode)) throw new Error('Unsupported match rules.');
     if (!Array.isArray(moves) || moves.length !== 6) throw new Error('Both teams must submit.');
     const plans = [...validatePlans(moves.slice(0, 3)), ...validatePlans(moves.slice(3))];
-    const next = structuredClone(state), bodies = next.bodies;
+    const bodies = state.bodies.map(b => ({
+      ...b,
+      stickOffset: b.stickOffset ? { x: b.stickOffset.x, y: b.stickOffset.y } : b.stickOffset,
+      equippedSuper: b.equippedSuper ? { ...b.equippedSuper } : b.equippedSuper,
+      personality: b.personality ? { ...b.personality } : b.personality
+    }));
+    const foulsCopy = state.fouls
+      ? { crease: [...state.fouls.crease], corner: state.fouls.corner, cornerTurns: state.fouls.cornerTurns, cards: [...(state.fouls.cards || [])], faceoff: Boolean(state.fouls.faceoff) }
+      : newFouls();
+    const next = { ...state, bodies, stats: state.stats ? state.stats.map(s => (s ? { ...s } : s)) : [], scores: [...state.scores], fouls: foulsCopy };
     const classic = rule(state.mode, 'classic'), limit = Math.min(turnTicks(state.mode), maxTicks);
-    bodies.slice(0, 6).forEach((b, i) => {
+    for (let i = 0; i < 6; i++) {
+      const b = bodies[i];
       if (plans[i].superArm && (classic || b.stunned || b.meter < 100 || !b.equippedSuper)) throw new Error('Super unavailable.');
       b.superArm = false;
-    });
+    }
     const initialBodies = effects ? structuredClone(bodies) : null;
     // The play persists until a goal, so a Pulse goal credits a touch from an earlier turn.
     const play = newPlay(state);
     P.startTurn(bodies, plans);
     // The match clock counts simulated ticks across turns for meter cooldowns.
     const clock = state.clock || 0;
-    let goal = null, ticks = 0;
-    next.fouls ||= newFouls();
-    const saved = [], struck = [], stops = [], tally = state.tally ? structuredClone(state.tally) : newTally();
+    let goal = null, ticks = 0, currentTick = 0;
+    const saved = [], struck = [], stops = [];
+    const tally = fastSearch ? null : cloneTally(state.tally);
+    const skipSaves = fastSearch && classic;
+    const tickFx = {
+      collide: (a, b, speed, impulse, plow, iron) => {
+        if (!plow) contactMeter(P, bodies, next.stats, a, b, speed, clock + currentTick, classic);
+        watch?.collide?.(a, b, speed, impulse, plow, iron);
+      },
+      wall: watch?.wall
+    };
     for (let tick = 1; tick <= limit; tick++) {
-      const result = playTick(P, bodies, play, { collide: (a, b, speed, impulse, plow, iron) => { if (!plow) contactMeter(P, bodies, next.stats, a, b, speed, clock + tick, classic); watch?.collide?.(a, b, speed, impulse, plow, iron); },
-        wall: watch?.wall }, tally, effects);
+      currentTick = tick;
+      const result = playTick(P, bodies, play, tickFx, tally, effects, skipSaves);
       goal = result.goal;
       lapseFouls(P, bodies, next.fouls);
       for (const save of result.saves) {

@@ -910,4 +910,22 @@ test('planning phase match state ensures iterable CPU plans on reload and turn l
   });
 });
 
-
+test('Pulse Knockout stun ends a victim active super and prevents meter gain while active', () => {
+  const bodies = P.kickoff();
+  const stats = Array.from({ length: 6 }, () => ({}));
+  bodies.slice(0, 6).forEach(b => M.applyStats(P, b, {}, 'pulse'));
+  bodies[0].equippedSuper = { ...P.SUPERS[4], bonusTicks: 0, bonusRefund: 0 }; // Magnet
+  bodies[0].meter = 100;
+  bodies[3].equippedSuper = { ...P.SUPERS[1], bonusTicks: 0, bonusRefund: 0 }; // Knockout
+  bodies[3].meter = 100;
+  Object.assign(bodies[0], { x: 480, y: 300 });
+  Object.assign(bodies[3], { x: 525, y: 300 });
+  const state1 = { version: M.VERSION, mode: 'pulse', bodies, stats, scores: [0, 0], turn: 1 };
+  const moves1 = [
+    { angle: 0, power: 0.5, spin: 0, superArm: true, guard: false }, still(), still(),
+    { angle: Math.PI, power: 0.5, spin: 0, superArm: true, guard: false }, still(), still()
+  ];
+  const r1 = M.resolveTurn(P, state1, moves1);
+  assert.equal(r1.state.bodies[0].stunned, true, 'victim is stunned for next Pulse turn');
+  assert.equal(r1.state.bodies[0].superActive, null, 'active Magnet is ended upon being knocked out');
+});

@@ -588,7 +588,16 @@ test('contactMeter and creditSave reject meter awards outside phase === play', (
   env.creditSave({}, false);
   assert.equal(calledGain, 0, 'save meter rejected during post-goal / non-play phase');
 
-  // 2. In active play phase, meter functions proceed
+  // 2. Even if goalReplay or theater is truthy, contactMeter never awards live meter
+  const replayEnv = runInNewContext(code + '\n;({ contactMeter });', {
+    phase: 'goal', online: null, goalReplay: { sim: [] }, theater: { sim: [] },
+    bodies: [], simBodies: [], stats: [], classicMode: () => false, matchTicks: 0, elapsed: 0,
+    P, ububallMatch, dirtyMeters, popup: () => {}, steamRing: () => {}, gameAudio: () => null
+  });
+  replayEnv.contactMeter({}, {}, 200);
+  assert.equal(calledContact, 0, 'contact meter rejected during goalReplay and theater');
+
+  // 3. In active play phase, meter functions proceed
   env.setPhase('play');
   env.contactMeter({}, {}, 100);
   assert.equal(calledContact, 1, 'contact meter allowed during active play');
