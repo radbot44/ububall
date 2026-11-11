@@ -809,10 +809,10 @@
       s.path.points.push({ x: b.x, y: b.y, depth }); s.path.age = 0;
     }
 
-    function flames(x, y, spread, vx, vy, amount) {
+    function flames(x, y, spread, vx, vy, amount, spreadY = spread) {
       const fx = getEffects();
-      for (let k = Math.ceil(amount); k > 0 && fx.particles.length < 380; k--) {
-        const px = x + (Math.random() - .5) * spread, py = y + (Math.random() - .5) * spread, life = .18 + Math.random() * .22;
+      for (let k = Math.ceil(amount); k > 0 && fx.particles.length < 850; k--) {
+        const px = x + (Math.random() - .5) * spread, py = y + (Math.random() - .5) * spreadY, life = .18 + Math.random() * .22;
         fx.particles.push({ x: px, y: py, px, py, vx: vx + (Math.random() - .5) * 50, vy: vy + (Math.random() - .5) * 50,
           team: -1, color: ['#fff3b0', '#ffc43d', '#ff7a1a', '#ff3b1a'][Math.floor(Math.random() * 4)], life, duration: life, flame: 10 + Math.random() * 12 });
       }
@@ -829,10 +829,10 @@
       } else if (!ballOnFire()) quench();
       const level = Math.max(fx.ballFlare, (share - HEAT.red) / (HEAT.redHot - HEAT.red));
       const ux = speed ? ball.vx / speed : 0, uy = speed ? ball.vy / speed : -1;
-      if (ballOnFire()) flames(ball.x - ux * ball.radius * .5, ball.y - uy * ball.radius * .5, ball.radius * 1.4, -ball.vx * .12, -ball.vy * .12, dt * 120);
-      if (level <= 0 || speed < 1) return;
+      if (ballOnFire() && !fx.netFire?.lit) flames(ball.x - ux * ball.radius * .5, ball.y - uy * ball.radius * .5, ball.radius * 1.4, -ball.vx * .12, -ball.vy * .12, dt * 120);
+      if (level <= 0 || speed < 1 || fx.netFire?.lit) return;
       const count = Math.ceil(dt * 90 * Math.min(1, level));
-      for (let k = 0; k < count && fx.particles.length < 360; k++) {
+      for (let k = 0; k < count && fx.particles.length < 850; k++) {
         const x = ball.x - ux * ball.radius, y = ball.y - uy * ball.radius, life = .2 + Math.random() * .2;
         fx.particles.push({ x, y, px: x, py: y, vx: -ball.vx * .25 + (Math.random() - .5) * 160, vy: -ball.vy * .25 + (Math.random() - .5) * 160,
           team: -1, color: Math.random() < .5 ? '#ffb347' : '#fff1c1', life, duration: life });
@@ -840,14 +840,19 @@
     }
 
     function burnNet(dt) {
-      const fx = getEffects(), view = getView();
+      const fx = getEffects();
       if (!fx.netFire?.lit || isReducedMotion()) return;
-      const back = fx.netFire.mouth < 500 ? fx.netFire.mouth - P.rink.goalDepth : fx.netFire.mouth + P.rink.goalDepth;
-      flames((fx.netFire.mouth + back) / 2, 300, P.rink.goalDepth, 0, 0, dt * 40);
-      flames(fx.netFire.mouth, 300, 30, 0, 0, dt * 20);
-      for (const y of [P.rink.goalTop, P.rink.goalBottom]) flames((fx.netFire.mouth + back) / 2, y, 30, 0, 0, dt * 15);
-      const ball = view.bodies[6];
-      if (ball) flames(ball.x, ball.y, ball.radius * 1.2, 0, 0, dt * 60);
+      const mouth = fx.netFire.mouth, depth = P.rink.goalDepth;
+      const back = mouth < 500 ? mouth - depth : mouth + depth;
+      const midX = (mouth + back) / 2, midY = (P.rink.goalTop + P.rink.goalBottom) / 2;
+      const height = P.rink.goalBottom - P.rink.goalTop;
+      flames(midX, midY, depth, 0, 0, dt * 210, height);
+      const sparks = Math.ceil(dt * 90);
+      for (let k = 0; k < sparks && fx.particles.length < 850; k++) {
+        const x = midX + (Math.random() - .5) * depth, y = midY + (Math.random() - .5) * height, life = .2 + Math.random() * .2;
+        fx.particles.push({ x, y, px: x, py: y, vx: (Math.random() - .5) * 140, vy: (Math.random() - .5) * 140,
+          team: -1, color: Math.random() < .5 ? '#ffb347' : '#fff1c1', life, duration: life });
+      }
       if (!fx.sizzle) fx.sizzle = gameAudio()?.playSizzle?.() || null;
     }
 
