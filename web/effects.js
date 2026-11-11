@@ -220,7 +220,7 @@
           id: 'ball-puck-slide',
           title: 'Moving Ball Hockey Puck Slide',
           when: 'Free ball glides across the ice above 30 px/s (`playPuckSlide`).',
-          visual: 'Continuous hockey-puck ice hiss layered with hard vulcanized-rubber scrape that brightens and pans across the rink with speed and spin.',
+          visual: 'Quiet, sleek hockey-puck ice glide that smoothly tracks and pans across the rink with speed and spin.',
           soundLabel: 'Play puck slide',
           variants: [
             { id: 'fast', label: 'Fast Crisp Glide' },

@@ -649,22 +649,22 @@ test('sound and music volume buses, mono/stereo toggle, and true left-right spat
   audio.setAudioMode('stereo');
   assert.equal(audio.isStereo(), true);
 
-  // 3. Landscape vs Portrait spatial math (0.85 soft stereo limit)
+  // 3. Landscape vs Portrait spatial math (0.75 soft stereo limit)
   audio.setOrientation(false); // landscape
   assert.equal(audio.isPortrait(), false);
   assert.equal(Number(audio.panFromField(500, 300).toFixed(4)), 0);
-  assert.equal(Number(audio.panFromField(0, 300).toFixed(4)), -0.85, 'landscape home goal x=0 pans full left (-0.85)');
-  assert.equal(Number(audio.panFromField(1000, 300).toFixed(4)), 0.85, 'landscape away goal x=1000 pans full right (+0.85)');
-  assert.equal(Number(audio.panFromField(-200, 300).toFixed(4)), -0.85, 'landscape clamp beyond left');
-  assert.equal(Number(audio.panFromField(1200, 300).toFixed(4)), 0.85, 'landscape clamp beyond right');
+  assert.equal(Number(audio.panFromField(0, 300).toFixed(4)), -0.75, 'landscape home goal x=0 pans full left (-0.75)');
+  assert.equal(Number(audio.panFromField(1000, 300).toFixed(4)), 0.75, 'landscape away goal x=1000 pans full right (+0.75)');
+  assert.equal(Number(audio.panFromField(-200, 300).toFixed(4)), -0.75, 'landscape clamp beyond left');
+  assert.equal(Number(audio.panFromField(1200, 300).toFixed(4)), 0.75, 'landscape clamp beyond right');
 
   audio.setOrientation(true); // portrait (rink rotated 90° clockwise in screen space: top boards y=0 is left, bottom y=600 is right)
   assert.equal(audio.isPortrait(), true);
   assert.equal(Number(audio.panFromField(500, 300).toFixed(4)), 0);
-  assert.equal(Number(audio.panFromField(500, 0).toFixed(4)), -0.85, 'portrait top boards y=0 pans screen left (-0.85)');
-  assert.equal(Number(audio.panFromField(500, 600).toFixed(4)), 0.85, 'portrait bottom boards y=600 pans screen right (+0.85)');
-  assert.equal(Number(audio.panFromField(500, -50).toFixed(4)), -0.85, 'portrait clamp beyond left');
-  assert.equal(Number(audio.panFromField(500, 750).toFixed(4)), 0.85, 'portrait clamp beyond right');
+  assert.equal(Number(audio.panFromField(500, 0).toFixed(4)), -0.75, 'portrait top boards y=0 pans screen left (-0.75)');
+  assert.equal(Number(audio.panFromField(500, 600).toFixed(4)), 0.75, 'portrait bottom boards y=600 pans screen right (+0.75)');
+  assert.equal(Number(audio.panFromField(500, -50).toFixed(4)), -0.75, 'portrait clamp beyond left');
+  assert.equal(Number(audio.panFromField(500, 750).toFixed(4)), 0.75, 'portrait clamp beyond right');
   audio.setOrientation(false); // restore landscape
 
   // 4. SFX vs Music bus routing
@@ -675,7 +675,7 @@ test('sound and music volume buses, mono/stereo toggle, and true left-right spat
   audio.playWallHit({ ctx: busCtx, volume: 0.8, x: 1000, y: 300 });
   const wallPanner = busCtx.nodes.find(n => n.kind === 'panner');
   assert.ok(wallPanner, 'spatial sound creates stereo panner');
-  assert.equal(Number(wallPanner.pan.value.toFixed(4)), 0.85, 'panner is panned right at x=1000');
+  assert.equal(Number(wallPanner.pan.value.toFixed(4)), 0.75, 'panner is panned right at x=1000');
   assert.ok(reaches(wallPanner, n => n === testBuses.sfxGain), 'wall hit routes to sfxGain');
 
   // Music sound routes to musicGain
@@ -691,12 +691,12 @@ test('sound and music volume buses, mono/stereo toggle, and true left-right spat
   audio.playUbuMove({ ctx: motionCtx, id: 1, speed: 400, mass: 3, radius: 25, x: 100, y: 300 });
   const movePanner = motionCtx.nodes.find(n => n.kind === 'panner');
   assert.ok(movePanner, 'motion loop creates panner node');
-  assert.equal(Number(movePanner.pan.value.toFixed(4)), -0.68, 'motion loop sets initial pan from field coordinate');
+  assert.equal(Number(movePanner.pan.value.toFixed(4)), -0.60, 'motion loop sets initial pan from field coordinate');
 
   // Updating loop dynamically updates pan
   motionCtx.currentTime = 0.016;
   audio.playUbuMove({ ctx: motionCtx, id: 1, speed: 400, mass: 3, radius: 25, x: 900, y: 300 });
-  assert.equal(Number(movePanner.pan.value.toFixed(4)), 0.68, 'motion loop dynamically updates panner pan on frame update');
+  assert.equal(Number(movePanner.pan.value.toFixed(4)), 0.60, 'motion loop dynamically updates panner pan on frame update');
 
   // Switching audio mode to mono zeroes out active motion loop panner
   audio.setAudioMode('mono');
@@ -705,4 +705,21 @@ test('sound and music volume buses, mono/stereo toggle, and true left-right spat
   audio.setAudioMode('stereo');
   audio.setSoundVolume(0.8);
   audio.setMusicVolume(0.8);
+
+  // 6. Puck slide is quiet, lowpass-filtered and smooth (not grainy/sandy)
+  const puckCtx = recordedContext();
+  audio.playPuckSlide({ ctx: puckCtx, speed: 500, spin: 8, x: 800, y: 300 });
+  const puckFilters = puckCtx.nodes.filter(n => n.kind === 'filter').slice(1);
+  assert.equal(puckFilters.length, 2, 'puck slide creates dual-filter glide layers');
+  assert.ok(puckFilters.every(f => f.type === 'lowpass'), 'puck slide uses lowpass filters to prevent abrasive/sandy grit');
+  for (const f of puckFilters) {
+    assert.ok(f.frequency.value <= 1100, 'puck slide lowpass cutoffs stay below 1100 Hz');
+  }
+  const puckGains = puckCtx.nodes.filter(n => n.kind === 'gain' && n.outputs.some(out => out.kind === 'panner' || out.kind === 'filter' || out.kind === 'compressor'));
+  for (const g of puckGains) {
+    const peakEvent = g.gain.events.find(e => e[2] === 'linear');
+    if (peakEvent) {
+      assert.ok(peakEvent[0] <= 0.006, 'puck slide gain stays polite and quiet (< 0.006)');
+    }
+  }
 });

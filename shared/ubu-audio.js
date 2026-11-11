@@ -246,7 +246,7 @@
 
   function isPortrait() { return currentOrientation; }
 
-  // Calculates spatial stereo pan in [-0.85, 0.85].
+  // Calculates spatial stereo pan in [-0.75, 0.75].
   // Landscape: x from 0 (home goal, left) to 1000 (away goal, right).
   // Portrait: y from 0 (top boards, left of screen) to 600 (bottom boards, right of screen).
   function panFromField(x, y, isPortrait = currentOrientation) {
@@ -262,13 +262,13 @@
       }
     }
     const clamped = Math.max(-1, Math.min(1, raw));
-    return clamped * 0.85;
+    return clamped * 0.75;
   }
 
   function getPan(options = {}) {
     if (audioMode === 'mono') return 0;
     if (typeof options.pan === 'number' && Number.isFinite(options.pan)) {
-      return Math.max(-0.85, Math.min(0.85, options.pan));
+      return Math.max(-0.75, Math.min(0.75, options.pan));
     }
     const isP = options.portrait ?? currentOrientation;
     if (typeof options.x === 'number' || typeof options.y === 'number') {
@@ -1244,7 +1244,7 @@
       setPan(panVal) {
         if (panner && audioMode !== 'mono') {
           try {
-            const clamped = Math.max(-0.85, Math.min(0.85, Number(panVal) || 0));
+            const clamped = Math.max(-0.75, Math.min(0.75, Number(panVal) || 0));
             panner.pan.cancelScheduledValues(ctx.currentTime);
             panner.pan.setValueAtTime(clamped, ctx.currentTime);
           } catch {}
@@ -1670,8 +1670,9 @@
     };
   }
 
-  // Hockey puck sliding on ice: quiet, tactile ice-grain whisper over a faint vulcanized-rubber
-  // glide resonance, scaled down to match the subtle moving-ubu background level.
+  // Hockey puck sliding on ice: quiet, low-friction glide with no abrasive/sandy grain.
+  // Uses gentle lowpass-filtered noise layers to synthesize smooth vulcanized rubber
+  // gliding across polished ice, kept subtle underneath gameplay.
   function playPuckSlide(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
@@ -1684,16 +1685,22 @@
     const spinShare = Math.min(1, Math.abs(options.spin || 0) / 20);
     const volume = Math.max(0.02, Math.min(1.2, options.volume ?? 1.0));
     const pan = getPan(options);
-    const iceFreq = 2100 + 1450 * s + 240 * spinShare;
-    const bodyFreq = 780 + 380 * s;
+    const iceFreq = 540 + 320 * s + 60 * spinShare;
+    const bodyFreq = 260 + 160 * s;
     const boost = duration > 0.4 ? 1.15 : 1.0;
     smoothNoise(ctx, master, now, duration, {
-      freq: iceFreq * 0.92, mid: iceFreq * 1.04, to: iceFreq * 0.88,
-      q: 1.9, level: (0.0032 + 0.0125 * Math.pow(s, 0.9)) * volume * boost, pan
+      type: 'lowpass',
+      freq: iceFreq * 0.94, mid: iceFreq * 1.05, to: iceFreq * 0.90,
+      q: 0.75,
+      level: (0.0007 + 0.0022 * Math.pow(s, 1.1)) * volume * boost,
+      pan
     });
     smoothNoise(ctx, master, now, duration, {
-      freq: bodyFreq, mid: bodyFreq * 1.06, to: bodyFreq * 0.92,
-      q: 3.0, level: (0.0022 + 0.0075 * Math.pow(s, 0.9)) * volume * boost, pan
+      type: 'lowpass',
+      freq: bodyFreq * 0.96, mid: bodyFreq * 1.04, to: bodyFreq * 0.94,
+      q: 0.85,
+      level: (0.0005 + 0.0014 * Math.pow(s, 1.1)) * volume * boost,
+      pan
     });
   }
 
@@ -1975,7 +1982,7 @@
     for (let i = 0; i < sparkles; i++) {
       const delay = 0.055 + i * 0.038 + Math.random() * 0.022;
       const sparkSpread = audioMode === 'mono' ? 0 : (Math.random() - 0.5) * 0.36;
-      const sparkPan = Math.max(-0.85, Math.min(0.85, pan + sparkSpread));
+      const sparkPan = Math.max(-0.75, Math.min(0.75, pan + sparkSpread));
       noiseGrain(ctx, master, now + delay, 0.006, {
         freq: 3600 + Math.random() * 3200,
         q: 2.6,
