@@ -961,10 +961,11 @@
       fx.burnState.path = null; fx.fireTime = 0; quench();
       if (fx.netFire) fx.netFire.lit = false;
       fx.shake = fx.shakeX = fx.shakeY = 0; if (!view.field && rinkWrap) rinkWrap.style.translate = '';
-      fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.goalCall = null;
+      fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.goalCall = fx.fireWarp = null;
       fx.puckSlideTime = -Infinity;
       fx.lastCannonImpact = -Infinity;
       fx.lastFireHitSound = -Infinity;
+      fx.lastHipClipSound = -Infinity;
       fx.superImpactTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.carveTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.slipstreamTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
@@ -1082,6 +1083,7 @@
       fieldFx.shakeY = fieldFx.shake ? Number(((Math.random() - .5) * 5 * scale * fieldFx.shake).toFixed(2)) : 0;
       if (!view.field && rinkWrap) rinkWrap.style.translate = fieldFx.shake ? `${fieldFx.shakeX}px ${fieldFx.shakeY}px` : '';
       fieldFx.ballFlare = Math.max(0, fieldFx.ballFlare - dt / .8);
+      if (fieldFx.fireWarp && (fieldFx.fireWarp.life -= dt) <= 0) fieldFx.fireWarp = null;
       fieldFx.kickoffGlow = Math.max(0, fieldFx.kickoffGlow - dt / 1.5);
       if (fieldFx.goalSweep && (fieldFx.goalSweep.p += dt / 1.5) >= 1) fieldFx.goalSweep = null;
       if (fieldFx.goalCall && (fieldFx.goalCall.t += dt) >= GOAL_CALL_SECONDS) fieldFx.goalCall = null;
@@ -2051,6 +2053,7 @@
       const isBall = a.team === -1 || b.team === -1;
       const isSnap = isBall && Boolean(snapped || a?.snapStruck || b?.snapStruck);
       const isSpinStrike = isBall && Boolean(a?.spinStruck || b?.spinStruck);
+      const isHipClip = !isBall && a.team !== b.team && tangentImpulse >= 55 && tangentImpulse >= speed * 0.22;
       const spinBoost = !isBall && a.team !== b.team ? (tangentImpulse || 0) * 0.45 : 0;
       const effSpeed = Math.max(speed, spinBoost);
       if (effSpeed < 15 && !isSnap && !isSpinStrike) return;
@@ -2061,6 +2064,33 @@
       const sparkStrength = Math.min(1.35, effSpeed / 600);
       burst(x, y, a.team, sparkStrength, false, tangent);
       if (a.team !== b.team) burst(x, y, b.team, sparkStrength, false, tangent);
+      if (isHipClip && !isReducedMotion()) {
+        if (fx.shockwaves.length < 30) {
+          fx.shockwaves.push({
+            x, y, currentRadius: 12, maxRadius: 54,
+            team: a.team, teamB: b.team, tangent, hipClip: true,
+            life: 0.24, duration: 0.24, width: 5.5, overlay: true
+          });
+        }
+        if (fx.particles.length < 400) {
+          fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ffffff', life: 0.16, duration: 0.16, flash: true, flashSize: 88, overlay: true });
+        }
+        for (let k = 0; k < 14 && fx.particles.length < 400; k++) {
+          const dir = k % 2 === 0 ? tangent : tangent + Math.PI;
+          const ang = dir + (Math.random() - 0.5) * 0.38;
+          const spd = 190 + Math.random() * 230;
+          const life = 0.18 + Math.random() * 0.12;
+          const sx = x + Math.cos(ang) * 6, sy = y + Math.sin(ang) * 6;
+          fx.particles.push({
+            x: sx, y: sy, px: sx - Math.cos(ang) * 7, py: sy - Math.sin(ang) * 7,
+            vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+            team: k % 2 === 0 ? a.team : b.team,
+            color: k % 5 === 0 ? '#ffffff' : null,
+            life, duration: life,
+            materialShape: 'streak', size: 3.0 + Math.random() * 1.8, angle: ang, snap: true, overlay: true
+          });
+        }
+      }
       if (isSnap && !isReducedMotion()) {
         const ball = a.team === -1 ? a : b;
         const snapper = a.team === -1 ? b : a;
@@ -2109,7 +2139,17 @@
             gameAudio().playSpinStrike({ volume: Math.min(1.0, 0.45 + 0.55 * (norm ** 0.8)), spin: ball.omega || player.omega || 14, x, y });
           }
         }
-        const fireHit = !iron && (plow || P.ballOnFire?.(ball)) && (now - (fx.lastCannonImpact ?? -Infinity) > 20);
+        const isFlamingCollision = (plow || P.ballOnFire?.(ball)) && (now - (fx.lastCannonImpact ?? -Infinity) > 20);
+        if (isFlamingCollision) {
+          fx.ballFlare = Math.max(fx.ballFlare || 0, 0.85);
+          const nx = (ball.x - player.x) / distance, ny = (ball.y - player.y) / distance;
+          fx.fireWarp = { x, y, nx, ny, life: 0.16, duration: 0.16 };
+          if (!isReducedMotion() && fx.particles.length < 400) {
+            fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ff7a1a', life: 0.20, duration: 0.20, flash: true, flashSize: 125, overlay: true });
+            fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#fff3b0', life: 0.12, duration: 0.12, flash: true, flashSize: 66, overlay: true });
+          }
+        }
+        const fireHit = !iron && isFlamingCollision;
         if (fireHit && gameAudio()?.playFireImpact && (now - (fx.lastFireHitSound ?? -Infinity) > 55)) {
           fx.lastFireHitSound = now;
           gameAudio().playFireImpact({ volume: Math.min(1.0, 0.42 + 0.58 * (norm ** 0.8)), x, y });
@@ -2126,6 +2166,15 @@
       } else if (a.team !== -1 && b.team !== -1) {
         const norm = Math.min(1.0, Math.max(0.0, (effSpeed - 40) / 600));
         const volume = Math.min(1.0, 0.12 + 0.75 * (norm ** 0.8));
+        if (isHipClip && gameAudio()?.playSpinStrike && (now - (fx.lastHipClipSound ?? -Infinity) > 65)) {
+          fx.lastHipClipSound = now;
+          gameAudio().playSpinStrike({
+            volume: Math.min(0.95, 0.38 + 0.55 * (norm ** 0.8)),
+            spin: Math.max(Math.abs(a.omega || 0), Math.abs(b.omega || 0), 12),
+            crack: false,
+            x, y
+          });
+        }
         const primary = (Math.hypot(a.vx, a.vy) * a.mass >= Math.hypot(b.vx, b.vy) * b.mass) ? a : b;
         if (primary.voice && gameAudio()) {
           if (!primary._lastHitSound || (now - primary._lastHitSound) > 65) {
@@ -2180,6 +2229,14 @@
       }
       const norm = Math.min(1.0, Math.max(0.0, (velocity - 20) / 480));
       const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
+      if (body.team === -1 && P.ballOnFire?.(body) && velocity >= 60) {
+        fx.ballFlare = Math.max(fx.ballFlare || 0, 0.85);
+        fx.fireWarp = { x: cx, y: cy, nx, ny, life: 0.16, duration: 0.16 };
+        if (!isReducedMotion() && fx.particles.length < 400) {
+          fx.particles.push({ x: cx, y: cy, px: cx, py: cy, vx: 0, vy: 0, team: -1, color: '#ff7a1a', life: 0.18, duration: 0.18, flash: true, flashSize: 115, overlay: true });
+          fx.particles.push({ x: cx, y: cy, px: cx, py: cy, vx: 0, vy: 0, team: -1, color: '#fff3b0', life: 0.11, duration: 0.11, flash: true, flashSize: 60, overlay: true });
+        }
+      }
       const audio = gameAudio();
       if (!audio) return;
       if (body.team === -1 && P.ballOnFire?.(body) && velocity >= 90 && (now - (fx.lastFireHitSound ?? -Infinity) > 55)) {
@@ -2191,7 +2248,7 @@
       } else if (wallType === 'net') {
         audio.playGoalHit('net', { volume, x: cx, y: cy });
       } else {
-        audio.playWallHit({ volume: Math.min(0.85, 0.1 + 0.68 * (norm ** 1.05)), x: cx, y: cy });
+        audio.playWallHit({ volume: Math.min(0.85, 0.1 + 0.68 * (norm ** 1.05)), speed: velocity, x: cx, y: cy });
       }
     }
 
@@ -2300,13 +2357,37 @@
       drawGuides(home, away, text, playback ? playback.guide : getGuide());
       fx.shockwaves.forEach(s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
-        const expand = s.dramatic ? 1 - (1 - progress) ** 2.6 : progress;
-        const fade = s.dramatic ? (1 - progress) ** 1.25 : 1 - progress;
+        const expand = (s.dramatic || s.hipClip) ? 1 - (1 - progress) ** 2.6 : progress;
+        const fade = (s.dramatic || s.hipClip) ? (1 - progress) ** 1.25 : 1 - progress;
         const r = s.currentRadius + (s.maxRadius - s.currentRadius) * expand;
         const targetCtx = s.overlay && view.badgeCtx ? view.badgeCtx : view.ctx;
         const waveColor = s.color || (s.team === 0 ? home : away);
         const baseW = s.width || (s.overlay ? 4.5 : 6);
         targetCtx.save();
+        if (s.hipClip) {
+          const secondColor = (s.teamB ?? (1 - s.team)) === 0 ? home : away;
+          const sweep = (s.tangent || 0) + expand * 0.95;
+          targetCtx.lineCap = 'round';
+          for (let side = 0; side < 2; side++) {
+            const a0 = sweep + side * Math.PI - 0.82, a1 = sweep + side * Math.PI + 0.82;
+            targetCtx.beginPath();
+            targetCtx.arc(s.x, s.y, r, a0, a1);
+            targetCtx.strokeStyle = side === 0 ? waveColor : secondColor;
+            targetCtx.lineWidth = Math.max(1.5, baseW * fade);
+            targetCtx.globalAlpha = Math.max(0, fade * 0.92);
+            targetCtx.stroke();
+            if (fade > 0.2) {
+              targetCtx.beginPath();
+              targetCtx.arc(s.x, s.y, Math.max(1, r - 1.5), a0 + 0.2, a1 - 0.1);
+              targetCtx.strokeStyle = '#ffffff';
+              targetCtx.lineWidth = Math.max(1, baseW * 0.4 * fade);
+              targetCtx.globalAlpha = Math.max(0, fade * 0.8);
+              targetCtx.stroke();
+            }
+          }
+          targetCtx.restore();
+          return;
+        }
         if (s.band) {
           targetCtx.beginPath();
           targetCtx.arc(s.x, s.y, r, 0, Math.PI * 2);
@@ -2439,12 +2520,45 @@
 
       const ball = view.bodies[6];
       if (ball) {
+        const fw = fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion() ? fx.fireWarp : null;
+        let warpScaleX = 1, warpScaleY = 1, warpAngle = 0;
+        if (fw) {
+          const wp = 1 - Math.max(0, fw.life / fw.duration);
+          const env = (1 - wp) * Math.cos(wp * Math.PI * 2.2);
+          const amt = env * 0.13;
+          warpScaleX = 1 - amt;
+          warpScaleY = 1 + amt;
+          warpAngle = Math.atan2(fw.ny || 0, fw.nx || 1);
+          const glowFade = (1 - wp) ** 1.3;
+          view.ctx.save();
+          view.ctx.translate(fw.x, fw.y);
+          view.ctx.rotate(warpAngle);
+          view.ctx.scale(1 - (1 - wp) * 0.18, 1 + (1 - wp) * 0.18);
+          view.ctx.beginPath();
+          view.ctx.arc(0, 0, ball.radius * (1.15 + wp * 1.35), 0, Math.PI * 2);
+          view.ctx.fillStyle = '#ff8c24';
+          view.ctx.globalAlpha = 0.28 * glowFade;
+          view.ctx.fill();
+          view.ctx.lineWidth = Math.max(1, 3.2 * glowFade);
+          view.ctx.strokeStyle = '#fff0a8';
+          view.ctx.globalAlpha = 0.72 * glowFade;
+          view.ctx.stroke();
+          view.ctx.restore();
+        }
+        view.ctx.save();
+        if (fw) {
+          view.ctx.translate(ball.x, ball.y);
+          view.ctx.rotate(warpAngle);
+          view.ctx.scale(warpScaleX, warpScaleY);
+          view.ctx.rotate(-warpAngle);
+          view.ctx.translate(-ball.x, -ball.y);
+        }
         view.ctx.beginPath(); view.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); view.ctx.fillStyle = background; view.ctx.fill();
         circle(ball.x, ball.y, ball.radius, text, 2);
-        const heat = ballHeat(ball), glow = Math.max(0, heat - 1) / 2;
+        const heat = ballHeat(ball), flare = fx.ballFlare || 0, glow = Math.min(1.35, Math.max(0, heat - 1) / 2 + flare * 0.45);
         if (glow > 0) {
-          view.ctx.save(); view.ctx.globalAlpha = .75 * glow; view.ctx.shadowColor = heatColor(heat); view.ctx.shadowBlur = 16 * glow * view.canvas.width / 1000;
-          view.ctx.beginPath(); view.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); view.ctx.fillStyle = heatColor(heat); view.ctx.fill(); view.ctx.restore();
+          view.ctx.save(); view.ctx.globalAlpha = Math.min(1, .75 * glow); view.ctx.shadowColor = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat)); view.ctx.shadowBlur = (16 + flare * 12) * glow * view.canvas.width / 1000;
+          view.ctx.beginPath(); view.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); view.ctx.fillStyle = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat)); view.ctx.fill(); view.ctx.restore();
         }
         const size = ball.radius * 1.7;
         const hot = ballOnFire() || (ball.team === -1 && P.ballOnFire?.(ball));
@@ -2463,6 +2577,7 @@
           drawBallFace(view.ctx, size, '#F8F7F4', '#FF7197');
           view.ctx.restore();
         }
+        view.ctx.restore();
         view.bodies.slice(0, 6).forEach(b => { if (!b.carded) drawSpin(b, b.team ? away : home); });
         drawSpin(ball, text);
       }

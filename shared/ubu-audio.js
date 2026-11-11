@@ -1319,7 +1319,7 @@
     const cutoff = Math.min(2200, freq * (1.85 + 1.25 * Math.min(1.65, massRatio) + 0.85 * s));
     const q = 1.15 + 0.85 * Math.max(0, Math.min(1.2, massRatio - 0.75));
     const weightScale = 0.86 + 0.18 * Math.min(1.8, (massRatio + sizeRatio) * 0.5);
-    const level = (0.012 + 0.024 * Math.pow(s, 0.85)) * weightScale * Math.max(0, Math.min(1.5, volume));
+    const level = (0.018 + 0.036 * Math.pow(s, 0.85)) * weightScale * Math.max(0, Math.min(1.5, volume));
     return { freq, wobbleHz, wobbleDepth, cutoff, q, level };
   }
 
@@ -1463,8 +1463,8 @@
     const dest = routePanner(ctx, master, options);
     const previewBoost = options.preview ? 1.6 : 1.3;
     outGain.gain.setValueAtTime(0.0001, now);
-    outGain.gain.linearRampToValueAtTime(Math.min(0.09, pPeak.level * previewBoost), now + Math.min(0.08, duration * 0.2));
-    outGain.gain.linearRampToValueAtTime(Math.min(0.075, pPeak.level * previewBoost * 0.8), now + duration * 0.72);
+    outGain.gain.linearRampToValueAtTime(Math.min(0.135, pPeak.level * previewBoost), now + Math.min(0.08, duration * 0.2));
+    outGain.gain.linearRampToValueAtTime(Math.min(0.1125, pPeak.level * previewBoost * 0.8), now + duration * 0.72);
     outGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
     osc.connect(filter); filter.connect(outGain); outGain.connect(dest);
@@ -1775,99 +1775,153 @@
     });
   }
 
-  // Spin strike: a tight unpitched air-cut ("hwh-") snapping into a sharp supersonic whipcrack.
+  // Spin strike & hip clip: pronounced accelerating aerodynamic whip ("hwhip-") that either resolves
+  // as a pure whip-slice (options.crack === false, for Hip Clips) or snaps into a supersonic N-wave bullwhip crack.
   function playSpinStrike(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.17);
+    const withCrack = options.crack !== false;
+    const master = createMasterChain(ctx, null, withCrack ? 0.22 : 0.14);
     const dest = routePanner(ctx, master, options);
     if (!sharedChains.has(ctx)) master.frequency.setValueAtTime(12500, ctx.currentTime);
     const now = ctx.currentTime;
     const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.85));
     const spinNorm = Math.min(1, Math.max(0.25, (Math.abs(options.spin) || 14) / 18));
+    const crackAt = now + (withCrack ? 0.068 : 0.058);
 
-    // 1. Fast, unpitched aerodynamic cord slice leading into the crack (0 -> 24 ms, no tonal sweep)
+    // 1a. Heavy braided-cord loop air displacement ("HWHH-") unrolling into the tip
     const whoosh = ctx.createBufferSource(), whooshBand = ctx.createBiquadFilter(), whooshGain = ctx.createGain();
     whoosh.buffer = grainNoise(ctx);
     whooshBand.type = 'bandpass';
-    whooshBand.Q.setValueAtTime(1.3, now);
-    whooshBand.frequency.setValueAtTime(340, now);
-    whooshBand.frequency.exponentialRampToValueAtTime(1750, now + 0.022);
+    whooshBand.Q.setValueAtTime(1.45, now);
+    whooshBand.frequency.setValueAtTime(210, now);
+    whooshBand.frequency.exponentialRampToValueAtTime(560, now + 0.036);
+    whooshBand.frequency.exponentialRampToValueAtTime(1480 + 320 * spinNorm, crackAt + 0.008);
     whooshGain.gain.setValueAtTime(0.0001, now);
-    whooshGain.gain.exponentialRampToValueAtTime(0.24 * volume, now + 0.02);
-    whooshGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.036);
+    whooshGain.gain.linearRampToValueAtTime(0.32 * volume, now + 0.028);
+    whooshGain.gain.exponentialRampToValueAtTime(0.54 * volume, crackAt);
+    whooshGain.gain.exponentialRampToValueAtTime(0.0001, now + (withCrack ? 0.082 : 0.108));
     whoosh.connect(whooshBand); whooshBand.connect(whooshGain); whooshGain.connect(dest);
     whoosh.start(now, Math.random() * 0.7);
-    whoosh.stop(now + 0.045);
+    whoosh.stop(now + (withCrack ? 0.088 : 0.115));
 
-    // 2. Supersonic whip-tip "CRACK!" impulse at 20 ms (sub-millisecond N-wave snap)
-    const crackAt = now + 0.02;
-    const snapFreq = 2600 + 650 * spinNorm;
+    // 1b. Accelerating tapered whip-tip air shear ("-WHIP!")
+    const swish = ctx.createBufferSource(), swishBand = ctx.createBiquadFilter(), swishGain = ctx.createGain();
+    swish.buffer = grainNoise(ctx);
+    swishBand.type = 'bandpass';
+    swishBand.Q.setValueAtTime(2.35, now + 0.014);
+    swishBand.frequency.setValueAtTime(580, now + 0.014);
+    swishBand.frequency.exponentialRampToValueAtTime(2850 + 550 * spinNorm, crackAt + 0.004);
+    swishGain.gain.setValueAtTime(0.0001, now + 0.014);
+    swishGain.gain.linearRampToValueAtTime(0.44 * volume, crackAt);
+    swishGain.gain.exponentialRampToValueAtTime(0.0001, now + (withCrack ? 0.078 : 0.102));
+    swish.connect(swishBand); swishBand.connect(swishGain); swishGain.connect(dest);
+    swish.start(now + 0.014, Math.random() * 0.7);
+    swish.stop(now + (withCrack ? 0.084 : 0.11));
+
+    if (!withCrack) {
+      noiseGrain(ctx, dest, now + 0.042, 0.055, { freq: 1150, to: 380, q: 1.6, level: 0.22 * volume });
+      return;
+    }
+
+    // 2. Supersonic whip-tip "CRACK!" N-wave shockfront at 68 ms
+    const snapFreq = 3100 + 700 * spinNorm;
 
     const crack = ctx.createBufferSource(), crackBand = ctx.createBiquadFilter(), crackGain = ctx.createGain();
     crack.buffer = grainNoise(ctx);
     crackBand.type = 'bandpass';
-    crackBand.Q.setValueAtTime(0.85, crackAt);
+    crackBand.Q.setValueAtTime(0.72, crackAt);
     crackBand.frequency.setValueAtTime(snapFreq, crackAt);
-    crackBand.frequency.exponentialRampToValueAtTime(1150, crackAt + 0.026);
+    crackBand.frequency.exponentialRampToValueAtTime(820, crackAt + 0.022);
     crackGain.gain.setValueAtTime(0.0001, crackAt);
-    crackGain.gain.linearRampToValueAtTime(0.84 * volume, crackAt + 0.0008);
-    crackGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.028);
+    crackGain.gain.linearRampToValueAtTime(0.96 * volume, crackAt + 0.0004);
+    crackGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.022);
     crack.connect(crackBand); crackBand.connect(crackGain); crackGain.connect(dest);
     crack.start(crackAt, Math.random() * 0.7);
-    crack.stop(crackAt + 0.036);
+    crack.stop(crackAt + 0.028);
 
     const tip = ctx.createBufferSource(), tipHp = ctx.createBiquadFilter(), tipGain = ctx.createGain();
     tip.buffer = grainNoise(ctx);
     tipHp.type = 'highpass';
-    tipHp.Q.setValueAtTime(0.9, crackAt);
-    tipHp.frequency.setValueAtTime(3600, crackAt);
+    tipHp.Q.setValueAtTime(1.25, crackAt);
+    tipHp.frequency.setValueAtTime(3400, crackAt);
     tipGain.gain.setValueAtTime(0.0001, crackAt);
-    tipGain.gain.linearRampToValueAtTime(0.56 * volume, crackAt + 0.0007);
-    tipGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.015);
+    tipGain.gain.linearRampToValueAtTime(0.76 * volume, crackAt + 0.0004);
+    tipGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.012);
     tip.connect(tipHp); tipHp.connect(tipGain); tipGain.connect(dest);
     tip.start(crackAt, Math.random() * 0.7);
-    tip.stop(crackAt + 0.022);
+    tip.stop(crackAt + 0.018);
 
-    // 11 ms percussive transient pop for physical snap punch (too brief to register as pitch)
+    // Trailing N-wave expansion snap 5 ms after the leading shockfront
+    const s2 = crackAt + 0.005;
+    const doubleSnap = ctx.createBufferSource(), dsBand = ctx.createBiquadFilter(), dsGain = ctx.createGain();
+    doubleSnap.buffer = grainNoise(ctx);
+    dsBand.type = 'bandpass';
+    dsBand.Q.setValueAtTime(1.15, s2);
+    dsBand.frequency.setValueAtTime(2650 + 450 * spinNorm, s2);
+    dsBand.frequency.exponentialRampToValueAtTime(960, s2 + 0.014);
+    dsGain.gain.setValueAtTime(0.0001, s2);
+    dsGain.gain.linearRampToValueAtTime(0.58 * volume, s2 + 0.0004);
+    dsGain.gain.exponentialRampToValueAtTime(0.0001, s2 + 0.014);
+    doubleSnap.connect(dsBand); dsBand.connect(dsGain); dsGain.connect(dest);
+    doubleSnap.start(s2, Math.random() * 0.7);
+    doubleSnap.stop(s2 + 0.02);
+
+    // Sub-20 ms N-wave shock impulse oscillators for physical snap punch
     const pop = ctx.createOscillator(), popGain = ctx.createGain();
     pop.type = 'triangle';
-    pop.frequency.setValueAtTime(840, crackAt);
-    pop.frequency.exponentialRampToValueAtTime(135, crackAt + 0.011);
+    pop.frequency.setValueAtTime(980, crackAt);
+    pop.frequency.exponentialRampToValueAtTime(145, crackAt + 0.011);
     popGain.gain.setValueAtTime(0.0001, crackAt);
-    popGain.gain.linearRampToValueAtTime(0.52 * volume, crackAt + 0.0008);
+    popGain.gain.linearRampToValueAtTime(0.58 * volume, crackAt + 0.0005);
     popGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.013);
     pop.connect(popGain); popGain.connect(dest);
     pop.start(crackAt);
-    pop.stop(crackAt + 0.018);
+    pop.stop(crackAt + 0.016);
 
-    // 3. Tight arena slapback air-tail off the crack (24 ms -> 110 ms)
+    const snapOsc = ctx.createOscillator(), snapOscGain = ctx.createGain();
+    snapOsc.type = 'sine';
+    snapOsc.frequency.setValueAtTime(2650, crackAt);
+    snapOsc.frequency.exponentialRampToValueAtTime(360, crackAt + 0.007);
+    snapOscGain.gain.setValueAtTime(0.0001, crackAt);
+    snapOscGain.gain.linearRampToValueAtTime(0.52 * volume, crackAt + 0.0004);
+    snapOscGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.009);
+    snapOsc.connect(snapOscGain); snapOscGain.connect(dest);
+    snapOsc.start(crackAt);
+    snapOsc.stop(crackAt + 0.012);
+
+    // 3. Tight arena slapback air-tail off the crack
+    const tAt = crackAt + 0.006;
     const tail = ctx.createBufferSource(), tailFilter = ctx.createBiquadFilter(), tailGain = ctx.createGain();
     tail.buffer = grainNoise(ctx);
     tailFilter.type = 'bandpass';
-    tailFilter.Q.setValueAtTime(1.25, crackAt + 0.004);
-    tailFilter.frequency.setValueAtTime(1650, crackAt + 0.004);
-    tailFilter.frequency.exponentialRampToValueAtTime(560, crackAt + 0.088);
-    tailGain.gain.setValueAtTime(0.0001, crackAt + 0.004);
-    tailGain.gain.linearRampToValueAtTime(0.19 * volume, crackAt + 0.009);
-    tailGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.09);
+    tailFilter.Q.setValueAtTime(1.2, tAt);
+    tailFilter.frequency.setValueAtTime(1850, tAt);
+    tailFilter.frequency.exponentialRampToValueAtTime(520, tAt + 0.086);
+    tailGain.gain.setValueAtTime(0.0001, tAt);
+    tailGain.gain.linearRampToValueAtTime(0.22 * volume, tAt + 0.005);
+    tailGain.gain.exponentialRampToValueAtTime(0.0001, tAt + 0.088);
     tail.connect(tailFilter); tailFilter.connect(tailGain); tailGain.connect(dest);
-    tail.start(crackAt + 0.004, Math.random() * 0.7);
-    tail.stop(crackAt + 0.105);
+    tail.start(tAt, Math.random() * 0.7);
+    tail.stop(tAt + 0.1);
   }
 
-  // Hockey dasher-board "thock": hollow woody/HDPE board cavity knock + restrained acrylic slap on
-  // hard hits, kept polite in loudness because board bounces happen constantly.
+  // Hockey dasher-board bounce: polite flex on light/medium hits, plus a deep hollow woody/HDPE
+  // dasher-box "thock" reserved strictly for truly hard board hits.
   function playWallHit(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.1);
+    const master = createMasterChain(ctx, null, 0.12);
     const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
     const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.5));
     const hard = Math.min(1, Math.max(0, (volume - 0.22) / 0.65));
+    const speed = Number(options.speed || 0);
+    const thock = speed > 0
+      ? Math.min(1, Math.max(0, (speed - 340) / 200))
+      : Math.min(1, Math.max(0, (volume - 0.58) / 0.28));
 
-    // 1. Dasher board flex body
+    // 1. Dasher board flex body (light & medium hits)
     const body = ctx.createOscillator(), bodyFilter = ctx.createBiquadFilter(), bodyGain = ctx.createGain();
     body.type = 'triangle';
     body.frequency.setValueAtTime(185, now);
@@ -1878,19 +1932,66 @@
     body.connect(bodyFilter); bodyFilter.connect(bodyGain); bodyGain.connect(dest);
     body.start(now); body.stop(now + 0.08);
 
-    // 2. Hollow HDPE board cavity "thock" partial
+    // 2. Gentle HDPE board partial
     const cavity = ctx.createOscillator(), cavityGain = ctx.createGain();
     cavity.type = 'sine';
     cavity.frequency.setValueAtTime(435, now);
     cavity.frequency.exponentialRampToValueAtTime(230, now + 0.03);
-    strike(cavityGain, (0.13 + 0.18 * hard) * volume, now, now + 0.036);
+    strike(cavityGain, (0.13 + 0.12 * hard) * volume, now, now + 0.036);
     cavity.connect(cavityGain); cavityGain.connect(dest);
     cavity.start(now); cavity.stop(now + 0.045);
 
-    // 3. Crisp board/plexiglass slap transient on hard impacts
+    // 3. Restrained board/plexiglass slap on medium-hard impacts
     if (hard > 0.05) {
-      noiseGrain(ctx, dest, now, 0.026, { freq: 980, to: 470, q: 2.4, level: 0.26 * hard * volume });
-      noiseGrain(ctx, dest, now, 0.014, { freq: 2150, to: 1150, q: 2.0, level: 0.14 * hard * volume });
+      noiseGrain(ctx, dest, now, 0.026, { freq: 980, to: 470, q: 2.4, level: 0.22 * hard * volume });
+      noiseGrain(ctx, dest, now, 0.014, { freq: 2150, to: 1150, q: 2.0, level: 0.12 * hard * volume });
+    }
+
+    // 4. Deep hollow dasher-box "THOCK" reserved strictly for truly hard board hits
+    if (thock > 0) {
+      const thockLevel = thock * volume;
+
+      // "TH-" attack knock transient (fast pitch-drop impact + woody/HDPE face knock)
+      const knock = ctx.createOscillator(), knockGain = ctx.createGain();
+      knock.type = 'sine';
+      knock.frequency.setValueAtTime(820, now);
+      knock.frequency.exponentialRampToValueAtTime(165, now + 0.011);
+      strike(knockGain, 0.48 * thockLevel, now, now + 0.014, 0.0005);
+      knock.connect(knockGain); knockGain.connect(dest);
+      knock.start(now); knock.stop(now + 0.018);
+
+      noiseGrain(ctx, dest, now, 0.016, { freq: 1250, to: 310, q: 1.8, level: 0.34 * thockLevel });
+
+      // "-OCK" hollow coupled dasher-box cavity resonance (bandpass-shaped hollow woody/HDPE box mode)
+      const box = ctx.createOscillator(), boxFilter = ctx.createBiquadFilter(), boxGain = ctx.createGain();
+      box.type = 'triangle';
+      box.frequency.setValueAtTime(360, now + 0.002);
+      box.frequency.exponentialRampToValueAtTime(192, now + 0.054);
+      boxFilter.type = 'bandpass';
+      boxFilter.Q.setValueAtTime(3.1, now + 0.002);
+      boxFilter.frequency.setValueAtTime(320, now + 0.002);
+      boxFilter.frequency.exponentialRampToValueAtTime(205, now + 0.058);
+      strike(boxGain, 0.58 * thockLevel, now + 0.002, now + 0.068, 0.0015);
+      box.connect(boxFilter); boxFilter.connect(boxGain); boxGain.connect(dest);
+      box.start(now + 0.002); box.stop(now + 0.076);
+
+      // Upper "-ock" cavity formant
+      const formant = ctx.createOscillator(), formantGain = ctx.createGain();
+      formant.type = 'sine';
+      formant.frequency.setValueAtTime(540, now + 0.001);
+      formant.frequency.exponentialRampToValueAtTime(275, now + 0.038);
+      strike(formantGain, 0.34 * thockLevel, now + 0.001, now + 0.046, 0.0012);
+      formant.connect(formantGain); formantGain.connect(dest);
+      formant.start(now + 0.001); formant.stop(now + 0.052);
+
+      // Deep structural board-frame low thump
+      const frame = ctx.createOscillator(), frameGain = ctx.createGain();
+      frame.type = 'sine';
+      frame.frequency.setValueAtTime(132, now);
+      frame.frequency.exponentialRampToValueAtTime(52, now + 0.078);
+      strike(frameGain, 0.46 * thockLevel, now, now + 0.088, 0.0015);
+      frame.connect(frameGain); frameGain.connect(dest);
+      frame.start(now); frame.stop(now + 0.096);
     }
   }
 

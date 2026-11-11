@@ -155,11 +155,11 @@
   // A big shot is a lone touch by an ubu driving into the ball at `share` or more of its own
   // full-launch speed; the ball's own speed does not count, so a fast ball off a still ubu is not one.
   const BIG_SHOT = Object.freeze({ share: .8 });
-  // Hit-stop in ms (tuning): `post` for a hard goalpost ring; `hit`/`snap` for a real save, spin strike,
-  // Snap one-timer or big shot; `long` for a save of a big shot, a spin strike or Snap that is also a big
-  // shot, or a big shot that will travel a rink height untouched; `goal` for a big shot whose own path
-  // (no bounces, no ubus) goes into a goal; `iron` at least, for an Iron Save; `scoredGoal` for a scored goal.
-  const HIT_STOP = Object.freeze({ post: 40, hit: 60, snap: 60, long: 100, goal: 150, iron: 150, scoredGoal: 200 });
+  // Hit-stop in ms (tuning): `fire` for any flaming-ball collision with an ubu; `post` for a hard goalpost ring;
+  // `hit`/`snap` for a real save, spin strike, Snap one-timer or big shot; `long` for a save of a big shot, a spin
+  // strike or Snap that is also a big shot, or a big shot that will travel a rink height untouched; `goal` for a
+  // big shot whose own path (no bounces, no ubus) goes into a goal; `iron` at least, for an Iron Save; `scoredGoal` for a scored goal.
+  const HIT_STOP = Object.freeze({ fire: 35, post: 40, hit: 60, snap: 60, long: 100, goal: 150, iron: 150, scoredGoal: 200 });
   const SCREEN_SHAKE = Object.freeze({ default: 1, goal: 2 });
   function bigShot(P, before, touched, ball) {
     if (touched.size !== 1) return false;
@@ -178,6 +178,9 @@
   let spareTick = null, activeTick = null;
   function tickTouch(a, b, speed, impulse, plow = false, iron = false, checker = null, snapped = false, tangentImpulse = 0) {
     const t = activeTick, player = toucher(a, b, speed);
+    if ((a.team === -1 || b.team === -1) && speed >= 15 && (plow || t.preOnFire || (t.ball?.onFire && !t.cannon))) {
+      t.fireHit = true;
+    }
     if (player && !plow) {
       // A touch passed from a teammate makes that teammate the assist; an opponent's significant touch (>= 35)
       // breaks the passing team's assist, whereas a light opponent poke-check graze (< 35) preserves the pass chain.
@@ -249,8 +252,9 @@
     if (t.daze.length < bodies.length) { t.daze = new Float64Array(bodies.length); t.iron = new Uint8Array(bodies.length); t.sup = new Array(bodies.length); }
     const { motion, touched } = t, ball = bodies[6]?.team === -1 ? bodies[6] : bodies.find(b => b.team === -1);
     touched.clear(); t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx; t.tally = tally;
-    t.cannon = false; t.postRing = false; t.postSide = -1; t.incomingCredit = null; t.passSender = -1;
+    t.cannon = false; t.fireHit = false; t.postRing = false; t.postSide = -1; t.incomingCredit = null; t.passSender = -1;
     t.preBallSpeed = ball ? Math.hypot(ball.vx, ball.vy) : 0;
+    t.preOnFire = Boolean(ball?.onFire);
     t.curBvx = ball ? ball.vx : 0; t.curBvy = ball ? ball.vy : 0;
     let held = null;
     for (let i = 0; i < bodies.length; i++) {
@@ -366,6 +370,7 @@
     const hasIron = tickSaves.some(s => s.iron);
     let stop = effects ? Math.max(hasIron ? HIT_STOP.iron : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), incomingBig)) : 0;
     if (effects) {
+      if (t.fireHit) stop = Math.max(stop, HIT_STOP.fire);
       if (snapped) stop = Math.max(stop, big ? HIT_STOP.long : HIT_STOP.snap);
       if (postRing) stop = Math.max(stop, HIT_STOP.post);
       if (goal !== null) stop = Math.max(stop, HIT_STOP.scoredGoal);
