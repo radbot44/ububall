@@ -102,6 +102,7 @@
       shakeX: 0,
       shakeY: 0,
       fireTime: 0,
+      heatTime: 0,
       sizzle: null,
       netFire: null,
       superImpactTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
@@ -1067,7 +1068,7 @@
       fx.particles.length = fx.fireworks.length = fx.shockwaves.length = 0;
       fx.skids.length = fx.skidState.length = fx.burns.length = fx.ripples.length = fx.pings.length = 0;
       fx.popups.length = 0;
-      fx.burnState.path = null; fx.fireTime = 0; fx.wasOnFire = null; quench();
+      fx.burnState.path = null; fx.fireTime = 0; fx.heatTime = 0; fx.wasOnFire = null; quench();
       if (fx.netFire) fx.netFire.lit = false;
       fx.shake = fx.shakeX = fx.shakeY = 0; if (!view.field && rinkWrap) rinkWrap.style.translate = '';
       fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.goalCall = fx.fireWarp = fx.koWarp = null;
@@ -1175,6 +1176,10 @@
     function updateEffects(dt, fx = getEffects()) {
       if (isReducedMotion()) { clearEffects(); return; }
       const fieldFx = getEffects(), view = getView(), rinkWrap = getRinkWrap();
+      if (Number.isFinite(dt) && dt > 0) {
+        fx.heatTime = (fx.heatTime || 0) + dt;
+        if (fieldFx && fieldFx !== fx) fieldFx.heatTime = (fieldFx.heatTime || 0) + dt;
+      }
       for (const trail of fx.trails) {
         for (const point of trail) point.life -= dt;
         while (trail.length && trail[0].life <= 0) trail.shift();
@@ -3016,13 +3021,13 @@
             const closeness = Math.max(0, Math.min(1, 1 - dist / 260));
             const ux = dx / dist, uy = dy / dist;
             const px = -uy, py = ux;
-            const nowSec = isReducedMotion() ? 0 : clockNow() * 0.001;
+            const animSec = isReducedMotion() ? 0 : (fx.heatTime || 0);
             view.ctx.save();
             view.ctx.setLineDash([4, 6]);
             line(b.x, b.y, ball.x, ball.y, '#3388ffcc', 2.2 + closeness * 1.1);
             view.ctx.setLineDash([]);
             for (let side = -1; side <= 1; side += 2) {
-              const bow = side * (8 + 10 * closeness) * Math.sin(nowSec * 6 + side);
+              const bow = side * (8 + 10 * closeness) * Math.sin(animSec * 6 + side);
               const mx = (ball.x + b.x) * 0.5 + px * bow;
               const my = (ball.y + b.y) * 0.5 + py * bow;
               view.ctx.beginPath();
@@ -3039,7 +3044,7 @@
             const chevCount = 4;
             const pullAng = Math.atan2(dy, dx);
             for (let c = 0; c < chevCount; c++) {
-              const t = ((c / chevCount) + nowSec * (1.8 + 1.4 * closeness)) % 1;
+              const t = ((c / chevCount) + animSec * (1.8 + 1.4 * closeness)) % 1;
               if (t < 0.12 || t > 0.88) continue;
               const cx = ball.x + dx * t;
               const cy = ball.y + dy * t;
@@ -3251,8 +3256,8 @@
         const fwNear = fx.fireWarp && fx.fireWarp.life > 0 && Math.hypot(ball.x - fx.fireWarp.x, ball.y - fx.fireWarp.y) < 32;
         if (!fwNear) {
           const mirageR = Math.max(26, (ball.radius || 14) * 2.3);
-          const nowSec = clockNow() * 0.001;
-          drawHeatMirage(ball.x, ball.y, mirageR, 0.5, nowSec, false);
+          const heatTime = fx.heatTime || 0;
+          drawHeatMirage(ball.x, ball.y, mirageR, 0.5, heatTime, false);
         }
       }
       drawFieldOver(colors);

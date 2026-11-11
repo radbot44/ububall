@@ -357,6 +357,37 @@ test('theater.exporting suppresses popup and effect aging in animation frame loo
   assert.equal(effectsUpdated, 2, 'effects update during gameplay');
 });
 
+test('heat effect animation time accumulates during updateEffects and freezes during Pulse mode freeze frames', () => {
+  const P = require('../web/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const fx = createEffectsState([], {});
+  assert.equal(fx.heatTime, 0, 'heatTime initializes to 0');
+
+  const bodies = P.kickoff();
+  const presenter = createRinkPresenter({
+    P, ububallMatch,
+    getView: () => ({ bodies, mode: 'pulse', canvas: { width: 1000, height: 600 }, ctx: {}, badgeCanvas: { width: 1000, height: 600 }, badgeCtx: {} }),
+    getEffects: () => fx,
+    isReducedMotion: () => false,
+    clockNow: () => 1000,
+    gameAudio: () => null
+  });
+
+  // 1. Simulation advances effects
+  presenter.updateEffects(0.016);
+  assert.equal(Number(fx.heatTime.toFixed(4)), 0.0160, 'heatTime advances by dt');
+  presenter.updateEffects(0.016);
+  assert.equal(Number(fx.heatTime.toFixed(4)), 0.0320, 'heatTime accumulates across frames');
+
+  // 2. Pulse mode freeze frames (or paused time) do not advance heatTime
+  presenter.updateEffects(0);
+  assert.equal(Number(fx.heatTime.toFixed(4)), 0.0320, 'heatTime does not advance with 0 dt');
+
+  // 3. Clear effects resets heatTime
+  presenter.clearEffects();
+  assert.equal(fx.heatTime, 0, 'clearEffects resets heatTime to 0');
+});
+
 test('exported video timing advances popups strictly once per export frame', () => {
   const popups = [{ text: 'Big save!', life: 1.0, duration: 1.2 }];
   const fps = 60;
