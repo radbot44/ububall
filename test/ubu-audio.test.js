@@ -465,3 +465,37 @@ test('getAudioContext returns null in environments without user gesture and hand
   assert.equal(typeof h5?.stop, 'function');
   assert.doesNotThrow(() => h5.stop());
 });
+
+test('quirk audio cues (Snap crack, spin-inflected post ring, corner carve, slipstream) synthesize cleanly and share master chain', () => {
+  // Silent no-op when no AudioContext / user gesture is active
+  assert.doesNotThrow(() => audio.playBallHit({ snap: true }));
+  assert.doesNotThrow(() => audio.playGoalHit('post', { spin: 20, speed: 650 }));
+  assert.doesNotThrow(() => audio.playCarve({ volume: 0.6 }));
+  assert.doesNotThrow(() => audio.playSlipstream({ volume: 0.5 }));
+
+  // Normal vs Snap ball hit: Snap layers harmonic crack oscillator + noise grain
+  const plainCtx = recordedContext(), snapCtx = recordedContext();
+  audio.playBallHit({ ctx: plainCtx, volume: 0.8 });
+  audio.playBallHit({ ctx: snapCtx, volume: 0.8, snap: true });
+  assert.ok(snapCtx.nodes.filter(n => n.kind === 'oscillator').length > plainCtx.nodes.filter(n => n.kind === 'oscillator').length);
+  assert.ok(snapCtx.nodes.some(n => n.kind === 'buffer'), 'Snap layers crisp noise transient');
+
+  // Spin-inflected post ring lifts pitch and extends ring decay up to 0.40s
+  const flatPostCtx = recordedContext(), spinPostCtx = recordedContext();
+  audio.playGoalHit('post', { ctx: flatPostCtx, spin: 0, speed: 300 });
+  audio.playGoalHit('post', { ctx: spinPostCtx, spin: 24, speed: 720 });
+  const flatOsc = flatPostCtx.nodes.filter(n => n.kind === 'oscillator');
+  const spinOsc = spinPostCtx.nodes.filter(n => n.kind === 'oscillator');
+  assert.ok(spinOsc[0].frequency.value > flatOsc[0].frequency.value, 'high-spin post hit lifts carrier frequency');
+  assert.ok(spinOsc[0].stopped > flatOsc[0].stopped, 'high-spin post hit extends ring decay');
+  assert.ok(spinOsc[0].stopped <= 0.43, 'post ring stays compact');
+
+  // Corner carve (~85 ms) and Slipstream (~110 ms) route through shared master chain for MP4 export
+  const shared = recordedContext();
+  audio.shareMasterChain(shared);
+  audio.playCarve({ ctx: shared, volume: 0.7 });
+  audio.playSlipstream({ ctx: shared, volume: 0.6 });
+  audio.playBallHit({ ctx: shared, snap: true });
+  audio.playGoalHit('post', { ctx: shared, spin: 18, speed: 500 });
+  assert.equal(shared.nodes.filter(n => n.kind === 'compressor').length, 1, 'all quirk sounds share single export compressor');
+});

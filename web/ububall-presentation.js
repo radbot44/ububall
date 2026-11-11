@@ -27,6 +27,8 @@
       sizzle: null,
       netFire: null,
       superImpactTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
+      carveTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
+      slipstreamTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       materialEmitters: (entries || []).map(entry => {
         const seen = new Set(), styles = [];
         for (const attribute of Object.values(entry?.model?.attributes || {})) {

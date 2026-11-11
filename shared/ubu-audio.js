@@ -696,14 +696,15 @@
   function playBallHit(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.08);
+    const snap = Boolean(options.snap);
+    const master = createMasterChain(ctx, null, snap ? 0.11 : 0.08);
     const now = ctx.currentTime;
     const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.8));
 
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'triangle';
-    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.setValueAtTime(snap ? 280 : 220, now);
     osc.frequency.exponentialRampToValueAtTime(75, now + 0.05);
 
     strike(gain, 0.7 * volume, now, now + 0.07);
@@ -712,6 +713,19 @@
     gain.connect(master);
     osc.start(now);
     osc.stop(now + 0.08);
+
+    if (snap) {
+      const crack = ctx.createOscillator(), crackGain = ctx.createGain();
+      crack.type = 'sine';
+      crack.frequency.setValueAtTime(1150, now);
+      crack.frequency.exponentialRampToValueAtTime(260, now + 0.042);
+      strike(crackGain, 0.45 * volume, now, now + 0.048);
+      crack.connect(crackGain);
+      crackGain.connect(master);
+      crack.start(now);
+      crack.stop(now + 0.055);
+      noiseGrain(ctx, master, now, 0.028, { freq: 2900, to: 1100, q: 1.8, level: 0.42 * volume });
+    }
   }
 
   // One second of white noise per audio context; grains read random slices of it.
@@ -974,6 +988,41 @@
     return handle;
   }
 
+  // Skate edge carving a curved corner: a brief (~85 ms), soft band-passed ice scrape.
+  function playCarve(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx, null, 0.11);
+    const now = ctx.currentTime;
+    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.55));
+    noiseGrain(ctx, master, now, 0.085, { freq: 2400, to: 3800, q: 2.6, level: 0.22 * volume });
+    blip(ctx, master, now, 0.075, 1350, 1650, 0.045 * volume);
+  }
+
+  // Slipstream draft entry: a quiet, airy bandpass filter sweep (~110 ms).
+  function playSlipstream(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx, null, 0.14);
+    const now = ctx.currentTime;
+    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.5));
+    const source = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+    source.buffer = grainNoise(ctx);
+    filter.type = 'bandpass';
+    filter.Q.setValueAtTime(1.6, now);
+    filter.frequency.setValueAtTime(650, now);
+    filter.frequency.exponentialRampToValueAtTime(1550, now + 0.055);
+    filter.frequency.exponentialRampToValueAtTime(900, now + 0.11);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.14 * volume, now + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(master);
+    source.start(now, Math.random() * 0.8);
+    source.stop(now + 0.13);
+  }
+
   function playWallHit(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
@@ -1004,7 +1053,11 @@
   function playGoalHit(type = 'post', options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.3);
+    const spinNorm = type === 'post' ? Math.min(1, Math.max(0, (Number(options.spin) || 0) / 24)) : 0;
+    const speedNorm = type === 'post' ? Math.min(1, Math.max(0, (Number(options.speed) || 0) / 720)) : 0;
+    const inflect = spinNorm * (0.4 + 0.6 * speedNorm);
+    const postDecay = 0.28 + 0.12 * inflect;
+    const master = createMasterChain(ctx, null, type === 'post' ? postDecay + 0.04 : 0.3);
     const now = ctx.currentTime;
     const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.8));
 
@@ -1015,23 +1068,23 @@
       const gain = ctx.createGain();
 
       carrier.type = 'sine';
-      carrier.frequency.setValueAtTime(1650, now);
+      carrier.frequency.setValueAtTime(1650 * (1 + 0.14 * inflect), now);
       mod.type = 'sine';
-      mod.frequency.setValueAtTime(2780, now);
+      mod.frequency.setValueAtTime(2780 * (1 + 0.18 * inflect), now);
 
-      modGain.gain.setValueAtTime(900, now);
-      modGain.gain.exponentialRampToValueAtTime(0.1, now + 0.12);
+      modGain.gain.setValueAtTime(900 + 350 * inflect, now);
+      modGain.gain.exponentialRampToValueAtTime(0.1, now + 0.12 + 0.06 * inflect);
       mod.connect(modGain);
       modGain.connect(carrier.frequency);
 
-      strike(gain, 0.5 * volume, now, now + 0.28);
+      strike(gain, 0.5 * volume, now, now + postDecay);
 
       carrier.connect(gain);
       gain.connect(master);
       carrier.start(now);
       mod.start(now);
-      carrier.stop(now + 0.3);
-      mod.stop(now + 0.3);
+      carrier.stop(now + postDecay + 0.02);
+      mod.stop(now + postDecay + 0.02);
     } else {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -1712,6 +1765,8 @@
     playCoin,
     playPack,
     playUnwrap,
+    playCarve,
+    playSlipstream,
     playWallHit,
     playSizzle,
     playGoalHit,

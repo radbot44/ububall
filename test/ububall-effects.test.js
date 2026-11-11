@@ -1970,3 +1970,121 @@ test('interactive replay and export session advance through identical determinis
   }
 });
 
+
+test("Snap, Post English, Rim-Arounds, Tailgating and Hip Clips emit particles/skids, gate audio cooldowns, wire MP4 offlineAudio, and never spawn popups", () => {
+  const P = require("../web/ububall-physics.js");
+  const calls = { ball: [], goal: [], wall: [], carve: [], slip: [], collision: [] };
+  let now = 1000;
+  const mockAudio = {
+    playBallHit: o => calls.ball.push(o),
+    playGoalHit: (t, o) => calls.goal.push([t, o]),
+    playWallHit: o => calls.wall.push(o),
+    playCarve: o => calls.carve.push(o),
+    playSlipstream: o => calls.slip.push(o),
+    playCollision: (v, o) => calls.collision.push(o),
+    playSizzle: () => null
+  };
+  const bodies = P.kickoff();
+  bodies.slice(0, 6).forEach((b, i) => { P.applyStats(b); b.voice = { instrument: i }; });
+  const fx = createEffectsState([], {});
+  const popups = fx.popups;
+  const context = {
+    ...fx,
+    P, bodies, popups,
+    HEAT: P.HEAT, SKID_SLOWDOWN: 220, WALL_STEP: 2, NET_RUNS: [], BOARD_RUNS: [],
+    reducedMotion: { matches: false },
+    clockNow: () => now,
+    gameAudio: () => mockAudio,
+    contactMeter: () => {},
+    popup: (body, text) => popups.push({ body, text })
+  };
+  const code =
+    section("function markIce(b, i, dt) {", "const reducedMotion =") + "\n" +
+    section("function burst(x, y, team, strength, celebration = false, tangent = 0, color = null) {", "let fanfareLoop = null;") + "\n" +
+    section("function addWallEffect(body, velocity, wallType, nx, ny) {", "const WALL_STEP = 2;") + "\n" +
+    section("function handleCollision(", "function handleSuper(");
+  const env = runInNewContext(code + "\n;({ emitSkaterEffects, handleCollision, handleWall });", context);
+
+  // 1. Snap collision: warm directional sparks + playBallHit({ snap: true }), zero popups
+  Object.assign(bodies[6], { x: 500, y: 300, vx: 650, vy: 0 });
+  const pBeforeSnap = fx.particles.length;
+  env.handleCollision(bodies[1], bodies[6], 340, 500, false, false, true, 0);
+  assert.equal(calls.ball.at(-1)?.snap, true, "Snap passes snap: true to playBallHit");
+  assert.ok(fx.particles.some(p => p.color === "#ffd76b"), "Snap emits warm gold sparks");
+  assert.ok(fx.particles.length > pBeforeSnap + 10);
+
+  // 2. Post English hard hit: metallic sparks + spin/speed passed to playGoalHit("post")
+  now += 200;
+  Object.assign(bodies[6], { x: 922, y: 235, vx: -400, vy: 120, omega: -18 });
+  const pBeforePost = fx.particles.length;
+  env.handleWall(bodies[6], 380, "post", 1, 0, false);
+  assert.equal(calls.goal.at(-1)?.[0], "post");
+  assert.equal(calls.goal.at(-1)?.[1]?.spin, 18);
+  assert.equal(calls.goal.at(-1)?.[1]?.speed, 380);
+  assert.ok(fx.particles.length > pBeforePost + 8, "hard post hit emits metallic tangent sparks");
+
+  // 3. Rim-Around corner carve: ice-spray particles + skidState armed + 180 ms playCarve cooldown
+  now += 200;
+  Object.assign(bodies[0], { x: 106, y: 106, vx: 280, vy: -280, omega: -12 });
+  env.handleWall(bodies[0], 95, "wall", -Math.SQRT1_2, -Math.SQRT1_2, true);
+  assert.equal(calls.carve.length, 1, "Rim-Around triggers playCarve");
+  assert.ok(fx.skidState[0]?.time >= 0.2, "Rim-Around feeds skidState for curved skate mark");
+  assert.ok(fx.particles.some(p => p.color === "#e8f7ff"), "Rim-Around emits fine ice-mist spray");
+  now += 50; // within 180 ms cooldown
+  env.handleWall(bodies[0], 80, "wall", -Math.SQRT1_2, -Math.SQRT1_2, true);
+  assert.equal(calls.carve.length, 1, "playCarve is cooldown-gated across multi-tick corner carves");
+  now += 150; // past 180 ms cooldown
+  env.handleWall(bodies[0], 80, "wall", -Math.SQRT1_2, -Math.SQRT1_2, true);
+  assert.equal(calls.carve.length, 2, "playCarve fires again once cooldown elapses");
+
+  // 4. Tailgating: wake streak particles + 500 ms playSlipstream cooldown
+  Object.assign(bodies[0], { x: 300, y: 300, vx: 360, vy: 0 });
+  Object.assign(bodies[1], { x: 365, y: 300, vx: 520, vy: 0 });
+  now += 600;
+  env.emitSkaterEffects(0.1);
+  assert.equal(calls.slip.length, 1, "strong Tailgating triggers playSlipstream");
+  assert.ok(fx.particles.some(p => p.color === "#d6f6ff"), "Tailgating spawns pale-cyan wake streaks");
+  now += 200; // within 500 ms cooldown
+  env.emitSkaterEffects(0.05);
+  assert.equal(calls.slip.length, 1, "playSlipstream is cooldown-gated per skater");
+  now += 350; // past 500 ms cooldown
+  env.emitSkaterEffects(0.05);
+  assert.equal(calls.slip.length, 2, "playSlipstream fires again after 500 ms cooldown");
+
+  // 5. Hip Clip glancing check: scales spark burst and audio volume even when normal closing speed is modest
+  now += 200;
+  Object.assign(bodies[2], { x: 400, y: 300, vx: 450, vy: 0 });
+  Object.assign(bodies[3], { x: 440, y: 330, vx: -100, vy: 0 });
+  const cBefore = calls.collision.length;
+  env.handleCollision(bodies[2], bodies[3], 50, 120, false, false, false, 480);
+  assert.equal(calls.collision.length, cBefore + 1);
+  assert.ok(calls.collision.at(-1).volume > 0.35, "Hip Clip tangential spin impulse scales check audio volume");
+
+  // Strict scope invariant: zero popup banners for any of the five mechanics
+  assert.equal(popups.length, 0, "none of the five mechanics create floating text popups");
+
+  // 6. Offline MP4 export audio adapter exposes playCarve and playSlipstream alongside updated options
+  const exportCode = section("function offlineAudio(offline, seconds) {", "let videoLogoImage = null;");
+  let sharedCtx = null;
+  const forwarded = [];
+  const fakeUbuAudio = {
+    shareMasterChain: ctx => { sharedCtx = ctx; },
+    playCollision: (v, o) => forwarded.push(["collision", o]),
+    playBallHit: o => forwarded.push(["ball", o]),
+    playCarve: o => forwarded.push(["carve", o]),
+    playSlipstream: o => forwarded.push(["slipstream", o]),
+    playWallHit: o => forwarded.push(["wall", o]),
+    playGoalHit: (t, o) => forwarded.push(["goal", t, o]),
+    playSuper: () => {}, playSizzle: () => {}, playFoul: () => {}, playIronSave: () => {}, playFanfare: () => {}
+  };
+  const { offlineAudio } = runInNewContext(exportCode + "\n;({ offlineAudio });", { Proxy, window: { ubuAudio: fakeUbuAudio } });
+  const adapter = offlineAudio({ sampleRate: 48000 }, () => 2.5);
+  assert.ok(sharedCtx && sharedCtx.currentTime === 2.5);
+  adapter.playBallHit({ volume: 0.9, snap: true });
+  adapter.playGoalHit("post", { volume: 0.9, spin: 16, speed: 480 });
+  adapter.playCarve({ volume: 0.6 });
+  adapter.playSlipstream({ volume: 0.5 });
+  assert.deepEqual(forwarded.map(e => e[0]), ["ball", "goal", "carve", "slipstream"]);
+  assert.equal(forwarded[0][1].snap, true);
+  assert.equal(forwarded[1][2].spin, 16);
+});

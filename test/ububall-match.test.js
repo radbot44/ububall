@@ -929,3 +929,64 @@ test('Pulse Knockout stun ends a victim active super and prevents meter gain whi
   assert.equal(r1.state.bodies[0].stunned, true, 'victim is stunned for next Pulse turn');
   assert.equal(r1.state.bodies[0].superActive, null, 'active Magnet is ended upon being knocked out');
 });
+
+test('Snap awards 60 ms hit-stop (100 ms when also a big shot), Post English rings award 40 ms hit-stop, and all modes enable quirks', () => {
+  assert.equal(M.HIT_STOP.post, 40);
+  assert.equal(M.HIT_STOP.snap, 60);
+
+  // 1. Moderate-speed Snap (not a big shot: drive >= 140 but < 0.8 * 720 = 576) awards 60 ms hit-stop across modes
+  for (const mode of ['standard', 'classic', 'pulse', 'blitz']) {
+    const bodies = P.kickoff();
+    bodies.slice(0, 6).forEach((b, i) => { M.applyStats(P, b, {}, mode); Object.assign(b, { x: 120 + i * 45, y: 500 }); });
+    Object.assign(bodies[1], { x: 460, y: 300 });
+    Object.assign(bodies[6], { x: 502, y: 300, vx: 0, vy: 260, strikerTeam: 0, strikerSlot: 0, strikerPower: 1, pace: 260 });
+    const state = { version: M.VERSION, mode, bodies, stats: [], scores: [0, 0], turn: 1 };
+    const moves = Array.from({ length: 6 }, still);
+    moves[1] = { angle: 0, power: 0.45, spin: 0, superArm: false, guard: false }; // 324 px/s >= 140, < 576
+    const res = M.resolveTurn(P, state, moves);
+    assert.ok(res.replay.stops.some(s => s.ms === M.HIT_STOP.snap), `${mode} awards 60 ms Snap hit-stop`);
+    assert.equal(Boolean(res.state.bodies[6].snapStruck), false, `${mode} clears snapStruck`);
+  }
+
+  // 2. Full-power Snap into nearby blocker (big shot + Snap) upgrades hit-stop to 100 ms (HIT_STOP.long)
+  const bigSnapState = shotState(
+    { x: 342, y: 300, vx: 0, vy: 240, strikerTeam: 0, strikerSlot: 0, strikerPower: 1, pace: 240 },
+    { 1: { x: 300, y: 300 }, 2: { x: 410, y: 340 } }
+  );
+  const bigMoves = Array.from({ length: 6 }, still);
+  bigMoves[1] = { angle: 0, power: 1, spin: 0, superArm: false, guard: false };
+  const bigRes = M.resolveTurn(P, bigSnapState, bigMoves);
+  assert.equal(bigRes.replay.stops[0].ms, M.HIT_STOP.long, 'Snap + big shot earns 100 ms hit-stop');
+
+  // 3. Hard ball-post hit (velocity >= 300 px/s) awards 40 ms hit-stop; soft post kiss (< 300) does not
+  const postState = speed => shotState({
+    x: P.rink.right - 22,
+    y: P.rink.goalTop + 12,
+    vx: speed,
+    vy: -speed * 0.5,
+    omega: 14
+  });
+  const hardPost = M.resolveTurn(P, postState(420), Array.from({ length: 6 }, still));
+  assert.ok(hardPost.replay.stops.some(s => s.ms === M.HIT_STOP.post), 'hard ball-post hit awards 40 ms hit-stop');
+  const softPost = M.resolveTurn(P, postState(150), Array.from({ length: 6 }, still));
+  assert.equal(softPost.replay.stops.some(s => s.ms === M.HIT_STOP.post), false, 'soft ball-post hit skips hit-stop');
+
+  // 4. Corner-stall faceoff resets strikerSlot to -1
+  const stallFouls = { ...M.newFouls(), corner: 0, cornerTurns: 2 };
+  const stallBodies = foulTurn(stallFouls, { 0: { x: 120, y: 75 } }, { x: 90, y: 90, strikerTeam: 0, strikerSlot: 2 });
+  assert.equal(stallFouls.faceoff, true);
+  assert.equal(stallBodies[6].strikerTeam, -1);
+  assert.equal(stallBodies[6].strikerSlot, -1, 'corner-stall faceoff resets strikerSlot');
+
+  // 5. CPU decided() stopping-distance bound accounts for Tailgating friction reduction
+  const cpuBodies = P.kickoff();
+  cpuBodies.slice(0, 6).forEach(b => P.applyStats(b));
+  Object.assign(cpuBodies[6], { x: 700, y: 300, vx: 0, vy: 0 });
+  // At vx = 180 and friction = 150: un-drafted stopDist = 180^2 / 300 = 108 px; drafted bound = 108 / 0.6 = 180 px.
+  // Place skater 0 at gap = 140 px (unreachable un-drafted, reachable with Tailgating!)
+  const contact = Math.max(cpuBodies[0].radius, cpuBodies[0].reach, 18) + cpuBodies[6].radius;
+  Object.assign(cpuBodies[0], { x: 700 - contact - 140, y: 300, vx: 180, vy: 0 });
+  assert.equal(C.decided(cpuBodies), false, 'decided() stays false when a drafting skater could still reach the ball');
+  Object.assign(cpuBodies[0], { x: 700 - contact - 200, y: 300, vx: 180, vy: 0 });
+  assert.equal(C.decided(cpuBodies), true, 'decided() returns true once beyond maximum drafting stopping distance');
+});

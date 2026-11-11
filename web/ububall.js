@@ -328,7 +328,31 @@
   }
   function emitSkaterEffects(dt) {
     if (reducedMotion.matches) return;
-    fieldView.bodies.slice(0, 6).forEach((b, i) => markIce(b, i, dt));
+    fieldView.bodies.slice(0, 6).forEach((b, i) => {
+      markIce(b, i, dt);
+      const draft = P.tailgateFactor ? P.tailgateFactor(fieldView.bodies, b) : 0;
+      if (draft > 0.35) {
+        const speed = Math.hypot(b.vx, b.vy) || 1, ux = b.vx / speed, uy = b.vy / speed;
+        const rate = dt * 42 * draft;
+        const count = Math.floor(rate) + (Math.random() < (rate % 1) ? 1 : 0);
+        for (let k = 0; k < count && fieldEffects.particles.length < 340; k++) {
+          const spread = (Math.random() - .5) * b.radius * 1.1;
+          const x = b.x - ux * (b.radius * .6) - uy * spread;
+          const y = b.y - uy * (b.radius * .6) + ux * spread;
+          const life = .12 + Math.random() * .09, wakeSpeed = 70 + speed * .22;
+          fieldEffects.particles.push({ x, y, px: x + ux * 6, py: y + uy * 6,
+            vx: -ux * wakeSpeed + (Math.random() - .5) * 20, vy: -uy * wakeSpeed + (Math.random() - .5) * 20,
+            team: -1, color: k % 2 ? '#d6f6ff' : '#ffffff', life, duration: life });
+        }
+        if (draft > 0.45 && gameAudio()?.playSlipstream) {
+          const now = clockNow(), map = (fieldEffects.slipstreamTimes ||= new WeakMap());
+          if (now - (map.get(b) ?? -Infinity) >= 500) {
+            map.set(b, now);
+            gameAudio().playSlipstream({ volume: Math.min(0.75, 0.25 + 0.5 * draft) });
+          }
+        }
+      }
+    });
     sparkBall(fieldView.bodies[6], dt);
     burnIce(fieldView.bodies[6]);
     fieldEffects.materialEmitters.forEach((emitter, i) => {
@@ -2795,7 +2819,7 @@
   // A replayed tick's saves, spin strike and hit-stop, shown as live play showed them.
   function replayEvents(turn, tick, sim) {
     const saves = turn.saves.filter(s => s.tick === tick), stop = turn.stops.find(s => s.tick === tick)?.ms, struck = sim[6].spinStruck;
-    sim[6].spinStruck = false;
+    sim[6].spinStruck = false; sim[6].snapStruck = false;
     if (saves.length || struck) syncReplay();
     for (const s of saves) {
       if (s.iron && sim[s.index]) sim[s.index].ironGuard = true;
@@ -2815,8 +2839,8 @@
   const replayView = (cb, th = currentReplay()) => toViewBody(cb, th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : null));
   const syncReplay = (th = currentReplay()) => syncViewBodies(th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : null), th ? th.anonymous : undefined, th?.exporting ? null : undefined, th?.entries);
   const replayFx = {
-    hit: (a, b, speed, impulse, plow = false, iron = false) => { syncReplay(); handleCollision(replayView(a), replayView(b), speed, impulse, plow, iron); },
-    wall: (body, velocity, wallType, nx, ny) => { syncReplay(); const seat = shownSeat(); handleWall(replayView(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny); },
+    hit: (a, b, speed, impulse, plow = false, iron = false, checker = null, snapped = false, tangentImpulse = 0) => { syncReplay(); handleCollision(replayView(a), replayView(b), speed, impulse, plow, iron, snapped, tangentImpulse); },
+    wall: (body, velocity, wallType, nx, ny, rimmed = false) => { syncReplay(); const seat = shownSeat(); handleWall(replayView(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny, rimmed); },
     shock: (source, radius, type = null) => { syncReplay(); handleShockwave(replayView(source), radius, type); },
     super: (key, stage, body, target = null) => { syncReplay(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
   };
@@ -3094,7 +3118,7 @@
       if (fx) P.step(sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super); else P.step(sim, P.DT);
       ububallMatch.lapseFouls(P, sim, th.fouls);
       th.tick++;
-      if (fx) replayEvents(th.replay.turns[th.index], th.tick, sim); else sim[6].spinStruck = false;
+      if (fx) replayEvents(th.replay.turns[th.index], th.tick, sim); else { sim[6].spinStruck = false; sim[6].snapStruck = false; }
       traceGuide(sim, th.guide);
     });
   }
@@ -3254,6 +3278,7 @@
     A.shareMasterChain(ctx);
     const into = (options = {}) => ({ ...options, ctx });
     return { getAudioContext: () => ctx, stop() {}, playCollision: (voice, o) => A.playCollision(voice, into(o)), playBallHit: o => A.playBallHit(into(o)),
+      playCarve: o => A.playCarve?.(into(o)), playSlipstream: o => A.playSlipstream?.(into(o)),
       playWallHit: o => A.playWallHit(into(o)), playGoalHit: (type, o) => A.playGoalHit(type, into(o)), playSuper: (key, phase, o) => A.playSuper(key, phase, into(o)),
       playSizzle: o => A.playSizzle(into(o)), playFoul: (kind, o) => A.playFoul(kind, into(o)),
       playIronSave: o => A.playIronSave?.(into(o)), playFanfare: (voice, notes, time, o) => A.playFanfare?.(voice, notes, time, into(o)) };
@@ -4531,36 +4556,50 @@
     updateFirstTurnGuide();
     sync(); draw();
   };
-  function handleCollision(a, b, speed, impulse, plow = false, iron = false) {
+  function handleCollision(a, b, speed, impulse, plow = false, iron = false, snapped = false, tangentImpulse = 0) {
     if (iron) {
       if (a?.guarding) a.ironGuard = true;
       if (b?.guarding) b.ironGuard = true;
     }
-    if (speed < 15) return;
+    const isBall = a.team === -1 || b.team === -1;
+    const isSnap = isBall && Boolean(snapped || a?.snapStruck || b?.snapStruck);
+    const spinBoost = !isBall && a.team !== b.team ? (tangentImpulse || 0) * 0.45 : 0;
+    const effSpeed = Math.max(speed, spinBoost);
+    if (effSpeed < 15 && !isSnap) return;
     const distance = Math.hypot(b.x - a.x, b.y - a.y) || 1;
     const x = a.x + (b.x - a.x) * a.radius / distance, y = a.y + (b.y - a.y) * a.radius / distance;
     const tangent = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
-    burst(x, y, a.team, Math.min(1, speed / 600), false, tangent);
-    if (a.team !== b.team) burst(x, y, b.team, Math.min(1, speed / 600), false, tangent);
+    const sparkStrength = Math.min(1.35, effSpeed / 600);
+    burst(x, y, a.team, sparkStrength, false, tangent);
+    if (a.team !== b.team) burst(x, y, b.team, sparkStrength, false, tangent);
+    if (isSnap && !reducedMotion.matches) {
+      const ball = a.team === -1 ? a : b;
+      const heading = Math.atan2(ball.vy || 0, ball.vx || 0);
+      for (let k = 0; k < 12 && fieldEffects.particles.length < 400; k++) {
+        const ang = heading + (Math.random() - .5) * .5, spd = 140 + Math.random() * 220, life = .16 + Math.random() * .14;
+        fieldEffects.particles.push({ x: ball.x, y: ball.y, px: ball.x, py: ball.y,
+          vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+          team: -1, color: k % 3 === 0 ? '#ffffff' : '#ffd76b', life, duration: life });
+      }
+    }
     if (plow) flames(x, y, 40, (b.vx || a.vx) * 0.1, (b.vy || a.vy) * 0.1, 15);
-    const isBall = a.team === -1 || b.team === -1;
     const now = clockNow();
-    if (!plow) contactMeter(a, b, speed);
+    if (!plow && speed >= 15) contactMeter(a, b, speed);
     if (isBall) {
       const player = a.team !== -1 ? a : b;
       const norm = Math.min(1.0, Math.max(0.0, (speed - 25) / 550));
       const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
-      if (!player._lastHitSound || (now - player._lastHitSound) > 55) {
+      if (isSnap || !player._lastHitSound || (now - player._lastHitSound) > 55) {
         player._lastHitSound = now;
         if (player.voice && gameAudio()) {
           gameAudio().playCollision(player.voice, { volume });
         }
         if (gameAudio()) {
-          gameAudio().playBallHit({ volume });
+          gameAudio().playBallHit({ volume: isSnap ? Math.min(1.0, volume * 1.15) : volume, snap: isSnap });
         }
       }
     } else if (a.team !== -1 && b.team !== -1) {
-      const norm = Math.min(1.0, Math.max(0.0, (speed - 40) / 600));
+      const norm = Math.min(1.0, Math.max(0.0, (effSpeed - 40) / 600));
       const volume = Math.min(1.0, 0.12 + 0.75 * (norm ** 0.8));
       const primary = (Math.hypot(a.vx, a.vy) * a.mass >= Math.hypot(b.vx, b.vy) * b.mass) ? a : b;
       if (primary.voice && gameAudio()) {
@@ -4571,19 +4610,52 @@
       }
     }
   }
-  function handleWall(body, velocity, wallType, nx, ny) {
-    if (velocity < 20) return;
+  function handleWall(body, velocity, wallType, nx, ny, rimmed = false) {
+    if (velocity < 20 && !rimmed) return;
     addWallEffect(body, velocity, wallType, nx, ny);
+    const cx = body.x + nx * body.radius, cy = body.y + ny * body.radius;
+    const tangent = Math.atan2(ny, nx) + Math.PI / 2;
     const now = clockNow();
+    if (rimmed) {
+      if (!reducedMotion.matches) {
+        const idx = fieldView.bodies?.indexOf(body) ?? -1;
+        if (idx >= 0 && idx < 6) {
+          const s = fieldEffects.skidState[idx] ||= { time: 0 };
+          Object.assign(s, { time: Math.max(s.time || 0, .22), strength: Math.max(s.time > 0 ? s.strength : 0, .55) });
+        }
+        for (let k = 0; k < 5 && fieldEffects.particles.length < 400; k++) {
+          const ang = tangent + (k % 2 ? Math.PI : 0) + (Math.random() - .5) * .45;
+          const spd = 45 + Math.random() * 85, life = .14 + Math.random() * .12;
+          fieldEffects.particles.push({ x: cx, y: cy, px: cx, py: cy,
+            vx: Math.cos(ang) * spd - nx * 25, vy: Math.sin(ang) * spd - ny * 25,
+            team: -1, color: k % 2 ? '#e8f7ff' : '#ffffff', life, duration: life });
+        }
+      }
+      const map = (fieldEffects.carveTimes ||= new WeakMap());
+      if (now - (map.get(body) ?? -Infinity) >= 180) {
+        map.set(body, now);
+        const speed = Math.hypot(body.vx || 0, body.vy || 0);
+        gameAudio()?.playCarve?.({ volume: Math.min(0.85, 0.25 + 0.5 * Math.min(1, speed / 550)) });
+      }
+      return;
+    }
     if (body._lastWallSound && (now - body._lastWallSound) < 60) return;
     body._lastWallSound = now;
-    burst(body.x + nx * body.radius, body.y + ny * body.radius, body.team,
-      Math.min(1, velocity / 500), false, Math.atan2(ny, nx) + Math.PI / 2);
+    burst(cx, cy, body.team, Math.min(1, velocity / 500), false, tangent);
+    if (wallType === 'post' && body.team === -1 && velocity >= 240 && !reducedMotion.matches) {
+      for (let k = 0; k < 8 && fieldEffects.particles.length < 400; k++) {
+        const ang = tangent + (k % 2 ? Math.PI : 0) + (Math.random() - .5) * .4;
+        const spd = 80 + Math.random() * 140, life = .16 + Math.random() * .14;
+        fieldEffects.particles.push({ x: cx, y: cy, px: cx, py: cy,
+          vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+          team: -1, color: k % 2 ? '#ffd76b' : '#ffffff', life, duration: life });
+      }
+    }
     const norm = Math.min(1.0, Math.max(0.0, (velocity - 20) / 480));
     const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
     if (!gameAudio()) return;
     if (wallType === 'post') {
-      gameAudio().playGoalHit('post', { volume: Math.min(1.0, volume * 1.1) });
+      gameAudio().playGoalHit('post', { volume: Math.min(1.0, volume * 1.1), spin: Math.abs(body.omega || 0), speed: velocity });
     } else if (wallType === 'net') {
       gameAudio().playGoalHit('net', { volume });
     } else {
@@ -4634,8 +4706,8 @@
   const liveView = cb => toViewBody(cb, liveSim(), 0);
   const syncLive = () => syncViewBodies(liveSim(), 0);
   const liveFx = {
-    collide: (a, b, speed, impulse, plow = false, iron = false) => { syncLive(); handleCollision(liveView(a), liveView(b), speed, impulse, plow, iron); },
-    wall: (body, velocity, wallType, nx, ny) => { syncLive(); handleWall(liveView(body), velocity, wallType, nx, ny); },
+    collide: (a, b, speed, impulse, plow = false, iron = false, checker = null, snapped = false, tangentImpulse = 0) => { syncLive(); handleCollision(liveView(a), liveView(b), speed, impulse, plow, iron, snapped, tangentImpulse); },
+    wall: (body, velocity, wallType, nx, ny, rimmed = false) => { syncLive(); handleWall(liveView(body), velocity, wallType, nx, ny, rimmed); },
     shockwave: (source, radius, type = null) => { syncLive(); handleShockwave(liveView(source), radius, type); },
     super: (key, stage, body, target = null) => { syncLive(); handleSuper(key, stage, liveView(body), target ? liveView(target) : null); }
   };
@@ -5760,6 +5832,7 @@
       P.step(replay.simBodies, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super); traceGuide(replay.simBodies);
       replay.currentTick++;
       ububallMatch.lapseFouls(P, replay.simBodies, simFouls);
+      replay.simBodies[6].spinStruck = false; replay.simBodies[6].snapStruck = false;
       const now = replay.currentTick, saves = (replay.saves || []).filter(s => s.tick === now), struck = replay.struck?.includes(now);
       if (saves.length || struck) syncViewBodies(replay.simBodies, online.state.seat);
       for (const s of saves) {

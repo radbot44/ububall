@@ -1702,3 +1702,256 @@ test('a moving Guard making a teammate Iron Save traps the fireball rather than 
   assert.ok(Math.hypot(b[6].vx, b[6].vy) < 150, 'ball stays trapped at Iron Save speed instead of blasting at 950 px/s');
   assert.ok(b[6].pace > 840 && P.ballOnFire(b[6]), 'fireball stays loaded for a follow-up Hot Shot');
 });
+
+test('Snap redirects a live teammate pass within the pair KE budget and adds pre-heat, rejecting self, opponent, slow or passive touches', () => {
+  const runSnap = ({ strikerTeam = 0, strikerSlot = 0, shooterIdx = 1, passVy = 320, shooterVx = 520, guarding = false, onFire = false, crowd = false }) => {
+    const b = P.kickoff();
+    b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+    b.slice(0, 6).forEach((x, idx) => Object.assign(x, { x: 120 + idx * 45, y: 500, vx: 0, vy: 0 }));
+    const shooter = b[shooterIdx], ball = b[6];
+    Object.assign(shooter, { x: 460, y: 300, vx: shooterVx, vy: 0, guarding });
+    P.syncEffectiveStats(shooter);
+    Object.assign(ball, { x: 500, y: 300, vx: 0, vy: passVy, strikerTeam, strikerSlot, strikerPower: 1, onFire, fireTicks: onFire ? P.FIRE_TICKS : 0, pace: onFire ? 900 : Math.abs(passVy) });
+    if (crowd) Object.assign(b[2], { x: 538, y: 300, vx: 0, vy: 0 });
+    const keBefore = kineticEnergy([shooter, ball]);
+    let snapFlag = false;
+    P.step(b, 0, (a, c, spd, imp, plow, iron, chk, snapped) => { if (snapped) snapFlag = true; });
+    return { ball, shooter, speedAfter: Math.hypot(ball.vx, ball.vy), keBefore, keAfter: kineticEnergy([shooter, ball]), snapFlag };
+  };
+
+  // Valid teammate one-timer (slot 0 -> slot 1) vs control with no prior passer (strikerTeam: -1)
+  const snap = runSnap({});
+  const plain = runSnap({ strikerTeam: -1, strikerSlot: -1 });
+  assert.equal(snap.snapFlag, true, 'Snap triggers on live pass from a different teammate');
+  assert.equal(snap.ball.snapStruck, true, 'ball.snapStruck is set');
+  assert.ok(snap.speedAfter > plain.speedAfter + 25, `Snap redirects incoming pass speed (${snap.speedAfter} vs ${plain.speedAfter})`);
+  assert.equal(snap.ball.fireTicks, P.SNAP.heatTicks, 'Snap adds pre-heat fireTicks');
+  assert.ok(snap.ball.pace >= snap.speedAfter - 1e-9, 'ball.pace updates to snapped speed');
+  assert.equal(snap.ball.strikerSlot, 1, 'strikerSlot updates to the new shooter');
+  assert.ok(snap.keAfter <= snap.keBefore * (1 + 1e-12), 'Snap strictly respects pair kinetic energy bound');
+
+  // Self-touch (strikerSlot === shooter.slot) does not trigger Snap
+  const selfTouch = runSnap({ strikerTeam: 0, strikerSlot: 1, shooterIdx: 1 });
+  assert.equal(selfTouch.snapFlag, false, 'self-touch does not trigger Snap');
+  assert.equal(Boolean(selfTouch.ball.snapStruck), false);
+  assert.ok(Math.abs(selfTouch.speedAfter - plain.speedAfter) < 1e-9);
+
+  // Opponent shot (strikerTeam !== shooter.team) does not trigger Snap
+  const oppTouch = runSnap({ strikerTeam: 1, strikerSlot: 0, shooterIdx: 1 });
+  assert.equal(oppTouch.snapFlag, false, 'opponent pass/shot does not trigger Snap');
+  assert.equal(oppTouch.ball.fireTicks, 0);
+
+  // Slow pass (< 180 px/s) and passive/stationary shooter (< 140 px/s) do not trigger Snap
+  assert.equal(runSnap({ passVy: 150 }).snapFlag, false, 'slow pass below 180 px/s does not Snap');
+  assert.equal(runSnap({ shooterVx: 100 }).snapFlag, false, 'passive shooter drive below 140 px/s does not Snap');
+  assert.equal(runSnap({ shooterVx: 0, passVy: -350 }).snapFlag, false, 'stationary touch does not Snap');
+  assert.equal(runSnap({ guarding: true }).snapFlag, false, 'guarding skater does not Snap');
+  assert.equal(runSnap({ onFire: true }).snapFlag, false, 'already burning ball uses Hot Shot rather than Snap');
+  assert.equal(runSnap({ crowd: true }).snapFlag, false, 'crowded simultaneous contact does not Snap');
+});
+
+test('Post English deflects opposite ball spins symmetrically off a goalpost, preserves spin, and respects KE bounds', () => {
+  const hitPost = omega => {
+    const b = P.kickoff();
+    const ball = b[6];
+    // Aim ball obliquely onto the right top goalpost (940, 230) from inside the rink so normal velocity > 0
+    const px = P.rink.right, py = P.rink.goalTop;
+    const angle = -Math.PI / 4; // normal from post (940,230) to ball center: ball at (940 - d*cos45, 230 + d*sin45)
+    const dist = ball.radius - 0.5;
+    Object.assign(ball, {
+      x: px - Math.SQRT1_2 * dist,
+      y: py + Math.SQRT1_2 * dist,
+      vx: 420 * Math.SQRT1_2,
+      vy: -420 * Math.SQRT1_2,
+      omega
+    });
+    const before = kineticEnergy([ball]);
+    let wallHit = null;
+    P.step([ball], 0, null, (body, vel, wt) => { wallHit = wt; });
+    assert.equal(wallHit, 'post');
+    assert.ok(kineticEnergy([ball]) <= before * (1 + 1e-12), `Post reflection preserves KE for omega=${omega}`);
+    return ball;
+  };
+
+  const pos = hitPost(20);
+  const zero = hitPost(0);
+  const neg = hitPost(-20);
+
+  // Symmetric inward vs outward deflection around the unspun normal bounce (vx = -vy)
+  const tanZero = (zero.vx + zero.vy) * Math.SQRT1_2;
+  const tanPos = (pos.vx + pos.vy) * Math.SQRT1_2;
+  const tanNeg = (neg.vx + neg.vy) * Math.SQRT1_2;
+  assert.ok(Math.abs(tanZero) < 1e-9, 'unspun head-on post hit bounces purely along normal');
+  assert.ok(tanPos < -40 && tanNeg > 40, 'opposite spins bite strongly in opposite tangential directions');
+  assert.ok(Math.abs(tanPos + tanNeg) < 1e-9, 'opposite spins deflect with exact symmetry');
+  assert.ok(Math.abs(pos.omega + neg.omega) < 1e-9, 'remaining spin is symmetric');
+  // spinKeep === 1 preserves all remaining post-impulse spin (unlike flat walls which halve it)
+  assert.equal(P.SURFACES.post.spinKeep, 1);
+  assert.equal(P.SURFACES.post.gripScale, 1.45);
+  assert.ok(Math.abs(pos.omega) > 6, `post preserves remaining spin without 0.5x halving (got ${pos.omega})`);
+});
+
+test('Rim-Arounds preserve spinStrike and omega for co-spinning skaters on curved corners while checking counter-spin and leaving flat walls/balls unchanged', () => {
+  // Top-left corner center is (160, 160), arc radius 100, skater radius 25 -> center orbit radius 75.
+  // At 45 degrees: normal outward is (-sqrt(1/2), -sqrt(1/2)), tangent (tx=-ny, ty=nx) is (+sqrt(1/2), -sqrt(1/2)).
+  // Moving up-and-right (vt > 0) with shallow normal entry (velocity <= 190): omega < 0 co-spins (omega * vt < 0).
+  const cornerSetup = (omega, isBall = false) => {
+    const bodies = P.kickoff();
+    bodies.slice(0, 6).forEach(x => P.applyStats(x, normal));
+    const r = isBall ? bodies[6].radius : bodies[0].radius;
+    const limit = P.rink.corner - r;
+    const d = limit + 0.6;
+    const nx = -Math.SQRT1_2, ny = -Math.SQRT1_2;
+    const tx = -ny, ty = nx; // (+0.707, -0.707)
+    const vn = 120, vt = 360;
+    const target = isBall ? bodies[6] : bodies[0];
+    Object.assign(target, {
+      x: 160 + nx * d,
+      y: 160 + ny * d,
+      vx: nx * vn + tx * vt,
+      vy: ny * vn + ty * vt,
+      omega,
+      spinStrike: isBall ? 0 : 1.5
+    });
+    if (!isBall) bodies[6].openingShot = true;
+    const beforeKE = kineticEnergy([target]);
+    let rimmedFlag = null;
+    P.step([target], 0, null, (body, vel, wt, wnx, wny, rimmed) => { rimmedFlag = rimmed; });
+    assert.ok(kineticEnergy([target]) <= beforeKE * (1 + 1e-12), 'corner reflection preserves KE bound');
+    return { target, rimmedFlag, nx, ny, tx, ty };
+  };
+
+  const coSpin = cornerSetup(-15, false);
+  const unspun = cornerSetup(0, false);
+  const counterSpin = cornerSetup(15, false);
+  const ballCorner = cornerSetup(-15, true);
+
+  assert.equal(coSpin.rimmedFlag, true, 'co-spinning skater triggers Rim-Around');
+  assert.equal(coSpin.target.spinStrike, 1.5, 'co-spinning Rim-Around preserves spinStrike');
+  assert.ok(Math.abs(coSpin.target.omega) > 12, `co-spinning Rim-Around retains 92% spin (got ${coSpin.target.omega})`);
+
+  // Normal rebound speed inward (-vn_after) is much smaller on Rim-Around than unspun bounce, hugging the corner
+  const inwardCo = -(coSpin.target.vx * coSpin.nx + coSpin.target.vy * coSpin.ny);
+  const inwardUnspun = -(unspun.target.vx * unspun.nx + unspun.target.vy * unspun.ny);
+  assert.ok(inwardCo < inwardUnspun * 0.5, `co-spinning skater hugs corner glass (${inwardCo} vs ${inwardUnspun})`);
+  assert.equal(unspun.target.spinStrike, 0, 'unspun corner hit spends spinStrike');
+
+  // Counter-spin checks tangential speed harder and spends spinStrike
+  assert.equal(counterSpin.rimmedFlag, false, 'counter-spin is not a Rim-Around');
+  assert.equal(counterSpin.target.spinStrike, 0, 'counter-spin spends spinStrike');
+  const vtCo = coSpin.target.vx * coSpin.tx + coSpin.target.vy * coSpin.ty;
+  const vtCounter = counterSpin.target.vx * counterSpin.tx + counterSpin.target.vy * counterSpin.ty;
+  assert.ok(vtCounter < vtCo - 30, `counter-spin checks tangential speed (${vtCounter} vs ${vtCo})`);
+  assert.ok(Math.abs(counterSpin.target.omega) < Math.abs(coSpin.target.omega) * 0.6, 'counter-spin halves remaining omega');
+
+  // Ball on curved corner never triggers skater-only Rim-Around and still halves spin
+  assert.equal(ballCorner.rimmedFlag, false, 'ball does not Rim-Around');
+  assert.ok(Math.abs(ballCorner.target.omega) < 10, 'ball halves spin on corner boards');
+
+  // Flat wall with co-rotating spin still spends spinStrike and halves omega
+  const flat = P.kickoff()[0];
+  P.applyStats(flat, normal);
+  Object.assign(flat, { x: 400, y: 60 + flat.radius - 0.5, vx: 360, vy: -120, omega: -15, spinStrike: 1.5 });
+  let flatRimmed = null;
+  P.step([flat], 0, null, (b, v, wt, wnx, wny, rim) => { flatRimmed = rim; });
+  assert.equal(flatRimmed, false, 'flat boards never Rim-Around');
+  assert.equal(flat.spinStrike, 0, 'flat boards spend spinStrike');
+  assert.ok(Math.abs(flat.omega) < 8, 'flat boards halve omega');
+});
+
+test('Tailgating reduces friction in the slipstream wake of fast teammates or opponents without mutating friction or affecting the ball', () => {
+  const runDraft = (leadTeam, offsetY = 0, gap = 20, leadSpeed = 500) => {
+    const b = P.kickoff();
+    b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+    b.forEach((x, idx) => Object.assign(x, { x: 100 + idx * 40, y: 500, vx: 0, vy: 0 }));
+    const trailer = b[0];
+    const lead = leadTeam === null ? null : (leadTeam === 0 ? b[1] : b[3]);
+    Object.assign(trailer, { x: 250, y: 300 + offsetY, vx: 320, vy: 0 });
+    if (lead) Object.assign(lead, { x: 250 + trailer.radius + lead.radius + gap, y: 300, vx: leadSpeed, vy: 0 });
+    const baseFric = trailer.friction;
+    const initialDraft = P.tailgateFactor(b, trailer);
+    for (let t = 0; t < 96; t++) P.step(b, P.DT);
+    assert.equal(trailer.friction, baseFric, 'b.friction is never mutated');
+    assert.equal(trailer.baseFriction, baseFric, 'b.baseFriction is never mutated');
+    return { endVx: trailer.vx, endX: trailer.x, initialDraft };
+  };
+
+  const solo = runDraft(null);
+  const behindTeammate = runDraft(0);
+  const behindOpponent = runDraft(1);
+  assert.ok(behindTeammate.initialDraft > 0.7, 'strong draft directly behind fast teammate');
+  assert.ok(Math.abs(behindTeammate.initialDraft - behindOpponent.initialDraft) < 1e-12, 'teammates and opponents grant identical slipstream');
+  assert.ok(behindTeammate.endVx > solo.endVx + 9, `drafting skater retains more speed (${behindTeammate.endVx} vs ${solo.endVx})`);
+  assert.ok(behindOpponent.endVx > solo.endVx + 9, 'drafting behind opponent retains more speed');
+
+  // Off-axis, distant, and slow-lead skaters grant zero draft
+  assert.equal(runDraft(0, 65, 20).initialDraft, 0, 'off-axis skater outside wake cone gets zero draft');
+  assert.equal(runDraft(0, 0, 120).initialDraft, 0, 'distant skater beyond maxGap gets zero draft');
+  assert.equal(runDraft(0, 0, 20, 180).initialDraft, 0, 'slow lead below 240 px/s grants zero draft');
+
+  // Colossus casts a wider wake (effectiveMaxGap scaled by lead.radius / 25 = 1.8)
+  const colBodies = P.kickoff();
+  colBodies.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  colBodies[1].superActive = 'colossus';
+  P.syncEffectiveStats(colBodies[1]);
+  Object.assign(colBodies[0], { x: 250, y: 300, vx: 320, vy: 0 });
+  Object.assign(colBodies[1], { x: 250 + colBodies[0].radius + colBodies[1].radius + 120, y: 300, vx: 500, vy: 0 });
+  assert.ok(P.tailgateFactor(colBodies, colBodies[0]) > 0.2, 'Colossus casts a proportionally wider slipstream wake');
+
+  // Ball neither grants nor receives Tailgating
+  const ballTest = P.kickoff();
+  Object.assign(ballTest[0], { x: 250, y: 300, vx: 320, vy: 0 });
+  Object.assign(ballTest[6], { x: 305, y: 300, vx: 600, vy: 0 });
+  assert.equal(P.tailgateFactor(ballTest, ballTest[0]), 0, 'ball does not grant Tailgating to trailing skater');
+  Object.assign(ballTest[0], { x: 360, y: 300, vx: 600, vy: 0 });
+  assert.equal(P.tailgateFactor(ballTest, ballTest[6]), 0, 'ball receives zero tailgateFactor');
+});
+
+test('Hip Clips impart higher spin on fast glancing opponent checks, bend trajectory via SKATER_CURVE, scale down with Stability, and preserve KE', () => {
+  const glanceCheck = ({ oppTeam = 1, stability = 127, grip = 64 }) => {
+    const b = P.kickoff();
+    P.applyStats(b[0], { ...normal, grip });
+    const target = oppTeam === 1 ? b[3] : b[1];
+    P.applyStats(target, { ...normal, grip, stability });
+    // Glancing 68-degree offset: nx = cos(68°), ny = sin(68°) -> |rvt| / |closing| = tan(68°) ≈ 2.47 > 1.05
+    const ang = 68 * Math.PI / 180;
+    const dist = b[0].radius + target.radius - 0.5;
+    Object.assign(b[0], { x: 400, y: 300, vx: 520, vy: 0, omega: 0 });
+    Object.assign(target, { x: 400 + Math.cos(ang) * dist, y: 300 + Math.sin(ang) * dist, vx: -120, vy: 0, omega: 0 });
+    const pair = [b[0], target];
+    const before = kineticEnergy(pair);
+    P.step(pair, 0);
+    assert.ok(kineticEnergy(pair) <= before * (1 + 1e-12), 'Hip Clip strictly conserves/dissipates pair KE');
+    return { attacker: b[0], target };
+  };
+
+  const oppLowStab = glanceCheck({ oppTeam: 1, stability: 0 });
+  const oppMidStab = glanceCheck({ oppTeam: 1, stability: 127 });
+  const oppHighStab = glanceCheck({ oppTeam: 1, stability: 255 });
+  const mateGraze = glanceCheck({ oppTeam: 0, stability: 127 }); // Teammate bumps do not trigger opponent Hip Clip
+
+  assert.ok(Math.abs(oppMidStab.target.omega) > Math.abs(mateGraze.target.omega) * 1.4,
+    `opponent Hip Clip imparts substantially more spin than ordinary Coulomb graze (${oppMidStab.target.omega} vs ${mateGraze.target.omega})`);
+  assert.ok(Math.abs(oppHighStab.target.omega) < Math.abs(oppLowStab.target.omega) * 0.72,
+    `high Stability resists Hip Clip spin-out (${oppHighStab.target.omega} vs ${oppLowStab.target.omega})`);
+
+  // Verify the imparted spin visibly curves a moving skater off its straight-line post-impact heading
+  const curved = structuredClone(oppMidStab.target);
+  curved.vx = 360; curved.vy = 0;
+  const straight = { ...curved, omega: 0 };
+  for (let t = 0; t < 120; t++) { P.step([curved], P.DT); P.step([straight], P.DT); }
+  assert.ok(Math.abs(curved.y - straight.y) > 5, 'clipped skater visibly curves off its straight line via SKATER_CURVE');
+
+  // Sweep glancing angles, spins, and stat extremes to verify strict KE bound on all Hip Clips
+  for (const deg of [48, 60, 75, 84]) for (const stab of [0, 127, 255]) for (const spin of [-15, 0, 15]) {
+    const all = P.kickoff(), a = all[0], c = all[3];
+    P.applyStats(a, { ...normal, grip: 255, strength: 255, stability: stab });
+    P.applyStats(c, { ...normal, grip: 255, strength: 0, stability: 255 - stab });
+    const rad = deg * Math.PI / 180, d = a.radius + c.radius - 0.5;
+    Object.assign(a, { x: 400, y: 300, vx: 650, vy: 50, omega: spin });
+    Object.assign(c, { x: 400 + Math.cos(rad) * d, y: 300 + Math.sin(rad) * d, vx: -400, vy: -90, omega: -spin });
+    const ke0 = kineticEnergy([a, c]);
+    P.step([a, c], 0);
+    assert.ok(kineticEnergy([a, c]) <= ke0 * (1 + 1e-12), `Hip Clip KE invariant failed at deg=${deg}, stab=${stab}, spin=${spin}`);
+  }
+});

@@ -45,7 +45,7 @@
       if (b.superActive) return false;
       const speed2 = b.vx * b.vx + b.vy * b.vy;
       if (!speed2) continue;
-      const stopDist = speed2 / (2 * b.friction);
+      const stopDist = speed2 / (2 * b.friction * (1 - (P.TAILGATE?.frictionCut ?? .4)));
       const contact = Math.max(b.radius, b.reach || b.radius, 18) + ball.radius;
       if (Math.hypot(b.x - ball.x, b.y - ball.y) - contact <= stopDist) return false;
       const ownGoalX = b.team ? P.rink.right : P.rink.left;

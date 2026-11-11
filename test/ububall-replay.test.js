@@ -63,7 +63,7 @@ function replayTurn(t) {
   const sim = R.restore(t.bodies);
   P.startTurn(sim, t.plans);
   // The viewer clears the spin-strike flag each tick, as matches do, when it calls the strike out.
-  for (let tick = 0; tick < t.ticks; tick++) { P.step(sim, P.DT); if (sim[6].spinStruck) sim[6].spinStruck = false; }
+  for (let tick = 0; tick < t.ticks; tick++) { P.step(sim, P.DT); if (sim[6].spinStruck) sim[6].spinStruck = false; if (sim[6].snapStruck) sim[6].snapStruck = false; }
   return R.snapshot(sim);
 }
 
@@ -163,12 +163,20 @@ function scripted(each = () => {}) {
   const lit = play(loaded, [{ ...still, power: 1, superArm: true }, { ...still, guard: true }, still, still, still, still]);
   const [shooter, ball] = [lit.bodies[2], lit.bodies[6]];
   play(JSON.parse(JSON.stringify(lit)), [still, { ...still, guard: true }, { ...still, angle: Math.atan2(ball.y - shooter.y, ball.x - shooter.x), power: .4 }, still, still, still]);
+  // A Pulse pass from slot 0 carried across JSON into a Snap one-timer by slot 1, and a corner Rim-Around keeping spinStrike.
+  const snapPass = play(field('pulse', { 0: { x: 300, y: 180 }, 6: { x: 344, y: 180 }, 1: { x: 360, y: 320 } }),
+    [{ ...still, angle: Math.PI / 2, power: .7 }, still, still, still, still, still]);
+  const [oneTimer, liveBall] = [snapPass.bodies[1], snapPass.bodies[6]];
+  play(JSON.parse(JSON.stringify(snapPass)),
+    [still, { ...still, angle: Math.atan2(liveBall.y - oneTimer.y, liveBall.x - oneTimer.x), power: .85 }, still, still, still, still]);
+  const rimStart = field('standard', { 0: { x: 92, y: 210 }, 6: { x: 220, y: 92 } });
+  play(JSON.parse(JSON.stringify(rimStart)), [{ ...still, angle: -Math.PI * .44, power: .9, spin: -1 }, still, still, still, still, still]);
   return ends;
 }
 
 // The physics this version of the replay format plays back. A change to how turns play out must
 // bump P.VERSION, which makes older replays refuse to play; then record the new fingerprint here.
-const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31', 7: '37a23456c784360a', 8: '83873175fc525045', 9: '09b47d9873e6c0d2', 10: 'c4a526d87f85f50d', 11: 'c149d32f71adb8f2', 12: 'a685065b99430f89', 13: 'dc91a880c4ee68be', 14: '2ac13b21775f0ea2', 15: '248086ed8e0fd514', 16: '9d8b34db2268210c', 17: '972e69182193ab24', 18: 'ae483586854f6d31', 19: '204a59c696047c0b', 20: '7a6a6fce3eaf5650', 21: '5062c20061903979', 22: '0ee5630f69ba5d66' };
+const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31', 7: '37a23456c784360a', 8: '83873175fc525045', 9: '09b47d9873e6c0d2', 10: 'c4a526d87f85f50d', 11: 'c149d32f71adb8f2', 12: 'a685065b99430f89', 13: 'dc91a880c4ee68be', 14: '2ac13b21775f0ea2', 15: '248086ed8e0fd514', 16: '9d8b34db2268210c', 17: '972e69182193ab24', 18: 'ae483586854f6d31', 19: '204a59c696047c0b', 20: '7a6a6fce3eaf5650', 21: '5062c20061903979', 22: '0ee5630f69ba5d66', 23: '5a3b47bd871862e7' };
 test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
   const ends = [...[...replay.turns, ...standard.turns].map(replayTurn), ...scripted()];
@@ -271,4 +279,64 @@ test('privacy keeps the play, looks and voices but drops every name', async () =
     assert.deepEqual([b.attributes, b.voice, b.stats], [a.attributes, a.voice, a.stats]);
   });
   hidden.turns.forEach((t, i) => assert.equal(JSON.stringify(replayTurn(t)), JSON.stringify(ends[i])));
+});
+
+test('Snap and Rim-Around turns round-trip identically through .ububall files and JSON state copies', async () => {
+  const { state: initState, ubus } = setup(21, 'pulse');
+  // Place slot 0 passing down into slot 1 driving right for a Snap one-timer, while slot 2 carves the bottom-left corner
+  initState.bodies.slice(0, 6).forEach((b, i) => { b.meter = 0; Object.assign(b, { x: 200 + i * 90, y: 460, vx: 0, vy: 0, omega: 0 }); });
+  Object.assign(initState.bodies[0], { x: 380, y: 170 });
+  Object.assign(initState.bodies[1], { x: 340, y: 300 });
+  Object.assign(initState.bodies[2], { x: 92, y: 390 });
+  Object.assign(initState.bodies[6], { x: 380, y: 214, vx: 0, vy: 0 });
+
+  const replay = R.create({ mode: 'pulse', names: ['Home', 'Away'], ubus });
+  const turnMoves = [
+    [
+      { angle: Math.PI / 2, power: 0.65, spin: 0, superArm: false, guard: false },
+      { angle: 0, power: 0.75, spin: 0, superArm: false, guard: false },
+      { angle: Math.PI * 0.44, power: 0.9, spin: 1, superArm: false, guard: false },
+      still, still, still
+    ],
+    [
+      still,
+      { angle: 0, power: 0.8, spin: 0.5, superArm: false, guard: false },
+      { angle: 0, power: 0.6, spin: 0, superArm: false, guard: false },
+      still, still, still
+    ]
+  ];
+
+  let cur = initState;
+  const liveEnds = [];
+  let sawSnapStop = false;
+  for (const rawMoves of turnMoves) {
+    const jsonState = JSON.parse(JSON.stringify(cur));
+    const plans = [...M.validatePlans(rawMoves.slice(0, 3)), ...M.validatePlans(rawMoves.slice(3))];
+    const entry = R.addTurn(replay, { turn: cur.turn, scores: cur.scores, fouls: cur.fouls || M.newFouls(), bodies: cur.bodies, plans });
+    const live = structuredClone(cur.bodies), play = M.newPlay();
+    P.startTurn(live, plans);
+    let ticks = 0;
+    for (let tick = 1; tick <= M.turnTicks('pulse'); tick++) {
+      ticks = tick;
+      const stepRes = M.playTick(P, live, play, {}, null, true);
+      if (stepRes.snapped && stepRes.stop >= M.HIT_STOP.snap) sawSnapStop = true;
+      if (stepRes.goal !== null || P.settled(live)) break;
+    }
+    const resMem = M.resolveTurn(P, cur, rawMoves);
+    const resJson = M.resolveTurn(P, jsonState, rawMoves);
+    assert.equal(JSON.stringify(resJson), JSON.stringify(resMem), 'JSON state copy resolves identically');
+    entry.ticks = ticks;
+    entry.cards = [...resMem.state.fouls.cards];
+    entry.saves = resMem.replay.saves.map(e => ({ tick: e.tick, index: e.index, own: e.own, iron: Boolean(e.iron) }));
+    entry.stops = resMem.replay.stops;
+    if (resMem.replay.goal !== null) entry.goal = { team: resMem.replay.goal, label: resMem.replay.label, scorer: resMem.replay.scorer, assist: resMem.replay.assist };
+    liveEnds.push(R.snapshot(live));
+    cur = resMem.state;
+  }
+  assert.equal(sawSnapStop, true, 'scripted pass triggered Snap and recorded Snap hit-stop');
+  const bytes = await R.write(replay);
+  const parsed = await R.read(bytes);
+  parsed.turns.forEach((t, idx) => {
+    assert.equal(JSON.stringify(replayTurn(t)), JSON.stringify(liveEnds[idx]), `re-simulated turn ${idx + 1} matches live end`);
+  });
 });

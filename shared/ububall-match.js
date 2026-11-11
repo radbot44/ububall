@@ -153,11 +153,11 @@
   // A big shot is a lone touch by an ubu driving into the ball at `share` or more of its own
   // full-launch speed; the ball's own speed does not count, so a fast ball off a still ubu is not one.
   const BIG_SHOT = Object.freeze({ share: .8 });
-  // Hit-stop in ms (tuning): `hit` for a real save, a spin strike or a big shot; `long` for a save of
-  // a big shot, a spin strike that is also a big shot, or a big shot that will travel a rink height
-  // untouched; `goal` for a big shot whose own path (no bounces, no ubus) goes into a goal; `iron` at
-  // least, for an Iron Save; `scoredGoal` for a scored goal.
-  const HIT_STOP = Object.freeze({ hit: 60, long: 100, goal: 150, iron: 150, scoredGoal: 200 });
+  // Hit-stop in ms (tuning): `post` for a hard goalpost ring; `hit`/`snap` for a real save, spin strike,
+  // Snap one-timer or big shot; `long` for a save of a big shot, a spin strike or Snap that is also a big
+  // shot, or a big shot that will travel a rink height untouched; `goal` for a big shot whose own path
+  // (no bounces, no ubus) goes into a goal; `iron` at least, for an Iron Save; `scoredGoal` for a scored goal.
+  const HIT_STOP = Object.freeze({ post: 40, hit: 60, snap: 60, long: 100, goal: 150, iron: 150, scoredGoal: 200 });
   const SCREEN_SHAKE = Object.freeze({ default: 1, goal: 2 });
   function bigShot(P, before, touched, ball) {
     if (touched.size !== 1) return false;
@@ -174,7 +174,7 @@
   // Per-tick scratch and the tick in progress, which the step callbacks below read, so neither is
   // rebuilt every tick. A nested tick would take fresh scratch and restore the outer tick after.
   let spareTick = null, activeTick = null;
-  function tickTouch(a, b, speed, impulse, plow = false, iron = false, checker = null) {
+  function tickTouch(a, b, speed, impulse, plow = false, iron = false, checker = null, snapped = false, tangentImpulse = 0) {
     const t = activeTick, player = toucher(a, b, speed);
     if (player && !plow) {
       // A touch passed from a teammate makes that teammate the assist; an opponent's touch clears it unless a light graze.
@@ -200,15 +200,16 @@
       const ci = t.bodies.indexOf(checker);
       if (ci >= 0) t.tally.checks[ci]++;
     }
-    t.fx.collide?.(a, b, speed, impulse, plow, iron, checker);
+    t.fx.collide?.(a, b, speed, impulse, plow, iron, checker, snapped, tangentImpulse);
   }
-  function tickWall(body, velocity, type, nx, ny) {
+  function tickWall(body, velocity, type, nx, ny, rimmed = false) {
     const t = activeTick;
     if (body === t.ball && type === 'wall') {
       t.play.banked = true;
-
+    } else if (body === t.ball && type === 'post' && velocity >= 300) {
+      t.postRing = true;
     }
-    t.fx.wall?.(body, velocity, type, nx, ny);
+    t.fx.wall?.(body, velocity, type, nx, ny, rimmed);
   }
   // Steps the field one tick and keeps the play (and the tally, if given) current. Returns the goal
   // (as P.step reports it), the tick's saves, whether a close-range spin strike landed and the
@@ -224,7 +225,7 @@
     if (t.motion.length < bodies.length * 5) t.motion = new Float64Array(bodies.length * 5);
     const { motion, touched } = t, ball = bodies[6]?.team === -1 ? bodies[6] : bodies.find(b => b.team === -1);
     touched.clear(); t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx; t.tally = tally;
-    t.cannon = false; t.incomingCredit = null;
+    t.cannon = false; t.postRing = false; t.incomingCredit = null;
     let held = null;
     for (let i = 0; i < bodies.length; i++) {
       const b = bodies[i];
@@ -267,7 +268,7 @@
       at.fx?.super?.(key, action, body, target);
     };
     const goal = P.step(bodies, P.DT, tickTouch, tickWall, t.onShockwave, t.onSuper);
-    const cannon = t.cannon;
+    const cannon = t.cannon, postRing = t.postRing;
     activeTick = outer;
     const before = touched.size ? bodies.map((b, i) => ({ ...b, x: motion[i * 5], y: motion[i * 5 + 1], vx: motion[i * 5 + 2],
       vy: motion[i * 5 + 3], omega: motion[i * 5 + 4], holding: b === held,
@@ -293,9 +294,15 @@
     // A Cannonball hit always counts as a big shot.
     const speed = (tally && touched.size) ? Math.hypot(ball.vx, ball.vy) : 0;
     const big = cannon || (touched.size ? bigShot(P, before, touched, ball) : false), struck = Boolean(ball.spinStruck);
+    const snapped = Boolean(ball?.snapStruck);
+    if (snapped) ball.snapStruck = false;
     const hasIron = tickSaves.some(s => s.iron);
     let stop = effects ? Math.max(hasIron ? HIT_STOP.iron : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big)) : 0;
-    if (effects && goal !== null) stop = Math.max(stop, HIT_STOP.scoredGoal);
+    if (effects) {
+      if (snapped) stop = Math.max(stop, big ? HIT_STOP.long : HIT_STOP.snap);
+      if (postRing) stop = Math.max(stop, HIT_STOP.post);
+      if (goal !== null) stop = Math.max(stop, HIT_STOP.scoredGoal);
+    }
     if (touched.size) play.big = big;
     if (tally) {
       const speedBefore = ballBefore ? Math.hypot(ballBefore.vx, ballBefore.vy) : 0;
@@ -320,7 +327,7 @@
     }
     if (struck) ball.spinStruck = false;
     t.bodies = t.play = t.ball = t.fx = t.tally = null; spareTick = t;
-    return { goal, saves: tickSaves, struck, stop, big };
+    return { goal, saves: tickSaves, struck, snapped, stop, big };
   }
   // A rebound is a goal within this many ticks of the conceding team's save.
   const REBOUND_TICKS = 240;
@@ -422,7 +429,7 @@
       const clear = y => ubus.every(b => b.carded || Math.hypot(b.x - 500, b.y - y) >= b.radius + ball.radius);
       const y = [300, 240, 360, 180, 420, 120, 480].find(clear) ?? 300;
       Object.assign(ball, { x: 500, y, vx: 0, vy: 0, omega: 0, stickOffset: null,
-        fireTicks: 0, onFire: false, pace: 0, strikerPower: 1, strikerTeam: -1 });
+        fireTicks: 0, onFire: false, pace: 0, strikerPower: 1, strikerTeam: -1, strikerSlot: -1, snapStruck: false });
       const holding = P.holder(bodies);
       if (holding) holding.holding = false;
     }
@@ -497,9 +504,9 @@
     const tally = fastSearch ? null : cloneTally(state.tally);
     const skipSaves = fastSearch && classic;
     const tickFx = {
-      collide: (a, b, speed, impulse, plow, iron) => {
+      collide: (a, b, speed, impulse, plow, iron, checker, snapped, tangentImpulse) => {
         if (!plow) contactMeter(P, bodies, next.stats, a, b, speed, clock + currentTick, classic);
-        watch?.collide?.(a, b, speed, impulse, plow, iron);
+        watch?.collide?.(a, b, speed, impulse, plow, iron, checker, snapped, tangentImpulse);
       },
       wall: watch?.wall
     };
