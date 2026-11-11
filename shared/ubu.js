@@ -380,7 +380,7 @@
     if (toCode(bytes) !== text) throw new Error('DNA has noncanonical padding bits.');
     return bytes;
   }
-  const api = { decode, fromText, randomDNA, toCode, fromCode, mouthPath, eyePolygon, grade, curve, statMultiplier, ubunym };
+  const api = { decode, fromText, randomDNA, toCode, fromCode, mouthPath, eyePolygon, grade, curve, statMultiplier, ubunym, PALETTE, read };
   Object.freeze(api);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.ubu = api;

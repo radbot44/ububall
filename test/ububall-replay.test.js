@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
-const P = require('../web/ububall-physics.js');
+const P = require('../shared/ububall-physics.js');
 const M = require('../shared/ububall-match.js');
 const C = require('../shared/ububall-cpu.js');
 const U = require('../shared/ubu.js');
@@ -181,7 +181,7 @@ test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
   const ends = [...[...replay.turns, ...standard.turns].map(replayTurn), ...scripted()];
   const print = createHash('sha256').update(JSON.stringify(ends)).digest('hex').slice(0, 16);
-  assert.equal(print, FINGERPRINTS[P.VERSION], `Physics changed: bump VERSION in web/ububall-physics.js and record ${print} for it.`);
+  assert.equal(print, FINGERPRINTS[P.VERSION], `Physics changed: bump VERSION in shared/ububall-physics.js and record ${print} for it.`);
 });
 
 // Online state crosses JSON (the server's storage and every client update), so no turn may play out

@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const P = require('../web/ububall-physics.js');
+const P = require('../shared/ububall-physics.js');
 const M = require('../shared/ububall-match.js');
 const normal = { mass: 127, size: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 };
 test('exponential stat curve preserves endpoints and spreads mid-range stats evenly', () => {

@@ -2,7 +2,7 @@
 // Run on both revisions with: node scripts/bench-ububall.cjs
 // Prefer the median over several runs, using the same Node/browser engine.
 const { performance } = require('node:perf_hooks');
-const P = require('../web/ububall-physics.js');
+const P = require('../shared/ububall-physics.js');
 const STEPS = 20000;
 function freshBodies() {
   const b = P.kickoff();

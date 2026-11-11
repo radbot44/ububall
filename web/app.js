@@ -31,7 +31,11 @@
   function loadMintScripts() {
     return Promise.all(['pack-scene.js', 'site.js'].map(loadScript));
   }
+  function loadMp4Script() {
+    return loadScript('mp4.js');
+  }
   window.loadMintScripts = loadMintScripts;
+  window.loadMp4Script = loadMp4Script;
   window.setUbuScreenGuard = fn => { guard = typeof fn === 'function' ? fn : null; };
 
   const rememberPlayUrl = () => {

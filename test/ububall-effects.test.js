@@ -94,7 +94,7 @@ test('trail gradient retains a hot sample between cool endpoints', () => {
 });
 
 test('ordinary particles keep their filled endpoint', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const radii = [];
   const ctx = {
@@ -128,7 +128,7 @@ test('straight vertical shots skip threat simulation, but curved shots do not', 
   let steps = 0;
   const ball = { x: 500, y: 300, vx: 0, vy: 600, omega: 0 };
   const bodies = Array.from({ length: 6 }, () => ({})).concat(ball);
-  const P = { ...require('../web/ububall-physics.js'), step() { steps++; return null; } };
+  const P = { ...require('../shared/ububall-physics.js'), step() { steps++; return null; } };
   const ububallMatch = require('../shared/ububall-match.js');
   const presenter = createRinkPresenter({ P, ububallMatch, getView: () => ({ bodies }), getEffects: () => createEffectsState([], {}) });
   presenter.goalThreat();
@@ -139,7 +139,7 @@ test('straight vertical shots skip threat simulation, but curved shots do not', 
 });
 
 function trailHarness() {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const gradients = [];
   const ctx = {
@@ -250,7 +250,7 @@ test('drawBallFace applies team colors to the ball face', () => {
 });
 
 test('prediction ignition indicator fills with team color', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const fills = [], strokes = [];
   const ctx = {
@@ -358,7 +358,7 @@ test('theater.exporting suppresses popup and effect aging in animation frame loo
 });
 
 test('heat effect animation time accumulates during updateEffects and freezes during Pulse mode freeze frames', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const fx = createEffectsState([], {});
   assert.equal(fx.heatTime, 0, 'heatTime initializes to 0');
@@ -420,7 +420,7 @@ test('video export isolates playback session from interactive theater object', (
 test('restoreEntry restores Stalwart ID 0 and mastery metadata, preserving null for unsaved', () => {
   const code = section('function restoreEntry(saved) {', 'function clearActiveMatch() {') +
     '\n' + section('function resolveEquippedSuper(entry, slotIndex = 0) {', 'const POSITIONS = [');
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
   const env = runInNewContext(code + '\n;({ restoreEntry, resolveEquippedSuper });', {
     P, ubu
@@ -505,7 +505,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
     section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
     section('function clearActiveMatch() {', 'function aimPower(distance, arrow) {') + '\n' +
     section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const ububallReplay = require('../shared/ububall-replay.js');
   let store = {};
@@ -602,7 +602,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
 
 test('contactMeter and creditSave reject meter awards outside phase === play', () => {
   const code = section('function creditSave(body, own, iron = false) {', 'function flushMeters() {');
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   let calledGain = 0, calledContact = 0;
   const ububallMatch = {
     METER: { save: 6 },
@@ -645,7 +645,7 @@ test('post-goal celebration simulation cannot alter the next kickoffs meter or g
   const code = section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') +
     '\n' + section('function finishTurn(goal) {', '$(\'launch\').onclick =') +
     '\n' + section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const ubu = require('../shared/ubu.js');
   const normal = { mass: 127, size: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 };
@@ -710,7 +710,7 @@ test('post-goal celebration simulation cannot alter the next kickoffs meter or g
 });
 
 test('predictionKey invalidates on micro angle/power adjustments, fouls, and carded changes', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const bodies = P.kickoff();
   const plans = [
@@ -763,7 +763,7 @@ test('predictionKey invalidates on micro angle/power adjustments, fouls, and car
 });
 
 test('display projection boundary: seat transforms, gameplay fields, presentation separation, and stable identities', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const projCode = section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
@@ -953,7 +953,7 @@ test('display projection boundary: seat transforms, gameplay fields, presentatio
 });
 
 test('local gameplay and goal replay maintain separate authoritative simBodies and stable display bodies', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const code =
@@ -1046,7 +1046,7 @@ test('local gameplay and goal replay maintain separate authoritative simBodies a
 });
 
 test('replay takeover (watchReplay -> playFromHere -> local turn) transforms simulation state without display contamination', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const ububallReplay = require('../shared/ububall-replay.js');
@@ -1181,7 +1181,7 @@ test('replay takeover (watchReplay -> playFromHere -> local turn) transforms sim
 });
 
 test('online seat 1 transition (resolving -> playOnlineReplay -> next plan phase) preserves stable display bodies and clean simulation state', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const ububallReplay = require('../shared/ububall-replay.js');
@@ -1364,7 +1364,7 @@ test('online seat 1 transition (resolving -> playOnlineReplay -> next plan phase
 });
 
 function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const ububallReplay = require('../shared/ububall-replay.js');
@@ -2012,7 +2012,7 @@ test('interactive replay and export session advance through identical determinis
 
 
 test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim-Around shared sound, Tailgating wind cone, Puck Slide, Fireworks & MP4 offlineAudio", () => {
-  const P = require("../web/ububall-physics.js");
+  const P = require('../shared/ububall-physics.js');
   const calls = { ball: [], goal: [], wall: [], carve: [], slip: [], collision: [], move: [], spin: [], puck: [], whip: [], fire: [], firework: [] };
   let now = 1000;
   const mockAudio = {
@@ -2227,7 +2227,7 @@ test('ububall.js shares ububall-presentation.js without duplicating effect imple
 });
 
 test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all supers, all materials, and executes every scenario through createRinkPresenter', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const { EFFECT_GROUPS, GOAL_CALL_VARIANTS } = require('../web/effects.js');
@@ -2460,7 +2460,7 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
 // --- Domain 4 Phase 2 Regression Tests ---
 
 test('D4-01, D4-03, D4-06: replay entries preserve keys & super mastery on takeover, endReplay avoids phantom CPU match, and newMatch clears theater', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const ububallReplay = require('../shared/ububall-replay.js');
@@ -2654,7 +2654,7 @@ test('D4-04 & D4-07: offlineAudio.playFanfare routes customCtx to OfflineAudioCo
 });
 
 test('D4-05, D4-08, D4-01: online onState preserves local roster, prevents mid-replay score regression, and ends stale goalReplay on fresh resolving turn', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const ububallReplay = require('../shared/ububall-replay.js');
@@ -2972,7 +2972,7 @@ test('D4-10, D4-14, D4-19: ububall-online.js handles non-JSON 502 errors, null-s
 });
 
 test('D4-11, D4-16, D4-17, D4-18, D4-20, D2-10, D4-02: UI icon/grid rules, clearEffects scrub cooldown reset, null-winner attribution, and cross-domain contracts', () => {
-  const P = require('../web/ububall-physics.js');
+  const P = require('../shared/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const presSrc = fs.readFileSync(require.resolve('../web/ububall-presentation.js'), 'utf8');
   const cssSrc = fs.readFileSync(require.resolve('../web/ububall.css'), 'utf8');

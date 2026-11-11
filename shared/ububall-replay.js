@@ -2,7 +2,7 @@
 (function(root) {
   'use strict';
   const node = typeof module === 'object' && module.exports;
-  const P = node ? require('../web/ububall-physics.js') : root.ububallPhysics;
+  const P = node ? require('./ububall-physics.js') : root.ububallPhysics;
   const M = node ? require('./ububall-match.js') : root.ububallMatch;
   const U = node ? require('./ubu.js') : root.ubu;
   const FORMAT = 6, MAX_BYTES = 8 << 20, MAX_TEXT = 64 << 20, MAX_TURNS = 5000;

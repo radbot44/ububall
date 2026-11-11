@@ -10,7 +10,7 @@ Re-simulation is exact within one JavaScript engine. JSON keeps every number exc
 
 ## Physics version
 
-`VERSION` in `web/ububall-physics.js` names how turns play out. Any change to `startTurn`, `step` or their tuning must bump it. Readers refuse a file with another physics version ("from an older/newer version of ububall"), and the replay library deletes stored replays from another version when it opens. `test/ububall-replay.test.js` pins a fingerprint of a simulated match per version and fails, naming the new fingerprint, when the physics changes.
+`VERSION` in `shared/ububall-physics.js` names how turns play out. Any change to `startTurn`, `step` or their tuning must bump it. Readers refuse a file with another physics version ("from an older/newer version of ububall"), and the replay library deletes stored replays from another version when it opens. `test/ububall-replay.test.js` pins a fingerprint of a simulated match per version and fails, naming the new fingerprint, when the physics changes.
 
 ## Encoding
 

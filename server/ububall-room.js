@@ -1,6 +1,6 @@
 'use strict';
 const rules = require('../shared/ububall-match.js');
-const P = require('../web/ububall-physics.js');
+const P = require('../shared/ububall-physics.js');
 const ubu = require('../shared/ubu.js');
 const { starterTeam } = require('../shared/rarity.js');
 const idle = () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false });

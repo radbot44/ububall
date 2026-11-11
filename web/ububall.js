@@ -1895,6 +1895,7 @@
     videoCancelled = false; exportingVideo = true; progress.value = 0; progress.hidden = false; status.textContent = 'Preparing…';
     let session = null, out = null, encoder = null, blob = null, stopAudio = null;
     try {
+      if (typeof ububallMP4 === 'undefined' && window.loadMp4Script) await window.loadMp4Script();
       let config = null;
       search: for (const codec of ['avc1.64002A', 'avc1.4D402A', 'avc1.42E02A']) {
         for (const bitrateMode of ['constant', 'variable']) {
@@ -2045,6 +2046,7 @@
   function openExport(kind) {
     const th = theater;
     if (!th || isExporting()) return;
+    if (kind === 'video' && window.loadMp4Script) void window.loadMp4Script();
     exportKind = kind;
     $('export-title').textContent = kind === 'video' ? 'Export video' : 'Export replay';
     $('export-note').textContent = kind === 'video' ? 'Saves an MP4 video with sound.' : 'Saves a .ububall file to watch in ububall.';

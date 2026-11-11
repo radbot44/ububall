@@ -11,7 +11,7 @@
 // and are reproducible from their seed. Reports go to stdout (and --output, under personal/).
 const os = require('node:os');
 const { Worker, isMainThread, parentPort } = require('node:worker_threads');
-const P = require('../web/ububall-physics.js');
+const P = require('../shared/ububall-physics.js');
 const M = require('../shared/ububall-match.js');
 const C = require('../shared/ububall-cpu.js');
 

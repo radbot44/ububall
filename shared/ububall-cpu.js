@@ -2,7 +2,7 @@
 (function(root) {
   'use strict';
   const node = typeof module === 'object' && module.exports;
-  const P = node ? require('../web/ububall-physics.js') : root.ububallPhysics;
+  const P = node ? require('./ububall-physics.js') : root.ububallPhysics;
   const M = node ? require('./ububall-match.js') : root.ububallMatch;
   const HOLD = Object.freeze({ angle: 0, power: 0, spin: 0, superArm: false, guard: false });
   const GUARD = Object.freeze({ ...HOLD, guard: true });

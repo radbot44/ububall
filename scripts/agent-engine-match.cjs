@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const S = require('./cpu-simulation.cjs');
-const P = require('../web/ububall-physics.js');
+const P = require('../shared/ububall-physics.js');
 const M = require('../shared/ububall-match.js');
 const C = require('../shared/ububall-cpu.js');
 

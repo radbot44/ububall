@@ -2,7 +2,7 @@
 const { sign } = require('../shared/ubu-file.js');
 const ubu = require('../shared/ubu.js');
 const { scoreRarity, starterTeam } = require('../shared/rarity.js');
-const { decode, fromCode } = ubu;
+const { decode, fromCode, PALETTE, read } = ubu;
 
 const MAX_SERIAL = 999999999999;
 const DEFAULT_BATCH_SIZE = 1000;
@@ -45,6 +45,17 @@ function randomBelow(size) {
   let roll;
   do { roll = crypto.getRandomValues(new Uint32Array(1))[0]; } while (roll >= limit);
   return roll % size;
+}
+
+function packHint(code) {
+  const dna = fromCode(code), colors = [];
+  let textured = false;
+  for (let i = 0; i < 5; i++) {
+    const start = 64 + 18 * i;
+    colors.push(PALETTE[read(dna, start, 5)][1]);
+    if (read(dna, start + 8, 5) === 31) textured = true;
+  }
+  return { background: colors[0], accents: colors.slice(1), textured };
 }
 
 // Internal service only. The caller must authenticate and authorize every issuance.
@@ -230,14 +241,7 @@ class Mint {
       }
       const choices = this.exec('SELECT * FROM pack_choices WHERE owner=? ORDER BY position', owner).map(choice => {
         const items = this.exec('SELECT dna FROM inventory WHERE pack_slot=(SELECT pack_slot FROM inventory WHERE id=?) ORDER BY quintile', choice.anchor);
-        return { choice: choice.token, type: packType(choice.token), hints: items.map(item => {
-          const attributes = decode(fromCode(item.dna)).attributes;
-          return {
-            background: attributes.background.hex,
-            accents: ['eyes', 'irises', 'pupils', 'mouth'].map(role => attributes[role].hex),
-            textured: Object.values(attributes).some(attribute => Boolean(attribute.texture))
-          };
-        }) };
+        return { choice: choice.token, type: packType(choice.token), hints: items.map(item => packHint(item.dna)) };
       });
       return { request: offer.request, expires: offer.expires, choices };
     });

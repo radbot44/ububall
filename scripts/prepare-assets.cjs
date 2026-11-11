@@ -9,12 +9,12 @@ mkdirSync(targetAssets, { recursive: true });
 
 // Explicit public files only; repository contents and secrets are never an asset root.
 const webFiles = [
-  'ububall.html', 'ububall.css', 'ububall.js', 'ububall-presentation.js', 'ububall-physics.js', 'mp4.js', 'ububall-online.js', 'ububall-cpu-worker.js', 'ububall-cpu-client.js',
+  'ububall.html', 'ububall.css', 'ububall.js', 'ububall-presentation.js', 'mp4.js', 'ububall-online.js', 'ububall-cpu-worker.js', 'ububall-cpu-client.js',
   'index.html', 'app.js', 'site.css', 'site.js', 'site-header.js', 'pack-scene.js', 'starter.js', 'ubu-list.js', 'game-ui.js', 'ububall-activity.js',
   'voice.html', 'demo.html', 'demo.js', 'effects.html', 'effects.css', 'effects.js', 'auth-complete.html'
 ];
 const sharedFiles = [
-  'ububall-match.js', 'ububall-replay.js', 'ububall-cpu.js', 'ubu.js', 'ubu-archetype.js', 'ubu-file.js', 'ubu-render.js', 'ubu-audio.js', 'rarity.js'
+  'ububall-match.js', 'ububall-physics.js', 'ububall-replay.js', 'ububall-cpu.js', 'ubu.js', 'ubu-archetype.js', 'ubu-file.js', 'ubu-render.js', 'ubu-audio.js', 'rarity.js'
 ];
 const assetFiles = [
   'uburoom-wordmark-brand.svg', 'uburoom-oomark-brand.svg', 'oomark-pattern.svg', 'ububall-logo.svg', 'ububall-logo-com.svg', 'UburoomSans-Regular.woff2',
