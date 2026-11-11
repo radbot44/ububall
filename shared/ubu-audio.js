@@ -1692,14 +1692,14 @@
       type: 'lowpass',
       freq: iceFreq * 0.94, mid: iceFreq * 1.05, to: iceFreq * 0.90,
       q: 0.75,
-      level: (0.0007 + 0.0022 * Math.pow(s, 1.1)) * volume * boost,
+      level: (0.0011 + 0.0033 * Math.pow(s, 1.1)) * volume * boost,
       pan
     });
     smoothNoise(ctx, master, now, duration, {
       type: 'lowpass',
       freq: bodyFreq * 0.96, mid: bodyFreq * 1.04, to: bodyFreq * 0.94,
       q: 0.85,
-      level: (0.0005 + 0.0014 * Math.pow(s, 1.1)) * volume * boost,
+      level: (0.0007 + 0.0021 * Math.pow(s, 1.1)) * volume * boost,
       pan
     });
   }
@@ -1962,33 +1962,94 @@
     noiseGrain(ctx, dest, now, 0.085, { freq: 3100, to: 6200, q: 4.8, level: 0.18 * volume });
   }
 
-  // Goal firework shell burst: punchy outdoor mortar pop + bright star-crack + sky crackle tail.
+  // Goal firework shell burst: explosive outdoor mortar detonation + sharp shell crack + cascading star crackle for big shells.
   function playFirework(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.3);
+    const isBig = Boolean(options.ring || options.big);
+    const duration = isBig ? 0.65 : 0.42;
+    const master = createMasterChain(ctx, null, duration + 0.1);
+    const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
-    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.55));
+    const volume = Math.max(0.04, Math.min(1.2, options.volume ?? 0.6));
     const pan = getPan(options);
-    const pitch = (0.9 + Math.random() * 0.22) * (options.ring ? 1.08 : 1.0);
+    const pitch = (0.92 + Math.random() * 0.18) * (isBig ? 0.92 : 1.05);
 
-    // 1. Aerial shell chest-pop + mid-snap
-    blip(ctx, master, now, 0.085, 225 * pitch, 56 * pitch, 0.48 * volume, pan);
-    noiseGrain(ctx, master, now, 0.048, { freq: 780 * pitch, to: 280, q: 1.3, level: 0.42 * volume, pan });
-    noiseGrain(ctx, master, now, 0.026, { freq: 2900 * pitch, to: 1150, q: 1.6, level: 0.3 * volume, pan });
+    // 1. Explosive low-end detonation thump (concussive shell burst)
+    const boom = ctx.createOscillator(), boomGain = ctx.createGain();
+    const boomDecay = isBig ? 0.28 : 0.18;
+    boom.type = 'triangle';
+    boom.frequency.setValueAtTime((isBig ? 160 : 190) * pitch, now);
+    boom.frequency.exponentialRampToValueAtTime(36, now + boomDecay);
+    strike(boomGain, (isBig ? 0.58 : 0.44) * volume, now, now + boomDecay);
+    boom.connect(boomGain); boomGain.connect(dest);
+    boom.start(now); boom.stop(now + boomDecay + 0.02);
 
-    // 2. Sparkling sky crackle pops
-    const sparkles = options.ring ? 5 : 4;
-    for (let i = 0; i < sparkles; i++) {
-      const delay = 0.055 + i * 0.038 + Math.random() * 0.022;
-      const sparkSpread = audioMode === 'mono' ? 0 : (Math.random() - 0.5) * 0.36;
-      const sparkPan = Math.max(-0.75, Math.min(0.75, pan + sparkSpread));
-      noiseGrain(ctx, master, now + delay, 0.006, {
-        freq: 3600 + Math.random() * 3200,
-        q: 2.6,
-        level: (0.16 - i * 0.02) * volume,
-        pan: sparkPan
-      });
+    // 2. High-pressure aerial explosion snap (loud "POW!")
+    noiseGrain(ctx, dest, now, isBig ? 0.075 : 0.055, {
+      freq: (isBig ? 1400 : 1750) * pitch,
+      to: 260,
+      q: 1.2,
+      level: (isBig ? 0.64 : 0.52) * volume
+    });
+
+    // 3. Sharp supersonic shell-crack transient (initial detonation snap)
+    noiseGrain(ctx, dest, now, 0.024, {
+      freq: 3600 * pitch,
+      to: 1200,
+      q: 2.0,
+      level: (isBig ? 0.55 : 0.42) * volume
+    });
+
+    // 4. Expanding shockwave fireball rumble through the sky
+    noiseGrain(ctx, dest, now + 0.008, isBig ? 0.26 : 0.16, {
+      freq: (isBig ? 480 : 620) * pitch,
+      to: 85,
+      q: 0.85,
+      level: (isBig ? 0.46 : 0.32) * volume
+    });
+
+    // 5. Star crackle: light sparkles for standard shells, rich cascading dragon's egg crackle for big ones
+    if (isBig) {
+      // Big shells: cascading cluster of 12 sharp, randomized crackle pops across the sky
+      const crackles = 12;
+      for (let i = 0; i < crackles; i++) {
+        const delay = 0.07 + (i * 0.028) + (Math.random() - 0.5) * 0.022;
+        const sparkSpread = audioMode === 'mono' ? 0 : (Math.random() - 0.5) * 0.42;
+        const sparkPan = Math.max(-0.75, Math.min(0.75, pan + sparkSpread));
+        const crackleLen = 0.008 + Math.random() * 0.008;
+        const crackleFreq = 2600 + Math.random() * 3200;
+        const crackleVol = (0.24 + Math.random() * 0.18) * Math.max(0.2, 1 - (i / crackles) * 0.6) * volume;
+        noiseGrain(ctx, master, now + delay, crackleLen, {
+          freq: crackleFreq,
+          to: crackleFreq * 0.7,
+          q: 2.8,
+          level: crackleVol,
+          pan: sparkPan
+        });
+        // Occasional metallic titanium star-ping
+        if (i % 3 === 0) {
+          const ping = ctx.createOscillator(), pingGain = ctx.createGain();
+          ping.type = 'sine';
+          ping.frequency.setValueAtTime((2400 + Math.random() * 1200) * pitch, now + delay);
+          strike(pingGain, 0.08 * volume, now + delay, now + delay + 0.018);
+          ping.connect(pingGain); pingGain.connect(dest);
+          ping.start(now + delay); ping.stop(now + delay + 0.02);
+        }
+      }
+    } else {
+      // Standard shells: 4 quick, cheerful sparkle pops
+      for (let i = 0; i < 4; i++) {
+        const delay = 0.045 + i * 0.032 + Math.random() * 0.018;
+        const sparkSpread = audioMode === 'mono' ? 0 : (Math.random() - 0.5) * 0.32;
+        const sparkPan = Math.max(-0.75, Math.min(0.75, pan + sparkSpread));
+        noiseGrain(ctx, master, now + delay, 0.01, {
+          freq: 3200 + Math.random() * 2600,
+          q: 2.4,
+          level: (0.18 - i * 0.025) * volume,
+          pan: sparkPan
+        });
+      }
     }
   }
 

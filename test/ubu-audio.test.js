@@ -719,7 +719,23 @@ test('sound and music volume buses, mono/stereo toggle, and true left-right spat
   for (const g of puckGains) {
     const peakEvent = g.gain.events.find(e => e[2] === 'linear');
     if (peakEvent) {
-      assert.ok(peakEvent[0] <= 0.006, 'puck slide gain stays polite and quiet (< 0.006)');
+      assert.ok(peakEvent[0] <= 0.008, 'puck slide gain stays polite and quiet (< 0.008)');
     }
   }
+
+  // 7. Explosive firework pops and big ring shell crackles
+  const standardFwCtx = recordedContext();
+  audio.playFirework({ ctx: standardFwCtx, ring: false, volume: 0.8 });
+  const stdOscs = standardFwCtx.nodes.filter(n => n.kind === 'oscillator');
+  const stdBuffers = standardFwCtx.nodes.filter(n => n.kind === 'buffer');
+  assert.ok(stdOscs.some(o => o.type === 'triangle'), 'standard firework has concussive triangle sub-thump');
+  assert.ok(stdBuffers.length >= 4, 'standard firework layers explosive blast, snap, rumble and sparkles');
+
+  const bigFwCtx = recordedContext();
+  audio.playFirework({ ctx: bigFwCtx, ring: true, volume: 0.8 });
+  const bigOscs = bigFwCtx.nodes.filter(n => n.kind === 'oscillator');
+  const bigBuffers = bigFwCtx.nodes.filter(n => n.kind === 'buffer');
+  assert.ok(bigOscs.some(o => o.type === 'triangle'), 'big firework has heavier concussive sub-thump');
+  assert.ok(bigBuffers.length >= 12, 'big firework generates rich cascading crackle volley (>= 12 crackle grains)');
+  assert.ok(bigOscs.some(o => o.type === 'sine'), 'big firework crackle includes titanium star pings');
 });
