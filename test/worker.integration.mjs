@@ -405,15 +405,6 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const watchOn = await (await post(base + '/allow-watch', { allowed: true }, guestHeaders)).json();
     assert.ok(watchOn.watchKey);
     const watchQuery = '?key=' + watchOn.watchKey;
-    // Standalone watch-state works even when DISCORD_ACTIVITY_BOT_TOKEN is unconfigured (null === null regression).
-    await server.update(options => ({ workers: options.workers.map(worker => {
-      const { DISCORD_ACTIVITY_BOT_TOKEN, ...restSecrets } = worker.secrets;
-      return { ...worker, secrets: restSecrets };
-    }) }));
-    assert.equal((await fetch(base + '/watch-state' + watchQuery)).status, 200);
-    await server.update(options => ({ workers: options.workers.map(worker => ({
-      ...worker, secrets: { ...worker.secrets, DISCORD_ACTIVITY_BOT_TOKEN: env.DISCORD_ACTIVITY_BOT_TOKEN }
-    })) }));
     const viewer = await connect({ Origin: env.ORIGIN }, '/watch-socket' + watchQuery);
     t.after(() => { try { viewer.ws.close(); } catch {} });
     const watching = await viewer.wait(m => m.phase === 'plan');
@@ -470,6 +461,19 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await post(ownedBase + '/team', selection, guestHeaders)).status, 400);
     assert.equal((await post(ownedBase + '/team', { ...selection, serials: [selection.serials[0], selection.serials[0], selection.serials[0]] })).status, 400);
     assert.equal((await post(ownedBase + '/team', selection)).status, 200);
+    await post(ownedBase + '/allow-watch', { allowed: true });
+    const ownedWatch = await (await post(ownedBase + '/allow-watch', { allowed: true }, guestHeaders)).json();
+    assert.ok(ownedWatch.watchKey);
+    const ownedWatchQuery = '?key=' + ownedWatch.watchKey;
+    // Standalone watch-state works even when DISCORD_ACTIVITY_BOT_TOKEN is unconfigured (null === null regression).
+    await server.update(options => ({ workers: options.workers.map(worker => {
+      const { DISCORD_ACTIVITY_BOT_TOKEN, ...restSecrets } = worker.secrets;
+      return { ...worker, secrets: restSecrets };
+    }) }));
+    assert.equal((await fetch(ownedBase + '/watch-state' + ownedWatchQuery)).status, 200);
+    await server.update(options => ({ workers: options.workers.map(worker => ({
+      ...worker, secrets: { ...worker.secrets, DISCORD_ACTIVITY_BOT_TOKEN: env.DISCORD_ACTIVITY_BOT_TOKEN }
+    })) }));
   });
   await t.test('public queue pairs Activity and standalone accounts with a persistent reserved match', async () => {
     const owner = '789012345678901234', instance = 'i-test-activity', origin = 'https://123.discordsays.com';
