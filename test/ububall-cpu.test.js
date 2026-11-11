@@ -130,3 +130,69 @@ test('decided() does not cut off search while ball sits in a corner or skater sl
   const colossusAim = C.strike(shooter, ball, 940, 300, 'colossus');
   assert.notEqual(normalAim.angle, colossusAim.angle, 'Colossus strike adjusts contact angle for 1.8x swollen radius');
 });
+
+test('CPU search infers cooldown clock when omitted, sanitizes Classic supers, and curves around blockers', () => {
+  const withHighTick = S.initialState(5, 'standard');
+  withHighTick.bodies.slice(0, 6).forEach(b => { b.meter = 92; b.meterTick = 5000; });
+  delete withHighTick.clock;
+  const withExplicitClock = structuredClone(withHighTick);
+  withExplicitClock.clock = 5000 + M.METER.cooldownTicks;
+  const planInferred = C.plan(withHighTick, 1, { level: 'easy', seed: 5 });
+  const planExplicit = C.plan(withExplicitClock, 1, { level: 'easy', seed: 5 });
+  assert.deepEqual(planInferred.plans, planExplicit.plans, 'omitted clock infers cooled-down meter clock');
+  assert.equal(planInferred.diagnostics.score, planExplicit.diagnostics.score);
+
+  const classicDirty = S.initialState(6, 'classic');
+  classicDirty.bodies.slice(0, 6).forEach(b => {
+    b.equippedSuper = { ...P.SUPERS[0], bonusTicks: 0, bonusRefund: 0 };
+    b.meter = 100;
+  });
+  const classicPlan = C.plan(classicDirty, 0, { level: 'easy', seed: 6 });
+  assert.ok(classicPlan.plans.every(p => p.superArm === false), 'Classic CPU never arms residual supers');
+
+  const bodies = P.kickoff();
+  bodies.slice(0, 6).forEach(b => P.applyStats(b));
+  bodies.slice(0, 6).forEach((b, i) => Object.assign(b, { x: 780 + (i % 3) * 45, y: i < 3 ? 110 : 490, vx: 0, vy: 0 }));
+  bodies[3].personality = { aggression: 60, creativity: 40, teamwork: 10, clutch: 32 };
+  Object.assign(bodies[3], { x: 500, y: 300 });
+  Object.assign(bodies[6], { x: 420, y: 300, vx: 0, vy: 0 });
+  Object.assign(bodies[0], { x: 260, y: 314 });
+  const basePlans = C.cpuPlans(bodies, () => 0.5, [0, 0]);
+  assert.ok(basePlans[0].spin < 0, `striker chooses negative spin (${basePlans[0].spin}) so counter-rotation bends upward`);
+  const sim = structuredClone(bodies);
+  const zeroMove = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
+  P.startTurn(sim, [zeroMove, zeroMove, zeroMove, ...basePlans]);
+  sim[0].y = 500;
+  for (let t = 0; t < 180; t++) P.step(sim, P.DT);
+  assert.ok(sim[6].y < 260, `counter-rotated ball bends upward (y=${sim[6].y}) away from blocker at y=314`);
+});
+
+test('CPU worker client supports dispose(), handles onmessageerror, and catches non-cloneable state', async () => {
+  const workers = [];
+  const client = createClient(() => {
+    const worker = { postMessage(data) { this.data = data; }, terminate() { this.terminated = true; } };
+    workers.push(worker);
+    return worker;
+  });
+  const state = S.initialState();
+  const p1 = client.plan(state, { level: 'easy' });
+  workers[0].onmessage({ data: { result: { plans: ['ok'] } } });
+  assert.deepEqual(await p1, { plans: ['ok'] });
+  assert.equal(workers[0].terminated, undefined, 'completed worker stays pooled while idle');
+
+  const pErr = client.plan(state, { level: 'easy' });
+  workers[0].onmessageerror();
+  assert.deepEqual(await pErr, { error: true });
+  assert.equal(workers[0].terminated, true, 'onmessageerror terminates corrupted worker');
+
+  const badState = { ...state, uncloneable: () => {} };
+  assert.deepEqual(await client.plan(badState, {}), { error: true });
+
+  const pIdle = client.plan(state, { level: 'easy' });
+  workers[1].onmessage({ data: { result: { plans: ['pooled'] } } });
+  await pIdle;
+  const pActive = client.plan(state, { level: 'hard' });
+  client.dispose();
+  assert.equal(await pActive, null);
+  assert.equal(workers[1].terminated, true, 'dispose terminates pooled worker');
+});

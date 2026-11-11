@@ -42,6 +42,7 @@
   const WALL_STEP = 2;
   const HEAT_COLORS = [[255, 255, 255], [255, 214, 170], [255, 158, 120], [255, 70, 30]];
   const MAX_CONIC_RING_SPRITES = 48;
+  const MAX_SPRITE_CACHE = 64;
 
   const makePath = d => typeof Path2D === 'function' ? new Path2D(d) : Object.freeze({ path: d });
   const ALERT = makePath('M21.73 18l-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z M12 9v4 M12 17h.01');
@@ -49,6 +50,7 @@
   const IGNITION_FLAME = makePath('M12 10.941c2.333 -3.308 .167 -7.823 -1 -8.941c0 3.395 -2.235 5.299 -3.667 6.706c-1.43 1.408 -2.333 3.294 -2.333 5.588c0 3.704 3.134 6.706 7 6.706c3.866 0 7 -3.002 7 -6.706c0 -1.712 -1.232 -4.403 -2.333 -5.588c-2.084 3.353 -3.257 3.353 -4.667 2.235Z');
   const GUARD_SHIELD = makePath('M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3');
   const TARGET_ICON = makePath('M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M7 12a5 5 0 1 0 10 0a5 5 0 1 0 -10 0 M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0');
+  const STUN_STARS = makePath('M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m-7 12a6 6 0 0 1 -6 -6a6 6 0 0 1 6 -6a6 6 0 0 1 6 6a6 6 0 0 1 -6 6');
 
   function hexToRgba(hex, alpha) {
     let c = String(hex || '#ffffff').replace('#', '');
@@ -325,20 +327,32 @@
 
   const glowSprites = new Map();
   function glowSprite(color, doc = typeof document !== 'undefined' ? document : null) {
-    if (glowSprites.has(color)) return glowSprites.get(color);
-    const sprite = doc.createElement('canvas'); sprite.width = sprite.height = 128;
+    const cached = glowSprites.get(color);
+    if (cached && cached._doc === doc) {
+      glowSprites.delete(color);
+      glowSprites.set(color, cached);
+      return cached;
+    }
+    const sprite = doc.createElement('canvas'); sprite.width = sprite.height = 128; sprite._doc = doc;
     const c = sprite.getContext('2d'); c.fillStyle = color;
     c.shadowColor = color; c.shadowBlur = 14;
     c.beginPath(); c.arc(64, 64, 6, 0, Math.PI * 2);
     c.fill();
-    glowSprites.set(color, sprite); return sprite;
+    glowSprites.set(color, sprite);
+    if (glowSprites.size > MAX_SPRITE_CACHE) glowSprites.delete(glowSprites.keys().next().value);
+    return sprite;
   }
 
   const superGlowSprites = new Map();
   function superGlowSprite(key, doc = typeof document !== 'undefined' ? document : null) {
-    if (superGlowSprites.has(key)) return superGlowSprites.get(key);
+    const cached = superGlowSprites.get(key);
+    if (cached && cached._doc === doc) {
+      superGlowSprites.delete(key);
+      superGlowSprites.set(key, cached);
+      return cached;
+    }
     const [c1, c2] = SUPER_AURA_THEMES[key] || ['#ff7197', '#ff9954'];
-    const sprite = doc.createElement('canvas'); sprite.width = sprite.height = 256;
+    const sprite = doc.createElement('canvas'); sprite.width = sprite.height = 256; sprite._doc = doc;
     const c = sprite.getContext('2d');
     const grad = c.createRadialGradient(128, 128, 10, 128, 128, 124);
     grad.addColorStop(0, hexToRgba(c1, 0.96));
@@ -353,7 +367,9 @@
     grad.addColorStop(1, hexToRgba(c2, 0));
     c.fillStyle = grad;
     c.beginPath(); c.arc(128, 128, 124, 0, Math.PI * 2); c.fill();
-    superGlowSprites.set(key, sprite); return sprite;
+    superGlowSprites.set(key, sprite);
+    if (superGlowSprites.size > MAX_SPRITE_CACHE) superGlowSprites.delete(superGlowSprites.keys().next().value);
+    return sprite;
   }
 
   const conicRingSprites = new Map();
@@ -387,11 +403,18 @@
 
   const impactStamps = new Map();
   function impactStamp(color, doc = typeof document !== 'undefined' ? document : null) {
-    if (impactStamps.has(color)) return impactStamps.get(color);
-    const stamp = doc.createElement('canvas'); stamp.width = stamp.height = 128;
+    const cached = impactStamps.get(color);
+    if (cached && cached._doc === doc) {
+      impactStamps.delete(color);
+      impactStamps.set(color, cached);
+      return cached;
+    }
+    const stamp = doc.createElement('canvas'); stamp.width = stamp.height = 128; stamp._doc = doc;
     const c = stamp.getContext('2d'); c.fillStyle = color;
     c.beginPath(); c.arc(64, 64, 60, 0, Math.PI * 2); c.fill();
-    impactStamps.set(color, stamp); return stamp;
+    impactStamps.set(color, stamp);
+    if (impactStamps.size > MAX_SPRITE_CACHE) impactStamps.delete(impactStamps.keys().next().value);
+    return stamp;
   }
 
   function impulseGeometry(P, body, plan) {
@@ -667,19 +690,29 @@
       };
     }
 
-    let themeColors = null;
+    let themeColors = null, themeObserver = null, darkMedia = null, onDarkChange = null;
     function invalidateTheme() {
       themeColors = null;
       const fx = getEffects();
       if (fx) fx.rinkCache = null;
     }
     if (typeof MutationObserver === 'function' && doc?.documentElement) {
-      const themeObserver = new MutationObserver(() => { invalidateTheme(); onAssetLoad?.(); });
+      themeObserver = new MutationObserver(() => { invalidateTheme(); onAssetLoad?.(); });
       themeObserver.observe(doc.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
       if (doc.body) themeObserver.observe(doc.body, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
     }
     if (typeof matchMedia === 'function') {
-      matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { invalidateTheme(); onAssetLoad?.(); });
+      darkMedia = matchMedia('(prefers-color-scheme: dark)');
+      onDarkChange = () => { invalidateTheme(); onAssetLoad?.(); };
+      darkMedia.addEventListener?.('change', onDarkChange);
+    }
+    function dispose() {
+      themeObserver?.disconnect();
+      themeObserver = null;
+      if (darkMedia && onDarkChange) darkMedia.removeEventListener?.('change', onDarkChange);
+      darkMedia = null; onDarkChange = null;
+      stopFanfare();
+      quench();
     }
 
     function getThemeColors() {
@@ -898,6 +931,21 @@
       if (fx.netFire) fx.netFire.lit = false;
       fx.shake = fx.shakeX = fx.shakeY = 0; if (!view.field && rinkWrap) rinkWrap.style.translate = '';
       fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.goalCall = null;
+      fx.puckSlideTime = -Infinity;
+      fx.lastCannonImpact = -Infinity;
+      fx.lastFireHitSound = -Infinity;
+      fx.superImpactTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
+      fx.carveTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
+      fx.slipstreamTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
+      fx.spinStrikeTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
+      if (Array.isArray(view.bodies)) {
+        for (const b of view.bodies) {
+          if (b && typeof b === 'object') {
+            delete b._lastWallSound;
+            delete b._lastHitSound;
+          }
+        }
+      }
     }
 
     function burst(x, y, team, strength, celebration = false, tangent = 0, color = null) {
@@ -2114,9 +2162,10 @@
       if (!isReducedMotion()) getEffects().shake = shakeLevel;
     }
 
-    function drawScene(exportSession = null) {
+    function drawScene() {
       const view = getView(), fx = getEffects(), phase = getPhase();
-      const fieldPlans = exportSession?.plans ?? getPlans();
+      const playback = getActivePlayback() || getTheater();
+      const fieldPlans = playback?.plans ?? getPlans();
       const sizes = getRenderSize ? getRenderSize() : {};
       const renderWidth = sizes.renderWidth || view.canvas.clientWidth || 1000;
       const renderHeight = sizes.renderHeight || view.canvas.clientHeight || 600;
@@ -2133,15 +2182,15 @@
 
       const colors = getThemeColors();
       const { text, home, away, background } = colors;
-      fx.rinkCache = drawRinkLayer(exportSession?.ctx ?? view.ctx, width, height, P, ububallMatch, colors, rinkLogo, fx.rinkCache, doc);
+      fx.rinkCache = drawRinkLayer(view.ctx, width, height, P, ububallMatch, colors, rinkLogo, fx.rinkCache, doc);
       drawFieldUnder(colors);
       if (!view.field) drawFoulFocus(text);
       if (phase === 'plan') {
         drawPrediction(home, away);
         drawPredictedGoalGlow(home, away);
       }
-      drawTrails(exportSession?.ctx ?? view.ctx, exportSession?.fx.trails ?? fx.trails, exportSession?.bodies ?? view.bodies, home, away, ballHeat);
-      drawGuides(home, away, text, exportSession ? exportSession.guide : getGuide());
+      drawTrails(view.ctx, fx.trails, view.bodies, home, away, ballHeat);
+      drawGuides(home, away, text, playback ? playback.guide : getGuide());
       fx.shockwaves.forEach(s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
         const r = s.currentRadius + (s.maxRadius - s.currentRadius) * progress;
@@ -2213,16 +2262,20 @@
         }
         if ((b.stunned || b.stunnedNext) && !b.carded) {
           view.ctx.save();
-          view.ctx.font = '16px system-ui';
-          view.ctx.textAlign = 'center';
-          view.ctx.textBaseline = 'middle';
           if (view.portrait) {
             view.ctx.translate(b.x + b.radius + 14, b.y);
             view.ctx.rotate(Math.PI / 2);
           } else {
-            view.ctx.translate(b.x, b.y - b.radius - 8);
+            view.ctx.translate(b.x, b.y - b.radius - 10);
           }
-          view.ctx.fillText('💫', 0, 0);
+          view.ctx.scale(18 / 24, 18 / 24);
+          view.ctx.translate(-12, -12);
+          view.ctx.fillStyle = '#ffe043';
+          view.ctx.strokeStyle = '#101112';
+          view.ctx.lineWidth = 2;
+          view.ctx.lineJoin = 'round';
+          view.ctx.stroke(STUN_STARS);
+          view.ctx.fill(STUN_STARS);
           view.ctx.restore();
         }
         if (b.superActive === 'magnet') {
@@ -2289,9 +2342,8 @@
 
       drawParticles(home, away);
       drawFieldOver(colors);
-      drawFouls(text, exportSession?.viewFouls ?? getFouls());
-      drawPopups(exportSession?.badgeCtx ?? view.badgeCtx, exportSession?.fx.popups ?? fx.popups,
-        exportSession?.portrait ?? view.portrait, width, home, away);
+      drawFouls(text, playback?.viewFouls ?? getFouls());
+      drawPopups(view.badgeCtx, fx.popups, view.portrait, width, home, away);
       drawParticles(home, away, true);
 
       if (goalReplay) {
@@ -2373,7 +2425,8 @@
       handleWall,
       handleSuper,
       handleShockwave,
-      impact
+      impact,
+      dispose
     };
   }
 
@@ -2394,6 +2447,7 @@
     IGNITION_FLAME,
     GUARD_SHIELD,
     TARGET_ICON,
+    STUN_STARS,
     hexToRgba,
     heatColor,
     createMaterialEmitters,

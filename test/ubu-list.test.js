@@ -1,7 +1,12 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 const list = require('../web/ubu-list.js');
+const ubuCore = require('../shared/ubu.js');
+const ubuFile = require('../shared/ubu-file.js');
+const rarity = require('../shared/rarity.js');
 
 const stats = (impulse, size) => ({ impulse, traction: 127, spin: 127, curve: 127, size, mass: 127, bounciness: 127, grip: 127,
   power: 127, reach: 127, strength: 127, stability: 127, efficiency: 127, synergy: 127, chemistry: 127 });
@@ -43,6 +48,16 @@ test('search matches names case-insensitively and digits against serials', () =>
   assert.deepEqual(serials({ query: '1818' }), ['000000001818']);
   assert.deepEqual(serials({ query: '#000000000004' }), ['000000000004']);
   assert.deepEqual(serials({ query: 'nobody' }), []);
+});
+
+test('quoted phrases work for bare names, field values and negated phrases without parsing quoted operators', () => {
+  assert.deepEqual(serials({ query: '"ekfopo ruba"' }), ['000000000001']);
+  assert.deepEqual(serials({ query: 'name:"ama tobi"' }), ['000000000002']);
+  assert.deepEqual(serials({ query: '-name:"ama tobi"' }), ['000000001818', '000000000004', '000000000001']);
+  const quotedOp = list.parseQuery('"sort:power"');
+  assert.deepEqual(quotedOp.sorts, []);
+  assert.deepEqual(quotedOp.errors, []);
+  assert.equal(quotedOp.tests.length, 1);
 });
 
 test('filters match any choice within a group and all groups together; pending drops out', () => {
@@ -90,7 +105,7 @@ test('random order is a stable shuffle per seed', () => {
   assert.ok(seeds.size > 1);
 });
 
-test('mint dates compare by local day, month or year', () => {
+test('mint dates compare by local day, month or year and reject out-of-range rollover dates', () => {
   const at = (y, m, d, h = 12) => new Date(y, m - 1, d, h) / 1000;
   const dated = [
     ubu('000000000011', { name: 'A', issuedAt: at(2026, 10, 19) }),
@@ -105,12 +120,17 @@ test('mint dates compare by local day, month or year', () => {
   assert.deepEqual(find('received<=2026-10-20'), ['11', '12', '13']);
   assert.deepEqual(find('minted:2026-10'), ['11', '12', '13']);
   assert.deepEqual(find('date:2026'), ['11', '12', '13', '14']);
+
+  const badDates = list.parseQuery('minted:2026-00 minted:2026-13 minted:2026-02-29 minted:2026-04-31');
+  assert.deepEqual(badDates.errors, ['minted:2026-00', 'minted:2026-13', 'minted:2026-02-29', 'minted:2026-04-31']);
+  assert.equal(badDates.tests.length, 0);
 });
 
-test('terms it cannot read are reported and ignored', () => {
-  const parsed = list.parseQuery('power>abc foo:bar sort:nope super:zap grade>x power>200');
-  assert.deepEqual(parsed.errors, ['power>abc', 'foo:bar', 'sort:nope', 'super:zap', 'grade>x']);
+test('terms it cannot read (including negated sort and empty values) are reported and ignored', () => {
+  const parsed = list.parseQuery('power>abc foo:bar sort:nope -sort:power sort: name: grade: super:zap grade>x power>200');
+  assert.deepEqual(parsed.errors, ['power>abc', 'foo:bar', 'sort:nope', '-sort:power', 'sort:', 'name:', 'grade:', 'super:zap', 'grade>x']);
   assert.equal(parsed.tests.length, 1);
+  assert.deepEqual(parsed.sorts, []);
   assert.deepEqual(parsed.compared, ['power']);
 });
 
@@ -118,4 +138,117 @@ test('serials show without leading zeros', () => {
   assert.equal(list.serialLabel('000000001084'), '#1084');
   assert.equal(list.serialLabel('999999999999'), '#999999999999');
   assert.deepEqual(serials({ query: '#1818' }), ['000000001818']);
+});
+
+test('browser ubuList coalesces concurrent refresh loads, protects in-flight setFavorite, and evicts failed key imports', async () => {
+  const keyPair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+  const pubJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+  const mintId = 'A'.repeat(21) + 'A';
+  const makeSigned = async (serial, issuedAt) => {
+    const idBytes = crypto.getRandomValues(new Uint8Array(16));
+    const id = Buffer.from(idBytes).toString('base64url');
+    const dna = ubuCore.toCode(ubuCore.randomDNA());
+    return ubuFile.sign({ mint: mintId, id, serial, dna, issuedAt, key: 'mint-1' }, keyPair.privateKey);
+  };
+  const cert1 = await makeSigned('000000000001', 1700000100);
+  const cert2 = await makeSigned('000000000002', 1700000200);
+
+  let importFailOnce = true;
+  const realSubtle = crypto.subtle;
+  const mockedCrypto = {
+    getRandomValues: buf => crypto.getRandomValues(buf),
+    subtle: {
+      importKey(...args) {
+        if (importFailOnce) {
+          importFailOnce = false;
+          return Promise.reject(new Error('transient WebCrypto failure'));
+        }
+        return realSubtle.importKey(...args);
+      },
+      verify: (...args) => realSubtle.verify(...args)
+    }
+  };
+
+  let pageGate = null;
+  let ubusCalls = 0;
+  let favState = false;
+  const listeners = new Map();
+  const sandbox = {
+    crypto: mockedCrypto,
+    ubu: ubuCore,
+    ubuFile,
+    rarity,
+    CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
+    Event: class Event { constructor(type) { this.type = type; } },
+    localStorage: { getItem: () => null, setItem() {} },
+    getUbuSession: () => ({ owner: '123456789012345678', csrf: 'csrf-token' }),
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(fn);
+    },
+    dispatchEvent(ev) {
+      for (const fn of listeners.get(ev.type) || []) fn(ev);
+    },
+    fetch: async (url, options) => {
+      if (url === '/api/config') {
+        return { ok: true, json: async () => ({ ready: true, login: true, mint: mintId, keys: { 'mint-1': pubJwk.x }, lifetimeLimit: 5 }) };
+      }
+      if (url.startsWith('/api/ubus')) {
+        ubusCalls++;
+        const callNum = ubusCalls;
+        if (callNum === 1) {
+          await new Promise(resolve => { pageGate = resolve; });
+          return { ok: true, json: async () => ({ ubus: [{ serial: '000000000001', certificate: cert1, favorite: false }], next: null }) };
+        }
+        if (pageGate) await pageGate;
+        return {
+          ok: true,
+          json: async () => ({
+            ubus: [
+              { serial: '000000000002', certificate: cert2, favorite: false },
+              { serial: '000000000001', certificate: cert1, favorite: favState }
+            ],
+            next: null
+          })
+        };
+      }
+      if (url === '/api/favorites') {
+        const body = JSON.parse(options.body);
+        favState = body.favorite;
+        return { ok: true, json: async () => ({ serial: body.serial, favorite: body.favorite }) };
+      }
+      throw new Error('Unexpected URL: ' + url);
+    }
+  };
+  sandbox.globalThis = sandbox;
+  const code = fs.readFileSync(require.resolve('../web/ubu-list.js'), 'utf8');
+  vm.runInNewContext(code, sandbox);
+
+  // 1. First trustedKey call fails transiently, evicts itself, and succeeds on retry.
+  await assert.rejects(() => sandbox.ubuList.trustedKey(mintId, 'mint-1'), /transient WebCrypto failure/);
+  const recoveredKey = await sandbox.ubuList.trustedKey(mintId, 'mint-1');
+  assert.equal(recoveredKey.type, 'public');
+
+  // 2. Superseded load() awaits the active refresh load rather than resolving early with 0 items.
+  const firstLoad = sandbox.ubuList.load();
+  await new Promise(r => setImmediate(r));
+  const releaseFirst = pageGate;
+  pageGate = null;
+  const secondLoad = sandbox.ubuList.load({ refresh: true });
+  releaseFirst();
+  await firstLoad;
+  assert.equal(sandbox.ubuList.items().length, 2, 'superseded caller must see completed refresh items');
+  await secondLoad;
+
+  // 3. Concurrent setFavorite during an in-flight refresh is never clobbered by stale server row data.
+  let releaseRefresh;
+  pageGate = new Promise(resolve => { releaseRefresh = resolve; });
+  favState = false; // Server snapshot read before favorite POST still had false.
+  const refreshPromise = sandbox.ubuList.load({ refresh: true });
+  await sandbox.ubuList.setFavorite('000000000001', true);
+  assert.equal(sandbox.ubuList.get('000000000001').favorite, true);
+  favState = false; // Simulate stale GET /api/ubus payload arriving after POST /api/favorites.
+  releaseRefresh();
+  await refreshPromise;
+  assert.equal(sandbox.ubuList.get('000000000001').favorite, true, 'stale page must not overwrite newer favorite toggle');
 });

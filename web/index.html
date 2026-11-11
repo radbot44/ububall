@@ -51,6 +51,8 @@
       <symbol id="icon-undo" viewBox="0 0 24 24"><path d="M9 14l-4 -4l4 -4"/><path d="M5 10h11a4 4 0 1 1 0 8h-1"/></symbol>
       <symbol id="icon-arrow-back-up" viewBox="0 0 24 24"><path d="M9 14l-4 -4l4 -4"/><path d="M5 10h11a4 4 0 1 1 0 8h-1"/></symbol>
       <symbol id="icon-pin" viewBox="0 0 24 24"><path d="M15 4.5l-4 4l-4 1.5l-1.5 1.5l7 7l1.5 -1.5l1.5 -4l4 -4"/><path d="M9 15l-4.5 4.5"/><path d="M14.5 4l5.5 5.5"/></symbol>
+      <symbol id="icon-sparkles" viewBox="0 0 24 24"><path d="M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m-7 12a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6"/></symbol>
+      <symbol id="icon-player-stop" viewBox="0 0 24 24"><path d="M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z"/></symbol>
     </defs>
   </svg>
   <header class="site-header">
@@ -484,7 +486,7 @@ SOFTWARE.
   <main data-screen="collection" hidden>
     <h1 class="visually-hidden">Collection</h1>
     <p id="collection-status" class="collection-status" role="status" aria-live="polite" hidden></p>
-    <div class="availability-actions" id="collection-recovery" hidden><a id="collection-packs" class="button" href="/mint" hidden>Open packs</a><button id="collection-retry" type="button" hidden>Retry</button></div>
+    <div class="availability-actions" id="collection-recovery" hidden><a id="collection-packs" class="button" href="/mint" hidden>Open packs</a><button id="collection-retry" type="button" hidden>Retry</button><label id="recovery-import-wrap" class="button quiet file-btn" hidden>Open .ubu<input id="recovery-import" type="file" accept=".ubu,application/json"></label></div>
     <section id="collection" hidden aria-labelledby="collection-title">
       <div class="collection-header">
         <h2 id="collection-title">Your ubus</h2>
@@ -502,6 +504,7 @@ SOFTWARE.
     <p id="signed-out-message" role="status"></p>
     <div class="availability-actions">
       <a id="signed-out-signin" class="button primary" hidden>Sign in with Discord</a>
+      <label id="signed-out-import-wrap" class="button quiet file-btn" hidden>Open .ubu<input id="signed-out-import" type="file" accept=".ubu,application/json"></label>
       <a class="button" href="/">Play as a guest</a>
     </div>
   </section>
@@ -528,7 +531,7 @@ SOFTWARE.
           <p id="details"></p>
           <p id="authenticity"></p>
           <div id="viewer-stats" class="viewer-stats"></div>
-          <a id="download" class="secondary" download="ubu.ubu">Download .ubu</a>
+          <button id="download" class="button quiet" type="button">Download .ubu</button>
         </div>
         <div id="viewer-card-stage" class="viewer-card-stage" role="tabpanel" aria-labelledby="view-card" hidden></div>
         <div id="viewer-token-stage" class="viewer-token-stage" role="tabpanel" aria-labelledby="view-token" hidden></div>

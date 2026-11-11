@@ -32,6 +32,7 @@ function strategy(s, prev) {
   };
 }
 function view(s, plans) {
+  const k = P.rink, rinkW = k.right - k.left, rinkH = k.bottom - k.top, goalH = k.goalBottom - k.goalTop, midY = (k.top + k.bottom) / 2;
   const bodies = s.bodies;
   const players = bodies.slice(0, 6).map((b, i) => {
     const fill = i < 3 ? '#e8ca48' : '#aa54d3';
@@ -44,13 +45,13 @@ function view(s, plans) {
       '" stroke="#18202a" stroke-width="3"/><text x="'+b.x+'" y="'+(b.y+6)+'" text-anchor="middle" font-size="18" fill="#13131e">'+(i+1)+'</text>';
   }).join('\n');
   const b=bodies[6];
-  return '<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="650" viewBox="0 0 1000 650">'+
-    '<rect width="1000" height="650" fill="#162736"/><rect x="20" y="40" width="960" height="570" rx="110" fill="#8ec4d7" stroke="#f1faff" stroke-width="8"/>'+
-    '<path d="M500 40V610" stroke="#ffffff" stroke-width="3" stroke-dasharray="16 12" fill="none"/>'+
-    '<circle cx="500" cy="325" r="90" fill="none" stroke="#fff" stroke-width="3"/>'+
-    '<rect x="20" y="250" width="20" height="150" rx="4" fill="#ec6173"/>'+
-    '<rect x="960" y="250" width="20" height="150" rx="4" fill="#ec6173"/>'+
-    '<text x="500" y="28" text-anchor="middle" fill="white" font-size="23">YOU '+s.scores[0]+' — '+s.scores[1]+' EASY CPU | Turn '+s.turn+'</text>'+
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600">'+
+    '<rect width="1000" height="600" fill="#162736"/><rect x="'+k.left+'" y="'+k.top+'" width="'+rinkW+'" height="'+rinkH+'" rx="'+k.corner+'" fill="#8ec4d7" stroke="#f1faff" stroke-width="8"/>'+
+    '<path d="M500 '+k.top+'V'+k.bottom+'" stroke="#ffffff" stroke-width="3" stroke-dasharray="16 12" fill="none"/>'+
+    '<circle cx="500" cy="'+midY+'" r="90" fill="none" stroke="#fff" stroke-width="3"/>'+
+    '<rect x="'+(k.left - k.goalDepth)+'" y="'+k.goalTop+'" width="'+k.goalDepth+'" height="'+goalH+'" rx="4" fill="#ec6173"/>'+
+    '<rect x="'+k.right+'" y="'+k.goalTop+'" width="'+k.goalDepth+'" height="'+goalH+'" rx="4" fill="#ec6173"/>'+
+    '<text x="500" y="34" text-anchor="middle" fill="white" font-size="23">YOU '+s.scores[0]+' — '+s.scores[1]+' EASY CPU | Turn '+s.turn+'</text>'+
     players+'<circle cx="'+b.x+'" cy="'+b.y+'" r="'+Math.max(9,b.radius||11)+'" fill="#fff" stroke="#151f29" stroke-width="4"/>'+
     '</svg>';
 }

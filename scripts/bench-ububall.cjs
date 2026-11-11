@@ -4,8 +4,13 @@
 const { performance } = require('node:perf_hooks');
 const P = require('../web/ububall-physics.js');
 const STEPS = 20000;
+function freshBodies() {
+  const b = P.kickoff();
+  b.slice(0, 6).forEach(s => P.applyStats(s));
+  return b;
+}
 function benchmark(withSpin) {
-  let bodies = P.kickoff(), seed = 20261026;
+  let bodies = freshBodies(), seed = 20261026;
   const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
   function launch() {
     P.launch(bodies, Array.from({ length: 6 }, (_, i) => ({
@@ -18,8 +23,13 @@ function benchmark(withSpin) {
   const start = performance.now();
   for (let i = 0; i < STEPS; i++) {
     const goal = P.step(bodies);
-    if (goal !== null) bodies = P.kickoff();
-    if (goal !== null || P.settled(bodies)) launch();
+    if (goal !== null) {
+      bodies = freshBodies();
+      launch();
+    } else if (P.settled(bodies)) {
+      P.stop(bodies);
+      launch();
+    }
   }
   return performance.now() - start;
 }

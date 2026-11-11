@@ -11,7 +11,11 @@ function initialState(seed = 1, mode = 'standard') {
     const classic = M.rule(mode, 'classic'), raw = classic ? {} : model.stats;
     stats.push(raw); M.applyStats(P, b, raw, mode);
     b.personality = model.personality;
-    b.equippedSuper = classic ? null : P.SUPERS[model.supers[0] % 8];
+    const superId = model.supers[0] % 8;
+    const mastery = classic ? null : P.superMastery(model.supers, superId);
+    b.equippedSuper = classic ? null : { ...P.SUPERS[superId], ...mastery };
+    b.superBonusTicks = mastery?.bonusTicks || 0;
+    b.superBonusRefund = mastery?.bonusRefund || 0;
     b.meter = classic ? 0 : Math.min(100, model.rating / 1020 * 100);
   }
   return { version: M.VERSION, mode, bodies, stats, scores: [0, 0], turn: 1, phase: 'plan', winner: null };
@@ -21,6 +25,14 @@ function kickoff(state) {
   state.bodies.forEach((b, i) => {
     b.x = positions[i].x; b.y = positions[i].y;
     b.vx = b.vy = b.omega = 0;
+    if (i < 6) {
+      b.daze = 0;
+      delete b.meterTick;
+      b.guarding = false;
+      b.ironGuard = false;
+      b.ironCooldownTicks = 0;
+      P.syncEffectiveStats(b);
+    }
   });
   state.phase = 'plan';
 }
@@ -99,12 +111,18 @@ if (require.main === module) {
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
     if (!['--games', '--turns', '--seed', '--a', '--b', '--mode', '--config', '--output', '--scenarios', '--trace'].includes(key)) throw new Error('Unknown option: ' + key);
-    values[key.slice(2)] = ['--scenarios', '--trace'].includes(key) ? true : args[++i];
+    if (['--scenarios', '--trace'].includes(key)) values[key.slice(2)] = true;
+    else {
+      if (i + 1 >= args.length || args[i + 1].startsWith('--')) throw new Error('Missing value for ' + key);
+      values[key.slice(2)] = args[++i];
+    }
   }
   const fs = require('node:fs');
   const config = values.config ? JSON.parse(fs.readFileSync(values.config, 'utf8')) : {};
   const profiles = [config.a || values.a || 'medium', config.b || values.b || 'legacy'];
-  const games = Number(values.games || 1), maxTurns = Number(values.turns || 80), seed = Number(values.seed || 1);
+  const games = values.games !== undefined ? Number(values.games) : 1;
+  const maxTurns = values.turns !== undefined ? Number(values.turns) : 80;
+  const seed = values.seed !== undefined ? Number(values.seed) : 1;
   if (![games, maxTurns, seed].every(Number.isInteger) || games < 1 || maxTurns < 1 || games > 1000 || maxTurns > 1000) throw new Error('Invalid simulation bounds.');
   const results = [];
   if (!values.scenarios) for (let i = 0; i < games; i++) for (const swapped of [false, true]) {

@@ -42,11 +42,15 @@
     const signature = new Uint8Array(await root.crypto.subtle.sign('Ed25519', privateKey, signingBytes(value)));
     return JSON.stringify({ ...value, signature: encode(signature) });
   }
-  async function read(input, { allowUnsigned = true, resolveKey } = {}) {
-    if (!(typeof input === 'string' || input instanceof Uint8Array) || !input.length || input.length > MAX_BYTES) {
+  async function read(input, options) {
+    const { allowUnsigned = true, resolveKey } = options || {};
+    const isBytes = input instanceof Uint8Array || (ArrayBuffer.isView(input) && input.constructor?.name === 'Uint8Array');
+    if (!(typeof input === 'string' || isBytes) || !input.length || input.length > MAX_BYTES) {
       throw new Error('A .ubu file must contain 1–1024 bytes.');
     }
-    const bytes = typeof input === 'string' ? encoder.encode(input) : input;
+    const bytes = typeof input === 'string'
+      ? encoder.encode(input)
+      : (input instanceof Uint8Array ? input : new Uint8Array(input.buffer, input.byteOffset, input.byteLength));
     if (bytes.byteLength > MAX_BYTES) throw new Error('A .ubu file must contain 1–1024 bytes.');
     let text, data;
     try { text = decoder.decode(bytes); data = JSON.parse(text); } catch { throw new Error('Invalid UTF-8 JSON .ubu file.'); }
@@ -68,7 +72,7 @@
     if (!valid) throw new Error('Invalid mint signature.');
     return Object.freeze({ type: 'signed', dna: value.dna, certificate: Object.freeze({ ...value, signature: data.signature }) });
   }
-  const api = { MAX_BYTES, unsigned, sign, read };
+  const api = Object.freeze({ MAX_BYTES, unsigned, sign, read });
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.ubuFile = api;
 })(globalThis);

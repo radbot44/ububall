@@ -1376,7 +1376,18 @@
       ubuAudio?.stop?.();
     }
 
+    let draggingPlan = false;
+    let rafId = 0;
+    let lastRaf = 0;
+    function scheduleLoop() {
+      if (!rafId && !paused && !doc.hidden) {
+        lastRaf = 0;
+        rafId = requestAnimationFrame(tickFrame);
+      }
+    }
+
     function resetStage({ phase: nextPhase = 'plan', mode = 'standard', glow = 0 } = {}) {
+      draggingPlan = false;
       stopAllAudio();
       clearTimeout(bugTabTimer); bugTabTimer = 0; bugTabs.length = 0; $('bug-tab')?.classList.remove('show');
       clearTimeout(bannerTimer); $('field-banner')?.classList.remove('show');
@@ -1442,6 +1453,7 @@
     }
 
     function launchPlans(turnPlans = plans) {
+      draggingPlan = false;
       plans = turnPlans.map(p => ({ angle: 0, power: 0, spin: 0, guard: false, ...p }));
       phase = 'play';
       elapsed = 0;
@@ -1449,6 +1461,7 @@
       P.startTurn(view.bodies, plans, liveFx.super);
       syncMeters();
       syncScorebug();
+      scheduleLoop();
     }
 
     function handleGoalScored(goalTeam) {
@@ -1679,6 +1692,7 @@
       }
       item.run(workbenchCtx, variant);
       updateTelemetry();
+      scheduleLoop();
     }
 
     // Build Catalog UI from EFFECT_GROUPS
@@ -1879,7 +1893,6 @@
     }
 
     // Interactive rink pointer support: click foul warnings to inspect, or drag aim arrows in `plan`!
-    let draggingPlan = false;
     function rinkPoint(event) {
       const r = canvas.getBoundingClientRect();
       if (view.portrait) {
@@ -1921,14 +1934,25 @@
       presenter.dirtyPrediction();
       draw();
     });
-    canvas.addEventListener('pointerup', () => { draggingPlan = false; });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+      canvas.addEventListener(ev, () => { draggingPlan = false; });
+    }
 
     // Wire transport & filter controls
     $('btn-replay').onclick = () => {
       if (activeDemo) runDemo(activeDemo, activeVariant);
       else runDemo(EFFECT_GROUPS[0].items[0]);
     };
-    $('btn-pause').onclick = () => { paused = !paused; if (paused) ubuAudio?.stopMotion?.(); updatePauseButton(); };
+    $('btn-pause').onclick = () => {
+      paused = !paused;
+      if (paused) {
+        ubuAudio?.stopMotion?.();
+        if (rafId) { cancelAnimationFrame(rafId); rafId = 0; lastRaf = 0; }
+      } else {
+        scheduleLoop();
+      }
+      updatePauseButton();
+    };
     $('btn-step-1').onclick = () => stepManualTicks(1);
     $('btn-step-10').onclick = () => stepManualTicks(10);
     $('btn-launch-plan').onclick = () => { if (phase === 'plan') launchPlans(plans); };
@@ -1945,6 +1969,7 @@
     $('btn-loop').onclick = e => {
       autoLoop = !autoLoop;
       e.currentTarget.setAttribute('aria-pressed', String(autoLoop));
+      if (autoLoop) scheduleLoop();
     };
     $('btn-reduced').onclick = e => {
       forceReducedMotion = !forceReducedMotion;
@@ -1991,13 +2016,34 @@
 
     new ResizeObserver(() => draw()).observe(stageArea);
 
-    // Main RAF loop
-    let lastRaf = 0;
+    function needsContinuousFrames() {
+      if (paused || doc.hidden) return false;
+      if (autoLoop && activeDemo) return true;
+      if (phase !== 'plan' || postGoal || goalReplay || timedCallbacks.length) return true;
+      if (fx.kickoffGlow > 0 || fx.particles.length || fx.shockwaves.length || fx.skids.length || fx.burns.length || fx.pings?.length || fx.popups?.length) return true;
+      if (fouls.crease.some(Boolean) || presenter.stalling(fouls)) return true;
+      if (activeDemo) return true;
+      return false;
+    }
+
+    doc.addEventListener('visibilitychange', () => {
+      if (doc.hidden) {
+        ubuAudio?.stopMotion?.();
+        stopAllAudio();
+        if (rafId) { cancelAnimationFrame(rafId); rafId = 0; lastRaf = 0; }
+      } else if (needsContinuousFrames()) {
+        scheduleLoop();
+      }
+    });
+
+    // Main RAF loop (sleeps when idle, paused, or hidden)
     function tickFrame(now) {
+      rafId = 0;
+      if (paused || doc.hidden) { lastRaf = 0; return; }
       const rawDt = lastRaf ? Math.min(0.05, Math.max(0, (now - lastRaf) / 1000)) : 0;
       lastRaf = now;
 
-      if (!paused && rawDt > 0) {
+      if (rawDt > 0) {
         let effectiveSpeed = speedMultiplier;
         if (goalReplay) {
           const base = goalReplay.scored ? 0.5 : ububallMatch.replaySpeed(Math.max(0, goalReplay.total - goalReplay.played));
@@ -2033,14 +2079,18 @@
         draw();
         updateTelemetry();
       }
-      requestAnimationFrame(tickFrame);
+      if (needsContinuousFrames()) {
+        rafId = requestAnimationFrame(tickFrame);
+      } else {
+        lastRaf = 0;
+      }
     }
 
     populatePickers();
     renderCatalog();
     rebuildSprites();
     resetStage({ phase: 'plan', mode: 'standard' });
-    requestAnimationFrame(tickFrame);
+    updateTelemetry();
 
     return { workbenchCtx, runDemo };
   }

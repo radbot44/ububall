@@ -990,3 +990,153 @@ test('Snap awards 60 ms hit-stop (100 ms when also a big shot), Post English rin
   Object.assign(cpuBodies[0], { x: 700 - contact - 200, y: 300, vx: 180, vy: 0 });
   assert.equal(C.decided(cpuBodies), true, 'decided() returns true once beyond maximum drafting stopping distance');
 });
+
+test('assists clear on hard opponent interceptions, survive light opponent grazes, and never self-assist', () => {
+  const bodies = P.kickoff();
+  bodies.slice(0, 6).forEach((b, i) => { P.applyStats(b); Object.assign(b, { x: 150 + i * 60, y: 500, vx: 0, vy: 0 }); });
+  const play = M.newPlay();
+
+  // 1. Teammate 0 strikes ball, then Teammate 1 touches it -> assist[0] = 0
+  Object.assign(bodies[0], { x: 300, y: 300, vx: 380, vy: 0 });
+  Object.assign(bodies[6], { x: 300 + bodies[0].radius + 18 - 0.5, y: 300, vx: 0, vy: 0 });
+  M.playTick(P, bodies, play, {}, null, false);
+  assert.equal(play.last, 0);
+
+  Object.assign(bodies[0], { x: 150, y: 500, vx: 0, vy: 0 });
+  Object.assign(bodies[1], { x: 420, y: 300, vx: 320, vy: 0 });
+  Object.assign(bodies[6], { x: 420 + bodies[1].radius + 18 - 0.5, y: 300, vx: 220, vy: 0 });
+  M.playTick(P, bodies, play, {}, null, false);
+  assert.equal(play.assist[0], 0, 'pass from 0 to 1 sets assist[0] = 0');
+
+  // 2. Hard opponent block by 3 (impulse >= 35) clears assist[0] immediately
+  Object.assign(bodies[1], { x: 210, y: 500, vx: 0, vy: 0 });
+  Object.assign(bodies[3], { x: 560, y: 300, vx: -420, vy: 0 });
+  Object.assign(bodies[6], { x: 560 - (bodies[3].radius + 18 - 0.5), y: 300, vx: 250, vy: 0 });
+  M.playTick(P, bodies, play, {}, null, false);
+  assert.equal(play.assist[0], null, 'hard opponent block clears opposing pending assist');
+
+  // Even if ball rebounds back off original passer 0 without another teammate touch, 0 cannot self-assist
+  Object.assign(bodies[3], { x: 330, y: 500, vx: 0, vy: 0 });
+  Object.assign(bodies[0], { x: 450, y: 300, vx: 360, vy: 0 });
+  Object.assign(bodies[6], { x: 450 + bodies[0].radius + 18 - 0.5, y: 300, vx: -150, vy: 0 });
+  M.playTick(P, bodies, play, {}, null, false);
+  assert.equal(play.assist[0], null, 'original passer touching after interception cannot self-assist');
+
+  // 3. Very light opponent graze (impulse < 35) between passer 0 and scorer 1 preserves assist[0] = 0
+  const grazePlay = M.newPlay();
+  bodies.slice(0, 6).forEach((b, i) => Object.assign(b, { x: 150 + i * 60, y: 500, vx: 0, vy: 0 }));
+  Object.assign(bodies[0], { x: 300, y: 300, vx: 400, vy: 0 });
+  Object.assign(bodies[6], { x: 300 + bodies[0].radius + 18 - 0.5, y: 300, vx: 0, vy: 0 });
+  M.playTick(P, bodies, grazePlay, {}, null, false);
+  Object.assign(bodies[0], { x: 150, y: 500, vx: 0, vy: 0 });
+  // Tiny closing speed (~12 px/s -> impulse ~ 15 < 35) from opponent 3
+  Object.assign(bodies[6], { x: 450, y: 300, vx: 260, vy: 0 });
+  Object.assign(bodies[3], { x: 450, y: 300 + bodies[3].radius + 18 - 0.2, vx: 260, vy: -12 });
+  M.playTick(P, bodies, grazePlay, {}, null, false);
+  assert.equal(grazePlay.last, 0, 'light opponent graze preserves passer chain');
+  Object.assign(bodies[3], { x: 330, y: 500, vx: 0, vy: 0 });
+  Object.assign(bodies[1], { x: 540, y: 300, vx: 360, vy: 0 });
+  Object.assign(bodies[6], { x: 540 + bodies[1].radius + 18 - 0.5, y: 300, vx: 250, vy: 0 });
+  M.playTick(P, bodies, grazePlay, {}, null, false);
+  assert.equal(grazePlay.assist[0], 0, 'teammate receiving grazed pass still credits passer 0 with assist');
+});
+
+test('opposing Magnet pull takes credit on velocity reversal, own goals carry null scorer without Ace/Hat-Trick badges, and ONE-TIMER requires a live single-touch pass', () => {
+  const state = shotState(
+    { x: 520, y: 300, vx: 80, vy: 0 },
+    { 3: { x: 430, y: 300, vx: -200, vy: 0 } },
+    { credit: { 0: 1 }, lastTouch: [0, null] }
+  );
+  state.bodies[3].equippedSuper = { ...P.SUPERS[4], bonusTicks: 0, bonusRefund: 0 };
+  state.bodies[3].superActive = 'magnet';
+  state.bodies[3].superTicks = 300;
+  const play = M.newPlay(state);
+  for (let t = 0; t < 35; t++) M.playTick(P, state.bodies, play, {}, null, true);
+  assert.deepEqual(play.credit, { 3: 1 }, 'opposing Magnet reversing ball direction takes full credit');
+  assert.equal(M.responsibleTeam(state.bodies, play.credit), 1, 'opposing Magnet takes responsibleTeam');
+
+  const selfMag = shotState(
+    { x: 460, y: 300, vx: 120, vy: 0 },
+    { 0: { x: 520, y: 300, vx: 220, vy: 0 } },
+    { credit: { 0: 1 }, last: 0, lastTouch: [0, null] }
+  );
+  selfMag.bodies[0].superActive = 'magnet';
+  selfMag.bodies[0].superTicks = 300;
+  const selfPlay = M.newPlay(selfMag);
+  M.playTick(P, selfMag.bodies, selfPlay, {}, null, true);
+  assert.equal(selfPlay.assist[0], null, 'Magnet carrier pulling its own ball never sets self-assist');
+
+  const ogBodies = P.kickoff();
+  const ogTally = M.newTally();
+  ogTally.goals[0] = 2;
+  const ogPlay = M.newPlay({ credit: { 3: 1 }, lastTouch: [0, 3] });
+  const ogCall = M.callGoal(ogBodies, ogPlay, ogTally, 0, true);
+  assert.equal(ogCall.own, true);
+  assert.equal(ogCall.scorer, null, 'own goal has null scorer');
+  assert.equal(ogCall.label, 'OWN GOAL');
+  assert.deepEqual(ogCall.badges, [], 'own goal omits ACE! and HAT TRICK! badges');
+
+  const oneBodies = P.kickoff();
+  const onePlay = M.newPlay({ credit: { 1: 1 }, lastTouch: [1, null], assist: [0, null], age: 40 });
+  onePlay.lastPass = { from: 0, to: 1, at: 20, speed: 240, touches: 1 };
+  assert.equal(M.callGoal(oneBodies, onePlay, M.newTally(), 0, false).label, 'ONE-TIMER!');
+  onePlay.lastPass.touches = 2;
+  assert.notEqual(M.callGoal(oneBodies, onePlay, M.newTally(), 0, false).label, 'ONE-TIMER!', 'multi-touch dribble is not a ONE-TIMER!');
+  onePlay.lastPass = { from: 0, to: 1, at: 20, speed: 90, touches: 1 };
+  assert.notEqual(M.callGoal(oneBodies, onePlay, M.newTally(), 0, false).label, 'ONE-TIMER!', 'stopped/slow ball is not a ONE-TIMER!');
+});
+
+test('goal-line Iron Save that still scores is discarded, curved shots preserve preCurveMult saves, carded skaters skip fouls, and Sticky faceoffs end Sticky', () => {
+  // 1. Iron Save inside goal mouth where ball is already past goal line (goal === 0) discards opposing save
+  const b1 = P.kickoff();
+  b1.slice(0, 6).forEach(b => P.applyStats(b));
+  P.applyStats(b1[3], { size: 0, reach: 0, mass: 255, stability: 255, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 });
+  b1[3].guarding = true;
+  Object.assign(b1[3], { x: 960, y: 330, vx: 0, vy: 0 });
+  Object.assign(b1[6], { x: 960, y: 298, vx: 0, vy: 600, onFire: true, fireTicks: P.FIRE_TICKS, pace: 600, strikerTeam: 0, strikerSlot: 0 });
+  let ironTriggered = false;
+  const r1 = M.playTick(P, b1, M.newPlay({ credit: { 0: 1 }, lastTouch: [0, null] }), {
+    collide: (a, b, s, imp, plow, iron) => { if (iron) ironTriggered = true; }
+  }, null, true);
+  assert.equal(ironTriggered, true, 'Iron Save contact fired inside goal pocket');
+  assert.equal(r1.goal, 0, 'ball past goal line scores');
+  assert.equal(r1.saves.filter(s => !s.own).length, 0, 'opposing Iron Save is discarded when goal still scores');
+
+  // 2. Spinning high-curve shot blocked by low-curve defender still registers a Save via preCurveMult
+  const b2 = P.kickoff();
+  b2.slice(0, 6).forEach((b, i) => { P.applyStats(b); Object.assign(b, { x: 200 + i * 50, y: 500 }); });
+  P.applyStats(b2[3], { size: 127, reach: 127, mass: 127, stability: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 0 });
+  Object.assign(b2[6], { x: 760, y: 198, vx: 520, vy: 0, omega: 20, curveMult: 1.5, strikerTeam: 0, strikerSlot: 0 });
+  Object.assign(b2[3], { x: 760 + b2[3].radius + 18 - 1, y: 198, vx: -300, vy: 0 });
+  const r2 = M.playTick(P, b2, M.newPlay({ credit: { 0: 1 }, lastTouch: [0, null] }), {}, null, true);
+  assert.equal(r2.saves.length, 1, 'defender gets Save credit on curved shot that needed pre-hit curveMult=1.5 to score');
+  assert.equal(r2.saves[0].index, 3);
+
+  // 3. Carded skaters in crease or attack zone do not count toward Goal Camping
+  const campFouls = { ...M.newFouls(), crease: [true, false] };
+  const campBodies = P.kickoff();
+  campBodies.slice(0, 6).forEach(b => P.applyStats(b));
+  Object.assign(campBodies[0], { x: 85, y: 280, carded: true });
+  Object.assign(campBodies[1], { x: 85, y: 320, carded: false });
+  Object.assign(campBodies[6], { x: 700, y: 300 });
+  assert.equal(M.inCrease(P, campBodies[0], 0), false, 'carded skater is excluded from inCrease');
+  M.lapseFouls(P, campBodies, campFouls);
+  assert.equal(campFouls.crease[0], false, 'carded skater in crease does not count toward 2-defender Goal Camping');
+
+  // 4. Corner-stall faceoff while a Sticky skater holds the ball cleanly ends Sticky and clears stuckTicks
+  const stickyFouls = { ...M.newFouls(), corner: 0, cornerTurns: 2 };
+  const stickyBodies = P.kickoff();
+  stickyBodies.slice(0, 6).forEach(b => P.applyStats(b));
+  stickyBodies[0].equippedSuper = { ...P.SUPERS[3], bonusTicks: 0, bonusRefund: 0 };
+  stickyBodies[0].superActive = 'sticky';
+  stickyBodies[0].superTicks = 200;
+  stickyBodies[0].superHit = true;
+  stickyBodies[0].holding = true;
+  Object.assign(stickyBodies[0], { x: 110, y: 85 });
+  Object.assign(stickyBodies[6], { x: 92, y: 85, stickOffset: { x: -18, y: 0 }, stuckTicks: 45 });
+  M.finishTurn(P, stickyBodies, [], [0, 0], null, 'pulse', {}, stickyFouls);
+  assert.equal(stickyFouls.faceoff, true);
+  assert.equal(stickyBodies[0].holding, false);
+  assert.equal(stickyBodies[6].stuckTicks, 0);
+  assert.equal(stickyBodies[0].superActive, null, 'Sticky super ends cleanly when ball is reset to center');
+});

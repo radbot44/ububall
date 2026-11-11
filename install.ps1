@@ -71,7 +71,7 @@ $Destination = [IO.Path]::GetFullPath($Destination).TrimEnd('\')
 if ($Destination -eq $source -or $Destination.StartsWith($source + '\', [StringComparison]::OrdinalIgnoreCase) -or $source.StartsWith($Destination + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'The installation must be separate from the source checkout.'
 }
-$wranglerPath = [regex]::Escape($Destination + '\node_modules\wrangler\')
+$wranglerPath = [regex]::Escape($Destination + '\node_modules\')
 $modulesPath = $Destination + '\node_modules\'
 $busy = @(Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='esbuild.exe' OR Name='workerd.exe'" | Where-Object {
     ($_.CommandLine -and $_.CommandLine.Replace('/', '\') -match $wranglerPath) -or
@@ -147,7 +147,8 @@ if (Test-Path -LiteralPath $distPublic) {
     Remove-Item -LiteralPath $distPublic -Recurse -Force
 }
 # Recover private settings before replacing the tracked Wrangler configuration.
-if (!(Test-Path (Join-Path $SettingsDirectory 'settings.json')) -and (Test-Path (Join-Path $Destination 'wrangler.local.jsonc'))) {
+if (!(Test-Path (Join-Path $SettingsDirectory 'settings.json')) -and
+    ((Test-Path (Join-Path $Destination 'wrangler.local.jsonc')) -or (Test-Path (Join-Path $Destination 'wrangler.deploy.jsonc')))) {
     Push-Location $Destination
     try {
         & node (Join-Path $source 'scripts\deploy-config.cjs') recover $SettingsDirectory

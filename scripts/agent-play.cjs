@@ -1,9 +1,9 @@
 'use strict';
-// Browser-driven Easy CPU match. Instrumentation is injected into a temporary
-// local copy of the UI script and always restored; no production code changes.
+// Browser-driven Easy CPU match. Instrumentation is served in-memory via Playwright
+// route interception; tracked files on disk are never modified.
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const out = path.join(root, 'artifacts', 'agent-play');
@@ -24,7 +24,8 @@ const hook = [
 '      return { phase, turn, scores: [...scores], cpuLevel, mode: fieldView.mode,',
 '        state: { version: ububallMatch.VERSION, mode: fieldView.mode,',
 '          bodies: structuredClone(simBodies), stats: structuredClone(stats),',
-'          scores: [...scores], turn, fouls: structuredClone(fouls) },',
+'          scores: [...scores], turn, clock: matchTicks, roundTurns,',
+'          ...ububallMatch.newPlay(play), fouls: structuredClone(fouls) },',
 '        playerNames: fieldView.entries.slice(0, 3).map(e => e.model.parts.fullName) };',
 '    },',
 '    choose(next) {',
@@ -42,9 +43,10 @@ const hook = [
 '    }',
 '  });'
 ].join('\n') + '\n';
-fs.writeFileSync(sourcePath, original
+const instrumented = original
   .replace(clock, 'const delta = window.__agentFast ? 0.18 : (lastTime ? Math.max(0, (time - lastTime) / 1000) : 0);')
-  .replace(marker, hook + marker));
+  .replace(marker, hook + marker);
+const isWin = process.platform === 'win32';
 const log = [];
 const emit = event => { log.push(event); console.log('AGENT_EVENT ' + JSON.stringify(event)); };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -83,8 +85,25 @@ function strategy(o, previous) {
     seed: 131 + o.turn * 31 + o.scores[0] * 997 + o.scores[1] * 1009 };
 }
 let worker, browser;
+function stopWorker() {
+  if (!worker) return;
+  const proc = worker; worker = null;
+  if (proc.pid) {
+    if (isWin) {
+      spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      try { process.kill(-proc.pid, 'SIGTERM'); } catch { try { proc.kill('SIGTERM'); } catch {} }
+    }
+  }
+  proc.stdout?.destroy(); proc.stderr?.destroy();
+}
 async function play() {
-  worker = spawn('npm', ['run', 'dev'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  worker = spawn(isWin ? 'npm.cmd' : 'npm', ['run', 'dev'], {
+    cwd: root,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: isWin,
+    detached: !isWin
+  });
   let serverLogs = '';
   for (const stream of [worker.stdout, worker.stderr]) stream.on('data', chunk => {
     serverLogs = (serverLogs + chunk.toString()).slice(-10000);
@@ -94,6 +113,11 @@ async function play() {
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 930 },
     deviceScaleFactor: 1, reducedMotion: 'reduce' });
+  await context.route('**/ububall.js', route => route.fulfill({
+    status: 200,
+    contentType: 'application/javascript; charset=utf-8',
+    body: instrumented
+  }));
   const page = await context.newPage(), errors = [];
   page.on('pageerror', err => errors.push(String(err).slice(0, 500)));
   await page.goto('http://127.0.0.1:8790/', { waitUntil: 'domcontentloaded', timeout: 45000 });
@@ -154,15 +178,14 @@ async function play() {
   fs.writeFileSync(path.join(out, 'page-errors.json'), JSON.stringify(errors, null, 2) + '\n');
   if (outcome.winner === 'capped') process.exitCode = 2;
 }
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => { stopWorker(); process.exit(130); });
+}
 play().catch(error => {
   emit({ event: 'error', message: String(error.stack || error) });
   fs.writeFileSync(path.join(out, 'failure.txt'), String(error.stack || error) + '\n');
   process.exitCode = 1;
 }).finally(async () => {
   await browser?.close().catch(() => {});
-  if (worker) {
-    try { process.kill(-worker.pid, 'SIGTERM'); } catch { worker.kill('SIGTERM'); }
-    worker.stdout?.destroy(); worker.stderr?.destroy();
-  }
-  fs.writeFileSync(sourcePath, original);
+  stopWorker();
 });

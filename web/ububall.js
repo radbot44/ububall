@@ -21,7 +21,7 @@
   fieldView.mode = 'standard';
   let planDeadline = 0, planPausedAt = null;
   // Each turn of the current play (motion since the field last rested), for goal replays.
-  let playSegments = [], goalReplay = null, goalReplayAt = 0, postGoal = null, authoritativeBodies = null;
+  let playSegments = [], goalReplay = null, goalReplayAt = 0, goalReplayDelayMs = 0, postGoal = null, authoritativeBodies = null;
   fieldView.anonymous = false;
   // The replay viewer (see watchReplay), and the match being recorded for the replay library.
   let theater = null, recording = null, recordingOnline = false, restoredMatch = false;
@@ -143,7 +143,7 @@
     tab.classList.add('show');
     bugTabTimer = setTimeout(() => { tab.classList.remove('show'); bugTabTimer = setTimeout(nextBugTab, 300); }, 2600);
   }
-  let arrowGrab = null, dragStart = null, dragMoved = false;
+  let arrowGrab = null, dragStart = null, dragStartClient = null, dragMoved = false;
   let pullBehind = false;
   try { pullBehind = localStorage.getItem('ububall-aim-style') === 'pull'; } catch {}
   const firstTurnKey = 'ububall-first-turn-guide';
@@ -413,13 +413,14 @@
     const summary = $('match-summary');
     if (demo || summary.open) return;
     const s = online?.state;
-    const winner = s ? (s.winner === s.seat ? 0 : 1) : (scores[0] > scores[1] ? 0 : 1);
-    const winnerName = $(winner ? 'opponent-label' : 'home-label').textContent;
+    const winner = s ? (s.winner == null ? null : s.winner === s.seat ? 0 : 1)
+      : (scores[0] === scores[1] ? null : scores[0] > scores[1] ? 0 : 1);
+    const winnerName = winner === null ? null : $(winner ? 'opponent-label' : 'home-label').textContent;
     const { tally: t } = viewTally();
-    const h = ububallMatch.honours(t, scores, winner);
+    const h = winner === null ? { comeback: false, shutout: false } : ububallMatch.honours(t, scores, winner);
     const mvp = matchMvp({ ...t, topShot: t.topSpeed });
     $('summary-score').textContent = scores.join(' – ');
-    $('summary-winner').textContent = winner === 0 && !s?.spectator ? 'You win!' : `${winnerName} wins!`;
+    $('summary-winner').textContent = winner === null ? 'Match ended' : winner === 0 && !s?.spectator ? 'You win!' : `${winnerName} wins!`;
     $('summary-honours').textContent = s && s.game.winner == null ? (s.left?.some(Boolean) ? 'Opponent left' : 'Won by forfeit') :
       [h.comeback && 'Comeback from 3 down!', h.shutout && 'Shutout!'].filter(Boolean).join(' ');
     $('summary-mvp').textContent = mvp === null ? 'No MVP awarded' : `MVP · ${fieldView.entries[mvp].model.parts.fullName}`;
@@ -546,7 +547,7 @@
     cpuClient.cancel();
     if (online?.active) return;
     cpu = Array.isArray(initialPlans) && initialPlans.length === 3 ? initialPlans : P.cpuPlans(simBodies, () => .5, scores);
-    cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: fieldView.mode, bodies: simBodies, stats, scores, turn, fouls },
+    cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: fieldView.mode, bodies: simBodies, stats, scores, turn, fouls, clock: matchTicks, roundTurns, ...ububallMatch.newPlay(play) },
       { level: demo ? demoLevels[1] : cpuLevel, seed: turn }).then(result => {
       if (generation !== cpuGeneration || !result || online?.active) return;
       if (result.error) console.warn('CPU search unavailable; using baseline plan.');
@@ -581,8 +582,6 @@
   }
   function renderStatsBox(statSource) {
     const wrap = document.createElement('div'); wrap.className = 'ubu-stats-wrap';
-    const details = document.createElement('details'); details.className = 'stat-details';
-    const summary = document.createElement('summary'); summary.textContent = 'Individual stats'; details.append(summary);
     const groups = [
       ['Movement', '#76b9ef', ['impulse', 'traction', 'spin', 'curve']],
       ['Physical', '#42c66b', ['size', 'mass', 'bounciness', 'grip']],
@@ -601,11 +600,6 @@
       row.append(name, track, valSpan);
       return row;
     };
-    const compactBox = document.createElement('div'); compactBox.className = 'ubu-stats compact-stats';
-    for (const [label, color, keys] of groups) {
-      const avg = Math.round(keys.reduce((sum, k) => sum + (statSource[k] ?? 127), 0) / keys.length);
-      compactBox.append(makeStatRow(label, avg, color));
-    }
     const fullBox = document.createElement('div'); fullBox.className = 'ubu-stats full-stats';
     for (const [groupName, color, keys] of groups) {
       const groupHeading = document.createElement('div');
@@ -617,9 +611,7 @@
         fullBox.append(makeStatRow(k[0].toUpperCase() + k.slice(1), statSource[k] ?? 127, color));
       }
     }
-    compactBox.setAttribute('aria-label', 'Category averages');
-    compactBox.title = 'Category averages · 0–255';
-    details.append(fullBox); wrap.append(compactBox, details);
+    wrap.append(fullBox);
     return wrap;
   }
   // An ubu's super: its name, meter and charge. Arming is done from the dock.
@@ -749,11 +741,11 @@
       $(team ? 'away-score' : 'home-score').textContent = scores[team];
     }
     const curB = fieldView.bodies[selected];
-    const isStunned = Boolean(curB?.stunned);
-    if (isStunned) {
+    const isDisabled = Boolean(curB?.stunned || curB?.carded);
+    if (isDisabled) {
       plans[selected].power = plans[selected].spin = 0;
     }
-    for (const id of ['shot-spin', 'spin-less', 'spin-more']) $(id).disabled = !planning || isStunned;
+    for (const id of ['shot-spin', 'spin-less', 'spin-more']) $(id).disabled = !knobEditable(selected);
     $('launch').disabled = phase === 'play' || phase === 'cpu-wait';
     document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
     $('launch-label').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : phase === 'cpu-wait' ? 'CPU planning…' : 'Launch team';
@@ -783,7 +775,7 @@
         const spin = Math.round((plan.spin || 0) * 100);
         const dazeCut = body && P.dazeSlow ? Math.round(P.dazeSlow(body) * 100) : 0;
         if (body?.carded) small.textContent = 'Yellow card · sits out this turn';
-        else if (body?.stunned) small.textContent = '💫 Stunned this turn';
+        else if (body?.stunned) small.textContent = 'Stunned this turn';
         else if (guarded) small.textContent = dazeCut ? `Guarding · Dazed (-${dazeCut}%)` : 'Guarding';
         else if (!aimed) small.textContent = dazeCut ? `Idle · Dazed (-${dazeCut}%)` : 'Idle';
         else small.textContent = `${Math.round(plan.power * 100)}% power · ${spin ? spin + '% spin' : 'no spin'}${dazeCut ? ` · Dazed (-${dazeCut}%)` : ''}`;
@@ -837,7 +829,7 @@
         const masteryBonus = s.copies > 1 ? ` (+${(s.bonusTicks / 240).toFixed(1)}s duration, +${s.bonusRefund}% refund)` : '';
         hudSuperIcon.dataset.tip = `${sName}: ${s.desc}${masteryBonus}`;
       }
-      const canArm = planning && (curB.meter >= 100) && !curB.stunned;
+      const canArm = planning && (curB.meter >= 100) && knobEditable(selected);
       hudSuperBtn.disabled = !canArm;
       hudSuperBtn.setAttribute('aria-pressed', String(Boolean(curB.superArm)));
       hudSuperBtn.classList.toggle('armed', Boolean(curB.superArm));
@@ -889,7 +881,6 @@
     const head = document.createElement('div'); head.className = 'stat-drawer-head';
     head.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'stat-drawer-art', 256) : ubuRender(entry.model, 'stat-drawer-art'), titles, close);
     const box = renderStatsBox(stats[i] || entry.model.stats || {});
-    box.querySelector('.stat-details').open = true;
     statDrawer.dataset.player = i; statDrawer.dataset.side = i < 3 ? 'home' : 'away';
     statDrawer.replaceChildren(head, box);
     if (!statDrawer.matches(':popover-open')) statDrawer.showPopover();
@@ -984,7 +975,7 @@
     try { localStorage.removeItem('ububall-active-match'); } catch {}
   }
   function saveActiveMatch(launchState = null) {
-    if (inDiscord && (demo || online?.active)) return;
+    if (inDiscord) return;
     if (demo || online?.active || phase === 'over' || !recording) {
       clearActiveMatch();
       return;
@@ -1124,6 +1115,7 @@
     }
   }
   function newMatch(playJingle = false, team = draft) {
+    if (typeof clearReplayViewer === 'function') clearReplayViewer();
     authoritativeBodies = null;
     endGoalReplay(); playSegments = []; saveRecording();
     fieldView.mode = cpuMode;
@@ -1156,7 +1148,7 @@
     const arrow = own.findIndex((b, i) => { const a = impulseGeometry(b, plans[i]); return a.visible && near(a); });
     if (arrow >= 0) return { mode: 'arrow', index: arrow };
     const p = point(event);
-    return { mode: 'aim', index: own.findIndex(b => !b.stunned && Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12) };
+    return { mode: 'aim', index: own.findIndex(b => !b.stunned && !b.carded && Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12) };
   }
   // The rink's box within the stage and the spin control's size, measured only when layout changes
   // (and without the rink shake), so placing the control never forces the page to lay out again.
@@ -1234,7 +1226,7 @@
       rinkWrap.style.transform = '';
     }
   }
-  function draw(exportSession = null) {
+  function draw() {
     if (layoutDirty && !fieldView.field) {
       const w0 = fieldView.canvas.clientWidth, h0 = fieldView.canvas.clientHeight;
       fitStadium();
@@ -1245,7 +1237,7 @@
     }
     if (!fieldView.field) positionSpinControl();
     themeColors = presenter.getThemeColors();
-    presenter.drawScene(exportSession);
+    presenter.drawScene();
     if (!fieldView.field) updateFoulInfo();
   }
   function recordSegment(source, turnPlans, ticks = 0, saves = [], stops = []) {
@@ -1291,7 +1283,7 @@
     super: (key, stage, body, target = null) => { syncReplay(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
   };
   function restartGoalReplay() {
-    Object.assign(goalReplay, { index: -1, played: 0, steps: 0, doneAt: 0, loops: (goalReplay.loops || 0) + 1 });
+    Object.assign(goalReplay, { index: -1, played: 0, steps: 0, doneAt: 0, doneHoldMs: 0, loops: (goalReplay.loops || 0) + 1 });
     clearEffects(); nextReplaySegment();
   }
   function nextReplaySegment() {
@@ -1312,15 +1304,16 @@
     endGoalReplay();
     const scorer = fieldView.bodies.indexOf(scoringPlayer);
     goalReplay = { segments, total: segments.reduce((n, s) => n + s.ticks, 0),
-      seat: online?.active ? online.state.seat : 0, scorer, started: performance.now() };
+      seat: online?.active ? online.state.seat : 0, scorer, started: performance.now(), elapsedMs: 0 };
     scoringPlayer = fieldView.bodies[scorer] || null;
     restartGoalReplay(); draw();
   }
   // The replay loops until the next kickoff (or, online, until the server moves on).
   function advanceGoalReplay(delta) {
     const r = goalReplay;
+    r.elapsedMs = (r.elapsedMs || 0) + delta * 1000;
     if (clockNow() < hitStopUntil) { draw(); return; }
-    if (r.doneAt && performance.now() >= r.doneAt) {
+    if (online?.active ? (r.doneAt && performance.now() >= r.doneAt) : (r.doneHoldMs > 0 && (r.doneHoldMs -= delta * 1000) <= 0)) {
       restartGoalReplay();
       draw();
       return;
@@ -1336,7 +1329,7 @@
         r.tick++; r.played++;
         replayEvents(r.segments[r.index], r.tick, r.sim);
         syncReplay(); recordTrails();
-        if (r.played >= r.total) r.doneAt = performance.now() + ububallMatch.GOAL_REPLAY_HOLD;
+        if (r.played >= r.total) { r.doneAt = performance.now() + ububallMatch.GOAL_REPLAY_HOLD; r.doneHoldMs = ububallMatch.GOAL_REPLAY_HOLD; }
         if (clockNow() < hitStopUntil) { r.steps = 0; break; }
       } else {
         P.stepPostGoal(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super);
@@ -1349,6 +1342,7 @@
   }
   function endGoalReplay() {
     goalReplayAt = 0;
+    if (typeof goalReplayDelayMs !== 'undefined') goalReplayDelayMs = 0;
     if (!goalReplay) return;
     scoringPlayer = fieldView.bodies[goalReplay.scorer] || null;
     goalReplay = null;
@@ -1363,14 +1357,35 @@
   // .ububall file and a summary for the list, with names and scores in rink order.
   const replayStore = (() => {
     let db = null;
-    const open = () => db ||= new Promise((resolve, reject) => {
-      const request = indexedDB.open('ububall', 1);
-      request.onupgradeneeded = () => request.result.createObjectStore('replays', { keyPath: 'id', autoIncrement: true });
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => { db = null; reject(request.error); };
-    });
+    const open = () => {
+      if (!db) {
+        db = new Promise((resolve, reject) => {
+          if (typeof indexedDB === 'undefined' || !indexedDB) {
+            reject(new Error('Replays cannot be saved in this browser.'));
+            return;
+          }
+          const request = indexedDB.open('ububall', 1);
+          request.onupgradeneeded = () => request.result.createObjectStore('replays', { keyPath: 'id', autoIncrement: true });
+          request.onsuccess = () => {
+            const handle = request.result;
+            handle.onversionchange = () => { handle.close(); db = null; };
+            handle.onclose = () => { db = null; };
+            resolve(handle);
+          };
+          request.onerror = () => { db = null; reject(request.error || new Error('Replays cannot be saved in this browser.')); };
+          request.onblocked = () => { db = null; reject(new Error('Replay storage is busy in another tab.')); };
+        }).catch(error => {
+          db = null;
+          throw error;
+        });
+      }
+      return db;
+    };
     async function run(mode, work) {
-      const tx = (await open()).transaction('replays', mode), request = work(tx.objectStore('replays'));
+      let handle = await open(), tx;
+      try { tx = handle.transaction('replays', mode); }
+      catch { db = null; handle = await open(); tx = handle.transaction('replays', mode); }
+      const request = work(tx.objectStore('replays'));
       return new Promise((resolve, reject) => { tx.oncomplete = () => resolve(request.result); tx.onerror = tx.onabort = () => reject(tx.error); });
     }
     return {
@@ -1409,7 +1424,7 @@
       final: Boolean(r.final), turns: r.turns.length, auto, pinned: false, file };
   }
   addEventListener('pagehide', () => {
-    if (online?.active || phase === 'over' || !recording) saveRecording();
+    if (recording && !demo && (online?.active || inDiscord)) saveRecording();
   });
   // Completes the local turn just played.
   function noteTurn(ticks, goal, cards) {
@@ -1446,12 +1461,10 @@
   const replayClock = ticks => { const sec = Math.floor(ticks * P.DT); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
   function watchReplay(replay, file) {
     saveRecording(); stopDemo(); closeSummary(); endGoalReplay(); stopFanfare(); gameAudio()?.stop();
-    cpuGeneration++; cpuClient.cancel(); videoLogo();
+    cpuGeneration++; cpuClient.cancel(); cpuClient.dispose?.(); videoLogo();
     const seat = replay.seat, names = seat ? [...replay.names].reverse() : replay.names;
     fieldView.mode = replay.mode; document.body.classList.toggle('classic-match', classicMode()); showMode(fieldView.mode);
-    fieldView.entries = onlineOrder(replay.ubus.map(u => ({ model: ubu.decode(ubu.fromCode(u.dna)), dna: u.dna, equippedSuper: u.super === null ? null : P.SUPERS[u.super] })), seat);
-    // A replay without names calls its ubus by team and place.
-    if (replay.anonymous) fieldView.entries.forEach((entry, i) => { entry.model.parts = { ...entry.model.parts, fullName: anonymousName(i) }; });
+    fieldView.entries = onlineOrder(replay.ubus, seat).map((u, i) => replayEntry(u, i, Boolean(replay.anonymous)));
     stats = fieldView.entries.map(entry => classicMode() ? normalStats() : { ...entry.model.stats });
     $('home-label').textContent = names[0]; $('opponent-label').textContent = names[1]; $('opponent-heading').textContent = `${names[1]}'s team`;
     fieldView.bodies = kickoff(true); buildTeam(); phase = 'replay'; selected = 0; drag = null;
@@ -1461,12 +1474,24 @@
     say(`Replay · ${names[0]} vs ${names[1]} · ${new Date(replay.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`);
     replayMarks(); enterMatch(); seekReplay(0, theater);
   }
-  // Leaves the viewer for a fresh match.
+  function clearReplayViewer() {
+    if (!theater) return false;
+    theater = null; document.body.classList.remove('replay-match');
+    stopFanfare(); gameAudio()?.stop?.(); clearEffects();
+    return true;
+  }
   function endReplay() {
-    if (!theater) return;
-    theater = null; document.body.classList.remove('replay-match'); clearEffects();
+    if (!clearReplayViewer()) return;
     $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
-    newMatch();
+    phase = 'over'; recording = null;
+    if (typeof updateHome === 'function') updateHome();
+  }
+  function replayEntry(u, i, anon = false) {
+    const model = typeof ubu !== 'undefined' && u.dna ? ubu.decode(ubu.fromCode(u.dna)) : { parts: { fullName: `Ubu ${i + 1}` }, attributes: {}, stats: typeof normalStats === 'function' ? normalStats() : {} };
+    if (anon) model.parts = { ...model.parts, fullName: anonymousName(i) };
+    const base = u.super === null || u.super === undefined ? null : P.SUPERS[u.super];
+    const equippedSuper = base ? { ...base, ...(P.superMastery ? P.superMastery(model.supers, u.super) : {}) } : null;
+    return { key: `replay-${i}`, label: 'Replay ubu', model, dna: u.dna, equippedSuper };
   }
   function createReplaySession(replay, { file = null, speed = 1, paused = false, anonymous = false, exporting = false, clock = null, audio = null, field = null } = {}) {
     const seat = replay.seat ?? 0, anon = Boolean(anonymous || replay.anonymous);
@@ -1475,13 +1500,10 @@
     const liveEntries = typeof fieldView.entries !== 'undefined' ? fieldView.entries : null;
     const reuseLive = Array.isArray(liveEntries) && liveEntries.length === orderedUbus.length && orderedUbus.every((u, i) => liveEntries[i]?.dna === u.dna && (liveEntries[i]?.equippedSuper?.id ?? null) === (u.super ?? null));
     const entries = reuseLive ? liveEntries.map((entry, i) => {
-      if (!anon) return entry;
-      return { ...entry, model: { ...entry.model, parts: { ...entry.model.parts, fullName: anonymousName(i) } } };
-    }) : orderedUbus.map((u, i) => {
-      const model = typeof ubu !== 'undefined' && u.dna ? ubu.decode(ubu.fromCode(u.dna)) : { parts: { fullName: `Ubu ${i + 1}` }, attributes: {}, stats: typeof normalStats === 'function' ? normalStats() : {} };
-      if (anon) model.parts = { ...model.parts, fullName: anonymousName(i) };
-      return { model, dna: u.dna, equippedSuper: u.super === null || u.super === undefined ? null : P.SUPERS[u.super] };
-    });
+      const base = entry.key ? entry : { ...entry, key: `replay-${i}`, label: 'Replay ubu' };
+      if (!anon) return base;
+      return { ...base, model: { ...base.model, parts: { ...base.model.parts, fullName: anonymousName(i) } } };
+    }) : orderedUbus.map((u, i) => replayEntry(u, i, anon));
     const canCanvas = exporting && typeof document !== 'undefined' && typeof document.createElement === 'function';
     const offscreen = canCanvas ? document.createElement('canvas') : null;
     const offscreenBadges = canCanvas ? document.createElement('canvas') : null;
@@ -1578,7 +1600,7 @@
       const target = Math.min(at - th.starts[k], turns[k].ticks), span = Math.min(target, Math.round(SEEK_EFFECTS / P.DT));
       while (th.tick < target - span) stepReplay(false, th);
       th.holdUntil = 0; th.steps = 0;
-      clearEffects(); syncReplay(th);
+      stopFanfare(); clearEffects(); syncReplay(th);
       // The last moment before `at` plays with its effects, silently, so the field shows its motion trails,
       // contact effects and spin as they were then.
       if (span) {
@@ -1600,7 +1622,7 @@
         if (typeof shownScores !== 'undefined') shownScores.splice(0, 2, ...scores);
         sync(); updateReplayBar();
       }
-      draw(th.exporting ? th : null);
+      draw();
     });
   }
   const SEEK_EFFECTS = .4;
@@ -1637,8 +1659,8 @@
       fieldEffects.goalCall.name = [`${th.scores[0]}–${th.scores[1]}`, deficit >= 3 && 'Comeback from 3 down!', !th.scores[1 - team] && 'Shutout!'].filter(Boolean).join(' · ');
       return false;
     }
-    if (th.index + 1 >= th.replay.turns.length) { th.paused = true; th.steps = 0; return false; }
-    if (t.goal) clearEffects();
+    if (th.index + 1 >= th.replay.turns.length) { stopFanfare(); if (typeof quench === 'function') quench(); th.paused = true; th.steps = 0; return false; }
+    if (t.goal) { stopFanfare(); clearEffects(); }
     const before = trailPositions();
     loadReplayTurn(th.index + 1, true); syncReplay();
     clearDiscontinuousTrails(before);
@@ -1661,7 +1683,7 @@
         emitSkaterEffects(delta * th.speed);
       }
       if (!th.exporting) updateReplayBar();
-      draw(th.exporting ? th : null);
+      draw();
     });
   }
   function updateReplayBar() {
@@ -1697,7 +1719,9 @@
     const th = theater;
     if (!th) return;
     if (th.paused && th.index === th.replay.turns.length - 1 && th.tick >= th.replay.turns[th.index].ticks) seekReplay(0);
-    th.paused = !th.paused; th.steps = 0; updateReplayBar();
+    th.paused = !th.paused; th.steps = 0;
+    if (th.paused) { stopFanfare(); if (typeof quench === 'function') quench(); }
+    updateReplayBar();
   };
   $('replay-prev').onclick = () => { const th = theater; if (th) seekReplay(th.starts[Math.max(0, th.tick > 120 ? th.index : th.index - 1)]); };
   $('replay-next').onclick = () => { const th = theater; if (th && th.index + 1 < th.replay.turns.length) seekReplay(th.starts[th.index + 1]); };
@@ -1731,7 +1755,7 @@
       playSave: o => A.playSave?.(into(o)), playFirework: o => A.playFirework?.(into(o)),
       playWallHit: o => A.playWallHit(into(o)), playGoalHit: (type, o) => A.playGoalHit(type, into(o)), playSuper: (key, phase, o) => A.playSuper(key, phase, into(o)),
       playSizzle: o => A.playSizzle(into(o)), playFoul: (kind, o) => A.playFoul(kind, into(o)),
-      playIronSave: o => A.playIronSave?.(into(o)), playFanfare: (voice, notes, time, o) => A.playFanfare?.(voice, notes, time, into(o)) };
+      playIronSave: o => A.playIronSave?.(into(o)), playFanfare: (voice, _customCtx, onNote, o) => A.playFanfare?.(voice, ctx, onNote || null, { ...o, loop: false }) };
   }
   // Videos and share cards carry the ububall.com logo, loaded the first time one is made.
   let videoLogoImage = null;
@@ -1779,18 +1803,21 @@
     const scale = width / 1000, fieldCanvas = th?.canvas || fieldView.canvas, fieldBadges = th?.badgeCanvas || fieldView.badgeCanvas, view = th?.bodies || fieldView.bodies;
     v.drawImage(fieldCanvas, x, y, width, height);
     view.slice(0, 6).forEach((b, i) => {
-      const sprite = skaters[i]?.firstChild;
+      const entry = th?.entries?.[i], liveEntry = fieldView.entries?.[i];
+      const sprite = (!th || !entry || liveEntry?.dna === entry.dna) ? skaters[i]?.firstChild : null;
       const size = 2 * b.radius * scale;
       v.save();
       v.globalAlpha = b.carded ? .3 : b.superActive === 'ghost' ? .45 : 1;
       if ((b.stunned || b.stunnedNext) && !b.carded) v.filter = 'grayscale(0.8) brightness(0.7)';
       v.translate(x + b.x * scale, y + b.y * scale); v.rotate(b.rotation);
-      if (sprite instanceof HTMLCanvasElement || (typeof HTMLImageElement !== 'undefined' && sprite instanceof HTMLImageElement)) {
+      const readyCanvas = typeof HTMLCanvasElement !== 'undefined' && sprite instanceof HTMLCanvasElement && sprite.width > 0;
+      const readyImage = typeof HTMLImageElement !== 'undefined' && sprite instanceof HTMLImageElement && sprite.complete && sprite.naturalWidth > 0;
+      if (readyCanvas || readyImage) {
         v.drawImage(sprite, -size / 2, -size / 2, size, size);
       } else {
         v.beginPath();
         v.arc(0, 0, size / 2, 0, Math.PI * 2);
-        v.fillStyle = i < 3 ? '#00e5ff' : '#ff4d6d';
+        v.fillStyle = i < 3 ? (themeColors?.home || '#00e5ff') : (themeColors?.away || '#ff4d6d');
         v.fill();
       }
       v.restore();
@@ -1833,7 +1860,7 @@
   async function exportVideo(slice) {
     const dialog = $('export-dialog'), status = $('export-status'), progress = $('export-progress'), close = $('export-close');
     videoCancelled = false; exportingVideo = true; progress.value = 0; progress.hidden = false; status.textContent = 'Preparing…';
-    let session = null, encoder = null, blob = null, stopAudio = null;
+    let session = null, out = null, encoder = null, blob = null, stopAudio = null;
     try {
       let config = null;
       search: for (const codec of ['avc1.64002A', 'avc1.4D402A', 'avc1.42E02A']) {
@@ -1844,7 +1871,7 @@
         }
       }
       if (!videoCancelled && !config) { status.textContent = 'This browser cannot encode MP4 video.'; progress.hidden = true; close.textContent = 'Close'; return; }
-      if (!videoCancelled) await videoLogo();
+      if (!videoCancelled) await Promise.all([videoLogo(), ...skaters.map(node => node?.firstChild?.decode?.().catch(() => {}))]);
       if (!videoCancelled) {
         session = createReplaySession(slice.replay, {
           file: slice.file,
@@ -1868,7 +1895,7 @@
           progress.hidden = true; close.textContent = 'Close'; return;
         }
         const offline = new OfflineAudioContext(2, Math.ceil(frameBudget / VIDEO.fps * rate), rate);
-        const out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
+        out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
         const v = out.getContext('2d'), samples = [];
         let description = null, failure = null, wakeQueue = null;
         const wake = () => { if (wakeQueue) { const fn = wakeQueue; wakeQueue = null; fn(); } };
@@ -1940,9 +1967,14 @@
       status.textContent = `The video could not be made: ${error.message}`;
     } finally {
       cancelVideo = null;
+      stopFanfare();
       stopAudio?.();
       if (encoder && encoder.state !== 'closed') encoder.close();
       if (session?.fx?.sizzle) { session.fx.sizzle.stop?.(); session.fx.sizzle = null; }
+      if (out) { out.width = 0; out.height = 0; }
+      if (session?.canvas) { session.canvas.width = 0; session.canvas.height = 0; }
+      if (session?.badgeCanvas) { session.badgeCanvas.width = 0; session.badgeCanvas.height = 0; }
+      if (session?.scorebug?.layer) { session.scorebug.layer.width = 0; session.scorebug.layer.height = 0; }
       exportingVideo = false;
     }
     close.textContent = 'Close';
@@ -2062,12 +2094,15 @@
     g.fillText(CARD.tagline, CARD.width / 2, fieldBottom + 100 + logoHeight + 30);
     // Encoding starts now so sharing does not wait on it.
     const name = `${replayFileName(th.replay.recorded, hidden ? null : th.replay.title)}-turn-${cardTurn}.png`;
-    cardImage = new Promise(resolve => out.toBlob(blob => resolve(new File([blob], name, { type: 'image/png' })), 'image/png'));
+    cardImage = new Promise((resolve, reject) => out.toBlob(blob => {
+      if (blob) resolve(new File([blob], name, { type: 'image/png' }));
+      else reject(new Error('Could not create share card image.'));
+    }, 'image/png'));
   }
   async function openShare() {
     const th = theater;
     if (!th || isExporting()) return;
-    await Promise.all([videoLogo(), document.fonts.load(`40px 'Uburoom Sans'`).catch(() => {})]);
+    await Promise.all([videoLogo(), document.fonts.load(`40px 'Uburoom Sans'`).catch(() => {}), ...skaters.map(node => node?.firstChild?.decode?.().catch(() => {}))]);
     if (theater !== th || isExporting()) return;
     $('share-private').closest('label').hidden = th.replay.anonymous;
     try { $('share-private').checked = localStorage.getItem('ububall-export-private') === 'on'; } catch {}
@@ -2087,8 +2122,10 @@
     try { await navigator.share({ files: [await cardImage], text: 'A moment from ububall. Play at https://ububall.com' }); } catch {}
   };
   $('share-save').onclick = async () => {
-    const file = await cardImage, link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: file.name });
-    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+    try {
+      const file = await cardImage, link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: file.name });
+      link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+    } catch {}
   };
   $('share-close').onclick = () => $('share-dialog').close();
   // Closing while a video renders cancels it.
@@ -2147,7 +2184,10 @@
       delete b.meterTick;
       if (i < 6) {
         b.personality = entries[i]?.model?.personality;
-        const sObj = classicMode() ? null : (entries[i]?.equippedSuper || resolveEquippedSuper(entries[i], i));
+        const rawSuper = entries[i]?.equippedSuper;
+        const sObj = classicMode() ? null : (rawSuper
+          ? (rawSuper.bonusTicks !== undefined ? rawSuper : { ...rawSuper, ...(P.superMastery ? P.superMastery(entries[i]?.model?.supers, rawSuper.id) : {}) })
+          : resolveEquippedSuper(entries[i], i));
         b.equippedSuper = sObj ? { id: sObj.id, key: sObj.key, bonusTicks: sObj.bonusTicks || 0, bonusRefund: sObj.bonusRefund || 0 } : null;
         b.superBonusTicks = sObj?.bonusTicks || 0;
         b.superBonusRefund = sObj?.bonusRefund || 0;
@@ -2156,7 +2196,7 @@
     stopFanfare(); gameAudio()?.stop();
     theater = null; document.body.classList.remove('replay-match'); clearEffects();
     $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
-    roster = entries.slice(0, 3);
+    roster = entries.slice(0, 3).map((e, i) => e.key ? e : { ...e, key: `replay-${i}`, label: e.label || 'Replay ubu' });
     simBodies = field;
     syncViewBodies(simBodies, 0);
     scores = th.seat ? [...t.scores].reverse() : [...t.scores]; turn = t.turn;
@@ -2222,7 +2262,7 @@
   function statsEventText(event, names) {
     const name = i => fieldView.entries[i]?.model.parts.fullName;
     const actor = event.actor === null ? names[event.team] : name(event.actor);
-    const target = event.target == null ? '' : ` → ${name(event.target)}`;
+    const target = event.target == null ? '' : ` to ${name(event.target)}`;
     return `${statsEventLabel(event)} · ${actor}${target}`;
   }
   function statsEventTime(event) {
@@ -2427,7 +2467,7 @@
         entry.className = 'stats-event-entry';
         entry.append(statsEventLabel(event), event.actor === null ? document.createElement('span') : pill(event.actor));
         if (event.actor === null) entry.lastChild.textContent = names[event.team];
-        if (event.target != null) entry.append('→', pill(event.target));
+        if (event.target != null) entry.append(gameUi.icon('arrow-narrow-right'), pill(event.target));
         row.append(time, entry);
         rows.set(event, row);
         list.append(row);
@@ -2523,10 +2563,12 @@
 
     let winner = null;
     if (isGame) {
-      winner = online?.active ? (online.state.winner === online.state.seat ? 0 : 1) : (scores[0] > scores[1] ? 0 : 1);
+      winner = online?.active
+        ? (online.state.winner == null ? null : online.state.winner === online.state.seat ? 0 : 1)
+        : (scores[0] === scores[1] ? null : scores[0] > scores[1] ? 0 : 1);
     } else if (ctx.theater?.replay?.final) {
       const fin = ctx.theater.replay.final;
-      winner = ctx.theater.seat ? 1 - fin.winner : fin.winner;
+      winner = fin.winner == null ? null : (ctx.theater.seat ? 1 - fin.winner : fin.winner);
     } else {
       winner = scores[0] > scores[1] ? 0 : scores[1] > scores[0] ? 1 : null;
     }
@@ -2660,7 +2702,7 @@
   }
   function downloadReplay(file, recorded, title = null) {
     const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([file], { type: 'application/gzip' })), download: `${replayFileName(recorded, title)}.ububall` });
-    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
   }
   async function openReplay(id) {
     if (online?.active) { replaysNote('Leave your online match to watch a replay.'); return; }
@@ -2701,10 +2743,12 @@
   async function listReplays(problem = '') {
     const list = $('replays-list');
     let entries;
-    try { entries = await replayStore.all(); } catch { replaysNote('Replays cannot be saved in this browser.'); return; }
-    const stale = entries.filter(e => e.physics !== P.VERSION || e.format !== ububallReplay.FORMAT);
-    await Promise.all(stale.map(e => replayStore.remove(e.id)));
-    entries = entries.filter(e => !stale.includes(e)).sort((a, b) => b.pinned - a.pinned || b.id - a.id);
+    try {
+      entries = await replayStore.all();
+      const stale = entries.filter(e => e.physics !== P.VERSION || e.format !== ububallReplay.FORMAT);
+      if (stale.length) await Promise.all(stale.map(e => replayStore.remove(e.id)));
+      entries = entries.filter(e => !stale.includes(e)).sort((a, b) => b.pinned - a.pinned || b.id - a.id);
+    } catch { replaysNote('Replays cannot be saved in this browser.'); return; }
     replaysNote(problem);
     const undo = $('replays-undo'), last = deletedReplays.at(-1);
     undo.classList.toggle('idle', !last);
@@ -2719,7 +2763,7 @@
     heading.className = 'replay-heading'; name.textContent = e.title || score;
     meta.textContent = [e.title && score, e.clip ? 'Clip' : ububallMatch.modeName(e.mode), new Date(e.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }),
       `${e.turns} turn${e.turns === 1 ? '' : 's'}`, !e.clip && !e.final && 'Unfinished'].filter(Boolean).join(' · ');
-    const pin = iconButton('pin', e.pinned ? 'Unpin' : 'Pin', async () => { await replayStore.put({ ...e, pinned: !e.pinned }); listReplays(); });
+    const pin = iconButton('pin', e.pinned ? 'Unpin' : 'Pin', async () => { try { await replayStore.put({ ...e, pinned: !e.pinned }); listReplays(); } catch (error) { replaysNote(error.message); } });
     pin.setAttribute('aria-pressed', String(Boolean(e.pinned)));
     const rename = () => {
       const input = Object.assign(document.createElement('input'), { value: e.title || '', maxLength: ububallReplay.MAX_TITLE, placeholder: score, className: 'replay-name' });
@@ -2744,14 +2788,18 @@
     heading.append(name, iconButton('edit', 'Rename', rename, 'icon-button replay-rename'));
     const actions = document.createElement('div'); actions.className = 'replay-actions';
     actions.append(pin, iconButton('download', 'Export .ububall', () => downloadReplay(e.file, e.recorded, e.title)),
-      iconButton('trash', 'Delete', async () => { await replayStore.remove(e.id); deletedReplays.push(e); listReplays(); }));
+      iconButton('trash', 'Delete', async () => { try { await replayStore.remove(e.id); deletedReplays.push(e); listReplays(); } catch (error) { replaysNote(error.message); } }));
     item.append(iconButton('play', 'Watch', () => openReplay(e.id), 'icon-button primary replay-watch'), heading, meta, actions);
     return item;
   }
   $('replays-undo').append(iconButton('undo', 'Undo delete', async () => {
-    const entry = deletedReplays.pop();
-    if (entry) await replayStore.put(entry);
-    listReplays();
+    const entry = deletedReplays.at(-1);
+    if (!entry) return;
+    try {
+      await replayStore.put(entry);
+      deletedReplays.pop();
+      listReplays();
+    } catch (error) { replaysNote(error.message); }
   }, 'quiet'));
   $('replays-undo').lastChild.append('Undo');
   // Imported replays are checked like any other and stay until deleted.
@@ -2800,6 +2848,7 @@
       }
       const scorer = fieldView.bodies[call.scorer] || fieldView.bodies.slice(goal * 3, goal * 3 + 3)[0];
       goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY + 800;
+      if (typeof goalReplayDelayMs !== 'undefined') goalReplayDelayMs = ububallMatch.GOAL_REPLAY_DELAY + 800;
       postGoal = { ticks: 0, sim: celebSim };
       scoringPlayer = scorer;
       const scorerName = scorer?.name || (goal === 0 ? 'Your ubu' : 'CPU ubu');
@@ -2858,7 +2907,7 @@
   };
   for (const [id, key, scale] of [['shot-spin', 'spin', .01]]) {
     $(id).oninput = () => {
-      if (phase !== 'plan' || fieldView.bodies[selected].stunned) return;
+      if (!knobEditable(selected)) return;
       plans[selected][key] = Number($(id).value) * scale; plans[selected].guard = false;
       sync(); draw();
       saveActiveMatch();
@@ -2866,7 +2915,7 @@
   }
   for (const [id, delta] of [['spin-less', -.1], ['spin-more', .1]]) {
     $(id).onclick = () => {
-      if (phase !== 'plan' || fieldView.bodies[selected].stunned) return;
+      if (!knobEditable(selected)) return;
       plans[selected].spin = Math.max(-1, Math.min(1, Math.round(((plans[selected].spin || 0) + delta) * 10) / 10)); plans[selected].guard = false;
       sync(); draw();
       saveActiveMatch();
@@ -2910,6 +2959,8 @@
   }, { passive: false });
   let tapGuards = false;
   fieldView.canvas.onpointerdown = event => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (drag !== null) return;
     gameAudio()?.getAudioContext();
     // A warning's explanation opens on a tap; a tap elsewhere only closes it.
     const warning = warningAt(point(event));
@@ -2924,7 +2975,9 @@
     selected = target.index;
     drag = event.pointerId;
     dragMode = target.mode;
-    dragStart = p; dragMoved = false;
+    dragStart = p;
+    dragStartClient = { x: event.clientX, y: event.clientY };
+    dragMoved = false;
     if (dragMode === 'arrow') {
       const arrow = impulseGeometry(fieldView.bodies[selected], plans[selected]);
       arrowGrab = { x: p.x - arrow.x, y: p.y - arrow.y, distance: arrow.distance, power: plans[selected].power };
@@ -2938,13 +2991,14 @@
       if (warningAt(p)) fieldView.canvas.style.cursor = 'pointer';
       else if (phase === 'plan') {
         const target = fieldTarget(event);
-        fieldView.canvas.style.cursor = target.index < 0 ? 'default' : target.mode === 'super' ? 'pointer' : target.mode === 'arrow' ? 'grab' : 'crosshair';
+        fieldView.canvas.style.cursor = target.index < 0 ? 'default' : target.mode === 'arrow' ? 'grab' : 'crosshair';
       }
       return;
     }
     const b = fieldView.bodies[selected];
-    // A tap toggles guard; aiming starts once the pointer leaves the tap radius.
-    if (!dragMoved && Math.hypot(p.x - dragStart.x, p.y - dragStart.y) < 6) return;
+    // A tap toggles guard; aiming starts once the pointer leaves the tap radius in screen pixels.
+    const tapRadius = (event.pointerType === 'mouse' ? 5 : 12) * gameUi.scale();
+    if (!dragMoved && dragStartClient && Math.hypot(event.clientX - dragStartClient.x, event.clientY - dragStartClient.y) < tapRadius) return;
     dragMoved = true; plans[selected].guard = false;
     if (dragMode === 'arrow') {
       const dx = p.x - arrowGrab.x - b.x, dy = p.y - arrowGrab.y - b.y;
@@ -2962,15 +3016,25 @@
 
     dragDirty = true;
   };
-  fieldView.canvas.onpointerup = fieldView.canvas.onpointercancel = event => {
-    if (event.type === 'pointerup' && drag === event.pointerId && dragMode === 'aim' && !dragMoved && tapGuards) toggleGuard(selected);
+  function endCanvasDrag() {
     arrowGrab = null;
     drag = null;
+    dragStart = null;
+    dragStartClient = null;
     dragMode = null;
     dragDirty = false;
     if (phase === 'plan') saveActiveMatch();
     updateFirstTurnGuide();
     sync(); draw();
+  }
+  fieldView.canvas.onpointerup = fieldView.canvas.onpointercancel = event => {
+    if (drag !== event.pointerId) return;
+    if (event.type === 'pointerup' && dragMode === 'aim' && !dragMoved && tapGuards) toggleGuard(selected);
+    endCanvasDrag();
+  };
+  fieldView.canvas.onlostpointercapture = event => {
+    if (drag !== event.pointerId) return;
+    endCanvasDrag();
   };
   const liveSim = () => postGoal?.sim ?? simBodies;
   const liveView = cb => toViewBody(cb, liveSim(), 0);
@@ -2991,7 +3055,8 @@
     const requested = online?.active && online.state.playUntil !== null;
     const final = online?.active ? online.state.game.winner !== null : phase === 'over';
     const label = requested ? 'Continuing after replay…' : final ? 'Tap for results' : 'Tap for next round';
-    const hideHint = !requested && replay.loops < 2 && performance.now() - replay.started < 3000;
+    const shownMs = online?.active ? performance.now() - replay.started : (replay.elapsedMs ?? (performance.now() - replay.started));
+    const hideHint = !requested && replay.loops < 2 && shownMs < 3000;
     if (replaySkipHint.hidden !== hideHint) replaySkipHint.hidden = hideHint;
     if (replaySkipHint.textContent !== label) replaySkipHint.textContent = label;
   }
@@ -3018,11 +3083,19 @@
       if (goalReplay) { if (active) advanceGoalReplay(delta); }
       else if (onlineReplay && active) playOnlineReplay();
     } else if (active && blitzMode() && phase === 'plan' && performance.now() >= planDeadline) $('launch').click();
-    if (goalReplayAt && performance.now() >= goalReplayAt) {
-      goalReplayAt = 0;
-      // The winner is announced once the goal call has cleared (the demo does so after its replays).
-      if (phase === 'over' && !demo && !online?.active) banner(scores[0] > scores[1] ? 'You win!' : 'CPU wins!', 3500, scores[0] > scores[1] ? 'home' : 'away');
-      startGoalReplay();
+    if (online?.active) {
+      if (goalReplayAt && performance.now() >= goalReplayAt) {
+        goalReplayAt = 0;
+        startGoalReplay();
+      }
+    } else if (goalReplayAt) {
+      if (active) goalReplayDelayMs -= delta * 1000;
+      if (active && goalReplayDelayMs <= 0) {
+        goalReplayAt = 0; goalReplayDelayMs = 0;
+        // The winner is announced once the goal call has cleared (the demo does so after its replays).
+        if (phase === 'over' && !demo) banner(scores[0] > scores[1] ? 'You win!' : 'CPU wins!', 3500, scores[0] > scores[1] ? 'home' : 'away');
+        startGoalReplay();
+      }
     }
     if ((goalReplay && !demo) || !replaySkip.hidden) updateReplaySkip(goalReplay);
     if (!active) { lastTime = 0; accumulator = 0; }
@@ -3382,7 +3455,7 @@
     return favorites.length === 3 ? favorites : null;
   }
   // Signing in, or gaining a first team, replaces a guest team with the account's own.
-  const onGuestTeam = () => roster.every(entry => entry.key.startsWith('guest-'));
+  const onGuestTeam = () => roster.length > 0 && roster.every(entry => Boolean(entry?.key?.startsWith('guest-')));
   async function adoptAccountTeam() {
     if (!signedIn() || online?.active || !onGuestTeam()) return;
     const entries = await accountTeam();
@@ -3506,8 +3579,9 @@
       setupFor = 'lobby'; rosterSlot = 0;
       if (view.guestTeam) draft = lobbyEntries(view.guestTeam);
       else {
-        await ownTeamReady(); // The server opened any signup pack as this seat was taken.
+        const readyOk = await ownTeamReady(); // The server opened any signup pack as this seat was taken.
         if (gen !== lobbyGeneration || setupFor !== 'lobby' || lobbyView !== view) return;
+        if (!readyOk) { await online?.leave(); return; }
         draft = roster.every(entry => ubuList.get(entry.key)?.model) ? roster.map(entry => ({ ...entry })) : [null, null, null];
         if (draft.some(d => !d) && signedIn()) {
           try {
@@ -3612,8 +3686,9 @@
     } finally { button.disabled = false; }
   }
   function startCpuMatch(team, mode, level) {
+    clearReplayViewer();
     stopDemo();
-    draft = team.map(entry => ({ ...entry }));
+    draft = team.map((entry, idx) => ({ ...entry, key: entry.key || `custom-${idx}`, label: entry.label || 'Custom ubu' }));
     roster = [...draft];
     rememberTeam();
     cpuMode = mode;
@@ -3621,7 +3696,7 @@
     lastCpuSetup = {
       mode, level,
       team: draft.map(({ key, dna, label, equippedSuper }) => ({
-        key, dna: key.startsWith('guest-') ? dna : undefined, label, equippedSuper: equippedSuper ? { id: equippedSuper.id } : null
+        key, dna: !ubuList.get(key)?.model ? dna : undefined, label, equippedSuper: equippedSuper ? { id: equippedSuper.id } : null
       }))
     };
     try { localStorage.setItem(quickPlayKey, JSON.stringify(lastCpuSetup)); } catch {}
@@ -3645,7 +3720,7 @@
   if (hudSuperBtn) {
     hudSuperBtn.onclick = () => {
       const b = fieldView.bodies[selected];
-      if (!classicMode() && b && b.meter >= 100 && phase === 'plan' && !b.stunned) {
+      if (!classicMode() && b && b.meter >= 100 && knobEditable(selected)) {
         b.superArm = !b.superArm;
         dirtyPrediction();
         sync(); draw();
@@ -3833,19 +3908,28 @@
   }
   function exitMatchMode() {
     closeFirstTurnGuide();
-    if ($('match-help').open) $('match-help').close();
-    if ($('pause-menu').open) $('pause-menu').close();
+    closeFoulInfo();
+    closeSummary();
+    if (isExporting()) { videoCancelled = true; cancelVideo?.(); }
+    for (const dialogId of ['match-help', 'pause-menu', 'replays-dialog', 'export-dialog', 'share-dialog', 'roster-dialog']) {
+      if ($(dialogId)?.open) $(dialogId).close();
+    }
+    if (statDrawer.matches(':popover-open')) statDrawer.hidePopover();
     endReplay();
+    if (!matchInProgress()) cpuClient.dispose?.();
+    if (location.pathname !== '/') demoClient.dispose?.();
     if (!inMatch) return;
     inMatch = false; document.body.classList.remove('in-match');
     void exitOwnedFullscreen();
     setPortrait(false); updateFullscreenUI(); updateHome();
-    if (!matchInProgress()) startDemo();
+    if (!matchInProgress() && location.pathname === '/') startDemo();
   }
   function openPause() {
-    $('pause-title').textContent = online?.spectating ? 'Watching' : online?.active ? online.state.matchKind === 'online' ? 'Online match' : 'Friend match' : 'CPU match';
-    $('pause-resume').textContent = online?.spectating ? 'Resume watching' : online?.active ? 'Resume match' : 'Resume CPU match';
-    $('pause-end-match').hidden = online?.spectating || !(online?.active || matchInProgress());
+    const inReplay = Boolean(theater);
+    $('pause-title').textContent = inReplay ? 'Replay' : online?.spectating ? 'Watching' : online?.active ? online.state.matchKind === 'online' ? 'Online match' : 'Friend match' : 'CPU match';
+    $('pause-resume').textContent = inReplay ? 'Resume replay' : online?.spectating ? 'Resume watching' : online?.active ? 'Resume match' : 'Resume CPU match';
+    $('pause-end-match').hidden = inReplay || online?.spectating || !(online?.active || matchInProgress());
+    $('pause-leave').textContent = inReplay ? 'Exit replay' : 'Back to home';
     $('pause-restart').disabled = $('new-match').disabled;
     $('pause-restart').hidden = Boolean(online?.active);
     if (inDiscord) {
@@ -3862,10 +3946,10 @@
   });
   function finishCpuMatch() {
     saveRecording(); clearActiveMatch();
-    cpuGeneration++; cpuClient.cancel();
+    cpuGeneration++; cpuClient.cancel(); cpuClient.dispose?.();
     draft = [...roster];
     phase = 'over'; drag = null;
-    closeFirstTurnGuide(); endGoalReplay(); stopFanfare(); gameAudio()?.stop();
+    closeFirstTurnGuide(); closeFoulInfo(); endGoalReplay(); stopFanfare(); gameAudio()?.stop();
   }
   function confirmCpuEnd(replacing = false) {
     return gameUi.confirm({
@@ -3915,7 +3999,8 @@
     try {
       if (!await ownTeamReady()) return;
       let team = roster;
-      if (online?.active || (signedIn() && onGuestTeam())) team = signedIn() ? await accountTeam() : guestTeam;
+      const tempTeam = onGuestTeam() || roster.some(entry => !entry?.key || entry.key.startsWith('replay-'));
+      if (online?.active || (signedIn() && tempTeam)) team = signedIn() ? await accountTeam() : guestTeam;
       if (location.pathname === '/' && !$('roster-dialog').open) {
         openSetup('mode', 'cpu', lastCpuSetup?.mode, lastCpuSetup?.level, team || [null, null, null]);
       }
@@ -3932,10 +4017,11 @@
     const button = $('home-play');
     button.disabled = true;
     try {
-      const guestSetup = saved.team.some(entry => entry.key.startsWith('guest-'));
-      if (!guestSetup && signedIn()) await ubuList.load({ refresh: true });
+      const inlineSetup = saved.team.some(entry => Boolean(entry.dna) || entry.key?.startsWith('guest-') || entry.key?.startsWith('replay-') || entry.key?.startsWith('custom-'));
+      const guestSetup = saved.team.every(entry => Boolean(entry.key?.startsWith('guest-')));
+      if (!inlineSetup && signedIn()) await ubuList.load({ refresh: true });
       if (online?.active || matchInProgress() || location.pathname !== '/' || $('roster-dialog').open) return;
-      const team = guestSetup && signedIn() ? roster : saved.team.map(entry => guestSetup ? restoreEntry(entry)
+      const team = guestSetup && signedIn() ? roster : saved.team.map(entry => entry.dna ? restoreEntry(entry)
         : signedIn() ? restoreTeam([{ serial: entry.key, super: entry.equippedSuper?.id ?? null }]).team[0] : null);
       if (team.some(entry => !entry)) throw new Error('Last team unavailable');
       startCpuMatch(team, saved.mode, saved.level);
@@ -3954,6 +4040,27 @@
     else if (online?.spectating) void online.leave().then(exitMatchMode);
     else if (inMatch) { history.pushState({ match: true }, '', location.href); openPause(); }
   });
+  const screenGuard = async nextScreen => {
+    if (nextScreen === 'play') return true;
+    if (online?.active && !(await online.leave())) return false;
+    exitMatchMode();
+    return true;
+  };
+  if (typeof window.setUbuScreenGuard === 'function') window.setUbuScreenGuard(screenGuard);
+  else document.addEventListener('DOMContentLoaded', () => window.setUbuScreenGuard?.(screenGuard), { once: true });
+  document.addEventListener('click', async event => {
+    if (typeof window.setUbuScreenGuard === 'function' || !online?.active) return;
+    const link = event.target.closest('a[href]');
+    if (!link || event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target || link.hasAttribute('download')) return;
+    const url = new URL(link.href, location.origin);
+    if (url.origin !== location.origin || url.pathname === '/') return;
+    if (url.pathname !== '/mint' && url.pathname !== '/collection') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!(await online.leave())) return;
+    exitMatchMode();
+    link.click();
+  }, true);
   window.addEventListener('ubu:screen', event => { if (event.detail !== 'play') exitMatchMode(); else updateHome(); });
   function networkMoves() {
     return plans.map((p, i) => ({ angle: p.angle + (online?.state?.seat ? Math.PI : 0), power: p.power,
@@ -4178,10 +4285,16 @@
   }
   online = ububallOnline({
     async playCpu() { if (await ownTeamReady()) startCpuMatch(roster, 'standard', 'easy'); },
-    cpuActive() { return inDiscord && inMatch && matchInProgress(); },
-    resumeCpu() { $('pause-menu').close(); },
+    cpuActive() { return inDiscord && matchInProgress(); },
+    resumeCpu() { enterMatch(); $('pause-menu').close(); },
     prepareOnline() {
-      if (inDiscord && inMatch && !online?.active && !demo) finishCpuMatch();
+      if (typeof clearReplayViewer === 'function') clearReplayViewer();
+      if (!online?.active && matchInProgress()) finishCpuMatch();
+      stopDemo();
+      cpuClient.cancel(); cpuClient.dispose?.();
+      demoClient.dispose?.();
+      closeFirstTurnGuide();
+      if (typeof closeFoulInfo === 'function') closeFoulInfo();
       $('pause-menu').close(); closeSummary();
     },
     chooseMode(mode) { openSetup('mode', 'online', mode); },
@@ -4193,6 +4306,7 @@
     lobby(view, open) { void showLobby(view, open); },
     closeLobby,
     onState(s) {
+      if (typeof clearReplayViewer === 'function') clearReplayViewer();
       if (!document.body.classList.contains('online-match')) { stopDemo(); endGoalReplay(); stopFanfare(); enterMatch(); }
       document.body.classList.add('online-match');
       $('online-open-label').textContent = s.spectator ? 'Watching a match' : 'Online match';
@@ -4208,12 +4322,19 @@
       const rosterKey = JSON.stringify(s.rosters);
       if (rosterKey !== onlineRoster) {
         onlineRoster = rosterKey;
-        fieldView.entries = onlineOrder(s.rosters.flat(), s.seat).map(entry => {
+        fieldView.entries = onlineOrder(s.rosters.flat(), s.seat).map((entry, idx) => {
           const model = ubu.decode(ubu.fromCode(entry.dna));
           const mastery = P.superMastery(model.supers, entry.superId);
-          return { model, dna: entry.dna, equippedSuper: { ...P.SUPERS[entry.superId], ...mastery } };
+          const serial = entry.serial || null;
+          return {
+            key: serial || `online-${idx}`,
+            label: serial && typeof ubuList !== 'undefined' && ubuList.serialLabel ? ubuList.serialLabel(serial) : 'Online ubu',
+            model,
+            dna: entry.dna,
+            equippedSuper: { ...P.SUPERS[entry.superId], ...mastery }
+          };
         });
-        roster = fieldView.entries.slice(0, 3); buildTeam();
+        buildTeam();
       }
       if (!s.spectator) recordOnline(s);
       const fresh = onlineTurn !== s.turn || onlineDisconnected || (s.phase === 'plan' && onlinePhase !== 'plan');
@@ -4228,13 +4349,14 @@
         const ball = s.game.bodies[6];
         if (s.phase === 'plan' && ball.x === 500 && ball.y === 300) fieldEffects.kickoffGlow = 1;
       }
-      if (s.phase !== 'resolving') { endGoalReplay(); stopFanfare(); }
+      if (s.phase !== 'resolving' || fresh || (onlineReplay && onlineReplay.turn !== s.replay?.turn)) { endGoalReplay(); stopFanfare(); }
       const before = !fresh && !s.replay && !goalReplay ? trailPositions() : null;
       if (!goalReplay) syncViewBodies(s.game.bodies, s.seat);
       if (before) clearDiscontinuousTrails(before);
       if (!s.replay) fouls = viewFouls(s.game.fouls, s.seat);
       stats = onlineOrder(s.game.stats, s.seat);
-      const rawScores = (s.phase === 'resolving' && s.replay?.goal !== null && !s.replay.goalPlayed)
+      const goalAlreadyShown = Boolean(onlineReplay && onlineReplay.turn === s.replay?.turn && onlineReplay.goalPlayed);
+      const rawScores = (s.phase === 'resolving' && s.replay?.goal !== null && !goalAlreadyShown)
         ? s.game.scores.map((sc, gi) => gi === s.replay.goal ? sc - 1 : sc)
         : s.game.scores;
       scores = s.seat ? [...rawScores].reverse() : [...rawScores];
@@ -4306,7 +4428,8 @@
       stopDemo();
       phase = 'over'; drag = null;
       endGoalReplay(); stopFanfare(); gameAudio()?.stop();
-      roster = [...guestTeam]; draft = [...roster];
+      if (!roster.length || roster.some(entry => !entry?.model || (!entry.key?.startsWith('guest-') && !ubuList.get(entry.key)?.model))) roster = [...guestTeam];
+      draft = [...roster];
       exitMatchMode();
       startDemo();
       // A match may have opened the signup pack on the server.
@@ -4406,7 +4529,7 @@
   }
   function stopDemo() {
     if (!demo) return;
-    demo = false; demoRun++; demoClient.cancel(); hideFinger();
+    demo = false; demoRun++; demoClient.cancel(); demoClient.dispose?.(); hideFinger();
     document.body.classList.remove('demo-match');
     $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU';
   }
@@ -4435,7 +4558,7 @@
   // the player's own ubus arrive after sign-in), it stops and the loop starts the new turn's.
   async function demoPlanTurn(run) {
     const game = demoGame, t = turn, current = () => game === demoGame && phase === 'plan' && turn === t;
-    const planning = demoClient.plan({ version: ububallMatch.VERSION, mode: fieldView.mode, bodies: simBodies, stats, scores, turn, fouls },
+    const planning = demoClient.plan({ version: ububallMatch.VERSION, mode: fieldView.mode, bodies: simBodies, stats, scores, turn, fouls, clock: matchTicks, roundTurns, ...ububallMatch.newPlay(play) },
       { level: demoLevels[0], seed: turn }, 0);
     await planBanner; await demoWait(run, 600);
     const result = await planning;

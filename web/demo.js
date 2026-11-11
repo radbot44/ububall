@@ -85,14 +85,17 @@
     }
     if (thumbInView.size && !thumbTicking) { thumbTicking = true; requestAnimationFrame(drainThumbs); }
   }, { rootMargin: '300px' }) : null;
-  function makeThumb(m) {
-    if (!thumbObserver || !renderSVG.spriteImg) return renderSVG.spriteImg ? renderSVG.spriteImg(m, 'ubu-thumb', 256) : renderSVG(m, 'ubu-thumb');
+  function makeThumb(m, onReplaced = null) {
+    if (!thumbObserver || !renderSVG.spriteImg) {
+      return { el: renderSVG.spriteImg ? renderSVG.spriteImg(m, 'ubu-thumb', 256) : renderSVG(m, 'ubu-thumb'), slot: null };
+    }
     const slot = node('span', { class: 'ubu-thumb' });
     thumbDraws.set(slot, () => {
       slot.replaceWith(renderSVG.spriteImg(m, 'ubu-thumb', 256));
+      onReplaced?.();
     });
     thumbObserver.observe(slot);
-    return slot;
+    return { el: slot, slot };
   }
   const panelCards = { storage: new Map(), history: new Map() };
   function syncCardSave(entry, code) {
@@ -110,15 +113,27 @@
     const m = model(code);
     const article = node('article', { class: 'ubu-card' });
     const open = node('button', { type: 'button', class: 'ubu-card-main' });
-    open.append(makeThumb(m), node('span', { class: 'ubu-card-name' }, caption || m.parts.fullName), node('span', { class: 'card-grade', 'data-grade': m.grade }, m.grade));
+    const entry = { article, save: null, slot: null };
+    const thumb = makeThumb(m, () => { entry.slot = null; });
+    entry.slot = thumb.slot;
+    open.append(thumb.el, node('span', { class: 'ubu-card-name' }, caption || m.parts.fullName), node('span', { class: 'card-grade', 'data-grade': m.grade }, m.grade));
     open.addEventListener('click', () => show(code)); article.append(open);
     if (!caption) {
       const save = node('button', { type: 'button', class: 'card-heart' });
       save.addEventListener('click', () => toggle(code)); article.append(save);
-      const entry = { article, save };
+      entry.save = save;
       syncCardSave(entry, code);
       if (cacheMap) {
-        if (cacheMap.size >= LIMIT * 2) cacheMap.delete(cacheMap.keys().next().value);
+        if (cacheMap.size >= LIMIT * 2) {
+          const oldestKey = cacheMap.keys().next().value;
+          const evicted = cacheMap.get(oldestKey);
+          if (evicted?.slot) {
+            thumbInView.delete(evicted.slot);
+            thumbDraws.delete(evicted.slot);
+            thumbObserver?.unobserve(evicted.slot);
+          }
+          cacheMap.delete(oldestKey);
+        }
         cacheMap.set(code, entry);
       }
     }
@@ -218,8 +233,8 @@
   });
   $('random-button').addEventListener('click', () => { generation++; show(ubu.toCode(ubu.randomDNA())); });
   $('favorite-toggle').addEventListener('click', () => toggle(current));
-  $('back-button').addEventListener('click', () => { generation++; show(nav[--navIndex], false); });
-  $('forward-button').addEventListener('click', () => { generation++; show(nav[++navIndex], false); });
+  $('back-button').addEventListener('click', () => { if (navIndex <= 0) return; generation++; show(nav[--navIndex], false); });
+  $('forward-button').addEventListener('click', () => { if (navIndex >= nav.length - 1) return; generation++; show(nav[++navIndex], false); });
   $('voice-play-tone')?.addEventListener('click', () => {
     if (!current) return;
     const m = model(current);

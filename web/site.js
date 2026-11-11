@@ -1,15 +1,22 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id);
-  let config = { ready: false }, session = null, current = null, busy = false;
+  let config = { ready: false }, session = null, current = null, busy = false, picking = false;
   let packScene = null, offer = null;
+  let coinLandTimer = 0;
+  const clearCoinTimer = () => { if (coinLandTimer) { clearTimeout(coinLandTimer); coinLandTimer = 0; } };
+
   const choiceViews = Array.from({ length: 3 }, (_, i) => {
     const card = document.createElement('article'); card.className = 'pack-option';
     const button = document.createElement('button'); button.className = 'candy-pack'; button.disabled = true;
     button.setAttribute('aria-label', `Choose pack ${i + 1}`);
     const canvas = document.createElement('canvas'); canvas.setAttribute('aria-hidden', 'true'); button.append(canvas);
     const sparkle = document.createElement('span'); sparkle.className = 'pack-sparkle'; sparkle.setAttribute('aria-hidden', 'true');
-    for (let s = 0; s < 3; s++) sparkle.append(Object.assign(document.createElement('i'), { textContent: '\u2726' }));
+    for (let s = 0; s < 3; s++) {
+      const slot = document.createElement('i');
+      slot.append(gameUi.icon('sparkles'));
+      sparkle.append(slot);
+    }
     card.style.setProperty('--bob-delay', `${-i * .7}s`);
     card.append(button, sparkle); $('pack-choices').append(card);
     let scene = null;
@@ -36,16 +43,18 @@
     if (busy) return;
     if (pack) { revealIndex = Math.max(0, pack.seen - 1); showReveal(); return; } // Finish the pack in progress first.
     busy = true; view.button.disabled = true; updatePackButton();
+    let persisted = false;
     try {
       const data = await ubuStarter.claim(kind);
       pack = await readPack(data.certificates);
       savePack();
+      persisted = true;
       await view.scene?.play(pack.items.length, pack.items.map(item => item.model));
       revealIndex = 0;
-      showReveal();
+      if (!document.body.classList.contains('in-match')) showReveal();
       status('');
     } catch (error) {
-      pack = null;
+      if (!persisted) pack = null;
       if (await gameUi.confirm({ title: 'Could not open your pack', message: error.message, confirmLabel: 'Retry' })) {
         busy = false; view.button.disabled = false;
         return openStarter(kind, view);
@@ -64,9 +73,9 @@
     $('pack-subtitle').textContent = daily ? 'Tap it to crack it open!' : 'Pick a pack to crack open!';
     if (daily) { $('pack-choices').hidden = true; status('', true); }
     else if (ubuStarter.status && offer) $('pack-choices').hidden = false;
-    else if (ubuStarter.status && !pack && config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey))) void loadChoices();
+    else if (ubuStarter.status && !pack && config.ready && (config.lifetimeLimit || (pendingKey && localStorage.getItem(pendingKey)))) void loadChoices();
   }
-  let outOfPacks = false, dealFailed = false;
+  let outOfPacks = false, dealFailed = false, collectionFailed = false;
   let pack = null, packKey = '', pendingKey = '', revealIndex = 0;
   let viewerView = 'ubu';
   const FAV_STORAGE_KEY = 'ubumint:favorites';
@@ -123,7 +132,7 @@
   async function readPack(certificates, seen = 0) {
     if (!Array.isArray(certificates) || !certificates.length || !Number.isInteger(seen) || seen < 0 || seen > certificates.length) throw new Error('Could not restore your pack. Your mint request is still safe to retry.');
     const items = await Promise.all(certificates.map(async text => {
-      const result = await inspect(text);
+      const result = await ubuFile.read(text, { allowUnsigned: false, resolveKey: ubuList.trustedKey });
       if (result.type !== 'signed') throw new Error('The pack contains an unsigned ubu.');
       const model = ubu.decode(ubu.fromCode(result.dna));
       return { text, result, model, rarity: rarity.scoreRarity(model) };
@@ -143,7 +152,6 @@
     transform: `translate(${x}%, ${y}%) rotateX(${rx}deg) rotateY(${ry}deg) rotate(${r}deg) scale(${sx}, ${sy})`,
     ...(offset === undefined ? {} : { offset })
   });
-  // Short dances a clicked ubu performs, picked at random.
   const UBU_DANCES = [
     // Wiggle: quick side-to-side tilts that settle.
     { duration: 900, frames: [0, -14, 12, -10, 7, -3, 0].map(r => pose({ r })) },
@@ -325,9 +333,10 @@
     const top = document.createElement('div'); top.className = 'card-top';
     const brand = document.createElement('img'); brand.src = 'assets/uburoom-wordmark-brand.svg'; brand.alt = 'uburoom';
     const serialNum = item.result.certificate?.serial || '';
-    const favBtn = createHeartButton(serialNum);
     const serial = document.createElement('span'); serial.textContent = serialNum ? ubuList.serialLabel(serialNum) : '';
-    top.append(brand, favBtn, serial);
+    top.append(brand);
+    if (serialNum && ubuList.get(serialNum)) top.append(createHeartButton(serialNum));
+    top.append(serial);
     // A two-sided coin: the face, and the stamped back that shows when a dance turns it round.
     // Stacked discs between them form a ridged edge, so it turns as a solid disc, not a flat circle.
     const art = document.createElement('div'), ubuArt = document.createElement('div');
@@ -414,10 +423,10 @@
     art.setAttribute('aria-label', `Make ${item.model.parts.fullName} dance`);
     pressable(art, dance);
     const targets = [[statFlip, flipStats], [art, dance]];
-    const rarity = document.createElement('div'); rarity.className = 'card-rarity';
+    const rarityEl = document.createElement('div'); rarityEl.className = 'card-rarity';
     const rarityCaption = document.createElement('span'), rarityValue = document.createElement('strong');
     rarityCaption.textContent = 'Rarity'; rarityValue.textContent = ubuList.rarityScore(item.rarity.percentile);
-    rarity.append(rarityCaption, rarityValue);
+    rarityEl.append(rarityCaption, rarityValue);
     const supers = document.createElement('section'); supers.className = 'card-supers'; supers.setAttribute('aria-label', 'Supers');
     const supersCaption = document.createElement('span'), supersIcons = document.createElement('div');
     supersCaption.textContent = 'Supers';
@@ -435,31 +444,44 @@
       const parsed = ubuAudio.parseVoiceInfo(item.model.voice);
       const fanfare = document.createElement('section'); fanfare.className = 'card-fanfare';
       const heading = document.createElement('h4'), meta = document.createElement('span');
-      heading.textContent = 'Fanfare'; meta.textContent = `${parsed.tempoBpm} BPM · ${parsed.groove}`;
+      const stateIcon = gameUi.icon('player-play');
+      const setFanfarePlaying = playing => {
+        fanfare.classList.toggle('is-playing', playing);
+        fanfare.setAttribute('aria-pressed', String(playing));
+        stateIcon.querySelector('use')?.setAttribute('href', playing ? '#icon-player-stop' : '#icon-player-play');
+      };
+      heading.append(stateIcon, 'Fanfare');
+      meta.textContent = `${parsed.tempoBpm} BPM · ${parsed.groove}`;
       const staff = fanfareStaff(parsed), marks = staff.querySelectorAll('.staff-note');
       heading.append(meta); fanfare.append(heading, staff); side.append(fanfare);
       fanfare.setAttribute('aria-label', 'Play fanfare'); fanfare.setAttribute('aria-pressed', 'false');
       let playback = null;
       const playFanfare = () => {
         if (playback) { playback.stop(); return; }
-        fanfare.classList.add('is-playing'); fanfare.setAttribute('aria-pressed', 'true');
+        if (!ubuAudio.getAudioContext?.()) return;
+        setFanfarePlaying(true);
         playback = ubuAudio.playFanfare(item.model.voice, null, index => {
           marks.forEach((mark, i) => mark.classList.toggle('is-playing', i === index));
           if (index !== -1) return;
-          playback = null; fanfare.classList.remove('is-playing'); fanfare.setAttribute('aria-pressed', 'false');
+          playback = null; setFanfarePlaying(false);
         });
       };
       pressable(fanfare, playFanfare);
       targets.push([fanfare, playFanfare]);
     }
-    // Touch tilting captures the pointer on the card, so hit-test the panels from the card's clicks.
+    // Touch tilting captures the pointer on the card, so hit-test the panels from the card's clicks;
+    // assistive-tech / keyboard synthetic clicks (detail === 0) match the activated target directly.
     card.addEventListener('click', event => {
+      if (event.target.closest?.('.card-heart')) return;
+      if (event.detail === 0) {
+        for (const [el, action] of targets) if (el.contains(event.target)) return action();
+      }
       for (const [el, action] of targets) {
         const box = el.getBoundingClientRect();
         if (event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom) return action();
       }
     });
-    card.append(top, badge, art, name, side, rarity, supers);
+    card.append(top, badge, art, name, side, rarityEl, supers);
     return card;
   }
   function showReveal() {
@@ -470,14 +492,15 @@
     const index = revealIndex, item = pack.items[index];
     const last = index === pack.items.length - 1;
     $('reveal-progress').textContent = `${index + 1} / ${pack.items.length}`;
-    // Render the background first so the visible card owns the shared lighting controller.
+    // Add the revealed ubu to the collection first so heart buttons recognize ownership immediately,
+    // then render the background before the visible card so the visible card owns shared lighting.
+    showMintedItem(item);
     display(item.text, item.result, false);
     $('card-stage').replaceChildren(tradingCard(item));
     $('reveal-dots').replaceChildren(...pack.items.map((_, i) => { const dot = document.createElement('span'); dot.className = i === index ? 'current' : i < pack.seen ? 'seen' : ''; return dot; }));
     $('prev-ubu').disabled = index === 0;
     $('next-ubu').disabled = last;
     $('finish-pack').hidden = pack.seen < pack.items.length;
-    showMintedItem(item);
     if (!$('reveal').open) $('reveal').showModal();
   }
   function navigatePack(direction) {
@@ -492,12 +515,13 @@
       revealIndex = target;
       showReveal();
 
-      if (document.activeElement.disabled) (target === 0 ? $('next-ubu') : $('prev-ubu')).focus();
+      if (document.activeElement?.disabled) (target === 0 ? $('next-ubu') : $('prev-ubu')).focus();
     } catch (error) { $('reveal-progress').textContent = `Could not save your place: ${error.message}`; }
   }
   $('prev-ubu').addEventListener('click', () => navigatePack(-1));
   $('next-ubu').addEventListener('click', () => navigatePack(1));
   $('reveal').addEventListener('keydown', event => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault(); navigatePack(event.key === 'ArrowLeft' ? -1 : 1);
     }
@@ -526,9 +550,10 @@
     $('reveal').close();
   });
   $('reveal').addEventListener('close', () => {
+    window.ubuAudio?.stop();
     if (pack && pack.seen >= pack.items.length) finishPack();
     updatePackButton();
-    $('mint').focus();
+    if (!$('mint').hidden && !$('mint').closest('[hidden]')) $('mint').focus();
   });
   // Collection shares this status line except for pack-only messages.
   const status = (text, packOnly = false) => {
@@ -539,14 +564,18 @@
     $('collection-status').textContent = note;
     $('collection-status').hidden = !note;
   }
-  function collectionRecovery({ packs = false, retry = false } = {}) {
-    $('collection-recovery').hidden = false;
+  function collectionRecovery({ packs = false, retry = false, importFile = false } = {}) {
+    $('collection-recovery').hidden = !(packs || retry || importFile);
     $('collection-packs').hidden = !packs;
     $('collection-retry').hidden = !retry;
+    const recImport = $('recovery-import-wrap');
+    if (recImport) recImport.hidden = !importFile;
   }
-  for (const id of ['mint-retry', 'collection-retry']) $(id).onclick = () => location.reload();
+  $('mint-retry').onclick = () => location.reload();
+  $('collection-retry').onclick = () => { void collection(); };
   async function inspect(text) { return ubuFile.read(text, { resolveKey: ubuList.trustedKey }); }
   function display(text, result, openModal = false) {
+    clearCoinTimer();
     const model = ubu.decode(ubu.fromCode(result.dna));
     const r = window.rarity ? rarity.scoreRarity(model) : null;
     const serial = result.certificate ? result.certificate.serial : null;
@@ -623,6 +652,7 @@
 
   function setViewerView(view) {
     if (!current) return;
+    clearCoinTimer();
     viewerView = view;
     for (const tab of document.querySelectorAll('.viewer-tabs [role="tab"]')) {
       const selected = tab.dataset.view === view;
@@ -688,7 +718,11 @@
         { transform: `translateY(-3%) rotateX(${to}deg) scale(1)`, offset: .9, easing: 'ease-in' },
         { transform: `translateY(0) rotateX(${to}deg) scale(1)` }
       ], { duration, fill: 'forwards' });
-      setTimeout(() => window.ubuAudio?.playCoin('land'), duration * .82);
+      clearCoinTimer();
+      coinLandTimer = setTimeout(() => {
+        coinLandTimer = 0;
+        if (coin.isConnected && $('viewer')?.open) window.ubuAudio?.playCoin('land');
+      }, duration * .82);
       toss.onfinish = () => {
         side = land; coin.style.transform = `rotateX(${land * 180}deg)`; toss.cancel();
         flipping = false; flipButton.disabled = false;
@@ -772,7 +806,7 @@
   }
 
   $('viewer-voice-tone')?.addEventListener('click', () => {
-    if (!current?.model?.voice || !window.ubuAudio) return;
+    if (!current?.model?.voice || !window.ubuAudio?.getAudioContext?.()) return;
     const btn = $('viewer-voice-tone');
     btn.classList.add('is-active');
     window.ubuAudio.playVoice(current.model.voice);
@@ -780,10 +814,10 @@
   });
 
   $('viewer-voice-fanfare')?.addEventListener('click', () => {
-    if (!current?.model?.voice || !window.ubuAudio) return;
+    if (!current?.model?.voice || !window.ubuAudio?.getAudioContext?.()) return;
     const btn = $('viewer-voice-fanfare');
     btn.classList.add('is-active');
-    window.ubuAudio.playFanfare(current.model.voice, null, (index, note) => {
+    window.ubuAudio.playFanfare(current.model.voice, null, index => {
       viewerNoteChips.forEach((chip, i) => {
         chip.classList.toggle('is-playing-note', i === index);
       });
@@ -794,6 +828,7 @@
   });
 
   $('viewer')?.addEventListener('close', () => {
+    clearCoinTimer();
     window.ubuAudio?.stop();
     viewerNoteChips.forEach(chip => chip.classList.remove('is-playing-note'));
     $('viewer-voice-tone')?.classList.remove('is-active');
@@ -806,10 +841,10 @@
     if (!response.ok) { const error = new Error(data.error || 'The mint could not complete this request.'); error.status = response.status; throw error; }
     return data;
   }
-  const post = data => ({ method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf }, body: JSON.stringify(data) });
+  const post = data => ({ method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session?.csrf || '' }, body: JSON.stringify(data) });
 
   // A pack's ubus join the collection as they are revealed; nothing redraws while a pick is in flight.
-  const choosing = () => Boolean(pendingKey && localStorage.getItem(pendingKey + ':choice'));
+  const choosing = () => picking;
   const collectionHidden = () => Boolean(document.querySelector('main[data-screen="collection"]')?.hidden);
   const collectionList = ubuList.mount({
     surface: 'collection', toolbarHost: $('collection-toolbar'), grid: $('ubus'),
@@ -818,10 +853,14 @@
     hidden: item => unseen(item.serial), paused: () => choosing() || collectionHidden(),
     onEmpty: reason => {
       if (session?.owner) {
-        if (reason === 'empty') collectionRecovery({ packs: true });
-        else $('collection-recovery').hidden = true;
+        if (reason === 'empty') {
+          if (collectionFailed) collectionRecovery({ retry: true, importFile: true });
+          else collectionRecovery({ packs: true });
+        } else {
+          collectionRecovery();
+        }
       }
-      if (!reason) return;
+      if (!reason || (reason === 'empty' && collectionFailed)) return;
       const note = document.createElement('p');
       note.textContent = reason === 'filtered' ? 'No ubus match. ' : reason === 'loading' ? 'Loading your ubus…' : 'No revealed ubus.';
       if (reason === 'filtered') {
@@ -853,25 +892,35 @@
     if (choosing()) return;
     try {
       await ubuList.load({ refresh: true });
+      collectionFailed = false;
       collectionStatus('');
+      collectionRecovery();
       collectionList.render();
       $('collection').hidden = false;
     } catch (error) {
+      collectionFailed = true;
       collectionStatus('Could not load collection: ' + error.message);
-      collectionRecovery({ retry: true });
+      collectionRecovery({ retry: true, importFile: true });
     }
   }
 
-  $('import').addEventListener('change', async event => {
+  async function handleImportFile(event) {
     const file = event.target.files[0]; if (!file) return;
     try {
       if (file.size > ubuFile.MAX_BYTES) throw new Error('A .ubu file must contain 1–1024 bytes.');
       const bytes = new Uint8Array(await file.arrayBuffer());
       const result = await inspect(bytes);
-      display(new TextDecoder().decode(bytes), result, true); status('');
-    } catch (error) { status(error.message); }
-    finally { event.target.value = ''; }
-  });
+      display(new TextDecoder().decode(bytes), result, true);
+      if (session?.owner) status('');
+    } catch (error) {
+      if (session?.owner) status(error.message);
+      else void gameUi.confirm({ title: 'Could not open .ubu file', message: error.message, confirmLabel: 'OK', cancelLabel: null });
+    } finally { event.target.value = ''; }
+  }
+  for (const id of ['import', 'signed-out-import', 'recovery-import']) {
+    $(id)?.addEventListener('change', handleImportFile);
+  }
+
   $('download').addEventListener('click', () => {
     if (!current) return;
     const url = URL.createObjectURL(new Blob([current.text], { type: 'application/json' }));
@@ -912,10 +961,17 @@
     try {
       let request = localStorage.getItem(pendingKey);
       if (!request) { request = crypto.randomUUID(); localStorage.setItem(pendingKey, request); }
+      let savedChoice = null;
+      try { savedChoice = JSON.parse(localStorage.getItem(pendingKey + ':choice') || 'null'); } catch {}
       status('');
       const data = await api('/api/packs', post({ request }));
       if (data.completed) {
         await acceptPack(await api('/api/mint', post({ request: data.request })));
+        $('pack-choices').hidden = true;
+        status('Your pack is ready.');
+      } else if (savedChoice?.request === data.request && typeof savedChoice.choice === 'string' &&
+          data.choices?.some(c => c.choice === savedChoice.choice)) {
+        await acceptPack(await api('/api/mint', post({ request: data.request, choice: savedChoice.choice })));
         $('pack-choices').hidden = true;
         status('Your pack is ready.');
       } else {
@@ -927,6 +983,10 @@
       collectionList.render();
     } catch (error) {
       outOfPacks = error.message === 'Lifetime mint limit reached.';
+      if (outOfPacks && pendingKey) {
+        localStorage.removeItem(pendingKey);
+        localStorage.removeItem(pendingKey + ':choice');
+      }
       dealFailed = !outOfPacks;
       status(outOfPacks ? "You've opened every pack you can. Enjoy your ubus!" : error.message, outOfPacks);
     } finally { busy = false; updatePackButton(); }
@@ -934,7 +994,7 @@
   async function selectPack(index) {
     if (busy || pack || !offer) return;
     const option = offer.choices[index], selection = { request: offer.request, choice: option.choice };
-    busy = true; updatePackButton();
+    busy = true; picking = true; updatePackButton();
     // The pick lands at once: the others fly off while the mint confirms the choice.
     choiceViews.forEach((view, i) => view.card.classList.toggle(i === index ? 'selected' : 'leaving', true));
     sound('playPack', 'pick');
@@ -942,6 +1002,7 @@
       localStorage.setItem(pendingKey + ':choice', JSON.stringify(selection));
       const [data] = await Promise.all([api('/api/mint', post(selection)), new Promise(resolve => setTimeout(resolve, 380))]);
       await acceptPack(data);
+      picking = false;
       packScene = choiceViews[index].scene;
       $('pack-choices').classList.add('choosing');
       const opening = packScene?.play(pack.items.length, pack.items.map(item => item.model));
@@ -953,14 +1014,21 @@
       await opening;
       $('pack-choices').hidden = true;
       revealIndex = 0;
-      showReveal();
+      if (!document.body.classList.contains('in-match')) showReveal();
       status('');
     } catch (error) {
       // Refresh authoritative state after an ambiguous selection; never submit a
       // second choice automatically. A committed selection is recovered by request.
       offer = null; $('pack-choices').hidden = true;
       status(error.message + ' Try again to recover your pack.');
-    } finally { busy = false; packScene?.reset(); updatePackButton(); }
+    } finally {
+      picking = false;
+      busy = false;
+      $('pack-hint').textContent = '';
+      packScene?.reset();
+      updatePackButton();
+      collectionList.render();
+    }
   }
   $('mint').addEventListener('click', async () => {
     if (busy || !session?.owner) return;
@@ -968,9 +1036,7 @@
       try { revealIndex = Math.max(0, pack.seen - 1); showReveal(); } catch (error) { status(error.message); }
     } else await loadChoices();
   });
-  $('logout').addEventListener('click', async () => {
-    try { await api('/api/logout', post({})); location.reload(); } catch (error) { status(error.message); }
-  });
+
   let sessionChecked = false;
   function renderSignedOut() {
     const panel = $('signed-out-panel');
@@ -987,7 +1053,9 @@
     const signIn = $('signed-out-signin');
     signIn.hidden = !config.login;
     signIn.href = '/auth/discord?return=' + encodeURIComponent(path);
-    signIn.onclick = window.ubuActivity ? event => window.openDiscordLogin(event) : null;
+    signIn.onclick = config.login ? event => window.openDiscordLogin(event) : null;
+    const importWrap = $('signed-out-import-wrap');
+    if (importWrap) importWrap.hidden = screen !== 'collection';
   }
   window.addEventListener('ubu:screen', renderSignedOut);
   // A match starting in the Activity takes over from a pack in progress; Continue pack resumes it.
@@ -996,58 +1064,106 @@
   starterPack('home-pack', 'signup', 'Signup bonus');
   window.addEventListener('ubu:starter', () => { if (sessionChecked) syncDaily(); });
 
+  function resetAccountState() {
+    clearCoinTimer();
+    window.ubuAudio?.stop();
+    if ($('reveal')?.open) $('reveal').close();
+    if ($('viewer')?.open) $('viewer').close();
+    packScene?.reset();
+    for (const view of choiceViews) view.scene?.reset();
+    packScene = null;
+    pack = null;
+    offer = null;
+    current = null;
+    packKey = '';
+    pendingKey = '';
+    revealIndex = 0;
+    outOfPacks = false;
+    dealFailed = false;
+    collectionFailed = false;
+    picking = false;
+    busy = false;
+    $('pack-choices').hidden = true;
+    $('daily-pack').hidden = true;
+    $('collection').hidden = true;
+    $('mint-recovery').hidden = true;
+    $('pack-hint').textContent = '';
+    status('');
+    collectionRecovery();
+    updatePackButton();
+  }
+
+  let sessionGeneration = 0;
+  async function handleSession(s) {
+    const gen = ++sessionGeneration;
+    const prevOwner = session?.owner || null;
+    const nextOwner = s?.owner || null;
+    if (prevOwner !== nextOwner || !nextOwner) resetAccountState();
+    session = s?.owner ? s : null;
+    sessionChecked = true;
+    renderSignedOut();
+    $('mint-retry').hidden = true;
+    if (session?.owner) {
+      pendingKey = `ubumint:pending:${config.mint}:${session.owner}`;
+      packKey = `ubumint:reveal:${config.mint}:${session.owner}`;
+      const saved = localStorage.getItem(packKey);
+      if (saved) {
+        try {
+          const data = JSON.parse(saved);
+          const restored = await readPack(data.certificates, data.seen);
+          if (gen !== sessionGeneration) return;
+          pack = restored;
+          localStorage.removeItem(pendingKey);
+          localStorage.removeItem(pendingKey + ':choice');
+        } catch {
+          pack = null;
+          localStorage.removeItem(packKey);
+        }
+      } else {
+        pack = null;
+      }
+      if (gen !== sessionGeneration) return;
+      updatePackButton();
+      $('pack-title').parentElement.classList.toggle('settled', Boolean(pack));
+      const canOpen = pack || (config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey)));
+      status(canOpen ? '' : config.ready ? 'No packs are available for this account.' : 'Minting closed', true);
+      $('mint-recovery').hidden = Boolean(canOpen);
+      if (config.ready) {
+        try { await migrateBrowserFavorites(); } catch (error) { if (gen === sessionGeneration) status('Could not migrate browser favorites: ' + error.message); }
+        if (gen !== sessionGeneration) return;
+        await ubuStarter.refresh().catch(error => { if (gen === sessionGeneration) { status(error.message); $('pack-title').parentElement.classList.add('settled'); } });
+        if (gen !== sessionGeneration) return;
+        await collection();
+      } else {
+        collectionStatus('The collection is unavailable right now.');
+        collectionRecovery({ importFile: true });
+      }
+    }
+  }
+
+  window.addEventListener('ubu:session', event => {
+    const next = event.detail;
+    if (next?.owner && (!session?.owner || session.owner !== next.owner)) {
+      void handleSession(next).catch(error => status(error.message));
+    } else if (next?.owner) {
+      session = next; // A new Activity launch renews the CSRF token.
+    } else if (!next?.owner && session?.owner) {
+      void handleSession(null).catch(() => {});
+    }
+  });
+
   (async () => {
     try {
       config = await ubuList.config();
-      if (!config.login) $('login').hidden = true;
-      if (config.login) {
-        $('login').href = '/auth/discord?return=' + encodeURIComponent((location.pathname === '/index.html' ? '/' : location.pathname) + location.search);
-        session = await api('/api/session');
+      let initialSession = window.getUbuSession?.() || null;
+      if (config.login && !initialSession) {
+        initialSession = await (window.checkUbuSession ? window.checkUbuSession(false) : api('/api/session'));
       }
-      async function handleSession(s) {
-        session = s;
-        sessionChecked = true;
-        renderSignedOut();
-        $('mint-retry').hidden = true;
-        if (session?.owner) {
-          $('login').hidden = true;
-          pendingKey = `ubumint:pending:${config.mint}:${session.owner}`;
-          packKey = `ubumint:reveal:${config.mint}:${session.owner}`;
-          const saved = localStorage.getItem(packKey);
-          if (saved) {
-            const data = JSON.parse(saved); pack = await readPack(data.certificates, data.seen);
-            localStorage.removeItem(pendingKey);
-            localStorage.removeItem(pendingKey + ':choice');
-          }
-          updatePackButton();
-          $('pack-title').parentElement.classList.toggle('settled', Boolean(pack));
-          const canOpen = pack || (config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey)));
-          status(canOpen ? '' : config.ready ? 'No packs are available for this account.' : 'Minting closed', true);
-          $('mint-recovery').hidden = Boolean(canOpen);
-          if (config.ready) {
-            try { await migrateBrowserFavorites(); } catch (error) { status('Could not migrate browser favorites: ' + error.message); }
-            await ubuStarter.refresh().catch(error => { status(error.message); $('pack-title').parentElement.classList.add('settled'); });
-            await collection();
-          } else {
-            collectionStatus('The collection is unavailable right now.');
-            collectionRecovery();
-          }
-        }
-      }
-      window.addEventListener('ubu:session', event => {
-        if (event.detail?.owner && (!session?.owner || session.owner !== event.detail.owner)) {
-          handleSession(event.detail);
-        } else if (event.detail?.owner) {
-          session = event.detail; // A new Activity launch renews the CSRF token.
-        } else if (!event.detail?.owner && session?.owner) {
-          handleSession(null);
-        }
-      });
-      await handleSession(session);
-    } catch (error) {
+      await handleSession(initialSession);
+    } catch {
       status('Could not connect to the mint. Try again.');
       $('mint-recovery').hidden = $('mint-retry').hidden = false;
-      collectionRecovery({ retry: true });
+      collectionRecovery({ retry: true, importFile: true });
     }
   })();
 })();

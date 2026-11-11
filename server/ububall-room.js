@@ -69,10 +69,11 @@ class MatchRoom {
     this.state.quickStart = true;
   }
   // Until kickoff a ready player may go back and change their team.
-  unready(owner) {
+  unready(owner, guest = Boolean(this.state.guestTeams[this.seat(owner)])) {
     const s = this.state, i = this.seat(owner);
     if (s.phase !== 'lobby') throw new Error('Match already started.');
     s.ready[i] = false;
+    if (!guest && s.guestTeams[i]) { s.guestTeams[i] = null; s.rosters[i] = null; }
   }
   canChangeRules() {
     const s = this.state;
@@ -214,6 +215,7 @@ class MatchRoom {
     if (s.rematch.every(Boolean)) {
       s.gameNumber = (s.gameNumber || 0) + 1;
       s.rematch = [false, false]; s.ready = s.quickStart ? [true, true] : [false, false]; s.winner = null; s.turn = 1; s.phase = 'lobby';
+      s.drafts = [hold(), hold()]; s.locked = [false, false]; s.deadline = null; s.remaining = null; s.playTicks = 0; s.playStops = 0;
       s.game = null; s.replay = null; s.playUntil = null; s.expires = now + 86400000;
     }
   }
@@ -239,7 +241,7 @@ class MatchRoom {
   }
   view(owner) {
     const s = this.state, seat = this.seat(owner);
-    return { version: s.version, seat, mode: s.mode, teams: s.teams, phase: s.phase, turn: s.turn,
+    return { version: s.version, seat, mode: s.mode, phase: s.phase, turn: s.turn,
       occupied: s.players.map(Boolean), names: [...s.names], connected: [...s.connected], locked: [...s.locked],
       moves: structuredClone(s.drafts[seat]), deadline: s.deadline, remaining: s.remaining, winner: s.winner,
       ready: [...s.ready], left: [...s.left], rosters: structuredClone(s.rosters),

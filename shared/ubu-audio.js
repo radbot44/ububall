@@ -61,6 +61,7 @@
   }
 
   function parseVoiceInfo(voice) {
+    voice = voice || {};
     const instIdx = (voice.instrument | 0) & 15;
     const pitchIdx = Math.max(0, Math.min(63, voice.pitch | 0));
     const scaleIdx = (voice.scale | 0) & 7;
@@ -194,9 +195,10 @@
       duration = 0.3,
       decay = 0.3,
       timbreMod = 0,
-      pitchBend = 0, // semitone pitch bend for voice tone inflection
+      pitchBend = 0, // semitone upward pitch scoop for voice inflection
       volume = 1.0,
-      soft = 0 // seconds to fade in over, so sharp instrument attacks never click
+      soft = 0, // seconds to fade in over, so sharp instrument attacks never click
+      cleanupNode = null
     } = params;
 
     const stopNodes = [];
@@ -222,9 +224,18 @@
     }
     volGain.connect(dest);
 
-    // Timbre modifiers: detune or overtone
-    const detuneCents = timbreMod === 1 ? 7 : 0;
-    const resonanceBoost = timbreMod === 2 ? 4 : 0;
+    // 2-bit timbreMod bitflags: bit 0 adds detune chorus, bit 1 boosts overtone/filter resonance (3 combines both).
+    const detuneCents = (timbreMod & 1) ? 7 : 0;
+    const resonanceBoost = (timbreMod & 2) ? 4 : 0;
+    const bendDur = Math.min(0.045, targetDecay * 0.35);
+    const setScoopedFreq = (osc, baseFreq) => {
+      if (pitchBend) {
+        osc.frequency.setValueAtTime(Math.max(20, baseFreq * Math.pow(2, -pitchBend / 12)), startTime);
+        osc.frequency.exponentialRampToValueAtTime(Math.max(20, baseFreq), startTime + bendDur);
+      } else {
+        osc.frequency.setValueAtTime(baseFreq, startTime);
+      }
+    };
 
     switch (instrument) {
       // 0: Soft Bell (rounded strike with a gently lingering, inharmonic ring)
@@ -233,17 +244,12 @@
         const osc2 = ctx.createOscillator();
         osc1.type = 'sine';
         osc2.type = 'sine';
-        osc1.frequency.setValueAtTime(freq, startTime);
-        osc2.frequency.setValueAtTime(freq * 2.76, startTime);
-        if (pitchBend) {
-          osc1.frequency.setValueAtTime(freq * Math.pow(2, pitchBend / 12), startTime);
-          osc1.frequency.exponentialRampToValueAtTime(freq, startTime + 0.05);
-          osc2.frequency.setValueAtTime(freq * 2.76 * Math.pow(2, pitchBend / 12), startTime);
-          osc2.frequency.exponentialRampToValueAtTime(freq * 2.76, startTime + 0.05);
-        }
+        setScoopedFreq(osc1, freq);
+        setScoopedFreq(osc2, freq * 2.76);
+        if (detuneCents) osc2.detune.setValueAtTime(detuneCents * 1.5, startTime);
 
         const g2 = ctx.createGain();
-        g2.gain.setValueAtTime(0.22, startTime);
+        g2.gain.setValueAtTime(0.22 + (resonanceBoost ? 0.06 : 0), startTime);
         g2.gain.exponentialRampToValueAtTime(0.025, startTime + targetDecay);
 
         osc1.connect(envGain);
@@ -264,11 +270,13 @@
       // 1: Woodblock (two short cavity resonances, with almost no pitch sweep)
       case 1: {
         const ring = Math.min(0.11, targetDecay * 0.55);
-        for (const [ratio, level, length] of [[1, 0.65, ring], [2.35, 0.3, ring * 0.45]]) {
+        const bendFactor = pitchBend ? Math.pow(2, -pitchBend / 12) : 1.04;
+        for (const [ratio, level, length] of [[1, 0.65, ring], [2.35, 0.3 + (resonanceBoost ? 0.08 : 0), ring * 0.45]]) {
           const osc = ctx.createOscillator(), gain = ctx.createGain();
           osc.type = 'sine';
-          osc.frequency.setValueAtTime(freq * ratio * 1.04, startTime);
-          osc.frequency.exponentialRampToValueAtTime(freq * ratio, startTime + 0.008);
+          osc.frequency.setValueAtTime(Math.max(20, freq * ratio * bendFactor), startTime);
+          osc.frequency.exponentialRampToValueAtTime(Math.max(20, freq * ratio), startTime + (pitchBend ? Math.min(0.025, ring * 0.5) : 0.008));
+          if (ratio > 1 && detuneCents) osc.detune.setValueAtTime(detuneCents * 2, startTime);
           gain.gain.setValueAtTime(level, startTime);
           gain.gain.exponentialRampToValueAtTime(0.0001, startTime + length);
           osc.connect(gain); gain.connect(envGain);
@@ -285,7 +293,8 @@
         const osc = ctx.createOscillator();
         const filter = ctx.createBiquadFilter();
         osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(freq, startTime);
+        setScoopedFreq(osc, freq);
+        if (detuneCents) osc.detune.setValueAtTime(detuneCents, startTime);
 
         filter.type = 'lowpass';
         filter.frequency.setValueAtTime(Math.min(4800, freq * 6), startTime);
@@ -308,13 +317,13 @@
       case 3: {
         const o1 = ctx.createOscillator(), o2 = ctx.createOscillator();
         o1.type = 'sine'; o2.type = 'sine';
-        o1.frequency.setValueAtTime(freq, startTime);
-        o2.frequency.setValueAtTime(freq * 2.5, startTime);
-        o1.detune.setValueAtTime(detuneCents - 4, startTime);
-        o2.detune.setValueAtTime(detuneCents + 6, startTime);
+        setScoopedFreq(o1, freq);
+        setScoopedFreq(o2, freq * 2.5);
+        o1.detune.setValueAtTime(-4 - detuneCents * 0.5, startTime);
+        o2.detune.setValueAtTime(6 + detuneCents, startTime);
 
         const g2 = ctx.createGain();
-        g2.gain.setValueAtTime(0.4, startTime);
+        g2.gain.setValueAtTime(0.4 + (resonanceBoost ? 0.08 : 0), startTime);
         g2.gain.exponentialRampToValueAtTime(0.025, startTime + targetDecay * 0.6);
 
         o1.connect(envGain);
@@ -334,13 +343,14 @@
       case 4: {
         const osc = ctx.createOscillator();
         osc.type = 'square';
-        osc.frequency.setValueAtTime(freq, startTime);
+        setScoopedFreq(osc, freq);
+        if (detuneCents) osc.detune.setValueAtTime(detuneCents, startTime);
 
         // Subtle vibrato
         const lfo = ctx.createOscillator();
         const lfoGain = ctx.createGain();
         lfo.type = 'sine';
-        lfo.frequency.setValueAtTime(6.0, startTime);
+        lfo.frequency.setValueAtTime(6.0 + (resonanceBoost ? 1.5 : 0), startTime);
         lfoGain.gain.setValueAtTime(0, startTime);
         lfoGain.gain.setValueAtTime(0, startTime + Math.min(0.06, targetDecay * 0.5));
         lfoGain.gain.linearRampToValueAtTime(freq * 0.012, startTime + Math.min(0.18, targetDecay));
@@ -370,7 +380,8 @@
         }
         const osc = ctx.createOscillator(), filter = ctx.createBiquadFilter();
         osc.setPeriodicWave(pulseWaves.get(ctx));
-        osc.frequency.setValueAtTime(freq, startTime);
+        setScoopedFreq(osc, freq);
+        if (detuneCents) osc.detune.setValueAtTime(detuneCents, startTime);
         filter.type = 'lowpass';
         filter.frequency.setValueAtTime(Math.min(6500, freq * 9), startTime);
         filter.frequency.exponentialRampToValueAtTime(Math.max(180, freq * 2), startTime + targetDecay * 0.4);
@@ -386,9 +397,10 @@
       case 6: {
         const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), overtone = ctx.createGain();
         o1.type = 'sine'; o2.type = 'sine';
-        o1.frequency.setValueAtTime(freq, startTime);
-        o2.frequency.setValueAtTime(freq * 2, startTime);
-        overtone.gain.value = 0.18;
+        setScoopedFreq(o1, freq);
+        setScoopedFreq(o2, freq * 2);
+        if (detuneCents) o2.detune.setValueAtTime(detuneCents, startTime);
+        overtone.gain.value = 0.18 + (resonanceBoost ? 0.07 : 0);
         o1.connect(envGain); o2.connect(overtone); overtone.connect(envGain);
         const attack = Math.min(0.09, targetDecay * 0.3);
         envGain.gain.linearRampToValueAtTime(0.5, startTime + attack);
@@ -404,8 +416,10 @@
         const osc = ctx.createOscillator();
         osc.type = 'sine';
         const subFreq = freq > 320 ? freq * 0.5 : freq;
-        osc.frequency.setValueAtTime(subFreq * 1.35, startTime);
-        osc.frequency.exponentialRampToValueAtTime(subFreq, startTime + 0.018);
+        const transient = (1.35 + (resonanceBoost ? 0.15 : 0)) * (pitchBend ? Math.pow(2, -pitchBend / 24) : 1);
+        osc.frequency.setValueAtTime(Math.max(20, subFreq * transient), startTime);
+        osc.frequency.exponentialRampToValueAtTime(Math.max(20, subFreq), startTime + 0.018);
+        if (detuneCents) osc.detune.setValueAtTime(detuneCents, startTime);
         osc.connect(envGain);
         envGain.gain.linearRampToValueAtTime(0.8, startTime + 0.004);
         envGain.gain.exponentialRampToValueAtTime(0.2, startTime + targetDecay * 0.18);
@@ -418,9 +432,10 @@
       case 8: {
         const body = ctx.createOscillator(), tine = ctx.createOscillator(), tineGain = ctx.createGain();
         body.type = 'sine'; tine.type = 'triangle';
-        body.frequency.setValueAtTime(freq, startTime);
-        tine.frequency.setValueAtTime(freq * 5.4, startTime);
-        tineGain.gain.setValueAtTime(0.32, startTime);
+        setScoopedFreq(body, freq);
+        setScoopedFreq(tine, freq * 5.4);
+        if (detuneCents) tine.detune.setValueAtTime(detuneCents * 2, startTime);
+        tineGain.gain.setValueAtTime(0.32 + (resonanceBoost ? 0.08 : 0), startTime);
         tineGain.gain.exponentialRampToValueAtTime(0.0001, startTime + Math.min(0.028, targetDecay * 0.3));
         body.connect(envGain); tine.connect(tineGain); tineGain.connect(envGain);
         envGain.gain.linearRampToValueAtTime(0.6, startTime + 0.002);
@@ -435,9 +450,10 @@
       case 9: {
         const body = ctx.createOscillator(), strike = ctx.createOscillator(), strikeGain = ctx.createGain();
         body.type = 'sine'; strike.type = 'sine';
-        body.frequency.setValueAtTime(freq, startTime);
-        strike.frequency.setValueAtTime(freq * 4, startTime);
-        strikeGain.gain.setValueAtTime(0.38, startTime);
+        setScoopedFreq(body, freq);
+        setScoopedFreq(strike, freq * 4);
+        if (detuneCents) strike.detune.setValueAtTime(detuneCents * 2, startTime);
+        strikeGain.gain.setValueAtTime(0.38 + (resonanceBoost ? 0.08 : 0), startTime);
         strikeGain.gain.exponentialRampToValueAtTime(0.0001, startTime + Math.min(0.045, targetDecay * 0.4));
         body.connect(envGain); strike.connect(strikeGain); strikeGain.connect(envGain);
         const ring = Math.min(0.32, targetDecay * 0.7);
@@ -456,18 +472,19 @@
         const lfoGain = ctx.createGain();
 
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, startTime);
+        setScoopedFreq(osc, freq);
 
         const overtone = ctx.createOscillator(), overtoneGain = ctx.createGain();
         overtone.type = 'sine';
-        overtone.frequency.setValueAtTime(freq * 3, startTime);
+        setScoopedFreq(overtone, freq * 3);
+        if (detuneCents) overtone.detune.setValueAtTime(detuneCents * 1.5, startTime);
         overtoneGain.gain.setValueAtTime(0.24, startTime);
         overtoneGain.gain.exponentialRampToValueAtTime(0.015, startTime + targetDecay * 0.55);
         overtone.connect(overtoneGain); overtoneGain.connect(trem);
 
         lfo.type = 'sine';
         lfo.frequency.setValueAtTime(5.4, startTime);
-        lfoGain.gain.setValueAtTime(0.25, startTime);
+        lfoGain.gain.setValueAtTime(0.25 + (resonanceBoost ? 0.07 : 0), startTime);
         trem.gain.setValueAtTime(0.75, startTime);
 
         lfo.connect(lfoGain);
@@ -492,7 +509,8 @@
         const osc = ctx.createOscillator();
         const filter = ctx.createBiquadFilter();
         osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(freq, startTime);
+        setScoopedFreq(osc, freq);
+        if (detuneCents) osc.detune.setValueAtTime(detuneCents, startTime);
 
         filter.type = 'lowpass';
         filter.frequency.setValueAtTime(freq * 1.2, startTime);
@@ -516,9 +534,10 @@
       case 12: {
         const carrier = ctx.createOscillator(), tine = ctx.createOscillator(), depth = ctx.createGain();
         carrier.type = 'sine'; tine.type = 'sine';
-        carrier.frequency.setValueAtTime(freq, startTime);
-        tine.frequency.setValueAtTime(freq * 3, startTime);
-        depth.gain.setValueAtTime(freq * 0.65, startTime);
+        setScoopedFreq(carrier, freq);
+        setScoopedFreq(tine, freq * 3);
+        if (detuneCents) tine.detune.setValueAtTime(detuneCents, startTime);
+        depth.gain.setValueAtTime(freq * (0.65 + (resonanceBoost ? 0.2 : 0)), startTime);
         depth.gain.exponentialRampToValueAtTime(freq * 0.035, startTime + targetDecay * 0.4);
         tine.connect(depth); depth.connect(carrier.frequency); carrier.connect(envGain);
         envGain.gain.linearRampToValueAtTime(0.62, startTime + 0.005);
@@ -534,8 +553,8 @@
         const o1 = ctx.createOscillator(), o2 = ctx.createOscillator();
         const filter = ctx.createBiquadFilter();
         o1.type = 'sawtooth'; o2.type = 'square';
-        o1.frequency.setValueAtTime(freq, startTime);
-        o2.frequency.setValueAtTime(freq, startTime);
+        setScoopedFreq(o1, freq);
+        setScoopedFreq(o2, freq);
         o2.detune.setValueAtTime(detuneCents + 8, startTime);
 
         filter.type = 'lowpass';
@@ -562,7 +581,8 @@
       case 14: {
         const osc = ctx.createOscillator(), body = ctx.createGain();
         osc.type = 'square';
-        osc.frequency.setValueAtTime(freq, startTime);
+        setScoopedFreq(osc, freq);
+        if (detuneCents) osc.detune.setValueAtTime(detuneCents, startTime);
         body.gain.value = 0.12;
         osc.connect(body); body.connect(envGain);
         // Keep a little dry fundamental so high notes retain their melody even when
@@ -588,8 +608,10 @@
       default: {
         const osc = ctx.createOscillator();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq * 3.2, startTime);
+        const startRatio = (3.2 + (resonanceBoost ? 0.4 : 0)) * (pitchBend ? Math.pow(2, pitchBend / 24) : 1);
+        osc.frequency.setValueAtTime(freq * startRatio, startTime);
         osc.frequency.exponentialRampToValueAtTime(Math.max(60, freq * 0.6), startTime + 0.08);
+        if (detuneCents) osc.detune.setValueAtTime(detuneCents * 2, startTime);
 
         osc.connect(envGain);
 
@@ -603,15 +625,28 @@
       }
     }
 
+    if (stopNodes[0]) {
+      stopNodes[0].onended = () => {
+        try {
+          volGain.disconnect();
+          if (cleanupNode) cleanupNode.disconnect();
+        } catch {}
+      };
+    }
+
     return {
+      endTime,
       stop() {
         try {
-          envGain.gain.cancelScheduledValues(ctx.currentTime);
-          envGain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.01);
-          volGain.gain.cancelScheduledValues(ctx.currentTime);
-          volGain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.01);
+          const t = ctx.currentTime;
+          envGain.gain.cancelScheduledValues(t);
+          envGain.gain.setValueAtTime(Math.max(0.0001, envGain.gain.value || 0.0001), t);
+          envGain.gain.linearRampToValueAtTime(0.0001, t + 0.01);
+          volGain.gain.cancelScheduledValues(t);
+          volGain.gain.setValueAtTime(Math.max(0.0001, volGain.gain.value || clampedVol), t);
+          volGain.gain.linearRampToValueAtTime(0.0001, t + 0.01);
           for (const node of stopNodes) {
-            try { node.stop(ctx.currentTime + 0.015); } catch {}
+            try { node.stop(t + 0.015); } catch {}
           }
         } catch {}
       }
@@ -626,6 +661,12 @@
   function isOfflineContext(ctx) {
     return (typeof OfflineAudioContext !== 'undefined' && ctx instanceof OfflineAudioContext) ||
       ctx?.constructor?.name === 'OfflineAudioContext';
+  }
+
+  function interpRamp(t0, v0, t1, v1, now) {
+    if (now <= t0 || t1 <= t0) return now <= t0 ? v0 : v1;
+    if (now >= t1) return v1;
+    return v0 + (v1 - v0) * ((now - t0) / (t1 - t0));
   }
 
   function currentLoopGain(entry, now) {
@@ -722,9 +763,12 @@
 
   // Impact envelope: a 3 ms rise instead of an instant start, then the usual quick decay.
   function strike(gain, level, now, end) {
+    const peak = Number.isFinite(level) ? Math.max(0.0001, level) : 0.0001;
+    const safeEnd = Math.max(now + 0.001, end);
+    const attack = Math.min(0.003, (safeEnd - now) * 0.35);
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(level, now + 0.003);
-    gain.gain.exponentialRampToValueAtTime(0.0001, end);
+    gain.gain.linearRampToValueAtTime(peak, now + attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, safeEnd);
   }
 
   function playBallHit(options = {}) {
@@ -841,11 +885,12 @@
   // its visual step. Phases are fractions of the animation and match pack-scene.js; activity in a
   // phase follows its smoothstep speed, which peaks halfway through.
   function playUnwrap(type, seconds, options = {}) {
+    if (!Number.isFinite(seconds) || seconds <= 0) return;
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx);
-    // Foil and wet crackle live up to 12 kHz; open the chain's usual 7.5 kHz softening.
-    master.frequency.setValueAtTime(16000, ctx.currentTime);
+    const master = createMasterChain(ctx, null, Math.max(seconds, 0.95) + 0.3);
+    // Foil and wet crackle live up to 12 kHz; open a private chain's usual 7.5 kHz softening.
+    if (!sharedChains.has(ctx)) master.frequency.setValueAtTime(16000, ctx.currentTime);
     const now = ctx.currentTime + 0.02;
     const at = fraction => now + fraction * seconds;
     const rand = (low, high) => low + Math.random() * (high - low);
@@ -957,9 +1002,11 @@
 
   // A burning ball: a faint, narrow hiss with sparse little fire pops.
   function playSizzle(options = {}) {
+    const volume = Number.isFinite(options.volume) ? Math.max(0, options.volume) : 1;
+    if (!volume) return { stop() {} };
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return { stop() {} };
-    const cleanup = [], master = createMasterChain(ctx, cleanup), volume = Math.max(0, options.volume ?? 1);
+    const cleanup = [], master = createMasterChain(ctx, cleanup);
     const hiss = ctx.createBufferSource(), band = ctx.createBiquadFilter(), level = ctx.createGain();
     const output = ctx.createGain();
     hiss.buffer = grainNoise(ctx); hiss.loop = true;
@@ -974,7 +1021,8 @@
     };
     hiss.start(ctx.currentTime, Math.random() * 0.9);
     let crackles;
-    const isOffline = (typeof OfflineAudioContext !== 'undefined' && ctx instanceof OfflineAudioContext) || ctx.constructor?.name === 'OfflineAudioContext';
+    const scheduledCrackles = [];
+    const isOffline = isOfflineContext(ctx);
     const scheduleCrackle = (time) => {
       const count = Math.random() < 0.15 ? 2 : 1;
       for (let k = 0; k < count; k++) {
@@ -991,6 +1039,7 @@
         source.connect(filter); filter.connect(gain); gain.connect(output);
         source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
         source.start(start, Math.random() * 0.8); source.stop(start + len + 0.01);
+        if (isOffline) scheduledCrackles.push({ source, start });
       }
     };
     if (isOffline) {
@@ -1016,6 +1065,9 @@
         output.gain.setValueAtTime(output.gain.value, now);
         output.gain.linearRampToValueAtTime(0, now + 0.15);
         hiss.stop(now + 0.16);
+        for (const item of scheduledCrackles) {
+          if (item.start > now + 0.16) { try { item.source.stop(item.start); } catch {} }
+        }
       }
     };
     superPlayback.add(handle);
@@ -1111,7 +1163,9 @@
         osc.start(now); lfo.start(now);
         entry = {
           stopped: false, timer: null, sources: [osc, lfo], osc, lfo, lfoGain, filter, outGain,
-          freq: p.freq, wobbleHz: p.wobbleHz, wobbleDepth: p.wobbleDepth, cutoff: p.cutoff,
+          freq0: p.freq, freq: p.freq, wobbleHz0: p.wobbleHz, wobbleHz: p.wobbleHz,
+          wobbleDepth0: p.wobbleDepth, wobbleDepth: p.wobbleDepth, cutoff0: p.cutoff, cutoff: p.cutoff,
+          paramT0: now, paramT1: now,
           t0: now, g0: 0, tPeak: now, gPeak: 0, tZero: now,
           stop() {
             if (entry.stopped) return;
@@ -1131,21 +1185,28 @@
         map.set(loopKey, entry);
       } else {
         const rampEnd = now + 0.04;
+        const curFreq = interpRamp(entry.paramT0, entry.freq0, entry.paramT1, entry.freq, now);
+        const curWobble = interpRamp(entry.paramT0, entry.wobbleHz0, entry.paramT1, entry.wobbleHz, now);
+        const curDepth = interpRamp(entry.paramT0, entry.wobbleDepth0, entry.paramT1, entry.wobbleDepth, now);
+        const curCutoff = interpRamp(entry.paramT0, entry.cutoff0, entry.paramT1, entry.cutoff, now);
         entry.osc.frequency.cancelScheduledValues(now);
-        entry.osc.frequency.setValueAtTime(entry.freq, now);
+        entry.osc.frequency.setValueAtTime(curFreq, now);
         entry.osc.frequency.linearRampToValueAtTime(p.freq, rampEnd);
         entry.lfo.frequency.cancelScheduledValues(now);
-        entry.lfo.frequency.setValueAtTime(entry.wobbleHz, now);
+        entry.lfo.frequency.setValueAtTime(curWobble, now);
         entry.lfo.frequency.linearRampToValueAtTime(p.wobbleHz, rampEnd);
         entry.lfoGain.gain.cancelScheduledValues(now);
-        entry.lfoGain.gain.setValueAtTime(entry.wobbleDepth, now);
+        entry.lfoGain.gain.setValueAtTime(curDepth, now);
         entry.lfoGain.gain.linearRampToValueAtTime(p.wobbleDepth, rampEnd);
         entry.filter.frequency.cancelScheduledValues(now);
-        entry.filter.frequency.setValueAtTime(entry.cutoff, now);
+        entry.filter.frequency.setValueAtTime(curCutoff, now);
         entry.filter.frequency.linearRampToValueAtTime(p.cutoff, rampEnd);
         entry.filter.Q.setValueAtTime(p.q, now);
-        entry.freq = p.freq; entry.wobbleHz = p.wobbleHz;
-        entry.wobbleDepth = p.wobbleDepth; entry.cutoff = p.cutoff;
+        entry.freq0 = curFreq; entry.freq = p.freq;
+        entry.wobbleHz0 = curWobble; entry.wobbleHz = p.wobbleHz;
+        entry.wobbleDepth0 = curDepth; entry.wobbleDepth = p.wobbleDepth;
+        entry.cutoff0 = curCutoff; entry.cutoff = p.cutoff;
+        entry.paramT0 = now; entry.paramT1 = rampEnd;
       }
       const cur = currentLoopGain(entry, now), tPeak = now + 0.035, tZero = now + 0.16;
       entry.outGain.gain.cancelScheduledValues(now);
@@ -1193,9 +1254,11 @@
     return {
       stop() {
         try {
-          outGain.gain.cancelScheduledValues(ctx.currentTime);
-          outGain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.015);
-          osc.stop(ctx.currentTime + 0.02); lfo.stop(ctx.currentTime + 0.02);
+          const t = ctx.currentTime;
+          outGain.gain.cancelScheduledValues(t);
+          outGain.gain.setValueAtTime(Math.max(0.0001, outGain.gain.value || 0.0001), t);
+          outGain.gain.linearRampToValueAtTime(0.0001, t + 0.015);
+          osc.stop(t + 0.02); lfo.stop(t + 0.02);
         } catch {}
       }
     };
@@ -1264,7 +1327,9 @@
         osc1.start(now); osc2.start(now); lfo.start(now);
         entry = {
           stopped: false, timer: null, sources: [osc1, osc2, lfo], osc1, osc2, lfo, lfoGain, filterLfo, filter, outGain,
-          freq: p.freq, swirlHz: p.swirlHz, swirlDepth: p.swirlDepth, bandFreq: p.bandFreq,
+          freq0: p.freq, freq: p.freq, swirlHz0: p.swirlHz, swirlHz: p.swirlHz,
+          swirlDepth0: p.swirlDepth, swirlDepth: p.swirlDepth, bandFreq0: p.bandFreq, bandFreq: p.bandFreq,
+          paramT0: now, paramT1: now,
           t0: now, g0: 0, tPeak: now, gPeak: 0, tZero: now,
           stop() {
             if (entry.stopped) return;
@@ -1284,24 +1349,31 @@
         map.set(loopKey, entry);
       } else {
         const rampEnd = now + 0.04;
+        const curFreq = interpRamp(entry.paramT0, entry.freq0, entry.paramT1, entry.freq, now);
+        const curSwirl = interpRamp(entry.paramT0, entry.swirlHz0, entry.paramT1, entry.swirlHz, now);
+        const curDepth = interpRamp(entry.paramT0, entry.swirlDepth0, entry.paramT1, entry.swirlDepth, now);
+        const curBand = interpRamp(entry.paramT0, entry.bandFreq0, entry.paramT1, entry.bandFreq, now);
         entry.osc1.frequency.cancelScheduledValues(now);
-        entry.osc1.frequency.setValueAtTime(entry.freq, now);
+        entry.osc1.frequency.setValueAtTime(curFreq, now);
         entry.osc1.frequency.linearRampToValueAtTime(p.freq, rampEnd);
         entry.osc2.frequency.cancelScheduledValues(now);
-        entry.osc2.frequency.setValueAtTime(entry.freq * 1.5, now);
+        entry.osc2.frequency.setValueAtTime(curFreq * 1.5, now);
         entry.osc2.frequency.linearRampToValueAtTime(p.freq * 1.5, rampEnd);
         entry.lfo.frequency.cancelScheduledValues(now);
-        entry.lfo.frequency.setValueAtTime(entry.swirlHz, now);
+        entry.lfo.frequency.setValueAtTime(curSwirl, now);
         entry.lfo.frequency.linearRampToValueAtTime(p.swirlHz, rampEnd);
         entry.lfoGain.gain.cancelScheduledValues(now);
-        entry.lfoGain.gain.setValueAtTime(entry.swirlDepth, now);
+        entry.lfoGain.gain.setValueAtTime(curDepth, now);
         entry.lfoGain.gain.linearRampToValueAtTime(p.swirlDepth, rampEnd);
         entry.filterLfo.gain.setValueAtTime(p.freq * 0.24, now);
         entry.filter.frequency.cancelScheduledValues(now);
-        entry.filter.frequency.setValueAtTime(entry.bandFreq, now);
+        entry.filter.frequency.setValueAtTime(curBand, now);
         entry.filter.frequency.linearRampToValueAtTime(p.bandFreq, rampEnd);
-        entry.freq = p.freq; entry.swirlHz = p.swirlHz;
-        entry.swirlDepth = p.swirlDepth; entry.bandFreq = p.bandFreq;
+        entry.freq0 = curFreq; entry.freq = p.freq;
+        entry.swirlHz0 = curSwirl; entry.swirlHz = p.swirlHz;
+        entry.swirlDepth0 = curDepth; entry.swirlDepth = p.swirlDepth;
+        entry.bandFreq0 = curBand; entry.bandFreq = p.bandFreq;
+        entry.paramT0 = now; entry.paramT1 = rampEnd;
       }
       const cur = currentLoopGain(entry, now), tPeak = now + 0.035, tZero = now + 0.16;
       entry.outGain.gain.cancelScheduledValues(now);
@@ -1350,9 +1422,11 @@
     return {
       stop() {
         try {
-          outGain.gain.cancelScheduledValues(ctx.currentTime);
-          outGain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.015);
-          osc1.stop(ctx.currentTime + 0.02); osc2.stop(ctx.currentTime + 0.02); lfo.stop(ctx.currentTime + 0.02);
+          const t = ctx.currentTime;
+          outGain.gain.cancelScheduledValues(t);
+          outGain.gain.setValueAtTime(Math.max(0.0001, outGain.gain.value || 0.0001), t);
+          outGain.gain.linearRampToValueAtTime(0.0001, t + 0.015);
+          osc1.stop(t + 0.02); osc2.stop(t + 0.02); lfo.stop(t + 0.02);
         } catch {}
       }
     };
@@ -1873,9 +1947,11 @@
 
   // An iron save: a heavy metallic clank with a sharp hiss of steam rushing through it.
   function playIronSave(options = {}) {
+    const volume = Number.isFinite(options.volume) ? Math.max(0, Math.min(1.5, options.volume)) : 1;
+    if (!volume) return;
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.4), now = ctx.currentTime + 0.005, volume = options.volume ?? 1;
+    const master = createMasterChain(ctx, null, 0.4), now = ctx.currentTime + 0.005;
     for (const [hz, level, decay] of [[587, .25, .45], [1480, .15, .32], [2480, .09, .22]]) {
       const osc = ctx.createOscillator(), gain = ctx.createGain();
       osc.type = 'sine'; osc.frequency.setValueAtTime(hz, now);
@@ -1900,15 +1976,18 @@
   // Fouls: a soft two-note "doot doot" when a warning first appears, like a system alert, and a light
   // referee's whistle for a yellow card. Both stay short and quiet so a stalled scrum never nags.
   function playFoul(kind = 'warning', options = {}) {
+    const volume = Number.isFinite(options.volume) ? Math.max(0, Math.min(1.5, options.volume)) : 1;
+    if (!volume) return;
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.4), now = ctx.currentTime + 0.01, volume = options.volume ?? 1;
+    const master = createMasterChain(ctx, null, 0.4), now = ctx.currentTime + 0.01;
     if (kind === 'warning') {
+      const peak = Math.max(0.0002, 0.12 * volume);
       for (const [at, freq] of [[0, 784], [0.16, 659]]) {
         const start = now + at, gain = ctx.createGain();
         gain.gain.setValueAtTime(0.0001, start);
-        gain.gain.exponentialRampToValueAtTime(0.12 * volume, start + 0.012);
-        gain.gain.setValueAtTime(0.12 * volume, start + 0.06);
+        gain.gain.exponentialRampToValueAtTime(peak, start + 0.012);
+        gain.gain.setValueAtTime(peak, start + 0.06);
         gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.14);
         gain.connect(master);
         for (const [type, ratio, level] of [['sine', 1, 1], ['triangle', 2, 0.12]]) {
@@ -1928,9 +2007,10 @@
     osc.frequency.linearRampToValueAtTime(2250, now + 0.06);
     trill.frequency.setValueAtTime(26, now); depth.gain.setValueAtTime(55, now);
     trill.connect(depth); depth.connect(osc.frequency);
+    const whistlePeak = Math.max(0.0002, 0.08 * volume);
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.08 * volume, now + 0.025);
-    gain.gain.setValueAtTime(0.08 * volume, now + 0.24);
+    gain.gain.exponentialRampToValueAtTime(whistlePeak, now + 0.025);
+    gain.gain.setValueAtTime(whistlePeak, now + 0.24);
     gain.gain.exponentialRampToValueAtTime(0.0001, end);
     osc.connect(gain); gain.connect(master);
     osc.start(now); trill.start(now); osc.stop(end + 0.02); trill.stop(end + 0.02);
@@ -1948,7 +2028,7 @@
       ? Math.max(0.01, Math.min(1.5, opts.volume))
       : 0.95;
 
-    const master = createMasterChain(ctx);
+    const master = createMasterChain(ctx, null, 2.2);
     const step = 60 / 150 / 4; // 16th-note grid at 150 BPM (0.10s per step)
     const now = ctx.currentTime + 0.03;
     const activeNodes = [];
@@ -2037,22 +2117,25 @@
 
   // Fanfare finishing: trims rumble and harsh highs, compresses gently instead of pumping, and adds a
   // short generated room reverb. Notes, timing, instrument and decay all still come from the DNA.
-  let roomImpulse = null;
+  const roomImpulses = new WeakMap();
   function fanfareRoom(ctx) {
-    if (roomImpulse && roomImpulse.sampleRate === ctx.sampleRate) return roomImpulse;
+    let impulse = roomImpulses.get(ctx);
+    if (impulse) return impulse;
     const length = Math.round(ctx.sampleRate * 1.4);
-    roomImpulse = ctx.createBuffer(2, length, ctx.sampleRate);
+    impulse = ctx.createBuffer(2, length, ctx.sampleRate);
     for (let channel = 0; channel < 2; channel++) {
-      const data = roomImpulse.getChannelData(channel);
+      const data = impulse.getChannelData(channel);
       for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 3;
     }
-    return roomImpulse;
+    roomImpulses.set(ctx, impulse);
+    return impulse;
   }
   function createFanfareChain(ctx) {
     const input = ctx.createGain(), lowCut = ctx.createBiquadFilter(), highCut = ctx.createBiquadFilter();
     const dry = ctx.createGain(), wet = ctx.createGain(), room = ctx.createConvolver();
     const roomLowCut = ctx.createBiquadFilter(), roomHighCut = ctx.createBiquadFilter();
     const compressor = ctx.createDynamicsCompressor(), master = ctx.createGain(), t = ctx.currentTime;
+    const chainNodes = [input, lowCut, highCut, dry, wet, room, roomLowCut, roomHighCut, compressor, master];
     lowCut.type = 'highpass'; lowCut.frequency.setValueAtTime(70, t);
     highCut.type = 'lowpass'; highCut.frequency.setValueAtTime(6500, t); highCut.Q.setValueAtTime(0.5, t);
     room.buffer = fanfareRoom(ctx);
@@ -2070,22 +2153,46 @@
     const part = amount => {
       const node = ctx.createGain();
       node.connect(input);
+      chainNodes.push(node);
       if (amount) {
         const send = ctx.createGain();
         send.gain.setValueAtTime(amount, t); node.connect(send); send.connect(roomLowCut);
+        chainNodes.push(send);
       }
       return node;
     };
     const lead = part(0.7), pad = part(1), percussion = part(0);
+    let disconnected = false, releaseGuard = null;
+    const disconnectAll = () => {
+      if (disconnected) return;
+      disconnected = true;
+      if (releaseGuard) { try { releaseGuard.disconnect(); } catch {} releaseGuard = null; }
+      for (const n of chainNodes) { try { n.disconnect(); } catch {} }
+    };
+    const disconnectAfter = seconds => {
+      if (disconnected) return;
+      if (releaseGuard) { try { releaseGuard.stop(); releaseGuard.disconnect(); } catch {} releaseGuard = null; }
+      if (typeof ctx.createConstantSource === 'function') {
+        const timer = ctx.createConstantSource();
+        timer.offset.value = 0;
+        timer.connect(master);
+        timer.onended = disconnectAll;
+        timer.start(ctx.currentTime);
+        timer.stop(ctx.currentTime + Math.max(0.01, seconds));
+        releaseGuard = timer;
+      } else if (!isOfflineContext(ctx)) {
+        setTimeout(disconnectAll, Math.max(10, seconds * 1000));
+      }
+    };
     // Stopping fades the whole chain out in 30 ms, so the reverb tail ends with the notes.
     input.silence = () => {
       const now = ctx.currentTime;
       master.gain.cancelScheduledValues(now);
       master.gain.setValueAtTime(master.gain.value, now);
       master.gain.linearRampToValueAtTime(0, now + 0.03);
-      setTimeout(() => master.disconnect(), 60);
+      disconnectAfter(0.05);
     };
-    return { lead, pad, dry: percussion, silence: input.silence };
+    return { lead, pad, dry: percussion, silence: input.silence, disconnectAfter, disconnectAll };
   }
 
   // Conservative fanfare-only trims for the brighter/layered voices. The shared voice and
@@ -2162,16 +2269,15 @@
   // Accompaniment under the melody: a soft pad follows the chords, with a bass pulse and quiet
   // percussion on each beat. Brass accents frame the sounding melody, while the pad opens up
   // toward its final note. These are backing voices; the DNA lead is never rewritten.
-  let noiseBuffer = null;
   function accompany(ctx, dest, plan) {
-    const { start, end, secondsPerBeat, chords, padRoot, bassRoot, onsets, looping } = plan, sources = [];
+    const { start, end, secondsPerBeat, chords, padRoot, bassRoot, onsets, looping } = plan, sources = [], rawSources = [];
     const firstNote = onsets[0], finalNote = onsets[onsets.length - 1];
     const lift = at => !firstNote ? 0 : Math.max(0, Math.min(1,
       (at - firstNote.at) / Math.max(secondsPerBeat * 0.5, finalNote.at - firstNote.at)));
     const pad = ctx.createBiquadFilter();
     pad.type = 'lowpass'; pad.frequency.setValueAtTime(1100, start); pad.connect(dest.pad);
     if (finalNote) pad.frequency.linearRampToValueAtTime(1600, finalNote.at);
-    let voicing = plan.previousVoicing;
+    let voicing = plan.previousVoicing, latestStop = end;
     chords.forEach((chord, k) => {
       const last = k === chords.length - 1, from = chord.at, until = last ? end + (looping ? 0 : 0.65) : chord.until + 0.1;
       // Pad: two slightly detuned triangles per chord note, crossfading into the next chord.
@@ -2185,7 +2291,9 @@
         gain.gain.setValueAtTime(0.0001, from); gain.gain.linearRampToValueAtTime(0.027 + 0.011 * lift(from), attackEnd);
         gain.gain.linearRampToValueAtTime(0.027 + 0.011 * lift(releaseStart), releaseStart);
         gain.gain.exponentialRampToValueAtTime(0.0001, until);
-        osc.connect(gain); gain.connect(pad); osc.start(from); osc.stop(until + 0.05); sources.push(osc);
+        osc.connect(gain); gain.connect(pad); osc.start(from); osc.stop(until + 0.05);
+        sources.push(osc); rawSources.push({ node: osc, stopAt: until + 0.05 });
+        if (until + 0.05 > latestStop) latestStop = until + 0.05;
       }
       // Bass has its own beat pulse even when successive pad chords were merged.
       for (let pulse = 0, at = from; at < chord.until - 0.01; pulse++, at = from + pulse * secondsPerBeat) {
@@ -2196,7 +2304,9 @@
         osc.type = 'sine'; osc.frequency.setValueAtTime(freq, at);
         gain.gain.setValueAtTime(0.0001, at); gain.gain.linearRampToValueAtTime(pulse ? 0.2 : 0.26, at + Math.min(0.012, ring / 2));
         gain.gain.exponentialRampToValueAtTime(0.0001, at + ring);
-        osc.connect(gain); gain.connect(dest.dry); osc.start(at); osc.stop(at + ring + 0.05); sources.push(osc);
+        osc.connect(gain); gain.connect(dest.dry); osc.start(at); osc.stop(at + ring + 0.05);
+        sources.push(osc); rawSources.push({ node: osc, stopAt: at + ring + 0.05 });
+        if (at + ring + 0.05 > latestStop) latestStop = at + ring + 0.05;
       }
     });
     // Short opening call, fuller arrival. A single/very short phrase gets just the arrival,
@@ -2207,41 +2317,57 @@
     if (finalNote) accents.push(finalNote);
     for (const note of accents) {
       const finale = note === finalNote;
-      const chord = [...chords].reverse().find(c => c.at <= note.at + 1e-9);
+      const chord = [...chords].reverse().find(c => c.at <= note.at + 1e-9) || chords[0];
+      if (!chord?.voicing) continue;
       const duration = finale ? Math.min(0.6, secondsPerBeat * 0.9, end - note.at + (looping ? 0 : 0.25))
         : Math.min(0.22, (onsets[1].at - note.at) * 0.65);
       const tones = [...chord.voicing];
       // An upper octave of the final melody pitch supplies the lift without adding a new degree.
       if (finale) tones.push(((note.semi % 12) + 12) % 12 + 12);
       for (const tone of tones) {
-        sources.push(playTone(ctx, dest.pad, {
+        const h = playTone(ctx, dest.pad, {
           instrument: 11, freq: padRoot * Math.pow(2, tone / 12), startTime: note.at,
           duration, decay: duration, volume: finale ? 0.28 : 0.2, soft: 0.006
-        }));
+        });
+        sources.push(h);
+        if (h.endTime > latestStop) latestStop = h.endTime;
       }
     }
-    // Percussion: a soft hat on every beat, a little stronger every fourth.
-    if (!noiseBuffer || noiseBuffer.sampleRate !== ctx.sampleRate) {
-      noiseBuffer = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.1), ctx.sampleRate);
-      const data = noiseBuffer.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-    }
+    // Percussion: a soft hat on every beat, a little stronger every fourth (reusing per-context grainNoise).
+    const hatBuffer = grainNoise(ctx);
     const hatFilter = ctx.createBiquadFilter();
     hatFilter.type = 'highpass'; hatFilter.frequency.setValueAtTime(3500, start); hatFilter.connect(dest.dry);
     for (let beat = 0, at = start; at < end - 0.01; beat++, at = start + beat * secondsPerBeat) {
       const hat = ctx.createBufferSource(), gain = ctx.createGain();
-      hat.buffer = noiseBuffer;
+      hat.buffer = hatBuffer;
       gain.gain.setValueAtTime(beat % 4 ? 0.025 : 0.04, at); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.04);
-      hat.connect(gain); gain.connect(hatFilter); hat.start(at); hat.stop(at + 0.06); sources.push(hat);
+      hat.connect(gain); gain.connect(hatFilter); hat.start(at); hat.stop(at + 0.06);
+      sources.push(hat); rawSources.push({ node: hat, stopAt: at + 0.06 });
+      if (at + 0.06 > latestStop) latestStop = at + 0.06;
     }
     for (const at of accents.map(note => note.at)) {
       const kick = ctx.createOscillator(), gain = ctx.createGain();
       kick.type = 'sine'; kick.frequency.setValueAtTime(150, at); kick.frequency.exponentialRampToValueAtTime(80, at + 0.12);
       gain.gain.setValueAtTime(0.0001, at); gain.gain.linearRampToValueAtTime(0.35, at + 0.004);
       gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.18);
-      kick.connect(gain); gain.connect(dest.dry); kick.start(at); kick.stop(at + 0.2); sources.push(kick);
+      kick.connect(gain); gain.connect(dest.dry); kick.start(at); kick.stop(at + 0.2);
+      sources.push(kick); rawSources.push({ node: kick, stopAt: at + 0.2 });
+      if (at + 0.2 > latestStop) latestStop = at + 0.2;
     }
-    return { voicing, stop() { for (const source of sources) { try { source.stop(); } catch {} } } };
+    const lastRaw = rawSources.reduce((best, item) => (!best || item.stopAt > best.stopAt ? item : best), null);
+    if (lastRaw) {
+      lastRaw.node.onended = () => { try { pad.disconnect(); hatFilter.disconnect(); } catch {} };
+    } else {
+      try { pad.disconnect(); hatFilter.disconnect(); } catch {}
+    }
+    return {
+      voicing,
+      endTime: latestStop,
+      stop() {
+        for (const source of sources) { try { source.stop(); } catch {} }
+        try { pad.disconnect(); hatFilter.disconnect(); } catch {}
+      }
+    };
   }
 
   // options.loop repeats the phrase seamlessly until stopped. Each repeat is scheduled on the audio
@@ -2258,13 +2384,22 @@
     const now = ctx.currentTime + 0.05; // tiny lead-in for smooth scheduling
 
     const activeNodes = [];
-    const timers = [];
+    const timers = new Set();
 
     const pitches = scalePitches(parsed.scaleIndex), variations = loopVariations(voice);
     const fit = (freq, low) => { while (freq >= low * 2) freq /= 2; while (freq < low) freq *= 2; return freq; };
     const padRoot = fit(parsed.rootFreq, 130), bassRoot = fit(parsed.rootFreq, 80);
     const baseNotes = parsed.notes.map(n => ({ ...n, semi: n.isRest ? null : n.midi - parsed.rootMidi }));
     let previousVoicing = null;
+
+    function pruneFinished() {
+      const t = ctx.currentTime;
+      let keep = 0;
+      for (let i = 0; i < activeNodes.length; i++) {
+        if (!(activeNodes[i].endTime <= t)) activeNodes[keep++] = activeNodes[i];
+      }
+      activeNodes.length = keep;
+    }
 
     function phrase(phraseStart, accompanyUntil = null, variation = null) {
       const notes = variation ? variation(baseNotes, pitches) : baseNotes;
@@ -2289,11 +2424,12 @@
         if (!note.isRest) {
           // Notes alternate slightly left and right for width, and may ring a little past their
           // length (the DNA decay still caps it) so the line sounds connected rather than chopped.
-          let dest = master.lead;
+          let dest = master.lead, panner = null;
           if (ctx.createStereoPanner) {
-            dest = ctx.createStereoPanner();
-            dest.pan.setValueAtTime(i % 2 ? 0.15 : -0.15, noteStartTime);
-            dest.connect(master.lead);
+            panner = ctx.createStereoPanner();
+            panner.pan.setValueAtTime(i % 2 ? 0.15 : -0.15, noteStartTime);
+            panner.connect(master.lead);
+            dest = panner;
           }
           let freq = parsed.rootFreq * Math.pow(2, note.semi / 12);
           while (freq > 2600) freq /= 2; // variations never climb into shrill registers
@@ -2305,19 +2441,21 @@
             decay: Math.min(parsed.decaySeconds, playDuration * 1.5),
             timbreMod: parsed.timbreMod,
             volume: FANFARE_LEVELS[parsed.instrumentIndex],
-            soft: 0.012
+            soft: 0.012,
+            cleanupNode: panner
           });
           activeNodes.push(handle);
           onsets.push({ beat, at: noteStartTime, semi: note.semi });
         }
 
         // Visual callback sync
-        if (typeof onNoteCallback === 'function') {
+        if (typeof onNoteCallback === 'function' && !isOfflineContext(ctx)) {
           const delayMs = Math.max(0, (noteStartTime - ctx.currentTime) * 1000);
           const timerId = setTimeout(() => {
+            timers.delete(timerId);
             onNoteCallback(i, parsed.notes[note.index]);
           }, delayMs);
-          timers.push(timerId);
+          timers.add(timerId);
         }
 
         currentTime += nominalDuration;
@@ -2359,26 +2497,34 @@
       let next = now, repeat = 0;
       // Keep at least one full repeat queued ahead of the audio clock.
       const queue = () => {
+        pruneFinished();
         while (next < ctx.currentTime + period) { phrase(next, next + period, variations[repeat++ % variations.length]); next += period; }
-        timers.push(setTimeout(queue, period * 500));
+        if (!isOfflineContext(ctx)) {
+          const id = setTimeout(() => { timers.delete(id); queue(); }, period * 500);
+          timers.add(id);
+        }
       };
       queue();
     } else {
       const end = phrase(now);
-      if (typeof onNoteCallback === 'function') {
+      master.disconnectAfter(Math.max(0.5, end - ctx.currentTime + 1.55));
+      if (typeof onNoteCallback === 'function' && !isOfflineContext(ctx)) {
         const finishDelayMs = Math.max(0, (end - ctx.currentTime + 0.2) * 1000);
         const finishTimer = setTimeout(() => {
+          timers.delete(finishTimer);
           finished = true;
           onNoteCallback(-1, null); // -1 indicates playback finished
         }, finishDelayMs);
-        timers.push(finishTimer);
+        timers.add(finishTimer);
       }
     }
 
     const handle = {
       stop() {
         for (const timer of timers) clearTimeout(timer);
+        timers.clear();
         for (const node of activeNodes) node.stop();
+        activeNodes.length = 0;
         master.silence();
         if (!finished && typeof onNoteCallback === 'function') onNoteCallback(-1, null);
         finished = true;
@@ -2433,10 +2579,12 @@
     stop: stopAll
   };
 
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = api;
-  }
+  Object.freeze(api);
+  globalThis.ubuAudio = api;
   if (typeof window !== 'undefined') {
     window.ubuAudio = api;
+  }
+  if (typeof module === 'object' && module.exports) {
+    module.exports = api;
   }
 })();

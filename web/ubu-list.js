@@ -59,9 +59,19 @@
   function dateSpan(text) {
     const match = /^(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?$/.exec(text);
     if (!match) return null;
-    const [, y, m, d] = match.map(Number);
-    const start = new Date(y, m ? m - 1 : 0, d || 1);
-    const end = d ? new Date(y, m - 1, d + 1) : m ? new Date(y, m, 1) : new Date(y + 1, 0, 1);
+    const y = Number(match[1]);
+    const hasM = match[2] !== undefined, m = hasM ? Number(match[2]) : 1;
+    const hasD = match[3] !== undefined, d = hasD ? Number(match[3]) : 1;
+    if ((hasM && (m < 1 || m > 12)) || (hasD && (d < 1 || d > 31))) return null;
+    const localDate = (year, monthIndex, day) => {
+      const dt = new Date(0);
+      dt.setFullYear(year, monthIndex, day);
+      dt.setHours(0, 0, 0, 0);
+      return dt;
+    };
+    const start = localDate(y, m - 1, d);
+    if (start.getFullYear() !== y || start.getMonth() !== m - 1 || start.getDate() !== d) return null;
+    const end = hasD ? localDate(y, m - 1, d + 1) : hasM ? localDate(y, m, 1) : localDate(y + 1, 0, 1);
     return [start / 1000, end / 1000];
   }
   const OPS = { '>': (v, x) => v > x, '>=': (v, x) => v >= x, '<': (v, x) => v < x, '<=': (v, x) => v <= x, '=': (v, x) => v === x, ':': (v, x) => v === x };
@@ -73,12 +83,14 @@
   // A leading - excludes a term. Unknown terms are reported, never guessed.
   function parseQuery(query = '') {
     const tests = [], sorts = [], errors = [], compared = [];
-    for (const raw of query.match(/-?"[^"]*"?|\S+/g) || []) {
+    for (const raw of query.match(/-?(?:[A-Za-z]+(?:>=|<=|>|<|=|:))?"[^"]*"?|\S+/g) || []) {
       const negate = raw.length > 1 && raw[0] === '-';
-      const token = (negate ? raw.slice(1) : raw).toLowerCase().replace(/^"|"$/g, '');
+      const body = (negate ? raw.slice(1) : raw).toLowerCase();
       const add = test => tests.push(negate ? item => !test(item) : test);
-      const term = /^([a-z]+)(>=|<=|>|<|=|:)(.*)$/.exec(token);
+      const quotedWhole = body.startsWith('"');
+      const term = quotedWhole ? null : /^([a-z]+)(>=|<=|>|<|=|:)(.*)$/.exec(body);
       if (!term) {
+        const token = body.replace(/^"|"$/g, '');
         if (!token) continue;
         const digits = /^#?[0-9]+$/.test(token) ? token.replace('#', '').replace(/^0+(?=[0-9])/, '') : null;
         add(digits === null ? item => item.model.parts.fullName.toLowerCase().includes(token)
@@ -86,9 +98,11 @@
         continue;
       }
       let [, field, op, value] = term;
+      value = value.replace(/^"|"$/g, '');
       if (field === 'before' || field === 'after') { op = field === 'before' ? '<' : '>'; field = 'minted'; }
       const key = metricKey(field), fail = () => errors.push(raw);
       if (field === 'sort' && op === ':') {
+        if (negate || !value) { fail(); continue; }
         for (const part of value.split(',')) {
           const sortKey = metricKey(part.replace(/^-/, ''));
           if (sortKey) sorts.push({ key: sortKey, reverse: part.startsWith('-') }); else fail();
@@ -96,13 +110,14 @@
       } else if (field === 'is' && op === ':') {
         if (metricKey(value) === 'favorite') add(item => item.favorite); else fail();
       } else if (field === 'name' && op === ':') {
-        add(item => item.model.parts.fullName.toLowerCase().includes(value));
-      } else if (field === 'super' && op === ':' && !/^[0-9.]+$/.test(value)) {
+        if (!value) fail();
+        else add(item => item.model.parts.fullName.toLowerCase().includes(value));
+      } else if (field === 'super' && op === ':' && value && !/^[0-9.]+$/.test(value)) {
         const ids = value.split(',').map(name => name ? SUPER_NAMES.findIndex(s => s.startsWith(name)) : -1);
         if (ids.includes(-1)) fail(); else add(item => item.model.supers.some(id => ids.includes(id % 8)));
       } else if (field === 'grade') {
         const grades = value.split(',').map(g => GRADES.indexOf(g.toUpperCase()));
-        if (grades.includes(-1) || (grades.length > 1 && op !== ':')) fail();
+        if (!value || grades.includes(-1) || (grades.length > 1 && op !== ':')) fail();
         else add(item => grades.some(g => OPS[op](GRADES.indexOf(item.model.grade), g)));
       } else if (key === 'recent') {
         const span = dateSpan(value);
@@ -162,8 +177,8 @@
   const api = { STAT_GROUPS, GRADES, METRICS, DEFAULT_STATE, parseQuery, view, rarityScore, serialLabel };
   if (typeof module === 'object' && module.exports) { module.exports = api; return; }
 
-  const items = new Map(), keys = new Map();
-  let configRequest = null, loading = null, loaded = false, generation = 0, owner;
+  const items = new Map(), keys = new Map(), favVersions = new Map(), touchedSerials = new Set();
+  let configRequest = null, loading = null, loaded = false, generation = 0, accountEpoch = 0, favSeq = 0, owner;
   const changing = new Set();
   async function request(path, options) {
     const response = await fetch(path, options);
@@ -178,11 +193,26 @@
   async function trustedKey(mint, id) {
     const c = await config();
     if (!c.ready || mint !== c.mint || !Object.hasOwn(c.keys, id)) return null;
-    if (!keys.has(id)) keys.set(id, crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: c.keys[id], ext: true }, 'Ed25519', false, ['verify']));
-    return keys.get(id);
+    const cacheKey = `${c.mint}:${id}`;
+    if (!keys.has(cacheKey)) {
+      const promise = crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: c.keys[id] }, 'Ed25519', false, ['verify']);
+      promise.catch(() => keys.delete(cacheKey));
+      keys.set(cacheKey, promise);
+    }
+    return keys.get(cacheKey);
   }
   const changed = () => root.dispatchEvent(new CustomEvent('ubu-list:change'));
-  function reset() { generation++; items.clear(); loading = null; loaded = false; changed(); }
+  function reset() {
+    generation++;
+    accountEpoch++;
+    items.clear();
+    favVersions.clear();
+    touchedSerials.clear();
+    changing.clear();
+    loading = null;
+    loaded = false;
+    changed();
+  }
   // Another account's ubus never linger; the first session report only records the owner.
   root.addEventListener('ubu:session', event => {
     const next = event.detail?.owner || null;
@@ -190,32 +220,53 @@
     owner = next;
   });
 
-  async function record(row) {
+  async function record(row, pageFavSeq) {
+    const override = favVersions.get(row.serial);
+    const favorite = override && override.ver > pageFavSeq ? override.favorite : row.favorite;
     const old = items.get(row.serial);
-    if (old && old.certificate === row.certificate) return { ...old, favorite: row.favorite };
-    if (!row.certificate) return { serial: row.serial, favorite: row.favorite, pending: true };
+    if (old && old.certificate === row.certificate) return old.favorite === favorite ? old : { ...old, favorite };
+    if (!row.certificate) return old?.pending && old.favorite === favorite ? old : { serial: row.serial, favorite, pending: true };
     const result = await ubuFile.read(row.certificate, { allowUnsigned: false, resolveKey: trustedKey });
     const model = ubu.decode(ubu.fromCode(result.dna));
     return { serial: row.serial, certificate: row.certificate, result, model, rarity: root.rarity.scoreRarity(model),
-      issuedAt: result.certificate.issuedAt, favorite: row.favorite };
+      issuedAt: result.certificate.issuedAt, favorite };
   }
   // Reads every page; `refresh` refetches a loaded collection, keeping verified entries.
   function load({ refresh = false } = {}) {
     if (loading && !refresh) return loading;
     if (loaded && !refresh) return Promise.resolve();
     const run = ++generation;
+    const epoch = accountEpoch;
     loading = (async () => {
       // Only entries present at the start can be stale; ubus added meanwhile (a new pack) stay.
-      const before = new Set(items.keys()), seen = new Set();
-      let after = '';
+      const before = new Set(items.keys());
+      const beforePending = new Set([...items.values()].filter(i => i.pending).map(i => i.serial));
+      const seen = new Set();
+      touchedSerials.clear();
+      let after = '', pages = 0;
       try {
         do {
+          const pageFavSeq = favSeq;
           const data = await request('/api/ubus' + (after ? '?after=' + encodeURIComponent(after) : ''));
-          const page = await Promise.all(data.ubus.map(record));
-          if (run !== generation) return;
-          for (const item of page) { seen.add(item.serial); items.set(item.serial, item); }
+          pages++;
+          const page = await Promise.all(data.ubus.map(row => record(row, pageFavSeq)));
+          if (run !== generation) return epoch === accountEpoch && loading ? loading : undefined;
+          for (const item of page) {
+            const latestOverride = favVersions.get(item.serial);
+            const merged = latestOverride && latestOverride.ver > pageFavSeq && item.favorite !== latestOverride.favorite
+              ? { ...item, favorite: latestOverride.favorite }
+              : item;
+            seen.add(merged.serial);
+            items.set(merged.serial, merged);
+          }
           after = data.next;
-          if (!after) for (const serial of before) if (!seen.has(serial)) items.delete(serial);
+          if (!after) {
+            for (const serial of before) {
+              if (!seen.has(serial) && !touchedSerials.has(serial) && !(pages > 1 && beforePending.has(serial))) {
+                items.delete(serial);
+              }
+            }
+          }
           changed();
         } while (after);
         loaded = true;
@@ -223,9 +274,10 @@
     })();
     return loading;
   }
-  function add(item) { items.set(item.serial, item); changed(); }
+  function add(item) { touchedSerials.add(item.serial); items.set(item.serial, item); changed(); }
   async function post(path, data) {
     const session = root.getUbuSession?.() || await request('/api/session');
+    if (!session?.csrf) throw new Error('Sign in with Discord first.');
     return request(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf }, body: JSON.stringify(data) });
   }
   // The account's saved ububall teams: { teams: [{ name, slots }], last }, each slot { serial, super }.
@@ -235,10 +287,19 @@
     const item = items.get(serial);
     if (!item || changing.has(serial)) return;
     changing.add(serial);
+    const ver = ++favSeq;
+    favVersions.set(serial, { ver, favorite });
     try {
       const result = await post('/api/favorites', { serial, favorite });
+      favVersions.set(serial, { ver, favorite: result.favorite });
       const current = items.get(serial);
-      if (current) { current.favorite = result.favorite; changed(); }
+      if (current) {
+        if (current.favorite !== result.favorite) items.set(serial, { ...current, favorite: result.favorite });
+        changed();
+      }
+    } catch (error) {
+      if (favVersions.get(serial)?.ver === ver) favVersions.delete(serial);
+      throw error;
     } finally { changing.delete(serial); }
   }
 
@@ -399,7 +460,7 @@
   // Art is drawn cooperatively with a frame budget, cancelling tiles scrolled past
   // before draw and prioritizing the current viewport (newest intersections first).
   function lazyArt(scrollRoot) {
-    if (!('IntersectionObserver' in root)) return { watch: (node, draw) => draw() };
+    if (!('IntersectionObserver' in root)) return { watch: (node, draw) => draw(), unwatch() {} };
     const draws = new Map(), queue = [], inView = new Set();
     let ticking = false;
     function drain() {
@@ -431,7 +492,10 @@
       }
       if (inView.size && !ticking) { ticking = true; requestAnimationFrame(drain); }
     }, { root: scrollRoot || null, rootMargin: '400px' });
-    return { watch(node, draw) { draws.set(node, draw); observer.observe(node); } };
+    return {
+      watch(node, draw) { draws.set(node, draw); observer.observe(node); },
+      unwatch(node) { inView.delete(node); draws.delete(node); observer.unobserve(node); }
+    };
   }
 
   const BATCH = 120;
@@ -448,8 +512,11 @@
 
     function tile(item) {
       const cached = tiles.get(item.serial);
-      if (cached?.item === item) return cached;
-      if (cached) cached.item = item;
+      if (cached && Boolean(cached.item.pending) === Boolean(item.pending) && cached.item.certificate === item.certificate) {
+        cached.item = item;
+        return cached;
+      }
+      if (cached?.artBox) art.unwatch(cached.artBox);
       const wrap = el('div', { className: 'ubu-tile' });
       wrap.dataset.serial = item.serial;
       if (item.pending) {
@@ -461,17 +528,19 @@
       }
       const name = item.model.parts.fullName;
       const { main, artBox, value } = tileMain(item.model, serialLabel(item.serial));
-      main.onclick = () => (pick || inspect)(item);
+      const entry = { item, wrap, main, artBox, heart: null, value };
+      main.onclick = () => (pick || inspect)(entry.item);
       if (drag) draggable(main, item.serial);
       wrap.append(main);
       const heart = el('button', { type: 'button', className: 'card-heart ubu-tile-heart', title: 'Favorite' }, heartIcon());
       heart.setAttribute('aria-label', `Favorite ${name}`);
       heart.onclick = () => setFavorite(item.serial, !items.get(item.serial)?.favorite).catch(error => { if (status) status.textContent = 'Could not update favorite: ' + error.message; });
+      entry.heart = heart;
       wrap.append(heart);
       if (pick && inspect) {
         const info = el('button', { type: 'button', className: 'ubu-tile-inspect', title: 'Stats and details' }, icon('info-circle'));
         info.setAttribute('aria-label', `Inspect ${name}`);
-        info.onclick = () => inspect(item);
+        info.onclick = () => inspect(entry.item);
         wrap.append(info);
       }
       art.watch(artBox, () => {
@@ -479,17 +548,16 @@
         // Share one rasterized PNG Blob sprite per visual DNA across Collection,
         // the team picker and match views, releasing intermediate SVG filter trees.
         if (typeof ubuRender.spriteImg === 'function') {
-          artBox.prepend(ubuRender.spriteImg(item.model, 'ubu-tile-svg', 256));
+          artBox.prepend(ubuRender.spriteImg(entry.item.model, 'ubu-tile-svg', 256));
           return;
         }
-        const svg = ubuRender(item.model, 'ubu-tile-svg');
+        const svg = ubuRender(entry.item.model, 'ubu-tile-svg');
         const image = el('img', { className: 'ubu-tile-svg',
           alt: svg.getAttribute('aria-label'), decoding: 'async', draggable: false });
         image.src = 'data:image/svg+xml;charset=utf-8,' +
           encodeURIComponent(new XMLSerializer().serializeToString(svg));
         artBox.prepend(image);
       });
-      const entry = { item, wrap, main, heart, value };
       tiles.set(item.serial, entry);
       return entry;
     }

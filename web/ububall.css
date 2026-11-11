@@ -294,7 +294,7 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
     width: min(34rem, calc(100% - 2rem)); max-height: calc(100dvh - 1.5rem); overflow: auto;
     padding: .875rem;
   }
-  .pause-menu :is(h2, .pause-links) { grid-column: 1 / -1; margin: 0; }
+  .pause-menu :is(.pause-heading, .pause-links) { grid-column: 1 / -1; margin: 0; }
   .pause-settings { grid-template-columns: minmax(0, 1fr); margin: 0; padding: 0; border: 0; }
   body:has(.stadium:not(.portrait-mode)) #setting-sidebar { display: flex; }
 }
@@ -379,7 +379,6 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
 .stat-drawer .stat-val { width: 1.625rem; }
 .stat-drawer .stat-row { gap: .5rem; padding: .125rem 0; }
 .stat-drawer .stat-group-title { margin-top: .625rem; font-size: .6875rem; }
-.stat-drawer .stat-details > summary { display: none; }
 /* Hiding the sidebars gives the rink the whole width; the toggle shows only where sidebars do. */
 body.in-match.sidebars-hidden .team-column { display: none; }
 @media (orientation: portrait), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) { #btn-sidebars { display: none; } }
@@ -412,7 +411,6 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
   border-top: .0625rem solid #ffffff12;
   width: 100%;
 }
-.stat-details:not([open]) > .full-stats { display: none; }
 .stat-group-title {
   font-size: .5625rem;
   font-weight: 700;
@@ -492,39 +490,6 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
 .super-panel:hover .super-icon {
   transform: scale(1.08);
   transition: transform 0.15s ease;
-}
-.super-picker-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: .5rem;
-  margin: .625rem 0;
-}
-.super-picker-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: .25rem;
-  min-width: 0;
-  padding: .375rem .25rem;
-  overflow-wrap: anywhere;
-  background: var(--elevated);
-  border: .0625rem solid var(--border);
-  border-radius: .5rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  font-size: .625rem;
-  color: var(--text);
-}
-.super-picker-btn img {
-  width: 2rem;
-  height: 2rem;
-  object-fit: contain;
-  border-radius: .25rem;
-}
-.super-picker-btn[aria-pressed="true"] {
-  border-color: #ff7197;
-  background: color-mix(in srgb, #ff7197 20%, var(--elevated));
-  box-shadow: var(--bevel), 0 0 .625rem rgba(255, 113, 151, 0.4);
 }
 .super-pct {
   font-size: .625rem;
@@ -690,10 +655,15 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
   white-space: nowrap;
   font-size: .75rem;
 }
-.stadium-super-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .125rem; }
+.stadium-super-controls { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .125rem; }
 #super-info { padding: .125rem; min-width: 0; width: auto; }
 #super-info .icon { width: 1rem; height: 1rem; }
-#super-ready-hint { grid-column: 1 / -1; text-align: center; }
+#super-ready-hint:not([hidden]) {
+  position: absolute; left: 50%; bottom: calc(100% + .375rem); transform: translateX(-50%); z-index: 25;
+  padding: .1875rem .625rem; border-radius: 999px; border: .0625rem solid #ff7197;
+  background: var(--card); color: var(--text); font-size: .75rem; font-weight: 600; white-space: nowrap;
+  box-shadow: var(--panel-shadow); pointer-events: none;
+}
 .classic-match .stadium-super-controls { visibility: hidden; }
 .super-info-panel { max-width: min(18rem, calc(100vw - 2rem)); padding: .75rem; background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: .75rem; }
 .stadium-actions > #launch, #stadium-super-text { overflow: hidden; text-overflow: ellipsis; }
@@ -801,20 +771,11 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
 /* Separate selection, character actions, and the team-wide turn action. */
 .team .card-select { width: 100%; padding: 0; border: 0; background: transparent; text-align: left; }
 .team .card-select:disabled { opacity: 1; }
-.team .super-arm-btn { min-height: 1.875rem; text-transform: none; letter-spacing: normal; }
-.team .super-arm-btn:disabled { opacity: 1; background: transparent; border-color: transparent; box-shadow: none; }
-
-.stat-details > summary { font-size: .6875rem; color: var(--muted); cursor: pointer; margin-top: .5rem; }
-.ubu-stats-wrap:not(:has(.stat-details[open])) > .compact-stats { display: flex; }
-.ubu-stats-wrap:has(.stat-details[open]) > .compact-stats { display: none; }
-.stat-details[open] > .full-stats { display: flex; }
 
 /* Prominent ability art and touch-friendly spin control outside the aiming area. */
 .super-icon { width: 2.25rem; height: 2.25rem; padding: .125rem; }
 .super-name-badge { gap: .5rem; }
 .super-panel .super-name-badge span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.super-picker-btn img { width: 2.75rem; height: 2.75rem; }
-.stat-super-thumb { width: 2.5rem; height: 2.5rem; }
 /* Bare spin slider follows the selected ubu in screen space. */
 #field-spin { position: absolute; z-index: 30; display: flex; align-items: center; gap: .375rem; width: min(9.125rem, calc(100% - .75rem)); height: 2.75rem; margin: 0; padding: 0; }
 #field-spin[hidden] { display: none; }
@@ -856,13 +817,9 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
 .classic-match .super-panel { display: none; }
 .classic-match #stadium-super-btn { visibility: hidden; }
 #blitz-clock { font-weight: 800; color: var(--primary); font-variant-numeric: tabular-nums; margin-left: .375rem; }
-#match-mode, #cpu-level { padding: .625rem; background: var(--elevated); color: var(--text); border: .0625rem solid var(--border); border-radius: .5rem; }
-/* Online lobby stays outside the rink's sizing and rotation containers. */
-#online-dialog { width: min(35rem, calc(100vw * 0.94)); max-height: calc(100dvh * 0.9); overflow: auto; }
-#online-dialog label { display: block; margin: .75rem 0; }
-
 /* Online setup follows the site's slate modal and control palette. */
-#online-dialog { width: min(35rem, calc(100% - 1.5rem)); max-height: calc(100dvh - 1.5rem); padding: 1.5rem; border: .0625rem solid var(--border); border-radius: 1.375rem; background: var(--card); color: var(--text); }
+#online-dialog { width: min(35rem, calc(100% - 1.5rem)); max-height: calc(100dvh - 1.5rem); overflow: auto; padding: 1.5rem; border: .0625rem solid var(--border); border-radius: 1.375rem; background: var(--card); color: var(--text); }
+#online-dialog label { display: block; margin: .75rem 0; }
 #online-dialog::backdrop { background: #000b; }
 body:has(#online-dialog[open]) { overflow: hidden; }
 .online-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
@@ -877,8 +834,9 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .online-options button[aria-pressed="true"] { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--card)); color: var(--primary); }
 .online-hint { color: var(--muted); font-size: .75rem; line-height: 1.6; margin: .75rem 0 1.25rem; }
 #online-create { width: 100%; }
-#online-status:empty { display: none; }
-.online-account { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; margin-top: 1.25rem; padding-top: 1rem; border-top: .0625rem solid var(--border); color: var(--muted); font-size: .75rem; }
+#online-status { display: block; min-height: 1.25rem; margin: .625rem 0 0; font-size: .875rem; }
+#online-status[hidden], #online-status:empty { display: block; visibility: hidden; }
+.online-account { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; margin-top: .625rem; padding-top: 1rem; border-top: .0625rem solid var(--border); color: var(--muted); font-size: .75rem; }
 @media (orientation: portrait) and (max-width: 400px) { #online-dialog { padding: 1rem; } .online-options { grid-template-columns: 1fr; } }
 
 /* Super meter: a glint at the growing end on each gain, and a shimmer when full. */
@@ -1071,11 +1029,15 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .team-menu button { justify-content: flex-start; min-height: 2.25rem; border-radius: .5rem; background: none; font-size: .875rem; box-shadow: none; }
 .team-menu button:hover { background: var(--hover); }
 /* The online lobby's invite and status sit above the same team screen. */
-.lobby-panel { display: grid; gap: .375rem; margin-bottom: .5rem; padding: .625rem; border-radius: .875rem; background: var(--elevated); }
+.lobby-panel { position: relative; display: grid; gap: .375rem; margin-bottom: .5rem; padding: .625rem; border-radius: .875rem; background: var(--elevated); }
 .lobby-invite { display: flex; gap: .375rem; }
 .lobby-invite input { flex: 1; min-width: 0; padding: .5rem .625rem; border: .0625rem solid var(--border); border-radius: .625rem; background: var(--background); color: var(--text); font: .8125rem var(--font-body); }
 .lobby-invite button, .lobby-actions .button, .lobby-actions button { min-height: 2.25rem; padding: .375rem .75rem; font-size: .875rem; }
-.lobby-status { margin: 0; font-size: .875rem; }
+.lobby-status:not([hidden]) {
+  position: absolute; top: 3.125rem; inset-inline: .625rem; z-index: 2; margin: 0; padding: .5rem .625rem;
+  border: .0625rem solid var(--primary); border-radius: .625rem; background: var(--card); color: var(--text);
+  font-size: .875rem; box-shadow: var(--panel-shadow);
+}
 .lobby-note { margin: 0; color: var(--muted); font-size: .75rem; }
 .lobby-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .375rem; }
 [data-for="lobby"] #team-back[hidden] { display: none; }
@@ -1092,7 +1054,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 /* Picker tiles are smaller than Collection's; the toolbar stays put while the list scrolls. */
 .roster-toolbar { position: sticky; top: 0; z-index: 2; margin: 0 -1rem; padding: 0 1rem; background: var(--card); }
 .roster-toolbar .ubu-toolbar { margin: 0 0 .5rem; padding-top: .125rem; }
-.roster-grid { grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: .5rem; margin: 0; }
+.roster-grid { grid-template-columns: repeat(auto-fill, minmax(max(7rem, calc((100% - 1.625rem) / 4)), 1fr)); gap: .5rem; margin: 0; }
 .roster-grid .ubu-tile-main { gap: .25rem; padding: .75rem .25rem .5rem; border-radius: .875rem; background-color: var(--elevated); }
 .roster-grid .ubu-tile-art { width: 3.5rem; height: 3.5rem; }
 @media (orientation: portrait) and (max-width: 640px), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
@@ -1525,6 +1487,7 @@ body.replay-match .stadium-actions > :not(.replay-bar), body.replay-match #field
 .stats-event-time { min-width: 7.5rem; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; text-align: left; }
 button.stats-event-time { padding: 0; min-height: 0; border: 0; background: none; color: var(--primary); font: inherit; font-weight: 400; text-decoration: underline; }
 .stats-event-entry { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
+.stats-event-entry svg.icon { width: 1em; height: 1em; flex: none; }
 .stats-player { display: inline-flex; align-items: center; gap: .25em; padding: 0 .45em 0 .2em; border-radius: 1em; white-space: nowrap; }
 .stats-player img { display: block; width: 1em; height: 1em; }
 .stats-note { margin: .5rem 0 0; color: var(--muted); font-size: .6875rem; }
@@ -1555,9 +1518,6 @@ button.stats-event-time { padding: 0; min-height: 0; border: 0; background: none
   .super-row { font-size: .875rem; }
   .super-name-badge { font-size: .875rem; }
   .super-pct { font-size: .8125rem; }
-  .super-arm-btn { font-size: .8125rem; }
-  .super-select { font-size: .8125rem; }
-  .stunned-badge { font-size: .8125rem; }
 
   .knob b { font-size: .875rem; }
   .knob small { font-size: .8125rem; }
@@ -1566,8 +1526,6 @@ button.stats-event-time { padding: 0; min-height: 0; border: 0; background: none
   .setting-value { font-size: .8125rem; }
   .bug-tab { font-size: .8125rem; }
   .scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-status { font-size: .8125rem; }
-  .bug-mode { font-size: .8125rem; }
-  .bug-team { font-size: .8125rem; }
 
   .stat-drawer .card-titles strong { font-size: 1.25rem; }
   .stat-drawer .card-titles small { font-size: .875rem; }
@@ -1599,10 +1557,7 @@ button.stats-event-time { padding: 0; min-height: 0; border: 0; background: none
   .stats-table th { font-size: .8125rem; }
   .stats-table td { font-size: .875rem; }
   .stats-table .mvp-badge { font-size: .8125rem; }
-
   .stats-label { font-size: .8125rem; }
-  .stats-table th { font-size: .8125rem; }
-  .stats-table td { font-size: .875rem; }
   .stats-note { font-size: .8125rem; }
 
   .replay-time { font-size: .8125rem; }

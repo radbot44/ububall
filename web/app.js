@@ -4,45 +4,115 @@
   const screens = { '/': 'play', '/mint': 'mint', '/collection': 'collection' };
   const titles = { play: 'Ububall', mint: 'Ubu Mint · Ububall', collection: 'Collection · Ububall' };
   const screenOf = path => Object.hasOwn(screens, path) ? screens[path] : null;
-  let mintScripts = null;
+  const loadedScripts = new Map();
+  let guard = null;
+  let activeScreen = null;
+  let playUrl = (screenOf(location.pathname) || 'play') === 'play' ? location.href : '/';
+  let navToken = 0;
 
   // Ubu Mint and Collection share site.js; load it on the first visit to either screen, or when
-  // the team picker opens the ubu viewer.
+  // the team picker opens the ubu viewer. Failed scripts evict themselves so later visits can retry.
+  function loadScript(src) {
+    if (!loadedScripts.has(src)) {
+      const promise = new Promise((resolve, reject) => {
+        const script = Object.assign(document.createElement('script'), { src, async: false });
+        script.onload = resolve;
+        script.onerror = () => {
+          script.remove();
+          loadedScripts.delete(src);
+          reject(new Error(`Could not load ${src}.`));
+        };
+        document.head.append(script);
+      });
+      loadedScripts.set(src, promise);
+    }
+    return loadedScripts.get(src);
+  }
   function loadMintScripts() {
-    mintScripts ||= Promise.all(['pack-scene.js', 'site.js'].map(src => new Promise((resolve, reject) => {
-      const script = Object.assign(document.createElement('script'), { src, async: false });
-      script.onload = resolve; script.onerror = reject;
-      document.head.append(script);
-    })));
-    return mintScripts;
+    return Promise.all(['pack-scene.js', 'site.js'].map(loadScript));
   }
   window.loadMintScripts = loadMintScripts;
+  window.setUbuScreenGuard = fn => { guard = typeof fn === 'function' ? fn : null; };
+
+  const rememberPlayUrl = () => {
+    if ((screenOf(location.pathname) || 'play') === 'play') playUrl = location.href;
+  };
+  addEventListener('pointerdown', rememberPlayUrl, true);
+  addEventListener('keydown', rememberPlayUrl, true);
+
+  function closeTransientUI() {
+    for (const id of ['viewer', 'account-dialog']) {
+      const dlg = document.getElementById(id);
+      if (dlg?.open) dlg.close();
+    }
+    for (const pop of document.querySelectorAll('.game-popover, #more-menu')) {
+      if (pop.matches?.(':popover-open')) {
+        try { pop.hidePopover(); } catch {}
+      }
+    }
+  }
 
   function show() {
     const screen = screenOf(location.pathname) || 'play';
+    const prev = activeScreen;
+    activeScreen = screen;
+    if (screen === 'play') playUrl = location.href;
+    if (prev && prev !== screen) closeTransientUI();
     for (const el of document.querySelectorAll('[data-screen]')) el.hidden = el.dataset.screen !== screen;
     for (const link of document.querySelectorAll('.site-nav a')) {
       if (screenOf(new URL(link.href).pathname) === screen) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
     }
     document.title = titles[screen];
-    if (screen !== 'play') void loadMintScripts();
+    if (screen !== 'play') {
+      loadMintScripts().catch(() => {
+        const statusEl = document.getElementById(screen === 'mint' ? 'status' : 'collection-status');
+        if (statusEl) {
+          statusEl.textContent = 'Could not load this screen. Check your connection and try again.';
+          statusEl.hidden = false;
+        }
+      });
+    }
     window.dispatchEvent(new CustomEvent('ubu:screen', { detail: screen }));
   }
 
-  document.addEventListener('click', event => {
+  document.addEventListener('click', async event => {
     const link = event.target.closest('a[href]');
     if (!link || event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target || link.hasAttribute('download')) return;
     const url = new URL(link.href);
-    if (url.origin !== location.origin || !screenOf(url.pathname)) return;
+    const next = url.origin === location.origin ? screenOf(url.pathname) : null;
+    if (!next) return;
     event.preventDefault();
     document.getElementById('more-menu')?.hidePopover();
+    const current = activeScreen || screenOf(location.pathname) || 'play';
+    const token = ++navToken;
+    if (current === 'play' && next !== 'play' && guard) {
+      rememberPlayUrl();
+      if (await guard(next) === false || token !== navToken) return;
+    }
     if (url.href !== location.href) history.pushState(null, '', url);
     show();
     scrollTo(0, 0);
     document.body.scrollTo(0, 0);
   });
-  window.addEventListener('popstate', show);
+
+  window.addEventListener('popstate', async () => {
+    const next = screenOf(location.pathname) || 'play';
+    const current = activeScreen || 'play';
+    const savedPlayUrl = playUrl;
+    const token = ++navToken;
+    if (current === 'play' && next !== 'play' && guard) {
+      if (await guard(next) === false) {
+        if (token === navToken && location.href !== savedPlayUrl) {
+          history.pushState(null, '', savedPlayUrl);
+        }
+        return;
+      }
+      if (token !== navToken) return;
+    }
+    show();
+  });
+
   window.showUbuScreen = show;
   show();
   document.documentElement.classList.remove('booting');

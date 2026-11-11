@@ -222,6 +222,8 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const target = [...serials].sort()[0];
     assert.equal((await favorite({ serial: target, favorite: true })).status, 200);
     assert.equal((await favorite({ serial: target, favorite: true })).status, 200);
+    assert.equal((await favorite({ serial: [target], favorite: true })).status, 400);
+    assert.equal((await favorite({ serial: 100000000000, favorite: true })).status, 400);
     let favorites = await readCollection();
     assert.deepEqual(favorites.ubus.filter(row => row.favorite).map(row => row.serial), [target]);
     const another = [...serials].sort()[1];
@@ -239,6 +241,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const postTeams = (data, h = headers) => fetch('/api/teams', { method: 'POST', headers: h, body: JSON.stringify(data) });
     assert.deepEqual(await (await fetch('/api/teams', { headers })).json(), { teams: [], last: null });
     assert.equal((await postTeams(teams)).status, 200);
+    assert.equal((await postTeams({ teams: [{ name: 'BadArr', slots: [{ serial: [serials[0]], super: null }, { serial: [serials[0]], super: null }, { serial: [serials[0]], super: null }] }], last: null })).status, 400);
     assert.equal((await postTeams(teams, outsider)).status, 400);
     assert.equal((await postTeams(teams, { ...headers, 'X-Ubu-CSRF': 'wrong' })).status, 403);
     assert.deepEqual(await (await fetch('/api/teams', { headers: outsider })).json(), { teams: [], last: null });
@@ -352,6 +355,10 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await post('/api/ububall', { mode: 'standard' }, { ...headers, 'X-Ubu-CSRF': 'wrong' })).status, 403);
     assert.equal((await post('/api/ububall', { mode: 'standard', owner: 'forged' })).status, 400);
     assert.equal((await post('/api/ububall', { mode: 'standard', teams: 'owned' })).status, 400);
+    assert.equal((await post('/api/ububall', [], guestHeaders)).status, 400);
+    assert.equal((await post('/api/ububall', { mode: 'invalid' }, guestHeaders)).status, 400);
+    // Invalid match creation requests must not open the caller's signup starter pack as a side effect.
+    assert.equal((await (await fetch('/api/starter', { headers: guestHeaders })).json()).signup, true);
     const created = await post('/api/ububall', { mode: 'blitz' });
     assert.equal(created.status, 200, await created.clone().text());
     const { id } = await created.json(), base = '/api/ububall/' + id;
@@ -362,6 +369,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await (await fetch('/api/ubus', { headers: guestHeaders })).json()).ubus.length, 3);
     const outsider = await signedIn('567890123456789012');
     assert.equal((await post(base + '/join', {}, { ...headers, Cookie: outsider.cookie, 'X-Ubu-CSRF': outsider.csrf })).status, 400);
+    assert.equal((await (await fetch('/api/starter', { headers: { ...headers, Cookie: outsider.cookie, 'X-Ubu-CSRF': outsider.csrf } })).json()).signup, true);
     assert.equal((await fetch(base + '/socket', { headers: { ...headers, Upgrade: 'websocket', Origin: 'https://evil.example' } })).status, 403);
     async function connect(h, path = '/socket') {
       const response = await fetch(base + path, { headers: { ...h, Upgrade: 'websocket' } });
@@ -397,6 +405,15 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const watchOn = await (await post(base + '/allow-watch', { allowed: true }, guestHeaders)).json();
     assert.ok(watchOn.watchKey);
     const watchQuery = '?key=' + watchOn.watchKey;
+    // Standalone watch-state works even when DISCORD_ACTIVITY_BOT_TOKEN is unconfigured (null === null regression).
+    await server.update(options => ({ workers: options.workers.map(worker => {
+      const { DISCORD_ACTIVITY_BOT_TOKEN, ...restSecrets } = worker.secrets;
+      return { ...worker, secrets: restSecrets };
+    }) }));
+    assert.equal((await fetch(base + '/watch-state' + watchQuery)).status, 200);
+    await server.update(options => ({ workers: options.workers.map(worker => ({
+      ...worker, secrets: { ...worker.secrets, DISCORD_ACTIVITY_BOT_TOKEN: env.DISCORD_ACTIVITY_BOT_TOKEN }
+    })) }));
     const viewer = await connect({ Origin: env.ORIGIN }, '/watch-socket' + watchQuery);
     t.after(() => { try { viewer.ws.close(); } catch {} });
     const watching = await viewer.wait(m => m.phase === 'plan');
@@ -424,6 +441,10 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.deepEqual(observed.replay.plans, result.replay.plans);
     const nextTurn = await hostSocket.wait(m => m.phase === 'plan' && m.turn === 2);
     assert.equal(nextTurn.locked[0], false);
+    // Unlocked drafts persist across Durable Object hibernation/eviction, and missing sockets mark disconnected.
+    const unlockedDraft = structuredClone(moves); unlockedDraft[1].power = .4;
+    hostSocket.ws.send(JSON.stringify({ type: 'moves', turn: 2, moves: unlockedDraft, lock: false }));
+    await new Promise(resolve => setTimeout(resolve, 30));
     const viewerClosed = new Promise(resolve => viewer.ws.addEventListener('close', e => resolve(e.code), { once: true }));
     const revoked = await (await post(base + '/allow-watch', { allowed: false })).json();
     assert.deepEqual(revoked.connected, [true, true]);
@@ -437,6 +458,8 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     await server.getWorker().evictDurableObject('UBUBALL', { name: id });
     const recovered = await (await fetch(base + '/state', { headers })).json();
     assert.equal(recovered.turn, 2); assert.deepEqual(recovered.game.scores, [0, 0]);
+    assert.equal(recovered.moves[1].power, .4);
+    assert.deepEqual(recovered.connected, [false, false]);
 
     const owned = await (await post('/api/ububall', { mode: 'classic' })).json();
     const ownedBase = '/api/ububall/' + owned.id;
@@ -521,6 +544,8 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await post('/api/ububall/lobby', { action: 'poll', instance }, { headers })).status, 400);
     assert.equal((await lobby(outsider, 'poll', { instance })).status, 400);
     assert.equal((await lobby(a, 'poll', { target: a.owner, forged: true })).status, 400);
+    assert.equal((await lobby(a, 'challenge', { target: [b.owner] })).status, 400);
+    assert.equal((await post('/api/ububall/lobby', { instance: a.instance, connection: [a.connection], action: 'poll' }, a)).status, 400);
     const first = await checked(await lobby(a));
     assert.equal(first.users[0].status, 'idle'); assert.equal(first.assignment, null);
     assert.equal(first.users[0].avatar, 'a'.repeat(32));
@@ -680,7 +705,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const guestCookie = start.headers.get('Set-Cookie').split(';')[0], guestSession = await start.json();
     assert.equal(guestSession.owner, null); assert.equal(guestSession.guest, true);
     assert.deepEqual(await (await fetch('/api/session', { headers: { Cookie: guestCookie } })).json(), guestSession);
-    const g = { Cookie: guestCookie, Origin: env.ORIGIN, 'X-Ubu-CSRF': guestSession.csrf, 'Content-Type': 'application/json' };
+    const g = { Cookie: guestCookie, Origin: env.ORIGIN, 'Content-Type': 'application/json', 'X-Ubu-CSRF': guestSession.csrf };
     const post = (path, data, h) => fetch(path, { method: 'POST', headers: h, body: JSON.stringify(data) });
     assert.equal((await fetch('/api/ubus', { headers: g })).status, 403);
     assert.equal((await post('/api/favorites', { serials: [] }, g)).status, 403);
@@ -707,9 +732,12 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const discordCookie = signed.headers.getSetCookie().find(c => c.startsWith('__Host-ubu-session=')).split(';')[0];
     const discordSession = await (await fetch('/api/session', { headers: { Cookie: discordCookie } })).json();
     assert.equal(discordSession.name, 'Ubu Fan');
+    // Unauthenticated cross-site GET without X-Ubu-CSRF cannot mutate/claim the guest seat.
+    assert.equal((await fetch(base + '/state', { headers: { Cookie: discordCookie } })).status, 400);
     const d = { ...g, Cookie: discordCookie, 'X-Ubu-CSRF': discordSession.csrf };
     const claimed = await (await fetch(base + '/state', { headers: d })).json();
     assert.equal(claimed.seat, 0); assert.equal(claimed.guestTeam, null);
+    assert.equal((await (await fetch('/api/ubus', { headers: d })).json()).ubus.length, 3);
     assert.equal((await fetch(base + '/state', { headers: g })).status, 400);
     const rematch = await post(base + '/rematch', {}, d);
     assert.equal(rematch.status, 400); assert.match((await rematch.json()).error, /not over/);

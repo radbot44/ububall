@@ -13,6 +13,7 @@ function ububallOnline(hooks) {
   let pendingMatch = null, offerBusy = false;
   const connection = crypto.randomUUID(), requests = new AbortController();
   const userCards = new Map(), matchCards = new Map();
+  const readJson = response => response.json().catch(() => null);
   const showLoading = () => {
     for (const name of ['activity-loading', 'online-loading']) $(name).hidden = disposed || !(lobbyStarting || lobbyBusy || connecting);
   };
@@ -43,15 +44,16 @@ function ububallOnline(hooks) {
   }
   async function refreshSession() {
     const response = await fetch('/api/session', { signal: requests.signal });
-    if (!response.ok) throw new Error('Could not check your session. Reopen online settings to retry.');
-    session = await response.json();
+    const nextSession = response.ok ? await readJson(response) : null;
+    if (!response.ok || !nextSession) throw new Error('Could not check your session. Reopen online settings to retry.');
+    session = nextSession;
     account();
     const returnDest = invite ? '/?match=' + encodeURIComponent(invite) : (id ? '/?match=' + encodeURIComponent(id) : ((location.pathname === '/index.html' ? '/' : location.pathname) + location.search));
     $('online-login').href = $('lobby-login').href = '/auth/discord?return=' + encodeURIComponent(returnDest);
   }
   window.addEventListener('ubu:session', event => {
     if (!event.detail?.owner) {
-      if (session?.owner) { session = null; account(); }
+      if (session?.owner) { session = null; account(); if (lobby) renderLobby(lobby); }
       return;
     }
     if (session?.owner === event.detail.owner) return;
@@ -68,23 +70,24 @@ function ububallOnline(hooks) {
     if (!playable()) throw new Error('Sign in with Discord or play as a guest below.');
     const response = await fetch(path, { signal: requests.signal, headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf,
       ...(activity ? { 'X-Ubu-Connection': connection } : {}) }, ...(data === undefined ? {} : { method: 'POST', body: JSON.stringify(data) }) });
-    const result = await response.json();
+    const result = await readJson(response);
     if (disposed) throw new DOMException('Activity closed.', 'AbortError');
-    if (activity && (response.status === 401 || response.status === 403 && result.error === 'Invalid request origin or token.' ||
-        response.status === 409 && result.error === 'This Activity connection has ended.')) {
+    if (activity && (response.status === 401 || response.status === 403 && result?.error === 'Invalid request origin or token.' ||
+        response.status === 409 && result?.error === 'This Activity connection has ended.')) {
       dispose(); activity.dispose();
     }
     if (response.status === 401 && !activity) await refreshSession();
-    if (!response.ok) throw new Error(result.error || 'Could not reach the match.');
+    if (!response.ok || !result) throw new Error(result?.error || (response.status >= 500 ? 'Server unavailable. Try again shortly.' : 'Could not reach the match.'));
     return result;
   }
   async function watchState(match, key) {
-    if (key === 'activity') return api('/api/ububall/' + match + '/activity-watch-state');
+    const encodedMatch = encodeURIComponent(match);
+    if (key === 'activity') return api('/api/ububall/' + encodedMatch + '/activity-watch-state');
     if (activity) await lobbyReady;
-    const response = await fetch('/api/ububall/' + match + '/watch-state?key=' + encodeURIComponent(key), {
+    const response = await fetch('/api/ububall/' + encodedMatch + '/watch-state?key=' + encodeURIComponent(key), {
       signal: requests.signal, headers: activity ? { 'X-Ubu-Connection': connection } : {} });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Could not reach the match.');
+    const result = await readJson(response);
+    if (!response.ok || !result) throw new Error(result?.error || (response.status >= 500 ? 'Server unavailable. Try again shortly.' : 'Could not reach the match.'));
     return result;
   }
   function updateWatchControls(next) {
@@ -161,7 +164,7 @@ function ububallOnline(hooks) {
     connecting = true; showLoading();
     const path = watchKey === 'activity' ? '/activity-watch-socket?connection=' + connection :
       watchKey ? '/watch-socket?key=' + encodeURIComponent(watchKey) + (activity ? '&connection=' + connection : '') : '/socket' + (activity ? '?connection=' + connection : '');
-    const current = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/ububall/' + id + path);
+    const current = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/ububall/' + encodeURIComponent(id) + path);
     socket = current;
     function ended(code) {
       if (![4001, 4002, 4003].includes(code)) return false;
@@ -176,7 +179,9 @@ function ububallOnline(hooks) {
     current.onopen = () => { lastPong = Date.now(); connecting = false; showLoading(); };
     current.onmessage = event => {
       if (socket !== current) return;
-      const data = JSON.parse(event.data); lastPong = Date.now();
+      let data;
+      try { data = JSON.parse(event.data); } catch { return; }
+      lastPong = Date.now();
       if (data.type === 'ended') { if (!stopped && !ended(data.code)) current.close(); return; }
       if (data.type === 'state') receive(data);
       if (data.type === 'error') { lastDraft = ''; status(data.error, true); hooks.onError(data.error); }
@@ -205,7 +210,7 @@ function ububallOnline(hooks) {
     $('online-dialog').close();
     const url = new URL(location.href); url.pathname = '/';
     url.searchParams.delete(key ? 'match' : 'watch');
-    if (key === 'activity') { url.searchParams.delete('match'); url.searchParams.delete('watch'); }
+    if (activity || key === 'activity') { url.searchParams.delete('match'); url.searchParams.delete('watch'); }
     else url.searchParams.set(key ? 'watch' : 'match', key ? id + '.' + key : id);
     history.replaceState(null, '', url);
     window.showUbuScreen?.(); // A match can start while the Activity shows Ubu Mint or Collection.
@@ -235,7 +240,7 @@ function ububallOnline(hooks) {
     const offer = pendingMatch;
     if (!offer || offerBusy) return;
     try {
-      const fresh = await api('/api/ububall/' + offer.id + '/state');
+      const fresh = await api('/api/ububall/' + encodeURIComponent(offer.id) + '/state');
       if (offer !== pendingMatch || offerBusy || fresh.phase !== 'over') return;
       pendingMatch = null; $('activity-match-offer').close();
       await offer.ack();
@@ -252,13 +257,14 @@ function ububallOnline(hooks) {
     offerBusy = true;
     $('activity-match-join').disabled = $('activity-match-keep-cpu').disabled = true;
     try {
+      const encodedOfferId = encodeURIComponent(offer.id);
       if (join) {
-        const fresh = await api('/api/ububall/' + offer.id + '/state');
+        const fresh = await api('/api/ububall/' + encodedOfferId + '/state');
         if (fresh.phase === 'over') throw new Error('Your opponent left before the match started.');
         pendingMatch = null; $('activity-match-offer').close();
         await enter(offer.id, fresh);
       } else {
-        await api('/api/ububall/' + offer.id + '/leave', {});
+        await api('/api/ububall/' + encodedOfferId + '/leave', {});
         pendingMatch = null; $('activity-match-offer').close();
         hooks.resumeCpu();
       }
@@ -292,7 +298,7 @@ function ububallOnline(hooks) {
     const wasStopped = stopped;
     stopped = true;
     if (!watchKey) {
-      try { await api('/api/ububall/' + id + '/leave', {}); }
+      try { await api('/api/ububall/' + encodeURIComponent(id) + '/leave', {}); }
       catch (error) { stopped = wasStopped; hooks.onError(error.message); return false; }
     }
     stopped = true; connecting = false; showLoading();
@@ -335,9 +341,9 @@ function ububallOnline(hooks) {
     finally { $('online-create').disabled = !playable(); }
   };
   async function guestSession() {
-    const response = await fetch('/api/guest', { method: 'POST' });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Could not start a guest session.');
+    const response = await fetch('/api/guest', { method: 'POST', signal: requests.signal });
+    const result = await readJson(response);
+    if (!response.ok || !result) throw new Error(result?.error || 'Could not start a guest session.');
     session = result; account();
   }
   async function ensureSession() {
@@ -376,13 +382,15 @@ function ububallOnline(hooks) {
       if (disposed || switching && action !== 'cancel') return;
       if (result.status === 'matched') {
         const ack = () => api('/api/ububall/queue', { ...destination, action: 'ack', id: result.id });
-        if (activity && action === 'cancel') {
-          await api('/api/ububall/' + result.id + '/leave', {});
+        const encodedId = encodeURIComponent(result.id);
+        if (action === 'cancel') {
+          await api('/api/ububall/' + encodedId + '/leave', {});
           await ack();
           setQueue(null);
+          status('');
           return;
         }
-        const initial = await api('/api/ububall/' + result.id + '/join', {});
+        const initial = await api('/api/ububall/' + encodedId + '/join', {});
         if (switching) return;
         setQueue(null);
         await takeMatch(result.id, initial, ack);
@@ -419,7 +427,7 @@ function ububallOnline(hooks) {
     switching = true;
     try {
       if (id && !await leave()) return false;
-      if (next === 'cpu') { hooks.playCpu(); status(''); return true; }
+      if (next === 'cpu') { await hooks.playCpu(); status(''); return true; }
       if (next === 'watch' && hooks.cpuActive() && !await gameUi.confirm({ title: 'Watch this match?',
         message: 'Watching will end your CPU match.', confirmLabel: 'Watch match', cancelLabel: 'Keep playing CPU' })) return false;
       clearTimeout(queueTimer);
@@ -440,7 +448,8 @@ function ububallOnline(hooks) {
   const labels = { idle: 'Not ready', ready: 'Ready', balling: 'Balling', spectating: 'Spectating' };
   function renderLobby(result) {
     lobby = result;
-    const me = result.users.find(user => user.owner === session.owner);
+    const owner = session?.owner ?? null;
+    const me = owner ? result.users.find(user => user.owner === owner) : null;
     $('activity-online-count').textContent = result.users.length + ' online';
     const challenge = result.challenges[0];
     const available = !pendingMatch && !lobbyBusy && !switching && !challenge;
@@ -474,14 +483,15 @@ function ububallOnline(hooks) {
         };
         userCards.set(user.owner, card);
       }
-      const own = user.owner === session.owner, name = user.name || 'Player';
-      const avatar = card.children[0];
-      if (avatar.dataset.avatar !== (user.avatar || 'default')) {
-        avatar.dataset.avatar = user.avatar || 'default'; avatar.textContent = name.slice(0, 2).toUpperCase();
+      const own = Boolean(owner && user.owner === owner), name = user.name || 'Player';
+      const initials = name.slice(0, 2).toUpperCase();
+      const avatar = card.children[0], avatarKey = `${user.avatar || 'default'}:${initials}`;
+      if (avatar.dataset.avatar !== avatarKey) {
+        avatar.dataset.avatar = avatarKey; avatar.textContent = initials;
         if (user.avatar) {
           const image = Object.assign(document.createElement('img'), { alt: '', referrerPolicy: 'no-referrer',
-            src: `https://cdn.discordapp.com/avatars/${user.owner}/${user.avatar}.png?size=128` });
-          image.onerror = () => { avatar.textContent = name.slice(0, 2).toUpperCase(); }; avatar.replaceChildren(image);
+            src: `https://cdn.discordapp.com/avatars/${encodeURIComponent(user.owner)}/${encodeURIComponent(user.avatar)}.png?size=128` });
+          image.onerror = () => { avatar.textContent = initials; }; avatar.replaceChildren(image);
         }
       }
       card.children[1].textContent = name; card.children[2].textContent = labels[user.status];
@@ -515,10 +525,10 @@ function ububallOnline(hooks) {
     for (let index = 0; index < nodes.length; index++) if (list.children[index] !== nodes[index]) list.insertBefore(nodes[index], list.children[index] || null);
     if (focused?.isConnected && document.activeElement !== focused && list.contains(focused)) focused.focus({ preventScroll: true });
     $('activity-challenge').hidden = !challenge;
-    document.querySelector('.site-nav a[href="/"]').classList.toggle('has-notice', challenge?.target === session.owner);
+    document.querySelector('.site-nav a[href="/"]')?.classList.toggle('has-notice', Boolean(owner && challenge?.target === owner));
     for (const action of ['accept', 'decline', 'cancel']) $('activity-challenge-' + action).disabled = lobbyBusy;
     if (challenge) {
-      const incoming = challenge.target === session.owner;
+      const incoming = Boolean(owner && challenge.target === owner);
       const other = result.users.find(user => user.owner === (incoming ? challenge.sender : challenge.target));
       $('activity-challenge-message').textContent = incoming ? `${other?.name || 'A player'} challenged you!` : `Challenge to ${other?.name || 'your opponent'}`;
       $('activity-challenge-accept').hidden = $('activity-challenge-decline').hidden = !incoming;
@@ -550,7 +560,7 @@ function ububallOnline(hooks) {
           await queueTask;
           if (switching) return true;
           setQueue(null);
-          const initial = await api('/api/ububall/' + result.assignment + '/join', {});
+          const initial = await api('/api/ububall/' + encodeURIComponent(result.assignment) + '/join', {});
           await takeMatch(result.assignment, initial, () => api('/api/ububall/lobby', {
             action: 'ack', instance: activity.instance, connection, id: result.assignment, match: result.assignment }));
         }
@@ -604,7 +614,7 @@ function ububallOnline(hooks) {
   }
   window.addEventListener('ubu:activity-leave', dispose, { signal: requests.signal });
   window.addEventListener('ubu:activity-participants', event => {
-    if (disposed || !lobby) return;
+    if (disposed || !lobby || !session?.owner) return;
     if (!event.detail.includes(session.owner)) { dispose(); activity.dispose(); return; }
     renderLobby(lobby);
     clearTimeout(reconcileTimer);
@@ -641,7 +651,7 @@ function ububallOnline(hooks) {
   async function toggleWatch(button) {
     if (!state || watchKey) return;
     button.disabled = true;
-    try { receive(await api('/api/ububall/' + id + '/allow-watch', { allowed: !state.watchAllowed })); }
+    try { receive(await api('/api/ububall/' + encodeURIComponent(id) + '/allow-watch', { allowed: !state.watchAllowed })); }
     catch (error) { status(error.message, true); hooks.onError(error.message); }
     finally { button.disabled = false; }
   }
@@ -671,7 +681,7 @@ function ububallOnline(hooks) {
     button.onclick = () => toggleWatch(button);
     copy.onclick = async () => {
       if (!state?.watchAllowed) return;
-      try { receive(await api('/api/ububall/' + id + '/share-watch', {})); }
+      try { receive(await api('/api/ububall/' + encodeURIComponent(id) + '/share-watch', {})); }
       catch (error) { status(error.message, true); return; }
       const link = new URL('/', session?.site || window.location.origin);
       link.searchParams.set('watch', id + '.' + state.watchKey);
@@ -690,7 +700,7 @@ function ububallOnline(hooks) {
     catch { $('online-invite').select(); status('Could not copy the invite.', true); }
   };
   $('online-forfeit').onclick = async () => {
-    try { receive(await api('/api/ububall/' + id + '/forfeit', {})); }
+    try { receive(await api('/api/ububall/' + encodeURIComponent(id) + '/forfeit', {})); }
     catch (error) { hooks.onError(error.message); }
   };
   $('online-guest').onclick = async () => {
@@ -732,15 +742,15 @@ function ububallOnline(hooks) {
     contextChanged() { if (!disposed && lobby) renderLobby(lobby); },
     leave,
     // Locks in a team: owned seats send serials in Back, Top, Bottom order; every seat sends supers.
-    async ready(team) { receive(await api('/api/ububall/' + id + '/team', { ...team, gameNumber: state.gameNumber })); },
-    async unready() { receive(await api('/api/ububall/' + id + '/unready', {})); },
-    async rules(mode, gameNumber) { receive(await api('/api/ububall/' + id + '/rules', { mode, gameNumber })); },
+    async ready(team) { receive(await api('/api/ububall/' + encodeURIComponent(id) + '/team', { ...team, gameNumber: state.gameNumber })); },
+    async unready() { receive(await api('/api/ububall/' + encodeURIComponent(id) + '/unready', {})); },
+    async rules(mode, gameNumber) { receive(await api('/api/ububall/' + encodeURIComponent(id) + '/rules', { mode, gameNumber })); },
     create(mode) { createMode = mode; $('online-mode-name').textContent = ububallMatch.modeName(mode); showDialog(true); },
     now: () => Date.now() + offset,
     async skipReplay() {
       if (watchKey || state?.phase !== 'resolving' || state.replay?.goal == null || state.playUntil !== null) return;
       const match = id;
-      const next = await api('/api/ububall/' + match + '/skip-replay', { startedAt: state.replay.startedAt });
+      const next = await api('/api/ububall/' + encodeURIComponent(match) + '/skip-replay', { startedAt: state.replay.startedAt });
       if (id === match) receive(next);
     },
     rematch() {
@@ -748,7 +758,7 @@ function ububallOnline(hooks) {
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'rematch' }));
       } else {
-        api('/api/ububall/' + id + '/rematch', {}).then(receive).catch(error => hooks.onError(error.message));
+        api('/api/ububall/' + encodeURIComponent(id) + '/rematch', {}).then(receive).catch(error => hooks.onError(error.message));
       }
     },
     send(moves, lock = false) {

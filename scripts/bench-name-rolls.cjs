@@ -110,7 +110,7 @@ const hybridStream = `class BenchRandom {
           this.value = this.value * 4294967296 + this.next32();
           this.range *= 4294967296;
         }
-        const limit = this.range - (this.range % n);
+        const limit = rangeLimit(this.range, n);
         if (this.value < limit) {
           const result = this.value % n;
           this.value = (this.value - result) / n;
@@ -122,6 +122,7 @@ const hybridStream = `class BenchRandom {
       }
     }
   }
+  function rangeLimit(range, n) { return range - (range % n); }
   function randomForState(state) { return new BenchRandom(state); }
   `;
 let hybridSource = source.slice(0, streamStart) + hybridStream + source.slice(streamEnd);
@@ -153,11 +154,16 @@ const plannedWord = `const VY_UP = [...V].flatMap(v => Array(6).fill(v)).concat(
   const V5_VY_TAIL = V5_LO.flatMap(() => VY_LO);                // 155
 
   const BENCH_PLANS = new Map([
+    ['VY_UP', [{ pool: VY_UP }]], ['VY_LO', [{ pool: VY_LO }]], ['V5_LO', [{ pool: V5_LO }]],
+    ['C0_LO', [{ pool: C0_LO }]], ['C1_LO', [{ pool: C1_LO }]], ['VV_LO', [{ pool: VV_LO }]],
+    ['CC0_LO', [{ pool: CC0_LO }]], ['CC1_LO', [{ pool: CC1_LO }]],
     ['WORD_2', [{ pool: WORD_2 }]],
     ['CAP_CV', [{ pool: CAP_CV }]], ['LOW_CV', [{ pool: LOW_CV }]],
     ['CAP_VC', [{ pool: CAP_VC }]], ['LOW_VC', [{ pool: LOW_VC }]],
     ['CAP_CVV', [{ pool: CAP_CVV }]], ['LOW_VVC1', [{ pool: LOW_VVC1 }]],
-    ['LOW_C1V', [{ pool: LOW_C1V }]], ['LOW_V5C', [{ pool: LOW_V5C }]]
+    ['LOW_C1V', [{ pool: LOW_C1V }]], ['LOW_V5C', [{ pool: LOW_V5C }]],
+    ['VY_PAIR_HEAD', [{ pool: VY_PAIR_HEAD }]], ['VY_PAIR_TAIL', [{ pool: VY_PAIR_TAIL }]],
+    ['V5_VY_HEAD', [{ pool: V5_VY_HEAD }]], ['V5_VY_TAIL', [{ pool: V5_VY_TAIL }]]
   ]);
 
   function word6(random) {
@@ -252,8 +258,8 @@ for (const api of apis.slice(1)) for (let i = 0; i < 128; i++) {
   assert.deepEqual(b, a);
 }
 const planStats = compile(hybridSource.replace('const api = { decode,',
-  'const api = { planStats: () => { let entries=0, chars=0; for (const ops of BENCH_PLANS.values()) for (const op of ops) { entries += op.pool.length; for (const word of op.pool) chars += word.length; } return {patterns: BENCH_PLANS.size, entries, chars}; }, decode,')).planStats();
-console.log('Hybrid table footprint (logical entries, including reused pools; not measured heap bytes):', planStats);
+  'const api = { planStats: () => { let entries=0, chars=0; for (const ops of BENCH_PLANS.values()) for (const op of ops) { entries += op.pool.length; for (const word of op.pool) chars += word.length; } return {tables: BENCH_PLANS.size, entries, chars}; }, decode,')).planStats();
+console.log('Hybrid table footprint (all precomputed pools, logical entries & chars; not V8 heap bytes):', planStats);
 console.log('Additional generated source bytes:', Buffer.byteLength(hybridSource) - Buffer.byteLength(source));
 console.table(diagnostics);
 console.log('Unbiased independent bounded draws assume independent uniform source words; a 64-bit seeded PRNG cannot provide unlimited exact independence.');
@@ -272,7 +278,7 @@ function run(api, work, n = count) {
   return elapsed;
 }
 function median(values) {
-  const sorted = values.toSorted((a, b) => a - b);
+  const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
 }
 console.log(`Node ${process.version}, ${process.platform}/${process.arch}`);
@@ -304,4 +310,3 @@ for (const [label, work] of workloads) {
 console.table(rows);
 assert.ok(Number.isFinite(sink));
 console.log('CPU microbenchmark only; excludes signing, database, rendering, network and cold startup. No runtime generator changes.');
-

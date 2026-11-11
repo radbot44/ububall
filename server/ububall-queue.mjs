@@ -3,6 +3,15 @@ import { DurableObject } from 'cloudflare:workers';
 const waitingMs = 20000;
 const assignmentMs = 120000;
 const matchMs = 86400000;
+const CLIENT_LOBBY_ERRORS = new Set([
+  'This Activity connection has ended.', 'You have left this Activity.',
+  'Could not finish leaving the match.', 'Could not set up the match. Try again.',
+  'Could not check the current match.', 'Leave the current game before readying up.',
+  'You are already in another queue.', 'Could not cancel the assigned match.',
+  'This player is no longer available.', 'Finish your pending challenge first.',
+  'This player already has a pending challenge.', 'This challenge is no longer available.',
+  'A player is no longer available.'
+]);
 
 export class UbuballQueue extends DurableObject {
   constructor(ctx, env) {
@@ -43,7 +52,10 @@ export class UbuballQueue extends DurableObject {
     for (const row of this.sql.exec(`SELECT c.owner, c.connection FROM lobby_connections c JOIN lobby_members m ON m.owner = c.owner
       WHERE c.closed = 1`).toArray()) {
       try { await this.depart(row.owner, row.connection); }
-      catch { this.sql.exec('UPDATE lobby_members SET expires = ? WHERE owner = ?', now + 1000, row.owner); }
+      catch {
+        this.sql.exec('UPDATE lobby_members SET expires = ? WHERE owner = ?', now + 1000, row.owner);
+        this.sql.exec('UPDATE lobby_connections SET expires = MAX(expires, ?) WHERE owner = ?', now + 1000, row.owner);
+      }
     }
     this.sql.exec('DELETE FROM queue WHERE expires <= ?', now);
     this.sql.exec('DELETE FROM activity_matches WHERE expires <= ?', now);
@@ -53,8 +65,8 @@ export class UbuballQueue extends DurableObject {
       (SELECT 1 FROM lobby_members WHERE owner = sender AND lobby_members.scope = challenges.scope) OR NOT EXISTS
       (SELECT 1 FROM lobby_members WHERE owner = target AND lobby_members.scope = challenges.scope)`, now);
     const next = this.sql.exec(`SELECT min(expires) AS at FROM (SELECT expires FROM queue UNION ALL SELECT expires FROM activity_matches
-      UNION ALL SELECT expires FROM lobby_members UNION ALL SELECT expires FROM challenges)`).one().at;
-    if (next !== null) await this.ctx.storage.setAlarm(next);
+      UNION ALL SELECT expires FROM lobby_members UNION ALL SELECT expires FROM lobby_connections UNION ALL SELECT expires FROM challenges)`).one().at;
+    if (next !== null) await this.ctx.storage.setAlarm(Math.max(now + 1, next));
   }
 
   async alarm() { return this.ctx.blockConcurrencyWhile(() => this.expire(Date.now())); }
@@ -77,6 +89,11 @@ export class UbuballQueue extends DurableObject {
         method: 'POST', headers: { 'X-Match-Owner': owner, 'X-Match-Connection': connection || '' }
       });
       if (!response.ok) throw new Error('Could not finish leaving the match.');
+      const result = await response.json().catch(() => ({}));
+      if (result.created === false) {
+        this.sql.exec('DELETE FROM queue WHERE match = ?', match);
+        this.sql.exec("UPDATE lobby_members SET match = NULL, status = 'idle' WHERE match = ?", match);
+      }
     }
     this.sql.exec('DELETE FROM lobby_members WHERE owner = ?', owner);
   }
@@ -113,6 +130,8 @@ export class UbuballQueue extends DurableObject {
       if (!opponent) { await this.expire(now); return { status: 'waiting' }; }
       entry.match = crypto.randomUUID();
       this.sql.exec('UPDATE queue SET match = ?, expires = ? WHERE owner IN (?, ?)', entry.match, now + assignmentMs, owner, opponent.owner);
+      this.clearChallenges(owner);
+      this.clearChallenges(opponent.owner);
     }
     await this.expire(now);
     await this.ensureMatch({ ...entry, scope }, now);
@@ -130,7 +149,7 @@ export class UbuballQueue extends DurableObject {
       });
       if (!response.ok) throw new Error('Could not set up the match. Try again.');
       if (entry.scope !== 'public') {
-        this.sql.exec('INSERT OR IGNORE INTO activity_matches VALUES (?, ?, ?)', entry.match, entry.scope, now + matchMs);
+        this.sql.exec('INSERT OR IGNORE INTO activity_matches (id, scope, expires) VALUES (?, ?, ?)', entry.match, entry.scope, now + matchMs);
       }
     }
   }
@@ -149,7 +168,7 @@ export class UbuballQueue extends DurableObject {
   reserveChallenge(id, players, scope, now) {
     // Reserve both seats before contacting the match object. A retry creates the same match.
     for (const owner of players) {
-      this.sql.exec('INSERT OR REPLACE INTO queue VALUES (?, ?, 0, ?, ?, ?, 1)', owner, scope, now, now + assignmentMs, id);
+      this.sql.exec('INSERT OR REPLACE INTO queue (owner, scope, guest, entered, expires, match, challenge) VALUES (?, ?, 0, ?, ?, ?, 1)', owner, scope, now, now + assignmentMs, id);
       this.sql.exec("UPDATE lobby_members SET match = ?, status = 'balling' WHERE owner = ?", id, owner);
       this.clearChallenges(owner);
     }
@@ -165,6 +184,7 @@ export class UbuballQueue extends DurableObject {
           if (lease) await this.depart(owner, lease.connection);
           this.sql.exec('INSERT OR REPLACE INTO lobby_connections (owner, scope, launch, issued, connection, closed, expires) VALUES (?, ?, ?, ?, ?, 1, ?)',
             owner, scope, profile.launch, profile.issued, data.connection, profile.expires);
+          await this.expire(now);
           return { users: [], challenges: [], assignment: null };
         }
         if (data.action === 'leave' && lease.launch === profile.launch && lease.connection === data.connection) {
@@ -200,7 +220,7 @@ export class UbuballQueue extends DurableObject {
         }
         if (!activeMatch && data.cpu) status = 'cpu';
         this.sql.exec('UPDATE lobby_connections SET matches = ? WHERE owner = ?', JSON.stringify([activeMatch, watching].filter(Boolean)), owner);
-        this.sql.exec(`INSERT INTO lobby_members VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        this.sql.exec(`INSERT INTO lobby_members (owner, scope, name, avatar, expires, match, status, watching) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(owner) DO UPDATE SET name=excluded.name, avatar=excluded.avatar, expires=excluded.expires,
           match=excluded.match, status=excluded.status, watching=excluded.watching`, owner, scope, profile.name, profile.avatar, now + waitingMs, activeMatch, status, watching);
         if (!['idle', 'cpu'].includes(status)) {
@@ -220,9 +240,14 @@ export class UbuballQueue extends DurableObject {
             const response = await this.match(assignment.match).fetch('https://match/leave', {
               method: 'POST', headers: { 'X-Match-Owner': owner }
             });
-            if (!response.ok) throw new Error('Could not cancel the assigned match.');
-            this.sql.exec("UPDATE lobby_members SET match = NULL, status = 'idle' WHERE owner = ?", owner);
-            this.sql.exec('DELETE FROM queue WHERE owner = ?', owner);
+            if (!response.ok && response.status !== 404) throw new Error('Could not cancel the assigned match.');
+            if (response.status === 404) {
+              this.sql.exec('DELETE FROM queue WHERE match = ?', assignment.match);
+              this.sql.exec("UPDATE lobby_members SET match = NULL, status = 'idle' WHERE match = ?", assignment.match);
+            } else {
+              this.sql.exec("UPDATE lobby_members SET match = NULL, status = 'idle' WHERE owner = ?", owner);
+              this.sql.exec('DELETE FROM queue WHERE owner = ?', owner);
+            }
           } else if (!assignment?.match) this.sql.exec('DELETE FROM queue WHERE owner = ? AND scope = ?', owner, scope);
         } else if (data.action === 'challenge') {
           const target = this.sql.exec('SELECT * FROM lobby_members WHERE owner = ? AND scope = ?', data.target, scope).toArray()[0];
@@ -237,7 +262,7 @@ export class UbuballQueue extends DurableObject {
           }
           // Challenging is a deliberate choice; stop the sender from being automatically paired.
           this.sql.exec('DELETE FROM queue WHERE owner = ? AND match IS NULL', owner);
-          this.sql.exec('INSERT INTO challenges VALUES (?, ?, ?, ?, ?)', crypto.randomUUID(), scope, owner, target.owner, now + 30000);
+          this.sql.exec('INSERT INTO challenges (id, scope, sender, target, expires) VALUES (?, ?, ?, ?, ?)', crypto.randomUUID(), scope, owner, target.owner, now + 30000);
         } else if (['accept', 'decline', 'cancel'].includes(data.action)) {
           const challenge = this.sql.exec('SELECT * FROM challenges WHERE id = ? AND scope = ?', data.id, scope).toArray()[0];
           if (!challenge || (data.action === 'cancel' ? challenge.sender !== owner : challenge.target !== owner)) {
@@ -270,19 +295,22 @@ export class UbuballQueue extends DurableObject {
         await this.expire(now);
         const users = this.sql.exec(`SELECT m.owner, m.name, m.avatar, m.match, m.status = 'cpu' AS cpu,
           CASE WHEN m.status NOT IN ('idle', 'cpu') THEN m.status
+          WHEN q.match IS NOT NULL THEN 'balling'
           WHEN q.owner IS NOT NULL AND q.match IS NULL THEN 'ready' WHEN m.status = 'cpu' THEN 'balling' ELSE 'idle' END AS status
           FROM lobby_members m LEFT JOIN queue q ON q.owner = m.owner
           WHERE m.scope = ? ORDER BY m.rowid LIMIT 200`, scope).toArray();
         const challenges = this.sql.exec('SELECT * FROM challenges WHERE scope = ? AND (sender = ? OR target = ?)', scope, owner, owner).toArray();
         const matches = {};
-        for (const match of new Set(users.map(user => user.match).filter(Boolean))) {
+        await Promise.all([...new Set(users.map(user => user.match).filter(Boolean))].map(async match => {
           const response = await this.match(match).fetch('https://match/lobby-info', { headers: { 'X-Match-Activity': scope.slice(9) } });
           if (response.ok) matches[match] = await response.json();
-        }
+        }));
         return { users, challenges, matches, assignment: assignment?.match || null };
       } catch (error) {
         // A rejected command must not reset the coordinator or invalidate other callers.
-        return { error: error.message };
+        if (CLIENT_LOBBY_ERRORS.has(error.message)) return { error: error.message };
+        console.error(error);
+        return { error: 'Online lobby unavailable. Try again.' };
       }
     });
   }
@@ -290,8 +318,11 @@ export class UbuballQueue extends DurableObject {
   async watch(scope) {
     const candidates = this.sql.exec('SELECT id FROM activity_matches WHERE scope = ? AND expires > ? ORDER BY expires DESC LIMIT 12',
       scope, Date.now()).toArray();
+    const activity = scope.startsWith('activity:') ? scope.slice(9) : '';
     const results = await Promise.all(candidates.map(async ({ id }) => {
-      const response = await this.match(id).fetch('https://match/watch-info');
+      const response = await this.match(id).fetch('https://match/watch-info', {
+        headers: activity ? { 'X-Match-Activity': activity } : {}
+      });
       return response.ok ? { id, ...await response.json() } : null;
     }));
     return results.filter(Boolean);

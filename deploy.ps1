@@ -13,7 +13,7 @@ function Run([string]$Program, [string[]]$Arguments) {
 }
 Push-Location $PSScriptRoot
 try {
-    $wranglerPath = [regex]::Escape($PSScriptRoot + '\node_modules\wrangler\')
+    $wranglerPath = [regex]::Escape($PSScriptRoot + '\node_modules\')
     $modulesPath = $PSScriptRoot + '\node_modules\'
     $busy = @(Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='esbuild.exe' OR Name='workerd.exe'" | Where-Object {
         ($_.CommandLine -and $_.CommandLine.Replace('/', '\') -match $wranglerPath) -or
@@ -29,7 +29,7 @@ try {
     Run icacls.exe @($SettingsDirectory, '/inheritance:r', '/grant:r', "*${sid}:(OI)(CI)F", '*S-1-5-18:(OI)(CI)F')
     if ($Setup) {
         if (Test-Path (Join-Path $SettingsDirectory 'settings.json')) { throw 'Settings already exist; refusing to replace them.' }
-        if ((Test-Path 'wrangler.local.jsonc') -or (Test-Path '.dev.vars')) { throw 'Existing local settings found. Run deploy.ps1 without -Setup to recover them; do not create a replacement mint.' }
+        if ((Test-Path 'wrangler.local.jsonc') -or (Test-Path 'wrangler.deploy.jsonc') -or (Test-Path '.dev.vars')) { throw 'Existing local settings found. Run deploy.ps1 without -Setup to recover them; do not create a replacement mint.' }
         $inputSettings = @{
             name = (Read-Host 'Cloudflare Worker name')
             origin = (Read-Host 'Website origin (https://..., no trailing slash)')
@@ -43,11 +43,13 @@ try {
     } else {
         Run node @('scripts/deploy-config.cjs', 'recover', $SettingsDirectory)
     }
-    $backup = Join-Path $SettingsDirectory ('backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
-    New-Item -ItemType Directory -Force -Path $backup | Out-Null
-    Copy-Item -LiteralPath (Join-Path $SettingsDirectory 'settings.json') -Destination $backup
-    foreach ($legacy in @('wrangler.jsonc', 'wrangler.local.jsonc', 'wrangler.deploy.jsonc', '.dev.vars')) {
-        if (Test-Path -LiteralPath $legacy) { Copy-Item -LiteralPath $legacy -Destination $backup }
+    if (!$DryRun) {
+        $backup = Join-Path $SettingsDirectory ('backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+        New-Item -ItemType Directory -Force -Path $backup | Out-Null
+        Copy-Item -LiteralPath (Join-Path $SettingsDirectory 'settings.json') -Destination $backup
+        foreach ($legacy in @('wrangler.jsonc', 'wrangler.local.jsonc', 'wrangler.deploy.jsonc', '.dev.vars')) {
+            if (Test-Path -LiteralPath $legacy) { Copy-Item -LiteralPath $legacy -Destination $backup }
+        }
     }
     Run npm.cmd @('ci', '--no-audit', '--no-fund')
     Run npm.cmd @('test')

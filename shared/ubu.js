@@ -141,6 +141,9 @@
     }
   }
   function ubunym(state) {
+    if (typeof state !== 'bigint' || state < 0n || state > MASK) {
+      throw new RangeError('Seed must be an unsigned 64-bit BigInt.');
+    }
     const random = new NameRandom(state);
     const nomen = word6(random);
     const length = [2, 3, 4, 6][random.flags & 3];
@@ -162,9 +165,13 @@
   }
   function read(dna, start, width) {
     const i = start >> 3;
-    return (((dna[i] << 16) | (dna[i + 1] << 8) | dna[i + 2]) >>> (24 - (start & 7) - width)) & ((1 << width) - 1);
+    const b2 = i + 2 < 128 ? dna[i + 2] : 0;
+    return (((dna[i] << 16) | (dna[i + 1] << 8) | b2) >>> (24 - (start & 7) - width)) & ((1 << width) - 1);
   }
   function curve(value) {
+    if (!Number.isInteger(value) || value < 0 || value > 1023) {
+      throw new RangeError('Curve value must be an integer from 0 to 1023.');
+    }
     const t = (value - 511) / (value <= 511 ? 511 : 512);
     return t * t * t;
   }
@@ -177,6 +184,9 @@
     return normal + c * (c <= 0 ? normal - min : max - normal);
   }
   function grade(value) {
+    if (!Number.isInteger(value) || value < 0 || value > 1023) {
+      throw new RangeError('Ubuquity rating must be an integer from 0 to 1023.');
+    }
     return value < 300 ? 'C' : value < 600 ? 'B' : value < 750 ? 'A' : value < 900 ? 'S' : value < 1000 ? 'S+' : value < 1021 ? 'U' : 'UBU';
   }
   function pairRolls(dna, start) {
@@ -343,11 +353,12 @@
     }
     return path;
   }
+  const textEncoder = new TextEncoder();
   async function fromText(text) {
-    const encoder = new TextEncoder();
+    if (typeof text !== 'string') throw new TypeError('Text seed must be a string.');
     const [h1, h2] = await Promise.all([
-      root.crypto.subtle.digest('SHA-512', encoder.encode(text)),
-      root.crypto.subtle.digest('SHA-512', encoder.encode(text + '\x01'))
+      root.crypto.subtle.digest('SHA-512', textEncoder.encode(text)),
+      root.crypto.subtle.digest('SHA-512', textEncoder.encode(text + '\x01'))
     ]);
     const dna = new Uint8Array(128);
     dna.set(new Uint8Array(h1), 0);
@@ -362,6 +373,7 @@
     return btoa(String.fromCharCode(...dna)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
   function fromCode(text) {
+    if (typeof text !== 'string') throw new TypeError('DNA code must be a string.');
     if (/^[0-9a-fA-F]{256}$/.test(text)) return Uint8Array.from(text.match(/../g), pair => parseInt(pair, 16));
     if (!/^[A-Za-z0-9_-]{171}$/.test(text)) throw new Error('Use 171-character base64url DNA or 256 hexadecimal characters.');
     const bytes = Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/') + '='), ch => ch.charCodeAt(0));
@@ -369,6 +381,7 @@
     return bytes;
   }
   const api = { decode, fromText, randomDNA, toCode, fromCode, mouthPath, eyePolygon, grade, curve, statMultiplier, ubunym };
+  Object.freeze(api);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.ubu = api;
 })(globalThis);

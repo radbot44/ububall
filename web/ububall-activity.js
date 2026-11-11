@@ -43,8 +43,10 @@
     if (closed) throw new DOMException('Activity closed.', 'AbortError');
     const response = await fetch('/auth/activity', { method: 'POST', signal: lifetime.signal, headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, instance: sdk.instanceId }) });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Discord sign-in failed.');
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result) {
+      throw new Error(result?.error || (response.status >= 500 ? 'Discord sign-in is temporarily unavailable. Reopen the Activity to retry.' : 'Discord sign-in failed.'));
+    }
     await sdk.commands.authenticate({ access_token: result.access_token });
     if (closed) throw new DOMException('Activity closed.', 'AbortError');
     await sdk.subscribe('ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE', updateParticipants);
@@ -59,7 +61,7 @@
   }
 
   window.ubuActivity = {
-    instance,
+    get instance() { return sdk?.instanceId || instance; },
     get signal() { return lifetime.signal; },
     get participants() { return participants; },
     dispose,

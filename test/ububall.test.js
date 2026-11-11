@@ -1955,3 +1955,90 @@ test('Hip Clips impart higher spin on fast glancing opponent checks, bend trajec
     assert.ok(kineticEnergy([a, c]) <= ke0 * (1 + 1e-12), `Hip Clip KE invariant failed at deg=${deg}, stab=${stab}, spin=${spin}`);
   }
 });
+
+test('Sticky-held ball checks all overlapping skaters, strips on opponent contact, and reports carrier on friendly bumps', () => {
+  const b = P.kickoff();
+  b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  Object.assign(b[0], { x: 400, y: 300, vx: 0, vy: 0, superActive: 'sticky', superTicks: 400, holding: true });
+  Object.assign(b[6], { x: 443, y: 300, vx: 0, vy: 0, stickOffset: { x: 43, y: 0 }, stuckTicks: 10, strikerTeam: 0 });
+  Object.assign(b[1], { x: 443, y: 300 - (b[1].radius + b[6].radius - 1), vx: 0, vy: 0 });
+  Object.assign(b[3], { x: 443 + b[3].radius + b[6].radius - 1, y: 300, vx: -500, vy: 0 });
+  P.step([b[0], b[1], b[3], b[6]], P.DT);
+  assert.equal(b[0].holding, false, 'opponent knocks Sticky ball loose even when a 3rd skater overlaps');
+
+  const fb = P.kickoff();
+  fb.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  Object.assign(fb[0], { x: 400, y: 300, vx: 0, vy: 0, superActive: 'sticky', superTicks: 400, holding: true });
+  Object.assign(fb[6], { x: 443, y: 300, vx: 0, vy: 0, stickOffset: { x: 43, y: 0 }, stuckTicks: 10, strikerTeam: 0 });
+  Object.assign(fb[1], { x: 443 + fb[1].radius + fb[6].radius - 1, y: 300, vx: -260, vy: 0 });
+  const pairs = [];
+  P.step([fb[0], fb[1], fb[6]], 0, (x, y) => pairs.push([x, y]));
+  assert.equal(fb[0].holding, true, 'teammate bump does not strip Sticky carrier');
+  assert.ok(pairs.length > 0 && pairs.every(([x, y]) => x.team !== -1 && y.team !== -1),
+    'non-stripping Sticky assembly bump reports skater-skater contact so ball credit stays with carrier');
+});
+
+test('Stalwart preserves KE when sliding, stays immovable at rest, and does not zero pinch KE budgets', () => {
+  const s = P.kickoff();
+  P.applyStats(s[0], { ...normal, strength: 255 });
+  P.applyStats(s[3], { ...normal, stability: 0 });
+  s[0].superActive = 'stalwart';
+  s[0].superTicks = 400;
+  Object.assign(s[0], { x: 400, y: 300, vx: 360, vy: 0 });
+  Object.assign(s[3], { x: 400 + s[0].radius + s[3].radius - 0.5, y: 300, vx: 0, vy: 0 });
+  const slidePair = [s[0], s[3]];
+  const keBeforeSlide = kineticEnergy(slidePair);
+  P.step(slidePair, 0);
+  assert.ok(kineticEnergy(slidePair) <= keBeforeSlide * (1 + 1e-12), 'sliding Stalwart check respects pair KE budget');
+  assert.equal(s[0].omega, 0, 'Stalwart takes zero spin');
+
+  const a = P.kickoff();
+  P.applyStats(a[0], normal);
+  P.applyStats(a[3], { ...normal, strength: 255, stability: 0 });
+  a[0].superActive = 'stalwart';
+  a[0].superTicks = 400;
+  Object.assign(a[0], { x: 400, y: 300, vx: 0, vy: 0 });
+  Object.assign(a[3], { x: 400 + a[0].radius + a[3].radius - 0.5, y: 300, vx: -500, vy: 0 });
+  const anchorPair = [a[0], a[3]];
+  const keBeforeAnchor = kineticEnergy(anchorPair);
+  P.step(anchorPair, 0);
+  assert.equal(a[0].vx, 0);
+  assert.equal(a[0].vy, 0);
+  assert.ok(kineticEnergy(anchorPair) <= keBeforeAnchor * (1 + 1e-12), 'stationary Stalwart rebound respects incoming KE');
+
+  const p = P.kickoff();
+  P.applyStats(p[0], normal);
+  P.applyStats(p[3], normal);
+  p[0].superActive = 'stalwart';
+  p[0].superTicks = 400;
+  Object.assign(p[0], { x: 400, y: 300, vx: 0, vy: 0 });
+  Object.assign(p[6], { x: 400 + p[0].radius + p[6].radius - 0.5, y: 300, vx: 0, vy: 0 });
+  Object.assign(p[3], { x: p[6].x + p[3].radius + p[6].radius - 0.5, y: 300, vx: -550, vy: 0 });
+  const pinch = [p[0], p[3], p[6]];
+  const kePinch0 = kineticEnergy(pinch);
+  P.step(pinch, 0);
+  assert.ok(Math.hypot(p[3].vx, p[3].vy) > 10 || Math.hypot(p[6].vx, p[6].vy) > 10, 'pinch against Stalwart does not zero all velocities');
+  assert.ok(kineticEnergy(pinch) <= kePinch0 * (1 + 1e-12), 'Stalwart pinch preserves total KE');
+});
+
+test('goal-pocket walls contain skaters nudged into net roof/floor, corner center overlap stays finite, and zero-power launch keeps spin', () => {
+  const pocket = P.kickoff()[0];
+  P.applyStats(pocket, normal);
+  Object.assign(pocket, { x: 35, y: P.rink.goalTop + pocket.radius - 2, vx: 0, vy: -300 });
+  P.step([pocket], P.DT);
+  assert.ok(pocket.x < P.rink.left, 'skater remains in goal pocket');
+  assert.ok(pocket.y >= P.rink.goalTop + pocket.radius - 1e-9, `goal roof contains skater (y=${pocket.y})`);
+  assert.ok(pocket.vy >= 0, 'goal roof reflects upward velocity downward');
+
+  const deg = P.kickoff()[0];
+  P.applyStats(deg, normal);
+  Object.assign(deg, { x: 160, y: 160, vx: -100, vy: -100 });
+  P.step([deg], 0);
+  assert.ok(Number.isFinite(deg.x) && Number.isFinite(deg.y) && Number.isFinite(deg.vx) && Number.isFinite(deg.vy));
+
+  const coast = P.kickoff();
+  P.applyStats(coast[0], normal);
+  Object.assign(coast[0], { vx: 250, vy: 0, omega: 4 });
+  P.launch(coast, [{ angle: 0, power: 0, spin: 1 }]);
+  assert.equal(coast[0].omega, 4, 'power=0 launch leaves existing omega untouched');
+});

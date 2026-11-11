@@ -4,6 +4,7 @@
   const node = typeof module === 'object' && module.exports;
   const P = node ? require('../web/ububall-physics.js') : root.ububallPhysics;
   const M = node ? require('./ububall-match.js') : root.ububallMatch;
+  const U = node ? require('./ubu.js') : root.ubu;
   const FORMAT = 6, MAX_BYTES = 8 << 20, MAX_TEXT = 64 << 20, MAX_TURNS = 5000;
   // Automatically saved matches kept on this device; the oldest unpinned go first.
   const KEEP = 25, MAX_TITLE = 80;
@@ -11,6 +12,8 @@
   const NUMBERS = ['x', 'y', 'vx', 'vy', 'omega', 'rotation', 'radius', 'mass', 'friction', 'grip', 'maxSpin', 'team', 'slot', 'curveFactor',
     'sizeMult', 'baseMass', 'baseRadius', 'baseFriction', 'baseReach', 'baseStrength', 'baseStability', 'baseBounciness', 'impulse', 'curveMult', 'bounciness', 'power', 'reach', 'strength', 'stability',
     'meter', 'meterTick', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'ironCooldownTicks', 'pace', 'strikerPower', 'strikerTeam', 'strikerSlot'];
+  const POSITIVE = new Set(['radius', 'mass', 'maxSpin', 'sizeMult', 'baseMass', 'baseRadius', 'baseReach', 'baseStrength', 'baseStability', 'baseBounciness', 'impulse', 'curveMult', 'bounciness', 'power', 'reach', 'strength', 'stability', 'strikerPower']);
+  const NONNEGATIVE = new Set(['friction', 'baseFriction', 'grip', 'curveFactor', 'meter', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'ironCooldownTicks', 'pace']);
   const FLAGS = ['superArm', 'guarding', 'ironGuard', 'usedSuperThisTurn', 'superHit', 'superRefunded', 'openingShot', 'spinStruck', 'snapStruck', 'shockwaveFired', 'carded', 'stunned', 'stunnedNext', 'onFire', 'holding'];
   const BODY = [...NUMBERS, ...FLAGS, 'superActive', 'equippedSuper', 'stickOffset'];
   const REQUIRED = ['x', 'y', 'vx', 'vy', 'omega', 'radius', 'mass', 'team'];
@@ -94,13 +97,28 @@
   const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
   const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
   function exact(v, keys) { if (!object(v) || Object.keys(v).length !== keys.length || keys.some(k => !Object.hasOwn(v, k))) fail(); }
+  function validNumber(key, v) {
+    if (!Number.isFinite(v)) return false;
+    if (POSITIVE.has(key)) {
+      if (v <= 0) return false;
+      if ((key === 'radius' || key === 'baseRadius') && v > 60) return false;
+      if ((key === 'mass' || key === 'baseMass') && v > 20) return false;
+    } else if (NONNEGATIVE.has(key)) {
+      if (v < 0) return false;
+      if (key === 'meter' && v > 100) return false;
+      if ((key === 'superTicks' || key === 'superHoldTicks') && (!Number.isInteger(v) || v > 2400)) return false;
+      if (key === 'fireTicks' && (!Number.isInteger(v) || v > P.FIRE_TICKS)) return false;
+      if (key === 'ironCooldownTicks' && (!Number.isInteger(v) || v > P.IRON_COOLDOWN_TICKS)) return false;
+    }
+    return true;
+  }
   function body(b, i) {
     if (!object(b) || Object.keys(b).some(k => !BODY.includes(k)) || REQUIRED.some(k => !Object.hasOwn(b, k))) fail();
     const out = {};
     for (const key of BODY) {
       if (!Object.hasOwn(b, key)) continue;
       const v = b[key];
-      if (NUMBERS.includes(key) ? !Number.isFinite(v) : FLAGS.includes(key) ? typeof v !== 'boolean'
+      if (NUMBERS.includes(key) ? !validNumber(key, v) : FLAGS.includes(key) ? typeof v !== 'boolean'
         : key === 'superActive' ? v !== null && !P.SUPERS.some(s => s.key === v)
         : key === 'equippedSuper' ? v !== null && !int(v, 0, P.SUPERS.length - 1)
         : key === 'stickOffset' ? v !== null && (exact(v, ['x', 'y']), !Number.isFinite(v.x) || !Number.isFinite(v.y))
@@ -108,6 +126,11 @@
       out[key] = v;
     }
     if (out.team !== (i < 3 ? 0 : i < 6 ? 1 : -1)) fail();
+    if (i < 6) {
+      if (out.slot !== undefined && out.slot !== i % 3) fail();
+    } else if (out.holding || out.equippedSuper != null || out.superActive) {
+      fail();
+    }
     return out;
   }
   function move(p) {
@@ -117,7 +140,7 @@
     return plan(p);
   }
   const index = v => v === null || int(v, 0, 5);
-  function turn(t) {
+  function turn(t, mode) {
     exact(t, ['turn', 'scores', 'fouls', 'bodies', 'plans', 'ticks', 'goal', 'cards', 'saves', 'stops']);
     const f = t.fouls;
     exact(f, ['crease', 'corner', 'cornerTurns']);
@@ -125,12 +148,13 @@
         !Array.isArray(f.crease) || f.crease.length !== 2 || !f.crease.every(c => typeof c === 'boolean') ||
         !(f.corner === null || int(f.corner, 0, 3)) || !int(f.cornerTurns, 0, M.FOULS.stallTurns) ||
         !Array.isArray(t.bodies) || t.bodies.length !== 7 || !Array.isArray(t.plans) || t.plans.length !== 6 ||
-        !int(t.ticks, 1, M.turnTicks('standard')) || !Array.isArray(t.cards) || !t.cards.every(c => int(c, 0, 5)) || new Set(t.cards).size !== t.cards.length) fail();
+        !int(t.ticks, 1, M.turnTicks(mode)) || !Array.isArray(t.cards) || !t.cards.every(c => int(c, 0, 5)) || new Set(t.cards).size !== t.cards.length) fail();
     let goal = null;
     if (t.goal !== null) {
       exact(t.goal, ['team', 'label', 'scorer', 'assist']);
       const g = t.goal;
       if (!int(g.team, 0, 1) || typeof g.label !== 'string' || g.label.length > 24 || !index(g.scorer) || !index(g.assist)) fail();
+      if (g.scorer === null ? g.assist !== null : (Math.floor(g.scorer / 3) !== g.team || (g.assist !== null && (g.assist === g.scorer || Math.floor(g.assist / 3) !== g.team)))) fail();
       goal = { team: g.team, label: g.label, scorer: g.scorer, assist: g.assist };
     }
     // Saves and hit-stops as live play showed them, by tick (1 is the turn's first), in tick order.
@@ -138,8 +162,10 @@
     if (!Array.isArray(t.saves) || !t.saves.every((s, i) => (exact(s, ['tick', 'index', 'own', 'iron']), at(t.saves, i) && int(s.index, 0, 5) &&
         typeof s.own === 'boolean' && typeof s.iron === 'boolean')) ||
         !Array.isArray(t.stops) || !t.stops.every((s, i) => (exact(s, ['tick', 'ms']), at(t.stops, i) && int(s.ms, 1, 1000)))) fail();
+    const bodies = t.bodies.map(body);
+    if (bodies.filter(b => b.holding).length > 1) fail();
     return { turn: t.turn, scores: [...t.scores], fouls: { crease: [...f.crease], corner: f.corner, cornerTurns: f.cornerTurns },
-      bodies: t.bodies.map(body), plans: t.plans.map(move), ticks: t.ticks, goal, cards: [...t.cards],
+      bodies, plans: t.plans.map(move), ticks: t.ticks, goal, cards: [...t.cards],
       saves: t.saves.map(s => ({ tick: s.tick, index: s.index, own: s.own, iron: s.iron })), stops: t.stops.map(s => ({ tick: s.tick, ms: s.ms })) };
   }
   // The replay in file order, or an error naming why it cannot be played.
@@ -154,22 +180,38 @@
         !(r.title === null || (typeof r.title === 'string' && r.title.length <= MAX_TITLE && r.title.trim() === r.title && r.title)) ||
         !Array.isArray(r.names) || r.names.length !== 2 || !r.names.every(n => typeof n === 'string' && n.length <= 64) ||
         !Array.isArray(r.ubus) || r.ubus.length !== 6 || !Array.isArray(r.turns) || !r.turns.length || r.turns.length > MAX_TURNS) fail();
+    if (r.anonymous) {
+      const expectedNames = r.seat ? [ANONYMOUS[1], ANONYMOUS[0]] : ANONYMOUS;
+      if (r.names[0] !== expectedNames[0] || r.names[1] !== expectedNames[1]) fail();
+    }
     const classic = M.rule(r.mode, 'classic');
     const ubus = r.ubus.map(u => {
       exact(u, ['dna', 'super']);
       // Canonical unpadded base64url for 128 bytes: the last character ends in two zero padding bits.
-      if (typeof u.dna !== 'string' || !/^[A-Za-z0-9_-]{170}[AEIMQUYcgkosw048]$/.test(u.dna) || (r.anonymous && !/^A{10}[A-P]/.test(u.dna)) || (classic ? u.super !== null : !int(u.super, 0, P.SUPERS.length - 1))) fail();
+      // Zeroing the 64-bit name seed zeroes bits 0..63 (10 'A' chars = 60 bits, plus top 4 bits of char 10 = [A-D]).
+      if (typeof u.dna !== 'string' || !/^[A-Za-z0-9_-]{170}[AEIMQUYcgkosw048]$/.test(u.dna) ||
+          (r.anonymous && !/^A{10}[A-D]/.test(u.dna)) ||
+          (classic ? u.super !== null : !int(u.super, 0, P.SUPERS.length - 1))) fail();
+      if (!classic && U) {
+        const model = U.decode(U.fromCode(u.dna));
+        if (!model.supers.some(s => s % 8 === u.super)) fail();
+      }
       return { dna: u.dna, super: u.super };
     });
+    const turns = r.turns.map(t => turn(t, r.mode));
     let final = null;
     if (r.final !== null) {
       if (r.clip) fail();
       exact(r.final, ['scores', 'winner']);
       if (!Array.isArray(r.final.scores) || r.final.scores.length !== 2 || !r.final.scores.every(s => int(s, 0, 5)) || !int(r.final.winner, 0, 1)) fail();
-      final = { scores: [...r.final.scores], winner: r.final.winner };
+      const w = r.final.winner, last = turns[turns.length - 1];
+      if (r.final.scores[w] !== 5 || r.final.scores[1 - w] >= 5 || !last.goal || last.goal.team !== w ||
+          last.scores[0] + (last.goal.team === 0 ? 1 : 0) !== r.final.scores[0] ||
+          last.scores[1] + (last.goal.team === 1 ? 1 : 0) !== r.final.scores[1]) fail();
+      final = { scores: [...r.final.scores], winner: w };
     }
     return { type: 'ububall-replay', format: FORMAT, physics: P.VERSION, mode: r.mode, seat: r.seat, title: r.title, clip: r.clip, anonymous: r.anonymous, names: [...r.names], ubus,
-      recorded: r.recorded, final, turns: r.turns.map(turn) };
+      recorded: r.recorded, final, turns };
   }
   async function pipe(bytes, stream, limit) {
     const reader = new Blob([bytes]).stream().pipeThrough(stream).getReader(), chunks = [];
@@ -205,11 +247,11 @@
   // Rebuild the box score and Game Log together, in the recording's rink order.
   function stats(replay) {
     const six = () => Array(6).fill(0);
-    const out = { goals: six(), assists: six(), shots: six(), saves: six(), checks: six(), cards: six(),
+    const out = { goals: six(), assists: six(), shots: six(), saves: six(), bigSaves: six(), checks: six(), cards: six(),
       touches: six(), passes: six(), skated: six(), control: [0, 0], side: [0, 0], rounds: [], events: [], trails: [] };
     const counts = { Goal: out.goals, Assist: out.assists, Shot: out.shots, Save: out.saves,
       Check: out.checks, Touch: out.touches, Pass: out.passes, Foul: out.cards };
-    // The engine also tallies its baseline events for top speed and big saves.
+    // The engine tallies top shot speed; saves and big saves come from the recorded turn saves.
     const engine = M.newTally(), origins = Array(6).fill(null);
     let play = M.newPlay(), last = null, lastTick = -Infinity, clock = 0, tick, turn, turnIndex, flight = null;
     const where = body => ({ x: body.x, y: body.y, tick, turn, turnIndex });
@@ -280,7 +322,8 @@
         tick = ++clock;
         contact = post = null;
         for (let i = 0; i < 6; i++) { before[i * 2] = sim[i].x; before[i * 2 + 1] = sim[i].y; }
-        const result = M.playTick(P, sim, play, fx, engine, false);
+        const incomingBig = play.big;
+        const result = M.playTick(P, sim, play, fx, engine, false, true);
         const incoming = flight;
         if (k % 8 === 0 || k === t.ticks) sample();
         if (contact) {
@@ -296,6 +339,8 @@
           const shooter = play.lastTouch[1 - sim[save.index].team];
           const point = where(ball);
           add('Save', save.index, point, { label: save.iron ? 'Iron save' : null, path: path(shooter === null ? incoming : origins[shooter], point) });
+          if (save.iron || incomingBig) out.bigSaves[save.index]++;
+          play.saved = { at: play.age, team: sim[save.index].team };
           if (shooter !== null) shot(shooter, point, 'Saved');
         }
         for (let i = 0; i < 6; i++) out.skated[i] += Math.hypot(sim[i].x - before[i * 2], sim[i].y - before[i * 2 + 1]);
@@ -340,7 +385,6 @@
     }
     out.events.sort((a, b) => a.tick - b.tick);
     out.topShot = engine.topSpeed;
-    out.bigSaves = engine.bigSaves;
     return out;
   }
   const api = { FORMAT, KEEP, MAX_TITLE, ANONYMOUS, snapshot, restore, create, clip, roundRange, anonymize, addTurn, timeline, canonical, write, read, stats };

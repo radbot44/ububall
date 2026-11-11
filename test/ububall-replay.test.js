@@ -176,7 +176,7 @@ function scripted(each = () => {}) {
 
 // The physics this version of the replay format plays back. A change to how turns play out must
 // bump P.VERSION, which makes older replays refuse to play; then record the new fingerprint here.
-const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31', 7: '37a23456c784360a', 8: '83873175fc525045', 9: '09b47d9873e6c0d2', 10: 'c4a526d87f85f50d', 11: 'c149d32f71adb8f2', 12: 'a685065b99430f89', 13: 'dc91a880c4ee68be', 14: '2ac13b21775f0ea2', 15: '248086ed8e0fd514', 16: '9d8b34db2268210c', 17: '972e69182193ab24', 18: 'ae483586854f6d31', 19: '204a59c696047c0b', 20: '7a6a6fce3eaf5650', 21: '5062c20061903979', 22: '0ee5630f69ba5d66', 23: '5a3b47bd871862e7' };
+const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31', 7: '37a23456c784360a', 8: '83873175fc525045', 9: '09b47d9873e6c0d2', 10: 'c4a526d87f85f50d', 11: 'c149d32f71adb8f2', 12: 'a685065b99430f89', 13: 'dc91a880c4ee68be', 14: '2ac13b21775f0ea2', 15: '248086ed8e0fd514', 16: '9d8b34db2268210c', 17: '972e69182193ab24', 18: 'ae483586854f6d31', 19: '204a59c696047c0b', 20: '7a6a6fce3eaf5650', 21: '5062c20061903979', 22: '0ee5630f69ba5d66', 23: '5a3b47bd871862e7', 24: '2a3f920af1689fe1' };
 test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
   const ends = [...[...replay.turns, ...standard.turns].map(replayTurn), ...scripted()];
@@ -339,4 +339,48 @@ test('Snap and Rim-Around turns round-trip identically through .ububall files an
   parsed.turns.forEach((t, idx) => {
     assert.equal(JSON.stringify(replayTurn(t)), JSON.stringify(liveEnds[idx]), `re-simulated turn ${idx + 1} matches live end`);
   });
+});
+
+test('replay validator rejects invalid physics bounds, oversized turn ticks, forged final winners, and leaky anonymization', async () => {
+  const { replay } = record(3, 'pulse', 2);
+  const good = R.canonical({ type: 'ububall-replay', format: R.FORMAT, physics: P.VERSION, ...replay });
+  const gzip = async text => new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+
+  for (const patch of [
+    r => { r.turns[0].bodies[0].mass = 0; },
+    r => { r.turns[0].bodies[0].radius = -5; },
+    r => { r.turns[0].bodies[0].friction = -1; },
+    r => { r.turns[0].bodies[6].curveMult = 0; },
+    r => { r.turns[0].bodies[0].daze = -0.1; },
+    r => { r.turns[0].ticks = M.turnTicks('pulse') + 1; },
+    r => { r.final = { scores: [5, 0], winner: 1 }; },
+    r => { r.final = { scores: [2, 2], winner: 0 }; }
+  ]) {
+    const bad = structuredClone(good);
+    patch(bad);
+    await assert.rejects(R.read(await gzip(JSON.stringify(bad))), /not a valid/);
+  }
+
+  const anon = R.canonical({ type: 'ububall-replay', format: R.FORMAT, physics: P.VERSION, ...R.anonymize(replay) });
+  assert.deepEqual(await R.read(await gzip(JSON.stringify(anon))), JSON.parse(JSON.stringify(anon)));
+
+  const leakyName = structuredClone(anon);
+  leakyName.names = ['RealName', 'Saffron'];
+  await assert.rejects(R.read(await gzip(JSON.stringify(leakyName))), /not a valid/);
+
+  const leakyDna = structuredClone(anon);
+  leakyDna.ubus[0].dna = 'AAAAAAAAAAE' + leakyDna.ubus[0].dna.slice(11);
+  await assert.rejects(R.read(await gzip(JSON.stringify(leakyDna))), /not a valid/);
+});
+
+test('R.stats counts bigSaves from recorded turn saves without duplicate counterfactual simulation', () => {
+  const state = field('pulse', { 0: { x: 300, y: 300 }, 3: { x: 860, y: 300 }, 6: { x: 500, y: 300, vx: 0, vy: 0 } });
+  const replay = { turns: [] };
+  const plans = Array.from({ length: 6 }, () => still);
+  const entry = R.addTurn(replay, { ...state, fouls: M.newFouls(), plans });
+  entry.ticks = 5;
+  entry.saves = [{ tick: 2, index: 3, own: false, iron: true }, { tick: 4, index: 0, own: true, iron: false }];
+  const stats = R.stats(replay);
+  assert.deepEqual(stats.bigSaves, [0, 0, 0, 1, 0, 0], 'bigSaves reflects recorded non-own saves even in clipped/Pulse turns');
+  assert.equal(stats.events.filter(e => e.type === 'Save').length, 1);
 });

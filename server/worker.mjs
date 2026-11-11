@@ -19,13 +19,15 @@ function configuration(env) {
       !keys || Array.isArray(keys) || typeof keys !== 'object' || Object.keys(keys).length > 16 ||
       !Object.hasOwn(keys, env.MINT_KEY_ID) || Object.entries(keys).some(([id, x]) =>
         !/^[A-Za-z0-9_-]{1,32}$/.test(id) || typeof x !== 'string' || !/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(x))) throw new Error('Mint is not configured.');
-  const limit = Number(env.LIFETIME_MINT_LIMIT ?? '0');
-  const batchSize = Number(env.BATCH_SIZE ?? '1000');
-  if (!Number.isSafeInteger(limit) || limit < 0 || !Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 1000000) throw new Error('Invalid mint limits.');
+  const rawLimit = String(env.LIFETIME_MINT_LIMIT ?? '0'), rawBatch = String(env.BATCH_SIZE ?? '1000');
+  const limit = /^\d+$/.test(rawLimit) ? Number(rawLimit) : NaN;
+  const batchSize = /^\d+$/.test(rawBatch) ? Number(rawBatch) : NaN;
+  if (!Number.isSafeInteger(limit) || limit < 0 || !Number.isSafeInteger(batchSize) ||
+      batchSize < 5 || batchSize > 1000000 || batchSize % 5 !== 0) throw new Error('Invalid mint limits.');
   return { mint: env.MINT_ID, key: env.MINT_KEY_ID, keys, limit, batchSize };
 }
 async function body(request, maxBytes = 512) {
-  if (request.headers.get('Content-Type')?.split(';')[0] !== 'application/json') throw new Error('Expected JSON.');
+  if (request.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'application/json') throw new Error('Expected JSON.');
   const reader = request.body?.getReader();
   if (!reader) throw new Error('Missing body.');
   const chunks = []; let length = 0;
@@ -47,15 +49,27 @@ export class MintRegistry extends DurableObject {
     super(ctx, env);
     this.config = configuration(env);
     this.signingKeys = new Map();
+    this.signingOwners = new Map();
     this.mint = new Mint({ exec: (sql, ...bindings) => ctx.storage.sql.exec(sql, ...bindings),
       transactionSync: callback => ctx.storage.transactionSync(callback) }, {
       mint: this.config.mint, key: this.config.key, resolveSigningKey: id => this.signingKey(id)
     });
   }
+  async trackSigning(owner, work) {
+    const previous = this.signingOwners.get(owner);
+    const task = (async () => {
+      if (previous) { try { await previous; } catch {} }
+      return await work();
+    })();
+    const tracked = task.then(() => {}, () => {});
+    this.signingOwners.set(owner, tracked);
+    try { return await task; }
+    finally { if (this.signingOwners.get(owner) === tracked) this.signingOwners.delete(owner); }
+  }
   signingKey(id) {
     if (!this.signingKeys.has(id)) {
       const keys = JSON.parse(this.env.MINT_PRIVATE_KEYS || '{}');
-      const jwk = Object.hasOwn(keys, id) ? keys[id] : null;
+      const jwk = keys && typeof keys === 'object' && !Array.isArray(keys) && Object.hasOwn(keys, id) ? keys[id] : null;
       if (!jwk || jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519' || jwk.x !== this.config.keys[id]) throw new Error('Signing key unavailable.');
       // Import only curve/key material: Node and workerd emit different optional JWK alg labels.
       const promise = crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: jwk.x, d: jwk.d }, 'Ed25519', false, ['sign']);
@@ -80,7 +94,12 @@ export class MintRegistry extends DurableObject {
     if (!this.needsPreparation()) return;
     await this.ctx.storage.setAlarm(Date.now() + 1000);
     const batchPacks = Math.floor(this.config.batchSize / 5);
-    this.mint.prepare({ batchSize: this.config.batchSize, minimumPacks: Math.max(batchPacks, 3) + 1 });
+    try {
+      this.mint.prepare({ batchSize: this.config.batchSize, minimumPacks: Math.max(batchPacks, 3) + 1 });
+    } catch (error) {
+      if (/^Invalid |multiple of 5|exhausted/.test(error.message)) await this.ctx.storage.deleteAlarm();
+      throw error;
+    }
     if (!this.needsPreparation()) await this.ctx.storage.deleteAlarm();
   }
   async offer(owner, request) {
@@ -97,12 +116,13 @@ export class MintRegistry extends DurableObject {
   }
   async issue(owner, request, choice) {
     try {
-      // Request-only calls can recover old allocations, never bypass selection.
-      if (choice === undefined && !this.mint.exec('SELECT 1 FROM issued WHERE owner=? AND request=? LIMIT 1', owner, request).length) {
-        return { error: 'Choose a pack first.', status: 409 };
-      }
-      const result = await this.mint.issue({ owner, request, choice }, { lifetimeLimit: this.config.limit });
-      return result;
+      return await this.trackSigning(owner, async () => {
+        // Request-only calls can recover old allocations, never bypass selection.
+        if (choice === undefined && !this.mint.exec('SELECT 1 FROM issued WHERE owner=? AND request=? LIMIT 1', owner, request).length) {
+          return { error: 'Choose a pack first.', status: 409 };
+        }
+        return await this.mint.issue({ owner, request, choice }, { lifetimeLimit: this.config.limit });
+      });
     } catch (error) {
       if (error.message === 'Lifetime mint limit reached.') return { error: error.message, status: 403 };
       if (error.message === 'Invalid issuance request.') return { error: error.message, status: 400 };
@@ -114,19 +134,25 @@ export class MintRegistry extends DurableObject {
   }
   starterStatus(owner) { return this.mint.starterStatus(owner); }
   async claimStarter(owner, kind) {
-    try { return await this.mint.claimStarter({ owner, kind }); }
+    try { return await this.trackSigning(owner, () => this.mint.claimStarter({ owner, kind })); }
     catch (error) {
       if (error.message === 'Invalid issuance request.') return { error: 'Choose a starter pack.', status: 400 };
       throw error;
     } finally { await this.ensureBatch(); } // Regular packs come next, so have them ready.
   }
-  // Anyone entering a match has a team: an unopened signup pack opens in the background.
+  // Anyone entering a match has a team: an unopened or interrupted starter pack finishes in the background.
   async matchTeam(owner) {
-    if (this.mint.starterStatus(owner).signup) await this.mint.claimStarter({ owner, kind: 'signup' });
+    if (this.mint.starterStatus(owner).signup ||
+        this.mint.exec("SELECT 1 FROM issued WHERE owner=? AND request LIKE 'starter:%' AND certificate IS NULL LIMIT 1", owner).length) {
+      const claimed = await this.claimStarter(owner, 'signup');
+      if (claimed.error) throw new Error(claimed.error);
+    }
     return this.mint.matchTeam(owner);
   }
   // Newest first, pending certificates last. Browsers sort and filter the full list themselves.
-  collection(owner, cursor = '') {
+  async collection(owner, cursor = '') {
+    const inflight = this.signingOwners.get(owner);
+    if (inflight) await inflight;
     const keys = [['(certificate IS NULL)', 'ASC'], ['issued_at', 'DESC'], ['serial', 'DESC']];
     if (cursor && !/^[0-9]{12}$/.test(cursor)) return { error: 'Invalid collection cursor.', status: 400 };
     const binds = [owner];
@@ -156,7 +182,7 @@ export class MintRegistry extends DurableObject {
   }
   favorite(owner, data) {
     if (data && typeof data === 'object' && !Array.isArray(data) &&
-        Object.keys(data).length === 2 && /^[0-9]{12}$/.test(data.serial) &&
+        Object.keys(data).length === 2 && typeof data.serial === 'string' && /^[0-9]{12}$/.test(data.serial) &&
         typeof data.favorite === 'boolean') {
       const updated = this.mint.exec('UPDATE issued SET favorite=? WHERE owner=? AND serial=? RETURNING serial',
         Number(data.favorite), owner, data.serial);
@@ -219,7 +245,7 @@ export default {
         if (!uuid.test(key || '')) return json({ error: 'Invalid watch link.' }, 400);
         const viewer = await auth.session(request, env);
         let activityHeaders = {};
-        if (source === embedded || url.origin === embedded || viewer?.instance) {
+        if ((embedded && (source === embedded || url.origin === embedded)) || viewer?.instance) {
           const connection = request.headers.get('X-Ubu-Connection') || url.searchParams.get('connection');
           const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
           if (!viewer?.instance || !uuid.test(connection || '') || !await queue.current(viewer.owner, 'activity:' + viewer.instance, viewer.launch || '', connection)) {
@@ -242,7 +268,7 @@ export default {
       }
       if (path === '/api/guest' && request.method === 'POST') {
         if (request.headers.get('Origin') !== auth.origin(env)) return json({ error: 'Invalid request origin.' }, 403);
-        if (session) return json(session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, csrf: session.csrf });
+        if (session) return json(session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, name: session.name ?? null, csrf: session.csrf });
         const created = await auth.guest(env);
         return json({ owner: null, guest: true, csrf: created.value.csrf }, 200, { 'Set-Cookie': created.cookie });
       }
@@ -258,13 +284,16 @@ export default {
         let data;
         try { data = await body(request, 1024); } catch { return json({ error: 'Invalid lobby request.' }, 400); }
         const actions = ['join', 'poll', 'reconcile', 'ready', 'unready', 'challenge', 'accept', 'decline', 'cancel', 'ack', 'leave'];
-        if (!data || !actions.includes(data.action) || data.instance !== session.instance || !auth.validInstance(data.instance) ||
-            !uuid.test(data.connection || '') || !uuid.test(session.launch || '') || !Number.isSafeInteger(session.issued) ||
+        if (!data || typeof data !== 'object' || Array.isArray(data) || !actions.includes(data.action) ||
+            data.instance !== session.instance || !auth.validInstance(data.instance) ||
+            typeof data.connection !== 'string' || !uuid.test(data.connection) ||
+            !uuid.test(session.launch || '') || !Number.isSafeInteger(session.issued) ||
             Object.keys(data).some(key => !['action', 'instance', 'connection', 'target', 'id', 'match', 'watch', 'cpu'].includes(key)) ||
             (data.cpu !== undefined && typeof data.cpu !== 'boolean') ||
-            (data.action === 'challenge' && !/^[1-9][0-9]{0,19}$/.test(data.target || '')) ||
-            (['accept', 'decline', 'cancel', 'ack'].includes(data.action) && !uuid.test(data.id || '')) ||
-            (data.match !== undefined && !uuid.test(data.match)) || (data.watch !== undefined && !uuid.test(data.watch))) {
+            (data.action === 'challenge' && (typeof data.target !== 'string' || !/^[1-9][0-9]{0,19}$/.test(data.target))) ||
+            (['accept', 'decline', 'cancel', 'ack'].includes(data.action) && (typeof data.id !== 'string' || !uuid.test(data.id))) ||
+            (data.match !== undefined && (typeof data.match !== 'string' || !uuid.test(data.match))) ||
+            (data.watch !== undefined && (typeof data.watch !== 'string' || !uuid.test(data.watch)))) {
           return json({ error: 'Invalid lobby request.' }, 400);
         }
         // The signed Activity session was created only after Discord verified membership.
@@ -284,17 +313,18 @@ export default {
         }
         catch (error) { return json({ error: error.message }, 409); }
       }
+      const activityConnection = request.headers.get('X-Ubu-Connection') || url.searchParams.get('connection') || '';
       if (path.startsWith('/api/ububall') && session.instance) {
-        const connection = request.headers.get('X-Ubu-Connection') || url.searchParams.get('connection');
         const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
-        if (!uuid.test(connection || '') || !await queue.current(session.owner, 'activity:' + session.instance, session.launch || '', connection)) {
+        if (!uuid.test(activityConnection) || !await queue.current(session.owner, 'activity:' + session.instance, session.launch || '', activityConnection)) {
           return json({ error: 'This Activity connection has ended.' }, 409);
         }
       }
       if (path === '/api/ububall/queue' && request.method === 'POST') {
         let data;
         try { data = await body(request); } catch { return json({ error: 'Invalid queue request.' }, 400); }
-        if (!['public', 'friends'].includes(data?.queue) || !['enter', 'poll', 'cancel', 'ack'].includes(data?.action) ||
+        if (!data || typeof data !== 'object' || Array.isArray(data) ||
+          !['public', 'friends'].includes(data.queue) || !['enter', 'poll', 'cancel', 'ack'].includes(data.action) ||
           (data.action === 'ack' ? typeof data.id !== 'string' || !uuid.test(data.id) : Object.hasOwn(data, 'id')) ||
           Object.keys(data).some(key => !['queue', 'action', 'id', 'instance'].includes(key))) {
           return json({ error: 'Invalid queue request.' }, 400);
@@ -309,7 +339,7 @@ export default {
         }
         const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
         const result = await queue.update(session.owner, Boolean(session.guest), scope, data.action, data.id ?? null,
-          session.instance ? { instance: session.instance, launch: session.launch, connection: request.headers.get('X-Ubu-Connection') } : null);
+          session.instance ? { instance: session.instance, launch: session.launch, connection: activityConnection } : null);
         return result.status === 'closed' ? json({ error: 'This Activity connection has ended.' }, 409) : json(result);
       }
       if (path === '/api/ububall/activity-watch' && request.method === 'GET') {
@@ -323,7 +353,7 @@ export default {
       if (path === '/api/ububall' && request.method === 'POST') {
         let data;
         try { data = await body(request); } catch { return json({ error: 'Invalid match request.' }, 400); }
-        if (!data || Object.keys(data).some(k => k !== 'mode')) return json({ error: 'Invalid match request.' }, 400);
+        if (!data || typeof data !== 'object' || Array.isArray(data) || typeof data.mode !== 'string' || Object.keys(data).some(k => k !== 'mode')) return json({ error: 'Invalid match request.' }, 400);
         const id = crypto.randomUUID();
         const response = await env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/create', {
           method: 'POST', headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Name': encodeURIComponent(session.name || ''), 'Content-Type': 'application/json' }, body: JSON.stringify(data)
@@ -342,12 +372,13 @@ export default {
         if (socket && request.headers.get('Origin') !== auth.requestOrigin(env, session)) return json({ error: 'Invalid socket origin.' }, 403);
         let data;
         if (!get) { try { data = await body(request, 2048); } catch { return json({ error: 'Invalid match request.' }, 400); } }
+        const allowAlias = !get || socket || request.headers.get('X-Ubu-CSRF') === session.csrf;
         return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + (activityWatch ? action.slice(9) : action), {
           method: request.method,
-          headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Alias': session.alias || '',
+          headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Alias': allowAlias ? (session.alias || '') : '',
             'X-Match-Name': encodeURIComponent(session.name || ''),
             'X-Match-Expires': session.expires ? String(session.expires * 1000) : '',
-            'X-Match-Connection': request.headers.get('X-Ubu-Connection') || url.searchParams.get('connection') || '',
+            'X-Match-Connection': activityConnection,
             ...(activityWatch ? { 'X-Match-Activity': session.instance } : {}),
             'Content-Type': 'application/json', ...(socket ? { Upgrade: 'websocket' } : {}) },
           body: get ? undefined : JSON.stringify(data)

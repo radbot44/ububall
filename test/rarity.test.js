@@ -1,8 +1,11 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const ubu = require('../shared/ubu.js');
 const rarity = require('../shared/rarity.js');
+const rarityJson = require('../shared/rarity-table.json');
 const file = require('../shared/ubu-file.js');
 
 const TOLERANCE = 1e-9;
@@ -175,7 +178,7 @@ test('luminance contrast responds to layer order rather than just the color set'
   assert.equal(score([0, 0, 0, 0, 0]).contrast, 0);
 });
 
-test('continuous geometry only scores expressed eyelid and opening parameters', () => {
+test('continuous geometry only scores expressed eyelid and opening parameters and attenuates lid-clamped eye travel', () => {
   const put = (dna, start, width, value) => {
     for (let i = 0; i < width; i++) {
       const bit = start + i, mask = 1 << (7 - (bit & 7));
@@ -207,6 +210,17 @@ test('continuous geometry only scores expressed eyelid and opening parameters', 
   };
   assert.ok(depth(900, true) > depth(100, true));
   closeTo(depth(900, false), depth(100, false), 'inactive eyelid raw depth is invisible');
+
+  // Eye upward displacement (rawEyes[1] = 0 -> py = -1) is attenuated when top eyelids clamp travel to 0.
+  const openEyes = new Uint8Array(neutral);
+  put(openEyes, 228, 10, 0);
+  const clampedEyes = new Uint8Array(openEyes);
+  put(clampedEyes, 258, 4, 15); // active top lids
+  put(clampedEyes, 292, 10, 1023); // maximum top lid depth
+  const openGeom = rarity.scoreRarity(ubu.decode(openEyes)).breakdown.geometry;
+  const clampedGeom = rarity.scoreRarity(ubu.decode(clampedEyes)).breakdown.geometry;
+  closeTo(openGeom, 3.6, 'unclamped extreme eye travel scores full 3.6 bits');
+  closeTo(clampedGeom, 0, 'fully lid-clamped eye travel contributes 0 geometry bits');
 });
 
 test('one rare finish contributes 10 bits; all five matching colors contribute 20 color bits', () => {
@@ -291,7 +305,19 @@ test('rarity calculation does not change decoded model or mutate DNA', () => {
   assert.equal(serialize(model), modelJsonBefore);
 });
 
-test('percentile lookup is monotonic: increasing rarity bits cannot decrease percentile', () => {
+test('percentile lookup is monotonic, frozen, matches rarity-table.json, and rejects non-finite inputs', () => {
+  assert.ok(Object.isFrozen(rarity));
+  assert.ok(Object.isFrozen(rarity.TABLE));
+  assert.equal(rarity.TABLE.length, 1001);
+  assert.deepEqual([...rarity.TABLE], rarityJson.table);
+  assert.throws(() => { rarity.TABLE[0] = 0; }, TypeError);
+  for (const bad of [NaN, Infinity, -Infinity, undefined]) {
+    assert.throws(() => rarity.percentile(bad), RangeError);
+  }
+  for (const badV of [-1, 1024, 1.5, NaN]) {
+    assert.throws(() => rarity.tailProbability(badV), RangeError);
+  }
+
   let prevPercentile = -1;
   for (let bits = 0; bits <= 80; bits += 0.25) {
     const p = rarity.percentile(bits);
@@ -299,6 +325,33 @@ test('percentile lookup is monotonic: increasing rarity bits cannot decrease per
     assert.ok(p >= 0 && p <= 100);
     prevPercentile = p;
   }
+
+  // Verify calibrate-rarity.cjs targets shared/rarity-table.json and shared/rarity.js cleanly
+  const scriptSrc = fs.readFileSync(path.resolve(__dirname, '../scripts/calibrate-rarity.cjs'), 'utf8');
+  assert.ok(scriptSrc.includes("path.join(__dirname, '..', 'shared')"));
+  const raritySrc = fs.readFileSync(path.resolve(__dirname, '../shared/rarity.js'), 'utf8');
+  assert.match(raritySrc, /const TABLE = \[[^\n]*?\];/);
+});
+
+test('starterTeam draws three canonical DNA codes across the 70, 80 and 90 rarity deciles, including 100th percentile', () => {
+  const codes = rarity.starterTeam(ubu);
+  assert.equal(codes.length, 3);
+  const deciles = codes.map(code => {
+    const pct = rarity.scoreRarity(ubu.decode(ubu.fromCode(code))).percentile;
+    return Math.min(90, Math.floor(pct / 10) * 10);
+  });
+  assert.deepEqual(deciles, [70, 80, 90]);
+
+  // Verify an all-max 100.0 percentile ubu lands cleanly in the 90 decile slot.
+  const maxDna = new Uint8Array(128).fill(255);
+  assert.equal(rarity.scoreRarity(ubu.decode(maxDna)).percentile, 100);
+  let calls = 0;
+  const synthetic = rarity.starterTeam({
+    randomDNA: () => (++calls > 200 ? maxDna : ubu.randomDNA()),
+    decode: ubu.decode,
+    toCode: ubu.toCode
+  });
+  assert.equal(synthetic.length, 3);
 });
 
 test('new expressed mouth and lid traits contribute their specified probabilities', () => {

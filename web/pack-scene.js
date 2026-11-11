@@ -5,19 +5,37 @@
   const clamp = n => Math.max(0, Math.min(1, n));
   const ease = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
   const mix = (a, b, t) => a + (b - a) * t;
+  let sharedGrainCanvas = null, sharedNoise = null;
+  function getSharedGrain() {
+    if (!sharedGrainCanvas) {
+      sharedGrainCanvas = document.createElement('canvas');
+      sharedGrainCanvas.width = sharedGrainCanvas.height = 128;
+      const gCtx = sharedGrainCanvas.getContext('2d'), pixels = gCtx.createImageData(128, 128);
+      sharedNoise = crypto.getRandomValues(new Uint8Array(128 * 128));
+      for (let i = 0; i < sharedNoise.length; i++) {
+        const value = sharedNoise[i] < 128 ? 0 : 255;
+        pixels.data.set([value, value, value, 3 + sharedNoise[i] % 9], i * 4);
+      }
+      gCtx.putImageData(pixels, 0, 0);
+    }
+    return sharedGrainCanvas;
+  }
 
   function createPackScene(canvas) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
-    const sheet = document.createElement('canvas');
-    sheet.width = 1200; sheet.height = 720;
-    const sheetCtx = sheet.getContext('2d');
-    const plasticPrint = document.createElement('canvas');
-    plasticPrint.width = 440; plasticPrint.height = 768;
-    const plasticPrintCtx = plasticPrint.getContext('2d');
-    const emboss = document.createElement('canvas');
-    emboss.width = emboss.height = 320;
-    const embossCtx = emboss.getContext('2d');
+    let sheet = null, sheetCtx = null;
+    let plasticPrint = null, plasticPrintCtx = null;
+    let emboss = null, embossCtx = null;
+    const ensureSheet = () => {
+      if (!sheet) { sheet = document.createElement('canvas'); sheet.width = 1200; sheet.height = 720; sheetCtx = sheet.getContext('2d'); }
+    };
+    const ensurePlasticPrint = () => {
+      if (!plasticPrint) { plasticPrint = document.createElement('canvas'); plasticPrint.width = 440; plasticPrint.height = 768; plasticPrintCtx = plasticPrint.getContext('2d'); }
+    };
+    const ensureEmboss = () => {
+      if (!emboss) { emboss = document.createElement('canvas'); emboss.width = emboss.height = 320; embossCtx = emboss.getContext('2d'); }
+    };
     let frame = 0, progress = 0, started = 0, finish = null, count = 5, pointer = 0, pointerY = 0;
     let aimX = 0, aimY = 0, lastPaint = 0;
     let blobCanvas, blobCtx, blobPixels, blobColors = [], blobFaces = [];
@@ -33,16 +51,9 @@
     ububallLogo.onload = requestPaint;
     ububallLogo.src = 'assets/ububall-logo.svg';
 
-    // Fixed fine grain: generated once, so the material never sparkles at rest.
-    const grain = document.createElement('canvas');
-    grain.width = grain.height = 128;
-    const grainCtx = grain.getContext('2d'), pixels = grainCtx.createImageData(128, 128);
-    const noise = crypto.getRandomValues(new Uint8Array(128 * 128));
-    for (let i = 0; i < noise.length; i++) {
-      const value = noise[i] < 128 ? 0 : 255;
-      pixels.data.set([value, value, value, 3 + noise[i] % 9], i * 4);
-    }
-    grainCtx.putImageData(pixels, 0, 0);
+    // Fixed fine grain: shared across all pack scenes, so the material never sparkles at rest.
+    const grain = getSharedGrain();
+    const noise = sharedNoise;
     const grainPattern = ctx.createPattern(grain, 'repeat');
 
     function paletteColor(index) {
@@ -234,6 +245,7 @@
 
     function plasticCenter(flat, target) {
       // Project the print onto the rounded body; only the flaps unwind.
+      ensurePlasticPrint();
       plasticPrintCtx.resetTransform();
       plasticPrintCtx.fillStyle = color; plasticPrintCtx.fillRect(0, 0, 440, 768);
       plasticPrintCtx.setTransform(2, 0, 0, 2, 220, 384);
@@ -271,6 +283,7 @@
     }
 
     function renderPlastic(t) {
+      ensureSheet();
       const untwist = ease(.03, .49, t), flat = ease(.49, .65, t), peel = ease(.59, .94, t);
       sheetCtx.resetTransform(); sheetCtx.clearRect(0, 0, sheet.width, sheet.height);
       sheetCtx.setTransform(2, 0, 0, 2, 600, 360);
@@ -426,6 +439,7 @@
     }
 
     function renderFoilSheet() {
+      ensureSheet();
       sheetCtx.resetTransform(); sheetCtx.clearRect(0, 0, sheet.width, sheet.height);
       sheetCtx.setTransform(2, 0, 0, 2, 600, 360);
 
@@ -500,6 +514,7 @@
       // Tint the SVG alpha mask to the foil: offset light and shade form a relief,
       // while the face picks up the same directional metallic reflection.
       if (mark.complete && mark.naturalWidth) {
+        ensureEmboss();
         sheetCtx.save();
         sheetCtx.translate(pointer * 9, pointerY * 8 - 3);
         sheetCtx.scale(.88, .88);
@@ -819,7 +834,7 @@
     }
 
     // Shared by the newer wrappers: the pack's hint colours, and whether it holds a special finish.
-    const hintHex = i => packHints ? packHints[i % 5].background : candyColors[i % 5];
+    const hintHex = i => packHints?.length ? packHints[i % packHints.length].background : candyColors[i % candyColors.length];
     const special = () => Boolean(packHints?.some(h => h.textured));
     function ball(x, y, r, hex) {
       const shade = ctx.createRadialGradient(x - r * .35, y - r * .4, r * .1, x, y, r);
@@ -1280,10 +1295,17 @@
       { id: 'starter', name: 'Starter Pack', setup: setupStarter, render: renderStarter, duration: 2600, reveal: .26, end: .96, sound: 'foil' }
     ];
 
+    function settlePending() {
+      const tap = awaitTap, done = finish;
+      awaitTap = null; finish = null;
+      tap?.(); done?.();
+    }
+
     function recolor(packTypeId) {
+      settlePending();
       tokenCache.clear();
       packHints = null;
-      finish = null; progress = 0;
+      progress = 0;
       let index;
       do { index = crypto.getRandomValues(new Uint8Array(1))[0] & 31; } while (index === previousColor);
       previousColor = index; color = paletteColor(index); canvas.dataset.color = String(index);
@@ -1391,7 +1413,15 @@
       const settling = Math.abs(pointer - aimX) + Math.abs(pointerY - aimY) > .001;
       if (!settling) { pointer = aimX; pointerY = aimY; }
       if (finish) progress = clamp((now - started) / duration());
-      const dpr = Math.min(devicePixelRatio, 2), width = Math.round(canvas.clientWidth * dpr), height = Math.round(canvas.clientHeight * dpr);
+      const dpr = Math.min(devicePixelRatio || 1, 2), width = Math.round(canvas.clientWidth * dpr), height = Math.round(canvas.clientHeight * dpr);
+      if (!width || !height) {
+        if (settling) requestPaint();
+        if (finish) {
+          if (progress < 1) requestPaint();
+          else { const done = finish; finish = null; done(); }
+        }
+        return;
+      }
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
       ctx.resetTransform(); ctx.clearRect(0, 0, width, height);
       const scale = width / 600; ctx.setTransform(scale, 0, 0, scale, width / 2, height * .46);
@@ -1437,7 +1467,14 @@
     });
     canvas.parentElement.addEventListener('pointerleave', () => { aimX = aimY = 0; requestPaint(); });
     new ResizeObserver(requestPaint).observe(canvas);
-    reduced.addEventListener('change', () => { aimX = aimY = pointer = pointerY = 0; if (reduced.matches && finish) started = performance.now() - duration(); requestPaint(); });
+    reduced.addEventListener('change', () => {
+      aimX = aimY = pointer = pointerY = 0;
+      if (reduced.matches) {
+        if (awaitTap) { const tap = awaitTap; awaitTap = null; tap(); }
+        if (finish) started = performance.now() - duration();
+      }
+      requestPaint();
+    });
 
     recolor();
 
@@ -1466,7 +1503,8 @@
         return true;
       },
       reset(newColor = false, packTypeId) {
-        finish = null; progress = 0; count = 5; eggTaps = 0; awaitTap = null;
+        settlePending();
+        progress = 0; count = 5; eggTaps = 0;
         if (newColor) recolor(packTypeId);
         else requestPaint();
       },

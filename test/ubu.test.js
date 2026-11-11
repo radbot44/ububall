@@ -274,6 +274,24 @@ test('statMultiplier maps 8-bit values across exponential multiplier curve', () 
   assert.throws(() => ubu.statMultiplier(1.5));
 });
 
+test('public helpers reject non-string seeds/codes and out-of-range ratings, curves and seeds', async () => {
+  assert.ok(Object.isFrozen(ubu));
+  for (const bad of [undefined, null, 0, 123, {}, ['abc'], new String('abc')]) {
+    await assert.rejects(() => ubu.fromText(bad), TypeError);
+    assert.throws(() => ubu.fromCode(bad), TypeError);
+  }
+  assert.throws(() => ubu.fromCode(new String('A'.repeat(171))), TypeError);
+  for (const bad of [NaN, undefined, null, -1, 1024, 1.5, Infinity, -Infinity, '511']) {
+    assert.throws(() => ubu.grade(bad), RangeError);
+    assert.throws(() => ubu.curve(bad), RangeError);
+  }
+  for (const badSeed of [0, '0', -1n, 1n << 64n, null, undefined]) {
+    assert.throws(() => ubu.ubunym(badSeed), RangeError);
+  }
+  assert.doesNotThrow(() => ubu.ubunym(0n));
+  assert.doesNotThrow(() => ubu.ubunym(0xffffffffffffffffn));
+});
+
 test('packed names retain slots, spelling format and placement for all visible structures', () => {
   const seen = new Set();
   for (const {seed} of require('./packed-name-vectors.json')) {
@@ -320,24 +338,43 @@ test('packed sampler rejects tails, retains quotient and handles >32-bit refills
   assert.equal(rng.value, Number(bigValue / 11171n));
   assert.equal(rng.range, Number((bigRange - bigRange % 11171n) / 11171n));
 });
-test('packed chunk endpoints obey vowel/consonant contexts for every word pattern', () => {
-  const { word6 } = packedInternals();
-  const patterns = ['CVCVCV','CVCVVC','CVVCCV','CVVCVC','VCCVCV','VCCVVC','VCVCCV','VCVCVC'];
-  for (let pattern = 0; pattern < 8; pattern++) for (const last of [false,true]) {
-    let first = true;
-    const word = word6({int(n) { if (first) { first=false; assert.equal(n,8); return pattern; } return last ? n-1 : 0; }}).toUpperCase();
-    assert.equal(word.length, 6);
-    const p = patterns[pattern];
-    for (let i=0;i<6;i++) {
+test('packed chunk endpoints obey vowel/consonant contexts for every word pattern (lengths 2, 3, 4 and 6)', () => {
+  const { word6, word } = packedInternals();
+  const patterns6 = ['CVCVCV','CVCVVC','CVVCCV','CVVCVC','VCCVCV','VCCVVC','VCVCCV','VCVCVC'];
+  const checkWord = (str, p) => {
+    assert.equal(str.length, p.length);
+    assert.match(str, /^[A-Z][a-z]+$/);
+    const upper = str.toUpperCase();
+    for (let i = 0; i < p.length; i++) {
       if (p[i] === 'V') {
-        const y = i === 0 || i === 5 || (p[i-1] === 'C' && p[i+1] === 'C' && p[i-2] !== 'C' && p[i+2] !== 'C');
-        assert.ok((y ? 'AEIOUY' : 'AEIOU').includes(word[i]));
-        if (p[i-1] === 'V' || p[i+1] === 'V') assert.notEqual(word[i], 'Y');
+        const y = i === 0 || i === p.length - 1 || (p[i-1] === 'C' && p[i+1] === 'C' && p[i-2] !== 'C' && p[i+2] !== 'C');
+        assert.ok((y ? 'AEIOUY' : 'AEIOU').includes(upper[i]));
+        if (p[i-1] === 'V' || p[i+1] === 'V') assert.notEqual(upper[i], 'Y');
       } else {
-        assert.ok('BCDFGHJKLMNPQRSTVWXYZ'.includes(word[i]));
-        if (p.slice(i-2,i) === 'VV') assert.ok(!(p[i+1] === 'C' ? 'HWY' : 'Y').includes(word[i]));
-        if (word[i] === 'X' && p[i-1] === 'C') assert.ok('HLNRSWYXZ'.includes(word[i-1]));
+        assert.ok('BCDFGHJKLMNPQRSTVWXYZ'.includes(upper[i]));
+        if (p.slice(i-2, i) === 'VV') assert.ok(!(p[i+1] === 'C' ? 'HWY' : 'Y').includes(upper[i]));
+        if (upper[i] === 'X' && p[i-1] === 'C') assert.ok('HLNRSWYXZ'.includes(upper[i-1]));
       }
     }
+  };
+  for (let pattern = 0; pattern < 8; pattern++) for (const last of [false, true]) {
+    let first = true;
+    const out = word6({ int(n) { if (first) { first = false; assert.equal(n, 8); return pattern; } return last ? n - 1 : 0; } });
+    checkWord(out, patterns6[pattern]);
+  }
+  // 2-letter words: first half CV (0..3285), second half VC (3286..6571)
+  for (const [idx, pat] of [[0, 'CV'], [3285, 'CV'], [3286, 'VC'], [6571, 'VC']]) {
+    checkWord(word(2, { int(n) { assert.equal(n, 6572); return idx; } }), pat);
+  }
+  // 3-letter words: pattern 0 -> CVC, pattern 1 -> VCV
+  for (const [patIdx, pat] of [[0, 'CVC'], [1, 'VCV']]) for (const last of [false, true]) {
+    let first = true;
+    checkWord(word(3, { int(n) { if (first) { first = false; assert.equal(n, 2); return patIdx; } return last ? n - 1 : 0; } }), pat);
+  }
+  // 4-letter words: 0 -> CVCV, 1 -> VCCV, 2 -> CVVC, 3 -> VCVC
+  const patterns4 = ['CVCV', 'VCCV', 'CVVC', 'VCVC'];
+  for (let patIdx = 0; patIdx < 4; patIdx++) for (const last of [false, true]) {
+    let first = true;
+    checkWord(word(4, { int(n) { if (first) { first = false; assert.equal(n, 4); return patIdx; } return last ? n - 1 : 0; } }), patterns4[patIdx]);
   }
 });

@@ -1,6 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const vm = require('node:vm');
 const { verify, createPublicKey } = require('node:crypto');
 const file = require('../shared/ubu-file.js');
 const dna = 'A'.repeat(171);
@@ -28,7 +29,10 @@ test('unsigned files are canonical and never imply mint authority', async () => 
   assert.equal(text, `{"type":"ubu","dna":"${dna}"}`);
   assert.equal(Buffer.byteLength(text), 194);
   assert.deepEqual(await file.read(text), { type: 'unsigned', dna });
+  assert.deepEqual(await file.read(text, null), { type: 'unsigned', dna });
   assert.deepEqual(await file.read(new TextEncoder().encode(text)), { type: 'unsigned', dna });
+  const crossRealmBytes = vm.runInNewContext('new Uint8Array(src)', { src: [...new TextEncoder().encode(text)] });
+  assert.deepEqual(await file.read(crossRealmBytes), { type: 'unsigned', dna });
   await assert.rejects(file.read(text, { allowUnsigned: false }), /requires mint-signed/);
   for (const bad of [text + '\n', ' ' + text, text.replace('{', '{"extra":true,'), text.replace('{', '{"dna":"bad",'),
     JSON.stringify({ dna, type: 'ubu' }), JSON.stringify({ type: 'ubu', dna, signature: 'A'.repeat(86) }),
@@ -97,6 +101,29 @@ test('serials preserve twelve digits, exclude zero and support the final number'
     await assert.rejects(file.read(JSON.stringify({ ...original, serial })), /serial/);
   }
   await assert.rejects(file.read(JSON.stringify({ type: 'ubu', dna, serial: record.serial })), /Noncanonical/);
+});
+test('issuedAt, signing-key ID and MAX_BYTES boundaries validate strictly before trust lookup', async () => {
+  assert.ok(Object.isFrozen(file));
+  const pair = await keyPair();
+  for (const [issuedAt, key, expectedLen] of [[0, 'k', 411], [Number.MAX_SAFE_INTEGER, 'k_1-'.repeat(8), 457]]) {
+    const signed = await file.sign({ ...record, issuedAt, key }, pair.privateKey);
+    assert.equal(Buffer.byteLength(signed), expectedLen);
+    const out = await file.read(signed, { resolveKey: async (m, k) => (m === record.mint && k === key ? pair.publicKey : null) });
+    assert.equal(out.certificate.issuedAt, issuedAt);
+    assert.equal(out.certificate.key, key);
+  }
+  for (const badTime of [-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    await assert.rejects(file.sign({ ...record, issuedAt: badTime }, pair.privateKey), /issuance time/);
+  }
+  for (const badKey of ['', 'k'.repeat(33), 'bad key', 'mint/1', 'mint.1']) {
+    await assert.rejects(file.sign({ ...record, key: badKey }, pair.privateKey), /signing-key ID/);
+  }
+  const zeroTimeSigned = await file.sign({ ...record, issuedAt: 0 }, pair.privateKey);
+  await assert.rejects(file.read(zeroTimeSigned.replace('"issuedAt":0', '"issuedAt":-0'), { resolveKey: () => pair.publicKey }), /Noncanonical/);
+  await assert.rejects(file.read(zeroTimeSigned.replace('"issuedAt":0', '"issuedAt":0e0'), { resolveKey: () => pair.publicKey }), /Noncanonical/);
+  await assert.rejects(file.read('x'.repeat(1024)), /Invalid UTF-8 JSON/);
+  await assert.rejects(file.read('x'.repeat(1025)), /1–1024 bytes/);
+  await assert.rejects(file.read(new Uint8Array(1025)), /1–1024 bytes/);
 });
 test('malformed files, encodings and metadata are rejected before trust lookup', async () => {
   let lookups = 0;

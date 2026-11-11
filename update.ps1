@@ -52,4 +52,10 @@ if (!(Test-Path -LiteralPath $installer -PathType Leaf)) {
     throw "Source checkout not found at $installer. Run install.ps1 from your ububall or ubumint source checkout."
 }
 
-& $installer -Destination $PSScriptRoot -DryRun:$DryRun -InstallOnly:$InstallOnly -SettingsDirectory $SettingsDirectory
+$here = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+$resolvedSource = [IO.Path]::GetFullPath($sourceDirectory).TrimEnd('\')
+if ($here -eq $resolvedSource) {
+    & $installer -DryRun:$DryRun -InstallOnly:$InstallOnly -SettingsDirectory $SettingsDirectory
+} else {
+    & $installer -Destination $PSScriptRoot -DryRun:$DryRun -InstallOnly:$InstallOnly -SettingsDirectory $SettingsDirectory
+}

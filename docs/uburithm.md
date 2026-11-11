@@ -1,10 +1,10 @@
 # The uburithm
 
-The uburithm is the permanent naming algorithm for Ububall, implemented in `web/app.js` and `shared/ubu.js`. It features independent surrounding-word visibility rolls and front placement of visible cognomens (1/8 odds).
+The uburithm is the permanent naming algorithm for Ububall, implemented in `shared/ubu.js`. It features independent surrounding-word visibility rolls and front placement of visible cognomens (1/8 odds).
 
 ## Architecture
 
-The reference generator uses `patternForLength`, `vowelYAllowed`, `followsVowelPair`, `consonantPair`, `generateWord`, `randomForSeed` and `ubunym`.
+The generator in `shared/ubu.js` uses `NameRandom`, `word6`, `word` and `ubunym` with pre-cased weighted syllable and consonant-pair lookup tables.
 
 ## Fixed naming rules
 

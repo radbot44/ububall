@@ -74,7 +74,7 @@ test('a starter pack interrupted before signing finishes on the next claim, even
   assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued')[0].n, 6);
 });
 
-test('a skipped team selection fields the last team, then favorites and newest ubus', async t => {
+test('a skipped team selection fields the last team, then favorites and newest ubus, falling back on invalid legacy supers', async t => {
   const f = await fixture(t), mint = new Mint(f.open(), f.options);
   await mint.claimStarter({ owner, kind: 'signup' });
   await mint.claimStarter({ owner, kind: 'daily' });
@@ -89,6 +89,13 @@ test('a skipped team selection fields the last team, then favorites and newest u
   const team = mint.matchTeam(owner);
   assert.deepEqual(team.entries.map(row => row.serial), last.map(slot => slot.serial));
   assert.deepEqual(team.supers, [chosen, first(rows[4].dna), first(rows[2].dna)]);
+  // If a legacy saved_teams row holds a super not in DNA, matchTeam falls back to the ubu's first super.
+  const available1 = new Set(ubu.decode(ubu.fromCode(rows[1].dna)).supers.map(n => n % 8));
+  const missingSuper = [0, 1, 2, 3, 4, 5, 6, 7].find(id => !available1.has(id));
+  mint.exec('UPDATE saved_teams SET data=? WHERE owner=?', JSON.stringify({
+    teams: [], last: [{ serial: rows[1].serial, super: missingSuper }, { serial: rows[4].serial, super: null }, { serial: rows[2].serial, super: null }]
+  }), owner);
+  assert.equal(mint.matchTeam(owner).supers[0], first(rows[1].dna));
   assert.deepEqual(mint.matchTeam('987654321098765432'), { entries: [], supers: [] });
 });
 
@@ -337,12 +344,23 @@ test('failed signing survives restart and retries the same pack with its origina
   }
 });
 
-test('preparation rollback, validation, mint binding and serial ceiling', async t => {
+test('preparation rollback, validation, mint binding, nested savepoints and serial ceiling', async t => {
   const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
   storage.exec("CREATE TRIGGER fail_insert BEFORE INSERT ON inventory BEGIN SELECT RAISE(ABORT, 'test failure'); END");
   assert.throws(() => mint.prepare({ batchSize: 5 }), /test failure/);
   assert.equal(mint.state().next_serial, 1); assert.equal(mint.state().batch, 0);
   storage.exec('DROP TRIGGER fail_insert');
+  // Nested transactionSync supports savepoints and preserves outer work when an inner savepoint rolls back.
+  storage.transactionSync(() => {
+    storage.exec('CREATE TABLE nested_check (v INTEGER)');
+    storage.exec('INSERT INTO nested_check VALUES (1)');
+    assert.throws(() => storage.transactionSync(() => {
+      storage.exec('INSERT INTO nested_check VALUES (2)');
+      throw new Error('inner abort');
+    }), /inner abort/);
+  });
+  assert.deepEqual(storage.exec('SELECT v FROM nested_check').map(r => r.v), [1]);
+  storage.exec('DROP TABLE nested_check');
   for (const batchSize of [0, -1, 1.5, '1000', 1000001, 7, 13]) assert.throws(() => mint.prepare({ batchSize }));
   assert.throws(() => mint.prepare({ chunkSize: 1001 }), /chunk size/);
   await assert.rejects(mint.issue({ owner: '', request: request(1) }), /Invalid issuance/);
@@ -492,15 +510,22 @@ test('retired server sort keys are dropped without touching issued ubus or inven
   assert.deepEqual(rows(reopened, 'issued'), before);
 });
 
-test('saved teams accept only owned signed ubus and replace the whole document', async t => {
+test('saved teams accept only owned signed ubus with DNA-granted supers and reject array/number coercion', async t => {
   const f = await fixture(t), mint = new Mint(f.open(), f.options);
   mint.prepare({ batchSize: 15 });
   const offer = mint.offer({ owner, request: request(1) });
   await mint.issue({ owner, request: offer.request, choice: offer.choices[0].choice });
-  const serials = mint.exec('SELECT serial FROM issued WHERE owner=? ORDER BY serial', owner).map(row => row.serial);
+  const issuedRows = mint.exec('SELECT serial, dna FROM issued WHERE owner=? ORDER BY serial', owner);
+  const serials = issuedRows.map(row => row.serial);
+  const firstSuper = row => ubu.decode(ubu.fromCode(row.dna)).supers[0] % 8;
+  const missingSuper = row => {
+    const allowed = new Set(ubu.decode(ubu.fromCode(row.dna)).supers.map(n => n % 8));
+    return [0, 1, 2, 3, 4, 5, 6, 7].find(id => !allowed.has(id));
+  };
   const slots = (a, b, c, s = null) => [a, b, c].map(serial => ({ serial, super: s }));
+  const validEquippedSlots = issuedRows.slice(0, 3).map(row => ({ serial: row.serial, super: firstSuper(row) }));
   assert.deepEqual(mint.teams(owner), { teams: [], last: null });
-  const saved = { teams: [{ name: 'Wall', slots: slots(serials[0], serials[1], serials[2], 3) }], last: slots(serials[2], serials[3], serials[4]) };
+  const saved = { teams: [{ name: 'Wall', slots: validEquippedSlots }], last: slots(serials[2], serials[3], serials[4]) };
   assert.deepEqual(mint.saveTeams(owner, saved), saved);
   assert.deepEqual(mint.teams(owner), saved);
   assert.deepEqual(mint.teams('someone-else'), { teams: [], last: null });
@@ -511,8 +536,11 @@ test('saved teams accept only owned signed ubus and replace the whole document',
     { teams: [{ name: 'x'.repeat(41), slots: saved.teams[0].slots }], last: null },
     { teams: [{ name: 'Tab\tName', slots: saved.teams[0].slots }], last: null },
     { teams: [{ name: 'Dup', slots: slots(serials[0], serials[0], serials[1]) }], last: null },
+    { teams: [{ name: 'ArrDup', slots: [{ serial: [serials[0]], super: null }, { serial: [serials[0]], super: null }, { serial: [serials[0]], super: null }] }], last: null },
+    { teams: [{ name: 'NumSerial', slots: [{ serial: 100000000000, super: null }, { serial: serials[1], super: null }, { serial: serials[2], super: null }] }], last: null },
     { teams: [{ name: 'Two', slots: slots(serials[0], serials[1]).slice(0, 2) }], last: null },
     { teams: [{ name: 'Super', slots: slots(serials[0], serials[1], serials[2], 8) }], last: null },
+    { teams: [{ name: 'UnavailableSuper', slots: [{ serial: issuedRows[0].serial, super: missingSuper(issuedRows[0]) }, validEquippedSlots[1], validEquippedSlots[2]] }], last: null },
     { teams: Array.from({ length: 31 }, (_, i) => ({ name: 'T' + i, slots: saved.teams[0].slots })), last: null }
   ];
   for (const data of invalid) assert.equal(mint.saveTeams(owner, data).status, 400, JSON.stringify(data));

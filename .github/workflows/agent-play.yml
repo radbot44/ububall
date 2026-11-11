@@ -2,7 +2,7 @@ name: Agent visual Easy CPU match
 on:
   push:
     branches:
-      - agent/visual-easy-cpu-play-20261110
+      - main
     paths:
       - scripts/agent-play.cjs
       - .github/workflows/agent-play.yml
@@ -19,12 +19,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.14'
           cache: npm
       - run: npm ci
-      - run: npm install --no-save --ignore-scripts playwright@1.57.0
-      - run: npx playwright install --with-deps chromium
+      - name: Install Playwright outside locked node_modules
+        run: |
+          npm install --prefix /tmp/pw-tools --no-save --ignore-scripts playwright@1.57.0
+          /tmp/pw-tools/node_modules/.bin/playwright install --with-deps chromium
       - name: Play one match against Easy CPU
+        env:
+          NODE_PATH: /tmp/pw-tools/node_modules
         run: node scripts/agent-play.cjs
       - name: Upload shot-by-shot log and screenshots
         if: always()

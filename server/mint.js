@@ -116,7 +116,7 @@ class Mint {
       this.exec('CREATE INDEX IF NOT EXISTS issued_recent_sort ON issued(owner, (certificate IS NULL), issued_at DESC, serial DESC)');
       this.exec('CREATE INDEX IF NOT EXISTS issued_owner ON issued(owner)');
       this.exec('CREATE INDEX IF NOT EXISTS issued_request ON issued(owner, request)');
-      this.exec('INSERT OR IGNORE INTO mint_state VALUES (1, ?, 1, 0, 0, 0, 0, 0)', mint);
+      this.exec('INSERT OR IGNORE INTO mint_state (singleton, mint, next_serial, batch, size, prepared, remaining, start_serial) VALUES (1, ?, 1, 0, 0, 0, 0, 0)', mint);
       if (this.state().mint !== mint) throw new Error('Database belongs to another mint.');
       if (!this.exec('PRAGMA table_info(inventory)').some(c => c.name === 'batch')) {
         this.exec('ALTER TABLE inventory ADD COLUMN batch INTEGER NOT NULL DEFAULT 0');
@@ -174,7 +174,7 @@ class Mint {
         for (let q = 0; q < PACK_SIZE; q++) {
           const slice = scored.slice(q * numPacks, (q + 1) * numPacks);
           for (let i = slice.length - 1; i > 0; i--) {
-            const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1);
+            const j = randomBelow(i + 1);
             const temp = slice[i]; slice[i] = slice[j]; slice[j] = temp;
           }
           quintiles.push(slice);
@@ -222,10 +222,10 @@ class Mint {
       if (!offer) {
         if (this.state().remaining < 3) throw new Error('Batch preparation required.');
         offer = { owner, request, expires: Math.floor(Date.now() / 1000) + 3600 };
-        this.exec('INSERT INTO pack_offers VALUES (?, ?, ?)', owner, request, offer.expires);
+        this.exec('INSERT INTO pack_offers (owner, request, expires) VALUES (?, ?, ?)', owner, request, offer.expires);
         for (let i = 0; i < 3; i++) {
           const pack = this.availablePack();
-          this.exec('INSERT INTO pack_choices VALUES (?, ?, ?, ?)', randomCode(16), owner, i, pack.id);
+          this.exec('INSERT INTO pack_choices (token, owner, position, anchor) VALUES (?, ?, ?, ?)', randomCode(16), owner, i, pack.id);
         }
       }
       const choices = this.exec('SELECT * FROM pack_choices WHERE owner=? ORDER BY position', owner).map(choice => {
@@ -286,7 +286,7 @@ class Mint {
       }
       this.exec('UPDATE mint_state SET remaining=remaining-1 WHERE singleton=1');
       if (choice !== undefined) {
-        this.exec('INSERT INTO pack_selections VALUES (?, ?, ?)', owner, request, choice);
+        this.exec('INSERT INTO pack_selections (owner, request, choice) VALUES (?, ?, ?)', owner, request, choice);
         this.exec('DELETE FROM pack_choices WHERE owner=?', owner);
         this.exec('DELETE FROM pack_offers WHERE owner=?', owner);
       }
@@ -350,32 +350,48 @@ class Mint {
     const last = this.teams(owner).last, saved = last?.map(slot => row(slot.serial)), kept = saved?.every(Boolean);
     const entries = kept ? saved : this.exec(`SELECT serial, dna FROM issued WHERE owner=? AND certificate IS NOT NULL
       ORDER BY favorite DESC, issued_at DESC, serial DESC LIMIT 3`, owner);
-    return { entries, supers: entries.map((entry, i) => (kept ? last[i].super : null) ?? decode(fromCode(entry.dna)).supers[0] % 8) };
+    return {
+      entries,
+      supers: entries.map((entry, i) => {
+        const available = decode(fromCode(entry.dna)).supers.map(n => n % 8);
+        const chosen = kept ? last[i].super : null;
+        return chosen !== null && available.includes(chosen) ? chosen : available[0];
+      })
+    };
   }
 
   teams(owner) {
     const row = this.exec('SELECT data FROM saved_teams WHERE owner=?', owner)[0];
     return row ? JSON.parse(row.data) : { teams: [], last: null };
   }
-  // Replaces the account's saved teams: named three-ubu lineups (Back, Top, Bottom) of owned,
+  // Replaces the account's saved ububall teams: named three-ubu lineups (Back, Top, Bottom) of owned,
   // signed ubus with an optional equipped super each, plus the last team played.
   saveTeams(owner, data) {
     const plain = value => value && typeof value === 'object' && !Array.isArray(value);
-    const slots = value => Array.isArray(value) && value.length === 3 && new Set(value.map(slot => slot?.serial)).size === 3 &&
-      value.every(slot => plain(slot) && Object.keys(slot).length === 2 && /^[0-9]{12}$/.test(slot.serial) &&
-        (slot.super === null || (Number.isInteger(slot.super) && slot.super >= 0 && slot.super < 8)));
+    const slots = value => Array.isArray(value) && value.length === 3 &&
+      value.every(slot => plain(slot) && Object.keys(slot).length === 2 && typeof slot.serial === 'string' && /^[0-9]{12}$/.test(slot.serial) &&
+        (slot.super === null || (Number.isInteger(slot.super) && slot.super >= 0 && slot.super < 8))) &&
+      new Set(value.map(slot => slot.serial)).size === 3;
     const named = team => plain(team) && Object.keys(team).length === 2 && typeof team.name === 'string' &&
       team.name === team.name.trim() && team.name.length >= 1 && team.name.length <= TEAM_NAME_LIMIT &&
       !/[\u0000-\u001f\u007f]/.test(team.name) && slots(team.slots);
     if (!plain(data) || Object.keys(data).length !== 2 || !Array.isArray(data.teams) || data.teams.length > TEAM_LIMIT ||
         !data.teams.every(named) || !(data.last === null || slots(data.last))) return { error: 'Invalid saved teams.', status: 400 };
-    const serials = [...new Set([...data.teams.flatMap(team => team.slots), ...(data.last || [])].map(slot => slot.serial))];
+    const allSlots = [...data.teams.flatMap(team => team.slots), ...(data.last || [])];
+    const serials = [...new Set(allSlots.map(slot => slot.serial))];
     return this.transaction(() => {
-      const owned = serials.length ? this.exec('SELECT COUNT(*) AS n FROM issued WHERE owner=? AND certificate IS NOT NULL AND serial IN (' +
-        serials.map(() => '?').join(',') + ')', owner, ...serials)[0].n : 0;
-      if (owned !== serials.length) return { error: 'Teams can only use signed ubus in your collection.', status: 400 };
-      const document = { teams: data.teams.map(({ name, slots }) => ({ name, slots })), last: data.last };
-      this.exec('INSERT INTO saved_teams VALUES (?, ?) ON CONFLICT(owner) DO UPDATE SET data=excluded.data', owner, JSON.stringify(document));
+      const rows = serials.length ? this.exec('SELECT serial, dna FROM issued WHERE owner=? AND certificate IS NOT NULL AND serial IN (' +
+        serials.map(() => '?').join(',') + ')', owner, ...serials) : [];
+      if (rows.length !== serials.length) return { error: 'Teams can only use signed ubus in your collection.', status: 400 };
+      const availableBySerial = new Map(rows.map(row => [row.serial, decode(fromCode(row.dna)).supers.map(n => n % 8)]));
+      if (allSlots.some(slot => slot.super !== null && !availableBySerial.get(slot.serial).includes(slot.super))) {
+        return { error: 'Super not available to this ubu.', status: 400 };
+      }
+      const document = {
+        teams: data.teams.map(({ name, slots: s }) => ({ name, slots: s.map(({ serial, super: id }) => ({ serial, super: id })) })),
+        last: data.last ? data.last.map(({ serial, super: id }) => ({ serial, super: id })) : null
+      };
+      this.exec('INSERT INTO saved_teams (owner, data) VALUES (?, ?) ON CONFLICT(owner) DO UPDATE SET data=excluded.data', owner, JSON.stringify(document));
       return document;
     });
   }

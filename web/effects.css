@@ -5,7 +5,7 @@
 
 body.effects-page {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--background, #101112);
@@ -33,7 +33,7 @@ body.effects-page {
   border: 1px solid var(--border, #333539);
   border-radius: 16px;
   padding: 10px 12px;
-  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -594,11 +594,16 @@ body.effects-page {
     grid-template-columns: 1fr;
   }
   .effects-stage-column {
-    position: sticky;
-    top: 8px;
+    position: static;
+  }
+  .effects-stage-card {
+    max-height: none;
   }
   .effects-stage-area {
-    max-height: 40vh;
+    max-height: 45dvh;
+    width: auto;
+    max-width: 100%;
+    margin: 0 auto;
   }
 }
 

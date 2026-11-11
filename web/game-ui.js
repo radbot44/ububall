@@ -36,6 +36,8 @@
   // `align: 'end'` lines its right edge up with the anchor's.
   function place(popover, anchor, align = 'start') {
     const a = anchor.getBoundingClientRect(), gap = 6 * uiScale, margin = 8 * uiScale;
+    popover.style.inset = 'auto';
+    popover.style.left = popover.style.top = '0px';
     if (popover.classList.contains('game-select-list')) popover.style.minWidth = a.width + 'px';
     const width = Math.min(popover.offsetWidth, innerWidth - margin * 2), height = popover.offsetHeight;
     let left = align === 'end' ? a.right - width : a.left;
@@ -47,12 +49,26 @@
   }
   // Wires a button to a popover: the button toggles it (light dismiss closes it), and it opens
   // anchored to whichever button opened it last. `prepare` runs before it shows.
-  function dropdown(button, popover, { align = 'start', prepare } = {}) {
+  function dropdown(button, popover, { align = 'start', prepare, haspopup = 'true' } = {}) {
     popover.classList.add('game-popover');
     if (!popover.hasAttribute('popover')) popover.popover = 'auto';
     button.popoverTargetElement = popover; button.popoverTargetAction = 'toggle';
-    button.setAttribute('aria-haspopup', 'true');
-    button.addEventListener('click', () => { popover.anchor = button; popover.align = align; if (!popover.matches(':popover-open')) prepare?.(); });
+    button.setAttribute('aria-haspopup', haspopup);
+    button.addEventListener('click', event => {
+      if (popover.matches(':popover-open') && popover.anchor && popover.anchor !== button) {
+        event.preventDefault();
+        popover.anchor.setAttribute('aria-expanded', 'false');
+        popover.anchor = button;
+        popover.align = align;
+        prepare?.();
+        button.setAttribute('aria-expanded', 'true');
+        place(popover, button, align);
+        return;
+      }
+      popover.anchor = button;
+      popover.align = align;
+      if (!popover.matches(':popover-open')) prepare?.();
+    });
     if (!popover.dataset.placed) {
       popover.dataset.placed = '1';
       popover.addEventListener('toggle', event => {
@@ -61,36 +77,48 @@
         if (open && popover.anchor) place(popover, popover.anchor, popover.align);
       });
       addEventListener('resize', () => { if (popover.matches(':popover-open') && popover.anchor) place(popover, popover.anchor, popover.align); });
+      addEventListener('scroll', event => {
+        if (!popover.matches(':popover-open') || !popover.anchor) return;
+        if (event.target === popover || popover.contains?.(event.target)) return;
+        const a = popover.anchor.getBoundingClientRect();
+        if (a.bottom < 0 || a.top > innerHeight || a.right < 0 || a.left > innerWidth) popover.hidePopover();
+        else place(popover, popover.anchor, popover.align);
+      }, true);
     }
     button.setAttribute('aria-expanded', 'false');
   }
 
-  // Confirm and name dialogs, styled as game panels. Each resolves when the player answers.
-  let dialog = null;
+  // Confirm and name dialogs, styled as game panels. Each creates an isolated top-layer dialog
+  // removed on close so concurrent alerts or confirmations never collide.
   function panel({ title, message, input, confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false }) {
-    dialog ||= document.body.appendChild(el('dialog', { className: 'game-dialog' }));
+    const dlg = document.body.appendChild(el('dialog', { className: 'game-dialog' }));
     const field = input ? el('input', { className: 'game-dialog-input', value: input.value || '', maxLength: input.maxLength || 40, required: true }) : null;
     if (field) {
       field.setAttribute('aria-label', input.label || title);
       field.readOnly = Boolean(input.readOnly);
     }
-    const confirm = el('button', { type: 'submit', className: danger ? 'game-dialog-danger' : 'primary', textContent: confirmLabel });
-    const cancel = el('button', { type: 'button', className: 'quiet', textContent: cancelLabel });
+    const showCancel = cancelLabel !== null && cancelLabel !== false && cancelLabel !== '';
+    const confirmBtn = el('button', { type: 'submit', className: danger ? 'game-dialog-danger' : 'primary', textContent: confirmLabel });
+    const cancelBtn = showCancel ? el('button', { type: 'button', className: 'quiet', textContent: cancelLabel }) : null;
+    const actions = el('div', { className: 'game-dialog-actions' }, ...(cancelBtn ? [cancelBtn] : []), confirmBtn);
     const form = el('form', { method: 'dialog' }, el('h2', { textContent: title }), ...(message ? [el('p', { textContent: message })] : []),
-      ...(field ? [field] : []), el('div', { className: 'game-dialog-actions' }, cancel, confirm));
-    dialog.replaceChildren(form);
-    dialog.setAttribute('aria-label', title);
+      ...(field ? [field] : []), actions);
+    dlg.replaceChildren(form);
+    dlg.setAttribute('aria-label', title);
     return new Promise(resolve => {
       let answer = null;
-      cancel.onclick = () => dialog.close();
+      if (cancelBtn) cancelBtn.onclick = () => dlg.close();
       form.onsubmit = event => {
         event.preventDefault();
         if (field && !field.value.trim()) { field.focus(); return; }
-        answer = field ? field.value : true; dialog.close();
+        answer = field ? field.value : true; dlg.close();
       };
-      dialog.addEventListener('close', () => resolve(answer ?? (field ? null : false)), { once: true });
-      dialog.showModal();
-      (field || confirm).focus();
+      dlg.addEventListener('close', () => {
+        dlg.remove();
+        resolve(answer ?? (field ? null : false));
+      }, { once: true });
+      dlg.showModal();
+      (field || confirmBtn).focus();
       field?.select();
     });
   }
@@ -114,6 +142,7 @@
       item.setAttribute('aria-selected', String(o.value === native.value));
       item.onclick = () => {
         list.hidePopover();
+        button.focus();
         if (native.value === o.value) return;
         native.value = o.value; sync(); native.dispatchEvent(new Event('change', { bubbles: true }));
       };
@@ -127,14 +156,26 @@
     function sync() {
       label.textContent = native.selectedOptions[0]?.textContent || '';
       button.disabled = native.disabled;
+      if (native.disabled && list.matches(':popover-open')) list.hidePopover();
+      else if (list.matches(':popover-open')) { fill(); place(list, button, list.align); }
     }
-    dropdown(button, list, { prepare: fill });
+    dropdown(button, list, { prepare: fill, haspopup: 'listbox' });
     list.addEventListener('toggle', event => { if (event.newState === 'open') (list.querySelector('[aria-selected="true"]') || list.querySelector('button'))?.focus(); });
-    // Arrow keys move through the options; Escape closes (light dismiss).
+    // Arrow/Home/End keys move through the options; Escape closes and restores trigger focus.
     list.addEventListener('keydown', event => {
-      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        list.hidePopover();
+        button.focus();
+        return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
-      const items = [...list.querySelectorAll('button:not(:disabled)')], at = items.indexOf(document.activeElement);
+      const items = [...list.querySelectorAll('button:not(:disabled)')];
+      if (!items.length) return;
+      if (event.key === 'Home') { items[0].focus(); return; }
+      if (event.key === 'End') { items[items.length - 1].focus(); return; }
+      const at = items.indexOf(document.activeElement);
       items[(at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
     });
     native.addEventListener('change', sync);
@@ -146,8 +187,9 @@
   // Tooltips: any element with data-tip names itself on hover, keyboard focus or a long press on
   // touch, above the element (below when there is no room). A long press swallows the tap that
   // ends it, so naming a super on a tile never picks the tile.
-  let tip = null, tipFor = null, pressTimer = 0, hideTimer = 0, pressed = null, swallow = false;
+  let tip = null, tipFor = null, pressTimer = 0, hideTimer = 0, swallowTimer = 0, pressed = null, swallow = false;
   function showTip(target) {
+    if (!target?.dataset.tip) return;
     tip ||= document.body.appendChild(el('div', { className: 'game-tip', popover: 'manual' }));
     clearTimeout(hideTimer);
     tip.textContent = target.dataset.tip; tipFor = target;
@@ -169,21 +211,37 @@
   addEventListener('focusin', event => { const t = tipTarget(event); if (t?.matches(':focus-visible')) showTip(t); });
   addEventListener('focusout', event => { if (tipTarget(event) === tipFor) hideTip(); });
   addEventListener('pointerdown', event => {
-    swallow = false; clearTimeout(pressTimer);
+    swallow = false; clearTimeout(pressTimer); clearTimeout(swallowTimer);
     const t = tipTarget(event);
     if (tipFor && tipFor !== t) hideTip();
-    if (event.pointerType === 'mouse' || !t) return;
+    if (event.pointerType === 'mouse' || !t || !t.dataset.tip) return;
     pressed = { x: event.clientX, y: event.clientY };
     pressTimer = setTimeout(() => { swallow = true; showTip(t); }, 450);
   });
   addEventListener('pointermove', event => {
     if (pressed && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > 10 * uiScale) { clearTimeout(pressTimer); pressed = null; }
   });
-  for (const type of ['pointerup', 'pointercancel']) addEventListener(type, event => {
+  addEventListener('pointerup', event => {
     clearTimeout(pressTimer); pressed = null;
-    if (swallow && event.pointerType !== 'mouse') hideTip(1500);
+    if (swallow && event.pointerType !== 'mouse') {
+      hideTip(1500);
+      clearTimeout(swallowTimer);
+      swallowTimer = setTimeout(() => { swallow = false; }, 0);
+    }
   });
-  addEventListener('click', event => { if (swallow) { swallow = false; event.preventDefault(); event.stopPropagation(); } }, true);
+  addEventListener('pointercancel', () => {
+    clearTimeout(pressTimer); clearTimeout(swallowTimer);
+    pressed = null; swallow = false;
+    if (tipFor) hideTip();
+  });
+  addEventListener('click', event => {
+    if (swallow) {
+      clearTimeout(swallowTimer);
+      swallow = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
   addEventListener('contextmenu', event => { if (swallow || tipTarget(event)) event.preventDefault(); }, true);
   for (const type of ['scroll', 'resize']) addEventListener(type, () => { if (tipFor) hideTip(); }, true);
 

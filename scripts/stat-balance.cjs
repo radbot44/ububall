@@ -22,18 +22,26 @@ const STATS = ['impulse', 'traction', 'spin', 'curve', 'size', 'mass', 'bouncine
 // `supers` optionally fixes each team's super ([team A, team B], an index into P.SUPERS or null for none).
 function match({ teams, seed, swapped, level, maxTurns, supers = null }) {
   const random = C.randomSource(seed), bodies = P.kickoff(), stats = [];
-  // Mirrored loadout: each slot gets the same super, personality and starting meter on both sides.
-  const slots = [0, 1, 2].map(() => ({
-    superId: Math.floor(random() * 8), meter: Math.floor(random() * 60),
-    personality: { aggression: Math.floor(random() * 64), creativity: Math.floor(random() * 64),
-      teamwork: Math.floor(random() * 64), clutch: Math.floor(random() * 64) }
-  }));
+  // Mirrored loadout: each slot gets the same 4-slot super pool, personality and starting meter on both sides.
+  const slots = [0, 1, 2].map(() => {
+    const superSlots = Array.from({ length: 4 }, () => Math.floor(random() * 16));
+    return {
+      superSlots, superId: superSlots[0] % 8, meter: Math.floor(random() * 60),
+      personality: { aggression: Math.floor(random() * 64), creativity: Math.floor(random() * 64),
+        teamwork: Math.floor(random() * 64), clutch: Math.floor(random() * 64) }
+    };
+  });
   const order = swapped ? [teams[1], teams[0]] : teams;
   bodies.slice(0, 6).forEach((b, i) => {
     const raw = order[Math.floor(i / 3)][i % 3], slot = slots[i % 3];
     stats.push(raw); M.applyStats(P, b, raw, 'standard');
     const own = supers ? supers[(i < 3) === !swapped ? 0 : 1] : slot.superId;
-    b.personality = slot.personality; b.equippedSuper = own === null ? null : P.SUPERS[own]; b.meter = slot.meter;
+    const mastery = own === null ? null : P.superMastery(supers ? [own] : slot.superSlots, own);
+    b.personality = slot.personality;
+    b.equippedSuper = own === null ? null : { ...P.SUPERS[own], ...mastery };
+    b.superBonusTicks = mastery?.bonusTicks || 0;
+    b.superBonusRefund = mastery?.bonusRefund || 0;
+    b.meter = slot.meter;
   });
   let state = { version: M.VERSION, mode: 'standard', bodies, stats, scores: [0, 0], turn: 1, phase: 'plan', winner: null };
   let turns = 0;
@@ -42,7 +50,17 @@ function match({ teams, seed, swapped, level, maxTurns, supers = null }) {
     state = M.resolveTurn(P, state, moves).state; turns++;
     if (state.phase === 'goal') {
       const positions = P.kickoff();
-      state.bodies.forEach((b, i) => { b.x = positions[i].x; b.y = positions[i].y; b.vx = b.vy = b.omega = 0; });
+      state.bodies.forEach((b, i) => {
+        b.x = positions[i].x; b.y = positions[i].y; b.vx = b.vy = b.omega = 0;
+        if (i < 6) {
+          b.daze = 0;
+          delete b.meterTick;
+          b.guarding = false;
+          b.ironGuard = false;
+          b.ironCooldownTicks = 0;
+          P.syncEffectiveStats(b);
+        }
+      });
       state.phase = 'plan';
     }
   }
@@ -92,30 +110,49 @@ function summarise(results) {
 // Least squares with standard errors (normal equations, Gauss-Jordan inverse).
 function regress(rows, ys) {
   const k = rows[0].length, n = rows.length;
+  if (n <= k) throw new Error(`Regression requires more pairs (${n}) than model parameters (${k}).`);
   const xtx = Array.from({ length: k }, (_, i) => Array.from({ length: k }, (_, j) => rows.reduce((a, r) => a + r[i] * r[j], 0)));
   const xty = Array.from({ length: k }, (_, i) => rows.reduce((a, r, t) => a + r[i] * ys[t], 0));
   const inv = xtx.map((row, i) => [...row, ...Array.from({ length: k }, (_, j) => +(i === j))]);
   for (let c = 0; c < k; c++) {
     let p = c; for (let r = c + 1; r < k; r++) if (Math.abs(inv[r][c]) > Math.abs(inv[p][c])) p = r;
     [inv[c], inv[p]] = [inv[p], inv[c]];
-    const d = inv[c][c]; for (let j = 0; j < 2 * k; j++) inv[c][j] /= d;
+    const d = inv[c][c];
+    if (Math.abs(d) < 1e-12) throw new Error('Singular design matrix in regression; increase --pairs.');
+    for (let j = 0; j < 2 * k; j++) inv[c][j] /= d;
     for (let r = 0; r < k; r++) if (r !== c) { const f = inv[r][c]; for (let j = 0; j < 2 * k; j++) inv[r][j] -= f * inv[c][j]; }
   }
   const xinv = inv.map(row => row.slice(k));
   const beta = xinv.map(row => row.reduce((a, v, j) => a + v * xty[j], 0));
   const residual = rows.reduce((a, r, t) => a + (ys[t] - r.reduce((s, v, j) => s + v * beta[j], 0)) ** 2, 0) / (n - k);
-  return beta.map((b, i) => ({ beta: b, se: Math.sqrt(residual * xinv[i][i]) }));
+  return beta.map((b, i) => ({ beta: b, se: Math.sqrt(Math.max(0, residual * xinv[i][i])) }));
 }
 
 async function main() {
-  const args = Object.fromEntries(process.argv.slice(2).map((a, i, all) => a.startsWith('--') ? [a.slice(2), all[i + 1]?.startsWith('--') || all[i + 1] === undefined ? true : all[i + 1]] : null).filter(Boolean));
   const known = ['experiment', 'pairs', 'seed', 'level', 'turns', 'threads', 'stats', 'output'];
-  for (const key of Object.keys(args)) if (!known.includes(key)) throw new Error('Unknown option: --' + key);
-  const experiment = args.experiment || 'sweep', pairs = Number(args.pairs || 20), seed = Number(args.seed || 1);
-  const level = args.level || 'easy', maxTurns = Number(args.turns || 60);
-  const threads = Number(args.threads || Math.max(1, os.availableParallelism() - 2));
+  const rawArgs = process.argv.slice(2), args = {};
+  for (let i = 0; i < rawArgs.length; i++) {
+    const token = rawArgs[i];
+    if (!token.startsWith('--')) throw new Error('Unexpected argument: ' + token);
+    const key = token.slice(2);
+    if (!known.includes(key)) throw new Error('Unknown option: --' + key);
+    if (i + 1 >= rawArgs.length || rawArgs[i + 1].startsWith('--')) throw new Error('Missing value for --' + key);
+    args[key] = rawArgs[++i];
+  }
+  const experiment = args.experiment || 'sweep';
+  const pairs = args.pairs !== undefined ? Number(args.pairs) : 20;
+  const seed = args.seed !== undefined ? Number(args.seed) : 1;
+  const level = args.level || 'easy';
+  const maxTurns = args.turns !== undefined ? Number(args.turns) : 60;
+  const threads = args.threads !== undefined ? Number(args.threads) : Math.max(1, os.availableParallelism() - 2);
   const stats = args.stats ? String(args.stats).split(',') : STATS;
-  if (!['sweep', 'regression', 'supers'].includes(experiment) || !stats.every(s => STATS.includes(s)) || ![pairs, seed, maxTurns, threads].every(Number.isInteger) || pairs < 1) throw new Error('Invalid options.');
+  if (!['sweep', 'regression', 'supers'].includes(experiment) || !stats.every(s => STATS.includes(s)) ||
+      ![pairs, seed, maxTurns, threads].every(Number.isInteger) || pairs < 1 || maxTurns < 1 || threads < 1) {
+    throw new Error('Invalid options.');
+  }
+  if (experiment === 'regression' && pairs <= stats.length + 1) {
+    throw new Error(`Regression requires --pairs > ${stats.length + 1}.`);
+  }
   const common = { level, maxTurns };
   const pairJobs = (teams, s, supers = null) => [false, true].map(swapped => ({ ...common, teams, seed: s, swapped, supers }));
   let report;
@@ -166,4 +203,4 @@ Goal difference per match for a team with one super on all three ubus vs a team 
   if (args.output) require('node:fs').writeFileSync(args.output, JSON.stringify(report, null, 2) + '\n');
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exit(1); });
-module.exports = { STATS, match };
+module.exports = { STATS, match, regress };

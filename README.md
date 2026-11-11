@@ -65,7 +65,7 @@ The ordered 32-color palette defines five color roles, each drawing one equally 
 Two .ubu forms are approved and implemented in `shared/ubu-file.js`:
 
 - **Unsigned/custom:** contains 1024-bit DNA, freely generated or designed. Carries no proof of official issuance or registered ownership. Exact serialized JSON size is 194 bytes (`{"type":"ubu","dna":"<171-character DNA>"}`).
-- **Mint-signed certificate:** contains 1024-bit DNA, a permanent twelve-digit serial (000000000001–999999999999), and certificate metadata covered by an Ed25519 signature verifiable against a trusted mint public key. Exact serialized size is 425 bytes (`{"type":"ubu-signed",...}`).
+- **Mint-signed certificate:** contains 1024-bit DNA, a permanent twelve-digit serial (000000000001–999999999999), and certificate metadata covered by an Ed25519 signature verifiable against a trusted mint public key. Typical serialized size is 425 bytes for a 10-digit timestamp and 6-character key ID (`411–457` bytes across valid key/timestamp lengths; `{"type":"ubu-signed",...}`).
 
 See the [file profile](docs/ubu-file.md) for full encoding, signing prefix (`ubumint:issuance\n`), and verification rules.
 

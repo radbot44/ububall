@@ -31,25 +31,38 @@
   // Each candidate is judged on at most 2 s of play (480 ticks), or sooner once its
   // result is clear.
   const SEARCH_TICKS = 480;
-  // Clear: the ball is at rest and loose, no super is running, and no ubu still sliding could reach
-  // the ball on its own momentum (a straight-line stopping distance; knock-ons are not followed).
+  // Clear: the ball is at rest, unlit and loose, no super is running, and no ubu still sliding could
+  // reach the ball, enter its own crease, cross an attack-zone line or check an opponent ahead of it.
   function decided(bodies) {
     const ball = bodies[6];
-    if (ball.vx || ball.vy || P.holder(bodies)) return false;
+    if (ball.vx || ball.vy || ball.onFire || P.holder(bodies)) return false;
     // Do not truncate when the resting ball sits in a corner (corner-stalling count/reset applies at turn end).
     if (M.cornerOf(P, ball.x, ball.y) !== null) return false;
     if (M.camping(P, bodies, 0) || M.camping(P, bodies, 1)) return false;
     const goalY = (P.rink.goalTop + P.rink.goalBottom) / 2;
+    const az0 = M.attackZoneLine(P, 0), az1 = M.attackZoneLine(P, 1);
     for (let i = 0; i < 6; i++) {
       const b = bodies[i];
       if (b.superActive) return false;
       const speed2 = b.vx * b.vx + b.vy * b.vy;
       if (!speed2) continue;
+      const speed = Math.sqrt(speed2);
       const stopDist = speed2 / (2 * b.friction * (1 - (P.TAILGATE?.frictionCut ?? .4)));
       const contact = Math.max(b.radius, b.reach || b.radius, 18) + ball.radius;
       if (Math.hypot(b.x - ball.x, b.y - ball.y) - contact <= stopDist) return false;
       const ownGoalX = b.team ? P.rink.right : P.rink.left;
       if (Math.hypot(b.x - ownGoalX, b.y - goalY) - M.FOULS.crease <= stopDist) return false;
+      const stopX = b.x + (b.vx / speed) * stopDist;
+      const oppAz = b.team ? az0 : az1;
+      if ((b.x - oppAz) * (stopX - oppAz) <= 0) return false;
+      for (let j = 0; j < 6; j++) {
+        if (j === i) continue;
+        const o = bodies[j];
+        if (o.team === b.team || o.carded) continue;
+        const dx = o.x - b.x, dy = o.y - b.y;
+        if (dx * b.vx + dy * b.vy <= 0) continue;
+        if (Math.hypot(dx, dy) - b.radius - o.radius <= stopDist) return false;
+      }
     }
     return true;
   }
@@ -57,7 +70,7 @@
     let value = seed >>> 0;
     return () => ((value = (Math.imul(value, 1664525) + 1013904223) >>> 0) / 4294967296);
   }
-  const SKATER_CURVE = .06, SPIN_DECAY = 5;
+  const SKATER_CURVE = P?.SKATER_CURVE ?? .06, SPIN_DECAY = P?.SPIN_DECAY ?? 5;
   const contactRadius = b => Math.max(b.radius, b.reach || b.radius, 18);
   function segmentBlocked(ax, ay, bx, by, obstacles, clearance = 38) {
     const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
@@ -117,7 +130,7 @@
       if (b.stunned) return { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
       const { agg, cre, tmw, surge } = traits[idx];
       const sKey = b.equippedSuper?.key || b.superKey;
-      const canSuper = (b.meter ?? 0) >= 100 && !b.stunned;
+      const canSuper = Boolean(sKey) && (b.meter ?? 0) >= 100 && !b.stunned;
       const reachR = contactRadius(b);
       const contactDist = reachR + ball.radius - 2;
       const dBall = Math.hypot(b.x - ball.x, b.y - ball.y);
@@ -156,7 +169,8 @@
               aimBallX = (ball.x + goalX) * 0.5;
               aimBallY = ball.y < 300 ? 78 : 522;
             } else {
-              spin = -shotBlock.side * Math.min(1, 0.45 + cre * 0.55);
+              // Spin strikes counter-rotate the ball, so matching shotBlock.side bends the ball away from the blocker.
+              spin = shotBlock.side * Math.min(1, 0.45 + cre * 0.55);
             }
           }
           if (spin === 0 && cre > 0.35) {
@@ -227,8 +241,9 @@
       const superLaunchScale = (superArm && sKey === 'colossus' && b.superActive !== 'colossus') ? P.SUPER.colossusLaunch
         : (superArm && sKey === 'stalwart' && b.superActive !== 'stalwart' ? P.SUPER.stalwartLaunch : 1);
       const maxV = P.launchSpeed(b) * superLaunchScale;
+      const effFriction = b.friction * ((superArm && sKey === 'stalwart') || b.superActive === 'stalwart' ? P.SUPER.stalwartFriction : b.holding ? P.SUPER.carryFriction : 1);
       let angle = Math.atan2(dy, dx);
-      const power = distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * b.friction * Math.max(0, distance + extraDrive)) / maxV);
+      const power = distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * effFriction * Math.max(0, distance + extraDrive)) / maxV);
 
       if (Math.abs(spin) > 0.01 && power > 0.05) {
         const omega0 = spin * (b.maxSpin || 15);
@@ -247,7 +262,11 @@
   // The old planner attacks left. Reflect the complete graph for the other team.
   function legacy(state, team, random = () => .5) {
     const bodies = structuredClone(state.bodies);
-    for (const b of bodies) b.superArm = false;
+    const classic = state.mode ? M.rule(state.mode, 'classic') : false;
+    for (const b of bodies) {
+      b.superArm = false;
+      if (classic) { b.equippedSuper = null; b.superKey = null; b.meter = 0; }
+    }
     if (team === 0) {
       for (const b of bodies) {
         b.x = 1000 - b.x; b.vx = -b.vx; b.omega = -b.omega;
@@ -265,9 +284,11 @@
     const dx = x - body.x, dy = y - body.y;
     const distance = Math.hypot(dx, dy);
     const superScale = superKey === 'colossus' && body.superActive !== 'colossus' ? (P.SUPER.colossusLaunch ?? (1 / P.SUPER.colossusMass))
-      : superKey === 'stalwart' ? (P.SUPER.stalwartLaunch ?? 0.5) : 1;
+      : (superKey === 'stalwart' && body.superActive !== 'stalwart' ? (P.SUPER.stalwartLaunch ?? 0.5) : 1);
     const maxV = P.launchSpeed(body) * superScale;
-    const speed = distance < 2 ? 0 : Math.min(maxV, Math.sqrt(2 * body.friction * Math.max(0, distance + drive)));
+    const frictionMult = (superKey === 'stalwart' || body.superActive === 'stalwart') ? (P.SUPER.stalwartFriction ?? 3)
+      : (body.holding ? (P.SUPER.carryFriction ?? 1.5) : 1);
+    const speed = distance < 2 ? 0 : Math.min(maxV, Math.sqrt(2 * body.friction * frictionMult * Math.max(0, distance + drive)));
     const vSpeed = Math.hypot(body.vx || 0, body.vy || 0);
 
     if (vSpeed <= 10 || speed === 0) {
@@ -339,9 +360,10 @@
     return team === 0 ? body.x <= ball.x + 12 : body.x >= ball.x - 12;
   }
   function isPointBlank(body, ball) {
-    const reach = Math.max(body.radius, body.reach || body.radius, 18);
+    const reach = Math.max(body.radius, bReach(body), 18);
     return Math.hypot(body.x - ball.x, body.y - ball.y) - reach - ball.radius < 4 * ball.radius;
   }
+  function bReach(body) { return body.reach || body.radius; }
   // A move tagged with its intent; copies made while searching keep it.
   const intents = new WeakMap();
   function tag(move, intent) { intents.set(move, intent); return move; }
@@ -509,11 +531,23 @@
     const started = performance.now(), random = randomSource(config.seed ?? 1);
     // Only public state crosses this boundary. Discard UI arming flags, not running supers.
     const state = structuredClone(input);
+    const classic = M.rule(state.mode, 'classic');
+    let maxMeterTick = -Infinity;
     // Every candidate copies the state, so presentation fields (voice, name, super descriptions) go.
     for (const b of state.bodies) {
       b.superArm = false;
       delete b.voice; delete b.name;
-      if (b.equippedSuper) b.equippedSuper = { id: b.equippedSuper.id, key: b.equippedSuper.key, bonusTicks: b.equippedSuper.bonusTicks, bonusRefund: b.equippedSuper.bonusRefund };
+      if (classic) {
+        b.equippedSuper = null;
+        b.superKey = null;
+        b.meter = 0;
+      } else if (b.equippedSuper) {
+        b.equippedSuper = { id: b.equippedSuper.id, key: b.equippedSuper.key, bonusTicks: b.equippedSuper.bonusTicks, bonusRefund: b.equippedSuper.bonusRefund };
+      }
+      if (Number.isFinite(b.meterTick) && b.meterTick > maxMeterTick) maxMeterTick = b.meterTick;
+    }
+    if (state.clock === undefined && maxMeterTick > -Infinity) {
+      state.clock = maxMeterTick + M.METER.cooldownTicks;
     }
 
     const ownUbus = state.bodies.slice(team * 3, team * 3 + 3);
@@ -549,6 +583,7 @@
       return aim(b, oppCoverX, 300);
     });
     const responses = [opponent, guardOpponents, attack].slice(0, settings.opponents);
+    const pulse = M.rule(state.mode, 'pulse');
     // A warned team can leave the crease and return later in the same turn.
     const searchTicks = state.fouls?.crease?.[team] ? M.turnTicks(state.mode) : SEARCH_TICKS;
     // One simulated turn, valued with its goal's complexity: board and post bounces after the first
@@ -557,7 +592,7 @@
     const results = new Map();
     const number = n => Object.is(n, -0) ? '-0' : n;
     function simulate(moves, response, r) {
-      const key = r + ':' + moves.map(p => [number(p.angle), number(p.power), number(p.spin), p.superArm, p.guard].join()).join('|');
+      const key = r + ':' + moves.map(p => p.guard || !p.power ? [number(p.angle), 0, 0, p.superArm, p.guard].join() : [number(p.angle), number(p.power), number(p.spin), p.superArm, p.guard].join()).join('|');
       if (!results.has(key)) results.set(key, run(moves, response));
       return results.get(key);
     }
@@ -575,7 +610,7 @@
         },
         wall(body, velocity, type) { if (body.team === -1 && touches && type !== 'net') boards++; }
       };
-      const canDecide = !state.fouls?.crease?.[team] && !state.fouls?.crease?.[1 - team] && state.fouls?.corner === null;
+      const canDecide = !pulse && !state.fouls?.crease?.[team] && !state.fouls?.crease?.[1 - team] && state.fouls?.corner === null;
       const checkDecided = canDecide ? bodies => touches > 0 && decided(bodies) : null;
       const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false, fastSearch: true, ticks: searchTicks, decided: checkDecided, watch, preservePartial: true });
       simulations++; ticks += result.replay.ticks;
@@ -644,18 +679,23 @@
         return pool[Math.floor(random() * pool.length)];
       });
     }
-    while (evaluated < settings.candidates) {
+    const anyUnstunned = [0, 1, 2].some(idx => !state.bodies[team * 3 + idx].stunned);
+    while (evaluated < settings.candidates && anyUnstunned) {
       const next = best.map(copy);
-      if (evaluated % 4 === 0) {
+      const editable = evaluated % 4 === 0 ? [] : [0, 1, 2].filter(idx => !state.bodies[team * 3 + idx].stunned && !next[idx].guard);
+      if (!editable.length) {
         next.splice(0, 3, ...teamPlan());
       } else {
-        const editable = [0, 1, 2].filter(idx => !state.bodies[team * 3 + idx].stunned && !next[idx].guard);
-        if (!editable.length) break;
         const i = editable[Math.floor(random() * editable.length)];
         // Fine-tune one ubu within its current intent.
         next[i].angle += (random() - .5) * .28;
         next[i].power = Math.max(0, Math.min(1, next[i].power + (random() - .5) * .25));
-        next[i].spin = Math.max(-1, Math.min(1, next[i].spin + (random() - .5) * creativityOf(state.bodies[team * 3 + i]) * .5));
+        if (next[i].power > 0) {
+          next[i].spin = Math.max(-1, Math.min(1, next[i].spin + (random() - .5) * creativityOf(state.bodies[team * 3 + i]) * .5));
+        } else {
+          next[i].angle = 0;
+          next[i].spin = 0;
+        }
       }
       consider(next);
     }
@@ -682,6 +722,5 @@
     randomSource, legacy, decided, plan, aim, strike, behindBall, isPointBlank, evaluate, options,
     segmentBlocked, cpuPlans, baseline: cpuPlans
   };
-  if (P && !P.cpuPlans) P.cpuPlans = cpuPlans;
   if (node) module.exports = api; else root.ububallCPU = api;
 })(globalThis);

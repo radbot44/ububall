@@ -143,7 +143,9 @@
       assist: from.assist ? [...from.assist] : [null, null], shotX: from.shotX ? [...from.shotX] : [null, null],
       credit: { ...from.credit }, banked: Boolean(from.banked),
       saved: from.saved ? { ...from.saved } : null, big: Boolean(from.big),
-      lastPass: from.lastPass ? { ...from.lastPass } : null };
+      lastPass: from.lastPass ? { ...from.lastPass } : null,
+      passOrigin: from.passOrigin ? { ...from.passOrigin } : null,
+      postCounted: Boolean(from.postCounted) };
   }
   // Per-ubu match totals (by index) for the summary (yellow cards included), and each team's deepest deficit.
   function newTally() {
@@ -177,22 +179,44 @@
   function tickTouch(a, b, speed, impulse, plow = false, iron = false, checker = null, snapped = false, tangentImpulse = 0) {
     const t = activeTick, player = toucher(a, b, speed);
     if (player && !plow) {
-      // A touch passed from a teammate makes that teammate the assist; an opponent's touch clears it unless a light graze.
+      // A touch passed from a teammate makes that teammate the assist; an opponent's significant touch (>= 35)
+      // breaks the passing team's assist, whereas a light opponent poke-check graze (< 35) preserves the pass chain.
       const { bodies, play } = t, i = bodies.indexOf(player), team = player.team, last = play.last;
-      if (last !== i) {
-        if (last !== null && bodies[last].team === team) {
-          play.assist[team] = last;
-          play.lastPass = { from: last, at: play.age, speed };
-          t.fx.pass?.(last, i, t.ball);
-        } else if (last !== null && bodies[last].team !== team) {
-          if (impulse >= 35) {
-            play.assist[team] = null;
-            play.lastPass = null;
-          }
+      if (last !== null && bodies[last].team !== team) {
+        if (impulse >= 35) {
+          play.assist[1 - team] = null;
+          play.assist[team] = null;
+          play.lastPass = null;
+          play.last = i;
+          play.banked = false;
+          play.postCounted = false;
+          t.passSender = i;
         }
+        play.lastTouch[team] = i;
+        play.shotX[team] = t.ball.x;
+      } else {
+        if (last !== null && last !== i) {
+          play.assist[team] = last;
+          const origin = play.passOrigin?.from === last ? play.passOrigin : null;
+          play.lastPass = {
+            from: last,
+            to: i,
+            at: origin ? origin.at : play.age,
+            speed: Math.max(t.preBallSpeed || 0, origin ? origin.speed : 0),
+            touches: 1
+          };
+          t.fx.pass?.(last, i, t.ball);
+        } else if (last === i) {
+          if (play.lastPass && play.lastPass.to === i) play.lastPass.touches = (play.lastPass.touches || 1) + 1;
+          if (play.assist[team] === i) play.assist[team] = null;
+        }
+        play.last = i;
+        play.lastTouch[team] = i;
+        play.shotX[team] = t.ball.x;
+        play.banked = false;
+        play.postCounted = false;
+        t.passSender = i;
       }
-      play.last = i; play.lastTouch[team] = i; play.shotX[team] = t.ball.x;
-      if (last === null || bodies[last].team === team || impulse >= 35) play.banked = false;
       t.touched.add(i);
       if (iron) t.ironSaver = i;
     }
@@ -206,8 +230,9 @@
     const t = activeTick;
     if (body === t.ball && type === 'wall') {
       t.play.banked = true;
-    } else if (body === t.ball && type === 'post' && velocity >= 300) {
-      t.postRing = true;
+    } else if (body === t.ball && type === 'post') {
+      t.postSide = body.x > 500 ? 0 : 1;
+      if (velocity >= 300) t.postRing = true;
     }
     t.fx.wall?.(body, velocity, type, nx, ny, rimmed);
   }
@@ -216,23 +241,26 @@
   // hit-stop it earns (ms, 0 for none). `fx` receives the step callbacks. Without `effects` (CPU
   // search), the presentation-only hit-stop look-aheads are skipped; rules are unchanged.
   function playTick(P, bodies, play, fx = {}, tally = null, effects = true, skipSaves = false) {
-    // Each tick records only motion and who held the ball; the pre-tick field is rebuilt from them when
-    // the ball was touched, which is all the save and big-shot checks need. Copying every body each tick
-    // was the single largest cost of CPU search. Other fields in the rebuilt field are as after the
-    // tick: the checks must not depend on them (a spent Cannonball is known by its impact instead).
-    const t = spareTick || { motion: new Float64Array(35), touched: new Set() }, outer = activeTick;
+    // Each tick records flat scalar pre-tick state and rebuilds full body clones only when the ball
+    // was touched, avoiding per-tick object allocations during CPU search while preserving exact pre-hit state.
+    const t = spareTick || { motion: new Float64Array(35), daze: new Float64Array(7), iron: new Uint8Array(7), sup: new Array(7), touched: new Set() }, outer = activeTick;
     spareTick = null; activeTick = t;
     if (t.motion.length < bodies.length * 5) t.motion = new Float64Array(bodies.length * 5);
+    if (t.daze.length < bodies.length) { t.daze = new Float64Array(bodies.length); t.iron = new Uint8Array(bodies.length); t.sup = new Array(bodies.length); }
     const { motion, touched } = t, ball = bodies[6]?.team === -1 ? bodies[6] : bodies.find(b => b.team === -1);
     touched.clear(); t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx; t.tally = tally;
-    t.cannon = false; t.postRing = false; t.incomingCredit = null;
+    t.cannon = false; t.postRing = false; t.postSide = -1; t.incomingCredit = null; t.passSender = -1;
+    t.preBallSpeed = ball ? Math.hypot(ball.vx, ball.vy) : 0;
+    t.curBvx = ball ? ball.vx : 0; t.curBvy = ball ? ball.vy : 0;
     let held = null;
     for (let i = 0; i < bodies.length; i++) {
       const b = bodies[i];
       if (b.holding && !held) held = b;
       motion[i * 5] = b.x; motion[i * 5 + 1] = b.y; motion[i * 5 + 2] = b.vx; motion[i * 5 + 3] = b.vy; motion[i * 5 + 4] = b.omega;
+      t.daze[i] = b.daze || 0; t.iron[i] = b.ironGuard ? 1 : 0; t.sup[i] = b.superActive || null;
     }
     const incomingStrikerTeam = ball?.strikerTeam ?? -1;
+    const preCurveMult = ball?.curveMult ?? 1, preOnFire = Boolean(ball?.onFire), preFireTicks = ball?.fireTicks || 0, prePace = ball?.pace || 0;
     play.age++;
     t.onShockwave ??= (source, radius, type = null) => {
       activeTick?.fx?.shockwave?.(source, radius, type);
@@ -246,33 +274,71 @@
         at.incomingCredit ??= { ...at.play.credit };
         const bi = at.bodies.indexOf(body);
         if (bi >= 0) {
+          const bvx = at.curBvx, bvy = at.curBvy;
+          const beforeSpeed2 = bvx * bvx + bvy * bvy, curSpeed2 = at.ball.vx * at.ball.vx + at.ball.vy * at.ball.vy;
+          const denom = Math.max(beforeSpeed2, curSpeed2);
+          let kept = denom ? Math.min(1, Math.max(0, (bvx * at.ball.vx + bvy * at.ball.vy) / denom)) : 0;
           const strikerTeam = at.ball.strikerTeam ?? -1;
           if (body.team === strikerTeam || strikerTeam < 0) {
-            at.play.last = bi; at.play.lastTouch[body.team] = bi;
-            at.play.credit = { [bi]: 1 }; at.play.shotX[body.team] = at.ball.x;
+            if (at.play.lastTouch[body.team] === null || 1 - kept > 0.05) {
+              if (at.play.last !== null && at.play.last !== bi && at.bodies[at.play.last].team === body.team) {
+                at.play.assist[body.team] = at.play.last;
+              } else if (at.play.assist[body.team] === bi) {
+                at.play.assist[body.team] = null;
+              }
+              at.play.last = bi; at.play.lastTouch[body.team] = bi; at.play.shotX[body.team] = at.ball.x;
+            }
+            if (strikerTeam < 0) {
+              at.play.credit = { [bi]: 1 };
+            } else {
+              const next = {};
+              for (const [idx, share] of Object.entries(at.play.credit)) if (share * kept >= 0.01) next[idx] = share * kept;
+              next[bi] = (next[bi] || 0) + (1 - kept);
+              at.play.credit = next;
+            }
           } else {
-            // Defending magnet: blend credit based on velocity projection with defense protection
-            const ballIdx = at.bodies.indexOf(at.ball);
-            const bvx = at.motion[ballIdx * 5 + 2], bvy = at.motion[ballIdx * 5 + 3];
-            const beforeSpeed = Math.hypot(bvx, bvy), curSpeed = Math.hypot(at.ball.vx, at.ball.vy);
-            let kept = beforeSpeed && curSpeed ? Math.max(0, (bvx * at.ball.vx + bvy * at.ball.vy) / (beforeSpeed * beforeSpeed)) : 0;
-            kept = Math.max(kept, 0.75);
+            // Defending magnet: blend credit based on velocity projection with passive own-goal deflection protection.
+            const ballToOwnBefore = body.team === 0 ? bvx < -50 : bvx > 50;
+            const ballToOwnAfter = body.team === 0 ? at.ball.vx < -20 : at.ball.vx > 20;
+            const driveToOwn = body.team === 0 ? -body.vx : body.vx;
+            if (ballToOwnBefore && ballToOwnAfter && driveToOwn < 60) kept = Math.max(kept, 0.75);
             const next = {};
             for (const [idx, share] of Object.entries(at.play.credit)) if (share * kept >= 0.01) next[idx] = share * kept;
             next[bi] = (next[bi] || 0) + (1 - kept);
             at.play.credit = next;
-            if (1 - kept > 0.5) { at.play.last = bi; at.play.lastTouch[body.team] = bi; at.play.shotX[body.team] = at.ball.x; }
+            if (responsibleTeam(at.bodies, next) === body.team) {
+              at.play.assist[1 - body.team] = null;
+              at.play.lastPass = null;
+              if (at.play.assist[body.team] === bi) at.play.assist[body.team] = null;
+              at.play.last = bi; at.play.lastTouch[body.team] = bi; at.play.shotX[body.team] = at.ball.x;
+            }
           }
+          at.curBvx = at.ball.vx; at.curBvy = at.ball.vy;
         }
       }
       at.fx?.super?.(key, action, body, target);
     };
-    const goal = P.step(bodies, P.DT, tickTouch, tickWall, t.onShockwave, t.onSuper);
-    const cannon = t.cannon, postRing = t.postRing;
-    activeTick = outer;
-    const before = touched.size ? bodies.map((b, i) => ({ ...b, x: motion[i * 5], y: motion[i * 5 + 1], vx: motion[i * 5 + 2],
-      vy: motion[i * 5 + 3], omega: motion[i * 5 + 4], holding: b === held,
-      strikerTeam: b.team === -1 ? incomingStrikerTeam : b.strikerTeam })) : null;
+    let goal;
+    try {
+      goal = P.step(bodies, P.DT, tickTouch, tickWall, t.onShockwave, t.onSuper);
+    } finally {
+      activeTick = outer;
+    }
+    const cannon = t.cannon, postRing = t.postRing, postSide = t.postSide, passSender = t.passSender;
+    if (passSender >= 0 && ball) {
+      play.passOrigin = { from: passSender, at: play.age, speed: Math.hypot(ball.vx, ball.vy) };
+    }
+    const before = touched.size ? bodies.map((b, i) => {
+      if (b.team === -1) {
+        return { ...b, x: motion[i * 5], y: motion[i * 5 + 1], vx: motion[i * 5 + 2], vy: motion[i * 5 + 3], omega: motion[i * 5 + 4],
+          holding: false, strikerTeam: incomingStrikerTeam, curveMult: preCurveMult, onFire: preOnFire, fireTicks: preFireTicks, pace: prePace };
+      }
+      const prevIron = Boolean(t.iron[i]), prevSup = t.sup[i];
+      const copy = { ...b, x: motion[i * 5], y: motion[i * 5 + 1], vx: motion[i * 5 + 2], vy: motion[i * 5 + 3], omega: motion[i * 5 + 4],
+        holding: b === held, daze: t.daze[i], ironGuard: prevIron, superActive: prevSup };
+      if (prevIron !== Boolean(b.ironGuard) || prevSup !== (b.superActive || null)) P.syncEffectiveStats(copy);
+      return copy;
+    }) : null;
     const needCredit = (!skipSaves && touched.size > 0) || t.ironSaver != null;
     const incomingCredit = needCredit ? (t.incomingCredit || { ...play.credit }) : null;
     const ballIdx = ball === bodies[6] ? 6 : bodies.indexOf(ball);
@@ -285,7 +351,7 @@
       if (existing) {
         existing.iron = true;
         existing.own = Boolean(isOwn);
-      } else {
+      } else if (isOwn || (goal !== 1 - saverTeam && P.ballRun(bodies, { boards: true, ticks: 2 * SAVE.ticks }).goal !== 1 - saverTeam)) {
         tickSaves.push({ index: ironIndex, own: Boolean(isOwn), iron: true });
       }
     }
@@ -293,11 +359,12 @@
     for (const save of tickSaves) if (!save.own) play.saved = { at: play.age, team: bodies[save.index].team };
     // A Cannonball hit always counts as a big shot.
     const speed = (tally && touched.size) ? Math.hypot(ball.vx, ball.vy) : 0;
+    const incomingBig = play.big;
     const big = cannon || (touched.size ? bigShot(P, before, touched, ball) : false), struck = Boolean(ball.spinStruck);
     const snapped = Boolean(ball?.snapStruck);
     if (snapped) ball.snapStruck = false;
     const hasIron = tickSaves.some(s => s.iron);
-    let stop = effects ? Math.max(hasIron ? HIT_STOP.iron : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), play.big)) : 0;
+    let stop = effects ? Math.max(hasIron ? HIT_STOP.iron : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), incomingBig)) : 0;
     if (effects) {
       if (snapped) stop = Math.max(stop, big ? HIT_STOP.long : HIT_STOP.snap);
       if (postRing) stop = Math.max(stop, HIT_STOP.post);
@@ -316,12 +383,22 @@
         }
         if (striker) tally.topSpeed[i] = Math.max(tally.topSpeed[i], speed);
       }
+      if (postSide >= 0 && play.big && !play.postCounted) {
+        const shooter = play.lastTouch[postSide];
+        if (shooter !== null) {
+          tally.shots[shooter]++;
+          play.postCounted = true;
+        }
+      }
       for (const save of tickSaves) {
         if (!save.own) {
           tally.saves[save.index]++;
-          if (save.iron || play.big) tally.bigSaves[save.index]++;
+          if (save.iron || incomingBig) tally.bigSaves[save.index]++;
           const shooter = play.lastTouch[1 - bodies[save.index].team];
-          if (shooter !== null) tally.shots[shooter]++;
+          if (shooter !== null && !play.postCounted) {
+            tally.shots[shooter]++;
+            play.postCounted = true;
+          }
         }
       }
     }
@@ -335,21 +412,27 @@
   // assist the teammate who passed to them with no opponent touch in between. It is an own goal when
   // the conceding team was most responsible for the ball; own goals credit no scorer or assist.
   function callGoal(bodies, play, tally, goal, ace) {
-    const own = responsibleTeam(bodies, play.credit) === 1 - goal, scorer = play.lastTouch[goal];
-    const assist = own || scorer === null ? null : play.assist[goal];
+    const own = responsibleTeam(bodies, play.credit) === 1 - goal;
+    const scorer = own ? null : play.lastTouch[goal];
+    const assist = own || scorer === null || play.assist[goal] === scorer ? null : play.assist[goal];
     let hatTrick = false;
     if (!own && scorer !== null && tally) {
       hatTrick = ++tally.goals[scorer] === 3;
-      tally.shots[scorer]++;
+      if (!play.postCounted) tally.shots[scorer]++;
     }
     if (assist !== null && tally) tally.assists[assist]++;
     const shotX = play.shotX[goal], snipe = shotX !== null && (goal === 0 ? shotX < 500 : shotX > 500);
     const rebound = play.saved?.team === 1 - goal && play.age - play.saved.at <= REBOUND_TICKS;
     const banked = Boolean(play.banked);
     const fireball = Boolean(bodies[6]?.onFire);
-    const oneTimer = Boolean(assist !== null && play.lastPass && play.lastPass.from === assist && play.age - play.lastPass.at <= 288 && play.lastPass.speed >= 180);
+    const oneTimer = Boolean(
+      assist !== null && play.lastPass && play.lastPass.from === assist &&
+      (play.lastPass.to === undefined || play.lastPass.to === scorer) &&
+      (play.lastPass.touches ?? 1) === 1 &&
+      play.age - play.lastPass.at <= 288 && play.lastPass.speed >= 180
+    );
     const label = own ? 'OWN GOAL' : hatTrick ? 'HAT TRICK!' : fireball ? 'FIREBALL!' : oneTimer ? 'ONE-TIMER!' : banked ? 'BANK SHOT!' : snipe ? 'SNIPE!' : rebound ? 'REBOUND!' : ace ? 'ACE!' : 'GOAL';
-    const badges = [hatTrick && 'HAT TRICK!', ace && 'ACE!'].filter(Boolean);
+    const badges = [!own && hatTrick && 'HAT TRICK!', !own && ace && 'ACE!'].filter(Boolean);
     return { scorer, assist, own, label, badges };
   }
   // After each goal: each team's deepest deficit so far, for the comeback call.
@@ -361,25 +444,18 @@
     return { comeback: tally.deficit[winner] >= 3, shutout: scores[1 - winner] === 0 };
   }
   // Fouls, called at the end of every turn without a goal.
-  // Goal camping: each end has an attack zone, from the end boards to a line across the rink at the
-  // rear kickoff spot. A team is camping when more of its ubus have their centres in its own crease
-  // than the larger of one and the opposing ubus with their centres in that zone. Camping warns the
-  // team; if the next turn also ends with it camping, its ubus in the crease are carded. Corner
-  // stalling: when the ball ends `stallTurns` turns in a row in one corner the field is warned; if the
-  // next turn ends with it still there, the team with more ubus in that corner has them carded (a tie
-  // cards nobody) and the ball is reset to centre ice. A warning lapses the moment it stops applying
-  // during play, and a corner count ends once the ball leaves its corner beyond the `cornerExit` hysteresis
-  // margin (see `lapseFouls`). A carded ubu loses its meter, returns to its spawn and sits out the next
-  // turn, touching nothing. The crease radius around the goal mouth's centre is tuning.
   const FOULS = Object.freeze({ crease: 80, stallTurns: 2, cornerExit: 45 });
   function newFouls() { return { crease: [false, false], corner: null, cornerTurns: 0, cards: [], faceoff: false }; }
   function inCrease(P, b, team) {
-    if (b.superActive === 'stalwart') return false;
+    if (b.carded || b.superActive === 'stalwart') return false;
     return Math.hypot(b.x - (team ? P.rink.right : P.rink.left), b.y - (P.rink.goalTop + P.rink.goalBottom) / 2) < FOULS.crease;
   }
   // The line closing the attack zone in front of a team's goal runs across the rink at its rear kickoff spot.
   function attackZoneLine(P, team) { return P.spawn(team, 0).x; }
-  function inAttackZone(P, b, team) { return team ? b.x > attackZoneLine(P, team) : b.x < attackZoneLine(P, team); }
+  function inAttackZone(P, b, team) {
+    if (b.carded) return false;
+    return team ? b.x > attackZoneLine(P, team) : b.x < attackZoneLine(P, team);
+  }
   function camping(P, bodies, team) {
     let inC = 0, curAZ = 0, opp = 1 - team;
     for (let i = 0; i < 6; i++) {
@@ -415,7 +491,7 @@
     fouls.corner = corner;
     fouls.faceoff = fouls.cornerTurns > FOULS.stallTurns;
     if (fouls.faceoff) {
-      const inside = ubus.filter(b => cornerOf(P, b.x, b.y, b.radius) === corner);
+      const inside = ubus.filter(b => !b.carded && cornerOf(P, b.x, b.y, b.radius) === corner);
       const count = [0, 1].map(team => inside.filter(b => b.team === team).length);
       if (count[0] !== count[1]) inside.filter(b => b.team === (count[0] > count[1] ? 0 : 1)).forEach(b => carded.add(b));
       fouls.corner = null; fouls.cornerTurns = 0;
@@ -425,13 +501,13 @@
       Object.assign(b, P.spawn(b.team, b.slot), { vx: 0, vy: 0, omega: 0, meter: 0, daze: 0, guarding: false, superArm: false, stunned: true, carded: true });
     }
     if (fouls.faceoff) {
+      const holding = P.holder(bodies);
+      if (holding) P.endSuper(holding, bodies);
       // Centre ice, or the nearest clear spot along the centre line.
       const clear = y => ubus.every(b => b.carded || Math.hypot(b.x - 500, b.y - y) >= b.radius + ball.radius);
       const y = [300, 240, 360, 180, 420, 120, 480].find(clear) ?? 300;
-      Object.assign(ball, { x: 500, y, vx: 0, vy: 0, omega: 0, stickOffset: null,
+      Object.assign(ball, { x: 500, y, vx: 0, vy: 0, omega: 0, stickOffset: null, stuckTicks: 0,
         fireTicks: 0, onFire: false, pace: 0, strikerPower: 1, strikerTeam: -1, strikerSlot: -1, snapStruck: false });
-      const holding = P.holder(bodies);
-      if (holding) holding.holding = false;
     }
     fouls.cards = ubus.flatMap((b, i) => carded.has(b) ? [i] : []);
   }
@@ -499,7 +575,7 @@
     P.startTurn(bodies, plans);
     // The match clock counts simulated ticks across turns for meter cooldowns.
     const clock = state.clock || 0;
-    let goal = null, ticks = 0, currentTick = 0;
+    let goal = null, ticks = 0, currentTick = 0, hitDecided = false;
     const saved = [], struck = [], stops = [];
     const tally = fastSearch ? null : cloneTally(state.tally);
     const skipSaves = fastSearch && classic;
@@ -522,14 +598,16 @@
       if (result.struck) struck.push(tick);
       if (result.stop) stops.push({ tick, ms: result.stop });
       ticks = tick;
-      const done = goal !== null || P.settled(bodies) || tick === limit || Boolean(decided?.(bodies));
-      if (done) break;
+      const settled = P.settled(bodies);
+      if (goal !== null || settled || tick === limit) break;
+      if (decided?.(bodies)) { hitDecided = true; break; }
     }
     // A round runs from kickoff to goal; scoring on its first turn is an ace.
     const ace = goal !== null && !state.roundTurns;
     const call = goal === null ? { scorer: null, assist: null, own: false, label: null } : callGoal(bodies, play, tally, goal, ace);
-    // A search cutoff is not a real turn end: keep live velocity and supers, and do not call fouls.
-    const partial = preservePartial && goal === null && ticks < turnTicks(state.mode) && !P.settled(bodies);
+    // A horizon cutoff is not a real turn end: keep live velocity and supers, and do not call fouls.
+    // A `decided` cutoff in a non-Pulse turn represents settled play and still runs end-of-turn cleanup.
+    const partial = preservePartial && !hitDecided && goal === null && ticks < turnTicks(state.mode) && !P.settled(bodies);
     if (!partial) {
       next.winner = finishTurn(P, bodies, next.stats, next.scores, goal, state.mode, { ace: ace && !call.own ? call.scorer : null, assist: call.assist }, next.fouls, tally);
       if (goal !== null && tally) noteScore(tally, next.scores);

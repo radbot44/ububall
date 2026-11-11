@@ -1,11 +1,39 @@
 // Production settings live outside the checkout. Never print their contents.
 const fs = require('node:fs');
 const path = require('node:path');
-const { parseEnv } = require('node:util');
+const util = require('node:util');
 const { randomBytes, generateKeyPairSync, createPrivateKey, createPublicKey } = require('node:crypto');
 const [action, home] = process.argv.slice(2);
 const settingsPath = path.join(home, 'settings.json');
-const read = p => JSON.parse(fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, ''));
+function parseJsonc(text) {
+  const withoutComments = text.replace(/"(?:\\.|[^"\\])*"|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//g, match => match.startsWith('"') ? match : '');
+  const withoutTrailingCommas = withoutComments.replace(/"(?:\\.|[^"\\])*"|,\s*([}\]])/g, (match, closer) => closer || match);
+  return JSON.parse(withoutTrailingCommas);
+}
+function parseEnvFallback(text) {
+  const env = {};
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (!match) continue;
+    let [, key, value] = match;
+    if (value.startsWith("'") && value.endsWith("'") && value.length >= 2) {
+      value = value.slice(1, -1);
+    } else if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+      value = value.slice(1, -1).replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    } else {
+      value = value.replace(/\s+#.*$/, '').trim();
+    }
+    env[key] = value;
+  }
+  return env;
+}
+const parseEnv = typeof util.parseEnv === 'function' ? util.parseEnv : parseEnvFallback;
+const read = p => {
+  const text = fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
+  return p.endsWith('.jsonc') ? parseJsonc(text) : JSON.parse(text);
+};
 const write = (p, value) => fs.writeFileSync(p, JSON.stringify(value, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
 const secretNames = ['DISCORD_CLIENT_SECRET', 'SESSION_SECRET', 'MINT_PRIVATE_KEYS'];
 const activityToken = 'DISCORD_ACTIVITY_BOT_TOKEN';
@@ -20,19 +48,30 @@ function validate(s) {
   if (!s.name || !v || !s.secrets) throw Error('Incomplete production settings.');
   const origin = new URL(v.ORIGIN);
   if (origin.protocol !== 'https:' || origin.origin !== v.ORIGIN) throw Error('ORIGIN must be an exact HTTPS origin without a trailing slash.');
-  if (!/^\d+$/.test(v.DISCORD_CLIENT_ID)) throw Error('A Discord application ID is required.');
+  if (!/^[1-9][0-9]{0,19}$/.test(String(v.DISCORD_CLIENT_ID || ''))) throw Error('A Discord application ID is required.');
   for (const name of secretNames) if (!s.secrets[name] || s.secrets[name].includes('<')) throw Error(`Missing saved secret: ${name}`);
   if (Object.hasOwn(v, activityToken)) throw Error(`Store ${activityToken} under secrets.`);
   const token = s.secrets[activityToken];
   if (Object.hasOwn(s.secrets, activityToken) && (typeof token !== 'string' || !token || token.includes('<'))) {
     throw Error(`Invalid saved secret: ${activityToken}`);
   }
-  if (!/^[A-Za-z0-9_-]{43}$/.test(s.secrets.SESSION_SECRET)) throw Error('Invalid session secret.');
-  if (!/^[A-Za-z0-9_-]{22}$/.test(v.MINT_ID)) throw Error('Invalid permanent mint ID.');
-  for (const name of ['BATCH_SIZE', 'LIFETIME_MINT_LIMIT']) if (!/^\d+$/.test(String(v[name]))) throw Error(`Invalid ${name}.`);
-  if (Number(v.BATCH_SIZE) < 1) throw Error('BATCH_SIZE must be positive.');
+  if (!/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(s.secrets.SESSION_SECRET)) throw Error('Invalid session secret.');
+  if (!/^[A-Za-z0-9_-]{21}[AQgw]$/.test(v.MINT_ID)) throw Error('Invalid permanent mint ID.');
+  for (const name of ['BATCH_SIZE', 'LIFETIME_MINT_LIMIT']) {
+    if (!/^\d+$/.test(String(v[name])) || !Number.isSafeInteger(Number(v[name]))) throw Error(`Invalid ${name}.`);
+  }
+  const batchSize = Number(v.BATCH_SIZE);
+  if (batchSize < 5 || batchSize > 1000000 || batchSize % 5 !== 0) throw Error('BATCH_SIZE must be a multiple of 5 between 5 and 1000000.');
   const privateKeys = JSON.parse(s.secrets.MINT_PRIVATE_KEYS), publicKeys = JSON.parse(v.MINT_PUBLIC_KEYS);
-  if (!privateKeys[v.MINT_KEY_ID]) throw Error('Active private key is missing.');
+  if (!publicKeys || typeof publicKeys !== 'object' || Array.isArray(publicKeys) ||
+      Object.keys(publicKeys).length < 1 || Object.keys(publicKeys).length > 16 ||
+      !/^[A-Za-z0-9_-]{1,32}$/.test(v.MINT_KEY_ID || '') || !Object.hasOwn(publicKeys, v.MINT_KEY_ID) ||
+      Object.entries(publicKeys).some(([id, x]) => !/^[A-Za-z0-9_-]{1,32}$/.test(id) || typeof x !== 'string' || !/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(x))) {
+    throw Error('Invalid public signing keys.');
+  }
+  if (!privateKeys || typeof privateKeys !== 'object' || Array.isArray(privateKeys) || !Object.hasOwn(privateKeys, v.MINT_KEY_ID)) {
+    throw Error('Active private key is missing.');
+  }
   for (const [id, jwk] of Object.entries(privateKeys)) {
     const key = createPrivateKey({ key: jwk, format: 'jwk' });
     if (key.asymmetricKeyType !== 'ed25519' || createPublicKey(key).export({ format: 'jwk' }).x !== publicKeys[id]) throw Error('Saved signing keys do not match public keys.');

@@ -12,7 +12,7 @@
       font: 14px/1.4 Inter, system-ui, -apple-system, sans-serif;
       display: grid;
       place-items: center;
-      min-height: 100vh;
+      min-height: 100dvh;
       margin: 0;
     }
     .status {
@@ -30,13 +30,30 @@
   <script>
     'use strict';
     (() => {
+      const isPopup = window.name === 'ubu_discord_auth' || Boolean(window.opener);
+      try {
+        if (typeof BroadcastChannel !== 'undefined') {
+          const channel = new BroadcastChannel('ubu:auth');
+          channel.postMessage({ type: 'ubu-auth-complete' });
+          channel.close();
+        }
+      } catch {}
+      try {
+        localStorage.setItem('ubu:auth-complete', String(Date.now()));
+        localStorage.removeItem('ubu:auth-complete');
+      } catch {}
       try {
         if (window.opener && !window.opener.closed) {
           window.opener.postMessage({ type: 'ubu-auth-complete' }, window.location.origin);
-          window.close();
-          return;
         }
       } catch {}
+      if (isPopup) {
+        try { window.close(); } catch {}
+        setTimeout(() => {
+          if (!window.closed) window.location.replace('/');
+        }, 150);
+        return;
+      }
       window.location.replace('/');
     })();
   </script>

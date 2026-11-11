@@ -2425,3 +2425,615 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
     assert.ok(superPhases.has(expectedSuper), `Effects Demo covers super sound ${expectedSuper}`);
   }
 });
+
+// --- Domain 4 Phase 2 Regression Tests ---
+
+test('D4-01, D4-03, D4-06: replay entries preserve keys & super mastery on takeover, endReplay avoids phantom CPU match, and newMatch clears theater', () => {
+  const P = require('../web/ububall-physics.js');
+  const ubu = require('../shared/ubu.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const ububallReplay = require('../shared/ububall-replay.js');
+
+  // Find or synthesize a DNA with >= 2 copies of a super so mastery bonusTicks > 0
+  let masteredDna = null, masteredSuperId = 0;
+  for (let attempt = 0; attempt < 200 && !masteredDna; attempt++) {
+    const raw = ubu.randomDNA();
+    const model = ubu.decode(raw);
+    for (let sid = 0; sid < 8; sid++) {
+      if (P.superMastery(model.supers, sid).copies >= 2) {
+        masteredDna = ubu.toCode(raw);
+        masteredSuperId = sid;
+        break;
+      }
+    }
+  }
+  assert.ok(masteredDna, 'found DNA with super mastery >= II');
+
+  const ubus = Array.from({ length: 6 }, (_, i) => ({
+    dna: i === 0 ? masteredDna : ubu.toCode(ubu.randomDNA()),
+    super: i === 0 ? masteredSuperId : (i % 8)
+  }));
+  const rec = ububallReplay.create({ mode: 'standard', seat: 0, names: ['Alpha', 'Beta'], ubus });
+  const t = ububallReplay.addTurn(rec, {
+    turn: 1, scores: [0, 0], fouls: ububallMatch.newFouls(), bodies: P.kickoff(),
+    plans: Array.from({ length: 6 }, () => ({ angle: 0, power: 0.3, spin: 0, superArm: false, guard: false }))
+  });
+  t.ticks = 12;
+
+  const code =
+    section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
+    section('function clearActiveMatch() {', 'function aimPower(distance, arrow) {') + '\n' +
+    section('let activePlayback = null;', 'const replayStore = (() => {') + '\n' +
+    section('function watchReplay(replay, file) {', 'function endReplayTurn() {') + '\n' +
+    section('let guide = null;', "$('replay-take-over').onclick = playFromHere;") + '\n' +
+    section('function resolveEquippedSuper(entry, slotIndex = 0) {', 'const POSITIONS = [') + '\n' +
+    section('  const onGuestTeam =', '  async function adoptAccountTeam()') + '\n' +
+    section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+
+  let newMatchCalls = 0;
+  const classes = new Set();
+  const dummy = () => {};
+  const elements = new Map();
+  const $ = id => {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        value: '1', textContent: '', hidden: false, disabled: false,
+        classList: { toggle: dummy, add: dummy, remove: dummy },
+        setAttribute: dummy, replaceChildren: dummy
+      });
+    }
+    return elements.get(id);
+  };
+  const localTeam = Array.from({ length: 3 }, (_, i) => ({
+    key: `guest-${i}`, dna: ubus[i].dna, label: 'Guest ubu', model: ubu.decode(ubu.fromCode(ubus[i].dna))
+  }));
+  const context = {
+    Object, Array, Set, Date, Math, Number, String, Boolean, JSON,
+    P, ubu, ububallMatch, ububallReplay, structuredClone,
+    localStorage: { getItem: () => null, setItem: dummy, removeItem: dummy },
+    $,
+    document: {
+      body: {
+        classList: {
+          add: c => classes.add(c),
+          remove: c => classes.delete(c),
+          toggle: (c, on) => (on ? classes.add(c) : classes.delete(c))
+        }
+      },
+      querySelector: () => null
+    },
+    inDiscord: false, demo: false, online: null,
+    cpuMode: 'standard', cpuLevel: 'medium', cpuTeam: localTeam,
+    starterEntries: () => localTeam,
+    draft: [...localTeam], roster: [...localTeam], teamEntries: [], stats: [], plans: [], cpu: [], cpuDone: false,
+    idlePlan: () => ({ angle: 0, power: 0, spin: 0, guard: false }),
+    saveRecording: dummy, stopDemo: dummy, closeSummary: dummy, endGoalReplay: dummy,
+    stopFanfare: dummy, gameAudio: () => ({ stop: dummy }),
+    cpuGeneration: 0, cpuClient: { cancel: dummy, dispose: dummy }, videoLogo: dummy,
+    showMode: dummy, classicMode: () => false, normalStats: () => ({}),
+    anonymousName: i => `Anon ${i}`, anonymousNames: false,
+    buildTeam: dummy, replayMarks: dummy, enterMatch: dummy, updateReplayBar: dummy, updateHome: dummy,
+    clearEffects: dummy, resetPlans: dummy, say: dummy, sync: dummy, draw: dummy,
+    recordTrails: dummy, emitSkaterEffects: dummy, updatePopups: dummy, updateEffects: dummy,
+    replayEvents: dummy, replayFx: { hit: dummy, wall: dummy, shock: dummy, super: dummy },
+    videoAudio: null, videoClock: null, clockNow: () => 1000, hitStopUntil: 0,
+    shownScores: [0, 0], scores: [0, 0], turn: 1, phase: 'plan',
+    matchMode: 'standard', fouls: ububallMatch.newFouls(), play: ububallMatch.newPlay(), tally: ububallMatch.newTally(),
+    roundTurns: 0, matchTicks: 0, playSegments: [], selected: 0, drag: null, elapsed: 0, accumulator: 0,
+    recording: null, theater: null, onlineReplay: null, goalReplay: null, postGoal: null,
+    authoritativeBodies: null, kickoffGlow: 0, netFire: null, dirtyMeters: new Set(),
+    bodies: P.kickoff(), simBodies: P.kickoff()
+  };
+
+  const env = runInNewContext(
+    code + '\n;({ watchReplay, endReplay, playFromHere, onGuestTeam, newMatch });',
+    context
+  );
+
+  // 1. watchReplay assigns replay-* keys and full superMastery metadata
+  env.watchReplay(rec, null);
+  assert.equal(classes.has('replay-match'), true);
+  assert.equal(context.teamEntries[0].key, 'replay-0');
+  assert.ok(context.teamEntries[0].equippedSuper.bonusTicks > 0, 'watchReplay preserves superMastery bonusTicks');
+  assert.ok(context.teamEntries[0].equippedSuper.copies >= 2, 'watchReplay preserves superMastery copies');
+
+  // 2. playFromHere keeps replay-* keys (onGuestTeam does not throw) and applies mastery bonuses to simBodies
+  env.playFromHere();
+  assert.equal(context.roster[0].key, 'replay-0');
+  assert.equal(env.onGuestTeam(), false, 'onGuestTeam returns false cleanly without TypeError');
+  assert.ok(context.simBodies[0].superBonusTicks > 0, 'playFromHere preserves superBonusTicks on simBodies');
+  assert.ok(context.simBodies[0].equippedSuper.bonusTicks > 0, 'playFromHere preserves equippedSuper.bonusTicks');
+
+  // 3. endReplay clears replay state cleanly without starting an unrequested phantom CPU match
+  env.watchReplay(rec, null);
+  env.endReplay();
+  assert.equal(context.theater, null);
+  assert.equal(classes.has('replay-match'), false);
+  assert.equal(context.phase, 'over', 'endReplay leaves phase === over so exitMatchMode resumes Home demo');
+  assert.equal(context.recording, null, 'endReplay does not create a phantom CPU match recording');
+  assert.equal(newMatchCalls, 0);
+
+  // 4. Starting newMatch while replay viewer is active clears theater and replay-match class (D4-03)
+  env.watchReplay(rec, null);
+  assert.ok(context.theater);
+  assert.equal(classes.has('replay-match'), true);
+  env.newMatch();
+  assert.equal(context.theater, null, 'newMatch clears active theater');
+  assert.equal(classes.has('replay-match'), false, 'newMatch removes replay-match class');
+  assert.equal(context.phase, 'plan');
+});
+
+test('D4-04 & D4-07: offlineAudio.playFanfare routes customCtx to OfflineAudioContext with loop:false, and replay/export stop fanfare cleanly', async () => {
+  const exportCode = section('function offlineAudio(offline, seconds) {', 'let videoLogoImage = null;');
+  const fanfareCalls = [];
+  const fakeUbuAudio = {
+    shareMasterChain: () => {},
+    stopMotion: () => {},
+    playFanfare: (voice, customCtx, onNote, opts) => {
+      fanfareCalls.push({ voice, customCtx, onNote, opts });
+      return { stop() {} };
+    }
+  };
+  const { offlineAudio } = runInNewContext(exportCode + '\n;({ offlineAudio });', { Proxy, window: { ubuAudio: fakeUbuAudio } });
+  const offlineTarget = { sampleRate: 48000, marker: 'offline-ctx' };
+  const adapter = offlineAudio(offlineTarget, () => 3.25);
+
+  // Simulate presenter.loopFanfare(voice) calling gameAudio().playFanfare(voice, null, null, { loop: true })
+  adapter.playFanfare({ pitch: 220 }, null, null, { loop: true, volume: 0.8 });
+  assert.equal(fanfareCalls.length, 1);
+  assert.equal(fanfareCalls[0].customCtx.marker, 'offline-ctx', '2nd arg customCtx receives offline AudioContext proxy');
+  assert.equal(fanfareCalls[0].customCtx.currentTime, 3.25, 'customCtx reports offline timeline currentTime');
+  assert.equal(fanfareCalls[0].opts.loop, false, 'offline export forces loop: false to prevent wall-clock setTimeout leaks');
+  assert.equal(fanfareCalls[0].opts.volume, 0.8);
+
+  // Verify stopFanfare() is called across seekReplay, goal turn advance, final turn end, and exportVideo finally
+  const harness = createReplayExportHarness({ seat: 0 });
+  let stopFanfareCount = 0;
+  harness.context.stopFanfare = () => { stopFanfareCount++; };
+  harness.env.watchReplay(harness.rec, null);
+  stopFanfareCount = 0;
+
+  harness.env.seekReplay(5);
+  assert.equal(stopFanfareCount, 1, 'seekReplay stops looping goal fanfare');
+
+  // Step through turn 1 goal and advance past hold into turn 2
+  const dt = 1 / 60;
+  for (let s = 0; s < 30; s++) {
+    harness.context.setClock(5000 + (s + 1) * 20);
+    harness.env.advanceReplay(dt, harness.context.theater);
+  }
+  assert.equal(harness.context.theater.called, true);
+  stopFanfareCount = 0;
+  harness.context.setClock(9000);
+  harness.env.advanceReplay(dt, harness.context.theater);
+  assert.ok(stopFanfareCount >= 1, 'advancing from goal hold to next turn stops looping fanfare');
+
+  // Export video calls stopFanfare in finally and zeroes offscreen canvas dimensions
+  stopFanfareCount = 0;
+  const createdCanvases = [];
+  const origCreateElement = harness.context.document.createElement;
+  harness.context.document.createElement = tag => {
+    const el = origCreateElement(tag);
+    if (tag === 'canvas') createdCanvases.push(el);
+    return el;
+  };
+  await harness.env.exportVideo(harness.env.exportSlice('turn', false));
+  assert.ok(stopFanfareCount >= 1, 'exportVideo finally stops fanfare');
+  assert.ok(createdCanvases.length >= 3 && createdCanvases.every(c => c.width === 0 && c.height === 0), 'exportVideo finally releases offscreen canvas backing stores');
+});
+
+test('D4-05, D4-08, D4-01: online onState preserves local roster, prevents mid-replay score regression, and ends stale goalReplay on fresh resolving turn', () => {
+  const P = require('../web/ububall-physics.js');
+  const ubu = require('../shared/ubu.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const ububallReplay = require('../shared/ububall-replay.js');
+  const onStateCode = section('function onlineNames(s) {', "});\n  $('online-rematch').onclick")
+    .replace('online = ububallOnline({', 'const onlineCallbacks = ({') + '});';
+  const code =
+    section('let lastSaved = Promise.resolve(null);', 'const replayClock =') + '\n' +
+    section('let guide = null;', 'function playFromHere() {') + '\n' +
+    section('const PRESENTATION_KEYS =', 'function onlineNames(s) {') + '\n' +
+    onStateCode;
+
+  const rosters = [
+    Array.from({ length: 3 }, (_, i) => ({ serial: `u-0-${i}`, dna: ubu.toCode(ubu.randomDNA()), superId: i })),
+    Array.from({ length: 3 }, (_, i) => ({ serial: `u-1-${i}`, dna: ubu.toCode(ubu.randomDNA()), superId: i + 3 }))
+  ];
+  const savedLocalRoster = [{ key: 'my-ubu-1' }, { key: 'my-ubu-2' }, { key: 'my-ubu-3' }];
+  let nowMs = 1000, endedGoalReplays = 0, clearedReplayViewers = 0;
+  const dummy = () => {};
+  const elements = new Map();
+  const $ = id => {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        value: '1', textContent: '', hidden: false, disabled: false,
+        classList: { toggle: dummy, add: dummy, remove: dummy },
+        setAttribute: dummy, replaceChildren: dummy
+      });
+    }
+    return elements.get(id);
+  };
+  const context = {
+    Object, Array, Set, Math, Number, String, Boolean, JSON, Promise, console,
+    addEventListener: dummy,
+    P, ubu, ububallMatch, ububallReplay, structuredClone, performance: { now: () => nowMs },
+    $,
+    inDiscord: true, inMatch: false, demo: false,
+    matchInProgress: () => true,
+    finishCpuMatch: dummy,
+    clearReplayViewer: () => { clearedReplayViewers++; },
+    cpuClient: { cancel: dummy, dispose: dummy },
+    demoClient: { cancel: dummy, dispose: dummy },
+    closeFirstTurnGuide: dummy, closeFoulInfo: dummy,
+    document: { body: { classList: { contains: () => true, toggle: dummy, add: dummy, remove: dummy } } },
+    closeLobby: dummy, stopDemo: dummy, enterMatch: dummy, showMode: dummy, closeSummary: dummy,
+    classicMode: () => false, buildTeam: dummy, dirtyPrediction: dummy,
+    endGoalReplay: () => { endedGoalReplays++; context.goalReplay = null; },
+    stopFanfare: dummy, clearEffects: dummy,
+    trailPositions: () => context.bodies.map(b => ({ x: b.x, y: b.y })),
+    clearDiscontinuousTrails: dummy,
+    recordSegment: dummy, saveEvent: (tick, e) => ({ tick, ...e }),
+    sync: dummy, draw: dummy, recordTrails: dummy, emitSkaterEffects: dummy,
+    announceFouls: dummy, foulText: () => '', say: dummy, popup: dummy, impact: dummy,
+    creditSave: dummy, celebrate: dummy, ballOnFire: () => false, lightNet: dummy,
+    goalTab: dummy, callText: () => '', honourText: () => '', loopFanfare: dummy,
+    resolveEquippedSuper: (entry, i) => entry?.equippedSuper || P.SUPERS[i % P.SUPERS.length],
+    anonymousName: i => `Anon ${i}`, anonymousNames: false,
+    replayStore: { add: () => Promise.resolve(1) },
+    replayFx: { hit: dummy, wall: dummy, shock: dummy, super: dummy },
+    guides: { moves: false, trails: false },
+    onlinePhase: 'plan', onlineRoster: '', onlineTurn: 0, onlineDisconnected: false,
+    onlineReplay: null, recording: null, recordingOnline: false,
+    goalReplay: null, goalReplayAt: 0, scoringPlayer: null, theater: null, postGoal: null,
+    matchMode: 'standard', roster: [...savedLocalRoster], teamEntries: [], stats: [],
+    plans: Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false })),
+    scores: [0, 0], turn: 1, phase: 'plan', drag: null, kickoffGlow: 0,
+    fouls: ububallMatch.newFouls(), dirtyMeters: new Set(),
+    bodies: P.kickoff(), simBodies: P.kickoff(),
+    online: { active: true, spectating: false, now: () => nowMs, state: null }
+  };
+
+  const env = runInNewContext(
+    code + '\n;({ onlineCallbacks, playOnlineReplay });',
+    context
+  );
+
+  // D4-09: cpuActive() detects an unfinished CPU match in Discord even when inMatch === false
+  assert.equal(env.onlineCallbacks.cpuActive(), true);
+
+  const makeResolvingGoalState = (turnNum, scores) => JSON.parse(JSON.stringify({
+    seat: 0, spectator: false, mode: 'standard', phase: 'resolving', turn: turnNum, winner: null,
+    names: ['Alice', 'Bob'], occupied: [true, true], connected: [true, true], locked: [true, true],
+    left: [false, false], rematch: [false, false], rosters,
+    moves: Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false })),
+    game: {
+      scores,
+      bodies: P.kickoff(),
+      fouls: ububallMatch.newFouls(),
+      stats: Array.from({ length: 6 }, () => ({}))
+    },
+    replay: {
+      turn: turnNum, startedAt: nowMs, ticks: 4, initialBodies: P.kickoff(),
+      plans: Array.from({ length: 6 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false })),
+      saves: [], stops: [], struck: [], goal: 0, label: 'GOAL', scorer: 0, assist: null
+    }
+  }));
+
+  // 1. Initial resolving broadcast (before goal tick): score starts pre-goal [0, 0]
+  const state1 = makeResolvingGoalState(1, [1, 0]);
+  context.online.state = state1;
+  env.onlineCallbacks.onState(state1);
+  assert.ok(clearedReplayViewers >= 1, 'onState clears any active replay viewer');
+  assert.deepEqual(context.roster, savedLocalRoster, 'onState preserves local player roster');
+  assert.equal(context.teamEntries[0].key, 'u-0-0', 'onState populates entry.key on fieldView.entries');
+  assert.deepEqual([...context.scores], [0, 0], 'pre-goal score held before goal tick');
+
+  // 2. Step past goal tick -> goalPlayed becomes true and score updates to [1, 0]
+  nowMs += 500;
+  env.playOnlineReplay();
+  assert.equal(context.onlineReplay.goalPlayed, true);
+  assert.deepEqual([...context.scores], [1, 0], 'post-goal score shown at goal tick');
+  context.goalReplay = { sim: P.kickoff(), seat: 0 };
+
+  // 3. Re-broadcast during resolving (fresh JSON without goalPlayed, e.g. /skip-replay or /allow-watch):
+  // Score MUST stay [1, 0] instead of regressing back to [0, 0] (D4-05)
+  const rebroadcast = makeResolvingGoalState(1, [1, 0]);
+  context.online.state = rebroadcast;
+  env.onlineCallbacks.onState(rebroadcast);
+  assert.deepEqual([...context.scores], [1, 0], 'D4-05: mid-replay state broadcast does not decrement score');
+  assert.ok(context.goalReplay, 'same-turn resolving broadcast keeps current goalReplay running');
+
+  // 4. Network hiccup jumps straight from Turn 1 resolving to Turn 2 resolving (skipping plan):
+  // Stale Turn 1 goalReplay MUST be ended so Turn 2 replay plays (D4-08)
+  endedGoalReplays = 0;
+  const turn2Resolving = makeResolvingGoalState(2, [2, 0]);
+  context.online.state = turn2Resolving;
+  env.onlineCallbacks.onState(turn2Resolving);
+  assert.ok(endedGoalReplays >= 1, 'D4-08: fresh resolving turn ends previous turn goalReplay');
+  assert.equal(context.onlineReplay.turn, 2, 'Turn 2 onlineReplay loaded cleanly');
+});
+
+test('D4-10, D4-14, D4-19: ububall-online.js handles non-JSON 502 errors, null-session lobby renders, standalone queue cancel races, and avatar name updates', async () => {
+  const onlineSrc = fs.readFileSync(require.resolve('../web/ububall-online.js'), 'utf8');
+  const elements = new Map();
+  const makeEl = id => ({
+    id, hidden: false, disabled: false, value: '', textContent: '', open: false, dataset: {}, style: {},
+    children: [], className: '',
+    classList: { toggle() {}, add() {}, remove() {} },
+    setAttribute(k, v) { this[k] = v; },
+    getAttribute(k) { return this[k] ?? null; },
+    querySelector: () => ({ textContent: '' }),
+    append(...nodes) { this.children.push(...nodes); },
+    prepend(node) { this.children.unshift(node); },
+    insertBefore(node, ref) {
+      const idx = ref ? this.children.indexOf(ref) : -1;
+      if (idx >= 0) this.children.splice(idx, 0, node);
+      else this.children.push(node);
+    },
+    replaceChildren(...nodes) { this.children = [...nodes]; },
+    remove() {},
+    contains: () => false,
+    addEventListener() {},
+    showModal() { this.open = true; },
+    close() { this.open = false; },
+    select() {},
+    getBoundingClientRect: () => ({ width: 80 })
+  });
+  const getEl = id => {
+    if (!elements.has(id)) elements.set(id, makeEl(id));
+    return elements.get(id);
+  };
+
+  let currentUrl = 'https://12345.discordsays.com/?instance_id=inst-1';
+  const listeners = new Map();
+  const fetchCalls = [];
+  let fetchResponder = async () => ({ ok: true, status: 200, json: async () => ({}) });
+
+  const makeHarness = ({ isActivity }) => {
+    elements.clear();
+    listeners.clear();
+    fetchCalls.length = 0;
+    currentUrl = isActivity ? 'https://12345.discordsays.com/?instance_id=inst-1' : 'https://ububall.com/';
+    const navLink = makeEl('nav-play');
+    const win = {
+      location: new URL(currentUrl),
+      ubuActivity: isActivity ? {
+        instance: 'inst-1',
+        participants: null,
+        dispose() {},
+        signIn: async () => ({ owner: 'u1', instance: 'inst-1', csrf: 'tok', avatar: null }),
+        invite: async () => {}
+      } : undefined,
+      addEventListener(type, fn) { listeners.set(type, fn); },
+      showUbuScreen() {}
+    };
+    const ctx = {
+      URL, URLSearchParams, DOMException, AbortController, encodeURIComponent, Error, Set, Map, Promise, JSON, Math, Date, String, Boolean, Object,
+      crypto: { randomUUID: () => 'conn-1' },
+      setTimeout: () => 1, clearTimeout() {}, setInterval: () => 2, clearInterval() {},
+      WebSocket: Object.assign(function() { this.close = () => {}; this.send = () => {}; }, { OPEN: 1 }),
+      navigator: { clipboard: { writeText: async () => {} } },
+      matchMedia: () => ({ matches: false }),
+      sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+      history: { state: null, replaceState(_s, _t, url) { currentUrl = String(url); win.location = new URL(currentUrl); } },
+      location: win.location,
+      window: win,
+      ububallMatch: { modeName: m => m },
+      gameUi: { confirm: async () => true },
+      document: {
+        title: 'Ububall', hidden: false, activeElement: null,
+        getElementById: getEl,
+        createElement: tag => makeEl(tag),
+        querySelector: () => navLink,
+        addEventListener() {}
+      },
+      fetch: async (path, opts) => {
+        fetchCalls.push({ path, opts });
+        return fetchResponder(path, opts);
+      }
+    };
+    const ububallOnline = vm.runInNewContext(onlineSrc + '\n;ububallOnline;', ctx);
+    let playCpuAwaited = false;
+    const hooks = {
+      playCpu: async () => { await Promise.resolve(); playCpuAwaited = true; },
+      cpuActive: () => playCpuAwaited,
+      resumeCpu() {},
+      prepareOnline() {},
+      chooseMode() {},
+      editRules() {},
+      onNewGame() {},
+      lobby() {},
+      closeLobby() {},
+      onState() {},
+      onDisconnect() {},
+      onError() {},
+      onLeave() {}
+    };
+    return { client: ububallOnline(hooks), getEl, listeners, fetchCalls, getUrl: () => currentUrl };
+  };
+
+  // 1. Standalone: HTML 502 error on /api/guest surfaces clean message (no SyntaxError) & passes AbortSignal (D4-14)
+  {
+    fetchResponder = async path => {
+      if (path === '/api/guest') {
+        return { ok: false, status: 502, json: async () => { throw new SyntaxError("Unexpected token '<'"); } };
+      }
+      return { ok: true, status: 200, json: async () => ({ csrf: 'c1' }) };
+    };
+    const h = makeHarness({ isActivity: false });
+    await h.getEl('online-guest').onclick();
+    assert.equal(h.getEl('online-status').textContent, 'Could not start a guest session.');
+    assert.ok(h.fetchCalls.find(c => c.path === '/api/guest')?.opts?.signal, '/api/guest includes AbortSignal');
+  }
+
+  // 2. Standalone: Cancel queue when server returns { status: 'matched' } leaves + acks instead of joining (D4-10)
+  {
+    let phase = 'enter';
+    fetchResponder = async (path, opts) => {
+      const body = opts?.body ? JSON.parse(opts.body) : null;
+      if (path === '/api/session') return { ok: true, status: 200, json: async () => ({ owner: 'u1', csrf: 'c1' }) };
+      if (path === '/api/ububall/queue' && body.action === 'enter') return { ok: true, status: 200, json: async () => ({ status: 'waiting' }) };
+      if (path === '/api/ububall/queue' && body.action === 'cancel') {
+        phase = 'cancelled';
+        return { ok: true, status: 200, json: async () => ({ status: 'matched', id: 'm-race-1' }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    };
+    const h = makeHarness({ isActivity: false });
+    h.getEl('online-public').onclick();
+    await new Promise(r => setImmediate(r));
+    await h.getEl('online-cancel-queue').onclick();
+    assert.equal(phase, 'cancelled');
+    assert.equal(h.client.active, false, 'cancelling standalone queue does not enter the matched game');
+    assert.ok(h.fetchCalls.some(c => c.path === '/api/ububall/m-race-1/leave'), 'posts /leave for raced match');
+    assert.ok(h.fetchCalls.some(c => c.path === '/api/ububall/queue' && JSON.parse(c.opts.body).action === 'ack'), 'acks raced queue assignment');
+  }
+
+  // 3. Activity: null session does not crash renderLobby / participants, avatar initials update on rename, and enter() keeps URL clean (D4-10, D4-19)
+  {
+    let lobbyName = 'al';
+    fetchResponder = async (path, opts) => {
+      const body = opts?.body ? JSON.parse(opts.body) : null;
+      if (path === '/api/ububall/lobby') {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            users: [{ owner: 'u1', name: lobbyName, avatar: null, status: 'idle' }],
+            challenges: [], matches: {}
+          })
+        };
+      }
+      if (path === '/api/ububall') {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            id: 'act-match-9', revision: 1, now: 1000, seat: 0, phase: 'plan', mode: 'standard',
+            names: ['Al', 'Bo'], occupied: [true, true], ready: [true, true], rematch: [false, false],
+            connected: [true, true], locked: [false, false], left: [false, false],
+            rosters: [[], []], moves: [], game: { scores: [0, 0], bodies: [], fouls: {}, stats: [] }
+          })
+        };
+      }
+      if (body) return { ok: true, status: 200, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ owner: 'u1', instance: 'inst-1', csrf: 'tok', avatar: null }) };
+    };
+    const h = makeHarness({ isActivity: true });
+    await new Promise(r => setImmediate(r));
+    await new Promise(r => setImmediate(r));
+
+    const userCard = h.getEl('activity-users').children[0];
+    assert.equal(userCard.children[0].textContent, 'AL', 'initial fallback avatar initials');
+
+    // Rename user without changing avatar (still null) -> initials update to 'BO' (D4-19)
+    lobbyName = 'bo';
+    await h.getEl('online-friends').onclick();
+    assert.equal(userCard.children[0].textContent, 'BO', 'D4-19: fallback initials refresh when display name changes');
+
+    // Entering a match inside Discord Activity does not pollute URL with ?match= (D4-10)
+    await h.getEl('online-create').onclick();
+    assert.equal(new URL(h.getUrl()).searchParams.has('match'), false, 'D4-10: Activity URL never receives ?match=');
+
+    // Clearing session via ubu:session then firing contextChanged and ubu:activity-participants does not throw (D4-10)
+    h.listeners.get('ubu:session')({ detail: null });
+    assert.doesNotThrow(() => h.client.contextChanged());
+    assert.doesNotThrow(() => h.listeners.get('ubu:activity-participants')({ detail: [] }));
+  }
+});
+
+test('D4-11, D4-16, D4-17, D4-18, D4-20, D2-10, D4-02: UI icon/grid rules, clearEffects scrub cooldown reset, null-winner attribution, and cross-domain contracts', () => {
+  const P = require('../web/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const presSrc = fs.readFileSync(require.resolve('../web/ububall-presentation.js'), 'utf8');
+  const cssSrc = fs.readFileSync(require.resolve('../web/ububall.css'), 'utf8');
+
+  // 1. D4-11: Zero emoji/text-arrow icons in ububall.js and ububall-presentation.js
+  assert.equal(source.includes('💫'), false, 'ububall.js has no 💫 emoji icon');
+  assert.equal(presSrc.includes('💫'), false, 'ububall-presentation.js has no 💫 emoji icon');
+  assert.equal(source.includes("'→'"), false, 'ububall.js has no raw → text icon');
+  assert.match(source, /gameUi\.icon\('arrow-narrow-right'\)/, 'stats event log uses Tabler arrow-narrow-right icon');
+
+  // 2. D4-11, D4-16, D4-20: CSS rules verified
+  assert.match(cssSrc, /\.roster-grid\s*\{\s*grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(max\(7rem,\s*calc\(\(100%\s*-\s*1\.625rem\)\s*\/\s*4\)\),\s*1fr\)\)/, '.roster-grid caps choices at <= 4 per row');
+  assert.match(cssSrc, /\.pause-menu :is\(\.pause-heading, \.pause-links\)/, 'landscape phone pause menu spans .pause-heading across full row');
+  assert.match(cssSrc, /#super-ready-hint:not\(\[hidden\]\)\s*\{\s*position:\s*absolute;/, '#super-ready-hint floats without resizing stadium');
+  assert.match(cssSrc, /\.lobby-status:not\(\[hidden\]\)\s*\{\s*position:\s*absolute;/, '#lobby-status overlays without shifting formation');
+  for (const dead of ['.super-picker-grid', '.super-picker-btn', '.super-arm-btn', '.super-select', '.stunned-badge', '#match-mode']) {
+    assert.equal(cssSrc.includes(dead), false, `dead CSS selector ${dead} removed`);
+  }
+
+  // 3. D4-17: clearEffects resets cooldown maps & _lastWallSound/_lastHitSound so rewound seek clocks still emit VFX
+  let clock = 5000;
+  const bodies = P.kickoff();
+  const fx = createEffectsState([], {});
+  const presenter = createRinkPresenter({
+    P, ububallMatch,
+    getView: () => ({ bodies, mode: 'standard', canvas: { width: 1000, height: 600 }, ctx: {}, badgeCanvas: { width: 1000, height: 600 }, badgeCtx: {} }),
+    getEffects: () => fx,
+    isReducedMotion: () => false,
+    clockNow: () => clock,
+    gameAudio: () => null
+  });
+  presenter.handleWall(bodies[6], 350, 'post', 1, 0, false);
+  presenter.handleSuper('stalwart', 'impact', bodies[0], bodies[3]);
+  assert.ok(bodies[6]._lastWallSound === 5000);
+  assert.ok(fx.particles.length > 0);
+
+  // Rewind clock (as seekReplay does) after clearEffects() -> wall sparks & stalwart shockwaves still fire!
+  presenter.clearEffects();
+  assert.equal('_lastWallSound' in bodies[6], false, 'clearEffects deletes _lastWallSound');
+  clock = 4600;
+  presenter.handleWall(bodies[6], 350, 'post', 1, 0, false);
+  assert.ok(fx.particles.length > 0, 'post sparks fire cleanly after backward clock seek');
+  presenter.handleSuper('stalwart', 'impact', bodies[0], bodies[3]);
+  assert.equal(fx.shockwaves.length, 1, 'stalwart shockwave fires cleanly after backward clock seek');
+
+  // 4. D4-18: openSummary handles online.state.winner === null without awarding win to Team 1
+  {
+    const summaryCode = section('function closeSummary() {', '// A save from a ball');
+    const summaryEls = new Map();
+    const $ = id => {
+      if (!summaryEls.has(id)) summaryEls.set(id, { textContent: '', hidden: false, open: false, showModal() { this.open = true; }, close() {} });
+      return summaryEls.get(id);
+    };
+    $('home-label').textContent = 'Alice';
+    $('opponent-label').textContent = 'Bob';
+    const env = runInNewContext(summaryCode + '\n;({ openSummary });', {
+      $, demo: false, scores: [2, 2],
+      online: { state: { winner: null, seat: 0, spectator: false, left: [false, true], game: { winner: null } } },
+      viewTally: () => ({ tally: ububallMatch.newTally(), scores: [2, 2] }),
+      ububallMatch,
+      matchMvp: () => null,
+      updateRematch: () => {}
+    });
+    env.openSummary();
+    assert.equal($('summary-winner').textContent, 'Match ended', 'null winner does not declare opponent winner');
+  }
+
+  // 5. D2-10 & D4-02: prepareCPU passes clock/roundTurns/play fields, and setUbuScreenGuard is registered
+  {
+    const prepCode = section('function prepareCPU(initialPlans = null) {', '// Big announcements over the rink.');
+    let receivedState = null;
+    const play = ububallMatch.newPlay({ age: 42, last: 1, lastTouch: [1, null], banked: true });
+    const env = runInNewContext(prepCode + '\n;({ prepareCPU });', {
+      Array, console,
+      cpuGeneration: 0, cpuDone: false, cpu: [], cpuReady: null,
+      online: null, demo: false, demoLevels: ['medium', 'hard'], cpuLevel: 'hard',
+      P, ububallMatch, simBodies: P.kickoff(), stats: [], scores: [2, 1], turn: 4,
+      fouls: ububallMatch.newFouls(), matchMode: 'pulse', matchTicks: 480, roundTurns: 2, play,
+      phase: 'plan', saveActiveMatch: () => {},
+      cpuClient: {
+        cancel() {},
+        plan(state) { receivedState = state; return Promise.resolve({ plans: P.cpuPlans(P.kickoff(), () => 0.5, [0, 0]) }); }
+      }
+    });
+    env.prepareCPU();
+    assert.equal(receivedState.clock, 480, 'D2-10: prepareCPU passes matchTicks as clock');
+    assert.equal(receivedState.roundTurns, 2, 'D2-10: prepareCPU passes roundTurns');
+    assert.equal(receivedState.age, 42, 'D2-10: prepareCPU spreads play state');
+    assert.equal(receivedState.last, 1);
+    assert.equal(receivedState.banked, true);
+  }
+  assert.match(source, /window\.setUbuScreenGuard/, 'D4-02: ububall.js registers window.setUbuScreenGuard');
+  assert.match(source, /cpuClient\.dispose\?\.\(\)/, 'D2-10: ububall.js disposes cpuClient worker');
+  assert.match(source, /demoClient\.dispose\?\.\(\)/, 'D2-10: ububall.js disposes demoClient worker');
+});

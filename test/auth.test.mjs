@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as auth from '../server/auth.mjs';
 const env = { ORIGIN: 'https://mint.example', DISCORD_CLIENT_ID: '123', DISCORD_CLIENT_SECRET: 'test-only', SESSION_SECRET: Buffer.alloc(32, 7).toString('base64url') };
+const getSetCookies = headers => typeof headers.getSetCookie === 'function'
+  ? headers.getSetCookie()
+  : (headers.get('set-cookie') || '').split(/,\s*(?=__(?:Host|Secure)-)/).filter(Boolean);
 async function authorize(overrides = {}, loginPath = '/auth/discord') {
   const login = await auth.login(new Request(env.ORIGIN + loginPath), env);
   const state = new URL(login.headers.get('Location')).searchParams.get('state');
@@ -20,7 +23,7 @@ test('Discord login validates state, exchanges credentials server-side and seals
   assert.equal(calls.length, 2);
   assert.equal(calls[0].options.body.get('client_secret'), env.DISCORD_CLIENT_SECRET);
   assert.equal(calls[0].options.body.get('redirect_uri'), env.ORIGIN + '/auth/callback');
-  const cookie = result.headers.getSetCookie().find(value => value.startsWith('__Host-ubu-session='));
+  const cookie = getSetCookies(result.headers).find(value => value.startsWith('__Host-ubu-session='));
   assert.match(cookie, /Secure; HttpOnly; SameSite=Lax/);
   assert.match(cookie, /Max-Age=34560000/);
   assert.ok(!cookie.includes('temporary'));
@@ -36,19 +39,28 @@ test('Discord login validates state, exchanges credentials server-side and seals
   assert.equal(await auth.session(new Request(env.ORIGIN, { headers: { Cookie: forged } }), env), null);
   assert.equal(await auth.session(request, { ...env, SESSION_SECRET: Buffer.alloc(32, 8).toString('base64url') }), null);
 });
-test('invalid OAuth state and invalid Discord identities never create a session', async () => {
+test('invalid OAuth state, oversized codes, placeholder secrets and invalid Discord identities never create a session', async () => {
   let calls = 0;
-  const { stateCookie } = await authorize();
+  const { stateCookie, state } = await authorize();
   const result = await auth.callback(new Request(env.ORIGIN + '/auth/callback?code=x&state=wrong', { headers: { Cookie: stateCookie } }), env,
     async () => { calls++; throw new Error('must not call Discord'); });
   assert.equal(result.status, 400); assert.equal(calls, 0);
+  assert.equal(result.headers.get('X-Content-Type-Options'), 'nosniff');
   assert.ok(!result.headers.get('Set-Cookie').includes('__Host-ubu-session'));
+  const hugeCode = await auth.callback(new Request(env.ORIGIN + '/auth/callback?code=' + 'a'.repeat(1025) + '&state=' + state, { headers: { Cookie: stateCookie } }), env,
+    async () => { calls++; throw new Error('must not call Discord on oversized code'); });
+  assert.equal(hugeCode.status, 400); assert.equal(calls, 0);
   assert.equal((await authorize({ id: '../bad' })).result.status, 400);
   assert.throws(() => auth.origin({ ORIGIN: 'http://evil.example' }));
   assert.throws(() => auth.origin({ ORIGIN: 'https://mint.example/path' }));
+  assert.equal(auth.configured(env), true);
+  assert.equal(auth.configured({ ...env, DISCORD_CLIENT_ID: '<Discord application ID>' }), false);
+  assert.equal(auth.configured({ ...env, DISCORD_CLIENT_SECRET: '<Discord application secret>' }), false);
+  assert.equal(auth.configured({ ...env, SESSION_SECRET: 'A'.repeat(42) + 'B' }), false);
+  assert.equal(auth.configured({ ...env, ORIGIN: 'http://evil.example' }), false);
 });
 
-test('Discord login return navigation preserves safe paths and rejects malicious destinations', async () => {
+test('Discord login return navigation preserves safe paths and rejects malicious or oversized destinations', async () => {
   const normal = await authorize();
   assert.equal(normal.result.headers.get('Location'), env.ORIGIN + '/');
 
@@ -70,7 +82,8 @@ test('Discord login return navigation preserves safe paths and rejects malicious
     '/auth/discord?return=data:text/html,bad',
     '/auth/discord?return=/auth/discord',
     '/auth/discord?return=/api/session',
-    '/auth/discord?return=/bad%0D%0ALocation:evil.example'
+    '/auth/discord?return=/bad%0D%0ALocation:evil.example',
+    '/auth/discord?return=/' + 'a'.repeat(600)
   ]) {
     const res = await authorize({}, evil);
     assert.equal(res.result.headers.get('Location'), env.ORIGIN + '/');
@@ -96,7 +109,7 @@ test('guest sessions are distinct from Discord identities and Discord login reco
   const result = await auth.callback(new Request(env.ORIGIN + '/auth/callback?code=x&state=' + state, {
     headers: { Cookie: login.headers.get('Set-Cookie').split(';')[0] + '; ' + cookie } }), env,
     async url => Response.json(url.endsWith('/token') ? { access_token: 't', token_type: 'Bearer' } : { id: '123456789012345678' }));
-  const discord = result.headers.getSetCookie().find(c => c.startsWith('__Host-ubu-session=')).split(';')[0];
+  const discord = getSetCookies(result.headers).find(c => c.startsWith('__Host-ubu-session=')).split(';')[0];
   const upgraded = await auth.session(new Request(env.ORIGIN, { headers: { Cookie: discord } }), env);
   assert.equal(upgraded.owner, '123456789012345678'); assert.equal(upgraded.alias, value.owner); assert.equal(upgraded.guest, undefined);
 });
@@ -130,6 +143,7 @@ test('Activity sign-in verifies Discord membership and creates a separate partit
   assert.equal((await auth.activityLogin(login(origin), activity, { ...payload, instance: 'i-other' }, mockDiscord)).status, 403);
   const result = await auth.activityLogin(login(origin), activity, payload, mockDiscord);
   assert.equal(result.status, 200);
+  assert.equal(result.headers.get('X-Content-Type-Options'), 'nosniff');
   assert.deepEqual(await result.json(), { access_token: 'sdk-token' });
   const setCookie = result.headers.get('Set-Cookie');
   assert.match(setCookie, /Domain=123\.discordsays\.com; Path=\/; Secure; HttpOnly; SameSite=None; Partitioned/);
@@ -144,20 +158,38 @@ test('Activity sign-in verifies Discord membership and creates a separate partit
   assert.match(auth.logoutCookie(activity, session), /Partitioned; Max-Age=0/);
 });
 
-test('refreshProfile updates user identity via Discord bot API without re-auth', async () => {
+test('refreshProfile updates user identity via Discord bot API, enforces cooldown, and checks user ID', async () => {
   const activityEnv = { ...env, DISCORD_ACTIVITY_BOT_TOKEN: 'test-bot' };
   const session = { purpose: 'session', owner: '123456789012345678', name: 'Old Name', csrf: 'A'.repeat(43) };
-  let calledUrl = '', calledAuth = '';
+  let calledUrl = '', calledAuth = '', fetchCount = 0;
   const mockFetch = async (url, options) => {
+    fetchCount++;
     calledUrl = url;
     calledAuth = options.headers.Authorization;
     return Response.json({ id: '123456789012345678', global_name: 'New Name' });
   };
   const result = await auth.refreshProfile(session, activityEnv, mockFetch);
   assert.equal(result.session.name, 'New Name');
+  assert.equal(fetchCount, 1);
   assert.equal(calledUrl, 'https://discord.com/api/v10/users/123456789012345678');
   assert.equal(calledAuth, 'Bot test-bot');
   assert.match(result.cookie, /Max-Age=34560000/);
+
+  // Immediate repeat refresh with the newly issued session cookie skips Discord Bot API call.
+  const refreshedSession = await auth.session(new Request(env.ORIGIN, { headers: { Cookie: result.cookie.split(';')[0] } }), activityEnv);
+  const throttled = await auth.refreshProfile(refreshedSession, activityEnv, () => assert.fail('must throttle repeat bot API fetch'));
+  assert.equal(throttled.session.name, 'New Name');
+
+  // Mismatched Discord user.id is ignored safely.
+  const mismatch = await auth.refreshProfile(session, activityEnv, async () => Response.json({ id: '999999999999999999', global_name: 'Spoof' }));
+  assert.equal(mismatch.session.name, 'Old Name');
+
+  // Activity session clamps Max-Age to remaining lifetime instead of resetting to 86400s.
+  const expires = Math.floor(Date.now() / 1000) + 120;
+  const actResult = await auth.refreshProfile({ purpose: 'activity', owner: '123456789012345678', instance: 'i-1', launch: 'l-1', issued: 1, expires, csrf: 'A'.repeat(43) },
+    activityEnv, async () => Response.json({ id: '123456789012345678', global_name: 'Act', avatar: 'a'.repeat(32) }));
+  const maxAge = Number(/Max-Age=(\d+)/.exec(actResult.cookie)[1]);
+  assert.ok(maxAge > 0 && maxAge <= 120);
 
   // If Discord API fails or has no bot token, gracefully keeps existing name and refreshes cookie
   const failingFetch = async () => Response.json({}, { status: 500 });

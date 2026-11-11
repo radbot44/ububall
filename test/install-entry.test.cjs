@@ -6,6 +6,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const installer = path.resolve(__dirname, '../install.ps1');
 const updater = path.resolve(__dirname, '../update.ps1');
+const deployer = path.resolve(__dirname, '../deploy.ps1');
 const windows = { skip: process.platform !== 'win32' };
 const stub = `param([string]$Destination,[switch]$DryRun,[switch]$InstallOnly,[switch]$Setup,[switch]$ResetMint,[string]$SettingsDirectory)
 @{Destination=$Destination;DryRun=[bool]$DryRun;InstallOnly=[bool]$InstallOnly;Setup=[bool]$Setup;ResetMint=[bool]$ResetMint;SettingsDirectory=$SettingsDirectory} | ConvertTo-Json -Compress`;
@@ -22,6 +23,18 @@ function fixture(t, folder = 'ubumint-cloudflare', sourceFolder = 'ubumint') {
   const runUpdate = (...args) => spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(installed, 'update.ps1'), '-SettingsDirectory', home, ...args], { encoding: 'utf8' });
   return { root, source, installed, home, run, runUpdate };
 }
+
+test('PowerShell deployment scripts guard wrangler.deploy.jsonc, dry-run backups, and node_modules locks', () => {
+  const installSrc = fs.readFileSync(installer, 'utf8');
+  const deploySrc = fs.readFileSync(deployer, 'utf8');
+  const updateSrc = fs.readFileSync(updater, 'utf8');
+  assert.match(installSrc, /wrangler\.deploy\.jsonc/);
+  assert.match(installSrc, /\\node_modules\\'/);
+  assert.match(deploySrc, /Test-Path 'wrangler\.deploy\.jsonc'/);
+  assert.match(deploySrc, /if \(!\$DryRun\)\s*\{\s*\$backup =/);
+  assert.match(deploySrc, /\\node_modules\\'/);
+  assert.match(updateSrc, /if \(\$here -eq \$resolvedSource\)/);
+});
 
 test('installed entry uses sibling source for legacy installs and forwards check switches', windows, t => {
   const f = fixture(t), r = f.run('-DryRun', '-InstallOnly');

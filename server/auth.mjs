@@ -8,13 +8,16 @@ function decode(text) {
   return bytes;
 }
 const random = () => encode(crypto.getRandomValues(new Uint8Array(32)));
+const canonicalSecret = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 let cachedSecret, cachedKey;
 function signingKey(secret) {
-  if (typeof secret !== 'string' || secret.length !== 43) throw new Error('Session secret is not configured.');
+  if (typeof secret !== 'string' || !canonicalSecret.test(secret)) throw new Error('Session secret is not configured.');
   if (secret !== cachedSecret) {
     const bytes = decode(secret);
     if (bytes.length !== 32) throw new Error('Invalid session secret.');
-    cachedKey = crypto.subtle.importKey('raw', bytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+    const promise = crypto.subtle.importKey('raw', bytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+    promise.catch(() => { if (cachedSecret === secret) cachedSecret = undefined; });
+    cachedKey = promise;
     cachedSecret = secret;
   }
   return cachedKey;
@@ -29,7 +32,7 @@ async function unseal(token, secret, purpose) {
     const pieces = token.split('.');
     if (pieces.length !== 2 || !await crypto.subtle.verify('HMAC', await signingKey(secret), decode(pieces[1]), encoder.encode(pieces[0]))) return null;
     const value = JSON.parse(decoder.decode(decode(pieces[0])));
-    if (value.purpose !== purpose) return null;
+    if (!value || typeof value !== 'object' || value.purpose !== purpose) return null;
     if ((value.purpose !== 'session' || value.guest) && (!Number.isSafeInteger(value.expires) || value.expires <= Date.now() / 1000)) return null;
     return value;
   } catch { return null; }
@@ -52,7 +55,10 @@ export const validInstance = value => typeof value === 'string' && activityId.te
 const activityCookie = (env, value, seconds) =>
   `${activityName}=${value}; Domain=${new URL(activityOrigin(env)).hostname}; Path=/; Secure; HttpOnly; SameSite=None; Partitioned; Max-Age=${seconds}`;
 export function configured(env) {
-  return !!(env.ORIGIN && env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET && env.SESSION_SECRET);
+  if (!env?.ORIGIN || !discordId.test(env.DISCORD_CLIENT_ID || '') ||
+      typeof env.DISCORD_CLIENT_SECRET !== 'string' || !env.DISCORD_CLIENT_SECRET || env.DISCORD_CLIENT_SECRET.includes('<') ||
+      typeof env.SESSION_SECRET !== 'string' || !canonicalSecret.test(env.SESSION_SECRET)) return false;
+  try { origin(env); return true; } catch { return false; }
 }
 export function origin(env) {
   const url = new URL(env.ORIGIN);
@@ -126,16 +132,22 @@ export async function activityMember(env, instance, owner, fetchDiscord = fetch)
 }
 export async function refreshProfile(session, env, fetchDiscord = fetch) {
   if (!session || session.guest || !discordId.test(session.owner)) throw new Error('Invalid session.');
-  let name = session.name;
-  if (env.DISCORD_ACTIVITY_BOT_TOKEN) {
+  const now = Date.now();
+  const throttled = Number.isSafeInteger(session.refreshed) && now - session.refreshed < 60000;
+  let name = session.name, avatar = session.avatar, refreshed = session.refreshed;
+  if (env.DISCORD_ACTIVITY_BOT_TOKEN && !throttled) {
+    refreshed = now;
     try {
       const response = await fetchDiscord(`${discordApi}/users/${session.owner}`, {
         headers: { Authorization: `Bot ${env.DISCORD_ACTIVITY_BOT_TOKEN}` }, signal: AbortSignal.timeout(5000)
       });
       if (response.ok) {
         const user = await response.json();
-        const fresh = [user.global_name, user.username].find(n => typeof n === 'string' && n.trim())?.trim().slice(0, 32);
-        if (fresh) name = fresh;
+        if (user?.id === session.owner) {
+          const fresh = [user.global_name, user.username].find(n => typeof n === 'string' && n.trim())?.trim().slice(0, 32);
+          if (fresh) name = fresh;
+          if (session.instance) avatar = typeof user.avatar === 'string' && /^(a_)?[0-9a-f]{32}$/.test(user.avatar) ? user.avatar : null;
+        }
       }
     } catch {}
   }
@@ -145,16 +157,18 @@ export async function refreshProfile(session, env, fetchDiscord = fetch) {
     ...(name ? { name } : {}),
     csrf: session.csrf,
     ...(session.alias ? { alias: session.alias } : {}),
-    ...(session.instance ? { instance: session.instance, avatar: session.avatar, launch: session.launch, issued: session.issued, expires: session.expires } : {})
+    ...(refreshed !== undefined ? { refreshed } : {}),
+    ...(session.instance ? { instance: session.instance, avatar, launch: session.launch, issued: session.issued, expires: session.expires } : {})
   }, env.SESSION_SECRET);
-  const cookie = session.instance ? activityCookie(env, sessionToken, 86400) : setCookie(sessionName, sessionToken, indefinite);
+  const maxAge = session.instance ? Math.max(0, (Number.isSafeInteger(session.expires) ? session.expires : Math.floor(now / 1000) + 86400) - Math.floor(now / 1000)) : indefinite;
+  const cookie = session.instance ? activityCookie(env, sessionToken, maxAge) : setCookie(sessionName, sessionToken, indefinite);
   return { session: { owner: session.owner, name: name ?? null, csrf: session.csrf }, cookie };
 }
 
 export async function activityLogin(request, env, data, fetchDiscord = fetch) {
   const embedded = activityOrigin(env);
   const json = (value, status, cookieHeader) => Response.json(value, { status, headers: {
-    'Cache-Control': 'no-store', ...(cookieHeader ? { 'Set-Cookie': cookieHeader } : {})
+    'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...(cookieHeader ? { 'Set-Cookie': cookieHeader } : {})
   } });
   if (!embedded || request.headers.get('Origin') !== embedded) return json({ error: 'Invalid Activity origin.' }, 403);
   const { code, instance } = data || {};
@@ -173,7 +187,7 @@ export async function activityLogin(request, env, data, fetchDiscord = fetch) {
 }
 
 export function safeReturnPath(raw, env) {
-  if (!raw || typeof raw !== 'string' || /[\x00-\x1F\x7F]/.test(raw)) return '/';
+  if (!raw || typeof raw !== 'string' || raw.length > 512 || /[\x00-\x1F\x7F]/.test(raw)) return '/';
   if (raw.startsWith('//') || raw.startsWith('/\\') || raw.startsWith('\\')) return '/';
   try {
     const base = origin(env);
@@ -202,10 +216,11 @@ export async function callback(request, env, fetchDiscord = fetch) {
   const url = new URL(request.url);
   const state = await unseal(cookie(request, stateName), env.SESSION_SECRET, 'oauth');
   const failed = () => new Response('Discord login failed. Please try again.', { status: 400,
-    headers: { 'Set-Cookie': setCookie(stateName, '', 0), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
-  if (!state || state.nonce !== url.searchParams.get('state') || !url.searchParams.get('code') || url.searchParams.has('error')) return failed();
+    headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff', 'Set-Cookie': setCookie(stateName, '', 0), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
+  const code = url.searchParams.get('code');
+  if (!state || state.nonce !== url.searchParams.get('state') || !code || code.length > 1024 || url.searchParams.has('error')) return failed();
   try {
-    const { owner, name } = await exchange(env, url.searchParams.get('code'), origin(env) + '/auth/callback', fetchDiscord);
+    const { owner, name } = await exchange(env, code, origin(env) + '/auth/callback', fetchDiscord);
     const returnTo = safeReturnPath(state.returnTo, env);
     // A guest signing in keeps their match seats: the Discord session names the guest ID it replaced.
     const previous = await session(request, env);

@@ -3,17 +3,49 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const audio = require('../shared/ubu-audio.js');
 
-// Record the actual scheduled sources and graph, including reverb reachability.
-function recordedContext() {
+assert.equal(globalThis.ubuAudio, audio);
+
+// Record the actual scheduled sources and graph, enforcing Web Audio AudioParam invariants.
+function recordedContext(extra = {}) {
   const nodes = [];
-  const param = () => ({ events: [], value: 0,
-    setValueAtTime(value, time) { this.events.push([value, time]); this.value = value; },
-    linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} });
+  const param = (initial = 0) => ({
+    events: [],
+    value: initial,
+    setValueAtTime(value, time) {
+      assert.ok(Number.isFinite(value) && Number.isFinite(time) && time >= 0, `invalid setValueAtTime(${value}, ${time})`);
+      if (this.events.length) assert.ok(time >= this.events.at(-1)[1] - 1e-12, `out-of-order setValueAtTime ${time} < ${this.events.at(-1)[1]}`);
+      this.events.push([value, time, 'set']);
+      this.value = value;
+    },
+    linearRampToValueAtTime(value, time) {
+      assert.ok(Number.isFinite(value) && Number.isFinite(time) && time >= 0, `invalid linearRamp(${value}, ${time})`);
+      if (this.events.length) assert.ok(time >= this.events.at(-1)[1] - 1e-12, `out-of-order linearRamp ${time} < ${this.events.at(-1)[1]}`);
+      this.events.push([value, time, 'linear']);
+    },
+    exponentialRampToValueAtTime(value, time) {
+      assert.ok(Number.isFinite(value) && value > 0 && Number.isFinite(time) && time >= 0, `invalid exponentialRamp(${value}, ${time})`);
+      if (this.events.length) {
+        assert.ok(time >= this.events.at(-1)[1] - 1e-12, `out-of-order exponentialRamp ${time} < ${this.events.at(-1)[1]}`);
+        assert.ok(this.events.at(-1)[0] > 0, `exponentialRamp from non-positive value ${this.events.at(-1)[0]}`);
+      }
+      this.events.push([value, time, 'exp']);
+    },
+    cancelScheduledValues(time) {
+      assert.ok(Number.isFinite(time) && time >= 0, `invalid cancelScheduledValues(${time})`);
+      this.events = this.events.filter(e => e[1] < time);
+    }
+  });
   const node = kind => {
-    const n = { kind, outputs: [], connect(to) { this.outputs.push(to); }, disconnect() {},
-      start(time) { this.started = time; }, stop(time) { this.stopped = time; },
+    const n = { kind, outputs: [], disconnected: false,
+      connect(to) { this.outputs.push(to); },
+      disconnect() { this.disconnected = true; },
+      start(time = 0) { assert.ok(Number.isFinite(time) && time >= 0); this.started = time; },
+      stop(time = 0) { assert.ok(Number.isFinite(time) && time >= 0); this.stopped = time; },
       setPeriodicWave(wave) { this.type = 'custom'; this.periodicWave = wave; } };
-    for (const key of ['gain', 'frequency', 'detune', 'Q', 'threshold', 'knee', 'ratio', 'attack', 'release', 'pan', 'offset']) n[key] = param();
+    for (const [key, init] of [['gain', 1], ['frequency', 440], ['detune', 0], ['Q', 1],
+      ['threshold', -12], ['knee', 30], ['ratio', 4], ['attack', 0.005], ['release', 0.25], ['pan', 0], ['offset', 1]]) {
+      n[key] = param(init);
+    }
     nodes.push(n);
     return n;
   };
@@ -26,7 +58,8 @@ function recordedContext() {
     createBuffer: (channels, length, sampleRate) => {
       const data = Array.from({ length: channels }, () => new Float32Array(length));
       return { sampleRate, getChannelData: channel => data[channel] };
-    }
+    },
+    ...extra
   };
 }
 
@@ -46,7 +79,7 @@ function leadNotes(ctx) {
   });
 }
 
-test('fanfare sustains a dry bass pulse under a merged chord, with wet lead and pad', () => {
+test('fanfare sustains a dry bass pulse under a merged chord, with wet lead and pad, and auto-releases its reverb chain', () => {
   const ctx = recordedContext();
   const voice = { instrument: 14, pitch: 24, decay: 6, timbreMod: 0, scale: 0, tempo: 3, groove: 0,
     notes: Array.from({ length: 8 }, () => ({ degree: 0, duration: 2 })) };
@@ -64,6 +97,14 @@ test('fanfare sustains a dry bass pulse under a merged chord, with wet lead and 
     const buffers = ctx.nodes.filter(n => n.kind === 'buffer');
     assert.ok(buffers.length > 0, 'dry percussion is present');
     for (const n of buffers) assert.equal(reaches(n, to => to.kind === 'room'), false);
+
+    // Verify natural completion schedules an audio-clock ConstantSource timer that disconnects the room convolver.
+    const releaseTimers = ctx.nodes.filter(n => n.kind === 'constant');
+    assert.equal(releaseTimers.length, 1);
+    const room = ctx.nodes.find(n => n.kind === 'room');
+    assert.equal(room.disconnected, false);
+    releaseTimers[0].onended();
+    assert.equal(room.disconnected, true, 'fanfare convolver disconnects once reverb tail finishes');
   } finally { handle.stop(); }
 });
 
@@ -202,7 +243,8 @@ test('audio: decay calculation', () => {
   assert.ok(audio.decaySeconds(5) > audio.decaySeconds(4));
 });
 
-test('audio: parseVoiceInfo parses decoded voice correctly', () => {
+test('audio: parseVoiceInfo parses decoded voice correctly and tolerates nullish voice', () => {
+  assert.equal(audio.parseVoiceInfo(null).instrument, 'Soft Bell');
   const sampleVoice = {
     instrument: 3, // Crystal Chime
     pitch: 24,      // C4 (midi 60)
@@ -248,85 +290,36 @@ test('audio: parseVoiceInfo parses decoded voice correctly', () => {
   assert.equal(parsed.notes[3].name, 'Rest');
 });
 
-test('audio: mock AudioContext synthesis and scheduling', () => {
-  // Create a lightweight Web Audio mock to verify all 16 instruments synthesize without throwing
-  class MockParam {
-    constructor(val = 0) { this.value = val; }
-    setValueAtTime() {}
-    linearRampToValueAtTime() {}
-    exponentialRampToValueAtTime() {}
-    cancelScheduledValues() {}
-  }
-
-  class MockNode {
-    constructor() {
-      this.gain = new MockParam(1);
-      this.frequency = new MockParam(440);
-      this.detune = new MockParam(0);
-      this.Q = new MockParam(1);
-      this.threshold = new MockParam(-12);
-      this.knee = new MockParam(30);
-      this.ratio = new MockParam(8);
-      this.attack = new MockParam(0.003);
-      this.release = new MockParam(0.25);
-      this.pan = new MockParam(0);
-      this.offset = new MockParam(1);
-    }
-    connect() {}
-    disconnect() {}
-    start() {}
-    stop() {}
-    setPeriodicWave(wave) { this.type = 'custom'; this.periodicWave = wave; }
-  }
-
-  let convolvers = 0;
-  const mockCtx = {
-    currentTime: 1.0,
-    sampleRate: 8000,
-    destination: new MockNode(),
-    createGain() { return new MockNode(); },
-    createOscillator() { return new MockNode(); },
-    createBiquadFilter() { return new MockNode(); },
-    createDynamicsCompressor() { return new MockNode(); },
-    createStereoPanner() { return new MockNode(); },
-    createBufferSource() { return new MockNode(); },
-    createConvolver() { convolvers++; return new MockNode(); },
-    createConstantSource() { return new MockNode(); },
-    createPeriodicWave(real, imag) {
-      assert.equal(real.length, imag.length);
-      assert.ok(real.length > 1);
-      assert.ok([...real, ...imag].every(Number.isFinite));
-      return { real: Float32Array.from(real), imag: Float32Array.from(imag) };
-    },
-    createBuffer(channels, length, sampleRate) {
-      const data = Array.from({ length: channels }, () => new Float32Array(length));
-      return { sampleRate, getChannelData: channel => data[channel] };
-    }
-  };
-
-  // Test playVoice for all 16 instruments
+test('audio: all 16 instruments synthesize all 4 timbreMod states with valid Web Audio ramps', () => {
   for (let inst = 0; inst < 16; inst++) {
-    const v = {
-      instrument: inst,
-      pitch: 20 + inst,
-      decay: 5,
-      timbreMod: inst % 4,
-      scale: inst % 8,
-      tempo: 3,
-      groove: 0,
-      notes: [{ degree: 0, duration: 1 }]
-    };
-    const handle = audio.playVoice(v, mockCtx);
-    assert.equal(typeof handle.stop, 'function');
-    handle.stop();
+    const signatures = new Set();
+    for (let mod = 0; mod < 4; mod++) {
+      const ctx = recordedContext({ currentTime: 1.0, sampleRate: 8000 });
+      const v = {
+        instrument: inst,
+        pitch: 20 + inst,
+        decay: 5,
+        timbreMod: mod,
+        scale: inst % 8,
+        tempo: 3,
+        groove: 0,
+        notes: [{ degree: 0, duration: 1 }]
+      };
+      const handle = audio.playVoice(v, ctx);
+      assert.equal(typeof handle.stop, 'function');
+      const snap = JSON.stringify(ctx.nodes.map(n => [n.kind, n.gain.value, n.frequency.value, n.detune.value, n.Q.value]));
+      signatures.add(snap);
+      handle.stop();
+    }
+    assert.equal(signatures.size, 4, `instrument ${inst} (${audio.INSTRUMENTS[inst]}) differentiates all 4 timbreMod values`);
   }
 
-  // Test playFanfare
+  const mockCtx = recordedContext({ currentTime: 1.0, sampleRate: 8000 });
   const testVoice = {
     instrument: 2,
     pitch: 25,
     decay: 6,
-    timbreMod: 0,
+    timbreMod: 3,
     scale: 0,
     tempo: 4,
     groove: 1,
@@ -334,33 +327,86 @@ test('audio: mock AudioContext synthesis and scheduling', () => {
   };
 
   let noteCallbackCount = 0;
-  const fanfareHandle = audio.playFanfare(testVoice, mockCtx, (idx, note) => {
-    noteCallbackCount++;
-  });
+  const fanfareHandle = audio.playFanfare(testVoice, mockCtx, () => { noteCallbackCount++; });
   assert.equal(typeof fanfareHandle.stop, 'function');
-  assert.equal(convolvers, 1); // The fanfare plays through its room reverb.
+  assert.equal(mockCtx.nodes.filter(n => n.kind === 'room').length, 1);
   fanfareHandle.stop();
+  assert.equal(noteCallbackCount, 1, 'stopping fanfare reports completion once');
 
-  // Looping queues repeats on the audio clock and stops cleanly.
+  // Looping queues repeats on the audio clock and stops cleanly; offline contexts never start runaway timers.
   const loopHandle = audio.playFanfare(testVoice, mockCtx, null, { loop: true });
   assert.equal(typeof loopHandle.stop, 'function');
   loopHandle.stop();
 
-  // Test playGameStart
-  const startHandle = audio.playGameStart({ ctx: mockCtx, volume: 0.9 });
-  assert.equal(typeof startHandle.stop, 'function');
+  const offlineCtx = recordedContext({ constructor: { name: 'OfflineAudioContext' } });
+  const offlineLoop = audio.playFanfare(testVoice, offlineCtx, null, { loop: true });
+  offlineLoop.stop();
+
+  // Test playGameStart releases its master chain automatically via ConstantSource timer
+  const startCtx = recordedContext({ currentTime: 0.5 });
+  const startHandle = audio.playGameStart({ ctx: startCtx, volume: 0.9 });
+  assert.ok(startCtx.nodes.some(n => n.kind === 'constant'), 'playGameStart schedules master chain auto-disconnect');
   startHandle.stop();
 
-  // Test playCollision with volume scaling
   const collisionHandle = audio.playCollision(testVoice, { ctx: mockCtx, volume: 0.5 });
-  assert.equal(typeof collisionHandle.stop, 'function');
   collisionHandle.stop();
 
-  // Test physical hit sounds
   audio.playBallHit({ ctx: mockCtx, volume: 0.8 });
   audio.playWallHit({ ctx: mockCtx, volume: 0.6 });
   audio.playGoalHit('post', { ctx: mockCtx, volume: 0.9 });
   audio.playGoalHit('net', { ctx: mockCtx, volume: 0.7 });
+});
+
+test('pack, unwrap, coin, sizzle, foul, and iron-save cues obey Web Audio ramp rules and preserve shared chains', () => {
+  // All pack & unwrap styles (including sub-3ms crackles) maintain strictly chronological ramps
+  for (const kind of ['deal', 'pick', 'crack']) {
+    const ctx = recordedContext();
+    audio.playPack(kind, { ctx, stage: 3 });
+    assert.ok(ctx.nodes.some(n => n.kind === 'constant'), `playPack(${kind}) schedules chain release`);
+  }
+  for (const kind of ['flick', 'land']) {
+    const ctx = recordedContext();
+    audio.playCoin(kind, { ctx });
+    assert.ok(ctx.nodes.some(n => n.kind === 'oscillator'));
+  }
+
+  for (const wrap of ['plastic', 'foil', 'blob', 'gumball', 'egg', 'gift', 'cookie', 'envelope']) {
+    const ctx = recordedContext();
+    audio.playUnwrap(wrap, 1.2, { ctx });
+    assert.ok(ctx.nodes.some(n => n.kind === 'constant'), `playUnwrap(${wrap}) releases private master chain`);
+  }
+  // Reduced-motion / invalid unwrap durations no-op cleanly without NaN or 0-duration ramps
+  const zeroUnwrap = recordedContext();
+  audio.playUnwrap('gift', 0, { ctx: zeroUnwrap });
+  audio.playUnwrap('plastic', undefined, { ctx: zeroUnwrap });
+  assert.equal(zeroUnwrap.nodes.length, 1, 'zero/undefined unwrap duration skips scheduling');
+
+  // Shared master chain lowpass cutoff (7500 Hz) is not mutated by playUnwrap
+  const shared = recordedContext();
+  audio.shareMasterChain(shared);
+  const sharedFilter = shared.nodes.find(n => n.kind === 'filter');
+  assert.equal(sharedFilter.frequency.value, 7500);
+  audio.playUnwrap('foil', 1.0, { ctx: shared });
+  assert.equal(sharedFilter.frequency.value, 7500, 'shared master chain filter cutoff preserved');
+
+  // Zero-volume guards on playFoul, playIronSave, and playSizzle never schedule 0-target exponential ramps
+  const validCtx = recordedContext();
+  audio.playFoul('warning', { ctx: validCtx, volume: 0.8 });
+  audio.playFoul('card', { ctx: validCtx, volume: 0.8 });
+  audio.playIronSave({ ctx: validCtx, volume: 0.9 });
+  assert.doesNotThrow(() => audio.playFoul('warning', { ctx: validCtx, volume: 0 }));
+  assert.doesNotThrow(() => audio.playFoul('card', { ctx: validCtx, volume: 0 }));
+  assert.doesNotThrow(() => audio.playIronSave({ ctx: validCtx, volume: 0 }));
+  assert.doesNotThrow(() => audio.playSizzle({ ctx: validCtx, volume: 0 }).stop());
+
+  // Offline sizzle cancels future pre-scheduled crackles when stopped early
+  const offlineSizzleCtx = recordedContext({ constructor: { name: 'OfflineAudioContext' } });
+  const sizzle = audio.playSizzle({ ctx: offlineSizzleCtx, duration: 4, volume: 0.8 });
+  offlineSizzleCtx.currentTime = 0.2;
+  sizzle.stop();
+  const futureCrackles = offlineSizzleCtx.nodes.filter(n => n.kind === 'buffer' && n.started > 0.36);
+  assert.ok(futureCrackles.length > 0);
+  assert.ok(futureCrackles.every(n => n.stopped === n.started), 'early offline sizzle stop cancels future crackle grains');
 });
 
 test('Super synthesis bounds playback, cleans nodes, and throttles Magnet', () => {
@@ -434,7 +480,7 @@ test('fanfare chords follow the melody and loops vary deterministically from the
 });
 
 test('short sounds let their chain go once rung out, and a shared chain replaces one per sound', () => {
-  const ctx = recordedContext(), voice = { instrument: 0, rootPitch: 30, decay: 4, timbreMod: 0 };
+  const ctx = recordedContext(), voice = { instrument: 0, pitch: 30, decay: 4, timbreMod: 0 };
   audio.playCollision(voice, { ctx });
   const timer = ctx.nodes.find(n => n.kind === 'constant');
   assert.ok(timer && typeof timer.onended === 'function' && timer.stopped > ctx.currentTime);
@@ -452,7 +498,7 @@ test('short sounds let their chain go once rung out, and a shared chain replaces
 test('getAudioContext returns null in environments without user gesture and handles silent no-op playback', () => {
   assert.equal(audio.getAudioContext(), null);
 
-  const voice = { instrument: 0, rootPitch: 30, decay: 4, timbreMod: 0 };
+  const voice = { instrument: 0, pitch: 30, decay: 4, timbreMod: 0 };
   const h1 = audio.playCollision(voice);
   assert.equal(typeof h1?.stop, 'function');
   assert.doesNotThrow(() => h1.stop());
@@ -467,20 +513,17 @@ test('getAudioContext returns null in environments without user gesture and hand
 });
 
 test('quirk audio cues (Snap crack, spin-inflected post ring, corner carve, slipstream) synthesize cleanly and share master chain', () => {
-  // Silent no-op when no AudioContext / user gesture is active
   assert.doesNotThrow(() => audio.playBallHit({ snap: true }));
   assert.doesNotThrow(() => audio.playGoalHit('post', { spin: 20, speed: 650 }));
   assert.doesNotThrow(() => audio.playCarve({ volume: 0.6 }));
   assert.doesNotThrow(() => audio.playSlipstream({ volume: 0.5 }));
 
-  // Normal vs Snap ball hit: Snap layers harmonic crack oscillator + noise grain
   const plainCtx = recordedContext(), snapCtx = recordedContext();
   audio.playBallHit({ ctx: plainCtx, volume: 0.8 });
   audio.playBallHit({ ctx: snapCtx, volume: 0.8, snap: true });
   assert.ok(snapCtx.nodes.filter(n => n.kind === 'oscillator').length > plainCtx.nodes.filter(n => n.kind === 'oscillator').length);
   assert.ok(snapCtx.nodes.some(n => n.kind === 'buffer'), 'Snap layers crisp noise transient');
 
-  // Spin-inflected post ring lifts pitch and extends ring decay up to 0.40s
   const flatPostCtx = recordedContext(), spinPostCtx = recordedContext();
   audio.playGoalHit('post', { ctx: flatPostCtx, spin: 0, speed: 300 });
   audio.playGoalHit('post', { ctx: spinPostCtx, spin: 24, speed: 720 });
@@ -490,7 +533,6 @@ test('quirk audio cues (Snap crack, spin-inflected post ring, corner carve, slip
   assert.ok(spinOsc[0].stopped > flatOsc[0].stopped, 'high-spin post hit extends ring decay');
   assert.ok(spinOsc[0].stopped <= 0.43, 'post ring stays compact');
 
-  // Corner carve (~85 ms) and Slipstream (~110 ms) route through shared master chain for MP4 export
   const shared = recordedContext();
   audio.shareMasterChain(shared);
   audio.playCarve({ ctx: shared, volume: 0.7 });
@@ -500,9 +542,7 @@ test('quirk audio cues (Snap crack, spin-inflected post ring, corner carve, slip
   assert.equal(shared.nodes.filter(n => n.kind === 'compressor').length, 1, 'all quirk sounds share single export compressor');
 });
 
-
 test('movement wobble, spin wobble, puck slide, spin strike, fire impact, save shing, and firework pop synthesize cleanly', () => {
-  // Silent no-op when no user gesture / AudioContext is active
   assert.doesNotThrow(() => audio.playUbuMove({ speed: 450, mass: 3, radius: 25 }));
   assert.doesNotThrow(() => audio.playSpin({ omega: 14, radius: 25 }));
   assert.doesNotThrow(() => audio.playPuckSlide({ speed: 500 }));
@@ -512,7 +552,6 @@ test('movement wobble, spin wobble, puck slide, spin strike, fire impact, save s
   assert.doesNotThrow(() => audio.playFirework({ ring: true, pan: -0.3 }));
   assert.doesNotThrow(() => audio.stopMotion());
 
-  // 1. Moving ubu wobble: faster speed increases pitch & loudness; larger size lowers pitch; heavier mass deepens FM wobble
   const slowCtx = recordedContext(), fastCtx = recordedContext();
   const smallCtx = recordedContext(), giantCtx = recordedContext();
   const lightCtx = recordedContext(), heavyCtx = recordedContext();
@@ -521,6 +560,7 @@ test('movement wobble, spin wobble, puck slide, spin strike, fire impact, save s
   audio.playUbuMove({ ctx: fastCtx, id: 0, speed: 650, mass: 3, radius: 25 });
   const slowCarrier = slowCtx.nodes.find(n => n.kind === 'oscillator' && n.type === 'triangle');
   const fastCarrier = fastCtx.nodes.find(n => n.kind === 'oscillator' && n.type === 'triangle');
+  const initialFastFreq = fastCarrier.frequency.value;
   assert.ok(fastCarrier.frequency.value > slowCarrier.frequency.value, 'faster speed increases wobble carrier pitch');
 
   audio.playUbuMove({ ctx: smallCtx, id: 0, speed: 400, mass: 3, radius: 17 });
@@ -535,35 +575,35 @@ test('movement wobble, spin wobble, puck slide, spin strike, fire impact, save s
   const heavyFilter = heavyCtx.nodes.filter(n => n.kind === 'filter' && n.type === 'lowpass').at(-1);
   assert.ok(heavyFilter.Q.value > lightFilter.Q.value, 'heavier mass increases resonant low-mid body');
 
-  // Updating an existing continuous loop reuses its oscillator nodes, and speed <= 28 stops it cleanly
+  // Updating an existing continuous loop at 60fps interpolates smoothly instead of jumping discontinuously
   const countBeforeUpdate = fastCtx.nodes.filter(n => n.kind === 'oscillator').length;
-  fastCtx.currentTime = 0.05;
-  audio.playUbuMove({ ctx: fastCtx, id: 0, speed: 500, mass: 3, radius: 25 });
+  fastCtx.currentTime = 0.016;
+  audio.playUbuMove({ ctx: fastCtx, id: 0, speed: 300, mass: 3, radius: 25 });
+  fastCtx.currentTime = 0.032;
+  audio.playUbuMove({ ctx: fastCtx, id: 0, speed: 200, mass: 3, radius: 25 });
+  assert.ok(fastCarrier.frequency.value < initialFastFreq && fastCarrier.frequency.value > slowCarrier.frequency.value, '60fps loop update interpolates frequency');
   assert.equal(fastCtx.nodes.filter(n => n.kind === 'oscillator').length, countBeforeUpdate, 'continuous loop reuses oscillators');
   fastCtx.currentTime = 0.1;
   audio.playUbuMove({ ctx: fastCtx, id: 0, speed: 0, mass: 3, radius: 25 });
   assert.ok(fastCarrier.stopped <= 0.135, 'dropping below threshold stops continuous loop');
 
-  // 2. Spinning wobble sits in a higher register than movement wobble and layers harmonic partial
   const spinCtx = recordedContext();
   audio.playSpin({ ctx: spinCtx, id: 0, omega: 15, radius: 25 });
   const spinSines = spinCtx.nodes.filter(n => n.kind === 'oscillator');
   assert.ok(spinSines.length >= 3, 'spin wobble uses dual harmonic oscillators + LFO');
-  assert.ok(spinSines[0].frequency.value > fastCarrier.frequency.value, 'spin wobble stands out in higher register');
+  assert.ok(spinSines[0].frequency.value > initialFastFreq, 'spin wobble stands out in higher register');
   audio.stopMotion();
   assert.ok(spinSines[0].stopped !== undefined, 'stopMotion stops active spin loop');
 
-  // 2b. SpinStrike uses crisp noise buffers + ultra-short percussive transient (<= 20 ms), never a long cartoon pitch-glide
   const whipCtx = recordedContext();
   audio.playSpinStrike({ ctx: whipCtx, spin: 18, volume: 0.9 });
-  const whipOscs = whipCtx.nodes.filter(n => n.kind === "oscillator");
-  const whipBufs = whipCtx.nodes.filter(n => n.kind === "buffer");
-  assert.ok(whipBufs.length >= 4, "whipcrack layers whoosh, N-wave crack, highpass tip snap, and arena tail");
+  const whipOscs = whipCtx.nodes.filter(n => n.kind === 'oscillator');
+  const whipBufs = whipCtx.nodes.filter(n => n.kind === 'buffer');
+  assert.ok(whipBufs.length >= 4, 'whipcrack layers whoosh, N-wave crack, highpass tip snap, and arena tail');
   for (const osc of whipOscs) {
-    assert.ok(osc.stopped - osc.started <= 0.02, "any whip transient oscillator is <20 ms percussive snap, never a cartoon slip sweep");
+    assert.ok(osc.stopped - osc.started <= 0.02, 'any whip transient oscillator is <20 ms percussive snap');
   }
 
-  // 3. Shared master chain compatibility across all new sounds (for MP4 video export)
   const shared = recordedContext();
   audio.shareMasterChain(shared);
   audio.playUbuMove({ ctx: shared, speed: 480, mass: 3, radius: 25 });

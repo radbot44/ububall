@@ -20,6 +20,70 @@
   const getAttr = (el, k) => typeof el.getAttribute === 'function' ? el.getAttribute(k) : (el.attrs ? el.attrs[k] : undefined);
   const tagOf = el => (el.tagName || el.tag || '').toLowerCase();
 
+  function makeRng(seed = 173) {
+    let state = seed;
+    return () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+  }
+  function parseHexRgb(hex) {
+    if (typeof hex === 'string') {
+      const m6 = /^#([0-9a-fA-F]{6})$/.exec(hex);
+      if (m6) {
+        const n = parseInt(m6[1], 16);
+        return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      }
+      const m3 = /^#([0-9a-fA-F]{3})$/.exec(hex);
+      if (m3) {
+        const [cr, cg, cb] = m3[1];
+        return [parseInt(cr + cr, 16), parseInt(cg + cg, 16), parseInt(cb + cb, 16)];
+      }
+    }
+    return [128, 128, 128];
+  }
+  function deepFreeze(obj) {
+    if (obj && typeof obj === 'object') {
+      Object.freeze(obj);
+      for (const v of Object.values(obj)) deepFreeze(v);
+    }
+    return obj;
+  }
+  const EDGE_FINISHES = deepFreeze({
+    terrazzo: { width: 1.6, rim: .4, stops: [[0, '#fff', .4], [.5, '#fff', .06], [1, '#000', .22]] },
+    crackle: { width: 2, rim: .6, stops: [[0, '#fff', .55], [.45, '#fff', .12], [1, '#000', .28]] },
+    opalescent: { width: 2.6, rim: .7, stops: [[0, '#fff0da', .65], [.35, '#d3f9ee', .45], [.7, '#e7dfff', .35], [1, '#000', .2]] },
+    frosted: { width: 2.8, rim: .7, stops: [[0, '#fff', .65], [.5, '#fff', .28], [1, '#fff', .12]] },
+    woodgrain: { width: 1.5, rim: .4, stops: [[0, '#fff', .3], [.45, '#fff', .06], [1, '#000', .25]] },
+    holographic: { width: 2, rim: .65, stops: [[0, '#b8ffff', .8], [.3, '#ffc9f6', .65], [.6, '#fff2af', .65], [1, '#94bcff', .6]] },
+    pearlescent: { width: 2.5, rim: .7, stops: [[0, '#fff4e4', .65], [.4, '#e3efff', .25], [1, '#000', .2]] },
+    marble: { width: 1.8, rim: .5, stops: [[0, '#fff', .45], [.5, '#fff', .08], [1, '#000', .2]] },
+    lacquered: { width: 3.2, rim: 1, stops: [[0, '#fff', .85], [.32, '#fff', .3], [.5, '#000', .15], [1, '#000', .5]] },
+    metallic: { width: 2.4, rim: .65, stops: [[0, '#fff', .85], [.43, '#fff', .12], [.49, '#000', .55], [.56, '#fff', .65], [1, '#000', .6]] },
+    glossy: { width: 3.4, rim: 1.1, stops: [[0, '#fff', .65], [.35, '#fff', .24], [.65, '#fff', .02], [1, '#000', .28]] },
+    iridescent: { width: 2.5, rim: .7, stops: [[0, '#82fff0', .8], [.28, '#aaa1ff', .65], [.5, '#ff8cdb', .55], [.72, '#ffe6a0', .6], [1, '#53bfff', .7]] },
+    crystalline: { width: 2, rim: .45, stops: [[0, '#fff', .9], [.24, '#fff', .55], [.25, '#000', .32], [.49, '#000', .12], [.5, '#fff', .8], [.74, '#fff', .2], [.75, '#000', .42], [1, '#000', .55]] },
+    granite: { width: 4, rim: .75, stops: [[0, '#fff', .85], [.42, '#fff', .5], [.49, '#fff', .22], [.5, '#000', .35], [1, '#000', .8]] },
+    satin: { width: 1.2, rim: .3, stops: [[0, '#fff', .22], [.3, '#fff', .06], [.55, '#fff', .02], [1, '#000', .12]] },
+    sandstone: { width: 3.2, rim: .7, stops: [[0, '#fff', .22], [.5, '#fff', .04], [1, '#000', .3]] },
+    starfield: { width: 2.6, rim: .7, stops: [[0, '#d1e8ff', .6], [.35, '#e0b8ff', .35], [.7, '#0f0524', .5], [1, '#000', .7]] },
+    quartz: { width: 2.2, rim: .5, stops: [[0, '#fff', .92], [.22, '#fff', .6], [.24, '#000', .28], [.48, '#fff', .82], [.72, '#fff', .25], [.74, '#000', .38], [1, '#000', .55]] },
+    obsidian: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.2, '#fff', .15], [.6, '#000', .35], [1, '#000', .7]] },
+    mosaic: { width: 2.2, rim: .55, stops: [[0, '#fff', .55], [.45, '#fff', .1], [1, '#000', .3]] },
+    'hammered-metal': { width: 2.6, rim: .7, stops: [[0, '#fff', .88], [.38, '#fff', .18], [.45, '#000', .5], [.52, '#fff', .7], [1, '#000', .6]] },
+    kintsugi: { width: 2, rim: .55, stops: [[0, '#fff', .4], [.35, '#fff', .12], [.65, '#000', .12], [1, '#000', .3]] },
+    leather: { width: 1.5, rim: .4, stops: [[0, '#fff', .2], [.35, '#fff', .04], [.7, '#000', .14], [1, '#000', .3]] },
+    'carbon-fiber': { width: 2.6, rim: .7, stops: [[0, '#fff', .85], [.3, '#000', .5], [.6, '#fff', .65], [1, '#000', .7]] },
+    denim: { width: 1.8, rim: .4, stops: [[0, '#fff', .35], [.5, '#fff', .05], [1, '#000', .3]] },
+    bubbled: { width: 2.8, rim: .8, stops: [[0, '#fff', .85], [.3, '#d4f8ff', .4], [.6, '#ffd6f5', .25], [1, '#000', .35]] },
+    lava: { width: 2.5, rim: .6, stops: [[0, '#ff9900', .9], [.35, '#ff3300', .6], [.65, '#3a0800', .7], [1, '#110000', .85]] },
+    circuitry: { width: 1.3, rim: .35, stops: [[0, '#fff', .25], [.3, '#a4a69b', .2], [.6, '#000', .16], [1, '#000', .4]] },
+    liquid: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.25, '#fff', .35], [.55, '#fff', .05], [1, '#000', .4]] }
+  });
+  const CARD_FINISHES = deepFreeze({
+    ...EDGE_FINISHES,
+    damascus: { width: 2, rim: .5, stops: [[0, '#fff', .6], [.4, '#fff', .15], [1, '#000', .3]] },
+    velvet: { width: 1.5, rim: .4, stops: [[0, '#fff', .25], [.5, '#fff', .05], [1, '#000', .2]] },
+    plush: { width: 1.5, rim: .4, stops: [[0, '#fff', .25], [.5, '#fff', .05], [1, '#000', .2]] }
+  });
+
   // Minimum distance from (180, 180) to an AABB. Shapes strictly outside r=limit cannot enter
   // the ubu's r=176 outer circle clip under any rotation around (180, 180).
   function hitsUbuDisc(minX, minY, maxX, maxY, limit = 194) {
@@ -133,11 +197,8 @@
 
   // Synthesize the 360x360 blurred liquid tile directly into canvas ImageData on first use,
   // avoiding a 500 KB SVG path serialize/parse round-trip and boot-time main-thread work.
-  function prepareLiquidTile(onReady) {
-    if (liquidTileDataUrl) {
-      if (onReady) onReady(liquidTileDataUrl);
-      return liquidTileDataUrl;
-    }
+  function prepareLiquidTile() {
+    if (liquidTileDataUrl) return liquidTileDataUrl;
     if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
     try {
       const canvas = document.createElement('canvas');
@@ -187,7 +248,6 @@
       }
       ctx.putImageData(imgData, 0, 0);
       liquidTileDataUrl = canvas.toDataURL('image/png');
-      if (onReady) onReady(liquidTileDataUrl);
     } catch {}
     return liquidTileDataUrl;
   }
@@ -204,8 +264,7 @@
   let cachedMatteData = null;
   function getMatteData() {
     if (cachedMatteData) return cachedMatteData;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng();
     const white = ['', '', ''], black = ['', '', ''];
     for (let i = 0; i < 160; i++) {
       const cx = 1 + roll() * 46, cy = 1 + roll() * 46;
@@ -220,8 +279,7 @@
   let cachedMetallicData = null;
   function getMetallicData() {
     if (cachedMetallicData) return cachedMetallicData;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng();
     const groups = [];
     const tiers = [[.26, .04], [.36, .058], [.46, .076]];
     for (let c = 0; c < 2; c++) for (let t = 0; t < 3; t++) groups.push({ d: '', color: c ? '#fff' : '#000', width: tiers[t][0], opacity: tiers[t][1] });
@@ -237,8 +295,7 @@
   let cachedSatinData = null;
   function getSatinData() {
     if (cachedSatinData) return cachedSatinData;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng();
     const white = ['', ''], black = ['', ''];
     for (let i = 0; i < 32; i++) {
       const y = i * 1.5, hi = roll() > .5 ? 1 : 0;
@@ -272,8 +329,7 @@
   let cachedMarbleData = null;
   function getMarbleData(isUbu = false) {
     if (!cachedMarbleData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       const make = () => ({ halos: ['', ''], cores: ['', ''], fine: '', branches: ['', ''] });
       const ubuSet = make(), cardSet = make();
       for (let vein = 0; vein < 17; vein++) {
@@ -323,8 +379,7 @@
   let cachedCrystallineData = null;
   function getCrystallineData() {
     if (cachedCrystallineData) return cachedCrystallineData;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng();
     const points = [];
     for (let y = 0; y <= 12; y++) {
       points[y] = [];
@@ -364,8 +419,7 @@
   let cachedMosaicData = null;
   function getMosaicData(isUbu = false) {
     if (!cachedMosaicData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       const make = () => ({ tiles: '', topBevels: '', bottomBevels: '', whiteShades: ['', '', '', ''], blackShades: ['', '', '', ''] });
       const ubuSet = make(), cardSet = make();
       for (let row = -10; row < 28; row++) for (let col = -10; col < 28; col++) {
@@ -396,8 +450,7 @@
   let cachedCrackleData = null;
   function getCrackleData(isUbu = false) {
     if (!cachedCrackleData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       const seeds = [];
       for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) {
         seeds.push([-180 + (x + .2 + roll() * .6) * 80, -180 + (y + .2 + roll() * .6) * 80]);
@@ -440,8 +493,7 @@
   let cachedLavaData = null;
   function getLavaData(isUbu = false) {
     if (!cachedLavaData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       const seeds = [];
       for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
         seeds.push([-180 + (x + 0.2 + roll() * 0.6) * 90, -180 + (y + 0.2 + roll() * 0.6) * 90]);
@@ -500,8 +552,7 @@
   let cachedCircuitryData = null;
   function getCircuitryData() {
     if (cachedCircuitryData) return cachedCircuitryData;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng();
     const rotatePoint = (x, y, cx, cy, angleDeg) => {
       const rad = angleDeg * Math.PI / 180;
       const cos = Math.cos(rad), sin = Math.sin(rad);
@@ -553,8 +604,7 @@
   let cachedKintsugiData = null;
   function getKintsugiData(isUbu = false) {
     if (!cachedKintsugiData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       const seeds = [];
       for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++) {
         seeds.push([-180 + (x + 0.2 + roll() * 0.6) * 105, -180 + (y + 0.2 + roll() * 0.6) * 105]);
@@ -592,8 +642,7 @@
   let cachedPlushData = null;
   function getPlushData() {
     if (cachedPlushData) return cachedPlushData;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng();
     const paths = ['', '', ''];
     for (let i = 0; i < 1800; i++) {
       const x = roll() * 96, y = roll() * 96, r = 1 + roll() * 2.4, lean = (roll() - .5) * 3;
@@ -608,8 +657,7 @@
   let cachedSandstoneData = null;
   function getSandstoneData() {
     if (cachedSandstoneData) return cachedSandstoneData;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng();
     const strataLight = ['', ''], strataDark = ['', ''];
     for (let band = -6; band < 27; band++) {
       const y = band * 26 + Math.sin(band * 1.7) * 9;
@@ -630,8 +678,7 @@
   let cachedGraniteData = null;
   function getGraniteData() {
     if (cachedGraniteData) return cachedGraniteData;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng();
     const minerals = ['', '', '', '', '', ''];
     for (let y = -1; y < 49; y++) for (let x = -1; x < 49; x++) {
       const px = x * 3 + roll() * 2, py = y * 3 + roll() * 2;
@@ -649,8 +696,7 @@
   let cachedTerrazzoData = null;
   function getTerrazzoData(isUbu = false) {
     if (!cachedTerrazzoData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       const chipsUbu = ['', '', '', ''], chipsCard = ['', '', '', ''];
       for (let i = 0; i < 440; i++) {
         const cx = -180 + roll() * 720, cy = -180 + roll() * 720;
@@ -674,8 +720,7 @@
   let cachedLeatherData = null;
   function getLeatherData() {
     if (cachedLeatherData) return cachedLeatherData;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng();
     const corners = Array.from({ length: 24 }, () => Array.from({ length: 24 }, () => [(roll() - .5) * 2.8, (roll() - .5) * 2.8]));
     const corner = (x, y) => {
       const jitter = corners[(y + 24) % 24][(x + 24) % 24];
@@ -701,8 +746,7 @@
   let cachedWoodgrainData = null;
   function getWoodgrainData(isUbu = false) {
     if (!cachedWoodgrainData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       const make = () => ({ fibersDark: ['', ''], fibersLight: ['', ''] });
       const ubuSet = make(), cardSet = make();
       for (let fiber = -28; fiber <= 100; fiber++) {
@@ -736,8 +780,7 @@
   let cachedBubbledData = null;
   function getBubbledData(isUbu = false) {
     if (!cachedBubbledData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       const bubblesCard = [];
       for (let i = 0; i < 180; i++) {
         const x = -150 + roll() * 660, y = -150 + roll() * 660, r = 7 + roll() ** 2 * 40;
@@ -753,8 +796,7 @@
   let cachedObsidianData = null;
   function getObsidianData(isUbu = false) {
     if (!cachedObsidianData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       let dShellsCard = '', dLipsCard = '', dShellsUbu = '', dLipsUbu = '';
       for (let row = -1; row < 5; row++) for (let col = -1; col < 5; col++) {
         const x = col * 150 + (roll() - .5) * 80, y = row * 145 + (roll() - .5) * 70;
@@ -773,8 +815,7 @@
   let cachedQuartzData = null;
   function getQuartzData(isUbu = false) {
     if (!cachedQuartzData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       const make = () => ({ dBody: '', dFace1: '', dFace2: '', dOutlines: '', dFractures: '', crystalTips: [] });
       const ubuSet = make(), cardSet = make();
       for (let i = 0; i < 85; i++) {
@@ -812,8 +853,7 @@
   let cachedFrostedData = null;
   function getFrostedData(isUbu = false) {
     if (!cachedFrostedData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       let branchesWhite = '', branchesBlue = '';
       for (let i = 0; i < 46; i++) {
         const px = roll() * 120, py = roll() * 120, length = 5 + roll() * 15;
@@ -854,8 +894,7 @@
   let cachedDenimData = null;
   function getDenimData() {
     if (cachedDenimData) return cachedDenimData;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng();
     let weft0 = '', weft1 = '';
     let dark0 = '', dark1 = '';
     let light0 = '', light1 = '';
@@ -880,8 +919,7 @@
   let cachedHammeredDentPaths = null;
   function getHammeredDentPaths() {
     if (cachedHammeredDentPaths) return cachedHammeredDentPaths;
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng();
     const grid = Array.from({ length: 13 }, (_, y) => Array.from({ length: 13 }, (_, x) => [-16 + x * 16 + (roll() - .5) * 13, -16 + y * 16 + (roll() - .5) * 13]));
     const paths = [];
     for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) {
@@ -963,13 +1001,13 @@
     // 720x720 bounds only for landscape card stripes (cx=240, cy=160).
     const box = isUbu ? (effects ? { x: -24, y: -24, width: 408, height: 408 } : { x: 0, y: 0, width: 360, height: 360 })
       : { x: -180, y: -180, width: 720, height: 720 };
-    const rotate = `rotate(${attribute.angle} ${cx} ${cy})`;
+    const matAngle = Number.isFinite(attribute?.angle) ? attribute.angle : 0;
+    const rotate = `rotate(${matAngle} ${cx} ${cy})`;
     // One global material field: every detail rotates about the outer-circle center.
     const pattern = svgNode('pattern', { id, patternUnits: 'userSpaceOnUse', x: cx - 360, y: cy - 360,
       width: 720, height: 720, viewBox: '-180 -180 720 720', patternTransform: rotate });
-    const lightLayers = [];
     const cover = fill => { const rect = svgNode('rect', { ...box, fill }); pattern.append(rect); return rect; };
-    const rgb = (attribute.hex || '#808080').slice(1).match(/../g).map(v => parseInt(v, 16));
+    const rgb = parseHexRgb(attribute?.hex);
     const dark = (rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722) / 255 < .25;
     function animate(effect) { if (effects) (effects.idle ||= []).push(effect); }
     function sparkle(points, strength = 1) {
@@ -1004,7 +1042,7 @@
       for (const [offset, color, opacity] of stops) gradient.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
       if (effects && attribute.texture !== 'starfield') {
         const base = attrs.gradientTransform || '';
-        const radians = attribute.angle * Math.PI / 180;
+        const radians = matAngle * Math.PI / 180;
         const strength = attribute.texture === 'matte' ? 15 : 65;
         effects.push((x, y) => {
           const dx = (x * Math.cos(radians) + y * Math.sin(radians)) * strength;
@@ -1013,11 +1051,9 @@
         });
       }
       defs.append(gradient);
-      lightLayers.push(cover(`url(#${key})`));
+      cover(`url(#${key})`);
     }
     // Fixed procedural detail never consumes DNA or the naming stream.
-    let state = 173;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
     if (attribute.texture === 'metallic') {
       lighting('reflection', [[0, '#000', .58], [.12, '#fff', .18], [.27, '#000', .4],
         [.36, '#000', .62], [.405, '#fff', .85], [.44, '#fff', .38], [.51, '#000', .18],
@@ -1184,6 +1220,7 @@
       });
       cover(`url(#${id}-tufts)`);
     } else if (attribute.texture === 'opalescent') {
+      const roll = makeRng();
       lighting('opal-body', [[0, '#fff', .38], [.5, '#fff', .18], [1, '#000', .16]], true);
       const colors = ['#73efc0', '#ffbd72', '#8da4ff', '#ed8bda', '#8ce6ff'];
       for (let i = 0; i < 28; i++) {
@@ -1212,7 +1249,7 @@
           if (isUbu && !item.inUbu) continue;
           const facet = svgNode('polygon', { points: item.ptsStr, fill: item.fill, opacity: item.opacity });
           pattern.append(facet);
-          const normal = item.light * Math.PI * 2 + attribute.angle * Math.PI / 180;
+          const normal = item.light * Math.PI * 2 + matAngle * Math.PI / 180;
           effects.push((x, y) => facet.setAttribute('opacity', Math.max(.025,
             Math.min(.78, item.opacity + .22 * (x * Math.cos(normal) + y * Math.sin(normal))))));
         }
@@ -1224,7 +1261,7 @@
           const spark = svgNode('path', { d: `M${fmt(px - 5)} ${fmt(py)}h10M${fmt(px)} ${fmt(py - 5)}v10`,
             stroke: '#fff', 'stroke-width': 1.25, 'stroke-linecap': 'round', opacity: 0 });
           pattern.append(spark);
-          const phase = (x * 1.7 + y * 2.3 + attribute.angle * Math.PI / 180);
+          const phase = (x * 1.7 + y * 2.3 + matAngle * Math.PI / 180);
           effects.push((dx, dy) => {
             const alignment = Math.max(0, Math.cos(phase + dx * 3 + dy * 2));
             spark.setAttribute('opacity', Math.pow(alignment, 22) * Math.min(1, Math.hypot(dx, dy) * 3.4));
@@ -1369,13 +1406,13 @@
       }
     } else if (attribute.texture === 'hammered-metal') {
       lighting('hammered-base', [[0,'#000',.25],[.25,'#fff',.08],[.48,'#fff',.3],[.7,'#000',.08],[1,'#000',.3]]);
-      attachBakedPattern(defs, id + '-dents', 'hammered-metal', 160, 160, (target, targetDefs) => {
+      attachBakedPattern(defs, id + '-dents', 'hammered-metal', 160, 160, target => {
         const dentId = id + '-dent';
         const dent = svgNode('linearGradient', { id: dentId, x1: '10%', y1: '0%', x2: '85%', y2: '100%' });
         for (const [offset, color, opacity] of [[0, '#fff', .04], [.2, '#000', .16], [.5, '#000', .025], [.8, '#fff', .15], [1, '#fff', .025]]) {
           dent.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
         }
-        targetDefs.append(dent);
+        target.append(dent);
         const dentFill = `url(#${dentId})`;
         for (const d of getHammeredDentPaths()) target.append(svgNode('path', { d, fill: dentFill }));
       });
@@ -1526,8 +1563,7 @@
   let cachedStarfieldData = null;
   function getStarfieldData(isUbu = false) {
     if (!cachedStarfieldData) {
-      let state = 173;
-      const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const roll = makeRng();
       const nebulaeCard = [], nebulaeUbu = [];
       for (let i = 0; i < 22; i++) {
         const x = -150 + roll() * 650, y = -150 + roll() * 650, r = 45 + roll() * 120;
@@ -1577,8 +1613,7 @@
   let cachedSandstoneEdge = null;
   function getSandstoneEdgeData() {
     if (cachedSandstoneEdge) return cachedSandstoneEdge;
-    let state = 317;
-    const roll = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const roll = makeRng(317);
     let dark = '', light = '';
     for (let i = 0; i < 260; i++) {
       const x = roll() * 48, y = roll() * 48, r = .35 + roll() * 1.35;
@@ -1623,8 +1658,8 @@
         if (y + h > maxY) maxY = y + h;
       } else if (tag === 'path') {
         const d = getAttr(shape, 'd') || '';
-        if (/[aAcCsStThHvV]/.test(d)) return { x: 0, y: 0, width: 360, height: 360 };
-        const nums = d.match(/-?\d+(?:\.\d+)?/g);
+        if (/[aAcCsStThHvVmlq]/.test(d)) return { x: 0, y: 0, width: 360, height: 360 };
+        const nums = d.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi);
         if (!nums) return { x: 0, y: 0, width: 360, height: 360 };
         for (let i = 0; i + 1 < nums.length; i += 2) {
           const x = +nums[i], y = +nums[i + 1];
@@ -1675,12 +1710,25 @@
 
   function materialEdge(defs, face, shapes, attribute, id, effects, seamContours = shapes) {
     const region = shapeBounds(shapes, 6);
+    let scaleFactor = 1;
+    for (const shape of shapes) {
+      const m = /\bscale\(\s*([\d.]+)/.exec(getAttr(shape, 'transform') || '');
+      if (m && +m[1] > 0 && +m[1] < scaleFactor) scaleFactor = +m[1];
+    }
+    const scaledMark = scaleFactor < 0.5;
     if (['denim', 'leather', 'plush', 'velvet'].includes(attribute.texture)) {
       const plush = attribute.texture === 'plush', velvet = attribute.texture === 'velvet', leather = attribute.texture === 'leather';
       // Erode the union, so the joined eyes have no seam through their overlap.
       // Clip dashed boundary strokes to two inset bands; tiny pupils get a hem only.
+      // Back-face scaled oomarks scale erosion bands & inverse-scale stitch stroke-width/dasharray
+      // so stitches fall cleanly inside userSpaceOnUse masks without eroding through 6.8px eye rings.
       const small = shapes.every(shape => Number(getAttr(shape, 'r')) > 0 && Number(getAttr(shape, 'r')) <= 17);
-      for (const [index, inner, outer] of [[0, 0, plush ? 3 : 2], ...(!small && !velvet ? (plush ? [[1, 2, 6]] : leather ? [[1, 3, 4.5]] : [[1, 3, 4], [2, 6, 7]]) : [])]) {
+      const bandScale = scaledMark ? 0.45 : 1;
+      const strokeScale = bandScale / scaleFactor;
+      const rawBands = [[0, 0, plush ? 3 : 2], ...(!small && !velvet ? (plush ? [[1, 2, 6]] : leather ? [[1, 3, 4.5]] : [[1, 3, 4], [2, 6, 7]]) : [])];
+      for (const [index, rawInner, rawOuter] of rawBands) {
+        const inner = scaledMark ? +(rawInner * bandScale).toFixed(2) : rawInner;
+        const outer = scaledMark ? +(rawOuter * bandScale).toFixed(2) : rawOuter;
         const key = `${id}-seam-${index}`;
         const filter = svgNode('filter', { id: key, filterUnits: 'userSpaceOnUse', ...region });
         filter.append(svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: inner, result: 'outer' }),
@@ -1701,67 +1749,44 @@
             seam.append(svgNode('rect',{...region,fill:`url(#${key}-fuzz)`}));
           }
         }
-        else for (const shape of seamContours) {
-          const stitch = shape.cloneNode(true);
-          stitch.setAttribute('fill', 'none');
-          stitch.setAttribute('stroke', plush ? '#d8caba' : leather ? '#b8a58a' : '#c6a36d');
-          stitch.setAttribute('stroke-width', 16);
-          stitch.setAttribute('stroke-dasharray', plush ? '2 5' : leather ? '2.5 2.5' : '3 3');
-          stitch.setAttribute('stroke-linecap', 'round');
-          seam.append(stitch);
+        else {
+          const baseDash = plush ? [2, 5] : leather ? [2.5, 2.5] : [3, 3];
+          const dashAttr = scaledMark ? baseDash.map(v => +(v * strokeScale).toFixed(2)).join(' ') : baseDash.join(' ');
+          const widthAttr = scaledMark ? +(16 * strokeScale).toFixed(2) : 16;
+          for (const shape of seamContours) {
+            const stitch = shape.cloneNode(true);
+            stitch.setAttribute('fill', 'none');
+            stitch.setAttribute('stroke', plush ? '#d8caba' : leather ? '#b8a58a' : '#c6a36d');
+            stitch.setAttribute('stroke-width', widthAttr);
+            stitch.setAttribute('stroke-dasharray', dashAttr);
+            stitch.setAttribute('stroke-linecap', 'round');
+            seam.append(stitch);
+          }
         }
         face.append(seam);
       }
       return;
     }
     // Erode the combined silhouette so overlapping eyes never acquire an internal seam.
-    const finishes = {
-      terrazzo: { width: 1.6, rim: .4, stops: [[0, '#fff', .4], [.5, '#fff', .06], [1, '#000', .22]] },
-      crackle: { width: 2, rim: .6, stops: [[0, '#fff', .55], [.45, '#fff', .12], [1, '#000', .28]] },
-      opalescent: { width: 2.6, rim: .7, stops: [[0, '#fff0da', .65], [.35, '#d3f9ee', .45], [.7, '#e7dfff', .35], [1, '#000', .2]] },
-      frosted: { width: 2.8, rim: .7, stops: [[0, '#fff', .65], [.5, '#fff', .28], [1, '#fff', .12]] },
-      woodgrain: { width: 1.5, rim: .4, stops: [[0, '#fff', .3], [.45, '#fff', .06], [1, '#000', .25]] },
-      holographic: { width: 2, rim: .65, stops: [[0, '#b8ffff', .8], [.3, '#ffc9f6', .65], [.6, '#fff2af', .65], [1, '#94bcff', .6]] },
-      pearlescent: { width: 2.5, rim: .7, stops: [[0, '#fff4e4', .65], [.4, '#e3efff', .25], [1, '#000', .2]] },
-      marble: { width: 1.8, rim: .5, stops: [[0, '#fff', .45], [.5, '#fff', .08], [1, '#000', .2]] },
-      lacquered: { width: 3.2, rim: 1, stops: [[0, '#fff', .85], [.32, '#fff', .3], [.5, '#000', .15], [1, '#000', .5]] },
-      metallic: { width: 2.4, rim: .65, stops: [[0, '#fff', .85], [.43, '#fff', .12], [.49, '#000', .55], [.56, '#fff', .65], [1, '#000', .6]] },
-      glossy: { width: 3.4, rim: 1.1, stops: [[0, '#fff', .65], [.35, '#fff', .24], [.65, '#fff', .02], [1, '#000', .28]] },
-      iridescent: { width: 2.5, rim: .7, stops: [[0, '#82fff0', .8], [.28, '#aaa1ff', .65], [.5, '#ff8cdb', .55], [.72, '#ffe6a0', .6], [1, '#53bfff', .7]] },
-      crystalline: { width: 2, rim: .45, stops: [[0, '#fff', .9], [.24, '#fff', .55], [.25, '#000', .32], [.49, '#000', .12], [.5, '#fff', .8], [.74, '#fff', .2], [.75, '#000', .42], [1, '#000', .55]] },
-      granite: { width: 4, rim: .75, stops: [[0, '#fff', .85], [.42, '#fff', .5], [.49, '#fff', .22], [.5, '#000', .35], [1, '#000', .8]] },
-      satin: { width: 1.2, rim: .3, stops: [[0, '#fff', .22], [.3, '#fff', .06], [.55, '#fff', .02], [1, '#000', .12]] },
-      sandstone: { width: 3.2, rim: .7, stops: [[0, '#fff', .22], [.5, '#fff', .04], [1, '#000', .3]] },
-      starfield: { width: 2.6, rim: .7, stops: [[0, '#d1e8ff', .6], [.35, '#e0b8ff', .35], [.7, '#0f0524', .5], [1, '#000', .7]] },
-      quartz: { width: 2.2, rim: .5, stops: [[0, '#fff', .92], [.22, '#fff', .6], [.24, '#000', .28], [.48, '#fff', .82], [.72, '#fff', .25], [.74, '#000', .38], [1, '#000', .55]] },
-      obsidian: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.2, '#fff', .15], [.6, '#000', .35], [1, '#000', .7]] },
-      mosaic: { width: 2.2, rim: .55, stops: [[0, '#fff', .55], [.45, '#fff', .1], [1, '#000', .3]] },
-      'hammered-metal': { width: 2.6, rim: .7, stops: [[0, '#fff', .88], [.38, '#fff', .18], [.45, '#000', .5], [.52, '#fff', .7], [1, '#000', .6]] },
-      kintsugi: { width: 2, rim: .55, stops: [[0, '#fff', .4], [.35, '#fff', .12], [.65, '#000', .12], [1, '#000', .3]] },
-      leather: { width: 1.5, rim: .4, stops: [[0, '#fff', .2], [.35, '#fff', .04], [.7, '#000', .14], [1, '#000', .3]] },
-      'carbon-fiber': { width: 2.6, rim: .7, stops: [[0, '#fff', .85], [.3, '#000', .5], [.6, '#fff', .65], [1, '#000', .7]] },
-      denim: { width: 1.8, rim: .4, stops: [[0, '#fff', .35], [.5, '#fff', .05], [1, '#000', .3]] },
-      bubbled: { width: 2.8, rim: .8, stops: [[0, '#fff', .85], [.3, '#d4f8ff', .4], [.6, '#ffd6f5', .25], [1, '#000', .35]] },
-      lava: { width: 2.5, rim: .6, stops: [[0, '#ff9900', .9], [.35, '#ff3300', .6], [.65, '#3a0800', .7], [1, '#110000', .85]] },
-      circuitry: { width: 1.3, rim: .35, stops: [[0, '#fff', .25], [.3, '#a4a69b', .2], [.6, '#000', .16], [1, '#000', .4]] },
-      liquid: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.25, '#fff', .35], [.55, '#fff', .05], [1, '#000', .4]] }
-    };
-    const finish = finishes[attribute.texture];
+    const finish = EDGE_FINISHES[attribute.texture];
     if (!finish) return;
+    const matAngle = Number.isFinite(attribute?.angle) ? attribute.angle : 0;
     const gradient = svgNode('linearGradient', { id: id + '-light', gradientUnits: 'userSpaceOnUse',
-      x1: 30, y1: 20, x2: 330, y2: 340, gradientTransform: `rotate(${attribute.angle} 180 180)` });
+      x1: 30, y1: 20, x2: 330, y2: 340, gradientTransform: `rotate(${matAngle} 180 180)` });
     for (const [offset, color, opacity] of finish.stops) gradient.append(svgNode('stop', {
       offset, 'stop-color': color, 'stop-opacity': opacity
     }));
     defs.append(gradient);
     if (effects) effects.push((x, y) => gradient.setAttribute('gradientTransform',
-      `translate(${x * 38} ${y * 38}) rotate(${attribute.angle} 180 180)`));
+      `translate(${x * 38} ${y * 38}) rotate(${matAngle} 180 180)`));
     const crumbs = attribute.texture === 'sandstone' ? sandstoneEdge(defs, id+'-crumbs') : null;
+    const rimScale = scaledMark ? 0.55 : 1;
     // Disjoint unclipped circles (background, pupils, and >99.9% of irises) need no feMorphology
     // or mask surfaces: an even-odd annulus draws the exact inset rim directly.
     const circles = !crumbs ? disjointCircles(shapes) : null;
     if (circles) {
-      for (const [index, width] of [finish.width, finish.rim].entries()) {
+      for (const [index, rawWidth] of [finish.width, finish.rim].entries()) {
+        const width = scaledMark ? +(rawWidth * rimScale).toFixed(2) : rawWidth;
         face.append(svgNode('path', {
           d: annulusPath(circles, width),
           'fill-rule': 'evenodd',
@@ -1771,7 +1796,8 @@
       }
       return;
     }
-    for (const [index, width] of [finish.width, finish.rim].entries()) {
+    for (const [index, rawWidth] of [finish.width, finish.rim].entries()) {
+      const width = scaledMark ? +(rawWidth * rimScale).toFixed(2) : rawWidth;
       const key = id + '-' + index;
       const filter = svgNode('filter', { id: key + '-cut', filterUnits: 'userSpaceOnUse',
         ...region, 'color-interpolation-filters': 'sRGB' });
@@ -1804,7 +1830,7 @@
       gradient.append(svgNode('stop', { offset, 'stop-color': color }));
     }
     defs.append(gradient);
-    effects.push((x, y) => gradient.setAttribute('gradientTransform', `translate(${x * 35} ${y * 35}) rotate(${x * 12 - y * 8} 180 180)`));
+    if (effects) effects.push((x, y) => gradient.setAttribute('gradientTransform', `translate(${x * 35} ${y * 35}) rotate(${x * 12 - y * 8} 180 180)`));
     return `url(#${id})`;
   }
   function enamelDivider(defs, face, shapes, id, metal) {
@@ -1843,7 +1869,7 @@
     defs.append(coat);
     face.append(svgNode('circle', { cx: 180, cy: 180, r: 176, fill: `url(#${coatId})`, 'pointer-events': 'none' }),
       svgNode('circle', { cx: 180, cy: 180, r: 175.5, fill: 'none', stroke: '#000', 'stroke-opacity': .28, 'stroke-width': 1 }));
-    effects.push((x, y) => coat.setAttribute('gradientTransform', `translate(${x * 25} ${y * 25})`));
+    if (effects) effects.push((x, y) => coat.setAttribute('gradientTransform', `translate(${x * 25} ${y * 25})`));
   }
   function renderSVG(m, className = 'oomark', surface = null, extraEffects = null, enamel = false) {
     const effects = className === 'oomark' || enamel ? (extraEffects || []) : null;
@@ -1992,7 +2018,7 @@
     return svg;
   }
   // The token's back: the same marks as enamel cells set in metal on the background enamel.
-  function renderTokenBack(m, effects) {
+  function renderTokenBack(m, effects = null) {
     const prefix = 'ubu-token-back-' + (++serial);
     const svg = svgNode('svg', { class: 'enamel-token token-back', viewBox: '0 0 360 360', 'aria-hidden': 'true' });
     const defs = svgNode('defs'), face = svgNode('g', { 'clip-path': `url(#${prefix}-bounds)` });
@@ -2005,21 +2031,24 @@
     enamelCoat(defs, face, prefix, effects);
     return svg;
   }
-  let stopLighting = () => {};
+  const surfaceControllers = new WeakMap();
   function attachLighting(svg, effects, surface) {
-    stopLighting();
+    surfaceControllers.get(surface)?.();
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-    let frame = 0, x = 0, y = 0, targetX = 0, targetY = 0, rect, lastPaint = 0;
+    let frame = 0, x = 0, y = 0, targetX = 0, targetY = 0, rect = null, lastPaint = 0;
+    let wasConnected = Boolean(surface.isConnected), disposed = false;
     const idle = effects.idle || [];
     function visible() {
-      const dialog = surface.closest('dialog');
+      if (surface.isConnected) wasConnected = true;
+      else if (wasConnected) { cleanup(); return false; }
+      const dialog = typeof surface.closest === 'function' ? surface.closest('dialog') : null;
       const bounds = surface.getBoundingClientRect();
       return bounds.bottom > 0 && bounds.right > 0 && bounds.top < innerHeight && bounds.left < innerWidth && surface.isConnected && !document.hidden && (!dialog || dialog.open) && surface.getClientRects().length > 0;
     }
     svg.style.filter = 'drop-shadow(0px 8px 9px #0005)';
     function paint(time) {
       frame = 0;
-      if (!visible()) return;
+      if (disposed || !visible()) return;
       if (idle.length && time - lastPaint < 32) { frame = requestAnimationFrame(paint); return; }
       lastPaint = time;
       const moving = x !== targetX || y !== targetY;
@@ -2027,7 +2056,7 @@
       const settled = Math.abs(targetX - x) + Math.abs(targetY - y) < .001;
       if (settled) { x = targetX; y = targetY; }
       surface.style.transform = `perspective(700px) rotateX(${-y * 12}deg) rotateY(${x * 12}deg)`;
-      if (surface !== svg) {
+      if (surface !== svg && typeof surface.style?.setProperty === 'function') {
         surface.style.setProperty('--light-x', `${50 + x * 45}%`);
         surface.style.setProperty('--light-y', `${50 + y * 45}%`);
       }
@@ -2036,7 +2065,13 @@
       for (const effect of idle) effect(x, y, reduced.matches ? 0 : time / 1000);
       if (!settled || (idle.length && !reduced.matches)) frame = requestAnimationFrame(paint);
     }
-    const schedule = () => { if (!frame && visible()) frame = requestAnimationFrame(paint); };
+    const schedule = () => {
+      if (disposed) return;
+      if (surface.isConnected) wasConnected = true;
+      else if (wasConnected) { cleanup(); return; }
+      if (!frame && visible()) frame = requestAnimationFrame(paint);
+    };
+    const invalidateRect = () => { rect = null; };
     function reset() { targetX = targetY = 0; schedule(); }
     function enter() { rect = surface.getBoundingClientRect(); }
     function down(event) {
@@ -2047,8 +2082,10 @@
       }
     }
     function move(event) {
-      if (reduced.matches || !rect) return;
+      if (disposed || reduced.matches) return;
       if (event.pointerType === 'touch' && event.buttons === 0) return;
+      if (!rect) rect = surface.getBoundingClientRect();
+      if (!(rect.width > 0) || !(rect.height > 0)) return;
       targetX = Math.max(-1, Math.min(1, (event.clientX - rect.left) / rect.width * 2 - 1));
       targetY = Math.max(-1, Math.min(1, (event.clientY - rect.top) / rect.height * 2 - 1));
       schedule();
@@ -2076,10 +2113,8 @@
       if (reduced.matches) targetX = targetY = x = y = 0;
       schedule();
     }
-    // One active viewer owns idle animation. Observe dialog/tab visibility,
-    // not changing SVG attributes, and never run a hidden RAF polling loop.
     const visibility = new MutationObserver(schedule);
-    visibility.observe(document.body, { childList:true, subtree:true, attributes:true, attributeFilter:['open','hidden'] });
+    if (document.body) visibility.observe(document.body, { childList:true, subtree:true, attributes:true, attributeFilter:['open','hidden'] });
     const intersection = new IntersectionObserver(entries => {
       if (entries.some(entry => entry.isIntersecting)) schedule();
       else { cancelAnimationFrame(frame); frame = 0; }
@@ -2089,10 +2124,15 @@
     queueMicrotask(schedule);
     reduced.addEventListener('change', preferenceChanged);
     window.addEventListener('blur', reset);
-    stopLighting = () => {
-      cancelAnimationFrame(frame);
+    window.addEventListener('resize', invalidateRect);
+    window.addEventListener('scroll', invalidateRect, true);
+    function cleanup() {
+      if (disposed) return;
+      disposed = true;
+      if (surfaceControllers.get(surface) === cleanup) surfaceControllers.delete(surface);
+      cancelAnimationFrame(frame); frame = 0;
       visibility.disconnect(); intersection.disconnect();
-      document.removeEventListener('visibilitychange', schedule);
+      if (typeof document.removeEventListener === 'function') document.removeEventListener('visibilitychange', schedule);
       surface.removeEventListener('pointerenter', enter);
       surface.removeEventListener('pointerdown', down);
       surface.removeEventListener('pointermove', move);
@@ -2101,7 +2141,11 @@
       surface.removeEventListener('pointercancel', cancel);
       reduced.removeEventListener('change', preferenceChanged);
       window.removeEventListener('blur', reset);
-    };
+      window.removeEventListener('resize', invalidateRect);
+      window.removeEventListener('scroll', invalidateRect, true);
+    }
+    surfaceControllers.set(surface, cleanup);
+    svg.disposeLighting = cleanup;
   }
   function renderCardMaterials(m, effects = null) {
     const CARD_ROLES = ['background', 'eyes', 'mouth', 'irises', 'pupils'];
@@ -2171,46 +2215,16 @@
       layers[i].rects = getLayerRects(layers[i]);
     }
 
-    const finishes = {
-      terrazzo: { width: 1.6, rim: .4, stops: [[0, '#fff', .4], [.5, '#fff', .06], [1, '#000', .22]] },
-      crackle: { width: 2, rim: .6, stops: [[0, '#fff', .55], [.45, '#fff', .12], [1, '#000', .28]] },
-      opalescent: { width: 2.6, rim: .7, stops: [[0, '#fff0da', .65], [.35, '#d3f9ee', .45], [.7, '#e7dfff', .35], [1, '#000', .2]] },
-      frosted: { width: 2.8, rim: .7, stops: [[0, '#fff', .65], [.5, '#fff', .28], [1, '#fff', .12]] },
-      woodgrain: { width: 1.5, rim: .4, stops: [[0, '#fff', .3], [.45, '#fff', .06], [1, '#000', .25]] },
-      holographic: { width: 2, rim: .65, stops: [[0, '#b8ffff', .8], [.3, '#ffc9f6', .65], [.6, '#fff2af', .65], [1, '#94bcff', .6]] },
-      pearlescent: { width: 2.5, rim: .7, stops: [[0, '#fff4e4', .65], [.4, '#e3efff', .25], [1, '#000', .2]] },
-      marble: { width: 1.8, rim: .5, stops: [[0, '#fff', .45], [.5, '#fff', .08], [1, '#000', .2]] },
-      lacquered: { width: 3.2, rim: 1, stops: [[0, '#fff', .85], [.32, '#fff', .3], [.5, '#000', .15], [1, '#000', .5]] },
-      metallic: { width: 2.4, rim: .65, stops: [[0, '#fff', .85], [.43, '#fff', .12], [.49, '#000', .55], [.56, '#fff', .65], [1, '#000', .6]] },
-      glossy: { width: 3.4, rim: 1.1, stops: [[0, '#fff', .65], [.35, '#fff', .24], [.65, '#fff', .02], [1, '#000', .28]] },
-      iridescent: { width: 2.5, rim: .7, stops: [[0, '#82fff0', .8], [.28, '#aaa1ff', .65], [.5, '#ff8cdb', .55], [.72, '#ffe6a0', .6], [1, '#53bfff', .7]] },
-      crystalline: { width: 2, rim: .45, stops: [[0, '#fff', .9], [.24, '#fff', .55], [.25, '#000', .32], [.49, '#000', .12], [.5, '#fff', .8], [.74, '#fff', .2], [.75, '#000', .42], [1, '#000', .55]] },
-      granite: { width: 4, rim: .75, stops: [[0, '#fff', .85], [.42, '#fff', .5], [.49, '#fff', .22], [.5, '#000', .35], [1, '#000', .8]] },
-      satin: { width: 1.2, rim: .3, stops: [[0, '#fff', .22], [.3, '#fff', .06], [.55, '#fff', .02], [1, '#000', .12]] },
-      sandstone: { width: 3.2, rim: .7, stops: [[0, '#fff', .22], [.5, '#fff', .04], [1, '#000', .3]] },
-      starfield: { width: 2.6, rim: .7, stops: [[0, '#d1e8ff', .6], [.35, '#e0b8ff', .35], [.7, '#0f0524', .5], [1, '#000', .7]] },
-      quartz: { width: 2.2, rim: .5, stops: [[0, '#fff', .92], [.22, '#fff', .6], [.24, '#000', .28], [.48, '#fff', .82], [.72, '#fff', .25], [.74, '#000', .38], [1, '#000', .55]] },
-      obsidian: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.2, '#fff', .15], [.6, '#000', .35], [1, '#000', .7]] },
-      mosaic: { width: 2.2, rim: .55, stops: [[0, '#fff', .55], [.45, '#fff', .1], [1, '#000', .3]] },
-      'hammered-metal': { width: 2.6, rim: .7, stops: [[0, '#fff', .88], [.38, '#fff', .18], [.45, '#000', .5], [.52, '#fff', .7], [1, '#000', .6]] },
-      kintsugi: { width: 2, rim: .55, stops: [[0, '#fff', .4], [.35, '#fff', .12], [.65, '#000', .12], [1, '#000', .3]] },
-      leather: { width: 1.5, rim: .4, stops: [[0, '#fff', .2], [.35, '#fff', .04], [.7, '#000', .14], [1, '#000', .3]] },
-      'carbon-fiber': { width: 2.6, rim: .7, stops: [[0, '#fff', .85], [.3, '#000', .5], [.6, '#fff', .65], [1, '#000', .7]] },
-      denim: { width: 1.8, rim: .4, stops: [[0, '#fff', .35], [.5, '#fff', .05], [1, '#000', .3]] },
-      bubbled: { width: 2.8, rim: .8, stops: [[0, '#fff', .85], [.3, '#d4f8ff', .4], [.6, '#ffd6f5', .25], [1, '#000', .35]] },
-      lava: { width: 2.5, rim: .6, stops: [[0, '#ff9900', .9], [.35, '#ff3300', .6], [.65, '#3a0800', .7], [1, '#110000', .85]] },
-      circuitry: { width: 1.3, rim: .35, stops: [[0, '#fff', .25], [.3, '#a4a69b', .2], [.6, '#000', .16], [1, '#000', .4]] },
-      liquid: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.25, '#fff', .35], [.55, '#fff', .05], [1, '#000', .4]] },
-      damascus: { width: 2, rim: .5, stops: [[0, '#fff', .6], [.4, '#fff', .15], [1, '#000', .3]] },
-      velvet: { width: 1.5, rim: .4, stops: [[0, '#fff', .25], [.5, '#fff', .05], [1, '#000', .2]] },
-      plush: { width: 1.5, rim: .4, stops: [[0, '#fff', .25], [.5, '#fff', .05], [1, '#000', .2]] }
-    };
-
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
       const { mat, angle, rects } = layer;
       const patId = `${prefix}-pat-${i}`;
-      const fill = material(defs, { ...mat, angle: (mat.angle ?? 45) - angle }, patId, effects, 240, 160);
+      let layerEffects = null;
+      if (effects) {
+        layerEffects = [];
+        layerEffects.idle = effects.idle;
+      }
+      const fill = material(defs, { ...mat, angle: (mat.angle ?? 45) - angle }, patId, layerEffects, 240, 160);
 
       const group = svgNode('g', {
         transform: `rotate(${angle} 240 160)`
@@ -2249,7 +2263,7 @@
         svgNode('path', { d: stripes, fill })
       );
 
-      const finish = finishes[mat.texture];
+      const finish = CARD_FINISHES[mat.texture];
       if (finish) {
         const edgeId = `${prefix}-edge-${i}`;
         const gradId = `${edgeId}-light`;
@@ -2261,9 +2275,9 @@
           grad.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
         }
         defs.append(grad);
-        if (effects) {
-          effects.push((x, y) => {
-            grad.setAttribute('gradientTransform', `translate(${x * 30} ${y * 30})`);
+        if (layerEffects) {
+          layerEffects.push((gx, gy) => {
+            grad.setAttribute('gradientTransform', `translate(${gx * 30} ${gy * 30})`);
           });
         }
 
@@ -2282,6 +2296,14 @@
         }
       }
 
+      if (effects && layerEffects.length) {
+        const rad = angle * Math.PI / 180, cosA = Math.cos(rad), sinA = Math.sin(rad);
+        effects.push((x, y) => {
+          const gx = x * cosA + y * sinA, gy = -x * sinA + y * cosA;
+          for (const fn of layerEffects) fn(gx, gy);
+        });
+      }
+
       face.append(group);
     }
 
@@ -2292,7 +2314,7 @@
   // Match sidebars, formation slots, lineup previews and Designer thumbnails. Rasterizing once to
   // a PNG Blob URL releases the intermediate SVG filter/mask/pattern tree and prevents Blink/WebKit
   // from re-running SVG filters when scrolling large collections.
-  const MAX_SPRITES = 8192;
+  const MAX_SPRITES = 2048;
   const BLANK_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const spriteCache = new Map();
   const bakeQueue = [];
@@ -2301,9 +2323,18 @@
 
   function pumpBakes() {
     while (activeBakes < MAX_CONCURRENT_BAKES && bakeQueue.length) {
-      const job = bakeQueue.pop();
+      const job = bakeQueue.shift();
       activeBakes++;
       job(() => { activeBakes--; pumpBakes(); });
+    }
+  }
+
+  function revokeSpriteEntry(entry) {
+    if (!entry) return;
+    entry.evicted = true;
+    if (typeof entry.url === 'string' && entry.url.startsWith('blob:') && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+      URL.revokeObjectURL(entry.url);
+      entry.url = null;
     }
   }
 
@@ -2311,12 +2342,18 @@
     if (m?.dna instanceof Uint8Array && m.dna.length >= 47) {
       let key = size + ':';
       for (let i = 8; i < 47; i++) key += (m.dna[i] < 16 ? '0' : '') + m.dna[i].toString(16);
+      if (m.attributes) {
+        for (const role of roles) {
+          const a = m.attributes[role];
+          if (a) key += `|${a.hex || ''},${a.angle ?? 0},${a.texture || ''}`;
+        }
+      }
       return key;
     }
     return size + ':' + JSON.stringify([m?.attributes, m?.eyes, m?.mouth]);
   }
 
-  function renderSprite(m, size = 256) {
+  function renderSprite(m, size = 256, maxEntries = MAX_SPRITES) {
     const key = spriteKey(m, size);
     const hit = spriteCache.get(key);
     if (hit) {
@@ -2325,23 +2362,32 @@
       return hit.url ? Promise.resolve(hit.url) : hit.promise;
     }
     if (typeof XMLSerializer === 'undefined' || typeof document === 'undefined') return Promise.resolve(null);
-    if (spriteCache.size >= MAX_SPRITES) {
+    const limit = Math.max(1, maxEntries | 0);
+    while (spriteCache.size >= limit) {
       const oldestKey = spriteCache.keys().next().value;
+      revokeSpriteEntry(spriteCache.get(oldestKey));
       spriteCache.delete(oldestKey);
     }
-    const entry = { url: null, promise: null };
+    const entry = { url: null, promise: null, evicted: false };
     entry.promise = new Promise(resolve => {
       bakeQueue.push(done => {
         const svg = renderSVG(m, 'ubu-sprite');
         svg.setAttribute('width', String(size));
         svg.setAttribute('height', String(size));
         const xml = new XMLSerializer().serializeToString(svg);
-        const finish = url => {
+        const dataUrl = () => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+        const finish = (url, isBlob = false) => {
+          if (entry.evicted) {
+            if (isBlob && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url);
+            resolve(dataUrl());
+            done();
+            return;
+          }
           entry.url = url;
           resolve(url);
           done();
         };
-        const fallback = () => finish('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml));
+        const fallback = () => finish(dataUrl(), false);
         if (typeof Blob === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function' || typeof Image === 'undefined') {
           fallback();
           return;
@@ -2358,7 +2404,7 @@
               if (ctx && typeof off.convertToBlob === 'function') {
                 ctx.drawImage(image, 0, 0, size, size);
                 off.convertToBlob({ type: 'image/webp', quality: 0.96 }).catch(() => off.convertToBlob({ type: 'image/png' })).then(blob => {
-                  finish(URL.createObjectURL(blob));
+                  finish(URL.createObjectURL(blob), true);
                 }, fallback);
                 return;
               }
@@ -2370,7 +2416,7 @@
             ctx.drawImage(image, 0, 0, size, size);
             canvas.toBlob(blob => {
               if (!blob) { fallback(); return; }
-              finish(URL.createObjectURL(blob));
+              finish(URL.createObjectURL(blob), true);
             }, 'image/webp', 0.96);
           } catch {
             fallback();
@@ -2422,4 +2468,5 @@
   renderSVG.sprite = renderSprite;
   renderSVG.spriteImg = renderSpriteImg;
   globalThis.ubuRender = renderSVG;
+  if (typeof module === 'object' && module.exports) module.exports = renderSVG;
 })();

@@ -1,7 +1,9 @@
 'use strict';
 // Run on both revisions with: node scripts/bench-materials.cjs
-// Measures cold/warm JS + SVG serialization latency, DOM node/filter counts, and SVG byte size
-// across all 32 rare finishes, default matte, and a 120-ubu collection batch.
+// Measures cold/warm JS SVG DOM construction latency, serialization latency, DOM node/filter counts,
+// and SVG byte size across all 32 rare finishes, default matte, and a 120-ubu collection batch.
+// Note: runs in a headless Node VM without browser Canvas/Image rasterization, exercising the
+// unbaked vector fallback paths for repeating tiles.
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -23,7 +25,7 @@ class Element {
     const copy = new Element(this.tag);
     copy.attrs = { ...this.attrs };
     copy.textContent = this.textContent;
-    if (deep) copy.children = this.children.map(c => c.cloneNode(true));
+    if (deep) copy.children = this.children.map(c => typeof c === 'string' ? c : c.cloneNode(true));
     return copy;
   }
   serialize() {
@@ -37,7 +39,9 @@ function createRenderContext() {
   const context = vm.createContext({
     document: {
       createElementNS: (_, tag) => new Element(tag),
+      createElement: tag => new Element(tag),
       addEventListener: () => {},
+      removeEventListener: () => {},
       body: new Element('body')
     },
     ubu,
@@ -73,6 +77,7 @@ const MATERIALS = [
   'carbon-fiber', 'denim', 'bubbled', 'lava', 'circuitry', 'liquid'
 ];
 
+console.log('Node VM benchmark (exercises unbaked SVG vector fallback paths without browser Canvas/Image rasterization):');
 const render = createRenderContext();
 const baseDna = new Uint8Array(128);
 for (let i = 0; i < 128; i++) baseDna[i] = (i * 73 + 19) & 0xff;
@@ -90,19 +95,27 @@ for (const tex of MATERIALS) {
   const first = render(m, 'ubu-tile-svg');
   const coldMs = performance.now() - t0;
 
-  const samples = [];
+  const renderSamples = [];
+  const serializeSamples = [];
   let serialized = '';
   for (let r = 0; r < 5; r++) {
-    const start = performance.now();
-    for (let i = 0; i < 20; i++) serialized = render(m, 'ubu-tile-svg').serialize();
-    samples.push((performance.now() - start) / 20);
+    let lastTree = first;
+    const startRender = performance.now();
+    for (let i = 0; i < 20; i++) lastTree = render(m, 'ubu-tile-svg');
+    renderSamples.push((performance.now() - startRender) / 20);
+
+    const startSerialize = performance.now();
+    for (let i = 0; i < 20; i++) serialized = lastTree.serialize();
+    serializeSamples.push((performance.now() - startSerialize) / 20);
   }
-  samples.sort((a, b) => a - b);
+  renderSamples.sort((a, b) => a - b);
+  serializeSamples.sort((a, b) => a - b);
   const st = countStats(first);
   rows.push({
     material: tex,
     coldMs: +coldMs.toFixed(2),
-    warmMedianMs: +samples[2].toFixed(3),
+    warmMedianMs: +renderSamples[2].toFixed(3),
+    serializeMs: +serializeSamples[2].toFixed(3),
     nodes: st.nodes,
     filters: st.filters,
     masks: st.masks,

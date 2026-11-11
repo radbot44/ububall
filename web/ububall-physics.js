@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 23;
+  const VERSION = 24;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, MAX_SPEED = 720;
   const IRON_COOLDOWN_TICKS = 48; // ~200 ms at 240 Hz DT: cooldown after an Iron Save
@@ -198,14 +198,14 @@
     return bodies;
   }
   // Counts boards and contacts resolved, so a collision pass that resolved nothing ends the passes.
-  let resolved = 0, stickyWallHost = null;
-  function reflect(b, nx, ny, penetration, wallType = 'wall', onWall = null, isCorner = false) {
+  let resolved = 0;
+  function reflect(b, nx, ny, penetration, wallType = 'wall', onWall = null, isCorner = false, hostCarrier = null) {
     resolved++;
     b.x -= nx * penetration; b.y -= ny * penetration;
     const velocity = b.vx * nx + b.vy * ny;
     if (velocity > 0) {
       const surface = SURFACES[wallType];
-      const carrier = b.team === -1 ? stickyWallHost : null;
+      const carrier = b.team === -1 ? hostCarrier : null;
       const isMeteor = b.team === -1 && !carrier && ballOnFire(b) && surface.meteorBank;
       const preSpeed = isMeteor ? Math.hypot(b.vx, b.vy) : 0;
       const tx = -ny, ty = nx;
@@ -238,60 +238,67 @@
       if (typeof onWall === 'function') onWall(b, velocity, wallType, nx, ny, rimmed);
     }
   }
-  function walls(b, onWall = null) {
+  function walls(b, onWall = null, carrier = null) {
     const r = b.radius, k = rink;
     // Clear of every board, post and corner arc: nothing below can apply.
     if (b.x >= k.left + r && b.x <= k.right - r && b.y >= k.top + r && b.y <= k.bottom - r &&
         ((b.x >= k.left + k.corner && b.x <= k.right - k.corner) || (b.y >= k.top + k.corner && b.y <= k.bottom - k.corner))) return;
     const inGoalY = b.y > k.goalTop && b.y < k.goalBottom, before = b.team === -1 ? Math.hypot(b.vx, b.vy) : 0;
+    const inLeftPocket = inGoalY || (b.x < k.left && b.y > k.goalTop - r && b.y < k.goalBottom + r);
+    const inRightPocket = inGoalY || (b.x > k.right && b.y > k.goalTop - r && b.y < k.goalBottom + r);
 
-    if (inGoalY) {
+    if (inLeftPocket) {
       const backX = k.left - k.goalDepth + r;
       if (b.x < backX) {
-        reflect(b, -1, 0, backX - b.x, 'net', onWall);
+        reflect(b, -1, 0, backX - b.x, 'net', onWall, false, carrier);
         if (b.team === -1) { b.vx *= 0.1; b.vy *= 0.1; }
       }
       if (b.x < k.left) {
-        if (b.y < k.goalTop + r) reflect(b, 0, -1, k.goalTop + r - b.y, 'net', onWall);
-        if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall);
+        if (b.y < k.goalTop + r) reflect(b, 0, -1, k.goalTop + r - b.y, 'net', onWall, false, carrier);
+        if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall, false, carrier);
       } else if (b.x < k.left + r) {
         for (const y of [k.goalTop, k.goalBottom]) {
           const dx = k.left - b.x, dy = y - b.y, d2 = dx * dx + dy * dy;
-          if (d2 < r * r && d2 > 0) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, r - d, 'post', onWall); }
+          if (d2 < r * r && d2 > 0) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, r - d, 'post', onWall, false, carrier); }
         }
       }
     } else {
-      if (b.x < k.left + r) reflect(b, -1, 0, k.left + r - b.x, 'wall', onWall);
+      if (b.x < k.left + r) reflect(b, -1, 0, k.left + r - b.x, 'wall', onWall, false, carrier);
     }
 
-    if (inGoalY) {
+    if (inRightPocket) {
       const backX = k.right + k.goalDepth - r;
       if (b.x > backX) {
-        reflect(b, 1, 0, b.x - backX, 'net', onWall);
+        reflect(b, 1, 0, b.x - backX, 'net', onWall, false, carrier);
         if (b.team === -1) { b.vx *= 0.1; b.vy *= 0.1; }
       }
       if (b.x > k.right) {
-        if (b.y < k.goalTop + r) reflect(b, 0, -1, k.goalTop + r - b.y, 'net', onWall);
-        if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall);
+        if (b.y < k.goalTop + r) reflect(b, 0, -1, k.goalTop + r - b.y, 'net', onWall, false, carrier);
+        if (b.y > k.goalBottom - r) reflect(b, 0, 1, b.y - (k.goalBottom - r), 'net', onWall, false, carrier);
       } else if (b.x > k.right - r) {
         for (const y of [k.goalTop, k.goalBottom]) {
           const dx = k.right - b.x, dy = y - b.y, d2 = dx * dx + dy * dy;
-          if (d2 < r * r && d2 > 0) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, r - d, 'post', onWall); }
+          if (d2 < r * r && d2 > 0) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, r - d, 'post', onWall, false, carrier); }
         }
       }
     } else {
-      if (b.x > k.right - r) reflect(b, 1, 0, b.x - k.right + r, 'wall', onWall);
+      if (b.x > k.right - r) reflect(b, 1, 0, b.x - k.right + r, 'wall', onWall, false, carrier);
     }
 
-    const insidePocket = (b.x < k.left) || (b.x > k.right);
+    const insidePocket = (b.x < k.left && inLeftPocket) || (b.x > k.right && inRightPocket);
     if (!insidePocket) {
-      if (b.y < k.top + r) reflect(b, 0, -1, k.top + r - b.y, 'wall', onWall);
-      if (b.y > k.bottom - r) reflect(b, 0, 1, b.y - k.bottom + r, 'wall', onWall);
+      if (b.y < k.top + r) reflect(b, 0, -1, k.top + r - b.y, 'wall', onWall, false, carrier);
+      if (b.y > k.bottom - r) reflect(b, 0, 1, b.y - k.bottom + r, 'wall', onWall, false, carrier);
       const cx = b.x < k.left + k.corner ? k.left + k.corner : b.x > k.right - k.corner ? k.right - k.corner : null;
       const cy = b.y < k.top + k.corner ? k.top + k.corner : b.y > k.bottom - k.corner ? k.bottom - k.corner : null;
       if (cx !== null && cy !== null) {
         const dx = b.x - cx, dy = b.y - cy, d2 = dx * dx + dy * dy, limit = k.corner - r;
-        if (limit < 0 || d2 > limit * limit) { const d = Math.sqrt(d2); reflect(b, dx / d, dy / d, d - limit, 'wall', onWall, true); }
+        if (limit < 0 || d2 > limit * limit) {
+          const d = Math.sqrt(d2);
+          const nx = d > 0 ? dx / d : (cx < 500 ? -Math.SQRT1_2 : Math.SQRT1_2);
+          const ny = d > 0 ? dy / d : (cy < 300 ? -Math.SQRT1_2 : Math.SQRT1_2);
+          reflect(b, nx, ny, d - limit, 'wall', onWall, true, carrier);
+        }
       }
     }
     if (before) countSlowing(b, before);
@@ -361,7 +368,7 @@
     b.superActive = null; b.superTicks = 0; b.superHoldTicks = 0; b.shockwaveFired = false; b.superHit = false;
     syncEffectiveStats(b);
   }
-  function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, onSuper = null) {
+  function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, onSuper = null, deferIronBlast = false) {
     const isBall = a.team === -1 || b.team === -1;
     // A carded ubu sits out its turn at its spawn, touching nothing.
     if (a.carded || b.carded) return;
@@ -386,7 +393,7 @@
         // An opponent checking the held ball (or another Sticky grab) knocks the carrier's hold loose first.
         endSuper(carrier, allBodies);
       } else {
-        // Teammate or separating contact against a held ball transfers cleanly to the carrier+ball assembly.
+        // Teammate or separating/grab-tick contact against a held ball transfers cleanly to the carrier+ball assembly.
         const overlap = radius - d;
         const pIsA = player === a, sign = pIsA ? 1 : -1;
         const cMass = carrier.mass + ball.mass;
@@ -401,7 +408,7 @@
             const j = -(1 + .88) * preClosing / invSum;
             if (invP > 0) { player.vx -= sign * j * preNx * invP; player.vy -= sign * j * preNy * invP; }
             if (invC > 0) { carrier.vx += sign * j * preNx * invC; carrier.vy += sign * j * preNy * invC; }
-            if (typeof onCollide === 'function') onCollide(a, b, -preClosing, j, false, false, null);
+            if (typeof onCollide === 'function') onCollide(pIsA ? player : carrier, pIsA ? carrier : player, -preClosing, j, false, false, null);
           }
         }
         const off = ball.stickOffset || { x: carrier.radius + ball.radius, y: 0 };
@@ -519,29 +526,42 @@
             player.ironGuard = true;
             player.ironCooldownTicks = IRON_COOLDOWN_TICKS;
             applyDoubledGuard(player);
-            if (allBodies) triggerIronShockwave(player, allBodies, onShockwave);
+            if (allBodies && !deferIronBlast) triggerIronShockwave(player, allBodies, onShockwave);
           }
         }
       }
     }
 
-    const invA = fireWin !== null && a.team === -1 ? fireWin / b.mass : 1 / a.mass;
-    const invB = fireWin !== null && b.team === -1 ? fireWin / a.mass : 1 / b.mass;
+    // Stationary Stalwarts act as anchored immovable walls (0 impulse/spin); sliding Stalwarts exchange
+    // translational recoil within the pair kinetic-energy budget while remaining spin- and daze-immune.
+    const anchorA = a.superActive === 'stalwart' && a.vx === 0 && a.vy === 0;
+    const anchorB = b.superActive === 'stalwart' && b.vx === 0 && b.vy === 0;
+    const rawInvA = fireWin !== null && a.team === -1 ? fireWin / b.mass : 1 / a.mass;
+    const rawInvB = fireWin !== null && b.team === -1 ? fireWin / a.mass : 1 / b.mass;
+    const invA = anchorA ? 0 : rawInvA;
+    const invB = anchorB ? 0 : rawInvB;
     const inverse = invA + invB;
-    if (inverse === 0) return;
 
     const overlap = radius - d;
     if (a.superActive === 'stalwart' && b.superActive !== 'stalwart') {
       b.x += nx * overlap; b.y += ny * overlap;
     } else if (b.superActive === 'stalwart' && a.superActive !== 'stalwart') {
       a.x -= nx * overlap; a.y -= ny * overlap;
-    } else {
-      const correction = overlap / inverse;
-      if (invA > 0) { a.x -= nx * correction * invA; a.y -= ny * correction * invA; }
-      if (invB > 0) { b.x += nx * correction * invB; b.y += ny * correction * invB; }
+    } else if (rawInvA + rawInvB > 0) {
+      const correction = overlap / (rawInvA + rawInvB);
+      a.x -= nx * correction * rawInvA; a.y -= ny * correction * rawInvA;
+      b.x += nx * correction * rawInvB; b.y += ny * correction * rawInvB;
     }
 
     if (closing >= 0) return;
+    if (inverse === 0) {
+      if (!isBall) {
+        if (a.superActive === 'stalwart') onSuper?.('stalwart', 'impact', a, b);
+        if (b.superActive === 'stalwart') onSuper?.('stalwart', 'impact', b, a);
+      }
+      if (typeof onCollide === 'function') onCollide(a, b, -closing, 0, false, false, knockoutChecker, false, 0);
+      return;
+    }
     const preRvx = b.vx - a.vx, preRvy = b.vy - a.vy;
     const preBallSpeed = isBall ? Math.hypot(ball.vx, ball.vy) : 0;
     const pairKEBefore = isBall ? bodyKE(player) + bodyKE(ball) : 0;
@@ -584,10 +604,10 @@
       else if (b.team !== -1 && b.superActive === 'cannonball') { cannon = b; cannonImpulse = -SUPER.cannonball * impulseA; }
     }
 
-    if (invA > 0 && a.superActive !== 'stalwart') {
+    if (invA > 0) {
       a.vx -= impulseA * nx * invA; a.vy -= impulseA * ny * invA;
     }
-    if (invB > 0 && b.superActive !== 'stalwart') {
+    if (invB > 0) {
       b.vx += impulseB * nx * invB; b.vy += impulseB * ny * invB;
     }
     // A hard check between opponents dazes the ubu that was hit, if knocked hard enough (see DAZE).
@@ -610,30 +630,38 @@
     }
 
     // Friction works at the bodies' real masses (a fireball's extra weight is for the hit only), so
-    // it can only take energy away.
-    const tx = -ny, ty = nx, frictionA = 1 / a.mass, frictionB = 1 / b.mass;
+    // it can only take energy away. Stalwart never receives spin.
+    const tx = -ny, ty = nx;
+    const frictionA = anchorA ? 0 : 1 / a.mass, frictionB = anchorB ? 0 : 1 / b.mass;
+    const spinA = a.superActive !== 'stalwart', spinB = b.superActive !== 'stalwart';
     const rvt = (b.vx - a.vx) * tx + (b.vy - a.vy) * ty;
     const relSpeed = Math.hypot(preRvx, preRvy);
     const hipClip = !isBall && a.team !== b.team && closing < 0 &&
       relSpeed >= HIP_CLIP.minRelSpeed && Math.abs(rvt) >= Math.abs(closing) * HIP_CLIP.glanceRatio;
     const slip = rvt - a.omega * a.radius - b.omega * b.radius;
     const limit = Math.sqrt(a.grip * b.grip) * baseImpulse;
-    const effectiveLimit = hipClip
-      ? limit + Math.sqrt(a.grip * b.grip) * HIP_CLIP.gripBoost * Math.abs(rvt) / (frictionA + frictionB)
+    const massDenom = frictionA + frictionB;
+    const slipDenom = massDenom + (spinA ? 2 * frictionA : 0) + (spinB ? 2 * frictionB : 0);
+    const effectiveLimit = hipClip && massDenom > 0
+      ? limit + Math.sqrt(a.grip * b.grip) * HIP_CLIP.gripBoost * Math.abs(rvt) / massDenom
       : limit;
-    const tangent = Math.max(-effectiveLimit, Math.min(effectiveLimit, -slip / (3 * (frictionA + frictionB))));
+    const tangent = slipDenom > 0 ? Math.max(-effectiveLimit, Math.min(effectiveLimit, -slip / slipDenom)) : 0;
 
-    if (frictionA > 0 && a.superActive !== 'stalwart') {
+    if (frictionA > 0) {
       a.vx -= tangent * tx * frictionA; a.vy -= tangent * ty * frictionA;
-      let dOmegaA = -2 * tangent * frictionA / a.radius;
-      if (hipClip && Math.abs(a.omega + dOmegaA) > Math.abs(a.omega)) dOmegaA /= Math.max(1, a.stability || 1);
-      a.omega += dOmegaA;
+      if (spinA) {
+        let dOmegaA = -2 * tangent * frictionA / a.radius;
+        if (hipClip && Math.abs(a.omega + dOmegaA) > Math.abs(a.omega)) dOmegaA /= Math.max(1, a.stability || 1);
+        a.omega += dOmegaA;
+      }
     }
-    if (frictionB > 0 && b.superActive !== 'stalwart') {
+    if (frictionB > 0) {
       b.vx += tangent * tx * frictionB; b.vy += tangent * ty * frictionB;
-      let dOmegaB = -2 * tangent * frictionB / b.radius;
-      if (hipClip && Math.abs(b.omega + dOmegaB) > Math.abs(b.omega)) dOmegaB /= Math.max(1, b.stability || 1);
-      b.omega += dOmegaB;
+      if (spinB) {
+        let dOmegaB = -2 * tangent * frictionB / b.radius;
+        if (hipClip && Math.abs(b.omega + dOmegaB) > Math.abs(b.omega)) dOmegaB /= Math.max(1, b.stability || 1);
+        b.omega += dOmegaB;
+      }
     }
 
     let snapped = false;
@@ -694,7 +722,8 @@
     }
     if (ironSave) {
       for (const body of [a, b]) {
-        if (body.superActive === 'stalwart') continue;
+        if (anchorA && body === a) continue;
+        if (anchorB && body === b) continue;
         body.vx *= IRON_KEEP; body.vy *= IRON_KEEP; body.omega *= IRON_KEEP;
       }
     }
@@ -760,17 +789,17 @@
     if (ball && !host && hasMagnet) {
       for (let i = 0; i < count; i++) {
         const b = bodies[i];
-        if (b.team !== -1 && b.superActive === 'magnet') {
+        if (b.team !== -1 && !b.carded && b.superActive === 'magnet') {
           const dx = b.x - ball.x, dy = b.y - ball.y, d2 = dx * dx + dy * dy;
           const minDist = b.radius + ball.radius;
           if (d2 > minDist * minDist && d2 < SUPER.magnetRadius ** 2) {
             const d = Math.sqrt(d2);
-            onSuper?.('magnet', 'pull', b);
             b.superHit = true;
             const pull = SUPER.magnetPull * (1 - d / SUPER.magnetRadius), before = Math.hypot(ball.vx, ball.vy);
             ball.vx += (dx / d) * pull * dt;
             ball.vy += (dy / d) * pull * dt;
             if (b.team !== ball.strikerTeam) countSlowing(ball, before);
+            onSuper?.('magnet', 'pull', b);
           }
         }
       }
@@ -891,8 +920,6 @@
         if (ball.fireTicks >= FIRE_TICKS && speed > HEAT.fire * MAX_SPEED) ball.onFire = true;
       }
     }
-    // Contact radii never grow during a step (Colossus only shrinks back), so radii taken once
-    // stay a safe bound for the broad phase.
     const hit = spareRadii?.length >= count ? spareRadii : new Float64Array(count);
     spareRadii = null;
     for (let i = 0; i < count; i++) hit[i] = ballHitRadius(bodies[i]);
@@ -913,7 +940,10 @@
       }
       // 2. Skater-vs-ball contacts: symmetric pinch resolution when 2+ skaters meet a free ball at once.
       if (ball) {
-        if (resolved !== resolvedBefore) host = holder(bodies);
+        if (resolved !== resolvedBefore) {
+          host = holder(bodies);
+          for (let i = 0; i < count; i++) hit[i] = ballHitRadius(bodies[i]);
+        }
         const bh = hit[ballIdx];
         let firstIdx = -1, multi = null;
         for (let i = 0; i < count; i++) {
@@ -940,15 +970,14 @@
             }
           } else {
             // Evaluate each touching skater against the same pre-pinch ball snapshot so team index order cannot bias 50/50 contests.
-            const bodyKE = b => 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy) + 0.25 * b.mass * b.radius * b.radius * b.omega * b.omega;
             let keBudget = bodyKE(ball);
-            for (const idx of multi) if (bodies[idx].superActive !== 'stalwart') keBudget += bodyKE(bodies[idx]);
+            for (const idx of multi) keBudget += bodyKE(bodies[idx]);
             const ball0 = { ...ball };
             let sumDx = 0, sumDy = 0, sumDvx = 0, sumDvy = 0, sumDomega = 0;
             let energySource = false, anyFireOff = false, anyFireOn = false, maxPace = 0;
             const strikerTeams = new Set(), strikerSlots = new Set();
             let lastStrikerPower = ball0.strikerPower, lastCurveMult = ball0.curveMult;
-            const collideEvents = [], shockEvents = [], superEvents = [];
+            const collideEvents = [], ironSavers = [], superEvents = [];
             for (const idx of multi) {
               const s = bodies[idx], bClone = { ...ball0 };
               const a = idx < ballIdx ? s : bClone, c = idx < ballIdx ? bClone : s;
@@ -957,10 +986,14 @@
               if (hadCannon || (ballOnFire(ball0) && s.team === ball0.strikerTeam && sDrive >= HOT_DRIVE)) energySource = true;
               collide(
                 a, c,
-                onCollide ? (ca, cb, ...rest) => collideEvents.push([ca === bClone ? ball : ca, cb === bClone ? ball : cb, ...rest]) : null,
+                (ca, cb, spd, imp, plow, isIron, ...rest) => {
+                  if (isIron) ironSavers.push(s);
+                  if (onCollide) collideEvents.push([ca === bClone ? ball : ca, cb === bClone ? ball : cb, spd, imp, plow, isIron, ...rest]);
+                },
                 bodies,
-                onShockwave ? (...args) => shockEvents.push(args) : null,
-                guardedOnSuper ? (k, act, sa, sb) => superEvents.push([k, act, sa === bClone ? ball : sa, sb === bClone ? ball : sb]) : null
+                null,
+                guardedOnSuper ? (k, act, sa, sb) => superEvents.push([k, act, sa === bClone ? ball : sa, sb === bClone ? ball : sb]) : null,
+                true
               );
               sumDx += bClone.x - ball0.x; sumDy += bClone.y - ball0.y;
               sumDvx += bClone.vx - ball0.vx; sumDvy += bClone.vy - ball0.vy;
@@ -981,7 +1014,7 @@
             ball.omega = Math.max(-24, Math.min(24, ball0.omega + sumDomega));
             if (!energySource) {
               let skaterKEAfter = 0;
-              for (const idx of multi) if (bodies[idx].superActive !== 'stalwart') skaterKEAfter += bodyKE(bodies[idx]);
+              for (const idx of multi) skaterKEAfter += bodyKE(bodies[idx]);
               const maxBallKE = Math.max(0, keBudget - skaterKEAfter);
               const curBallKE = bodyKE(ball);
               if (curBallKE > maxBallKE && curBallKE > 0) {
@@ -1004,14 +1037,25 @@
             }
             const postSpeed = Math.hypot(ball.vx, ball.vy);
             ball.pace = strikerTeams.size === 1 && ball.strikerTeam === ball0.strikerTeam ? Math.max(postSpeed, maxPace) : postSpeed;
-            for (const args of shockEvents) onShockwave(...args);
+            for (const saver of ironSavers) {
+              hit[bodies.indexOf(saver)] = ballHitRadius(saver);
+              triggerIronShockwave(saver, bodies, onShockwave);
+            }
             for (const args of superEvents) guardedOnSuper(...args);
             for (const args of collideEvents) onCollide(...args);
+          }
+        } else if (multi && host) {
+          for (const idx of multi) {
+            const a = idx < ballIdx ? bodies[idx] : ball, c = idx < ballIdx ? ball : bodies[idx];
+            collide(a, c, onCollide, bodies, onShockwave, guardedOnSuper);
           }
         } else if (firstIdx >= 0) {
           const a = firstIdx < ballIdx ? bodies[firstIdx] : ball, c = firstIdx < ballIdx ? ball : bodies[firstIdx];
           collide(a, c, onCollide, bodies, onShockwave, guardedOnSuper);
         }
+      }
+      if (resolved !== resolvedBefore) {
+        for (let i = 0; i < count; i++) hit[i] = ballHitRadius(bodies[i]);
       }
       for (let i = 0; i < count; i++) {
         const b = bodies[i];
@@ -1024,9 +1068,7 @@
           const ex = host.x + off.x, ey = host.y + off.y;
           ball.x = ex; ball.y = ey;
           ball.vx = host.vx; ball.vy = host.vy; ball.omega = host.omega;
-          stickyWallHost = host;
-          walls(ball, onWall);
-          stickyWallHost = null;
+          walls(ball, onWall, host);
           const dx = ball.x - ex, dy = ball.y - ey;
           if (dx !== 0 || dy !== 0) {
             if (host.superActive !== 'stalwart') {
@@ -1039,9 +1081,7 @@
             ball.stickOffset = { x: (ox / od) * td, y: (oy / od) * td };
             ball.x = host.x + ball.stickOffset.x;
             ball.y = host.y + ball.stickOffset.y;
-            stickyWallHost = host;
-            walls(ball, onWall);
-            stickyWallHost = null;
+            walls(ball, onWall, host);
           }
         } else {
           walls(ball, onWall);
@@ -1078,7 +1118,7 @@
       // A launch steers toward the arrow's velocity using at most one full launch of change (more
       // for small ubus, which re-steer more easily), so a moving ubu can turn or brake but its own
       // launches never exceed full-launch speed. From rest this is the plain launch. No power leaves
-      // the ubu coasting.
+      // the ubu coasting without adding spin.
       const plan = plans[i] || { angle: 0, power: 0 };
       const full = launchSpeed(b), power = Math.max(0, Math.min(1, plan.power));
       b.daze = 0;
@@ -1086,9 +1126,9 @@
         const dx = Math.cos(plan.angle) * full * power - b.vx, dy = Math.sin(plan.angle) * full * power - b.vy;
         const scale = Math.min(1, full * (b.sizeMult || 1) ** SIZE.agility / (Math.hypot(dx, dy) || 1));
         b.vx += dx * scale; b.vy += dy * scale;
+        b.omega = Math.max(-b.maxSpin, Math.min(b.maxSpin, b.omega + Math.max(-1, Math.min(1, plan.spin || 0)) * b.maxSpin));
+        if (b.omega) b.spinStrike = STRIKE_GAIN;
       }
-      b.omega = Math.max(-b.maxSpin, Math.min(b.maxSpin, b.omega + Math.max(-1, Math.min(1, plan.spin || 0)) * b.maxSpin));
-      if (plan.power > 0 && b.omega) b.spinStrike = STRIKE_GAIN;
     });
     // A spinning launch arms a spin strike: if the ball is the first thing the ubu touches, the
     // ball gains the ubu's remaining spin times its gain, counter-rotating, rising to point-blank within 2 ball diameters.
@@ -1262,6 +1302,6 @@
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS,
       guards: [...guards].map(([index, held]) => ({ index, held })), ignition, goalTargets, goalTick };
   }
-  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, AIR_DRAG, SURFACES, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, IRON_COOLDOWN_TICKS, SNAP, RIM, TAILGATE, HIP_CLIP, tailgateFactor, ballOnFire, ballCurveFactor, holder, dazeSlow, multiplier, launchSpeed, syncEffectiveStats, applyStats, applyDoubledGuard, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SKATER_CURVE, SPIN_DECAY, AIR_DRAG, SURFACES, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, IRON_COOLDOWN_TICKS, SNAP, RIM, TAILGATE, HIP_CLIP, tailgateFactor, ballOnFire, ballCurveFactor, holder, dazeSlow, multiplier, launchSpeed, syncEffectiveStats, applyStats, applyDoubledGuard, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);
