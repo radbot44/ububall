@@ -2,6 +2,19 @@
 // The signed-in player's ubus, shared by Collection and the team picker: fetched and verified
 // once, then searched, filtered and sorted in memory, so stat orders cover the whole collection.
 (function(root) {
+  const archetypeApi = typeof module === 'object' && module.exports ? require('../shared/ubu-archetype.js') : root.ubuArchetype;
+  function itemArchetype(item) {
+    if (!item?.model || !archetypeApi) return null;
+    if (item.archetype !== undefined) return item.archetype;
+    if (!item.model.stats || !item.model.personality) return null;
+    try { return (item.archetype = archetypeApi.describe(item.model)); } catch { return null; }
+  }
+  function itemNoun(item) {
+    const full = itemArchetype(item);
+    if (full) return full.noun;
+    if (!item?.model?.stats || !archetypeApi) return '';
+    try { return archetypeApi.chooseNoun(item.model.stats).noun; } catch { return ''; }
+  }
   const STAT_GROUPS = [
     ['Movement', '#76b9ef', ['impulse', 'traction', 'spin', 'curve']],
     ['Physical', '#42c66b', ['size', 'mass', 'bounciness', 'grip']],
@@ -24,6 +37,7 @@
     ubuquity: { label: 'Ubuquity', color: '#ff7197', value: item => item.model.rating },
     serial: { label: 'Serial number', words: ['Lowest', 'Highest'], ascending: true, value: item => Number(item.serial) },
     name: { label: 'Name', words: ['A–Z', 'Z–A'], ascending: true, compare: (a, b) => a.model.parts.fullName.localeCompare(b.model.parts.fullName) },
+    archetype: { label: 'Archetype', words: ['A–Z', 'Z–A'], ascending: true, compare: (a, b) => (itemArchetype(a)?.fullName || '').localeCompare(itemArchetype(b)?.fullName || '') },
     random: { label: 'Random', words: ['Shuffle', 'Shuffle'] },
     all: { label: 'All stats (average)', value: item => average(item, STATS), show: item => average(item, STATS).toFixed(1) },
     grade: { label: 'Grade', value: item => GRADES.indexOf(item.model.grade), show: item => item.model.grade },
@@ -93,7 +107,7 @@
         const token = body.replace(/^"|"$/g, '');
         if (!token) continue;
         const digits = /^#?[0-9]+$/.test(token) ? token.replace('#', '').replace(/^0+(?=[0-9])/, '') : null;
-        add(digits === null ? item => item.model.parts.fullName.toLowerCase().includes(token)
+        add(digits === null ? item => item.model.parts.fullName.toLowerCase().includes(token) || (itemArchetype(item)?.fullName.toLowerCase().includes(token) ?? false)
           : item => item.serial.replace(/^0+(?=[0-9])/, '').includes(digits));
         continue;
       }
@@ -112,6 +126,18 @@
       } else if (field === 'name' && op === ':') {
         if (!value) fail();
         else add(item => item.model.parts.fullName.toLowerCase().includes(value));
+      } else if (field === 'archetype' && (op === ':' || op === '=')) {
+        const parts = value.split(',').map(s => s.trim()).filter(Boolean);
+        if (!value || !parts.length) fail();
+        else add(item => { const full = itemArchetype(item)?.fullName.toLowerCase() || ''; return parts.some(p => full.includes(p)); });
+      } else if ((field === 'adj' || field === 'adjective') && (op === ':' || op === '=')) {
+        const parts = value.split(',').map(s => s.trim()).filter(Boolean);
+        if (!value || !parts.length) fail();
+        else add(item => { const adj = itemArchetype(item)?.adjective.toLowerCase() || ''; return parts.some(p => adj.includes(p)); });
+      } else if (field === 'noun' && (op === ':' || op === '=')) {
+        const parts = value.split(',').map(s => s.trim()).filter(Boolean);
+        if (!value || !parts.length) fail();
+        else add(item => { const noun = itemNoun(item).toLowerCase(); return Boolean(noun) && parts.some(p => noun.includes(p)); });
       } else if (field === 'super' && op === ':' && value && !/^[0-9.]+$/.test(value)) {
         const ids = value.split(',').map(name => name ? SUPER_NAMES.findIndex(s => s.startsWith(name)) : -1);
         if (ids.includes(-1)) fail(); else add(item => item.model.supers.some(id => ids.includes(id % 8)));
@@ -142,7 +168,8 @@
     ['sort:power  sort:-size', 'sort, highest first; - reverses; several apply in order'],
     ['sort:random', 'shuffle'],
     ['-super:ghost', 'a leading - excludes'],
-    ['ruba  1084', 'words search names, numbers search serials']
+    ['archetype:piston  adj:peppy', 'filter by archetype, adj: or noun:'],
+    ['ruba  pinball  1084', 'words search names and archetypes, numbers search serials']
   ];
 
   // Pending ubus (no certificate yet) follow the rest and drop out once anything filters.
@@ -229,7 +256,7 @@
     const result = await ubuFile.read(row.certificate, { allowUnsigned: false, resolveKey: trustedKey });
     const model = ubu.decode(ubu.fromCode(result.dna));
     return { serial: row.serial, certificate: row.certificate, result, model, rarity: root.rarity.scoreRarity(model),
-      issuedAt: result.certificate.issuedAt, favorite };
+      archetype: archetypeApi ? archetypeApi.describe(model) : null, issuedAt: result.certificate.issuedAt, favorite };
   }
   // Reads every page; `refresh` refetches a loaded collection, keeping verified entries.
   function load({ refresh = false } = {}) {
@@ -436,8 +463,10 @@
     const grade = el('span', { className: 'ubu-tile-grade', textContent: model.grade, title: 'Ubuquity ' + model.grade });
     grade.dataset.grade = model.grade;
     const value = el('span', { className: 'ubu-tile-value', hidden: true });
+    const archLabel = archetypeApi?.format(model) || '';
     const main = el('button', { type: 'button', className: 'ubu-tile-main' }, artBox,
       el('span', { className: 'ubu-tile-name', textContent: model.parts.fullName }),
+      archLabel ? el('span', { className: 'ubu-tile-archetype', textContent: archLabel }) : '',
       el('span', { className: 'ubu-tile-meta' }, grade, el('span', { textContent: caption })), supers, value);
     main.dataset.tileGrade = model.grade;
     return { main, artBox, value };

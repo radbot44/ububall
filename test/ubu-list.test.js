@@ -7,6 +7,7 @@ const list = require('../web/ubu-list.js');
 const ubuCore = require('../shared/ubu.js');
 const ubuFile = require('../shared/ubu-file.js');
 const rarity = require('../shared/rarity.js');
+const ubuArchetype = require('../shared/ubu-archetype.js');
 
 const stats = (impulse, size) => ({ impulse, traction: 127, spin: 127, curve: 127, size, mass: 127, bounciness: 127, grip: 127,
   power: 127, reach: 127, strength: 127, stability: 127, efficiency: 127, synergy: 127, chemistry: 127 });
@@ -178,6 +179,7 @@ test('browser ubuList coalesces concurrent refresh loads, protects in-flight set
     ubu: ubuCore,
     ubuFile,
     rarity,
+    ubuArchetype,
     CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
     Event: class Event { constructor(type) { this.type = type; } },
     localStorage: { getItem: () => null, setItem() {} },
@@ -251,4 +253,44 @@ test('browser ubuList coalesces concurrent refresh loads, protects in-flight set
   releaseRefresh();
   await refreshPromise;
   assert.equal(sandbox.ubuList.get('000000000001').favorite, true, 'stale page must not overwrite newer favorite toggle');
+});
+
+test('archetype search matches plain words, archetype:/adj:/noun: filters, negation, and sort:archetype', () => {
+  const fullUbu = (serial, name, personality, overrides = {}) => ({
+    serial,
+    issuedAt: 100,
+    favorite: false,
+    rarity: { bits: 10, percentile: 10 },
+    model: {
+      rating: 500,
+      grade: 'B',
+      supers: [0, 0, 0, 0],
+      parts: { fullName: name },
+      personality,
+      stats: {
+        impulse: 127, traction: 127, spin: 127, curve: 127,
+        size: 127, mass: 127, bounciness: 127, grip: 127,
+        power: 127, reach: 127, strength: 127, stability: 127,
+        efficiency: 127, synergy: 127, chemistry: 127,
+        ...overrides
+      }
+    }
+  });
+  const roster = [
+    fullUbu('000000000101', 'Alpha One', { aggression: 60, creativity: 60, teamwork: 60, clutch: 30 }, { impulse: 145, traction: 230, spin: 45, curve: 40, efficiency: 230, synergy: 65, chemistry: 65 }), // Peppy Piston
+    fullUbu('000000000102', 'Beta Two', { aggression: 30, creativity: 10, teamwork: 60, clutch: 30 }, { power: 90, reach: 230, strength: 85, stability: 125, efficiency: 135, synergy: 45, chemistry: 235 }), // Solid Trapper
+    fullUbu('000000000103', 'Gamma Three', { aggression: 60, creativity: 10, teamwork: 60, clutch: 30 }, { impulse: 45, traction: 210, spin: 35, curve: 40 }) // Fierce Curler
+  ];
+  const pick = q => list.view(roster, { query: q, sort: 'serial' }).map(x => x.serial.slice(-3));
+  assert.deepEqual(pick('piston'), ['101']);
+  assert.deepEqual(pick('"solid trapper"'), ['102']);
+  assert.deepEqual(pick('adj:peppy,fierce'), ['101', '103']);
+  assert.deepEqual(pick('adjective:solid'), ['102']);
+  assert.deepEqual(pick('noun:trapper,curler'), ['102', '103']);
+  assert.deepEqual(pick('archetype:"fierce curler"'), ['103']);
+  assert.deepEqual(pick('-noun:piston'), ['102', '103']);
+  assert.deepEqual(list.view(roster, { sort: 'archetype' }).map(x => x.serial.slice(-3)), ['103', '101', '102']);
+
+  const bad = list.parseQuery('archetype: adj: noun:');
+  assert.deepEqual(bad.errors, ['archetype:', 'adj:', 'noun:']);
 });

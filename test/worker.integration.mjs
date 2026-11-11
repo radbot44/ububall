@@ -85,7 +85,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(legacy.status, 200);
     const legacyText = await legacy.text();
     assert.match(legacyText, /location\.replace\('\/' \+ location\.search/);
-    for (const path of ['/ubu-render.js', '/demo.html', '/site.js', '/rarity.js', '/app.js', '/ububall.html', '/ububall.js', '/ububall.css',
+    for (const path of ['/ubu-render.js', '/demo.html', '/site.js', '/rarity.js', '/ubu-archetype.js', '/app.js', '/ububall.html', '/ububall.js', '/ububall.css',
       '/ububall-activity.js', '/discord-sdk.js']) assert.equal((await fetch(path)).status, 200);
     for (const path of ['/worker.mjs', '/mint.js', '/auth.mjs', '/AGENTS.md', '/.dev.vars', '/state/mint.sqlite']) assert.equal((await fetch(path)).status, 404);
     const response = await fetch('/api/config'), config = await response.json();

@@ -360,7 +360,16 @@
       dancing = ubuArt.animate(frames, { duration, easing: 'ease-in-out', composite: 'add' });
       dancing.onfinish = dancing.oncancel = () => { dancing = null; };
     };
+    const nameStack = document.createElement('div'); nameStack.className = 'card-title-stack';
     const name = document.createElement('h3'); name.textContent = item.model.parts.fullName;
+    nameStack.append(name);
+    const cardArchText = window.ubuArchetype ? ubuArchetype.format(item.model) : '';
+    if (cardArchText) {
+      const cardArch = document.createElement('p');
+      cardArch.className = 'card-archetype';
+      cardArch.textContent = cardArchText;
+      nameStack.append(cardArch);
+    }
     const badge = document.createElement('div'); badge.className = 'card-ubuquity'; badge.dataset.grade = item.model.grade;
     const caption = document.createElement('span'); caption.className = 'badge-caption'; caption.textContent = 'Ubuquity';
     const lettering = document.createElement('strong'); lettering.className = 'grade-lettering'; lettering.textContent = item.model.grade;
@@ -481,7 +490,7 @@
         if (event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom) return action();
       }
     });
-    card.append(top, badge, art, name, side, rarityEl, supers);
+    card.append(top, badge, art, nameStack, side, rarityEl, supers);
     return card;
   }
   function showReveal() {
@@ -582,6 +591,12 @@
     current = { text, result, model, rarity: r, name: model.parts.fullName, serial };
 
     $('ubunym').textContent = model.parts.fullName;
+    const viewerArch = $('viewer-archetype');
+    if (viewerArch) {
+      const archLabel = window.ubuArchetype ? ubuArchetype.format(model) : '';
+      viewerArch.textContent = archLabel;
+      viewerArch.hidden = !archLabel;
+    }
     const rarityText = r ? ` · Rarity ${r.percentile.toFixed(3)} / 100 (${r.bits.toFixed(6)} bits)` : '';
     const grade = document.createElement('strong'); grade.dataset.grade = model.grade; grade.textContent = model.grade;
     $('details').replaceChildren('Ubuquity ', grade, rarityText + (serial ? ' · ' + ubuList.serialLabel(serial) : ''));

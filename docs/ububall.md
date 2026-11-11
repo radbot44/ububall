@@ -143,7 +143,14 @@ Four 6-bit axes (`0–63`, neutral `31.5`) determining autonomous CPU behavior:
 1. **`Aggression` (Bits 510–515, 6 bits):** Rink positioning (0 = Crease Anchor/Goalie, 63 = Hyper-Aggressive Forechecker).
 2. **`Creativity` (Bits 516–521, 6 bits):** Shot selection (0 = Direct linear strikes, 63 = Bank shots off boards & heavy curve tricksters).
 3. **`Teamwork` (Bits 522–527, 6 bits):** Playmaking (0 = Solo shooter, 63 = Dedicated passer).
-4. **`Clutch` (Bits 528–533, 6 bits):** Composure surge when trailing or tied at match point (0 = Calm/steady, 63 = High-urgency hero surge).
+4. **`Clutch` (Bits 528–533, 6 bits):** Composure surge when trailing or tied at match point (0 = Conservative/cautious retreat, 63 = High-urgency hero surge).
+
+### Two-Part Archetype Descriptors (`shared/ubu-archetype.js`)
+
+Every decoded ubu receives a deterministic `<Adjective> <Noun>` archetype subtitle (7,290 combinations) alongside its `ubunym` identity name, with no runtime randomness:
+
+- **Personality Adjective (81 words):** Each 6-bit AI trait (`aggression`, `creativity`, `teamwork`, `clutch`) maps to `Low` (`0–20`), `Medium` (`21–42`), or `High` (`43–63`), indexing into 9 families (`Aggression × Teamwork`) of 9 slots (`Creativity × Clutch`).
+- **Gameplay Noun (90 words):** Ten 9-slot families (4 core families across `Movement`, `Physical`, `Engagement`, and `Super`, plus all 6 two-family hybrids) are scored directly against the 15 raw 8-bit gameplay stats (`0–255`) using salience-weighted squared error (`1 + 1.5 × |target − 127.5| / 127.5` normalized over the profile's specified stats), a worst-stat guard (`0.45 × max squared error`), and soft off-axis neutrality (`0.15 × mean squared distance from 127.5` across unspecified stats), minus fixed optimal-transport dual biases calibrated for near-equal `1/90` rarity (ties broken by lowest slot).
 
 ---
 

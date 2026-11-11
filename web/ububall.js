@@ -789,7 +789,10 @@
         if (body?.carded) small.textContent = 'Yellow card · sits out this turn';
         else if (body?.stunned) small.textContent = 'Stunned this turn';
         else if (guarded) small.textContent = dazeCut ? `Guarding · Dazed (-${dazeCut}%)` : 'Guarding';
-        else if (!aimed) small.textContent = dazeCut ? `Idle · Dazed (-${dazeCut}%)` : 'Idle';
+        else if (!aimed) {
+          const idleLabel = archetypeOfModel(fieldView.entries[i]?.model) || 'Idle';
+          small.textContent = dazeCut ? `${idleLabel} · Dazed (-${dazeCut}%)` : idleLabel;
+        }
         else small.textContent = `${Math.round(plan.power * 100)}% power · ${spin ? spin + '% spin' : 'no spin'}${dazeCut ? ` · Dazed (-${dazeCut}%)` : ''}`;
       }
     });
@@ -800,8 +803,20 @@
     if (planning && !hasMoves) $('launch').dataset.tip = 'No moves are planned.';
     else delete $('launch').dataset.tip;
     fieldView.bodies.slice(0, 6).forEach((b, i) => {
-      const shield = i >= 3 && $(`player-${i}`)?.querySelector('.card-guard');
+      const awayCard = i >= 3 ? $(`player-${i}`) : null;
+      const shield = awayCard?.querySelector('.card-guard');
       if (shield) shield.hidden = phase !== 'play' || !b.guarding;
+      if (awayCard) {
+        const awaySmall = awayCard.querySelector('small.away');
+        if (awaySmall) {
+          const dazeCut = b && P.dazeSlow ? Math.round(P.dazeSlow(b) * 100) : 0;
+          const baseLabel = archetypeOfModel(fieldView.entries[i]?.model) || $('opponent-label').textContent;
+          awaySmall.textContent = b.carded ? 'Yellow card · sits out this turn'
+            : b.stunned ? 'Stunned this turn'
+            : dazeCut ? `${baseLabel} · Dazed (-${dazeCut}%)`
+            : baseLabel;
+        }
+      }
       const pctNode = $(`super-pct-${i}`);
       const fillNode = $(`super-fill-${i}`);
       if (fillNode) setMeterFill(fillNode, b.meter);
@@ -882,14 +897,17 @@
     portrait.onclick = () => openStatDrawer(i);
     return portrait;
   }
+  const archetypeOfModel = model => (typeof ubuArchetype !== 'undefined' && model ? ubuArchetype.format(model) : '');
   function openStatDrawer(i) {
     if (drawerClosed.player === i && performance.now() - drawerClosed.at < 400) return;
     const entry = fieldView.entries[i], close = document.createElement('button');
     close.type = 'button'; close.className = 'icon-button'; close.setAttribute('aria-label', 'Close stats'); close.append(gameUi.icon('x'));
     close.onclick = () => statDrawer.hidePopover();
     const titles = document.createElement('div'); titles.className = 'card-titles';
+    const sideText = $(i < 3 ? 'home-label' : 'opponent-label').textContent;
+    const archText = archetypeOfModel(entry?.model);
     titles.append(Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }),
-      Object.assign(document.createElement('small'), { textContent: $(i < 3 ? 'home-label' : 'opponent-label').textContent }));
+      Object.assign(document.createElement('small'), { textContent: [archText, sideText].filter(Boolean).join(' · ') }));
     const head = document.createElement('div'); head.className = 'stat-drawer-head';
     head.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'stat-drawer-art', 256) : ubuRender(entry.model, 'stat-drawer-art'), titles, close);
     const box = renderStatsBox(stats[i] || entry.model.stats || {});
@@ -930,7 +948,7 @@
       const select = document.createElement('button'); select.type = 'button'; select.className = 'card-select';
       const titles = document.createElement('div'); titles.className = 'card-titles';
       const strong = document.createElement('strong'); strong.textContent = entry.model.parts.fullName;
-      const small = document.createElement('small'); small.textContent = 'Idle';
+      const small = document.createElement('small'); small.textContent = archetypeOfModel(entry.model) || 'Idle';
       select.append(strong, small);
       const shield = document.createElement('button'); shield.type = 'button'; shield.className = 'card-guard guard-toggle';
       shield.setAttribute('aria-label', 'Guard with ' + entry.model.parts.fullName);
@@ -943,7 +961,10 @@
       select.onclick = () => { selected = i; sync(); draw(); };
       $('team').append(button);
       const lineup = document.createElement('div'); lineup.className = 'home-ubu';
-      lineup.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'home-ubu-art', 256) : ubuRender(entry.model, 'home-ubu-art'), Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }));
+      const homeArch = archetypeOfModel(entry.model);
+      lineup.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'home-ubu-art', 256) : ubuRender(entry.model, 'home-ubu-art'),
+        Object.assign(document.createElement('strong'), { textContent: entry.model.parts.fullName }),
+        ...(homeArch ? [Object.assign(document.createElement('span'), { className: 'home-ubu-archetype', textContent: homeArch })] : []));
       const superInfo = classicMode() ? null : entry.equippedSuper || resolveEquippedSuper(entry, i);
       if (superInfo) {
         const superLabel = document.createElement('small');
@@ -959,7 +980,7 @@
         const header = document.createElement('div'); header.className = 'card-header';
         const titles = document.createElement('div'); titles.className = 'card-titles';
         const strong = document.createElement('strong'); strong.textContent = entry.model.parts.fullName;
-        const small = document.createElement('small'); small.className = 'away'; small.textContent = $('opponent-label').textContent;
+        const small = document.createElement('small'); small.className = 'away'; small.textContent = archetypeOfModel(entry.model) || $('opponent-label').textContent;
         const name = document.createElement('div'); name.className = 'card-select'; name.append(strong, small);
         const shield = document.createElement('span'); shield.className = 'card-guard'; shield.hidden = true;
         shield.setAttribute('role', 'img'); shield.setAttribute('aria-label', 'Guarding'); shield.append(gameUi.icon('shield'));
@@ -3223,8 +3244,14 @@
     slot.classList.toggle('is-empty', !entry);
     slot.classList.toggle('just-changed', i === changedSlot);
     const pick = node('button', { type: 'button', className: 'formation-pick' }, node('span', { className: 'formation-pos', textContent: POSITIONS[i] }));
-    if (entry) pick.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'formation-art', 256) : ubuRender(entry.model, 'formation-art'), node('span', { className: 'formation-name' },
-      node('strong', { textContent: entry.model.parts.fullName }), node('small', { textContent: entry.label })));
+    if (entry) {
+      const arch = archetypeOfModel(entry.model);
+      const subLabel = entry.label && entry.label !== entry.model.parts.fullName
+        ? [arch, entry.label].filter(Boolean).join(' · ')
+        : (arch || entry.label || '');
+      pick.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'formation-art', 256) : ubuRender(entry.model, 'formation-art'), node('span', { className: 'formation-name' },
+        node('strong', { textContent: entry.model.parts.fullName }), node('small', { textContent: subLabel })));
+    }
     else pick.append(node('span', { className: 'formation-art formation-empty-art' }), node('span', { className: 'formation-name' },
       node('strong', { textContent: 'Empty' }), node('small', { textContent: i === rosterSlot ? 'Pick an ubu below' : 'Select to fill' })));
     pick.setAttribute('aria-pressed', String(i === rosterSlot));

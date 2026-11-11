@@ -26,6 +26,7 @@
 }
 .home-ubu-art { width: min(7rem, 100%); height: auto; aspect-ratio: 1; filter: drop-shadow(0 .5rem .625rem #0007); }
 .home-ubu strong { font-family: var(--font-display); font-weight: 400; font-size: 1rem; line-height: 1.15; overflow-wrap: anywhere; }
+.home-ubu-archetype { color: var(--muted); font-size: .75rem; line-height: 1.15; }
 .home-ubu small { display: flex; align-items: center; gap: .25rem; color: var(--secondary); font-size: .75rem; }
 .home-ubu small img { width: 1.125rem; }
 .home-actions { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: .75rem; }
@@ -1000,7 +1001,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .formation-empty-art { display: block; border: .125rem dashed var(--border); border-radius: 50%; }
 .formation-name { display: grid; min-width: 0; }
 .formation-name strong { overflow: hidden; font-size: .9375rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-.formation-name small { color: var(--muted); font: .6875rem var(--font-body); }
+.formation-name small { overflow: hidden; color: var(--muted); font: .6875rem var(--font-body); text-overflow: ellipsis; white-space: nowrap; }
 .formation-super {
   grid-column: 1; justify-self: start; display: inline-flex; align-items: center; gap: .25rem; min-height: 0; max-width: 100%; padding: .1875rem .5rem .1875rem .25rem;
   border: .0625rem solid var(--border); border-radius: 62.4375rem; background: var(--card); color: var(--secondary); font: .75rem var(--font-body);

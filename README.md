@@ -33,6 +33,7 @@ Ububall uses a deterministic 1024-bit (128-byte) DNA schema that supplies random
   - *Super (8 bits each):* Efficiency, Synergy, Chemistry.
 - **Super slots (bits 494–509, 16 bits):** 4 special ability slots (4 bits each, 0–15).
 - **AI tactical brain (bits 510–533, 24 bits):** Personality axes for Aggression, Creativity, Teamwork, Clutch (6 bits each, 0–63).
+- **Archetype descriptors (`shared/ubu-archetype.js`):** Deterministic `<Adjective> <Noun>` classification combining 81 personality adjectives (`3^4` AI trait tiers) and 90 calibrated gameplay nouns across all 15 core stats.
 - **Voice & fanfare suite (bits 534–597, 64 bits):** Web Audio voice synthesizer (root pitch, instrument timbre, decay) and 8-note goal fanfare melody with scale mode, tempo, and groove.
 - **Unassigned reserve (bits 598–1013, 416 bits):** Headroom preserved for future expansion.
 - **Ubuquity (bits 1014–1023, 10 bits):** Starting special meter percentage (0–1023).

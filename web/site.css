@@ -511,7 +511,8 @@ body:has(.viewer[open]) { overflow: hidden; }
 .token-result { min-height: 1.4em; margin: 0; font-weight: 600; }
 
 .oomark { display: block; width: 16.25rem; height: 16.25rem; touch-action: none; }
-#ubunym { margin: .625rem 0 .25rem; overflow-wrap: anywhere; font-size: 1.25rem; }
+#ubunym { margin: .625rem 0 .125rem; overflow-wrap: anywhere; font-size: 1.25rem; }
+.viewer-archetype { margin: 0 0 .25rem; font-size: .875rem; color: var(--secondary); letter-spacing: .015em; }
 #details, #authenticity { font-size: .75rem; color: var(--muted); margin: .1875rem 0; }
 #download { margin: .75rem 0 .5rem; }
 
@@ -911,6 +912,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .ubu-tile-art { display: grid; place-items: center; width: 6.25rem; height: 6.25rem; border-radius: 50%; background: radial-gradient(circle, #ffffff0a, transparent 70%); }
 .ubu-tile-svg { display: block; width: 100%; height: 100%; }
 .ubu-tile-name { max-width: 100%; font-family: var(--font-display); font-size: .8125rem; line-height: 1.15; overflow-wrap: anywhere; }
+.ubu-tile-archetype { max-width: 100%; color: var(--secondary); font-size: .6875rem; line-height: 1.15; overflow-wrap: anywhere; }
 .ubu-tile-meta { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: .125rem .375rem; color: var(--muted); font-size: .625rem; font-variant-numeric: tabular-nums; }
 .ubu-tile-grade { font-family: var(--font-display); font-size: .8125rem; }
 .ubu-tile-supers { display: flex; flex-wrap: wrap; justify-content: center; gap: .1875rem; min-height: 1.375rem; }
@@ -968,7 +970,9 @@ body:has(#reveal[open]) { overflow: hidden; }
 /* Edge discs sit just inside the faces' r176 outline; alternating shades read as a milled rim. */
 .coin-edge { position: absolute; inset: 1.2%; border-radius: 50%; background: color-mix(in srgb, var(--coin-color) 58%, #000); transform: translateZ(calc(var(--coin-depth) * var(--depth))); }
 .coin-edge:nth-child(even) { background: color-mix(in srgb, var(--coin-color) 74%, #000); }
-.trading-card h3 { grid-column: 2; grid-row: 3; position: relative; z-index: 2; text-align: center; font-size: 5.2cqw; font-weight: 400; line-height: 1.1; letter-spacing: 0; margin: 0; align-self: end; overflow-wrap: anywhere; color: #eee7de; text-shadow: 0 .125rem .1875rem #0006; }
+.card-title-stack { grid-column: 2; grid-row: 3; position: relative; z-index: 2; align-self: end; text-align: center; }
+.trading-card h3 { font-size: 4.8cqw; font-weight: 400; line-height: 1.08; letter-spacing: 0; margin: 0; overflow-wrap: anywhere; color: #eee7de; text-shadow: 0 .125rem .1875rem #0006; }
+.card-archetype { margin: .3cqw 0 0; font-family: var(--font-body); font-size: 2cqw; line-height: 1.15; letter-spacing: .04em; color: #d6cdc2; text-shadow: 0 .0625rem .125rem #0008; }
 .trading-card { font-family: 'Uburoom Sans', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
 /* Glass panel: the card material shows through, framed like the card's inner rule. */
 .card-side { grid-column: 3; grid-row: 2; position: relative; z-index: 2; display: grid; grid-template-rows: 33cqw auto; align-content: start; gap: 1.2cqw; }
@@ -1170,6 +1174,8 @@ body:has(#reveal[open]) { overflow: hidden; }
 
   .ubu-tile-main { font-size: .875rem; }
   .ubu-tile-name { font-size: .9375rem; }
+  .ubu-tile-archetype { font-size: .75rem; }
+  .viewer-archetype { font-size: .9375rem; }
   .ubu-tile-meta, .ubu-tile-meta span { font-size: .8125rem; }
   .ubu-tile-meta { gap: .25rem .5rem; }
   .ubu-tile-grade { font-size: .875rem; }

@@ -160,6 +160,7 @@
     for (const role of ['praenomen', 'nomen', 'cognomen']) {
       $(role).textContent = m.parts[role]; $(role).parentElement.hidden = !m.parts[role];
     }
+    if ($('archetype-name') && window.ubuArchetype) $('archetype-name').textContent = ubuArchetype.format(m);
     $('grade').textContent = m.grade;
     $('grade').dataset.grade = m.grade;
     $('rating').textContent = `${m.rating} / 1023`;
