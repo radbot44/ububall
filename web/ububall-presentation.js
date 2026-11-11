@@ -1843,13 +1843,12 @@
       ctx.globalAlpha = level === 2 ? .45 : .22;
       ctx.drawImage(superGlowSprite(key, doc), b.x - haloR, b.y - haloR, haloR * 2, haloR * 2);
       ctx.lineCap = 'round';
-      if (key === 'shockwave') {
-        const active = b.superActive === 'shockwave';
-        const ringCount = active ? 4 : 3;
-        const rate = active ? 1.35 : (level === 2 ? 1.05 : .78);
+      if (key === 'shockwave' && b.superActive === 'shockwave' && b.shockwaveFired) {
+        const ringCount = 4;
+        const rate = 1.35;
         const startR = reach + 3;
-        const maxR = active ? reach + 86 : ringR + (level === 2 ? 44 : 28);
-        const peakAlpha = active ? .88 : (level === 2 ? .72 : .52);
+        const maxR = reach + 86;
+        const peakAlpha = .88;
         for (let w = 0; w < ringCount; w++) {
           const p = still ? (w + .3) / ringCount : (t * rate + w / ringCount) % 1;
           const ease = 1 - (1 - p) ** 1.65;
@@ -1858,14 +1857,14 @@
           const fadeOut = (1 - p) ** 1.45;
           const alpha = peakAlpha * fadeIn * fadeOut;
           if (alpha <= .01) continue;
-          const width = (active ? 4.2 : (level === 2 ? 3.4 : 2.6)) * (1 - p * .62);
+          const width = 4.2 * (1 - p * .62);
           ctx.globalAlpha = alpha * .42;
           circle(b.x, b.y, r, c2, width * 2.1);
           ctx.globalAlpha = alpha;
           circle(b.x, b.y, r, w % 2 === 0 ? c1 : '#ffb3c9', width);
         }
-        ctx.globalAlpha = level === 2 ? .7 : .45;
-        circle(b.x, b.y, ringR, c1, level === 2 ? 2.2 : 1.6);
+        ctx.globalAlpha = .7;
+        circle(b.x, b.y, ringR, c1, 2.2);
         ctx.restore();
         return;
       }
@@ -2143,7 +2142,7 @@
         if (isFlamingCollision) {
           fx.ballFlare = Math.max(fx.ballFlare || 0, 0.85);
           const nx = (ball.x - player.x) / distance, ny = (ball.y - player.y) / distance;
-          fx.fireWarp = { x, y, nx, ny, life: 0.16, duration: 0.16 };
+          fx.fireWarp = { x, y, nx, ny, life: 0.28, duration: 0.28 };
           if (!isReducedMotion() && fx.particles.length < 400) {
             fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ff7a1a', life: 0.20, duration: 0.20, flash: true, flashSize: 125, overlay: true });
             fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#fff3b0', life: 0.12, duration: 0.12, flash: true, flashSize: 66, overlay: true });
@@ -2231,7 +2230,7 @@
       const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
       if (body.team === -1 && P.ballOnFire?.(body) && velocity >= 60) {
         fx.ballFlare = Math.max(fx.ballFlare || 0, 0.85);
-        fx.fireWarp = { x: cx, y: cy, nx, ny, life: 0.16, duration: 0.16 };
+        fx.fireWarp = { x: cx, y: cy, nx, ny, life: 0.28, duration: 0.28 };
         if (!isReducedMotion() && fx.particles.length < 400) {
           fx.particles.push({ x: cx, y: cy, px: cx, py: cy, vx: 0, vy: 0, team: -1, color: '#ff7a1a', life: 0.18, duration: 0.18, flash: true, flashSize: 115, overlay: true });
           fx.particles.push({ x: cx, y: cy, px: cx, py: cy, vx: 0, vy: 0, team: -1, color: '#fff3b0', life: 0.11, duration: 0.11, flash: true, flashSize: 60, overlay: true });
@@ -2583,6 +2582,89 @@
       }
 
       drawParticles(home, away);
+      if (fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion()) {
+        const fw = fx.fireWarp;
+        const wp = 1 - Math.max(0, fw.life / fw.duration);
+        const fade = (1 - wp) ** 1.15;
+        const mirageR = 46 + wp * 44;
+        const sx = width / 1000, sy = height / 600;
+        const rx = Math.max(0, fw.x - mirageR), ry = Math.max(0, fw.y - mirageR);
+        const rw = Math.min(1000 - rx, mirageR * 2), rh = Math.min(600 - ry, mirageR * 2);
+        const pw = Math.max(1, Math.round(rw * sx)), ph = Math.max(1, Math.round(rh * sy));
+        if (doc?.createElement && view.canvas && pw > 2 && ph > 2) {
+          if (!fx.mirageCanvas) {
+            fx.mirageCanvas = doc.createElement('canvas');
+            fx.mirageCtx = fx.mirageCanvas.getContext('2d');
+          }
+          const mc = fx.mirageCanvas, mctx = fx.mirageCtx;
+          if (mc && mctx) {
+            if (mc.width !== pw || mc.height !== ph) { mc.width = pw; mc.height = ph; }
+            mctx.clearRect(0, 0, pw, ph);
+            mctx.drawImage(view.canvas, rx * sx, ry * sy, pw, ph, 0, 0, pw, ph);
+            // 1. Radial thermal depth-lens magnification near the expanding shockwave rim
+            const lensR = mirageR * (0.38 + wp * 0.48);
+            view.ctx.save();
+            view.ctx.beginPath();
+            view.ctx.arc(fw.x, fw.y, lensR, 0, Math.PI * 2);
+            view.ctx.clip();
+            const lensZoom = 1 + 0.085 * fade * Math.cos(wp * Math.PI * 1.5);
+            view.ctx.translate(fw.x, fw.y);
+            view.ctx.scale(lensZoom, lensZoom);
+            view.ctx.translate(-fw.x, -fw.y);
+            view.ctx.drawImage(mc, 0, 0, pw, ph, rx, ry, rw, rh);
+            view.ctx.restore();
+
+            // 2. Wavy convective heat-mirage slice refraction across the superheated air pocket
+            const slices = 14, sliceH = rh / slices;
+            view.ctx.save();
+            view.ctx.beginPath();
+            view.ctx.arc(fw.x, fw.y, mirageR, 0, Math.PI * 2);
+            view.ctx.clip();
+            for (let s = 0; s < slices; s++) {
+              const y0 = ry + s * sliceH;
+              const u = ((y0 + sliceH * 0.5) - fw.y) / mirageR;
+              const env = Math.max(0, 1 - u * u) * fade;
+              if (env <= 0.01) continue;
+              const wave = s * 0.95 - wp * 24;
+              const dx = (Math.sin(wave) * 4.6 + Math.cos(s * 1.7 + wp * 31) * 2.0) * env;
+              const dy = Math.cos(wave * 0.85) * 2.4 * env;
+              const sy0 = Math.max(0, (s * sliceH) * sy);
+              const sh = Math.min(ph - sy0, (sliceH + 0.8) * sy);
+              if (sh > 0) {
+                view.ctx.drawImage(mc, 0, sy0, pw, sh, rx + dx, y0 + dy, rw, sliceH + 0.8);
+              }
+            }
+            view.ctx.restore();
+          }
+        }
+        // 3. Subtle wavering refractive caustic filaments (visible even over solid-color ice)
+        view.ctx.save();
+        view.ctx.beginPath();
+        view.ctx.arc(fw.x, fw.y, mirageR, 0, Math.PI * 2);
+        view.ctx.clip();
+        view.ctx.lineCap = 'round';
+        for (let k = 0; k < 5; k++) {
+          const baseOff = (k - 2) * (mirageR * 0.34) - wp * 14;
+          const yBand = fw.y + baseOff;
+          const u = (yBand - fw.y) / mirageR;
+          const bandEnv = Math.max(0, 1 - u * u) * fade;
+          if (bandEnv <= 0.02) continue;
+          const halfSpan = Math.sqrt(Math.max(0, 1 - u * u)) * mirageR * 0.82;
+          view.ctx.beginPath();
+          for (let j = 0; j <= 16; j++) {
+            const frac = j / 16;
+            const px = fw.x - halfSpan + frac * halfSpan * 2;
+            const edgeFade = Math.sin(frac * Math.PI);
+            const py = yBand + Math.sin(j * 0.85 - wp * 26 + k * 1.4) * 3.6 * bandEnv * edgeFade;
+            if (j === 0) view.ctx.moveTo(px, py); else view.ctx.lineTo(px, py);
+          }
+          view.ctx.lineWidth = 2.2 * bandEnv;
+          view.ctx.strokeStyle = k % 2 === 0 ? '#fff6d6' : '#ff9e3d';
+          view.ctx.globalAlpha = (k % 2 === 0 ? 0.24 : 0.18) * bandEnv;
+          view.ctx.stroke();
+        }
+        view.ctx.restore();
+      }
       drawFieldOver(colors);
       drawFouls(text, playback?.viewFouls ?? getFouls());
       drawPopups(view.badgeCtx, fx.popups, view.portrait, width, home, away);
