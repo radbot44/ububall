@@ -2053,32 +2053,47 @@
       const isSnap = isBall && Boolean(snapped || a?.snapStruck || b?.snapStruck);
       const isSpinStrike = isBall && Boolean(a?.spinStruck || b?.spinStruck);
       const isHipClip = !isBall && a.team !== b.team && tangentImpulse >= 55 && tangentImpulse >= speed * 0.22;
+      const isCheck = !isBall && a.team !== b.team && !isHipClip && speed >= 65;
       const spinBoost = !isBall && a.team !== b.team ? (tangentImpulse || 0) * 0.45 : 0;
       const effSpeed = Math.max(speed, spinBoost);
       if (effSpeed < 15 && !isSnap && !isSpinStrike) return;
       const fx = getEffects();
       const distance = Math.hypot(b.x - a.x, b.y - a.y) || 1;
       const x = a.x + (b.x - a.x) * a.radius / distance, y = a.y + (b.y - a.y) * a.radius / distance;
-      const tangent = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
+      const normalAngle = Math.atan2(b.y - a.y, b.x - a.x);
+      const tangent = normalAngle + Math.PI / 2;
       const sparkStrength = Math.min(1.35, effSpeed / 600);
       burst(x, y, a.team, sparkStrength, false, tangent);
       if (a.team !== b.team) burst(x, y, b.team, sparkStrength, false, tangent);
       if (isHipClip && !isReducedMotion()) {
+        const hipStrength = Math.min(1, Math.max(0.12, (Math.max(tangentImpulse, effSpeed * 0.42) - 50) / 195));
+        const dur = 0.14 + 0.10 * hipStrength;
         if (fx.shockwaves.length < 30) {
           fx.shockwaves.push({
-            x, y, currentRadius: 12, maxRadius: 54,
+            x, y,
+            currentRadius: 10 + 2 * hipStrength,
+            maxRadius: 12 + 42 * (0.35 + 0.65 * hipStrength),
             team: a.team, teamB: b.team, tangent, hipClip: true,
-            life: 0.24, duration: 0.24, width: 5.5, overlay: true
+            strength: hipStrength,
+            life: dur, duration: dur,
+            width: 2.2 + 3.3 * hipStrength,
+            overlay: true
           });
         }
         if (fx.particles.length < 400) {
-          fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ffffff', life: 0.16, duration: 0.16, flash: true, flashSize: 88, overlay: true });
+          const flashLife = 0.10 + 0.06 * hipStrength;
+          fx.particles.push({
+            x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ffffff',
+            life: flashLife, duration: flashLife,
+            flash: true, flashSize: Math.round(32 + 56 * hipStrength), overlay: true
+          });
         }
-        for (let k = 0; k < 14 && fx.particles.length < 400; k++) {
+        const streakCount = Math.round(3 + 11 * hipStrength);
+        for (let k = 0; k < streakCount && fx.particles.length < 400; k++) {
           const dir = k % 2 === 0 ? tangent : tangent + Math.PI;
           const ang = dir + (Math.random() - 0.5) * 0.38;
-          const spd = 190 + Math.random() * 230;
-          const life = 0.18 + Math.random() * 0.12;
+          const spd = 115 + 75 * hipStrength + Math.random() * (90 + 140 * hipStrength);
+          const life = 0.13 + 0.05 * hipStrength + Math.random() * (0.07 + 0.05 * hipStrength);
           const sx = x + Math.cos(ang) * 6, sy = y + Math.sin(ang) * 6;
           fx.particles.push({
             x: sx, y: sy, px: sx - Math.cos(ang) * 7, py: sy - Math.sin(ang) * 7,
@@ -2086,7 +2101,46 @@
             team: k % 2 === 0 ? a.team : b.team,
             color: k % 5 === 0 ? '#ffffff' : null,
             life, duration: life,
-            materialShape: 'streak', size: 3.0 + Math.random() * 1.8, angle: ang, snap: true, overlay: true
+            materialShape: 'streak', size: 1.8 + 1.2 * hipStrength + Math.random() * 1.8 * hipStrength, angle: ang, snap: true, overlay: true
+          });
+        }
+      } else if (isCheck && !isReducedMotion()) {
+        const checkStrength = Math.min(1, Math.max(0.12, (speed - 65) / 455));
+        const dur = 0.14 + 0.10 * checkStrength;
+        if (fx.shockwaves.length < 30) {
+          fx.shockwaves.push({
+            x, y,
+            currentRadius: 9 + 3 * checkStrength,
+            maxRadius: 11 + 41 * (0.35 + 0.65 * checkStrength),
+            team: a.team, teamB: b.team, normalAngle, check: true,
+            strength: checkStrength,
+            life: dur, duration: dur,
+            width: 2.2 + 3.6 * checkStrength,
+            overlay: true
+          });
+        }
+        if (fx.particles.length < 400) {
+          const flashLife = 0.09 + 0.07 * checkStrength;
+          fx.particles.push({
+            x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ffffff',
+            life: flashLife, duration: flashLife,
+            flash: true, flashSize: Math.round(28 + 60 * checkStrength), overlay: true
+          });
+        }
+        const streakCount = Math.round(2 + 12 * checkStrength);
+        for (let k = 0; k < streakCount && fx.particles.length < 400; k++) {
+          const baseDir = k % 2 === 0 ? tangent : tangent + Math.PI;
+          const ang = baseDir + (Math.random() - 0.5) * 0.65;
+          const spd = 105 + 80 * checkStrength + Math.random() * (85 + 145 * checkStrength);
+          const life = 0.12 + 0.06 * checkStrength + Math.random() * (0.06 + 0.06 * checkStrength);
+          const sx = x + Math.cos(ang) * 5, sy = y + Math.sin(ang) * 5;
+          fx.particles.push({
+            x: sx, y: sy, px: sx - Math.cos(ang) * 6, py: sy - Math.sin(ang) * 6,
+            vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+            team: k % 2 === 0 ? a.team : b.team,
+            color: k % 5 === 0 ? '#ffffff' : null,
+            life, duration: life,
+            materialShape: 'streak', size: 1.7 + 1.3 * checkStrength + Math.random() * 1.7 * checkStrength, angle: ang, snap: true, overlay: true
           });
         }
       }
@@ -2142,7 +2196,8 @@
         if (isFlamingCollision) {
           fx.ballFlare = Math.max(fx.ballFlare || 0, 0.85);
           const nx = (ball.x - player.x) / distance, ny = (ball.y - player.y) / distance;
-          fx.fireWarp = { x, y, nx, ny, life: 0.28, duration: 0.28 };
+          const ubuIndex = player.playerIndex ?? (getView().bodies?.indexOf(player) ?? -1);
+          fx.fireWarp = { x, y, nx, ny, ubuIndex, life: 0.28, duration: 0.28 };
           if (!isReducedMotion() && fx.particles.length < 400) {
             fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ff7a1a', life: 0.20, duration: 0.20, flash: true, flashSize: 125, overlay: true });
             fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#fff3b0', life: 0.12, duration: 0.12, flash: true, flashSize: 66, overlay: true });
@@ -2356,31 +2411,35 @@
       drawGuides(home, away, text, playback ? playback.guide : getGuide());
       fx.shockwaves.forEach(s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
-        const expand = (s.dramatic || s.hipClip) ? 1 - (1 - progress) ** 2.6 : progress;
-        const fade = (s.dramatic || s.hipClip) ? (1 - progress) ** 1.25 : 1 - progress;
+        const expand = (s.dramatic || s.hipClip || s.check) ? 1 - (1 - progress) ** 2.6 : progress;
+        const fade = (s.dramatic || s.hipClip || s.check) ? (1 - progress) ** 1.25 : 1 - progress;
         const r = s.currentRadius + (s.maxRadius - s.currentRadius) * expand;
         const targetCtx = s.overlay && view.badgeCtx ? view.badgeCtx : view.ctx;
         const waveColor = s.color || (s.team === 0 ? home : away);
         const baseW = s.width || (s.overlay ? 4.5 : 6);
         targetCtx.save();
-        if (s.hipClip) {
+        if (s.hipClip || s.check) {
           const secondColor = (s.teamB ?? (1 - s.team)) === 0 ? home : away;
-          const sweep = (s.tangent || 0) + expand * 0.95;
+          const str = s.strength ?? 1;
+          const sweep = s.hipClip
+            ? (s.tangent || 0) + expand * (0.45 + 0.50 * str)
+            : (s.normalAngle || 0);
+          const halfArc = s.hipClip ? (0.32 + 0.50 * str) : (0.28 + 0.48 * str);
           targetCtx.lineCap = 'round';
           for (let side = 0; side < 2; side++) {
-            const a0 = sweep + side * Math.PI - 0.82, a1 = sweep + side * Math.PI + 0.82;
+            const a0 = sweep + side * Math.PI - halfArc, a1 = sweep + side * Math.PI + halfArc;
             targetCtx.beginPath();
             targetCtx.arc(s.x, s.y, r, a0, a1);
             targetCtx.strokeStyle = side === 0 ? waveColor : secondColor;
-            targetCtx.lineWidth = Math.max(1.5, baseW * fade);
-            targetCtx.globalAlpha = Math.max(0, fade * 0.92);
+            targetCtx.lineWidth = Math.max(1.2, baseW * fade);
+            targetCtx.globalAlpha = Math.max(0, fade * (0.55 + 0.37 * str));
             targetCtx.stroke();
-            if (fade > 0.2) {
+            if (fade > 0.2 && str > 0.25) {
               targetCtx.beginPath();
-              targetCtx.arc(s.x, s.y, Math.max(1, r - 1.5), a0 + 0.2, a1 - 0.1);
+              targetCtx.arc(s.x, s.y, Math.max(1, r - 1.5), a0 + halfArc * 0.22, a1 - halfArc * 0.14);
               targetCtx.strokeStyle = '#ffffff';
               targetCtx.lineWidth = Math.max(1, baseW * 0.4 * fade);
-              targetCtx.globalAlpha = Math.max(0, fade * 0.8);
+              targetCtx.globalAlpha = Math.max(0, fade * 0.8 * str);
               targetCtx.stroke();
             }
           }
@@ -2416,10 +2475,27 @@
       const goalReplay = getGoalReplay();
       const onlineReplay = getOnlineReplay();
       const skaters = getSkaters();
+      const fwActive = fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion() ? fx.fireWarp : null;
 
       view.bodies.slice(0, 6).forEach((b, i) => {
         const reachR = Math.max(b.radius, b.reach || b.radius, 18);
         const isSuperReady = (b.meter >= 100) || Boolean(b.superArm) || Boolean(b.superActive);
+        const ubuWarped = fwActive && fwActive.ubuIndex === i;
+        let ubuWarpAngle = 0, ubuScaleX = 1, ubuScaleY = 1;
+        if (ubuWarped) {
+          const wp = 1 - Math.max(0, fwActive.life / fwActive.duration);
+          const env = (1 - wp) * Math.cos(wp * Math.PI * 2.2);
+          const amt = env * 0.13;
+          ubuScaleX = 1 - amt;
+          ubuScaleY = 1 + amt;
+          ubuWarpAngle = Math.atan2(fwActive.ny || 0, fwActive.nx || 1);
+          view.ctx.save();
+          view.ctx.translate(b.x, b.y);
+          view.ctx.rotate(ubuWarpAngle);
+          view.ctx.scale(ubuScaleX, ubuScaleY);
+          view.ctx.rotate(-ubuWarpAngle);
+          view.ctx.translate(-b.x, -b.y);
+        }
 
         if (isSuperReady) {
           const activeKey = b.superActive || b.equippedSuper?.key || 'stalwart';
@@ -2440,6 +2516,7 @@
           circle(b.x, b.y, b.radius + 9, goalAccent, 4);
           circle(b.x, b.y, b.radius + 15, goalAccent, 2);
         }
+        if (ubuWarped) view.ctx.restore();
 
         const inAction = phase === 'play' || phase === 'replay' || Boolean(goalReplay);
         if (inAction && !b.carded && !isReducedMotion()) {
@@ -2501,7 +2578,10 @@
         const wPct = b.radius / 5 + '%';
         const opacity = b.carded ? '0.3' : b.superActive === 'ghost' ? '0.45' : '1';
         const filter = (b.stunned || b.stunnedNext) && !b.carded ? 'grayscale(0.8) brightness(0.7)' : '';
-        const transform = `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${b.rotation + (view.portrait ? Math.PI / 2 : 0)}rad)`;
+        const rot = b.rotation + (view.portrait ? Math.PI / 2 : 0);
+        const transform = ubuWarped
+          ? `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${ubuWarpAngle}rad) scale(${ubuScaleX.toFixed(4)}, ${ubuScaleY.toFixed(4)}) rotate(${rot - ubuWarpAngle}rad)`
+          : `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${rot}rad)`;
 
         if (style.width !== wPct) style.width = wPct;
         if (style.opacity !== opacity) style.opacity = opacity;

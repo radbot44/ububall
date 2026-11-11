@@ -1483,18 +1483,18 @@
     };
   }
 
-  // Spinning ubu wobble: related to the movement wobble in a slightly brighter register with a
-  // fifth-harmonic gyroscopic shimmer, compensated for ear sensitivity so it stays just as quiet.
+  // Spinning ubu wobble: continuous loop modulated by spin speed |omega|, inaudible below threshold
+  // and rising smoothly from near-silence at low spin to a faster, louder gyroscopic wobble at high spin.
   function ubuSpinParams(omega, radius, slot, volume) {
     const absSpin = Math.abs(omega || 0);
-    const p = Math.min(1, Math.max(0, (absSpin - 2.5) / 18));
+    const p = Math.min(1, Math.max(0, (absSpin - 2.8) / 15.5));
     const sizeRatio = Math.max(0.6, Math.min(2.4, (radius || 25) / 25));
     const slotDetune = 1 + (((slot | 0) % 6) - 2.5) * 0.009;
-    const freq = (245 + 115 * p) * Math.pow(sizeRatio, -0.45) * slotDetune;
-    const swirlHz = (8.5 + 9.5 * p) * Math.pow(sizeRatio, -0.3);
-    const swirlDepth = freq * (0.04 + 0.025 * p);
-    const bandFreq = Math.min(2600, freq * (1.35 + 0.3 * p));
-    const level = (0.0042 + 0.0098 * Math.pow(p, 0.9)) * Math.max(0, Math.min(1.5, volume));
+    const freq = (242 + 158 * Math.pow(p, 0.95)) * Math.pow(sizeRatio, -0.45) * slotDetune;
+    const swirlHz = (3.2 + 12.8 * Math.pow(p, 1.1)) * Math.pow(sizeRatio, -0.35);
+    const swirlDepth = freq * (0.018 + 0.052 * Math.pow(p, 1.05));
+    const bandFreq = Math.min(2800, freq * (1.15 + 0.85 * p));
+    const level = (0.0008 + 0.029 * Math.pow(p, 1.35)) * Math.max(0, Math.min(1.5, volume));
     return { freq, swirlHz, swirlDepth, bandFreq, level };
   }
 
@@ -1509,7 +1509,7 @@
     if (options.id !== undefined && options.id !== null) {
       const loopKey = 'spin:' + options.id;
       let map = motionLoops.get(ctx);
-      if (Math.abs(omega) < 2.5 || volume <= 0) {
+      if (Math.abs(omega) < 2.8 || volume <= 0) {
         map?.get(loopKey)?.stop();
         return { stop() {} };
       }
@@ -1518,7 +1518,8 @@
       const now = ctx.currentTime;
       const p = ubuSpinParams(omega, radius, slot, volume);
       let entry = map.get(loopKey);
-      if (!entry || entry.stopped) {
+      const isNew = !entry || entry.stopped;
+      if (isNew) {
         const cleanup = [], master = createMasterChain(ctx, cleanup);
         const osc1 = ctx.createOscillator(), osc2 = ctx.createOscillator(), g2 = ctx.createGain();
         const lfo = ctx.createOscillator(), lfoGain = ctx.createGain(), filterLfo = ctx.createGain();
@@ -1527,14 +1528,14 @@
         osc1.frequency.setValueAtTime(p.freq, now);
         osc2.type = 'triangle';
         osc2.frequency.setValueAtTime(p.freq * 1.5, now);
-        g2.gain.setValueAtTime(0.22, now);
+        g2.gain.setValueAtTime(0.24, now);
         lfo.type = 'sine';
         lfo.frequency.setValueAtTime(p.swirlHz, now);
         lfoGain.gain.setValueAtTime(p.swirlDepth, now);
         filterLfo.gain.setValueAtTime(p.freq * 0.24, now);
         filter.type = 'bandpass';
         filter.frequency.setValueAtTime(p.bandFreq, now);
-        filter.Q.setValueAtTime(1.35, now);
+        filter.Q.setValueAtTime(0.95, now);
         outGain.gain.setValueAtTime(0, now);
         let panner = null;
         const initialPan = getPan(options);
@@ -1612,7 +1613,7 @@
         entry.bandFreq0 = curBand; entry.bandFreq = p.bandFreq;
         entry.paramT0 = now; entry.paramT1 = rampEnd;
       }
-      const cur = currentLoopGain(entry, now), tPeak = now + 0.035, tZero = now + 0.16;
+      const cur = currentLoopGain(entry, now), tPeak = now + (isNew ? 0.075 : 0.035), tZero = now + 0.16;
       entry.outGain.gain.cancelScheduledValues(now);
       entry.outGain.gain.setValueAtTime(cur, now);
       entry.outGain.gain.linearRampToValueAtTime(p.level, tPeak);
@@ -1625,32 +1626,40 @@
       return { stop: () => entry.stop() };
     }
 
-    // Standalone one-shot spin wobble audition (kept gentle like ubu movement)
+    // Standalone one-shot spin wobble audition (sweeps low -> peak -> low like ubu movement)
     const duration = Math.max(0.18, Math.min(2.5, Number(options.duration) || 0.85));
     const master = createMasterChain(ctx, null, duration + 0.06);
     const now = ctx.currentTime;
+    const pLow = ubuSpinParams(Math.max(3.5, Math.abs(omega) * 0.42), radius, slot, volume);
     const pPeak = ubuSpinParams(omega, radius, slot, volume);
-    const pTail = ubuSpinParams(Math.max(4, Math.abs(omega) * 0.45), radius, slot, volume);
     const osc1 = ctx.createOscillator(), osc2 = ctx.createOscillator(), g2 = ctx.createGain();
     const lfo = ctx.createOscillator(), lfoGain = ctx.createGain(), filter = ctx.createBiquadFilter(), outGain = ctx.createGain();
     osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(pPeak.freq, now);
-    osc1.frequency.linearRampToValueAtTime(pTail.freq, now + duration);
+    osc1.frequency.setValueAtTime(pLow.freq, now);
+    osc1.frequency.linearRampToValueAtTime(pPeak.freq, now + duration * 0.45);
+    osc1.frequency.linearRampToValueAtTime(pLow.freq, now + duration);
     osc2.type = 'triangle';
-    osc2.frequency.setValueAtTime(pPeak.freq * 1.5, now);
-    osc2.frequency.linearRampToValueAtTime(pTail.freq * 1.5, now + duration);
-    g2.gain.setValueAtTime(0.22, now);
+    osc2.frequency.setValueAtTime(pLow.freq * 1.5, now);
+    osc2.frequency.linearRampToValueAtTime(pPeak.freq * 1.5, now + duration * 0.45);
+    osc2.frequency.linearRampToValueAtTime(pLow.freq * 1.5, now + duration);
+    g2.gain.setValueAtTime(0.24, now);
     lfo.type = 'sine';
-    lfo.frequency.setValueAtTime(pPeak.swirlHz, now);
-    lfo.frequency.linearRampToValueAtTime(pTail.swirlHz, now + duration);
-    lfoGain.gain.setValueAtTime(pPeak.swirlDepth, now);
+    lfo.frequency.setValueAtTime(pLow.swirlHz, now);
+    lfo.frequency.linearRampToValueAtTime(pPeak.swirlHz, now + duration * 0.45);
+    lfo.frequency.linearRampToValueAtTime(pLow.swirlHz, now + duration);
+    lfoGain.gain.setValueAtTime(pLow.swirlDepth, now);
+    lfoGain.gain.linearRampToValueAtTime(pPeak.swirlDepth, now + duration * 0.45);
+    lfoGain.gain.linearRampToValueAtTime(pLow.swirlDepth, now + duration);
     filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(pPeak.bandFreq, now);
-    filter.Q.setValueAtTime(1.35, now);
+    filter.frequency.setValueAtTime(pLow.bandFreq, now);
+    filter.frequency.linearRampToValueAtTime(pPeak.bandFreq, now + duration * 0.45);
+    filter.frequency.linearRampToValueAtTime(pLow.bandFreq, now + duration);
+    filter.Q.setValueAtTime(0.95, now);
     const dest = routePanner(ctx, master, options);
-    const previewBoost = options.preview ? 1.45 : 1.15;
+    const previewBoost = options.preview ? 1.5 : 1.25;
     outGain.gain.setValueAtTime(0.0001, now);
-    outGain.gain.linearRampToValueAtTime(Math.min(0.048, pPeak.level * previewBoost), now + Math.min(0.06, duration * 0.18));
+    outGain.gain.linearRampToValueAtTime(Math.min(0.085, pPeak.level * previewBoost), now + duration * 0.42);
+    outGain.gain.linearRampToValueAtTime(Math.min(0.065, pPeak.level * previewBoost * 0.75), now + duration * 0.72);
     outGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     lfo.connect(lfoGain); lfoGain.connect(osc1.frequency); lfoGain.connect(osc2.frequency);
     osc1.connect(filter); osc2.connect(g2); g2.connect(filter);
