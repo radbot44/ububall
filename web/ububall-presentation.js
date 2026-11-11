@@ -829,6 +829,9 @@
       if (burning) {
         if (wasBurning === false && !fx.netFire?.lit && (clockNow() - (fx.lastCannonImpact ?? -Infinity) > 40)) {
           fx.ballFlare = 1;
+          const spd = Math.hypot(ball.vx || 0, ball.vy || 0) || 1;
+          const nx = -(ball.vx || 0) / spd, ny = -(ball.vy || 0) / spd;
+          fx.fireWarp = { x: ball.x, y: ball.y, nx, ny, life: 0.30, duration: 0.30 };
           if (!isReducedMotion()) {
             if (fx.shockwaves.length < 30) {
               fx.shockwaves.push({
@@ -1316,42 +1319,44 @@
 
     function paintIce() {
       const fx = getEffects(), ctx = getView().ctx;
-      for (const s of fx.skids) {
-        const age = Math.floor(s.age * 4) / 4;
-        const t = age / SKID_LIFE, fade = 1 - t * t * (3 - 2 * t), thin = .6 + .4 * fade;
-        ctx.globalAlpha = .12 * fade;
-        softRibbon(s.points, p => s.width * .7 * (.4 + .6 * p.depth) * thin, s.width * .45, '#000000');
-        ctx.globalAlpha = .08 * fade;
-        softRibbon(s.points, p => s.width * .3 * p.depth * thin, s.width * .2, '#000000');
-      }
-      for (const s of fx.burns) {
-        if (s.poof) {
+      inRink(() => {
+        for (const s of fx.skids) {
+          const age = Math.floor(s.age * 4) / 4;
+          const t = age / SKID_LIFE, fade = 1 - t * t * (3 - 2 * t), thin = .6 + .4 * fade;
+          ctx.globalAlpha = .12 * fade;
+          softRibbon(s.points, p => s.width * .7 * (.4 + .6 * p.depth) * thin, s.width * .45, '#000000');
+          ctx.globalAlpha = .08 * fade;
+          softRibbon(s.points, p => s.width * .3 * p.depth * thin, s.width * .2, '#000000');
+        }
+        for (const s of fx.burns) {
+          if (s.poof) {
+            const age = Math.floor(s.age * 4) / 4;
+            const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
+            if (fade <= 0.01) continue;
+            const r = (s.radius || 22) * 1.35;
+            ctx.save();
+            const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
+            grad.addColorStop(0, `rgba(0, 0, 0, ${(0.40 * fade).toFixed(3)})`);
+            grad.addColorStop(0.32, `rgba(0, 0, 0, ${(0.30 * fade).toFixed(3)})`);
+            grad.addColorStop(0.62, `rgba(43, 18, 6, ${(0.24 * fade).toFixed(3)})`);
+            grad.addColorStop(0.84, `rgba(43, 18, 6, ${(0.08 * fade).toFixed(3)})`);
+            grad.addColorStop(1, 'rgba(43, 18, 6, 0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+            continue;
+          }
+          if (!s.points || s.points.length < 2) continue;
           const age = Math.floor(s.age * 4) / 4;
           const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
-          if (fade <= 0.01) continue;
-          const r = s.radius || 22;
-          ctx.save();
-          ctx.globalAlpha = 0.38 * fade;
-          ctx.fillStyle = '#2b1206';
-          ctx.beginPath();
-          ctx.arc(s.x, s.y, r * 1.35, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = 0.32 * fade;
-          ctx.fillStyle = '#000000';
-          ctx.beginPath();
-          ctx.arc(s.x, s.y, r * 0.9, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-          continue;
+          ctx.globalAlpha = .3 * fade;
+          softRibbon(s.points, p => s.width * (.5 + .5 * p.depth), s.width * .35, '#2b1206');
+          ctx.globalAlpha = .22 * fade;
+          softRibbon(s.points, p => s.width * .35 * p.depth, s.width * .15, '#000000');
         }
-        if (!s.points || s.points.length < 2) continue;
-        const age = Math.floor(s.age * 4) / 4;
-        const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
-        ctx.globalAlpha = .3 * fade;
-        softRibbon(s.points, p => s.width * (.5 + .5 * p.depth), s.width * .35, '#2b1206');
-        ctx.globalAlpha = .22 * fade;
-        softRibbon(s.points, p => s.width * .35 * p.depth, s.width * .15, '#000000');
-      }
+      });
     }
 
     function drawFieldUnder(colors) {
@@ -1489,20 +1494,6 @@
             ctx.fill();
             ctx.restore();
           }
-          // Board char mark at impact site
-          const charFade = (1 - p) ** 0.85;
-          ctx.save();
-          ctx.globalAlpha = charFade * 0.55;
-          ctx.fillStyle = '#1c0c04';
-          ctx.beginPath();
-          ctx.arc(r.x, r.y, 16, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = charFade * 0.45;
-          ctx.fillStyle = '#000000';
-          ctx.beginPath();
-          ctx.arc(r.x, r.y, 10, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
         }
         ctx.restore();
       }
@@ -3160,13 +3151,10 @@
       }
 
       drawParticles(home, away);
-      if (fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion()) {
-        const fw = fx.fireWarp;
-        const wp = 1 - Math.max(0, fw.life / fw.duration);
-        const fade = (1 - wp) ** 1.15;
-        const mirageR = 46 + wp * 44;
+      function drawHeatMirage(cx, cy, mirageR, strength, timeVal, isImpact = false) {
+        if (strength <= 0.02 || isReducedMotion()) return;
         const sx = width / 1000, sy = height / 600;
-        const rx = Math.max(0, fw.x - mirageR), ry = Math.max(0, fw.y - mirageR);
+        const rx = Math.max(0, cx - mirageR), ry = Math.max(0, cy - mirageR);
         const rw = Math.min(1000 - rx, mirageR * 2), rh = Math.min(600 - ry, mirageR * 2);
         const pw = Math.max(1, Math.round(rw * sx)), ph = Math.max(1, Math.round(rh * sy));
         if (doc?.createElement && view.canvas && pw > 2 && ph > 2) {
@@ -3179,33 +3167,36 @@
             if (mc.width !== pw || mc.height !== ph) { mc.width = pw; mc.height = ph; }
             mctx.clearRect(0, 0, pw, ph);
             mctx.drawImage(view.canvas, rx * sx, ry * sy, pw, ph, 0, 0, pw, ph);
-            // 1. Radial thermal depth-lens magnification near the expanding shockwave rim
-            const lensR = mirageR * (0.38 + wp * 0.48);
+
+            // 1. Thermal depth-lens magnification
+            const lensR = mirageR * (isImpact ? 0.38 + timeVal * 0.48 : 0.65);
             view.ctx.save();
             view.ctx.beginPath();
-            view.ctx.arc(fw.x, fw.y, lensR, 0, Math.PI * 2);
+            view.ctx.arc(cx, cy, lensR, 0, Math.PI * 2);
             view.ctx.clip();
-            const lensZoom = 1 + 0.085 * fade * Math.cos(wp * Math.PI * 1.5);
-            view.ctx.translate(fw.x, fw.y);
+            const lensZoom = 1 + (isImpact ? 0.085 * strength * Math.cos(timeVal * Math.PI * 1.5) : 0.040 * strength);
+            view.ctx.translate(cx, cy);
             view.ctx.scale(lensZoom, lensZoom);
-            view.ctx.translate(-fw.x, -fw.y);
+            view.ctx.translate(-cx, -cy);
             view.ctx.drawImage(mc, 0, 0, pw, ph, rx, ry, rw, rh);
             view.ctx.restore();
 
-            // 2. Wavy convective heat-mirage slice refraction across the superheated air pocket
-            const slices = 14, sliceH = rh / slices;
+            // 2. Wavy convective heat-mirage slice refraction
+            const slices = isImpact ? 14 : 9, sliceH = rh / slices;
             view.ctx.save();
             view.ctx.beginPath();
-            view.ctx.arc(fw.x, fw.y, mirageR, 0, Math.PI * 2);
+            view.ctx.arc(cx, cy, mirageR, 0, Math.PI * 2);
             view.ctx.clip();
             for (let s = 0; s < slices; s++) {
               const y0 = ry + s * sliceH;
-              const u = ((y0 + sliceH * 0.5) - fw.y) / mirageR;
-              const env = Math.max(0, 1 - u * u) * fade;
+              const u = ((y0 + sliceH * 0.5) - cy) / mirageR;
+              const env = Math.max(0, 1 - u * u) * strength;
               if (env <= 0.01) continue;
-              const wave = s * 0.95 - wp * 24;
-              const dx = (Math.sin(wave) * 4.6 + Math.cos(s * 1.7 + wp * 31) * 2.0) * env;
-              const dy = Math.cos(wave * 0.85) * 2.4 * env;
+              const wave = isImpact ? s * 0.95 - timeVal * 24 : s * 1.1 + timeVal * 12;
+              const maxDx = isImpact ? 4.6 : 2.3;
+              const maxDy = isImpact ? 2.4 : 1.2;
+              const dx = (Math.sin(wave) * maxDx + Math.cos(s * 1.7 + timeVal * 18) * (maxDx * 0.45)) * env;
+              const dy = Math.cos(wave * 0.85) * maxDy * env;
               const sy0 = Math.max(0, (s * sliceH) * sy);
               const sh = Math.min(ph - sy0, (sliceH + 0.8) * sy);
               if (sh > 0) {
@@ -3215,33 +3206,52 @@
             view.ctx.restore();
           }
         }
-        // 3. Subtle wavering refractive caustic filaments (visible even over solid-color ice)
+
+        // 3. Wavering refractive caustic filaments
         view.ctx.save();
         view.ctx.beginPath();
-        view.ctx.arc(fw.x, fw.y, mirageR, 0, Math.PI * 2);
+        view.ctx.arc(cx, cy, mirageR, 0, Math.PI * 2);
         view.ctx.clip();
         view.ctx.lineCap = 'round';
-        for (let k = 0; k < 5; k++) {
-          const baseOff = (k - 2) * (mirageR * 0.34) - wp * 14;
-          const yBand = fw.y + baseOff;
-          const u = (yBand - fw.y) / mirageR;
-          const bandEnv = Math.max(0, 1 - u * u) * fade;
+        const numFilaments = isImpact ? 5 : 3;
+        for (let k = 0; k < numFilaments; k++) {
+          const baseOff = (k - (numFilaments - 1) / 2) * (mirageR * (isImpact ? 0.34 : 0.48)) - (isImpact ? timeVal * 14 : Math.sin(timeVal * 8 + k) * 6);
+          const yBand = cy + baseOff;
+          const u = (yBand - cy) / mirageR;
+          const bandEnv = Math.max(0, 1 - u * u) * strength;
           if (bandEnv <= 0.02) continue;
           const halfSpan = Math.sqrt(Math.max(0, 1 - u * u)) * mirageR * 0.82;
           view.ctx.beginPath();
-          for (let j = 0; j <= 16; j++) {
-            const frac = j / 16;
-            const px = fw.x - halfSpan + frac * halfSpan * 2;
+          const steps = isImpact ? 16 : 10;
+          for (let j = 0; j <= steps; j++) {
+            const frac = j / steps;
+            const px = cx - halfSpan + frac * halfSpan * 2;
             const edgeFade = Math.sin(frac * Math.PI);
-            const py = yBand + Math.sin(j * 0.85 - wp * 26 + k * 1.4) * 3.6 * bandEnv * edgeFade;
+            const py = yBand + Math.sin(j * 0.85 - (isImpact ? timeVal * 26 : timeVal * 14) + k * 1.4) * (isImpact ? 3.6 : 1.8) * bandEnv * edgeFade;
             if (j === 0) view.ctx.moveTo(px, py); else view.ctx.lineTo(px, py);
           }
-          view.ctx.lineWidth = 2.2 * bandEnv;
+          view.ctx.lineWidth = (isImpact ? 2.2 : 1.4) * bandEnv;
           view.ctx.strokeStyle = k % 2 === 0 ? '#fff6d6' : '#ff9e3d';
           view.ctx.globalAlpha = (k % 2 === 0 ? 0.24 : 0.18) * bandEnv;
           view.ctx.stroke();
         }
         view.ctx.restore();
+      }
+
+      if (fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion()) {
+        const fw = fx.fireWarp;
+        const wp = 1 - Math.max(0, fw.life / fw.duration);
+        const fade = (1 - wp) ** 1.15;
+        const mirageR = 46 + wp * 44;
+        drawHeatMirage(fw.x, fw.y, mirageR, fade, wp, true);
+      }
+      if (ball && ballOnFire() && !isReducedMotion()) {
+        const fwNear = fx.fireWarp && fx.fireWarp.life > 0 && Math.hypot(ball.x - fx.fireWarp.x, ball.y - fx.fireWarp.y) < 32;
+        if (!fwNear) {
+          const mirageR = Math.max(26, (ball.radius || 14) * 2.3);
+          const nowSec = clockNow() * 0.001;
+          drawHeatMirage(ball.x, ball.y, mirageR, 0.5, nowSec, false);
+        }
       }
       drawFieldOver(colors);
       drawFouls(text, playback?.viewFouls ?? getFouls());

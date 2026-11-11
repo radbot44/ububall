@@ -530,7 +530,7 @@
           id: 'fireball-burn',
           title: 'Ball Heat Stages, Ignition Burst, Ice Burn & Meteor Bank',
           when: 'Ball pace crosses 540 (orange) -> 720 (red + sparks) -> 800 (red-hot) -> 840+ on fire (`sparkBall` ignition burst, `burnIce`, `r.meteor` board scorch).',
-          visual: 'Mid-flight ignition shockwave rings, flash, ember streaks & ignition whoof at 60 heat ticks; glowing fireball, additive flames, scorched ice burn ribbon, and Meteor Bank impact hotspot glow, board/ground circular black ash char poof, heat-mirage warp & tangential ember streaks.',
+          visual: 'Mid-flight ignition shockwave rings, flash, ember streaks, ignition whoof & heat mirage at 60 heat ticks; glowing fireball with continuous shimmering convective heat haze, additive flames, scorched ice burn ribbon, and Meteor Bank impact hotspot glow, rink-clipped circular black ash char poof, heat-mirage warp & tangential ember streaks.',
           soundLabel: 'Play fire sizzle (1.5s)',
           variants: [
             { id: 'fire', label: 'Full Fireball + Meteor Bank' },
