@@ -553,6 +553,16 @@ test('movement wobble, spin wobble, puck slide, spin strike, fire impact, save s
   audio.stopMotion();
   assert.ok(spinSines[0].stopped !== undefined, 'stopMotion stops active spin loop');
 
+  // 2b. SpinStrike uses crisp noise buffers + ultra-short percussive transient (<= 20 ms), never a long cartoon pitch-glide
+  const whipCtx = recordedContext();
+  audio.playSpinStrike({ ctx: whipCtx, spin: 18, volume: 0.9 });
+  const whipOscs = whipCtx.nodes.filter(n => n.kind === "oscillator");
+  const whipBufs = whipCtx.nodes.filter(n => n.kind === "buffer");
+  assert.ok(whipBufs.length >= 4, "whipcrack layers whoosh, N-wave crack, highpass tip snap, and arena tail");
+  for (const osc of whipOscs) {
+    assert.ok(osc.stopped - osc.started <= 0.02, "any whip transient oscillator is <20 ms percussive snap, never a cartoon slip sweep");
+  }
+
   // 3. Shared master chain compatibility across all new sounds (for MP4 video export)
   const shared = recordedContext();
   audio.shareMasterChain(shared);

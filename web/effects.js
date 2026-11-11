@@ -281,7 +281,7 @@
           visual: 'Dual-layer Gaussian-blurred dark ice gouges (`SKID_LIFE = 12s`) paired with an ice-hockey blade shave & snow-spray stop sound.',
           soundLabel: 'Play ice brake',
           duration: 2.5,
-          playSound: ctx => ctx.audio()?.playCarve({ volume: 0.85 }),
+          playSound: ctx => ctx.audio()?.playCarve({ volume: 0.5 }),
           run: ctx => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
             ctx.place(0, 210, 240, { vx: 700, vy: 40 });
@@ -305,7 +305,7 @@
           visual: 'Fine ice-mist spray (`#e8f7ff` / `#ffffff`), curved corner skid mark, and the shared ice-hockey hard-brake edge shave sound.',
           soundLabel: 'Play ice brake',
           duration: 2.4,
-          playSound: ctx => ctx.audio()?.playCarve({ volume: 0.85 }),
+          playSound: ctx => ctx.audio()?.playCarve({ volume: 0.5 }),
           run: ctx => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
             // Top-left corner (center 160,160, radius 100): moving left along top wall (vt > 0 -> negative omega co-rotates)
@@ -411,8 +411,8 @@
           id: 'spin-strike',
           title: 'Point-Blank Spin Strike (`"Spin strike!"`)',
           when: 'Skater launched with spin touches the ball first within 2 ball diameters (`tick.struck`, `playSpinStrike`).',
-          visual: 'Spinny, swooshy whip-crack sound, tapered counter-rotating spin blades on the ball, extra shot speed + Magnus curve, hit-stop, and `"Spin strike!"` callout.',
-          soundLabel: 'Play spin whip',
+          visual: 'Tight cord-whoosh into sharp supersonic whipcrack, tapered counter-rotating spin blades on the ball, extra shot speed + Magnus curve, hit-stop, and `"Spin strike!"` callout.',
+          soundLabel: 'Play whipcrack',
           duration: 2.5,
           playSound: ctx => {
             ctx.audio()?.playSpinStrike?.({ volume: 0.92, spin: 16 });

@@ -740,7 +740,7 @@
         const now = clockNow(), map = (fx.carveTimes ||= new WeakMap());
         if (now - (map.get(b) ?? -Infinity) >= 180) {
           map.set(b, now);
-          gameAudio()?.playCarve?.({ volume: Math.min(0.85, 0.3 + 0.55 * strength) });
+          gameAudio()?.playCarve?.({ volume: Math.min(0.55, 0.18 + 0.36 * strength) });
         }
       }
       if (s.time <= 0) { s.path = null; return; }
@@ -2030,7 +2030,7 @@
         if (now - (map.get(body) ?? -Infinity) >= 180) {
           map.set(body, now);
           const speed = Math.hypot(body.vx || 0, body.vy || 0);
-          gameAudio()?.playCarve?.({ volume: Math.min(0.85, 0.25 + 0.5 * Math.min(1, speed / 550)) });
+          gameAudio()?.playCarve?.({ volume: Math.min(0.55, 0.16 + 0.36 * Math.min(1, speed / 550)) });
         }
         return;
       }

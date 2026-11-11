@@ -1180,11 +1180,11 @@
     filter.type = 'lowpass';
     filter.frequency.setValueAtTime(pPeak.cutoff, now);
     filter.Q.setValueAtTime(pPeak.q, now);
-    // Audition plays a touch clearer than a single background skater while keeping exact timbre
-    const previewBoost = options.preview ? 2.4 : 1.8;
+    // Audition plays gently at the same subtle scale as in-game movement
+    const previewBoost = options.preview ? 1.6 : 1.3;
     outGain.gain.setValueAtTime(0.0001, now);
-    outGain.gain.linearRampToValueAtTime(Math.min(0.22, pPeak.level * previewBoost), now + Math.min(0.08, duration * 0.2));
-    outGain.gain.linearRampToValueAtTime(Math.min(0.18, pPeak.level * previewBoost * 0.8), now + duration * 0.72);
+    outGain.gain.linearRampToValueAtTime(Math.min(0.09, pPeak.level * previewBoost), now + Math.min(0.08, duration * 0.2));
+    outGain.gain.linearRampToValueAtTime(Math.min(0.075, pPeak.level * previewBoost * 0.8), now + duration * 0.72);
     outGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
     osc.connect(filter); filter.connect(outGain); outGain.connect(master);
@@ -1201,18 +1201,18 @@
     };
   }
 
-  // Spinning ubu wobble: related to the movement wobble, but pitched in an airier upper register
-  // with a fifth-harmonic gyroscopic shimmer and faster rotational swirl so spinning stands out.
+  // Spinning ubu wobble: related to the movement wobble in a slightly brighter register with a
+  // fifth-harmonic gyroscopic shimmer, compensated for ear sensitivity so it stays just as quiet.
   function ubuSpinParams(omega, radius, slot, volume) {
     const absSpin = Math.abs(omega || 0);
     const p = Math.min(1, Math.max(0, (absSpin - 2.5) / 18));
     const sizeRatio = Math.max(0.6, Math.min(2.4, (radius || 25) / 25));
     const slotDetune = 1 + (((slot | 0) % 6) - 2.5) * 0.009;
-    const freq = (290 + 155 * p) * Math.pow(sizeRatio, -0.45) * slotDetune;
-    const swirlHz = (8.8 + 10.2 * p) * Math.pow(sizeRatio, -0.3);
-    const swirlDepth = freq * (0.045 + 0.028 * p);
-    const bandFreq = Math.min(3400, freq * (1.45 + 0.35 * p));
-    const level = (0.012 + 0.026 * Math.pow(p, 0.85)) * Math.max(0, Math.min(1.5, volume));
+    const freq = (245 + 115 * p) * Math.pow(sizeRatio, -0.45) * slotDetune;
+    const swirlHz = (8.5 + 9.5 * p) * Math.pow(sizeRatio, -0.3);
+    const swirlDepth = freq * (0.04 + 0.025 * p);
+    const bandFreq = Math.min(2600, freq * (1.35 + 0.3 * p));
+    const level = (0.0042 + 0.0098 * Math.pow(p, 0.9)) * Math.max(0, Math.min(1.5, volume));
     return { freq, swirlHz, swirlDepth, bandFreq, level };
   }
 
@@ -1245,14 +1245,14 @@
         osc1.frequency.setValueAtTime(p.freq, now);
         osc2.type = 'triangle';
         osc2.frequency.setValueAtTime(p.freq * 1.5, now);
-        g2.gain.setValueAtTime(0.36, now);
+        g2.gain.setValueAtTime(0.22, now);
         lfo.type = 'sine';
         lfo.frequency.setValueAtTime(p.swirlHz, now);
         lfoGain.gain.setValueAtTime(p.swirlDepth, now);
-        filterLfo.gain.setValueAtTime(p.freq * 0.3, now);
+        filterLfo.gain.setValueAtTime(p.freq * 0.24, now);
         filter.type = 'bandpass';
         filter.frequency.setValueAtTime(p.bandFreq, now);
-        filter.Q.setValueAtTime(2.1, now);
+        filter.Q.setValueAtTime(1.35, now);
         outGain.gain.setValueAtTime(0, now);
         lfo.connect(lfoGain); lfoGain.connect(osc1.frequency); lfoGain.connect(osc2.frequency);
         lfo.connect(filterLfo); filterLfo.connect(filter.frequency);
@@ -1296,7 +1296,7 @@
         entry.lfoGain.gain.cancelScheduledValues(now);
         entry.lfoGain.gain.setValueAtTime(entry.swirlDepth, now);
         entry.lfoGain.gain.linearRampToValueAtTime(p.swirlDepth, rampEnd);
-        entry.filterLfo.gain.setValueAtTime(p.freq * 0.3, now);
+        entry.filterLfo.gain.setValueAtTime(p.freq * 0.24, now);
         entry.filter.frequency.cancelScheduledValues(now);
         entry.filter.frequency.setValueAtTime(entry.bandFreq, now);
         entry.filter.frequency.linearRampToValueAtTime(p.bandFreq, rampEnd);
@@ -1316,7 +1316,7 @@
       return { stop: () => entry.stop() };
     }
 
-    // Standalone one-shot spin wobble audition
+    // Standalone one-shot spin wobble audition (kept gentle like ubu movement)
     const duration = Math.max(0.18, Math.min(2.5, Number(options.duration) || 0.85));
     const master = createMasterChain(ctx, null, duration + 0.06);
     const now = ctx.currentTime;
@@ -1330,17 +1330,17 @@
     osc2.type = 'triangle';
     osc2.frequency.setValueAtTime(pPeak.freq * 1.5, now);
     osc2.frequency.linearRampToValueAtTime(pTail.freq * 1.5, now + duration);
-    g2.gain.setValueAtTime(0.36, now);
+    g2.gain.setValueAtTime(0.22, now);
     lfo.type = 'sine';
     lfo.frequency.setValueAtTime(pPeak.swirlHz, now);
     lfo.frequency.linearRampToValueAtTime(pTail.swirlHz, now + duration);
     lfoGain.gain.setValueAtTime(pPeak.swirlDepth, now);
     filter.type = 'bandpass';
     filter.frequency.setValueAtTime(pPeak.bandFreq, now);
-    filter.Q.setValueAtTime(2.1, now);
-    const previewBoost = options.preview ? 2.4 : 1.9;
+    filter.Q.setValueAtTime(1.35, now);
+    const previewBoost = options.preview ? 1.45 : 1.15;
     outGain.gain.setValueAtTime(0.0001, now);
-    outGain.gain.linearRampToValueAtTime(Math.min(0.22, pPeak.level * previewBoost), now + Math.min(0.06, duration * 0.18));
+    outGain.gain.linearRampToValueAtTime(Math.min(0.048, pPeak.level * previewBoost), now + Math.min(0.06, duration * 0.18));
     outGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     lfo.connect(lfoGain); lfoGain.connect(osc1.frequency); lfoGain.connect(osc2.frequency);
     osc1.connect(filter); osc2.connect(g2); g2.connect(filter);
@@ -1358,8 +1358,8 @@
     };
   }
 
-  // Hockey puck sliding on ice: crisp high-mid ice-grain hiss layered over a subtle vulcanized-rubber
-  // low-mid scrape resonance. Overlapping 180 ms grains create a continuous glide during play.
+  // Hockey puck sliding on ice: quiet, tactile ice-grain whisper over a faint vulcanized-rubber
+  // glide resonance, scaled down to match the subtle moving-ubu background level.
   function playPuckSlide(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
@@ -1370,62 +1370,62 @@
     const now = ctx.currentTime;
     const s = Math.min(1, Math.max(0, (speed - 28) / 720));
     const spinShare = Math.min(1, Math.abs(options.spin || 0) / 20);
-    const volume = Math.max(0.04, Math.min(1.2, options.volume ?? 1.0));
+    const volume = Math.max(0.02, Math.min(1.2, options.volume ?? 1.0));
     const pan = Math.max(-0.7, Math.min(0.7, Number(options.pan) || 0));
-    const iceFreq = 2450 + 1850 * s + 320 * spinShare;
-    const bodyFreq = 860 + 480 * s;
-    const boost = duration > 0.4 ? 1.5 : 1.0;
+    const iceFreq = 2100 + 1450 * s + 240 * spinShare;
+    const bodyFreq = 780 + 380 * s;
+    const boost = duration > 0.4 ? 1.15 : 1.0;
     smoothNoise(ctx, master, now, duration, {
-      freq: iceFreq * 0.92, mid: iceFreq * 1.05, to: iceFreq * 0.86,
-      q: 1.75, level: (0.016 + 0.052 * Math.pow(s, 0.85)) * volume * boost, pan
+      freq: iceFreq * 0.92, mid: iceFreq * 1.04, to: iceFreq * 0.88,
+      q: 1.9, level: (0.0032 + 0.0125 * Math.pow(s, 0.9)) * volume * boost, pan
     });
     smoothNoise(ctx, master, now, duration, {
-      freq: bodyFreq, mid: bodyFreq * 1.08, to: bodyFreq * 0.9,
-      q: 3.1, level: (0.008 + 0.024 * Math.pow(s, 0.85)) * volume * boost, pan
+      freq: bodyFreq, mid: bodyFreq * 1.06, to: bodyFreq * 0.92,
+      q: 3.0, level: (0.0022 + 0.0075 * Math.pow(s, 0.9)) * volume * boost, pan
     });
   }
 
-  // Ice hockey hard brake & corner rim-around skate shave: crisp steel-edge bite, gritty shaved-ice
-  // crystals, and a snow-shower spray wash (~220 ms).
+  // Ice hockey hard brake & corner rim-around skate shave: restrained steel-edge shave and soft
+  // snow spray (~170 ms), kept polite in the mix.
   function playCarve(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.25);
+    const master = createMasterChain(ctx, null, 0.2);
     const now = ctx.currentTime;
-    const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.65));
+    const volume = Math.max(0.03, Math.min(1.0, options.volume ?? 0.42));
 
-    // 1. Primary steel-blade edge dig & snow spray sweep
+    // 1. Restrained steel-blade edge shave sweep
     const spray = ctx.createBufferSource(), sprayFilter = ctx.createBiquadFilter(), sprayGain = ctx.createGain();
     spray.buffer = grainNoise(ctx);
     sprayFilter.type = 'bandpass';
-    sprayFilter.Q.setValueAtTime(1.5, now);
-    sprayFilter.frequency.setValueAtTime(1650, now);
-    sprayFilter.frequency.exponentialRampToValueAtTime(3100, now + 0.055);
-    sprayFilter.frequency.exponentialRampToValueAtTime(1350, now + 0.22);
+    sprayFilter.Q.setValueAtTime(1.6, now);
+    sprayFilter.frequency.setValueAtTime(1350, now);
+    sprayFilter.frequency.exponentialRampToValueAtTime(2350, now + 0.045);
+    sprayFilter.frequency.exponentialRampToValueAtTime(1050, now + 0.165);
     sprayGain.gain.setValueAtTime(0.0001, now);
-    sprayGain.gain.linearRampToValueAtTime(0.32 * volume, now + 0.014);
-    sprayGain.gain.linearRampToValueAtTime(0.24 * volume, now + 0.065);
-    sprayGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+    sprayGain.gain.linearRampToValueAtTime(0.13 * volume, now + 0.012);
+    sprayGain.gain.linearRampToValueAtTime(0.095 * volume, now + 0.05);
+    sprayGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.165);
     spray.connect(sprayFilter); sprayFilter.connect(sprayGain); sprayGain.connect(master);
     spray.start(now, Math.random() * 0.7);
-    spray.stop(now + 0.24);
+    spray.stop(now + 0.18);
 
-    // 2. Bright shaved-ice snow hiss
-    noiseGrain(ctx, master, now + 0.008, 0.17, { freq: 4200, to: 1950, q: 0.95, level: 0.2 * volume });
+    // 2. Soft shaved-ice snow spray
+    noiseGrain(ctx, master, now + 0.006, 0.13, { freq: 2900, to: 1500, q: 1.0, level: 0.065 * volume });
 
-    // 3. Gritty ice-crystal shave crunch in the initial bite
-    for (let i = 0; i < 5; i++) {
-      const t = now + i * 0.014 + Math.random() * 0.006;
-      noiseGrain(ctx, master, t, 0.016, {
-        freq: 1250 + i * 260 + Math.random() * 350,
-        to: 950 + i * 160,
-        q: 2.8,
-        level: (0.22 - i * 0.028) * volume
+    // 3. Subtle ice-crystal shave texture in the initial bite
+    for (let i = 0; i < 3; i++) {
+      const t = now + i * 0.014 + Math.random() * 0.005;
+      noiseGrain(ctx, master, t, 0.014, {
+        freq: 1150 + i * 240 + Math.random() * 250,
+        to: 900 + i * 140,
+        q: 2.6,
+        level: (0.075 - i * 0.018) * volume
       });
     }
 
-    // 4. Low-mid ice pressure weight so the stop feels grounded
-    noiseGrain(ctx, master, now, 0.095, { freq: 460, to: 260, q: 2.2, level: 0.16 * volume });
+    // 4. Gentle low-mid skate pressure weight
+    noiseGrain(ctx, master, now, 0.075, { freq: 420, to: 250, q: 2.2, level: 0.07 * volume });
   }
 
   // Continuous tailgating wind: smooth overlapping rushing-air stream when triggered repeatedly
@@ -1454,52 +1454,84 @@
     });
   }
 
-  // Spin strike: a spinny, swooshy rotational whip into crisp tip-crack.
+  // Spin strike: a tight unpitched air-cut ("hwh-") snapping into a sharp supersonic whipcrack.
   function playSpinStrike(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.22);
+    const master = createMasterChain(ctx, null, 0.17);
+    if (!sharedChains.has(ctx)) master.frequency.setValueAtTime(12500, ctx.currentTime);
     const now = ctx.currentTime;
     const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.85));
     const spinNorm = Math.min(1, Math.max(0.25, (Math.abs(options.spin) || 14) / 18));
 
-    // 1. Rotational modulated air swoosh whipping upward into the strike
-    const swoosh = ctx.createBufferSource(), band = ctx.createBiquadFilter();
-    const mod = ctx.createGain(), lfo = ctx.createOscillator(), lfoDepth = ctx.createGain(), env = ctx.createGain();
-    swoosh.buffer = grainNoise(ctx);
-    band.type = 'bandpass';
-    band.Q.setValueAtTime(2.2, now);
-    band.frequency.setValueAtTime(420, now);
-    band.frequency.exponentialRampToValueAtTime(3400 * (0.82 + 0.22 * spinNorm), now + 0.055);
-    band.frequency.exponentialRampToValueAtTime(780, now + 0.175);
-    mod.gain.setValueAtTime(0.72, now);
-    lfo.type = 'sine';
-    lfo.frequency.setValueAtTime(26 + 10 * spinNorm, now);
-    lfoDepth.gain.setValueAtTime(0.28, now);
-    env.gain.setValueAtTime(0.0001, now);
-    env.gain.linearRampToValueAtTime(0.48 * volume, now + 0.042);
-    env.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
-    lfo.connect(lfoDepth); lfoDepth.connect(mod.gain);
-    swoosh.connect(band); band.connect(mod); mod.connect(env); env.connect(master);
-    swoosh.start(now, Math.random() * 0.7); lfo.start(now);
-    swoosh.stop(now + 0.195); lfo.stop(now + 0.195);
+    // 1. Fast, unpitched aerodynamic cord slice leading into the crack (0 -> 24 ms, no tonal sweep)
+    const whoosh = ctx.createBufferSource(), whooshBand = ctx.createBiquadFilter(), whooshGain = ctx.createGain();
+    whoosh.buffer = grainNoise(ctx);
+    whooshBand.type = 'bandpass';
+    whooshBand.Q.setValueAtTime(1.3, now);
+    whooshBand.frequency.setValueAtTime(340, now);
+    whooshBand.frequency.exponentialRampToValueAtTime(1750, now + 0.022);
+    whooshGain.gain.setValueAtTime(0.0001, now);
+    whooshGain.gain.exponentialRampToValueAtTime(0.24 * volume, now + 0.02);
+    whooshGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.036);
+    whoosh.connect(whooshBand); whooshBand.connect(whooshGain); whooshGain.connect(master);
+    whoosh.start(now, Math.random() * 0.7);
+    whoosh.stop(now + 0.045);
 
-    // 2. Coiled tonal Doppler whip curve
-    const whip = ctx.createOscillator(), whipGain = ctx.createGain();
-    whip.type = 'triangle';
-    whip.frequency.setValueAtTime(240, now);
-    whip.frequency.exponentialRampToValueAtTime(1060 * (0.88 + 0.18 * spinNorm), now + 0.05);
-    whip.frequency.exponentialRampToValueAtTime(430, now + 0.125);
-    whipGain.gain.setValueAtTime(0.0001, now);
-    whipGain.gain.linearRampToValueAtTime(0.36 * volume, now + 0.038);
-    whipGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
-    whip.connect(whipGain); whipGain.connect(master);
-    whip.start(now); whip.stop(now + 0.14);
+    // 2. Supersonic whip-tip "CRACK!" impulse at 20 ms (sub-millisecond N-wave snap)
+    const crackAt = now + 0.02;
+    const snapFreq = 2600 + 650 * spinNorm;
 
-    // 3. Crisp whip-tip snap at the apex of the swing
-    const snapAt = now + 0.044;
-    blip(ctx, master, snapAt, 0.032, 1950, 360, 0.36 * volume);
-    noiseGrain(ctx, master, snapAt, 0.034, { freq: 3500, to: 1250, q: 1.6, level: 0.44 * volume });
+    const crack = ctx.createBufferSource(), crackBand = ctx.createBiquadFilter(), crackGain = ctx.createGain();
+    crack.buffer = grainNoise(ctx);
+    crackBand.type = 'bandpass';
+    crackBand.Q.setValueAtTime(0.85, crackAt);
+    crackBand.frequency.setValueAtTime(snapFreq, crackAt);
+    crackBand.frequency.exponentialRampToValueAtTime(1150, crackAt + 0.026);
+    crackGain.gain.setValueAtTime(0.0001, crackAt);
+    crackGain.gain.linearRampToValueAtTime(0.84 * volume, crackAt + 0.0008);
+    crackGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.028);
+    crack.connect(crackBand); crackBand.connect(crackGain); crackGain.connect(master);
+    crack.start(crackAt, Math.random() * 0.7);
+    crack.stop(crackAt + 0.036);
+
+    const tip = ctx.createBufferSource(), tipHp = ctx.createBiquadFilter(), tipGain = ctx.createGain();
+    tip.buffer = grainNoise(ctx);
+    tipHp.type = 'highpass';
+    tipHp.Q.setValueAtTime(0.9, crackAt);
+    tipHp.frequency.setValueAtTime(3600, crackAt);
+    tipGain.gain.setValueAtTime(0.0001, crackAt);
+    tipGain.gain.linearRampToValueAtTime(0.56 * volume, crackAt + 0.0007);
+    tipGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.015);
+    tip.connect(tipHp); tipHp.connect(tipGain); tipGain.connect(master);
+    tip.start(crackAt, Math.random() * 0.7);
+    tip.stop(crackAt + 0.022);
+
+    // 11 ms percussive transient pop for physical snap punch (too brief to register as pitch)
+    const pop = ctx.createOscillator(), popGain = ctx.createGain();
+    pop.type = 'triangle';
+    pop.frequency.setValueAtTime(840, crackAt);
+    pop.frequency.exponentialRampToValueAtTime(135, crackAt + 0.011);
+    popGain.gain.setValueAtTime(0.0001, crackAt);
+    popGain.gain.linearRampToValueAtTime(0.52 * volume, crackAt + 0.0008);
+    popGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.013);
+    pop.connect(popGain); popGain.connect(master);
+    pop.start(crackAt);
+    pop.stop(crackAt + 0.018);
+
+    // 3. Tight arena slapback air-tail off the crack (24 ms -> 110 ms)
+    const tail = ctx.createBufferSource(), tailFilter = ctx.createBiquadFilter(), tailGain = ctx.createGain();
+    tail.buffer = grainNoise(ctx);
+    tailFilter.type = 'bandpass';
+    tailFilter.Q.setValueAtTime(1.25, crackAt + 0.004);
+    tailFilter.frequency.setValueAtTime(1650, crackAt + 0.004);
+    tailFilter.frequency.exponentialRampToValueAtTime(560, crackAt + 0.088);
+    tailGain.gain.setValueAtTime(0.0001, crackAt + 0.004);
+    tailGain.gain.linearRampToValueAtTime(0.19 * volume, crackAt + 0.009);
+    tailGain.gain.exponentialRampToValueAtTime(0.0001, crackAt + 0.09);
+    tail.connect(tailFilter); tailFilter.connect(tailGain); tailGain.connect(master);
+    tail.start(crackAt + 0.004, Math.random() * 0.7);
+    tail.stop(crackAt + 0.105);
   }
 
   // Hockey dasher-board "thock": hollow woody/HDPE board cavity knock + restrained acrylic slap on
