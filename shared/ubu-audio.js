@@ -1967,7 +1967,7 @@
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
     const isBig = Boolean(options.ring || options.big);
-    const duration = isBig ? 0.65 : 0.42;
+    const duration = isBig ? 1.15 : 0.68;
     const master = createMasterChain(ctx, null, duration + 0.1);
     const dest = routePanner(ctx, master, options);
     const now = ctx.currentTime;
@@ -2009,46 +2009,87 @@
       level: (isBig ? 0.46 : 0.32) * volume
     });
 
-    // 5. Star crackle: light sparkles for standard shells, rich cascading dragon's egg crackle for big ones
+    // 5. Pyrotechnic star crackle: each micro-star detonation is a sub-millisecond N-wave
+    // firecracker snap (mid-focused pressure crack + fast downward shockwave pop + open-air slap),
+    // firing after the stars streak outward rather than a uniform high-bandpass foil crinkle.
+    const firecrackerSnap = (delay, strength, sparkPan, echo = false) => {
+      const start = now + delay;
+      const snapLen = 0.011 + Math.random() * 0.007;
+      const startFreq = (1150 + Math.random() * 850) * pitch;
+      const endFreq = 320 + Math.random() * 160;
+
+      const src = ctx.createBufferSource(), band = ctx.createBiquadFilter(), gain = ctx.createGain();
+      src.buffer = grainNoise(ctx);
+      band.type = 'bandpass';
+      band.Q.setValueAtTime(0.8 + Math.random() * 0.25, start);
+      band.frequency.setValueAtTime(startFreq, start);
+      band.frequency.exponentialRampToValueAtTime(endFreq, start + snapLen);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.linearRampToValueAtTime(0.42 * strength * volume, start + 0.0005);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + snapLen);
+      src.connect(band); band.connect(gain);
+
+      // Percussive N-wave shockwave pop (rapid downward pitch drop gives explosive gunpowder body)
+      const pop = ctx.createOscillator(), popGain = ctx.createGain();
+      const popLen = 0.007 + Math.random() * 0.004;
+      pop.type = 'sine';
+      pop.frequency.setValueAtTime((1050 + Math.random() * 650) * pitch, start);
+      pop.frequency.exponentialRampToValueAtTime(175 + Math.random() * 85, start + popLen);
+      popGain.gain.setValueAtTime(0.0001, start);
+      popGain.gain.linearRampToValueAtTime(0.34 * strength * volume, start + 0.0005);
+      popGain.gain.exponentialRampToValueAtTime(0.0001, start + popLen);
+      pop.connect(popGain);
+
+      let out = master;
+      if (sparkPan && ctx.createStereoPanner) {
+        out = ctx.createStereoPanner();
+        out.pan.setValueAtTime(sparkPan, start);
+        out.connect(master);
+      }
+      gain.connect(out);
+      popGain.connect(out);
+      src.start(start, Math.random() * 0.85);
+      src.stop(start + snapLen + 0.01);
+      pop.start(start);
+      pop.stop(start + popLen + 0.01);
+
+      if (echo) {
+        const tailStart = start + 0.004, tailLen = 0.036 + Math.random() * 0.018;
+        const tail = ctx.createBufferSource(), tailBand = ctx.createBiquadFilter(), tailGain = ctx.createGain();
+        tail.buffer = grainNoise(ctx);
+        tailBand.type = 'bandpass';
+        tailBand.Q.setValueAtTime(0.75, tailStart);
+        tailBand.frequency.setValueAtTime(720 * pitch, tailStart);
+        tailBand.frequency.exponentialRampToValueAtTime(240, tailStart + tailLen);
+        tailGain.gain.setValueAtTime(0.0001, tailStart);
+        tailGain.gain.linearRampToValueAtTime(0.11 * strength * volume, tailStart + 0.002);
+        tailGain.gain.exponentialRampToValueAtTime(0.0001, tailStart + tailLen);
+        tail.connect(tailBand); tailBand.connect(tailGain); tailGain.connect(out);
+        tail.start(tailStart, Math.random() * 0.85);
+        tail.stop(tailStart + tailLen + 0.01);
+      }
+    };
+
     if (isBig) {
-      // Big shells: cascading cluster of 12 sharp, randomized crackle pops across the sky
-      const crackles = 12;
-      for (let i = 0; i < crackles; i++) {
-        const delay = 0.07 + (i * 0.028) + (Math.random() - 0.5) * 0.022;
-        const sparkSpread = audioMode === 'mono' ? 0 : (Math.random() - 0.5) * 0.42;
+      // Big shells: irregular staccato firecracker clusters after a brief outward star-flight hang time
+      const clusterOffsets = [0.16, 0.21, 0.23, 0.29, 0.34, 0.36, 0.43, 0.49, 0.51, 0.59, 0.66, 0.68, 0.78, 0.89];
+      for (let i = 0; i < clusterOffsets.length; i++) {
+        const delay = clusterOffsets[i] + (Math.random() - 0.5) * 0.014;
+        const sparkSpread = audioMode === 'mono' ? 0 : (Math.random() - 0.5) * 0.48;
         const sparkPan = Math.max(-0.75, Math.min(0.75, pan + sparkSpread));
-        const crackleLen = 0.008 + Math.random() * 0.008;
-        const crackleFreq = 2600 + Math.random() * 3200;
-        const crackleVol = (0.24 + Math.random() * 0.18) * Math.max(0.2, 1 - (i / crackles) * 0.6) * volume;
-        noiseGrain(ctx, master, now + delay, crackleLen, {
-          freq: crackleFreq,
-          to: crackleFreq * 0.7,
-          q: 2.8,
-          level: crackleVol,
-          pan: sparkPan
-        });
-        // Occasional metallic titanium star-ping
-        if (i % 3 === 0) {
-          const ping = ctx.createOscillator(), pingGain = ctx.createGain();
-          ping.type = 'sine';
-          ping.frequency.setValueAtTime((2400 + Math.random() * 1200) * pitch, now + delay);
-          strike(pingGain, 0.08 * volume, now + delay, now + delay + 0.018);
-          ping.connect(pingGain); pingGain.connect(dest);
-          ping.start(now + delay); ping.stop(now + delay + 0.02);
-        }
+        const envelope = Math.sin(Math.PI * ((i + 0.8) / (clusterOffsets.length + 1))) ** 0.55;
+        const strength = (0.68 + Math.random() * 0.36) * Math.max(0.35, envelope);
+        firecrackerSnap(delay, strength, sparkPan, i % 3 === 0);
       }
     } else {
-      // Standard shells: 4 quick, cheerful sparkle pops
-      for (let i = 0; i < 4; i++) {
-        const delay = 0.045 + i * 0.032 + Math.random() * 0.018;
-        const sparkSpread = audioMode === 'mono' ? 0 : (Math.random() - 0.5) * 0.32;
+      // Standard shells: 4 crisp, spaced-out star-tip snaps after the main burst
+      const stdOffsets = [0.17, 0.26, 0.37, 0.49];
+      for (let i = 0; i < stdOffsets.length; i++) {
+        const delay = stdOffsets[i] + (Math.random() - 0.5) * 0.02;
+        const sparkSpread = audioMode === 'mono' ? 0 : (Math.random() - 0.5) * 0.34;
         const sparkPan = Math.max(-0.75, Math.min(0.75, pan + sparkSpread));
-        noiseGrain(ctx, master, now + delay, 0.01, {
-          freq: 3200 + Math.random() * 2600,
-          q: 2.4,
-          level: (0.18 - i * 0.025) * volume,
-          pan: sparkPan
-        });
+        const strength = (0.58 - i * 0.09) * (0.85 + Math.random() * 0.25);
+        firecrackerSnap(delay, strength, sparkPan, false);
       }
     }
   }

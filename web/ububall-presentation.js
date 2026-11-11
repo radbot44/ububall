@@ -118,21 +118,43 @@
   }
 
   function explodeShell(f, particles) {
-    particles.push({ x: f.x, y: f.y, px: f.x, py: f.y, vx: 0, vy: 0, team: f.team, life: .3, duration: .3, flash: true, overlay: true });
-    for (let k = 0; k < 72 && particles.length < 700; k++) {
-      const angle = f.ring ? k / 72 * Math.PI * 2 : Math.random() * Math.PI * 2;
-      const speed = f.ring ? 210 : 60 + Math.random() * 200, life = 1 + Math.random() * .7;
+    particles.push({ x: f.x, y: f.y, px: f.x, py: f.y, vx: 0, vy: 0, team: f.team, life: .34, duration: .34, flash: true, flashSize: f.ring ? 210 : 180, overlay: true });
+    particles.push({ x: f.x, y: f.y, px: f.x, py: f.y, vx: 0, vy: 0, team: -1, color: '#fff7d6', life: .14, duration: .14, flash: true, flashSize: 95, overlay: true });
+    const count = f.ring ? 76 : 80;
+    for (let k = 0; k < count && particles.length < 850; k++) {
+      let angle, speed, color = null, isCrackle, size;
+      if (f.ring) {
+        const inner = k >= 52;
+        const idx = inner ? k - 52 : k, ringCount = inner ? 24 : 52;
+        angle = (idx / ringCount) * Math.PI * 2 + (inner ? .13 : 0);
+        speed = inner ? 108 + (idx % 2) * 14 : 215 + (idx % 2) * 16;
+        color = inner ? (idx % 2 === 0 ? '#ffd76b' : '#ffffff') : (idx % 4 === 0 ? '#ffffff' : idx % 4 === 2 ? '#ffd76b' : null);
+        isCrackle = !inner && (idx % 2 === 0 || Math.random() < .35);
+        size = inner ? 1.7 : 2.2;
+      } else {
+        const pistil = k >= 60;
+        angle = Math.random() * Math.PI * 2;
+        const u = Math.random(), shell = Math.sqrt(1 - u * u);
+        speed = pistil ? 45 + shell * 75 : (90 + shell * 175) * (.9 + Math.random() * .18);
+        color = pistil ? (k % 2 === 0 ? '#ffd76b' : '#ffffff') : (k % 4 === 0 ? '#ffffff' : k % 5 === 0 ? '#ffd76b' : null);
+        isCrackle = !pistil && Math.random() < .35;
+        size = pistil ? 1.6 : 1.8 + shell * .55;
+      }
+      const life = isCrackle ? .52 + Math.random() * .38 : .95 + Math.random() * .65;
       particles.push({ x: f.x, y: f.y, px: f.x, py: f.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, team: f.team,
-        color: k % 4 === 0 ? '#ffffff' : k % 5 === 0 ? '#ffd76b' : null, life, duration: life,
-        celebration: true, overlay: true, crackle: Math.random() < .3 });
+        color, size, life, duration: life, celebration: true, overlay: true, crackle: isCrackle, twinkle: Math.random() * 6.28 });
     }
   }
 
   function crackle(p, particles) {
-    for (let k = 0; k < 3 && particles.length < 700; k++) {
-      const angle = Math.random() * Math.PI * 2, life = .12 + Math.random() * .1;
-      particles.push({ x: p.x, y: p.y, px: p.x, py: p.y, vx: Math.cos(angle) * 60, vy: Math.sin(angle) * 60,
-        team: -1, color: '#ffffff', life, duration: life, overlay: true });
+    if (particles.length < 850) {
+      particles.push({ x: p.x, y: p.y, px: p.x, py: p.y, vx: 0, vy: 0, team: -1, color: '#fff6d6',
+        life: .09, duration: .09, flash: true, flashSize: 44, overlay: true });
+    }
+    for (let k = 0; k < 4 && particles.length < 850; k++) {
+      const angle = (k / 4) * Math.PI * 2 + Math.random() * 1.1, speed = 55 + Math.random() * 65, life = .12 + Math.random() * .1;
+      particles.push({ x: p.x, y: p.y, px: p.x, py: p.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+        team: -1, color: k % 2 === 0 ? '#ffffff' : '#ffe49e', life, duration: life, snap: true, overlay: true });
     }
   }
 
@@ -146,16 +168,17 @@
         continue;
       }
       p.px = p.x; p.py = p.y;
-      const drag = Math.exp(-dt * (p.celebration ? 1.2 : 4));
+      const drag = Math.exp(-dt * (p.celebration ? 1.3 : 4));
       p.vx *= drag; p.vy = p.vy * drag + (p.celebration ? 95 : 0) * dt;
       p.x += p.vx * dt; p.y += p.vy * dt;
     }
     for (let i = fireworks.length - 1; i >= 0; i--) {
       const f = fireworks[i];
       if ((f.delay -= dt) > 0) continue;
-      f.y += f.vy * dt; f.vy += 320 * dt; f.fuse -= dt;
-      if (particles.length < 700) particles.push({ x: f.x, y: f.y, px: f.x, py: f.y, vx: (Math.random() - .5) * 30, vy: 30,
-        team: f.team, color: '#ffe9b0', life: .3, duration: .3, overlay: true });
+      f.x += (f.vx || 0) * dt; f.y += f.vy * dt; f.vy += 320 * dt; f.fuse -= dt;
+      if (particles.length < 850) particles.push({ x: f.x, y: f.y, px: f.x, py: f.y - f.vy * .02,
+        vx: (f.vx || 0) * .25 + (Math.random() - .5) * 36, vy: 28 + Math.random() * 24,
+        team: f.team, color: Math.random() < .35 ? '#ffffff' : '#ffe9b0', life: .28, duration: .28, overlay: true });
       if (f.fuse <= 0) {
         explodeShell(f, particles);
         onFirework?.(f);
@@ -1000,7 +1023,7 @@
       burst(ball.x, ball.y, team, 1, true);
       fx.goalSweep = { team, p: 0 };
       for (let i = 0; i < 9; i++) fx.fireworks.push({ x: team === 0 ? 560 + Math.random() * 340 : 100 + Math.random() * 340, y: 560,
-        vy: -(430 + Math.random() * 160), fuse: .55 + Math.random() * .3, delay: .1 + i * .17, team, ring: i % 3 === 2 });
+        vx: (Math.random() - .5) * 64, vy: -(430 + Math.random() * 160), fuse: .55 + Math.random() * .3, delay: .1 + i * .17, team, ring: i % 3 === 2 });
     }
 
     function goalThreat() {
@@ -1853,11 +1876,24 @@
       const view = getView(), fx = getEffects();
       const c = overlay ? view.badgeCtx : view.ctx;
       c.save(); c.lineCap = 'round';
+      if (overlay) {
+        for (const f of fx.fireworks) {
+          if ((f.delay || 0) > 0) continue;
+          const cometColor = f.team === 0 ? home : away;
+          c.globalAlpha = .92;
+          c.drawImage(glowSprite(cometColor, doc), f.x - 18, f.y - 18, 36, 36);
+          c.beginPath(); c.moveTo(f.x - (f.vx || 0) * .035, f.y - f.vy * .035); c.lineTo(f.x, f.y);
+          c.strokeStyle = '#ffe9b0'; c.lineWidth = 2.8; c.stroke();
+          c.fillStyle = '#ffffff'; c.beginPath(); c.arc(f.x, f.y, 2.1, 0, Math.PI * 2); c.fill();
+        }
+      }
       const flameDots = [];
       for (const p of fx.particles) {
         if (Boolean(p.overlay) !== overlay) continue;
         const color = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? home : away), fade = p.life / p.duration;
-        c.globalAlpha = Math.min(1, fade * 2) * (p.celebration || p.snap ? .95 : .65);
+        const shimmer = p.celebration && fade < .38 ? .55 + .45 * Math.sin((p.twinkle || 0) + fade * 38) : 1;
+        const baseAlpha = Math.min(1, fade * 2) * (p.celebration || p.snap ? .95 : .65) * shimmer;
+        c.globalAlpha = baseAlpha;
         if (p.flash) {
           const size = (p.flashSize || 170) * fade; c.globalAlpha = fade * .85;
           c.drawImage(glowSprite(color, doc), p.x - size / 2, p.y - size / 2, size, size); continue;
@@ -1885,10 +1921,23 @@
           flameDots.push({ x: p.x, y: p.y, r: p.flame * .45 * (.4 + .6 * fade), color, alpha: c.globalAlpha });
           continue;
         }
-        if (p.celebration) c.drawImage(glowSprite(color, doc), p.x - 24, p.y - 24, 48, 48);
+        if (p.celebration) {
+          const starSize = p.size || 2;
+          const halo = (34 + 18 * fade) * (starSize / 2);
+          c.drawImage(glowSprite(color, doc), p.x - halo / 2, p.y - halo / 2, halo, halo);
+          const tailDt = .058 * (.35 + .65 * fade);
+          const tx = p.x - p.vx * tailDt, ty = p.y - p.vy * tailDt;
+          c.globalAlpha = baseAlpha * .42;
+          c.beginPath(); c.moveTo(tx, ty); c.lineTo(p.x, p.y); c.strokeStyle = color; c.lineWidth = starSize * 1.45; c.stroke();
+          c.globalAlpha = baseAlpha;
+          c.beginPath(); c.moveTo((tx + p.x) * .5, (ty + p.y) * .5); c.lineTo(p.x, p.y); c.strokeStyle = color; c.lineWidth = starSize; c.stroke();
+          c.fillStyle = color; c.beginPath(); c.arc(p.x, p.y, starSize * (.65 + .35 * fade), 0, Math.PI * 2); c.fill();
+          c.fillStyle = '#ffffff'; c.beginPath(); c.arc(p.x, p.y, Math.max(.75, starSize * .48 * fade), 0, Math.PI * 2); c.fill();
+          continue;
+        }
         const px = p.px === p.x && p.py === p.y ? p.x - 0.01 : p.px;
-        c.beginPath(); c.moveTo(px, p.py); c.lineTo(p.x, p.y); c.strokeStyle = color; c.lineWidth = p.celebration || p.snap ? 2.6 : 1.3; c.stroke();
-        c.fillStyle = color; c.beginPath(); c.arc(p.x, p.y, p.celebration || p.snap ? 1.9 : .9, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.moveTo(px, p.py); c.lineTo(p.x, p.y); c.strokeStyle = color; c.lineWidth = p.snap ? 2.6 : 1.3; c.stroke();
+        c.fillStyle = color; c.beginPath(); c.arc(p.x, p.y, p.snap ? 1.9 : .9, 0, Math.PI * 2); c.fill();
       }
       if (flameDots.length) {
         c.save(); c.globalCompositeOperation = 'lighter';
