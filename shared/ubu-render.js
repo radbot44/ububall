@@ -2292,8 +2292,21 @@
   // Match sidebars, formation slots, lineup previews and Designer thumbnails. Rasterizing once to
   // a PNG Blob URL releases the intermediate SVG filter/mask/pattern tree and prevents Blink/WebKit
   // from re-running SVG filters when scrolling large collections.
-  const MAX_SPRITES = 2048;
+  const MAX_SPRITES = 8192;
+  const BLANK_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const spriteCache = new Map();
+  const bakeQueue = [];
+  let activeBakes = 0;
+  const MAX_CONCURRENT_BAKES = 8;
+
+  function pumpBakes() {
+    while (activeBakes < MAX_CONCURRENT_BAKES && bakeQueue.length) {
+      const job = bakeQueue.pop();
+      activeBakes++;
+      job(() => { activeBakes--; pumpBakes(); });
+    }
+  }
+
   function spriteKey(m, size) {
     if (m?.dna instanceof Uint8Array && m.dna.length >= 47) {
       let key = size + ':';
@@ -2302,6 +2315,7 @@
     }
     return size + ':' + JSON.stringify([m?.attributes, m?.eyes, m?.mouth]);
   }
+
   function renderSprite(m, size = 256) {
     const key = spriteKey(m, size);
     const hit = spriteCache.get(key);
@@ -2317,74 +2331,86 @@
     }
     const entry = { url: null, promise: null };
     entry.promise = new Promise(resolve => {
-      const svg = renderSVG(m, 'ubu-sprite');
-      svg.setAttribute('width', String(size));
-      svg.setAttribute('height', String(size));
-      const xml = new XMLSerializer().serializeToString(svg);
-      const fallback = () => {
-        const dataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
-        entry.url = dataUrl;
-        resolve(dataUrl);
-      };
-      if (typeof Blob === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function' || typeof Image === 'undefined') {
-        fallback();
-        return;
-      }
-      const svgUrl = URL.createObjectURL(new Blob([xml], { type: 'image/svg+xml' }));
-      const image = new Image();
-      image.decoding = 'async';
-      image.onload = () => {
-        URL.revokeObjectURL(svgUrl);
-        try {
-          if (typeof OffscreenCanvas !== 'undefined') {
-            const off = new OffscreenCanvas(size, size);
-            const ctx = off.getContext('2d');
-            if (ctx && typeof off.convertToBlob === 'function') {
-              ctx.drawImage(image, 0, 0, size, size);
-              off.convertToBlob({ type: 'image/png' }).then(blob => {
-                entry.url = URL.createObjectURL(blob);
-                resolve(entry.url);
-              }, fallback);
-              return;
-            }
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = canvas.height = size;
-          const ctx = canvas.getContext('2d');
-          if (!ctx || typeof canvas.toBlob !== 'function') { fallback(); return; }
-          ctx.drawImage(image, 0, 0, size, size);
-          canvas.toBlob(blob => {
-            if (!blob) { fallback(); return; }
-            entry.url = URL.createObjectURL(blob);
-            resolve(entry.url);
-          }, 'image/png');
-        } catch {
+      bakeQueue.push(done => {
+        const svg = renderSVG(m, 'ubu-sprite');
+        svg.setAttribute('width', String(size));
+        svg.setAttribute('height', String(size));
+        const xml = new XMLSerializer().serializeToString(svg);
+        const finish = url => {
+          entry.url = url;
+          resolve(url);
+          done();
+        };
+        const fallback = () => finish('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml));
+        if (typeof Blob === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function' || typeof Image === 'undefined') {
           fallback();
+          return;
         }
-      };
-      image.onerror = () => {
-        URL.revokeObjectURL(svgUrl);
-        fallback();
-      };
-      image.src = svgUrl;
+        const svgUrl = URL.createObjectURL(new Blob([xml], { type: 'image/svg+xml' }));
+        const image = new Image();
+        image.decoding = 'async';
+        image.onload = () => {
+          URL.revokeObjectURL(svgUrl);
+          try {
+            if (typeof OffscreenCanvas !== 'undefined') {
+              const off = new OffscreenCanvas(size, size);
+              const ctx = off.getContext('2d');
+              if (ctx && typeof off.convertToBlob === 'function') {
+                ctx.drawImage(image, 0, 0, size, size);
+                off.convertToBlob({ type: 'image/webp', quality: 0.96 }).catch(() => off.convertToBlob({ type: 'image/png' })).then(blob => {
+                  finish(URL.createObjectURL(blob));
+                }, fallback);
+                return;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            if (!ctx || typeof canvas.toBlob !== 'function') { fallback(); return; }
+            ctx.drawImage(image, 0, 0, size, size);
+            canvas.toBlob(blob => {
+              if (!blob) { fallback(); return; }
+              finish(URL.createObjectURL(blob));
+            }, 'image/webp', 0.96);
+          } catch {
+            fallback();
+          }
+        };
+        image.onerror = () => {
+          URL.revokeObjectURL(svgUrl);
+          fallback();
+        };
+        image.src = svgUrl;
+      });
+      pumpBakes();
     });
     spriteCache.set(key, entry);
     return entry.promise;
   }
+
   function renderSpriteImg(m, className = 'ubu-tile-svg', size = 256) {
     if (typeof document === 'undefined' || typeof document.createElement !== 'function' || typeof XMLSerializer === 'undefined') {
       return renderSVG(m, className);
     }
+    const label = `${m.parts.fullName}, Ubuquity ${m.grade}`;
     const image = document.createElement('img');
     image.className = className;
-    image.alt = `${m.parts.fullName}, Ubuquity ${m.grade}`;
     image.decoding = 'async';
     image.draggable = false;
     const hit = spriteCache.get(spriteKey(m, size));
     if (hit?.url) {
+      image.alt = label;
       image.src = hit.url;
     } else {
-      renderSprite(m, size).then(url => { if (url) image.src = url; });
+      // Keep a valid transparent 1x1 src and empty alt while the sprite bakes so browsers
+      // never show a broken-image icon or duplicate alt text over empty tile slots.
+      image.alt = '';
+      image.src = BLANK_PIXEL;
+      renderSprite(m, size).then(url => {
+        if (!url) return;
+        image.onload = () => { image.alt = label; image.onload = null; };
+        image.src = url;
+      });
     }
     return image;
   }

@@ -396,34 +396,40 @@
     main.addEventListener('dragstart', event => { event.dataTransfer.setData('application/x-ubu-key', key); event.dataTransfer.effectAllowed = 'copyMove'; });
   }
 
-  // Art is drawn cooperatively with a frame budget so large collections stay cheap.
+  // Art is drawn cooperatively with a frame budget, cancelling tiles scrolled past
+  // before draw and prioritizing the current viewport (newest intersections first).
   function lazyArt(scrollRoot) {
     if (!('IntersectionObserver' in root)) return { watch: (node, draw) => draw() };
-    const draws = new Map(), queue = [], queued = new Set();
+    const draws = new Map(), queue = [], inView = new Set();
     let ticking = false;
     function drain() {
       ticking = false;
       const deadline = performance.now() + 5;
-      do {
-        const target = queue.shift();
-        if (!target) break;
-        queued.delete(target);
-        if (!target.isConnected) {
-          if (draws.has(target)) observer.observe(target);
-          continue;
-        }
+      let drew = false;
+      while (queue.length && (!drew || performance.now() < deadline)) {
+        const target = queue.pop();
+        if (!inView.has(target) || !target.isConnected) continue;
+        inView.delete(target);
+        observer.unobserve(target);
         draws.get(target)?.();
         draws.delete(target);
-      } while (queue.length && performance.now() < deadline);
-      if (queue.length) { ticking = true; requestAnimationFrame(drain); }
+        drew = true;
+      }
+      if (queue.length && inView.size) { ticking = true; requestAnimationFrame(drain); }
+      else if (!inView.size) queue.length = 0;
     }
     const observer = new IntersectionObserver(entries => {
       for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        observer.unobserve(entry.target);
-        if (!queued.has(entry.target)) { queued.add(entry.target); queue.push(entry.target); }
+        if (entry.isIntersecting) {
+          if (draws.has(entry.target) && !inView.has(entry.target)) {
+            inView.add(entry.target);
+            queue.push(entry.target);
+          }
+        } else {
+          inView.delete(entry.target);
+        }
       }
-      if (queue.length && !ticking) { ticking = true; requestAnimationFrame(drain); }
+      if (inView.size && !ticking) { ticking = true; requestAnimationFrame(drain); }
     }, { root: scrollRoot || null, rootMargin: '400px' });
     return { watch(node, draw) { draws.set(node, draw); observer.observe(node); } };
   }

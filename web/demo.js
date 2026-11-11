@@ -54,14 +54,36 @@
     if (index >= 0) saved.splice(index, 1); else { saved.unshift(code); saved.length = Math.min(saved.length, LIMIT); }
     persist(); heart(); collections();
   }
-  const thumbDraws = new Map();
+  const thumbDraws = new Map(), thumbInView = new Set(), thumbQueue = [];
+  let thumbTicking = false;
+  function drainThumbs() {
+    thumbTicking = false;
+    const deadline = performance.now() + 5;
+    let drew = false;
+    while (thumbQueue.length && (!drew || performance.now() < deadline)) {
+      const target = thumbQueue.pop();
+      if (!thumbInView.has(target) || !target.isConnected) continue;
+      thumbInView.delete(target);
+      thumbObserver.unobserve(target);
+      thumbDraws.get(target)?.();
+      thumbDraws.delete(target);
+      drew = true;
+    }
+    if (thumbQueue.length && thumbInView.size) { thumbTicking = true; requestAnimationFrame(drainThumbs); }
+    else if (!thumbInView.size) thumbQueue.length = 0;
+  }
   const thumbObserver = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
     for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      thumbObserver.unobserve(entry.target);
-      thumbDraws.get(entry.target)?.();
-      thumbDraws.delete(entry.target);
+      if (entry.isIntersecting) {
+        if (thumbDraws.has(entry.target) && !thumbInView.has(entry.target)) {
+          thumbInView.add(entry.target);
+          thumbQueue.push(entry.target);
+        }
+      } else {
+        thumbInView.delete(entry.target);
+      }
     }
+    if (thumbInView.size && !thumbTicking) { thumbTicking = true; requestAnimationFrame(drainThumbs); }
   }, { rootMargin: '300px' }) : null;
   function makeThumb(m) {
     if (!thumbObserver || !renderSVG.spriteImg) return renderSVG.spriteImg ? renderSVG.spriteImg(m, 'ubu-thumb', 256) : renderSVG(m, 'ubu-thumb');
