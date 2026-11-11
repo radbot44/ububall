@@ -2007,8 +2007,8 @@
     }
   }
 
-  // Flaming ball impact: a firestarting explosive woosh — like Cannonball's blast, scaled down so
-  // Cannonball stays king while every burning-ball hit or Meteor Bank blooms with fire.
+  // Flaming ball impact: a rushing, blossoming flaming woosh — like a sudden surge of fire
+  // sweeping across the contact point rather than a percussive impact knock.
   function playFireImpact(options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
@@ -2017,26 +2017,44 @@
     const now = ctx.currentTime;
     const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.8));
 
-    // 1. Torch-ignition flare pop
-    noiseGrain(ctx, dest, now, 0.042, { freq: 2900, to: 920, q: 1.25, level: 0.34 * volume });
-
-    // 2. Blooming firestarter woosh (opens fast then darkens like a smaller Cannonball)
+    // 1. Primary blooming flame roar (smooth swell and sweeping resonance without percussive snap)
     const src = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
     src.buffer = grainNoise(ctx);
     filter.type = 'lowpass';
-    filter.Q.setValueAtTime(0.95, now);
-    filter.frequency.setValueAtTime(850, now);
-    filter.frequency.exponentialRampToValueAtTime(3400, now + 0.024);
-    filter.frequency.exponentialRampToValueAtTime(185, now + 0.34);
+    filter.Q.setValueAtTime(1.4, now);
+    filter.frequency.setValueAtTime(520, now);
+    filter.frequency.exponentialRampToValueAtTime(2600, now + 0.055);
+    filter.frequency.exponentialRampToValueAtTime(240, now + 0.44);
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(0.35 * volume, now + 0.016);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    gain.gain.linearRampToValueAtTime(0.42 * volume, now + 0.048);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.46);
     src.connect(filter); filter.connect(gain); gain.connect(dest);
-    src.start(now, Math.random() * 0.6); src.stop(now + 0.36);
+    src.start(now, Math.random() * 0.6); src.stop(now + 0.48);
 
-    // 3. Compact warm punch (tighter & lighter than Cannonball's 75->30 Hz boom)
-    blip(ctx, dest, now, 0.22, 112, 44, 0.32 * volume);
-    blip(ctx, dest, now, 0.085, 220, 82, 0.18 * volume);
+    // 2. High-frequency flame air rush / turbulent heat flare
+    const wispSrc = ctx.createBufferSource(), wispFilter = ctx.createBiquadFilter(), wispGain = ctx.createGain();
+    wispSrc.buffer = grainNoise(ctx);
+    wispFilter.type = 'bandpass';
+    wispFilter.Q.setValueAtTime(1.1, now);
+    wispFilter.frequency.setValueAtTime(1400, now);
+    wispFilter.frequency.exponentialRampToValueAtTime(3200, now + 0.04);
+    wispFilter.frequency.exponentialRampToValueAtTime(650, now + 0.36);
+    wispGain.gain.setValueAtTime(0.0001, now);
+    wispGain.gain.linearRampToValueAtTime(0.24 * volume, now + 0.035);
+    wispGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.38);
+    wispSrc.connect(wispFilter); wispFilter.connect(wispGain); wispGain.connect(dest);
+    wispSrc.start(now, Math.random() * 0.6); wispSrc.stop(now + 0.40);
+
+    // 3. Gentle warm body breath (soft low-frequency fire swell, no click/thud)
+    const breath = ctx.createOscillator(), breathGain = ctx.createGain();
+    breath.type = 'sine';
+    breath.frequency.setValueAtTime(68, now);
+    breath.frequency.exponentialRampToValueAtTime(42, now + 0.28);
+    breathGain.gain.setValueAtTime(0.0001, now);
+    breathGain.gain.linearRampToValueAtTime(0.14 * volume, now + 0.05);
+    breathGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+    breath.connect(breathGain); breathGain.connect(dest);
+    breath.start(now); breath.stop(now + 0.34);
   }
 
   // Goal-line save: a crisp, rewarding metallic blade "shing / tink" (gentler when saving an own-team touch).

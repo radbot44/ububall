@@ -2071,7 +2071,7 @@ test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim
   env.handleWall(bodies[0], 95, "wall", -Math.SQRT1_2, -Math.SQRT1_2, true);
   assert.equal(calls.carve.length, 1, "Rim-Around triggers playCarve");
   assert.ok(fx.skidState[0]?.time >= 0.2, "Rim-Around feeds skidState for curved skate mark");
-  assert.ok(fx.particles.some(p => p.color === "#e8f7ff"), "Rim-Around emits fine ice-mist spray");
+  assert.ok(fx.particles.some(p => p.color === "#ffb347" || p.color === "#fff1c1" || p.color === "#ff7a1a"), "Rim-Around emits skate sparks like the hot ball");
   now += 50; // within 180 ms cooldown
   env.handleWall(bodies[0], 80, "wall", -Math.SQRT1_2, -Math.SQRT1_2, true);
   assert.equal(calls.carve.length, 1, "playCarve is cooldown-gated across multi-tick corner carves");

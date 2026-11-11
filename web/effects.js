@@ -301,9 +301,9 @@
         },
         {
           id: 'corner-carve',
-          title: 'Corner Rim-Around (Skate Edge Carve & Rooster-Tail Spray)',
+          title: 'Corner Rim-Around (Skate Edge Carve & Friction Sparks)',
           when: 'Skater skims a 100 px curved corner arc (`vn <= 190`, `|vt| >= 150`) with co-rotating spin (`rimmed = true`).',
-          visual: 'Curved rooster-tail sheet of ice crystals & streak shards (`#9be7ff` / `#e8f7ff` / `#ffffff`) fanning backward and inward along the skate edge, stronger curved corner gouge, and speed-pitched edge-bite carve sound.',
+          visual: 'Stream of glowing friction sparks & streak sparks (`#fff1c1` / `#fff3b0` / `#ffc43d` / `#ffb347` / `#ff7a1a`) like the hot ball spraying backward from the skate edge, curved corner skid gouge, and speed-pitched edge-bite carve sound.',
           soundLabel: 'Play edge-bite carve',
           duration: 2.4,
           playSound: ctx => ctx.audio()?.playCarve({ volume: 0.55, speed: 500, rimmed: true }),
@@ -530,7 +530,7 @@
           id: 'fireball-burn',
           title: 'Ball Heat Stages, Ignition Burst, Ice Burn & Meteor Bank',
           when: 'Ball pace crosses 540 (orange) -> 720 (red + sparks) -> 800 (red-hot) -> 840+ on fire (`sparkBall` ignition burst, `burnIce`, `r.meteor` board scorch).',
-          visual: 'Mid-flight ignition shockwave rings, flash, ember streaks & ignition whoof at 60 heat ticks; glowing fireball, additive flames, scorched ice burn ribbon, and Meteor Bank board flex with glowing `#ff6a1a`/`#fff2b2` char, heat-mirage warp & tangential ember streaks.',
+          visual: 'Mid-flight ignition shockwave rings, flash, ember streaks & ignition whoof at 60 heat ticks; glowing fireball, additive flames, scorched ice burn ribbon, and Meteor Bank impact hotspot glow, board/ground circular black ash char poof, heat-mirage warp & tangential ember streaks.',
           soundLabel: 'Play fire sizzle (1.5s)',
           variants: [
             { id: 'fire', label: 'Full Fireball + Meteor Bank' },
@@ -569,8 +569,8 @@
           id: 'fireball-plow',
           title: 'Flaming Ball Impacts: Warp, Heat Mirage, Plow & Hot Shot',
           when: 'Flaming ball strikes a skater, boards, or defender (`HIT_STOP.fire = 35ms`, `fx.fireWarp`, `plow = true`, `HOT_DRIVE`, `playFireImpact`).',
-          visual: '35ms minor hit-stop on ubu contact, damped squash-and-stretch warp on both the fireball and colliding ubu, contact glow + rising refractive heat-mirage depth distortion, 15-particle flame scatter, and explosive fire woosh.',
-          soundLabel: 'Play fire impact woosh',
+          visual: '35ms minor hit-stop on ubu contact, damped squash-and-stretch warp on both the fireball and colliding ubu, contact glow + rising refractive heat-mirage depth distortion, 15-particle flame scatter, and surging resonant flaming woosh.',
+          soundLabel: 'Play flaming woosh',
           variants: [
             { id: 'plow', label: 'Overpower Defender (Plow)' },
             { id: 'hotshot', label: 'Teammate Trap + Hot Shot' }

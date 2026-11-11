@@ -1238,11 +1238,16 @@
             hi: Math.min(best.run.length - 1, best.k + half),
             net,
             meteor: isMeteor,
+            x, y, nx, ny,
             side: x < 500 ? 0 : 1,
             amp: Math.min(net || isMeteor ? 1.25 : 1, velocity / (isMeteor ? 440 : 500)),
             life: isMeteor ? .72 : .6,
             duration: isMeteor ? .72 : .6
           });
+          if (isMeteor) {
+            fx.burns.push({ poof: true, x, y, radius: 22, age: 0 });
+            if (fx.burns.length > 30) fx.burns.shift();
+          }
         }
       }
     }
@@ -1320,7 +1325,26 @@
         softRibbon(s.points, p => s.width * .3 * p.depth * thin, s.width * .2, '#000000');
       }
       for (const s of fx.burns) {
-        if (s.points.length < 2) continue;
+        if (s.poof) {
+          const age = Math.floor(s.age * 4) / 4;
+          const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
+          if (fade <= 0.01) continue;
+          const r = s.radius || 22;
+          ctx.save();
+          ctx.globalAlpha = 0.38 * fade;
+          ctx.fillStyle = '#2b1206';
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, r * 1.35, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 0.32 * fade;
+          ctx.fillStyle = '#000000';
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, r * 0.9, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          continue;
+        }
+        if (!s.points || s.points.length < 2) continue;
         const age = Math.floor(s.age * 4) / 4;
         const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
         ctx.globalAlpha = .3 * fade;
@@ -1340,7 +1364,7 @@
         let key = view.canvas.width + ',' + view.canvas.height;
         for (const s of fx.skids) key += ',' + Math.floor(s.age * 4) + ':' + s.points.length;
         key += '|';
-        for (const s of fx.burns) key += ',' + Math.floor(s.age * 4) + ':' + s.points.length;
+        for (const s of fx.burns) key += ',' + Math.floor(s.age * 4) + ':' + (s.poof ? 'p' + Math.round(s.x) + '_' + Math.round(s.y) : (s.points?.length || 0));
         cachedLayer(fx.iceCache, key, paintIce, Math.min(1, 1000 / view.canvas.width));
       }
       if (getPhase() === 'plan' && pulseMode() && !P.settled(view.bodies)) {
@@ -1429,37 +1453,56 @@
           const w = r.run[k], d = bulge * Math.sin(Math.PI * (k - r.lo) / Math.max(1, r.hi - r.lo)) ** (r.goalPocket ? 1.4 : 2);
           ctx.lineTo(w.x + w.nx * d, w.y + w.ny * d);
         }
-        if (r.meteor) {
-          const charFade = (1 - p) ** 1.15;
+        const netColor = r.side ? away : home;
+        ctx.globalAlpha = (1 - p) * .9;
+        ctx.strokeStyle = r.net ? netColor : border;
+        ctx.lineWidth = r.goalPocket ? 5.2 : 4;
+        ctx.stroke();
+        if (r.goalPocket && p < 0.65) {
+          ctx.globalAlpha = (1 - p / 0.65) * 0.65;
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+        if (r.meteor && r.x != null && r.y != null) {
+          // Hot glow centered strictly on the impact site
+          const glowFade = (1 - p) ** 1.35;
+          if (glowFade > 0.01) {
+            ctx.save();
+            const glowR = 26 * (0.8 + 0.35 * (1 - glowFade));
+            const grad = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, glowR);
+            grad.addColorStop(0, '#ffffff');
+            grad.addColorStop(0.25, '#fff3b0');
+            grad.addColorStop(0.55, '#ff7a1a');
+            grad.addColorStop(0.85, 'rgba(255, 84, 0, 0.45)');
+            grad.addColorStop(1, 'rgba(255, 84, 0, 0)');
+            ctx.globalAlpha = glowFade * 0.88;
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(r.x, r.y, glowR, 0, Math.PI * 2);
+            ctx.fill();
+            // Intense core flash at impact point
+            ctx.globalAlpha = glowFade * 0.95;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(r.x, r.y, 6.5 * glowFade, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+          // Board char mark at impact site
+          const charFade = (1 - p) ** 0.85;
+          ctx.save();
           ctx.globalAlpha = charFade * 0.55;
-          ctx.shadowColor = '#ff5500';
-          ctx.shadowBlur = 12 * (view.canvas.width / 1000);
-          ctx.strokeStyle = '#ff6a1a';
-          ctx.lineWidth = 8.5;
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-          ctx.globalAlpha = charFade * 0.92;
-          ctx.strokeStyle = '#ffb347';
-          ctx.lineWidth = 4.5;
-          ctx.stroke();
-          if (charFade > 0.3) {
-            ctx.globalAlpha = (charFade - 0.3) * 1.1;
-            ctx.strokeStyle = '#fff2b2';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-          }
-        } else {
-          const netColor = r.side ? away : home;
-          ctx.globalAlpha = (1 - p) * .9;
-          ctx.strokeStyle = r.net ? netColor : border;
-          ctx.lineWidth = r.goalPocket ? 5.2 : 4;
-          ctx.stroke();
-          if (r.goalPocket && p < 0.65) {
-            ctx.globalAlpha = (1 - p / 0.65) * 0.65;
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-          }
+          ctx.fillStyle = '#1c0c04';
+          ctx.beginPath();
+          ctx.arc(r.x, r.y, 16, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = charFade * 0.45;
+          ctx.fillStyle = '#000000';
+          ctx.beginPath();
+          ctx.arc(r.x, r.y, 10, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
         }
         ctx.restore();
       }
@@ -2535,25 +2578,27 @@
           const moveAng = Math.atan2(body.vy || 0, body.vx || 0);
           const sprayBase = moveAng + Math.PI;
           const inwardAngle = Math.atan2(-ny, -nx);
-          const count = 8 + Math.round(7 * speedNorm);
+          const count = 7 + Math.round(6 * speedNorm);
+          const sparkColors = ['#fff1c1', '#fff3b0', '#ffc43d', '#ffb347', '#ff7a1a'];
           for (let k = 0; k < count && fx.particles.length < 450; k++) {
             const frac = k / Math.max(1, count - 1);
-            const ang = sprayBase * (1 - frac * 0.42) + inwardAngle * (frac * 0.42) + (Math.random() - .5) * .36;
-            const spd = (55 + Math.random() * 115) * (0.7 + 0.55 * speedNorm);
-            const life = .15 + Math.random() * .15;
+            const ang = sprayBase * (1 - frac * 0.42) + inwardAngle * (frac * 0.42) + (Math.random() - .5) * .38;
+            const spd = (65 + Math.random() * 125) * (0.7 + 0.55 * speedNorm);
+            const life = .14 + Math.random() * .15;
             const p = {
               x: cx, y: cy, px: cx, py: cy,
-              vx: Math.cos(ang) * spd - nx * (22 + 24 * frac),
-              vy: Math.sin(ang) * spd - ny * (22 + 24 * frac),
+              vx: Math.cos(ang) * spd - nx * (18 + 20 * frac),
+              vy: Math.sin(ang) * spd - ny * (18 + 20 * frac),
               team: -1,
-              color: k % 3 === 0 ? '#9be7ff' : k % 2 ? '#e8f7ff' : '#ffffff',
-              life, duration: life
+              color: sparkColors[k % sparkColors.length],
+              life, duration: life,
+              snap: true,
+              overlay: true
             };
-            if (k % 3 === 0) {
+            if (k % 2 === 0) {
               p.materialShape = 'streak';
               p.angle = ang;
-              p.size = 3.2 + Math.random() * 2.4;
-              p.snap = true;
+              p.size = 2.4 + Math.random() * 1.8;
             }
             fx.particles.push(p);
           }
@@ -2604,6 +2649,17 @@
               color: k % 3 === 0 ? '#fff3b0' : k % 2 === 0 ? '#ff9f1c' : '#ff5400',
               life, duration: life,
               materialShape: 'streak', angle: ang, size: 3.8 + Math.random() * 2.6, snap: true, overlay: true
+            });
+          }
+          for (let k = 0; k < 7 && fx.particles.length < 450; k++) {
+            const ang = Math.atan2(-ny, -nx) + (Math.random() - 0.5) * 1.5;
+            const spd = 25 + Math.random() * 65, life = 0.28 + Math.random() * 0.18;
+            fx.particles.push({
+              x: cx, y: cy, px: cx, py: cy,
+              vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+              team: -1,
+              color: k % 2 === 0 ? '#1f130b' : '#000000',
+              life, duration: life
             });
           }
         }
