@@ -1218,8 +1218,102 @@
     y = Math.max(6 * gameUi.scale(), Math.min(r.stageHeight - height - 6 * gameUi.scale(), y));
     control.style.transform = `translate3d(${x}px, ${y}px, 0)`;
   }
+  let collectionShownLength = 1000, collectionTargetLength = 1000, collectionLengthRaf = 0;
+  let collectionRotateHold = false, collectionLengthOverride = null, collectionShrinkingBox = null;
+  function stepCollectionLength() {
+    collectionLengthRaf = 0;
+    if (shot !== 'collection' || collectionLengthOverride !== null || collectionRotateHold) return;
+    const diff = collectionTargetLength - collectionShownLength;
+    if (Math.abs(diff) <= 1.5 || reducedMotion.matches) {
+      collectionShownLength = collectionTargetLength;
+      rinkStage.style?.removeProperty?.('--collection-hold-h');
+      layoutDirty = true;
+      draw();
+      return;
+    }
+    collectionShownLength += diff * 0.24;
+    if (rinkStage.clientWidth > 0) {
+      rinkStage.style?.setProperty?.('--collection-hold-h', Math.round(rinkStage.clientWidth * collectionShownLength / 600) + 'px');
+    }
+    layoutDirty = true;
+    draw();
+    if (typeof requestAnimationFrame === 'function') collectionLengthRaf = requestAnimationFrame(stepCollectionLength);
+  }
   function fitStadium() {
     if (!stageArea || !rinkStage || !rinkWrap) return;
+    if (collectionShrinkingBox) {
+      visibleRinkHeight = 600;
+      const { width: sw, height: sh, length: sl } = collectionShrinkingBox;
+      const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+      const wrapH = Math.max(120, Math.min(sh, vh));
+      rinkStage.style.width = sw + 'px';
+      rinkStage.style.height = sh + 'px';
+      rinkWrap.style.width = '100%';
+      rinkWrap.style.height = wrapH + 'px';
+      rinkWrap.style.marginBottom = -wrapH + 'px';
+      rinkWrap.style.top = '';
+      rinkWrap.style.left = '';
+      rinkWrap.style.transform = '';
+      fieldView.collectionPortrait = { length: sl, viewTop: 0, viewSpan: 600 * (wrapH / Math.max(1, sw)) };
+      return;
+    }
+    if (shot === 'collection') {
+      visibleRinkHeight = 600;
+      rinkStage.style.width = '';
+      rinkStage.style.height = '';
+      const stageW = Math.max(120, rinkStage.clientWidth || stageArea.clientWidth || stadium?.clientWidth || 600);
+      const minH = Math.round(stageW * 5 / 3);
+      if (collectionRotateHold) {
+        rinkWrap.style.width = '100%';
+        rinkWrap.style.height = minH + 'px';
+        rinkWrap.style.marginBottom = -minH + 'px';
+        rinkWrap.style.top = '';
+        rinkWrap.style.left = '';
+        rinkWrap.style.transform = '';
+        collectionShownLength = collectionTargetLength = 1000;
+        fieldView.collectionPortrait = { length: 1000, viewTop: 0, viewSpan: 1000 };
+        return;
+      }
+      const naturalH = Math.max(minH, $('collection-world')?.offsetHeight || rinkStage.offsetHeight || minH);
+      const desiredLength = Math.max(1000, 600 * (naturalH / stageW));
+      if (collectionLengthOverride !== null) {
+        collectionShownLength = collectionTargetLength = Math.max(1000, collectionLengthOverride);
+      } else if (!collectionShownLength || reducedMotion.matches) {
+        collectionShownLength = collectionTargetLength = desiredLength;
+      } else if (Math.abs(desiredLength - collectionTargetLength) > 1.5) {
+        if (desiredLength < collectionShownLength - 2) {
+          const vh = window.innerHeight || 800;
+          const sr = rinkStage.getBoundingClientRect();
+          const visBottomPx = Math.max(minH, Math.min(stageW * collectionShownLength / 600, vh - sr.top + 180));
+          collectionShownLength = Math.min(collectionShownLength, Math.max(desiredLength, 600 * (visBottomPx / stageW)));
+          rinkStage.style?.setProperty?.('--collection-hold-h', Math.round(stageW * collectionShownLength / 600) + 'px');
+        }
+        collectionTargetLength = desiredLength;
+        if (!collectionLengthRaf && typeof requestAnimationFrame === 'function') {
+          collectionLengthRaf = requestAnimationFrame(stepCollectionLength);
+        }
+      }
+      const shownH = Math.max(naturalH, Math.round(stageW * collectionShownLength / 600));
+      const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+      const wrapH = Math.max(120, Math.min(shownH, vh));
+      rinkWrap.style.width = '100%';
+      rinkWrap.style.height = wrapH + 'px';
+      rinkWrap.style.marginBottom = -wrapH + 'px';
+      rinkWrap.style.top = '';
+      rinkWrap.style.left = '';
+      rinkWrap.style.transform = '';
+      const stageRect = rinkStage.getBoundingClientRect(), wrapRect = rinkWrap.getBoundingClientRect();
+      const offsetPx = Math.max(0, Math.min(shownH - wrapH, wrapRect.top - stageRect.top));
+      fieldView.collectionPortrait = {
+        length: collectionShownLength,
+        viewTop: 600 * (offsetPx / stageW),
+        viewSpan: 600 * (wrapH / stageW)
+      };
+      return;
+    }
+    fieldView.collectionPortrait = null;
+    rinkWrap.style.marginBottom = '';
+    rinkStage.style?.removeProperty?.('--collection-hold-h');
     if (!fieldView.portrait && !isMatchShot()) {
       visibleRinkHeight = 600;
       rinkStage.style.width = '';
@@ -1285,13 +1379,215 @@
   // play and reduced motion cut. See docs/rink-stage.md.
   let cameraMove = null;
   let cameraDone = Promise.resolve(), resolveCameraDone = null;
+  let cameraStepRaf = 0, pendingExitCollection = null, afterCollectionShrink = null;
   const playableShot = () => shot === 'match' && !cameraMove;
+  const compactPhoneStage = () => Boolean(portraitScreen?.matches) ||
+    (typeof matchMedia === 'function' && matchMedia('(max-width: 47.99rem), ((pointer: coarse) and (max-height: 600px))').matches);
   function settleCameraPromise() {
     if (resolveCameraDone) { const done = resolveCameraDone; resolveCameraDone = null; done(); }
   }
-  function camera(change) {
-    const from = rinkStage.getBoundingClientRect(), turned = fieldView.portrait;
-    if (cameraMove) { cameraMove.cancel(); cameraMove = null; stadium.classList.remove('camera-moving'); settleCameraPromise(); }
+  function clearCameraArtifacts() {
+    if (cameraStepRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(cameraStepRaf);
+    cameraStepRaf = 0;
+    afterCollectionShrink = null;
+    if (typeof collectionRotateHold !== 'undefined') collectionRotateHold = false;
+    if (typeof collectionLengthOverride !== 'undefined') collectionLengthOverride = null;
+    if (typeof collectionShrinkingBox !== 'undefined') collectionShrinkingBox = null;
+    rinkStage.classList.remove('collection-rotating', 'collection-shrinking');
+    rinkStage.style?.removeProperty?.('--shrink-left');
+    rinkStage.style?.removeProperty?.('--shrink-top');
+  }
+  function cancelActiveCamera() {
+    if (cameraMove) { cameraMove.cancel(); cameraMove = null; }
+    stadium.classList.remove('camera-moving');
+    clearCameraArtifacts();
+    settleCameraPromise();
+  }
+  function finishCameraMove() {
+    cameraMove = null;
+    stadium.classList.remove('camera-moving');
+    clearCameraArtifacts();
+    settleCameraPromise();
+    updateFirstTurnGuide();
+    layoutDirty = true; draw(); // The rink's box was measured mid-move.
+  }
+  function camera(change, prevShot = shot, nextShot = shot) {
+    const now = typeof performance !== 'undefined' ? performance.now() : 0;
+    let from = rinkStage.getBoundingClientRect(), turned = fieldView.portrait;
+    let fromCollection = prevShot === 'collection' && nextShot !== 'collection';
+    let savedExit = null;
+    if (fromCollection && from.width > 0) {
+      savedExit = { rect: from, at: now, length: typeof collectionShownLength === 'number' ? collectionShownLength : Math.max(1000, 600 * (from.height / from.width)) };
+      pendingExitCollection = savedExit;
+    } else if (!fromCollection && nextShot !== 'collection' && pendingExitCollection && (now - pendingExitCollection.at) < 40) {
+      fromCollection = true;
+      savedExit = pendingExitCollection;
+      from = savedExit.rect;
+    } else {
+      pendingExitCollection = null;
+    }
+    const enteringCollection = prevShot !== 'collection' && nextShot === 'collection';
+    if (cameraMove || cameraStepRaf) cancelActiveCamera();
+
+    if (enteringCollection) {
+      const canAnim = Boolean(rinkStage.animate) && !compactPhoneStage() && !reducedMotion.matches && !document.hidden && from.width > 0;
+      if (!canAnim) {
+        change();
+        layoutDirty = true; draw();
+        return;
+      }
+      if (typeof collectionRotateHold !== 'undefined') collectionRotateHold = true;
+      if (typeof collectionLengthOverride !== 'undefined') collectionLengthOverride = 1000;
+      rinkStage.classList.add('collection-rotating');
+      change();
+      layoutDirty = true; draw();
+      const to1 = rinkStage.getBoundingClientRect();
+      if (!(to1.width > 0 && to1.height > 0)) {
+        clearCameraArtifacts();
+        layoutDirty = true; draw();
+        return;
+      }
+      const dx = from.left + from.width / 2 - (to1.left + to1.width / 2);
+      const dy = from.top + from.height / 2 - (to1.top + to1.height / 2);
+      const startTransform = turned
+        ? `translate(${dx}px, ${dy}px) scale(${from.width / to1.width})`
+        : `translate(${dx}px, ${dy}px) rotate(90deg) scale(${from.width / to1.height})`;
+      stadium.classList.add('camera-moving');
+      cameraDone = new Promise(resolve => { resolveCameraDone = resolve; });
+      const move1 = cameraMove = rinkStage.animate([{ transform: startTransform }, { transform: 'none' }],
+        { duration: 480, easing: 'cubic-bezier(.3, .8, .2, 1)' });
+      positionSpinControl(); updateFirstTurnGuide(); updateFoulInfo();
+      move1.onfinish = () => {
+        if (cameraMove !== move1) return;
+        if (typeof collectionRotateHold !== 'undefined') collectionRotateHold = false;
+        rinkStage.classList.remove('collection-rotating');
+        layoutDirty = true; draw();
+        const to2 = rinkStage.getBoundingClientRect();
+        const minH = to1.height || (to2.width * 5 / 3);
+        const fullH = Math.max(minH, to2.height);
+        const cw = $('collection-world');
+        cw?.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: 'ease-out' });
+        if (fullH <= minH + 4) {
+          finishCameraMove();
+          return;
+        }
+        const targetLen = Math.max(1000, 600 * (fullH / Math.max(1, to2.width)));
+        const dur = 360, t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+        if (typeof collectionLengthOverride !== 'undefined') collectionLengthOverride = 1000;
+        const move2 = cameraMove = rinkStage.animate([
+          { clipPath: `inset(0 0 ${Math.max(0, fullH - minH)}px 0)` },
+          { clipPath: 'inset(0 0 0px 0)' }
+        ], { duration: dur, easing: 'cubic-bezier(.25, .85, .25, 1)' });
+        if (typeof requestAnimationFrame === 'function') {
+          const tickStretch = ts => {
+            if (cameraMove !== move2) return;
+            const p = Math.min(1, Math.max(0, (ts - t0) / dur));
+            const eased = 1 - (1 - p) ** 3;
+            if (typeof collectionLengthOverride !== 'undefined') {
+              collectionLengthOverride = 1000 + (targetLen - 1000) * eased;
+            }
+            layoutDirty = true; draw();
+            if (p < 1) cameraStepRaf = requestAnimationFrame(tickStretch);
+          };
+          cameraStepRaf = requestAnimationFrame(tickStretch);
+        }
+        move2.onfinish = () => {
+          if (cameraMove !== move2) return;
+          if (typeof collectionShownLength !== 'undefined') collectionShownLength = collectionTargetLength = targetLen;
+          finishCameraMove();
+        };
+      };
+      return;
+    }
+
+    if (fromCollection) {
+      change();
+      const canAnim = Boolean(rinkStage.animate) && !compactPhoneStage() && !reducedMotion.matches && !document.hidden && from.width > 0;
+      if (!canAnim) {
+        pendingExitCollection = null;
+        layoutDirty = true; draw();
+        return;
+      }
+      const wCol = from.width, hMin = wCol * 5 / 3;
+      const startLen = Math.max(1000, savedExit?.length || (600 * (from.height / Math.max(1, wCol))));
+      const anchorTop = Math.max(64, from.top);
+      stadium.classList.add('camera-moving');
+      cameraDone = new Promise(resolve => { resolveCameraDone = resolve; });
+
+      const startRotateBack = () => {
+        pendingExitCollection = null;
+        if (typeof collectionShrinkingBox !== 'undefined') collectionShrinkingBox = null;
+        rinkStage.classList.remove('collection-shrinking');
+        rinkStage.style?.removeProperty?.('--shrink-left');
+        rinkStage.style?.removeProperty?.('--shrink-top');
+        layoutDirty = true; draw();
+        const runDeferred = afterCollectionShrink;
+        afterCollectionShrink = null;
+        runDeferred?.();
+        const to = rinkStage.getBoundingClientRect();
+        if (!(to.width > 0 && to.height > 0)) {
+          finishCameraMove();
+          return;
+        }
+        const dx = (from.left + wCol / 2) - (to.left + to.width / 2);
+        const dy = (anchorTop + hMin / 2) - (to.top + to.height / 2);
+        const startPose = fieldView.portrait
+          ? `translate(${dx}px, ${dy}px) scale(${wCol / to.width})`
+          : `translate(${dx}px, ${dy}px) rotate(-90deg) scale(${wCol / to.height})`;
+        const rotMove = cameraMove = rinkStage.animate([{ transform: startPose }, { transform: 'none' }],
+          { duration: 480, easing: 'cubic-bezier(.3, .8, .2, 1)' });
+        positionSpinControl(); updateFirstTurnGuide(); updateFoulInfo();
+        rotMove.onfinish = () => {
+          if (cameraMove !== rotMove) return;
+          finishCameraMove();
+        };
+      };
+
+      if (startLen > 1006) {
+        const vh = typeof window !== 'undefined' && window.innerHeight ? window.innerHeight : 860;
+        const visCapLen = Math.max(1000, 600 * (Math.max(hMin, vh - anchorTop + 220) / Math.max(1, wCol)));
+        const shrinkFromLen = Math.min(startLen, visCapLen);
+        const shrinkFromH = Math.round(wCol * shrinkFromLen / 600);
+        const hMinRound = Math.round(hMin);
+        if (typeof collectionShrinkingBox !== 'undefined') {
+          collectionShrinkingBox = { width: Math.round(wCol), height: shrinkFromH, length: shrinkFromLen };
+        }
+        rinkStage.classList.add('collection-shrinking');
+        rinkStage.style?.setProperty?.('--shrink-left', Math.round(from.left) + 'px');
+        rinkStage.style?.setProperty?.('--shrink-top', Math.round(anchorTop) + 'px');
+        layoutDirty = true; draw();
+        const dur = 260, t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+        const shrinkMove = cameraMove = rinkStage.animate([
+          { clipPath: 'inset(0 0 0px 0)' },
+          { clipPath: `inset(0 0 ${Math.max(0, shrinkFromH - hMinRound)}px 0)` }
+        ], { duration: dur, easing: 'cubic-bezier(.35, 0, .25, 1)' });
+        positionSpinControl(); updateFirstTurnGuide(); updateFoulInfo();
+        if (typeof requestAnimationFrame === 'function') {
+          const tickShrink = ts => {
+            if (cameraMove !== shrinkMove) return;
+            const p = Math.min(1, Math.max(0, (ts - t0) / dur));
+            const eased = p < 0.5 ? 2 * p * p : 1 - ((-2 * p + 2) ** 2) / 2;
+            const curLen = shrinkFromLen + (1000 - shrinkFromLen) * eased;
+            if (typeof collectionShrinkingBox !== 'undefined' && collectionShrinkingBox) {
+              collectionShrinkingBox.length = curLen;
+            }
+            layoutDirty = true; draw();
+            if (p < 1) cameraStepRaf = requestAnimationFrame(tickShrink);
+          };
+          cameraStepRaf = requestAnimationFrame(tickShrink);
+        }
+        shrinkMove.onfinish = () => {
+          if (cameraMove !== shrinkMove) return;
+          if (cameraStepRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(cameraStepRaf);
+          cameraStepRaf = 0;
+          startRotateBack();
+        };
+      } else {
+        startRotateBack();
+      }
+      return;
+    }
+
     change();
     layoutDirty = true; draw();
     const to = rinkStage.getBoundingClientRect();
@@ -1305,16 +1601,14 @@
     positionSpinControl(); updateFirstTurnGuide(); updateFoulInfo();
     move.onfinish = () => {
       if (cameraMove !== move) return;
-      cameraMove = null; stadium.classList.remove('camera-moving');
-      settleCameraPromise();
-      updateFirstTurnGuide();
-      layoutDirty = true; draw(); // The rink's box was measured mid-move.
+      finishCameraMove();
     };
   }
   if (typeof window !== 'undefined') window.ubuStageReady = () => cameraDone;
   function setShot(next, { keepPortrait = false, beforeLayout = null } = {}) {
     if (!beforeLayout && shot === next && document.body?.dataset?.shot === next) return;
     if (drag !== null && next !== 'match') endCanvasDrag();
+    const prevShot = shot;
     camera(() => {
       beforeLayout?.();
       shot = next;
@@ -1331,7 +1625,7 @@
       }
       syncFullscreenButton();
       fitScorebug();
-    });
+    }, prevShot, next);
     updateReplaySkip(shot === 'match' ? goalReplay : null);
   }
   // The cast: whoever is on the ice (demo, match or replay) can skate off and back without the game
@@ -4404,7 +4698,11 @@
       return;
     }
     setShot('home', { beforeLayout: applyDom });
-    castTo(false);
+    if (rinkStage.classList.contains('collection-shrinking')) {
+      afterCollectionShrink = () => { if (shot === 'home') castTo(false); };
+    } else {
+      castTo(false);
+    }
   }
   const screenGuard = async nextScreen => {
     if (nextScreen === 'play') return true;
@@ -4847,9 +5145,16 @@
   try { ro.observe(fieldView.canvas, { box: 'device-pixel-content-box' }); } catch { ro.observe(fieldView.canvas); }
   if (stadium) ro.observe(stadium);
   if (stageArea) ro.observe(stageArea);
+  if ($('collection-world')) ro.observe($('collection-world'));
   ro.observe($('field-spin')); // Its size places it; it has none until first shown.
   const resizeField = () => { gameUi.updateScale?.(); fitSetupShot(); layoutDirty = true; draw(); };
+  const scrollCollectionField = () => {
+    if (shot !== 'collection' || collectionRotateHold) return;
+    layoutDirty = true;
+    draw();
+  };
   window.addEventListener('resize', resizeField);
+  window.addEventListener('scroll', scrollCollectionField, { passive: true });
   window.visualViewport?.addEventListener('resize', resizeField);
   requestAnimationFrame(frame);
   // "Play with my ubus" arrives as /?roster=1, on load or from the Collection screen.

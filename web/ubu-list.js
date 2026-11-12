@@ -530,7 +530,7 @@
   const BATCH = 120;
   // One list surface: a toolbar over a grid of tiles. `pick` makes a click choose the ubu (the
   // team picker) and adds an inspect button; otherwise a click inspects it.
-  function mount({ surface, toolbarHost, grid, scrollRoot, status, inspect, pick, describe, drag, hidden, paused, onEmpty }) {
+  function mount({ surface, toolbarHost, grid, scrollRoot, status, inspect, pick, describe, drag, hidden, paused, onEmpty, onToolbarChange }) {
     const state = savedState(surface);
     const tiles = new Map(), art = lazyArt(scrollRoot);
     const sentinel = el('div', { className: 'ubu-sentinel' });
@@ -633,9 +633,20 @@
       if (!allView.length) onEmpty?.(all.length ? 'filtered' : loading ? 'loading' : 'empty');
       else onEmpty?.(null);
     }
-    toolbarHost.append(toolbar(state, persist => { if (persist) saveState(surface, state); render(); }));
+    function ensureVisible(serial) {
+      const idx = allView.findIndex(item => item.serial === serial);
+      if (idx < 0) return null;
+      while (idx >= limit && limit < allView.length) appendBatch();
+      return tiles.get(serial)?.wrap || null;
+    }
+    toolbarHost.append(toolbar(state, persist => { if (persist) saveState(surface, state); onToolbarChange?.(); render(); }));
     root.addEventListener('ubu-list:change', render);
-    return { render, clearFilters: () => toolbarHost.querySelector('.ubu-clear').click() };
+    return {
+      render,
+      clearFilters: () => toolbarHost.querySelector('.ubu-clear').click(),
+      shownItems: () => [...allView],
+      ensureVisible
+    };
   }
 
   root.ubuList = Object.assign(api, {

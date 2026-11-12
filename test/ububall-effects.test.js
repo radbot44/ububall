@@ -4062,3 +4062,476 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
   realScene.setType('blob');
   assert.equal(realScene.getSilhouetteTokens(5)[0].diameter, 84, 'blob pack reports its 84u silhouette diameter');
 });
+
+test('Rink stage Phase 4: stretched portrait Collection rink, repeating markings & center logos, 2-step rotate/stretch & shrink/rotate camera moves, sticky dock, and hybrid on-ice viewer', async () => {
+  const crypto = require('node:crypto');
+  const P = require('../shared/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const ubu = require('../shared/ubu.js');
+  const ubuFile = require('../shared/ubu-file.js');
+  const rarity = require('../shared/rarity.js');
+  const ubuArchetype = require('../shared/ubu-archetype.js');
+  const pres = require('../web/ububall-presentation.js');
+  const cssSrc = fs.readFileSync(require.resolve('../web/ububall.css'), 'utf8');
+  const siteCssSrc = fs.readFileSync(require.resolve('../web/site.css'), 'utf8');
+  const htmlSrc = fs.readFileSync(require.resolve('../web/index.html'), 'utf8');
+  const siteSrc = fs.readFileSync(require.resolve('../web/site.js'), 'utf8');
+
+  // 1. Structural & CSS invariants: Collection lives inside .ball-page with sticky #collection-dock and #collection-world on .rink-stage
+  assert.equal(cssSrc.includes('body[data-shot="collection"] .ball-page { display: none; }'), false, '.ball-page is no longer hidden on collection shot');
+  const ballPageStart = htmlSrc.indexOf('<div class="ball-page">');
+  const viewerDialogStart = htmlSrc.indexOf('<dialog id="viewer"');
+  const ballPageRegion = htmlSrc.slice(ballPageStart, viewerDialogStart);
+  assert.ok(ballPageRegion.includes('data-screen="collection"'), '<main data-screen="collection"> lives inside shared .ball-page');
+  assert.match(htmlSrc, /id="collection-dock"/, 'index.html mounts sticky #collection-dock');
+  assert.match(htmlSrc, /id="collection-world"/, 'index.html mounts #collection-world inside .rink-stage');
+  assert.match(htmlSrc, /id="collection-viewer-stage"/, 'index.html mounts #collection-viewer-stage for hybrid on-ice viewer');
+  assert.match(cssSrc, /body\[data-shot="collection"\] \.collection-dock[\s\S]*?position:\s*sticky/, 'collection dock is sticky above the rink');
+  assert.match(cssSrc, /body\[data-shot="collection"\] \.ball-page[\s\S]*?min\(114rem,\s*calc\(100%\s*-\s*3rem\)\)/, 'portrait collection rink matches Ubu Mint width');
+  assert.match(siteCssSrc, /\.collection-world[\s\S]*?min-height:\s*calc\(100cqw \* 5 \/ 3\)/, 'collection world enforces minimum 3:5 portrait height');
+
+  // 2. drawPortraitRinkSurface: enforces 3:5 minimum (L >= 1000), draws top/bottom goals & creases, and repeats lines & center logos every 320/640 units
+  const recordPortraitDraw = (length, viewTop = 0, viewSpan = null) => {
+    const ops = { roundRects: [], lines: [], arcs: [], logos: [], fillRects: [] };
+    let curLine = null;
+    const g = {
+      fillStyle: '', strokeStyle: '', lineWidth: 1, globalAlpha: 1,
+      save() {}, restore() {}, clip() {}, setLineDash() {},
+      beginPath() { curLine = null; },
+      roundRect(x, y, w, h, r) { ops.roundRects.push({ x, y, w, h, r }); },
+      fill() {},
+      stroke() { if (curLine) ops.lines.push({ ...curLine, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth }); },
+      moveTo(x, y) { curLine = { x1: x, y1: y, x2: x, y2: y }; },
+      lineTo(x, y) { if (curLine) { curLine.x2 = x; curLine.y2 = y; } },
+      arc(x, y, r, a0, a1) { ops.arcs.push({ x, y, r, a0, a1 }); },
+      fillRect(x, y, w, h) { ops.fillRects.push({ x, y, w, h }); },
+      drawImage(_img, x, y, w, h) { ops.logos.push({ cx: x + w / 2, cy: y + h / 2, w, h }); }
+    };
+    const colors = { surface: '#1b1e26', border: '#393f4d', background: '#101217', home: '#e8ca48', away: '#aa54d3' };
+    const logo = { complete: true, naturalWidth: 220, naturalHeight: 44 };
+    pres.drawPortraitRinkSurface(g, P, ububallMatch, colors, logo, length, viewTop, viewSpan);
+    return ops;
+  };
+
+  // Minimum 3:5 clamp: length=480 clamps to L=1000 (boardH = 880)
+  const minOps = recordPortraitDraw(480);
+  assert.equal(minOps.roundRects[0].w, 480);
+  assert.equal(minOps.roundRects[0].h, 880, 'length below 1000 clamps to 3:5 minimum (600x1000, board height 880)');
+  assert.deepEqual(minOps.logos.map(l => l.cy), [500], 'regulation 3:5 rink has single center logo at y=500');
+  const minHorizLines = minOps.lines.filter(l => l.x1 === 60 && l.x2 === 540).map(l => l.y1);
+  assert.deepEqual(minHorizLines, [180, 500, 820], 'regulation 3:5 rink draws top zone (180), center (500), and bottom zone (820) lines');
+  assert.equal(minOps.fillRects.length, 2, 'top Away and bottom Home goal pockets drawn');
+  assert.equal(minOps.fillRects[0].y, 60 - P.rink.goalDepth, 'top goal sits above y=60');
+  assert.equal(minOps.fillRects[1].y, 940, 'bottom goal sits at y=L-60');
+
+  // Stretched rink (L=2600): lines repeat regularly every 320 units and center logos every 640 units
+  const longOps = recordPortraitDraw(2600);
+  assert.equal(longOps.roundRects[0].h, 2480);
+  assert.deepEqual(longOps.logos.map(l => l.cy), [500, 1140, 1780], 'center logos repeat regularly every 640 units as rink stretches');
+  const longHorizLines = longOps.lines.filter(l => l.x1 === 60 && l.x2 === 540).map(l => l.y1);
+  assert.deepEqual(longHorizLines, [180, 500, 820, 1140, 1460, 1780, 2100], 'interior lines repeat regularly every 320 units down the stretched rink');
+
+  // Viewport slice culling: scrolling to viewTop=1000, viewSpan=700 only draws markings near [1000..1700]
+  const sliceOps = recordPortraitDraw(5000, 1000, 700);
+  assert.deepEqual(sliceOps.logos.map(l => l.cy), [1140, 1780], 'scrolled slice renders only visible repeating center logos at exact coordinates');
+
+  // 3. Two-step camera choreography in ububall.js: rotate -> stretch on enter, shrink -> rotate on exit, cut on phones
+  const stageSlice =
+    section('  let cast = null, shot =', '  // While a video export renders') + '\n' +
+    section('  function localPlayBlocked() {', '  function updateLocalPlanClock(') + '\n' +
+    section('  function updateFoulInfo() {', '  function kickoff(isNewMatch = false) {') + '\n' +
+    section('  function updateFirstTurnGuide() {', '  function prepareCPU(initialPlans = null) {') + '\n' +
+    section('  function positionSpinControl() {', '  function fitStadium() {') + '\n' +
+    section('  let cameraMove = null;', '  // The cast: whoever is on the ice') + '\n' +
+    section('  function updateReplaySkip(replay) {', '  replaySkip.onclick =') + '\n' +
+    section('  function syncFullscreenButton() {', '  async function exitOwnedFullscreen() {') + '\n' +
+    section('  function fitOrientation() {', '  function openPause() {') + '\n' +
+    section('  function leavePlayOverlays() {', '  const screenGuard =') + '\n' +
+    section('  function demoPaused() {', '  // Waits count only while');
+
+  const makeClassList = () => {
+    const set = new Set();
+    return {
+      add: (...cs) => cs.forEach(c => set.add(c)),
+      remove: (...cs) => cs.forEach(c => set.delete(c)),
+      toggle: (c, on) => { const next = on === undefined ? !set.has(c) : Boolean(on); if (next) set.add(c); else set.delete(c); return next; },
+      contains: c => set.has(c)
+    };
+  };
+  let collectionFullHeight = 2900; // Taller than 3:5 (1200 * 5 / 3 = 2000)
+  const animHistory = [];
+  let castCalls = [];
+  const stageEls = new Map();
+  const getStageEl = id => {
+    if (!stageEls.has(id)) {
+      stageEls.set(id, {
+        id, hidden: false, open: false, inert: false,
+        style: { visibility: '', setProperty(k, v) { this[k] = v; }, removeProperty(k) { delete this[k]; } },
+        classList: makeClassList(),
+        children: [],
+        get firstElementChild() { return { textContent: '' }; },
+        replaceChildren() { this.children = []; }, setAttribute() {},
+        close() { this.open = false; },
+        animate() { return { cancel() {} }; }
+      });
+    }
+    return stageEls.get(id);
+  };
+  const mockWin = { innerHeight: 900, dispatchEvent() {} };
+  const rinkStage = {
+    classList: makeClassList(),
+    style: { setProperty(k, v) { this[k] = v; }, removeProperty(k) { delete this[k]; } },
+    getBoundingClientRect() {
+      const s = stageCtx.document.body.dataset.shot;
+      if (s === 'collection') {
+        const h = this.classList.contains('collection-rotating') ? 2000 : collectionFullHeight;
+        return { left: 120, top: 80, width: 1200, height: h };
+      }
+      if (s === 'mint') return { left: 120, top: 100, width: 1200, height: 720 };
+      return { left: 40, top: 80, width: 750, height: 450 };
+    },
+    animate(keyframes, opts) {
+      const anim = { keyframes, opts, cancelled: false, onfinish: null, cancel() { this.cancelled = true; } };
+      animHistory.push(anim);
+      return anim;
+    }
+  };
+  const stageCtx = {
+    Object, Array, Set, Map, Math, Number, String, Boolean, Promise, URL,
+    performance: { now: () => 1000 },
+    CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o?.detail; } },
+    window: mockWin,
+    P, ububallMatch,
+    $: getStageEl,
+    inDiscord: false,
+    location: { pathname: '/' },
+    scrollY: 0,
+    scrollTo() {},
+    reducedMotion: { matches: false },
+    portraitScreen: { matches: false },
+    ownsFullscreen: () => false,
+    fullscreenDisplay: { matches: false },
+    fullscreenRequest: null,
+    btnFullscreen: getStageEl('btn-fullscreen'),
+    exitOwnedFullscreen: async () => {},
+    fitScorebug() {},
+    setPortrait() {},
+    fitSetupShot() {},
+    endCanvasDrag() {},
+    drag: null,
+    fieldView: { portrait: false, field: null, bodies: P.kickoff(), mode: 'standard' },
+    fieldBox: { left: 0, top: 0, width: 750, height: 450, stageWidth: 750, stageHeight: 450, controlWidth: 120, controlHeight: 32 },
+    stagePoint: p => ({ x: p.x, y: p.y }),
+    impulseGeometry: b => ({ x: b.x, y: b.y - 40 }),
+    gameUi: { scale: () => 1 },
+    selected: 0,
+    plans: [{ angle: 0, power: 0, spin: 0, guard: false }],
+    phase: 'plan',
+    spinSlider: false,
+    firstTurnStep: null,
+    foulInfo: null,
+    foulBox: getStageEl('foul-box'),
+    goalReplay: null,
+    replaySkip: getStageEl('skip-goal-replay'),
+    demo: true,
+    online: null,
+    theater: null,
+    recording: null,
+    lineupMove: null,
+    returnPortrait: false,
+    closeFirstTurnGuide() {},
+    closeFoulInfo() {},
+    closeSummary() {},
+    stopFanfare() {},
+    gameAudio: () => ({ stopMotion() {} }),
+    isExporting: () => false,
+    statDrawer: { matches: () => false, hidePopover() {} },
+    endReplay() {},
+    hideFinger() {},
+    matchInProgress: () => false,
+    cpuClient: { dispose() {} },
+    layoutDirty: false,
+    draw() { stageCtx.layoutDirty = false; },
+    castTo: away => { castCalls.push(away); },
+    stadium: { classList: makeClassList() },
+    rinkWrap: { classList: makeClassList(), style: {} },
+    rinkStage,
+    document: {
+      hidden: false,
+      fullscreenElement: null,
+      fullscreenEnabled: true,
+      body: { dataset: { shot: 'home' }, classList: makeClassList() },
+      querySelector: () => null
+    }
+  };
+  const stageEnv = runInNewContext(
+    stageSlice + '\n;({ getShot: () => shot, screenTransition });',
+    stageCtx
+  );
+
+  // Enter Collection from Home: Step 1 rotates in-plane (rotate(90deg) -> none) at 3:5, Step 2 stretches height
+  stageCtx.location.pathname = '/collection';
+  stageEnv.screenTransition('collection', () => {}, 'play');
+  assert.equal(stageEnv.getShot(), 'collection');
+  assert.deepEqual(castCalls, [true], 'skaters scatter off the ice on entering Collection');
+  assert.equal(animHistory.length, 1, 'Step 1 (rotate to portrait) starts immediately');
+  assert.match(animHistory[0].keyframes[0].transform, /rotate\(90deg\)/, 'Step 1 rotates landscape rink -90deg CCW into 3:5 portrait');
+  assert.equal(rinkStage.classList.contains('collection-rotating'), true, 'rink holds 3:5 unstretched height during rotation');
+
+  let enterSettled = false;
+  mockWin.ubuStageReady().then(() => { enterSettled = true; });
+  await Promise.resolve();
+  assert.equal(enterSettled, false, 'ubuStageReady stays pending during Step 1 rotation');
+
+  // Finish Step 1 -> automatically chains Step 2 (height stretch from 2000 to 2900)
+  animHistory[0].onfinish();
+  assert.equal(rinkStage.classList.contains('collection-rotating'), false);
+  assert.equal(animHistory.length, 2, 'Step 2 (stretch height) chains automatically after rotation');
+  assert.match(animHistory[1].keyframes[0].clipPath, /inset\(0 0 900px 0\)/, 'Step 2 grows rink from 3:5 height (2000) to full collection height (2900)');
+  await Promise.resolve();
+  assert.equal(enterSettled, false, 'ubuStageReady waits until Step 2 stretch completes');
+
+  animHistory[1].onfinish();
+  await Promise.resolve();
+  assert.equal(enterSettled, true, 'ubuStageReady resolves once both rotate and stretch steps finish');
+
+  // Leave stretched Collection for Play (Home): Step 1 shrinks height first (deferring castTo(false)), Step 2 rotates back (+90deg CW)
+  animHistory.length = 0;
+  castCalls = [];
+  stageCtx.location.pathname = '/';
+  stageEnv.screenTransition('play', () => {}, 'collection');
+  assert.equal(stageEnv.getShot(), 'home');
+  assert.equal(animHistory.length, 1, 'Step 1 (shrink to 3:5) starts first when leaving stretched Collection');
+  assert.equal(rinkStage.classList.contains('collection-shrinking'), true);
+  assert.deepEqual(castCalls, [], 'skaters wait until portrait shrink finishes before skating back');
+
+  animHistory[0].onfinish();
+  assert.equal(rinkStage.classList.contains('collection-shrinking'), false);
+  assert.equal(animHistory.length, 2, 'Step 2 (rotate back to landscape) chains after shrink finishes');
+  assert.match(animHistory[1].keyframes[0].transform, /rotate\(-90deg\)/, 'Step 2 rotates 3:5 portrait rink +90deg CW back to Home landscape');
+  assert.deepEqual(castCalls, [false], 'skaters skate back onto the ice as the rink rotates back to Home');
+  animHistory[1].onfinish();
+
+  // Phone portrait skips rotation/stretch moves cleanly
+  animHistory.length = 0;
+  stageCtx.portraitScreen.matches = true;
+  stageCtx.location.pathname = '/collection';
+  stageEnv.screenTransition('collection', () => {}, 'play');
+  assert.equal(animHistory.length, 0, 'phones skip rotation and stretch camera animations cleanly');
+  stageCtx.portraitScreen.matches = false;
+
+  // 4. Hybrid on-ice viewer in site.js: scatter other ubus, grow selected ubu into .viewer.on-ice, Prev/Next navigation, Close & re-open, and Team Picker modal fallback
+  const { publicKey, privateKey } = await globalThis.crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+  const pubJwk = await globalThis.crypto.subtle.exportKey('jwk', publicKey);
+  const certs = [];
+  for (let i = 1; i <= 3; i++) {
+    const dna = crypto.randomBytes(128);
+    const cert = await ubuFile.sign({
+      mint: 'AAAAAAAAAAAAAAAAAAAAAA',
+      id: crypto.randomBytes(16).toString('base64url'),
+      serial: String(i).padStart(12, '0'),
+      dna: ubu.toCode(dna),
+      issuedAt: 1794441600 + i,
+      key: 'k1'
+    }, privateKey);
+    const res = await ubuFile.read(cert, {
+      allowUnsigned: false,
+      resolveKey: async () => globalThis.crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: pubJwk.x, ext: true }, { name: 'Ed25519' }, false, ['verify'])
+    });
+    const model = ubu.decode(dna);
+    certs.push({ serial: String(i).padStart(12, '0'), certificate: cert, result: res, model, rarity: rarity.scoreRarity(model), favorite: false });
+  }
+
+  const domMap = new Map();
+  const winEvents = new Map();
+  const makeNode = (tag, id = '') => {
+    const cl = makeClassList();
+    const n = {
+      tagName: tag.toUpperCase(), id, hidden: false, disabled: false, open: false, modalOpened: false, textContent: '', value: '',
+      dataset: {}, parentElement: null,
+      style: { setProperty(k, v) { this[k] = String(v); }, getPropertyValue(k) { return this[k] || ''; }, removeProperty(k) { delete this[k]; } },
+      classList: cl,
+      children: [],
+      get childElementCount() { return this.children.length; },
+      get firstChild() { return this.children[0] || null; },
+      append(...kids) {
+        for (const k of kids) {
+          if (k && typeof k === 'object') {
+            if (k.parentElement?.children) {
+              const idx = k.parentElement.children.indexOf(k);
+              if (idx >= 0) k.parentElement.children.splice(idx, 1);
+            }
+            k.parentElement = this;
+          }
+          this.children.push(k);
+        }
+      },
+      after(...kids) {
+        if (!this.parentElement) return;
+        const idx = this.parentElement.children.indexOf(this);
+        this.parentElement.children.splice(idx + 1, 0, ...kids);
+      },
+      replaceChildren(...kids) { this.children = []; this.append(...kids); },
+      setAttribute(k, v) { this[k] = String(v); },
+      getAttribute(k) { return this[k] ?? null; },
+      removeAttribute(k) { delete this[k]; },
+      closest: () => null,
+      querySelector(sel) {
+        if (sel === 'button' || sel === '.ubu-tile-main') return this.children.find(c => c?.tagName === 'BUTTON') || makeNode('button');
+        if (sel === 'canvas') return this.children.find(c => c?.tagName === 'CANVAS') || makeNode('canvas');
+        if (sel === '.ubu-tile-art') return this._artNode || this;
+        if (sel === 'use') return makeNode('use');
+        return null;
+      },
+      querySelectorAll: () => [],
+      addEventListener(type, fn) { this[`_on_${type}`] = fn; },
+      click() {
+        const ev = { target: this, detail: 1, clientX: 0, clientY: 0, stopPropagation() {}, preventDefault() {} };
+        this._on_click?.(ev);
+      },
+      focus() {},
+      show() { this.open = true; this.modalOpened = false; },
+      showModal() { this.open = true; this.modalOpened = true; },
+      close() { this.open = false; this.modalOpened = false; this._on_close?.(); },
+      getBoundingClientRect: () => ({ left: 200, top: 200, right: 320, bottom: 360, width: 120, height: 160 }),
+      getContext: () => ({
+        clearRect() {}, fillRect() {}, beginPath() {}, arc() {}, fill() {}, save() {}, restore() {},
+        translate() {}, scale() {}, createRadialGradient: () => ({ addColorStop() {} })
+      }),
+      animate(keyframes, options) {
+        const rec = { keyframes, options, cancelled: false, cancel() { this.cancelled = true; } };
+        this._lastAnim = rec;
+        return rec;
+      }
+    };
+    return n;
+  };
+  const getColEl = id => {
+    if (!domMap.has(id)) domMap.set(id, makeNode('div', id));
+    return domMap.get(id);
+  };
+  for (const sid of ['daily-pack', 'signup-stage-pack', 'home-pack']) {
+    const w = getColEl(sid), b = makeNode('button');
+    b.append(makeNode('canvas')); w.append(b);
+  }
+  getColEl('viewer').getBoundingClientRect = () => ({ left: 260, top: 180, right: 1140, bottom: 640, width: 880, height: 460 });
+  const bodyNode = makeNode('body');
+  bodyNode.dataset.shot = 'collection';
+  bodyNode.append(getColEl('viewer'));
+
+  // Populate 3 mock tiles inside #ubus and capture mount config
+  let mountedCollectionOpts = null;
+  const tileNodes = certs.map((c, idx) => {
+    const t = makeNode('div', 'tile-' + idx);
+    t.classList.add('ubu-tile');
+    t.dataset.serial = c.serial;
+    t.getBoundingClientRect = () => ({ left: 180 + idx * 180, top: 240, right: 320 + idx * 180, bottom: 420, width: 140, height: 180 });
+    return t;
+  });
+  getColEl('ubus').append(...tileNodes);
+
+  let importedVerifyKey = null;
+  const colWin = {
+    location: { pathname: '/collection' },
+    innerHeight: 900,
+    navigator: { userActivation: { hasBeenActive: false } },
+    devicePixelRatio: 1,
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    requestAnimationFrame: () => 1,
+    setTimeout: fn => { fn(); return 1; },
+    clearTimeout() {},
+    URL, Blob, TextDecoder,
+    crypto: globalThis.crypto,
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    addEventListener(type, fn) { if (!winEvents.has(type)) winEvents.set(type, []); winEvents.get(type).push(fn); },
+    dispatchEvent(ev) { for (const fn of (winEvents.get(ev.type) || [])) fn(ev); },
+    getUbuSession: () => ({ owner: 'acct-1', csrf: 'csrf' }),
+    gameUi: { icon: () => makeNode('svg'), confirm: async () => false },
+    ubu, ubuFile, rarity, ubuArchetype, ububallPhysics: P,
+    ubuRender: Object.assign(() => makeNode('svg'), {
+      back: () => makeNode('svg'), cardMaterials: () => makeNode('div'), token: () => makeNode('svg'), tokenBack: () => makeNode('svg')
+    }),
+    ubuAudio: { getAudioContext: () => null, parseVoiceInfo: () => ({ instrument: 'Sine', rootName: 'C4', rootFreq: 261.6, scale: 'Major', tempoBpm: 120, groove: 'Straight', grooveIndex: 0, notes: [] }), stop() {} },
+    ubuStarter: { status: { signup: false, daily: true }, known: true, async refresh() {} },
+    ubuList: {
+      config: async () => ({ ready: true, login: true, mint: 'AAAAAAAAAAAAAAAAAAAAAA', lifetimeLimit: 5, keys: { k1: pubJwk.x } }),
+      trustedKey: async () => {
+        importedVerifyKey ||= await globalThis.crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: pubJwk.x, ext: true }, { name: 'Ed25519' }, false, ['verify']);
+        return importedVerifyKey;
+      },
+      load: async () => {},
+      get: serial => certs.find(c => c.serial === serial) || null,
+      add() {},
+      setFavorite: async () => {},
+      serialLabel: s => '#' + Number(s),
+      rarityScore: p => p.toFixed(2),
+      heartIcon: () => makeNode('svg'),
+      mount: opts => {
+        mountedCollectionOpts = opts;
+        return { render() {}, clearFilters() {}, shownItems: () => certs, ensureVisible: s => tileNodes.find(t => t.dataset.serial === s) || null };
+      }
+    },
+    createPackScene: () => ({ async play() {}, awaitingTap: () => false, tap: () => false, reset() {}, setStarter() {}, setHints() {} }),
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({}) })
+  };
+  const colDoc = {
+    body: bodyNode,
+    activeElement: null,
+    getElementById: getColEl,
+    createElement: tag => makeNode(tag),
+    createElementNS: (_, tag) => makeNode(tag),
+    querySelector: sel => sel === '.rink-stage' ? makeNode('div', 'rink-stage') : null,
+    querySelectorAll: () => []
+  };
+  colWin.window = colWin;
+  colWin.globalThis = colWin;
+  colWin.document = colDoc;
+  colWin.performance = { now: () => 2000 };
+  colWin.Object = Object; colWin.Array = Array; colWin.Set = Set; colWin.Map = Map;
+  colWin.Math = Math; colWin.Number = Number; colWin.String = String; colWin.Boolean = Boolean;
+  colWin.Promise = Promise; colWin.JSON = JSON; colWin.Error = Error; colWin.Uint8Array = Uint8Array;
+
+  runInNewContext(siteSrc, colWin);
+  await new Promise(r => setTimeout(r, 20));
+
+  // Inspecting ubu 1 on Collection scatters tiles 0 and 2, grows viewer on ice (non-modal!), and shows Prev/Next
+  mountedCollectionOpts.inspect(certs[1]);
+  const viewerEl = getColEl('viewer');
+  assert.equal(viewerEl.open, true, 'on-ice viewer opens on Collection');
+  assert.equal(viewerEl.modalOpened, false, 'on-ice viewer uses non-modal show() so rink and sticky toolbar stay visible');
+  assert.equal(viewerEl.classList.contains('on-ice'), true, 'viewer gains .on-ice class');
+  assert.equal(viewerEl.parentElement, getColEl('collection-viewer-host'), 'viewer docks inside #collection-viewer-host');
+  assert.equal(getColEl('ubus').classList.contains('is-scattered'), true, 'other ubus scatter away on the ice');
+  assert.ok(tileNodes[0]._lastAnim && tileNodes[2]._lastAnim, 'neighbouring tiles play radial scatter animation');
+  assert.equal(getColEl('viewer-prev').hidden, false, 'Prev arrow shown for multi-ubu collection');
+  assert.equal(getColEl('viewer-next').hidden, false, 'Next arrow shown for multi-ubu collection');
+  assert.equal(getColEl('viewer-prev').disabled, false);
+  assert.equal(getColEl('viewer-next').disabled, false);
+  assert.equal(getColEl('ubunym').textContent, certs[1].model.parts.fullName);
+
+  // Step Next -> advances to ubu 2 and disables Next at end of list
+  getColEl('viewer-next').click();
+  assert.equal(getColEl('ubunym').textContent, certs[2].model.parts.fullName, 'Next arrow steps to next ubu in filtered collection');
+  assert.equal(getColEl('viewer-next').disabled, true, 'Next disables on last ubu');
+
+  // Close viewer -> cancels close animation cleanly and gathers tiles back; re-opening works cleanly without stale opacity
+  getColEl('close-viewer').click();
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(viewerEl.open, false, 'viewer closes cleanly');
+  assert.equal(getColEl('ubus').classList.contains('is-scattered'), false, 'ubu grid gathers back onto the ice');
+  assert.equal(Boolean(viewerEl._lastAnim?.cancelled), true, 'close animation is cancelled on cleanup so re-opening never stays transparent');
+
+  // Re-open ubu 0 and verify toolbar filter change closes the on-ice viewer automatically
+  mountedCollectionOpts.inspect(certs[0]);
+  assert.equal(viewerEl.open, true);
+  mountedCollectionOpts.onToolbarChange();
+  assert.equal(viewerEl.open, false, 'changing search/sort/filters in sticky dock closes open on-ice viewer');
+
+  // Calling showUbuViewer outside Collection (e.g. Choose Team picker on team shot) opens modal #viewer on document.body
+  bodyNode.dataset.shot = 'team';
+  colWin.showUbuViewer(certs[0].serial);
+  assert.equal(viewerEl.open, true);
+  assert.equal(viewerEl.modalOpened, true, 'Choose Team inspect opens modal viewer via showModal()');
+  assert.equal(viewerEl.classList.contains('on-ice'), false);
+  assert.equal(viewerEl.parentElement, bodyNode, 'modal viewer re-mounts onto document.body outside Collection');
+});

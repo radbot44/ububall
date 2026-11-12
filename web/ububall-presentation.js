@@ -623,6 +623,111 @@
     }
   }
 
+  // Stretched portrait rink for Collection: minimum 3:5 (600x1000), rounded ends and goals at top
+  // and bottom, with zone lines and centre-ice face-off circles + logos repeating at regular intervals.
+  function drawPortraitRinkSurface(g, P, ububallMatch, colors, rinkLogo = null, length = 1000, viewTop = 0, viewSpan = null) {
+    const { surface, border, background, home, away } = colors;
+    const L = Math.max(1000, Number(length) || 1000);
+    const span = viewSpan == null ? L : Math.max(1, viewSpan);
+    const visMin = viewTop - 130, visMax = viewTop + span + 130;
+    const topY = 60, bottomY = L - 60, boardH = bottomY - topY;
+    const creaseR = ububallMatch.FOULS.crease;
+    const zoneOffset = ububallMatch.attackZoneLine(P, 0) - P.rink.left;
+    const step = 500 - (topY + zoneOffset);
+
+    g.beginPath();
+    g.roundRect(60, topY, 480, boardH, 100);
+    g.fillStyle = surface;
+    g.fill();
+    g.strokeStyle = border;
+    g.lineWidth = 4;
+    g.stroke();
+
+    g.save();
+    g.beginPath();
+    g.roundRect(60, topY, 480, boardH, 100);
+    g.clip();
+
+    g.setLineDash([6, 10]);
+    if (topY + creaseR >= visMin && topY <= visMax) {
+      g.beginPath();
+      g.arc(300, topY, creaseR, 0, Math.PI);
+      g.strokeStyle = border;
+      g.lineWidth = 2;
+      g.stroke();
+    }
+    if (bottomY >= visMin && bottomY - creaseR <= visMax) {
+      g.beginPath();
+      g.arc(300, bottomY, creaseR, Math.PI, Math.PI * 2);
+      g.strokeStyle = border;
+      g.lineWidth = 2;
+      g.stroke();
+    }
+    g.setLineDash([]);
+
+    const firstY = topY + zoneOffset;
+    const kStart = Math.max(0, Math.floor((visMin - firstY) / step));
+    const kEnd = Math.max(-1, Math.ceil((Math.min(visMax, bottomY - creaseR) - firstY) / step));
+    for (let k = kStart; k <= kEnd; k++) {
+      const y = firstY + k * step;
+      const isCenter = (k % 2) === 1;
+      const clearY = isCenter ? bottomY - (creaseR + 90) : bottomY - zoneOffset;
+      if (y > clearY + 24) continue;
+      const alpha = y > clearY ? (clearY + 24 - y) / 24 : 1;
+      g.save();
+      if (alpha < 1) g.globalAlpha = Math.max(0, Math.min(1, alpha));
+      g.setLineDash([6, 10]);
+      g.beginPath();
+      g.moveTo(60, y);
+      g.lineTo(540, y);
+      g.strokeStyle = border;
+      g.lineWidth = 2;
+      g.stroke();
+      g.setLineDash([]);
+
+      if (isCenter) {
+        g.fillStyle = surface;
+        g.beginPath();
+        g.arc(300, y, 70, 0, Math.PI * 2);
+        g.fill();
+        g.beginPath();
+        g.arc(300, y, 70, 0, Math.PI * 2);
+        g.strokeStyle = border;
+        g.lineWidth = 2;
+        g.stroke();
+        if (rinkLogo?.complete && rinkLogo.naturalWidth) {
+          const w = 110, h = w * rinkLogo.naturalHeight / rinkLogo.naturalWidth;
+          g.save();
+          g.globalAlpha = .08 * Math.max(0, Math.min(1, alpha));
+          g.drawImage(rinkLogo, 300 - w / 2, y - h / 2, w, h);
+          g.restore();
+        }
+      }
+      g.restore();
+    }
+    g.restore();
+
+    const depth = P.rink.goalDepth;
+    if (topY >= visMin && topY - depth <= visMax) {
+      g.fillStyle = background;
+      g.fillRect(230, topY - depth, 140, depth);
+      g.strokeStyle = away;
+      g.lineWidth = 4;
+      g.beginPath(); g.moveTo(230, topY); g.lineTo(230, topY - depth); g.stroke();
+      g.beginPath(); g.moveTo(370, topY); g.lineTo(370, topY - depth); g.stroke();
+      g.beginPath(); g.moveTo(230, topY - depth); g.lineTo(370, topY - depth); g.stroke();
+    }
+    if (bottomY + depth >= visMin && bottomY <= visMax) {
+      g.fillStyle = background;
+      g.fillRect(230, bottomY, 140, depth);
+      g.strokeStyle = home;
+      g.lineWidth = 4;
+      g.beginPath(); g.moveTo(230, bottomY); g.lineTo(230, bottomY + depth); g.stroke();
+      g.beginPath(); g.moveTo(370, bottomY); g.lineTo(370, bottomY + depth); g.stroke();
+      g.beginPath(); g.moveTo(230, bottomY + depth); g.lineTo(370, bottomY + depth); g.stroke();
+    }
+  }
+
   function drawRinkLayer(ctx, width, height, P, ububallMatch, colors, rinkLogo, cache, doc = typeof document !== 'undefined' ? document : null) {
     const key = width + ',' + height + JSON.stringify(colors);
     if (cache?.key !== key) {
@@ -2803,11 +2908,53 @@
       const height = view.field?.height ?? Math.max(1, Math.round(rawH * cap));
       if (view.canvas.width !== width || view.canvas.height !== height) { view.canvas.width = width; view.canvas.height = height; }
       if (view.badgeCanvas.width !== width || view.badgeCanvas.height !== height) { view.badgeCanvas.width = width; view.badgeCanvas.height = height; }
-      view.badgeCtx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); view.badgeCtx.clearRect(0, 0, 1000, 600);
-      view.ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); view.ctx.clearRect(0, 0, 1000, 600);
-
       const colors = getThemeColors();
       const { text, home, away, background } = colors;
+      if (!view.field && view.collectionPortrait) {
+        const { length = 1000, viewTop = 0, viewSpan = 1000 } = view.collectionPortrait;
+        const safeSpan = Math.max(1, viewSpan);
+        view.badgeCtx.setTransform(1, 0, 0, 1, 0, 0);
+        view.badgeCtx.clearRect(0, 0, width, height);
+        view.ctx.setTransform(width / 600, 0, 0, height / safeSpan, 0, -viewTop * (height / safeSpan));
+        view.ctx.clearRect(0, viewTop - 8, 600, safeSpan + 16);
+        drawPortraitRinkSurface(view.ctx, P, ububallMatch, colors, rinkLogo, length, viewTop, safeSpan);
+        if (!view.castHidden) {
+          const skaters = getSkaters();
+          view.bodies.slice(0, 6).forEach((b, i) => {
+            const px = b.y, py = 1000 - b.x;
+            const reachR = Math.max(b.radius, b.reach || b.radius, 18);
+            if (!b.carded) {
+              view.ctx.beginPath();
+              view.ctx.arc(px, py, reachR + 2, 0, Math.PI * 2);
+              view.ctx.strokeStyle = i < 3 ? home : away;
+              view.ctx.lineWidth = 4;
+              view.ctx.stroke();
+            }
+            if (!skaters[i]) return;
+            const style = skaters[i].style;
+            const wPct = (b.radius / 3) + '%';
+            const rot = b.rotation - Math.PI / 2;
+            style.width = wPct;
+            style.opacity = b.carded ? '0.3' : '1';
+            style.filter = '';
+            style.transform = `translate(${px / 600 * renderWidth}px, ${(py - viewTop) / safeSpan * renderHeight}px) translate(-50%, -50%) rotate(${rot}rad)`;
+          });
+          const ball = view.bodies[6];
+          if (ball) {
+            const bx = ball.y, by = 1000 - ball.x;
+            view.ctx.beginPath(); view.ctx.arc(bx, by, ball.radius, 0, Math.PI * 2); view.ctx.fillStyle = background; view.ctx.fill();
+            view.ctx.beginPath(); view.ctx.arc(bx, by, ball.radius, 0, Math.PI * 2); view.ctx.strokeStyle = text; view.ctx.lineWidth = 2; view.ctx.stroke();
+            const size = ball.radius * 1.7;
+            view.ctx.save(); view.ctx.translate(bx, by); view.ctx.rotate(ball.rotation - Math.PI / 2);
+            if (ballMark.complete && ballMark.naturalWidth) view.ctx.drawImage(ballMark, -size / 2, -size / 2, size, size);
+            else drawBallFace(view.ctx, size, '#F8F7F4', '#FF7197');
+            view.ctx.restore();
+          }
+        }
+        return { width, height, colors };
+      }
+      view.badgeCtx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); view.badgeCtx.clearRect(0, 0, 1000, 600);
+      view.ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0); view.ctx.clearRect(0, 0, 1000, 600);
       fx.rinkCache = drawRinkLayer(view.ctx, width, height, P, ububallMatch, colors, rinkLogo, fx.rinkCache, doc);
       // The ice stands empty while the cast is away (the team setup shot).
       if (view.castHidden) return;
@@ -3342,6 +3489,7 @@
       drawGoalSweep,
       drawGoalCall,
       drawRinkSurface: (g, colors = getThemeColors()) => drawRinkSurface(g, P, ububallMatch, colors, rinkLogo),
+      drawPortraitRinkSurface: (g, length = 1000, viewTop = 0, viewSpan = null, colors = getThemeColors()) => drawPortraitRinkSurface(g, P, ububallMatch, colors, rinkLogo, length, viewTop, viewSpan),
       drawScene,
       handleCollision,
       handleWall,
@@ -3392,6 +3540,7 @@
     setMeterFill,
     mountSkaterSprites,
     drawRinkSurface,
+    drawPortraitRinkSurface,
     drawRinkLayer,
     createRinkPresenter
   };

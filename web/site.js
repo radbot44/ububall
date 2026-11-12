@@ -6,6 +6,7 @@
   const motionOff = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
   const waitMs = ms => motionOff() || ms <= 0 ? Promise.resolve() : new Promise(resolve => setTimeout(resolve, ms));
   const onMintShot = () => document.body?.dataset?.shot === 'mint';
+  const onCollectionShot = () => document.body?.dataset?.shot === 'collection';
 
   let config = { ready: false }, session = null, current = null, busy = false, picking = false;
   let packScene = null, offer = null, pendingSignupOpen = false, fadeNextChoices = false;
@@ -144,6 +145,7 @@
   }
 
   if ($('mint-world')) $('mint-world').hidden = false;
+  if ($('collection-world')) $('collection-world').hidden = false;
 
   const choiceViews = Array.from({ length: 3 }, (_, i) => {
     const card = document.createElement('article'); card.className = 'pack-option';
@@ -1082,8 +1084,235 @@
   }
   $('mint-retry').onclick = () => location.reload();
   $('collection-retry').onclick = () => { void collection(); };
+  let collectionViewerOpen = false, collectionViewerFromList = false, collectionViewerClosing = false;
+  let scatteredAnims = [], viewerPanelAnim = null;
+  function cancelViewerPanelAnim() {
+    if (viewerPanelAnim) { try { viewerPanelAnim.cancel(); } catch {} viewerPanelAnim = null; }
+  }
+  function cancelScatterAnims() {
+    for (const anim of scatteredAnims) {
+      try { anim.cancel(); } catch {}
+    }
+    scatteredAnims = [];
+  }
+  function updateCollectionViewerOffset() {
+    const world = $('collection-world');
+    if (!world) return;
+    const dock = $('collection-dock');
+    const dockBottom = dock && dock.offsetHeight ? Math.max(0, dock.getBoundingClientRect().bottom) : 0;
+    world.style?.setProperty?.('--collection-viewer-top', `${Math.max(12, Math.round(dockBottom + 10))}px`);
+  }
+  function syncCollectionViewerNav() {
+    const prevBtn = $('viewer-prev'), nextBtn = $('viewer-next');
+    if (!prevBtn || !nextBtn) return;
+    if (!collectionViewerOpen || !collectionViewerFromList || !current?.serial) {
+      prevBtn.hidden = true;
+      nextBtn.hidden = true;
+      return;
+    }
+    const items = collectionList?.shownItems?.() || [];
+    const idx = items.findIndex(item => item.serial === current.serial);
+    const showNav = items.length > 1 && idx >= 0;
+    prevBtn.hidden = !showNav;
+    nextBtn.hidden = !showNav;
+    prevBtn.disabled = idx <= 0;
+    nextBtn.disabled = idx < 0 || idx >= items.length - 1;
+  }
+  function scatterGridTiles(originRect, activeTile) {
+    const grid = $('ubus');
+    if (!grid) return;
+    cancelScatterAnims();
+    grid.classList.add('is-scattered');
+    if (motionOff()) return;
+    const stageRect = rinkStageEl()?.getBoundingClientRect() || { left: 0, top: 0, width: 800, height: 800 };
+    const vh = typeof innerHeight === 'number' && innerHeight > 0 ? innerHeight : 800;
+    const ox = originRect && originRect.width > 0 ? originRect.left + originRect.width / 2 : stageRect.left + stageRect.width / 2;
+    const oy = originRect && originRect.height > 0 ? originRect.top + originRect.height / 2 : Math.min(vh * 0.5, stageRect.top + stageRect.height * 0.35);
+    for (const tile of grid.children || []) {
+      if (!tile?.classList?.contains?.('ubu-tile')) continue;
+      if (tile === activeTile) {
+        const hold = tile.animate?.([{ opacity: 0 }, { opacity: 0 }], { duration: 400, fill: 'forwards' });
+        if (hold) scatteredAnims.push(hold);
+        continue;
+      }
+      const r = tile.getBoundingClientRect?.();
+      if (!r || !r.width || r.bottom < -220 || r.top > vh + 220) continue;
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      let vx = cx - ox, vy = cy - oy;
+      const dist = Math.hypot(vx, vy) || 1;
+      const push = 240 + Math.min(220, dist * 0.45);
+      vx = (vx / dist) * push;
+      vy = (vy / dist) * push * 0.78;
+      const spin = (vx >= 0 ? 1 : -1) * (10 + (Math.round(Math.abs(cx + cy)) % 12));
+      const delay = Math.min(90, Math.round(dist * 0.08));
+      const anim = tile.animate?.([
+        { transform: 'translate(0, 0) rotate(0deg) scale(1)', opacity: 1 },
+        { transform: `translate(${vx.toFixed(1)}px, ${vy.toFixed(1)}px) rotate(${spin}deg) scale(.68)`, opacity: 0 }
+      ], { duration: 360, delay, easing: 'cubic-bezier(.25, .1, .35, 1)', fill: 'forwards' });
+      if (anim) scatteredAnims.push(anim);
+    }
+  }
+  function gatherGridTiles(activeTile) {
+    const grid = $('ubus');
+    if (!grid) return;
+    cancelScatterAnims();
+    grid.classList.remove('is-scattered');
+    if (motionOff()) return;
+    const vh = typeof innerHeight === 'number' && innerHeight > 0 ? innerHeight : 800;
+    const stageRect = rinkStageEl()?.getBoundingClientRect() || { left: 0, top: 0, width: 800, height: 800 };
+    const ar = activeTile?.getBoundingClientRect?.();
+    const ox = ar && ar.width > 0 ? ar.left + ar.width / 2 : stageRect.left + stageRect.width / 2;
+    const oy = ar && ar.height > 0 ? ar.top + ar.height / 2 : vh * 0.45;
+    for (const tile of grid.children || []) {
+      if (!tile?.classList?.contains?.('ubu-tile') || tile === activeTile) continue;
+      const r = tile.getBoundingClientRect?.();
+      if (!r || !r.width || r.bottom < -180 || r.top > vh + 180) continue;
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      let vx = cx - ox, vy = cy - oy;
+      const dist = Math.hypot(vx, vy) || 1;
+      const push = 160 + Math.min(160, dist * 0.32);
+      vx = (vx / dist) * push;
+      vy = (vy / dist) * push * 0.72;
+      const spin = (vx >= 0 ? 1 : -1) * 10;
+      tile.animate?.([
+        { transform: `translate(${vx.toFixed(1)}px, ${vy.toFixed(1)}px) rotate(${spin}deg) scale(.78)`, opacity: 0 },
+        { transform: 'none', opacity: 1 }
+      ], { duration: 320, easing: 'cubic-bezier(.2, .85, .25, 1)' });
+    }
+  }
+  function mountViewerDialog(onIce) {
+    const viewer = $('viewer');
+    if (!viewer) return;
+    if (onIce && $('collection-viewer-host')) {
+      if (viewer.parentElement !== $('collection-viewer-host')) $('collection-viewer-host').append(viewer);
+      viewer.classList.add('on-ice');
+    } else {
+      if (viewer.parentElement && viewer.parentElement !== document.body) document.body.append(viewer);
+      viewer.classList.remove('on-ice');
+    }
+  }
+  function openCollectionStageViewer({ fromList = false, sourceSerial = null } = {}) {
+    const viewer = $('viewer'), stageSlot = $('collection-viewer-stage');
+    if (!viewer || !stageSlot) {
+      if (viewer && !viewer.open) viewer.showModal();
+      return;
+    }
+    const wasAlreadyOpen = collectionViewerOpen;
+    const activeTile = sourceSerial
+      ? ([...($('ubus')?.children || [])].find(el => el?.dataset?.serial === sourceSerial) || null)
+      : null;
+    const artNode = activeTile?.querySelector?.('.ubu-tile-art') || activeTile;
+    const fromRect = !wasAlreadyOpen && artNode?.getBoundingClientRect ? artNode.getBoundingClientRect() : null;
+
+    collectionViewerOpen = true;
+    collectionViewerFromList = fromList;
+    collectionViewerClosing = false;
+    updateCollectionViewerOffset();
+    stageSlot.style?.setProperty?.('--ubu-accent', current?.model?.attributes?.background?.hex || '#ff9954');
+    stageSlot.hidden = false;
+    $('collection-world')?.classList.add('viewer-open');
+    if ($('signed-out-panel') && !$('signed-out-panel').hidden) $('signed-out-panel').classList.add('viewer-behind');
+
+    if (!wasAlreadyOpen) scatterGridTiles(fromRect, activeTile);
+    if (viewer.open && !viewer.classList.contains('on-ice')) viewer.close();
+    mountViewerDialog(true);
+    if (!viewer.open) {
+      if (typeof viewer.show === 'function') viewer.show();
+      else viewer.open = true;
+    }
+    syncCollectionViewerNav();
+
+    if (!wasAlreadyOpen && !motionOff() && fromRect && fromRect.width > 0 && viewer.getBoundingClientRect) {
+      const toRect = viewer.getBoundingClientRect();
+      if (toRect.width > 0 && toRect.height > 0) {
+        const dx = (fromRect.left + fromRect.width / 2) - (toRect.left + toRect.width / 2);
+        const dy = (fromRect.top + fromRect.height / 2) - (toRect.top + toRect.height / 2);
+        const sx = Math.max(0.14, Math.min(1, fromRect.width / toRect.width));
+        const sy = Math.max(0.14, Math.min(1, fromRect.height / toRect.height));
+        cancelViewerPanelAnim();
+        viewerPanelAnim = viewer.animate?.([
+          { transform: `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${sx.toFixed(3)}, ${sy.toFixed(3)})`, borderRadius: '3rem', opacity: 0.45 },
+          { transform: 'none', borderRadius: '1.5rem', opacity: 1 }
+        ], { duration: 400, easing: 'cubic-bezier(.2, .88, .24, 1)' }) || null;
+      }
+    }
+  }
+  function cleanupCollectionViewerDom() {
+    cancelViewerPanelAnim();
+    collectionViewerOpen = false;
+    collectionViewerFromList = false;
+    collectionViewerClosing = false;
+    cancelScatterAnims();
+    $('ubus')?.classList.remove('is-scattered');
+    $('collection-world')?.classList.remove('viewer-open');
+    if ($('collection-viewer-stage')) $('collection-viewer-stage').hidden = true;
+    if ($('signed-out-panel')) $('signed-out-panel').classList.remove('viewer-behind');
+    syncCollectionViewerNav();
+  }
+  async function closeCollectionViewer({ immediate = false } = {}) {
+    const viewer = $('viewer');
+    if (!collectionViewerOpen) {
+      if (viewer?.open) viewer.close();
+      return;
+    }
+    if (collectionViewerClosing && !immediate) return;
+    collectionViewerClosing = true;
+    clearCoinTimer();
+    window.ubuAudio?.stop();
+
+    const targetSerial = collectionViewerFromList ? current?.serial : null;
+    const targetTile = targetSerial ? (collectionList?.ensureVisible?.(targetSerial) || [...($('ubus')?.children || [])].find(el => el?.dataset?.serial === targetSerial) || null) : null;
+    if (!immediate && !motionOff() && viewer?.open) {
+      if (targetTile?.scrollIntoView && targetTile.getBoundingClientRect) {
+        const tr = targetTile.getBoundingClientRect();
+        const vh = typeof innerHeight === 'number' && innerHeight > 0 ? innerHeight : 800;
+        if (tr.bottom < 80 || tr.top > vh - 60) {
+          try { targetTile.scrollIntoView({ block: 'nearest' }); } catch {}
+        }
+      }
+      const vr = viewer.getBoundingClientRect?.();
+      const artNode = targetTile?.querySelector?.('.ubu-tile-art') || targetTile;
+      const tr = artNode?.getBoundingClientRect?.();
+      gatherGridTiles(targetTile);
+      cancelViewerPanelAnim();
+      if (vr && vr.width > 0 && tr && tr.width > 0) {
+        const dx = (tr.left + tr.width / 2) - (vr.left + vr.width / 2);
+        const dy = (tr.top + tr.height / 2) - (vr.top + vr.height / 2);
+        const sx = Math.max(0.14, Math.min(1, tr.width / vr.width));
+        const sy = Math.max(0.14, Math.min(1, tr.height / vr.height));
+        viewerPanelAnim = viewer.animate?.([
+          { transform: 'none', opacity: 1 },
+          { transform: `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${sx.toFixed(3)}, ${sy.toFixed(3)})`, opacity: 0 }
+        ], { duration: 250, easing: 'cubic-bezier(.35, 0, .25, 1)', fill: 'forwards' }) || null;
+      } else {
+        viewerPanelAnim = viewer.animate?.([{ opacity: 1, scale: 1 }, { opacity: 0, scale: .92 }], { duration: 200, easing: 'ease-in', fill: 'forwards' }) || null;
+      }
+      await waitMs(250);
+    }
+    cleanupCollectionViewerDom();
+    if (viewer?.open) viewer.close();
+    targetTile?.querySelector?.('.ubu-tile-main')?.focus?.();
+  }
+  function stepCollectionViewer(dir) {
+    if (!collectionViewerOpen || !collectionViewerFromList || !current?.serial) return;
+    const items = collectionList?.shownItems?.() || [];
+    const idx = items.findIndex(item => item.serial === current.serial);
+    const next = items[idx + dir];
+    if (!next?.certificate) return;
+    collectionList?.ensureVisible?.(next.serial);
+    display(next.certificate, next.result, false);
+    $('collection-viewer-stage')?.style?.setProperty?.('--ubu-accent', current?.model?.attributes?.background?.hex || '#ff9954');
+    syncCollectionViewerNav();
+    if (!motionOff()) {
+      $('viewer-display')?.animate?.([
+        { translate: `${dir * 20}px 0`, opacity: 0.45 },
+        { translate: '0 0', opacity: 1 }
+      ], { duration: 190, easing: 'cubic-bezier(.2, .85, .25, 1)' });
+    }
+  }
+
   async function inspect(text) { return ubuFile.read(text, { resolveKey: ubuList.trustedKey }); }
-  function display(text, result, openModal = false) {
+  function display(text, result, openModal = false, { fromCollectionList = false, sourceSerial = null } = {}) {
     clearCoinTimer();
     const model = ubu.decode(ubu.fromCode(result.dna));
     const r = window.rarity ? rarity.scoreRarity(model) : null;
@@ -1109,8 +1338,14 @@
     $('viewer-fav').hidden = true;
     syncFavoriteButtons();
 
-    if (openModal && !$('viewer').open) {
-      $('viewer').showModal();
+    if (openModal) {
+      if (onCollectionShot()) {
+        openCollectionStageViewer({ fromList: fromCollectionList, sourceSerial: sourceSerial || serial });
+      } else {
+        if (collectionViewerOpen) cleanupCollectionViewerDom();
+        mountViewerDialog(false);
+        if (!$('viewer').open) $('viewer').showModal();
+      }
     }
   }
 
@@ -1265,9 +1500,32 @@
     });
   }
 
-  $('close-viewer').addEventListener('click', () => $('viewer').close());
+  $('close-viewer').addEventListener('click', () => {
+    if (collectionViewerOpen) void closeCollectionViewer();
+    else $('viewer').close();
+  });
   $('viewer').addEventListener('click', event => {
-    if (event.target === $('viewer')) $('viewer').close();
+    if (event.target === $('viewer') && !collectionViewerOpen) $('viewer').close();
+  });
+  $('collection-viewer-stage')?.addEventListener('click', event => {
+    if (!collectionViewerOpen) return;
+    if (event.target?.closest?.('#viewer, .collection-viewer-arrow')) return;
+    void closeCollectionViewer();
+  });
+  $('viewer-prev')?.addEventListener('click', () => stepCollectionViewer(-1));
+  $('viewer-next')?.addEventListener('click', () => stepCollectionViewer(1));
+  addEventListener('keydown', event => {
+    if (!collectionViewerOpen || !onCollectionShot() || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (document.querySelector('dialog:modal, :popover-open')) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      void closeCollectionViewer();
+      return;
+    }
+    if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !document.activeElement?.closest?.('.viewer-tabs, input, textarea, select')) {
+      event.preventDefault();
+      stepCollectionViewer(event.key === 'ArrowLeft' ? -1 : 1);
+    }
   });
   $('viewer-fav').addEventListener('click', () => {
     if (current?.serial) void toggleFavorite(current.serial);
@@ -1348,6 +1606,7 @@
     viewerNoteChips.forEach(chip => chip.classList.remove('is-playing-note'));
     $('viewer-voice-tone')?.classList.remove('is-active');
     $('viewer-voice-fanfare')?.classList.remove('is-active');
+    if (collectionViewerOpen && !collectionViewerClosing) cleanupCollectionViewerDom();
   });
 
   async function api(path, options) {
@@ -1364,7 +1623,8 @@
   const collectionList = ubuList.mount({
     surface: 'collection', toolbarHost: $('collection-toolbar'), grid: $('ubus'),
     status: $('collection-status'),
-    inspect: item => { display(item.certificate, item.result, true); status(''); },
+    inspect: item => { display(item.certificate, item.result, true, { fromCollectionList: true, sourceSerial: item.serial }); status(''); },
+    onToolbarChange: () => { if (collectionViewerOpen) void closeCollectionViewer({ immediate: true }); },
     hidden: item => unseen(item.serial), paused: () => choosing() || collectionHidden(),
     onEmpty: reason => {
       if (session?.owner) {
@@ -1405,6 +1665,7 @@
 
   async function collection() {
     if (choosing()) return;
+    if (session?.owner) $('collection').hidden = false;
     try {
       await ubuList.load({ refresh: true });
       collectionFailed = false;
@@ -1596,7 +1857,9 @@
     const screen = path === '/mint' ? 'mint' : path === '/collection' ? 'collection' : null;
     panel.hidden = !sessionChecked || Boolean(session?.owner) || !screen;
     if (panel.hidden) return;
-    const host = screen === 'mint' ? $('mint-world') || document.querySelector('main[data-screen="mint"]') : document.querySelector('main[data-screen="collection"]');
+    const host = screen === 'mint'
+      ? $('mint-world') || document.querySelector('main[data-screen="mint"]')
+      : $('collection-ice') || $('collection-world') || document.querySelector('main[data-screen="collection"]');
     if (host && panel.parentElement !== host) host.append(panel);
     const title = screen === 'mint' ? 'Ubu Mint' : 'Collection';
     $('signed-out-title').textContent = title;
@@ -1612,11 +1875,13 @@
   }
   window.addEventListener('ubu:before-screen', event => {
     if (event.detail !== 'mint') closeRevealImmediate();
+    if (event.detail !== 'collection' && collectionViewerOpen) void closeCollectionViewer({ immediate: true });
   });
   window.addEventListener('ubu:screen', event => {
     renderSignedOut();
     if (event.detail !== 'mint') closeRevealImmediate();
     else syncMintStage();
+    if (event.detail !== 'collection' && collectionViewerOpen) void closeCollectionViewer({ immediate: true });
   });
 
   starterPack('daily-pack', 'daily', 'Daily pack');

@@ -14,46 +14,46 @@ slide in and out around it, like moving through the menus of a video game. Whate
 
 ## Status
 
-Phase 3 is built and awaiting the owner's review (Phase 2 approved).
+Phase 4 is built and awaiting the owner's review (Phases 2–3 built).
 
 Working now (`web/index.html`, `web/app.js`, `web/site.js`, `web/site.css`, `web/pack-scene.js`,
-`web/ububall.js`, `web/ububall.css`, `shared/ubu-audio.js`):
+`web/ubu-list.js`, `web/ububall-presentation.js`, `web/ububall.js`, `web/ububall.css`,
+`shared/ubu-audio.js`):
 
-- `.arena-layout` lives in the shared `.ball-page` shell outside `main[data-screen]`; `app.js`
-  routes screen switches through `setUbuScreenTransition` so `setShot(name)` (`home`, `rules`,
-  `team`, `match`, `replay`, `mint`, `collection`) measures and glides the rink atomically across
-  Play and Ubu Mint.
-- Entering `mint` glides the rink to centre stage, scatters whoever is on the ice (`castTo(true)`)
-  and pauses the demo (`localPlayBlocked()` / `demoPaused()`); returning to `home` skates the cast
-  back (`castTo(false)`) and resumes the demo or keeps any paused CPU match intact.
-- `#mint-lights` paints a dark wash over the rink interior with feathered spotlight cutouts and
-  overhead beams tracking the dealt packs (three choice packs across left/centre/right or a single
-  centred daily/signup pack), while the site header and Mint heading stay outside the boards.
-- Clicking a choice pack swipes the unchosen packs off the rink, glides the picked pack and its
-  spotlight to centre ice, and unwraps it in silhouette mode (`pack-scene.js`).
-- On desktop, the Mint stage spans Play's full `min(114rem, calc(100% - 3rem))` content width,
-  zooming/cropping slightly vertically when height-constrained so packs and cards scale up cleanly.
-- Opening a pack keeps the five (or three) unwrapped silhouettes solid at the end of `pack-scene.js`
-  and scales/glides them in one continuous animation from their exact pack-fan positions into their
-  lineup spotlights on the ice, then zooms and pans the stage camera onto the first ubu to reveal its
-  trading card with Prev/Next arrows (on phones, overlaying the trading card directly over the
-  framed rink with a compact single-row control bar below and horizontal touch-swipe navigation
-  between cards so no vertical scrolling is needed), and on Done zooms back out, scampers all ubus
-  away and fades the next packs into position.
-- Clicking the Home screen's Signup bonus pack (`#home-pack`) navigates to `/mint`, waits for the
-  camera transition (`ubuStageReady()`) and opens the starter pack on the Mint stage.
-- Aiming input, docked desktop `rules`/`team` setup, pause/stats/summary modals, replays and CPU
-  leave/resume from Phases 1–2 continue working unchanged.
+- `.arena-layout` lives in the shared `.ball-page` shell across Play, Ubu Mint and Collection;
+  `app.js` routes screen switches through `setUbuScreenTransition` so `setShot(name)` (`home`,
+  `rules`, `team`, `match`, `replay`, `mint`, `collection`) drives all three screens on one
+  persistent rink stage.
+- Entering `collection` on desktop scatters whoever is on the ice (`castTo(true)`), rotates the
+  rink `-90deg` in-plane into a portrait `3:5` pose matching Ubu Mint's `min(114rem, calc(100% - 3rem))`
+  width, and then stretches the rink in height (`drawPortraitRinkSurface`) to hold the collection
+  rows while keeping at least the regulation `3:5` portrait height. Leaving shrinks the stretched
+  rink back to `3:5` first and then rotates `+90deg` back into the target landscape shot (`home`,
+  `mint`, or directly into `team` for `/?roster=1`). Phones and `prefers-reduced-motion` skip the
+  rotation/stretch animations cleanly.
+- `#rink` renders as a sticky viewport-sized portrait window inside `.rink-stage` so collections of
+  any size stay crisp at native DPR without oversized canvas buffers; top (Away) and bottom (Home)
+  goals and creases frame the ends while dashed zone/centre lines and centre-ice face-off circles +
+  Ububall logos repeat at regular `320`/`640`-unit intervals as you scroll.
+- `#collection-dock` (`Your ubus`, `Open .ubu`, `Play with my ubus` and `#collection-toolbar`) sits
+  outside above the top goal and sticks to the top of the viewport while scrolling; `#ubus` lives
+  directly on the ice inside `#collection-world`.
+- Selecting an ubu in Collection scatters neighbouring tiles outward across the ice and grows the
+  chosen ubu from its tile into a stage-integrated `.viewer.on-ice` panel over a colour-matched ice
+  halo, preserving all four tabs (`Ubu Stats`, `Card`, `Token`, `Sound`), Favorite, `Download .ubu`,
+  Prev/Next collection stepping and Escape/outside-ice close (gathering tiles back onto the ice),
+  while `window.showUbuViewer` from Choose Team continues opening `#viewer` as a modal.
+- Ubu Mint spotlights, pack unwrap, silhouette emergence, zoomed card reveal, aiming input, docked
+  desktop `rules`/`team` setup, pause/stats/summary modals, replays and CPU leave/resume from
+  Phases 1–3 continue working unchanged.
 
 Not done or not checked:
 
-- Collection still hides `.ball-page` and uses its standalone grid until Phase 4 rotates and
-  stretches the rink.
 - The team sheet stays a modal, with the drawn `.formation`, on phones and in the Discord Activity
-  (phases 5 and 6).
+  (phases 5 and 6); Activity Mint and Collection layout check is Phase 5.
 - Scatter, arrival and Mint scamper are not in `web/effects.html` yet (phase 7).
 
-Next step: Phase 4 (Collection: rotate to portrait, stretch rink height to hold the collection rows, ubu grid on the ice, viewer).
+Next step: Phase 5 (Discord Activity: lobby shot, Mint and Collection inside the Activity).
 
 ## Decisions (owner, 2026-11-11)
 
@@ -68,9 +68,15 @@ Next step: Phase 4 (Collection: rotate to portrait, stretch rink height to hold 
    appear as ubus off to the side — silhouetted until seen, full colour once seen). Pressing Done
    zooms back out, scampers all the ubus away and fades the next packs into position. Clicking the
    Home screen's Signup bonus pack navigates to Ubu Mint and opens after the transition.
-3. **Collection is a stretched portrait rink.** Opening it rotates the rink to portrait and then
-   grows it in height to hold the collection rows; the ubu grid lives on the ice. Leaving shrinks
-   it first, then rotates back.
+3. **Collection is a stretched portrait rink** (updated 2026-11-12). Opening it rotates the rink
+   to portrait at about the same width as the Ubu Mint rink (`min(114rem, calc(100% - 3rem))` on
+   desktop) and then grows it in height to hold the collection rows (minimum `3:5` portrait height);
+   leaving shrinks it back to `3:5` first, then rotates back. Zone/centre lines and the centre-ice
+   face-off circle + logo repeat at regular intervals down the ice as you scroll. The Collection
+   header/actions and search/sort/filter toolbar sit outside above the top goal and stay sticky on
+   scroll, while the ubu grid lives on the ice. Selecting an ubu scatters the other ubus away and
+   grows the chosen ubu into an on-ice viewer panel with the full stats, card, token and sound
+   views.
 4. **Live games.** A CPU match can be left for the home screen and returned to, as now. An online
    match still cannot be left without the forfeit confirmation.
 5. **Choose team.** The rink goes to game size. Your three ubus stand at their kickoff positions,
@@ -232,3 +238,15 @@ so it reads as part of the arena.
   scroll) plus touch swipe navigation across cards; eliminated the silhouette fade-out/re-appear by
   keeping `pack-scene.js` silhouettes solid through `t = 1` and animating `.mint-ubu` directly from
   `getSilhouetteTokens()` / `capturePackEmergence()` into the lineup as one continuous motion.
+- 2026-11-12: Phase 4 built (Collection on the persistent portrait rink). Moved
+  `<main data-screen="collection">` into `.ball-page` with sticky `#collection-dock` above the top
+  goal and `#collection-world` / `#collection-viewer-stage` inside `.rink-stage` (`web/index.html`,
+  `web/ububall.css`, `web/site.css`); added `drawPortraitRinkSurface` (`web/ububall-presentation.js`)
+  with `3:5` minimum height (`L >= 1000`), top/bottom goals and creases, viewport-windowed sticky
+  canvas rendering and regularly repeating `320`/`640`-unit lines and centre-ice circles + logos on
+  scroll; added chained two-step `rotate → stretch` and `shrink → rotate` camera moves in
+  `web/ububall.js` (with phone/reduced-motion cuts and direct `/?roster=1` handoff); built the
+  hybrid rink-and-panel `.viewer.on-ice` in `web/site.js` and `web/ubu-list.js` with radial tile
+  scatter, FLIP panel growth, colour-matched ice halo, Prev/Next collection stepping and modal
+  fallback for Choose Team inspect; added Phase 4 unit tests in `test/ububall-effects.test.js` and
+  verified desktop and mobile frames in headless Chromium.

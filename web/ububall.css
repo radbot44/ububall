@@ -41,7 +41,7 @@
 #quick-play-setup, #quick-play-signin, #online-open-note { font-size: .8125rem; font-weight: normal; }
 #online-open { display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .availability-actions:not([hidden]) { display: flex; justify-content: center; flex-wrap: wrap; gap: .5rem; margin-block: .75rem; }
-body:not([data-shot="mint"]):has(#signed-out-panel:not([hidden])) { display: flex; flex-direction: column; }
+body:not([data-shot="mint"], [data-shot="collection"]):has(#signed-out-panel:not([hidden])) { display: flex; flex-direction: column; }
 main:has(> #signed-out-panel:not([hidden])) {
   flex: 1; width: 100%; margin: 0; padding: 1.25rem;
   display: grid; place-items: center;
@@ -143,10 +143,10 @@ body.match-fullscreen .stadium { border: 0; border-radius: 0; box-shadow: none; 
   body:is([data-shot="match"], [data-shot="replay"]) .arena-layout { grid-template-columns: minmax(0, 1fr); }
   body:is([data-shot="match"], [data-shot="replay"]) .stadium { grid-column: 1; }
 }
-/* Shared persistent stage shell: Play and Ubu Mint share .arena-layout inside .ball-page; Collection hides it until Phase 4. */
+/* Shared persistent stage shell: Play, Ubu Mint and Collection share .arena-layout inside .ball-page. */
 main[data-screen="play"]:not([hidden]) { display: contents; }
 body:not([data-shot="mint"]) :is(#mint-world, #mint-reveal) { display: none !important; }
-body[data-shot="collection"] .ball-page { display: none; }
+body:not([data-shot="collection"]) #collection-world { display: none !important; }
 
 /* Ubu Mint shot: matches Play's full 114rem content width; header and Mint title stay outside the dark spotlit rink. */
 body[data-shot="mint"] .ball-page {
@@ -219,6 +219,90 @@ body[data-shot="mint"] #mint-world > #signed-out-panel {
     aspect-ratio: 5 / 3;
     inset: auto;
     flex: none;
+  }
+}
+
+/* Collection shot: stretched portrait rink matching Ubu Mint's width (minimum 3:5 height), sticky dock above, ubu grid and hybrid viewer on the ice. */
+body[data-shot="collection"] .ball-page {
+  display: grid;
+  grid-template-rows: auto auto;
+  justify-items: center;
+  width: min(114rem, calc(100% - 3rem));
+  max-width: none;
+  margin: 0 auto 2.5rem;
+}
+body[data-shot="collection"] main[data-screen="collection"]:not([hidden]) { display: contents; }
+body[data-shot="collection"] .collection-dock {
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  width: 100%;
+  padding: .625rem .875rem .5rem;
+  margin-bottom: .125rem;
+  border-radius: 0 0 1.125rem 1.125rem;
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  backdrop-filter: blur(.625rem);
+  border: .0625rem solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-top: 0;
+  box-shadow: 0 .625rem 1.5rem rgb(0 0 0 / .32);
+}
+body[data-shot="collection"] .collection-dock:not(:has(> :not([hidden]))) { display: none; }
+body[data-shot="collection"] .collection-dock #collection { margin-top: 0; }
+body[data-shot="collection"] .collection-dock .ubu-toolbar { margin: .5rem 0 .125rem; }
+body[data-shot="collection"] .arena-layout { grid-row: 2; display: block; width: 100%; margin: 0; }
+body[data-shot="collection"] :is(.team-column, .scoreboard, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin, #skip-goal-replay),
+body[data-shot="collection"] .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner, #skip-goal-replay) { display: none; }
+body[data-shot="collection"] :is(.stadium, .stadium-stage-area) {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+body[data-shot="collection"] .rink-stage {
+  display: block;
+  width: 100%;
+  aspect-ratio: auto;
+  container-type: inline-size;
+  min-height: var(--collection-hold-h, 0px);
+  overflow: visible;
+}
+body[data-shot="collection"] .rink-stage.collection-rotating {
+  aspect-ratio: 3 / 5;
+  min-height: 0;
+  overflow: hidden;
+}
+body[data-shot="collection"] .rink-stage.collection-rotating #collection-world {
+  opacity: 0;
+  pointer-events: none;
+}
+body[data-shot="collection"] .rink-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 0;
+  aspect-ratio: auto;
+  pointer-events: none;
+}
+body[data-shot="collection"] #rink { touch-action: pan-y; }
+.rink-stage.collection-shrinking {
+  position: fixed !important;
+  left: var(--shrink-left, 0px) !important;
+  top: var(--shrink-top, 4rem) !important;
+  z-index: 18;
+  aspect-ratio: auto !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
+@media (max-width: 47.99rem) {
+  body[data-shot="collection"] .ball-page {
+    width: calc(100% - 1rem);
+    margin-bottom: 1.5rem;
+  }
+  body[data-shot="collection"] .collection-dock {
+    padding: .5rem .5rem .375rem;
+    border-radius: 0 0 .875rem .875rem;
   }
 }
 
