@@ -2,14 +2,14 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 24;
+  const VERSION = 25;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
-  const DT = 1 / 240, MAX_SPEED = 720;
+  const DT = 1 / 240, BASE_LAUNCH_SPEED = 720;
   const IRON_COOLDOWN_TICKS = 48; // ~200 ms at 240 Hz DT: cooldown after an Iron Save
-  const IMPULSE = 3 * MAX_SPEED;
+  const IMPULSE = 3 * BASE_LAUNCH_SPEED;
   const SKATER_CURVE = .06, BALL_CURVE = .06, BURNING_BALL_CURVE = .08;
   const AIR_DRAG = .00015; // Quadratic drag on the ball, strongest on fast shots; ubus have none.
-  const SPIN_DECAY = 5; // Rad/s of spin every body loses each second.
+  const SPIN_DECAY = 5, SETTLED_SPIN_DECAY = 30; // Rad/s of spin every body loses each second (faster once linear motion settles).
   const STRIKE_GAIN = 1, CLOSE_SPIN_GAIN = 2; // Spin strike multiplier from range and at point blank.
   const STRIKE_POWER = .5; // Point-blank strike's extra ball speed at full spin, as a share of the ubu's speed.
   const GUARD_BRAKE = .25; // Share of velocity and spin a guarding ubu keeps when its turn starts.
@@ -21,7 +21,7 @@
   // Size trade-offs (tuning): as powers of the size multiplier, small ubus launch faster, curve and
   // re-steer more and strike spin harder; big ubus lose more speed off the boards.
   const SIZE = Object.freeze({ launch: -.28, agility: -.5, strike: -.5, boards: -.5 });
-  // Heat and fire tuning, as shares of MAX_SPEED. Fire follows the ball's
+  // Heat and fire tuning, as shares of BASE_LAUNCH_SPEED. Fire follows the ball's
   // pace: its speed with any slowing by its striking team's own ubus left out. Friction and drag slow
   // the pace as they would a free ball; boards, posts, net and an opponent's Magnet take their share
   // off it; an opponent's touch takes the ball over, leaving its pace at its real speed; it never falls
@@ -29,7 +29,7 @@
   // red from 720 and red hot from 800. Heat builds while the pace is above 840 (pausing between 504 and
   // 840, lost at 504); at FIRE_TICKS (0.25 s) of heat the ball catches fire once it really moves above
   // 840, and burns until its pace drops to 504.
-  const HEAT = Object.freeze({ orange: 540 / MAX_SPEED, red: 720 / MAX_SPEED, redHot: 800 / MAX_SPEED, fire: 840 / MAX_SPEED, sustain: .70 });
+  const HEAT = Object.freeze({ orange: 540 / BASE_LAUNCH_SPEED, red: 720 / BASE_LAUNCH_SPEED, redHot: 800 / BASE_LAUNCH_SPEED, fire: 840 / BASE_LAUNCH_SPEED, sustain: .70 });
   const FIRE_TICKS = 60;
   // An Iron Save leaves the ball and the Guard each with this share of their speed off the hit:
   // the ball dies at the Guard's feet and the Guard holds its ground,
@@ -99,10 +99,10 @@
   // carryFriction × friction meanwhile. Magnet pulls within magnetRadius, up to magnetPull px/s² at
   // contact. Shockwave bursts on first opponent proximity within shockRadius, then repels opponents;
   // Iron Save's minor blast scales teammates by shockTeammate. Cannonball adds cannonball × ball impulse. Colossus
-  // grows by colossusRadius and colossusMass.
+  // grows to uniform 1.5x max size and mass over colossusGrowTicks.
   const SUPER = Object.freeze({ ticks: 720, holdTicks: 480, carryFriction: 1.5, magnetRadius: 190, magnetPull: 1000,
     shockRadius: 170, shockForce: 1100, shockTeammate: .4, shockRepel: 550, cannonball: 1,
-    colossusRadius: 1.8, colossusMass: 1.8, colossusLaunch: 0.75,
+    colossusRadius: 25 * 1.5 * 1.5, colossusMass: 3 * Math.sqrt(1.5) * 1.5, colossusGrowTicks: 40, colossusLaunch: 0.75,
     stalwartLaunch: 0.5, stalwartFriction: 3.0, whiffRefund: 25 });
   function ballHitRadius(body) { return Math.max(body.radius, body.reach || body.radius, 18); }
   const SUPERS = Object.freeze([
@@ -142,11 +142,20 @@
     return (body.impulse || IMPULSE) / 3 * superScale * (body.sizeMult || 1) ** SIZE.launch * (1 - dazeSlow(body));
   }
   // Recomputes live physical stats from immutable base stats and active temporary effects (Guard, Iron Guard, Colossus).
+  function colossusProgress(b) {
+    if (b.superActive !== 'colossus') return 0;
+    if (!b.superTicks) return 1;
+    const totalTicks = SUPER.ticks + (b.equippedSuper?.bonusTicks ?? b.superBonusTicks ?? 0);
+    const elapsed = Math.max(0, totalTicks - b.superTicks);
+    return Math.min(1, elapsed / SUPER.colossusGrowTicks);
+  }
   function syncEffectiveStats(b) {
     if (b.team < 0) return; // The ball has fixed physical properties
-    const isColossus = b.superActive === 'colossus';
-    b.radius = isColossus ? Math.min(60, (b.baseRadius ?? b.radius) * SUPER.colossusRadius) : (b.baseRadius ?? b.radius);
-    b.mass = isColossus ? (b.baseMass ?? b.mass) * SUPER.colossusMass : (b.baseMass ?? b.mass);
+    const p = colossusProgress(b);
+    const baseR = b.baseRadius ?? b.radius;
+    const baseM = b.baseMass ?? b.mass;
+    b.radius = p > 0 ? baseR + (Math.max(baseR, SUPER.colossusRadius) - baseR) * p : baseR;
+    b.mass = p > 0 ? baseM + (Math.max(baseM, SUPER.colossusMass) - baseM) * p : baseM;
 
     if (b.guarding) {
       const mult = b.ironGuard ? 1.5 : 1.25;
@@ -507,12 +516,12 @@
             const normMass = (player.baseMass || player.mass) / 3;
             const baseStab = player.baseStability ?? player.stability ?? 1;
             const guardMult = player.guarding ? (player.ironGuard ? 4.0 : 2.0) : 1.0;
-            const colossusMult = player.superActive === 'colossus' ? 1.8 : 1.0;
+            const colossusMult = player.superActive === 'colossus' ? Math.max(1, player.mass / (player.baseMass || player.mass)) : 1.0;
             R = normMass * baseStab * (1 + delta * delta) * guardMult * colossusMult;
           }
 
           const strikerPow = ball.strikerPower || 1;
-          const E = (ballSpeed / MAX_SPEED) * strikerPow * 2.8;
+          const E = (ballSpeed / BASE_LAUNCH_SPEED) * strikerPow * 2.8;
 
           if (isFire && E > R) {
             fireWin = R / E;
@@ -812,6 +821,7 @@
         if (!b.superActive || b.team < 0 || !b.superTicks) continue;
         if (--b.superTicks > 0) {
           if (b.superActive === 'shockwave') hasShockwave = true;
+          if (b.superActive === 'colossus' && b.radius < Math.max(b.baseRadius ?? b.radius, SUPER.colossusRadius)) syncEffectiveStats(b);
           continue;
         }
         endSuper(b, bodies);
@@ -850,6 +860,7 @@
       }
     }
     if (host && ++ball.stuckTicks >= (host.superHoldTicks || SUPER.holdTicks)) { endSuper(host, bodies); host = null; }
+    let settledSpin = null;
     for (let i = 0; i < count; i++) {
       const b = bodies[i];
       if (b === ball && host) continue;
@@ -861,8 +872,10 @@
           const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
           b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
         }
+        settledSpin ??= !hasMagnet && bodies.every(o => o.vx * o.vx + o.vy * o.vy < 4);
+        const spinDecay = settledSpin ? SETTLED_SPIN_DECAY : SPIN_DECAY;
         b.rotation += b.omega * dt;
-        b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - SPIN_DECAY * dt);
+        b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - spinDecay * dt);
       }
       if (b.vx !== 0 || b.vy !== 0) {
         b.x += b.vx * dt; b.y += b.vy * dt;
@@ -911,13 +924,13 @@
     if (ball && (ball.vx !== 0 || ball.vy !== 0 || ball.pace || ball.onFire || ball.fireTicks)) {
       const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy), pace = ball.pace || 0;
       ball.pace = Math.max(speed, pace - (ball.friction + AIR_DRAG * pace * pace) * dt);
-      const share = ball.pace / MAX_SPEED;
+      const share = ball.pace / BASE_LAUNCH_SPEED;
       if (ball.onFire) {
         if (share <= HEAT.sustain) { ball.onFire = false; ball.fireTicks = 0; }
       } else {
         if (share > HEAT.fire) ball.fireTicks = Math.min(FIRE_TICKS, (ball.fireTicks || 0) + 1);
         else if (share <= HEAT.sustain) ball.fireTicks = 0;
-        if (ball.fireTicks >= FIRE_TICKS && speed > HEAT.fire * MAX_SPEED) ball.onFire = true;
+        if (ball.fireTicks >= FIRE_TICKS && speed > HEAT.fire * BASE_LAUNCH_SPEED) ball.onFire = true;
       }
     }
     const hit = spareRadii?.length >= count ? spareRadii : new Float64Array(count);
@@ -1150,7 +1163,10 @@
     return null;
   }
   function settled(bodies, ignoreBall = false) {
-    return bodies.every(b => (ignoreBall && b.team === -1) || (b.vx * b.vx + b.vy * b.vy < 4 && Math.abs(b.omega) < .05));
+    return bodies.every(b => (ignoreBall && b.team === -1) || (
+      !(b.superActive === 'colossus' && colossusProgress(b) < 1) &&
+      b.vx * b.vx + b.vy * b.vy < 4 && Math.abs(b.omega) < .05
+    ));
   }
   // Ends turn effects; keepMotion leaves velocities for a Pulse turn that ends mid-motion.
   function stop(bodies, keepMotion = false) {
@@ -1181,10 +1197,16 @@
   function stepPostGoal(bodies, dt = DT, onCollide = null, onWall = null, onShockwave = null, onSuper = null) {
     const ball = bodies.find(b => b.team === -1);
     if (ball) {
-      ball.pinX ??= ball.x; ball.pinY ??= ball.y;
+      if (ball.pinX == null) {
+        ball.pinX = ball.x;
+        ball.pinY = ball.y;
+        ball.stickOffset = null;
+        for (const b of bodies) if (b.holding) b.holding = false;
+      }
       ball.vx = 0; ball.vy = 0; ball.omega = 0;
     }
-    step(bodies, dt, onCollide, onWall, onShockwave, onSuper);
+    const skaters = ball ? bodies.filter(b => b !== ball) : bodies;
+    step(skaters, dt, onCollide, onWall, onShockwave, onSuper);
     if (ball) {
       ball.x = ball.pinX; ball.y = ball.pinY;
       ball.vx = 0; ball.vy = 0; ball.omega = 0;
@@ -1302,6 +1324,6 @@
     return { paths, impacts, stops: sim.map((b, index) => ({ index, x: b.x, y: b.y, stopped: b.vx * b.vx + b.vy * b.vy < 4 })), ticks, goal, horizon: PREDICTION_TICKS,
       guards: [...guards].map(([index, held]) => ({ index, held })), ignition, goalTargets, goalTick };
   }
-  const api = { VERSION, rink, DT, MAX_SPEED, IMPULSE, SKATER_CURVE, SPIN_DECAY, AIR_DRAG, SURFACES, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, IRON_COOLDOWN_TICKS, SNAP, RIM, TAILGATE, HIP_CLIP, tailgateFactor, ballOnFire, ballCurveFactor, holder, dazeSlow, multiplier, launchSpeed, syncEffectiveStats, applyStats, applyDoubledGuard, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
+  const api = { VERSION, rink, DT, BASE_LAUNCH_SPEED, IMPULSE, SKATER_CURVE, SPIN_DECAY, SETTLED_SPIN_DECAY, AIR_DRAG, SURFACES, SUPERS, DAZE, SIZE, SUPER, HEAT, FIRE_TICKS, IRON_COOLDOWN_TICKS, SNAP, RIM, TAILGATE, HIP_CLIP, tailgateFactor, ballOnFire, ballCurveFactor, holder, dazeSlow, multiplier, launchSpeed, syncEffectiveStats, applyStats, applyDoubledGuard, spawn, kickoff, endSuper, superMastery, step, stepPostGoal, launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, cpuPlans, startTurn, predictTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallPhysics = api;
 })(globalThis);

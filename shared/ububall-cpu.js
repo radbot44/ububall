@@ -350,7 +350,7 @@
     }
     const d = Math.hypot(x - leadX, y - leadY) || 1;
     const effRadius = superKey === 'colossus' && body.superActive !== 'colossus'
-      ? Math.min(60, (body.baseRadius ?? body.radius) * P.SUPER.colossusRadius)
+      ? Math.max(body.baseRadius ?? body.radius, P.SUPER.colossusRadius)
       : body.radius;
     const contact = Math.max(effRadius, body.reach || effRadius, 18) + ball.radius - 1;
     return aim(body, leadX - (x - leadX) / d * contact, leadY - (y - leadY) / d * contact, 260, superKey);

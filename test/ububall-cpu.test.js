@@ -128,7 +128,7 @@ test('decided() does not cut off search while ball sits in a corner or skater sl
   Object.assign(ball, { x: 500, y: 300 });
   const normalAim = C.strike(shooter, ball, 940, 300, null);
   const colossusAim = C.strike(shooter, ball, 940, 300, 'colossus');
-  assert.notEqual(normalAim.angle, colossusAim.angle, 'Colossus strike adjusts contact angle for 1.8x swollen radius');
+  assert.notEqual(normalAim.angle, colossusAim.angle, 'Colossus strike adjusts contact angle for uniform 1.5x max radius');
 });
 
 test('CPU search infers cooldown clock when omitted, sanitizes Classic supers, and curves around blockers', () => {

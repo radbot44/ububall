@@ -6,7 +6,7 @@ function ububallOnline(hooks) {
   const activity = window.ubuActivity;
   const queueStorageKey = activity ? 'ububall-queue:' + activity.instance : 'ububall-queue';
   let id = null, socket = null, session = null, state = null, retry = null, heartbeat = null;
-  let stopped = false, lastPong = 0, offset = 0, lastDraft = '', sentAt = 0;
+  let stopped = false, outdated = false, lastPong = 0, offset = 0, lastDraft = '', sentAt = 0;
   let watchKey = null, queue = null, queueTimer, queueTask, leaveTask, switching = false;
   let lobby = null, lobbyTimer, lobbyTask, lobbyStarting = false, lobbyBusy = false;
   let disposed = false, connecting = false, lobbyReady, reconcileTimer;
@@ -100,8 +100,31 @@ function ububallOnline(hooks) {
       copy.hidden = !next?.watchAllowed;
     }
   }
+  function isOutdatedState(next) {
+    if (!next || typeof next !== 'object') return false;
+    const matchVer = typeof ububallMatch !== 'undefined' ? ububallMatch.VERSION : null;
+    const physVer = typeof ububallPhysics !== 'undefined' ? ububallPhysics.VERSION : null;
+    if (next.version != null && matchVer != null && next.version !== matchVer) return true;
+    if (next.physicsVersion != null && physVer != null && next.physicsVersion !== physVer) return true;
+    return false;
+  }
+  function flagOutdated(next) {
+    if (outdated) return;
+    outdated = true; stopped = true; connecting = false; showLoading();
+    pendingMatch = null;
+    clearTimeout(lobbyTimer); clearTimeout(queueTimer); clearTimeout(retry); clearTimeout(reconcileTimer); clearInterval(heartbeat);
+    try { socket?.close(); } catch { /* socket may already be closing */ }
+    socket = null;
+    $('activity-match-offer')?.close?.();
+    $('online-dialog')?.close?.();
+    if (hooks.onOutdated) hooks.onOutdated(next);
+    else if (typeof gameUi !== 'undefined' && gameUi.blocking) {
+      gameUi.blocking({ title: 'Game updated', message: 'Ububall has updated. Refresh the page to continue playing.', confirmLabel: 'Refresh' });
+    }
+  }
   function receive(next, reopen = false) {
-    if (disposed) return;
+    if (disposed || outdated) return;
+    if (isOutdatedState(next)) { flagOutdated(next); return; }
     if (state && next.revision < state.revision) return;
     if (next.spectator) next.seat = 0; // Fixed rink orientation for viewers.
     const before = state; state = next; offset = next.now - Date.now();
@@ -160,7 +183,7 @@ function ububallOnline(hooks) {
   function nudge(text) { if (document.hidden) document.title = '● ' + text + ' · ' + title; }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = title; }, { signal: requests.signal });
   function connect() {
-    if (disposed || stopped || !id) return;
+    if (disposed || stopped || outdated || !id) return;
     connecting = true; showLoading();
     const path = watchKey === 'activity' ? '/activity-watch-socket?connection=' + connection :
       watchKey ? '/watch-socket?key=' + encodeURIComponent(watchKey) + (activity ? '&connection=' + connection : '') : '/socket' + (activity ? '?connection=' + connection : '');
@@ -204,7 +227,8 @@ function ububallOnline(hooks) {
     };
   }
   async function enter(matchId, initial, key = null) {
-    if (disposed) return;
+    if (disposed || outdated) return;
+    if (isOutdatedState(initial)) { flagOutdated(initial); return; }
     hooks.prepareOnline();
     id = matchId; watchKey = key; state = null; stopped = false; lastDraft = '';
     $('online-dialog').close();
@@ -224,7 +248,8 @@ function ububallOnline(hooks) {
     }, 10000);
   }
   async function takeMatch(match, initial, ack) {
-    if (disposed || pendingMatch?.id === match) return;
+    if (disposed || outdated || pendingMatch?.id === match) return;
+    if (isOutdatedState(initial)) { flagOutdated(initial); return; }
     if (initial.phase === 'over') { await ack(); status('Your opponent left before the match started.', true); return; }
     if (hooks.cpuActive()) {
       pendingMatch = { id: match, ack };
@@ -241,6 +266,7 @@ function ububallOnline(hooks) {
     if (!offer || offerBusy) return;
     try {
       const fresh = await api('/api/ububall/' + encodeURIComponent(offer.id) + '/state');
+      if (isOutdatedState(fresh)) { flagOutdated(fresh); return; }
       if (offer !== pendingMatch || offerBusy || fresh.phase !== 'over') return;
       pendingMatch = null; $('activity-match-offer').close();
       await offer.ack();
@@ -290,7 +316,7 @@ function ububallOnline(hooks) {
     return leaveTask;
   }
   async function finishLeave() {
-    if (!id) return true;
+    if (!id || outdated) return !outdated;
     const historyState = watchKey ? history.state : null;
     const live = !watchKey && state && ['plan', 'resolving'].includes(state.phase);
     if (live && !await gameUi.confirm({ title: 'Forfeit match?', message: `Leaving will forfeit this match and give ${state.names[1 - state.seat] || 'your opponent'} the win.`,
@@ -738,23 +764,23 @@ function ububallOnline(hooks) {
     }
   }
   return {
-    get active() { return Boolean(id); }, get state() { return state; }, get spectating() { return Boolean(watchKey); },
-    contextChanged() { if (!disposed && lobby) renderLobby(lobby); },
+    get active() { return Boolean(id) && !outdated; }, get state() { return state; }, get spectating() { return Boolean(watchKey); },
+    contextChanged() { if (!disposed && !outdated && lobby) renderLobby(lobby); },
     leave,
     // Locks in a team: owned seats send serials in Back, Top, Bottom order; every seat sends supers.
-    async ready(team) { receive(await api('/api/ububall/' + encodeURIComponent(id) + '/team', { ...team, gameNumber: state.gameNumber })); },
-    async unready() { receive(await api('/api/ububall/' + encodeURIComponent(id) + '/unready', {})); },
-    async rules(mode, gameNumber) { receive(await api('/api/ububall/' + encodeURIComponent(id) + '/rules', { mode, gameNumber })); },
-    create(mode) { createMode = mode; $('online-mode-name').textContent = ububallMatch.modeName(mode); showDialog(true); },
+    async ready(team) { if (outdated) throw new Error('Game updated.'); receive(await api('/api/ububall/' + encodeURIComponent(id) + '/team', { ...team, gameNumber: state.gameNumber })); },
+    async unready() { if (outdated) throw new Error('Game updated.'); receive(await api('/api/ububall/' + encodeURIComponent(id) + '/unready', {})); },
+    async rules(mode, gameNumber) { if (outdated) throw new Error('Game updated.'); receive(await api('/api/ububall/' + encodeURIComponent(id) + '/rules', { mode, gameNumber })); },
+    create(mode) { if (outdated) return; createMode = mode; $('online-mode-name').textContent = ububallMatch.modeName(mode); showDialog(true); },
     now: () => Date.now() + offset,
     async skipReplay() {
-      if (watchKey || state?.phase !== 'resolving' || state.replay?.goal == null || state.playUntil !== null) return;
+      if (outdated || watchKey || state?.phase !== 'resolving' || state.replay?.goal == null || state.playUntil !== null) return;
       const match = id;
       const next = await api('/api/ububall/' + encodeURIComponent(match) + '/skip-replay', { startedAt: state.replay.startedAt });
       if (id === match) receive(next);
     },
     rematch() {
-      if (watchKey || !state || state.phase !== 'over') return;
+      if (outdated || watchKey || !state || state.phase !== 'over') return;
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'rematch' }));
       } else {
@@ -762,7 +788,7 @@ function ububallOnline(hooks) {
       }
     },
     send(moves, lock = false) {
-      if (watchKey || !state || state.phase !== 'plan' || state.locked[state.seat] || !state.connected.every(Boolean) || socket?.readyState !== WebSocket.OPEN) return false;
+      if (outdated || watchKey || !state || state.phase !== 'plan' || state.locked[state.seat] || !state.connected.every(Boolean) || socket?.readyState !== WebSocket.OPEN) return false;
       const text = JSON.stringify({ type: 'moves', turn: state.turn, gameNumber: state.gameNumber, moves, lock });
       if (!lock && (text === lastDraft || Date.now() - sentAt < 120)) return false;
       socket.send(text); lastDraft = text; sentAt = Date.now(); return true;

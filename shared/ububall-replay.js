@@ -247,13 +247,12 @@
   // Rebuild the box score and Game Log together, in the recording's rink order.
   function stats(replay) {
     const six = () => Array(6).fill(0);
-    const out = { goals: six(), assists: six(), shots: six(), saves: six(), bigSaves: six(), checks: six(), cards: six(),
-      touches: six(), passes: six(), skated: six(), control: [0, 0], side: [0, 0], rounds: [], events: [], trails: [] };
-    const counts = { Goal: out.goals, Assist: out.assists, Shot: out.shots, Save: out.saves,
-      Check: out.checks, Touch: out.touches, Pass: out.passes, Foul: out.cards };
-    // The engine tallies top shot speed; saves and big saves come from the recorded turn saves.
     const engine = M.newTally(), origins = Array(6).fill(null);
-    let play = M.newPlay(), last = null, lastTick = -Infinity, clock = 0, tick, turn, turnIndex, flight = null;
+    const out = { goals: engine.goals, assists: engine.assists, shots: engine.shots, saves: engine.saves, bigSaves: engine.bigSaves,
+      checks: engine.checks, cards: engine.cards, touches: six(), passes: six(), skated: six(),
+      control: [0, 0], side: [0, 0], rounds: [], events: [], trails: [], topShot: engine.topSpeed };
+    const counts = { Touch: out.touches, Pass: out.passes };
+    let play = M.newPlay(), last = null, lastTick = -Infinity, clock = 0, tick, turn, turnIndex, flight = null, lastPost = null;
     const where = body => ({ x: body.x, y: body.y, tick, turn, turnIndex });
     const path = (origin, end) => {
       if (!origin || origin.tick >= end.tick) return null;
@@ -263,16 +262,17 @@
     const add = (type, actor, point, detail = {}) => {
       const event = { ...point, type, actor, team: actor === null ? null : Math.floor(actor / 3), round: out.rounds.length, ...detail };
       out.events.push(event);
-      if (actor !== null) counts[type][actor]++;
+      if (actor !== null && counts[type]) counts[type][actor]++;
       return event;
     };
-    const shot = (actor, point, outcome) => {
+    const shot = (actor, point, outcome, upgradeOnly = false) => {
       const origin = origins[actor];
-      if (origin?.post?.outcome === 'Post') {
-        origin.post.outcome = `Post, ${outcome.toLowerCase()}`;
-        origin.post.path = path(origin, point);
+      if (upgradeOnly && lastPost?.actor === actor && lastPost.outcome === 'Post') {
+        lastPost.outcome = `Post, ${outcome.toLowerCase()}`;
+        lastPost.path = path(origin, point);
       } else {
-        add('Shot', actor, origin || point, { outcome, path: path(origin, point) });
+        const event = add('Shot', actor, origin || point, { outcome, path: path(origin, point) });
+        lastPost = outcome === 'Post' ? event : null;
       }
     };
     let unscored = false;
@@ -282,7 +282,7 @@
       turn = t.turn;
       turnIndex = index;
       const sim = restore(t.bodies), ball = sim[6], fouls = { ...t.fouls, crease: [...t.fouls.crease] };
-      let contact, post;
+      let contact;
       const fx = {
         collide(a, b, speed, impulse, plow, iron, checker) {
           if (checker) add('Check', sim.indexOf(checker), where(checker), { target: sim.indexOf(checker === a ? b : a) });
@@ -296,11 +296,8 @@
           lastTick = tick;
         },
         pass(from, to, body) { add('Pass', from, where(body), { target: to }); },
-        wall(body, velocity, type) {
-          if (body === ball && type === 'post') {
-            const origin = contact || flight;
-            if (origin && Math.floor(origin.actor / 3) === (body.x > 500 ? 0 : 1)) post ??= { origin, point: where(body) };
-          }
+        shot(shooter, outcome, pos) {
+          if (outcome === 'Post') shot(shooter, { ...pos, tick, turn, turnIndex }, 'Post');
         }
       };
       P.startTurn(sim, t.plans);
@@ -320,28 +317,23 @@
       const before = new Float64Array(12);
       for (let k = 1; k <= t.ticks; k++) {
         tick = ++clock;
-        contact = post = null;
+        contact = null;
         for (let i = 0; i < 6; i++) { before[i * 2] = sim[i].x; before[i * 2 + 1] = sim[i].y; }
         const incomingBig = play.big;
-        const result = M.playTick(P, sim, play, fx, engine, false, true);
+        M.playTick(P, sim, play, fx, engine, false, true);
         const incoming = flight;
         if (k % 8 === 0 || k === t.ticks) sample();
-        if (contact) {
-          contact.big = result.big;
-          flight = contact;
-        }
-        if (post?.origin.big && !post.origin.post) {
-          post.origin.post = add('Shot', post.origin.actor, post.point, { outcome: 'Post', path: path(post.origin, post.point) });
-        }
-        while (t.saves[saveIndex]?.tick === k) {
-          const save = t.saves[saveIndex++];
-          if (save.own) continue;
-          const shooter = play.lastTouch[1 - sim[save.index].team];
+        if (contact) flight = contact;
+        const tickSaves = [];
+        while (t.saves[saveIndex]?.tick === k) tickSaves.push(t.saves[saveIndex++]);
+        if (tickSaves.length) {
           const point = where(ball);
-          add('Save', save.index, point, { label: save.iron ? 'Iron save' : null, path: path(shooter === null ? incoming : origins[shooter], point) });
-          if (save.iron || incomingBig) out.bigSaves[save.index]++;
-          play.saved = { at: play.age, team: sim[save.index].team };
-          if (shooter !== null) shot(shooter, point, 'Saved');
+          M.recordSaves(sim, play, engine, tickSaves, incomingBig, (save, shooter, _big, shotType) => {
+            add('Save', save.index, point, { label: save.iron ? 'Iron save' : null, path: path(shooter === null ? incoming : origins[shooter], point) });
+            if (shooter !== null && (shotType || (lastPost?.actor === shooter && lastPost.outcome === 'Post'))) {
+              shot(shooter, point, 'Saved', !shotType);
+            }
+          });
         }
         for (let i = 0; i < 6; i++) out.skated[i] += Math.hypot(sim[i].x - before[i * 2], sim[i].y - before[i * 2 + 1]);
         if (last !== null) {
@@ -350,11 +342,14 @@
         }
         M.lapseFouls(P, sim, fouls);
       }
+      M.recordCards(engine, t.cards);
       for (const actor of t.cards) add('Foul', actor, where(sim[actor]), { label: 'Yellow card' });
       if (t.goal) {
         const { team, scorer, assist, label } = t.goal;
         const point = where(ball);
-        if (scorer !== null) shot(scorer, point, 'Goal');
+        const wasCounted = play.postCounted;
+        M.recordGoal(play, engine, scorer, assist);
+        if (scorer !== null) shot(scorer, point, 'Goal', wasCounted);
         add('Goal', scorer, point, { team, label, score: t.scores[team] + 1, path: path(scorer === null ? flight : origins[scorer], point) });
         if (assist !== null) add('Assist', assist, where(ball), { target: scorer });
         out.rounds.push({ team, score: t.scores[team] + 1 });
@@ -365,7 +360,7 @@
       if (t.goal || faceoff) {
         play = M.newPlay();
         origins.fill(null);
-        last = flight = null;
+        last = flight = lastPost = null;
       }
     }
     if (unscored) out.rounds.push({ team: null });
@@ -384,7 +379,6 @@
       event.path = path(ballAt(Math.max(startTick, tick - 120)), ballAt(tick));
     }
     out.events.sort((a, b) => a.tick - b.tick);
-    out.topShot = engine.topSpeed;
     return out;
   }
   const api = { FORMAT, KEEP, MAX_TITLE, ANONYMOUS, snapshot, restore, create, clip, roundRange, anonymize, addTurn, timeline, canonical, write, read, stats };

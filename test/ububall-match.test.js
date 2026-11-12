@@ -40,7 +40,11 @@ test('private drafts, turn locking, disconnect pause and latest-draft Blitz expi
   room.connect('host',0); room.connect('guest',0); room.beginPlanning(0);
   const moves=Array.from({length:3},()=>({angle:0,power:.8,spin:0,superArm:false,guard:false}));
   room.submit('host',1,moves,false,1000);
-  assert.equal(room.view('guest').moves[0].power,0);
+  const guestView = room.view('guest');
+  assert.equal(guestView.moves[0].power,0);
+  assert.equal(guestView.physicsVersion, P.VERSION);
+  assert.equal(room.watchView().physicsVersion, P.VERSION);
+  assert.equal(room.watchView().version, room.state.version);
   assert.throws(()=>room.view('stranger'));
   room.disconnect('guest',2000); assert.equal(room.state.remaining,3000);
   assert.equal(room.takeTurn(50000),null);
@@ -477,6 +481,8 @@ test('responsibility stays with the shooter through a glancing deflection and pa
   assert.ok(glance[0]>.95 && glance[4]<.05);
   const block=M.credit({0:1},{vx:-600,vy:0},{vx:400,vy:0},touched);
   assert.deepEqual(block,{4:1});
+  const rev=M.credit({0:1},{vx:200,vy:0},{vx:-150,vy:0},touched);
+  assert.deepEqual(rev,{4:1},'meaningful x-reversal drops prior shooter credit');
   const bodies=P.kickoff();
   assert.equal(M.responsibleTeam(bodies,glance),0); assert.equal(M.responsibleTeam(bodies,{}),null);
 });
@@ -497,6 +503,34 @@ test('own goals, bank shots and hat tricks are called, and own-goal saves earn n
   const ownSave=M.resolveTurn(P,shotState({x:260,y:300,vx:-600},{0:{x:130,y:300}},{credit:{1:1}}),idle());
   assert.deepEqual(ownSave.replay.saves.map(s=>[s.index,s.own]),[[0,true]]);
   assert.ok(Math.abs(ownSave.state.bodies[0].meter-M.METER.ball*M.METER.rate)<1e-9);
+
+  // S1b Option A: live attacking shot survives 120 ticks of defender deflections, then expires back to OWN GOAL
+  const liveBodies = P.kickoff();
+  const survived = M.callGoal(liveBodies, M.newPlay({ credit: { 3: 1 }, lastTouch: [0, 3], shot: { team: 0, at: 100 }, age: 220 }), M.newTally(), 0, false);
+  assert.equal(survived.own, false); assert.equal(survived.scorer, 0);
+  const expired = M.callGoal(liveBodies, M.newPlay({ credit: { 3: 1 }, lastTouch: [0, 3], shot: { team: 0, at: 100 }, age: 221 }), M.newTally(), 0, false);
+  assert.equal(expired.own, true); assert.equal(expired.label, 'OWN GOAL');
+
+  // B1: Sticky soft catch at speed < 15 claims 100% possession while keeping teammate assist
+  const stBodies = P.kickoff(); stBodies.slice(0, 6).forEach(b => P.applyStats(b));
+  Object.assign(stBodies[1], { x: 400, y: 300, vx: 0, vy: 0, superActive: 'sticky', superTicks: P.SUPER.ticks });
+  Object.assign(stBodies[6], { x: 400 + stBodies[1].radius + 17, y: 300, vx: 5, vy: 0 });
+  const stPlay = M.newPlay({ last: 0, lastTouch: [0, null], credit: { 4: 1 }, assist: [null, null] });
+  M.playTick(P, stBodies, stPlay);
+  assert.equal(stBodies[1].holding, true);
+  assert.deepEqual(stPlay.credit, { 1: 1 });
+  assert.equal(stPlay.assist[0], 0);
+  assert.equal(stPlay.lastTouch[0], 1);
+
+  // S1a: clean check-into-ball attributes touch/credit to the checker, unless knocked toward checker's own net
+  const chkBodies = P.kickoff(); chkBodies.slice(0, 6).forEach(b => P.applyStats(b));
+  Object.assign(chkBodies[0], { x: 400, y: 300, vx: 600, vy: 0 });
+  Object.assign(chkBodies[3], { x: 440, y: 300, vx: 0, vy: 0 });
+  Object.assign(chkBodies[6], { x: 495, y: 300, vx: 0, vy: 0 });
+  const chkPlay = M.newPlay();
+  for (let t = 0; t < 25; t++) M.playTick(P, chkBodies, chkPlay);
+  assert.equal(chkPlay.last, 0, 'checker earns ball touch attribution after knocking victim into ball');
+  assert.equal(M.responsibleTeam(chkBodies, chkPlay.credit), 0);
 });
 test('a close-range spin strike is reported for its callout', () => {
   const state=shotState({x:443,y:300},{0:{x:400,y:300}});
@@ -539,7 +573,7 @@ test('snipes, rebounds, comebacks, shutouts and huge shots are recognised', () =
   assert.deepEqual(M.honours(M.newTally(),[5,0],0),{comeback:false,shutout:true});
   const moves=idle(); moves[0]={angle:0,power:1,spin:0,superArm:false,guard:false};
   const blast=M.resolveTurn(P,shotState({x:343,y:300},{0:{x:300,y:300}}),moves);
-  assert.ok(blast.state.tally.topSpeed[0]>P.MAX_SPEED);
+  assert.ok(blast.state.tally.topSpeed[0]>P.BASE_LAUNCH_SPEED);
 });
 test('a touch is only a save if the ball then stays out of the goal', () => {
   const keeper=y=>M.resolveTurn(P,shotState({x:800,y,vx:700},{3:{x:905,y:300}},{credit:{0:1}}),Array.from({length:6},still));
@@ -782,8 +816,8 @@ test('Ubu positioned ahead of the ball wraps around rather than shooting into ow
 
 test('opposing Iron Save awards defensive save statistics, save meter, and arms rebound tracking', () => {
   const state = shotState(
-    { x: 550, y: 300, vx: 600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1 },
-    { 0: { x: 300, y: 300 }, 3: { x: 600, y: 300 } },
+    { x: 700, y: 300, vx: 600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1 },
+    { 0: { x: 300, y: 300 }, 3: { x: 750, y: 300 } },
     { credit: { 0: 1 }, last: 0, lastTouch: [0, null], stats: Array.from({ length: 6 }, () => ({})) }
   );
   const moves = Array.from({ length: 6 }, still);
@@ -801,6 +835,23 @@ test('opposing Iron Save awards defensive save statistics, save meter, and arms 
   assert.ok(Math.abs(result.state.bodies[3].meter - (M.METER.ball + M.METER.save) * M.METER.rate) < 1e-9, 'defender receives both contact and save meter');
   assert.ok(result.state.saved, 'play.saved is recorded');
   assert.equal(result.state.saved.team, 1, 'play.saved team is defending team');
+
+  // S2: midfield / off-target opposing Iron Guard quenches fireball & doubles Guard without awarding Save stats
+  const midfield = shotState(
+    { x: 450, y: 300, vx: 600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1 },
+    { 0: { x: 250, y: 300 }, 3: { x: 500, y: 300 } },
+    { credit: { 0: 1 }, last: 0, lastTouch: [0, null], stats: Array.from({ length: 6 }, () => ({})) }
+  );
+  let midIron = false;
+  const midRes = M.resolveTurn(P, midfield, moves, {
+    watch: { collide: (_a, _b, _s, _i, _p, iron) => { if (iron) midIron = true; } }
+  });
+  assert.equal(midIron, true, 'midfield opposing Iron Guard still triggers iron contact');
+  assert.equal(midRes.replay.saves.length, 0, 'midfield opposing Iron Guard outside SAVE.range scores no Save');
+  assert.equal(midRes.state.tally.saves[3], 0);
+  assert.equal(midRes.state.tally.bigSaves[3], 0);
+  assert.equal(midRes.state.tally.shots[0], 0);
+  assert.equal(midRes.state.bodies[6].onFire, false, 'opposing Iron Guard still quenches fireball');
 });
 
 test('friendly Iron Save (trap) classifies as own save with no defensive stats or meter, and preserves credit', () => {
@@ -833,8 +884,8 @@ test('Iron Save ownership attribution survives strikerTeam change on contact', (
   play.lastTouch = [0, null];
   const bodies = P.kickoff();
   bodies.slice(0, 6).forEach(b => P.applyStats(b));
-  Object.assign(bodies[3], { x: 600, y: 300, guarding: true });
-  Object.assign(bodies[6], { x: 558, y: 300, vx: 600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1 });
+  Object.assign(bodies[3], { x: 750, y: 300, guarding: true });
+  Object.assign(bodies[6], { x: 708, y: 300, vx: 600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1 });
 
   const tick = M.playTick(P, bodies, play);
   assert.equal(tick.saves.length, 1);
@@ -846,8 +897,8 @@ test('Iron Save ownership attribution survives strikerTeam change on contact', (
 
 test('opposing Iron Save leads to REBOUND! callout on quick follow-up goal', () => {
   const state = shotState(
-    { x: 550, y: 300, vx: 600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1 },
-    { 0: { x: 300, y: 300 }, 3: { x: 600, y: 300 } },
+    { x: 700, y: 300, vx: 600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1 },
+    { 0: { x: 300, y: 300 }, 3: { x: 750, y: 300 } },
     { credit: { 0: 1 }, last: 0, lastTouch: [0, null], roundTurns: 1, stats: Array.from({ length: 6 }, () => ({})) }
   );
   const moves = Array.from({ length: 6 }, still);

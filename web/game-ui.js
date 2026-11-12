@@ -125,6 +125,23 @@
   const confirm = options => panel(options);
   const ask = options => panel({ confirmLabel: 'Save', ...options, input: options.input || {} });
 
+  // Blocking modal notice that cannot be dismissed via Escape or backdrop until confirmed.
+  function blocking({ title, message, confirmLabel = 'Refresh', onConfirm = () => location.reload() }) {
+    const existing = document.querySelector('.game-dialog[data-blocking="true"]');
+    if (existing) { if (!existing.open) existing.showModal(); return existing; }
+    const dlg = document.body.appendChild(el('dialog', { className: 'game-dialog' }));
+    dlg.dataset.blocking = 'true';
+    const confirmBtn = el('button', { type: 'button', className: 'primary', textContent: confirmLabel });
+    const actions = el('div', { className: 'game-dialog-actions' }, confirmBtn);
+    dlg.replaceChildren(el('div', {}, el('h2', { textContent: title }), ...(message ? [el('p', { textContent: message })] : []), actions));
+    dlg.setAttribute('aria-label', title);
+    dlg.addEventListener('cancel', event => event.preventDefault());
+    confirmBtn.onclick = () => onConfirm();
+    dlg.showModal();
+    confirmBtn.focus();
+    return dlg;
+  }
+
   // Replaces a <select>'s browser popup with a game dropdown. The select stays the source of
   // truth (value, options, change events); call sync() after changing it in code.
   function select(native) {
@@ -245,7 +262,7 @@
   addEventListener('contextmenu', event => { if (swallow || tipTarget(event)) event.preventDefault(); }, true);
   for (const type of ['scroll', 'resize']) addEventListener(type, () => { if (tipFor) hideTip(); }, true);
 
-  root.gameUi = { ICONS: {}, icon, fillIcons, dropdown, place, confirm, ask, select, scale: () => uiScale, updateScale };
+  root.gameUi = { ICONS: {}, icon, fillIcons, dropdown, place, confirm, ask, blocking, select, scale: () => uiScale, updateScale };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => fillIcons());
   else fillIcons();
 })(globalThis);

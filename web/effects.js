@@ -130,7 +130,7 @@
           id: 'plan-iron-preview',
           title: 'Armed Colossus Ring & Predicted Iron Guard Shield',
           when: 'Colossus is armed in `plan` or a Guarding skater is predicted to hold against a fireball.',
-          visual: 'Dashed golden 1.8x Colossus preview circle (`#ffe043cc`) alongside a Guard shield turning metallic iron (`#c3ccd6`).',
+          visual: 'Dashed golden uniform 1.5x max Colossus preview circle (`#ffe043cc`) alongside a Guard shield turning metallic iron (`#c3ccd6`).',
           duration: 3.0,
           run: ctx => {
             ctx.resetStage({ phase: 'plan', mode: 'standard' });
@@ -145,7 +145,7 @@
             ctx.bodies[2].superArm = true;
             ctx.place(6, 350, 300);
             ctx.plans[2] = { angle: 0, power: 1, spin: 0, guard: false, superArm: true };
-            // Skater 1 arms Colossus -> dashed 1.8x size ring preview
+            // Skater 1 arms Colossus -> dashed uniform 1.5x max size ring preview
             ctx.place(1, 330, 155);
             ctx.equipSuper(1, 5);
             ctx.bodies[1].meter = 100;
@@ -815,9 +815,9 @@
         },
         {
           id: 'super-colossus',
-          title: '05 · Colossus (1.8x Titan Growth & Thunderclap)',
+          title: '05 · Colossus (1.5x Max Titan Growth & Thunderclap)',
           when: 'Launching with Colossus armed (`handleSuper("colossus", "launch")`).',
-          visual: 'Golden titan aura (`#ffe043` / `#c8961e`), sky-splitting thunderclap & rolling giant rumble, and 1.8x size/mass bowling defenders aside.',
+          visual: 'Golden titan aura (`#ffe043` / `#c8961e`), sky-splitting thunderclap & rolling giant rumble, and uniform 1.5x max size/mass growing over 40 ticks to bowl defenders aside.',
           soundLabel: 'Play colossus thunder',
           duration: 2.7,
           playSound: ctx => ctx.audio()?.playSuper('colossus', 'launch'),

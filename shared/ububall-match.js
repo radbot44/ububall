@@ -1,7 +1,7 @@
 /* Shared match rules; callers supply authenticated, server-derived roster data. */
 (function(root) {
   'use strict';
-  const VERSION = 3;
+  const VERSION = 4;
   // Classic, Pulse and Blitz are independent rules, joined in this order; 'standard' has none.
   const RULES = ['classic', 'pulse', 'blitz'];
   const MODES = Array.from({ length: 8 }, (_, n) => RULES.filter((r, i) => n >> i & 1).join('-') || 'standard');
@@ -110,10 +110,13 @@
   // touched the ball, the part of its new velocity carried over from its old one stays with whoever
   // gave it; the rest is split among that tick's touchers. A glancing deflection leaves the shot with
   // the shooter, while a ubu that stops or redirects the ball takes it over.
+  const SHOT_SURVIVE_TICKS = 120;
   function credit(shares, before, ball, touched, bodiesBefore = null) {
     if (!touched.size) return shares;
     const speed2 = ball.vx * ball.vx + ball.vy * ball.vy;
     let kept = speed2 ? Math.min(1, Math.max(0, (before.vx * ball.vx + before.vy * ball.vy) / speed2)) : 0;
+    // Meaningful x-reversal across the hit means the previous shooter no longer owns goal-axis direction.
+    if ((before.vx > 50 && ball.vx < -50) || (before.vx < -50 && ball.vx > 50)) kept = 0;
     if (bodiesBefore && touched.size === 1) {
       const [i] = touched, b = bodiesBefore[i];
       if (b && b.team >= 0) {
@@ -145,6 +148,8 @@
       saved: from.saved ? { ...from.saved } : null, big: Boolean(from.big),
       lastPass: from.lastPass ? { ...from.lastPass } : null,
       passOrigin: from.passOrigin ? { ...from.passOrigin } : null,
+      shot: from.shot ? { ...from.shot } : null,
+      checks: from.checks ? from.checks.map(c => (c ? { ...c } : null)) : Array(6).fill(null),
       postCounted: Boolean(from.postCounted) };
   }
   // Per-ubu match totals (by index) for the summary (yellow cards included), and each team's deepest deficit.
@@ -173,6 +178,47 @@
     if (big && P.ballRun([ball], { ticks: 960 }).goal !== null) ms = HIT_STOP.goal;
     return ms;
   }
+  function applyBallPossession(bodies, play, ball, i, impulse, preBallSpeed, age, fx, deferPasses = null) {
+    const team = bodies[i].team, last = play.last;
+    let passSender = -1;
+    if (last !== null && bodies[last].team !== team) {
+      if (impulse >= 35) {
+        play.assist[1 - team] = null;
+        play.assist[team] = null;
+        play.lastPass = null;
+        play.last = i;
+        play.banked = false;
+        play.postCounted = false;
+        passSender = i;
+      }
+      play.lastTouch[team] = i;
+      play.shotX[team] = ball.x;
+    } else {
+      if (last !== null && last !== i) {
+        play.assist[team] = last;
+        const origin = play.passOrigin?.from === last ? play.passOrigin : null;
+        play.lastPass = {
+          from: last,
+          to: i,
+          at: origin ? origin.at : age,
+          speed: Math.max(preBallSpeed || 0, origin ? origin.speed : 0),
+          touches: 1
+        };
+        if (deferPasses) deferPasses.push({ from: last, to: i });
+        else fx.pass?.(last, i, ball);
+      } else if (last === i) {
+        if (play.lastPass && play.lastPass.to === i) play.lastPass.touches = (play.lastPass.touches || 1) + 1;
+        if (play.assist[team] === i) play.assist[team] = null;
+      }
+      play.last = i;
+      play.lastTouch[team] = i;
+      play.shotX[team] = ball.x;
+      play.banked = false;
+      play.postCounted = false;
+      passSender = i;
+    }
+    return passSender;
+  }
   // Per-tick scratch and the tick in progress, which the step callbacks below read, so neither is
   // rebuilt every tick. A nested tick would take fresh scratch and restore the outer tick after.
   let spareTick = null, activeTick = null;
@@ -181,45 +227,22 @@
     if ((a.team === -1 || b.team === -1) && speed >= 15 && (plow || t.preOnFire || (t.ball?.onFire && !t.cannon))) {
       t.fireHit = true;
     }
+    if (a.team >= 0 && b.team >= 0) {
+      const ai = t.bodies.indexOf(a), bi = t.bodies.indexOf(b);
+      if (checker !== null) {
+        const ci = checker === a ? ai : bi, vi = checker === a ? bi : ai;
+        if (ci >= 0 && vi >= 0) t.checked.push({ ci, vi, team: checker.team });
+      } else {
+        if (ai >= 0) t.bumped.add(ai);
+        if (bi >= 0) t.bumped.add(bi);
+      }
+    }
     if (player && !plow) {
       // A touch passed from a teammate makes that teammate the assist; an opponent's significant touch (>= 35)
       // breaks the passing team's assist, whereas a light opponent poke-check graze (< 35) preserves the pass chain.
-      const { bodies, play } = t, i = bodies.indexOf(player), team = player.team, last = play.last;
-      if (last !== null && bodies[last].team !== team) {
-        if (impulse >= 35) {
-          play.assist[1 - team] = null;
-          play.assist[team] = null;
-          play.lastPass = null;
-          play.last = i;
-          play.banked = false;
-          play.postCounted = false;
-          t.passSender = i;
-        }
-        play.lastTouch[team] = i;
-        play.shotX[team] = t.ball.x;
-      } else {
-        if (last !== null && last !== i) {
-          play.assist[team] = last;
-          const origin = play.passOrigin?.from === last ? play.passOrigin : null;
-          play.lastPass = {
-            from: last,
-            to: i,
-            at: origin ? origin.at : play.age,
-            speed: Math.max(t.preBallSpeed || 0, origin ? origin.speed : 0),
-            touches: 1
-          };
-          t.fx.pass?.(last, i, t.ball);
-        } else if (last === i) {
-          if (play.lastPass && play.lastPass.to === i) play.lastPass.touches = (play.lastPass.touches || 1) + 1;
-          if (play.assist[team] === i) play.assist[team] = null;
-        }
-        play.last = i;
-        play.lastTouch[team] = i;
-        play.shotX[team] = t.ball.x;
-        play.banked = false;
-        play.postCounted = false;
-        t.passSender = i;
-      }
+      const { bodies, play } = t, i = bodies.indexOf(player);
+      const ps = applyBallPossession(bodies, play, t.ball, i, impulse, t.preBallSpeed, play.age, t.fx, play.checks?.[i] ? t.deferredPasses : null);
+      if (ps >= 0) t.passSender = ps;
       t.touched.add(i);
       if (iron) t.ironSaver = i;
     }
@@ -235,9 +258,48 @@
       t.play.banked = true;
     } else if (body === t.ball && type === 'post') {
       t.postSide = body.x > 500 ? 0 : 1;
+      t.postX = body.x; t.postY = body.y;
       if (velocity >= 300) t.postRing = true;
+    } else if (body !== t.ball && body.team >= 0) {
+      const bi = t.bodies.indexOf(body);
+      if (bi >= 0) t.wallBumped.add(bi);
     }
     t.fx.wall?.(body, velocity, type, nx, ny, rimmed);
+  }
+  function recordSaves(bodies, play, tally, tickSaves, incomingBig, onSave = null) {
+    for (const save of tickSaves) {
+      if (save.own) continue;
+      play.saved = { at: play.age, team: bodies[save.index].team };
+      const shooter = play.lastTouch[1 - bodies[save.index].team];
+      const big = Boolean(save.iron || incomingBig);
+      if (tally) {
+        tally.saves[save.index]++;
+        if (big) tally.bigSaves[save.index]++;
+      }
+      let shotType = null;
+      if (shooter !== null && !play.postCounted) {
+        if (tally) tally.shots[shooter]++;
+        play.postCounted = true;
+        shotType = 'Saved';
+      }
+      onSave?.(save, shooter, big, shotType);
+    }
+  }
+  function recordGoal(play, tally, scorer, assist) {
+    let hatTrick = false;
+    if (scorer !== null && tally) {
+      hatTrick = ++tally.goals[scorer] === 3;
+      if (!play.postCounted) {
+        tally.shots[scorer]++;
+        play.postCounted = true;
+      }
+    }
+    if (assist !== null && tally) tally.assists[assist]++;
+    return hatTrick;
+  }
+  function recordCards(tally, cards) {
+    if (!tally || !cards) return;
+    for (const i of cards) tally.cards[i]++;
   }
   // Steps the field one tick and keeps the play (and the tally, if given) current. Returns the goal
   // (as P.step reports it), the tick's saves, whether a close-range spin strike landed and the
@@ -246,13 +308,19 @@
   function playTick(P, bodies, play, fx = {}, tally = null, effects = true, skipSaves = false) {
     // Each tick records flat scalar pre-tick state and rebuilds full body clones only when the ball
     // was touched, avoiding per-tick object allocations during CPU search while preserving exact pre-hit state.
-    const t = spareTick || { motion: new Float64Array(35), daze: new Float64Array(7), iron: new Uint8Array(7), sup: new Array(7), touched: new Set() }, outer = activeTick;
+    const t = spareTick || {
+      motion: new Float64Array(35), daze: new Float64Array(7), iron: new Uint8Array(7), sup: new Array(7),
+      touched: new Set(), attrSet: new Set(), checked: [], bumped: new Set(), wallBumped: new Set(), deferredPasses: []
+    }, outer = activeTick;
     spareTick = null; activeTick = t;
     if (t.motion.length < bodies.length * 5) t.motion = new Float64Array(bodies.length * 5);
     if (t.daze.length < bodies.length) { t.daze = new Float64Array(bodies.length); t.iron = new Uint8Array(bodies.length); t.sup = new Array(bodies.length); }
     const { motion, touched } = t, ball = bodies[6]?.team === -1 ? bodies[6] : bodies.find(b => b.team === -1);
-    touched.clear(); t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx; t.tally = tally;
-    t.cannon = false; t.fireHit = false; t.postRing = false; t.postSide = -1; t.incomingCredit = null; t.passSender = -1;
+    touched.clear(); t.bumped.clear(); t.wallBumped.clear(); t.checked.length = 0; t.deferredPasses.length = 0;
+    t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx; t.tally = tally;
+    t.cannon = false; t.fireHit = false; t.postRing = false; t.postSide = -1; t.postX = 0; t.postY = 0;
+    t.incomingCredit = null; t.passSender = -1; t.stickyGrab = null; t.magnetTeam = -1;
+    t.preBallX = ball ? ball.x : 0; t.preBallY = ball ? ball.y : 0;
     t.preBallSpeed = ball ? Math.hypot(ball.vx, ball.vy) : 0;
     t.preOnFire = Boolean(ball?.onFire);
     t.curBvx = ball ? ball.vx : 0; t.curBvy = ball ? ball.vy : 0;
@@ -265,6 +333,10 @@
     }
     const incomingStrikerTeam = ball?.strikerTeam ?? -1;
     const preCurveMult = ball?.curveMult ?? 1, preOnFire = Boolean(ball?.onFire), preFireTicks = ball?.fireTicks || 0, prePace = ball?.pace || 0;
+    const preCheckPlay = play.checks?.some(Boolean) ? {
+      lt0: play.lastTouch[0], lt1: play.lastTouch[1],
+      sx0: play.shotX[0], sx1: play.shotX[1]
+    } : null;
     play.age++;
     t.onShockwave ??= (source, radius, type = null) => {
       activeTick?.fx?.shockwave?.(source, radius, type);
@@ -274,6 +346,16 @@
       const at = activeTick;
       if (!at) return;
       if (key === 'cannonball' && action === 'impact') at.cannon = true;
+      if (key === 'sticky' && action === 'impact' && body && body.team >= 0 && at.ball) {
+        const bi = at.bodies.indexOf(body);
+        if (bi >= 0) {
+          at.stickyGrab = bi;
+          if (at.play.last !== bi) {
+            const ps = applyBallPossession(at.bodies, at.play, at.ball, bi, Infinity, at.preBallSpeed, at.play.age, at.fx, null);
+            if (ps >= 0) at.passSender = ps;
+          }
+        }
+      }
       if (key === 'magnet' && action === 'pull' && body && at.ball) {
         at.incomingCredit ??= { ...at.play.credit };
         const bi = at.bodies.indexOf(body);
@@ -292,6 +374,7 @@
               }
               at.play.last = bi; at.play.lastTouch[body.team] = bi; at.play.shotX[body.team] = at.ball.x;
             }
+            at.magnetTeam = body.team;
             if (strikerTeam < 0) {
               at.play.credit = { [bi]: 1 };
             } else {
@@ -315,6 +398,7 @@
               at.play.lastPass = null;
               if (at.play.assist[body.team] === bi) at.play.assist[body.team] = null;
               at.play.last = bi; at.play.lastTouch[body.team] = bi; at.play.shotX[body.team] = at.ball.x;
+              at.magnetTeam = body.team;
             }
           }
           at.curBvx = at.ball.vx; at.curBvy = at.ball.vy;
@@ -328,9 +412,55 @@
     } finally {
       activeTick = outer;
     }
-    const cannon = t.cannon, postRing = t.postRing, postSide = t.postSide, passSender = t.passSender;
-    if (passSender >= 0 && ball) {
-      play.passOrigin = { from: passSender, at: play.age, speed: Math.hypot(ball.vx, ball.vy) };
+    const cannon = t.cannon, postRing = t.postRing, postSide = t.postSide;
+    for (const bi of t.bumped) if (play.checks) play.checks[bi] = null;
+    let s1a = null;
+    if (ball && touched.size === 1 && t.stickyGrab === null && t.ironSaver == null && play.checks) {
+      const [only] = touched, chk = play.checks[only];
+      if (chk && bodies[chk.checker]) {
+        const gap = play.age - chk.at;
+        if (gap > 0 && gap <= 60 && chk.dvToward >= 60 && chk.postToward >= 60) {
+          const vPreVx = motion[only * 5 + 2], vPreVy = motion[only * 5 + 3];
+          const dot = vPreVx * chk.postVx + vPreVy * chk.postVy;
+          const mag = (Math.hypot(vPreVx, vPreVy) || 1) * (Math.hypot(chk.postVx, chk.postVy) || 1);
+          const ballToOwn = chk.team === 0 ? ball.vx < -20 : ball.vx > 20;
+          if (dot / mag > 0.35 && !ballToOwn) s1a = chk;
+        }
+      }
+    }
+    if (play.checks) {
+      for (const i of touched) play.checks[i] = null;
+      for (const c of t.checked) {
+        const preVx = motion[c.vi * 5 + 2], preVy = motion[c.vi * 5 + 3];
+        const dx = t.preBallX - motion[c.vi * 5], dy = t.preBallY - motion[c.vi * 5 + 1];
+        const dist = Math.hypot(dx, dy) || 1;
+        const preToward = (preVx * dx + preVy * dy) / dist;
+        const post = bodies[c.vi];
+        const postToward = (post.vx * dx + post.vy * dy) / dist;
+        play.checks[c.vi] = {
+          checker: c.ci, team: c.team, at: play.age,
+          preToward, postToward, dvToward: postToward - preToward,
+          postVx: post.vx, postVy: post.vy
+        };
+      }
+      for (const bi of t.wallBumped) play.checks[bi] = null;
+    }
+    if (s1a && preCheckPlay && ball) {
+      play.assist[0] = null; play.assist[1] = null; play.lastPass = null;
+      play.last = s1a.checker;
+      play.lastTouch[0] = preCheckPlay.lt0; play.lastTouch[1] = preCheckPlay.lt1;
+      play.shotX[0] = preCheckPlay.sx0; play.shotX[1] = preCheckPlay.sx1;
+      play.lastTouch[s1a.team] = s1a.checker;
+      play.shotX[s1a.team] = ball.x;
+      play.banked = false;
+      play.postCounted = false;
+      t.passSender = s1a.checker;
+      t.deferredPasses.length = 0;
+    } else if (t.deferredPasses.length && ball) {
+      for (const p of t.deferredPasses) fx.pass?.(p.from, p.to, ball);
+    }
+    if (t.passSender >= 0 && ball) {
+      play.passOrigin = { from: t.passSender, at: play.age, speed: Math.hypot(ball.vx, ball.vy) };
     }
     const before = touched.size ? bodies.map((b, i) => {
       if (b.team === -1) {
@@ -355,12 +485,33 @@
       if (existing) {
         existing.iron = true;
         existing.own = Boolean(isOwn);
-      } else if (isOwn || (goal !== 1 - saverTeam && P.ballRun(bodies, { boards: true, ticks: 2 * SAVE.ticks }).goal !== 1 - saverTeam)) {
-        tickSaves.push({ index: ironIndex, own: Boolean(isOwn), iron: true });
+      } else if (isOwn) {
+        tickSaves.push({ index: ironIndex, own: true, iron: true });
       }
     }
-    play.credit = credit(play.credit, ballBefore, ball, touched, before);
-    for (const save of tickSaves) if (!save.own) play.saved = { at: play.age, team: bodies[save.index].team };
+    if (t.stickyGrab !== null) {
+      play.credit = { [t.stickyGrab]: 1 };
+    } else if (s1a) {
+      t.attrSet.clear(); t.attrSet.add(s1a.checker);
+      play.credit = credit(play.credit, ballBefore, ball, t.attrSet, before);
+    } else {
+      play.credit = credit(play.credit, ballBefore, ball, touched, before);
+    }
+    if (ball) {
+      if (t.stickyGrab !== null) {
+        const st = bodies[t.stickyGrab].team;
+        if (st >= 0 && (st === 0 ? ball.vx > 60 : ball.vx < -60)) play.shot = { team: st, at: play.age };
+      } else if (s1a) {
+        if (s1a.team === 0 ? ball.vx > 60 : ball.vx < -60) play.shot = { team: s1a.team, at: play.age };
+      } else if (touched.size) {
+        for (const i of touched) {
+          const b = before[i];
+          if (b && b.team >= 0 && (b.team === 0 ? ball.vx > 60 : ball.vx < -60)) play.shot = { team: b.team, at: play.age };
+        }
+      } else if (t.magnetTeam >= 0 && (t.magnetTeam === 0 ? ball.vx > 60 : ball.vx < -60)) {
+        play.shot = { team: t.magnetTeam, at: play.age };
+      }
+    }
     // A Cannonball hit always counts as a big shot.
     const speed = (tally && touched.size) ? Math.hypot(ball.vx, ball.vy) : 0;
     const incomingBig = play.big;
@@ -388,25 +539,18 @@
         }
         if (striker) tally.topSpeed[i] = Math.max(tally.topSpeed[i], speed);
       }
-      if (postSide >= 0 && play.big && !play.postCounted) {
-        const shooter = play.lastTouch[postSide];
-        if (shooter !== null) {
-          tally.shots[shooter]++;
-          play.postCounted = true;
-        }
-      }
-      for (const save of tickSaves) {
-        if (!save.own) {
-          tally.saves[save.index]++;
-          if (save.iron || incomingBig) tally.bigSaves[save.index]++;
-          const shooter = play.lastTouch[1 - bodies[save.index].team];
-          if (shooter !== null && !play.postCounted) {
-            tally.shots[shooter]++;
-            play.postCounted = true;
-          }
-        }
+    }
+    if (postSide >= 0 && play.big && !play.postCounted) {
+      const shooter = play.lastTouch[postSide];
+      if (shooter !== null) {
+        if (tally) tally.shots[shooter]++;
+        play.postCounted = true;
+        fx.shot?.(shooter, 'Post', { x: t.postX, y: t.postY });
       }
     }
+    recordSaves(bodies, play, tally, tickSaves, incomingBig, (_save, shooter, _big, shotType) => {
+      if (shotType) fx.shot?.(shooter, shotType);
+    });
     if (struck) ball.spinStruck = false;
     t.bodies = t.play = t.ball = t.fx = t.tally = null; spareTick = t;
     return { goal, saves: tickSaves, struck, snapped, stop, big };
@@ -417,15 +561,11 @@
   // assist the teammate who passed to them with no opponent touch in between. It is an own goal when
   // the conceding team was most responsible for the ball; own goals credit no scorer or assist.
   function callGoal(bodies, play, tally, goal, ace) {
-    const own = responsibleTeam(bodies, play.credit) === 1 - goal;
+    let own = responsibleTeam(bodies, play.credit) === 1 - goal;
+    if (own && play.shot && play.shot.team === goal && play.age - play.shot.at <= SHOT_SURVIVE_TICKS) own = false;
     const scorer = own ? null : play.lastTouch[goal];
     const assist = own || scorer === null || play.assist[goal] === scorer ? null : play.assist[goal];
-    let hatTrick = false;
-    if (!own && scorer !== null && tally) {
-      hatTrick = ++tally.goals[scorer] === 3;
-      if (!play.postCounted) tally.shots[scorer]++;
-    }
-    if (assist !== null && tally) tally.assists[assist]++;
+    const hatTrick = recordGoal(play, tally, scorer, assist);
     const shotX = play.shotX[goal], snipe = shotX !== null && (goal === 0 ? shotX < 500 : shotX > 500);
     const rebound = play.saved?.team === 1 - goal && play.age - play.saved.at <= REBOUND_TICKS;
     const banked = Boolean(play.banked);
@@ -534,7 +674,7 @@
     }
     if (goal === null) callFouls(P, bodies, fouls);
     else Object.assign(fouls, newFouls());
-    if (tally) for (const i of fouls.cards) tally.cards[i]++;
+    recordCards(tally, fouls.cards);
     if (goal !== null) {
       scores[goal]++;
       for (const b of bodies.filter(b => b.team === 1 - goal)) gainMeter(P, bodies, stats, b, METER.conceded, classic);
@@ -626,6 +766,6 @@
     return { state: next, replay: { version: VERSION, turn: state.turn, plans, ticks, goal, scorer: call.scorer, assist: call.assist,
       label: call.label, saves: saved, struck, stops, initialBodies } };
   }
-  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, replaySpeed, postGoalSpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, SAVE, FOULS, newFouls, inCrease, attackZoneLine, inAttackZone, camping, cornerOf, lapseFouls, BIG_SHOT, HIT_STOP, SCREEN_SHAKE, gainMeter, contactMeter, toucher, saves, credit, responsibleTeam, newPlay, newTally, playTick, callGoal, noteScore, honours, finishTurn, resolveTurn };
+  const api = { VERSION, RULES, MODES, GOAL_REPLAY_DELAY, GOAL_REPLAY_HOLD, SHOT_SURVIVE_TICKS, replaySpeed, postGoalSpeed, replayMilliseconds, validatePlans, rule, modeName, planningMilliseconds, turnTicks, applyStats, METER, SAVE, FOULS, newFouls, inCrease, attackZoneLine, inAttackZone, camping, cornerOf, lapseFouls, BIG_SHOT, HIT_STOP, SCREEN_SHAKE, gainMeter, contactMeter, toucher, saves, credit, responsibleTeam, newPlay, newTally, recordSaves, recordGoal, recordCards, playTick, callGoal, noteScore, honours, finishTurn, resolveTurn };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ububallMatch = api;
 })(globalThis);

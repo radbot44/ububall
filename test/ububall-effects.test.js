@@ -215,6 +215,14 @@ test('discrete snapshots without repositioning do not erase trails', () => {
   const before = h.trailPositions();
   h.clearDiscontinuousTrails(before);
   assert.equal(h.trails[0].length, 2);
+
+  // Sub-pixel rounding drift (<= 1px) does not erase trails; jumps > 1px do
+  h.bodies[0].x += 0.5;
+  h.clearDiscontinuousTrails(before);
+  assert.equal(h.trails[0].length, 2, 'sub-pixel drift retains trail');
+  h.bodies[0].x += 2;
+  h.clearDiscontinuousTrails(before);
+  assert.equal(h.trails[0].length, 0, 'real discontinuity (>1px) clears trail');
 });
 
 test('legitimate high-speed physical movement remains continuous', () => {
@@ -299,6 +307,11 @@ test('updatePopups ages popups independently and prunes expired ones', () => {
   assert.equal(popups.length, 1);
   assert.equal(popups[0].text, 'Trap!');
   assert.ok(Math.abs(popups[0].life - 0.3) < 1e-6);
+
+  // Reduced motion keeps and ages popups instead of wiping them immediately
+  updatePopups(0.1, popups, true);
+  assert.equal(popups.length, 1);
+  assert.ok(Math.abs(popups[0].life - 0.2) < 1e-6);
 });
 
 test('iron guard shield receives #6b7785 border stroke with lineWidth 1.5', () => {
@@ -366,11 +379,14 @@ test('heat effect animation time accumulates during updateEffects and freezes du
   assert.equal(fx.heatTime, 0, 'heatTime initializes to 0');
 
   const bodies = P.kickoff();
+  let reduced = false, clearedPostGoal = 0, sizzleStopped = 0;
+  fx.sizzle = { stop() { sizzleStopped++; } };
   const presenter = createRinkPresenter({
     P, ububallMatch,
     getView: () => ({ bodies, mode: 'pulse', canvas: { width: 1000, height: 600 }, ctx: {}, badgeCanvas: { width: 1000, height: 600 }, badgeCtx: {} }),
     getEffects: () => fx,
-    isReducedMotion: () => false,
+    isReducedMotion: () => reduced,
+    onClearPostGoal: () => { clearedPostGoal++; },
     clockNow: () => 1000,
     gameAudio: () => null
   });
@@ -385,9 +401,28 @@ test('heat effect animation time accumulates during updateEffects and freezes du
   presenter.updateEffects(0);
   assert.equal(Number(fx.heatTime.toFixed(4)), 0.0320, 'heatTime does not advance with 0 dt');
 
-  // 3. Clear effects resets heatTime
+  // 3. Reduced motion clears transient VFX without wiping postGoal, goalCall, popups, throttles, or sizzle audio
+  reduced = true;
+  fx.particles.push({ x: 10, y: 10, px: 10, py: 10, vx: 0, vy: 0, life: 0.5, duration: 0.5 });
+  fx.shake = 1;
+  fx.goalCall = { team: 0, label: 'GOAL', scorer: 0, name: 'Test', t: 0 };
+  fx.lastFireHitSound = 500;
+  presenter.popup(bodies[0], 'Save!');
+  assert.equal(fx.popups.length, 1, 'popup shows even with reduced motion enabled');
+  presenter.updateEffects(0.2);
+  assert.equal(fx.particles.length, 0, 'reduced motion clears transient particles');
+  assert.equal(fx.shake, 0, 'reduced motion clears shake');
+  assert.equal(clearedPostGoal, 0, 'reduced motion does not abort postGoal');
+  assert.equal(sizzleStopped, 0, 'reduced motion does not call quench every frame');
+  assert.equal(fx.lastFireHitSound, 500, 'reduced motion preserves sound throttles');
+  assert.equal(fx.popups.length, 1, 'reduced motion preserves active popups');
+  assert.ok(Math.abs(fx.goalCall.t - 0.2) < 1e-6, 'reduced motion ages goalCall cleanly');
+  reduced = false;
+
+  // 4. Clear effects resets heatTime and full state
   presenter.clearEffects();
   assert.equal(fx.heatTime, 0, 'clearEffects resets heatTime to 0');
+  assert.equal(clearedPostGoal, 1, 'clearEffects still resets postGoal outside reduced motion');
 });
 
 test('exported video timing advances popups strictly once per export frame', () => {
@@ -790,6 +825,7 @@ test('display projection boundary: seat transforms, gameplay fields, presentatio
   sim[0].x = 220; sim[0].y = 180; sim[0].vx = 45; sim[0].vy = -30; sim[0].rotation = 0.5;
   sim[0].guarding = true; sim[0].ironGuard = true; sim[0].daze = 0.35;
   sim[0].superActive = 'colossus'; sim[0].stunnedNext = true; sim[0].holding = true;
+  sim[0].superTicks = 25; sim[0].usedSuperThisTurn = true;
   sim[0].futureGameplayField = 42;
   sim[0].nestedArray = [1, { tag: 'combo', values: [3, 4] }];
   sim[0].meterTick = 120; // internal simulation cooldown tick
@@ -847,23 +883,20 @@ test('display projection boundary: seat transforms, gameplay fields, presentatio
   const projected0 = env.viewBodies(sim, 0);
   assert.deepEqual(structuredClone(context.bodies), structuredClone(projected0), 'syncViewBodies and viewBodies produce identical display state for seat 0');
 
-  // 3. Gameplay properties, special abilities, temporary state, and future gameplay fields are projected
+  // 3. Explicit fixed-field projection forwards canonical gameplay and ability state without forwarding arbitrary keys
   assert.equal(context.bodies[0].reach, sim[0].reach);
   assert.equal(context.bodies[0].impulse, sim[0].impulse);
   assert.equal(context.bodies[0].guarding, true);
   assert.equal(context.bodies[0].ironGuard, true);
   assert.equal(context.bodies[0].daze, 0.35);
   assert.equal(context.bodies[0].superActive, 'colossus');
+  assert.equal(context.bodies[0].superTicks, 25);
+  assert.equal(context.bodies[0].usedSuperThisTurn, true);
   assert.equal(context.bodies[0].stunned, true, 'stunnedNext projects as stunned on display body');
   assert.equal(context.bodies[0].holding, true);
-  assert.equal(context.bodies[0].futureGameplayField, 42, 'future gameplay fields automatically project without allowlist edits');
-  assert.equal(Array.isArray(context.bodies[0].nestedArray), true, 'array-valued gameplay field stays an Array');
-  assert.deepEqual(structuredClone(context.bodies[0].nestedArray), [1, { tag: 'combo', values: [3, 4] }]);
-  assert.notEqual(context.bodies[0].nestedArray, sim[0].nestedArray, 'array reference is cloned across boundary');
-  assert.notEqual(context.bodies[0].nestedArray[1], sim[0].nestedArray[1], 'nested object inside array is cloned across boundary');
-  assert.notEqual(context.bodies[0].nestedArray[1].values, sim[0].nestedArray[1].values, 'nested inner array is cloned across boundary');
-  context.bodies[0].nestedArray[1].values.push(99);
-  assert.deepEqual(sim[0].nestedArray[1].values, [3, 4], 'mutating nested display array does not mutate simulation state');
+  assert.equal('futureGameplayField' in context.bodies[0], false, 'unprojected ad-hoc field stays off display body');
+  assert.equal('nestedArray' in context.bodies[0], false, 'unprojected nested object stays off display body');
+  delete sim[0].futureGameplayField;
   delete sim[0].nestedArray;
   assert.equal(context.bodies[6].onFire, true);
   assert.equal(context.bodies[6].fireTicks, 90);
@@ -872,7 +905,7 @@ test('display projection boundary: seat transforms, gameplay fields, presentatio
   assert.deepEqual({ ...context.bodies[6].stickOffset }, { x: 18, y: -12 });
   assert.notEqual(context.bodies[6].stickOffset, sim[6].stickOffset, 'nested stickOffset is cloned across boundary');
 
-  // 4. Simulation-internal fields (meterTick, pinX, pinY) stay out of display bodies, and presentation fields stay out of sim
+  // 4. Simulation-internal fields (meterTick, pinX, pinY, stunnedNext) stay out of display bodies, and presentation fields stay out of sim
   assert.equal('meterTick' in context.bodies[0], false, 'meterTick excluded from display body');
   assert.equal('pinX' in context.bodies[6], false, 'pinX excluded from display ball');
   assert.equal('pinY' in context.bodies[6], false, 'pinY excluded from display ball');
@@ -947,6 +980,17 @@ test('display projection boundary: seat transforms, gameplay fields, presentatio
   anonymousNames = false;
   env.syncViewBodies(sim, 1);
   assert.equal(context.bodies[0].name, teamEntries[0].model.parts.fullName);
+
+  // 6b. Repeated ticks keep static UI metadata and stickOffset object references stable (A2)
+  const stickBefore = context.bodies[6].stickOffset;
+  const persBefore = context.bodies[0].personality;
+  const superBefore = context.bodies[0].equippedSuper;
+  sim[6].stickOffset = { x: 24, y: -14 };
+  env.syncViewBodies(sim, 1);
+  assert.equal(context.bodies[6].stickOffset, stickBefore, 'stickOffset mutates in place');
+  assert.deepEqual({ ...context.bodies[6].stickOffset }, { x: -24, y: 14 });
+  assert.equal(context.bodies[0].personality, persBefore, 'unchanged personality is not re-cloned every tick');
+  assert.equal(context.bodies[0].equippedSuper, superBefore, 'unchanged equippedSuper is not re-cloned every tick');
 
   // 7. stripPresentation removes presentation keys from any tainted array
   const tainted = [{ x: 100, name: 'Test', voice: {}, playerIndex: 2, _lastHitSound: 10, _lastWallSound: 20 }];
@@ -1190,6 +1234,7 @@ test('online seat 1 transition (resolving -> playOnlineReplay -> next plan phase
   const onStateCode = section('function onlineNames(s) {', '});\n  $(\'online-rematch\').onclick')
     .replace('online = ububallOnline({', 'const onlineCallbacks = ({') + '});';
   const code =
+    section('function impactFor(', 'function stepPostGoalFrame(') + '\n' +
     section('let lastSaved = Promise.resolve(null);', 'const replayClock =') + '\n' +
     section('let guide = null;', 'function playFromHere() {') + '\n' +
     section('const PRESENTATION_KEYS =', 'function onlineNames(s) {') + '\n' +
@@ -2685,6 +2730,7 @@ test('D4-05, D4-08, D4-01: online onState preserves local roster, prevents mid-r
   const onStateCode = section('function onlineNames(s) {', "});\n  $('online-rematch').onclick")
     .replace('online = ububallOnline({', 'const onlineCallbacks = ({') + '});';
   const code =
+    section('function impactFor(', 'function stepPostGoalFrame(') + '\n' +
     section('let lastSaved = Promise.resolve(null);', 'const replayClock =') + '\n' +
     section('let guide = null;', 'function playFromHere() {') + '\n' +
     section('const PRESENTATION_KEYS =', 'function onlineNames(s) {') + '\n' +
@@ -2844,10 +2890,11 @@ test('D4-10, D4-14, D4-19: ububall-online.js handles non-JSON 502 errors, null-s
   const fetchCalls = [];
   let fetchResponder = async () => ({ ok: true, status: 200, json: async () => ({}) });
 
-  const makeHarness = ({ isActivity }) => {
+  const makeHarness = ({ isActivity, matchVersion, physicsVersion, onOutdated: customOutdated } = {}) => {
     elements.clear();
     listeners.clear();
     fetchCalls.length = 0;
+    const sockets = [];
     currentUrl = isActivity ? 'https://12345.discordsays.com/?instance_id=inst-1' : 'https://ububall.com/';
     const navLink = makeEl('nav-play');
     const win = {
@@ -2866,15 +2913,21 @@ test('D4-10, D4-14, D4-19: ububall-online.js handles non-JSON 502 errors, null-s
       URL, URLSearchParams, DOMException, AbortController, encodeURIComponent, Error, Set, Map, Promise, JSON, Math, Date, String, Boolean, Object,
       crypto: { randomUUID: () => 'conn-1' },
       setTimeout: () => 1, clearTimeout() {}, setInterval: () => 2, clearInterval() {},
-      WebSocket: Object.assign(function() { this.close = () => {}; this.send = () => {}; }, { OPEN: 1 }),
+      WebSocket: Object.assign(function() {
+        this.readyState = 1; this.closed = false; this.sent = [];
+        this.close = () => { this.closed = true; this.readyState = 3; };
+        this.send = msg => { this.sent.push(msg); };
+        sockets.push(this);
+      }, { OPEN: 1 }),
       navigator: { clipboard: { writeText: async () => {} } },
       matchMedia: () => ({ matches: false }),
       sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
       history: { state: null, replaceState(_s, _t, url) { currentUrl = String(url); win.location = new URL(currentUrl); } },
       location: win.location,
       window: win,
-      ububallMatch: { modeName: m => m },
-      gameUi: { confirm: async () => true },
+      ububallMatch: { modeName: m => m, ...(matchVersion != null ? { VERSION: matchVersion } : {}) },
+      ...(physicsVersion != null ? { ububallPhysics: { VERSION: physicsVersion } } : {}),
+      gameUi: { confirm: async () => true, blocking: () => {} },
       document: {
         title: 'Ububall', hidden: false, activeElement: null,
         getElementById: getEl,
@@ -2888,7 +2941,7 @@ test('D4-10, D4-14, D4-19: ububall-online.js handles non-JSON 502 errors, null-s
       }
     };
     const ububallOnline = vm.runInNewContext(onlineSrc + '\n;ububallOnline;', ctx);
-    let playCpuAwaited = false;
+    let playCpuAwaited = false, outdatedCount = 0;
     const hooks = {
       playCpu: async () => { await Promise.resolve(); playCpuAwaited = true; },
       cpuActive: () => playCpuAwaited,
@@ -2902,9 +2955,10 @@ test('D4-10, D4-14, D4-19: ububall-online.js handles non-JSON 502 errors, null-s
       onState() {},
       onDisconnect() {},
       onError() {},
+      onOutdated() { outdatedCount++; customOutdated?.(); },
       onLeave() {}
     };
-    return { client: ububallOnline(hooks), getEl, listeners, fetchCalls, getUrl: () => currentUrl };
+    return { client: ububallOnline(hooks), getEl, listeners, fetchCalls, sockets, getOutdated: () => outdatedCount, getUrl: () => currentUrl };
   };
 
   // 1. Standalone: HTML 502 error on /api/guest surfaces clean message (no SyntaxError) & passes AbortSignal (D4-14)
@@ -2992,6 +3046,37 @@ test('D4-10, D4-14, D4-19: ububall-online.js handles non-JSON 502 errors, null-s
     h.listeners.get('ubu:session')({ detail: null });
     assert.doesNotThrow(() => h.client.contextChanged());
     assert.doesNotThrow(() => h.listeners.get('ubu:activity-participants')({ detail: [] }));
+  }
+
+  // 4. Server physicsVersion or match version mismatch halts online room, closes socket, blocks actions, and locks UI until reload (A7)
+  {
+    const baseState = (revision, physicsVersion) => ({
+      type: 'state', id: 'ver-match-1', version: 2, physicsVersion, revision, now: 1000, seat: 0, phase: 'plan', mode: 'standard',
+      names: ['Al', 'Bo'], occupied: [true, true], ready: [true, true], rematch: [false, false],
+      connected: [true, true], locked: [false, false], left: [false, false],
+      rosters: [[], []], moves: [], game: { scores: [0, 0], bodies: [], fouls: {}, stats: [] }
+    });
+    fetchResponder = async path => {
+      if (path === '/api/session') return { ok: true, status: 200, json: async () => ({ owner: 'u1', csrf: 'c1' }) };
+      if (path === '/api/ububall') return { ok: true, status: 200, json: async () => baseState(1, 5) };
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+    const h = makeHarness({ isActivity: false, matchVersion: 2, physicsVersion: 5 });
+    await h.getEl('online-create').onclick();
+    assert.equal(h.client.active, true);
+    assert.equal(h.getOutdated(), 0);
+    assert.equal(h.sockets.length, 1);
+
+    // Server rolls to newer physicsVersion mid-match -> socket closes, active becomes false, send() is blocked
+    h.sockets[0].onmessage({ data: JSON.stringify(baseState(2, 6)) });
+    assert.equal(h.getOutdated(), 1, 'physicsVersion mismatch triggers onOutdated');
+    assert.equal(h.sockets[0].closed, true, 'mismatch closes socket immediately');
+    assert.equal(h.client.active, false, 'outdated client stops active play');
+    assert.equal(h.client.send([], true), false, 'outdated client blocks send()');
+
+    // Duplicate state messages do not re-trigger onOutdated
+    h.sockets[0].onmessage({ data: JSON.stringify(baseState(3, 6)) });
+    assert.equal(h.getOutdated(), 1);
   }
 });
 

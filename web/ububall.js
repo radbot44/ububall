@@ -1696,13 +1696,7 @@
   function replayEvents(turn, tick, sim) {
     const saves = turn.saves.filter(s => s.tick === tick), stop = turn.stops.find(s => s.tick === tick)?.ms, struck = sim[6].spinStruck;
     sim[6].spinStruck = false; sim[6].snapStruck = false;
-    if (saves.length || struck) syncReplay();
-    for (const s of saves) {
-      if (s.iron && sim[s.index]) sim[s.index].ironGuard = true;
-      creditSave(replayView(sim[s.index]), s.own, s.iron);
-    }
-    if (struck) popup(fieldView.bodies[6], 'Spin strike!');
-    if (stop) impact(stop, stop >= (ububallMatch.HIT_STOP?.scoredGoal ?? 200) ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1));
+    applyTickEvents(sim, { saves, struck, stop, applyIron: true, syncFn: syncReplay, viewFn: b => replayView(b) });
   }
   // Replays re-simulate each recorded turn from its exact starting state on a display copy.
   // The goal replay and the replay viewer share these.
@@ -1720,6 +1714,44 @@
     shock: (source, radius, type = null) => { syncReplay(); handleShockwave(replayView(source), radius, type); },
     super: (key, stage, body, target = null) => { syncReplay(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
   };
+  // Shared tick event, post-goal settle, and step-budget helpers across live, local replay, goal replay, and online replay.
+  function impactFor(stop, isGoal = stop >= (ububallMatch.HIT_STOP?.scoredGoal ?? 200)) {
+    impact(stop, isGoal ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1));
+  }
+  function applyTickEvents(sim, { saves, struck, stop, applyIron = true, syncFn = null, viewFn, isGoal, onStop = null }) {
+    if (syncFn && (saves.length || struck)) syncFn();
+    for (const s of saves) {
+      const iron = Boolean(s.iron);
+      if (applyIron && iron && sim[s.index]) sim[s.index].ironGuard = true;
+      creditSave(viewFn(sim[s.index], s), s.own, iron);
+    }
+    if (struck) popup(fieldView.bodies[6], 'Spin strike!');
+    if (!stop) return false;
+    impactFor(stop, isGoal);
+    if (onStop) onStop(stop);
+    return true;
+  }
+  function stepPostGoalFrame(sim, fx, syncFn, trace = false) {
+    P.stepPostGoal(sim, P.DT, fx.hit || fx.collide, fx.wall, fx.shock || fx.shockwave, fx.super);
+    syncFn();
+    if (trace) traceGuide(sim);
+    recordTrails();
+    if (!P.settled(sim.slice(0, 6))) return false;
+    P.stop(sim);
+    syncFn();
+    return true;
+  }
+  function runPlaybackTicks(state, delta, speed, maxSteps, getHitStop, onStep) {
+    state.steps += delta / P.DT * speed;
+    for (let n = 0; state.steps >= 1 && n < maxSteps; n++) {
+      const result = onStep();
+      if (result === 'stop') break;
+      if (result === 'reset') { state.steps = 0; break; }
+      if (result === 'continue') continue;
+      state.steps--;
+      if (result === 'hold' || clockNow() < getHitStop()) { state.steps = 0; break; }
+    }
+  }
   function restartGoalReplay() {
     Object.assign(goalReplay, { index: -1, played: 0, steps: 0, doneAt: 0, doneHoldMs: 0, loops: (goalReplay.loops || 0) + 1 });
     clearEffects(); nextReplaySegment();
@@ -1748,6 +1780,7 @@
   }
   // The replay loops until the next kickoff (or, online, until the server moves on).
   function advanceGoalReplay(delta) {
+    delta = Math.min(1 / 15, Math.max(0, delta));
     const r = goalReplay;
     r.elapsedMs = (r.elapsedMs || 0) + delta * 1000;
     if (clockNow() < hitStopUntil) { draw(); return; }
@@ -1758,9 +1791,7 @@
     }
     const post = r.played >= r.total;
     const speed = post ? 0.5 : ububallMatch.replaySpeed(r.total - r.played);
-    r.steps += delta / P.DT * speed;
-    for (let n = 0; r.steps >= 1 && n < 48; n++) {
-      r.steps--;
+    runPlaybackTicks(r, delta, speed, 48, () => hitStopUntil, () => {
       if (r.played < r.total) {
         if (r.tick >= r.segments[r.index].ticks) nextReplaySegment();
         if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && P.ballOnFire(r.sim[6]) && fieldEffects.netFire) fieldEffects.netFire.lit = true;
@@ -1768,14 +1799,10 @@
         replayEvents(r.segments[r.index], r.tick, r.sim);
         syncReplay(); recordTrails();
         if (r.played >= r.total) { r.doneAt = performance.now() + ububallMatch.GOAL_REPLAY_HOLD; r.doneHoldMs = ububallMatch.GOAL_REPLAY_HOLD; }
-        if (clockNow() < hitStopUntil) { r.steps = 0; break; }
-      } else {
-        P.stepPostGoal(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super);
-        syncReplay(); recordTrails();
-        if (P.settled(r.sim.slice(0, 6))) { P.stop(r.sim); r.steps = 0; break; }
-        if (clockNow() < hitStopUntil) { r.steps = 0; break; }
+      } else if (stepPostGoalFrame(r.sim, replayFx, syncReplay)) {
+        return 'reset';
       }
-    }
+    });
     emitSkaterEffects(delta * speed); draw();
   }
   function endGoalReplay() {
@@ -2112,14 +2139,13 @@
   const WIN_SECONDS = GOAL_CALL_SECONDS + .6;
   const winningTurn = t => Boolean(t.goal) && t.scores[t.goal.team] + 1 >= 5;
   function advanceReplay(delta, th = currentReplay()) {
+    delta = Math.min(1 / 15, Math.max(0, delta));
     return withPlaybackContext(th, () => {
       if (!th.paused && clockNow() >= th.holdUntil && clockNow() >= replayHitStop(th)) {
-        th.steps += delta / P.DT * th.speed;
-        for (let n = 0; th.steps >= 1 && n < 240; n++) {
-          if (th.tick >= th.replay.turns[th.index].ticks) { if (!endReplayTurn(th)) break; continue; }
-          stepReplay(true, th); th.steps--; syncReplay(th); recordTrails();
-          if (clockNow() < replayHitStop(th)) { th.steps = 0; break; }
-        }
+        runPlaybackTicks(th, delta, th.speed, 240, () => replayHitStop(th), () => {
+          if (th.tick >= th.replay.turns[th.index].ticks) return endReplayTurn(th) ? 'continue' : 'stop';
+          stepReplay(true, th); syncReplay(th); recordTrails();
+        });
         updateReplayFouls(th);
         emitSkaterEffects(delta * th.speed);
       }
@@ -3019,7 +3045,7 @@
     const mvp = matchMvp(s);
 
     const table = document.createElement('table'), head = table.createTHead().insertRow();
-    const headers = ['', 'Ubu', 'Goals', 'Assists', 'Shots', 'Saves', 'Checks', 'Touches', 'Passes', 'Top shot', 'Distance', 'Fouls'];
+    const headers = ['', 'Ubu', 'Goals', 'Assists', 'Shots on goal', 'Saves', 'Checks', 'Touches', 'Passes', 'Top shot', 'Distance', 'Fouls'];
     for (const label of headers) {
       const th = document.createElement('th');
       th.textContent = label;
@@ -3086,7 +3112,7 @@
       return part;
     }));
 
-    $('stats-note').textContent = "Top shot is the ball speed off that ubu's fastest touch. Distance is in rink lengths. Shots include goals, saved attempts and high-power strikes off the post. Checks are hard hits inflicting daze or stuns. Fouls are yellow cards.";
+    $('stats-note').textContent = "Top shot is the ball speed off that ubu's fastest touch. Distance is in rink lengths. Shots on goal include goals, saved attempts and high-power strikes off the post. Checks are hard hits inflicting daze or stuns. Fouls are yellow cards.";
   }
   function openMatchStats(type) {
     if (type === 'replay') {
@@ -3519,7 +3545,7 @@
     }
   };
   function frame(time) {
-    const delta = lastTime ? Math.max(0, (time - lastTime) / 1000) : 0; lastTime = time;
+    const delta = lastTime ? Math.min(1 / 15, Math.max(0, (time - lastTime) / 1000)) : 0; lastTime = time;
     const active = !localPlayBlocked();
     updateLocalPlanClock(!active);
     updateClock();
@@ -3566,21 +3592,16 @@
           const celeb = postGoal.sim || simBodies;
           elapsed += P.DT; accumulator -= P.DT;
           postGoal.ticks++;
-          P.stepPostGoal(celeb, P.DT, liveFx.collide, liveFx.wall, liveFx.shockwave, liveFx.super);
-          syncViewBodies(celeb, 0);
-          traceGuide(celeb);
-          recordTrails();
-          if (P.settled(celeb.slice(0, 6))) { P.stop(celeb); syncViewBodies(celeb, 0); postGoal = null; break; }
+          if (stepPostGoalFrame(celeb, liveFx, () => syncViewBodies(celeb, 0), true)) { postGoal = null; break; }
         } else {
           const tick = ububallMatch.playTick(P, simBodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
           ububallMatch.lapseFouls(P, simBodies, fouls); traceGuide(simBodies);
           syncViewBodies(simBodies, 0);
-          for (const save of tick.saves) creditSave(fieldView.bodies[save.index], save.own, Boolean(save.iron));
-          if (tick.struck) popup(fieldView.bodies[6], 'Spin strike!');
-          if (tick.stop) {
-            impact(tick.stop, goal !== null ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1));
-            accumulator = 0;
-          }
+          applyTickEvents(simBodies, {
+            saves: tick.saves, struck: tick.struck, stop: tick.stop, applyIron: false,
+            viewFn: (_, s) => fieldView.bodies[s.index], isGoal: goal !== null,
+            onStop: () => { accumulator = 0; }
+          });
           noteEvents(Math.round(elapsed / P.DT), tick.saves, tick.stop);
           recordTrails();
           if (goal !== null || P.settled(simBodies) || Math.round(elapsed / P.DT) >= ububallMatch.turnTicks(fieldView.mode)) {
@@ -4776,11 +4797,10 @@
     return plans.map((p, i) => ({ angle: p.angle + (online?.state?.seat ? Math.PI : 0), power: p.power,
       spin: p.spin || 0, superArm: Boolean(fieldView.bodies[i].superArm), guard: Boolean(p.guard) }));
   }
-  // Presentation-only and internal-simulation body keys. Presentation keys live only on display
-  // bodies (`bodies`); internal simulation keys stay out of display bodies. All other simulation
-  // fields are projected through `projectBody` so new physics/gameplay properties are preserved.
+  // Presentation-only body keys stay on display bodies (`bodies`) and out of simulation state.
+  // `projectBody` copies an explicit fixed set of simulation fields so internal keys (`meterTick`,
+  // `pinX`, `pinY`, `stunnedNext`) and transient/ad-hoc keys never leak onto display bodies.
   const PRESENTATION_KEYS = new Set(['playerIndex', 'name', 'voice', '_lastHitSound', '_lastWallSound']);
-  const SIM_INTERNAL_KEYS = new Set(['meterTick', 'pinX', 'pinY']);
   function stripPresentation(sim) {
     if (!Array.isArray(sim)) return sim;
     for (const b of sim) {
@@ -4789,13 +4809,7 @@
     }
     return sim;
   }
-  function cloneSimValue(v) {
-    if (!v || typeof v !== 'object') return v;
-    if (Array.isArray(v)) return v.map(cloneSimValue);
-    const out = {};
-    for (const [k, item] of Object.entries(v)) out[k] = cloneSimValue(item);
-    return out;
-  }
+  const PROJECTED_STATIC = new WeakMap();
   function onlineOrder(items, seat) { return seat ? [...items.slice(3, 6), ...items.slice(0, 3), ...items.slice(6)] : items; }
   // Maps simulation bodies (server seat-0 order and coordinates) onto the displayed bodies.
   const viewIndex = (i, seat) => seat ? (i < 3 ? i + 3 : i < 6 ? i - 3 : 6) : i;
@@ -4804,12 +4818,17 @@
       dst.x = 1000 - src.x; dst.y = 600 - src.y;
       dst.vx = -src.vx; dst.vy = -src.vy;
       dst.rotation = (src.rotation || 0) + Math.PI;
-      if (src.stickOffset) dst.stickOffset = { x: -src.stickOffset.x, y: -src.stickOffset.y };
     } else {
       dst.x = src.x; dst.y = src.y;
       dst.vx = src.vx; dst.vy = src.vy;
       dst.rotation = src.rotation;
-      if (src.stickOffset) dst.stickOffset = { x: src.stickOffset.x, y: src.stickOffset.y };
+    }
+    if (src.stickOffset) {
+      const sign = seat ? -1 : 1;
+      if (dst.stickOffset && typeof dst.stickOffset === 'object') { dst.stickOffset.x = sign * src.stickOffset.x; dst.stickOffset.y = sign * src.stickOffset.y; }
+      else dst.stickOffset = { x: sign * src.stickOffset.x, y: sign * src.stickOffset.y };
+    } else {
+      delete dst.stickOffset;
     }
     dst.team = i < 3 ? 0 : i < 6 ? 1 : -1;
     if (i < 6) dst.slot = i % 3;
@@ -4827,40 +4846,94 @@
   }
   function projectBody(cb, vb, i, seat = 0, entries = typeof fieldView.entries !== 'undefined' ? fieldView.entries : null, anonymous = typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous) {
     const armed = vb.superArm;
-    for (const k of Object.keys(vb)) {
-      if (!PRESENTATION_KEYS.has(k) && (SIM_INTERNAL_KEYS.has(k) || !(k in cb))) delete vb[k];
-    }
-    for (const [k, v] of Object.entries(cb)) {
-      if (PRESENTATION_KEYS.has(k) || SIM_INTERNAL_KEYS.has(k)) continue;
-      vb[k] = cloneSimValue(v);
-    }
     applySeatTransform(cb, vb, i, seat);
     vb.playerIndex = i;
+    vb.omega = cb.omega;
+    vb.radius = cb.radius;
+    vb.mass = cb.mass;
+    vb.friction = cb.friction;
+    vb.grip = cb.grip;
+    vb.maxSpin = cb.maxSpin;
+    vb.curveMult = cb.curveMult;
+    vb.curveFactor = cb.curveFactor;
     if (i < 6) {
+      const entry = entries ? entries[i] : null;
+      const hasModel = Boolean(entry?.model);
+      const classic = hasModel && classicMode();
+      const anonLabel = anonymous ? anonymousName(i) : null;
+      const cached = hasModel ? PROJECTED_STATIC.get(vb) : null;
+      const staticOk = Boolean(cached &&
+        cached.index === i && cached.entry === entry && cached.model === entry.model &&
+        cached.fullName === entry.model.parts?.fullName && cached.voice === entry.model.voice &&
+        cached.entrySuper === entry.equippedSuper && cached.cbSuper === cb.equippedSuper &&
+        cached.classic === classic && cached.anonymous === anonymous && cached.anonLabel === anonLabel &&
+        'personality' in vb && 'equippedSuper' in vb);
+      vb.sizeMult = cb.sizeMult;
+      vb.baseRadius = cb.baseRadius;
+      vb.baseMass = cb.baseMass;
+      vb.baseFriction = cb.baseFriction;
+      vb.baseReach = cb.baseReach;
+      vb.baseStrength = cb.baseStrength;
+      vb.baseStability = cb.baseStability;
+      vb.baseBounciness = cb.baseBounciness;
+      vb.bounciness = cb.bounciness;
+      vb.impulse = cb.impulse;
+      vb.power = cb.power;
+      vb.reach = cb.reach;
+      vb.strength = cb.strength;
+      vb.stability = cb.stability;
       vb.meter = cb.meter ?? 0;
+      vb.daze = cb.daze || 0;
+      vb.spinStrike = cb.spinStrike || 0;
+      vb.ironCooldownTicks = cb.ironCooldownTicks || 0;
+      vb.superTicks = cb.superTicks || 0;
+      vb.superHoldTicks = cb.superHoldTicks || 0;
+      vb.superBonusTicks = cb.superBonusTicks || 0;
+      vb.superBonusRefund = cb.superBonusRefund || 0;
+      vb.superActive = cb.superActive || null;
       vb.guarding = Boolean(cb.guarding);
       vb.ironGuard = Boolean(cb.ironGuard);
-      vb.daze = cb.daze || 0;
-      vb.superActive = cb.superActive || null;
       vb.superArm = cb.superArm !== undefined ? Boolean(cb.superArm) : Boolean(armed);
       vb.stunned = Boolean(cb.stunned || cb.stunnedNext);
       vb.carded = Boolean(cb.carded);
       vb.holding = Boolean(cb.holding);
-      const entry = entries ? entries[i] : null;
-      if (entry?.model) {
-        vb.name = anonymous ? anonymousName(i) : entry.model.parts?.fullName;
-        vb.voice = entry.model.voice;
-        vb.personality = cloneSimValue(entry.model.personality);
-        const sObj = entry.equippedSuper || (cb.equippedSuper ? { ...P.SUPERS[cb.equippedSuper.id], ...cb.equippedSuper } : resolveEquippedSuper(entry, i));
-        vb.equippedSuper = classicMode() ? null : cloneSimValue(sObj || null);
-      } else if (anonymous) {
-        vb.name = anonymousName(i);
+      vb.usedSuperThisTurn = Boolean(cb.usedSuperThisTurn);
+      vb.superHit = Boolean(cb.superHit);
+      vb.superRefunded = Boolean(cb.superRefunded);
+      vb.shockwaveFired = Boolean(cb.shockwaveFired);
+      if (hasModel) {
+        if (!staticOk) {
+          const fullName = entry.model.parts?.fullName;
+          vb.name = anonymous ? anonLabel : fullName;
+          vb.voice = entry.model.voice;
+          vb.personality = entry.model.personality && typeof entry.model.personality === 'object' ? { ...entry.model.personality } : entry.model.personality;
+          const sObj = entry.equippedSuper || (cb.equippedSuper ? { ...P.SUPERS[cb.equippedSuper.id], ...cb.equippedSuper } : resolveEquippedSuper(entry, i));
+          vb.equippedSuper = classic ? null : (sObj ? { ...sObj } : null);
+          PROJECTED_STATIC.set(vb, {
+            index: i, entry, model: entry.model, fullName, voice: entry.model.voice,
+            entrySuper: entry.equippedSuper, cbSuper: cb.equippedSuper,
+            classic, anonymous, anonLabel
+          });
+        }
+      } else {
+        PROJECTED_STATIC.delete(vb);
+        if (cb.personality && typeof cb.personality === 'object') vb.personality = { ...cb.personality }; else delete vb.personality;
+        if (cb.equippedSuper && typeof cb.equippedSuper === 'object') vb.equippedSuper = { ...cb.equippedSuper };
+        else if (cb.equippedSuper === null) vb.equippedSuper = null;
+        else delete vb.equippedSuper;
+        if (anonymous) vb.name = anonLabel;
       }
     } else {
       vb.onFire = Boolean(cb.onFire);
       vb.fireTicks = cb.fireTicks || 0;
       vb.pace = cb.pace || 0;
+      vb.stuckTicks = cb.stuckTicks || 0;
+      vb.strikerSlot = cb.strikerSlot;
+      vb.strikerPower = cb.strikerPower;
       vb.strikerTeam = cb.strikerTeam === undefined || cb.strikerTeam < 0 ? -1 : (seat ? 1 - cb.strikerTeam : cb.strikerTeam);
+      vb.openingShot = Boolean(cb.openingShot);
+      vb.spinStruck = Boolean(cb.spinStruck);
+      vb.snapStruck = Boolean(cb.snapStruck);
     }
     return vb;
   }
@@ -4913,15 +4986,14 @@
       ububallMatch.lapseFouls(P, replay.simBodies, simFouls);
       replay.simBodies[6].spinStruck = false; replay.simBodies[6].snapStruck = false;
       const now = replay.currentTick, saves = (replay.saves || []).filter(s => s.tick === now), struck = replay.struck?.includes(now);
-      if (saves.length || struck) syncViewBodies(replay.simBodies, online.state.seat);
-      for (const s of saves) {
-        if (s.iron && replay.simBodies[s.index]) replay.simBodies[s.index].ironGuard = true;
-        creditSave(toViewBody(replay.simBodies[s.index], replay.simBodies, online.state.seat), s.own, Boolean(s.iron));
-      }
-      if (struck) popup(fieldView.bodies[6], 'Spin strike!');
       // Hit-stop holds the replay clock back so the rest of the turn plays on after the pause.
       const stop = replay.stops?.find(s => s.tick === now)?.ms;
-      if (stop) { replay.paused = (replay.paused || 0) + stop; impact(stop, stop >= (ububallMatch.HIT_STOP?.scoredGoal ?? 200) ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1)); break; }
+      if (applyTickEvents(replay.simBodies, {
+        saves, struck, stop, applyIron: true,
+        syncFn: () => syncViewBodies(replay.simBodies, online.state.seat),
+        viewFn: b => toViewBody(b, replay.simBodies, online.state.seat),
+        onStop: ms => { replay.paused = (replay.paused || 0) + ms; }
+      })) break;
     }
     syncViewBodies(replay.simBodies, online.state.seat);
     if (!replay.fouled) fouls = viewFouls(simFouls, online.state.seat);
@@ -5133,6 +5205,26 @@
       sync(); draw();
     },
     onError(message) { say(message); banner(message, 3000); },
+    onOutdated() {
+      stopDemo();
+      phase = 'waiting'; drag = null;
+      endGoalReplay(); stopFanfare(); gameAudio()?.stop?.();
+      closeLobby(); closeSummary();
+      if (typeof closeFoulInfo === 'function') closeFoulInfo();
+      if (typeof sheetOpen === 'function' && sheetOpen() && typeof closeSheet === 'function') closeSheet();
+      for (const dlg of document.querySelectorAll('dialog[open]')) {
+        if (dlg.dataset.blocking !== 'true') dlg.close();
+      }
+      for (const pop of document.querySelectorAll('[popover]:popover-open')) {
+        try { pop.hidePopover(); } catch {}
+      }
+      sync(); draw();
+      gameUi.blocking({
+        title: 'Game updated',
+        message: 'Ububall has updated. Refresh the page to continue playing.',
+        confirmLabel: 'Refresh'
+      });
+    },
     onLeave() {
       saveRecording();
       onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = ''; scoringPlayer = null; onlinePlanFouls = null;

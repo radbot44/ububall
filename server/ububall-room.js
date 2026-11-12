@@ -233,7 +233,7 @@ class MatchRoom {
   }
   watchView() {
     const s = this.state;
-    return { spectator: true, mode: s.mode, phase: s.phase, turn: s.turn,
+    return { version: s.version, physicsVersion: P.VERSION, spectator: true, mode: s.mode, phase: s.phase, turn: s.turn,
       names: [...s.names], connected: [...s.connected], winner: s.winner, deadline: s.deadline, remaining: s.remaining,
       rosters: s.game ? s.rosters.map(team => team.map(({ dna, superId }) => ({ dna, superId }))) : [null, null],
       game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
@@ -241,7 +241,7 @@ class MatchRoom {
   }
   view(owner) {
     const s = this.state, seat = this.seat(owner);
-    return { version: s.version, seat, mode: s.mode, phase: s.phase, turn: s.turn,
+    return { version: s.version, physicsVersion: P.VERSION, seat, mode: s.mode, phase: s.phase, turn: s.turn,
       occupied: s.players.map(Boolean), names: [...s.names], connected: [...s.connected], locked: [...s.locked],
       moves: structuredClone(s.drafts[seat]), deadline: s.deadline, remaining: s.remaining, winner: s.winner,
       ready: [...s.ready], left: [...s.left], rosters: structuredClone(s.rosters),

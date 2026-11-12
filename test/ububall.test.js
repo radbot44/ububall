@@ -328,10 +328,13 @@ test('spin strike counter-rotates the ball 1x from range, ramping to 2x spin and
   assert.equal(closeSpinSetup(300)[0].spinStrike, 1);
 });
 
-test('spin strike uses the remaining spin, which decays at 5 rad/s', () => {
-  const [ubu] = P.kickoff(); P.applyStats(ubu); ubu.omega = 10;
+test('spin strike uses the remaining spin, which decays at 5 rad/s while moving and 30 rad/s once linear motion settles', () => {
+  const [ubu] = P.kickoff(); P.applyStats(ubu); ubu.vx = 100; ubu.omega = 10;
   P.step([ubu], .2);
   assert.ok(Math.abs(ubu.omega - 9) < 1e-9);
+  const [stillSpin] = P.kickoff(); P.applyStats(stillSpin); stillSpin.omega = 10;
+  P.step([stillSpin], .2);
+  assert.ok(Math.abs(stillSpin.omega - 4) < 1e-9);
   const bodies = closeSpinSetup(300), control = structuredClone(bodies);
   bodies[0].omega = control[0].omega = 4; control[6].openingShot = false;
   strikeCloseSpin(bodies); strikeCloseSpin(control);
@@ -607,8 +610,8 @@ test('Colossus increases radius and mass during launch and restores them on stop
   const origMass = b[0].mass;
   b[0].superActive = 'colossus';
   P.launch(b, [{ angle: 0, power: 0.5 }]);
-  assert.ok(Math.abs(b[0].radius - origRadius * P.SUPER.colossusRadius) < 1e-6);
-  assert.ok(Math.abs(b[0].mass - origMass * P.SUPER.colossusMass) < 1e-6);
+  assert.ok(Math.abs(b[0].radius - P.SUPER.colossusRadius) < 1e-6);
+  assert.ok(Math.abs(b[0].mass - P.SUPER.colossusMass) < 1e-6);
   P.stop(b);
   assert.ok(Math.abs(b[0].radius - origRadius) < 1e-6);
   assert.ok(Math.abs(b[0].mass - origMass) < 1e-6);
@@ -1576,8 +1579,8 @@ test('stat model: colossus scales effective radius and mass without altering bas
   b[0].superActive = 'colossus';
   P.syncEffectiveStats(b[0]);
 
-  assert.equal(b[0].radius, Math.min(60, baseRadius * P.SUPER.colossusRadius));
-  assert.equal(b[0].mass, baseMass * P.SUPER.colossusMass);
+  assert.equal(b[0].radius, Math.max(baseRadius, P.SUPER.colossusRadius));
+  assert.equal(b[0].mass, Math.max(baseMass, P.SUPER.colossusMass));
   assert.equal(b[0].baseRadius, baseRadius);
   assert.equal(b[0].baseMass, baseMass);
 
@@ -1596,8 +1599,8 @@ test('stat model: colossus and guard compose correctly without compound drift', 
   b[0].guarding = true;
   P.syncEffectiveStats(b[0]);
 
-  assert.equal(b[0].radius, Math.min(60, baseRadius * P.SUPER.colossusRadius));
-  assert.equal(b[0].mass, baseMass * P.SUPER.colossusMass);
+  assert.equal(b[0].radius, Math.max(baseRadius, P.SUPER.colossusRadius));
+  assert.equal(b[0].mass, Math.max(baseMass, P.SUPER.colossusMass));
   assert.equal(b[0].friction, Math.min(225, baseFriction * 1.25));
   assert.equal(b[0].reach, Math.max(b[0].radius, Math.min(37.5, baseReach * 1.25)));
 
@@ -1607,6 +1610,21 @@ test('stat model: colossus and guard compose correctly without compound drift', 
   assert.equal(b[0].radius, baseRadius);
   assert.equal(b[0].mass, baseMass);
   assert.equal(b[0].friction, Math.min(225, baseFriction * 1.25));
+
+  // Uniform 1.5x max Colossus regardless of base size, growing over colossusGrowTicks without settling prematurely
+  const smallCol = P.kickoff()[0], stillGrow = { angle: 0, power: 0, spin: 0, guard: false, superArm: true };
+  P.applyStats(smallCol, { size: 0, reach: 127, mass: 0, stability: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 });
+  smallCol.equippedSuper = { ...P.SUPERS[5], bonusTicks: 0, bonusRefund: 0 }; smallCol.meter = 100;
+  P.startTurn([smallCol], [stillGrow]);
+  assert.equal(smallCol.radius, smallCol.baseRadius, 'Colossus begins growth from baseRadius at tick 0');
+  assert.equal(P.settled([smallCol]), false, 'growing Colossus keeps turn alive past tick 0');
+  for (let tick = 1; tick < P.SUPER.colossusGrowTicks; tick++) P.step([smallCol], P.DT);
+  assert.ok(smallCol.radius > smallCol.baseRadius && smallCol.radius < P.SUPER.colossusRadius, 'Colossus grows gradually before tick 40');
+  assert.equal(P.settled([smallCol]), false, 'Colossus not settled before growth finishes');
+  P.step([smallCol], P.DT);
+  assert.equal(smallCol.radius, P.SUPER.colossusRadius, 'small ubu reaches uniform 1.5x max Colossus radius at tick 40');
+  assert.equal(smallCol.mass, P.SUPER.colossusMass, 'small ubu reaches uniform 1.5x max Colossus mass at tick 40');
+  assert.equal(P.settled([smallCol]), true, 'stationary Colossus settles once 40-tick growth completes');
 
   // Stop turn
   P.stop(b);
@@ -2041,4 +2059,15 @@ test('goal-pocket walls contain skaters nudged into net roof/floor, corner cente
   Object.assign(coast[0], { vx: 250, vy: 0, omega: 4 });
   P.launch(coast, [{ angle: 0, power: 0, spin: 1 }]);
   assert.equal(coast[0].omega, 4, 'power=0 launch leaves existing omega untouched');
+
+  // stepPostGoal pins ball & clears Sticky carrier without pinning/colliding skaters against the pinned ball
+  const pg = P.kickoff();
+  pg.slice(0, 6).forEach(b => P.applyStats(b));
+  pg[0].holding = true;
+  Object.assign(pg[0], { x: 930, y: 300, vx: 300, vy: 0 });
+  Object.assign(pg[6], { x: 960, y: 300, vx: 250, vy: 0, stickOffset: { x: 30, y: 0 } });
+  P.stepPostGoal(pg, P.DT);
+  assert.equal(pg[0].holding, false, 'stepPostGoal releases Sticky holding when pinning scored ball');
+  assert.equal(pg[6].x, 960); assert.equal(pg[6].y, 300);
+  assert.ok(pg[0].vx > 200, 'skater continues past pinned ball without rebounding off it');
 });

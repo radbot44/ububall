@@ -196,17 +196,16 @@
     }
   }
 
-  function updatePopups(dt, popups, reduced = false) {
-    if (reduced) { popups.length = 0; return; }
+  function updatePopups(dt, popups, _reduced = false) {
     for (let i = popups.length - 1; i >= 0; i--) if ((popups[i].life -= dt) <= 0) popups.splice(i, 1);
   }
 
-  function drawPopups(badgeCtx, popups, isPortrait, width, home, away) {
+  function drawPopups(badgeCtx, popups, isPortrait, width, home, away, reduced = false) {
     for (const p of popups) {
       const duration = p.duration || 1.2;
-      const age = 1 - p.life / duration, t = Math.min(1, age / .2), scale = 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2;
+      const age = 1 - p.life / duration, t = reduced ? 1 : Math.min(1, age / .2), scale = reduced ? 1 : 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2;
       const color = p.team ? away : home;
-      badgeCtx.save(); badgeCtx.translate(p.x, p.y - age * 22); if (isPortrait) badgeCtx.rotate(Math.PI / 2); badgeCtx.scale(scale, scale);
+      badgeCtx.save(); badgeCtx.translate(p.x, reduced ? p.y : p.y - age * 22); if (isPortrait) badgeCtx.rotate(Math.PI / 2); badgeCtx.scale(scale, scale);
       badgeCtx.globalAlpha = age < .7 ? 1 : (1 - age) / .3;
       badgeCtx.font = '900 26px system-ui, sans-serif'; badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle';
       badgeCtx.shadowColor = color; badgeCtx.shadowBlur = 12 * width / 1000;
@@ -446,7 +445,7 @@
     const activeSuper = body.superActive || ((body.superArm && (body.meter ?? 0) >= 100) ? body.equippedSuper?.key : null);
     const isColossus = activeSuper === 'colossus';
     const isStalwart = activeSuper === 'stalwart';
-    const effRadius = isColossus ? Math.min(60, body.radius * (body.superActive === 'colossus' ? 1 : (P.SUPER?.colossusRadius || 1.8))) : body.radius;
+    const effRadius = isColossus ? (body.superActive === 'colossus' ? body.radius : Math.max(body.baseRadius ?? body.radius, P.SUPER?.colossusRadius || 56.25)) : body.radius;
     const superScale = isColossus ? (P.SUPER?.colossusLaunch || 0.75) : (isStalwart ? (P.SUPER?.stalwartLaunch || 0.5) : 1);
     const agility = (body.sizeMult || 1) ** (P.SIZE?.launch ?? -0.28);
     const daze = 1 - (P.dazeSlow ? P.dazeSlow(body) : 0);
@@ -870,7 +869,7 @@
     }
 
     const pulseMode = () => ububallMatch.rule(getView().mode, 'pulse');
-    const paceShare = ball => Math.max(Math.hypot(ball.vx, ball.vy), ball.pace || 0) / P.MAX_SPEED;
+    const paceShare = ball => Math.max(Math.hypot(ball.vx, ball.vy), ball.pace || 0) / P.BASE_LAUNCH_SPEED;
     const ballOnFire = () => Boolean(getEffects().netFire?.lit) || P.ballOnFire(getView().bodies?.[6]);
 
     function quench() {
@@ -1166,17 +1165,25 @@
       });
     }
 
-    function clearEffects() {
-      const fx = getEffects(), view = getView(), rinkWrap = getRinkWrap();
-      if (!view.field) onClearPostGoal?.();
+    function clearMotionEffects(fx = getEffects()) {
+      const view = getView(), rinkWrap = getRinkWrap();
       fx.trails.forEach(trail => { trail.length = 0; });
       fx.particles.length = fx.fireworks.length = fx.shockwaves.length = 0;
       fx.skids.length = fx.skidState.length = fx.burns.length = fx.ripples.length = fx.pings.length = 0;
-      fx.popups.length = 0;
-      fx.burnState.path = null; fx.fireTime = 0; fx.heatTime = 0; fx.wasOnFire = null; quench();
+      fx.burnState.path = null;
+      fx.heatTime = 0;
       if (fx.netFire) fx.netFire.lit = false;
       fx.shake = fx.shakeX = fx.shakeY = 0; if (!view.field && rinkWrap) rinkWrap.style.translate = '';
-      fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.goalCall = fx.fireWarp = fx.koWarp = null;
+      fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.fireWarp = fx.koWarp = null;
+    }
+
+    function clearEffects() {
+      const fx = getEffects(), view = getView();
+      if (!view.field) onClearPostGoal?.();
+      clearMotionEffects(fx);
+      fx.popups.length = 0;
+      fx.fireTime = 0; fx.wasOnFire = null; quench();
+      fx.goalCall = null;
       fx.puckSlideTime = -Infinity;
       fx.lastCannonImpact = -Infinity;
       fx.lastFireHitSound = -Infinity;
@@ -1279,8 +1286,13 @@
     }
 
     function updateEffects(dt, fx = getEffects()) {
-      if (isReducedMotion()) { clearEffects(); return; }
       const fieldFx = getEffects(), view = getView(), rinkWrap = getRinkWrap();
+      if (isReducedMotion()) {
+        clearMotionEffects(fx);
+        if (fx !== fieldFx) clearMotionEffects(fieldFx);
+        if (fieldFx.goalCall && (fieldFx.goalCall.t += dt) >= GOAL_CALL_SECONDS) fieldFx.goalCall = null;
+        return;
+      }
       if (Number.isFinite(dt) && dt > 0) {
         fx.heatTime = (fx.heatTime || 0) + dt;
         if (fieldFx && fieldFx !== fx) fieldFx.heatTime = (fieldFx.heatTime || 0) + dt;
@@ -1369,7 +1381,7 @@
 
     function popup(body, text) {
       const popups = getEffects().popups;
-      if (!isReducedMotion() && popups.length < 8) popups.push({ x: body.x, y: body.y - body.radius - 20, text, team: body.team, life: 1.2, duration: 1.2 });
+      if (popups.length < 8) popups.push({ x: body.x, y: body.y - body.radius - 20, text, team: body.team, life: 1.2, duration: 1.2 });
     }
 
     function rounded(x, y, width, height, radius) {
@@ -2152,7 +2164,7 @@
     const trailPositions = () => getView().bodies.map(b => ({ x: b.x, y: b.y }));
     function clearDiscontinuousTrails(before, trails = getEffects().trails) {
       getView().bodies.forEach((b, i) => {
-        if (before[i] && (before[i].x !== b.x || before[i].y !== b.y)) trails[i].length = 0;
+        if (before[i] && (before[i].x - b.x) ** 2 + (before[i].y - b.y) ** 2 > 1) trails[i].length = 0;
       });
     }
     function recordTrails(trails = getEffects().trails) {
@@ -3102,7 +3114,7 @@
           if (phase === 'plan' && b.superArm && activeKey === 'colossus') {
             view.ctx.save();
             view.ctx.setLineDash([5, 5]);
-            circle(b.x, b.y, Math.min(60, b.radius * (P.SUPER?.colossusRadius || 1.8)), '#ffe043cc', 2);
+            circle(b.x, b.y, Math.max(b.baseRadius ?? b.radius, P.SUPER?.colossusRadius || 56.25), '#ffe043cc', 2);
             view.ctx.restore();
           }
           drawSuperBadge(b, activeKey);
@@ -3412,7 +3424,7 @@
       }
       drawFieldOver(colors);
       drawFouls(text, playback?.viewFouls ?? getFouls());
-      drawPopups(view.badgeCtx, fx.popups, view.portrait, width, home, away);
+      drawPopups(view.badgeCtx, fx.popups, view.portrait, width, home, away, isReducedMotion());
       drawParticles(home, away, true);
 
       if (goalReplay) {
