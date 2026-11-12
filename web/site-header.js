@@ -152,7 +152,7 @@
   window.getUbuSession = () => currentSession;
 
   function updateHeaderUI() {
-    const loginBtn = $('login') || $('site-login-btn');
+    const loginBtn = $('login');
     const identityBtn = $('identity');
     const accountDialog = $('account-dialog');
     const discordIdentity = $('discord-identity');
@@ -244,7 +244,7 @@
 
   function initHeader() {
     wireMoreMenu();
-    const loginBtn = $('login') || $('site-login-btn');
+    const loginBtn = $('login');
     if (loginBtn) {
       loginBtn.addEventListener('click', openDiscordLogin);
     }
@@ -256,7 +256,7 @@
     const identityBtn = $('identity');
     const accountDialog = $('account-dialog');
     const accountClose = $('account-close');
-    const logoutBtn = $('logout') || $('account-logout');
+    const logoutBtn = $('logout');
     const refreshBtn = $('account-refresh');
 
     if (refreshBtn) {

@@ -2236,8 +2236,8 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
 
   assert.deepEqual(
     EFFECT_GROUPS.map(g => g.id),
-    ['start', 'planning', 'movement', 'impacts', 'saves', 'supers', 'fouls', 'goals'],
-    'groups follow exact match occurrence order'
+    ['start', 'planning', 'movement', 'impacts', 'saves', 'supers', 'fouls', 'goals', 'stage'],
+    'groups follow exact match + stage occurrence order'
   );
 
   // Goal calls include every GOAL_WORDS entry
@@ -2275,6 +2275,7 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
     playFoul: kind => { audioHits.add(`playFoul:${kind}`); },
     playVoice: () => { audioHits.add('playVoice'); return { stop() {} }; },
     playFanfare: () => { audioHits.add('playFanfare'); return { stop() {} }; },
+    playPack: kind => { audioHits.add(`playPack:${kind}`); },
     stopMotion: () => {},
     stop: () => {}
   };
@@ -2394,6 +2395,18 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
       goalReplay = { total: 40, played: 0, scored: false };
       view.bodies[6].x = 880; view.bodies[6].vx = 520;
     },
+    runStageCast: mode => { view.castHidden = mode !== 'return'; },
+    runStageLineup: variant => { view.castHidden = variant === 'arrive'; },
+    runStageMint: variant => {
+      view.castHidden = true;
+      if (variant === 'deal') mockAudio.playPack('deal');
+      else if (variant === 'pick') callbacks.push({ at: 0.1, fn: () => mockAudio.playPack('pick') });
+      else if (variant === 'crack') callbacks.push({ at: 0.1, fn: () => mockAudio.playPack('crack') });
+      else {
+        callbacks.push({ at: 0.1, fn: () => mockAudio.playPack('reveal') });
+        callbacks.push({ at: 0.25, fn: () => mockAudio.playPack('scamper') });
+      }
+    },
     after: (sec, fn) => callbacks.push({ at: sec, fn }),
     playTimedSizzle: () => { mockAudio.playSizzle(); },
     playSampleFanfare: () => { mockAudio.playFanfare(); }
@@ -2447,7 +2460,8 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
     'playCarve', 'playSlipstream', 'playSpinStrike', 'playWallHit', 'playFireImpact',
     'playSave', 'playFirework', 'playGoalHit:post', 'playGoalHit:net',
     'playSizzle', 'playIronSave', 'playSuper', 'playFoul:warning', 'playFoul:card',
-    'playVoice', 'playFanfare'
+    'playVoice', 'playFanfare',
+    'playPack:deal', 'playPack:pick', 'playPack:crack', 'playPack:reveal', 'playPack:scamper'
   ]) {
     assert.ok(audioHits.has(expected), `Effects Demo covers audio entrypoint ${expected}`);
   }
@@ -3307,7 +3321,7 @@ test('Rink stage Phase 2: shots fold in-match/replay-match/setup-shot, camera gu
   };
 
   const env = runInNewContext(
-    stageCode + '\n;({ getShot: () => shot, setShot, playableShot, enterMatch, exitMatchMode, prepareSheet, openSheet, setupStep, closeLobby, leaveSetupShot, matchInProgress, positionSpinControl, updateFirstTurnGuide, updateFoulInfo });',
+    stageCode + '\n;({ getShot: () => shot, setShot, playableShot, enterMatch, exitMatchMode, resetSetupSlots, sheetOpen, openSheet, closeSheet, cancelSheet, setupStep, closeLobby, leaveSetupShot, matchInProgress, positionSpinControl, updateFirstTurnGuide, updateFoulInfo });',
     ctx
   );
 
@@ -3348,11 +3362,11 @@ test('Rink stage Phase 2: shots fold in-match/replay-match/setup-shot, camera gu
   $('pause-menu').open = true;
   ctx.isPortrait = true; // Manually rotated to portrait during match
   castArgs = [];
-  env.prepareSheet();
+  env.resetSetupSlots();
   env.setupStep('mode');
   env.openSheet();
   assert.equal($('pause-menu').open, false, 'docked mid-match setup closes modal pause menu');
-  assert.equal($('roster-dialog').classList.contains('docked'), true, 'sheet docks during match on wide desktop');
+  assert.equal(env.sheetOpen(), true, 'setup panel opens in docked rules shot during match');
   assert.equal(env.getShot(), 'rules');
   assert.equal(ctx.document.body.dataset.shot, 'rules');
   assert.equal(ctx.isPortrait, false, 'setup shot always uses landscape rink');
@@ -3365,7 +3379,7 @@ test('Rink stage Phase 2: shots fold in-match/replay-match/setup-shot, camera gu
   assert.equal(ctx.document.body.dataset.shot, 'team');
 
   // Cancel/close docked sheet -> returns to match shot (not home!), restores portrait, and skates match cast back
-  $('roster-dialog').close();
+  env.closeSheet();
   assert.equal(env.getShot(), 'match', 'cancelling mid-match setup returns to match shot');
   assert.equal(ctx.document.body.dataset.shot, 'match');
   assert.equal(ctx.isPortrait, true, 'cancelling mid-match setup restores previous match portrait orientation');
@@ -3376,7 +3390,7 @@ test('Rink stage Phase 2: shots fold in-match/replay-match/setup-shot, camera gu
   ctx.setupFor = 'lobby';
   $('roster-dialog').dataset.for = 'lobby';
   ctx.lobbyView = { state: { mode: 'standard', canChangeRules: false }, ready: true };
-  env.prepareSheet();
+  env.resetSetupSlots();
   env.setupStep('team');
   env.openSheet();
   assert.equal(env.getShot(), 'team');
@@ -4778,23 +4792,22 @@ test('Rink stage Phase 5: Discord Activity lobby shot, docked Activity rules/tea
     }
   };
   const actEnv = runInNewContext(
-    stageCode + '\n;({ getShot: () => shot, canDock, prepareSheet, setupStep, openSheet, screenTransition, enterMatch, openPause, leaveForHome, matchInProgress, localPlayBlocked, demoPaused });',
+    stageCode + '\n;({ getShot: () => shot, sheetOpen, resetSetupSlots, setupStep, openSheet, closeSheet, screenTransition, enterMatch, openPause, leaveForHome, matchInProgress, localPlayBlocked, demoPaused });',
     actCtx
   );
 
   assert.equal(actEnv.getShot(), 'lobby', 'Discord Activity boots on the lobby shot');
   assert.equal(actEnv.localPlayBlocked(), false, 'demo physics run unblocked on lobby shot');
   assert.equal(actEnv.demoPaused(), false, 'demo loop runs unpaused on lobby shot');
-  assert.equal(actEnv.canDock(), true, 'wide-screen Discord Activity docks rules/team setup on the stage');
 
   // Docked Change team in Activity glides lobby -> team and returns to lobby on close
-  actEnv.prepareSheet();
+  actEnv.resetSetupSlots();
   actEnv.setupStep('team');
   actEnv.openSheet();
-  assert.equal($('roster-dialog').classList.contains('docked'), true);
+  assert.equal(actEnv.sheetOpen(), true);
   assert.equal(actEnv.getShot(), 'team');
   assert.deepEqual(castCalls, [true], 'demo skaters scatter off the ice for Activity Change team');
-  $('roster-dialog').close();
+  actEnv.closeSheet();
   assert.equal(actEnv.getShot(), 'lobby', 'closing Activity Change team returns to lobby shot, not home');
   assert.deepEqual(castCalls, [true, false], 'demo skaters return to lobby rink');
 
@@ -4937,16 +4950,15 @@ test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-i
   // 1. CSS & handoff doc invariants for stacked phone shots
   assert.match(cssSrc, /html:has\(body\[data-shot="collection"\]\)\s*\{\s*overflow-x:\s*clip;\s*\}/, 'html clips horizontal scatter overflow on Collection');
   assert.match(cssSrc, /@media \(orientation: portrait\), \(width < 56rem\), \(\(pointer: coarse\) and \(max-height: 600px\)\)[\s\S]*?body:is\(\[data-shot="team"\], \[data-shot="rules"\]\) \.ball-page/, 'ububall.css defines stacked flex layout for phone rules/team shots');
-  assert.equal(/\.team-sheet\.docked\s*\{[^}]*allow-discrete/.test(cssSrc.slice(cssSrc.indexOf('Phones and narrow screens stack'))), false, 'stacked in-flow .team-sheet.docked omits allow-discrete display hold so closing never leaves a flex box');
+  assert.equal(/\.team-sheet\s*\{[^}]*allow-discrete/.test(cssSrc.slice(cssSrc.indexOf('Phones and narrow screens stack'))), false, 'stacked in-flow .team-sheet omits allow-discrete display hold so closing never leaves a flex box');
   assert.match(cssSrc, /@media \(max-height: 37\.5rem\)[\s\S]*?body\[data-shot="mint"\] \.rink-stage/, 'ububall.css caps Mint rink width by container height on short landscape phones');
   assert.match(siteCssSrc, /@media \(max-width: 47\.99rem\) and \(min-height: 37\.5625rem\)[\s\S]*?\.collection-viewer-host[\s\S]*?grid-column:\s*1 \/ -1/, 'narrow portrait Collection viewer spans full width with Prev/Next row below');
   assert.match(siteCssSrc, /@media \(max-height: 37\.5rem\)[\s\S]*?\.collection-viewer-frame[\s\S]*?position:\s*fixed/, 'short landscape Collection viewer frames cleanly across full viewport height');
   assert.match(cssSrc, /body:is\(\[data-shot="team"\], \[data-shot="rules"\]\) :is\(\.site-header, \.site-nav\)\s*\{\s*display:\s*none;\s*\}/, 'mobile rules/team setup hides outer site header and bottom nav');
   assert.match(cssSrc, /@media \(max-width: 47\.99rem\)[\s\S]*?body\[data-shot="collection"\] \.rink-stage[\s\S]*?width:\s*calc\(100% \* 600 \/ 484\)/, 'mobile Collection aligns portrait rink boards edge-to-edge without side gutters');
-  assert.match(cssSrc, /@media \(max-width: 34rem\)[\s\S]*?\.team-sheet\.docked \.roster-grid[\s\S]*?repeat\(3,\s*minmax\(0,\s*1fr\)\)/, 'mobile Change Team scales picker ubu tiles to 3 per row');
+  assert.match(cssSrc, /@media \(max-width: 34rem\)[\s\S]*?\.team-sheet \.roster-grid[\s\S]*?repeat\(3,\s*minmax\(0,\s*1fr\)\)/, 'mobile Change Team scales picker ubu tiles to 3 per row');
   assert.match(siteCssSrc, /@media \(orientation: portrait\) and \(max-width: 34rem\)[\s\S]*?\.collection-ice \.ubu-grid[\s\S]*?repeat\(3,\s*minmax\(0,\s*1fr\)\)/, 'mobile portrait Collection scales ubu buttons to 3 per row');
-  assert.match(rinkDocSrc, /Phase 6 is built/, 'docs/rink-stage.md Status updated for Phase 6');
-  assert.match(rinkDocSrc, /Next step: Phase 7/, 'docs/rink-stage.md advances Next step to Phase 7');
+  assert.match(rinkDocSrc, /Phase 6 built/, 'docs/rink-stage.md Log records Phase 6 completion');
 
   // 2. Exercise phone canDock, stacked rules/team, wideScreen resize preservation, compactPhoneStage camera cuts, orientation isolation, and portrait play geometry
   const stageCode =
@@ -5182,20 +5194,18 @@ test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-i
   };
 
   const env = runInNewContext(
-    stageCode + '\n;({ getShot: () => shot, teamHint, compactPhoneStage, playableShot, canDock, prepareSheet, setupStep, openSheet, enterMatch, screenTransition, toggleRotate, setPortrait, fitOrientation, point, stagePoint, measureField, positionSpinControl, updateFoulInfo, screenDegrees, setKnob, knobValue });',
+    stageCode + '\n;({ getShot: () => shot, teamHint, compactPhoneStage, playableShot, sheetOpen, resetSetupSlots, setupStep, openSheet, closeSheet, enterMatch, screenTransition, toggleRotate, setPortrait, fitOrientation, point, stagePoint, measureField, positionSpinControl, updateFoulInfo, screenDegrees, setKnob, knobValue });',
     phoneCtx
   );
 
-  // A. Stacked rules & team setup on portrait phone: canDock is true, docks #roster-dialog + .formation.on-ice, cuts camera without FLIP
+  // A. Stacked rules & team setup on portrait phone: opens docked .team-sheet panel with on-ice #roster-slots, cuts camera without FLIP
   assert.equal(env.compactPhoneStage(), true, 'portrait phone activates compactPhoneStage()');
-  assert.equal(env.canDock(), true, 'phones dock #roster-dialog on / instead of falling back to modal');
-  env.prepareSheet();
+  env.resetSetupSlots();
   env.setupStep('mode');
   env.openSheet();
-  assert.equal($('roster-dialog').classList.contains('docked'), true, '#roster-dialog receives .docked on phone');
-  assert.equal($('roster-dialog').modalOpened, false, '#roster-dialog uses non-modal show() on phone');
-  assert.equal($('roster-slots').classList.contains('on-ice'), true, '#roster-slots mounts .on-ice inside .rink-stage on phone');
-  assert.equal(rinkStage.children.includes($('roster-slots')), true);
+  assert.equal(env.sheetOpen(), true, '#roster-dialog opens as docked .team-sheet panel on phone');
+  assert.equal($('roster-dialog').modalOpened, false, '#roster-dialog never calls showModal()');
+  assert.equal($('roster-slots').childElementCount, 3, 'CPU kickoff lineup populates #roster-slots on phone setup');
   assert.equal(env.getShot(), 'rules');
   assert.equal(animCalls, 0, 'phone cuts directly to rules shot without FLIP camera animation');
   assert.deepEqual(castCalls, [true], 'cast still scatters off the ice on phone setup');
@@ -5206,11 +5216,11 @@ test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-i
   isPortraitScreen = false;
   isWide = false;
   mediaListeners.get('wide')?.();
-  assert.equal($('roster-dialog').open, true, 'rotating/resizing between portrait and landscape keeps docked setup open');
+  assert.equal(env.sheetOpen(), true, 'rotating/resizing between portrait and landscape keeps docked setup open');
   assert.equal(env.compactPhoneStage(), true, 'short landscape phone (wideScreen.matches === false) also activates compactPhoneStage()');
 
   // B. Short landscape phone cuts camera across Mint and Collection (skipping rotate/stretch) AND playableShot() is immediately true on Match
-  $('roster-dialog').close();
+  env.closeSheet();
   assert.equal(env.getShot(), 'home');
   assert.equal(animCalls, 0, 'short landscape phone cuts back to home without FLIP');
 
@@ -5306,4 +5316,58 @@ test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-i
   assert.match(siteCssSrc, /\.ubu-tile-noun\s*\{[^}]*flex:\s*0 0 auto/, 'archetype noun stays unshrunk across all screen sizes');
   assert.match(siteCssSrc, /@media \(max-width: 47\.99rem\)[\s\S]*?\.ubu-tile-meta\s*\{\s*display:\s*none;\s*\}/, 'small screens hide grade and serial row on tiles');
   assert.match(siteCssSrc, /\.ubu-tile-value\s*\{[^}]*position:\s*absolute/, 'stat sort value overlays bottom-right of ubu art');
+});
+
+
+test('Rink stage Phase 7: dead layout CSS & modal setup dialog code removed, scoreboard-strip header styled, Group 9 Stage & Mint catalog added, and handoff doc completed', () => {
+  const cssSrc = fs.readFileSync(require.resolve('../web/ububall.css'), 'utf8');
+  const siteCssSrc = fs.readFileSync(require.resolve('../web/site.css'), 'utf8');
+  const htmlSrc = fs.readFileSync(require.resolve('../web/index.html'), 'utf8');
+  const siteJsSrc = fs.readFileSync(require.resolve('../web/site.js'), 'utf8');
+  const headerJsSrc = fs.readFileSync(require.resolve('../web/site-header.js'), 'utf8');
+  const effectsHtmlSrc = fs.readFileSync(require.resolve('../web/effects.html'), 'utf8');
+  const rinkDocSrc = fs.readFileSync(require.resolve('../docs/rink-stage.md'), 'utf8');
+  const { EFFECT_GROUPS } = require('../web/effects.js');
+
+  // 1. #roster-dialog is a plain docked <section>, #roster-slots lives permanently in .rink-stage, and dead modal/CSS paths are gone
+  assert.equal(htmlSrc.includes('<dialog id="roster-dialog"'), false, '#roster-dialog is no longer a <dialog>');
+  assert.match(htmlSrc, /<section id="roster-dialog" class="team-sheet"/, '#roster-dialog is a docked <section class="team-sheet">');
+  const rinkStageChunk = htmlSrc.slice(htmlSrc.indexOf('<div class="rink-stage">'), htmlSrc.indexOf('<div id="mint-reveal"'));
+  assert.match(rinkStageChunk, /id="roster-slots" class="roster-slots"/, '#roster-slots lives permanently inside .rink-stage');
+
+  for (const deadJs of ['canDock', 'sheetDocked', 'prepareSheet']) {
+    assert.equal(source.includes(deadJs), false, `ububall.js removes legacy ${deadJs} fallback`);
+  }
+  assert.equal(headerJsSrc.includes('site-login-btn'), false, 'site-header.js removes dead #site-login-btn fallback');
+  assert.equal(headerJsSrc.includes('account-logout'), false, 'site-header.js removes dead #account-logout fallback');
+  assert.equal(siteJsSrc.includes('main[data-screen="mint"]'), false, 'site.js removes dead pre-stage <main> fallback host');
+
+  for (const deadUbuballCss of ['.formation {', '.formation::before', '.formation::after', '.formation.on-ice', '.team-sheet.docked', '.team-sheet::backdrop', '.online-options', 'main:has(> #signed-out-panel']) {
+    assert.equal(cssSrc.includes(deadUbuballCss), false, `ububall.css removes dead rule ${deadUbuballCss}`);
+  }
+  for (const deadSiteCss of ['main[data-screen="collection"]', '.pack-fallback', '.super-arm-btn', '.super-picker-btn']) {
+    assert.equal(siteCssSrc.includes(deadSiteCss), false, `site.css removes dead rule ${deadSiteCss}`);
+  }
+
+  // 2. Scoreboard-strip .site-header styling pass
+  assert.match(siteCssSrc, /\.site-header\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+minmax\(0,\s*1fr\)/, 'landscape .site-header uses 3-zone scoreboard grid');
+  assert.match(siteCssSrc, /\.site-header::before\s*\{[\s\S]*?var\(--team-home\)[\s\S]*?var\(--team-away\)/, '.site-header carries Saffron home and Amethyst away scoreboard end-caps');
+  assert.match(siteCssSrc, /\.site-nav\s*\{[\s\S]*?box-shadow:\s*inset/, '.site-nav forms a recessed scoreboard cell bay');
+
+  // 3. Group 9 (9. Stage & Mint) in effects.html / effects.js
+  assert.match(effectsHtmlSrc, /id="fx-lineup"/, 'effects.html mounts #fx-lineup stage layer');
+  assert.match(effectsHtmlSrc, /id="fx-mint"/, 'effects.html mounts #fx-mint spotlight & ubu layer');
+  const stageGroup = EFFECT_GROUPS.find(g => g.id === 'stage');
+  assert.ok(stageGroup, 'EFFECT_GROUPS includes 9. Stage & Mint');
+  assert.equal(stageGroup.title, '9. Stage & Mint');
+  assert.deepEqual(
+    stageGroup.items.map(i => i.id),
+    ['stage-cast-scatter', 'stage-lineup-arrival', 'stage-mint-scamper'],
+    'Group 9 covers cast scatter/return, lineup skate-in/out, and Mint spotlight/scamper'
+  );
+
+  // 4. Handoff document docs/rink-stage.md marks all 7 phases complete and settles Open points into Decisions
+  assert.match(rinkDocSrc, /All 7 phases \(Phases 1–7\) are built and complete\./, 'docs/rink-stage.md Status marks all 7 phases complete');
+  assert.match(rinkDocSrc, /## Open points\s+None\./, 'docs/rink-stage.md Open points moved into Decisions');
+  assert.match(rinkDocSrc, /Phase 7 built/, 'docs/rink-stage.md Log records Phase 7');
 });

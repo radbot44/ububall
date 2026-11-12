@@ -1070,6 +1070,85 @@
           }
         }
       ]
+    },
+    {
+      id: 'stage',
+      title: '9. Stage & Mint',
+      summary: 'Persistent rink cast scatter & return, Choose Team kickoff arrival, and Ubu Mint spotlight reveal & scamper.',
+      items: [
+        {
+          id: 'stage-cast-scatter',
+          title: 'Cast Scatter & Return (`castTo`)',
+          when: 'Entering or leaving `rules`, `team`, `mint`, or `collection` (`castTo(true)` / `castTo(false)`).',
+          visual: 'Display-only skater & ball cast flies straight out from centre ice `(500, 300)` (`820 px` quadratic ease, `50ms` per-body stagger, `±5 rad` spin) without altering simulation bodies, then skates back to exact positions on return.',
+          variants: [
+            { id: 'scatter-return', label: 'Scatter Out + Return' },
+            { id: 'scatter', label: 'Scatter Off Ice' },
+            { id: 'return', label: 'Return to Ice' }
+          ],
+          duration: 2.4,
+          run: (ctx, variant = 'scatter-return') => {
+            ctx.resetStage({ phase: 'plan', mode: 'standard' });
+            ctx.place(0, 220, 210);
+            ctx.place(1, 355, 165);
+            ctx.place(2, 340, 420);
+            ctx.place(3, 645, 185);
+            ctx.place(4, 670, 415);
+            ctx.place(5, 805, 305);
+            ctx.place(6, 515, 285);
+            if (variant === 'return') {
+              ctx.runStageCast?.('return');
+            } else if (variant === 'scatter') {
+              ctx.runStageCast?.('scatter');
+            } else {
+              ctx.runStageCast?.('scatter');
+              ctx.after(0.95, () => ctx.runStageCast?.('return'));
+            }
+          }
+        },
+        {
+          id: 'stage-lineup-arrival',
+          title: 'Choose Team Lineup Skate-In & Skate-Out (`skateLineup`)',
+          when: 'Opening or closing the docked Choose Team / Rules panel (`openSheet`, `skateLineup(true/false)`).',
+          visual: 'Active match or demo cast scatters off the ice while your three home ubus (`Back`, `Top`, `Bottom`) glide in from the home goal (`-45cqw → 0`, `480ms` after `240ms` lead) inside on-ice kickoff position cards; closing skates the lineup back out (`260ms`) as the cast returns.',
+          variants: [
+            { id: 'arrive', label: 'Scatter + Lineup Skate-In' },
+            { id: 'depart', label: 'Lineup Skate-Out + Cast Return' }
+          ],
+          duration: 2.6,
+          run: (ctx, variant = 'arrive') => {
+            ctx.resetStage({ phase: 'plan', mode: 'standard' });
+            ctx.runStageLineup?.(variant);
+          }
+        },
+        {
+          id: 'stage-mint-scamper',
+          title: 'Ubu Mint Spotlights, Reveal & Scamper (`mintLights`, `playPack`)',
+          when: 'Entering Ubu Mint, revealing silhouetted ubus under spotlights, and pressing `Done` (`finishPackWithScamper`, `playPack`).',
+          visual: 'Cast scatters off as an `80%` `#080a10` stage wash lights 5 (regular) or 3 (starter/daily) silhouetted ubus under warm spotlights; each ubu lights in full colour with a reveal chime, then hops (`-68%`, `1.12x`) and scampers off the ice (`±28°` spin, `45ms` stagger) to panned skitter SFX.',
+          soundLabel: 'Play pack sound',
+          variants: [
+            { id: 'scamper-5', label: '5-Ubu Reveal + Scamper' },
+            { id: 'scamper-3', label: '3-Ubu Starter Scamper' },
+            { id: 'deal', label: 'Deal 3 Packs' },
+            { id: 'pick', label: 'Pick Pack to Centre' },
+            { id: 'crack', label: 'Egg Crack (3 Taps)' }
+          ],
+          duration: 3.1,
+          playSound: (ctx, variant = 'scamper-5') => {
+            const a = ctx.audio();
+            if (!a?.playPack) return;
+            if (variant === 'deal') a.playPack('deal');
+            else if (variant === 'pick') a.playPack('pick');
+            else if (variant === 'crack') a.playPack('crack', { stage: 3 });
+            else a.playPack('scamper', { count: variant === 'scamper-3' ? 3 : 5 });
+          },
+          run: (ctx, variant = 'scamper-5') => {
+            ctx.resetStage({ phase: 'plan', mode: 'standard' });
+            ctx.runStageMint?.(variant);
+          }
+        }
+      ]
     }
   ];
 
@@ -1104,6 +1183,7 @@
       mode: 'standard',
       portrait: false,
       anonymous: false,
+      castHidden: false,
       field: null
     };
 
@@ -1148,6 +1228,11 @@
     let forcedGoalLabel = null;
     let sizzleTimer = null;
     let timedCallbacks = [];
+    let castState = null;
+    let stageChoreoActive = false;
+    let lineupAnim = null;
+    let mintSpots = [];
+    let mintTargetSpots = [];
 
     // Sandbox control state
     let paused = false;
@@ -1416,9 +1501,368 @@
       }
     }
 
+    const CAST_SECONDS = 0.45, CAST_STAGGER = 0.05;
+    const POSITIONS = ['Back', 'Top', 'Bottom'];
+
+    function clearStageLayers() {
+      castState = null;
+      stageChoreoActive = false;
+      view.castHidden = false;
+      rinkWrap.classList.remove('cast-away');
+      if (lineupAnim) { try { lineupAnim.cancel(); } catch {} lineupAnim = null; }
+      const fxLineup = $('fx-lineup');
+      if (fxLineup) {
+        fxLineup.replaceChildren();
+        fxLineup.style.opacity = '';
+        fxLineup.style.translate = '';
+      }
+      mintSpots = [];
+      mintTargetSpots = [];
+      const fxMint = $('fx-mint');
+      if (fxMint) fxMint.hidden = true;
+      const fxMintUbus = $('fx-mint-ubus');
+      if (fxMintUbus) fxMintUbus.replaceChildren();
+    }
+
+    function applyCastPose(t) {
+      if (!castState) return;
+      view.bodies.forEach((b, i) => {
+        const home = castState.home[i];
+        if (!home) return;
+        const local = Math.max(0, Math.min(1, (t - i * CAST_STAGGER) / (1 - 6 * CAST_STAGGER)));
+        const far = local * local * 820;
+        const ox = home.x - 500, oy = home.y - 300, len = Math.hypot(ox, oy);
+        b.x = home.x + (len > 1 ? ox / len : 0) * far;
+        b.y = home.y + (len > 1 ? oy / len : -1) * far;
+        b.rotation = home.rotation + local * local * (i % 2 ? -5 : 5);
+      });
+    }
+
+    function runStageCast(mode = 'scatter') {
+      stageChoreoActive = true;
+      const away = mode !== 'return';
+      const home = castState?.home || view.bodies.map(b => ({ x: b.x, y: b.y, rotation: b.rotation || 0 }));
+      if (!away && !castState) {
+        castState = { home, t: 1, away: false };
+        applyCastPose(1);
+      } else {
+        castState = { home, t: castState ? castState.t : (away ? 0 : 1), away };
+      }
+      view.castHidden = false;
+      rinkWrap.classList.remove('cast-away');
+      if (isReduced()) {
+        castState.t = away ? 1 : 0;
+        finishCastIfDone();
+      } else {
+        applyCastPose(castState.t);
+      }
+      draw();
+    }
+
+    function finishCastIfDone() {
+      if (!castState) return;
+      if (castState.away && castState.t >= 1) {
+        castState.home.forEach((h, i) => {
+          view.bodies[i].x = h.x; view.bodies[i].y = h.y; view.bodies[i].rotation = h.rotation;
+        });
+        view.castHidden = true;
+        rinkWrap.classList.add('cast-away');
+        castState = null;
+      } else if (!castState.away && castState.t <= 0) {
+        castState.home.forEach((h, i) => {
+          view.bodies[i].x = h.x; view.bodies[i].y = h.y; view.bodies[i].rotation = h.rotation;
+        });
+        view.castHidden = false;
+        rinkWrap.classList.remove('cast-away');
+        castState = null;
+      }
+    }
+
+    function buildLineupCards(host) {
+      const kickoff = P.kickoff();
+      host.replaceChildren(...[0, 1, 2].map(i => {
+        const entry = view.entries[i];
+        const spot = kickoff[i];
+        ububallMatch.applyStats(P, spot, entry.model.stats, 'standard');
+        const slot = doc.createElement('div');
+        slot.className = 'formation-slot' + (i === 0 ? ' is-selected' : '');
+        slot.dataset.position = POSITIONS[i].toLowerCase();
+        slot.style.setProperty('--x', spot.x / 10 + '%');
+        slot.style.setProperty('--y', spot.y / 6 + '%');
+        slot.style.setProperty('--r', String(spot.radius / 5));
+
+        const pick = doc.createElement('div');
+        pick.className = 'formation-pick';
+        const pos = Object.assign(doc.createElement('span'), { className: 'formation-pos', textContent: POSITIONS[i] });
+        const art = ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'formation-art', 256) : ubuRender(entry.model, 'formation-art');
+        const nameWrap = doc.createElement('span');
+        nameWrap.className = 'formation-name';
+        nameWrap.append(Object.assign(doc.createElement('strong'), { textContent: entry.model.parts.fullName }));
+        pick.append(pos, art, nameWrap);
+
+        const sup = entry.equippedSuper || P.SUPERS[i];
+        const supBadge = doc.createElement('span');
+        supBadge.className = 'formation-super';
+        const supImg = Object.assign(doc.createElement('img'), { src: sup.icon, alt: '' });
+        const supTxt = Object.assign(doc.createElement('span'), { textContent: sup.displayName || sup.name });
+        supBadge.append(supImg, supTxt);
+
+        slot.append(pick, supBadge);
+        return slot;
+      }));
+    }
+
+    function runStageLineup(variant = 'arrive') {
+      stageChoreoActive = true;
+      const host = $('fx-lineup');
+      if (!host) return;
+      buildLineupCards(host);
+      if (lineupAnim) { try { lineupAnim.cancel(); } catch {} lineupAnim = null; }
+      const off = { translate: '-45cqw 0', opacity: 0 }, at = { translate: '0 0', opacity: 1 };
+      if (variant === 'depart') {
+        const home = view.bodies.map(b => ({ x: b.x, y: b.y, rotation: b.rotation || 0 }));
+        castState = { home, t: 1, away: true };
+        finishCastIfDone();
+        host.style.translate = '0 0';
+        host.style.opacity = '1';
+        timedCallbacks.push({
+          at: 0.32,
+          fn: () => {
+            if (!isReduced() && host.animate) {
+              lineupAnim = host.animate([at, off], { duration: 260 / speedMultiplier, easing: 'ease-in', fill: 'forwards' });
+              lineupAnim.onfinish = () => { host.replaceChildren(); lineupAnim = null; };
+            } else {
+              host.replaceChildren();
+            }
+            castState = { home, t: 1, away: false };
+            applyCastPose(1);
+            view.castHidden = false;
+            rinkWrap.classList.remove('cast-away');
+          }
+        });
+      } else {
+        runStageCast('scatter');
+        if (!isReduced() && host.animate) {
+          lineupAnim = host.animate([off, at], {
+            duration: 480 / speedMultiplier,
+            delay: 240 / speedMultiplier,
+            easing: 'cubic-bezier(.2, .8, .2, 1)',
+            fill: 'both'
+          });
+        }
+      }
+      draw();
+    }
+
+    function hexRgb(hex) {
+      const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+      if (!m) return [255, 236, 210];
+      const n = parseInt(m[1], 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+
+    function setFxMintSpots(spots) {
+      mintTargetSpots = spots.map(s => ({ ...s }));
+      if (!mintSpots.length || isReduced()) {
+        mintSpots = spots.map(s => ({ ...s }));
+      }
+    }
+
+    function paintFxMintLights() {
+      const fxMint = $('fx-mint'), lightCanvas = $('fx-mint-lights');
+      if (!fxMint || fxMint.hidden || !lightCanvas) return;
+      const w = Math.max(1, Math.round((lightCanvas.clientWidth || 540) * (root.devicePixelRatio || 1)));
+      const h = Math.max(1, Math.round((lightCanvas.clientHeight || 300) * (root.devicePixelRatio || 1)));
+      if (lightCanvas.width !== w || lightCanvas.height !== h) {
+        lightCanvas.width = w;
+        lightCanvas.height = h;
+      }
+      const lctx = lightCanvas.getContext('2d');
+      lctx.clearRect(0, 0, w, h);
+      lctx.fillStyle = 'rgba(8, 10, 16, 0.80)';
+      lctx.fillRect(0, 0, w, h);
+
+      lctx.save();
+      lctx.globalCompositeOperation = 'destination-out';
+      for (const s of mintSpots) {
+        if (s.alpha <= 0.01) continue;
+        const cx = (s.x / 100) * w, cy = (s.y / 100) * h, rad = (s.r / 100) * w;
+        const g = lctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+        g.addColorStop(0, `rgba(0,0,0,${Math.min(1, s.alpha * 0.96)})`);
+        g.addColorStop(0.55, `rgba(0,0,0,${Math.min(1, s.alpha * 0.62)})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        lctx.fillStyle = g;
+        lctx.beginPath();
+        lctx.arc(cx, cy, rad, 0, Math.PI * 2);
+        lctx.fill();
+      }
+      lctx.restore();
+
+      lctx.save();
+      lctx.globalCompositeOperation = 'lighter';
+      for (const s of mintSpots) {
+        if (s.alpha <= 0.01) continue;
+        const [r, gCol, b] = hexRgb(s.color);
+        const cx = (s.x / 100) * w, cy = (s.y / 100) * h, rad = (s.r / 100) * w * 1.12;
+        const g = lctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+        g.addColorStop(0, `rgba(${r},${gCol},${b},${(0.30 * s.alpha).toFixed(3)})`);
+        g.addColorStop(0.5, `rgba(${r},${gCol},${b},${(0.11 * s.alpha).toFixed(3)})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        lctx.fillStyle = g;
+        lctx.beginPath();
+        lctx.arc(cx, cy, rad, 0, Math.PI * 2);
+        lctx.fill();
+      }
+      lctx.restore();
+    }
+
+    function runStageMint(variant = 'scamper-5') {
+      stageChoreoActive = true;
+      runStageCast('scatter');
+      const fxMint = $('fx-mint'), host = $('fx-mint-ubus');
+      if (!fxMint || !host) return;
+      fxMint.hidden = false;
+      host.replaceChildren();
+
+      if (variant === 'deal') {
+        const xs = [23, 50, 77];
+        setFxMintSpots(xs.map((x, i) => ({
+          id: 'p-' + i, x, y: 50, r: 16, alpha: 0.95,
+          color: view.entries[i]?.model?.attributes?.background?.hex || '#ffecd2'
+        })));
+        activeAudio()?.playPack?.('deal');
+        paintFxMintLights();
+        return;
+      }
+      if (variant === 'pick' || variant === 'crack') {
+        const xs = [23, 50, 77];
+        setFxMintSpots(xs.map((x, i) => ({ id: 'p-' + i, x, y: 50, r: 15, alpha: 0.9, color: '#ffecd2' })));
+        if (variant === 'pick') {
+          timedCallbacks.push({
+            at: 0.25,
+            fn: () => {
+              setFxMintSpots([{ id: 'p-1', x: 50, y: 50, r: 21, alpha: 1, color: '#ff9954' }]);
+              activeAudio()?.playPack?.('pick');
+            }
+          });
+        } else {
+          setFxMintSpots([{ id: 'egg', x: 50, y: 50, r: 18, alpha: 0.95, color: '#ffecd2' }]);
+          [1, 2, 3].forEach(stage => {
+            timedCallbacks.push({
+              at: (stage - 1) * 0.42 + 0.12,
+              fn: () => {
+                setFxMintSpots([{ id: 'egg', x: 50, y: 50, r: 17 + stage * 2.2, alpha: 1, color: stage === 3 ? '#ff9954' : '#ffecd2' }]);
+                activeAudio()?.playPack?.('crack', { stage });
+              }
+            });
+          });
+        }
+        paintFxMintLights();
+        return;
+      }
+
+      const count = variant === 'scamper-3' ? 3 : 5;
+      const xs = count === 3 ? [31, 50, 69] : [24, 37, 50, 63, 76];
+      const ubuEls = Array.from({ length: count }, (_, i) => {
+        const entry = view.entries[i % view.entries.length];
+        const btn = doc.createElement('div');
+        btn.className = 'mint-ubu is-silhouetted';
+        btn.style.setProperty('--ubu-x', xs[i] + '%');
+        btn.style.setProperty('--ubu-size', (count === 3 ? 8.2 : 7.0) + '%');
+        const svg = ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'mint-ubu-svg', 256) : ubuRender(entry.model, 'mint-ubu-svg');
+        btn.append(svg);
+        host.append(btn);
+        return { el: btn, color: entry.model.attributes.background.hex || '#ffecd2', x: xs[i] };
+      });
+
+      setFxMintSpots(ubuEls.map((u, i) => ({ id: 'u-' + i, x: u.x, y: 50, r: 9.5, alpha: 0.92, color: '#ffecd2' })));
+      paintFxMintLights();
+
+      ubuEls.forEach((u, i) => {
+        timedCallbacks.push({
+          at: 0.35 + i * 0.18,
+          fn: () => {
+            u.el.classList.remove('is-silhouetted');
+            u.el.classList.add('is-revealed');
+            setFxMintSpots(ubuEls.map((item, j) => ({
+              id: 'u-' + j, x: item.x, y: 50, r: j === i ? 12 : 9.5, alpha: j <= i ? 0.96 : 0.82,
+              color: j <= i ? item.color : '#ffecd2'
+            })));
+            if (i === 0 || i === count - 1) activeAudio()?.playPack?.('reveal');
+          }
+        });
+      });
+
+      const scamperAt = 0.45 + count * 0.18 + 0.35;
+      timedCallbacks.push({
+        at: scamperAt,
+        fn: () => {
+          activeAudio()?.playPack?.('scamper', { count });
+          setFxMintSpots([{ id: 'center', x: 50, y: 50, r: 16, alpha: 0.32, color: '#ffecd2' }]);
+          if (!isReduced()) {
+            ubuEls.forEach((u, i) => {
+              const slot = i - (count - 1) / 2;
+              const dx = slot * 22 + (i % 2 ? -14 : 14);
+              const dy = (i % 2 ? -1 : 1) * (38 + Math.abs(slot) * 6);
+              const spin = (i % 2 ? 1 : -1) * 28;
+              u.el.animate?.([
+                { translate: '-50% -50%', rotate: '0deg', scale: 1, opacity: 1 },
+                { translate: '-50% -68%', rotate: `${-spin * 0.35}deg`, scale: 1.12, opacity: 1, offset: 0.2 },
+                { translate: `calc(-50% + ${dx}cqw) calc(-50% + ${dy}cqw)`, rotate: `${spin}deg`, scale: 0.62, opacity: 0 }
+              ], { duration: 480 / speedMultiplier, delay: (i * 45) / speedMultiplier, easing: 'cubic-bezier(.3, .1, .7, 1)', fill: 'forwards' });
+            });
+          } else {
+            host.replaceChildren();
+          }
+        }
+      });
+    }
+
+    function advanceStageChoreo(dt) {
+      if (dt <= 0) return;
+      if (phase === 'plan' && (timedCallbacks.length > 0 || stageChoreoActive)) {
+        elapsed += dt;
+        for (let i = timedCallbacks.length - 1; i >= 0; i--) {
+          if (elapsed >= timedCallbacks[i].at) {
+            const fn = timedCallbacks[i].fn;
+            timedCallbacks.splice(i, 1);
+            fn();
+          }
+        }
+      }
+      if (castState) {
+        const step = isReduced() ? 1 : dt / CAST_SECONDS;
+        castState.t = castState.away ? Math.min(1, castState.t + step) : Math.max(0, castState.t - step);
+        if (castState.away ? castState.t < 1 : castState.t > 0) applyCastPose(castState.t);
+        else finishCastIfDone();
+      }
+      if (mintTargetSpots.length) {
+        const byId = new Map(mintSpots.map(s => [s.id, s]));
+        const next = [];
+        const k = isReduced() ? 1 : Math.min(1, dt * 9);
+        for (const tgt of mintTargetSpots) {
+          const cur = byId.get(tgt.id);
+          if (!cur) next.push({ ...tgt, alpha: tgt.alpha * k });
+          else {
+            next.push({
+              id: tgt.id,
+              x: cur.x + (tgt.x - cur.x) * k,
+              y: cur.y + (tgt.y - cur.y) * k,
+              r: cur.r + (tgt.r - cur.r) * k,
+              alpha: cur.alpha + (tgt.alpha - cur.alpha) * k,
+              color: tgt.color
+            });
+          }
+        }
+        mintSpots = next;
+        paintFxMintLights();
+      }
+    }
+
     function resetStage({ phase: nextPhase = 'plan', mode = 'standard', glow = 0 } = {}) {
       draggingPlan = false;
       stopAllAudio();
+      clearStageLayers();
       clearTimeout(bugTabTimer); bugTabTimer = 0; bugTabs.length = 0; $('bug-tab')?.classList.remove('show');
       clearTimeout(bannerTimer); $('field-banner')?.classList.remove('show');
       timedCallbacks = [];
@@ -1622,8 +2066,9 @@
       hitStopUntil = 0;
       for (let i = 0; i < count; i++) {
         clockMs += P.DT * 1000;
-        if (phase === 'plan' && i === 0) launchPlans(plans);
-        else stepSimulationTick();
+        if (phase === 'plan' && !stageChoreoActive && !timedCallbacks.length && i === 0) launchPlans(plans);
+        else if (phase !== 'plan') stepSimulationTick();
+        advanceStageChoreo(P.DT);
         presenter.emitSkaterEffects(P.DT);
         presenter.updatePopups(P.DT);
         presenter.updateEffects(P.DT);
@@ -1650,6 +2095,7 @@
         rinkWrap.style.transform = '';
       }
       presenter.drawScene();
+      paintFxMintLights();
       updateFoulInfo();
     }
 
@@ -1695,6 +2141,9 @@
       openFoulInfo,
       setForcedGoalLabel: lbl => { forcedGoalLabel = lbl; },
       startGoalReplayDemo,
+      runStageCast,
+      runStageLineup,
+      runStageMint,
       after: (sec, fn) => timedCallbacks.push({ at: sec, fn }),
       playTimedSizzle(seconds = 1.5) {
         const a = activeAudio();
@@ -2049,7 +2498,7 @@
     function needsContinuousFrames() {
       if (paused || doc.hidden) return false;
       if (autoLoop && activeDemo) return true;
-      if (phase !== 'plan' || postGoal || goalReplay || timedCallbacks.length) return true;
+      if (phase !== 'plan' || postGoal || goalReplay || timedCallbacks.length || castState || stageChoreoActive) return true;
       if (fx.kickoffGlow > 0 || fx.fireWarp || fx.koWarp || fx.particles.length || fx.shockwaves.length || fx.skids.length || fx.burns.length || fx.pings?.length || fx.popups?.length) return true;
       if (fouls.crease.some(Boolean) || presenter.stalling(fouls)) return true;
       if (activeDemo) return true;
@@ -2091,6 +2540,7 @@
 
         presenter.updatePopups(rawDt * speedMultiplier);
         presenter.updateEffects(simDt);
+        if (!frozenByHitStop) advanceStageChoreo(simDt);
 
         if (!frozenByHitStop && (phase === 'play' || postGoal || goalReplay)) {
           accumulator += simDt;

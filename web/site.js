@@ -1857,9 +1857,7 @@
     const screen = path === '/mint' ? 'mint' : path === '/collection' ? 'collection' : null;
     panel.hidden = !sessionChecked || Boolean(session?.owner) || !screen;
     if (panel.hidden) return;
-    const host = screen === 'mint'
-      ? $('mint-world') || document.querySelector('main[data-screen="mint"]')
-      : $('collection-ice') || $('collection-world') || document.querySelector('main[data-screen="collection"]');
+    const host = screen === 'mint' ? $('mint-world') : ($('collection-ice') || $('collection-world'));
     if (host && panel.parentElement !== host) host.append(panel);
     const title = screen === 'mint' ? 'Ubu Mint' : 'Collection';
     $('signed-out-title').textContent = title;

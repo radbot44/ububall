@@ -102,6 +102,48 @@ body.effects-page {
   position: relative;
   width: 100%;
   height: 100%;
+  container-type: size;
+}
+
+.effects-stage-area #fx-lineup .formation-slot {
+  pointer-events: none;
+  width: clamp(5.6rem, 20.5cqw, 7.6rem);
+  padding: .3rem .35rem;
+  gap: .14rem;
+  border-radius: .65rem;
+}
+
+.effects-stage-area #fx-lineup .formation-slot canvas {
+  width: clamp(1.65rem, 6.2cqw, 2.3rem);
+  height: clamp(1.65rem, 6.2cqw, 2.3rem);
+}
+
+.effects-stage-area #fx-lineup .slot-pos {
+  font-size: .52rem;
+}
+
+.effects-stage-area #fx-lineup .slot-name {
+  font-size: .66rem;
+}
+
+.effects-stage-area #fx-lineup .slot-sub {
+  display: none;
+}
+
+.effects-stage-area #fx-lineup .slot-super {
+  min-height: 1.15rem;
+  padding: .1rem .35rem;
+  font-size: .53rem;
+  gap: .2rem;
+}
+
+.effects-stage-area #fx-lineup .slot-super .super-badge {
+  width: .72rem;
+  height: .72rem;
+}
+
+.effects-stage-area #fx-mint .mint-ubu {
+  pointer-events: none;
 }
 
 .effects-stage-area .rink-wrap {

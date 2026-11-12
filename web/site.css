@@ -36,7 +36,6 @@ body {
 }
 @media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
   .site-header { width: min(114rem, calc(100% - 3rem)); }
-  main[data-screen="collection"] { width: min(114rem, calc(100% - 3rem)); margin: 0 auto; }
   .viewer { width: min(60rem, calc(100% - 2rem)); height: min(54rem, calc(100dvh - 2rem)); }
 }
 /* Faint ice scratches under a vignette, fixed across the viewport as screens scroll. */
@@ -74,37 +73,67 @@ a { color: inherit; text-decoration: none; }
   border: 0;
 }
 
-/* Site header with constant width across all pages */
+/* Arena scoreboard strip header: 3-zone broadcast gantry (Home Saffron cap left, recessed tab bay
+   dead-centre over the rink, Away Amethyst cap right). */
 .site-header {
-  width: min(95rem, calc(100% - 2rem));
-  margin: .625rem auto .75rem;
-  display: flex;
+  position: relative;
+  width: min(95rem, calc(100% - 1.5rem));
+  margin: .5rem auto .625rem;
+  padding: .3125rem .75rem .375rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
+  gap: .5rem .875rem;
+  border: .0625rem solid var(--border);
+  border-radius: .9375rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--elevated) 76%, var(--card)) 0%, var(--card) 58%, color-mix(in srgb, var(--background) 42%, var(--card)) 100%);
+  box-shadow:
+    inset 0 .0625rem 0 rgb(255 255 255 / .11),
+    inset 0 -.1875rem 0 rgb(0 0 0 / .36),
+    0 .625rem 1.5rem rgb(0 0 0 / .38);
 }
-.site-brand, .brand {
+.site-header::before {
+  content: '';
+  position: absolute;
+  inset: .3125rem .375rem .4375rem;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, var(--team-home), color-mix(in srgb, var(--team-home) 62%, #000)) left center / .25rem 100% no-repeat,
+    linear-gradient(180deg, var(--team-away), color-mix(in srgb, var(--team-away) 62%, #000)) right center / .25rem 100% no-repeat;
+  border-radius: .25rem;
+  opacity: .92;
+}
+.site-brand {
+  grid-column: 1;
+  justify-self: start;
   display: inline-flex;
   align-items: center;
+  padding: .125rem .375rem;
   text-decoration: none;
   flex-shrink: 0;
 }
-.site-brand img, .brand img {
-  height: 2rem;
+.site-brand img {
+  height: 1.6875rem;
   width: auto;
   display: block;
+  filter: drop-shadow(0 .125rem .25rem rgb(0 0 0 / .45));
+  transition: scale .14s ease;
 }
+.site-brand:hover img { scale: 1.03; }
 
-/* Tab based navigation */
+/* Recessed scoreboard cell bay */
 .site-nav {
+  grid-column: 2;
+  justify-self: center;
   display: inline-flex;
   align-items: center;
-  gap: .25rem;
-  background: var(--card);
-  padding: .25rem;
-  border: .0625rem solid var(--border);
-  border-radius: .875rem;
+  gap: .1875rem;
+  background: color-mix(in srgb, var(--background) 78%, var(--card));
+  padding: .1875rem;
+  border: .0625rem solid color-mix(in srgb, var(--border) 82%, #000);
+  border-radius: .6875rem;
+  box-shadow: inset 0 .125rem .3125rem rgb(0 0 0 / .55), 0 .0625rem 0 rgb(255 255 255 / .05);
   min-width: 0;
 }
 .site-nav a, .site-nav button {
@@ -112,16 +141,16 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   justify-content: center;
   gap: .375rem;
-  padding: .375rem .8125rem;
-  min-height: 2rem;
+  padding: .375rem .875rem;
+  min-height: 2.0625rem;
   border: 0;
-  border-radius: .625rem;
+  border-radius: .5rem;
   background: none;
   color: var(--muted);
   font-size: .84375rem;
-  font-weight: 500;
+  letter-spacing: .02em;
   text-decoration: none;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: color .15s ease, background .15s ease, box-shadow .15s ease;
   white-space: nowrap;
 }
 .site-nav svg {
@@ -130,14 +159,13 @@ a { color: inherit; text-decoration: none; }
 }
 .site-nav a:hover, .site-nav button:hover {
   color: var(--text);
-  background: color-mix(in srgb, var(--elevated) 60%, transparent);
+  background: color-mix(in srgb, var(--elevated) 78%, transparent);
 }
 .site-nav a[aria-current="page"],
 .site-nav .active {
-  background: var(--primary);
-  color: #101217;
-  font-weight: 600;
-  box-shadow: var(--bevel);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--primary), white 15%), var(--primary));
+  color: #1d1208;
+  box-shadow: var(--bevel), 0 0 .875rem color-mix(in srgb, var(--primary) 30%, transparent);
 }
 .more-menu {
   position: fixed; inset: auto; margin: 0;
@@ -148,17 +176,35 @@ a { color: inherit; text-decoration: none; }
 .more-menu a { padding: .625rem .875rem; border-radius: .625rem; color: var(--muted); }
 .more-menu a:hover, .more-menu a[aria-current="page"] { background: var(--elevated); color: var(--text); }
 
-/* Portrait screens (phones, narrow windows): the main navigation becomes a bottom tab bar.
-   Landscape keeps it in the top bar. */
+@media (orientation: landscape) and (max-width: 52rem) {
+  .site-header { grid-template-columns: auto 1fr auto; gap: .375rem .5rem; padding: .25rem .625rem .3125rem; }
+  .site-brand img { height: 1.3125rem; }
+  .site-nav a, .site-nav button { gap: .25rem; padding: .25rem .5rem; min-height: 1.8125rem; font-size: .75rem; }
+  .site-header-actions #login, #identity { min-height: 1.875rem; padding: .25rem .625rem .375rem; font-size: .75rem; }
+}
+
+/* Portrait screens (phones, narrow windows): compact scoreboard strip on top, docked tab bar at bottom. */
 @media (orientation: portrait) {
   body { padding-bottom: calc(4.25rem + var(--safe-bottom, env(safe-area-inset-bottom))); }
-  .site-header { flex-wrap: nowrap; }
+  .site-header {
+    width: calc(100% - 1rem);
+    margin: .375rem auto .5rem;
+    padding: .3125rem .6875rem .375rem;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    border-radius: .875rem;
+  }
+  .site-brand img { height: 1.5rem; }
+  .discord-activity .site-header { justify-content: center; }
   .site-nav {
-    position: fixed; inset: auto 0 0; z-index: 50;
+    position: fixed; inset: auto 0 0; width: 100%; justify-self: stretch; z-index: 50;
     display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .125rem;
     padding: .375rem max(.5rem, var(--safe-right, env(safe-area-inset-right))) calc(.375rem + var(--safe-bottom, env(safe-area-inset-bottom))) max(.5rem, var(--safe-left, env(safe-area-inset-left)));
-    border-width: .0625rem 0 0; border-radius: 0;
-    background: color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter: blur(.75rem);
+    border-width: .0625rem 0 0; border-color: var(--border); border-radius: 0;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--elevated) 72%, var(--card) 94%), color-mix(in srgb, var(--card) 96%, #000));
+    box-shadow: inset 0 .0625rem 0 rgb(255 255 255 / .1), 0 -.5rem 1.5rem rgb(0 0 0 / .45);
+    backdrop-filter: blur(.75rem);
   }
   .site-nav a, .site-nav button { flex-direction: column; gap: .1875rem; min-height: 3.375rem; padding: .375rem .125rem; font-size: .6875rem; }
   .site-nav svg { width: 1.5rem; height: 1.5rem; }
@@ -167,24 +213,35 @@ a { color: inherit; text-decoration: none; }
   .discord-activity .site-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
-.site-header-actions, .actions {
+.site-header-actions {
+  grid-column: 3;
+  justify-self: end;
   display: inline-flex;
   align-items: center;
-  gap: .625rem;
+  gap: .5rem;
+  padding-right: .25rem;
   flex-shrink: 0;
+}
+.site-header-actions #login {
+  min-height: 2.0625rem;
+  padding: .3125rem .75rem .5rem;
+  border-radius: .5625rem;
+  font-size: .8125rem;
+  white-space: nowrap;
 }
 
 #identity .identity-name { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #identity {
   display: inline-flex;
   align-items: center;
-  gap: .5rem;
-  min-height: 2.5rem;
-  padding: .5rem 1rem;
+  gap: .4375rem;
+  min-height: 2.0625rem;
+  padding: .3125rem .75rem .4375rem;
   border: .0625rem solid var(--border);
-  border-radius: .75rem;
+  border-radius: .5625rem;
   background: var(--elevated);
   color: var(--text);
+  font-size: .8125rem;
   font-weight: 500;
   cursor: pointer;
   touch-action: manipulation;
@@ -286,19 +343,18 @@ button, .button, .quiet, .primary {
 button:hover, .button:hover, .quiet:hover { background: var(--hover); }
 /* Everything a player presses is raised and sinks onto its lip when pressed: buttons, pills and
    tiles. Menu items and plain icon actions stay flat. */
-:is(button:not([class]), .button, .quiet, .primary, .mint-entry-cta, .mint-entry-link, .game-dialog-danger, .stadium-tool-btn, .stadium-super-btn, .super-arm-btn,
-  .super-picker-btn, .super-choice, .formation-super, .setting, .game-select, .ubu-direction, .ubu-filters-toggle, .ubu-chip, .voice-play-btn,
+:is(button:not([class]), .button, .quiet, .primary, .mint-entry-cta, .mint-entry-link, .game-dialog-danger, .stadium-tool-btn, .stadium-super-btn,
+  .super-choice, .formation-super, .setting, .game-select, .ubu-direction, .ubu-filters-toggle, .ubu-chip, .voice-play-btn,
   .ubu-tile-main, .mode-option, .cpu-levels span) { box-shadow: var(--bevel); }
 .viewer-tabs [aria-selected="true"] { box-shadow: var(--bevel); }
-:is(button:not([class]), .button, .quiet, .primary, .mint-entry-cta, .mint-entry-link, .stadium-tool-btn, .stadium-super-btn, .super-arm-btn,
-  .super-picker-btn, .super-choice, .formation-super, .setting, .game-select, .ubu-direction, .ubu-filters-toggle, .ubu-chip, .voice-play-btn,
+:is(button:not([class]), .button, .quiet, .primary, .mint-entry-cta, .mint-entry-link, .stadium-tool-btn, .stadium-super-btn,
+  .super-choice, .formation-super, .setting, .game-select, .ubu-direction, .ubu-filters-toggle, .ubu-chip, .voice-play-btn,
   .ubu-tile-main, .mode-option, .cpu-levels span):active:not(:disabled) { transform: translateY(.125rem); box-shadow: var(--bevel-pressed); }
 /* Tiles and inner panels that hold controls are raised but do not press. */
 .home-ubu, .formation-slot, .lobby-panel, .roster-signin, .replays-list li, .viewer-stat-group, .viewer-voice { box-shadow: var(--bevel); }
 button:disabled { opacity: .4; cursor: default; }
 .primary { background: linear-gradient(color-mix(in srgb, var(--primary), white 14%), var(--primary)); color: #2B1608; }
 .primary:hover { background: linear-gradient(color-mix(in srgb, var(--primary), white 24%), color-mix(in srgb, var(--primary), white 8%)); }
-#login { min-height: 2.25rem; }
 :focus-visible, .button:focus-within { outline: .125rem solid var(--text); outline-offset: .125rem; }
 .icon-button { width: 2.5rem; height: 2.5rem; flex: none; padding: .5rem; border-radius: .625rem; color: var(--muted); }
 .icon-button svg { width: 1.5rem; height: 1.5rem; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
@@ -389,8 +445,6 @@ html.booting body { visibility: hidden; }
 .mint-ubu.is-silhouetted .mint-ubu-svg { opacity: 0; }
 .mint-ubu.is-revealed .mint-ubu-svg { filter: drop-shadow(0 .25rem .5rem rgb(0 0 0 / .62)); }
 .mint-ubu.is-active { opacity: 0; scale: .72; pointer-events: none; }
-.pack-fallback { position: absolute; inset: 18% 28%; display: grid; place-items: center; border-radius: 50%; background: radial-gradient(circle at 30% 20%, #89929e, #292e38 55%, #101217); box-shadow: inset -.625rem -.75rem 1.25rem #0008; }
-.pack-fallback img { width: 85%; }
 
 /* Viewer dialog modal */
 .viewer {
@@ -728,7 +782,6 @@ body:has(.viewer:modal) { overflow: hidden; }
   transform: scale(1.12);
   box-shadow: 0 0 .625rem rgba(255, 113, 151, 0.6);
 }
-.actions { justify-content: center; margin-top: 1rem; }
 .button { position: relative; }
 input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacity: 0; }
 
@@ -1072,7 +1125,6 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 }
 
 /* Collection layout & sorting */
-#collection { margin-top: 1.5rem; }
 .collection-header {
   display: flex;
   align-items: center;
@@ -1527,7 +1579,6 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 }
 @media (orientation: portrait) and (max-width: 520px) {
   main { width: calc(100% - 1rem); margin-top: .75rem; }
-  .brand img { width: 8.125rem; } header { gap: .75rem; } nav { gap: .375rem; }
   .viewer { padding: 1rem .75rem; }
 }
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) { .viewer-card-stage { width: min(45rem, 100%, calc((100dvh - 13.75rem) * 1.5)); } .viewer-toolbar { margin-bottom: .75rem; } }

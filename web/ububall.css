@@ -1,5 +1,5 @@
 /* Ububall arena and layout */
-.ball-page { max-width: 95rem; width: min(95rem, calc(100% - 2rem)); }
+.ball-page { margin: 0 auto; }
 :root {
   --safe-top: var(--discord-safe-area-inset-top, env(safe-area-inset-top));
   --safe-right: var(--discord-safe-area-inset-right, env(safe-area-inset-right));
@@ -29,7 +29,7 @@
 .home-ubu-archetype { color: var(--muted); font-size: .75rem; line-height: 1.15; }
 .home-ubu small { display: flex; align-items: center; gap: .25rem; color: var(--secondary); font-size: .75rem; }
 .home-ubu small img { width: 1.125rem; }
-.home-actions { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: .75rem; }
+.home-actions { display: grid; gap: .75rem; }
 .home-actions button { min-height: 4.25rem; border-radius: 1.125rem; font-size: 1.375rem; }
 .match-action-pair { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: .5rem; }
 #replays-open { min-height: 3rem; font-size: 1.125rem; }
@@ -41,13 +41,6 @@
 #quick-play-setup, #quick-play-signin, #online-open-note { font-size: .8125rem; font-weight: normal; }
 #online-open { display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .availability-actions:not([hidden]) { display: flex; justify-content: center; flex-wrap: wrap; gap: .5rem; margin-block: .75rem; }
-body:not([data-shot="mint"], [data-shot="collection"]):has(#signed-out-panel:not([hidden])) { display: flex; flex-direction: column; }
-main:has(> #signed-out-panel:not([hidden])) {
-  flex: 1; width: 100%; margin: 0; padding: 1.25rem;
-  display: grid; place-items: center;
-  background: radial-gradient(ellipse at center, #29243a, transparent 72%);
-}
-main:has(> #signed-out-panel:not([hidden])) > :not(#signed-out-panel) { display: none; }
 #signed-out-panel { width: min(100%, 36rem); text-align: center; }
 #signed-out-title { margin: 0; font: clamp(2rem, 7vw, 4rem)/1.1 var(--font-display); }
 #signed-out-message { margin: .75rem 0; font-size: 1rem; }
@@ -90,7 +83,6 @@ main:has(> #signed-out-panel:not([hidden])) > :not(#signed-out-panel) { display:
   .home-ubu { padding: .75rem .25rem .625rem; }
   .home-ubu strong { font-size: .8125rem; }
   .home-ubu small { font-size: .6875rem; }
-  .home-actions { grid-template-columns: 1fr; }
   .mint-entry, .mint-entry-content { flex-direction: column; align-items: stretch; text-align: center; gap: .625rem; }
   .mint-entry-badge { align-self: center; }
   .mint-entry-links { justify-content: center; }
@@ -158,7 +150,7 @@ body[data-shot="mint"] .pack-shop { display: contents; }
 body[data-shot="mint"] .mint-head { grid-row: 1; width: 100%; }
 body[data-shot="mint"] .arena-layout { grid-row: 2; display: block; width: 100%; margin: 0; }
 body[data-shot="mint"] .mint-foot { grid-row: 3; width: 100%; }
-body[data-shot="mint"] :is(.team-column, .scoreboard, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin, #skip-goal-replay),
+body[data-shot="mint"] :is(.team-column, .scoreboard, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin, #skip-goal-replay, #roster-slots),
 body[data-shot="mint"] .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner, #skip-goal-replay) { display: none; }
 body[data-shot="mint"] .stadium-stage-area { touch-action: pan-y; }
 @media (min-width: 48rem) and (min-height: 37.5625rem) {
@@ -271,12 +263,11 @@ body[data-shot="collection"] .collection-dock {
   box-shadow: 0 .625rem 1.5rem rgb(0 0 0 / .32);
 }
 body[data-shot="collection"] .collection-dock:not(:has(> :not([hidden]))) { display: none; }
-body[data-shot="collection"] .collection-dock #collection { margin-top: 0; }
 body[data-shot="collection"] .collection-dock .ubu-toolbar { margin: .5rem 0 .125rem; }
 body[data-shot="collection"] .arena-layout { grid-row: 2; display: block; width: 100%; margin: 0; }
 html:has(body[data-shot="collection"]) { overflow-x: clip; }
 body[data-shot="collection"] { overflow-x: clip; }
-body[data-shot="collection"] :is(.team-column, .scoreboard, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin, #skip-goal-replay, #skaters, .field-badges),
+body[data-shot="collection"] :is(.team-column, .scoreboard, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin, #skip-goal-replay, #skaters, .field-badges, #roster-slots),
 body[data-shot="collection"] .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner, #skip-goal-replay) { display: none; }
 body[data-shot="collection"] :is(.stadium, .stadium-stage-area) {
   display: block;
@@ -371,7 +362,6 @@ body:is([data-shot="home"], [data-shot="lobby"], [data-shot="team"], [data-shot=
 body:is([data-shot="home"], [data-shot="lobby"], [data-shot="team"], [data-shot="rules"]) .arena-layout { grid-area: 1 / 1; display: block; width: 100%; margin: 0; pointer-events: none; }
 body:is([data-shot="home"], [data-shot="lobby"], [data-shot="team"], [data-shot="rules"]) :is(.team-column, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin, #skip-goal-replay) { display: none; }
 body:is([data-shot="home"], [data-shot="lobby"]) .play-home { grid-area: 1 / 2; width: 100%; margin: 0; }
-body[data-shot="home"] .play-home .home-actions { grid-template-columns: 1fr; }
 body[data-shot="home"] .play-home :is(.mint-entry, .mint-entry-content) { flex-direction: column; align-items: stretch; text-align: center; gap: .625rem; }
 body[data-shot="home"] .play-home .mint-entry-badge { align-self: center; }
 body[data-shot="home"] .play-home .mint-entry-links { justify-content: center; }
@@ -399,8 +389,8 @@ body[data-shot="home"] .play-home .mint-entry-links { justify-content: center; }
 .discord-activity #signed-out-panel a[href="/"],
 body[data-shot="lobby"] .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner, #skip-goal-replay) { display: none; }
 .discord-activity .site-header {
-  padding-top: var(--safe-top, 0px);
-  padding-inline: var(--safe-left, 0px) var(--safe-right, 0px);
+  margin-top: max(.375rem, calc(var(--safe-top, 0px) + .25rem));
+  width: min(114rem, calc(100% - 1.5rem - var(--safe-left, 0px) - var(--safe-right, 0px)));
 }
 .discord-activity body[data-shot="collection"] .collection-dock { top: var(--safe-top, 0px); }
 body[data-shot="lobby"] .ball-page {
@@ -610,14 +600,8 @@ body[data-shot="lobby"] .play-home { align-self: center; gap: .6875rem; }
 .pause-links a { color: var(--muted); }
 .pause-links a:hover { color: var(--text); }
 
-/* Arena layout: Stadium in center at full size, columns on the outside */
-.arena-layout {
-  display: grid;
-  grid-template-columns: 13.125rem minmax(0, 65rem) 13.125rem;
-  justify-content: center;
-  gap: 1rem;
-  align-items: start;
-}
+/* Arena layout: persistent stage wrapper configured per shot. */
+.arena-layout { display: grid; }
 .column-heading {
   font-size: .9375rem;
   margin-bottom: .5rem;
@@ -930,7 +914,6 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
 .match-help-keys kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5rem; height: 1.5rem; padding: 0 .375rem; border-radius: .25rem; border: 1px solid var(--border); background: var(--background, #101112); font-family: monospace; font-size: .75rem; font-weight: 600; color: var(--text); }
 .skater { position: absolute; width: 5%; aspect-ratio: 1; transform: translate(-50%, -50%); }
 .skater svg, .skater img { width: 100%; height: 100%; display: block; }
-#game-status { margin: .625rem 0 .25rem; padding: 0 1rem; color: var(--muted); text-align: center; font-size: .8125rem; }
 
 /* Launch and HUD actions in stadium */
 .stadium-actions {
@@ -1049,19 +1032,11 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
   transform: translate(-50%, -50%) rotate(-90deg);
   transform-origin: center center;
 }
-.stadium.portrait-mode #game-status {
-  font-size: .75rem;
-  margin: .375rem 0 .125rem;
-}
-
 @media (orientation: portrait) and (max-width: 650px) {
-  .ball-page { width: calc(100% - 1.5rem); }
   .stadium-toolbar { right: .5rem; gap: .25rem; }
   .stadium-tool-btn { width: 1.875rem; height: 1.875rem; padding: .3125rem; border-radius: .375rem; }
   .stadium-tool-btn svg { width: 1rem; height: 1rem; }
   .stadium-actions { gap: .5rem; padding: .375rem .75rem .75rem; }
-  .home-column, .away-column { grid-template-columns: 1fr; }
-  #game-status { font-size: .75rem; }
 }
 
 /* Separate selection, character actions, and the team-wide turn action. */
@@ -1084,11 +1059,6 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
 #shot-spin:disabled { opacity: .45; cursor: default; }
 
 .stadium.portrait-mode.goal-phase #launch { animation: none; padding: .5rem 1rem; }
-@media (orientation: portrait) and (max-width: 650px) {
-  .ball-page:has(.portrait-mode) { width: calc(100% - .75rem); }
-  .stadium.portrait-mode { border-radius: .75rem; }
-}
-
 #field-spin button { display: grid; place-items: center; flex: none; width: 2rem; min-height: 2.75rem; padding: 0; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
 #field-spin { gap: .125rem; }
 
@@ -1120,20 +1090,14 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
 body:has(#online-dialog[open]) { overflow: hidden; }
 .online-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
 .online-heading p { margin: .375rem 0 0; color: var(--muted); }
-#online-dialog fieldset { border: 0; padding: 0; margin: 0 0 1.25rem; min-width: 0; }
-#online-dialog legend { padding: 0; margin-bottom: .625rem; font-weight: 600; }
-.online-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
-.online-options button { flex-direction: column; align-items: flex-start; text-align: left; gap: .25rem; border: .0625rem solid var(--border); padding: .75rem; }
-.online-options button small { color: var(--muted); font-size: .75rem; font-weight: 400; }
 .online-mode-line { display: flex; align-items: center; gap: .625rem; margin: 0 0 1.25rem; font-family: var(--font-display); }
 .online-mode-line strong { font-weight: 400; color: var(--primary); }
-.online-options button[aria-pressed="true"] { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--card)); color: var(--primary); }
 .online-hint { color: var(--muted); font-size: .75rem; line-height: 1.6; margin: .75rem 0 1.25rem; }
 #online-create { width: 100%; }
 #online-status { display: block; min-height: 1.25rem; margin: .625rem 0 0; font-size: .875rem; }
 #online-status[hidden], #online-status:empty { display: block; visibility: hidden; }
 .online-account { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; margin-top: .625rem; padding-top: 1rem; border-top: .0625rem solid var(--border); color: var(--muted); font-size: .75rem; }
-@media (orientation: portrait) and (max-width: 400px) { #online-dialog { padding: 1rem; } .online-options { grid-template-columns: 1fr; } }
+@media (orientation: portrait) and (max-width: 400px) { #online-dialog { padding: 1rem; } }
 
 /* Super meter: a glint at the growing end on each gain, and a shimmer when full. */
 .super-meter-fill { position: relative; }
@@ -1144,21 +1108,23 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 @keyframes meter-full { to { background-position: -300% 0; } }
 @media (prefers-reduced-motion: reduce) { .super-meter-fill.gain::after, .super-meter-fill.full { animation: none; } }
 
-/* Match setup: a mode screen, then a team screen where only the ubu list scrolls. Full screen on
-   phones. */
+/* Match setup panel: docks over the away half on wide screens and stacks below the rink on phones. */
 .team-sheet {
-  position: relative; display: none; width: min(47.5rem, calc(100% - 1.5rem)); height: min(53.75rem, calc(100dvh - 1.5rem)); max-height: none; padding: 0;
-  flex-direction: column; overflow: hidden; border: .0625rem solid var(--border); border-radius: 1.375rem;
+  position: fixed; inset: var(--setup-top, 4.5rem) max(1rem, var(--safe-right, 0px)) max(1rem, var(--safe-bottom, 0px)) 50%; z-index: 40;
+  display: none; flex-direction: column; overflow: hidden; padding: 0; margin: 0;
+  border: .0625rem solid var(--border); border-radius: 1.375rem;
   background: var(--card); color: var(--text);
+  translate: calc(100% + 2rem) 0;
+  transition: translate .45s cubic-bezier(.3, .8, .2, 1), display .45s allow-discrete;
 }
+.team-sheet.open { display: flex; translate: 0 0; }
+@starting-style { .team-sheet.open { translate: calc(100% + 2rem) 0; } }
+@media (prefers-reduced-motion: reduce) { .team-sheet { transition: none; } }
 @media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
-  .team-sheet { width: min(65rem, calc(100% - 2rem)); height: min(58rem, calc(100dvh - 2rem)); }
   #online-dialog { width: min(42rem, calc(100% - 1.5rem)); }
   .replays-dialog { width: min(46rem, calc(100% - 1.5rem)); }
   .share-dialog { width: min(34rem, calc(100% - 1.5rem)); }
 }
-.team-sheet[open] { display: flex; }
-.team-sheet::backdrop { background: rgb(0 0 0 / .65); backdrop-filter: blur(.1875rem); }
 .team-sheet-close { position: absolute; top: .75rem; right: .75rem; z-index: 3; }
 .sheet-step { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 1rem; }
 .team-sheet[data-step="mode"] .team-step, .team-sheet[data-step="team"] .mode-step,
@@ -1220,84 +1186,51 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .team-heading { display: grid; min-width: 0; }
 .team-step-head h2 { margin: 0; font-size: 1.375rem; line-height: 1.1; white-space: nowrap; }
 .team-mode { overflow: hidden; color: var(--muted); font-family: var(--font-display); font-size: .8125rem; text-overflow: ellipsis; white-space: nowrap; }
-/* Kickoff formation on your half of the rink, marked as in a match: boards with your goal and its
-   dashed crease on the left, the dashed centre line and half the face-off circle on the right.
-   Back stands by the goal, Top and Bottom ahead of it. */
-.formation {
-  --crease: 2.125rem;
-  position: relative; display: grid; grid-template: "back top" auto "back bottom" auto / minmax(0, 1fr) minmax(0, 1fr); gap: .625rem;
-  margin-left: .875rem; padding: .75rem 1.375rem .75rem calc(var(--crease) + .625rem);
-  border: .1875rem solid var(--border); border-right: .125rem dashed var(--border); border-radius: 2.75rem 0 0 2.75rem;
-  background: radial-gradient(circle at 100% 50%, transparent 3.25rem, var(--border) 3.25rem 3.375rem, transparent 3.375rem), color-mix(in srgb, var(--card), var(--background) 40%);
-}
-.formation::before {
-  content: ''; position: absolute; right: calc(100% + .1875rem); top: 50%; width: .6875rem; height: 29%; translate: 0 -50%;
-  border: .1875rem solid var(--team-home); border-right: 0; border-radius: .1875rem 0 0 .1875rem; background: var(--background);
-}
-.formation::after {
-  content: ''; position: absolute; left: calc(-1 * var(--crease)); top: 50%; width: calc(2 * var(--crease)); aspect-ratio: 1; translate: 0 -50%;
-  border: .125rem dashed var(--border); border-radius: 50%; clip-path: inset(0 0 0 50%); pointer-events: none;
-}
+/* On-ice kickoff position cards (--x, --y, --r from physics kickoff spots). */
+.roster-slots { position: absolute; inset: 0; z-index: 6; display: block; pointer-events: none; }
+.roster-slots:empty { display: none; }
 .formation-slot {
-  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .375rem; min-width: 0; padding: .375rem;
-  border: .125rem solid var(--border); border-radius: .875rem; background: var(--elevated); transition: border-color .15s, background .15s;
+  --art: calc(var(--r, 5) * 1cqw); --head: 1.375rem;
+  position: absolute; left: var(--x); top: var(--y); translate: -50% calc(-.375rem - var(--head) - var(--art) / 2);
+  display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; justify-items: center;
+  gap: .25rem; width: 12.5cqw; min-width: 0; padding: .375rem .375rem .5rem;
+  border: .125rem solid var(--border); border-radius: 1.25rem;
+  background: color-mix(in srgb, var(--elevated) 55%, transparent); pointer-events: auto;
+  transition: border-color .15s, background .15s;
 }
-.formation-slot[data-position="back"] { grid-area: back; align-content: center; }
-.formation-slot[data-position="top"] { grid-area: top; }
-.formation-slot[data-position="bottom"] { grid-area: bottom; }
-.formation-slot.is-selected { border-color: var(--primary); background: color-mix(in srgb, var(--elevated), var(--primary) 12%); }
+.formation-slot.is-selected { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 16%, transparent); }
 .formation-slot.is-empty { border-style: dashed; }
 .formation-slot.drop-target { border-color: var(--team-home); background: color-mix(in srgb, var(--elevated), var(--team-home) 18%); }
 .formation-slot.just-changed { animation: slot-changed .6s ease-out; }
 @keyframes slot-changed { from { box-shadow: 0 0 0 .25rem color-mix(in srgb, var(--team-home) 70%, transparent); } to { box-shadow: 0 0 0 0 transparent; } }
 .formation-pick {
-  display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; column-gap: .5rem;
-  min-width: 0; min-height: 0; padding: 0; border: 0; background: none; color: var(--text); text-align: left; box-shadow: none;
+  display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; row-gap: 0; align-items: center;
+  width: 100%; min-width: 0; min-height: 0; padding: 0; border: 0; background: none; color: var(--text); text-align: center; box-shadow: none;
 }
 .formation-pick:hover { background: none; }
-.formation-pos { grid-column: 1 / -1; color: var(--muted); font: 600 .625rem var(--font-body); letter-spacing: .12em; text-transform: uppercase; }
+.formation-pos { grid-column: 1 / -1; height: var(--head); color: var(--muted); font: 600 .75rem/var(--head) var(--font-body); letter-spacing: .12em; text-transform: uppercase; }
 .formation-slot.is-selected .formation-pos { color: var(--primary); }
-.formation-art { width: 2.75rem; height: 2.75rem; }
+.formation-art { width: var(--art); height: var(--art); }
 .formation-empty-art { display: block; border: .125rem dashed var(--border); border-radius: 50%; }
-.formation-name { display: grid; min-width: 0; }
-.formation-name strong { overflow: hidden; font-size: .9375rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.formation-name { display: grid; justify-items: center; max-width: 100%; min-width: 0; margin-top: .25rem; }
+.formation-name strong { overflow: hidden; font-size: clamp(.6875rem, 1.3cqw, .9375rem); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .formation-name small { overflow: hidden; color: var(--muted); font: .6875rem var(--font-body); text-overflow: ellipsis; white-space: nowrap; }
+@container (width < 75rem) { .formation-slot:not(.is-empty) .formation-name small { display: none; } }
 .formation-super {
-  grid-column: 1; justify-self: start; display: inline-flex; align-items: center; gap: .25rem; min-height: 0; max-width: 100%; padding: .1875rem .5rem .1875rem .25rem;
-  border: .0625rem solid var(--border); border-radius: 62.4375rem; background: var(--card); color: var(--secondary); font: .75rem var(--font-body);
+  grid-column: 1; justify-self: center; display: inline-flex; align-items: center; gap: .25rem; min-height: 0; max-width: 100%; padding: .1875rem .5rem .1875rem .25rem;
+  border: .0625rem solid var(--border); border-radius: 62.4375rem; background: var(--card); color: var(--secondary); font: clamp(.625rem, 1.1cqw, .75rem) var(--font-body);
 }
 .formation-super img { flex: none; width: 1.25rem; height: 1.25rem; }
 .formation-super span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .formation-super svg { flex: none; width: .875rem; height: .875rem; color: var(--muted); }
 .formation-super svg, .formation-tool svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .formation-super[aria-expanded="true"] { border-color: var(--secondary); }
-.formation-tools { grid-column: 2; grid-row: 1 / span 2; align-self: start; display: grid; gap: .25rem; }
+.formation-tools { position: absolute; top: .375rem; right: .375rem; bottom: auto; display: grid; gap: .25rem; }
 /* Position tools are bare icons: no button chrome, only a color change on hover. */
 .formation-tool { width: 1.5rem; height: 1.5rem; min-height: 0; padding: 0; border: 0; background: none; color: var(--muted); box-shadow: none; }
 .formation-tool svg { width: 1.25rem; height: 1.25rem; }
 .formation-tool:hover, .formation-tool:focus-visible { background: none; color: var(--text); }
-/* Back fills its tall card: a large ubu, centred, with its tools in the corner. */
-.formation-slot[data-position="back"] { grid-template-columns: minmax(0, 1fr); justify-items: center; }
-.formation-slot[data-position="back"] .formation-pick { grid-template-columns: minmax(0, 1fr); justify-items: center; row-gap: .25rem; text-align: center; }
-.formation-slot[data-position="back"] .formation-art { width: 4.75rem; height: 4.75rem; }
-.formation-slot[data-position="back"] .formation-name { justify-items: center; max-width: 100%; }
-.formation-slot[data-position="back"] .formation-super { justify-self: center; max-width: 100%; }
-.formation-slot[data-position="back"] .formation-tools { position: absolute; top: .375rem; right: .375rem; bottom: auto; }
 [data-locked] .roster-scroll { opacity: .55; pointer-events: none; }
-/* Phones: position tools sit in the corner beside the position label, so names and supers keep the width. */
-@media (orientation: portrait) and (max-width: 520px), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
-  .formation { --crease: 1.375rem; gap: .375rem; margin-left: .6875rem; padding: .5rem .875rem .5rem calc(var(--crease) + .375rem); border-radius: 2rem 0 0 2rem; }
-  .formation::before { width: .5rem; }
-  .formation-slot { grid-template-columns: minmax(0, 1fr); padding: .3125rem; }
-  .formation-tools { position: absolute; top: .125rem; right: .25rem; display: flex; gap: .1875rem; }
-  .formation-pos { line-height: 1.5rem; }
-  .formation-slot[data-position="back"] .formation-pos { justify-self: start; }
-  .formation-art { width: 2.25rem; height: 2.25rem; }
-  .formation-slot[data-position="back"] .formation-art { width: 3.5rem; height: 3.5rem; }
-  .formation-name strong { font-size: .8125rem; line-height: 1.15; white-space: normal; overflow-wrap: anywhere; }
-  .formation-super { max-width: 100%; padding: .125rem .375rem .125rem .1875rem; font-size: .6875rem; }
-  .formation-super img { width: 1.125rem; height: 1.125rem; }
-}
 /* A position's super choices: icon, name with mastery, and what it does. */
 .super-popover { padding: .625rem; border-color: var(--secondary); }
 .roster-super-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .5rem; }
@@ -1350,10 +1283,6 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .roster-grid { grid-template-columns: repeat(auto-fill, minmax(max(7rem, calc((100% - 1.625rem) / 4)), 1fr)); gap: .5rem; margin: 0; }
 .roster-grid .ubu-tile-main { gap: .25rem; padding: .75rem .25rem .5rem; border-radius: .875rem; background-color: var(--elevated); }
 .roster-grid .ubu-tile-art { width: 3.5rem; height: 3.5rem; }
-@media (orientation: portrait) and (max-width: 640px), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
-  .team-sheet { width: 100%; height: 100dvh; max-width: none; border: 0; border-radius: 0; padding-top: var(--safe-top); }
-}
-
 /* Camera moves (camera() in ububall.js): the rink stage is played from its old box to its new one,
    so nothing above it may clip it on the way. */
 .stadium.camera-moving, .stadium.camera-moving .stadium-stage-area { overflow: visible; }
@@ -1364,41 +1293,12 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 
 /* The rules and team setup shots (see docs/rink-stage.md): on a wide screen the rink grows to
    game size, the team sheet docks over the away half, and the lineup stands on the ice. */
-.team-sheet.docked {
-  position: fixed; inset: var(--setup-top, 4.5rem) max(1rem, var(--safe-right, 0px)) max(1rem, var(--safe-bottom, 0px)) 50%; z-index: 40; width: auto; height: auto; margin: 0;
-  translate: calc(100% + 2rem) 0; transition: translate .45s cubic-bezier(.3, .8, .2, 1), display .45s allow-discrete;
-}
-.team-sheet.docked[open] { translate: 0 0; }
-@starting-style { .team-sheet.docked[open] { translate: calc(100% + 2rem) 0; } }
-@media (prefers-reduced-motion: reduce) { .team-sheet.docked { transition: none; } }
 body:is([data-shot="team"], [data-shot="rules"]) { overflow: hidden; }
 body:is([data-shot="team"], [data-shot="rules"]) .arena-layout { grid-column: 1 / -1; }
 body:is([data-shot="team"], [data-shot="rules"]) :is(.play-home, .scoreboard),
 body:is([data-shot="team"], [data-shot="rules"]) .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner, #skip-goal-replay) { display: none; }
 body:is([data-shot="team"], [data-shot="rules"]) .stadium-stage-area { min-height: calc(100dvh - var(--setup-top, 4.5rem) - max(1rem, var(--safe-bottom, 0px))); }
 body:is([data-shot="team"], [data-shot="rules"]) .rink-stage { width: min(100%, calc((100dvh - var(--setup-top, 4.5rem) - max(1rem, var(--safe-bottom, 0px))) * 5 / 3)); }
-/* Each position is a button around its ubu, centred on the kickoff spot (--x, --y), with the ubu
-   drawn at the size it plays at (--r, as the rink's sprites are). */
-.formation.on-ice { position: absolute; inset: 0; z-index: 6; display: block; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; pointer-events: none; }
-.formation.on-ice::before, .formation.on-ice::after { content: none; }
-.formation.on-ice .formation-slot {
-  --art: calc(var(--r, 5) * 1cqw); --head: 1.375rem;
-  position: absolute; left: var(--x); top: var(--y); translate: -50% calc(-.375rem - var(--head) - var(--art) / 2);
-  grid-template-columns: minmax(0, 1fr); justify-items: center; gap: .25rem; width: 12.5cqw; padding: .375rem .375rem .5rem;
-  border-radius: 1.25rem; background: color-mix(in srgb, var(--elevated) 55%, transparent); pointer-events: auto;
-}
-/* Neighbouring spots are 13% of the rink apart, so the buttons stay narrower than that and their
-   text scales with the rink; the second line of the name needs a big rink. */
-.formation.on-ice .formation-slot .formation-name strong { font-size: clamp(.6875rem, 1.3cqw, .9375rem); }
-.formation.on-ice .formation-slot .formation-super { font-size: clamp(.625rem, 1.1cqw, .75rem); }
-@container (width < 75rem) { .formation.on-ice .formation-slot:not(.is-empty) .formation-name small { display: none; } }
-.formation.on-ice .formation-slot.is-selected { background: color-mix(in srgb, var(--primary) 16%, transparent); }
-.formation.on-ice .formation-slot .formation-pick { grid-template-columns: minmax(0, 1fr); justify-items: center; row-gap: 0; width: 100%; text-align: center; }
-.formation.on-ice .formation-slot .formation-pos { height: var(--head); font-size: .75rem; line-height: var(--head); }
-.formation.on-ice .formation-slot .formation-art { width: var(--art); height: var(--art); }
-.formation.on-ice .formation-slot .formation-name { justify-items: center; max-width: 100%; margin-top: .25rem; }
-.formation.on-ice .formation-slot .formation-super { justify-self: center; max-width: 100%; }
-.formation.on-ice .formation-slot .formation-tools { position: absolute; top: .375rem; right: .375rem; bottom: auto; display: grid; }
 /* Phones and narrow screens stack the rink above the docked team sheet and keep the three kickoff
    slots clear across the ice. */
 @media (orientation: portrait), (width < 56rem), ((pointer: coarse) and (max-height: 600px)) {
@@ -1411,138 +1311,138 @@ body:is([data-shot="team"], [data-shot="rules"]) .rink-stage { width: min(100%, 
   }
   body:is([data-shot="team"], [data-shot="rules"]) .arena-layout { order: -1; flex: none; width: 100%; }
   body:is([data-shot="team"], [data-shot="rules"]) .stadium-stage-area { min-height: 0; }
-  .team-sheet.docked {
+  .team-sheet {
     position: relative; inset: auto; z-index: 20;
     width: 100%; max-width: none; padding-top: 0;
     border: .0625rem solid var(--border); border-radius: 1.125rem;
     translate: 0 0; transition: opacity .18s ease-out, translate .18s ease-out;
   }
-  @starting-style { .team-sheet.docked[open] { opacity: 0; translate: 0 .625rem; } }
-  .team-sheet.docked .team-sheet-close { top: .375rem; right: .5rem; width: 1.875rem; height: 1.875rem; min-height: 0; padding: .25rem; }
-  .team-sheet.docked .sheet-step { padding: 0 .75rem; }
-  .team-sheet.docked .team-step { padding-top: .375rem; }
-  .team-sheet.docked .team-step-head { min-height: 2rem; gap: .5rem; padding-right: 2.375rem; margin-bottom: .25rem; }
-  .team-sheet.docked .team-step-head .quiet { min-height: 1.875rem; padding: .25rem .5625rem; font-size: .8125rem; }
-  .team-sheet.docked .team-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .125rem .4375rem; }
-  .team-sheet.docked .team-step-head h2 { font-size: 1.0625rem; }
-  .team-sheet.docked .team-mode { font-size: .75rem; }
-  .team-sheet.docked .team-bar { flex-wrap: nowrap; gap: .25rem; margin-bottom: .1875rem; }
-  .team-sheet.docked .team-bar > button { min-height: 1.875rem; padding: .1875rem .5rem; font-size: .75rem; white-space: nowrap; }
-  .team-sheet.docked .team-bar .team-step-btn { width: 1.875rem; flex: none; }
-  .team-sheet.docked .team-bar .game-select { flex: 1 1 0; min-width: 0; min-height: 1.875rem; padding: .1875rem .5rem; font-size: .75rem; }
-  .team-sheet.docked .roster-hint { margin: 0 0 .25rem; font-size: .6875rem; line-height: 1.2; }
-  .team-sheet.docked .roster-scroll { margin: 0 -.75rem; padding: 0 .75rem .5rem; }
-  .team-sheet.docked .roster-toolbar { position: static; margin: 0; padding: 0; background: none; }
-  .team-sheet.docked .roster-toolbar .ubu-toolbar { gap: .25rem; margin: .125rem 0 .375rem; padding-top: 0; }
-  .team-sheet.docked .roster-toolbar .ubu-search { min-height: 1.9375rem; padding: .25rem 2rem .25rem .5625rem; font-size: .75rem; }
-  .team-sheet.docked .roster-toolbar .ubu-filters-toggle { width: 1.9375rem; height: 1.9375rem; min-height: 0; padding: .3125rem; }
-  .team-sheet.docked .roster-toolbar .ubu-help-toggle { width: 1.5rem; height: 1.5rem; right: .25rem; }
-  .team-sheet.docked .roster-toolbar .ubu-help-toggle .icon { width: 1.125rem; height: 1.125rem; }
-  .formation.on-ice .formation-slot {
+  @starting-style { .team-sheet.open { opacity: 0; translate: 0 .625rem; } }
+  .team-sheet .team-sheet-close { top: .375rem; right: .5rem; width: 1.875rem; height: 1.875rem; min-height: 0; padding: .25rem; }
+  .team-sheet .sheet-step { padding: 0 .75rem; }
+  .team-sheet .team-step { padding-top: .375rem; }
+  .team-sheet .team-step-head { min-height: 2rem; gap: .5rem; padding-right: 2.375rem; margin-bottom: .25rem; }
+  .team-sheet .team-step-head .quiet { min-height: 1.875rem; padding: .25rem .5625rem; font-size: .8125rem; }
+  .team-sheet .team-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .125rem .4375rem; }
+  .team-sheet .team-step-head h2 { font-size: 1.0625rem; }
+  .team-sheet .team-mode { font-size: .75rem; }
+  .team-sheet .team-bar { flex-wrap: nowrap; gap: .25rem; margin-bottom: .1875rem; }
+  .team-sheet .team-bar > button { min-height: 1.875rem; padding: .1875rem .5rem; font-size: .75rem; white-space: nowrap; }
+  .team-sheet .team-bar .team-step-btn { width: 1.875rem; flex: none; }
+  .team-sheet .team-bar .game-select { flex: 1 1 0; min-width: 0; min-height: 1.875rem; padding: .1875rem .5rem; font-size: .75rem; }
+  .team-sheet .roster-hint { margin: 0 0 .25rem; font-size: .6875rem; line-height: 1.2; }
+  .team-sheet .roster-scroll { margin: 0 -.75rem; padding: 0 .75rem .5rem; }
+  .team-sheet .roster-toolbar { position: static; margin: 0; padding: 0; background: none; }
+  .team-sheet .roster-toolbar .ubu-toolbar { gap: .25rem; margin: .125rem 0 .375rem; padding-top: 0; }
+  .team-sheet .roster-toolbar .ubu-search { min-height: 1.9375rem; padding: .25rem 2rem .25rem .5625rem; font-size: .75rem; }
+  .team-sheet .roster-toolbar .ubu-filters-toggle { width: 1.9375rem; height: 1.9375rem; min-height: 0; padding: .3125rem; }
+  .team-sheet .roster-toolbar .ubu-help-toggle { width: 1.5rem; height: 1.5rem; right: .25rem; }
+  .team-sheet .roster-toolbar .ubu-help-toggle .icon { width: 1.125rem; height: 1.125rem; }
+  .roster-slots .formation-slot {
     border-radius: .875rem;
     background: color-mix(in srgb, var(--elevated) 78%, transparent);
     backdrop-filter: blur(.25rem);
   }
-  .formation.on-ice .formation-slot.is-selected {
+  .roster-slots .formation-slot.is-selected {
     background: color-mix(in srgb, var(--elevated) 65%, var(--primary) 28%);
   }
-  .formation.on-ice .formation-slot[data-position="back"] {
+  .roster-slots .formation-slot[data-position="back"] {
     --art: clamp(1.875rem, 9cqw, 2.75rem);
     --head: 1.0625rem;
     left: 6.5%; top: 50%; translate: 0 -50%;
     width: 31%; max-width: 9.5rem;
     gap: .125rem; padding: .25rem .25rem .3125rem;
   }
-  .formation.on-ice .formation-slot[data-position="back"] .formation-pick { width: 100%; overflow: hidden; }
-  .formation.on-ice .formation-slot[data-position="back"] .formation-pos { justify-self: start; padding-left: .125rem; font-size: .5625rem; }
-  .formation.on-ice .formation-slot[data-position="back"] .formation-name { width: 100%; min-width: 0; margin-top: .125rem; overflow: hidden; }
-  .formation.on-ice .formation-slot[data-position="back"] .formation-name strong {
+  .roster-slots .formation-slot[data-position="back"] .formation-pick { width: 100%; overflow: hidden; }
+  .roster-slots .formation-slot[data-position="back"] .formation-pos { justify-self: start; padding-left: .125rem; font-size: .5625rem; }
+  .roster-slots .formation-slot[data-position="back"] .formation-name { width: 100%; min-width: 0; margin-top: .125rem; overflow: hidden; }
+  .roster-slots .formation-slot[data-position="back"] .formation-name strong {
     display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
     font-size: clamp(.6875rem, 2.15cqw, .8125rem); line-height: 1.12; white-space: nowrap;
   }
-  .formation.on-ice .formation-slot[data-position="back"] .formation-name small { display: none; }
-  .formation.on-ice .formation-slot[data-position="back"] .formation-super {
+  .roster-slots .formation-slot[data-position="back"] .formation-name small { display: none; }
+  .roster-slots .formation-slot[data-position="back"] .formation-super {
     max-width: 100%; padding: .125rem .3125rem .125rem .1875rem; font-size: .625rem; gap: .1875rem;
   }
-  .formation.on-ice .formation-slot[data-position="back"] .formation-super img { width: .9375rem; height: .9375rem; }
-  .formation.on-ice .formation-slot[data-position="back"] .formation-super svg { width: .6875rem; height: .6875rem; }
-  .formation.on-ice .formation-slot[data-position="back"] .formation-tools { top: .1875rem; right: .1875rem; display: flex; gap: .125rem; }
-  .formation.on-ice .formation-slot[data-position="back"] .formation-tool { width: 1.1875rem; height: 1.1875rem; }
-  .formation.on-ice .formation-slot[data-position="back"] .formation-tool svg { width: .9375rem; height: .9375rem; }
-  .formation.on-ice .formation-slot:not([data-position="back"]) {
+  .roster-slots .formation-slot[data-position="back"] .formation-super img { width: .9375rem; height: .9375rem; }
+  .roster-slots .formation-slot[data-position="back"] .formation-super svg { width: .6875rem; height: .6875rem; }
+  .roster-slots .formation-slot[data-position="back"] .formation-tools { top: .1875rem; right: .1875rem; display: flex; gap: .125rem; }
+  .roster-slots .formation-slot[data-position="back"] .formation-tool { width: 1.1875rem; height: 1.1875rem; }
+  .roster-slots .formation-slot[data-position="back"] .formation-tool svg { width: .9375rem; height: .9375rem; }
+  .roster-slots .formation-slot:not([data-position="back"]) {
     --slot-art: clamp(1.875rem, 8.5cqw, 2.375rem);
     left: 39%; width: 54.5%; max-width: 19.5rem; translate: 0 -50%;
     display: grid; grid-template-columns: minmax(0, 1fr);
     align-items: center; justify-items: stretch; row-gap: .125rem;
     padding: .25rem .375rem;
   }
-  .formation.on-ice .formation-slot[data-position="top"] { top: 29.5%; }
-  .formation.on-ice .formation-slot[data-position="bottom"] { top: 70.5%; }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-pick {
+  .roster-slots .formation-slot[data-position="top"] { top: 29.5%; }
+  .roster-slots .formation-slot[data-position="bottom"] { top: 70.5%; }
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-pick {
     grid-column: 1; grid-row: 1;
     display: grid; grid-template-columns: var(--slot-art) minmax(0, 1fr); grid-template-rows: auto auto;
     column-gap: .375rem; row-gap: .0625rem; align-items: center; justify-items: stretch;
     width: 100%; overflow: hidden; text-align: left;
   }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-art {
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-art {
     grid-column: 1; grid-row: 1 / span 2;
     width: var(--slot-art); height: var(--slot-art);
   }
-  .formation.on-ice .formation-slot:not([data-position="back"]):has(> .formation-super) .formation-art {
+  .roster-slots .formation-slot:not([data-position="back"]):has(> .formation-super) .formation-art {
     translate: 0 .5rem;
   }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-pos {
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-pos {
     grid-column: 2; grid-row: 1; height: auto; line-height: 1.1; font-size: .5625rem;
     padding-right: 2.625rem;
   }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-name {
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-name {
     grid-column: 2; grid-row: 2; margin-top: 0; width: 100%; min-width: 0; justify-items: stretch; overflow: hidden;
   }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-name strong {
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-name strong {
     display: block; overflow: hidden; text-overflow: ellipsis;
     font-size: clamp(.6875rem, 2.2cqw, .875rem); line-height: 1.15; white-space: nowrap;
   }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-name small { display: none; }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-tools {
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-name small { display: none; }
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-tools {
     position: absolute; top: .1875rem; right: .25rem; z-index: 2; display: flex; gap: .125rem;
   }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-tool { width: 1.1875rem; height: 1.1875rem; }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-tool svg { width: .9375rem; height: .9375rem; }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-super {
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-tool { width: 1.1875rem; height: 1.1875rem; }
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-tool svg { width: .9375rem; height: .9375rem; }
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-super {
     grid-column: 1; grid-row: 2; justify-self: start;
     margin-left: calc(var(--slot-art) + .375rem);
     max-width: calc(100% - var(--slot-art) - .375rem);
     padding: .125rem .375rem .125rem .1875rem; font-size: .625rem; gap: .1875rem;
   }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-super img { width: 1rem; height: 1rem; }
-  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-super svg { width: .75rem; height: .75rem; }
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-super img { width: 1rem; height: 1rem; }
+  .roster-slots .formation-slot:not([data-position="back"]) .formation-super svg { width: .75rem; height: .75rem; }
 }
 @media (max-width: 34rem) {
-  .team-sheet.docked .roster-grid {
+  .team-sheet .roster-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: .375rem;
   }
-  .team-sheet.docked .roster-grid .ubu-tile-main {
+  .team-sheet .roster-grid .ubu-tile-main {
     gap: .1875rem;
     padding: .5rem .25rem .375rem;
     border-radius: .75rem;
   }
-  .team-sheet.docked .roster-grid .ubu-tile-art {
+  .team-sheet .roster-grid .ubu-tile-art {
     width: clamp(2.75rem, 13vw, 3.375rem);
     height: clamp(2.75rem, 13vw, 3.375rem);
   }
-  .team-sheet.docked .roster-grid .ubu-tile-name { font-size: .75rem; line-height: 1.1; }
-  .team-sheet.docked .roster-grid .ubu-tile-archetype { font-size: .625rem; line-height: 1.1; }
-  .team-sheet.docked .roster-grid .ubu-tile-meta { font-size: .625rem; gap: .125rem .25rem; }
-  .team-sheet.docked .roster-grid .ubu-tile-grade { font-size: .75rem; }
-  .team-sheet.docked .roster-grid .ubu-tile-supers { gap: .125rem; min-height: 1.125rem; }
-  .team-sheet.docked .roster-grid .ubu-tile-supers img { width: 1.125rem; height: 1.125rem; }
-  .team-sheet.docked .roster-grid :is(.ubu-tile-heart, .ubu-tile-inspect) {
+  .team-sheet .roster-grid .ubu-tile-name { font-size: .75rem; line-height: 1.1; }
+  .team-sheet .roster-grid .ubu-tile-archetype { font-size: .625rem; line-height: 1.1; }
+  .team-sheet .roster-grid .ubu-tile-meta { font-size: .625rem; gap: .125rem .25rem; }
+  .team-sheet .roster-grid .ubu-tile-grade { font-size: .75rem; }
+  .team-sheet .roster-grid .ubu-tile-supers { gap: .125rem; min-height: 1.125rem; }
+  .team-sheet .roster-grid .ubu-tile-supers img { width: 1.125rem; height: 1.125rem; }
+  .team-sheet .roster-grid :is(.ubu-tile-heart, .ubu-tile-inspect) {
     top: .1875rem; width: 1.5rem; height: 1.5rem; padding: .1875rem;
   }
-  .team-sheet.docked .roster-grid .ubu-tile-heart { right: .1875rem; }
-  .team-sheet.docked .roster-grid .ubu-tile-inspect { left: .1875rem; }
-  .team-sheet.docked .roster-grid :is(.ubu-tile-heart svg, .ubu-tile-inspect svg) { width: .9375rem; height: .9375rem; }
+  .team-sheet .roster-grid .ubu-tile-heart { right: .1875rem; }
+  .team-sheet .roster-grid .ubu-tile-inspect { left: .1875rem; }
+  .team-sheet .roster-grid :is(.ubu-tile-heart svg, .ubu-tile-inspect svg) { width: .9375rem; height: .9375rem; }
 }
 @media (orientation: portrait) and (min-height: 36rem) {
   body:is([data-shot="team"], [data-shot="rules"]) { height: 100dvh; overflow: hidden; }
@@ -1554,17 +1454,17 @@ body:is([data-shot="team"], [data-shot="rules"]) .rink-stage { width: min(100%, 
     width: min(100%, calc(36dvh * 5 / 3));
     margin: -2.5% auto;
   }
-  .team-sheet.docked { flex: 1; min-height: 0; height: auto; }
-  .team-sheet.docked .team-sheet-foot { padding: .5rem .75rem; }
-  .team-sheet.docked .team-sheet-foot button { min-height: 2.75rem; font-size: 1.0625rem; }
-  .team-sheet.docked .mode-step { justify-content: flex-start; gap: .5rem; padding-block: .5rem; }
-  .team-sheet.docked .mode-logo img { max-height: clamp(2.25rem, 8dvh, 4.5rem); }
-  .team-sheet.docked .mode-option { padding: .625rem .25rem .5rem; }
-  .team-sheet.docked .cpu-levels span { min-height: 2.625rem; }
+  .team-sheet { flex: 1; min-height: 0; height: auto; }
+  .team-sheet .team-sheet-foot { padding: .5rem .75rem; }
+  .team-sheet .team-sheet-foot button { min-height: 2.75rem; font-size: 1.0625rem; }
+  .team-sheet .mode-step { justify-content: flex-start; gap: .5rem; padding-block: .5rem; }
+  .team-sheet .mode-logo img { max-height: clamp(2.25rem, 8dvh, 4.5rem); }
+  .team-sheet .mode-option { padding: .625rem .25rem .5rem; }
+  .team-sheet .cpu-levels span { min-height: 2.625rem; }
 }
 @media (orientation: portrait) and (min-height: 36rem) and (max-height: 44rem) {
-  .team-sheet.docked .team-sheet-foot { padding: .375rem .75rem; }
-  .team-sheet.docked .team-sheet-foot button { min-height: 2.4375rem; font-size: 1rem; }
+  .team-sheet .team-sheet-foot { padding: .375rem .75rem; }
+  .team-sheet .team-sheet-foot button { min-height: 2.4375rem; font-size: 1rem; }
 }
 @media (max-height: 35.99rem), (orientation: landscape) and ((width < 56rem) or ((pointer: coarse) and (max-height: 600px))) {
   body:is([data-shot="team"], [data-shot="rules"]) { overflow-x: clip; overflow-y: auto; }
@@ -1572,13 +1472,13 @@ body:is([data-shot="team"], [data-shot="rules"]) .rink-stage { width: min(100%, 
   body:is([data-shot="team"], [data-shot="rules"]) .rink-stage {
     width: min(100%, calc(48dvh * 5 / 3)); margin: -3% auto;
   }
-  .team-sheet.docked { flex: none; height: min(30rem, 84dvh); }
-  .team-sheet.docked .team-sheet-foot { padding: .5rem .875rem; }
-  .team-sheet.docked .team-sheet-foot button { min-height: 2.75rem; font-size: 1.0625rem; }
-  .team-sheet.docked .mode-step { justify-content: flex-start; gap: .5rem; padding-block: .5rem; }
-  .team-sheet.docked .mode-logo img { max-height: 2.5rem; }
-  .team-sheet.docked .mode-option { padding: .5rem .25rem; }
-  .team-sheet.docked .cpu-levels span { min-height: 2.375rem; }
+  .team-sheet { flex: none; height: min(30rem, 84dvh); }
+  .team-sheet .team-sheet-foot { padding: .5rem .875rem; }
+  .team-sheet .team-sheet-foot button { min-height: 2.75rem; font-size: 1.0625rem; }
+  .team-sheet .mode-step { justify-content: flex-start; gap: .5rem; padding-block: .5rem; }
+  .team-sheet .mode-logo img { max-height: 2.5rem; }
+  .team-sheet .mode-option { padding: .5rem .25rem; }
+  .team-sheet .cpu-levels span { min-height: 2.375rem; }
 }
 
 /* Announcements over the rink ("Plan your shot…", "Launch!", the winner). */
@@ -2076,7 +1976,6 @@ button.stats-event-time { padding: 0; min-height: 0; border: 0; background: none
   .knob b { font-size: .875rem; }
   .knob small { font-size: .8125rem; }
 
-  #game-status { font-size: .875rem; }
   .setting-value { font-size: .8125rem; }
   .bug-tab { font-size: .8125rem; }
   .scoreboard:is([data-size="small"], [data-size="tiny"]) .bug-status { font-size: .8125rem; }
@@ -2103,7 +2002,6 @@ button.stats-event-time { padding: 0; min-height: 0; border: 0; background: none
   .lobby-note { font-size: .8125rem; }
   .roster-status { font-size: .8125rem; }
 
-  .online-options button small { font-size: .8125rem; }
   .online-hint { font-size: .875rem; }
   .online-account { font-size: .875rem; }
 

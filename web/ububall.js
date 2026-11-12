@@ -67,7 +67,7 @@
     planPausedAt = localPlayBlocked() ? now : null;
   }
   function localPlayBlocked() {
-    return (shot !== 'match' && shot !== 'replay' && !(demo && isHomeShot())) || document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(document.querySelector('.game-dialog[open]')) || Boolean(foulInfo && !online?.active);
+    return (shot !== 'match' && shot !== 'replay' && !(demo && isHomeShot())) || document.hidden || Boolean($('roster-dialog').classList?.contains('open') || $('roster-dialog').open) || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(document.querySelector('.game-dialog[open]')) || Boolean(foulInfo && !online?.active);
   }
   function updateLocalPlanClock(blocked) {
     if (online?.active || phase !== 'plan' || !blitzMode()) return;
@@ -3672,7 +3672,7 @@
       node('strong', { textContent: 'Empty' }), node('small', { textContent: i === rosterSlot ? 'Pick an ubu' : 'Select to fill' })));
     pick.setAttribute('aria-pressed', String(i === rosterSlot));
     pick.setAttribute('aria-label', `${POSITIONS[i]}: ${entry ? entry.model.parts.fullName : 'empty'}`);
-    // From the rules step (where only the docked sheet shows the lineup) a position opens the team step.
+    // From the rules step (where the lineup stands on the ice) a position opens the team step.
     pick.onclick = () => { rosterSlot = i; if ($('roster-dialog').dataset.step === 'mode') setupStep('team'); else rosterSlots(); };
     slot.append(pick);
     if (entry && !classic) {
@@ -3783,7 +3783,7 @@
   const rosterList = ubuList.mount({
     surface: 'picker', toolbarHost: $('roster-toolbar'), grid: $('roster-options'), scrollRoot: $('roster-scroll'),
     status: $('roster-collection-status'),
-    paused: () => !$('roster-dialog').open || $('roster-dialog').dataset.step !== 'team',
+    paused: () => !sheetOpen() || $('roster-dialog').dataset.step !== 'team',
     pick: item => choose(entryFor(item)),
     // The viewer belongs to the Collection screen's script, loaded on first use.
     inspect: async item => {
@@ -3892,7 +3892,7 @@
   };
   gameUi.dropdown($('team-more'), $('team-menu'), { align: 'end' });
   // Closing the super choices brings the cards' tools in line with the selected position.
-  $('roster-super').addEventListener('toggle', event => { if (event.newState === 'closed' && $('roster-dialog').open) rosterSlots(); });
+  $('roster-super').addEventListener('toggle', event => { if (event.newState === 'closed' && sheetOpen()) rosterSlots(); });
   const teamSelectUi = gameUi.select($('team-select'));
   // Signed-in players start with the team they played last, else their top three favorites.
   async function accountTeam() {
@@ -4060,13 +4060,13 @@
       $('team-mode').textContent = ububallMatch.modeName(setupFor === 'lobby' ? lobbyView.state.mode : chosenMode());
       if (!fixedTeam()) { void loadCollection(); void loadTeams(); }
       rosterSlots();
-    } else if (sheetDocked()) {
-      // The docked sheet keeps a CPU match's lineup on the ice through the rules step.
+    } else {
+      // Keep a CPU match's lineup on the ice through the rules step.
       if (setupFor === 'cpu') rosterSlots();
-      else if (!sheet.open) $('roster-slots').replaceChildren();
+      else if (!sheetOpen()) $('roster-slots').replaceChildren();
     }
     $('start-match').textContent = setupFor === 'pick' ? 'Use team' : setupFor !== 'lobby' ? 'Start match' : lobbyView?.ready ? 'Change team' : 'Ready to play';
-    if (sheet.open && sheetDocked()) {
+    if (sheetOpen()) {
       setShot(step === 'team' ? 'team' : 'rules');
       const wantsLineup = step === 'team' || setupFor === 'cpu';
       if (!hadLineup && wantsLineup && $('roster-slots').childElementCount) skateLineup(true);
@@ -4076,8 +4076,7 @@
   // The rules and team setup shots. On wide screens the team sheet docks over the away half of a
   // game-size rink; on phones it stacks below the rink while the lineup stands at its kickoff spots.
   const wideScreen = matchMedia('(min-width: 56rem) and (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px)))');
-  const canDock = () => location.pathname === '/';
-  const sheetDocked = () => $('roster-dialog').classList.contains('docked');
+  const sheetOpen = () => $('roster-dialog').classList.contains('open');
   let lineupMove = null;
   function fitSetupShot() {
     if (isSetupShot()) document.body.style.setProperty('--setup-top', Math.round(document.querySelector('.ball-page').getBoundingClientRect().top + scrollY) + 'px');
@@ -4095,24 +4094,15 @@
       move.cancel(); lineupMove = null;
     };
   }
-  // Decides how the sheet opens, before its step is drawn.
-  function prepareSheet() {
-    const sheet = $('roster-dialog'), slots = $('roster-slots');
-    if (sheet.open) return;
-    const dock = canDock();
-    lineupMove?.cancel(); lineupMove = null; slots.inert = false;
-    sheet.classList.toggle('docked', dock); slots.classList.toggle('on-ice', dock);
-    if (dock) rinkStage.append(slots); else $('roster-super').before(slots);
+  function resetSetupSlots() {
+    if (sheetOpen()) return;
+    lineupMove?.cancel(); lineupMove = null;
+    $('roster-slots').inert = false;
   }
   function openSheet() {
     const sheet = $('roster-dialog');
     handoffToMatch = false;
-    if (sheet.open) return;
-    if (!sheetDocked()) {
-      if (setupFor === 'lobby' && !isHomeShot()) setShot(homeShot);
-      sheet.showModal();
-      return;
-    }
+    if (sheetOpen()) return;
     if (!isSetupShot()) {
       returnShot = setupFor === 'lobby' ? homeShot : shot;
       returnPortrait = setupFor === 'lobby' ? false : fieldView.portrait;
@@ -4122,10 +4112,23 @@
     }
     if (statDrawer.matches(':popover-open')) statDrawer.hidePopover();
     closeFoulInfo();
-    sheet.show();
+    sheet.classList.add('open');
     setShot(sheet.dataset.step === 'team' ? 'team' : 'rules');
     castTo(true);
     if ($('roster-slots').childElementCount) skateLineup(true);
+  }
+  function closeSheet() {
+    const sheet = $('roster-dialog');
+    if (!sheetOpen()) { handoffToMatch = false; return; }
+    if ($('roster-super')?.matches?.(':popover-open')) $('roster-super').hidePopover();
+    if ($('team-menu')?.matches?.(':popover-open')) $('team-menu').hidePopover();
+    sheet.classList.remove('open');
+    if (!handoffToMatch) leaveSetupShot(false);
+  }
+  function cancelSheet() {
+    if (!sheetOpen()) return;
+    if ($('roster-dialog').dataset.step === 'team' && setupFor !== 'lobby' && setupFor !== 'pick') setupStep('mode');
+    else closeSheet();
   }
   // Leaving for a match hands the camera move to enterMatch; the new match's ubus stand where the lineup stood.
   function leaveSetupShot(toMatch = false) {
@@ -4142,7 +4145,6 @@
     castTo(false);
     if ($('roster-slots').childElementCount) skateLineup(false);
   }
-  $('roster-dialog').addEventListener('close', () => { if (!$('roster-dialog').open && !handoffToMatch) leaveSetupShot(false); });
   wideScreen.addEventListener('change', () => {
     if (!isSetupShot()) return;
     scrollTo(0, 0);
@@ -4150,13 +4152,13 @@
     layoutDirty = true;
     draw();
   });
-  // A docked sheet is not modal, so Escape is handled here: back a step, as the modal's cancel does, or close.
+  // Escape steps back from team to mode, or closes the docked setup panel.
   addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !isSetupShot() || event.defaultPrevented || document.querySelector('dialog:modal, :popover-open')) return;
-    if ($('roster-dialog').dispatchEvent(new Event('cancel', { cancelable: true }))) $('roster-dialog').close();
+    cancelSheet();
   });
   function openSetup(step, purpose = 'cpu', mode = cpuMode, level = cpuLevel, team = roster) {
-    setupFor = purpose; prepareSheet();
+    setupFor = purpose; resetSetupSlots();
     for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(mode, rule);
     modeSummary();
     $('rules-status').textContent = '';
@@ -4181,7 +4183,7 @@
     lobbyView = view;
     const teamChanged = JSON.stringify(before?.guestTeam || null) !== JSON.stringify(view.guestTeam || null);
     if (entering || teamChanged) {
-      setupFor = 'lobby'; rosterSlot = 0; prepareSheet();
+      setupFor = 'lobby'; rosterSlot = 0; resetSetupSlots();
       if (view.guestTeam) draft = lobbyEntries(view.guestTeam);
       else {
         const readyOk = await ownTeamReady(); // The server opened any signup pack as this seat was taken.
@@ -4217,7 +4219,7 @@
     const toMatch = Boolean(online?.state?.game && online.state.phase !== 'lobby');
     if ($('roster-dialog').dataset.for === 'lobby') {
       if (toMatch && isSetupShot()) handoffToMatch = true;
-      $('roster-dialog').close();
+      closeSheet();
     }
     setupFor = 'cpu'; lobbyView = null;
     $('roster-scroll').hidden = false; $('lobby-panel').hidden = true;
@@ -4233,13 +4235,13 @@
       try {
         const gameNumber = purpose === 'rules' ? rulesGameNumber : lobbyView.state.gameNumber;
         await online.rules(chosenMode(), gameNumber);
-        if (purpose === 'rules') $('roster-dialog').close();
+        if (purpose === 'rules') closeSheet();
         else setupStep('team');
       } catch (error) { $('rules-status').textContent = error.message; }
       finally { button.disabled = false; }
       return;
     }
-    $('roster-dialog').close(); online.create(chosenMode());
+    closeSheet(); online.create(chosenMode());
   };
   $('team-back').onclick = async () => {
     if (setupFor === 'lobby' && lobbyView.ready) {
@@ -4248,10 +4250,7 @@
     }
     setupStep('mode');
   };
-  // Back (Escape, or a phone's back gesture) steps from the team screen to the mode screen.
-  $('roster-dialog').addEventListener('cancel', event => {
-    if ($('roster-dialog').dataset.step === 'team' && setupFor !== 'lobby' && setupFor !== 'pick') { event.preventDefault(); setupStep('mode'); }
-  });
+
   $('start-match').onclick = async () => {
     if (setupFor === 'lobby') {
       const button = $('start-match');
@@ -4270,7 +4269,7 @@
     }
     if (draft.some(d => !d)) return;
     if (setupFor === 'pick') {
-      $('roster-dialog').close();
+      closeSheet();
       rememberTeam();
       if (demo) newDemoGame(draft); else if (!matchInProgress()) newMatch();
       return;
@@ -4290,7 +4289,7 @@
         finishCpuMatch();
       }
       if (isSetupShot()) handoffToMatch = true;
-      $('roster-dialog').close();
+      closeSheet();
       $('pause-menu').close();
       startCpuMatch(team, mode, level);
     } finally { button.disabled = false; }
@@ -4318,7 +4317,7 @@
       updateFirstTurnGuide();
     }
   }
-  $('cancel-roster').onclick = () => $('roster-dialog').close();
+  $('cancel-roster').onclick = closeSheet;
   $('lobby-leave').onclick = () => online.leave();
   // A modal pauses the simulation; cancelling preserves the current turn.
   const hudSuperBtn = $('stadium-super-btn');
@@ -4547,7 +4546,9 @@
     if (isExporting()) { videoCancelled = true; cancelVideo?.(); }
     returnShot = homeShot;
     returnPortrait = false;
-    for (const dialogId of ['match-help', 'pause-menu', 'replays-dialog', 'export-dialog', 'share-dialog', 'roster-dialog']) {
+    if (typeof closeSheet === 'function') closeSheet();
+    else $('roster-dialog')?.classList?.remove('open');
+    for (const dialogId of ['match-help', 'pause-menu', 'replays-dialog', 'export-dialog', 'share-dialog']) {
       if ($(dialogId)?.open) $(dialogId).close();
     }
     if (statDrawer.matches(':popover-open')) statDrawer.hidePopover();
@@ -4643,7 +4644,7 @@
       let team = roster;
       const tempTeam = onGuestTeam() || roster.some(entry => !entry?.key || entry.key.startsWith('replay-'));
       if (online?.active || (signedIn() && tempTeam)) team = signedIn() ? await accountTeam() : guestTeam;
-      if (location.pathname === '/' && !$('roster-dialog').open) {
+      if (location.pathname === '/' && !sheetOpen()) {
         openSetup('mode', 'cpu', lastCpuSetup?.mode, lastCpuSetup?.level, team || [null, null, null]);
       }
     } catch (error) {
@@ -4662,13 +4663,13 @@
       const inlineSetup = saved.team.some(entry => Boolean(entry.dna) || entry.key?.startsWith('guest-') || entry.key?.startsWith('replay-') || entry.key?.startsWith('custom-'));
       const guestSetup = saved.team.every(entry => Boolean(entry.key?.startsWith('guest-')));
       if (!inlineSetup && signedIn()) await ubuList.load({ refresh: true });
-      if (online?.active || matchInProgress() || location.pathname !== '/' || $('roster-dialog').open) return;
+      if (online?.active || matchInProgress() || location.pathname !== '/' || sheetOpen()) return;
       const team = guestSetup && signedIn() ? roster : saved.team.map(entry => entry.dna ? restoreEntry(entry)
         : signedIn() ? restoreTeam([{ serial: entry.key, super: entry.equippedSuper?.id ?? null }]).team[0] : null);
       if (team.some(entry => !entry)) throw new Error('Last team unavailable');
       startCpuMatch(team, saved.mode, saved.level);
     } catch {
-      if (location.pathname === '/' && !online?.active && !matchInProgress() && !$('roster-dialog').open) {
+      if (location.pathname === '/' && !online?.active && !matchInProgress() && !sheetOpen()) {
         openSetup('team', 'cpu', saved.mode, saved.level);
         $('roster-status').textContent = 'Your last team is unavailable. Choose a team to start.';
       }
@@ -4689,7 +4690,7 @@
     } else if (online?.spectating) void online.leave().then(exitMatchMode);
     else if (isSetupShot() && isMatchShot(returnShot)) {
       history.pushState({ match: true }, '', location.href);
-      if ($('roster-dialog').dispatchEvent(new Event('cancel', { cancelable: true }))) $('roster-dialog').close();
+      cancelSheet();
     } else if (isMatchShot()) {
       history.pushState({ match: true }, '', location.href);
       openPause();
@@ -4705,7 +4706,9 @@
     returnShot = homeShot;
     returnPortrait = false;
     handoffToMatch = false;
-    for (const dialogId of ['match-help', 'pause-menu', 'replays-dialog', 'export-dialog', 'share-dialog', 'roster-dialog', 'stats-dialog', 'online-dialog']) {
+    if (typeof closeSheet === 'function') closeSheet();
+    else $('roster-dialog')?.classList?.remove('open');
+    for (const dialogId of ['match-help', 'pause-menu', 'replays-dialog', 'export-dialog', 'share-dialog', 'stats-dialog', 'online-dialog']) {
       if ($(dialogId)?.open) $(dialogId).close();
     }
     if (statDrawer.matches(':popover-open')) statDrawer.hidePopover();
@@ -4997,9 +5000,9 @@
     prepareOnline() {
       if (typeof clearReplayViewer === 'function') clearReplayViewer();
       if (!online?.active && matchInProgress()) finishCpuMatch();
-      if ($('roster-dialog')?.open && setupFor !== 'lobby') {
+      if (sheetOpen() && setupFor !== 'lobby') {
         if (isSetupShot()) handoffToMatch = true;
-        $('roster-dialog').close();
+        closeSheet();
         lineupMove?.cancel(); lineupMove = null; $('roster-slots').replaceChildren();
       }
       stopDemo();
@@ -5021,7 +5024,7 @@
       if (typeof clearReplayViewer === 'function') clearReplayViewer();
       if (!document.body.classList.contains('online-match')) { stopDemo(); endGoalReplay(); stopFanfare(); }
       document.body.classList.add('online-match');
-      if (typeof setupFor !== 'undefined' && setupFor === 'rules' && (!s.canChangeRules || s.phase !== 'plan') && $('roster-dialog')?.open) $('roster-dialog').close();
+      if (typeof setupFor !== 'undefined' && setupFor === 'rules' && (!s.canChangeRules || s.phase !== 'plan') && (typeof sheetOpen === 'function' ? sheetOpen() : $('roster-dialog')?.classList?.contains('open'))) { if (typeof closeSheet === 'function') closeSheet(); else $('roster-dialog')?.classList?.remove('open'); }
       if (s.game && s.phase !== 'lobby') enterMatch('match');
       $('online-open-label').textContent = s.spectator ? 'Watching a match' : 'Online match';
       $('online-open-note').hidden = true;

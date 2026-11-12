@@ -14,48 +14,33 @@ slide in and out around it, like moving through the menus of a video game. Whate
 
 ## Status
 
-Phase 6 is built and awaiting the owner's review (Phases 2–5 built).
+All 7 phases (Phases 1–7) are built and complete.
 
-Working now (`web/index.html`, `web/app.js`, `web/ububall-activity.js`, `web/site.js`,
-`web/site.css`, `web/pack-scene.js`, `web/ubu-list.js`, `web/ububall-presentation.js`,
-`web/ububall.js`, `web/ububall.css`, `shared/ubu-audio.js`):
+Working now (`web/index.html`, `web/app.js`, `web/site-header.js`, `web/ububall-activity.js`,
+`web/site.js`, `web/site.css`, `web/pack-scene.js`, `web/ubu-list.js`,
+`web/ububall-presentation.js`, `web/ububall.js`, `web/ububall.css`, `web/effects.html`,
+`web/effects.css`, `web/effects.js`, `shared/ubu-audio.js`):
 
 - `.arena-layout` lives in the shared `.ball-page` shell across Play, Ubu Mint and Collection;
   `app.js` routes screen switches through `setUbuScreenTransition` (preserving Discord Activity
   launch query parameters when embedded) so `setShot(name)` (`home`, `lobby`, `rules`, `team`,
   `match`, `replay`, `mint`, `collection`) drives all three screens on one persistent rink stage.
-- Phones (portrait and short/narrow landscape, standalone and Discord Activity) now use stacked
-  variants across every shot (`home`, `lobby`, `rules`, `team`, `match`, `replay`, `mint`,
-  `collection`) on the persistent stage and cut cleanly between shots without FLIP/rotate camera
-  moves (`compactPhoneStage()`):
-  - `rules` and `team` dock `#roster-dialog.docked` below the landscape rink (`canDock()` enabled on
-    phones) with compact, non-overlapping `.formation.on-ice` kickoff cards (`Back` over the left
-    crease, `Top` and `Bottom` extending across centre ice with both goal pockets clear) and keep
-    setup open across device rotation/resizing.
-  - `home` and `lobby` stack `.play-home` below a height-capped landscape rink on short landscape
-    phones while keeping the full-width scoreboard unclipped above it.
-  - `mint` fits the 3-pack deal and zoomed card reveal inside both portrait phones and `<= 600px`
-    short landscape phones without vertical overflow.
-  - `collection` removes side gutters on narrow viewports so the sticky `#collection-dock` and
-    portrait rink boards span edge-to-edge, scales `.collection-ice .ubu-grid` to 3 ubus per row on
-    portrait phones, clips horizontal scatter overflow on `html` as well as `body`, spans
-    `.viewer.on-ice` full width with thumb-friendly `Prev`/`Next` arrows underneath on narrow
-    portrait phones, and frames `.viewer.on-ice` across the full viewport height on short landscape
-    phones.
-- Portrait play (`match` and `replay`) verified and polished on phones: `setPortrait()` updates the
-  stage without polluting `localStorage`, manual `#btn-rotate` overrides are scoped to the current
-  screen orientation (never leaking `.portrait-mode` onto `home`, `lobby`, `mint`, `collection` or
-  rotated landscape screens), short portrait screens use compact `.scoreboard` and `.stadium-actions`
-  for a larger `3:5` rink, `#replay-bar` fits cleanly in both portrait and short-landscape sidebar
-  layouts, and upward aiming, `#field-spin`, `#first-turn-guide` and `.foul-info` align accurately.
-- Wide-screen desktop and Discord Activity layouts from Phases 1–5 continue working unchanged.
-
-Not done or not checked:
-
-- Dead modal `.formation` CSS / legacy setup fallback paths remain to be deleted in cleanup (phase 7).
-- Scatter, arrival and Mint scamper are not in `web/effects.html` yet (phase 7).
-
-Next step: Phase 7 (Cleanup: remove dead layout CSS and dialog code; effects catalog; header styling pass).
+- `#roster-dialog` is a plain docked `.team-sheet` `<section>` (not a `<dialog>`) that slides over
+  the away half on wide screens and stacks below the landscape rink on phones, while `#roster-slots`
+  (`.roster-slots`) lives permanently inside `.rink-stage` with `.formation-slot` cards over your
+  three kickoff positions (`Back`, `Top`, `Bottom`). All legacy modal setup fallbacks (`canDock`,
+  `sheetDocked`, `showModal`) and CSS half-rink `.formation` rules are removed.
+- `.site-header` is styled as the arena's overhead scoreboard strip: a 3-zone beveled slate gantry
+  with Saffron home and Amethyst away end-caps and a recessed centre tab bay over the rink on
+  landscape screens, pairing with a compact top strip and docked bottom `.site-nav` bar on portrait
+  phones.
+- Phones (portrait and short/narrow landscape, standalone and Discord Activity) use stacked variants
+  across every shot on the persistent stage and cut cleanly between shots (`compactPhoneStage()`),
+  preserving isolated portrait-play orientation (`match` and `replay`) and full touch aiming/overlay
+  geometry.
+- `web/effects.html` (`EFFECT_GROUPS` in `web/effects.js`) includes **`9. Stage & Mint`** covering
+  `castTo` scatter & return, Choose Team `skateLineup` arrival & departure, and Ubu Mint spotlight
+  reveal & scamper alongside all `playPack` sound effects.
 
 ## Decisions (owner, 2026-11-11)
 
@@ -89,7 +74,9 @@ Next step: Phase 7 (Cleanup: remove dead layout CSS and dialog code; effects cat
 6. **Phones.** Agent's call; the site must work on phones. Phones may skip the camera moves.
 7. **Discord Activity** stays level with the site, including working Mint and Collection. It uses
    the same stage with its own layout (lobby beside the rink, see AGENTS.md).
-8. **Navigation** stays at the top. Styling it to look part of the scene is welcome, not required.
+8. **Navigation** stays at the top, styled as an arena scoreboard strip with Saffron/Amethyst end-caps and a recessed centre tab bay (portrait phones keep the compact top strip and bottom tab bar; confirmed 2026-11-12).
+9. **Scatter and lineup arrival** (confirmed 2026-11-12). Cast scatter flies each ubu and the ball straight out radially from centre ice with staggered spin (`castTo`); the Choose Team lineup skates in from the home goal into `.roster-slots` kickoff position cards (`Back`, `Top`, `Bottom`) over the real kickoff spots.
+10. **Effects catalog** (confirmed 2026-11-12). Stage cast scatter/return, lineup skate-in/out and Ubu Mint spotlight/scamper choreography live in a 9th `EFFECT_GROUPS` section (`9. Stage & Mint`) in `web/effects.html`.
 
 ## Invariants
 
@@ -201,8 +188,7 @@ so it reads as part of the arena.
 
 ## Open points
 
-- Exact look of the position buttons around the ubus in the team shot.
-- What scatter looks like (skate off through the goals, over the boards, fade).
+None.
 
 ## Log
 
@@ -294,3 +280,16 @@ so it reads as part of the arena.
   overlay on `.ubu-tile-art`; removed routine `#roster-hint` copy and switched to Tabler `#icon-filter-2`, keeping sort/direction/favorites inline on one row on large
   screens (`>= 56rem` landscape) and tucking them into the `#icon-filter-2` dropdown on compact
   screens so Change Team controls stay at 3 rows everywhere.
+- 2026-11-12: Phase 7 built (Cleanup: dead layout CSS and dialog code removed, `9. Stage & Mint`
+  effects catalog added, scoreboard-strip `.site-header` pass). Converted `#roster-dialog` from
+  `<dialog>` to a plain docked `<section class="team-sheet">` (`sheetOpen` / `openSheet` /
+  `closeSheet` / `cancelSheet`), mounted `#roster-slots` (`.roster-slots`) permanently inside
+  `.rink-stage`, and deleted `canDock`, `sheetDocked`, modal `.team-sheet` / `.formation` half-rink
+  CSS, legacy `#signed-out-panel` `main:has(...)` rules, `.online-options`, `.pack-fallback`,
+  `.super-arm-btn`/`.super-picker-btn` and dead header/fallback selectors across `web/index.html`,
+  `web/ububall.js`, `web/ububall.css`, `web/site.css`, `web/site.js` and `web/site-header.js`;
+  styled `.site-header` as a 3-zone broadcast scoreboard strip with Saffron/Amethyst team end-caps
+  and a recessed centre tab bay; added Group `9. Stage & Mint` (`stage-cast-scatter`,
+  `stage-lineup-arrival`, `stage-mint-scamper` + `playPack` audio) to `web/effects.html`,
+  `web/effects.css` and `web/effects.js`; updated unit tests in `test/ububall-effects.test.js` and
+  verified across desktop and mobile in headless Chromium.

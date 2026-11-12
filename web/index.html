@@ -247,6 +247,7 @@ SOFTWARE.
               </div>
             </div>
           </div>
+          <div id="roster-slots" class="roster-slots" aria-label="Your team in kickoff formation"></div>
           <div id="field-banner" class="field-banner" role="status" aria-live="polite"></div>
           <div class="demo-badge" aria-hidden="true">DEMO</div>
           <button id="skip-goal-replay" type="button" aria-label="Skip goal replay" hidden><span class="demo-badge"></span></button>
@@ -478,7 +479,7 @@ SOFTWARE.
       <div id="stats-events"></div>
     </section>
   </dialog>
-  <dialog id="roster-dialog" class="team-sheet" data-step="mode" aria-labelledby="roster-title">
+  <section id="roster-dialog" class="team-sheet" data-step="mode" aria-labelledby="roster-title">
     <button id="cancel-roster" class="icon-button team-sheet-close" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button>
     <section class="sheet-step mode-step" aria-labelledby="roster-title">
       <h2 id="roster-title" class="mode-logo"><img src="assets/ububall-logo.svg" alt="ububall"><span class="visually-hidden">: choose a mode</span></h2>
@@ -512,11 +513,6 @@ SOFTWARE.
         <button id="team-more" class="team-step-btn" type="button" aria-label="More team actions"><svg class="icon" aria-hidden="true"><use href="#icon-dots"/></svg></button>
         <div id="team-menu" class="team-menu"><button id="team-save-new" type="button">Save as new team</button><button id="team-rename" type="button">Rename</button><button id="team-delete" type="button">Delete</button></div>
       </div>
-      <div id="roster-slots" class="formation" aria-label="Your team in kickoff formation"></div>
-      <div id="roster-super" class="super-popover">
-        <div class="roster-super-head"><h3 id="roster-super-title"></h3><button class="formation-tool" type="button" popovertarget="roster-super" popovertargetaction="hide" aria-label="Close super choices"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button></div>
-        <div id="roster-super-grid" class="super-choice-grid"></div>
-      </div>
       <p id="roster-hint" class="roster-hint" role="status"></p>
       <p id="roster-status" class="roster-status" role="status"></p>
       <div id="roster-scroll" class="roster-scroll">
@@ -528,6 +524,10 @@ SOFTWARE.
         </div>
       </div>
     </section>
+    <div id="roster-super" class="super-popover">
+      <div class="roster-super-head"><h3 id="roster-super-title"></h3><button class="formation-tool" type="button" popovertarget="roster-super" popovertargetaction="hide" aria-label="Close super choices"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button></div>
+      <div id="roster-super-grid" class="super-choice-grid"></div>
+    </div>
     <footer class="team-sheet-foot">
       <button id="sheet-start" class="primary" type="button" hidden>
         <span>Start match with</span><span id="sheet-team-name" hidden></span><span id="sheet-team-preview" aria-hidden="true"></span>
@@ -535,7 +535,7 @@ SOFTWARE.
       <button id="sheet-next" class="primary" type="button">Choose team</button>
       <button id="start-match" class="primary" type="button">Start match</button>
     </footer>
-  </dialog>
+  </section>
   <dialog id="online-dialog" aria-labelledby="online-title"><div class="online-heading"><div><h2 id="online-title">Online Ububall</h2><p>One opponent. Three ubus. First to five.</p></div><button id="online-close" class="icon-button" aria-label="Close online settings"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button></div>
     <div id="online-entry" class="lobby-actions">
       <button id="online-public" type="button">Find online match</button>
