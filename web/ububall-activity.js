@@ -4,6 +4,7 @@
   if (!appId || window.parent === window) return;
   const instance = new URLSearchParams(location.search).get('instance_id');
   document.documentElement.classList.add('discord-activity');
+  if (document.body?.dataset && location.pathname === '/') document.body.dataset.shot = 'lobby';
 
   let sdk, login, closed = false, participants = null;
   const lifetime = new AbortController();

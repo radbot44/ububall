@@ -25,7 +25,9 @@
   fieldView.anonymous = false;
   // The replay viewer (see watchReplay), and the match being recorded for the replay library.
   let theater = null, recording = null, recordingOnline = false, restoredMatch = false;
-  let cast = null, shot = location.pathname === '/mint' ? 'mint' : location.pathname === '/collection' ? 'collection' : 'home', returnShot = 'home', returnPortrait = false, handoffToMatch = false;
+  let cast = null, shot = location.pathname === '/mint' ? 'mint' : location.pathname === '/collection' ? 'collection' : (inDiscord ? 'lobby' : 'home'), returnShot = inDiscord ? 'lobby' : 'home', returnPortrait = false, handoffToMatch = false;
+  const homeShot = inDiscord ? 'lobby' : 'home';
+  const isHomeShot = (s = shot) => s === 'home' || s === 'lobby';
   const isMatchShot = (s = shot) => s === 'match' || s === 'replay';
   const isSetupShot = (s = shot) => s === 'team' || s === 'rules';
   if (document.body?.dataset) document.body.dataset.shot = shot;
@@ -39,7 +41,8 @@
   const cpuClient = createCPUClient();
   let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuDone = false, cpuLevel = 'medium', cpuMode = 'standard';
   // The home screen demo (CPU against CPU) plays silently.
-  let demo = false, demoLevels = ['medium', 'hard'];
+  let demo = false, demoLevels = ['medium', 'hard'], demoRun = 0, demoGame = 0;
+  const demoClient = createCPUClient(), DEMO_STOP = Symbol('demo stopped');
   let soundVolume = 80;
   let musicVolume = 80;
   let audioMode = 'stereo';
@@ -64,7 +67,7 @@
     planPausedAt = localPlayBlocked() ? now : null;
   }
   function localPlayBlocked() {
-    return (shot !== 'match' && shot !== 'replay' && !(demo && shot === 'home')) || document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(document.querySelector('.game-dialog[open]')) || Boolean(foulInfo && !online?.active);
+    return (shot !== 'match' && shot !== 'replay' && !(demo && isHomeShot())) || document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(document.querySelector('.game-dialog[open]')) || Boolean(foulInfo && !online?.active);
   }
   function updateLocalPlanClock(blocked) {
     if (online?.active || phase !== 'plan' || !blitzMode()) return;
@@ -196,7 +199,7 @@
   const knobRow = document.querySelector('.stadium-actions .knob-row');
   const rinkStage = document.querySelector('.rink-stage');
   const rinkWrap = document.querySelector('.rink-wrap');
-  if (shot !== 'home') { fieldView.castHidden = true; rinkWrap.classList.add('cast-away'); }
+  if (!isHomeShot()) { fieldView.castHidden = true; rinkWrap.classList.add('cast-away'); }
   fieldView.badgeCanvas = document.createElement('canvas'); fieldView.badgeCanvas.className = 'field-badges';
   fieldView.badgeCanvas.setAttribute('aria-hidden', 'true'); rinkWrap.append(fieldView.badgeCanvas);
   fieldView.badgeCtx = fieldView.badgeCanvas.getContext('2d');
@@ -4075,11 +4078,11 @@
       else if (hadLineup && !wantsLineup) skateLineup(false);
     }
   }
-  // The rules and team setup shots. On a wide screen outside Discord the team sheet docks over the
-  // away half of a game-size rink: the cast skates off and the lineup stands at its kickoff spots.
-  // Elsewhere (phones, the Activity) the sheet is a modal with its own formation.
+  // The rules and team setup shots. On a wide screen the team sheet docks over the away half of a
+  // game-size rink: the cast skates off and the lineup stands at its kickoff spots. On phones the
+  // sheet stays a modal with its own formation.
   const wideScreen = matchMedia('(min-width: 56rem) and (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px)))');
-  const canDock = () => !inDiscord && location.pathname === '/' && wideScreen.matches;
+  const canDock = () => location.pathname === '/' && wideScreen.matches;
   const sheetDocked = () => $('roster-dialog').classList.contains('docked');
   let lineupMove = null;
   function fitSetupShot() {
@@ -4109,14 +4112,15 @@
   }
   function openSheet() {
     const sheet = $('roster-dialog');
+    handoffToMatch = false;
     if (sheet.open) return;
     if (!sheetDocked()) {
-      if (setupFor === 'lobby' && shot !== 'home') setShot('home');
+      if (setupFor === 'lobby' && !isHomeShot()) setShot(homeShot);
       sheet.showModal();
       return;
     }
     if (!isSetupShot()) {
-      returnShot = setupFor === 'lobby' ? 'home' : shot;
+      returnShot = setupFor === 'lobby' ? homeShot : shot;
       returnPortrait = setupFor === 'lobby' ? false : fieldView.portrait;
     }
     for (const id of ['pause-menu', 'match-help', 'stats-dialog', 'match-summary', 'replays-dialog', 'online-dialog']) {
@@ -4139,12 +4143,12 @@
       fieldView.castHidden = false; rinkWrap.classList.remove('cast-away');
       return;
     }
-    const back = returnShot === 'replay' && !theater ? 'home' : returnShot;
+    const back = returnShot === 'replay' && !theater ? homeShot : returnShot;
     setShot(back, { keepPortrait: isMatchShot(back) });
     castTo(false);
     if ($('roster-slots').childElementCount) skateLineup(false);
   }
-  $('roster-dialog').addEventListener('close', () => { if (!handoffToMatch) leaveSetupShot(false); });
+  $('roster-dialog').addEventListener('close', () => { if (!$('roster-dialog').open && !handoffToMatch) leaveSetupShot(false); });
   wideScreen.addEventListener('change', () => { if (isSetupShot() && !wideScreen.matches) $('roster-dialog').close(); });
   // A docked sheet is not modal, so Escape is handled here: back a step, as the modal's cancel does, or close.
   addEventListener('keydown', event => {
@@ -4512,6 +4516,10 @@
       history.pushState({ match: true }, '', url);
     }
     leaveSetupShot(true);
+    if (typeof lineupMove !== 'undefined' && lineupMove) { lineupMove.cancel(); lineupMove = null; }
+    $('roster-slots')?.replaceChildren?.();
+    if (cast) { cancelAnimationFrame(cast.frame); castHome(); cast = null; }
+    fieldView.castHidden = false; rinkWrap.classList.remove('cast-away');
     setShot(next);
   }
   function exitMatchMode() {
@@ -4521,7 +4529,7 @@
     stopFanfare();
     gameAudio()?.stopMotion?.();
     if (isExporting()) { videoCancelled = true; cancelVideo?.(); }
-    returnShot = 'home';
+    returnShot = homeShot;
     returnPortrait = false;
     for (const dialogId of ['match-help', 'pause-menu', 'replays-dialog', 'export-dialog', 'share-dialog', 'roster-dialog']) {
       if ($(dialogId)?.open) $(dialogId).close();
@@ -4530,14 +4538,16 @@
     endReplay();
     if (!matchInProgress()) cpuClient.dispose?.();
     if (location.pathname !== '/') demoClient.dispose?.();
-    if (shot !== 'home') {
-      lineupMove?.cancel(); lineupMove = null; $('roster-slots').replaceChildren();
+    if (!isHomeShot()) {
+      if (typeof lineupMove !== 'undefined' && lineupMove) { lineupMove.cancel(); lineupMove = null; }
+      $('roster-slots')?.replaceChildren?.();
       if (cast) { cancelAnimationFrame(cast.frame); castHome(); cast = null; }
       fieldView.castHidden = false; rinkWrap.classList.remove('cast-away');
-      setShot('home');
+      setShot(homeShot);
       void exitOwnedFullscreen();
     }
     updateHome();
+    online?.contextChanged?.();
     if (!matchInProgress() && location.pathname === '/') startDemo();
   }
   function openPause() {
@@ -4545,7 +4555,7 @@
     $('pause-title').textContent = inReplay ? 'Replay' : online?.spectating ? 'Watching' : online?.active ? online.state.matchKind === 'online' ? 'Online match' : 'Friend match' : 'CPU match';
     $('pause-resume').textContent = inReplay ? 'Resume replay' : online?.spectating ? 'Resume watching' : online?.active ? 'Resume match' : 'Resume CPU match';
     $('pause-end-match').hidden = inReplay || online?.spectating || !(online?.active || matchInProgress());
-    $('pause-leave').textContent = inReplay ? 'Exit replay' : 'Back to home';
+    $('pause-leave').textContent = inReplay ? 'Exit replay' : inDiscord ? 'Back to lobby' : 'Back to home';
     $('pause-restart').disabled = $('new-match').disabled;
     $('pause-restart').hidden = Boolean(online?.active);
     if (inDiscord) {
@@ -4597,7 +4607,7 @@
     try {
       if (online?.active) {
         if (!await online.leave()) return;
-      } else if ((endMatch || inDiscord) && matchInProgress()) {
+      } else if (endMatch && matchInProgress()) {
         if (!await confirmCpuEnd()) return;
         finishCpuMatch();
       }
@@ -4671,7 +4681,7 @@
     stopFanfare();
     gameAudio()?.stopMotion?.();
     if (isExporting()) { videoCancelled = true; cancelVideo?.(); }
-    returnShot = 'home';
+    returnShot = homeShot;
     returnPortrait = false;
     handoffToMatch = false;
     for (const dialogId of ['match-help', 'pause-menu', 'replays-dialog', 'export-dialog', 'share-dialog', 'roster-dialog', 'stats-dialog', 'online-dialog']) {
@@ -4697,9 +4707,9 @@
       castTo(true);
       return;
     }
-    setShot('home', { beforeLayout: applyDom });
+    setShot(homeShot, { beforeLayout: applyDom });
     if (rinkStage.classList.contains('collection-shrinking')) {
-      afterCollectionShrink = () => { if (shot === 'home') castTo(false); };
+      afterCollectionShrink = () => { if (isHomeShot()) castTo(false); };
     } else {
       castTo(false);
     }
@@ -4727,9 +4737,10 @@
   }, true);
   window.addEventListener('ubu:screen', event => {
     if (event.detail === 'play') {
-      if (shot !== 'home' && !isSetupShot() && !isMatchShot()) { setShot('home'); castTo(false); }
+      if (!isHomeShot() && !isSetupShot() && !isMatchShot()) { setShot(homeShot); castTo(false); }
       updateHome();
-      if (!matchInProgress() && !online?.active && shot === 'home') startDemo();
+      online?.contextChanged?.();
+      if (!matchInProgress() && !online?.active && isHomeShot()) startDemo();
     } else if (shot !== event.detail) {
       leavePlayOverlays();
       setShot(event.detail);
@@ -4965,6 +4976,11 @@
     prepareOnline() {
       if (typeof clearReplayViewer === 'function') clearReplayViewer();
       if (!online?.active && matchInProgress()) finishCpuMatch();
+      if ($('roster-dialog')?.open && setupFor !== 'lobby') {
+        if (isSetupShot()) handoffToMatch = true;
+        $('roster-dialog').close();
+        lineupMove?.cancel(); lineupMove = null; $('roster-slots').replaceChildren();
+      }
       stopDemo();
       cpuClient.cancel(); cpuClient.dispose?.();
       demoClient.dispose?.();
@@ -5187,9 +5203,7 @@
   updateTopSide(); screen.orientation?.addEventListener('change', updateTopSide);
   // Home screen demo: Saffron (the home team) against Amethyst, one hard CPU and one medium, chosen
   // at random each game. Saffron's planning is acted out with a pointer, as a how-to for new players.
-  const demoClient = createCPUClient(), DEMO_STOP = Symbol('demo stopped');
-  let demoRun = 0, demoGame = 0;
-  function demoPaused() { return shot !== 'home' || location.pathname !== '/' || document.hidden || Boolean(foulInfo) || Boolean(document.querySelector('dialog[open]')); }
+  function demoPaused() { return !isHomeShot() || location.pathname !== '/' || document.hidden || Boolean(foulInfo) || Boolean(document.querySelector('dialog[open]')); }
   // Waits count only while the demo is on screen; a stopped demo ends its walkthrough.
   async function demoWait(run, ms, until = null) {
     let left = ms;
@@ -5206,7 +5220,7 @@
     showMode(fieldView.mode);
   }
   function startDemo() {
-    if (demo || shot !== 'home' || matchInProgress() || online?.active) return;
+    if (demo || !isHomeShot() || matchInProgress() || online?.active) return;
     demo = true; document.body.classList.add('demo-match'); setPortrait(false);
     newDemoGame(); updateHome();
     void demoLoop(++demoRun);

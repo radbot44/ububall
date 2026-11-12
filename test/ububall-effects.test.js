@@ -4535,3 +4535,393 @@ test('Rink stage Phase 4: stretched portrait Collection rink, repeating markings
   assert.equal(viewerEl.classList.contains('on-ice'), false);
   assert.equal(viewerEl.parentElement, bodyNode, 'modal viewer re-mounts onto document.body outside Collection');
 });
+
+test('Rink stage Phase 5: Discord Activity lobby shot, docked Activity rules/team setup, Activity query preservation, Mint/Collection session sign-in, and match handoff', async () => {
+  const P = require('../shared/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const ubu = require('../shared/ubu.js');
+  const ubuFile = require('../shared/ubu-file.js');
+  const rarity = require('../shared/rarity.js');
+  const ubuArchetype = require('../shared/ubu-archetype.js');
+  const cssSrc = fs.readFileSync(require.resolve('../web/ububall.css'), 'utf8');
+  const siteCssSrc = fs.readFileSync(require.resolve('../web/site.css'), 'utf8');
+  const activitySrc = fs.readFileSync(require.resolve('../web/ububall-activity.js'), 'utf8');
+  const appSrc = fs.readFileSync(require.resolve('../web/app.js'), 'utf8');
+  const siteSrc = fs.readFileSync(require.resolve('../web/site.js'), 'utf8');
+
+  // 1. CSS & Activity bootstrap invariants
+  assert.ok(cssSrc.includes('body[data-shot="lobby"]'), 'ububall.css defines lobby shot layout');
+  assert.equal(cssSrc.includes('.discord-activity body[data-shot="home"]'), false, 'legacy .discord-activity home overrides replaced by lobby shot');
+  assert.match(cssSrc, /body\[data-shot="collection"\]\s*\{\s*overflow-x:\s*clip;\s*\}/, 'collection shot clips horizontal scatter overflow while preserving sticky dock');
+  assert.match(siteCssSrc, /\.discord-activity \.site-nav\s*\{\s*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);\s*\}/, 'portrait Activity nav bar distributes 3 visible tabs evenly');
+  assert.match(activitySrc, /document\.body\.dataset\.shot\s*=\s*'lobby'/, 'ububall-activity.js sets initial lobby shot on Play');
+  assert.equal(siteSrc.includes('location.reload()'), false, 'site.js retries Mint setup in place without reloading/closing the Activity');
+
+  // 2. app.js preserves Discord Activity launch query params across /mint, /collection, and /?roster=1
+  {
+    let pushedUrl = 'https://123456.discordsays.com/?instance_id=inst-77&frame_id=f-9&platform=desktop';
+    const screens = ['play', 'mint', 'collection'].map(name => ({ dataset: { screen: name }, hidden: name !== 'play' }));
+    const appWin = {
+      ubuActivity: { instance: 'inst-77' },
+      location: new URL(pushedUrl),
+      CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o?.detail; } },
+      URL, Map, Set, Object, Promise, Error,
+      scrollTo() {},
+      addEventListener() {},
+      dispatchEvent() {},
+      history: {
+        pushState(_s, _t, u) {
+          pushedUrl = String(u);
+          appWin.location = new URL(pushedUrl);
+        }
+      },
+      document: {
+        title: 'Ububall',
+        documentElement: { classList: { remove() {} } },
+        body: { scrollTo() {} },
+        head: { append(el) { setImmediate(() => el.onload?.()); } },
+        getElementById: () => null,
+        createElement: () => ({ remove() {} }),
+        querySelectorAll: sel => sel === '[data-screen]' ? screens : [],
+        addEventListener() {}
+      }
+    };
+    appWin.window = appWin;
+    runInNewContext(appSrc, appWin);
+    await appWin.navigateUbuScreen('https://123456.discordsays.com/mint');
+    assert.equal(appWin.location.pathname, '/mint');
+    assert.equal(appWin.location.searchParams.get('instance_id'), 'inst-77', 'navigating to /mint preserves instance_id');
+    assert.equal(appWin.location.searchParams.get('frame_id'), 'f-9', 'navigating to /mint preserves frame_id');
+    await appWin.navigateUbuScreen('https://123456.discordsays.com/?roster=1');
+    assert.equal(appWin.location.pathname, '/');
+    assert.equal(appWin.location.searchParams.get('roster'), '1');
+    assert.equal(appWin.location.searchParams.get('instance_id'), 'inst-77', 'navigating to /?roster=1 preserves instance_id alongside roster=1');
+  }
+
+  // 3. ububall.js Activity lobby shot, docked rules/team setup, CPU leave/resume, and Mint/Collection -> Match cast restoration
+  const stageCode =
+    section('  let cast = null, shot =', '  // While a video export renders') + '\n' +
+    section('  function localPlayBlocked() {', '  function updateLocalPlanClock(') + '\n' +
+    section('  function updateFoulInfo() {', '  function kickoff(isNewMatch = false) {') + '\n' +
+    section('  function updateFirstTurnGuide() {', '  function prepareCPU(initialPlans = null) {') + '\n' +
+    section('  function positionSpinControl() {', '  function fitStadium() {') + '\n' +
+    section('  let cameraMove = null;', '  // The cast: whoever is on the ice') + '\n' +
+    section('  function updateReplaySkip(replay) {', '  replaySkip.onclick =') + '\n' +
+    section('  function setupStep(step) {', '  function openSetup(step,') + '\n' +
+    section('  function closeLobby() {', '  // In Discord, Ready to play') + '\n' +
+    section('  function syncFullscreenButton() {', '  async function exitOwnedFullscreen() {') + '\n' +
+    section('  function fitOrientation() {', '  function finishCpuMatch() {') + '\n' +
+    section('  async function leaveForHome(button, endMatch) {', '  $(\'pause-leave\').onclick =') + '\n' +
+    section('  function leavePlayOverlays() {', '  const screenGuard =') + '\n' +
+    section('  function demoPaused() {', '  // Waits count only while');
+
+  const makeClassList = () => {
+    const set = new Set();
+    return {
+      add: (...cs) => cs.forEach(c => set.add(c)),
+      remove: (...cs) => cs.forEach(c => set.delete(c)),
+      toggle: (c, on) => { const next = on === undefined ? !set.has(c) : Boolean(on); if (next) set.add(c); else set.delete(c); return next; },
+      contains: c => set.has(c)
+    };
+  };
+  const listeners = new Map();
+  const els = new Map();
+  const makeEl = id => ({
+    id, hidden: false, disabled: false, inert: false, open: false, modalOpened: false, textContent: '', value: '',
+    dataset: {}, style: { visibility: '', setProperty(k, v) { this[k] = v; }, removeProperty(k) { delete this[k]; } },
+    classList: makeClassList(),
+    children: [],
+    get childElementCount() { return this.children.length; },
+    get firstElementChild() { return this.children[0] || { hidden: false, textContent: '' }; },
+    append(...nodes) { this.children.push(...nodes); },
+    prepend(node) { this.children.unshift(node); },
+    before() {},
+    replaceChildren(...nodes) { this.children = [...nodes]; },
+    setAttribute(k, v) { this[k] = v; },
+    removeAttribute(k) { delete this[k]; },
+    toggleAttribute(k, on) { if (on) this[k] = ''; else delete this[k]; },
+    querySelector: () => ({ textContent: '', replaceChildren() {}, classList: makeClassList() }),
+    addEventListener(type, fn) { listeners.set(`${id}:${type}`, fn); },
+    dispatchEvent() { return true; },
+    show() { this.open = true; this.modalOpened = false; },
+    showModal() { this.open = true; this.modalOpened = true; },
+    close() { if (!this.open) return; this.open = false; this.modalOpened = false; listeners.get(`${id}:close`)?.(); },
+    animate() { return { cancel() {} }; }
+  });
+  const $ = id => {
+    if (!els.has(id)) els.set(id, makeEl(id));
+    return els.get(id);
+  };
+  const playHome = makeEl('play-home');
+  const rectByShot = {
+    lobby: { left: 24, top: 80, width: 800, height: 480 },
+    rules: { left: 24, top: 72, width: 1080, height: 648 },
+    team: { left: 24, top: 72, width: 1080, height: 648 },
+    match: { left: 180, top: 64, width: 960, height: 576 },
+    mint: { left: 120, top: 100, width: 1120, height: 672 },
+    collection: { left: 120, top: 80, width: 1120, height: 2400 }
+  };
+  const anims = [];
+  const rinkStage = {
+    classList: makeClassList(),
+    style: { setProperty(k, v) { this[k] = v; }, removeProperty(k) { delete this[k]; } },
+    children: [],
+    append(...nodes) { this.children.push(...nodes); },
+    getBoundingClientRect() {
+      const s = actCtx.document.body.dataset.shot;
+      if (s === 'collection' && this.classList.contains('collection-rotating')) return { left: 120, top: 80, width: 1120, height: 1867 };
+      return rectByShot[s] || rectByShot.lobby;
+    },
+    animate(keyframes, opts) {
+      const anim = { keyframes, opts, cancelled: false, onfinish: null, cancel() { this.cancelled = true; } };
+      anims.push(anim);
+      return anim;
+    }
+  };
+  let castCalls = [], contextUpdates = 0, endedCpu = 0;
+  const rinkWrap = { classList: makeClassList(), style: {} };
+  const actCtx = {
+    Object, Array, Set, Map, Math, Number, String, Boolean, Promise, JSON, URL,
+    Event: class { constructor(t) { this.type = t; } },
+    CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o?.detail; } },
+    performance: { now: () => 2000 },
+    window: { innerHeight: 720, dispatchEvent() {} },
+    P, ububallMatch, $,
+    inDiscord: true,
+    location: { pathname: '/', href: 'https://123456.discordsays.com/?instance_id=inst-1' },
+    scrollY: 0, scrollTo() {}, addEventListener() {},
+    matchMedia: () => ({ matches: true, addEventListener() {} }),
+    reducedMotion: { matches: false },
+    portraitScreen: { matches: false },
+    ownsFullscreen: () => false,
+    fullscreenDisplay: { matches: false },
+    fullscreenRequest: null,
+    btnFullscreen: $('btn-fullscreen'),
+    exitOwnedFullscreen: async () => {},
+    fitScorebug() {},
+    setPortrait() {},
+    endCanvasDrag() {},
+    drag: null,
+    fieldView: { portrait: false, field: null, bodies: P.kickoff(), mode: 'standard', castHidden: false },
+    fieldBox: { left: 0, top: 0, width: 800, height: 480, stageWidth: 800, stageHeight: 480, controlWidth: 120, controlHeight: 32 },
+    stagePoint: p => ({ x: p.x, y: p.y }),
+    impulseGeometry: b => ({ x: b.x, y: b.y - 40 }),
+    gameUi: { scale: () => 1 },
+    selected: 0,
+    plans: [{ angle: 0, power: 0, spin: 0, guard: false }],
+    phase: 'plan',
+    spinSlider: false,
+    firstTurnStep: null,
+    foulInfo: null,
+    foulBox: $('foul-box'),
+    goalReplay: null,
+    replaySkip: $('skip-goal-replay'),
+    demo: true,
+    online: { active: false, spectating: false, contextChanged() { contextUpdates++; } },
+    theater: null,
+    recording: null,
+    setupFor: 'pick',
+    chosenMode: () => 'standard',
+    draft: [{ key: 'u0', model: {} }, { key: 'u1', model: {} }, { key: 'u2', model: {} }],
+    signedIn: () => true,
+    teamSlotsOf: () => null,
+    sameSlots: () => false,
+    savedTeams: null,
+    teamIndex: -1,
+    ubuRender: Object.assign(() => makeEl('svg'), { spriteImg: () => makeEl('img') }),
+    lobbyView: null,
+    fixedTeam: () => false,
+    loadCollection: async () => {},
+    loadTeams: async () => {},
+    rosterSlots() { $('roster-slots').replaceChildren(makeEl('s0'), makeEl('s1'), makeEl('s2')); },
+    lastCpuSetup: null,
+    closeFirstTurnGuide() {},
+    closeFoulInfo() {},
+    closeSummary() {},
+    stopFanfare() {},
+    gameAudio: () => ({ stopMotion() {} }),
+    isExporting: () => false,
+    statDrawer: { matches: () => false, hidePopover() {} },
+    endReplay() {},
+    hideFinger() {},
+    cpuClient: { dispose() {} },
+    demoClient: { dispose() {} },
+    startDemo() { actCtx.demo = true; },
+    stopDemo() { actCtx.demo = false; },
+    newMatch() {},
+    confirmCpuEnd: async () => true,
+    finishCpuMatch() { endedCpu++; actCtx.recording = null; actCtx.phase = 'over'; },
+    cancelAnimationFrame() {},
+    castHome() {},
+    castTo: away => {
+      castCalls.push(away);
+      actCtx.fieldView.castHidden = away;
+      rinkWrap.classList.toggle('cast-away', away);
+    },
+    history: { state: null, pushState(s) { this.state = s; }, replaceState() {}, back() { this.state = null; } },
+    layoutDirty: false,
+    draw() { actCtx.layoutDirty = false; },
+    stadium: { classList: makeClassList() },
+    rinkStage,
+    rinkWrap,
+    document: {
+      hidden: false,
+      fullscreenElement: null,
+      fullscreenEnabled: true,
+      body: { dataset: { shot: 'lobby' }, style: { setProperty() {} }, classList: makeClassList() },
+      querySelector: sel => {
+        if (sel === '.ball-page') return { getBoundingClientRect: () => ({ top: 64 }) };
+        if (sel === '.play-home') return playHome;
+        return null;
+      }
+    }
+  };
+  const actEnv = runInNewContext(
+    stageCode + '\n;({ getShot: () => shot, canDock, prepareSheet, setupStep, openSheet, screenTransition, enterMatch, openPause, leaveForHome, matchInProgress, localPlayBlocked, demoPaused });',
+    actCtx
+  );
+
+  assert.equal(actEnv.getShot(), 'lobby', 'Discord Activity boots on the lobby shot');
+  assert.equal(actEnv.localPlayBlocked(), false, 'demo physics run unblocked on lobby shot');
+  assert.equal(actEnv.demoPaused(), false, 'demo loop runs unpaused on lobby shot');
+  assert.equal(actEnv.canDock(), true, 'wide-screen Discord Activity docks rules/team setup on the stage');
+
+  // Docked Change team in Activity glides lobby -> team and returns to lobby on close
+  actEnv.prepareSheet();
+  actEnv.setupStep('team');
+  actEnv.openSheet();
+  assert.equal($('roster-dialog').classList.contains('docked'), true);
+  assert.equal(actEnv.getShot(), 'team');
+  assert.deepEqual(castCalls, [true], 'demo skaters scatter off the ice for Activity Change team');
+  $('roster-dialog').close();
+  assert.equal(actEnv.getShot(), 'lobby', 'closing Activity Change team returns to lobby shot, not home');
+  assert.deepEqual(castCalls, [true, false], 'demo skaters return to lobby rink');
+
+  // Navigating lobby -> collection -> match (online match starting while browsing Collection) restores skaters onto the ice
+  actCtx.location.pathname = '/collection';
+  actEnv.screenTransition('collection', () => {}, 'play');
+  assert.equal(actEnv.getShot(), 'collection');
+  assert.equal(actCtx.fieldView.castHidden, true);
+  assert.equal(rinkWrap.classList.contains('cast-away'), true);
+  actCtx.location.pathname = '/';
+  actEnv.enterMatch('match');
+  assert.equal(actEnv.getShot(), 'match');
+  assert.equal(actCtx.fieldView.castHidden, false, 'enterMatch clears castHidden when online match starts from Collection/Mint');
+  assert.equal(rinkWrap.classList.contains('cast-away'), false, 'enterMatch clears .cast-away so live match skaters are visible');
+
+  // CPU match in Activity: Pause mounts #activity-play in #pause-lobby, shows "Back to lobby", and leaving preserves resumable CPU state
+  actCtx.demo = false;
+  actCtx.phase = 'plan';
+  actCtx.recording = { turns: [{}] };
+  assert.equal(actEnv.matchInProgress(), true);
+  actEnv.openPause();
+  assert.equal($('pause-leave').textContent, 'Back to lobby');
+  assert.equal($('pause-lobby').children.includes($('activity-play')), true, 'live Activity lobby moves into pause menu');
+  const prevUpdates = contextUpdates;
+  await actEnv.leaveForHome($('pause-leave'), false);
+  assert.equal(endedCpu, 0, 'Back to lobby keeps CPU match resumable instead of ending it');
+  assert.equal(actEnv.matchInProgress(), true);
+  assert.equal(actEnv.getShot(), 'lobby');
+  assert.ok(contextUpdates > prevUpdates, 'Activity lobby refreshes so Resume CPU label updates immediately');
+
+  // End match button explicitly ends CPU match
+  actEnv.enterMatch('match');
+  await actEnv.leaveForHome($('pause-end-match'), true);
+  assert.equal(endedCpu, 1, 'End match button ends the CPU match after confirmation');
+
+  // 4. site.js awaits ubuActivity.signIn() before rendering Mint/Collection and retries without reloading
+  let signInCalls = 0, configFails = true;
+  let resolveSignIn;
+  const signInPromise = new Promise(resolve => { resolveSignIn = resolve; });
+  const siteNodes = new Map();
+  const makeSiteNode = (tag, id = '') => ({
+    tagName: tag.toUpperCase(), id, hidden: false, disabled: false, open: false, textContent: '', value: '',
+    dataset: {}, parentElement: null, children: [],
+    style: { setProperty() {}, getPropertyValue: () => '', removeProperty() {} },
+    classList: makeClassList(),
+    append(...kids) { this.children.push(...kids); },
+    replaceChildren(...kids) { this.children = [...kids]; },
+    setAttribute() {}, getAttribute: () => null, removeAttribute() {}, closest: () => null,
+    querySelector: () => makeSiteNode('button'),
+    querySelectorAll: () => [],
+    addEventListener(type, fn) { this[`_on_${type}`] = fn; },
+    click() { const ev = { target: this, stopPropagation() {}, preventDefault() {} }; this.onclick?.(ev); this._on_click?.(ev); },
+    getContext: () => null
+  });
+  const getSiteEl = id => {
+    if (!siteNodes.has(id)) siteNodes.set(id, makeSiteNode('div', id));
+    return siteNodes.get(id);
+  };
+  const siteWin = {
+    location: { pathname: '/mint', reload() { throw new Error('location.reload must never run inside Discord Activity'); } },
+    ubuActivity: {
+      instance: 'inst-77',
+      signIn() { signInCalls++; return signInPromise; }
+    },
+    navigator: { userActivation: { hasBeenActive: false } },
+    devicePixelRatio: 1,
+    matchMedia: () => ({ matches: true, addEventListener() {} }),
+    requestAnimationFrame: () => 1,
+    setTimeout: fn => { fn(); return 1; },
+    clearTimeout() {},
+    URL, Blob, TextDecoder, crypto: globalThis.crypto,
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    addEventListener() {}, dispatchEvent() {},
+    getUbuSession: () => null,
+    checkUbuSession: async () => ({ owner: null }),
+    gameUi: { icon: () => makeSiteNode('svg'), confirm: async () => false },
+    ubu, ubuFile, rarity, ubuArchetype, ububallPhysics: P,
+    ubuRender: Object.assign(() => makeSiteNode('svg'), { back: () => makeSiteNode('svg'), cardMaterials: () => makeSiteNode('div'), token: () => makeSiteNode('svg'), tokenBack: () => makeSiteNode('svg') }),
+    ubuAudio: { getAudioContext: () => null, stop() {} },
+    ubuStarter: { status: { signup: false, daily: true }, known: true, async refresh() {} },
+    ubuList: {
+      config: async () => {
+        if (configFails) throw new Error('network');
+        return { ready: true, login: true, mint: 'AAAAAAAAAAAAAAAAAAAAAA', lifetimeLimit: 5, keys: {} };
+      },
+      trustedKey: async () => null,
+      load: async () => {},
+      get: () => null,
+      add() {},
+      setFavorite: async () => {},
+      serialLabel: s => '#' + Number(s),
+      rarityScore: p => p.toFixed(2),
+      heartIcon: () => makeSiteNode('svg'),
+      mount: () => ({ render() {}, clearFilters() {} })
+    },
+    createPackScene: () => ({ async play() {}, awaitingTap: () => false, tap: () => false, reset() {}, setStarter() {}, setHints() {} }),
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({}) })
+  };
+  siteWin.window = siteWin;
+  siteWin.globalThis = siteWin;
+  siteWin.document = {
+    body: { dataset: { shot: 'mint' }, append() {} },
+    activeElement: null,
+    getElementById: getSiteEl,
+    createElement: t => makeSiteNode(t),
+    createElementNS: (_, t) => makeSiteNode(t),
+    querySelector: () => makeSiteNode('div'),
+    querySelectorAll: () => []
+  };
+  siteWin.performance = { now: () => 0 };
+  siteWin.Object = Object; siteWin.Array = Array; siteWin.Set = Set; siteWin.Map = Map;
+  siteWin.Math = Math; siteWin.Number = Number; siteWin.String = String; siteWin.Boolean = Boolean;
+  siteWin.Promise = Promise; siteWin.JSON = JSON; siteWin.Error = Error; siteWin.Uint8Array = Uint8Array;
+
+  getSiteEl('signed-out-panel').hidden = true;
+  runInNewContext(siteSrc, siteWin);
+  await new Promise(r => setImmediate(r));
+  assert.equal(getSiteEl('mint-retry').hidden, false, 'failed initial config exposes #mint-retry');
+
+  // Clicking #mint-retry re-runs bootMint() without calling location.reload() and awaits ubuActivity.signIn()
+  configFails = false;
+  getSiteEl('mint-retry').click();
+  await new Promise(r => setImmediate(r));
+  assert.equal(signInCalls, 1, 'bootMint awaits window.ubuActivity.signIn() when session is not yet established');
+  assert.equal(getSiteEl('signed-out-panel').hidden, true, 'signed-out panel never flashes while Activity signIn() is in flight');
+
+  resolveSignIn({ owner: '111111111111111111', csrf: 'csrf-act', instance: 'inst-77' });
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(getSiteEl('signed-out-panel').hidden, true, 'Activity session signs into Mint cleanly');
+  assert.equal(getSiteEl('daily-pack').hidden, false, 'Activity daily pack renders on Mint stage after signIn resolves');
+});
