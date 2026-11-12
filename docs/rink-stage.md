@@ -196,3 +196,7 @@ so it reads as part of the arena.
   prevented premature `enterMatch` while an online room is still in `lobby`; stopped fanfare/motion
   audio and preserved CPU match state across Leave → Home → Resume; added Phase 2 unit tests in
   `test/ububall-effects.test.js`.
+- 2026-11-11: Fixed layout jump on closing Choose Team / camera move: `.stadium-stage-area` has
+  `min-width: 0; min-height: 0;` so `.stadium.camera-moving`'s `overflow: visible` does not trigger
+  CSS flexbox auto-minimum expansion to `.rink-stage`'s 5:3 content height during transitions,
+  keeping the home shot's 1000:540 stage ratio and vertically-centered `.play-home` sidebar rock-solid.
