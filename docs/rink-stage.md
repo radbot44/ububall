@@ -14,46 +14,43 @@ slide in and out around it, like moving through the menus of a video game. Whate
 
 ## Status
 
-Phase 4 is built and awaiting the owner's review (Phases 2–3 built).
+Phase 5 is built and awaiting the owner's review (Phases 2–4 built).
 
-Working now (`web/index.html`, `web/app.js`, `web/site.js`, `web/site.css`, `web/pack-scene.js`,
-`web/ubu-list.js`, `web/ububall-presentation.js`, `web/ububall.js`, `web/ububall.css`,
-`shared/ubu-audio.js`):
+Working now (`web/index.html`, `web/app.js`, `web/ububall-activity.js`, `web/site.js`,
+`web/site.css`, `web/pack-scene.js`, `web/ubu-list.js`, `web/ububall-presentation.js`,
+`web/ububall.js`, `web/ububall.css`, `shared/ubu-audio.js`):
 
 - `.arena-layout` lives in the shared `.ball-page` shell across Play, Ubu Mint and Collection;
-  `app.js` routes screen switches through `setUbuScreenTransition` so `setShot(name)` (`home`,
-  `rules`, `team`, `match`, `replay`, `mint`, `collection`) drives all three screens on one
-  persistent rink stage.
-- Entering `collection` on desktop scatters whoever is on the ice (`castTo(true)`), rotates the
-  rink `-90deg` in-plane into a portrait `3:5` pose matching Ubu Mint's `min(114rem, calc(100% - 3rem))`
-  width, and then stretches the rink in height (`drawPortraitRinkSurface`) to hold the collection
-  rows while keeping at least the regulation `3:5` portrait height. Leaving shrinks the stretched
-  rink back to `3:5` first and then rotates `+90deg` back into the target landscape shot (`home`,
-  `mint`, or directly into `team` for `/?roster=1`). Phones and `prefers-reduced-motion` skip the
-  rotation/stretch animations cleanly.
-- `#rink` renders as a sticky viewport-sized portrait window inside `.rink-stage` so collections of
-  any size stay crisp at native DPR without oversized canvas buffers; top (Away) and bottom (Home)
-  goals and creases frame the ends while dashed zone/centre lines and centre-ice face-off circles +
-  Ububall logos repeat at regular `320`/`640`-unit intervals as you scroll.
-- `#collection-dock` (`Your ubus`, `Open .ubu`, `Play with my ubus` and `#collection-toolbar`) sits
-  outside above the top goal and sticks to the top of the viewport while scrolling; `#ubus` lives
-  directly on the ice inside `#collection-world`.
-- Selecting an ubu in Collection scatters neighbouring tiles outward across the ice and grows the
-  chosen ubu from its tile into a stage-integrated `.viewer.on-ice` panel over a colour-matched ice
-  halo, preserving all four tabs (`Ubu Stats`, `Card`, `Token`, `Sound`), Favorite, `Download .ubu`,
-  Prev/Next collection stepping and Escape/outside-ice close (gathering tiles back onto the ice),
-  while `window.showUbuViewer` from Choose Team continues opening `#viewer` as a modal.
-- Ubu Mint spotlights, pack unwrap, silhouette emergence, zoomed card reveal, aiming input, docked
-  desktop `rules`/`team` setup, pause/stats/summary modals, replays and CPU leave/resume from
-  Phases 1–3 continue working unchanged.
+  `app.js` routes screen switches through `setUbuScreenTransition` (preserving Discord Activity
+  launch query parameters when embedded) so `setShot(name)` (`home`, `lobby`, `rules`, `team`,
+  `match`, `replay`, `mint`, `collection`) drives all three screens on one persistent rink stage.
+- Launching inside the Discord Activity opens on the `lobby` shot (`body[data-shot="lobby"]`) with
+  the live demo rink on the left and the four-per-row Activity lobby, `Your team` (`Change team`)
+  and compact `Ubu Mint` strip beside it on desktop (`1280×720` fits without scrolling), or stacked
+  below the rink on portrait and short landscape phones with a three-tab bottom nav bar and Discord
+  safe-area clearance.
+- Wide-screen Activity setup (`Change team`, accepted challenges, public matchmaking lobbies,
+  instant-match `Change rules` and CPU `New match`) now docks `#roster-dialog.docked` over the away
+  half in `rules` and `team` shots with `.formation.on-ice` over your three ubus at kickoff spots,
+  returning cleanly to `lobby` (or `match`) on close and handing off directly to `match` when
+  online play begins (including when a match starts while viewing `mint`, `collection` or
+  `Change team`). CPU matches in the Activity can also be left via `Back to lobby` and resumed via
+  `Resume CPU` alongside the live pause-menu lobby.
+- Ubu Mint and Collection run inside the Discord Activity on the same persistent stage: `site.js`
+  awaits `window.ubuActivity.signIn()` before rendering so Mint/Collection never flash signed-out
+  during SDK sign-in, `#mint-retry` re-runs Mint setup in place without reloading/closing the
+  Activity, and safe-area offsets keep `.site-header`, sticky `#collection-dock` and `.viewer.on-ice`
+  clear of Discord's chrome.
+- Collection portrait rotation/stretch (`drawPortraitRinkSurface`), repeating `320`/`640`-unit
+  markings, hybrid `.viewer.on-ice` panel, Ubu Mint spotlights/reveal choreography, aiming input,
+  replays and standalone flows from Phases 1–4 continue working unchanged.
 
 Not done or not checked:
 
-- The team sheet stays a modal, with the drawn `.formation`, on phones and in the Discord Activity
-  (phases 5 and 6); Activity Mint and Collection layout check is Phase 5.
+- The team sheet stays a modal, with the drawn `.formation`, on phones (phase 6).
 - Scatter, arrival and Mint scamper are not in `web/effects.html` yet (phase 7).
 
-Next step: Phase 5 (Discord Activity: lobby shot, Mint and Collection inside the Activity).
+Next step: Phase 6 (Phones: stacked variants of every shot; check portrait play).
 
 ## Decisions (owner, 2026-11-11)
 
@@ -250,3 +247,16 @@ so it reads as part of the arena.
   scatter, FLIP panel growth, colour-matched ice halo, Prev/Next collection stepping and modal
   fallback for Choose Team inspect; added Phase 4 unit tests in `test/ububall-effects.test.js` and
   verified desktop and mobile frames in headless Chromium.
+- 2026-11-12: Phase 5 built (Discord Activity `lobby` shot, docked Activity `rules`/`team` setup,
+  and Activity Mint & Collection). Added `lobby` shot (`web/ububall-activity.js`, `web/ububall.js`,
+  `web/ububall.css`) placing the landscape demo/paused-CPU rink beside the 4-per-row Activity lobby,
+  team card and compact Mint bar on desktop (stacked below the rink on portrait and short landscape
+  phones); enabled docked `rules` and `team` setup with `.formation.on-ice` inside the Activity on
+  wide screens (`canDock`), clean `returnShot = 'lobby'`, `prepareOnline()` setup teardown,
+  `enterMatch()` cast restoration when matches start from `mint`/`collection`, and resumable CPU
+  play (`Back to lobby` / `Resume CPU`); integrated Activity Mint & Collection (`bootMint()` awaiting
+  `ubuActivity.signIn()`, non-reloading `#mint-retry`, preserved Discord query params in `app.js`,
+  3-column portrait `.site-nav`, safe-area insets on `.site-header`/`#collection-dock`/`.viewer.on-ice`,
+  and `overflow-x: clip` on `collection` so scattered skaters never add a horizontal scrollbar);
+  added Phase 5 unit tests in `test/ububall-effects.test.js` and verified desktop and mobile Activity
+  flows in headless Chromium.

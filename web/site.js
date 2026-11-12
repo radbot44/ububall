@@ -1082,7 +1082,7 @@
     const recImport = $('recovery-import-wrap');
     if (recImport) recImport.hidden = !importFile;
   }
-  $('mint-retry').onclick = () => location.reload();
+  $('mint-retry').onclick = () => { void bootMint(); };
   $('collection-retry').onclick = () => { void collection(); };
   let collectionViewerOpen = false, collectionViewerFromList = false, collectionViewerClosing = false;
   let scatteredAnims = [], viewerPanelAnim = null;
@@ -2005,11 +2005,14 @@
     }
   });
 
-  (async () => {
+  async function bootMint() {
+    $('mint-recovery').hidden = $('mint-retry').hidden = true;
     try {
       config = await ubuList.config();
       let initialSession = window.getUbuSession?.() || null;
-      if (config.login && !initialSession) {
+      if (window.ubuActivity && !initialSession?.owner) {
+        try { initialSession = await window.ubuActivity.signIn(); } catch {}
+      } else if (config.login && !initialSession) {
         initialSession = await (window.checkUbuSession ? window.checkUbuSession(false) : api('/api/session'));
       }
       await handleSession(initialSession);
@@ -2018,5 +2021,6 @@
       $('mint-recovery').hidden = $('mint-retry').hidden = false;
       collectionRecovery({ retry: true, importFile: true });
     }
-  })();
+  }
+  void bootMint();
 })();

@@ -151,12 +151,12 @@ a { color: inherit; text-decoration: none; }
 /* Portrait screens (phones, narrow windows): the main navigation becomes a bottom tab bar.
    Landscape keeps it in the top bar. */
 @media (orientation: portrait) {
-  body { padding-bottom: calc(4.25rem + env(safe-area-inset-bottom)); }
+  body { padding-bottom: calc(4.25rem + var(--safe-bottom, env(safe-area-inset-bottom))); }
   .site-header { flex-wrap: nowrap; }
   .site-nav {
     position: fixed; inset: auto 0 0; z-index: 50;
     display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .125rem;
-    padding: .375rem max(.5rem, env(safe-area-inset-right)) calc(.375rem + env(safe-area-inset-bottom)) max(.5rem, env(safe-area-inset-left));
+    padding: .375rem max(.5rem, var(--safe-right, env(safe-area-inset-right))) calc(.375rem + var(--safe-bottom, env(safe-area-inset-bottom))) max(.5rem, var(--safe-left, env(safe-area-inset-left)));
     border-width: .0625rem 0 0; border-radius: 0;
     background: color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter: blur(.75rem);
   }
@@ -164,6 +164,7 @@ a { color: inherit; text-decoration: none; }
   .site-nav svg { width: 1.5rem; height: 1.5rem; }
   .site-nav a[aria-current="page"], .site-nav .active { background: none; color: var(--primary); box-shadow: none; }
   .site-nav a[aria-current="page"] svg, .site-nav .active svg { filter: drop-shadow(0 0 .5rem color-mix(in srgb, var(--primary) 60%, transparent)); }
+  .discord-activity .site-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 .site-header-actions, .actions {
@@ -951,14 +952,14 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
     height: 4.75rem;
   }
   .collection-viewer-frame {
-    padding: .375rem 1.25% 4.5rem;
+    padding: .375rem 1.25% calc(4.5rem + var(--safe-bottom, 0px));
     min-height: calc(100dvh - var(--collection-viewer-top, 8rem) - .5rem);
     max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - .25rem);
     grid-template-columns: 2rem minmax(0, 1fr) 2rem;
     gap: .25rem;
   }
   .collection-viewer-host {
-    max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - 4.75rem);
+    max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - 4.75rem - var(--safe-bottom, 0px));
   }
   .collection-viewer-arrow {
     width: 2rem;
@@ -971,7 +972,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
   }
   .viewer.on-ice {
     padding: .625rem .5rem;
-    max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - 4.75rem);
+    max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - 4.75rem - var(--safe-bottom, 0px));
   }
   .viewer.on-ice .viewer-toolbar {
     gap: .25rem;

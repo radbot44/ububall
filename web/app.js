@@ -4,11 +4,22 @@
   const screens = { '/': 'play', '/mint': 'mint', '/collection': 'collection' };
   const titles = { play: 'Ububall', mint: 'Ubu Mint · Ububall', collection: 'Collection · Ububall' };
   const screenOf = path => Object.hasOwn(screens, path) ? screens[path] : null;
+  const appParams = new Set(['match', 'watch', 'roster']);
+  const activityParams = window.ubuActivity
+    ? [...new URL(location.href).searchParams].filter(([k]) => !appParams.has(k))
+    : [];
+  const withActivitySearch = href => {
+    const url = new URL(href, location.origin);
+    for (const [k, v] of activityParams) {
+      if (!url.searchParams.has(k)) url.searchParams.set(k, v);
+    }
+    return url;
+  };
   const loadedScripts = new Map();
   let guard = null;
   let screenTransition = (_, apply) => apply();
   let activeScreen = null;
-  let playUrl = (screenOf(location.pathname) || 'play') === 'play' ? location.href : '/';
+  let playUrl = (screenOf(location.pathname) || 'play') === 'play' ? location.href : withActivitySearch('/').href;
   let navToken = 0;
 
   // Ubu Mint and Collection share site.js; load it on the first visit to either screen, or when
@@ -85,9 +96,10 @@
   }
 
   async function navigateUbuScreen(href) {
-    const url = new URL(href, location.origin);
-    const next = url.origin === location.origin ? screenOf(url.pathname) : null;
+    const raw = new URL(href, location.origin);
+    const next = raw.origin === location.origin ? screenOf(raw.pathname) : null;
     if (!next) return false;
+    const url = activityParams.length ? withActivitySearch(raw.href) : raw;
     document.getElementById('more-menu')?.hidePopover();
     const current = activeScreen || screenOf(location.pathname) || 'play';
     const token = ++navToken;
