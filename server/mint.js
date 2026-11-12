@@ -61,12 +61,13 @@ function packHint(code) {
 // Internal service only. The caller must authenticate and authorize every issuance.
 // storage supplies synchronous exec(sql, ...bindings) and transactionSync(callback).
 class Mint {
-  constructor(storage, { mint, key, resolveSigningKey }) {
+  constructor(storage, { mint, key, resolveSigningKey, logSqlReads = false }) {
     if (!identity(mint) || typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(key) || typeof resolveSigningKey !== 'function') throw new Error('Invalid mint configuration.');
     this.storage = storage;
     this.mint = mint;
     this.key = key;
     this.resolveSigningKey = resolveSigningKey;
+    this.logSqlReads = logSqlReads;
     this.transaction(() => {
       this.exec(`CREATE TABLE IF NOT EXISTS mint_state (
         singleton INTEGER PRIMARY KEY CHECK(singleton=1), mint TEXT NOT NULL,
@@ -133,6 +134,8 @@ class Mint {
         this.exec('ALTER TABLE inventory ADD COLUMN batch INTEGER NOT NULL DEFAULT 0');
         this.exec('UPDATE inventory SET batch=?', this.state().batch);
       }
+      // Batch is added above for pre-existing databases before creating this index.
+      this.exec('CREATE INDEX IF NOT EXISTS inventory_offer_lookup ON inventory(quintile, batch, pack_slot)');
       this.exec(`CREATE TABLE IF NOT EXISTS pack_offers (
         owner TEXT PRIMARY KEY, request TEXT NOT NULL, expires INTEGER NOT NULL) STRICT`);
       this.exec(`CREATE TABLE IF NOT EXISTS pack_choices (
@@ -142,9 +145,28 @@ class Mint {
         owner TEXT NOT NULL, request TEXT NOT NULL, choice TEXT NOT NULL, PRIMARY KEY(owner, request)) STRICT`);
       // Each account's saved ububall teams, as one validated JSON document.
       this.exec('CREATE TABLE IF NOT EXISTS saved_teams (owner TEXT PRIMARY KEY, data TEXT NOT NULL) STRICT');
+      this.exec(`CREATE TABLE IF NOT EXISTS mint_account_counts (
+        owner TEXT PRIMARY KEY, regular_packs INTEGER NOT NULL CHECK(regular_packs >= 0)) STRICT`);
+      this.exec('CREATE TABLE IF NOT EXISTS mint_migrations (id TEXT PRIMARY KEY) STRICT');
+      // Backfill historical ownership once. The marker and counts are committed atomically.
+      if (!this.exec("SELECT 1 FROM mint_migrations WHERE id='regular-pack-counts-v1'").length) {
+        this.exec(`INSERT INTO mint_account_counts (owner, regular_packs)
+          SELECT owner, COUNT(DISTINCT request) FROM issued
+          WHERE request NOT LIKE 'starter:%' GROUP BY owner
+          ON CONFLICT(owner) DO UPDATE SET regular_packs=excluded.regular_packs`);
+        this.exec("INSERT INTO mint_migrations (id) VALUES ('regular-pack-counts-v1')");
+      }
     });
   }
-  exec(sql, ...bindings) { return Array.from(this.storage.exec(sql, ...bindings)); }
+  exec(sql, ...bindings) {
+    const cursor = this.storage.exec(sql, ...bindings);
+    const rows = Array.from(cursor);
+    // Opt-in diagnostics: log query shapes, never SQL bindings or account identities.
+    if (this.logSqlReads && typeof cursor.rowsRead === 'number' && cursor.rowsRead >= 100) {
+      console.info('mint_sql_reads', { rowsRead: cursor.rowsRead, sql: sql.replace(/\s+/g, ' ').trim().slice(0, 240) });
+    }
+    return rows;
+  }
   transaction(callback) { return this.storage.transactionSync(callback); }
   state() { return this.exec('SELECT * FROM mint_state WHERE singleton=1')[0]; }
   newId() {
@@ -204,7 +226,7 @@ class Mint {
   }
 
   checkAllowance(owner, lifetimeLimit) {
-    if (lifetimeLimit !== undefined && this.exec("SELECT COUNT(DISTINCT request) AS count FROM issued WHERE owner=? AND request NOT LIKE 'starter:%'", owner)[0].count >= lifetimeLimit) {
+    if (lifetimeLimit !== undefined && (this.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0]?.regular_packs ?? 0) >= lifetimeLimit) {
       throw new Error('Lifetime mint limit reached.');
     }
   }
@@ -289,6 +311,9 @@ class Mint {
         this.exec('UPDATE inventory SET pack_slot=? WHERE pack_slot=?', chosenPack, state.remaining - 1);
       }
       this.exec('UPDATE mint_state SET remaining=remaining-1 WHERE singleton=1');
+      // Increment exactly once in the allocation transaction; starter packs use claimStarter().
+      this.exec(`INSERT INTO mint_account_counts (owner, regular_packs) VALUES (?, 1)
+        ON CONFLICT(owner) DO UPDATE SET regular_packs=regular_packs+1`, owner);
       if (choice !== undefined) {
         this.exec('INSERT INTO pack_selections (owner, request, choice) VALUES (?, ?, ?)', owner, request, choice);
         this.exec('DELETE FROM pack_choices WHERE owner=?', owner);
