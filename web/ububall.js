@@ -1384,8 +1384,9 @@
   let cameraDone = Promise.resolve(), resolveCameraDone = null;
   let cameraStepRaf = 0, pendingExitCollection = null, afterCollectionShrink = null;
   const playableShot = () => shot === 'match' && !cameraMove;
+  const WIDE_STAGE_QUERY = '(min-width: 56rem) and (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px)))';
   const compactPhoneStage = () => Boolean(portraitScreen?.matches) ||
-    (typeof matchMedia === 'function' && matchMedia('(max-width: 47.99rem), ((pointer: coarse) and (max-height: 600px))').matches);
+    (typeof wideScreen !== 'undefined' ? !wideScreen.matches : (typeof matchMedia === 'function' && !matchMedia(WIDE_STAGE_QUERY).matches));
   function settleCameraPromise() {
     if (resolveCameraDone) { const done = resolveCameraDone; resolveCameraDone = null; done(); }
   }
@@ -1594,7 +1595,7 @@
     change();
     layoutDirty = true; draw();
     const to = rinkStage.getBoundingClientRect();
-    if (!rinkStage.animate || turned || fieldView.portrait || reducedMotion.matches || document.hidden || !from.width || !to.width) return;
+    if (!rinkStage.animate || compactPhoneStage() || turned || fieldView.portrait || reducedMotion.matches || document.hidden || !from.width || !to.width) return;
     const dx = from.left + from.width / 2 - to.left - to.width / 2, dy = from.top + from.height / 2 - to.top - to.height / 2;
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(from.width - to.width) < 1) return;
     stadium.classList.add('camera-moving');
@@ -4078,11 +4079,10 @@
       else if (hadLineup && !wantsLineup) skateLineup(false);
     }
   }
-  // The rules and team setup shots. On a wide screen the team sheet docks over the away half of a
-  // game-size rink: the cast skates off and the lineup stands at its kickoff spots. On phones the
-  // sheet stays a modal with its own formation.
+  // The rules and team setup shots. On wide screens the team sheet docks over the away half of a
+  // game-size rink; on phones it stacks below the rink while the lineup stands at its kickoff spots.
   const wideScreen = matchMedia('(min-width: 56rem) and (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px)))');
-  const canDock = () => location.pathname === '/' && wideScreen.matches;
+  const canDock = () => location.pathname === '/';
   const sheetDocked = () => $('roster-dialog').classList.contains('docked');
   let lineupMove = null;
   function fitSetupShot() {
@@ -4149,7 +4149,13 @@
     if ($('roster-slots').childElementCount) skateLineup(false);
   }
   $('roster-dialog').addEventListener('close', () => { if (!$('roster-dialog').open && !handoffToMatch) leaveSetupShot(false); });
-  wideScreen.addEventListener('change', () => { if (isSetupShot() && !wideScreen.matches) $('roster-dialog').close(); });
+  wideScreen.addEventListener('change', () => {
+    if (!isSetupShot()) return;
+    scrollTo(0, 0);
+    fitSetupShot();
+    layoutDirty = true;
+    draw();
+  });
   // A docked sheet is not modal, so Escape is handled here: back a step, as the modal's cancel does, or close.
   addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !isSetupShot() || event.defaultPrevented || document.querySelector('dialog:modal, :popover-open')) return;
@@ -4388,20 +4394,27 @@
     }
   };
 
-  function toggleRotate() {
+  function setPortrait(value) {
+    const next = Boolean(value);
+    if (fieldView.portrait === next) return;
     layoutDirty = true;
-    fieldView.portrait = !fieldView.portrait;
-    stadium?.classList.toggle('portrait-mode', fieldView.portrait);
-    window.ubuAudio?.setOrientation?.(fieldView.portrait);
+    fieldView.portrait = next;
+    stadium?.classList.toggle('portrait-mode', next);
+    window.ubuAudio?.setOrientation?.(next);
     if (btnRotate) {
-      btnRotate.setAttribute('aria-pressed', String(fieldView.portrait));
-      btnRotate.title = fieldView.portrait ? 'Switch to landscape orientation' : 'Switch to portrait orientation';
-      btnRotate.setAttribute('aria-label', fieldView.portrait ? 'Switch to landscape orientation' : 'Switch to portrait orientation');
+      btnRotate.setAttribute('aria-pressed', String(next));
+      btnRotate.title = next ? 'Switch to landscape orientation' : 'Switch to portrait orientation';
+      btnRotate.setAttribute('aria-label', next ? 'Switch to landscape orientation' : 'Switch to portrait orientation');
     }
-    try {
-      localStorage.setItem('ububall-orientation', fieldView.portrait ? 'portrait' : 'landscape');
-    } catch {}
     draw();
+  }
+
+  function toggleRotate() {
+    setPortrait(!fieldView.portrait);
+    try {
+      const prefix = portraitScreen?.matches ? 'portrait:' : 'landscape:';
+      localStorage.setItem('ububall-orientation', prefix + (fieldView.portrait ? 'portrait' : 'landscape'));
+    } catch {}
   }
 
   if (btnRotate) btnRotate.onclick = toggleRotate;
@@ -4490,8 +4503,17 @@
     }
   });
   const portraitScreen = matchMedia('(orientation: portrait)');
-  function setPortrait(value) { if (fieldView.portrait !== value) toggleRotate(); }
-  function fitOrientation() { if (isMatchShot()) setPortrait(portraitScreen.matches); }
+  function fitOrientation() {
+    if (!isMatchShot()) return;
+    let want = portraitScreen.matches;
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('ububall-orientation') : null;
+      const prefix = portraitScreen.matches ? 'portrait:' : 'landscape:';
+      if (saved === prefix + 'portrait') want = true;
+      else if (saved === prefix + 'landscape') want = false;
+    } catch {}
+    setPortrait(want);
+  }
   function matchInProgress() { return !demo && phase !== 'over' && Boolean(recording && !online?.active); }
   function updateHome() {
     const active = online?.active || matchInProgress();
@@ -4659,7 +4681,12 @@
     } finally { button.disabled = false; }
   };
   $('demo-play').onclick = () => $('home-play').click();
-  portraitScreen.addEventListener('change', () => { gameUi.updateScale?.(); fitOrientation(); draw(); });
+  portraitScreen.addEventListener('change', () => {
+    try { if (typeof localStorage !== 'undefined') localStorage.removeItem('ububall-orientation'); } catch {}
+    gameUi.updateScale?.();
+    fitOrientation();
+    draw();
+  });
   window.addEventListener('popstate', () => {
     if (location.pathname !== '/') return;
     if (history.state?.match) {
@@ -5134,9 +5161,7 @@
   if (!inDiscord) {
     restoredMatch = restoreActiveMatch();
     if (!restoredMatch) newMatch();
-    try {
-      if (localStorage.getItem('ububall-orientation') === 'portrait') toggleRotate();
-    } catch {}
+    if (isMatchShot()) fitOrientation();
   } else if (history.state?.match) {
     // Discord opens the friends queue. Online matches and watch links resume through their URLs.
     const { match, ...homeState } = history.state;

@@ -3299,6 +3299,7 @@ test('Rink stage Phase 2: shots fold in-match/replay-match/setup-shot, camera gu
       hidden: false,
       fullscreenElement: null,
       fullscreenEnabled: true,
+      addEventListener() {},
       createElement: tag => makeEl(tag),
       body: { dataset: { shot: 'home' }, style: { setProperty(k, v) { this[k] = v; } }, classList: makeClassList() },
       querySelector: sel => sel === '.ball-page' ? { getBoundingClientRect: () => ({ top: 72 }) } : null
@@ -4924,4 +4925,368 @@ test('Rink stage Phase 5: Discord Activity lobby shot, docked Activity rules/tea
   await new Promise(r => setTimeout(r, 20));
   assert.equal(getSiteEl('signed-out-panel').hidden, true, 'Activity session signs into Mint cleanly');
   assert.equal(getSiteEl('daily-pack').hidden, false, 'Activity daily pack renders on Mint stage after signIn resolves');
+});
+
+test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-ice lineup, camera cuts, orientation isolation, and portrait play geometry', () => {
+  const P = require('../shared/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const cssSrc = fs.readFileSync(require.resolve('../web/ububall.css'), 'utf8');
+  const siteCssSrc = fs.readFileSync(require.resolve('../web/site.css'), 'utf8');
+  const rinkDocSrc = fs.readFileSync(require.resolve('../docs/rink-stage.md'), 'utf8');
+
+  // 1. CSS & handoff doc invariants for stacked phone shots
+  assert.match(cssSrc, /html:has\(body\[data-shot="collection"\]\)\s*\{\s*overflow-x:\s*clip;\s*\}/, 'html clips horizontal scatter overflow on Collection');
+  assert.match(cssSrc, /@media \(orientation: portrait\), \(width < 56rem\), \(\(pointer: coarse\) and \(max-height: 600px\)\)[\s\S]*?body:is\(\[data-shot="team"\], \[data-shot="rules"\]\) \.ball-page/, 'ububall.css defines stacked flex layout for phone rules/team shots');
+  assert.equal(/\.team-sheet\.docked\s*\{[^}]*allow-discrete/.test(cssSrc.slice(cssSrc.indexOf('Phones and narrow screens stack'))), false, 'stacked in-flow .team-sheet.docked omits allow-discrete display hold so closing never leaves a flex box');
+  assert.match(cssSrc, /@media \(max-height: 37\.5rem\)[\s\S]*?body\[data-shot="mint"\] \.rink-stage/, 'ububall.css caps Mint rink width by container height on short landscape phones');
+  assert.match(siteCssSrc, /@media \(max-width: 47\.99rem\) and \(min-height: 37\.5625rem\)[\s\S]*?\.collection-viewer-host[\s\S]*?grid-column:\s*1 \/ -1/, 'narrow portrait Collection viewer spans full width with Prev/Next row below');
+  assert.match(siteCssSrc, /@media \(max-height: 37\.5rem\)[\s\S]*?\.collection-viewer-frame[\s\S]*?position:\s*fixed/, 'short landscape Collection viewer frames cleanly across full viewport height');
+  assert.match(rinkDocSrc, /Phase 6 is built/, 'docs/rink-stage.md Status updated for Phase 6');
+  assert.match(rinkDocSrc, /Next step: Phase 7/, 'docs/rink-stage.md advances Next step to Phase 7');
+
+  // 2. Exercise phone canDock, stacked rules/team, wideScreen resize preservation, compactPhoneStage camera cuts, orientation isolation, and portrait play geometry
+  const stageCode =
+    section('  let cast = null, shot =', '  // While a video export renders') + '\n' +
+    section('  function updateFoulInfo() {', '  function kickoff(isNewMatch = false) {') + '\n' +
+    section('  function updateFirstTurnGuide() {', '  function prepareCPU(initialPlans = null) {') + '\n' +
+    section('  const KNOB_SWEEP =', '  function wheelKnob(') + '\n' +
+    section('  function aimPower(distance, arrow) {', '  let fieldBox = null;') + '\n' +
+    section('  let fieldBox = null;', '  let collectionShownLength =') + '\n' +
+    section('  let cameraMove = null;', '  // The cast: whoever is on the ice') + '\n' +
+    section('  function point(event) {', '  fieldView.canvas.addEventListener(\'wheel\'') + '\n' +
+    section('  function updateReplaySkip(replay) {', '  replaySkip.onclick =') + '\n' +
+    section('  function setupStep(step) {', '  function openSetup(step,') + '\n' +
+    section('  const fullscreenTarget =', '  document.addEventListener(\'keydown\', e => {') + '\n' +
+    section('  const portraitScreen = matchMedia', '  function openPause() {') + '\n' +
+    section('  portraitScreen.addEventListener(\'change\'', '  window.addEventListener(\'popstate\'') + '\n' +
+    section('  function leavePlayOverlays() {', '  const screenGuard =');
+
+  const makeClassList = () => {
+    const set = new Set();
+    return {
+      add: (...cs) => cs.forEach(c => set.add(c)),
+      remove: (...cs) => cs.forEach(c => set.delete(c)),
+      toggle: (c, on) => { const next = on === undefined ? !set.has(c) : Boolean(on); if (next) set.add(c); else set.delete(c); return next; },
+      contains: c => set.has(c)
+    };
+  };
+
+  let isWide = false; // Phone mode!
+  let isPortraitScreen = true; // Portrait phone (e.g. 390x844)
+  const mediaListeners = new Map();
+  const mockMatchMedia = query => {
+    const key = query.includes('min-width: 56rem') ? 'wide' : query.includes('orientation: portrait') ? 'portrait' : 'other';
+    return {
+      get matches() {
+        if (key === 'wide') return isWide;
+        if (key === 'portrait') return isPortraitScreen;
+        return false;
+      },
+      addEventListener(_type, fn) { mediaListeners.set(key, fn); }
+    };
+  };
+
+  const storage = new Map();
+  const mockStorage = {
+    getItem: k => storage.has(k) ? storage.get(k) : null,
+    setItem: (k, v) => storage.set(k, String(v)),
+    removeItem: k => storage.delete(k)
+  };
+
+  const closeListeners = new Map();
+  const els = new Map();
+  const makeEl = id => ({
+    id, hidden: false, disabled: false, inert: false, open: false, modalOpened: false, textContent: '', value: '',
+    offsetWidth: 140, offsetHeight: 40,
+    dataset: {},
+    style: { visibility: '', transform: '', width: '', maxHeight: '', left: '', top: '', setProperty(k, v) { this[k] = v; }, removeProperty(k) { delete this[k]; } },
+    classList: makeClassList(),
+    children: [],
+    get childElementCount() { return this.children.length; },
+    get firstElementChild() { return this.children[0] || { hidden: false, textContent: '' }; },
+    append(...nodes) { this.children.push(...nodes); },
+    before() {},
+    replaceChildren(...nodes) { this.children = [...nodes]; },
+    setAttribute(k, v) { this[k] = String(v); },
+    getAttribute(k) { return this[k] ?? null; },
+    removeAttribute(k) { delete this[k]; },
+    toggleAttribute(k, on) { if (on) this[k] = ''; else delete this[k]; },
+    querySelector: () => ({ textContent: '', replaceChildren() {}, onclick: null, classList: makeClassList() }),
+    addEventListener(type, fn) { if (type === 'close') closeListeners.set(id, fn); },
+    dispatchEvent: () => true,
+    show() { this.open = true; this.modalOpened = false; },
+    showModal() { this.open = true; this.modalOpened = true; },
+    close() { if (!this.open) return; this.open = false; this.modalOpened = false; closeListeners.get(id)?.(); },
+    animate() { return { onfinish: null, cancel() {} }; }
+  });
+  const $ = id => {
+    if (!els.has(id)) els.set(id, makeEl(id));
+    return els.get(id);
+  };
+
+  let animCalls = 0, castCalls = [], audioOrientations = [];
+  const canvasRect = () => phoneCtx.fieldView.portrait
+    ? { left: 18, top: 110, width: 354, height: 590 }
+    : { left: 187, top: 0, width: 650, height: 390 };
+  const stageRect = () => phoneCtx.fieldView.portrait
+    ? { left: 0, top: 100, width: 390, height: 610 }
+    : { left: 180, top: 0, width: 664, height: 390 };
+
+  const rinkStage = {
+    classList: makeClassList(),
+    style: { setProperty(k, v) { this[k] = v; }, removeProperty(k) { delete this[k]; } },
+    children: [],
+    append(...nodes) { this.children.push(...nodes); },
+    getBoundingClientRect: () => ({ left: 8, top: 62, width: 374, height: 224 }),
+    animate() {
+      animCalls++;
+      return { onfinish: null, cancel() {} };
+    }
+  };
+  const stadium = { classList: makeClassList() };
+  const rinkWrap = { classList: makeClassList(), style: {} };
+  const btnRotate = $('btn-rotate');
+  const btnFullscreen = $('btn-fullscreen');
+
+  const phoneCtx = {
+    Object, Array, Set, Map, Math, Number, String, Boolean, Promise, JSON, URL,
+    Event: class { constructor(t) { this.type = t; } },
+    CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o?.detail; } },
+    performance: { now: () => 3000 },
+    window: { innerHeight: 844, dispatchEvent() {}, ubuAudio: { setOrientation: p => audioOrientations.push(p) } },
+    localStorage: mockStorage,
+    P, ububallMatch, $,
+    inDiscord: false,
+    location: new URL('https://ububall.com/'),
+    scrollY: 0, scrollTo() {}, addEventListener() {},
+    matchMedia: mockMatchMedia,
+    reducedMotion: { matches: false },
+    stageArea: { getBoundingClientRect: stageRect },
+    btnRotate,
+    btnFullscreen,
+    canvas: { getBoundingClientRect: canvasRect },
+    bodies: P.kickoff(),
+    shakeX: 0, shakeY: 0, isPortrait: false, videoField: null, matchMode: 'standard',
+    fieldView: {
+      portrait: false,
+      field: null,
+      bodies: P.kickoff(),
+      mode: 'standard',
+      castHidden: false,
+      canvas: { getBoundingClientRect: canvasRect }
+    },
+    pullBehind: false,
+    impulseGeometry: (b, plan) => ({
+      visible: plan.power > 0,
+      ringR: 25,
+      scale: 120,
+      distance: 25 + plan.power * 120,
+      x: b.x + Math.cos(plan.angle) * (25 + plan.power * 120),
+      y: b.y + Math.sin(plan.angle) * (25 + plan.power * 120)
+    }),
+    gameUi: { scale: () => 1, updateScale() {} },
+    selected: 0,
+    plans: [
+      { angle: 0, power: 0.6, spin: 0, guard: false },
+      { angle: 0, power: 0, spin: 0, guard: false },
+      { angle: 0, power: 0, spin: 0, guard: false }
+    ],
+    phase: 'plan',
+    spinSlider: true,
+    drag: null,
+    endCanvasDrag() {},
+    sync() {},
+    firstTurnStep: 'aim',
+    firstTurnStarted: null,
+    placeFinger() {},
+    hideFinger() {},
+    foulInfo: null,
+    foulInfoKey: '',
+    foulBox: $('foul-box'),
+    fouls: { crease: [true, false], corner: null, cornerTurns: 0, cards: [] },
+    foulInfoLines: () => ['Goal camping', [{ text: 'Move out', act: true }]],
+    stalling: () => false,
+    isCreasing: () => true,
+    cornerTeams: () => [[], []],
+    sideName: t => t ? 'CPU' : 'You',
+    sideHas: t => t ? 'CPU has' : 'You have',
+    ubuCount: n => `${n} ubus`,
+    CARD_TEXT: 'out for a turn',
+    goalReplay: null,
+    replaySkip: $('skip-goal-replay'),
+    demo: true,
+    online: null,
+    theater: null,
+    recording: null,
+    setupFor: 'cpu',
+    chosenMode: () => 'standard',
+    draft: [{ key: 'u0', model: {} }, { key: 'u1', model: {} }, { key: 'u2', model: {} }],
+    signedIn: () => true,
+    teamSlotsOf: () => null,
+    sameSlots: () => false,
+    savedTeams: null,
+    teamIndex: -1,
+    ubuRender: Object.assign(() => makeEl('svg'), { spriteImg: () => makeEl('img') }),
+    lobbyView: null,
+    fixedTeam: () => false,
+    loadCollection: async () => {},
+    loadTeams: async () => {},
+    rosterSlots() { $('roster-slots').replaceChildren(makeEl('s0'), makeEl('s1'), makeEl('s2')); },
+    lastCpuSetup: null,
+    fitScorebug() {},
+    closeFirstTurnGuide() { phoneCtx.firstTurnStep = null; },
+    closeFoulInfo() { phoneCtx.foulInfo = null; },
+    closeSummary() {},
+    stopFanfare() {},
+    gameAudio: () => ({ stopMotion() {} }),
+    isExporting: () => false,
+    statDrawer: { matches: () => false, hidePopover() {} },
+    endReplay() {},
+    cpuClient: { dispose() {} },
+    demoClient: { dispose() {} },
+    startDemo() { phoneCtx.demo = true; },
+    stopDemo() { phoneCtx.demo = false; },
+    newMatch() {},
+    cancelAnimationFrame() {},
+    castHome() {},
+    castTo: away => { castCalls.push(away); },
+    history: { state: null, pushState(s) { this.state = s; }, replaceState() {} },
+    layoutDirty: false,
+    draw() {
+      phoneCtx.layoutDirty = false;
+      env.measureField();
+      env.positionSpinControl();
+      env.updateFoulInfo();
+    },
+    stadium,
+    rinkStage,
+    rinkWrap,
+    document: {
+      hidden: false,
+      fullscreenElement: null,
+      fullscreenEnabled: true,
+      addEventListener() {},
+      createElement: tag => makeEl(tag),
+      body: { dataset: { shot: 'home' }, style: { setProperty(k, v) { this[k] = v; } }, classList: makeClassList() },
+      querySelector: sel => sel === '.ball-page' ? { getBoundingClientRect: () => ({ top: 56 }) } : null
+    }
+  };
+
+  const env = runInNewContext(
+    stageCode + '\n;({ getShot: () => shot, compactPhoneStage, playableShot, canDock, prepareSheet, setupStep, openSheet, enterMatch, screenTransition, toggleRotate, setPortrait, fitOrientation, point, stagePoint, measureField, positionSpinControl, updateFoulInfo, screenDegrees, setKnob, knobValue });',
+    phoneCtx
+  );
+
+  // A. Stacked rules & team setup on portrait phone: canDock is true, docks #roster-dialog + .formation.on-ice, cuts camera without FLIP
+  assert.equal(env.compactPhoneStage(), true, 'portrait phone activates compactPhoneStage()');
+  assert.equal(env.canDock(), true, 'phones dock #roster-dialog on / instead of falling back to modal');
+  env.prepareSheet();
+  env.setupStep('mode');
+  env.openSheet();
+  assert.equal($('roster-dialog').classList.contains('docked'), true, '#roster-dialog receives .docked on phone');
+  assert.equal($('roster-dialog').modalOpened, false, '#roster-dialog uses non-modal show() on phone');
+  assert.equal($('roster-slots').classList.contains('on-ice'), true, '#roster-slots mounts .on-ice inside .rink-stage on phone');
+  assert.equal(rinkStage.children.includes($('roster-slots')), true);
+  assert.equal(env.getShot(), 'rules');
+  assert.equal(animCalls, 0, 'phone cuts directly to rules shot without FLIP camera animation');
+  assert.deepEqual(castCalls, [true], 'cast still scatters off the ice on phone setup');
+
+  // Step to team shot & rotate phone to short landscape (isPortraitScreen=false, isWide=false) -> sheet stays open!
+  env.setupStep('team');
+  assert.equal(env.getShot(), 'team');
+  isPortraitScreen = false;
+  isWide = false;
+  mediaListeners.get('wide')?.();
+  assert.equal($('roster-dialog').open, true, 'rotating/resizing between portrait and landscape keeps docked setup open');
+  assert.equal(env.compactPhoneStage(), true, 'short landscape phone (wideScreen.matches === false) also activates compactPhoneStage()');
+
+  // B. Short landscape phone cuts camera across Mint and Collection (skipping rotate/stretch) AND playableShot() is immediately true on Match
+  $('roster-dialog').close();
+  assert.equal(env.getShot(), 'home');
+  assert.equal(animCalls, 0, 'short landscape phone cuts back to home without FLIP');
+
+  phoneCtx.location = new URL('https://ububall.com/collection');
+  env.screenTransition('collection', () => {}, 'play');
+  assert.equal(env.getShot(), 'collection');
+  assert.equal(animCalls, 0, 'short landscape phone cuts into Collection without rotate/stretch steps');
+  assert.equal(phoneCtx.fieldView.portrait, false, 'Collection never sets stadium .portrait-mode');
+
+  phoneCtx.location = new URL('https://ububall.com/mint');
+  env.screenTransition('mint', () => {}, 'collection');
+  assert.equal(env.getShot(), 'mint');
+  assert.equal(animCalls, 0, 'short landscape phone cuts from Collection to Mint without shrink/rotate');
+
+  phoneCtx.location = new URL('https://ububall.com/');
+  env.screenTransition('play', () => {}, 'mint');
+  env.enterMatch('match');
+  assert.equal(env.getShot(), 'match');
+  assert.equal(animCalls, 0, 'short landscape phone cuts into Match without FLIP delay');
+  assert.equal(env.playableShot(), true, 'aiming input is immediately playable on phone Match entry');
+  assert.equal(phoneCtx.fieldView.portrait, false, 'landscape phone Match defaults to landscape rink');
+
+  // C. Portrait play orientation & isolation: portrait phone enters portrait play without polluting localStorage; manual #btn-rotate scopes to screen orientation
+  isPortraitScreen = true;
+  mediaListeners.get('portrait')?.();
+  assert.equal(phoneCtx.fieldView.portrait, true, 'rotating phone to portrait during Match enters portrait play');
+  assert.equal(stadium.classList.contains('portrait-mode'), true);
+  assert.equal(mockStorage.getItem('ububall-orientation'), null, 'automatic portrait play does not pollute localStorage');
+
+  // Manual toggleRotate on portrait screen stores 'portrait:landscape', which does NOT force landscape screen into portrait or vice versa
+  env.toggleRotate();
+  assert.equal(phoneCtx.fieldView.portrait, false);
+  assert.equal(mockStorage.getItem('ububall-orientation'), 'portrait:landscape');
+
+  // Switching back to portrait manually stores 'portrait:portrait'; rotating to landscape screen ignores portrait-only override and clears on change
+  env.toggleRotate();
+  assert.equal(phoneCtx.fieldView.portrait, true);
+  assert.equal(mockStorage.getItem('ububall-orientation'), 'portrait:portrait');
+
+  // Leaving Match for Mint resets portrait-mode to false WITHOUT erasing saved match orientation
+  phoneCtx.location = new URL('https://ububall.com/mint');
+  env.screenTransition('mint', () => {}, 'play');
+  assert.equal(phoneCtx.fieldView.portrait, false, 'Mint never inherits .portrait-mode');
+  assert.equal(stadium.classList.contains('portrait-mode'), false);
+  assert.equal(mockStorage.getItem('ububall-orientation'), 'portrait:portrait', 'non-match setPortrait(false) preserves saved match orientation');
+
+  // Returning to Match on a landscape desktop/phone does NOT inherit 'portrait:portrait'
+  isPortraitScreen = false;
+  phoneCtx.location = new URL('https://ububall.com/');
+  env.enterMatch('match');
+  assert.equal(phoneCtx.fieldView.portrait, false, 'landscape screen ignores portrait-screen manual override');
+
+  // Switch back to portrait play to verify portrait coordinate mapping, knobs, spin slider, guide, and foul box
+  isPortraitScreen = true;
+  mediaListeners.get('portrait')?.();
+  assert.equal(phoneCtx.fieldView.portrait, true);
+  env.measureField();
+
+  // D. Portrait play coordinate round-trip (stagePoint <-> point), quarter-turn angle knob, spin control, and foul warning placement
+  const cr = canvasRect();
+  for (const sample of [{ x: 180, y: 300 }, { x: 500, y: 300 }, { x: 820, y: 120 }, { x: 310, y: 480 }]) {
+    const clientX = cr.left + (sample.y / 600) * cr.width;
+    const clientY = cr.top + (1 - sample.x / 1000) * cr.height;
+    const mapped = env.point({ clientX, clientY });
+    assert.ok(Math.abs(mapped.x - sample.x) < 1e-6 && Math.abs(mapped.y - sample.y) < 1e-6, 'point() inverts portrait rink transform');
+  }
+
+  // Field angle 0 (toward opponent goal at x=1000, top of portrait screen) is 0 screen degrees (up); 90° screen (right) is +y (Math.PI / 2)
+  assert.equal(Math.round(env.screenDegrees(0)), 0, 'field angle 0 points straight up (0°) in portrait play');
+  env.setKnob('angle', 0, 90);
+  assert.ok(Math.abs(phoneCtx.plans[0].angle - Math.PI / 2) < 1e-6, '90° knob angle points right (+y) in portrait play');
+  env.setKnob('angle', 0, 0);
+  assert.ok(Math.abs(phoneCtx.plans[0].angle) < 1e-6, '0° knob angle points up (+x) in portrait play');
+
+  // Spin control sits below skater 0 when aiming upward in portrait play
+  env.positionSpinControl();
+  assert.equal($('field-spin').style.visibility, 'visible');
+  const skaterStage = env.stagePoint(phoneCtx.fieldView.bodies[0]);
+  const spinMatch = /translate3d\(([-\d.]+)px,\s*([-\d.]+)px/.exec($('field-spin').style.transform);
+  assert.ok(spinMatch, 'spin control has 3d transform in portrait play');
+  assert.ok(Number(spinMatch[2]) > skaterStage.y, 'spin control places below skater opposite upward aim arrow in portrait play');
+
+  // Foul info box for home crease (team 0, bottom of portrait rink) places over the far top half (along = 0.27)
+  phoneCtx.foulInfo = { kind: 'crease', team: 0 };
+  env.updateFoulInfo();
+  assert.equal($('foul-box').hidden, false);
+  assert.ok(parseFloat($('foul-box').style.top) < stageRect().height * 0.45, 'home-crease foul box sits over far top half of portrait rink');
 });

@@ -14,7 +14,7 @@ slide in and out around it, like moving through the menus of a video game. Whate
 
 ## Status
 
-Phase 5 is built and awaiting the owner's review (Phases 2–4 built).
+Phase 6 is built and awaiting the owner's review (Phases 2–5 built).
 
 Working now (`web/index.html`, `web/app.js`, `web/ububall-activity.js`, `web/site.js`,
 `web/site.css`, `web/pack-scene.js`, `web/ubu-list.js`, `web/ububall-presentation.js`,
@@ -24,33 +24,35 @@ Working now (`web/index.html`, `web/app.js`, `web/ububall-activity.js`, `web/sit
   `app.js` routes screen switches through `setUbuScreenTransition` (preserving Discord Activity
   launch query parameters when embedded) so `setShot(name)` (`home`, `lobby`, `rules`, `team`,
   `match`, `replay`, `mint`, `collection`) drives all three screens on one persistent rink stage.
-- Launching inside the Discord Activity opens on the `lobby` shot (`body[data-shot="lobby"]`) with
-  the live demo rink on the left and the four-per-row Activity lobby, `Your team` (`Change team`)
-  and compact `Ubu Mint` strip beside it on desktop (`1280×720` fits without scrolling), or stacked
-  below the rink on portrait and short landscape phones with a three-tab bottom nav bar and Discord
-  safe-area clearance.
-- Wide-screen Activity setup (`Change team`, accepted challenges, public matchmaking lobbies,
-  instant-match `Change rules` and CPU `New match`) now docks `#roster-dialog.docked` over the away
-  half in `rules` and `team` shots with `.formation.on-ice` over your three ubus at kickoff spots,
-  returning cleanly to `lobby` (or `match`) on close and handing off directly to `match` when
-  online play begins (including when a match starts while viewing `mint`, `collection` or
-  `Change team`). CPU matches in the Activity can also be left via `Back to lobby` and resumed via
-  `Resume CPU` alongside the live pause-menu lobby.
-- Ubu Mint and Collection run inside the Discord Activity on the same persistent stage: `site.js`
-  awaits `window.ubuActivity.signIn()` before rendering so Mint/Collection never flash signed-out
-  during SDK sign-in, `#mint-retry` re-runs Mint setup in place without reloading/closing the
-  Activity, and safe-area offsets keep `.site-header`, sticky `#collection-dock` and `.viewer.on-ice`
-  clear of Discord's chrome.
-- Collection portrait rotation/stretch (`drawPortraitRinkSurface`), repeating `320`/`640`-unit
-  markings, hybrid `.viewer.on-ice` panel, Ubu Mint spotlights/reveal choreography, aiming input,
-  replays and standalone flows from Phases 1–4 continue working unchanged.
+- Phones (portrait and short/narrow landscape, standalone and Discord Activity) now use stacked
+  variants across every shot (`home`, `lobby`, `rules`, `team`, `match`, `replay`, `mint`,
+  `collection`) on the persistent stage and cut cleanly between shots without FLIP/rotate camera
+  moves (`compactPhoneStage()`):
+  - `rules` and `team` dock `#roster-dialog.docked` below the landscape rink (`canDock()` enabled on
+    phones) with compact, non-overlapping `.formation.on-ice` kickoff cards (`Back` over the left
+    crease, `Top` and `Bottom` extending across centre ice with both goal pockets clear) and keep
+    setup open across device rotation/resizing.
+  - `home` and `lobby` stack `.play-home` below a height-capped landscape rink on short landscape
+    phones while keeping the full-width scoreboard unclipped above it.
+  - `mint` fits the 3-pack deal and zoomed card reveal inside both portrait phones and `<= 600px`
+    short landscape phones without vertical overflow.
+  - `collection` clips horizontal scatter overflow on `html` as well as `body`, spans `.viewer.on-ice`
+    full width with thumb-friendly `Prev`/`Next` arrows underneath on narrow portrait phones, and
+    frames `.viewer.on-ice` across the full viewport height on short landscape phones.
+- Portrait play (`match` and `replay`) verified and polished on phones: `setPortrait()` updates the
+  stage without polluting `localStorage`, manual `#btn-rotate` overrides are scoped to the current
+  screen orientation (never leaking `.portrait-mode` onto `home`, `lobby`, `mint`, `collection` or
+  rotated landscape screens), short portrait screens use compact `.scoreboard` and `.stadium-actions`
+  for a larger `3:5` rink, `#replay-bar` fits cleanly in both portrait and short-landscape sidebar
+  layouts, and upward aiming, `#field-spin`, `#first-turn-guide` and `.foul-info` align accurately.
+- Wide-screen desktop and Discord Activity layouts from Phases 1–5 continue working unchanged.
 
 Not done or not checked:
 
-- The team sheet stays a modal, with the drawn `.formation`, on phones (phase 6).
+- Dead modal `.formation` CSS / legacy setup fallback paths remain to be deleted in cleanup (phase 7).
 - Scatter, arrival and Mint scamper are not in `web/effects.html` yet (phase 7).
 
-Next step: Phase 6 (Phones: stacked variants of every shot; check portrait play).
+Next step: Phase 7 (Cleanup: remove dead layout CSS and dialog code; effects catalog; header styling pass).
 
 ## Decisions (owner, 2026-11-11)
 
@@ -260,3 +262,16 @@ so it reads as part of the arena.
   and `overflow-x: clip` on `collection` so scattered skaters never add a horizontal scrollbar);
   added Phase 5 unit tests in `test/ububall-effects.test.js` and verified desktop and mobile Activity
   flows in headless Chromium.
+- 2026-11-12: Phase 6 built (Phones: stacked variants of every shot and portrait play check).
+  Enabled `#roster-dialog.docked` and `.formation.on-ice` on phones (`canDock` in `web/ububall.js`)
+  with stacked rink-over-panel `rules`/`team` layouts and compact non-overlapping kickoff cards in
+  `web/ububall.css`, keeping setup open across `wideScreen` rotation/resize; updated
+  `compactPhoneStage()` and `camera()` so portrait and short/narrow landscape phones cut directly
+  between all shots without FLIP or Collection rotate steps; capped short-landscape rink height on
+  `home`, `lobby` and `mint` (preserving full scoreboard width and fitting `mint` deal/reveal inside
+  `<= 600px` height); clipped `html:has(body[data-shot="collection"])` scatter overflow and gave
+  phone `.viewer.on-ice` full-width portrait / full-height short-landscape framing (`web/site.css`);
+  separated `setPortrait` from `toggleRotate` orientation persistence so `.portrait-mode` never
+  leaks onto non-match shots or across screen orientations, compacted short-portrait `.scoreboard` /
+  `.stadium-actions` and phone `#replay-bar`, added Phase 6 unit tests in
+  `test/ububall-effects.test.js`, and verified all 8 shots plus portrait play in headless Chromium.

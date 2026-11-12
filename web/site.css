@@ -951,29 +951,62 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
     width: 4.75rem;
     height: 4.75rem;
   }
+}
+@media (max-width: 47.99rem) and (min-height: 37.5625rem) {
   .collection-viewer-frame {
-    padding: .375rem 1.25% calc(4.5rem + var(--safe-bottom, 0px));
+    padding: .375rem 2% calc(4.5rem + var(--safe-bottom, 0px));
     min-height: calc(100dvh - var(--collection-viewer-top, 8rem) - .5rem);
     max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - .25rem);
-    grid-template-columns: 2rem minmax(0, 1fr) 2rem;
-    gap: .25rem;
+    grid-template-columns: repeat(2, auto);
+    grid-template-rows: minmax(0, 1fr) auto;
+    justify-content: center;
+    gap: .375rem .75rem;
   }
   .collection-viewer-host {
-    max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - 4.75rem - var(--safe-bottom, 0px));
+    grid-column: 1 / -1;
+    grid-row: 1;
+    width: min(calc(100vw - 1.5rem), 100%);
+    max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - 7.5rem - var(--safe-bottom, 0px));
   }
+  #viewer-prev { grid-column: 1; grid-row: 2; justify-self: end; }
+  #viewer-next { grid-column: 2; grid-row: 2; justify-self: start; }
   .collection-viewer-arrow {
-    width: 2rem;
-    height: 2rem;
-    padding: .25rem;
+    width: 2.375rem;
+    height: 2.375rem;
+    padding: .375rem;
   }
   .collection-viewer-arrow svg {
-    width: 1.0625rem;
-    height: 1.0625rem;
+    width: 1.1875rem;
+    height: 1.1875rem;
   }
   .viewer.on-ice {
-    padding: .625rem .5rem;
-    max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - 4.75rem - var(--safe-bottom, 0px));
+    padding: .75rem .625rem;
+    max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - 7.5rem - var(--safe-bottom, 0px));
   }
+}
+@media (max-height: 37.5rem) {
+  .collection-viewer-stage { z-index: 30; }
+  .collection-viewer-frame {
+    position: fixed;
+    inset: max(.375rem, var(--safe-top, 0px)) max(.75rem, var(--safe-right, 0px)) max(.375rem, var(--safe-bottom, 0px)) max(.75rem, var(--safe-left, 0px));
+    padding: .25rem 3%;
+    min-height: 0;
+    max-height: none;
+    gap: .5rem;
+  }
+  .collection-viewer-host {
+    max-height: calc(100dvh - 1.25rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+  }
+  .collection-viewer-arrow { width: 2.25rem; height: 2.25rem; padding: .3125rem; }
+  .viewer.on-ice {
+    padding: .625rem .75rem;
+    max-height: calc(100dvh - 1.25rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+  }
+  .viewer.on-ice .viewer-toolbar { margin-bottom: .5rem; }
+  .viewer.on-ice .viewer-stats-stage .oomark { width: 7rem; height: 7rem; }
+  .viewer.on-ice .viewer-stats-stage .viewer-preview { min-height: 7.25rem; }
+}
+@media (max-width: 47.99rem) {
   .viewer.on-ice .viewer-toolbar {
     gap: .25rem;
     margin-bottom: .5rem;
@@ -1210,7 +1243,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
   background: color-mix(in srgb, var(--card) 84%, transparent); border: .0625rem solid color-mix(in srgb, var(--border) 80%, transparent);
   backdrop-filter: blur(.375rem); pointer-events: auto;
 }
-@media (min-width: 48rem) {
+@media (min-width: 48rem) and (min-height: 37.5625rem) {
   .mint-reveal {
     position: absolute; inset: 0;
     container-type: size; gap: .625rem; padding: .875rem 1rem .625rem;
@@ -1223,6 +1256,23 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
     gap: .75rem;
   }
   .mint-reveal .card-stage { width: var(--reveal-card-w); }
+}
+@media (max-height: 37.5rem) {
+  .mint-reveal {
+    position: absolute; inset: 0;
+    container-type: size; gap: .25rem; padding: .25rem .5rem;
+  }
+  .mint-reveal-close { top: .375rem; right: .5rem; width: 2.25rem; height: 2.25rem; }
+  .mint-reveal-arrow { width: 2.25rem; height: 2.25rem; }
+  .mint-reveal .reveal-layout {
+    width: auto;
+    --reveal-card-w: min(56cqw, calc((100cqh - 2.625rem) * 1.5));
+    grid-template-columns: 2.25rem var(--reveal-card-w) 2.25rem;
+    gap: .5rem;
+  }
+  .mint-reveal .card-stage { width: var(--reveal-card-w); }
+  .mint-reveal-bar { min-height: 2rem; padding: .125rem .625rem; gap: .375rem .5rem; }
+  #finish-pack { min-height: 1.75rem; padding: .25rem .625rem .375rem; font-size: .8125rem; }
 }
 .trading-card {
   --foil-angle: 125deg; --foil-shadow-x: 0rem; --foil-shadow-y: .125rem;
@@ -1395,7 +1445,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
   0% { transform: translateZ(var(--float-min, .6875rem)) translateY(0); }
   100% { transform: translateZ(var(--float-max, 1.0625rem)) translateY(var(--float-y, -.125rem)); }
 }
-@media (max-width: 47.99rem) {
+@media (max-width: 47.99rem) and (min-height: 37.5625rem) {
   .mint-reveal:not([hidden]),
   .mint-reveal:not([hidden]) > .reveal-layout { display: contents; }
   .mint-reveal .card-stage {

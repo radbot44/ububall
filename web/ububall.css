@@ -161,7 +161,7 @@ body[data-shot="mint"] .mint-foot { grid-row: 3; width: 100%; }
 body[data-shot="mint"] :is(.team-column, .scoreboard, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin, #skip-goal-replay),
 body[data-shot="mint"] .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner, #skip-goal-replay) { display: none; }
 body[data-shot="mint"] .stadium-stage-area { touch-action: pan-y; }
-@media (min-width: 48rem) {
+@media (min-width: 48rem) and (min-height: 37.5625rem) {
   body[data-shot="mint"] .stadium-stage-area {
     width: 100%;
     height: clamp(18.5rem, calc(100dvh - 13rem - var(--safe-top, 0px) - var(--safe-bottom, 0px)), calc(min(114rem, 100vw - 3rem) * 0.54));
@@ -174,7 +174,7 @@ body[data-shot="mint"] .stadium-stage-area { touch-action: pan-y; }
     border-color: color-mix(in srgb, var(--border) 65%, transparent);
     box-shadow: var(--panel-shadow);
   }
-  body[data-shot="mint"] .rink-stage { width: 100%; margin: 0 auto; }
+  body[data-shot="mint"] .rink-stage { width: min(100%, calc(100cqh * 5 / 3)); margin: 0 auto; }
 }
 body[data-shot="mint"] .rink-stage > :is(.rink-wrap, .mint-world) {
   transform-origin: 50% 50%;
@@ -188,7 +188,30 @@ body[data-shot="mint"] #mint-world > #signed-out-panel {
   background: color-mix(in srgb, var(--card) 82%, transparent); border: .0625rem solid var(--border);
   box-shadow: var(--panel-shadow); backdrop-filter: blur(.375rem);
 }
-@media (max-width: 47.99rem) {
+@media (max-height: 37.5rem) {
+  body[data-shot="mint"] .site-header { margin: .25rem auto; }
+  body[data-shot="mint"] .ball-page { width: calc(100% - 1.25rem); gap: .125rem; margin-bottom: .25rem; }
+  body[data-shot="mint"] .mint-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: .1875rem .625rem; min-height: 1.625rem; }
+  body[data-shot="mint"] #pack-title { font-size: clamp(1.1875rem, 3.2vw, 1.5rem); }
+  body[data-shot="mint"] .pack-subtitle { min-height: 0; font-size: .8125rem; }
+  body[data-shot="mint"] .stadium-stage-area {
+    width: 100%;
+    height: clamp(10rem, calc(100dvh - 8.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px)), 20rem);
+    border-radius: 1rem;
+    border: .0625rem solid transparent;
+    container-type: size;
+  }
+  body[data-shot="mint"] .stadium-stage-area:has(.rink-stage.mint-zoomed) {
+    border-color: color-mix(in srgb, var(--border) 65%, transparent);
+    box-shadow: var(--panel-shadow);
+  }
+  body[data-shot="mint"] .rink-stage { width: min(100%, calc(100cqh * 5 / 3)); margin: 0 auto; }
+  body[data-shot="mint"] .mint-foot { min-height: 1.25rem; gap: .125rem; }
+  body[data-shot="mint"] .mint-foot #mint { min-height: 2rem; padding: .25rem .875rem .375rem; font-size: .875rem; }
+  body[data-shot="mint"] .mint-foot .daily-next { font-size: .75rem; }
+  body[data-shot="mint"] .pack-prompt { font-size: .9375rem; }
+}
+@media (max-width: 47.99rem) and (min-height: 37.5625rem) {
   body[data-shot="mint"] .ball-page { width: calc(100% - 1rem); margin-bottom: .5rem; }
   body[data-shot="mint"] .mint-head { min-height: 2.875rem; }
   body[data-shot="mint"] .stadium-stage-area {
@@ -251,6 +274,7 @@ body[data-shot="collection"] .collection-dock:not(:has(> :not([hidden]))) { disp
 body[data-shot="collection"] .collection-dock #collection { margin-top: 0; }
 body[data-shot="collection"] .collection-dock .ubu-toolbar { margin: .5rem 0 .125rem; }
 body[data-shot="collection"] .arena-layout { grid-row: 2; display: block; width: 100%; margin: 0; }
+html:has(body[data-shot="collection"]) { overflow-x: clip; }
 body[data-shot="collection"] { overflow-x: clip; }
 body[data-shot="collection"] :is(.team-column, .scoreboard, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin, #skip-goal-replay, #skaters, .field-badges),
 body[data-shot="collection"] .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner, #skip-goal-replay) { display: none; }
@@ -306,10 +330,29 @@ body[data-shot="collection"] #rink { touch-action: pan-y; }
     border-radius: 0 0 .875rem .875rem;
   }
 }
+@media (max-height: 37.5rem) {
+  body[data-shot="collection"] .site-header { margin: .25rem auto; }
+  body[data-shot="collection"] .ball-page { width: calc(100% - 1.25rem); margin-bottom: 1.25rem; }
+  body[data-shot="collection"] .collection-dock {
+    padding: .375rem .625rem .25rem;
+    border-radius: 0 0 .875rem .875rem;
+    transition: opacity .18s ease;
+  }
+  body[data-shot="collection"] .collection-dock .collection-header { margin-bottom: .3125rem; gap: .5rem; }
+  body[data-shot="collection"] .collection-dock .ubu-toolbar { margin: .25rem 0 .125rem; gap: .3125rem; }
+  body[data-shot="collection"] .collection-dock :is(.game-select, .ubu-search, .ubu-direction, .ubu-filters-toggle, #play-with-ubus, .collection-actions .file-btn) {
+    min-height: 1.9375rem;
+    padding-block: .25rem;
+  }
+  body[data-shot="collection"]:has(.collection-world.viewer-open) .collection-dock {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
 
 /* Home, Activity lobby and setup shots: in landscape, the rink sits beside the home/lobby panel (or fills the stage in setup); in portrait and phone sideways, above it. */
 body:is([data-shot="home"], [data-shot="lobby"], [data-shot="team"], [data-shot="rules"]) .ball-page { display: grid; grid-template-columns: minmax(0, 1fr) 28.5rem; gap: 0 1.25rem; align-items: stretch; width: min(114rem, calc(100% - 3rem)); max-width: none; margin: 0 auto; }
-@media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
+@media (min-width: 56rem) and (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
   body:is([data-shot="home"], [data-shot="team"], [data-shot="rules"]) .ball-page { align-items: center; margin-block: clamp(.75rem, 2dvh, 2rem); }
   body[data-shot="home"] .stadium:not(.portrait-mode) .stadium-stage-area { aspect-ratio: 1000 / 540; }
 }
@@ -320,10 +363,23 @@ body[data-shot="home"] .play-home .home-actions { grid-template-columns: 1fr; }
 body[data-shot="home"] .play-home :is(.mint-entry, .mint-entry-content) { flex-direction: column; align-items: stretch; text-align: center; gap: .625rem; }
 body[data-shot="home"] .play-home .mint-entry-badge { align-self: center; }
 body[data-shot="home"] .play-home .mint-entry-links { justify-content: center; }
+@media (orientation: portrait), (width < 56rem), ((pointer: coarse) and (max-height: 600px)) {
+  body[data-shot="home"] .ball-page { display: flex; flex-direction: column; width: min(95rem, calc(100% - 1.5rem)); }
+  body[data-shot="home"] .arena-layout { order: -1; width: min(55rem, 100%); margin: .25rem auto 0; }
+  body[data-shot="home"] .play-home { width: min(55rem, 100%); margin: .75rem auto 1.5rem; }
+}
 @media (orientation: portrait), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
-  body:is([data-shot="home"], [data-shot="lobby"]) .ball-page { display: flex; flex-direction: column; width: min(95rem, calc(100% - 2rem)); }
-  body:is([data-shot="home"], [data-shot="lobby"]) .arena-layout { order: -1; width: min(55rem, 100%); margin: .25rem auto 0; }
-  body:is([data-shot="home"], [data-shot="lobby"]) .play-home { width: min(55rem, 100%); margin: .875rem auto 1.5rem; }
+  body[data-shot="lobby"] .ball-page { display: flex; flex-direction: column; width: min(95rem, calc(100% - 1.5rem)); }
+  body[data-shot="lobby"] .arena-layout { order: -1; width: min(55rem, 100%); margin: .25rem auto 0; }
+  body[data-shot="lobby"] .play-home { width: min(55rem, 100%); margin: .75rem auto 1.5rem; }
+}
+@media (orientation: landscape) and (max-height: 600px) and ((pointer: coarse) or (width < 56rem)) {
+  body[data-shot="home"] .site-header { margin: .25rem auto; }
+  body[data-shot="home"] .rink-stage { width: min(100%, calc(48dvh * 5 / 3)); margin: 0 auto; }
+}
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
+  body[data-shot="lobby"] .site-header { margin: .25rem auto; }
+  body[data-shot="lobby"] .rink-stage { width: min(100%, calc(48dvh * 5 / 3)); margin: 0 auto; }
 }
 /* The Discord Activity opens on the lobby shot with the friends queue beside the rink (below on phones). */
 .discord-activity :is(.nav-more, .site-header-actions),
@@ -1334,6 +1390,136 @@ body:is([data-shot="team"], [data-shot="rules"]) .rink-stage { width: min(100%, 
 .formation.on-ice .formation-slot .formation-name { justify-items: center; max-width: 100%; margin-top: .25rem; }
 .formation.on-ice .formation-slot .formation-super { justify-self: center; max-width: 100%; }
 .formation.on-ice .formation-slot .formation-tools { position: absolute; top: .375rem; right: .375rem; bottom: auto; display: grid; }
+/* Phones and narrow screens stack the rink above the docked team sheet and keep the three kickoff
+   slots clear across the ice. */
+@media (orientation: portrait), (width < 56rem), ((pointer: coarse) and (max-height: 600px)) {
+  body:is([data-shot="team"], [data-shot="rules"]) .ball-page {
+    display: flex; flex-direction: column; align-items: center; gap: .5rem;
+    width: min(55rem, calc(100% - 1rem)); margin: 0 auto;
+  }
+  body:is([data-shot="team"], [data-shot="rules"]) .arena-layout { order: -1; flex: none; width: 100%; }
+  body:is([data-shot="team"], [data-shot="rules"]) .stadium-stage-area { min-height: 0; }
+  .team-sheet.docked {
+    position: relative; inset: auto; z-index: 20;
+    width: 100%; max-width: none; padding-top: 0;
+    border: .0625rem solid var(--border); border-radius: 1.125rem;
+    translate: 0 0; transition: opacity .18s ease-out, translate .18s ease-out;
+  }
+  @starting-style { .team-sheet.docked[open] { opacity: 0; translate: 0 .625rem; } }
+  .team-sheet.docked .team-step { padding-top: .5rem; }
+  .team-sheet.docked .team-step-head { min-height: 2.125rem; margin-bottom: .3125rem; }
+  .team-sheet.docked .team-step-head h2 { font-size: 1.125rem; }
+  .team-sheet.docked .team-bar { flex-wrap: nowrap; gap: .25rem; margin-bottom: .3125rem; }
+  .team-sheet.docked .team-bar > button { min-height: 2rem; padding: .25rem .5rem; font-size: .75rem; white-space: nowrap; }
+  .team-sheet.docked .team-bar .team-step-btn { width: 2rem; flex: none; }
+  .team-sheet.docked .team-bar .game-select { flex: 1 1 0; min-width: 0; min-height: 2rem; padding: .25rem .5rem; font-size: .8125rem; }
+  .team-sheet.docked .roster-hint { margin-top: .125rem; font-size: .75rem; line-height: 1.25; }
+  .formation.on-ice .formation-slot {
+    border-radius: .875rem;
+    background: color-mix(in srgb, var(--elevated) 78%, transparent);
+    backdrop-filter: blur(.25rem);
+  }
+  .formation.on-ice .formation-slot.is-selected {
+    background: color-mix(in srgb, var(--elevated) 65%, var(--primary) 28%);
+  }
+  .formation.on-ice .formation-slot[data-position="back"] {
+    --art: clamp(1.5rem, 8.5cqw, 2.75rem);
+    --head: 1rem;
+    left: 6%; top: 50%; translate: 0 -50%;
+    width: 27.5%; max-width: 8.75rem;
+    gap: .125rem; padding: .25rem .25rem .3125rem;
+  }
+  .formation.on-ice .formation-slot[data-position="back"] .formation-pos { font-size: .5625rem; }
+  .formation.on-ice .formation-slot[data-position="back"] .formation-name { margin-top: .125rem; }
+  .formation.on-ice .formation-slot[data-position="back"] .formation-name strong { font-size: clamp(.625rem, 2.1cqw, .8125rem); line-height: 1.1; white-space: nowrap; }
+  .formation.on-ice .formation-slot[data-position="back"] .formation-name small { display: none; }
+  .formation.on-ice .formation-slot[data-position="back"] .formation-super { padding: .125rem .3125rem .125rem .1875rem; font-size: .5625rem; gap: .1875rem; }
+  .formation.on-ice .formation-slot[data-position="back"] .formation-super img { width: .9375rem; height: .9375rem; }
+  .formation.on-ice .formation-slot[data-position="back"] .formation-super svg { width: .6875rem; height: .6875rem; }
+  .formation.on-ice .formation-slot[data-position="back"] .formation-tools { top: .125rem; right: .1875rem; display: flex; gap: .125rem; }
+  .formation.on-ice .formation-slot[data-position="back"] .formation-tool { width: 1.1875rem; height: 1.1875rem; }
+  .formation.on-ice .formation-slot[data-position="back"] .formation-tool svg { width: .9375rem; height: .9375rem; }
+  .formation.on-ice .formation-slot:not([data-position="back"]) {
+    left: 35%; width: 59%; max-width: 19.5rem; translate: 0 -50%;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto;
+    align-items: center; justify-items: stretch; column-gap: .25rem; row-gap: .125rem;
+    padding: .25rem .375rem;
+  }
+  .formation.on-ice .formation-slot[data-position="top"] { top: 27%; }
+  .formation.on-ice .formation-slot[data-position="bottom"] { top: 73%; }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-pick {
+    grid-column: 1; grid-row: 1 / span 2;
+    display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto;
+    column-gap: .3125rem; row-gap: 0; align-items: center; justify-items: start; text-align: left;
+  }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-art {
+    grid-column: 1; grid-row: 1 / span 2;
+    width: clamp(1.5rem, 7.5cqw, 2.375rem); height: clamp(1.5rem, 7.5cqw, 2.375rem);
+  }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-pos {
+    grid-column: 2; grid-row: 1; height: auto; line-height: 1.1; font-size: .5625rem;
+  }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-name {
+    grid-column: 2; grid-row: 2; margin-top: 0; justify-items: start;
+  }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-name strong {
+    font-size: clamp(.6875rem, 2.2cqw, .875rem); line-height: 1.15; white-space: nowrap;
+  }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-name small { display: none; }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-tools {
+    position: static; grid-column: 2; grid-row: 1; justify-self: end; display: flex; gap: .125rem;
+  }
+  .formation.on-ice .formation-slot:not([data-position="back"]):not(:has(> .formation-super)) .formation-tools {
+    grid-row: 1 / span 2; align-self: center;
+  }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-tool { width: 1.25rem; height: 1.25rem; }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-tool svg { width: 1rem; height: 1rem; }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-super {
+    grid-column: 2; grid-row: 2; justify-self: end; max-width: 7.25rem;
+    padding: .125rem .375rem .125rem .1875rem; font-size: .625rem; gap: .1875rem;
+  }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-super img { width: 1rem; height: 1rem; }
+  .formation.on-ice .formation-slot:not([data-position="back"]) .formation-super svg { width: .75rem; height: .75rem; }
+}
+@media (orientation: portrait) and (min-height: 36rem) {
+  body:is([data-shot="team"], [data-shot="rules"]) { overflow: hidden; }
+  body:is([data-shot="team"], [data-shot="rules"]) .ball-page {
+    height: calc(100dvh - var(--setup-top, 3.25rem) - 4.25rem - var(--safe-bottom, 0px));
+  }
+  body:is([data-shot="team"], [data-shot="rules"]) .rink-stage {
+    width: min(100%, calc(28dvh * 5 / 3)); margin: 0 auto;
+  }
+  .team-sheet.docked { flex: 1; min-height: 0; height: auto; }
+  .team-sheet.docked .team-sheet-foot { padding: .5rem .875rem; }
+  .team-sheet.docked .team-sheet-foot button { min-height: 2.875rem; font-size: 1.125rem; }
+  .team-sheet.docked .mode-step { justify-content: flex-start; gap: .5rem; padding-block: .5rem; }
+  .team-sheet.docked .mode-logo img { max-height: clamp(2.25rem, 8dvh, 4.5rem); }
+  .team-sheet.docked .mode-option { padding: .625rem .25rem .5rem; }
+  .team-sheet.docked .cpu-levels span { min-height: 2.625rem; }
+}
+@media (orientation: portrait) and (min-height: 36rem) and (max-height: 44rem) {
+  body:is([data-shot="team"], [data-shot="rules"]) .rink-stage {
+    width: min(100%, calc(25.5dvh * 5 / 3));
+  }
+  .team-sheet.docked .team-sheet-foot { padding: .375rem .75rem; }
+  .team-sheet.docked .team-sheet-foot button { min-height: 2.5rem; font-size: 1rem; }
+  .team-sheet.docked .roster-hint { font-size: .6875rem; }
+}
+@media (max-height: 35.99rem), (orientation: landscape) and ((width < 56rem) or ((pointer: coarse) and (max-height: 600px))) {
+  body:is([data-shot="team"], [data-shot="rules"]) { overflow-x: clip; overflow-y: auto; }
+  body:is([data-shot="team"], [data-shot="rules"]) .site-header { margin: .25rem auto; }
+  body:is([data-shot="team"], [data-shot="rules"]) .ball-page { padding-bottom: max(.75rem, var(--safe-bottom, 0px)); }
+  body:is([data-shot="team"], [data-shot="rules"]) .rink-stage {
+    width: min(100%, calc(48dvh * 5 / 3)); margin: 0 auto;
+  }
+  .team-sheet.docked { flex: none; height: min(30rem, 84dvh); }
+  .team-sheet.docked .team-sheet-foot { padding: .5rem .875rem; }
+  .team-sheet.docked .team-sheet-foot button { min-height: 2.75rem; font-size: 1.0625rem; }
+  .team-sheet.docked .mode-step { justify-content: flex-start; gap: .5rem; padding-block: .5rem; }
+  .team-sheet.docked .mode-logo img { max-height: 2.5rem; }
+  .team-sheet.docked .mode-option { padding: .5rem .25rem; }
+  .team-sheet.docked .cpu-levels span { min-height: 2.375rem; }
+}
 
 /* Announcements over the rink ("Plan your shot…", "Launch!", the winner). */
 .field-banner {
@@ -1591,6 +1777,40 @@ body[data-shot="replay"] .stadium-actions > :not(.replay-bar), body[data-shot="r
 .replay-export svg, .replays-tools svg { width: 1.125rem; height: 1.125rem; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .replay-time { min-width: 5.75rem; color: var(--muted); font-size: .8125rem; font-variant-numeric: tabular-nums; text-align: center; }
 .game-select[data-for="replay-speed"] { min-height: 0; padding: .375rem .5rem; background: var(--elevated); color: var(--text); border: .0625rem solid var(--border); border-radius: .5rem; }
+@media (orientation: portrait) and (max-height: 46rem) {
+  body:is([data-shot="match"], [data-shot="replay"]) .scoreboard { gap: .125rem; padding: .125rem .375rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .bug-left { flex-direction: row; gap: .375rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .bug-brand img { height: 1.1875rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .bug-team { height: 2.125rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .bug-status { height: 1.25rem; }
+  body[data-shot="match"] .stadium-actions { gap: .25rem .375rem; padding: .25rem .5rem .375rem; }
+  body[data-shot="match"] .knob svg { width: min(100%, 2.5rem); }
+  body[data-shot="match"] .stadium-actions :is(.stadium-super-btn, #launch) { height: 2.375rem; }
+  body[data-shot="match"] #launch { height: 2.5rem; }
+  body[data-shot="match"] .shot-buttons button { min-height: 1.5rem; }
+}
+@media (orientation: portrait) and (max-width: 40rem) {
+  body[data-shot="replay"] .stadium-actions { padding: .25rem .5rem .5rem; }
+  .replay-bar { gap: .25rem; }
+  .replay-controls { gap: .25rem .375rem; }
+  .replay-controls .icon-button { width: 2rem; height: 2rem; min-height: 0; padding: .3125rem; }
+  .replay-controls button:not(.icon-button) { min-height: 2rem; padding: .25rem .5rem; font-size: .75rem; }
+  .replay-time { min-width: 4.75rem; font-size: .75rem; }
+  .game-select[data-for="replay-speed"] { min-height: 2rem; padding: .25rem .375rem; font-size: .75rem; }
+}
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
+  body[data-shot="replay"] .stadium:not(.portrait-mode) > .stadium-actions {
+    min-height: 0; max-height: 100%; overflow-y: auto; padding: .25rem .5rem .375rem;
+  }
+  body[data-shot="replay"] .stadium:not(.portrait-mode) .replay-bar { gap: .25rem; }
+  body[data-shot="replay"] .stadium:not(.portrait-mode) .replay-track { padding-top: .6875rem; }
+  body[data-shot="replay"] .stadium:not(.portrait-mode) .replay-controls { gap: .25rem; }
+  body[data-shot="replay"] .stadium:not(.portrait-mode) .replay-controls .icon-button { width: 1.75rem; height: 1.75rem; min-height: 0; padding: .25rem; }
+  body[data-shot="replay"] .stadium:not(.portrait-mode) .replay-controls button:not(.icon-button) { min-height: 1.75rem; padding: .1875rem .4375rem; font-size: .6875rem; }
+  body[data-shot="replay"] .stadium:not(.portrait-mode) .replay-export svg { width: .9375rem; height: .9375rem; }
+  body[data-shot="replay"] .stadium:not(.portrait-mode) .replay-time { min-width: 4.5rem; font-size: .6875rem; }
+  body[data-shot="replay"] .stadium:not(.portrait-mode) .game-select[data-for="replay-speed"] { min-height: 1.75rem; padding: .1875rem .375rem; font-size: .6875rem; }
+}
 
 /* Replay library. */
 /* Anchored near the top, so deleting or restoring a replay changes only the bottom edge. */
