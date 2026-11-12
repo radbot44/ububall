@@ -4941,6 +4941,10 @@ test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-i
   assert.match(cssSrc, /@media \(max-height: 37\.5rem\)[\s\S]*?body\[data-shot="mint"\] \.rink-stage/, 'ububall.css caps Mint rink width by container height on short landscape phones');
   assert.match(siteCssSrc, /@media \(max-width: 47\.99rem\) and \(min-height: 37\.5625rem\)[\s\S]*?\.collection-viewer-host[\s\S]*?grid-column:\s*1 \/ -1/, 'narrow portrait Collection viewer spans full width with Prev/Next row below');
   assert.match(siteCssSrc, /@media \(max-height: 37\.5rem\)[\s\S]*?\.collection-viewer-frame[\s\S]*?position:\s*fixed/, 'short landscape Collection viewer frames cleanly across full viewport height');
+  assert.match(cssSrc, /body:is\(\[data-shot="team"\], \[data-shot="rules"\]\) :is\(\.site-header, \.site-nav\)\s*\{\s*display:\s*none;\s*\}/, 'mobile rules/team setup hides outer site header and bottom nav');
+  assert.match(cssSrc, /@media \(max-width: 47\.99rem\)[\s\S]*?body\[data-shot="collection"\] \.rink-stage[\s\S]*?width:\s*calc\(100% \* 600 \/ 484\)/, 'mobile Collection aligns portrait rink boards edge-to-edge without side gutters');
+  assert.match(cssSrc, /@media \(max-width: 34rem\)[\s\S]*?\.team-sheet\.docked \.roster-grid[\s\S]*?repeat\(3,\s*minmax\(0,\s*1fr\)\)/, 'mobile Change Team scales picker ubu tiles to 3 per row');
+  assert.match(siteCssSrc, /@media \(orientation: portrait\) and \(max-width: 34rem\)[\s\S]*?\.collection-ice \.ubu-grid[\s\S]*?repeat\(3,\s*minmax\(0,\s*1fr\)\)/, 'mobile portrait Collection scales ubu buttons to 3 per row');
   assert.match(rinkDocSrc, /Phase 6 is built/, 'docs/rink-stage.md Status updated for Phase 6');
   assert.match(rinkDocSrc, /Next step: Phase 7/, 'docs/rink-stage.md advances Next step to Phase 7');
 
@@ -4955,6 +4959,7 @@ test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-i
     section('  let cameraMove = null;', '  // The cast: whoever is on the ice') + '\n' +
     section('  function point(event) {', '  fieldView.canvas.addEventListener(\'wheel\'') + '\n' +
     section('  function updateReplaySkip(replay) {', '  replaySkip.onclick =') + '\n' +
+    section('  function teamHint(classic) {', '  function rosterSlots() {') + '\n' +
     section('  function setupStep(step) {', '  function openSetup(step,') + '\n' +
     section('  const fullscreenTarget =', '  document.addEventListener(\'keydown\', e => {') + '\n' +
     section('  const portraitScreen = matchMedia', '  function openPause() {') + '\n' +
@@ -5120,13 +5125,17 @@ test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-i
     recording: null,
     setupFor: 'cpu',
     chosenMode: () => 'standard',
-    draft: [{ key: 'u0', model: {} }, { key: 'u1', model: {} }, { key: 'u2', model: {} }],
+    draft: [{ key: 'u0', model: { parts: { fullName: 'Piwoce Umet' } } }, { key: 'u1', model: { parts: { fullName: 'Atil Ujotat Ke' } } }, { key: 'u2', model: { parts: { fullName: 'Ejka Evusmu Aj' } } }],
     signedIn: () => true,
     teamSlotsOf: () => null,
     sameSlots: () => false,
     savedTeams: null,
     teamIndex: -1,
     ubuRender: Object.assign(() => makeEl('svg'), { spriteImg: () => makeEl('img') }),
+    POSITIONS: ['Back', 'Top', 'Bottom'],
+    rosterSlot: 0,
+    canDrag: true,
+    teamLocked: () => false,
     lobbyView: null,
     fixedTeam: () => false,
     loadCollection: async () => {},
@@ -5173,7 +5182,7 @@ test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-i
   };
 
   const env = runInNewContext(
-    stageCode + '\n;({ getShot: () => shot, compactPhoneStage, playableShot, canDock, prepareSheet, setupStep, openSheet, enterMatch, screenTransition, toggleRotate, setPortrait, fitOrientation, point, stagePoint, measureField, positionSpinControl, updateFoulInfo, screenDegrees, setKnob, knobValue });',
+    stageCode + '\n;({ getShot: () => shot, teamHint, compactPhoneStage, playableShot, canDock, prepareSheet, setupStep, openSheet, enterMatch, screenTransition, toggleRotate, setPortrait, fitOrientation, point, stagePoint, measureField, positionSpinControl, updateFoulInfo, screenDegrees, setKnob, knobValue });',
     phoneCtx
   );
 
@@ -5289,4 +5298,12 @@ test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-i
   env.updateFoulInfo();
   assert.equal($('foul-box').hidden, false);
   assert.ok(parseFloat($('foul-box').style.top) < stageRect().height * 0.45, 'home-crease foul box sits over far top half of portrait rink');
+
+  // E. teamHint omits routine "Picking an ubu puts..." copy during unlocked team editing (leaving #roster-hint empty) and compact tile/toolbar CSS invariants hold
+  env.teamHint(false);
+  assert.equal($('roster-hint').textContent, '', 'unlocked team editing keeps #roster-hint empty so controls stay 3 rows');
+  assert.match(siteCssSrc, /\.ubu-tile-adj\s*\{[^}]*text-overflow:\s*ellipsis/, 'archetype adjective truncates with ellipsis before noun');
+  assert.match(siteCssSrc, /\.ubu-tile-noun\s*\{[^}]*flex:\s*0 0 auto/, 'archetype noun stays unshrunk across all screen sizes');
+  assert.match(siteCssSrc, /@media \(max-width: 47\.99rem\)[\s\S]*?\.ubu-tile-meta\s*\{\s*display:\s*none;\s*\}/, 'small screens hide grade and serial row on tiles');
+  assert.match(siteCssSrc, /\.ubu-tile-value\s*\{[^}]*position:\s*absolute/, 'stat sort value overlays bottom-right of ubu art');
 });

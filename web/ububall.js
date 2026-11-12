@@ -3747,14 +3747,8 @@
     }));
   }
   function teamHint(classic) {
-    const entry = draft[rosterSlot], position = POSITIONS[rosterSlot];
-    let text = teamLocked() ? 'Your team is locked in. Choose Change team to edit it.' :
-      fixedTeam() ? (classic ? 'Guests play with these three ubus.' : 'Guests play with these three ubus. Pick each ubu’s super with its super button.') :
-      !entry ? `Pick an ubu for ${position}.` : `Picking an ubu puts it in ${position}, replacing ${entry.model.parts.fullName}.`;
-    if (!teamLocked() && !fixedTeam()) {
-      if (canDrag) text += ' You can also drag ubus onto any position.';
-      if (classic) text += ' Classic: supers are off.';
-    }
+    const text = teamLocked() ? 'Your team is locked in. Choose Change team to edit it.' :
+      fixedTeam() ? (classic ? 'Guests play with these three ubus.' : 'Guests play with these three ubus. Pick each ubu’s super with its super button.') : '';
     $('roster-hint').textContent = text;
   }
   function rosterSlots() {

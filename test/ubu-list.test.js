@@ -294,3 +294,134 @@ test('archetype search matches plain words, archetype:/adj:/noun: filters, negat
   const bad = list.parseQuery('archetype: adj: noun:');
   assert.deepEqual(bad.errors, ['archetype:', 'adj:', 'noun:']);
 });
+
+test('tileMain mounts stat value inside artBox, splits archetype into adj + noun, omits tile badge, and packs sort controls into filter popover', () => {
+  const makeNode = (tag, props = {}) => {
+    const attrs = new Map();
+    const getSet = n => new Set((n.className || '').split(/\s+/).filter(Boolean));
+    const setSet = (n, st) => { n.className = [...st].join(' '); };
+    const node = {
+      tagName: tag.toUpperCase(),
+      className: props.className || '',
+      textContent: props.textContent || '',
+      hidden: Boolean(props.hidden),
+      value: props.value || '',
+      dataset: {},
+      style: {},
+      children: [],
+      classList: {
+        add: (...cs) => { const st = getSet(node); cs.forEach(c => st.add(c)); setSet(node, st); },
+        remove: (...cs) => { const st = getSet(node); cs.forEach(c => st.delete(c)); setSet(node, st); },
+        toggle: (c, on) => { const st = getSet(node); const v = on === undefined ? !st.has(c) : Boolean(on); if (v) st.add(c); else st.delete(c); setSet(node, st); return v; },
+        contains: c => getSet(node).has(c)
+      },
+      append(...kids) {
+        for (const k of kids) {
+          if (k === '' || k == null) continue;
+          this.children.push(typeof k === 'string' ? { textContent: k, children: [] } : k);
+        }
+      },
+      prepend(...kids) { this.children.unshift(...kids.filter(Boolean)); },
+      replaceChildren(...kids) { this.children = []; this.append(...kids); },
+      setAttribute(k, v) { attrs.set(k, String(v)); },
+      getAttribute(k) { return attrs.get(k) ?? null; },
+      querySelector(sel) {
+        const cls = sel.startsWith('.') ? sel.slice(1) : null;
+        const visit = n => {
+          for (const ch of n.children || []) {
+            if (cls && ch.classList?.contains(cls)) return ch;
+            const found = visit(ch);
+            if (found) return found;
+          }
+          return null;
+        };
+        return visit(this);
+      },
+      addEventListener() {}
+    };
+    return Object.assign(node, props);
+  };
+
+  const sandbox = {
+    ubuArchetype,
+    ububallPhysics: {
+      SUPERS: Array.from({ length: 8 }, (_, id) => ({ id, name: 'S' + id, icon: id + '.png' })),
+      superMastery: (_s, id) => ({ id, level: 2, displayName: 'Super ' + id + ' II' })
+    },
+    localStorage: { getItem: () => null, setItem() {} },
+    addEventListener() {},
+    dispatchEvent() {},
+    Option: function(label, val) { return makeNode('option', { textContent: label, value: val }); },
+    Event: class { constructor(t) { this.type = t; } },
+    CustomEvent: class { constructor(t) { this.type = t; } },
+    gameUi: {
+      icon: name => makeNode('svg', { iconName: name }),
+      select: sel => ({ sync() {}, button: sel }),
+      dropdown: () => {}
+    },
+    document: { createElement: tag => makeNode(tag) }
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(fs.readFileSync(require.resolve('../web/ubu-list.js'), 'utf8'), sandbox);
+
+  const decoded = ubuCore.decode(ubuCore.randomDNA());
+  const { main, artBox, value } = sandbox.ubuList.tileMain(decoded, '#5037');
+  assert.equal(artBox.children.includes(value), true, 'stat value badge lives inside .ubu-tile-art for bottom-right overlay');
+  assert.equal(main.children.includes(value), false, 'stat value is no longer a bottom row inside .ubu-tile-main');
+  const archEl = main.querySelector('.ubu-tile-archetype');
+  assert.ok(archEl.querySelector('.ubu-tile-adj') && archEl.querySelector('.ubu-tile-noun'), 'archetype splits into .ubu-tile-adj and .ubu-tile-noun');
+  sandbox.ubuList.describeTile(main, decoded.parts.fullName, { badge: 'Back' });
+  assert.equal(main.querySelector('.ubu-tile-badge'), null, 'describeTile omits .ubu-tile-badge element');
+  assert.equal(main.getAttribute('aria-pressed'), 'true', 'describeTile still sets aria-pressed for picked teammates');
+
+  let isWide = false, mediaListener = null;
+  sandbox.matchMedia = () => ({
+    get matches() { return isWide; },
+    addEventListener(_t, fn) { mediaListener = fn; }
+  });
+  // Add before() helper on nodes for wide-screen inline insertion
+  const origCreate = sandbox.document.createElement;
+  sandbox.document.createElement = tag => {
+    const n = origCreate(tag);
+    const wrapChildren = parent => {
+      for (const ch of parent.children) ch._parent = parent;
+    };
+    const origAppend = n.append.bind(n);
+    n.append = (...kids) => {
+      for (const k of kids) {
+        if (k && typeof k === 'object' && k._parent) {
+          k._parent.children = k._parent.children.filter(x => x !== k);
+        }
+      }
+      origAppend(...kids);
+      wrapChildren(n);
+    };
+    n.before = (...items) => {
+      const p = n._parent;
+      if (!p) return;
+      for (const it of items) {
+        if (it._parent) it._parent.children = it._parent.children.filter(x => x !== it);
+        it._parent = p;
+      }
+      const idx = p.children.indexOf(n);
+      p.children.splice(idx, 0, ...items);
+    };
+    return n;
+  };
+
+  const toolbarHost = sandbox.document.createElement('div');
+  const grid = sandbox.document.createElement('div');
+  sandbox.ubuList.mount({ surface: 'roster', toolbarHost, grid });
+  const row = toolbarHost.querySelector('.ubu-toolbar-row');
+  const chips = toolbarHost.querySelector('.ubu-chips');
+  const sortRow = chips.querySelector('.ubu-sort-row');
+  assert.equal(row.children.length, 2, 'narrow screens keep only search box and filter-2 toggle on toolbar row');
+  assert.equal(row.children[1].classList.contains('ubu-filters-toggle'), true);
+  assert.equal(row.children[1].children[0].iconName, 'filter-2', 'filter toggle uses Tabler filter-2 icon');
+  assert.equal(sortRow.hidden, false, 'narrow screens show sort, direction, and favorites inside filter popover');
+
+  isWide = true;
+  mediaListener?.();
+  assert.equal(row.children.length, 5, 'large screens place search, sort, direction, favorites, and filter-2 inline on one row');
+  assert.equal(sortRow.hidden, true, 'large screens hide duplicate sort row inside filter popover');
+});

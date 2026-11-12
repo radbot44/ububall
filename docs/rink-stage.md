@@ -36,9 +36,12 @@ Working now (`web/index.html`, `web/app.js`, `web/ububall-activity.js`, `web/sit
     phones while keeping the full-width scoreboard unclipped above it.
   - `mint` fits the 3-pack deal and zoomed card reveal inside both portrait phones and `<= 600px`
     short landscape phones without vertical overflow.
-  - `collection` clips horizontal scatter overflow on `html` as well as `body`, spans `.viewer.on-ice`
-    full width with thumb-friendly `Prev`/`Next` arrows underneath on narrow portrait phones, and
-    frames `.viewer.on-ice` across the full viewport height on short landscape phones.
+  - `collection` removes side gutters on narrow viewports so the sticky `#collection-dock` and
+    portrait rink boards span edge-to-edge, scales `.collection-ice .ubu-grid` to 3 ubus per row on
+    portrait phones, clips horizontal scatter overflow on `html` as well as `body`, spans
+    `.viewer.on-ice` full width with thumb-friendly `Prev`/`Next` arrows underneath on narrow
+    portrait phones, and frames `.viewer.on-ice` across the full viewport height on short landscape
+    phones.
 - Portrait play (`match` and `replay`) verified and polished on phones: `setPortrait()` updates the
   stage without polluting `localStorage`, manual `#btn-rotate` overrides are scoped to the current
   screen orientation (never leaking `.portrait-mode` onto `home`, `lobby`, `mint`, `collection` or
@@ -275,3 +278,19 @@ so it reads as part of the arena.
   leaks onto non-match shots or across screen orientations, compacted short-portrait `.scoreboard` /
   `.stadium-actions` and phone `#replay-bar`, added Phase 6 unit tests in
   `test/ububall-effects.test.js`, and verified all 8 shots plus portrait play in headless Chromium.
+- 2026-11-12: Applied owner mobile review polish on Phase 6 (`web/ububall.js`, `web/ububall.css`,
+  `web/site.css`): hid outer `.site-header` and `.site-nav` during stacked mobile `rules`/`team`
+  setup to reclaim vertical picker height, widened the setup rink to full width with 3-row
+  non-overlapping `Top`/`Bottom` on-ice cards and wider `Back` slot, gated the desktop drag hint in
+  `teamHint()` on `!compactPhoneStage()`, unstuck `.roster-toolbar` and scaled mobile `.roster-grid`
+  to 3 columns; removed side gutters on mobile `collection` (full-width `#collection-dock` and
+  board-aligned `.rink-stage`) and scaled `.collection-ice .ubu-grid` to 3 ubus per row on portrait
+  phones; verified on Chrome DevTools iPhone SE (`375×667`, DPR 2) and unit tests.
+- 2026-11-12: Compacted ubu tiles and list controls across desktop and mobile (`web/index.html`,
+  `web/ubu-list.js`, `web/ububall.js`, `web/site.css`, `web/ububall.css`): removed `.ubu-tile-badge`
+  and single-line-clamped `.ubu-tile-name` plus adjective-truncating `.ubu-tile-archetype`
+  (`.ubu-tile-adj` + `.ubu-tile-noun`) across all screen sizes; hid `.ubu-tile-meta` (`Grade #serial`)
+  on small screens; moved numeric sort values (`chipValue` without label prefix) into a bottom-right
+  overlay on `.ubu-tile-art`; removed routine `#roster-hint` copy and switched to Tabler `#icon-filter-2`, keeping sort/direction/favorites inline on one row on large
+  screens (`>= 56rem` landscape) and tucking them into the `#icon-filter-2` dropdown on compact
+  screens so Change Team controls stay at 3 rows everywhere.
