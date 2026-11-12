@@ -52,3 +52,10 @@
 - Run repository commands inside this repository.
 - Add focused verification for protocol, cryptographic, authorization and accounting boundaries when implemented; setup documentation does not need invented tests.
 - Run npm test and npm run test:worker for Worker/auth/mint changes. The latter uses isolated local Cloudflare runtime storage, never a remote deployment. Public assets must use the explicit whitelist in scripts/prepare-assets.cjs; never serve the repository root. ubu-render.js is shared by the designer and site; preserve established finishes and lighting.
+
+## Cloud and offline agent sandboxes
+
+- Node 18 compatibility: the target runtime is Node 22.13+, but isolated Linux sandboxes often run Node 18 where `globalThis.crypto` is disabled by default. Pass `--experimental-global-webcrypto` to `node --test` on Node 18 so WebCrypto suites pass; only `test/mint.test.js` (`node:sqlite`) strictly requires Node 22+.
+- Offline `node_modules`: without installed `devDependencies` (`esbuild`, `wrangler`), `scripts/prepare-assets.cjs` and `npm run test:worker` cannot run. Execute zero-dependency suites directly via `node --test` (using `--test-reporter=spec` when diagnosing failures), and expect 8 Windows PowerShell subtests in `test/install-entry.test.cjs` to skip on Linux.
+- Test and benchmark anchors: `test/ubu.test.js` (`packedInternals`) and `scripts/bench-name-rolls.cjs` match literal source substrings (`const api = { decode,` and `function ubunym(state)`) in `shared/ubu.js`; keep derived classifiers in standalone `shared/*.js` UMD modules rather than reformatting those anchors, and keep `web/ubu-list.js` tolerant of partial mock `model` fixtures and `vm.runInNewContext` globals.
+- Packaging and batch simulations: use Python's standard `zipfile` module (excluding `.git/`, `dist/` and `node_modules/`) when `/usr/bin/zip` is absent, and run large Monte Carlo or calibration scripts in 2D `float32` batches (50,000 rows or fewer) rather than 3D `float64` tensors to avoid container OOM kills.
