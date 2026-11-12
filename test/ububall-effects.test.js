@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const ububallPresentation = require('../web/ububall-presentation.js');
 const ububallPlayback = require('../web/ububall-playback.js');
 const ububallStats = require('../web/ububall-stats.js');
+const ububallTheater = require('../web/ububall-theater.js');
 const {
   createEffectsState, updateParticles, updatePopups, drawBallFace, drawTrails,
   drawGuardShield, GUARD_SHIELD, conicRingSprites, conicRingSprite, createRinkPresenter
@@ -22,7 +23,7 @@ function runInNewContext(code, context) {
     set: (_, key, value) => { context[aliases[key] ?? key] = value; return true; }
   });
   context.fieldEffects = fixtureState();
-  Object.assign(context, { createEffectsState, updateParticles, ububallPresentation, ububallPlayback, ububallStats, createPlaybackDriver: ububallPlayback.createPlaybackDriver, matchMvp: ububallStats.matchMvp, replayFileName: ububallStats.replayFileName });
+  Object.assign(context, { createEffectsState, updateParticles, ububallPresentation, ububallPlayback, ububallStats, ububallTheater, createPlaybackDriver: ububallPlayback.createPlaybackDriver, matchMvp: ububallStats.matchMvp, replayFileName: ububallStats.replayFileName });
   context.fieldView = fixtureState({ mode: 'matchMode', entries: 'teamEntries', anonymous: 'anonymousNames',
     portrait: 'isPortrait', field: 'videoField' });
   return vm.runInNewContext(code, context);
@@ -75,7 +76,8 @@ function section(start, end) {
   assert.ok(a >= 0 && b > a, 'effect source boundary changed');
   return source.slice(a, b);
 }
-const __PLAYBACK_PROJ_SHIM__ = "const {\n  PRESENTATION_KEYS, stripPresentation, onlineOrder, viewIndex, applySeatTransform, transformSimSeat\n} = ububallPlayback;\nconst viewFouls = (f, seat) => ububallPlayback.viewFouls(ububallMatch, f, seat);\nconst { projectBody, viewBodies, toViewBody, syncViewBodies } = ububallPlayback.createBodyProjector({\n  P,\n  getEntries: () => (typeof fieldView.entries !== 'undefined' ? fieldView.entries : null),\n  getAnonymous: () => Boolean(typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous),\n  anonymousName: i => (typeof anonymousName === 'function' ? anonymousName(i) : `Ubu ${i + 1}`),\n  isClassicMode: () => (typeof classicMode === 'function' ? classicMode() : false),\n  resolveEquippedSuper: (entry, i) => (typeof resolveEquippedSuper === 'function' ? resolveEquippedSuper(entry, i) : entry?.equippedSuper),\n  getShownSim: () => (typeof shownSim === 'function' ? shownSim() : (typeof simBodies !== 'undefined' ? simBodies : null)),\n  getShownSeat: () => (typeof shownSeat === 'function' ? shownSeat() : 0),\n  getTargetBodies: () => fieldView.bodies,\n  getDirtyMeters: () => (typeof dirtyMeters !== 'undefined' ? dirtyMeters : null)\n});";
+const __PLAYBACK_PROJ_SHIM__ = "const {\n  PRESENTATION_KEYS, stripPresentation, onlineOrder, viewIndex, applySeatTransform, transformSimSeat\n} = ububallPlayback;\nconst viewFouls = (f, seat) => ububallPlayback.viewFouls(ububallMatch, f, seat);\nconst { projectBody, viewBodies, toViewBody, syncViewBodies } = ububallPlayback.createBodyProjector({\n  P,\n  getEntries: () => (typeof fieldView.entries !== 'undefined' ? fieldView.entries : null),\n  getAnonymous: () => Boolean(typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous),\n  anonymousName: i => (typeof anonymousName === 'function' ? anonymousName(i) : ububallTheater.anonymousName(ububallReplay, i)),\n  isClassicMode: () => (typeof classicMode === 'function' ? classicMode() : false),\n  resolveEquippedSuper: (entry, i) => (typeof resolveEquippedSuper === 'function' ? resolveEquippedSuper(entry, i) : entry?.equippedSuper),\n  getShownSim: () => (typeof shownSim === 'function' ? shownSim() : (typeof simBodies !== 'undefined' ? simBodies : null)),\n  getShownSeat: () => (typeof shownSeat === 'function' ? shownSeat() : 0),\n  getTargetBodies: () => fieldView.bodies,\n  getDirtyMeters: () => (typeof dirtyMeters !== 'undefined' ? dirtyMeters : null)\n});";
+const __THEATER_SHIM__ = "const anonymousName = i => ububallTheater.anonymousName(ububallReplay, i);\nconst _thCtrl = ububallTheater.createReplayTheater({\n  $,\n  window: typeof window !== 'undefined' ? window : {},\n  document: typeof document !== 'undefined' ? document : {},\n  navigator: typeof navigator !== 'undefined' ? navigator : null,\n  localStorage: typeof localStorage !== 'undefined' ? localStorage : { getItem: () => null, setItem() {} },\n  getComputedStyle: typeof getComputedStyle === 'function' ? getComputedStyle : (() => ({ fontFamily: 'sans-serif' })),\n  MessageChannel: typeof MessageChannel !== 'undefined' ? MessageChannel : null,\n  Blob: typeof Blob !== 'undefined' ? Blob : null,\n  File: typeof File !== 'undefined' ? File : null,\n  Image: typeof Image !== 'undefined' ? Image : null,\n  URL: typeof URL !== 'undefined' ? URL : null,\n  HTMLCanvasElement: typeof HTMLCanvasElement !== 'undefined' ? HTMLCanvasElement : null,\n  HTMLImageElement: typeof HTMLImageElement !== 'undefined' ? HTMLImageElement : null,\n  VideoEncoder: typeof VideoEncoder !== 'undefined' ? VideoEncoder : null,\n  VideoFrame: typeof VideoFrame !== 'undefined' ? VideoFrame : null,\n  AudioEncoder: typeof AudioEncoder !== 'undefined' ? AudioEncoder : null,\n  AudioData: typeof AudioData !== 'undefined' ? AudioData : null,\n  OfflineAudioContext: typeof OfflineAudioContext !== 'undefined' ? OfflineAudioContext : null,\n  setTimeout: typeof setTimeout === 'function' ? setTimeout : (() => 1),\n  P,\n  ubu,\n  ububallMatch,\n  ububallReplay,\n  getMp4: () => (typeof ububallMP4 !== 'undefined' ? ububallMP4 : (typeof window !== 'undefined' ? window.ububallMP4 : null)),\n  gameUi: typeof gameUi !== 'undefined' ? gameUi : null,\n  GOAL_CALL_SECONDS: typeof GOAL_CALL_SECONDS !== 'undefined' ? GOAL_CALL_SECONDS : 2.4,\n  materialStyles: typeof materialStyles !== 'undefined' ? materialStyles : {},\n  createEffectsState,\n  onlineOrder,\n  viewIndex,\n  stripPresentation,\n  transformSimSeat,\n  viewFouls: (f, seat) => viewFouls(f, seat),\n  runPlaybackTicks,\n  replayEvents: (turnObj, tick, sim) => (typeof replayEvents === 'function' ? replayEvents(turnObj, tick, sim) : undefined),\n  getReplayFx: () => replayFx,\n  replayHitStop: th => replayHitStop(th),\n  syncReplay: th => syncReplay(th),\n  makeGuide: (sim, turnPlans, seat, gTurn, gScores) => makeGuide(sim, turnPlans, seat, gTurn, gScores),\n  traceGuide: (sim, g) => traceGuide(sim, g),\n  recordTrails: () => recordTrails(),\n  trailPositions: () => (typeof trailPositions === 'function' ? trailPositions() : []),\n  clearDiscontinuousTrails: before => (typeof clearDiscontinuousTrails === 'function' ? clearDiscontinuousTrails(before) : undefined),\n  emitSkaterEffects: dt => emitSkaterEffects(dt),\n  updatePopups: (dt, popups) => updatePopups(dt, popups),\n  updateEffects: (dt, fx) => updateEffects(dt, fx),\n  clearEffects: () => clearEffects(),\n  celebrate: (team, ball, label, scorer) => (typeof celebrate === 'function' ? celebrate(team, ball, label, scorer) : undefined),\n  loopFanfare: voice => (typeof loopFanfare === 'function' ? loopFanfare(voice) : undefined),\n  stopFanfare: () => stopFanfare(),\n  quench: () => (typeof quench === 'function' ? quench() : undefined),\n  lightNet: team => (typeof lightNet === 'function' ? lightNet(team) : undefined),\n  ballOnFire: () => (typeof ballOnFire === 'function' ? ballOnFire() : false),\n  popup: (body, text) => (typeof popup === 'function' ? popup(body, text) : undefined),\n  goalTab: (team, label, scorer) => (typeof goalTab === 'function' ? goalTab(team, label, scorer) : undefined),\n  replayFileName: (recorded, title) => replayFileName(recorded, title),\n  downloadReplay: (file, recorded, title) => (typeof downloadReplay === 'function' ? downloadReplay(file, recorded, title) : undefined),\n  rinkLogo: typeof rinkLogo !== 'undefined' ? rinkLogo : null,\n  getThemeColors: () => (typeof themeColors !== 'undefined' ? themeColors : {}),\n  getSkaters: () => (typeof skaters !== 'undefined' ? skaters : []),\n  clockNow: () => clockNow(),\n  gameAudio: () => gameAudio(),\n  classicMode: () => classicMode(),\n  normalStats: () => normalStats(),\n  idlePlan: () => (typeof idlePlan === 'function' ? idlePlan() : { angle: 0, power: 0, spin: 0, guard: false }),\n  resolveEquippedSuper: (entry, i) => resolveEquippedSuper(entry, i),\n  kickoff: isNew => kickoff(isNew),\n  buildTeam: () => buildTeam(),\n  resetPlans: keep => (typeof resetPlans === 'function' ? resetPlans(keep) : undefined),\n  saveRecording: () => saveRecording(),\n  saveActiveMatch: state => (typeof saveActiveMatch === 'function' ? saveActiveMatch(state) : undefined),\n  stopDemo: () => stopDemo(),\n  closeSummary: () => closeSummary(),\n  endGoalReplay: () => endGoalReplay(),\n  showMode: m => showMode(m),\n  enterMatch: next => enterMatch(next),\n  setShot: next => {\n    if (typeof setShot === 'function') setShot(next);\n    else if (typeof shot !== 'undefined') { shot = next; if (document.body?.dataset) document.body.dataset.shot = next; }\n  },\n  updateHome: () => (typeof updateHome === 'function' ? updateHome() : undefined),\n  bumpCpuGeneration: () => { cpuGeneration++; cpuClient.cancel(); cpuClient.dispose?.(); },\n  say: msg => say(msg),\n  sync: () => sync(),\n  draw: () => draw(),\n  getTheater: () => theater,\n  setTheater: next => { theater = next; },\n  getActivePlayback: () => activePlayback,\n  setActivePlayback: next => { activePlayback = next; },\n  getFieldView: () => fieldView,\n  setFieldView: next => { fieldView = next; },\n  getFieldEffects: () => fieldEffects,\n  setFieldEffects: next => { fieldEffects = next; },\n  getVideoAudio: () => videoAudio,\n  setVideoAudio: next => { videoAudio = next; },\n  getVideoClock: () => videoClock,\n  setVideoClock: next => { videoClock = next; },\n  setCardShot: next => { cardShot = next; },\n  markLayoutDirty: () => { if (typeof layoutDirty !== 'undefined') layoutDirty = true; },\n  setHitStopUntil: next => { hitStopUntil = next; },\n  getShot: () => (typeof shot !== 'undefined' ? shot : 'match'),\n  getScores: () => scores,\n  getTurn: () => turn,\n  syncShownScores: sc => { if (typeof shownScores !== 'undefined') shownScores.splice(0, 2, ...sc); },\n  setFouls: next => { fouls = next; },\n  onWatchReplayLoaded: ({ stats: nextStats }) => {\n    stats = nextStats;\n    phase = 'replay'; selected = 0; drag = null;\n  },\n  onEndReplayState: () => {\n    phase = 'over'; recording = null;\n  },\n  onLoadReplayTurnState: ({ scores: sc, turn: tn, plans: pl, guide: gd }) => {\n    scores = sc; turn = tn; plans = pl; guide = gd;\n  },\n  onPlayFromHereState: ({ roster: nextRoster, simBodies: nextSim, scores: nextScores, turn: nextTurn, fouls: nextFouls, roundTurns: nextRoundTurns, recording: nextRec }) => {\n    roster = nextRoster;\n    simBodies = nextSim;\n    syncViewBodies(simBodies, 0);\n    scores = nextScores; turn = nextTurn; fouls = nextFouls;\n    play = ububallMatch.newPlay(); tally = ububallMatch.newTally();\n    roundTurns = nextRoundTurns; matchTicks = 0; playSegments = [];\n    selected = 0; drag = null; elapsed = accumulator = 0; phase = 'plan';\n    recording = nextRec;\n  }\n});\n_thCtrl.bindEvents();\nconst {\n  isExporting, cancelExport, createReplaySession, withPlaybackContext, loadReplayTurn, stepReplay,\n  seekReplay, endReplayTurn, advanceReplay, updateReplayBar, replayMarks, watchReplay,\n  clearReplayViewer, endReplay, composeFrame, paintField, exportSlice, exportVideo, drawShareCard, playFromHere\n} = _thCtrl;";
 const __PLAYBACK_DRIVER_SHIM__ = "const postGoalState = { steps: 0, onTick: null };\nconst {\n  impactFor, applyTickEvents, stepPostGoalFrame, runPlaybackTicks, advancePostGoal, stepOnlineTurn\n} = ububallPlayback.createPlaybackDriver({\n  P,\n  ububallMatch,\n  clockNow: () => (typeof clockNow === 'function' ? clockNow() : performance.now()),\n  impact: (ms, shake) => impact(ms, shake),\n  creditSave: (body, own, iron) => creditSave(body, own, iron),\n  popup: (body, text) => popup(body, text),\n  getBallView: () => fieldView.bodies[6],\n  traceGuide: sim => (typeof traceGuide === 'function' ? traceGuide(sim) : undefined),\n  recordTrails: () => (typeof recordTrails === 'function' ? recordTrails() : undefined)\n});";
 
 test('trail gradient retains a hot sample between cool endpoints', () => {
@@ -243,12 +245,16 @@ test('local, online, and saved replay state boundaries clear repositioned trails
   for (const [start, end] of [
     ['function finishTurn(goal) {', "$('launch').onclick"],
     ['function nextReplaySegment() {', 'function startGoalReplay()'],
-    ['function endReplayTurn() {', 'const WIN_SECONDS'],
     ['function playOnlineReplay() {', '// Each side\'s Discord'],
     ['const before = !fresh && !s.replay && !goalReplay', 'if (!s.replay) fouls =']
   ]) {
     assert.match(section(start, end), /clearDiscontinuousTrails\(before\)/);
   }
+  const theaterSrc = fs.readFileSync(require.resolve('../web/ububall-theater.js'), 'utf8');
+  const a = theaterSrc.indexOf('function endReplayTurn(');
+  const b = theaterSrc.indexOf('function advanceReplay(', a);
+  assert.ok(a >= 0 && b > a);
+  assert.match(theaterSrc.slice(a, b), /clearDiscontinuousTrails\(before\)/);
 });
 
 test('drawBallFace applies team colors to the ball face', () => {
@@ -1103,9 +1109,9 @@ test('replay takeover (watchReplay -> playFromHere -> local turn) transforms sim
   const code =
     section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
     section('let activePlayback = null;', 'const replayStore = (() => {') + '\n' +
-    section('function watchReplay(replay, file) {', 'function endReplayTurn() {') + '\n' +
-    section('let guide = null;', '$(\'replay-take-over\').onclick = playFromHere;') + '\n' +
-    __PLAYBACK_PROJ_SHIM__;
+    section('let guide = null;', 'const theaterController = createReplayTheater({') + '\n' +
+    __PLAYBACK_PROJ_SHIM__ + '\n' +
+    __THEATER_SHIM__;
 
   const ubus = Array.from({ length: 6 }, (_, i) => {
     const dna = ubu.toCode(ubu.randomDNA());
@@ -1240,8 +1246,8 @@ test('online seat 1 transition (resolving -> playOnlineReplay -> next plan phase
   const code =
     __PLAYBACK_PROJ_SHIM__ + '\n' +
     __PLAYBACK_DRIVER_SHIM__ + '\n' +
-    section('let lastSaved = Promise.resolve(null);', 'const replayClock =') + '\n' +
-    section('let guide = null;', 'function playFromHere() {') + '\n' +
+    section('let lastSaved = Promise.resolve(null);', '// Guides, remembered on this device') + '\n' +
+    section('let guide = null;', 'const theaterController = createReplayTheater({') + '\n' +
     section('function playOnlineReplay() {', 'function onlineNames(s) {') + '\n' +
     onStateCode;
 
@@ -1428,12 +1434,9 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
     section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
     section('function creditSave(body, own, iron = false) {', 'function flushMeters() {') + '\n' +
     section('function replayEvents(turn, tick, sim) {', 'const replayStore = (() => {') + '\n' +
-    section('const replayClock = ticks =>', '$(\'replay-seek\').oninput =') + '\n' +
-    section('const VIDEO = Object.freeze(', '$(\'replay-export-video\').hidden =') + '\n' +
-    section('const CARD = {', 'async function openShare() {') + '\n' +
-    section('$(\'export-close\').onclick =', '// Guides, remembered on this device') + '\n' +
-    section('let guide = null;', '// Play from here:') + '\n' +
-    __PLAYBACK_PROJ_SHIM__;
+    section('let guide = null;', 'const theaterController = createReplayTheater({') + '\n' +
+    __PLAYBACK_PROJ_SHIM__ + '\n' +
+    __THEATER_SHIM__;
 
   const ubus = Array.from({ length: 6 }, (_, i) => {
     const dna = ubu.toCode(ubu.randomDNA());
@@ -1814,7 +1817,7 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
   };
 
   const env = runInNewContext(
-    code + '\n;({ watchReplay, endReplay, createReplaySession, withPlaybackContext, loadReplayTurn, stepReplay, seekReplay, endReplayTurn, advanceReplay, updateReplayBar, exportSlice, exportVideo, drawShareCard, composeFrame, currentReplay, shownSim, shownSeat, syncViewBodies, cancelExport: () => { videoCancelled = true; }, isExporting });',
+    code + '\n;({ watchReplay, endReplay, createReplaySession, withPlaybackContext, loadReplayTurn, stepReplay, seekReplay, endReplayTurn, advanceReplay, updateReplayBar, exportSlice, exportVideo, drawShareCard, composeFrame, currentReplay, shownSim, shownSeat, syncViewBodies, cancelExport, isExporting });',
     context
   );
 
@@ -2210,7 +2213,6 @@ test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim
   assert.equal(popups.length, 0, "none of these mechanics create floating text popups");
 
   // 7. Offline MP4 export audio adapter exposes all new movement, spin, impact, save, and firework methods
-  const exportCode = section("function offlineAudio(offline, seconds) {", "let videoLogoImage = null;");
   let sharedCtx = null;
   const forwarded = [];
   const fakeUbuAudio = {
@@ -2231,8 +2233,7 @@ test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim
     playGoalHit: (t, o) => forwarded.push(["goal", t, o]),
     playSuper: () => {}, playSizzle: () => {}, playFoul: () => {}, playIronSave: () => {}, playFanfare: () => {}
   };
-  const { offlineAudio } = runInNewContext(exportCode + "\n;({ offlineAudio });", { Proxy, window: { ubuAudio: fakeUbuAudio } });
-  const adapter = offlineAudio({ sampleRate: 48000 }, () => 2.5);
+  const adapter = ububallTheater.offlineAudio(fakeUbuAudio, { sampleRate: 48000 }, () => 2.5);
   assert.ok(sharedCtx && sharedCtx.currentTime === 2.5);
   adapter.playBallHit({ volume: 0.9, snap: true });
   adapter.playGoalHit("post", { volume: 0.9, spin: 16, speed: 480 });
@@ -2265,7 +2266,7 @@ test('ububall.js shares ububall-presentation.js without duplicating effect imple
   }
 
   // Verify no existing page or script links to /effects or effects.html
-  for (const rel of ['web/index.html', 'web/demo.html', 'web/voice.html', 'web/ububall.html', 'web/site-header.js', 'web/app.js', 'web/ububall.js', 'web/ububall-playback.js', 'web/ububall-stats.js', 'web/site.js']) {
+  for (const rel of ['web/index.html', 'web/demo.html', 'web/voice.html', 'web/ububall.html', 'web/site-header.js', 'web/app.js', 'web/ububall.js', 'web/ububall-playback.js', 'web/ububall-stats.js', 'web/ububall-theater.js', 'web/site.js']) {
     const content = fs.readFileSync(path.resolve(__dirname, '..', rel), 'utf8');
     assert.equal(/\/effects(\.html)?\b/.test(content), false, `${rel} must not link to /effects`);
   }
@@ -2561,11 +2562,11 @@ test('D4-01, D4-03, D4-06: replay entries preserve keys & super mastery on takeo
     section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
     section('function clearActiveMatch() {', 'function aimPower(distance, arrow) {') + '\n' +
     section('let activePlayback = null;', 'const replayStore = (() => {') + '\n' +
-    section('function watchReplay(replay, file) {', 'function endReplayTurn() {') + '\n' +
-    section('let guide = null;', "$('replay-take-over').onclick = playFromHere;") + '\n' +
+    section('let guide = null;', 'const theaterController = createReplayTheater({') + '\n' +
     section('function resolveEquippedSuper(entry, slotIndex = 0) {', 'const POSITIONS = [') + '\n' +
     section('  const onGuestTeam =', '  async function adoptAccountTeam()') + '\n' +
-    __PLAYBACK_PROJ_SHIM__;
+    __PLAYBACK_PROJ_SHIM__ + '\n' +
+    __THEATER_SHIM__;
 
   let newMatchCalls = 0;
   const classes = new Set();
@@ -2669,7 +2670,6 @@ test('D4-01, D4-03, D4-06: replay entries preserve keys & super mastery on takeo
 });
 
 test('D4-04 & D4-07: offlineAudio.playFanfare routes customCtx to OfflineAudioContext with loop:false, and replay/export stop fanfare cleanly', async () => {
-  const exportCode = section('function offlineAudio(offline, seconds) {', 'let videoLogoImage = null;');
   const fanfareCalls = [];
   const fakeUbuAudio = {
     shareMasterChain: () => {},
@@ -2679,9 +2679,8 @@ test('D4-04 & D4-07: offlineAudio.playFanfare routes customCtx to OfflineAudioCo
       return { stop() {} };
     }
   };
-  const { offlineAudio } = runInNewContext(exportCode + '\n;({ offlineAudio });', { Proxy, window: { ubuAudio: fakeUbuAudio } });
   const offlineTarget = { sampleRate: 48000, marker: 'offline-ctx' };
-  const adapter = offlineAudio(offlineTarget, () => 3.25);
+  const adapter = ububallTheater.offlineAudio(fakeUbuAudio, offlineTarget, () => 3.25);
 
   // Simulate presenter.loopFanfare(voice) calling gameAudio().playFanfare(voice, null, null, { loop: true })
   adapter.playFanfare({ pitch: 220 }, null, null, { loop: true, volume: 0.8 });
@@ -2737,8 +2736,8 @@ test('D4-05, D4-08, D4-01: online onState preserves local roster, prevents mid-r
   const code =
     __PLAYBACK_PROJ_SHIM__ + '\n' +
     __PLAYBACK_DRIVER_SHIM__ + '\n' +
-    section('let lastSaved = Promise.resolve(null);', 'const replayClock =') + '\n' +
-    section('let guide = null;', 'function playFromHere() {') + '\n' +
+    section('let lastSaved = Promise.resolve(null);', '// Guides, remembered on this device') + '\n' +
+    section('let guide = null;', 'const theaterController = createReplayTheater({') + '\n' +
     section('function playOnlineReplay() {', 'function onlineNames(s) {') + '\n' +
     onStateCode;
 
@@ -3092,10 +3091,11 @@ test('D4-11, D4-16, D4-17, D4-18, D4-20, D2-10, D4-02: UI icon/grid rules, clear
   const presSrc = fs.readFileSync(require.resolve('../web/ububall-presentation.js'), 'utf8');
   const playbackSrc = fs.readFileSync(require.resolve('../web/ububall-playback.js'), 'utf8');
   const statsSrc = fs.readFileSync(require.resolve('../web/ububall-stats.js'), 'utf8');
+  const theaterSrc = fs.readFileSync(require.resolve('../web/ububall-theater.js'), 'utf8');
   const cssSrc = fs.readFileSync(require.resolve('../web/ububall.css'), 'utf8');
 
   // 1. D4-11: Zero emoji/text-arrow icons across ububall.js and extracted modules
-  for (const [name, txt] of [['ububall.js', source], ['ububall-presentation.js', presSrc], ['ububall-playback.js', playbackSrc], ['ububall-stats.js', statsSrc]]) {
+  for (const [name, txt] of [['ububall.js', source], ['ububall-presentation.js', presSrc], ['ububall-playback.js', playbackSrc], ['ububall-stats.js', statsSrc], ['ububall-theater.js', theaterSrc]]) {
     assert.equal(txt.includes('💫'), false, `${name} has no 💫 emoji icon`);
     assert.equal(txt.includes("'→'"), false, `${name} has no raw → text icon`);
   }

@@ -236,6 +236,10 @@
   const {
     matchMvp, replayFileName, createStatsController
   } = ububallStats;
+  const {
+    anonymousName: formatAnonymousName, createReplayTheater
+  } = ububallTheater;
+  const anonymousName = i => formatAnonymousName(ububallReplay, i);
   const viewFouls = (f, seat) => projectFouls(ububallMatch, f, seat);
   const { projectBody, viewBodies, toViewBody, syncViewBodies } = createBodyProjector({
     P,
@@ -1933,685 +1937,6 @@
     if (s.game.winner != null) recording.final = { scores: [...s.game.scores], winner: s.game.winner };
     saveRecording();
   }
-  // The replay viewer re-simulates each turn from its recorded start, as goal replays do. Seeking
-  // starts from the nearest turn's start and simulates forward without effects.
-  const replayClock = ticks => { const sec = Math.floor(ticks * P.DT); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
-  function watchReplay(replay, file) {
-    saveRecording(); stopDemo(); closeSummary(); endGoalReplay(); stopFanfare(); gameAudio()?.stop();
-    cpuGeneration++; cpuClient.cancel(); cpuClient.dispose?.(); videoLogo();
-    const seat = replay.seat, names = seat ? [...replay.names].reverse() : replay.names;
-    fieldView.mode = replay.mode; document.body.classList.toggle('classic-match', classicMode()); showMode(fieldView.mode);
-    fieldView.entries = onlineOrder(replay.ubus, seat).map((u, i) => replayEntry(u, i, Boolean(replay.anonymous)));
-    stats = fieldView.entries.map(entry => classicMode() ? normalStats() : { ...entry.model.stats });
-    $('home-label').textContent = names[0]; $('opponent-label').textContent = names[1]; $('opponent-heading').textContent = `${names[1]}'s team`;
-    fieldView.bodies = kickoff(true); buildTeam(); phase = 'replay'; selected = 0; drag = null;
-    theater = createReplaySession(replay, { file, speed: Number($('replay-speed').value), anonymous: Boolean(replay.anonymous) });
-    theater.bodies = fieldView.bodies;
-    say(`Replay · ${names[0]} vs ${names[1]} · ${new Date(replay.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`);
-    replayMarks(); enterMatch('replay'); seekReplay(0, theater);
-  }
-  function clearReplayViewer(toMatch = true) {
-    if (!theater) return false;
-    theater = null;
-    if (toMatch && typeof shot !== 'undefined' && shot === 'replay') {
-      if (typeof setShot === 'function') setShot('match');
-      else { shot = 'match'; if (document.body?.dataset) document.body.dataset.shot = 'match'; }
-    }
-    stopFanfare(); gameAudio()?.stop?.(); clearEffects();
-    return true;
-  }
-  function endReplay() {
-    if (!clearReplayViewer(false)) return;
-    $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
-    phase = 'over'; recording = null;
-    if (typeof updateHome === 'function') updateHome();
-  }
-  function replayEntry(u, i, anon = false) {
-    const model = typeof ubu !== 'undefined' && u.dna ? ubu.decode(ubu.fromCode(u.dna)) : { parts: { fullName: `Ubu ${i + 1}` }, attributes: {}, stats: typeof normalStats === 'function' ? normalStats() : {} };
-    if (anon) model.parts = { ...model.parts, fullName: anonymousName(i) };
-    const base = u.super === null || u.super === undefined ? null : P.SUPERS[u.super];
-    const equippedSuper = base ? { ...base, ...(P.superMastery ? P.superMastery(model.supers, u.super) : {}) } : null;
-    return { key: `replay-${i}`, label: 'Replay ubu', model, dna: u.dna, equippedSuper };
-  }
-  function createReplaySession(replay, { file = null, speed = 1, paused = false, anonymous = false, exporting = false, clock = null, audio = null, field = null } = {}) {
-    const seat = replay.seat ?? 0, anon = Boolean(anonymous || replay.anonymous);
-    const names = anon ? [...ububallReplay.ANONYMOUS] : (seat ? [...replay.names].reverse() : [...replay.names]);
-    const orderedUbus = Array.isArray(replay.ubus) ? onlineOrder(replay.ubus, seat) : [];
-    const liveEntries = typeof fieldView.entries !== 'undefined' ? fieldView.entries : null;
-    const reuseLive = Array.isArray(liveEntries) && liveEntries.length === orderedUbus.length && orderedUbus.every((u, i) => liveEntries[i]?.dna === u.dna && (liveEntries[i]?.equippedSuper?.id ?? null) === (u.super ?? null));
-    const entries = reuseLive ? liveEntries.map((entry, i) => {
-      const base = entry.key ? entry : { ...entry, key: `replay-${i}`, label: 'Replay ubu' };
-      if (!anon) return base;
-      return { ...base, model: { ...base.model, parts: { ...base.model.parts, fullName: anonymousName(i) } } };
-    }) : orderedUbus.map((u, i) => replayEntry(u, i, anon));
-    const canCanvas = exporting && typeof document !== 'undefined' && typeof document.createElement === 'function';
-    const offscreen = canCanvas ? document.createElement('canvas') : null;
-    const offscreenBadges = canCanvas ? document.createElement('canvas') : null;
-    return {
-      replay,
-      file,
-      seat,
-      mode: replay.mode || (typeof fieldView.mode !== 'undefined' ? fieldView.mode : 'standard'),
-      ...ububallReplay.timeline(replay),
-      speed,
-      paused,
-      steps: 0,
-      holdUntil: 0,
-      index: 0,
-      tick: 0,
-      called: false,
-      crowned: false,
-      exporting: Boolean(exporting),
-      anonymous: anon,
-      names,
-      entries,
-      bodies: exporting ? P.kickoff() : (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : P.kickoff()),
-      sim: null,
-      fouls: ububallMatch.newFouls(),
-      viewFouls: ububallMatch.newFouls(),
-      scores: [0, 0],
-      turn: replay.turns?.[0]?.turn ?? 1,
-      plans: Array.from({ length: 3 }, () => (typeof idlePlan === 'function' ? idlePlan() : { angle: 0, power: 0, spin: 0, guard: false })),
-      guide: null,
-      portrait: false,
-      clock,
-      audio,
-      field,
-      canvas: offscreen,
-      ctx: offscreen ? offscreen.getContext('2d') : null,
-      badgeCanvas: offscreenBadges,
-      badgeCtx: offscreenBadges ? offscreenBadges.getContext('2d') : null,
-      fx: exporting ? createEffectsState(entries, typeof materialStyles === 'undefined' ? {} : materialStyles) : null
-    };
-  }
-  function withPlaybackContext(th, fn) {
-    if (!th || activePlayback === th) return fn();
-    const previousPlayback = activePlayback, previousView = fieldView, previousEffects = fieldEffects;
-    activePlayback = th;
-    if (th.exporting) {
-      fieldView = th;
-      fieldEffects = th.fx;
-    }
-    try {
-      return fn();
-    } finally {
-      activePlayback = previousPlayback;
-      fieldView = previousView;
-      fieldEffects = previousEffects;
-    }
-  }
-  function updateReplayFouls(th) {
-    th.viewFouls = viewFouls(th.fouls, th.seat);
-    if (!th.exporting) fouls = th.viewFouls;
-  }
-  function loadReplayTurn(k, fx, th = currentReplay()) {
-    return withPlaybackContext(th, () => {
-      const t = th.replay.turns[k];
-      th.index = k; th.tick = 0; th.called = th.crowned = false; th.sim = ububallReplay.restore(t.bodies);
-      th.fouls = { ...ububallMatch.newFouls(), ...structuredClone(t.fouls) };
-      th.scores = th.seat ? [...t.scores].reverse() : [...t.scores];
-      th.turn = t.turn;
-      if (!th.exporting) { scores = th.scores; turn = th.turn; }
-      th.guide = makeGuide(th.sim, t.plans, th.seat, th.turn, th.scores);
-      // The home cards show the moves this turn was played with.
-      th.plans = th.guide.moves.slice(0, 3);
-      if (!th.exporting) { plans = th.plans; guide = th.guide; }
-      P.startTurn(th.sim, t.plans, fx ? replayFx.super : null);
-      updateReplayFouls(th);
-    });
-  }
-  function stepReplay(fx, th = currentReplay()) {
-    return withPlaybackContext(th, () => {
-      const sim = th.sim;
-      if (fx) P.step(sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super); else P.step(sim, P.DT);
-      ububallMatch.lapseFouls(P, sim, th.fouls);
-      th.tick++;
-      if (fx) replayEvents(th.replay.turns[th.index], th.tick, sim); else { sim[6].spinStruck = false; sim[6].snapStruck = false; }
-      traceGuide(sim, th.guide);
-    });
-  }
-  function seekReplay(at, th = currentReplay(), turnIndex = null) {
-    return withPlaybackContext(th, () => {
-      const turns = th.replay.turns;
-      at = Math.max(0, Math.min(th.total, Math.round(at)));
-      let k = turnIndex ?? 0;
-      if (turnIndex === null) while (k + 1 < turns.length && th.starts[k + 1] <= at) k++;
-      loadReplayTurn(k, false, th);
-      const target = Math.min(at - th.starts[k], turns[k].ticks), span = Math.min(target, Math.round(SEEK_EFFECTS / P.DT));
-      while (th.tick < target - span) stepReplay(false, th);
-      th.holdUntil = 0; th.steps = 0;
-      stopFanfare(); clearEffects(); syncReplay(th);
-      // The last moment before `at` plays with its effects, silently, so the field shows its motion trails,
-      // contact effects and spin as they were then.
-      if (span) {
-        const audio = videoAudio, clock = videoClock, dt = 1 / 60;
-        videoAudio = silentAudio; videoClock = clockNow() - span * P.DT * 1000;
-        try {
-          while (th.tick < target) {
-            for (let n = 0; n < dt / P.DT && th.tick < target; n++) { stepReplay(true, th); syncReplay(th); recordTrails(); }
-            updateReplayFouls(th); emitSkaterEffects(dt);
-            videoClock += dt * 1000; updatePopups(dt, fieldEffects.popups); updateEffects(dt);
-          }
-        } finally { videoAudio = audio; videoClock = clock; }
-      }
-      // A hit-stop met on the way (or left from play, on another clock) does not hold the new moment.
-      if (th.fx) th.fx.hitStopUntil = 0;
-      else hitStopUntil = 0;
-      updateReplayFouls(th);
-      if (!th.exporting) {
-        if (typeof shownScores !== 'undefined') shownScores.splice(0, 2, ...scores);
-        sync(); updateReplayBar();
-      }
-      draw();
-    });
-  }
-  const SEEK_EFFECTS = .4;
-  const silentAudio = new Proxy({}, { get: () => () => null });
-  // At a turn's end its goal is called and held a moment; at the replay's end it pauses. False stops this frame's steps.
-  function endReplayTurn() {
-    const th = arguments[0] || currentReplay();
-    if (typeof withPlaybackContext === 'function' && th && activePlayback !== th && (th !== theater || th.exporting)) {
-      return withPlaybackContext(th, () => endReplayTurn(th));
-    }
-    const t = th.replay.turns[th.index];
-    if (t.goal && !th.called) {
-      th.called = true; th.steps = 0; th.holdUntil = clockNow() + 2500;
-      const team = th.seat ? 1 - t.goal.team : t.goal.team, scorer = t.goal.scorer === null ? null : fieldView.bodies[viewIndex(t.goal.scorer, th.seat)];
-      th.scores[team]++;
-      if (!th.exporting) sync();
-      celebrate(team, fieldView.bodies[6], t.goal.label, scorer);
-      if (typeof loopFanfare === 'function' && scorer?.voice) loopFanfare(scorer.voice);
-      if (typeof lightNet === 'function' && (t.goal.fireball || (typeof ballOnFire === 'function' && ballOnFire()))) lightNet(team);
-      if (!th.exporting && typeof popup === 'function' && t.goal.assist !== null && t.goal.assist !== undefined) {
-        const assistUbu = fieldView.bodies[viewIndex(t.goal.assist, th.seat)];
-        if (assistUbu) popup(assistUbu, 'Assist');
-      }
-      if (!th.exporting) goalTab(team, t.goal.label, scorer?.name || null);
-      return false;
-    }
-    // The match's winning goal: once its call clears, the winner is called before the replay goes on.
-    if (winningTurn(t) && !th.crowned) {
-      th.crowned = true; th.steps = 0; th.holdUntil = clockNow() + WIN_SECONDS * 1000;
-      const team = th.seat ? 1 - t.goal.team : t.goal.team, name = (th.names || [$('home-label').textContent, $('opponent-label').textContent])[team];
-      // A comeback from 3 or more down, or a shutout, as at full time.
-      const deficit = Math.max(...th.replay.turns.map(r => r.scores[1 - t.goal.team] - r.scores[t.goal.team]));
-      celebrate(team, fieldView.bodies[6], name === 'You' ? 'YOU WIN!' : `${name.toUpperCase().slice(0, 16)} WINS!`);
-      fieldEffects.goalCall.name = [`${th.scores[0]}–${th.scores[1]}`, deficit >= 3 && 'Comeback from 3 down!', !th.scores[1 - team] && 'Shutout!'].filter(Boolean).join(' · ');
-      return false;
-    }
-    if (th.index + 1 >= th.replay.turns.length) { stopFanfare(); if (typeof quench === 'function') quench(); th.paused = true; th.steps = 0; return false; }
-    if (t.goal) { stopFanfare(); clearEffects(); }
-    const before = trailPositions();
-    loadReplayTurn(th.index + 1, true); syncReplay();
-    clearDiscontinuousTrails(before);
-    if (!th.exporting) sync();
-    return true;
-  }
-  // The winner's call holds as long as a goal's call shows.
-  const WIN_SECONDS = GOAL_CALL_SECONDS + .6;
-  const winningTurn = t => Boolean(t.goal) && t.scores[t.goal.team] + 1 >= 5;
-  function advanceReplay(delta, th = currentReplay()) {
-    delta = Math.min(1 / 15, Math.max(0, delta));
-    return withPlaybackContext(th, () => {
-      if (!th.paused && clockNow() >= th.holdUntil && clockNow() >= replayHitStop(th)) {
-        runPlaybackTicks(th, delta, th.speed, 240, () => replayHitStop(th), () => {
-          if (th.tick >= th.replay.turns[th.index].ticks) return endReplayTurn(th) ? 'continue' : 'stop';
-          stepReplay(true, th); syncReplay(th); recordTrails();
-        });
-        updateReplayFouls(th);
-        emitSkaterEffects(delta * th.speed);
-      }
-      if (!th.exporting) updateReplayBar();
-      draw();
-    });
-  }
-  function updateReplayBar() {
-    const th = theater || currentReplay(), at = th.starts[th.index] + th.tick, seek = $('replay-seek'), play = $('replay-play');
-    seek.max = th.total;
-    if (!seek.matches(':active')) seek.value = at;
-    $('replay-time').textContent = `${replayClock(at)} / ${replayClock(th.total)}`;
-    play.classList.toggle('paused', th.paused);
-    play.setAttribute('aria-label', th.paused ? 'Play' : 'Pause');
-  }
-  // Goals (tap to watch from just before) and cards along the timeline.
-  function replayMarks() {
-    const th = theater, marks = [];
-    th.replay.turns.forEach((t, k) => {
-      const end = th.starts[k] + t.ticks, left = `${end / th.total * 100}%`;
-      if (t.goal) {
-        const team = th.seat ? 1 - t.goal.team : t.goal.team, scorer = t.goal.scorer === null ? null : fieldView.entries[viewIndex(t.goal.scorer, th.seat)];
-        const mark = document.createElement('button'); mark.type = 'button'; mark.className = `replay-mark ${team ? 'away' : 'home'}`; mark.style.left = left;
-        mark.title = [t.goal.label, scorer?.model.parts.fullName].filter(Boolean).join(' · ');
-        mark.setAttribute('aria-label', mark.title);
-        mark.onclick = () => seekReplay(Math.max(th.starts[k], end - 3 / P.DT));
-        marks.push(mark);
-      }
-      if (t.cards.length) {
-        const mark = document.createElement('span'); mark.className = 'replay-mark card'; mark.style.left = left;
-        marks.push(mark);
-      }
-    });
-    $('replay-marks').replaceChildren(...marks);
-  }
-  $('replay-seek').oninput = event => { if (theater) seekReplay(Number(event.target.value)); };
-  $('replay-play').onclick = () => {
-    const th = theater;
-    if (!th) return;
-    if (th.paused && th.index === th.replay.turns.length - 1 && th.tick >= th.replay.turns[th.index].ticks) seekReplay(0);
-    th.paused = !th.paused; th.steps = 0;
-    if (th.paused) { stopFanfare(); if (typeof quench === 'function') quench(); }
-    updateReplayBar();
-  };
-  $('replay-prev').onclick = () => { const th = theater; if (th) seekReplay(th.starts[Math.max(0, th.tick > 120 ? th.index : th.index - 1)]); };
-  $('replay-next').onclick = () => { const th = theater; if (th && th.index + 1 < th.replay.turns.length) seekReplay(th.starts[th.index + 1]); };
-  gameUi.select($('replay-speed'));
-  $('replay-speed').onchange = event => { if (theater) theater.speed = Number(event.target.value); };
-  // Video export: the replay renders frame by frame on its own clock, faster than real time, into a
-  // 1080p60 H.264 MP4 (web/mp4.js) at a constant 1.5 Mb/s: the flat field needs little, and the
-  // encoder's variable mode overshot low targets several times over. Its sounds are scheduled into
-  // an offline audio context at each frame's time, then encoded as AAC, or Opus where AAC is unavailable.
-  // The frame is laid out in 1920×1080 units and scaled to `width`. The field fills the width, cropped
-  // to the boards, goals and Pulse strip (field y 42–564), under a scorebug band `bug` high: the
-  // field's empty margin above the boards runs beneath the band.
-  const VIDEO = Object.freeze({ width: 1920, height: 1080, fps: 60, bitrate: 1.5e6, keySeconds: 5, hold: 1, bug: 78,
-    field: { x: 0, y: 78 - 42 * 1.92, width: 1920, height: 1152 } });
-  const yieldTask = () => new Promise(resolve => { const channel = new MessageChannel(); channel.port1.onmessage = () => resolve(); channel.port2.postMessage(0); });
-  const ownBytes = d => d instanceof ArrayBuffer ? new Uint8Array(d.slice(0)) : new Uint8Array(d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength));
-  // The game's sound calls, played into `offline` at `seconds()` on the video's timeline.
-  function offlineAudio(offline, seconds) {
-    const A = window.ubuAudio, ctx = new Proxy(offline, {
-      get: (target, key) => key === 'currentTime' ? seconds() : typeof target[key] === 'function' ? target[key].bind(target) : target[key]
-    });
-    // One compressor for the export's mix: a chain per sound made the render several times slower,
-    // and changes loudness by well under a decibel.
-    A.shareMasterChain(ctx);
-    const into = (options = {}) => ({ ...options, ctx });
-    return { getAudioContext: () => ctx, stop: () => A.stopMotion?.(ctx), stopMotion: () => A.stopMotion?.(ctx),
-      playCollision: (voice, o) => A.playCollision(voice, into(o)), playBallHit: o => A.playBallHit(into(o)),
-      playUbuMove: o => A.playUbuMove?.(into(o)), playSpin: o => A.playSpin?.(into(o)), playPuckSlide: o => A.playPuckSlide?.(into(o)),
-      playCarve: o => A.playCarve?.(into(o)), playSlipstream: o => A.playSlipstream?.(into(o)),
-      playSpinStrike: o => A.playSpinStrike?.(into(o)), playFireImpact: o => A.playFireImpact?.(into(o)),
-      playSave: o => A.playSave?.(into(o)), playFirework: o => A.playFirework?.(into(o)),
-      playWallHit: o => A.playWallHit(into(o)), playGoalHit: (type, o) => A.playGoalHit(type, into(o)), playSuper: (key, phase, o) => A.playSuper(key, phase, into(o)),
-      playSizzle: o => A.playSizzle(into(o)), playFoul: (kind, o) => A.playFoul(kind, into(o)),
-      playIronSave: o => A.playIronSave?.(into(o)), playFanfare: (voice, _customCtx, onNote, o) => A.playFanfare?.(voice, ctx, onNote || null, { ...o, loop: false }) };
-  }
-  // Videos and share cards carry the ububall.com logo, loaded the first time one is made.
-  let videoLogoImage = null;
-  function videoLogo() {
-    videoLogoImage ||= Object.assign(new Image(), { src: 'assets/ububall-logo-com.svg' });
-    return videoLogoImage.decode().catch(() => {});
-  }
-  const videoFieldSize = () => ({ width: Math.round(VIDEO.field.width * VIDEO.width / 1920), height: Math.round(VIDEO.field.height * VIDEO.width / 1920) });
-  // A frame: the field, its ubus and their badges, as the stadium shows them, under the scorebug. The
-  // scorebug only changes with a score or turn, so it is drawn once each and reused.
-  function composeFrame(v, session) {
-    const f = VIDEO.field, k = VIDEO.width / 1920;
-    const { names, scores: frameScores, turn: frameTurn, scorebug } = session;
-    const key = `${names}|${frameScores}|${frameTurn}`;
-    if (scorebug?.key !== key) {
-      const { home, away, text, surface } = themeColors, cx = 960, font = scorebug?.font || getComputedStyle(document.body).fontFamily;
-      const layer = scorebug?.layer || Object.assign(document.createElement('canvas'), { width: VIDEO.width, height: Math.ceil(VIDEO.bug * k) }), b = layer.getContext('2d');
-      b.setTransform(k, 0, 0, k, 0, 0); b.clearRect(0, 0, 1920, VIDEO.bug);
-      b.beginPath(); b.roundRect(cx - 560, 9, 1120, 60, 14); b.fillStyle = surface; b.fill();
-      const logo = videoLogoImage?.naturalWidth ? videoLogoImage : rinkLogo, logoHeight = logo.naturalWidth ? 170 * logo.naturalHeight / logo.naturalWidth : 0;
-      if (logoHeight) b.drawImage(logo, cx - 548, 39 - logoHeight / 2, 170, logoHeight);
-      b.textBaseline = 'middle';
-      for (const team of [0, 1]) {
-        const left = team ? cx : cx - 360;
-        b.fillStyle = team ? away : home; b.fillRect(left, 9, 360, 60);
-        b.fillStyle = team ? '#ffffff' : '#1b1e26';
-        b.font = `800 25px ${font}`; b.textAlign = team ? 'right' : 'left';
-        b.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 344 : left + 16, 40);
-        b.font = `800 38px ${font}`; b.textAlign = 'center';
-        b.fillText(String(frameScores[team]), team ? left + 40 : left + 320, 40);
-      }
-      b.fillStyle = text; b.textAlign = 'center'; b.font = `800 23px ${font}`;
-      b.fillText(`T${frameTurn}  REPLAY`, cx + 460, 40);
-      session.scorebug = { key, font, layer };
-    }
-    v.setTransform(1, 0, 0, 1, 0, 0);
-    v.fillStyle = themeColors.background; v.fillRect(0, 0, VIDEO.width, VIDEO.height);
-    v.setTransform(k, 0, 0, k, 0, 0);
-    paintField(v, f.x, f.y, f.width, f.height, session);
-    v.setTransform(1, 0, 0, 1, 0, 0);
-    v.drawImage(session.scorebug.layer, 0, 0);
-  }
-  // The field, its ubus and their badges, the whole 1000×600 field at (x, y) in `width`×`height`.
-  function paintField(v, x, y, width, height, th = currentReplay()) {
-    const scale = width / 1000, fieldCanvas = th?.canvas || fieldView.canvas, fieldBadges = th?.badgeCanvas || fieldView.badgeCanvas, view = th?.bodies || fieldView.bodies;
-    v.drawImage(fieldCanvas, x, y, width, height);
-    view.slice(0, 6).forEach((b, i) => {
-      const entry = th?.entries?.[i], liveEntry = fieldView.entries?.[i];
-      const sprite = (!th || !entry || liveEntry?.dna === entry.dna) ? skaters[i]?.firstChild : null;
-      const size = 2 * b.radius * scale;
-      v.save();
-      v.globalAlpha = b.carded ? .3 : b.superActive === 'ghost' ? .45 : 1;
-      if ((b.stunned || b.stunnedNext) && !b.carded) v.filter = 'grayscale(0.8) brightness(0.7)';
-      v.translate(x + b.x * scale, y + b.y * scale); v.rotate(b.rotation);
-      const readyCanvas = typeof HTMLCanvasElement !== 'undefined' && sprite instanceof HTMLCanvasElement && sprite.width > 0;
-      const readyImage = typeof HTMLImageElement !== 'undefined' && sprite instanceof HTMLImageElement && sprite.complete && sprite.naturalWidth > 0;
-      if (readyCanvas || readyImage) {
-        v.drawImage(sprite, -size / 2, -size / 2, size, size);
-      } else {
-        v.beginPath();
-        v.arc(0, 0, size / 2, 0, Math.PI * 2);
-        v.fillStyle = i < 3 ? (themeColors?.home || '#00e5ff') : (themeColors?.away || '#ff4d6d');
-        v.fill();
-      }
-      v.restore();
-    });
-    v.drawImage(fieldBadges, x, y, width, height);
-  }
-  async function encodeAudio(buffer, length) {
-    if (!buffer || !('AudioEncoder' in window)) return null;
-    const rate = buffer.sampleRate;
-    for (const [codec, bitrate, frame] of [['mp4a.40.2', 160000, 1024], ['opus', 128000, 960]]) {
-      const config = { codec, bitrate, sampleRate: rate, numberOfChannels: 2 };
-      if (!(await AudioEncoder.isConfigSupported(config).catch(() => ({}))).supported) continue;
-      const samples = [];
-      let description = null, failure = null;
-      const encoder = new AudioEncoder({ error: error => { failure = error; }, output: (chunk, meta) => {
-        if (meta?.decoderConfig?.description) description = ownBytes(meta.decoderConfig.description);
-        const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
-        samples.push({ data, duration: chunk.duration ? Math.round(chunk.duration * rate / 1e6) : frame });
-      } });
-      encoder.configure(config);
-      const left = buffer.getChannelData(0), right = buffer.getChannelData(1);
-      for (let at = 0; at < length; at += 4800) {
-        const n = Math.min(4800, length - at), data = new Float32Array(n * 2);
-        data.set(left.subarray(at, at + n)); data.set(right.subarray(at, at + n), n);
-        const audio = new AudioData({ format: 'f32-planar', sampleRate: rate, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(at * 1e6 / rate), data });
-        encoder.encode(audio); audio.close();
-      }
-      await encoder.flush(); encoder.close();
-      if (failure) throw failure;
-      const opus = codec === 'opus';
-      // AAC-LC at 48 kHz in stereo, should the encoder not describe itself.
-      return { codec: opus ? 'opus' : 'mp4a', channels: 2, sampleRate: rate, timescale: rate, bitrate, samples,
-        description: opus ? null : description || Uint8Array.of(0x11, 0x90), preSkip: opus ? ububallMP4.opusPreSkip(description) : undefined };
-    }
-    return null;
-  }
-  let videoCancelled = false, exportingVideo = false, cancelVideo = null;
-  const isExporting = () => exportingVideo || Boolean(theater?.exporting);
-  // Renders `slice` (see exportSlice) in the export dialog, which is already open.
-  async function exportVideo(slice) {
-    const dialog = $('export-dialog'), status = $('export-status'), progress = $('export-progress'), close = $('export-close');
-    videoCancelled = false; exportingVideo = true; progress.value = 0; progress.hidden = false; status.textContent = 'Preparing…';
-    let session = null, out = null, encoder = null, blob = null, stopAudio = null;
-    try {
-      if (typeof ububallMP4 === 'undefined' && window.loadMp4Script) await window.loadMp4Script();
-      let config = null;
-      search: for (const codec of ['avc1.64002A', 'avc1.4D402A', 'avc1.42E02A']) {
-        for (const bitrateMode of ['constant', 'variable']) {
-          if (videoCancelled) break search;
-          const option = { codec, width: VIDEO.width, height: VIDEO.height, bitrate: VIDEO.bitrate, bitrateMode, framerate: VIDEO.fps, avc: { format: 'avc' } };
-          if ((await VideoEncoder.isConfigSupported(option).catch(() => ({}))).supported) { config = option; break search; }
-        }
-      }
-      if (!videoCancelled && !config) { status.textContent = 'This browser cannot encode MP4 video.'; progress.hidden = true; close.textContent = 'Close'; return; }
-      if (!videoCancelled) await Promise.all([videoLogo(), ...skaters.map(node => node?.firstChild?.decode?.().catch(() => {}))]);
-      if (!videoCancelled) {
-        session = createReplaySession(slice.replay, {
-          file: slice.file,
-          speed: 1,
-          paused: false,
-          anonymous: Boolean(slice.hidden || slice.replay.anonymous),
-          exporting: true,
-          clock: 0,
-          field: videoFieldSize()
-        });
-        // Reserve audio for the full replay, including rounded holds and frames split by hit-stop.
-        const holdFrames = Math.ceil(VIDEO.hold * VIDEO.fps), rate = 48000;
-        const frameBudget = 1 + holdFrames + session.replay.turns.reduce((frames, t) => frames +
-          Math.ceil(t.ticks * P.DT * VIDEO.fps) + 1 +
-          t.stops.reduce((extra, stop) => extra + Math.ceil(stop.ms * VIDEO.fps / 1000) + 1, 0) +
-          (t.goal ? Math.ceil(2.5 * VIDEO.fps) + 1 : 0) +
-          (winningTurn(t) ? Math.ceil(WIN_SECONDS * VIDEO.fps) + 1 : 0), 0);
-        const maxFrames = 5 * 60 * VIDEO.fps;
-        if (frameBudget > maxFrames) {
-          status.textContent = 'This replay is too long to export as an MP4 (5 minutes maximum). Export a single round or turn instead.';
-          progress.hidden = true; close.textContent = 'Close'; return;
-        }
-        const offline = new OfflineAudioContext(2, Math.ceil(frameBudget / VIDEO.fps * rate), rate);
-        out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
-        const v = out.getContext('2d'), samples = [];
-        let description = null, failure = null, wakeQueue = null;
-        const wake = () => { if (wakeQueue) { const fn = wakeQueue; wakeQueue = null; fn(); } };
-        cancelVideo = wake;
-        encoder = new VideoEncoder({ error: error => { failure = error; wake(); }, output: (chunk, meta) => {
-          if (meta?.decoderConfig?.description) description = ownBytes(meta.decoderConfig.description);
-          const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
-          samples.push({ data, duration: 90000 / VIDEO.fps, key: chunk.type === 'key' });
-        } });
-        encoder.addEventListener('dequeue', wake);
-        encoder.configure(config);
-        session.audio = offlineAudio(offline, () => session.clock / 1000);
-        // The sound renders alongside the video, a second behind it: it pauses at each second until the
-        // video has scheduled every sound up to the next, so nothing is scheduled where it has already rendered.
-        let waiting = null, videoDone = false;
-        const pump = () => {
-          if (waiting !== null && (videoDone || session.clock / 1000 >= waiting + 1)) {
-            waiting = null;
-            try { offline.resume()?.catch?.(() => {}); } catch {}
-          }
-        };
-        stopAudio = () => {
-          if (session) session.audio = null;
-          videoDone = true;
-          pump();
-        };
-        for (let mark = 1; mark < offline.length / rate; mark++) offline.suspend(mark).then(() => { waiting = mark; pump(); }, () => {});
-        const rendering = offline.startRendering();
-        rendering?.catch?.(() => {});
-        gameAudio()?.stop();
-        seekReplay(0, session);
-        let frames = 0, endFrame = Infinity;
-        for (; frames < endFrame && !videoCancelled && !failure; frames++) {
-          const f = frames;
-          if (f) {
-            session.clock = f * 1000 / VIDEO.fps;
-            updatePopups(1 / VIDEO.fps, session.fx.popups);
-            withPlaybackContext(session, () => {
-              updateEffects(1 / VIDEO.fps, session.fx);
-              advanceReplay(1 / VIDEO.fps, session);
-            });
-          }
-          composeFrame(v, session);
-          if (session.paused && endFrame === Infinity) endFrame = f + holdFrames;
-          const frame = new VideoFrame(out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
-          encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
-          pump();
-          while (encoder.encodeQueueSize > 4 && !videoCancelled && !failure) {
-            await new Promise(resolve => {
-              wakeQueue = resolve;
-              setTimeout(wake, 3000);
-            });
-          }
-          if (f % 15 === 0) { progress.value = .9 * f / Math.min(endFrame, frameBudget); status.textContent = `Rendering ${replayClock(f / VIDEO.fps / P.DT)}…`; await yieldTask(); }
-        }
-        if (!videoCancelled && !failure) await encoder.flush();
-        if (failure) throw failure;
-        if (!videoCancelled) {
-          stopAudio();
-          status.textContent = 'Mixing sound…';
-          const audio = await encodeAudio(await rendering, Math.round(frames / VIDEO.fps * rate));
-          if (!videoCancelled) {
-            blob = new Blob(ububallMP4.write({ width: VIDEO.width, height: VIDEO.height, timescale: 90000, description, samples }, audio), { type: 'video/mp4' });
-            if (!audio) status.textContent = 'This browser cannot encode sound, so the video is silent.';
-          }
-        }
-      }
-    } catch (error) {
-      status.textContent = `The video could not be made: ${error.message}`;
-    } finally {
-      cancelVideo = null;
-      stopFanfare();
-      stopAudio?.();
-      if (encoder && encoder.state !== 'closed') encoder.close();
-      if (session?.fx?.sizzle) { session.fx.sizzle.stop?.(); session.fx.sizzle = null; }
-      if (out) { out.width = 0; out.height = 0; }
-      if (session?.canvas) { session.canvas.width = 0; session.canvas.height = 0; }
-      if (session?.badgeCanvas) { session.badgeCanvas.width = 0; session.badgeCanvas.height = 0; }
-      if (session?.scorebug?.layer) { session.scorebug.layer.width = 0; session.scorebug.layer.height = 0; }
-      exportingVideo = false;
-    }
-    close.textContent = 'Close';
-    if (videoCancelled) { dialog.close(); return; }
-    if (!blob) return;
-    progress.value = 1;
-    const name = replayFileName(slice.replay.recorded, slice.replay.title) + '.mp4';
-    const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
-    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
-    status.textContent = `${status.textContent.startsWith('This browser') ? status.textContent + ' ' : ''}Saved ${name} (${(blob.size / 1e6).toFixed(1)} MB).`;
-  }
-  // Export: the whole replay, the round around the current turn (from its kickoff through its goal;
-  // see ububallReplay.roundRange) or the turn alone, as an MP4 video or a .ububall file. With names
-  // hidden, the teams become Saffron and Amethyst and the ubus lose their names (ububallReplay.anonymize).
-  let exportKind = 'video';
-  const anonymousName = i => `${ububallReplay.ANONYMOUS[i < 3 ? 0 : 1]} ${i % 3 + 1}`;
-  function exportRange(range) {
-    const th = theater, last = th.replay.turns.length - 1;
-    return range === 'match' ? [0, last] : range === 'round' ? ububallReplay.roundRange(th.replay, th.index) : [th.index, th.index];
-  }
-  // Rounds are numbered by the goals before them.
-  function rangeLabel(r, range, from, to) {
-    const turns = from === to ? `Turn ${r.turns[from].turn}` : `Turns ${r.turns[from].turn}–${r.turns[to].turn}`;
-    return range === 'round' ? `Round ${r.turns[from].scores[0] + r.turns[from].scores[1] + 1} · ${turns}` : turns;
-  }
-  // The replay to export, with its stored file when that is exactly it; a part becomes a clip named after its turns.
-  function exportSlice(range, hidden) {
-    const th = theater, r = th.replay, [from, to] = exportRange(range), whole = from === 0 && to === r.turns.length - 1;
-    hidden &&= !r.anonymous;
-    const names = hidden ? ububallReplay.ANONYMOUS : th.seat ? [...r.names].reverse() : r.names;
-    const title = whole ? (hidden ? null : r.title) : `${rangeLabel(r, range, from, to)} · ${names[0]} vs ${names[1]}`.slice(0, ububallReplay.MAX_TITLE).trim();
-    const replay = whole ? r : ububallReplay.clip(r, from, to, title);
-    return { replay: hidden ? ububallReplay.anonymize(replay, title) : replay, file: whole && !hidden ? th.file : null, hidden };
-  }
-  function openExport(kind) {
-    const th = theater;
-    if (!th || isExporting()) return;
-    if (kind === 'video' && window.loadMp4Script) void window.loadMp4Script();
-    exportKind = kind;
-    $('export-title').textContent = kind === 'video' ? 'Export video' : 'Export replay';
-    $('export-note').textContent = kind === 'video' ? 'Saves an MP4 video with sound.' : 'Saves a .ububall file to watch in ububall.';
-    for (const button of $('export-options').querySelectorAll('button')) {
-      const [from, to] = exportRange(button.dataset.range);
-      button.querySelector('small').textContent = `${rangeLabel(th.replay, button.dataset.range, from, to)} · ${replayClock(th.replay.turns.slice(from, to + 1).reduce((n, t) => n + t.ticks, 0))}`;
-    }
-    // A replay already without names has none to hide.
-    $('export-private').closest('label').hidden = th.replay.anonymous;
-    try { $('export-private').checked = localStorage.getItem('ububall-export-private') === 'on'; } catch {}
-    $('export-options').hidden = false; $('export-progress').hidden = true; $('export-status').textContent = ''; $('export-close').textContent = 'Cancel';
-    $('export-dialog').showModal();
-  }
-  $('export-private').onchange = event => { try { localStorage.setItem('ububall-export-private', event.target.checked ? 'on' : 'off'); } catch {} };
-  $('export-options').onclick = async event => {
-    const range = event.target.closest('button')?.dataset.range;
-    if (!range || !theater) return;
-    $('export-options').hidden = true;
-    const slice = exportSlice(range, $('export-private').checked);
-    if (exportKind === 'video') { await exportVideo(slice); return; }
-    try {
-      downloadReplay(slice.file || await ububallReplay.write(slice.replay), slice.replay.recorded, slice.replay.title);
-      $('export-status').textContent = `Saved ${replayFileName(slice.replay.recorded, slice.replay.title)}.ububall.`;
-    } catch (error) { $('export-status').textContent = error.message; }
-    $('export-close').textContent = 'Close';
-  };
-  $('replay-export-video').hidden = !('VideoEncoder' in window && 'OfflineAudioContext' in window);
-  $('replay-export-video').onclick = () => openExport('video');
-  $('replay-export-file').onclick = () => openExport('replay');
-  // Share: the moment on screen as a 1080×980 card, the scorebug over the field (cropped to the boards
-  // and goals, y 42–550, leaving out the Pulse timer) with its effects and any moves or trails, and a
-  // line inviting others to play over the logo and what ububall is. It draws straight into the dialog's canvas and is
-  // encoded only when shared or saved.
-  const CARD = { width: 1080, height: 980, field: 146, crop: [42, 550], cta: 'Collect & Collide at', tagline: '3v3 turn-based hockey' };
-  let cardImage = null;
-  function drawShareCard(hidden) {
-    const th = theater;
-    if (!th) return;
-    const out = $('share-card'), g = out.getContext('2d'), { home, away, text, surface, background } = themeColors;
-    const anon = Boolean(hidden || th.replay.anonymous), portrait = fieldView.portrait, prevAnon = fieldView.anonymous;
-    const names = anon ? ububallReplay.ANONYMOUS : (th.names || [$('home-label').textContent, $('opponent-label').textContent]);
-    const cardScores = th.scores || scores, cardTurn = th.turn ?? turn;
-    const font = getComputedStyle(document.body).fontFamily;
-    const k = CARD.width / 1000, [cropTop, cropBottom] = CARD.crop, fieldBottom = CARD.field + (cropBottom - cropTop) * k;
-    g.fillStyle = background; g.fillRect(0, 0, CARD.width, CARD.height);
-    try {
-      fieldView.portrait = false; cardShot = true; fieldView.anonymous = anon; fieldView.field = { width: CARD.width, height: 600 * k }; draw();
-      g.save(); g.beginPath(); g.rect(0, CARD.field, CARD.width, fieldBottom - CARD.field); g.clip();
-      paintField(g, 0, CARD.field - cropTop * k, CARD.width, 600 * k, th);
-      g.restore();
-    } finally {
-      fieldView.field = null; cardShot = false; fieldView.anonymous = prevAnon; fieldView.portrait = portrait; layoutDirty = true; draw();
-    }
-    // Scorebug, as wide as the rink's flat top (x 160–840): each team's name and score, the turn between them.
-    const bugLeft = 160 * k, bugWidth = 680 * k, middle = 110, side = (bugWidth - middle) / 2;
-    g.textBaseline = 'middle';
-    g.save(); g.beginPath(); g.roundRect(bugLeft, 36, bugWidth, 90, 18); g.clip();
-    for (const team of [0, 1]) {
-      const left = team ? bugLeft + side + middle : bugLeft;
-      g.fillStyle = team ? away : home; g.fillRect(left, 36, side, 90);
-      g.fillStyle = team ? '#ffffff' : '#1b1e26';
-      g.font = `800 52px ${font}`; g.textAlign = 'center';
-      g.fillText(String(cardScores[team]), team ? left + 42 : left + side - 42, 83);
-      // Names shrink to fit beside the score.
-      const name = names[team].toUpperCase().slice(0, 16), room = side - 100;
-      let size = 28;
-      do g.font = `800 ${size}px ${font}`; while (g.measureText(name).width > room && --size > 14);
-      g.textAlign = team ? 'right' : 'left';
-      g.fillText(name, team ? left + side - 18 : left + 18, 82, room);
-    }
-    g.fillStyle = surface; g.fillRect(bugLeft + side, 36, middle, 90);
-    g.fillStyle = text; g.textAlign = 'center'; g.font = `800 28px ${font}`; g.fillText(`T${cardTurn}`, CARD.width / 2, 82);
-    g.restore();
-    // The invitation, the logo and what the game is.
-    g.textBaseline = 'alphabetic'; g.textAlign = 'center'; g.fillStyle = text; g.font = `400 34px 'Uburoom Sans', ${font}`;
-    g.fillText(CARD.cta, CARD.width / 2, fieldBottom + 60);
-    const logo = videoLogoImage, logoWidth = 500, logoHeight = logo?.naturalWidth ? logoWidth * logo.naturalHeight / logo.naturalWidth : 0;
-    if (logoHeight) g.drawImage(logo, (CARD.width - logoWidth) / 2, fieldBottom + 80, logoWidth, logoHeight);
-    g.font = `400 40px 'Uburoom Sans', ${font}`; g.fillStyle = text;
-    g.fillText(CARD.tagline, CARD.width / 2, fieldBottom + 100 + logoHeight + 30);
-    // Encoding starts now so sharing does not wait on it.
-    const name = `${replayFileName(th.replay.recorded, hidden ? null : th.replay.title)}-turn-${cardTurn}.png`;
-    cardImage = new Promise((resolve, reject) => out.toBlob(blob => {
-      if (blob) resolve(new File([blob], name, { type: 'image/png' }));
-      else reject(new Error('Could not create share card image.'));
-    }, 'image/png'));
-  }
-  async function openShare() {
-    const th = theater;
-    if (!th || isExporting()) return;
-    await Promise.all([videoLogo(), document.fonts.load(`40px 'Uburoom Sans'`).catch(() => {}), ...skaters.map(node => node?.firstChild?.decode?.().catch(() => {}))]);
-    if (theater !== th || isExporting()) return;
-    $('share-private').closest('label').hidden = th.replay.anonymous;
-    try { $('share-private').checked = localStorage.getItem('ububall-export-private') === 'on'; } catch {}
-    drawShareCard($('share-private').checked);
-    $('share-dialog').showModal();
-  }
-  // Devices that can share files get Share and Save; others only Save.
-  const canShareFiles = Boolean(navigator.canShare?.({ files: [new File([], 'card.png', { type: 'image/png' })] }));
-  $('share-send').hidden = !canShareFiles;
-  $('share-save').classList.toggle('primary', !canShareFiles);
-  $('replay-card').onclick = openShare;
-  $('share-private').onchange = event => {
-    try { localStorage.setItem('ububall-export-private', event.target.checked ? 'on' : 'off'); } catch {}
-    drawShareCard(event.target.checked);
-  };
-  $('share-send').onclick = async () => {
-    try { await navigator.share({ files: [await cardImage], text: 'A moment from ububall. Play at https://ububall.com' }); } catch {}
-  };
-  $('share-save').onclick = async () => {
-    try {
-      const file = await cardImage, link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: file.name });
-      link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
-    } catch {}
-  };
-  $('share-close').onclick = () => $('share-dialog').close();
-  // Closing while a video renders cancels it.
-  $('export-close').onclick = () => { if (isExporting()) { videoCancelled = true; cancelVideo?.(); } else $('export-dialog').close(); };
-  $('export-dialog').addEventListener('cancel', event => { if (isExporting()) { event.preventDefault(); videoCancelled = true; cancelVideo?.(); } });
   // Guides, remembered on this device and set from the pause menu or the replay viewer: Moves draws each
   // ubu's launch (its guard and armed super) from where the turn started; Trails draws the path each body
   // has taken this turn. In play, Moves shows while the turn plays and Trails until the next launch (not
@@ -2654,40 +1979,138 @@
     if (phase === 'play') return guide.turn === turn;
     return key === 'trails' && guide.turn === turn - 1 && guide.goals === scores[0] + scores[1];
   }
-  // Play from here: a match against the CPU from the start of the turn on screen, playing the left team.
-  function playFromHere() {
-    const th = theater;
-    if (!th || (typeof isExporting === 'function' ? isExporting() : th.exporting)) return;
-    const t = th.replay.turns[th.index], [roundStart] = ububallReplay.roundRange(th.replay, th.index), entries = fieldView.entries;
-    const field = stripPresentation(transformSimSeat(ububallReplay.restore(t.bodies), th.seat));
-    field.forEach((b, i) => {
-      // Meter cooldowns counted the recorded match's clock; this match starts its own.
-      delete b.meterTick;
-      if (i < 6) {
-        b.personality = entries[i]?.model?.personality;
-        const rawSuper = entries[i]?.equippedSuper;
-        const sObj = classicMode() ? null : (rawSuper
-          ? (rawSuper.bonusTicks !== undefined ? rawSuper : { ...rawSuper, ...(P.superMastery ? P.superMastery(entries[i]?.model?.supers, rawSuper.id) : {}) })
-          : resolveEquippedSuper(entries[i], i));
-        b.equippedSuper = sObj ? { id: sObj.id, key: sObj.key, bonusTicks: sObj.bonusTicks || 0, bonusRefund: sObj.bonusRefund || 0 } : null;
-        b.superBonusTicks = sObj?.bonusTicks || 0;
-        b.superBonusRefund = sObj?.bonusRefund || 0;
-      }
-    });
-    stopFanfare(); gameAudio()?.stop();
-    theater = null; clearEffects(); enterMatch('match');
-    $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
-    roster = entries.slice(0, 3).map((e, i) => e.key ? e : { ...e, key: `replay-${i}`, label: e.label || 'Replay ubu' });
-    simBodies = field;
-    syncViewBodies(simBodies, 0);
-    scores = th.seat ? [...t.scores].reverse() : [...t.scores]; turn = t.turn;
-    fouls = viewFouls({ ...ububallMatch.newFouls(), ...structuredClone(t.fouls) }, th.seat);
-    play = ububallMatch.newPlay(); tally = ububallMatch.newTally(); roundTurns = th.index - roundStart; matchTicks = 0; playSegments = [];
-    selected = 0; drag = null; elapsed = accumulator = 0; phase = 'plan';
-    recording = ububallReplay.create({ mode: fieldView.mode, names: ['You', 'CPU'], ubus: simBodies.slice(0, 6).map((b, i) => ({ dna: entries[i].dna, super: b.equippedSuper?.id ?? null })) });
-    buildTeam(); resetPlans(); if (typeof saveActiveMatch === 'function') saveActiveMatch(); say('Playing from the replay. Plan your launches.'); draw();
-  }
-  $('replay-take-over').onclick = playFromHere;
+  const theaterController = createReplayTheater({
+    $,
+    window,
+    document,
+    navigator,
+    localStorage,
+    getComputedStyle,
+    MessageChannel,
+    Blob,
+    File,
+    Image,
+    URL,
+    HTMLCanvasElement: typeof HTMLCanvasElement !== 'undefined' ? HTMLCanvasElement : null,
+    HTMLImageElement: typeof HTMLImageElement !== 'undefined' ? HTMLImageElement : null,
+    VideoEncoder: typeof VideoEncoder !== 'undefined' ? VideoEncoder : null,
+    VideoFrame: typeof VideoFrame !== 'undefined' ? VideoFrame : null,
+    AudioEncoder: typeof AudioEncoder !== 'undefined' ? AudioEncoder : null,
+    AudioData: typeof AudioData !== 'undefined' ? AudioData : null,
+    OfflineAudioContext: typeof OfflineAudioContext !== 'undefined' ? OfflineAudioContext : null,
+    setTimeout,
+    P,
+    ubu,
+    ububallMatch,
+    ububallReplay,
+    getMp4: () => (typeof ububallMP4 !== 'undefined' ? ububallMP4 : window.ububallMP4),
+    gameUi,
+    GOAL_CALL_SECONDS,
+    materialStyles,
+    createEffectsState,
+    onlineOrder,
+    viewIndex,
+    stripPresentation,
+    transformSimSeat,
+    viewFouls: (f, seat) => viewFouls(f, seat),
+    runPlaybackTicks,
+    replayEvents: (turnObj, tick, sim) => replayEvents(turnObj, tick, sim),
+    getReplayFx: () => replayFx,
+    replayHitStop: th => replayHitStop(th),
+    syncReplay: th => syncReplay(th),
+    makeGuide: (sim, turnPlans, seat, gTurn, gScores) => makeGuide(sim, turnPlans, seat, gTurn, gScores),
+    traceGuide: (sim, g) => traceGuide(sim, g),
+    recordTrails: () => recordTrails(),
+    trailPositions: () => trailPositions(),
+    clearDiscontinuousTrails: before => clearDiscontinuousTrails(before),
+    emitSkaterEffects: dt => emitSkaterEffects(dt),
+    updatePopups: (dt, popups) => updatePopups(dt, popups),
+    updateEffects: (dt, fx) => updateEffects(dt, fx),
+    clearEffects: () => clearEffects(),
+    celebrate: (team, ball, label, scorer) => celebrate(team, ball, label, scorer),
+    loopFanfare: voice => loopFanfare(voice),
+    stopFanfare: () => stopFanfare(),
+    quench: () => quench(),
+    lightNet: team => lightNet(team),
+    ballOnFire: () => ballOnFire(),
+    popup: (body, text) => popup(body, text),
+    goalTab: (team, label, scorer) => goalTab(team, label, scorer),
+    replayFileName: (recorded, title) => replayFileName(recorded, title),
+    downloadReplay: (file, recorded, title) => downloadReplay(file, recorded, title),
+    rinkLogo,
+    getThemeColors: () => getThemeColors(),
+    getSkaters: () => skaters,
+    clockNow: () => clockNow(),
+    gameAudio: () => gameAudio(),
+    classicMode: () => classicMode(),
+    normalStats: () => normalStats(),
+    idlePlan: () => idlePlan(),
+    resolveEquippedSuper: (entry, i) => resolveEquippedSuper(entry, i),
+    kickoff: isNew => kickoff(isNew),
+    buildTeam: () => buildTeam(),
+    resetPlans: keep => resetPlans(keep),
+    saveRecording: () => saveRecording(),
+    saveActiveMatch: state => saveActiveMatch(state),
+    stopDemo: () => stopDemo(),
+    closeSummary: () => closeSummary(),
+    endGoalReplay: () => endGoalReplay(),
+    showMode: m => showMode(m),
+    enterMatch: next => enterMatch(next),
+    setShot: next => {
+      if (typeof setShot === 'function') setShot(next);
+      else { shot = next; if (document.body?.dataset) document.body.dataset.shot = next; }
+    },
+    updateHome: () => updateHome(),
+    bumpCpuGeneration: () => { cpuGeneration++; cpuClient.cancel(); cpuClient.dispose?.(); },
+    say: msg => say(msg),
+    sync: () => sync(),
+    draw: () => draw(),
+    getTheater: () => theater,
+    setTheater: next => { theater = next; },
+    getActivePlayback: () => activePlayback,
+    setActivePlayback: next => { activePlayback = next; },
+    getFieldView: () => fieldView,
+    setFieldView: next => { fieldView = next; },
+    getFieldEffects: () => fieldEffects,
+    setFieldEffects: next => { fieldEffects = next; },
+    getVideoAudio: () => videoAudio,
+    setVideoAudio: next => { videoAudio = next; },
+    getVideoClock: () => videoClock,
+    setVideoClock: next => { videoClock = next; },
+    setCardShot: next => { cardShot = next; },
+    markLayoutDirty: () => { layoutDirty = true; },
+    setHitStopUntil: next => { hitStopUntil = next; },
+    getShot: () => shot,
+    getScores: () => scores,
+    getTurn: () => turn,
+    syncShownScores: sc => { shownScores.splice(0, 2, ...sc); },
+    setFouls: next => { fouls = next; },
+    onWatchReplayLoaded: ({ stats: nextStats }) => {
+      stats = nextStats;
+      phase = 'replay'; selected = 0; drag = null;
+    },
+    onEndReplayState: () => {
+      phase = 'over'; recording = null;
+    },
+    onLoadReplayTurnState: ({ scores: sc, turn: tn, plans: pl, guide: gd }) => {
+      scores = sc; turn = tn; plans = pl; guide = gd;
+    },
+    onPlayFromHereState: ({ roster: nextRoster, simBodies: nextSim, scores: nextScores, turn: nextTurn, fouls: nextFouls, roundTurns: nextRoundTurns, recording: nextRec }) => {
+      roster = nextRoster;
+      simBodies = nextSim;
+      syncViewBodies(simBodies, 0);
+      scores = nextScores; turn = nextTurn; fouls = nextFouls;
+      play = ububallMatch.newPlay(); tally = ububallMatch.newTally();
+      roundTurns = nextRoundTurns; matchTicks = 0; playSegments = [];
+      selected = 0; drag = null; elapsed = accumulator = 0; phase = 'plan';
+      recording = nextRec;
+    }
+  });
+  theaterController.bindEvents();
+  const {
+    isExporting, cancelExport, watchReplay, clearReplayViewer, endReplay,
+    seekReplay, advanceReplay, updateReplayBar, playFromHere
+  } = theaterController;
   const statsController = createStatsController({
     $,
     document,
@@ -4017,7 +3440,7 @@
     closeSummary();
     stopFanfare();
     gameAudio()?.stopMotion?.();
-    if (isExporting()) { videoCancelled = true; cancelVideo?.(); }
+    if (typeof isExporting === 'function' && isExporting()) { if (typeof cancelExport === 'function') cancelExport(); else { videoCancelled = true; cancelVideo?.(); } }
     returnShot = homeShot;
     returnPortrait = false;
     if (typeof closeSheet === 'function') closeSheet();
@@ -4176,7 +3599,7 @@
     closeSummary();
     stopFanfare();
     gameAudio()?.stopMotion?.();
-    if (isExporting()) { videoCancelled = true; cancelVideo?.(); }
+    if (typeof isExporting === 'function' && isExporting()) { if (typeof cancelExport === 'function') cancelExport(); else { videoCancelled = true; cancelVideo?.(); } }
     returnShot = homeShot;
     returnPortrait = false;
     handoffToMatch = false;

@@ -2,7 +2,7 @@
   "name": "ububall",
   "private": true,
   "scripts": {
-    "test": "node --test --test-reporter=dot test/ubu-audio.test.js test/ububall-effects.test.js test/ububall-stats.test.js test/ububall-playback.test.js test/ubu-render.test.js test/ububall.test.js test/ububall-cpu.test.js test/ububall-match.test.js test/ububall-replay.test.js test/mp4.test.js test/ubu.test.js test/ubu-archetype.test.js test/ubu-file.test.js test/rarity.test.js test/ubu-list.test.js test/mint.test.js test/auth.test.mjs test/deploy-config.test.cjs test/install-entry.test.cjs",
+    "test": "node --test --test-reporter=dot test/ubu-audio.test.js test/ububall-effects.test.js test/ububall-stats.test.js test/ububall-theater.test.js test/ububall-playback.test.js test/ubu-render.test.js test/ububall.test.js test/ububall-cpu.test.js test/ububall-match.test.js test/ububall-replay.test.js test/mp4.test.js test/ubu.test.js test/ubu-archetype.test.js test/ubu-file.test.js test/rarity.test.js test/ubu-list.test.js test/mint.test.js test/auth.test.mjs test/deploy-config.test.cjs test/install-entry.test.cjs",
     "dev": "node scripts/prepare-assets.cjs && wrangler dev --local --ip 127.0.0.1 --port 8790",
     "test:worker": "node scripts/prepare-assets.cjs && node --test --test-reporter=dot test/worker.integration.mjs",
     "test:cpu": "node --test --test-reporter=dot test/ububall-cpu.test.js",
