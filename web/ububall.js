@@ -25,6 +25,7 @@
   fieldView.anonymous = false;
   // The replay viewer (see watchReplay), and the match being recorded for the replay library.
   let theater = null, recording = null, recordingOnline = false, restoredMatch = false;
+  let cast = null, setupShot = false; // The team setup shot and its skating cast (see camera()).
   // While a video export renders, effects and sounds run on its clock (ms) instead of the wall clock,
   // sounds go to its offline audio, and the field draws at its size.
   let videoClock = null, videoAudio = null, cardShot = false;
@@ -234,7 +235,7 @@
     getEffects: () => fieldEffects,
     getActivePlayback: () => (typeof activePlayback !== 'undefined' ? activePlayback : null),
     getTheater: () => theater,
-    getPhase: () => phase,
+    getPhase: () => cast ? 'cast' : phase, // No aim arrows or selection while the cast skates off or on.
     getPlans: () => plans,
     getSelected: () => selected,
     getTurn: () => turn,
@@ -1272,6 +1273,74 @@
     themeColors = presenter.getThemeColors();
     presenter.drawScene();
     if (!fieldView.field) updateFoulInfo();
+  }
+  // The camera. A layout change is made at once, then the rink stage is played from the box it had
+  // to the box it now has, so the rink glides between the home, setup and match layouts. Portrait
+  // play and reduced motion cut. See docs/rink-stage.md.
+  let cameraMove = null;
+  function camera(change) {
+    const from = rinkStage.getBoundingClientRect(), turned = fieldView.portrait;
+    if (cameraMove) { cameraMove.cancel(); cameraMove = null; stadium.classList.remove('camera-moving'); }
+    change();
+    layoutDirty = true; draw();
+    const to = rinkStage.getBoundingClientRect();
+    if (turned || fieldView.portrait || reducedMotion.matches || document.hidden || !from.width || !to.width) return;
+    const dx = from.left + from.width / 2 - to.left - to.width / 2, dy = from.top + from.height / 2 - to.top - to.height / 2;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(from.width - to.width) < 1) return;
+    stadium.classList.add('camera-moving');
+    const move = cameraMove = rinkStage.animate([{ transform: `translate(${dx}px, ${dy}px) scale(${from.width / to.width})` }, { transform: 'none' }],
+      { duration: 520, easing: 'cubic-bezier(.3, .8, .2, 1)' });
+    move.onfinish = () => {
+      if (cameraMove !== move) return;
+      cameraMove = null; stadium.classList.remove('camera-moving');
+      layoutDirty = true; draw(); // The rink's box was measured mid-move.
+    };
+  }
+  // The cast: whoever is on the ice (demo, match or replay) can skate off and back without the game
+  // knowing. Only displayed positions move, and each is put back exactly; while the cast is away the
+  // ice is drawn empty.
+  const CAST_SECONDS = .45, CAST_STAGGER = .05;
+  function castPose(t) {
+    cast.bodies.forEach((b, i) => {
+      const home = cast.home[i], shown = cast.shown[i];
+      // The game moved this body (a new match, a simulation step): that is its place now.
+      if (shown && (b.x !== shown.x || b.y !== shown.y)) { home.x = b.x; home.y = b.y; home.rotation = b.rotation; }
+      const local = Math.max(0, Math.min(1, (t - i * CAST_STAGGER) / (1 - 6 * CAST_STAGGER))), far = local * local * 820;
+      const ox = home.x - 500, oy = home.y - 300, length = Math.hypot(ox, oy);
+      b.x = home.x + (length > 1 ? ox / length : 0) * far; b.y = home.y + (length > 1 ? oy / length : -1) * far;
+      b.rotation = home.rotation + local * local * (i % 2 ? -5 : 5);
+      cast.shown[i] = { x: b.x, y: b.y };
+    });
+  }
+  function castHome() {
+    cast.bodies.forEach((b, i) => {
+      const home = cast.home[i], shown = cast.shown[i];
+      if (shown && b.x === shown.x && b.y === shown.y) { b.x = home.x; b.y = home.y; b.rotation = home.rotation; }
+    });
+    cast.shown = [];
+  }
+  function castTo(away) {
+    const bodies = fieldView.bodies;
+    if (cast && cast.bodies !== bodies) { cancelAnimationFrame(cast.frame); castHome(); cast = null; }
+    if (!cast) {
+      if (away === !!fieldView.castHidden) return;
+      cast = { bodies, home: bodies.map(b => ({ x: b.x, y: b.y, rotation: b.rotation })), shown: [], t: away ? 0 : 1, frame: 0 };
+    }
+    cancelAnimationFrame(cast.frame);
+    fieldView.castHidden = false; rinkWrap.classList.remove('cast-away');
+    let last = performance.now();
+    const step = now => {
+      if (!cast) return;
+      if (fieldView.bodies !== cast.bodies) { castTo(away); draw(); return; }
+      const moved = reducedMotion.matches ? 1 : Math.min(.1, (now - last) / 1000) / CAST_SECONDS;
+      last = now;
+      cast.t = away ? Math.min(1, cast.t + moved) : Math.max(0, cast.t - moved);
+      if (away ? cast.t < 1 : cast.t > 0) { castPose(cast.t); draw(); cast.frame = requestAnimationFrame(step); return; }
+      castHome(); cast = null;
+      fieldView.castHidden = away; rinkWrap.classList.toggle('cast-away', away);
+      draw();
+    };
+    step(last);
   }
   function recordSegment(source, turnPlans, ticks = 0, saves = [], stops = []) {
     if (P.settled(source)) playSegments = [];
@@ -3245,6 +3314,10 @@
     slot.classList.toggle('is-selected', i === rosterSlot);
     slot.classList.toggle('is-empty', !entry);
     slot.classList.toggle('just-changed', i === changedSlot);
+    // On the ice the slot is centred on the ubu's kickoff spot and its art is the size it plays at.
+    const spot = P.kickoff()[i];
+    if (entry) ububallMatch.applyStats(P, spot, entry.model.stats || normalStats(), classic ? 'classic' : 'standard');
+    slot.style.setProperty('--x', spot.x / 10 + '%'); slot.style.setProperty('--y', spot.y / 6 + '%'); slot.style.setProperty('--r', spot.radius / 5);
     const pick = node('button', { type: 'button', className: 'formation-pick' }, node('span', { className: 'formation-pos', textContent: POSITIONS[i] }));
     if (entry) {
       const arch = archetypeOfModel(entry.model);
@@ -3255,10 +3328,11 @@
         node('strong', { textContent: entry.model.parts.fullName }), node('small', { textContent: subLabel })));
     }
     else pick.append(node('span', { className: 'formation-art formation-empty-art' }), node('span', { className: 'formation-name' },
-      node('strong', { textContent: 'Empty' }), node('small', { textContent: i === rosterSlot ? 'Pick an ubu below' : 'Select to fill' })));
+      node('strong', { textContent: 'Empty' }), node('small', { textContent: i === rosterSlot ? 'Pick an ubu' : 'Select to fill' })));
     pick.setAttribute('aria-pressed', String(i === rosterSlot));
     pick.setAttribute('aria-label', `${POSITIONS[i]}: ${entry ? entry.model.parts.fullName : 'empty'}`);
-    pick.onclick = () => { rosterSlot = i; rosterSlots(); };
+    // From the rules step (where only the docked sheet shows the lineup) a position opens the team step.
+    pick.onclick = () => { rosterSlot = i; if ($('roster-dialog').dataset.step === 'mode') setupStep('team'); else rosterSlots(); };
     slot.append(pick);
     if (entry && !classic) {
       const current = resolveEquippedSuper(entry, i);
@@ -3651,11 +3725,75 @@
       $('team-mode').textContent = ububallMatch.modeName(setupFor === 'lobby' ? lobbyView.state.mode : chosenMode());
       if (!fixedTeam()) { void loadCollection(); void loadTeams(); }
       rosterSlots();
+    } else if (sheetDocked()) {
+      // The docked sheet keeps a CPU match's lineup on the ice through the rules step.
+      if (setupFor === 'cpu') rosterSlots(); else $('roster-slots').replaceChildren();
     }
     $('start-match').textContent = setupFor === 'pick' ? 'Use team' : setupFor !== 'lobby' ? 'Start match' : lobbyView?.ready ? 'Change team' : 'Ready to play';
   }
+  // The setup shot. On a wide screen outside a match the team sheet docks over the away half of a
+  // game-size rink: the cast skates off and the lineup stands at its kickoff spots on the ice.
+  // Elsewhere (phones, the Activity, mid-match) the sheet is a modal with its own formation.
+  const wideScreen = matchMedia('(min-width: 56rem) and (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px)))');
+  const sheetDocked = () => $('roster-dialog').classList.contains('docked');
+  let lineupMove = null;
+  function fitSetupShot() {
+    if (setupShot) document.body.style.setProperty('--setup-top', Math.round(document.querySelector('.ball-page').getBoundingClientRect().top + scrollY) + 'px');
+  }
+  function skateLineup(on) {
+    const slots = $('roster-slots');
+    lineupMove?.cancel(); lineupMove = null;
+    slots.inert = !on;
+    if (reducedMotion.matches) { if (!on) slots.replaceChildren(); return; }
+    const off = { translate: '-45cqw 0', opacity: 0 }, at = { translate: '0 0', opacity: 1 };
+    const move = lineupMove = slots.animate(on ? [off, at] : [at, off], { duration: on ? 480 : 260, delay: on ? 240 : 0, easing: on ? 'cubic-bezier(.2, .8, .2, 1)' : 'ease-in', fill: 'both' });
+    move.onfinish = () => {
+      if (lineupMove !== move) return;
+      if (!on) slots.replaceChildren();
+      move.cancel(); lineupMove = null;
+    };
+  }
+  // Decides how the sheet opens, before its step is drawn.
+  function prepareSheet() {
+    const sheet = $('roster-dialog'), slots = $('roster-slots');
+    if (sheet.open) return;
+    const dock = !inMatch && !inDiscord && location.pathname === '/' && wideScreen.matches;
+    lineupMove?.cancel(); lineupMove = null; slots.inert = false;
+    sheet.classList.toggle('docked', dock); slots.classList.toggle('on-ice', dock);
+    if (dock) rinkStage.append(slots); else $('roster-super').before(slots);
+  }
+  function openSheet() {
+    const sheet = $('roster-dialog');
+    if (sheet.open) return;
+    if (!sheetDocked()) { sheet.showModal(); return; }
+    sheet.show();
+    setupShot = true;
+    camera(() => { scrollTo(0, 0); document.body.classList.add('setup-shot'); fitSetupShot(); });
+    castTo(true); skateLineup(true);
+  }
+  // Leaving for a match hands the camera move to enterMatch; the new match's ubus stand where the lineup stood.
+  function leaveSetupShot(toMatch = false) {
+    if (!setupShot) return;
+    setupShot = false;
+    if (toMatch) {
+      lineupMove?.cancel(); lineupMove = null; $('roster-slots').replaceChildren();
+      document.body.classList.remove('setup-shot');
+      if (cast) { cancelAnimationFrame(cast.frame); castHome(); cast = null; }
+      fieldView.castHidden = false; rinkWrap.classList.remove('cast-away');
+      return;
+    }
+    camera(() => document.body.classList.remove('setup-shot'));
+    castTo(false); skateLineup(false);
+  }
+  $('roster-dialog').addEventListener('close', () => leaveSetupShot());
+  wideScreen.addEventListener('change', () => { if (setupShot && !wideScreen.matches) $('roster-dialog').close(); });
+  // A docked sheet is not modal, so Escape is handled here: back a step, as the modal's cancel does, or close.
+  addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !setupShot || event.defaultPrevented || document.querySelector('dialog:modal, :popover-open')) return;
+    if ($('roster-dialog').dispatchEvent(new Event('cancel', { cancelable: true }))) $('roster-dialog').close();
+  });
   function openSetup(step, purpose = 'cpu', mode = cpuMode, level = cpuLevel, team = roster) {
-    setupFor = purpose;
+    setupFor = purpose; prepareSheet();
     for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(mode, rule);
     modeSummary();
     $('rules-status').textContent = '';
@@ -3665,7 +3803,7 @@
     $('roster-scroll').scrollTop = 0;
     void loadCollection();
     setupStep(step);
-    if (!$('roster-dialog').open) $('roster-dialog').showModal();
+    openSheet();
   }
   // The online lobby. A guest seat fields the room's own three ubus; otherwise the player
   // picks from their collection, starting from their current, last or favorite team.
@@ -3680,7 +3818,7 @@
     lobbyView = view;
     const teamChanged = JSON.stringify(before?.guestTeam || null) !== JSON.stringify(view.guestTeam || null);
     if (entering || teamChanged) {
-      setupFor = 'lobby'; rosterSlot = 0;
+      setupFor = 'lobby'; rosterSlot = 0; prepareSheet();
       if (view.guestTeam) draft = lobbyEntries(view.guestTeam);
       else {
         const readyOk = await ownTeamReady(); // The server opened any signup pack as this seat was taken.
@@ -3708,7 +3846,7 @@
     }
     if (entering) setupStep(view.state.challenge ? 'mode' : 'team');
     else setupStep($('roster-dialog').dataset.step);
-    if (open && !$('roster-dialog').open) $('roster-dialog').showModal();
+    if (open) openSheet();
   }
   function closeLobby() {
     lobbyGeneration++;
@@ -4008,8 +4146,11 @@
       history.pushState({ match: true }, '', url);
     }
     if (inMatch) return;
-    inMatch = true; document.body.classList.add('in-match');
-    fitOrientation(); updateFullscreenUI();
+    camera(() => {
+      leaveSetupShot(true);
+      inMatch = true; document.body.classList.add('in-match');
+      fitOrientation(); updateFullscreenUI();
+    });
   }
   function exitMatchMode() {
     closeFirstTurnGuide();
@@ -4024,9 +4165,12 @@
     if (!matchInProgress()) cpuClient.dispose?.();
     if (location.pathname !== '/') demoClient.dispose?.();
     if (!inMatch) return;
-    inMatch = false; document.body.classList.remove('in-match');
+    camera(() => {
+      inMatch = false; document.body.classList.remove('in-match');
+      setPortrait(false);
+    });
     void exitOwnedFullscreen();
-    setPortrait(false); updateFullscreenUI(); updateHome();
+    updateFullscreenUI(); updateHome();
     if (!matchInProgress() && location.pathname === '/') startDemo();
   }
   function openPause() {
@@ -4574,7 +4718,7 @@
   if (stadium) ro.observe(stadium);
   if (stageArea) ro.observe(stageArea);
   ro.observe($('field-spin')); // Its size places it; it has none until first shown.
-  const resizeField = () => { gameUi.updateScale?.(); layoutDirty = true; draw(); };
+  const resizeField = () => { gameUi.updateScale?.(); fitSetupShot(); layoutDirty = true; draw(); };
   window.addEventListener('resize', resizeField);
   window.visualViewport?.addEventListener('resize', resizeField);
   requestAnimationFrame(frame);

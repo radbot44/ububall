@@ -2809,6 +2809,8 @@
       const colors = getThemeColors();
       const { text, home, away, background } = colors;
       fx.rinkCache = drawRinkLayer(view.ctx, width, height, P, ububallMatch, colors, rinkLogo, fx.rinkCache, doc);
+      // The ice stands empty while the cast is away (the team setup shot).
+      if (view.castHidden) return;
       drawFieldUnder(colors);
       if (!view.field) drawFoulFocus(text);
       if (phase === 'plan') {

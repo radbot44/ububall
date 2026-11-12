@@ -1097,6 +1097,53 @@ body:has(#online-dialog[open]) { overflow: hidden; }
   .team-sheet { width: 100%; height: 100dvh; max-width: none; border: 0; border-radius: 0; padding-top: var(--safe-top); }
 }
 
+/* Camera moves (camera() in ububall.js): the rink stage is played from its old box to its new one,
+   so nothing above it may clip it on the way. */
+.stadium.camera-moving, .stadium.camera-moving .stadium-stage-area { overflow: visible; }
+.stadium.camera-moving .stadium-stage-area { z-index: 30; }
+.stadium.camera-moving .rink-stage { will-change: transform; }
+/* The cast is away: the ice is drawn empty and its sprites and badges wait out of sight. */
+.rink-wrap.cast-away :is(#skaters, .field-badges) { visibility: hidden; }
+
+/* The setup shot (see docs/rink-stage.md): on a wide screen outside a match the rink grows to
+   game size, the team sheet docks over the away half, and the lineup stands on the ice. */
+.team-sheet.docked {
+  position: fixed; inset: var(--setup-top, 4.5rem) 1rem 1rem 50%; z-index: 40; width: auto; height: auto; margin: 0;
+  translate: calc(100% + 2rem) 0; transition: translate .45s cubic-bezier(.3, .8, .2, 1), display .45s allow-discrete;
+}
+.team-sheet.docked[open] { translate: 0 0; }
+@starting-style { .team-sheet.docked[open] { translate: calc(100% + 2rem) 0; } }
+@media (prefers-reduced-motion: reduce) { .team-sheet.docked { transition: none; } }
+body.setup-shot { overflow: hidden; }
+body.setup-shot .arena-layout { grid-column: 1 / -1; }
+body.setup-shot :is(.play-home, .scoreboard),
+body.setup-shot:not(.in-match) .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner) { display: none; }
+html:not(.discord-activity) body.setup-shot:not(.in-match) .stadium:not(.portrait-mode) .stadium-stage-area { aspect-ratio: auto; }
+body.setup-shot .stadium-stage-area { min-height: calc(100dvh - var(--setup-top, 4.5rem) - 1rem); }
+body.setup-shot .rink-stage { width: min(100%, calc((100dvh - var(--setup-top, 4.5rem) - 1rem) * 5 / 3)); }
+/* Each position is a button around its ubu, centred on the kickoff spot (--x, --y), with the ubu
+   drawn at the size it plays at (--r, as the rink's sprites are). */
+.formation.on-ice { position: absolute; inset: 0; z-index: 6; display: block; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; pointer-events: none; }
+.formation.on-ice::before, .formation.on-ice::after { content: none; }
+.formation.on-ice .formation-slot {
+  --art: calc(var(--r, 5) * 1cqw); --head: 1.375rem;
+  position: absolute; left: var(--x); top: var(--y); translate: -50% calc(-.375rem - var(--head) - var(--art) / 2);
+  grid-template-columns: minmax(0, 1fr); justify-items: center; gap: .25rem; width: 12.5cqw; padding: .375rem .375rem .5rem;
+  border-radius: 1.25rem; background: color-mix(in srgb, var(--elevated) 55%, transparent); pointer-events: auto;
+}
+/* Neighbouring spots are 13% of the rink apart, so the buttons stay narrower than that and their
+   text scales with the rink; the second line of the name needs a big rink. */
+.formation.on-ice .formation-slot .formation-name strong { font-size: clamp(.6875rem, 1.3cqw, .9375rem); }
+.formation.on-ice .formation-slot .formation-super { font-size: clamp(.625rem, 1.1cqw, .75rem); }
+@container (width < 75rem) { .formation.on-ice .formation-slot:not(.is-empty) .formation-name small { display: none; } }
+.formation.on-ice .formation-slot.is-selected { background: color-mix(in srgb, var(--primary) 16%, transparent); }
+.formation.on-ice .formation-slot .formation-pick { grid-template-columns: minmax(0, 1fr); justify-items: center; row-gap: 0; width: 100%; text-align: center; }
+.formation.on-ice .formation-slot .formation-pos { height: var(--head); font-size: .75rem; line-height: var(--head); }
+.formation.on-ice .formation-slot .formation-art { width: var(--art); height: var(--art); }
+.formation.on-ice .formation-slot .formation-name { justify-items: center; max-width: 100%; margin-top: .25rem; }
+.formation.on-ice .formation-slot .formation-super { justify-self: center; max-width: 100%; }
+.formation.on-ice .formation-slot .formation-tools { position: absolute; top: .375rem; right: .375rem; bottom: auto; display: grid; }
+
 /* Announcements over the rink ("Plan your shot…", "Launch!", the winner). */
 .field-banner {
   position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; padding: 0 .75rem; pointer-events: none;
