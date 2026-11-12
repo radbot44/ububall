@@ -41,7 +41,7 @@
 #quick-play-setup, #quick-play-signin, #online-open-note { font-size: .8125rem; font-weight: normal; }
 #online-open { display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .availability-actions:not([hidden]) { display: flex; justify-content: center; flex-wrap: wrap; gap: .5rem; margin-block: .75rem; }
-body:has(#signed-out-panel:not([hidden])) { display: flex; flex-direction: column; }
+body:not([data-shot="mint"]):has(#signed-out-panel:not([hidden])) { display: flex; flex-direction: column; }
 main:has(> #signed-out-panel:not([hidden])) {
   flex: 1; width: 100%; margin: 0; padding: 1.25rem;
   display: grid; place-items: center;
@@ -143,6 +143,50 @@ body.match-fullscreen .stadium { border: 0; border-radius: 0; box-shadow: none; 
   body:is([data-shot="match"], [data-shot="replay"]) .arena-layout { grid-template-columns: minmax(0, 1fr); }
   body:is([data-shot="match"], [data-shot="replay"]) .stadium { grid-column: 1; }
 }
+/* Shared persistent stage shell: Play and Ubu Mint share .arena-layout inside .ball-page; Collection hides it until Phase 4. */
+main[data-screen="play"]:not([hidden]) { display: contents; }
+body:not([data-shot="mint"]) :is(#mint-world, #mint-reveal) { display: none !important; }
+body[data-shot="collection"] .ball-page { display: none; }
+
+/* Ubu Mint shot: header and Mint title stay outside the centred dark rink; packs and reveals sit under spotlights on the ice. */
+body[data-shot="mint"] .ball-page {
+  display: grid; grid-template-rows: auto auto auto; justify-items: center; gap: .25rem;
+  width: min(92rem, calc(100% - 2rem)); max-width: none; margin: 0 auto 1rem;
+}
+body[data-shot="mint"] main[data-screen="mint"]:not([hidden]),
+body[data-shot="mint"] .pack-shop { display: contents; }
+body[data-shot="mint"] .mint-head { grid-row: 1; width: 100%; }
+body[data-shot="mint"] .arena-layout { grid-row: 2; display: block; width: 100%; margin: 0; }
+body[data-shot="mint"] .mint-foot { grid-row: 3; width: 100%; }
+body[data-shot="mint"] :is(.team-column, .scoreboard, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin, #skip-goal-replay),
+body[data-shot="mint"] .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner, #skip-goal-replay) { display: none; }
+body[data-shot="mint"] .rink-stage {
+  width: min(100%, 70rem, max(24rem, calc((100dvh - 15rem) * 5 / 3))); margin: 0 auto;
+  border-radius: 1.5rem; border: .0625rem solid transparent;
+  transition: border-color .35s ease, box-shadow .35s ease;
+}
+body[data-shot="mint"] .rink-stage.mint-zoomed {
+  border-color: color-mix(in srgb, var(--border) 65%, transparent);
+  box-shadow: var(--panel-shadow);
+}
+body[data-shot="mint"] .rink-stage > :is(.rink-wrap, .mint-world) {
+  transform-origin: 50% 50%;
+  transform: translate(var(--mint-pan-x, 0%), var(--mint-pan-y, 0%)) scale(var(--mint-zoom, 1));
+  transition: transform .48s cubic-bezier(.3, .8, .2, 1);
+}
+body[data-shot="mint"] .rink-stage.mint-camera-cut > :is(.rink-wrap, .mint-world) { transition: none; }
+body[data-shot="mint"] #mint-world > #signed-out-panel {
+  position: absolute; left: 50%; top: 50%; z-index: 6; translate: -50% -50%;
+  width: min(82%, 30rem); padding: 1.25rem; border-radius: 1.25rem;
+  background: color-mix(in srgb, var(--card) 82%, transparent); border: .0625rem solid var(--border);
+  box-shadow: var(--panel-shadow); backdrop-filter: blur(.375rem);
+}
+@media (max-width: 47.99rem) {
+  body[data-shot="mint"] .ball-page { width: calc(100% - 1rem); }
+  body[data-shot="mint"] .stadium-stage-area { flex-direction: column; gap: .5rem; overflow: visible; }
+  body[data-shot="mint"] .rink-stage { width: 100%; }
+}
+
 /* Home and setup shots: in landscape, the rink sits beside the home panel (or fills the stage in setup); in portrait and phone sideways, above it. */
 body:is([data-shot="home"], [data-shot="team"], [data-shot="rules"]) .ball-page { display: grid; grid-template-columns: minmax(0, 1fr) 28.5rem; gap: 0 1.25rem; align-items: stretch; width: min(114rem, calc(100% - 3rem)); max-width: none; margin: 0 auto; }
 @media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {

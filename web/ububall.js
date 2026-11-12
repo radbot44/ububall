@@ -25,10 +25,10 @@
   fieldView.anonymous = false;
   // The replay viewer (see watchReplay), and the match being recorded for the replay library.
   let theater = null, recording = null, recordingOnline = false, restoredMatch = false;
-  let cast = null, shot = 'home', returnShot = 'home', returnPortrait = false, handoffToMatch = false;
+  let cast = null, shot = location.pathname === '/mint' ? 'mint' : location.pathname === '/collection' ? 'collection' : 'home', returnShot = 'home', returnPortrait = false, handoffToMatch = false;
   const isMatchShot = (s = shot) => s === 'match' || s === 'replay';
   const isSetupShot = (s = shot) => s === 'team' || s === 'rules';
-  if (document.body?.dataset && !document.body.dataset.shot) document.body.dataset.shot = shot;
+  if (document.body?.dataset) document.body.dataset.shot = shot;
   // While a video export renders, effects and sounds run on its clock (ms) instead of the wall clock,
   // sounds go to its offline audio, and the field draws at its size.
   let videoClock = null, videoAudio = null, cardShot = false;
@@ -64,7 +64,7 @@
     planPausedAt = localPlayBlocked() ? now : null;
   }
   function localPlayBlocked() {
-    return (shot !== 'match' && shot !== 'replay' && !demo) || document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(document.querySelector('.game-dialog[open]')) || Boolean(foulInfo && !online?.active);
+    return (shot !== 'match' && shot !== 'replay' && !(demo && shot === 'home')) || document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(document.querySelector('.game-dialog[open]')) || Boolean(foulInfo && !online?.active);
   }
   function updateLocalPlanClock(blocked) {
     if (online?.active || phase !== 'plan' || !blitzMode()) return;
@@ -196,6 +196,7 @@
   const knobRow = document.querySelector('.stadium-actions .knob-row');
   const rinkStage = document.querySelector('.rink-stage');
   const rinkWrap = document.querySelector('.rink-wrap');
+  if (shot !== 'home') { fieldView.castHidden = true; rinkWrap.classList.add('cast-away'); }
   fieldView.badgeCanvas = document.createElement('canvas'); fieldView.badgeCanvas.className = 'field-badges';
   fieldView.badgeCanvas.setAttribute('aria-hidden', 'true'); rinkWrap.append(fieldView.badgeCanvas);
   fieldView.badgeCtx = fieldView.badgeCanvas.getContext('2d');
@@ -1283,10 +1284,14 @@
   // to the box it now has, so the rink glides between the home, setup and match layouts. Portrait
   // play and reduced motion cut. See docs/rink-stage.md.
   let cameraMove = null;
+  let cameraDone = Promise.resolve(), resolveCameraDone = null;
   const playableShot = () => shot === 'match' && !cameraMove;
+  function settleCameraPromise() {
+    if (resolveCameraDone) { const done = resolveCameraDone; resolveCameraDone = null; done(); }
+  }
   function camera(change) {
     const from = rinkStage.getBoundingClientRect(), turned = fieldView.portrait;
-    if (cameraMove) { cameraMove.cancel(); cameraMove = null; stadium.classList.remove('camera-moving'); }
+    if (cameraMove) { cameraMove.cancel(); cameraMove = null; stadium.classList.remove('camera-moving'); settleCameraPromise(); }
     change();
     layoutDirty = true; draw();
     const to = rinkStage.getBoundingClientRect();
@@ -1294,20 +1299,24 @@
     const dx = from.left + from.width / 2 - to.left - to.width / 2, dy = from.top + from.height / 2 - to.top - to.height / 2;
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(from.width - to.width) < 1) return;
     stadium.classList.add('camera-moving');
+    cameraDone = new Promise(resolve => { resolveCameraDone = resolve; });
     const move = cameraMove = rinkStage.animate([{ transform: `translate(${dx}px, ${dy}px) scale(${from.width / to.width})` }, { transform: 'none' }],
       { duration: 520, easing: 'cubic-bezier(.3, .8, .2, 1)' });
     positionSpinControl(); updateFirstTurnGuide(); updateFoulInfo();
     move.onfinish = () => {
       if (cameraMove !== move) return;
       cameraMove = null; stadium.classList.remove('camera-moving');
+      settleCameraPromise();
       updateFirstTurnGuide();
       layoutDirty = true; draw(); // The rink's box was measured mid-move.
     };
   }
-  function setShot(next, { keepPortrait = false } = {}) {
-    if (shot === next && document.body?.dataset?.shot === next) return;
+  if (typeof window !== 'undefined') window.ubuStageReady = () => cameraDone;
+  function setShot(next, { keepPortrait = false, beforeLayout = null } = {}) {
+    if (!beforeLayout && shot === next && document.body?.dataset?.shot === next) return;
     if (drag !== null && next !== 'match') endCanvasDrag();
     camera(() => {
+      beforeLayout?.();
       shot = next;
       if (document.body?.dataset) document.body.dataset.shot = next;
       if (isSetupShot(next)) {
@@ -4361,14 +4370,51 @@
       openPause();
     }
   });
+  function leavePlayOverlays() {
+    closeFirstTurnGuide();
+    closeFoulInfo();
+    closeSummary();
+    stopFanfare();
+    gameAudio()?.stopMotion?.();
+    if (isExporting()) { videoCancelled = true; cancelVideo?.(); }
+    returnShot = 'home';
+    returnPortrait = false;
+    handoffToMatch = false;
+    for (const dialogId of ['match-help', 'pause-menu', 'replays-dialog', 'export-dialog', 'share-dialog', 'roster-dialog', 'stats-dialog', 'online-dialog']) {
+      if ($(dialogId)?.open) $(dialogId).close();
+    }
+    if (statDrawer.matches(':popover-open')) statDrawer.hidePopover();
+    endReplay();
+    hideFinger();
+    $('field-banner')?.classList.remove('show');
+    if (!matchInProgress()) cpuClient.dispose?.();
+    lineupMove?.cancel(); lineupMove = null; $('roster-slots').replaceChildren();
+  }
+  function screenTransition(nextScreen, applyDom, prevScreen) {
+    if (!prevScreen || prevScreen === nextScreen) {
+      applyDom();
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('ubu:before-screen', { detail: nextScreen }));
+    if (nextScreen !== 'play') {
+      leavePlayOverlays();
+      setShot(nextScreen, { beforeLayout: applyDom });
+      void exitOwnedFullscreen();
+      castTo(true);
+      return;
+    }
+    setShot('home', { beforeLayout: applyDom });
+    castTo(false);
+  }
   const screenGuard = async nextScreen => {
     if (nextScreen === 'play') return true;
     if (online?.active && !(await online.leave())) return false;
-    exitMatchMode();
     return true;
   };
   if (typeof window.setUbuScreenGuard === 'function') window.setUbuScreenGuard(screenGuard);
   else document.addEventListener('DOMContentLoaded', () => window.setUbuScreenGuard?.(screenGuard), { once: true });
+  if (typeof window.setUbuScreenTransition === 'function') window.setUbuScreenTransition(screenTransition);
+  else document.addEventListener('DOMContentLoaded', () => window.setUbuScreenTransition?.(screenTransition), { once: true });
   document.addEventListener('click', async event => {
     if (typeof window.setUbuScreenGuard === 'function' || !online?.active) return;
     const link = event.target.closest('a[href]');
@@ -4379,12 +4425,19 @@
     event.preventDefault();
     event.stopPropagation();
     if (!(await online.leave())) return;
-    exitMatchMode();
     link.click();
   }, true);
   window.addEventListener('ubu:screen', event => {
-    if (event.detail !== 'play') exitMatchMode();
-    else { updateHome(); if (!matchInProgress() && !online?.active && shot === 'home') startDemo(); }
+    if (event.detail === 'play') {
+      if (shot !== 'home' && !isSetupShot() && !isMatchShot()) { setShot('home'); castTo(false); }
+      updateHome();
+      if (!matchInProgress() && !online?.active && shot === 'home') startDemo();
+    } else if (shot !== event.detail) {
+      leavePlayOverlays();
+      setShot(event.detail);
+      void exitOwnedFullscreen();
+      castTo(true);
+    }
   });
   function networkMoves() {
     return plans.map((p, i) => ({ angle: p.angle + (online?.state?.seat ? Math.PI : 0), power: p.power,
@@ -4831,7 +4884,7 @@
   // at random each game. Saffron's planning is acted out with a pointer, as a how-to for new players.
   const demoClient = createCPUClient(), DEMO_STOP = Symbol('demo stopped');
   let demoRun = 0, demoGame = 0;
-  function demoPaused() { return shot !== 'home' || document.hidden || Boolean(foulInfo) || $('field-banner').closest('[data-screen]').hidden || Boolean(document.querySelector('dialog[open]')); }
+  function demoPaused() { return shot !== 'home' || location.pathname !== '/' || document.hidden || Boolean(foulInfo) || Boolean(document.querySelector('dialog[open]')); }
   // Waits count only while the demo is on screen; a stopped demo ends its walkthrough.
   async function demoWait(run, ms, until = null) {
     let left = ms;
@@ -4937,8 +4990,8 @@
     hideFinger();
     await demoWait(run, 300);
   }
-  // Standalone reloads can resume a CPU match. Discord starts at the Activity bench.
-  if (!inDiscord && (restoredMatch || history.state?.match) && matchInProgress()) enterMatch();
-  else startDemo();
+  // Standalone reloads can resume a CPU match on Play. Discord starts at the Activity bench.
+  if (!inDiscord && location.pathname === '/' && (restoredMatch || history.state?.match) && matchInProgress()) enterMatch();
+  else if (location.pathname === '/') startDemo();
   openRosterFromLink();
 })();

@@ -1034,12 +1034,13 @@
     osc.stop(start + length + 0.02);
   }
 
-  // Pack shop sounds: 'deal' flicks three packs onto the table in step with their staggered
-  // arrival, 'pick' is a soft pop as one is chosen, and 'crack' taps an egg (options.stage 1-3).
+  // Pack shop sounds: 'deal' flicks three packs onto the ice, 'pick' pops the chosen pack to
+  // centre, 'crack' taps an egg (options.stage 1-3), 'reveal' chimes on spotlight reveal, and
+  // 'scamper' skitters the opened ubus away.
   function playPack(kind, options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, 0.4);
+    const master = createMasterChain(ctx, null, kind === 'scamper' ? 0.65 : 0.4);
     const now = ctx.currentTime;
     if (kind === 'deal') {
       for (let i = 0; i < 3; i++) noiseGrain(ctx, master, now + i * 0.12, 0.09, { freq: 2600, to: 900, level: 0.5, pan: (i - 1) * 0.5 });
@@ -1052,6 +1053,17 @@
       noiseGrain(ctx, master, now, 0.004, { freq: 3600, q: 2, level: 0.3 });
       blip(ctx, master, now, 0.02, 1700, 1400, 0.08);
       for (let i = 1; i < stage * 2; i++) noiseGrain(ctx, master, now + 0.01 + Math.random() * 0.05 * stage, 0.003, { freq: 2600 + Math.random() * 3000, q: 2, level: 0.12 + 0.04 * stage });
+    } else if (kind === 'reveal') {
+      blip(ctx, master, now, 0.11, 520, 1040, 0.28);
+      blip(ctx, master, now + 0.055, 0.16, 780, 1320, 0.2);
+      noiseGrain(ctx, master, now, 0.04, { freq: 4200, to: 2400, level: 0.12 });
+    } else if (kind === 'scamper') {
+      const n = Math.max(1, Math.min(5, options.count || 5));
+      for (let i = 0; i < n; i++) {
+        const t = now + i * 0.055, pan = n > 1 ? (i / (n - 1) - 0.5) * 1.2 : 0;
+        blip(ctx, master, t, 0.065, 480 + i * 75, 880 + i * 110, 0.22, pan);
+        noiseGrain(ctx, master, t + 0.015, 0.035, { freq: 3400, to: 1600, level: 0.16, pan });
+      }
     }
   }
 

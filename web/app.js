@@ -1,11 +1,12 @@
 'use strict';
-// App shell: Play, Ubu Mint and Collection share one page and switch by path.
+// App shell: Play, Ubu Mint and Collection share one page and persistent rink stage, switching by path.
 (() => {
   const screens = { '/': 'play', '/mint': 'mint', '/collection': 'collection' };
   const titles = { play: 'Ububall', mint: 'Ubu Mint · Ububall', collection: 'Collection · Ububall' };
   const screenOf = path => Object.hasOwn(screens, path) ? screens[path] : null;
   const loadedScripts = new Map();
   let guard = null;
+  let screenTransition = (_, apply) => apply();
   let activeScreen = null;
   let playUrl = (screenOf(location.pathname) || 'play') === 'play' ? location.href : '/';
   let navToken = 0;
@@ -37,6 +38,7 @@
   window.loadMintScripts = loadMintScripts;
   window.loadMp4Script = loadMp4Script;
   window.setUbuScreenGuard = fn => { guard = typeof fn === 'function' ? fn : null; };
+  window.setUbuScreenTransition = fn => { screenTransition = typeof fn === 'function' ? fn : (_, apply) => apply(); };
 
   const rememberPlayUrl = () => {
     if ((screenOf(location.pathname) || 'play') === 'play') playUrl = location.href;
@@ -62,7 +64,9 @@
     activeScreen = screen;
     if (screen === 'play') playUrl = location.href;
     if (prev && prev !== screen) closeTransientUI();
-    for (const el of document.querySelectorAll('[data-screen]')) el.hidden = el.dataset.screen !== screen;
+    screenTransition(screen, () => {
+      for (const el of document.querySelectorAll('[data-screen]')) el.hidden = el.dataset.screen !== screen;
+    }, prev);
     for (const link of document.querySelectorAll('.site-nav a')) {
       if (screenOf(new URL(link.href).pathname) === screen) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
@@ -80,24 +84,31 @@
     window.dispatchEvent(new CustomEvent('ubu:screen', { detail: screen }));
   }
 
-  document.addEventListener('click', async event => {
-    const link = event.target.closest('a[href]');
-    if (!link || event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target || link.hasAttribute('download')) return;
-    const url = new URL(link.href);
+  async function navigateUbuScreen(href) {
+    const url = new URL(href, location.origin);
     const next = url.origin === location.origin ? screenOf(url.pathname) : null;
-    if (!next) return;
-    event.preventDefault();
+    if (!next) return false;
     document.getElementById('more-menu')?.hidePopover();
     const current = activeScreen || screenOf(location.pathname) || 'play';
     const token = ++navToken;
     if (current === 'play' && next !== 'play' && guard) {
       rememberPlayUrl();
-      if (await guard(next) === false || token !== navToken) return;
+      if (await guard(next) === false || token !== navToken) return false;
     }
     if (url.href !== location.href) history.pushState(null, '', url);
     show();
     scrollTo(0, 0);
     document.body.scrollTo(0, 0);
+    return true;
+  }
+
+  document.addEventListener('click', event => {
+    const link = event.target.closest('a[href]');
+    if (!link || event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target || link.hasAttribute('download')) return;
+    const url = new URL(link.href);
+    if (url.origin !== location.origin || !screenOf(url.pathname)) return;
+    event.preventDefault();
+    void navigateUbuScreen(url.href);
   });
 
   window.addEventListener('popstate', async () => {
@@ -117,6 +128,7 @@
     show();
   });
 
+  window.navigateUbuScreen = navigateUbuScreen;
   window.showUbuScreen = show;
   show();
   document.documentElement.classList.remove('booting');

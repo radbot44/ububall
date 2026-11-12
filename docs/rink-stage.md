@@ -14,42 +14,56 @@ slide in and out around it, like moving through the menus of a video game. Whate
 
 ## Status
 
-Phase 2 is built and awaiting the owner's review. [note from owner: approved]
+Phase 3 is built and awaiting the owner's review (Phase 2 approved).
 
-Working now (`web/index.html`, `web/site.js`, `web/ububall.js`, `web/ububall.css`):
+Working now (`web/index.html`, `web/app.js`, `web/site.js`, `web/site.css`, `web/pack-scene.js`,
+`web/ububall.js`, `web/ububall.css`, `shared/ubu-audio.js`):
 
-- `setShot(name)` owns `home`, `rules`, `team`, `match` and `replay` through `body[data-shot]` and
-  `camera(change)`; the `in-match`, `replay-match` and `setup-shot` body classes are gone.
-- Aiming input is gated by `playableShot()` (`shot === 'match' && !cameraMove`); `#field-spin`,
-  `#first-turn-guide` and `.foul-info` hide during a camera move and re-measure when it finishes.
-- `castTo(away)` skates whoever is on the ice off and back; the game's simulation bodies are
-  untouched.
-- On a wide desktop screen outside the Discord Activity, New match, Change team, Change rules and
-  online rematch lobbies open the docked `rules` / `team` shots from `home`, `match` or `replay`,
-  closing pause/summary modals first and restoring the prior shot (and portrait orientation) on
-  cancel or Escape.
-- Pause, stats and summary modals keep working across matches and replays; Watch Replay and Play
-  from Here switch cleanly between `replay` and `match`.
-- Leaving a CPU match returns to `home` (stopping goal fanfare/motion audio and hiding
-  `#skip-goal-replay`), preserves full match state without starting the demo over it, and resumes
-  cleanly into `match`.
+- `.arena-layout` lives in the shared `.ball-page` shell outside `main[data-screen]`; `app.js`
+  routes screen switches through `setUbuScreenTransition` so `setShot(name)` (`home`, `rules`,
+  `team`, `match`, `replay`, `mint`, `collection`) measures and glides the rink atomically across
+  Play and Ubu Mint.
+- Entering `mint` glides the rink to centre stage, scatters whoever is on the ice (`castTo(true)`)
+  and pauses the demo (`localPlayBlocked()` / `demoPaused()`); returning to `home` skates the cast
+  back (`castTo(false)`) and resumes the demo or keeps any paused CPU match intact.
+- `#mint-lights` paints a dark wash over the rink interior with feathered spotlight cutouts and
+  overhead beams tracking the dealt packs (three choice packs across left/centre/right or a single
+  centred daily/signup pack), while the site header and Mint heading stay outside the boards.
+- Clicking a choice pack swipes the unchosen packs off the rink, glides the picked pack and its
+  spotlight to centre ice, and unwraps it in silhouette mode (`pack-scene.js`).
+- Opening a pack places the five ubus (or three for daily/signup packs) in dark silhouette under
+  individual spotlights across the ice, zooms and pans the stage camera onto the first ubu to
+  reveal its trading card with Prev/Next arrows (showing a trading card on the focused ubu and plain
+  on-ice ubus — silhouetted if unseen, full colour if seen — off to the sides), and on Done zooms
+  back out, scampers all ubus away and fades the next packs into position.
+- Clicking the Home screen's Signup bonus pack (`#home-pack`) navigates to `/mint`, waits for the
+  camera transition (`ubuStageReady()`) and opens the starter pack on the Mint stage.
+- Aiming input, docked desktop `rules`/`team` setup, pause/stats/summary modals, replays and CPU
+  leave/resume from Phases 1–2 continue working unchanged.
 
 Not done or not checked:
 
-- The sheet stays a modal, with the drawn `.formation`, on phones and in the Discord Activity
+- Collection still hides `.ball-page` and uses its standalone grid until Phase 4 rotates and
+  stretches the rink.
+- The team sheet stays a modal, with the drawn `.formation`, on phones and in the Discord Activity
   (phases 5 and 6).
-- Camera moves and docked transitions are covered by unit tests; live motion in a desktop browser,
-  the docked online lobby and a signed-in collection still warrant interactive visual check.
-- Scatter and arrival are not in `web/effects.html` yet (phase 7).
+- Scatter, arrival and Mint scamper are not in `web/effects.html` yet (phase 7).
 
-Next step: Phase 3 (Ubu Mint: shared persistent stage layer, lighting, packs on the ice, pack reveal).
+Next step: Phase 4 (Collection: rotate to portrait, stretch rink height to hold the collection rows, ubu grid on the ice, viewer).
 
 ## Decisions (owner, 2026-11-11)
 
 1. **Flat only.** The rink stays top-down. Camera moves are translate, scale and in-plane rotation.
    No perspective tilt, no WebGL.
-2. **Ubu Mint is a lit stage.** The rink's lighting changes: the ice goes dark and spotlights pick
-   out each pack, which sit on the rink.
+2. **Ubu Mint is a lit stage** (updated 2026-11-12). The header and Mint title stay outside the
+   rink. Entering Ubu Mint scatters all skaters off the rink (pausing the demo) as the ice goes
+   dark with spotlights picking out each pack. Clicking a pack swipes the other packs away, glides
+   the chosen pack and its spotlight to centre ice and opens it; the five ubus inside (three for a
+   daily or signup pack) appear silhouetted under spotlights, and the camera zooms to the first ubu
+   to reveal its card with Prev/Next arrows (the active ubu shows its trading card while neighbours
+   appear as ubus off to the side — silhouetted until seen, full colour once seen). Pressing Done
+   zooms back out, scampers all the ubus away and fades the next packs into position. Clicking the
+   Home screen's Signup bonus pack navigates to Ubu Mint and opens after the transition.
 3. **Collection is a stretched portrait rink.** Opening it rotates the rink to portrait and then
    grows it in height to hold the collection rows; the ubu grid lives on the ice. Leaving shrinks
    it first, then rotates back.
@@ -177,8 +191,6 @@ so it reads as part of the arena.
 
 - Exact look of the position buttons around the ubus in the team shot.
 - What scatter looks like (skate off through the goals, over the boards, fade).
-- Whether the demo keeps simulating under the Mint and Collection shots or freezes to save CPU.
-- Where opened ubus go after a pack reveal on the Mint stage.
 
 ## Log
 
@@ -200,3 +212,13 @@ so it reads as part of the arena.
   `min-width: 0; min-height: 0;` so `.stadium.camera-moving`'s `overflow: visible` does not trigger
   CSS flexbox auto-minimum expansion to `.rink-stage`'s 5:3 content height during transitions,
   keeping the home shot's 1000:540 stage ratio and vertically-centered `.play-home` sidebar rock-solid.
+- 2026-11-12: Phase 3 built (Ubu Mint on the persistent stage). Moved `.arena-layout` into the
+  shared `.ball-page` shell across Play and Mint (`web/index.html`, `web/app.js`, `web/ububall.js`,
+  `web/ububall.css`) with atomic FLIP screen transitions (`setUbuScreenTransition`, `ubuStageReady`),
+  skater scatter (`castTo(true)`) and paused demo on `mint`; replaced `<dialog id="reveal">` with
+  `#mint-world`, `#mint-lights`, `#mint-ubus` and `#mint-reveal` (`web/site.js`, `web/site.css`,
+  `web/pack-scene.js`, `shared/ubu-audio.js`) for pack spotlights, swipe-and-centre opening,
+  5/3-spotlight silhouettes, zoomed card-and-neighbour reveal panning, scamper exit, fade-in
+  re-deal and Home `#home-pack` handoff to `/mint`; added Phase 3 unit tests in
+  `test/ububall-effects.test.js` and `test/ubu-audio.test.js` and verified desktop/mobile frames in
+  headless Chromium.

@@ -3415,3 +3415,553 @@ test('Rink stage Phase 2: shots fold in-match/replay-match/setup-shot, camera gu
   assert.equal($('home-play-label').textContent, 'Quick play');
   assert.equal($('home-end-match').hidden, true);
 });
+
+
+test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on-ice pack reveal choreography, and signup pack handoff', async () => {
+  const crypto = require('node:crypto');
+  const P = require('../shared/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const ubu = require('../shared/ubu.js');
+  const ubuFile = require('../shared/ubu-file.js');
+  const rarity = require('../shared/rarity.js');
+  const ubuArchetype = require('../shared/ubu-archetype.js');
+  const cssSrc = fs.readFileSync(require.resolve('../web/ububall.css'), 'utf8');
+  const siteCssSrc = fs.readFileSync(require.resolve('../web/site.css'), 'utf8');
+  const htmlSrc = fs.readFileSync(require.resolve('../web/index.html'), 'utf8');
+  const siteSrc = fs.readFileSync(require.resolve('../web/site.js'), 'utf8');
+
+  // 1. Structural & CSS invariants: persistent .arena-layout outside [data-screen], old #reveal modal removed, mint/collection shots defined
+  assert.equal(htmlSrc.includes('<dialog id="reveal"'), false, 'modal #reveal dialog replaced outright by #mint-reveal on stage');
+  assert.equal(siteCssSrc.includes('#reveal {'), false, 'obsolete #reveal modal styles removed');
+  assert.match(htmlSrc, /id="mint-world"/, 'index.html mounts #mint-world inside .rink-stage');
+  assert.match(htmlSrc, /id="mint-lights"/, 'index.html mounts #mint-lights spotlight canvas');
+  assert.match(htmlSrc, /id="mint-ubus"/, 'index.html mounts #mint-ubus actor layer');
+  assert.match(htmlSrc, /id="mint-reveal"/, 'index.html mounts #mint-reveal stage overlay');
+  assert.match(htmlSrc, /id="signup-stage-pack"/, 'index.html mounts #signup-stage-pack for Home signup handoff');
+  const playBlock = htmlSrc.slice(htmlSrc.indexOf('<main data-screen="play">'), htmlSrc.indexOf('</main>'));
+  assert.equal(playBlock.includes('class="arena-layout"'), false, '.arena-layout lives outside <main data-screen="play"> so screen changes never hide the rink');
+  assert.ok(cssSrc.includes('[data-shot="mint"]'), 'ububall.css defines mint shot layout');
+  assert.ok(cssSrc.includes('[data-shot="collection"]'), 'ububall.css defines collection shot rule');
+
+  // 2. Stage screen transitions (Home <-> Mint): FLIP camera move, castTo(true/false), ubuStageReady(), and demo pause
+  const stageSlice =
+    section('  let cast = null, shot =', '  // While a video export renders') + '\n' +
+    section('  function localPlayBlocked() {', '  function updateLocalPlanClock(') + '\n' +
+    section('  function updateFoulInfo() {', '  function kickoff(isNewMatch = false) {') + '\n' +
+    section('  function updateFirstTurnGuide() {', '  function prepareCPU(initialPlans = null) {') + '\n' +
+    section('  function positionSpinControl() {', '  function fitStadium() {') + '\n' +
+    section('  let cameraMove = null;', '  // The cast: whoever is on the ice') + '\n' +
+    section('  function updateReplaySkip(replay) {', '  replaySkip.onclick =') + '\n' +
+    section('  function syncFullscreenButton() {', '  async function exitOwnedFullscreen() {') + '\n' +
+    section('  function fitOrientation() {', '  function openPause() {') + '\n' +
+    section('  function leavePlayOverlays() {', '  const screenGuard =') + '\n' +
+    section('  function demoPaused() {', '  // Waits count only while');
+
+  const makeClassList = () => {
+    const set = new Set();
+    return {
+      add: c => set.add(c),
+      remove: c => set.delete(c),
+      toggle: (c, on) => { const next = on === undefined ? !set.has(c) : Boolean(on); if (next) set.add(c); else set.delete(c); return next; },
+      contains: c => set.has(c)
+    };
+  };
+  const rectByShot = {
+    home: { left: 40, top: 80, width: 640, height: 384 },
+    mint: { left: 160, top: 120, width: 1120, height: 672 },
+    collection: { left: 0, top: 0, width: 0, height: 0 }
+  };
+  let activeAnim = null, castCalls = [], beforeEvents = [], domFlips = 0;
+  const stageEls = new Map();
+  const getStageEl = id => {
+    if (!stageEls.has(id)) {
+      stageEls.set(id, {
+        id, hidden: false, open: false, inert: false,
+        style: { visibility: '', setProperty(k, v) { this[k] = v; } },
+        classList: makeClassList(),
+        children: [],
+        get firstElementChild() { return { textContent: '' }; },
+        replaceChildren() { this.children = []; }, setAttribute() {},
+        close() { this.open = false; }
+      });
+    }
+    return stageEls.get(id);
+  };
+  const mockWin = {
+    dispatchEvent(ev) { beforeEvents.push(ev.detail); }
+  };
+  const stageCtx = {
+    Object, Array, Set, Map, Math, Number, String, Boolean, Promise, URL,
+    CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o?.detail; } },
+    window: mockWin,
+    P, ububallMatch,
+    $: getStageEl,
+    inDiscord: false,
+    location: { pathname: '/' },
+    scrollY: 0,
+    scrollTo() {},
+    reducedMotion: { matches: false },
+    portraitScreen: { matches: false },
+    ownsFullscreen: () => false,
+    fullscreenDisplay: { matches: false },
+    fullscreenRequest: null,
+    btnFullscreen: getStageEl('btn-fullscreen'),
+    exitOwnedFullscreen: async () => {},
+    fitScorebug() {},
+    setPortrait() {},
+    fitSetupShot() {},
+    endCanvasDrag() {},
+    drag: null,
+    fieldView: { portrait: false, field: null, bodies: P.kickoff(), mode: 'standard' },
+    fieldBox: { left: 0, top: 0, width: 640, height: 384, stageWidth: 640, stageHeight: 384, controlWidth: 120, controlHeight: 32 },
+    stagePoint: p => ({ x: p.x, y: p.y }),
+    impulseGeometry: b => ({ x: b.x, y: b.y - 40 }),
+    gameUi: { scale: () => 1 },
+    selected: 0,
+    plans: [{ angle: 0, power: 0, spin: 0, guard: false }],
+    phase: 'plan',
+    spinSlider: false,
+    firstTurnStep: null,
+    foulInfo: null,
+    foulBox: getStageEl('foul-box'),
+    goalReplay: null,
+    replaySkip: getStageEl('skip-goal-replay'),
+    demo: true,
+    online: null,
+    theater: null,
+    recording: null,
+    lineupMove: null,
+    returnPortrait: false,
+    closeFirstTurnGuide() {},
+    closeFoulInfo() {},
+    closeSummary() {},
+    stopFanfare() {},
+    gameAudio: () => ({ stopMotion() {} }),
+    isExporting: () => false,
+    statDrawer: { matches: () => false, hidePopover() {} },
+    endReplay() {},
+    hideFinger() {},
+    matchInProgress: () => false,
+    cpuClient: { dispose() {} },
+    layoutDirty: false,
+    draw() { stageCtx.layoutDirty = false; },
+    castTo: away => { castCalls.push(away); },
+    stadium: { classList: makeClassList() },
+    rinkWrap: { classList: makeClassList() },
+    rinkStage: {
+      classList: makeClassList(),
+      getBoundingClientRect: () => rectByShot[stageCtx.document.body.dataset.shot] || rectByShot.home,
+      animate(keyframes, opts) {
+        activeAnim = { keyframes, opts, cancelled: false, onfinish: null, cancel() { this.cancelled = true; } };
+        return activeAnim;
+      }
+    },
+    document: {
+      hidden: false,
+      fullscreenElement: null,
+      fullscreenEnabled: true,
+      body: { dataset: { shot: 'home' }, classList: makeClassList() },
+      querySelector: () => null
+    }
+  };
+
+  const stageEnv = runInNewContext(
+    stageSlice + '\n;({ getShot: () => shot, screenTransition, localPlayBlocked, demoPaused });',
+    stageCtx
+  );
+
+  assert.equal(stageEnv.getShot(), 'home');
+  assert.equal(stageEnv.localPlayBlocked(), false, 'demo runs unblocked on home shot');
+  assert.equal(stageEnv.demoPaused(), false, 'demo walkthrough active on home shot');
+
+  // Transition play -> mint: camera glides, ubuStageReady waits for finish, skaters scatter, demo pauses
+  stageCtx.location.pathname = '/mint';
+  stageEnv.screenTransition('mint', () => { domFlips++; }, 'play');
+  assert.equal(domFlips, 1, 'DOM screen visibility flips inside atomic camera callback');
+  assert.equal(stageEnv.getShot(), 'mint');
+  assert.equal(stageCtx.document.body.dataset.shot, 'mint');
+  assert.deepEqual(beforeEvents, ['mint']);
+  assert.deepEqual(castCalls, [true], 'skaters scatter off the ice on entering Mint');
+  assert.equal(stageEnv.localPlayBlocked(), true, 'demo physics pause on Mint shot');
+  assert.equal(stageEnv.demoPaused(), true, 'demo planner pauses on Mint shot');
+
+  let stageReadySettled = false;
+  mockWin.ubuStageReady().then(() => { stageReadySettled = true; });
+  await Promise.resolve();
+  assert.equal(stageReadySettled, false, 'ubuStageReady stays pending while camera glide is in flight');
+  activeAnim.onfinish();
+  await Promise.resolve();
+  assert.equal(stageReadySettled, true, 'ubuStageReady resolves once camera glide finishes');
+
+  // Transition mint -> play: camera glides back to home, skaters return, demo unpauses
+  stageCtx.location.pathname = '/';
+  stageEnv.screenTransition('play', () => { domFlips++; }, 'mint');
+  assert.equal(stageEnv.getShot(), 'home');
+  assert.deepEqual(castCalls, [true, false], 'skaters skate back onto the ice on returning to Home');
+  assert.equal(stageEnv.localPlayBlocked(), false, 'demo unpauses once back on Home');
+
+  // 3. Full Mint stage choreography in site.js: 3-pack spotlights, swipe & center unwrap, 5 silhouettes, camera zoom/pan reveal, scamper, re-deal & signup handoff
+  const { publicKey, privateKey } = await globalThis.crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+  const pubJwk = await globalThis.crypto.subtle.exportKey('jwk', publicKey);
+  const makeCerts = async (n, startSerial) => {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const dna = crypto.randomBytes(128);
+      const code = ubu.toCode(dna);
+      const cert = await ubuFile.sign({
+        mint: 'AAAAAAAAAAAAAAAAAAAAAA',
+        id: crypto.randomBytes(16).toString('base64url'),
+        serial: String(startSerial + i).padStart(12, '0'),
+        dna: code,
+        issuedAt: 1794441600000 + i,
+        key: 'k1'
+      }, privateKey);
+      const model = ubu.decode(dna);
+      out.push({ cert, bg: model.attributes.background.hex, tex: model.attributes.background.material > 0 });
+    }
+    return out;
+  };
+  const pack5 = await makeCerts(5, 1);
+  const pack3 = await makeCerts(3, 50);
+
+  const mintListeners = new Map();
+  const winListeners = new Map();
+  const storage = new Map();
+  const makeDomNode = (tag, id = '') => {
+    const node = {
+      tagName: tag.toUpperCase(),
+      id,
+      hidden: false,
+      disabled: false,
+      inert: false,
+      open: false,
+      tabIndex: 0,
+      textContent: '',
+      value: '',
+      parentElement: null,
+      dataset: {},
+      style: {
+        setProperty(k, v) { this[k] = String(v); },
+        getPropertyValue(k) { return this[k] || ''; }
+      },
+      classList: makeClassList(),
+      children: [],
+      get childElementCount() { return this.children.length; },
+      get firstChild() { return this.children[0] || null; },
+      append(...kids) {
+        for (const k of kids) {
+          if (k && typeof k === 'object') k.parentElement = this;
+          this.children.push(k);
+        }
+      },
+      after(...kids) {
+        if (!this.parentElement) return;
+        const idx = this.parentElement.children.indexOf(this);
+        this.parentElement.children.splice(idx + 1, 0, ...kids);
+      },
+      replaceChildren(...kids) {
+        this.children = [];
+        this.append(...kids);
+      },
+      setAttribute(k, v) { this[k] = String(v); },
+      getAttribute(k) { return this[k] ?? null; },
+      removeAttribute(k) { delete this[k]; },
+      closest(sel) {
+        if (sel === '.pack-shop') return packShopNode;
+        if (sel === '[hidden]') {
+          let cur = this;
+          while (cur) { if (cur.hidden) return cur; cur = cur.parentElement; }
+        }
+        return null;
+      },
+      querySelector(sel) {
+        if (sel === 'button') return this.children.find(c => c?.tagName === 'BUTTON') || makeDomNode('button');
+        if (sel === 'canvas') return this.children.find(c => c?.tagName === 'CANVAS') || makeDomNode('canvas');
+        if (sel === 'use') return makeDomNode('use');
+        return null;
+      },
+      querySelectorAll() { return []; },
+      addEventListener(type, fn) {
+        const key = `${id || tag}:${type}`;
+        if (!mintListeners.has(key)) mintListeners.set(key, []);
+        mintListeners.get(key).push(fn);
+        this[`_on_${type}`] = fn;
+      },
+      click() {
+        const ev = { target: this, detail: 1, clientX: 0, clientY: 0, stopPropagation() {}, preventDefault() {} };
+        this._on_click?.(ev);
+        if (typeof this.onclick === 'function') this.onclick(ev);
+      },
+      focus() {},
+      close() { this.open = false; },
+      showModal() { this.open = true; },
+      getBoundingClientRect: () => ({ left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100 }),
+      getContext: () => ({
+        clearRect() {}, fillRect() {}, beginPath() {}, arc() {}, fill() {}, save() {}, restore() {},
+        translate() {}, scale() {}, moveTo() {}, lineTo() {}, closePath() {},
+        createRadialGradient: () => ({ addColorStop() {} }),
+        createLinearGradient: () => ({ addColorStop() {} })
+      }),
+      animate(keyframes, options) {
+        node._lastAnim = { keyframes, options };
+        return { onfinish: null, oncancel: null, cancel() {} };
+      }
+    };
+    return node;
+  };
+
+  const domById = new Map();
+  const getMintEl = id => {
+    if (!domById.has(id)) domById.set(id, makeDomNode('div', id));
+    return domById.get(id);
+  };
+  const packShopNode = makeDomNode('section', 'pack-shop');
+  packShopNode.append(getMintEl('pack-title'), getMintEl('pack-subtitle'));
+  for (const starterId of ['daily-pack', 'signup-stage-pack', 'home-pack']) {
+    const wrap = getMintEl(starterId);
+    const btn = makeDomNode('button', starterId + '-btn');
+    btn.append(makeDomNode('canvas', starterId + '-canvas'));
+    wrap.append(btn);
+  }
+  getMintEl('pack-choices');
+  getMintEl('mint-world').hidden = true;
+  getMintEl('mint-lights');
+  getMintEl('mint-ubus').hidden = true;
+  getMintEl('mint-reveal').hidden = true;
+  const rinkStageDom = makeDomNode('div', 'rink-stage');
+
+  let unwrapCalls = [], mintCount = 0, navigatedTo = null, stageReadyGate = Promise.resolve();
+  let starterState = { signup: false, daily: false };
+  const ownedMap = new Map();
+  let importedKey = null;
+
+  const mintWin = {
+    location: { pathname: '/mint' },
+    navigator: { userActivation: { hasBeenActive: true } },
+    devicePixelRatio: 1,
+    matchMedia: q => ({
+      matches: q.includes('reduce'), // Use reduced-motion so async waits resolve deterministically
+      addEventListener() {}
+    }),
+    requestAnimationFrame: fn => { fn(16); return 1; },
+    setTimeout: (fn) => { fn(); return 1; },
+    clearTimeout() {},
+    URL, Blob, TextDecoder,
+    crypto: globalThis.crypto,
+    localStorage: {
+      getItem: k => storage.has(k) ? storage.get(k) : null,
+      setItem: (k, v) => storage.set(k, String(v)),
+      removeItem: k => storage.delete(k)
+    },
+    addEventListener(type, fn) {
+      if (!winListeners.has(type)) winListeners.set(type, []);
+      winListeners.get(type).push(fn);
+    },
+    dispatchEvent(ev) {
+      for (const fn of (winListeners.get(ev.type) || [])) fn(ev);
+    },
+    navigateUbuScreen: async href => {
+      navigatedTo = href;
+      mintWin.location.pathname = '/mint';
+      mintDoc.body.dataset.shot = 'mint';
+      for (const fn of (winListeners.get('ubu:screen') || [])) fn({ detail: 'mint' });
+      return true;
+    },
+    ubuStageReady: () => stageReadyGate,
+    getUbuSession: () => ({ owner: 'acct-1', csrf: 'csrf-tok' }),
+    gameUi: {
+      icon: name => makeDomNode('svg', 'icon-' + name),
+      confirm: async () => false
+    },
+    ubu, ubuFile, rarity, ubuArchetype, ububallPhysics: P,
+    ubuRender: Object.assign(() => makeDomNode('svg'), {
+      back: () => makeDomNode('svg'),
+      cardMaterials: () => makeDomNode('div'),
+      token: () => makeDomNode('svg'),
+      tokenBack: () => makeDomNode('svg')
+    }),
+    ubuAudio: {
+      getAudioContext: () => null,
+      parseVoiceInfo: () => ({ instrument: 'Sine', rootName: 'C4', rootFreq: 261.6, scale: 'Major', tempoBpm: 120, groove: 'Straight', grooveIndex: 0, notes: [{ midi: 60, name: 'C4', beats: 1, degree: 0, isRest: false }] }),
+      playPack() {},
+      stop() {}
+    },
+    ubuStarter: {
+      get status() { return starterState; },
+      get known() { return true; },
+      async refresh() {
+        for (const fn of (winListeners.get('ubu:starter') || [])) fn({});
+      },
+      async claim(kind) {
+        starterState = { ...starterState, [kind]: false };
+        return { certificates: pack3.map(p => p.cert) };
+      }
+    },
+    ubuList: {
+      config: async () => ({ ready: true, login: true, mint: 'AAAAAAAAAAAAAAAAAAAAAA', lifetimeLimit: 10, keys: { k1: pubJwk.x } }),
+      trustedKey: async () => {
+        importedKey ||= await globalThis.crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: pubJwk.x, ext: true }, { name: 'Ed25519' }, false, ['verify']);
+        return importedKey;
+      },
+      load: async () => {},
+      get: serial => ownedMap.get(serial) || null,
+      add: entry => { ownedMap.set(entry.serial, entry); },
+      setFavorite: async () => {},
+      serialLabel: s => '#' + Number(s),
+      rarityScore: p => p.toFixed(2),
+      heartIcon: () => makeDomNode('svg'),
+      mount: () => ({ render() {}, clearFilters() {} })
+    },
+    createPackScene: () => {
+      let packType = 'foil';
+      return {
+        async play(amount, models, options) {
+          unwrapCalls.push({ amount, count: models.length, silhouette: Boolean(options?.silhouette), type: packType });
+        },
+        awaitingTap: () => false,
+        tap: () => false,
+        reset() {},
+        setStarter() { packType = 'starter'; },
+        setHints(type) { packType = type; }
+      };
+    },
+    fetch: async (url, init = {}) => {
+      const json = obj => ({ ok: true, status: 200, json: async () => obj });
+      if (url === '/api/packs') {
+        const body = JSON.parse(init.body || '{}');
+        const hints = pack5.map(p => ({ background: p.bg, textured: p.tex }));
+        return json({
+          request: body.request,
+          choices: [
+            { choice: 'tok-0', type: 'foil', hints },
+            { choice: 'tok-1', type: 'gift', hints },
+            { choice: 'tok-2', type: 'plastic', hints }
+          ]
+        });
+      }
+      if (url === '/api/mint') {
+        mintCount++;
+        return json({ certificates: pack5.map(p => p.cert) });
+      }
+      if (url === '/api/favorites') return json({ ok: true });
+      return json({});
+    }
+  };
+  const mintDoc = {
+    body: { dataset: { shot: 'mint' }, append() {} },
+    activeElement: null,
+    getElementById: getMintEl,
+    createElement: tag => makeDomNode(tag),
+    createElementNS: (_, tag) => makeDomNode(tag),
+    querySelector: sel => {
+      if (sel === '.rink-stage') return rinkStageDom;
+      if (sel === 'main[data-screen="collection"]') return makeDomNode('main');
+      if (sel === 'main[data-screen="mint"]') return makeDomNode('main');
+      return null;
+    },
+    querySelectorAll: () => []
+  };
+  mintWin.window = mintWin;
+  mintWin.globalThis = mintWin;
+  mintWin.document = mintDoc;
+  mintWin.performance = { now: () => 1000 };
+  mintWin.Object = Object;
+  mintWin.Array = Array;
+  mintWin.Set = Set;
+  mintWin.Map = Map;
+  mintWin.Math = Math;
+  mintWin.Number = Number;
+  mintWin.String = String;
+  mintWin.Boolean = Boolean;
+  mintWin.Promise = Promise;
+  mintWin.JSON = JSON;
+  mintWin.Error = Error;
+  mintWin.Uint8Array = Uint8Array;
+
+  runInNewContext(siteSrc, mintWin);
+  // Wait for async session + initial offer load
+  for (let i = 0; i < 12; i++) await new Promise(r => setImmediate(r));
+
+  assert.equal(getMintEl('pack-choices').hidden, false, '3 pack choices dealt onto the Mint stage');
+  assert.equal(getMintEl('pack-choices').children.length, 3);
+  assert.deepEqual(
+    getMintEl('pack-choices').children.map(c => c.style.getPropertyValue('--pack-x')),
+    ['25%', '50%', '75%'],
+    'packs positioned across left, center, and right spotlights on the ice'
+  );
+
+  // Click pack 0 -> swipes 1 & 2 away, centers pack 0, unwraps in silhouette, silhouettes 5 ubus, zooms onto ubu 0 and reveals its card!
+  const pack0Btn = getMintEl('pack-choices').children[0].children[0];
+  pack0Btn.click();
+  for (let i = 0; i < 16; i++) await new Promise(r => setImmediate(r));
+
+  assert.equal(mintCount, 1);
+  assert.equal(unwrapCalls.length, 1);
+  assert.equal(unwrapCalls[0].silhouette, true, 'pack unwrap runs in silhouette mode on the Mint stage');
+  assert.equal(getMintEl('mint-ubus').hidden, false, '5 ubus placed onto the ice');
+  assert.equal(getMintEl('mint-ubus').children.length, 5);
+  assert.equal(rinkStageDom.style.getPropertyValue('--mint-zoom'), '2.4', 'camera zooms in 2.4x onto active ubu');
+  assert.equal(rinkStageDom.style.getPropertyValue('--mint-pan-x'), '69.600%', 'camera pans to center ubu 0 (x=21%)');
+  assert.equal(rinkStageDom.classList.contains('mint-zoomed'), true);
+  assert.equal(getMintEl('mint-reveal').hidden, false, 'arrows and card stage pop up');
+  assert.equal(getMintEl('card-stage').children.length, 1, 'active ubu displays its trading card');
+  assert.equal(getMintEl('prev-ubu').disabled, true);
+  assert.equal(getMintEl('next-ubu').disabled, false);
+  assert.equal(getMintEl('finish-pack').hidden, true, 'Done stays hidden until all 5 ubus are revealed');
+
+  // Verify ubu 0 is active (card shown) while ubus 1..4 are silhouetted side ubus on the ice
+  const ubuEls = getMintEl('mint-ubus').children;
+  assert.equal(ubuEls[0].classList.contains('is-active'), true);
+  for (let i = 1; i < 5; i++) {
+    assert.equal(ubuEls[i].classList.contains('is-silhouetted'), true, `unseen ubu ${i} stays silhouetted under its spotlight`);
+    assert.equal(ubuEls[i].classList.contains('is-active'), false);
+  }
+
+  // Click Next arrow -> pans to ubu 1; ubu 0 becomes a plain revealed ubu off to the left, ubu 1 shows its card, ubus 2..4 remain silhouetted
+  getMintEl('next-ubu').click();
+  for (let i = 0; i < 8; i++) await new Promise(r => setImmediate(r));
+  assert.equal(rinkStageDom.style.getPropertyValue('--mint-pan-x'), '34.800%', 'camera pans to ubu 1 (x=35.5%)');
+  assert.equal(ubuEls[0].classList.contains('is-active'), false, 'previous ubu returns to the ice off to the side');
+  assert.equal(ubuEls[0].classList.contains('is-revealed'), true, 'previous ubu shows in full color on the ice');
+  assert.equal(ubuEls[1].classList.contains('is-active'), true, 'ubu 1 shows its trading card');
+  assert.equal(ubuEls[2].classList.contains('is-silhouetted'), true, 'ubu 2 off to the right stays silhouetted');
+
+  // Reveal remaining ubus 2, 3, 4 -> Done button appears
+  for (let step = 0; step < 3; step++) {
+    getMintEl('next-ubu').click();
+    for (let i = 0; i < 8; i++) await new Promise(r => setImmediate(r));
+  }
+  assert.equal(getMintEl('finish-pack').hidden, false, 'Done appears once all 5 ubus are revealed');
+
+  // Click Done -> zooms back out to 1x, scampers all ubus off the ice, and deals new packs into position
+  getMintEl('finish-pack').click();
+  for (let i = 0; i < 16; i++) await new Promise(r => setImmediate(r));
+  assert.equal(rinkStageDom.style.getPropertyValue('--mint-zoom'), '1', 'camera zooms back out to full rink');
+  assert.equal(rinkStageDom.style.getPropertyValue('--mint-pan-x'), '0%', 'camera resets pan');
+  assert.equal(rinkStageDom.classList.contains('mint-zoomed'), false);
+  assert.equal(getMintEl('mint-reveal').hidden, true);
+  assert.equal(getMintEl('mint-ubus').hidden, true, 'ubus scamper away and clear the ice');
+  assert.equal(getMintEl('pack-choices').hidden, false, 'next set of packs fades into position for another round');
+
+  // 4. Home signup bonus pack (#home-pack) navigates to /mint, waits for camera transition, then opens 3-ubu starter pack on Mint stage
+  mintWin.location.pathname = '/';
+  mintDoc.body.dataset.shot = 'home';
+  starterState = { signup: true, daily: false };
+  let releaseTransition;
+  stageReadyGate = new Promise(resolve => { releaseTransition = resolve; });
+  const homeSignupBtn = getMintEl('home-pack').children[0];
+  homeSignupBtn.click();
+  for (let i = 0; i < 6; i++) await new Promise(r => setImmediate(r));
+  assert.equal(navigatedTo, '/mint', 'clicking Home signup pack navigates to /mint');
+  assert.equal(unwrapCalls.length, 1, 'signup pack waits for camera transition into Mint before unwrapping');
+  assert.equal(getMintEl('signup-stage-pack').hidden, false, 'signup pack sits at center ice during camera glide');
+
+  releaseTransition();
+  for (let i = 0; i < 16; i++) await new Promise(r => setImmediate(r));
+  assert.equal(unwrapCalls.length, 2, 'signup pack unwraps once Mint camera transition completes');
+  assert.equal(unwrapCalls[1].amount, 3, 'signup pack unwraps 3 starter ubus');
+  assert.equal(unwrapCalls[1].silhouette, true);
+  assert.equal(getMintEl('mint-ubus').children.length, 3, '3 starter ubus placed under 3 spotlights');
+  assert.equal(rinkStageDom.style.getPropertyValue('--mint-zoom'), '1.85', '3-ubu reveal uses 1.85x zoom');
+  assert.equal(rinkStageDom.style.getPropertyValue('--mint-pan-x'), '35.150%', 'camera centers starter ubu 0 (x=31%)');
+});

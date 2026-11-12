@@ -1,13 +1,154 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id);
+  const packShop = () => $('pack-title')?.closest('.pack-shop');
+  const rinkStageEl = () => document.querySelector('.rink-stage');
+  const motionOff = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const waitMs = ms => motionOff() || ms <= 0 ? Promise.resolve() : new Promise(resolve => setTimeout(resolve, ms));
+  const onMintShot = () => document.body?.dataset?.shot === 'mint';
+
   let config = { ready: false }, session = null, current = null, busy = false, picking = false;
-  let packScene = null, offer = null;
+  let packScene = null, offer = null, pendingSignupOpen = false, fadeNextChoices = false;
+  let outOfPacks = false, dealFailed = false, collectionFailed = false;
+  let pack = null, packKey = '', pendingKey = '', revealIndex = 0, revealOpen = false, revealSeq = 0;
   let coinLandTimer = 0;
   const clearCoinTimer = () => { if (coinLandTimer) { clearTimeout(coinLandTimer); coinLandTimer = 0; } };
 
+  // Stage lighting over the rink interior (60..940, 60..540 on the 1000x600 rink -> inset 10% 6%).
+  // Spotlights cut soft pools out of the dark wash so the real ice and markings glow beneath each pack or ubu.
+  const mintLights = (() => {
+    const canvas = $('mint-lights');
+    const ctx = canvas?.getContext?.('2d') || null;
+    let active = [], frame = 0, lastAt = 0;
+    const hexRgb = hex => {
+      if (typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) return [255, 236, 210];
+      return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+    };
+    function paint(now) {
+      frame = 0;
+      if (!ctx || !canvas) return;
+      const dt = lastAt ? Math.min(64, Math.max(1, now - lastAt)) : 16;
+      lastAt = now;
+      const k = motionOff() ? 1 : 1 - Math.exp(-dt / 95);
+      let moving = false;
+      for (const s of active) {
+        for (const prop of ['x', 'y', 'r', 'alpha']) {
+          const diff = s.to[prop] - s[prop];
+          if (Math.abs(diff) > .003) { s[prop] += diff * k; moving = true; }
+          else s[prop] = s.to[prop];
+        }
+      }
+      active = active.filter(s => s.alpha > .004 || s.to.alpha > 0);
+      const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+      const w = Math.round((canvas.clientWidth || 880) * dpr), h = Math.round((canvas.clientHeight || 480) * dpr);
+      if (w && h) {
+        if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = 'rgba(6, 9, 15, 0.84)';
+        ctx.fillRect(0, 0, w, h);
+        ctx.globalCompositeOperation = 'destination-out';
+        for (const s of active) {
+          if (s.alpha <= .005) continue;
+          const lx = ((s.x - 6) / 88) * w, ly = ((s.y - 10) / 80) * h, lr = Math.max(4, (s.r / 88) * w);
+          const cut = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr);
+          cut.addColorStop(0, `rgba(0, 0, 0, ${(0.95 * s.alpha).toFixed(3)})`);
+          cut.addColorStop(0.5, `rgba(0, 0, 0, ${(0.64 * s.alpha).toFixed(3)})`);
+          cut.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          ctx.fillStyle = cut;
+          ctx.beginPath(); ctx.arc(lx, ly, lr, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+        for (const s of active) {
+          if (s.alpha <= .005) continue;
+          const lx = ((s.x - 6) / 88) * w, ly = ((s.y - 10) / 80) * h, lr = Math.max(4, (s.r / 88) * w);
+          const [r, g, b] = hexRgb(s.color);
+          // Feathered overhead spotlight haze above the pool on the ice (no hard polygon edges).
+          ctx.save();
+          ctx.translate(lx, ly - lr * .55);
+          ctx.scale(.68, 1.45);
+          const beam = ctx.createRadialGradient(0, -lr * .35, 0, 0, 0, lr * 1.15);
+          beam.addColorStop(0, `rgba(255, 244, 224, ${(0.11 * s.alpha).toFixed(3)})`);
+          beam.addColorStop(0.55, `rgba(${r}, ${g}, ${b}, ${(0.06 * s.alpha).toFixed(3)})`);
+          beam.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+          ctx.fillStyle = beam;
+          ctx.beginPath(); ctx.arc(0, 0, lr * 1.15, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+          const pool = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr);
+          pool.addColorStop(0, `rgba(255, 244, 224, ${(0.20 * s.alpha).toFixed(3)})`);
+          pool.addColorStop(0.55, `rgba(${r}, ${g}, ${b}, ${(0.14 * s.alpha).toFixed(3)})`);
+          pool.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+          ctx.fillStyle = pool;
+          ctx.beginPath(); ctx.arc(lx, ly, lr, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      if (moving) requestPaint();
+      else lastAt = 0;
+    }
+    function requestPaint() {
+      if (!frame && ctx) frame = requestAnimationFrame(paint);
+    }
+    if (canvas && typeof ResizeObserver === 'function') new ResizeObserver(requestPaint).observe(canvas);
+    return {
+      setSpots(targets, { immediate = false, seedFrom = null } = {}) {
+        const snap = immediate || motionOff();
+        const byId = new Map(active.map(s => [s.id, s]));
+        for (const s of active) s.to = { ...s.to, alpha: 0 };
+        for (const t of targets) {
+          const goal = { x: t.x, y: t.y ?? 50, r: t.r ?? 14, alpha: t.alpha ?? 1 };
+          let s = byId.get(t.id);
+          if (s) {
+            s.color = t.color || s.color;
+            s.to = goal;
+            if (snap) Object.assign(s, goal);
+          } else {
+            const start = snap ? goal : seedFrom ? { x: seedFrom.x, y: seedFrom.y ?? 50, r: seedFrom.r ?? goal.r, alpha: seedFrom.alpha ?? 0.85 } : { ...goal, alpha: 0 };
+            s = { id: t.id, ...start, color: t.color || '#ffecd2', to: goal };
+            active.push(s);
+          }
+        }
+        if (snap) paint(performance.now());
+        else requestPaint();
+      },
+      getSpots: () => active.map(s => ({ id: s.id, x: s.to.x, y: s.to.y, r: s.to.r, alpha: s.to.alpha, color: s.color })),
+      repaint: () => paint(performance.now())
+    };
+  })();
+
+  // Positions (% of rink width) and camera zoom for 3-ubu starter/daily packs vs 5-ubu regular packs.
+  // Keeping x_0 * zoom >= 50 ensures the zoomed rink canvas always fills 100% of .rink-stage.
+  const ubuPositions = count => count <= 3 ? [31, 50, 69] : [21, 35.5, 50, 64.5, 79];
+  const ubuZoom = count => count <= 3 ? 1.85 : 2.4;
+  function setMintCamera(index, count, { immediate = false } = {}) {
+    const stage = rinkStageEl();
+    if (!stage) return;
+    const xs = ubuPositions(count), x = xs[index] ?? 50, z = ubuZoom(count);
+    const panX = (50 - x) * z;
+    if (immediate || motionOff()) stage.classList.add('mint-camera-cut');
+    else stage.classList.remove('mint-camera-cut');
+    stage.classList.add('mint-zoomed');
+    stage.style.setProperty('--mint-zoom', String(z));
+    stage.style.setProperty('--mint-pan-x', `${panX.toFixed(3)}%`);
+    stage.style.setProperty('--mint-pan-y', '0%');
+    if (immediate || motionOff()) requestAnimationFrame(() => stage.classList.remove('mint-camera-cut'));
+  }
+  function resetMintCamera({ immediate = false } = {}) {
+    const stage = rinkStageEl();
+    if (!stage) return;
+    if (immediate || motionOff()) stage.classList.add('mint-camera-cut');
+    else stage.classList.remove('mint-camera-cut');
+    stage.classList.remove('mint-zoomed');
+    stage.style.setProperty('--mint-zoom', '1');
+    stage.style.setProperty('--mint-pan-x', '0%');
+    stage.style.setProperty('--mint-pan-y', '0%');
+    if (immediate || motionOff()) requestAnimationFrame(() => stage.classList.remove('mint-camera-cut'));
+  }
+
+  if ($('mint-world')) $('mint-world').hidden = false;
+
   const choiceViews = Array.from({ length: 3 }, (_, i) => {
     const card = document.createElement('article'); card.className = 'pack-option';
+    card.dataset.slot = String(i);
+    card.style.setProperty('--pack-x', `${25 + i * 25}%`);
     const button = document.createElement('button'); button.className = 'candy-pack'; button.disabled = true;
     button.setAttribute('aria-label', `Choose pack ${i + 1}`);
     const canvas = document.createElement('canvas'); canvas.setAttribute('aria-hidden', 'true'); button.append(canvas);
@@ -24,59 +165,149 @@
     button.addEventListener('click', () => {
       // A tap-to-open wrapper takes taps on the chosen pack; otherwise a click picks the pack.
       if (!scene?.tap()) { selectPack(i); return; }
-      if (!scene.awaitingTap()) { button.disabled = true; $('pack-hint').textContent = ''; }
+      if (!scene.awaitingTap()) {
+        button.disabled = true;
+        $('pack-hint').textContent = '';
+        $('pack-title').textContent = 'Opening pack…';
+      }
     });
     return { card, button, scene };
   });
   // Sounds need a page gesture first; packs dealt on page load, or while another screen is up, stay silent.
-  const sound = (kind, name) => { if (navigator.userActivation?.hasBeenActive && !$('pack-choices').closest('[data-screen]').hidden) window.ubuAudio?.[kind]?.(name); };
-  // The signup and daily packs share one horizontal wrapper and the regular reveal.
-  function starterPack(id, kind, label) {
-    const button = $(id).querySelector('button'), canvas = button.querySelector('canvas');
+  const sound = (kind, name, opts) => { if (navigator.userActivation?.hasBeenActive && onMintShot()) window.ubuAudio?.[kind]?.(name, opts); };
+  // The signup and daily packs share one horizontal wrapper and open on the Mint stage.
+  function starterPack(id, kind, label, bindClick = true) {
+    const host = $(id);
+    if (!host) return null;
+    const button = host.querySelector('button'), canvas = button.querySelector('canvas');
     let scene = null;
     try { scene = createPackScene(canvas); scene.setStarter(label); } catch { canvas.hidden = true; button.textContent = label; }
-    const view = { button, scene };
-    button.addEventListener('click', () => openStarter(kind, view));
+    const view = { host, button, scene };
+    if (bindClick) button.addEventListener('click', () => openStarter(kind, view));
     return view;
   }
   async function openStarter(kind, view) {
-    if (busy) return;
-    if (pack) { revealIndex = Math.max(0, pack.seen - 1); showReveal(); return; } // Finish the pack in progress first.
+    if (busy || !view) return;
+    if (pack) { revealIndex = Math.max(0, pack.seen - 1); void beginStageReveal({ freshlyOpened: false }); return; }
     busy = true; view.button.disabled = true; updatePackButton();
+    $('pack-choices').hidden = true;
+    if (kind === 'signup') $('daily-pack').hidden = true;
+    else if ($('signup-stage-pack')) $('signup-stage-pack').hidden = true;
+    view.host.hidden = false;
+    $('pack-title').textContent = kind === 'signup' ? 'Signup bonus' : 'Your daily pack';
+    $('pack-subtitle').textContent = '';
+    mintLights.setSpots([{ id: 'starter', x: 50, y: 50, r: 19, alpha: 1, color: '#ffecd2' }]);
     let persisted = false;
     try {
       const data = await ubuStarter.claim(kind);
       pack = await readPack(data.certificates);
       savePack();
       persisted = true;
-      await view.scene?.play(pack.items.length, pack.items.map(item => item.model));
+      await view.scene?.play(pack.items.length, pack.items.map(item => item.model), { silhouette: true });
+      view.host.hidden = true;
       revealIndex = 0;
-      if (document.body.dataset.shot !== 'match' && document.body.dataset.shot !== 'replay') showReveal();
       status('');
+      busy = false;
+      if (onMintShot()) await beginStageReveal({ freshlyOpened: true });
+      else syncMintStage();
     } catch (error) {
       if (!persisted) pack = null;
       if (await gameUi.confirm({ title: 'Could not open your pack', message: error.message, confirmLabel: 'Retry' })) {
         busy = false; view.button.disabled = false;
         return openStarter(kind, view);
       }
+      view.host.hidden = kind === 'signup';
+      syncMintStage();
     } finally {
       busy = false; view.button.disabled = false; view.scene?.reset(); updatePackButton();
     }
     void ubuStarter.refresh().catch(() => {});
   }
-  // The daily pack comes before the shop; regular packs are dealt once it is opened.
+  // Syncs the Mint stage headings, packs and spotlights when not actively unwrapping or revealing.
   function syncDaily() {
-    const daily = Boolean(session?.owner && ubuStarter.status?.daily);
-    $('pack-title').parentElement.classList.toggle('settled', ubuStarter.known);
-    $('daily-pack').hidden = !daily || Boolean(pack);
-    $('pack-title').textContent = daily ? 'Your daily pack' : 'Choose your pack';
-    $('pack-subtitle').textContent = daily ? 'Tap it to crack it open!' : 'Pick a pack to crack open!';
-    if (daily) { $('pack-choices').hidden = true; status('', true); }
-    else if (ubuStarter.status && offer) $('pack-choices').hidden = false;
-    else if (ubuStarter.status && !pack && config.ready && (config.lifetimeLimit || (pendingKey && localStorage.getItem(pendingKey)))) void loadChoices();
+    syncMintStage();
   }
-  let outOfPacks = false, dealFailed = false, collectionFailed = false;
-  let pack = null, packKey = '', pendingKey = '', revealIndex = 0;
+  function syncMintStage() {
+    packShop()?.classList.toggle('settled', Boolean(ubuStarter.known || pack || !session?.owner));
+    if (!sessionChecked) return;
+    if (!session?.owner) {
+      $('daily-pack').hidden = true;
+      if ($('signup-stage-pack')) $('signup-stage-pack').hidden = true;
+      $('pack-choices').hidden = true;
+      $('mint-ubus').hidden = true;
+      $('mint-reveal').hidden = true;
+      if (onMintShot()) {
+        $('pack-title').textContent = 'Ubu Mint';
+        $('pack-subtitle').textContent = "You're not signed in.";
+        mintLights.setSpots([{ id: 'center', x: 50, y: 50, r: 22, alpha: 0.9, color: '#ffecd2' }]);
+      }
+      return;
+    }
+    if (pendingSignupOpen) {
+      $('daily-pack').hidden = true;
+      $('pack-choices').hidden = true;
+      $('mint-ubus').hidden = true;
+      $('mint-reveal').hidden = true;
+      if ($('signup-stage-pack')) $('signup-stage-pack').hidden = false;
+      $('pack-title').textContent = 'Signup bonus';
+      $('pack-subtitle').textContent = 'Tap it to crack it open!';
+      mintLights.setSpots([{ id: 'starter', x: 50, y: 50, r: 19, alpha: 1, color: '#ffecd2' }]);
+      return;
+    }
+    if (busy || revealOpen) return;
+    if ($('signup-stage-pack')) $('signup-stage-pack').hidden = true;
+    if (pack) {
+      $('daily-pack').hidden = true;
+      $('pack-choices').hidden = true;
+      renderStageUbus();
+      const xs = ubuPositions(pack.items.length);
+      mintLights.setSpots(pack.items.map((item, i) => ({
+        id: 'ubu-' + i, x: xs[i], y: 50, r: 9.5, alpha: i < pack.seen ? 0.95 : 0.8,
+        color: i < pack.seen ? item.model.attributes.background.hex : '#ffecd2'
+      })));
+      $('pack-title').textContent = 'Unfinished pack';
+      $('pack-subtitle').textContent = `${pack.seen} of ${pack.items.length} revealed · Continue below or tap an ubu`;
+      updatePackButton();
+      return;
+    }
+    $('mint-ubus').hidden = true;
+    $('mint-reveal').hidden = true;
+    resetMintCamera({ immediate: true });
+    const daily = Boolean(ubuStarter.status?.daily);
+    $('daily-pack').hidden = !daily;
+    if (daily) {
+      $('pack-choices').hidden = true;
+      $('pack-title').textContent = 'Your daily pack';
+      $('pack-subtitle').textContent = 'Tap it to crack it open!';
+      status('', true);
+      mintLights.setSpots([{ id: 'starter', x: 50, y: 50, r: 19, alpha: 1, color: '#ffecd2' }]);
+      if (fadeNextChoices && !motionOff()) {
+        fadeNextChoices = false;
+        $('daily-pack').animate([{ opacity: 0, scale: .9 }, { opacity: 1, scale: 1 }], { duration: 380, easing: 'ease-out' });
+      }
+      return;
+    }
+    if (ubuStarter.status && offer) {
+      $('pack-choices').hidden = false;
+      $('pack-title').textContent = 'Choose your pack';
+      $('pack-subtitle').textContent = 'Pick a pack to crack open!';
+      mintLights.setSpots(offer.choices.map((opt, i) => ({
+        id: 'pack-' + i, x: 25 + i * 25, y: 50, r: 14.5, alpha: 1, color: opt.hints[0].background
+      })));
+      return;
+    }
+    if (ubuStarter.status && config.ready && (config.lifetimeLimit || (pendingKey && localStorage.getItem(pendingKey))) && !outOfPacks && !dealFailed) {
+      $('pack-title').textContent = 'Choose your pack';
+      $('pack-subtitle').textContent = '';
+      mintLights.setSpots([{ id: 'center', x: 50, y: 50, r: 16, alpha: 0.35, color: '#ffecd2' }]);
+      void loadChoices();
+      return;
+    }
+    $('pack-choices').hidden = true;
+    $('pack-title').textContent = 'Ubu Mint';
+    $('pack-subtitle').textContent = '';
+    mintLights.setSpots([{ id: 'center', x: 50, y: 50, r: 18, alpha: 0.45, color: '#ffecd2' }]);
+  }
   let viewerView = 'ubu';
   const FAV_STORAGE_KEY = 'ubumint:favorites';
   const isFavorite = serial => ubuList.get(serial)?.favorite === true;
@@ -142,8 +373,8 @@
   // The shop deals packs by itself; the one button only continues an unrevealed pack or retries.
   function updatePackButton() {
     $('mint').textContent = pack ? 'Continue pack' : 'Try again';
-    $('mint').hidden = busy || !(pack || dealFailed);
-    for (const view of choiceViews) view.button.disabled = busy || !offer || Boolean(pack);
+    $('mint').hidden = busy || revealOpen || !(pack || dealFailed);
+    for (const view of choiceViews) view.button.disabled = busy || revealOpen || !offer || Boolean(pack);
   }
   // Short dances a clicked ubu performs, picked at random.
   // Every pose uses the same transform functions, so rotations interpolate by angle (a full
@@ -493,75 +724,271 @@
     card.append(top, badge, art, nameStack, side, rarityEl, supers);
     return card;
   }
-  function showReveal() {
-    if (!pack.seen) {
-      pack.seen = 1;
-      try { savePack(); } catch (error) { pack.seen = 0; throw error; }
+  function renderStageUbus() {
+    const host = $('mint-ubus');
+    if (!host || !pack) return;
+    const count = pack.items.length, xs = ubuPositions(count);
+    host.style.setProperty('--ubu-size', count <= 3 ? '6.4cqw' : '5.2cqw');
+    if (host.childElementCount !== count || host.dataset.packId !== (pack.items[0]?.result.certificate?.serial || '')) {
+      host.dataset.packId = pack.items[0]?.result.certificate?.serial || '';
+      host.replaceChildren(...pack.items.map((item, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'mint-ubu';
+        btn.dataset.index = String(i);
+        btn.style.setProperty('--ubu-x', `${xs[i]}%`);
+        btn.append(ubuRender(item.model, 'mint-ubu-svg'));
+        btn.addEventListener('click', () => {
+          if (busy) return;
+          if (!revealOpen) {
+            revealIndex = i <= pack.seen ? i : pack.seen;
+            void beginStageReveal({ freshlyOpened: false });
+          } else if (i !== revealIndex && i <= pack.seen) {
+            void goToRevealIndex(i);
+          }
+        });
+        return btn;
+      }));
     }
-    const index = revealIndex, item = pack.items[index];
+    syncStageUbuStates(revealOpen ? revealIndex : -1);
+    host.hidden = false;
+  }
+
+  function syncStageUbuStates(activeIdx = -1) {
+    const host = $('mint-ubus');
+    if (!host || !pack) return;
+    [...host.children].forEach((el, i) => {
+      const seen = i < pack.seen;
+      const active = i === activeIdx;
+      el.classList.toggle('is-silhouetted', !seen);
+      el.classList.toggle('is-revealed', seen);
+      el.classList.toggle('is-active', active);
+      el.disabled = busy || (revealOpen && i > pack.seen);
+      el.setAttribute('aria-label', seen ? `Show ${pack.items[i].model.parts.fullName}` : `Reveal ubu ${i + 1}`);
+    });
+  }
+
+  function updateRevealLights(activeIdx) {
+    if (!pack) return;
+    const xs = ubuPositions(pack.items.length);
+    mintLights.setSpots(pack.items.map((item, i) => ({
+      id: 'ubu-' + i,
+      x: xs[i],
+      y: 50,
+      r: i === activeIdx ? 12.5 : 8.5,
+      alpha: i === activeIdx ? 1 : 0.78,
+      color: i < pack.seen || i === activeIdx ? item.model.attributes.background.hex : '#ffecd2'
+    })));
+  }
+
+  function mountRevealCard(index) {
+    if (!pack) return;
+    const previousSeen = pack.seen;
+    const newlyRevealed = index >= previousSeen;
+    if (newlyRevealed) {
+      pack.seen = index + 1;
+      try { savePack(); } catch (error) { pack.seen = previousSeen; throw error; }
+    }
+    const item = pack.items[index];
     const last = index === pack.items.length - 1;
     $('reveal-progress').textContent = `${index + 1} / ${pack.items.length}`;
     // Add the revealed ubu to the collection first so heart buttons recognize ownership immediately,
     // then render the background before the visible card so the visible card owns shared lighting.
     showMintedItem(item);
     display(item.text, item.result, false);
-    $('card-stage').replaceChildren(tradingCard(item));
-    $('reveal-dots').replaceChildren(...pack.items.map((_, i) => { const dot = document.createElement('span'); dot.className = i === index ? 'current' : i < pack.seen ? 'seen' : ''; return dot; }));
+    syncStageUbuStates(index);
+    updateRevealLights(index);
+    if (newlyRevealed) sound('playPack', 'reveal');
+    const cardStage = $('card-stage');
+    cardStage.classList.remove('panning');
+    cardStage.replaceChildren(tradingCard(item));
+    $('reveal-dots').replaceChildren(...pack.items.map((_, i) => {
+      const dot = document.createElement('span');
+      dot.className = i === index ? 'current' : i < pack.seen ? 'seen' : '';
+      return dot;
+    }));
     $('prev-ubu').disabled = index === 0;
     $('next-ubu').disabled = last;
     $('finish-pack').hidden = pack.seen < pack.items.length;
-    if (!$('reveal').open) $('reveal').showModal();
+    $('mint-reveal').hidden = false;
+    $('pack-title').textContent = 'Pack reveal';
+    $('pack-subtitle').textContent = pack.seen >= pack.items.length
+      ? 'All revealed · Click Done when ready'
+      : `Ubu ${index + 1} of ${pack.items.length}`;
+    updatePackButton();
   }
-  function navigatePack(direction) {
-    const target = revealIndex + direction;
-    if (!pack || target < 0 || target >= pack.items.length) return;
-    try {
-      const previousSeen = pack.seen;
-      if (target >= pack.seen) {
-        pack.seen = target + 1;
-        try { savePack(); } catch (error) { pack.seen = previousSeen; throw error; }
-      }
-      revealIndex = target;
-      showReveal();
 
+  async function beginStageReveal({ freshlyOpened = false } = {}) {
+    if (!pack) return;
+    const seq = ++revealSeq;
+    revealOpen = true;
+    $('pack-choices').hidden = true;
+    $('daily-pack').hidden = true;
+    if ($('signup-stage-pack')) $('signup-stage-pack').hidden = true;
+    updatePackButton();
+    renderStageUbus();
+    syncStageUbuStates(-1);
+    const count = pack.items.length, xs = ubuPositions(count);
+    if (freshlyOpened) {
+      $('pack-title').textContent = 'Pack opened!';
+      $('pack-subtitle').textContent = '';
+      mintLights.setSpots(
+        pack.items.map((_, i) => ({ id: 'ubu-' + i, x: xs[i], y: 50, r: 9.5, alpha: 0.92, color: '#ffecd2' })),
+        { seedFrom: { x: 50, y: 50, r: 14, alpha: 1 } }
+      );
+      if (!motionOff()) {
+        [...$('mint-ubus').children].forEach((el, i) => {
+          const dx = 50 - xs[i];
+          el.animate?.([
+            { translate: `calc(-50% + ${dx}cqw) -50%`, scale: .55, opacity: 0 },
+            { translate: '-50% -50%', scale: 1, opacity: 1 }
+          ], { duration: 360, delay: i * 35, easing: 'cubic-bezier(.2, .85, .25, 1)', fill: 'backwards' });
+        });
+      }
+      await waitMs(520);
+      if (seq !== revealSeq || !pack || !revealOpen) return;
+    }
+    setMintCamera(revealIndex, count);
+    updateRevealLights(revealIndex);
+    await waitMs(freshlyOpened ? 340 : 260);
+    if (seq !== revealSeq || !pack || !revealOpen) return;
+    try {
+      mountRevealCard(revealIndex);
+    } catch (error) {
+      $('reveal-progress').textContent = `Could not save your place: ${error.message}`;
+    }
+  }
+
+  async function goToRevealIndex(target) {
+    if (!pack || !revealOpen || target < 0 || target >= pack.items.length || target > pack.seen) return;
+    const seq = ++revealSeq;
+    window.ubuAudio?.stop();
+    const unseenTarget = target >= pack.seen;
+    revealIndex = target;
+    // Restore the previous ubu onto the ice so it slides off to the side while the camera pans.
+    syncStageUbuStates(-1);
+    $('card-stage').classList.add('panning');
+    setMintCamera(target, pack.items.length);
+    updateRevealLights(target);
+    await waitMs(unseenTarget ? 240 : 140);
+    if (seq !== revealSeq || !pack || !revealOpen) return;
+    try {
+      mountRevealCard(target);
       if (document.activeElement?.disabled) (target === 0 ? $('next-ubu') : $('prev-ubu')).focus();
-    } catch (error) { $('reveal-progress').textContent = `Could not save your place: ${error.message}`; }
+    } catch (error) {
+      $('reveal-progress').textContent = `Could not save your place: ${error.message}`;
+    }
+  }
+
+  function navigatePack(direction) {
+    void goToRevealIndex(revealIndex + direction);
   }
   $('prev-ubu').addEventListener('click', () => navigatePack(-1));
   $('next-ubu').addEventListener('click', () => navigatePack(1));
-  $('reveal').addEventListener('keydown', event => {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
+  addEventListener('keydown', event => {
+    if (!revealOpen || !onMintShot() || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (document.querySelector('dialog[open], :popover-open')) return;
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-      event.preventDefault(); navigatePack(event.key === 'ArrowLeft' ? -1 : 1);
+      event.preventDefault();
+      navigatePack(event.key === 'ArrowLeft' ? -1 : 1);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      $('pause-reveal').click();
     }
   });
-  function finishPack() {
-    if (!pack || pack.seen < pack.items.length) return false;
+
+  function clearFinishedPackState() {
+    localStorage.removeItem(packKey);
+    pack = null;
+    offer = null;
+    $('pack-choices').hidden = true;
+    packScene?.reset();
+    status('');
+  }
+
+  async function finishPackWithScamper() {
+    if (!pack || pack.seen < pack.items.length || busy) return false;
+    ++revealSeq;
+    revealOpen = false;
+    busy = true;
+    window.ubuAudio?.stop();
+    $('mint-reveal').hidden = true;
+    $('card-stage').replaceChildren();
+    syncStageUbuStates(-1);
+    const count = pack.items.length, xs = ubuPositions(count);
+    $('pack-title').textContent = 'Ubus collected!';
+    $('pack-subtitle').textContent = '';
+    resetMintCamera();
+    mintLights.setSpots(pack.items.map((item, i) => ({
+      id: 'ubu-' + i, x: xs[i], y: 50, r: 10, alpha: 0.9, color: item.model.attributes.background.hex
+    })));
+    await waitMs(430);
+    sound('playPack', 'scamper', { count });
+    mintLights.setSpots([{ id: 'center', x: 50, y: 50, r: 16, alpha: 0.32, color: '#ffecd2' }]);
+    if (!motionOff()) {
+      [...$('mint-ubus').children].forEach((el, i) => {
+        const slot = i - (count - 1) / 2;
+        const dx = slot * 22 + (i % 2 ? -14 : 14);
+        const dy = (i % 2 ? -1 : 1) * (38 + Math.abs(slot) * 6);
+        const spin = (i % 2 ? 1 : -1) * 28;
+        el.animate?.([
+          { translate: '-50% -50%', rotate: '0deg', scale: 1, opacity: 1 },
+          { translate: '-50% -68%', rotate: `${-spin * .35}deg`, scale: 1.12, opacity: 1, offset: .2 },
+          { translate: `calc(-50% + ${dx}cqw) calc(-50% + ${dy}cqw)`, rotate: `${spin}deg`, scale: .62, opacity: 0 }
+        ], { duration: 480, delay: i * 45, easing: 'cubic-bezier(.3, .1, .7, 1)', fill: 'forwards' });
+      });
+    }
+    await waitMs(520);
+    $('mint-ubus').hidden = true;
+    $('mint-ubus').replaceChildren();
+    delete $('mint-ubus').dataset.packId;
     try {
-      localStorage.removeItem(packKey);
-      pack = null;
-      offer = null; $('pack-choices').hidden = true;
-      packScene?.reset();
-      status('');
-      updatePackButton();
-      syncDaily();
-      return true;
+      clearFinishedPackState();
+      fadeNextChoices = true;
     } catch (error) {
-      $('reveal-progress').textContent = error.message;
+      busy = false;
+      updatePackButton();
+      status(error.message);
       return false;
     }
+    busy = false;
+    updatePackButton();
+    syncMintStage();
+    return true;
   }
+
+  function closeRevealImmediate() {
+    ++revealSeq;
+    if (!revealOpen) return;
+    revealOpen = false;
+    window.ubuAudio?.stop();
+    $('mint-reveal').hidden = true;
+    $('card-stage').replaceChildren();
+    if (pack && pack.seen >= pack.items.length) {
+      try { clearFinishedPackState(); } catch {}
+      $('mint-ubus').hidden = true;
+      $('mint-ubus').replaceChildren();
+      delete $('mint-ubus').dataset.packId;
+    }
+    resetMintCamera({ immediate: true });
+    updatePackButton();
+  }
+
   $('finish-pack').addEventListener('click', () => {
-    if (finishPack()) $('reveal').close();
+    void finishPackWithScamper();
   });
   $('pause-reveal').addEventListener('click', () => {
-    if (pack && pack.seen >= pack.items.length) finishPack();
-    $('reveal').close();
-  });
-  $('reveal').addEventListener('close', () => {
+    if (pack && pack.seen >= pack.items.length) {
+      void finishPackWithScamper();
+      return;
+    }
+    ++revealSeq;
+    revealOpen = false;
     window.ubuAudio?.stop();
-    if (pack && pack.seen >= pack.items.length) finishPack();
-    updatePackButton();
+    $('mint-reveal').hidden = true;
+    $('card-stage').replaceChildren();
+    resetMintCamera();
+    syncMintStage();
     if (!$('mint').hidden && !$('mint').closest('[hidden]')) $('mint').focus();
   });
   // Collection shares this status line except for pack-only messages.
@@ -942,25 +1369,38 @@
     const link = document.createElement('a'); link.href = url; link.download = current.name.replaceAll(' ', '-') + '.ubu';
     document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
-  // Packs are dealt onto the table one after another, then bob in place until one is picked.
+  // Packs sit under individual spotlights on the dark ice; after finishing a pack, new packs fade in.
   function showChoices(data) {
     offer = data;
     $('pack-choices').hidden = false;
     $('pack-choices').classList.remove('choosing');
-    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    $('pack-title').textContent = 'Choose your pack';
+    $('pack-subtitle').textContent = 'Pick a pack to crack open!';
+    const still = motionOff();
+    const fadeIn = fadeNextChoices;
+    fadeNextChoices = false;
+    mintLights.setSpots(data.choices.map((option, i) => ({
+      id: 'pack-' + i, x: 25 + i * 25, y: 50, r: 14.5, alpha: 1, color: option.hints[0].background
+    })));
     choiceViews.forEach((view, i) => {
-      const option = data.choices[i]; view.card.classList.remove('selected', 'leaving');
+      const option = data.choices[i];
+      view.card.classList.remove('selected', 'swiped-left', 'swiped-right');
       view.scene?.setHints(option.type, option.hints);
       const hasSpecial = option.hints.some(h => h.textured);
       view.card.classList.toggle('special', hasSpecial);
       view.card.style.setProperty('--pack-glow', option.hints[0].background);
       const description = `Pack ${i + 1}: backgrounds ${option.hints.map(h => h.background).join(', ')}${hasSpecial ? '; special finish in pack' : '; matte finishes'}`;
       view.button.setAttribute('aria-label', description);
-      if (!still) view.card.animate([
-        { transform: `translateY(-4.375rem) rotate(${(i - 1) * 14}deg) scale(.7)`, opacity: 0 },
-        { transform: 'translateY(.5rem) rotate(0deg) scale(1.04)', opacity: 1, offset: .7 },
-        { transform: 'none', opacity: 1 }
-      ], { duration: 520, delay: i * 120, easing: 'cubic-bezier(.2, .8, .3, 1)', fill: 'backwards' });
+      if (!still) {
+        view.card.animate?.(fadeIn ? [
+          { opacity: 0, scale: .88 },
+          { opacity: 1, scale: 1 }
+        ] : [
+          { transform: `translateY(-2.75rem) rotate(${(i - 1) * 10}deg) scale(.78)`, opacity: 0 },
+          { transform: 'translateY(.25rem) rotate(0deg) scale(1.03)', opacity: 1, offset: .7 },
+          { transform: 'none', opacity: 1 }
+        ], { duration: fadeIn ? 420 : 500, delay: i * 95, easing: fadeIn ? 'ease-out' : 'cubic-bezier(.2, .8, .3, 1)', fill: 'backwards' });
+      }
     });
     sound('playPack', 'deal');
   }
@@ -1004,37 +1444,53 @@
       }
       dealFailed = !outOfPacks;
       status(outOfPacks ? "You've opened every pack you can. Enjoy your ubus!" : error.message, outOfPacks);
-    } finally { busy = false; updatePackButton(); }
+    } finally {
+      busy = false;
+      updatePackButton();
+      if (!offer) syncMintStage();
+    }
   }
   async function selectPack(index) {
-    if (busy || pack || !offer) return;
+    if (busy || revealOpen || pack || !offer) return;
     const option = offer.choices[index], selection = { request: offer.request, choice: option.choice };
     busy = true; picking = true; updatePackButton();
-    // The pick lands at once: the others fly off while the mint confirms the choice.
-    choiceViews.forEach((view, i) => view.card.classList.toggle(i === index ? 'selected' : 'leaving', true));
+    // Swipe the unchosen packs off the rink while the chosen pack and its spotlight glide to centre ice.
+    choiceViews.forEach((view, i) => {
+      if (i === index) view.card.classList.add('selected');
+      else view.card.classList.add(i < index ? 'swiped-left' : 'swiped-right');
+    });
+    mintLights.setSpots([{ id: 'pack-' + index, x: 50, y: 50, r: 19, alpha: 1, color: option.hints[0].background }]);
+    $('pack-title').textContent = 'Opening pack…';
+    $('pack-subtitle').textContent = '';
     sound('playPack', 'pick');
+    let opened = false;
     try {
       localStorage.setItem(pendingKey + ':choice', JSON.stringify(selection));
-      const [data] = await Promise.all([api('/api/mint', post(selection)), new Promise(resolve => setTimeout(resolve, 380))]);
+      const [data] = await Promise.all([api('/api/mint', post(selection)), waitMs(420)]);
       await acceptPack(data);
       picking = false;
       packScene = choiceViews[index].scene;
       $('pack-choices').classList.add('choosing');
-      const opening = packScene?.play(pack.items.length, pack.items.map(item => item.model));
+      const opening = packScene?.play(pack.items.length, pack.items.map(item => item.model), { silhouette: true });
       if (packScene?.awaitingTap()) {
         const button = choiceViews[index].button;
         button.disabled = false; button.setAttribute('aria-label', 'Tap to crack it open'); button.focus();
+        $('pack-title').textContent = 'Tap to crack it!';
         $('pack-hint').textContent = 'Tap to crack it!';
       }
       await opening;
       $('pack-choices').hidden = true;
+      $('pack-choices').classList.remove('choosing');
+      choiceViews.forEach(v => v.card.classList.remove('selected', 'swiped-left', 'swiped-right'));
       revealIndex = 0;
-      if (document.body.dataset.shot !== 'match' && document.body.dataset.shot !== 'replay') showReveal();
       status('');
+      opened = true;
     } catch (error) {
       // Refresh authoritative state after an ambiguous selection; never submit a
       // second choice automatically. A committed selection is recovered by request.
       offer = null; $('pack-choices').hidden = true;
+      $('pack-choices').classList.remove('choosing');
+      choiceViews.forEach(v => v.card.classList.remove('selected', 'swiped-left', 'swiped-right'));
       status(error.message + ' Try again to recover your pack.');
     } finally {
       picking = false;
@@ -1044,11 +1500,18 @@
       updatePackButton();
       collectionList.render();
     }
+    if (opened && pack) {
+      if (onMintShot()) await beginStageReveal({ freshlyOpened: true });
+      else syncMintStage();
+    } else if (!opened) {
+      syncMintStage();
+    }
   }
   $('mint').addEventListener('click', async () => {
     if (busy || !session?.owner) return;
     if (pack) {
-      try { revealIndex = Math.max(0, pack.seen - 1); showReveal(); } catch (error) { status(error.message); }
+      revealIndex = Math.max(0, pack.seen - 1);
+      await beginStageReveal({ freshlyOpened: false });
     } else await loadChoices();
   });
 
@@ -1059,11 +1522,12 @@
     const screen = path === '/mint' ? 'mint' : path === '/collection' ? 'collection' : null;
     panel.hidden = !sessionChecked || Boolean(session?.owner) || !screen;
     if (panel.hidden) return;
-    const host = document.querySelector(`main[data-screen="${screen}"]`);
-    if (panel.parentElement !== host) host.append(panel);
+    const host = screen === 'mint' ? $('mint-world') || document.querySelector('main[data-screen="mint"]') : document.querySelector('main[data-screen="collection"]');
+    if (host && panel.parentElement !== host) host.append(panel);
     const title = screen === 'mint' ? 'Ubu Mint' : 'Collection';
     $('signed-out-title').textContent = title;
-    $('signed-out-message').textContent = "You're not signed in. " + (config.login
+    $('signed-out-title').hidden = screen === 'mint';
+    $('signed-out-message').textContent = (screen === 'mint' ? '' : "You're not signed in. ") + (config.login
       ? `Sign in with Discord to access ${title}.` : 'Sign-in is unavailable here.');
     const signIn = $('signed-out-signin');
     signIn.hidden = !config.login;
@@ -1072,20 +1536,44 @@
     const importWrap = $('signed-out-import-wrap');
     if (importWrap) importWrap.hidden = screen !== 'collection';
   }
-  window.addEventListener('ubu:screen', renderSignedOut);
-  // A match starting in the Activity takes over from a pack in progress; Continue pack resumes it.
-  window.addEventListener('ubu:screen', event => { if (event.detail === 'play' && $('reveal').open) $('reveal').close(); });
+  window.addEventListener('ubu:before-screen', event => {
+    if (event.detail !== 'mint') closeRevealImmediate();
+  });
+  window.addEventListener('ubu:screen', event => {
+    renderSignedOut();
+    if (event.detail !== 'mint') closeRevealImmediate();
+    else syncMintStage();
+  });
+
   starterPack('daily-pack', 'daily', 'Daily pack');
-  starterPack('home-pack', 'signup', 'Signup bonus');
+  const signupStageView = starterPack('signup-stage-pack', 'signup', 'Signup bonus');
+  const homeSignupView = starterPack('home-pack', 'signup', 'Signup bonus', false);
+  homeSignupView?.button.addEventListener('click', async () => {
+    if (busy) return;
+    pendingSignupOpen = true;
+    if (location.pathname !== '/mint') {
+      const moved = window.navigateUbuScreen ? await window.navigateUbuScreen('/mint') : false;
+      if (!moved) { pendingSignupOpen = false; return; }
+    } else {
+      syncMintStage();
+    }
+    await (window.ubuStageReady?.() ?? Promise.resolve());
+    if (!pendingSignupOpen || location.pathname !== '/mint') return;
+    pendingSignupOpen = false;
+    await openStarter('signup', signupStageView);
+  });
   window.addEventListener('ubu:starter', () => { if (sessionChecked) syncDaily(); });
 
   function resetAccountState() {
     clearCoinTimer();
     window.ubuAudio?.stop();
-    if ($('reveal')?.open) $('reveal').close();
+    closeRevealImmediate();
     if ($('viewer')?.open) $('viewer').close();
     packScene?.reset();
-    for (const view of choiceViews) view.scene?.reset();
+    for (const view of choiceViews) {
+      view.scene?.reset();
+      view.card.classList.remove('selected', 'swiped-left', 'swiped-right');
+    }
     packScene = null;
     pack = null;
     offer = null;
@@ -1093,6 +1581,8 @@
     packKey = '';
     pendingKey = '';
     revealIndex = 0;
+    pendingSignupOpen = false;
+    fadeNextChoices = false;
     outOfPacks = false;
     dealFailed = false;
     collectionFailed = false;
@@ -1100,9 +1590,14 @@
     busy = false;
     $('pack-choices').hidden = true;
     $('daily-pack').hidden = true;
+    if ($('signup-stage-pack')) $('signup-stage-pack').hidden = true;
+    $('mint-ubus').hidden = true;
+    $('mint-ubus').replaceChildren();
+    delete $('mint-ubus').dataset.packId;
     $('collection').hidden = true;
     $('mint-recovery').hidden = true;
     $('pack-hint').textContent = '';
+    resetMintCamera({ immediate: true });
     status('');
     collectionRecovery();
     updatePackButton();
@@ -1139,20 +1634,24 @@
       }
       if (gen !== sessionGeneration) return;
       updatePackButton();
-      $('pack-title').parentElement.classList.toggle('settled', Boolean(pack));
+      packShop()?.classList.toggle('settled', Boolean(pack));
       const canOpen = pack || (config.ready && (config.lifetimeLimit || localStorage.getItem(pendingKey)));
       status(canOpen ? '' : config.ready ? 'No packs are available for this account.' : 'Minting closed', true);
       $('mint-recovery').hidden = Boolean(canOpen);
       if (config.ready) {
         try { await migrateBrowserFavorites(); } catch (error) { if (gen === sessionGeneration) status('Could not migrate browser favorites: ' + error.message); }
         if (gen !== sessionGeneration) return;
-        await ubuStarter.refresh().catch(error => { if (gen === sessionGeneration) { status(error.message); $('pack-title').parentElement.classList.add('settled'); } });
+        await ubuStarter.refresh().catch(error => { if (gen === sessionGeneration) { status(error.message); packShop()?.classList.add('settled'); } });
         if (gen !== sessionGeneration) return;
+        syncMintStage();
         await collection();
       } else {
+        syncMintStage();
         collectionStatus('The collection is unavailable right now.');
         collectionRecovery({ importFile: true });
       }
+    } else {
+      syncMintStage();
     }
   }
 

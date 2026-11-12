@@ -39,7 +39,7 @@
     let frame = 0, progress = 0, started = 0, finish = null, count = 5, pointer = 0, pointerY = 0;
     let aimX = 0, aimY = 0, lastPaint = 0;
     let blobCanvas, blobCtx, blobPixels, blobColors = [], blobFaces = [];
-    let packHints = null;
+    let packHints = null, silhouetteReveal = false;
     let color, candyColors, previousColor = -1, currentType = null;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     const tokenCache = new Map();
@@ -808,10 +808,10 @@
       if (become) {
         ctx.globalAlpha *= become;
         for (let i = 0; i < count; i++) {
-          const { x, y } = lobes[i], face = blobFaces[i];
+          const { x, y } = lobes[i], face = !silhouetteReveal && blobFaces[i];
           if (face) ctx.drawImage(face, x - 43, y - 43, 86, 86);
           else {
-            // Standalone previews without minted models use the brand face.
+            // Stage reveals keep emerging ubus silhouetted; standalone previews use the brand face.
             candy(x, y, `rgb(${blobColors[i % 5].join(',')})`, 0, 42);
           }
         }
@@ -1380,9 +1380,27 @@
       tCtx.stroke();
     }
 
-    function getToken(hex, R) {
-      const hasMark = Boolean(mark.complete && mark.naturalWidth);
-      const key = `${hex}:${R}`;
+    function renderSilhouetteTo(tCtx, R) {
+      tCtx.shadowColor = '#00000088';
+      tCtx.shadowBlur = Math.round(12 * (R / 176));
+      tCtx.shadowOffsetX = 0;
+      tCtx.shadowOffsetY = Math.round(8 * (R / 176));
+      tCtx.beginPath(); tCtx.arc(0, 0, R, 0, Math.PI * 2); tCtx.fillStyle = '#0b0e15'; tCtx.fill();
+      tCtx.shadowColor = 'transparent';
+      const rim = tCtx.createLinearGradient(0, -R, 0, R);
+      rim.addColorStop(0, 'rgba(255, 240, 214, 0.42)');
+      rim.addColorStop(0.55, 'rgba(255, 240, 214, 0.10)');
+      rim.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
+      tCtx.strokeStyle = rim;
+      tCtx.lineWidth = Math.max(1.2, R * (3.4 / 176));
+      tCtx.beginPath();
+      tCtx.arc(0, 0, R * (174.5 / 176), 0, Math.PI * 2);
+      tCtx.stroke();
+    }
+
+    function getToken(hex, R, silhouette = false) {
+      const hasMark = silhouette || Boolean(mark.complete && mark.naturalWidth);
+      const key = silhouette ? `sil:${R}` : `${hex}:${R}`;
       let cached = tokenCache.get(key);
       if (cached && cached.hasMark === hasMark) return cached;
       const halfSize = Math.ceil(R * 1.35);
@@ -1390,14 +1408,15 @@
       canvas.width = canvas.height = halfSize * 4;
       const tCtx = canvas.getContext('2d');
       tCtx.setTransform(2, 0, 0, 2, halfSize * 2, halfSize * 2);
-      renderUbuTo(tCtx, hex, R);
+      if (silhouette) renderSilhouetteTo(tCtx, R);
+      else renderUbuTo(tCtx, hex, R);
       cached = { canvas, halfSize, hasMark };
       tokenCache.set(key, cached);
       return cached;
     }
 
     function candy(x, y, hex, angle, R = 104) {
-      const token = getToken(hex, R);
+      const token = getToken(hex, R, silhouetteReveal);
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(angle);
@@ -1479,11 +1498,12 @@
     recolor();
 
     return {
-      async play(amount = 5, models = []) {
+      async play(amount = 5, models = [], options = {}) {
         count = amount; aimX = aimY = pointer = pointerY = 0;
+        silhouetteReveal = Boolean(options?.silhouette);
         if (reduced.matches) return Promise.resolve();
         if (currentType?.id === 'starter') candyColors = models.map(model => model.attributes.background.hex);
-        if (currentType?.id === 'blob') blobFaces = await prepareBlobFaces(models);
+        if (currentType?.id === 'blob' && !silhouetteReveal) blobFaces = await prepareBlobFaces(models);
         // Tap-to-open wrappers wait here until the player has tapped enough times.
         if (currentType?.taps && eggTaps < currentType.taps) await new Promise(resolve => { awaitTap = resolve; requestPaint(); });
         if (reduced.matches) return;
@@ -1504,7 +1524,7 @@
       },
       reset(newColor = false, packTypeId) {
         settlePending();
-        progress = 0; count = 5; eggTaps = 0;
+        progress = 0; count = 5; eggTaps = 0; silhouetteReveal = false;
         if (newColor) recolor(packTypeId);
         else requestPaint();
       },

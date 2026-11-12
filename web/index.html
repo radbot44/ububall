@@ -75,8 +75,8 @@
       </button>
     </div>
   </header>
-  <main class="ball-page" data-screen="play">
-
+  <div class="ball-page">
+  <main data-screen="play">
   <section class="play-home" aria-label="Play Ububall">
     <div id="activity-play" class="activity-play" hidden>
       <section class="activity-friends" aria-labelledby="activity-lobby-title">
@@ -120,6 +120,22 @@
       <div class="mint-entry-links"><a class="mint-entry-cta" href="/mint"><span id="mint-cta-label">Open packs</span><svg class="icon" aria-hidden="true"><use href="#icon-arrow-narrow-right"/></svg></a><a class="mint-entry-link" href="/collection">Your collection</a></div>
     </aside>
   </section>
+  </main>
+  <main data-screen="mint" hidden>
+    <section class="pack-shop" aria-labelledby="pack-title">
+      <header class="mint-head">
+        <h1 id="pack-title">Choose your pack</h1>
+        <p id="pack-subtitle" class="pack-subtitle">Pick a pack to crack open!</p>
+      </header>
+      <div class="mint-foot">
+        <p id="pack-hint" class="pack-prompt"></p>
+        <p id="daily-next" class="daily-next" role="timer" hidden></p>
+        <button id="mint" class="primary" type="button" hidden>Continue pack</button>
+        <p id="status" role="status" aria-live="polite"></p>
+        <div class="availability-actions" id="mint-recovery" hidden><button id="mint-retry" type="button" hidden>Retry</button></div>
+      </div>
+    </section>
+  </main>
   <div class="arena-layout">
     <aside class="team-column home-column" aria-label="Your team">
       <div class="column-heading"><span class="home">Your team</span></div>
@@ -193,12 +209,32 @@ SOFTWARE.
             <canvas id="rink" width="1000" height="600" aria-label="Playing field. Drag from an ubu to aim its launch; tap the selected ubu to guard."></canvas>
             <div id="skaters" aria-hidden="true"></div>
           </div>
+          <div id="mint-world" class="mint-world" hidden>
+            <canvas id="mint-lights" class="mint-lights" aria-hidden="true"></canvas>
+            <div id="daily-pack" class="starter-pack mint-center-pack" hidden><button class="candy-pack" type="button" aria-label="Open your daily pack"><canvas aria-hidden="true"></canvas></button></div>
+            <div id="signup-stage-pack" class="starter-pack mint-center-pack" hidden><button class="candy-pack" type="button" aria-label="Open your signup pack"><canvas aria-hidden="true"></canvas></button></div>
+            <div id="pack-choices" class="pack-choices" hidden></div>
+            <div id="mint-ubus" class="mint-ubus" hidden></div>
+          </div>
           <div id="field-banner" class="field-banner" role="status" aria-live="polite"></div>
           <div class="demo-badge" aria-hidden="true">DEMO</div>
           <button id="skip-goal-replay" type="button" aria-label="Skip goal replay" hidden><span class="demo-badge"></span></button>
           <button id="demo-play" class="demo-play" type="button" aria-label="Play vs CPU"><span class="demo-hook">3v3 turn-based hockey</span><span class="demo-cta">Click or tap to play</span></button>
           <!-- Tabler hand-finger-down icon (MIT), as in uburoom web/icons.js. -->
           <svg id="demo-finger" class="demo-finger" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="#icon-hand-finger-down"/></svg>
+        </div>
+        <div id="mint-reveal" class="mint-reveal" role="region" aria-label="Pack reveal" hidden>
+          <button id="pause-reveal" class="icon-button mint-reveal-close" type="button" aria-label="Close pack"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button>
+          <div class="reveal-layout">
+            <button id="prev-ubu" class="icon-button mint-reveal-arrow" type="button" aria-label="Previous ubu"><svg class="icon" aria-hidden="true"><use href="#icon-chevron-left"/></svg></button>
+            <div id="card-stage" class="card-stage"></div>
+            <button id="next-ubu" class="icon-button mint-reveal-arrow" type="button" aria-label="Next ubu"><svg class="icon" aria-hidden="true"><use href="#icon-chevron-right"/></svg></button>
+          </div>
+          <div class="mint-reveal-bar">
+            <span id="reveal-progress" aria-live="polite"></span>
+            <div id="reveal-dots" class="reveal-dots" aria-hidden="true"></div>
+            <button id="finish-pack" class="primary" type="button" hidden>Done</button>
+          </div>
         </div>
         <div id="first-turn-guide" class="first-turn-guide" hidden>
           <svg aria-hidden="true"><path id="first-turn-arrow"/></svg>
@@ -483,20 +519,7 @@ SOFTWARE.
     <div id="online-ended" hidden><button id="online-leave">Leave online match</button></div>
     <p id="online-status" role="status"></p><div class="online-account"><span id="online-account-status" role="status">Checking session…</span><a id="online-login" class="button" href="/auth/discord" hidden>Sign in with Discord</a><button id="online-guest" hidden>Play as guest</button></div>
   </dialog>
-</main>
-  <main data-screen="mint" hidden>
-    <section class="pack-shop" aria-labelledby="pack-title">
-      <h1 id="pack-title">Choose your pack</h1>
-      <p id="pack-subtitle" class="pack-subtitle">Pick a pack to crack open!</p>
-      <div id="daily-pack" class="starter-pack" hidden><button class="candy-pack" type="button" aria-label="Open your daily pack"><canvas aria-hidden="true"></canvas></button></div>
-      <div id="pack-choices" class="pack-choices" hidden></div>
-      <p id="pack-hint" class="pack-prompt"></p>
-      <p id="daily-next" class="daily-next" role="timer" hidden></p>
-      <button id="mint" class="primary" hidden>Continue pack</button>
-      <p id="status" role="status" aria-live="polite"></p>
-      <div class="availability-actions" id="mint-recovery" hidden><button id="mint-retry" type="button" hidden>Retry</button></div>
-    </section>
-  </main>
+  </div>
   <main data-screen="collection" hidden>
     <h1 class="visually-hidden">Collection</h1>
     <p id="collection-status" class="collection-status" role="status" aria-live="polite" hidden></p>
@@ -567,17 +590,6 @@ SOFTWARE.
         </div>
       </div>
     </div>
-  </dialog>
-  <dialog id="reveal" aria-labelledby="reveal-title">
-    <div class="reveal-toolbar"><h2 id="reveal-title">Pack</h2><button id="pause-reveal" class="icon-button" aria-label="Close pack"><svg class="icon" aria-hidden="true"><use href="#icon-x"/></svg></button></div>
-    <div class="reveal-layout">
-      <button id="prev-ubu" class="icon-button" aria-label="Previous ubu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button>
-      <div id="card-stage" class="card-stage"></div>
-      <button id="next-ubu" class="icon-button" aria-label="Next ubu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg></button>
-    </div>
-    <p id="reveal-progress" aria-live="polite"></p>
-    <div id="reveal-dots" class="reveal-dots" aria-hidden="true"></div>
-    <button id="finish-pack" class="primary" hidden>Done</button>
   </dialog>
   <dialog id="account-dialog" class="account-dialog" aria-labelledby="account-dialog-title">
     <div class="account-dialog-header">
