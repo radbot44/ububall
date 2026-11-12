@@ -229,6 +229,26 @@
     createMaterialEmitters, createEffectsState, setMeterFill, mountSkaterSprites,
     impulseGeometry: calcImpulseGeometry, createRinkPresenter
   } = ububallPresentation;
+  const {
+    PRESENTATION_KEYS, stripPresentation, onlineOrder, viewIndex, applySeatTransform,
+    transformSimSeat, viewFouls: projectFouls, createBodyProjector, createPlaybackDriver
+  } = ububallPlayback;
+  const {
+    matchMvp, replayFileName, createStatsController
+  } = ububallStats;
+  const viewFouls = (f, seat) => projectFouls(ububallMatch, f, seat);
+  const { projectBody, viewBodies, toViewBody, syncViewBodies } = createBodyProjector({
+    P,
+    getEntries: () => (typeof fieldView.entries !== 'undefined' ? fieldView.entries : null),
+    getAnonymous: () => Boolean(typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous),
+    anonymousName: i => anonymousName(i),
+    isClassicMode: () => classicMode(),
+    resolveEquippedSuper: (entry, i) => resolveEquippedSuper(entry, i),
+    getShownSim: () => shownSim(),
+    getShownSeat: () => shownSeat(),
+    getTargetBodies: () => fieldView.bodies,
+    getDirtyMeters: () => dirtyMeters
+  });
   let fieldEffects = createEffectsState([], materialStyles);
   let hitStopUntil = 0;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -1703,9 +1723,26 @@
   let activePlayback = null;
   const replayHitStop = th => th.fx?.hitStopUntil ?? hitStopUntil;
   const currentReplay = () => activePlayback || theater;
-  const activeOnlineSim = () => (onlineReplay && (onlineReplay.currentTick ?? 0) < onlineReplay.ticks) ? onlineReplay.simBodies : (online?.state?.game?.bodies ?? onlineReplay?.simBodies);
-  const shownSim = () => (goalReplay || currentReplay())?.sim ?? (online?.active ? activeOnlineSim() : (postGoal?.sim ?? simBodies));
-  const shownSeat = () => (goalReplay || currentReplay() ? (goalReplay || currentReplay()).seat : (online?.active ? (online.state?.seat ?? 0) : 0));
+  const activeOnlineSim = () => {
+    const pg = typeof postGoal !== 'undefined' ? postGoal : null;
+    const onl = typeof online !== 'undefined' ? online : null;
+    if (pg?.sim) return pg.sim;
+    if (onlineReplay) {
+      if ((onlineReplay.currentTick ?? 0) < onlineReplay.ticks) return onlineReplay.simBodies;
+      if (onlineReplay.postGoalSim) return onlineReplay.postGoalSim;
+    }
+    return onl?.state?.game?.bodies ?? onlineReplay?.simBodies;
+  };
+  const shownSim = () => {
+    const pg = typeof postGoal !== 'undefined' ? postGoal : null;
+    const onl = typeof online !== 'undefined' ? online : null;
+    return (goalReplay || currentReplay())?.sim ?? (onl?.active ? activeOnlineSim() : (pg?.sim ?? simBodies));
+  };
+  const shownSeat = () => {
+    const pg = typeof postGoal !== 'undefined' ? postGoal : null;
+    const onl = typeof online !== 'undefined' ? online : null;
+    return goalReplay || currentReplay() ? (goalReplay || currentReplay()).seat : (onl?.active ? (pg?.seat ?? onl.state?.seat ?? 0) : 0);
+  };
   const replayView = (cb, th = currentReplay()) => toViewBody(cb, th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : null));
   const syncReplay = (th = currentReplay()) => syncViewBodies(th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : null), th ? th.anonymous : undefined, th?.exporting ? null : undefined, th?.entries);
   const replayFx = {
@@ -1714,44 +1751,19 @@
     shock: (source, radius, type = null) => { syncReplay(); handleShockwave(replayView(source), radius, type); },
     super: (key, stage, body, target = null) => { syncReplay(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
   };
-  // Shared tick event, post-goal settle, and step-budget helpers across live, local replay, goal replay, and online replay.
-  function impactFor(stop, isGoal = stop >= (ububallMatch.HIT_STOP?.scoredGoal ?? 200)) {
-    impact(stop, isGoal ? (ububallMatch.SCREEN_SHAKE?.goal ?? 2) : (ububallMatch.SCREEN_SHAKE?.default ?? 1));
-  }
-  function applyTickEvents(sim, { saves, struck, stop, applyIron = true, syncFn = null, viewFn, isGoal, onStop = null }) {
-    if (syncFn && (saves.length || struck)) syncFn();
-    for (const s of saves) {
-      const iron = Boolean(s.iron);
-      if (applyIron && iron && sim[s.index]) sim[s.index].ironGuard = true;
-      creditSave(viewFn(sim[s.index], s), s.own, iron);
-    }
-    if (struck) popup(fieldView.bodies[6], 'Spin strike!');
-    if (!stop) return false;
-    impactFor(stop, isGoal);
-    if (onStop) onStop(stop);
-    return true;
-  }
-  function stepPostGoalFrame(sim, fx, syncFn, trace = false) {
-    P.stepPostGoal(sim, P.DT, fx.hit || fx.collide, fx.wall, fx.shock || fx.shockwave, fx.super);
-    syncFn();
-    if (trace) traceGuide(sim);
-    recordTrails();
-    if (!P.settled(sim.slice(0, 6))) return false;
-    P.stop(sim);
-    syncFn();
-    return true;
-  }
-  function runPlaybackTicks(state, delta, speed, maxSteps, getHitStop, onStep) {
-    state.steps += delta / P.DT * speed;
-    for (let n = 0; state.steps >= 1 && n < maxSteps; n++) {
-      const result = onStep();
-      if (result === 'stop') break;
-      if (result === 'reset') { state.steps = 0; break; }
-      if (result === 'continue') continue;
-      state.steps--;
-      if (result === 'hold' || clockNow() < getHitStop()) { state.steps = 0; break; }
-    }
-  }
+  const {
+    impactFor, applyTickEvents, stepPostGoalFrame, runPlaybackTicks, advancePostGoal, stepOnlineTurn
+  } = createPlaybackDriver({
+    P,
+    ububallMatch,
+    clockNow: () => clockNow(),
+    impact: (ms, shake) => impact(ms, shake),
+    creditSave: (body, own, iron) => creditSave(body, own, iron),
+    popup: (body, text) => popup(body, text),
+    getBallView: () => fieldView.bodies[6],
+    traceGuide: sim => traceGuide(sim),
+    recordTrails: () => recordTrails()
+  });
   function restartGoalReplay() {
     Object.assign(goalReplay, { index: -1, played: 0, steps: 0, doneAt: 0, doneHoldMs: 0, loops: (goalReplay.loops || 0) + 1 });
     clearEffects(); nextReplaySegment();
@@ -2676,616 +2688,48 @@
     buildTeam(); resetPlans(); if (typeof saveActiveMatch === 'function') saveActiveMatch(); say('Playing from the replay. Plan your launches.'); draw();
   }
   $('replay-take-over').onclick = playFromHere;
-  function replayStats({ replay, seat }) {
-    const s = ububallReplay.stats(replay);
-    s.seat = seat;
-    for (const key of ['goals', 'assists', 'shots', 'saves', 'bigSaves', 'checks', 'touches', 'passes', 'topShot', 'skated', 'cards']) {
-      s[key] = onlineOrder(s[key], seat);
-    }
-    if (seat) {
-      s.control.reverse();
-      s.side.reverse();
-      for (const round of s.rounds) if (round.team !== null) round.team = 1 - round.team;
-      for (const event of s.events) {
-        if (event.actor !== null) event.actor = viewIndex(event.actor, seat);
-        if (event.target != null) event.target = viewIndex(event.target, seat);
-        if (event.team !== null) event.team = 1 - event.team;
-        event.x = 1000 - event.x;
-        event.y = 600 - event.y;
-      }
-    }
-    return s;
-  }
-  function updateStatsRinkWidth() {
-    const rw = $('rink')?.getBoundingClientRect().width || 1000;
-    $('stats-dialog').style.setProperty('--rink-w', `${rw}px`);
-  }
-  function getStatsForContext(ctx) {
-    if (ctx.type === 'replay') {
-      const th = ctx.theater;
-      th.stats ||= replayStats(th);
-      return th.stats;
-    }
-    if (ctx.stats) return ctx.stats;
-    const replay = ctx.replay;
-    if (replay) {
-      ctx.stats = replayStats({ replay, seat: replay.seat });
-      return ctx.stats;
-    }
-    const { tally: t } = viewTally();
-    const six = () => [0, 0, 0, 0, 0, 0];
-    ctx.stats = {
-      goals: [...t.goals], assists: [...t.assists], saves: [...t.saves],
-      shots: [...(t.shots || six())], checks: [...(t.checks || six())],
-      touches: six(), passes: six(), topShot: [...t.topSpeed], skated: six(),
-      cards: [...t.cards], control: [50, 50], side: [50, 50], events: [], rounds: [], trails: [],
-      bigSaves: t.bigSaves
-    };
-    return ctx.stats;
-  }
-  const statsMajor = new Set(['Goal', 'Shot', 'Save', 'Foul']);
-  function statsEventLabel(event) {
-    const detail = event.outcome || (event.label?.toLowerCase() !== event.type.toLowerCase() ? event.label : null);
-    return detail ? `${event.type} (${detail})` : event.type;
-  }
-  function statsEventText(event, names) {
-    const name = i => fieldView.entries[i]?.model.parts.fullName;
-    const actor = event.actor === null ? names[event.team] : name(event.actor);
-    const target = event.target == null ? '' : ` to ${name(event.target)}`;
-    return `${statsEventLabel(event)} · ${actor}${target}`;
-  }
-  function statsEventTime(event) {
-    const tenths = Math.floor(event.tick * P.DT * 10);
-    const seconds = String(Math.floor(tenths / 10) % 60).padStart(2, '0');
-    return `${Math.floor(tenths / 600)}:${seconds}.${tenths % 10} · Turn ${event.turn}`;
-  }
-  function showStatsTab(ctx) {
-    const log = ctx.tab === 'log';
-    $('stats-box').hidden = log;
-    $('stats-log').hidden = !log;
-    $('stats-box-tab').setAttribute('aria-pressed', String(!log));
-    $('stats-log-tab').setAttribute('aria-pressed', String(log));
-    if (log) renderGameLog(ctx);
-  }
-  function renderGameLog(ctx) {
-    const { events, rounds, trails, seat } = getStatsForContext(ctx);
-    const { names } = ctx;
-    const roundName = round => round.team === null ? 'Unscored' : `${names[round.team]} #${round.score}`;
-    const filters = $('stats-rounds');
-    filters.replaceChildren();
-    for (const [index, label] of ['ALL', ...rounds.map(roundName)].entries()) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = label;
-      const team = rounds[index - 1]?.team;
-      if (team != null) button.dataset.team = team;
-      button.onclick = () => { ctx.round = index - 1; updateLog(); };
-      filters.append(button);
-    }
-    const map = $('stats-map'), detail = $('stats-map-detail'), log = $('stats-events');
-    // Crop the rink's vertical gutter while keeping marks and trails in field coordinates.
-    const mapTop = (P.rink.top + P.rink.bottom - map.height) / 2;
-    const highlights = $('stats-highlights');
-    const g = map.getContext('2d');
-    const { home, away, text } = getThemeColors();
-    const rows = new Map();
-    const portraits = ctx.portraits ??= fieldView.entries.slice(0, 6).map((entry, idx) => {
-      const sprite = skaters[idx]?.querySelector('canvas');
-      if (sprite && fieldView.entries[idx] === entry) {
-        try { return sprite.toDataURL('image/png'); } catch {}
-      }
-      const svg = new XMLSerializer().serializeToString(ubuRender(entry.model, 'stats-portrait'));
-      return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-    });
-    function pill(index) {
-      const player = document.createElement('span'), image = document.createElement('img');
-      player.className = 'stats-player';
-      player.dataset.team = index < 3 ? 0 : 1;
-      image.alt = '';
-      image.src = portraits[index];
-      player.append(image, fieldView.entries[index].model.parts.fullName);
-      return player;
-    }
-    let visible, shown, hovered = null, preview = [], marked = [];
-    ctx.pinned ??= [];
-    const active = event => ctx.round == null || ctx.round < 0 || event.round === ctx.round;
-    const radius = event => event.type === 'Goal' ? 11 : statsMajor.has(event.type) ? 8 : 4;
-    function drawMap() {
-      g.resetTransform();
-      g.clearRect(0, 0, map.width, map.height);
-      g.translate(0, -mapTop);
-      drawRinkSurface(g, themeColors);
-      if (marked.length || ctx.ballTrail || ctx.ubuTrails) {
-        g.save();
-        if (seat) g.transform(-1, 0, 0, -1, map.width, P.rink.top + P.rink.bottom);
-        g.lineCap = g.lineJoin = 'round';
-        for (let i = 0; i < 7; i++) {
-          if (i === 6 ? !ctx.ballTrail : !ctx.ubuTrails) continue;
-          g.strokeStyle = i === 6 ? text : ((i < 3) !== Boolean(seat) ? home : away);
-          g.globalAlpha = i === 6 ? 0.8 : 0.45;
-          g.lineWidth = i === 6 ? 3 : 2;
-          g.beginPath();
-          for (const trail of trails) {
-            if (!active(trail)) continue;
-            const { samples } = trail, start = i * 2;
-            g.moveTo(samples[start], samples[start + 1]);
-            for (let n = start + 14; n < samples.length; n += 14) g.lineTo(samples[n], samples[n + 1]);
-          }
-          g.stroke();
-        }
-        for (const event of marked) {
-          if (!event.path) continue;
-          const { from, to } = event.path;
-          g.strokeStyle = event.team === 0 ? home : away;
-          g.globalAlpha = 1;
-          g.lineWidth = 4;
-          g.beginPath();
-          for (let i = from.turnIndex; i <= to.turnIndex; i++) {
-            const { startTick, endTick, samples } = trails[i];
-            if (i === from.turnIndex) g.moveTo(from.x, from.y);
-            else g.moveTo(samples[12], samples[13]);
-            for (let n = 26, k = 1; n < samples.length; n += 14, k++) {
-              const tick = Math.min(endTick, startTick + k * 8);
-              if (tick > from.tick && tick < to.tick) g.lineTo(samples[n], samples[n + 1]);
-            }
-            if (i === to.turnIndex) g.lineTo(to.x, to.y);
-          }
-          g.stroke();
-          g.fillStyle = g.strokeStyle;
-          g.beginPath();
-          g.arc(to.x, to.y, 3, 0, Math.PI * 2);
-          g.fill();
-        }
-        g.restore();
-      }
-      for (const layer of [shown.filter(event => !active(event)), visible.filter(event => !statsMajor.has(event.type)), visible.filter(event => statsMajor.has(event.type))]) {
-        for (const event of layer) {
-          g.globalAlpha = !active(event) ? 0.13 : statsMajor.has(event.type) ? 1 : 0.65;
-          g.fillStyle = event.team === 0 ? home : away;
-          g.beginPath();
-          g.arc(event.x, event.y, radius(event), 0, Math.PI * 2);
-          g.fill();
-          if (statsMajor.has(event.type)) {
-            g.strokeStyle = text;
-            g.lineWidth = event.type === 'Goal' ? 4 : 2;
-            g.stroke();
-          }
-        }
-      }
-      g.globalAlpha = 1;
-      for (const event of marked) {
-        g.strokeStyle = text;
-        g.lineWidth = 3;
-        g.beginPath();
-        g.arc(event.x, event.y, radius(event) + 6, 0, Math.PI * 2);
-        g.stroke();
-      }
-    }
-    function updateMarks() {
-      for (const event of marked) rows.get(event)?.classList.remove('highlighted');
-      marked = [...new Set([...ctx.pinned, ...preview])];
-      for (const event of marked) rows.get(event)?.classList.add('highlighted');
-      drawMap();
-    }
-    function pin(events) {
-      const same = events.length === ctx.pinned.length && events.every((event, i) => event === ctx.pinned[i]);
-      ctx.pinned = same ? [] : events;
-      updateMarks();
-    }
-    function updateLog() {
-      [...filters.children].forEach((button, i) => button.setAttribute('aria-pressed', String(i - 1 === (ctx.round ?? -1))));
-      highlights.setAttribute('aria-pressed', String(Boolean(ctx.highlights)));
-      highlights.textContent = ctx.highlights ? 'Highlights only' : 'All events';
-      shown = ctx.highlights ? events.filter(event => statsMajor.has(event.type)) : events;
-      visible = shown.filter(active);
-      ctx.pinned = ctx.pinned.filter(event => visible.includes(event));
-      preview = [];
-      hovered = null;
-      detail.textContent = 'Hover to preview. Click to pin or unpin.';
-      rows.clear();
-      const content = document.createDocumentFragment();
-      if (!visible.length) {
-        const empty = document.createElement('p');
-        empty.textContent = ctx.type === 'pause' && !events.length ? 'Events appear here after the first completed turn.' : 'No events in this selection.';
-        content.append(empty);
-      }
-      let currentRound = -1, list;
-      for (const event of visible) {
-        if (event.round !== currentRound) {
-          currentRound = event.round;
-          const heading = document.createElement('h3');
-          heading.textContent = roundName(rounds[currentRound]);
-          list = document.createElement('ol');
-          list.className = 'stats-events';
-          content.append(heading, list);
-        }
-        const row = document.createElement('li'), time = document.createElement(ctx.theater ? 'button' : 'span');
-        row.classList.toggle('major', statsMajor.has(event.type));
-        row.tabIndex = 0;
-        const markRow = () => { preview = [event]; updateMarks(); };
-        const unmarkRow = () => {
-          if (preview[0] === event) { preview = []; updateMarks(); }
-        };
-        row.onpointerenter = markRow;
-        row.onpointerleave = () => { if (!row.contains(document.activeElement)) unmarkRow(); };
-        row.addEventListener('focusin', markRow);
-        row.addEventListener('focusout', focus => {
-          if (!row.contains(focus.relatedTarget) && !row.matches(':hover')) unmarkRow();
-        });
-        row.onclick = click => {
-          if (!click.target.closest('button')) pin([event]);
-        };
-        row.onkeydown = key => {
-          if (key.target === row && (key.key === 'Enter' || key.key === ' ')) {
-            key.preventDefault();
-            pin([event]);
-          }
-        };
-        time.className = 'stats-event-time';
-        time.textContent = statsEventTime(event);
-        if (ctx.theater) {
-          time.type = 'button';
-          time.onclick = () => {
-            const th = ctx.theater;
-            $('stats-dialog').close();
-            th.paused = true;
-            seekReplay(event.tick, th, event.turnIndex);
-          };
-        }
-        const entry = document.createElement('span');
-        entry.className = 'stats-event-entry';
-        entry.append(statsEventLabel(event), event.actor === null ? document.createElement('span') : pill(event.actor));
-        if (event.actor === null) entry.lastChild.textContent = names[event.team];
-        if (event.target != null) entry.append(gameUi.icon('arrow-narrow-right'), pill(event.target));
-        row.append(time, entry);
-        rows.set(event, row);
-        list.append(row);
-      }
-      log.replaceChildren(content);
-      log.scrollTop = 0;
-      updateMarks();
-    }
-    function inspectMark(pointer) {
-      const rect = map.getBoundingClientRect();
-      const x = (pointer.clientX - rect.left) * map.width / rect.width;
-      const y = mapTop + (pointer.clientY - rect.top) * map.height / rect.height;
-      const hitRadius = 12 * map.width / rect.width;
-      let closest = null, distance = hitRadius;
-      for (const event of visible) {
-        const gap = Math.hypot(event.x - x, event.y - y);
-        if (gap <= distance) { closest = event; distance = gap; }
-      }
-      if (closest !== hovered || pointer.type === 'click') {
-        hovered = closest;
-        preview = closest ? visible.filter(event =>
-          Math.hypot(event.x - closest.x, event.y - closest.y) <= radius(event) + radius(closest)
-        ) : [];
-        detail.textContent = preview.length ? preview.map(event => `${statsEventText(event, names)} · ${statsEventTime(event)}`).join('\n') : 'Hover to preview. Click to pin or unpin.';
-        if (pointer.type === 'click') {
-          pin(preview);
-          const row = rows.get(preview[0]);
-          if (row) {
-            const viewport = log.getBoundingClientRect(), bounds = row.getBoundingClientRect();
-            log.scrollTo({ top: log.scrollTop + bounds.top - viewport.top - (log.clientHeight - bounds.height) / 2, behavior: 'smooth' });
-          }
-        } else {
-          updateMarks();
-        }
-      }
-    }
-    map.onpointermove = inspectMark;
-    map.onclick = inspectMark;
-    map.onpointerleave = () => {
-      hovered = null;
-      preview = [];
-      updateMarks();
-      detail.textContent = 'Hover to preview. Click to pin or unpin.';
-    };
-    highlights.onclick = () => { ctx.highlights = !ctx.highlights; updateLog(); };
-    for (const [id, key, label] of [['stats-ball-trail', 'ballTrail', 'ball trail'], ['stats-ubu-trails', 'ubuTrails', 'ubu trails']]) {
-      const button = $(id);
-      const update = () => {
-        button.setAttribute('aria-pressed', String(Boolean(ctx[key])));
-        button.textContent = `${ctx[key] ? 'Hide' : 'Show'} ${label}`;
-      };
-      update();
-      button.onclick = () => {
-        ctx[key] = !ctx[key];
-        update();
-        drawMap();
-      };
-    }
-    updateLog();
-  }
-  $('stats-box-tab').onclick = () => { activeStatsContext.tab = 'box'; showStatsTab(activeStatsContext); };
-  $('stats-log-tab').onclick = () => { activeStatsContext.tab = 'log'; showStatsTab(activeStatsContext); };
-  function matchMvp(s) {
-    const rating = i => s.goals[i] * 3 + s.assists[i] * 2 + s.saves[i] * 2 + (s.bigSaves?.[i] || 0) + (s.checks?.[i] || 0) * 0.5 + (s.topShot?.[i] || 0) / 10000;
-    const mvp = [0, 1, 2, 3, 4, 5].reduce((best, i) => rating(i) > rating(best) ? i : best, 0);
-    return rating(mvp) > 0 ? mvp : null;
-  }
-  function renderStats(ctx = activeStatsContext) {
-    if (!ctx) return;
-    activeStatsContext = ctx;
-    updateStatsRinkWidth();
-
-    const s = getStatsForContext(ctx);
-    const isGame = ctx.type === 'game';
-    const names = [$('home-label').textContent, $('opponent-label').textContent];
-    ctx.names = names;
-    showStatsTab(ctx);
-
-    $('stats-title').textContent = 'Game stats';
-    $('stats-watch-replay').hidden = !isGame || online?.active;
-
-    const honoursEl = $('stats-honours');
-    if (isGame && (!online?.active || online.state.game.winner != null)) {
-      const { tally: t, scores: sc } = viewTally();
-      const w = sc[0] > sc[1] ? 0 : 1;
-      const h = ububallMatch.honours(t, sc, w);
-      honoursEl.textContent = [h.comeback && 'Comeback from 3 down!', h.shutout && 'Shutout!'].filter(Boolean).join(' ');
-      honoursEl.hidden = !honoursEl.textContent;
-    } else {
-      honoursEl.textContent = '';
-      honoursEl.hidden = true;
-    }
-
-    let winner = null;
-    if (isGame) {
-      winner = online?.active
-        ? (online.state.winner == null ? null : online.state.winner === online.state.seat ? 0 : 1)
-        : (scores[0] === scores[1] ? null : scores[0] > scores[1] ? 0 : 1);
-    } else if (ctx.theater?.replay?.final) {
-      const fin = ctx.theater.replay.final;
-      winner = fin.winner == null ? null : (ctx.theater.seat ? 1 - fin.winner : fin.winner);
-    } else {
-      winner = scores[0] > scores[1] ? 0 : scores[1] > scores[0] ? 1 : null;
-    }
-
-    const mvp = matchMvp(s);
-
-    const table = document.createElement('table'), head = table.createTHead().insertRow();
-    const headers = ['', 'Ubu', 'Goals', 'Assists', 'Shots on goal', 'Saves', 'Checks', 'Touches', 'Passes', 'Top shot', 'Distance', 'Fouls'];
-    for (const label of headers) {
-      const th = document.createElement('th');
-      th.textContent = label;
-      head.append(th);
-    }
-
-    const rows = table.createTBody();
-    fieldView.entries.slice(0, 6).forEach((entry, i) => {
-      const team = i < 3 ? 0 : 1;
-      const isWinner = winner !== null && team === winner;
-      const row = rows.insertRow();
-      row.className = `team-${team}`;
-
-      const trophyCell = row.insertCell();
-      trophyCell.className = `col-trophy${isWinner ? ` team-${team}-win` : ''}`;
-      if (isWinner) trophyCell.append(gameUi.icon('trophy'));
-
-      const nameCell = row.insertCell();
-      nameCell.className = `col-name team-${team}`;
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'ubu-name';
-      nameSpan.textContent = entry.model.parts.fullName;
-      nameCell.append(nameSpan);
-      if (i === mvp) {
-        const badge = document.createElement('span');
-        badge.className = 'mvp-badge';
-        badge.textContent = 'MVP';
-        nameCell.append(' ', badge);
-      }
-
-      const values = [
-        s.goals[i],
-        s.assists[i],
-        s.shots?.[i] || 0,
-        s.saves[i],
-        s.checks?.[i] || 0,
-        s.touches[i],
-        s.passes[i],
-        s.topShot[i] ? Math.round(s.topShot[i]) : '–',
-        (s.skated[i] / 880).toFixed(1),
-        s.cards[i]
-      ];
-      for (const val of values) {
-        row.insertCell().textContent = val;
-      }
-    });
-    $('stats-table').replaceChildren(table);
-
-    const totalControl = s.control[0] + s.control[1] || 1;
-    $('stats-control').replaceChildren(...[0, 1].map(team => {
-      const part = document.createElement('span');
-      part.className = team ? 'away' : 'home';
-      part.style.flexGrow = String(s.control[team] || 0.001);
-      part.textContent = `${names[team]} ${Math.round(s.control[team] / totalControl * 100)}%`;
-      return part;
-    }));
-
-    const totalSide = s.side[0] + s.side[1] || 1;
-    $('stats-side').replaceChildren(...[0, 1].map(team => {
-      const part = document.createElement('span');
-      part.className = team ? 'away' : 'home';
-      part.style.flexGrow = String(s.side[team] || 0.001);
-      part.textContent = `${names[team]} ${Math.round(s.side[team] / totalSide * 100)}%`;
-      return part;
-    }));
-
-    $('stats-note').textContent = "Top shot is the ball speed off that ubu's fastest touch. Distance is in rink lengths. Shots on goal include goals, saved attempts and high-power strikes off the post. Checks are hard hits inflicting daze or stuns. Fouls are yellow cards.";
-  }
-  function openMatchStats(type) {
-    if (type === 'replay') {
-      const th = theater;
-      if (!th || th.exporting) return;
-      th.paused = true;
-      th.steps = 0;
-      updateReplayBar();
-      renderStats({ type: 'replay', theater: th });
-    } else {
-      const replay = type === 'pause' && phase !== 'over' ? recording : lastCompletedReplay;
-      renderStats({ type, replay });
-    }
-    if (!$('stats-dialog').open) $('stats-dialog').showModal();
-  }
-  function openStats() {
-    openMatchStats('replay');
-  }
-  $('replay-stats').onclick = openStats;
-  $('stats-close').onclick = () => $('stats-dialog').close();
-  $('stats-watch-replay').onclick = async () => {
-    const id = await lastSaved;
-    if (id) {
-      closeSummary();
-      openReplay(id);
-    }
-  };
-  $('match-summary').addEventListener('cancel', event => event.preventDefault());
-  $('summary-stats').onclick = () => openMatchStats('game');
-  $('summary-play-again').onclick = () => {
-    closeSummary();
-    newMatch(true);
-  };
-  $('summary-rematch').onclick = () => {
-    if (online?.active) online.rematch();
-  };
-  $('summary-leave').onclick = async () => {
-    if (online?.active && !await online.leave()) return;
-    closeSummary();
-    exitMatchMode();
-    if (history.state?.match) history.back();
-  };
-  addEventListener('resize', updateStatsRinkWidth);
-  $('replay-exit').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
-  // Space plays and pauses and the arrows step by turn, unless a control has focus.
-  document.addEventListener('keydown', event => {
-    if (!theater || shot !== 'replay' || cameraMove || document.querySelector('dialog[open]') || event.target.closest?.('button, input, select, textarea')) return;
-    const button = { ' ': 'replay-play', ArrowLeft: 'replay-prev', ArrowRight: 'replay-next' }[event.key];
-    if (button) { event.preventDefault(); $(button).click(); }
+  const statsController = createStatsController({
+    $,
+    document,
+    addEventListener,
+    history,
+    P,
+    ububallMatch,
+    ububallReplay,
+    ubuRender: (model, cls) => ubuRender(model, cls),
+    gameUi,
+    onlineOrder,
+    viewIndex,
+    getFieldView: () => fieldView,
+    getSkaters: () => skaters,
+    getThemeColors: () => getThemeColors(),
+    drawRinkSurface: (ctx, colors) => drawRinkSurface(ctx, colors),
+    viewTally: () => viewTally(),
+    getScores: () => scores,
+    getPhase: () => phase,
+    getOnline: () => online,
+    getTheater: () => theater,
+    getRecording: () => recording,
+    getLastCompletedReplay: () => lastCompletedReplay,
+    getLastSaved: () => lastSaved,
+    getShot: () => shot,
+    getCameraMove: () => cameraMove,
+    replayStore,
+    libraryEntry: (r, file, auto) => libraryEntry(r, file, auto),
+    seekReplay: (at, th, turnIdx) => seekReplay(at, th, turnIdx),
+    updateReplayBar: () => updateReplayBar(),
+    watchReplay: (replay, file) => watchReplay(replay, file),
+    matchInProgress: () => matchInProgress(),
+    finishCpuMatch: () => finishCpuMatch(),
+    closeFirstTurnGuide: () => closeFirstTurnGuide(),
+    closeSummary: () => closeSummary(),
+    newMatch: playJingle => newMatch(playJingle),
+    exitMatchMode: () => exitMatchMode()
   });
-  // A file name from the replay's name, or the time it was recorded.
-  function replayFileName(recorded, title = null) {
-    const d = new Date(recorded), two = n => String(n).padStart(2, '0');
-    return title?.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60) ||
-      `ububall-${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}`;
-  }
-  function downloadReplay(file, recorded, title = null) {
-    const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([file], { type: 'application/gzip' })), download: `${replayFileName(recorded, title)}.ububall` });
-    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
-  }
-  async function openReplay(id) {
-    if (online?.active) { replaysNote('Leave your online match to watch a replay.'); return; }
-    if (matchInProgress() && !theater && !await gameUi.confirm({ title: 'Watch replay?', message: 'Watching a replay ends your current match.', confirmLabel: 'Watch replay' })) return;
-    try {
-      const entry = await replayStore.get(id), replay = await ububallReplay.read(entry.file);
-      if ($('replays-dialog').open) $('replays-dialog').close();
-      if (matchInProgress()) finishCpuMatch();
-      closeFirstTurnGuide();
-      watchReplay(replay, entry.file);
-    } catch (error) { replaysNote(error.message); }
-  }
-  function iconButton(name, label, run, className = 'icon-button') {
-    const button = document.createElement('button'); button.type = 'button'; button.className = className; button.title = label;
-    button.setAttribute('aria-label', label); button.onclick = run;
-    button.append(gameUi.icon(name));
-    return button;
-  }
-  // Deleted entries, newest last, for undo while the library stays open.
-  const deletedReplays = [];
-  // Renaming rewrites the file too, so an export carries the name.
-  async function renameReplay(entry, title) {
-    const replay = await ububallReplay.read(entry.file);
-    await replayStore.put({ ...entry, title, file: await ububallReplay.write({ ...replay, title }) });
-  }
-  // The library: pinned first, then newest first. Replays from another physics or file version can
-  // never play again (see P.VERSION), so they are removed.
-  async function openReplays() {
-    deletedReplays.length = 0; replaysNote();
-    if (!$('replays-dialog').open) $('replays-dialog').showModal();
-    await listReplays();
-  }
-  // The note under the title, or a problem in its place.
-  function replaysNote(problem = '') {
-    $('replays-note').textContent = problem || `Your latest ${ububallReplay.KEEP} matches are kept automatically. Pinned and imported replays stay for the current version until you delete them.`;
-    $('replays-note').classList.toggle('problem', Boolean(problem));
-  }
-  async function listReplays(problem = '') {
-    const list = $('replays-list');
-    let entries;
-    try {
-      entries = await replayStore.all();
-      const stale = entries.filter(e => e.physics !== P.VERSION || e.format !== ububallReplay.FORMAT);
-      if (stale.length) await Promise.all(stale.map(e => replayStore.remove(e.id)));
-      entries = entries.filter(e => !stale.includes(e)).sort((a, b) => b.pinned - a.pinned || b.id - a.id);
-    } catch { replaysNote('Replays cannot be saved in this browser.'); return; }
-    replaysNote(problem);
-    const undo = $('replays-undo'), last = deletedReplays.at(-1);
-    undo.classList.toggle('idle', !last);
-    if (last) undo.querySelector('span').textContent = last.title ? `Deleted “${last.title}”.` : `Deleted a ${last.clip ? 'clip' : 'replay'}.`;
-    const empty = Object.assign(document.createElement('li'), { className: 'replays-empty', textContent: 'No replays yet. Matches are saved here automatically.' });
-    list.replaceChildren(...(entries.length ? entries.map(replayItem) : [empty]));
-  }
-  function replayItem(e) {
-    const names = e.seat ? [...e.names].reverse() : e.names, sc = e.seat ? [...e.scores].reverse() : e.scores, score = `${names[0]} ${sc[0]}–${sc[1]} ${names[1]}`;
-    const item = document.createElement('li'), heading = document.createElement('div'), name = document.createElement('strong'), meta = document.createElement('small');
-    item.classList.toggle('pinned', Boolean(e.pinned));
-    heading.className = 'replay-heading'; name.textContent = e.title || score;
-    meta.textContent = [e.title && score, e.clip ? 'Clip' : ububallMatch.modeName(e.mode), new Date(e.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }),
-      `${e.turns} turn${e.turns === 1 ? '' : 's'}`, !e.clip && !e.final && 'Unfinished'].filter(Boolean).join(' · ');
-    const pin = iconButton('pin', e.pinned ? 'Unpin' : 'Pin', async () => { try { await replayStore.put({ ...e, pinned: !e.pinned }); listReplays(); } catch (error) { replaysNote(error.message); } });
-    pin.setAttribute('aria-pressed', String(Boolean(e.pinned)));
-    const rename = () => {
-      const input = Object.assign(document.createElement('input'), { value: e.title || '', maxLength: ububallReplay.MAX_TITLE, placeholder: score, className: 'replay-name' });
-      input.setAttribute('aria-label', 'Replay name');
-      heading.replaceWith(input); input.focus(); input.select();
-      let done = false;
-      const finish = async save => {
-        if (done) return;
-        done = true;
-        const title = input.value.trim() || null;
-        let message = '';
-        try { if (save && title !== e.title) await renameReplay(e, title); } catch (error) { message = error.message; }
-        listReplays(message);
-      };
-      input.onkeydown = event => {
-        if (event.key === 'Enter') finish(true);
-        else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
-      };
-      input.onblur = () => finish(true);
-    };
-    // Watch leads the row; the name carries its own small rename button.
-    heading.append(name, iconButton('edit', 'Rename', rename, 'icon-button replay-rename'));
-    const actions = document.createElement('div'); actions.className = 'replay-actions';
-    actions.append(pin, iconButton('download', 'Export .ububall', () => downloadReplay(e.file, e.recorded, e.title)),
-      iconButton('trash', 'Delete', async () => { try { await replayStore.remove(e.id); deletedReplays.push(e); listReplays(); } catch (error) { replaysNote(error.message); } }));
-    item.append(iconButton('play', 'Watch', () => openReplay(e.id), 'icon-button primary replay-watch'), heading, meta, actions);
-    return item;
-  }
-  $('replays-undo').append(iconButton('undo', 'Undo delete', async () => {
-    const entry = deletedReplays.at(-1);
-    if (!entry) return;
-    try {
-      await replayStore.put(entry);
-      deletedReplays.pop();
-      listReplays();
-    } catch (error) { replaysNote(error.message); }
-  }, 'quiet'));
-  $('replays-undo').lastChild.append('Undo');
-  // Imported replays are checked like any other and stay until deleted.
-  $('replays-import').onchange = async event => {
-    const files = [...event.target.files], problems = [];
-    event.target.value = '';
-    for (const file of files) {
-      try {
-        if (file.size > 8 << 20) throw new Error('This replay is too large.');
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        await replayStore.add(libraryEntry(await ububallReplay.read(bytes), bytes, false));
-      } catch (error) { problems.push(`${file.name}: ${error.message}`); }
-    }
-    listReplays(problems.join(' '));
-  };
-  $('replays-open').onclick = openReplays;
-  $('replays-close').onclick = () => $('replays-dialog').close();
+  statsController.bindEvents();
+  const {
+    replayStats, renderStats, openMatchStats, openStats, downloadReplay, openReplay, openReplays, listReplays
+  } = statsController;
   function finishTurn(goal) {
     const ticks = Math.round(elapsed / P.DT);
     if (playSegments.length) playSegments[playSegments.length - 1].ticks = ticks;
@@ -3318,7 +2762,7 @@
       const scorer = fieldView.bodies[call.scorer] || fieldView.bodies.slice(goal * 3, goal * 3 + 3)[0];
       goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY + 800;
       if (typeof goalReplayDelayMs !== 'undefined') goalReplayDelayMs = ububallMatch.GOAL_REPLAY_DELAY + 800;
-      postGoal = { ticks: 0, sim: celebSim };
+      postGoal = { ticks: 0, sim: celebSim, seat: 0 };
       scoringPlayer = scorer;
       const scorerName = scorer?.name || (goal === 0 ? 'Your ubu' : 'CPU ubu');
       goalTab(goal, call.label, call.own ? null : scorerName);
@@ -3544,6 +2988,7 @@
       $('launch').click();
     }
   };
+  const postGoalState = { steps: 0, onTick: null };
   function frame(time) {
     const delta = lastTime ? Math.min(1 / 15, Math.max(0, (time - lastTime) / 1000)) : 0; lastTime = time;
     const active = !localPlayBlocked();
@@ -3551,25 +2996,24 @@
     updateClock();
     if (online?.active) {
       if (phase === 'plan') online.send(networkMoves());
-      if (goalReplay) { if (active) advanceGoalReplay(delta); }
-      else if (onlineReplay && active) playOnlineReplay();
-    } else if (active && blitzMode() && phase === 'plan' && performance.now() >= planDeadline) $('launch').click();
-    if (online?.active) {
       if (goalReplayAt && performance.now() >= goalReplayAt) {
         goalReplayAt = 0;
         startGoalReplay();
       }
-    } else if (goalReplayAt) {
-      if (active) goalReplayDelayMs -= delta * 1000;
-      if (active && goalReplayDelayMs <= 0) {
-        goalReplayAt = 0; goalReplayDelayMs = 0;
-        // The winner is announced once the goal call has cleared (the demo does so after its replays).
-        if (phase === 'over' && !demo) banner(scores[0] > scores[1] ? 'You win!' : 'CPU wins!', 3500, scores[0] > scores[1] ? 'home' : 'away');
-        startGoalReplay();
+    } else {
+      if (active && blitzMode() && phase === 'plan' && performance.now() >= planDeadline) $('launch').click();
+      if (goalReplayAt) {
+        if (active) goalReplayDelayMs -= delta * 1000;
+        if (active && goalReplayDelayMs <= 0) {
+          goalReplayAt = 0; goalReplayDelayMs = 0;
+          // The winner is announced once the goal call has cleared (the demo does so after its replays).
+          if (phase === 'over' && !demo) banner(scores[0] > scores[1] ? 'You win!' : 'CPU wins!', 3500, scores[0] > scores[1] ? 'home' : 'away');
+          startGoalReplay();
+        }
       }
     }
     if ((goalReplay && !demo) || !replaySkip.hidden) updateReplaySkip(goalReplay);
-    if (!active) { lastTime = 0; accumulator = 0; }
+    if (!active) { lastTime = 0; accumulator = 0; postGoalState.steps = 0; }
     const hadEffects = fieldEffects.particles.length || fieldEffects.fireworks.length || fieldEffects.trails.some(trail => trail.length) || fieldEffects.shockwaves.length || fieldEffects.goalCall || fieldEffects.fireWarp || fieldEffects.koWarp ||
       fieldEffects.ripples.length || fieldEffects.pings.length || fieldEffects.popups.length || fieldEffects.kickoffGlow || fieldEffects.goalSweep || fieldEffects.danger[0] > .02 || fieldEffects.danger[1] > .02;
     // Effects pause with the replay viewer, and in Pulse mode when time freezes between turns.
@@ -3585,15 +3029,13 @@
     if (active && !theater?.paused && !exporting && !pulseFrozen) updateEffects(simDelta);
     if (theater) { if (active && !exporting) advanceReplay(delta); }
     else if ((phase === 'play' || postGoal) && active && !online?.active) {
-      if (clockNow() < hitStopUntil) accumulator = 0; else accumulator += simDelta;
-      let steps = 0;
-      while (steps++ < 48 && accumulator >= P.DT && (phase === 'play' || postGoal)) {
-        if (postGoal) {
-          const celeb = postGoal.sim || simBodies;
-          elapsed += P.DT; accumulator -= P.DT;
-          postGoal.ticks++;
-          if (stepPostGoalFrame(celeb, liveFx, () => syncViewBodies(celeb, 0), true)) { postGoal = null; break; }
-        } else {
+      if (postGoal) {
+        postGoalState.onTick = () => { elapsed += P.DT; };
+        if (!advancePostGoal(postGoal, postGoalState, simDelta, liveFx, () => syncViewBodies(postGoal.sim || simBodies, 0), 48, () => hitStopUntil)) postGoal = null;
+      } else {
+        if (clockNow() < hitStopUntil) accumulator = 0; else accumulator += simDelta;
+        let steps = 0;
+        while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
           const tick = ububallMatch.playTick(P, simBodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
           ububallMatch.lapseFouls(P, simBodies, fouls); traceGuide(simBodies);
           syncViewBodies(simBodies, 0);
@@ -3605,6 +3047,7 @@
           noteEvents(Math.round(elapsed / P.DT), tick.saves, tick.stop);
           recordTrails();
           if (goal !== null || P.settled(simBodies) || Math.round(elapsed / P.DT) >= ububallMatch.turnTicks(fieldView.mode)) {
+            postGoalState.steps = 0;
             finishTurn(goal);
             if (goal !== null) break;
           }
@@ -3612,8 +3055,18 @@
       }
       if (phase === 'play' || postGoal) emitSkaterEffects(simDelta);
       draw();
-    } else if (goalReplay && active && !online?.active) advanceGoalReplay(delta);
-    else if (active && (dragDirty || hadEffects || (phase === 'plan' && presenter.getPredictionCache()?.data?.goal !== null) || (!reducedMotion.matches && (foulsShowing() || fieldView.bodies.some(b => b.meter >= 100 || b.superArm || b.superActive || (P.dazeSlow && P.dazeSlow(b) > 0)))))) {
+    } else if (goalReplay && active) advanceGoalReplay(delta);
+    else if (online?.active && active && (postGoal || (onlineReplay && !onlineReplay.settledSynced))) {
+      const turnRunning = Boolean(onlineReplay && (onlineReplay.currentTick ?? 0) < onlineReplay.ticks);
+      if (turnRunning) playOnlineReplay();
+      else if (postGoal) {
+        postGoalState.onTick = null;
+        const seat = postGoal.seat ?? online.state?.seat ?? 0;
+        if (!advancePostGoal(postGoal, postGoalState, simDelta, replayFx, () => syncViewBodies(postGoal.sim, seat), 48, () => hitStopUntil)) postGoal = null;
+      }
+      if ((onlineReplay && (onlineReplay.currentTick ?? 0) < onlineReplay.ticks) || postGoal) emitSkaterEffects(simDelta);
+      draw();
+    } else if (active && (dragDirty || hadEffects || (phase === 'plan' && presenter.getPredictionCache()?.data?.goal !== null) || (!reducedMotion.matches && (foulsShowing() || fieldView.bodies.some(b => b.meter >= 100 || b.superArm || b.superActive || (P.dazeSlow && P.dazeSlow(b) > 0)))))) {
       if (dragDirty) { dragDirty = false; sync(); }
       draw();
     }
@@ -4797,251 +4250,70 @@
     return plans.map((p, i) => ({ angle: p.angle + (online?.state?.seat ? Math.PI : 0), power: p.power,
       spin: p.spin || 0, superArm: Boolean(fieldView.bodies[i].superArm), guard: Boolean(p.guard) }));
   }
-  // Presentation-only body keys stay on display bodies (`bodies`) and out of simulation state.
-  // `projectBody` copies an explicit fixed set of simulation fields so internal keys (`meterTick`,
-  // `pinX`, `pinY`, `stunnedNext`) and transient/ad-hoc keys never leak onto display bodies.
-  const PRESENTATION_KEYS = new Set(['playerIndex', 'name', 'voice', '_lastHitSound', '_lastWallSound']);
-  function stripPresentation(sim) {
-    if (!Array.isArray(sim)) return sim;
-    for (const b of sim) {
-      if (!b || typeof b !== 'object') continue;
-      for (const k of PRESENTATION_KEYS) delete b[k];
-    }
-    return sim;
-  }
-  const PROJECTED_STATIC = new WeakMap();
-  function onlineOrder(items, seat) { return seat ? [...items.slice(3, 6), ...items.slice(0, 3), ...items.slice(6)] : items; }
-  // Maps simulation bodies (server seat-0 order and coordinates) onto the displayed bodies.
-  const viewIndex = (i, seat) => seat ? (i < 3 ? i + 3 : i < 6 ? i - 3 : 6) : i;
-  function applySeatTransform(src, dst, i, seat = 0) {
-    if (seat) {
-      dst.x = 1000 - src.x; dst.y = 600 - src.y;
-      dst.vx = -src.vx; dst.vy = -src.vy;
-      dst.rotation = (src.rotation || 0) + Math.PI;
-    } else {
-      dst.x = src.x; dst.y = src.y;
-      dst.vx = src.vx; dst.vy = src.vy;
-      dst.rotation = src.rotation;
-    }
-    if (src.stickOffset) {
-      const sign = seat ? -1 : 1;
-      if (dst.stickOffset && typeof dst.stickOffset === 'object') { dst.stickOffset.x = sign * src.stickOffset.x; dst.stickOffset.y = sign * src.stickOffset.y; }
-      else dst.stickOffset = { x: sign * src.stickOffset.x, y: sign * src.stickOffset.y };
-    } else {
-      delete dst.stickOffset;
-    }
-    dst.team = i < 3 ? 0 : i < 6 ? 1 : -1;
-    if (i < 6) dst.slot = i % 3;
-    else {
-      delete dst.slot;
-      if (src.strikerTeam !== undefined || dst.strikerTeam !== undefined) {
-        dst.strikerTeam = src.strikerTeam === undefined || src.strikerTeam < 0 ? -1 : (seat ? 1 - src.strikerTeam : src.strikerTeam);
-      }
-    }
-    return dst;
-  }
-  // Pure simulation-to-simulation seat transform (used when taking over a replay from seat 1).
-  function transformSimSeat(sim, seat = 0) {
-    return onlineOrder(structuredClone(sim), seat).map((b, i) => applySeatTransform(b, b, i, seat));
-  }
-  function projectBody(cb, vb, i, seat = 0, entries = typeof fieldView.entries !== 'undefined' ? fieldView.entries : null, anonymous = typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous) {
-    const armed = vb.superArm;
-    applySeatTransform(cb, vb, i, seat);
-    vb.playerIndex = i;
-    vb.omega = cb.omega;
-    vb.radius = cb.radius;
-    vb.mass = cb.mass;
-    vb.friction = cb.friction;
-    vb.grip = cb.grip;
-    vb.maxSpin = cb.maxSpin;
-    vb.curveMult = cb.curveMult;
-    vb.curveFactor = cb.curveFactor;
-    if (i < 6) {
-      const entry = entries ? entries[i] : null;
-      const hasModel = Boolean(entry?.model);
-      const classic = hasModel && classicMode();
-      const anonLabel = anonymous ? anonymousName(i) : null;
-      const cached = hasModel ? PROJECTED_STATIC.get(vb) : null;
-      const staticOk = Boolean(cached &&
-        cached.index === i && cached.entry === entry && cached.model === entry.model &&
-        cached.fullName === entry.model.parts?.fullName && cached.voice === entry.model.voice &&
-        cached.entrySuper === entry.equippedSuper && cached.cbSuper === cb.equippedSuper &&
-        cached.classic === classic && cached.anonymous === anonymous && cached.anonLabel === anonLabel &&
-        'personality' in vb && 'equippedSuper' in vb);
-      vb.sizeMult = cb.sizeMult;
-      vb.baseRadius = cb.baseRadius;
-      vb.baseMass = cb.baseMass;
-      vb.baseFriction = cb.baseFriction;
-      vb.baseReach = cb.baseReach;
-      vb.baseStrength = cb.baseStrength;
-      vb.baseStability = cb.baseStability;
-      vb.baseBounciness = cb.baseBounciness;
-      vb.bounciness = cb.bounciness;
-      vb.impulse = cb.impulse;
-      vb.power = cb.power;
-      vb.reach = cb.reach;
-      vb.strength = cb.strength;
-      vb.stability = cb.stability;
-      vb.meter = cb.meter ?? 0;
-      vb.daze = cb.daze || 0;
-      vb.spinStrike = cb.spinStrike || 0;
-      vb.ironCooldownTicks = cb.ironCooldownTicks || 0;
-      vb.superTicks = cb.superTicks || 0;
-      vb.superHoldTicks = cb.superHoldTicks || 0;
-      vb.superBonusTicks = cb.superBonusTicks || 0;
-      vb.superBonusRefund = cb.superBonusRefund || 0;
-      vb.superActive = cb.superActive || null;
-      vb.guarding = Boolean(cb.guarding);
-      vb.ironGuard = Boolean(cb.ironGuard);
-      vb.superArm = cb.superArm !== undefined ? Boolean(cb.superArm) : Boolean(armed);
-      vb.stunned = Boolean(cb.stunned || cb.stunnedNext);
-      vb.carded = Boolean(cb.carded);
-      vb.holding = Boolean(cb.holding);
-      vb.usedSuperThisTurn = Boolean(cb.usedSuperThisTurn);
-      vb.superHit = Boolean(cb.superHit);
-      vb.superRefunded = Boolean(cb.superRefunded);
-      vb.shockwaveFired = Boolean(cb.shockwaveFired);
-      if (hasModel) {
-        if (!staticOk) {
-          const fullName = entry.model.parts?.fullName;
-          vb.name = anonymous ? anonLabel : fullName;
-          vb.voice = entry.model.voice;
-          vb.personality = entry.model.personality && typeof entry.model.personality === 'object' ? { ...entry.model.personality } : entry.model.personality;
-          const sObj = entry.equippedSuper || (cb.equippedSuper ? { ...P.SUPERS[cb.equippedSuper.id], ...cb.equippedSuper } : resolveEquippedSuper(entry, i));
-          vb.equippedSuper = classic ? null : (sObj ? { ...sObj } : null);
-          PROJECTED_STATIC.set(vb, {
-            index: i, entry, model: entry.model, fullName, voice: entry.model.voice,
-            entrySuper: entry.equippedSuper, cbSuper: cb.equippedSuper,
-            classic, anonymous, anonLabel
-          });
-        }
-      } else {
-        PROJECTED_STATIC.delete(vb);
-        if (cb.personality && typeof cb.personality === 'object') vb.personality = { ...cb.personality }; else delete vb.personality;
-        if (cb.equippedSuper && typeof cb.equippedSuper === 'object') vb.equippedSuper = { ...cb.equippedSuper };
-        else if (cb.equippedSuper === null) vb.equippedSuper = null;
-        else delete vb.equippedSuper;
-        if (anonymous) vb.name = anonLabel;
-      }
-    } else {
-      vb.onFire = Boolean(cb.onFire);
-      vb.fireTicks = cb.fireTicks || 0;
-      vb.pace = cb.pace || 0;
-      vb.stuckTicks = cb.stuckTicks || 0;
-      vb.strikerSlot = cb.strikerSlot;
-      vb.strikerPower = cb.strikerPower;
-      vb.strikerTeam = cb.strikerTeam === undefined || cb.strikerTeam < 0 ? -1 : (seat ? 1 - cb.strikerTeam : cb.strikerTeam);
-      vb.openingShot = Boolean(cb.openingShot);
-      vb.spinStruck = Boolean(cb.spinStruck);
-      vb.snapStruck = Boolean(cb.snapStruck);
-    }
-    return vb;
-  }
-  function viewBodies(items, seat = 0, entries = typeof fieldView.entries !== 'undefined' ? fieldView.entries : null, anonymous = typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous) {
-    if (!items) return [];
-    return onlineOrder(items, seat).map((cb, i) => projectBody(cb, {}, i, seat, entries, anonymous));
-  }
-  // The server's fouls as this seat sees them: teams swapped and the rink turned half round.
-  function viewFouls(f, seat) {
-    if (!f) return ububallMatch.newFouls();
-    if (!seat) return structuredClone(f);
-    return { ...f, crease: [f.crease[1], f.crease[0]], corner: f.corner === null ? null : 3 - f.corner, cards: f.cards.map(i => viewIndex(i, seat)) };
-  }
-  function toViewBody(cb, sim = shownSim(), seat = shownSeat(), targetBodies = fieldView.bodies) {
-    if (!cb) return null;
-    const idx = sim?.indexOf(cb);
-    if (idx === undefined || idx < 0) return cb;
-    return targetBodies[viewIndex(idx, seat)] || cb;
-  }
-  function syncViewBodies(sim = shownSim(), seat = shownSeat(), targetBodies = fieldView.bodies, anonymous = typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous, meters = dirtyMeters, entries = typeof fieldView.entries !== 'undefined' ? fieldView.entries : null) {
-    if (!sim) return targetBodies;
-    for (let i = 0; i < sim.length; i++) {
-      const vi = viewIndex(i, seat);
-      const vb = targetBodies[vi] ||= {};
-      projectBody(sim[i], vb, vi, seat, entries, anonymous);
-      if (meters) meters.add(vb);
-    }
-    return targetBodies;
-  }
   function playOnlineReplay() {
     const replay = onlineReplay;
-    if (!replay || !replay.simBodies) return;
-    const elapsedSec = Math.max(0, (online.now() - replay.startedAt - (replay.paused || 0)) / 1000);
-    const targetTick = Math.min(replay.ticks, Math.floor(elapsedSec / P.DT));
-    if (replay.currentTick === undefined) replay.currentTick = 0;
-
-    // Warnings lapse during the replay as they did on the server.
-    const simFouls = viewFouls(fouls, online.state.seat);
-    if (targetTick - replay.currentTick > 60) {
-      while (replay.currentTick < targetTick - 8) {
-        P.step(replay.simBodies, P.DT); traceGuide(replay.simBodies);
-        replay.currentTick++;
-        ububallMatch.lapseFouls(P, replay.simBodies, simFouls);
-      }
-    }
-
-    while (replay.currentTick < targetTick) {
-      P.step(replay.simBodies, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super); traceGuide(replay.simBodies);
-      replay.currentTick++;
-      ububallMatch.lapseFouls(P, replay.simBodies, simFouls);
-      replay.simBodies[6].spinStruck = false; replay.simBodies[6].snapStruck = false;
-      const now = replay.currentTick, saves = (replay.saves || []).filter(s => s.tick === now), struck = replay.struck?.includes(now);
-      // Hit-stop holds the replay clock back so the rest of the turn plays on after the pause.
-      const stop = replay.stops?.find(s => s.tick === now)?.ms;
-      if (applyTickEvents(replay.simBodies, {
-        saves, struck, stop, applyIron: true,
-        syncFn: () => syncViewBodies(replay.simBodies, online.state.seat),
-        viewFn: b => toViewBody(b, replay.simBodies, online.state.seat),
-        onStop: ms => { replay.paused = (replay.paused || 0) + ms; }
-      })) break;
-    }
-    syncViewBodies(replay.simBodies, online.state.seat);
-    if (!replay.fouled) fouls = viewFouls(simFouls, online.state.seat);
-
-    if (replay.goal !== null) {
-      const preScores = online.state.seat ? [...online.state.game.scores].reverse() : [...online.state.game.scores];
-      const viewGoal = replay.goal === online.state.seat ? 0 : 1;
-      if (replay.currentTick < replay.ticks) {
-        preScores[viewGoal]--;
-        scores = preScores;
-      } else {
-        scores = online.state.seat ? [...online.state.game.scores].reverse() : [...online.state.game.scores];
-        if (!replay.goalPlayed) {
-          replay.goalPlayed = true;
-          goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
-          const toView = index => index == null ? null : viewIndex(index, online.state.seat);
-          celebrate(viewGoal, fieldView.bodies[6], replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : fieldView.bodies[toView(replay.scorer)] || null);
-          if (ballOnFire()) lightNet(viewGoal);
-          if (toView(replay.assist) !== null) popup(fieldView.bodies[toView(replay.assist)], 'Assist');
-          const viewScorerIndex = toView(replay.scorer);
-          const scorer = viewScorerIndex !== null ? fieldView.bodies[viewScorerIndex] : fieldView.bodies[viewGoal * 3];
-          scoringPlayer = scorer;
-          const [home, them] = onlineNames(online.state), scoringTeam = viewGoal === 0 ? home : them;
-          const scorerName = scorer?.name || (online.spectating ? `${scoringTeam}'s ubu` : viewGoal === 0 ? 'Your ubu' : `${them}'s ubu`);
-          goalTab(viewGoal, replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : scorerName);
-          say(online.spectating ? `${scoringTeam} ${online.state.game.winner !== null ? 'wins' : 'scores'}. ${callText(replay.label || 'GOAL', scorerName)}` : online.state.game.winner !== null
-            ? (viewGoal === 0 ? `You win! ${callText(replay.label || 'GOAL', scorerName)}${honourText(0)}` : `${them} wins. ${callText(replay.label || 'GOAL', scorerName)}${honourText(1)}`)
-            : `${viewGoal === 0 ? 'You score!' : `${them} scores.`} ${callText(replay.label || 'GOAL', scorerName)} Ready for the next kickoff.`
-          );
-          loopFanfare(scorer?.voice);
-          sync();
+    if (!replay || !replay.simBodies || !online?.state) return;
+    const seat = online.state.seat;
+    const syncSim = () => syncViewBodies(replay.simBodies, seat);
+    const res = stepOnlineTurn({
+      replay,
+      nowMs: online.now(),
+      seat,
+      fouls,
+      fx: replayFx,
+      syncSim,
+      toView: b => toViewBody(b, replay.simBodies, seat),
+      onGoalReached: () => {
+        goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
+        const celebSim = structuredClone(replay.simBodies);
+        replay.postGoalSim = celebSim;
+        postGoal = { ticks: 0, sim: celebSim, seat };
+        postGoalState.steps = 0;
+        syncViewBodies(celebSim, seat);
+        const viewGoal = replay.goal === seat ? 0 : 1;
+        const toView = index => index == null ? null : viewIndex(index, seat);
+        celebrate(viewGoal, fieldView.bodies[6], replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : fieldView.bodies[toView(replay.scorer)] || null);
+        if (ballOnFire()) lightNet(viewGoal);
+        if (toView(replay.assist) !== null) popup(fieldView.bodies[toView(replay.assist)], 'Assist');
+        const viewScorerIndex = toView(replay.scorer);
+        const scorer = viewScorerIndex !== null ? fieldView.bodies[viewScorerIndex] : fieldView.bodies[viewGoal * 3];
+        scoringPlayer = scorer;
+        const [home, them] = onlineNames(online.state), scoringTeam = viewGoal === 0 ? home : them;
+        const scorerName = scorer?.name || (online.spectating ? `${scoringTeam}'s ubu` : viewGoal === 0 ? 'Your ubu' : `${them}'s ubu`);
+        goalTab(viewGoal, replay.label || 'GOAL', replay.label === 'OWN GOAL' ? null : scorerName);
+        say(online.spectating ? `${scoringTeam} ${online.state.game.winner !== null ? 'wins' : 'scores'}. ${callText(replay.label || 'GOAL', scorerName)}` : online.state.game.winner !== null
+          ? (viewGoal === 0 ? `You win! ${callText(replay.label || 'GOAL', scorerName)}${honourText(0)}` : `${them} wins. ${callText(replay.label || 'GOAL', scorerName)}${honourText(1)}`)
+          : `${viewGoal === 0 ? 'You score!' : `${them} scores.`} ${callText(replay.label || 'GOAL', scorerName)} Ready for the next kickoff.`
+        );
+        loopFanfare(scorer?.voice);
+        sync();
+      },
+      onSettledTurnEnd: () => {
+        if (replay.goal === null && !replay.settledSynced) {
+          const before = trailPositions();
+          syncViewBodies(online.state.game.bodies, seat);
+          clearDiscontinuousTrails(before);
+          replay.settledSynced = true;
+        } else if (replay.goal !== null) {
+          replay.settledSynced = true;
+        }
+        if (!replay.fouled) {
+          replay.fouled = true;
+          fouls = viewFouls(online.state.game.fouls, seat);
+          announceFouls();
+          if (replay.goal === null && foulText()) say(foulText());
         }
       }
+    });
+    if (!replay.fouled) fouls = res.fouls;
+    if (replay.goal !== null) {
+      const preScores = seat ? [...online.state.game.scores].reverse() : [...online.state.game.scores];
+      const viewGoal = replay.goal === seat ? 0 : 1;
+      if (replay.currentTick < replay.ticks) preScores[viewGoal]--;
+      scores = preScores;
     } else {
-      scores = online.state.seat ? [...online.state.game.scores].reverse() : [...online.state.game.scores];
+      scores = seat ? [...online.state.game.scores].reverse() : [...online.state.game.scores];
     }
-
-    if (replay.currentTick >= replay.ticks) {
-      const before = trailPositions();
-      syncViewBodies(online.state.game.bodies, online.state.seat);
-      clearDiscontinuousTrails(before);
-      if (!replay.fouled) {
-        replay.fouled = true; fouls = viewFouls(online.state.game.fouls, online.state.seat); announceFouls();
-        if (replay.goal === null && foulText()) say(foulText());
-      }
-    }
-
-    recordTrails(); emitSkaterEffects(Math.min(.05, 1 / 60)); draw();
   }
   // Each side's Discord display name, mine first; a guest has none.
   function onlineNames(s) {
@@ -5087,7 +4359,7 @@
     chooseMode(mode) { openSetup('mode', 'online', mode); },
     editRules(mode) { openSetup('mode', 'rules', mode); },
     onNewGame() {
-      saveRecording(); onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = ''; onlinePlanFouls = null;
+      saveRecording(); onlineRoster = ''; onlineTurn = 0; onlineReplay = null; postGoal = null; onlinePhase = ''; onlinePlanFouls = null;
       closeSummary(); endGoalReplay(); stopFanfare();
     },
     lobby(view, open) { void showLobby(view, open); },
@@ -5138,9 +4410,9 @@
         const ball = s.game.bodies[6];
         if (s.phase === 'plan' && ball.x === 500 && ball.y === 300) fieldEffects.kickoffGlow = 1;
       }
-      if (s.phase !== 'resolving' || fresh || (onlineReplay && onlineReplay.turn !== s.replay?.turn)) { endGoalReplay(); stopFanfare(); }
-      const before = !fresh && !s.replay && !goalReplay ? trailPositions() : null;
-      if (!goalReplay) syncViewBodies(s.game.bodies, s.seat);
+      if (s.phase !== 'resolving' || fresh || (onlineReplay && onlineReplay.turn !== s.replay?.turn)) { postGoal = null; endGoalReplay(); stopFanfare(); }
+      const before = !fresh && !s.replay && !goalReplay && !postGoal ? trailPositions() : null;
+      if (!goalReplay && !postGoal && !(onlineReplay && onlineReplay.postGoalSim)) syncViewBodies(s.game.bodies, s.seat);
       if (before) clearDiscontinuousTrails(before);
       if (!s.replay) fouls = viewFouls(s.game.fouls, s.seat);
       stats = onlineOrder(s.game.stats, s.seat);
@@ -5197,7 +4469,7 @@
       }
       if (!s.spectator) finishOnlineRecording(s);
       phase = s.phase === 'over' ? 'over' : s.phase === 'resolving' ? 'play' : !s.spectator && s.connected.every(Boolean) && !s.locked[s.seat] ? 'plan' : 'waiting';
-      sync(); if (onlineReplay && !goalReplay) playOnlineReplay(); else draw();
+      sync(); if (onlineReplay && !goalReplay && (onlineReplay.currentTick ?? 0) < onlineReplay.ticks) playOnlineReplay(); draw();
       if (justFinished) openSummary();
     },
     onDisconnect(reconnecting) {
@@ -5207,7 +4479,7 @@
     onError(message) { say(message); banner(message, 3000); },
     onOutdated() {
       stopDemo();
-      phase = 'waiting'; drag = null;
+      phase = 'waiting'; drag = null; postGoal = null;
       endGoalReplay(); stopFanfare(); gameAudio()?.stop?.();
       closeLobby(); closeSummary();
       if (typeof closeFoulInfo === 'function') closeFoulInfo();
@@ -5227,7 +4499,7 @@
     },
     onLeave() {
       saveRecording();
-      onlineRoster = ''; onlineTurn = 0; onlineReplay = null; onlinePhase = ''; scoringPlayer = null; onlinePlanFouls = null;
+      onlineRoster = ''; onlineTurn = 0; onlineReplay = null; postGoal = null; onlinePhase = ''; scoringPlayer = null; onlinePlanFouls = null;
       document.body.classList.remove('online-match');
       $('online-open-label').textContent = 'Play online';
       $('online-open-note').hidden = false;

@@ -2071,3 +2071,51 @@ test('goal-pocket walls contain skaters nudged into net roof/floor, corner cente
   assert.equal(pg[6].x, 960); assert.equal(pg[6].y, 300);
   assert.ok(pg[0].vx > 200, 'skater continues past pinned ball without rebounding off it');
 });
+
+test('Sticky grab sets strikerTeam/strikerSlot/strikerPower/curveMult so released ball counts as carrier team pass for teammate Snaps and friendly Guard traps', () => {
+  const M = require('../shared/ububall-match.js');
+  const b = P.kickoff();
+  b.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  // Team 1 carrier (b[3], slot 3 in kickoff, team 1) catches an incoming Team 0 shot
+  const carrier = b[3], teammateShooter = b[4], teammateGuard = b[5], ball = b[6];
+  carrier.power = 1.25;
+  carrier.curveMult = 1.15;
+  Object.assign(carrier, { x: 600, y: 300, vx: -260, vy: 0, superActive: 'sticky', superTicks: P.SUPER.ticks, superHoldTicks: P.SUPER.holdTicks });
+  Object.assign(ball, { x: 560, y: 300, vx: 380, vy: 0, strikerTeam: 0, strikerSlot: 1, strikerPower: 0.9, curveMult: 0.85 });
+
+  for (let t = 0; t < 30 && !carrier.holding; t++) P.step(b, P.DT);
+  assert.equal(carrier.holding, true, 'Team 1 Sticky carrier catches Team 0 shot');
+  assert.equal(ball.strikerTeam, 1, 'Sticky grab updates ball.strikerTeam to carrier team');
+  assert.equal(ball.strikerSlot, carrier.slot, 'Sticky grab updates ball.strikerSlot to carrier slot');
+  assert.equal(ball.strikerPower, 1.25, 'Sticky grab updates ball.strikerPower');
+  assert.equal(ball.curveMult, 1.15, 'Sticky grab updates ball.curveMult');
+
+  // Release without another touch while moving fast enough (>= 180 px/s) for a teammate Snap one-timer
+  carrier.vx = -320; carrier.vy = 0;
+  ball.vx = -320; ball.vy = 0;
+  P.endSuper(carrier, b);
+  assert.equal(carrier.holding, false);
+  assert.equal(ball.strikerTeam, 1, 'released ball retains Sticky carrier team');
+
+  // 1) Different Team 1 teammate driving >= 140 px/s into the Sticky-released ball triggers Snap
+  const snapSim = structuredClone(b);
+  snapSim.slice(0, 6).forEach((x, idx) => Object.assign(x, { x: 100 + idx * 45, y: 520, vx: 0, vy: 0 }));
+  Object.assign(snapSim[6], { x: 500, y: 300, vx: 0, vy: 280 });
+  Object.assign(snapSim[4], { x: 538, y: 300, vx: -500, vy: 0, guarding: false });
+  let snapped = false;
+  P.step(snapSim, 0, (_a, _c, _spd, _imp, _plow, _iron, _chk, isSnap) => { if (isSnap) snapped = true; });
+  assert.equal(snapped, true, 'teammate Snap one-timer triggers off a Sticky-released pass');
+
+  // 2) Team 1 teammate in Guard stance catching the Sticky-released ball (>= 175 px/s) triggers friendly Trap! (own: true)
+  const trapSim = structuredClone(b);
+  trapSim.slice(0, 6).forEach((x, idx) => Object.assign(x, { x: 100 + idx * 45, y: 520, vx: 0, vy: 0 }));
+  trapSim[5].guarding = true;
+  P.syncEffectiveStats(trapSim[5]);
+  Object.assign(trapSim[5], { x: 460, y: 300, vx: 0, vy: 0 });
+  Object.assign(trapSim[6], { x: 460 + trapSim[5].reach + trapSim[6].radius - 1, y: 300, vx: -260, vy: 0 });
+  const play = M.newPlay({ credit: { 3: 1 }, last: 3, lastTouch: [null, 3] });
+  const tick = M.playTick(P, trapSim, play, {}, M.newTally(), true);
+  assert.equal(tick.saves.length, 1, 'friendly Guard trap registers on Sticky-released pass');
+  assert.equal(tick.saves[0].iron, true);
+  assert.equal(tick.saves[0].own, true, 'counted as friendly Trap! rather than opposing Iron Save');
+});

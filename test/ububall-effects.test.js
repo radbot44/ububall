@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ububallPresentation = require('../web/ububall-presentation.js');
+const ububallPlayback = require('../web/ububall-playback.js');
+const ububallStats = require('../web/ububall-stats.js');
 const {
   createEffectsState, updateParticles, updatePopups, drawBallFace, drawTrails,
   drawGuardShield, GUARD_SHIELD, conicRingSprites, conicRingSprite, createRinkPresenter
@@ -20,7 +22,7 @@ function runInNewContext(code, context) {
     set: (_, key, value) => { context[aliases[key] ?? key] = value; return true; }
   });
   context.fieldEffects = fixtureState();
-  Object.assign(context, { createEffectsState, updateParticles, ububallPresentation });
+  Object.assign(context, { createEffectsState, updateParticles, ububallPresentation, ububallPlayback, ububallStats, createPlaybackDriver: ububallPlayback.createPlaybackDriver, matchMvp: ububallStats.matchMvp, replayFileName: ububallStats.replayFileName });
   context.fieldView = fixtureState({ mode: 'matchMode', entries: 'teamEntries', anonymous: 'anonymousNames',
     portrait: 'isPortrait', field: 'videoField' });
   return vm.runInNewContext(code, context);
@@ -73,6 +75,8 @@ function section(start, end) {
   assert.ok(a >= 0 && b > a, 'effect source boundary changed');
   return source.slice(a, b);
 }
+const __PLAYBACK_PROJ_SHIM__ = "const {\n  PRESENTATION_KEYS, stripPresentation, onlineOrder, viewIndex, applySeatTransform, transformSimSeat\n} = ububallPlayback;\nconst viewFouls = (f, seat) => ububallPlayback.viewFouls(ububallMatch, f, seat);\nconst { projectBody, viewBodies, toViewBody, syncViewBodies } = ububallPlayback.createBodyProjector({\n  P,\n  getEntries: () => (typeof fieldView.entries !== 'undefined' ? fieldView.entries : null),\n  getAnonymous: () => Boolean(typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous),\n  anonymousName: i => (typeof anonymousName === 'function' ? anonymousName(i) : `Ubu ${i + 1}`),\n  isClassicMode: () => (typeof classicMode === 'function' ? classicMode() : false),\n  resolveEquippedSuper: (entry, i) => (typeof resolveEquippedSuper === 'function' ? resolveEquippedSuper(entry, i) : entry?.equippedSuper),\n  getShownSim: () => (typeof shownSim === 'function' ? shownSim() : (typeof simBodies !== 'undefined' ? simBodies : null)),\n  getShownSeat: () => (typeof shownSeat === 'function' ? shownSeat() : 0),\n  getTargetBodies: () => fieldView.bodies,\n  getDirtyMeters: () => (typeof dirtyMeters !== 'undefined' ? dirtyMeters : null)\n});";
+const __PLAYBACK_DRIVER_SHIM__ = "const postGoalState = { steps: 0, onTick: null };\nconst {\n  impactFor, applyTickEvents, stepPostGoalFrame, runPlaybackTicks, advancePostGoal, stepOnlineTurn\n} = ububallPlayback.createPlaybackDriver({\n  P,\n  ububallMatch,\n  clockNow: () => (typeof clockNow === 'function' ? clockNow() : performance.now()),\n  impact: (ms, shake) => impact(ms, shake),\n  creditSave: (body, own, iron) => creditSave(body, own, iron),\n  popup: (body, text) => popup(body, text),\n  getBallView: () => fieldView.bodies[6],\n  traceGuide: sim => (typeof traceGuide === 'function' ? traceGuide(sim) : undefined),\n  recordTrails: () => (typeof recordTrails === 'function' ? recordTrails() : undefined)\n});";
 
 test('trail gradient retains a hot sample between cool endpoints', () => {
   const gradients = [];
@@ -534,14 +538,14 @@ test('local Blitz preserves the deadline across blocked frames and hidden time',
 
 test('active match save and restore enforces matching matchVersion and physicsVersion', () => {
   assert.ok(
-    source.indexOf('const PRESENTATION_KEYS =') < source.indexOf('restoredMatch = restoreActiveMatch();') &&
-    source.indexOf('const viewIndex =') < source.indexOf('restoredMatch = restoreActiveMatch();'),
+    source.indexOf('PRESENTATION_KEYS,') < source.indexOf('restoredMatch = restoreActiveMatch();') &&
+    source.indexOf('viewIndex,') < source.indexOf('restoredMatch = restoreActiveMatch();'),
     'projection constants and viewIndex must initialize before startup match restore/newMatch'
   );
   const code =
     section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
     section('function clearActiveMatch() {', 'function aimPower(distance, arrow) {') + '\n' +
-    section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+    __PLAYBACK_PROJ_SHIM__;
   const P = require('../shared/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const ububallReplay = require('../shared/ububall-replay.js');
@@ -681,7 +685,7 @@ test('contactMeter and creditSave reject meter awards outside phase === play', (
 test('post-goal celebration simulation cannot alter the next kickoffs meter or gameplay state', () => {
   const code = section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') +
     '\n' + section('function finishTurn(goal) {', '$(\'launch\').onclick =') +
-    '\n' + section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+    '\n' + __PLAYBACK_PROJ_SHIM__;
   const P = require('../shared/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const ubu = require('../shared/ubu.js');
@@ -803,7 +807,7 @@ test('display projection boundary: seat transforms, gameplay fields, presentatio
   const P = require('../shared/ububall-physics.js');
   const ubu = require('../shared/ubu.js');
   const ububallMatch = require('../shared/ububall-match.js');
-  const projCode = section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+  const projCode = __PLAYBACK_PROJ_SHIM__;
 
   const teamEntries = Array.from({ length: 6 }, (_, i) => {
     const dna = ubu.randomDNA();
@@ -1007,7 +1011,7 @@ test('local gameplay and goal replay maintain separate authoritative simBodies a
     section('function creditSave(body, own, iron = false) {', 'function flushMeters() {') + '\n' +
     section('let activePlayback = null;', 'const replayStore = (() => {') + '\n' +
     section('function finishTurn(goal) {', '$(\'launch\').onclick =') + '\n' +
-    section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+    __PLAYBACK_PROJ_SHIM__;
 
   const normal = { mass: 127, size: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 };
   const practice = Array.from({ length: 6 }, () => {
@@ -1101,7 +1105,7 @@ test('replay takeover (watchReplay -> playFromHere -> local turn) transforms sim
     section('let activePlayback = null;', 'const replayStore = (() => {') + '\n' +
     section('function watchReplay(replay, file) {', 'function endReplayTurn() {') + '\n' +
     section('let guide = null;', '$(\'replay-take-over\').onclick = playFromHere;') + '\n' +
-    section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+    __PLAYBACK_PROJ_SHIM__;
 
   const ubus = Array.from({ length: 6 }, (_, i) => {
     const dna = ubu.toCode(ubu.randomDNA());
@@ -1234,10 +1238,11 @@ test('online seat 1 transition (resolving -> playOnlineReplay -> next plan phase
   const onStateCode = section('function onlineNames(s) {', '});\n  $(\'online-rematch\').onclick')
     .replace('online = ububallOnline({', 'const onlineCallbacks = ({') + '});';
   const code =
-    section('function impactFor(', 'function stepPostGoalFrame(') + '\n' +
+    __PLAYBACK_PROJ_SHIM__ + '\n' +
+    __PLAYBACK_DRIVER_SHIM__ + '\n' +
     section('let lastSaved = Promise.resolve(null);', 'const replayClock =') + '\n' +
     section('let guide = null;', 'function playFromHere() {') + '\n' +
-    section('const PRESENTATION_KEYS =', 'function onlineNames(s) {') + '\n' +
+    section('function playOnlineReplay() {', 'function onlineNames(s) {') + '\n' +
     onStateCode;
 
   const rosters = [
@@ -1428,7 +1433,7 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
     section('const CARD = {', 'async function openShare() {') + '\n' +
     section('$(\'export-close\').onclick =', '// Guides, remembered on this device') + '\n' +
     section('let guide = null;', '// Play from here:') + '\n' +
-    section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+    __PLAYBACK_PROJ_SHIM__;
 
   const ubus = Array.from({ length: 6 }, (_, i) => {
     const dna = ubu.toCode(ubu.randomDNA());
@@ -2260,7 +2265,7 @@ test('ububall.js shares ububall-presentation.js without duplicating effect imple
   }
 
   // Verify no existing page or script links to /effects or effects.html
-  for (const rel of ['web/index.html', 'web/demo.html', 'web/voice.html', 'web/ububall.html', 'web/site-header.js', 'web/app.js', 'web/ububall.js', 'web/site.js']) {
+  for (const rel of ['web/index.html', 'web/demo.html', 'web/voice.html', 'web/ububall.html', 'web/site-header.js', 'web/app.js', 'web/ububall.js', 'web/ububall-playback.js', 'web/ububall-stats.js', 'web/site.js']) {
     const content = fs.readFileSync(path.resolve(__dirname, '..', rel), 'utf8');
     assert.equal(/\/effects(\.html)?\b/.test(content), false, `${rel} must not link to /effects`);
   }
@@ -2560,7 +2565,7 @@ test('D4-01, D4-03, D4-06: replay entries preserve keys & super mastery on takeo
     section('let guide = null;', "$('replay-take-over').onclick = playFromHere;") + '\n' +
     section('function resolveEquippedSuper(entry, slotIndex = 0) {', 'const POSITIONS = [') + '\n' +
     section('  const onGuestTeam =', '  async function adoptAccountTeam()') + '\n' +
-    section('const PRESENTATION_KEYS =', 'function playOnlineReplay() {');
+    __PLAYBACK_PROJ_SHIM__;
 
   let newMatchCalls = 0;
   const classes = new Set();
@@ -2730,10 +2735,11 @@ test('D4-05, D4-08, D4-01: online onState preserves local roster, prevents mid-r
   const onStateCode = section('function onlineNames(s) {', "});\n  $('online-rematch').onclick")
     .replace('online = ububallOnline({', 'const onlineCallbacks = ({') + '});';
   const code =
-    section('function impactFor(', 'function stepPostGoalFrame(') + '\n' +
+    __PLAYBACK_PROJ_SHIM__ + '\n' +
+    __PLAYBACK_DRIVER_SHIM__ + '\n' +
     section('let lastSaved = Promise.resolve(null);', 'const replayClock =') + '\n' +
     section('let guide = null;', 'function playFromHere() {') + '\n' +
-    section('const PRESENTATION_KEYS =', 'function onlineNames(s) {') + '\n' +
+    section('function playOnlineReplay() {', 'function onlineNames(s) {') + '\n' +
     onStateCode;
 
   const rosters = [
@@ -3084,13 +3090,16 @@ test('D4-11, D4-16, D4-17, D4-18, D4-20, D2-10, D4-02: UI icon/grid rules, clear
   const P = require('../shared/ububall-physics.js');
   const ububallMatch = require('../shared/ububall-match.js');
   const presSrc = fs.readFileSync(require.resolve('../web/ububall-presentation.js'), 'utf8');
+  const playbackSrc = fs.readFileSync(require.resolve('../web/ububall-playback.js'), 'utf8');
+  const statsSrc = fs.readFileSync(require.resolve('../web/ububall-stats.js'), 'utf8');
   const cssSrc = fs.readFileSync(require.resolve('../web/ububall.css'), 'utf8');
 
-  // 1. D4-11: Zero emoji/text-arrow icons in ububall.js and ububall-presentation.js
-  assert.equal(source.includes('💫'), false, 'ububall.js has no 💫 emoji icon');
-  assert.equal(presSrc.includes('💫'), false, 'ububall-presentation.js has no 💫 emoji icon');
-  assert.equal(source.includes("'→'"), false, 'ububall.js has no raw → text icon');
-  assert.match(source, /gameUi\.icon\('arrow-narrow-right'\)/, 'stats event log uses Tabler arrow-narrow-right icon');
+  // 1. D4-11: Zero emoji/text-arrow icons across ububall.js and extracted modules
+  for (const [name, txt] of [['ububall.js', source], ['ububall-presentation.js', presSrc], ['ububall-playback.js', playbackSrc], ['ububall-stats.js', statsSrc]]) {
+    assert.equal(txt.includes('💫'), false, `${name} has no 💫 emoji icon`);
+    assert.equal(txt.includes("'→'"), false, `${name} has no raw → text icon`);
+  }
+  assert.match(statsSrc, /gameUi\.icon\('arrow-narrow-right'\)/, 'stats event log uses Tabler arrow-narrow-right icon');
 
   // 2. D4-11, D4-16, D4-20: CSS rules verified
   assert.match(cssSrc, /\.roster-grid\s*\{\s*grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(max\(7rem,\s*calc\(\(100%\s*-\s*1\.625rem\)\s*\/\s*4\)\),\s*1fr\)\)/, '.roster-grid caps choices at <= 4 per row');

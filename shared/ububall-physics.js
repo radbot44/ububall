@@ -2,7 +2,7 @@
 (function (root) {
   // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
   // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-  const VERSION = 25;
+  const VERSION = 26;
   const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
   const DT = 1 / 240, BASE_LAUNCH_SPEED = 720;
   const IRON_COOLDOWN_TICKS = 48; // ~200 ms at 240 Hz DT: cooldown after an Iron Save
@@ -477,6 +477,10 @@
       onSuper?.('sticky', 'impact', player, ball);
       // An opponent's Sticky smothers the ball; a teammate's keeps it as hot as it was.
       if (!own) { ball.onFire = false; ball.fireTicks = 0; ball.pace = 0; }
+      ball.strikerPower = player.power || 1;
+      ball.strikerTeam = player.team;
+      ball.strikerSlot = player.slot ?? -1;
+      ball.curveMult = player.curveMult ?? 1;
       const ox = ball === b ? dx : -dx, oy = ball === b ? dy : -dy, od = d || 1;
       const targetDist = player.radius + ball.radius;
       ball.stickOffset = { x: (ox / od) * targetDist, y: (oy / od) * targetDist };
