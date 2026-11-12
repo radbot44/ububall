@@ -210,6 +210,8 @@ test('existing pack inventory upgrades without replacement and hints disclose on
   const special = Buffer.alloc(128, 255).toString('base64url');
   mint.exec('UPDATE inventory SET dna=? WHERE quintile=5', special);
   const before = mint.exec('SELECT id, serial, dna, pack_slot, quintile FROM inventory ORDER BY id');
+  // This fixture models a pre-upgrade database, before the batch-aware offer index existed.
+  storage.exec('DROP INDEX IF EXISTS inventory_offer_lookup');
   storage.exec('ALTER TABLE inventory DROP COLUMN batch');
   mint = new Mint(storage, f.options);
   assert.deepEqual(mint.exec('SELECT id, serial, dna, pack_slot, quintile FROM inventory ORDER BY id'), before);
