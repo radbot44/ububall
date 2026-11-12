@@ -2935,7 +2935,7 @@
           const wSrc = isKoWarped ? koActive : fwActive;
           const wp = 1 - Math.max(0, wSrc.life / wSrc.duration);
           const env = (1 - wp) * Math.cos(wp * Math.PI * 2.2);
-          const amt = env * (isKoWarped ? (koActive.targetIdx === i ? 0.16 : 0.11) : 0.13);
+          const amt = env * (isKoWarped ? (koActive.targetIdx === i ? 0.08 : 0.055) : 0.065);
           ubuScaleX = 1 - amt;
           ubuScaleY = 1 + amt;
           ubuWarpAngle = Math.atan2(wSrc.ny || 0, wSrc.nx || 1);
@@ -3175,74 +3175,75 @@
             mctx.clearRect(0, 0, pw, ph);
             mctx.drawImage(view.canvas, rx * sx, ry * sy, pw, ph, 0, 0, pw, ph);
 
-            // 1. Thermal depth-lens magnification
-            const lensR = mirageR * (isImpact ? 0.38 + timeVal * 0.48 : 0.65);
-            view.ctx.save();
-            view.ctx.beginPath();
-            view.ctx.arc(cx, cy, lensR, 0, Math.PI * 2);
-            view.ctx.clip();
-            const lensZoom = 1 + (isImpact ? 0.085 * strength * Math.cos(timeVal * Math.PI * 1.5) : 0.040 * strength);
-            view.ctx.translate(cx, cy);
-            view.ctx.scale(lensZoom, lensZoom);
-            view.ctx.translate(-cx, -cy);
-            view.ctx.drawImage(mc, 0, 0, pw, ph, rx, ry, rw, rh);
-            view.ctx.restore();
+            const traceBulbousLobe = (ctx, bx, by, br, t, seed) => {
+              ctx.beginPath();
+              const steps = 16;
+              for (let i = 0; i <= steps; i++) {
+                const a = (i / steps) * Math.PI * 2;
+                const undulation = 0.18 * Math.sin(a * 3 + t * 4.8 + seed * 1.7)
+                                 + 0.10 * Math.cos(a * 2 - t * 3.4 + seed * 2.3);
+                const r = br * (1 + undulation);
+                const px = bx + Math.cos(a) * r;
+                const py = by + Math.sin(a) * r;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+              }
+              ctx.closePath();
+            };
 
-            // 2. Wavy convective heat-mirage slice refraction
-            const slices = isImpact ? 14 : 9, sliceH = rh / slices;
+            // Confine all heat distortion strictly within mirageR
             view.ctx.save();
             view.ctx.beginPath();
             view.ctx.arc(cx, cy, mirageR, 0, Math.PI * 2);
             view.ctx.clip();
-            for (let s = 0; s < slices; s++) {
-              const y0 = ry + s * sliceH;
-              const u = ((y0 + sliceH * 0.5) - cy) / mirageR;
-              const env = Math.max(0, 1 - u * u) * strength;
-              if (env <= 0.01) continue;
-              const wave = isImpact ? s * 0.95 - timeVal * 24 : s * 1.1 + timeVal * 12;
-              const maxDx = isImpact ? 4.6 : 2.3;
-              const maxDy = isImpact ? 2.4 : 1.2;
-              const dx = (Math.sin(wave) * maxDx + Math.cos(s * 1.7 + timeVal * 18) * (maxDx * 0.45)) * env;
-              const dy = Math.cos(wave * 0.85) * maxDy * env;
-              const sy0 = Math.max(0, (s * sliceH) * sy);
-              const sh = Math.min(ph - sy0, (sliceH + 0.8) * sy);
-              if (sh > 0) {
-                view.ctx.drawImage(mc, 0, sy0, pw, sh, rx + dx, y0 + dy, rw, sliceH + 0.8);
-              }
+
+            // 1. Central convective plume core lens
+            const coreR = mirageR * (isImpact ? 0.42 + timeVal * 0.44 : 0.65);
+            const coreZoom = 1 + (isImpact ? 0.085 * strength * Math.cos(timeVal * Math.PI * 1.5) : 0.045 * strength);
+            const coreUpdraft = isImpact ? 0 : -1.8 * strength * Math.sin(timeVal * 5.5);
+            view.ctx.save();
+            traceBulbousLobe(view.ctx, cx, cy, coreR, timeVal, 0);
+            view.ctx.clip();
+            view.ctx.translate(cx, cy + coreUpdraft);
+            view.ctx.scale(coreZoom, coreZoom);
+            view.ctx.translate(-cx, -cy);
+            view.ctx.globalAlpha = 0.75;
+            view.ctx.drawImage(mc, 0, 0, pw, ph, rx, ry, rw, rh);
+            view.ctx.restore();
+
+            // 2. Swirling bulbous convective eddies / thermal bubbles
+            const numLobes = isImpact ? 6 : 5;
+            for (let k = 0; k < numLobes; k++) {
+              const swirlSpeed = isImpact ? 12 : 6.5;
+              const baseAngle = (k / numLobes) * Math.PI * 2;
+              const orbitAngle = baseAngle + timeVal * swirlSpeed * (k % 2 === 0 ? 1.0 : 0.82);
+              const orbitR = mirageR * (0.34 + 0.24 * Math.sin(timeVal * 5.2 + k * 1.8));
+              const updraft = isImpact ? 0 : (Math.sin(timeVal * 6.5 + k * 2.0) * 0.20 - 0.10) * mirageR;
+              const bx = cx + Math.cos(orbitAngle) * orbitR;
+              const by = cy + Math.sin(orbitAngle) * orbitR * 0.86 + updraft;
+              const br = mirageR * (isImpact ? 0.36 + 0.14 * Math.cos(timeVal * 7 + k) : 0.42 + 0.12 * Math.sin(timeVal * 4.5 + k));
+
+              const lobeZoom = 1 + (isImpact ? 0.065 : 0.038) * strength * (0.85 + 0.35 * Math.sin(timeVal * 6.8 + k * 1.5));
+              const swirlDir = k % 2 === 0 ? 1 : -1;
+              const tanAngle = Math.atan2(by - cy, bx - cx) + (Math.PI / 2) * swirlDir;
+              const drift = (isImpact ? 3.8 : 2.2) * strength;
+              const dx = Math.cos(tanAngle) * drift;
+              const dy = Math.sin(tanAngle) * drift - (isImpact ? 0 : 1.2 * strength);
+
+              view.ctx.save();
+              traceBulbousLobe(view.ctx, bx, by, br, timeVal, k + 1);
+              view.ctx.clip();
+              view.ctx.translate(bx + dx, by + dy);
+              view.ctx.scale(lobeZoom, lobeZoom);
+              view.ctx.translate(-bx, -by);
+              view.ctx.globalAlpha = 0.65;
+              view.ctx.drawImage(mc, 0, 0, pw, ph, rx, ry, rw, rh);
+              view.ctx.restore();
             }
+
             view.ctx.restore();
           }
         }
-
-        // 3. Wavering refractive caustic filaments
-        view.ctx.save();
-        view.ctx.beginPath();
-        view.ctx.arc(cx, cy, mirageR, 0, Math.PI * 2);
-        view.ctx.clip();
-        view.ctx.lineCap = 'round';
-        const numFilaments = isImpact ? 5 : 3;
-        for (let k = 0; k < numFilaments; k++) {
-          const baseOff = (k - (numFilaments - 1) / 2) * (mirageR * (isImpact ? 0.34 : 0.48)) - (isImpact ? timeVal * 14 : Math.sin(timeVal * 8 + k) * 6);
-          const yBand = cy + baseOff;
-          const u = (yBand - cy) / mirageR;
-          const bandEnv = Math.max(0, 1 - u * u) * strength;
-          if (bandEnv <= 0.02) continue;
-          const halfSpan = Math.sqrt(Math.max(0, 1 - u * u)) * mirageR * 0.82;
-          view.ctx.beginPath();
-          const steps = isImpact ? 16 : 10;
-          for (let j = 0; j <= steps; j++) {
-            const frac = j / steps;
-            const px = cx - halfSpan + frac * halfSpan * 2;
-            const edgeFade = Math.sin(frac * Math.PI);
-            const py = yBand + Math.sin(j * 0.85 - (isImpact ? timeVal * 26 : timeVal * 14) + k * 1.4) * (isImpact ? 3.6 : 1.8) * bandEnv * edgeFade;
-            if (j === 0) view.ctx.moveTo(px, py); else view.ctx.lineTo(px, py);
-          }
-          view.ctx.lineWidth = (isImpact ? 2.2 : 1.4) * bandEnv;
-          view.ctx.strokeStyle = k % 2 === 0 ? '#fff6d6' : '#ff9e3d';
-          view.ctx.globalAlpha = (k % 2 === 0 ? 0.24 : 0.18) * bandEnv;
-          view.ctx.stroke();
-        }
-        view.ctx.restore();
       }
 
       if (fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion()) {

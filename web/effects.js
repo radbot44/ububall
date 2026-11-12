@@ -530,7 +530,7 @@
           id: 'fireball-burn',
           title: 'Ball Heat Stages, Ignition Burst, Ice Burn & Meteor Bank',
           when: 'Ball pace crosses 540 (orange) -> 720 (red + sparks) -> 800 (red-hot) -> 840+ on fire (`sparkBall` ignition burst, `burnIce`, `r.meteor` board scorch).',
-          visual: 'Mid-flight ignition shockwave rings, flash, ember streaks, ignition whoof & heat mirage at 60 heat ticks; glowing fireball with continuous shimmering convective heat haze (pauses with freeze frames), additive flames, scorched ice burn ribbon, and Meteor Bank impact hotspot glow, rink-clipped circular black ash char poof, heat-mirage warp & tangential ember streaks.',
+          visual: 'Mid-flight ignition shockwave rings, flash, ember streaks, ignition whoof & bulbous heat devil at 60 heat ticks; glowing fireball with continuous shimmering bulbous convective heat haze (pauses with freeze frames), additive flames, scorched ice burn ribbon, and Meteor Bank impact hotspot glow, rink-clipped circular black ash char poof, bulbous heat-devil warp & tangential ember streaks.',
           soundLabel: 'Play fire sizzle (1.5s)',
           variants: [
             { id: 'fire', label: 'Full Fireball + Meteor Bank' },
@@ -567,9 +567,9 @@
         },
         {
           id: 'fireball-plow',
-          title: 'Flaming Ball Impacts: Warp, Heat Mirage, Plow & Hot Shot',
+          title: 'Flaming Ball Impacts: Warp, Heat Devil, Plow & Hot Shot',
           when: 'Flaming ball strikes a skater, boards, or defender (`HIT_STOP.fire = 35ms`, `fx.fireWarp`, `plow = true`, `HOT_DRIVE`, `playFireImpact`).',
-          visual: '35ms minor hit-stop on ubu contact, damped squash-and-stretch warp on both the fireball and colliding ubu, contact glow + rising refractive heat-mirage depth distortion, 15-particle flame scatter, and surging resonant flaming woosh.',
+          visual: '35ms minor hit-stop on ubu contact, damped squash-and-stretch warp (reduced 50% magnitude on ubus), contact glow + rising refractive bulbous heat-devil distortion, 15-particle flame scatter, and surging resonant flaming woosh.',
           soundLabel: 'Play flaming woosh',
           variants: [
             { id: 'plow', label: 'Overpower Defender (Plow)' },
