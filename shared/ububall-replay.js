@@ -14,7 +14,7 @@
     'meter', 'meterTick', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'ironCooldownTicks', 'pace', 'strikerPower', 'strikerTeam', 'strikerSlot'];
   const POSITIVE = new Set(['radius', 'mass', 'maxSpin', 'sizeMult', 'baseMass', 'baseRadius', 'baseReach', 'baseStrength', 'baseStability', 'baseBounciness', 'impulse', 'curveMult', 'bounciness', 'power', 'reach', 'strength', 'stability', 'strikerPower']);
   const NONNEGATIVE = new Set(['friction', 'baseFriction', 'grip', 'curveFactor', 'meter', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'ironCooldownTicks', 'pace']);
-  const FLAGS = ['superArm', 'guarding', 'ironGuard', 'usedSuperThisTurn', 'superHit', 'superRefunded', 'openingShot', 'spinStruck', 'snapStruck', 'shockwaveFired', 'carded', 'stunned', 'stunnedNext', 'onFire', 'holding'];
+  const FLAGS = ['superArm', 'guarding', 'ironGuard', 'usedSuperThisTurn', 'superHit', 'superRefunded', 'openingShot', 'shockwaveFired', 'carded', 'stunned', 'stunnedNext', 'onFire', 'holding'];
   const BODY = [...NUMBERS, ...FLAGS, 'superActive', 'equippedSuper', 'stickOffset'];
   const REQUIRED = ['x', 'y', 'vx', 'vy', 'omega', 'radius', 'mass', 'team'];
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
@@ -284,7 +284,7 @@
       const sim = restore(t.bodies), ball = sim[6], fouls = { ...t.fouls, crease: [...t.fouls.crease] };
       let contact;
       const fx = {
-        collide(a, b, speed, impulse, plow, iron, checker) {
+        collide({ a, b, speed, plow, checker }) {
           if (checker) add('Check', sim.indexOf(checker), where(checker), { target: sim.indexOf(checker === a ? b : a) });
           const player = !plow && M.toucher(a, b, speed);
           if (!player) return;

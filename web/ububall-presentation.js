@@ -2420,14 +2420,15 @@
       }
     }
 
-    function handleCollision(a, b, speed, impulse, plow = false, iron = false, snapped = false, tangentImpulse = 0) {
+    function handleCollision(contact) {
+      const { a, b, speed = 0, impulse = 0, plow = false, iron = false, snapped = false, spinStruck = false, tangentImpulse = 0 } = contact;
       if (iron) {
         if (a?.guarding) a.ironGuard = true;
         if (b?.guarding) b.ironGuard = true;
       }
       const isBall = a.team === -1 || b.team === -1;
-      const isSnap = isBall && Boolean(snapped || a?.snapStruck || b?.snapStruck);
-      const isSpinStrike = isBall && Boolean(a?.spinStruck || b?.spinStruck);
+      const isSnap = isBall && Boolean(snapped);
+      const isSpinStrike = isBall && Boolean(spinStruck);
       const isHipClip = !isBall && a.team !== b.team && tangentImpulse >= 55 && tangentImpulse >= speed * 0.22;
       const isCheck = !isBall && a.team !== b.team && !isHipClip && speed >= 65;
       const spinBoost = !isBall && a.team !== b.team ? (tangentImpulse || 0) * 0.45 : 0;

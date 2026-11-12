@@ -25,7 +25,7 @@ const hook = [
 '        state: { version: ububallMatch.VERSION, mode: fieldView.mode,',
 '          bodies: structuredClone(simBodies), stats: structuredClone(stats),',
 '          scores: [...scores], turn, clock: matchTicks, roundTurns,',
-'          ...ububallMatch.newPlay(play), fouls: structuredClone(fouls) },',
+'          play: ububallMatch.newPlay(play), fouls: structuredClone(fouls) },',
 '        playerNames: fieldView.entries.slice(0, 3).map(e => e.model.parts.fullName) };',
 '    },',
 '    choose(next) {',

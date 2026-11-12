@@ -1,7 +1,7 @@
 /* Shared match rules; callers supply authenticated, server-derived roster data. */
 (function(root) {
   'use strict';
-  const VERSION = 4;
+  const VERSION = 5;
   // Classic, Pulse and Blitz are independent rules, joined in this order; 'standard' has none.
   const RULES = ['classic', 'pulse', 'blitz'];
   const MODES = Array.from({ length: 8 }, (_, n) => RULES.filter((r, i) => n >> i & 1).join('-') || 'standard');
@@ -222,8 +222,11 @@
   // Per-tick scratch and the tick in progress, which the step callbacks below read, so neither is
   // rebuilt every tick. A nested tick would take fresh scratch and restore the outer tick after.
   let spareTick = null, activeTick = null;
-  function tickTouch(a, b, speed, impulse, plow = false, iron = false, checker = null, snapped = false, tangentImpulse = 0) {
+  function tickTouch(contact) {
+    const { a, b, speed, impulse, plow, iron, checker, snapped, spinStruck } = contact;
     const t = activeTick, player = toucher(a, b, speed);
+    if (snapped) t.snapped = true;
+    if (spinStruck) t.spinStruck = true;
     if ((a.team === -1 || b.team === -1) && speed >= 15 && (plow || t.preOnFire || (t.ball?.onFire && !t.cannon))) {
       t.fireHit = true;
     }
@@ -250,7 +253,7 @@
       const ci = t.bodies.indexOf(checker);
       if (ci >= 0) t.tally.checks[ci]++;
     }
-    t.fx.collide?.(a, b, speed, impulse, plow, iron, checker, snapped, tangentImpulse);
+    t.fx.collide?.(contact);
   }
   function tickWall(body, velocity, type, nx, ny, rimmed = false) {
     const t = activeTick;
@@ -318,7 +321,7 @@
     const { motion, touched } = t, ball = bodies[6]?.team === -1 ? bodies[6] : bodies.find(b => b.team === -1);
     touched.clear(); t.bumped.clear(); t.wallBumped.clear(); t.checked.length = 0; t.deferredPasses.length = 0;
     t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx; t.tally = tally;
-    t.cannon = false; t.fireHit = false; t.postRing = false; t.postSide = -1; t.postX = 0; t.postY = 0;
+    t.cannon = false; t.fireHit = false; t.snapped = false; t.spinStruck = false; t.postRing = false; t.postSide = -1; t.postX = 0; t.postY = 0;
     t.incomingCredit = null; t.passSender = -1; t.stickyGrab = null; t.magnetTeam = -1;
     t.preBallX = ball ? ball.x : 0; t.preBallY = ball ? ball.y : 0;
     t.preBallSpeed = ball ? Math.hypot(ball.vx, ball.vy) : 0;
@@ -515,9 +518,8 @@
     // A Cannonball hit always counts as a big shot.
     const speed = (tally && touched.size) ? Math.hypot(ball.vx, ball.vy) : 0;
     const incomingBig = play.big;
-    const big = cannon || (touched.size ? bigShot(P, before, touched, ball) : false), struck = Boolean(ball.spinStruck);
-    const snapped = Boolean(ball?.snapStruck);
-    if (snapped) ball.snapStruck = false;
+    const big = cannon || (touched.size ? bigShot(P, before, touched, ball) : false), struck = t.spinStruck;
+    const snapped = t.snapped;
     const hasIron = tickSaves.some(s => s.iron);
     let stop = effects ? Math.max(hasIron ? HIT_STOP.iron : 0, hitStop(P, bodies, ball, big, struck, tickSaves.some(save => !save.own), incomingBig)) : 0;
     if (effects) {
@@ -551,7 +553,6 @@
     recordSaves(bodies, play, tally, tickSaves, incomingBig, (_save, shooter, _big, shotType) => {
       if (shotType) fx.shot?.(shooter, shotType);
     });
-    if (struck) ball.spinStruck = false;
     t.bodies = t.play = t.ball = t.fx = t.tally = null; spareTick = t;
     return { goal, saves: tickSaves, struck, snapped, stop, big };
   }
@@ -643,7 +644,8 @@
     }
     for (const b of carded) {
       P.endSuper(b, bodies);
-      Object.assign(b, P.spawn(b.team, b.slot), { vx: 0, vy: 0, omega: 0, meter: 0, daze: 0, guarding: false, superArm: false, stunned: true, carded: true });
+      Object.assign(b, P.spawn(b.team, b.slot), { vx: 0, vy: 0, omega: 0, meter: 0, daze: 0, guarding: false, stunned: true, carded: true });
+      if (b.superArm !== undefined) b.superArm = false;
     }
     if (fouls.faceoff) {
       const holding = P.holder(bodies);
@@ -651,8 +653,9 @@
       // Centre ice, or the nearest clear spot along the centre line.
       const clear = y => ubus.every(b => b.carded || Math.hypot(b.x - 500, b.y - y) >= b.radius + ball.radius);
       const y = [300, 240, 360, 180, 420, 120, 480].find(clear) ?? 300;
-      Object.assign(ball, { x: 500, y, vx: 0, vy: 0, omega: 0, stickOffset: null, stuckTicks: 0,
-        fireTicks: 0, onFire: false, pace: 0, strikerPower: 1, strikerTeam: -1, strikerSlot: -1, snapStruck: false });
+      Object.assign(ball, { x: 500, y, vx: 0, vy: 0, omega: 0, stickOffset: null, stuckTicks: 0 });
+      P.clearHeat(ball);
+      P.clearStriker(ball);
     }
     fouls.cards = ubus.flatMap((b, i) => carded.has(b) ? [i] : []);
   }
@@ -667,7 +670,7 @@
       if (b.stunnedNext) {
         if (b.superActive) P.endSuper(b, bodies);
         b.stunned = true;
-        delete b.stunnedNext;
+        b.stunnedNext = false;
       }
       // A card lasts the turn after it is given.
       b.carded = false;
@@ -712,11 +715,11 @@
     for (let i = 0; i < 6; i++) {
       const b = bodies[i];
       if (plans[i].superArm && (classic || b.stunned || b.meter < 100 || !b.equippedSuper)) throw new Error('Super unavailable.');
-      b.superArm = false;
+      if (b.superArm !== undefined) b.superArm = false;
     }
     const initialBodies = effects ? structuredClone(bodies) : null;
     // The play persists until a goal, so a Pulse goal credits a touch from an earlier turn.
-    const play = newPlay(state);
+    const play = newPlay(state.play);
     P.startTurn(bodies, plans);
     // The match clock counts simulated ticks across turns for meter cooldowns.
     const clock = state.clock || 0;
@@ -725,9 +728,9 @@
     const tally = fastSearch ? null : cloneTally(state.tally);
     const skipSaves = fastSearch && classic;
     const tickFx = {
-      collide: (a, b, speed, impulse, plow, iron, checker, snapped, tangentImpulse) => {
-        if (!plow) contactMeter(P, bodies, next.stats, a, b, speed, clock + currentTick, classic);
-        watch?.collide?.(a, b, speed, impulse, plow, iron, checker, snapped, tangentImpulse);
+      collide: contact => {
+        if (!contact.plow) contactMeter(P, bodies, next.stats, contact.a, contact.b, contact.speed, clock + currentTick, classic);
+        watch?.collide?.(contact);
       },
       wall: watch?.wall
     };
@@ -762,7 +765,8 @@
     }
     next.clock = clock + ticks;
     // A goal or a corner reset starts a fresh play.
-    Object.assign(next, goal === null && !next.fouls.faceoff ? play : newPlay(), { tally });
+    next.play = goal === null && !next.fouls.faceoff ? play : newPlay();
+    next.tally = tally;
     return { state: next, replay: { version: VERSION, turn: state.turn, plans, ticks, goal, scorer: call.scorer, assist: call.assist,
       label: call.label, saves: saved, struck, stops, initialBodies } };
   }

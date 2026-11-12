@@ -1433,7 +1433,7 @@ function createReplayExportHarness({ seat = 0, mode = 'standard' } = {}) {
     'function updatePopups(dt, popups) { ububallPresentation.updatePopups(dt, popups, reducedMotion.matches); }\n' +
     section('function kickoff(isNewMatch = false) {', 'let activeStatsContext') + '\n' +
     section('function creditSave(body, own, iron = false) {', 'function flushMeters() {') + '\n' +
-    section('function replayEvents(turn, tick, sim) {', 'const replayStore = (() => {') + '\n' +
+    section('let replayTickStruck = false;', 'const replayStore = (() => {') + '\n' +
     section('let guide = null;', 'const theaterController = createReplayTheater({') + '\n' +
     __PLAYBACK_PROJ_SHIM__ + '\n' +
     __THEATER_SHIM__;
@@ -2113,7 +2113,7 @@ test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim
   Object.assign(bodies[6], { x: 500, y: 300, vx: 650, vy: 0 });
   const pBeforeSnap = fx.particles.length;
   const wBeforeSnap = fx.shockwaves.length;
-  env.handleCollision(bodies[4], bodies[6], 340, 500, false, false, true, 0); // Away team (team 1) Snap
+  env.handleCollision({ a: bodies[4], b: bodies[6], speed: 340, impulse: 500, plow: false, iron: false, snapped: true, spinStruck: false, tangentImpulse: 0 }); // Away team (team 1) Snap
   assert.equal(calls.ball.at(-1)?.snap, true, "Snap passes snap: true to playBallHit");
   assert.equal(fx.shockwaves.length, wBeforeSnap + 2, "Snap emits twin team-colored shockwave rings");
   assert.equal(fx.shockwaves.at(-1).team, 1, "Snap shockwave uses redirecting skater team color");
@@ -2126,15 +2126,14 @@ test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim
 
   // 1b. Spin strike collision triggers playSpinStrike whip sound
   now += 200;
-  Object.assign(bodies[6], { x: 460, y: 300, vx: 620, vy: -80, omega: -16, spinStruck: true });
-  env.handleCollision(bodies[0], bodies[6], 360, 480, false, false, false, 0);
-  bodies[6].spinStruck = false;
+  Object.assign(bodies[6], { x: 460, y: 300, vx: 620, vy: -80, omega: -16 });
+  env.handleCollision({ a: bodies[0], b: bodies[6], speed: 360, impulse: 480, plow: false, iron: false, snapped: false, spinStruck: true, tangentImpulse: 0 });
   assert.equal(calls.whip.length, 1, "Spin strike triggers playSpinStrike whip sound");
 
   // 1c. Flaming ball impacts trigger playFireImpact on skater hit and flaming wall bounce (but not on Cannonball ignition tick)
   now += 200;
   Object.assign(bodies[6], { onFire: true, fireTicks: 60, vx: 880, vy: 0 });
-  env.handleCollision(bodies[3], bodies[6], 520, 600, true, false, false, 0);
+  env.handleCollision({ a: bodies[3], b: bodies[6], speed: 520, impulse: 600, plow: true, iron: false, snapped: false, spinStruck: false, tangentImpulse: 0 });
   assert.equal(calls.fire.length, 1, "Flaming ball plow triggers playFireImpact");
   now += 200;
   env.handleWall(bodies[6], 420, "wall", 0, -1, false);
@@ -2205,7 +2204,7 @@ test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim
   Object.assign(bodies[2], { x: 400, y: 300, vx: 450, vy: 0 });
   Object.assign(bodies[3], { x: 440, y: 330, vx: -100, vy: 0 });
   const cBefore = calls.collision.length;
-  env.handleCollision(bodies[2], bodies[3], 50, 120, false, false, false, 480);
+  env.handleCollision({ a: bodies[2], b: bodies[3], speed: 50, impulse: 120, plow: false, iron: false, snapped: false, spinStruck: false, tangentImpulse: 480 });
   assert.equal(calls.collision.length, cBefore + 1);
   assert.ok(calls.collision.at(-1).volume > 0.35, "Hip Clip tangential spin impulse scales check audio volume");
 
@@ -2384,7 +2383,7 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
   });
 
   const liveFx = {
-    collide: (a, b, spd, imp, plow, iron, checker, snapped, tang) => presenter.handleCollision(a, b, spd, imp, plow, iron, snapped, tang),
+    collide: contact => presenter.handleCollision(contact),
     wall: (b, v, wt, nx, ny, rimmed) => presenter.handleWall(b, v, wt, nx, ny, rimmed),
     shockwave: (srcBody, r, type) => presenter.handleShockwave(srcBody, r, type),
     super: (k, stg, b, tgt) => presenter.handleSuper(k, stg, b, tgt)
@@ -3178,9 +3177,10 @@ test('D4-11, D4-16, D4-17, D4-18, D4-20, D2-10, D4-02: UI icon/grid rules, clear
     env.prepareCPU();
     assert.equal(receivedState.clock, 480, 'D2-10: prepareCPU passes matchTicks as clock');
     assert.equal(receivedState.roundTurns, 2, 'D2-10: prepareCPU passes roundTurns');
-    assert.equal(receivedState.age, 42, 'D2-10: prepareCPU spreads play state');
-    assert.equal(receivedState.last, 1);
-    assert.equal(receivedState.banked, true);
+    assert.equal(receivedState.play.age, 42, 'D2-10 & A6: prepareCPU nests play state under state.play');
+    assert.equal(receivedState.play.last, 1);
+    assert.equal(receivedState.play.banked, true);
+    assert.equal(receivedState.age, undefined);
   }
   assert.match(source, /window\.setUbuScreenGuard/, 'D4-02: ububall.js registers window.setUbuScreenGuard');
   assert.match(source, /cpuClient\.dispose\?\.\(\)/, 'D2-10: ububall.js disposes cpuClient worker');

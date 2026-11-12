@@ -135,6 +135,7 @@
         vb.ironGuard = Boolean(cb.ironGuard);
         vb.superArm = cb.superArm !== undefined ? Boolean(cb.superArm) : Boolean(armed);
         vb.stunned = Boolean(cb.stunned || cb.stunnedNext);
+        if ('stunnedNext' in vb) delete vb.stunnedNext;
         vb.carded = Boolean(cb.carded);
         vb.holding = Boolean(cb.holding);
         vb.usedSuperThisTurn = Boolean(cb.usedSuperThisTurn);
@@ -172,8 +173,6 @@
         vb.strikerPower = cb.strikerPower;
         vb.strikerTeam = cb.strikerTeam === undefined || cb.strikerTeam < 0 ? -1 : (seat ? 1 - cb.strikerTeam : cb.strikerTeam);
         vb.openingShot = Boolean(cb.openingShot);
-        vb.spinStruck = Boolean(cb.spinStruck);
-        vb.snapStruck = Boolean(cb.snapStruck);
       }
       return vb;
     }
@@ -301,18 +300,19 @@
         }
       }
 
-      let stepped = false;
+      let stepped = false, tickStruck = false;
+      const onHit = contact => {
+        if (contact?.spinStruck) tickStruck = true;
+        fx.hit?.(contact);
+      };
       while (replay.currentTick < targetTick) {
-        P.step(replay.simBodies, P.DT, fx.hit, fx.wall, fx.shock, fx.super);
+        tickStruck = false;
+        P.step(replay.simBodies, P.DT, onHit, fx.wall, fx.shock, fx.super);
         traceGuide(replay.simBodies);
         replay.currentTick++;
         stepped = true;
         ububallMatch.lapseFouls(P, replay.simBodies, simFouls);
-        const struck = Boolean(replay.simBodies[6]?.spinStruck) || Boolean(replay.struck?.includes(replay.currentTick));
-        if (replay.simBodies[6]) {
-          replay.simBodies[6].spinStruck = false;
-          replay.simBodies[6].snapStruck = false;
-        }
+        const struck = tickStruck || Boolean(replay.struck?.includes(replay.currentTick));
         const now = replay.currentTick;
         const saves = (replay.saves || []).filter(s => s.tick === now);
         // Hit-stop holds the replay clock back so the rest of the turn plays on after the pause.

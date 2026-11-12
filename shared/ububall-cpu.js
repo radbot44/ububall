@@ -600,7 +600,7 @@
       let toucher = null, touches = 0, boards = 0;
       const teammatesTouched = new Set();
       const watch = {
-        collide(a, b, speed) {
+        collide({ a, b, speed }) {
           const player = M.toucher(a, b, speed);
           if (player && player !== toucher) {
             toucher = player;

@@ -313,7 +313,7 @@ test('a quick start fields registry teams with their saved supers beside a guest
 
 function pulseState(mode) {
   const bodies=P.kickoff(); bodies.slice(0,6).forEach(b=>{M.applyStats(P,b,{},mode);b.meter=0;});
-  return {version:M.VERSION,mode,bodies,stats:[],scores:[0,0],turn:1};
+  return {version:M.VERSION,mode,bodies,stats:[],scores:[0,0],turn:1,play:M.newPlay()};
 }
 const idle=()=>({angle:0,power:0,spin:0,superArm:false,guard:false});
 test('Pulse turns stop after one second and carry momentum into the next turn', () => {
@@ -373,11 +373,11 @@ test('guard is explicit and brakes a moving ubu', () => {
   assert.equal(coasting[1].guarding,false); assert.equal(coasting[1].vx,300);
 });
 test('a Pulse goal credits the last toucher from an earlier turn', () => {
-  const state=pulseState('pulse'); state.lastTouch=[2,null];
+  const state=pulseState('pulse'); state.play.lastTouch=[2,null];
   Object.assign(state.bodies[6],{x:930,y:300,vx:300});
   const result=M.resolveTurn(P,state,Array.from({length:6},idle));
   assert.equal(result.replay.goal,0); assert.equal(result.replay.scorer,2);
-  assert.deepEqual(result.state.lastTouch,[null,null]);
+  assert.deepEqual(result.state.play.lastTouch,[null,null]);
 });
 test('goal replays re-simulate a chained Pulse play exactly and ease to half speed', () => {
   let state=pulseState('pulse'); state.bodies[3].y=520; state.bodies[4].y=500; Object.assign(state.bodies[6],{x:420,y:300});
@@ -432,15 +432,22 @@ test('turns earn no meter; conceding a goal earns the conceded bonus', () => {
 });
 
 // `extra` adds match state, such as who is responsible for the ball (`credit`).
+const PLAY_KEYS = new Set(Object.keys(M.newPlay()));
 function shotState(ball, place = {}, extra = {}) {
   const bodies=P.kickoff(); bodies.slice(0,6).forEach(b=>{P.applyStats(b);b.meter=0;});
   Object.assign(bodies[6],ball);
   for (const [i,at] of Object.entries(place)) Object.assign(bodies[i],at);
-  return {version:M.VERSION,mode:'standard',bodies,stats:[],scores:[0,0],turn:1,...extra};
+  const playIn = extra.play ? { ...extra.play } : {}, rest = {};
+  for (const [k, v] of Object.entries(extra)) {
+    if (k === 'play') continue;
+    if (PLAY_KEYS.has(k)) playIn[k] = v;
+    else rest[k] = v;
+  }
+  return {version:M.VERSION,mode:'standard',bodies,stats:[],scores:[0,0],turn:1,play:M.newPlay(playIn),...rest};
 }
 const still=()=>({angle:0,power:0,spin:0,superArm:false,guard:false});
 test('a goal on the first turn of a round is an ace and earns the scorer extra meter', () => {
-  const state=shotState({x:930,y:300,vx:300}); state.lastTouch=[2,null];
+  const state=shotState({x:930,y:300,vx:300}); state.play.lastTouch=[2,null];
   const ace=M.resolveTurn(P,state,Array.from({length:6},still));
   assert.equal(ace.replay.label,'ACE!'); assert.equal(ace.state.roundTurns,0);
   assert.ok(Math.abs(ace.state.bodies[2].meter-M.METER.ace*M.METER.rate)<1e-9);
@@ -537,7 +544,7 @@ test('a close-range spin strike is reported for its callout', () => {
   const moves=Array.from({length:6},still); moves[0]={angle:0,power:.6,spin:1,superArm:false,guard:false};
   const result=M.resolveTurn(P,state,moves);
   assert.equal(result.replay.struck.length,1);
-  assert.ok(result.state.bodies.every(b=>!b.spinStruck));
+  assert.ok(result.state.bodies.every(b=>!('spinStruck' in b)));
 });
 
 test('an assist goes to the teammate who passed to the scorer, unless an opponent touched it between', () => {
@@ -703,7 +710,7 @@ test('a carded ubu touches nothing, and a corner reset starts a fresh play', () 
   const state=shotState({x:90,y:90},{3:{x:120,y:75}},{fouls:{...M.newFouls(),corner:0,cornerTurns:2},lastTouch:[null,3],credit:{3:1}});
   const next=M.resolveTurn(P,state,Array.from({length:6},still)).state;
   assert.ok(next.fouls.faceoff); assert.deepEqual(next.fouls.cards,[3]);
-  assert.deepEqual(next.lastTouch,[null,null]); assert.deepEqual(next.credit,{});
+  assert.deepEqual(next.play.lastTouch,[null,null]); assert.deepEqual(next.play.credit,{});
 });
 
 test('deflections off defending ubus stay credited to attacker, topSpeed rejects passive hits, and fireball/one-timer calls trigger', () => {
@@ -833,8 +840,8 @@ test('opposing Iron Save awards defensive save statistics, save meter, and arms 
   assert.equal(result.state.tally.saves[3], 1, 'defensive save credited to defender');
   assert.equal(result.state.tally.bigSaves[3], 1, 'big save stat recorded');
   assert.ok(Math.abs(result.state.bodies[3].meter - (M.METER.ball + M.METER.save) * M.METER.rate) < 1e-9, 'defender receives both contact and save meter');
-  assert.ok(result.state.saved, 'play.saved is recorded');
-  assert.equal(result.state.saved.team, 1, 'play.saved team is defending team');
+  assert.ok(result.state.play.saved, 'play.saved is recorded');
+  assert.equal(result.state.play.saved.team, 1, 'play.saved team is defending team');
 
   // S2: midfield / off-target opposing Iron Guard quenches fireball & doubles Guard without awarding Save stats
   const midfield = shotState(
@@ -844,7 +851,7 @@ test('opposing Iron Save awards defensive save statistics, save meter, and arms 
   );
   let midIron = false;
   const midRes = M.resolveTurn(P, midfield, moves, {
-    watch: { collide: (_a, _b, _s, _i, _p, iron) => { if (iron) midIron = true; } }
+    watch: { collide: ({ iron }) => { if (iron) midIron = true; } }
   });
   assert.equal(midIron, true, 'midfield opposing Iron Guard still triggers iron contact');
   assert.equal(midRes.replay.saves.length, 0, 'midfield opposing Iron Guard outside SAVE.range scores no Save');
@@ -873,9 +880,9 @@ test('friendly Iron Save (trap) classifies as own save with no defensive stats o
   assert.equal(result.state.tally.saves[1], 0, 'no defensive save credited for friendly trap');
   assert.equal(result.state.tally.bigSaves[1], 0, 'no big save stat for friendly trap');
   assert.ok(Math.abs(result.state.bodies[1].meter - M.METER.ball * M.METER.rate) < 1e-9, 'friendly trap receives only contact meter, not save meter');
-  assert.equal(result.state.saved, null, 'friendly trap does not arm play.saved');
-  assert.equal(M.responsibleTeam(result.state.bodies, result.state.credit), 0, 'team 0 retained possession');
-  assert.equal(result.state.assist[0], 0, 'passer credited with assist');
+  assert.equal(result.state.play.saved, null, 'friendly trap does not arm play.saved');
+  assert.equal(M.responsibleTeam(result.state.bodies, result.state.play.credit), 0, 'team 0 retained possession');
+  assert.equal(result.state.play.assist[0], 0, 'passer credited with assist');
 });
 
 test('Iron Save ownership attribution survives strikerTeam change on contact', () => {
@@ -904,16 +911,19 @@ test('opposing Iron Save leads to REBOUND! callout on quick follow-up goal', () 
   const moves = Array.from({ length: 6 }, still);
   moves[3] = { ...still(), guard: true };
   const turn1 = M.resolveTurn(P, state, moves);
-  assert.ok(turn1.state.saved, 'play.saved was set by opposing iron save');
-  assert.equal(turn1.state.saved.team, 1);
+  assert.ok(turn1.state.play.saved, 'play.saved was set by opposing iron save');
+  assert.equal(turn1.state.play.saved.team, 1);
 
   const goalState = {
     ...turn1.state,
     bodies: structuredClone(turn1.state.bodies),
-    credit: { 0: 1 },
-    lastTouch: [0, null],
-    last: 0,
-    shotX: [900, null]
+    play: {
+      ...turn1.state.play,
+      credit: { 0: 1 },
+      lastTouch: [0, null],
+      last: 0,
+      shotX: [900, null]
+    }
   };
   Object.assign(goalState.bodies[6], { x: 930, y: 300, vx: 600, vy: 0 });
   const turn2 = M.resolveTurn(P, goalState, Array.from({ length: 6 }, still));
@@ -996,7 +1006,7 @@ test('Snap awards 60 ms hit-stop (100 ms when also a big shot), Post English rin
     moves[1] = { angle: 0, power: 0.45, spin: 0, superArm: false, guard: false }; // 324 px/s >= 140, < 576
     const res = M.resolveTurn(P, state, moves);
     assert.ok(res.replay.stops.some(s => s.ms === M.HIT_STOP.snap), `${mode} awards 60 ms Snap hit-stop`);
-    assert.equal(Boolean(res.state.bodies[6].snapStruck), false, `${mode} clears snapStruck`);
+    assert.equal('snapStruck' in res.state.bodies[6], false, `${mode} omits snapStruck on ball`);
   }
 
   // 2. Full-power Snap into nearby blocker (big shot + Snap) upgrades hit-stop to 100 ms (HIT_STOP.long)
@@ -1101,7 +1111,7 @@ test('opposing Magnet pull takes credit on velocity reversal, own goals carry nu
   state.bodies[3].equippedSuper = { ...P.SUPERS[4], bonusTicks: 0, bonusRefund: 0 };
   state.bodies[3].superActive = 'magnet';
   state.bodies[3].superTicks = 300;
-  const play = M.newPlay(state);
+  const play = M.newPlay(state.play);
   for (let t = 0; t < 35; t++) M.playTick(P, state.bodies, play, {}, null, true);
   assert.deepEqual(play.credit, { 3: 1 }, 'opposing Magnet reversing ball direction takes full credit');
   assert.equal(M.responsibleTeam(state.bodies, play.credit), 1, 'opposing Magnet takes responsibleTeam');
@@ -1113,7 +1123,7 @@ test('opposing Magnet pull takes credit on velocity reversal, own goals carry nu
   );
   selfMag.bodies[0].superActive = 'magnet';
   selfMag.bodies[0].superTicks = 300;
-  const selfPlay = M.newPlay(selfMag);
+  const selfPlay = M.newPlay(selfMag.play);
   M.playTick(P, selfMag.bodies, selfPlay, {}, null, true);
   assert.equal(selfPlay.assist[0], null, 'Magnet carrier pulling its own ball never sets self-assist');
 
@@ -1147,7 +1157,7 @@ test('goal-line Iron Save that still scores is discarded, curved shots preserve 
   Object.assign(b1[6], { x: 960, y: 298, vx: 0, vy: 600, onFire: true, fireTicks: P.FIRE_TICKS, pace: 600, strikerTeam: 0, strikerSlot: 0 });
   let ironTriggered = false;
   const r1 = M.playTick(P, b1, M.newPlay({ credit: { 0: 1 }, lastTouch: [0, null] }), {
-    collide: (a, b, s, imp, plow, iron) => { if (iron) ironTriggered = true; }
+    collide: ({ iron }) => { if (iron) ironTriggered = true; }
   }, null, true);
   assert.equal(ironTriggered, true, 'Iron Save contact fired inside goal pocket');
   assert.equal(r1.goal, 0, 'ball past goal line scores');
@@ -1190,4 +1200,30 @@ test('goal-line Iron Save that still scores is discarded, curved shots preserve 
   assert.equal(stickyBodies[0].holding, false);
   assert.equal(stickyBodies[6].stuckTicks, 0);
   assert.equal(stickyBodies[0].superActive, null, 'Sticky super ends cleanly when ball is reset to center');
+});
+
+test('A6 & D1b: M.VERSION is 5, resolveTurn nests attribution under state.play without top-level leakage, and AGENTS.md records D1b', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  assert.equal(M.VERSION, 5);
+  const state = {
+    version: M.VERSION,
+    mode: 'pulse',
+    bodies: P.kickoff(),
+    stats: [],
+    scores: [0, 0],
+    turn: 1,
+    play: M.newPlay({ last: 1, lastTouch: [1, null], credit: { 1: 1 }, banked: true })
+  };
+  state.bodies.slice(0, 6).forEach(b => M.applyStats(P, b, {}, 'pulse'));
+  const res = M.resolveTurn(P, state, Array.from({ length: 6 }, still));
+  assert.ok(res.state.play && typeof res.state.play === 'object', 'next state carries nested state.play');
+  assert.equal(res.state.play.last, 1);
+  assert.equal(res.state.play.banked, true);
+  for (const k of Object.keys(M.newPlay())) {
+    assert.equal(Object.hasOwn(res.state, k), false, `play field ${k} never leaks onto top-level state`);
+  }
+  const agents = fs.readFileSync(path.join(__dirname, '..', 'AGENTS.md'), 'utf8');
+  assert.match(agents, /Never compare client-simulated and server state for exact equality/i);
+  assert.match(agents, /never carry client-simulated state into the next turn/i);
 });

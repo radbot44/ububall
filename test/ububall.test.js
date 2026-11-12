@@ -459,7 +459,7 @@ test('Cannonball boosts the ball once without boosting its shooter or subsequent
   for (let tick = 0; tick < 2880; tick++) {
     const ball = bodies[6], hot = P.ballOnFire(ball), team = ball.strikerTeam;
     let hotShot = false;
-    const goal = P.step(bodies, P.DT, (a, b) => { ricochets++; if (hot && (a === ball ? b : a).team === team) hotShot = true; }, null, null, key => { if (key === 'cannonball') activations++; });
+    const goal = P.step(bodies, P.DT, ({ a, b }) => { ricochets++; if (hot && (a === ball ? b : a).team === team) hotShot = true; }, null, null, key => { if (key === 'cannonball') activations++; });
     const energy = kineticEnergy(bodies);
     assert.ok(hotShot || energy <= previous * (1 + 1e-10) + 1e-8, `Ricochet gained energy at tick ${tick}`);
     previous = energy;
@@ -483,7 +483,7 @@ test('step invokes onCollide callback reporting colliding bodies and impact spee
   Object.assign(b[0], { x: 400, y: 300, vx: 500, vy: 0 });
   Object.assign(b[6], { x: 435, y: 300, vx: 0, vy: 0 });
   let reported = null;
-  P.step(b, 0, (bodyA, bodyB, speed, impulse) => {
+  P.step(b, 0, ({ a: bodyA, b: bodyB, speed, impulse }) => {
     reported = { bodyA, bodyB, speed, impulse };
   });
   assert.ok(reported !== null);
@@ -1071,7 +1071,7 @@ function fireballInto(offset) {
   let hit = null;
   for (let t = 0; t < 120 && !hit; t++) {
     const before = kineticEnergy(b);
-    P.step(b, P.DT, (bodyA, bodyB, speed, impulse, plow) => { hit = { plow, before }; });
+    P.step(b, P.DT, ({ plow }) => { hit = { plow, before }; });
   }
   assert.ok(hit?.plow, 'the hit is a winning fire hit');
   assert.ok(kineticEnergy(b) <= hit.before * (1 + 1e-10), 'the hit adds no energy');
@@ -1119,7 +1119,7 @@ function guardAgainstFireball(offset) {
   Object.assign(b[6], { x: 540, y: 300, vx: 1000, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerPower: 1, strikerTeam: 0 });
   let iron = false, beaten = false, shockwave = false;
   for (let t = 0; t < 60 && !iron && !beaten; t++) {
-    P.step(b, P.DT, (bodyA, bodyB, speed, impulse, plow, isIron) => { if (isIron) iron = true; else if (plow) beaten = true; }, null, (src, rad, type) => { if (type === 'iron') shockwave = true; });
+    P.step(b, P.DT, ({ plow, iron: isIron }) => { if (isIron) iron = true; else if (plow) beaten = true; }, null, (src, rad, type) => { if (type === 'iron') shockwave = true; });
   }
   return { ball: b[6], iron, beaten, shockwave };
 }
@@ -1137,7 +1137,7 @@ test('Iron Save triggers for a teammate pass without extinguishing the fireball'
   Object.assign(b[6], { x: 540, y: 300, vx: 1000, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, strikerPower: 1, strikerTeam: 0, pace: 1000 });
   let iron = false, shockwave = false;
   for (let t = 0; t < 60 && !iron; t++) {
-    P.step(b, P.DT, (bodyA, bodyB, speed, impulse, plow, isIron) => { if (isIron) iron = true; }, null, (src, rad, type) => { if (type === 'iron') shockwave = true; });
+    P.step(b, P.DT, ({ iron: isIron }) => { if (isIron) iron = true; }, null, (src, rad, type) => { if (type === 'iron') shockwave = true; });
   }
   assert.equal(iron, true, 'the teammate Guard makes an Iron Save');
   assert.equal(shockwave, true, 'iron shockwave is triggered');
@@ -1155,7 +1155,7 @@ test('Iron Save triggers for a non-flaming teammate pass at or above 180 px/s, b
     Object.assign(b[6], { x: 550, y: 300, vx: speed, vy: 0, onFire: false, fireTicks: 0, strikerPower: 1, strikerTeam, pace: speed });
     let iron = false, shockwave = false;
     for (let t = 0; t < 60 && !iron; t++) {
-      P.step(b, P.DT, (bodyA, bodyB, spd, impulse, plow, isIron) => { if (isIron) iron = true; }, null, (src, rad, type) => { if (type === 'iron') shockwave = true; });
+      P.step(b, P.DT, ({ iron: isIron }) => { if (isIron) iron = true; }, null, (src, rad, type) => { if (type === 'iron') shockwave = true; });
     }
     return { iron, shockwave, ball: b[6] };
   };
@@ -1203,7 +1203,7 @@ test('a teammate driving into a trapped fireball fires it at its pace; a passive
     const b = fireballStopped(1), ball = b[6];
     Object.assign(b[index], { x: ball.x - 80, y: ball.y, vx, vy: 0 });
     let after = null, pace = null;
-    for (let t = 0; t < 60 && after === null; t++) P.step(b, P.DT, (x, y) => { if (x === ball || y === ball) { after = Math.hypot(ball.vx, ball.vy); pace = ball.pace; } });
+    for (let t = 0; t < 60 && after === null; t++) P.step(b, P.DT, ({ a: x, b: y }) => { if (x === ball || y === ball) { after = Math.hypot(ball.vx, ball.vy); pace = ball.pace; } });
     return { after, pace: pace ?? ball.pace, ball };
   };
   const shot = touch(2, 300);
@@ -1510,7 +1510,7 @@ test('iron save triggers ~200 ms cooldown and doubles guard effects for the rest
   ball.vx = -600; ball.vy = 0;
   ball.onFire = true; ball.fireTicks = 60; ball.strikerTeam = 1;
   let secondIron = false;
-  P.step(b, P.DT, (bodyA, bodyB, spd, imp, plow, isIron) => { if (isIron) secondIron = true; }, null, (src, r, type) => { if (type === 'iron') shockCount++; });
+  P.step(b, P.DT, ({ iron: isIron }) => { if (isIron) secondIron = true; }, null, (src, r, type) => { if (type === 'iron') shockCount++; });
   assert.equal(secondIron, false, 'no iron save during cooldown');
   assert.equal(shockCount, 1, 'no second iron shockwave during cooldown');
   assert.equal(ball.onFire, true, 'fire is not quenched during cooldown');
@@ -1525,7 +1525,7 @@ test('iron save triggers ~200 ms cooldown and doubles guard effects for the rest
   ball.vx = -600; ball.vy = 0;
   ball.onFire = true; ball.fireTicks = 60; ball.strikerTeam = 1;
   let thirdIron = false;
-  P.step(b, P.DT, (bodyA, bodyB, spd, imp, plow, isIron) => { if (isIron) thirdIron = true; }, null, (src, r, type) => { if (type === 'iron') shockCount++; });
+  P.step(b, P.DT, ({ iron: isIron }) => { if (isIron) thirdIron = true; }, null, (src, r, type) => { if (type === 'iron') shockCount++; });
   assert.equal(thirdIron, true, 'iron save triggers again after cooldown');
   assert.equal(shockCount, 2, 'second iron shockwave triggers');
   assert.equal(ball.onFire, false, 'fire quenched by new iron save');
@@ -1695,7 +1695,7 @@ test('even head-on checks do not bias checker credit toward Team 1, and Colossus
   Object.assign(sym[0], { x: 480, y: 300, vx: 500 });
   Object.assign(sym[3], { x: 520, y: 300, vx: -500 });
   let symChecker = 'unset';
-  P.step(sym, P.DT, (a, c, spd, imp, plow, iron, chk) => { symChecker = chk; });
+  P.step(sym, P.DT, ({ checker: chk }) => { symChecker = chk; });
   assert.equal(symChecker, null, 'symmetric head-on tie awards neither side a unilateral check');
 
   const col = P.kickoff();
@@ -1704,7 +1704,7 @@ test('even head-on checks do not bias checker credit toward Team 1, and Colossus
   P.syncEffectiveStats(col[0]);
   Object.assign(col[3], { x: 525, y: 300, vx: -700, strength: 1.5 });
   let colChecker = null;
-  P.step(col, P.DT, (a, c, spd, imp, plow, iron, chk) => { colChecker = chk; });
+  P.step(col, P.DT, ({ checker: chk }) => { colChecker = chk; });
   assert.ok(col[0].daze > 0 && colChecker === col[3], 'attacker dazing a Colossus receives check credit');
 });
 
@@ -1715,7 +1715,7 @@ test('a moving Guard making a teammate Iron Save traps the fireball rather than 
   P.syncEffectiveStats(b[0]);
   Object.assign(b[6], { x: 440, y: 300, vx: -600, vy: 0, onFire: true, fireTicks: P.FIRE_TICKS, pace: 950, strikerTeam: 0, strikerPower: 0.8 });
   let iron = false;
-  P.step(b, P.DT, (a, c, spd, imp, plow, isIron) => { if (isIron) iron = true; });
+  P.step(b, P.DT, ({ iron: isIron }) => { if (isIron) iron = true; });
   assert.equal(iron, true, 'teammate Iron Save triggers');
   assert.ok(Math.hypot(b[6].vx, b[6].vy) < 150, 'ball stays trapped at Iron Save speed instead of blasting at 950 px/s');
   assert.ok(b[6].pace > 840 && P.ballOnFire(b[6]), 'fireball stays loaded for a follow-up Hot Shot');
@@ -1733,7 +1733,7 @@ test('Snap redirects a live teammate pass within the pair KE budget and adds pre
     if (crowd) Object.assign(b[2], { x: 538, y: 300, vx: 0, vy: 0 });
     const keBefore = kineticEnergy([shooter, ball]);
     let snapFlag = false;
-    P.step(b, 0, (a, c, spd, imp, plow, iron, chk, snapped) => { if (snapped) snapFlag = true; });
+    P.step(b, 0, ({ snapped }) => { if (snapped) snapFlag = true; });
     return { ball, shooter, speedAfter: Math.hypot(ball.vx, ball.vy), keBefore, keAfter: kineticEnergy([shooter, ball]), snapFlag };
   };
 
@@ -1741,7 +1741,7 @@ test('Snap redirects a live teammate pass within the pair KE budget and adds pre
   const snap = runSnap({});
   const plain = runSnap({ strikerTeam: -1, strikerSlot: -1 });
   assert.equal(snap.snapFlag, true, 'Snap triggers on live pass from a different teammate');
-  assert.equal(snap.ball.snapStruck, true, 'ball.snapStruck is set');
+  assert.equal('snapStruck' in snap.ball, false, 'Snap reports via contact event without mutating ball.snapStruck');
   assert.ok(snap.speedAfter > plain.speedAfter + 25, `Snap redirects incoming pass speed (${snap.speedAfter} vs ${plain.speedAfter})`);
   assert.equal(snap.ball.fireTicks, P.SNAP.heatTicks, 'Snap adds pre-heat fireTicks');
   assert.ok(snap.ball.pace >= snap.speedAfter - 1e-9, 'ball.pace updates to snapped speed');
@@ -1751,7 +1751,7 @@ test('Snap redirects a live teammate pass within the pair KE budget and adds pre
   // Self-touch (strikerSlot === shooter.slot) does not trigger Snap
   const selfTouch = runSnap({ strikerTeam: 0, strikerSlot: 1, shooterIdx: 1 });
   assert.equal(selfTouch.snapFlag, false, 'self-touch does not trigger Snap');
-  assert.equal(Boolean(selfTouch.ball.snapStruck), false);
+  assert.equal('snapStruck' in selfTouch.ball, false);
   assert.ok(Math.abs(selfTouch.speedAfter - plain.speedAfter) < 1e-9);
 
   // Opponent shot (strikerTeam !== shooter.team) does not trigger Snap
@@ -1990,7 +1990,7 @@ test('Sticky-held ball checks all overlapping skaters, strips on opponent contac
   Object.assign(fb[6], { x: 443, y: 300, vx: 0, vy: 0, stickOffset: { x: 43, y: 0 }, stuckTicks: 10, strikerTeam: 0 });
   Object.assign(fb[1], { x: 443 + fb[1].radius + fb[6].radius - 1, y: 300, vx: -260, vy: 0 });
   const pairs = [];
-  P.step([fb[0], fb[1], fb[6]], 0, (x, y) => pairs.push([x, y]));
+  P.step([fb[0], fb[1], fb[6]], 0, ({ a: x, b: y }) => pairs.push([x, y]));
   assert.equal(fb[0].holding, true, 'teammate bump does not strip Sticky carrier');
   assert.ok(pairs.length > 0 && pairs.every(([x, y]) => x.team !== -1 && y.team !== -1),
     'non-stripping Sticky assembly bump reports skater-skater contact so ball credit stays with carrier');
@@ -2103,7 +2103,7 @@ test('Sticky grab sets strikerTeam/strikerSlot/strikerPower/curveMult so release
   Object.assign(snapSim[6], { x: 500, y: 300, vx: 0, vy: 280 });
   Object.assign(snapSim[4], { x: 538, y: 300, vx: -500, vy: 0, guarding: false });
   let snapped = false;
-  P.step(snapSim, 0, (_a, _c, _spd, _imp, _plow, _iron, _chk, isSnap) => { if (isSnap) snapped = true; });
+  P.step(snapSim, 0, ({ snapped: isSnap }) => { if (isSnap) snapped = true; });
   assert.equal(snapped, true, 'teammate Snap one-timer triggers off a Sticky-released pass');
 
   // 2) Team 1 teammate in Guard stance catching the Sticky-released ball (>= 175 px/s) triggers friendly Trap! (own: true)
@@ -2118,4 +2118,68 @@ test('Sticky grab sets strikerTeam/strikerSlot/strikerPower/curveMult so release
   assert.equal(tick.saves.length, 1, 'friendly Guard trap registers on Sticky-released pass');
   assert.equal(tick.saves[0].iron, true);
   assert.equal(tick.saves[0].own, true, 'counted as friendly Trap! rather than opposing Iron Save');
+});
+
+test('A4 & A5: makeUbu/makeBall pre-initialize stable shapes, helpers manage striker/heat, and onCollide reuses one contact object without body flags', () => {
+  const u0 = P.makeUbu(0, 0), u4 = P.makeUbu(1, 1), ball = P.makeBall();
+  assert.deepEqual(Object.keys(u0), Object.keys(u4), 'makeUbu produces identical key order across teams/slots');
+  assert.equal('superArm' in u0, false, 'makeUbu omits UI-only superArm');
+  assert.equal(ball.team, -1);
+  assert.equal(ball.strikerTeam, -1);
+  assert.equal(ball.strikerSlot, -1);
+  assert.equal(ball.stickOffset, null);
+
+  u4.power = 1.18;
+  u4.curveMult = 1.25;
+  P.setStriker(ball, u4);
+  assert.equal(ball.strikerTeam, 1);
+  assert.equal(ball.strikerSlot, 1);
+  assert.equal(ball.strikerPower, 1.18);
+  assert.equal(ball.curveMult, 1.25);
+
+  ball.onFire = true; ball.fireTicks = 120; ball.pace = 820;
+  P.clearHeat(ball);
+  assert.equal(ball.onFire, false);
+  assert.equal(ball.fireTicks, 0);
+  assert.equal(ball.pace, 0);
+
+  P.clearStriker(ball);
+  assert.equal(ball.strikerTeam, -1);
+  assert.equal(ball.strikerSlot, -1);
+  assert.equal(ball.strikerPower, 1);
+  assert.equal(ball.curveMult, 1);
+
+  // Reused contact event object & zero spinStruck/snapStruck properties on bodies
+  const sim = P.kickoff();
+  sim.slice(0, 6).forEach(x => P.applyStats(x, normal));
+  sim.slice(0, 6).forEach((x, idx) => Object.assign(x, { x: 120 + idx * 50, y: 500, vx: 0, vy: 0 }));
+  Object.assign(sim[0], { x: 400, y: 300, vx: 420, vy: 0, omega: 14, spinStrike: 2 });
+  Object.assign(sim[6], { x: 441, y: 300, vx: 0, vy: 0, openingShot: true });
+  const refs = [], snapshots = [];
+  P.step(sim, 0, ev => {
+    refs.push(ev);
+    snapshots.push({ ...ev });
+  });
+  Object.assign(sim[1], { x: 460, y: 300, vx: 520, vy: 0 });
+  Object.assign(sim[6], { x: 500, y: 300, vx: 0, vy: 320, strikerTeam: 0, strikerSlot: 0, strikerPower: 1 });
+  P.step(sim, 0, ev => {
+    refs.push(ev);
+    snapshots.push({ ...ev });
+  });
+  assert.equal(refs.length, 2);
+  assert.equal(refs[0], refs[1], 'onCollide reuses a single contact event object across contacts');
+  assert.equal(snapshots[0].spinStruck, true, 'spin strike reported on contact event');
+  assert.equal(snapshots[1].snapped, true, 'Snap reported on contact event');
+  for (const body of sim) {
+    assert.equal('spinStruck' in body, false);
+    assert.equal('snapStruck' in body, false);
+  }
+
+  // stepPostGoal pins ball at current coordinates without adding/deleting pinX/pinY
+  Object.assign(sim[6], { x: 962, y: 304, vx: 400, vy: -50, omega: 9 });
+  P.stepPostGoal(sim, P.DT);
+  assert.equal(sim[6].x, 962);
+  assert.equal(sim[6].y, 304);
+  assert.equal('pinX' in sim[6], false);
+  assert.equal('pinY' in sim[6], false);
 });

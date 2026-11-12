@@ -1368,8 +1368,7 @@
     }
 
     const liveFx = {
-      collide: (a, b, speed, impulse, plow = false, iron = false, checker = null, snapped = false, tangentImpulse = 0) =>
-        presenter.handleCollision(a, b, speed, impulse, plow, iron, snapped, tangentImpulse),
+      collide: contact => presenter.handleCollision(contact),
       wall: (body, velocity, wallType, nx, ny, rimmed = false) =>
         presenter.handleWall(body, velocity, wallType, nx, ny, rimmed),
       shockwave: (source, radius, type = null) =>

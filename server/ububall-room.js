@@ -125,7 +125,7 @@ class MatchRoom {
   advance(now) {
     const s = this.state;
     if (s.phase === 'lobby' && s.ready.every(Boolean) && s.connected.every(Boolean)) {
-      s.game = { version: rules.VERSION, mode: s.mode, ...this.kickoff(), scores: [0, 0], turn: 1 };
+      s.game = { version: rules.VERSION, mode: s.mode, ...this.kickoff(), play: rules.newPlay(), scores: [0, 0], turn: 1 };
       this.beginPlanning(now);
     }
     if (s.phase === 'resolving' && s.playUntil !== null && now >= s.playUntil) {

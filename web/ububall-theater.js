@@ -321,7 +321,6 @@
         ububallMatch.lapseFouls(P, sim, th.fouls);
         th.tick++;
         if (fx) replayEvents(th.replay.turns[th.index], th.tick, sim);
-        else { sim[6].spinStruck = false; sim[6].snapStruck = false; }
         traceGuide(sim, th.guide);
       });
     }

@@ -593,7 +593,7 @@
     cpuClient.cancel();
     if (online?.active) return;
     cpu = Array.isArray(initialPlans) && initialPlans.length === 3 ? initialPlans : P.cpuPlans(simBodies, () => .5, scores);
-    cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: fieldView.mode, bodies: simBodies, stats, scores, turn, fouls, clock: matchTicks, roundTurns, ...ububallMatch.newPlay(play) },
+    cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: fieldView.mode, bodies: simBodies, stats, scores, turn, fouls, clock: matchTicks, roundTurns, play: ububallMatch.newPlay(play) },
       { level: demo ? demoLevels[1] : cpuLevel, seed: turn }).then(result => {
       if (generation !== cpuGeneration || !result || online?.active) return;
       if (result.error) console.warn('CPU search unavailable; using baseline plan.');
@@ -1717,9 +1717,10 @@
     }
   }
   // A replayed tick's saves, spin strike and hit-stop, shown as live play showed them.
+  let replayTickStruck = false;
   function replayEvents(turn, tick, sim) {
-    const saves = turn.saves.filter(s => s.tick === tick), stop = turn.stops.find(s => s.tick === tick)?.ms, struck = sim[6].spinStruck;
-    sim[6].spinStruck = false; sim[6].snapStruck = false;
+    const saves = turn.saves.filter(s => s.tick === tick), stop = turn.stops.find(s => s.tick === tick)?.ms, struck = replayTickStruck;
+    replayTickStruck = false;
     applyTickEvents(sim, { saves, struck, stop, applyIron: true, syncFn: syncReplay, viewFn: b => replayView(b) });
   }
   // Replays re-simulate each recorded turn from its exact starting state on a display copy.
@@ -1750,7 +1751,7 @@
   const replayView = (cb, th = currentReplay()) => toViewBody(cb, th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : null));
   const syncReplay = (th = currentReplay()) => syncViewBodies(th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : null), th ? th.anonymous : undefined, th?.exporting ? null : undefined, th?.entries);
   const replayFx = {
-    hit: (a, b, speed, impulse, plow = false, iron = false, checker = null, snapped = false, tangentImpulse = 0) => { syncReplay(); handleCollision(replayView(a), replayView(b), speed, impulse, plow, iron, snapped, tangentImpulse); },
+    hit: contact => { if (contact.spinStruck && ((typeof goalReplay !== 'undefined' && goalReplay) || currentReplay())) replayTickStruck = true; syncReplay(); handleCollision({ ...contact, a: replayView(contact.a), b: replayView(contact.b) }); },
     wall: (body, velocity, wallType, nx, ny, rimmed = false) => { syncReplay(); const seat = shownSeat(); handleWall(replayView(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny, rimmed); },
     shock: (source, radius, type = null) => { syncReplay(); handleShockwave(replayView(source), radius, type); },
     super: (key, stage, body, target = null) => { syncReplay(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
@@ -2378,7 +2379,7 @@
   const liveView = cb => toViewBody(cb, liveSim(), 0);
   const syncLive = () => syncViewBodies(liveSim(), 0);
   const liveFx = {
-    collide: (a, b, speed, impulse, plow = false, iron = false, checker = null, snapped = false, tangentImpulse = 0) => { syncLive(); handleCollision(liveView(a), liveView(b), speed, impulse, plow, iron, snapped, tangentImpulse); },
+    collide: contact => { syncLive(); handleCollision({ ...contact, a: liveView(contact.a), b: liveView(contact.b) }); },
     wall: (body, velocity, wallType, nx, ny, rimmed = false) => { syncLive(); handleWall(liveView(body), velocity, wallType, nx, ny, rimmed); },
     shockwave: (source, radius, type = null) => { syncLive(); handleShockwave(liveView(source), radius, type); },
     super: (key, stage, body, target = null) => { syncLive(); handleSuper(key, stage, liveView(body), target ? liveView(target) : null); }
@@ -4065,7 +4066,7 @@
   // the player's own ubus arrive after sign-in), it stops and the loop starts the new turn's.
   async function demoPlanTurn(run) {
     const game = demoGame, t = turn, current = () => game === demoGame && phase === 'plan' && turn === t;
-    const planning = demoClient.plan({ version: ububallMatch.VERSION, mode: fieldView.mode, bodies: simBodies, stats, scores, turn, fouls, clock: matchTicks, roundTurns, ...ububallMatch.newPlay(play) },
+    const planning = demoClient.plan({ version: ububallMatch.VERSION, mode: fieldView.mode, bodies: simBodies, stats, scores, turn, fouls, clock: matchTicks, roundTurns, play: ububallMatch.newPlay(play) },
       { level: demoLevels[0], seed: turn }, 0);
     await planBanner; await demoWait(run, 600);
     const result = await planning;
