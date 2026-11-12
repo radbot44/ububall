@@ -14,7 +14,7 @@ slide in and out around it, like moving through the menus of a video game. Whate
 
 ## Status
 
-Phase 2 is built and awaiting the owner's review. Not committed.
+Phase 2 is built and awaiting the owner's review. [note from owner: approved]
 
 Working now (`web/index.html`, `web/site.js`, `web/ububall.js`, `web/ububall.css`):
 
