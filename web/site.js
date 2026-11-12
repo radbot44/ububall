@@ -51,7 +51,7 @@
       persisted = true;
       await view.scene?.play(pack.items.length, pack.items.map(item => item.model));
       revealIndex = 0;
-      if (!document.body.classList.contains('in-match')) showReveal();
+      if (document.body.dataset.shot !== 'match' && document.body.dataset.shot !== 'replay') showReveal();
       status('');
     } catch (error) {
       if (!persisted) pack = null;
@@ -1029,7 +1029,7 @@
       await opening;
       $('pack-choices').hidden = true;
       revealIndex = 0;
-      if (!document.body.classList.contains('in-match')) showReveal();
+      if (document.body.dataset.shot !== 'match' && document.body.dataset.shot !== 'replay') showReveal();
       status('');
     } catch (error) {
       // Refresh authoritative state after an ambiguous selection; never submit a

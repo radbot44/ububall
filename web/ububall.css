@@ -96,80 +96,79 @@ main:has(> #signed-out-panel:not([hidden])) > :not(#signed-out-panel) { display:
   .mint-entry-links { justify-content: center; }
 }
 
-/* Match mode: the stadium fills the screen; the home screen and site chrome step aside. */
-body.in-match .play-home,
-body.in-match .site-nav, body.in-match .site-header { display: none; }
-:where(body.in-match) { height: 100dvh; }
-body.in-match { padding-bottom: 0; overflow: hidden; }
-body.in-match .ball-page {
+/* Match and replay shots: the stadium fills the screen; the home screen and site chrome step aside. */
+body:is([data-shot="match"], [data-shot="replay"]) :is(.play-home, .site-nav, .site-header) { display: none; }
+:where(body[data-shot="match"], body[data-shot="replay"]) { height: 100dvh; }
+body:is([data-shot="match"], [data-shot="replay"]) { padding-bottom: 0; overflow: hidden; }
+body:is([data-shot="match"], [data-shot="replay"]) .ball-page {
   width: 100%; max-width: none; height: 100%; margin: 0;
   padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
 }
-body.in-match .arena-layout {
+body:is([data-shot="match"], [data-shot="replay"]) .arena-layout {
   --roster-width: clamp(9rem, 12.5vw, 15rem);
   height: 100%; padding: .5rem; gap: 0 clamp(.25rem, 1vw, .875rem);
   grid-template-columns: var(--roster-width) minmax(0, 1fr) var(--roster-width);
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
-body.in-match .team-column { grid-row: 2; align-self: center; max-height: 100%; overflow-y: auto; }
-body.in-match .home-column { grid-column: 1; }
-body.in-match .away-column { grid-column: 3; }
-body.in-match .stadium {
+body:is([data-shot="match"], [data-shot="replay"]) .team-column { grid-row: 2; align-self: center; max-height: 100%; overflow-y: auto; }
+body:is([data-shot="match"], [data-shot="replay"]) .home-column { grid-column: 1; }
+body:is([data-shot="match"], [data-shot="replay"]) .away-column { grid-column: 3; }
+body:is([data-shot="match"], [data-shot="replay"]) .stadium {
   grid-column: 2; grid-row: 1 / -1; align-self: stretch; min-width: 0; min-height: 0;
   display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: subgrid;
 }
-body.in-match .stadium-stage-area { grid-row: 2; min-width: 0; min-height: 0; container-type: size; }
-body.in-match .stadium:not(.portrait-mode) > .stadium-stage-area { --visible-rink-height: 516; }
-body.in-match .scoreboard { grid-row: 1; }
-body.in-match .stadium-actions { grid-row: 3; }
-body.in-match .stadium > :is(.scoreboard, .stadium-stage-area, .stadium-actions) { grid-column: 1; }
-body.in-match.sidebars-hidden .arena-layout { grid-template-columns: minmax(0, 1fr); }
-body.in-match.sidebars-hidden .stadium { grid-column: 1; }
+body:is([data-shot="match"], [data-shot="replay"]) .stadium-stage-area { grid-row: 2; min-width: 0; min-height: 0; container-type: size; }
+body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) > .stadium-stage-area { --visible-rink-height: 516; }
+body:is([data-shot="match"], [data-shot="replay"]) .scoreboard { grid-row: 1; }
+body:is([data-shot="match"], [data-shot="replay"]) .stadium-actions { grid-row: 3; }
+body:is([data-shot="match"], [data-shot="replay"]) .stadium > :is(.scoreboard, .stadium-stage-area, .stadium-actions) { grid-column: 1; }
+body:is([data-shot="match"], [data-shot="replay"]).sidebars-hidden .arena-layout { grid-template-columns: minmax(0, 1fr); }
+body:is([data-shot="match"], [data-shot="replay"]).sidebars-hidden .stadium { grid-column: 1; }
 body.match-fullscreen .stadium { border: 0; border-radius: 0; box-shadow: none; }
 @media (min-width: 56rem) and (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
-  body.in-match:not(.sidebars-hidden) .arena-layout > .stadium {
+  body:is([data-shot="match"], [data-shot="replay"]):not(.sidebars-hidden) .arena-layout > .stadium {
     grid-column: 1 / -1; grid-template-columns: subgrid;
   }
-  body.in-match:not(.sidebars-hidden) .arena-layout > .stadium > .stadium-stage-area { grid-column: 2; }
-  body.in-match:not(.sidebars-hidden) .arena-layout > .stadium > :is(.scoreboard, .stadium-actions) { grid-column: 1 / -1; }
-  body.in-match .arena-layout > .team-column { position: relative; z-index: 1; }
+  body:is([data-shot="match"], [data-shot="replay"]):not(.sidebars-hidden) .arena-layout > .stadium > .stadium-stage-area { grid-column: 2; }
+  body:is([data-shot="match"], [data-shot="replay"]):not(.sidebars-hidden) .arena-layout > .stadium > :is(.scoreboard, .stadium-actions) { grid-column: 1 / -1; }
+  body:is([data-shot="match"], [data-shot="replay"]) .arena-layout > .team-column { position: relative; z-index: 1; }
 }
 @media (orientation: portrait) {
-  body.in-match .team-column { display: none; }
-  body.in-match .arena-layout { grid-template-columns: 1fr; padding: 0; }
-  body.in-match .stadium { grid-column: 1; border: 0; border-radius: 0; box-shadow: none; }
+  body:is([data-shot="match"], [data-shot="replay"]) .team-column { display: none; }
+  body:is([data-shot="match"], [data-shot="replay"]) .arena-layout { grid-template-columns: 1fr; padding: 0; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium { grid-column: 1; border: 0; border-radius: 0; box-shadow: none; }
 }
 @media (orientation: landscape) and (width < 56rem) {
-  body.in-match .team-column, #btn-sidebars { display: none; }
-  body.in-match .arena-layout { grid-template-columns: minmax(0, 1fr); }
-  body.in-match .stadium { grid-column: 1; }
+  body:is([data-shot="match"], [data-shot="replay"]) .team-column, #btn-sidebars { display: none; }
+  body:is([data-shot="match"], [data-shot="replay"]) .arena-layout { grid-template-columns: minmax(0, 1fr); }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium { grid-column: 1; }
 }
-/* Home: in landscape, the demo match plays beside the lineup; in portrait and phone sideways, above it. */
-body:not(.in-match) .ball-page { display: grid; grid-template-columns: minmax(0, 1fr) 28.5rem; gap: 0 1.25rem; align-items: stretch; width: min(114rem, calc(100% - 3rem)); max-width: none; margin: 0 auto; }
+/* Home and setup shots: in landscape, the rink sits beside the home panel (or fills the stage in setup); in portrait and phone sideways, above it. */
+body:is([data-shot="home"], [data-shot="team"], [data-shot="rules"]) .ball-page { display: grid; grid-template-columns: minmax(0, 1fr) 28.5rem; gap: 0 1.25rem; align-items: stretch; width: min(114rem, calc(100% - 3rem)); max-width: none; margin: 0 auto; }
 @media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
-  html:not(.discord-activity) body:not(.in-match) .ball-page { align-items: center; margin-block: clamp(.75rem, 2dvh, 2rem); }
-  html:not(.discord-activity) body:not(.in-match) .stadium:not(.portrait-mode) .stadium-stage-area { aspect-ratio: 1000 / 540; }
+  html:not(.discord-activity) body:is([data-shot="home"], [data-shot="team"], [data-shot="rules"]) .ball-page { align-items: center; margin-block: clamp(.75rem, 2dvh, 2rem); }
+  html:not(.discord-activity) body[data-shot="home"] .stadium:not(.portrait-mode) .stadium-stage-area { aspect-ratio: 1000 / 540; }
 }
-body:not(.in-match) .arena-layout { grid-area: 1 / 1; display: block; width: 100%; margin: 0; pointer-events: none; }
-body:not(.in-match) :is(.team-column, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin) { display: none; }
-body:not(.in-match) .play-home { grid-area: 1 / 2; width: 100%; margin: 0; }
-body:not(.in-match) .play-home .home-actions { grid-template-columns: 1fr; }
-body:not(.in-match) .play-home :is(.mint-entry, .mint-entry-content) { flex-direction: column; align-items: stretch; text-align: center; gap: .625rem; }
-body:not(.in-match) .play-home .mint-entry-badge { align-self: center; }
-body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
+body:is([data-shot="home"], [data-shot="team"], [data-shot="rules"]) .arena-layout { grid-area: 1 / 1; display: block; width: 100%; margin: 0; pointer-events: none; }
+body:is([data-shot="home"], [data-shot="team"], [data-shot="rules"]) :is(.team-column, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin, #skip-goal-replay) { display: none; }
+body[data-shot="home"] .play-home { grid-area: 1 / 2; width: 100%; margin: 0; }
+body[data-shot="home"] .play-home .home-actions { grid-template-columns: 1fr; }
+body[data-shot="home"] .play-home :is(.mint-entry, .mint-entry-content) { flex-direction: column; align-items: stretch; text-align: center; gap: .625rem; }
+body[data-shot="home"] .play-home .mint-entry-badge { align-self: center; }
+body[data-shot="home"] .play-home .mint-entry-links { justify-content: center; }
 @media (orientation: portrait), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
-  body:not(.in-match) .ball-page { display: flex; flex-direction: column; width: min(95rem, calc(100% - 2rem)); }
-  body:not(.in-match) .arena-layout { order: -1; width: min(55rem, 100%); margin: .25rem auto 0; }
-  body:not(.in-match) .play-home { width: min(55rem, 100%); margin: .875rem auto 1.5rem; }
+  body[data-shot="home"] .ball-page { display: flex; flex-direction: column; width: min(95rem, calc(100% - 2rem)); }
+  body[data-shot="home"] .arena-layout { order: -1; width: min(55rem, 100%); margin: .25rem auto 0; }
+  body[data-shot="home"] .play-home { width: min(55rem, 100%); margin: .875rem auto 1.5rem; }
 }
 /* The Discord Activity opens at the rink with the friends queue on the bench. */
 .discord-activity :is(.nav-more, .site-header-actions),
 .discord-activity .play-home > :not(.activity-play, .home-team, .mint-entry),
-.discord-activity body.demo-match:not(.in-match) :is(.demo-play, .demo-finger, .field-banner) { display: none; }
-.discord-activity body:not(.in-match) .ball-page {
+.discord-activity body.demo-match[data-shot="home"] :is(.demo-play, .demo-finger, .field-banner) { display: none; }
+.discord-activity body[data-shot="home"] .ball-page {
   gap: 1rem; height: auto; padding-block: max(.75rem, var(--safe-top)) max(.75rem, var(--safe-bottom));
 }
-.discord-activity body:not(.in-match) .play-home { align-self: center; }
+.discord-activity body[data-shot="home"] .play-home { align-self: center; }
 .activity-play { display: grid; gap: .75rem; }
 .activity-friends {
   position: relative;
@@ -224,56 +223,56 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
 .activity-friend-actions > button { flex: 1 1 auto; }
 .activity-other > button { flex: 1 1 auto; min-height: 2.75rem; }
 @media (orientation: landscape) and (min-width: 600px) {
-  .discord-activity body:not(.in-match) .ball-page {
+  .discord-activity body[data-shot="home"] .ball-page {
     display: grid; grid-template-columns: minmax(0, 1fr) minmax(16rem, 27%); align-items: center;
     width: min(114rem, calc(100% - 2rem)); min-height: 100dvh;
   }
-  .discord-activity body:not(.in-match) .arena-layout { order: 0; height: auto; max-width: none; margin: 0; }
-  .discord-activity body:not(.in-match) .stadium { height: auto; }
-  .discord-activity body:not(.in-match) .stadium-stage-area { flex: none; height: auto; container-type: normal; }
-  .discord-activity body:not(.in-match) .stadium:not(.portrait-mode) .rink-stage {
+  .discord-activity body[data-shot="home"] .arena-layout { order: 0; height: auto; max-width: none; margin: 0; }
+  .discord-activity body[data-shot="home"] .stadium { height: auto; }
+  .discord-activity body[data-shot="home"] .stadium-stage-area { flex: none; height: auto; container-type: normal; }
+  .discord-activity body[data-shot="home"] .stadium:not(.portrait-mode) .rink-stage {
     width: min(100%, max(12rem, calc((100dvh - 6rem) * 5 / 3))); height: auto;
   }
-  .discord-activity body:not(.in-match) .play-home { width: 100%; margin: 0; }
+  .discord-activity body[data-shot="home"] .play-home { width: 100%; margin: 0; }
 }
 @media (orientation: portrait), (max-width: 599px) {
-  .discord-activity body:not(.in-match) .arena-layout { order: 0; }
-  .discord-activity body:not(.in-match) .play-home { order: 1; margin: 0 auto; }
+  .discord-activity body[data-shot="home"] .arena-layout { order: 0; }
+  .discord-activity body[data-shot="home"] .play-home { order: 1; margin: 0 auto; }
 }
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
-  .discord-activity body:not(.in-match) .ball-page { display: flex; flex-direction: column; min-height: 0; }
-  .discord-activity body:not(.in-match) .arena-layout { order: 0; }
-  .discord-activity body:not(.in-match) .play-home { order: 1; width: min(55rem, 100%); }
+  .discord-activity body[data-shot="home"] .ball-page { display: flex; flex-direction: column; min-height: 0; }
+  .discord-activity body[data-shot="home"] .arena-layout { order: 0; }
+  .discord-activity body[data-shot="home"] .play-home { order: 1; width: min(55rem, 100%); }
 }
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
-  body.in-match .arena-layout { grid-template-columns: 1fr; padding: 0; }
-  body.in-match .team-column { display: none; }
-  body.in-match .stadium { grid-column: 1; border: 0; border-radius: 0; box-shadow: none; }
-  body.in-match .stadium:not(.portrait-mode) {
+  body:is([data-shot="match"], [data-shot="replay"]) .arena-layout { grid-template-columns: 1fr; padding: 0; }
+  body:is([data-shot="match"], [data-shot="replay"]) .team-column { display: none; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium { grid-column: 1; border: 0; border-radius: 0; box-shadow: none; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) {
     --controls-width: clamp(9.5rem, 24vw, 14rem);
     --controls-inset: 1.75rem;
     --controls-shift: var(--controls-inset);
     grid-template: "score field" auto ". field" minmax(0, 1fr) "actions field" auto / var(--controls-width) minmax(0, 1fr);
   }
-  body.in-match .stadium:not(.portrait-mode)[data-controls-side="right"] {
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode)[data-controls-side="right"] {
     --controls-shift: calc(-1 * var(--controls-inset));
     grid-template: "field score" auto "field ." minmax(0, 1fr) "field actions" auto / minmax(0, 1fr) var(--controls-width);
   }
-  body.in-match .stadium:not(.portrait-mode) > .stadium-stage-area {
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) > .stadium-stage-area {
     --visible-rink-height: 536;
     grid-area: field; width: auto; height: 100%; margin-inline-start: -1rem; justify-content: flex-start;
   }
-  body.in-match .stadium:not(.portrait-mode)[data-controls-side="right"] > .stadium-stage-area {
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode)[data-controls-side="right"] > .stadium-stage-area {
     margin-inline: 0 -1rem; justify-content: flex-end;
   }
-  body.in-match .stadium:not(.portrait-mode) > :is(.scoreboard, .stadium-actions) { translate: var(--controls-shift) 0; }
-  body.in-match .stadium:not(.portrait-mode) > .scoreboard { grid-area: score; border-bottom: 0; }
-  body.in-match .stadium:not(.portrait-mode) > .stadium-actions {
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) > :is(.scoreboard, .stadium-actions) { translate: var(--controls-shift) 0; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) > .scoreboard { grid-area: score; border-bottom: 0; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) > .stadium-actions {
     grid-area: actions; grid-template-columns: minmax(0, 1fr); padding: .375rem 1rem .5rem;
     z-index: 1;
   }
-  body.in-match .stadium:not(.portrait-mode) .knob svg { width: 2.625rem; }
-  body.in-match .stadium:not(.portrait-mode) .knob-row { grid-column: 1; width: min(100%, 8rem); justify-self: center; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .knob svg { width: 2.625rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .knob-row { grid-column: 1; width: min(100%, 8rem); justify-self: center; }
 }
 .pause-menu {
   width: min(23.75rem, calc(100% - 1.5rem)); padding: 1.375rem; border: .0625rem solid var(--border); border-radius: 1.375rem;
@@ -416,7 +415,7 @@ body:not(.in-match) .play-home .mint-entry-links { justify-content: center; }
 .stat-drawer .stat-row { gap: .5rem; padding: .125rem 0; }
 .stat-drawer .stat-group-title { margin-top: .625rem; font-size: .6875rem; }
 /* Hiding the sidebars gives the rink the whole width; the toggle shows only where sidebars do. */
-body.in-match.sidebars-hidden .team-column { display: none; }
+body:is([data-shot="match"], [data-shot="replay"]).sidebars-hidden .team-column { display: none; }
 @media (orientation: portrait), (orientation: landscape) and (pointer: coarse) and (max-height: 600px) { #btn-sidebars { display: none; } }
 .card-titles { min-width: 0; flex: 1; }
 .card-titles:has(> .card-guard) { display: flex; align-items: center; gap: .25rem; }
@@ -1105,7 +1104,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 /* The cast is away: the ice is drawn empty and its sprites and badges wait out of sight. */
 .rink-wrap.cast-away :is(#skaters, .field-badges) { visibility: hidden; }
 
-/* The setup shot (see docs/rink-stage.md): on a wide screen outside a match the rink grows to
+/* The rules and team setup shots (see docs/rink-stage.md): on a wide screen the rink grows to
    game size, the team sheet docks over the away half, and the lineup stands on the ice. */
 .team-sheet.docked {
   position: fixed; inset: var(--setup-top, 4.5rem) 1rem 1rem 50%; z-index: 40; width: auto; height: auto; margin: 0;
@@ -1114,13 +1113,12 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .team-sheet.docked[open] { translate: 0 0; }
 @starting-style { .team-sheet.docked[open] { translate: calc(100% + 2rem) 0; } }
 @media (prefers-reduced-motion: reduce) { .team-sheet.docked { transition: none; } }
-body.setup-shot { overflow: hidden; }
-body.setup-shot .arena-layout { grid-column: 1 / -1; }
-body.setup-shot :is(.play-home, .scoreboard),
-body.setup-shot:not(.in-match) .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner) { display: none; }
-html:not(.discord-activity) body.setup-shot:not(.in-match) .stadium:not(.portrait-mode) .stadium-stage-area { aspect-ratio: auto; }
-body.setup-shot .stadium-stage-area { min-height: calc(100dvh - var(--setup-top, 4.5rem) - 1rem); }
-body.setup-shot .rink-stage { width: min(100%, calc((100dvh - var(--setup-top, 4.5rem) - 1rem) * 5 / 3)); }
+body:is([data-shot="team"], [data-shot="rules"]) { overflow: hidden; }
+body:is([data-shot="team"], [data-shot="rules"]) .arena-layout { grid-column: 1 / -1; }
+body:is([data-shot="team"], [data-shot="rules"]) :is(.play-home, .scoreboard),
+body:is([data-shot="team"], [data-shot="rules"]) .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner, #skip-goal-replay) { display: none; }
+body:is([data-shot="team"], [data-shot="rules"]) .stadium-stage-area { min-height: calc(100dvh - var(--setup-top, 4.5rem) - 1rem); }
+body:is([data-shot="team"], [data-shot="rules"]) .rink-stage { width: min(100%, calc((100dvh - var(--setup-top, 4.5rem) - 1rem) * 5 / 3)); }
 /* Each position is a button around its ubu, centred on the kickoff spot (--x, --y), with the ubu
    drawn at the size it plays at (--r, as the rink's sprites are). */
 .formation.on-ice { position: absolute; inset: 0; z-index: 6; display: block; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; pointer-events: none; }
@@ -1186,7 +1184,7 @@ body.setup-shot .rink-stage { width: min(100%, calc((100dvh - var(--setup-top, 4
   font-family: var(--font-display); font-size: clamp(.8125rem, 3.4cqmin, 1.375rem); letter-spacing: .2em; color: var(--text);
   animation: demo-flash 1.4s ease-in-out infinite;
 }
-body.demo-match:not(.in-match) .rink-stage > .demo-badge {
+body.demo-match[data-shot="home"] .rink-stage > .demo-badge {
   display: block; top: 22%; right: 9%; bottom: auto; left: auto; transform: none;
 }
 #skip-goal-replay {
@@ -1208,7 +1206,7 @@ body.demo-match:not(.in-match) .rink-stage > .demo-badge {
   display: none; position: absolute; inset: 0; z-index: 6; flex-direction: column; align-items: center; justify-content: space-between; min-height: 0; padding: 0;
   border: 0; border-radius: inherit; background: none; box-shadow: none; cursor: pointer; pointer-events: auto;
 }
-body.demo-match:not(.in-match) .demo-play { display: flex; }
+body.demo-match[data-shot="home"] .demo-play { display: flex; }
 .demo-play:hover { background: none; }
 .demo-play:focus-visible { outline: .1875rem solid var(--primary); outline-offset: -.1875rem; }
 .demo-hook, .demo-cta {
@@ -1302,55 +1300,55 @@ body.online-match .bug-team { text-transform: none; letter-spacing: .01em; }
 @media (prefers-reduced-motion: reduce) { .bug-tab { transition: opacity .2s; transform: translate(-50%, 0); } }
 /* Compact: phones in landscape (the sidebar) and portrait. */
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
-  body.in-match .stadium:not(.portrait-mode) .scoreboard {
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .scoreboard {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-rows: 2rem 1.5rem 1.875rem; gap: .25rem 0;
     grid-template-areas: "pause pause tools" "left left left" "home status away"; padding: .375rem;
   }
 }
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
-  body.in-match .stadium:not(.portrait-mode) :is(.bug-center, .bug-right) { display: contents; }
-  body.in-match .stadium:not(.portrait-mode) .match-tools { grid-area: pause; justify-self: start; position: static; transform: none; gap: .125rem; }
-  body.in-match .match-tools .stadium-tool-btn { width: 2rem; height: 2rem; min-height: 0; padding: .25rem; }
-  body.in-match .stadium:not(.portrait-mode) .stadium-toolbar { grid-area: tools; position: static; transform: none; justify-self: end; gap: .125rem; }
-  body.in-match .stadium-toolbar .stadium-tool-btn { width: 1.75rem; height: 1.75rem; min-height: 0; padding: .3125rem; }
-  body.in-match .stadium:not(.portrait-mode) .bug-left { grid-area: left; justify-self: center; align-items: center; gap: .375rem; }
-  body.in-match .stadium:not(.portrait-mode) :is(.bug-brand, .bug-modes) { height: auto; padding: 0; background: none; border: 0; gap: .25rem; }
-  body.in-match .stadium:not(.portrait-mode) .bug-brand img { height: 1.375rem; }
-  body.in-match .stadium:not(.portrait-mode) .bug-mode { font-size: .75rem; }
-  body.in-match .stadium:not(.portrait-mode) .bug-team { height: 1.875rem; justify-content: space-between; font-size: .8125rem; }
-  body.in-match .stadium:not(.portrait-mode) .bug-team > span:not(.bug-score) { padding: 0 .375rem; }
-  body.in-match .stadium:not(.portrait-mode) .bug-score { min-width: 1.625rem; padding: 0 .3125rem; }
-  body.in-match .stadium:not(.portrait-mode) .bug-score strong { font-size: 1.375rem; }
-  body.in-match .stadium:not(.portrait-mode) .turn-long { display: none; }
-  body.in-match .stadium:not(.portrait-mode) .turn-short { display: inline; }
-  body.in-match .stadium:not(.portrait-mode) .bug-home { grid-area: home; border-radius: .375rem 0 0 .375rem; }
-  body.in-match .stadium:not(.portrait-mode) .bug-away { grid-area: away; border-radius: 0 .375rem .375rem 0; }
-  body.in-match .stadium:not(.portrait-mode) .bug-status {
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) :is(.bug-center, .bug-right) { display: contents; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .match-tools { grid-area: pause; justify-self: start; position: static; transform: none; gap: .125rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .match-tools .stadium-tool-btn { width: 2rem; height: 2rem; min-height: 0; padding: .25rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .stadium-toolbar { grid-area: tools; position: static; transform: none; justify-self: end; gap: .125rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium-toolbar .stadium-tool-btn { width: 1.75rem; height: 1.75rem; min-height: 0; padding: .3125rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .bug-left { grid-area: left; justify-self: center; align-items: center; gap: .375rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) :is(.bug-brand, .bug-modes) { height: auto; padding: 0; background: none; border: 0; gap: .25rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .bug-brand img { height: 1.375rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .bug-mode { font-size: .75rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .bug-team { height: 1.875rem; justify-content: space-between; font-size: .8125rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .bug-team > span:not(.bug-score) { padding: 0 .375rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .bug-score { min-width: 1.625rem; padding: 0 .3125rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .bug-score strong { font-size: 1.375rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .turn-long { display: none; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .turn-short { display: inline; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .bug-home { grid-area: home; border-radius: .375rem 0 0 .375rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .bug-away { grid-area: away; border-radius: 0 .375rem .375rem 0; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) .bug-status {
     grid-area: status; height: 1.875rem;
     flex-wrap: wrap; justify-content: center; align-content: center; gap: 0 .25rem; padding: 0 .25rem; font-size: .625rem; line-height: .75rem;
   }
-  body.in-match .stadium:not(.portrait-mode) #blitz-clock { flex-basis: 100%; margin: 0; text-align: center; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium:not(.portrait-mode) #blitz-clock { flex-basis: 100%; margin: 0; text-align: center; }
 }
 @media (orientation: portrait) {
-  body.in-match .scoreboard {
+  body:is([data-shot="match"], [data-shot="replay"]) .scoreboard {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     grid-template-areas: "menu brand tools" "score score score" "status status status";
     gap: .25rem; padding: .1875rem .5rem;
   }
-  body.in-match .match-tools { grid-area: menu; justify-self: start; position: static; transform: none; gap: .125rem; }
-  body.in-match .match-tools .stadium-tool-btn { width: 2rem; height: 2rem; min-height: 0; padding: .25rem; }
-  body.in-match .stadium-toolbar { grid-area: tools; position: static; transform: none; justify-self: end; }
-  body.in-match .bug-left { grid-area: brand; justify-self: center; flex-direction: column; align-items: center; gap: .125rem; }
-  body.in-match :is(.bug-brand, .bug-modes) { height: auto; padding: 0; gap: .25rem; }
-  body.in-match .bug-brand img { height: 1.375rem; }
-  body.in-match .bug-mode { font-size: .75rem; }
-  body.in-match .bug-center {
+  body:is([data-shot="match"], [data-shot="replay"]) .match-tools { grid-area: menu; justify-self: start; position: static; transform: none; gap: .125rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .match-tools .stadium-tool-btn { width: 2rem; height: 2rem; min-height: 0; padding: .25rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium-toolbar { grid-area: tools; position: static; transform: none; justify-self: end; }
+  body:is([data-shot="match"], [data-shot="replay"]) .bug-left { grid-area: brand; justify-self: center; flex-direction: column; align-items: center; gap: .125rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) :is(.bug-brand, .bug-modes) { height: auto; padding: 0; gap: .25rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .bug-brand img { height: 1.375rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .bug-mode { font-size: .75rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .bug-center {
     grid-area: score; justify-self: center; width: min(100%, 28rem);
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  body.in-match .bug-team { height: 2.625rem; justify-content: space-between; }
-  body.in-match .bug-right { grid-area: status; justify-self: center; }
-  body.in-match .bug-status { height: 1.5rem; border-radius: 0; font-size: .75rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .bug-team { height: 2.625rem; justify-content: space-between; }
+  body:is([data-shot="match"], [data-shot="replay"]) .bug-right { grid-area: status; justify-self: center; }
+  body:is([data-shot="match"], [data-shot="replay"]) .bug-status { height: 1.5rem; border-radius: 0; font-size: .75rem; }
 }
 
 /* The score is the match HUD. Tools sit at the edges, and each layout gives the score its own space. */
@@ -1358,10 +1356,10 @@ body.online-match .bug-team { text-transform: none; letter-spacing: .01em; }
 .ball-page .scoreboard .bug-score strong { font-size: clamp(1.5rem, 2.8vw, 2.5rem); }
 .scoreboard .bug-home { border-radius: .625rem 0 0 .625rem; }
 .scoreboard .bug-away { border-radius: 0 .625rem .625rem 0; }
-body:not(.in-match) .scoreboard { padding-inline: .25rem; }
-body.in-match .stadium-actions :is(.stadium-super-btn, #launch) { font-size: .9375rem; }
-body.in-match #launch { height: 3rem; font-size: 1.0625rem; }
-body.in-match .shot-buttons button { font-size: .8125rem; padding-inline: .375rem; }
+body[data-shot="home"] .scoreboard { padding-inline: .25rem; }
+body:is([data-shot="match"], [data-shot="replay"]) .stadium-actions :is(.stadium-super-btn, #launch) { font-size: .9375rem; }
+body:is([data-shot="match"], [data-shot="replay"]) #launch { height: 3rem; font-size: 1.0625rem; }
+body:is([data-shot="match"], [data-shot="replay"]) .shot-buttons button { font-size: .8125rem; padding-inline: .375rem; }
 @media (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px))) {
   .scoreboard { column-gap: .75rem; }
   .scoreboard .bug-team { height: clamp(2.625rem, 4.5vw, 3.625rem); }
@@ -1370,21 +1368,21 @@ body.in-match .shot-buttons button { font-size: .8125rem; padding-inline: .375re
   .bug-status { font-size: 1rem; }
   .match-tools .stadium-tool-btn { width: 2.625rem; height: 2.625rem; }
   .match-tools .stadium-tool-btn > svg { width: 1.25rem; height: 1.25rem; }
-  body.in-match .stadium-actions { grid-template-columns: minmax(0, 10rem) minmax(0, 12rem) minmax(0, 13rem); }
-  body.in-match #launch { height: 3.375rem; font-size: 1.1875rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium-actions { grid-template-columns: minmax(0, 10rem) minmax(0, 12rem) minmax(0, 13rem); }
+  body:is([data-shot="match"], [data-shot="replay"]) #launch { height: 3.375rem; font-size: 1.1875rem; }
 }
 @media (orientation: portrait) and (max-width: 30rem) {
-  body.in-match .stadium-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
-  body.in-match .stadium-actions > .shot-controls { grid-row: span 2; }
-  body.in-match .stadium-actions > :is(.stadium-super-controls, #launch) { grid-column: 2; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium-actions > .shot-controls { grid-row: span 2; }
+  body:is([data-shot="match"], [data-shot="replay"]) .stadium-actions > :is(.stadium-super-controls, #launch) { grid-column: 2; }
 }
 
 /* Replay viewer: the timeline (goal and card marks above it) over the playback controls, in place
    of the planning controls. */
 .replay-bar { display: none; flex: 1 1 100%; gap: .375rem; min-width: 0; }
-body.replay-match .replay-bar { display: grid; grid-column: 1 / -1; }
-body.replay-match .stadium-actions { grid-template-columns: minmax(0, 1fr); }
-body.replay-match .stadium-actions > :not(.replay-bar), body.replay-match #field-spin { display: none !important; }
+body[data-shot="replay"] .replay-bar { display: grid; grid-column: 1 / -1; }
+body[data-shot="replay"] .stadium-actions { grid-template-columns: minmax(0, 1fr); }
+body[data-shot="replay"] .stadium-actions > :not(.replay-bar), body[data-shot="replay"] #field-spin { display: none !important; }
 .replay-track { position: relative; padding-top: .875rem; }
 #replay-seek { display: block; width: 100%; margin: 0; accent-color: var(--primary); }
 .replay-marks { position: absolute; top: 0; left: .5rem; right: .5rem; height: .75rem; }

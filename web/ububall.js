@@ -25,7 +25,10 @@
   fieldView.anonymous = false;
   // The replay viewer (see watchReplay), and the match being recorded for the replay library.
   let theater = null, recording = null, recordingOnline = false, restoredMatch = false;
-  let cast = null, setupShot = false; // The team setup shot and its skating cast (see camera()).
+  let cast = null, shot = 'home', returnShot = 'home', returnPortrait = false, handoffToMatch = false;
+  const isMatchShot = (s = shot) => s === 'match' || s === 'replay';
+  const isSetupShot = (s = shot) => s === 'team' || s === 'rules';
+  if (document.body?.dataset && !document.body.dataset.shot) document.body.dataset.shot = shot;
   // While a video export renders, effects and sounds run on its clock (ms) instead of the wall clock,
   // sounds go to its offline audio, and the field draws at its size.
   let videoClock = null, videoAudio = null, cardShot = false;
@@ -61,7 +64,7 @@
     planPausedAt = localPlayBlocked() ? now : null;
   }
   function localPlayBlocked() {
-    return (!inMatch && !demo) || document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(document.querySelector('.game-dialog[open]')) || Boolean(foulInfo && !online?.active);
+    return (shot !== 'match' && shot !== 'replay' && !demo) || document.hidden || $('roster-dialog').open || $('pause-menu').open || $('match-help').open || $('stats-dialog').open || Boolean(document.querySelector('.game-dialog[open]')) || Boolean(foulInfo && !online?.active);
   }
   function updateLocalPlanClock(blocked) {
     if (online?.active || phase !== 'plan' || !blitzMode()) return;
@@ -353,6 +356,8 @@
   function updateFoulInfo() {
     if (!foulInfo) return;
     if (foulInfo.kind === 'crease' ? !fouls.crease[foulInfo.team] : !stalling()) { foulInfo = null; foulBox.hidden = true; return; }
+    if (cameraMove) { foulBox.hidden = true; return; }
+    foulBox.hidden = false;
     const [title, lines] = foulInfoLines(), key = title + JSON.stringify(lines);
     if (key !== foulInfoKey) {
       foulInfoKey = key;
@@ -492,7 +497,7 @@
       : 'Drag from an ubu toward your target. Drag farther for more power.';
   }
   function updateFirstTurnGuide() {
-    const visible = firstTurnStep !== null && phase === 'plan' && !online?.active;
+    const visible = firstTurnStep !== null && shot === 'match' && !cameraMove && phase === 'plan' && !online?.active;
     $('first-turn-guide').hidden = !visible;
     if (!visible) return;
     if (!drag && plans.some(plan => plan.power > 0)) firstTurnStep = 'launch';
@@ -513,7 +518,7 @@
   }
   function animateFirstTurnGuide(time, active) {
     const arrow = $('first-turn-arrow');
-    if (!active || firstTurnStep !== 'aim' || phase !== 'plan' || drag !== null || online?.active || !fieldBox) {
+    if (!active || shot !== 'match' || cameraMove || firstTurnStep !== 'aim' || phase !== 'plan' || drag !== null || online?.active || !fieldBox) {
       if (firstTurnStarted !== null) {
         firstTurnStarted = null; arrow.removeAttribute('d'); hideFinger();
       }
@@ -1198,7 +1203,7 @@
   function positionSpinControl() {
     const control = $('field-spin');
     control.hidden = false;
-    const visible = phase === 'plan' && drag === null && spinSlider;
+    const visible = shot === 'match' && !cameraMove && phase === 'plan' && drag === null && spinSlider;
     control.style.visibility = visible ? 'visible' : 'hidden';
     control.inert = !visible;
     if (!visible) return;
@@ -1214,7 +1219,7 @@
   }
   function fitStadium() {
     if (!stageArea || !rinkStage || !rinkWrap) return;
-    if (!fieldView.portrait && !inMatch) {
+    if (!fieldView.portrait && !isMatchShot()) {
       visibleRinkHeight = 600;
       rinkStage.style.width = '';
       rinkStage.style.height = '';
@@ -1278,23 +1283,47 @@
   // to the box it now has, so the rink glides between the home, setup and match layouts. Portrait
   // play and reduced motion cut. See docs/rink-stage.md.
   let cameraMove = null;
+  const playableShot = () => shot === 'match' && !cameraMove;
   function camera(change) {
     const from = rinkStage.getBoundingClientRect(), turned = fieldView.portrait;
     if (cameraMove) { cameraMove.cancel(); cameraMove = null; stadium.classList.remove('camera-moving'); }
     change();
     layoutDirty = true; draw();
     const to = rinkStage.getBoundingClientRect();
-    if (turned || fieldView.portrait || reducedMotion.matches || document.hidden || !from.width || !to.width) return;
+    if (!rinkStage.animate || turned || fieldView.portrait || reducedMotion.matches || document.hidden || !from.width || !to.width) return;
     const dx = from.left + from.width / 2 - to.left - to.width / 2, dy = from.top + from.height / 2 - to.top - to.height / 2;
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(from.width - to.width) < 1) return;
     stadium.classList.add('camera-moving');
     const move = cameraMove = rinkStage.animate([{ transform: `translate(${dx}px, ${dy}px) scale(${from.width / to.width})` }, { transform: 'none' }],
       { duration: 520, easing: 'cubic-bezier(.3, .8, .2, 1)' });
+    positionSpinControl(); updateFirstTurnGuide(); updateFoulInfo();
     move.onfinish = () => {
       if (cameraMove !== move) return;
       cameraMove = null; stadium.classList.remove('camera-moving');
+      updateFirstTurnGuide();
       layoutDirty = true; draw(); // The rink's box was measured mid-move.
     };
+  }
+  function setShot(next, { keepPortrait = false } = {}) {
+    if (shot === next && document.body?.dataset?.shot === next) return;
+    if (drag !== null && next !== 'match') endCanvasDrag();
+    camera(() => {
+      shot = next;
+      if (document.body?.dataset) document.body.dataset.shot = next;
+      if (isSetupShot(next)) {
+        scrollTo(0, 0);
+        setPortrait(false);
+        fitSetupShot();
+      } else if (isMatchShot(next)) {
+        if (keepPortrait) setPortrait(returnPortrait);
+        else fitOrientation();
+      } else {
+        setPortrait(false);
+      }
+      syncFullscreenButton();
+      fitScorebug();
+    });
+    updateReplaySkip(shot === 'match' ? goalReplay : null);
   }
   // The cast: whoever is on the ice (demo, match or replay) can skate off and back without the game
   // knowing. Only displayed positions move, and each is put back exactly; while the cast is away the
@@ -1572,18 +1601,21 @@
     fieldView.bodies = kickoff(true); buildTeam(); phase = 'replay'; selected = 0; drag = null;
     theater = createReplaySession(replay, { file, speed: Number($('replay-speed').value), anonymous: Boolean(replay.anonymous) });
     theater.bodies = fieldView.bodies;
-    document.body.classList.add('replay-match');
     say(`Replay · ${names[0]} vs ${names[1]} · ${new Date(replay.recorded).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`);
-    replayMarks(); enterMatch(); seekReplay(0, theater);
+    replayMarks(); enterMatch('replay'); seekReplay(0, theater);
   }
-  function clearReplayViewer() {
+  function clearReplayViewer(toMatch = true) {
     if (!theater) return false;
-    theater = null; document.body.classList.remove('replay-match');
+    theater = null;
+    if (toMatch && typeof shot !== 'undefined' && shot === 'replay') {
+      if (typeof setShot === 'function') setShot('match');
+      else { shot = 'match'; if (document.body?.dataset) document.body.dataset.shot = 'match'; }
+    }
     stopFanfare(); gameAudio()?.stop?.(); clearEffects();
     return true;
   }
   function endReplay() {
-    if (!clearReplayViewer()) return;
+    if (!clearReplayViewer(false)) return;
     $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
     phase = 'over'; recording = null;
     if (typeof updateHome === 'function') updateHome();
@@ -2298,7 +2330,7 @@
       }
     });
     stopFanfare(); gameAudio()?.stop();
-    theater = null; document.body.classList.remove('replay-match'); clearEffects();
+    theater = null; clearEffects(); enterMatch('match');
     $('home-label').textContent = 'You'; $('opponent-label').textContent = 'CPU'; $('opponent-heading').textContent = 'CPU team';
     roster = entries.slice(0, 3).map((e, i) => e.key ? e : { ...e, key: `replay-${i}`, label: e.label || 'Replay ubu' });
     simBodies = field;
@@ -2794,7 +2826,7 @@
   $('replay-exit').onclick = () => { exitMatchMode(); if (history.state?.match) history.back(); };
   // Space plays and pauses and the arrows step by turn, unless a control has focus.
   document.addEventListener('keydown', event => {
-    if (!theater || document.querySelector('dialog[open]') || event.target.closest?.('button, input, select, textarea')) return;
+    if (!theater || shot !== 'replay' || cameraMove || document.querySelector('dialog[open]') || event.target.closest?.('button, input, select, textarea')) return;
     const button = { ' ': 'replay-play', ArrowLeft: 'replay-prev', ArrowRight: 'replay-next' }[event.key];
     if (button) { event.preventDefault(); $(button).click(); }
   });
@@ -3007,7 +3039,7 @@
     P.startTurn(simBodies, turnPlans, liveFx.super);
     syncViewBodies(simBodies, 0);
     elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
-    if (!demo) banner('Launch!', 800, 'launch');
+    if (!demo && shot === 'match') banner('Launch!', 800, 'launch');
   };
   for (const [id, key, scale] of [['shot-spin', 'spin', .01]]) {
     $(id).oninput = () => {
@@ -3059,10 +3091,11 @@
     };
   }
   fieldView.canvas.addEventListener('wheel', e => {
-    if (inMatch && !foulInfo && !e.ctrlKey) wheelKnob(e, 'spin', selected);
+    if (playableShot() && !foulInfo && !e.ctrlKey) wheelKnob(e, 'spin', selected);
   }, { passive: false });
   let tapGuards = false;
   fieldView.canvas.onpointerdown = event => {
+    if (!isMatchShot() || cameraMove) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     if (drag !== null) return;
     gameAudio()?.getAudioContext();
@@ -3070,7 +3103,7 @@
     const warning = warningAt(point(event));
     if (warning) { openFoulInfo(warning); return; }
     if (foulInfo) { closeFoulInfo(); return; }
-    if (phase !== 'plan') return;
+    if (!playableShot() || phase !== 'plan') return;
     const p = point(event);
     const target = fieldTarget(event);
     if (target.index < 0) return;
@@ -3090,13 +3123,14 @@
     sync(); draw();
   };
   fieldView.canvas.onpointermove = event => {
+    if (!isMatchShot() || cameraMove) { fieldView.canvas.style.cursor = 'default'; return; }
     const p = point(event);
-    if (drag !== event.pointerId || phase !== 'plan') {
+    if (drag !== event.pointerId || !playableShot() || phase !== 'plan') {
       if (warningAt(p)) fieldView.canvas.style.cursor = 'pointer';
-      else if (phase === 'plan') {
+      else if (playableShot() && phase === 'plan') {
         const target = fieldTarget(event);
         fieldView.canvas.style.cursor = target.index < 0 ? 'default' : target.mode === 'arrow' ? 'grab' : 'crosshair';
-      }
+      } else fieldView.canvas.style.cursor = 'default';
       return;
     }
     const b = fieldView.bodies[selected];
@@ -3151,7 +3185,7 @@
   };
   const replaySkip = $('skip-goal-replay'), replaySkipHint = replaySkip.firstElementChild;
   function updateReplaySkip(replay) {
-    if (!replay || demo || online?.spectating) {
+    if (!replay || shot !== 'match' || demo || online?.spectating) {
       replaySkip.hidden = true;
       return;
     }
@@ -3702,7 +3736,7 @@
   const modeSummary = () => { $('mode-summary').textContent = ububallMatch.modeName(chosenMode()); };
   for (const rule of ububallMatch.RULES) $('rule-' + rule).addEventListener('change', modeSummary);
   function setupStep(step) {
-    const sheet = $('roster-dialog');
+    const sheet = $('roster-dialog'), hadLineup = $('roster-slots').childElementCount > 0;
     sheet.dataset.step = step; sheet.dataset.for = setupFor;
     $('sheet-next').textContent = setupFor === 'rules' ? 'Apply rules' : setupFor === 'online' ? 'Next: online match' : 'Choose team';
     $('sheet-next').classList.toggle('primary', setupFor !== 'cpu');
@@ -3727,24 +3761,32 @@
       rosterSlots();
     } else if (sheetDocked()) {
       // The docked sheet keeps a CPU match's lineup on the ice through the rules step.
-      if (setupFor === 'cpu') rosterSlots(); else $('roster-slots').replaceChildren();
+      if (setupFor === 'cpu') rosterSlots();
+      else if (!sheet.open) $('roster-slots').replaceChildren();
     }
     $('start-match').textContent = setupFor === 'pick' ? 'Use team' : setupFor !== 'lobby' ? 'Start match' : lobbyView?.ready ? 'Change team' : 'Ready to play';
+    if (sheet.open && sheetDocked()) {
+      setShot(step === 'team' ? 'team' : 'rules');
+      const wantsLineup = step === 'team' || setupFor === 'cpu';
+      if (!hadLineup && wantsLineup && $('roster-slots').childElementCount) skateLineup(true);
+      else if (hadLineup && !wantsLineup) skateLineup(false);
+    }
   }
-  // The setup shot. On a wide screen outside a match the team sheet docks over the away half of a
-  // game-size rink: the cast skates off and the lineup stands at its kickoff spots on the ice.
-  // Elsewhere (phones, the Activity, mid-match) the sheet is a modal with its own formation.
+  // The rules and team setup shots. On a wide screen outside Discord the team sheet docks over the
+  // away half of a game-size rink: the cast skates off and the lineup stands at its kickoff spots.
+  // Elsewhere (phones, the Activity) the sheet is a modal with its own formation.
   const wideScreen = matchMedia('(min-width: 56rem) and (orientation: landscape) and (not ((pointer: coarse) and (max-height: 600px)))');
+  const canDock = () => !inDiscord && location.pathname === '/' && wideScreen.matches;
   const sheetDocked = () => $('roster-dialog').classList.contains('docked');
   let lineupMove = null;
   function fitSetupShot() {
-    if (setupShot) document.body.style.setProperty('--setup-top', Math.round(document.querySelector('.ball-page').getBoundingClientRect().top + scrollY) + 'px');
+    if (isSetupShot()) document.body.style.setProperty('--setup-top', Math.round(document.querySelector('.ball-page').getBoundingClientRect().top + scrollY) + 'px');
   }
   function skateLineup(on) {
     const slots = $('roster-slots');
     lineupMove?.cancel(); lineupMove = null;
     slots.inert = !on;
-    if (reducedMotion.matches) { if (!on) slots.replaceChildren(); return; }
+    if (reducedMotion.matches || !slots.animate) { if (!on) slots.replaceChildren(); return; }
     const off = { translate: '-45cqw 0', opacity: 0 }, at = { translate: '0 0', opacity: 1 };
     const move = lineupMove = slots.animate(on ? [off, at] : [at, off], { duration: on ? 480 : 260, delay: on ? 240 : 0, easing: on ? 'cubic-bezier(.2, .8, .2, 1)' : 'ease-in', fill: 'both' });
     move.onfinish = () => {
@@ -3757,7 +3799,7 @@
   function prepareSheet() {
     const sheet = $('roster-dialog'), slots = $('roster-slots');
     if (sheet.open) return;
-    const dock = !inMatch && !inDiscord && location.pathname === '/' && wideScreen.matches;
+    const dock = canDock();
     lineupMove?.cancel(); lineupMove = null; slots.inert = false;
     sheet.classList.toggle('docked', dock); slots.classList.toggle('on-ice', dock);
     if (dock) rinkStage.append(slots); else $('roster-super').before(slots);
@@ -3765,31 +3807,45 @@
   function openSheet() {
     const sheet = $('roster-dialog');
     if (sheet.open) return;
-    if (!sheetDocked()) { sheet.showModal(); return; }
+    if (!sheetDocked()) {
+      if (setupFor === 'lobby' && shot !== 'home') setShot('home');
+      sheet.showModal();
+      return;
+    }
+    if (!isSetupShot()) {
+      returnShot = setupFor === 'lobby' ? 'home' : shot;
+      returnPortrait = setupFor === 'lobby' ? false : fieldView.portrait;
+    }
+    for (const id of ['pause-menu', 'match-help', 'stats-dialog', 'match-summary', 'replays-dialog', 'online-dialog']) {
+      if ($(id)?.open) $(id).close();
+    }
+    if (statDrawer.matches(':popover-open')) statDrawer.hidePopover();
+    closeFoulInfo();
     sheet.show();
-    setupShot = true;
-    camera(() => { scrollTo(0, 0); document.body.classList.add('setup-shot'); fitSetupShot(); });
-    castTo(true); skateLineup(true);
+    setShot(sheet.dataset.step === 'team' ? 'team' : 'rules');
+    castTo(true);
+    if ($('roster-slots').childElementCount) skateLineup(true);
   }
   // Leaving for a match hands the camera move to enterMatch; the new match's ubus stand where the lineup stood.
   function leaveSetupShot(toMatch = false) {
-    if (!setupShot) return;
-    setupShot = false;
+    handoffToMatch = false;
+    if (!isSetupShot()) return;
     if (toMatch) {
       lineupMove?.cancel(); lineupMove = null; $('roster-slots').replaceChildren();
-      document.body.classList.remove('setup-shot');
       if (cast) { cancelAnimationFrame(cast.frame); castHome(); cast = null; }
       fieldView.castHidden = false; rinkWrap.classList.remove('cast-away');
       return;
     }
-    camera(() => document.body.classList.remove('setup-shot'));
-    castTo(false); skateLineup(false);
+    const back = returnShot === 'replay' && !theater ? 'home' : returnShot;
+    setShot(back, { keepPortrait: isMatchShot(back) });
+    castTo(false);
+    if ($('roster-slots').childElementCount) skateLineup(false);
   }
-  $('roster-dialog').addEventListener('close', () => leaveSetupShot());
-  wideScreen.addEventListener('change', () => { if (setupShot && !wideScreen.matches) $('roster-dialog').close(); });
+  $('roster-dialog').addEventListener('close', () => { if (!handoffToMatch) leaveSetupShot(false); });
+  wideScreen.addEventListener('change', () => { if (isSetupShot() && !wideScreen.matches) $('roster-dialog').close(); });
   // A docked sheet is not modal, so Escape is handled here: back a step, as the modal's cancel does, or close.
   addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || !setupShot || event.defaultPrevented || document.querySelector('dialog:modal, :popover-open')) return;
+    if (event.key !== 'Escape' || !isSetupShot() || event.defaultPrevented || document.querySelector('dialog:modal, :popover-open')) return;
     if ($('roster-dialog').dispatchEvent(new Event('cancel', { cancelable: true }))) $('roster-dialog').close();
   });
   function openSetup(step, purpose = 'cpu', mode = cpuMode, level = cpuLevel, team = roster) {
@@ -3851,7 +3907,11 @@
   function closeLobby() {
     lobbyGeneration++;
     if (setupFor !== 'lobby') return;
-    if ($('roster-dialog').dataset.for === 'lobby') $('roster-dialog').close();
+    const toMatch = Boolean(online?.state?.game && online.state.phase !== 'lobby');
+    if ($('roster-dialog').dataset.for === 'lobby') {
+      if (toMatch && isSetupShot()) handoffToMatch = true;
+      $('roster-dialog').close();
+    }
     setupFor = 'cpu'; lobbyView = null;
     $('roster-scroll').hidden = false; $('lobby-panel').hidden = true;
     $('roster-dialog').removeAttribute('data-locked');
@@ -3922,6 +3982,7 @@
         if (!await confirmCpuEnd(true)) return;
         finishCpuMatch();
       }
+      if (isSetupShot()) handoffToMatch = true;
       $('roster-dialog').close();
       $('pause-menu').close();
       startCpuMatch(team, mode, level);
@@ -3976,16 +4037,20 @@
   let fullscreenRequest = null;
   const ownsFullscreen = () => document.fullscreenElement === fullscreenTarget;
 
-  function updateFullscreenUI() {
+  function syncFullscreenButton() {
     const owned = ownsFullscreen();
     const active = Boolean(document.fullscreenElement) || fullscreenDisplay.matches;
-    document.body.classList.toggle('match-fullscreen', inMatch && active);
-    btnFullscreen.hidden = !inMatch || inDiscord || (!owned && (active || !document.fullscreenEnabled));
+    document.body.classList.toggle('match-fullscreen', isMatchShot() && active);
+    btnFullscreen.hidden = !isMatchShot() || inDiscord || (!owned && (active || !document.fullscreenEnabled));
     btnFullscreen.disabled = Boolean(fullscreenRequest);
     const label = owned ? 'Exit fullscreen' : 'Enter fullscreen';
     btnFullscreen.title = label;
     btnFullscreen.setAttribute('aria-label', label);
     btnFullscreen.setAttribute('aria-pressed', String(owned));
+  }
+
+  function updateFullscreenUI() {
+    syncFullscreenButton();
     fitScorebug();
     layoutDirty = true;
     draw();
@@ -4035,17 +4100,15 @@
   if (btnRotate) btnRotate.onclick = toggleRotate;
   document.addEventListener('fullscreenchange', updateFullscreenUI);
   fullscreenDisplay.addEventListener('change', updateFullscreenUI);
-  // Match mode: the field fills the screen and the site chrome hides. Entering adds a history
-  // entry, so the system back button opens the menu instead of leaving the match.
-  let inMatch = false;
-
+  // Match and replay shots: the stadium fills the screen and the site chrome steps aside.
+  // Entering adds a history entry, so the system back button opens the menu instead of leaving.
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       if (foulInfo) closeFoulInfo();
-      else if (inMatch && !ownsFullscreen() && !document.querySelector('dialog[open]')) openPause();
+      else if (isMatchShot() && !ownsFullscreen() && !document.querySelector('dialog[open]')) openPause();
       return;
     }
-    if (!inMatch || theater || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (!playableShot() || theater || e.ctrlKey || e.altKey || e.metaKey) return;
     if (document.querySelector('dialog[open]') || e.target.closest?.('button, a, input, select, textarea, [tabindex], [contenteditable]')) return;
 
     if (e.key === ' ') {
@@ -4121,7 +4184,7 @@
   });
   const portraitScreen = matchMedia('(orientation: portrait)');
   function setPortrait(value) { if (fieldView.portrait !== value) toggleRotate(); }
-  function fitOrientation() { if (inMatch) setPortrait(portraitScreen.matches); }
+  function fitOrientation() { if (isMatchShot()) setPortrait(portraitScreen.matches); }
   function matchInProgress() { return !demo && phase !== 'over' && Boolean(recording && !online?.active); }
   function updateHome() {
     const active = online?.active || matchInProgress();
@@ -4133,7 +4196,7 @@
     $('quick-play-setup').textContent = [ububallMatch.modeName(mode), level[0].toUpperCase() + level.slice(1),
       team ? 'Last team' : signedIn() ? 'Your team' : 'Guest team'].join(' · ');
   }
-  function enterMatch() {
+  function enterMatch(next = 'match') {
     if (location.pathname !== '/') return;
     if (demo) { stopDemo(); newMatch(true); }
     if (!history.state?.match) {
@@ -4145,18 +4208,18 @@
       }
       history.pushState({ match: true }, '', url);
     }
-    if (inMatch) return;
-    camera(() => {
-      leaveSetupShot(true);
-      inMatch = true; document.body.classList.add('in-match');
-      fitOrientation(); updateFullscreenUI();
-    });
+    leaveSetupShot(true);
+    setShot(next);
   }
   function exitMatchMode() {
     closeFirstTurnGuide();
     closeFoulInfo();
     closeSummary();
+    stopFanfare();
+    gameAudio()?.stopMotion?.();
     if (isExporting()) { videoCancelled = true; cancelVideo?.(); }
+    returnShot = 'home';
+    returnPortrait = false;
     for (const dialogId of ['match-help', 'pause-menu', 'replays-dialog', 'export-dialog', 'share-dialog', 'roster-dialog']) {
       if ($(dialogId)?.open) $(dialogId).close();
     }
@@ -4164,13 +4227,14 @@
     endReplay();
     if (!matchInProgress()) cpuClient.dispose?.();
     if (location.pathname !== '/') demoClient.dispose?.();
-    if (!inMatch) return;
-    camera(() => {
-      inMatch = false; document.body.classList.remove('in-match');
-      setPortrait(false);
-    });
-    void exitOwnedFullscreen();
-    updateFullscreenUI(); updateHome();
+    if (shot !== 'home') {
+      lineupMove?.cancel(); lineupMove = null; $('roster-slots').replaceChildren();
+      if (cast) { cancelAnimationFrame(cast.frame); castHome(); cast = null; }
+      fieldView.castHidden = false; rinkWrap.classList.remove('cast-away');
+      setShot('home');
+      void exitOwnedFullscreen();
+    }
+    updateHome();
     if (!matchInProgress() && location.pathname === '/') startDemo();
   }
   function openPause() {
@@ -4285,9 +4349,17 @@
   portraitScreen.addEventListener('change', () => { gameUi.updateScale?.(); fitOrientation(); draw(); });
   window.addEventListener('popstate', () => {
     if (location.pathname !== '/') return;
-    if (history.state?.match) enterMatch();
-    else if (online?.spectating) void online.leave().then(exitMatchMode);
-    else if (inMatch) { history.pushState({ match: true }, '', location.href); openPause(); }
+    if (history.state?.match) {
+      if (online?.active || matchInProgress()) enterMatch('match');
+      else if (theater) enterMatch('replay');
+    } else if (online?.spectating) void online.leave().then(exitMatchMode);
+    else if (isSetupShot() && isMatchShot(returnShot)) {
+      history.pushState({ match: true }, '', location.href);
+      if ($('roster-dialog').dispatchEvent(new Event('cancel', { cancelable: true }))) $('roster-dialog').close();
+    } else if (isMatchShot()) {
+      history.pushState({ match: true }, '', location.href);
+      openPause();
+    }
   });
   const screenGuard = async nextScreen => {
     if (nextScreen === 'play') return true;
@@ -4310,7 +4382,10 @@
     exitMatchMode();
     link.click();
   }, true);
-  window.addEventListener('ubu:screen', event => { if (event.detail !== 'play') exitMatchMode(); else updateHome(); });
+  window.addEventListener('ubu:screen', event => {
+    if (event.detail !== 'play') exitMatchMode();
+    else { updateHome(); if (!matchInProgress() && !online?.active && shot === 'home') startDemo(); }
+  });
   function networkMoves() {
     return plans.map((p, i) => ({ angle: p.angle + (online?.state?.seat ? Math.PI : 0), power: p.power,
       spin: p.spin || 0, superArm: Boolean(fieldView.bodies[i].superArm), guard: Boolean(p.guard) }));
@@ -4556,8 +4631,10 @@
     closeLobby,
     onState(s) {
       if (typeof clearReplayViewer === 'function') clearReplayViewer();
-      if (!document.body.classList.contains('online-match')) { stopDemo(); endGoalReplay(); stopFanfare(); enterMatch(); }
+      if (!document.body.classList.contains('online-match')) { stopDemo(); endGoalReplay(); stopFanfare(); }
       document.body.classList.add('online-match');
+      if (typeof setupFor !== 'undefined' && setupFor === 'rules' && (!s.canChangeRules || s.phase !== 'plan') && $('roster-dialog')?.open) $('roster-dialog').close();
+      if (s.game && s.phase !== 'lobby') enterMatch('match');
       $('online-open-label').textContent = s.spectator ? 'Watching a match' : 'Online match';
       $('online-open-note').hidden = true;
       const [me, them] = onlineNames(s);
@@ -4754,7 +4831,7 @@
   // at random each game. Saffron's planning is acted out with a pointer, as a how-to for new players.
   const demoClient = createCPUClient(), DEMO_STOP = Symbol('demo stopped');
   let demoRun = 0, demoGame = 0;
-  function demoPaused() { return inMatch || document.hidden || Boolean(foulInfo) || $('field-banner').closest('[data-screen]').hidden || Boolean(document.querySelector('dialog[open]')); }
+  function demoPaused() { return shot !== 'home' || document.hidden || Boolean(foulInfo) || $('field-banner').closest('[data-screen]').hidden || Boolean(document.querySelector('dialog[open]')); }
   // Waits count only while the demo is on screen; a stopped demo ends its walkthrough.
   async function demoWait(run, ms, until = null) {
     let left = ms;
@@ -4771,7 +4848,7 @@
     showMode(fieldView.mode);
   }
   function startDemo() {
-    if (demo || inMatch || online?.active) return;
+    if (demo || shot !== 'home' || matchInProgress() || online?.active) return;
     demo = true; document.body.classList.add('demo-match'); setPortrait(false);
     newDemoGame(); updateHome();
     void demoLoop(++demoRun);

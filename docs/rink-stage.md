@@ -14,28 +14,35 @@ slide in and out around it, like moving through the menus of a video game. Whate
 
 ## Status
 
-Slice 1 is built and awaiting the owner's review of the feel. Not committed.
+Phase 2 is built and awaiting the owner's review. Not committed.
 
-Working now, on a wide desktop screen outside a match (`web/ububall.js`, `web/ububall.css`):
+Working now (`web/index.html`, `web/site.js`, `web/ububall.js`, `web/ububall.css`):
 
-- `camera(change)` glides the rink between the home, setup and match layouts.
-- `castTo(away)` skates whoever is on the ice off and back; the game's bodies are restored exactly.
-- New match and Change team open the setup shot: the rink grows to game size, the team sheet docks
-  over the away half (`.team-sheet.docked`, a non-modal `<dialog>`), and the lineup stands on the
-  ice as position buttons (`.formation.on-ice`). Rules and team are two steps of the same sheet.
-- Start match hands over to the match layout with the new ubus where the lineup stood. Close or
-  Escape returns to home and the cast skates back.
+- `setShot(name)` owns `home`, `rules`, `team`, `match` and `replay` through `body[data-shot]` and
+  `camera(change)`; the `in-match`, `replay-match` and `setup-shot` body classes are gone.
+- Aiming input is gated by `playableShot()` (`shot === 'match' && !cameraMove`); `#field-spin`,
+  `#first-turn-guide` and `.foul-info` hide during a camera move and re-measure when it finishes.
+- `castTo(away)` skates whoever is on the ice off and back; the game's simulation bodies are
+  untouched.
+- On a wide desktop screen outside the Discord Activity, New match, Change team, Change rules and
+  online rematch lobbies open the docked `rules` / `team` shots from `home`, `match` or `replay`,
+  closing pause/summary modals first and restoring the prior shot (and portrait orientation) on
+  cancel or Escape.
+- Pause, stats and summary modals keep working across matches and replays; Watch Replay and Play
+  from Here switch cleanly between `replay` and `match`.
+- Leaving a CPU match returns to `home` (stopping goal fanfare/motion audio and hiding
+  `#skip-goal-replay`), preserves full match state without starting the demo over it, and resumes
+  cleanly into `match`.
 
 Not done or not checked:
 
-- The sheet is still the old modal, with the drawn `.formation`, on phones, in the Discord Activity
-  and when opened during a match (pause → New match, Change rules, after full time).
-- Layout states were checked in the browser at 1024×768 and 1440×900; the moves themselves were
-  not watched in motion. The docked online lobby and a signed-in collection were not exercised
-  (local dev has no session).
-- Scatter and arrival are not in `web/effects.html` yet.
+- The sheet stays a modal, with the drawn `.formation`, on phones and in the Discord Activity
+  (phases 5 and 6).
+- Camera moves and docked transitions are covered by unit tests; live motion in a desktop browser,
+  the docked online lobby and a signed-in collection still warrant interactive visual check.
+- Scatter and arrival are not in `web/effects.html` yet (phase 7).
 
-Next step: owner feedback on slice 1, then phase 2.
+Next step: Phase 3 (Ubu Mint: shared persistent stage layer, lighting, packs on the ice, pack reveal).
 
 ## Decisions (owner, 2026-11-11)
 
@@ -76,12 +83,14 @@ Next step: owner feedback on slice 1, then phase 2.
 
 - `web/app.js` shows one of three `<main data-screen>` blocks by path. The rink exists only inside
   the Play block (`.arena-layout > .stadium > .rink-stage > .rink-wrap > #rink`).
-- `fitStadium()` in `web/ububall.js` sizes the rink; the `in-match` body class switches between the
-  home layout and the match layout in `web/ububall.css` with no transition. Portrait play is a CSS
-  `rotate(-90deg)` on `.rink-wrap`.
-- Team and rules are the modal `#roster-dialog`; `.formation` is a CSS drawing of half a rink.
-- The demo (`startDemo`/`stopDemo`) runs only on `/` outside a match and is disposed on other
-  screens. `theater` is the replay viewer's session.
+- `fitStadium()` in `web/ububall.js` sizes the rink; `body[data-shot]` switches between the `home`,
+  `rules`, `team`, `match` and `replay` layouts in `web/ububall.css` via `setShot(name)`. Portrait
+  play is a CSS `rotate(-90deg)` on `.rink-wrap`.
+- On wide desktop screens, `#roster-dialog` docks over the away half in `rules` and `team` shots
+  with `.formation.on-ice`; on phones and in the Discord Activity it remains a modal with the CSS
+  `.formation` drawing until phases 5–7.
+- The demo (`startDemo`/`stopDemo`) runs only on `/` in `home` when no match is in progress and is
+  disposed on other screens. `theater` is the replay viewer's session.
 - Mint packs are DOM buttons with their own canvases (`web/pack-scene.js`); Collection is the
   `#ubus` grid from `web/ubu-list.js` and `web/site.js`, loaded lazily.
 
@@ -90,14 +99,16 @@ Next step: owner feedback on slice 1, then phase 2.
 ### Stage
 Move the stadium out of the Play block into one persistent layer that all three screens share.
 `app.js` keeps routing by path but stops hiding the rink; a screen change becomes a shot change.
-Slice 1 did not need this (all its shots are on Play); it is the first job of phases 3 and 4.
+Phases 1 and 2 did not need this (all their shots are on Play); it is the first job of phases 3
+and 4.
 
 ### Camera (as built)
-Each shot's layout is ordinary CSS, switched by a body class (`setup-shot`, `in-match`). `camera()`
-measures the rink stage's box, applies the change, measures again and plays the stage from the old
-box to the new one with one transform animation. New shots therefore need only CSS plus a
-`camera()` call around the class change. Portrait play and reduced motion cut. In-plane rotation is
-not built yet; Collection needs it.
+Each shot's layout is ordinary CSS, switched by `body[data-shot]` (`home`, `rules`, `team`, `match`,
+`replay`) via `setShot(name)`. `camera()` measures the rink stage's box, applies the change,
+measures again and plays the stage from the old box to the new one with one transform animation,
+marking `cameraMove` until `onfinish` and then re-measuring field geometry and stage overlays. New
+shots therefore need only CSS plus a `setShot()` pose. Portrait play and reduced motion cut.
+In-plane rotation is not built yet; Collection needs it.
 
 ### Shots
 A shot is a named pose plus the panels that belong to it:
@@ -176,3 +187,12 @@ so it reads as part of the arena.
   Scatter is each ubu flying straight out from centre ice with a spin; the lineup skates in from
   the home goal. Dev note: `npm run dev` serves `dist/public`, so rerun
   `node scripts/prepare-assets.cjs` after editing `web/` and reload.
+- 2026-11-11: Phase 2 built. Replaced `in-match`, `replay-match` and `setup-shot` body classes
+  with `setShot(name)` (`body[data-shot]`: `home`, `rules`, `team`, `match`, `replay`) across
+  `web/index.html`, `web/site.js`, `web/ububall.css` and `web/ububall.js`. Gated aiming input and
+  stage overlays (`#field-spin`, `#first-turn-guide`, `.foul-info`) until `cameraMove` finishes;
+  enabled docked `rules`/`team` shots from `match` and `replay` (Pause → New match, Change rules,
+  Full time → New match, online rematch lobby) with `returnShot` / portrait restoration on cancel;
+  prevented premature `enterMatch` while an online room is still in `lobby`; stopped fanfare/motion
+  audio and preserved CPU match state across Leave → Home → Resume; added Phase 2 unit tests in
+  `test/ububall-effects.test.js`.

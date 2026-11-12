@@ -33,7 +33,9 @@ test('match shortcuts do not hijack focused buttons or other controls', () => {
       addEventListener(type, listener) { if (type === 'keydown') keydown = listener; },
       querySelector() { return null; }
     },
-    inMatch: true, theater: null, foulInfo: null, selected: 0,
+    shot: 'match', cameraMove: null, theater: null, foulInfo: null, selected: 0,
+    isMatchShot: () => context.shot === 'match' || context.shot === 'replay',
+    playableShot: () => context.shot === 'match' && !context.cameraMove,
     ownsFullscreen: () => false,
     sync: () => { syncs++; }, draw() {},
     $: id => {
@@ -471,7 +473,7 @@ test('local Blitz preserves the deadline across blocked frames and hidden time',
   const context = {
     performance: { now: () => now }, document: { hidden: false, querySelector: () => gameDialog ? {} : null },
     $: id => id === 'pause-menu' ? dialog : { open: false },
-    foulInfo: null, online: null, inMatch: true, demo: false, phase: 'plan', matchMode: 'blitz', blitzMode: () => true,
+    foulInfo: null, online: null, shot: 'match', demo: false, phase: 'plan', matchMode: 'blitz', blitzMode: () => true,
     ububallMatch: { planningMilliseconds: () => 5000 }, planDeadline: 0, planPausedAt: null
   };
   const { startPlanClock, refresh } = runInNewContext(code +
@@ -487,8 +489,8 @@ test('local Blitz preserves the deadline across blocked frames and hidden time',
   now = 11100; gameDialog = true; refresh();
   now = 15100; gameDialog = false; refresh();
   assert.equal(context.planDeadline - now, 2000, 'match offers preserve the CPU planning clock');
-  now = 15600; context.inMatch = false; refresh();
-  now = 19600; context.inMatch = true; refresh();
+  now = 15600; context.shot = 'home'; refresh();
+  now = 19600; context.shot = 'match'; refresh();
   assert.equal(context.planDeadline - now, 1500, 'returning home pauses the CPU planning clock');
   context.online = { active: true };
   dialog.open = true; refresh();
@@ -2523,8 +2525,10 @@ test('D4-01, D4-03, D4-06: replay entries preserve keys & super mastery on takeo
     P, ubu, ububallMatch, ububallReplay, structuredClone,
     localStorage: { getItem: () => null, setItem: dummy, removeItem: dummy },
     $,
+    shot: 'home',
     document: {
       body: {
+        dataset: { shot: 'home' },
         classList: {
           add: c => classes.add(c),
           remove: c => classes.delete(c),
@@ -2543,7 +2547,10 @@ test('D4-01, D4-03, D4-06: replay entries preserve keys & super mastery on takeo
     cpuGeneration: 0, cpuClient: { cancel: dummy, dispose: dummy }, videoLogo: dummy,
     showMode: dummy, classicMode: () => false, normalStats: () => ({}),
     anonymousName: i => `Anon ${i}`, anonymousNames: false,
-    buildTeam: dummy, replayMarks: dummy, enterMatch: dummy, updateReplayBar: dummy, updateHome: dummy,
+    buildTeam: dummy, replayMarks: dummy,
+    enterMatch: (next = 'match') => { context.shot = next; context.document.body.dataset.shot = next; },
+    setShot: next => { context.shot = next; context.document.body.dataset.shot = next; },
+    updateReplayBar: dummy, updateHome: dummy,
     clearEffects: dummy, resetPlans: dummy, say: dummy, sync: dummy, draw: dummy,
     recordTrails: dummy, emitSkaterEffects: dummy, updatePopups: dummy, updateEffects: dummy,
     replayEvents: dummy, replayFx: { hit: dummy, wall: dummy, shock: dummy, super: dummy },
@@ -2561,15 +2568,18 @@ test('D4-01, D4-03, D4-06: replay entries preserve keys & super mastery on takeo
     context
   );
 
-  // 1. watchReplay assigns replay-* keys and full superMastery metadata
+  // 1. watchReplay assigns replay-* keys, enters replay shot, and preserves full superMastery metadata
   env.watchReplay(rec, null);
-  assert.equal(classes.has('replay-match'), true);
+  assert.equal(context.shot, 'replay');
+  assert.equal(context.document.body.dataset.shot, 'replay');
   assert.equal(context.teamEntries[0].key, 'replay-0');
   assert.ok(context.teamEntries[0].equippedSuper.bonusTicks > 0, 'watchReplay preserves superMastery bonusTicks');
   assert.ok(context.teamEntries[0].equippedSuper.copies >= 2, 'watchReplay preserves superMastery copies');
 
-  // 2. playFromHere keeps replay-* keys (onGuestTeam does not throw) and applies mastery bonuses to simBodies
+  // 2. playFromHere switches from replay shot to match shot, keeps replay-* keys, and applies mastery bonuses
   env.playFromHere();
+  assert.equal(context.shot, 'match');
+  assert.equal(context.document.body.dataset.shot, 'match');
   assert.equal(context.roster[0].key, 'replay-0');
   assert.equal(env.onGuestTeam(), false, 'onGuestTeam returns false cleanly without TypeError');
   assert.ok(context.simBodies[0].superBonusTicks > 0, 'playFromHere preserves superBonusTicks on simBodies');
@@ -2579,18 +2589,18 @@ test('D4-01, D4-03, D4-06: replay entries preserve keys & super mastery on takeo
   env.watchReplay(rec, null);
   env.endReplay();
   assert.equal(context.theater, null);
-  assert.equal(classes.has('replay-match'), false);
   assert.equal(context.phase, 'over', 'endReplay leaves phase === over so exitMatchMode resumes Home demo');
   assert.equal(context.recording, null, 'endReplay does not create a phantom CPU match recording');
   assert.equal(newMatchCalls, 0);
 
-  // 4. Starting newMatch while replay viewer is active clears theater and replay-match class (D4-03)
+  // 4. Starting newMatch while replay viewer is active clears theater and switches replay shot to match shot (D4-03)
   env.watchReplay(rec, null);
   assert.ok(context.theater);
-  assert.equal(classes.has('replay-match'), true);
+  assert.equal(context.shot, 'replay');
   env.newMatch();
   assert.equal(context.theater, null, 'newMatch clears active theater');
-  assert.equal(classes.has('replay-match'), false, 'newMatch removes replay-match class');
+  assert.equal(context.shot, 'match', 'newMatch folds replay shot into match shot');
+  assert.equal(context.document.body.dataset.shot, 'match');
   assert.equal(context.phase, 'plan');
 });
 
@@ -3067,4 +3077,341 @@ test('D4-11, D4-16, D4-17, D4-18, D4-20, D2-10, D4-02: UI icon/grid rules, clear
   assert.match(source, /window\.setUbuScreenGuard/, 'D4-02: ububall.js registers window.setUbuScreenGuard');
   assert.match(source, /cpuClient\.dispose\?\.\(\)/, 'D2-10: ububall.js disposes cpuClient worker');
   assert.match(source, /demoClient\.dispose\?\.\(\)/, 'D2-10: ububall.js disposes demoClient worker');
+});
+
+
+
+test('Rink stage Phase 2: shots fold in-match/replay-match/setup-shot, camera guards input/overlays, setup docks mid-match, and CPU match leaves/resumes cleanly', () => {
+  const P = require('../shared/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const cssSrc = fs.readFileSync(require.resolve('../web/ububall.css'), 'utf8');
+  const htmlSrc = fs.readFileSync(require.resolve('../web/index.html'), 'utf8');
+  const siteSrc = fs.readFileSync(require.resolve('../web/site.js'), 'utf8');
+
+  // 1. Legacy layout classes/booleans are completely folded into data-shot
+  for (const legacy of ['in-match', 'replay-match', 'setup-shot']) {
+    assert.equal(source.includes(legacy), false, `ububall.js must not use ${legacy}`);
+    assert.equal(cssSrc.includes(legacy), false, `ububall.css must not use ${legacy}`);
+    assert.equal(siteSrc.includes(legacy), false, `site.js must not use ${legacy}`);
+  }
+  assert.equal(source.includes('inMatch'), false, 'ububall.js replaces inMatch with shot state');
+  assert.equal(source.includes('setupShot'), false, 'ububall.js replaces setupShot with shot state');
+  assert.match(htmlSrc, /<body data-shot="home">/, 'index.html boots on the home shot');
+  for (const shotName of ['home', 'rules', 'team', 'match', 'replay']) {
+    assert.ok(cssSrc.includes(`[data-shot="${shotName}"]`), `ububall.css defines layout rules for ${shotName} shot`);
+  }
+
+  // 2. Exercise setShot, camera move gating (Invariant 2), mid-match docked setup, portrait restore, online lobby handoff, and CPU leave/resume
+  const stageCode =
+    section('  let cast = null, shot =', '  // While a video export renders') + '\n' +
+    section('  function updateFoulInfo() {', '  function kickoff(isNewMatch = false) {') + '\n' +
+    section('  function updateFirstTurnGuide() {', '  function prepareCPU(initialPlans = null) {') + '\n' +
+    section('  function positionSpinControl() {', '  function fitStadium() {') + '\n' +
+    section('  let cameraMove = null;', '  // The cast: whoever is on the ice') + '\n' +
+    section('  fieldView.canvas.addEventListener(\'wheel\'', '  function endCanvasDrag() {') + '\n' +
+    section('  function updateReplaySkip(replay) {', '  replaySkip.onclick =') + '\n' +
+    section('  function setupStep(step) {', '  function openSetup(step,') + '\n' +
+    section('  function closeLobby() {', '  // In Discord, Ready to play') + '\n' +
+    section('  function syncFullscreenButton() {', '  async function exitOwnedFullscreen() {') + '\n' +
+    section('  function fitOrientation() {', '  function openPause() {');
+
+  const listeners = new Map();
+  const makeClassList = () => {
+    const set = new Set();
+    return {
+      add: c => set.add(c),
+      remove: c => set.delete(c),
+      toggle: (c, on) => {
+        const next = on === undefined ? !set.has(c) : Boolean(on);
+        if (next) set.add(c); else set.delete(c);
+        return next;
+      },
+      contains: c => set.has(c)
+    };
+  };
+  let rectByShot = {
+    home: { left: 40, top: 80, width: 640, height: 384 },
+    rules: { left: 24, top: 72, width: 1100, height: 660 },
+    team: { left: 24, top: 72, width: 1100, height: 660 },
+    match: { left: 220, top: 64, width: 960, height: 576 },
+    replay: { left: 220, top: 64, width: 960, height: 576 }
+  };
+  let activeAnim = null;
+  const elements = new Map();
+  const makeEl = id => {
+    const el = {
+      id, hidden: false, disabled: false, inert: false, open: false, value: '', textContent: '',
+      dataset: {}, style: { visibility: '', cursor: '', setProperty(k, v) { this[k] = v; }, removeProperty(k) { delete this[k]; } },
+      classList: makeClassList(),
+      children: [],
+      get childElementCount() { return this.children.length; },
+      get firstElementChild() { return this.children[0] || { hidden: false, textContent: '' }; },
+      append(...nodes) { this.children.push(...nodes); },
+      before() {},
+      replaceChildren(...nodes) { this.children = [...nodes]; },
+      setAttribute(k, v) { this[k] = v; },
+      removeAttribute(k) { delete this[k]; },
+      toggleAttribute(k, on) { if (on) this[k] = ''; else delete this[k]; },
+      querySelector: () => ({ textContent: '', replaceChildren() {}, removeAttribute() {}, setAttribute() {}, classList: makeClassList() }),
+      addEventListener(type, fn) { listeners.set(`${id}:${type}`, fn); },
+      dispatchEvent() { return true; },
+      show() { this.open = true; },
+      showModal() { this.open = true; },
+      close() {
+        if (!this.open) return;
+        this.open = false;
+        listeners.get(`${id}:close`)?.();
+      },
+      setPointerCapture() {},
+      getBoundingClientRect: () => ({ top: 72, left: 0, width: 1000, height: 600 })
+    };
+    return el;
+  };
+  const $ = id => {
+    if (!elements.has(id)) elements.set(id, makeEl(id));
+    return elements.get(id);
+  };
+  $('skip-goal-replay').append(makeEl('skip-badge'));
+
+  const rinkCanvas = makeEl('rink');
+  const rinkStage = {
+    classList: makeClassList(),
+    children: [],
+    append(...nodes) { this.children.push(...nodes); },
+    getBoundingClientRect: () => rectByShot[ctx.document.body.dataset.shot] || rectByShot.home,
+    animate(keyframes, opts) {
+      const anim = { keyframes, opts, cancelled: false, onfinish: null, cancel() { this.cancelled = true; } };
+      activeAnim = anim;
+      return anim;
+    }
+  };
+  const stadium = { classList: makeClassList() };
+  const rinkWrap = { classList: makeClassList() };
+  const foulBox = makeEl('foul-box');
+  let castArgs = [], demoStarts = 0, stoppedFanfares = 0, stoppedMotions = 0, pushedStates = 0, wheelSpins = 0;
+
+  const ctx = {
+    Object, Array, Set, Map, Math, Number, String, Boolean, JSON, URL, Event: class { constructor(t) { this.type = t; } },
+    P, ububallMatch, performance: { now: () => 5000 },
+    $,
+    canvas: rinkCanvas,
+    inDiscord: false,
+    location: new URL('https://ububall.com/'),
+    scrollY: 0,
+    scrollTo() {},
+    addEventListener() {},
+    matchMedia: () => ({ matches: true, addEventListener() {} }),
+    reducedMotion: { matches: false },
+    portraitScreen: { matches: false },
+    ownsFullscreen: () => false,
+    fullscreenDisplay: { matches: false },
+    fullscreenRequest: null,
+    btnFullscreen: makeEl('btn-fullscreen'),
+    exitOwnedFullscreen: async () => {},
+    fitScorebug() {},
+    setPortrait(val) { ctx.isPortrait = val; },
+    isPortrait: false,
+    videoField: null,
+    bodies: P.kickoff(),
+    simBodies: P.kickoff(),
+    plans: [{ angle: 0, power: 0, spin: 0, guard: false }, { angle: 0, power: 0, spin: 0, guard: false }, { angle: 0, power: 0, spin: 0, guard: false }],
+    selected: 0,
+    drag: null,
+    dragMode: null,
+    dragStart: null,
+    dragStartClient: null,
+    dragMoved: false,
+    dragDirty: false,
+    arrowGrab: null,
+    endCanvasDrag() { ctx.drag = null; },
+    point: e => ({ x: e.clientX, y: e.clientY }),
+    fieldTarget: () => ({ mode: 'aim', index: 0 }),
+    warningAt: () => null,
+    wheelKnob() { wheelSpins++; },
+    sync() {},
+    spinSlider: true,
+    phase: 'plan',
+    demo: false,
+    online: null,
+    theater: null,
+    recording: { turns: [{}] },
+    goalReplay: { loops: 2, started: 0, elapsedMs: 4000 },
+    replaySkip: $('skip-goal-replay'),
+    replaySkipHint: $('skip-goal-replay').firstElementChild,
+    firstTurnStep: 'aim',
+    firstTurnStarted: null,
+    pullBehind: false,
+    aimPower: () => 0.5,
+    impulseGeometry: () => ({ visible: true, ringR: 25, distance: 80, x: 260, y: 300, scale: 120 }),
+    placeFinger() {},
+    hideFinger() {},
+    fieldBox: { left: 0, top: 0, width: 960, height: 576, stageWidth: 960, stageHeight: 576, controlWidth: 140, controlHeight: 44 },
+    stagePoint: p => ({ x: p.x, y: p.y }),
+    foulInfo: { kind: 'crease', team: 0 },
+    foulInfoKey: '',
+    foulBox,
+    fouls: { crease: [true, false], corner: null, cornerTurns: 0, cards: [] },
+    stalling: () => false,
+    foulInfoLines: () => ['Goal camping', [{ text: 'Move out', act: true }]],
+    gameUi: { scale: () => 1 },
+    layoutDirty: false,
+    draw() {
+      ctx.layoutDirty = false;
+      env.positionSpinControl();
+      env.updateFoulInfo();
+    },
+    castTo: away => { castArgs.push(away); },
+    castHome() {},
+    lobbyGeneration: 0,
+    setupFor: 'cpu',
+    chosenMode: () => 'standard',
+    draft: [{ key: 'g-0', model: {} }, { key: 'g-1', model: {} }, { key: 'g-2', model: {} }],
+    signedIn: () => false,
+    teamSlotsOf: () => null,
+    sameSlots: () => false,
+    savedTeams: null,
+    teamIndex: -1,
+    ubuRender: Object.assign(() => makeEl('svg'), { spriteImg: () => makeEl('img') }),
+    lobbyView: null,
+    fixedTeam: () => true,
+    loadCollection: async () => {},
+    loadTeams: async () => {},
+    rosterSlots() { $('roster-slots').replaceChildren(makeEl('s0'), makeEl('s1'), makeEl('s2')); },
+    lastCpuSetup: null,
+    closeFirstTurnGuide() { ctx.firstTurnStep = null; $('first-turn-guide').hidden = true; },
+    closeFoulInfo() { ctx.foulInfo = null; foulBox.hidden = true; },
+    closeSummary() { $('match-summary').open = false; },
+    stopFanfare() { stoppedFanfares++; },
+    gameAudio: () => ({ getAudioContext() {}, stopMotion() { stoppedMotions++; } }),
+    isExporting: () => false,
+    statDrawer: { matches: () => false, hidePopover() {} },
+    endReplay() { ctx.theater = null; },
+    cpuClient: { dispose() {} },
+    demoClient: { dispose() {} },
+    startDemo() { if (!ctx.demo && env.getShot() === 'home' && !env.matchInProgress()) { ctx.demo = true; demoStarts++; } },
+    stopDemo() { ctx.demo = false; },
+    newMatch() {},
+    history: { state: null, pushState(s) { this.state = s; pushedStates++; }, replaceState() {} },
+    stadium,
+    rinkStage,
+    rinkWrap,
+    document: {
+      hidden: false,
+      fullscreenElement: null,
+      fullscreenEnabled: true,
+      createElement: tag => makeEl(tag),
+      body: { dataset: { shot: 'home' }, style: { setProperty(k, v) { this[k] = v; } }, classList: makeClassList() },
+      querySelector: sel => sel === '.ball-page' ? { getBoundingClientRect: () => ({ top: 72 }) } : null
+    }
+  };
+
+  const env = runInNewContext(
+    stageCode + '\n;({ getShot: () => shot, setShot, playableShot, enterMatch, exitMatchMode, prepareSheet, openSheet, setupStep, closeLobby, leaveSetupShot, matchInProgress, positionSpinControl, updateFirstTurnGuide, updateFoulInfo });',
+    ctx
+  );
+
+  // A. Entering match glides from home -> match; during cameraMove, playableShot is false, aiming input is ignored, and overlays stay hidden
+  env.enterMatch('match');
+  assert.equal(env.getShot(), 'match');
+  assert.equal(ctx.document.body.dataset.shot, 'match');
+  assert.equal(pushedStates, 1);
+  assert.ok(activeAnim && !activeAnim.cancelled, 'camera starts transform glide from home to match');
+  assert.equal(env.playableShot(), false, 'rink rejects aiming input while cameraMove is in flight');
+  assert.equal($('field-spin').style.visibility, 'hidden', 'spin slider stays hidden during camera glide');
+  assert.equal($('first-turn-guide').hidden, true, 'first-turn guide waits until camera rests');
+  assert.equal(foulBox.hidden, true, 'foul box hides during camera glide');
+
+  ctx.foulInfo = null;
+  rinkCanvas.onpointerdown({ pointerType: 'mouse', button: 0, pointerId: 1, clientX: 180, clientY: 300 });
+  listeners.get('rink:wheel')({ ctrlKey: false });
+  assert.equal(ctx.drag, null, 'pointerdown aiming rejected while camera is moving');
+  assert.equal(wheelSpins, 0, 'wheel spin rejected while camera is moving');
+
+  // Finish camera move -> playableShot becomes true, overlays appear, and aiming input works
+  ctx.foulInfo = { kind: 'crease', team: 0 };
+  activeAnim.onfinish();
+  assert.equal(env.playableShot(), true, 'rink accepts aiming input once camera rests in match shot');
+  assert.equal($('field-spin').style.visibility, 'visible', 'spin slider appears once camera rests');
+  assert.equal($('first-turn-guide').hidden, false, 'first-turn guide appears once camera rests');
+  assert.equal(foulBox.hidden, false, 'foul box appears once camera rests');
+  assert.equal($('skip-goal-replay').hidden, false, 'goal replay skip prompt visible in match shot');
+
+  ctx.foulInfo = null;
+  rinkCanvas.onpointerdown({ pointerType: 'mouse', button: 0, pointerId: 7, clientX: 180, clientY: 300 });
+  assert.equal(ctx.drag, 7, 'pointerdown aiming accepted at rest in match shot');
+  ctx.drag = null;
+  listeners.get('rink:wheel')({ ctrlKey: false });
+  assert.equal(wheelSpins, 1, 'wheel spin accepted at rest in match shot');
+
+  // B. Mid-match Pause -> New match docks sheet in rules shot (forcing landscape), closes pause menu, scatters cast, and cancelling restores match + portrait
+  $('pause-menu').open = true;
+  ctx.isPortrait = true; // Manually rotated to portrait during match
+  castArgs = [];
+  env.prepareSheet();
+  env.setupStep('mode');
+  env.openSheet();
+  assert.equal($('pause-menu').open, false, 'docked mid-match setup closes modal pause menu');
+  assert.equal($('roster-dialog').classList.contains('docked'), true, 'sheet docks during match on wide desktop');
+  assert.equal(env.getShot(), 'rules');
+  assert.equal(ctx.document.body.dataset.shot, 'rules');
+  assert.equal(ctx.isPortrait, false, 'setup shot always uses landscape rink');
+  assert.deepEqual(castArgs, [true], 'current match cast scatters off the ice');
+  assert.equal($('skip-goal-replay').hidden, true, 'goal replay skip prompt hides outside match shot');
+
+  // Step from rules -> team updates shot to team
+  env.setupStep('team');
+  assert.equal(env.getShot(), 'team');
+  assert.equal(ctx.document.body.dataset.shot, 'team');
+
+  // Cancel/close docked sheet -> returns to match shot (not home!), restores portrait, and skates match cast back
+  $('roster-dialog').close();
+  assert.equal(env.getShot(), 'match', 'cancelling mid-match setup returns to match shot');
+  assert.equal(ctx.document.body.dataset.shot, 'match');
+  assert.equal(ctx.isPortrait, true, 'cancelling mid-match setup restores previous match portrait orientation');
+  assert.deepEqual(castArgs, [true, false], 'match cast skates back onto the ice');
+  ctx.isPortrait = false;
+
+  // C. Online lobby handoff -> closeLobby when game starts transitions directly from team -> match without bouncing through home
+  ctx.setupFor = 'lobby';
+  $('roster-dialog').dataset.for = 'lobby';
+  ctx.lobbyView = { state: { mode: 'standard', canChangeRules: false }, ready: true };
+  env.prepareSheet();
+  env.setupStep('team');
+  env.openSheet();
+  assert.equal(env.getShot(), 'team');
+  ctx.online = { active: true, state: { phase: 'plan', game: { bodies: P.kickoff() } } };
+  env.closeLobby();
+  assert.equal(env.getShot(), 'team', 'closeLobby holds team shot for synchronous enterMatch handoff instead of bouncing to home');
+  env.enterMatch('match');
+  assert.equal(env.getShot(), 'match');
+  ctx.online = null;
+
+  // D. Leaving CPU match for Home preserves match state, stops audio, hides skip button, and does not start demo
+  if (activeAnim && !activeAnim.cancelled) activeAnim.onfinish();
+  ctx.firstTurnStep = 'aim';
+  ctx.foulInfo = { kind: 'crease', team: 0 };
+  env.exitMatchMode();
+  assert.equal(env.getShot(), 'home');
+  assert.equal(ctx.document.body.dataset.shot, 'home');
+  assert.equal(env.matchInProgress(), true, 'CPU match stays in progress when left for home');
+  assert.equal(demoStarts, 0, 'leaving an active CPU match never starts demo over it');
+  assert.equal($('home-play-label').textContent, 'Resume match');
+  assert.equal($('home-end-match').hidden, false);
+  assert.ok(stoppedFanfares >= 1 && stoppedMotions >= 1, 'looping fanfare and motion audio stop on leaving match');
+  assert.equal($('skip-goal-replay').hidden, true, 'goal replay skip overlay stays hidden on home');
+
+  // Resuming CPU match returns cleanly to match shot
+  env.enterMatch('match');
+  assert.equal(env.getShot(), 'match');
+  if (activeAnim && !activeAnim.cancelled) activeAnim.onfinish();
+  assert.equal(env.playableShot(), true);
+
+  // Ending CPU match and exiting starts demo and resets Home CTA
+  ctx.phase = 'over';
+  ctx.recording = null;
+  env.exitMatchMode();
+  assert.equal(env.getShot(), 'home');
+  assert.equal(demoStarts, 1, 'demo starts once no CPU match is in progress');
+  assert.equal($('home-play-label').textContent, 'Quick play');
+  assert.equal($('home-end-match').hidden, true);
 });
