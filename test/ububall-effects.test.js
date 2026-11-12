@@ -3723,15 +3723,18 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
     btn.append(makeDomNode('canvas', starterId + '-canvas'));
     wrap.append(btn);
   }
-  getMintEl('pack-choices');
+  getMintEl('pack-choices').hidden = true;
   getMintEl('mint-world').hidden = true;
   getMintEl('mint-lights');
   getMintEl('mint-ubus').hidden = true;
   getMintEl('mint-reveal').hidden = true;
   const rinkStageDom = makeDomNode('div', 'rink-stage');
+  rinkStageDom.getBoundingClientRect = () => ({ left: 100, top: 80, right: 1100, bottom: 680, width: 1000, height: 600 });
+  const stageAreaDom = makeDomNode('div', 'stadium-stage-area');
 
   let unwrapCalls = [], mintCount = 0, navigatedTo = null, stageReadyGate = Promise.resolve();
   let starterState = { signup: false, daily: false };
+  let reduceMotion = false, mockNow = 1000;
   const ownedMap = new Map();
   let importedKey = null;
 
@@ -3740,10 +3743,10 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
     navigator: { userActivation: { hasBeenActive: true } },
     devicePixelRatio: 1,
     matchMedia: q => ({
-      matches: q.includes('reduce'), // Use reduced-motion so async waits resolve deterministically
+      get matches() { return q.includes('reduce') ? reduceMotion : false; },
       addEventListener() {}
     }),
-    requestAnimationFrame: fn => { fn(16); return 1; },
+    requestAnimationFrame: () => 1,
     setTimeout: (fn) => { fn(); return 1; },
     clearTimeout() {},
     URL, Blob, TextDecoder,
@@ -3822,7 +3825,13 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
         tap: () => false,
         reset() {},
         setStarter() { packType = 'starter'; },
-        setHints(type) { packType = type; }
+        setHints(type) { packType = type; },
+        getSilhouetteTokens(amount = 5) {
+          return Array.from({ length: amount }, (_, i) => {
+            const slot = i - (amount - 1) / 2;
+            return { x: slot * (amount === 3 ? 165 : 88), y: -26 + Math.abs(slot) * 14, diameter: 208 };
+          });
+        }
       };
     },
     fetch: async (url, init = {}) => {
@@ -3855,6 +3864,7 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
     createElementNS: (_, tag) => makeDomNode(tag),
     querySelector: sel => {
       if (sel === '.rink-stage') return rinkStageDom;
+      if (sel === '.stadium-stage-area') return stageAreaDom;
       if (sel === 'main[data-screen="collection"]') return makeDomNode('main');
       if (sel === 'main[data-screen="mint"]') return makeDomNode('main');
       return null;
@@ -3864,7 +3874,7 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
   mintWin.window = mintWin;
   mintWin.globalThis = mintWin;
   mintWin.document = mintDoc;
-  mintWin.performance = { now: () => 1000 };
+  mintWin.performance = { now: () => mockNow };
   mintWin.Object = Object;
   mintWin.Array = Array;
   mintWin.Set = Set;
@@ -3878,9 +3888,15 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
   mintWin.Error = Error;
   mintWin.Uint8Array = Uint8Array;
 
+  const waitUntil = async (pred) => {
+    for (let i = 0; i < 100; i++) {
+      if (pred()) return;
+      await new Promise(r => setTimeout(r, 2));
+    }
+  };
   runInNewContext(siteSrc, mintWin);
   // Wait for async session + initial offer load
-  for (let i = 0; i < 12; i++) await new Promise(r => setImmediate(r));
+  await waitUntil(() => !getMintEl('pack-choices').hidden && getMintEl('pack-choices').children.length === 3);
 
   assert.equal(getMintEl('pack-choices').hidden, false, '3 pack choices dealt onto the Mint stage');
   assert.equal(getMintEl('pack-choices').children.length, 3);
@@ -3893,7 +3909,7 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
   // Click pack 0 -> swipes 1 & 2 away, centers pack 0, unwraps in silhouette, silhouettes 5 ubus, zooms onto ubu 0 and reveals its card!
   const pack0Btn = getMintEl('pack-choices').children[0].children[0];
   pack0Btn.click();
-  for (let i = 0; i < 16; i++) await new Promise(r => setImmediate(r));
+  await waitUntil(() => !getMintEl('mint-reveal').hidden && getMintEl('card-stage').children.length === 1);
 
   assert.equal(mintCount, 1);
   assert.equal(unwrapCalls.length, 1);
@@ -3919,7 +3935,7 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
 
   // Click Next arrow -> pans to ubu 1; ubu 0 becomes a plain revealed ubu off to the left, ubu 1 shows its card, ubus 2..4 remain silhouetted
   getMintEl('next-ubu').click();
-  for (let i = 0; i < 8; i++) await new Promise(r => setImmediate(r));
+  await waitUntil(() => getMintEl('reveal-progress').textContent === '2 / 5');
   assert.equal(rinkStageDom.style.getPropertyValue('--mint-pan-x'), '34.800%', 'camera pans to ubu 1 (x=35.5%)');
   assert.equal(ubuEls[0].classList.contains('is-active'), false, 'previous ubu returns to the ice off to the side');
   assert.equal(ubuEls[0].classList.contains('is-revealed'), true, 'previous ubu shows in full color on the ice');
@@ -3928,14 +3944,15 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
 
   // Reveal remaining ubus 2, 3, 4 -> Done button appears
   for (let step = 0; step < 3; step++) {
+    const expected = `${step + 3} / 5`;
     getMintEl('next-ubu').click();
-    for (let i = 0; i < 8; i++) await new Promise(r => setImmediate(r));
+    await waitUntil(() => getMintEl('reveal-progress').textContent === expected);
   }
   assert.equal(getMintEl('finish-pack').hidden, false, 'Done appears once all 5 ubus are revealed');
 
   // Click Done -> zooms back out to 1x, scampers all ubus off the ice, and deals new packs into position
   getMintEl('finish-pack').click();
-  for (let i = 0; i < 16; i++) await new Promise(r => setImmediate(r));
+  await waitUntil(() => getMintEl('mint-ubus').hidden && !getMintEl('pack-choices').hidden);
   assert.equal(rinkStageDom.style.getPropertyValue('--mint-zoom'), '1', 'camera zooms back out to full rink');
   assert.equal(rinkStageDom.style.getPropertyValue('--mint-pan-x'), '0%', 'camera resets pan');
   assert.equal(rinkStageDom.classList.contains('mint-zoomed'), false);
@@ -3951,17 +3968,97 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
   stageReadyGate = new Promise(resolve => { releaseTransition = resolve; });
   const homeSignupBtn = getMintEl('home-pack').children[0];
   homeSignupBtn.click();
-  for (let i = 0; i < 6; i++) await new Promise(r => setImmediate(r));
+  await waitUntil(() => navigatedTo === '/mint' && !getMintEl('signup-stage-pack').hidden);
   assert.equal(navigatedTo, '/mint', 'clicking Home signup pack navigates to /mint');
   assert.equal(unwrapCalls.length, 1, 'signup pack waits for camera transition into Mint before unwrapping');
   assert.equal(getMintEl('signup-stage-pack').hidden, false, 'signup pack sits at center ice during camera glide');
 
   releaseTransition();
-  for (let i = 0; i < 16; i++) await new Promise(r => setImmediate(r));
+  await waitUntil(() => unwrapCalls.length === 2 && !getMintEl('mint-reveal').hidden && getMintEl('reveal-progress').textContent === '1 / 3');
   assert.equal(unwrapCalls.length, 2, 'signup pack unwraps once Mint camera transition completes');
   assert.equal(unwrapCalls[1].amount, 3, 'signup pack unwraps 3 starter ubus');
   assert.equal(unwrapCalls[1].silhouette, true);
   assert.equal(getMintEl('mint-ubus').children.length, 3, '3 starter ubus placed under 3 spotlights');
+  // Verify continuous silhouette emergence keyframes: starts at solid opacity 1 and larger pack scale, gliding down to scale 1
+  const starterUbu0Anim = getMintEl('mint-ubus').children[0]._lastAnim;
+  assert.ok(starterUbu0Anim, 'emerging silhouette ubu animates continuously from pack coordinates to lineup');
+  assert.equal(starterUbu0Anim.keyframes[0].opacity, 1, 'emerging silhouette starts solid without fading in from 0');
+  assert.equal(starterUbu0Anim.keyframes[1].opacity, 1);
+  assert.ok(starterUbu0Anim.keyframes[0].scale > 1 || starterUbu0Anim.keyframes[1].scale === 1);
   assert.equal(rinkStageDom.style.getPropertyValue('--mint-zoom'), '1.85', '3-ubu reveal uses 1.85x zoom');
   assert.equal(rinkStageDom.style.getPropertyValue('--mint-pan-x'), '35.150%', 'camera centers starter ubu 0 (x=31%)');
+
+  // 5. Mobile touch swipe controls step between cards and suppress synthetic post-swipe card clicks
+  const cardEl = getMintEl('card-stage').children[0];
+  const fireSwipe = (dx) => {
+    const base = { pointerId: 9, pointerType: 'touch', isPrimary: true, target: cardEl, clientY: 200 };
+    stageAreaDom._on_pointerdown?.({ ...base, clientX: 220 });
+    stageAreaDom._on_pointermove?.({ ...base, clientX: 220 + dx * 0.4 });
+    stageAreaDom._on_pointermove?.({ ...base, clientX: 220 + dx });
+    stageAreaDom._on_pointerup?.({ ...base, clientX: 220 + dx });
+  };
+  mockNow = 5000;
+  fireSwipe(-90); // Swipe left -> advance to starter ubu 1 (index 1, x=50%)
+  await waitUntil(() => getMintEl('reveal-progress').textContent === '2 / 3');
+  assert.equal(rinkStageDom.style.getPropertyValue('--mint-pan-x'), '0.000%', 'touch swipe left advances to starter ubu 1 at center ice');
+  assert.equal(getMintEl('reveal-progress').textContent, '2 / 3');
+
+  // Immediate synthetic click (< 90ms after swipe) does not open the modal viewer
+  mockNow = 5040;
+  getMintEl('card-stage').children[0].click();
+  assert.equal(Boolean(getMintEl('viewer').open), false, 'post-swipe synthetic click does not trigger modal viewer');
+
+  mockNow = 5300;
+  fireSwipe(95); // Swipe right -> step back to starter ubu 0 (index 0, x=31%)
+  await waitUntil(() => getMintEl('reveal-progress').textContent === '1 / 3');
+  assert.equal(rinkStageDom.style.getPropertyValue('--mint-pan-x'), '35.150%', 'touch swipe right returns to starter ubu 0');
+  assert.equal(getMintEl('reveal-progress').textContent, '1 / 3');
+
+  // 6. Verify pack-scene.js getSilhouetteTokens returns continuous end-of-unwrap fan geometry
+  const packSceneSrc = fs.readFileSync(path.join(__dirname, '../web/pack-scene.js'), 'utf8');
+  const noopCtx = () => ({
+    setTransform() {}, resetTransform() {}, clearRect() {}, fillRect() {}, strokeRect() {},
+    save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, quadraticCurveTo() {}, bezierCurveTo() {},
+    arc() {}, ellipse() {}, rect() {}, roundRect() {}, closePath() {}, clip() {}, fill() {}, stroke() {},
+    translate() {}, scale() {}, rotate() {}, transform() {}, drawImage() {}, fillText() {}, strokeText() {},
+    measureText: () => ({ width: 20 }),
+    createLinearGradient: () => ({ addColorStop() {} }),
+    createRadialGradient: () => ({ addColorStop() {} }),
+    createImageData: (w = 64, h = 64) => ({ data: new Uint8Array(w * h * 4) }),
+    putImageData() {},
+    createPattern: () => ({})
+  });
+  const packSceneCtx = {
+    Math, Number, String, Boolean, Array, Object, Map, Set, Promise, Uint8Array, Uint32Array, parseInt,
+    crypto: globalThis.crypto,
+    navigator: { userActivation: { hasBeenActive: false } },
+    devicePixelRatio: 1,
+    performance: { now: () => 0 },
+    requestAnimationFrame: () => 1,
+    cancelAnimationFrame() {},
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    ResizeObserver: class { observe() {} },
+    Image: class { set src(_) {} },
+    document: {
+      createElement: () => ({ width: 64, height: 64, dataset: {}, getContext: noopCtx })
+    }
+  };
+  packSceneCtx.globalThis = packSceneCtx;
+  runInNewContext(packSceneSrc, packSceneCtx);
+  const mockCanvas = {
+    clientWidth: 300, clientHeight: 180, width: 300, height: 180, dataset: {},
+    parentElement: { addEventListener() {} },
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 300, height: 180 }),
+    getContext: noopCtx
+  };
+  const realScene = packSceneCtx.createPackScene(mockCanvas);
+  realScene.setType('foil');
+  const tok5 = realScene.getSilhouetteTokens(5);
+  assert.equal(tok5.length, 5);
+  assert.deepEqual(tok5.map(t => t.x), [-176, -88, 0, 88, 176], '5-ubu foil fan coordinates match pack-scene reveal');
+  assert.equal(tok5[2].diameter, 208);
+  const tok3 = realScene.getSilhouetteTokens(3);
+  assert.deepEqual(tok3.map(t => t.x), [-165, 0, 165], '3-ubu starter fan coordinates match pack-scene reveal');
+  realScene.setType('blob');
+  assert.equal(realScene.getSilhouetteTokens(5)[0].diameter, 84, 'blob pack reports its 84u silhouette diameter');
 });

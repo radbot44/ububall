@@ -10,7 +10,7 @@
   let config = { ready: false }, session = null, current = null, busy = false, picking = false;
   let packScene = null, offer = null, pendingSignupOpen = false, fadeNextChoices = false;
   let outOfPacks = false, dealFailed = false, collectionFailed = false;
-  let pack = null, packKey = '', pendingKey = '', revealIndex = 0, revealOpen = false, revealSeq = 0;
+  let pack = null, packKey = '', pendingKey = '', revealIndex = 0, revealOpen = false, revealSeq = 0, lastSwipeAt = -1e9;
   let coinLandTimer = 0;
   const clearCoinTimer = () => { if (coinLandTimer) { clearTimeout(coinLandTimer); coinLandTimer = 0; } };
 
@@ -204,11 +204,12 @@
       savePack();
       persisted = true;
       await view.scene?.play(pack.items.length, pack.items.map(item => item.model), { silhouette: true });
+      const emergeFrom = capturePackEmergence(view.scene, view.button.querySelector('canvas'), pack.items.length);
       view.host.hidden = true;
       revealIndex = 0;
       status('');
       busy = false;
-      if (onMintShot()) await beginStageReveal({ freshlyOpened: true });
+      if (onMintShot()) await beginStageReveal({ freshlyOpened: true, emergeFrom });
       else syncMintStage();
     } catch (error) {
       if (!persisted) pack = null;
@@ -712,6 +713,7 @@
     // Touch tilting captures the pointer on the card, so hit-test the panels from the card's clicks;
     // assistive-tech / keyboard synthetic clicks (detail === 0) match the activated target directly.
     card.addEventListener('click', event => {
+      if (performance.now() - lastSwipeAt < 90) return;
       if (event.target.closest?.('.card-heart')) return;
       if (event.detail === 0) {
         for (const [el, action] of targets) if (el.contains(event.target)) return action();
@@ -724,11 +726,35 @@
     card.append(top, badge, art, nameStack, side, rarityEl, supers);
     return card;
   }
+  function capturePackEmergence(scene, packCanvas, count) {
+    if (motionOff() || !scene?.getSilhouetteTokens || !packCanvas) return null;
+    const stage = rinkStageEl();
+    if (!stage) return null;
+    const stageRect = stage.getBoundingClientRect();
+    const canvasRect = packCanvas.getBoundingClientRect();
+    if (!(stageRect.width > 0) || !(canvasRect.width > 0)) return null;
+    const tokens = scene.getSilhouetteTokens(count);
+    const xs = ubuPositions(count);
+    const endDiam = stageRect.width * ((count <= 3 ? 6.4 : 5.2) / 100);
+    const unit = canvasRect.width / 600;
+    return tokens.map((tok, i) => {
+      const startX = canvasRect.left + canvasRect.width * 0.5 + tok.x * unit;
+      const startY = canvasRect.top + canvasRect.height * 0.46 + tok.y * unit;
+      const endX = stageRect.left + stageRect.width * (xs[i] / 100);
+      const endY = stageRect.top + stageRect.height * 0.5;
+      return {
+        dxPx: startX - endX,
+        dyPx: startY - endY,
+        scale: endDiam > 0 ? (tok.diameter * unit) / endDiam : 2
+      };
+    });
+  }
+
   function renderStageUbus() {
     const host = $('mint-ubus');
     if (!host || !pack) return;
     const count = pack.items.length, xs = ubuPositions(count);
-    host.style.setProperty('--ubu-size', count <= 3 ? '6.4cqw' : '5.2cqw');
+    host.style.setProperty('--ubu-size', count <= 3 ? '6.4%' : '5.2%');
     if (host.childElementCount !== count || host.dataset.packId !== (pack.items[0]?.result.certificate?.serial || '')) {
       host.dataset.packId = pack.items[0]?.result.certificate?.serial || '';
       host.replaceChildren(...pack.items.map((item, i) => {
@@ -737,6 +763,8 @@
         btn.className = 'mint-ubu';
         btn.dataset.index = String(i);
         btn.style.setProperty('--ubu-x', `${xs[i]}%`);
+        // Match the pack reveal fan's centre-on-top z-order during emergence.
+        btn.style.zIndex = String(10 - Math.abs(i * 2 - (count - 1)));
         btn.append(ubuRender(item.model, 'mint-ubu-svg'));
         btn.addEventListener('click', () => {
           if (busy) return;
@@ -818,7 +846,7 @@
     updatePackButton();
   }
 
-  async function beginStageReveal({ freshlyOpened = false } = {}) {
+  async function beginStageReveal({ freshlyOpened = false, emergeFrom = null } = {}) {
     if (!pack) return;
     const seq = ++revealSeq;
     revealOpen = true;
@@ -832,20 +860,31 @@
     if (freshlyOpened) {
       $('pack-title').textContent = 'Pack opened!';
       $('pack-subtitle').textContent = '';
+      $('mint-ubus').classList.add('is-emerging');
       mintLights.setSpots(
         pack.items.map((_, i) => ({ id: 'ubu-' + i, x: xs[i], y: 50, r: 9.5, alpha: 0.92, color: '#ffecd2' })),
         { seedFrom: { x: 50, y: 50, r: 14, alpha: 1 } }
       );
       if (!motionOff()) {
+        const stageW = rinkStageEl()?.getBoundingClientRect().width || 0;
         [...$('mint-ubus').children].forEach((el, i) => {
-          const dx = 50 - xs[i];
+          const from = emergeFrom?.[i];
+          const fallbackDx = stageW * ((50 - xs[i]) / 100);
+          const startTranslate = from
+            ? `calc(-50% + ${from.dxPx.toFixed(1)}px) calc(-50% + ${from.dyPx.toFixed(1)}px)`
+            : `calc(-50% + ${fallbackDx.toFixed(1)}px) -50%`;
+          const startScale = from ? from.scale : 2.1;
           el.animate?.([
-            { translate: `calc(-50% + ${dx}cqw) -50%`, scale: .55, opacity: 0 },
+            { translate: startTranslate, scale: startScale, opacity: 1 },
             { translate: '-50% -50%', scale: 1, opacity: 1 }
-          ], { duration: 360, delay: i * 35, easing: 'cubic-bezier(.2, .85, .25, 1)', fill: 'backwards' });
+          ], { duration: 540, easing: 'cubic-bezier(.22, .85, .25, 1)', fill: 'backwards' });
         });
       }
-      await waitMs(520);
+      try {
+        await waitMs(640);
+      } finally {
+        $('mint-ubus').classList.remove('is-emerging');
+      }
       if (seq !== revealSeq || !pack || !revealOpen) return;
     }
     setMintCamera(revealIndex, count);
@@ -896,6 +935,40 @@
       $('pause-reveal').click();
     }
   });
+
+  // Touch swipe controls across the reveal stage and trading card on mobile/tablet devices.
+  const swipeArea = document.querySelector('.stadium-stage-area');
+  let activeSwipe = null;
+  swipeArea?.addEventListener('pointerdown', event => {
+    if (!revealOpen || !onMintShot() || event.pointerType === 'mouse' || !event.isPrimary) return;
+    if (event.target?.closest?.('button')) return;
+    activeSwipe = { id: event.pointerId, x: event.clientX, y: event.clientY, dragging: false };
+  });
+  swipeArea?.addEventListener('pointermove', event => {
+    if (!activeSwipe || event.pointerId !== activeSwipe.id) return;
+    const dx = event.clientX - activeSwipe.x, dy = event.clientY - activeSwipe.y;
+    if (!activeSwipe.dragging && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+      activeSwipe.dragging = true;
+    }
+    if (activeSwipe.dragging && !motionOff()) {
+      const pull = Math.max(-72, Math.min(72, dx * 0.36));
+      $('card-stage').style.setProperty('translate', `${pull.toFixed(1)}px 0`);
+    }
+  });
+  const finishSwipe = (event, cancelled) => {
+    if (!activeSwipe || event.pointerId !== activeSwipe.id) return;
+    const dx = event.clientX - activeSwipe.x, dy = event.clientY - activeSwipe.y;
+    const wasDragging = activeSwipe.dragging;
+    activeSwipe = null;
+    $('card-stage').style.setProperty('translate', '');
+    if (cancelled || !revealOpen || !onMintShot()) return;
+    if ((wasDragging || Math.abs(dx) >= 40) && Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+      lastSwipeAt = performance.now();
+      navigatePack(dx < 0 ? 1 : -1);
+    }
+  };
+  swipeArea?.addEventListener('pointerup', event => finishSwipe(event, false));
+  swipeArea?.addEventListener('pointercancel', event => finishSwipe(event, true));
 
   function clearFinishedPackState() {
     localStorage.removeItem(packKey);
@@ -1479,6 +1552,7 @@
         $('pack-hint').textContent = 'Tap to crack it!';
       }
       await opening;
+      var emergeFrom = capturePackEmergence(packScene, choiceViews[index].button.querySelector('canvas'), pack.items.length);
       $('pack-choices').hidden = true;
       $('pack-choices').classList.remove('choosing');
       choiceViews.forEach(v => v.card.classList.remove('selected', 'swiped-left', 'swiped-right'));
@@ -1501,7 +1575,7 @@
       collectionList.render();
     }
     if (opened && pack) {
-      if (onMintShot()) await beginStageReveal({ freshlyOpened: true });
+      if (onMintShot()) await beginStageReveal({ freshlyOpened: true, emergeFrom });
       else syncMintStage();
     } else if (!opened) {
       syncMintStage();

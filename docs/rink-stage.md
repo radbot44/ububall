@@ -31,11 +31,15 @@ Working now (`web/index.html`, `web/app.js`, `web/site.js`, `web/site.css`, `web
   centred daily/signup pack), while the site header and Mint heading stay outside the boards.
 - Clicking a choice pack swipes the unchosen packs off the rink, glides the picked pack and its
   spotlight to centre ice, and unwraps it in silhouette mode (`pack-scene.js`).
-- Opening a pack places the five ubus (or three for daily/signup packs) in dark silhouette under
-  individual spotlights across the ice, zooms and pans the stage camera onto the first ubu to
-  reveal its trading card with Prev/Next arrows (showing a trading card on the focused ubu and plain
-  on-ice ubus — silhouetted if unseen, full colour if seen — off to the sides), and on Done zooms
-  back out, scampers all ubus away and fades the next packs into position.
+- On desktop, the Mint stage spans Play's full `min(114rem, calc(100% - 3rem))` content width,
+  zooming/cropping slightly vertically when height-constrained so packs and cards scale up cleanly.
+- Opening a pack keeps the five (or three) unwrapped silhouettes solid at the end of `pack-scene.js`
+  and scales/glides them in one continuous animation from their exact pack-fan positions into their
+  lineup spotlights on the ice, then zooms and pans the stage camera onto the first ubu to reveal its
+  trading card with Prev/Next arrows (on phones, overlaying the trading card directly over the
+  framed rink with a compact single-row control bar below and horizontal touch-swipe navigation
+  between cards so no vertical scrolling is needed), and on Done zooms back out, scampers all ubus
+  away and fades the next packs into position.
 - Clicking the Home screen's Signup bonus pack (`#home-pack`) navigates to `/mint`, waits for the
   camera transition (`ubuStageReady()`) and opens the starter pack on the Mint stage.
 - Aiming input, docked desktop `rules`/`team` setup, pause/stats/summary modals, replays and CPU
@@ -222,3 +226,9 @@ so it reads as part of the arena.
   re-deal and Home `#home-pack` handoff to `/mint`; added Phase 3 unit tests in
   `test/ububall-effects.test.js` and `test/ubu-audio.test.js` and verified desktop/mobile frames in
   headless Chromium.
+- 2026-11-12: Applied owner review polish on Phase 3: scaled `mint` `.ball-page` and `.rink-stage`
+  up to match Play's full `114rem` content width; updated mobile `< 48rem` reveal to overlay
+  `.card-stage` over the spotlit rink with single-row controls directly underneath (no vertical
+  scroll) plus touch swipe navigation across cards; eliminated the silhouette fade-out/re-appear by
+  keeping `pack-scene.js` silhouettes solid through `t = 1` and animating `.mint-ubu` directly from
+  `getSilhouetteTokens()` / `capturePackEmergence()` into the lineup as one continuous motion.

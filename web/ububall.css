@@ -148,10 +148,10 @@ main[data-screen="play"]:not([hidden]) { display: contents; }
 body:not([data-shot="mint"]) :is(#mint-world, #mint-reveal) { display: none !important; }
 body[data-shot="collection"] .ball-page { display: none; }
 
-/* Ubu Mint shot: header and Mint title stay outside the centred dark rink; packs and reveals sit under spotlights on the ice. */
+/* Ubu Mint shot: matches Play's full 114rem content width; header and Mint title stay outside the dark spotlit rink. */
 body[data-shot="mint"] .ball-page {
   display: grid; grid-template-rows: auto auto auto; justify-items: center; gap: .25rem;
-  width: min(92rem, calc(100% - 2rem)); max-width: none; margin: 0 auto 1rem;
+  width: min(114rem, calc(100% - 3rem)); max-width: none; margin: 0 auto .75rem;
 }
 body[data-shot="mint"] main[data-screen="mint"]:not([hidden]),
 body[data-shot="mint"] .pack-shop { display: contents; }
@@ -160,14 +160,21 @@ body[data-shot="mint"] .arena-layout { grid-row: 2; display: block; width: 100%;
 body[data-shot="mint"] .mint-foot { grid-row: 3; width: 100%; }
 body[data-shot="mint"] :is(.team-column, .scoreboard, .match-tools, .stadium-toolbar, #game-status, .stadium-actions, #field-spin, #skip-goal-replay),
 body[data-shot="mint"] .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner, #skip-goal-replay) { display: none; }
-body[data-shot="mint"] .rink-stage {
-  width: min(100%, 70rem, max(24rem, calc((100dvh - 15rem) * 5 / 3))); margin: 0 auto;
-  border-radius: 1.5rem; border: .0625rem solid transparent;
-  transition: border-color .35s ease, box-shadow .35s ease;
-}
-body[data-shot="mint"] .rink-stage.mint-zoomed {
-  border-color: color-mix(in srgb, var(--border) 65%, transparent);
-  box-shadow: var(--panel-shadow);
+body[data-shot="mint"] .stadium-stage-area { touch-action: pan-y; }
+@media (min-width: 48rem) {
+  body[data-shot="mint"] .stadium-stage-area {
+    width: 100%;
+    height: clamp(20rem, calc(100dvh - 13rem), calc(min(114rem, 100vw - 3rem) * 0.54));
+    border-radius: 1.5rem;
+    border: .0625rem solid transparent;
+    container-type: size;
+    transition: border-color .35s ease, box-shadow .35s ease;
+  }
+  body[data-shot="mint"] .stadium-stage-area:has(.rink-stage.mint-zoomed) {
+    border-color: color-mix(in srgb, var(--border) 65%, transparent);
+    box-shadow: var(--panel-shadow);
+  }
+  body[data-shot="mint"] .rink-stage { width: 100%; margin: 0 auto; }
 }
 body[data-shot="mint"] .rink-stage > :is(.rink-wrap, .mint-world) {
   transform-origin: 50% 50%;
@@ -182,9 +189,37 @@ body[data-shot="mint"] #mint-world > #signed-out-panel {
   box-shadow: var(--panel-shadow); backdrop-filter: blur(.375rem);
 }
 @media (max-width: 47.99rem) {
-  body[data-shot="mint"] .ball-page { width: calc(100% - 1rem); }
-  body[data-shot="mint"] .stadium-stage-area { flex-direction: column; gap: .5rem; overflow: visible; }
-  body[data-shot="mint"] .rink-stage { width: 100%; }
+  body[data-shot="mint"] .ball-page { width: calc(100% - 1rem); margin-bottom: .5rem; }
+  body[data-shot="mint"] .mint-head { min-height: 2.875rem; }
+  body[data-shot="mint"] .stadium-stage-area {
+    display: grid;
+    grid-template-columns: 2.625rem minmax(0, 1fr) 2.625rem auto;
+    grid-template-rows: minmax(15.25rem, auto) auto;
+    align-items: center;
+    gap: .5rem .375rem;
+    width: 100%;
+    overflow: visible;
+  }
+  body[data-shot="mint"] .rink-stage {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    width: 100%;
+    border-radius: 1.25rem;
+    border: .0625rem solid transparent;
+  }
+  body[data-shot="mint"] .rink-stage.mint-zoomed {
+    height: clamp(16.25rem, 39dvh, 18.75rem);
+    aspect-ratio: auto;
+    border-color: color-mix(in srgb, var(--border) 65%, transparent);
+    box-shadow: var(--panel-shadow);
+  }
+  body[data-shot="mint"] .rink-stage.mint-zoomed > :is(.rink-wrap, .mint-world) {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 5 / 3;
+    inset: auto;
+    flex: none;
+  }
 }
 
 /* Home and setup shots: in landscape, the rink sits beside the home panel (or fills the stage in setup); in portrait and phone sideways, above it. */

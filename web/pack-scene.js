@@ -800,7 +800,7 @@
           blobCtx.restore();
         }
       }
-      ctx.save(); ctx.globalAlpha = 1 - ease(.94, 1, t);
+      ctx.save(); ctx.globalAlpha = silhouetteReveal ? 1 : 1 - ease(.94, 1, t);
       if (become < 1) {
         ctx.save(); ctx.globalAlpha *= 1 - become;
         ctx.drawImage(blobCanvas, -300, -180, 600, 360); ctx.restore();
@@ -1257,7 +1257,7 @@
       // The ubus climb out of the opening, small, then spread into the reveal fan. They are drawn
       // before the envelope's panel, so the part still inside stays hidden behind it.
       if (rise) {
-        ctx.save(); ctx.translate(0, -drop); ctx.globalAlpha = 1 - ease(.96, 1, t);
+        ctx.save(); ctx.translate(0, -drop); ctx.globalAlpha = silhouetteReveal ? 1 : 1 - ease(.96, 1, t);
         const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => Math.abs(b - (count - 1) / 2) - Math.abs(a - (count - 1) / 2));
         for (const i of order) {
           const slot = i - (count - 1) / 2;
@@ -1450,7 +1450,7 @@
         const reveal = ease(revealStart, revealStart + .14, progress);
         const fan = ease(.36, .78, progress);
         ctx.save();
-        ctx.globalAlpha = reveal * (1 - ease(.96, 1, progress));
+        ctx.globalAlpha = silhouetteReveal ? reveal : reveal * (1 - ease(.96, 1, progress));
         const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => Math.abs(b - (count - 1) / 2) - Math.abs(a - (count - 1) / 2));
         for (const i of order) {
           const slot = i - (count - 1) / 2;
@@ -1537,6 +1537,14 @@
         color = candyColors[0];
         blobColors = candyColors.map(hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)));
         requestPaint();
+      },
+      getSilhouetteTokens(amount = count) {
+        const isBlob = currentType?.id === 'blob';
+        return Array.from({ length: amount }, (_, i) => {
+          const slot = i - (amount - 1) / 2;
+          if (isBlob) return { x: slot * 104, y: 0, diameter: 84 };
+          return { x: slot * (amount === 3 ? 165 : 88), y: -26 + Math.abs(slot) * 14, diameter: 208 };
+        });
       },
       getType() { return currentType ? currentType.id : null; }
     };
