@@ -529,7 +529,10 @@
     for (const body of dirtyMeters) {
       const fill = $(`super-fill-${body.playerIndex}`), pct = $(`super-pct-${body.playerIndex}`);
       if (fill) setMeterFill(fill, body.meter);
-      if (pct) pct.textContent = Math.floor(body.meter) + '%';
+      if (pct) {
+        const pctTxt = Math.floor(body.meter) + '%';
+        if (pct.textContent !== pctTxt) pct.textContent = pctTxt;
+      }
     }
     dirtyMeters.clear();
   }
@@ -622,11 +625,30 @@
   // Big announcements over the rink. The promise settles once the banner has gone, or as soon as
   // another banner replaces it.
   let bannerTimer = 0, bannerGone = null, planBanner = Promise.resolve();
+  function restartClassAnimation(el, cls, durationMs = 0) {
+    if (!el) return;
+    if (!el.classList.contains?.(cls)) {
+      el.classList.add(cls);
+      return;
+    }
+    const anims = typeof el.getAnimations === 'function' ? el.getAnimations() : null;
+    if (anims && anims.length) {
+      for (const a of anims) {
+        if (durationMs > 0) a.effect?.updateTiming?.({ duration: durationMs });
+        a.cancel?.();
+        a.play?.();
+      }
+    } else {
+      el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+    }
+  }
   function banner(text, ms = 1200, tone = '') {
     const el = $('field-banner');
     clearTimeout(bannerTimer); bannerGone?.();
-    el.textContent = text; el.dataset.tone = tone; el.style.setProperty('--banner-ms', ms + 'ms');
-    el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+    if (el.textContent !== text) el.textContent = text;
+    if (el.dataset.tone !== tone) el.dataset.tone = tone;
+    el.style.setProperty('--banner-ms', ms + 'ms');
+    restartClassAnimation(el, 'show', ms);
     return new Promise(resolve => {
       bannerGone = resolve;
       bannerTimer = setTimeout(() => { el.classList.remove('show'); bannerGone = null; resolve(); }, ms);
@@ -795,7 +817,7 @@
       // A goal pops the score; a side reaching 4 goals is on match point.
       if (scores[team] > shownScores[team]) {
         const cell = $(team ? 'away-score' : 'home-score').parentElement;
-        cell.classList.remove('scored'); void cell.offsetWidth; cell.classList.add('scored');
+        restartClassAnimation(cell, 'scored');
       }
       if (scores[team] === 4 && shownScores[team] === 3 && phase !== 'over') bugTab(`Match point · ${sideName(team)}`, { team, colour: true });
       shownScores[team] = scores[team];
@@ -1245,10 +1267,12 @@
   const stagePoint = p => boxPoint(fieldBox, p);
   function positionSpinControl() {
     const control = $('field-spin');
-    control.hidden = false;
+    if (control.hidden) control.hidden = false;
     const visible = shot === 'match' && !cameraMove && phase === 'plan' && drag === null && spinSlider;
-    control.style.visibility = visible ? 'visible' : 'hidden';
-    control.inert = !visible;
+    const vis = visible ? 'visible' : 'hidden';
+    if (control._lastVis !== vis) { control._lastVis = vis; control.style.visibility = vis; }
+    const nextInert = !visible;
+    if (control.inert !== nextInert) control.inert = nextInert;
     if (!visible) return;
     const b = fieldView.bodies[selected], center = stagePoint(b), r = fieldBox;
     const radius = b.radius * (fieldView.portrait ? r.height / 1000 : r.width / 1000);
@@ -1258,7 +1282,8 @@
     let y = arrow.y > center.y + 8 * gameUi.scale() ? center.y - radius - height - 24 * gameUi.scale() : center.y + radius + 5 * gameUi.scale();
     const x = Math.max(6 * gameUi.scale(), Math.min(r.stageWidth - width - 6 * gameUi.scale(), center.x - width / 2));
     y = Math.max(6 * gameUi.scale(), Math.min(r.stageHeight - height - 6 * gameUi.scale(), y));
-    control.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+    const xf = `translate3d(${x}px, ${y}px, 0)`;
+    if (control._lastXf !== xf) { control._lastXf = xf; control.style.transform = xf; }
   }
   let collectionShownLength = 1000, collectionTargetLength = 1000, collectionLengthRaf = 0;
   let collectionRotateHold = false, collectionLengthOverride = null, collectionShrinkingBox = null;

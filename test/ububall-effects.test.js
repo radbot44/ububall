@@ -5620,3 +5620,108 @@ test('mobile trace fixes: offscreen goalCall/goalSweep/popup caches, skaterStyle
   for (let i = 0; i < 60; i++) clockEnv.updateClock();
   assert.equal(hiddenWrites, 0, 'updateClock performs zero .hidden DOM writes when hidden state is unchanged');
 });
+
+test('positionSpinControl guards .inert/visibility/transform writes, and banner + setMeterFill avoid offsetWidth forced reflow', () => {
+  const P = require('../shared/ububall-physics.js');
+  const { setMeterFill, impulseGeometry } = require('../web/ububall-presentation.js');
+
+  // 1. positionSpinControl skips redundant .hidden, .inert, style.visibility, and style.transform writes
+  const spinCode = section('  function positionSpinControl() {', '  let collectionShownLength =');
+  let inertWrites = 0, hiddenWrites = 0, visWrites = 0, xfWrites = 0;
+  let curInert = true, curHidden = true, curVis = 'hidden', curXf = '';
+  const controlEl = {
+    get hidden() { return curHidden; },
+    set hidden(v) { curHidden = v; hiddenWrites++; },
+    get inert() { return curInert; },
+    set inert(v) { curInert = v; inertWrites++; },
+    style: {
+      get visibility() { return curVis; },
+      set visibility(v) { curVis = v; visWrites++; },
+      get transform() { return curXf; },
+      set transform(v) { curXf = v; xfWrites++; }
+    }
+  };
+  const bodies = P.kickoff();
+  const plans = [{ angle: 0, power: 0.5, spin: 0, guard: false }, { angle: 0, power: 0, spin: 0, guard: false }, { angle: 0, power: 0, spin: 0, guard: false }];
+  const spinEnv = runInNewContext(spinCode + '\n;({ positionSpinControl });', {
+    $: () => controlEl,
+    shot: 'match',
+    cameraMove: null,
+    phase: 'plan',
+    drag: null,
+    spinSlider: true,
+    bodies,
+    fieldView: { bodies, portrait: true },
+    selected: 0,
+    plans,
+    fieldBox: { left: 0, top: 0, width: 330, height: 551, stageWidth: 360, stageHeight: 580, controlWidth: 146, controlHeight: 44 },
+    stagePoint: p => ({ x: p.y / 600 * 330, y: (1 - p.x / 1000) * 551 }),
+    impulseGeometry: (b, pl) => impulseGeometry(P, b, pl),
+    gameUi: { scale: () => 1 },
+    Math
+  });
+  spinEnv.positionSpinControl();
+  assert.equal(hiddenWrites, 1);
+  assert.equal(inertWrites, 1);
+  assert.equal(visWrites, 1);
+  assert.equal(xfWrites, 1);
+  for (let i = 0; i < 60; i++) spinEnv.positionSpinControl();
+  assert.equal(hiddenWrites, 1, 'steady-state frames perform zero .hidden writes on #field-spin');
+  assert.equal(inertWrites, 1, 'steady-state frames perform zero .inert writes on #field-spin');
+  assert.equal(visWrites, 1, 'steady-state frames perform zero style.visibility writes on #field-spin');
+  assert.equal(xfWrites, 1, 'steady-state frames perform zero style.transform writes on #field-spin');
+
+  // 2. banner() restarts animation without reading offsetWidth
+  const bannerCode = section('  let bannerTimer = 0,', '  function resetPlans(');
+  let offsetReads = 0, animCancels = 0, animPlays = 0;
+  const classes = new Set();
+  const bannerEl = {
+    textContent: '',
+    dataset: {},
+    style: { setProperty() {} },
+    classList: {
+      contains: c => classes.has(c),
+      add: c => classes.add(c),
+      remove: c => classes.delete(c)
+    },
+    get offsetWidth() { offsetReads++; return 300; },
+    getAnimations: () => [{ effect: { updateTiming() {} }, cancel() { animCancels++; }, play() { animPlays++; } }]
+  };
+  const timers = [];
+  const bannerEnv = runInNewContext(bannerCode + '\n;({ banner });', {
+    $: () => bannerEl,
+    clearTimeout: () => {},
+    setTimeout: (fn, ms) => { timers.push(fn); return timers.length; },
+    Promise
+  });
+  bannerEnv.banner('Plan your shot…', 1300, 'plan');
+  assert.equal(classes.has('show'), true);
+  assert.equal(offsetReads, 0, 'fresh banner never reads offsetWidth');
+  bannerEnv.banner('Launch!', 900, 'launch');
+  assert.equal(offsetReads, 0, 'interrupting banner restarts via getAnimations() with zero offsetWidth reflow');
+  assert.equal(animCancels, 1);
+  assert.equal(animPlays, 1);
+
+  // 3. setMeterFill skips unchanged values and avoids offsetWidth reflow via getAnimations()
+  let meterOffsetReads = 0, meterWidthWrites = 0;
+  const meterClasses = new Set();
+  const fillEl = {
+    dataset: {},
+    style: { set width(_v) { meterWidthWrites++; } },
+    classList: {
+      contains: c => meterClasses.has(c),
+      add: c => meterClasses.add(c),
+      remove: c => meterClasses.delete(c),
+      toggle: (c, force) => force ? meterClasses.add(c) : meterClasses.delete(c)
+    },
+    get offsetWidth() { meterOffsetReads++; return 100; },
+    getAnimations: () => [{ cancel() {}, play() {} }]
+  };
+  setMeterFill(fillEl, 40);
+  setMeterFill(fillEl, 40);
+  setMeterFill(fillEl, 40);
+  assert.equal(meterWidthWrites, 1, 'setMeterFill skips redundant width writes when meter is unchanged');
+  setMeterFill(fillEl, 55);
+  setMeterFill(fillEl, 70);
+  assert.equal(meterOffsetReads, 0, 'setMeterFill never forces synchronous offsetWidth layout when getAnimations is present');
+});

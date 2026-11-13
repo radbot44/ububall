@@ -484,10 +484,27 @@
 
   // A gain flashes a glint at the bar's growing end; a full bar shimmers.
   function setMeterFill(fill, meter) {
-    const value = Math.min(100, Math.max(0, meter || 0)), previous = Number(fill.dataset.value ?? value);
-    fill.style.width = value + '%'; fill.dataset.value = value;
-    if (value > previous + .2) { fill.classList.remove('gain'); void fill.offsetWidth; fill.classList.add('gain'); }
-    fill.classList.toggle('full', value >= 100);
+    const value = Math.min(100, Math.max(0, meter || 0));
+    const valStr = String(value);
+    const hasPrev = fill.dataset.value !== undefined && fill.dataset.value !== '';
+    const previous = hasPrev ? Number(fill.dataset.value) : value;
+    if (hasPrev && fill.dataset.value === valStr) return;
+    fill.style.width = valStr + '%';
+    fill.dataset.value = valStr;
+    if (value > previous + .2) {
+      if (!fill.classList.contains('gain')) {
+        fill.classList.add('gain');
+      } else {
+        const anims = typeof fill.getAnimations === 'function' ? fill.getAnimations() : null;
+        if (anims && anims.length) {
+          for (const a of anims) { a.cancel?.(); a.play?.(); }
+        } else {
+          fill.classList.remove('gain'); void fill.offsetWidth; fill.classList.add('gain');
+        }
+      }
+    }
+    const isFull = value >= 100;
+    if (fill.classList.contains?.('full') !== isFull) fill.classList.toggle('full', isFull);
   }
 
   function mountSkaterSprites(container, entries, ubuRender, onReady = null) {
