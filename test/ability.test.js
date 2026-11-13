@@ -335,3 +335,56 @@ test('loadCompletedIds auto-archives stale physicsVersion corpora and resumes ma
   const afterMatch = bench.loadCompletedIds(corpusPath, P.VERSION);
   assert.equal(afterMatch.has('corpus:0'), true);
 });
+
+test('SoAKernel fastTick matches canonical M.resolveTurn(fastTick) across Standard, Pulse, Classic, and armed Supers', () => {
+  const P = require('../shared/ububall-physics.js');
+  const M = require('../shared/ububall-match.js');
+  const C = require('../shared/ububall-cpu.js');
+
+  for (const mode of ['standard', 'pulse', 'classic']) {
+    const bodies = P.kickoff();
+    const stats = [];
+    for (let i = 0; i < 6; i++) {
+      const raw = { impulse: 90 + i * 25, power: 110 + i * 20, spin: 100 + i * 22, curve: 140, synergy: 160, chemistry: 150 };
+      stats.push(mode === 'classic' ? {} : raw);
+      M.applyStats(P, bodies[i], stats[i], mode);
+      if (mode !== 'classic') {
+        bodies[i].equippedSuper = { ...P.SUPERS[(i * 3 + 1) % P.SUPERS.length], bonusTicks: 120, bonusRefund: 5 };
+        bodies[i].meter = 100;
+      }
+    }
+    let state = { version: M.VERSION, mode, bodies, stats, scores: [0, 0], turn: 1, phase: 'plan', winner: null };
+    for (let turn = 0; turn < 3; turn++) {
+      const p0 = C.plan(state, 0, { level: 'medium', candidates: 16, opponents: 2, wobble: true, searchTicks: 240, fastTick: true, seed: 500 + turn });
+      const p1 = C.plan(state, 1, { level: 'medium', candidates: 16, opponents: 2, wobble: true, searchTicks: 240, fastTick: true, seed: 900 + turn });
+      const allMoves = [...p0.plans, ...p1.plans];
+
+      // Compare single-candidate rollout (candidates: 1, opponents: 1, wobble: false) where C.plan evaluates legacy(0) vs legacy(1)
+      const singleFast = C.plan(state, 0, { level: 'easy', candidates: 1, opponents: 1, wobble: false, searchTicks: 240, fastTick: true, seed: 1 });
+      const m0 = C.legacy(state, 0), m1 = C.legacy(state, 1);
+      let toucher = null, touches = 0, boards = 0, firstTeamTouch = null, multiTeamTouch = false;
+      const watch = {
+        collide({ a, b, speed }) {
+          const player = M.toucher(a, b, speed);
+          if (player && player !== toucher) {
+            toucher = player; touches++;
+            if (player.team === 0) {
+              if (firstTeamTouch === null) firstTeamTouch = player;
+              else if (firstTeamTouch !== player) multiTeamTouch = true;
+            }
+          }
+        },
+        wall(body, _v, type) { if (body.team === -1 && touches && type !== 'net') boards++; }
+      };
+      const pulse = M.rule(mode, 'pulse');
+      const canDecide = !pulse && !state.fouls?.crease?.[0] && !state.fouls?.crease?.[1] && (state.fouls?.corner ?? null) === null;
+      const ref = M.resolveTurn(P, state, [...m0, ...m1], {
+        effects: false, fastSearch: true, fastTick: true, ticks: 240,
+        decided: canDecide ? b => touches > 0 && C.decided(b) : null,
+        watch, preservePartial: true
+      });
+      assert.equal(singleFast.diagnostics.ticks, ref.replay.ticks, `tick count match in ${mode} turn ${turn}`);
+      state = M.resolveTurn(P, state, allMoves, { effects: false }).state;
+    }
+  }
+});

@@ -14,14 +14,14 @@
 //   full:         Interleaves curves + interactions + corpus + wild into a unified resumable JSONL
 //                 dataset so even partial checkpoints cover all 15 stats and modes evenly.
 //
-// Designed for hybrid high-core CPUs (e.g. i9-14900K P+E cores): single-pair dynamic work stealing,
-// live in-flight turn & per-game progress streaming (no cold-start ETA spikes), fastTick headless
-// physics resolution, two-stage minimax response screening, and append-only JSONL (--resume).
+// Designed for hybrid high-core CPUs (e.g. i9-14900K 8P+16E / 32 threads): lock-free SharedArrayBuffer
+// + Atomics single-pair work stealing, zero-IPC atomic turn/game telemetry, worker-parallel JSONL
+// serialization, unboxed TypedArray fastTick search rollouts, and append-only JSONL (--resume).
 
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { Worker, isMainThread, parentPort } = require('node:worker_threads');
+const { Worker, isMainThread, parentPort, workerData } = require('node:worker_threads');
 const P = require('../shared/ububall-physics.js');
 const M = require('../shared/ububall-match.js');
 const C = require('../shared/ububall-cpu.js');
@@ -106,12 +106,17 @@ function rollContextSlot(random) {
   };
 }
 
+const KICKOFF_POS = Object.freeze([
+  { x: 180, y: 300 }, { x: 310, y: 180 }, { x: 310, y: 420 },
+  { x: 820, y: 300 }, { x: 690, y: 180 }, { x: 690, y: 420 },
+  { x: 500, y: 300 }
+]);
+
 function kickoffReset(state) {
-  const positions = P.kickoff();
-  for (let i = 0; i < state.bodies.length; i++) {
+  for (let i = 0; i < 7; i++) {
     const b = state.bodies[i];
-    b.x = positions[i].x;
-    b.y = positions[i].y;
+    b.x = KICKOFF_POS[i].x;
+    b.y = KICKOFF_POS[i].y;
     b.vx = b.vy = b.omega = 0;
     if (i < 6) {
       b.daze = 0;
@@ -124,6 +129,8 @@ function kickoffReset(state) {
   }
   state.phase = 'plan';
 }
+
+const RESOLVE_OPTS = Object.freeze({ effects: false });
 
 // Plays one match (one side orientation) and returns scores, ticks, turns, territorial tiebreak, and per-ubu tallies.
 function playSingleMatch({ teams, contexts, mode, seed, swapped, cpuConfig, maxTurns, onProgress = null }) {
@@ -140,13 +147,14 @@ function playSingleMatch({ teams, contexts, mode, seed, swapped, cpuConfig, maxT
     const ctx = ctxOrder[sideIdx][slotIdx];
     stats.push(raw);
     M.applyStats(P, b, raw, mode);
-    b.personality = { ...ctx.personality };
-    b.equippedSuper = { ...ctx.equippedSuper };
-    b.superBonusTicks = ctx.bonusTicks;
-    b.superBonusRefund = ctx.bonusRefund;
+    b.openingShot = false;
     b.meter = ctx.meter;
     b.meterTick = -Infinity;
     b.superArm = false;
+    b.superBonusTicks = ctx.bonusTicks;
+    b.superBonusRefund = ctx.bonusRefund;
+    b.equippedSuper = { ...ctx.equippedSuper };
+    b.personality = { ...ctx.personality };
   }
 
   let state = {
@@ -161,13 +169,22 @@ function playSingleMatch({ teams, contexts, mode, seed, swapped, cpuConfig, maxT
     tally: M.newTally()
   };
 
+  const planCfg0 = { ...cpuConfig, seed: 0 };
+  const planCfg1 = { ...cpuConfig, seed: 0 };
+  const moveBuf = new Array(6);
+
   let turns = 0;
   let unreportedTurns = 0;
   let ballXSum = 0;
   while (state.winner === null && turns < maxTurns) {
-    const p0 = C.plan(state, 0, { ...cpuConfig, seed: (seed * 2654435761 + turns * 97 + (swapped ? 1 : 0)) >>> 0 }).plans;
-    const p1 = C.plan(state, 1, { ...cpuConfig, seed: (seed * 2654435761 + turns * 97 + (swapped ? 0 : 1)) >>> 0 }).plans;
-    state = M.resolveTurn(P, state, [...p0, ...p1], { effects: false }).state;
+    const baseTurnSeed = Math.imul(seed, 2654435761) + turns * 97;
+    planCfg0.seed = (baseTurnSeed + (swapped ? 1 : 0)) >>> 0;
+    planCfg1.seed = (baseTurnSeed + (swapped ? 0 : 1)) >>> 0;
+    const p0 = C.plan(state, 0, planCfg0).plans;
+    const p1 = C.plan(state, 1, planCfg1).plans;
+    moveBuf[0] = p0[0]; moveBuf[1] = p0[1]; moveBuf[2] = p0[2];
+    moveBuf[3] = p1[0]; moveBuf[4] = p1[1]; moveBuf[5] = p1[2];
+    state = M.resolveTurn(P, state, moveBuf, RESOLVE_OPTS).state;
     turns++;
     unreportedTurns++;
     ballXSum += (state.bodies[6].x - 500);
@@ -181,10 +198,9 @@ function playSingleMatch({ teams, contexts, mode, seed, swapped, cpuConfig, maxT
 
   const [aGoals, bGoals] = swapped ? [state.scores[1], state.scores[0]] : state.scores;
   const winner = state.winner === null ? null : (state.winner === (swapped ? 1 : 0) ? 1 : -1);
-  // Map 6-ubu tallies back to canonical [TeamA_0..2, TeamB_0..2] order.
   const t = state.tally || M.newTally();
   const mapSix = arr => swapped ? [arr[3], arr[4], arr[5], arr[0], arr[1], arr[2]] : [...arr];
-  const territory = (swapped ? -1 : 1) * (ballXSum / Math.max(1, turns)) / 440; // [-1, +1] average field tilt
+  const territory = (swapped ? -1 : 1) * (ballXSum / Math.max(1, turns)) / 440;
 
   return {
     aGoals,
@@ -230,7 +246,6 @@ function runPairJob(job, onProgress = null) {
   const totalTurns = m0.turns + m1.turns;
   const cappedCount = Number(m0.capped) + Number(m1.capped);
   const territory = (m0.territory + m1.territory) / 2;
-  // Pace-adjusted goal rate (goals per 7,200 ticks = 30s simulated play, soft-clamped at ±10 to prevent 2-s fluke spikes).
   const rawRate = totalTicks > 0 ? ((m0.diff + m1.diff) / totalTicks) * 7200 : 0;
   const goalRate30s = Math.max(-10, Math.min(10, rawRate));
 
@@ -269,27 +284,10 @@ function runPairJob(job, onProgress = null) {
   return out;
 }
 
-if (!isMainThread) {
-  parentPort.on('message', batch => {
-    const onProgress = (turns, games) => {
-      if (turns > 0 || games > 0) parentPort.postMessage({ type: 'progress', turns, games });
-    };
-    const results = [];
-    for (let i = 0; i < batch.length; i++) {
-      results.push(runPairJob(batch[i], onProgress));
-    }
-    parentPort.postMessage({ type: 'batch', results });
-  });
-  return;
-}
-
-// --- Main Thread: Experiment Generation, Checkpointed Worker Pool & Live Summary ---
-
 const neutralStats = () => Object.fromEntries(STATS.map(s => [s, 127]));
 const randomStats = rng => Object.fromEntries(STATS.map(s => [s, Math.floor(rng() * 256)]));
 
-// Interleaves job buckets deterministically using Bresenham-style proportional scheduling so
-// partial checkpoints always have balanced coverage across all 15 stats, grids, corpus, and modes.
+// Interleaves job buckets deterministically using Bresenham-style proportional scheduling.
 function interleaveBuckets(buckets) {
   const nonEmpty = buckets.filter(b => b.length > 0);
   if (nonEmpty.length <= 1) return nonEmpty[0] || [];
@@ -322,8 +320,6 @@ function buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuC
   const corpusBucket = [];
   const wildBucket = [];
 
-  // 1. Single-ubu focal 5-point marginal curves (0, 64, 127, 191, 255), ordered outer-loop by replicate `p`
-  // so early checkpoints already sweep all 15 stats and all 4 non-neutral knots evenly.
   if (suite === 'curves' || suite === 'full') {
     const knots = [0, 64, 191, 255];
     for (let p = 0; p < curvePairs; p++) {
@@ -354,7 +350,6 @@ function buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuC
     }
   }
 
-  // 2. Targeted 2D physics interaction grids on focal ubu (outer-loop by replicate `p`).
   if (suite === 'interactions' || suite === 'full') {
     const pairs2D = [
       ['size', 'reach'],
@@ -396,7 +391,6 @@ function buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuC
     }
   }
 
-  // 3. Large random-stat 6-ubu corpus (50% standard, 50% pulse, mirrored non-stat context).
   if (suite === 'corpus' || suite === 'full') {
     for (let p = 0; p < pairs; p++) {
       const mode = modeAt(p);
@@ -417,7 +411,6 @@ function buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuC
     }
   }
 
-  // 4. Unmirrored wild 128-byte DNA validation split (tests real match win-rate prediction).
   if (suite === 'wild' || suite === 'full') {
     for (let p = 0; p < wildPairs; p++) {
       const mode = modeAt(p);
@@ -440,6 +433,64 @@ function buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuC
 
   return interleaveBuckets([corpusBucket, curveBucket, interBucket, wildBucket]);
 }
+
+// --- Worker Thread Entry Point (Lock-Free Atomic Work Stealing) ---
+if (!isMainThread && workerData && workerData.sharedCtrl) {
+  const ctrl = new Int32Array(workerData.sharedCtrl);
+  const stepSize = Math.max(1, workerData.batchSize || 1);
+  const serializeOnly = Boolean(workerData.serializeOnly);
+  const flushLimit = Math.max(1, workerData.flushEvery || 1);
+
+  const localJobs = workerData.buildParams
+    ? (() => {
+        const all = buildJobs(workerData.buildParams);
+        const idxArr = new Int32Array(workerData.pendingIndicesBuf);
+        return { all, idxArr, length: idxArr.length };
+      })()
+    : { all: workerData.jobs, idxArr: null, length: workerData.jobs.length };
+
+  const onProgress = (turns, games) => {
+    if (turns > 0) Atomics.add(ctrl, 3, turns);
+    if (games > 0) Atomics.add(ctrl, 2, games);
+  };
+
+  const outResults = [];
+  const outLines = [];
+  let lastFlush = Date.now();
+
+  const flush = () => {
+    if (serializeOnly) {
+      if (outLines.length > 0) {
+        parentPort.postMessage({ type: 'jsonl', count: outLines.length, chunk: outLines.join('\n') + '\n' });
+        outLines.length = 0;
+      }
+    } else if (outResults.length > 0) {
+      parentPort.postMessage({ type: 'batch', results: outResults.splice(0, outResults.length) });
+    }
+    lastFlush = Date.now();
+  };
+
+  for (;;) {
+    const base = Atomics.add(ctrl, 0, stepSize);
+    if (base >= localJobs.length) break;
+    const end = Math.min(localJobs.length, base + stepSize);
+    for (let k = base; k < end; k++) {
+      const job = localJobs.idxArr ? localJobs.all[localJobs.idxArr[k]] : localJobs.all[k];
+      const res = runPairJob(job, onProgress);
+      Atomics.add(ctrl, 4, res.turns);
+      Atomics.add(ctrl, 1, 1);
+      if (serializeOnly) outLines.push(JSON.stringify(res));
+      else outResults.push(res);
+    }
+    const buffered = serializeOnly ? outLines.length : outResults.length;
+    if (buffered >= flushLimit || Date.now() - lastFlush >= 80) flush();
+  }
+  flush();
+  parentPort.postMessage({ type: 'done' });
+  return;
+}
+
+// --- Main Thread: Experiment Generation, Lock-Free Worker Pool & Live Summary ---
 
 function loadCompletedIds(outputPath, expectedPhysics = P.VERSION) {
   const done = new Set();
@@ -483,84 +534,107 @@ function formatEta(seconds) {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${rem}` : `${m}:${rem}`;
 }
 
-function runPool(jobs, threads, batchSize, onBatch) {
+function runPool(jobs, threads, batchSize, onBatch, opts = null) {
   if (!jobs.length) return Promise.resolve([]);
   return new Promise((resolve, reject) => {
-    const allResults = [];
-    let cursor = 0;
-    let completedPairs = 0;
-    let finishedPairTurns = 0;
-    let liveGames = 0;
-    let liveTurns = 0;
+    const serializeOnly = Boolean(opts && opts.onJsonChunk);
+    const allResults = serializeOnly ? null : [];
+    const totalJobs = jobs.length;
+    const stepSize = Math.max(1, batchSize || 1);
+    const workerCount = Math.min(threads, Math.ceil(totalJobs / stepSize));
+
+    // ctrl: [0] cursor, [1] completedPairs, [2] liveGames, [3] liveTurns, [4] finishedPairTurns
+    const sharedCtrl = new SharedArrayBuffer(5 * Int32Array.BYTES_PER_ELEMENT);
+    const ctrl = new Int32Array(sharedCtrl);
+
+    const flushEvery = serializeOnly
+      ? Math.min(4, Math.max(1, Math.floor(totalJobs / Math.max(1, workerCount * 8))))
+      : 1;
+
+    const wData = opts && opts.buildParams && opts.pendingIndicesBuf
+      ? {
+          sharedCtrl,
+          batchSize: stepSize,
+          flushEvery,
+          serializeOnly,
+          buildParams: opts.buildParams,
+          pendingIndicesBuf: opts.pendingIndicesBuf
+        }
+      : {
+          sharedCtrl,
+          batchSize: stepSize,
+          flushEvery,
+          serializeOnly,
+          jobs
+        };
+
     let lastRender = 0;
     const started = Date.now();
-    const workerCount = Math.min(threads, Math.ceil(jobs.length / batchSize));
-    const workers = Array.from({ length: workerCount }, () => new Worker(__filename));
-    let activeWorkers = 0;
 
     const renderProgress = (force = false) => {
       const now = Date.now();
-      if (!force && now - lastRender < 250) return;
+      if (!force && now - lastRender < 200) return;
       lastRender = now;
+      const completedPairs = Atomics.load(ctrl, 1);
+      const liveGames = Atomics.load(ctrl, 2);
+      const liveTurns = Atomics.load(ctrl, 3);
+      const finishedPairTurns = Atomics.load(ctrl, 4);
+
       const elapsed = Math.max(0.1, (now - started) / 1000);
       const turnsRate = liveTurns / elapsed;
-      // Blend prior ~125 turns/pair with observed mean so in-flight workers don't skew cold-start ETA.
       const obsTurnsPerPair = completedPairs >= 4 ? finishedPairTurns / completedPairs : 125;
       const priorWeight = Math.max(0, 1 - completedPairs / Math.max(8, workerCount));
       const estTurnsPerPair = priorWeight * 125 + (1 - priorWeight) * obsTurnsPerPair;
       const inFlightTurns = Math.max(0, liveTurns - finishedPairTurns);
-      const inFlightPairs = Math.min(activeWorkers * batchSize * 0.95, inFlightTurns / Math.max(20, estTurnsPerPair));
-      const effectivePairs = Math.min(jobs.length, completedPairs + inFlightPairs);
+      const inFlightPairs = Math.min(workerCount * stepSize * 0.95, inFlightTurns / Math.max(20, estTurnsPerPair));
+      const effectivePairs = Math.min(totalJobs, completedPairs + inFlightPairs);
       const pairRate = effectivePairs / elapsed;
       const gamesRate = pairRate * 2;
-      const remainingPairs = Math.max(0, jobs.length - effectivePairs);
+      const remainingPairs = Math.max(0, totalJobs - effectivePairs);
       const etaStr = liveTurns >= 8 ? formatEta(remainingPairs / Math.max(1e-6, pairRate)) : 'warming...';
       process.stderr.write(
-        `\r[${completedPairs}/${jobs.length} pairs · ${liveGames} games · ${liveTurns} turns] ` +
+        `\r[${completedPairs}/${totalJobs} pairs · ${liveGames} games · ${liveTurns} turns] ` +
         `${gamesRate.toFixed(2)} games/s · ${Math.round(turnsRate)} turns/s · ETA ${etaStr}   `
       );
     };
 
-    const heartbeat = setInterval(() => renderProgress(false), 500);
+    const heartbeat = setInterval(() => renderProgress(false), 250);
     if (typeof heartbeat.unref === 'function') heartbeat.unref();
 
-    const dispatch = worker => {
-      if (cursor >= jobs.length) return false;
-      const slice = jobs.slice(cursor, cursor + batchSize);
-      cursor += slice.length;
-      worker.postMessage(slice);
-      return true;
-    };
+    const workers = Array.from({ length: workerCount }, () => new Worker(__filename, { workerData: wData }));
+    let remainingWorkers = workerCount;
+    let settled = false;
 
     for (const worker of workers) {
-      if (dispatch(worker)) activeWorkers++;
       worker.on('message', msg => {
-        if (msg && msg.type === 'progress') {
-          liveTurns += msg.turns || 0;
-          liveGames += msg.games || 0;
+        if (!msg || settled) return;
+        if (msg.type === 'jsonl') {
+          opts.onJsonChunk(msg.chunk, msg.count);
           renderProgress(false);
           return;
         }
-        const batchResults = msg && msg.type === 'batch' ? msg.results : msg;
-        onBatch(batchResults);
-        for (const r of batchResults) {
-          allResults.push(r);
-          finishedPairTurns += r.turns;
+        if (msg.type === 'batch') {
+          if (onBatch) onBatch(msg.results);
+          if (allResults) {
+            for (let i = 0; i < msg.results.length; i++) allResults.push(msg.results[i]);
+          }
+          renderProgress(false);
+          return;
         }
-        completedPairs += batchResults.length;
-        renderProgress(true);
-        if (!dispatch(worker)) {
-          activeWorkers--;
+        if (msg.type === 'done') {
           worker.terminate();
-          if (activeWorkers === 0) {
+          if (--remainingWorkers === 0) {
+            settled = true;
             clearInterval(heartbeat);
             renderProgress(true);
             process.stderr.write('\n');
-            resolve(allResults);
+            resolve(allResults || []);
           }
         }
       });
       worker.on('error', err => {
+        if (settled) return;
+        settled = true;
         clearInterval(heartbeat);
         workers.forEach(w => w.terminate());
         reject(err);
@@ -645,7 +719,8 @@ async function main() {
   const wildPairs = args['wild-pairs'] !== undefined ? Number(args['wild-pairs']) : (args.pairs !== undefined ? Math.max(120, Math.round(pairs * 0.15)) : tier.wildPairs);
   const seed = args.seed !== undefined ? Number(args.seed) : 20261113;
   const hwThreads = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
-  const threads = args.threads !== undefined ? Number(args.threads) : Math.max(1, hwThreads - 2);
+  // Default to full hardware thread count (e.g. all 32 threads on i9-14900K) for maximum throughput.
+  const threads = args.threads !== undefined ? Number(args.threads) : Math.max(1, hwThreads);
   const batchSize = args.batch !== undefined ? Number(args.batch) : 1;
   const stdTurns = args['std-turns'] !== undefined ? Number(args['std-turns']) : 60;
   const pulseTurns = args['pulse-turns'] !== undefined ? Number(args['pulse-turns']) : 150;
@@ -658,22 +733,37 @@ async function main() {
   }
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  const allJobs = buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuConfig, stdTurns, pulseTurns });
+  const buildParams = { suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuConfig, stdTurns, pulseTurns };
+  const allJobs = buildJobs(buildParams);
   const doneIds = resume ? loadCompletedIds(outputPath) : new Set();
   if (!resume && fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
 
-  const pending = allJobs.filter(j => !doneIds.has(j.id));
+  const pendingIndices = [];
+  const pending = [];
+  for (let i = 0; i < allJobs.length; i++) {
+    if (!doneIds.has(allJobs[i].id)) {
+      pendingIndices.push(i);
+      pending.push(allJobs[i]);
+    }
+  }
+
   console.error(
     `Ability Benchmark [${suite} · scale=${scaleName} · preset=${presetName} · 50/50 Standard(${stdTurns}t)+Pulse(${pulseTurns}t) · ${threads} threads]: ` +
     `${allJobs.length} total pairs (${doneIds.size} cached, ${pending.length} to simulate)`
   );
 
   if (pending.length > 0) {
+    const pendingIndicesBuf = new SharedArrayBuffer(pendingIndices.length * Int32Array.BYTES_PER_ELEMENT);
+    new Int32Array(pendingIndicesBuf).set(pendingIndices);
+
     const stream = fs.createWriteStream(outputPath, { flags: 'a' });
     try {
-      await runPool(pending, threads, batchSize, batchResults => {
-        const chunk = batchResults.map(r => JSON.stringify(r)).join('\n') + '\n';
-        stream.write(chunk);
+      await runPool(pending, threads, batchSize, null, {
+        buildParams,
+        pendingIndicesBuf,
+        onJsonChunk: chunk => {
+          stream.write(chunk);
+        }
       });
     } finally {
       await new Promise(res => stream.end(res));
@@ -684,7 +774,7 @@ async function main() {
   console.error(`\nNext steps:\n  1. Fit spline + interaction model (RTX 4090 / Python): python scripts/fit-ability.py --input ${outputPath}\n  2. Or fit + calibrate 1M DNA quantiles in Node:        npm run calibrate:ability -- --corpus ${outputPath}`);
 }
 
-if (require.main === module) {
+if (require.main === module && isMainThread) {
   main().catch(err => {
     console.error(err);
     process.exit(1);

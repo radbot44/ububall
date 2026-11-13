@@ -8,9 +8,9 @@
 //               teams' average stat differences values all stats at once.
 //
 // Each match is played twice with the teams' sides swapped. Matches run in parallel worker threads
-// and are reproducible from their seed. Reports go to stdout (and --output, under personal/).
+// via lock-free SharedArrayBuffer work stealing and are reproducible from their seed.
 const os = require('node:os');
-const { Worker, isMainThread, parentPort } = require('node:worker_threads');
+const { Worker, isMainThread, parentPort, workerData } = require('node:worker_threads');
 const P = require('../shared/ububall-physics.js');
 const M = require('../shared/ububall-match.js');
 const C = require('../shared/ububall-cpu.js');
@@ -18,9 +18,16 @@ const C = require('../shared/ububall-cpu.js');
 const STATS = ['impulse', 'traction', 'spin', 'curve', 'size', 'mass', 'bounciness', 'grip',
   'power', 'reach', 'strength', 'stability', 'efficiency', 'synergy', 'chemistry'];
 
+const KICKOFF_POS = Object.freeze([
+  { x: 180, y: 300 }, { x: 310, y: 180 }, { x: 310, y: 420 },
+  { x: 820, y: 300 }, { x: 690, y: 180 }, { x: 690, y: 420 },
+  { x: 500, y: 300 }
+]);
+const RESOLVE_OPTS = Object.freeze({ effects: false });
+
 // One match: `teams` holds each team's three raw stat objects; `swapped` puts team A on the right.
 // `supers` optionally fixes each team's super ([team A, team B], an index into P.SUPERS or null for none).
-function match({ teams, seed, swapped, level, maxTurns, supers = null }) {
+function match({ teams, seed, swapped, level, maxTurns, supers = null, fastTick = true }) {
   const random = C.randomSource(seed), bodies = P.kickoff(), stats = [];
   // Mirrored loadout: each slot gets the same 4-slot super pool, personality and starting meter on both sides.
   const slots = [0, 1, 2].map(() => {
@@ -32,46 +39,68 @@ function match({ teams, seed, swapped, level, maxTurns, supers = null }) {
     };
   });
   const order = swapped ? [teams[1], teams[0]] : teams;
-  bodies.slice(0, 6).forEach((b, i) => {
+  for (let i = 0; i < 6; i++) {
+    const b = bodies[i];
     const raw = order[Math.floor(i / 3)][i % 3], slot = slots[i % 3];
     stats.push(raw); M.applyStats(P, b, raw, 'standard');
     const own = supers ? supers[(i < 3) === !swapped ? 0 : 1] : slot.superId;
     const mastery = own === null ? null : P.superMastery(supers ? [own] : slot.superSlots, own);
-    b.personality = slot.personality;
-    b.equippedSuper = own === null ? null : { ...P.SUPERS[own], ...mastery };
+    b.openingShot = false;
+    b.meter = slot.meter;
+    b.meterTick = -Infinity;
+    b.superArm = false;
     b.superBonusTicks = mastery?.bonusTicks || 0;
     b.superBonusRefund = mastery?.bonusRefund || 0;
-    b.meter = slot.meter;
-  });
+    b.equippedSuper = own === null ? null : { ...P.SUPERS[own], ...mastery };
+    b.personality = slot.personality;
+  }
   let state = { version: M.VERSION, mode: 'standard', bodies, stats, scores: [0, 0], turn: 1, phase: 'plan', winner: null };
   let turns = 0;
+  const cfg0 = { level, fastTick, seed: 0 };
+  const cfg1 = { level, fastTick, seed: 0 };
+  const moves = new Array(6);
   while (state.winner === null && turns < maxTurns) {
-    const moves = [0, 1].flatMap(team => C.plan(state, team, { level, seed: seed * 1009 + turns * 17 + team }).plans);
-    state = M.resolveTurn(P, state, moves).state; turns++;
+    cfg0.seed = seed * 1009 + turns * 17;
+    cfg1.seed = cfg0.seed + 1;
+    const p0 = C.plan(state, 0, cfg0).plans;
+    const p1 = C.plan(state, 1, cfg1).plans;
+    moves[0] = p0[0]; moves[1] = p0[1]; moves[2] = p0[2];
+    moves[3] = p1[0]; moves[4] = p1[1]; moves[5] = p1[2];
+    state = M.resolveTurn(P, state, moves, RESOLVE_OPTS).state; turns++;
     if (state.phase === 'goal') {
-      const positions = P.kickoff();
-      state.bodies.forEach((b, i) => {
-        b.x = positions[i].x; b.y = positions[i].y; b.vx = b.vy = b.omega = 0;
+      for (let i = 0; i < 7; i++) {
+        const b = state.bodies[i];
+        b.x = KICKOFF_POS[i].x; b.y = KICKOFF_POS[i].y; b.vx = b.vy = b.omega = 0;
         if (i < 6) {
           b.daze = 0;
-          delete b.meterTick;
+          b.meterTick = -Infinity;
           b.guarding = false;
           b.ironGuard = false;
           b.ironCooldownTicks = 0;
           P.syncEffectiveStats(b);
         }
-      });
+      }
       state.phase = 'plan';
     }
   }
-  // Report from team A's point of view.
   const [a, b] = swapped ? [state.scores[1], state.scores[0]] : state.scores;
   const winner = state.winner === null ? null : (state.winner === (swapped ? 1 : 0) ? 'a' : 'b');
   return { diff: a - b, winner, turns };
 }
 
-if (!isMainThread) {
-  parentPort.on('message', job => parentPort.postMessage({ id: job.id, ...match(job) }));
+if (!isMainThread && workerData && workerData.sharedCtrl) {
+  const ctrl = new Int32Array(workerData.sharedCtrl);
+  const jobs = workerData.jobs;
+  const out = [];
+  for (;;) {
+    const id = Atomics.add(ctrl, 0, 1);
+    if (id >= jobs.length) break;
+    out.push({ id, ...match(jobs[id]) });
+    Atomics.add(ctrl, 1, 1);
+    if (out.length >= 8) parentPort.postMessage({ type: 'batch', results: out.splice(0, out.length) });
+  }
+  if (out.length > 0) parentPort.postMessage({ type: 'batch', results: out });
+  parentPort.postMessage({ type: 'done' });
   return;
 }
 
@@ -80,25 +109,52 @@ const neutral = () => Object.fromEntries(STATS.map(s => [s, 127]));
 const team = patch => [0, 1, 2].map(() => ({ ...neutral(), ...patch }));
 
 function run(jobs, threads) {
+  if (!jobs.length) return Promise.resolve([]);
   return new Promise((resolve, reject) => {
     const results = new Array(jobs.length);
-    let next = 0, done = 0;
+    const sharedCtrl = new SharedArrayBuffer(2 * Int32Array.BYTES_PER_ELEMENT);
+    const ctrl = new Int32Array(sharedCtrl);
     const started = Date.now();
-    const workers = Array.from({ length: Math.min(threads, jobs.length) }, () => new Worker(__filename));
-    const feed = worker => { if (next < jobs.length) worker.postMessage({ ...jobs[next], id: next++ }); };
+    let lastRender = 0;
+    const workerCount = Math.min(threads, jobs.length);
+    const workers = Array.from({ length: workerCount }, () => new Worker(__filename, { workerData: { sharedCtrl, jobs } }));
+    let remaining = workerCount;
+
+    const render = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastRender < 200) return;
+      lastRender = now;
+      const done = Atomics.load(ctrl, 1);
+      const elapsed = Math.max(0.05, (now - started) / 1000);
+      process.stderr.write(`\r${done}/${jobs.length} matches · ${(done / elapsed).toFixed(1)} games/s · ${elapsed.toFixed(1)}s   `);
+    };
+
     for (const worker of workers) {
-      worker.on('message', result => {
-        results[result.id] = result; done++;
-        if (done % 50 === 0 || done === jobs.length) process.stderr.write(`\r${done}/${jobs.length} matches · ${Math.round((Date.now() - started) / 1000)} s`);
-        if (done === jobs.length) { process.stderr.write('\n'); workers.forEach(w => w.terminate()); resolve(results); } else feed(worker);
+      worker.on('message', msg => {
+        if (msg.type === 'batch') {
+          for (let i = 0; i < msg.results.length; i++) {
+            const r = msg.results[i];
+            results[r.id] = r;
+          }
+          render(false);
+        } else if (msg.type === 'done') {
+          worker.terminate();
+          if (--remaining === 0) {
+            render(true);
+            process.stderr.write('\n');
+            resolve(results);
+          }
+        }
       });
-      worker.on('error', reject);
-      feed(worker);
+      worker.on('error', err => {
+        workers.forEach(w => w.terminate());
+        reject(err);
+      });
     }
   });
 }
+
 const mean = xs => xs.reduce((a, b) => a + b, 0) / xs.length;
-// Mean with a 95% interval; side-swapped pairs are averaged first, so each pair is one sample.
 function summarise(results) {
   const pairs = [];
   for (let i = 0; i < results.length; i += 2) pairs.push((results[i].diff + results[i + 1].diff) / 2);
@@ -107,7 +163,7 @@ function summarise(results) {
   return { goalDiff: m, ci: 1.96 * sd / Math.sqrt(pairs.length), winRate: decided.length ? wins / decided.length : null,
     games: results.length, capped: results.length - decided.length };
 }
-// Least squares with standard errors (normal equations, Gauss-Jordan inverse).
+
 function regress(rows, ys) {
   const k = rows[0].length, n = rows.length;
   if (n <= k) throw new Error(`Regression requires more pairs (${n}) than model parameters (${k}).`);
@@ -144,7 +200,8 @@ async function main() {
   const seed = args.seed !== undefined ? Number(args.seed) : 1;
   const level = args.level || 'easy';
   const maxTurns = args.turns !== undefined ? Number(args.turns) : 60;
-  const threads = args.threads !== undefined ? Number(args.threads) : Math.max(1, os.availableParallelism() - 2);
+  const hwThreads = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+  const threads = args.threads !== undefined ? Number(args.threads) : Math.max(1, hwThreads);
   const stats = args.stats ? String(args.stats).split(',') : STATS;
   if (!['sweep', 'regression', 'supers'].includes(experiment) || !stats.every(s => STATS.includes(s)) ||
       ![pairs, seed, maxTurns, threads].every(Number.isInteger) || pairs < 1 || maxTurns < 1 || threads < 1) {
@@ -153,14 +210,12 @@ async function main() {
   if (experiment === 'regression' && pairs <= stats.length + 1) {
     throw new Error(`Regression requires --pairs > ${stats.length + 1}.`);
   }
-  const common = { level, maxTurns };
+  const common = { level, maxTurns, fastTick: true };
   const pairJobs = (teams, s, supers = null) => [false, true].map(swapped => ({ ...common, teams, seed: s, swapped, supers }));
   let report;
   if (experiment === 'sweep') {
     const cells = [];
     for (const stat of stats) for (const value of [0, 255]) cells.push({ stat, value });
-    // Every cell uses the same seeds. (A neutral-vs-neutral control is exactly 0 by symmetry, since
-    // swapped pairs mirror each other, so the 95% intervals are the noise guide.)
     const jobs = [];
     for (const cell of cells) for (let p = 0; p < pairs; p++) jobs.push(...pairJobs([team({ [cell.stat]: cell.value }), team({})], seed + p));
     const results = await run(jobs, threads);
@@ -180,9 +235,7 @@ async function main() {
     const results = await run(jobs, threads), per = 2 * pairs;
     const rows = P.SUPERS.map((sup, id) => ({ super: sup.name, ...summarise(results.slice(id * per, (id + 1) * per)) })).sort((a, b) => b.goalDiff - a.goalDiff);
     report = { experiment, level, pairs, seed, maxTurns, supers: rows };
-    console.log(`
-Goal difference per match for a team with one super on all three ubus vs a team with none (${level} CPU, ${pairs} side-swapped pairs each).
-`);
+    console.log(`\nGoal difference per match for a team with one super on all three ubus vs a team with none (${level} CPU, ${pairs} side-swapped pairs each).\n`);
     console.log('super'.padEnd(12) + 'goal diff'.padStart(16) + '  win%');
     for (const r of rows) console.log(r.super.padEnd(12) + `${r.goalDiff.toFixed(2)} ± ${r.ci.toFixed(2)}`.padStart(16) + `  ${r.winRate === null ? '–' : Math.round(r.winRate * 100) + '%'}`);
   } else {
@@ -190,7 +243,6 @@ Goal difference per match for a team with one super on all three ubus vs a team 
     const randomTeam = () => [0, 1, 2].map(() => ({ ...neutral(), ...Object.fromEntries(stats.map(s => [s, Math.floor(random() * 256)])) }));
     for (let p = 0; p < pairs; p++) { const teams = [randomTeam(), randomTeam()]; designs.push(teams); jobs.push(...pairJobs(teams, seed + p)); }
     const results = await run(jobs, threads);
-    // One row per pair: the teams' average stat difference (in units of 128 points), against the pair's goal difference.
     const rows = designs.map(([a, b]) => [1, ...stats.map(s => (mean(a.map(u => u[s])) - mean(b.map(u => u[s]))) / 128)]);
     const ys = designs.map((_, p) => (results[2 * p].diff + results[2 * p + 1].diff) / 2);
     const fit = regress(rows, ys);
@@ -202,5 +254,5 @@ Goal difference per match for a team with one super on all three ubus vs a team 
   }
   if (args.output) require('node:fs').writeFileSync(args.output, JSON.stringify(report, null, 2) + '\n');
 }
-if (require.main === module) main().catch(error => { console.error(error); process.exit(1); });
+if (require.main === module && isMainThread) main().catch(error => { console.error(error); process.exit(1); });
 module.exports = { STATS, match, regress };
