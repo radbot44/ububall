@@ -200,17 +200,43 @@
     for (let i = popups.length - 1; i >= 0; i--) if ((popups[i].life -= dt) <= 0) popups.splice(i, 1);
   }
 
-  function drawPopups(badgeCtx, popups, isPortrait, width, home, away, reduced = false) {
+  function drawPopups(badgeCtx, popups, isPortrait, width, home, away, reduced = false, docRef = null) {
+    const pxScale = Math.max(0.5, Math.min(4, (width || 1000) / 1000));
+    const d = docRef || (typeof document !== 'undefined' ? document : null);
     for (const p of popups) {
       const duration = p.duration || 1.2;
       const age = 1 - p.life / duration, t = reduced ? 1 : Math.min(1, age / .2), scale = reduced ? 1 : 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2;
       const color = p.team ? away : home;
       badgeCtx.save(); badgeCtx.translate(p.x, reduced ? p.y : p.y - age * 22); if (isPortrait) badgeCtx.rotate(Math.PI / 2); badgeCtx.scale(scale, scale);
       badgeCtx.globalAlpha = age < .7 ? 1 : (1 - age) / .3;
-      badgeCtx.font = '900 26px system-ui, sans-serif'; badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle';
-      badgeCtx.shadowColor = color; badgeCtx.shadowBlur = 12 * width / 1000;
-      badgeCtx.lineWidth = 4; badgeCtx.strokeStyle = color; badgeCtx.strokeText(p.text, 0, 0);
-      badgeCtx.fillStyle = '#ffffff'; badgeCtx.fillText(p.text, 0, 0);
+      const key = `${p.text}\0${color}\0${width}`;
+      let sprite = p._sprite?.key === key ? p._sprite : null;
+      if (!sprite && d?.createElement && typeof badgeCtx.drawImage === 'function') {
+        const sc = d.createElement('canvas');
+        const sctx = sc?.getContext?.('2d');
+        if (sctx && typeof sctx.fillText === 'function') {
+          sctx.font = '900 26px system-ui, sans-serif';
+          const tw = typeof sctx.measureText === 'function' ? (sctx.measureText(p.text)?.width || 220) : 220;
+          const halfW = Math.ceil(Math.max(80, tw / 2) + 32), halfH = 44;
+          const lw = halfW * 2, lh = halfH * 2;
+          sc.width = Math.max(1, Math.ceil(lw * pxScale));
+          sc.height = Math.max(1, Math.ceil(lh * pxScale));
+          sctx.setTransform(pxScale, 0, 0, pxScale, halfW * pxScale, halfH * pxScale);
+          sctx.font = '900 26px system-ui, sans-serif'; sctx.textAlign = 'center'; sctx.textBaseline = 'middle';
+          sctx.shadowColor = color; sctx.shadowBlur = 12 * pxScale;
+          sctx.lineWidth = 4; sctx.strokeStyle = color; sctx.strokeText(p.text, 0, 0);
+          sctx.fillStyle = '#ffffff'; sctx.fillText(p.text, 0, 0);
+          sprite = p._sprite = { key, canvas: sc, halfW, halfH, lw, lh };
+        }
+      }
+      if (sprite) {
+        badgeCtx.drawImage(sprite.canvas, -sprite.halfW, -sprite.halfH, sprite.lw, sprite.lh);
+      } else {
+        badgeCtx.font = '900 26px system-ui, sans-serif'; badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle';
+        badgeCtx.shadowColor = color; badgeCtx.shadowBlur = 12 * width / 1000;
+        badgeCtx.lineWidth = 4; badgeCtx.strokeStyle = color; badgeCtx.strokeText(p.text, 0, 0);
+        badgeCtx.fillStyle = '#ffffff'; badgeCtx.fillText(p.text, 0, 0);
+      }
       badgeCtx.restore();
     }
   }
@@ -1324,7 +1350,13 @@
       fieldFx.shake = Math.max(0, fieldFx.shake - dt / .2);
       fieldFx.shakeX = fieldFx.shake ? Number(((Math.random() - .5) * 5 * scale * fieldFx.shake).toFixed(2)) : 0;
       fieldFx.shakeY = fieldFx.shake ? Number(((Math.random() - .5) * 5 * scale * fieldFx.shake).toFixed(2)) : 0;
-      if (!view.field && rinkWrap) rinkWrap.style.translate = fieldFx.shake ? `${fieldFx.shakeX}px ${fieldFx.shakeY}px` : '';
+      if (!view.field && rinkWrap) {
+        const nextTranslate = fieldFx.shake ? `${fieldFx.shakeX}px ${fieldFx.shakeY}px` : '';
+        if (fieldFx._lastTranslate !== nextTranslate) {
+          fieldFx._lastTranslate = nextTranslate;
+          rinkWrap.style.translate = nextTranslate;
+        }
+      }
       fieldFx.ballFlare = Math.max(0, fieldFx.ballFlare - dt / .8);
       if (fieldFx.fireWarp && (fieldFx.fireWarp.life -= dt) <= 0) fieldFx.fireWarp = null;
       if (fieldFx.koWarp && (fieldFx.koWarp.life -= dt) <= 0) fieldFx.koWarp = null;
@@ -1535,36 +1567,96 @@
           ctx.fill();
         }
       });
-      const mouth = sweep.team ? 60 : 940, back = sweep.team ? mouth - P.rink.goalDepth : mouth + P.rink.goalDepth;
-      ctx.save(); ctx.globalAlpha = 1 - p; ctx.shadowColor = color; ctx.shadowBlur = 24 * view.canvas.width / 1000;
-      line(mouth, 230, back, 230, color, 6); line(back, 230, back, 370, color, 6); line(mouth, 370, back, 370, color, 6);
-      line(mouth, 230, mouth, 370, '#ffffff', 3);
+      const fx = getEffects(), mouth = sweep.team ? 60 : 940, back = sweep.team ? mouth - P.rink.goalDepth : mouth + P.rink.goalDepth;
+      const pxW = view.canvas.width || 1000, pxScale = Math.max(0.5, Math.min(4, pxW / 1000));
+      const sweepKey = `${sweep.team}\0${color}\0${pxW}`;
+      let sweepSprite = fx.goalSweepCache?.key === sweepKey ? fx.goalSweepCache : null;
+      if (!sweepSprite && doc?.createElement && typeof ctx.drawImage === 'function') {
+        const sc = doc.createElement('canvas');
+        const sctx = sc?.getContext?.('2d');
+        if (sctx && typeof sctx.stroke === 'function') {
+          const pad = 64, minX = Math.min(mouth, back) - pad, minY = 230 - pad;
+          const lw = Math.abs(back - mouth) + pad * 2, lh = 140 + pad * 2;
+          sc.width = Math.max(1, Math.ceil(lw * pxScale));
+          sc.height = Math.max(1, Math.ceil(lh * pxScale));
+          sctx.setTransform(pxScale, 0, 0, pxScale, -minX * pxScale, -minY * pxScale);
+          sctx.lineCap = 'round';
+          sctx.shadowColor = color; sctx.shadowBlur = 24 * pxScale;
+          const seg = (x1, y1, x2, y2, stroke, w) => {
+            sctx.beginPath(); sctx.moveTo(x1, y1); sctx.lineTo(x2, y2);
+            sctx.strokeStyle = stroke; sctx.lineWidth = w; sctx.stroke();
+          };
+          seg(mouth, 230, back, 230, color, 6);
+          seg(back, 230, back, 370, color, 6);
+          seg(mouth, 370, back, 370, color, 6);
+          seg(mouth, 230, mouth, 370, '#ffffff', 3);
+          sweepSprite = fx.goalSweepCache = { key: sweepKey, canvas: sc, minX, minY, lw, lh };
+        }
+      }
+      ctx.save(); ctx.globalAlpha = 1 - p;
+      if (sweepSprite) {
+        ctx.drawImage(sweepSprite.canvas, sweepSprite.minX, sweepSprite.minY, sweepSprite.lw, sweepSprite.lh);
+      } else {
+        ctx.shadowColor = color; ctx.shadowBlur = 24 * pxW / 1000;
+        line(mouth, 230, back, 230, color, 6); line(back, 230, back, 370, color, 6); line(mouth, 370, back, 370, color, 6);
+        line(mouth, 230, mouth, 370, '#ffffff', 3);
+      }
       ctx.restore();
     }
 
+    const skaterStyleCache = new WeakMap();
+
     function drawGoalCall(call, color) {
-      const view = getView(), badgeCtx = view.badgeCtx, skaters = getSkaters();
+      const view = getView(), fx = getEffects(), badgeCtx = view.badgeCtx, skaters = getSkaters();
       const pop = isReducedMotion() ? 1 : Math.min(1, call.t / .27), scale = 1 + 2.70158 * (pop - 1) ** 3 + 1.70158 * (pop - 1) ** 2;
-      const face = skaters[call.scorer]?.querySelector?.('canvas'), top = face ? 40 : 0;
-      const write = (text, y, size) => {
-        badgeCtx.font = `900 ${size}px system-ui, sans-serif`; badgeCtx.lineWidth = size / 14; badgeCtx.strokeStyle = color;
-        badgeCtx.strokeText(text, 0, y); badgeCtx.fillStyle = '#ffffff'; badgeCtx.fillText(text, 0, y);
-      };
-      badgeCtx.save(); badgeCtx.translate(500, 300); if (view.portrait) badgeCtx.rotate(Math.PI / 2); badgeCtx.scale(scale, scale);
-      badgeCtx.globalAlpha = Math.max(0, Math.min(1, (GOAL_CALL_SECONDS - call.t) / .5));
-      badgeCtx.shadowColor = color; badgeCtx.shadowBlur = 30 * view.canvas.width / 1000;
-      if (face) {
-        badgeCtx.beginPath(); badgeCtx.arc(0, -82, 74, 0, Math.PI * 2); badgeCtx.fillStyle = color; badgeCtx.fill();
-        badgeCtx.shadowBlur = 0; badgeCtx.drawImage(face, -66, -148, 132, 132);
-        badgeCtx.shadowBlur = 30 * view.canvas.width / 1000;
-      }
-      badgeCtx.textAlign = 'center'; badgeCtx.textBaseline = 'middle';
+      const skaterNode = skaters[call.scorer] || null;
+      const face = call._skater === skaterNode && call._face !== undefined ? call._face : (call._skater = skaterNode, call._face = skaterNode?.querySelector?.('canvas') || null);
+      const top = face ? 40 : 0;
       const callLabel = view.anonymous && call.scorer < 0 && call.label.endsWith(' WINS!') && ububallReplay?.ANONYMOUS
         ? `${ububallReplay.ANONYMOUS[call.team].toUpperCase()} WINS!`
         : call.label;
       const callName = view.anonymous && call.scorer >= 0 ? anonymousName(call.scorer) : call.name;
-      write(callLabel, top, 88);
-      if (callName) write(callName, top + 66, 34);
+      const pxW = view.canvas.width || 1000, pxScale = Math.max(0.5, Math.min(4, pxW / 1000));
+      const paintBadge = (targetCtx, blurPx) => {
+        const write = (text, y, size) => {
+          targetCtx.font = `900 ${size}px system-ui, sans-serif`; targetCtx.lineWidth = size / 14; targetCtx.strokeStyle = color;
+          targetCtx.strokeText(text, 0, y); targetCtx.fillStyle = '#ffffff'; targetCtx.fillText(text, 0, y);
+        };
+        targetCtx.shadowColor = color; targetCtx.shadowBlur = blurPx;
+        if (face) {
+          targetCtx.beginPath(); targetCtx.arc(0, -82, 74, 0, Math.PI * 2); targetCtx.fillStyle = color; targetCtx.fill();
+          targetCtx.shadowBlur = 0; targetCtx.drawImage(face, -66, -148, 132, 132);
+          targetCtx.shadowBlur = blurPx;
+        }
+        targetCtx.textAlign = 'center'; targetCtx.textBaseline = 'middle';
+        write(callLabel, top, 88);
+        if (callName) write(callName, top + 66, 34);
+      };
+      const cacheKey = `${callLabel}\0${callName}\0${color}\0${pxW}`;
+      let cache = fx.goalCallCache?.key === cacheKey && fx.goalCallCache.face === face ? fx.goalCallCache : null;
+      if (!cache && doc?.createElement && typeof badgeCtx.drawImage === 'function') {
+        const sc = doc.createElement('canvas');
+        const sctx = sc?.getContext?.('2d');
+        if (sctx && typeof sctx.fillText === 'function') {
+          sctx.font = '900 88px system-ui, sans-serif';
+          const labelW = typeof sctx.measureText === 'function' ? (sctx.measureText(callLabel)?.width || 560) : 560;
+          sctx.font = '900 34px system-ui, sans-serif';
+          const nameW = callName ? (typeof sctx.measureText === 'function' ? (sctx.measureText(callName)?.width || 360) : 360) : 0;
+          const halfW = Math.ceil(Math.max(150, labelW / 2, nameW / 2) + 76);
+          const topExt = face ? 232 : 124;
+          const botExt = (callName ? top + 92 : top + 58) + 76;
+          const logicalW = halfW * 2, logicalH = topExt + botExt;
+          sc.width = Math.max(1, Math.ceil(logicalW * pxScale));
+          sc.height = Math.max(1, Math.ceil(logicalH * pxScale));
+          sctx.setTransform(pxScale, 0, 0, pxScale, halfW * pxScale, topExt * pxScale);
+          paintBadge(sctx, 30 * pxScale);
+          cache = fx.goalCallCache = { key: cacheKey, face, canvas: sc, halfW, topExt, logicalW, logicalH };
+        }
+      }
+      badgeCtx.save(); badgeCtx.translate(500, 300); if (view.portrait) badgeCtx.rotate(Math.PI / 2); badgeCtx.scale(scale, scale);
+      badgeCtx.globalAlpha = Math.max(0, Math.min(1, (GOAL_CALL_SECONDS - call.t) / .5));
+      if (cache) badgeCtx.drawImage(cache.canvas, -cache.halfW, -cache.topExt, cache.logicalW, cache.logicalH);
+      else paintBadge(badgeCtx, 30 * pxW / 1000);
       badgeCtx.restore();
     }
 
@@ -2947,10 +3039,14 @@
             const style = skaters[i].style;
             const wPct = (b.radius / 3) + '%';
             const rot = b.rotation - Math.PI / 2;
-            style.width = wPct;
-            style.opacity = b.carded ? '0.3' : '1';
-            style.filter = '';
-            style.transform = `translate(${px / 600 * renderWidth}px, ${(py - viewTop) / safeSpan * renderHeight}px) translate(-50%, -50%) rotate(${rot}rad)`;
+            const opacity = b.carded ? '0.3' : '1';
+            const transform = `translate(${px / 600 * renderWidth}px, ${(py - viewTop) / safeSpan * renderHeight}px) translate(-50%, -50%) rotate(${rot}rad)`;
+            let prev = skaterStyleCache.get(skaters[i]);
+            if (!prev) { prev = {}; skaterStyleCache.set(skaters[i], prev); }
+            if (prev.width !== wPct) { prev.width = wPct; style.width = wPct; }
+            if (prev.opacity !== opacity) { prev.opacity = opacity; style.opacity = opacity; }
+            if (prev.filter !== '') { prev.filter = ''; style.filter = ''; }
+            if (prev.transform !== transform) { prev.transform = transform; style.transform = transform; }
           });
           const ball = view.bodies[6];
           if (ball) {
@@ -3241,10 +3337,12 @@
           ? `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${ubuWarpAngle}rad) scale(${ubuScaleX.toFixed(4)}, ${ubuScaleY.toFixed(4)}) rotate(${rot - ubuWarpAngle}rad)`
           : `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${rot}rad)`;
 
-        if (style.width !== wPct) style.width = wPct;
-        if (style.opacity !== opacity) style.opacity = opacity;
-        if (style.filter !== filter) style.filter = filter;
-        if (style.transform !== transform) style.transform = transform;
+        let prev = skaterStyleCache.get(skaters[i]);
+        if (!prev) { prev = {}; skaterStyleCache.set(skaters[i], prev); }
+        if (prev.width !== wPct) { prev.width = wPct; style.width = wPct; }
+        if (prev.opacity !== opacity) { prev.opacity = opacity; style.opacity = opacity; }
+        if (prev.filter !== filter) { prev.filter = filter; style.filter = filter; }
+        if (prev.transform !== transform) { prev.transform = transform; style.transform = transform; }
       });
 
       const holding = P.holder?.(view.bodies);
@@ -3425,12 +3523,12 @@
       }
       drawFieldOver(colors);
       drawFouls(text, playback?.viewFouls ?? getFouls());
-      drawPopups(view.badgeCtx, fx.popups, view.portrait, width, home, away, isReducedMotion());
+      drawPopups(view.badgeCtx, fx.popups, view.portrait, width, home, away, isReducedMotion(), doc);
       drawParticles(home, away, true);
 
       if (goalReplay) {
-        view.ctx.save(); view.ctx.translate(view.portrait ? 30 : 500, view.portrait ? 300 : 32); if (view.portrait) view.ctx.rotate(Math.PI / 2);
-        view.ctx.font = 'bold 18px system-ui'; view.ctx.textAlign = 'center'; view.ctx.textBaseline = 'middle'; view.ctx.fillStyle = text;
+        view.ctx.save(); view.ctx.translate(view.portrait ? 990 : 500, view.portrait ? 300 : 32); if (view.portrait) view.ctx.rotate(Math.PI / 2);
+        view.ctx.font = view.portrait ? 'bold 16px system-ui' : 'bold 18px system-ui'; view.ctx.textAlign = 'center'; view.ctx.textBaseline = 'middle'; view.ctx.fillStyle = text;
         const slow = goalReplay.played >= goalReplay.total || ububallMatch.replaySpeed(goalReplay.total - goalReplay.played) < 1;
         view.ctx.fillText(slow ? 'REPLAY · SLOW MOTION' : 'REPLAY', 0, 0);
         view.ctx.restore();

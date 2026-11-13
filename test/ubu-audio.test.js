@@ -739,3 +739,25 @@ test('sound and music volume buses, mono/stereo toggle, and true left-right spat
   assert.ok(bigBuffers.length >= 12, 'big firework generates rich cascading crackle volley (>= 12 crackle grains)');
   assert.ok(bigOscs.some(o => o.type === 'sine'), 'big firework crackle includes titanium star pings');
 });
+
+test('continuous playUbuMove and playSpin loops extend stopAt without recreating DOM timers every frame', () => {
+  const origSetTimeout = global.setTimeout, origClearTimeout = global.clearTimeout;
+  let setCalls = 0, clearCalls = 0;
+  global.setTimeout = (fn, ms) => { setCalls++; const t = origSetTimeout(fn, ms); t?.unref?.(); return t; };
+  global.clearTimeout = id => { clearCalls++; return origClearTimeout(id); };
+  try {
+    const ctx = recordedContext();
+    for (let i = 0; i < 60; i++) {
+      ctx.currentTime = i * (1 / 60);
+      audio.playUbuMove({ ctx, id: 2, speed: 380, mass: 3, radius: 25 });
+      audio.playSpin({ ctx, id: 2, omega: 12, radius: 25 });
+    }
+    assert.equal(setCalls, 2, '60 frame updates schedule only 1 timer for move and 1 timer for spin');
+    assert.equal(clearCalls, 0, '60 frame updates perform zero clearTimeout churn');
+    audio.stopMotion();
+    assert.equal(clearCalls, 2, 'stopMotion clears the 2 active timers cleanly');
+  } finally {
+    global.setTimeout = origSetTimeout;
+    global.clearTimeout = origClearTimeout;
+  }
+});

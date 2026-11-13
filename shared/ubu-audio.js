@@ -826,6 +826,24 @@
   let activePlayback = null;
   const motionLoops = new WeakMap();
   const activeMotionContexts = new Set();
+  const perfNow = () => (typeof performance === 'object' && typeof performance.now === 'function') ? performance.now() : Date.now();
+  function extendLoopTimer(entry, ms = 220) {
+    entry.stopAt = perfNow() + ms;
+    if (entry.timer) return;
+    const check = () => {
+      entry.timer = null;
+      if (entry.stopped) return;
+      const rem = entry.stopAt - perfNow();
+      if (rem > 4) {
+        entry.timer = setTimeout(check, Math.ceil(rem));
+        entry.timer?.unref?.();
+      } else {
+        entry.stop();
+      }
+    };
+    entry.timer = setTimeout(check, ms);
+    entry.timer?.unref?.();
+  }
 
   function isOfflineContext(ctx) {
     return (typeof OfflineAudioContext !== 'undefined' && ctx instanceof OfflineAudioContext) ||
@@ -1394,7 +1412,7 @@
           stop() {
             if (entry.stopped) return;
             entry.stopped = true;
-            if (entry.timer) clearTimeout(entry.timer);
+            if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
             if (entry.panner) { try { entry.panner.disconnect(); } catch {} }
             map.delete(loopKey);
             if (!map.size) activeMotionContexts.delete(ctx);
@@ -1445,8 +1463,7 @@
       entry.outGain.gain.linearRampToValueAtTime(0, tZero);
       entry.t0 = now; entry.g0 = cur; entry.tPeak = tPeak; entry.gPeak = p.level; entry.tZero = tZero;
       if (!isOfflineContext(ctx)) {
-        if (entry.timer) clearTimeout(entry.timer);
-        entry.timer = setTimeout(() => entry.stop(), 220);
+        extendLoopTimer(entry, 220);
       }
       return { stop: () => entry.stop() };
     }
@@ -1578,7 +1595,7 @@
           stop() {
             if (entry.stopped) return;
             entry.stopped = true;
-            if (entry.timer) clearTimeout(entry.timer);
+            if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
             if (entry.panner) { try { entry.panner.disconnect(); } catch {} }
             map.delete(loopKey);
             if (!map.size) activeMotionContexts.delete(ctx);
@@ -1632,8 +1649,7 @@
       entry.outGain.gain.linearRampToValueAtTime(0, tZero);
       entry.t0 = now; entry.g0 = cur; entry.tPeak = tPeak; entry.gPeak = p.level; entry.tZero = tZero;
       if (!isOfflineContext(ctx)) {
-        if (entry.timer) clearTimeout(entry.timer);
-        entry.timer = setTimeout(() => entry.stop(), 220);
+        extendLoopTimer(entry, 220);
       }
       return { stop: () => entry.stop() };
     }

@@ -5465,3 +5465,158 @@ test('Rink stage Phase 7: dead layout CSS & modal setup dialog code removed, sco
   assert.match(rinkDocSrc, /## Open points\s+None\./, 'docs/rink-stage.md Open points moved into Decisions');
   assert.match(rinkDocSrc, /Phase 7 built/, 'docs/rink-stage.md Log records Phase 7');
 });
+
+test('mobile trace fixes: offscreen goalCall/goalSweep/popup caches, skaterStyleCache CSSOM guard, updateClock hidden guard, and Portrait top REPLAY watermark', () => {
+  const P = require('../shared/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  const { createRinkPresenter, createEffectsState } = require('../web/ububall-presentation.js');
+
+  let offscreenFillTextCalls = 0, badgeFillTextCalls = 0, badgeDrawImageCalls = 0, mainShadowBlurs = 0;
+  function makeMockCtx(kind) {
+    let sb = 0;
+    return {
+      get shadowBlur() { return sb; },
+      set shadowBlur(v) { sb = v; if (kind === 'main' && v > 0) mainShadowBlurs++; },
+      shadowColor: '', globalAlpha: 1, font: '', lineWidth: 1, strokeStyle: '', fillStyle: '',
+      textAlign: '', textBaseline: '', lineCap: '', lineJoin: '', globalCompositeOperation: 'source-over',
+      save() {}, restore() {}, setTransform() {}, clearRect() {}, translate() {}, rotate() {}, scale() {},
+      beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, arc() {}, arcTo() {}, ellipse() {}, quadraticCurveTo() {}, bezierCurveTo() {}, roundRect() {}, rect() {}, clip() {}, createPattern: () => ({}),
+      stroke() {}, fill() {}, fillRect() {}, setLineDash() {},
+      createLinearGradient: () => ({ addColorStop() {} }),
+      createRadialGradient: () => ({ addColorStop() {} }),
+      measureText: t => ({ width: String(t).length * 24 }),
+      strokeText() {},
+      fillText(t, x, y) {
+        if (kind === 'offscreen') offscreenFillTextCalls++;
+        if (kind === 'badge') badgeFillTextCalls++;
+        if (kind === 'main') lastMainText = { text: t, lastTranslate };
+      },
+      drawImage() {
+        if (kind === 'badge') badgeDrawImageCalls++;
+      }
+    };
+  }
+  let lastTranslate = null, lastMainText = null;
+  const mainCtx = makeMockCtx('main');
+  const origTranslate = mainCtx.translate;
+  mainCtx.translate = (x, y) => { lastTranslate = [x, y]; origTranslate(x, y); };
+  const badgeCtx = makeMockCtx('badge');
+  const docMock = {
+    createElement(tag) {
+      if (tag !== 'canvas') return {};
+      return { width: 0, height: 0, getContext: () => makeMockCtx('offscreen') };
+    }
+  };
+
+  // Skater DOM elements simulating Chromium CSSOM 6-digit float rounding on style.transform getter
+  let transformWrites = 0;
+  const makeSkaterNode = () => {
+    let rawTf = '';
+    const style = {
+      width: '', opacity: '', filter: '',
+      get transform() { return rawTf.replace(/\d+\.\d{4,}/g, m => Number(m).toFixed(2)); },
+      set transform(v) { rawTf = v; transformWrites++; }
+    };
+    return { style, querySelector: () => ({ width: 132, height: 132 }) };
+  };
+  const skaters = Array.from({ length: 6 }, makeSkaterNode);
+  const bodies = P.kickoff();
+  bodies[0].x = 180.123456789; bodies[0].y = 300.987654321; bodies[0].rotation = Math.PI / 3;
+  const fx = createEffectsState();
+  fx.goalCall = { team: 0, label: 'GOAL', scorer: 0, name: 'Ijul Ecgait', t: 0.1 };
+  fx.goalSweep = { team: 0, p: 0.2 };
+  fx.popups.push({ x: 500, y: 300, text: 'Assist', team: 0, life: 1.0, duration: 1.2 });
+
+  let goalReplayObj = null;
+  const view = {
+    canvas: { width: 1653, height: 990, clientWidth: 551, clientHeight: 330 },
+    ctx: mainCtx,
+    badgeCanvas: { width: 1653, height: 990 },
+    badgeCtx,
+    bodies,
+    portrait: true,
+    mode: 'standard',
+    anonymous: false
+  };
+  const presenter = createRinkPresenter({
+    P, ububallMatch, ububallReplay: { ANONYMOUS: ['Saffron', 'Amethyst'] },
+    getView: () => view,
+    getEffects: () => fx,
+    getPhase: () => 'goal',
+    getPlans: () => [],
+    getFouls: () => ububallMatch.newFouls(),
+    getFoulInfo: () => null,
+    getSelected: () => 0,
+    getScoringPlayer: () => bodies[0],
+    getGoalReplay: () => goalReplayObj,
+    getOnlineReplay: () => null,
+    getTheater: () => null,
+    getActivePlayback: () => null,
+    getGuide: () => null,
+    guideShown: () => false,
+    getSkaters: () => skaters,
+    getRinkWrap: () => ({ style: { translate: '' } }),
+    getRenderSize: () => ({ renderWidth: 551, renderHeight: 330, deviceWidth: 1653, deviceHeight: 990, visibleRinkHeight: 600 }),
+    isReducedMotion: () => false,
+    clockNow: () => 1000,
+    gameAudio: () => null,
+    uiScale: () => 1,
+    anonymousName: i => `Anon ${i}`,
+    contactMeter: () => {},
+    doc: docMock
+  });
+
+  // Frame 1 populates offscreen caches for goalCall (2 lines), popup (1 line), and goalSweep
+  presenter.drawScene();
+  const firstOffscreenTexts = offscreenFillTextCalls;
+  const firstMainBlurs = mainShadowBlurs;
+  const firstTransformWrites = transformWrites;
+  assert.equal(firstOffscreenTexts, 3, 'goalCall label + scorer name + popup rendered once to offscreen canvases');
+  assert.equal(badgeFillTextCalls, 0, 'badgeCanvas uses cached drawImage instead of direct blurred fillText');
+  assert.equal(badgeDrawImageCalls, 2, 'goalCall and popup blitted onto badgeCanvas via drawImage');
+  assert.equal(firstTransformWrites, 6, 'initial frame writes 6 skater transforms');
+
+  // Frames 2..10 reuse cached sprites with zero additional text rasterization, zero main shadowBlur, and zero stationary transform writes
+  for (let frameIdx = 0; frameIdx < 9; frameIdx++) {
+    fx.goalCall.t += 0.05;
+    fx.goalSweep.p += 0.05;
+    fx.popups[0].life -= 0.05;
+    presenter.drawScene();
+  }
+  assert.equal(offscreenFillTextCalls, firstOffscreenTexts, 'subsequent celebration frames perform zero blurred fillText calls');
+  assert.equal(mainShadowBlurs, firstMainBlurs, 'subsequent goalSweep frames perform zero main-canvas shadowBlur passes');
+  assert.equal(transformWrites, firstTransformWrites, 'stationary skaters do not rewrite style.transform despite CSSOM float rounding');
+
+  // Portrait goalReplay watermark renders at top (x = 990) instead of bottom (x = 30)
+  fx.goalCall = null; fx.goalSweep = null; fx.popups.length = 0;
+  goalReplayObj = { played: 100, total: 100 };
+  presenter.drawScene();
+  assert.equal(lastMainText?.text, 'REPLAY · SLOW MOTION');
+  assert.deepEqual(lastMainText?.lastTranslate, [990, 300], 'Portrait REPLAY watermark sits at top (990, 300) clear of bottom Tap for next round');
+
+  // updateClock skips redundant .hidden setter writes on steady-state non-Blitz frames
+  const clockCode = section('function updateClock() {', 'let bugMode =');
+  let hiddenWrites = 0;
+  const makeHiddenEl = () => {
+    let h = true;
+    return {
+      get hidden() { return h; },
+      set hidden(v) { h = v; hiddenWrites++; },
+      textContent: '',
+      firstChild: { style: { transform: '' } }
+    };
+  };
+  const els = { 'blitz-clock': makeHiddenEl(), 'clock-strip': makeHiddenEl(), 'online-forfeit': makeHiddenEl() };
+  const clockEnv = runInNewContext(clockCode + '\n;({ updateClock });', {
+    $: id => els[id],
+    online: null,
+    blitzMode: () => false,
+    phase: 'play',
+    planDeadline: 0,
+    planPausedAt: null,
+    performance: { now: () => 500 },
+    ububallMatch
+  });
+  for (let i = 0; i < 60; i++) clockEnv.updateClock();
+  assert.equal(hiddenWrites, 0, 'updateClock performs zero .hidden DOM writes when hidden state is unchanged');
+});

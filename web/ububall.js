@@ -79,25 +79,40 @@
     }
   }
   function updateClock() {
+    const setHidden = (el, next) => { if (el && el.hidden !== next) el.hidden = next; };
+    const clock = $('blitz-clock');
     if (online?.active) {
-      const s = online.state, clock = $('blitz-clock');
-      clock.hidden = !blitzMode() || s?.phase !== 'plan';
-      const left = clock.hidden ? 0 : Math.max(0, s.deadline === null ? s.remaining : s.deadline - online.now());
-      if (!clock.hidden) clock.textContent = Math.ceil(left / 1000) + 's';
-      drainClock(clock.hidden, left);
+      const s = online.state;
+      const hideClock = !blitzMode() || s?.phase !== 'plan';
+      setHidden(clock, hideClock);
+      const left = hideClock ? 0 : Math.max(0, s.deadline === null ? s.remaining : s.deadline - online.now());
+      if (!hideClock && clock) {
+        const txt = Math.ceil(left / 1000) + 's';
+        if (clock.textContent !== txt) clock.textContent = txt;
+      }
+      drainClock(hideClock, left);
       const other = s ? 1 - s.seat : 1;
-      $('online-forfeit').hidden = !s || s.spectator || s.phase === 'over' || !s.connected[s.seat] || s.connected[other] || s.disconnectedAt[other] === null || online.now() - s.disconnectedAt[other] < 60000;
+      const hideForfeit = !s || s.spectator || s.phase === 'over' || !s.connected[s.seat] || s.connected[other] || s.disconnectedAt[other] === null || online.now() - s.disconnectedAt[other] < 60000;
+      setHidden($('online-forfeit'), hideForfeit);
       return;
     }
-    const clock = $('blitz-clock'); clock.hidden = !blitzMode() || phase !== 'plan';
-    const left = clock.hidden ? 0 : Math.max(0, planDeadline - (planPausedAt ?? performance.now()));
-    if (!clock.hidden) clock.textContent = Math.ceil(left / 1000) + 's';
-    drainClock(clock.hidden, left);
+    const hideClock = !blitzMode() || phase !== 'plan';
+    setHidden(clock, hideClock);
+    const left = hideClock ? 0 : Math.max(0, planDeadline - (planPausedAt ?? performance.now()));
+    if (!hideClock && clock) {
+      const txt = Math.ceil(left / 1000) + 's';
+      if (clock.textContent !== txt) clock.textContent = txt;
+    }
+    drainClock(hideClock, left);
   }
   // The scorebug's Blitz strip: the share of planning time left.
   function drainClock(hidden, left) {
-    const strip = $('clock-strip'); strip.hidden = hidden;
-    if (!hidden) strip.firstChild.style.transform = `scaleX(${Math.min(1, left / ububallMatch.planningMilliseconds('blitz'))})`;
+    const strip = $('clock-strip');
+    if (strip && strip.hidden !== hidden) strip.hidden = hidden;
+    if (!hidden && strip?.firstChild) {
+      const xf = `scaleX(${Math.min(1, left / ububallMatch.planningMilliseconds('blitz'))})`;
+      if (strip.firstChild.style.transform !== xf) strip.firstChild.style.transform = xf;
+    }
   }
   // The scorebug's rules, in order, each in its colour (a letter on narrow scorebugs).
   let bugMode = 'standard';
@@ -2387,7 +2402,7 @@
   const replaySkip = $('skip-goal-replay'), replaySkipHint = replaySkip.firstElementChild;
   function updateReplaySkip(replay) {
     if (!replay || shot !== 'match' || demo || online?.spectating) {
-      replaySkip.hidden = true;
+      if (!replaySkip.hidden) replaySkip.hidden = true;
       return;
     }
     if (replaySkip.hidden) replaySkip.hidden = false;
