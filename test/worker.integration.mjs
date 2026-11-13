@@ -343,6 +343,14 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
       } while (cursor);
       assert.deepEqual(sizes, [200, 23]);
       assert.deepEqual(results, expected);
+      // Also seek from a cursor within the pending group (not just across the boundary).
+      const pendingCursor = (await all.exec(`SELECT serial FROM issued WHERE owner=? AND certificate IS NULL
+        ORDER BY issued_at DESC, serial DESC LIMIT 1`, '123456789012345678'))[0].serial;
+      const pendingResponse = await fetch('/api/ubus?after=' + pendingCursor, { headers });
+      assert.equal(pendingResponse.status, 200);
+      const pendingPage = await pendingResponse.json();
+      assert.deepEqual(pendingPage.ubus.map(row => row.serial),
+        expected.slice(expected.indexOf(pendingCursor) + 1, expected.indexOf(pendingCursor) + 201));
     } finally {
       await all.exec("DELETE FROM issued WHERE pack_id='padding'");
     }

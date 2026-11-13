@@ -52,7 +52,8 @@ export class MintRegistry extends DurableObject {
     this.signingOwners = new Map();
     this.mint = new Mint({ exec: (sql, ...bindings) => ctx.storage.sql.exec(sql, ...bindings),
       transactionSync: callback => ctx.storage.transactionSync(callback) }, {
-      mint: this.config.mint, key: this.config.key, resolveSigningKey: id => this.signingKey(id)
+      mint: this.config.mint, key: this.config.key, resolveSigningKey: id => this.signingKey(id),
+      logSqlReads: env.LOG_SQL_READS === '1'
     });
   }
   async trackSigning(owner, work) {
@@ -149,30 +150,32 @@ export class MintRegistry extends DurableObject {
     }
     return this.mint.matchTeam(owner);
   }
-  // Newest first, pending certificates last. Browsers sort and filter the full list themselves.
+  // Newest first, pending certificates last. Seek into issued_recent_sort rather than
+  // rescanning earlier pages through an OR-combined cursor predicate.
   async collection(owner, cursor = '') {
     const inflight = this.signingOwners.get(owner);
     if (inflight) await inflight;
-    const keys = [['(certificate IS NULL)', 'ASC'], ['issued_at', 'DESC'], ['serial', 'DESC']];
     if (cursor && !/^[0-9]{12}$/.test(cursor)) return { error: 'Invalid collection cursor.', status: 400 };
-    const binds = [owner];
-    let after = '';
-    if (cursor) {
-      const anchor = this.mint.exec('SELECT * FROM issued WHERE owner=? AND serial=?', owner, cursor)[0];
+    const limit = COLLECTION_PAGE + 1;
+    let rows;
+    if (!cursor) {
+      rows = this.mint.exec(`SELECT serial, certificate, favorite FROM issued WHERE owner=?
+        ORDER BY (certificate IS NULL) ASC, issued_at DESC, serial DESC LIMIT ${limit}`, owner);
+    } else {
+      const anchor = this.mint.exec('SELECT serial, issued_at, certificate FROM issued WHERE owner=? AND serial=?', owner, cursor)[0];
       if (!anchor) return { error: 'Invalid collection cursor.', status: 400 };
-      const value = expression => expression === '(certificate IS NULL)' ? Number(anchor.certificate === null) : anchor[expression];
-      const parts = keys.map((key, i) => {
-        const terms = [];
-        for (let j = 0; j < i; j++) { terms.push(keys[j][0] + '=?'); binds.push(value(keys[j][0])); }
-        terms.push(key[0] + (key[1] === 'ASC' ? '>?' : '<?'));
-        binds.push(value(key[0]));
-        return '(' + terms.join(' AND ') + ')';
-      });
-      after = ' AND (' + parts.join(' OR ') + ')';
+      const pending = Number(anchor.certificate === null);
+      rows = this.mint.exec(`SELECT serial, certificate, favorite FROM issued
+        WHERE owner=? AND (certificate IS NULL)=? AND (issued_at, serial) < (?, ?)
+        ORDER BY issued_at DESC, serial DESC LIMIT ${limit}`,
+        owner, pending, anchor.issued_at, anchor.serial);
+      // Signed pages may run into pending rows; append those without scanning issued history.
+      if (!pending && rows.length < limit) {
+        rows.push(...this.mint.exec(`SELECT serial, certificate, favorite FROM issued
+          WHERE owner=? AND (certificate IS NULL)=1
+          ORDER BY issued_at DESC, serial DESC LIMIT ${limit - rows.length}`, owner));
+      }
     }
-    const order = keys.map(([expression, direction]) => expression + ' ' + direction).join(', ');
-    const rows = this.mint.exec('SELECT serial, certificate, favorite FROM issued WHERE owner=?' + after +
-      ' ORDER BY ' + order + ' LIMIT ' + (COLLECTION_PAGE + 1), ...binds);
     return {
       ubus: rows.slice(0, COLLECTION_PAGE).map(row => ({
         serial: row.serial, certificate: row.certificate, favorite: Boolean(row.favorite)

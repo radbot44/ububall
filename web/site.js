@@ -1083,7 +1083,7 @@
     if (recImport) recImport.hidden = !importFile;
   }
   $('mint-retry').onclick = () => { void bootMint(); };
-  $('collection-retry').onclick = () => { void collection(); };
+  $('collection-retry').onclick = () => { void collection({ refresh: true }); };
   let collectionViewerOpen = false, collectionViewerFromList = false, collectionViewerClosing = false;
   let scatteredAnims = [], viewerPanelAnim = null;
   function cancelViewerPanelAnim() {
@@ -1668,11 +1668,11 @@
     $('collection').hidden = false;
   }
 
-  async function collection() {
+  async function collection({ refresh = false } = {}) {
     if (choosing()) return;
     if (session?.owner) $('collection').hidden = false;
     try {
-      await ubuList.load({ refresh: true });
+      await ubuList.load({ refresh });
       collectionFailed = false;
       collectionStatus('');
       collectionRecovery();

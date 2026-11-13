@@ -161,15 +161,18 @@ test('choice allocation rolls back atomically and signing failures recover witho
   await assert.rejects(mint.issue(selection), /selection failure/);
   assert.equal(mint.state().remaining, 4);
   assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued')[0].n, 0);
+  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM mint_account_counts')[0].n, 0);
   assert.deepEqual(mint.offer({ owner, request: request(2) }), offer);
   storage.exec('DROP TRIGGER fail_choice');
   await assert.rejects(mint.issue(selection), /signing failed/);
   assert.equal(mint.state().remaining, 3);
   assert.equal(mint.exec('SELECT COUNT(*) AS n FROM pack_choices')[0].n, 0);
+  assert.equal(mint.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0].regular_packs, 1);
   failing = false;
   const retry = await mint.issue(selection, { lifetimeLimit: 0 });
   assert.equal(retry.certificates.length, 5);
   assert.equal(mint.state().remaining, 3);
+  assert.equal(mint.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0].regular_packs, 1);
 });
 
 test('concurrent different choices grant only one pack and later requests cannot bypass allowance', async t => {
@@ -207,6 +210,8 @@ test('existing pack inventory upgrades without replacement and hints disclose on
   const special = Buffer.alloc(128, 255).toString('base64url');
   mint.exec('UPDATE inventory SET dna=? WHERE quintile=5', special);
   const before = mint.exec('SELECT id, serial, dna, pack_slot, quintile FROM inventory ORDER BY id');
+  // This fixture models a pre-upgrade database, before the batch-aware offer index existed.
+  storage.exec('DROP INDEX IF EXISTS inventory_offer_lookup');
   storage.exec('ALTER TABLE inventory DROP COLUMN batch');
   mint = new Mint(storage, f.options);
   assert.deepEqual(mint.exec('SELECT id, serial, dna, pack_slot, quintile FROM inventory ORDER BY id'), before);
@@ -442,6 +447,29 @@ test('lifetime allowance counts packs atomically and retries do not consume it t
   const first = outcomes[0].value;
   assert.deepEqual(await mint.issue({ owner, request: request(0) }, { lifetimeLimit: 0 }), first);
   for (const lifetimeLimit of [-1, NaN, '3', 1.5]) await assert.rejects(mint.issue({ owner, request: request(9) }, { lifetimeLimit }), /Invalid lifetime/);
+});
+
+test('regular pack counters backfill historical ownership once and exclude starter packs', async t => {
+  const f = await fixture(t), mint = new Mint(f.open(), f.options);
+  mint.prepare({ batchSize: 30 });
+  await mint.issue({ owner, request: request(1) });
+  await mint.issue({ owner, request: request(2) });
+  await mint.claimStarter({ owner, kind: 'signup' });
+  assert.equal(mint.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0].regular_packs, 2);
+
+  // Simulate an existing installation whose issued history predates the counter table.
+  mint.exec('DELETE FROM mint_migrations WHERE id=?', 'regular-pack-counts-v1');
+  mint.exec('DROP TABLE mint_account_counts');
+  const upgraded = new Mint(f.open(), f.options);
+  assert.equal(upgraded.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0].regular_packs, 2);
+  assert.throws(() => upgraded.offer({ owner, request: request(3) }, { lifetimeLimit: 2 }), /limit reached/);
+  const offer = upgraded.offer({ owner, request: request(3) }, { lifetimeLimit: 3 });
+  await upgraded.issue({ owner, request: offer.request, choice: offer.choices[0].choice }, { lifetimeLimit: 3 });
+
+  const reopened = new Mint(f.open(), f.options);
+  assert.equal(reopened.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0].regular_packs, 3);
+  assert.throws(() => reopened.offer({ owner, request: request(4) }, { lifetimeLimit: 3 }), /limit reached/);
+  assert.equal(reopened.exec('SELECT COUNT(*) AS n FROM mint_migrations WHERE id=?', 'regular-pack-counts-v1')[0].n, 1);
 });
 
 test('seamlessly migrates legacy pre-pack database schema on initialization', async t => {
