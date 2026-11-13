@@ -461,3 +461,70 @@ test('drawPrediction skips predictionLayer allocation during active drag and 256
   assert.ok(fx.portraitRinkCache.hits >= 11, 'subsequent scroll offsets hit offscreen portraitRinkCache');
   assert.equal(badgeCanvas.width, 300, 'collectionPortrait skips resizing hidden badgeCanvas');
 });
+
+test('paintPrediction skips stationary bodies, decimates redundant polyline vertices while keeping bounce kinks, and skips clip when impacts is empty', () => {
+  const pres = require('../web/ububall-presentation.js');
+  const bodies = P.kickoff();
+  const ops = { strokes: 0, lineTos: [], clips: 0, images: 0 };
+  const ctx = {
+    globalAlpha: 1, fillStyle: '#000', strokeStyle: '#000', lineWidth: 1,
+    save() {}, restore() {}, translate() {}, rotate() {}, scale() {},
+    setLineDash() {},
+    beginPath() {},
+    moveTo() {},
+    lineTo(x, y) { ops.lineTos.push([x, y]); },
+    stroke() { ops.strokes++; },
+    fill() {},
+    arc() {},
+    rect() {},
+    roundRect() {},
+    clip() { ops.clips++; },
+    drawImage() { ops.images++; }
+  };
+  const mockDoc = {
+    createElement() {
+      return { width: 0, height: 0, getContext: () => ({ fillStyle: '#000', beginPath() {}, arc() {}, fill() {} }) };
+    }
+  };
+  const presenter = pres.createRinkPresenter({
+    P,
+    ububallMatch,
+    getView: () => ({ ctx, badgeCtx: ctx, bodies, mode: 'standard', portrait: false }),
+    getEffects: () => pres.createEffectsState([], {}),
+    doc: mockDoc
+  });
+
+  // Build 1 moving path with a sharp wall bounce at (300, 60) + decelerating sub-pixel tail, and 6 stationary 121-point paths
+  const moving = [];
+  for (let i = 0; i <= 40; i++) {
+    // Straight approach to top board (200,110) -> (300,60), then bounce to (400,110)
+    const u = i / 20;
+    if (i <= 20) moving.push({ x: 200 + u * 100, y: 110 - u * 50, tick: i * 4 });
+    else moving.push({ x: 300 + (u - 1) * 100, y: 60 + (u - 1) * 50, tick: i * 4 });
+  }
+  // Add 50 decelerating sub-pixel points bunched near (401, 110.5)
+  for (let k = 1; k <= 50; k++) {
+    moving.push({ x: 400 + (1 - Math.exp(-k * 0.2)), y: 110 + 0.5 * (1 - Math.exp(-k * 0.2)), tick: 160 + k * 4 });
+  }
+  const still = Array.from({ length: 121 }, (_, k) => ({ x: 780, y: 300, tick: k * 4 }));
+  const prediction = {
+    paths: [moving, still, still, still, still, still, still],
+    impacts: [],
+    stops: [],
+    horizon: 480,
+    guards: [],
+    ignition: null,
+    goalTargets: null
+  };
+
+  presenter.paintPrediction(prediction, '#E8CA48', '#AA54D3');
+  assert.equal(ops.clips, 0, 'skips rounded-rink + goal clip mask when prediction.impacts is empty');
+  assert.ok(ops.lineTos.length <= 16, `expected <= 16 emitted lineTo vertices (from 91 raw + 726 stationary), got ${ops.lineTos.length}`);
+  assert.equal(ops.lineTos.some(([x, y]) => Math.abs(x - 300) < 1e-6 && Math.abs(y - 60) < 1e-6), true, 'preserves exact wall-bounce apex vertex');
+
+  // Verify non-empty impacts still clips and renders stamp
+  prediction.impacts = [{ index: 0, x: 300, y: 80, radius: 25, reach: 28, tick: 80 }];
+  presenter.paintPrediction(prediction, '#E8CA48', '#AA54D3');
+  assert.equal(ops.clips, 1, 'applies rink + goal clip when impacts are present');
+  assert.equal(ops.images, 1, 'draws impact stamp inside clip');
+});

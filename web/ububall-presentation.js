@@ -2038,10 +2038,55 @@
       return k;
     }
 
+    function strokeDecimatedPathRange(ctx, points, start, end) {
+      if (end <= start) return;
+      let lx = points[start].x, ly = points[start].y;
+      let ux = 0, uy = 0, hasDir = false, segments = 0;
+      ctx.beginPath();
+      ctx.moveTo(lx, ly);
+      for (let i = start + 1; i < end; i++) {
+        const px = points[i].x, py = points[i].y;
+        const dx = px - lx, dy = py - ly;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < 0.01) continue;
+        const nxPt = points[i + 1];
+        const ndx = nxPt.x - px, ndy = nxPt.y - py;
+        const nLen2 = ndx * ndx + ndy * ndy;
+        const sharpTurn = nLen2 > 0.01 && (dx * ndx + dy * ndy) < 0.92 * Math.sqrt(d2 * nLen2);
+        if (!sharpTurn) {
+          if (d2 < 4) continue;
+          if (hasDir && d2 < 1225) {
+            const inv = 1 / Math.sqrt(d2);
+            const dirX = dx * inv, dirY = dy * inv;
+            const nextAligned = nLen2 < 0.01 || ((ndx * dirX + ndy * dirY) > 0.998 * Math.sqrt(nLen2));
+            if ((ux * dirX + uy * dirY) > 0.9995 && nextAligned) continue;
+          }
+        }
+        ctx.lineTo(px, py);
+        const inv = 1 / Math.sqrt(d2);
+        ux = dx * inv; uy = dy * inv; hasDir = true;
+        lx = px; ly = py;
+        segments++;
+      }
+      const ex = points[end].x, ey = points[end].y;
+      if ((ex - lx) * (ex - lx) + (ey - ly) * (ey - ly) >= 0.01) {
+        ctx.lineTo(ex, ey);
+        segments++;
+      }
+      if (segments > 0) ctx.stroke();
+    }
+
     function paintPrediction(prediction, home, away) {
       const view = getView(), ctx = view.ctx;
       prediction.paths.forEach((points, index) => {
         if (points.length < 2) return;
+        const x0 = points[0].x, y0 = points[0].y;
+        let moved = false;
+        for (let i = 1; i < points.length; i++) {
+          const dx = points[i].x - x0, dy = points[i].y - y0;
+          if (dx * dx + dy * dy > 0.64) { moved = true; break; }
+        }
+        if (!moved) return;
         const isBall = view.bodies[index].team === -1;
         const color = isBall ? '#f2efe9' : view.bodies[index].team === 0 ? home : away;
         const baseAlpha = isBall ? .9 : .65;
@@ -2055,10 +2100,7 @@
         const solidEnd = Math.min(points.length - 1, splitIdx);
         if (solidEnd >= 1) {
           ctx.globalAlpha = baseAlpha;
-          ctx.beginPath();
-          ctx.moveTo(points[0].x, points[0].y);
-          for (let i = 1; i <= solidEnd; i++) ctx.lineTo(points[i].x, points[i].y);
-          ctx.stroke();
+          strokeDecimatedPathRange(ctx, points, 0, solidEnd);
         }
 
         if (solidEnd < points.length - 1) {
@@ -2071,10 +2113,7 @@
             const midTick = points[Math.floor((start + end) / 2)].tick;
             const fade = Math.max(0, Math.min(1, (prediction.horizon - midTick) / 240));
             ctx.globalAlpha = fade * baseAlpha;
-            ctx.beginPath();
-            ctx.moveTo(points[start].x, points[start].y);
-            for (let i = start + 1; i <= end; i++) ctx.lineTo(points[i].x, points[i].y);
-            ctx.stroke();
+            strokeDecimatedPathRange(ctx, points, start, end);
           }
         }
         ctx.restore();
@@ -2131,21 +2170,23 @@
         line(stop.x - 4, stop.y - 4, stop.x + 4, stop.y + 4, color, 2);
         line(stop.x + 4, stop.y - 4, stop.x - 4, stop.y + 4, color, 2);
       }
-      ctx.save(); rounded(60, 60, 880, 480, 100);
-      ctx.rect(60 - P.rink.goalDepth, 230, P.rink.goalDepth, 140); ctx.rect(940, 230, P.rink.goalDepth, 140); ctx.clip();
-      for (const hit of prediction.impacts) {
-        const team = view.bodies[hit.index].team;
-        const color = team < 0 ? '#ffffff' : team === 0 ? home : away;
-        ctx.save();
-        ctx.translate(hit.x, hit.y);
-        if (view.portrait) ctx.rotate(Math.PI / 2);
-        const fade = Math.min(1, (prediction.horizon - hit.tick) / 240);
-        ctx.globalAlpha = .2 * fade;
-        const size = hit.reach * 128 / 60;
-        ctx.drawImage(impactStamp(color, doc), -size / 2, -size / 2, size, size);
+      if (prediction.impacts && prediction.impacts.length > 0) {
+        ctx.save(); rounded(60, 60, 880, 480, 100);
+        ctx.rect(60 - P.rink.goalDepth, 230, P.rink.goalDepth, 140); ctx.rect(940, 230, P.rink.goalDepth, 140); ctx.clip();
+        for (const hit of prediction.impacts) {
+          const team = view.bodies[hit.index].team;
+          const color = team < 0 ? '#ffffff' : team === 0 ? home : away;
+          ctx.save();
+          ctx.translate(hit.x, hit.y);
+          if (view.portrait) ctx.rotate(Math.PI / 2);
+          const fade = Math.min(1, (prediction.horizon - hit.tick) / 240);
+          ctx.globalAlpha = .2 * fade;
+          const size = hit.reach * 128 / 60;
+          ctx.drawImage(impactStamp(color, doc), -size / 2, -size / 2, size, size);
+          ctx.restore();
+        }
         ctx.restore();
       }
-      ctx.restore();
     }
 
     function drawPrediction(home, away) {
