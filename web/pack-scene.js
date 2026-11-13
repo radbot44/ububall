@@ -1432,6 +1432,9 @@
       const settling = Math.abs(pointer - aimX) + Math.abs(pointerY - aimY) > .001;
       if (!settling) { pointer = aimX; pointerY = aimY; }
       if (finish) progress = clamp((now - started) / duration());
+      const host = canvas.offsetParent === canvas.parentElement && canvas.parentElement?.clientWidth > 0 && canvas.parentElement?.clientHeight > 0
+        ? canvas.parentElement
+        : null;
       const dpr = Math.min(devicePixelRatio || 1, 2), width = Math.round(canvas.clientWidth * dpr), height = Math.round(canvas.clientHeight * dpr);
       if (!width || !height) {
         if (settling) requestPaint();
@@ -1443,7 +1446,11 @@
       }
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
       ctx.resetTransform(); ctx.clearRect(0, 0, width, height);
-      const scale = width / 600; ctx.setTransform(scale, 0, 0, scale, width / 2, height * .46);
+      // Center on the .candy-pack button even when the canvas overflows it so opening fragments stay unclipped.
+      const scale = (host ? host.clientWidth * dpr : width) / 600;
+      const originX = host ? (host.clientWidth * .5 - canvas.offsetLeft) * dpr : width / 2;
+      const originY = host ? (host.clientHeight * .46 - canvas.offsetTop) * dpr : height * .46;
+      ctx.setTransform(scale, 0, 0, scale, originX, originY);
 
       const revealStart = currentType?.reveal ?? null;
       if (revealStart !== null && progress > revealStart) {
@@ -1479,7 +1486,9 @@
 
     canvas.parentElement.addEventListener('pointermove', event => {
       if (reduced.matches || event.pointerType === 'touch' || finish) return;
-      const r = canvas.getBoundingClientRect();
+      const box = canvas.parentElement.getBoundingClientRect ? canvas.parentElement : canvas;
+      const r = box.getBoundingClientRect();
+      if (!(r.width > 0) || !(r.height > 0)) return;
       aimX = clamp((event.clientX - r.left) / r.width) * 2 - 1;
       aimY = clamp((event.clientY - r.top) / r.height) * 2 - 1;
       requestPaint();

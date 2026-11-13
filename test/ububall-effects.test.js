@@ -3829,7 +3829,13 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
   for (const starterId of ['daily-pack', 'signup-stage-pack', 'home-pack']) {
     const wrap = getMintEl(starterId);
     const btn = makeDomNode('button', starterId + '-btn');
-    btn.append(makeDomNode('canvas', starterId + '-canvas'));
+    const canvas = makeDomNode('canvas', starterId + '-canvas');
+    if (starterId === 'signup-stage-pack') {
+      // Simulate the oversized 200% x 280% Mint canvas inside the .candy-pack button box.
+      btn.getBoundingClientRect = () => ({ left: 410, top: 270, right: 790, bottom: 500, width: 380, height: 230 });
+      canvas.getBoundingClientRect = () => ({ left: 220, top: 75, right: 980, bottom: 719, width: 760, height: 644 });
+    }
+    btn.append(canvas);
     wrap.append(btn);
   }
   getMintEl('pack-choices').hidden = true;
@@ -4094,6 +4100,7 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
   assert.equal(starterUbu0Anim.keyframes[0].opacity, 1, 'emerging silhouette starts solid without fading in from 0');
   assert.equal(starterUbu0Anim.keyframes[1].opacity, 1);
   assert.ok(starterUbu0Anim.keyframes[0].scale > 1 || starterUbu0Anim.keyframes[1].scale === 1);
+  assert.ok(Math.abs(starterUbu0Anim.keyframes[0].scale - (208 * 380 / 600) / 64) < 1e-4, 'capturePackEmergence scales against the .candy-pack button rather than the overflowing canvas');
   assert.equal(rinkStageDom.style.getPropertyValue('--mint-zoom'), '1.85', '3-ubu reveal uses 1.85x zoom');
   assert.equal(rinkStageDom.style.getPropertyValue('--mint-pan-x'), '35.150%', 'camera centers starter ubu 0 (x=31%)');
 
@@ -4137,13 +4144,14 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
     putImageData() {},
     createPattern: () => ({})
   });
+  let rafCallback = null;
   const packSceneCtx = {
     Math, Number, String, Boolean, Array, Object, Map, Set, Promise, Uint8Array, Uint32Array, parseInt,
     crypto: globalThis.crypto,
     navigator: { userActivation: { hasBeenActive: false } },
     devicePixelRatio: 1,
     performance: { now: () => 0 },
-    requestAnimationFrame: () => 1,
+    requestAnimationFrame: fn => { rafCallback = fn; return 1; },
     cancelAnimationFrame() {},
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     ResizeObserver: class { observe() {} },
@@ -4170,6 +4178,25 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
   assert.deepEqual(tok3.map(t => t.x), [-165, 0, 165], '3-ubu starter fan coordinates match pack-scene reveal');
   realScene.setType('blob');
   assert.equal(realScene.getSilhouetteTokens(5)[0].diameter, 84, 'blob pack reports its 84u silhouette diameter');
+
+  const transforms = [];
+  const paddedBtn = {
+    clientWidth: 300, clientHeight: 180,
+    getBoundingClientRect: () => ({ left: 100, top: 100, width: 300, height: 180 }),
+    listeners: {},
+    addEventListener(type, fn) { this.listeners[type] = fn; }
+  };
+  const paddedCanvas = {
+    clientWidth: 600, clientHeight: 504, width: 600, height: 504,
+    offsetLeft: -150, offsetTop: -153, offsetParent: paddedBtn, parentElement: paddedBtn, dataset: {},
+    getBoundingClientRect: () => ({ left: -50, top: -53, width: 600, height: 504 }),
+    getContext: () => ({ ...noopCtx(), setTransform: (...args) => transforms.push(args) })
+  };
+  const paddedScene = packSceneCtx.createPackScene(paddedCanvas);
+  paddedScene.setType('egg');
+  rafCallback(16);
+  assert.deepEqual(transforms.at(-1), [0.5, 0, 0, 0.5, 300, 180 * 0.46 + 153],
+    'pack-scene centers and scales transform to .candy-pack host when canvas overflows');
 });
 
 test('Rink stage Phase 4: stretched portrait Collection rink, repeating markings & center logos, 2-step rotate/stretch & shrink/rotate camera moves, sticky dock, and hybrid on-ice viewer', async () => {

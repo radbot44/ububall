@@ -733,15 +733,15 @@
     const stage = rinkStageEl();
     if (!stage) return null;
     const stageRect = stage.getBoundingClientRect();
-    const canvasRect = packCanvas.getBoundingClientRect();
-    if (!(stageRect.width > 0) || !(canvasRect.width > 0)) return null;
+    const packRect = (packCanvas.parentElement?.getBoundingClientRect ? packCanvas.parentElement : packCanvas).getBoundingClientRect();
+    if (!(stageRect.width > 0) || !(packRect.width > 0)) return null;
     const tokens = scene.getSilhouetteTokens(count);
     const xs = ubuPositions(count);
     const endDiam = stageRect.width * ((count <= 3 ? 6.4 : 5.2) / 100);
-    const unit = canvasRect.width / 600;
+    const unit = packRect.width / 600;
     return tokens.map((tok, i) => {
-      const startX = canvasRect.left + canvasRect.width * 0.5 + tok.x * unit;
-      const startY = canvasRect.top + canvasRect.height * 0.46 + tok.y * unit;
+      const startX = packRect.left + packRect.width * 0.5 + tok.x * unit;
+      const startY = packRect.top + packRect.height * 0.46 + tok.y * unit;
       const endX = stageRect.left + stageRect.width * (xs[i] / 100);
       const endY = stageRect.top + stageRect.height * 0.5;
       return {

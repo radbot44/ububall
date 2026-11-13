@@ -309,3 +309,10 @@ None.
   pose before rotating back; moved `scrollTo(0, 0)` into `app.js`'s `applyDom` (covering `popstate`
   and measuring target shots at `scrollY = 0`); elevated `.site-header` `z-index` above `.camera-moving`
   and clipped transient `.camera-moving` page scrollbars.
+- 2026-11-12: Fixed clipped Ubu Mint pack-opening animations on the rink stage (`web/site.css`,
+  `web/pack-scene.js`, `web/site.js`, `test/ububall-effects.test.js`): expanded `.mint-world
+  .candy-pack canvas` (`left: -50%; top: -85%; width: 200%; height: 280%; pointer-events: none;`)
+  outside the `.candy-pack` hit box so flying caps, domes, shards, flaps, tear strips and fanned
+  silhouettes render unclipped onto the rink while keeping button click targets, hover glows and
+  `#home-pack` unchanged; updated `createPackScene` (`paint` and `pointermove`) and
+  `capturePackEmergence` to align coordinates and scale against the parent `.candy-pack` button.

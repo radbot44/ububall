@@ -390,6 +390,7 @@ html.booting body { visibility: hidden; }
 .candy-pack:disabled { opacity: .65; }
 .candy-pack.unwrapping { opacity: 1; }
 .candy-pack canvas { display: block; width: 100%; height: 100%; }
+.mint-world .candy-pack canvas { position: absolute; left: -50%; top: -85%; width: 200%; height: 280%; pointer-events: none; }
 .mint-world { position: absolute; inset: 0; z-index: 4; }
 .mint-lights { position: absolute; inset: 10% 6%; width: 88%; height: 80%; border-radius: 10cqw; pointer-events: none; }
 .mint-center-pack { position: absolute; left: 50%; top: 50%; z-index: 2; translate: -50% -50%; width: 38cqw; }
