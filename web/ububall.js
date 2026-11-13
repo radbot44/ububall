@@ -57,7 +57,9 @@
     else if (legacySound === 'off') musicVolume = 0;
     if (savedMode === 'mono' || savedMode === 'stereo') audioMode = savedMode;
   } catch {}
-  const gameAudio = () => videoAudio || activePlayback?.audio || (demo ? null : window.ubuAudio);
+  const bench = typeof window !== 'undefined' && location.search.includes('bench=1')
+    ? (window.__ubuBench ||= { flags: {}, rec: null }) : null;
+  const gameAudio = () => bench?.flags.noAudio ? null : (videoAudio || activePlayback?.audio || (demo ? null : window.ubuAudio));
   const classicMode = () => ububallMatch.rule(fieldView.mode, 'classic');
   const blitzMode = () => ububallMatch.rule(fieldView.mode, 'blitz');
   const pulseMode = () => ububallMatch.rule(fieldView.mode, 'pulse');
@@ -256,7 +258,7 @@
   } = ububallTheater;
   const anonymousName = i => formatAnonymousName(ububallReplay, i);
   const viewFouls = (f, seat) => projectFouls(ububallMatch, f, seat);
-  const { projectBody, viewBodies, toViewBody, syncViewBodies } = createBodyProjector({
+  const { projectBody, viewBodies, toViewBody, syncViewBodies, syncTickBodies } = createBodyProjector({
     P,
     getEntries: () => (typeof fieldView.entries !== 'undefined' ? fieldView.entries : null),
     getAnonymous: () => Boolean(typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous),
@@ -733,19 +735,20 @@
     return kind === 'angle' ? screenDegrees(plan.angle) : kind === 'power' ? plan.power * 100 : (plan.spin || 0) * 100;
   }
   const knobEditable = i => phase === 'plan' && Boolean(plans[i] && fieldView.bodies[i] && !fieldView.bodies[i].stunned && !fieldView.bodies[i].carded);
-  function setKnob(kind, i, value) {
+  function setKnob(kind, i, value, deferDraw = false) {
     if (!knobEditable(i)) return;
     const plan = plans[i], [min, max] = KNOB_RANGE[kind];
     if (kind === 'angle') plan.angle = (((value - 90 + (fieldView.portrait ? 90 : 0)) % 360 + 360) % 360) * Math.PI / 180;
     else plan[kind] = Math.max(min, Math.min(max, value)) / 100;
     plan.guard = false;
+    if (deferDraw) { dragDirty = true; return; }
     sync(); draw();
   }
   function wheelKnob(e, kind, i) {
     if (!e.deltaY || !knobEditable(i)) return;
     e.preventDefault();
-    setKnob(kind, i, knobValue(kind, i) - Math.sign(e.deltaY) * (e.shiftKey ? 10 : 1));
-    saveActiveMatch();
+    setKnob(kind, i, knobValue(kind, i) - Math.sign(e.deltaY) * (e.shiftKey ? 10 : 1), typeof requestAnimationFrame === 'function');
+    scheduleSaveActiveMatch();
   }
   function makeKnob(kind) {
     const wrap = document.createElement('div'); wrap.className = 'knob';
@@ -764,15 +767,19 @@
     svg.onpointermove = e => {
       if (grab?.id !== e.pointerId) return;
       const distance = (e.clientX - grab.x) - (e.clientY - grab.y);
-      setKnob(kind, grab.index, grab.value + distance / (KNOB_SWEEP * gameUi.scale()) * (max - min) * (e.shiftKey ? .25 : 1));
+      setKnob(kind, grab.index, grab.value + distance / (KNOB_SWEEP * gameUi.scale()) * (max - min) * (e.shiftKey ? .25 : 1), typeof requestAnimationFrame === 'function');
     };
-    svg.onlostpointercapture = () => { grab = null; if (phase === 'plan') saveActiveMatch(); };
+    svg.onlostpointercapture = () => {
+      grab = null;
+      if (dragDirty) { dragDirty = false; sync(); draw(); }
+      if (phase === 'plan') saveActiveMatch();
+    };
     svg.addEventListener('wheel', e => wheelKnob(e, kind, selected), { passive: false });
     svg.onkeydown = e => {
       const step = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key];
       if (!step) return;
-      e.preventDefault(); setKnob(kind, selected, knobValue(kind, selected) + step * (e.shiftKey ? 10 : 1));
-      if (phase === 'plan') saveActiveMatch();
+      e.preventDefault(); setKnob(kind, selected, knobValue(kind, selected) + step * (e.shiftKey ? 10 : 1), Boolean(e.repeat && typeof requestAnimationFrame === 'function'));
+      if (phase === 'plan') { if (e.repeat) scheduleSaveActiveMatch(); else saveActiveMatch(); }
     };
     if (kind === 'spin') svg.ondblclick = () => { setKnob(kind, selected, 0); if (phase === 'plan') saveActiveMatch(); };
     knobs.push({ kind, wrap, svg });
@@ -806,6 +813,7 @@
     }
   }
   function sync() {
+    const _tSync = bench?.rec ? performance.now() : 0;
     updateFirstTurnGuide();
     updateClock();
     const planning = phase === 'plan';
@@ -952,6 +960,7 @@
       $('new-match').disabled = true;
       $('launch').hidden = online.spectating || phase === 'over';
     }
+    if (bench?.rec) bench.rec.syncMs += (performance.now() - _tSync);
   }
   // A sidebar card's portrait opens that ubu's stats in a drawer from its team's side of the screen.
   // Light dismiss closes it; tapping the same portrait again leaves it closed.
@@ -1076,9 +1085,11 @@
     };
   }
   function clearActiveMatch() {
+    if (typeof cancelScheduledSave === 'function') cancelScheduledSave();
     try { localStorage.removeItem('ububall-active-match'); } catch {}
   }
   function saveActiveMatch(launchState = null) {
+    if (typeof cancelScheduledSave === 'function') cancelScheduledSave();
     if (inDiscord) return;
     if (demo || online?.active || phase === 'over' || !recording) {
       clearActiveMatch();
@@ -1101,7 +1112,7 @@
         turn,
         phase: launchState ? 'play' : phase,
         fouls: { crease: [...fouls.crease], corner: fouls.corner, cornerTurns: fouls.cornerTurns, cards: [...(fouls.cards || [])] },
-        tally: structuredClone(tally),
+        tally,
         play: ububallMatch.newPlay(play),
         roundTurns,
         matchTicks,
@@ -1112,7 +1123,7 @@
         plans: launchState ? null : (Array.isArray(plans) ? plans.map((p, i) => ({ angle: p.angle, power: p.power, spin: p.spin || 0, superArm: Boolean(fieldView.bodies[i]?.superArm || p.superArm), guard: Boolean(p.guard) })) : null),
         cpu: launchState ? null : (Array.isArray(cpu) ? cpu.map(p => ({ angle: p.angle, power: p.power, spin: p.spin || 0, superArm: Boolean(p.superArm), guard: Boolean(p.guard) })) : null),
         cpuDone: launchState ? false : Boolean(cpuDone),
-        recording: recording ? structuredClone(recording) : null
+        recording: recording || null
       };
       localStorage.setItem('ububall-active-match', JSON.stringify(data));
     } catch {}
@@ -1428,6 +1439,7 @@
     }
   }
   function draw() {
+    const _tDraw = bench?.rec ? performance.now() : 0;
     if (layoutDirty && !fieldView.field) {
       const w0 = fieldView.canvas.clientWidth, h0 = fieldView.canvas.clientHeight;
       fitStadium();
@@ -1440,6 +1452,7 @@
     themeColors = presenter.getThemeColors();
     presenter.drawScene();
     if (!fieldView.field) updateFoulInfo();
+    if (bench?.rec) bench.rec.drawMs += (performance.now() - _tDraw);
   }
   // The camera. A layout change is made at once, then the rink stage is played from the box it had
   // to the box it now has, so the rink glides between the home, setup and match layouts. Portrait
@@ -1790,11 +1803,14 @@
   };
   const replayView = (cb, th = currentReplay()) => toViewBody(cb, th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : null));
   const syncReplay = (th = currentReplay()) => syncViewBodies(th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || (typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : null), th ? th.anonymous : undefined, th?.exporting ? null : undefined, th?.entries);
+  const syncReplayTick = (th = currentReplay()) => (typeof syncTickBodies === 'function' && !th)
+    ? syncTickBodies(shownSim(), shownSeat(), typeof fieldView.bodies !== 'undefined' ? fieldView.bodies : null)
+    : syncReplay(th);
   const replayFx = {
-    hit: contact => { if (contact.spinStruck && ((typeof goalReplay !== 'undefined' && goalReplay) || currentReplay())) replayTickStruck = true; syncReplay(); handleCollision({ ...contact, a: replayView(contact.a), b: replayView(contact.b) }); },
-    wall: (body, velocity, wallType, nx, ny, rimmed = false) => { syncReplay(); const seat = shownSeat(); handleWall(replayView(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny, rimmed); },
-    shock: (source, radius, type = null) => { syncReplay(); handleShockwave(replayView(source), radius, type); },
-    super: (key, stage, body, target = null) => { syncReplay(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
+    hit: contact => { if (contact.spinStruck && ((typeof goalReplay !== 'undefined' && goalReplay) || currentReplay())) replayTickStruck = true; syncReplayTick(); handleCollision({ ...contact, a: replayView(contact.a), b: replayView(contact.b) }); },
+    wall: (body, velocity, wallType, nx, ny, rimmed = false) => { syncReplayTick(); const seat = shownSeat(); handleWall(replayView(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny, rimmed); },
+    shock: (source, radius, type = null) => { syncReplayTick(); handleShockwave(replayView(source), radius, type); },
+    super: (key, stage, body, target = null) => { syncReplayTick(); handleSuper(key, stage, replayView(body), target ? replayView(target) : null); }
   };
   const {
     impactFor, applyTickEvents, stepPostGoalFrame, runPlaybackTicks, advancePostGoal, stepOnlineTurn
@@ -1848,18 +1864,21 @@
     }
     const post = r.played >= r.total;
     const speed = post ? 0.5 : ububallMatch.replaySpeed(r.total - r.played);
+    let steppedReplay = false;
     runPlaybackTicks(r, delta, speed, 48, () => hitStopUntil, () => {
+      steppedReplay = true;
       if (r.played < r.total) {
         if (r.tick >= r.segments[r.index].ticks) nextReplaySegment();
         if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && P.ballOnFire(r.sim[6]) && fieldEffects.netFire) fieldEffects.netFire.lit = true;
         r.tick++; r.played++;
         replayEvents(r.segments[r.index], r.tick, r.sim);
-        syncReplay(); recordTrails();
+        syncReplayTick(); recordTrails();
         if (r.played >= r.total) { r.doneAt = performance.now() + ububallMatch.GOAL_REPLAY_HOLD; r.doneHoldMs = ububallMatch.GOAL_REPLAY_HOLD; }
-      } else if (stepPostGoalFrame(r.sim, replayFx, syncReplay)) {
+      } else if (stepPostGoalFrame(r.sim, replayFx, syncReplayTick)) {
         return 'reset';
       }
     });
+    if (steppedReplay && goalReplay) syncReplay();
     emitSkaterEffects(delta * speed); draw();
   }
   function endGoalReplay() {
@@ -1946,6 +1965,7 @@
       final: Boolean(r.final), turns: r.turns.length, auto, pinned: false, file };
   }
   addEventListener('pagehide', () => {
+    flushScheduledSave();
     if (recording && !demo && (online?.active || inDiscord)) saveRecording();
   });
   // Completes the local turn just played.
@@ -2282,12 +2302,36 @@
     elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
     if (!demo && shot === 'match') banner('Launch!', 800, 'launch');
   };
+  let saveActiveMatchTimer = 0;
+  function cancelScheduledSave() {
+    if (!saveActiveMatchTimer) return;
+    if (typeof clearTimeout === 'function') clearTimeout(saveActiveMatchTimer);
+    saveActiveMatchTimer = 0;
+  }
+  function flushScheduledSave() {
+    if (!saveActiveMatchTimer) return;
+    cancelScheduledSave();
+    if (phase === 'plan') saveActiveMatch();
+  }
+  function scheduleSaveActiveMatch() {
+    if (phase !== 'plan') return;
+    if (typeof setTimeout !== 'function') { saveActiveMatch(); return; }
+    cancelScheduledSave();
+    saveActiveMatchTimer = setTimeout(() => {
+      saveActiveMatchTimer = 0;
+      if (phase === 'plan') saveActiveMatch();
+    }, 200);
+  }
   for (const [id, key, scale] of [['shot-spin', 'spin', .01]]) {
     $(id).oninput = () => {
       if (!knobEditable(selected)) return;
       plans[selected][key] = Number($(id).value) * scale; plans[selected].guard = false;
-      sync(); draw();
-      saveActiveMatch();
+      if (typeof requestAnimationFrame === 'function') dragDirty = true;
+      else { sync(); draw(); }
+    };
+    $(id).onchange = () => {
+      if (dragDirty) { dragDirty = false; sync(); draw(); }
+      if (phase === 'plan') saveActiveMatch();
     };
   }
   for (const [id, delta] of [['spin-less', -.1], ['spin-more', .1]]) {
@@ -2417,7 +2461,7 @@
   };
   const liveSim = () => postGoal?.sim ?? simBodies;
   const liveView = cb => toViewBody(cb, liveSim(), 0);
-  const syncLive = () => syncViewBodies(liveSim(), 0);
+  const syncLive = () => (typeof syncTickBodies === 'function' ? syncTickBodies(liveSim(), 0) : syncViewBodies(liveSim(), 0));
   const liveFx = {
     collide: contact => { syncLive(); handleCollision({ ...contact, a: liveView(contact.a), b: liveView(contact.b) }); },
     wall: (body, velocity, wallType, nx, ny, rimmed = false) => { syncLive(); handleWall(liveView(body), velocity, wallType, nx, ny, rimmed); },
@@ -2493,16 +2537,20 @@
     if (active && !theater?.paused && !exporting && !pulseFrozen) updateEffects(simDelta);
     if (theater) { if (active && !exporting) advanceReplay(delta); }
     else if ((phase === 'play' || postGoal) && active && !online?.active) {
+      const _tSim = typeof bench !== 'undefined' && bench?.rec ? performance.now() : 0;
+      const stepSync = typeof syncTickBodies === 'function' ? syncTickBodies : syncViewBodies;
       if (postGoal) {
         postGoalState.onTick = () => { elapsed += P.DT; };
-        if (!advancePostGoal(postGoal, postGoalState, simDelta, liveFx, () => syncViewBodies(postGoal.sim || simBodies, 0), 48, () => hitStopUntil)) postGoal = null;
+        if (!advancePostGoal(postGoal, postGoalState, simDelta, liveFx, () => stepSync(postGoal.sim || simBodies, 0), 48, () => hitStopUntil)) postGoal = null;
+        syncViewBodies(postGoal?.sim || simBodies, 0);
       } else {
         if (clockNow() < hitStopUntil) accumulator = 0; else accumulator += simDelta;
-        let steps = 0;
+        let steps = 0, steppedPlay = false;
         while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
+          steppedPlay = true;
           const tick = ububallMatch.playTick(P, simBodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
           ububallMatch.lapseFouls(P, simBodies, fouls); traceGuide(simBodies);
-          syncViewBodies(simBodies, 0);
+          stepSync(simBodies, 0);
           applyTickEvents(simBodies, {
             saves: tick.saves, struck: tick.struck, stop: tick.stop, applyIron: false,
             viewFn: (_, s) => fieldView.bodies[s.index], isGoal: goal !== null,
@@ -2516,7 +2564,9 @@
             if (goal !== null) break;
           }
         }
+        if (steppedPlay && phase === 'play') syncViewBodies(simBodies, 0);
       }
+      if (typeof bench !== 'undefined' && bench?.rec) bench.rec.simMs += (performance.now() - _tSim);
       if (phase === 'play' || postGoal) emitSkaterEffects(simDelta);
       draw();
     } else if (goalReplay && active) advanceGoalReplay(delta);
@@ -3384,51 +3434,53 @@
       toggleGuard(selected);
       return;
     }
+    const repeatDefer = Boolean(e.repeat && typeof requestAnimationFrame === 'function');
+    const persistKeyChange = () => { if (e.repeat && typeof scheduleSaveActiveMatch === 'function') scheduleSaveActiveMatch(); else saveActiveMatch(); };
     if (e.key === 'w' || e.key === 'W') {
       if (knobEditable(selected)) {
         e.preventDefault();
-        setKnob('power', selected, knobValue('power', selected) + (e.shiftKey ? 10 : 5));
-        saveActiveMatch();
+        setKnob('power', selected, knobValue('power', selected) + (e.shiftKey ? 10 : 5), repeatDefer);
+        persistKeyChange();
       }
       return;
     }
     if (e.key === 's' || e.key === 'S') {
       if (knobEditable(selected)) {
         e.preventDefault();
-        setKnob('power', selected, knobValue('power', selected) - (e.shiftKey ? 10 : 5));
-        saveActiveMatch();
+        setKnob('power', selected, knobValue('power', selected) - (e.shiftKey ? 10 : 5), repeatDefer);
+        persistKeyChange();
       }
       return;
     }
     if (e.key === 'a' || e.key === 'A') {
       if (knobEditable(selected)) {
         e.preventDefault();
-        setKnob('angle', selected, knobValue('angle', selected) - (e.shiftKey ? 15 : 5));
-        saveActiveMatch();
+        setKnob('angle', selected, knobValue('angle', selected) - (e.shiftKey ? 15 : 5), repeatDefer);
+        persistKeyChange();
       }
       return;
     }
     if (e.key === 'd' || e.key === 'D') {
       if (knobEditable(selected)) {
         e.preventDefault();
-        setKnob('angle', selected, knobValue('angle', selected) + (e.shiftKey ? 15 : 5));
-        saveActiveMatch();
+        setKnob('angle', selected, knobValue('angle', selected) + (e.shiftKey ? 15 : 5), repeatDefer);
+        persistKeyChange();
       }
       return;
     }
     if (e.key === 'q' || e.key === 'Q') {
       if (knobEditable(selected)) {
         e.preventDefault();
-        setKnob('spin', selected, knobValue('spin', selected) - (e.shiftKey ? 20 : 10));
-        saveActiveMatch();
+        setKnob('spin', selected, knobValue('spin', selected) - (e.shiftKey ? 20 : 10), repeatDefer);
+        persistKeyChange();
       }
       return;
     }
     if (e.key === 'e' || e.key === 'E') {
       if (knobEditable(selected)) {
         e.preventDefault();
-        setKnob('spin', selected, knobValue('spin', selected) + (e.shiftKey ? 20 : 10));
-        saveActiveMatch();
+        setKnob('spin', selected, knobValue('spin', selected) + (e.shiftKey ? 20 : 10), repeatDefer);
+        persistKeyChange();
       }
       return;
     }
@@ -3719,6 +3771,7 @@
     if (!replay || !replay.simBodies || !online?.state) return;
     const seat = online.state.seat;
     const syncSim = () => syncViewBodies(replay.simBodies, seat);
+    const syncTick = () => (typeof syncTickBodies === 'function' ? syncTickBodies(replay.simBodies, seat) : syncSim());
     const res = stepOnlineTurn({
       replay,
       nowMs: online.now(),
@@ -3726,6 +3779,7 @@
       fouls,
       fx: replayFx,
       syncSim,
+      syncTick,
       toView: b => toViewBody(b, replay.simBodies, seat),
       onGoalReached: () => {
         goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
@@ -3993,6 +4047,7 @@
     history.replaceState(homeState, '');
   }
   document.addEventListener('visibilitychange', () => {
+    if (document.hidden) flushScheduledSave();
     updateLocalPlanClock(localPlayBlocked());
     lastTime = 0; accumulator = 0;
   });
@@ -4015,7 +4070,7 @@
   ro.observe($('field-spin')); // Its size places it; it has none until first shown.
   const resizeField = () => { gameUi.updateScale?.(); fitSetupShot(); layoutDirty = true; draw(); };
   const scrollCollectionField = () => {
-    if (shot !== 'collection' || collectionRotateHold) return;
+    if (shot !== 'collection' || collectionRotateHold || bench?.flags.noCollectionScrollDraw) return;
     layoutDirty = true;
     draw();
   };
@@ -4123,8 +4178,10 @@
     if (current()) $('launch').click();
   }
   // The pointer's fingertip sits on a field point, through the inverse of the pointer-input mapping.
-  function placeFinger(x, y) {
-    const finger = $('demo-finger'), stage = finger.parentElement.getBoundingClientRect(), p = screenPoint({ x, y });
+  function placeFinger(x, y, rects = null) {
+    const finger = $('demo-finger');
+    const stage = rects?.stage || finger.parentElement.getBoundingClientRect();
+    const p = rects?.canvas ? boxPoint(rects.canvas, { x, y }) : screenPoint({ x, y });
     finger.style.left = p.x - stage.left + 'px'; finger.style.top = p.y - stage.top + 'px';
   }
   function hideFinger() { $('demo-finger').toggleAttribute('hidden', true); $('demo-finger').classList.remove('pressed'); }
@@ -4139,18 +4196,29 @@
     $('demo-finger').classList.add('pressed');
     await demoWait(run, 200);
     const began = performance.now(), ms = 900;
+    const useRaf = typeof requestAnimationFrame === 'function';
+    const nextTick = useRaf ? requestAnimationFrame : fn => setTimeout(fn, 16);
+    const fingerEl = $('demo-finger');
+    let rects = !layoutDirty && fingerEl?.parentElement
+      ? { stage: fingerEl.parentElement.getBoundingClientRect(), canvas: fieldView.canvas.getBoundingClientRect() }
+      : null;
     await new Promise(resolve => {
       const step = () => {
         const now = performance.now();
         if (run !== demoRun || !current()) { resolve(); return; }
+        if (layoutDirty || !rects) {
+          rects = fingerEl?.parentElement
+            ? { stage: fingerEl.parentElement.getBoundingClientRect(), canvas: fieldView.canvas.getBoundingClientRect() }
+            : null;
+        }
         const k = Math.min(1, (now - began) / ms), eased = 1 - (1 - k) ** 3;
         plans[i] = { ...target, power: target.power * eased };
         const arrow = impulseGeometry(b, plans[i]);
-        placeFinger(arrow.x, arrow.y);
-        sync(); draw();
-        if (k < 1) setTimeout(step, 16); else resolve();
+        placeFinger(arrow.x, arrow.y, rects);
+        if (useRaf) dragDirty = true; else { sync(); draw(); }
+        if (k < 1) nextTick(step); else resolve();
       };
-      step();
+      nextTick(step);
     });
     if (run !== demoRun) throw DEMO_STOP;
     if (!current()) { hideFinger(); return; }
@@ -4163,4 +4231,228 @@
   if (!inDiscord && location.pathname === '/' && (restoredMatch || history.state?.match) && matchInProgress()) enterMatch();
   else if (location.pathname === '/') startDemo();
   openRosterFromLink();
+  if (bench) {
+    let collectionSeeded = false;
+    bench.control = {
+      getState: () => ({
+        shot,
+        phase,
+        canvasW: fieldView.canvas.width,
+        canvasH: fieldView.canvas.height,
+        cssW: fieldView.canvas.clientWidth,
+        cssH: fieldView.canvas.clientHeight
+      }),
+      markDirty: () => { layoutDirty = true; dirtyPrediction(); draw(); },
+      prepareRoster() {
+        stopDemo();
+        cpuClient.cancel(); cpuClient.dispose?.();
+        demoClient.cancel(); demoClient.dispose?.();
+        let seed = 1337;
+        const randByte = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return (seed >>> 24) & 0xff; };
+        const entries = [];
+        for (let i = 0; i < 6; i++) {
+          let model, dnaBytes;
+          for (let tries = 0; tries < 400; tries++) {
+            dnaBytes = Uint8Array.from({ length: 128 }, randByte);
+            model = ubu.decode(dnaBytes);
+            if (Object.values(model.attributes || {}).some(a => a && a.material && a.material !== 'matte')) break;
+          }
+          const dna = ubu.toCode(dnaBytes);
+          const superId = [4, 5, 6, 2, 1, 7][i];
+          const mastery = P.superMastery(model.supers, superId);
+          entries.push({
+            key: 'bench-' + i,
+            dna,
+            label: model.parts.fullName,
+            model,
+            equippedSuper: { ...P.SUPERS[superId], ...mastery }
+          });
+        }
+        roster = entries.slice(0, 3);
+        draft = [...roster];
+        cpuTeam = entries.slice(3, 6);
+        fieldView.entries = [...entries];
+        fieldView.mode = 'standard';
+        stats = entries.map(e => ({ ...e.model.stats }));
+        buildTeam();
+      },
+      async enterMatchBench() {
+        if (location.pathname !== '/' && typeof window.navigateUbuScreen === 'function') {
+          await window.navigateUbuScreen('/');
+        }
+        stopDemo();
+        cancelActiveCamera();
+        shot = 'match';
+        if (document.body?.dataset) document.body.dataset.shot = 'match';
+        fieldView.castHidden = false;
+        rinkWrap.classList.remove('cast-away');
+        fitOrientation();
+        layoutDirty = true;
+      },
+      async startScenario(kind) {
+        if (kind === 'collectionCold' || kind === 'collectionWarm') {
+          if (typeof window.loadMintScripts === 'function') await window.loadMintScripts();
+          if (kind === 'collectionCold' || !collectionSeeded) {
+            let seed = 2026;
+            const randByte = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return (seed >>> 24) & 0xff; };
+            for (let i = 0; i < 60; i++) {
+              const dnaBytes = Uint8Array.from({ length: 128 }, randByte);
+              const dna = ubu.toCode(dnaBytes);
+              const model = ubu.decode(dnaBytes);
+              const serial = String(900000 + i + 1).padStart(12, '0');
+              ubuList.add({
+                serial,
+                certificate: 'bench-' + serial,
+                result: { dna, certificate: { serial, issuedAt: '2026-11-12T00:00:00Z' } },
+                model,
+                rarity: rarity.scoreRarity(model),
+                issuedAt: '2026-11-12T00:00:00Z',
+                favorite: i < 4
+              });
+            }
+            collectionSeeded = true;
+          }
+          if (typeof window.navigateUbuScreen === 'function') await window.navigateUbuScreen('/collection');
+          cancelActiveCamera();
+          if (kind === 'collectionCold') {
+            window.scrollTo(0, 0);
+            return f => { if (f % 10 === 0) { window.scrollTo(0, (f * 18) % 900); window.dispatchEvent(new Event('scroll')); } };
+          }
+          return f => { window.scrollTo(0, (f * 42) % 1400); window.dispatchEvent(new Event('scroll')); };
+        }
+
+        await this.enterMatchBench();
+        endGoalReplay(); postGoal = null; clearEffects(); recording = null;
+
+        if (kind === 'calm') {
+          simBodies = P.kickoff();
+          simBodies.slice(0, 6).forEach((b, i) => {
+            ububallMatch.applyStats(P, b, stats[i], 'standard');
+            b.meter = 40;
+            b.equippedSuper = fieldView.entries[i].equippedSuper;
+          });
+          const turnPlans = [
+            { angle: 0.15, power: 0.55, spin: 0, guard: false, superArm: false },
+            { angle: -0.2, power: 0.5, spin: 0, guard: false, superArm: false },
+            { angle: 0, power: 0.45, spin: 0, guard: false, superArm: false },
+            { angle: Math.PI - 0.15, power: 0.55, spin: 0, guard: false, superArm: false },
+            { angle: Math.PI + 0.2, power: 0.5, spin: 0, guard: false, superArm: false },
+            { angle: Math.PI, power: 0.45, spin: 0, guard: false, superArm: false }
+          ];
+          play = ububallMatch.newPlay(); tally = ububallMatch.newTally(); fouls = ububallMatch.newFouls();
+          P.startTurn(simBodies, turnPlans, liveFx.super);
+          syncViewBodies(simBodies, 0);
+          elapsed = accumulator = 0; phase = 'play';
+          sync(); draw();
+          return () => { if (phase !== 'play') { phase = 'play'; elapsed = 0.1; } };
+        }
+
+        if (kind === 'chaos' || kind === 'celebration') {
+          simBodies = P.kickoff();
+          const coords = [[310, 250], [340, 350], [260, 300], [690, 250], [660, 350], [740, 300]];
+          simBodies.slice(0, 6).forEach((b, i) => {
+            b.x = coords[i][0]; b.y = coords[i][1];
+            ububallMatch.applyStats(P, b, stats[i], 'standard');
+            b.meter = 100;
+            b.equippedSuper = fieldView.entries[i].equippedSuper;
+          });
+          const turnPlans = [
+            { angle: 0.12, power: 1.0, spin: 0.95, guard: false, superArm: true },
+            { angle: -0.18, power: 1.0, spin: -0.9, guard: false, superArm: true },
+            { angle: 0.02, power: 1.0, spin: 0.85, guard: false, superArm: false },
+            { angle: Math.PI - 0.12, power: 1.0, spin: -0.95, guard: false, superArm: true },
+            { angle: Math.PI + 0.18, power: 1.0, spin: 0.9, guard: false, superArm: false },
+            { angle: Math.PI - 0.02, power: 1.0, spin: -0.85, guard: true, superArm: false }
+          ];
+          play = ububallMatch.newPlay(); tally = ububallMatch.newTally(); fouls = ububallMatch.newFouls();
+          P.startTurn(simBodies, turnPlans, liveFx.super);
+          const ball = simBodies[6];
+          ball.onFire = true; ball.fireTicks = 600; ball.pace = 3; ball.strikerTeam = 0;
+          ball.vx = 680; ball.vy = 190; ball.omega = 20;
+          syncViewBodies(simBodies, 0);
+          for (let k = 0; k < 16; k++) {
+            for (let s = 0; s < 2; s++) ububallMatch.playTick(P, simBodies, play, liveFx, tally);
+            syncViewBodies(simBodies, 0);
+            presenter.recordTrails();
+            presenter.emitSkaterEffects(1 / 60);
+            presenter.sparkBall(fieldView.bodies[6], 1 / 60);
+            presenter.burnIce(fieldView.bodies[6]);
+            presenter.updateEffects(1 / 60);
+          }
+          simBodies[6].onFire = true; simBodies[6].fireTicks = 720; simBodies[6].pace = 3;
+          fieldEffects.fireWarp = { x: fieldView.bodies[6].x, y: fieldView.bodies[6].y, nx: 1, ny: 0, life: 2.5, duration: 2.5, ubuIndex: 0 };
+          elapsed = 0.2; accumulator = 0; phase = 'play';
+          if (kind === 'celebration') {
+            playSegments = [{ bodies: structuredClone(simBodies), plans: turnPlans, ticks: 200, saves: [], stops: [] }];
+            scoringPlayer = fieldView.bodies[0];
+            presenter.celebrate(0, fieldView.bodies[6], 'BLAZING GOAL!', fieldView.bodies[0]);
+            presenter.lightNet(0);
+            startGoalReplay();
+            return null;
+          }
+          sync(); draw();
+          return () => {
+            if (phase !== 'play') { phase = 'play'; elapsed = 0.2; }
+            simBodies[6].onFire = true; simBodies[6].fireTicks = 600; simBodies[6].pace = 3;
+            if (Math.hypot(simBodies[6].vx, simBodies[6].vy) < 350) { simBodies[6].vx = 620; simBodies[6].vy = -210; }
+          };
+        }
+
+        if (kind === 'aimDrag' || kind === 'spinSlider') {
+          simBodies = P.kickoff();
+          simBodies.slice(0, 6).forEach((b, i) => {
+            ububallMatch.applyStats(P, b, stats[i], 'standard');
+            b.meter = 100; b.superArm = i < 2;
+            b.equippedSuper = fieldView.entries[i].equippedSuper;
+          });
+          syncViewBodies(simBodies, 0);
+          fouls = ububallMatch.newFouls();
+          fouls.crease = [true, false];
+          fouls.corner = 0; fouls.cornerTurns = ububallMatch.FOULS.stallTurns;
+          phase = 'plan'; selected = 0;
+          plans = [
+            { angle: 0.1, power: 0.95, spin: 0.8, guard: false, superArm: true },
+            { angle: -0.25, power: 0.9, spin: -0.7, guard: false, superArm: true },
+            { angle: 0.05, power: 0.85, spin: 0.4, guard: false, superArm: false }
+          ];
+          recording = ububallReplay.create({
+            mode: 'standard', names: ['You', 'CPU'],
+            ubus: fieldView.entries.map(e => ({ dna: e.dna, super: e.equippedSuper.id }))
+          });
+          for (let t = 1; t <= 30; t++) {
+            const entry = ububallReplay.addTurn(recording, { turn: t, scores: [2, 2], fouls, bodies: simBodies, plans: [...plans, ...plans] });
+            entry.ticks = 360; entry.cards = []; entry.saves = []; entry.stops = [];
+          }
+          turn = 30;
+          sync(); draw();
+          if (kind === 'spinSlider') {
+            const spinInput = $('shot-spin');
+            return f => { spinInput.value = String(Math.round(Math.sin(f * 0.14) * 90)); spinInput.oninput(); };
+          }
+          return f => {
+            plans[0].angle = 0.08 + Math.sin(f * 0.11) * 0.35;
+            plans[0].power = 0.85 + Math.cos(f * 0.07) * 0.14;
+            dragDirty = true;
+          };
+        }
+        return null;
+      },
+      async finishSuite() {
+        recording = null;
+        clearActiveMatch();
+        if (location.pathname !== '/' && typeof window.navigateUbuScreen === 'function') {
+          await window.navigateUbuScreen('/');
+          window.scrollTo(0, 0);
+        }
+        await this.enterMatchBench();
+        newMatch(false);
+      }
+    };
+    if (typeof document !== 'undefined' && document.head) {
+      const s = document.createElement('script');
+      s.src = 'ububall-bench.js';
+      s.defer = true;
+      document.head.append(s);
+    }
+  }
 })();

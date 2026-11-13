@@ -200,7 +200,47 @@
       return targetBodies;
     }
 
-    return { projectBody, viewBodies, toViewBody, syncViewBodies };
+    // Fast kinematic-only sync for intermediate 240 Hz sub-steps and mid-tick FX callbacks.
+    // Preserves exact per-tick positions/velocities/fire state for trails and collision FX
+    // while deferring full static trait projection and dirtyMeters updates to once per frame.
+    function syncTickBodies(sim = getShownSim(), seat = getShownSeat(), targetBodies = getTargetBodies()) {
+      if (!sim || !targetBodies) return targetBodies;
+      for (let i = 0; i < sim.length; i++) {
+        const vi = viewIndex(i, seat);
+        const vb = targetBodies[vi];
+        if (!vb || vb.playerIndex !== vi) {
+          return syncViewBodies(sim, seat, targetBodies);
+        }
+        const cb = sim[i];
+        applySeatTransform(cb, vb, vi, seat);
+        vb.omega = cb.omega;
+        vb.radius = cb.radius;
+        if (vi < 6) {
+          vb.reach = cb.reach;
+          vb.meter = cb.meter ?? 0;
+          vb.daze = cb.daze || 0;
+          vb.spinStrike = cb.spinStrike || 0;
+          vb.ironCooldownTicks = cb.ironCooldownTicks || 0;
+          vb.superTicks = cb.superTicks || 0;
+          vb.superActive = cb.superActive || null;
+          vb.guarding = Boolean(cb.guarding);
+          vb.ironGuard = Boolean(cb.ironGuard);
+          vb.stunned = Boolean(cb.stunned || cb.stunnedNext);
+          vb.holding = Boolean(cb.holding);
+        } else {
+          vb.onFire = Boolean(cb.onFire);
+          vb.fireTicks = cb.fireTicks || 0;
+          vb.pace = cb.pace || 0;
+          vb.stuckTicks = cb.stuckTicks || 0;
+          vb.strikerSlot = cb.strikerSlot;
+          vb.strikerPower = cb.strikerPower;
+          vb.openingShot = Boolean(cb.openingShot);
+        }
+      }
+      return targetBodies;
+    }
+
+    return { projectBody, viewBodies, toViewBody, syncViewBodies, syncTickBodies };
   }
 
   function createPlaybackDriver({
@@ -281,6 +321,7 @@
       fouls,
       fx,
       syncSim,
+      syncTick = syncSim,
       toView,
       onGoalReached,
       onSettledTurnEnd
@@ -317,7 +358,7 @@
         const saves = (replay.saves || []).filter(s => s.tick === now);
         // Hit-stop holds the replay clock back so the rest of the turn plays on after the pause.
         const stop = replay.stops?.find(s => s.tick === now)?.ms;
-        syncSim();
+        syncTick();
         const stopped = applyTickEvents(replay.simBodies, {
           saves, struck, stop, applyIron: true,
           syncFn: null,
@@ -329,7 +370,7 @@
         if (stopped) break;
       }
 
-      if (!stepped && replay.currentTick < replay.ticks) {
+      if (stepped || replay.currentTick < replay.ticks) {
         syncSim();
       }
       const nextFouls = !replay.fouled ? viewFouls(ububallMatch, simFouls, seat) : fouls;

@@ -798,6 +798,8 @@
   }
 
   function createRinkPresenter(deps) {
+    const bench = typeof window !== 'undefined' && window.location?.search?.includes('bench=1')
+      ? (window.__ubuBench ||= { flags: {}, rec: null }) : null;
     const {
       P,
       ububallMatch,
@@ -1469,9 +1471,14 @@
     function softRibbon(points, widthAt, blur, color) {
       const ctx = getView().ctx, scale = ctx.getTransform().a, offset = 4000;
       ctx.save();
-      ctx.shadowColor = color; ctx.shadowBlur = blur * scale; ctx.shadowOffsetX = offset;
-      ctx.translate(-offset / scale, 0);
-      ribbon(points, widthAt);
+      if (bench?.flags.noIceShadow) {
+        ctx.fillStyle = color;
+        ribbon(points, widthAt);
+      } else {
+        ctx.shadowColor = color; ctx.shadowBlur = blur * scale; ctx.shadowOffsetX = offset;
+        ctx.translate(-offset / scale, 0);
+        ribbon(points, widthAt);
+      }
       ctx.restore();
     }
 
@@ -1534,15 +1541,22 @@
 
     function drawFieldUnder(colors) {
       const { primary, home, away } = colors, fx = getEffects(), view = getView(), ctx = view.ctx;
+      const noBlur = Boolean(bench?.flags.noGlowBlur);
       if (fx.kickoffGlow) {
-        ctx.save(); ctx.globalAlpha = fx.kickoffGlow; ctx.shadowColor = primary; ctx.shadowBlur = 12 * view.canvas.width / 1000;
+        ctx.save(); ctx.globalAlpha = fx.kickoffGlow; ctx.shadowColor = primary; ctx.shadowBlur = noBlur ? 0 : 12 * view.canvas.width / 1000;
         circle(500, 300, 70 + (1 - fx.kickoffGlow) * 10, primary, 3); ctx.restore();
       }
       if (fx.skids.length || fx.burns.length) {
         let key = view.canvas.width + ',' + view.canvas.height;
-        for (const s of fx.skids) key += ',' + Math.floor(s.age * 4) + ':' + s.points.length;
-        key += '|';
-        for (const s of fx.burns) key += ',' + Math.floor(s.age * 4) + ':' + (s.poof ? 'p' + Math.round(s.x) + '_' + Math.round(s.y) : (s.points?.length || 0));
+        if (bench?.flags.freezeIceKey) {
+          for (const s of fx.skids) key += ',' + Math.floor(s.age * 4) + ':' + (s.points.length >> 3);
+          key += '|';
+          for (const s of fx.burns) key += ',' + Math.floor(s.age * 4) + ':' + (s.poof ? 'p' + Math.round(s.x) + '_' + Math.round(s.y) : ((s.points?.length || 0) >> 3));
+        } else {
+          for (const s of fx.skids) key += ',' + Math.floor(s.age * 4) + ':' + s.points.length;
+          key += '|';
+          for (const s of fx.burns) key += ',' + Math.floor(s.age * 4) + ':' + (s.poof ? 'p' + Math.round(s.x) + '_' + Math.round(s.y) : (s.points?.length || 0));
+        }
         cachedLayer(fx.iceCache, key, paintIce, Math.min(1, 1000 / view.canvas.width));
       }
       if (getPhase() === 'plan' && pulseMode() && !P.settled(view.bodies)) {
@@ -1551,7 +1565,7 @@
       fx.danger.forEach((glow, side) => {
         if (glow < .02) return;
         const x = side ? 940 : 60, color = side ? away : home;
-        ctx.save(); ctx.globalAlpha = Math.min(1, glow) * .4; ctx.shadowColor = color; ctx.shadowBlur = 8 * glow * view.canvas.width / 1000;
+        ctx.save(); ctx.globalAlpha = Math.min(1, glow) * .4; ctx.shadowColor = color; ctx.shadowBlur = noBlur ? 0 : 8 * glow * view.canvas.width / 1000;
         line(x, 230, x, 370, color, 5); ctx.restore();
       });
     }
@@ -2015,15 +2029,25 @@
     }
 
     function drawPrediction(home, away) {
+      if (bench?.flags.noPredictAll) return;
       const view = getView(), key = predictionKey();
+      const t0 = bench?.rec ? clockNow() : 0;
       if (predictionCache?.key !== key) {
         const data = P.predictTurn(view.bodies, getPlans());
         predictionCache = { key, data, fouls: predictFouls(data) };
       }
-      cachedLayer(predictionLayer, [view.canvas.width, view.canvas.height, home, away, view.portrait, view.mode, key].join(), () => paintPrediction(predictionCache.data, home, away));
+      const t1 = bench?.rec ? clockNow() : 0;
+      if (!bench?.flags.noPredictLayer) {
+        cachedLayer(predictionLayer, [view.canvas.width, view.canvas.height, home, away, view.portrait, view.mode, key].join(), () => paintPrediction(predictionCache.data, home, away));
+      }
+      if (bench?.rec) {
+        bench.rec.predictSimMs += (t1 - t0);
+        bench.rec.predictPaintMs += (clockNow() - t1);
+      }
     }
 
     function drawPredictedGoalGlow(home, away) {
+      if (bench?.flags.noPredictAll) return;
       const data = predictionCache?.data;
       if (!data || data.goal === null || data.goalTick == null) return;
       const view = getView(), ctx = view.ctx;
@@ -2055,7 +2079,7 @@
 
       ctx.strokeStyle = color;
       ctx.shadowColor = color;
-      ctx.shadowBlur = blur;
+      ctx.shadowBlur = bench?.flags.noGlowBlur ? 0 : blur;
       ctx.globalAlpha = Math.min(1, alpha);
       ctx.lineWidth = 4 + 3 * u;
       ctx.beginPath();
@@ -2162,7 +2186,7 @@
 
     function drawSpin(b, color) {
       const spin = Math.abs(b.omega);
-      if (spin < 2.5 || isReducedMotion()) return;
+      if (spin < 2.5 || isReducedMotion() || bench?.flags.noSpin) return;
       const ctx = getView().ctx;
       const power = Math.min(1, (spin - 2.5) / 20), arcs = spin >= 8 ? 3 : 2;
       const dir = Math.sign(b.omega);
@@ -2309,7 +2333,7 @@
       ctx.lineTo(ends[1].ax, ends[1].ay); ctx.closePath();
       ctx.fillStyle = '#44dd662b'; ctx.fill();
       ctx.lineCap = 'round'; ctx.shadowColor = '#44dd66';
-      ctx.shadowBlur = isReducedMotion() ? 0 : 8 * view.canvas.width / 1000;
+      ctx.shadowBlur = (isReducedMotion() || bench?.flags.noGlowBlur) ? 0 : 8 * view.canvas.width / 1000;
       for (const e of ends) {
         line(e.ax, e.ay, e.bx, e.by, '#44dd66', 3);
         line(e.ax, e.ay, e.bx, e.by, '#d9ffe3', 1);
@@ -2390,6 +2414,7 @@
     }
 
     function drawParticles(home, away, overlay = false) {
+      if (bench?.flags.noParticles) return;
       const view = getView(), fx = getEffects();
       const c = overlay ? view.badgeCtx : view.ctx;
       c.save(); c.lineCap = 'round';
@@ -3022,9 +3047,11 @@
       const sizes = getRenderSize ? getRenderSize() : {};
       const renderWidth = sizes.renderWidth || view.canvas.clientWidth || 1000;
       const renderHeight = sizes.renderHeight || view.canvas.clientHeight || 600;
-      const dpr = (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1;
-      const rawW = sizes.deviceWidth || Math.round(renderWidth * dpr);
-      const rawH = sizes.deviceHeight || Math.round(renderHeight * dpr);
+      const nativeDpr = (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1;
+      const dprCap = bench?.flags.dprCap || 0;
+      const dpr = dprCap ? Math.min(nativeDpr, dprCap) : nativeDpr;
+      const rawW = dprCap ? Math.round(renderWidth * dpr) : (sizes.deviceWidth || Math.round(renderWidth * dpr));
+      const rawH = dprCap ? Math.round(renderHeight * dpr) : (sizes.deviceHeight || Math.round(renderHeight * dpr));
       const cap = Math.min(1, 3840 / Math.max(1, rawW, rawH));
       const width = view.field?.width ?? Math.max(1, Math.round(rawW * cap));
       const height = view.field?.height ?? Math.max(1, Math.round(rawH * cap));
@@ -3090,7 +3117,7 @@
         drawPrediction(home, away);
         drawPredictedGoalGlow(home, away);
       }
-      drawTrails(view.ctx, fx.trails, view.bodies, home, away, ballHeat);
+      if (!bench?.flags.noTrails) drawTrails(view.ctx, fx.trails, view.bodies, home, away, ballHeat);
       drawGuides(home, away, text, playback ? playback.guide : getGuide());
       fx.shockwaves.forEach(s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
@@ -3344,7 +3371,7 @@
           }
         }
         if (i < 3 && phase === 'plan') drawImpulse(b, fieldPlans[i], home);
-        if (view.field || !skaters[i]) return;
+        if (view.field || !skaters[i] || bench?.flags.noDomSkaters) return;
         const style = skaters[i].style;
         const wPct = b.radius / 5 + '%';
         const opacity = b.carded ? '0.3' : b.superActive === 'ghost' ? '0.45' : '1';
@@ -3409,7 +3436,7 @@
         circle(ball.x, ball.y, ball.radius, text, 2);
         const heat = ballHeat(ball), flare = fx.ballFlare || 0, glow = Math.min(1.35, Math.max(0, heat - 1) / 2 + flare * 0.45);
         if (glow > 0) {
-          view.ctx.save(); view.ctx.globalAlpha = Math.min(1, .75 * glow); view.ctx.shadowColor = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat)); view.ctx.shadowBlur = (16 + flare * 12) * glow * view.canvas.width / 1000;
+          view.ctx.save(); view.ctx.globalAlpha = Math.min(1, .75 * glow); view.ctx.shadowColor = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat)); view.ctx.shadowBlur = bench?.flags.noGlowBlur ? 0 : (16 + flare * 12) * glow * view.canvas.width / 1000;
           view.ctx.beginPath(); view.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); view.ctx.fillStyle = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat)); view.ctx.fill(); view.ctx.restore();
         }
         const size = ball.radius * 1.7;
@@ -3436,7 +3463,7 @@
 
       drawParticles(home, away);
       function drawHeatMirage(cx, cy, mirageR, strength, timeVal, isImpact = false) {
-        if (strength <= 0.02 || isReducedMotion()) return;
+        if (strength <= 0.02 || isReducedMotion() || bench?.flags.noMirage) return;
         const sx = width / 1000, sy = height / 600;
         const rx = Math.max(0, cx - mirageR), ry = Math.max(0, cy - mirageR);
         const rw = Math.min(1000 - rx, mirageR * 2), rh = Math.min(600 - ry, mirageR * 2);
