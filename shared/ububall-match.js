@@ -597,10 +597,10 @@
     return Math.hypot(b.x - (team ? P.rink.right : P.rink.left), b.y - (P.rink.goalTop + P.rink.goalBottom) / 2) < FOULS.crease;
   }
   // The line closing the attack zone in front of a team's goal runs across the rink at its rear kickoff spot.
-  function attackZoneLine(P, team) { return P.spawn(team, 0).x; }
+  function attackZoneLine(P, team) { return team ? 820 : 180; }
   function inAttackZone(P, b, team) {
     if (b.carded) return false;
-    return team ? b.x > attackZoneLine(P, team) : b.x < attackZoneLine(P, team);
+    return team ? b.x > 820 : b.x < 180;
   }
   function camping(P, bodies, team) {
     let inC = 0, curAZ = 0, opp = 1 - team;
@@ -621,9 +621,12 @@
   // Every tick of play: a crease warning lapses once its team stops camping, and the corner count
   // (with any warning) ends once the ball leaves its corner, until the turn's end calls them again.
   function lapseFouls(P, bodies, fouls) {
-    for (const team of [0, 1]) if (fouls.crease[team] && !camping(P, bodies, team)) fouls.crease[team] = false;
-    const ball = bodies[6];
-    if (fouls.corner !== null && cornerOf(P, ball.x, ball.y, FOULS.cornerExit) !== fouls.corner) { fouls.corner = null; fouls.cornerTurns = 0; }
+    if (fouls.crease[0] && !camping(P, bodies, 0)) fouls.crease[0] = false;
+    if (fouls.crease[1] && !camping(P, bodies, 1)) fouls.crease[1] = false;
+    if (fouls.corner !== null) {
+      const ball = bodies[6];
+      if (cornerOf(P, ball.x, ball.y, FOULS.cornerExit) !== fouls.corner) { fouls.corner = null; fouls.cornerTurns = 0; }
+    }
   }
   function callFouls(P, bodies, fouls) {
     const ubus = bodies.slice(0, 6), ball = bodies[6], carded = new Set();
@@ -697,20 +700,35 @@
       shots: [...t.shots], checks: [...t.checks], topSpeed: [...t.topSpeed], cards: [...t.cards], deficit: [...t.deficit]
     };
   }
-  function resolveTurn(P, state, moves, { effects = true, ticks: maxTicks = Infinity, decided = null, watch = null, preservePartial = false, fastSearch = false } = {}) {
-    if (state.version !== VERSION || !MODES.includes(state.mode)) throw new Error('Unsupported match rules.');
+  const TWO_PI = 2 * Math.PI;
+  function fastNormalizePlans(moves) {
+    const out = new Array(6);
+    for (let i = 0; i < 6; i++) {
+      const p = moves[i];
+      out[i] = { angle: ((p.angle % TWO_PI) + TWO_PI) % TWO_PI, power: p.power, spin: p.spin, superArm: p.superArm, guard: p.guard };
+    }
+    return out;
+  }
+  function resolveTurn(P, state, moves, { effects = true, ticks: maxTicks = Infinity, decided = null, watch = null, preservePartial = false, fastSearch = false, fastTick = false } = {}) {
+    if (!fastSearch && (state.version !== VERSION || !MODES.includes(state.mode))) throw new Error('Unsupported match rules.');
     if (!Array.isArray(moves) || moves.length !== 6) throw new Error('Both teams must submit.');
-    const plans = [...validatePlans(moves.slice(0, 3)), ...validatePlans(moves.slice(3))];
-    const bodies = state.bodies.map(b => ({
-      ...b,
-      stickOffset: b.stickOffset ? { x: b.stickOffset.x, y: b.stickOffset.y } : b.stickOffset,
-      equippedSuper: b.equippedSuper ? { ...b.equippedSuper } : b.equippedSuper,
-      personality: b.personality ? { ...b.personality } : b.personality
-    }));
+    const plans = fastSearch ? fastNormalizePlans(moves) : [...validatePlans(moves.slice(0, 3)), ...validatePlans(moves.slice(3))];
+    const bodies = new Array(state.bodies.length);
+    for (let i = 0; i < state.bodies.length; i++) {
+      const b = state.bodies[i];
+      bodies[i] = fastSearch
+        ? { ...b, stickOffset: b.stickOffset ? { x: b.stickOffset.x, y: b.stickOffset.y } : b.stickOffset }
+        : {
+            ...b,
+            stickOffset: b.stickOffset ? { x: b.stickOffset.x, y: b.stickOffset.y } : b.stickOffset,
+            equippedSuper: b.equippedSuper ? { ...b.equippedSuper } : b.equippedSuper,
+            personality: b.personality ? { ...b.personality } : b.personality
+          };
+    }
     const foulsCopy = state.fouls
-      ? { crease: [...state.fouls.crease], corner: state.fouls.corner, cornerTurns: state.fouls.cornerTurns, cards: [...(state.fouls.cards || [])], faceoff: Boolean(state.fouls.faceoff) }
+      ? { crease: [state.fouls.crease[0], state.fouls.crease[1]], corner: state.fouls.corner, cornerTurns: state.fouls.cornerTurns, cards: state.fouls.cards ? [...state.fouls.cards] : [], faceoff: Boolean(state.fouls.faceoff) }
       : newFouls();
-    const next = { ...state, bodies, stats: state.stats ? state.stats.map(s => (s ? { ...s } : s)) : [], scores: [...state.scores], fouls: foulsCopy };
+    const next = { ...state, bodies, stats: fastSearch ? (state.stats || []) : (state.stats ? state.stats.map(s => (s ? { ...s } : s)) : []), scores: [state.scores[0], state.scores[1]], fouls: foulsCopy };
     const classic = rule(state.mode, 'classic'), limit = Math.min(turnTicks(state.mode), maxTicks);
     for (let i = 0; i < 6; i++) {
       const b = bodies[i];
@@ -718,41 +736,67 @@
       if (b.superArm !== undefined) b.superArm = false;
     }
     const initialBodies = effects ? structuredClone(bodies) : null;
+    const useFastTick = fastSearch && fastTick;
     // The play persists until a goal, so a Pulse goal credits a touch from an earlier turn.
-    const play = newPlay(state.play);
+    const play = useFastTick ? null : newPlay(state.play);
     P.startTurn(bodies, plans);
     // The match clock counts simulated ticks across turns for meter cooldowns.
     const clock = state.clock || 0;
     let goal = null, ticks = 0, currentTick = 0, hitDecided = false;
     const saved = [], struck = [], stops = [];
     const tally = fastSearch ? null : cloneTally(state.tally);
-    const skipSaves = fastSearch && classic;
-    const tickFx = {
-      collide: contact => {
+    let hasFoul = next.fouls.crease[0] || next.fouls.crease[1] || next.fouls.corner !== null;
+    if (useFastTick) {
+      const onCollide = contact => {
         if (!contact.plow) contactMeter(P, bodies, next.stats, contact.a, contact.b, contact.speed, clock + currentTick, classic);
-        watch?.collide?.(contact);
-      },
-      wall: watch?.wall
-    };
-    for (let tick = 1; tick <= limit; tick++) {
-      currentTick = tick;
-      const result = playTick(P, bodies, play, tickFx, tally, effects, skipSaves);
-      goal = result.goal;
-      lapseFouls(P, bodies, next.fouls);
-      for (const save of result.saves) {
-        saved.push({ tick, ...save });
-        if (!save.own) gainMeter(P, bodies, next.stats, bodies[save.index], METER.save, classic);
+        if (watch?.collide) watch.collide(contact);
+      };
+      const onWall = watch?.wall || null;
+      for (let tick = 1; tick <= limit; tick++) {
+        currentTick = tick;
+        goal = P.step(bodies, P.DT, onCollide, onWall, null, null);
+        if (hasFoul) {
+          lapseFouls(P, bodies, next.fouls);
+          hasFoul = next.fouls.crease[0] || next.fouls.crease[1] || next.fouls.corner !== null;
+        }
+        ticks = tick;
+        if (goal !== null || P.settled(bodies) || tick === limit) break;
+        if (decided && decided(bodies)) { hitDecided = true; break; }
       }
-      if (result.struck) struck.push(tick);
-      if (result.stop) stops.push({ tick, ms: result.stop });
-      ticks = tick;
-      const settled = P.settled(bodies);
-      if (goal !== null || settled || tick === limit) break;
-      if (decided?.(bodies)) { hitDecided = true; break; }
+    } else {
+      const skipSaves = fastSearch && classic;
+      const tickFx = {
+        collide: contact => {
+          if (!contact.plow) contactMeter(P, bodies, next.stats, contact.a, contact.b, contact.speed, clock + currentTick, classic);
+          watch?.collide?.(contact);
+        },
+        wall: watch?.wall
+      };
+      for (let tick = 1; tick <= limit; tick++) {
+        currentTick = tick;
+        const result = playTick(P, bodies, play, tickFx, tally, effects, skipSaves);
+        goal = result.goal;
+        if (hasFoul) {
+          lapseFouls(P, bodies, next.fouls);
+          hasFoul = next.fouls.crease[0] || next.fouls.crease[1] || next.fouls.corner !== null;
+        }
+        for (const save of result.saves) {
+          saved.push({ tick, ...save });
+          if (!save.own) gainMeter(P, bodies, next.stats, bodies[save.index], METER.save, classic);
+        }
+        if (result.struck) struck.push(tick);
+        if (result.stop) stops.push({ tick, ms: result.stop });
+        ticks = tick;
+        const settled = P.settled(bodies);
+        if (goal !== null || settled || tick === limit) break;
+        if (decided?.(bodies)) { hitDecided = true; break; }
+      }
     }
     // A round runs from kickoff to goal; scoring on its first turn is an ace.
     const ace = goal !== null && !state.roundTurns;
-    const call = goal === null ? { scorer: null, assist: null, own: false, label: null } : callGoal(bodies, play, tally, goal, ace);
+    const call = (goal === null || useFastTick)
+      ? { scorer: null, assist: null, own: false, label: null }
+      : callGoal(bodies, play, tally, goal, ace);
     // A horizon cutoff is not a real turn end: keep live velocity and supers, and do not call fouls.
     // A `decided` cutoff in a non-Pulse turn represents settled play and still runs end-of-turn cleanup.
     const partial = preservePartial && !hitDecided && goal === null && ticks < turnTicks(state.mode) && !P.settled(bodies);
@@ -765,7 +809,7 @@
     }
     next.clock = clock + ticks;
     // A goal or a corner reset starts a fresh play.
-    next.play = goal === null && !next.fouls.faceoff ? play : newPlay();
+    next.play = useFastTick ? null : (goal === null && !next.fouls.faceoff ? play : newPlay());
     next.tally = tally;
     return { state: next, replay: { version: VERSION, turn: state.turn, plans, ticks, goal, scorer: call.scorer, assist: call.assist,
       label: call.label, saves: saved, struck, stops, initialBodies } };

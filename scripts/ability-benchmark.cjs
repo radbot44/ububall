@@ -11,11 +11,12 @@
 //                 spin×curve, efficiency×synergy, size×mass) on focal skaters.
 //   wild:         Out-of-sample validation matches using completely independent 128-byte wild DNAs
 //                 (unmirrored supers, personalities, Ubuquity) to verify real-match win prediction.
-//   full:         Runs curves + interactions + corpus + wild into a unified resumable JSONL dataset.
+//   full:         Interleaves curves + interactions + corpus + wild into a unified resumable JSONL
+//                 dataset so even partial checkpoints cover all 15 stats and modes evenly.
 //
-// Designed for high-core-count CPUs (e.g. i9-14900K 32 threads): persistent worker pool, dynamic
-// multi-pair micro-batches for P/E-core load balancing, { effects: false } headless turn resolution,
-// and append-only JSONL checkpointing (--resume) so large runs can stop and resume cleanly.
+// Designed for hybrid high-core CPUs (e.g. i9-14900K P+E cores): single-pair dynamic work stealing,
+// live in-flight turn & per-game progress streaming (no cold-start ETA spikes), fastTick headless
+// physics resolution, two-stage minimax response screening, and append-only JSONL (--resume).
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -33,10 +34,28 @@ const STATS = Object.freeze([
 ]);
 
 const PRESETS = Object.freeze({
-  fast: Object.freeze({ level: 'easy', candidates: 28, opponents: 2, risk: 0.30, temperature: 15, wobble: false }),
-  balanced: Object.freeze({ level: 'medium', candidates: 56, opponents: 2, risk: 0.35, temperature: 12, wobble: false }),
-  deep: Object.freeze({ level: 'hard', candidates: 96, opponents: 3, risk: 0.45, temperature: 10, wobble: true }),
-  hard: Object.freeze({ level: 'hard', candidates: 120, opponents: 3, risk: 0.55, temperature: 25, wobble: true })
+  fast: Object.freeze({
+    level: 'easy', candidates: 20, opponents: 1,
+    risk: 0.25, temperature: 10, wobble: false, fastTick: true, searchTicks: 220
+  }),
+  balanced: Object.freeze({
+    level: 'medium', candidates: 30, opponents: 2, screenTop: 3,
+    risk: 0.35, temperature: 10, wobble: false, fastTick: true, searchTicks: 240
+  }),
+  deep: Object.freeze({
+    level: 'medium', candidates: 56, opponents: 2, screenTop: 8,
+    risk: 0.35, temperature: 12, wobble: false, fastTick: true, searchTicks: 320
+  }),
+  hard: Object.freeze({
+    level: 'hard', candidates: 96, opponents: 3, screenTop: 8,
+    risk: 0.45, temperature: 12, wobble: true, fastTick: true, searchTicks: 400
+  })
+});
+
+const SCALE_TIERS = Object.freeze({
+  quick: Object.freeze({ pairs: 600, curvePairs: 8, interPairs: 5, wildPairs: 120 }),
+  standard: Object.freeze({ pairs: 2000, curvePairs: 24, interPairs: 12, wildPairs: 300 }),
+  deep: Object.freeze({ pairs: 6000, curvePairs: 60, interPairs: 30, wildPairs: 900 })
 });
 
 // Empirical super tier tie-breaker when equipping the highest-mastery unlocked super from 4 DNA slots.
@@ -89,24 +108,25 @@ function rollContextSlot(random) {
 
 function kickoffReset(state) {
   const positions = P.kickoff();
-  state.bodies.forEach((b, i) => {
+  for (let i = 0; i < state.bodies.length; i++) {
+    const b = state.bodies[i];
     b.x = positions[i].x;
     b.y = positions[i].y;
     b.vx = b.vy = b.omega = 0;
     if (i < 6) {
       b.daze = 0;
-      delete b.meterTick;
+      b.meterTick = -Infinity;
       b.guarding = false;
       b.ironGuard = false;
       b.ironCooldownTicks = 0;
       P.syncEffectiveStats(b);
     }
-  });
+  }
   state.phase = 'plan';
 }
 
 // Plays one match (one side orientation) and returns scores, ticks, turns, territorial tiebreak, and per-ubu tallies.
-function playSingleMatch({ teams, contexts, mode, seed, swapped, cpuConfig, maxTurns }) {
+function playSingleMatch({ teams, contexts, mode, seed, swapped, cpuConfig, maxTurns, onProgress = null }) {
   const bodies = P.kickoff();
   const stats = [];
   const teamOrder = swapped ? [teams[1], teams[0]] : teams;
@@ -125,6 +145,8 @@ function playSingleMatch({ teams, contexts, mode, seed, swapped, cpuConfig, maxT
     b.superBonusTicks = ctx.bonusTicks;
     b.superBonusRefund = ctx.bonusRefund;
     b.meter = ctx.meter;
+    b.meterTick = -Infinity;
+    b.superArm = false;
   }
 
   let state = {
@@ -140,15 +162,22 @@ function playSingleMatch({ teams, contexts, mode, seed, swapped, cpuConfig, maxT
   };
 
   let turns = 0;
+  let unreportedTurns = 0;
   let ballXSum = 0;
   while (state.winner === null && turns < maxTurns) {
     const p0 = C.plan(state, 0, { ...cpuConfig, seed: (seed * 2654435761 + turns * 97 + (swapped ? 1 : 0)) >>> 0 }).plans;
     const p1 = C.plan(state, 1, { ...cpuConfig, seed: (seed * 2654435761 + turns * 97 + (swapped ? 0 : 1)) >>> 0 }).plans;
     state = M.resolveTurn(P, state, [...p0, ...p1], { effects: false }).state;
     turns++;
+    unreportedTurns++;
     ballXSum += (state.bodies[6].x - 500);
     if (state.phase === 'goal') kickoffReset(state);
+    if (onProgress && unreportedTurns >= 8) {
+      onProgress(unreportedTurns, 0);
+      unreportedTurns = 0;
+    }
   }
+  if (onProgress) onProgress(unreportedTurns, 1);
 
   const [aGoals, bGoals] = swapped ? [state.scores[1], state.scores[0]] : state.scores;
   const winner = state.winner === null ? null : (state.winner === (swapped ? 1 : 0) ? 1 : -1);
@@ -179,7 +208,7 @@ function playSingleMatch({ teams, contexts, mode, seed, swapped, cpuConfig, maxT
 }
 
 // Plays a side-swapped pair (swapped=false and swapped=true) and aggregates exact symmetric outcomes.
-function runPairJob(job) {
+function runPairJob(job, onProgress = null) {
   const { id, kind, tag, mode, seed, teams, mirrorContext, cpuConfig, maxTurns } = job;
   const rng = C.randomSource(seed ^ 0x9e3779b9);
   const ctxA = [rollContextSlot(rng), rollContextSlot(rng), rollContextSlot(rng)];
@@ -192,8 +221,8 @@ function runPairJob(job) {
       }))
     : [rollContextSlot(rng), rollContextSlot(rng), rollContextSlot(rng)];
 
-  const m0 = playSingleMatch({ teams, contexts: [ctxA, ctxB], mode, seed, swapped: false, cpuConfig, maxTurns });
-  const m1 = playSingleMatch({ teams, contexts: [ctxA, ctxB], mode, seed, swapped: true, cpuConfig, maxTurns });
+  const m0 = playSingleMatch({ teams, contexts: [ctxA, ctxB], mode, seed, swapped: false, cpuConfig, maxTurns, onProgress });
+  const m1 = playSingleMatch({ teams, contexts: [ctxA, ctxB], mode, seed, swapped: true, cpuConfig, maxTurns, onProgress });
 
   const goalDiff = (m0.diff + m1.diff) / 2;
   const winDiff = (m0.winner + m1.winner) / 2;
@@ -241,8 +270,14 @@ function runPairJob(job) {
 
 if (!isMainThread) {
   parentPort.on('message', batch => {
-    const results = batch.map(runPairJob);
-    parentPort.postMessage(results);
+    const onProgress = (turns, games) => {
+      if (turns > 0 || games > 0) parentPort.postMessage({ type: 'progress', turns, games });
+    };
+    const results = [];
+    for (let i = 0; i < batch.length; i++) {
+      results.push(runPairJob(batch[i], onProgress));
+    }
+    parentPort.postMessage({ type: 'batch', results });
   });
   return;
 }
@@ -252,30 +287,57 @@ if (!isMainThread) {
 const neutralStats = () => Object.fromEntries(STATS.map(s => [s, 127]));
 const randomStats = rng => Object.fromEntries(STATS.map(s => [s, Math.floor(rng() * 256)]));
 
+// Interleaves job buckets deterministically using Bresenham-style proportional scheduling so
+// partial checkpoints always have balanced coverage across all 15 stats, grids, corpus, and modes.
+function interleaveBuckets(buckets) {
+  const nonEmpty = buckets.filter(b => b.length > 0);
+  if (nonEmpty.length <= 1) return nonEmpty[0] || [];
+  const total = nonEmpty.reduce((s, b) => s + b.length, 0);
+  const cursors = new Array(nonEmpty.length).fill(0);
+  const out = [];
+  for (let step = 0; step < total; step++) {
+    let bestIdx = -1;
+    let bestDeficit = -Infinity;
+    for (let b = 0; b < nonEmpty.length; b++) {
+      if (cursors[b] >= nonEmpty[b].length) continue;
+      const target = ((step + 1) * nonEmpty[b].length) / total;
+      const deficit = target - cursors[b];
+      if (deficit > bestDeficit) {
+        bestDeficit = deficit;
+        bestIdx = b;
+      }
+    }
+    out.push(nonEmpty[bestIdx][cursors[bestIdx]++]);
+  }
+  return out;
+}
+
 function buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuConfig, stdTurns, pulseTurns }) {
-  const jobs = [];
   const modeAt = idx => (idx % 2 === 0 ? 'standard' : 'pulse');
   const turnsFor = mode => (mode === 'pulse' ? pulseTurns : stdTurns);
 
-  // 1. Single-ubu focal 5-point marginal curves (0, 64, 127, 191, 255), rotating slots 0, 1, 2.
+  const curveBucket = [];
+  const interBucket = [];
+  const corpusBucket = [];
+  const wildBucket = [];
+
+  // 1. Single-ubu focal 5-point marginal curves (0, 64, 127, 191, 255), ordered outer-loop by replicate `p`
+  // so early checkpoints already sweep all 15 stats and all 4 non-neutral knots evenly.
   if (suite === 'curves' || suite === 'full') {
-    const knots = [0, 64, 127, 191, 255];
-    let idx = 0;
-    for (const stat of STATS) {
-      for (const value of knots) {
-        if (value === 127) continue; // vs baseline neutral is identically 0 by symmetry; saves 20% compute
-        for (let p = 0; p < curvePairs; p++) {
-          const mode = modeAt(p);
-          const slot = p % 3;
-          const baseSeed = seed + 100000 + p;
+    const knots = [0, 64, 191, 255];
+    for (let p = 0; p < curvePairs; p++) {
+      const mode = modeAt(p);
+      const slot = p % 3;
+      const baseSeed = seed + 100000 + p;
+      for (const stat of STATS) {
+        for (const value of knots) {
           const bgRng = C.randomSource(baseSeed ^ 0x517cc1b7);
-          // Shared background teammates on both sides (CRN) so ONLY the focal ubu's stat differs!
           const bgTeam = [randomStats(bgRng), randomStats(bgRng), randomStats(bgRng)];
           const teamA = bgTeam.map(u => ({ ...u }));
           const teamB = bgTeam.map(u => ({ ...u }));
           teamA[slot] = { ...neutralStats(), [stat]: value };
           teamB[slot] = neutralStats();
-          jobs.push({
+          curveBucket.push({
             id: `curve:${stat}:${value}:${p}`,
             kind: 'curve',
             tag: { stat, value, slot },
@@ -286,13 +348,12 @@ function buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuC
             cpuConfig,
             maxTurns: turnsFor(mode)
           });
-          idx++;
         }
       }
     }
   }
 
-  // 2. Targeted 2D physics interaction grids on focal ubu.
+  // 2. Targeted 2D physics interaction grids on focal ubu (outer-loop by replicate `p`).
   if (suite === 'interactions' || suite === 'full') {
     const pairs2D = [
       ['size', 'reach'],
@@ -303,22 +364,21 @@ function buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuC
       ['size', 'mass']
     ];
     const gridVals = [24, 127, 232];
-    for (const [s1, s2] of pairs2D) {
-      for (const v1 of gridVals) {
-        for (const v2 of gridVals) {
-          if (v1 === 127 && v2 === 127) continue;
-          for (let p = 0; p < interPairs; p++) {
-            const mode = modeAt(p);
-            const slot = p % 3;
-            const baseSeed = seed + 300000 + p;
+    for (let p = 0; p < interPairs; p++) {
+      const mode = modeAt(p);
+      const slot = p % 3;
+      const baseSeed = seed + 300000 + p;
+      for (const [s1, s2] of pairs2D) {
+        for (const v1 of gridVals) {
+          for (const v2 of gridVals) {
+            if (v1 === 127 && v2 === 127) continue;
             const bgRng = C.randomSource(baseSeed ^ 0x85ebca6b);
             const bgTeam = [randomStats(bgRng), randomStats(bgRng), randomStats(bgRng)];
             const teamA = bgTeam.map(u => ({ ...u }));
             const teamB = bgTeam.map(u => ({ ...u }));
-            // Note: for efficiency×synergy, give teammates random chemistry (identical on both sides) so synergy transfers realistically.
             teamA[slot] = { ...neutralStats(), [s1]: v1, [s2]: v2 };
             teamB[slot] = neutralStats();
-            jobs.push({
+            interBucket.push({
               id: `inter:${s1}_${s2}:${v1}_${v2}:${p}`,
               kind: 'interaction',
               tag: { s1, s2, v1, v2, slot },
@@ -343,7 +403,7 @@ function buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuC
       const rng = C.randomSource(pairSeed ^ 0xc2b2ae35);
       const teamA = [randomStats(rng), randomStats(rng), randomStats(rng)];
       const teamB = [randomStats(rng), randomStats(rng), randomStats(rng)];
-      jobs.push({
+      corpusBucket.push({
         id: `corpus:${p}`,
         kind: 'corpus',
         mode,
@@ -358,27 +418,26 @@ function buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuC
 
   // 4. Unmirrored wild 128-byte DNA validation split (tests real match win-rate prediction).
   if (suite === 'wild' || suite === 'full') {
-    const wildCpu = cpuConfig.candidates < 56 ? PRESETS.balanced : cpuConfig;
     for (let p = 0; p < wildPairs; p++) {
       const mode = modeAt(p);
       const pairSeed = seed + 900000 + p;
       const rng = C.randomSource(pairSeed ^ 0x27d4eb2f);
       const teamA = [randomStats(rng), randomStats(rng), randomStats(rng)];
       const teamB = [randomStats(rng), randomStats(rng), randomStats(rng)];
-      jobs.push({
+      wildBucket.push({
         id: `wild:${p}`,
         kind: 'wild',
         mode,
         seed: pairSeed,
         teams: [teamA, teamB],
         mirrorContext: false,
-        cpuConfig: wildCpu,
+        cpuConfig,
         maxTurns: turnsFor(mode)
       });
     }
   }
 
-  return jobs;
+  return interleaveBuckets([corpusBucket, curveBucket, interBucket, wildBucket]);
 }
 
 function loadCompletedIds(outputPath) {
@@ -397,16 +456,55 @@ function loadCompletedIds(outputPath) {
   return done;
 }
 
+function formatEta(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '--:--';
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const rem = String(s % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${rem}` : `${m}:${rem}`;
+}
+
 function runPool(jobs, threads, batchSize, onBatch) {
   if (!jobs.length) return Promise.resolve([]);
   return new Promise((resolve, reject) => {
     const allResults = [];
     let cursor = 0;
-    let completed = 0;
-    let totalTurns = 0;
+    let completedPairs = 0;
+    let finishedPairTurns = 0;
+    let liveGames = 0;
+    let liveTurns = 0;
+    let lastRender = 0;
     const started = Date.now();
     const workerCount = Math.min(threads, Math.ceil(jobs.length / batchSize));
     const workers = Array.from({ length: workerCount }, () => new Worker(__filename));
+    let activeWorkers = 0;
+
+    const renderProgress = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastRender < 250) return;
+      lastRender = now;
+      const elapsed = Math.max(0.1, (now - started) / 1000);
+      const turnsRate = liveTurns / elapsed;
+      // Blend prior ~125 turns/pair with observed mean so in-flight workers don't skew cold-start ETA.
+      const obsTurnsPerPair = completedPairs >= 4 ? finishedPairTurns / completedPairs : 125;
+      const priorWeight = Math.max(0, 1 - completedPairs / Math.max(8, workerCount));
+      const estTurnsPerPair = priorWeight * 125 + (1 - priorWeight) * obsTurnsPerPair;
+      const inFlightTurns = Math.max(0, liveTurns - finishedPairTurns);
+      const inFlightPairs = Math.min(activeWorkers * batchSize * 0.95, inFlightTurns / Math.max(20, estTurnsPerPair));
+      const effectivePairs = Math.min(jobs.length, completedPairs + inFlightPairs);
+      const pairRate = effectivePairs / elapsed;
+      const gamesRate = pairRate * 2;
+      const remainingPairs = Math.max(0, jobs.length - effectivePairs);
+      const etaStr = liveTurns >= 8 ? formatEta(remainingPairs / Math.max(1e-6, pairRate)) : 'warming...';
+      process.stderr.write(
+        `\r[${completedPairs}/${jobs.length} pairs · ${liveGames} games · ${liveTurns} turns] ` +
+        `${gamesRate.toFixed(2)} games/s · ${Math.round(turnsRate)} turns/s · ETA ${etaStr}   `
+      );
+    };
+
+    const heartbeat = setInterval(() => renderProgress(false), 500);
+    if (typeof heartbeat.unref === 'function') heartbeat.unref();
 
     const dispatch = worker => {
       if (cursor >= jobs.length) return false;
@@ -416,34 +514,36 @@ function runPool(jobs, threads, batchSize, onBatch) {
       return true;
     };
 
-    let activeWorkers = 0;
     for (const worker of workers) {
       if (dispatch(worker)) activeWorkers++;
-      worker.on('message', batchResults => {
+      worker.on('message', msg => {
+        if (msg && msg.type === 'progress') {
+          liveTurns += msg.turns || 0;
+          liveGames += msg.games || 0;
+          renderProgress(false);
+          return;
+        }
+        const batchResults = msg && msg.type === 'batch' ? msg.results : msg;
         onBatch(batchResults);
         for (const r of batchResults) {
           allResults.push(r);
-          totalTurns += r.turns;
+          finishedPairTurns += r.turns;
         }
-        completed += batchResults.length;
-        const elapsed = Math.max(0.001, (Date.now() - started) / 1000);
-        const rate = completed / elapsed;
-        const etaSec = Math.round((jobs.length - completed) / Math.max(1e-6, rate));
-        const etaMin = Math.floor(etaSec / 60), etaRem = String(etaSec % 60).padStart(2, '0');
-        process.stderr.write(
-          `\r[${completed}/${jobs.length} pairs · ${completed * 2} games] ` +
-          `${(rate * 2).toFixed(1)} games/s · ${Math.round(totalTurns / elapsed)} turns/s · ETA ${etaMin}:${etaRem}   `
-        );
+        completedPairs += batchResults.length;
+        renderProgress(true);
         if (!dispatch(worker)) {
           activeWorkers--;
           worker.terminate();
           if (activeWorkers === 0) {
+            clearInterval(heartbeat);
+            renderProgress(true);
             process.stderr.write('\n');
             resolve(allResults);
           }
         }
       });
       worker.on('error', err => {
+        clearInterval(heartbeat);
         workers.forEach(w => w.terminate());
         reject(err);
       });
@@ -490,7 +590,7 @@ function printQuickSummary(outputPath) {
 
 async function main() {
   const known = [
-    'suite', 'preset', 'pairs', 'curve-pairs', 'inter-pairs', 'wild-pairs',
+    'suite', 'preset', 'scale', 'pairs', 'curve-pairs', 'inter-pairs', 'wild-pairs',
     'seed', 'threads', 'batch', 'std-turns', 'pulse-turns', 'wobble', 'output', 'resume'
   ];
   const rawArgs = process.argv.slice(2);
@@ -499,6 +599,8 @@ async function main() {
     const tok = rawArgs[i];
     if (tok === '--resume') { args.resume = 'true'; continue; }
     if (tok === '--no-resume') { args.resume = 'false'; continue; }
+    if (tok === '--quick') { args.scale = 'quick'; continue; }
+    if (tok === '--deep') { args.scale = 'deep'; continue; }
     if (!tok.startsWith('--')) throw new Error('Unexpected argument: ' + tok);
     const key = tok.slice(2);
     if (!known.includes(key)) throw new Error('Unknown option: --' + key);
@@ -508,24 +610,27 @@ async function main() {
 
   const suite = args.suite || 'full';
   const presetName = args.preset || 'balanced';
+  const scaleName = args.scale || 'standard';
   if (!['full', 'corpus', 'curves', 'interactions', 'wild'].includes(suite)) {
     throw new Error(`Invalid --suite ${suite}`);
   }
   if (!PRESETS[presetName]) throw new Error(`Invalid --preset ${presetName}`);
+  if (!SCALE_TIERS[scaleName]) throw new Error(`Invalid --scale ${scaleName}`);
 
+  const tier = SCALE_TIERS[scaleName];
   const cpuConfig = { ...PRESETS[presetName] };
   if (args.wobble !== undefined) cpuConfig.wobble = args.wobble === 'true';
 
-  const pairs = args.pairs !== undefined ? Number(args.pairs) : 6000;
-  const curvePairs = args['curve-pairs'] !== undefined ? Number(args['curve-pairs']) : 60;
-  const interPairs = args['inter-pairs'] !== undefined ? Number(args['inter-pairs']) : 30;
-  const wildPairs = args['wild-pairs'] !== undefined ? Number(args['wild-pairs']) : Math.max(200, Math.round(pairs * 0.15));
+  const pairs = args.pairs !== undefined ? Number(args.pairs) : tier.pairs;
+  const curvePairs = args['curve-pairs'] !== undefined ? Number(args['curve-pairs']) : tier.curvePairs;
+  const interPairs = args['inter-pairs'] !== undefined ? Number(args['inter-pairs']) : tier.interPairs;
+  const wildPairs = args['wild-pairs'] !== undefined ? Number(args['wild-pairs']) : (args.pairs !== undefined ? Math.max(120, Math.round(pairs * 0.15)) : tier.wildPairs);
   const seed = args.seed !== undefined ? Number(args.seed) : 20261113;
   const hwThreads = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
   const threads = args.threads !== undefined ? Number(args.threads) : Math.max(1, hwThreads - 2);
-  const batchSize = args.batch !== undefined ? Number(args.batch) : 2;
-  const stdTurns = args['std-turns'] !== undefined ? Number(args['std-turns']) : 80;
-  const pulseTurns = args['pulse-turns'] !== undefined ? Number(args['pulse-turns']) : stdTurns * 3;
+  const batchSize = args.batch !== undefined ? Number(args.batch) : 1;
+  const stdTurns = args['std-turns'] !== undefined ? Number(args['std-turns']) : 60;
+  const pulseTurns = args['pulse-turns'] !== undefined ? Number(args['pulse-turns']) : 150;
   const outputPath = args.output || path.join(__dirname, '..', 'personal', 'ability-corpus.jsonl');
   const resume = args.resume !== 'false';
 
@@ -541,7 +646,7 @@ async function main() {
 
   const pending = allJobs.filter(j => !doneIds.has(j.id));
   console.error(
-    `Ability Benchmark [${suite} · preset=${presetName} · 50/50 Standard(${stdTurns}t)+Pulse(${pulseTurns}t) · ${threads} threads]: ` +
+    `Ability Benchmark [${suite} · scale=${scaleName} · preset=${presetName} · 50/50 Standard(${stdTurns}t)+Pulse(${pulseTurns}t) · ${threads} threads]: ` +
     `${allJobs.length} total pairs (${doneIds.size} cached, ${pending.length} to simulate)`
   );
 
@@ -568,4 +673,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { STATS, PRESETS, pickEquippedSuper, playSingleMatch, runPairJob, buildJobs };
+module.exports = { STATS, PRESETS, SCALE_TIERS, pickEquippedSuper, playSingleMatch, runPairJob, buildJobs, runPool };

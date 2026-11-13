@@ -528,16 +528,32 @@
         !Number.isFinite(settings.risk) || settings.risk < 0 || settings.risk > 1 ||
         !Number.isFinite(settings.temperature) || settings.temperature <= 0 ||
         (settings.wobble !== undefined && typeof settings.wobble !== 'boolean') ||
+        (settings.fastTick !== undefined && typeof settings.fastTick !== 'boolean') ||
+        (settings.searchTicks !== undefined && (!Number.isInteger(settings.searchTicks) || settings.searchTicks < 30 || settings.searchTicks > 2880)) ||
+        (settings.screenTop !== undefined && (!Number.isInteger(settings.screenTop) || settings.screenTop < 1 || settings.screenTop > 1000)) ||
         Object.values(rawWeights).some(v => !Number.isFinite(v) || v < 0)) throw new Error('Invalid CPU search settings.');
     const started = performance.now(), random = randomSource(config.seed ?? 1);
     // Only public state crosses this boundary. Discard UI arming flags, not running supers.
-    const state = structuredClone(input);
+    const state = settings.fastTick
+      ? {
+          ...input,
+          bodies: input.bodies.map(b => ({
+            ...b,
+            stickOffset: b.stickOffset ? { x: b.stickOffset.x, y: b.stickOffset.y } : b.stickOffset,
+            equippedSuper: b.equippedSuper ? { id: b.equippedSuper.id, key: b.equippedSuper.key, bonusTicks: b.equippedSuper.bonusTicks, bonusRefund: b.equippedSuper.bonusRefund } : null,
+            personality: b.personality ? { ...b.personality } : undefined
+          })),
+          scores: input.scores ? [input.scores[0], input.scores[1]] : [0, 0],
+          fouls: input.fouls ? { crease: [input.fouls.crease[0], input.fouls.crease[1]], corner: input.fouls.corner, cornerTurns: input.fouls.cornerTurns, cards: input.fouls.cards ? [...input.fouls.cards] : [], faceoff: Boolean(input.fouls.faceoff) } : undefined
+        }
+      : structuredClone(input);
     const classic = M.rule(state.mode, 'classic');
     let maxMeterTick = -Infinity;
     // Every candidate copies the state, so presentation fields (voice, name, super descriptions) go.
     for (const b of state.bodies) {
-      b.superArm = false;
-      delete b.voice; delete b.name;
+      if (b.team >= 0) b.superArm = false;
+      if ('voice' in b) delete b.voice;
+      if ('name' in b) delete b.name;
       if (classic) {
         b.equippedSuper = null;
         b.superKey = null;
@@ -586,60 +602,108 @@
     const responses = [opponent, guardOpponents, attack].slice(0, settings.opponents);
     const pulse = M.rule(state.mode, 'pulse');
     // A warned team can leave the crease and return later in the same turn.
-    const searchTicks = state.fouls?.crease?.[team] ? M.turnTicks(state.mode) : SEARCH_TICKS;
+    const baseHorizon = settings.searchTicks || SEARCH_TICKS;
+    const searchTicks = state.fouls?.crease?.[team] ? M.turnTicks(state.mode) : baseHorizon;
+    const useFastTick = Boolean(settings.fastTick);
     // One simulated turn, valued with its goal's complexity: board and post bounces after the first
     // touch, plus each change of the ubu touching the ball after the first. A turn is a pure function
     // of its moves, so a repeat (a plan tried twice, or a plan with no launch to aim off) is reused.
     const results = new Map();
     const number = n => Object.is(n, -0) ? '-0' : n;
+    const moveKey = p => p.guard || !p.power
+      ? `${number(p.angle)},0,0,${p.superArm},${p.guard}`
+      : `${number(p.angle)},${number(p.power)},${number(p.spin)},${p.superArm},${p.guard}`;
     function simulate(moves, response, r) {
-      const key = r + ':' + moves.map(p => p.guard || !p.power ? [number(p.angle), 0, 0, p.superArm, p.guard].join() : [number(p.angle), number(p.power), number(p.spin), p.superArm, p.guard].join()).join('|');
-      if (!results.has(key)) results.set(key, run(moves, response));
-      return results.get(key);
+      const key = `${r}:${moveKey(moves[0])}|${moveKey(moves[1])}|${moveKey(moves[2])}`;
+      let cached = results.get(key);
+      if (cached === undefined) {
+        cached = run(moves, response);
+        results.set(key, cached);
+      }
+      return cached;
     }
+    const canDecide = !pulse && !state.fouls?.crease?.[team] && !state.fouls?.crease?.[1 - team] && state.fouls?.corner === null;
     function run(moves, response) {
       let toucher = null, touches = 0, boards = 0;
-      const teammatesTouched = new Set();
+      let firstTeamTouch = null, multiTeamTouch = false;
       const watch = {
         collide({ a, b, speed }) {
           const player = M.toucher(a, b, speed);
           if (player && player !== toucher) {
             toucher = player;
             touches++;
-            if (player.team === team) teammatesTouched.add(player);
+            if (player.team === team) {
+              if (firstTeamTouch === null) firstTeamTouch = player;
+              else if (firstTeamTouch !== player) multiTeamTouch = true;
+            }
           }
         },
         wall(body, velocity, type) { if (body.team === -1 && touches && type !== 'net') boards++; }
       };
-      const canDecide = !pulse && !state.fouls?.crease?.[team] && !state.fouls?.crease?.[1 - team] && state.fouls?.corner === null;
       const checkDecided = canDecide ? bodies => touches > 0 && decided(bodies) : null;
-      const result = M.resolveTurn(P, state, team ? [...response, ...moves] : [...moves, ...response], { effects: false, fastSearch: true, ticks: searchTicks, decided: checkDecided, watch, preservePartial: true });
+      const allMoves = team
+        ? [response[0], response[1], response[2], moves[0], moves[1], moves[2]]
+        : [moves[0], moves[1], moves[2], response[0], response[1], response[2]];
+      const result = M.resolveTurn(P, state, allMoves, { effects: false, fastSearch: true, fastTick: useFastTick, ticks: searchTicks, decided: checkDecided, watch, preservePartial: true });
       simulations++; ticks += result.replay.ticks;
-      return evaluate(result.state, team, result.replay.goal, weights, boards + Math.max(0, touches - 1), toucher, teammatesTouched.size > 1, tmw);
+      return evaluate(result.state, team, result.replay.goal, weights, boards + Math.max(0, touches - 1), toucher, multiTeamTouch, tmw);
     }
     // Plans scored in full, from which `choose` picks. A plan whose plain result already trails the
     // best by more than `vetting` × temperature, where `choose` would almost never pick it (under 2%
     // weight), skips the aimed-off runs and is left out of the pick.
-    const scored = [], vetting = 4;
+    const scored = [], screened = [], vetting = 4;
+    const useScreenTop = Number.isInteger(settings.screenTop) && responses.length > 1;
     let bestScore = -Infinity;
-    function score(moves) {
-      // Ubus keeping to their jobs read as a team with a plan.
-      const fit = moves.reduce((n, p, i) => {
-        const b = state.bodies[team * 3 + i];
-        if (!fitsRole(jobs[i], p, b, state)) return n;
+    function roleFit(moves) {
+      let n = 0;
+      for (let i = 0; i < 3; i++) {
+        const p = moves[i], b = state.bodies[team * 3 + i];
+        if (!fitsRole(jobs[i], p, b, state)) continue;
         const intent = intents.get(p);
         if (state.fouls?.crease?.[team] && M.inCrease(P, b, team)) {
           if (intent === 'hold' || intent === 'guard') {
             const isStalwart = p.superArm && b.equippedSuper?.key?.toLowerCase() === 'stalwart';
-            if (!isStalwart) return n;
+            if (!isStalwart) continue;
           }
         }
-        return n + 1;
-      }, 0);
-      const values = responses.map((response, r) => simulate(moves, response, r));
-      const blend = () => values.reduce((a, b) => a + b) / values.length * (1 - settings.risk) + Math.min(...values) * settings.risk + fit * weights.role;
+        n++;
+      }
+      return n;
+    }
+    function score(moves) {
+      // Ubus keeping to their jobs read as a team with a plan.
+      const fit = roleFit(moves);
+      if (useScreenTop) {
+        const v0 = simulate(moves, responses[0], 0);
+        evaluated++;
+        const quickVal = v0 + fit * weights.role;
+        screened.push({ moves, fit, v0, quickVal });
+        return quickVal;
+      }
+      const respCount = responses.length;
+      const values = new Array(respCount);
+      const maxEval = Math.max(weights.goal, 3000);
+      const cutoff = bestScore - vetting * settings.temperature;
+      let sumSoFar = 0, minSoFar = Infinity, pruned = false;
+      for (let r = 0; r < respCount; r++) {
+        const v = simulate(moves, responses[r], r);
+        values[r] = v;
+        sumSoFar += v;
+        if (v < minSoFar) minSoFar = v;
+        if (useFastTick && r + 1 < respCount && bestScore > -Infinity) {
+          const rem = respCount - (r + 1);
+          const upperBlend = ((sumSoFar + rem * maxEval) / respCount) * (1 - settings.risk) + Math.min(minSoFar, maxEval) * settings.risk + fit * weights.role;
+          if (upperBlend < cutoff) { pruned = true; break; }
+        }
+      }
       evaluated++;
-      if (blend() < bestScore - vetting * settings.temperature) return blend();
+      if (pruned) return cutoff - 1;
+      const blend = () => {
+        let s = 0, m = Infinity;
+        for (let r = 0; r < respCount; r++) { s += values[r]; if (values[r] < m) m = values[r]; }
+        return (s / respCount) * (1 - settings.risk) + m * settings.risk + fit * weights.role;
+      };
+      if (blend() < cutoff) return blend();
       // Against the expected response, the plan must also hold up when aimed a little off.
       if (settings.wobble !== false) {
         values[0] = (values[0] + simulate(wobble(moves, 1), responses[0], 0) + simulate(wobble(moves, -1), responses[0], 0)) / 3;
@@ -701,6 +765,26 @@
         }
       }
       consider(next);
+    }
+    if (useScreenTop && screened.length) {
+      screened.sort((a, b) => b.quickVal - a.quickVal);
+      const topK = Math.min(screened.length, settings.screenTop);
+      const respCount = responses.length;
+      for (let idx = 0; idx < topK; idx++) {
+        const cand = screened[idx];
+        let v0 = cand.v0;
+        if (settings.wobble !== false) {
+          v0 = (v0 + simulate(wobble(cand.moves, 1), responses[0], 0) + simulate(wobble(cand.moves, -1), responses[0], 0)) / 3;
+        }
+        let s = v0, m = v0;
+        for (let r = 1; r < respCount; r++) {
+          const vr = simulate(cand.moves, responses[r], r);
+          s += vr;
+          if (vr < m) m = vr;
+        }
+        const value = (s / respCount) * (1 - settings.risk) + m * settings.risk + cand.fit * weights.role;
+        scored.push({ moves: cand.moves, value });
+      }
     }
     const chosen = choose(scored, settings.temperature, random, state, team);
     return { plans: M.validatePlans(chosen.moves), diagnostics: { level, candidates: evaluated, simulations, ticks, score: chosen.value, milliseconds: performance.now() - started } };

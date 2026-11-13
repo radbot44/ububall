@@ -23,14 +23,19 @@ Raw `score` maps to an empirical percentile (`0.0` to `100.0`) via binary search
 
 ### Step 1: Simulate Checkpointed Match Corpus (Node 22+ `worker_threads`)
 
-Run `scripts/ability-benchmark.cjs` (`npm run sim:ability`). It spawns persistent workers across all logical threads minus two (e.g. 30 threads on an i9-14900K), alternates `Standard` (80-turn cap) and `Pulse` (240-turn cap) 50/50, keeps DNA personalities active, initializes real Ubuquity `0–100%` starting meters, equips highest-mastery unlocked supers, and streams append-only `.jsonl` rows so runs can stop (`Ctrl+C`) and `--resume` at any time:
+Run `scripts/ability-benchmark.cjs` (`npm run sim:ability`). It spawns persistent workers across logical cores (`availableParallelism() - 2` by default, or override with `--threads`), alternates `Standard` (60-turn cap) and `Pulse` (150-turn cap) 50/50, keeps DNA personalities active, initializes real Ubuquity `0–100%` starting meters, equips highest-mastery unlocked supers, and uses `fastTick` headless simulation + two-stage `screenTop` minimax refinement (`~5×` faster per game than unpruned full-replay search).
+
+Jobs are proportionally interleaved across `corpus`, `curves`, `interactions`, and `wild`, and the `--quick`, default (`standard`), and `--deep` tiers share deterministic subset IDs so any run can stop (`Ctrl+C`), fit immediately, or expand later via `--resume`:
 
 ```powershell
-# High-certainty full suite (~25,000+ side-swapped pairs = 50,000+ matches)
-npm run sim:ability -- --suite full --preset balanced --pairs 20000 --curve-pairs 150 --inter-pairs 80 --wild-pairs 2000 --threads 30 --output personal/ability-corpus.jsonl
+# Default high-certainty calibration (4,316 side-swapped pairs = 8,632 matches = 60 pairs/parameter)
+npm run sim:ability
 
-# Faster iteration preset (28 candidates, 2 opponent scenarios, wobble off)
-npm run sim:ability -- --suite full --preset fast --pairs 10000 --threads 30 --output personal/ability-corpus.jsonl
+# Quick high-signal check (1,440 pairs = 2,880 matches; strict subset of default!)
+npm run sim:ability:quick
+
+# Deep overnight expansion (11,940 pairs = 23,880 matches; resumes seamlessly on top of default!)
+npm run sim:ability:deep
 ```
 
 ### Step 2: Fit Splines, Verify on GPU Oracle & Bootstrap 95% CIs, and Rebuild Quantiles

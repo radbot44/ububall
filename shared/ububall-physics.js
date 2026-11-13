@@ -47,23 +47,37 @@
   }
   function tailgateFactor(bodies, b) {
     if (!b || b.team < 0 || b.carded || !Array.isArray(bodies)) return 0;
-    const speed = Math.hypot(b.vx, b.vy);
-    if (speed < TAILGATE.minSpeed) return 0;
+    const speed2 = b.vx * b.vx + b.vy * b.vy;
+    if (speed2 < TAILGATE.minSpeed * TAILGATE.minSpeed - 1e-6) return 0;
+    let speed = 0;
     let maxDraft = 0;
     const span = 1 - TAILGATE.minAlign;
+    const minLead2 = TAILGATE.minLeadSpeed * TAILGATE.minLeadSpeed - 1e-6;
     for (let j = 0; j < bodies.length; j++) {
       const lead = bodies[j];
       if (!lead || lead === b || lead.team < 0 || lead.carded) continue;
+      if (lead.vx * lead.vx + lead.vy * lead.vy < minLead2) continue;
+      const headingDot = b.vx * lead.vx + b.vy * lead.vy;
+      if (headingDot <= 0) continue;
+      const dx = lead.x - b.x, dy = lead.y - b.y;
+      const aheadDot = dx * lead.vx + dy * lead.vy;
+      if (aheadDot <= 0) continue;
+      const effectiveMaxGap = TAILGATE.maxGap * Math.max(1, lead.radius / 25);
+      const maxDist = effectiveMaxGap + lead.radius + b.radius;
+      if (dx >= maxDist || dx <= -maxDist || dy >= maxDist || dy <= -maxDist) continue;
       const leadSpeed = Math.hypot(lead.vx, lead.vy);
       if (leadSpeed < TAILGATE.minLeadSpeed) continue;
-      const dx = lead.x - b.x, dy = lead.y - b.y, d = Math.hypot(dx, dy);
+      const d = Math.hypot(dx, dy);
       if (d <= 0) continue;
       const gap = d - lead.radius - b.radius;
-      const effectiveMaxGap = TAILGATE.maxGap * Math.max(1, lead.radius / 25);
       if (gap >= effectiveMaxGap) continue;
-      const ahead = Math.min(1, (dx * lead.vx + dy * lead.vy) / (d * leadSpeed));
+      const ahead = Math.min(1, aheadDot / (d * leadSpeed));
       if (ahead < TAILGATE.minAlign) continue;
-      const heading = Math.min(1, (b.vx * lead.vx + b.vy * lead.vy) / (speed * leadSpeed));
+      if (!speed) {
+        speed = Math.hypot(b.vx, b.vy);
+        if (speed < TAILGATE.minSpeed) return 0;
+      }
+      const heading = Math.min(1, headingDot / (speed * leadSpeed));
       if (heading < TAILGATE.minAlign) continue;
       const rawDraft = (1 - gap / effectiveMaxGap) * ((ahead - TAILGATE.minAlign) / span) * ((heading - TAILGATE.minAlign) / span);
       const draft = Math.min(1, Math.max(0, rawDraft));
@@ -307,7 +321,10 @@
     }
   }
   function walls(b, onWall = null, carrier = null) {
-    const r = b.radius, k = rink;
+    const r = b.radius;
+    // Fast interior box check using numeric literals when rink has standard geometry.
+    if (rink.left === 60 && b.x >= 150 && b.x <= 850 && b.y >= 60 + r && b.y <= 540 - r) return;
+    const k = rink;
     // Clear of every board, post and corner arc: nothing below can apply.
     if (b.x >= k.left + r && b.x <= k.right - r && b.y >= k.top + r && b.y <= k.bottom - r &&
         ((b.x >= k.left + k.corner && b.x <= k.right - k.corner) || (b.y >= k.top + k.corner && b.y <= k.bottom - k.corner))) return;
@@ -491,7 +508,8 @@
     let closeSpin = 0, strikeBoost = 0;
     if (isBall) {
       if (player.superActive) {
-        if (['cannonball', 'sticky', 'magnet', 'ghost', 'stalwart', 'colossus'].includes(player.superActive)) {
+        const psa = player.superActive;
+        if (psa === 'cannonball' || psa === 'sticky' || psa === 'magnet' || psa === 'ghost' || psa === 'stalwart' || psa === 'colossus') {
           player.superHit = true;
         }
       }
@@ -500,8 +518,16 @@
         closeSpin = -player.spinStrike * player.omega * small * (player.curveMult || 1);
         strikeBoost = small * STRIKE_POWER * (player.spinStrike - STRIKE_GAIN) * Math.min(1, Math.abs(player.omega) / player.maxSpin) * Math.hypot(player.vx, player.vy);
       }
-      var crowdedBall = Boolean(allBodies?.some(other => other.team >= 0 && other !== player && !other.carded &&
-          (other.x - ball.x) ** 2 + (other.y - ball.y) ** 2 <= (ballHitRadius(other) + ball.radius) ** 2));
+      var crowdedBall = false;
+      if (allBodies) {
+        for (let k = 0; k < allBodies.length; k++) {
+          const other = allBodies[k];
+          if (other.team >= 0 && other !== player && !other.carded) {
+            const cdx = other.x - ball.x, cdy = other.y - ball.y, cr = ballHitRadius(other) + ball.radius;
+            if (cdx * cdx + cdy * cdy <= cr * cr) { crowdedBall = true; break; }
+          }
+        }
+      }
       if (closeSpin && crowdedBall) closeSpin = strikeBoost = 0;
       ball.openingShot = false;
     } else {
@@ -514,8 +540,8 @@
 
     let knockoutChecker = null;
     if (!isBall && a.team !== b.team && closing < 0) {
-      if (['knockout', 'stalwart', 'colossus'].includes(a.superActive)) a.superHit = true;
-      if (['knockout', 'stalwart', 'colossus'].includes(b.superActive)) b.superHit = true;
+      if (a.superActive === 'knockout' || a.superActive === 'stalwart' || a.superActive === 'colossus') a.superHit = true;
+      if (b.superActive === 'knockout' || b.superActive === 'stalwart' || b.superActive === 'colossus') b.superHit = true;
       if (a.superActive === 'knockout') { b.stunnedNext = true; a.superActive = null; onSuper?.('knockout', 'impact', a, b); knockoutChecker = a; }
       if (b.superActive === 'knockout') { a.stunnedNext = true; b.superActive = null; onSuper?.('knockout', 'impact', b, a); knockoutChecker = knockoutChecker || b; }
       // An opponent's hit knocks a Sticky ball loose.
@@ -927,7 +953,15 @@
           const angle = b.omega * curve * dt, cos = Math.cos(angle), sin = Math.sin(angle), vx = b.vx;
           b.vx = vx * cos - b.vy * sin; b.vy = vx * sin + b.vy * cos;
         }
-        settledSpin ??= !hasMagnet && bodies.every(o => o.vx * o.vx + o.vy * o.vy < 4);
+        if (settledSpin === null) {
+          settledSpin = !hasMagnet;
+          if (settledSpin) {
+            for (let j = 0; j < count; j++) {
+              const o = bodies[j];
+              if (o.vx * o.vx + o.vy * o.vy >= 4) { settledSpin = false; break; }
+            }
+          }
+        }
         const spinDecay = settledSpin ? SETTLED_SPIN_DECAY : SPIN_DECAY;
         b.rotation += b.omega * dt;
         b.omega = Math.sign(b.omega) * Math.max(0, Math.abs(b.omega) - spinDecay * dt);
@@ -938,18 +972,25 @@
     }
     let drafts = null;
     if (dt > 0) {
-      const minLead2 = TAILGATE.minLeadSpeed * TAILGATE.minLeadSpeed;
-      let hasFastLead = false;
+      const minLead2 = TAILGATE.minLeadSpeed * TAILGATE.minLeadSpeed - 1e-6;
+      const minFollow2 = TAILGATE.minSpeed * TAILGATE.minSpeed - 1e-6;
+      let leadCount = 0, followCount = 0;
       for (let i = 0; i < count; i++) {
         const b = bodies[i];
-        if (b.team >= 0 && !b.carded && b.vx * b.vx + b.vy * b.vy >= minLead2) { hasFastLead = true; break; }
+        if (b.team >= 0 && !b.carded) {
+          const v2 = b.vx * b.vx + b.vy * b.vy;
+          if (v2 >= minFollow2) {
+            followCount++;
+            if (v2 >= minLead2) leadCount++;
+          }
+        }
       }
-      if (hasFastLead) {
+      if (leadCount > 0 && followCount >= 2) {
         drafts = spareDrafts?.length >= count ? spareDrafts : new Float64Array(count);
         spareDrafts = null;
         for (let i = 0; i < count; i++) {
           const b = bodies[i];
-          drafts[i] = b.team >= 0 && !b.carded ? tailgateFactor(bodies, b) : 0;
+          drafts[i] = (b.team >= 0 && !b.carded && b.vx * b.vx + b.vy * b.vy >= minFollow2) ? tailgateFactor(bodies, b) : 0;
         }
       }
     }
@@ -1211,14 +1252,17 @@
   // The ubu holding the ball with Sticky, or null. Held is a flag on the ubu, not a reference on the
   // ball, so the field survives JSON (online state and its storage).
   function holder(bodies) {
-    for (const b of bodies) if (b.holding) return b;
+    for (let i = 0; i < bodies.length; i++) if (bodies[i].holding) return bodies[i];
     return null;
   }
   function settled(bodies, ignoreBall = false) {
-    return bodies.every(b => (ignoreBall && b.team === -1) || (
-      !(b.superActive === 'colossus' && colossusProgress(b) < 1) &&
-      b.vx * b.vx + b.vy * b.vy < 4 && Math.abs(b.omega) < .05
-    ));
+    for (let i = bodies.length - 1; i >= 0; i--) {
+      const b = bodies[i];
+      if (ignoreBall && b.team === -1) continue;
+      if (b.vx * b.vx + b.vy * b.vy >= 4 || Math.abs(b.omega) >= .05 ||
+          (b.superActive === 'colossus' && colossusProgress(b) < 1)) return false;
+    }
+    return true;
   }
   // Ends turn effects; keepMotion leaves velocities for a Pulse turn that ends mid-motion.
   function stop(bodies, keepMotion = false) {

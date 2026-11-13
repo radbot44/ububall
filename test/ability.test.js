@@ -224,3 +224,44 @@ test('Benchmark harness enforces 50/50 Standard+Pulse split, symmetric swapped p
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('Nested scale tiers (--quick ⊂ standard ⊂ --deep), interleaved strata, fastTick+screenTop search, and worker pool streaming work cleanly', async () => {
+  const mkIds = tier => new Set(bench.buildJobs({
+    suite: 'full',
+    ...bench.SCALE_TIERS[tier],
+    seed: 20261113,
+    cpuConfig: bench.PRESETS.balanced,
+    stdTurns: 60,
+    pulseTurns: 150
+  }).map(j => j.id));
+
+  const quickIds = mkIds('quick');
+  const stdIds = mkIds('standard');
+  const deepIds = mkIds('deep');
+  assert.equal(quickIds.size, 1440);
+  assert.equal(stdIds.size, 4316);
+  assert.equal(deepIds.size, 11940);
+  for (const id of quickIds) assert.ok(stdIds.has(id), `quick id ${id} must be in standard tier`);
+  for (const id of stdIds) assert.ok(deepIds.has(id), `standard id ${id} must be in deep tier`);
+
+  // First 24 jobs of an interleaved full suite should already include both corpus and curve jobs and both modes.
+  const sampleJobs = bench.buildJobs({
+    suite: 'full',
+    pairs: 20,
+    curvePairs: 2,
+    interPairs: 2,
+    wildPairs: 6,
+    seed: 99,
+    cpuConfig: { ...bench.PRESETS.fast, candidates: 6, searchTicks: 120 },
+    stdTurns: 3,
+    pulseTurns: 6
+  });
+  const head = sampleJobs.slice(0, 24);
+  assert.ok(head.some(j => j.kind === 'corpus') && head.some(j => j.kind === 'curve'));
+  assert.ok(head.some(j => j.mode === 'standard') && head.some(j => j.mode === 'pulse'));
+
+  // End-to-end worker pool test (verifies live progress messages + batch assembly)
+  const poolOut = await bench.runPool(sampleJobs.slice(0, 4), 2, 1, () => {});
+  assert.equal(poolOut.length, 4);
+  assert.ok(poolOut.every(r => Number.isFinite(r.goalDiff) && r.turns >= 2));
+});

@@ -11,6 +11,8 @@
     "sim:stats": "node scripts/stat-balance.cjs",
     "bench:serve": "node scripts/serve-bench.cjs",
     "sim:ability": "node scripts/ability-benchmark.cjs",
+    "sim:ability:quick": "node scripts/ability-benchmark.cjs --quick",
+    "sim:ability:deep": "node scripts/ability-benchmark.cjs --deep",
     "calibrate:ability": "node scripts/calibrate-ability.cjs"
   },
   "engines": {
