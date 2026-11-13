@@ -122,9 +122,12 @@
         vb.reach = cb.reach;
         vb.strength = cb.strength;
         vb.stability = cb.stability;
+        vb.synergyMult = cb.synergyMult ?? 1;
+        vb.chemistryMult = cb.chemistryMult ?? 1;
         vb.meter = cb.meter ?? 0;
         vb.daze = cb.daze || 0;
         vb.spinStrike = cb.spinStrike || 0;
+        vb.launchSpin = cb.launchSpin || 0;
         vb.ironCooldownTicks = cb.ironCooldownTicks || 0;
         vb.superTicks = cb.superTicks || 0;
         vb.superHoldTicks = cb.superHoldTicks || 0;
@@ -171,6 +174,7 @@
         vb.stuckTicks = cb.stuckTicks || 0;
         vb.strikerSlot = cb.strikerSlot;
         vb.strikerPower = cb.strikerPower;
+        vb.strikerSynergy = cb.strikerSynergy ?? 1;
         vb.strikerTeam = cb.strikerTeam === undefined || cb.strikerTeam < 0 ? -1 : (seat ? 1 - cb.strikerTeam : cb.strikerTeam);
         vb.openingShot = Boolean(cb.openingShot);
       }
@@ -220,6 +224,7 @@
           vb.meter = cb.meter ?? 0;
           vb.daze = cb.daze || 0;
           vb.spinStrike = cb.spinStrike || 0;
+          vb.launchSpin = cb.launchSpin || 0;
           vb.ironCooldownTicks = cb.ironCooldownTicks || 0;
           vb.superTicks = cb.superTicks || 0;
           vb.superActive = cb.superActive || null;
@@ -234,6 +239,7 @@
           vb.stuckTicks = cb.stuckTicks || 0;
           vb.strikerSlot = cb.strikerSlot;
           vb.strikerPower = cb.strikerPower;
+          vb.strikerSynergy = cb.strikerSynergy ?? 1;
           vb.openingShot = Boolean(cb.openingShot);
         }
       }

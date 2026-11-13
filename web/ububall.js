@@ -310,7 +310,7 @@
     gameAudio: () => gameAudio(),
     uiScale: () => gameUi.scale(),
     anonymousName: i => anonymousName(i),
-    contactMeter: (a, b, speed) => contactMeter(a, b, speed),
+    contactMeter: (a, b, speed, passerSlot) => contactMeter(a, b, speed, passerSlot),
     setHitStopUntil: until => { hitStopUntil = until; },
     onClearPostGoal: () => { postGoal = null; },
     onAssetLoad: () => { if (skaters.length) draw(); }
@@ -515,13 +515,13 @@
     }
   }
   // Online meters come from the server; replays never earn meter.
-  function contactMeter(a, b, speed) {
+  function contactMeter(a, b, speed, passerSlot = -1) {
     if ((typeof phase !== 'undefined' && phase !== 'play') || online?.active || goalReplay || theater || (typeof activePlayback !== 'undefined' && activePlayback)) return;
     const tick = matchTicks + Math.round((elapsed + P.DT) / P.DT);
     const ia = fieldView.bodies.indexOf(a), ib = fieldView.bodies.indexOf(b);
     const sa = ia >= 0 && simBodies[ia] ? simBodies[ia] : a;
     const sb = ib >= 0 && simBodies[ib] ? simBodies[ib] : b;
-    for (const changed of ububallMatch.contactMeter(P, simBodies, stats, sa, sb, speed, tick, classicMode())) {
+    for (const changed of ububallMatch.contactMeter(P, simBodies, stats, sa, sb, speed, tick, classicMode(), passerSlot)) {
       const cIdx = simBodies.indexOf(changed);
       const vb = cIdx >= 0 && fieldView.bodies[cIdx] ? fieldView.bodies[cIdx] : changed;
       vb.meter = changed.meter;

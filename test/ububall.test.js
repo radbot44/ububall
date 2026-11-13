@@ -64,9 +64,9 @@ test('impulse scales launch speed independently of mass', () => {
   const b = P.kickoff();
   [0, 127, 255].forEach((impulse, i) => P.applyStats(b[i], { ...normal, impulse }));
   P.launch(b, Array.from({ length: 6 }, () => ({ angle: 0, power: 1 })));
-  assert.ok(Math.abs(b[0].vx - 720 * (2 / 3)) < 1e-9);
+  assert.ok(Math.abs(b[0].vx - 720 * (2 / 3) ** P.ICE_BITE.impulseExp) < 1e-9);
   assert.equal(b[1].vx, 720);
-  assert.equal(b[2].vx, 1080);
+  assert.ok(Math.abs(b[2].vx - 720 * 1.5 ** P.ICE_BITE.impulseExp) < 1e-9);
 });
 test('curve stat scales trajectory bend for equal spin', () => {
   const outcomes = [0, 127, 255].map(curve => {
@@ -2182,4 +2182,152 @@ test('A4 & A5: makeUbu/makeBall pre-initialize stable shapes, helpers manage str
   assert.equal(sim[6].y, 304);
   assert.equal('pinX' in sim[6], false);
   assert.equal('pinY' in sim[6], false);
+});
+
+test('v28 Ice Bite & Carve Drive: Grip fuels launch thrust and moving cuts, and high Spin×Curve boosts spinning launches only', () => {
+  // Ice Bite: Grip contributes to launch speed and sharpens high-speed cuts; from rest, big ubus get full effSteer = 1
+  const lowGrip = P.kickoff()[0], highGrip = P.kickoff()[0], bigRest = P.kickoff()[0];
+  P.applyStats(lowGrip, { ...normal, impulse: 180, grip: 0 });
+  P.applyStats(highGrip, { ...normal, impulse: 180, grip: 255 });
+  P.applyStats(bigRest, { ...normal, size: 255, grip: 0 });
+  assert.ok(P.launchSpeed(highGrip) > P.launchSpeed(lowGrip) * 1.14, 'high Grip increases Ice Bite launch speed');
+  P.launch([bigRest], [{ angle: 0, power: 1, spin: 0 }]);
+  assert.ok(Math.abs(bigRest.vx - P.launchSpeed(bigRest)) < 1e-9, 'stationary big ubu gets full launch speed without double size penalty');
+
+  const cutLow = P.kickoff()[0], cutHigh = P.kickoff()[0];
+  P.applyStats(cutLow, { ...normal, grip: 0 });
+  P.applyStats(cutHigh, { ...normal, grip: 255 });
+  cutLow.vx = cutHigh.vx = 600;
+  P.launch([cutLow], [{ angle: Math.PI, power: 1, spin: 0 }]);
+  P.launch([cutHigh], [{ angle: Math.PI, power: 1, spin: 0 }]);
+  assert.ok(cutHigh.vx < cutLow.vx - 120, `high Grip reverses moving momentum sharper (${cutHigh.vx} vs ${cutLow.vx})`);
+
+  // Carve Drive: neutral and low Spin×Curve get 0% boost; 255/255 gets +10% at full spin
+  const bruiser = P.kickoff()[0], carver = P.kickoff()[0];
+  P.applyStats(bruiser, { ...normal, spin: 40, curve: 40 });
+  P.applyStats(carver, { ...normal, spin: 255, curve: 255 });
+  assert.equal(P.carveDriveBoost(bruiser, 1), 1, 'below-neutral Spin×Curve gets no Carve Drive boost');
+  assert.ok(Math.abs(P.carveDriveBoost(carver, 1) - 1.1) < 1e-9, '255/255 Spin×Curve gets +10% Carve Drive at |spin|=1');
+  assert.equal(P.carveDriveBoost(carver, 0), 1, 'zero spin gets no Carve Drive boost');
+  P.launch([carver], [{ angle: 0, power: 1, spin: -1 }]);
+  assert.ok(Math.abs(carver.vx - P.launchSpeed(carver) * 1.1) < 1e-9, 'launch applies Carve Drive symmetrically on negative spin');
+});
+
+test('v28 True Glide: intentional spin launches keep full Curve while involuntary check spin-outs are damped on high-Curve skaters', () => {
+  const intentional = P.kickoff()[0], clippedHigh = P.kickoff()[0], clippedNeutral = P.kickoff()[0];
+  P.applyStats(intentional, { ...normal, curve: 255, spin: 255 });
+  P.applyStats(clippedHigh, { ...normal, curve: 255, spin: 255 });
+  P.applyStats(clippedNeutral, { ...normal, curve: 127, spin: 255 });
+
+  Object.assign(intentional, { x: 250, y: 300 });
+  P.launch([intentional], [{ angle: 0, power: 0.8, spin: 1 }]);
+  Object.assign(clippedHigh, { x: 250, y: 300, vx: intentional.vx, vy: 0, omega: intentional.omega, launchSpin: 0 });
+  Object.assign(clippedNeutral, { x: 250, y: 300, vx: intentional.vx, vy: 0, omega: intentional.omega, launchSpin: 0 });
+
+  for (let t = 0; t < 48; t++) {
+    P.step([intentional], P.DT);
+    P.step([clippedHigh], P.DT);
+    P.step([clippedNeutral], P.DT);
+  }
+  const dyIntent = Math.abs(intentional.y - 300);
+  const dyClipHigh = Math.abs(clippedHigh.y - 300);
+  const dyClipNeut = Math.abs(clippedNeutral.y - 300);
+  assert.ok(dyIntent > dyClipHigh * 3.5, `True Glide preserves intentional curve while damping involuntary spin-out (${dyIntent} vs ${dyClipHigh})`);
+  assert.ok(dyClipHigh < dyClipNeut, `high Curve suffers less involuntary drift than neutral Curve (${dyClipHigh} vs ${dyClipNeut})`);
+
+  // Skater-vs-skater collision clears launchSpin so post-collision spin uses True Glide damping
+  const a = P.kickoff()[0], c = P.kickoff()[3];
+  P.applyStats(a, { ...normal, curve: 255, spin: 255 });
+  P.applyStats(c, normal);
+  Object.assign(a, { x: 400, y: 300 });
+  Object.assign(c, { x: 448, y: 310, vx: -200, vy: 0 });
+  P.launch([a], [{ angle: 0, power: 0.8, spin: 1 }]);
+  assert.ok(a.launchSpin > 0);
+  P.step([a, c], P.DT);
+  assert.equal(a.launchSpin, 0, 'skater collision clears launchSpin');
+});
+
+test('v28 Tempered Shot, Sweet Spot & Wide Stance: Power is tempered, extended Reach tips hit softer than body core, and big Guards get proportional reach', () => {
+  // Tempered Shot exponent
+  const shooter = P.kickoff()[0];
+  P.applyStats(shooter, { ...normal, power: 255 });
+  assert.ok(Math.abs(shooter.power - 1.5 ** P.TEMPERED_SHOT.powerExp) < 1e-9);
+
+  // Sweet Spot: core contact (d <= max(radius, 25) + 18) transfers more ball speed than outer poke tip (d near 37.5 + 18)
+  const hitAt = dist => {
+    const b = P.kickoff();
+    P.applyStats(b[0], { ...normal, size: 127, reach: 255, power: 200 });
+    Object.assign(b[0], { x: 400, y: 300, vx: 600, vy: 0 });
+    Object.assign(b[6], { x: 400 + dist, y: 300, vx: 0, vy: 0 });
+    const before = kineticEnergy([b[0], b[6]]);
+    P.step([b[0], b[6]], 0);
+    assert.ok(kineticEnergy([b[0], b[6]]) <= before * (1 + 1e-12));
+    return b[6].vx;
+  };
+  const coreSpeed = hitAt(25 + 18 - 0.2);
+  const tipSpeed = hitAt(37.5 + 18 - 0.2);
+  assert.ok(coreSpeed > tipSpeed * 1.12, `Sweet Spot core hits harder than extended Reach poke tip (${coreSpeed} vs ${tipSpeed})`);
+
+  // Big ubu (size=255, radius=37.5) hits at 100% Sweet Spot even at its outer 37.5 px body edge
+  const bigHit = (() => {
+    const b = P.kickoff();
+    P.applyStats(b[0], { ...normal, size: 255, reach: 0, mass: 127, power: 200 });
+    Object.assign(b[0], { x: 400, y: 300, vx: 600, vy: 0 });
+    Object.assign(b[6], { x: 400 + 37.5 + 18 - 0.2, y: 300, vx: 0, vy: 0 });
+    P.step([b[0], b[6]], 0);
+    return b[6].vx;
+  })();
+  assert.ok(Math.abs(bigHit - coreSpeed) < 1e-6, 'big ubu outer body edge gets 100% Sweet Spot transfer');
+
+  // Wide Stance: Size=255 Guard reach scales to 37.5 * 1.25 = 46.875 px (56.25 px on Iron Guard) instead of 0 bonus
+  const bigGuard = P.kickoff()[0];
+  P.applyStats(bigGuard, { ...normal, size: 255, reach: 0 });
+  assert.equal(bigGuard.reach, 37.5);
+  bigGuard.guarding = true;
+  P.syncEffectiveStats(bigGuard);
+  assert.ok(Math.abs(bigGuard.reach - 37.5 * 1.25) < 1e-9, `Wide Stance gives Size=255 Guard reach 46.875 (got ${bigGuard.reach})`);
+  P.applyDoubledGuard(bigGuard);
+  assert.ok(Math.abs(bigGuard.reach - 37.5 * 1.5) < 1e-9, `Wide Stance gives Size=255 Iron Guard reach 56.25 (got ${bigGuard.reach})`);
+});
+
+test('v28 Board Spring & Pack Draft: Bounciness unclips above 175 and boosts corner Rim-Around exit speed within KE bounds, and Synergy×Chemistry strengthens teammate slipstream', () => {
+  // Board Spring unclips Bounciness between 175 and 235 on flat boards
+  const wallRebound = bounciness => {
+    const u = P.kickoff()[0];
+    P.applyStats(u, { ...normal, bounciness });
+    Object.assign(u, { x: 400, y: 60 + u.radius - 0.5, vx: 0, vy: -500 });
+    P.step([u], 0);
+    return u.vy;
+  };
+  assert.ok(wallRebound(235) > wallRebound(175) + 35, 'Bounciness 175->235 stays unclipped on rink boards');
+
+  // Board Spring redirects dissipated corner Rim-Around energy into tangential speed while strictly preserving KE
+  const cornerCarve = bounciness => {
+    const u = P.kickoff()[0];
+    P.applyStats(u, { ...normal, bounciness });
+    const nx = -Math.SQRT1_2, ny = -Math.SQRT1_2, tx = -ny, ty = nx;
+    const d = P.rink.corner - u.radius + 0.6;
+    Object.assign(u, { x: 160 + nx * d, y: 160 + ny * d, vx: nx * 130 + tx * 360, vy: ny * 130 + ty * 360, omega: -15, spinStrike: 1.5 });
+    const ke0 = kineticEnergy([u]);
+    P.step([u], 0);
+    const ke1 = kineticEnergy([u]);
+    assert.ok(ke1 <= ke0 * (1 + 1e-12), `Board Spring corner carve preserves KE (${ke1} <= ${ke0})`);
+    return u.vx * tx + u.vy * ty;
+  };
+  assert.ok(cornerCarve(255) > cornerCarve(0) + 12, 'higher Bounciness exits corner Rim-Around with faster tangential speed');
+
+  // Pack Draft: high Synergy lead + high Chemistry trailer cuts more friction than opponent drafting
+  const bodies = P.kickoff();
+  P.applyStats(bodies[0], { ...normal, chemistry: 255 });
+  P.applyStats(bodies[1], { ...normal, synergy: 255 });
+  P.applyStats(bodies[3], { ...normal, synergy: 255 });
+  Object.assign(bodies[1], { x: 460, y: 240, vx: 520, vy: 0 });
+  Object.assign(bodies[0], { x: 395, y: 240, vx: 440, vy: 0 });
+  const teamDraft = P.tailgateFactor(bodies, bodies[0]);
+
+  Object.assign(bodies[1], { x: 100, y: 500, vx: 0, vy: 0 });
+  Object.assign(bodies[3], { x: 460, y: 240, vx: 520, vy: 0 });
+  const oppDraft = P.tailgateFactor(bodies, bodies[0]);
+  assert.ok(teamDraft > oppDraft * 1.4, `Pack Draft boosts teammate slipstream (${teamDraft} vs ${oppDraft})`);
+  assert.ok(teamDraft * P.TAILGATE.frictionCut <= P.PACK_DRAFT.maxCut + 1e-9, 'Pack Draft respects maxCut ceiling');
 });

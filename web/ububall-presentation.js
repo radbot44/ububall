@@ -473,9 +473,10 @@
     const isStalwart = activeSuper === 'stalwart';
     const effRadius = isColossus ? (body.superActive === 'colossus' ? body.radius : Math.max(body.baseRadius ?? body.radius, P.SUPER?.colossusRadius || 56.25)) : body.radius;
     const superScale = isColossus ? (P.SUPER?.colossusLaunch || 0.75) : (isStalwart ? (P.SUPER?.stalwartLaunch || 0.5) : 1);
-    const agility = (body.sizeMult || 1) ** (P.SIZE?.launch ?? -0.28);
+    const agility = (body.sizeMult || 1) ** (P.SIZE?.launch ?? -0.16);
     const daze = 1 - (P.dazeSlow ? P.dazeSlow(body) : 0);
-    const scale = 110 * ((body.impulse || P.IMPULSE) / P.IMPULSE) * superScale * agility * daze;
+    const carve = P.carveDriveBoost ? P.carveDriveBoost(body, plan.spin || 0) : 1;
+    const scale = 110 * ((body.impulse || P.IMPULSE) / P.IMPULSE) * superScale * agility * daze * carve;
     const ringR = Math.max(effRadius, body.reach || effRadius, 18) + 2;
     const distance = ringR + scale * plan.power;
     return { ringR, scale, distance, x: body.x + Math.cos(plan.angle) * distance, y: body.y + Math.sin(plan.angle) * distance,
@@ -2723,7 +2724,7 @@
     }
 
     function handleCollision(contact) {
-      const { a, b, speed = 0, impulse = 0, plow = false, iron = false, snapped = false, spinStruck = false, tangentImpulse = 0 } = contact;
+      const { a, b, speed = 0, impulse = 0, plow = false, iron = false, snapped = false, spinStruck = false, tangentImpulse = 0, passerSlot = -1 } = contact;
       if (iron) {
         if (a?.guarding) a.ironGuard = true;
         if (b?.guarding) b.ironGuard = true;
@@ -2917,7 +2918,7 @@
       }
       if (plow) flames(x, y, 40, (b.vx || a.vx) * 0.1, (b.vy || a.vy) * 0.1, 15);
       const now = clockNow();
-      if (!plow && speed >= 15) contactMeter?.(a, b, speed);
+      if (!plow && speed >= 15) contactMeter?.(a, b, speed, passerSlot);
       if (isBall) {
         const ball = a.team === -1 ? a : b;
         const player = a.team !== -1 ? a : b;

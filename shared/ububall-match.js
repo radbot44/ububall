@@ -46,7 +46,7 @@
   // Contact counts only for real impacts against the ball or an opponent, at most once per
   // cooldown per ubu, so pinging around the ball or an enemy cannot farm it.
   // Every gain is scaled by `rate` (slightly below the listed amounts).
-  const METER = Object.freeze({ ball: 8, check: 4, conceded: 6, ace: 10, save: 6, assist: 4, teammate: .15, rate: .85, minSpeed: 60, cooldownTicks: 360 });
+  const METER = Object.freeze({ ball: 8, check: 4, conceded: 6, ace: 10, save: 6, assist: 4, pass: 4, teammate: .28, rate: .85, minSpeed: 60, cooldownTicks: 360 });
   // Efficiency, Synergy and Chemistry swing harder than other stats: their
   // multiplier is squared, 0.44–2.25×, so good super stats matter and poor ones hold a ubu back.
   const superStat = (P, raw) => P.multiplier(raw ?? 127) ** 2;
@@ -65,7 +65,7 @@
     });
     return changed;
   }
-  function contactMeter(P, bodies, stats, a, b, speed, tick, classic = false) {
+  function contactMeter(P, bodies, stats, a, b, speed, tick, classic = false, passerSlot = -1) {
     const ball = a.team === -1 ? a : b.team === -1 ? b : null;
     if (speed < METER.minSpeed || (!ball && a.team === b.team)) return [];
     const changed = [];
@@ -73,6 +73,22 @@
       if (tick - (body.meterTick ?? -Infinity) < METER.cooldownTicks) continue;
       body.meterTick = tick;
       changed.push(...gainMeter(P, bodies, stats, body, ball ? METER.ball : METER.check, classic));
+      if (!classic && ball && passerSlot >= 0) {
+        const recvIdx = bodies.indexOf(body);
+        const passerIdx = bodies.findIndex(o => o.team === body.team && o.slot === passerSlot);
+        if (recvIdx >= 0 && passerIdx >= 0 && passerIdx !== recvIdx) {
+          const passGain = METER.pass * METER.rate * superStat(P, stats?.[passerIdx]?.synergy) * superStat(P, stats?.[recvIdx]?.chemistry);
+          if (!body.usedSuperThisTurn) {
+            body.meter = Math.min(100, Math.max(0, (body.meter || 0) + passGain));
+            if (!changed.includes(body)) changed.push(body);
+          }
+          const passer = bodies[passerIdx];
+          if (passer && !passer.usedSuperThisTurn && !passer.carded) {
+            passer.meter = Math.min(100, Math.max(0, (passer.meter || 0) + passGain * .5));
+            if (!changed.includes(passer)) changed.push(passer);
+          }
+        }
+      }
     }
     return changed;
   }
@@ -647,7 +663,7 @@
     }
     for (const b of carded) {
       P.endSuper(b, bodies);
-      Object.assign(b, P.spawn(b.team, b.slot), { vx: 0, vy: 0, omega: 0, meter: 0, daze: 0, guarding: false, stunned: true, carded: true });
+      Object.assign(b, P.spawn(b.team, b.slot), { vx: 0, vy: 0, omega: 0, launchSpin: 0, meter: 0, daze: 0, guarding: false, stunned: true, carded: true });
       if (b.superArm !== undefined) b.superArm = false;
     }
     if (fouls.faceoff) {
@@ -748,7 +764,7 @@
     let hasFoul = next.fouls.crease[0] || next.fouls.crease[1] || next.fouls.corner !== null;
     if (useFastTick) {
       const onCollide = contact => {
-        if (!contact.plow) contactMeter(P, bodies, next.stats, contact.a, contact.b, contact.speed, clock + currentTick, classic);
+        if (!contact.plow) contactMeter(P, bodies, next.stats, contact.a, contact.b, contact.speed, clock + currentTick, classic, contact.passerSlot);
         if (watch?.collide) watch.collide(contact);
       };
       const onWall = watch?.wall || null;
@@ -767,7 +783,7 @@
       const skipSaves = fastSearch && classic;
       const tickFx = {
         collide: contact => {
-          if (!contact.plow) contactMeter(P, bodies, next.stats, contact.a, contact.b, contact.speed, clock + currentTick, classic);
+          if (!contact.plow) contactMeter(P, bodies, next.stats, contact.a, contact.b, contact.speed, clock + currentTick, classic, contact.passerSlot);
           watch?.collide?.(contact);
         },
         wall: watch?.wall

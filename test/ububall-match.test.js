@@ -25,7 +25,7 @@ test('Classic, Pulse and Blitz combine independently', () => {
   assert.equal(M.planningMilliseconds('classic-pulse'),null);
   assert.equal(M.turnTicks('standard'),2880); assert.equal(M.turnTicks('classic-pulse'),240);
   const a={}, b={}; M.applyStats(P,a,{impulse:200},'blitz'); M.applyStats(P,b,{impulse:200},'classic-pulse');
-  assert.equal(a.impulse,P.IMPULSE*P.multiplier(200)); assert.equal(b.impulse,P.IMPULSE);
+  assert.equal(a.impulse,P.IMPULSE*P.multiplier(200)**P.ICE_BITE.impulseExp); assert.equal(b.impulse,P.IMPULSE);
 });
 test('shared meter rules exclude super users and the opposing team', () => {
   const bodies=P.kickoff(); bodies.forEach(b=>b.meter=0); bodies[1].usedSuperThisTurn=true;
@@ -1226,4 +1226,50 @@ test('A6 & D1b: M.VERSION is 5, resolveTurn nests attribution under state.play w
   const agents = fs.readFileSync(path.join(__dirname, '..', 'AGENTS.md'), 'utf8');
   assert.match(agents, /Never compare client-simulated and server state for exact equality/i);
   assert.match(agents, /never carry client-simulated state into the next turn/i);
+});
+
+test('v28 Tape-to-Tape & presentation sync: Synergy×Chemistry scales Snap redirect and awards live pass meter to receiver and passer in both playTick and fastTick', () => {
+  const { impulseGeometry } = require('../web/ububall-presentation.js');
+  const makePassState = (syn, chem) => {
+    const bodies = P.kickoff();
+    const rawStats = Array.from({ length: 6 }, () => ({}));
+    rawStats[0] = { synergy: syn };
+    rawStats[1] = { chemistry: chem };
+    bodies.slice(0, 6).forEach((b, i) => {
+      P.applyStats(b, rawStats[i]);
+      Object.assign(b, { x: 140 + i * 60, y: 500, vx: 0, vy: 0, meter: 0 });
+    });
+    // Passer 0 already sent a live pass diagonally back into teammate 1's one-timer lane
+    P.setStriker(bodies[6], bodies[0]);
+    bodies[6].strikerSlot = 0;
+    Object.assign(bodies[6], { x: 504, y: 294, vx: -200, vy: 110, pace: 230 });
+    Object.assign(bodies[1], { x: 460, y: 300, vx: 0, vy: 0 });
+    return {
+      version: M.VERSION, mode: 'standard', phase: 'play', scores: [0, 0], roundTurns: 1, clock: 400,
+      bodies, stats: rawStats, play: M.newPlay({ last: 0, lastTouch: [0, null] }), fouls: M.newFouls(), tally: M.newTally()
+    };
+  };
+
+  const moves = Array.from({ length: 6 }, (_, i) => (
+    i === 1 ? { angle: 0, power: 0.9, spin: 0, superArm: false, guard: false } : { angle: 0, power: 0, spin: 0, superArm: false, guard: false }
+  ));
+
+  const low = M.resolveTurn(P, makePassState(0, 0), moves, { effects: false, ticks: 12, preservePartial: true });
+  const high = M.resolveTurn(P, makePassState(255, 255), moves, { effects: false, ticks: 12, preservePartial: true });
+  const highFast = M.resolveTurn(P, makePassState(255, 255), moves, { effects: false, fastSearch: true, fastTick: true, ticks: 12, preservePartial: true });
+
+  const vLow = Math.hypot(low.state.bodies[6].vx, low.state.bodies[6].vy);
+  const vHigh = Math.hypot(high.state.bodies[6].vx, high.state.bodies[6].vy);
+  assert.ok(vHigh > vLow + 40, `Tape-to-Tape Synergy×Chemistry boosts Snap redirect speed (${vHigh} vs ${vLow})`);
+  assert.ok(high.state.bodies[1].meter > low.state.bodies[1].meter + 14, 'receiver earns Tape-to-Tape pass bonus meter');
+  assert.ok(high.state.bodies[0].meter > low.state.bodies[0].meter + 8, 'passer earns Tape-to-Tape pass bonus + spillover meter');
+  assert.ok(Math.abs(highFast.state.bodies[1].meter - high.state.bodies[1].meter) < 1e-9, 'fastTick matches playTick pass meter on receiver');
+  assert.ok(Math.abs(highFast.state.bodies[0].meter - high.state.bodies[0].meter) < 1e-9, 'fastTick matches playTick pass meter on passer');
+
+  // impulseGeometry reflects Carve Drive boost when spin is dialed on a high-Spin/Curve ubu
+  const carver = P.kickoff()[0];
+  P.applyStats(carver, { spin: 255, curve: 255 });
+  const g0 = impulseGeometry(P, carver, { angle: 0, power: 1, spin: 0 });
+  const g1 = impulseGeometry(P, carver, { angle: 0, power: 1, spin: 1 });
+  assert.ok(Math.abs(g1.scale / g0.scale - 1.1) < 1e-9, 'impulseGeometry arrow scale matches +10% Carve Drive');
 });

@@ -47,7 +47,17 @@
       const speed2 = b.vx * b.vx + b.vy * b.vy;
       if (!speed2) continue;
       const speed = Math.sqrt(speed2);
-      const stopDist = speed2 / (2 * b.friction * (1 - (P.TAILGATE?.frictionCut ?? .4)));
+      let maxTeamSyn = 1;
+      const tStart = b.team === 0 ? 0 : 3;
+      for (let k = tStart; k < tStart + 3; k++) {
+        if (k !== i && bodies[k] && !bodies[k].carded && (bodies[k].synergyMult ?? 1) > maxTeamSyn) {
+          maxTeamSyn = bodies[k].synergyMult ?? 1;
+        }
+      }
+      const baseCut = P.TAILGATE?.frictionCut ?? .4;
+      const packMult = P.PACK_DRAFT ? (maxTeamSyn * (b.chemistryMult ?? 1)) ** P.PACK_DRAFT.exp : 1;
+      const maxCut = Math.min(P.PACK_DRAFT?.maxCut ?? baseCut, Math.max(baseCut, baseCut * packMult));
+      const stopDist = speed2 / (2 * b.friction * (1 - maxCut));
       const contact = Math.max(b.radius, b.reach || b.radius, 18) + ball.radius;
       if (Math.hypot(b.x - ball.x, b.y - ball.y) - contact <= stopDist) return false;
       const ownGoalX = b.team ? P.rink.right : P.rink.left;
@@ -240,7 +250,7 @@
       const dx = tx - b.x, dy = ty - b.y, distance = Math.hypot(dx, dy);
       const superLaunchScale = (superArm && sKey === 'colossus' && b.superActive !== 'colossus') ? P.SUPER.colossusLaunch
         : (superArm && sKey === 'stalwart' && b.superActive !== 'stalwart' ? P.SUPER.stalwartLaunch : 1);
-      const maxV = P.launchSpeed(b) * superLaunchScale;
+      const maxV = P.launchSpeed(b) * (P.carveDriveBoost ? P.carveDriveBoost(b, spin) : 1) * superLaunchScale;
       const effFriction = b.friction * ((superArm && sKey === 'stalwart') || b.superActive === 'stalwart' ? P.SUPER.stalwartFriction : b.holding ? P.SUPER.carryFriction : 1);
       let angle = Math.atan2(dy, dx);
       const power = distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * effFriction * Math.max(0, distance + extraDrive)) / maxV);
@@ -269,7 +279,7 @@
     }
     if (team === 0) {
       for (const b of bodies) {
-        b.x = 1000 - b.x; b.vx = -b.vx; b.omega = -b.omega;
+        b.x = 1000 - b.x; b.vx = -b.vx; b.omega = -b.omega; if (b.launchSpin) b.launchSpin = -b.launchSpin;
         if (b.team >= 0) b.team = 1 - b.team;
         if (b.stickOffset) b.stickOffset.x = -b.stickOffset.x;
       }
@@ -304,7 +314,9 @@
     const dist = distance || 1;
     const ux = dx / dist, uy = dy / dist;
     const vxTarget = ux * speed, vyTarget = uy * speed;
-    const steerLimit = maxV * (body.sizeMult || 1) ** P.SIZE.agility;
+    const reSteerMult = (body.sizeMult || 1) ** P.SIZE.agility * ((body.grip ?? .3) / .3) ** (P.ICE_BITE?.gripCutExp ?? 0);
+    const effSteer = 1 + Math.min(1, vSpeed / (maxV || 1)) * (reSteerMult - 1);
+    const steerLimit = maxV * effSteer;
     const deltaX = vxTarget - (body.vx || 0), deltaY = vyTarget - (body.vy || 0);
     const deltaDist = Math.hypot(deltaX, deltaY);
 

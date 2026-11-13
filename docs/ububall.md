@@ -40,21 +40,21 @@ Every stat is stored as an 8-bit unsigned integer (`0–255`, neutral `127`) and
 
 | Category | Stat | Bits | Width | Values | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Movement** | `Impulse` | 374–381 | 8 | 0–255 | Engine thrust / launch speed ceiling |
+| **Movement** | `Impulse` | 374–381 | 8 | 0–255 | Engine thrust / launch speed ceiling (`Ice Bite`: `Impulse^0.55 × Grip^0.18`) |
 | | `Traction` | 382–389 | 8 | 0–255 | Braking deceleration on ice, over a narrower span than most stats (multiplier^0.7, 0.75–1.33×; tuning) |
-| | `Spin` | 390–397 | 8 | 0–255 | Maximum launch rotation rate |
-| | `Curve` | 398–405 | 8 | 0–255 | Bends the ubu's own path, and the path of the ball after it strikes it; multiplies the spin a spin strike passes to the ball (still counter-rotating) |
-| **Physical** | `Size` | 406–413 | 8 | 0–255 | Physical collision radius. Size trade-offs (tuning, powers of the size multiplier in `SIZE`): smaller ubus launch faster (^−0.28), curve more and re-steer a moving launch more (^−0.5), and strike spin harder (^−0.5); bigger ubus lose more speed off the boards (^−0.5). |
-| | `Mass` | 414–421 | 8 | 0–255 | Body weight and collision momentum, over a narrower span than other stats (the square root of the multiplier, 0.82–1.22×; tuning). It does not slow the launch (full-launch speed comes from Impulse alone), so a heavier ubu shoots and checks harder and is harder to knock away; only Colossus's added weight slows a launch. Ubus have no air drag; the ball does. |
-| | `Bounciness` | 422–429 | 8 | 0–255 | How much incoming normal speed the ubu gets back off rink surfaces (surface baseline × effective Bounciness ÷ √Size). Baselines are 0.82 for boards, 0.96 for posts, and 0.60 for the net. The cap is 1.00 for posts and 0.95 elsewhere. Guard and Iron Guard reduce effective Bounciness. Body and ball contacts use one fixed rebound (0.88). |
-| | `Grip` | 430–437 | 8 | 0–255 | Contact friction and spin transfer |
-| **Engagement** | `Power` | 438–445 | 8 | 0–255 | Velocity transfer to the ball (shot power) |
-| | `Reach` | 446–453 | 8 | 0–255 | Ball-only intercept/poke-check radius |
+| | `Spin` | 390–397 | 8 | 0–255 | Maximum launch rotation rate, plus `Carve Drive` launch boost when paired with above-neutral `Spin × Curve` |
+| | `Curve` | 398–405 | 8 | 0–255 | Bends intentional spin launches (`True Glide` damps involuntary check spin-outs), shapes struck ball curves, fuels `Carve Drive`, and multiplies spin strike transfer |
+| **Physical** | `Size` | 406–413 | 8 | 0–255 | Physical collision radius and `Wide Stance` proportional Guard reach ceiling (`max(37.5, baseRadius × mult)`). Size trade-offs (`SIZE`): smaller ubus launch faster (^−0.16), curve and re-steer moving launches sharper (^−0.45), and strike spin harder (^−0.5); bigger ubus lose slightly more speed off boards (^−0.4). |
+| | `Mass` | 414–421 | 8 | 0–255 | Body weight and collision momentum, over a narrower span than other stats (the square root of the multiplier, 0.82–1.22×; tuning). It does not slow the launch (full-launch speed comes from Impulse and Grip), so a heavier ubu shoots and checks harder and is harder to knock away; only Colossus's added weight slows a launch. Ubus have no air drag; the ball does. |
+| | `Bounciness` | 422–429 | 8 | 0–255 | `Board Spring` surface rebound (`0.66` skater board baseline so `0–255` stays unclipped up to the `0.95` cap, `0.82` for the ball, `0.96` posts, `0.60` net) and tangential corner `Rim-Around` exit spring. Guard and Iron Guard reduce effective Bounciness. Body and ball contacts use one fixed rebound (0.88). |
+| | `Grip` | 430–437 | 8 | 0–255 | Contact friction, spin transfer, and `Ice Bite` blade push-off (`^0.18` launch thrust, `^0.35` moving-cut agility) |
+| **Engagement** | `Power` | 438–445 | 8 | 0–255 | `Tempered Shot` velocity transfer to the ball (`multiplier^0.75`, with `√strikerPower` fireball overpower scaling) |
+| | `Reach` | 446–453 | 8 | 0–255 | Ball-only intercept/poke-check radius (`Sweet Spot`: full 100% power inside `max(radius, 25)`, tapering to 86% at the outer extended reach tip) |
 | | `Strength` | 454–461 | 8 | 0–255 | Check momentum delivered into opponents, which also deepens dazes (below) |
 | | `Stability` | 462–469 | 8 | 0–255 | Resistance to checks, momentum loss, glancing Hip Clip spin-outs, and dazes (divides them) |
 | **Super** | `Efficiency` | 470–477 | 8 | 0–255 | Meter gain rate from in-game events (squared multiplier, 0.44–2.25×) |
-| | `Synergy` | 478–485 | 8 | 0–255 | Outbound meter bonus granted to teammates (squared multiplier, 0.44–2.25×) |
-| | `Chemistry` | 486–493 | 8 | 0–255 | Inbound meter bonus received from teammates (squared multiplier, 0.44–2.25×) |
+| | `Synergy` | 478–485 | 8 | 0–255 | Outbound teammate meter share (`0.28×`), `Tape-to-Tape` pass meter & Snap boost, and `Pack Draft` lead slipstream |
+| | `Chemistry` | 486–493 | 8 | 0–255 | Inbound teammate meter share (`0.28×`), `Tape-to-Tape` pass reception meter & Snap boost, and `Pack Draft` trailing slipstream |
 
 ---
 
@@ -132,7 +132,7 @@ Whiff refund (physics v3): if a super ends without connecting (`superHit = false
   - Ace: a goal on the first turn of a round (the turns from one kickoff to the next goal) earns the scorer (the scoring team's last toucher) $+10\% \times \text{Efficiency multiplier}$, unless it is an own goal.
   - Save: $+6\% \times \text{Efficiency multiplier}$, with a "Save!" callout over the saver, when an ubu touches the ball while it is heading into its own goal and, from the field as it stood just before that contact and with the saver removed, the ball would have gone in touching nothing but the goal posts and net (no boards, no other ubu). Opposing Iron Saves use the same pre-save on-target check (`SAVE`) before awarding defensive save stats, shots against, or save meter, while friendly Guard traps remain `"Trap!"` without defensive stats. Only a lone touch counts (two ubus meeting the ball in the same tick is a scramble), the ball must be within 300 px of the goal mouth's centre, and without the saver it must have been due in within 1 second (240 ticks); these limits are tuning in `SAVE`. The touch must also keep the ball out: from the field just after it, the ball must not go on into that goal (even off the boards) before another ubu touches it, so a deflection that still goes in is no save. A save from a ball the saver's own team was most responsible for (see Ball Responsibility) still shows, as "Save...", but earns nothing.
   - Anti-farming: contact only counts at impact speed 60 or more, and each ubu earns contact meter at most once per 1.5 seconds of simulated play (ball and checks share the cooldown, which carries across Pulse turns).
-  - Teammate Synergy/Chemistry: Whenever an ubu gains meter, teammates receive an inbound bonus: $\Delta M \times (\text{Synergy}^2 \times \text{Chemistry}^2 \times 0.15)$, using the stat multipliers.
+  - Teammate Synergy/Chemistry (`Tape-to-Tape`): Whenever an ubu gains meter, teammates receive an inbound bonus $\Delta M \times (\text{Synergy}^2 \times \text{Chemistry}^2 \times 0.28)$. Completing a live teammate pass ($\ge 140$ px/s to a non-guarding receiver) also awards $+4\% \times \text{rate} \times \text{Synergy}_{\text{passer}}^2 \times \text{Chemistry}_{\text{receiver}}^2$ to the receiver and half that bonus to the passer.
 
 ---
 

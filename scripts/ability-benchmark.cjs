@@ -239,6 +239,7 @@ function runPairJob(job, onProgress = null) {
 
   const out = {
     id,
+    physicsVersion: P.VERSION,
     kind,
     mode,
     seed,
@@ -440,18 +441,35 @@ function buildJobs({ suite, pairs, curvePairs, interPairs, wildPairs, seed, cpuC
   return interleaveBuckets([corpusBucket, curveBucket, interBucket, wildBucket]);
 }
 
-function loadCompletedIds(outputPath) {
+function loadCompletedIds(outputPath, expectedPhysics = P.VERSION) {
   const done = new Set();
   if (!outputPath || !fs.existsSync(outputPath)) return done;
   const content = fs.readFileSync(outputPath, 'utf8');
+  let staleVersion = null;
   for (const line of content.split('\n')) {
     if (!line.trim()) continue;
     try {
       const row = JSON.parse(line);
+      const rowVer = row?.physicsVersion ?? 27;
+      if (rowVer !== expectedPhysics) {
+        staleVersion = rowVer;
+        break;
+      }
       if (row && row.id) done.add(row.id);
     } catch {
       // Ignore partial trailing line from an interrupted run.
     }
+  }
+  if (staleVersion !== null) {
+    const parsed = path.parse(outputPath);
+    let archivePath = path.join(parsed.dir, `${parsed.name}.v${staleVersion}${parsed.ext}`);
+    let suffix = 1;
+    while (fs.existsSync(archivePath)) {
+      archivePath = path.join(parsed.dir, `${parsed.name}.v${staleVersion}-${suffix++}${parsed.ext}`);
+    }
+    fs.renameSync(outputPath, archivePath);
+    console.error(`[ability-benchmark] Archived prior physics v${staleVersion} corpus -> ${archivePath} (starting clean v${expectedPhysics} run).`);
+    return new Set();
   }
   return done;
 }
@@ -673,4 +691,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { STATS, PRESETS, SCALE_TIERS, pickEquippedSuper, playSingleMatch, runPairJob, buildJobs, runPool };
+module.exports = { STATS, PRESETS, SCALE_TIERS, pickEquippedSuper, playSingleMatch, runPairJob, buildJobs, loadCompletedIds, runPool };

@@ -301,8 +301,8 @@
         },
         {
           id: 'corner-carve',
-          title: 'Corner Rim-Around (Skate Edge Carve & Friction Sparks)',
-          when: 'Skater skims a 100 px curved corner arc (`vn <= 190`, `|vt| >= 150`) with co-rotating spin (`rimmed = true`).',
+          title: 'Corner Rim-Around & Board Spring (Skate Edge Carve)',
+          when: 'Skater skims a 100 px curved corner arc (`vn <= 190`, `|vt| >= 150`) with co-rotating spin (`rimmed = true`, redirecting Board Spring rebound along the glass).',
           visual: 'Stream of glowing friction sparks & streak sparks (`#fff1c1` / `#fff3b0` / `#ffc43d` / `#ffb347` / `#ff7a1a`) like the hot ball spraying backward from the skate edge, curved corner skid gouge, and speed-pitched edge-bite carve sound.',
           soundLabel: 'Play edge-bite carve',
           duration: 2.4,
@@ -318,8 +318,8 @@
         },
         {
           id: 'slipstream-draft',
-          title: 'Tailgating (Front Wind Cone & Continuous Slipstream)',
-          when: 'Skater drafts behind any fast skater (`tailgateFactor > 0.22` cone, `> 0.35` continuous wind).',
+          title: 'Tailgating & Pack Draft (Front Wind Cone & Slipstream)',
+          when: 'Skater drafts behind any fast skater (`tailgateFactor > 0.22` cone, `> 0.35` wind; Pack Draft boosts teammate Synergy × Chemistry wake up to 65% friction cut).',
           visual: 'Translucent pale-cyan aerodynamic wind cone parting around the front of the drafting ubu, wake streaks, and continuous rushing wind.',
           soundLabel: 'Play slipstream wind',
           duration: 2.6,
@@ -445,8 +445,8 @@
         },
         {
           id: 'snap-one-timer',
-          title: 'Snap One-Timer Redirect (Team Colors)',
-          when: 'Non-guarding skater (>=140 px/s) redirects a live teammate pass (>=180 px/s, `snapped = true`).',
+          title: 'Snap One-Timer & Tape-to-Tape Redirect (Team Colors)',
+          when: 'Non-guarding skater (>=140 px/s) redirects a live teammate pass (>=180 px/s, `snapped = true`, scaled by passer Synergy × shooter Chemistry).',
           visual: 'Team-colored shockwave ring, contact flash, and 20 directional & V-wing team-colored streaks/sparks, +30 fire pre-heat ticks, and 60-100ms hit-stop.',
           soundLabel: 'Play snap crack',
           variants: [
@@ -1284,7 +1284,7 @@
       clockNow: () => clockMs,
       gameAudio: activeAudio,
       uiScale: () => 1,
-      contactMeter: (a, b, spd) => awardContactMeter(a, b, spd),
+      contactMeter: (a, b, spd, passerSlot) => awardContactMeter(a, b, spd, passerSlot),
       setHitStopUntil: until => { hitStopUntil = until; },
       onClearPostGoal: () => { postGoal = null; },
       onAssetLoad: () => draw()
@@ -1351,10 +1351,10 @@
       }
     }
 
-    function awardContactMeter(a, b, speed) {
+    function awardContactMeter(a, b, speed, passerSlot = -1) {
       if (phase !== 'play' || goalReplay) return;
       const tick = matchTicks + Math.round((elapsed + P.DT) / P.DT);
-      const changed = ububallMatch.contactMeter(P, view.bodies, stats, a, b, speed, tick, ububallMatch.rule(view.mode, 'classic'));
+      const changed = ububallMatch.contactMeter(P, view.bodies, stats, a, b, speed, tick, ububallMatch.rule(view.mode, 'classic'), passerSlot);
       if (changed.length) syncMeters();
     }
 
@@ -2449,7 +2449,7 @@
       if (!draggingPlan || phase !== 'plan') return;
       const p = rinkPoint(e), b = view.bodies[selected];
       const dx = p.x - b.x, dy = p.y - b.y, dist = Math.hypot(dx, dy);
-      const geom = impulseGeometry(P, b, { angle: 0, power: 1 });
+      const geom = impulseGeometry(P, b, { angle: 0, power: 1, spin: plans[selected]?.spin || 0 });
       plans[selected].angle = Math.atan2(dy, dx);
       plans[selected].power = Math.max(0, Math.min(1, (dist - geom.ringR) / Math.max(1, geom.scale)));
       plans[selected].guard = false;

@@ -316,3 +316,22 @@ test('isCharged classifies top-decile Ability (>= 90th percentile) identically a
   assert.equal(ability.isCharged({ score: ability.TABLE[899], percentile: 89.99 }), false);
   assert.equal(ability.isCharged(null), false);
 });
+
+test('loadCompletedIds auto-archives stale physicsVersion corpora and resumes matching P.VERSION corpora', t => {
+  const P = require('../shared/ububall-physics.js');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ability-ver-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const corpusPath = path.join(tmpDir, 'ability-corpus.jsonl');
+
+  // Legacy v27 row (no physicsVersion field) -> archived to .v27.jsonl and returns empty Set
+  fs.writeFileSync(corpusPath, JSON.stringify({ id: 'corpus:0', goalDiff: 1 }) + '\n');
+  const afterStale = bench.loadCompletedIds(corpusPath, P.VERSION);
+  assert.equal(afterStale.size, 0);
+  assert.equal(fs.existsSync(corpusPath), false);
+  assert.equal(fs.existsSync(path.join(tmpDir, 'ability-corpus.v27.jsonl')), true);
+
+  // Matching P.VERSION row -> kept and resumed
+  fs.writeFileSync(corpusPath, JSON.stringify({ id: 'corpus:0', physicsVersion: P.VERSION, goalDiff: 1 }) + '\n');
+  const afterMatch = bench.loadCompletedIds(corpusPath, P.VERSION);
+  assert.equal(afterMatch.has('corpus:0'), true);
+});

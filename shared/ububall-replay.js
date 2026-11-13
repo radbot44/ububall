@@ -10,9 +10,9 @@
   const KEEP = 25, MAX_TITLE = 80;
   // Body fields a snapshot keeps, in file order: everything a turn's simulation reads or writes.
   const NUMBERS = ['x', 'y', 'vx', 'vy', 'omega', 'rotation', 'radius', 'mass', 'friction', 'grip', 'maxSpin', 'team', 'slot', 'curveFactor',
-    'sizeMult', 'baseMass', 'baseRadius', 'baseFriction', 'baseReach', 'baseStrength', 'baseStability', 'baseBounciness', 'impulse', 'curveMult', 'bounciness', 'power', 'reach', 'strength', 'stability',
-    'meter', 'meterTick', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'ironCooldownTicks', 'pace', 'strikerPower', 'strikerTeam', 'strikerSlot'];
-  const POSITIVE = new Set(['radius', 'mass', 'maxSpin', 'sizeMult', 'baseMass', 'baseRadius', 'baseReach', 'baseStrength', 'baseStability', 'baseBounciness', 'impulse', 'curveMult', 'bounciness', 'power', 'reach', 'strength', 'stability', 'strikerPower']);
+    'sizeMult', 'baseMass', 'baseRadius', 'baseFriction', 'baseReach', 'baseStrength', 'baseStability', 'baseBounciness', 'impulse', 'curveMult', 'bounciness', 'power', 'reach', 'strength', 'stability', 'synergyMult', 'chemistryMult',
+    'meter', 'meterTick', 'daze', 'spinStrike', 'launchSpin', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'ironCooldownTicks', 'pace', 'strikerPower', 'strikerSynergy', 'strikerTeam', 'strikerSlot'];
+  const POSITIVE = new Set(['radius', 'mass', 'maxSpin', 'sizeMult', 'baseMass', 'baseRadius', 'baseReach', 'baseStrength', 'baseStability', 'baseBounciness', 'impulse', 'curveMult', 'bounciness', 'power', 'reach', 'strength', 'stability', 'synergyMult', 'chemistryMult', 'strikerPower', 'strikerSynergy']);
   const NONNEGATIVE = new Set(['friction', 'baseFriction', 'grip', 'curveFactor', 'meter', 'daze', 'spinStrike', 'superTicks', 'superHoldTicks', 'superBonusTicks', 'superBonusRefund', 'stuckTicks', 'fireTicks', 'ironCooldownTicks', 'pace']);
   const FLAGS = ['superArm', 'guarding', 'ironGuard', 'usedSuperThisTurn', 'superHit', 'superRefunded', 'openingShot', 'shockwaveFired', 'carded', 'stunned', 'stunnedNext', 'onFire', 'holding'];
   const BODY = [...NUMBERS, ...FLAGS, 'superActive', 'equippedSuper', 'stickOffset'];
