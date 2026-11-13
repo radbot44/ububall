@@ -38,7 +38,7 @@ Calibrated on **11,940 side-swapped pairs (`23,880` full matches, `1.64M` turns,
 
 ## 2. Calibrated Empirical Percentile (`0.00` to `100`)
 
-Raw `score` maps to an empirical percentile (`0.0` to `100.0`) via binary search and linear interpolation over `TABLE` (`shared/ability-table.json`, 1,001 thresholds in `0.1%` steps generated from 1,000,000 uniformly random 128-byte DNA samples). Display formatting shares `ubuList.rarityScore(percentile)` (`XX.XX` up to `99.00`, expanding precision past leading `9`s above `99` so elite stat rolls stay distinguishable).
+Raw `score` maps to an empirical percentile (`0.0` to `100.0`) via binary search and linear interpolation over `TABLE` (`shared/ability-table.json`, 1,001 thresholds in `0.1%` steps generated from 1,000,000 uniformly random 128-byte DNA samples). Display formatting shares `ubuList.rarityScore(percentile)` (`XX.XX` up to `99.00`, expanding precision past leading `9`s above `99` so elite stat rolls stay distinguishable). `isCharged(input)` (`percentile >= CHARGED_PERCENTILE`, `90`) identifies top-decile Ability ubus for Charged Pack stages (`0`–`5`) and Mint reveal effects without altering pack assembly.
 
 ## 3. High-Certainty Calibration Workflow
 

@@ -4,6 +4,7 @@ import { createTestHarness } from 'wrangler';
 import { login, callback, activityLogin, session as activitySession } from '../server/auth.mjs';
 import file from '../shared/ubu-file.js';
 import ubu from '../shared/ubu.js';
+import ability from '../shared/ability.js';
 
 test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { timeout: 60000 }, async t => {
   const keys = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
@@ -183,13 +184,17 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(ready.status, 200, await ready.clone().text());
     firstCertificates = (await ready.json()).certificates;
     assert.equal(firstCertificates.length, 5);
+    let expectedCharge = 0;
     for (let i = 0; i < firstCertificates.length; i++) {
       const verified = await file.read(firstCertificates[i], { resolveKey: () => keys.publicKey });
-      const attrs = ubu.decode(ubu.fromCode(verified.dna)).attributes;
+      const decoded = ubu.decode(ubu.fromCode(verified.dna));
+      if (ability.isCharged(decoded)) expectedCharge++;
+      const attrs = decoded.attributes;
       assert.deepEqual(offered.choices[0].hints[i], { background: attrs.background.hex,
         accents: ['eyes', 'irises', 'pupils', 'mouth'].map(role => attrs[role].hex),
         textured: Object.values(attrs).some(a => Boolean(a.texture)) });
     }
+    assert.equal(offered.choices[0].charge, expectedCharge);
     assert.equal((await select(offered.request, offered.choices[1].choice)).status, 409);
     const retries = await Promise.all(Array.from({ length: 8 }, () => issue('first_request_0001')));
     for (const retry of retries) assert.deepEqual((await retry.json()).certificates, firstCertificates);

@@ -10,6 +10,7 @@ const { openStorage } = require('../server/mint-local.js');
 const file = require('../shared/ubu-file.js');
 const ubu = require('../shared/ubu.js');
 const rarity = require('../shared/rarity.js');
+const ability = require('../shared/ability.js');
 
 const mintID = 'A'.repeat(22);
 const owner = '123456789012345678';
@@ -110,19 +111,24 @@ test('pack hints are stable, private, and exactly match the selected issuance', 
   const reopened = new Mint(f.open(), f.options);
   assert.deepEqual(reopened.offer({ owner, request: request(3) }, { lifetimeLimit: 1 }), offered);
   for (const option of offered.choices) {
-    assert.deepEqual(Object.keys(option).sort(), ['choice', 'hints', 'type']);
+    assert.deepEqual(Object.keys(option).sort(), ['charge', 'choice', 'hints', 'type']);
+    assert.ok(Number.isInteger(option.charge) && option.charge >= 0 && option.charge <= 5);
     assert.equal(option.hints.length, 5);
     for (const hint of option.hints) assert.deepEqual(Object.keys(hint).sort(), ['accents', 'background', 'textured']);
   }
   const chosen = offered.choices[1];
   const issued = await reopened.issue({ owner, request: offered.request, choice: chosen.choice }, { lifetimeLimit: 1 });
+  let expectedCharge = 0;
   for (let i = 0; i < 5; i++) {
     const verified = await file.read(issued.certificates[i], { resolveKey: () => f.keys.publicKey });
-    const attrs = ubu.decode(ubu.fromCode(verified.dna)).attributes;
+    const decoded = ubu.decode(ubu.fromCode(verified.dna));
+    if (ability.isCharged(decoded)) expectedCharge++;
+    const attrs = decoded.attributes;
     assert.deepEqual(chosen.hints[i], { background: attrs.background.hex,
       accents: ['eyes', 'irises', 'pupils', 'mouth'].map(role => attrs[role].hex),
       textured: Object.values(attrs).some(a => Boolean(a.texture)) });
   }
+  assert.equal(chosen.charge, expectedCharge);
   assert.equal(mint.exec('SELECT COUNT(*) AS n FROM pack_choices')[0].n, 0);
   assert.equal(mint.state().remaining, 5);
   assert.deepEqual(await mint.issue({ owner, request: offered.request, choice: chosen.choice }, { lifetimeLimit: 0 }), issued);
@@ -218,6 +224,7 @@ test('existing pack inventory upgrades without replacement and hints disclose on
   assert.ok(mint.exec('SELECT batch FROM inventory').every(row => row.batch === 1));
   const offer = mint.offer({ owner, request: request(1) }, { lifetimeLimit: 1 });
   assert.ok(offer.choices.every(option => option.hints[4].textured === true));
+  assert.ok(offer.choices.every(option => option.charge >= 1 && option.charge <= 5));
   assert.ok(offer.choices.every(option => Object.keys(option.hints[4]).length === 3));
   await assert.rejects(mint.issue({ owner, request: offer.request, choice: offer.choices[0].choice }, { lifetimeLimit: 0 }), /limit reached/);
   assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued')[0].n, 0);

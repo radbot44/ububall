@@ -15,6 +15,83 @@
   let coinLandTimer = 0;
   const clearCoinTimer = () => { if (coinLandTimer) { clearTimeout(coinLandTimer); coinLandTimer = 0; } };
 
+  const VOLT_HEX = '#0066FF';
+  function blendHex(hexA, hexB, t) {
+    if (typeof hexA !== 'string' || !/^#[0-9a-f]{6}$/i.test(hexA)) return hexB;
+    if (typeof hexB !== 'string' || !/^#[0-9a-f]{6}$/i.test(hexB)) return hexA;
+    const k = Math.max(0, Math.min(1, t));
+    return '#' + [1, 3, 5].map(i => {
+      const a = parseInt(hexA.slice(i, i + 2), 16), b = parseInt(hexB.slice(i, i + 2), 16);
+      return Math.round(a + (b - a) * k).toString(16).padStart(2, '0');
+    }).join('');
+  }
+  const packChargeOf = option => Math.max(0, Math.min(5, Math.trunc(option?.charge) || 0));
+  function packSpotColor(option) {
+    const bg = option?.hints?.[0]?.background || '#ffecd2';
+    const c = packChargeOf(option);
+    return c > 0 ? blendHex(bg, VOLT_HEX, Math.min(1, .24 + c * .152)) : bg;
+  }
+  const packSpotRadius = (option, base = 14.5) => base + packChargeOf(option) * .68;
+  function isChargedItem(item) {
+    if (!item) return false;
+    const res = item.ability || (window.ability && item.model ? ability.scoreAbility(item.model) : null);
+    if (window.ability?.isCharged) return ability.isCharged(res || item.model);
+    return Boolean(res && typeof res.percentile === 'number' && res.percentile >= 90);
+  }
+  function isMaterialItem(item) {
+    const attrs = item?.model?.attributes;
+    return Boolean(attrs && Object.values(attrs).some(a => Boolean(a?.texture)));
+  }
+  function silhouetteSpotColor(item) {
+    const charged = isChargedItem(item), material = isMaterialItem(item);
+    if (charged && material) return '#d9ecff';
+    if (charged) return '#8ec0ff';
+    if (material) return '#fff0c2';
+    return '#ffecd2';
+  }
+  function makeElectricArcs(className) {
+    const wrap = document.createElement('span');
+    wrap.className = className;
+    wrap.setAttribute('aria-hidden', 'true');
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '-64 -64 128 128');
+    svg.setAttribute('aria-hidden', 'true');
+    const arcs = [
+      'M-50 -16 L-58 -26 L-46 -36 L-52 -46 L-36 -52',
+      'M34 -48 L46 -55 L42 -39 L55 -34 L48 -20',
+      'M46 18 L57 28 L44 37 L50 48 L34 52',
+      'M-34 48 L-46 54 L-41 38 L-54 31 L-47 18'
+    ];
+    arcs.forEach((d, idx) => {
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('class', `volt-arc volt-arc-${idx + 1}`);
+      svg.append(path);
+    });
+    [[-56, -4], [4, -58], [58, -2], [-4, 57]].forEach(([cx, cy], idx) => {
+      const dot = document.createElementNS(NS, 'circle');
+      dot.setAttribute('cx', String(cx));
+      dot.setAttribute('cy', String(cy));
+      dot.setAttribute('r', '2.4');
+      dot.setAttribute('class', `volt-spark volt-spark-${idx + 1}`);
+      svg.append(dot);
+    });
+    wrap.append(svg);
+    return wrap;
+  }
+  function makeMaterialSparkles(className, count = 3) {
+    const wrap = document.createElement('span');
+    wrap.className = className;
+    wrap.setAttribute('aria-hidden', 'true');
+    for (let s = 0; s < count; s++) {
+      const slot = document.createElement('i');
+      slot.append(gameUi.icon('sparkles'));
+      wrap.append(slot);
+    }
+    return wrap;
+  }
+
   // Stage lighting over the rink interior (60..940, 60..540 on the 1000x600 rink -> inset 10% 6%).
   // Spotlights cut soft pools out of the dark wash so the real ice and markings glow beneath each pack or ubu.
   const mintLights = (() => {
@@ -265,8 +342,8 @@
       renderStageUbus();
       const xs = ubuPositions(pack.items.length);
       mintLights.setSpots(pack.items.map((item, i) => ({
-        id: 'ubu-' + i, x: xs[i], y: 50, r: 9.5, alpha: i < pack.seen ? 0.95 : 0.8,
-        color: i < pack.seen ? item.model.attributes.background.hex : '#ffecd2'
+        id: 'ubu-' + i, x: xs[i], y: 50, r: 9.5, alpha: i < pack.seen ? 0.95 : 0.84,
+        color: i < pack.seen ? item.model.attributes.background.hex : silhouetteSpotColor(item)
       })));
       $('pack-title').textContent = 'Unfinished pack';
       $('pack-subtitle').textContent = `${pack.seen} of ${pack.items.length} revealed · Continue below or tap an ubu`;
@@ -295,7 +372,7 @@
       $('pack-title').textContent = 'Choose your pack';
       $('pack-subtitle').textContent = 'Pick a pack to crack open!';
       mintLights.setSpots(offer.choices.map((opt, i) => ({
-        id: 'pack-' + i, x: 25 + i * 25, y: 50, r: 14.5, alpha: 1, color: opt.hints[0].background
+        id: 'pack-' + i, x: 25 + i * 25, y: 50, r: packSpotRadius(opt, 14.5), alpha: 1, color: packSpotColor(opt)
       })));
       return;
     }
@@ -533,7 +610,7 @@
     svg.setAttribute('aria-label', `Fanfare in ${parsed.scale}: ${notes.map(n => n.isRest ? 'rest' : n.name).join(', ')}`);
     return svg;
   }
-  function tradingCard(item) {
+  function tradingCard(item, { firstOpen = false } = {}) {
     const card = document.createElement('article');
     card.className = 'trading-card';
     card.dataset.finish = item.model.grade;
@@ -665,17 +742,28 @@
     pressable(art, dance);
     const targets = [[statFlip, flipStats], [art, dance]];
     const abilityRes = item.ability || (window.ability && item.model ? ability.scoreAbility(item.model) : null);
+    const chargedUbu = Boolean(abilityRes && (window.ability?.isCharged ? ability.isCharged(abilityRes) : abilityRes.percentile >= 90));
+    const materialUbu = isMaterialItem(item);
+    card.classList.toggle('is-charged-ubu', chargedUbu);
+    card.classList.toggle('is-material-ubu', materialUbu);
+    if (firstOpen && (chargedUbu || materialUbu)) card.classList.add('is-first-open');
+    if (chargedUbu) art.append(makeElectricArcs('card-art-charge-fx'));
+    if (materialUbu) art.append(makeMaterialSparkles('card-art-material-fx', 4));
     let abilityEl = null;
     if (abilityRes) {
       abilityEl = document.createElement('div'); abilityEl.className = 'card-ability';
+      if (chargedUbu) abilityEl.classList.add('is-charged');
       const abilityCaption = document.createElement('span'), abilityValue = document.createElement('strong');
       abilityCaption.textContent = 'Ability'; abilityValue.textContent = ubuList.rarityScore(abilityRes.percentile);
       abilityEl.append(abilityCaption, abilityValue);
+      if (chargedUbu && firstOpen) abilityEl.append(makeElectricArcs('ledge-charge-fx'));
     }
     const rarityEl = document.createElement('div'); rarityEl.className = 'card-rarity';
+    if (materialUbu) rarityEl.classList.add('is-material');
     const rarityCaption = document.createElement('span'), rarityValue = document.createElement('strong');
     rarityCaption.textContent = 'Rarity'; rarityValue.textContent = ubuList.rarityScore(item.rarity.percentile);
     rarityEl.append(rarityCaption, rarityValue);
+    if (materialUbu && firstOpen) rarityEl.append(makeMaterialSparkles('ledge-material-fx', 2));
     const supers = document.createElement('section'); supers.className = 'card-supers'; supers.setAttribute('aria-label', 'Supers');
     const supersCaption = document.createElement('span'), supersIcons = document.createElement('div');
     supersCaption.textContent = 'Supers';
@@ -773,7 +861,12 @@
         btn.style.setProperty('--ubu-x', `${xs[i]}%`);
         // Match the pack reveal fan's centre-on-top z-order during emergence.
         btn.style.zIndex = String(10 - Math.abs(i * 2 - (count - 1)));
+        const charged = isChargedItem(item), material = isMaterialItem(item);
+        btn.classList.toggle('is-charged', charged);
+        btn.classList.toggle('is-material', material);
         btn.append(ubuRender(item.model, 'mint-ubu-svg'));
+        if (charged) btn.append(makeElectricArcs('ubu-charge-fx'));
+        if (material) btn.append(makeMaterialSparkles('ubu-material-fx', 3));
         btn.addEventListener('click', () => {
           if (busy) return;
           if (!revealOpen) {
@@ -812,8 +905,8 @@
       x: xs[i],
       y: 50,
       r: i === activeIdx ? 12.5 : 8.5,
-      alpha: i === activeIdx ? 1 : 0.78,
-      color: i < pack.seen || i === activeIdx ? item.model.attributes.background.hex : '#ffecd2'
+      alpha: i === activeIdx ? 1 : 0.82,
+      color: i < pack.seen || i === activeIdx ? item.model.attributes.background.hex : silhouetteSpotColor(item)
     })));
   }
 
@@ -834,10 +927,10 @@
     display(item.text, item.result, false);
     syncStageUbuStates(index);
     updateRevealLights(index);
-    if (newlyRevealed) sound('playPack', 'reveal');
+    if (newlyRevealed) sound('playPack', 'reveal', { charged: isChargedItem(item), material: isMaterialItem(item) });
     const cardStage = $('card-stage');
     cardStage.classList.remove('panning');
-    cardStage.replaceChildren(tradingCard(item));
+    cardStage.replaceChildren(tradingCard(item, { firstOpen: newlyRevealed }));
     $('reveal-dots').replaceChildren(...pack.items.map((_, i) => {
       const dot = document.createElement('span');
       dot.className = i === index ? 'current' : i < pack.seen ? 'seen' : '';
@@ -870,7 +963,7 @@
       $('pack-subtitle').textContent = '';
       $('mint-ubus').classList.add('is-emerging');
       mintLights.setSpots(
-        pack.items.map((_, i) => ({ id: 'ubu-' + i, x: xs[i], y: 50, r: 9.5, alpha: 0.92, color: '#ffecd2' })),
+        pack.items.map((item, i) => ({ id: 'ubu-' + i, x: xs[i], y: 50, r: 9.5, alpha: 0.92, color: silhouetteSpotColor(item) })),
         { seedFrom: { x: 50, y: 50, r: 14, alpha: 1 } }
       );
       if (!motionOff()) {
@@ -1727,16 +1820,20 @@
     const fadeIn = fadeNextChoices;
     fadeNextChoices = false;
     mintLights.setSpots(data.choices.map((option, i) => ({
-      id: 'pack-' + i, x: 25 + i * 25, y: 50, r: 14.5, alpha: 1, color: option.hints[0].background
+      id: 'pack-' + i, x: 25 + i * 25, y: 50, r: packSpotRadius(option, 14.5), alpha: 1, color: packSpotColor(option)
     })));
     choiceViews.forEach((view, i) => {
-      const option = data.choices[i];
+      const option = data.choices[i], charge = packChargeOf(option);
       view.card.classList.remove('selected', 'swiped-left', 'swiped-right');
-      view.scene?.setHints(option.type, option.hints);
+      view.scene?.setHints(option.type, option.hints, charge);
       const hasSpecial = option.hints.some(h => h.textured);
       view.card.classList.toggle('special', hasSpecial);
-      view.card.style.setProperty('--pack-glow', option.hints[0].background);
-      const description = `Pack ${i + 1}: backgrounds ${option.hints.map(h => h.background).join(', ')}${hasSpecial ? '; special finish in pack' : '; matte finishes'}`;
+      view.card.classList.toggle('charged', charge > 0);
+      if (charge > 0) view.card.dataset.charge = String(charge);
+      else delete view.card.dataset.charge;
+      view.card.style.setProperty('--pack-glow', packSpotColor(option));
+      view.card.style.setProperty('--charge-stage', String(charge));
+      const description = `Pack ${i + 1}: backgrounds ${option.hints.map(h => h.background).join(', ')}${hasSpecial ? '; special finish in pack' : '; matte finishes'}${charge > 0 ? `; charged stage ${charge} of 5` : ''}`;
       view.button.setAttribute('aria-label', description);
       if (!still) {
         view.card.animate?.(fadeIn ? [
@@ -1749,7 +1846,7 @@
         ], { duration: fadeIn ? 420 : 500, delay: i * 95, easing: fadeIn ? 'ease-out' : 'cubic-bezier(.2, .8, .3, 1)', fill: 'backwards' });
       }
     });
-    sound('playPack', 'deal');
+    sound('playPack', 'deal', { charges: data.choices.map(packChargeOf) });
   }
   async function acceptPack(data) {
     pack = await readPack(data.certificates);
@@ -1812,10 +1909,11 @@
       if (i === index) view.card.classList.add('selected');
       else view.card.classList.add(i < index ? 'swiped-left' : 'swiped-right');
     });
-    mintLights.setSpots([{ id: 'pack-' + index, x: 50, y: 50, r: 19, alpha: 1, color: option.hints[0].background }]);
+    const charge = packChargeOf(option);
+    mintLights.setSpots([{ id: 'pack-' + index, x: 50, y: 50, r: packSpotRadius(option, 19), alpha: 1, color: packSpotColor(option) }]);
     $('pack-title').textContent = 'Opening pack…';
     $('pack-subtitle').textContent = '';
-    sound('playPack', 'pick');
+    sound('playPack', 'pick', { charge });
     let opened = false;
     try {
       localStorage.setItem(pendingKey + ':choice', JSON.stringify(selection));

@@ -1123,13 +1123,17 @@
         },
         {
           id: 'stage-mint-scamper',
-          title: 'Ubu Mint Spotlights, Reveal & Scamper (`mintLights`, `playPack`)',
-          when: 'Entering Ubu Mint, revealing silhouetted ubus under spotlights, and pressing `Done` (`finishPackWithScamper`, `playPack`).',
-          visual: 'Cast scatters off as an `80%` `#080a10` stage wash lights 5 (regular) or 3 (starter/daily) silhouetted ubus under warm spotlights; each ubu lights in full colour with a reveal chime, then hops (`-68%`, `1.12x`) and scampers off the ice (`±28°` spin, `45ms` stagger) to panned skitter SFX.',
+          title: 'Ubu Mint Spotlights, Charged & Special Packs, Reveal & Scamper (`mintLights`, `playPack`)',
+          when: 'Dealing Regular, Material (`special`), and Charged (`charge` 1–5) packs in Ubu Mint, revealing silhouetted ubus, and pressing `Done` (`finishPackWithScamper`, `playPack`).',
+          visual: 'Charged Packs (`charge` 1–5 top-decile Ability ubus) leak pressurized Volt (`#0066FF`) seam/crack light, electric sparks, micro-arcs, and Volt-tinted spotlights; silhouetted Charged ubus crackle with Volt arcs while Material ubus twinkle with pearlescent sparkles, and first-open cards burst around the ubu coin and call out the Ability / Rarity score ledges before scampering off.',
           soundLabel: 'Play pack sound',
           variants: [
             { id: 'scamper-5', label: '5-Ubu Reveal + Scamper' },
             { id: 'scamper-3', label: '3-Ubu Starter Scamper' },
+            { id: 'special-reveal', label: 'Charged + Material Silhouettes & Reveal' },
+            { id: 'charge-1', label: 'Charged Pack (Stage 1)' },
+            { id: 'charge-3', label: 'Charged Pack (Stage 3)' },
+            { id: 'charge-5', label: 'Charged Pack (Stage 5)' },
             { id: 'deal', label: 'Deal 3 Packs' },
             { id: 'pick', label: 'Pick Pack to Centre' },
             { id: 'crack', label: 'Egg Crack (3 Taps)' }
@@ -1141,6 +1145,8 @@
             if (variant === 'deal') a.playPack('deal');
             else if (variant === 'pick') a.playPack('pick');
             else if (variant === 'crack') a.playPack('crack', { stage: 3 });
+            else if (variant?.startsWith('charge-')) a.playPack('charge', { stage: Number(variant.slice(7)) || 3 });
+            else if (variant === 'special-reveal') a.playPack('reveal', { charged: true, material: true });
             else a.playPack('scamper', { count: variant === 'scamper-3' ? 3 : 5 });
           },
           run: (ctx, variant = 'scamper-5') => {
@@ -1723,6 +1729,29 @@
       fxMint.hidden = false;
       host.replaceChildren();
 
+      if (variant?.startsWith('charge-')) {
+        const st = Math.max(1, Math.min(5, Number(variant.slice(7)) || 3));
+        const voltMix = ['#ffecd2', '#82b6ff', '#579aff', '#2c7eff', '#126fff', '#0066FF'][st];
+        const xs = [23, 50, 77];
+        setFxMintSpots(xs.map((x, i) => ({
+          id: 'p-' + i, x, y: 50, r: i === 1 ? 15 + st * 0.9 : 14.5, alpha: i === 1 ? 1 : 0.85,
+          color: i === 1 ? voltMix : '#ffecd2'
+        })));
+        activeAudio()?.playPack?.('deal', { charges: [0, st, 0] });
+        timedCallbacks.push({
+          at: 0.42,
+          fn: () => {
+            setFxMintSpots([{ id: 'p-1', x: 50, y: 50, r: 19 + st * 0.9, alpha: 1, color: voltMix }]);
+            activeAudio()?.playPack?.('pick', { charge: st });
+          }
+        });
+        timedCallbacks.push({
+          at: 0.78,
+          fn: () => activeAudio()?.playPack?.('charge', { stage: st })
+        });
+        paintFxMintLights();
+        return;
+      }
       if (variant === 'deal') {
         const xs = [23, 50, 77];
         setFxMintSpots(xs.map((x, i) => ({
@@ -1762,32 +1791,47 @@
 
       const count = variant === 'scamper-3' ? 3 : 5;
       const xs = count === 3 ? [31, 50, 69] : [24, 37, 50, 63, 76];
+      const isSpecialDemo = variant === 'special-reveal';
       const ubuEls = Array.from({ length: count }, (_, i) => {
         const entry = view.entries[i % view.entries.length];
+        const charged = isSpecialDemo ? (i === 1 || i === 3 || i === 4) : false;
+        const material = isSpecialDemo ? (i === 2 || i === 4) : false;
         const btn = doc.createElement('div');
-        btn.className = 'mint-ubu is-silhouetted';
+        btn.className = 'mint-ubu is-silhouetted' + (charged ? ' is-charged' : '') + (material ? ' is-material' : '');
         btn.style.setProperty('--ubu-x', xs[i] + '%');
         btn.style.setProperty('--ubu-size', (count === 3 ? 8.2 : 7.0) + '%');
         const svg = ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'mint-ubu-svg', 256) : ubuRender(entry.model, 'mint-ubu-svg');
         btn.append(svg);
+        if (charged) {
+          const NS = 'http://www.w3.org/2000/svg';
+          const fx = doc.createElement('span'); fx.className = 'ubu-charge-fx';
+          const arcSvg = doc.createElementNS(NS, 'svg'); arcSvg.setAttribute('viewBox', '-64 -64 128 128');
+          ['M-50 -16 L-58 -26 L-46 -36 L-52 -46 L-36 -52', 'M34 -48 L46 -55 L42 -39 L55 -34 L48 -20', 'M46 18 L57 28 L44 37 L50 48 L34 52'].forEach((d, k) => {
+            const p = doc.createElementNS(NS, 'path'); p.setAttribute('d', d); p.setAttribute('class', `volt-arc volt-arc-${k + 1}`); arcSvg.append(p);
+          });
+          fx.append(arcSvg); btn.append(fx);
+        }
         host.append(btn);
-        return { el: btn, color: entry.model.attributes.background.hex || '#ffecd2', x: xs[i] };
+        const silColor = charged && material ? '#d9ecff' : charged ? '#8ec0ff' : material ? '#fff0c2' : '#ffecd2';
+        return { el: btn, color: entry.model.attributes.background.hex || '#ffecd2', silColor, charged, material, x: xs[i] };
       });
 
-      setFxMintSpots(ubuEls.map((u, i) => ({ id: 'u-' + i, x: u.x, y: 50, r: 9.5, alpha: 0.92, color: '#ffecd2' })));
+      setFxMintSpots(ubuEls.map((u, i) => ({ id: 'u-' + i, x: u.x, y: 50, r: 9.5, alpha: 0.92, color: u.silColor })));
       paintFxMintLights();
 
       ubuEls.forEach((u, i) => {
         timedCallbacks.push({
-          at: 0.35 + i * 0.18,
+          at: (isSpecialDemo ? 0.55 : 0.35) + i * 0.18,
           fn: () => {
             u.el.classList.remove('is-silhouetted');
             u.el.classList.add('is-revealed');
             setFxMintSpots(ubuEls.map((item, j) => ({
               id: 'u-' + j, x: item.x, y: 50, r: j === i ? 12 : 9.5, alpha: j <= i ? 0.96 : 0.82,
-              color: j <= i ? item.color : '#ffecd2'
+              color: j <= i ? item.color : item.silColor
             })));
-            if (i === 0 || i === count - 1) activeAudio()?.playPack?.('reveal');
+            if (i === 0 || i === count - 1 || u.charged || u.material) {
+              activeAudio()?.playPack?.('reveal', { charged: u.charged, material: u.material });
+            }
           }
         });
       });

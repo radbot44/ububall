@@ -1052,29 +1052,93 @@
     osc.stop(start + length + 0.02);
   }
 
+  // A crisp Volt electric arc snap: filtered high-band static tick + descending spark chirp.
+  function electricSnap(ctx, dest, start, level = 0.22, pan = 0) {
+    const dur = 0.007 + Math.random() * 0.011;
+    noiseGrain(ctx, dest, start, dur, {
+      freq: 4600 + Math.random() * 4200,
+      to: 1800 + Math.random() * 1400,
+      q: 2.6,
+      level: Math.min(0.65, level * 1.15),
+      pan
+    });
+    blip(ctx, dest, start, 0.016 + Math.random() * 0.016, 1750 + Math.random() * 1500, 420 + Math.random() * 260, level * 0.55, pan);
+  }
+
   // Pack shop sounds: 'deal' flicks three packs onto the ice, 'pick' pops the chosen pack to
-  // centre, 'crack' taps an egg (options.stage 1-3), 'reveal' chimes on spotlight reveal, and
-  // 'scamper' skitters the opened ubus away.
+  // centre, 'charge' previews a Charged Pack stage (1-5), 'crack' taps an egg (options.stage 1-3),
+  // 'reveal' chimes on spotlight reveal (with electric/sparkle accents for charged/material ubus),
+  // and 'scamper' skitters the opened ubus away.
   function playPack(kind, options = {}) {
     const ctx = options.ctx || getAudioContext();
     if (!ctx) return;
-    const master = createMasterChain(ctx, null, kind === 'scamper' ? 0.65 : 0.4);
+    const hold = kind === 'scamper' || kind === 'charge' || (kind === 'reveal' && (options.charged || options.material)) || (kind === 'deal' && (options.charge > 0 || options.charges?.some(c => c > 0)))
+      ? 0.68
+      : 0.44;
+    const master = createMasterChain(ctx, null, hold);
     const now = ctx.currentTime;
+    const clampStage = v => Math.max(0, Math.min(5, Math.trunc(v) || 0));
     if (kind === 'deal') {
-      for (let i = 0; i < 3; i++) noiseGrain(ctx, master, now + i * 0.12, 0.09, { freq: 2600, to: 900, level: 0.5, pan: (i - 1) * 0.5 });
+      const slotCharges = Array.isArray(options.charges) ? options.charges.map(clampStage) : null;
+      const fallbackCharge = clampStage(options.charge);
+      for (let i = 0; i < 3; i++) {
+        const pan = (i - 1) * 0.5, landAt = now + i * 0.12;
+        noiseGrain(ctx, master, landAt, 0.09, { freq: 2600, to: 900, level: 0.5, pan });
+        const st = slotCharges ? slotCharges[i] : (i === 1 ? fallbackCharge : 0);
+        if (st > 0) {
+          const lvl = 0.07 + st * 0.032;
+          blip(ctx, master, landAt + 0.035, 0.09 + st * 0.014, 180 + st * 22, 310 + st * 48, lvl * 0.75, pan);
+          for (let s = 0; s < st; s++) {
+            electricSnap(ctx, master, landAt + 0.045 + s * 0.028 + Math.random() * 0.012, lvl, pan);
+          }
+        }
+      }
     } else if (kind === 'pick') {
       blip(ctx, master, now, 0.14, 420, 940, 0.45);
       noiseGrain(ctx, master, now, 0.05, { freq: 3200, to: 1800, level: 0.25 });
+      const st = clampStage(options.charge ?? options.stage);
+      if (st > 0) {
+        const lvl = 0.09 + st * 0.035;
+        blip(ctx, master, now + 0.015, 0.16, 220, 480 + st * 85, lvl * 0.85);
+        for (let s = 0; s <= st; s++) {
+          electricSnap(ctx, master, now + 0.03 + s * 0.026 + Math.random() * 0.01, lvl, (Math.random() - 0.5) * 0.45);
+        }
+      }
+    } else if (kind === 'charge') {
+      const st = Math.max(1, clampStage(options.stage ?? options.charge ?? 3));
+      const lvl = 0.09 + st * 0.038;
+      blip(ctx, master, now, 0.14 + st * 0.03, 155, 290 + st * 68, lvl * 0.9);
+      blip(ctx, master, now + 0.04, 0.12 + st * 0.025, 340, 680 + st * 110, lvl * 0.48);
+      const snaps = 1 + st * 2;
+      for (let s = 0; s < snaps; s++) {
+        electricSnap(ctx, master, now + 0.02 + s * (0.28 / snaps) + Math.random() * 0.014, lvl, (Math.random() - 0.5) * 0.6);
+      }
     } else if (kind === 'crack') {
       // An eggshell tap: a light tick, with more small crackles as the crack spreads.
       const stage = options.stage || 1;
       noiseGrain(ctx, master, now, 0.004, { freq: 3600, q: 2, level: 0.3 });
       blip(ctx, master, now, 0.02, 1700, 1400, 0.08);
       for (let i = 1; i < stage * 2; i++) noiseGrain(ctx, master, now + 0.01 + Math.random() * 0.05 * stage, 0.003, { freq: 2600 + Math.random() * 3000, q: 2, level: 0.12 + 0.04 * stage });
+      const st = clampStage(options.charge);
+      if (st > 0) electricSnap(ctx, master, now + 0.014, 0.08 + st * 0.028);
     } else if (kind === 'reveal') {
       blip(ctx, master, now, 0.11, 520, 1040, 0.28);
       blip(ctx, master, now + 0.055, 0.16, 780, 1320, 0.2);
       noiseGrain(ctx, master, now, 0.04, { freq: 4200, to: 2400, level: 0.12 });
+      if (options.charged) {
+        blip(ctx, master, now + 0.085, 0.15, 660, 1760, 0.18);
+        for (let s = 0; s < 4; s++) {
+          electricSnap(ctx, master, now + 0.07 + s * 0.045 + Math.random() * 0.012, 0.16 - s * 0.02, (s - 1.5) * 0.22);
+        }
+      }
+      if (options.material) {
+        const baseOffset = options.charged ? 0.13 : 0.075;
+        [[1568, 2093, -0.25], [1976, 2637, 0.2], [2349, 3136, 0]].forEach(([f0, f1, pan], idx) => {
+          const t = now + baseOffset + idx * 0.05;
+          blip(ctx, master, t, 0.13, f0, f1, 0.13 - idx * 0.02, pan);
+          noiseGrain(ctx, master, t, 0.024, { freq: 6800, to: 9200, q: 3.2, level: 0.075, pan });
+        });
+      }
     } else if (kind === 'scamper') {
       const n = Math.max(1, Math.min(5, options.count || 5));
       for (let i = 0; i < n; i++) {
@@ -1176,6 +1240,15 @@
       for (let i = 0; i < 6; i++) noiseGrain(ctx, master, at(0.07) + rand(0, 0.04), 0.003, { freq: rand(1500, 4000), q: 1.5, level: 0.16 });
       noiseGrain(ctx, master, at(0.2), 0.2 * seconds, { freq: 1200, to: 2200, q: 0.9, level: 0.04 });
       noiseGrain(ctx, master, at(0.4), 0.18 * seconds, { freq: 2500, to: 1800, q: 0.9, level: 0.035 });
+    }
+    const charge = Math.max(0, Math.min(5, Math.trunc(options.charge) || 0));
+    if (charge > 0) {
+      const lvl = 0.07 + charge * 0.032;
+      scatter(0.05, 0.58, 4 + charge * 5, (t, speed) => {
+        electricSnap(ctx, master, t, lvl * (0.65 + speed * 0.35), rand(-0.45, 0.45));
+      });
+      const burstAt = at(type === 'cookie' ? 0.28 : type === 'plastic' ? 0.52 : 0.22);
+      blip(ctx, master, burstAt, Math.min(0.22, 0.1 + charge * 0.02), 210, 540 + charge * 110, lvl * 0.8);
     }
   }
 

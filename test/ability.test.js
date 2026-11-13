@@ -297,3 +297,22 @@ test('Nested scale tiers (--quick ⊂ standard ⊂ --deep), interleaved strata, 
   assert.equal(poolOut.length, 4);
   assert.ok(poolOut.every(r => Number.isFinite(r.goalDiff) && r.turns >= 2));
 });
+
+test('isCharged classifies top-decile Ability (>= 90th percentile) identically across raw 128-byte DNA, decoded models, stats, and scored objects', () => {
+  assert.equal(ability.CHARGED_PERCENTILE, 90);
+  const eliteDna = new Uint8Array(128).fill(255);
+  const lowDna = new Uint8Array(128).fill(0);
+  const eliteModel = ubu.decode(eliteDna);
+  const lowModel = ubu.decode(lowDna);
+  assert.equal(ability.scoreAbility(eliteDna).score, ability.scoreAbility(eliteModel).score);
+  assert.equal(ability.scoreAbility(lowDna).score, ability.scoreAbility(lowModel).score);
+  assert.equal(ability.isCharged(eliteDna), true);
+  assert.equal(ability.isCharged(eliteModel), true);
+  assert.equal(ability.isCharged(eliteModel.stats), true);
+  assert.equal(ability.isCharged(ability.scoreAbility(eliteModel)), true);
+  assert.equal(ability.isCharged(lowDna), false);
+  assert.equal(ability.isCharged(lowModel), false);
+  assert.equal(ability.isCharged({ score: ability.TABLE[900], percentile: 90 }), true);
+  assert.equal(ability.isCharged({ score: ability.TABLE[899], percentile: 89.99 }), false);
+  assert.equal(ability.isCharged(null), false);
+});

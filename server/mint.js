@@ -2,6 +2,7 @@
 const { sign } = require('../shared/ubu-file.js');
 const ubu = require('../shared/ubu.js');
 const { scoreRarity, starterTeam } = require('../shared/rarity.js');
+const { isCharged } = require('../shared/ability.js');
 const { decode, fromCode, PALETTE, read } = ubu;
 
 const MAX_SERIAL = 999999999999;
@@ -47,8 +48,8 @@ function randomBelow(size) {
   return roll % size;
 }
 
-function packHint(code) {
-  const dna = fromCode(code), colors = [];
+function packHint(source) {
+  const dna = source instanceof Uint8Array ? source : fromCode(source), colors = [];
   let textured = false;
   for (let i = 0; i < 5; i++) {
     const start = 64 + 18 * i;
@@ -263,7 +264,13 @@ class Mint {
       }
       const choices = this.exec('SELECT * FROM pack_choices WHERE owner=? ORDER BY position', owner).map(choice => {
         const items = this.exec('SELECT dna FROM inventory WHERE pack_slot=(SELECT pack_slot FROM inventory WHERE id=?) ORDER BY quintile', choice.anchor);
-        return { choice: choice.token, type: packType(choice.token), hints: items.map(item => packHint(item.dna)) };
+        let charge = 0;
+        const hints = items.map(item => {
+          const dna = fromCode(item.dna);
+          if (isCharged(dna)) charge++;
+          return packHint(dna);
+        });
+        return { choice: choice.token, type: packType(choice.token), charge, hints };
       });
       return { request: offer.request, expires: offer.expires, choices };
     });

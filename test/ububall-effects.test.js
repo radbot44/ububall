@@ -3891,7 +3891,7 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
       icon: name => makeDomNode('svg', 'icon-' + name),
       confirm: async () => false
     },
-    ubu, ubuFile, rarity, ubuArchetype, ububallPhysics: P,
+    ubu, ubuFile, rarity, ability: require('../shared/ability.js'), ubuArchetype, ububallPhysics: P,
     ubuRender: Object.assign(() => makeDomNode('svg'), {
       back: () => makeDomNode('svg'),
       cardMaterials: () => makeDomNode('div'),
@@ -3931,16 +3931,17 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
       mount: () => ({ render() {}, clearFilters() {} })
     },
     createPackScene: () => {
-      let packType = 'foil';
+      let packType = 'foil', packCharge = 0;
       return {
         async play(amount, models, options) {
-          unwrapCalls.push({ amount, count: models.length, silhouette: Boolean(options?.silhouette), type: packType });
+          unwrapCalls.push({ amount, count: models.length, silhouette: Boolean(options?.silhouette), type: packType, charge: packCharge });
         },
         awaitingTap: () => false,
         tap: () => false,
         reset() {},
-        setStarter() { packType = 'starter'; },
-        setHints(type) { packType = type; },
+        setStarter() { packType = 'starter'; packCharge = 0; },
+        setHints(type, _hints, charge = 0) { packType = type; packCharge = charge; },
+        getCharge: () => packCharge,
         getSilhouetteTokens(amount = 5) {
           return Array.from({ length: amount }, (_, i) => {
             const slot = i - (amount - 1) / 2;
@@ -3957,9 +3958,9 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
         return json({
           request: body.request,
           choices: [
-            { choice: 'tok-0', type: 'foil', hints },
-            { choice: 'tok-1', type: 'gift', hints },
-            { choice: 'tok-2', type: 'plastic', hints }
+            { choice: 'tok-0', type: 'foil', charge: 3, hints },
+            { choice: 'tok-1', type: 'gift', charge: 0, hints },
+            { choice: 'tok-2', type: 'plastic', charge: 5, hints }
           ]
         });
       }
@@ -4197,6 +4198,290 @@ test('Rink stage Phase 3: persistent stage shell, Mint lighting & spotlights, on
   rafCallback(16);
   assert.deepEqual(transforms.at(-1), [0.5, 0, 0, 0.5, 300, 180 * 0.46 + 153],
     'pack-scene centers and scales transform to .candy-pack host when canvas overflows');
+
+  // Verify Charged Packs Stages 1..5, coexistence with Special packs, silhouetted crackle/sparkle, and first-open vs revisit card effects
+  const abilityMod = require('../shared/ability.js');
+  // Re-deal checks on pack-choices
+  const dealtCards = getMintEl('pack-choices').children;
+  assert.equal(dealtCards[0].classList.contains('charged'), true, 'Stage 3 choice gets .charged class');
+  assert.equal(dealtCards[0].dataset.charge, '3', 'Stage 3 choice records data-charge=3');
+  assert.equal(dealtCards[1].classList.contains('charged'), false, 'Stage 0 choice is uncharged');
+  assert.equal(dealtCards[2].classList.contains('charged'), true, 'Stage 5 choice gets .charged class');
+  assert.equal(dealtCards[2].dataset.charge, '5', 'Stage 5 choice records data-charge=5');
+  assert.equal(dealtCards[2].style.getPropertyValue('--pack-glow'), '#0066ff', 'Stage 5 pack glow reaches pure Volt #0066FF');
+  assert.match(dealtCards[0].children[0].getAttribute('aria-label'), /charged stage 3 of 5/, 'accessible label announces charge stage');
+
+  // Verify real pack-scene.js handles all 8 wrappers across Stages 0..5 and respects prefers-reduced-motion
+  let scheduledFrames = 0;
+  let reducedPref = false;
+  let unwrapChargedCall = null;
+  const chargedSceneCtx = {
+    Math, Number, String, Boolean, Array, Object, Map, Set, Promise, Uint8Array, Uint16Array, Uint32Array, parseInt,
+    crypto: globalThis.crypto,
+    navigator: { userActivation: { hasBeenActive: true } },
+    devicePixelRatio: 1,
+    performance: { now: () => 320 },
+    requestAnimationFrame: fn => { scheduledFrames++; rafCallback = fn; return scheduledFrames; },
+    cancelAnimationFrame() {},
+    matchMedia: () => ({ get matches() { return reducedPref; }, addEventListener() {} }),
+    ResizeObserver: class { observe() {} },
+    Image: class { set src(_) {} },
+    ubuAudio: {
+      playUnwrap(type, dur, opts) { unwrapChargedCall = { type, dur, charge: opts?.charge }; },
+      playPack() {}
+    },
+    document: { createElement: () => ({ width: 64, height: 64, dataset: {}, getContext: noopCtx }) }
+  };
+  chargedSceneCtx.globalThis = chargedSceneCtx;
+  runInNewContext(packSceneSrc, chargedSceneCtx);
+  const sampleHints = Array.from({ length: 5 }, (_, idx) => ({ background: '#ff9954', accents: ['#fff', '#fff', '#fff', '#fff'], textured: idx === 4 }));
+  for (const wType of chargedSceneCtx.createPackScene.types) {
+    const c = {
+      clientWidth: 300, clientHeight: 180, width: 300, height: 180, dataset: {},
+      parentElement: { addEventListener() {} },
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 300, height: 180 }),
+      getContext: noopCtx
+    };
+    const sc = chargedSceneCtx.createPackScene(c);
+    sc.setHints(wType, sampleHints, 4);
+    assert.equal(sc.getCharge(), 4);
+    assert.equal(c.dataset.charge, '4');
+    const beforeRaf = scheduledFrames;
+    rafCallback(400);
+    assert.equal(scheduledFrames, beforeRaf + 1, `${wType} Charged Pack animates electric particles when motion is allowed`);
+    reducedPref = true;
+    const reducedBefore = scheduledFrames;
+    rafCallback(460);
+    assert.equal(scheduledFrames, reducedBefore, `${wType} Charged Pack skips continuous RAF loop under prefers-reduced-motion`);
+    reducedPref = false;
+  }
+  const unwrapCanvas = {
+    clientWidth: 300, clientHeight: 180, width: 300, height: 180, dataset: {},
+    parentElement: { addEventListener() {} },
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 300, height: 180 }),
+    getContext: noopCtx
+  };
+  const unwrapScene = chargedSceneCtx.createPackScene(unwrapCanvas);
+  unwrapScene.setHints('gift', sampleHints, 5);
+  void unwrapScene.play(5, [], { silhouette: true });
+  assert.equal(unwrapChargedCall?.charge, 5, 'unwrap forwards pack charge stage to ubuAudio.playUnwrap');
+});
+
+test('Charged & Material silhouetted ubus and first-open vs revisited tradingCard effects', async () => {
+  const crypto = require('node:crypto');
+  const P = require('../shared/ububall-physics.js');
+  const ubu = require('../shared/ubu.js');
+  const ubuFile = require('../shared/ubu-file.js');
+  const rarity = require('../shared/rarity.js');
+  const ability = require('../shared/ability.js');
+  const ubuArchetype = require('../shared/ubu-archetype.js');
+  const siteSrc = fs.readFileSync(path.join(__dirname, '../web/site.js'), 'utf8');
+
+  const keys = await crypto.webcrypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+  const pubJwk = await crypto.webcrypto.subtle.exportKey('jwk', keys.publicKey);
+
+  // Build 5 deterministic ubus:
+  // [0]: Charged + Matte (max stats, matte finishes)
+  // [1]: Uncharged + Material (low stats, starfield material gate=31 on background)
+  // [2]: Charged + Material (max stats + material)
+  // [3..4]: Uncharged + Matte
+  const makeDna = ({ highAbility, material }) => {
+    const dna = new Uint8Array(128);
+    // Bits 374..493 = 15 stats
+    for (let s = 0; s < 15; s++) {
+      const val = highAbility ? 250 : 20;
+      const bit = 374 + s * 8, byte = bit >> 3, shift = bit & 7;
+      dna[byte] = (dna[byte] & ~(0xff >> shift)) | (val >> shift);
+      dna[byte + 1] = (dna[byte + 1] & ~((0xff << (8 - shift)) & 0xff)) | ((val << (8 - shift)) & 0xff);
+    }
+    if (material) {
+      // Slot 0 gate starts at bit 64 + 8 = 72 (byte 9, bits 0..4 = 31 -> 0xF8)
+      dna[9] |= 0xf8;
+    }
+    return dna;
+  };
+  const dnas = [
+    makeDna({ highAbility: true, material: false }),
+    makeDna({ highAbility: false, material: true }),
+    makeDna({ highAbility: true, material: true }),
+    makeDna({ highAbility: false, material: false }),
+    makeDna({ highAbility: false, material: false })
+  ];
+  assert.equal(ability.isCharged(dnas[0]), true);
+  assert.equal(ability.isCharged(dnas[1]), false);
+  assert.equal(ability.isCharged(dnas[2]), true);
+
+  const certs = await Promise.all(dnas.map((d, idx) => ubuFile.sign({
+    mint: 'AAAAAAAAAAAAAAAAAAAAAA',
+    id: Buffer.alloc(16, idx + 1).toString('base64url'),
+    serial: String(idx + 1).padStart(12, '0'),
+    dna: ubu.toCode(d),
+    issuedAt: 1790000000 + idx,
+    key: 'k1'
+  }, keys.privateKey)));
+
+  const makeNode = (tag, id = '') => {
+    const classes = new Set();
+    const attrs = new Map();
+    const props = new Map();
+    const listeners = {};
+    const node = {
+      tagName: tag.toUpperCase(), id, hidden: false, disabled: false, textContent: '', dataset: {}, children: [], parentElement: null,
+      classList: {
+        add: (...cs) => cs.forEach(c => c && classes.add(c)),
+        remove: (...cs) => cs.forEach(c => classes.delete(c)),
+        toggle: (c, f) => { const on = f === undefined ? !classes.has(c) : Boolean(f); if (on) classes.add(c); else classes.delete(c); return on; },
+        contains: c => classes.has(c)
+      },
+      set className(v) { classes.clear(); String(v || '').split(/\s+/).filter(Boolean).forEach(c => classes.add(c)); },
+      get className() { return [...classes].join(' '); },
+      style: { setProperty: (k, v) => props.set(k, String(v)), getPropertyValue: k => props.get(k) || '' },
+      get firstChild() { return node.children[0] || null; },
+      setAttribute: (k, v) => attrs.set(k, String(v)),
+      getAttribute: k => attrs.get(k) ?? null,
+      removeAttribute: k => attrs.delete(k),
+      after(...kids) {
+        if (!node.parentElement) return;
+        for (const k of kids) if (k && typeof k === 'object') k.parentElement = node.parentElement;
+        const idx = node.parentElement.children.indexOf(node);
+        node.parentElement.children.splice(idx + 1, 0, ...kids.filter(k => k && typeof k === 'object'));
+      },
+      append(...kids) { for (const k of kids) if (k && typeof k === 'object') { k.parentElement = node; node.children.push(k); } },
+      replaceChildren(...kids) { node.children = []; node.append(...kids); },
+      querySelector: sel => {
+        const cls = sel.startsWith('.') ? sel.slice(1) : null;
+        const visit = n => {
+          for (const ch of n.children || []) {
+            if ((cls && ch.classList?.contains(cls)) || ch.tagName?.toLowerCase() === sel) return ch;
+            const found = visit(ch);
+            if (found) return found;
+          }
+          return null;
+        };
+        return visit(node);
+      },
+      querySelectorAll: () => [],
+      closest: () => null,
+      contains: target => target === node,
+      getBoundingClientRect: () => ({ left: 0, top: 0, right: 200, bottom: 120, width: 200, height: 120 }),
+      addEventListener: (t, fn) => { listeners[t] = fn; },
+      click() { if (!node.disabled) listeners.click?.({ preventDefault() {}, stopPropagation() {}, target: node, detail: 1 }); },
+      focus() {},
+      animate: () => ({ onfinish: null, oncancel: null, cancel() {} })
+    };
+    return node;
+  };
+  const els = new Map();
+  const getEl = id => { if (!els.has(id)) els.set(id, makeNode('div', id)); return els.get(id); };
+  for (const sid of ['daily-pack', 'signup-stage-pack', 'home-pack']) {
+    const w = getEl(sid), b = makeNode('button'), c = makeNode('canvas');
+    b.append(c); w.append(b);
+  }
+  getEl('pack-choices').hidden = true;
+  getEl('mint-ubus').hidden = true;
+  getEl('mint-reveal').hidden = true;
+  const stageDom = makeNode('div', 'rink-stage');
+  const revealCalls = [];
+  const store = new Map();
+  let pubKey = null;
+  const win = {
+    location: { pathname: '/mint' },
+    navigator: { userActivation: { hasBeenActive: true } },
+    devicePixelRatio: 1,
+    matchMedia: () => ({ matches: true, addEventListener() {} }),
+    requestAnimationFrame: () => 1,
+    setTimeout: fn => { fn(); return 1; },
+    clearTimeout() {},
+    URL, Blob, TextDecoder, crypto: crypto.webcrypto,
+    localStorage: { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k) },
+    addEventListener() {}, dispatchEvent() {},
+    getUbuSession: () => ({ owner: 'acct-2', csrf: 'tok' }),
+    gameUi: { icon: name => makeNode('svg', 'icon-' + name), confirm: async () => false },
+    ubu, ubuFile, rarity, ability, ubuArchetype, ububallPhysics: P,
+    ubuRender: Object.assign(() => makeNode('svg'), { back: () => makeNode('svg'), cardMaterials: () => makeNode('div'), token: () => makeNode('svg'), tokenBack: () => makeNode('svg') }),
+    ubuAudio: {
+      getAudioContext: () => null,
+      parseVoiceInfo: () => ({ instrument: 'Sine', rootName: 'C4', rootFreq: 261.6, scale: 'Major', tempoBpm: 120, groove: 'Straight', grooveIndex: 0, notes: [{ midi: 60, name: 'C4', beats: 1, degree: 0, isRest: false }] }),
+      playPack(kind, opts) { if (kind === 'reveal') revealCalls.push(opts); },
+      stop() {}
+    },
+    ubuStarter: { status: { signup: false, daily: false }, known: true, async refresh() {}, async claim() { return { certificates: [] }; } },
+    ubuList: {
+      config: async () => ({ ready: true, login: true, mint: 'AAAAAAAAAAAAAAAAAAAAAA', lifetimeLimit: 5, keys: { k1: pubJwk.x } }),
+      trustedKey: async () => (pubKey ||= await crypto.webcrypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: pubJwk.x, ext: true }, { name: 'Ed25519' }, false, ['verify'])),
+      load: async () => {}, get: () => null, add() {}, setFavorite: async () => {},
+      serialLabel: s => '#' + Number(s), rarityScore: p => p.toFixed(2), heartIcon: () => makeNode('svg'),
+      mount: () => ({ render() {}, clearFilters() {} })
+    },
+    createPackScene: () => ({ async play() {}, awaitingTap: () => false, tap: () => false, reset() {}, setStarter() {}, setHints() {}, getSilhouetteTokens: () => [] }),
+    fetch: async url => ({
+      ok: true, status: 200,
+      json: async () => url === '/api/packs'
+        ? { request: 'req_0000000000000001', choices: [
+            { choice: 'c0', type: 'foil', charge: 2, hints: dnas.map((_, i) => ({ background: '#0066FF', textured: i === 1 || i === 2 })) },
+            { choice: 'c1', type: 'gift', charge: 0, hints: dnas.map(() => ({ background: '#FF9954', textured: false })) },
+            { choice: 'c2', type: 'egg', charge: 1, hints: dnas.map(() => ({ background: '#42C66B', textured: false })) }
+          ] }
+        : url === '/api/mint' ? { certificates: certs } : {}
+    })
+  };
+  const doc = {
+    body: { dataset: { shot: 'mint' }, append() {} }, activeElement: null,
+    getElementById: getEl, createElement: t => makeNode(t), createElementNS: (_, t) => makeNode(t),
+    querySelector: sel => sel === '.rink-stage' ? stageDom : makeNode('div'),
+    querySelectorAll: () => []
+  };
+  win.window = win; win.globalThis = win; win.document = doc;
+  win.performance = { now: () => 1000 };
+  Object.assign(win, { Object, Array, Set, Map, Math, Number, String, Boolean, Promise, JSON, Error, Uint8Array });
+
+  const wait = async pred => { for (let i = 0; i < 80 && !pred(); i++) await new Promise(r => setTimeout(r, 2)); };
+  runInNewContext(siteSrc, win);
+  await wait(() => getEl('pack-choices').children.length === 3 && !getEl('pack-choices').hidden);
+
+  // Pack 0 has both special (textured) and charge: 2 -> both classes coexist!
+  const p0 = getEl('pack-choices').children[0];
+  assert.equal(p0.classList.contains('special') && p0.classList.contains('charged'), true, 'Special + Charged coexist on pack option');
+
+  // Open Pack 0 -> check silhouetted ubus 0..4 and first-open Card 0 (Charged, Matte)
+  p0.children[0].click();
+  await wait(() => !getEl('mint-reveal').hidden && getEl('card-stage').children.length === 1);
+
+  const stageBtns = getEl('mint-ubus').children;
+  assert.equal(stageBtns[0].classList.contains('is-charged'), true, 'ubu 0 marked .is-charged on stage');
+  assert.equal(stageBtns[0].classList.contains('is-material'), false);
+  assert.ok(stageBtns[1].querySelector('.ubu-material-fx'), 'silhouetted material ubu 1 mounts .ubu-material-fx sparkles');
+  assert.ok(stageBtns[2].querySelector('.ubu-charge-fx') && stageBtns[2].querySelector('.ubu-material-fx'),
+    'silhouetted dual ubu 2 mounts both .ubu-charge-fx and .ubu-material-fx');
+
+  // Card 0 on first open: .is-first-open.is-charged-ubu, .card-art-charge-fx, .card-ability.is-charged + .ledge-charge-fx
+  const card0 = getEl('card-stage').children[0];
+  assert.equal(card0.classList.contains('is-first-open'), true);
+  assert.equal(card0.classList.contains('is-charged-ubu'), true);
+  assert.equal(card0.classList.contains('is-material-ubu'), false);
+  assert.ok(card0.querySelector('.card-art-charge-fx'), 'Charged ubu mounts crackling arcs around .ubu-coin');
+  assert.ok(card0.querySelector('.card-ability')?.classList.contains('is-charged'), 'Ability ledge marked .is-charged');
+  assert.ok(card0.querySelector('.ledge-charge-fx'), 'Ability ledge mounts first-open .ledge-charge-fx');
+  assert.deepEqual({ ...revealCalls[0] }, { charged: true, material: false });
+
+  // Step to ubu 1 (Uncharged + Material) -> first open triggers material burst & Rarity ledge callout
+  getEl('next-ubu').click();
+  await wait(() => getEl('reveal-progress').textContent === '2 / 5');
+  const card1 = getEl('card-stage').children[0];
+  assert.equal(card1.classList.contains('is-first-open'), true);
+  assert.equal(card1.classList.contains('is-material-ubu'), true);
+  assert.ok(card1.querySelector('.card-art-material-fx'), 'Material ubu mounts sparkles around .ubu-coin');
+  assert.ok(card1.querySelector('.card-rarity')?.classList.contains('is-material'), 'Rarity ledge marked .is-material');
+  assert.ok(card1.querySelector('.ledge-material-fx'), 'Rarity ledge mounts first-open .ledge-material-fx');
+  assert.deepEqual({ ...revealCalls[1] }, { charged: false, material: true });
+
+  // Step back to already-seen ubu 0 -> .is-charged-ubu persists, but .is-first-open burst does NOT replay!
+  getEl('prev-ubu').click();
+  await wait(() => getEl('reveal-progress').textContent === '1 / 5');
+  const card0Revisit = getEl('card-stage').children[0];
+  assert.equal(card0Revisit.classList.contains('is-charged-ubu'), true);
+  assert.equal(card0Revisit.classList.contains('is-first-open'), false, 'revisiting an already-seen card omits .is-first-open');
+  assert.equal(revealCalls.length, 2, 'revisiting an already-seen card does not replay reveal chime');
 });
 
 test('Rink stage Phase 4: stretched portrait Collection rink, repeating markings & center logos, 2-step rotate/stretch & shrink/rotate camera moves, sticky dock, and hybrid on-ice viewer', async () => {

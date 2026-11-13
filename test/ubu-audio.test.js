@@ -359,10 +359,16 @@ test('audio: all 16 instruments synthesize all 4 timbreMod states with valid Web
 
 test('pack, unwrap, coin, sizzle, foul, and iron-save cues obey Web Audio ramp rules and preserve shared chains', () => {
   // All pack & unwrap styles (including sub-3ms crackles) maintain strictly chronological ramps
-  for (const kind of ['deal', 'pick', 'crack', 'reveal', 'scamper']) {
+  for (const kind of ['deal', 'pick', 'charge', 'crack', 'reveal', 'scamper']) {
     const ctx = recordedContext();
-    audio.playPack(kind, { ctx, stage: 3 });
+    audio.playPack(kind, { ctx, stage: 3, charge: 4, charges: [0, 2, 5], charged: true, material: true });
     assert.ok(ctx.nodes.some(n => n.kind === 'constant'), `playPack(${kind}) schedules chain release`);
+  }
+  for (let stage = 1; stage <= 5; stage++) {
+    const ctx = recordedContext();
+    audio.playPack('charge', { ctx, stage });
+    audio.playUnwrap('foil', 1.4, { ctx, charge: stage });
+    assert.ok(ctx.nodes.some(n => n.kind === 'oscillator'), `stage ${stage} charge synthesizes cleanly`);
   }
   for (const kind of ['flick', 'land']) {
     const ctx = recordedContext();

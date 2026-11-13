@@ -11,6 +11,7 @@
 
   const STATS = Object.freeze(STAT_GROUPS.flatMap(([, keys]) => keys));
   const KNOTS = Object.freeze([0, 64, 127.5, 191, 255]);
+  const CHARGED_PERCENTILE = 90;
 
   // Exact 18 px ballHitRadius floor in shared/ububall-physics.js: 25 * (2/3)^((127 - 25.321928)/127) === 18.0.
   // Because baseReach = max(baseRadius, 25 * mult(reach), 18), raw.reach has zero physical effect whenever
@@ -83,8 +84,17 @@
   }
 
   function resolveStats(input) {
+    if (input instanceof Uint8Array) {
+      if (input.length !== 128) throw new RangeError('DNA must contain 128 bytes.');
+      const fromDna = {};
+      for (let i = 0; i < STATS.length; i++) {
+        const bit = 374 + i * 8, byte = bit >> 3, shift = bit & 7;
+        fromDna[STATS[i]] = (((input[byte] << 8) | input[byte + 1]) >> (8 - shift)) & 255;
+      }
+      return fromDna;
+    }
     if (!input || typeof input !== 'object') {
-      throw new TypeError('Expected decoded ubu model or 15-stat object.');
+      throw new TypeError('Expected decoded ubu model, 128-byte DNA, or 15-stat object.');
     }
     const s = input.stats && typeof input.stats === 'object' ? input.stats : input;
     for (let i = 0; i < STATS.length; i++) {
@@ -151,10 +161,19 @@
     };
   }
 
+  function isCharged(input, customModel = MODEL) {
+    if (!input) return false;
+    const res = typeof input === 'object' && typeof input.percentile === 'number' && !input.stats && !(input instanceof Uint8Array)
+      ? input
+      : scoreAbility(input, customModel);
+    return typeof res.percentile === 'number' && res.percentile >= CHARGED_PERCENTILE;
+  }
+
   const api = Object.freeze({
     STATS,
     STAT_GROUPS,
     KNOTS,
+    CHARGED_PERCENTILE,
     REACH_FLOOR,
     INTERACTIONS,
     MODEL,
@@ -162,7 +181,8 @@
     evalSpline,
     evalSplineContinuous,
     percentile,
-    scoreAbility
+    scoreAbility,
+    isCharged
   });
 
   if (typeof module === 'object' && module.exports) module.exports = api;

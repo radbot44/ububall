@@ -39,7 +39,14 @@
     let frame = 0, progress = 0, started = 0, finish = null, count = 5, pointer = 0, pointerY = 0;
     let aimX = 0, aimY = 0, lastPaint = 0;
     let blobCanvas, blobCtx, blobPixels, blobColors = [], blobFaces = [];
-    let packHints = null, silhouetteReveal = false;
+    let packHints = null, packCharge = 0, silhouetteReveal = false, paintClock = 0;
+    const VOLT = '#0066FF', VOLT_MID = '#4DA3FF', VOLT_CORE = '#E6F5FF';
+    const CHARGE_POWER = [0, .16, .34, .56, .78, 1];
+    const CHARGE_PARTICLES = [0, 5, 10, 16, 23, 32];
+    const CHARGE_ARCS = [0, 1, 2, 3, 5, 8];
+    const chargeRolls = new Uint16Array(192);
+    const chargePower = () => CHARGE_POWER[packCharge] || 0;
+    const chargePulse = (speed = .0052, shift = 0) => .84 + .16 * Math.sin(paintClock * speed + shift);
     let color, candyColors, previousColor = -1, currentType = null;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     const tokenCache = new Map();
@@ -84,6 +91,61 @@
         wash.addColorStop(0, hint.background); wash.addColorStop(.4, hint.background + 'dd'); wash.addColorStop(1, hint.background + '00');
         target.fillStyle = wash; target.fillRect(-135, -135, 270, 270);
       });
+    }
+
+    // Pressurized Volt energy glowing along a wrapper's structural seam or fracture line.
+    function voltSeam(target, pts, power, widthScale = 1) {
+      if (!pts || pts.length < 2 || power <= 0) return;
+      const pulse = chargePulse(.0058, pts[0].x * .03);
+      const p = Math.min(1.25, power * pulse);
+      const trace = () => {
+        target.beginPath();
+        target.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) target.lineTo(pts[i].x, pts[i].y);
+      };
+      target.save();
+      target.lineCap = 'round';
+      target.lineJoin = 'round';
+      trace();
+      target.shadowColor = VOLT;
+      target.shadowBlur = (5 + 17 * p) * widthScale;
+      target.strokeStyle = `rgba(0, 102, 255, ${(.18 + .44 * p).toFixed(3)})`;
+      target.lineWidth = (3.2 + 8.8 * p) * widthScale;
+      target.stroke();
+      target.shadowBlur = 0;
+      trace();
+      target.strokeStyle = `rgba(77, 163, 255, ${(.30 + .52 * p).toFixed(3)})`;
+      target.lineWidth = (1.4 + 3.4 * p) * widthScale;
+      target.stroke();
+      trace();
+      target.strokeStyle = `rgba(230, 245, 255, ${(.40 + .56 * p).toFixed(3)})`;
+      target.lineWidth = (.65 + 1.35 * p) * widthScale;
+      target.stroke();
+      target.restore();
+    }
+
+    // Directional plume of Volt light escaping outward perpendicular to a seam segment.
+    function voltPlume(target, x1, y1, x2, y2, nx, ny, reach, alpha) {
+      if (reach <= 1 || alpha <= .005) return;
+      const mx = (x1 + x2) * .5, my = (y1 + y2) * .5;
+      const spread = 1 + reach * .0045;
+      const ox1 = mx + (x1 - mx) * spread + nx * reach, oy1 = my + (y1 - my) * spread + ny * reach;
+      const ox2 = mx + (x2 - mx) * spread + nx * reach, oy2 = my + (y2 - my) * spread + ny * reach;
+      target.save();
+      target.beginPath();
+      target.moveTo(x1, y1);
+      target.lineTo(x2, y2);
+      target.lineTo(ox2, oy2);
+      target.lineTo(ox1, oy1);
+      target.closePath();
+      const g = target.createLinearGradient(mx, my, mx + nx * reach, my + ny * reach);
+      g.addColorStop(0, `rgba(214, 240, 255, ${Math.min(1, alpha * .95).toFixed(3)})`);
+      g.addColorStop(.24, `rgba(0, 102, 255, ${Math.min(1, alpha * .72).toFixed(3)})`);
+      g.addColorStop(.68, `rgba(0, 102, 255, ${Math.min(1, alpha * .22).toFixed(3)})`);
+      g.addColorStop(1, 'rgba(0, 102, 255, 0)');
+      target.fillStyle = g;
+      target.fill();
+      target.restore();
     }
 
     // --- Plastic Cellophane Wrapper ---
@@ -228,9 +290,29 @@
       const shineX = -70 + pointer * 22;
       target.fillStyle = gradient(target, shineX - 55, -135, shineX + 100, 135, [[0, '#ffffff00'], [.31, '#ffffff00'], [.4, '#ffffff50'], [.43, '#ffffffa0'], [.46, '#ffffff12'], [.57, '#ffffff00'], [.8, '#ffffff22'], [1, '#ffffff00']]);
       target.fillRect(-110, -135, 220, 270);
+      if (packCharge > 0) {
+        const pwr = chargePower(), pulse = chargePulse(.006, 1.1);
+        const core = target.createRadialGradient(pointer * 16, pointerY * 12, 4, 0, 0, 118);
+        core.addColorStop(0, `rgba(214, 240, 255, ${(.14 + .38 * pwr * pulse).toFixed(3)})`);
+        core.addColorStop(.45, `rgba(0, 102, 255, ${(.12 + .34 * pwr * pulse).toFixed(3)})`);
+        core.addColorStop(1, 'rgba(0, 102, 255, 0)');
+        target.fillStyle = core;
+        target.fillRect(-128, -135, 256, 270);
+        for (const [sy, arch] of [[-68, -7], [68, 7]]) {
+          const pts = Array.from({ length: 9 }, (_, k) => {
+            const u = k / 8, x = -98 + u * 196;
+            return { x, y: sy + Math.sin(u * Math.PI) * arch };
+          });
+          voltSeam(target, pts, pwr * .78, .72);
+        }
+      }
       // A narrow printed band leaves the colored cellophane visible above and below.
       target.fillStyle = gradient(target, 0, -29, 0, 29, [[0, '#101217b8'], [.5, '#101217e8'], [1, '#101217b8']]);
       target.fillRect(-112, -29, 224, 58);
+      if (packCharge > 0) {
+        const pwr = chargePower();
+        for (const y of [-29, 29]) voltSeam(target, [{ x: -108, y }, { x: 108, y }], pwr * .85, .62);
+      }
       target.strokeStyle = '#ffffff40'; target.lineWidth = .6;
       for (const y of [-29, 29]) {
         target.beginPath(); target.moveTo(-110, y); target.lineTo(110, y); target.stroke();
@@ -289,6 +371,13 @@
       sheetCtx.setTransform(2, 0, 0, 2, 600, 360);
       sheetCtx.save();
       for (const side of [-1, 1]) plasticFilm(side, flat, untwist, sheetCtx);
+      if (packCharge > 0 && flat < .95) {
+        const pwr = chargePower() * (1 - flat * .85) * (1 + .48 * Math.sin(Math.PI * untwist));
+        for (const side of [-1, 1]) {
+          voltPlume(sheetCtx, side * 122, -13, side * 122, 13, side, 0, 34 + 96 * pwr, .18 + .56 * pwr);
+          voltSeam(sheetCtx, [{ x: side * 116, y: 0 }, { x: side * (134 + 36 * pwr), y: 0 }], pwr, .85);
+        }
+      }
       plasticCenter(flat, sheetCtx);
       sheetCtx.restore();
       plasticKnot(-1, untwist, sheetCtx); plasticKnot(1, untwist, sheetCtx);
@@ -553,6 +642,30 @@
         sheetCtx.restore();
       }
 
+      if (packCharge > 0 && foilTear.length > 2) {
+        const pwr = chargePower();
+        // Hairline Volt fracture grows from the center of the tear path outward across Stages 1-5.
+        const mid = (foilTear.length - 1) / 2;
+        const halfSpan = 1.6 + packCharge * ((mid - 1.2) / 5);
+        const sub = foilTear.filter((_, i) => Math.abs(i - mid) <= halfSpan);
+        if (sub.length >= 2) {
+          voltSeam(sheetCtx, sub, pwr, .78 + .26 * pwr);
+          if (packCharge >= 3) {
+            for (let i = 1; i < sub.length - 1; i += 2) {
+              const p = sub[i], dir = i % 4 === 1 ? -1 : 1;
+              const len = (7 + 14 * pwr) * (.6 + .4 * Math.abs(Math.sin(i * 2.1)));
+              voltSeam(sheetCtx, [p, { x: p.x + (i % 3 - 1) * 5, y: p.y + dir * len }], pwr * .72, .52);
+            }
+          }
+        }
+        // Pinpoints of Volt light escaping between gathered perimeter flutes.
+        const step = Math.max(2, 7 - packCharge);
+        for (let i = 0; i < foilRimPoints.length; i += step) {
+          const pt = foilRimPoints[i];
+          voltSeam(sheetCtx, [{ x: pt.x * .90, y: pt.y * .90 }, { x: pt.x * .99, y: pt.y * .99 }], pwr * .75, .55);
+        }
+      }
+
       sheetCtx.restore();
     }
 
@@ -582,6 +695,14 @@
       const openY = rip * 165, openX = rip * 24, rot = rip * 0.22;
       const fade = 1 - ease(0.80, 0.95, t);
 
+      if (packCharge > 0 && rip < .82) {
+        const pwr = chargePower() * (1 - ease(.52, .82, rip));
+        const rift = ctx.createRadialGradient(0, 0, 4, 0, 0, 126 + rip * 70);
+        rift.addColorStop(0, `rgba(230, 245, 255, ${(.35 + .55 * pwr).toFixed(3)})`);
+        rift.addColorStop(.38, `rgba(0, 102, 255, ${(.28 + .48 * pwr).toFixed(3)})`);
+        rift.addColorStop(1, 'rgba(0, 102, 255, 0)');
+        ctx.save(); ctx.fillStyle = rift; ctx.beginPath(); ctx.ellipse(0, 0, 132, 34 + rip * 95, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      }
       // Upper torn flap: curls up and peels away
       ctx.save();
       ctx.globalAlpha = fade;
@@ -803,7 +924,30 @@
       ctx.save(); ctx.globalAlpha = silhouetteReveal ? 1 : 1 - ease(.94, 1, t);
       if (become < 1) {
         ctx.save(); ctx.globalAlpha *= 1 - become;
-        ctx.drawImage(blobCanvas, -300, -180, 600, 360); ctx.restore();
+        ctx.drawImage(blobCanvas, -300, -180, 600, 360);
+        if (packCharge > 0) {
+          const pwr = chargePower() * (1 - become);
+          // Pressurized Volt veins trace the pinched valleys where adjacent lobes meet.
+          const valleys = Math.min(count, 1 + packCharge);
+          for (let i = 0; i < valleys; i++) {
+            const a = (i + .5) * Math.PI * 2 / count - Math.PI / 2;
+            const bend = Math.sin(paintClock * .004 + i * 1.9) * 6;
+            const r0 = 10 + split * 18, r1 = (48 + 30 * pwr) * (1 - split * .35);
+            const nx = -Math.sin(a), ny = Math.cos(a);
+            const pts = [
+              { x: Math.cos(a) * r0, y: Math.sin(a) * r0 },
+              { x: Math.cos(a) * ((r0 + r1) * .52) + nx * bend, y: Math.sin(a) * ((r0 + r1) * .52) + ny * bend },
+              { x: Math.cos(a) * r1, y: Math.sin(a) * r1 }
+            ];
+            voltSeam(ctx, pts, pwr * .9, .78);
+          }
+          if (split > .05) {
+            for (let i = 0; i < count - 1; i++) {
+              voltSeam(ctx, [lobes[i], lobes[i + 1]], pwr * Math.sin(split * Math.PI) * .85, .65);
+            }
+          }
+        }
+        ctx.restore();
       }
       if (become) {
         ctx.globalAlpha *= become;
@@ -873,10 +1017,26 @@
       ctx.fillStyle = gradient(ctx, -R, 0, R, 0, [[0, tint(base, .45)], [.5, tint(base, .15)], [1, tint(base, -.3)]]);
       ctx.fillRect(-R, -2, R * 2, 10);
       ctx.restore();
+      if (packCharge > 0 && away < 1) {
+        const pwr = chargePower() * (1 - away);
+        ctx.save();
+        const domeGlow = ctx.createRadialGradient(0, -34 - pop * 18, 4, 0, -28, R * (.72 + .28 * pwr));
+        domeGlow.addColorStop(0, `rgba(224, 243, 255, ${(.16 + .44 * pwr).toFixed(3)})`);
+        domeGlow.addColorStop(.48, `rgba(0, 102, 255, ${(.14 + .36 * pwr).toFixed(3)})`);
+        domeGlow.addColorStop(1, 'rgba(0, 102, 255, 0)');
+        ctx.fillStyle = domeGlow;
+        ctx.beginPath(); ctx.arc(0, -8, R, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
       // Gumballs jump as the dome pops, then give way to the ubus.
       ctx.save(); ctx.globalAlpha = 1 - ease(.44, .58, t);
       gumballs.forEach((g, i) => ball(g.x, g.y - Math.sin(Math.PI * pop) * (22 + i * 4), 25, hintHex(i)));
       ctx.restore();
+      if (packCharge > 0 && away < 1) {
+        const pwr = chargePower() * (1 - away) * (1 + .35 * Math.sin(Math.PI * pop));
+        const halfW = R * (.38 + .62 * (packCharge / 5));
+        voltSeam(ctx, [{ x: -halfW, y: -2 + pop * 8 }, { x: halfW, y: -2 + pop * 8 }], pwr, .88);
+      }
       // Clear dome: tick marks along its rim travel as it twists; it then flies off.
       ctx.save(); ctx.globalAlpha = 1 - away;
       ctx.translate(away * 60, -pop * 60 - away * 170); ctx.rotate(-pop * .3 - away * .5);
@@ -926,11 +1086,28 @@
       }
       ctx.restore();
       const shown = Math.min(1, eggTaps / 3), mid = (crack.length - 1) / 2;
-      if (shown) {
-        const pts = crack.filter((_, i) => Math.abs(i - mid) <= mid * shown + .01);
-        ctx.beginPath(); pts.forEach((pt, i) => i ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y));
-        ctx.strokeStyle = '#ffffff70'; ctx.lineWidth = 2; ctx.save(); ctx.translate(.8, 1.4); ctx.stroke(); ctx.restore();
-        ctx.strokeStyle = tint(hintHex(0), -.7); ctx.lineWidth = 2.4; ctx.lineJoin = 'round'; ctx.stroke();
+      const chargeShown = packCharge > 0 ? Math.min(1, .18 + packCharge * .16 + shown * .45) : 0;
+      const crackSpan = Math.max(shown, chargeShown);
+      if (crackSpan) {
+        const pts = crack.filter((_, i) => Math.abs(i - mid) <= mid * crackSpan + .01);
+        if (pts.length >= 2) {
+          if (packCharge > 0) {
+            const pwr = Math.min(1.15, chargePower() + shown * .24);
+            ctx.save(); eggPath(ctx); ctx.clip();
+            voltSeam(ctx, pts, pwr, .82 + shown * .25);
+            if (packCharge >= 3) {
+              for (let i = 1; i < pts.length - 1; i += 2) {
+                const p = pts[i], dir = i % 4 === 1 ? -1 : 1;
+                voltSeam(ctx, [p, { x: p.x + (i % 3 - 1) * 6, y: p.y + dir * (9 + 15 * pwr) }], pwr * .7, .52);
+              }
+            }
+            ctx.restore();
+          } else {
+            ctx.beginPath(); pts.forEach((pt, i) => i ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y));
+            ctx.strokeStyle = '#ffffff70'; ctx.lineWidth = 2; ctx.save(); ctx.translate(.8, 1.4); ctx.stroke(); ctx.restore();
+            ctx.strokeStyle = tint(hintHex(0), -.7); ctx.lineWidth = 2.4; ctx.lineJoin = 'round'; ctx.stroke();
+          }
+        }
       }
     }
     function renderEgg(t) {
@@ -945,6 +1122,14 @@
       ctx.beginPath(); ctx.ellipse(0, 122, 70, 9, 0, 0, Math.PI * 2); ctx.fillStyle = '#00000038'; ctx.filter = 'blur(6px)'; ctx.fill(); ctx.filter = 'none';
       ctx.restore();
       if (!lift) { eggShell(); ctx.restore(); return; }
+      if (packCharge > 0 && drop < 1) {
+        const pwr = chargePower() * (1 - drop);
+        const core = ctx.createRadialGradient(0, -lift * 32, 4, 0, -lift * 20, 108);
+        core.addColorStop(0, `rgba(230, 245, 255, ${(.34 + .52 * pwr).toFixed(3)})`);
+        core.addColorStop(.45, `rgba(0, 102, 255, ${(.24 + .44 * pwr).toFixed(3)})`);
+        core.addColorStop(1, 'rgba(0, 102, 255, 0)');
+        ctx.fillStyle = core; ctx.beginPath(); ctx.arc(0, -lift * 20, 108, 0, Math.PI * 2); ctx.fill();
+      }
       // Hatching: the shell parts along the crack; the cap tips off and the base sinks away.
       // One side of the crack: the cap above it (edge -170) or the base below it (edge 170).
       const half = edge => { ctx.beginPath(); ctx.moveTo(-130, edge); ctx.lineTo(130, edge); for (let i = crack.length - 1; i >= 0; i--) ctx.lineTo(crack[i].x, crack[i].y); ctx.closePath(); };
@@ -1008,6 +1193,23 @@
       ctx.save(); ctx.globalAlpha = 1 - fall; ctx.translate(0, fall * 70);
       block(-96, -28, 192, 134, d, false, true, untie);
       ctx.restore();
+      if (packCharge > 0 && fall < 1) {
+        const pwr = chargePower() * (1 - fall);
+        const span = 36 + packCharge * 12.8;
+        // Volt light leaking out from the gap directly beneath the overhanging lid.
+        voltPlume(ctx, -span, -28 + fall * 70, span, -28 + fall * 70, 0, 1, 18 + 46 * pwr, .22 + .52 * pwr);
+        voltSeam(ctx, [{ x: -span, y: -28 + fall * 70 }, { x: span, y: -28 + fall * 70 }], pwr, .86);
+        if (packCharge >= 2) {
+          const sFrac = Math.min(1, (packCharge - 1) / 4);
+          voltSeam(ctx, [
+            { x: 96, y: -28 + fall * 70 },
+            { x: 96 + d[0] * sFrac, y: -28 + fall * 70 + d[1] * sFrac }
+          ], pwr * .82, .72);
+        }
+        if (lid > .04) {
+          voltPlume(ctx, -90, -28 + fall * 70, 90, -28 + fall * 70, 0, -1, (40 + 95 * pwr) * Math.sin(Math.PI * clamp(lid * 1.1)), .30 + .55 * pwr);
+        }
+      }
       // The lid overhangs the box a little; the bow sits on its top face.
       ctx.save(); ctx.globalAlpha = 1 - ease(.36, .52, t);
       ctx.translate(-lid * 70, -lid * 150); ctx.rotate(-lid * .8);
@@ -1077,6 +1279,17 @@
       ctx.bezierCurveTo(35, -87, 40, -78, 28, -68);
       ctx.bezierCurveTo(-13, -25, -51, 29, -79, 80); ctx.closePath();
       ctx.fillStyle = '#875025'; ctx.fill();
+      if (packCharge > 0) {
+        const pwr = chargePower();
+        const tSpan = .28 + packCharge * .144;
+        const pocketPts = [
+          { x: mix(-32, -68, tSpan), y: mix(14, 88, tSpan) },
+          { x: -12, y: -6 },
+          { x: mix(6, 34, tSpan), y: mix(-28, -63, tSpan) }
+        ];
+        voltPlume(ctx, pocketPts[0].x, pocketPts[0].y, pocketPts[2].x, pocketPts[2].y, -.68, -.73, 18 + 52 * pwr, .22 + .55 * pwr);
+        voltSeam(ctx, pocketPts, pwr, .88);
+      }
       cookieFront(ctx);
       ctx.fillStyle = gradient(ctx, -35 + pointer * 15, -65, 95 + pointer * 15, 85, [[0, '#ffe3a2'], [.52, '#efc781'], [1, '#d29b53']]);
       ctx.fill();
@@ -1179,6 +1392,14 @@
       // Only the tip peeks out at rest; the enlarged fortune bridges the open mouths.
       if (!snap) { fortuneSlip(target, 0, 0); cookieBody(target); target.restore(); return; }
       for (const side of [-1, 1]) cookieHalf(target, side, snap, apart, false);
+      if (packCharge > 0 && apart < 1) {
+        const pwr = chargePower() * (1 - apart);
+        const hollow = target.createRadialGradient(0, 6, 4, 0, 6, 95 + snap * 45);
+        hollow.addColorStop(0, `rgba(230, 245, 255, ${(.30 + .52 * pwr).toFixed(3)})`);
+        hollow.addColorStop(.45, `rgba(0, 102, 255, ${(.22 + .42 * pwr).toFixed(3)})`);
+        hollow.addColorStop(1, 'rgba(0, 102, 255, 0)');
+        target.fillStyle = hollow; target.beginPath(); target.arc(0, 6, 130, 0, Math.PI * 2); target.fill();
+      }
       fortuneSlip(target, slip, slip);
       for (const side of [-1, 1]) cookieHalf(target, side, snap, apart, true);
       target.restore();
@@ -1269,6 +1490,21 @@
         ctx.restore();
       }
       envelopeBody();
+      if (packCharge > 0 && away < 1) {
+        const pwr = chargePower() * (1 - away);
+        if (inside) {
+          const span = .25 + packCharge * .15;
+          for (const side of [-1, 1]) {
+            const x0 = 0, y0 = tipY;
+            const x1 = mix(0, side * (W / 2 - 6), span), y1 = mix(tipY, top + 3, span);
+            voltPlume(ctx, x0, y0, x1, y1, side * .6, .8, 14 + 42 * pwr, .20 + .48 * pwr);
+            voltSeam(ctx, [{ x: x0, y: y0 }, { x: x1, y: y1 }], pwr, .82);
+          }
+        } else {
+          voltPlume(ctx, -W / 2 + 12, top, W / 2 - 12, top, 0, -1, 32 + 88 * pwr, .26 + .56 * pwr);
+          voltSeam(ctx, [{ x: -W / 2 + 12, y: top }, { x: W / 2 - 12, y: top }], pwr, .88);
+        }
+      }
       if (!inside) flap();
       // The seal rides the flap's tip until it cracks apart and falls.
       if (!inside || open < .55) {
@@ -1301,10 +1537,186 @@
       tap?.(); done?.();
     }
 
+    // Seam emitter segments { x1, y1, x2, y2, nx, ny } in wrapper coordinates for each pack type.
+    function seamSegments(typeId) {
+      if (typeId === 'plastic') {
+        return [
+          { x1: -128, y1: -18, x2: -128, y2: 18, nx: -1, ny: 0 },
+          { x1: 128, y1: -18, x2: 128, y2: 18, nx: 1, ny: 0 },
+          { x1: -78, y1: -88, x2: 78, y2: -88, nx: 0, ny: -1 },
+          { x1: -78, y1: 88, x2: 78, y2: 88, nx: 0, ny: 1 }
+        ];
+      }
+      if (typeId === 'foil') {
+        return [
+          { x1: -106, y1: -4, x2: 0, y2: 6, nx: -.15, ny: -.98 },
+          { x1: 0, y1: 6, x2: 106, y2: -4, nx: .15, ny: .98 },
+          { x1: -98, y1: -56, x2: -112, y2: 12, nx: -.95, ny: -.3 },
+          { x1: 98, y1: -56, x2: 112, y2: 12, nx: .95, ny: -.3 }
+        ];
+      }
+      if (typeId === 'blob') {
+        return Array.from({ length: 5 }, (_, i) => {
+          const a = (i + .5) * Math.PI * 2 / 5 - Math.PI / 2;
+          const cx = Math.cos(a) * 62, cy = Math.sin(a) * 58;
+          const tx = -Math.sin(a) * 18, ty = Math.cos(a) * 18;
+          return { x1: cx - tx, y1: cy - ty, x2: cx + tx, y2: cy + ty, nx: Math.cos(a), ny: Math.sin(a) };
+        });
+      }
+      if (typeId === 'gumball') {
+        return [
+          { x1: -110, y1: 8, x2: -24, y2: 8, nx: -.55, ny: -.83 },
+          { x1: 24, y1: 8, x2: 110, y2: 8, nx: .55, ny: -.83 },
+          { x1: -72, y1: 8, x2: 72, y2: 8, nx: 0, ny: -1 }
+        ];
+      }
+      if (typeId === 'egg') {
+        return [
+          { x1: -90, y1: 2, x2: 0, y2: -4, nx: -.45, ny: -.89 },
+          { x1: 0, y1: -4, x2: 90, y2: 2, nx: .45, ny: -.89 },
+          { x1: -76, y1: 4, x2: 76, y2: 4, nx: 0, ny: .95 }
+        ];
+      }
+      if (typeId === 'gift') {
+        return [
+          { x1: -112, y1: -18, x2: 84, y2: -18, nx: -.15, ny: -.98 },
+          { x1: 82, y1: -18, x2: 124, y2: -44, nx: .82, ny: -.57 },
+          { x1: -112, y1: -18, x2: 84, y2: -18, nx: -.1, ny: .99 }
+        ];
+      }
+      if (typeId === 'cookie') {
+        return [
+          { x1: -68, y1: 94, x2: -10, y2: 8, nx: -.78, ny: -.62 },
+          { x1: -10, y1: 8, x2: 38, y2: -48, nx: -.62, ny: -.78 },
+          { x1: 20, y1: -58, x2: 78, y2: -32, nx: .52, ny: -.85 }
+        ];
+      }
+      if (typeId === 'envelope') {
+        return [
+          { x1: -122, y1: -64, x2: 0, y2: 28, nx: -.62, ny: .78 },
+          { x1: 0, y1: 28, x2: 122, y2: -64, nx: .62, ny: .78 },
+          { x1: -96, y1: -64, x2: 96, y2: -64, nx: 0, ny: -1 }
+        ];
+      }
+      return [{ x1: -90, y1: 0, x2: 90, y2: 0, nx: 0, ny: -1 }];
+    }
+
+    function drawChargeBack(now, t) {
+      const fade = 1 - ease(.56, .84, t);
+      if (fade <= .01) return;
+      const surge = 1 + .45 * Math.sin(Math.PI * clamp(t / .52));
+      const pwr = chargePower() * fade;
+      const segs = seamSegments(currentType?.id);
+      ctx.save();
+      // Subtle ambient Volt back-halo only strong enough to seat the seam plumes on the ice.
+      const backR = 118 + 74 * pwr * surge;
+      const halo = ctx.createRadialGradient(0, 0, 26, 0, 0, backR);
+      halo.addColorStop(0, `rgba(0, 102, 255, ${(.06 + .28 * pwr).toFixed(3)})`);
+      halo.addColorStop(.58, `rgba(0, 102, 255, ${(.03 + .14 * pwr).toFixed(3)})`);
+      halo.addColorStop(1, 'rgba(0, 102, 255, 0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(0, 0, backR, 0, Math.PI * 2); ctx.fill();
+      for (let i = 0; i < segs.length; i++) {
+        const s = segs[i];
+        const wave = .82 + .18 * Math.sin(now * .0048 + i * 1.7);
+        const reach = (24 + 92 * pwr) * wave * surge;
+        voltPlume(ctx, s.x1, s.y1, s.x2, s.y2, s.nx, s.ny, reach, (.12 + .46 * pwr) * wave);
+      }
+      ctx.restore();
+    }
+
+    function drawChargeFront(now, t) {
+      const fade = 1 - ease(.58, .86, t);
+      if (fade <= .01) return;
+      const pwr = chargePower();
+      const surge = 1 + .55 * Math.sin(Math.PI * clamp(t / .52));
+      const segs = seamSegments(currentType?.id);
+      const particleCount = CHARGE_PARTICLES[packCharge] || 0;
+      const arcCount = CHARGE_ARCS[packCharge] || 0;
+      const rUnit = idx => chargeRolls[idx % chargeRolls.length] / 65535;
+
+      ctx.save();
+      ctx.globalAlpha *= fade;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      // Electric particles streaming and jittering outward from the wrapper's seams.
+      for (let i = 0; i < particleCount; i++) {
+        const seg = segs[i % segs.length];
+        const speed = .00042 + rUnit(i * 5) * (.00038 + .00045 * pwr);
+        const phase = (now * speed + rUnit(i * 5 + 1)) % 1;
+        const along = .08 + .84 * ((rUnit(i * 5 + 2) + Math.floor(now * speed + rUnit(i * 5 + 1)) * .37) % 1);
+        const sx = mix(seg.x1, seg.x2, along), sy = mix(seg.y1, seg.y2, along);
+        const travel = (20 + 96 * pwr + rUnit(i * 5 + 3) * 34) * surge;
+        const tx = -seg.ny, ty = seg.nx;
+        const zig = Math.sin(now * .024 + i * 3.1) * (3 + 11 * pwr) * phase + (rUnit(i * 5 + 4) - .5) * 26 * phase;
+        const px = sx + seg.nx * travel * phase + tx * zig;
+        const py = sy + seg.ny * travel * phase + ty * zig;
+        const life = Math.sin(Math.PI * phase);
+        const alpha = life * (.38 + .60 * pwr);
+        if (alpha <= .03) continue;
+        const rad = (1.2 + 2.3 * pwr * rUnit(i * 3 + 7)) * (.7 + .5 * life);
+        // Outer Volt glow dot
+        ctx.fillStyle = `rgba(0, 102, 255, ${(alpha * .52).toFixed(3)})`;
+        ctx.beginPath(); ctx.arc(px, py, rad * 2.5, 0, Math.PI * 2); ctx.fill();
+        // Electric spark streak along travel vector
+        const tail = (2.5 + 8.5 * pwr) * life;
+        ctx.strokeStyle = `rgba(77, 163, 255, ${(alpha * .85).toFixed(3)})`;
+        ctx.lineWidth = rad * 1.25;
+        ctx.beginPath();
+        ctx.moveTo(px - seg.nx * tail, py - seg.ny * tail);
+        ctx.lineTo(px + seg.nx * tail * .35, py + seg.ny * tail * .35);
+        ctx.stroke();
+        // Hot white-cyan core
+        ctx.fillStyle = `rgba(230, 245, 255, ${Math.min(1, alpha * 1.05).toFixed(3)})`;
+        ctx.beginPath(); ctx.arc(px, py, rad * .72, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Crackling jagged micro-arcs snapping out from the seams.
+      const bucket = Math.floor(now / 58);
+      for (let a = 0; a < arcCount; a++) {
+        // Stage 1 flickers intermittently so a single top-decile ubu stays subtle; Stage 5 crackles continuously.
+        const hash = ((bucket * 2654435761 + (a + 1) * 1013904223) >>> 0) / 4294967296;
+        const duty = .38 + packCharge * .12;
+        if (hash > duty) continue;
+        const seg = segs[(a + bucket) % segs.length];
+        const u = .12 + .76 * (((hash * 17.3 + rUnit(a * 7 + 20)) % 1));
+        const x0 = mix(seg.x1, seg.x2, u), y0 = mix(seg.y1, seg.y2, u);
+        const reach = (16 + 58 * pwr) * (.65 + .55 * ((hash * 7.1) % 1)) * surge;
+        const tx = -seg.ny, ty = seg.nx;
+        const steps = packCharge >= 4 ? 4 : 3;
+        const pts = [{ x: x0, y: y0 }];
+        for (let k = 1; k <= steps; k++) {
+          const f = k / steps;
+          const jag = ((((bucket * 31 + a * 13 + k * 7) % 19) / 9) - 1) * (6 + 13 * pwr) * (1 - f * .25);
+          pts.push({
+            x: x0 + seg.nx * reach * f + tx * jag,
+            y: y0 + seg.ny * reach * f + ty * jag
+          });
+        }
+        const trace = () => {
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
+        };
+        trace();
+        ctx.strokeStyle = `rgba(0, 102, 255, ${(.34 + .50 * pwr).toFixed(3)})`;
+        ctx.lineWidth = 2.6 + 2.8 * pwr;
+        ctx.stroke();
+        trace();
+        ctx.strokeStyle = `rgba(230, 245, 255, ${(.55 + .42 * pwr).toFixed(3)})`;
+        ctx.lineWidth = .85 + .65 * pwr;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     function recolor(packTypeId) {
       settlePending();
       tokenCache.clear();
       packHints = null;
+      packCharge = 0;
+      crypto.getRandomValues(chargeRolls);
       progress = 0;
       let index;
       do { index = crypto.getRandomValues(new Uint8Array(1))[0] & 31; } while (index === previousColor);
@@ -1426,6 +1838,7 @@
 
     function paint(now) {
       frame = 0;
+      paintClock = reduced.matches ? 1200 : now;
       const follow = 1 - Math.exp(-Math.min(64, now - lastPaint) / 85);
       lastPaint = now;
       pointer = mix(pointer, aimX, follow); pointerY = mix(pointerY, aimY, follow);
@@ -1469,13 +1882,16 @@
         ctx.save();
         // Modest foreshortening plus surface parallax and moving light imply
         // volume without a 3D dependency or transforming the interaction target.
-        ctx.translate(pointer * 4, pointerY * 3);
+        const hum = packCharge >= 4 && !reduced.matches && progress === 0 ? (packCharge - 3) * .55 : 0;
+        ctx.translate(pointer * 4 + (hum ? Math.sin(paintClock * .09) * hum : 0), pointerY * 3 + (hum ? Math.cos(paintClock * .11) * hum * .75 : 0));
         ctx.transform(Math.cos(pointer * .22), pointer * pointerY * .035, -pointer * pointerY * .025, Math.cos(pointerY * .20), 0, 0);
         ctx.rotate(pointer * .025);
+        if (packCharge > 0) drawChargeBack(paintClock, progress);
         currentType.render(progress);
+        if (packCharge > 0) drawChargeFront(paintClock, progress);
         ctx.restore();
       }
-      if (settling) requestPaint();
+      if (settling || (packCharge > 0 && !reduced.matches && progress < (currentType?.end ?? 1))) requestPaint();
       if (finish) {
         if (progress < 1) requestPaint();
         else { const done = finish; finish = null; done(); }
@@ -1518,7 +1934,7 @@
         if (reduced.matches) return;
         started = performance.now(); progress = 0;
         // The opening sounds share this start, so each lands on its step of the animation.
-        if (navigator.userActivation?.hasBeenActive) globalThis.ubuAudio?.playUnwrap?.(currentType?.sound || currentType?.id, duration() / 1000);
+        if (navigator.userActivation?.hasBeenActive) globalThis.ubuAudio?.playUnwrap?.(currentType?.sound || currentType?.id, duration() / 1000, { charge: packCharge });
         return new Promise(resolve => { finish = resolve; requestPaint(); });
       },
       // True while a tap-to-open wrapper is waiting for the player.
@@ -1526,7 +1942,7 @@
       tap() {
         if (!awaitTap) return false;
         eggTaps++; knockAt = performance.now();
-        if (navigator.userActivation?.hasBeenActive) globalThis.ubuAudio?.playPack?.('crack', { stage: eggTaps });
+        if (navigator.userActivation?.hasBeenActive) globalThis.ubuAudio?.playPack?.('crack', { stage: eggTaps, charge: packCharge });
         if (eggTaps >= currentType.taps) { const resolve = awaitTap; awaitTap = null; resolve(); }
         requestPaint();
         return true;
@@ -1539,14 +1955,22 @@
       },
       setType(packTypeId) { recolor(packTypeId); },
       setStarter(label) { starterLabel = label; recolor('starter'); },
-      setHints(packTypeId, hints) {
+      setHints(packTypeId, hints, charge = 0) {
         recolor(packTypeId);
         packHints = hints;
+        packCharge = Math.max(0, Math.min(5, Math.trunc(charge) || 0));
+        canvas.dataset.charge = String(packCharge);
         candyColors = hints.map(hint => hint.background);
         color = candyColors[0];
         blobColors = candyColors.map(hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)));
         requestPaint();
       },
+      setCharge(charge = 0) {
+        packCharge = Math.max(0, Math.min(5, Math.trunc(charge) || 0));
+        canvas.dataset.charge = String(packCharge);
+        requestPaint();
+      },
+      getCharge() { return packCharge; },
       getSilhouetteTokens(amount = count) {
         const isBlob = currentType?.id === 'blob';
         return Array.from({ length: amount }, (_, i) => {
