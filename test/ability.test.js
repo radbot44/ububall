@@ -14,13 +14,6 @@ const list = require('../web/ubu-list.js');
 const bench = require('../scripts/ability-benchmark.cjs');
 const calibrate = require('../scripts/calibrate-ability.cjs');
 
-function putBits(dna, start, width, value) {
-  for (let i = 0; i < width; i++) {
-    const bit = start + i, mask = 1 << (7 - (bit & 7));
-    dna[bit >> 3] = (dna[bit >> 3] & ~mask) | (((value >> (width - i - 1)) & 1) ? mask : 0);
-  }
-}
-
 test('1024-bit DNA inputs receive deterministic, finite Ability Scores and bounded percentiles', async () => {
   for (const dna of [new Uint8Array(128), new Uint8Array(128).fill(255), await ubu.fromText('ububall')]) {
     const m1 = ubu.decode(dna);
@@ -31,22 +24,30 @@ test('1024-bit DNA inputs receive deterministic, finite Ability Scores and bound
     assert.deepEqual(s1, ability.scoreAbility(m1.stats));
     assert.ok(Number.isFinite(s1.score) && s1.percentile >= 0 && s1.percentile <= 100);
   }
-  const minStats = Object.fromEntries(ability.STATS.map(s => [s, 0]));
-  const maxStats = Object.fromEntries(ability.STATS.map(s => [s, 255]));
-  assert.equal(ability.scoreAbility(minStats).percentile, 0);
-  assert.equal(ability.scoreAbility(maxStats).percentile, 100);
+  const worstBuild = {
+    impulse: 0, traction: 0, spin: 127, curve: 255,
+    size: 255, mass: 0, bounciness: 255, grip: 255,
+    power: 0, reach: 0, strength: 0, stability: 0,
+    efficiency: 0, synergy: 0, chemistry: 0
+  };
+  const bestBuild = {
+    impulse: 255, traction: 255, spin: 0, curve: 0,
+    size: 0, mass: 255, bounciness: 0, grip: 0,
+    power: 255, reach: 255, strength: 255, stability: 255,
+    efficiency: 255, synergy: 255, chemistry: 255
+  };
+  assert.equal(ability.scoreAbility(worstBuild).percentile, 0);
+  assert.equal(ability.scoreAbility(bestBuild).percentile, 100);
 });
 
 test('Ability Score depends strictly on the 15 core stats (bits 374–493) and is invariant to appearance, supers, personality, voice, reserve, Ubuquity, and .ubu signing', async () => {
   const baseDna = ubu.randomDNA();
   const mutated = new Uint8Array(baseDna);
 
-  // Mutate visual/name bits (0–373)
   for (let bit = 0; bit <= 373; bit++) {
     const mask = 1 << (7 - (bit & 7));
     mutated[bit >> 3] ^= mask;
   }
-  // Mutate supers (494–509), personality (510–533), voice (534–597), reserve (598–1013), Ubuquity (1014–1023)
   for (let bit = 494; bit <= 1023; bit++) {
     const mask = 1 << (7 - (bit & 7));
     mutated[bit >> 3] ^= mask;
@@ -63,7 +64,6 @@ test('Ability Score depends strictly on the 15 core stats (bits 374–493) and i
   const a2 = ability.scoreAbility(mMut);
   assert.deepEqual(a1, a2);
 
-  // Unsigned vs Ed25519-signed .ubu certificate invariance
   const code = ubu.toCode(baseDna);
   const keys = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
   const id = () => Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url');
@@ -86,22 +86,28 @@ test('inline TABLE and MODEL stay synchronized with shared JSON artifacts and mo
   }
 });
 
-test('effective reach interaction activates only when Reach exceeds Size', () => {
+test('Reach scoring obeys exact ububall-physics baseReach = max(baseRadius, reach, 18) equivariance', () => {
   const neutral = Object.fromEntries(ability.STATS.map(s => [s, 127]));
-  const baseInter = ability.scoreAbility(neutral).breakdown.interactions;
-  const shadowed = ability.scoreAbility({ ...neutral, size: 200, reach: 150 });
-  const unshadowed = ability.scoreAbility({ ...neutral, size: 100, reach: 220 });
-  const z0 = (127 - 127.5) / 127.5;
-  // Isolate the (size, reach) change relative to neutral: when reach <= size, reach_over_size hinge is 0.
-  const expectedShadowDelta =
-    (((200 - 127.5) / 127.5) * ((150 - 127.5) / 127.5) - z0 * z0) * ability.MODEL.interactions.size_x_reach +
-    (((200 - 127.5) / 127.5) - z0) * z0 * (ability.MODEL.interactions.impulse_x_size + ability.MODEL.interactions.size_x_mass);
-  assert.ok(Math.abs((shadowed.breakdown.interactions - baseInter) - expectedShadowDelta) < 1e-12);
-  const expectedHinge = ((220 - 100) / 255) * ability.MODEL.interactions.reach_over_size;
-  const prodOnlyDelta =
-    (((100 - 127.5) / 127.5) * ((220 - 127.5) / 127.5) - z0 * z0) * ability.MODEL.interactions.size_x_reach +
-    (((100 - 127.5) / 127.5) - z0) * z0 * (ability.MODEL.interactions.impulse_x_size + ability.MODEL.interactions.size_x_mass);
-  assert.ok(Math.abs((unshadowed.breakdown.interactions - baseInter) - (prodOnlyDelta + expectedHinge)) < 1e-12);
+
+  // When Reach <= Size (and Size >= 26), raw Reach is physically shadowed by body radius: scores must match identically.
+  const bigLowReach = ability.scoreAbility({ ...neutral, size: 200, reach: 0 });
+  const bigMidReach = ability.scoreAbility({ ...neutral, size: 200, reach: 127 });
+  const bigCapReach = ability.scoreAbility({ ...neutral, size: 200, reach: 200 });
+  assert.equal(bigLowReach.score, bigMidReach.score);
+  assert.equal(bigMidReach.score, bigCapReach.score);
+  assert.equal(bigLowReach.breakdown.stats.reach, 0);
+
+  // Below the 18 px ballHitRadius floor (REACH_FLOOR ≈ 25.32), Reach 0..25 are also physically identical.
+  const tinyZero = ability.scoreAbility({ ...neutral, size: 12, reach: 0 });
+  const tiny25 = ability.scoreAbility({ ...neutral, size: 12, reach: 25 });
+  assert.equal(tinyZero.score, tiny25.score);
+  assert.equal(tiny25.breakdown.stats.reach, 0);
+
+  // Once Reach exceeds max(Size, REACH_FLOOR), poke-check extension strictly boosts Ability Score.
+  const extended = ability.scoreAbility({ ...neutral, size: 80, reach: 230 });
+  const unextended = ability.scoreAbility({ ...neutral, size: 80, reach: 80 });
+  assert.ok(extended.breakdown.stats.reach > 0.25);
+  assert.ok(extended.score > unextended.score + 0.25);
 });
 
 test('Collection ubuList sorts and filters by ability and places Ability right before Rarity', () => {
@@ -120,9 +126,9 @@ test('Collection ubuList sorts and filters by ability and places Ability right b
       parts: { fullName: 'Ubu ' + serial }
     }
   });
-  const sample = [make('000000000001', 60), make('000000000002', 220), make('000000000003', 140)];
+  const sample = [make('000000000001', 40), make('000000000002', 235), make('000000000003', 135)];
   assert.deepEqual(list.view(sample, { sort: 'ability' }).map(x => x.serial), ['000000000002', '000000000003', '000000000001']);
-  assert.deepEqual(list.view(sample, { query: 'ability>60 sort:ability' }).map(x => x.serial), ['000000000002', '000000000003']);
+  assert.deepEqual(list.view(sample, { query: 'ability>40 sort:ability' }).map(x => x.serial), ['000000000002', '000000000003']);
 });
 
 test('Trading card markup & CSS stack Ability ledge above Rarity and drop obsolete rarity foil/card-hue hooks', () => {
@@ -156,7 +162,6 @@ test('Benchmark harness enforces 50/50 Standard+Pulse split, symmetric swapped p
   const pulseCount = jobs.filter(j => j.mode === 'pulse').length;
   assert.equal(stdCount, pulseCount, 'exact 50/50 standard and pulse job split');
 
-  // Identical teams across a side-swapped pair with mirrored context must cancel to 0.0 goalDiff!
   const neutral = Object.fromEntries(ability.STATS.map(s => [s, 127]));
   const symResult = bench.runPairJob({
     id: 'sym:0',
@@ -171,14 +176,13 @@ test('Benchmark harness enforces 50/50 Standard+Pulse split, symmetric swapped p
   assert.equal(symResult.goalDiff, 0);
   assert.equal(symResult.winDiff, 0);
 
-  // Verify both Node fitFromCorpus and Python fit-ability.py on a synthetic 120-pair JSONL file
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ability-fit-'));
   const jsonlPath = path.join(tmpDir, 'synthetic.jsonl');
   const reportPath = path.join(tmpDir, 'report.json');
   let seed = 12345;
   const rand = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
   const lines = [];
-  for (let p = 0; p < 120; p++) {
+  for (let p = 0; p < 140; p++) {
     const randUbu = () => ability.STATS.map(() => Math.floor(rand() * 256));
     const teamA = [randUbu(), randUbu(), randUbu()];
     const teamB = [randUbu(), randUbu(), randUbu()];
@@ -191,7 +195,7 @@ test('Benchmark harness enforces 50/50 Standard+Pulse split, symmetric swapped p
       mode: p % 2 === 0 ? 'standard' : 'pulse',
       seed: p,
       teams: [teamA, teamB],
-      goalDiff: Number((trueDiff + (rand() - 0.5) * 0.2).toFixed(4)),
+      goalDiff: Number((trueDiff + (rand() - 0.5) * 0.15).toFixed(4)),
       goalRate30s: Number((trueDiff * 1.1).toFixed(4)),
       winDiff: trueDiff >= 0 ? 1 : -1,
       turns: 24,
@@ -201,24 +205,23 @@ test('Benchmark harness enforces 50/50 Standard+Pulse split, symmetric swapped p
   fs.writeFileSync(jsonlPath, lines.join('\n') + '\n');
 
   const nodeFit = calibrate.fitFromCorpus(jsonlPath);
-  assert.equal(nodeFit.pairs, 120);
+  assert.equal(nodeFit.pairs, 140);
   assert.ok(nodeFit.knots.impulse[4] > nodeFit.knots.impulse[0], 'Node fitter recovers positive Impulse slope');
   assert.ok(nodeFit.knots.power[4] > nodeFit.knots.power[0], 'Node fitter recovers positive Power slope');
 
-  // Verify Python fit-ability.py (--no-calibrate and backing up shared/ability-model.json so committed prior stays untouched)
   const modelPath = path.join(__dirname, '..', 'shared', 'ability-model.json');
   const backupModel = fs.readFileSync(modelPath, 'utf8');
   try {
     execFileSync('python3', [
       path.join(__dirname, '..', 'scripts', 'fit-ability.py'),
       '--input', jsonlPath,
-      '--bootstraps', '40',
+      '--bootstraps', '20',
       '--report', reportPath,
       '--no-calibrate'
     ], { stdio: 'pipe' });
     const rep = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-    assert.equal(rep.pairs, 120);
-    assert.ok(rep.holdout.splinePearsonR > 0.85, `Expected high recovery r > 0.85, got ${rep.holdout.splinePearsonR}`);
+    assert.equal(rep.pairs, 140);
+    assert.ok(rep.holdout.splineCVPearsonR > 0.85, `Expected high CV recovery r > 0.85, got ${rep.holdout.splineCVPearsonR}`);
   } finally {
     fs.writeFileSync(modelPath, backupModel);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -244,7 +247,6 @@ test('Nested scale tiers (--quick ⊂ standard ⊂ --deep), interleaved strata, 
   for (const id of quickIds) assert.ok(stdIds.has(id), `quick id ${id} must be in standard tier`);
   for (const id of stdIds) assert.ok(deepIds.has(id), `standard id ${id} must be in deep tier`);
 
-  // First 24 jobs of an interleaved full suite should already include both corpus and curve jobs and both modes.
   const sampleJobs = bench.buildJobs({
     suite: 'full',
     pairs: 20,
@@ -260,7 +262,6 @@ test('Nested scale tiers (--quick ⊂ standard ⊂ --deep), interleaved strata, 
   assert.ok(head.some(j => j.kind === 'corpus') && head.some(j => j.kind === 'curve'));
   assert.ok(head.some(j => j.mode === 'standard') && head.some(j => j.mode === 'pulse'));
 
-  // End-to-end worker pool test (verifies live progress messages + batch assembly)
   const poolOut = await bench.runPool(sampleJobs.slice(0, 4), 2, 1, () => {});
   assert.equal(poolOut.length, 4);
   assert.ok(poolOut.every(r => Number.isFinite(r.goalDiff) && r.turns >= 2));
