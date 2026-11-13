@@ -16,7 +16,7 @@
   const idlePlan = () => ({ angle: 0, power: 0, spin: 0, guard: false });
   fieldView.bodies = P.kickoff();
   let simBodies = P.kickoff(), plans = Array.from({ length: 3 }, idlePlan), cpu = [], selected = 0, scores = [0, 0], turn = 1, phase = 'plan';
-  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, dragDirty = false, skaters = [];
+  let elapsed = 0, accumulator = 0, lastTime = 0, drag = null, dragMode = null, dragDirty = false, drawingDragFrame = false, skaters = [];
   fieldView.portrait = false;
   fieldView.mode = 'standard';
   let planDeadline = 0, planPausedAt = null;
@@ -295,6 +295,7 @@
     getOnline: () => online,
     getOnlineReplay: () => onlineReplay,
     isCardShot: () => cardShot,
+    isDragging: () => drag !== null || dragDirty || drawingDragFrame,
     isMoving: () => {
       const activeReplay = typeof currentReplay === 'function' ? currentReplay() : theater;
       return phase === 'play' || Boolean(postGoal) || Boolean(goalReplay) || Boolean(activeReplay && !activeReplay.paused);
@@ -1297,7 +1298,7 @@
     if (control._lastXf !== xf) { control._lastXf = xf; control.style.transform = xf; }
   }
   let collectionShownLength = 1000, collectionTargetLength = 1000, collectionLengthRaf = 0;
-  let collectionRotateHold = false, collectionLengthOverride = null, collectionShrinkingBox = null;
+  let collectionRotateHold = false, collectionLengthOverride = null, collectionShrinkingBox = null, collectionLayout = null, collectionScrollRaf = 0;
   function stepCollectionLength() {
     collectionLengthRaf = 0;
     if (shot !== 'collection' || collectionLengthOverride !== null || collectionRotateHold) return;
@@ -1320,6 +1321,7 @@
   function fitStadium() {
     if (!stageArea || !rinkStage || !rinkWrap) return;
     if (collectionShrinkingBox) {
+      collectionLayout = null;
       visibleRinkHeight = 600;
       const { width: sw, height: sh, length: sl } = collectionShrinkingBox;
       const vh = window.innerHeight || document.documentElement.clientHeight || 800;
@@ -1342,6 +1344,7 @@
       const stageW = Math.max(120, rinkStage.clientWidth || stageArea.clientWidth || stadium?.clientWidth || 600);
       const minH = Math.round(stageW * 5 / 3);
       if (collectionRotateHold) {
+        collectionLayout = null;
         rinkWrap.style.width = '100%';
         rinkWrap.style.height = minH + 'px';
         rinkWrap.style.marginBottom = -minH + 'px';
@@ -1382,6 +1385,9 @@
       rinkWrap.style.transform = '';
       const stageRect = rinkStage.getBoundingClientRect(), wrapRect = rinkWrap.getBoundingClientRect();
       const offsetPx = Math.max(0, Math.min(shownH - wrapH, wrapRect.top - stageRect.top));
+      const scrollTop = typeof window !== 'undefined' ? (window.scrollY || window.pageYOffset || 0) : 0;
+      const stickyTop = stageRect.top < 0 && offsetPx < shownH - wrapH ? wrapRect.top : 0;
+      collectionLayout = { stageW, shownH, wrapH, stageDocTop: stageRect.top + scrollTop, stickyTop };
       fieldView.collectionPortrait = {
         length: collectionShownLength,
         viewTop: 600 * (offsetPx / stageW),
@@ -1390,6 +1396,7 @@
       return;
     }
     fieldView.collectionPortrait = null;
+    collectionLayout = null;
     rinkWrap.style.marginBottom = '';
     rinkStage.style?.removeProperty?.('--collection-hold-h');
     if (!fieldView.portrait && !isMatchShot()) {
@@ -2581,8 +2588,8 @@
       if ((onlineReplay && (onlineReplay.currentTick ?? 0) < onlineReplay.ticks) || postGoal) emitSkaterEffects(simDelta);
       draw();
     } else if (active && (dragDirty || hadEffects || (phase === 'plan' && presenter.getPredictionCache()?.data?.goal !== null) || (!reducedMotion.matches && (foulsShowing() || fieldView.bodies.some(b => b.meter >= 100 || b.superArm || b.superActive || (P.dazeSlow && P.dazeSlow(b) > 0)))))) {
-      if (dragDirty) { dragDirty = false; sync(); }
-      draw();
+      if (dragDirty) { dragDirty = false; drawingDragFrame = true; sync(); }
+      try { draw(); } finally { drawingDragFrame = false; }
     }
     if (firstTurnStep !== null) animateFirstTurnGuide(time, active);
     flushMeters();
@@ -4069,10 +4076,24 @@
   if ($('collection-world')) ro.observe($('collection-world'));
   ro.observe($('field-spin')); // Its size places it; it has none until first shown.
   const resizeField = () => { gameUi.updateScale?.(); fitSetupShot(); layoutDirty = true; draw(); };
+  const flushCollectionScroll = () => {
+    collectionScrollRaf = 0;
+    if (shot !== 'collection' || collectionRotateHold || bench?.flags.noCollectionScrollDraw) return;
+    if (!layoutDirty && collectionLayout && fieldView.collectionPortrait) {
+      const { stageW, shownH, wrapH, stageDocTop, stickyTop } = collectionLayout;
+      const scrollTop = window.scrollY || window.pageYOffset || 0;
+      const offsetPx = Math.max(0, Math.min(shownH - wrapH, scrollTop + stickyTop - stageDocTop));
+      const nextViewTop = 600 * (offsetPx / stageW);
+      if (Math.abs(nextViewTop - fieldView.collectionPortrait.viewTop) < 0.01) return;
+      fieldView.collectionPortrait.viewTop = nextViewTop;
+    }
+    draw();
+  };
   const scrollCollectionField = () => {
     if (shot !== 'collection' || collectionRotateHold || bench?.flags.noCollectionScrollDraw) return;
-    layoutDirty = true;
-    draw();
+    if (collectionScrollRaf) return;
+    if (typeof requestAnimationFrame === 'function') collectionScrollRaf = requestAnimationFrame(flushCollectionScroll);
+    else flushCollectionScroll();
   };
   window.addEventListener('resize', resizeField);
   window.addEventListener('scroll', scrollCollectionField, { passive: true });

@@ -214,3 +214,250 @@ test('ububall-online boots cleanly on non-HTTPS LAN origins where crypto.randomU
   const client = initOnline({ lobby() {}, closeLobby() {}, onState() {}, onDisconnect() {}, onError() {}, onOutdated() {}, onLeave() {} });
   assert.equal(typeof client.active, 'boolean');
 });
+
+test('incremental iceCache appends new skid/burn points without clearing and rebuilds only on 250ms fade bucket ticks', () => {
+  const pres = require('../web/ububall-presentation.js');
+  const bodies = P.kickoff();
+  const fx = pres.createEffectsState([], {});
+  const layers = [];
+  const makeCtx = label => {
+    const ops = { label, clears: 0, fills: 0, drawImages: [], shadowBlurs: [] };
+    const ctx = {
+      ops,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      set shadowBlur(v) { if (v > 0) ops.shadowBlurs.push(v); },
+      get shadowBlur() { return 0; },
+      shadowColor: 'transparent',
+      save() {},
+      restore() {},
+      setTransform() {},
+      getTransform: () => ({ a: 1 }),
+      clearRect() { ops.clears++; },
+      fillRect() {},
+      beginPath() {},
+      closePath() {},
+      moveTo() {},
+      lineTo() {},
+      arc() {},
+      rect() {},
+      roundRect() {},
+      setLineDash() {},
+      clip() {},
+      stroke() {},
+      fill() { ops.fills++; },
+      translate() {},
+      rotate() {},
+      scale() {},
+      drawImage(src, ...args) { ops.drawImages.push({ src, args }); },
+      createLinearGradient: () => ({ addColorStop() {} }),
+      createRadialGradient: () => ({ addColorStop() {} }),
+      createConicGradient: () => ({ addColorStop() {} })
+    };
+    return ctx;
+  };
+  const mockDoc = {
+    createElement(tag) {
+      const c = { tag, width: 0, height: 0, _ctx: makeCtx('offscreen-' + layers.length) };
+      c.getContext = () => c._ctx;
+      layers.push(c);
+      return c;
+    }
+  };
+  const mainCanvas = { width: 1653, height: 990, clientWidth: 551, clientHeight: 330 };
+  const badgeCanvas = { width: 1653, height: 990 };
+  const view = {
+    canvas: mainCanvas,
+    ctx: makeCtx('main'),
+    badgeCanvas,
+    badgeCtx: makeCtx('badge'),
+    bodies,
+    portrait: false,
+    mode: 'standard',
+    castHidden: false,
+    field: null
+  };
+  const presenter = pres.createRinkPresenter({
+    P,
+    ububallMatch,
+    getView: () => view,
+    getEffects: () => fx,
+    getPhase: () => 'play',
+    getPlans: () => [],
+    getRenderSize: () => ({ renderWidth: 551, renderHeight: 330, deviceWidth: 1653, deviceHeight: 990 }),
+    doc: mockDoc
+  });
+
+  // Seed one active skid mark with 3 points in fade bucket 0 (age = 0.02s)
+  const skid = { width: 18, age: 0.02, points: [{ x: 200, y: 200, depth: 0.8 }, { x: 220, y: 205, depth: 0.9 }, { x: 240, y: 212, depth: 1.0 }] };
+  fx.skids.push(skid);
+
+  presenter.drawScene();
+  assert.equal(fx.iceCache.rebuilds, 1, 'initial frame builds iceCache once');
+  const iceLayerCtx = fx.iceCache.layer.getContext('2d');
+  assert.equal(iceLayerCtx.ops.shadowBlurs.length, 0, 'feathered softRibbon uses zero Gaussian shadowBlur passes');
+  const clearsAfterInit = iceLayerCtx.ops.clears;
+
+  // Frame 2: skid grows by 2 points within the same 250ms bucket (age = 0.08s -> bucket 0)
+  skid.age = 0.08;
+  skid.points.push({ x: 262, y: 220, depth: 1.0 }, { x: 285, y: 228, depth: 0.95 });
+  presenter.drawScene();
+  assert.equal(fx.iceCache.rebuilds, 1, 'growing skid points within same fade bucket does NOT rebuild iceCache');
+  assert.equal(fx.iceCache.appends, 1, 'growing skid points appends only the new tail slice');
+  assert.equal(iceLayerCtx.ops.clears, clearsAfterInit, 'incremental append does not clear the offscreen ice layer');
+
+  // Frame 3: advance past 0.25s fade bucket boundary -> triggers clean rebuild
+  skid.age = 0.26;
+  presenter.drawScene();
+  assert.equal(fx.iceCache.rebuilds, 2, 'crossing 250ms fade bucket triggers a full iceCache refresh');
+});
+
+test('drawHeatMirage composites offscreen rinkCache + iceCache and never self-copies view.canvas', () => {
+  const pres = require('../web/ububall-presentation.js');
+  const bodies = P.kickoff();
+  bodies[6].onFire = true;
+  bodies[6].fireTicks = 300;
+  bodies[6].pace = 3;
+  const fx = pres.createEffectsState([], {});
+  fx.wasOnFire = true;
+  fx.heatTime = 0.5;
+  fx.skids.push({ width: 16, age: 0.05, points: [{ x: 480, y: 295, depth: 1 }, { x: 505, y: 302, depth: 1 }] });
+
+  const makeCtx = () => {
+    const drawSources = [];
+    return {
+      drawSources,
+      globalAlpha: 1, fillStyle: '#000', strokeStyle: '#000', lineWidth: 1, shadowBlur: 0, shadowColor: '#000',
+      save() {}, restore() {}, setTransform() {}, getTransform: () => ({ a: 1 }),
+      clearRect() {}, fillRect() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {},
+      arc() {}, rect() {}, roundRect() {}, setLineDash() {}, clip() {}, stroke() {}, fill() {}, translate() {}, rotate() {}, scale() {},
+      drawImage(src) { drawSources.push(src); },
+      createLinearGradient: () => ({ addColorStop() {} }),
+      createRadialGradient: () => ({ addColorStop() {} }),
+      createConicGradient: () => ({ addColorStop() {} })
+    };
+  };
+  const mockDoc = {
+    createElement(tag) {
+      const c = { tag, width: 0, height: 0, _ctx: makeCtx() };
+      c.getContext = () => c._ctx;
+      return c;
+    }
+  };
+  const mainCanvas = { id: 'live-main-canvas', width: 1920, height: 1152, clientWidth: 1280, clientHeight: 768 };
+  const view = {
+    canvas: mainCanvas,
+    ctx: makeCtx(),
+    badgeCanvas: { width: 1920, height: 1152 },
+    badgeCtx: makeCtx(),
+    bodies,
+    portrait: false,
+    mode: 'standard',
+    castHidden: false,
+    field: null
+  };
+  const presenter = pres.createRinkPresenter({
+    P,
+    ububallMatch,
+    getView: () => view,
+    getEffects: () => fx,
+    getPhase: () => 'play',
+    getPlans: () => [],
+    getRenderSize: () => ({ renderWidth: 1280, renderHeight: 768, deviceWidth: 1920, deviceHeight: 1152 }),
+    doc: mockDoc
+  });
+
+  presenter.drawScene();
+  assert.ok(fx.mirageCanvas, 'mirageCanvas created when ball is on fire');
+  const mirageSources = fx.mirageCtx.drawSources;
+  assert.equal(mirageSources.includes(mainCanvas), false, 'mirageCtx NEVER copies from live view.canvas');
+  assert.equal(mirageSources.includes(fx.rinkCache.layer), true, 'mirageCtx samples finished offscreen rinkCache');
+  assert.equal(mirageSources.includes(fx.iceCache.layer), true, 'mirageCtx samples finished offscreen iceCache');
+});
+
+test('drawPrediction skips predictionLayer allocation during active drag and 2560px cap preserves native phone 1653x990', () => {
+  const pres = require('../web/ububall-presentation.js');
+  const bodies = P.kickoff();
+  const fx = pres.createEffectsState([], {});
+  const plans = [
+    { angle: 0.1, power: 0.8, spin: 0.2, guard: false, superArm: false },
+    { angle: 0, power: 0.5, spin: 0, guard: false, superArm: false },
+    { angle: -0.1, power: 0.6, spin: 0, guard: false, superArm: false }
+  ];
+  let dragging = true;
+  const createdCanvases = [];
+  const makeCtx = () => ({
+    globalAlpha: 1, fillStyle: '#000', strokeStyle: '#000', lineWidth: 1, shadowBlur: 0, shadowColor: '#000',
+    save() {}, restore() {}, setTransform() {}, getTransform: () => ({ a: 1 }),
+    clearRect() {}, fillRect() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {},
+    arc() {}, rect() {}, roundRect() {}, setLineDash() {}, clip() {}, stroke() {}, fill() {}, translate() {}, rotate() {}, scale() {},
+    setLineDash() {}, drawImage() {}, fillText() {}, strokeText() {}, measureText: () => ({ width: 40 }),
+    createLinearGradient: () => ({ addColorStop() {} }),
+    createRadialGradient: () => ({ addColorStop() {} }),
+    createConicGradient: () => ({ addColorStop() {} })
+  });
+  const mockDoc = {
+    createElement(tag) {
+      const c = { tag, width: 0, height: 0, _ctx: makeCtx() };
+      c.getContext = () => c._ctx;
+      createdCanvases.push(c);
+      return c;
+    }
+  };
+
+  let renderSize = { renderWidth: 551, renderHeight: 330, deviceWidth: 1653, deviceHeight: 990 };
+  const mainCanvas = { width: 0, height: 0, clientWidth: 551, clientHeight: 330 };
+  const badgeCanvas = { width: 0, height: 0 };
+  const view = {
+    canvas: mainCanvas, ctx: makeCtx(), badgeCanvas, badgeCtx: makeCtx(),
+    bodies, portrait: false, mode: 'standard', castHidden: false, field: null
+  };
+  const presenter = pres.createRinkPresenter({
+    P, ububallMatch,
+    getView: () => view,
+    getEffects: () => fx,
+    getPhase: () => 'plan',
+    getPlans: () => plans,
+    isDragging: () => dragging,
+    getRenderSize: () => renderSize,
+    doc: mockDoc
+  });
+
+  // 1. Native phone match size (1653x990) stays 100% untouched, and active drag allocates only rinkCache (1 canvas, no predictionLayer)
+  for (let f = 0; f < 5; f++) {
+    plans[0].angle = 0.1 + f * 0.05;
+    presenter.drawScene();
+  }
+  assert.equal(mainCanvas.width, 1653);
+  assert.equal(mainCanvas.height, 990);
+  assert.equal(createdCanvases.filter(c => c.width === 1653 && c.height === 990).length, 1, 'active drag allocates only rinkCache (no full-screen predictionLayer)');
+
+  // 2. Once stationary in plan phase, 2nd frame at same plan caches predictionLayer
+  dragging = false;
+  presenter.drawScene();
+  presenter.drawScene();
+  assert.equal(createdCanvases.filter(c => c.width === 1653 && c.height === 990).length, 2, 'stationary plan allocates predictionLayer once after plan settles');
+
+  // 3. Oversized 3840x2304 desktop-mode buffer caps cleanly to 2560x1536
+  renderSize = { renderWidth: 1280, renderHeight: 768, deviceWidth: 3840, deviceHeight: 2304 };
+  presenter.drawScene();
+  assert.equal(mainCanvas.width, 2560);
+  assert.equal(mainCanvas.height, 1536);
+
+  // 4. Collection portrait caches offscreen rink across scroll frames and skips badgeCanvas resize
+  badgeCanvas.width = 300; badgeCanvas.height = 180;
+  view.castHidden = true;
+  view.collectionPortrait = { length: 2400, viewTop: 0, viewSpan: 950 };
+  renderSize = { renderWidth: 524, renderHeight: 828, deviceWidth: 1572, deviceHeight: 2484 };
+  presenter.drawScene(); // Frame 1 settles length
+  presenter.drawScene(); // Frame 2 bakes portraitRinkCache
+  for (let s = 1; s <= 10; s++) {
+    view.collectionPortrait.viewTop = s * 120;
+    presenter.drawScene();
+  }
+  assert.equal(fx.portraitRinkCache.builds, 1, 'portrait rink surface baked once across 10 scroll offsets');
+  assert.ok(fx.portraitRinkCache.hits >= 11, 'subsequent scroll offsets hit offscreen portraitRinkCache');
+  assert.equal(badgeCanvas.width, 300, 'collectionPortrait skips resizing hidden badgeCanvas');
+});

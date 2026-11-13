@@ -526,16 +526,16 @@
     let ticking = false;
     function drain() {
       ticking = false;
-      const deadline = performance.now() + 5;
-      let drew = false;
-      while (queue.length && (!drew || performance.now() < deadline)) {
+      const deadline = performance.now() + 3;
+      let count = 0;
+      while (queue.length && count < 4 && (count === 0 || performance.now() < deadline)) {
         const target = queue.pop();
         if (!inView.has(target) || !target.isConnected) continue;
         inView.delete(target);
         observer.unobserve(target);
         draws.get(target)?.();
         draws.delete(target);
-        drew = true;
+        count++;
       }
       if (queue.length && inView.size) { ticking = true; requestAnimationFrame(drain); }
       else if (!inView.size) queue.length = 0;

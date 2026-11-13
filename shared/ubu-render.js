@@ -2319,7 +2319,8 @@
   const spriteCache = new Map();
   const bakeQueue = [];
   let activeBakes = 0;
-  const MAX_CONCURRENT_BAKES = 8;
+  const MAX_CONCURRENT_BAKES = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? 1 : 2;
+  const SPRITE_WEBP_QUALITY = 0.88;
 
   function pumpBakes() {
     while (activeBakes < MAX_CONCURRENT_BAKES && bakeQueue.length) {
@@ -2403,7 +2404,7 @@
               const ctx = off.getContext('2d');
               if (ctx && typeof off.convertToBlob === 'function') {
                 ctx.drawImage(image, 0, 0, size, size);
-                off.convertToBlob({ type: 'image/webp', quality: 0.96 }).catch(() => off.convertToBlob({ type: 'image/png' })).then(blob => {
+                off.convertToBlob({ type: 'image/webp', quality: SPRITE_WEBP_QUALITY }).catch(() => off.convertToBlob({ type: 'image/png' })).then(blob => {
                   finish(URL.createObjectURL(blob), true);
                 }, fallback);
                 return;
@@ -2417,7 +2418,7 @@
             canvas.toBlob(blob => {
               if (!blob) { fallback(); return; }
               finish(URL.createObjectURL(blob), true);
-            }, 'image/webp', 0.96);
+            }, 'image/webp', SPRITE_WEBP_QUALITY);
           } catch {
             fallback();
           }

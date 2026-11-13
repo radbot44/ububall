@@ -820,6 +820,7 @@
       getOnline = () => null,
       getOnlineReplay = () => null,
       isCardShot = () => false,
+      isDragging = () => false,
       isMoving = () => true,
       getGuide = () => null,
       guideShown = () => false,
@@ -1220,6 +1221,7 @@
       if (fx.netFire) fx.netFire.lit = false;
       fx.shake = fx.shakeX = fx.shakeY = 0; if (!view.field && rinkWrap) rinkWrap.style.translate = '';
       fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.fireWarp = fx.koWarp = null;
+      if (fx.iceCache) { fx.iceCache.key = null; fx.iceCache.skidSnap = null; fx.iceCache.burnSnap = null; }
     }
 
     function clearEffects() {
@@ -1455,29 +1457,37 @@
       return getView().portrait ? { x: b.x - b.radius * .65, y: b.y - b.radius * .65 } : { x: b.x - b.radius * .65, y: b.y + b.radius * .65 };
     }
 
-    function ribbon(points, widthAt) {
+    function ribbon(points, widthAt, prevPoint = null) {
+      if (!points || points.length < 2) return;
       const ctx = getView().ctx, left = [], right = [];
-      points.forEach((p, k) => {
-        const a = points[Math.max(0, k - 1)], b = points[Math.min(points.length - 1, k + 1)];
+      for (let k = 0; k < points.length; k++) {
+        const p = points[k];
+        const a = k === 0 && prevPoint ? prevPoint : points[Math.max(0, k - 1)];
+        const b = k === 0 && prevPoint ? p : points[Math.min(points.length - 1, k + 1)];
         const len = Math.hypot(b.x - a.x, b.y - a.y) || 1, nx = -(b.y - a.y) / len, ny = (b.x - a.x) / len, half = widthAt(p) / 2;
         left.push([p.x + nx * half, p.y + ny * half]); right.push([p.x - nx * half, p.y - ny * half]);
-      });
+      }
       ctx.beginPath(); ctx.moveTo(left[0][0], left[0][1]);
       for (let i = 1; i < left.length; i++) ctx.lineTo(left[i][0], left[i][1]);
       for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
       ctx.closePath(); ctx.fill();
     }
 
-    function softRibbon(points, widthAt, blur, color) {
-      const ctx = getView().ctx, scale = ctx.getTransform().a, offset = 4000;
+    function softRibbon(points, widthAt, blur, color, prevPoint = null) {
+      if (!points || points.length < 2) return;
+      const ctx = getView().ctx;
       ctx.save();
-      if (bench?.flags.noIceShadow) {
-        ctx.fillStyle = color;
-        ribbon(points, widthAt);
+      ctx.fillStyle = color;
+      if (bench?.flags.noIceShadow || blur <= 0.05) {
+        ribbon(points, widthAt, prevPoint);
       } else {
-        ctx.shadowColor = color; ctx.shadowBlur = blur * scale; ctx.shadowOffsetX = offset;
-        ctx.translate(-offset / scale, 0);
-        ribbon(points, widthAt);
+        const baseAlpha = ctx.globalAlpha;
+        ctx.globalAlpha = baseAlpha * 0.22;
+        ribbon(points, p => widthAt(p) + blur * 1.35, prevPoint);
+        ctx.globalAlpha = baseAlpha * 0.34;
+        ribbon(points, p => widthAt(p) + blur * 0.6, prevPoint);
+        ctx.globalAlpha = baseAlpha * 0.44;
+        ribbon(points, widthAt, prevPoint);
       }
       ctx.restore();
     }
@@ -1497,46 +1507,157 @@
       view.ctx.drawImage(cache.layer, 0, 0, 1000, 600);
     }
 
+    function paintSkidSlice(ctx, s, points, prevPoint = null) {
+      if (!points || points.length < 2) return;
+      const age = Math.floor(s.age * 4) / 4;
+      const t = age / SKID_LIFE, fade = 1 - t * t * (3 - 2 * t), thin = .6 + .4 * fade;
+      if (fade <= 0.005) return;
+      ctx.globalAlpha = .12 * fade;
+      softRibbon(points, p => s.width * .7 * (.4 + .6 * p.depth) * thin, s.width * .45, '#000000', prevPoint);
+      ctx.globalAlpha = .08 * fade;
+      softRibbon(points, p => s.width * .3 * p.depth * thin, s.width * .2, '#000000', prevPoint);
+    }
+
+    function paintBurnPoof(ctx, s) {
+      const age = Math.floor(s.age * 4) / 4;
+      const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
+      if (fade <= 0.01) return;
+      const r = s.radius || 30;
+      ctx.save();
+      const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
+      grad.addColorStop(0, `rgba(0, 0, 0, ${(0.82 * fade).toFixed(3)})`);
+      grad.addColorStop(0.35, `rgba(12, 5, 2, ${(0.75 * fade).toFixed(3)})`);
+      grad.addColorStop(0.65, `rgba(45, 18, 6, ${(0.55 * fade).toFixed(3)})`);
+      grad.addColorStop(0.85, `rgba(45, 18, 6, ${(0.25 * fade).toFixed(3)})`);
+      grad.addColorStop(1, 'rgba(45, 18, 6, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function paintBurnSlice(ctx, s, points, prevPoint = null) {
+      if (!points || points.length < 2) return;
+      const age = Math.floor(s.age * 4) / 4;
+      const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
+      if (fade <= 0.005) return;
+      ctx.globalAlpha = .3 * fade;
+      softRibbon(points, p => s.width * (.5 + .5 * p.depth), s.width * .35, '#2b1206', prevPoint);
+      ctx.globalAlpha = .22 * fade;
+      softRibbon(points, p => s.width * .35 * p.depth, s.width * .15, '#000000', prevPoint);
+    }
+
     function paintIce() {
       const fx = getEffects(), ctx = getView().ctx;
       inRink(() => {
-        for (const s of fx.skids) {
-          const age = Math.floor(s.age * 4) / 4;
-          const t = age / SKID_LIFE, fade = 1 - t * t * (3 - 2 * t), thin = .6 + .4 * fade;
-          ctx.globalAlpha = .12 * fade;
-          softRibbon(s.points, p => s.width * .7 * (.4 + .6 * p.depth) * thin, s.width * .45, '#000000');
-          ctx.globalAlpha = .08 * fade;
-          softRibbon(s.points, p => s.width * .3 * p.depth * thin, s.width * .2, '#000000');
-        }
+        for (const s of fx.skids) paintSkidSlice(ctx, s, s.points, null);
         for (const s of fx.burns) {
-          if (s.poof) {
-            const age = Math.floor(s.age * 4) / 4;
-            const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
-            if (fade <= 0.01) continue;
-            const r = s.radius || 30;
-            ctx.save();
-            const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
-            grad.addColorStop(0, `rgba(0, 0, 0, ${(0.82 * fade).toFixed(3)})`);
-            grad.addColorStop(0.35, `rgba(12, 5, 2, ${(0.75 * fade).toFixed(3)})`);
-            grad.addColorStop(0.65, `rgba(45, 18, 6, ${(0.55 * fade).toFixed(3)})`);
-            grad.addColorStop(0.85, `rgba(45, 18, 6, ${(0.25 * fade).toFixed(3)})`);
-            grad.addColorStop(1, 'rgba(45, 18, 6, 0)');
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-            continue;
-          }
-          if (!s.points || s.points.length < 2) continue;
-          const age = Math.floor(s.age * 4) / 4;
-          const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
-          ctx.globalAlpha = .3 * fade;
-          softRibbon(s.points, p => s.width * (.5 + .5 * p.depth), s.width * .35, '#2b1206');
-          ctx.globalAlpha = .22 * fade;
-          softRibbon(s.points, p => s.width * .35 * p.depth, s.width * .15, '#000000');
+          if (s.poof) paintBurnPoof(ctx, s);
+          else paintBurnSlice(ctx, s, s.points, null);
         }
       });
+    }
+
+    function drawIceLayer(cache, fx, scale) {
+      const view = getView();
+      const width = Math.max(1, Math.round(view.canvas.width * scale));
+      const height = Math.max(1, Math.round(view.canvas.height * scale));
+      const shadowFlag = Boolean(bench?.flags.noIceShadow);
+      cache.layer ||= doc.createElement('canvas');
+      const resized = cache.layer.width !== width || cache.layer.height !== height || cache.shadowFlag !== shadowFlag;
+      const skidSnap = cache.skidSnap, burnSnap = cache.burnSnap;
+      let canAppend = !resized && Array.isArray(skidSnap) && Array.isArray(burnSnap)
+        && fx.skids.length >= skidSnap.length && fx.burns.length >= burnSnap.length;
+      if (canAppend) {
+        for (let i = 0; i < skidSnap.length; i++) {
+          const prev = skidSnap[i], cur = fx.skids[i];
+          if (cur !== prev.ref || Math.floor(cur.age * 4) !== prev.bucket || cur.points.length < prev.count) {
+            canAppend = false;
+            break;
+          }
+        }
+      }
+      if (canAppend) {
+        for (let i = 0; i < burnSnap.length; i++) {
+          const prev = burnSnap[i], cur = fx.burns[i];
+          const curCount = cur.poof ? 1 : (cur.points?.length || 0);
+          if (cur !== prev.ref || Math.floor(cur.age * 4) !== prev.bucket || curCount < prev.count) {
+            canAppend = false;
+            break;
+          }
+        }
+      }
+      if (!canAppend) {
+        if (cache.layer.width !== width || cache.layer.height !== height) {
+          cache.layer.width = width;
+          cache.layer.height = height;
+        }
+        cache.shadowFlag = shadowFlag;
+        const main = view.ctx;
+        view.ctx = cache.layer.getContext('2d');
+        view.ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0);
+        view.ctx.clearRect(0, 0, 1000, 600);
+        view.ctx.save();
+        try { paintIce(); } finally { view.ctx.restore(); view.ctx = main; }
+        cache.skidSnap = fx.skids.map(s => ({ ref: s, bucket: Math.floor(s.age * 4), count: s.points.length }));
+        cache.burnSnap = fx.burns.map(s => ({ ref: s, bucket: Math.floor(s.age * 4), count: s.poof ? 1 : (s.points?.length || 0) }));
+        cache.rebuilds = (cache.rebuilds || 0) + 1;
+      } else {
+        let hasDelta = fx.skids.length > skidSnap.length || fx.burns.length > burnSnap.length;
+        if (!hasDelta) {
+          for (let i = 0; i < skidSnap.length; i++) {
+            if (fx.skids[i].points.length > skidSnap[i].count) { hasDelta = true; break; }
+          }
+        }
+        if (!hasDelta) {
+          for (let i = 0; i < burnSnap.length; i++) {
+            const c = fx.burns[i].poof ? 1 : (fx.burns[i].points?.length || 0);
+            if (c > burnSnap[i].count) { hasDelta = true; break; }
+          }
+        }
+        if (hasDelta) {
+          const main = view.ctx;
+          view.ctx = cache.layer.getContext('2d');
+          view.ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0);
+          view.ctx.save();
+          try {
+            const lctx = view.ctx;
+            inRink(() => {
+              for (let i = 0; i < fx.skids.length; i++) {
+                const s = fx.skids[i], prevCount = i < skidSnap.length ? skidSnap[i].count : 0;
+                if (s.points.length > prevCount && s.points.length >= 2) {
+                  if (prevCount < 2) paintSkidSlice(lctx, s, s.points, null);
+                  else paintSkidSlice(lctx, s, s.points.slice(prevCount - 1), s.points[prevCount - 2]);
+                }
+                if (i < skidSnap.length) skidSnap[i].count = s.points.length;
+                else skidSnap.push({ ref: s, bucket: Math.floor(s.age * 4), count: s.points.length });
+              }
+              for (let i = 0; i < fx.burns.length; i++) {
+                const s = fx.burns[i], prevCount = i < burnSnap.length ? burnSnap[i].count : 0;
+                if (s.poof) {
+                  if (prevCount === 0) paintBurnPoof(lctx, s);
+                  if (i < burnSnap.length) burnSnap[i].count = 1;
+                  else burnSnap.push({ ref: s, bucket: Math.floor(s.age * 4), count: 1 });
+                } else {
+                  const len = s.points?.length || 0;
+                  if (len > prevCount && len >= 2) {
+                    if (prevCount < 2) paintBurnSlice(lctx, s, s.points, null);
+                    else paintBurnSlice(lctx, s, s.points.slice(prevCount - 1), s.points[prevCount - 2]);
+                  }
+                  if (i < burnSnap.length) burnSnap[i].count = len;
+                  else burnSnap.push({ ref: s, bucket: Math.floor(s.age * 4), count: len });
+                }
+              }
+            });
+          } finally {
+            view.ctx.restore();
+            view.ctx = main;
+          }
+          cache.appends = (cache.appends || 0) + 1;
+        }
+      }
+      view.ctx.drawImage(cache.layer, 0, 0, 1000, 600);
     }
 
     function drawFieldUnder(colors) {
@@ -1547,17 +1668,16 @@
         circle(500, 300, 70 + (1 - fx.kickoffGlow) * 10, primary, 3); ctx.restore();
       }
       if (fx.skids.length || fx.burns.length) {
-        let key = view.canvas.width + ',' + view.canvas.height;
+        const scale = Math.min(1, 1000 / view.canvas.width);
         if (bench?.flags.freezeIceKey) {
+          let key = view.canvas.width + ',' + view.canvas.height;
           for (const s of fx.skids) key += ',' + Math.floor(s.age * 4) + ':' + (s.points.length >> 3);
           key += '|';
           for (const s of fx.burns) key += ',' + Math.floor(s.age * 4) + ':' + (s.poof ? 'p' + Math.round(s.x) + '_' + Math.round(s.y) : ((s.points?.length || 0) >> 3));
+          cachedLayer(fx.iceCache, key, paintIce, scale);
         } else {
-          for (const s of fx.skids) key += ',' + Math.floor(s.age * 4) + ':' + s.points.length;
-          key += '|';
-          for (const s of fx.burns) key += ',' + Math.floor(s.age * 4) + ':' + (s.poof ? 'p' + Math.round(s.x) + '_' + Math.round(s.y) : (s.points?.length || 0));
+          drawIceLayer(fx.iceCache, fx, scale);
         }
-        cachedLayer(fx.iceCache, key, paintIce, Math.min(1, 1000 / view.canvas.width));
       }
       if (getPhase() === 'plan' && pulseMode() && !P.settled(view.bodies)) {
         inRink(() => { ctx.fillStyle = 'rgba(120,170,255,.07)'; ctx.fillRect(60, 60, 880, 480); });
@@ -2038,7 +2158,14 @@
       }
       const t1 = bench?.rec ? clockNow() : 0;
       if (!bench?.flags.noPredictLayer) {
-        cachedLayer(predictionLayer, [view.canvas.width, view.canvas.height, home, away, view.portrait, view.mode, key].join(), () => paintPrediction(predictionCache.data, home, away));
+        const layerKey = [view.canvas.width, view.canvas.height, home, away, view.portrait, view.mode, key].join();
+        if (isDragging() || predictionLayer.lastSeenKey !== layerKey) {
+          predictionLayer.lastSeenKey = layerKey;
+          view.ctx.save();
+          try { paintPrediction(predictionCache.data, home, away); } finally { view.ctx.restore(); }
+        } else {
+          cachedLayer(predictionLayer, layerKey, () => paintPrediction(predictionCache.data, home, away));
+        }
       }
       if (bench?.rec) {
         bench.rec.predictSimMs += (t1 - t0);
@@ -3047,26 +3174,63 @@
       const sizes = getRenderSize ? getRenderSize() : {};
       const renderWidth = sizes.renderWidth || view.canvas.clientWidth || 1000;
       const renderHeight = sizes.renderHeight || view.canvas.clientHeight || 600;
+      const isCollectionPortrait = !view.field && Boolean(view.collectionPortrait);
       const nativeDpr = (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1;
       const dprCap = bench?.flags.dprCap || 0;
-      const dpr = dprCap ? Math.min(nativeDpr, dprCap) : nativeDpr;
-      const rawW = dprCap ? Math.round(renderWidth * dpr) : (sizes.deviceWidth || Math.round(renderWidth * dpr));
-      const rawH = dprCap ? Math.round(renderHeight * dpr) : (sizes.deviceHeight || Math.round(renderHeight * dpr));
-      const cap = Math.min(1, 3840 / Math.max(1, rawW, rawH));
+      const effDprCap = isCollectionPortrait ? (dprCap ? Math.min(dprCap, 1.5) : 1.5) : dprCap;
+      const dpr = effDprCap ? Math.min(nativeDpr, effDprCap) : nativeDpr;
+      const rawW = effDprCap ? Math.round(renderWidth * dpr) : (sizes.deviceWidth || Math.round(renderWidth * dpr));
+      const rawH = effDprCap ? Math.round(renderHeight * dpr) : (sizes.deviceHeight || Math.round(renderHeight * dpr));
+      const maxDim = isCollectionPortrait ? 1920 : 2560;
+      const cap = Math.min(1, maxDim / Math.max(1, rawW, rawH));
       const width = view.field?.width ?? Math.max(1, Math.round(rawW * cap));
       const height = view.field?.height ?? Math.max(1, Math.round(rawH * cap));
       if (view.canvas.width !== width || view.canvas.height !== height) { view.canvas.width = width; view.canvas.height = height; }
-      if (view.badgeCanvas.width !== width || view.badgeCanvas.height !== height) { view.badgeCanvas.width = width; view.badgeCanvas.height = height; }
+      if (!isCollectionPortrait && (view.badgeCanvas.width !== width || view.badgeCanvas.height !== height)) {
+        view.badgeCanvas.width = width; view.badgeCanvas.height = height;
+      }
       const colors = getThemeColors();
       const { text, home, away, background } = colors;
-      if (!view.field && view.collectionPortrait) {
+      if (isCollectionPortrait) {
         const { length = 1000, viewTop = 0, viewSpan = 1000 } = view.collectionPortrait;
         const safeSpan = Math.max(1, viewSpan);
-        view.badgeCtx.setTransform(1, 0, 0, 1, 0, 0);
-        view.badgeCtx.clearRect(0, 0, width, height);
         view.ctx.setTransform(width / 600, 0, 0, height / safeSpan, 0, -viewTop * (height / safeSpan));
         view.ctx.clearRect(0, viewTop - 8, 600, safeSpan + 16);
-        drawPortraitRinkSurface(view.ctx, P, ububallMatch, colors, rinkLogo, length, viewTop, safeSpan);
+        const roundedLen = Math.max(1000, Math.round(length));
+        const cacheH = Math.max(1, Math.round(roundedLen * (width / 600)));
+        const logoReady = Boolean(rinkLogo?.complete && rinkLogo.naturalWidth);
+        const cacheKey = `${width}x${cacheH}|${roundedLen}|${colors.surface}|${colors.border}|${background}|${home}|${away}|${logoReady ? 1 : 0}`;
+        const lenSettled = Math.abs(length - roundedLen) < 0.05 && fx.portraitRinkPrevKey === cacheKey;
+        fx.portraitRinkPrevKey = cacheKey;
+        let usedPortraitCache = false;
+        if (doc?.createElement && typeof view.ctx.drawImage === 'function' && cacheH <= 8192 && (fx.portraitRinkCache?.key === cacheKey || lenSettled)) {
+          if (fx.portraitRinkCache?.key !== cacheKey) {
+            const layer = fx.portraitRinkCache?.layer || doc.createElement('canvas');
+            const lctx = layer?.getContext?.('2d');
+            if (lctx && typeof lctx.save === 'function') {
+              if (layer.width !== width || layer.height !== cacheH) { layer.width = width; layer.height = cacheH; }
+              lctx.setTransform(width / 600, 0, 0, cacheH / roundedLen, 0, 0);
+              lctx.clearRect(0, 0, 600, roundedLen);
+              drawPortraitRinkSurface(lctx, P, ububallMatch, colors, rinkLogo, roundedLen, 0, roundedLen);
+              fx.portraitRinkCache = { key: cacheKey, layer, width, height: cacheH, length: roundedLen, builds: (fx.portraitRinkCache?.builds || 0) + 1 };
+            }
+          }
+          const pc = fx.portraitRinkCache;
+          if (pc?.key === cacheKey) {
+            const v0 = Math.max(0, Math.min(pc.length, viewTop));
+            const v1 = Math.max(v0, Math.min(pc.length, viewTop + safeSpan));
+            if (v1 > v0) {
+              const sy = v0 * (pc.height / pc.length);
+              const sh = (v1 - v0) * (pc.height / pc.length);
+              view.ctx.drawImage(pc.layer, 0, sy, pc.width, sh, 0, v0, 600, v1 - v0);
+            }
+            pc.hits = (pc.hits || 0) + 1;
+            usedPortraitCache = true;
+          }
+        }
+        if (!usedPortraitCache) {
+          drawPortraitRinkSurface(view.ctx, P, ububallMatch, colors, rinkLogo, length, viewTop, safeSpan);
+        }
         if (!view.castHidden) {
           const skaters = getSkaters();
           view.bodies.slice(0, 6).forEach((b, i) => {
@@ -3397,71 +3561,6 @@
         if (b) circle(b.x, b.y, b.radius + 8, text, 2);
       }
 
-      const ball = view.bodies[6];
-      if (ball) {
-        const fw = fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion() ? fx.fireWarp : null;
-        let warpScaleX = 1, warpScaleY = 1, warpAngle = 0;
-        if (fw) {
-          const wp = 1 - Math.max(0, fw.life / fw.duration);
-          const env = (1 - wp) * Math.cos(wp * Math.PI * 2.2);
-          const amt = env * 0.13;
-          warpScaleX = 1 - amt;
-          warpScaleY = 1 + amt;
-          warpAngle = Math.atan2(fw.ny || 0, fw.nx || 1);
-          const glowFade = (1 - wp) ** 1.3;
-          view.ctx.save();
-          view.ctx.translate(fw.x, fw.y);
-          view.ctx.rotate(warpAngle);
-          view.ctx.scale(1 - (1 - wp) * 0.18, 1 + (1 - wp) * 0.18);
-          view.ctx.beginPath();
-          view.ctx.arc(0, 0, ball.radius * (1.15 + wp * 1.35), 0, Math.PI * 2);
-          view.ctx.fillStyle = '#ff8c24';
-          view.ctx.globalAlpha = 0.28 * glowFade;
-          view.ctx.fill();
-          view.ctx.lineWidth = Math.max(1, 3.2 * glowFade);
-          view.ctx.strokeStyle = '#fff0a8';
-          view.ctx.globalAlpha = 0.72 * glowFade;
-          view.ctx.stroke();
-          view.ctx.restore();
-        }
-        view.ctx.save();
-        if (fw) {
-          view.ctx.translate(ball.x, ball.y);
-          view.ctx.rotate(warpAngle);
-          view.ctx.scale(warpScaleX, warpScaleY);
-          view.ctx.rotate(-warpAngle);
-          view.ctx.translate(-ball.x, -ball.y);
-        }
-        view.ctx.beginPath(); view.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); view.ctx.fillStyle = background; view.ctx.fill();
-        circle(ball.x, ball.y, ball.radius, text, 2);
-        const heat = ballHeat(ball), flare = fx.ballFlare || 0, glow = Math.min(1.35, Math.max(0, heat - 1) / 2 + flare * 0.45);
-        if (glow > 0) {
-          view.ctx.save(); view.ctx.globalAlpha = Math.min(1, .75 * glow); view.ctx.shadowColor = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat)); view.ctx.shadowBlur = bench?.flags.noGlowBlur ? 0 : (16 + flare * 12) * glow * view.canvas.width / 1000;
-          view.ctx.beginPath(); view.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); view.ctx.fillStyle = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat)); view.ctx.fill(); view.ctx.restore();
-        }
-        const size = ball.radius * 1.7;
-        const hot = ballOnFire() || (ball.team === -1 && P.ballOnFire?.(ball));
-        const paceTeam = ball.strikerTeam;
-        if (hot && paceTeam !== undefined && paceTeam >= 0) {
-          const teamColor = paceTeam === 0 ? home : away;
-          view.ctx.save(); view.ctx.translate(ball.x, ball.y); view.ctx.rotate(ball.rotation + (view.portrait ? Math.PI / 2 : 0));
-          drawBallFace(view.ctx, size, teamColor, teamColor);
-          view.ctx.restore();
-        } else if (ballMark.complete && ballMark.naturalWidth) {
-          view.ctx.save(); view.ctx.translate(ball.x, ball.y); view.ctx.rotate(ball.rotation + (view.portrait ? Math.PI / 2 : 0));
-          view.ctx.drawImage(ballMark, -size / 2, -size / 2, size, size);
-          view.ctx.restore();
-        } else {
-          view.ctx.save(); view.ctx.translate(ball.x, ball.y); view.ctx.rotate(ball.rotation + (view.portrait ? Math.PI / 2 : 0));
-          drawBallFace(view.ctx, size, '#F8F7F4', '#FF7197');
-          view.ctx.restore();
-        }
-        view.ctx.restore();
-        view.bodies.slice(0, 6).forEach(b => { if (!b.carded) drawSpin(b, b.team ? away : home); });
-        drawSpin(ball, text);
-      }
-
-      drawParticles(home, away);
       function drawHeatMirage(cx, cy, mirageR, strength, timeVal, isImpact = false) {
         if (strength <= 0.02 || isReducedMotion() || bench?.flags.noMirage) return;
         const sx = width / 1000, sy = height / 600;
@@ -3477,7 +3576,28 @@
           if (mc && mctx) {
             if (mc.width !== pw || mc.height !== ph) { mc.width = pw; mc.height = ph; }
             mctx.clearRect(0, 0, pw, ph);
-            mctx.drawImage(view.canvas, rx * sx, ry * sy, pw, ph, 0, 0, pw, ph);
+            const rinkLayer = fx.rinkCache?.layer;
+            if (rinkLayer && rinkLayer.width > 0 && rinkLayer.height > 0) {
+              const rsx = rinkLayer.width / 1000, rsy = rinkLayer.height / 600;
+              mctx.drawImage(rinkLayer, rx * rsx, ry * rsy, rw * rsx, rh * rsy, 0, 0, pw, ph);
+            } else {
+              mctx.fillStyle = background;
+              mctx.fillRect(0, 0, pw, ph);
+            }
+            const iceLayer = (fx.skids.length || fx.burns.length) ? fx.iceCache?.layer : null;
+            if (iceLayer && iceLayer.width > 0 && iceLayer.height > 0) {
+              const isx = iceLayer.width / 1000, isy = iceLayer.height / 600;
+              mctx.drawImage(iceLayer, rx * isx, ry * isy, rw * isx, rh * isy, 0, 0, pw, ph);
+            }
+            if (typeof mctx.createRadialGradient === 'function') {
+              const gx = (cx - rx) * sx, gy = (cy - ry) * sy, gr = Math.max(4, mirageR * Math.max(sx, sy));
+              const glowGrad = mctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
+              glowGrad.addColorStop(0, `rgba(255, 176, 84, ${(0.18 * strength).toFixed(3)})`);
+              glowGrad.addColorStop(0.55, `rgba(255, 120, 44, ${(0.08 * strength).toFixed(3)})`);
+              glowGrad.addColorStop(1, 'rgba(255, 120, 44, 0)');
+              mctx.fillStyle = glowGrad;
+              mctx.fillRect(0, 0, pw, ph);
+            }
 
             const traceBulbousLobe = (ctx, bx, by, br, t, seed) => {
               ctx.beginPath();
@@ -3550,6 +3670,7 @@
         }
       }
 
+      const ball = view.bodies[6];
       if (fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion()) {
         const fw = fx.fireWarp;
         const wp = 1 - Math.max(0, fw.life / fw.duration);
@@ -3565,6 +3686,70 @@
           drawHeatMirage(ball.x, ball.y, mirageR, 0.5, heatTime, false);
         }
       }
+      if (ball) {
+        const fw = fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion() ? fx.fireWarp : null;
+        let warpScaleX = 1, warpScaleY = 1, warpAngle = 0;
+        if (fw) {
+          const wp = 1 - Math.max(0, fw.life / fw.duration);
+          const env = (1 - wp) * Math.cos(wp * Math.PI * 2.2);
+          const amt = env * 0.13;
+          warpScaleX = 1 - amt;
+          warpScaleY = 1 + amt;
+          warpAngle = Math.atan2(fw.ny || 0, fw.nx || 1);
+          const glowFade = (1 - wp) ** 1.3;
+          view.ctx.save();
+          view.ctx.translate(fw.x, fw.y);
+          view.ctx.rotate(warpAngle);
+          view.ctx.scale(1 - (1 - wp) * 0.18, 1 + (1 - wp) * 0.18);
+          view.ctx.beginPath();
+          view.ctx.arc(0, 0, ball.radius * (1.15 + wp * 1.35), 0, Math.PI * 2);
+          view.ctx.fillStyle = '#ff8c24';
+          view.ctx.globalAlpha = 0.28 * glowFade;
+          view.ctx.fill();
+          view.ctx.lineWidth = Math.max(1, 3.2 * glowFade);
+          view.ctx.strokeStyle = '#fff0a8';
+          view.ctx.globalAlpha = 0.72 * glowFade;
+          view.ctx.stroke();
+          view.ctx.restore();
+        }
+        view.ctx.save();
+        if (fw) {
+          view.ctx.translate(ball.x, ball.y);
+          view.ctx.rotate(warpAngle);
+          view.ctx.scale(warpScaleX, warpScaleY);
+          view.ctx.rotate(-warpAngle);
+          view.ctx.translate(-ball.x, -ball.y);
+        }
+        view.ctx.beginPath(); view.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); view.ctx.fillStyle = background; view.ctx.fill();
+        circle(ball.x, ball.y, ball.radius, text, 2);
+        const heat = ballHeat(ball), flare = fx.ballFlare || 0, glow = Math.min(1.35, Math.max(0, heat - 1) / 2 + flare * 0.45);
+        if (glow > 0) {
+          view.ctx.save(); view.ctx.globalAlpha = Math.min(1, .75 * glow); view.ctx.shadowColor = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat)); view.ctx.shadowBlur = bench?.flags.noGlowBlur ? 0 : (16 + flare * 12) * glow * view.canvas.width / 1000;
+          view.ctx.beginPath(); view.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); view.ctx.fillStyle = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat)); view.ctx.fill(); view.ctx.restore();
+        }
+        const size = ball.radius * 1.7;
+        const hot = ballOnFire() || (ball.team === -1 && P.ballOnFire?.(ball));
+        const paceTeam = ball.strikerTeam;
+        if (hot && paceTeam !== undefined && paceTeam >= 0) {
+          const teamColor = paceTeam === 0 ? home : away;
+          view.ctx.save(); view.ctx.translate(ball.x, ball.y); view.ctx.rotate(ball.rotation + (view.portrait ? Math.PI / 2 : 0));
+          drawBallFace(view.ctx, size, teamColor, teamColor);
+          view.ctx.restore();
+        } else if (ballMark.complete && ballMark.naturalWidth) {
+          view.ctx.save(); view.ctx.translate(ball.x, ball.y); view.ctx.rotate(ball.rotation + (view.portrait ? Math.PI / 2 : 0));
+          view.ctx.drawImage(ballMark, -size / 2, -size / 2, size, size);
+          view.ctx.restore();
+        } else {
+          view.ctx.save(); view.ctx.translate(ball.x, ball.y); view.ctx.rotate(ball.rotation + (view.portrait ? Math.PI / 2 : 0));
+          drawBallFace(view.ctx, size, '#F8F7F4', '#FF7197');
+          view.ctx.restore();
+        }
+        view.ctx.restore();
+        view.bodies.slice(0, 6).forEach(b => { if (!b.carded) drawSpin(b, b.team ? away : home); });
+        drawSpin(ball, text);
+      }
+
+      drawParticles(home, away);
       drawFieldOver(colors);
       drawFouls(text, playback?.viewFouls ?? getFouls());
       drawPopups(view.badgeCtx, fx.popups, view.portrait, width, home, away, isReducedMotion(), doc);
