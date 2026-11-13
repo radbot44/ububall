@@ -1323,18 +1323,26 @@
     if (collectionShrinkingBox) {
       collectionLayout = null;
       visibleRinkHeight = 600;
-      const { width: sw, height: sh, length: sl } = collectionShrinkingBox;
-      const vh = window.innerHeight || document.documentElement.clientHeight || 800;
-      const wrapH = Math.max(120, Math.min(sh, vh));
-      rinkStage.style.width = sw + 'px';
-      rinkStage.style.height = sh + 'px';
+      const { left: sx = 0, stageTop = 0, width: sw, length: sl, canvasH = 0 } = collectionShrinkingBox;
+      const safeW = Math.max(1, sw);
+      const vh = (typeof window !== 'undefined' && window.innerHeight) || document.documentElement?.clientHeight || 800;
+      const visTop = Math.max(0, stageTop);
+      const wrapH = canvasH > 0 ? canvasH : Math.max(120, Math.min(Math.round(safeW * sl / 600), vh));
+      rinkStage.style?.setProperty?.('--shrink-left', `${sx}px`);
+      rinkStage.style?.setProperty?.('--shrink-top', `${visTop}px`);
+      rinkStage.style.width = `${Math.round(safeW)}px`;
+      rinkStage.style.height = `${wrapH}px`;
       rinkWrap.style.width = '100%';
-      rinkWrap.style.height = wrapH + 'px';
-      rinkWrap.style.marginBottom = -wrapH + 'px';
+      rinkWrap.style.height = `${wrapH}px`;
+      rinkWrap.style.marginBottom = '0px';
       rinkWrap.style.top = '';
       rinkWrap.style.left = '';
       rinkWrap.style.transform = '';
-      fieldView.collectionPortrait = { length: sl, viewTop: 0, viewSpan: 600 * (wrapH / Math.max(1, sw)) };
+      fieldView.collectionPortrait = {
+        length: sl,
+        viewTop: Math.max(0, 600 * ((visTop - stageTop) / safeW)),
+        viewSpan: 600 * (wrapH / safeW)
+      };
       return;
     }
     if (shot === 'collection') {
@@ -1504,15 +1512,30 @@
     let from = rinkStage.getBoundingClientRect(), turned = fieldView.portrait;
     let fromCollection = prevShot === 'collection' && nextShot !== 'collection';
     let savedExit = null;
+    const resumeShrink = typeof collectionShrinkingBox !== 'undefined' && collectionShrinkingBox ? { ...collectionShrinkingBox } : null;
     if (fromCollection && from.width > 0) {
-      savedExit = { rect: from, at: now, length: typeof collectionShownLength === 'number' ? collectionShownLength : Math.max(1000, 600 * (from.height / from.width)) };
+      const curLen = fieldView.collectionPortrait?.length ||
+        (typeof collectionShownLength === 'number' && collectionShownLength > 0 ? collectionShownLength : 0) ||
+        Math.max(1000, 600 * (from.height / Math.max(1, from.width)));
+      savedExit = { rect: from, at: now, length: Math.max(1000, curLen) };
       pendingExitCollection = savedExit;
-    } else if (!fromCollection && nextShot !== 'collection' && pendingExitCollection && (now - pendingExitCollection.at) < 40) {
+    } else if (!fromCollection && nextShot !== 'collection' && pendingExitCollection &&
+      (resumeShrink || (now - pendingExitCollection.at) < 120)) {
       fromCollection = true;
       savedExit = pendingExitCollection;
       from = savedExit.rect;
     } else {
       pendingExitCollection = null;
+    }
+    if (fromCollection) {
+      if (typeof collectionLengthRaf !== 'undefined' && collectionLengthRaf && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(collectionLengthRaf);
+        collectionLengthRaf = 0;
+      }
+      if (typeof collectionScrollRaf !== 'undefined' && collectionScrollRaf && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(collectionScrollRaf);
+        collectionScrollRaf = 0;
+      }
     }
     const enteringCollection = prevShot !== 'collection' && nextShot === 'collection';
     if (cameraMove || cameraStepRaf) cancelActiveCamera();
@@ -1589,6 +1612,7 @@
     }
 
     if (fromCollection) {
+      pendingExitCollection = savedExit;
       change();
       const canAnim = Boolean(rinkStage.animate) && !compactPhoneStage() && !reducedMotion.matches && !document.hidden && from.width > 0;
       if (!canAnim) {
@@ -1596,9 +1620,15 @@
         layoutDirty = true; draw();
         return;
       }
-      const wCol = from.width, hMin = wCol * 5 / 3;
-      const startLen = Math.max(1000, savedExit?.length || (600 * (from.height / Math.max(1, wCol))));
-      const anchorTop = Math.max(64, from.top);
+      const wCol = from.width, pxPerUnit = Math.max(0.01, wCol / 600), hMin = wCol * 5 / 3;
+      const vh = (typeof window !== 'undefined' && window.innerHeight) || document.documentElement?.clientHeight || 860;
+      const rawStartTop = resumeShrink ? resumeShrink.stageTop : from.top;
+      const fromBottom = typeof from.bottom === 'number' ? from.bottom : (from.top + from.height);
+      const minCoverLen = 600 * (Math.max(0, Math.min(vh, fromBottom) - rawStartTop) / Math.max(1, wCol));
+      const rawStartLen = Math.max(1000, minCoverLen, resumeShrink?.length || savedExit?.length || (600 * (from.height / Math.max(1, wCol))));
+      const startBottom = rawStartTop + (wCol * rawStartLen / 600);
+      const visBottomRef = Math.max(Math.min(vh, hMin), Math.min(vh, Math.max(fromBottom, startBottom)));
+      const rotStageTop = Math.max(rawStartTop, visBottomRef - hMin);
       stadium.classList.add('camera-moving');
       cameraDone = new Promise(resolve => { resolveCameraDone = resolve; });
 
@@ -1618,7 +1648,7 @@
           return;
         }
         const dx = (from.left + wCol / 2) - (to.left + to.width / 2);
-        const dy = (anchorTop + hMin / 2) - (to.top + to.height / 2);
+        const dy = (rotStageTop + hMin / 2) - (to.top + to.height / 2);
         const startPose = fieldView.portrait
           ? `translate(${dx}px, ${dy}px) scale(${wCol / to.width})`
           : `translate(${dx}px, ${dy}px) rotate(-90deg) scale(${wCol / to.height})`;
@@ -1631,33 +1661,45 @@
         };
       };
 
-      if (startLen > 1006) {
-        const vh = typeof window !== 'undefined' && window.innerHeight ? window.innerHeight : 860;
-        const visCapLen = Math.max(1000, 600 * (Math.max(hMin, vh - anchorTop + 220) / Math.max(1, wCol)));
-        const shrinkFromLen = Math.min(startLen, visCapLen);
-        const shrinkFromH = Math.round(wCol * shrinkFromLen / 600);
-        const hMinRound = Math.round(hMin);
+      if (rawStartLen > 1006) {
+        const zoneOffset = ububallMatch.attackZoneLine(P, 0) - P.rink.left;
+        const periodUnits = 2 * Math.max(120, 500 - (60 + zoneOffset));
+        let shrinkFromLen = rawStartLen, shrinkFromTop = rawStartTop;
+        const periodAdjusted = Boolean(resumeShrink?.periodAdjusted);
+        if (!periodAdjusted && shrinkFromLen > 1000 + periodUnits && shrinkFromTop < -300 * pxPerUnit) {
+          const maxByLen = Math.floor((shrinkFromLen - (1000 + periodUnits)) / periodUnits);
+          const maxByTop = Math.floor((-300 * pxPerUnit - shrinkFromTop) / (periodUnits * pxPerUnit));
+          const periods = Math.max(0, Math.min(maxByLen, maxByTop));
+          if (periods > 0) {
+            shrinkFromLen -= periods * periodUnits;
+            shrinkFromTop += periods * periodUnits * pxPerUnit;
+          }
+        }
+        const visStartTop = Math.max(0, shrinkFromTop);
+        const visStartBot = Math.max(visStartTop + 1, Math.min(vh, shrinkFromTop + wCol * shrinkFromLen / 600));
+        const visEndTop = Math.max(0, rotStageTop);
+        const visEndBot = Math.max(visEndTop + 1, Math.min(vh, rotStageTop + hMin));
+        const visibleTravelPx = Math.max(Math.abs(rotStageTop - shrinkFromTop), Math.max(0, visStartBot - visEndBot));
+        const dur = visibleTravelPx < 4 ? 16 : Math.round(Math.min(260, Math.max(120, visibleTravelPx * 0.45)));
+        const canvasH = resumeShrink?.canvasH || Math.max(120, Math.round(Math.min(wCol * rawStartLen / 600, vh)));
         if (typeof collectionShrinkingBox !== 'undefined') {
-          collectionShrinkingBox = { width: Math.round(wCol), height: shrinkFromH, length: shrinkFromLen };
+          collectionShrinkingBox = { left: from.left, stageTop: shrinkFromTop, width: wCol, length: shrinkFromLen, canvasH, periodAdjusted: true };
         }
         rinkStage.classList.add('collection-shrinking');
-        rinkStage.style?.setProperty?.('--shrink-left', Math.round(from.left) + 'px');
-        rinkStage.style?.setProperty?.('--shrink-top', Math.round(anchorTop) + 'px');
+        rinkStage.style?.setProperty?.('--shrink-left', `${from.left}px`);
+        rinkStage.style?.setProperty?.('--shrink-top', `${visStartTop}px`);
         layoutDirty = true; draw();
-        const dur = 260, t0 = typeof performance !== 'undefined' ? performance.now() : 0;
-        const shrinkMove = cameraMove = rinkStage.animate([
-          { clipPath: 'inset(0 0 0px 0)' },
-          { clipPath: `inset(0 0 ${Math.max(0, shrinkFromH - hMinRound)}px 0)` }
-        ], { duration: dur, easing: 'cubic-bezier(.35, 0, .25, 1)' });
+        const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+        const shrinkMove = cameraMove = rinkStage.animate([{ opacity: 1 }, { opacity: 1 }], { duration: dur, easing: 'cubic-bezier(.35, 0, .25, 1)' });
         positionSpinControl(); updateFirstTurnGuide(); updateFoulInfo();
         if (typeof requestAnimationFrame === 'function') {
           const tickShrink = ts => {
             if (cameraMove !== shrinkMove) return;
             const p = Math.min(1, Math.max(0, (ts - t0) / dur));
             const eased = p < 0.5 ? 2 * p * p : 1 - ((-2 * p + 2) ** 2) / 2;
-            const curLen = shrinkFromLen + (1000 - shrinkFromLen) * eased;
             if (typeof collectionShrinkingBox !== 'undefined' && collectionShrinkingBox) {
-              collectionShrinkingBox.length = curLen;
+              collectionShrinkingBox.length = shrinkFromLen + (1000 - shrinkFromLen) * eased;
+              collectionShrinkingBox.stageTop = shrinkFromTop + (rotStageTop - shrinkFromTop) * eased;
             }
             layoutDirty = true; draw();
             if (p < 1) cameraStepRaf = requestAnimationFrame(tickShrink);
@@ -3110,7 +3152,17 @@
     sheet.classList.add('open');
     setShot(sheet.dataset.step === 'team' ? 'team' : 'rules');
     castTo(true);
-    if ($('roster-slots').childElementCount) skateLineup(true);
+    if ($('roster-slots').childElementCount) {
+      if (rinkStage.classList.contains('collection-shrinking')) {
+        const prevDeferred = afterCollectionShrink;
+        afterCollectionShrink = () => {
+          prevDeferred?.();
+          if (sheetOpen() && $('roster-slots').childElementCount) skateLineup(true);
+        };
+      } else {
+        skateLineup(true);
+      }
+    }
   }
   function closeSheet() {
     const sheet = $('roster-dialog');

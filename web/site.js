@@ -1288,10 +1288,15 @@
         viewerPanelAnim = viewer.animate?.([{ opacity: 1, scale: 1 }, { opacity: 0, scale: .92 }], { duration: 200, easing: 'ease-in', fill: 'forwards' }) || null;
       }
       await waitMs(250);
+      if (!collectionViewerOpen || !onCollectionShot()) {
+        cleanupCollectionViewerDom();
+        if (viewer?.open) viewer.close();
+        return;
+      }
     }
     cleanupCollectionViewerDom();
     if (viewer?.open) viewer.close();
-    targetTile?.querySelector?.('.ubu-tile-main')?.focus?.();
+    if (onCollectionShot()) targetTile?.querySelector?.('.ubu-tile-main')?.focus?.();
   }
   function stepCollectionViewer(dir) {
     if (!collectionViewerOpen || !collectionViewerFromList || !current?.serial) return;

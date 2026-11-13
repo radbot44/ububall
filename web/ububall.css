@@ -305,11 +305,26 @@ body[data-shot="collection"] #rink { touch-action: pan-y; }
 .rink-stage.collection-shrinking {
   position: fixed !important;
   left: var(--shrink-left, 0px) !important;
-  top: var(--shrink-top, 4rem) !important;
+  top: var(--shrink-top, 0px) !important;
   z-index: 18;
+  display: block !important;
+  margin: 0 !important;
+  min-height: 0 !important;
   aspect-ratio: auto !important;
   overflow: hidden !important;
   pointer-events: none !important;
+}
+.rink-stage.collection-shrinking > :not(.rink-wrap) {
+  display: none !important;
+}
+.rink-stage.collection-shrinking > .rink-wrap {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  margin: 0 !important;
+  aspect-ratio: auto !important;
+  transform: none !important;
+  transition: none !important;
 }
 @media (max-height: 37.5rem) {
   body[data-shot="collection"] .site-header { margin: .25rem auto; }
@@ -1286,6 +1301,9 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .roster-grid .ubu-tile-art { width: 3.5rem; height: 3.5rem; }
 /* Camera moves (camera() in ububall.js): the rink stage is played from its old box to its new one,
    so nothing above it may clip it on the way. */
+html:has(.stadium.camera-moving), body:has(.stadium.camera-moving) { overflow-x: clip; }
+html:has(body:not([data-shot="collection"]) .stadium.camera-moving),
+body:not([data-shot="collection"]):has(.stadium.camera-moving) { overflow-y: clip; }
 .stadium.camera-moving, .stadium.camera-moving .stadium-stage-area { overflow: visible; }
 .stadium.camera-moving .stadium-stage-area { z-index: 30; }
 .stadium.camera-moving .rink-stage { will-change: transform; }

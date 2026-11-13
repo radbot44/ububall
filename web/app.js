@@ -77,6 +77,10 @@
     if (prev && prev !== screen) closeTransientUI();
     screenTransition(screen, () => {
       for (const el of document.querySelectorAll('[data-screen]')) el.hidden = el.dataset.screen !== screen;
+      if (prev && prev !== screen) {
+        scrollTo(0, 0);
+        document.body?.scrollTo?.(0, 0);
+      }
     }, prev);
     for (const link of document.querySelectorAll('.site-nav a')) {
       if (screenOf(new URL(link.href).pathname) === screen) link.setAttribute('aria-current', 'page');
@@ -109,8 +113,6 @@
     }
     if (url.href !== location.href) history.pushState(null, '', url);
     show();
-    scrollTo(0, 0);
-    document.body.scrollTo(0, 0);
     return true;
   }
 

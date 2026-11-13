@@ -300,3 +300,12 @@ None.
   `.roster-slots .formation-slot:not([data-position="back"]) .formation-pick` from `overflow: hidden;`
   to `overflow: visible;` so `.formation-art` (`translate: 0 .5rem;` when `.formation-super` is shown)
   is not sliced off while `.formation-name` retains name ellipsis truncation.
+- 2026-11-12: Fixed seamless Collection exit transitions across all scroll positions (`web/ububall.js`,
+  `web/ububall.css`, `web/app.js`, `web/site.css`, `web/site.js`, `test/ububall-effects.test.js`):
+  forced `display: block` and `margin-bottom: 0` on `.rink-stage.collection-shrinking` (hiding
+  target-shot in-stage overlays until shrink finishes) so flex centering never pushes `#rink` below
+  the viewport; preserved exact scrolled `stageTop` and `viewTop` instead of snapping to `64px` / `0`,
+  retracting deep scrolls smoothly (with `2 * step` period reduction) to a viewport-covering `3:5`
+  pose before rotating back; moved `scrollTo(0, 0)` into `app.js`'s `applyDom` (covering `popstate`
+  and measuring target shots at `scrollY = 0`); elevated `.site-header` `z-index` above `.camera-moving`
+  and clipped transient `.camera-moving` page scrollbars.

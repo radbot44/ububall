@@ -4421,6 +4421,61 @@ test('Rink stage Phase 4: stretched portrait Collection rink, repeating markings
   assert.deepEqual(castCalls, [false], 'skaters skate back onto the ice as the rink rotates back to Home');
   animHistory[1].onfinish();
 
+  // Leaving Collection at mid-scroll and deep-scroll keeps the rink in view with exact scroll-matched viewTop & rotate origin
+  {
+    const ububallCssSrc = fs.readFileSync(path.join(__dirname, '..', 'web', 'ububall.css'), 'utf8');
+    assert.match(ububallCssSrc, /\.rink-stage\.collection-shrinking\s*\{[^}]*display:\s*block\s*!important/s,
+      'collection-shrinking forces display: block so flex centering never pushes #rink off-screen');
+    assert.match(ububallCssSrc, /\.rink-stage\.collection-shrinking\s*>\s*:not\(\.rink-wrap\)\s*\{\s*display:\s*none\s*!important/s,
+      'collection-shrinking hides target-shot stage overlays until portrait shrink finishes');
+
+    let mockCollectionTop = -650; // mid-scroll: -650 + 2000 = 1350 >= innerHeight (900)
+    const origGetRect = rinkStage.getBoundingClientRect;
+    rinkStage.getBoundingClientRect = function () {
+      const s = stageCtx.document.body.dataset.shot;
+      if (s === 'collection') return { left: 120, top: mockCollectionTop, width: 1200, height: collectionFullHeight, bottom: mockCollectionTop + collectionFullHeight };
+      return origGetRect.call(this);
+    };
+
+    stageCtx.document.body.dataset.shot = 'collection';
+    stageCtx.location.pathname = '/collection';
+    stageEnv.screenTransition('collection', () => {}, 'collection');
+    // Force internal shot back to collection cleanly
+    stageEnv.screenTransition('collection', () => {}, 'play');
+    animHistory.at(-1)?.onfinish?.();
+    animHistory.at(-1)?.onfinish?.();
+
+    // Mid-scroll exit to Mint: stageTop stays at -650 (no snap to +64px) and rotates from cy0 = -650 + 1000 = 350
+    animHistory.length = 0;
+    stageCtx.location.pathname = '/mint';
+    stageEnv.screenTransition('mint', () => {}, 'collection');
+    assert.equal(rinkStage.classList.contains('collection-shrinking'), true);
+    assert.equal(rinkStage.style['--shrink-top'], '0px', 'scrolled portrait rink stays flush at viewport top instead of snapping down to 64px');
+    animHistory[0].onfinish();
+    // Mint box is { left: 120, top: 100, width: 1200, height: 720 } -> center Y = 460; rotStageTop = -650 -> cy0 = 350 -> dy = -110
+    assert.match(animHistory[1].keyframes[0].transform, /translate\(0px,\s*-110px\)\s*rotate\(-90deg\)/,
+      'mid-scroll Collection -> Mint rotates directly from the scrolled portrait pose without vertical jump');
+    animHistory[1].onfinish();
+
+    // Deep-scroll exit (scrolled near bottom of 2900px rink: top = -1800, bottom = 1100 > 900) retracts to rotStageTop = 900 - 2000 = -1100
+    stageCtx.location.pathname = '/collection';
+    stageEnv.screenTransition('collection', () => {}, 'mint');
+    animHistory.at(-1)?.onfinish?.();
+    animHistory.at(-1)?.onfinish?.();
+    mockCollectionTop = -1800;
+    animHistory.length = 0;
+    stageCtx.location.pathname = '/';
+    stageEnv.screenTransition('play', () => {}, 'collection');
+    assert.equal(rinkStage.classList.contains('collection-shrinking'), true);
+    animHistory[0].onfinish();
+    // Home box is { left: 40, top: 80, width: 750, height: 450 } -> center Y = 305; rotStageTop = -1100 -> cy0 = -100 -> dy = -405
+    assert.match(animHistory[1].keyframes[0].transform, /translate\(305px,\s*-405px\)\s*rotate\(-90deg\)/,
+      'deep-scroll Collection -> Play retracts to viewport-covering 3:5 bottom (-1100px) and rotates seamlessly');
+    animHistory[1].onfinish();
+
+    rinkStage.getBoundingClientRect = origGetRect;
+  }
+
   // Phone portrait skips rotation/stretch moves cleanly
   animHistory.length = 0;
   stageCtx.portraitScreen.matches = true;
@@ -4701,10 +4756,26 @@ test('Rink stage Phase 5: Discord Activity lobby shot, docked Activity rules/tea
     assert.equal(appWin.location.pathname, '/mint');
     assert.equal(appWin.location.searchParams.get('instance_id'), 'inst-77', 'navigating to /mint preserves instance_id');
     assert.equal(appWin.location.searchParams.get('frame_id'), 'f-9', 'navigating to /mint preserves frame_id');
+    let scrolledInsideApply = false, inTransition = false, popHandler = null;
+    appWin.addEventListener = (t, fn) => { if (t === 'popstate') popHandler = fn; };
+    appWin.scrollTo = () => { if (inTransition) scrolledInsideApply = true; };
+    runInNewContext(appSrc, appWin);
+    appWin.setUbuScreenTransition((_next, apply) => {
+      inTransition = true;
+      scrolledInsideApply = false;
+      apply();
+      assert.equal(scrolledInsideApply, true, 'app.js resets scroll inside applyDom before target shot measurement');
+      inTransition = false;
+    });
     await appWin.navigateUbuScreen('https://123456.discordsays.com/?roster=1');
     assert.equal(appWin.location.pathname, '/');
     assert.equal(appWin.location.searchParams.get('roster'), '1');
     assert.equal(appWin.location.searchParams.get('instance_id'), 'inst-77', 'navigating to /?roster=1 preserves instance_id alongside roster=1');
+    appWin.location = new URL('https://123456.discordsays.com/collection?instance_id=inst-77');
+    await popHandler?.();
+    appWin.location = new URL('https://123456.discordsays.com/mint?instance_id=inst-77');
+    scrolledInsideApply = false;
+    await popHandler?.();
   }
 
   // 3. ububall.js Activity lobby shot, docked rules/team setup, CPU leave/resume, and Mint/Collection -> Match cast restoration
