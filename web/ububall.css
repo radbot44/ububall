@@ -273,7 +273,7 @@ body[data-shot="collection"] :is(.stadium, .stadium-stage-area) {
   display: block;
   width: 100%;
   overflow: visible;
-  border: 0;
+  border: 0 none transparent;
   background: none;
   box-shadow: none;
 }
@@ -869,6 +869,7 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
   width: 100%;
   min-width: 0;
   min-height: 0;
+  border: 0 none transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1382,7 +1383,7 @@ body:is([data-shot="team"], [data-shot="rules"]) .rink-stage { width: min(100%, 
     grid-column: 1; grid-row: 1;
     display: grid; grid-template-columns: var(--slot-art) minmax(0, 1fr); grid-template-rows: auto auto;
     column-gap: .375rem; row-gap: .0625rem; align-items: center; justify-items: stretch;
-    width: 100%; overflow: hidden; text-align: left;
+    width: 100%; overflow: visible; text-align: left;
   }
   .roster-slots .formation-slot:not([data-position="back"]) .formation-art {
     grid-column: 1; grid-row: 1 / span 2;

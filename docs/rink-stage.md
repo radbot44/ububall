@@ -293,3 +293,10 @@ None.
   `stage-lineup-arrival`, `stage-mint-scamper` + `playPack` audio) to `web/effects.html`,
   `web/effects.css` and `web/effects.js`; updated unit tests in `test/ububall-effects.test.js` and
   verified across desktop and mobile in headless Chromium.
+- 2026-11-12: Fixed Ubu Mint entry border flash in `web/ububall.css` by setting
+  `border: 0 none transparent;` on `.stadium-stage-area` (and `collection` `.stadium`/`.stadium-stage-area`)
+  so entering `mint` no longer interpolates `border-color` from `currentcolor` to `transparent`.
+- 2026-11-12: Fixed mobile Choose Team `TOP`/`BOTTOM` ubu clipping in `web/ububall.css` by changing
+  `.roster-slots .formation-slot:not([data-position="back"]) .formation-pick` from `overflow: hidden;`
+  to `overflow: visible;` so `.formation-art` (`translate: 0 .5rem;` when `.formation-super` is shown)
+  is not sliced off while `.formation-name` retains name ellipsis truncation.
