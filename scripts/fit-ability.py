@@ -161,6 +161,9 @@ def fit_penalized(X: np.ndarray, y: np.ndarray, weights: np.ndarray, P: np.ndarr
 
 
 def maybe_run_gpu_oracle(train_teams: np.ndarray, train_y: np.ndarray, val_teams: np.ndarray, val_y: np.ndarray) -> dict | None:
+    if len(train_y) < 400 or len(val_y) < 80:
+        return {"note": "Dataset too small for neural oracle split."}
+
     try:
         import torch
         import torch.nn as nn
@@ -169,8 +172,6 @@ def maybe_run_gpu_oracle(train_teams: np.ndarray, train_y: np.ndarray, val_teams
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     gpu_name = torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU"
-    if len(train_y) < 400 or len(val_y) < 80:
-        return {"device": str(device), "gpuName": gpu_name, "note": "Dataset too small for neural oracle split."}
 
     torch.manual_seed(42)
 
@@ -231,6 +232,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Fit Ububall Ability Score model with bootstrap CIs.")
     parser.add_argument("--input", default="personal/ability-corpus.jsonl", help="Path to benchmark JSONL.")
     parser.add_argument("--bootstraps", type=int, default=400, help="Bootstrap resamples for 95% CIs.")
+    parser.add_argument("--model", default="shared/ability-model.json", help="Output fitted model JSON.")
     parser.add_argument("--report", default="personal/ability-fit-report.json", help="Output diagnostic report.")
     parser.add_argument("--no-calibrate", action="store_true", help="Skip running calibrate-ability.cjs.")
     args = parser.parse_args()
@@ -396,7 +398,8 @@ def main() -> None:
         "knots": knots_dict,
         "interactions": inter_dict,
     }
-    model_path = repo_root / "shared" / "ability-model.json"
+    model_path = (repo_root / args.model).resolve() if not Path(args.model).is_absolute() else Path(args.model)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
     model_path.write_text(json.dumps(model_payload, indent=2) + "\n", encoding="utf-8")
 
     report_payload = {

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const ubu = require('../shared/ubu.js');
 const ability = require('../shared/ability.js');
 const abilityTableJson = require('../shared/ability-table.json');
@@ -146,7 +146,49 @@ test('Trading card markup & CSS stack Ability ledge above Rarity and drop obsole
   assert.ok(prepJs.includes("'ability.js'"), 'prepare-assets.cjs whitelists ability.js');
 });
 
-test('Benchmark harness enforces 50/50 Standard+Pulse split, symmetric swapped pairs, and end-to-end Node+Python fitters', () => {
+function writeSyntheticCorpus(jsonlPath, pairCount = 140) {
+  let seed = 12345;
+  const rand = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+  const objOf = arr => Object.fromEntries(ability.STATS.map((s, i) => [s, arr[i]]));
+  const randUbu = () => ability.STATS.map(() => Math.floor(rand() * 256));
+  const lines = [];
+  for (let p = 0; p < pairCount; p++) {
+    const teamA = [randUbu(), randUbu(), randUbu()];
+    const teamB = [randUbu(), randUbu(), randUbu()];
+    const trueDiff = teamA.reduce((acc, u) => acc + ability.scoreAbility(objOf(u)).score, 0) -
+                     teamB.reduce((acc, u) => acc + ability.scoreAbility(objOf(u)).score, 0);
+    lines.push(JSON.stringify({
+      id: `corpus:${p}`,
+      kind: 'corpus',
+      mode: p % 2 === 0 ? 'standard' : 'pulse',
+      seed: p,
+      teams: [teamA, teamB],
+      goalDiff: Number((trueDiff + (rand() - 0.5) * 0.15).toFixed(4)),
+      goalRate30s: Number((trueDiff * 1.1).toFixed(4)),
+      winDiff: trueDiff >= 0 ? 1 : -1,
+      turns: 24,
+      ticks: 9600
+    }));
+  }
+  fs.writeFileSync(jsonlPath, lines.join('\n') + '\n');
+}
+
+function findPythonWithNumpy() {
+  const candidates = [];
+  if (process.env.PYTHON) candidates.push([process.env.PYTHON]);
+  if (process.platform === 'win32') {
+    candidates.push(['python'], ['py', '-3'], ['py', '-3.11'], ['py', '-3.10'], ['py', '-3.12'], ['python3']);
+  } else {
+    candidates.push(['python3'], ['python']);
+  }
+  for (const [cmd, ...prefix] of candidates) {
+    const probe = spawnSync(cmd, [...prefix, '-c', 'import sys, numpy; sys.exit(0 if sys.version_info >= (3, 8) else 1)'], { stdio: 'ignore' });
+    if (!probe.error && probe.status === 0) return { cmd, prefix };
+  }
+  return null;
+}
+
+test('Benchmark harness enforces 50/50 Standard+Pulse split, symmetric swapped pairs, and Node fitter', t => {
   const jobs = bench.buildJobs({
     suite: 'full',
     pairs: 10,
@@ -177,55 +219,44 @@ test('Benchmark harness enforces 50/50 Standard+Pulse split, symmetric swapped p
   assert.equal(symResult.winDiff, 0);
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ability-fit-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
   const jsonlPath = path.join(tmpDir, 'synthetic.jsonl');
-  const reportPath = path.join(tmpDir, 'report.json');
-  let seed = 12345;
-  const rand = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
-  const lines = [];
-  for (let p = 0; p < 140; p++) {
-    const randUbu = () => ability.STATS.map(() => Math.floor(rand() * 256));
-    const teamA = [randUbu(), randUbu(), randUbu()];
-    const teamB = [randUbu(), randUbu(), randUbu()];
-    const objOf = arr => Object.fromEntries(ability.STATS.map((s, i) => [s, arr[i]]));
-    const trueDiff = teamA.reduce((acc, u) => acc + ability.scoreAbility(objOf(u)).score, 0) -
-                     teamB.reduce((acc, u) => acc + ability.scoreAbility(objOf(u)).score, 0);
-    lines.push(JSON.stringify({
-      id: `corpus:${p}`,
-      kind: 'corpus',
-      mode: p % 2 === 0 ? 'standard' : 'pulse',
-      seed: p,
-      teams: [teamA, teamB],
-      goalDiff: Number((trueDiff + (rand() - 0.5) * 0.15).toFixed(4)),
-      goalRate30s: Number((trueDiff * 1.1).toFixed(4)),
-      winDiff: trueDiff >= 0 ? 1 : -1,
-      turns: 24,
-      ticks: 9600
-    }));
-  }
-  fs.writeFileSync(jsonlPath, lines.join('\n') + '\n');
+  writeSyntheticCorpus(jsonlPath);
 
   const nodeFit = calibrate.fitFromCorpus(jsonlPath);
   assert.equal(nodeFit.pairs, 140);
   assert.ok(nodeFit.knots.impulse[4] > nodeFit.knots.impulse[0], 'Node fitter recovers positive Impulse slope');
   assert.ok(nodeFit.knots.power[4] > nodeFit.knots.power[0], 'Node fitter recovers positive Power slope');
+});
 
-  const modelPath = path.join(__dirname, '..', 'shared', 'ability-model.json');
-  const backupModel = fs.readFileSync(modelPath, 'utf8');
-  try {
-    execFileSync('python3', [
-      path.join(__dirname, '..', 'scripts', 'fit-ability.py'),
-      '--input', jsonlPath,
-      '--bootstraps', '20',
-      '--report', reportPath,
-      '--no-calibrate'
-    ], { stdio: 'pipe' });
-    const rep = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-    assert.equal(rep.pairs, 140);
-    assert.ok(rep.holdout.splineCVPearsonR > 0.85, `Expected high CV recovery r > 0.85, got ${rep.holdout.splineCVPearsonR}`);
-  } finally {
-    fs.writeFileSync(modelPath, backupModel);
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+test('Python fit-ability.py recovers spline weights from synthetic corpus', t => {
+  const py = findPythonWithNumpy();
+  if (!py) {
+    t.skip('Python 3 with numpy is not available');
+    return;
   }
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ability-pyfit-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const jsonlPath = path.join(tmpDir, 'synthetic.jsonl');
+  const modelPath = path.join(tmpDir, 'ability-model.json');
+  const reportPath = path.join(tmpDir, 'report.json');
+  writeSyntheticCorpus(jsonlPath);
+
+  execFileSync(py.cmd, [
+    ...py.prefix,
+    path.join(__dirname, '..', 'scripts', 'fit-ability.py'),
+    '--input', jsonlPath,
+    '--bootstraps', '20',
+    '--model', modelPath,
+    '--report', reportPath,
+    '--no-calibrate'
+  ], { stdio: 'pipe' });
+
+  const rep = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+  const fittedModel = JSON.parse(fs.readFileSync(modelPath, 'utf8'));
+  assert.equal(rep.pairs, 140);
+  assert.equal(fittedModel.pairs, 140);
+  assert.ok(rep.holdout.splineCVPearsonR > 0.85, `Expected high CV recovery r > 0.85, got ${rep.holdout.splineCVPearsonR}`);
 });
 
 test('Nested scale tiers (--quick ⊂ standard ⊂ --deep), interleaved strata, fastTick+screenTop search, and worker pool streaming work cleanly', async () => {
