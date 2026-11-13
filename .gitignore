@@ -18,3 +18,4 @@ secrets/
 *.log
 wrangler.local.jsonc
 wrangler.deploy.jsonc
+/bench-results

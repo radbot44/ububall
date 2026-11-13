@@ -276,13 +276,35 @@
 
   let lastReport = null, lastMarkdown = '';
 
+  async function copyText(str) {
+    if (navigator.clipboard?.writeText) {
+      try { await navigator.clipboard.writeText(str); return true; } catch {}
+    }
+    try {
+      const ta = Object.assign(document.createElement('textarea'), { value: str });
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.append(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch { return false; }
+  }
+  function postProgress(msg) {
+    try { void fetch('/__bench_progress', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ msg }) }).catch(() => {}); } catch {}
+  }
+  window.addEventListener('error', e => {
+    liveEl.textContent = 'ERR: ' + (e.message || 'script error');
+    postProgress('ERROR: ' + (e.message || 'unknown') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0));
+  });
   copyMdBtn.onclick = async () => {
     if (!lastMarkdown) return;
-    try { await navigator.clipboard.writeText(lastMarkdown); copyMdBtn.textContent = 'Copied MD!'; setTimeout(() => { copyMdBtn.textContent = 'Copy Markdown'; }, 1400); } catch {}
+    if (await copyText(lastMarkdown)) { copyMdBtn.textContent = 'Copied MD!'; setTimeout(() => { copyMdBtn.textContent = 'Copy Markdown'; }, 1400); }
   };
   copyJsonBtn.onclick = async () => {
     if (!lastReport) return;
-    try { await navigator.clipboard.writeText(JSON.stringify(lastReport, null, 2)); copyJsonBtn.textContent = 'Copied JSON!'; setTimeout(() => { copyJsonBtn.textContent = 'Copy JSON'; }, 1400); } catch {}
+    if (await copyText(JSON.stringify(lastReport, null, 2))) { copyJsonBtn.textContent = 'Copied JSON!'; setTimeout(() => { copyJsonBtn.textContent = 'Copy JSON'; }, 1400); }
   };
   dlJsonBtn.onclick = () => {
     if (!lastReport) return;
@@ -319,6 +341,9 @@
       } catch {}
     }
 
+    let wakeLock = null;
+    try { wakeLock = await navigator.wakeLock?.request?.('screen'); } catch {}
+    postProgress(`Started suite (${passes.length} passes) on ${window.innerWidth}x${window.innerHeight} @ DPR ${window.devicePixelRatio || 1}`);
     const results = [];
     try {
       bench.control.prepareRoster();
@@ -336,6 +361,7 @@
       for (let idx = 0; idx < passes.length; idx++) {
         const pass = passes[idx];
         liveEl.textContent = `[${idx + 1}/${passes.length}] ${pass.id}...`;
+        if (idx === 0 || (idx + 1) % 6 === 0 || idx === passes.length - 1) postProgress(`[${idx + 1}/${passes.length}] ${pass.id}`);
         bench.flags = { ...pass.flags };
         const skatersEl = document.getElementById('skaters');
         if (skatersEl) skatersEl.style.display = bench.flags.noDomSkaters ? 'none' : '';
@@ -369,6 +395,7 @@
         results.push(summarizePass(pass, rec, bench.control.getState(), longTaskState));
       }
     } finally {
+      try { await wakeLock?.release?.(); } catch {}
       if (observer) observer.disconnect();
       bench.flags = {};
       const skatersEl = document.getElementById('skaters');
@@ -424,8 +451,9 @@
   bench.runSuite = () => executeSuite(SUITE_PASSES);
   bench.getLastReport = () => lastReport;
 
+  postProgress(`Bench HUD ready on ${navigator.userAgent}`);
   const params = new URLSearchParams(location.search);
-  if (params.get('auto') === '1') {
+  if (params.has('auto') && params.get('auto') !== '0') {
     setTimeout(() => { void executeSuite(SUITE_PASSES); }, 450);
   }
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -183,3 +183,34 @@ test('bench whitelist and server security invariants hold', () => {
   assert.equal(typeof srv.listen, 'function');
   srv.close();
 });
+
+test('ububall-online boots cleanly on non-HTTPS LAN origins where crypto.randomUUID is undefined', () => {
+  const onlineSrc = fs.readFileSync(require.resolve('../web/ububall-online.js'), 'utf8');
+  const crypto = require('node:crypto').webcrypto;
+  const insecureCrypto = {
+    randomUUID: undefined,
+    getRandomValues: arr => crypto.getRandomValues(arr)
+  };
+  const makeEl = () => ({
+    hidden: false, disabled: false, value: '', textContent: '', dataset: {}, style: {},
+    classList: { toggle() {}, add() {}, remove() {} },
+    setAttribute() {}, removeAttribute() {}, addEventListener() {}, append() {}, replaceChildren() {},
+    querySelector: () => ({ textContent: '' })
+  });
+  const ctx = {
+    URL, URLSearchParams, AbortController, Map, Set, Promise, JSON, Math, Date, String, Boolean, Object, Array, Uint8Array,
+    crypto: insecureCrypto,
+    window: { location: new URL('http://192.168.1.50:8791/?bench=1&auto=1'), addEventListener() {} },
+    document: { getElementById: () => makeEl(), querySelectorAll: () => [], addEventListener() {} },
+    navigator: {},
+    location: new URL('http://192.168.1.50:8791/?bench=1&auto=1'),
+    history: { state: null, replaceState() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    matchMedia: () => ({ matches: false }),
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+    setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {}
+  };
+  const initOnline = vm.runInNewContext(onlineSrc + '\n;ububallOnline;', ctx);
+  const client = initOnline({ lobby() {}, closeLobby() {}, onState() {}, onDisconnect() {}, onError() {}, onOutdated() {}, onLeave() {} });
+  assert.equal(typeof client.active, 'boolean');
+});

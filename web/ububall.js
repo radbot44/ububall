@@ -57,7 +57,7 @@
     else if (legacySound === 'off') musicVolume = 0;
     if (savedMode === 'mono' || savedMode === 'stereo') audioMode = savedMode;
   } catch {}
-  const bench = typeof window !== 'undefined' && location.search.includes('bench=1')
+  const bench = typeof window !== 'undefined' && (window.__ubuBench || /[?&]bench(?:=|&|$)/i.test(location.search || ''))
     ? (window.__ubuBench ||= { flags: {}, rec: null }) : null;
   const gameAudio = () => bench?.flags.noAudio ? null : (videoAudio || activePlayback?.audio || (demo ? null : window.ubuAudio));
   const classicMode = () => ububallMatch.rule(fieldView.mode, 'classic');
@@ -4278,7 +4278,7 @@
       },
       async enterMatchBench() {
         if (location.pathname !== '/' && typeof window.navigateUbuScreen === 'function') {
-          await window.navigateUbuScreen('/');
+          await window.navigateUbuScreen('/?bench=1');
         }
         stopDemo();
         cancelActiveCamera();
@@ -4312,7 +4312,7 @@
             }
             collectionSeeded = true;
           }
-          if (typeof window.navigateUbuScreen === 'function') await window.navigateUbuScreen('/collection');
+          if (typeof window.navigateUbuScreen === 'function') await window.navigateUbuScreen('/collection?bench=1');
           cancelActiveCamera();
           if (kind === 'collectionCold') {
             window.scrollTo(0, 0);
@@ -4441,7 +4441,7 @@
         recording = null;
         clearActiveMatch();
         if (location.pathname !== '/' && typeof window.navigateUbuScreen === 'function') {
-          await window.navigateUbuScreen('/');
+          await window.navigateUbuScreen('/?bench=1');
           window.scrollTo(0, 0);
         }
         await this.enterMatchBench();
@@ -4451,7 +4451,7 @@
     if (typeof document !== 'undefined' && document.head) {
       const s = document.createElement('script');
       s.src = 'ububall-bench.js';
-      s.defer = true;
+      s.async = false;
       document.head.append(s);
     }
   }

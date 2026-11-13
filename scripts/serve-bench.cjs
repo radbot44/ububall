@@ -92,6 +92,20 @@ function createBenchServer() {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
     const pathname = url.pathname;
 
+    if (req.method === 'POST' && pathname === '/__bench_progress') {
+      const chunks = [];
+      req.on('data', c => { if (chunks.length < 16) chunks.push(c); });
+      req.on('end', () => {
+        try {
+          const { msg } = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          const ip = req.socket.remoteAddress || 'client';
+          console.log(`[bench ${ip}] ${msg}`);
+        } catch {}
+        sendJson(res, 200, { ok: true });
+      });
+      return;
+    }
+
     if (req.method === 'POST' && pathname === '/__bench_report') {
       const chunks = [];
       let total = 0;
@@ -131,6 +145,18 @@ function createBenchServer() {
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405);
+      res.end();
+      return;
+    }
+
+    if (pathname === '/auto') {
+      res.writeHead(302, { Location: '/?bench=1&auto=1', 'Cache-Control': 'no-store' });
+      res.end();
+      return;
+    }
+
+    if (pathname === '/' && !url.searchParams.has('bench') && !url.searchParams.has('nobench')) {
+      res.writeHead(302, { Location: '/?bench=1', 'Cache-Control': 'no-store' });
       res.end();
       return;
     }
@@ -181,7 +207,8 @@ if (require.main === module) {
     console.log(`  PC Interactive : http://127.0.0.1:${PORT}/?bench=1`);
     console.log(`  PC Auto-Run    : http://127.0.0.1:${PORT}/?bench=1&auto=1`);
     for (const ip of lanAddresses()) {
-      console.log(`  Phone Wi-Fi    : http://${ip}:${PORT}/?bench=1&auto=1`);
+      console.log(`  Phone Auto-Run : http://${ip}:${PORT}/auto`);
+      console.log(`  Phone Controls : http://${ip}:${PORT}/`);
     }
     console.log(`\nReports automatically save to: ${outDir}`);
   });

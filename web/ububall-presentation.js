@@ -798,7 +798,7 @@
   }
 
   function createRinkPresenter(deps) {
-    const bench = typeof window !== 'undefined' && window.location?.search?.includes('bench=1')
+    const bench = typeof window !== 'undefined' && (window.__ubuBench || /[?&]bench(?:=|&|$)/i.test(window.location?.search || ''))
       ? (window.__ubuBench ||= { flags: {}, rec: null }) : null;
     const {
       P,
