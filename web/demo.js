@@ -164,6 +164,12 @@
     $('grade').textContent = m.grade;
     $('grade').dataset.grade = m.grade;
     $('rating').textContent = `${m.rating} / 1023`;
+    if (window.ability && $('ability-percentile')) {
+      const ab = ability.scoreAbility(m);
+      $('ability-percentile').textContent = `${ab.percentile.toFixed(3)} / 100`;
+      $('ability-raw').textContent = `${ab.score >= 0 ? '+' : ''}${ab.score.toFixed(4)} xGD`;
+      $('ability-breakdown').textContent = `Ability breakdown: movement ${ab.breakdown.movement.toFixed(3)}, physical ${ab.breakdown.physical.toFixed(3)}, engagement ${ab.breakdown.engagement.toFixed(3)}, super ${ab.breakdown.super.toFixed(3)}, interactions ${ab.breakdown.interactions.toFixed(3)}.`;
+    }
     if (window.rarity) {
       const r = rarity.scoreRarity(m);
       $('rarity-percentile').textContent = `${r.percentile.toFixed(3)} / 100`;

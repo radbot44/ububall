@@ -4379,6 +4379,7 @@
                 result: { dna, certificate: { serial, issuedAt: '2026-11-12T00:00:00Z' } },
                 model,
                 rarity: rarity.scoreRarity(model),
+                ability: typeof ability !== 'undefined' ? ability.scoreAbility(model) : null,
                 issuedAt: '2026-11-12T00:00:00Z',
                 favorite: i < 4
               });

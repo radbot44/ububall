@@ -3,6 +3,13 @@
 // once, then searched, filtered and sorted in memory, so stat orders cover the whole collection.
 (function(root) {
   const archetypeApi = typeof module === 'object' && module.exports ? require('../shared/ubu-archetype.js') : root.ubuArchetype;
+  const abilityApi = typeof module === 'object' && module.exports ? require('../shared/ability.js') : root.ability;
+  function itemAbility(item) {
+    if (!item) return null;
+    if (item.ability !== undefined) return item.ability;
+    if (!item.model?.stats || !abilityApi) return null;
+    try { return (item.ability = abilityApi.scoreAbility(item.model)); } catch { return null; }
+  }
   function itemArchetype(item) {
     if (!item?.model || !archetypeApi) return null;
     if (item.archetype !== undefined) return item.archetype;
@@ -33,6 +40,7 @@
   const METRICS = {
     recent: { label: 'Mint date', words: ['Newest', 'Oldest'], value: item => item.issuedAt || 0 },
     favorite: { label: 'Favorites first', words: ['Favorites first', 'Favorites last'], value: item => Number(item.favorite) },
+    ability: { label: 'Ability', value: item => itemAbility(item)?.percentile ?? 0, show: item => { const a = itemAbility(item); return a ? rarityScore(a.percentile) : ''; } },
     rarity: { label: 'Rarity', value: item => item.rarity?.percentile ?? 0, show: item => item.rarity ? rarityScore(item.rarity.percentile) : '' },
     ubuquity: { label: 'Ubuquity', color: '#ff7197', value: item => item.model.rating },
     serial: { label: 'Serial number', words: ['Lowest', 'Highest'], ascending: true, value: item => Number(item.serial) },
@@ -160,7 +168,7 @@
   const SEARCH_HELP = [
     ['power>200', 'any stat; >, >=, <, <=, ='],
     ['movement>=150', 'group average: movement, physical, engagement, super; all for every stat'],
-    ['ubuquity>800 rarity>90', 'also mastery, serial, aggression, creativity, teamwork, clutch'],
+    ['ubuquity>800 ability>90 rarity>90', 'also mastery, serial, aggression, creativity, teamwork, clutch'],
     ['grade>=s  grade:a,b', 'grades C B A S S+ U UBU'],
     ['super:magnet,ghost', 'has any of these supers'],
     ['is:fav', 'favorites'],
@@ -256,6 +264,7 @@
     const result = await ubuFile.read(row.certificate, { allowUnsigned: false, resolveKey: trustedKey });
     const model = ubu.decode(ubu.fromCode(result.dna));
     return { serial: row.serial, certificate: row.certificate, result, model, rarity: root.rarity.scoreRarity(model),
+      ability: abilityApi ? abilityApi.scoreAbility(model) : null,
       archetype: archetypeApi ? archetypeApi.describe(model) : null, issuedAt: result.certificate.issuedAt, favorite };
   }
   // Reads every page; `refresh` refetches a loaded collection, keeping verified entries.
@@ -351,7 +360,7 @@
   const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
   const icon = name => gameUi.icon(name);
   const heartIcon = () => icon('heart');
-  const SORT_CHOICES = ['recent', 'favorite', 'rarity', 'ubuquity', 'serial', 'name', 'random', 'all', 'movement', 'physical', 'engagement', 'super', ...STATS];
+  const SORT_CHOICES = ['recent', 'favorite', 'ability', 'rarity', 'ubuquity', 'serial', 'name', 'random', 'all', 'movement', 'physical', 'engagement', 'super', ...STATS];
   const NO_CHIP = ['recent', 'favorite', 'serial', 'name', 'archetype', 'random', 'grade'];
   // The tile chip shows the first value a query sorts or compares by, else the chosen order's.
   function chipKey(state, query) {
@@ -373,7 +382,7 @@
     const select = el('select', { className: 'ubu-sort' });
     select.setAttribute('aria-label', 'Sort by');
     const options = keys => keys.map(key => new Option(METRICS[key].label, key));
-    select.append(el('optgroup', { label: 'Collection' }, ...options(['recent', 'favorite', 'rarity', 'ubuquity', 'serial', 'name', 'random'])),
+    select.append(el('optgroup', { label: 'Collection' }, ...options(['recent', 'favorite', 'ability', 'rarity', 'ubuquity', 'serial', 'name', 'random'])),
       el('optgroup', { label: 'Averages' }, ...options(['all', 'movement', 'physical', 'engagement', 'super'])));
     for (const [group, , statKeys] of STAT_GROUPS) select.append(el('optgroup', { label: group }, ...options(statKeys)));
     const direction = el('button', { type: 'button', className: 'ubu-direction' });

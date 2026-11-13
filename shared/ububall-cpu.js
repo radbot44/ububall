@@ -527,6 +527,7 @@
         !Number.isInteger(settings.opponents) || settings.opponents < 1 || settings.opponents > 3 ||
         !Number.isFinite(settings.risk) || settings.risk < 0 || settings.risk > 1 ||
         !Number.isFinite(settings.temperature) || settings.temperature <= 0 ||
+        (settings.wobble !== undefined && typeof settings.wobble !== 'boolean') ||
         Object.values(rawWeights).some(v => !Number.isFinite(v) || v < 0)) throw new Error('Invalid CPU search settings.');
     const started = performance.now(), random = randomSource(config.seed ?? 1);
     // Only public state crosses this boundary. Discard UI arming flags, not running supers.
@@ -640,7 +641,9 @@
       evaluated++;
       if (blend() < bestScore - vetting * settings.temperature) return blend();
       // Against the expected response, the plan must also hold up when aimed a little off.
-      values[0] = (values[0] + simulate(wobble(moves, 1), responses[0], 0) + simulate(wobble(moves, -1), responses[0], 0)) / 3;
+      if (settings.wobble !== false) {
+        values[0] = (values[0] + simulate(wobble(moves, 1), responses[0], 0) + simulate(wobble(moves, -1), responses[0], 0)) / 3;
+      }
       const value = blend();
       scored.push({ moves, value });
       return value;

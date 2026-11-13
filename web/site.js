@@ -369,7 +369,7 @@
       const result = await ubuFile.read(text, { allowUnsigned: false, resolveKey: ubuList.trustedKey });
       if (result.type !== 'signed') throw new Error('The pack contains an unsigned ubu.');
       const model = ubu.decode(ubu.fromCode(result.dna));
-      return { text, result, model, rarity: rarity.scoreRarity(model) };
+      return { text, result, model, rarity: rarity.scoreRarity(model), ability: window.ability ? ability.scoreAbility(model) : null };
     }));
     return { items, seen };
   }
@@ -537,8 +537,6 @@
     const card = document.createElement('article');
     card.className = 'trading-card';
     card.dataset.finish = item.model.grade;
-    card.style.setProperty('--card-hue', String(155 + item.rarity.percentile * 1.5));
-    if (item.rarity.percentile >= 95) card.classList.add('foil');
     const signX = Math.random() < .5 ? -1 : 1, signY = Math.random() < .5 ? -1 : 1;
     const dur = 0.58 + Math.random() * 0.14, rest = 20 + Math.random() * 4;
     card.style.setProperty('--wobble-rx', `${((7 + Math.random() * 5) * signX).toFixed(1)}deg`);
@@ -666,6 +664,14 @@
     art.setAttribute('aria-label', `Make ${item.model.parts.fullName} dance`);
     pressable(art, dance);
     const targets = [[statFlip, flipStats], [art, dance]];
+    const abilityRes = item.ability || (window.ability && item.model ? ability.scoreAbility(item.model) : null);
+    let abilityEl = null;
+    if (abilityRes) {
+      abilityEl = document.createElement('div'); abilityEl.className = 'card-ability';
+      const abilityCaption = document.createElement('span'), abilityValue = document.createElement('strong');
+      abilityCaption.textContent = 'Ability'; abilityValue.textContent = ubuList.rarityScore(abilityRes.percentile);
+      abilityEl.append(abilityCaption, abilityValue);
+    }
     const rarityEl = document.createElement('div'); rarityEl.className = 'card-rarity';
     const rarityCaption = document.createElement('span'), rarityValue = document.createElement('strong');
     rarityCaption.textContent = 'Rarity'; rarityValue.textContent = ubuList.rarityScore(item.rarity.percentile);
@@ -725,7 +731,7 @@
         if (event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom) return action();
       }
     });
-    card.append(top, badge, art, nameStack, side, rarityEl, supers);
+    card.append(top, badge, art, nameStack, side, ...(abilityEl ? [abilityEl] : []), rarityEl, supers);
     return card;
   }
   function capturePackEmergence(scene, packCanvas, count) {
@@ -1321,8 +1327,9 @@
     clearCoinTimer();
     const model = ubu.decode(ubu.fromCode(result.dna));
     const r = window.rarity ? rarity.scoreRarity(model) : null;
+    const ab = window.ability ? ability.scoreAbility(model) : null;
     const serial = result.certificate ? result.certificate.serial : null;
-    current = { text, result, model, rarity: r, name: model.parts.fullName, serial };
+    current = { text, result, model, rarity: r, ability: ab, name: model.parts.fullName, serial };
 
     $('ubunym').textContent = model.parts.fullName;
     const viewerArch = $('viewer-archetype');
@@ -1331,9 +1338,10 @@
       viewerArch.textContent = archLabel;
       viewerArch.hidden = !archLabel;
     }
+    const abilityText = ab ? ` · Ability ${ab.percentile.toFixed(3)} / 100` : '';
     const rarityText = r ? ` · Rarity ${r.percentile.toFixed(3)} / 100 (${r.bits.toFixed(6)} bits)` : '';
     const grade = document.createElement('strong'); grade.dataset.grade = model.grade; grade.textContent = model.grade;
-    $('details').replaceChildren('Ubuquity ', grade, rarityText + (serial ? ' · ' + ubuList.serialLabel(serial) : ''));
+    $('details').replaceChildren('Ubuquity ', grade, abilityText + rarityText + (serial ? ' · ' + ubuList.serialLabel(serial) : ''));
     $('authenticity').textContent = result.type === 'signed' ? 'Verified mint certificate' : 'Custom · unsigned';
     $('download').hidden = false;
     window.ubuAudio?.stop();
@@ -1663,7 +1671,7 @@
     if (old?.certificate === item.text) { collectionList.render(); return; }
     ubuList.add({
       serial, certificate: item.text, result: item.result, model: item.model,
-      rarity: item.rarity, issuedAt: item.result.certificate.issuedAt, favorite: old?.favorite || false
+      ability: item.ability || (window.ability ? ability.scoreAbility(item.model) : null), rarity: item.rarity, issuedAt: item.result.certificate.issuedAt, favorite: old?.favorite || false
     });
     $('collection').hidden = false;
   }
