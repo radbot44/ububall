@@ -852,6 +852,37 @@
     }
     return out;
   }
+  function cloneFastSkater(P, b) {
+    const rad = b.radius ?? 25, mass = b.mass ?? 3, fric = b.friction ?? 150;
+    return {
+      x: b.x, y: b.y, vx: b.vx || 0, vy: b.vy || 0, omega: b.omega || 0, rotation: b.rotation || 0,
+      team: b.team, slot: b.slot,
+      sizeMult: b.sizeMult ?? 1,
+      radius: rad, mass, friction: fric, reach: b.reach ?? rad, strength: b.strength ?? 1, stability: b.stability ?? 1, bounciness: b.bounciness ?? 1,
+      baseRadius: b.baseRadius ?? rad, baseMass: b.baseMass ?? mass, baseFriction: b.baseFriction ?? fric,
+      baseReach: b.baseReach ?? b.reach ?? rad, baseStrength: b.baseStrength ?? b.strength ?? 1,
+      baseStability: b.baseStability ?? b.stability ?? 1, baseBounciness: b.baseBounciness ?? b.bounciness ?? 1,
+      grip: b.grip ?? .3, maxSpin: b.maxSpin ?? 15, impulse: b.impulse ?? P.IMPULSE, curveMult: b.curveMult ?? 1, curveFactor: b.curveFactor ?? P.SKATER_CURVE, power: b.power ?? 1,
+      synergyMult: b.synergyMult ?? 1, chemistryMult: b.chemistryMult ?? 1,
+      meter: b.meter || 0, meterTick: b.meterTick ?? -Infinity, daze: b.daze || 0, spinStrike: b.spinStrike || 0, launchSpin: b.launchSpin || 0,
+      superTicks: b.superTicks || 0, superHoldTicks: b.superHoldTicks || 0, superBonusTicks: b.superBonusTicks || 0, superBonusRefund: b.superBonusRefund || 0, ironCooldownTicks: b.ironCooldownTicks || 0,
+      guarding: Boolean(b.guarding), ironGuard: Boolean(b.ironGuard),
+      usedSuperThisTurn: Boolean(b.usedSuperThisTurn), superHit: Boolean(b.superHit), superRefunded: Boolean(b.superRefunded), shockwaveFired: Boolean(b.shockwaveFired),
+      carded: Boolean(b.carded), stunned: Boolean(b.stunned), stunnedNext: Boolean(b.stunnedNext), holding: Boolean(b.holding),
+      superActive: b.superActive || null, equippedSuper: b.equippedSuper || null, personality: b.personality || null
+    };
+  }
+  function cloneFastBall(b) {
+    return {
+      x: b.x, y: b.y, vx: b.vx || 0, vy: b.vy || 0, omega: b.omega || 0, rotation: b.rotation || 0,
+      team: -1,
+      radius: b.radius ?? 18, mass: b.mass ?? 1, friction: b.friction ?? 85, grip: b.grip ?? .3, maxSpin: b.maxSpin ?? 8, curveMult: b.curveMult ?? 1,
+      fireTicks: b.fireTicks || 0, onFire: Boolean(b.onFire), pace: b.pace || 0,
+      strikerPower: b.strikerPower ?? 1, strikerSynergy: b.strikerSynergy ?? 1, strikerTeam: b.strikerTeam ?? -1, strikerSlot: b.strikerSlot ?? -1,
+      openingShot: Boolean(b.openingShot), stuckTicks: b.stuckTicks || 0,
+      stickOffset: b.stickOffset ? { x: b.stickOffset.x, y: b.stickOffset.y } : null
+    };
+  }
   function resolveTurn(P, state, moves, { effects = true, ticks: maxTicks = Infinity, decided = null, watch = null, preservePartial = false, fastSearch = false, fastTick = false } = {}) {
     if (!fastSearch && (state.version !== VERSION || MODE_MASK[state.mode] === undefined)) throw new Error('Unsupported match rules.');
     if (!Array.isArray(moves) || moves.length !== 6) throw new Error('Both teams must submit.');
@@ -860,9 +891,9 @@
     for (let i = 0; i < state.bodies.length; i++) {
       const b = state.bodies[i];
       if (b.team === -1) {
-        bodies[i] = { ...b, stickOffset: b.stickOffset ? { x: b.stickOffset.x, y: b.stickOffset.y } : null };
+        bodies[i] = fastSearch ? cloneFastBall(b) : { ...b, stickOffset: b.stickOffset ? { x: b.stickOffset.x, y: b.stickOffset.y } : null };
       } else if (fastSearch) {
-        bodies[i] = { ...b };
+        bodies[i] = cloneFastSkater(P, b);
       } else {
         const copy = { ...b, equippedSuper: b.equippedSuper ? { ...b.equippedSuper } : null };
         if (copy.personality) copy.personality = { ...copy.personality };

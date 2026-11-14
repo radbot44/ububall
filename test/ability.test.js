@@ -336,7 +336,7 @@ test('loadCompletedIds auto-archives stale physicsVersion corpora and resumes ma
   assert.equal(afterMatch.has('corpus:0'), true);
 });
 
-test('SoAKernel fastTick matches canonical M.resolveTurn(fastTick) across Standard, Pulse, Classic, and armed Supers', () => {
+test('CPU search rollouts match canonical M.resolveTurn(fastTick) across Standard, Pulse, Classic, and armed Supers', () => {
   const P = require('../shared/ububall-physics.js');
   const M = require('../shared/ububall-match.js');
   const C = require('../shared/ububall-cpu.js');

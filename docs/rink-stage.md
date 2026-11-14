@@ -316,3 +316,4 @@ None.
   silhouettes render unclipped onto the rink while keeping button click targets, hover glows and
   `#home-pack` unchanged; updated `createPackScene` (`paint` and `pointermove`) and
   `capturePackEmergence` to align coordinates and scale against the parent `.candy-pack` button.
+- 2026-11-14: Expanded `.cpu-levels` on the `rules` setup sheet to five tiers (`Easy`, `Medium`, `Hard`, `Insane`, `Ububall God`) arranged as a 3+2 6-column spanned grid (`<= 3` choices per row) with compact mobile row heights and saved-setup persistence.

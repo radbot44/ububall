@@ -1,26 +1,57 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const C = require('../shared/ububall-cpu.js');
 const P = require('../shared/ububall-physics.js');
 const M = require('../shared/ububall-match.js');
 const S = require('../scripts/cpu-simulation.cjs');
 const createClient = require('../web/ububall-cpu-client.js');
 
-test('CPU search is reproducible, bounded and leaves public state unchanged', () => {
+test('all 5 CPU difficulty tiers (Easy through Ububall God) are reproducible, bounded and leave public state unchanged', () => {
+  assert.deepEqual(Object.keys(C.LEVELS), ['easy', 'medium', 'hard', 'insane', 'god']);
+  assert.equal(C.LEVEL_LABELS.insane, 'Insane');
+  assert.equal(C.LEVEL_LABELS.god, 'Ububall God');
+
   const state = S.initialState(4), before = structuredClone(state);
   const first = C.plan(state, 1, { level: 'easy', seed: 4 });
   const second = C.plan(state, 1, { level: 'easy', seed: 4 });
   assert.deepEqual(first.plans, second.plans);
   assert.deepEqual(state, before);
-  assert.equal(first.diagnostics.candidates, 18);
-  // Each plan runs once per response, plus twice aimed a little off unless it trails or repeats.
-  assert.ok(first.diagnostics.simulations >= 1 && first.diagnostics.simulations <= 18 * 3);
+  assert.equal(first.diagnostics.candidates, C.LEVELS.easy.candidates);
+  assert.ok(first.diagnostics.simulations >= 1 && first.diagnostics.simulations <= C.LEVELS.easy.candidates * 2);
   assert.ok(state.bodies.slice(0, 6).every(b => Number.isFinite(b.meter)));
   M.validatePlans(first.plans);
+
+  for (const level of ['medium', 'hard', 'insane', 'god']) {
+    const a = C.plan(state, 1, { level, seed: 12 });
+    const b = C.plan(state, 1, { level, seed: 12 });
+    assert.deepEqual(a.plans, b.plans, `${level} deterministic`);
+    assert.equal(a.diagnostics.candidates, C.LEVELS[level].candidates);
+    M.validatePlans(a.plans);
+  }
+  assert.deepEqual(state, before);
+
   assert.throws(() => C.plan(state, 1, { candidates: Infinity }));
+  assert.throws(() => C.plan(state, 1, { opponents: 6 }));
   assert.throws(() => C.plan(state, 1, { level: 'impossible' }));
 });
+
+test('two-rung adversarial screening keeps Medium and Hard simulation counts lean while converting tactical fixtures', () => {
+  for (const level of ['hard', 'insane', 'god']) {
+    const results = S.scenarioReport(level);
+    assert.ok(results[0].outcomes.every(o => o.goal === 1), `${level} converts open-shot fixture`);
+    assert.ok(results[1].outcomes.every(o => o.goal !== 0), `${level} defends goal-threat fixture`);
+    assert.ok(results.every(r => r.diagnostics.candidates === C.LEVELS[level].candidates));
+  }
+  const medReport = S.scenarioReport('medium');
+  const hardReport = S.scenarioReport('hard');
+  const avgSims = list => list.reduce((n, r) => n + r.diagnostics.simulations, 0) / list.length;
+  assert.ok(avgSims(medReport) <= 130, `Medium averages <= 130 simulations (got ${avgSims(medReport).toFixed(1)})`);
+  assert.ok(avgSims(hardReport) <= 220, `Hard averages <= 220 simulations (got ${avgSims(hardReport).toFixed(1)})`);
+});
+
 test('search ignores private arming flags and handles either team and stunned players', () => {
   const state = S.initialState(9);
   state.bodies[1].stunned = true;
@@ -31,7 +62,8 @@ test('search ignores private arming flags and handles either team and stunned pl
   assert.equal(first.plans[1].power, 0);
   assert.equal(first.plans[1].superArm, false);
 });
-test('CPU search accounts for a carried Pulse super', () => {
+
+test('CPU search accounts for a carried Pulse super and drives an active Sticky ball carrier into goal', () => {
   const state = S.initialState(9, 'pulse'), active = state.bodies[3];
   active.superActive = 'colossus';
   active.superTicks = P.SUPER.ticks;
@@ -43,27 +75,41 @@ test('CPU search accounts for a carried Pulse super', () => {
   const withSuper = C.plan(state, 1, { level: 'easy', candidates: 1, seed: 9 });
   const withoutSuper = C.plan(expired, 1, { level: 'easy', candidates: 1, seed: 9 });
   assert.notEqual(withSuper.diagnostics.score, withoutSuper.diagnostics.score);
+
+  // Sticky carrier starting a Pulse turn near opponent goal drives ball across the goal line instead of stalling
+  const stickyState = S.initialState(14, 'pulse');
+  stickyState.bodies.slice(0, 6).forEach((b, i) => {
+    Object.assign(b, { x: i < 3 ? 620 + i * 60 : 780, y: i < 3 ? 115 : 460, vx: 0, vy: 0, omega: 0, meter: 0 });
+  });
+  const carrier = stickyState.bodies[3], ball = stickyState.bodies[6];
+  carrier.x = 240; carrier.y = 300;
+  carrier.superActive = 'sticky';
+  carrier.holding = true;
+  carrier.superTicks = 480;
+  carrier.superHoldTicks = 480;
+  ball.stickOffset = { x: -(carrier.radius + ball.radius), y: 0 };
+  ball.x = carrier.x + ball.stickOffset.x;
+  ball.y = carrier.y;
+  const carryDecision = C.plan(stickyState, 1, { level: 'hard', seed: 14 });
+  const carryRes = M.resolveTurn(P, stickyState, [C.HOLD, C.HOLD, C.HOLD, ...carryDecision.plans], { effects: false });
+  assert.equal(carryRes.replay.goal, 1, 'Sticky carrier drives ball directly into open net');
 });
-test('Hard converts an open shot and defends the goal-threat fixture', () => {
-  const results = S.scenarioReport('hard');
-  assert.ok(results[0].outcomes.every(o => o.goal === 1));
-  assert.ok(results[1].outcomes.every(o => o.goal !== 0));
-  assert.ok(results.every(r => r.diagnostics.candidates === 120 && r.diagnostics.simulations <= 120 * (3 + 2)));
-});
-test('CPU supers are legal and full simulations include guard and meter rules', () => {
+
+test('CPU supers are legal across all 5 levels and full simulations include guard and meter rules', () => {
   const state = S.initialState(17);
   state.bodies.slice(0, 6).forEach((b, i) => { b.meter = 100; b.equippedSuper = P.SUPERS[i]; });
-  const a = C.plan(state, 0, { level: 'easy' }).plans, b = C.plan(state, 1, { level: 'easy' }).plans;
+  const a = C.plan(state, 0, { level: 'insane' }).plans, b = C.plan(state, 1, { level: 'god' }).plans;
   const result = M.resolveTurn(P, state, [...a, ...b]);
-  assert.ok(result.state.bodies.every(b => Number.isFinite(b.x) && Number.isFinite(b.y)));
+  assert.ok(result.state.bodies.every(body => Number.isFinite(body.x) && Number.isFinite(body.y)));
   const classic = S.initialState(17, 'classic');
-  assert.ok(C.plan(classic, 1, { level: 'easy' }).plans.every(p => !p.superArm));
+  assert.ok(C.plan(classic, 1, { level: 'god' }).plans.every(p => !p.superArm));
   for (const superType of P.SUPERS) {
-    state.bodies.slice(0, 6).forEach(b => { b.equippedSuper = superType; });
+    state.bodies.slice(0, 6).forEach(body => { body.equippedSuper = superType; });
     const decision = C.plan(state, 1, { level: 'easy', candidates: 8 });
     assert.doesNotThrow(() => M.resolveTurn(P, state, [C.HOLD, C.HOLD, C.HOLD, ...decision.plans]));
   }
 });
+
 test('simulation records reproducible replays and capped games without declaring a winner', () => {
   const config = { profiles: ['easy', 'hold'], maxTurns: 2, trace: true, seed: 3 };
   const a = S.match(config), b = S.match(config);
@@ -81,6 +127,7 @@ test('simulation records reproducible replays and capped games without declaring
   }
   assert.deepEqual(state.scores, a.scores);
 });
+
 test('worker client snapshots public state, cancels stale work and reports failure', async () => {
   const workers = [];
   const client = createClient(() => {
@@ -89,7 +136,7 @@ test('worker client snapshots public state, cancels stale work and reports failu
   });
   const state = S.initialState(); state.bodies[0].superArm = true;
   state.bodies[0].superActive = 'magnet'; state.bodies[0].superTicks = 400;
-  const first = client.plan(state, { level: 'hard' });
+  const first = client.plan(state, { level: 'god' });
   state.bodies[0].x = 999;
   assert.notEqual(workers[0].data.state.bodies[0].x, 999);
   assert.equal(workers[0].data.state.bodies[0].superArm, false);
@@ -220,7 +267,7 @@ test('spin-compensated aim/strike hits targets cleanly at Curve=255, Spin=255 wh
   assert.equal(resUncomp.replay.goal, null, 'uncompensated straight angle with spin=1 curves wide and misses');
 });
 
-test('tactical puzzles: CPU converts screened bank/curve shot and finds zero-teamwork cross-ice one-timer pass', () => {
+test('tactical puzzles: CPU converts screened bank/curve shot and finds zero-teamwork cross-ice one-timer pass in under 40 candidates', () => {
   const mkBase = mode => {
     const bodies = P.kickoff();
     const stats = Array.from({ length: 6 }, () => ({ impulse: 160, power: 170, spin: 200, curve: 200, synergy: 210, chemistry: 210 }));
@@ -232,7 +279,7 @@ test('tactical puzzles: CPU converts screened bank/curve shot and finds zero-tea
     return { version: M.VERSION, mode, bodies, stats, scores: [0, 0], turn: 1, phase: 'plan', winner: null };
   };
 
-  // Puzzle 1: Direct lane to goal (940, 300) is screened by two defenders at x=820, y=282 & y=318; bank/curve lane is wide open
+  // Puzzle 1: Direct lane to goal (940, 300) is screened by two defenders at x=820, y=280 & y=320; bank/curve lane is wide open
   const screened = mkBase('standard');
   Object.assign(screened.bodies[0], { x: 560, y: 300 });
   Object.assign(screened.bodies[1], { x: 200, y: 180 });
@@ -242,10 +289,10 @@ test('tactical puzzles: CPU converts screened bank/curve shot and finds zero-tea
   Object.assign(screened.bodies[5], { x: 180, y: 510 });
   Object.assign(screened.bodies[6], { x: 640, y: 300 });
   const decScreened = C.plan(screened, 0, {
-    level: 'hard', candidates: 60, opponents: 2, wobble: false, temperature: 1, fastTick: true, searchTicks: 480, seed: 11
+    level: 'medium', candidates: 34, opponents: 2, wobble: false, temperature: 1, seed: 11
   });
   const outScreened = M.resolveTurn(P, screened, [...decScreened.plans, C.GUARD, C.GUARD, C.HOLD], { effects: false });
-  assert.equal(outScreened.replay.goal, 0, 'CPU converts screened shot via bank/curve despite creativity=5');
+  assert.equal(outScreened.replay.goal, 0, 'Medium CPU converts screened shot via bank/curve in 34 candidates despite creativity=5');
 
   // Puzzle 2: Shooter at (565, 112) behind ball at (610, 165) has direct shot/bank walled off, while slot 1 sits open at (610, 360) with teamwork=0
   const passState = mkBase('standard');
@@ -257,100 +304,29 @@ test('tactical puzzles: CPU converts screened bank/curve shot and finds zero-tea
   Object.assign(passState.bodies[5], { x: 200, y: 500 });
   Object.assign(passState.bodies[6], { x: 610, y: 165 });
   const decPass = C.plan(passState, 0, {
-    level: 'hard', candidates: 60, opponents: 2, wobble: false, temperature: 1, fastTick: true, searchTicks: 480, seed: 23
+    level: 'medium', candidates: 34, opponents: 2, wobble: false, temperature: 1, seed: 23
   });
   const outPass = M.resolveTurn(P, passState, [...decPass.plans, C.GUARD, C.GUARD, C.HOLD], { effects: false });
-  assert.equal(outPass.replay.goal, 0, 'CPU finds cross-ice pass + one-timer goal even when teamwork=0');
+  assert.equal(outPass.replay.goal, 0, 'Medium CPU finds cross-ice Snap one-timer goal in 34 candidates even when teamwork=0');
 });
 
-test('SoAKernel randomized parity fuzzer matches canonical M.resolveTurn(fastTick) on ticks, goals, and evaluation', () => {
-  const rng = C.randomSource(20261114);
-  const modes = ['standard', 'pulse', 'classic'];
-  for (let caseIdx = 0; caseIdx < 48; caseIdx++) {
-    const mode = modes[caseIdx % 3];
-    const classic = M.rule(mode, 'classic');
-    const bodies = P.kickoff();
-    const stats = [];
-    for (let i = 0; i < 6; i++) {
-      const raw = classic ? {} : {
-        impulse: Math.floor(rng() * 256), traction: Math.floor(rng() * 256),
-        spin: Math.floor(rng() * 256), curve: Math.floor(rng() * 256),
-        size: Math.floor(rng() * 256), mass: Math.floor(rng() * 256),
-        bounciness: Math.floor(rng() * 256), grip: Math.floor(rng() * 256),
-        power: Math.floor(rng() * 256), reach: Math.floor(rng() * 256),
-        strength: Math.floor(rng() * 256), stability: Math.floor(rng() * 256),
-        efficiency: Math.floor(rng() * 256), synergy: Math.floor(rng() * 256),
-        chemistry: Math.floor(rng() * 256)
-      };
-      stats.push(raw);
-      M.applyStats(P, bodies[i], raw, mode);
-      bodies[i].personality = {
-        aggression: Math.floor(rng() * 64), creativity: Math.floor(rng() * 64),
-        teamwork: Math.floor(rng() * 64), clutch: Math.floor(rng() * 64)
-      };
-      bodies[i].x = 140 + rng() * 720;
-      bodies[i].y = 110 + rng() * 380;
-      if (mode === 'pulse') {
-        bodies[i].vx = (rng() - 0.5) * 240;
-        bodies[i].vy = (rng() - 0.5) * 240;
+test('shot-cone geometry stays strictly outside the 80 px crease and UI markup exposes all 5 CPU tiers in <= 3-per-row grid', () => {
+  for (const team of [0, 1]) {
+    for (const bx of [120, 350, 500, 750, 890]) {
+      for (const by of [90, 200, 300, 420, 510]) {
+        const pt = C.shotConePoint(bx, by, team, 88);
+        const ownGoalX = team ? 940 : 60;
+        assert.ok(Math.hypot(pt.x - ownGoalX, pt.y - 300) > M.FOULS.crease + 4, 'shotConePoint always clears crease radius');
       }
-      if (!classic) {
-        const sid = (caseIdx + i) % P.SUPERS.length;
-        bodies[i].equippedSuper = { ...P.SUPERS[sid], bonusTicks: (i % 3) * 120, bonusRefund: (i % 3) * 5 };
-        bodies[i].meter = rng() < 0.55 ? 100 : Math.floor(rng() * 95);
-      }
-      bodies[i].daze = rng() < 0.25 ? rng() * 0.35 : 0;
-      bodies[i].stunned = rng() < 0.1;
     }
-    bodies[6].x = 160 + rng() * 680;
-    bodies[6].y = 120 + rng() * 360;
-    if (mode === 'pulse') {
-      bodies[6].vx = (rng() - 0.5) * 360;
-      bodies[6].vy = (rng() - 0.5) * 360;
-      bodies[6].omega = (rng() - 0.5) * 16;
-    }
-    // Resolve non-overlapping initial positions via 1 step or spacing check
-    const fouls = M.newFouls();
-    if (caseIdx % 7 === 0) fouls.crease[0] = true;
-    if (caseIdx % 11 === 0) { fouls.corner = 0; fouls.cornerTurns = 1; }
-
-    const state = {
-      version: M.VERSION, mode, bodies, stats,
-      scores: [caseIdx % 4, (caseIdx * 2) % 4],
-      turn: 1 + (caseIdx % 10), roundTurns: caseIdx % 3,
-      clock: caseIdx * 240, phase: 'plan', winner: null, fouls
-    };
-    const team = caseIdx % 2;
-    const searchTicks = 180;
-    const fast = C.plan(state, team, {
-      level: 'easy', candidates: 1, opponents: 1, wobble: false,
-      fastTick: true, searchTicks, seed: 100 + caseIdx
-    });
-    const mOwn = C.legacy(state, team);
-    const mOpp = C.legacy(state, 1 - team);
-    const allMoves = team ? [...mOpp, ...mOwn] : [...mOwn, ...mOpp];
-
-    let toucher = null, touches = 0, boards = 0, firstTeamTouch = null, multiTeamTouch = false;
-    const watch = {
-      collide({ a, b, speed }) {
-        const player = M.toucher(a, b, speed);
-        if (player && player !== toucher) {
-          toucher = player; touches++;
-          if (player.team === team) {
-            if (firstTeamTouch === null) firstTeamTouch = player;
-            else if (firstTeamTouch !== player) multiTeamTouch = true;
-          }
-        }
-      },
-      wall(body, _v, type) { if (body.team === -1 && touches && type !== 'net') boards++; }
-    };
-    const pulse = M.rule(mode, 'pulse');
-    const canDecide = !pulse && !fouls.crease[team] && !fouls.crease[1 - team] && fouls.corner === null;
-    const ref = M.resolveTurn(P, state, allMoves, {
-      effects: false, fastSearch: true, fastTick: true, ticks: fouls.crease[team] ? M.turnTicks(mode) : searchTicks,
-      decided: canDecide ? b => touches > 0 && C.decided(b) : null,
-      watch, preservePartial: true
-    });
-    assert.equal(fast.diagnostics.ticks, ref.replay.ticks, `fuzz case ${caseIdx} (${mode}) tick parity`);
   }
+
+  const indexHtml = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
+  for (const val of ['easy', 'medium', 'hard', 'insane', 'god']) {
+    assert.ok(indexHtml.includes(`name="cpu-level" value="${val}"`), `web/index.html includes radio for ${val}`);
+  }
+  assert.ok(indexHtml.includes('<span>Ububall God</span>'), 'web/index.html displays Ububall God label');
+
+  const css = fs.readFileSync(path.join(__dirname, '../web/ububall.css'), 'utf8');
+  assert.ok(css.includes('grid-template-columns: repeat(6, minmax(0, 1fr))'), '6-column spanned 3+2 grid keeps <= 3 items per row');
 });

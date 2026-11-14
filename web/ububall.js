@@ -39,6 +39,7 @@
   let matchTicks = 0; // Simulated ticks played locally, for meter cooldowns.
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const cpuClient = createCPUClient();
+  const VALID_CPU_LEVELS = typeof ububallCPU === 'object' && ububallCPU?.LEVELS ? Object.keys(ububallCPU.LEVELS) : ['easy', 'medium', 'hard', 'insane', 'god'];
   let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuDone = false, cpuLevel = 'medium', cpuMode = 'standard';
   // The home screen demo (CPU against CPU) plays silently.
   let demo = false, demoLevels = ['medium', 'hard'], demoRun = 0, demoGame = 0;
@@ -1142,7 +1143,8 @@
       endGoalReplay();
       playSegments = [];
       cpuMode = saved.mode || 'standard';
-      cpuLevel = saved.level || 'medium';
+      const validCpuLevels = typeof VALID_CPU_LEVELS !== 'undefined' ? VALID_CPU_LEVELS : ['easy', 'medium', 'hard', 'insane', 'god'];
+      cpuLevel = validCpuLevels.includes(saved.level) ? saved.level : 'medium';
       fieldView.mode = cpuMode;
       const radio = document.querySelector(`input[name="cpu-level"][value="${cpuLevel}"]`);
       if (radio) radio.checked = true;
@@ -3064,7 +3066,7 @@
   let lastCpuSetup = null;
   try {
     const saved = JSON.parse(localStorage.getItem(quickPlayKey));
-    if (saved && ['easy', 'medium', 'hard'].includes(saved.level) &&
+    if (saved && VALID_CPU_LEVELS.includes(saved.level) &&
         (saved.mode === 'standard' || typeof saved.mode === 'string' &&
           saved.mode.split('-').every(rule => ububallMatch.RULES.includes(rule))) &&
         Array.isArray(saved.team) && saved.team.length === 3 &&
@@ -3210,7 +3212,8 @@
     modeSummary();
     $('rules-status').textContent = '';
     if (purpose === 'rules') rulesGameNumber = online.state.gameNumber;
-    document.querySelector(`input[name="cpu-level"][value="${level}"]`).checked = true;
+    const levelRadio = document.querySelector(`input[name="cpu-level"][value="${level}"]`) || document.querySelector('input[name="cpu-level"][value="medium"]');
+    if (levelRadio) levelRadio.checked = true;
     draft = [...team]; rosterSlot = 0; $('roster-status').textContent = '';
     $('roster-scroll').scrollTop = 0;
     void loadCollection();
