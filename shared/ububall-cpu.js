@@ -13,11 +13,15 @@
   });
   const WEIGHTS = Object.freeze({
     goal: 10000, progress: 1, access: .35, cover: .3, meter: .35,
-    role: 40, card: 400, warning: 150, stun: 180, daze: 120
+    role: 8, card: 400, warning: 150, stun: 180, daze: 120
   });
   const WOBBLE = Object.freeze({ angle: .035, power: .05 });
-  const COMPLEX = Object.freeze({ simple: .45, creative: .4 });
-  const ROLE_INTENTS = Object.freeze({ attack: ['shoot', 'pass'], support: ['chase', 'clear', 'receive', 'check'], defend: ['cover', 'guard', 'hold'] });
+  const COMPLEX = Object.freeze({ simple: 1, creative: .002 });
+  const ROLE_INTENTS = Object.freeze({
+    attack: ['shoot', 'pass'],
+    support: ['chase', 'clear', 'receive', 'check', 'pass', 'shoot'],
+    defend: ['cover', 'guard', 'hold', 'clear']
+  });
   const SEARCH_TICKS = 480;
   const TWO_PI = 2 * Math.PI;
 
@@ -349,29 +353,83 @@
     return out;
   }
 
-  function aim(body, x, y, drive = 0, superKey = null) {
+  // Integrates curved skater deceleration trajectory over `arcDist` in 8 quadrature substeps
+  // so high-Curve / high-Spin launches compensate both chord angle deflection and arc-to-chord shortening.
+  function integrateSpinArc(v0, effFriction, arcDist, omega0, curveF) {
+    if (v0 <= 1e-6 || arcDist <= 1e-6) return { chordAngle: 0, chordRatio: 1, endTheta: 0, endSpeed: v0, endOmega: omega0 };
+    const disc = Math.max(0, v0 * v0 - 2 * effFriction * arcDist);
+    const T = effFriction > 0 ? (v0 - Math.sqrt(disc)) / effFriction : arcDist / v0;
+    if (T <= 1e-6) return { chordAngle: 0, chordRatio: 1, endTheta: 0, endSpeed: v0, endOmega: omega0 };
+    const dt = T * 0.125;
+    const absW0 = Math.abs(omega0), signW = omega0 < 0 ? -1 : 1;
+    let sx = 0, sy = 0, sArc = 0, th = 0;
+    for (let k = 0; k < 8; k++) {
+      const t0 = k * dt, tm = t0 + 0.5 * dt, t1 = t0 + dt;
+      const effDecel = effFriction + (P.AIR_DRAG ?? 0.00015) * v0 * v0 * 0.55;
+      const v = v0 > effDecel * tm ? v0 - effDecel * tm : 0;
+      const w0 = absW0 > SPIN_DECAY * t0 ? signW * (absW0 - SPIN_DECAY * t0) : 0;
+      const wm = absW0 > SPIN_DECAY * tm ? signW * (absW0 - SPIN_DECAY * tm) : 0;
+      const w1 = absW0 > SPIN_DECAY * t1 ? signW * (absW0 - SPIN_DECAY * t1) : 0;
+      const thMid = th + curveF * 0.25 * (w0 + wm) * dt;
+      sx += v * Math.cos(thMid) * dt;
+      sy += v * Math.sin(thMid) * dt;
+      sArc += v * dt;
+      th += curveF * 0.5 * (w0 + w1) * dt;
+    }
+    const chord = Math.hypot(sx, sy);
+    const endDecel = effFriction + (P.AIR_DRAG ?? 0.00015) * v0 * v0 * 0.55;
+    const endSpeed = v0 > endDecel * T ? v0 - endDecel * T : 0;
+    const endOmega = absW0 > SPIN_DECAY * T ? signW * (absW0 - SPIN_DECAY * T) : 0;
+    return {
+      chordAngle: chord > 1e-6 ? Math.atan2(sy, sx) : 0,
+      chordRatio: sArc > 1e-6 ? Math.max(0.55, Math.min(1, chord / sArc)) : 1,
+      endTheta: th,
+      endSpeed,
+      endOmega
+    };
+  }
+
+  function aim(body, x, y, drive = 0, superKey = null, spin = 0) {
     const dx = x - body.x, dy = y - body.y;
     const distance = Math.hypot(dx, dy);
+    const clampedSpin = spin ? Math.max(-1, Math.min(1, spin)) : 0;
     const superScale = superKey === 'colossus' && body.superActive !== 'colossus' ? (P.SUPER.colossusLaunch ?? (1 / P.SUPER.colossusMass))
       : (superKey === 'stalwart' && body.superActive !== 'stalwart' ? (P.SUPER.stalwartLaunch ?? 0.5) : 1);
-    const maxV = P.launchSpeed(body) * superScale;
+    const carveBoost = clampedSpin && P.carveDriveBoost ? P.carveDriveBoost(body, clampedSpin) : 1;
+    const maxV = P.launchSpeed(body) * superScale * carveBoost;
     const frictionMult = (superKey === 'stalwart' || body.superActive === 'stalwart') ? (P.SUPER.stalwartFriction ?? 3)
       : (body.holding ? (P.SUPER.carryFriction ?? 1.5) : 1);
-    const speed = distance < 2 ? 0 : Math.min(maxV, Math.sqrt(2 * body.friction * frictionMult * Math.max(0, distance + drive)));
-    const vSpeed = Math.hypot(body.vx || 0, body.vy || 0);
+    const effFriction = body.friction * frictionMult;
 
+    let speed = distance < 2 ? 0 : Math.min(maxV, Math.sqrt(2 * effFriction * Math.max(0, distance + drive)));
+    let chordAngle = 0;
+    if (clampedSpin && speed > 0 && distance >= 2) {
+      const omega0 = clampedSpin * (body.maxSpin || 15);
+      const curveF = body.curveFactor ?? SKATER_CURVE;
+      const pass1 = integrateSpinArc(speed, effFriction, distance, omega0, curveF);
+      const arcDist = distance / pass1.chordRatio;
+      speed = Math.min(maxV, Math.sqrt(2 * effFriction * Math.max(0, arcDist + drive)));
+      chordAngle = integrateSpinArc(speed, effFriction, arcDist, omega0, curveF).chordAngle;
+    }
+
+    const vSpeed = Math.hypot(body.vx || 0, body.vy || 0);
     if (vSpeed <= 10 || speed === 0) {
       return {
-        angle: Math.atan2(dy, dx),
+        angle: speed === 0 ? Math.atan2(dy, dx) : Math.atan2(dy, dx) - chordAngle,
         power: maxV > 0 ? speed / maxV : 0,
-        spin: 0,
+        spin: speed === 0 ? 0 : clampedSpin,
         superArm: false,
         guard: false
       };
     }
 
     const dist = distance || 1;
-    const ux = dx / dist, uy = dy / dist;
+    let ux = dx / dist, uy = dy / dist;
+    if (chordAngle) {
+      const c = Math.cos(-chordAngle), sn = Math.sin(-chordAngle);
+      const rux = ux * c - uy * sn, ruy = ux * sn + uy * c;
+      ux = rux; uy = ruy;
+    }
     const vxTarget = ux * speed, vyTarget = uy * speed;
     const reSteerMult = (body.sizeMult || 1) ** P.SIZE.agility * ((body.grip ?? .3) / .3) ** (P.ICE_BITE?.gripCutExp ?? 0);
     const effSteer = 1 + Math.min(1, vSpeed / (maxV || 1)) * (reSteerMult - 1);
@@ -400,31 +458,84 @@
     return {
       angle: Math.atan2(aimVy, aimVx),
       power: maxV > 0 ? Math.min(1, aimSpeed / maxV) : 0,
-      spin: 0,
+      spin: aimSpeed > 0 ? clampedSpin : 0,
       superArm: false,
       guard: false
     };
   }
 
-  function strike(body, ball, x, y, superKey = null) {
+  function strike(body, ball, x, y, superKey = null, spin = 0) {
     let leadX = ball.x, leadY = ball.y;
     const ballSpeed = Math.hypot(ball.vx || 0, ball.vy || 0);
     if (!ball.stickOffset && ballSpeed > 20) {
-      const tLead = Math.min(0.32, Math.hypot(ball.x - body.x, ball.y - body.y) / Math.max(180, P.launchSpeed(body)));
+      const boost = spin && P.carveDriveBoost ? P.carveDriveBoost(body, spin) : 1;
+      const tLead = Math.min(0.32, Math.hypot(ball.x - body.x, ball.y - body.y) / Math.max(180, P.launchSpeed(body) * boost));
       const friction = ball.friction ?? 85;
       const drag = P.AIR_DRAG ?? 0.00015;
       const decel = friction + drag * ballSpeed * ballSpeed;
       const avgSpeed = Math.max(0, ballSpeed - 0.5 * decel * tLead);
       const leadDist = avgSpeed * tLead;
-      leadX = Math.max(105, Math.min(895, ball.x + ((ball.vx || 0) / ballSpeed) * leadDist));
-      leadY = Math.max(105, Math.min(495, ball.y + ((ball.vy || 0) / ballSpeed) * leadDist));
+      let bux = (ball.vx || 0) / ballSpeed, buy = (ball.vy || 0) / ballSpeed;
+      if (ball.omega && P.ballCurveFactor) {
+        const bRot = ball.omega * P.ballCurveFactor(ball, Boolean(ball.onFire)) * tLead * 0.5;
+        const bc = Math.cos(bRot), bs = Math.sin(bRot);
+        const rx = bux * bc - buy * bs, ry = bux * bs + buy * bc;
+        bux = rx; buy = ry;
+      }
+      leadX = Math.max(105, Math.min(895, ball.x + bux * leadDist));
+      leadY = Math.max(105, Math.min(495, ball.y + buy * leadDist));
     }
     const d = Math.hypot(x - leadX, y - leadY) || 1;
     const effRadius = superKey === 'colossus' && body.superActive !== 'colossus'
       ? Math.max(body.baseRadius ?? body.radius, P.SUPER.colossusRadius)
       : body.radius;
     const contact = Math.max(effRadius, body.reach || effRadius, 18) + ball.radius - 1;
-    return aim(body, leadX - (x - leadX) / d * contact, leadY - (y - leadY) / d * contact, 260, superKey);
+    let ux = (x - leadX) / d, uy = (y - leadY) / d;
+
+    const clampedSpin = spin ? Math.max(-1, Math.min(1, spin)) : 0;
+    if (clampedSpin) {
+      // Pre-compensate contact normal for tangential grip kick + post-impact ball Magnus curve
+      const approxCx = leadX - ux * contact, approxCy = leadY - uy * contact;
+      const appDist = Math.hypot(approxCx - body.x, approxCy - body.y);
+      const superScale = superKey === 'colossus' && body.superActive !== 'colossus' ? (P.SUPER.colossusLaunch ?? (1 / P.SUPER.colossusMass))
+        : (superKey === 'stalwart' && body.superActive !== 'stalwart' ? (P.SUPER.stalwartLaunch ?? 0.5) : 1);
+      const carveBoost = P.carveDriveBoost ? P.carveDriveBoost(body, clampedSpin) : 1;
+      const maxV = P.launchSpeed(body) * superScale * carveBoost;
+      const frictionMult = (superKey === 'stalwart' || body.superActive === 'stalwart') ? (P.SUPER.stalwartFriction ?? 3)
+        : (body.holding ? (P.SUPER.carryFriction ?? 1.5) : 1);
+      const effFric = body.friction * frictionMult;
+      const strikeDrive = 1200;
+      const v0 = Math.min(maxV, Math.sqrt(2 * effFric * Math.max(0, appDist + strikeDrive)));
+      const arc = integrateSpinArc(v0, effFric, appDist, clampedSpin * (body.maxSpin || 15), body.curveFactor ?? SKATER_CURVE);
+      const vImp = Math.max(80, arc.endSpeed);
+      const arrivalSkew = arc.endTheta - arc.chordAngle;
+      const vn = vImp * Math.cos(arrivalSkew), vt = vImp * Math.sin(arrivalSkew);
+      const mP = body.mass || 3, mB = ball.mass || 1, invSum = 1 / mP + 1 / mB;
+      const rest = 0.88;
+      const baseImp = (1 + rest) * Math.max(40, vn) / invSum;
+      const elasticCap = (2 * mP / (mP + mB)) * Math.max(40, vn);
+      const dvnB = Math.min(elasticCap, (baseImp * (body.power || 1)) / mB);
+      const slip = -vt - arc.endOmega * effRadius;
+      const gripPair = Math.sqrt((body.grip ?? 0.3) * (ball.grip ?? 0.3));
+      const lim = gripPair * baseImp;
+      const tang = Math.max(-lim, Math.min(lim, -slip / (3 * invSum)));
+      const dvtB = tang / mB;
+      let wBall = Math.max(-24, Math.min(24, -2 * tang / (mB * ball.radius)));
+      if (appDist <= 4) {
+        const small = (body.sizeMult || 1) ** (P.SIZE?.strike ?? 0);
+        wBall = Math.max(-24, Math.min(24, wBall - clampedSpin * (body.maxSpin || 15) * (body.spinStrikeMult ?? 1) * small * 0.8));
+      }
+      const postSpeed = Math.max(160, Math.hypot(dvnB, dvtB));
+      const ballFric = (ball.friction ?? 85) + (P.AIR_DRAG ?? 0.00015) * postSpeed * postSpeed * 0.6;
+      const bCurveF = P.ballCurveFactor ? P.ballCurveFactor({ curveMult: body.curveMult ?? 1 }, false) : 0.06 * (body.curveMult ?? 1);
+      const bPass1 = integrateSpinArc(postSpeed, ballFric, d, wBall, bCurveF);
+      const bArc = integrateSpinArc(postSpeed, ballFric, d / bPass1.chordRatio, wBall, bCurveF);
+      const ballDeflect = Math.atan2(dvtB, dvnB) + bArc.chordAngle;
+      const c = Math.cos(-ballDeflect), sn = Math.sin(-ballDeflect);
+      const rux = ux * c - uy * sn, ruy = ux * sn + uy * c;
+      ux = rux; uy = ruy;
+    }
+    return aim(body, leadX - ux * contact, leadY - uy * contact, clampedSpin ? 1200 : 260, superKey, clampedSpin);
   }
 
   const creativityOf = body => (body.personality?.creativity ?? 31.5) / 63;
@@ -483,55 +594,45 @@
 
       if (isBehind) {
         for (const y of [300, 250, 350]) {
-          const shot = strike(body, ball, goal, y, superArmKey);
+          const shot = strike(body, ball, goal, y, superArmKey, 0);
           for (const power of [shot.power, shot.power * .75, 1]) {
             moves.push(tag({ ...shot, power, superArm: arm }, 'shoot'));
           }
         }
-        moves.push(tag({ ...aim(body, ball.x, ball.y, 150, superArmKey), superArm: arm }, 'chase'));
-        if (creativity > .3) {
-          for (const y of [2 * 78 - 300, 2 * 522 - 300]) {
-            moves.push(tag({ ...strike(body, ball, goal, y, superArmKey), superArm: arm }, 'shoot'));
-          }
-          const primaryShot = strike(body, ball, goal, 300, superArmKey);
-          for (const spin of [-creativity, creativity]) {
-            moves.push(tag({ ...primaryShot, spin, superArm: arm }, 'shoot'));
-          }
+        for (const spin of [1, -1, 0.55, -0.55]) {
+          moves.push(tag({ ...strike(body, ball, goal, 300, superArmKey, spin), superArm: arm }, 'shoot'));
         }
-        if (pointBlank) {
-          const primaryShot = strike(body, ball, goal, 300, superArmKey);
-          moves.push(tag({ ...primaryShot, spin: 1, superArm: arm }, 'shoot'));
-          moves.push(tag({ ...primaryShot, spin: -1, superArm: arm }, 'shoot'));
+        for (const y of [2 * 78 - 300, 2 * 522 - 300]) {
+          moves.push(tag({ ...strike(body, ball, goal, y, superArmKey, 0), superArm: arm }, 'shoot'));
         }
+        moves.push(tag({ ...aim(body, ball.x, ball.y, 150, superArmKey, 0), superArm: arm }, 'chase'));
       } else {
         const backX = Math.max(100, Math.min(900, ball.x + (team ? 68 : -68)));
         for (const side of [-54, 54]) {
           const arcY = Math.max(95, Math.min(505, ball.y + side));
-          const wrap = aim(body, backX, arcY, 140, superArmKey);
-          moves.push(tag({ ...wrap, superArm: arm }, 'chase'));
-          if (creativity > 0.25) {
-            moves.push(tag({ ...wrap, spin: (side < 0 ? 0.5 : -0.5) * (team ? 1 : -1), superArm: arm }, 'chase'));
-          }
+          moves.push(tag({ ...aim(body, backX, arcY, 140, superArmKey, 0), superArm: arm }, 'chase'));
+          const wrapSpin = (side < 0 ? 0.65 : -0.65) * (team ? 1 : -1);
+          moves.push(tag({ ...aim(body, backX, arcY, 140, superArmKey, wrapSpin), superArm: arm }, 'chase'));
         }
       }
 
       const coverX = ownGoal + (team ? -88 : 88);
       const t = (coverX - ownGoal) / ((ball.x - ownGoal) || 1);
-      moves.push(tag({ ...aim(body, coverX, Math.max(240, Math.min(360, 300 + (ball.y - 300) * t)), 0, superArmKey), superArm: arm }, 'cover'));
+      moves.push(tag({ ...aim(body, coverX, Math.max(240, Math.min(360, 300 + (ball.y - 300) * t)), 0, superArmKey, 0), superArm: arm }, 'cover'));
 
       if (state.fouls?.crease?.[team] && M.inCrease(P, body, team)) {
         const exitX = ownGoal + (team ? -98 : 98);
         for (const exitY of [245, 355]) {
-          moves.push(tag({ ...aim(body, exitX, exitY, 0, superArmKey), superArm: arm }, 'cover'));
+          moves.push(tag({ ...aim(body, exitX, exitY, 0, superArmKey, 0), superArm: arm }, 'cover'));
         }
       }
 
+      const nearPerimeter = Math.abs(ball.y - 300) > 160 || ball.x < 190 || ball.x > 810;
       for (const y of [130, 470]) {
-        const clr = strike(body, ball, 500, y, superArmKey);
-        moves.push(tag({ ...clr, superArm: arm }, 'clear'));
-        if (isBehind && pointBlank) {
-          moves.push(tag({ ...clr, spin: 1, superArm: arm }, 'clear'));
-          moves.push(tag({ ...clr, spin: -1, superArm: arm }, 'clear'));
+        moves.push(tag({ ...strike(body, ball, 500, y, superArmKey, 0), superArm: arm }, 'clear'));
+        if (isBehind || pointBlank || nearPerimeter) {
+          moves.push(tag({ ...strike(body, ball, 500, y, superArmKey, 1), superArm: arm }, 'clear'));
+          moves.push(tag({ ...strike(body, ball, 500, y, superArmKey, -1), superArm: arm }, 'clear'));
         }
       }
 
@@ -555,10 +656,21 @@
     }
 
     const unarmedMoves = generateMoves(null);
-    const moves = [unarmedMoves[0], unarmedMoves[1], base, ...unarmedMoves.slice(2)];
-    if (hasSuper) {
-      const armedMoves = generateMoves(sKey);
-      moves.push(...armedMoves);
+    if (!hasSuper) {
+      return [unarmedMoves[0], unarmedMoves[1], base, ...unarmedMoves.slice(2)];
+    }
+    const armedMoves = generateMoves(sKey);
+    const moves = [unarmedMoves[0], unarmedMoves[1], base];
+    if (armedMoves[1]?.superArm) moves.push(armedMoves[1]);
+    // Put signature tactical super action (e.g. Knockout/Shockwave check or Cannonball/Sticky primary shot) near front
+    const prioCheck = (sKey === 'knockout' || sKey === 'shockwave')
+      ? armedMoves.find(m => getIntent(m) === 'check')
+      : null;
+    if (prioCheck) moves.push(prioCheck);
+    const maxLen = Math.max(unarmedMoves.length, armedMoves.length);
+    for (let k = 2; k < maxLen; k++) {
+      if (unarmedMoves[k]) moves.push(unarmedMoves[k]);
+      if (armedMoves[k] && armedMoves[k] !== prioCheck) moves.push(armedMoves[k]);
     }
     return moves;
   }
@@ -595,7 +707,7 @@
     if (goal !== null) {
       if (goal !== team) return -weights.goal;
       const effectiveCreativity = teamTouches ? Math.max(creativityOf(scorer || {}), tmw) : creativityOf(scorer || {});
-      return weights.goal * (COMPLEX.simple + COMPLEX.creative * effectiveCreativity) ** complexity;
+      return weights.goal * (COMPLEX.simple + COMPLEX.creative * (effectiveCreativity - 0.35) * Math.min(4, complexity));
     }
     const ball = bodies[6];
     const ownStart = team * 3, otherStart = (1 - team) * 3;
@@ -2391,8 +2503,9 @@
         } else {
           const scCre = toucherIdx >= 0 ? creativity[toucherIdx] : (31.5 / 63);
           const effCre = multiTeamTouchFlag && tmw > scCre ? tmw : scCre;
-          const comp = boardsCount + (touchesCount > 1 ? touchesCount - 1 : 0);
-          val = weights.goal * ((COMPLEX.simple + COMPLEX.creative * effCre) ** comp);
+          const rawComp = boardsCount + (touchesCount > 1 ? touchesCount - 1 : 0);
+          const comp = rawComp > 4 ? 4 : rawComp;
+          val = weights.goal * (COMPLEX.simple + COMPLEX.creative * (effCre - 0.35) * comp);
         }
       } else {
         const bx = x[6], by = y[6];
@@ -2574,9 +2687,22 @@
       const attack = new Array(3);
       for (let k = 0; k < 3; k++) {
         const b = state.bodies[oppStart + k];
-        if (b.stunned) attack[k] = HOLD;
-        else if (behindBall(b, ball, oppTeam)) attack[k] = strike(b, ball, oppGoal, 300);
-        else attack[k] = aim(b, oppCoverX, 300);
+        if (b.stunned) {
+          attack[k] = HOLD;
+        } else {
+          const oppSuper = !classic && b.meter >= 100 && b.equippedSuper ? b.equippedSuper.key?.toLowerCase() : null;
+          const armAtk = oppSuper === 'cannonball' || oppSuper === 'colossus' || oppSuper === 'sticky' || oppSuper === 'ghost' || oppSuper === 'magnet';
+          if (behindBall(b, ball, oppTeam)) {
+            const mv = strike(b, ball, oppGoal, 300, armAtk ? oppSuper : null, 0);
+            if (armAtk) mv.superArm = true;
+            attack[k] = mv;
+          } else {
+            const armDef = oppSuper === 'stalwart' || oppSuper === 'colossus' || oppSuper === 'shockwave';
+            const mv = aim(b, oppCoverX, 300, 0, armDef ? oppSuper : null, 0);
+            if (armDef) mv.superArm = true;
+            attack[k] = mv;
+          }
+        }
       }
       const responses = [opponent, guardOpponents, attack].slice(0, settings.opponents);
       const pulse = M.rule(state.mode, 'pulse');
@@ -2726,13 +2852,59 @@
           const next = best.slice(); next[i] = choices[i][j]; consider(next);
         }
       }
+      const atkGoal = team ? 60 : 940;
       for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
-        if (i === j || evaluated >= settings.candidates * .8) continue;
+        if (i === j || evaluated >= settings.candidates * .82) continue;
         const sender = state.bodies[ownStart + i], receiver = state.bodies[ownStart + j];
-        if (sender.stunned || receiver.stunned || (sender.personality?.teamwork ?? 31.5) < 24) continue;
+        if (sender.stunned || receiver.stunned) continue;
+        // 1. Direct Tape-to-Tape Snap one-timer pass into receiver's forward lane
+        if (behindBall(sender, ball, team)) {
+          const snapX = Math.max(160, Math.min(840, receiver.x * 0.62 + atkGoal * 0.38));
+          const snapY = Math.max(110, Math.min(490, receiver.y * 0.8 + 300 * 0.2));
+          const passMove = strike(sender, ball, snapX, snapY, null, 0);
+          // Synchronize receiver arrival & vector-impulse normal n = normalize(v_out - v_in) to cancel cross-ice pass drift
+          const vSend0 = Math.max(120, passMove.power * P.launchSpeed(sender));
+          const dSend = Math.max(0, Math.hypot(ball.x - sender.x, ball.y - sender.y) - sender.radius - ball.radius + 1);
+          const vImp = Math.sqrt(Math.max(6400, vSend0 * vSend0 - 2 * sender.friction * dSend));
+          const tSend = sender.friction > 0 ? Math.max(0, (vSend0 - vImp) / sender.friction) : dSend / vSend0;
+          const mP = sender.mass || 3, mB = ball.mass || 1;
+          const vPass0 = Math.max(180, Math.min((2 * mP / (mP + mB)) * vImp, (1.88 / (1 / mP + 1 / mB)) * (sender.power || 1) * vImp));
+          const dPass = Math.hypot(snapX - ball.x, snapY - ball.y) || 1;
+          const tPass = dPass / Math.max(140, vPass0 - 0.5 * (ball.friction ?? 85) * (dPass / vPass0));
+          const vPassEnd = Math.max(100, vPass0 - (ball.friction ?? 85) * tPass);
+          const pvx = ((snapX - ball.x) / dPass) * vPassEnd;
+          const pvy = ((snapY - ball.y) / dPass) * vPassEnd;
+          const tBall = Math.max(0.18, Math.min(1.6, tSend + tPass));
+          const rContact = Math.max(receiver.radius, receiver.reach || receiver.radius, 18) + ball.radius - 2;
+          const rGoalD = Math.hypot(atkGoal - snapX, 300 - snapY) || 1;
+          const outSpeed = Math.max(420, vPassEnd * 1.45);
+          const dvx = ((atkGoal - snapX) / rGoalD) * outSpeed - pvx * 0.85;
+          const dvy = ((300 - snapY) / rGoalD) * outSpeed - pvy * 0.85;
+          const dvLen = Math.hypot(dvx, dvy) || 1;
+          const nUx = dvx / dvLen, nUy = dvy / dvLen;
+          const rTargetX = snapX - nUx * rContact;
+          const rTargetY = snapY - nUy * rContact;
+          const virtBall = { ...ball, x: snapX, y: snapY, vx: pvx, vy: pvy, omega: 0, stickOffset: null };
+          const recvMove = strike(receiver, virtBall, atkGoal, 300, null, 0);
+          const dRecv = Math.hypot(rTargetX - receiver.x, rTargetY - receiver.y);
+          const maxVRecv = P.launchSpeed(receiver);
+          if (maxVRecv > 0 && Math.hypot(receiver.vx || 0, receiver.vy || 0) <= 10) {
+            const vSync = (dRecv + 14) / tBall + 0.5 * receiver.friction * tBall;
+            recvMove.power = Math.max(0.25, Math.min(1, vSync / maxVRecv));
+            recvMove.angle = Math.atan2(rTargetY - receiver.y, rTargetX - receiver.x);
+          }
+          const nextSnap = best.slice();
+          nextSnap[i] = tag(passMove, 'pass');
+          nextSnap[j] = tag(recvMove, 'shoot');
+          consider(nextSnap);
+        }
+        if (evaluated >= settings.candidates * .82) continue;
+        // 2. Open-wing space lead pass
         const x = Math.max(180, Math.min(820, ball.x + (team ? -130 : 130)));
         const y = ball.y < 300 ? 390 : 210;
-        const next = best.slice(); next[i] = tag(strike(sender, ball, x, y), 'pass'); next[j] = tag(aim(receiver, x, y), 'receive');
+        const next = best.slice();
+        next[i] = tag(strike(sender, ball, x, y, null, 0), 'pass');
+        next[j] = tag(aim(receiver, x, y, 0, null, 0), 'receive');
         consider(next);
       }
 
@@ -2766,7 +2938,8 @@
           next[i].angle += (random() - .5) * .28;
           next[i].power = Math.max(0, Math.min(1, next[i].power + (random() - .5) * .25));
           if (next[i].power > 0) {
-            next[i].spin = Math.max(-1, Math.min(1, next[i].spin + (random() - .5) * creativityOf(state.bodies[ownStart + i]) * .5));
+            const spinSpan = 0.35 + 0.35 * creativityOf(state.bodies[ownStart + i]);
+            next[i].spin = Math.max(-1, Math.min(1, next[i].spin + (random() - .5) * spinSpan));
           } else {
             next[i].angle = 0;
             next[i].spin = 0;
@@ -2795,27 +2968,19 @@
           scored.push({ moves: cand.moves, value });
         }
       }
-      const chosen = choose(scored, settings.temperature, random, state, team);
+      const chosen = choose(scored, settings.temperature, random);
       return { plans: M.validatePlans(chosen.moves), diagnostics: { level, candidates: evaluated, simulations, ticks, score: chosen.value, milliseconds: performance.now() - started } };
     } finally {
       if (kernel) spareKernel = kernel;
     }
   }
 
-  function choose(scored, temperature, random, state = null, team = null) {
-    const ball = state?.bodies?.[6];
+  function choose(scored, temperature, random) {
     const nScored = scored.length;
     const plains = new Float64Array(nScored);
     let top = -Infinity;
     for (let s = 0; s < nScored; s++) {
-      const c = scored[s];
-      let spinPen = 0;
-      for (let i = 0; i < 3; i++) {
-        const skater = (state && team !== null) ? state.bodies[team * 3 + i] : null;
-        const waive = skater && ball && isPointBlank(skater, ball);
-        if (!waive) spinPen += Math.abs(c.moves[i].spin || 0);
-      }
-      const pl = c.value - 15 * spinPen;
+      const pl = scored[s].value;
       plains[s] = pl;
       if (pl > top) top = pl;
     }

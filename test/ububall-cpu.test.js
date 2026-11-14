@@ -196,3 +196,161 @@ test('CPU worker client supports dispose(), handles onmessageerror, and catches 
   assert.equal(await pActive, null);
   assert.equal(workers[1].terminated, true, 'dispose terminates pooled worker');
 });
+
+test('spin-compensated aim/strike hits targets cleanly at Curve=255, Spin=255 where uncompensated spin whiffs', () => {
+  const bodies = P.kickoff();
+  for (let i = 0; i < 6; i++) {
+    M.applyStats(P, bodies[i], { curve: 255, spin: 255, impulse: 180 }, 'standard');
+    Object.assign(bodies[i], { x: 140 + i * 70, y: 500, vx: 0, vy: 0, omega: 0 });
+  }
+  const shooter = bodies[0], ball = bodies[6];
+  Object.assign(shooter, { x: 470, y: 300, vx: 0, vy: 0, omega: 0 });
+  Object.assign(ball, { x: 740, y: 300, vx: 0, vy: 0, omega: 0 });
+
+  const compShot = C.strike(shooter, ball, 940, 300, null, 1);
+  const rawStraight = C.strike(shooter, ball, 940, 300, null, 0);
+  const uncompShot = { ...rawStraight, spin: 1 };
+
+  const state = { version: M.VERSION, mode: 'standard', bodies, stats: Array(6).fill({ curve: 255, spin: 255, impulse: 180 }), scores: [0, 0], turn: 1, phase: 'plan', winner: null };
+  const hold = C.HOLD;
+  const resComp = M.resolveTurn(P, state, [compShot, hold, hold, hold, hold, hold], { effects: false });
+  const resUncomp = M.resolveTurn(P, state, [uncompShot, hold, hold, hold, hold, hold], { effects: false });
+
+  assert.equal(resComp.replay.goal, 0, 'spin-compensated Curve=255 strike converts open 260px shot');
+  assert.equal(resUncomp.replay.goal, null, 'uncompensated straight angle with spin=1 curves wide and misses');
+});
+
+test('tactical puzzles: CPU converts screened bank/curve shot and finds zero-teamwork cross-ice one-timer pass', () => {
+  const mkBase = mode => {
+    const bodies = P.kickoff();
+    const stats = Array.from({ length: 6 }, () => ({ impulse: 160, power: 170, spin: 200, curve: 200, synergy: 210, chemistry: 210 }));
+    for (let i = 0; i < 6; i++) {
+      M.applyStats(P, bodies[i], stats[i], mode);
+      bodies[i].personality = { aggression: 32, creativity: 5, teamwork: 0, clutch: 32 };
+      bodies[i].meter = 0;
+    }
+    return { version: M.VERSION, mode, bodies, stats, scores: [0, 0], turn: 1, phase: 'plan', winner: null };
+  };
+
+  // Puzzle 1: Direct lane to goal (940, 300) is screened by two defenders at x=820, y=282 & y=318; bank/curve lane is wide open
+  const screened = mkBase('standard');
+  Object.assign(screened.bodies[0], { x: 560, y: 300 });
+  Object.assign(screened.bodies[1], { x: 200, y: 180 });
+  Object.assign(screened.bodies[2], { x: 200, y: 420 });
+  Object.assign(screened.bodies[3], { x: 820, y: 280, guarding: true });
+  Object.assign(screened.bodies[4], { x: 820, y: 320, guarding: true });
+  Object.assign(screened.bodies[5], { x: 180, y: 510 });
+  Object.assign(screened.bodies[6], { x: 640, y: 300 });
+  const decScreened = C.plan(screened, 0, {
+    level: 'hard', candidates: 60, opponents: 2, wobble: false, temperature: 1, fastTick: true, searchTicks: 480, seed: 11
+  });
+  const outScreened = M.resolveTurn(P, screened, [...decScreened.plans, C.GUARD, C.GUARD, C.HOLD], { effects: false });
+  assert.equal(outScreened.replay.goal, 0, 'CPU converts screened shot via bank/curve despite creativity=5');
+
+  // Puzzle 2: Shooter at (565, 112) behind ball at (610, 165) has direct shot/bank walled off, while slot 1 sits open at (610, 360) with teamwork=0
+  const passState = mkBase('standard');
+  Object.assign(passState.bodies[0], { x: 565, y: 112 });
+  Object.assign(passState.bodies[1], { x: 610, y: 360 });
+  Object.assign(passState.bodies[2], { x: 180, y: 300 });
+  Object.assign(passState.bodies[3], { x: 770, y: 220, guarding: true });
+  Object.assign(passState.bodies[4], { x: 830, y: 255, guarding: true });
+  Object.assign(passState.bodies[5], { x: 200, y: 500 });
+  Object.assign(passState.bodies[6], { x: 610, y: 165 });
+  const decPass = C.plan(passState, 0, {
+    level: 'hard', candidates: 60, opponents: 2, wobble: false, temperature: 1, fastTick: true, searchTicks: 480, seed: 23
+  });
+  const outPass = M.resolveTurn(P, passState, [...decPass.plans, C.GUARD, C.GUARD, C.HOLD], { effects: false });
+  assert.equal(outPass.replay.goal, 0, 'CPU finds cross-ice pass + one-timer goal even when teamwork=0');
+});
+
+test('SoAKernel randomized parity fuzzer matches canonical M.resolveTurn(fastTick) on ticks, goals, and evaluation', () => {
+  const rng = C.randomSource(20261114);
+  const modes = ['standard', 'pulse', 'classic'];
+  for (let caseIdx = 0; caseIdx < 48; caseIdx++) {
+    const mode = modes[caseIdx % 3];
+    const classic = M.rule(mode, 'classic');
+    const bodies = P.kickoff();
+    const stats = [];
+    for (let i = 0; i < 6; i++) {
+      const raw = classic ? {} : {
+        impulse: Math.floor(rng() * 256), traction: Math.floor(rng() * 256),
+        spin: Math.floor(rng() * 256), curve: Math.floor(rng() * 256),
+        size: Math.floor(rng() * 256), mass: Math.floor(rng() * 256),
+        bounciness: Math.floor(rng() * 256), grip: Math.floor(rng() * 256),
+        power: Math.floor(rng() * 256), reach: Math.floor(rng() * 256),
+        strength: Math.floor(rng() * 256), stability: Math.floor(rng() * 256),
+        efficiency: Math.floor(rng() * 256), synergy: Math.floor(rng() * 256),
+        chemistry: Math.floor(rng() * 256)
+      };
+      stats.push(raw);
+      M.applyStats(P, bodies[i], raw, mode);
+      bodies[i].personality = {
+        aggression: Math.floor(rng() * 64), creativity: Math.floor(rng() * 64),
+        teamwork: Math.floor(rng() * 64), clutch: Math.floor(rng() * 64)
+      };
+      bodies[i].x = 140 + rng() * 720;
+      bodies[i].y = 110 + rng() * 380;
+      if (mode === 'pulse') {
+        bodies[i].vx = (rng() - 0.5) * 240;
+        bodies[i].vy = (rng() - 0.5) * 240;
+      }
+      if (!classic) {
+        const sid = (caseIdx + i) % P.SUPERS.length;
+        bodies[i].equippedSuper = { ...P.SUPERS[sid], bonusTicks: (i % 3) * 120, bonusRefund: (i % 3) * 5 };
+        bodies[i].meter = rng() < 0.55 ? 100 : Math.floor(rng() * 95);
+      }
+      bodies[i].daze = rng() < 0.25 ? rng() * 0.35 : 0;
+      bodies[i].stunned = rng() < 0.1;
+    }
+    bodies[6].x = 160 + rng() * 680;
+    bodies[6].y = 120 + rng() * 360;
+    if (mode === 'pulse') {
+      bodies[6].vx = (rng() - 0.5) * 360;
+      bodies[6].vy = (rng() - 0.5) * 360;
+      bodies[6].omega = (rng() - 0.5) * 16;
+    }
+    // Resolve non-overlapping initial positions via 1 step or spacing check
+    const fouls = M.newFouls();
+    if (caseIdx % 7 === 0) fouls.crease[0] = true;
+    if (caseIdx % 11 === 0) { fouls.corner = 0; fouls.cornerTurns = 1; }
+
+    const state = {
+      version: M.VERSION, mode, bodies, stats,
+      scores: [caseIdx % 4, (caseIdx * 2) % 4],
+      turn: 1 + (caseIdx % 10), roundTurns: caseIdx % 3,
+      clock: caseIdx * 240, phase: 'plan', winner: null, fouls
+    };
+    const team = caseIdx % 2;
+    const searchTicks = 180;
+    const fast = C.plan(state, team, {
+      level: 'easy', candidates: 1, opponents: 1, wobble: false,
+      fastTick: true, searchTicks, seed: 100 + caseIdx
+    });
+    const mOwn = C.legacy(state, team);
+    const mOpp = C.legacy(state, 1 - team);
+    const allMoves = team ? [...mOpp, ...mOwn] : [...mOwn, ...mOpp];
+
+    let toucher = null, touches = 0, boards = 0, firstTeamTouch = null, multiTeamTouch = false;
+    const watch = {
+      collide({ a, b, speed }) {
+        const player = M.toucher(a, b, speed);
+        if (player && player !== toucher) {
+          toucher = player; touches++;
+          if (player.team === team) {
+            if (firstTeamTouch === null) firstTeamTouch = player;
+            else if (firstTeamTouch !== player) multiTeamTouch = true;
+          }
+        }
+      },
+      wall(body, _v, type) { if (body.team === -1 && touches && type !== 'net') boards++; }
+    };
+    const pulse = M.rule(mode, 'pulse');
+    const canDecide = !pulse && !fouls.crease[team] && !fouls.crease[1 - team] && fouls.corner === null;
+    const ref = M.resolveTurn(P, state, allMoves, {
+      effects: false, fastSearch: true, fastTick: true, ticks: fouls.crease[team] ? M.turnTicks(mode) : searchTicks,
+      decided: canDecide ? b => touches > 0 && C.decided(b) : null,
+      watch, preservePartial: true
+    });
+    assert.equal(fast.diagnostics.ticks, ref.replay.ticks, `fuzz case ${caseIdx} (${mode}) tick parity`);
+  }
+});

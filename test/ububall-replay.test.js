@@ -3,12 +3,48 @@ const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const P = require('../shared/ububall-physics.js');
 const M = require('../shared/ububall-match.js');
-const C = require('../shared/ububall-cpu.js');
 const U = require('../shared/ubu.js');
 const R = require('../shared/ububall-replay.js');
 
+function seededRandom(seed = 1) {
+  let value = seed >>> 0;
+  return () => ((value = (Math.imul(value, 1664525) + 1013904223) >>> 0) / 4294967296);
+}
+
+// Pure deterministic physics/replay move generator (zero dependency on ububall-cpu.js)
+// Exercises full [-1, 1] spin, Carve Drive, Spin Strike, guards/Iron Saves, passes, and supers.
+function seededPlans(state, seed) {
+  const rng = seededRandom(seed);
+  const ball = state.bodies[6];
+  const plans = new Array(6);
+  const imminentGoal = ball.x > 890 || ball.x < 110;
+  for (let i = 0; i < 6; i++) {
+    const b = state.bodies[i];
+    if (b.stunned) {
+      plans[i] = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
+      continue;
+    }
+    const slot = i % 3;
+    if (imminentGoal && b.team === 1 && ball.x > 890) {
+      plans[i] = { angle: Math.PI, power: 0.4, spin: 0, superArm: false, guard: false };
+      continue;
+    }
+    if (slot === 1 && rng() < 0.28) {
+      plans[i] = { angle: 0, power: 0, spin: 0, superArm: false, guard: true };
+      continue;
+    }
+    const tx = slot === 0 ? ball.x : (slot === 1 ? (b.team ? 140 : 860) : ball.x + (rng() - 0.5) * 140);
+    const ty = slot === 0 ? ball.y : (slot === 1 ? 300 + (rng() - 0.5) * 120 : 120 + rng() * 360);
+    const angle = Math.atan2(ty - b.y, tx - b.x) + (rng() - 0.5) * 0.22;
+    const power = 0.45 + rng() * 0.55;
+    const spin = Math.max(-1, Math.min(1, (rng() * 2 - 1)));
+    plans[i] = { angle, power, spin, superArm: false, guard: false };
+  }
+  return plans;
+}
+
 function setup(seed, mode) {
-  const random = C.randomSource(seed), bodies = P.kickoff(), stats = [], ubus = [];
+  const random = seededRandom(seed), bodies = P.kickoff(), stats = [], ubus = [];
   for (const b of bodies.slice(0, 6)) {
     const dna = Uint8Array.from({ length: 128 }, () => Math.floor(random() * 256)), model = U.decode(dna);
     const classic = M.rule(mode, 'classic'), raw = classic ? {} : model.stats;
@@ -34,7 +70,7 @@ function record(seed, mode, turns, each = null) {
       state.bodies.forEach((b, i) => Object.assign(b, { x: spots[i].x, y: spots[i].y, vx: 0, vy: 0, omega: 0 }));
     }
     if (each) each(state, n);
-    const moves = [0, 1].flatMap(team => C.plan(state, team, { level: 'easy', seed: seed + n }).plans);
+    const moves = seededPlans(state, Math.imul(seed + 1, 2654435761) + n * 97);
     moves.forEach((m, i) => { if (i % 3 === 0 && state.bodies[i].meter >= 100 && !state.bodies[i].stunned) m.superArm = true; });
     // As resolveTurn does, arming comes from the moves alone.
     state.bodies.forEach(b => { if (b.team >= 0) b.superArm = false; });
@@ -178,7 +214,7 @@ function scripted(each = () => {}) {
 
 // The physics this version of the replay format plays back. A change to how turns play out must
 // bump P.VERSION, which makes older replays refuse to play; then record the new fingerprint here.
-const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31', 7: '37a23456c784360a', 8: '83873175fc525045', 9: '09b47d9873e6c0d2', 10: 'c4a526d87f85f50d', 11: 'c149d32f71adb8f2', 12: 'a685065b99430f89', 13: 'dc91a880c4ee68be', 14: '2ac13b21775f0ea2', 15: '248086ed8e0fd514', 16: '9d8b34db2268210c', 17: '972e69182193ab24', 18: 'ae483586854f6d31', 19: '204a59c696047c0b', 20: '7a6a6fce3eaf5650', 21: '5062c20061903979', 22: '0ee5630f69ba5d66', 23: '5a3b47bd871862e7', 24: '2a3f920af1689fe1', 25: '9da10598a7eb12a9', 26: '9a31e6fbed5fe191', 27: '48448020ef8eeb55', 28: '238e2916eb038316' };
+const FINGERPRINTS = { 1: '25fc28df601f6fcd', 2: '010e56666f6547fd', 3: '554a0eeae1fd368f', 4: 'acb65e3b3be77ac8', 5: 'b40578a293ecbf1e', 6: 'e06866ac1d001c31', 7: '37a23456c784360a', 8: '83873175fc525045', 9: '09b47d9873e6c0d2', 10: 'c4a526d87f85f50d', 11: 'c149d32f71adb8f2', 12: 'a685065b99430f89', 13: 'dc91a880c4ee68be', 14: '2ac13b21775f0ea2', 15: '248086ed8e0fd514', 16: '9d8b34db2268210c', 17: '972e69182193ab24', 18: 'ae483586854f6d31', 19: '204a59c696047c0b', 20: '7a6a6fce3eaf5650', 21: '5062c20061903979', 22: '0ee5630f69ba5d66', 23: '5a3b47bd871862e7', 24: '2a3f920af1689fe1', 25: '9da10598a7eb12a9', 26: '9a31e6fbed5fe191', 27: '48448020ef8eeb55', 28: '130fc9e43b8c2555' };
 test('the physics fingerprint matches P.VERSION', () => {
   const { replay } = record(11, 'pulse', 16), standard = record(12, 'standard', 4).replay;
   const ends = [...[...replay.turns, ...standard.turns].map(replayTurn), ...scripted()];
@@ -385,4 +421,14 @@ test('R.stats counts bigSaves from recorded turn saves without duplicate counter
   const stats = R.stats(replay);
   assert.deepEqual(stats.bigSaves, [0, 0, 0, 1, 0, 0], 'bigSaves reflects recorded non-own saves even in clipped/Pulse turns');
   assert.equal(stats.events.filter(e => e.type === 'Save').length, 1);
+});
+
+const GOLDEN_V28_REPLAY_B64 = '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';
+test('authentic pre-existing v28 .ububall binary archive plays back bit-for-bit identically', async () => {
+  const bytes = Uint8Array.from(Buffer.from(GOLDEN_V28_REPLAY_B64, 'base64'));
+  const parsed = await R.read(bytes);
+  assert.equal(parsed.turns.length, 3);
+  const ends = parsed.turns.map(replayTurn);
+  const print = createHash('sha256').update(JSON.stringify(ends)).digest('hex').slice(0, 16);
+  assert.equal(print, '9cf4e733179fca5f');
 });
