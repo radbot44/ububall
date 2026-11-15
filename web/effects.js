@@ -85,7 +85,7 @@
           id: 'plan-prediction',
           title: 'Trajectory, Wall Stamps, Stop Marks & Pulse Ticks',
           when: 'Planning moves with board bounces, stops, or Pulse 1-second turns (`paintPrediction`).',
-          visual: 'Dashed skater/ball paths fading toward horizon, translucent wall-impact stamps, settled `x` stop marks, and Pulse 1s turn-end ticks.',
+          visual: 'Round-capped 4-tick skater/ball dashes whose length tracks speed, smoothly fading toward the horizon, translucent wall-impact stamps, settled `x` stop marks, and Pulse 1s turn-end ticks.',
           variants: [
             { id: 'pulse', label: 'Pulse 1s Ticks + Ice Tint' },
             { id: 'standard', label: 'Standard Full Horizon' }

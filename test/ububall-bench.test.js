@@ -487,18 +487,18 @@ test('drawPrediction skips predictionLayer allocation during active drag and 256
   assert.equal(badgeCanvas.width, 300, 'collectionPortrait skips resizing hidden badgeCanvas');
 });
 
-test('paintPrediction skips stationary bodies, decimates redundant polyline vertices while keeping bounce kinks, and skips clip when impacts is empty', () => {
+test('paintPrediction skips stationary bodies, builds 4-tick round-capped dashes without stacking slow tails, preserves bounce kinks, and skips clip when impacts is empty', () => {
   const pres = require('../web/ububall-presentation.js');
   const bodies = P.kickoff();
-  const ops = { strokes: 0, lineTos: [], clips: 0, images: 0 };
+  const ops = { strokes: 0, vertices: [], lineTos: [], clips: 0, images: 0, lineCaps: [] };
   const ctx = {
-    globalAlpha: 1, fillStyle: '#000', strokeStyle: '#000', lineWidth: 1,
+    globalAlpha: 1, fillStyle: '#000', strokeStyle: '#000', lineWidth: 1, lineCap: 'butt',
     save() {}, restore() {}, translate() {}, rotate() {}, scale() {},
     setLineDash() {},
     beginPath() {},
-    moveTo() {},
-    lineTo(x, y) { ops.lineTos.push([x, y]); },
-    stroke() { ops.strokes++; },
+    moveTo(x, y) { ops.vertices.push([x, y]); },
+    lineTo(x, y) { ops.vertices.push([x, y]); ops.lineTos.push([x, y]); },
+    stroke() { ops.strokes++; ops.lineCaps.push(this.lineCap); },
     fill() {},
     arc() {},
     rect() {},
@@ -544,8 +544,9 @@ test('paintPrediction skips stationary bodies, decimates redundant polyline vert
 
   presenter.paintPrediction(prediction, '#E8CA48', '#AA54D3');
   assert.equal(ops.clips, 0, 'skips rounded-rink + goal clip mask when prediction.impacts is empty');
-  assert.ok(ops.lineTos.length <= 16, `expected <= 16 emitted lineTo vertices (from 91 raw + 726 stationary), got ${ops.lineTos.length}`);
-  assert.equal(ops.lineTos.some(([x, y]) => Math.abs(x - 300) < 1e-6 && Math.abs(y - 60) < 1e-6), true, 'preserves exact wall-bounce apex vertex');
+  assert.equal(ops.lineTos.length, 20, `expected 20 4-tick dashes across moving path without stacking 50-pt tail or 726 stationary pts, got ${ops.lineTos.length}`);
+  assert.equal(ops.vertices.some(([x, y]) => Math.abs(x - 300) < 1e-6 && Math.abs(y - 60) < 1e-6), true, 'preserves exact wall-bounce apex vertex');
+  assert.equal(ops.lineCaps[0], 'round', 'renders prediction dashes with round caps');
 
   // Verify non-empty impacts still clips and renders stamp
   prediction.impacts = [{ index: 0, x: 300, y: 80, radius: 25, reach: 28, tick: 80 }];

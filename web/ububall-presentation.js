@@ -2289,88 +2289,121 @@
       return k;
     }
 
-    function collectDecimatedPoints(points, start, end) {
-      if (end <= start) return null;
-      let lx = points[start].x, ly = points[start].y;
-      let ux = 0, uy = 0, hasDir = false;
-      const out = [{ x: lx, y: ly }];
-      for (let i = start + 1; i < end; i++) {
-        const px = points[i].x, py = points[i].y;
-        const dx = px - lx, dy = py - ly;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < 0.01) continue;
-        const nxPt = points[i + 1];
-        const ndx = nxPt.x - px, ndy = nxPt.y - py;
-        const nLen2 = ndx * ndx + ndy * ndy;
-        const sharpTurn = nLen2 > 0.01 && (dx * ndx + dy * ndy) < 0.92 * Math.sqrt(d2 * nLen2);
-        if (!sharpTurn) {
-          if (d2 < 4) continue;
-          if (hasDir && d2 < 1225) {
-            const inv = 1 / Math.sqrt(d2);
-            const dirX = dx * inv, dirY = dy * inv;
-            const nextAligned = nLen2 < 0.01 || ((ndx * dirX + ndy * dirY) > 0.998 * Math.sqrt(nLen2));
-            if ((ux * dirX + uy * dirY) > 0.9995 && nextAligned) continue;
+    // Sample 4-tick dashes & gaps so spacing reflects speed, extending across multiple
+    // 4-tick steps below minDashPx/minGapPx so slow tails never stack overlapping caps.
+    function buildTickDashes(points, minDashPx, minGapPx) {
+      if (!points || points.length < 2) return null;
+      const p0 = points[0];
+      const x0 = p0.x, y0 = p0.y;
+      let moved = false;
+      for (let i = 1; i < points.length; i++) {
+        const dx = points[i].x - x0, dy = points[i].y - y0;
+        if (dx * dx + dy * dy > 0.64) { moved = true; break; }
+      }
+      if (!moved) return null;
+
+      const DASH_TICKS = 4;
+      const GAP_TICKS = 4;
+      const out = [];
+      let inDash = true;
+      let anchor = p0;
+      let anchorTick = p0.tick ?? 0;
+
+      for (let i = 1; i < points.length; i++) {
+        const p = points[i];
+        const pt = p.tick ?? (i * 4);
+        const prev = points[i - 1];
+        const prevT = prev.tick ?? ((i - 1) * 4);
+
+        const sdx = p.x - prev.x, sdy = p.y - prev.y;
+        const sLen = Math.hypot(sdx, sdy);
+        const adxPrev = prev.x - anchor.x, adyPrev = prev.y - anchor.y;
+        const chordPrev = Math.hypot(adxPrev, adyPrev);
+        if (sLen > 0.01 && chordPrev > 0.5) {
+          const dot = (adxPrev / chordPrev) * (sdx / sLen) + (adyPrev / chordPrev) * (sdy / sLen);
+          if (dot < 0.35 && inDash && chordPrev >= 1.0) {
+            out.push(anchor.x, anchor.y, anchorTick, prev.x, prev.y, prevT);
+            inDash = false;
+            anchor = prev;
+            anchorTick = prevT;
           }
         }
-        out.push({ x: px, y: py });
-        const inv = 1 / Math.sqrt(d2);
-        ux = dx * inv; uy = dy * inv; hasDir = true;
-        lx = px; ly = py;
+
+        const dx = p.x - anchor.x, dy = p.y - anchor.y;
+        const chord = Math.hypot(dx, dy);
+        const dt = pt - anchorTick;
+        if (inDash) {
+          if (dt >= DASH_TICKS && chord >= minDashPx) {
+            out.push(anchor.x, anchor.y, anchorTick, p.x, p.y, pt);
+            inDash = false;
+            anchor = p;
+            anchorTick = pt;
+          }
+        } else if (dt >= GAP_TICKS && chord >= minGapPx) {
+          inDash = true;
+          anchor = p;
+          anchorTick = pt;
+        }
       }
-      const ex = points[end].x, ey = points[end].y;
-      if ((ex - lx) * (ex - lx) + (ey - ly) * (ey - ly) >= 0.01) out.push({ x: ex, y: ey });
-      return out.length >= 2 ? out : null;
+
+      const last = points[points.length - 1];
+      if (inDash && anchor !== last && Math.hypot(last.x - anchor.x, last.y - anchor.y) >= minDashPx) {
+        out.push(anchor.x, anchor.y, anchorTick, last.x, last.y, last.tick ?? ((points.length - 1) * 4));
+      }
+      return out.length >= 6 ? new Float32Array(out) : null;
     }
 
-    function strokeDecimatedPathRange(ctx, points, start, end) {
-      const dec = collectDecimatedPoints(points, start, end);
-      if (!dec) return;
-      ctx.beginPath();
-      ctx.moveTo(dec[0].x, dec[0].y);
-      for (let i = 1; i < dec.length; i++) ctx.lineTo(dec[i].x, dec[i].y);
-      ctx.stroke();
+    function getPredictionDashPaths(prediction, bodies) {
+      if (prediction._dashPaths && prediction._dashPathsLen === prediction.paths.length) {
+        return prediction._dashPaths;
+      }
+      const dashPaths = prediction.paths.map((points, index) => {
+        const isBall = bodies[index].team === -1;
+        const lineWidth = isBall ? 2.5 : 2;
+        return buildTickDashes(points, 2.5, lineWidth + 3.0);
+      });
+      prediction._dashPaths = dashPaths;
+      prediction._dashPathsLen = prediction.paths.length;
+      return dashPaths;
     }
 
     function paintPrediction(prediction, home, away) {
       const view = getView(), ctx = view.ctx;
-      prediction.paths.forEach((points, index) => {
-        if (points.length < 2) return;
-        const x0 = points[0].x, y0 = points[0].y;
-        let moved = false;
-        for (let i = 1; i < points.length; i++) {
-          const dx = points[i].x - x0, dy = points[i].y - y0;
-          if (dx * dx + dy * dy > 0.64) { moved = true; break; }
-        }
-        if (!moved) return;
+      const dashPaths = getPredictionDashPaths(prediction, view.bodies);
+      const invFade = 1 / 240;
+      const fadeStartTick = prediction.horizon - 240;
+      const QUANT = 16;
+
+      dashPaths.forEach((segs, index) => {
+        if (!segs || segs.length < 6) return;
         const isBall = view.bodies[index].team === -1;
         const color = isBall ? '#f2efe9' : view.bodies[index].team === 0 ? home : away;
         const baseAlpha = isBall ? .9 : .65;
         ctx.save();
-        ctx.setLineDash(isBall ? [3, 4] : [4, 4]);
+        ctx.setLineDash([]);
+        ctx.lineCap = 'round';
         ctx.strokeStyle = color;
         ctx.lineWidth = isBall ? 2.5 : 2;
 
-        let splitIdx = 0;
-        while (splitIdx < points.length && prediction.horizon - points[splitIdx].tick >= 240) splitIdx++;
-        const solidEnd = Math.min(points.length - 1, splitIdx);
-        if (solidEnd >= 1) {
-          ctx.globalAlpha = baseAlpha;
-          strokeDecimatedPathRange(ctx, points, 0, solidEnd);
-        }
-
-        if (solidEnd < points.length - 1) {
-          const remaining = points.length - 1 - solidEnd;
-          const BUCKETS = 5, step = Math.ceil(remaining / BUCKETS);
-          for (let b = 0; b < BUCKETS; b++) {
-            const start = solidEnd + b * step;
-            if (start >= points.length - 1) break;
-            const end = Math.min(points.length - 1, start + step);
-            const midTick = points[Math.floor((start + end) / 2)].tick;
-            const fade = Math.max(0, Math.min(1, (prediction.horizon - midTick) / 240));
-            ctx.globalAlpha = fade * baseAlpha;
-            strokeDecimatedPathRange(ctx, points, start, end);
+        let curQ = -1;
+        let hasPath = false;
+        for (let i = 0; i < segs.length; i += 6) {
+          const tMid = 0.5 * (segs[i + 2] + segs[i + 5]);
+          const fade = tMid <= fadeStartTick ? 1 : Math.max(0, Math.min(1, (prediction.horizon - tMid) * invFade));
+          const q = Math.round(fade * QUANT);
+          if (q <= 0) continue;
+          if (q !== curQ) {
+            if (hasPath) ctx.stroke();
+            ctx.globalAlpha = (q / QUANT) * baseAlpha;
+            ctx.beginPath();
+            hasPath = false;
+            curQ = q;
           }
+          ctx.moveTo(segs[i], segs[i + 1]);
+          ctx.lineTo(segs[i + 3], segs[i + 4]);
+          hasPath = true;
         }
+        if (hasPath) ctx.stroke();
         ctx.restore();
       });
 
@@ -3788,41 +3821,14 @@
 
       // 4. Planning trajectories, ignition markers, goal beacons, and pulsing goal glow
       const drawPredictionOverlayWebGL = pred => {
-        pred.paths.forEach((points, index) => {
-          if (points.length < 2) return;
-          const x0 = points[0].x, y0 = points[0].y;
-          let moved = false;
-          for (let i = 1; i < points.length; i++) {
-            const dx = points[i].x - x0, dy = points[i].y - y0;
-            if (dx * dx + dy * dy > 0.64) { moved = true; break; }
-          }
-          if (!moved) return;
+        const dashPaths = getPredictionDashPaths(pred, view.bodies);
+        dashPaths.forEach((segs, index) => {
+          if (!segs || segs.length < 6) return;
           const isBall = view.bodies[index].team === -1;
           const col = isBall ? '#f2efe9' : view.bodies[index].team === 0 ? home : away;
           const baseAlpha = isBall ? 0.9 : 0.65;
           const lw = isBall ? 2.5 : 2;
-          const dLen = isBall ? 3 : 4;
-
-          let splitIdx = 0;
-          while (splitIdx < points.length && pred.horizon - points[splitIdx].tick >= 240) splitIdx++;
-          const solidEnd = Math.min(points.length - 1, splitIdx);
-          if (solidEnd >= 1) {
-            const dec = collectDecimatedPoints(points, 0, solidEnd);
-            if (dec) gpu.strokePolyline(dec, col, lw, baseAlpha, dLen, 4);
-          }
-          if (solidEnd < points.length - 1) {
-            const remaining = points.length - 1 - solidEnd;
-            const BUCKETS = 5, step = Math.ceil(remaining / BUCKETS);
-            for (let b = 0; b < BUCKETS; b++) {
-              const start = solidEnd + b * step;
-              if (start >= points.length - 1) break;
-              const end = Math.min(points.length - 1, start + step);
-              const midTick = points[Math.floor((start + end) / 2)].tick;
-              const fade = Math.max(0, Math.min(1, (pred.horizon - midTick) / 240));
-              const dec = collectDecimatedPoints(points, start, end);
-              if (dec) gpu.strokePolyline(dec, col, lw, fade * baseAlpha, dLen, 4);
-            }
-          }
+          gpu.drawFadeSegments(segs, col, lw, baseAlpha, pred.horizon, 240);
         });
 
         const endTick = pulseMode() ? ububallMatch.turnTicks(view.mode) : 0;

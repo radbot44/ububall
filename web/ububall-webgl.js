@@ -1438,6 +1438,50 @@ void main() {
       }
     }
 
+    // Batch round-capped dash quads with smooth per-vertex horizon fade (segs = [x1,y1,t1,x2,y2,t2,...])
+    function drawFadeSegments(segs, color, lineWidth = 2, alpha = 1, horizon = 480, fadeTicks = 240) {
+      if (!segs || segs.length < 6 || alpha <= 0.001 || lineWidth <= 0 || contextLost) return;
+      const [br, bg, bb, ba] = premul(color, alpha);
+      if (ba <= 0.001 && currentBlend !== 'add') return;
+      const halfW = lineWidth * 0.5;
+      const pad = halfW + 1.5;
+      const extW = halfW + 1.5;
+      const invFade = fadeTicks > 0 ? 1 / fadeTicks : 0;
+
+      for (let i = 0; i < segs.length; i += 6) {
+        const x1 = segs[i], y1 = segs[i + 1], t1 = segs[i + 2];
+        const x2 = segs[i + 3], y2 = segs[i + 4], t2 = segs[i + 5];
+        const f0 = invFade > 0 ? Math.max(0, Math.min(1, (horizon - t1) * invFade)) : 1;
+        const f1 = invFade > 0 ? Math.max(0, Math.min(1, (horizon - t2) * invFade)) : 1;
+        if (f0 <= 0.001 && f1 <= 0.001 && currentBlend !== 'add') continue;
+        const dx = x2 - x1, dy = y2 - y1;
+        const len = Math.hypot(dx, dy);
+        if (len < 0.001) {
+          fillCircle(x1, y1, halfW, color, alpha * f0);
+          continue;
+        }
+        ensureSpace(6);
+        const ux = dx / len, uy = dy / len;
+        const nx = -uy, ny = ux;
+        const p0x = x1 - ux * pad, p0y = y1 - uy * pad;
+        const p1x = x2 + ux * pad, p1y = y2 + uy * pad;
+        const ax = p0x + nx * extW, ay = p0y + ny * extW;
+        const bx = p1x + nx * extW, by = p1y + ny * extW;
+        const cx = p0x - nx * extW, cy = p0y - ny * extW;
+        const ex = p1x - nx * extW, ey = p1y - ny * extW;
+        const uStart = -pad, uEnd = len + pad;
+        const r0 = br * f0, g0 = bg * f0, b0 = bb * f0, a0 = ba * f0;
+        const r1 = br * f1, g1 = bg * f1, b1 = bb * f1, a1 = ba * f1;
+
+        pushVert(ax, ay, uStart, extW, r0, g0, b0, a0, 4, len, halfW, 0, currentClip, 0);
+        pushVert(bx, by, uEnd, extW, r1, g1, b1, a1, 4, len, halfW, 0, currentClip, 0);
+        pushVert(cx, cy, uStart, -extW, r0, g0, b0, a0, 4, len, halfW, 0, currentClip, 0);
+        pushVert(cx, cy, uStart, -extW, r0, g0, b0, a0, 4, len, halfW, 0, currentClip, 0);
+        pushVert(bx, by, uEnd, extW, r1, g1, b1, a1, 4, len, halfW, 0, currentClip, 0);
+        pushVert(ex, ey, uEnd, -extW, r1, g1, b1, a1, 4, len, halfW, 0, currentClip, 0);
+      }
+    }
+
     function drawRadialStops(cx, cy, maxR, stops, alpha = 1, rings = 28) {
       if (alpha <= 0.001 || maxR <= 0 || !stops || stops.length < 2 || contextLost) return;
       const parsed = stops.map(([offset, col]) => [offset, parseColor(col)]);
@@ -1967,6 +2011,7 @@ void main() {
       fillArcSector,
       strokeLine,
       strokePolyline,
+      drawFadeSegments,
       drawRadialStops,
       drawSoftRibbon,
       drawTaperedSpinArc,
