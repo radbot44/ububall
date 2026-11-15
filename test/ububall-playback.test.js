@@ -289,3 +289,34 @@ test('frame() unified rendering path: single draw() per frame and simDelta passe
   assert.equal(advanceGoalCalls, 1);
   assert.equal(draws, 1, 'online goalReplay draws once without double-drawing in trailing hadEffects branch');
 });
+
+test('render interpolation blends x, y, rotation across fractional alpha and snaps across teleports', () => {
+  const sim = P.kickoff();
+  sim[0].x = 200; sim[0].y = 300; sim[0].rotation = 1;
+  const view = P.kickoff();
+  const projector = ububallPlayback.createBodyProjector({
+    P,
+    getEntries: () => null,
+    getAnonymous: () => false,
+    anonymousName: i => `Ubu ${i + 1}`,
+    isClassicMode: () => false,
+    resolveEquippedSuper: () => P.SUPERS[0],
+    getShownSim: () => sim,
+    getShownSeat: () => 0,
+    getTargetBodies: () => view,
+    getDirtyMeters: () => null,
+    superStats: () => ({})
+  });
+  projector.syncViewBodies(sim, 0, view);
+  projector.capturePose(sim, 0);
+  sim[0].x = 210; sim[0].y = 304; sim[0].rotation = 1.4;
+  projector.syncInterpolatedBodies(0.25, sim, 0, view);
+  assert.ok(Math.abs(view[0].x - 202.5) < 1e-9);
+  assert.ok(Math.abs(view[0].y - 301) < 1e-9);
+  assert.ok(Math.abs(view[0].rotation - 1.1) < 1e-9);
+  // Larger than 80 px jump snaps immediately to sim instead of interpolating across the rink
+  projector.capturePose(sim, 0);
+  sim[0].x = 400; sim[0].y = 304;
+  projector.syncInterpolatedBodies(0.5, sim, 0, view);
+  assert.equal(view[0].x, 400);
+});

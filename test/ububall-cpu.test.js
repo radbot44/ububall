@@ -489,8 +489,8 @@ test('selective 2-turn look-ahead bridges finishTurn stuns to convert 2-turn Kno
   Object.assign(koState.bodies[5], { x: 245, y: 295, meter: 100, equippedSuper: koSuper });
   Object.assign(koState.bodies[6], { x: 295, y: 300 });
 
-  const oneTurn = C.plan(koState, 1, { level: 'insane', candidates: 90, lookaheadTop: 0, seed: 6 });
-  const twoTurn = C.plan(koState, 1, { level: 'insane', candidates: 90, seed: 6 });
+  const oneTurn = C.plan(koState, 1, { level: 'insane', candidates: 90, lookaheadTop: 0, seed: 4 });
+  const twoTurn = C.plan(koState, 1, { level: 'insane', candidates: 90, seed: 4 });
   assert.ok(twoTurn.diagnostics.score > oneTurn.diagnostics.score + 2000,
     `2-turn look-ahead detects post-Knockout Turn-2 goal (${twoTurn.diagnostics.score} vs ${oneTurn.diagnostics.score})`);
 

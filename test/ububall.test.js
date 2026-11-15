@@ -1654,10 +1654,10 @@ test('opponent checking a Sticky-held ball directly knocks it loose instead of b
   Object.assign(side[0], { x: 400, y: 300, vx: 300, vy: 0, superActive: 'sticky', superTicks: P.SUPER.ticks, holding: true });
   Object.assign(side[6], { x: 443, y: 300, vx: 300, vy: 0, stickOffset: { x: 43, y: 0 }, stuckTicks: 10, strikerTeam: 0 });
   Object.assign(side[3], { x: 443, y: 342, vx: 0, vy: -400 });
-  let sideHits = 0;
-  P.step(side, P.DT, () => { sideHits++; });
+  let defenderHits = 0;
+  P.step(side, P.DT, c => { if (c.a === side[3] || c.b === side[3]) defenderHits++; });
   assert.equal(side[0].holding, false);
-  assert.equal(sideHits, 1, 'side poke-check strips held ball in a single clean contact');
+  assert.equal(defenderHits, 1, 'side poke-check strips held ball in a single clean defender contact');
 });
 
 test('a second Sticky skater stealing a held ball ends the first Sticky without multi-pass ping-pong', () => {

@@ -246,7 +246,60 @@
       return targetBodies;
     }
 
-    return { projectBody, viewBodies, toViewBody, syncViewBodies, syncTickBodies };
+    let prevPose = null, prevPoseLen = 0, prevSeat = 0, hasPrevPose = false;
+
+    function capturePose(sim = getShownSim(), seat = getShownSeat()) {
+      if (!sim || !sim.length) { hasPrevPose = false; return; }
+      const need = sim.length * 3;
+      if (!prevPose || prevPose.length < need) prevPose = new Float64Array(need);
+      const flip = Boolean(seat);
+      for (let i = 0; i < sim.length; i++) {
+        const cb = sim[i], o = i * 3;
+        prevPose[o] = flip ? 1000 - cb.x : cb.x;
+        prevPose[o + 1] = flip ? 600 - cb.y : cb.y;
+        prevPose[o + 2] = (cb.rotation || 0) + (flip ? Math.PI : 0);
+      }
+      prevPoseLen = sim.length;
+      prevSeat = seat;
+      hasPrevPose = true;
+    }
+
+    function clearPose() {
+      hasPrevPose = false;
+    }
+
+    // Blends view-body render pose (x, y, rotation) between the previous tick and current tick
+    // without touching simulation state or trail sampling.
+    function syncInterpolatedBodies(alpha = 1, sim = getShownSim(), seat = getShownSeat(), targetBodies = getTargetBodies()) {
+      if (!sim || !targetBodies) return targetBodies;
+      const t = alpha <= 0 ? 0 : (alpha >= 1 ? 1 : alpha);
+      const canBlend = hasPrevPose && prevPoseLen === sim.length && prevSeat === seat && t < 1 - 1e-6;
+      const flip = Boolean(seat);
+      for (let i = 0; i < sim.length; i++) {
+        const vi = viewIndex(i, seat), vb = targetBodies[vi];
+        if (!vb) continue;
+        const cb = sim[i];
+        const tx = flip ? 1000 - cb.x : cb.x;
+        const ty = flip ? 600 - cb.y : cb.y;
+        const tr = (cb.rotation || 0) + (flip ? Math.PI : 0);
+        if (canBlend) {
+          const o = i * 3, px = prevPose[o], py = prevPose[o + 1], pr = prevPose[o + 2];
+          const dx = tx - px, dy = ty - py;
+          if (dx * dx + dy * dy <= 6400) {
+            vb.x = px + dx * t;
+            vb.y = py + dy * t;
+            vb.rotation = pr + (tr - pr) * t;
+            continue;
+          }
+        }
+        vb.x = tx;
+        vb.y = ty;
+        vb.rotation = tr;
+      }
+      return targetBodies;
+    }
+
+    return { projectBody, viewBodies, toViewBody, syncViewBodies, syncTickBodies, capturePose, clearPose, syncInterpolatedBodies };
   }
 
   function createPlaybackDriver({
@@ -305,7 +358,7 @@
     }
 
     // Shared post-goal slow-motion skater glide used identically by local and online goals.
-    function advancePostGoal(postGoal, state, simDelta, fx, syncFn, maxSteps = 48, getHitStop = () => 0) {
+    function advancePostGoal(postGoal, state, simDelta, fx, syncFn, maxSteps = 48, getHitStop = () => 0, onBeforeStep = null) {
       if (!postGoal || !postGoal.sim) return false;
       if (clockNow() < getHitStop()) { state.steps = 0; return true; }
       state.steps += simDelta / P.DT;
@@ -314,6 +367,7 @@
         state.steps -= 1;
         if (state.onTick) state.onTick();
         postGoal.ticks++;
+        onBeforeStep?.();
         if (stepPostGoalFrame(postGoal.sim, fx, syncFn, true)) return false;
       }
       return true;
@@ -328,13 +382,16 @@
       fx,
       syncSim,
       syncTick = syncSim,
+      onBeforeStep = null,
+      syncInterpolated = null,
       toView,
       onGoalReached,
       onSettledTurnEnd
     }) {
       if (!replay || !replay.simBodies) return { active: false, fouls };
       const elapsedSec = Math.max(0, (nowMs - replay.startedAt - (replay.paused || 0)) / 1000);
-      const targetTick = Math.min(replay.ticks, Math.floor(elapsedSec / P.DT));
+      const exactTick = elapsedSec / P.DT;
+      const targetTick = Math.min(replay.ticks, Math.floor(exactTick));
       if (replay.currentTick === undefined) replay.currentTick = 0;
 
       const simFouls = viewFouls(ububallMatch, fouls, seat);
@@ -347,13 +404,14 @@
         }
       }
 
-      let stepped = false, tickStruck = false;
+      let stepped = false, tickStruck = false, stoppedByEvent = false;
       const onHit = contact => {
         if (contact?.spinStruck) tickStruck = true;
         fx.hit?.(contact);
       };
       while (replay.currentTick < targetTick) {
         tickStruck = false;
+        onBeforeStep?.();
         P.step(replay.simBodies, P.DT, onHit, fx.wall, fx.shock, fx.super);
         traceGuide(replay.simBodies);
         replay.currentTick++;
@@ -373,11 +431,16 @@
           onStop: ms => { replay.paused = (replay.paused || 0) + ms; }
         });
         recordTrails();
-        if (stopped) break;
+        if (stopped) { stoppedByEvent = true; break; }
       }
 
-      if (stepped || replay.currentTick < replay.ticks) {
-        syncSim();
+      if (stepped || !syncInterpolated) {
+        if (stepped || replay.currentTick < replay.ticks) syncSim();
+      }
+      if (syncInterpolated && (stepped || replay.currentTick < replay.ticks)) {
+        const activeTurn = replay.currentTick < replay.ticks && !stoppedByEvent;
+        const alpha = activeTurn && replay.currentTick === targetTick ? Math.max(0, Math.min(1, exactTick - targetTick)) : 1;
+        syncInterpolated(alpha);
       }
       const nextFouls = !replay.fouled ? viewFouls(ububallMatch, simFouls, seat) : fouls;
 

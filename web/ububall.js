@@ -259,7 +259,7 @@
   } = ububallTheater;
   const anonymousName = i => formatAnonymousName(ububallReplay, i);
   const viewFouls = (f, seat) => projectFouls(ububallMatch, f, seat);
-  const { projectBody, viewBodies, toViewBody, syncViewBodies, syncTickBodies } = createBodyProjector({
+  const { projectBody, viewBodies, toViewBody, syncViewBodies, syncTickBodies, capturePose, clearPose, syncInterpolatedBodies } = createBodyProjector({
     P,
     getEntries: () => (typeof fieldView.entries !== 'undefined' ? fieldView.entries : null),
     getAnonymous: () => Boolean(typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous),
@@ -1946,18 +1946,26 @@
     let steppedReplay = false;
     runPlaybackTicks(r, delta, speed, 48, () => hitStopUntil, () => {
       steppedReplay = true;
+      if (typeof capturePose === 'function') capturePose(r.sim, r.seat);
       if (r.played < r.total) {
-        if (r.tick >= r.segments[r.index].ticks) nextReplaySegment();
+        if (r.tick >= r.segments[r.index].ticks) {
+          nextReplaySegment();
+          if (typeof clearPose === 'function') clearPose();
+        }
         if (P.step(r.sim, P.DT, replayFx.hit, replayFx.wall, replayFx.shock, replayFx.super) !== null && P.ballOnFire(r.sim[6]) && fieldEffects.netFire) fieldEffects.netFire.lit = true;
         r.tick++; r.played++;
         replayEvents(r.segments[r.index], r.tick, r.sim);
         syncReplayTick(); recordTrails();
         if (r.played >= r.total) { r.doneAt = performance.now() + ububallMatch.GOAL_REPLAY_HOLD; r.doneHoldMs = ububallMatch.GOAL_REPLAY_HOLD; }
       } else if (stepPostGoalFrame(r.sim, replayFx, syncReplayTick)) {
+        if (typeof clearPose === 'function') clearPose();
         return 'reset';
       }
     });
     if (steppedReplay && goalReplay) syncReplay();
+    if (goalReplay && goalReplay.sim && typeof syncInterpolatedBodies === 'function') {
+      syncInterpolatedBodies(clockNow() < hitStopUntil ? 1 : goalReplay.steps, goalReplay.sim, goalReplay.seat);
+    }
     emitSkaterEffects(delta * speed); draw();
   }
   function endGoalReplay() {
@@ -1966,6 +1974,7 @@
     if (!goalReplay) return;
     scoringPlayer = fieldView.bodies[goalReplay.scorer] || null;
     goalReplay = null;
+    if (typeof clearPose === 'function') clearPose();
     clearEffects();
     syncReplay();
     fieldView.bodies.slice(0, 6).forEach(b => dirtyMeters.add(b));
@@ -2623,30 +2632,39 @@
       const stepSync = typeof syncTickBodies === 'function' ? syncTickBodies : syncViewBodies;
       if (postGoal) {
         postGoalState.onTick = () => { elapsed += P.DT; };
-        if (!advancePostGoal(postGoal, postGoalState, simDelta, liveFx, () => stepSync(postGoal.sim || simBodies, 0), 48, () => hitStopUntil)) postGoal = null;
+        if (!advancePostGoal(postGoal, postGoalState, simDelta, liveFx, () => stepSync(postGoal.sim || simBodies, 0), 48, () => hitStopUntil,
+          typeof capturePose === 'function' ? () => capturePose(postGoal.sim || simBodies, 0) : null)) postGoal = null;
         syncViewBodies(postGoal?.sim || simBodies, 0);
+        if (postGoal && typeof syncInterpolatedBodies === 'function') {
+          syncInterpolatedBodies(clockNow() < hitStopUntil ? 1 : postGoalState.steps, postGoal.sim || simBodies, 0);
+        }
       } else {
         if (clockNow() < hitStopUntil) accumulator = 0; else accumulator += simDelta;
         let steps = 0, steppedPlay = false;
         while (steps++ < 48 && accumulator >= P.DT && phase === 'play') {
           steppedPlay = true;
+          if (typeof capturePose === 'function') capturePose(simBodies, 0);
           const tick = ububallMatch.playTick(P, simBodies, play, liveFx, tally), { goal } = tick; elapsed += P.DT; accumulator -= P.DT;
           ububallMatch.lapseFouls(P, simBodies, fouls); traceGuide(simBodies);
           stepSync(simBodies, 0);
           applyTickEvents(simBodies, {
             saves: tick.saves, struck: tick.struck, stop: tick.stop, applyIron: false,
             viewFn: (_, s) => fieldView.bodies[s.index], isGoal: goal !== null,
-            onStop: () => { accumulator = 0; }
+            onStop: () => { accumulator = 0; if (typeof clearPose === 'function') clearPose(); }
           });
           noteEvents(Math.round(elapsed / P.DT), tick.saves, tick.stop);
           recordTrails();
           if (goal !== null || P.settled(simBodies) || Math.round(elapsed / P.DT) >= ububallMatch.turnTicks(fieldView.mode)) {
             postGoalState.steps = 0;
             finishTurn(goal);
+            if (typeof clearPose === 'function') clearPose();
             if (goal !== null) break;
           }
         }
         if (steppedPlay && phase === 'play') syncViewBodies(simBodies, 0);
+        if (phase === 'play' && typeof syncInterpolatedBodies === 'function') {
+          syncInterpolatedBodies(clockNow() < hitStopUntil ? 1 : accumulator / P.DT, simBodies, 0);
+        }
       }
       if (typeof bench !== 'undefined' && bench?.rec) bench.rec.simMs += (performance.now() - _tSim);
       if (phase === 'play' || postGoal) emitSkaterEffects(simDelta);
@@ -2658,7 +2676,11 @@
       else if (postGoal) {
         postGoalState.onTick = null;
         const seat = postGoal.seat ?? online.state?.seat ?? 0;
-        if (!advancePostGoal(postGoal, postGoalState, simDelta, replayFx, () => syncViewBodies(postGoal.sim, seat), 48, () => hitStopUntil)) postGoal = null;
+        if (!advancePostGoal(postGoal, postGoalState, simDelta, replayFx, () => syncViewBodies(postGoal.sim, seat), 48, () => hitStopUntil,
+          typeof capturePose === 'function' ? () => capturePose(postGoal.sim, seat) : null)) postGoal = null;
+        if (postGoal && typeof syncInterpolatedBodies === 'function') {
+          syncInterpolatedBodies(clockNow() < hitStopUntil ? 1 : postGoalState.steps, postGoal.sim, seat);
+        }
       }
       if ((onlineReplay && (onlineReplay.currentTick ?? 0) < onlineReplay.ticks) || postGoal) emitSkaterEffects(simDelta);
       draw();
@@ -3873,6 +3895,10 @@
       fx: replayFx,
       syncSim,
       syncTick,
+      onBeforeStep: typeof capturePose === 'function' ? () => capturePose(replay.simBodies, seat) : null,
+      syncInterpolated: typeof syncInterpolatedBodies === 'function'
+        ? alpha => syncInterpolatedBodies(clockNow() < hitStopUntil ? 1 : alpha, replay.simBodies, seat)
+        : null,
       toView: b => toViewBody(b, replay.simBodies, seat),
       onGoalReached: () => {
         goalReplayAt = performance.now() + ububallMatch.GOAL_REPLAY_DELAY;
