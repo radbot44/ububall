@@ -326,14 +326,14 @@ test('drawHeatMirage composites offscreen rinkCache + iceCache and never self-co
   fx.skids.push({ width: 16, age: 0.05, points: [{ x: 480, y: 295, depth: 1 }, { x: 505, y: 302, depth: 1 }] });
 
   const makeCtx = () => {
-    const drawSources = [];
+    const drawSources = [], drawCalls = [];
     return {
-      drawSources,
+      drawSources, drawCalls,
       globalAlpha: 1, fillStyle: '#000', strokeStyle: '#000', lineWidth: 1, shadowBlur: 0, shadowColor: '#000',
       save() {}, restore() {}, setTransform() {}, getTransform: () => ({ a: 1 }),
       clearRect() {}, fillRect() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {},
       arc() {}, rect() {}, roundRect() {}, setLineDash() {}, clip() {}, stroke() {}, fill() {}, translate() {}, rotate() {}, scale() {},
-      drawImage(src) { drawSources.push(src); },
+      drawImage(src, ...args) { drawSources.push(src); drawCalls.push({ src, args }); },
       createLinearGradient: () => ({ addColorStop() {} }),
       createRadialGradient: () => ({ addColorStop() {} }),
       createConicGradient: () => ({ addColorStop() {} })
@@ -375,6 +375,20 @@ test('drawHeatMirage composites offscreen rinkCache + iceCache and never self-co
   assert.equal(mirageSources.includes(mainCanvas), false, 'mirageCtx NEVER copies from live view.canvas');
   assert.equal(mirageSources.includes(fx.rinkCache.layer), true, 'mirageCtx samples finished offscreen rinkCache');
   assert.equal(mirageSources.includes(fx.iceCache.layer), true, 'mirageCtx samples finished offscreen iceCache');
+  assert.equal(fx.mirageCanvas.width, 128, 'scratch width is bounded independently of DPR');
+  assert.equal(fx.mirageCanvas.height, 128, 'scratch height is bounded independently of DPR');
+  assert.equal(view.ctx.drawSources.filter(src => src === fx.mirageCanvas).length, 3,
+    'one core and two eddies replace six distortion passes');
+  const layer = fx.mirageCanvas;
+  fx.fireWarp = { x: 65, y: 65, life: .05, duration: .3 };
+  presenter.drawScene();
+  assert.equal(fx.mirageCanvas, layer, 'continuous and impact heat share the same scratch canvas');
+  assert.equal(layer.width, 128, 'expanding impact does not resize scratch storage');
+  assert.equal(layer.height, 128, 'expanding impact does not resize scratch storage');
+  assert.ok(fx.mirageCtx.drawCalls.every(({ src, args }) => args[0] >= 0 && args[1] >= 0
+    && args[2] > 0 && args[3] > 0 && args[0] + args[2] <= src.width + 1e-6
+    && args[1] + args[3] <= src.height + 1e-6), 'sample crops stay valid');
+
 });
 
 test('drawPrediction skips predictionLayer allocation during active drag and 2560px cap preserves native phone 1653x990', () => {
