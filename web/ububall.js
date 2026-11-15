@@ -1253,7 +1253,7 @@
       return false;
     }
   }
-  function newMatch(playJingle = false, team = draft) {
+  function newMatch(playJingle = false, team = draft, { standby = false } = {}) {
     if (typeof clearReplayViewer === 'function') clearReplayViewer();
     authoritativeBodies = null;
     endGoalReplay(); playSegments = []; saveRecording();
@@ -1264,11 +1264,18 @@
     stats = [...team, ...cpuTeam].map(entry => classicMode() ? normalStats() : { ...(entry.model.stats || normalStats()) });
     stopFanfare(); gameAudio()?.stop();
     roster = [...team]; fieldView.entries = [...roster, ...cpuTeam]; fieldView.bodies = kickoff(true); buildTeam(); scores = [0, 0]; turn = 1; selected = 0; phase = 'plan'; elapsed = accumulator = 0; drag = null;
-    if (!demo) {
+    const active = !demo && !standby;
+    if (active) {
       recording = ububallReplay.create({ mode: fieldView.mode, names: ['You', 'CPU'], ubus: fieldView.bodies.slice(0, 6).map((b, i) => ({ dna: fieldView.entries[i].dna, super: b.equippedSuper?.id ?? null })) });
     }
-    resetPlans();
-    if (!demo) saveActiveMatch();
+    if (standby) {
+      if (typeof dirtyPrediction === 'function') dirtyPrediction();
+      plans = Array.from({ length: 3 }, idlePlan);
+      sync();
+    } else {
+      resetPlans();
+    }
+    if (active) saveActiveMatch();
     say('Drag from an ubu toward your target to aim. Drag its arrowhead to adjust power and direction.'); draw();
     if (playJingle) gameAudio()?.playGameStart?.();
   }
@@ -2971,7 +2978,7 @@
     const entries = await accountTeam();
     if (!entries || online?.active || !onGuestTeam()) return;
     draft = entries;
-    if (demo) newDemoGame(entries); else if (!matchInProgress()) newMatch();
+    if (demo) newDemoGame(entries); else if (!matchInProgress()) newMatch(false, draft, { standby: true });
     updateHome();
   }
   // A signed-in player always fields their own ubus. Nothing starts until they have them.
@@ -3342,7 +3349,7 @@
     if (setupFor === 'pick') {
       closeSheet();
       rememberTeam();
-      if (demo) newDemoGame(draft); else if (!matchInProgress()) newMatch();
+      if (demo) newDemoGame(draft); else if (!matchInProgress()) newMatch(false, draft, { standby: true });
       return;
     }
     await startFromSetup($('start-match'));
@@ -4122,7 +4129,7 @@
   $('online-rematch').onclick = () => online.rematch();
   if (!inDiscord) {
     restoredMatch = restoreActiveMatch();
-    if (!restoredMatch) newMatch();
+    if (!restoredMatch) newMatch(false, draft, { standby: true });
     if (isMatchShot()) fitOrientation();
   } else if (history.state?.match) {
     // Discord opens the friends queue. Online matches and watch links resume through their URLs.

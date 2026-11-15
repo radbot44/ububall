@@ -645,6 +645,38 @@ test('active match save and restore enforces matching matchVersion and physicsVe
   store['ububall-active-match'] = JSON.stringify(parsed);
   assert.equal(env.restoreActiveMatch(), false);
   assert.equal(store['ububall-active-match'], undefined);
+
+  // Standby setup prepares the rink without creating a recording or saving an active match
+  let resetCalls = 0;
+  const standbyCtx = {
+    Object, Array, Set, Math, Number, String, Boolean,
+    P, ububallMatch, ububallReplay, localStorage, structuredClone,
+    inDiscord: false, demo: false, online: null, phase: 'plan', recording: null,
+    matchMode: 'standard', cpuMode: 'standard', cpuLevel: 'medium', scores: [0, 0], turn: 1, selected: 0,
+    elapsed: 0, accumulator: 0, drag: null, playSegments: [],
+    cpuTeam: [], starterEntries: () => Array.from({ length: 3 }, () => ({ dna: 'a', label: 'a', model: { stats: {} } })),
+    draft: Array.from({ length: 3 }, () => ({ dna: 'a', label: 'a', model: { stats: {} } })),
+    fouls: { crease: [false, false], corner: null, cornerTurns: 0, cards: [] },
+    tally: {}, roster: [{ dna: 'a', label: 'a' }], teamEntries: [{ dna: 'a', label: 'a' }], stats: [],
+    bodies: P.kickoff(), simBodies: P.kickoff(), plans: [], cpu: [], cpuDone: false,
+    authoritativeBodies: null, kickoffGlow: 0, netFire: null, scoringPlayer: null, roundTurns: 0, matchTicks: 0, play: {},
+    clearEffects: dummy, closeSummary: dummy, saveRecording: () => { standbyCtx.recording = null; },
+    resetPlans: () => { resetCalls++; },
+    resolveEquippedSuper: () => P.SUPERS[0], anonymousName: i => `Anon ${i}`, anonymousNames: false,
+    shownSim: () => P.kickoff(), shownSeat: () => 0,
+    endGoalReplay: dummy, showMode: dummy, classicMode: () => false,
+    stopFanfare: dummy, gameAudio: () => null, buildTeam: dummy,
+    normalStats: () => ({}), idlePlan: () => ({ angle: 0, power: 0, spin: 0 }),
+    document: { body: { classList: { toggle: dummy } }, querySelector: () => null },
+    restoreEntry: e => e, dirtyMeters: new Set(), startPlanClock: dummy, prepareCPU: dummy,
+    sync: dummy, draw: dummy, say: dummy, recordSegment: dummy, beginGuide: dummy, liveFx: { super: dummy }
+  };
+  const standbyEnv = runInNewContext(code + '\n;({ newMatch, restoreActiveMatch });', standbyCtx);
+  standbyEnv.newMatch(false, standbyCtx.draft, { standby: true });
+  assert.equal(standbyCtx.recording, null);
+  assert.equal(resetCalls, 0);
+  assert.equal(store['ububall-active-match'], undefined);
+  assert.equal(standbyEnv.restoreActiveMatch(), false);
 });
 
 test('contactMeter and creditSave reject meter awards outside phase === play', () => {
