@@ -44,8 +44,9 @@ Working now (`web/index.html`, `web/app.js`, `web/site-header.js`, `web/ububall-
 
 ## Decisions (owner, 2026-11-11)
 
-1. **Flat only.** The rink stays top-down. Camera moves are translate, scale and in-plane rotation.
-   No perspective tilt, no WebGL.
+1. **Flat only.** The rink stays top-down. Camera moves are translate, scale and in-plane rotation
+   (no 3D perspective tilt). Live rink rendering uses 2D top-down WebGL2 (`web/ububall-webgl.js` +
+   `web/ububall-presentation.js`) with automatic Canvas 2D fallback (updated 2026-11-15).
 2. **Ubu Mint is a lit stage** (updated 2026-11-12). The header and Mint title stay outside the
    rink. Entering Ubu Mint scatters all skaters off the rink (pausing the demo) as the ice goes
    dark with spotlights picking out each pack. Clicking a pack swipes the other packs away, glides
@@ -317,3 +318,4 @@ None.
   `#home-pack` unchanged; updated `createPackScene` (`paint` and `pointermove`) and
   `capturePackEmergence` to align coordinates and scale against the parent `.candy-pack` button.
 - 2026-11-14: Expanded `.cpu-levels` on the `rules` setup sheet to five tiers (`Easy`, `Medium`, `Hard`, `Insane`, `Ububall God`) arranged as a 3+2 6-column spanned grid (`<= 3` choices per row) with compact mobile row heights and saved-setup persistence.
+- 2026-11-15: Completed production WebGL2 rink renderer migration (`web/ububall-webgl.js`, `web/ububall-presentation.js`, `web/ububall.js`, `web/effects.js`, `web/ububall-theater.js`, `web/ububall-bench.js`, `web/webgl-demo.js`): batched 8-slot GPU sprite & analytic SDF rendering, GPU skaters in scene depth order, continuous feathered warm-umber burn & skid ribbons, bounded FBO scene-to-texture heat refraction (refracting skaters, ball, flames, trails and rink markings), native WebGL2 stretched portrait `collection` rink, single-canvas compositing for Share Cards and MP4 video exports, and automatic Canvas 2D fallback on WebGL2 unavailability or context loss.

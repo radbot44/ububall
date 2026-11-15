@@ -27,7 +27,7 @@ const WEB_FILES = new Set([
 ]);
 const SHARED_FILES = new Set([
   'ububall-match.js', 'ububall-physics.js', 'ububall-replay.js', 'ububall-cpu.js',
-  'ubu.js', 'ubu-archetype.js', 'ubu-file.js', 'ubu-render.js', 'ubu-audio.js', 'rarity.js'
+  'ubu.js', 'ubu-archetype.js', 'ubu-file.js', 'ubu-render.js', 'ubu-audio.js', 'rarity.js', 'ability.js'
 ]);
 const ASSET_FILES = new Set([
   'uburoom-wordmark-brand.svg', 'uburoom-oomark-brand.svg', 'oomark-pattern.svg',

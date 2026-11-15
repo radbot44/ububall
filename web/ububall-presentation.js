@@ -860,6 +860,7 @@
       rinkLogo.src = 'assets/ububall-logo.svg';
       rinkLogo.onload = () => {
         const fx = getEffects();
+        rinkCacheGen++;
         if (fx) fx.rinkCache = null;
         onAssetLoad?.();
       };
@@ -868,6 +869,7 @@
     let themeColors = null, themeObserver = null, darkMedia = null, onDarkChange = null;
     function invalidateTheme() {
       themeColors = null;
+      rinkCacheGen++;
       const fx = getEffects();
       if (fx) fx.rinkCache = null;
     }
@@ -881,11 +883,215 @@
       onDarkChange = () => { invalidateTheme(); onAssetLoad?.(); };
       darkMedia.addEventListener?.('change', onDarkChange);
     }
+    const webglApi = deps.ububallWebGL ?? root.ububallWebGL
+      ?? (typeof require === 'function' ? (() => { try { return require('./ububall-webgl.js'); } catch { return null; } })() : null);
+    const ubuRenderApi = deps.ubuRender ?? root.ubuRender ?? null;
+    const forceCanvas2DOption = Boolean(deps.forceCanvas2D);
+    const ownedGpuViews = new Set();
+    const stampSprites = new Map();
+    const entrySpriteCache = new Map();
+    let rinkCacheGen = 1;
+    let modelObjSeq = 1;
+    const modelObjIds = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+
+    function entrySpriteKey(entry) {
+      if (!entry) return null;
+      if (entry.dna && (!entry.model || entry.model.dna !== null)) return 'dna:' + entry.dna;
+      const m = entry.model;
+      if (!m || typeof m !== 'object') return entry.key || null;
+      if (modelObjIds) {
+        let id = modelObjIds.get(m);
+        if (!id) { id = modelObjSeq++; modelObjIds.set(m, id); }
+        return 'mdl:' + id;
+      }
+      return 'mdl:' + (m._spriteSeq ||= modelObjSeq++);
+    }
+
+    function getOrBakeEntrySprite(entry) {
+      if (!entry?.model || !ubuRenderApi || !doc?.createElement) return null;
+      const key = entrySpriteKey(entry);
+      if (!key) return null;
+      let rec = entrySpriteCache.get(key);
+      if (rec) {
+        entrySpriteCache.delete(key);
+        entrySpriteCache.set(key, rec);
+        return rec.canvas || null;
+      }
+      rec = { canvas: null, promise: null };
+      entrySpriteCache.set(key, rec);
+      if (entrySpriteCache.size > MAX_SPRITE_CACHE) {
+        entrySpriteCache.delete(entrySpriteCache.keys().next().value);
+      }
+      if (typeof ubuRenderApi.sprite === 'function' && hasImage) {
+        rec.promise = Promise.resolve(ubuRenderApi.sprite(entry.model, 256)).then(url => {
+          if (!url) return null;
+          return new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => {
+              const c = doc.createElement('canvas');
+              c.width = c.height = 256;
+              c.getContext('2d')?.drawImage(img, 0, 0, 256, 256);
+              rec.canvas = c;
+              onAssetLoad?.();
+              resolve(c);
+            };
+            img.onerror = () => resolve(null);
+            img.src = url;
+          });
+        }).catch(() => null);
+      }
+      return rec.canvas;
+    }
+
+    async function ensureEntrySprites(entries) {
+      if (!Array.isArray(entries)) return;
+      const tasks = [];
+      for (const entry of entries) {
+        if (!entry?.model) continue;
+        getOrBakeEntrySprite(entry);
+        const rec = entrySpriteCache.get(entrySpriteKey(entry));
+        if (rec?.promise && !rec.canvas) tasks.append ? tasks.append(rec.promise) : tasks.push(rec.promise);
+      }
+      if (tasks.length) await Promise.all(tasks);
+    }
+
+    function getStampCanvas(key, lw, lh, pxScale, paintFn) {
+      if (!doc?.createElement) return null;
+      const scale = Math.max(1, Math.min(4, Math.ceil((pxScale || 1) * 2) / 2));
+      const fullKey = `${key}@${scale}`;
+      const hit = stampSprites.get(fullKey);
+      if (hit) {
+        stampSprites.delete(fullKey);
+        stampSprites.set(fullKey, hit);
+        return hit;
+      }
+      const c = doc.createElement('canvas');
+      const pw = Math.max(1, Math.ceil(lw * scale));
+      const ph = Math.max(1, Math.ceil(lh * scale));
+      c.width = pw; c.height = ph;
+      const g = c.getContext?.('2d');
+      if (!g || typeof g.save !== 'function') return null;
+      g.setTransform(scale, 0, 0, scale, 0, 0);
+      paintFn(g, lw, lh, scale);
+      const item = { key: fullKey, canvas: c, lw, lh };
+      stampSprites.set(fullKey, item);
+      if (stampSprites.size > 96) stampSprites.delete(stampSprites.keys().next().value);
+      return item;
+    }
+
+    function releaseViewGpu(targetView) {
+      if (!targetView) return;
+      if (targetView._webgl) {
+        targetView._webgl.dispose(Boolean(targetView.exporting));
+        ownedGpuViews.delete(targetView);
+        targetView._webgl = null;
+      }
+      if (targetView.canvas) targetView.canvas._webglComposite = false;
+      if (targetView._fallbackCanvas) {
+        targetView._fallbackCanvas.width = targetView._fallbackCanvas.height = 0;
+        targetView._fallbackCanvas.remove?.();
+        targetView._fallbackCanvas = null;
+      }
+    }
+
+    function resolveRendererBackend(view) {
+      const wantCanvas2D = forceCanvas2DOption
+        || Boolean(bench?.flags.forceCanvas2D)
+        || (typeof root.location === 'object' && /[?&]renderer=canvas\b/i.test(root.location?.search || ''));
+
+      if (!wantCanvas2D && webglApi?.createSceneRenderer && view?.canvas && typeof view.canvas.getContext === 'function') {
+        // Respect pre-bound mock 2D contexts in unit tests unless canvas has not been locked to 2D
+        if (!view._webglTried && !view._prebound2D) {
+          if (view.ctx) {
+            view._prebound2D = true;
+          } else {
+            view._webglTried = true;
+            try {
+              const gpu = webglApi.createSceneRenderer(view.canvas, {
+                alpha: !view.videoFrame,
+                preserveDrawingBuffer: Boolean(view.exporting),
+                enableGpuTimer: Boolean(bench || deps.enableGpuTimer),
+                onContextLost: () => onAssetLoad?.(),
+                onContextRestored: () => onAssetLoad?.()
+              });
+              if (gpu) {
+                view._webgl = gpu;
+                ownedGpuViews.add(view);
+              }
+            } catch {
+              view._webgl = null;
+            }
+          }
+        }
+      }
+
+      const gpu = !wantCanvas2D && view?._webgl && !view._webgl.isLost ? view._webgl : null;
+      const rinkWrap = !view?.field ? getRinkWrap() : null;
+      const skaters = getSkaters();
+      const skatersParent = skaters?.[0]?.parentElement || (doc?.getElementById ? doc.getElementById('skaters') : null);
+
+      if (gpu) {
+        view.canvas._webglComposite = true;
+        if (view.canvas.style && view.canvas.style.visibility === 'hidden') view.canvas.style.visibility = '';
+        if (view._fallbackCanvas) {
+          view._fallbackCanvas.hidden = true;
+          if (view._fallbackCanvas.width) view._fallbackCanvas.width = view._fallbackCanvas.height = 0;
+        }
+        if (!view.field && skatersParent?.style && skatersParent.style.display !== 'none') {
+          skatersParent.style.display = 'none';
+        }
+        if (view.badgeCanvas?.style && view.badgeCanvas.style.display !== 'none') {
+          view.badgeCanvas.style.display = 'none';
+          if (view.badgeCanvas.width) { view.badgeCanvas.width = 0; view.badgeCanvas.height = 0; }
+        }
+        return gpu;
+      }
+
+      if (view?.canvas) view.canvas._webglComposite = false;
+      if (!view?.field && skatersParent?.style) {
+        const nextDisp = bench?.flags.noDomSkaters ? 'none' : '';
+        if (skatersParent.style.display !== nextDisp) skatersParent.style.display = nextDisp;
+      }
+      if (view?.badgeCanvas?.style && view.badgeCanvas.style.display === 'none') {
+        view.badgeCanvas.style.display = '';
+      }
+
+      if (view && view.canvas?.getContext) {
+        if (!view._webgl && !view.ctx) {
+          view.ctx = view.canvas.getContext('2d');
+        }
+        if (view._webgl && doc?.createElement) {
+          // Canvas previously owned a WebGL2 context (lost or runtime A/B switched to Canvas 2D)
+          if (!view._fallbackCanvas) {
+            const fb = doc.createElement('canvas');
+            fb.className = 'rink-fallback';
+            if (fb.style) fb.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;display:block;';
+            fb.setAttribute?.('aria-hidden', 'true');
+            if (rinkWrap?.insertBefore) rinkWrap.insertBefore(fb, view.canvas.nextSibling || null);
+            view._fallbackCanvas = fb;
+          }
+          view._fallbackCanvas.hidden = false;
+          if (view.canvas.style) view.canvas.style.visibility = 'hidden';
+          view._fallbackCtx ||= view._fallbackCanvas.getContext('2d');
+        }
+      }
+      if (view?._fallbackCanvas && !view._fallbackCanvas.hidden && view._fallbackCtx) {
+        view._active2dCanvas = view._fallbackCanvas;
+        view.ctx = view._fallbackCtx;
+      } else {
+        view._active2dCanvas = view?.canvas || null;
+      }
+      return null;
+    }
+
     function dispose() {
       themeObserver?.disconnect();
       themeObserver = null;
       if (darkMedia && onDarkChange) darkMedia.removeEventListener?.('change', onDarkChange);
       darkMedia = null; onDarkChange = null;
+      for (const v of Array.from(ownedGpuViews)) releaseViewGpu(v);
+      stampSprites.clear();
+      entrySpriteCache.clear();
       stopFanfare();
       quench();
     }
@@ -2056,12 +2262,11 @@
       return k;
     }
 
-    function strokeDecimatedPathRange(ctx, points, start, end) {
-      if (end <= start) return;
+    function collectDecimatedPoints(points, start, end) {
+      if (end <= start) return null;
       let lx = points[start].x, ly = points[start].y;
-      let ux = 0, uy = 0, hasDir = false, segments = 0;
-      ctx.beginPath();
-      ctx.moveTo(lx, ly);
+      let ux = 0, uy = 0, hasDir = false;
+      const out = [{ x: lx, y: ly }];
       for (let i = start + 1; i < end; i++) {
         const px = points[i].x, py = points[i].y;
         const dx = px - lx, dy = py - ly;
@@ -2080,18 +2285,23 @@
             if ((ux * dirX + uy * dirY) > 0.9995 && nextAligned) continue;
           }
         }
-        ctx.lineTo(px, py);
+        out.push({ x: px, y: py });
         const inv = 1 / Math.sqrt(d2);
         ux = dx * inv; uy = dy * inv; hasDir = true;
         lx = px; ly = py;
-        segments++;
       }
       const ex = points[end].x, ey = points[end].y;
-      if ((ex - lx) * (ex - lx) + (ey - ly) * (ey - ly) >= 0.01) {
-        ctx.lineTo(ex, ey);
-        segments++;
-      }
-      if (segments > 0) ctx.stroke();
+      if ((ex - lx) * (ex - lx) + (ey - ly) * (ey - ly) >= 0.01) out.push({ x: ex, y: ey });
+      return out.length >= 2 ? out : null;
+    }
+
+    function strokeDecimatedPathRange(ctx, points, start, end) {
+      const dec = collectDecimatedPoints(points, start, end);
+      if (!dec) return;
+      ctx.beginPath();
+      ctx.moveTo(dec[0].x, dec[0].y);
+      for (let i = 1; i < dec.length; i++) ctx.lineTo(dec[i].x, dec[i].y);
+      ctx.stroke();
     }
 
     function paintPrediction(prediction, home, away) {
@@ -3226,6 +3436,1415 @@
       if (!isReducedMotion()) getEffects().shake = shakeLevel;
     }
 
+    function drawSceneWebGL(gpu, view, fx, phase, playback, fieldPlans, width, height, isCollectionPortrait, colors) {
+      const { primary, text, home, away, border, surface, background } = colors;
+      const pxScale = Math.max(0.5, Math.min(4, (view.videoFrame ? view.videoFrame.width / view.videoFrame.logW : (width || 1000) / 1000)));
+      const noBlur = Boolean(bench?.flags.noGlowBlur);
+      const reduced = isReducedMotion();
+      const skaters = getSkaters();
+
+      const resolveSkaterArt = i => {
+        const entry = view.entries?.[i];
+        const liveNode = skaters?.[i];
+        const child = liveNode?.firstChild || liveNode?.querySelector?.('canvas,img') || null;
+        if (child && (!view.exporting || !entry)) {
+          const tag = child.tagName;
+          if (tag === 'CANVAS' && child.width > 0 && child.height > 0) return child;
+          if (tag === 'IMG' && child.complete && child.naturalWidth > 0) return child;
+        }
+        return entry ? getOrBakeEntrySprite(entry) : null;
+      };
+
+      const drawBallGlyph = (bx, by, radius, rot, hot, paceTeam) => {
+        const size = radius * 1.7;
+        gpu.pushTransform();
+        gpu.translate(bx, by);
+        gpu.rotate(rot);
+        if (hot && paceTeam !== undefined && paceTeam >= 0) {
+          const tc = paceTeam === 0 ? home : away;
+          const face = getStampCanvas(`ballFace:${tc}`, 64, 64, pxScale, g => {
+            g.translate(32, 32);
+            drawBallFace(g, 56, tc, tc);
+          });
+          if (face) {
+            const drawSz = size * (64 / 56);
+            gpu.drawTexture(face.key, face.canvas, -drawSz / 2, -drawSz / 2, drawSz, drawSz, 1);
+          }
+        } else if (ballMark?.complete && ballMark.naturalWidth) {
+          gpu.drawTexture('asset:ballMark', ballMark, -size / 2, -size / 2, size, size, 1);
+        } else {
+          const face = getStampCanvas('ballFace:default', 64, 64, pxScale, g => {
+            g.translate(32, 32);
+            drawBallFace(g, 56, '#F8F7F4', '#FF7197');
+          });
+          if (face) {
+            const drawSz = size * (64 / 56);
+            gpu.drawTexture(face.key, face.canvas, -drawSz / 2, -drawSz / 2, drawSz, drawSz, 1);
+          }
+        }
+        gpu.popTransform();
+      };
+
+      if (isCollectionPortrait) {
+        const { length = 1000, viewTop = 0, viewSpan = 1000 } = view.collectionPortrait;
+        const L = Math.max(1000, Number(length) || 1000);
+        const safeSpan = Math.max(1, viewSpan);
+        if (!gpu.beginFrame(width, height, 600, safeSpan, 0, viewTop, false)) return null;
+
+        const topY = 60, bottomY = L - 60, boardH = bottomY - topY;
+        const visMin = viewTop - 130, visMax = viewTop + safeSpan + 130;
+        const creaseR = ububallMatch.FOULS.crease;
+        const zoneOffset = ububallMatch.attackZoneLine(P, 0) - P.rink.left;
+        const step = 500 - (topY + zoneOffset);
+
+        // Portrait rounded rink surface & border
+        gpu.fillRoundRect(300, topY + boardH * 0.5, 480, boardH, 100, surface, 1, 0);
+        gpu.fillRoundRect(300, topY + boardH * 0.5, 480, boardH, 100, border, 1, 4);
+
+        gpu.setClip(3, L);
+        if (topY + creaseR >= visMin && topY <= visMax) {
+          // Dashed top crease arc
+          const segs = 16;
+          for (let s = 0; s < segs; s += 2) {
+            gpu.strokeArc(300, topY, creaseR, (s / segs) * Math.PI, ((s + 0.45) / segs) * Math.PI, border, 2, 1, false);
+          }
+        }
+        if (bottomY >= visMin && bottomY - creaseR <= visMax) {
+          const segs = 16;
+          for (let s = 0; s < segs; s += 2) {
+            gpu.strokeArc(300, bottomY, creaseR, Math.PI + (s / segs) * Math.PI, Math.PI + ((s + 0.45) / segs) * Math.PI, border, 2, 1, false);
+          }
+        }
+
+        const firstY = topY + zoneOffset;
+        const kStart = Math.max(0, Math.floor((visMin - firstY) / step));
+        const kEnd = Math.max(-1, Math.ceil((Math.min(visMax, bottomY - creaseR) - firstY) / step));
+        for (let k = kStart; k <= kEnd; k++) {
+          const y = firstY + k * step;
+          const isCenter = (k % 2) === 1;
+          const clearY = isCenter ? bottomY - (creaseR + 90) : bottomY - zoneOffset;
+          if (y > clearY + 24) continue;
+          const alpha = Math.max(0, Math.min(1, y > clearY ? (clearY + 24 - y) / 24 : 1));
+          gpu.strokeLine(60, y, 540, y, border, 2, alpha, false, 6, 10);
+          if (isCenter) {
+            gpu.fillCircle(300, y, 70, surface, alpha);
+            gpu.strokeCircle(300, y, 70, border, 2, alpha);
+            if (rinkLogo?.complete && rinkLogo.naturalWidth) {
+              const lw = 110, lh = lw * rinkLogo.naturalHeight / rinkLogo.naturalWidth;
+              gpu.drawTexture('asset:rinkLogo', rinkLogo, 300 - lw / 2, y - lh / 2, lw, lh, 0.08 * alpha);
+            }
+          }
+        }
+        gpu.setClip(0);
+
+        const depth = P.rink.goalDepth;
+        if (topY >= visMin && topY - depth <= visMax) {
+          gpu.fillRect(230, topY - depth, 140, depth, background, 1);
+          gpu.strokeLine(230, topY, 230, topY - depth, away, 4, 1, false);
+          gpu.strokeLine(370, topY, 370, topY - depth, away, 4, 1, false);
+          gpu.strokeLine(230, topY - depth, 370, topY - depth, away, 4, 1, false);
+        }
+        if (bottomY + depth >= visMin && bottomY <= visMax) {
+          gpu.fillRect(230, bottomY, 140, depth, background, 1);
+          gpu.strokeLine(230, bottomY, 230, bottomY + depth, home, 4, 1, false);
+          gpu.strokeLine(370, bottomY, 370, bottomY + depth, home, 4, 1, false);
+          gpu.strokeLine(230, bottomY + depth, 370, bottomY + depth, home, 4, 1, false);
+        }
+
+        if (!view.castHidden) {
+          view.bodies.slice(0, 6).forEach((b, i) => {
+            const px = b.y, py = 1000 - b.x;
+            const reachR = Math.max(b.radius, b.reach || b.radius, 18);
+            const teamCol = i < 3 ? home : away;
+            if (!b.carded) gpu.strokeCircle(px, py, reachR + 2, teamCol, 4, 1);
+            const art = resolveSkaterArt(i);
+            const alpha = b.carded ? 0.3 : 1;
+            const sz = b.radius * 2;
+            if (art) {
+              gpu.pushTransform();
+              gpu.translate(px, py);
+              gpu.rotate(b.rotation - Math.PI / 2);
+              gpu.drawTexture(null, art, -sz / 2, -sz / 2, sz, sz, alpha);
+              gpu.popTransform();
+            } else {
+              gpu.fillCircle(px, py, b.radius, view.entries?.[i]?.model?.attributes?.background?.hex || teamCol, alpha);
+            }
+          });
+          const ball = view.bodies[6];
+          if (ball) {
+            const bx = ball.y, by = 1000 - ball.x;
+            gpu.fillCircle(bx, by, ball.radius, background, 1);
+            gpu.strokeCircle(bx, by, ball.radius, text, 2, 1);
+            drawBallGlyph(bx, by, ball.radius, ball.rotation - Math.PI / 2, false, -1);
+          }
+        }
+        gpu.endFrame();
+        return { width, height, colors };
+      }
+
+      // Compute active heat refraction sources up front so non-heat frames skip the scene FBO copy entirely
+      const heatSources = [];
+      if (!view.castHidden && !reduced && !bench?.flags.noMirage) {
+        if (fx.fireWarp && fx.fireWarp.life > 0) {
+          const fw = fx.fireWarp;
+          const wp = 1 - Math.max(0, fw.life / fw.duration);
+          const fade = (1 - wp) ** 1.15;
+          const mirageR = 46 + wp * 44;
+          const wMul = bench?.warpScale ?? 1;
+          if (fade * wMul > 0.02) heatSources.push({ x: fw.x, y: fw.y, radius: mirageR, strength: fade * wMul, time: wp, isImpact: true });
+        }
+        const heatBall = view.bodies[6];
+        if (heatBall && ballOnFire()) {
+          const fwNear = fx.fireWarp && fx.fireWarp.life > 0 && Math.hypot(heatBall.x - fx.fireWarp.x, heatBall.y - fx.fireWarp.y) < 32;
+          if (!fwNear) {
+            const mirageR = Math.max(38, (heatBall.radius || 14) * 2.9);
+            const wMul = bench?.warpScale ?? 1;
+            if (wMul > 0.02) heatSources.push({ x: heatBall.x, y: heatBall.y, radius: mirageR, strength: 0.75 * wMul, time: fx.heatTime || 0, isImpact: false });
+          }
+        }
+      }
+
+      const vf = view.videoFrame || null;
+      const frameW = vf ? vf.width : width;
+      const frameH = vf ? vf.height : height;
+      const logW = vf ? vf.logW : 1000;
+      const logH = vf ? vf.logH : 600;
+      const offX = vf ? vf.offX : 0;
+      const offY = vf ? vf.offY : 0;
+      if (!gpu.beginFrame(frameW, frameH, logW, logH, offX, offY, heatSources.length > 0, vf ? background : null)) return null;
+
+      // 1. Baked static rink surface texture (invalidated only on resize, theme change, or logo load)
+      const logoReady = Boolean(rinkLogo?.complete && rinkLogo.naturalWidth);
+      const rinkKey = `${width},${height},${logoReady ? 1 : 0}${JSON.stringify(colors)}`;
+      if (fx.rinkCache?.key !== rinkKey && doc?.createElement) {
+        const layer = fx.rinkCache?.layer || doc.createElement('canvas');
+        layer.width = width; layer.height = height;
+        const lctx = layer.getContext('2d');
+        lctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0);
+        lctx.clearRect(0, 0, 1000, 600);
+        drawRinkSurface(lctx, P, ububallMatch, colors, rinkLogo);
+        fx.rinkCache = { key: rinkKey, layer, gen: ++rinkCacheGen };
+      }
+      if (fx.rinkCache?.layer) {
+        gpu.drawTexture('rinkSurface', fx.rinkCache.layer, 0, 0, 1000, 600, 1, 0, fx.rinkCache.gen || 1);
+      }
+
+      if (view.castHidden) {
+        gpu.endFrame();
+        return { width, height, colors };
+      }
+
+      // 2. Field underlays (kickoffGlow, feathered skids & warm umber-to-soot burns, Pulse tint, danger glow)
+      if (fx.kickoffGlow > 0) {
+        const kr = 70 + (1 - fx.kickoffGlow) * 10;
+        if (!noBlur) gpu.strokeCircle(500, 300, kr, primary, 11, fx.kickoffGlow * 0.28);
+        gpu.strokeCircle(500, 300, kr, primary, 3, fx.kickoffGlow);
+      }
+      if (fx.skids.length || fx.burns.length) {
+        const hardIce = Boolean(bench?.flags.noIceShadow);
+        gpu.setClip(1);
+        for (const s of fx.skids) {
+          if (!s.points || s.points.length < 2) continue;
+          const t = Math.min(1, Math.max(0, s.age / SKID_LIFE));
+          const fade = 1 - t * t * (3 - 2 * t);
+          const thin = 0.6 + 0.4 * fade;
+          if (fade > 0.005) gpu.drawSoftRibbon(s.points, p => s.width * 0.85 * (0.4 + 0.6 * p.depth) * thin, false, fade, hardIce);
+        }
+        for (const s of fx.burns) {
+          const t = Math.min(1, Math.max(0, s.age / BURN_LIFE));
+          const fade = 1 - t * t * (3 - 2 * t);
+          if (fade <= 0.005) continue;
+          if (s.poof) {
+            const r = s.radius || 30;
+            gpu.drawRadialStops(s.x, s.y, r, [
+              [0.00, `rgba(0, 0, 0, ${(0.82 * fade).toFixed(3)})`],
+              [0.35, `rgba(12, 5, 2, ${(0.75 * fade).toFixed(3)})`],
+              [0.65, `rgba(45, 18, 6, ${(0.55 * fade).toFixed(3)})`],
+              [0.85, `rgba(45, 18, 6, ${(0.25 * fade).toFixed(3)})`],
+              [1.00, 'rgba(45, 18, 6, 0)']
+            ], 1, 24);
+          } else if (s.points && s.points.length >= 2) {
+            gpu.drawSoftRibbon(s.points, p => s.width * (0.5 + 0.5 * p.depth), true, fade, hardIce);
+          }
+        }
+        gpu.setClip(0);
+      }
+      if (phase === 'plan' && pulseMode() && !P.settled(view.bodies)) {
+        gpu.setClip(1);
+        gpu.fillRect(60, 60, 880, 480, 'rgba(120,170,255,0.07)', 1);
+        gpu.setClip(0);
+      }
+      fx.danger.forEach((glow, side) => {
+        if (glow < 0.02) return;
+        const x = side ? 940 : 60, col = side ? away : home;
+        const a = Math.min(1, glow) * 0.4;
+        if (!noBlur) gpu.strokeLine(x, 230, x, 370, col, 13, a * 0.35);
+        gpu.strokeLine(x, 230, x, 370, col, 5, a);
+      });
+
+      // 3. Foul Focus Inspector (when foul dialog is open)
+      const foulInfo = !view.field ? getFoulInfo() : null;
+      if (foulInfo) {
+        const foulsCur = getFouls(), amber = '#ffb020';
+        const drawFocusLabel = (words, lx, ly) => {
+          const st = getStampCanvas(`foulFocus:${words}`, 132, 28, pxScale, g => {
+            g.translate(66, 14);
+            g.font = '800 14px system-ui, sans-serif';
+            g.textAlign = 'center'; g.textBaseline = 'middle';
+            g.lineWidth = 4; g.strokeStyle = '#101217'; g.strokeText(words, 0, 0);
+            g.fillStyle = amber; g.fillText(words, 0, 0);
+          });
+          if (!st) return;
+          gpu.pushTransform();
+          gpu.translate(lx, ly);
+          if (view.portrait) gpu.rotate(Math.PI / 2);
+          gpu.drawTexture(st.key, st.canvas, -st.lw / 2, -st.lh / 2, st.lw, st.lh, 1);
+          gpu.popTransform();
+        };
+        const ubus = view.bodies.slice(0, 6);
+        const drawRingList = (list, dashed) => {
+          for (const b of list) {
+            gpu.strokeCircle(b.x, b.y, Math.max(b.radius, b.reach || b.radius) + 7, dashed ? text : amber, 2.5, 1, dashed ? 4 : 0, dashed ? 5 : 0);
+          }
+        };
+        if (foulInfo.kind === 'crease') {
+          const t = foulInfo.team, mouth = t ? 940 : 60, zone = ububallMatch.attackZoneLine(P, t), from = t ? Math.PI / 2 : -Math.PI / 2;
+          gpu.setClip(1);
+          gpu.fillRect(Math.min(mouth, zone), 60, Math.abs(zone - mouth), 480, amber, 0.10);
+          gpu.setClip(0);
+          gpu.strokeLine(zone, 60, zone, 540, amber, 2, 0.8);
+          gpu.fillArcSector(mouth, 300, ububallMatch.FOULS.crease, from, from + Math.PI, amber, 0.22, 24);
+          gpu.strokeArc(mouth, 300, ububallMatch.FOULS.crease, from, from + Math.PI, amber, 2, 0.9);
+          gpu.strokeLine(mouth, 300 - ububallMatch.FOULS.crease, mouth, 300 + ububallMatch.FOULS.crease, amber, 2, 0.9);
+          drawFocusLabel('Attack zone', (mouth + zone) / 2, view.portrait ? 112 : 80);
+          drawFocusLabel('Crease', mouth + (t ? -40 : 40), 300 - ububallMatch.FOULS.crease - 16);
+          drawRingList(ubus.filter(b => b.team === t && isCreasing(b, t)), false);
+          drawRingList(ubus.filter(b => b.team === 1 - t && ububallMatch.inAttackZone(P, b, t)), true);
+        } else {
+          const c = foulsCur.corner ?? 0, cx = c % 2 ? 840 : 60, cy = c > 1 ? 440 : 60;
+          gpu.setClip(1);
+          gpu.fillRect(cx, cy, 100, 100, amber, 0.16);
+          gpu.setClip(0);
+          gpu.strokeLine(c % 2 ? 840 : 160, cy, c % 2 ? 840 : 160, cy + 100, amber, 2, 0.8, false, 6, 6);
+          gpu.strokeLine(cx, c > 1 ? 440 : 160, cx + 100, c > 1 ? 440 : 160, amber, 2, 0.8, false, 6, 6);
+          drawFocusLabel('Corner', c % 2 ? 790 : 210, c > 1 ? 430 : 170);
+          const [hList, aList] = cornerTeams(foulsCur);
+          drawRingList(hList, hList.length <= aList.length);
+          drawRingList(aList, aList.length <= hList.length);
+        }
+      }
+
+      // 4. Planning trajectories, ignition markers, goal beacons, and pulsing goal glow
+      if (phase === 'plan' && !bench?.flags.noPredictAll) {
+        const key = predictionKey();
+        const t0 = bench?.rec ? clockNow() : 0;
+        if (predictionCache?.key !== key) {
+          const data = P.predictTurn(view.bodies, getPlans());
+          predictionCache = { key, data, fouls: predictFouls(data) };
+        }
+        const t1 = bench?.rec ? clockNow() : 0;
+        if (!bench?.flags.noPredictLayer) {
+          const pred = predictionCache.data;
+          pred.paths.forEach((points, index) => {
+            if (points.length < 2) return;
+            const x0 = points[0].x, y0 = points[0].y;
+            let moved = false;
+            for (let i = 1; i < points.length; i++) {
+              const dx = points[i].x - x0, dy = points[i].y - y0;
+              if (dx * dx + dy * dy > 0.64) { moved = true; break; }
+            }
+            if (!moved) return;
+            const isBall = view.bodies[index].team === -1;
+            const col = isBall ? '#f2efe9' : view.bodies[index].team === 0 ? home : away;
+            const baseAlpha = isBall ? 0.9 : 0.65;
+            const lw = isBall ? 2.5 : 2;
+            const dLen = isBall ? 3 : 4;
+
+            let splitIdx = 0;
+            while (splitIdx < points.length && pred.horizon - points[splitIdx].tick >= 240) splitIdx++;
+            const solidEnd = Math.min(points.length - 1, splitIdx);
+            if (solidEnd >= 1) {
+              const dec = collectDecimatedPoints(points, 0, solidEnd);
+              if (dec) gpu.strokePolyline(dec, col, lw, baseAlpha, dLen, 4);
+            }
+            if (solidEnd < points.length - 1) {
+              const remaining = points.length - 1 - solidEnd;
+              const BUCKETS = 5, step = Math.ceil(remaining / BUCKETS);
+              for (let b = 0; b < BUCKETS; b++) {
+                const start = solidEnd + b * step;
+                if (start >= points.length - 1) break;
+                const end = Math.min(points.length - 1, start + step);
+                const midTick = points[Math.floor((start + end) / 2)].tick;
+                const fade = Math.max(0, Math.min(1, (pred.horizon - midTick) / 240));
+                const dec = collectDecimatedPoints(points, start, end);
+                if (dec) gpu.strokePolyline(dec, col, lw, fade * baseAlpha, dLen, 4);
+              }
+            }
+          });
+
+          const endTick = pulseMode() ? ububallMatch.turnTicks(view.mode) : 0;
+          if (endTick) {
+            pred.paths.forEach((points, index) => {
+              const k = points.findIndex(p => p.tick >= endTick);
+              if (k < 1) return;
+              const from = points[k - 1], to = points[k], dx = to.x - from.x, dy = to.y - from.y, d = Math.hypot(dx, dy);
+              if (!d) return;
+              const u = (endTick - from.tick) / (to.tick - from.tick), x = from.x + dx * u, y = from.y + dy * u;
+              const isBall = view.bodies[index].team === -1, half = isBall ? 6 : 8, nx = -dy / d * half, ny = dx / d * half;
+              gpu.strokeLine(x - nx, y - ny, x + nx, y + ny, isBall ? '#f2efe9' : view.bodies[index].team === 0 ? home : away, 2.5, isBall ? 0.95 : 0.8);
+            });
+          }
+
+          if (pred.ignition) {
+            const { x, y, team } = pred.ignition;
+            const ic = team === 1 ? away : home;
+            const st = getStampCanvas(`ignite:${ic}`, 30, 30, pxScale, g => {
+              g.translate(3, 3);
+              g.fillStyle = ic; g.strokeStyle = '#ffffff'; g.lineWidth = 1.5; g.lineJoin = 'round';
+              g.fill(IGNITION_FLAME); g.stroke(IGNITION_FLAME);
+            });
+            if (st) {
+              gpu.pushTransform();
+              gpu.translate(x, y);
+              if (view.portrait) gpu.rotate(Math.PI / 2);
+              gpu.drawTexture(st.key, st.canvas, -15, -15, 30, 30, 0.95);
+              gpu.popTransform();
+            }
+          }
+
+          if (pred.goalTargets) {
+            for (const target of pred.goalTargets) {
+              if (target.team >= 0 && !pred.paths[target.index].some(p => Math.hypot(p.x - pred.paths[target.index][0].x, p.y - pred.paths[target.index][0].y) > 3)) continue;
+              const col = target.team < 0 ? '#f2efe9' : target.team === 0 ? home : away;
+              const st = getStampCanvas(`target:${col}`, 24, 24, pxScale, g => {
+                g.translate(12, 12);
+                g.beginPath(); g.arc(0, 0, 7.5, 0, Math.PI * 2); g.fillStyle = 'rgba(11, 13, 16, 0.75)'; g.fill();
+                g.scale(13 / 24, 13 / 24); g.translate(-12, -12);
+                g.lineWidth = 1.8; g.lineCap = g.lineJoin = 'round'; g.strokeStyle = col; g.stroke(TARGET_ICON);
+              });
+              if (st) {
+                gpu.pushTransform();
+                gpu.translate(target.x, target.y);
+                if (view.portrait) gpu.rotate(Math.PI / 2);
+                gpu.drawTexture(st.key, st.canvas, -12, -12, 24, 24, 1);
+                gpu.popTransform();
+              }
+            }
+          }
+
+          for (const stop of pred.stops) {
+            if (!stop.stopped || !pred.paths[stop.index].some(p => Math.hypot(p.x - stop.x, p.y - stop.y) > 3)) continue;
+            if (pred.goalTargets?.some(t => t.index === stop.index && Math.hypot(t.x - stop.x, t.y - stop.y) < 5)) continue;
+            const col = view.bodies[stop.index].team < 0 ? '#ffffff' : view.bodies[stop.index].team === 0 ? home : away;
+            gpu.strokeLine(stop.x - 4, stop.y - 4, stop.x + 4, stop.y + 4, col, 2, 1);
+            gpu.strokeLine(stop.x + 4, stop.y - 4, stop.x - 4, stop.y + 4, col, 2, 1);
+          }
+
+          if (pred.impacts && pred.impacts.length > 0) {
+            gpu.setClip(2);
+            for (const hit of pred.impacts) {
+              const team = view.bodies[hit.index].team;
+              const col = team < 0 ? '#ffffff' : team === 0 ? home : away;
+              const fade = Math.max(0, Math.min(1, (pred.horizon - hit.tick) / 240));
+              gpu.fillCircle(hit.x, hit.y, hit.reach, col, 0.2 * fade);
+            }
+            gpu.setClip(0);
+          }
+
+          // Pulsing predicted goal glow
+          if (pred.goal !== null && pred.goalTick != null) {
+            const defSide = pred.goal === 1 ? 0 : 1;
+            const col = defSide === 0 ? home : away;
+            const arrival = pred.goalTick * P.DT;
+            const horizon = (pred.horizon || 480) * P.DT;
+            const u = Math.max(0, Math.min(1, 1 - arrival / horizon));
+            const freq = 1.2 + 4.3 * u;
+            const pulse = 0.5 + 0.5 * Math.sin((clockNow() / 1000) * Math.PI * 2 * freq);
+            const alpha = Math.min(1, (0.25 + 0.15 * (1 - u)) + ((0.45 + 0.55 * u) - (0.25 + 0.15 * (1 - u))) * pulse);
+            const depth = P.rink.goalDepth;
+            const mouthX = defSide ? 940 : 60, backX = defSide ? 940 + depth : 60 - depth;
+            gpu.fillRect(Math.min(mouthX, backX), 230, depth, 140, col, (0.04 + 0.16 * u) * (0.6 + 0.4 * pulse));
+            const netW = 4 + 3 * u, mouthW = 5 + 4 * u;
+            if (!noBlur) {
+              const glowW = netW + 10 + 10 * u * pulse;
+              gpu.strokeLine(mouthX, 230, backX, 230, col, glowW, alpha * 0.28);
+              gpu.strokeLine(backX, 230, backX, 370, col, glowW, alpha * 0.28);
+              gpu.strokeLine(mouthX, 370, backX, 370, col, glowW, alpha * 0.28);
+              gpu.strokeLine(mouthX, 230, mouthX, 370, col, mouthW + 12, alpha * 0.32);
+            }
+            gpu.strokeLine(mouthX, 230, backX, 230, col, netW, alpha);
+            gpu.strokeLine(backX, 230, backX, 370, col, netW, alpha);
+            gpu.strokeLine(mouthX, 370, backX, 370, col, netW, alpha);
+            gpu.strokeLine(mouthX, 230, mouthX, 370, col, mouthW, alpha);
+          }
+        }
+        if (bench?.rec) {
+          bench.rec.predictSimMs += (t1 - t0);
+          bench.rec.predictPaintMs += (clockNow() - t1);
+        }
+      }
+
+      // 5. Motion trails
+      if (!bench?.flags.noTrails) {
+        gpu.drawTrails(fx.trails, view.bodies, home, away, ballHeat, heatColor);
+      }
+
+      // 6. Turn guides (scene layer) & queue guide badges for post-refraction overlay
+      const activeGuide = playback ? playback.guide : getGuide();
+      const overlayGuideMoves = Boolean(guideShown('moves', activeGuide) && activeGuide);
+      if (guideShown('trails', activeGuide) && activeGuide) {
+        activeGuide.paths.forEach((path, i) => {
+          if (!path || path.length < 2) return;
+          const col = i < 3 ? home : i < 6 ? away : text;
+          const pts = [];
+          for (let k = 0; k < path.length; k += 2) pts.push({ x: path[k], y: path[k + 1] });
+          if (pts.length >= 2) gpu.strokePolyline(pts, col, i < 6 ? 3 : 2, 0.6);
+          gpu.fillCircle(path[0], path[1], i < 6 ? 4 : 3, col, 0.9);
+        });
+      }
+      const drawImpulseWebGL = (body, plan, col) => {
+        if (!plan) return;
+        const arrow = impulseGeometry(P, body, plan);
+        if (!arrow.visible) return;
+        const startX = body.x + Math.cos(plan.angle) * arrow.ringR;
+        const startY = body.y + Math.sin(plan.angle) * arrow.ringR;
+        const endX = arrow.x, endY = arrow.y;
+        const a = plan.guard ? 0.25 : 1;
+        gpu.strokeLine(startX, startY, endX, endY, col, 4, a, true);
+        for (const offset of [-0.55, 0.55]) {
+          gpu.strokeLine(endX, endY, endX - Math.cos(plan.angle + offset) * 14, endY - Math.sin(plan.angle + offset) * 14, col, 4, a, true);
+        }
+      };
+      if (overlayGuideMoves) {
+        activeGuide.start.slice(0, 6).forEach((b, i) => {
+          const plan = activeGuide.moves[i], col = i < 3 ? home : away;
+          gpu.strokeCircle(b.x, b.y, b.radius, col, 2, 0.7, 4, 6);
+          drawImpulseWebGL(b, plan, col);
+        });
+      }
+
+      // Helper for shockwaves (shared by Pass 1 non-overlay and Pass 3 overlay)
+      const drawShockwaveItem = s => {
+        const progress = 1 - Math.max(0, s.life / s.duration);
+        const isSpecial = s.dramatic || s.hipClip || s.check || s.spinStrike || s.koCone;
+        const expand = isSpecial ? 1 - (1 - progress) ** 2.6 : progress;
+        const fade = isSpecial ? (1 - progress) ** 1.25 : 1 - progress;
+        const r = s.currentRadius + (s.maxRadius - s.currentRadius) * expand;
+        const waveColor = s.color || (s.team === 0 ? home : away);
+        const baseW = s.width || (s.overlay ? 4.5 : 6);
+        if (s.koCone) {
+          const dir = s.normalAngle || 0;
+          const halfArc = 0.56 + 0.24 * expand;
+          gpu.strokeArc(s.x, s.y, r, dir - halfArc, dir + halfArc, waveColor, Math.max(1.5, baseW * fade), Math.max(0, fade * 0.92), true);
+          if (fade > 0.2) {
+            gpu.strokeArc(s.x, s.y, Math.max(2, r - 2), dir - halfArc * 0.65, dir + halfArc * 0.65, '#ffffff', Math.max(1, baseW * 0.42 * fade), Math.max(0, fade * 0.85), true);
+          }
+          return;
+        }
+        if (s.spinStrike) {
+          const blades = s.blades || 3, dir = s.spinDir || 1;
+          const rot = (s.startAngle || 0) + dir * (1 - (1 - progress) ** 1.75) * 2.55;
+          const arcSweep = (blades === 3 ? 1.42 : 1.72) * (0.78 + 0.22 * fade) * dir;
+          const bladeW = Math.max(1.4, baseW * (0.45 + 0.55 * fade));
+          const peakAlpha = Math.max(0, fade * 0.94);
+          for (let bIdx = 0; bIdx < blades; bIdx++) {
+            const a0 = rot + (bIdx * Math.PI * 2) / blades;
+            gpu.drawTaperedSpinArc(s.x, s.y, r, a0, arcSweep, bladeW, waveColor, peakAlpha);
+            if (fade > 0.2) {
+              gpu.drawTaperedSpinArc(s.x, s.y, Math.max(2, r - 1.2), a0 + arcSweep * 0.28, arcSweep * 0.68, bladeW * 0.48, '#ffffff', peakAlpha * 0.82);
+            }
+          }
+          return;
+        }
+        if (s.hipClip || s.check) {
+          const secondColor = (s.teamB ?? (1 - s.team)) === 0 ? home : away;
+          const str = s.strength ?? 1;
+          const sweep = s.hipClip ? (s.tangent || 0) + expand * (0.45 + 0.50 * str) : (s.normalAngle || 0);
+          const halfArc = s.hipClip ? (0.32 + 0.50 * str) : (0.28 + 0.48 * str);
+          for (let side = 0; side < 2; side++) {
+            const a0 = sweep + side * Math.PI - halfArc, a1 = sweep + side * Math.PI + halfArc;
+            gpu.strokeArc(s.x, s.y, r, a0, a1, side === 0 ? waveColor : secondColor, Math.max(1.2, baseW * fade), Math.max(0, fade * (0.55 + 0.37 * str)), true);
+            if (fade > 0.2 && str > 0.25) {
+              gpu.strokeArc(s.x, s.y, Math.max(1, r - 1.5), a0 + halfArc * 0.22, a1 - halfArc * 0.14, '#ffffff', Math.max(1, baseW * 0.4 * fade), Math.max(0, fade * 0.8 * str), true);
+            }
+          }
+          return;
+        }
+        if (s.band) {
+          gpu.strokeCircle(s.x, s.y, r, waveColor, Math.max(2, baseW * 2.4 * fade), Math.max(0, fade * 0.28));
+        }
+        gpu.strokeCircle(s.x, s.y, r, waveColor, Math.max(1, baseW * fade), Math.max(0, fade * (s.overlay ? 0.92 : 1)));
+        if (s.band && fade > 0.15) {
+          gpu.strokeCircle(s.x, s.y, Math.max(1, r - baseW * 0.25 * fade), '#ffffff', Math.max(1, baseW * 0.38 * fade), Math.max(0, fade * 0.85));
+        }
+      };
+
+      // 7. Scene-layer shockwaves
+      for (const s of fx.shockwaves) {
+        if (!s.overlay) drawShockwaveItem(s);
+      }
+
+      // 8. Skaters (auras, reach rings, rasterized SVG character textures, warps,cones, magnet beams, arrows)
+      const scoringPlayer = getScoringPlayer();
+      const goalReplay = getGoalReplay();
+      const onlineReplay = getOnlineReplay();
+      const fwActive = fx.fireWarp && fx.fireWarp.life > 0 && !reduced ? fx.fireWarp : null;
+      const koActive = fx.koWarp && fx.koWarp.life > 0 && !reduced ? fx.koWarp : null;
+      const inAction = phase === 'play' || phase === 'replay' || Boolean(goalReplay);
+
+      const drawSuperAuraWebGL = (b, key, reach) => {
+        const [c1, c2] = SUPER_AURA_THEMES[key] || ['#ff7197', '#ff9954'];
+        const level = b.superActive || b.superArm ? 2 : 1;
+        const t = reduced ? 0 : clockNow() / 1000, spin = t * (0.6 + level * 1.2);
+        const ringR = reach + 6 + level * 2;
+        const haloR = ringR + 10 + level * 4 + (reduced ? 0 : Math.sin(t * 3) * 2);
+        if (doc?.createElement) {
+          const glowTex = superGlowSprite(key, doc);
+          gpu.drawTexture(`superGlow:${key}`, glowTex, b.x - haloR, b.y - haloR, haloR * 2, haloR * 2, level === 2 ? 0.45 : 0.22);
+        }
+        if (key === 'shockwave' && b.superActive === 'shockwave' && b.shockwaveFired) {
+          const ringCount = 4, rate = 1.35, startR = reach + 3, maxR = reach + 86, peakAlpha = 0.88;
+          for (let w = 0; w < ringCount; w++) {
+            const p = reduced ? (w + 0.3) / ringCount : (t * rate + w / ringCount) % 1;
+            const ease = 1 - (1 - p) ** 1.65;
+            const r = startR + (maxR - startR) * ease;
+            const alpha = peakAlpha * Math.min(1, p / 0.14) * ((1 - p) ** 1.45);
+            if (alpha <= 0.01) continue;
+            const lw = 4.2 * (1 - p * 0.62);
+            gpu.strokeCircle(b.x, b.y, r, c2, lw * 2.1, alpha * 0.42);
+            gpu.strokeCircle(b.x, b.y, r, w % 2 === 0 ? c1 : '#ffb3c9', lw, alpha);
+          }
+          gpu.strokeCircle(b.x, b.y, ringR, c1, 2.2, 0.7);
+          return;
+        }
+        gpu.strokeCircle(b.x, b.y, ringR, c1, level === 2 ? 2.5 : 2, level === 2 ? 0.75 : 0.55);
+        if (doc?.createElement) {
+          const ringAlpha = level === 2 ? 1 : 0.85;
+          for (const [rad, dir] of level === 2 ? [[ringR, 1], [ringR + 5, -1]] : [[ringR, 1]]) {
+            const lw = level === 2 ? 3.5 : 3;
+            const sprite = conicRingSprite(key, rad, lw, doc), sz = sprite.size;
+            gpu.pushTransform();
+            gpu.translate(b.x, b.y);
+            gpu.rotate(spin * dir);
+            gpu.drawTexture(`conic:${key}:${Math.round(rad)}:${lw}`, sprite, -sz / 2, -sz / 2, sz, sz, ringAlpha);
+            gpu.popTransform();
+          }
+        }
+        if (level === 2 && !reduced) {
+          for (let k = 0; k < 2; k++) {
+            const head = spin * 1.5 + k * Math.PI;
+            for (let s = 4; s >= 0; s--) {
+              const angle = head - s * 0.08;
+              gpu.fillCircle(b.x + Math.cos(angle) * ringR, b.y + Math.sin(angle) * ringR, 2.2 - s * 0.3, s ? (k ? c2 : c1) : '#ffffff', (1 - s / 5) * 0.8);
+            }
+          }
+        }
+      };
+
+      const drawTailgateConeWebGL = (b, draft) => {
+        if (draft <= 0.22 || reduced) return;
+        const speed = Math.hypot(b.vx || 0, b.vy || 0);
+        if (speed < (P.TAILGATE?.minSpeed ?? 110)) return;
+        const heading = Math.atan2(b.vy, b.vx);
+        const reachR = Math.max(b.radius, b.reach || b.radius, 18);
+        const strength = Math.min(1, (draft - 0.22) / 0.72);
+        const t = clockNow() / 1000, phaseShift = (b.playerIndex || 0) * 1.9;
+        const flutter = Math.sin(t * 20 + phaseShift) * 1.2;
+        const r = reachR + 4.5;
+        const noseX = r + 13 + 7 * strength + flutter * 0.6;
+        const backX = -r * 0.88;
+        const wingY = r + 16 + 7 * strength + flutter * 0.9;
+
+        gpu.pushTransform();
+        gpu.translate(b.x, b.y);
+        gpu.rotate(heading);
+
+        const coneSteps = 10;
+        const shroudL = [[noseX, 0]], shroudR = [[noseX, 0]];
+        for (let s = 1; s <= coneSteps; s++) {
+          const u = s / coneSteps;
+          const x = noseX + (backX - noseX) * Math.pow(u, 0.94);
+          const y = wingY * Math.pow(u, 0.72);
+          // Carve inner ring boundary along front arc
+          const ix = Math.min(x, Math.cos((u * 2.32)) * (r + 1.2));
+          const iy = Math.sin(Math.min(Math.PI * 0.74, u * 2.32)) * (r + 1.2);
+          shroudL.push([x, y]);
+          shroudR.push([ix, iy]);
+        }
+        const shroudStops = [
+          [0, `rgba(210, 248, 255, ${(0.28 + 0.22 * strength).toFixed(3)})`],
+          [0.45, `rgba(170, 236, 255, ${(0.14 + 0.14 * strength).toFixed(3)})`],
+          [1, 'rgba(170, 236, 255, 0)']
+        ];
+        gpu.fillRibbonPairsWithLinearGrad(shroudL, shroudR, noseX, 0, backX, 0, shroudStops, 1);
+        gpu.fillRibbonPairsWithLinearGrad(
+          shroudL.map(([x, y]) => [x, -y]),
+          shroudR.map(([x, y]) => [x, -y]),
+          noseX, 0, backX, 0, shroudStops, 1
+        );
+
+        const bladeStops = [
+          [0, `rgba(248, 254, 255, ${(0.65 + 0.3 * strength).toFixed(3)})`],
+          [0.5, `rgba(182, 240, 255, ${(0.36 + 0.24 * strength).toFixed(3)})`],
+          [1, 'rgba(182, 240, 255, 0)']
+        ];
+        for (const sign of [-1, 1]) {
+          const outerPts = [], innerPts = [];
+          for (let s = 0; s <= coneSteps; s++) {
+            const u = s / coneSteps;
+            const x = noseX + (backX - noseX) * Math.pow(u, 0.94);
+            const y = sign * wingY * Math.pow(u, 0.72);
+            const w = (2.8 + 1.3 * strength) * (1 - u * 0.92) * (u < 0.1 ? 0.5 + 0.5 * (u / 0.1) : 1);
+            outerPts.push([x + w * 0.2, y + sign * w * 0.5]);
+            innerPts.push([x - w * 0.35, y - sign * w * 0.5]);
+          }
+          gpu.fillRibbonPairsWithLinearGrad(outerPts, innerPts, noseX, 0, backX, 0, bladeStops, 1);
+
+          const innerNoseX = r + 5.5 + 2.5 * strength - flutter * 0.4;
+          const innerBackX = -r * 0.48;
+          const innerWingY = r + 8.5 + 3 * strength;
+          const iOut = [], iIn = [];
+          for (let s = 0; s <= 7; s++) {
+            const u = s / 7;
+            const x = innerNoseX + (innerBackX - innerNoseX) * u;
+            const y = sign * (2.5 + (innerWingY - 2.5) * Math.pow(u, 0.65));
+            const w = (1.5 + 0.7 * strength) * (1 - u);
+            iOut.push([x, y + sign * w * 0.5]);
+            iIn.push([x, y - sign * w * 0.5]);
+          }
+          gpu.fillRibbonPairsWithLinearGrad(iOut, iIn, noseX, 0, backX, 0, bladeStops, 1);
+        }
+        gpu.popTransform();
+      };
+
+      const badgeOverlayQueue = [];
+
+      view.bodies.slice(0, 6).forEach((b, i) => {
+        const reachR = Math.max(b.radius, b.reach || b.radius, 18);
+        const isSuperReady = (b.meter >= 100) || Boolean(b.superArm) || Boolean(b.superActive);
+        const isFwWarped = Boolean(fwActive && fwActive.ubuIndex === i);
+        const isKoWarped = Boolean(koActive && (koActive.attackerIdx === i || koActive.targetIdx === i));
+        const ubuWarped = isFwWarped || isKoWarped;
+        let ubuWarpAngle = 0, ubuScaleX = 1, ubuScaleY = 1;
+        if (ubuWarped) {
+          const wSrc = isKoWarped ? koActive : fwActive;
+          const wp = 1 - Math.max(0, wSrc.life / wSrc.duration);
+          const env = (1 - wp) * Math.cos(wp * Math.PI * 2.2);
+          const amt = env * (isKoWarped ? (koActive.targetIdx === i ? 0.08 : 0.055) : 0.065);
+          ubuScaleX = 1 - amt;
+          ubuScaleY = 1 + amt;
+          ubuWarpAngle = Math.atan2(wSrc.ny || 0, wSrc.nx || 1);
+          gpu.pushTransform();
+          gpu.translate(b.x, b.y);
+          gpu.rotate(ubuWarpAngle);
+          gpu.scale(ubuScaleX, ubuScaleY);
+          gpu.rotate(-ubuWarpAngle);
+          gpu.translate(-b.x, -b.y);
+        }
+
+        if (isSuperReady) {
+          const activeKey = b.superActive || b.equippedSuper?.key || 'stalwart';
+          drawSuperAuraWebGL(b, activeKey, reachR);
+          if (phase === 'plan' && b.superArm && activeKey === 'colossus') {
+            gpu.strokeCircle(b.x, b.y, Math.max(b.baseRadius ?? b.radius, P.SUPER?.colossusRadius || 56.25), '#ffe043cc', 2, 1, 5, 5);
+          }
+          badgeOverlayQueue.push({ kind: 'super', b, key: activeKey });
+        }
+
+        const teamCol = i < 3 ? home : away;
+        if (!b.carded) gpu.strokeCircle(b.x, b.y, reachR + 2, teamCol, 4, 1);
+
+        if ((phase === 'goal' || (onlineReplay?.goalPlayed && phase === 'play')) && b === scoringPlayer) {
+          const goalAccent = b.team === 0 ? home : away;
+          gpu.strokeCircle(b.x, b.y, b.radius + 9, goalAccent, 4, 1);
+          gpu.strokeCircle(b.x, b.y, b.radius + 15, goalAccent, 2, 1);
+        }
+
+        // Render rasterized character sprite inside the GPU scene so heat refraction bends skaters too
+        if (!bench?.flags.noDomSkaters) {
+          const art = resolveSkaterArt(i);
+          const opacity = b.carded ? 0.3 : b.superActive === 'ghost' ? 0.45 : 1;
+          const stunAmt = (b.stunned || b.stunnedNext) && !b.carded ? 1 : 0;
+          const rot = b.rotation + (view.portrait ? Math.PI / 2 : 0);
+          const sz = b.radius * 2;
+          if (art) {
+            gpu.pushTransform();
+            gpu.translate(b.x, b.y);
+            gpu.rotate(rot);
+            gpu.drawTexture(null, art, -sz / 2, -sz / 2, sz, sz, opacity, stunAmt);
+            gpu.popTransform();
+          } else {
+            gpu.fillCircle(b.x, b.y, b.radius, view.entries?.[i]?.model?.attributes?.background?.hex || teamCol, opacity);
+          }
+        }
+
+        if (ubuWarped) gpu.popTransform();
+
+        if (inAction && !b.carded && !reduced) {
+          const draft = P.tailgateFactor ? P.tailgateFactor(view.bodies, b) : 0;
+          if (draft > 0.22) drawTailgateConeWebGL(b, draft);
+        }
+
+        if ((inAction && b.guarding) || (phase === 'plan' && i < 3 && fieldPlans[i]?.guard)) {
+          const iron = phase === 'plan'
+            ? Boolean(predictionCache?.data.guards.some(g => g.index === i && g.held))
+            : Boolean(b.ironGuard);
+          badgeOverlayQueue.push({ kind: 'guard', b, iron });
+        }
+
+        if (b.superActive === 'magnet') {
+          const ball = view.bodies[6];
+          const dx = b.x - ball.x, dy = b.y - ball.y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq < 260 * 260) {
+            const dist = Math.sqrt(distSq) || 1;
+            const closeness = Math.max(0, Math.min(1, 1 - dist / 260));
+            const ux = dx / dist, uy = dy / dist;
+            const px = -uy, py = ux;
+            const animSec = reduced ? 0 : (fx.heatTime || 0);
+            gpu.strokeLine(b.x, b.y, ball.x, ball.y, '#3388ffcc', 2.2 + closeness * 1.1, 1, false, 4, 6);
+            for (let side = -1; side <= 1; side += 2) {
+              const bow = side * (8 + 10 * closeness) * Math.sin(animSec * 6 + side);
+              const mx = (ball.x + b.x) * 0.5 + px * bow;
+              const my = (ball.y + b.y) * 0.5 + py * bow;
+              const qPts = [];
+              for (let s = 0; s <= 12; s++) {
+                const u = s / 12, inv = 1 - u;
+                qPts.push({
+                  x: inv * inv * ball.x + 2 * inv * u * mx + u * u * b.x,
+                  y: inv * inv * ball.y + 2 * inv * u * my + u * u * b.y
+                });
+              }
+              gpu.strokePolyline(qPts, side < 0 ? '#3388ff66' : '#ff334466', 1.5, 1);
+            }
+            const chevCount = 4, pullAng = Math.atan2(dy, dx);
+            for (let c = 0; c < chevCount; c++) {
+              const u = ((c / chevCount) + animSec * (1.8 + 1.4 * closeness)) % 1;
+              if (u < 0.12 || u > 0.88) continue;
+              const cx = ball.x + dx * u, cy = ball.y + dy * u;
+              const fade = Math.sin(u * Math.PI), span = 5.5 + 3.5 * (1 - u);
+              const col = c % 2 === 0 ? '#7ec8ff' : '#ff6b7a';
+              const a = fade * (0.5 + 0.45 * closeness);
+              gpu.pushTransform();
+              gpu.translate(cx, cy);
+              gpu.rotate(pullAng);
+              gpu.strokeLine(-span * 0.75, -span, span * 0.45, 0, col, 2.1, a, true);
+              gpu.strokeLine(span * 0.45, 0, -span * 0.75, span, col, 2.1, a, true);
+              gpu.popTransform();
+            }
+          }
+        }
+        if (i < 3 && phase === 'plan') drawImpulseWebGL(b, fieldPlans[i], home);
+      });
+
+      // Second pass over skater head-top indicators (daze swirl & stun stars) so adjacent skaters never cover them
+      view.bodies.slice(0, 6).forEach(b => {
+        const slow = P.dazeSlow(b);
+        if (slow > 0 && !b.stunned) {
+          const depth = slow / P.DAZE.max, spin = reduced ? 0 : clockNow() / 300;
+          const cx = view.portrait ? b.x + b.radius + 12 : b.x;
+          const cy = view.portrait ? b.y : b.y - b.radius - 12;
+          const pts = [];
+          for (let a = 0; a <= Math.PI * 3.5; a += 0.22) {
+            const r = 1 + a * (0.7 + 0.4 * depth);
+            pts.push({ x: cx + Math.cos(a + spin) * r, y: cy + Math.sin(a + spin) * r });
+          }
+          gpu.strokePolyline(pts, '#c3cbff', 2, 0.55 + 0.45 * depth);
+        }
+        if ((b.stunned || b.stunnedNext) && !b.carded) {
+          const st = getStampCanvas('stunStars', 24, 24, pxScale, g => {
+            g.translate(12, 12);
+            g.scale(18 / 24, 18 / 24);
+            g.translate(-12, -12);
+            g.fillStyle = '#ffe043'; g.strokeStyle = '#101112'; g.lineWidth = 2; g.lineJoin = 'round';
+            g.stroke(STUN_STARS); g.fill(STUN_STARS);
+          });
+          if (st) {
+            gpu.pushTransform();
+            if (view.portrait) {
+              gpu.translate(b.x + b.radius + 14, b.y);
+              gpu.rotate(Math.PI / 2);
+            } else {
+              gpu.translate(b.x, b.y - b.radius - 10);
+            }
+            gpu.drawTexture(st.key, st.canvas, -12, -12, 24, 24, 1);
+            gpu.popTransform();
+          }
+        }
+      });
+
+      // 9. Sticky tether & selected skater ring
+      const holding = P.holder?.(view.bodies);
+      if (holding && view.bodies[6]) {
+        const ball = view.bodies[6];
+        const dx = ball.x - holding.x, dy = ball.y - holding.y, d = Math.hypot(dx, dy);
+        if (d > Math.abs(holding.radius - ball.radius) && d > 0) {
+          const ux = dx / d, uy = dy / d;
+          const c = (holding.radius - ball.radius) / d, t = Math.sqrt(Math.max(0, 1 - c * c));
+          const ends = [-1, 1].map(sign => {
+            const nx = ux * c - sign * uy * t, ny = uy * c + sign * ux * t;
+            return { ax: holding.x + nx * holding.radius, ay: holding.y + ny * holding.radius, bx: ball.x + nx * ball.radius, by: ball.y + ny * ball.radius };
+          });
+          const pulse = reduced ? 0.65 : 0.65 + 0.15 * Math.sin(getElapsed() * 14);
+          gpu.fillQuad(ends[0].ax, ends[0].ay, ends[0].bx, ends[0].by, ends[1].bx, ends[1].by, ends[1].ax, ends[1].ay, '#44dd662b', pulse);
+          for (const e of ends) {
+            if (!reduced && !noBlur) gpu.strokeLine(e.ax, e.ay, e.bx, e.by, '#44dd66', 9, pulse * 0.32, true);
+            gpu.strokeLine(e.ax, e.ay, e.bx, e.by, '#44dd66', 3, pulse, true);
+            gpu.strokeLine(e.ax, e.ay, e.bx, e.by, '#d9ffe3', 1, pulse, true);
+          }
+        }
+      }
+
+      if (phase === 'plan') {
+        const sel = view.bodies[getSelected()];
+        if (sel) gpu.strokeCircle(sel.x, sel.y, sel.radius + 8, text, 2, 1);
+      }
+
+      // 10. Ball & Spin Swirls
+      const drawSpinWebGL = (b, col) => {
+        const spin = Math.abs(b.omega);
+        if (spin < 2.5 || reduced || bench?.flags.noSpin) return;
+        const power = Math.min(1, (spin - 2.5) / 20), arcs = spin >= 8 ? 3 : 2;
+        const dir = Math.sign(b.omega);
+        const sweep = (arcs === 3 ? (1.28 + 0.56 * power) : (1.42 + 0.95 * power)) * dir;
+        for (let k = 0; k < arcs; k++) {
+          const start = b.rotation + k * 2 * Math.PI / arcs;
+          gpu.drawTaperedSpinArc(b.x, b.y, b.radius + 4.5, start, sweep, 1.65 + 2.15 * power, col, Math.min(0.96, 0.36 + 0.58 * power));
+          if (power > 0.30) {
+            gpu.drawTaperedSpinArc(b.x, b.y, b.radius + 9.8, start + sweep * 0.14, sweep * 0.84, 1.15 + 1.15 * power, col, Math.min(0.76, 0.22 + (power - 0.30) * 0.76));
+          }
+        }
+      };
+
+      const ball = view.bodies[6];
+      if (ball) {
+        const fw = fx.fireWarp && fx.fireWarp.life > 0 && !reduced ? fx.fireWarp : null;
+        let warpScaleX = 1, warpScaleY = 1, warpAngle = 0;
+        if (fw) {
+          const wp = 1 - Math.max(0, fw.life / fw.duration);
+          const env = (1 - wp) * Math.cos(wp * Math.PI * 2.2);
+          const amt = env * 0.13;
+          warpScaleX = 1 - amt;
+          warpScaleY = 1 + amt;
+          warpAngle = Math.atan2(fw.ny || 0, fw.nx || 1);
+          const glowFade = (1 - wp) ** 1.3;
+          const burstR = ball.radius * (1.15 + wp * 1.35);
+          gpu.pushTransform();
+          gpu.translate(fw.x, fw.y);
+          gpu.rotate(warpAngle);
+          gpu.scale(1 - (1 - wp) * 0.18, 1 + (1 - wp) * 0.18);
+          gpu.fillCircle(0, 0, burstR, '#ff8c24', 0.28 * glowFade);
+          gpu.strokeCircle(0, 0, burstR, '#fff0a8', Math.max(1, 3.2 * glowFade), 0.72 * glowFade);
+          gpu.popTransform();
+        }
+        gpu.pushTransform();
+        if (fw) {
+          gpu.translate(ball.x, ball.y);
+          gpu.rotate(warpAngle);
+          gpu.scale(warpScaleX, warpScaleY);
+          gpu.rotate(-warpAngle);
+          gpu.translate(-ball.x, -ball.y);
+        }
+        gpu.fillCircle(ball.x, ball.y, ball.radius, background, 1);
+        gpu.strokeCircle(ball.x, ball.y, ball.radius, text, 2, 1);
+        const heat = ballHeat(ball), flare = fx.ballFlare || 0, glow = Math.min(1.35, Math.max(0, heat - 1) / 2 + flare * 0.45);
+        if (glow > 0) {
+          const hc = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat));
+          const ga = Math.min(1, 0.75 * glow);
+          if (!noBlur && doc?.createElement) {
+            const gs = glowSprite(hc, doc);
+            const haloSz = (ball.radius * 2 + (16 + flare * 12) * glow) * 2.2;
+            gpu.drawTexture(`glow:${hc}`, gs, ball.x - haloSz / 2, ball.y - haloSz / 2, haloSz, haloSz, ga * 0.85);
+          }
+          gpu.fillCircle(ball.x, ball.y, ball.radius, hc, ga);
+        }
+        const hot = ballOnFire() || (ball.team === -1 && P.ballOnFire?.(ball));
+        drawBallGlyph(ball.x, ball.y, ball.radius, ball.rotation + (view.portrait ? Math.PI / 2 : 0), hot, ball.strikerTeam);
+        gpu.popTransform();
+
+        view.bodies.slice(0, 6).forEach(b => { if (!b.carded) drawSpinWebGL(b, b.team ? away : home); });
+        drawSpinWebGL(ball, text);
+      }
+
+      // 11. Particles helper (overlay = false in Pass 1 so flames & sparks refract; overlay = true in Pass 3)
+      const drawParticlesWebGL = overlay => {
+        if (bench?.flags.noParticles) return;
+        if (overlay) {
+          for (const f of fx.fireworks) {
+            if ((f.delay || 0) > 0) continue;
+            const cometColor = f.team === 0 ? home : away;
+            if (doc?.createElement) {
+              const gs = glowSprite(cometColor, doc);
+              gpu.drawTexture(`glow:${cometColor}`, gs, f.x - 18, f.y - 18, 36, 36, 0.92);
+            }
+            gpu.strokeLine(f.x - (f.vx || 0) * 0.035, f.y - f.vy * 0.035, f.x, f.y, '#ffe9b0', 2.8, 0.92, true);
+            gpu.fillCircle(f.x, f.y, 2.1, '#ffffff', 0.92);
+          }
+        }
+        const flameDots = [];
+        for (const p of fx.particles) {
+          if (Boolean(p.overlay) !== overlay) continue;
+          const col = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? home : away);
+          const fade = Math.max(0, p.life / p.duration);
+          const shimmer = p.celebration && fade < 0.38 ? 0.55 + 0.45 * Math.sin((p.twinkle || 0) + fade * 38) : 1;
+          const baseAlpha = Math.min(1, fade * 2) * (p.celebration || p.snap ? 0.95 : 0.65) * shimmer;
+          if (p.flash) {
+            if (doc?.createElement) {
+              const sz = (p.flashSize || 170) * fade;
+              const gs = glowSprite(col, doc);
+              gpu.drawTexture(`glow:${col}`, gs, p.x - sz / 2, p.y - sz / 2, sz, sz, fade * 0.85);
+            }
+            continue;
+          }
+          if (p.materialShape) {
+            const sz = p.size * Math.min(1, fade * 2);
+            const lw = p.snap ? 2.4 : 1;
+            gpu.pushTransform();
+            gpu.translate(p.x, p.y);
+            if (p.angle) gpu.rotate(p.angle);
+            if (p.materialShape === 'spark') {
+              gpu.strokeLine(-sz, 0, sz, 0, col, lw, baseAlpha, true);
+              gpu.strokeLine(0, -sz, 0, sz, col, lw, baseAlpha, true);
+            } else if (p.materialShape === 'streak') {
+              gpu.strokeLine(-sz * 2, 0, sz * 2, 0, col, lw, baseAlpha, true);
+            } else if (p.materialShape === 'shard') {
+              gpu.fillTriangle(0, -sz * 1.6, sz, sz, -sz, sz, col, baseAlpha);
+            } else if (p.materialShape === 'chip') {
+              gpu.fillRect(-sz / 2, -sz / 2, sz, sz, col, baseAlpha);
+            } else if (p.materialShape === 'bubble') {
+              gpu.strokeCircle(0, 0, sz, col, lw, baseAlpha);
+            } else {
+              gpu.fillCircle(0, 0, sz, col, baseAlpha);
+            }
+            gpu.popTransform();
+            continue;
+          }
+          if (p.flame) {
+            flameDots.push({ x: p.x, y: p.y, r: p.flame * 0.45 * (0.4 + 0.6 * fade), color: col, alpha: baseAlpha });
+            continue;
+          }
+          if (p.celebration) {
+            const starSize = p.size || 2;
+            const halo = (34 + 18 * fade) * (starSize / 2);
+            if (doc?.createElement) {
+              const gs = glowSprite(col, doc);
+              gpu.drawTexture(`glow:${col}`, gs, p.x - halo / 2, p.y - halo / 2, halo, halo, baseAlpha);
+            }
+            const tailDt = 0.058 * (0.35 + 0.65 * fade);
+            const tx = p.x - p.vx * tailDt, ty = p.y - p.vy * tailDt;
+            gpu.strokeLine(tx, ty, p.x, p.y, col, starSize * 1.45, baseAlpha * 0.42, true);
+            gpu.strokeLine((tx + p.x) * 0.5, (ty + p.y) * 0.5, p.x, p.y, col, starSize, baseAlpha, true);
+            gpu.fillCircle(p.x, p.y, starSize * (0.65 + 0.35 * fade), col, baseAlpha);
+            gpu.fillCircle(p.x, p.y, Math.max(0.75, starSize * 0.48 * fade), '#ffffff', baseAlpha);
+            continue;
+          }
+          const px = p.px === p.x && p.py === p.y ? p.x - 0.01 : p.px;
+          gpu.strokeLine(px, p.py, p.x, p.y, col, p.snap ? 2.6 : 1.3, baseAlpha, true);
+          gpu.fillCircle(p.x, p.y, p.snap ? 1.9 : 0.9, col, baseAlpha);
+        }
+        if (flameDots.length) {
+          gpu.setBlend('add');
+          for (const f of flameDots) gpu.fillCircle(f.x, f.y, f.r, f.color, f.alpha);
+          gpu.setBlend('normal');
+        }
+      };
+
+      drawParticlesWebGL(false);
+
+      // 12. Pass 2: True GPU Scene-to-Texture Heat Refraction
+      if (heatSources.length > 0) {
+        gpu.applyHeatRefraction(heatSources);
+      }
+
+      // 13. Pass 3: Post-Refraction Field Overlays (ripples, pings, goalSweep, Pulse bar, badges, fouls, popups, fireworks)
+      for (const r of fx.ripples) {
+        const p = 1 - r.life / r.duration;
+        const baseScale = r.goalPocket ? 13 : (r.net ? 9.5 : 8);
+        const freq = r.goalPocket ? 4.2 : 5;
+        const bulge = r.amp * baseScale * (1 - p) * Math.cos(p * Math.PI * freq);
+        const pts = [];
+        for (let k = r.lo; k <= r.hi; k++) {
+          const w = r.run[k], d = bulge * Math.sin(Math.PI * (k - r.lo) / Math.max(1, r.hi - r.lo)) ** (r.goalPocket ? 1.4 : 2);
+          pts.push({ x: w.x + w.nx * d, y: w.y + w.ny * d });
+        }
+        const netColor = r.side ? away : home;
+        gpu.strokePolyline(pts, r.net ? netColor : border, r.goalPocket ? 5.2 : 4, (1 - p) * 0.9);
+        if (r.goalPocket && p < 0.65) {
+          gpu.strokePolyline(pts, '#ffffff', 2, (1 - p / 0.65) * 0.65);
+        }
+        if (r.meteor && r.x != null && r.y != null) {
+          const glowFade = (1 - p) ** 1.35;
+          if (glowFade > 0.01) {
+            const glowR = 26 * (0.8 + 0.35 * (1 - glowFade));
+            gpu.drawRadialStops(r.x, r.y, glowR, [
+              [0.00, '#ffffff'],
+              [0.25, '#fff3b0'],
+              [0.55, '#ff7a1a'],
+              [0.85, 'rgba(255, 84, 0, 0.45)'],
+              [1.00, 'rgba(255, 84, 0, 0)']
+            ], glowFade * 0.88, 20);
+            gpu.fillCircle(r.x, r.y, 6.5 * glowFade, '#ffffff', glowFade * 0.95);
+          }
+        }
+      }
+
+      for (const g of fx.pings) {
+        const p = 1 - g.life / g.duration;
+        const fade = (1 - p) ** 1.15;
+        const amp = g.amp ?? 0.7;
+        const shiver = (1 - p) ** 1.6 * Math.sin(p * Math.PI * 18) * (2.6 * amp);
+        const sx = g.x + (g.nx || 0) * shiver * 0.5 - (g.ny || 0) * shiver;
+        const sy = g.y + (g.ny || 0) * shiver * 0.5 + (g.nx || 0) * shiver;
+        gpu.strokeCircle(g.x, g.y, 4 + p * (18 + 6 * amp), text, 2.2, fade);
+        if (amp > 0.45) {
+          gpu.strokeCircle(g.x, g.y, 6 + p * (28 + 8 * amp), '#ffd76b', 1.6, fade * 0.72);
+        }
+        if (Math.abs(g.spin || 0) >= 6 && fade > 0.15) {
+          const spinDir = Math.sign(g.spin) || 1;
+          const spinPow = Math.min(1, Math.abs(g.spin) / 20);
+          const rot = p * spinDir * 4.2;
+          gpu.drawTaperedSpinArc(g.x, g.y, 8 + p * 18, rot, 1.45 * spinDir, 2.2 + 1.2 * spinPow, '#ffd76b', fade * 0.85);
+          gpu.drawTaperedSpinArc(g.x, g.y, 8 + p * 18, rot + Math.PI, 1.45 * spinDir, 2.2 + 1.2 * spinPow, '#ffffff', fade * 0.75);
+        }
+        gpu.fillCircle(sx, sy, (3.6 + 1.4 * amp) * (1 - p * 0.65) + 1, p < 0.35 ? '#ffd76b' : text, fade);
+      }
+
+      if (fx.goalSweep) {
+        const sweep = fx.goalSweep, sColor = sweep.team ? away : home;
+        const p = sweep.p, sx = sweep.team ? 60 + p * 880 : 940 - p * 880;
+        const dim = 0.14 * Math.sin(Math.PI * p);
+        gpu.setClip(1);
+        if (dim > 0.005) gpu.fillRect(60, 60, 880, 480, `rgba(8, 10, 14, ${dim.toFixed(3)})`, 1);
+        gpu.fillRect(60, 60, 880, 480, hexToRgba(sColor, 0.12 * Math.sin(Math.PI * p)), 1);
+        gpu.fillBandLinearX(60, 60, 880, 480, sx - 220, sx + 220, [
+          [0.0, hexToRgba(sColor, 0)],
+          [0.4, hexToRgba(sColor, 0.32)],
+          [0.5, 'rgba(255,255,255,0.5)'],
+          [0.6, hexToRgba(sColor, 0.32)],
+          [1.0, hexToRgba(sColor, 0)]
+        ], 1 - p * 0.6);
+        const scorer = getScoringPlayer();
+        if (scorer && scorer.x != null && scorer.y != null) {
+          const spotR = (scorer.radius || 25) * 3.8;
+          gpu.drawRadialStops(scorer.x, scorer.y, spotR, [
+            [0.00, hexToRgba(sColor, 0.28 * (1 - p * 0.7))],
+            [0.55, hexToRgba(sColor, 0.11 * (1 - p * 0.7))],
+            [1.00, hexToRgba(sColor, 0)]
+          ], 1, 24);
+        }
+        gpu.setClip(0);
+
+        const mouth = sweep.team ? 60 : 940, back = sweep.team ? mouth - P.rink.goalDepth : mouth + P.rink.goalDepth;
+        const sweepKey = `${sweep.team}\u0000${sColor}\u0000${width || 1000}`;
+        let sweepSprite = fx.goalSweepCache?.key === sweepKey ? fx.goalSweepCache : null;
+        if (!sweepSprite && doc?.createElement) {
+          const sc = doc.createElement('canvas');
+          const sctx = sc?.getContext?.('2d');
+          if (sctx && typeof sctx.stroke === 'function') {
+            const pad = 64, minX = Math.min(mouth, back) - pad, minY = 230 - pad;
+            const lw = Math.abs(back - mouth) + pad * 2, lh = 140 + pad * 2;
+            sc.width = Math.max(1, Math.ceil(lw * pxScale));
+            sc.height = Math.max(1, Math.ceil(lh * pxScale));
+            sctx.setTransform(pxScale, 0, 0, pxScale, -minX * pxScale, -minY * pxScale);
+            sctx.lineCap = 'round';
+            sctx.shadowColor = sColor; sctx.shadowBlur = 24 * pxScale;
+            const seg = (x1, y1, x2, y2, stroke, w) => {
+              sctx.beginPath(); sctx.moveTo(x1, y1); sctx.lineTo(x2, y2);
+              sctx.strokeStyle = stroke; sctx.lineWidth = w; sctx.stroke();
+            };
+            seg(mouth, 230, back, 230, sColor, 6);
+            seg(back, 230, back, 370, sColor, 6);
+            seg(mouth, 370, back, 370, sColor, 6);
+            seg(mouth, 230, mouth, 370, '#ffffff', 3);
+            sweepSprite = fx.goalSweepCache = { key: sweepKey, canvas: sc, minX, minY, lw, lh };
+          }
+        }
+        if (sweepSprite) {
+          gpu.drawTexture('goalSweep:' + sweepSprite.key, sweepSprite.canvas, sweepSprite.minX, sweepSprite.minY, sweepSprite.lw, sweepSprite.lh, 1 - p);
+        }
+      }
+
+      if (pulseMode() && !goalReplay && !isCardShot()) {
+        const turnSeconds = ububallMatch.turnTicks(view.mode) * P.DT;
+        const online = getOnline();
+        const progress = playback ? playback.tick * P.DT / turnSeconds
+          : phase !== 'play' ? 0
+          : online?.active ? (onlineReplay?.currentTick ?? 0) * P.DT / turnSeconds
+          : getElapsed() / turnSeconds;
+        gpu.strokeLine(160, 556, 840, 556, border, 4, 0.25, true);
+        if (progress > 0) gpu.strokeLine(160, 556, 160 + 680 * Math.min(1, progress), 556, '#DA4DB5', 4, 0.9, true);
+      }
+
+      // Badge & UI Overlays (in exact badgeCanvas order)
+      const drawShieldWebGL = (bx, by, iron, alpha = 1) => {
+        const st = getStampCanvas(`guardShield:${iron ? 1 : 0}`, 32, 32, pxScale, g => {
+          g.translate(16, 16); g.scale(1.1, 1.1); g.translate(-12, -12);
+          g.fillStyle = iron ? '#c3ccd6' : '#4798ff'; g.fill(GUARD_SHIELD);
+          if (iron) { g.strokeStyle = '#6b7785'; g.lineWidth = 1.5; g.stroke(GUARD_SHIELD); }
+        });
+        if (!st) return;
+        gpu.pushTransform();
+        gpu.translate(bx, by);
+        if (view.portrait) gpu.rotate(Math.PI / 2);
+        gpu.drawTexture(st.key, st.canvas, -16, -16, 32, 32, alpha);
+        gpu.popTransform();
+      };
+
+      const drawSuperBadgeWebGL = (b, key) => {
+        const superId = b.equippedSuper?.id ?? 0;
+        const icon = superImages[superId];
+        if (!icon?.complete || !icon.naturalWidth) return;
+        const [c1] = SUPER_AURA_THEMES[key] || ['#ff7197'];
+        const size = b.superActive || b.superArm ? 24 : 20, p = badgePoint(b);
+        const st = getStampCanvas(`superBadge:${superId}:${size}:${c1}`, 34, 34, pxScale, g => {
+          g.translate(17, 17);
+          g.beginPath(); g.arc(0, 0, size / 2 + 2, 0, Math.PI * 2);
+          g.fillStyle = '#0b0d10d9'; g.fill();
+          g.lineWidth = 1.5; g.strokeStyle = c1; g.stroke();
+          g.drawImage(icon, -size / 2, -size / 2, size, size);
+        });
+        if (!st) return;
+        gpu.pushTransform();
+        gpu.translate(p.x, p.y);
+        if (view.portrait) gpu.rotate(Math.PI / 2);
+        gpu.drawTexture(st.key, st.canvas, -17, -17, 34, 34, 1);
+        gpu.popTransform();
+      };
+
+      if (overlayGuideMoves) {
+        activeGuide.start.slice(0, 6).forEach(b => {
+          const idx = activeGuide.start.indexOf(b);
+          const plan = activeGuide.moves[idx];
+          if (plan?.guard && !b.stunned) {
+            drawShieldWebGL(b.x + b.radius * 0.65, b.y + b.radius * 0.65, Boolean(b.ironGuard), 0.85);
+          }
+          if ((plan?.superArm || b.superArm) && b.equippedSuper && b.meter >= 100 && !b.stunned) {
+            drawSuperBadgeWebGL({ ...b, superArm: true }, b.equippedSuper.key);
+          }
+        });
+      }
+
+      for (const s of fx.shockwaves) {
+        if (s.overlay) drawShockwaveItem(s);
+      }
+
+      for (const item of badgeOverlayQueue) {
+        if (item.kind === 'super') drawSuperBadgeWebGL(item.b, item.key);
+        else if (item.kind === 'guard') {
+          const b = item.b;
+          const gp = view.portrait ? { x: b.x - b.radius * 0.65, y: b.y + b.radius * 0.65 } : { x: b.x + b.radius * 0.65, y: b.y + b.radius * 0.65 };
+          drawShieldWebGL(gp.x, gp.y, item.iron, 1);
+        }
+      }
+
+      if (fx.goalCall && doc?.createElement) {
+        const call = fx.goalCall, gcColor = call.team ? away : home;
+        const pop = reduced ? 1 : Math.min(1, call.t / 0.27);
+        const scFactor = 1 + 2.70158 * (pop - 1) ** 3 + 1.70158 * (pop - 1) ** 2;
+        const face = call.scorer >= 0 ? resolveSkaterArt(call.scorer) : null;
+        const top = face ? 40 : 0;
+        const callLabel = view.anonymous && call.scorer < 0 && call.label.endsWith(' WINS!') && ububallReplay?.ANONYMOUS
+          ? `${ububallReplay.ANONYMOUS[call.team].toUpperCase()} WINS!`
+          : call.label;
+        const callName = view.anonymous && call.scorer >= 0 ? anonymousName(call.scorer) : call.name;
+        const cacheKey = `${callLabel}\u0000${callName}\u0000${gcColor}\u0000${width || 1000}\u0000${face ? 1 : 0}`;
+        let cache = fx.goalCallCache?.key === cacheKey && fx.goalCallCache.face === face ? fx.goalCallCache : null;
+        if (!cache) {
+          const sc = doc.createElement('canvas');
+          const sctx = sc?.getContext?.('2d');
+          if (sctx && typeof sctx.fillText === 'function') {
+            sctx.font = '900 88px system-ui, sans-serif';
+            const labelW = sctx.measureText(callLabel)?.width || 560;
+            sctx.font = '900 34px system-ui, sans-serif';
+            const nameW = callName ? (sctx.measureText(callName)?.width || 360) : 0;
+            const halfW = Math.ceil(Math.max(150, labelW / 2, nameW / 2) + 76);
+            const topExt = face ? 232 : 124;
+            const botExt = (callName ? top + 92 : top + 58) + 76;
+            const logicalW = halfW * 2, logicalH = topExt + botExt;
+            sc.width = Math.max(1, Math.ceil(logicalW * pxScale));
+            sc.height = Math.max(1, Math.ceil(logicalH * pxScale));
+            sctx.setTransform(pxScale, 0, 0, pxScale, halfW * pxScale, topExt * pxScale);
+            const write = (str, y, sz) => {
+              sctx.font = `900 ${sz}px system-ui, sans-serif`; sctx.lineWidth = sz / 14; sctx.strokeStyle = gcColor;
+              sctx.strokeText(str, 0, y); sctx.fillStyle = '#ffffff'; sctx.fillText(str, 0, y);
+            };
+            sctx.shadowColor = gcColor; sctx.shadowBlur = 30 * pxScale;
+            if (face) {
+              sctx.beginPath(); sctx.arc(0, -82, 74, 0, Math.PI * 2); sctx.fillStyle = gcColor; sctx.fill();
+              sctx.shadowBlur = 0; sctx.drawImage(face, -66, -148, 132, 132);
+              sctx.shadowBlur = 30 * pxScale;
+            }
+            sctx.textAlign = 'center'; sctx.textBaseline = 'middle';
+            write(callLabel, top, 88);
+            if (callName) write(callName, top + 66, 34);
+            cache = fx.goalCallCache = { key: cacheKey, face, canvas: sc, halfW, topExt, logicalW, logicalH, rev: ++rinkCacheGen };
+          }
+        }
+        if (cache) {
+          const alpha = Math.max(0, Math.min(1, (GOAL_CALL_SECONDS - call.t) / 0.5));
+          gpu.pushTransform();
+          gpu.translate(500, 300);
+          if (view.portrait) gpu.rotate(Math.PI / 2);
+          gpu.scale(scFactor, scFactor);
+          gpu.drawTexture('goalCall:' + cache.key, cache.canvas, -cache.halfW, -cache.topExt, cache.logicalW, cache.logicalH, alpha, 0, cache.rev || 1);
+          gpu.popTransform();
+        }
+      }
+
+      // Foul warnings, offender alerts/checks, and yellow cards
+      {
+        const fieldFouls = playback?.viewFouls ?? getFouls();
+        const predicted = phase === 'plan' ? predictionCache?.fouls : null;
+        const drawAlertWebGL = (ax, ay, sz, alpha = 1) => {
+          const st = getStampCanvas(`alert:${sz}`, 32, 32, pxScale, g => {
+            g.translate(16, 16); g.scale(sz / 24, sz / 24); g.translate(-12, -12);
+            g.fillStyle = '#0b0d10d9'; g.fill(ALERT);
+            g.lineWidth = 2; g.lineCap = g.lineJoin = 'round'; g.strokeStyle = '#ffb020'; g.stroke(ALERT);
+          });
+          if (!st) return;
+          gpu.pushTransform();
+          gpu.translate(ax, ay);
+          if (view.portrait) gpu.rotate(Math.PI / 2);
+          gpu.drawTexture(st.key, st.canvas, -16, -16, 32, 32, alpha);
+          gpu.popTransform();
+        };
+        const drawCheckWebGL = (cx, cy, sz) => {
+          const st = getStampCanvas(`check:${sz}`, 32, 32, pxScale, g => {
+            g.translate(16, 16); g.scale(sz / 24, sz / 24);
+            g.beginPath(); g.arc(0, 0, 12, 0, Math.PI * 2); g.fillStyle = '#0b0d10d9'; g.fill();
+            g.translate(-12, -12); g.scale(0.8, 0.8); g.translate(3, 3);
+            g.lineWidth = 3; g.lineCap = g.lineJoin = 'round'; g.strokeStyle = '#3ddc84'; g.stroke(CHECK);
+          });
+          if (!st) return;
+          gpu.pushTransform();
+          gpu.translate(cx, cy);
+          if (view.portrait) gpu.rotate(Math.PI / 2);
+          gpu.drawTexture(st.key, st.canvas, -16, -16, 32, 32, 1);
+          gpu.popTransform();
+        };
+        const drawWarnWebGL = (wx, wy, words, cleared = false) => {
+          const ix = view.portrait ? wx + 13 : wx, iy = view.portrait ? wy : wy - 13;
+          if (cleared) drawCheckWebGL(ix, iy, 24);
+          else drawAlertWebGL(ix, iy, 24, 1);
+          const wKey = words.join(' ');
+          const st = getStampCanvas(`warnTxt:${wKey}:${text}`, 88, 36, pxScale, g => {
+            g.translate(44, 4);
+            g.font = '700 11px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = text;
+            words.forEach((word, idx) => g.fillText(word, 0, 7 + idx * 12));
+          });
+          if (st) {
+            gpu.pushTransform();
+            gpu.translate(wx, wy);
+            if (view.portrait) gpu.rotate(Math.PI / 2);
+            gpu.drawTexture(st.key, st.canvas, -44, -4, 88, 36, 1);
+            gpu.popTransform();
+          }
+        };
+        for (const team of [0, 1]) {
+          if (fieldFouls.crease[team]) drawWarnWebGL(team ? 970 : 30, 180, ['Goal', 'Camping'], predicted?.crease[team]);
+        }
+        if (stalling(fieldFouls)) {
+          drawWarnWebGL(fieldFouls.corner % 2 ? 970 : 30, cornerWarningY(fieldFouls), ['Corner', 'Stalling'], predicted?.corner);
+        }
+        const flash = reduced ? 1 : 0.35 + 0.65 * (0.5 + 0.5 * Math.cos(clockNow() / 1000 * Math.PI * 2.4));
+        const creasing = new Set(view.bodies.slice(0, 6).filter(b => fieldFouls.crease[b.team] && isCreasing(b, b.team)));
+        for (const b of offenders(fieldFouls)) {
+          if (b.carded) continue;
+          const ox = b.x + b.radius * 0.8, oy = view.portrait ? b.y + b.radius * 0.8 : b.y - b.radius * 0.8;
+          if (predicted && (creasing.has(b) ? predicted.left.has(view.bodies.indexOf(b)) : predicted.corner)) drawCheckWebGL(ox, oy, 24);
+          else drawAlertWebGL(ox, oy, 26, flash);
+        }
+        for (const b of view.bodies.slice(0, 6)) {
+          if (!b.carded) continue;
+          const st = getStampCanvas('yellowCard', 24, 28, pxScale, g => {
+            g.translate(12, 14);
+            g.beginPath(); g.roundRect(-6, -8, 12, 16, 2); g.fillStyle = '#ffd60a'; g.fill();
+            g.lineWidth = 1.5; g.strokeStyle = '#0b0d10'; g.stroke();
+          });
+          if (st) {
+            const cr = b.radius * 0.7;
+            gpu.pushTransform();
+            gpu.translate(b.x + cr, view.portrait ? b.y + cr : b.y - cr);
+            gpu.rotate((view.portrait ? Math.PI / 2 : 0) + 0.2);
+            gpu.drawTexture(st.key, st.canvas, -12, -14, 24, 28, 1);
+            gpu.popTransform();
+          }
+        }
+      }
+
+      // Popups ("Save!", "Big save!", "Trap!", "Spin strike!", "Assist", "Yellow card")
+      if (fx.popups.length && doc?.createElement) {
+        for (const p of fx.popups) {
+          const duration = p.duration || 1.2;
+          const age = 1 - p.life / duration;
+          const u = reduced ? 1 : Math.min(1, age / 0.2);
+          const scFactor = reduced ? 1 : 1 + 2.70158 * (u - 1) ** 3 + 1.70158 * (u - 1) ** 2;
+          const col = p.team ? away : home;
+          const alpha = age < 0.7 ? 1 : Math.max(0, (1 - age) / 0.3);
+          const key = `${p.text}\u0000${col}\u0000${width || 1000}`;
+          let sprite = p._sprite?.key === key ? p._sprite : null;
+          if (!sprite) {
+            const sc = doc.createElement('canvas');
+            const sctx = sc?.getContext?.('2d');
+            if (sctx && typeof sctx.fillText === 'function') {
+              sctx.font = '900 26px system-ui, sans-serif';
+              const tw = sctx.measureText(p.text)?.width || 220;
+              const halfW = Math.ceil(Math.max(80, tw / 2) + 32), halfH = 44;
+              const lw = halfW * 2, lh = halfH * 2;
+              sc.width = Math.max(1, Math.ceil(lw * pxScale));
+              sc.height = Math.max(1, Math.ceil(lh * pxScale));
+              sctx.setTransform(pxScale, 0, 0, pxScale, halfW * pxScale, halfH * pxScale);
+              sctx.font = '900 26px system-ui, sans-serif'; sctx.textAlign = 'center'; sctx.textBaseline = 'middle';
+              sctx.shadowColor = col; sctx.shadowBlur = 12 * pxScale;
+              sctx.lineWidth = 4; sctx.strokeStyle = col; sctx.strokeText(p.text, 0, 0);
+              sctx.fillStyle = '#ffffff'; sctx.fillText(p.text, 0, 0);
+              sprite = p._sprite = { key, canvas: sc, halfW, halfH, lw, lh };
+            }
+          }
+          if (sprite) {
+            gpu.pushTransform();
+            gpu.translate(p.x, reduced ? p.y : p.y - age * 22);
+            if (view.portrait) gpu.rotate(Math.PI / 2);
+            gpu.scale(scFactor, scFactor);
+            gpu.drawTexture('popup:' + sprite.key, sprite.canvas, -sprite.halfW, -sprite.halfH, sprite.lw, sprite.lh, alpha);
+            gpu.popTransform();
+          }
+        }
+      }
+
+      drawParticlesWebGL(true);
+
+      if (goalReplay) {
+        const slow = goalReplay.played >= goalReplay.total || ububallMatch.replaySpeed(goalReplay.total - goalReplay.played) < 1;
+        const labelStr = slow ? 'REPLAY · SLOW MOTION' : 'REPLAY';
+        const fontPx = view.portrait ? 16 : 18;
+        const st = getStampCanvas(`replayMark:${labelStr}:${fontPx}:${text}`, 280, 32, pxScale, g => {
+          g.translate(140, 16);
+          g.font = `bold ${fontPx}px system-ui, sans-serif`;
+          g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = text;
+          g.fillText(labelStr, 0, 0);
+        });
+        if (st) {
+          gpu.pushTransform();
+          gpu.translate(view.portrait ? 990 : 500, view.portrait ? 300 : 32);
+          if (view.portrait) gpu.rotate(Math.PI / 2);
+          gpu.drawTexture(st.key, st.canvas, -140, -16, 280, 32, 1);
+          gpu.popTransform();
+        }
+      }
+
+      if (vf?.scorebugLayer) {
+        gpu.resetTransform();
+        gpu.setClip(0);
+        gpu.setBlend('normal');
+        const bugLogH = (vf.scorebugLayer.height / vf.height) * vf.logH;
+        gpu.drawTexture('video:scorebug', vf.scorebugLayer, vf.offX, vf.offY, vf.logW, bugLogH, 1, 0, vf.scorebugRev || 0);
+      }
+
+      gpu.endFrame();
+      return { width: frameW, height: frameH, colors };
+    }
+
     function drawScene() {
       const view = getView(), fx = getEffects(), phase = getPhase();
       const playback = getActivePlayback() || getTheater();
@@ -3244,11 +4863,22 @@
       const cap = Math.min(1, maxDim / Math.max(1, rawW, rawH));
       const width = view.field?.width ?? Math.max(1, Math.round(rawW * cap));
       const height = view.field?.height ?? Math.max(1, Math.round(rawH * cap));
-      if (view.canvas.width !== width || view.canvas.height !== height) { view.canvas.width = width; view.canvas.height = height; }
-      if (!isCollectionPortrait && (view.badgeCanvas.width !== width || view.badgeCanvas.height !== height)) {
+      const colors = getThemeColors();
+      const gpu = resolveRendererBackend(view);
+      if (gpu) {
+        const gpuRes = drawSceneWebGL(gpu, view, fx, phase, playback, fieldPlans, width, height, isCollectionPortrait, colors);
+        if (gpuRes) return gpuRes;
+        resolveRendererBackend(view);
+      }
+      if (!view.ctx) return { width, height, colors };
+      const target2dCanvas = view._active2dCanvas || view.canvas;
+      if (target2dCanvas.width !== width || target2dCanvas.height !== height) { target2dCanvas.width = width; target2dCanvas.height = height; }
+      if (target2dCanvas !== view.canvas && (view.canvas.width !== width || view.canvas.height !== height)) {
+        view.canvas.width = width; view.canvas.height = height;
+      }
+      if (!isCollectionPortrait && view.badgeCanvas && (view.badgeCanvas.width !== width || view.badgeCanvas.height !== height)) {
         view.badgeCanvas.width = width; view.badgeCanvas.height = height;
       }
-      const colors = getThemeColors();
       const { text, home, away, background } = colors;
       if (isCollectionPortrait) {
         const { length = 1000, viewTop = 0, viewSpan = 1000 } = view.collectionPortrait;
@@ -3700,9 +5330,9 @@
         fx.mirageCanvas ||= doc.createElement('canvas');
         const mc = fx.mirageCanvas;
         if (mc.width !== size || mc.height !== size) { mc.width = size; mc.height = size; }
-        const mctx = fx.mirageCtx ||= mc.getContext('2d');
+        const mctx = fx.mirageCtx ||= mc.getContext('2d', { willReadFrequently: true });
         mctx.clearRect(0, 0, size, size);
-        mctx.drawImage(view.canvas, rx * sx, ry * sy, rw * sx, rh * sy, 0, 0, size, size);
+        mctx.drawImage(view._active2dCanvas || view.canvas, rx * sx, ry * sy, rw * sx, rh * sy, 0, 0, size, size);
         const traceBulbousLobe = (ctx, bx, by, br, t, seed) => {
           ctx.beginPath();
           const steps = 16;
@@ -3781,14 +5411,14 @@
         const wp = 1 - Math.max(0, fw.life / fw.duration);
         const fade = (1 - wp) ** 1.15;
         const mirageR = 46 + wp * 44;
-        drawHeatMirage(fw.x, fw.y, mirageR, fade, wp, true);
+        drawHeatMirage(fw.x, fw.y, mirageR, fade * (bench?.warpScale ?? 1), wp, true);
       }
       if (heatBall && ballOnFire() && !isReducedMotion()) {
         const fwNear = fx.fireWarp && fx.fireWarp.life > 0 && Math.hypot(heatBall.x - fx.fireWarp.x, heatBall.y - fx.fireWarp.y) < 32;
         if (!fwNear) {
           const mirageR = Math.max(36, (heatBall.radius || 14) * 2.8);
           const heatTime = fx.heatTime || 0;
-          drawHeatMirage(heatBall.x, heatBall.y, mirageR, 0.5, heatTime, false);
+          drawHeatMirage(heatBall.x, heatBall.y, mirageR, 0.5 * (bench?.warpScale ?? 1), heatTime, false);
         }
       }
 
@@ -3873,6 +5503,19 @@
       drawRinkSurface: (g, colors = getThemeColors()) => drawRinkSurface(g, P, ububallMatch, colors, rinkLogo),
       drawPortraitRinkSurface: (g, length = 1000, viewTop = 0, viewSpan = null, colors = getThemeColors()) => drawPortraitRinkSurface(g, P, ububallMatch, colors, rinkLogo, length, viewTop, viewSpan),
       drawScene,
+      ensureEntrySprites,
+      releaseViewGpu,
+      getRendererInfo: (v = getView()) => {
+        const g = v?._webgl;
+        const active = Boolean(g && !g.isLost && v?.canvas?._webglComposite);
+        return {
+          backend: active ? 'webgl2' : 'canvas2d',
+          contextLost: Boolean(g?.isLost),
+          drawCalls: active ? g.lastDrawCalls : 0,
+          textures: active ? g.textureCount : 0,
+          gpuMs: active ? g.lastGpuMs : null
+        };
+      },
       handleCollision,
       handleWall,
       handleSuper,

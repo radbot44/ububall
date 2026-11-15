@@ -127,6 +127,8 @@
     rinkLogo,
     getThemeColors,
     getSkaters,
+    ensureEntrySprites = null,
+    releaseViewGpu = null,
     clockNow,
     gameAudio,
     classicMode,
@@ -265,7 +267,7 @@
         audio,
         field,
         canvas: offscreen,
-        ctx: offscreen ? offscreen.getContext('2d') : null,
+        ctx: null,
         badgeCanvas: offscreenBadges,
         badgeCtx: offscreenBadges ? offscreenBadges.getContext('2d') : null,
         fx: exporting ? createEffectsState(entries, materialStyles || {}) : null
@@ -515,7 +517,12 @@
     function paintField(v, x, y, width, height, th = currentReplay()) {
       const fieldView = getFieldView(), skaters = getSkaters(), themeColors = getThemeColors();
       const scale = width / 1000, fieldCanvas = th?.canvas || fieldView.canvas, fieldBadges = th?.badgeCanvas || fieldView.badgeCanvas, view = th?.bodies || fieldView.bodies;
-      v.drawImage(fieldCanvas, x, y, width, height);
+      if (fieldCanvas?._webglComposite) {
+        v.drawImage(fieldCanvas, x, y, width, height);
+        return;
+      }
+      const src2d = th?._active2dCanvas || (!th || !th.canvas ? fieldView?._active2dCanvas : null) || fieldCanvas;
+      v.drawImage(src2d, x, y, width, height);
       view.slice(0, 6).forEach((b, i) => {
         const entry = th?.entries?.[i], liveEntry = fieldView.entries?.[i];
         const sprite = (!th || !entry || liveEntry?.dna === entry.dna) ? skaters?.[i]?.firstChild : null;
@@ -536,12 +543,12 @@
         }
         v.restore();
       });
-      v.drawImage(fieldBadges, x, y, width, height);
+      if (fieldBadges && (!fieldBadges.width || fieldBadges.width > 0)) v.drawImage(fieldBadges, x, y, width, height);
     }
 
-    function composeFrame(v, session) {
+    function ensureScorebug(session) {
       const themeColors = getThemeColors();
-      const f = VIDEO.field, k = VIDEO.width / 1920;
+      const k = VIDEO.width / 1920;
       const { names, scores: frameScores, turn: frameTurn, scorebug } = session;
       const key = `${names}|${frameScores}|${frameTurn}`;
       if (scorebug?.key !== key) {
@@ -563,14 +570,25 @@
         }
         b.fillStyle = text; b.textAlign = 'center'; b.font = `800 23px ${font}`;
         b.fillText(`T${frameTurn}  REPLAY`, cx + 460, 40);
-        session.scorebug = { key, font, layer };
+        session.scorebug = { key, font, layer, rev: (scorebug?.rev || 0) + 1 };
       }
+      if (session.videoFrame) {
+        session.videoFrame.scorebugLayer = session.scorebug.layer;
+        session.videoFrame.scorebugRev = session.scorebug.rev;
+      }
+      return session.scorebug;
+    }
+
+    function composeFrame(v, session) {
+      const themeColors = getThemeColors();
+      const f = VIDEO.field, k = VIDEO.width / 1920;
+      const scorebug = ensureScorebug(session);
       v.setTransform(1, 0, 0, 1, 0, 0);
       v.fillStyle = themeColors.background; v.fillRect(0, 0, VIDEO.width, VIDEO.height);
       v.setTransform(k, 0, 0, k, 0, 0);
       paintField(v, f.x, f.y, f.width, f.height, session);
       v.setTransform(1, 0, 0, 1, 0, 0);
-      v.drawImage(session.scorebug.layer, 0, 0);
+      v.drawImage(scorebug.layer, 0, 0);
     }
 
     async function encodeAudio(buffer, length) {
@@ -638,6 +656,7 @@
             clock: 0,
             field: videoFieldSize()
           });
+          if (ensureEntrySprites) await ensureEntrySprites(session.entries);
           const holdFrames = Math.ceil(VIDEO.hold * VIDEO.fps), rate = 48000;
           const frameBudget = 1 + holdFrames + session.replay.turns.reduce((frames, t) => frames +
             Math.ceil(t.ticks * P.DT * VIDEO.fps) + 1 +
@@ -650,8 +669,8 @@
             progress.hidden = true; close.textContent = 'Close'; return;
           }
           const offline = new OfflineAudioContext(2, Math.ceil(frameBudget / VIDEO.fps * rate), rate);
-          out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
-          const v = out.getContext('2d'), samples = [];
+          const samples = [];
+          let v = null;
           let description = null, failure = null, wakeQueue = null;
           const wake = () => { if (wakeQueue) { const fn = wakeQueue; wakeQueue = null; fn(); } };
           cancelVideo = wake;
@@ -682,7 +701,32 @@
           const rendering = offline.startRendering();
           rendering?.catch?.(() => {});
           gameAudio()?.stop?.();
+          // Configure direct 1920x1080 WebGL2 composition (background + cropped field + scorebug quad)
+          const kVid = VIDEO.width / 1920;
+          const fScale = (VIDEO.field.width * kVid) / 1000;
+          session.field = { width: VIDEO.width, height: VIDEO.height };
+          session.videoFrame = {
+            width: VIDEO.width,
+            height: VIDEO.height,
+            logW: VIDEO.width / fScale,
+            logH: VIDEO.height / fScale,
+            offX: -(VIDEO.field.x * kVid) / fScale,
+            offY: -(VIDEO.field.y * kVid) / fScale,
+            scorebugLayer: null,
+            scorebugRev: 0
+          };
           seekReplay(0, session);
+          ensureScorebug(session);
+          withPlaybackContext(session, () => draw());
+          const directGpuVideo = Boolean(session.canvas?._webglComposite);
+          if (!directGpuVideo) {
+            // Canvas 2D fallback: restore 1920x1152 field buffer and allocate 1920x1080 2D compositor canvas
+            session.videoFrame = null;
+            session.field = videoFieldSize();
+            withPlaybackContext(session, () => draw());
+            out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
+            v = out.getContext('2d');
+          }
           let frames = 0, endFrame = Infinity;
           for (; frames < endFrame && !videoCancelled && !failure; frames++) {
             const f = frames;
@@ -693,10 +737,15 @@
                 updateEffects(1 / VIDEO.fps, session.fx);
                 advanceReplay(1 / VIDEO.fps, session);
               });
+              if (directGpuVideo) {
+                const prevRev = session.scorebug?.rev || 0;
+                ensureScorebug(session);
+                if (session.scorebug.rev !== prevRev) withPlaybackContext(session, () => draw());
+              }
             }
-            composeFrame(v, session);
+            if (!directGpuVideo) composeFrame(v, session);
             if (session.paused && endFrame === Infinity) endFrame = f + holdFrames;
-            const frame = new VideoFrame(out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
+            const frame = new VideoFrame(directGpuVideo ? session.canvas : out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
             encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
             pump();
             while (encoder.encodeQueueSize > 4 && !videoCancelled && !failure) {
@@ -732,6 +781,7 @@
         if (encoder && encoder.state !== 'closed') encoder.close();
         if (session?.fx?.sizzle) { session.fx.sizzle.stop?.(); session.fx.sizzle = null; }
         if (out) { out.width = 0; out.height = 0; }
+        if (session) releaseViewGpu?.(session);
         if (session?.canvas) { session.canvas.width = 0; session.canvas.height = 0; }
         if (session?.badgeCanvas) { session.badgeCanvas.width = 0; session.badgeCanvas.height = 0; }
         if (session?.scorebug?.layer) { session.scorebug.layer.width = 0; session.scorebug.layer.height = 0; }
@@ -835,6 +885,7 @@
       await Promise.all([
         videoLogo(),
         document.fonts?.load?.(`40px 'Uburoom Sans'`)?.catch(() => {}),
+        ensureEntrySprites ? ensureEntrySprites(th.entries) : Promise.resolve(),
         ...skaters.map(node => node?.firstChild?.decode?.().catch(() => {}))
       ]);
       if (getTheater() !== th || isExporting()) return;

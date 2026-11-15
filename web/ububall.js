@@ -5,7 +5,7 @@
   const liveField = {};
   let fieldView = liveField;
   fieldView.canvas = $('rink');
-  fieldView.ctx = fieldView.canvas.getContext('2d');
+  fieldView.ctx = null;
   let layoutDirty = true, renderWidth = 1, renderHeight = 1, deviceWidth = 0, deviceHeight = 0;
   const dirtyMeters = new Set();
   // Guests field three ubus they cannot keep; the CPU gets a fresh three each match.
@@ -1045,7 +1045,7 @@
     fieldView.entries.forEach((entry, i) => {
       if (entry.model && entry.model.stats) stats[i] = classicMode() ? normalStats() : { ...entry.model.stats };
     });
-    skaters = mountSkaterSprites($('skaters'), fieldView.entries, ubuRender);
+    skaters = mountSkaterSprites($('skaters'), fieldView.entries, ubuRender, () => draw());
     fieldView.entries.slice(0, 3).forEach((entry, i) => {
       const button = document.createElement('div'); button.className = 'team-card'; button.id = `player-${i}`;
       const select = document.createElement('button'); select.type = 'button'; select.className = 'card-select';
@@ -2046,6 +2046,7 @@
   addEventListener('pagehide', () => {
     flushScheduledSave();
     if (recording && !demo && (online?.active || inDiscord)) saveRecording();
+    presenter.dispose?.();
   });
   // Completes the local turn just played.
   function noteTurn(ticks, goal, cards) {
@@ -2180,6 +2181,8 @@
     rinkLogo,
     getThemeColors: () => getThemeColors(),
     getSkaters: () => skaters,
+    ensureEntrySprites: entries => presenter.ensureEntrySprites?.(entries),
+    releaseViewGpu: v => presenter.releaseViewGpu?.(v),
     clockNow: () => clockNow(),
     gameAudio: () => gameAudio(),
     classicMode: () => classicMode(),
@@ -4344,7 +4347,8 @@
         canvasW: fieldView.canvas.width,
         canvasH: fieldView.canvas.height,
         cssW: fieldView.canvas.clientWidth,
-        cssH: fieldView.canvas.clientHeight
+        cssH: fieldView.canvas.clientHeight,
+        ...(presenter.getRendererInfo ? presenter.getRendererInfo() : {})
       }),
       markDirty: () => { layoutDirty = true; dirtyPrediction(); draw(); },
       prepareRoster() {

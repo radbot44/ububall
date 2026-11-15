@@ -75,7 +75,7 @@ See the [file profile](docs/ubu-file.md) for full encoding, signing prefix (`ubu
 - **Designer:** Open `web/demo.html` (or `/demo.html` under `npm run dev`) for standalone DNA inspection, trait editing, card/token previews, and custom `.ubu` import/export.
 - **Voice & Goal Fanfare Lab:** Open `web/voice.html` (or `/voice.html` under `npm run dev`) to test Web Audio procedural voice synthesis and DNA-derived 8-note goal fanfares.
 
-- **WebGL2 rink lab (local only):** Run `npm run bench:serve` and open http://127.0.0.1:8791/webgl-demo.html. Compare shared physics and baked artwork in Canvas 2D and WebGL2, with GPU scene refraction, pause, resolution and solo-view controls. This is a partial renderer prototype; it is excluded from deployment assets.
+- **WebGL2 rink lab (local only):** Run `npm run bench:serve` and open http://127.0.0.1:8791/webgl-demo.html. Compares the full production `createRinkPresenter` across WebGL2 (default live rink renderer with batched GPU sprites/SDFs, feathered umber/skid ribbons and scene-to-texture heat refraction) and the Canvas 2D fallback reference on identical physics and artwork, with pause/step, heat, context-loss, resolution and solo-view controls. Excluded from deployment assets.
 
 ## Testing
 

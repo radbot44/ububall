@@ -6,6 +6,7 @@
   if (!bench || !bench.control) return;
 
   const TOGGLE_DEFS = [
+    { key: 'forceCanvas2D', value: true, label: 'Force Canvas 2D' },
     { key: 'dprCap', value: 2, label: 'DPR <= 2.0' },
     { key: 'dprCap', value: 1.5, label: 'DPR <= 1.5' },
     { key: 'dprCap', value: 1, label: 'DPR <= 1.0' },
@@ -25,7 +26,8 @@
 
   const SUITE_PASSES = [
     { id: '01_calm_3v3', group: 'play', title: 'Calm 3v3 glide (reference)', scenario: 'calm', flags: {}, frames: 90 },
-    { id: '02_chaos_baseline', group: 'chaos', title: 'Chaos full baseline (all FX on)', scenario: 'chaos', flags: {}, frames: 110, baseline: true },
+    { id: '02_chaos_baseline', group: 'chaos', title: 'Chaos full baseline (WebGL2 all FX on)', scenario: 'chaos', flags: {}, frames: 110, baseline: true },
+    { id: '02b_chaos_canvas2d', group: 'chaos', title: 'Chaos full (Canvas 2D fallback)', scenario: 'chaos', flags: { forceCanvas2D: true }, frames: 100 },
     { id: '03_chaos_dpr_2.0', group: 'chaos', title: 'Chaos + DPR cap 2.0', scenario: 'chaos', flags: { dprCap: 2 }, frames: 100 },
     { id: '04_chaos_dpr_1.5', group: 'chaos', title: 'Chaos + DPR cap 1.5', scenario: 'chaos', flags: { dprCap: 1.5 }, frames: 100 },
     { id: '05_chaos_dpr_1.0', group: 'chaos', title: 'Chaos + DPR cap 1.0', scenario: 'chaos', flags: { dprCap: 1 }, frames: 100 },
@@ -86,6 +88,10 @@
       nonJsFrameMs: +Math.max(0, mean - jsTotal).toFixed(2),
       longTasks: longTasks.count,
       longTaskMaxMs: +longTasks.max.toFixed(1),
+      renderer: state.backend || 'canvas2d',
+      drawCalls: state.drawCalls ?? 0,
+      textures: state.textures ?? 0,
+      gpuTimerMs: state.gpuMs != null ? +state.gpuMs.toFixed(2) : null,
       canvas: state.canvasW + 'x' + state.canvasH,
       cssRink: state.cssW + 'x' + state.cssH
     };
@@ -99,6 +105,8 @@
       '- **Viewport / DPR**: `' + report.device.innerW + 'x' + report.device.innerH + '` CSS @ DPR `' + report.device.dpr + '`',
       '- **Estimated Display Refresh**: `' + report.device.displayHz + ' Hz`',
       '- **Hardware Threads / Memory**: `' + (report.device.cores || '?') + '` cores' + (report.device.deviceMemoryGB ? ', `' + report.device.deviceMemoryGB + ' GB` class' : ''),
+      '- **Active Default Renderer**: `' + (report.device.renderer || 'webgl2') + '`' + (report.device.glRenderer ? ' (`' + report.device.glRenderer + '`)' : ''),
+      '- **Frame Budget Thresholds**: `>8.5 ms` (~120 Hz + 0.2 ms jitter) / `>16.9 ms` (~60 Hz + 0.2 ms jitter)',
       '- **User Agent**: `' + report.device.userAgent + '`',
       '',
       '| Pass | Canvas Buffer | p50 (ms) | p95 (ms) | max (ms) | JS/f (ms) | DrawJS (ms) | >8.3ms % | >16.7ms % | Delta p95 |',
@@ -266,7 +274,8 @@
         const hz = Math.round(1000 / Math.max(1, p50));
         if (hz > estimatedHz && hz <= 240) estimatedHz = hz;
         const st = bench.control.getState();
-        liveEl.textContent = `${st.canvasW}x${st.canvasH} | p50 ${p50.toFixed(1)}ms p95 ${p95.toFixed(1)}ms (~${hz}Hz)`;
+        const tag = st.backend === 'webgl2' ? 'GL2' : '2D';
+        liveEl.textContent = `${tag} ${st.canvasW}x${st.canvasH} | p50 ${p50.toFixed(1)}ms p95 ${p95.toFixed(1)}ms (~${hz}Hz)`;
         rolling.length = 0;
       }
     }
@@ -411,6 +420,8 @@
       schema: 'ububall-bench-v1',
       timestamp: new Date().toISOString(),
       device: {
+        renderer: bench.control.getState().backend || 'canvas2d',
+        glRenderer: (() => { try { const c = document.createElement('canvas'); const gl = c.getContext('webgl2'); const dbg = gl?.getExtension('WEBGL_debug_renderer_info'); const r = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : (gl && gl.getParameter(gl.RENDERER)); gl?.getExtension('WEBGL_lose_context')?.loseContext(); return r || null; } catch { return null; } })(),
         userAgent: navigator.userAgent,
         innerW: window.innerWidth,
         innerH: window.innerHeight,
