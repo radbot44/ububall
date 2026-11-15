@@ -304,19 +304,21 @@ void main() {
   }
 
   if (mode == 9) {
-    // #13 Feathered & Animated Motion Trails: v_uv.x = alongU (0..1), v_uv.y = acrossV (-1..1), v_ext.y = heat
-    float across = clamp(abs(v_uv.y), 0.0, 1.0);
-    float feather = 1.0 - smoothstep(0.18, 1.0, across);
-    feather *= (0.45 + 0.55 * (1.0 - across * across));
+    // #13 Feathered & Animated Motion Trails: v_uv.x = alongU, v_uv.y = signed across offset, v_ext.y = heat, v_ext.z = halfWidth
+    float across = v_ext.z > 0.0001 ? clamp(abs(v_uv.y) / v_ext.z, 0.0, 1.0) : clamp(abs(v_uv.y), 0.0, 1.0);
+    float feather = pow(1.0 - smoothstep(0.0, 1.0, across), 1.35);
     float heat = v_ext.y;
     float streaks = 0.86 + 0.14 * sin(v_uv.x * 24.0 - u_time * (heat > 1.5 ? 24.0 : 14.0) + across * 4.5);
     float shimmer = heat > 1.5
-      ? 0.85 + 0.30 * vnoise(vec2(v_uv.x * 8.0 - u_time * 11.0, v_uv.y * 3.0))
+      ? 0.85 + 0.30 * vnoise(vec2(v_uv.x * 8.0 - u_time * 11.0, across * 3.0))
       : 1.0;
     float mask = feather * streaks * shimmer * clipMask;
     if (mask <= 0.002) discard;
     vec4 col = v_color * mask;
     if (heat > 2.0) col.rgb += vec3(0.35, 0.18, 0.04) * (1.0 - across) * v_color.a * mask;
+    float tpdf = hash21(gl_FragCoord.xy) + hash21(gl_FragCoord.xy + vec2(17.3, 31.7)) - 1.0;
+    float dither = tpdf * (1.25 / 255.0) * smoothstep(0.0, 0.04, col.a);
+    col.rgb = max(vec3(0.0), col.rgb + dither);
     outColor = col;
     return;
   }
@@ -1793,22 +1795,31 @@ void main() {
             for (let s = 0; s < capSteps; s++) {
               const a0 = baseAng + (s / capSteps) * Math.PI;
               const a1 = baseAng + ((s + 1) / capSteps) * Math.PI;
-              pushVert(S0.x, S0.y, 0, 0, c0[0], c0[1], c0[2], c0[3], mode, H[0], 0, 0, currentClip, 0);
-              pushVert(S0.x + Math.cos(a0) * w0, S0.y + Math.sin(a0) * w0, 0, feathered ? 1 : 0, c0[0], c0[1], c0[2], c0[3], mode, H[0], 0, 0, currentClip, 0);
-              pushVert(S0.x + Math.cos(a1) * w0, S0.y + Math.sin(a1) * w0, 0, feathered ? 1 : 0, c0[0], c0[1], c0[2], c0[3], mode, H[0], 0, 0, currentClip, 0);
+              pushVert(S0.x, S0.y, 0, 0, c0[0], c0[1], c0[2], c0[3], mode, H[0], w0, 0, currentClip, 0);
+              pushVert(S0.x + Math.cos(a0) * w0, S0.y + Math.sin(a0) * w0, 0, feathered ? w0 : 0, c0[0], c0[1], c0[2], c0[3], mode, H[0], w0, 0, currentClip, 0);
+              pushVert(S0.x + Math.cos(a1) * w0, S0.y + Math.sin(a1) * w0, 0, feathered ? w0 : 0, c0[0], c0[1], c0[2], c0[3], mode, H[0], w0, 0, currentClip, 0);
             }
           }
 
-          for (let k = 0; k < m; k++) {
-            const u0 = k / m, u1 = (k + 1) / m;
-            const c0 = C[k], c1 = C[k + 1];
-            pushVert(L[k].x, L[k].y, u0, 1, c0[0], c0[1], c0[2], c0[3], mode, H[k], 0, 0, currentClip, 0);
-            pushVert(L[k + 1].x, L[k + 1].y, u1, 1, c1[0], c1[1], c1[2], c1[3], mode, H[k + 1], 0, 0, currentClip, 0);
-            pushVert(R[k].x, R[k].y, u0, -1, c0[0], c0[1], c0[2], c0[3], mode, H[k], 0, 0, currentClip, 0);
+          const arcU = [0];
+          let arcLen = 0;
+          for (let k = 1; k <= m; k++) {
+            arcLen += Math.hypot(sec[k].x - sec[k - 1].x, sec[k].y - sec[k - 1].y);
+            arcU.push(arcLen);
+          }
 
-            pushVert(R[k].x, R[k].y, u0, -1, c0[0], c0[1], c0[2], c0[3], mode, H[k], 0, 0, currentClip, 0);
-            pushVert(L[k + 1].x, L[k + 1].y, u1, 1, c1[0], c1[1], c1[2], c1[3], mode, H[k + 1], 0, 0, currentClip, 0);
-            pushVert(R[k + 1].x, R[k + 1].y, u1, -1, c1[0], c1[1], c1[2], c1[3], mode, H[k + 1], 0, 0, currentClip, 0);
+          for (let k = 0; k < m; k++) {
+            const u0 = arcLen > 0.001 ? arcU[k] / arcLen : k / m;
+            const u1 = arcLen > 0.001 ? arcU[k + 1] / arcLen : (k + 1) / m;
+            const c0 = C[k], c1 = C[k + 1];
+            const wk = L[k].w, wk1 = L[k + 1].w;
+            pushVert(L[k].x, L[k].y, u0, wk, c0[0], c0[1], c0[2], c0[3], mode, H[k], wk, 0, currentClip, 0);
+            pushVert(L[k + 1].x, L[k + 1].y, u1, wk1, c1[0], c1[1], c1[2], c1[3], mode, H[k + 1], wk1, 0, currentClip, 0);
+            pushVert(R[k].x, R[k].y, u0, -wk, c0[0], c0[1], c0[2], c0[3], mode, H[k], wk, 0, currentClip, 0);
+
+            pushVert(R[k].x, R[k].y, u0, -wk, c0[0], c0[1], c0[2], c0[3], mode, H[k], wk, 0, currentClip, 0);
+            pushVert(L[k + 1].x, L[k + 1].y, u1, wk1, c1[0], c1[1], c1[2], c1[3], mode, H[k + 1], wk1, 0, currentClip, 0);
+            pushVert(R[k + 1].x, R[k + 1].y, u1, -wk1, c1[0], c1[1], c1[2], c1[3], mode, H[k + 1], wk1, 0, currentClip, 0);
           }
         }
       }
