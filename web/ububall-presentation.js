@@ -2304,8 +2304,8 @@
       }
     }
 
-    // Sample 4-tick dashes & gaps so spacing tracks speed down to round dots (~1 dash width),
-    // bending around reported collision vertices and widening slow gaps to >= 1 clear width.
+    // Sample 4-tick dashes & gaps so spacing tracks speed smoothly down to round dots,
+    // bending around collisions and clamping slow gaps continuously at minGapPx without integer-tick jumps.
     function buildTickDashes(points, minDashPx, minGapPx) {
       if (!points || points.length < 2) return null;
       const p0 = points[0];
@@ -2324,42 +2324,83 @@
       let trail = [p0];
       let dashArc = 0;
       let gapArc = 0;
-      let anchorTick = p0.tick ?? 0;
-      let prev = p0;
+      let segStart = p0;
+      let segTickStart = p0.tick ?? 0;
+      let targetTick = segTickStart + DASH_TICKS;
+      let i = 1;
 
-      for (let i = 1; i < points.length; i++) {
+      while (i < points.length) {
         const p = points[i];
         const pt = p.tick ?? (i * 4);
-        const segLen = Math.hypot(p.x - prev.x, p.y - prev.y);
-        const dt = pt - anchorTick;
+        const startT = segStart.tick ?? segTickStart;
+        const segDt = pt - startT;
+        const dx = p.x - segStart.x, dy = p.y - segStart.y;
+        const segLen = Math.hypot(dx, dy);
 
         if (inDash) {
-          dashArc += segLen;
-          if (dt >= DASH_TICKS) {
+          if (pt + 1e-6 >= targetTick) {
+            const frac = segDt > 1e-6 ? Math.max(0, Math.min(1, (targetTick - startT) / segDt)) : 1;
+            const endPt = frac >= 1 - 1e-6 ? p : {
+              x: segStart.x + dx * frac,
+              y: segStart.y + dy * frac,
+              tick: targetTick
+            };
+            dashArc += segLen * frac;
             if (dashArc >= minDashPx) {
-              pushDashTrail(out, trail, p);
+              pushDashTrail(out, trail, endPt);
               inDash = false;
               gapArc = 0;
-              anchorTick = pt;
+              segTickStart = endPt.tick;
             } else {
               // Still stationary: keep anchor advancing so delayed hits start at impact tick
-              trail = [p];
+              trail = [endPt];
               dashArc = 0;
-              anchorTick = pt;
+              targetTick = endPt.tick + DASH_TICKS;
             }
-          } else if (p.hit) {
-            trail.push(p);
+            segStart = endPt;
+            if (frac >= 1 - 1e-6) i++;
+            continue;
           }
+          dashArc += segLen;
+          if (p.hit) trail.push(p);
+          else if (trail.length > 0 && segLen > 0.01 && points[i + 1]) {
+            const lastW = trail[trail.length - 1];
+            const wdx = p.x - lastW.x, wdy = p.y - lastW.y, wLen = Math.hypot(wdx, wdy);
+            const ndx = points[i + 1].x - p.x, ndy = points[i + 1].y - p.y, nLen = Math.hypot(ndx, ndy);
+            if (wLen > 0.01 && nLen > 0.01 && (wdx * ndx + wdy * ndy) < 0.995 * wLen * nLen) {
+              trail.push(p);
+            }
+          }
+          segStart = p;
+          i++;
         } else {
-          gapArc += segLen;
-          if (dt >= GAP_TICKS && gapArc >= minGapPx) {
+          const gapTargetTick = segTickStart + GAP_TICKS;
+          const ft = pt + 1e-6 >= gapTargetTick
+            ? (segDt > 1e-6 ? Math.max(0, (gapTargetTick - startT) / segDt) : 0)
+            : 2;
+          const fd = gapArc + segLen + 1e-6 >= minGapPx
+            ? (segLen > 1e-6 ? Math.max(0, (minGapPx - gapArc) / segLen) : 0)
+            : 2;
+          const frac = Math.max(ft, fd);
+          if (frac <= 1 + 1e-6) {
+            const cFrac = Math.min(1, frac);
+            const endPt = cFrac >= 1 - 1e-6 ? p : {
+              x: segStart.x + dx * cFrac,
+              y: segStart.y + dy * cFrac,
+              tick: startT + segDt * cFrac
+            };
             inDash = true;
-            trail = [p];
+            trail = [endPt];
             dashArc = 0;
-            anchorTick = pt;
+            targetTick = endPt.tick + DASH_TICKS;
+            segStart = endPt;
+            if (cFrac >= 1 - 1e-6) i++;
+            continue;
           }
+          gapArc += segLen;
+          segStart = p;
+          i++;
         }
-        prev = p;
       }
 
       const last = points[points.length - 1];
