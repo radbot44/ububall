@@ -1761,6 +1761,16 @@
       softRibbon(points, p => s.width * .85 * (.4 + .6 * p.depth) * thin, '#000000', prevPoint, s.age >= .25 || P.settled(getView().bodies));
     }
 
+    function burnPoofStops(fade) {
+      return [
+        [0.00, `rgba(29, 10, 3, ${(0.56 * fade).toFixed(3)})`],
+        [0.30, `rgba(34, 12, 4, ${(0.46 * fade).toFixed(3)})`],
+        [0.55, `rgba(45, 17, 5, ${(0.30 * fade).toFixed(3)})`],
+        [0.78, `rgba(56, 21, 6, ${(0.12 * fade).toFixed(3)})`],
+        [1.00, 'rgba(56, 21, 6, 0)']
+      ];
+    }
+
     function paintBurnPoof(ctx, s) {
       const age = Math.floor(s.age * 4) / 4;
       const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
@@ -1768,11 +1778,7 @@
       const r = s.radius || 30;
       ctx.save();
       const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
-      grad.addColorStop(0, `rgba(0, 0, 0, ${(0.82 * fade).toFixed(3)})`);
-      grad.addColorStop(0.35, `rgba(12, 5, 2, ${(0.75 * fade).toFixed(3)})`);
-      grad.addColorStop(0.65, `rgba(45, 18, 6, ${(0.55 * fade).toFixed(3)})`);
-      grad.addColorStop(0.85, `rgba(45, 18, 6, ${(0.25 * fade).toFixed(3)})`);
-      grad.addColorStop(1, 'rgba(45, 18, 6, 0)');
+      for (const [offset, col] of burnPoofStops(fade)) grad.addColorStop(offset, col);
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
@@ -1780,14 +1786,14 @@
       ctx.restore();
     }
 
-    // The wall scorch's warm umber fades gradually into soot, without a separate core stripe.
-    const BURN_COLORS = ['#2d1206', '#291106', '#200e05', '#120802', '#000000'];
+    // Darker reddish-brown ember scorch gradient matching burnPoofStops without a separate core stripe.
+    const BURN_COLORS = ['#381506', '#311205', '#290f04', '#220c04', '#1d0a03'];
     function paintBurnSlice(ctx, s, points, prevPoint = null) {
       if (!points || points.length < 2) return;
       const age = Math.floor(s.age * 4) / 4;
       const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
       if (fade <= 0.005) return;
-      ctx.globalAlpha = .42 * fade;
+      ctx.globalAlpha = .60 * fade;
       softRibbon(points, p => s.width * (.5 + .5 * p.depth), BURN_COLORS, prevPoint, s.age >= .25 || P.settled(getView().bodies));
     }
 
@@ -3708,14 +3714,7 @@
           const fade = 1 - t * t * (3 - 2 * t);
           if (fade <= 0.005) continue;
           if (s.poof) {
-            const r = s.radius || 30;
-            gpu.drawRadialStops(s.x, s.y, r, [
-              [0.00, `rgba(0, 0, 0, ${(0.82 * fade).toFixed(3)})`],
-              [0.35, `rgba(12, 5, 2, ${(0.75 * fade).toFixed(3)})`],
-              [0.65, `rgba(45, 18, 6, ${(0.55 * fade).toFixed(3)})`],
-              [0.85, `rgba(45, 18, 6, ${(0.25 * fade).toFixed(3)})`],
-              [1.00, 'rgba(45, 18, 6, 0)']
-            ], 1, 24);
+            gpu.drawRadialStops(s.x, s.y, s.radius || 30, burnPoofStops(fade), 1, 24);
           } else if (s.points && s.points.length >= 2) {
             gpu.drawSoftRibbon(s.points, p => s.width * (0.5 + 0.5 * p.depth), true, fade, hardIce);
           }
@@ -3896,6 +3895,7 @@
         }
       };
 
+      let predictedGoalBloom = null;
       if (phase === 'plan' && !bench?.flags.noPredictAll) {
         const key = predictionKey();
         const t0 = bench?.rec ? clockNow() : 0;
@@ -3908,7 +3908,7 @@
           const pred = predictionCache.data;
           drawPredictionOverlayWebGL(pred);
 
-          // Pulsing predicted goal glow
+          // Pulsing predicted goal glow (single mitered/rounded-rect SDF strokes to avoid overlapping corner caps)
           if (pred.goal !== null && pred.goalTick != null) {
             const defSide = pred.goal === 1 ? 0 : 1;
             const col = defSide === 0 ? home : away;
@@ -3920,19 +3920,15 @@
             const alpha = Math.min(1, (0.25 + 0.15 * (1 - u)) + ((0.45 + 0.55 * u) - (0.25 + 0.15 * (1 - u))) * pulse);
             const depth = P.rink.goalDepth;
             const mouthX = defSide ? 940 : 60, backX = defSide ? 940 + depth : 60 - depth;
-            gpu.fillRect(Math.min(mouthX, backX), 230, depth, 140, col, (0.04 + 0.16 * u) * (0.6 + 0.4 * pulse));
-            const netW = 4 + 3 * u, mouthW = 5 + 4 * u;
+            const goalX = Math.min(mouthX, backX), goalCx = goalX + depth * 0.5;
+            gpu.fillRect(goalX, 230, depth, 140, col, (0.04 + 0.16 * u) * (0.6 + 0.4 * pulse));
+            const netW = 4.5 + 3.5 * u;
             if (!noBlur) {
               const glowW = netW + 10 + 10 * u * pulse;
-              gpu.strokeLine(mouthX, 230, backX, 230, col, glowW, alpha * 0.28);
-              gpu.strokeLine(backX, 230, backX, 370, col, glowW, alpha * 0.28);
-              gpu.strokeLine(mouthX, 370, backX, 370, col, glowW, alpha * 0.28);
-              gpu.strokeLine(mouthX, 230, mouthX, 370, col, mouthW + 12, alpha * 0.32);
+              gpu.fillRoundRect(goalCx, 300, depth, 140, 0, col, alpha * 0.24, glowW);
+              predictedGoalBloom = { cx: goalCx, depth, col, netW: netW + 4, alpha: alpha * 0.65 };
             }
-            gpu.strokeLine(mouthX, 230, backX, 230, col, netW, alpha);
-            gpu.strokeLine(backX, 230, backX, 370, col, netW, alpha);
-            gpu.strokeLine(mouthX, 370, backX, 370, col, netW, alpha);
-            gpu.strokeLine(mouthX, 230, mouthX, 370, col, mouthW, alpha);
+            gpu.fillRoundRect(goalCx, 300, depth, 140, 0, col, alpha, netW);
           }
         }
         if (bench?.rec) {
@@ -4561,6 +4557,9 @@
             gpu.fillCircle(p.x, p.y, r, col, Math.min(1, fade * 1.8) * (p.flame ? 0.72 : 0.62));
           }
         }
+        if (predictedGoalBloom) {
+          gpu.fillRoundRect(predictedGoalBloom.cx, 300, predictedGoalBloom.depth, 140, 0, predictedGoalBloom.col, predictedGoalBloom.alpha, predictedGoalBloom.netW);
+        }
         if (fx.goalSweep) {
           const sweep = fx.goalSweep, sColor = sweep.team ? away : home;
           const p = sweep.p, sx = sweep.team ? 60 + p * 880 : 940 - p * 880;
@@ -4707,7 +4706,11 @@
         });
         const sel = view.bodies[getSelected()];
         if (sel) gpu.strokeCircle(sel.x, sel.y, sel.radius + 8, text, 2, 1);
-        if (ball) gpu.strokeCircle(ball.x, ball.y, ball.radius, text, 2, 1);
+        if (ball) {
+          gpu.strokeCircle(ball.x, ball.y, ball.radius, text, 2, 1);
+          const hot = ballOnFire() || (ball.team === -1 && P.ballOnFire?.(ball));
+          drawBallGlyph(ball.x, ball.y, ball.radius, ball.rotation + (view.portrait ? Math.PI / 2 : 0), hot, ball.strikerTeam);
+        }
       }
 
       // Badge & UI Overlays (in exact badgeCanvas order)
@@ -5386,6 +5389,22 @@
       }
 
       const ball = view.bodies[6];
+      const drawBallFace2D = () => {
+        if (!ball) return;
+        const size = ball.radius * 1.7;
+        const hot = ballOnFire() || (ball.team === -1 && P.ballOnFire?.(ball));
+        const paceTeam = ball.strikerTeam;
+        view.ctx.save(); view.ctx.translate(ball.x, ball.y); view.ctx.rotate(ball.rotation + (view.portrait ? Math.PI / 2 : 0));
+        if (hot && paceTeam !== undefined && paceTeam >= 0) {
+          const teamColor = paceTeam === 0 ? home : away;
+          drawBallFace(view.ctx, size, teamColor, teamColor);
+        } else if (ballMark.complete && ballMark.naturalWidth) {
+          view.ctx.drawImage(ballMark, -size / 2, -size / 2, size, size);
+        } else {
+          drawBallFace(view.ctx, size, '#F8F7F4', '#FF7197');
+        }
+        view.ctx.restore();
+      };
       if (ball) {
         const fw = fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion() ? fx.fireWarp : null;
         let warpScaleX = 1, warpScaleY = 1, warpAngle = 0;
@@ -5427,23 +5446,7 @@
           view.ctx.save(); view.ctx.globalAlpha = Math.min(1, .75 * glow); view.ctx.shadowColor = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat)); view.ctx.shadowBlur = bench?.flags.noGlowBlur ? 0 : (16 + flare * 12) * glow * view.canvas.width / 1000;
           view.ctx.beginPath(); view.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); view.ctx.fillStyle = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat)); view.ctx.fill(); view.ctx.restore();
         }
-        const size = ball.radius * 1.7;
-        const hot = ballOnFire() || (ball.team === -1 && P.ballOnFire?.(ball));
-        const paceTeam = ball.strikerTeam;
-        if (hot && paceTeam !== undefined && paceTeam >= 0) {
-          const teamColor = paceTeam === 0 ? home : away;
-          view.ctx.save(); view.ctx.translate(ball.x, ball.y); view.ctx.rotate(ball.rotation + (view.portrait ? Math.PI / 2 : 0));
-          drawBallFace(view.ctx, size, teamColor, teamColor);
-          view.ctx.restore();
-        } else if (ballMark.complete && ballMark.naturalWidth) {
-          view.ctx.save(); view.ctx.translate(ball.x, ball.y); view.ctx.rotate(ball.rotation + (view.portrait ? Math.PI / 2 : 0));
-          view.ctx.drawImage(ballMark, -size / 2, -size / 2, size, size);
-          view.ctx.restore();
-        } else {
-          view.ctx.save(); view.ctx.translate(ball.x, ball.y); view.ctx.rotate(ball.rotation + (view.portrait ? Math.PI / 2 : 0));
-          drawBallFace(view.ctx, size, '#F8F7F4', '#FF7197');
-          view.ctx.restore();
-        }
+        drawBallFace2D();
         view.ctx.restore();
         view.bodies.slice(0, 6).forEach(b => { if (!b.carded) drawSpin(b, b.team ? away : home); });
         drawSpin(ball, text);
@@ -5576,7 +5579,10 @@
         });
         const sel = view.bodies[getSelected()];
         if (sel) circle(sel.x, sel.y, sel.radius + 8, text, 2);
-        if (ball) circle(ball.x, ball.y, ball.radius, text, 2);
+        if (ball) {
+          circle(ball.x, ball.y, ball.radius, text, 2);
+          drawBallFace2D();
+        }
       }
 
       drawFieldOver(colors);

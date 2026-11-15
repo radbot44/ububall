@@ -232,11 +232,11 @@ void main() {
       rgb = isBurn ? vec3(0.11, 0.045, 0.015) : vec3(0.0);
     } else {
       float s = 1.0 - r;
-      // Continuous cumulative feather matching the 5-band warm umber-to-soot profile without a core stripe
+      // Continuous cumulative feather matching the darker reddish-brown profile shared with impact scorches
       float prof = smoothstep(0.0, 0.94, s) * (0.34 + 0.66 * smoothstep(0.06, 0.86, s));
-      alpha = (isBurn ? 0.357 : 0.170) * fade * prof;
+      alpha = (isBurn ? 0.520 : 0.170) * fade * prof;
       rgb = isBurn
-        ? mix(vec3(0.177, 0.071, 0.024), vec3(0.086, 0.037, 0.012), smoothstep(0.12, 0.92, s))
+        ? mix(vec3(0.220, 0.082, 0.024), vec3(0.114, 0.039, 0.012), smoothstep(0.05, 0.78, s))
         : vec3(0.0);
     }
     float outA = alpha * clipMask;
