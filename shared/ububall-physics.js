@@ -1638,10 +1638,13 @@
     startTurn(sim, predictedPlans);
     const paths = sim.map(b => [{ x: b.x, y: b.y, tick: 0 }]);
     const impacts = [], lastImpact = new Map(), guards = new Map(), ball = sim.find(b => b.team === -1), ballIndex = sim.indexOf(ball);
+    const hitThisTick = new Set();
     let goal = null, ticks = 0, ignition = null, burning = ballOnFire(ball);
     let goalTargets = null, goalTick = null;
     function recordImpact(b) {
-      const index = sim.indexOf(b), last = lastImpact.get(index);
+      const index = sim.indexOf(b);
+      if (index >= 0) hitThisTick.add(index);
+      const last = lastImpact.get(index);
       if (last && (ticks - last.tick < 12 || Math.hypot(b.x - last.x, b.y - last.y) < 8)) return;
       const marker = { index, x: b.x, y: b.y, radius: b.radius, reach: b.team < 0 ? b.radius : Math.max(b.radius, b.reach || b.radius), tick: ticks };
       lastImpact.set(index, marker);
@@ -1654,6 +1657,7 @@
       if (ubu?.guarding && !guards.has(index) && (plow || iron || (ballOnFire(ball) && preStepBallSpeed > 50))) guards.set(index, !plow);
     };
     for (let tick = 1; tick <= PREDICTION_TICKS; tick++) {
+      hitThisTick.clear();
       ticks = tick;
       preStepBallSpeed = ball ? Math.hypot(ball.vx, ball.vy) : 0;
       if (goal !== null) {
@@ -1664,15 +1668,18 @@
           goal = stepGoal;
           goalTick = tick;
           goalTargets = sim.map((b, i) => ({ x: b.x, y: b.y, index: i, team: b.team }));
-          if (ball && ballIndex >= 0) paths[ballIndex].push({ x: ball.x, y: ball.y, tick });
+          if (ball && ballIndex >= 0) paths[ballIndex].push({ x: ball.x, y: ball.y, tick, ...(hitThisTick.has(ballIndex) ? { hit: true } : null) });
         }
       }
       if (ball && !burning && ballOnFire(ball)) { burning = true; ignition = { x: ball.x, y: ball.y, tick, team: ball.strikerTeam }; }
       const done = settled(sim, goal !== null) || tick === PREDICTION_TICKS;
-      if (tick % 4 === 0 || done) {
+      if (tick % 4 === 0 || done || hitThisTick.size > 0) {
         sim.forEach((b, i) => {
           if (goal !== null && b === ball) return;
-          paths[i].push({ x: b.x, y: b.y, tick });
+          const hit = hitThisTick.has(i);
+          if (tick % 4 === 0 || done || hit) {
+            paths[i].push({ x: b.x, y: b.y, tick, ...(hit ? { hit: true } : null) });
+          }
         });
       }
       if (done) break;

@@ -2289,8 +2289,23 @@
       return k;
     }
 
-    // Sample 4-tick dashes & gaps so spacing reflects speed, extending across multiple
-    // 4-tick steps below minDashPx/minGapPx so slow tails never stack overlapping caps.
+    // Emit a polyline dash across a list of waypoints [anchor, ...collisionPts, end].
+    function pushDashTrail(out, trail, endPt) {
+      const len = endPt && endPt !== trail[trail.length - 1] ? trail.length + 1 : trail.length;
+      if (len < 2) return;
+      for (let i = 0; i < len - 1; i++) {
+        const a = trail[i];
+        const b = i + 1 < trail.length ? trail[i + 1] : endPt;
+        const at = a.tick ?? 0;
+        const bt = b.tick ?? 0;
+        if (Math.hypot(b.x - a.x, b.y - a.y) > 0.001 || len === 2) {
+          out.push(a.x, a.y, at, b.x, b.y, bt);
+        }
+      }
+    }
+
+    // Sample 4-tick dashes & gaps so spacing tracks speed down to round dots (~1 dash width),
+    // bending around reported collision vertices and widening slow gaps to >= 1 clear width.
     function buildTickDashes(points, minDashPx, minGapPx) {
       if (!points || points.length < 2) return null;
       const p0 = points[0];
@@ -2306,49 +2321,50 @@
       const GAP_TICKS = 4;
       const out = [];
       let inDash = true;
-      let anchor = p0;
+      let trail = [p0];
+      let dashArc = 0;
+      let gapArc = 0;
       let anchorTick = p0.tick ?? 0;
+      let prev = p0;
 
       for (let i = 1; i < points.length; i++) {
         const p = points[i];
         const pt = p.tick ?? (i * 4);
-        const prev = points[i - 1];
-        const prevT = prev.tick ?? ((i - 1) * 4);
-
-        const sdx = p.x - prev.x, sdy = p.y - prev.y;
-        const sLen = Math.hypot(sdx, sdy);
-        const adxPrev = prev.x - anchor.x, adyPrev = prev.y - anchor.y;
-        const chordPrev = Math.hypot(adxPrev, adyPrev);
-        if (sLen > 0.01 && chordPrev > 0.5) {
-          const dot = (adxPrev / chordPrev) * (sdx / sLen) + (adyPrev / chordPrev) * (sdy / sLen);
-          if (dot < 0.35 && inDash && chordPrev >= 1.0) {
-            out.push(anchor.x, anchor.y, anchorTick, prev.x, prev.y, prevT);
-            inDash = false;
-            anchor = prev;
-            anchorTick = prevT;
-          }
-        }
-
-        const dx = p.x - anchor.x, dy = p.y - anchor.y;
-        const chord = Math.hypot(dx, dy);
+        const segLen = Math.hypot(p.x - prev.x, p.y - prev.y);
         const dt = pt - anchorTick;
+
         if (inDash) {
-          if (dt >= DASH_TICKS && chord >= minDashPx) {
-            out.push(anchor.x, anchor.y, anchorTick, p.x, p.y, pt);
-            inDash = false;
-            anchor = p;
+          dashArc += segLen;
+          if (dt >= DASH_TICKS) {
+            if (dashArc >= minDashPx) {
+              pushDashTrail(out, trail, p);
+              inDash = false;
+              gapArc = 0;
+              anchorTick = pt;
+            } else {
+              // Still stationary: keep anchor advancing so delayed hits start at impact tick
+              trail = [p];
+              dashArc = 0;
+              anchorTick = pt;
+            }
+          } else if (p.hit) {
+            trail.push(p);
+          }
+        } else {
+          gapArc += segLen;
+          if (dt >= GAP_TICKS && gapArc >= minGapPx) {
+            inDash = true;
+            trail = [p];
+            dashArc = 0;
             anchorTick = pt;
           }
-        } else if (dt >= GAP_TICKS && chord >= minGapPx) {
-          inDash = true;
-          anchor = p;
-          anchorTick = pt;
         }
+        prev = p;
       }
 
       const last = points[points.length - 1];
-      if (inDash && anchor !== last && Math.hypot(last.x - anchor.x, last.y - anchor.y) >= minDashPx) {
-        out.push(anchor.x, anchor.y, anchorTick, last.x, last.y, last.tick ?? ((points.length - 1) * 4));
+      if (inDash && dashArc >= minDashPx) {
+        pushDashTrail(out, trail, last);
       }
       return out.length >= 6 ? new Float32Array(out) : null;
     }
@@ -2360,7 +2376,7 @@
       const dashPaths = prediction.paths.map((points, index) => {
         const isBall = bodies[index].team === -1;
         const lineWidth = isBall ? 2.5 : 2;
-        return buildTickDashes(points, 2.5, lineWidth + 3.0);
+        return buildTickDashes(points, 0.05, lineWidth * 2);
       });
       prediction._dashPaths = dashPaths;
       prediction._dashPathsLen = prediction.paths.length;
@@ -2382,11 +2398,13 @@
         ctx.save();
         ctx.setLineDash([]);
         ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         ctx.strokeStyle = color;
         ctx.lineWidth = isBall ? 2.5 : 2;
 
         let curQ = -1;
         let hasPath = false;
+        let prevEndX = NaN, prevEndY = NaN;
         for (let i = 0; i < segs.length; i += 6) {
           const tMid = 0.5 * (segs[i + 2] + segs[i + 5]);
           const fade = tMid <= fadeStartTick ? 1 : Math.max(0, Math.min(1, (prediction.horizon - tMid) * invFade));
@@ -2397,10 +2415,16 @@
             ctx.globalAlpha = (q / QUANT) * baseAlpha;
             ctx.beginPath();
             hasPath = false;
+            prevEndX = NaN;
+            prevEndY = NaN;
             curQ = q;
           }
-          ctx.moveTo(segs[i], segs[i + 1]);
+          if (segs[i] !== prevEndX || segs[i + 1] !== prevEndY) {
+            ctx.moveTo(segs[i], segs[i + 1]);
+          }
           ctx.lineTo(segs[i + 3], segs[i + 4]);
+          prevEndX = segs[i + 3];
+          prevEndY = segs[i + 4];
           hasPath = true;
         }
         if (hasPath) ctx.stroke();

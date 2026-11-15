@@ -544,9 +544,30 @@ test('paintPrediction skips stationary bodies, builds 4-tick round-capped dashes
 
   presenter.paintPrediction(prediction, '#E8CA48', '#AA54D3');
   assert.equal(ops.clips, 0, 'skips rounded-rink + goal clip mask when prediction.impacts is empty');
-  assert.equal(ops.lineTos.length, 20, `expected 20 4-tick dashes across moving path without stacking 50-pt tail or 726 stationary pts, got ${ops.lineTos.length}`);
+  assert.equal(ops.lineTos.length, 21, `expected 20 4-tick dashes + 1 slow tail dot without stacking remaining 49 tail or 726 stationary pts, got ${ops.lineTos.length}`);
   assert.equal(ops.vertices.some(([x, y]) => Math.abs(x - 300) < 1e-6 && Math.abs(y - 60) < 1e-6), true, 'preserves exact wall-bounce apex vertex');
   assert.equal(ops.lineCaps[0], 'round', 'renders prediction dashes with round caps');
+
+  // Verify sub-4-tick collision vertex mid-dash bends through exact bounce apex rather than cutting straight across
+  ops.vertices.length = 0;
+  ops.lineTos.length = 0;
+  presenter.paintPrediction({
+    paths: [[
+      { x: 200, y: 100, tick: 0 },
+      { x: 206, y: 108, tick: 2, hit: true },
+      { x: 212, y: 100, tick: 4 }
+    ]],
+    impacts: [], stops: [], horizon: 480, guards: [], ignition: null, goalTargets: null
+  }, '#E8CA48', '#AA54D3');
+  assert.equal(ops.lineTos.length, 2, 'bends single 4-tick dash through mid-interval collision vertex');
+  assert.equal(ops.vertices.some(([x, y]) => Math.abs(x - 206) < 1e-6 && Math.abs(y - 108) < 1e-6), true, 'hits exact sub-4-tick collision apex');
+
+  // Verify real predictTurn records wall collisions on exact collision ticks
+  const wallBodies = P.kickoff();
+  wallBodies[0].x = 500;
+  wallBodies[0].y = 82;
+  const wallPred = P.predictTurn(wallBodies, [{ angle: -Math.PI / 2, power: 1, spin: 0 }]);
+  assert.ok(wallPred.paths[0].some(pt => pt.hit), 'predictTurn records collision points in body paths');
 
   // Verify non-empty impacts still clips and renders stamp
   prediction.impacts = [{ index: 0, x: 300, y: 80, radius: 25, reach: 28, tick: 80 }];
