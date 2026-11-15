@@ -151,9 +151,28 @@ Every ubu's back is a hexagon of oomarks on its background colour and material. 
 
 ## Colors
 
-Each color field is an integer from 0 to 31 indexing the exact palette order in README.md. All colors are equally likely. Choices are independent, allow repetition, and have no contrast correction. Both eyes share one eye color, both irises share one iris color, and both pupils share one pupil color.
+Each color field is an integer from 0 to 31 indexing the **canonical palette below**. All colors are equally likely and chosen independently, with repetition permitted and no automatic contrast correction. Both eyes share one eye color, both irises share one iris color, and both pupils share one pupil color. Palette order, names and hex values are permanent.
 
-The palette indices, names and hex values in README.md are permanent. No additional color capabilities are planned.
+The ordered 32-color palette defines five color roles, each drawing one equally likely color from 5 random bits. Palette order, hex values and field mappings are permanent.
+
+| Index | Color | Hex | Index | Color | Hex |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 0 | Coral | #FF7D69 | 16 | Cobalt | #2659AC |
+| 1 | Sienna | #A56C57 | 17 | Cornflower | #477AE7 |
+| 2 | Copper | #CD7847 | 18 | Indigo | #4F5FC2 |
+| 3 | Tangerine | #FF9954 | 19 | Periwinkle | #9E9EED |
+| 4 | Ochre | #B68720 | 20 | Iris | #C5A3FF |
+| 5 | Saffron | #E8CA48 | 21 | Amethyst | #AA54D3 |
+| 6 | Chartreuse | #B4D858 | 22 | Aubergine | #673C75 |
+| 7 | Olive | #758C3D | 23 | Orchid | #DA4DB5 |
+| 8 | Emerald | #42C66B | 24 | Mulberry | #9D467A |
+| 9 | Mint | #B9ECCD | 25 | Burgundy | #7C3349 |
+| 10 | Seafoam | #89D8B5 | 26 | Rose | #FF7197 |
+| 11 | Forest | #21845B | 27 | Vermilion | #EE4455 |
+| 12 | Teal | #138F99 | 28 | Alabaster | #F8F6F2 |
+| 13 | Turquoise | #47C8DE | 29 | Slate | #706D77 |
+| 14 | Sky | #76B9EF | 30 | Gunmetal | #292E38 |
+| 15 | Volt | #0066FF | 31 | Onyx | #101217 |
 
 ## Name seed and the uburithm
 
