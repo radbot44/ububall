@@ -1,12 +1,12 @@
 # CPU planning and simulation
 
-The local CPU evaluates complete three-player plans through `ububallMatch.resolveTurn` (`fastSearch: true`, `fastTick: true`), using the canonical gameplay physics, 240 Hz timestep, 12-second turn cap (1 second in Pulse), explicit guard braking, supers, stun, and meter rules. It never receives the human's planned arrows or super arming choices, and judges every turn fresh without requiring match history so single-turn replays remain self-contained; on `hard` and above, optional resolved-turn `history` adapts opponent predictions to repeated setups and tendencies. Browser planning runs in a Web Worker from the public state captured at the start of the turn. Launch waits for that plan; a reset cancels old work. Worker failure or a ten-second timeout falls back to the heuristic planner.
+The local CPU evaluates complete three-player plans through `ububallMatch.resolveTurn` (`fastSearch: true`, `fastTick: true`), using the canonical gameplay physics, 240 Hz timestep, 12-second turn cap (1 second in Pulse), explicit guard braking, supers, stun, and meter rules. It never receives the human's planned arrows or super arming choices, and judges every turn fresh without requiring match history so single-turn replays remain self-contained; on `hard` and above, optional resolved-turn `history` adapts opponent predictions to repeated setups (including alternating kickoff patterns) and offensive/defensive tendencies. Browser planning runs in a Web Worker from the public state captured at the start of the turn. Launch waits for that plan; a reset cancels old work. Worker failure or a ten-second timeout falls back to the heuristic planner.
 
-The planner seeds search from the personality heuristic (`cpuPlans`), then builds a coordinated three-player play portfolio (`jointTeamPlays`): open-aperture goal aiming (`scanGoalAperture`), goalie screen-clearing checks paired with simultaneous sniper shots, synchronized Tape-to-Tape `Snap` one-timers, `Pack Draft` slipstream breakaways, corner `Rim-Around` exits, dynamic shot-cone goalie coverage (`shotConePoint`, always outside the 80 px crease), and dedicated `Sticky` ball-carrier drives and takedowns. Search interleaves single-skater options by tactical intent, then spends its refinement budget in a two-gear (coarse-to-fine) perturbation loop concentrating edits on skaters that actively participate in the rollout (`activeMask`).
+The planner seeds search from the personality heuristic (`cpuPlans`), then builds a coordinated three-player play portfolio (`jointTeamPlays`) alongside single-skater options: open-aperture goal aiming (`scanGoalAperture`), goalie screen-clearing checks and `Shockwave` crease blasts paired with simultaneous sniper shots, two-turn goalie-knockout slot parks and wing-space chips, synchronized Tape-to-Tape `Snap` one-timers, `Pack Draft` slipstream breakaways, corner `Rim-Around` exits, coordinated two-skater defensive fire drills and wing breakouts, non-contact `Magnet` fly-by pulls and slot yanks, dynamic shot-cone goalie coverage (`shotConePoint`, always outside the 80 px crease), and dedicated `Sticky` ball-carrier drives and takedowns. Search interleaves single-skater options by tactical intent, then spends its refinement budget in a two-gear (coarse-to-fine) perturbation loop concentrating edits on skaters that actively participate in the rollout (`activeMask`).
 
-To maximize tactical strength per simulation, multi-opponent presets use a quick first-pass `r = 0` gate plus inline challenger wobble: obvious duds are dropped after a single rollout against an apples-to-apples baseline reference, while contenders run full multi-opponent vetting and execution `wobble` inline (preventing fragile 1-px flukes or own-goal traps from hijacking hill-climbing). When a Standard or Classic rollout truncates at its tick horizon, `evaluateBodies` projects 4-substep curved ball coast and skater stopping slides (including post-horizon crease-camping warnings and cards) and scores antisymmetric positional features (`strikeAccess`, `coneCover`, `shotChance`) alongside `WEIGHTS` (`chance: 200`, `access: 0.7`, `cover: 0.6`).
+To maximize tactical strength per simulation, multi-opponent presets use a worst-case-aware `r = 0` gate (`bestMin` cap so one-sided blunders never prune plays that beat guarding goalies) plus inline challenger wobble (`ensureWobbled`). When a Standard or Classic rollout truncates at its tick horizon, `evaluateBodies` projects curved skater stopping slides and a 6-substep skater-aware ball coast—stopping blocked shots at goalies while awarding discounted impending-goal equity when an unobstructed ball crosses the open goal mouth after the cutoff—alongside post-horizon crease-camping warnings/cards, charged 100-meter Super reserve equity, and antisymmetric positional features (`strikeAccess`, `coneCover`, `shotChance`) weighted by `WEIGHTS` (`chance: 200`, `access: 0.7`, `cover: 0.6`). In Pulse mode, `evaluateBodies` keeps skater and ball positional features synchronized at turn-end coordinates while projecting carry-over ball velocity and unstoppable imminent goal-mouth crossings.
 
-On `hard`, `insane`, and `god`, top distinct tactical basins also run a bounded adversarial counter-search (`findCounter`, 1–2 rounds) to uncover opponent punishes that static scenario presets miss.
+On `hard`, `insane`, and `god`, top distinct tactical basins run a trajectory-aware adversarial counter-search (`findCounter`, 1–2 rounds) targeting ball-path midpoints, goal-mouth plugs, and active playmakers, and re-verify any newly promoted runner-up basin with execution `wobble`. On `insane` and `god`, whenever no forced Turn-1 goal is already locked, top distinct finalists bridge through canonical `finishTurn` settlement (`preservePartial: false`: applying knockout stuns, penalty cards, expired Standard supers, 25% whiff refunds, and carried Pulse momentum/supers) into a bounded simultaneous-move Turn-2 micro-game (`lookaheadTop`, `lookaheadBreadth`, `lookaheadBudget`), with `god` chaining up to 3 continuous turns (`pulseDepth: 3`) in Pulse mode.
 
 ## Difficulty presets
 
@@ -16,11 +16,11 @@ Choose a CPU difficulty in **New match**. The initial default is Medium.
 | --- | --- | ---: | ---: | ---: |
 | `easy` | Easy | 14 | 1 (Heuristic) | 240 |
 | `medium` | Medium | 48 | 2 (+ Guard brake) | 420 |
-| `hard` | Hard | 84 | 3 (+ Open-corner sniper, striker check blitz & counter-search) | 500 |
-| `insane` | Insane | 150 | 4 (+ Multi-attacker rush, dual-skater refine & counter-search) | 580 |
-| `god` | Ububall God | 240 | 4 (+ Full 720-tick vision, dual wobble, dual refine & 2-round counter-search) | 720 |
+| `hard` | Hard | 84 | 3 (+ Open-corner sniper, striker check blitz, trajectory counter-search & history learning) | 500 |
+| `insane` | Insane | 150 | 4 (+ Multi-attacker rush, dual refine, counter-search, multi-pattern learning & 2-turn finalist look-ahead) | 580 |
+| `god` | Ububall God | 240 | 4 (+ 720-tick rollout + 1.35s coast, dual wobble/refine, 2-round counter-search, dual-bridge 2-turn look-ahead & 3-turn Pulse chain) | 720 |
 
-Each candidate blends its average and worst outcome across the active opponent scenarios (`risk` weights: `.15`, `.35`, `.53`, `.55`, `.55`). Final selection deduplicates quantized tactical basins (`planBasinKey`) before Boltzmann sampling (`temperature`: `45`, `3.0`, `1.5`, `0.8`, `0.4`) so repeated local tweaks never drown out a sharp pass or bank shot. Team personality traits (`aggression`, `creativity`, `teamwork`, `clutch`) express style at equal strength through a bounded tie-break bias (`±8`) among near-optimal candidates rather than changing evaluation weights or risk tolerance. DNA and game physics are unchanged.
+Each candidate blends its average and worst outcome across the active opponent scenarios (`risk` weights: `.15`, `.35`, `.53`, `.55`, `.55`), verifying execution `wobble` across all contenders within the final selection window. Final selection deduplicates quantized tactical basins (`planBasinKey`) before Boltzmann sampling (`temperature`: `45`, `3.0`, `1.5`, `0.8`, `0.4`) so repeated local tweaks never drown out a sharp pass or bank shot. Team personality traits (`aggression`, `creativity`, `teamwork`, `clutch`) express style at equal strength through a bounded tie-break bias (`±8`) among near-optimal candidates rather than changing evaluation weights or risk tolerance. DNA and game physics are unchanged.
 
 ## Run comparisons
 
@@ -48,6 +48,8 @@ Pass `--config personal/cpu-experiment.json` with an `a` and/or `b` profile. Eac
     "level": "insane",
     "candidates": 160,
     "opponents": 4,
+    "lookaheadTop": 4,
+    "lookaheadBudget": 56,
     "risk": 0.55,
     "weights": { "goal": 10000, "progress": 1, "access": 0.35, "cover": 0.30, "meter": 0.35 }
   },
@@ -55,7 +57,7 @@ Pass `--config personal/cpu-experiment.json` with an `a` and/or `b` profile. Eac
 }
 ```
 
-Omitted values inherit the preset and default weights in `shared/ububall-cpu.js`. Candidate counts are bounded to 1–1000, opponent scenarios to 1–5, `screenTop` to 1–1000, risk to 0–1 and weights to nonnegative finite values.
+Omitted values inherit the preset and default weights in `shared/ububall-cpu.js`. Candidate counts are bounded to 1–1000, opponent scenarios to 1–5, `lookaheadTop` to 0–20, `lookaheadBreadth` to 2–8, `lookaheadBudget` to 0–400, `pulseDepth` to 1–3, `screenTop` to 1–1000, risk to 0–1 and weights to nonnegative finite values.
 
 ## Measure stat value
 
@@ -76,7 +78,4 @@ CPU search calls `resolveTurn` with `effects: false`, which skips presentation-o
 
 ## Validation notes
 
-In isolated Node 22 benchmarks (`sim:cpu`, Standard mode) on this development machine:
-- `medium` beat `easy` 4–0 (seeds 1–2, both sides, 0 capped; `medium` mean 169–189 ms/turn, `easy` mean 13–31 ms/turn).
-- `hard` beat `medium` 5–1 (seeds 1–3, both sides, 0 capped; `hard` mean 416–468 ms/turn, `medium` mean 178–226 ms/turn).
-- `god` beat `hard` 3–1 (seeds 1–2, both sides, 0 capped; `god` mean 1195–1421 ms/turn, `hard` mean 307–413 ms/turn).
+In isolated Node benchmarks (`sim:cpu`), all 17 CPU suites pass (`Medium` averaging ~108 simulations/turn and `Hard` ~213 simulations/turn across tactical fixtures). Selective 2-turn look-ahead (`Insane` and `Ububall God`) adds ~30–100 bounded short rollouts per non-terminal turn and defeated the 1-turn `Insane` planner 3–1 (`17–12` goals) in swapped-side Pulse matches and `8–5` in swapped-side Standard matches.

@@ -370,3 +370,149 @@ test('Hard+ adapts to resolved history on repeated setups and extreme style trai
   const resWithHist = M.resolveTurn(P, kState, [...blitz, ...withHist.plans], { effects: false });
   assert.notEqual(resWithHist.replay.goal, 0, 'Hard with kickoff blitz history prevents the kickoff blitz goal');
 });
+
+test('truncated coast distinguishes open nets from goalie blocks, Pulse scores unstoppable carry-over rockets, and charged Supers hold reserve value', () => {
+  // 1. Truncated Standard coast sees impending open-net goals and stops at guarding goalies
+  const cState = S.initialState(4, 'standard');
+  cState.bodies.slice(0, 6).forEach((b, i) => Object.assign(b, { x: 500, y: i < 3 ? 110 : 490, vx: 0, vy: 0, meter: 0 }));
+  Object.assign(cState.bodies[3], { x: 340, y: 300 });
+  Object.assign(cState.bodies[6], { x: 220, y: 300, vx: 0, vy: 0 });
+  const openDec = C.plan(cState, 1, { level: 'easy', candidates: 8, searchTicks: 60, seed: 4 });
+  const blockedState = structuredClone(cState);
+  Object.assign(blockedState.bodies[0], { x: 95, y: 300, guarding: true });
+  const blockedDec = C.plan(blockedState, 1, { level: 'easy', candidates: 8, searchTicks: 60, seed: 4 });
+  assert.ok(openDec.diagnostics.score > 7000, `open-net truncated coast awards impending goal equity (got ${openDec.diagnostics.score})`);
+  assert.ok(blockedDec.diagnostics.score < 1000, `goalie in crease blocks truncated coast goal credit (got ${blockedDec.diagnostics.score})`);
+
+  // 2. Pulse end-of-turn velocity look-ahead detects unstoppable goal-mouth rockets antisymmetrically
+  const pState = S.initialState(4, 'pulse');
+  pState.bodies.slice(0, 6).forEach((b, i) => Object.assign(b, { x: 500, y: i < 3 ? 110 : 490, vx: 0, vy: 0, meter: 0 }));
+  Object.assign(pState.bodies[6], { x: 890, y: 300, vx: 0, vy: 0 });
+  const stoppedEval = C.evaluate(pState, 1, null, C.WEIGHTS);
+  pState.bodies[6].vx = 700;
+  const ownNetRocket = C.evaluate(pState, 1, null, C.WEIGHTS);
+  const oppPerspective = C.evaluate(pState, 0, null, C.WEIGHTS);
+  assert.ok(ownNetRocket < stoppedEval - 5000, `Pulse penalizes unstoppable rocket into own net (${ownNetRocket} vs ${stoppedEval})`);
+  assert.ok(Math.abs(ownNetRocket + oppPerspective) < 1e-6, 'Pulse velocity evaluation remains antisymmetric');
+
+  // 3. Charged 100-meter Super reserve discourages zero-gain neutral waste
+  const rState = S.initialState(8, 'standard');
+  rState.bodies.slice(0, 6).forEach(b => { b.meter = 0; });
+  rState.bodies[3].meter = 95;
+  const at95 = C.evaluate(rState, 1, null, C.WEIGHTS);
+  rState.bodies[3].meter = 100;
+  const at100 = C.evaluate(rState, 1, null, C.WEIGHTS);
+  assert.ok(at100 - at95 > 25, `crossing 100 meter adds charged Super reserve equity (delta=${(at100 - at95).toFixed(2)})`);
+});
+
+test('Magnet/Shockwave plays, defensive fire drills, multi-kickoff memory, and offensive habit adaptation work cleanly', () => {
+  // 1. Non-contact Magnet fly-by & Shockwave cluster wedge candidates in options()
+  const supState = S.initialState(11, 'standard');
+  const magnetSuper = P.SUPERS.find(s => s.key === 'magnet');
+  const shockSuper = P.SUPERS.find(s => s.key === 'shockwave');
+  Object.assign(supState.bodies[3], { x: 380, y: 300, meter: 100, equippedSuper: magnetSuper });
+  Object.assign(supState.bodies[6], { x: 460, y: 300 });
+  const magOpts = C.options(supState, 1, 0, C.HOLD);
+  assert.ok(magOpts.some(m => m.superArm && m.power > 0.4), 'Magnet skater ahead of ball generates armed fly-by pull candidates');
+
+  Object.assign(supState.bodies[0], { x: 160, y: 270 });
+  Object.assign(supState.bodies[1], { x: 165, y: 330 });
+  Object.assign(supState.bodies[3], { x: 320, y: 300, meter: 100, equippedSuper: shockSuper });
+  const shockOpts = C.options(supState, 1, 0, C.HOLD);
+  assert.ok(shockOpts.some(m => m.superArm && Math.abs(m.angle - Math.PI) < 0.25 && m.power > 0.4), 'Shockwave skater generates cluster-midpoint crease blast');
+
+  // 2. Coordinated defensive fire drill in jointTeamPlays when own goal is threatened
+  const defCrisis = S.initialState(12, 'standard');
+  Object.assign(defCrisis.bodies[6], { x: 810, y: 300, vx: 0, vy: 0 });
+  Object.assign(defCrisis.bodies[0], { x: 745, y: 300, vx: 0, vy: 0 });
+  Object.assign(defCrisis.bodies[3], { x: 840, y: 180, stunned: true });
+  Object.assign(defCrisis.bodies[4], { x: 760, y: 190, stunned: false });
+  Object.assign(defCrisis.bodies[5], { x: 720, y: 410, stunned: false });
+  const baseDef = C.legacy(defCrisis, 1);
+  const jointDef = C.jointTeamPlays(defCrisis, 1, baseDef, ['defend', 'attack', 'support']);
+  assert.ok(jointDef.length >= 1 && jointDef[0][1].power > 0.3 && jointDef[0][2].power > 0.3, 'Defensive fire drill mobilizes both unstunned skaters during crease crisis');
+
+  // 3. Multi-kickoff memory remembers alternating kickoff plays instead of forgetting play A after decoy B
+  const kState = S.initialState(2, 'standard');
+  kState.roundTurns = 0;
+  const blitzA = [
+    C.strike(kState.bodies[0], kState.bodies[6], 940, 300),
+    C.aim(kState.bodies[1], 760, 220, 220),
+    C.aim(kState.bodies[2], 760, 380, 220)
+  ];
+  const decoyB = [
+    C.aim(kState.bodies[0], 200, 140, 80),
+    C.GUARD,
+    C.GUARD
+  ];
+  const altHistory = [
+    { roundTurns: 0, bodies: kState.bodies.map(b => ({ ...b })), plans: [...blitzA, C.HOLD, C.HOLD, C.HOLD] },
+    { roundTurns: 0, bodies: kState.bodies.map(b => ({ ...b })), plans: [...decoyB, C.HOLD, C.HOLD, C.HOLD] },
+    { roundTurns: 0, bodies: kState.bodies.map(b => ({ ...b })), plans: [...blitzA, C.HOLD, C.HOLD, C.HOLD] },
+    { roundTurns: 0, bodies: kState.bodies.map(b => ({ ...b })), plans: [...decoyB, C.HOLD, C.HOLD, C.HOLD] }
+  ];
+  const learnedKickoffs = C.learnedOpponentResponses(kState, 1, false, altHistory, 2);
+  assert.equal(learnedKickoffs.length, 2, 'retains both alternating kickoff setups');
+  const altDecision = C.plan(kState, 1, { level: 'hard', seed: 19, history: altHistory });
+  const altRes = M.resolveTurn(P, kState, [...blitzA, ...altDecision.plans], { effects: false });
+  assert.notEqual(altRes.replay.goal, 0, 'Hard blocks recurring blitzA even when decoyB was played most recently');
+
+  // 4. Offensive habit tracking adapts to repeated wall-bank shots on mid-round turns
+  const midState = S.initialState(7, 'standard');
+  midState.roundTurns = 3;
+  Object.assign(midState.bodies[0], { x: 440, y: 260, vx: 0, vy: 0 });
+  Object.assign(midState.bodies[6], { x: 520, y: 260, vx: 0, vy: 0 });
+  const bankHistory = Array.from({ length: 4 }, (_, idx) => {
+    const bx = 520 + (idx + 3) * 35;
+    const hBodies = midState.bodies.map((b, bi) => ({ x: bi === 6 ? bx : (bi === 0 ? bx - 80 : b.x), y: b.y, meter: 0, stunned: false, carded: false }));
+    const shot = C.strike({ ...midState.bodies[0], x: bx - 80 }, { ...midState.bodies[6], x: bx }, 940, 2 * (60 + 18) - 300);
+    return { roundTurns: idx + 1, bodies: hBodies, plans: [shot, C.HOLD, C.HOLD, C.HOLD, C.HOLD, C.HOLD] };
+  });
+  const legOpp = C.legacy(midState, 0);
+  const bankOpp = C.learnedOpponentResponse(midState, 1, false, bankHistory);
+  assert.ok(bankOpp && Math.abs(Math.sin(bankOpp[0].angle - legOpp[0].angle)) > 0.2, 'habit model shifts predicted shot toward opponent favored wall bank');
+});
+
+test('selective 2-turn look-ahead bridges finishTurn stuns to convert 2-turn Knockout setups and bounds 3-turn Pulse God chains', () => {
+  // 1. Walled goal mouth where Turn-1 Knockout stuns defender so Turn 2 converts an open net across two resolved turns
+  const koState = S.initialState(6, 'standard');
+  const koSuper = P.SUPERS.find(sup => sup.key === 'knockout');
+  koState.bodies.slice(0, 6).forEach(b => {
+    M.applyStats(P, b, { impulse: 170, power: 180, size: 180 }, 'standard');
+    b.meter = 0; b.equippedSuper = null; b.vx = 0; b.vy = 0; b.omega = 0; b.stunned = false;
+  });
+  Object.assign(koState.bodies[0], { x: 150, y: 300, guarding: true });
+  Object.assign(koState.bodies[1], { x: 840, y: 110, stunned: true });
+  Object.assign(koState.bodies[2], { x: 840, y: 490, stunned: true });
+  Object.assign(koState.bodies[3], { x: 850, y: 300 });
+  Object.assign(koState.bodies[4], { x: 355, y: 300 });
+  Object.assign(koState.bodies[5], { x: 245, y: 295, meter: 100, equippedSuper: koSuper });
+  Object.assign(koState.bodies[6], { x: 295, y: 300 });
+
+  const oneTurn = C.plan(koState, 1, { level: 'insane', candidates: 90, lookaheadTop: 0, seed: 6 });
+  const twoTurn = C.plan(koState, 1, { level: 'insane', candidates: 90, seed: 6 });
+  assert.ok(twoTurn.diagnostics.score > oneTurn.diagnostics.score + 2000,
+    `2-turn look-ahead detects post-Knockout Turn-2 goal (${twoTurn.diagnostics.score} vs ${oneTurn.diagnostics.score})`);
+
+  const t1Res = M.resolveTurn(P, koState, [C.GUARD, C.HOLD, C.HOLD, ...twoTurn.plans], { effects: false });
+  assert.equal(t1Res.state.bodies[0].stunned, true, 'screen defender enters Turn 2 stunned after finishTurn');
+  const t2Plan = C.plan(t1Res.state, 1, { level: 'insane', candidates: 60, seed: 7 });
+  const t2Res = M.resolveTurn(P, t1Res.state, [C.HOLD, C.GUARD, C.GUARD, ...t2Plan.plans], { effects: false });
+  assert.ok(t1Res.replay.goal === 1 || t2Res.replay.goal === 1, 'Insane CPU converts walled net within 2 turns via Knockout stun');
+
+  // 2. Ububall God 3-turn Pulse chaining is deterministic, bounded by lookaheadBudget, and leaves state untouched
+  const pGodState = S.initialState(10, 'pulse');
+  const snapBefore = structuredClone(pGodState);
+  const pg1 = C.plan(pGodState, 1, { level: 'god', candidates: 48, seed: 10 });
+  const pg2 = C.plan(pGodState, 1, { level: 'god', candidates: 48, seed: 10 });
+  const pgNoT2 = C.plan(pGodState, 1, { level: 'god', candidates: 48, lookaheadTop: 0, seed: 10 });
+  assert.deepEqual(pg1.plans, pg2.plans, '3-turn Pulse God planning is deterministic');
+  assert.deepEqual(pGodState, snapBefore, '3-turn Pulse God leaves input state untouched');
+  assert.ok(pg1.diagnostics.simulations > pgNoT2.diagnostics.simulations &&
+    pg1.diagnostics.simulations <= pgNoT2.diagnostics.simulations + 120,
+    `lookaheadBudget stays bounded (got ${pg1.diagnostics.simulations} vs ${pgNoT2.diagnostics.simulations})`);
+
+  assert.throws(() => C.plan(pGodState, 1, { level: 'god', pulseDepth: 5 }));
+  assert.throws(() => C.plan(pGodState, 1, { level: 'god', lookaheadTop: -1 }));
+  assert.throws(() => C.plan(pGodState, 1, { level: 'god', lookaheadBudget: 999 }));
+});

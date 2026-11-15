@@ -619,11 +619,17 @@
     let history;
     if (turns?.length) {
       history = [];
-      for (let i = Math.max(0, turns.length - 32); i < turns.length; i++) {
+      let rt = 0;
+      const startIdx = Math.max(0, turns.length - 32);
+      for (let i = 0; i < turns.length; i++) {
         const t = turns[i];
+        const isKick = i === 0 || turns[i - 1]?.goal != null;
+        if (isKick) rt = 0;
+        const curRt = rt++;
+        if (i < startIdx) continue;
         if (!t?.bodies || t.bodies.length < 7 || !t.plans || t.plans.length < 6) continue;
         history.push({
-          roundTurns: i === 0 || turns[i - 1]?.goal != null ? 0 : 1,
+          roundTurns: isKick ? 0 : Math.max(1, curRt),
           bodies: t.bodies.map(b => ({ x: b.x, y: b.y, meter: b.meter, stunned: b.stunned, carded: b.carded })),
           plans: t.plans
         });
