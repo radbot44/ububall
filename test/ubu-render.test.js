@@ -351,3 +351,49 @@ test('sprite cache runs FIFO, differentiates mutated attributes on decoded model
   const liveUrls = createdBlobs.map(b => b.u).filter(u => !revokedUrls.includes(u));
   assert.ok(liveUrls.length <= 3, `expected <= 3 unrevoked blob URLs, got ${liveUrls.length}`);
 });
+
+test('all 32 materials share consolidated edge detection across ubus, backs, and card bars', () => {
+  const textures = [
+    'metallic', 'glossy', 'iridescent', 'crystalline', 'pearlescent', 'damascus', 'marble', 'lacquered',
+    'velvet', 'frosted', 'woodgrain', 'holographic', 'terrazzo', 'crackle', 'plush', 'opalescent', 'granite',
+    'satin', 'sandstone', 'starfield', 'quartz', 'obsidian', 'mosaic', 'hammered-metal', 'kintsugi', 'leather',
+    'carbon-fiber', 'denim', 'bubbled', 'lava', 'circuitry', 'liquid'
+  ];
+  const fabrics = new Set(['denim', 'leather', 'plush', 'velvet']);
+  const base = ubu.decode(new Uint8Array(128));
+
+  for (const texture of textures) {
+    const m = structuredClone(base);
+    for (const role of ['background', 'eyes', 'irises', 'pupils', 'mouth']) {
+      m.attributes[role] = { name: 'Coral', hex: '#ff7d69', texture: null, angle: 45 };
+    }
+    m.attributes.mouth = { name: 'Gunmetal', hex: '#292e38', texture, angle: 135 };
+
+    const ubuNodes = flatten(context.ubuRender(m, 'ubu-tile-svg'));
+    const backNodes = flatten(context.ubuRender.back(m));
+    const cardNodes = flatten(context.ubuRender.cardMaterials(m));
+
+    if (fabrics.has(texture)) {
+      const hasFuzz = nodes => nodes.some(n => n.tag === 'pattern' && n.attrs.id.includes('-seam-0-fuzz'));
+      const hasStitch = nodes => nodes.some(n => Boolean(n.attrs['stroke-dasharray']));
+      const cardStitches = cardNodes.filter(n => n.tag === 'rect' && n.attrs['stroke-dasharray']);
+      assert.ok(hasStitch(ubuNodes) || texture === 'velvet', `${texture} ubu mouth has stitch or fuzz`);
+      assert.ok(hasStitch(backNodes) || texture === 'velvet', `${texture} back mouth has stitch or fuzz`);
+      if (texture === 'velvet' || texture === 'plush') {
+        assert.ok(hasFuzz(ubuNodes) && hasFuzz(backNodes) && hasFuzz(cardNodes), `${texture} shares fuzz edge across ubu, back, and card`);
+      }
+      if (texture !== 'velvet') {
+        assert.ok(cardStitches.length > 0, `${texture} card bars receive stitched seam edges`);
+        assert.ok(cardNodes.some(n => n.tag === 'clipPath' && n.attrs.id.includes('-edge-0-seam-1-clip')), `${texture} card stitches clip to analytic band`);
+      }
+      assert.equal(cardNodes.filter(n => n.tag === 'filter' && n.attrs.id.includes('-seam-')).length, 0, `${texture} card edges avoid feMorphology filters`);
+    } else {
+      assert.ok(ubuNodes.some(n => n.tag === 'linearGradient' && n.attrs.id.endsWith('-mouth-edge-light')), `${texture} ubu mouth has bevel gradient`);
+      assert.ok(backNodes.some(n => n.tag === 'linearGradient' && n.attrs.id.endsWith('-mouth-edge-light')), `${texture} back mouth has bevel gradient`);
+      const cardGrad = cardNodes.find(n => n.tag === 'linearGradient' && n.attrs.id.endsWith('-edge-0-light'));
+      assert.ok(cardGrad, `${texture} card bars have bevel gradient`);
+      assert.match(cardGrad.attrs.gradientTransform, /rotate\(-135 240 160\)/, `${texture} card bevel counter-rotates stripe group angle`);
+      assert.equal(cardNodes.filter(n => n.tag === 'filter' && n.attrs.id.includes('-edge-')).length, 0, `${texture} card edges avoid feMorphology filters`);
+    }
+  }
+});

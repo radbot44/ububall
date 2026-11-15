@@ -47,41 +47,34 @@
     return obj;
   }
   const EDGE_FINISHES = deepFreeze({
-    terrazzo: { width: 1.6, rim: .4, stops: [[0, '#fff', .4], [.5, '#fff', .06], [1, '#000', .22]] },
-    crackle: { width: 2, rim: .6, stops: [[0, '#fff', .55], [.45, '#fff', .12], [1, '#000', .28]] },
-    opalescent: { width: 2.6, rim: .7, stops: [[0, '#fff0da', .65], [.35, '#d3f9ee', .45], [.7, '#e7dfff', .35], [1, '#000', .2]] },
-    frosted: { width: 2.8, rim: .7, stops: [[0, '#fff', .65], [.5, '#fff', .28], [1, '#fff', .12]] },
-    woodgrain: { width: 1.5, rim: .4, stops: [[0, '#fff', .3], [.45, '#fff', .06], [1, '#000', .25]] },
-    holographic: { width: 2, rim: .65, stops: [[0, '#b8ffff', .8], [.3, '#ffc9f6', .65], [.6, '#fff2af', .65], [1, '#94bcff', .6]] },
-    pearlescent: { width: 2.5, rim: .7, stops: [[0, '#fff4e4', .65], [.4, '#e3efff', .25], [1, '#000', .2]] },
-    marble: { width: 1.8, rim: .5, stops: [[0, '#fff', .45], [.5, '#fff', .08], [1, '#000', .2]] },
-    lacquered: { width: 3.2, rim: 1, stops: [[0, '#fff', .85], [.32, '#fff', .3], [.5, '#000', .15], [1, '#000', .5]] },
+    terrazzo: { width: 2.2, rim: .6, stops: [[0, '#fff', .55], [.45, '#fff', .16], [.55, '#000', .18], [1, '#000', .42]] },
+    crackle: { width: 2.2, rim: .6, stops: [[0, '#fff', .6], [.45, '#fff', .18], [.55, '#000', .18], [1, '#000', .38]] },
+    opalescent: { width: 2.6, rim: .7, stops: [[0, '#fff0da', .65], [.35, '#d3f9ee', .45], [.7, '#e7dfff', .35], [1, '#000', .3]] },
+    frosted: { width: 2.8, rim: .7, stops: [[0, '#fff', .7], [.48, '#e8f6ff', .32], [.62, '#6285a0', .24], [1, '#39556b', .42]] },
+    woodgrain: { width: 2.2, rim: .6, stops: [[0, '#f5e4cd', .5], [.42, '#fff', .18], [.58, '#000', .22], [1, '#000', .48]] },
+    holographic: { width: 2.2, rim: .65, stops: [[0, '#b8ffff', .8], [.3, '#ffc9f6', .65], [.6, '#fff2af', .65], [1, '#94bcff', .6]] },
+    pearlescent: { width: 2.5, rim: .7, stops: [[0, '#fff4e4', .68], [.42, '#e3efff', .28], [.58, '#000', .16], [1, '#000', .36]] },
+    marble: { width: 2.4, rim: .65, stops: [[0, '#fff', .6], [.45, '#fff', .16], [.55, '#000', .2], [1, '#000', .45]] },
+    lacquered: { width: 3.2, rim: 1, stops: [[0, '#fff', .85], [.32, '#fff', .3], [.5, '#000', .2], [1, '#000', .52]] },
     metallic: { width: 2.4, rim: .65, stops: [[0, '#fff', .85], [.43, '#fff', .12], [.49, '#000', .55], [.56, '#fff', .65], [1, '#000', .6]] },
-    glossy: { width: 3.4, rim: 1.1, stops: [[0, '#fff', .65], [.35, '#fff', .24], [.65, '#fff', .02], [1, '#000', .28]] },
+    glossy: { width: 3.4, rim: 1.1, stops: [[0, '#fff', .7], [.38, '#fff', .26], [.56, '#000', .14], [1, '#000', .36]] },
     iridescent: { width: 2.5, rim: .7, stops: [[0, '#82fff0', .8], [.28, '#aaa1ff', .65], [.5, '#ff8cdb', .55], [.72, '#ffe6a0', .6], [1, '#53bfff', .7]] },
-    crystalline: { width: 2, rim: .45, stops: [[0, '#fff', .9], [.24, '#fff', .55], [.25, '#000', .32], [.49, '#000', .12], [.5, '#fff', .8], [.74, '#fff', .2], [.75, '#000', .42], [1, '#000', .55]] },
+    crystalline: { width: 2.2, rim: .55, stops: [[0, '#fff', .9], [.24, '#fff', .55], [.25, '#000', .32], [.49, '#000', .18], [.5, '#fff', .8], [.74, '#fff', .2], [.75, '#000', .42], [1, '#000', .55]] },
     granite: { width: 4, rim: .75, stops: [[0, '#fff', .85], [.42, '#fff', .5], [.49, '#fff', .22], [.5, '#000', .35], [1, '#000', .8]] },
-    satin: { width: 1.2, rim: .3, stops: [[0, '#fff', .22], [.3, '#fff', .06], [.55, '#fff', .02], [1, '#000', .12]] },
-    sandstone: { width: 3.2, rim: .7, stops: [[0, '#fff', .22], [.5, '#fff', .04], [1, '#000', .3]] },
+    satin: { width: 2.2, rim: .55, stops: [[0, '#fff', .45], [.4, '#fff', .16], [.58, '#000', .16], [1, '#000', .34]] },
+    sandstone: { width: 3.2, rim: .7, stops: [[0, '#fff6e5', .42], [.45, '#fff', .14], [.58, '#000', .24], [1, '#000', .52]] },
     starfield: { width: 2.6, rim: .7, stops: [[0, '#d1e8ff', .6], [.35, '#e0b8ff', .35], [.7, '#0f0524', .5], [1, '#000', .7]] },
-    quartz: { width: 2.2, rim: .5, stops: [[0, '#fff', .92], [.22, '#fff', .6], [.24, '#000', .28], [.48, '#fff', .82], [.72, '#fff', .25], [.74, '#000', .38], [1, '#000', .55]] },
-    obsidian: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.2, '#fff', .15], [.6, '#000', .35], [1, '#000', .7]] },
-    mosaic: { width: 2.2, rim: .55, stops: [[0, '#fff', .55], [.45, '#fff', .1], [1, '#000', .3]] },
+    quartz: { width: 2.2, rim: .55, stops: [[0, '#fff', .92], [.22, '#fff', .6], [.24, '#000', .28], [.48, '#fff', .82], [.72, '#fff', .25], [.74, '#000', .38], [1, '#000', .55]] },
+    obsidian: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.25, '#fff', .22], [.58, '#000', .35], [1, '#000', .7]] },
+    mosaic: { width: 2.2, rim: .55, stops: [[0, '#fff', .6], [.45, '#fff', .16], [.55, '#000', .18], [1, '#000', .38]] },
     'hammered-metal': { width: 2.6, rim: .7, stops: [[0, '#fff', .88], [.38, '#fff', .18], [.45, '#000', .5], [.52, '#fff', .7], [1, '#000', .6]] },
-    kintsugi: { width: 2, rim: .55, stops: [[0, '#fff', .4], [.35, '#fff', .12], [.65, '#000', .12], [1, '#000', .3]] },
-    leather: { width: 1.5, rim: .4, stops: [[0, '#fff', .2], [.35, '#fff', .04], [.7, '#000', .14], [1, '#000', .3]] },
+    kintsugi: { width: 2.4, rim: .65, stops: [[0, '#fff1b6', .6], [.4, '#f0d681', .2], [.6, '#000', .22], [1, '#000', .5]] },
+    damascus: { width: 2.2, rim: .55, stops: [[0, '#fff', .65], [.42, '#fff', .2], [.58, '#000', .22], [1, '#000', .4]] },
     'carbon-fiber': { width: 2.6, rim: .7, stops: [[0, '#fff', .85], [.3, '#000', .5], [.6, '#fff', .65], [1, '#000', .7]] },
-    denim: { width: 1.8, rim: .4, stops: [[0, '#fff', .35], [.5, '#fff', .05], [1, '#000', .3]] },
     bubbled: { width: 2.8, rim: .8, stops: [[0, '#fff', .85], [.3, '#d4f8ff', .4], [.6, '#ffd6f5', .25], [1, '#000', .35]] },
     lava: { width: 2.5, rim: .6, stops: [[0, '#ff9900', .9], [.35, '#ff3300', .6], [.65, '#3a0800', .7], [1, '#110000', .85]] },
-    circuitry: { width: 1.3, rim: .35, stops: [[0, '#fff', .25], [.3, '#a4a69b', .2], [.6, '#000', .16], [1, '#000', .4]] },
-    liquid: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.25, '#fff', .35], [.55, '#fff', .05], [1, '#000', .4]] }
-  });
-  const CARD_FINISHES = deepFreeze({
-    ...EDGE_FINISHES,
-    damascus: { width: 2, rim: .5, stops: [[0, '#fff', .6], [.4, '#fff', .15], [1, '#000', .3]] },
-    velvet: { width: 1.5, rim: .4, stops: [[0, '#fff', .25], [.5, '#fff', .05], [1, '#000', .2]] },
-    plush: { width: 1.5, rim: .4, stops: [[0, '#fff', .25], [.5, '#fff', .05], [1, '#000', .2]] }
+    circuitry: { width: 2, rim: .6, stops: [[0, '#e8dfb8', .55], [.4, '#a4a69b', .25], [.6, '#000', .32], [1, '#000', .65]] },
+    liquid: { width: 3.2, rim: 1, stops: [[0, '#fff', .9], [.25, '#fff', .35], [.55, '#000', .16], [1, '#000', .45]] }
   });
 
   // Minimum distance from (180, 180) to an AABB. Shapes strictly outside r=limit cannot enter
@@ -1087,7 +1080,7 @@
       lighting('pearl-sheen', [[0, '#fff', 0], [.2, '#fff', .04], [.38, '#fff', .38],
         [.5, '#fff', .16], [.7, '#fff', 0], [1, '#fff', 0]]);
     } else if (attribute.texture === 'damascus') {
-      // Polished etched alloys: quantized turbulent bands with steel luster, without bevels or paired edge highlights.
+      // Polished etched alloys: quantized turbulent bands with steel luster.
       const etch = svgNode('filter', { id: id + '-etch', filterUnits: 'userSpaceOnUse',
         ...box, 'color-interpolation-filters': 'sRGB' });
       etch.append(svgNode('feTurbulence', { type: 'fractalNoise', baseFrequency: '.009 .023',
@@ -1636,12 +1629,14 @@
     return `url(#${id})`;
   }
 
-  // Tight bounding box in [0, 360] for shape silhouettes so feMorphology and mask buffers only
-  // allocate and erode over the feature's actual area instead of the entire 360x360 canvas.
-  function shapeBounds(shapes, pad = 4) {
+  const DEFAULT_EDGE_BOUNDS = deepFreeze({ x: 0, y: 0, width: 360, height: 360 });
+
+  // Tight bounding box inside `bounds` for shape silhouettes so feMorphology and mask buffers only
+  // allocate and erode over the feature's actual area instead of the entire canvas.
+  function shapeBounds(shapes, pad = 4, bounds = DEFAULT_EDGE_BOUNDS) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const shape of shapes) {
-      if (getAttr(shape, 'transform')) return { x: 0, y: 0, width: 360, height: 360 };
+      if (getAttr(shape, 'transform')) return { ...bounds };
       const tag = tagOf(shape);
       if (tag === 'circle') {
         const cx = +getAttr(shape, 'cx'), cy = +getAttr(shape, 'cy'), r = +getAttr(shape, 'r');
@@ -1658,9 +1653,9 @@
         if (y + h > maxY) maxY = y + h;
       } else if (tag === 'path') {
         const d = getAttr(shape, 'd') || '';
-        if (/[aAcCsStThHvVmlq]/.test(d)) return { x: 0, y: 0, width: 360, height: 360 };
+        if (/[aAcCsStThHvVmlq]/.test(d)) return { ...bounds };
         const nums = d.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi);
-        if (!nums) return { x: 0, y: 0, width: 360, height: 360 };
+        if (!nums) return { ...bounds };
         for (let i = 0; i + 1 < nums.length; i += 2) {
           const x = +nums[i], y = +nums[i + 1];
           if (x < minX) minX = x;
@@ -1669,14 +1664,14 @@
           if (y > maxY) maxY = y;
         }
       } else {
-        return { x: 0, y: 0, width: 360, height: 360 };
+        return { ...bounds };
       }
     }
-    if (!Number.isFinite(minX)) return { x: 0, y: 0, width: 360, height: 360 };
-    const x0 = Math.max(0, Math.floor(minX - pad));
-    const y0 = Math.max(0, Math.floor(minY - pad));
-    const x1 = Math.min(360, Math.ceil(maxX + pad));
-    const y1 = Math.min(360, Math.ceil(maxY + pad));
+    if (!Number.isFinite(minX)) return { ...bounds };
+    const x0 = Math.max(bounds.x, Math.floor(minX - pad));
+    const y0 = Math.max(bounds.y, Math.floor(minY - pad));
+    const x1 = Math.min(bounds.x + bounds.width, Math.ceil(maxX + pad));
+    const y1 = Math.min(bounds.y + bounds.height, Math.ceil(maxY + pad));
     return { x: x0, y: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0) };
   }
 
@@ -1708,14 +1703,72 @@
     return d;
   }
 
-  function materialEdge(defs, face, shapes, attribute, id, effects, seamContours = shapes) {
-    const region = shapeBounds(shapes, 6);
+  function disjointRects(shapes) {
+    if (!shapes.length) return null;
+    const rects = [];
+    for (const shape of shapes) {
+      if (tagOf(shape) !== 'rect' || getAttr(shape, 'clip-path') || getAttr(shape, 'transform') || getAttr(shape, 'rx') || getAttr(shape, 'ry')) return null;
+      const x = +(getAttr(shape, 'x') || 0), y = +(getAttr(shape, 'y') || 0);
+      const w = +getAttr(shape, 'width'), h = +getAttr(shape, 'height');
+      if (!(w > 0) || !(h > 0)) return null;
+      rects.push({ x, y, w, h });
+    }
+    for (let i = 0; i < rects.length; i++) {
+      const a = rects[i];
+      for (let j = i + 1; j < rects.length; j++) {
+        const b = rects[j];
+        if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) return null;
+      }
+    }
+    return rects;
+  }
+
+  function rectBandPath(rects, inner, outer) {
+    let d = '';
+    for (const { x, y, w, h } of rects) {
+      const ow = w - inner * 2, oh = h - inner * 2;
+      if (ow <= 0 || oh <= 0) continue;
+      d += `M${fmt2(x + inner)} ${fmt2(y + inner)}h${fmt2(ow)}v${fmt2(oh)}h${fmt2(-ow)}Z`;
+      const iw = w - outer * 2, ih = h - outer * 2;
+      if (iw > 0 && ih > 0) {
+        d += `M${fmt2(x + outer)} ${fmt2(y + outer)}h${fmt2(iw)}v${fmt2(ih)}h${fmt2(-iw)}Z`;
+      }
+    }
+    return d;
+  }
+
+  function appendFuzzPattern(defs, key, plush) {
+    const fuzz = svgNode('pattern', { id: key + '-fuzz', patternUnits: 'userSpaceOnUse', width: 8, height: 8 });
+    fuzz.append(svgNode('path', { d: 'M0 1l2 1M4 0l-1 3M7 3l-2 2M1 6l2-1M5 7l2 1', stroke: '#fff', 'stroke-width': plush ? 1.2 : .65, 'stroke-linecap': 'round' }));
+    defs.append(fuzz);
+    return `url(#${key}-fuzz)`;
+  }
+
+  function appendStitches(seam, seamContours, plush, leather, scaledMark, strokeScale) {
+    const baseDash = plush ? [2, 5] : leather ? [2.5, 2.5] : [3, 3];
+    const dashAttr = scaledMark ? baseDash.map(v => +(v * strokeScale).toFixed(2)).join(' ') : baseDash.join(' ');
+    const widthAttr = scaledMark ? +(16 * strokeScale).toFixed(2) : 16;
+    for (const shape of seamContours) {
+      const stitch = shape.cloneNode(true);
+      stitch.setAttribute('fill', 'none');
+      stitch.setAttribute('stroke', plush ? '#d8caba' : leather ? '#b8a58a' : '#c6a36d');
+      stitch.setAttribute('stroke-width', widthAttr);
+      stitch.setAttribute('stroke-dasharray', dashAttr);
+      stitch.setAttribute('stroke-linecap', 'round');
+      seam.append(stitch);
+    }
+  }
+
+  function materialEdge(defs, face, shapes, attribute, id, effects, seamContours = shapes, options = null) {
+    const bounds = options?.bounds || DEFAULT_EDGE_BOUNDS;
+    const region = shapeBounds(shapes, 6, bounds);
     let scaleFactor = 1;
     for (const shape of shapes) {
       const m = /\bscale\(\s*([\d.]+)/.exec(getAttr(shape, 'transform') || '');
       if (m && +m[1] > 0 && +m[1] < scaleFactor) scaleFactor = +m[1];
     }
     const scaledMark = scaleFactor < 0.5;
+    const rects = disjointRects(shapes);
     if (['denim', 'leather', 'plush', 'velvet'].includes(attribute.texture)) {
       const plush = attribute.texture === 'plush', velvet = attribute.texture === 'velvet', leather = attribute.texture === 'leather';
       // Erode the union, so the joined eyes have no seam through their overlap.
@@ -1725,11 +1778,29 @@
       const small = shapes.every(shape => Number(getAttr(shape, 'r')) > 0 && Number(getAttr(shape, 'r')) <= 17);
       const bandScale = scaledMark ? 0.45 : 1;
       const strokeScale = bandScale / scaleFactor;
-      const rawBands = [[0, 0, plush ? 3 : 2], ...(!small && !velvet ? (plush ? [[1, 2, 6]] : leather ? [[1, 3, 4.5]] : [[1, 3, 4], [2, 6, 7]]) : [])];
+      const rawBands = [[0, 0, plush || velvet ? 3 : 2], ...(!small && !velvet ? (plush ? [[1, 2, 6]] : leather ? [[1, 3, 4.5]] : [[1, 3, 4], [2, 6, 7]]) : [])];
       for (const [index, rawInner, rawOuter] of rawBands) {
         const inner = scaledMark ? +(rawInner * bandScale).toFixed(2) : rawInner;
         const outer = scaledMark ? +(rawOuter * bandScale).toFixed(2) : rawOuter;
         const key = `${id}-seam-${index}`;
+        if (rects) {
+          const band = rectBandPath(rects, inner, outer);
+          if (!band) continue;
+          if (!index) {
+            const seam = svgNode('g', { opacity: velvet ? .48 : plush ? .38 : .2 });
+            seam.append(svgNode('path', { d: band, 'fill-rule': 'evenodd', fill: '#000' }));
+            if (velvet || plush) seam.append(svgNode('path', { d: band, 'fill-rule': 'evenodd', fill: appendFuzzPattern(defs, key, plush) }));
+            face.append(seam);
+          } else {
+            const clip = svgNode('clipPath', { id: key + '-clip', clipPathUnits: 'userSpaceOnUse' });
+            clip.append(svgNode('path', { d: band, 'clip-rule': 'evenodd' }));
+            defs.append(clip);
+            const seam = svgNode('g', { 'clip-path': `url(#${key}-clip)`, opacity: plush ? .85 : .65 });
+            appendStitches(seam, seamContours, plush, leather, scaledMark, strokeScale);
+            face.append(seam);
+          }
+          continue;
+        }
         const filter = svgNode('filter', { id: key, filterUnits: 'userSpaceOnUse', ...region });
         filter.append(svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: inner, result: 'outer' }),
           svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: outer, result: 'inner' }),
@@ -1743,25 +1814,11 @@
         if (!index) {
           seam.append(svgNode('rect', { ...region, fill: '#000' }));
           if (velvet || plush) {
-            const fuzz=svgNode('pattern',{id:key+'-fuzz',patternUnits:'userSpaceOnUse',width:8,height:8});
-            fuzz.append(svgNode('path',{d:'M0 1l2 1M4 0l-1 3M7 3l-2 2M1 6l2-1M5 7l2 1',stroke:'#fff','stroke-width':plush?1.2:.65,'stroke-linecap':'round'}));
-            defs.append(fuzz);seam.setAttribute('opacity',.38);
-            seam.append(svgNode('rect',{...region,fill:`url(#${key}-fuzz)`}));
+            seam.setAttribute('opacity', velvet ? .48 : .38);
+            seam.append(svgNode('rect', { ...region, fill: appendFuzzPattern(defs, key, plush) }));
           }
-        }
-        else {
-          const baseDash = plush ? [2, 5] : leather ? [2.5, 2.5] : [3, 3];
-          const dashAttr = scaledMark ? baseDash.map(v => +(v * strokeScale).toFixed(2)).join(' ') : baseDash.join(' ');
-          const widthAttr = scaledMark ? +(16 * strokeScale).toFixed(2) : 16;
-          for (const shape of seamContours) {
-            const stitch = shape.cloneNode(true);
-            stitch.setAttribute('fill', 'none');
-            stitch.setAttribute('stroke', plush ? '#d8caba' : leather ? '#b8a58a' : '#c6a36d');
-            stitch.setAttribute('stroke-width', widthAttr);
-            stitch.setAttribute('stroke-dasharray', dashAttr);
-            stitch.setAttribute('stroke-linecap', 'round');
-            seam.append(stitch);
-          }
+        } else {
+          appendStitches(seam, seamContours, plush, leather, scaledMark, strokeScale);
         }
         face.append(seam);
       }
@@ -1771,28 +1828,33 @@
     const finish = EDGE_FINISHES[attribute.texture];
     if (!finish) return;
     const matAngle = Number.isFinite(attribute?.angle) ? attribute.angle : 0;
+    const light = options?.lightBox || { x1: 30, y1: 20, x2: 330, y2: 340, cx: 180, cy: 180, angle: matAngle, shift: 38 };
     const gradient = svgNode('linearGradient', { id: id + '-light', gradientUnits: 'userSpaceOnUse',
-      x1: 30, y1: 20, x2: 330, y2: 340, gradientTransform: `rotate(${matAngle} 180 180)` });
+      x1: light.x1, y1: light.y1, x2: light.x2, y2: light.y2, gradientTransform: `rotate(${light.angle} ${light.cx} ${light.cy})` });
     for (const [offset, color, opacity] of finish.stops) gradient.append(svgNode('stop', {
       offset, 'stop-color': color, 'stop-opacity': opacity
     }));
     defs.append(gradient);
     if (effects) effects.push((x, y) => gradient.setAttribute('gradientTransform',
-      `translate(${x * 38} ${y * 38}) rotate(${matAngle} 180 180)`));
+      `translate(${x * light.shift} ${y * light.shift}) rotate(${light.angle} ${light.cx} ${light.cy})`));
     const crumbs = attribute.texture === 'sandstone' ? sandstoneEdge(defs, id+'-crumbs') : null;
     const rimScale = scaledMark ? 0.55 : 1;
-    // Disjoint unclipped circles (background, pupils, and >99.9% of irises) need no feMorphology
-    // or mask surfaces: an even-odd annulus draws the exact inset rim directly.
+    // Disjoint unclipped circles and rects need no feMorphology or mask surfaces:
+    // an even-odd path draws the exact inset rim directly.
     const circles = !crumbs ? disjointCircles(shapes) : null;
-    if (circles) {
+    const analytic = circles ? w => annulusPath(circles, w) : rects ? w => rectBandPath(rects, 0, w) : null;
+    if (analytic) {
       for (const [index, rawWidth] of [finish.width, finish.rim].entries()) {
         const width = scaledMark ? +(rawWidth * rimScale).toFixed(2) : rawWidth;
+        const d = analytic(width);
+        if (!d) continue;
         face.append(svgNode('path', {
-          d: annulusPath(circles, width),
+          d,
           'fill-rule': 'evenodd',
           fill: `url(#${id}-light)`,
           opacity: index ? .8 : attribute.texture === 'granite' ? .68 : .38
         }));
+        if (crumbs && !index) face.append(svgNode('path', { d, 'fill-rule': 'evenodd', fill: crumbs }));
       }
       return;
     }
@@ -1801,10 +1863,10 @@
       const key = id + '-' + index;
       const filter = svgNode('filter', { id: key + '-cut', filterUnits: 'userSpaceOnUse',
         ...region, 'color-interpolation-filters': 'sRGB' });
-      filter.append(svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: width, result: 'inset' }));
+      filter.append(svgNode('feMorphology', { in: 'SourceAlpha', operator: 'erode', radius: Math.max(.5, width), result: 'inset' }));
       if (crumbs) filter.append(
         svgNode('feTurbulence', { type:'fractalNoise', baseFrequency:.28, numOctaves:2, seed:317, result:'grain' }),
-        svgNode('feDisplacementMap', { in:'inset', in2:'grain', scale:index ? 1.4 : 4, xChannelSelector:'R', yChannelSelector:'G', result:'inset' }));
+        svgNode('feDisplacementMap', { in:'inset', in2:'grain', scale:(index ? 1.4 : 4) * rimScale, xChannelSelector:'R', yChannelSelector:'G', result:'inset' }));
       filter.append(svgNode('feComposite', { in: 'SourceGraphic', in2: 'inset', operator: 'out' }));
       const mask = svgNode('mask', { id: key + '-mask', maskUnits: 'userSpaceOnUse',
         maskContentUnits: 'userSpaceOnUse', ...region });
@@ -2263,38 +2325,11 @@
         svgNode('path', { d: stripes, fill })
       );
 
-      const finish = CARD_FINISHES[mat.texture];
-      if (finish) {
-        const edgeId = `${prefix}-edge-${i}`;
-        const gradId = `${edgeId}-light`;
-        const grad = svgNode('linearGradient', {
-          id: gradId, gradientUnits: 'userSpaceOnUse',
-          x1: 0, y1: 0, x2: 480, y2: 0
-        });
-        for (const [offset, color, opacity] of finish.stops) {
-          grad.append(svgNode('stop', { offset, 'stop-color': color, 'stop-opacity': opacity }));
-        }
-        defs.append(grad);
-        if (layerEffects) {
-          layerEffects.push((gx, gy) => {
-            grad.setAttribute('gradientTransform', `translate(${gx * 30} ${gy * 30})`);
-          });
-        }
-
-        // Stripe ends lie outside the card at every rotation. Inside the card,
-        // eroding a rectangular stripe exposes only its two vertical edges.
-        // Draw those strips directly instead of filtering/masking entire stripes.
-        const crumbs = mat.texture === 'sandstone' ? sandstoneEdge(defs, edgeId+'-crumbs') : null;
-        for (const [idx, width] of [finish.width, finish.rim].entries()) {
-          const edges = rects.map(r =>
-            `M${r.x} ${r.y}h${width}v${r.height}h${-width}Z` +
-            `M${r.x + r.width - width} ${r.y}h${width}v${r.height}h${-width}Z`).join('');
-          group.append(svgNode('path', {
-            d: edges, fill: `url(#${gradId})`, opacity: idx ? .8 : mat.texture === 'granite' ? .68 : .42
-          }));
-          if (crumbs && !idx) group.append(svgNode('path', { d:edges, fill:crumbs }));
-        }
-      }
+      const rectShapes = rects.map(r => svgNode('rect', { x: r.x, y: r.y, width: r.width, height: r.height }));
+      materialEdge(defs, group, rectShapes, mat, `${prefix}-edge-${i}`, layerEffects, rectShapes, {
+        bounds: region,
+        lightBox: { x1: 60, y1: 0, x2: 420, y2: 320, cx: 240, cy: 160, angle: -angle, shift: 30 }
+      });
 
       if (effects && layerEffects.length) {
         const rad = angle * Math.PI / 180, cosA = Math.cos(rad), sinA = Math.sin(rad);
