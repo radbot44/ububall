@@ -1458,37 +1458,38 @@
       return getView().portrait ? { x: b.x - b.radius * .65, y: b.y - b.radius * .65 } : { x: b.x - b.radius * .65, y: b.y + b.radius * .65 };
     }
 
-    function ribbon(points, widthAt, prevPoint = null) {
+    // One feathered profile, rather than a wide stain plus a separate dark core.
+    // Keep the existing six fills, but calculate normals/widths only once per point.
+    const ICE_FEATHER = [1.5, 1.22, .96, .72, .5, .28];
+    const ICE_OPACITY = [.045, .12, .20, .24, .235, .16];
+    function softRibbon(points, widthAt, color, prevPoint = null) {
       if (!points || points.length < 2) return;
-      const ctx = getView().ctx, left = [], right = [];
+      const ctx = getView().ctx, edges = [];
       for (let k = 0; k < points.length; k++) {
         const p = points[k];
         const a = k === 0 && prevPoint ? prevPoint : points[Math.max(0, k - 1)];
         const b = k === 0 && prevPoint ? p : points[Math.min(points.length - 1, k + 1)];
-        const len = Math.hypot(b.x - a.x, b.y - a.y) || 1, nx = -(b.y - a.y) / len, ny = (b.x - a.x) / len, half = widthAt(p) / 2;
-        left.push([p.x + nx * half, p.y + ny * half]); right.push([p.x - nx * half, p.y - ny * half]);
+        const half = widthAt(p) / (2 * (Math.hypot(b.x - a.x, b.y - a.y) || 1));
+        edges.push([p.x, p.y, -(b.y - a.y) * half, (b.x - a.x) * half]);
       }
-      ctx.beginPath(); ctx.moveTo(left[0][0], left[0][1]);
-      for (let i = 1; i < left.length; i++) ctx.lineTo(left[i][0], left[i][1]);
-      for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
-      ctx.closePath(); ctx.fill();
-    }
-
-    function softRibbon(points, widthAt, blur, color, prevPoint = null) {
-      if (!points || points.length < 2) return;
-      const ctx = getView().ctx;
       ctx.save();
       ctx.fillStyle = color;
-      if (bench?.flags.noIceShadow || blur <= 0.05) {
-        ribbon(points, widthAt, prevPoint);
-      } else {
-        const baseAlpha = ctx.globalAlpha;
-        ctx.globalAlpha = baseAlpha * 0.22;
-        ribbon(points, p => widthAt(p) + blur * 1.35, prevPoint);
-        ctx.globalAlpha = baseAlpha * 0.34;
-        ribbon(points, p => widthAt(p) + blur * 0.6, prevPoint);
-        ctx.globalAlpha = baseAlpha * 0.44;
-        ribbon(points, widthAt, prevPoint);
+      const alpha = ctx.globalAlpha, hard = bench?.flags.noIceShadow;
+      for (let band = 0; band < (hard ? 1 : ICE_FEATHER.length); band++) {
+        const scale = hard ? 1 : ICE_FEATHER[band];
+        ctx.globalAlpha = alpha * (hard ? 1 : ICE_OPACITY[band]);
+        ctx.beginPath();
+        const first = edges[0];
+        ctx.moveTo(first[0] + first[2] * scale, first[1] + first[3] * scale);
+        for (let k = 1; k < edges.length; k++) {
+          const e = edges[k];
+          ctx.lineTo(e[0] + e[2] * scale, e[1] + e[3] * scale);
+        }
+        for (let k = edges.length - 1; k >= 0; k--) {
+          const e = edges[k];
+          ctx.lineTo(e[0] - e[2] * scale, e[1] - e[3] * scale);
+        }
+        ctx.closePath(); ctx.fill();
       }
       ctx.restore();
     }
@@ -1513,10 +1514,8 @@
       const age = Math.floor(s.age * 4) / 4;
       const t = age / SKID_LIFE, fade = 1 - t * t * (3 - 2 * t), thin = .6 + .4 * fade;
       if (fade <= 0.005) return;
-      ctx.globalAlpha = .12 * fade;
-      softRibbon(points, p => s.width * .7 * (.4 + .6 * p.depth) * thin, s.width * .45, '#000000', prevPoint);
-      ctx.globalAlpha = .08 * fade;
-      softRibbon(points, p => s.width * .3 * p.depth * thin, s.width * .2, '#000000', prevPoint);
+      ctx.globalAlpha = .20 * fade;
+      softRibbon(points, p => s.width * .85 * (.4 + .6 * p.depth) * thin, '#000000', prevPoint);
     }
 
     function paintBurnPoof(ctx, s) {
@@ -1543,10 +1542,8 @@
       const age = Math.floor(s.age * 4) / 4;
       const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
       if (fade <= 0.005) return;
-      ctx.globalAlpha = .3 * fade;
-      softRibbon(points, p => s.width * (.5 + .5 * p.depth), s.width * .35, '#2b1206', prevPoint);
-      ctx.globalAlpha = .22 * fade;
-      softRibbon(points, p => s.width * .35 * p.depth, s.width * .15, '#000000', prevPoint);
+      ctx.globalAlpha = .42 * fade;
+      softRibbon(points, p => s.width * (.5 + .5 * p.depth), '#171310', prevPoint);
     }
 
     function paintIce() {
