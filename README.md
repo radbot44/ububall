@@ -18,57 +18,13 @@ Install updates and deploy with **`.\install.ps1`** from either your local sourc
 
 To install updates and start a fresh mint, use `.\install.ps1 -ResetMint`; to reset only the installed mint, run `.\deploy.ps1 -ResetMint` from the deployment folder. This explicitly replaces the mint identity/keys and session secret, selecting a fresh registry starting at serial 1 while preserving the domain, Discord credentials and allowance. Previous registry Durable Object storage is retained separately. See [reset details](docs/worker.md#fresh-mint-reset).
 
-## 1024-bit DNA specification
+## DNA, naming and file formats
 
-Ububall uses a deterministic 1024-bit (128-byte) DNA schema that supplies random input to permanent generation rules. Obsolete 256-bit beta and 512-bit ubus are rejected without conversion. See the authoritative [DNA specification](docs/dna.md) and [Ububall specification](docs/ububall.md).
+Every ubu has a permanent 1024-bit (128-byte) DNA value. Its deterministic visual traits, gameplay stats, abilities, audio and naming rules are specified in [the canonical DNA specification](docs/dna.md) and [the uburithm](docs/uburithm.md). The [gameplay specification](docs/ububall.md) covers what those stats and abilities do in a match. Obsolete 256-bit and 512-bit codes are not supported.
 
-- **Representation:** Canonical unpadded base64url is exactly 171 characters (or 256 hexadecimal characters).
-- **Text seeds:** Converted from exact UTF-8 text through dual SHA-512 into complete 128-byte DNA (first 64 bytes from SHA-512(text), second 64 bytes from SHA-512(text + '\x01')).
-- **Ubunym naming:** Initialized directly from the first 64 DNA bits and evaluated via the official `uburithm` SplitMix64 generator (`docs/uburithm.md`).
-- **Visual traits (bits 0–373, 374 bits):** 5 body-part attribute slots (background, eye rings, irises, pupils, mouth) with 18 bits each, drawing colors from the 32-color palette and finishes across 32 assigned rare materials, plus geometric mouth/eye controls, corner curvature and lip-notch cuts.
-- **Core game stats (bits 374–493, 120 bits):** 15 stats evaluated with an exponential multiplier curve, equal percentage per stat point (0 = 2/3×, 127 = 1.0×, 255 = 1.5×):
-  - *Movement (8 bits each):* Impulse, Traction, Spin, Curve.
-  - *Physical (8 bits each):* Size, Mass, Bounciness, Grip.
-  - *Engagement (8 bits each):* Power, Reach, Strength, Stability.
-  - *Super (8 bits each):* Efficiency, Synergy, Chemistry.
-- **Super slots (bits 494–509, 16 bits):** 4 special ability slots (4 bits each, 0–15).
-- **AI tactical brain (bits 510–533, 24 bits):** Personality axes for Aggression, Creativity, Teamwork, Clutch (6 bits each, 0–63).
-- **Archetype descriptors (`shared/ubu-archetype.js`):** Deterministic `<Adjective> <Noun>` classification combining 81 personality adjectives (`3^4` AI trait tiers) and 90 calibrated gameplay nouns across all 15 core stats.
-- **Voice & fanfare suite (bits 534–597, 64 bits):** Web Audio voice synthesizer (root pitch, instrument timbre, decay) and 8-note goal fanfare melody with scale mode, tempo, and groove.
-- **Unassigned reserve (bits 598–1013, 416 bits):** Headroom preserved for future expansion.
-- **Ubuquity (bits 1014–1023, 10 bits):** Starting special meter percentage (0–1023).
+Two `.ubu` formats exist: unsigned custom DNA and mint-signed issuance certificates. A custom file is not proof of ownership. For canonical serialization, signatures, trust and host policy, see [the file profile](docs/ubu-file.md); for match replays, see [the `.ububall` format](docs/ububall-file.md).
 
-## Color palette
-
-The ordered 32-color palette defines five color roles, each drawing one equally likely color from 5 random bits. Palette order, hex values and field mappings are permanent.
-
-| Index | Color | Hex | Index | Color | Hex |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| 0 | Coral | #FF7D69 | 16 | Cobalt | #2659AC |
-| 1 | Sienna | #A56C57 | 17 | Cornflower | #477AE7 |
-| 2 | Copper | #CD7847 | 18 | Indigo | #4F5FC2 |
-| 3 | Tangerine | #FF9954 | 19 | Periwinkle | #9E9EED |
-| 4 | Ochre | #B68720 | 20 | Iris | #C5A3FF |
-| 5 | Saffron | #E8CA48 | 21 | Amethyst | #AA54D3 |
-| 6 | Chartreuse | #B4D858 | 22 | Aubergine | #673C75 |
-| 7 | Olive | #758C3D | 23 | Orchid | #DA4DB5 |
-| 8 | Emerald | #42C66B | 24 | Mulberry | #9D467A |
-| 9 | Mint | #B9ECCD | 25 | Burgundy | #7C3349 |
-| 10 | Seafoam | #89D8B5 | 26 | Rose | #FF7197 |
-| 11 | Forest | #21845B | 27 | Vermilion | #EE4455 |
-| 12 | Teal | #138F99 | 28 | Alabaster | #F8F6F2 |
-| 13 | Turquoise | #47C8DE | 29 | Slate | #706D77 |
-| 14 | Sky | #76B9EF | 30 | Gunmetal | #292E38 |
-| 15 | Volt | #0066FF | 31 | Onyx | #101217 |
-
-## .ubu file profiles
-
-Two .ubu forms are approved and implemented in `shared/ubu-file.js`:
-
-- **Unsigned/custom:** contains 1024-bit DNA, freely generated or designed. Carries no proof of official issuance or registered ownership. Exact serialized JSON size is 194 bytes (`{"type":"ubu","dna":"<171-character DNA>"}`).
-- **Mint-signed certificate:** contains 1024-bit DNA, a permanent twelve-digit serial (000000000001–999999999999), and certificate metadata covered by an Ed25519 signature verifiable against a trusted mint public key. Typical serialized size is 425 bytes for a 10-digit timestamp and 6-character key ID (`411–457` bytes across valid key/timestamp lengths; `{"type":"ubu-signed",...}`).
-
-See the [file profile](docs/ubu-file.md) for full encoding, signing prefix (`ubumint:issuance\n`), and verification rules.
+The ordered 32-color palette and exact field allocations live in [docs/dna.md](docs/dna.md#colors), not in a second copy here.
 
 ## Additional labs and tools
 
