@@ -94,6 +94,7 @@
       popups: [],
       danger: [0, 0],
       ballFlare: 0,
+      ballWarpFlare: 0,
       kickoffGlow: 0,
       goalSweep: null,
       goalCall: null,
@@ -105,6 +106,7 @@
       heatTime: 0,
       sizzle: null,
       netFire: null,
+      spaceWarps: [],
       superImpactTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       carveTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       slipstreamTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
@@ -116,6 +118,13 @@
       iceCache: {},
       rinkCache: null
     };
+  }
+
+  function pushSpaceWarp(fx, x, y, maxRadius, duration, kind, sub = 0, chroma = 1.0, strength = 1.0) {
+    if (!fx) return;
+    if (!fx.spaceWarps) fx.spaceWarps = [];
+    if (fx.spaceWarps.length >= 6) fx.spaceWarps.shift();
+    fx.spaceWarps.push({ x, y, maxRadius, duration, life: duration, kind, sub, chroma, strength });
   }
 
   function explodeShell(f, particles) {
@@ -1187,6 +1196,7 @@
       if (burning) {
         if (wasBurning === false && !fx.netFire?.lit && (clockNow() - (fx.lastCannonImpact ?? -Infinity) > 40)) {
           fx.ballFlare = 1;
+          fx.ballWarpFlare = 1;
           const spd = Math.hypot(ball.vx || 0, ball.vy || 0) || 1;
           const nx = -(ball.vx || 0) / spd, ny = -(ball.vy || 0) / spd;
           fx.fireWarp = { x: ball.x, y: ball.y, nx, ny, life: 0.30, duration: 0.30 };
@@ -1312,6 +1322,7 @@
                 gMap.set(pairKey, now);
                 const midX = (b.x + other.x) * 0.5, midY = (b.y + other.y) * 0.5;
                 if (!reduced) {
+                  pushSpaceWarp(fx, midX, midY, 132, 0.58, 2, 0, 1.35, 1.15);
                   if (fx.shockwaves.length < 30) {
                     fx.shockwaves.push({
                       x: midX, y: midY, currentRadius: 11, maxRadius: 56,
@@ -1427,7 +1438,8 @@
       fx.heatTime = 0;
       if (fx.netFire) fx.netFire.lit = false;
       fx.shake = fx.shakeX = fx.shakeY = 0; if (!view.field && rinkWrap) rinkWrap.style.translate = '';
-      fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.fireWarp = fx.koWarp = null;
+      fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.ballWarpFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.fireWarp = fx.koWarp = null;
+      if (fx.spaceWarps) fx.spaceWarps.length = 0;
       if (fx.iceCache) { fx.iceCache.key = null; fx.iceCache.skidSnap = null; fx.iceCache.burnSnap = null; }
     }
 
@@ -1586,8 +1598,17 @@
         }
       }
       fieldFx.ballFlare = Math.max(0, fieldFx.ballFlare - dt / .8);
+      fieldFx.ballWarpFlare = Math.max(0, (fieldFx.ballWarpFlare || 0) - dt / 0.34);
       if (fieldFx.fireWarp && (fieldFx.fireWarp.life -= dt) <= 0) fieldFx.fireWarp = null;
       if (fieldFx.koWarp && (fieldFx.koWarp.life -= dt) <= 0) fieldFx.koWarp = null;
+      const tickWarps = list => {
+        if (!list?.length) return;
+        for (let i = list.length - 1; i >= 0; i--) {
+          if ((list[i].life -= dt) <= 0) list.splice(i, 1);
+        }
+      };
+      tickWarps(fieldFx.spaceWarps);
+      if (fx !== fieldFx) tickWarps(fx.spaceWarps);
       fieldFx.kickoffGlow = Math.max(0, fieldFx.kickoffGlow - dt / 1.5);
       if (fieldFx.goalSweep && (fieldFx.goalSweep.p += dt / 1.5) >= 1) fieldFx.goalSweep = null;
       if (fieldFx.goalCall && (fieldFx.goalCall.t += dt) >= GOAL_CALL_SECONDS) fieldFx.goalCall = null;
@@ -3161,6 +3182,7 @@
         const isFlamingCollision = (plow || P.ballOnFire?.(ball)) && (now - (fx.lastCannonImpact ?? -Infinity) > 20);
         if (isFlamingCollision) {
           fx.ballFlare = Math.max(fx.ballFlare || 0, 0.85);
+          fx.ballWarpFlare = 1;
           const nx = (ball.x - player.x) / distance, ny = (ball.y - player.y) / distance;
           const ubuIndex = player.playerIndex ?? (getView().bodies?.indexOf(player) ?? -1);
           fx.fireWarp = { x, y, nx, ny, ubuIndex, life: 0.28, duration: 0.28 };
@@ -3280,6 +3302,7 @@
       const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
       if (body.team === -1 && P.ballOnFire?.(body) && velocity >= 60) {
         fx.ballFlare = Math.max(fx.ballFlare || 0, 0.85);
+        fx.ballWarpFlare = 1;
         fx.fireWarp = { x: cx, y: cy, nx, ny, life: 0.28, duration: 0.28 };
         if (!isReducedMotion() && fx.particles.length < 450) {
           fx.particles.push({ x: cx, y: cy, px: cx, py: cy, vx: 0, vy: 0, team: -1, color: '#ff7a1a', life: 0.18, duration: 0.18, flash: true, flashSize: 115, overlay: true });
@@ -3345,6 +3368,7 @@
           const attackerIdx = body.playerIndex ?? (view.bodies?.indexOf(body) ?? -1);
           const targetIdx = target.playerIndex ?? (view.bodies?.indexOf(target) ?? -1);
           fx.koWarp = { attackerIdx, targetIdx, nx, ny, life: 0.26, duration: 0.26 };
+          pushSpaceWarp(fx, x, y, 125, 0.30, 1, 1, 1.25, 1.0);
           const normalAngle = Math.atan2(dy, dx);
           if (fx.shockwaves.length < 40) {
             fx.shockwaves.push({
@@ -3377,7 +3401,11 @@
           }
         } else if (key === 'cannonball' || key === 'stalwart') {
           const color = key === 'cannonball' ? '#ff634d' : '#ffd166';
-          if (key === 'cannonball') fx.ballFlare = 1;
+          if (key === 'cannonball') {
+            fx.ballFlare = 1;
+            fx.ballWarpFlare = 1;
+            pushSpaceWarp(fx, x, y, 110, 0.30, 1, 0, 1.0, 0.85);
+          }
           burst(x, y, body.team, 3.5, false, tangent, color);
           if (fx.shockwaves.length < 32) fx.shockwaves.push({ x, y, currentRadius: 4,
             maxRadius: key === 'cannonball' ? 48 : 36, team: body.team, color, life: .24, duration: .24 });
@@ -3399,6 +3427,7 @@
       }
       if (!isReducedMotion()) {
         fx.shake = Math.max(fx.shake || 0, 0.85);
+        pushSpaceWarp(fx, source.x, source.y, radius * 1.45, 0.42, 1, 0, 1.15, 1.0);
         if (fx.particles.length < 850) {
           fx.particles.push({ x: source.x, y: source.y, px: source.x, py: source.y, vx: 0, vy: 0, team: source.team, color: '#ff7197', life: 0.28, duration: 0.28, flash: true, flashSize: radius * 1.45, overlay: true });
           fx.particles.push({ x: source.x, y: source.y, px: source.x, py: source.y, vx: 0, vy: 0, team: -1, color: '#ffffff', life: 0.14, duration: 0.14, flash: true, flashSize: radius * 0.8, overlay: true });
@@ -3585,21 +3614,45 @@
       // Compute active heat refraction sources up front so non-heat frames skip the scene FBO copy entirely
       const heatSources = [];
       if (!view.castHidden && !reduced && !bench?.flags.noMirage) {
+        const wMul = bench?.warpScale ?? 1;
         if (fx.fireWarp && fx.fireWarp.life > 0) {
           const fw = fx.fireWarp;
           const wp = 1 - Math.max(0, fw.life / fw.duration);
           const fade = (1 - wp) ** 1.15;
           const mirageR = 46 + wp * 44;
-          const wMul = bench?.warpScale ?? 1;
-          if (fade * wMul > 0.02) heatSources.push({ x: fw.x, y: fw.y, radius: mirageR, strength: fade * wMul, time: wp, isImpact: true });
+          if (fade * wMul > 0.02) {
+            heatSources.push({ x: fw.x, y: fw.y, radius: mirageR, strength: fade * wMul, time: wp, kind: 0, sub: 1, chroma: 1.0 });
+          }
         }
         const heatBall = view.bodies[6];
         if (heatBall && ballOnFire()) {
           const fwNear = fx.fireWarp && fx.fireWarp.life > 0 && Math.hypot(heatBall.x - fx.fireWarp.x, heatBall.y - fx.fireWarp.y) < 32;
           if (!fwNear) {
             const mirageR = Math.max(38, (heatBall.radius || 14) * 2.9);
-            const wMul = bench?.warpScale ?? 1;
-            if (wMul > 0.02) heatSources.push({ x: heatBall.x, y: heatBall.y, radius: mirageR, strength: 0.75 * wMul, time: fx.heatTime || 0, isImpact: false });
+            const flare = Math.max(0, fx.ballWarpFlare || 0);
+            const strength = (0.20 + 0.75 * flare) * wMul;
+            if (strength > 0.02) {
+              heatSources.push({ x: heatBall.x, y: heatBall.y, radius: mirageR, strength, time: fx.heatTime || 0, kind: 0, sub: 0, chroma: 0.4 + 0.8 * flare });
+            }
+          }
+        }
+        if (fx.spaceWarps?.length) {
+          for (const sw of fx.spaceWarps) {
+            if (sw.life <= 0 || heatSources.length >= 6) break;
+            const wp = 1 - Math.max(0, sw.life / sw.duration);
+            const fade = (1 - wp) ** 1.25;
+            const str = (sw.strength ?? 1) * fade * wMul;
+            if (str <= 0.02) continue;
+            heatSources.push({
+              x: sw.x,
+              y: sw.y,
+              radius: 14 + wp * (sw.maxRadius - 14),
+              strength: str,
+              time: wp,
+              kind: sw.kind,
+              sub: sw.sub || 0,
+              chroma: sw.chroma ?? 1.0
+            });
           }
         }
       }
@@ -3611,7 +3664,7 @@
       const logH = vf ? vf.logH : 600;
       const offX = vf ? vf.offX : 0;
       const offY = vf ? vf.offY : 0;
-      if (!gpu.beginFrame(frameW, frameH, logW, logH, offX, offY, heatSources.length > 0, vf ? background : null)) return null;
+      if (!gpu.beginFrame(frameW, frameH, logW, logH, offX, offY, heatSources.length > 0, vf ? background : null, reduced ? 0 : (fx.heatTime || 0))) return null;
 
       // 1. Baked static rink surface texture (invalidated only on resize, theme change, or logo load)
       const logoReady = Boolean(rinkLogo?.complete && rinkLogo.naturalWidth);
@@ -3886,7 +3939,7 @@
 
       // 5. Motion trails
       if (!bench?.flags.noTrails) {
-        gpu.drawTrails(fx.trails, view.bodies, home, away, ballHeat, heatColor);
+        gpu.drawTrails(fx.trails, view.bodies, home, away, ballHeat, heatColor, !reduced);
       }
 
       // 6. Turn guides (scene layer) & queue guide badges for post-refraction overlay
@@ -4017,17 +4070,21 @@
           gpu.strokeCircle(b.x, b.y, ringR, c1, 2.2, 0.7);
           return;
         }
-        gpu.strokeCircle(b.x, b.y, ringR, c1, level === 2 ? 2.5 : 2, level === 2 ? 0.75 : 0.55);
-        if (doc?.createElement) {
-          const ringAlpha = level === 2 ? 1 : 0.85;
-          for (const [rad, dir] of level === 2 ? [[ringR, 1], [ringR + 5, -1]] : [[ringR, 1]]) {
-            const lw = level === 2 ? 3.5 : 3;
-            const sprite = conicRingSprite(key, rad, lw, doc), sz = sprite.size;
-            gpu.pushTransform();
-            gpu.translate(b.x, b.y);
-            gpu.rotate(spin * dir);
-            gpu.drawTexture(`conic:${key}:${Math.round(rad)}:${lw}`, sprite, -sz / 2, -sz / 2, sz, sz, ringAlpha);
-            gpu.popTransform();
+        if (gpu.drawSuperAuraShader) {
+          gpu.drawSuperAuraShader(b.x, b.y, ringR, level === 2 ? 3.8 : 2.8, c1, c2, level, level === 2 ? 0.96 : 0.72);
+        } else {
+          gpu.strokeCircle(b.x, b.y, ringR, c1, level === 2 ? 2.5 : 2, level === 2 ? 0.75 : 0.55);
+          if (doc?.createElement) {
+            const ringAlpha = level === 2 ? 1 : 0.85;
+            for (const [rad, dir] of level === 2 ? [[ringR, 1], [ringR + 5, -1]] : [[ringR, 1]]) {
+              const lw = level === 2 ? 3.5 : 3;
+              const sprite = conicRingSprite(key, rad, lw, doc), sz = sprite.size;
+              gpu.pushTransform();
+              gpu.translate(b.x, b.y);
+              gpu.rotate(spin * dir);
+              gpu.drawTexture(`conic:${key}:${Math.round(rad)}:${lw}`, sprite, -sz / 2, -sz / 2, sz, sz, ringAlpha);
+              gpu.popTransform();
+            }
           }
         }
         if (level === 2 && !reduced) {
@@ -4451,9 +4508,63 @@
 
       drawParticlesWebGL(false);
 
-      // 12. Pass 2: True GPU Scene-to-Texture Heat Refraction
+      // 12. Pass 2: True GPU Scene-to-Texture Heat Refraction & Chromatic Dispersion
       if (heatSources.length > 0) {
-        gpu.applyHeatRefraction(heatSources);
+        gpu.applyHeatRefraction(heatSources, !reduced);
+      }
+
+      // 12b. Pass 2.5: Half-Res Emissive Multi-Pass Bloom (#5) at 0.5x additive gain
+      if (!reduced && !noBlur && gpu.beginEmissive?.()) {
+        if (!view.castHidden) {
+          const bloomBall = view.bodies[6];
+          if (bloomBall && (ballOnFire() || (bloomBall.team === -1 && P.ballOnFire?.(bloomBall)))) {
+            const heat = ballHeat(bloomBall);
+            const flare = fx.ballFlare || 0;
+            const warpFlare = Math.max(0, fx.ballWarpFlare || 0);
+            const hc = heatColor(Math.max(heat, flare > 0.1 ? 3 : heat));
+            gpu.fillCircle(bloomBall.x, bloomBall.y, bloomBall.radius * (1.28 + warpFlare * 0.42), hc, 0.72);
+          }
+          if (!bench?.flags.noAuras) {
+            for (const b of view.bodies.slice(0, 6)) {
+              if (b.carded) continue;
+              const key = b.equippedSuper?.key;
+              if (!key || !(b.superActive || b.superArm || (b.meter ?? 0) >= 100)) continue;
+              const [c1, c2] = SUPER_AURA_THEMES[key] || ['#ff7197', '#ff9954'];
+              const level = b.superActive || b.superArm ? 2 : 1;
+              const reachR = Math.max(b.radius, b.reach || b.radius, 18);
+              const ringR = reachR + 6 + level * 2;
+              if (gpu.drawSuperAuraShader) {
+                gpu.drawSuperAuraShader(b.x, b.y, ringR, level === 2 ? 5.2 : 4.2, c1, c2, level, level === 2 ? 0.44 : 0.24);
+              } else {
+                gpu.strokeCircle(b.x, b.y, ringR, c1, level === 2 ? 5 : 4, level === 2 ? 0.42 : 0.22);
+              }
+            }
+          }
+        }
+        for (const s of fx.shockwaves) {
+          drawShockwaveItem(s);
+        }
+        if (!bench?.flags.noParticles) {
+          for (const f of fx.fireworks) {
+            if ((f.delay || 0) > 0) continue;
+            gpu.fillCircle(f.x, f.y, 4.2, f.team === 0 ? home : away, 0.82);
+          }
+          for (const p of fx.particles) {
+            if (!p.flame && !p.celebration) continue;
+            const col = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? home : away);
+            const fade = Math.max(0, p.life / p.duration);
+            const r = p.flame ? p.flame * 0.55 * (0.4 + 0.6 * fade) : (p.size || 2) * (1.6 + 0.8 * fade);
+            gpu.fillCircle(p.x, p.y, r, col, Math.min(1, fade * 1.8) * (p.flame ? 0.72 : 0.62));
+          }
+        }
+        if (fx.goalSweep) {
+          const sweep = fx.goalSweep, sColor = sweep.team ? away : home;
+          const p = sweep.p, sx = sweep.team ? 60 + p * 880 : 940 - p * 880;
+          gpu.setClip(1);
+          gpu.fillRect(sx - 28, 60, 56, 480, sColor, (1 - p * 0.5) * 0.38);
+          gpu.setClip(0);
+        }
+        gpu.endEmissive(0.5);
       }
 
       // 13. Pass 3: Post-Refraction Field Overlays (ripples, pings, goalSweep, Pulse bar, badges, fouls, popups, fireworks)
@@ -5418,7 +5529,8 @@
         if (!fwNear) {
           const mirageR = Math.max(36, (heatBall.radius || 14) * 2.8);
           const heatTime = fx.heatTime || 0;
-          drawHeatMirage(heatBall.x, heatBall.y, mirageR, 0.5 * (bench?.warpScale ?? 1), heatTime, false);
+          const flare = Math.max(0, fx.ballWarpFlare || 0);
+          drawHeatMirage(heatBall.x, heatBall.y, mirageR, (0.20 + 0.75 * flare) * (bench?.warpScale ?? 1), heatTime, false);
         }
       }
 

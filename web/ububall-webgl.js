@@ -40,6 +40,7 @@ in vec4 v_ext;
 in vec2 v_aux;
 uniform float u_pxScale;
 uniform float u_portraitLen;
+uniform float u_time;
 uniform sampler2D u_tex0;
 uniform sampler2D u_tex1;
 uniform sampler2D u_tex2;
@@ -79,6 +80,30 @@ float rinkSignedDist(vec2 p, int clipMode) {
     return min(dRink, min(dGoalL, dGoalR));
   }
   return dRink;
+}
+
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash21(i);
+  float b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0));
+  float d = hash21(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+vec3 unpack6bitColor(float p) {
+  float r = floor(p / 4096.0);
+  float rem = p - r * 4096.0;
+  float g = floor(rem / 64.0);
+  float b = rem - g * 64.0;
+  return vec3(r, g, b) / 63.0;
 }
 
 void main() {
@@ -233,6 +258,69 @@ void main() {
     return;
   }
 
+  if (mode == 7) {
+    // #6 Shader-Native Conic Super Aura + Soft Corona
+    // v_uv = local offset, v_ext.y = ringR, v_ext.z = halfW, v_ext.w = level, v_aux.y = packed c2
+    float dist = length(v_uv);
+    float ringR = v_ext.y;
+    float halfW = v_ext.z;
+    float level = v_ext.w;
+    vec3 c1 = v_color.rgb;
+    vec3 c2 = unpack6bitColor(v_aux.y);
+    float ang = atan(v_uv.y, v_uv.x);
+    float spin = u_time * (0.65 + level * 1.35);
+
+    float coronaDist = abs(dist - ringR);
+    float corona = exp(-coronaDist * coronaDist / (level > 1.5 ? 95.0 : 52.0)) * (level > 1.5 ? 0.42 : 0.22);
+    vec3 colSum = mix(c1, c2, 0.5 + 0.5 * sin(ang * 2.0 - spin)) * corona;
+    float aSum = corona * v_color.a;
+
+    float phase1 = fract((ang - spin) / 6.28318530718);
+    float aa = max(0.55 * u_pxScale, 0.65 * fwidth(dist));
+    float ringMask = 1.0 - smoothstep(halfW - aa, halfW + aa, abs(dist - ringR));
+    float sweep1 = smoothstep(0.08, 0.96, phase1);
+    vec3 ringCol = mix(c2, c1, sweep1);
+    float head1 = smoothstep(0.88, 1.0, phase1);
+    ringCol = mix(ringCol, vec3(1.0), head1 * 0.72);
+    float ringAlpha = ringMask * (0.18 + 0.82 * sweep1) * v_color.a;
+    colSum += ringCol * ringAlpha;
+    aSum = max(aSum, ringAlpha);
+
+    if (level > 1.5) {
+      float outerR = ringR + 5.2;
+      float phase2 = fract((ang + spin * 1.15) / 6.28318530718);
+      float ring2 = 1.0 - smoothstep(halfW * 0.72 - aa, halfW * 0.72 + aa, abs(dist - outerR));
+      float sweep2 = smoothstep(0.15, 0.98, phase2);
+      vec3 r2Col = mix(c1, c2, sweep2);
+      r2Col = mix(r2Col, vec3(1.0), smoothstep(0.91, 1.0, phase2) * 0.65);
+      float a2 = ring2 * (0.12 + 0.75 * sweep2) * v_color.a;
+      colSum += r2Col * a2;
+      aSum = max(aSum, a2);
+    }
+
+    if (aSum <= 0.002) discard;
+    outColor = vec4(colSum * clipMask, aSum * clipMask);
+    return;
+  }
+
+  if (mode == 9) {
+    // #13 Feathered & Animated Motion Trails: v_uv.x = alongU (0..1), v_uv.y = acrossV (-1..1), v_ext.y = heat
+    float across = clamp(abs(v_uv.y), 0.0, 1.0);
+    float feather = 1.0 - smoothstep(0.18, 1.0, across);
+    feather *= (0.45 + 0.55 * (1.0 - across * across));
+    float heat = v_ext.y;
+    float streaks = 0.86 + 0.14 * sin(v_uv.x * 24.0 - u_time * (heat > 1.5 ? 24.0 : 14.0) + across * 4.5);
+    float shimmer = heat > 1.5
+      ? 0.85 + 0.30 * vnoise(vec2(v_uv.x * 8.0 - u_time * 11.0, v_uv.y * 3.0))
+      : 1.0;
+    float mask = feather * streaks * shimmer * clipMask;
+    if (mask <= 0.002) discard;
+    vec4 col = v_color * mask;
+    if (heat > 2.0) col.rgb += vec3(0.35, 0.18, 0.04) * (1.0 - across) * v_color.a * mask;
+    outColor = col;
+    return;
+  }
+
   outColor = v_color * clipMask;
 }`;
 
@@ -255,8 +343,9 @@ in vec2 v_fieldPos;
 uniform sampler2D u_scene;
 uniform vec4 u_view;
 uniform int u_heatCount;
-uniform vec4 u_heat[2];
-uniform vec4 u_heatMeta[2];
+uniform vec4 u_heat[6];
+uniform vec4 u_heatMeta[6];
+uniform float u_enableChroma;
 out vec4 outColor;
 
 float rinkDomainDist(vec2 p) {
@@ -269,40 +358,69 @@ float rinkDomainDist(vec2 p) {
   return min(dRink, min(dGoalL, dGoalR));
 }
 
-vec2 computeHeatDisp(vec2 p, vec4 h, vec4 meta) {
+void computeWarpDisp(vec2 p, vec4 h, vec4 meta, out vec2 disp, out float chroma, out float cyanTint) {
+  disp = vec2(0.0);
+  chroma = 0.0;
+  cyanTint = 0.0;
   vec2 center = h.xy;
   float mirageR = h.z;
   float strength = h.w;
   float t = meta.x;
-  bool isImpact = meta.y > 0.5;
+  int kind = int(meta.y + 0.5);
+  float sub = meta.z;
   vec2 rel = p - center;
   float dist = length(rel);
-  if (dist >= mirageR * 1.24 || strength <= 0.001) return vec2(0.0);
+  if (dist >= mirageR * 1.24 || strength <= 0.001) return;
 
+  vec2 radial = dist > 0.001 ? rel / dist : vec2(0.0, -1.0);
+
+  if (kind == 1) {
+    // #1 Shockwave / Knockout / Cannonball expanding radial space-warp wavefront
+    float normR = dist / max(1.0, mirageR);
+    float wavePos = 0.14 + 0.76 * t;
+    float delta = normR - wavePos;
+    float bandW = sub > 0.5 ? 28.0 : 42.0;
+    float ring = exp(-delta * delta * bandW);
+    float env = (1.0 - smoothstep(0.75, 1.15, normR)) * ring;
+    float push = (delta >= 0.0 ? -1.0 : 1.0) * 14.0 * env + sin(delta * 26.0) * 4.5 * env;
+    disp = radial * (push - env * 9.5) * strength;
+    chroma = env * strength * meta.w;
+    return;
+  }
+
+  if (kind == 2) {
+    // #4 Ghost phase-shift crisp geometric concentric spectral rings + ice/skater pinch
+    float ringR = (0.14 + 0.86 * t) * mirageR;
+    float band = 1.0 - smoothstep(2.5, 9.5, abs(dist - ringR));
+    float band2 = (1.0 - smoothstep(2.0, 7.5, abs(dist - ringR * 0.62))) * 0.72;
+    float fade = 1.0 - smoothstep(0.62, 1.0, t);
+    disp = radial * (band * 18.0 - band2 * 11.0) * fade * strength;
+    cyanTint = (band * 0.85 + band2 * 0.55) * fade * strength;
+    chroma = (band + band2) * fade * meta.w * 1.8;
+    return;
+  }
+
+  // kind == 0: Heat Devil (weak cruising shimmer + brief full impact flare)
+  bool isImpact = sub > 0.5;
   float ang = atan(rel.y, rel.x);
   float lobe = 1.0 + 0.16 * sin(ang * 3.0 + t * 5.1) + 0.10 * cos(ang * 2.0 - t * 3.6);
   float effU = dist / max(1.0, mirageR * lobe);
-  if (effU >= 1.0) return vec2(0.0);
+  if (effU >= 1.0) return;
 
   float env = 1.0 - smoothstep(0.24, 1.0, effU);
-  vec2 radial = dist > 0.001 ? rel / dist : vec2(0.0, -1.0);
-  vec2 disp = vec2(0.0);
 
   if (isImpact) {
-    // Expanding convective impact ring + core lens
     float ringPos = 0.25 + 0.58 * t;
     float ringDelta = (dist / max(1.0, mirageR)) - ringPos;
     float shock = exp(-ringDelta * ringDelta * 24.0) * (1.0 - t * 0.65);
     float coreZoom = 0.20 * cos(t * 4.71238898);
     disp -= radial * (shock * 11.0 + dist * coreZoom * env) * strength;
   } else {
-    // Rising convective thermal plume lens
     float zoom = (0.20 + 0.08 * sin(t * 5.8)) * env;
     disp -= rel * zoom * strength;
     disp.y += (3.4 + 2.0 * sin(t * 5.5)) * env * strength;
   }
 
-  // Two orbiting bulbous thermal eddies (matching the 2 convective eddies in production design)
   for (int k = 0; k < 2; k++) {
     float fk = float(k);
     float swirlSpeed = isImpact ? 11.5 : 6.5;
@@ -322,34 +440,90 @@ vec2 computeHeatDisp(vec2 p, vec4 h, vec4 meta) {
     }
   }
 
-  // Rising turbulent heat-shimmer waves across lines, trails, skaters, ball, and flames
   vec2 flow = vec2(
     sin(rel.y * 0.20 - t * 13.0 + sin(rel.x * 0.13 + t * 5.5)) + 0.55 * sin(rel.y * 0.36 - t * 18.5 + rel.x * 0.18),
     cos(rel.x * 0.18 - t * 10.5 + cos(rel.y * 0.14 - t * 7.0)) * 0.72
   );
   disp += flow * (isImpact ? 4.8 : 5.4) * strength * env;
-  return disp;
+  chroma = env * strength * meta.w * (isImpact ? 1.1 : 0.45);
 }
 
 void main() {
   float dHere = rinkDomainDist(v_fieldPos);
   float inDomain = 1.0 - smoothstep(-1.5, 0.5, dHere);
   vec2 totalDisp = vec2(0.0);
+  float totalChroma = 0.0;
+  float totalCyan = 0.0;
   if (inDomain > 0.001) {
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 6; i++) {
       if (i >= u_heatCount) break;
-      totalDisp += computeHeatDisp(v_fieldPos, u_heat[i], u_heatMeta[i]);
+      vec2 d; float ch; float cy;
+      computeWarpDisp(v_fieldPos, u_heat[i], u_heatMeta[i], d, ch, cy);
+      totalDisp += d;
+      totalChroma += ch;
+      totalCyan += cy;
     }
     totalDisp *= inDomain;
   }
   vec2 samplePos = v_fieldPos + totalDisp;
   if (rinkDomainDist(samplePos) > -0.5) {
-    // Keep refracted sample inside rink/goal interior so outer arena gutter never bleeds inward
     samplePos = mix(v_fieldPos, samplePos, 0.25);
     if (rinkDomainDist(samplePos) > 0.0) samplePos = v_fieldPos;
   }
   vec2 uv = vec2((samplePos.x - u_view.z) / u_view.x, 1.0 - (samplePos.y - u_view.w) / u_view.y);
-  outColor = texture(u_scene, clamp(uv, vec2(0.0005), vec2(0.9995)));
+  uv = clamp(uv, vec2(0.0005), vec2(0.9995));
+  if (u_enableChroma > 0.5 && totalChroma > 0.05) {
+    vec2 delta = (samplePos - v_fieldPos) / vec2(u_view.x, u_view.y);
+    float dLen = length(delta);
+    vec2 dir = dLen > 0.00001 ? delta / dLen : vec2(1.0, 0.0);
+    float split = min(0.0028, dLen * 0.22 * clamp(totalChroma, 0.0, 1.5));
+    float r = texture(u_scene, clamp(uv + dir * split, vec2(0.0005), vec2(0.9995))).r;
+    vec4 gSample = texture(u_scene, uv);
+    float b = texture(u_scene, clamp(uv - dir * split, vec2(0.0005), vec2(0.9995))).b;
+    outColor = vec4(r, gSample.g, b, gSample.a);
+  } else {
+    outColor = texture(u_scene, uv);
+  }
+  if (totalCyan > 0.005) {
+    outColor.rgb += vec3(0.20, 0.90, 1.0) * min(0.58, totalCyan) * outColor.a;
+  }
+}`;
+
+  const BLOOM_QUAD_VERT = `#version 300 es
+precision highp float;
+layout(location = 0) in vec2 a_unit;
+out vec2 v_uv;
+void main() {
+  v_uv = a_unit;
+  gl_Position = vec4(a_unit * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+  const BLOOM_BLUR_FRAG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2 u_texel;
+uniform vec2 u_dir;
+out vec4 outColor;
+void main() {
+  vec2 stepUv = u_texel * u_dir;
+  vec4 c = texture(u_tex, v_uv) * 0.227027;
+  c += texture(u_tex, v_uv + stepUv * 1.384615) * 0.316216;
+  c += texture(u_tex, v_uv - stepUv * 1.384615) * 0.316216;
+  c += texture(u_tex, v_uv + stepUv * 3.230769) * 0.070270;
+  c += texture(u_tex, v_uv - stepUv * 3.230769) * 0.070270;
+  outColor = c;
+}`;
+
+  const BLOOM_COMP_FRAG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_bloom;
+uniform float u_gain;
+out vec4 outColor;
+void main() {
+  vec4 b = texture(u_bloom, v_uv);
+  outColor = vec4(b.rgb * u_gain, 0.0);
 }`;
 
   const colorParseCache = new Map();
@@ -442,6 +616,8 @@ void main() {
     // GPU resource handles (rebuilt on webglcontextrestored)
     let batchProg = null;
     let warpProg = null;
+    let blurProg = null;
+    let bloomCompProg = null;
     let batchVao = null;
     let batchVbo = null;
     let warpVao = null;
@@ -450,6 +626,8 @@ void main() {
     let sceneTex = null;
     let sceneFbo = null;
     let fboW = 0, fboH = 0;
+    let emissiveTex = null, emissiveFbo = null, emW = 0, emH = 0;
+    let bloomTexA = null, bloomFboA = null, bloomTexB = null, bloomFboB = null, blW = 0, blH = 0;
 
     // Optional non-blocking GPU timer query telemetry (EXT_disjoint_timer_query_webgl2)
     let timerExt = null;
@@ -472,7 +650,9 @@ void main() {
     let logicalW = 1000, logicalH = 600, viewOffX = 0, viewOffY = 0;
     let portraitLen = 1000;
     let curW = 0, curH = 0;
+    let curTime = 0;
     let usingSceneFbo = false;
+    let usingEmissiveFbo = false;
 
     // 2D affine matrix stack [a, b, c, d, tx, ty]
     let m0 = 1, m1 = 0, m2 = 0, m3 = 1, m4 = 0, m5 = 0;
@@ -515,12 +695,13 @@ void main() {
     function initGpuResources() {
       maxTexSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096;
       batchProg = compileProgram(BATCH_VERT, BATCH_FRAG, [
-        'u_view', 'u_pxScale', 'u_portraitLen',
+        'u_view', 'u_pxScale', 'u_portraitLen', 'u_time',
         'u_tex0', 'u_tex1', 'u_tex2', 'u_tex3', 'u_tex4', 'u_tex5', 'u_tex6', 'u_tex7'
       ]);
       warpProg = compileProgram(WARP_VERT, WARP_FRAG, [
-        'u_quad', 'u_view', 'u_scene', 'u_heatCount',
-        'u_heat[0]', 'u_heat[1]', 'u_heatMeta[0]', 'u_heatMeta[1]'
+        'u_quad', 'u_view', 'u_scene', 'u_heatCount', 'u_enableChroma',
+        'u_heat[0]', 'u_heat[1]', 'u_heat[2]', 'u_heat[3]', 'u_heat[4]', 'u_heat[5]',
+        'u_heatMeta[0]', 'u_heatMeta[1]', 'u_heatMeta[2]', 'u_heatMeta[3]', 'u_heatMeta[4]', 'u_heatMeta[5]'
       ]);
 
       batchVao = gl.createVertexArray();
@@ -585,6 +766,11 @@ void main() {
       boundTexSlots.length = 0;
       vertCount = 0;
       fboW = fboH = 0;
+      emW = emH = blW = blH = 0;
+      blurProg = bloomCompProg = null;
+      emissiveTex = emissiveFbo = bloomTexA = bloomFboA = bloomTexB = bloomFboB = null;
+      usingSceneFbo = false;
+      usingEmissiveFbo = false;
       pendingQueries = [];
       activeQuery = null;
       options.onContextLost?.();
@@ -605,17 +791,65 @@ void main() {
     canvas.addEventListener?.('webglcontextlost', onContextLost);
     canvas.addEventListener?.('webglcontextrestored', onContextRestored);
 
+    function ensureFboTarget(tex, fbo, w, h) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        throw new Error('Framebuffer is incomplete.');
+      }
+    }
+
     function ensureSceneFbo(w, h) {
       if (fboW === w && fboH === h) return;
       fboW = w; fboH = h;
+      ensureFboTarget(sceneTex, sceneFbo, w, h);
+    }
+
+    function makeLinearTarget() {
+      const tex = gl.createTexture();
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, sceneTex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sceneTex, 0);
-      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        throw new Error('Scene framebuffer is incomplete.');
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return { tex, fbo: gl.createFramebuffer() };
+    }
+
+    function ensureBloomResources(w, h) {
+      if (!blurProg) {
+        blurProg = compileProgram(BLOOM_QUAD_VERT, BLOOM_BLUR_FRAG, ['u_tex', 'u_texel', 'u_dir']);
+        gl.useProgram(blurProg.p);
+        gl.uniform1i(blurProg.u.u_tex, 0);
+      }
+      if (!bloomCompProg) {
+        bloomCompProg = compileProgram(BLOOM_QUAD_VERT, BLOOM_COMP_FRAG, ['u_bloom', 'u_gain']);
+        gl.useProgram(bloomCompProg.p);
+        gl.uniform1i(bloomCompProg.u.u_bloom, 0);
+      }
+      const ew = Math.max(64, Math.floor(w * 0.5)), eh = Math.max(64, Math.floor(h * 0.5));
+      if (!emissiveTex) {
+        const t = makeLinearTarget();
+        emissiveTex = t.tex; emissiveFbo = t.fbo;
+      }
+      if (emW !== ew || emH !== eh) {
+        emW = ew; emH = eh;
+        ensureFboTarget(emissiveTex, emissiveFbo, ew, eh);
+      }
+      const bw = Math.max(32, Math.floor(w * 0.25)), bh = Math.max(32, Math.floor(h * 0.25));
+      if (!bloomTexA) {
+        const a = makeLinearTarget(), b = makeLinearTarget();
+        bloomTexA = a.tex; bloomFboA = a.fbo;
+        bloomTexB = b.tex; bloomFboB = b.fbo;
+      }
+      if (blW !== bw || blH !== bh) {
+        blW = bw; blH = bh;
+        ensureFboTarget(bloomTexA, bloomFboA, bw, bh);
+        ensureFboTarget(bloomTexB, bloomFboB, bw, bh);
       }
     }
 
@@ -635,6 +869,7 @@ void main() {
       gl.uniform4f(batchProg.u.u_view, logicalW, logicalH, viewOffX, viewOffY);
       gl.uniform1f(batchProg.u.u_pxScale, logicalW / Math.max(1, curW));
       gl.uniform1f(batchProg.u.u_portraitLen, portraitLen);
+      gl.uniform1f(batchProg.u.u_time, curTime);
 
       for (let i = 0; i < MAX_SLOTS; i++) {
         gl.activeTexture(gl.TEXTURE0 + i);
@@ -840,7 +1075,7 @@ void main() {
       }
     }
 
-    function beginFrame(width, height, logW = 1000, logH = 600, offX = 0, offY = 0, needSceneFbo = false, bgColor = null) {
+    function beginFrame(width, height, logW = 1000, logH = 600, offX = 0, offY = 0, needSceneFbo = false, bgColor = null, timeSec = 0) {
       if (disposed) return false;
       if (contextLost || (gl.isContextLost && gl.isContextLost())) {
         contextLost = true;
@@ -853,6 +1088,7 @@ void main() {
         canvas.height = h;
       }
       curW = w; curH = h;
+      curTime = Number.isFinite(timeSec) ? timeSec : 0;
       logicalW = logW; logicalH = logH;
       viewOffX = offX; viewOffY = offY;
       frameStamp++;
@@ -861,6 +1097,7 @@ void main() {
       boundTexSlots.length = 0;
       currentBlend = 'normal';
       currentClip = 0;
+      usingEmissiveFbo = false;
       resetTransform();
 
       pollTimerQueries();
@@ -889,7 +1126,7 @@ void main() {
       return true;
     }
 
-    function applyHeatRefraction(sources) {
+    function applyHeatRefraction(sources, enableChroma = true) {
       if (!usingSceneFbo || contextLost) return;
       flush();
       usingSceneFbo = false;
@@ -900,7 +1137,7 @@ void main() {
       gl.blitFramebuffer(0, 0, curW, curH, 0, 0, curW, curH, gl.COLOR_BUFFER_BIT, gl.NEAREST);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-      const valid = (sources || []).filter(s => s && s.strength > 0.01 && s.radius > 1).slice(0, 2);
+      const valid = (sources || []).filter(s => s && s.strength > 0.01 && s.radius > 1).slice(0, 6);
       if (!valid.length) return;
 
       // Compute tight union bounding box in visible logical field space
@@ -924,10 +1161,14 @@ void main() {
       gl.uniform4f(warpProg.u.u_view, logicalW, logicalH, viewOffX, viewOffY);
       gl.uniform4f(warpProg.u.u_quad, minX, minY, maxX - minX, maxY - minY);
       gl.uniform1i(warpProg.u.u_heatCount, valid.length);
+      gl.uniform1f(warpProg.u.u_enableChroma, enableChroma ? 1 : 0);
       for (let i = 0; i < valid.length; i++) {
         const s = valid[i];
+        const kind = s.kind ?? 0;
+        const sub = s.sub ?? (s.isImpact ? 1 : 0);
+        const chroma = s.chroma ?? (s.isImpact ? 1 : 0);
         gl.uniform4f(warpProg.u[`u_heat[${i}]`], s.x, s.y, s.radius, s.strength);
-        gl.uniform4f(warpProg.u[`u_heatMeta[${i}]`], s.time || 0, s.isImpact ? 1 : 0, 0, 0);
+        gl.uniform4f(warpProg.u[`u_heatMeta[${i}]`], s.time || 0, kind, sub, chroma);
       }
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sceneTex);
@@ -935,6 +1176,74 @@ void main() {
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       drawCallCount++;
       applyBlendMode(currentBlend);
+    }
+
+    function beginEmissive() {
+      if (contextLost || curW <= 0 || curH <= 0) return false;
+      flush();
+      ensureBloomResources(curW, curH);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, emissiveFbo);
+      gl.viewport(0, 0, emW, emH);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      usingEmissiveFbo = true;
+      currentBlend = 'add';
+      currentClip = 0;
+      resetTransform();
+      applyBlendMode('add');
+      return true;
+    }
+
+    function endEmissive(bloomGain = 0.5) {
+      if (!usingEmissiveFbo || contextLost) return;
+      flush();
+      usingEmissiveFbo = false;
+
+      if (bloomGain > 0.01 && blurProg && bloomCompProg && bloomFboA && bloomFboB) {
+        gl.disable(gl.BLEND);
+        gl.useProgram(blurProg.p);
+        gl.bindVertexArray(warpVao);
+        gl.activeTexture(gl.TEXTURE0);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFboA);
+        gl.viewport(0, 0, blW, blH);
+        gl.bindTexture(gl.TEXTURE_2D, emissiveTex);
+        gl.uniform2f(blurProg.u.u_texel, 1 / emW, 1 / emH);
+        gl.uniform2f(blurProg.u.u_dir, 1.35, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFboB);
+        gl.bindTexture(gl.TEXTURE_2D, bloomTexA);
+        gl.uniform2f(blurProg.u.u_texel, 1 / blW, 1 / blH);
+        gl.uniform2f(blurProg.u.u_dir, 0, 1.35);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFboA);
+        gl.bindTexture(gl.TEXTURE_2D, bloomTexB);
+        gl.uniform2f(blurProg.u.u_dir, 2.2, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFboB);
+        gl.bindTexture(gl.TEXTURE_2D, bloomTexA);
+        gl.uniform2f(blurProg.u.u_dir, 0, 2.2);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, usingSceneFbo ? sceneFbo : null);
+        gl.viewport(0, 0, curW, curH);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);
+        gl.useProgram(bloomCompProg.p);
+        gl.bindTexture(gl.TEXTURE_2D, bloomTexB);
+        gl.uniform1f(bloomCompProg.u.u_gain, bloomGain);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        gl.bindVertexArray(null);
+        drawCallCount += 5;
+      } else {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, usingSceneFbo ? sceneFbo : null);
+        gl.viewport(0, 0, curW, curH);
+      }
+      currentBlend = 'normal';
+      applyBlendMode('normal');
     }
 
     function endFrame() {
@@ -1324,8 +1633,32 @@ void main() {
       pushVert(prevIx, prevIy, 0, 0, baseRgb[0] * prevA, baseRgb[1] * prevA, baseRgb[2] * prevA, prevA, 0, 0, 0, 0, currentClip, 0);
     }
 
-    function drawTrails(trails, bodies, home, away, ballHeatFn, heatColorFn) {
+    function pack6bitColor(color) {
+      const rgb = parseColor(color);
+      const r = Math.min(63, Math.max(0, Math.round(rgb[0] * 63)));
+      const g = Math.min(63, Math.max(0, Math.round(rgb[1] * 63)));
+      const b = Math.min(63, Math.max(0, Math.round(rgb[2] * 63)));
+      return r * 4096 + g * 64 + b;
+    }
+
+    function drawSuperAuraShader(cx, cy, ringR, lw, c1, c2, level, alpha = 1) {
+      if (alpha <= 0.002 || ringR <= 0 || lw <= 0 || contextLost) return;
+      const rgb1 = parseColor(c1);
+      const packed2 = pack6bitColor(c2);
+      const ext = ringR + lw + 26;
+      ensureSpace(6);
+      pushVert(cx - ext, cy - ext, -ext, -ext, rgb1[0], rgb1[1], rgb1[2], alpha, 7, ringR, lw * 0.5, level, currentClip, packed2);
+      pushVert(cx + ext, cy - ext, ext, -ext, rgb1[0], rgb1[1], rgb1[2], alpha, 7, ringR, lw * 0.5, level, currentClip, packed2);
+      pushVert(cx - ext, cy + ext, -ext, ext, rgb1[0], rgb1[1], rgb1[2], alpha, 7, ringR, lw * 0.5, level, currentClip, packed2);
+      pushVert(cx - ext, cy + ext, -ext, ext, rgb1[0], rgb1[1], rgb1[2], alpha, 7, ringR, lw * 0.5, level, currentClip, packed2);
+      pushVert(cx + ext, cy - ext, ext, -ext, rgb1[0], rgb1[1], rgb1[2], alpha, 7, ringR, lw * 0.5, level, currentClip, packed2);
+      pushVert(cx + ext, cy + ext, ext, ext, rgb1[0], rgb1[1], rgb1[2], alpha, 7, ringR, lw * 0.5, level, currentClip, packed2);
+    }
+
+    function drawTrails(trails, bodies, home, away, ballHeatFn, heatColorFn, feathered = true) {
       if (contextLost || !trails) return;
+      const mode = feathered ? 9 : 0;
+      const wMul = feathered ? 1.15 : 1;
       for (let index = 0; index < trails.length; index++) {
         const trail = trails[index];
         if (!trail || !trail.length) continue;
@@ -1368,7 +1701,7 @@ void main() {
           const m = sec.length - 1;
           if (m < 1) continue;
           const S0 = sec[0], Sm = sec[m];
-          const L = [], R = [], C = [];
+          const L = [], R = [], C = [], H = [];
           for (let k = 0; k <= m; k++) {
             const pt = sec[k];
             let tx = 1, ty = 0;
@@ -1386,13 +1719,14 @@ void main() {
             }
             const nx = -ty, ny = tx;
             const fade = pt.isHead ? 1 : Math.max(0, pt.life / pt.duration);
-            const w = b.radius * fade;
+            const w = b.radius * fade * wMul;
             L.push({ x: pt.x + nx * w, y: pt.y + ny * w, tx, ty, w, fade, heat: pt.heat || 0 });
             R.push({ x: pt.x - nx * w, y: pt.y - ny * w, tx, ty, w, fade, heat: pt.heat || 0 });
 
             const f = k === 0 && S0.origIndex === 0 ? 0 : fade;
+            const h = pt.heat || 0;
+            H.push(h);
             if (b.team === -1) {
-              const h = pt.heat || 0;
               const base = 0.23 + Math.min(2, h) * 0.05 + Math.max(0, h - 2) * 0.3;
               const alpha = f <= 0 ? 0 : 1 - Math.pow(1 - Math.min(0.99, base * f), 18 * f);
               const hc = parseColor(heatColorFn(h, 1));
@@ -1415,21 +1749,22 @@ void main() {
             for (let s = 0; s < capSteps; s++) {
               const a0 = baseAng + (s / capSteps) * Math.PI;
               const a1 = baseAng + ((s + 1) / capSteps) * Math.PI;
-              pushVert(S0.x, S0.y, 0, 0, c0[0], c0[1], c0[2], c0[3], 0, 0, 0, 0, currentClip, 0);
-              pushVert(S0.x + Math.cos(a0) * w0, S0.y + Math.sin(a0) * w0, 0, 0, c0[0], c0[1], c0[2], c0[3], 0, 0, 0, 0, currentClip, 0);
-              pushVert(S0.x + Math.cos(a1) * w0, S0.y + Math.sin(a1) * w0, 0, 0, c0[0], c0[1], c0[2], c0[3], 0, 0, 0, 0, currentClip, 0);
+              pushVert(S0.x, S0.y, 0, 0, c0[0], c0[1], c0[2], c0[3], mode, H[0], 0, 0, currentClip, 0);
+              pushVert(S0.x + Math.cos(a0) * w0, S0.y + Math.sin(a0) * w0, 0, feathered ? 1 : 0, c0[0], c0[1], c0[2], c0[3], mode, H[0], 0, 0, currentClip, 0);
+              pushVert(S0.x + Math.cos(a1) * w0, S0.y + Math.sin(a1) * w0, 0, feathered ? 1 : 0, c0[0], c0[1], c0[2], c0[3], mode, H[0], 0, 0, currentClip, 0);
             }
           }
 
           for (let k = 0; k < m; k++) {
+            const u0 = k / m, u1 = (k + 1) / m;
             const c0 = C[k], c1 = C[k + 1];
-            pushVert(L[k].x, L[k].y, 0, 0, c0[0], c0[1], c0[2], c0[3], 0, 0, 0, 0, currentClip, 0);
-            pushVert(L[k + 1].x, L[k + 1].y, 0, 0, c1[0], c1[1], c1[2], c1[3], 0, 0, 0, 0, currentClip, 0);
-            pushVert(R[k].x, R[k].y, 0, 0, c0[0], c0[1], c0[2], c0[3], 0, 0, 0, 0, currentClip, 0);
+            pushVert(L[k].x, L[k].y, u0, 1, c0[0], c0[1], c0[2], c0[3], mode, H[k], 0, 0, currentClip, 0);
+            pushVert(L[k + 1].x, L[k + 1].y, u1, 1, c1[0], c1[1], c1[2], c1[3], mode, H[k + 1], 0, 0, currentClip, 0);
+            pushVert(R[k].x, R[k].y, u0, -1, c0[0], c0[1], c0[2], c0[3], mode, H[k], 0, 0, currentClip, 0);
 
-            pushVert(R[k].x, R[k].y, 0, 0, c0[0], c0[1], c0[2], c0[3], 0, 0, 0, 0, currentClip, 0);
-            pushVert(L[k + 1].x, L[k + 1].y, 0, 0, c1[0], c1[1], c1[2], c1[3], 0, 0, 0, 0, currentClip, 0);
-            pushVert(R[k + 1].x, R[k + 1].y, 0, 0, c1[0], c1[1], c1[2], c1[3], 0, 0, 0, 0, currentClip, 0);
+            pushVert(R[k].x, R[k].y, u0, -1, c0[0], c0[1], c0[2], c0[3], mode, H[k], 0, 0, currentClip, 0);
+            pushVert(L[k + 1].x, L[k + 1].y, u1, 1, c1[0], c1[1], c1[2], c1[3], mode, H[k + 1], 0, 0, currentClip, 0);
+            pushVert(R[k + 1].x, R[k + 1].y, u1, -1, c1[0], c1[1], c1[2], c1[3], mode, H[k + 1], 0, 0, currentClip, 0);
           }
         }
       }
@@ -1585,12 +1920,20 @@ void main() {
         if (whiteTex) gl.deleteTexture(whiteTex);
         if (sceneTex) gl.deleteTexture(sceneTex);
         if (sceneFbo) gl.deleteFramebuffer(sceneFbo);
+        if (emissiveTex) gl.deleteTexture(emissiveTex);
+        if (emissiveFbo) gl.deleteFramebuffer(emissiveFbo);
+        if (bloomTexA) gl.deleteTexture(bloomTexA);
+        if (bloomFboA) gl.deleteFramebuffer(bloomFboA);
+        if (bloomTexB) gl.deleteTexture(bloomTexB);
+        if (bloomFboB) gl.deleteFramebuffer(bloomFboB);
         if (batchVbo) gl.deleteBuffer(batchVbo);
         if (batchVao) gl.deleteVertexArray(batchVao);
         if (warpVbo) gl.deleteBuffer(warpVbo);
         if (warpVao) gl.deleteVertexArray(warpVao);
         if (batchProg) gl.deleteProgram(batchProg.p);
         if (warpProg) gl.deleteProgram(warpProg.p);
+        if (blurProg) gl.deleteProgram(blurProg.p);
+        if (bloomCompProg) gl.deleteProgram(bloomCompProg.p);
         if (releaseContext) gl.getExtension('WEBGL_lose_context')?.loseContext();
       }
     }
@@ -1603,6 +1946,8 @@ void main() {
       get lastGpuMs() { return lastGpuMs; },
       beginFrame,
       applyHeatRefraction,
+      beginEmissive,
+      endEmissive,
       endFrame,
       flush,
       pushTransform,
@@ -1625,6 +1970,7 @@ void main() {
       drawRadialStops,
       drawSoftRibbon,
       drawTaperedSpinArc,
+      drawSuperAuraShader,
       drawTrails,
       fillPolygonWithLinearGrad,
       fillRibbonPairsWithLinearGrad,

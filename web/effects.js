@@ -166,7 +166,7 @@
           id: 'motion-trails',
           title: 'Skater & Ball Motion Trails',
           when: 'Skaters or ball move faster than 25 px/s (`recordTrails`, `drawTrails`).',
-          visual: 'Smooth tapered team-colored and ball-heat-tinted gradient ribbons (0.24s life) that split cleanly at sharp bounce corners.',
+          visual: 'Feathered tapered team-colored and animated heat-shimmering fireball ribbons (0.24s life) with semicircular caps that split cleanly at sharp bounce corners.',
           duration: 2.6,
           run: ctx => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
@@ -568,8 +568,8 @@
         {
           id: 'fireball-plow',
           title: 'Flaming Ball Impacts: Warp, Heat Devil, Plow & Hot Shot',
-          when: 'Flaming ball strikes a skater, boards, or defender (`HIT_STOP.fire = 35ms`, `fx.fireWarp`, `plow = true`, `HOT_DRIVE`, `playFireImpact`).',
-          visual: '35ms minor hit-stop on ubu contact, damped squash-and-stretch warp (reduced 50% magnitude on ubus), contact glow + rising refractive bulbous heat-devil distortion, 15-particle flame scatter, and surging resonant flaming woosh.',
+          when: 'Flaming ball strikes a skater, boards, or defender (`HIT_STOP.fire = 35ms`, `fx.fireWarp`, `fx.ballWarpFlare`, `plow = true`, `HOT_DRIVE`, `playFireImpact`).',
+          visual: '35ms minor hit-stop on ubu contact, damped squash-and-stretch warp, subtle `0.20` ambient heat-devil shimmer while cruising that flares to `0.95` peak refraction with subtle RGB chromatic dispersion on impacts, multi-pass emissive bloom, 15-particle flame scatter, and surging resonant flaming woosh.',
           soundLabel: 'Play flaming woosh',
           variants: [
             { id: 'plow', label: 'Overpower Defender (Plow)' },
@@ -734,7 +734,7 @@
           id: 'super-knockout',
           title: '01 · Knockout (Heavyweight POW, Directional Shock-Cone & Stunned State)',
           when: 'Touching an opposing skater while Knockout is active (`handleSuper("knockout", "impact")`).',
-          visual: 'Crimson & pink aura (`#ee2b47` / `#ff7197`), heavyweight arcade POW punch, damped squash-and-stretch KO warp on attacker & target, directional crimson shock-cone & blow-through streak shards behind the target, and target dimmed with `💫` stun stars.',
+          visual: 'Crimson & pink conic shader aura (`#ee2b47` / `#ff7197`) with multi-pass bloom, heavyweight arcade POW punch, damped squash-and-stretch KO warp + radial space-warp wavefront with RGB chromatic dispersion, directional crimson shock-cone & blow-through streak shards behind the target, and target dimmed with `💫` stun stars.',
           soundLabel: 'Play knockout POW',
           duration: 2.5,
           playSound: ctx => ctx.audio()?.playSuper('knockout', 'impact'),
@@ -775,7 +775,7 @@
           id: 'super-cannonball',
           title: '03 · Cannonball (Explosive Blast & Instant Fireball)',
           when: 'Striking the ball with Cannonball active (`handleSuper("cannonball", "impact")`).',
-          visual: 'Fiery red/orange aura, `#ff634d` blast burst + 48 px shockwave, `ballFlare = 1`, instant fireball ignition, and hit-stop + shake.',
+          visual: 'Fiery red/orange conic shader aura with multi-pass bloom, `#ff634d` blast burst + 48 px shockwave, radial space-warp wavefront, `ballFlare = 1` + `ballWarpFlare = 1` heat-devil flare, instant fireball ignition, and hit-stop + shake.',
           soundLabel: 'Play cannonball boom',
           duration: 2.6,
           playSound: ctx => ctx.audio()?.playSuper('cannonball', 'impact'),
@@ -838,7 +838,7 @@
           id: 'super-shockwave',
           title: '06 · Shockwave (Dramatic Blast & Repulsion Forcefield Rings)',
           when: 'Opponent enters 170 px of an active Shockwave skater (`handleShockwave`), followed by active repulsion (`b.shockwaveFired`).',
-          visual: 'Charged conic-ring aura before trigger; dramatic 3-ring sonic blast, core flash, 26 radial streak shards & screen shake on trigger; then pulsing forcefield rings that continuously grow and fade while repelling opponents.',
+          visual: 'Charged conic shader aura before trigger; dramatic 3-ring sonic blast with radial space-warp wavefront, subtle RGB chromatic dispersion, multi-pass emissive bloom, core flash, 26 radial streak shards & screen shake on trigger; then pulsing forcefield rings that continuously grow and fade while repelling opponents.',
           soundLabel: 'Play shockwave pulse',
           duration: 2.6,
           playSound: ctx => ctx.audio()?.playSuper('shockwave', 'impact'),
@@ -860,7 +860,7 @@
           id: 'super-ghost',
           title: '07 · Ghost (Translucent Phase Shift & Ectoplasmic Pass-Through)',
           when: 'Launching with Ghost armed (`handleSuper("ghost", "launch")`) and phasing through opposing skaters (`playSuper("ghost", "phase")`).',
-          visual: 'Cyan & alabaster aura (`#33e0ff` / `#f8f6f2`), 45%-opacity body skating straight through blockers, and an ectoplasmic phase ripple + airy shimmer wisp as the Ghost passes through each defender.',
+          visual: 'Cyan & alabaster conic shader aura (`#33e0ff` / `#f8f6f2`), 45%-opacity body skating straight through blockers, and crisp geometric concentric cyan phase ripples + radial refraction with RGB chromatic split and airy shimmer wisp as the Ghost passes through each defender.',
           soundLabel: 'Play ghost shimmer',
           variants: [
             { id: 'launch', label: 'Phase Through Blockers' },

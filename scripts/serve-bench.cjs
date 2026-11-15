@@ -18,7 +18,7 @@ const PORT = portArgIdx >= 0 && Number(process.argv[portArgIdx + 1]) ? Number(pr
 
 // Explicit public whitelist matching scripts/prepare-assets.cjs (never serve repository root or secrets).
 const WEB_FILES = new Set([
-  'webgl-demo.html', 'webgl-demo.js', 'ububall-webgl.js',
+  'webgl-demo.html', 'webgl-demo.js', 'webgl-fx-demo.html', 'webgl-fx-demo.js', 'ububall-webgl.js',
   'ububall.html', 'ububall.css', 'ububall.js', 'ububall-presentation.js', 'ububall-playback.js',
   'ububall-stats.js', 'ububall-theater.js', 'ububall-bench.js', 'mp4.js', 'ububall-online.js',
   'ububall-cpu-worker.js', 'ububall-cpu-client.js', 'index.html', 'app.js', 'site.css', 'site.js',

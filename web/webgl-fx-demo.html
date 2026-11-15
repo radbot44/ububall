@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ububall / WebGL2 Effects Showcase</title>
+  <style>
+    :root { color-scheme: dark; font: 14px/1.45 system-ui, sans-serif; background: #0e1217; color: #e8edf2; }
+    body { margin: 0; padding: 20px 24px 32px; max-width: 1420px; margin-inline: auto; }
+    header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+    h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+    .sub { color: #9fb0c2; margin: 0 0 14px; max-width: 980px; }
+    .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+    button {
+      background: #1f2935; color: #eef3f8; border: 1px solid #3c4d60; border-radius: 7px;
+      padding: 7px 12px; font: inherit; cursor: pointer; transition: background .12s, border-color .12s;
+    }
+    button:hover { background: #2a3747; }
+    button[aria-pressed="true"] { background: #2d2616; border-color: #ffd05b; color: #ffd05b; }
+    .sep { width: 1px; height: 24px; background: #2a3644; margin: 0 4px; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 16px; align-items: start; }
+    .stage-card { background: #161c24; border: 1px solid #263140; border-radius: 12px; overflow: hidden; }
+    .stage-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid #232d3b; font-size: 13px; color: #c7d4e2; }
+    .stage-box { position: relative; width: 100%; aspect-ratio: 5 / 3; background: #101112; }
+    canvas#fx-canvas { width: 100%; height: 100%; display: block; }
+    output {
+      display: block; padding: 10px 14px; border-top: 1px solid #232d3b;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; color: #a9bbd0;
+    }
+    .panel {
+      background: #161c24; border: 1px solid #263140; border-radius: 12px; padding: 14px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: #90a4b8; margin: 0; }
+    .toggles { display: flex; flex-direction: column; gap: 6px; }
+    .fx-toggle {
+      display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; border-radius: 8px;
+      background: #1c242e; border: 1px solid #283444; cursor: pointer; user-select: none;
+    }
+    .fx-toggle:hover { border-color: #41556e; }
+    .fx-toggle input { margin: 3px 0 0; accent-color: #ffd05b; }
+    .fx-toggle strong { display: block; font-size: 13px; color: #eef3f8; }
+    .fx-toggle span { display: block; font-size: 11.5px; color: #96a8ba; }
+    .sliders { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; border-top: 1px solid #232d3b; }
+    .sliders label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; color: #c9d5e2; }
+    .sliders input[type="range"] { width: 130px; accent-color: #ffd05b; }
+    .triggers { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding-top: 4px; border-top: 1px solid #232d3b; }
+    .triggers button { font-size: 12px; padding: 6px 8px; }
+    #status { color: #ffd05b; font-size: 13px; margin: 0; }
+    @media (max-width: 1080px) { .layout { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Ububall · WebGL2 Effects Review Demo</h1>
+    <p id="status" role="status">Initializing WebGL2 effects pipeline...</p>
+  </header>
+  <p class="sub">Interactive preview of the tuned Heat Devil (weak cruising shimmer + impact flare-ups) and selected WebGL2 shader effects (#1, #2, #3, #4, #5, #6, #12, #13, #14) running on real ububall physics, sprites, and rink geometry.</p>
+
+  <div class="bar" id="scenario-bar">
+    <button type="button" data-scene="heat" aria-pressed="true">Heat Devil + Impacts</button>
+    <button type="button" data-scene="shock" aria-pressed="false">#1/#2 Shockwave &amp; KO</button>
+    <button type="button" data-scene="net" aria-pressed="false">#3 Burning Net Goal</button>
+    <button type="button" data-scene="ghost" aria-pressed="false">#4/#6/#14 Ghost &amp; Materials</button>
+    <button type="button" data-scene="chaos" aria-pressed="false">Full 3v3 Chaos</button>
+    <span class="sep"></span>
+    <button id="pause" type="button">Pause</button>
+    <button id="step" type="button">+1 Frame</button>
+    <button id="restart" type="button">Restart</button>
+    <button id="speed" type="button">Speed: 1.0x</button>
+    <button id="heat-mode" type="button" aria-pressed="true">Heat Devil: New (0.20 + Flare)</button>
+  </div>
+
+  <div class="layout">
+    <section class="stage-card">
+      <div class="stage-head">
+        <span id="scene-title">Scenario: Heat Devil (Weak Ambient + Impact Flare-Up)</span>
+        <span id="heat-readout">Ambient 0.20 · Impact 1.00</span>
+      </div>
+      <div class="stage-box">
+        <canvas id="fx-canvas" width="1500" height="900"></canvas>
+      </div>
+      <output id="stats">Waiting for first frame...</output>
+    </section>
+
+    <aside class="panel">
+      <h2>Effect Toggles</h2>
+      <div class="toggles" id="toggles"></div>
+      <div class="sliders">
+        <label>Bloom Intensity <input id="bloom-amt" type="range" min="0" max="1.6" step="0.1" value="0.5"><span id="bloom-val">0.5x</span></label>
+        <label>Ambient Heat <input id="ambient-heat" type="range" min="0" max="0.8" step="0.05" value="0.20"><span id="ambient-val">0.20</span></label>
+        <label>Resolution <input id="resolution" type="range" min="1" max="2.5" step="0.5" value="1.5"><span id="res-val">1.5x</span></label>
+      </div>
+      <h2>Manual Triggers</h2>
+      <div class="triggers">
+        <button id="trig-impact" type="button">Fire Impact Flare</button>
+        <button id="trig-shock" type="button">Shockwave Blast</button>
+        <button id="trig-ko" type="button">Knockout Warp</button>
+        <button id="trig-ghost" type="button">Ghost Phase Ripple</button>
+      </div>
+    </aside>
+  </div>
+
+  <script src="ubu.js"></script>
+  <script src="ubu-render.js"></script>
+  <script src="rarity.js"></script>
+  <script src="ability.js"></script>
+  <script src="ubu-archetype.js"></script>
+  <script src="ububall-physics.js"></script>
+  <script src="ububall-match.js"></script>
+  <script src="ububall-replay.js"></script>
+  <script src="ububall-presentation.js"></script>
+  <script src="webgl-fx-demo.js"></script>
+</body>
+</html>
