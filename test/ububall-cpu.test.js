@@ -330,3 +330,43 @@ test('shot-cone geometry stays strictly outside the 80 px crease and UI markup e
   const css = fs.readFileSync(path.join(__dirname, '../web/ububall.css'), 'utf8');
   assert.ok(css.includes('grid-template-columns: repeat(6, minmax(0, 1fr))'), '6-column spanned 3+2 grid keeps <= 3 items per row');
 });
+
+test('Hard+ adapts to resolved history on repeated setups and extreme style traits keep forced goals', () => {
+  // Equal-strength style tie-breaking: extreme personality presets still convert an open shot.
+  const open = S.initialState(9);
+  Object.assign(open.bodies[0], { x: 470, y: 300, vx: 0, vy: 0, omega: 0 });
+  Object.assign(open.bodies[1], { x: 180, y: 120, vx: 0, vy: 0, omega: 0 });
+  Object.assign(open.bodies[2], { x: 180, y: 480, vx: 0, vy: 0, omega: 0 });
+  for (let i = 3; i < 6; i++) Object.assign(open.bodies[i], { x: 120 + i * 35, y: 510, vx: 0, vy: 0, omega: 0 });
+  Object.assign(open.bodies[6], { x: 740, y: 300, vx: 0, vy: 0, omega: 0 });
+  for (const traits of [
+    { aggression: 63, creativity: 0, teamwork: 0, clutch: 63 },
+    { aggression: 0, creativity: 63, teamwork: 63, clutch: 0 }
+  ]) {
+    const s = structuredClone(open);
+    for (let i = 0; i < 3; i++) s.bodies[i].personality = traits;
+    const dec = C.plan(s, 0, { level: 'medium', seed: 5 });
+    const out = M.resolveTurn(P, s, [...dec.plans, C.HOLD, C.HOLD, C.HOLD], { effects: false });
+    assert.equal(out.replay.goal, 0, 'extreme style traits never sacrifice a forced goal');
+  }
+
+  // Behavior learning: repeated kickoff blitz history lets Hard block an unorthodox rush without mutating inputs.
+  const kState = S.initialState(2);
+  kState.roundTurns = 0;
+  const blitz = [
+    C.strike(kState.bodies[0], kState.bodies[6], 940, 300),
+    C.aim(kState.bodies[1], 760, 220, 220),
+    C.aim(kState.bodies[2], 760, 380, 220)
+  ];
+  const history = [{ roundTurns: 0, bodies: kState.bodies.map(b => ({ ...b })), plans: [...blitz, C.HOLD, C.HOLD, C.HOLD] }];
+  const stateSnap = structuredClone(kState), histSnap = structuredClone(history);
+
+  const withoutHist = C.plan(kState, 1, { level: 'hard', seed: 19 });
+  const withHist = C.plan(kState, 1, { level: 'hard', seed: 19, history });
+  assert.deepEqual(kState, stateSnap);
+  assert.deepEqual(history, histSnap);
+  assert.ok(withHist.plans.length === 3 && withoutHist.plans.length === 3);
+
+  const resWithHist = M.resolveTurn(P, kState, [...blitz, ...withHist.plans], { effects: false });
+  assert.notEqual(resWithHist.replay.goal, 0, 'Hard with kickoff blitz history prevents the kickoff blitz goal');
+});

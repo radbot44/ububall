@@ -1,10 +1,12 @@
 # CPU planning and simulation
 
-The local CPU evaluates complete three-player plans through `ububallMatch.resolveTurn` (`fastSearch: true`, `fastTick: true`), using the canonical gameplay physics, 240 Hz timestep, 12-second turn cap (1 second in Pulse), explicit guard braking, supers, stun, and meter rules. It never receives the human's planned arrows or super arming choices, and judges every turn fresh without match history so single-turn replays remain self-contained. Browser planning runs in a Web Worker from the public state captured at the start of the turn. Launch waits for that plan; a reset cancels old work. Worker failure or a ten-second timeout falls back to the heuristic planner.
+The local CPU evaluates complete three-player plans through `ububallMatch.resolveTurn` (`fastSearch: true`, `fastTick: true`), using the canonical gameplay physics, 240 Hz timestep, 12-second turn cap (1 second in Pulse), explicit guard braking, supers, stun, and meter rules. It never receives the human's planned arrows or super arming choices, and judges every turn fresh without requiring match history so single-turn replays remain self-contained; on `hard` and above, optional resolved-turn `history` adapts opponent predictions to repeated setups and tendencies. Browser planning runs in a Web Worker from the public state captured at the start of the turn. Launch waits for that plan; a reset cancels old work. Worker failure or a ten-second timeout falls back to the heuristic planner.
 
 The planner seeds search from the personality heuristic (`cpuPlans`), then builds a coordinated three-player play portfolio (`jointTeamPlays`): open-aperture goal aiming (`scanGoalAperture`), goalie screen-clearing checks paired with simultaneous sniper shots, synchronized Tape-to-Tape `Snap` one-timers, `Pack Draft` slipstream breakaways, corner `Rim-Around` exits, dynamic shot-cone goalie coverage (`shotConePoint`, always outside the 80 px crease), and dedicated `Sticky` ball-carrier drives and takedowns. Search interleaves single-skater options by tactical intent, then spends its refinement budget in a two-gear (coarse-to-fine) perturbation loop concentrating edits on skaters that actively participate in the rollout (`activeMask`).
 
-To maximize tactical strength per simulation, multi-opponent presets use a quick first-pass `r = 0` gate plus inline challenger wobble: obvious duds are dropped after a single rollout against an apples-to-apples baseline reference, while contenders run full multi-opponent vetting and execution `wobble` inline (preventing fragile 1-px flukes or own-goal traps from hijacking hill-climbing). When a Standard or Classic rollout truncates at its tick horizon, `evaluateBodies` projects 4-substep curved ball coast and skater stopping slides (including post-horizon crease-camping warnings and cards) without distorting settled coordinates.
+To maximize tactical strength per simulation, multi-opponent presets use a quick first-pass `r = 0` gate plus inline challenger wobble: obvious duds are dropped after a single rollout against an apples-to-apples baseline reference, while contenders run full multi-opponent vetting and execution `wobble` inline (preventing fragile 1-px flukes or own-goal traps from hijacking hill-climbing). When a Standard or Classic rollout truncates at its tick horizon, `evaluateBodies` projects 4-substep curved ball coast and skater stopping slides (including post-horizon crease-camping warnings and cards) and scores antisymmetric positional features (`strikeAccess`, `coneCover`, `shotChance`) alongside `WEIGHTS` (`chance: 200`, `access: 0.7`, `cover: 0.6`).
+
+On `hard`, `insane`, and `god`, top distinct tactical basins also run a bounded adversarial counter-search (`findCounter`, 1–2 rounds) to uncover opponent punishes that static scenario presets miss.
 
 ## Difficulty presets
 
@@ -14,11 +16,11 @@ Choose a CPU difficulty in **New match**. The initial default is Medium.
 | --- | --- | ---: | ---: | ---: |
 | `easy` | Easy | 14 | 1 (Heuristic) | 240 |
 | `medium` | Medium | 48 | 2 (+ Guard brake) | 420 |
-| `hard` | Hard | 84 | 3 (+ Open-corner sniper & striker check blitz) | 500 |
-| `insane` | Insane | 150 | 4 (+ Multi-attacker rush & dual-skater refine) | 580 |
-| `god` | Ububall God | 240 | 4 (+ Full 720-tick vision, dual wobble & dual refine) | 720 |
+| `hard` | Hard | 84 | 3 (+ Open-corner sniper, striker check blitz & counter-search) | 500 |
+| `insane` | Insane | 150 | 4 (+ Multi-attacker rush, dual-skater refine & counter-search) | 580 |
+| `god` | Ububall God | 240 | 4 (+ Full 720-tick vision, dual wobble, dual refine & 2-round counter-search) | 720 |
 
-Each candidate blends its average and worst outcome across the active opponent scenarios (`risk` weights: `.15`, `.35`, `.53`, `.55`, `.55`). Final selection deduplicates quantized tactical basins (`planBasinKey`) before Boltzmann sampling (`temperature`: `45`, `3.0`, `1.0`, `0.30`, `0.08`) so repeated local tweaks never drown out a sharp pass or bank shot. Team personality traits (`aggression`, `creativity`, `teamwork`, `clutch`) and match pressure modulate evaluation weights and risk tolerance dynamically. DNA and game physics are unchanged.
+Each candidate blends its average and worst outcome across the active opponent scenarios (`risk` weights: `.15`, `.35`, `.53`, `.55`, `.55`). Final selection deduplicates quantized tactical basins (`planBasinKey`) before Boltzmann sampling (`temperature`: `45`, `3.0`, `1.5`, `0.8`, `0.4`) so repeated local tweaks never drown out a sharp pass or bank shot. Team personality traits (`aggression`, `creativity`, `teamwork`, `clutch`) express style at equal strength through a bounded tie-break bias (`±8`) among near-optimal candidates rather than changing evaluation weights or risk tolerance. DNA and game physics are unchanged.
 
 ## Run comparisons
 

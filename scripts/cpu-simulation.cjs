@@ -48,13 +48,13 @@ function kickoff(state) {
   state.phase = 'plan';
 }
 
-function choose(state, team, profile, seed) {
+function choose(state, team, profile, seed, history) {
   const started = performance.now();
   if (profile === 'legacy' || profile === 'hold') {
     const plans = profile === 'legacy' ? C.legacy(state, team, C.randomSource(seed)) : [C.HOLD, C.HOLD, C.HOLD];
     return { plans, diagnostics: { milliseconds: performance.now() - started, simulations: 0 } };
   }
-  return C.plan(state, team, { ...(typeof profile === 'string' ? { level: profile } : profile), seed });
+  return C.plan(state, team, { ...(typeof profile === 'string' ? { level: profile } : profile), seed, ...(history?.length ? { history } : {}) });
 }
 
 function match({ seed = 1, mode = 'standard', profiles = ['medium', 'legacy'], maxTurns = 80, swapped = false, trace = false } = {}) {
@@ -70,13 +70,19 @@ function match({ seed = 1, mode = 'standard', profiles = ['medium', 'legacy'], m
     }
     profiles = [...profiles].reverse();
   }
-  const timing = [[], []], simulations = [0, 0], turns = [];
+  const timing = [[], []], simulations = [0, 0], turns = [], history = [];
   const fouls = { campingWarnings: [0, 0], cornerWarnings: 0, cards: [0, 0], cornerResets: 0 };
   let count = 0;
   while (state.winner === null && count < maxTurns) {
-    const decisions = profiles.map((p, team) => choose(state, team, p, seed + count * 17 + (swapped ? 1 - team : team)));
+    const decisions = profiles.map((p, team) => choose(state, team, p, seed + count * 17 + (swapped ? 1 - team : team), history));
     decisions.forEach((d, i) => { timing[i].push(d.diagnostics.milliseconds); simulations[i] += d.diagnostics.simulations; });
     const moves = [...decisions[0].plans, ...decisions[1].plans];
+    history.push({
+      roundTurns: state.roundTurns || 0,
+      bodies: state.bodies.map(b => ({ x: b.x, y: b.y, meter: b.meter, stunned: b.stunned, carded: b.carded })),
+      plans: moves
+    });
+    if (history.length > 32) history.shift();
     const result = M.resolveTurn(P, state, moves, RESOLVE_OPTS);
     if (trace) turns.push({ turn: state.turn, plans: moves, goal: result.replay.goal, ticks: result.replay.ticks });
     state = result.state; count++;

@@ -40,7 +40,7 @@
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const cpuClient = createCPUClient();
   const VALID_CPU_LEVELS = typeof ububallCPU === 'object' && ububallCPU?.LEVELS ? Object.keys(ububallCPU.LEVELS) : ['easy', 'medium', 'hard', 'insane', 'god'];
-  let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuDone = false, cpuLevel = 'medium', cpuMode = 'standard';
+  let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuDone = false, cpuLevel = 'medium', cpuMode = 'standard', cpuMatchSeed = (Math.random() * 0x100000000) >>> 0;
   // The home screen demo (CPU against CPU) plays silently.
   let demo = false, demoLevels = ['medium', 'hard'], demoRun = 0, demoGame = 0;
   const demoClient = createCPUClient(), DEMO_STOP = Symbol('demo stopped');
@@ -425,7 +425,7 @@
     clearEffects(); fieldEffects.kickoffGlow = 1;
     play = ububallMatch.newPlay(); scoringPlayer = null; roundTurns = 0; fouls = ububallMatch.newFouls();
     fieldEffects.netFire = null;
-    if (isNewMatch) { matchTicks = 0; tally = ububallMatch.newTally(); closeSummary(); }
+    if (isNewMatch) { matchTicks = 0; tally = ububallMatch.newTally(); closeSummary(); cpuMatchSeed = (Math.random() * 0x100000000) >>> 0; }
     const oldBodies = authoritativeBodies || simBodies;
     authoritativeBodies = null;
     const result = P.kickoff();
@@ -615,8 +615,23 @@
     cpuClient.cancel();
     if (online?.active) return;
     cpu = Array.isArray(initialPlans) && initialPlans.length === 3 ? initialPlans : P.cpuPlans(simBodies, () => .5, scores);
+    const turns = !demo && typeof recording !== 'undefined' ? recording?.turns : null;
+    let history;
+    if (turns?.length) {
+      history = [];
+      for (let i = Math.max(0, turns.length - 32); i < turns.length; i++) {
+        const t = turns[i];
+        if (!t?.bodies || t.bodies.length < 7 || !t.plans || t.plans.length < 6) continue;
+        history.push({
+          roundTurns: i === 0 || turns[i - 1]?.goal != null ? 0 : 1,
+          bodies: t.bodies.map(b => ({ x: b.x, y: b.y, meter: b.meter, stunned: b.stunned, carded: b.carded })),
+          plans: t.plans
+        });
+      }
+    }
+    const seed = ((typeof cpuMatchSeed === 'number' ? cpuMatchSeed : 0) ^ Math.imul(turn, 2654435761)) >>> 0;
     cpuReady = cpuClient.plan({ version: ububallMatch.VERSION, mode: fieldView.mode, bodies: simBodies, stats, scores, turn, fouls, clock: matchTicks, roundTurns, play: ububallMatch.newPlay(play) },
-      { level: demo ? demoLevels[1] : cpuLevel, seed: turn }).then(result => {
+      { level: demo ? demoLevels[1] : cpuLevel, seed, history }).then(result => {
       if (generation !== cpuGeneration || !result || online?.active) return;
       if (result.error) console.warn('CPU search unavailable; using baseline plan.');
       else {
