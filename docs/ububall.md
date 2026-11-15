@@ -1,4 +1,4 @@
-# Ububall Design & 1024-Bit DNA Specification
+# Ububall gameplay rules, stats and abilities
 
 Ububall is a 3v3 simultaneous-turn physics hockey game played on a curved-corner rink.
 
@@ -16,23 +16,9 @@ Fouls (implemented by `callFouls` in `shared/ububall-match.js`, the same in ever
 - A warning lapses the moment it stops applying during play (a camping team drops to its allowance, or the ball leaves the corner past its 45 px hysteresis margin, which also ends the corner count) and stays clear until the turn's end calls fouls again, so a team that clears it cannot be carded that turn, only warned afresh.
 - The crease and zone lines are drawn dashed, like the centre line. A warning shows an `alert-triangle` just outside the boards by that goal or corner, named "Goal Camping" or "Corner Stalling" beneath it, and flashes on the top right of each ubu it would card. Tapping that warning (in a match or the demo) opens a short explanation over the far half of the rink, naming the sides as the scoreboard does (You, CPU, the opponent's or a demo team's name): the count against the allowance, what must happen this turn to clear it, and what happens if it doesn't, closed with Got it. The rink lights its areas meanwhile: the crease and attack zone, or the corner, ringing the ubus that count. It updates as the field changes and closes once the warning lapses; while it is open, local play and the demo hold still. While planning, a warning the planned turn is predicted to clear (the prediction holds the opponents still) shows a green check in place of its alert beside the boards, as does each offending ubu predicted to get its centre out of the crease (or every corner offender, when the ball is predicted out of the corner). A new warning sounds a soft two-note alert and a card a light whistle. The scorebug's event tab also calls each card, new warning and corner reset, and a power play for the side with more ubus on the ice while the other sits out cards. The match summary counts each ubu's yellow cards as Fouls, and a goal replay shows a ubu carded during it faded with its card.
 
-## 1. 1024-Bit DNA Block Layout (128 Bytes Total)
+## DNA compatibility
 
-Canonical unpadded base64url encoding is exactly 171 characters (or 256 hexadecimal characters).
-
-```
-[Bits    0–373: 374 bits] Visual Traits & Identity (Preserved from original specification)
-[Bits  374–493: 120 bits] 15 Core Physical & Game Stats (8 bits each: 0–255)
-[Bits  494–509:  16 bits] 4 Special Ability Slots (4 bits each: 0–15)
-[Bits  510–533:  24 bits] AI Tactical Brain / Personality (4 axes @ 6 bits: 0–63)
-[Bits  534–597:  64 bits] Voice & Goal Fanfare Suite (Synthesizer + 8-Note Melody)
-[Bits 598–1013: 416 bits] Unassigned Reserve (52 bytes of headroom for future expansion)
-[Bits 1014–1023: 10 bits] Ubuquity (Starting Special Meter %: 0–1023)
-```
-
-$$\text{Total} = 374 + 120 + 16 + 24 + 64 + 416 + 10 = \mathbf{1024 \text{ bits}}$$
-
----
+DNA fields and their exact 1024-bit layout are defined only in [the DNA specification](dna.md); naming is defined in [the uburithm](uburithm.md). This document specifies the **gameplay meaning** of the stat, ability and personality fields, not a second copy of their binary schema.
 
 ## 2. Core Physical & Game Stats (Bits 374–493: 120 Bits)
 
@@ -173,7 +159,3 @@ Enables full Web Audio synthesis of procedural voice and an 8-note personal goal
 
 ---
 
-## 6. Unassigned Reserve & Ubuquity (Bits 598–1023)
-
-- **Unassigned Reserve (Bits 598–1013, 416 bits):** Exactly 52 bytes of pristine unassigned space reserved for future game modes, sports, tournament perks, or visual auras.
-- **Ubuquity (Bits 1014–1023, 10 bits):** Starting special meter % (`0–1023`, where values 1021–1023 = 100% full meter).
