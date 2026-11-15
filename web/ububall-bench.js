@@ -29,7 +29,7 @@
     { id: '03_chaos_dpr_2.0', group: 'chaos', title: 'Chaos + DPR cap 2.0', scenario: 'chaos', flags: { dprCap: 2 }, frames: 100 },
     { id: '04_chaos_dpr_1.5', group: 'chaos', title: 'Chaos + DPR cap 1.5', scenario: 'chaos', flags: { dprCap: 1.5 }, frames: 100 },
     { id: '05_chaos_dpr_1.0', group: 'chaos', title: 'Chaos + DPR cap 1.0', scenario: 'chaos', flags: { dprCap: 1 }, frames: 100 },
-    { id: '06_chaos_no_mirage', group: 'chaos', title: 'Chaos - Heat Mirage (cached refraction)', scenario: 'chaos', flags: { noMirage: true }, frames: 100 },
+    { id: '06_chaos_no_mirage', group: 'chaos', title: 'Chaos - Heat Mirage (local scene refraction)', scenario: 'chaos', flags: { noMirage: true }, frames: 100 },
     { id: '07_chaos_freeze_ice', group: 'chaos', title: 'Chaos - Ice Cache per-frame bust', scenario: 'chaos', flags: { freezeIceKey: true }, frames: 100 },
     { id: '08_chaos_no_ice_shadow', group: 'chaos', title: 'Chaos - Ice 4000px shadowBlur', scenario: 'chaos', flags: { noIceShadow: true }, frames: 100 },
     { id: '09_chaos_no_glow_blur', group: 'chaos', title: 'Chaos - Live glow shadowBlur', scenario: 'chaos', flags: { noGlowBlur: true }, frames: 100 },

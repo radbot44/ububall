@@ -3335,129 +3335,6 @@
       // The ice stands empty while the cast is away (the team setup shot).
       if (view.castHidden) return;
       drawFieldUnder(colors);
-      function drawHeatMirage(cx, cy, mirageR, strength, timeVal, isImpact = false) {
-        if (strength <= 0.02 || isReducedMotion() || bench?.flags.noMirage) return;
-        // A bounded scratch texture avoids DPR-sized allocations and live-canvas readback.
-        const padding = 12;
-        const rx = Math.max(0, cx - mirageR - padding), ry = Math.max(0, cy - mirageR - padding);
-        const rw = Math.min(1000, cx + mirageR + padding) - rx;
-        const rh = Math.min(600, cy + mirageR + padding) - ry;
-        if (rw <= 0 || rh <= 0) return;
-        const pw = Math.min(160, Math.max(64, Math.ceil(64 * Math.min(width / 1000, height / 600) / 32) * 32));
-        const ph = pw;
-        if (doc?.createElement && view.canvas && pw > 2 && ph > 2) {
-          if (!fx.mirageCanvas) {
-            fx.mirageCanvas = doc.createElement('canvas');
-            fx.mirageCtx = fx.mirageCanvas.getContext('2d');
-          }
-          const mc = fx.mirageCanvas, mctx = fx.mirageCtx;
-          if (mc && mctx) {
-            if (mc.width !== pw || mc.height !== ph) { mc.width = pw; mc.height = ph; }
-            mctx.clearRect(0, 0, pw, ph);
-            const rinkLayer = fx.rinkCache?.layer;
-            if (rinkLayer && rinkLayer.width > 0 && rinkLayer.height > 0) {
-              const rsx = rinkLayer.width / 1000, rsy = rinkLayer.height / 600;
-              mctx.drawImage(rinkLayer, rx * rsx, ry * rsy, rw * rsx, rh * rsy, 0, 0, pw, ph);
-            } else {
-              mctx.fillStyle = background;
-              mctx.fillRect(0, 0, pw, ph);
-            }
-            const iceLayer = (fx.skids.length || fx.burns.length) ? fx.iceCache?.layer : null;
-            if (iceLayer && iceLayer.width > 0 && iceLayer.height > 0) {
-              const isx = iceLayer.width / 1000, isy = iceLayer.height / 600;
-              mctx.drawImage(iceLayer, rx * isx, ry * isy, rw * isx, rh * isy, 0, 0, pw, ph);
-            }
-            const traceBulbousLobe = (ctx, bx, by, br, t, seed) => {
-              ctx.beginPath();
-              const steps = 16;
-              for (let i = 0; i <= steps; i++) {
-                const a = (i / steps) * Math.PI * 2;
-                const undulation = 0.18 * Math.sin(a * 3 + t * 4.8 + seed * 1.7)
-                                 + 0.10 * Math.cos(a * 2 - t * 3.4 + seed * 2.3);
-                const r = br * (1 + undulation);
-                const px = bx + Math.cos(a) * r;
-                const py = by + Math.sin(a) * r;
-                if (i === 0) ctx.moveTo(px, py);
-                else ctx.lineTo(px, py);
-              }
-              ctx.closePath();
-            };
-
-            // Refraction belongs to the ice: never repaint foreground trails or skaters.
-            view.ctx.save();
-            view.ctx.beginPath();
-            view.ctx.roundRect(60, 60, 880, 480, 100);
-            view.ctx.clip();
-            view.ctx.beginPath();
-            view.ctx.arc(cx, cy, mirageR, 0, Math.PI * 2);
-            view.ctx.clip();
-
-            // 1. Central convective plume core lens
-            const coreR = mirageR * (isImpact ? 0.42 + timeVal * 0.44 : 0.65);
-            const coreZoom = 1 + (isImpact ? 0.18 * strength * Math.cos(timeVal * Math.PI * 1.5) : 0.14 * strength);
-            const coreUpdraft = isImpact ? 0 : -4 * strength * Math.sin(timeVal * 5.5);
-            view.ctx.save();
-            traceBulbousLobe(view.ctx, cx, cy, coreR, timeVal, 0);
-            view.ctx.clip();
-            view.ctx.translate(cx, cy + coreUpdraft);
-            view.ctx.scale(coreZoom, coreZoom);
-            view.ctx.translate(-cx, -cy);
-            view.ctx.globalAlpha = 0.85 * Math.min(1, strength * 2);
-            view.ctx.drawImage(mc, 0, 0, pw, ph, rx, ry, rw, rh);
-            view.ctx.restore();
-
-            // 2. Swirling bulbous convective eddies / thermal bubbles
-            const numLobes = 2;
-            for (let k = 0; k < numLobes; k++) {
-              const swirlSpeed = isImpact ? 12 : 6.5;
-              const baseAngle = (k / numLobes) * Math.PI * 2;
-              const orbitAngle = baseAngle + timeVal * swirlSpeed * (k % 2 === 0 ? 1.0 : 0.82);
-              const orbitR = mirageR * (0.34 + 0.24 * Math.sin(timeVal * 5.2 + k * 1.8));
-              const updraft = isImpact ? 0 : (Math.sin(timeVal * 6.5 + k * 2.0) * 0.20 - 0.10) * mirageR;
-              const bx = cx + Math.cos(orbitAngle) * orbitR;
-              const by = cy + Math.sin(orbitAngle) * orbitR * 0.86 + updraft;
-              const br = mirageR * (isImpact ? 0.36 + 0.14 * Math.cos(timeVal * 7 + k) : 0.42 + 0.12 * Math.sin(timeVal * 4.5 + k));
-
-              const lobeZoom = 1 + (isImpact ? 0.16 : 0.12) * strength * (0.85 + 0.35 * Math.sin(timeVal * 6.8 + k * 1.5));
-              const swirlDir = k % 2 === 0 ? 1 : -1;
-              const tanAngle = Math.atan2(by - cy, bx - cx) + (Math.PI / 2) * swirlDir;
-              const drift = (isImpact ? 9 : 7) * strength;
-              const dx = Math.cos(tanAngle) * drift;
-              const dy = Math.sin(tanAngle) * drift - (isImpact ? 0 : 1.2 * strength);
-
-              view.ctx.save();
-              traceBulbousLobe(view.ctx, bx, by, br, timeVal, k + 1);
-              view.ctx.clip();
-              view.ctx.translate(bx + dx, by + dy);
-              view.ctx.scale(lobeZoom, lobeZoom);
-              view.ctx.translate(-bx, -by);
-              view.ctx.globalAlpha = 0.9 * Math.min(1, strength * 2);
-              view.ctx.drawImage(mc, 0, 0, pw, ph, rx, ry, rw, rh);
-              view.ctx.restore();
-            }
-
-            view.ctx.restore();
-          }
-        }
-      }
-
-      const heatBall = view.bodies[6];
-      if (fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion()) {
-        const fw = fx.fireWarp;
-        const wp = 1 - Math.max(0, fw.life / fw.duration);
-        const fade = (1 - wp) ** 1.15;
-        const mirageR = 46 + wp * 44;
-        drawHeatMirage(fw.x, fw.y, mirageR, fade, wp, true);
-      }
-      if (heatBall && ballOnFire() && !isReducedMotion()) {
-        const fwNear = fx.fireWarp && fx.fireWarp.life > 0 && Math.hypot(heatBall.x - fx.fireWarp.x, heatBall.y - fx.fireWarp.y) < 32;
-        if (!fwNear) {
-          const mirageR = Math.max(26, (heatBall.radius || 14) * 2.3);
-          const heatTime = fx.heatTime || 0;
-          drawHeatMirage(heatBall.x, heatBall.y, mirageR, 0.5, heatTime, false);
-        }
-      }
-
       if (!view.field) drawFoulFocus(text);
       if (phase === 'plan') {
         drawPrediction(home, away);
@@ -3808,6 +3685,113 @@
       }
 
       drawParticles(home, away);
+      function drawHeatMirage(cx, cy, mirageR, strength, timeVal, isImpact = false) {
+        if (strength <= 0.02 || isReducedMotion() || bench?.flags.noMirage) return;
+        const padding = 12;
+        const rx = Math.max(0, cx - mirageR - padding), ry = Math.max(0, cy - mirageR - padding);
+        const rw = Math.min(1000, cx + mirageR + padding) - rx;
+        const rh = Math.min(600, cy + mirageR + padding) - ry;
+        if (rw <= 0 || rh <= 0) return;
+        const sx = width / 1000, sy = height / 600;
+        // Snapshot only the affected region after the live scene has been drawn.
+        // The scratch surface stays small and is reused; no CPU pixel processing.
+        const size = Math.min(160, Math.max(64, Math.ceil(64 * Math.min(sx, sy) / 32) * 32));
+        if (!doc?.createElement) return;
+        fx.mirageCanvas ||= doc.createElement('canvas');
+        const mc = fx.mirageCanvas;
+        if (mc.width !== size || mc.height !== size) { mc.width = size; mc.height = size; }
+        const mctx = fx.mirageCtx ||= mc.getContext('2d');
+        mctx.clearRect(0, 0, size, size);
+        mctx.drawImage(view.canvas, rx * sx, ry * sy, rw * sx, rh * sy, 0, 0, size, size);
+        const traceBulbousLobe = (ctx, bx, by, br, t, seed) => {
+          ctx.beginPath();
+          const steps = 16;
+          for (let i = 0; i <= steps; i++) {
+            const a = (i / steps) * Math.PI * 2;
+            const undulation = 0.18 * Math.sin(a * 3 + t * 4.8 + seed * 1.7)
+                             + 0.10 * Math.cos(a * 2 - t * 3.4 + seed * 2.3);
+            const r = br * (1 + undulation);
+            const px = bx + Math.cos(a) * r;
+            const py = by + Math.sin(a) * r;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+        };
+
+        // Replace the local image with refracted pixels; opacity is not the heat effect.
+        view.ctx.save();
+        view.ctx.beginPath();
+        view.ctx.roundRect(60, 60, 880, 480, 100);
+        view.ctx.clip();
+        view.ctx.beginPath();
+        view.ctx.arc(cx, cy, mirageR, 0, Math.PI * 2);
+        view.ctx.clip();
+
+        // 1. Central convective plume core lens
+        const coreR = mirageR * (isImpact ? 0.42 + timeVal * 0.44 : 0.65);
+        const coreZoom = 1 + (isImpact ? 0.18 * strength * Math.cos(timeVal * Math.PI * 1.5) : 0.24 * strength * Math.sin(timeVal * 5.5));
+        const coreUpdraft = isImpact ? 0 : -4 * strength * Math.sin(timeVal * 5.5);
+        view.ctx.save();
+        traceBulbousLobe(view.ctx, cx, cy, coreR, timeVal, 0);
+        view.ctx.clip();
+        view.ctx.translate(cx, cy + coreUpdraft);
+        view.ctx.scale(coreZoom, coreZoom);
+        view.ctx.translate(-cx, -cy);
+        view.ctx.globalAlpha = 1;
+        view.ctx.drawImage(mc, 0, 0, size, size, rx, ry, rw, rh);
+        view.ctx.restore();
+
+        // 2. Swirling bulbous convective eddies / thermal bubbles
+        const numLobes = 2;
+        for (let k = 0; k < numLobes; k++) {
+          const swirlSpeed = isImpact ? 12 : 6.5;
+          const baseAngle = (k / numLobes) * Math.PI * 2;
+          const orbitAngle = baseAngle + timeVal * swirlSpeed * (k % 2 === 0 ? 1.0 : 0.82);
+          const orbitR = mirageR * (0.34 + 0.24 * Math.sin(timeVal * 5.2 + k * 1.8));
+          const updraft = isImpact ? 0 : (Math.sin(timeVal * 6.5 + k * 2.0) * 0.20 - 0.10) * mirageR;
+          const bx = cx + Math.cos(orbitAngle) * orbitR;
+          const by = cy + Math.sin(orbitAngle) * orbitR * 0.86 + updraft;
+          const br = mirageR * (isImpact ? 0.36 + 0.14 * Math.cos(timeVal * 7 + k) : 0.42 + 0.12 * Math.sin(timeVal * 4.5 + k));
+
+          const lobeZoom = 1 + (isImpact ? 0.20 : 0.18) * strength * (0.85 + 0.35 * Math.sin(timeVal * 6.8 + k * 1.5));
+          const swirlDir = k % 2 === 0 ? 1 : -1;
+          const tanAngle = Math.atan2(by - cy, bx - cx) + (Math.PI / 2) * swirlDir;
+          const drift = (isImpact ? 12 : 11) * strength;
+          const dx = Math.cos(tanAngle) * drift;
+          const dy = Math.sin(tanAngle) * drift - (isImpact ? 0 : 1.2 * strength);
+
+          view.ctx.save();
+          traceBulbousLobe(view.ctx, bx, by, br, timeVal, k + 1);
+          view.ctx.clip();
+          view.ctx.translate(bx + dx, by + dy);
+          view.ctx.scale(lobeZoom, lobeZoom);
+          view.ctx.translate(-bx, -by);
+          view.ctx.globalAlpha = 1;
+          view.ctx.drawImage(mc, 0, 0, size, size, rx, ry, rw, rh);
+          view.ctx.restore();
+        }
+
+        view.ctx.restore();
+      }
+
+      const heatBall = view.bodies[6];
+      if (fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion()) {
+        const fw = fx.fireWarp;
+        const wp = 1 - Math.max(0, fw.life / fw.duration);
+        const fade = (1 - wp) ** 1.15;
+        const mirageR = 46 + wp * 44;
+        drawHeatMirage(fw.x, fw.y, mirageR, fade, wp, true);
+      }
+      if (heatBall && ballOnFire() && !isReducedMotion()) {
+        const fwNear = fx.fireWarp && fx.fireWarp.life > 0 && Math.hypot(heatBall.x - fx.fireWarp.x, heatBall.y - fx.fireWarp.y) < 32;
+        if (!fwNear) {
+          const mirageR = Math.max(36, (heatBall.radius || 14) * 2.8);
+          const heatTime = fx.heatTime || 0;
+          drawHeatMirage(heatBall.x, heatBall.y, mirageR, 0.5, heatTime, false);
+        }
+      }
+
       drawFieldOver(colors);
       drawFouls(text, playback?.viewFouls ?? getFouls());
       drawPopups(view.badgeCtx, fx.popups, view.portrait, width, home, away, isReducedMotion(), doc);

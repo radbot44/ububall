@@ -323,7 +323,7 @@ test('incremental iceCache appends new skid/burn points without clearing and reb
   assert.equal(fx.iceCache.rebuilds, 3, 'crossing 250ms fade bucket triggers a full iceCache refresh');
 });
 
-test('drawHeatMirage composites offscreen rinkCache + iceCache and never self-copies view.canvas', () => {
+test('drawHeatMirage refracts a bounded live-scene snapshot without canvas self-copy', () => {
   const pres = require('../web/ububall-presentation.js');
   const bodies = P.kickoff();
   bodies[6].onFire = true;
@@ -381,9 +381,11 @@ test('drawHeatMirage composites offscreen rinkCache + iceCache and never self-co
   presenter.drawScene();
   assert.ok(fx.mirageCanvas, 'mirageCanvas created when ball is on fire');
   const mirageSources = fx.mirageCtx.drawSources;
-  assert.equal(mirageSources.includes(mainCanvas), false, 'mirageCtx NEVER copies from live view.canvas');
-  assert.equal(mirageSources.includes(fx.rinkCache.layer), true, 'mirageCtx samples finished offscreen rinkCache');
-  assert.equal(mirageSources.includes(fx.iceCache.layer), true, 'mirageCtx samples finished offscreen iceCache');
+  assert.deepEqual(mirageSources, [mainCanvas], 'snapshot includes the rendered scene, not just static ice');
+  assert.equal(view.ctx.drawSources.includes(mainCanvas), false, 'main canvas never draws onto itself');
+  const crop = fx.mirageCtx.drawCalls[0].args;
+  assert.ok(crop[2] < mainCanvas.width / 4 && crop[3] < mainCanvas.height / 4,
+    'capture is a local crop, never the entire frame');
   assert.equal(fx.mirageCanvas.width, 128, 'scratch width is bounded independently of DPR');
   assert.equal(fx.mirageCanvas.height, 128, 'scratch height is bounded independently of DPR');
   assert.equal(view.ctx.drawSources.filter(src => src === fx.mirageCanvas).length, 3,
