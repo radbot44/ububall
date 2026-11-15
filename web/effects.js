@@ -279,7 +279,7 @@
           id: 'ice-skids',
           title: 'Hard Braking & Ice Skid Marks',
           when: 'Sharp speed drop (`slowed > 220 px/s`) from Guard braking or heavy collision (`markIce`, `paintIce`, `playCarve`).',
-          visual: 'Softly feathered dark ice gouges (`SKID_LIFE = 12s`) paired with an ice-hockey blade shave & snow-spray stop sound.',
+          visual: 'Softly feathered dark ice gouges with rounded, fading ends (`SKID_LIFE = 12s`) paired with an ice-hockey blade shave & snow-spray stop sound.',
           soundLabel: 'Play ice brake',
           duration: 2.5,
           playSound: ctx => ctx.audio()?.playCarve({ volume: 0.5 }),
@@ -530,7 +530,7 @@
           id: 'fireball-burn',
           title: 'Ball Heat Stages, Ignition Burst, Ice Burn & Meteor Bank',
           when: 'Ball pace crosses 540 (orange) -> 720 (red + sparks) -> 800 (red-hot) -> 840+ on fire (`sparkBall` ignition burst, `burnIce`, `r.meteor` board scorch).',
-          visual: 'Mid-flight ignition shockwave rings, flash, ember streaks, ignition whoof & bulbous heat devil at 60 heat ticks; glowing fireball with clear swirling heat refraction that bends rink lines and ice marks beneath the flames (pauses with freeze frames), additive flames, single-tone charcoal ice burn ribbon with gently feathered edges, and Meteor Bank impact hotspot glow, rink-clipped circular black ash char poof, expanding heat-refraction eddies & tangential ember streaks.',
+          visual: 'Mid-flight ignition shockwave rings, flash, ember streaks, ignition whoof & bulbous heat devil at 60 heat ticks; glowing fireball with clear swirling heat refraction that bends rink lines and ice marks beneath the flames (pauses with freeze frames), additive flames, warm umber-to-soot ice burn ribbon matching wall scorch colors, with feathered sides and rounded, fading ends, and Meteor Bank impact hotspot glow, rink-clipped circular black ash char poof, expanding heat-refraction eddies & tangential ember streaks.',
           soundLabel: 'Play fire sizzle (1.5s)',
           variants: [
             { id: 'fire', label: 'Full Fireball + Meteor Bank' },

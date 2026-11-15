@@ -1458,11 +1458,13 @@
       return getView().portrait ? { x: b.x - b.radius * .65, y: b.y - b.radius * .65 } : { x: b.x - b.radius * .65, y: b.y + b.radius * .65 };
     }
 
-    // One feathered profile, rather than a wide stain plus a separate dark core.
-    // Keep the existing six fills, but calculate normals/widths only once per point.
-    const ICE_FEATHER = [1.5, 1.22, .96, .72, .5, .28];
-    const ICE_OPACITY = [.045, .12, .20, .24, .235, .16];
-    function softRibbon(points, widthAt, color, prevPoint = null) {
+    // One feathered profile across the width and around the ends.
+    // Five fills cover the sides and caps; calculate normals/widths only once per point.
+    // Only cap tails after a fade bucket or when the field settles. Growing slices
+    // keep butt joints, so incremental appends never paint overlapping end caps.
+    const ICE_FEATHER = [1.5, 1.16, .84, .54, .28];
+    const ICE_OPACITY = [.055, .17, .28, .30, .195];
+    function softRibbon(points, widthAt, color, prevPoint = null, capEnd = false) {
       if (!points || points.length < 2) return;
       const ctx = getView().ctx, edges = [];
       for (let k = 0; k < points.length; k++) {
@@ -1473,11 +1475,11 @@
         edges.push([p.x, p.y, -(b.y - a.y) * half, (b.x - a.x) * half]);
       }
       ctx.save();
-      ctx.fillStyle = color;
       const alpha = ctx.globalAlpha, hard = bench?.flags.noIceShadow;
       for (let band = 0; band < (hard ? 1 : ICE_FEATHER.length); band++) {
         const scale = hard ? 1 : ICE_FEATHER[band];
         ctx.globalAlpha = alpha * (hard ? 1 : ICE_OPACITY[band]);
+        ctx.fillStyle = Array.isArray(color) ? color[band] : color;
         ctx.beginPath();
         const first = edges[0];
         ctx.moveTo(first[0] + first[2] * scale, first[1] + first[3] * scale);
@@ -1485,9 +1487,23 @@
           const e = edges[k];
           ctx.lineTo(e[0] + e[2] * scale, e[1] + e[3] * scale);
         }
+        const last = edges[edges.length - 1];
+        if (capEnd) {
+          // Nested round caps feather lengthwise using the same five polygon fills.
+          const nx = last[2] * scale, ny = last[3] * scale;
+          ctx.lineTo(last[0] + (nx + ny) * .7071, last[1] + (ny - nx) * .7071);
+          ctx.lineTo(last[0] + ny, last[1] - nx);
+          ctx.lineTo(last[0] + (ny - nx) * .7071, last[1] - (nx + ny) * .7071);
+        }
         for (let k = edges.length - 1; k >= 0; k--) {
           const e = edges[k];
           ctx.lineTo(e[0] - e[2] * scale, e[1] - e[3] * scale);
+        }
+        if (!prevPoint) {
+          const nx = first[2] * scale, ny = first[3] * scale;
+          ctx.lineTo(first[0] - (nx + ny) * .7071, first[1] + (nx - ny) * .7071);
+          ctx.lineTo(first[0] - ny, first[1] + nx);
+          ctx.lineTo(first[0] + (nx - ny) * .7071, first[1] + (nx + ny) * .7071);
         }
         ctx.closePath(); ctx.fill();
       }
@@ -1515,7 +1531,7 @@
       const t = age / SKID_LIFE, fade = 1 - t * t * (3 - 2 * t), thin = .6 + .4 * fade;
       if (fade <= 0.005) return;
       ctx.globalAlpha = .20 * fade;
-      softRibbon(points, p => s.width * .85 * (.4 + .6 * p.depth) * thin, '#000000', prevPoint);
+      softRibbon(points, p => s.width * .85 * (.4 + .6 * p.depth) * thin, '#000000', prevPoint, s.age >= .25 || P.settled(getView().bodies));
     }
 
     function paintBurnPoof(ctx, s) {
@@ -1537,13 +1553,15 @@
       ctx.restore();
     }
 
+    // The wall scorch's warm umber fades gradually into soot, without a separate core stripe.
+    const BURN_COLORS = ['#2d1206', '#291106', '#200e05', '#120802', '#000000'];
     function paintBurnSlice(ctx, s, points, prevPoint = null) {
       if (!points || points.length < 2) return;
       const age = Math.floor(s.age * 4) / 4;
       const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
       if (fade <= 0.005) return;
       ctx.globalAlpha = .42 * fade;
-      softRibbon(points, p => s.width * (.5 + .5 * p.depth), '#171310', prevPoint);
+      softRibbon(points, p => s.width * (.5 + .5 * p.depth), BURN_COLORS, prevPoint, s.age >= .25 || P.settled(getView().bodies));
     }
 
     function paintIce() {
@@ -1562,8 +1580,9 @@
       const width = Math.max(1, Math.round(view.canvas.width * scale));
       const height = Math.max(1, Math.round(view.canvas.height * scale));
       const shadowFlag = Boolean(bench?.flags.noIceShadow);
+      const settled = P.settled(view.bodies);
       cache.layer ||= doc.createElement('canvas');
-      const resized = cache.layer.width !== width || cache.layer.height !== height || cache.shadowFlag !== shadowFlag;
+      const resized = cache.layer.width !== width || cache.layer.height !== height || cache.shadowFlag !== shadowFlag || cache.settled !== settled;
       const skidSnap = cache.skidSnap, burnSnap = cache.burnSnap;
       let canAppend = !resized && Array.isArray(skidSnap) && Array.isArray(burnSnap)
         && fx.skids.length >= skidSnap.length && fx.burns.length >= burnSnap.length;
@@ -1592,6 +1611,7 @@
           cache.layer.height = height;
         }
         cache.shadowFlag = shadowFlag;
+        cache.settled = settled;
         const main = view.ctx;
         view.ctx = cache.layer.getContext('2d');
         view.ctx.setTransform(width / 1000, 0, 0, height / 600, 0, 0);

@@ -215,9 +215,10 @@ test('ububall-online boots cleanly on non-HTTPS LAN origins where crypto.randomU
   assert.equal(typeof client.active, 'boolean');
 });
 
-test('incremental iceCache appends new skid/burn points without clearing and rebuilds only on 250ms fade bucket ticks', () => {
+test('incremental iceCache appends new skid/burn points without clearing and rebuilds on fade ticks or settling to finish caps', () => {
   const pres = require('../web/ububall-presentation.js');
   const bodies = P.kickoff();
+  bodies[0].vx = 100;
   const fx = pres.createEffectsState([], {});
   const layers = [];
   const makeCtx = label => {
@@ -308,10 +309,18 @@ test('incremental iceCache appends new skid/burn points without clearing and reb
   assert.equal(fx.iceCache.appends, 1, 'growing skid points appends only the new tail slice');
   assert.equal(iceLayerCtx.ops.clears, clearsAfterInit, 'incremental append does not clear the offscreen ice layer');
 
+  // A settled turn must finish the end cap even when its age stays in bucket zero.
+  bodies[0].vx = 0;
+  presenter.drawScene();
+  assert.equal(fx.iceCache.rebuilds, 2, 'settling refreshes the cache to finish caps');
+  const fillsAfterStop = iceLayerCtx.ops.fills;
+  presenter.drawScene();
+  assert.equal(iceLayerCtx.ops.fills, fillsAfterStop, 'finished caps remain cached while idle');
+
   // Frame 3: advance past 0.25s fade bucket boundary -> triggers clean rebuild
   skid.age = 0.26;
   presenter.drawScene();
-  assert.equal(fx.iceCache.rebuilds, 2, 'crossing 250ms fade bucket triggers a full iceCache refresh');
+  assert.equal(fx.iceCache.rebuilds, 3, 'crossing 250ms fade bucket triggers a full iceCache refresh');
 });
 
 test('drawHeatMirage composites offscreen rinkCache + iceCache and never self-copies view.canvas', () => {
