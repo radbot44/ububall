@@ -2331,3 +2331,38 @@ test('v28 Board Spring & Pack Draft: Bounciness unclips above 175 and boosts cor
   assert.ok(teamDraft > oppDraft * 1.4, `Pack Draft boosts teammate slipstream (${teamDraft} vs ${oppDraft})`);
   assert.ok(teamDraft * P.TAILGATE.frictionCut <= P.PACK_DRAFT.maxCut + 1e-9, 'Pack Draft respects maxCut ceiling');
 });
+
+test('v29 adaptive substepping preserves borderline Meteor Banks, blocks premature tick-59 Fire Plows, and stays re-entrant safe', () => {
+  // 1. Borderline Meteor Bank (504.3 px/s > 504 sustain) hitting wall on substep 0 preserves full speed instead of quenching on trial step
+  const bankSim = P.kickoff();
+  bankSim.slice(0, 6).forEach((b, i) => { P.applyStats(b, normal); Object.assign(b, { x: 200 + i * 60, y: 300, vx: 0, vy: 0 }); });
+  const bankBall = bankSim[6];
+  Object.assign(bankBall, { x: 940 - 18 - 0.1, y: 200, vx: 504.3, vy: 0, pace: 504.3, onFire: true, fireTicks: P.FIRE_TICKS, strikerTeam: 0, strikerPower: 1.3 });
+  P.step(bankSim, P.DT);
+  const postBankSpeed = Math.hypot(bankBall.vx, bankBall.vy);
+  assert.ok(postBankSpeed > 503.5, `borderline Fireball keeps Meteor Bank speed on substep 0 (${postBankSpeed})`);
+
+  // 2. Shot at fireTicks = 59 hitting a defender 0.1 px away on substep 0 does not prematurely ignite or plow before 60 full ticks
+  const preFireSim = P.kickoff();
+  preFireSim.slice(0, 6).forEach((b, i) => { P.applyStats(b, normal); Object.assign(b, { x: 140 + i * 55, y: 500, vx: 0, vy: 0 }); });
+  Object.assign(preFireSim[3], { x: 600, y: 300, vx: 0, vy: 0 });
+  Object.assign(preFireSim[6], { x: 600 - 25 - 18 - 0.1, y: 300, vx: 900, vy: 0, pace: 900, onFire: false, fireTicks: P.FIRE_TICKS - 1, strikerTeam: 0, strikerPower: 1.25 });
+  let prematurePlow = false;
+  P.step(preFireSim, P.DT, ({ plow }) => { if (plow) prematurePlow = true; });
+  assert.equal(prematurePlow, false, 'fireTicks=59 contact on substep 0 does not trigger premature Fire Plow');
+  assert.equal(preFireSim[6].onFire, false, 'slowed deflection at fireTicks=59 stays unlit');
+
+  // 3. Re-entrant P.ballRun / P.step inside onCollide never clobbers outer adaptive rollback buffers
+  const reentrantA = P.kickoff();
+  reentrantA.slice(0, 6).forEach(b => P.applyStats(b, normal));
+  Object.assign(reentrantA[0], { x: 460, y: 300, vx: 680, vy: 45, omega: 9 });
+  Object.assign(reentrantA[6], { x: 501, y: 304, vx: -120, vy: 0 });
+  const reentrantB = structuredClone(reentrantA);
+  let innerGoal = undefined;
+  P.step(reentrantA, P.DT, () => {
+    innerGoal = P.ballRun(reentrantA, { boards: true, ticks: 120 }).goal;
+  });
+  P.step(reentrantB, P.DT);
+  assert.notEqual(innerGoal, undefined, 'onCollide ran nested P.ballRun');
+  assert.deepEqual(reentrantA, reentrantB, 'nested P.step leaves outer adaptive simulation bit-for-bit identical');
+});

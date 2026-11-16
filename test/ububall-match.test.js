@@ -1273,3 +1273,51 @@ test('v28 Tape-to-Tape & presentation sync: Synergy×Chemistry scales Snap redir
   const g1 = impulseGeometry(P, carver, { angle: 0, power: 1, spin: 1 });
   assert.ok(Math.abs(g1.scale / g0.scale - 1.1) < 1e-9, 'impulseGeometry arrow scale matches +10% Carve Drive');
 });
+
+test('v29 substep deduplication: same-tick micro double-touches preserve ONE-TIMER!, deduplicate pass FX, and count checks once per tick', () => {
+  // 1. Heavy fast shooter driving through a live teammate pass across multiple substeps in a single tick keeps touches === 1 (ONE-TIMER!)
+  const bodies = P.kickoff();
+  bodies.slice(0, 6).forEach((b, i) => {
+    P.applyStats(b, i === 1 ? { mass: 255, impulse: 255, power: 0, size: 255 } : {});
+    Object.assign(b, { x: 140 + i * 60, y: 500, vx: 0, vy: 0 });
+  });
+  // Place shooter 1 driving hard right into a slow-x vertical teammate pass near top boards so ball bounces back into shooter within the same 1/240s tick
+  P.setStriker(bodies[6], bodies[0]);
+  bodies[6].strikerSlot = 0;
+  Object.assign(bodies[1], { x: 500, y: 126, vx: 820, vy: -520 });
+  Object.assign(bodies[6], { x: 500, y: 80, vx: 190, vy: -200, pace: 275 });
+  const play = M.newPlay({ last: 0, lastTouch: [0, null], credit: { 0: 1 }, age: 20 });
+  let sameTickTouches = 0, passFxCalls = 0;
+  M.playTick(P, bodies, play, {
+    collide({ a, b, speed }) {
+      if (M.toucher(a, b, speed) === bodies[1]) sameTickTouches++;
+    },
+    pass() { passFxCalls++; }
+  }, M.newTally(), true);
+  assert.ok(sameTickTouches >= 2, `setup produced ${sameTickTouches} substep touches in one tick`);
+  assert.equal(passFxCalls, 1, 'fx.pass fires once per ordered teammate pair in a tick');
+  assert.equal(play.lastPass?.touches, 1, 'same-tick substep follow-through keeps lastPass.touches === 1');
+  assert.equal(M.callGoal(bodies, play, M.newTally(), 0, false).label, 'ONE-TIMER!', 'goal after same-tick substep double-tap still calls ONE-TIMER!');
+
+  // Subsequent-tick follow-up touch still counts as a multi-touch dribble (touches === 2)
+  Object.assign(bodies[6], { x: bodies[1].x + bodies[1].radius + 18 - 0.5, y: bodies[1].y, vx: 0, vy: 0 });
+  bodies[1].vx = 500; bodies[1].vy = 0;
+  M.playTick(P, bodies, play, {}, M.newTally(), true);
+  assert.equal(play.lastPass?.touches, 2, 'touch on a later tick increments touches to 2');
+
+  // 2. Opponent pinned against boards in a single substepped tick increments tally.checks at most once
+  const chkBodies = P.kickoff();
+  chkBodies.slice(0, 6).forEach((b, i) => {
+    P.applyStats(b, i === 0 ? { mass: 255, strength: 255 } : { stability: 0 });
+    Object.assign(b, { x: 200 + i * 60, y: 300, vx: 0, vy: 0 });
+  });
+  Object.assign(chkBodies[3], { x: 500, y: 60 + chkBodies[3].radius + 0.2, vx: 0, vy: -60 });
+  Object.assign(chkBodies[0], { x: 500, y: chkBodies[3].y + chkBodies[3].radius + chkBodies[0].radius + 0.2, vx: 0, vy: -820 });
+  const chkTally = M.newTally();
+  let rawCheckContacts = 0;
+  M.playTick(P, chkBodies, M.newPlay(), {
+    collide({ checker }) { if (checker === chkBodies[0]) rawCheckContacts++; }
+  }, chkTally, true);
+  assert.ok(rawCheckContacts >= 1);
+  assert.equal(chkTally.checks[0], 1, 'same-tick multi-substep wall pin counts as 1 check');
+});

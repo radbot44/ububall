@@ -238,7 +238,7 @@
     if (big && P.ballRun([ball], { ticks: 960 }).goal !== null) ms = HIT_STOP.goal;
     return ms;
   }
-  function applyBallPossession(bodies, play, ball, i, impulse, preBallSpeed, age, fx, deferPasses = null) {
+  function applyBallPossession(bodies, play, ball, i, impulse, preBallSpeed, age, fx, deferPasses = null, repeatTouch = false, tickState = null) {
     const team = bodies[i].team, last = play.last;
     let passSender = -1;
     if (last !== null && bodies[last].team !== team) {
@@ -264,9 +264,15 @@
           speed: Math.max(preBallSpeed || 0, origin ? origin.speed : 0),
           touches: 1
         };
-        if (deferPasses) deferPasses.push({ from: last, to: i });
-        else fx.pass?.(last, i, ball);
-      } else if (last === i) {
+        const passBit = (last >= 0 && last < 6 && i >= 0 && i < 6 && team >= 0 && team < 2)
+          ? (1 << (team * 9 + (last % 3) * 3 + (i % 3)))
+          : 0;
+        if (!tickState || !passBit || !(tickState.passMask & passBit)) {
+          if (tickState && passBit) tickState.passMask |= passBit;
+          if (deferPasses) deferPasses.push({ from: last, to: i });
+          else fx.pass?.(last, i, ball);
+        }
+      } else if (last === i && !repeatTouch) {
         if (play.lastPass && play.lastPass.to === i) play.lastPass.touches = (play.lastPass.touches || 1) + 1;
         if (play.assist[team] === i) play.assist[team] = null;
       }
@@ -303,19 +309,34 @@
       const ai = findSkaterIdx(t.bodies, a), bi = findSkaterIdx(t.bodies, b);
       if (checker !== null) {
         const ci = checker === a ? ai : bi, vi = checker === a ? bi : ai;
-        if (ci >= 0 && vi >= 0) t.checked.push({ ci, vi, team: checker.team });
-        if (t.tally && ci >= 0) t.tally.checks[ci]++;
+        if (ci >= 0 && vi >= 0) {
+          let dup = false;
+          for (let k = 0; k < t.checked.length; k++) {
+            if (t.checked[k].ci === ci && t.checked[k].vi === vi) { dup = true; break; }
+          }
+          if (!dup) {
+            t.checked.push({ ci, vi, team: checker.team });
+            if (t.tally) t.tally.checks[ci]++;
+          }
+        } else if (t.tally && ci >= 0 && !(t.ballCheckMask & (1 << Math.min(30, ci)))) {
+          t.ballCheckMask |= (1 << Math.min(30, ci));
+          t.tally.checks[ci]++;
+        }
       } else {
         if (ai >= 0) t.bumped.add(ai);
         if (bi >= 0) t.bumped.add(bi);
       }
     } else if (checker !== null && t.tally) {
       const ci = findSkaterIdx(t.bodies, checker);
-      if (ci >= 0) t.tally.checks[ci]++;
+      if (ci >= 0 && !(t.ballCheckMask & (1 << Math.min(30, ci)))) {
+        t.ballCheckMask |= (1 << Math.min(30, ci));
+        t.tally.checks[ci]++;
+      }
     }
     if (player && !plow) {
       const { bodies, play } = t, i = findSkaterIdx(bodies, player);
-      const ps = applyBallPossession(bodies, play, t.ball, i, impulse, getTickPreBallSpeed(t), play.age, t.fx, play.checks?.[i] ? t.deferredPasses : null);
+      const repeatTouch = i >= 0 && t.touched.has(i);
+      const ps = applyBallPossession(bodies, play, t.ball, i, impulse, getTickPreBallSpeed(t), play.age, t.fx, play.checks?.[i] ? t.deferredPasses : null, repeatTouch, t);
       if (ps >= 0) t.passSender = ps;
       t.touched.add(i);
       if (iron) t.ironSaver = i;
@@ -389,7 +410,7 @@
     if (t.deferredPasses.length) t.deferredPasses.length = 0;
     t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx; t.tally = tally;
     t.cannon = false; t.fireHit = false; t.snapped = false; t.spinStruck = false; t.postRing = false; t.postSide = -1; t.postX = 0; t.postY = 0;
-    t.incomingCredit = null; t.passSender = -1; t.stickyGrab = -1; t.ironSaver = -1; t.magnetTeam = -1;
+    t.incomingCredit = null; t.passSender = -1; t.stickyGrab = -1; t.ironSaver = -1; t.magnetTeam = -1; t.passMask = 0; t.ballCheckMask = 0;
     t.preBallX = ball ? ball.x : 0; t.preBallY = ball ? ball.y : 0;
     t.preBallSpeed = -1;
     t.preOnFire = Boolean(ball?.onFire);
@@ -438,7 +459,7 @@
         if (bi >= 0) {
           at.stickyGrab = bi;
           if (at.play.last !== bi) {
-            const ps = applyBallPossession(at.bodies, at.play, at.ball, bi, Infinity, getTickPreBallSpeed(at), at.play.age, at.fx, null);
+            const ps = applyBallPossession(at.bodies, at.play, at.ball, bi, Infinity, getTickPreBallSpeed(at), at.play.age, at.fx, null, at.touched.has(bi), at);
             if (ps >= 0) at.passSender = ps;
           }
         }

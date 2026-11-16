@@ -109,6 +109,8 @@
       spaceWarps: [],
       superImpactTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       carveTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
+      rimSparkTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
+      wallEffectTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       slipstreamTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       spinStrikeTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       puckSlideTime: -Infinity,
@@ -1457,6 +1459,8 @@
       fx.ghostPhaseTimes = new Map();
       fx.superImpactTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.carveTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
+      fx.rimSparkTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
+      fx.wallEffectTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.slipstreamTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.spinStrikeTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       if (Array.isArray(view.bodies)) {
@@ -3334,7 +3338,6 @@
     function handleWall(body, velocity, wallType, nx, ny, rimmed = false) {
       if (velocity < 20 && !rimmed) return;
       const fx = getEffects(), view = getView();
-      addWallEffect(body, velocity, wallType, nx, ny);
       const cx = body.x + nx * body.radius, cy = body.y + ny * body.radius;
       const tangent = Math.atan2(ny, nx) + Math.PI / 2;
       const now = clockNow();
@@ -3347,32 +3350,36 @@
             const s = fx.skidState[idx] ||= { time: 0 };
             Object.assign(s, { time: Math.max(s.time || 0, .25), strength: Math.max(s.time > 0 ? s.strength : 0, .62 + .35 * speedNorm) });
           }
-          const moveAng = Math.atan2(body.vy || 0, body.vx || 0);
-          const sprayBase = moveAng + Math.PI;
-          const inwardAngle = Math.atan2(-ny, -nx);
-          const count = 7 + Math.round(6 * speedNorm);
-          const sparkColors = ['#fff1c1', '#fff3b0', '#ffc43d', '#ffb347', '#ff7a1a'];
-          for (let k = 0; k < count && fx.particles.length < 450; k++) {
-            const frac = k / Math.max(1, count - 1);
-            const ang = sprayBase * (1 - frac * 0.42) + inwardAngle * (frac * 0.42) + (Math.random() - .5) * .38;
-            const spd = (65 + Math.random() * 125) * (0.7 + 0.55 * speedNorm);
-            const life = .14 + Math.random() * .15;
-            const p = {
-              x: cx, y: cy, px: cx, py: cy,
-              vx: Math.cos(ang) * spd - nx * (18 + 20 * frac),
-              vy: Math.sin(ang) * spd - ny * (18 + 20 * frac),
-              team: -1,
-              color: sparkColors[k % sparkColors.length],
-              life, duration: life,
-              snap: true,
-              overlay: true
-            };
-            if (k % 2 === 0) {
-              p.materialShape = 'streak';
-              p.angle = ang;
-              p.size = 2.4 + Math.random() * 1.8;
+          const sparkMap = (fx.rimSparkTimes ||= (typeof WeakMap !== 'undefined' ? new WeakMap() : new Map()));
+          if (now - (sparkMap.get(body) ?? -Infinity) >= 20) {
+            sparkMap.set(body, now);
+            const moveAng = Math.atan2(body.vy || 0, body.vx || 0);
+            const sprayBase = moveAng + Math.PI;
+            const inwardAngle = Math.atan2(-ny, -nx);
+            const count = 7 + Math.round(6 * speedNorm);
+            const sparkColors = ['#fff1c1', '#fff3b0', '#ffc43d', '#ffb347', '#ff7a1a'];
+            for (let k = 0; k < count && fx.particles.length < 450; k++) {
+              const frac = k / Math.max(1, count - 1);
+              const ang = sprayBase * (1 - frac * 0.42) + inwardAngle * (frac * 0.42) + (Math.random() - .5) * .38;
+              const spd = (65 + Math.random() * 125) * (0.7 + 0.55 * speedNorm);
+              const life = .14 + Math.random() * .15;
+              const p = {
+                x: cx, y: cy, px: cx, py: cy,
+                vx: Math.cos(ang) * spd - nx * (18 + 20 * frac),
+                vy: Math.sin(ang) * spd - ny * (18 + 20 * frac),
+                team: -1,
+                color: sparkColors[k % sparkColors.length],
+                life, duration: life,
+                snap: true,
+                overlay: true
+              };
+              if (k % 2 === 0) {
+                p.materialShape = 'streak';
+                p.angle = ang;
+                p.size = 2.4 + Math.random() * 1.8;
+              }
+              fx.particles.push(p);
             }
-            fx.particles.push(p);
           }
         }
         const map = (fx.carveTimes ||= new WeakMap());
@@ -3381,6 +3388,12 @@
           gameAudio()?.playCarve?.({ volume: Math.min(0.58, 0.16 + 0.38 * Math.min(1, speed / 550)), speed, rimmed: true, x: cx, y: cy });
         }
         return;
+      }
+      const wallFxMap = (fx.wallEffectTimes ||= (typeof WeakMap !== 'undefined' ? new WeakMap() : new Map()));
+      const prevWallFx = wallFxMap.get(body);
+      if (!prevWallFx || prevWallFx.type !== wallType || now - prevWallFx.at >= 16) {
+        wallFxMap.set(body, { at: now, type: wallType });
+        addWallEffect(body, velocity, wallType, nx, ny);
       }
       if (body._lastWallSound && (now - body._lastWallSound) < 60) return;
       body._lastWallSound = now;

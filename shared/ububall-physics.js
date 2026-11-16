@@ -932,7 +932,11 @@
   }
 
   let spareRadii = new Float64Array(7), spareDrafts = new Float64Array(7);
-  let sparePreX = new Float64Array(7), sparePreY = new Float64Array(7), sparePreVx = new Float64Array(7), sparePreVy = new Float64Array(7), sparePreOmega = new Float64Array(7), sparePreRot = new Float64Array(7);
+  let sparePre = {
+    x: new Float64Array(7), y: new Float64Array(7),
+    vx: new Float64Array(7), vy: new Float64Array(7),
+    omega: new Float64Array(7), rot: new Float64Array(7)
+  };
   const shockOpp = new Array(6), shockD = new Float64Array(6), shockDx = new Float64Array(6), shockDy = new Float64Array(6);
 
   function segMinDist2(dx0, dy0, dx1, dy1) {
@@ -945,89 +949,101 @@
     return cx * cx + cy * cy;
   }
 
-  function bodyHitsWallOrPost(b, x0, y0, stdRink) {
+  // Returns 0 when inside clean interior ice, 2 when a wall/post/net impact needs 16x substepping,
+  // and 1 when near/overlapping a boundary without inward velocity (needs 1x depenetration check).
+  function bodyWallStepMode(b, x0, y0, stdRink) {
     const r = b.radius, x1 = b.x, y1 = b.y;
     if (stdRink && r <= 90 && x0 >= 150 && x1 >= 150 && x0 <= 850 && x1 <= 850 &&
-        y0 >= 60 + r && y1 >= 60 + r && y0 <= 540 - r && y1 <= 540 - r) return false;
-    if (b.vx === 0 && b.vy === 0) return false;
+        y0 >= 60 + r && y1 >= 60 + r && y0 <= 540 - r && y1 <= 540 - r) return 0;
     const k = rink;
     if (x1 >= k.left + r && x1 <= k.right - r && y1 >= k.top + r && y1 <= k.bottom - r &&
         ((x1 >= k.left + k.corner && x1 <= k.right - k.corner) || (y1 >= k.top + k.corner && y1 <= k.bottom - k.corner)) &&
-        x0 >= k.left + r && x0 <= k.right - r) return false;
+        x0 >= k.left + r && x0 <= k.right - r) return 0;
+    if (b.vx === 0 && b.vy === 0) return 1;
     const inGoalY = (y1 > k.goalTop && y1 < k.goalBottom) || (y0 > k.goalTop && y0 < k.goalBottom);
     const inLeftPocket = inGoalY || (x1 < k.left && y1 > k.goalTop - r && y1 < k.goalBottom + r);
     const inRightPocket = inGoalY || (x1 > k.right && y1 > k.goalTop - r && y1 < k.goalBottom + r);
 
     if (inLeftPocket) {
-      if (x1 < k.left - k.goalDepth + r && b.vx < 0) return true;
+      if (x1 < k.left - k.goalDepth + r && b.vx < 0) return 2;
       if (x1 < k.left) {
-        if ((y1 < k.goalTop + r && b.vy < 0) || (y1 > k.goalBottom - r && b.vy > 0)) return true;
+        if ((y1 < k.goalTop + r && b.vy < 0) || (y1 > k.goalBottom - r && b.vy > 0)) return 2;
       } else if (Math.min(x0, x1) < k.left + r) {
         for (let pi = 0; pi < 2; pi++) {
           const py = pi === 0 ? k.goalTop : k.goalBottom;
           const dx0 = k.left - x0, dy0 = py - y0, dx1 = k.left - x1, dy1 = py - y1;
-          if (segMinDist2(dx0, dy0, dx1, dy1) < r * r && (dx0 * dx0 + dy0 * dy0 >= r * r || b.vx * dx1 + b.vy * dy1 > 0)) return true;
+          if (segMinDist2(dx0, dy0, dx1, dy1) < r * r && (dx0 * dx0 + dy0 * dy0 >= r * r || b.vx * dx1 + b.vy * dy1 > 0)) return 2;
         }
       }
     } else if (x1 < k.left + r && b.vx < 0) {
-      return true;
+      return 2;
     }
 
     if (inRightPocket) {
-      if (x1 > k.right + k.goalDepth - r && b.vx > 0) return true;
+      if (x1 > k.right + k.goalDepth - r && b.vx > 0) return 2;
       if (x1 > k.right) {
-        if ((y1 < k.goalTop + r && b.vy < 0) || (y1 > k.goalBottom - r && b.vy > 0)) return true;
+        if ((y1 < k.goalTop + r && b.vy < 0) || (y1 > k.goalBottom - r && b.vy > 0)) return 2;
       } else if (Math.max(x0, x1) > k.right - r) {
         for (let pi = 0; pi < 2; pi++) {
           const py = pi === 0 ? k.goalTop : k.goalBottom;
           const dx0 = k.right - x0, dy0 = py - y0, dx1 = k.right - x1, dy1 = py - y1;
-          if (segMinDist2(dx0, dy0, dx1, dy1) < r * r && (dx0 * dx0 + dy0 * dy0 >= r * r || b.vx * dx1 + b.vy * dy1 > 0)) return true;
+          if (segMinDist2(dx0, dy0, dx1, dy1) < r * r && (dx0 * dx0 + dy0 * dy0 >= r * r || b.vx * dx1 + b.vy * dy1 > 0)) return 2;
         }
       }
     } else if (x1 > k.right - r && b.vx > 0) {
-      return true;
+      return 2;
     }
 
     const insidePocket = (x1 < k.left && inLeftPocket) || (x1 > k.right && inRightPocket);
     if (!insidePocket) {
-      if ((y1 < k.top + r && b.vy < 0) || (y1 > k.bottom - r && b.vy > 0)) return true;
+      if ((y1 < k.top + r && b.vy < 0) || (y1 > k.bottom - r && b.vy > 0)) return 2;
       const cx = x1 < k.left + k.corner ? k.left + k.corner : (x1 > k.right - k.corner ? k.right - k.corner : -1);
       const cy = y1 < k.top + k.corner ? k.top + k.corner : (y1 > k.bottom - k.corner ? k.bottom - k.corner : -1);
       if (cx >= 0 && cy >= 0) {
         const dx = x1 - cx, dy = y1 - cy, d2 = dx * dx + dy * dy, limit = k.corner - r;
-        if ((limit < 0 || d2 > limit * limit) && (b.vx * dx + b.vy * dy > 0)) return true;
+        if ((limit < 0 || d2 > limit * limit) && (b.vx * dx + b.vy * dy > 0)) return 2;
       }
     }
-    return false;
+    return 1;
   }
 
-  function needsSubstep(bodies, count, std7, ball, skaterEnd, ballIdx, stdRink, preX, preY, hit) {
+  // Returns 2 when swept contact needs 16x substeps, 1 when passive overlap / Sticky carrier needs 1x resolveContacts,
+  // and 0 when all bodies are in clean free flight (safe to skip resolveContacts entirely).
+  function classifyContactStep(bodies, count, std7, ball, skaterEnd, ballIdx, stdRink, preX, preY, preVx, preVy, hit, host) {
+    let mode = host ? 1 : 0;
     for (let i = 0; i < count; i++) {
-      if (bodyHitsWallOrPost(bodies[i], preX[i], preY[i], stdRink)) return true;
+      const wm = bodyWallStepMode(bodies[i], preX[i], preY[i], stdRink);
+      if (wm === 2) return 2;
+      if (wm === 1) mode = 1;
     }
     for (let i = 0; i < skaterEnd; i++) {
       if (!std7 && i === ballIdx) continue;
       const a = bodies[i];
       if (a.carded) continue;
       const ax0 = preX[i], ay0 = preY[i], ax1 = a.x, ay1 = a.y, ar = a.radius;
+      const avx0 = preVx[i], avy0 = preVy[i];
       for (let j = i + 1; j < skaterEnd; j++) {
         if (!std7 && j === ballIdx) continue;
         const c = bodies[j];
         if (c.carded) continue;
         if (a.team !== c.team && (a.superActive === 'ghost' || c.superActive === 'ghost')) continue;
         const reach = ar + c.radius;
-        const dx0 = c.x - ax1, dy0 = c.y - ay1; // check AABB quickly with pre/post
+        const dx0 = c.x - ax1, dy0 = c.y - ay1;
         const sx0 = preX[j] - ax0, sy0 = preY[j] - ay0;
         if ((sx0 > reach && dx0 > reach) || (sx0 < -reach && dx0 < -reach) ||
             (sy0 > reach && dy0 > reach) || (sy0 < -reach && dy0 < -reach)) continue;
         const r2 = reach * reach;
         if (segMinDist2(sx0, sy0, dx0, dy0) <= r2) {
-          if (sx0 * sx0 + sy0 * sy0 > r2 || (dx0 - sx0) * sx0 + (dy0 - sy0) * sy0 < 0) return true;
+          if (sx0 * sx0 + sy0 * sy0 > r2 ||
+              (dx0 - sx0) * sx0 + (dy0 - sy0) * sy0 < 0 ||
+              (preVx[j] - avx0) * sx0 + (preVy[j] - avy0) * sy0 < 0) return 2;
+          mode = 1;
         }
       }
     }
     if (ball) {
       const bh = hit[ballIdx], bx0 = preX[ballIdx], by0 = preY[ballIdx], bx1 = ball.x, by1 = ball.y;
+      const bvx0 = preVx[ballIdx], bvy0 = preVy[ballIdx];
       for (let i = 0; i < skaterEnd; i++) {
         if (!std7 && i === ballIdx) continue;
         const s = bodies[i];
@@ -1039,11 +1055,28 @@
             (sy0 > reach && dy1 > reach) || (sy0 < -reach && dy1 < -reach)) continue;
         const r2 = reach * reach;
         if (segMinDist2(sx0, sy0, dx1, dy1) <= r2) {
-          if (sx0 * sx0 + sy0 * sy0 > r2 || (dx1 - sx0) * sx0 + (dy1 - sy0) * sy0 < 0) return true;
+          if (sx0 * sx0 + sy0 * sy0 > r2 ||
+              (dx1 - sx0) * sx0 + (dy1 - sy0) * sy0 < 0 ||
+              (bvx0 - preVx[i]) * sx0 + (bvy0 - preVy[i]) * sy0 < 0) return 2;
+          mode = 1;
         }
       }
     }
-    return false;
+    return mode;
+  }
+
+  function advanceBallHeatTick(ball, checkSustain = true) {
+    if (ball && (ball.vx !== 0 || ball.vy !== 0 || ball.pace || ball.onFire || ball.fireTicks)) {
+      const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+      const share = ball.pace / BASE_LAUNCH_SPEED;
+      if (ball.onFire) {
+        if (checkSustain && share <= HEAT.sustain) { ball.onFire = false; ball.fireTicks = 0; }
+      } else {
+        if (share > HEAT.fire) ball.fireTicks = Math.min(FIRE_TICKS, (ball.fireTicks || 0) + 1);
+        else if (share <= HEAT.sustain) ball.fireTicks = 0;
+        if (ball.fireTicks >= FIRE_TICKS && speed > HEAT.fire * BASE_LAUNCH_SPEED) ball.onFire = true;
+      }
+    }
   }
 
   function integrateMotionAndFriction(bodies, dt, std7, ball, skaterEnd, host, spinDecay, drafts) {
@@ -1556,14 +1589,15 @@
     const stdRink = rink.left === 60 && rink.right === 940 && rink.top === 60 && rink.bottom === 540 && rink.corner === 100;
 
     const doAdaptive = dt >= DT * 0.99;
-    let preX = null, preY = null, preVx = null, preVy = null, preOmega = null, preRot = null, preBallPace = 0;
+    let pre = null, preX = null, preY = null, preVx = null, preVy = null, preOmega = null, preRot = null, preBallPace = 0;
     if (doAdaptive) {
-      if (sparePreX.length < count) {
-        sparePreX = new Float64Array(count); sparePreY = new Float64Array(count);
-        sparePreVx = new Float64Array(count); sparePreVy = new Float64Array(count);
-        sparePreOmega = new Float64Array(count); sparePreRot = new Float64Array(count);
-      }
-      preX = sparePreX; preY = sparePreY; preVx = sparePreVx; preVy = sparePreVy; preOmega = sparePreOmega; preRot = sparePreRot;
+      pre = sparePre && sparePre.x.length >= count ? sparePre : {
+        x: new Float64Array(count), y: new Float64Array(count),
+        vx: new Float64Array(count), vy: new Float64Array(count),
+        omega: new Float64Array(count), rot: new Float64Array(count)
+      };
+      sparePre = null;
+      preX = pre.x; preY = pre.y; preVx = pre.vx; preVy = pre.vy; preOmega = pre.omega; preRot = pre.rot;
       for (let i = 0; i < count; i++) {
         const b = bodies[i];
         preX[i] = b.x; preY[i] = b.y; preVx[i] = b.vx; preVy[i] = b.vy; preOmega[i] = b.omega; preRot[i] = b.rotation;
@@ -1573,36 +1607,38 @@
 
     integrateMotionAndFriction(bodies, dt, std7, ball, skaterEnd, host, spinDecay, drafts);
 
-    if (ball && (ball.vx !== 0 || ball.vy !== 0 || ball.pace || ball.onFire || ball.fireTicks)) {
-      const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
-      const share = ball.pace / BASE_LAUNCH_SPEED;
-      if (ball.onFire) {
-        if (share <= HEAT.sustain) { ball.onFire = false; ball.fireTicks = 0; }
-      } else {
-        if (share > HEAT.fire) ball.fireTicks = Math.min(FIRE_TICKS, (ball.fireTicks || 0) + 1);
-        else if (share <= HEAT.sustain) ball.fireTicks = 0;
-        if (ball.fireTicks >= FIRE_TICKS && speed > HEAT.fire * BASE_LAUNCH_SPEED) ball.onFire = true;
-      }
-    }
-
     let goal = null;
-    if (doAdaptive && needsSubstep(bodies, count, std7, ball, skaterEnd, ballIdx, stdRink, preX, preY, hit)) {
+    const stepMode = doAdaptive
+      ? classifyContactStep(bodies, count, std7, ball, skaterEnd, ballIdx, stdRink, preX, preY, preVx, preVy, hit, host)
+      : 1;
+    if (stepMode === 2) {
       for (let i = 0; i < count; i++) {
         const b = bodies[i];
         b.x = preX[i]; b.y = preY[i]; b.vx = preVx[i]; b.vy = preVy[i]; b.omega = preOmega[i]; b.rotation = preRot[i];
       }
       if (ball) ball.pace = preBallPace;
       const subDt = dt / SUBSTEPS;
+      const resAtTickStart = resolved;
       for (let sub = 0; sub < SUBSTEPS; sub++) {
         integrateMotionAndFriction(bodies, subDt, std7, ball, skaterEnd, host, spinDecay, drafts);
+        if (ball && ball.onFire && resolved === resAtTickStart && goal === null) {
+          if (ball.pace / BASE_LAUNCH_SPEED <= HEAT.sustain) { ball.onFire = false; ball.fireTicks = 0; }
+        }
+        if (sub === SUBSTEPS - 1 && (!ball || !ball.onFire)) {
+          advanceBallHeatTick(ball, false);
+        }
         host = resolveContacts(bodies, std7, ball, skaterEnd, count, ballIdx, stdRink, hit, host, onCollide, onWall, onShockwave, guardedOnSuper);
         if (goal === null && ball) goal = checkGoal(ball);
       }
     } else {
-      resolveContacts(bodies, std7, ball, skaterEnd, count, ballIdx, stdRink, hit, host, onCollide, onWall, onShockwave, guardedOnSuper);
-      goal = checkGoal(ball);
+      advanceBallHeatTick(ball, true);
+      if (stepMode === 1) {
+        resolveContacts(bodies, std7, ball, skaterEnd, count, ballIdx, stdRink, hit, host, onCollide, onWall, onShockwave, guardedOnSuper);
+      }
+      if (ball && (!stdRink || ball.x < 78 || ball.x > 922)) goal = checkGoal(ball);
     }
 
+    if (pre) sparePre = pre;
     if (drafts) spareDrafts = drafts;
     spareRadii = hit;
     return goal;

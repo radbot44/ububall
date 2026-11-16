@@ -6140,3 +6140,52 @@ test('positionSpinControl guards .inert/visibility/transform writes, and banner 
   setMeterFill(fillEl, 70);
   assert.equal(meterOffsetReads, 0, 'setMeterFill never forces synchronous offsetWidth layout when getAnimations is present');
 });
+
+test('v29 substep FX throttling: Rim-Around corner carves cap sparks to once per 20 ms and wall ripples deduplicate same-surface substeps while keeping post-to-net ricochets', () => {
+  const P = require('../shared/ububall-physics.js');
+  const ububallMatch = require('../shared/ububall-match.js');
+  let clock = 1000;
+  const bodies = P.kickoff();
+  Object.assign(bodies[0], { x: 106, y: 106, vx: 320, vy: -320, omega: -14 });
+  const fx = createEffectsState([], {});
+  const presenter = createRinkPresenter({
+    P, ububallMatch,
+    getView: () => ({ bodies, mode: 'standard', canvas: { width: 1000, height: 600 }, ctx: {}, badgeCanvas: { width: 1000, height: 600 }, badgeCtx: {} }),
+    getEffects: () => fx,
+    isReducedMotion: () => false,
+    clockNow: () => clock,
+    gameAudio: () => null
+  });
+
+  // Simulate 16 Rim-Around substeps within a single 1/240s tick (~4.16 ms total)
+  for (let sub = 0; sub < 16; sub++) {
+    clock = 1000 + sub * (1000 / 240 / 16);
+    presenter.handleWall(bodies[0], 90, 'wall', -Math.SQRT1_2, -Math.SQRT1_2, true);
+  }
+  const firstTickSparks = fx.particles.length;
+  assert.ok(firstTickSparks >= 7 && firstTickSparks <= 13, `16 substeps emit one spark burst (${firstTickSparks}), not 16x`);
+
+  // Advance past 20 ms cooldown -> next Rim-Around burst emits cleanly
+  clock = 1025;
+  presenter.handleWall(bodies[0], 90, 'wall', -Math.SQRT1_2, -Math.SQRT1_2, true);
+  assert.ok(fx.particles.length >= firstTickSparks + 7, 'Rim-Around sparks emit again after 20 ms');
+
+  // Same-surface substep wall hits within 16 ms emit 1 ripple, whereas post -> net ricochet in the same tick emits both post ping and net ripple
+  clock = 2000;
+  for (let sub = 0; sub < 8; sub++) {
+    presenter.handleWall(bodies[6], 360, 'wall', 0, -1, false);
+  }
+  assert.equal(fx.ripples.length, 1, '8 same-wall substeps in one tick add 1 board ripple');
+
+  clock = 2100;
+  presenter.handleWall(bodies[6], 360, 'post', 1, 0, false);
+  presenter.handleWall(bodies[6], 280, 'net', 1, 0, false);
+  assert.equal(fx.pings.length, 1, 'post contact emits post ping');
+  assert.equal(fx.ripples.length, 2, 'immediate post-to-net ricochet still emits net ripple');
+
+  // clearEffects resets rimSparkTimes and wallEffectTimes for backward replay seeks
+  presenter.clearEffects();
+  clock = 900;
+  presenter.handleWall(bodies[0], 90, 'wall', -Math.SQRT1_2, -Math.SQRT1_2, true);
+  assert.ok(fx.particles.length >= 7, 'clearEffects resets rimSparkTimes on backward seek');
+});
