@@ -835,6 +835,32 @@ body:has(.viewer:modal) { overflow: hidden; }
   color: var(--text);
   font-weight: 500;
 }
+.voice-tag.is-drop {
+  border-color: color-mix(in srgb, #ff9954 60%, var(--border));
+  background: color-mix(in srgb, #ff9954 14%, #141618);
+}
+.voice-tag.is-drop strong {
+  color: #ffb980;
+}
+.fanfare-bars-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  margin-top: .125rem;
+}
+.fanfare-bar-label {
+  font-size: .625rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--muted);
+  min-width: 1rem;
+  text-align: right;
+  margin-right: .125rem;
+}
+.fanfare-note-chip.is-answer.is-playing-note {
+  background: #ff9954;
+  box-shadow: 0 0 .625rem rgba(255, 153, 84, 0.65);
+}
 .fanfare-notes-strip {
   display: flex;
   align-items: center;
@@ -1527,11 +1553,17 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .full-stat em { font-style: normal; }
 .card-fanfare { padding: 1.5cqw 1.6cqw .6cqw; color: #eee7de; cursor: pointer; transition: border-color .2s; }
 .card-fanfare:focus-visible { outline: .125rem solid var(--text); outline-offset: .125rem; }
+.card-fanfare.has-drop { border-color: color-mix(in srgb, #ff9954 45%, #e6d8ce40); }
 .card-fanfare.is-playing { border-color: color-mix(in srgb, var(--primary) 60%, transparent); }
+.card-fanfare.is-playing.is-chorus { border-color: color-mix(in srgb, #ff9954 72%, transparent); }
 /* Tabler play/stop icon indicates playback state on the fanfare staff card. */
 .card-fanfare h4 .icon { width: 1.35cqw; height: 1.35cqw; margin-right: .55cqw; vertical-align: -.2cqw; fill: currentColor; stroke: currentColor; }
 .card-fanfare.is-playing h4 .icon { color: var(--primary); }
+.card-fanfare.is-playing.is-chorus h4 .icon { color: #ff9954; }
+.fanfare-drop-badge { display: inline-flex; align-items: center; gap: .25cqw; margin-left: .55cqw; padding: .12cqw .48cqw; border-radius: 99rem; font-style: normal; font-size: .98cqw; letter-spacing: .06em; text-transform: none; color: #ffd7b3; background: #ff99542e; border: .0625rem solid #ff995466; vertical-align: .1cqw; }
+.fanfare-drop-badge .icon { width: 1.05cqw !important; height: 1.05cqw !important; margin-right: 0 !important; vertical-align: 0 !important; fill: none !important; stroke: #ffb37a !important; }
 .staff-marker { fill: var(--primary); opacity: 0; transition: opacity .25s; }
+.card-fanfare.is-chorus .staff-marker { fill: #ff9954; }
 .staff-note { transition: color .15s; }
 .staff-note.is-playing { color: #ffd9b8; }
 .staff-note.is-playing .staff-marker { opacity: .5; transition-duration: .05s; }

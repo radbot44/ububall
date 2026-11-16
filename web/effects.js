@@ -989,7 +989,7 @@
     {
       id: 'goals',
       title: '8. Goals & Celebrations',
-      summary: 'Goal light sweeps, peony & ring fireworks with crackle, all Goal Call banners, burning nets, fanfares, and slow-mo replay.',
+      summary: 'Goal light sweeps, peony & ring fireworks with crackle, all Goal Call banners, burning nets, 2-bar DNA goal anthems (band, drums, stage, and 1/32 signature drops), and slow-mo replay.',
       items: [
         {
           id: 'goal-celebration',

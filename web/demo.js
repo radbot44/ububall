@@ -197,26 +197,33 @@
     if (window.ubuAudio && m.voice) {
       window.ubuAudio.stop();
       const p = window.ubuAudio.parseVoiceInfo(m.voice);
-      $('voice-summary').textContent = `Instrument: ${p.instrument} (#${p.instrumentIndex}) · Root Pitch: ${p.rootName} (${Math.round(p.rootFreq)} Hz, pitch code ${p.pitchIndex}) · Decay: ${p.decaySeconds.toFixed(2)}s · Timbre Mod: ${p.timbreMod} · Scale: ${p.scale} · Tempo: ${p.tempoBpm} BPM · Groove: ${p.groove}`;
-      const chips = p.notes.map((note, i) => {
-        const chip = node('button', {
-          type: 'button',
-          class: 'fanfare-note-chip' + (note.isRest ? ' is-rest' : ''),
-          title: note.isRest ? `Note ${i + 1}: Rest` : `Note ${i + 1}: ${note.name} (${note.beats} beats) - click to audition`
-        }, note.isRest ? '—' : note.name);
-        chip.addEventListener('click', () => {
-          if (!note.isRest && note.freq) {
-            window.ubuAudio.playVoice({
-              instrument: p.instrumentIndex,
-              pitch: note.midi - 36,
-              decay: m.voice.decay,
-              timbreMod: p.timbreMod
-            });
-          }
+      const dropText = p.hasSignatureDrop ? `★ ${p.signatureDrop} (gate 31/31)` : `inactive (${p.signatureGate}/31)`;
+      $('voice-summary').textContent = `Instrument: ${p.instrument} (#${p.instrumentIndex}) · Root: ${p.rootName} (${Math.round(p.rootFreq)} Hz) · Decay: ${p.decaySeconds.toFixed(2)}s · Timbre: ${p.timbreMod} · Scale: ${p.scale} · Tempo: ${p.tempoBpm} BPM · Groove: ${p.groove} · Form: ${p.phraseForm} · Band: ${p.backingTexture} · Rhythm: ${p.drumBass} · Harmony: ${p.harmonyProg} · Lead: ${p.leadExpr} · Stage: ${p.acousticStage} · Signature Drop: ${dropText}`;
+      const makeRow = (label, list, isAnswer) => {
+        const row = node('div', { class: 'fanfare-bar-row' }, node('span', { class: 'fanfare-bar-tag' }, label));
+        list.forEach((note, i) => {
+          const chip = node('button', {
+            type: 'button',
+            class: 'fanfare-note-chip' + (note.isRest ? ' is-rest' : '') + (isAnswer ? ' is-answer' : ''),
+            title: note.isRest ? `${label} ${i + 1}: Rest` : `${label} ${i + 1}: ${note.name} (${note.beats} beats) - click to audition`
+          }, note.isRest ? '—' : note.name);
+          chip.addEventListener('click', () => {
+            if (!note.isRest && note.midi !== null) {
+              window.ubuAudio.playVoice({
+                instrument: p.instrumentIndex,
+                pitch: note.midi - 36,
+                decay: m.voice.decay,
+                timbreMod: p.timbreMod
+              });
+            }
+          });
+          row.append(chip);
         });
-        return chip;
-      });
-      $('fanfare-strip').replaceChildren(...chips);
+        return row;
+      };
+      const rows = [makeRow('Bar A', p.notes, false)];
+      if (p.effectiveAnswerNotes?.length) rows.push(makeRow('Bar B', p.effectiveAnswerNotes, true));
+      $('fanfare-strip').replaceChildren(...rows);
     }
     history.splice(0, history.length, code, ...history.filter(value => value !== code).slice(0, LIMIT - 1));
     if (push && nav[navIndex] !== code) {
@@ -251,14 +258,14 @@
     if (!current) return;
     const m = model(current);
     if (!m?.voice || !window.ubuAudio) return;
-    const chips = Array.from($('fanfare-strip').children);
+    const chips = Array.from($('fanfare-strip').querySelectorAll('.fanfare-note-chip'));
     window.ubuAudio.playFanfare(m.voice, null, (idx) => {
       chips.forEach((c, i) => c.classList.toggle('is-playing-note', i === idx));
     });
   });
   $('voice-stop')?.addEventListener('click', () => {
     window.ubuAudio?.stop();
-    Array.from($('fanfare-strip').children).forEach(c => c.classList.remove('is-playing-note'));
+    Array.from($('fanfare-strip').querySelectorAll('.fanfare-note-chip')).forEach(c => c.classList.remove('is-playing-note'));
   });
   for (const id of ['storage', 'history']) $(id + '-tab').addEventListener('click', () => {
     for (const candidate of ['storage', 'history']) {
@@ -326,7 +333,9 @@
     ['Fully open mouth', dna => { setBits(dna, 350, 12, 4095); setBits(dna, 362, 10, 1023); }],
     ['Both mouth cuts', dna => { setBits(dna, 350, 12, 4095); }],
     ['Top lids', dna => { setBits(dna, 258, 4, 15); setBits(dna, 292, 10, 800); }],
-    ['Both lids, flipped', dna => { setBits(dna, 258, 8, 255); setBits(dna, 282, 10, 1023); setBits(dna, 292, 10, 900); setBits(dna, 312, 10, 600); setBits(dna, 322, 20, 1048575); }]);
+    ['Both lids, flipped', dna => { setBits(dna, 258, 8, 255); setBits(dna, 282, 10, 1023); setBits(dna, 292, 10, 900); setBits(dna, 312, 10, 600); setBits(dna, 322, 20, 1048575); }],
+    ['Rink Organ Anthem', dna => { setBits(dna, 534, 4, 11); setBits(dna, 538, 6, 24); setBits(dna, 550, 3, 2); setBits(dna, 553, 3, 4); setBits(dna, 598, 3, 1); setBits(dna, 641, 3, 1); setBits(dna, 644, 4, 1); setBits(dna, 654, 3, 1); }],
+    ['Signature Goal Horn', dna => { setBits(dna, 534, 4, 11); setBits(dna, 538, 6, 24); setBits(dna, 550, 3, 0); setBits(dna, 553, 3, 5); setBits(dna, 598, 3, 0); setBits(dna, 641, 3, 3); setBits(dna, 644, 4, 2); setBits(dna, 651, 3, 2); setBits(dna, 654, 3, 3); setBits(dna, 657, 5, 31); }]);
   $('sample-details').addEventListener('toggle', () => {
     if (!$('sample-details').open || $('samples').childElementCount) return;
     $('samples').replaceChildren(...specimens.map(([caption, change]) => { const dna = new Uint8Array(base); change(dna); return card(ubu.toCode(dna), caption); }));

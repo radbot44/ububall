@@ -140,22 +140,30 @@ Every decoded ubu receives a deterministic `<Adjective> <Noun>` archetype subtit
 
 ---
 
-## 5. Voice & Procedural Melody Suite (Bits 534–597: 64 Bits)
+## 5. Voice & Procedural Anthem Suite (Bits 534–661: 128 Bits)
 
-Enables full Web Audio synthesis of procedural voice and an 8-note personal goal fanfare jingle.
+Enables full Web Audio synthesis of each ubu's procedural voice, 8-note Bar A hook, and 64-bit two-bar stadium goal anthem.
 
-### Voice Synthesizer Profile (16 Bits)
-- **`Instrument` (Bits 534–537, 4 bits: 0–15):** 16 synthesis sound profiles (Soft Bell, Woodblock, Resonant Pluck, Crystal Chime, Square Chip, Pulse Pluck, etc.).
+### Voice Synthesizer Profile (16 Bits: 534–549)
+- **`Instrument` (Bits 534–537, 4 bits: 0–15):** 16 synthesis sound profiles (Soft Bell, Woodblock, Resonant Pluck, Crystal Chime, Square Chip, Pulse Pluck, Warm Pad, Sub Pluck, Kalimba, Marimba, Vibraphone, Brass Ping, Electric Piano, Synth Bass, Robot Vowel, Space Zap).
 - **`Root Pitch` (Bits 538–543, 6 bits: 0–63):** 64 base chromatic pitches spanning 5+ octaves (C2 to D#7).
 - **`Decay` (Bits 544–547, 4 bits: 0–15):** 16 envelope sustain lengths (120ms staccato to 1.02s resonant ringing).
-- **`Timbre Mod` (Bits 548–549, 2 bits: 0–3):** Chorus/warmth modulation depth.
+- **`Timbre Mod` (Bits 548–549, 2 bits: 0–3):** Chorus detune and resonant filter bite flags.
 
-### 8-Note Goal Fanfare / Anthem (48 Bits)
-- **`Scale / Mode` (Bits 550–552, 3 bits: 0–7):** 8 guaranteed-harmonious scales (Major, Minor, Pentatonic, Blues, Dorian, Japanese Insen, Synthwave, Retro Arcade).
+### Bar A Goal Fanfare Hook (48 Bits: 550–597)
+- **`Scale / Mode` (Bits 550–552, 3 bits: 0–7):** 8 guaranteed-harmonious scales (Major, Minor, Major Pentatonic, Minor Blues, Dorian, Insen, Synthwave, Retro Arcade).
 - **`Tempo` (Bits 553–555, 3 bits: 0–7):** 8 speed settings (84 to 168 BPM).
-- **`8 Notes` (Bits 556–595, 40 bits — 8 notes @ 5 bits each):**
-  - *Per Note:* 3 bits Scale Degree (1 to 8: Root, 2nd, 3rd, 4th, 5th, 6th, 7th, Octave) + 2 bits Duration/Articulation (16th, 8th, Quarter, 8th Rest).
+- **`Bar A Notes` (Bits 556–595, 40 bits — 8 notes @ 5 bits each):** 3-bit Scale Degree + 2-bit Duration (16th, 8th, Quarter, 8th Rest). Engraved on the Trading Card five-line musical staff.
 - **`Swing / Groove` (Bits 596–597, 2 bits: 0–3):** Straight, Light Swing, Shuffle, Staccato.
 
----
+### 64-Bit Anthem Block (64 Bits: 598–661)
+- **`Phrase Form` (Bits 598–600, 3 bits: 0–7):** 8 two-bar call-and-response song structures (`Call & Response`, `Resolved Answer`, `Rhythmic Rhyme`, `Hook & Turnaround`, `Rising Sequence`, `Octave Chorus`, `Mirror Answer`, `Double Finale`).
+- **`Bar B Answer Notes` (Bits 601–640, 40 bits — 8 notes @ 5 bits each):** Second 8-note bar using the same 3-bit degree + 2-bit duration layout.
+- **`Backing Texture` (Bits 641–643, 3 bits: 0–7):** 8 accompaniment band voices (`Warm Strings`, `Rink Organ`, `Chip Arp`, `Brass Section`, `Power Fifths`, `Glassy Choir`, `Electric Comp`, `FM Pluck Grid`).
+- **`Drum & Bass Groove` (Bits 644–647, 4 bits: 0–15):** 16 deterministic bassline and percussion patterns (`Beat Pulse`, `Arena Stomp-Clap`, `Four-on-Floor`, `Breakbeat`, `8-Bit Chiptune`, `Marching Snare`, `Halftime Boom`, `Synthwave Drive`, `Walking Rink`, `Funk Slap`, `Polka Bounce`, `Double-Time Punk`, `Tribal Toms`, `Electro Arp Bass`, `Anthem Tympani`, `Drumless Anthem`).
+- **`Harmony Progression` (Bits 648–650, 3 bits: 0–7):** 8 harmonic flavors (`Heroic`, `Anthemic`, `Dark Drive`, `Rink Pedal`, `Quartal Synth`, `Blues Turn`, `Modal Float`, `Stepwise Lift`).
+- **`Lead Expression` (Bits 651–653, 3 bits: 0–7):** 8 lead articulations (`Clean`, `Portamento Glide`, `Twin-Lead 3rds`, `Octave Stack`, `Brass Scoop`, `Dotted Echo`, `Held Trill`, `Vibrato Swell`).
+- **`Acoustic Stage` (Bits 654–656, 3 bits: 0–7):** 8 deterministic stereo room/arena reverbs (`Studio Room`, `Ice Rink PA`, `Arcade Cab`, `Stadium Hall`, `Gated 80s`, `Jumbotron`, `Shimmer Hall`, `Wide Ping-Pong`).
+- **`Signature Drop Gate` (Bits 657–661, 5 bits: 0–31):** Active on `31` (`1/32` odds), unlocking a pre-fanfare arena drop (`Goal Horn`, `Air Siren`, `Crowd Chant`, or `Synth Riser`) and a collectible card badge.
 
+---

@@ -779,26 +779,40 @@
     const side = document.createElement('div'); side.className = 'card-side'; side.append(statFlip);
     if (item.model.voice && window.ubuAudio) {
       const parsed = ubuAudio.parseVoiceInfo(item.model.voice);
-      const fanfare = document.createElement('section'); fanfare.className = 'card-fanfare';
+      const fanfare = document.createElement('section');
+      fanfare.className = 'card-fanfare' + (parsed.hasSignatureDrop ? ' has-drop' : '');
       const heading = document.createElement('h4'), meta = document.createElement('span');
       const stateIcon = gameUi.icon('player-play');
       const setFanfarePlaying = playing => {
         fanfare.classList.toggle('is-playing', playing);
+        if (!playing) fanfare.classList.remove('is-chorus');
         fanfare.setAttribute('aria-pressed', String(playing));
         stateIcon.querySelector('use')?.setAttribute('href', playing ? '#icon-player-stop' : '#icon-player-play');
       };
       heading.append(stateIcon, 'Fanfare');
-      meta.textContent = `${parsed.tempoBpm} BPM · ${parsed.groove}`;
+      if (parsed.hasSignatureDrop) {
+        const dropBadge = document.createElement('em');
+        dropBadge.className = 'fanfare-drop-badge';
+        dropBadge.title = `1/32 Signature Drop: ${parsed.signatureDrop}`;
+        dropBadge.append(gameUi.icon('sparkles'), parsed.signatureDrop);
+        heading.append(dropBadge);
+      }
+      meta.textContent = `${parsed.tempoBpm} BPM · ${parsed.backingTexture}`;
       const staff = fanfareStaff(parsed), marks = staff.querySelectorAll('.staff-note');
       heading.append(meta); fanfare.append(heading, staff); side.append(fanfare);
-      fanfare.setAttribute('aria-label', 'Play fanfare'); fanfare.setAttribute('aria-pressed', 'false');
+      fanfare.title = `${parsed.scale} · ${parsed.phraseForm} · ${parsed.backingTexture} · ${parsed.drumBass} · ${parsed.acousticStage}${parsed.hasSignatureDrop ? ` · ${parsed.signatureDrop}` : ''}`;
+      fanfare.setAttribute('aria-label', `Play goal anthem (${parsed.backingTexture}, ${parsed.tempoBpm} BPM${parsed.hasSignatureDrop ? `, ${parsed.signatureDrop}` : ''})`);
+      fanfare.setAttribute('aria-pressed', 'false');
       let playback = null;
       const playFanfare = () => {
         if (playback) { playback.stop(); return; }
         if (!ubuAudio.getAudioContext?.()) return;
         setFanfarePlaying(true);
         playback = ubuAudio.playFanfare(item.model.voice, null, index => {
-          marks.forEach((mark, i) => mark.classList.toggle('is-playing', i === index));
+          const isChorus = index >= 8;
+          const staffIndex = index >= 8 ? index - 8 : index;
+          fanfare.classList.toggle('is-chorus', isChorus);
+          marks.forEach((mark, i) => mark.classList.toggle('is-playing', i === staffIndex));
           if (index !== -1) return;
           playback = null; setFanfarePlaying(false);
         });
@@ -1666,22 +1680,47 @@
       makeTag('Pitch', `${parsed.rootName} (${Math.round(parsed.rootFreq)} Hz)`),
       makeTag('Scale', parsed.scale),
       makeTag('Tempo', `${parsed.tempoBpm} BPM`),
-      makeTag('Groove', parsed.groove)
+      makeTag('Groove', parsed.groove),
+      makeTag('Form', parsed.phraseForm),
+      makeTag('Band', parsed.backingTexture),
+      makeTag('Rhythm', parsed.drumBass),
+      makeTag('Harmony', parsed.harmonyProg),
+      makeTag('Lead', parsed.leadExpr),
+      makeTag('Stage', parsed.acousticStage)
     );
+    if (parsed.hasSignatureDrop) {
+      const dropTag = makeTag('Drop', parsed.signatureDrop);
+      dropTag.classList.add('is-drop');
+      tags.append(dropTag);
+    }
 
-    const fanfareRow = document.createElement('div');
-    fanfareRow.className = 'fanfare-notes-strip';
+    const barsWrap = document.createElement('div');
+    barsWrap.className = 'fanfare-bars-wrap';
+    const buildBarStrip = (label, notes, offset) => {
+      const row = document.createElement('div');
+      row.className = 'fanfare-notes-strip';
+      const badge = document.createElement('span');
+      badge.className = 'fanfare-bar-label';
+      badge.textContent = label;
+      row.append(badge);
+      notes.forEach((note, i) => {
+        const chip = document.createElement('span');
+        chip.className = 'fanfare-note-chip' + (note.isRest ? ' is-rest' : '') + (offset ? ' is-answer' : '');
+        chip.textContent = note.isRest ? '—' : note.name;
+        chip.title = note.isRest
+          ? `${label} Note ${i + 1}: Rest`
+          : `${label} Note ${i + 1}: ${note.name} (${note.beats} beats)`;
+        row.append(chip);
+        viewerNoteChips[offset + i] = chip;
+      });
+      return row;
+    };
+    barsWrap.append(buildBarStrip('A', parsed.notes, 0));
+    if (parsed.effectiveAnswerNotes?.length) {
+      barsWrap.append(buildBarStrip('B', parsed.effectiveAnswerNotes, parsed.notes.length));
+    }
 
-    parsed.notes.forEach((note, i) => {
-      const chip = document.createElement('span');
-      chip.className = 'fanfare-note-chip' + (note.isRest ? ' is-rest' : '');
-      chip.textContent = note.isRest ? '—' : note.name;
-      chip.title = note.isRest ? `Note ${i + 1}: Rest` : `Note ${i + 1}: ${note.name} (Degree ${note.degree + 1})`;
-      fanfareRow.append(chip);
-      viewerNoteChips.push(chip);
-    });
-
-    infoEl.append(tags, fanfareRow);
+    infoEl.append(tags, barsWrap);
   }
 
   $('viewer-voice-tone')?.addEventListener('click', () => {

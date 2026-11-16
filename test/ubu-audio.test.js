@@ -767,3 +767,183 @@ test('continuous playUbuMove and playSpin loops extend stopAt without recreating
     global.clearTimeout = origClearTimeout;
   }
 });
+
+test('Anthem Block (bits 598-661): constants, 8 phrase forms, and 1/32 signature gate parsing', () => {
+  const ubu = require('../shared/ubu.js');
+  assert.equal(audio.PHRASE_FORMS.length, 8);
+  assert.equal(audio.BACKING_TEXTURES.length, 8);
+  assert.equal(audio.DRUM_BASS_GROOVES.length, 16);
+  assert.equal(audio.HARMONY_PROGS.length, 8);
+  assert.equal(audio.LEAD_EXPRESSIONS.length, 8);
+  assert.equal(audio.ACOUSTIC_STAGES.length, 8);
+  assert.equal(audio.SIGNATURE_DROPS.length, 4);
+  assert.equal(audio.SIGNATURE_GATE_ACTIVE, 31);
+
+  // Check exact 1/32 gate behavior across all 32 values of bits 657-661
+  let activeCount = 0;
+  for (let g = 0; g < 32; g++) {
+    const info = audio.parseVoiceInfo({ pitch: 24, scale: 0, notes: [{ degree: 0, duration: 1 }], answerNotes: [{ degree: 2, duration: 1 }], phraseForm: g % 8, signatureGate: g });
+    assert.equal(info.hasSignatureDrop, g === 31);
+    if (info.hasSignatureDrop) {
+      activeCount++;
+      assert.equal(info.signatureDrop, audio.SIGNATURE_DROPS[(g % 8) & 3]);
+    } else {
+      assert.equal(info.signatureDrop, null);
+    }
+  }
+  assert.equal(activeCount, 1);
+
+  // Verify all 8 phrase forms produce 16-note two-bar anthems in key from decoded 1024-bit DNA
+  const dna = new Uint8Array(128);
+  const setBits = (buf, start, width, val) => {
+    for (let i = 0; i < width; i++) {
+      const bit = start + i, mask = 1 << (7 - (bit & 7));
+      buf[bit >> 3] = (buf[bit >> 3] & ~mask) | (((val >> (width - i - 1)) & 1) ? mask : 0);
+    }
+  };
+  setBits(dna, 534, 4, 3);  // Crystal Chime
+  setBits(dna, 538, 6, 24); // C4
+  setBits(dna, 550, 3, 0);  // Major
+  for (let i = 0; i < 8; i++) {
+    setBits(dna, 556 + i * 5, 5, ((i % 7) << 2) | (i % 3));
+    setBits(dna, 601 + i * 5, 5, (((7 - i) % 7) << 2) | ((i + 1) % 3));
+  }
+  const majorPitches = audio.scalePitches(0);
+  for (let form = 0; form < 8; form++) {
+    setBits(dna, 598, 3, form);
+    const decoded = ubu.decode(dna);
+    const parsed = audio.parseVoiceInfo(decoded.voice);
+    assert.equal(parsed.hasAnthem, true);
+    assert.equal(parsed.phraseFormIndex, form);
+    assert.equal(parsed.effectiveAnswerNotes.length, 8);
+    assert.equal(parsed.anthemNotes.length, 16);
+    for (const n of parsed.anthemNotes) {
+      if (!n.isRest) {
+        const pc = (((n.midi - parsed.rootMidi) % 12) + 12) % 12;
+        assert.ok(majorPitches.includes(pc), `form ${form} note ${n.name} stays in scale`);
+      }
+    }
+    if (form === 1 || form === 6 || form === 7) {
+      const last = parsed.effectiveAnswerNotes.findLast(n => !n.isRest);
+      assert.equal(((last.midi - parsed.rootMidi) % 12 + 12) % 12, 0, `form ${form} resolves final note to tonic`);
+    }
+    if (form === 5) {
+      assert.equal(parsed.effectiveAnswerNotes[0].midi, parsed.answerNotes[0].midi + 12, 'Octave Chorus lifts Bar B by +12 semitones');
+    }
+  }
+});
+
+test('Anthem Block synthesizes all 8 backing textures, 16 drum/bass grooves, 8 harmony progressions, 8 lead expressions, 8 deterministic stages, and 4 signature drops with valid Web Audio ramps', () => {
+  const baseVoice = {
+    instrument: 11,
+    pitch: 24,
+    decay: 6,
+    timbreMod: 1,
+    scale: 2,
+    tempo: 4,
+    groove: 1,
+    notes: Array.from({ length: 8 }, (_, i) => ({ degree: i % 8, duration: i === 4 ? 3 : (i % 3) })),
+    phraseForm: 0,
+    answerNotes: Array.from({ length: 8 }, (_, i) => ({ degree: (7 - i) % 8, duration: i === 6 ? 3 : ((i + 1) % 3) })),
+    backingTexture: 0,
+    drumBass: 0,
+    harmonyProg: 0,
+    leadExpr: 0,
+    acousticStage: 0,
+    signatureGate: 0
+  };
+
+  // 1. All 8 Backing Textures
+  for (let b = 0; b < 8; b++) {
+    const ctx = recordedContext({ sampleRate: 8000 });
+    const h = audio.playFanfare({ ...baseVoice, backingTexture: b }, ctx);
+    assert.ok(ctx.nodes.some(n => n.kind === 'oscillator'), `backingTexture ${b} schedules oscillators`);
+    h.stop();
+  }
+
+  // 2. All 16 Drum & Bass Grooves (both one-shot and looping)
+  for (let db = 0; db < 16; db++) {
+    const ctx = recordedContext({ sampleRate: 8000 });
+    const h = audio.playFanfare({ ...baseVoice, drumBass: db }, ctx);
+    const buffers = ctx.nodes.filter(n => n.kind === 'buffer');
+    if (db === 15) assert.equal(buffers.length, 0, 'Drumless Anthem schedules zero noise drum buffers');
+    else if (db !== 12 && db !== 14) assert.ok(buffers.length > 0, `drumBass ${db} schedules percussion buffers`);
+    h.stop();
+
+    const loopCtx = recordedContext({ sampleRate: 8000 });
+    const lh = audio.playFanfare({ ...baseVoice, drumBass: db }, loopCtx, null, { loop: true });
+    lh.stop();
+  }
+
+  // 3. All 8 Harmony Progressions (melody pitch class always sits in its chord, Rink Pedal locks pedal flag)
+  for (let hp = 0; hp < 8; hp++) {
+    for (let scale = 0; scale < 8; scale++) {
+      const pitches = audio.scalePitches(scale);
+      for (const pc of pitches) {
+        const ch = audio.chordFor(pitches, pc, hp, 2);
+        assert.ok(ch.tones.includes(pc), `harmonyProg ${hp} in scale ${scale} includes melody note ${pc}`);
+        assert.equal(ch.pedal, hp === 3);
+      }
+    }
+    const ctx = recordedContext({ sampleRate: 8000 });
+    audio.playFanfare({ ...baseVoice, harmonyProg: hp }, ctx).stop();
+  }
+
+  // 4. All 8 Lead Expressions
+  for (let expr = 0; expr < 8; expr++) {
+    const ctx = recordedContext({ sampleRate: 8000 });
+    const h = audio.playFanfare({ ...baseVoice, leadExpr: expr }, ctx);
+    assert.ok(leadNotes(ctx).length >= 14, `leadExpr ${expr} schedules full two-bar lead`);
+    h.stop();
+  }
+
+  // 5. All 8 Acoustic Stages produce deterministic impulses across contexts and distinct impulses per stage
+  const stageSnaps = new Set();
+  for (let st = 0; st < 8; st++) {
+    const ctx1 = recordedContext({ sampleRate: 8000 });
+    const ctx2 = recordedContext({ sampleRate: 8000 });
+    audio.playFanfare({ ...baseVoice, acousticStage: st }, ctx1).stop();
+    audio.playFanfare({ ...baseVoice, acousticStage: st }, ctx2).stop();
+    const buf1 = ctx1.nodes.find(n => n.kind === 'room').buffer.getChannelData(0);
+    const buf2 = ctx2.nodes.find(n => n.kind === 'room').buffer.getChannelData(0);
+    assert.deepEqual(Array.from(buf1.slice(0, 32)), Array.from(buf2.slice(0, 32)), `stage ${st} room impulse is 100% deterministic`);
+    stageSnaps.add(`${buf1.length}:${buf1[5].toFixed(6)}:${buf1[25].toFixed(6)}`);
+  }
+  assert.equal(stageSnaps.size, 8, 'all 8 acoustic stages generate distinct stereo impulses');
+
+  // 6. All 4 Signature Drops (gate === 31 delays first lead note for pre-fanfare drop; gate === 30 starts immediately)
+  const noDropCtx = recordedContext({ sampleRate: 8000 });
+  audio.playFanfare({ ...baseVoice, signatureGate: 30, leadExpr: 0, groove: 0 }, noDropCtx).stop();
+  assert.ok(Math.abs(leadNotes(noDropCtx)[0].started - 0.05) < 1e-9, 'inactive gate 30 starts Bar A immediately at 0.05s');
+
+  for (let drop = 0; drop < 4; drop++) {
+    const dropCtx = recordedContext({ sampleRate: 8000 });
+    const h = audio.playFanfare({ ...baseVoice, phraseForm: drop, signatureGate: 31, leadExpr: 0, groove: 0 }, dropCtx);
+    const firstLeadStart = leadNotes(dropCtx)[0].started;
+    assert.ok(firstLeadStart > 0.25, `Signature Drop ${drop} (${audio.SIGNATURE_DROPS[drop]}) schedules pre-beat-1 intro before Bar A`);
+    const offlineCtx = recordedContext({ sampleRate: 8000, constructor: { name: 'OfflineAudioContext' } });
+    audio.playFanfare({ ...baseVoice, phraseForm: drop, signatureGate: 31 }, offlineCtx).stop();
+    h.stop();
+  }
+});
+
+test('UI templates (voice.html, demo.js, site.js) parse cleanly and cover 64-bit Anthem Block fields', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+
+  const voiceHtml = fs.readFileSync(path.resolve(__dirname, '../web/voice.html'), 'utf8');
+  assert.ok(voiceHtml.includes('Bits 598–661'), 'voice.html documents bits 598-661');
+  assert.ok(voiceHtml.includes('sequencer-b'), 'voice.html mounts Bar B sequencer');
+  const inlineScript = voiceHtml.match(/<script>\s*('use strict';[\s\S]*?)<\/script>/);
+  assert.ok(inlineScript, 'voice.html inline script extracted');
+  new vm.Script(inlineScript[1], { filename: 'voice.html' });
+
+  const demoJs = fs.readFileSync(path.resolve(__dirname, '../web/demo.js'), 'utf8');
+  new vm.Script(demoJs, { filename: 'demo.js' });
+  assert.ok(demoJs.includes('Signature Goal Horn'), 'demo.js includes Signature Goal Horn specimen');
+
+  const siteJs = fs.readFileSync(path.resolve(__dirname, '../web/site.js'), 'utf8');
+  new vm.Script(siteJs, { filename: 'site.js' });
+  assert.ok(siteJs.includes('fanfare-drop-badge'), 'site.js renders 1/32 Signature Drop badge on trading cards');
+});

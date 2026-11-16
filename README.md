@@ -29,7 +29,7 @@ The ordered 32-color palette and exact field allocations live in [docs/dna.md](d
 ## Additional labs and tools
 
 - **Designer:** Open `web/demo.html` (or `/demo.html` under `npm run dev`) for standalone DNA inspection, trait editing, card/token previews, and custom `.ubu` import/export.
-- **Voice & Goal Fanfare Lab:** Open `web/voice.html` (or `/voice.html` under `npm run dev`) to test Web Audio procedural voice synthesis and DNA-derived 8-note goal fanfares.
+- **Voice & Goal Fanfare Lab:** Open `web/voice.html` (or `/voice.html` under `npm run dev`) to test Web Audio procedural voice synthesis and 128-bit DNA-derived 2-bar goal anthems (bits 534–661).
 
 - **WebGL2 rink lab (local only):** Run `npm run bench:serve` and open http://127.0.0.1:8791/webgl-demo.html. Compares the full production `createRinkPresenter` across WebGL2 (default live rink renderer with batched GPU sprites/SDFs, feathered umber/skid ribbons and scene-to-texture heat refraction) and the Canvas 2D fallback reference on identical physics and artwork, with pause/step, heat, context-loss, resolution and solo-view controls. Excluded from deployment assets.
 

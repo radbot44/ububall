@@ -47,7 +47,7 @@ test('exact text uses dual SHA-512, and encoding preserves every bit including u
     assert.deepEqual(ubu.fromCode(Buffer.from(dna).toString('hex')), dna);
   }
   const a = neutral(), b = new Uint8Array(a);
-  for (let i = 598; i <= 1013; i++) set(b, i, 1, 1);
+  for (let i = 662; i <= 1013; i++) set(b, i, 1, 1);
   assert.notEqual(ubu.toCode(a), ubu.toCode(b));
   const ma = ubu.decode(a), mb = ubu.decode(b);
   delete ma.dna; delete mb.dna;
@@ -244,6 +244,14 @@ test('decodes all 15 core stats, supers, AI personality, voice, and fanfare corr
   set(dna, 553, 3, 4);
   for (let n = 0; n < 8; n++) set(dna, 556 + n * 5, 5, (n * 3) % 32);
   set(dna, 596, 2, 3);
+  set(dna, 598, 3, 6);
+  for (let n = 0; n < 8; n++) set(dna, 601 + n * 5, 5, (n * 7 + 5) % 32);
+  set(dna, 641, 3, 5);
+  set(dna, 644, 4, 13);
+  set(dna, 648, 3, 4);
+  set(dna, 651, 3, 2);
+  set(dna, 654, 3, 7);
+  set(dna, 657, 5, 31);
 
   const m = ubu.decode(dna);
   statNames.forEach((name, i) => assert.equal(m.stats[name], (i * 17) % 256));
@@ -261,6 +269,27 @@ test('decodes all 15 core stats, supers, AI personality, voice, and fanfare corr
     assert.deepEqual(m.voice.notes[n], { degree: raw >> 2, duration: raw & 3 });
   }
   assert.equal(m.voice.groove, 3);
+  assert.equal(m.voice.phraseForm, 6);
+  assert.equal(m.voice.answerNotes.length, 8);
+  for (let n = 0; n < 8; n++) {
+    const raw = (n * 7 + 5) % 32;
+    assert.deepEqual(m.voice.answerNotes[n], { degree: raw >> 2, duration: raw & 3 });
+  }
+  assert.equal(m.voice.backingTexture, 5);
+  assert.equal(m.voice.drumBass, 13);
+  assert.equal(m.voice.harmonyProg, 4);
+  assert.equal(m.voice.leadExpr, 2);
+  assert.equal(m.voice.acousticStage, 7);
+  assert.equal(m.voice.signatureGate, 31);
+
+  // Appearance rarity and gameplay ability remain completely independent of bits 598-661
+  const rarity = require('../shared/rarity.js');
+  const ability = require('../shared/ability.js');
+  const baseDna = neutral();
+  const mutatedAnthem = new Uint8Array(baseDna);
+  for (let bit = 598; bit <= 661; bit++) set(mutatedAnthem, bit, 1, 1);
+  assert.deepEqual(rarity.scoreRarity(ubu.decode(baseDna)), rarity.scoreRarity(ubu.decode(mutatedAnthem)));
+  assert.deepEqual(ability.scoreAbility(ubu.decode(baseDna)), ability.scoreAbility(ubu.decode(mutatedAnthem)));
 });
 
 test('statMultiplier maps 8-bit values across exponential multiplier curve', () => {

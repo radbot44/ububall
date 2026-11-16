@@ -32,6 +32,81 @@
 
   const TEMPOS = [84, 96, 108, 120, 132, 144, 156, 168];
   const GROOVES = ['Straight', 'Light Swing', 'Shuffle', 'Staccato'];
+  const PHRASE_FORMS = [
+    'Call & Response',   // 0: Bar A -> Bar B verbatim
+    'Resolved Answer',   // 1: Bar A -> Bar B with final sounding note resolved to tonic
+    'Rhythmic Rhyme',    // 2: Bar A -> Bar B pitches on Bar A's rhythm, resolved cadence
+    'Hook & Turnaround', // 3: Bar A -> A[0..3] hook repeat + B[4..7] turnaround
+    'Rising Sequence',   // 4: Bar A -> A[0..3] stepped up a 3rd + B[4..7] cadence
+    'Octave Chorus',     // 5: Bar A -> Bar B lifted one octave
+    'Mirror Answer',     // 6: Bar A -> inverted B[0..3] contour + resolved B[4..7]
+    'Double Finale'      // 7: Bar A -> punchy pickup Bar B + extended quarter arrival
+  ];
+  const BACKING_TEXTURES = [
+    'Warm Strings',  // 0: Detuned triangle pad + brass endpoint accents
+    'Rink Organ',    // 1: Drawbar stadium organ with rotary shimmer
+    'Chip Arp',      // 2: Fast 16th-note retro chord arpeggiator
+    'Brass Section', // 3: Ensemble sawtooth brass swell
+    'Power Fifths',  // 4: Driving root-fifth-octave power chords
+    'Glassy Choir',  // 5: Dual-formant vowel choir pad
+    'Electric Comp', // 6: Rhythmic Rhodes tine chord stabs
+    'FM Pluck Grid'  // 7: Eighth-note resonant synth pluck chords
+  ];
+  const DRUM_BASS_GROOVES = [
+    'Beat Pulse',       // 0: Sine beat bass + soft quarter hat + accent kicks
+    'Arena Stomp-Clap', // 1: Stadium boom-boom-clap + heavy root bass
+    'Four-on-Floor',    // 2: Kick on every beat, offbeat hat + octave disco bass
+    'Breakbeat',        // 3: Syncopated kick/snare break + rolling sub
+    '8-Bit Chiptune',   // 4: Retro pitch-drop chip kick, noise snare + triangle bass
+    'Marching Snare',   // 5: Rudimental 16th snare cadence + root-fifth tuba bass
+    'Halftime Boom',    // 6: Sustained 808 sub glide + halftime snare + rapid hats
+    'Synthwave Drive',  // 7: Pumping 8th saw bass + gated snare + bar-end tom fill
+    'Walking Rink',     // 8: Walking scale bassline + ride shimmer + rim backbeat
+    'Funk Slap',        // 9: Syncopated 16th plucked bass + tight ghost-note snare
+    'Polka Bounce',     // 10: Upbeat oom-pah root/fifth bass + offbeat sizzle
+    'Double-Time Punk', // 11: Fast driving 8th kick/snare sprint + 8th bass chug
+    'Tribal Toms',      // 12: Pitched stadium floor-tom pattern + sub pulse
+    'Electro Arp Bass', // 13: 16th octave-jumping synth bass + electro clap
+    'Anthem Tympani',   // 14: Orchestral timpani rolls on chord changes + pedal sub
+    'Drumless Anthem'   // 15: Pure pad/organ/choir swell + warm sustained bass, no drums
+  ];
+  const HARMONY_PROGS = [
+    'Heroic',        // 0: I-IV-V preference
+    'Anthemic',      // 1: I-V-vi-IV stadium preference
+    'Dark Drive',    // 2: vi-IV-VII minor-leaning drive
+    'Rink Pedal',    // 3: Moving upper triads over locked tonic pedal bass
+    'Quartal Synth', // 4: Stacked 4th/sus stadium voicings
+    'Blues Turn',    // 5: IV-V-I turnaround pull
+    'Modal Float',   // 6: ii-IV-vi modal movement
+    'Stepwise Lift'  // 7: Beat-ascending chord preference
+  ];
+  const LEAD_EXPRESSIONS = [
+    'Clean',            // 0: Unadorned lead with alternating stereo width
+    'Portamento Glide', // 1: Smooth pitch slide from previous sounding note
+    'Twin-Lead 3rds',   // 2: Harmonized diatonic 3rd twin lead panned opposite
+    'Octave Stack',     // 3: Upper/lower octave unison lead layer
+    'Brass Scoop',      // 4: Upward horn pitch scoop on held notes
+    'Dotted Echo',      // 5: Stereo-flipped dotted-8th delay tap
+    'Held Trill',       // 6: Upper-neighbor diatonic trill on quarter notes
+    'Vibrato Swell'     // 7: Lush dual-detuned chorus lead
+  ];
+  const ACOUSTIC_STAGES = [
+    'Studio Room',    // 0: Balanced 1.4s room
+    'Ice Rink PA',    // 1: Arena slapback + bright PA air
+    'Arcade Cab',     // 2: Tight 0.32s dry wooden cabinet
+    'Stadium Hall',   // 3: Wide 2.3s arena reverb
+    'Gated 80s',      // 4: Dense nonlinear gated drum/synth room
+    'Jumbotron',      // 5: Bandpass stadium speaker projection
+    'Shimmer Hall',   // 6: Bright 2.1s hall tail
+    'Wide Ping-Pong'  // 7: Stereo-bouncing arena reflections
+  ];
+  const SIGNATURE_DROPS = [
+    'Goal Horn',   // 0: Dual-detuned brass arena foghorn blast
+    'Air Siren',   // 1: Rising octave arena siren sweep
+    'Crowd Chant', // 2: Rhythmic 3-count stadium clap-hey swell
+    'Synth Riser'  // 3: Fast 8-step upward scale sweep
+  ];
+  const SIGNATURE_GATE_ACTIVE = 31;
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
   // 6-bit pitch (0-63) maps to MIDI note 36 (C2, ~65.4 Hz) to 99 (D#7, ~2489 Hz)
@@ -60,6 +135,156 @@
     return scale.degrees[(degree | 0) & 7];
   }
 
+  function beatsForDuration(duration) {
+    return duration === 0 ? 0.25 : duration === 1 ? 0.5 : duration === 2 ? 1.0 : 0.5;
+  }
+
+  function parseNoteArray(list, scaleIdx, rootMidi) {
+    return list.map((n, i) => {
+      const degree = (n?.degree | 0) & 7;
+      const duration = (n?.duration | 0) & 3;
+      const isRest = duration === 3;
+      let midi = null, freq = null, name = 'Rest', semi = null;
+      if (!isRest) {
+        semi = scaleDegreeSemitones(scaleIdx, degree);
+        midi = rootMidi + semi;
+        freq = noteFrequency(midi);
+        name = noteName(midi);
+      }
+      return { index: i, degree, duration, isRest, midi, freq, name, beats: beatsForDuration(duration), semi };
+    });
+  }
+
+  function buildAnswerNote(semi, duration, index, scaleIdx, rootMidi, fallbackDegree = 0) {
+    const dur = (duration | 0) & 3;
+    if (dur === 3 || semi === null || semi === undefined) {
+      return { index, degree: fallbackDegree & 7, duration: 3, isRest: true, midi: null, freq: null, name: 'Rest', beats: 0.5, semi: null };
+    }
+    const degrees = SCALES[scaleIdx].degrees;
+    let bestDeg = fallbackDegree & 7, bestDist = Infinity;
+    for (let d = 0; d < degrees.length; d++) {
+      const dist = Math.abs(degrees[d] - semi);
+      if (dist < bestDist) { bestDist = dist; bestDeg = d; }
+    }
+    const midi = rootMidi + semi;
+    return {
+      index,
+      degree: bestDeg,
+      duration: dur,
+      isRest: false,
+      midi,
+      freq: noteFrequency(midi),
+      name: noteName(midi),
+      beats: beatsForDuration(dur),
+      semi
+    };
+  }
+
+  function resolveAnswerBar(barA, rawBarB, phraseFormIdx, scaleIdx, rootMidi) {
+    if (!rawBarB.length) return [];
+    const scaleDegs = SCALES[scaleIdx].degrees;
+    const distinct = [...new Set(scaleDegs.map(s => s % 12))].sort((a, b) => a - b);
+    const stepOf = semi => {
+      const pc = ((semi % 12) + 12) % 12;
+      const idx = distinct.indexOf(pc);
+      return (idx >= 0 ? idx : 0) + distinct.length * Math.floor(semi / 12);
+    };
+    const semiAtStep = step => {
+      const n = distinct.length;
+      return distinct[((step % n) + n) % n] + 12 * Math.floor(step / n);
+    };
+    const snapTonic = semi => (semi >= 6 ? 12 : 0);
+    const snapCadence = semi => {
+      const fifth = distinct.includes(7) ? 7 : distinct[Math.min(distinct.length - 1, 3)];
+      const candidates = [0, fifth, 12];
+      return candidates.reduce((best, c) => Math.abs(c - semi) < Math.abs(best - semi) ? c : best, 0);
+    };
+
+    let shaped = rawBarB.map(n => ({ ...n }));
+    switch (phraseFormIdx & 7) {
+      case 0: // Call & Response: verbatim Bar B
+        break;
+      case 1: { // Resolved Answer: final sounding note lands on tonic
+        const lastIdx = shaped.findLastIndex(n => !n.isRest);
+        if (lastIdx >= 0) {
+          const s = snapTonic(shaped[lastIdx].semi);
+          shaped[lastIdx] = buildAnswerNote(s, shaped[lastIdx].duration, lastIdx, scaleIdx, rootMidi, s === 12 ? 7 : 0);
+        }
+        break;
+      }
+      case 2: { // Rhythmic Rhyme: Bar B degrees on Bar A rhythm + cadence
+        shaped = shaped.map((bNote, i) => {
+          const aDur = i < barA.length ? barA[i].duration : bNote.duration;
+          if (aDur === 3) return buildAnswerNote(null, 3, i, scaleIdx, rootMidi, bNote.degree);
+          const semi = bNote.isRest ? scaleDegreeSemitones(scaleIdx, bNote.degree) : bNote.semi;
+          return buildAnswerNote(semi, aDur, i, scaleIdx, rootMidi, bNote.degree);
+        });
+        const lastIdx = shaped.findLastIndex(n => !n.isRest);
+        if (lastIdx >= 0) {
+          const s = snapCadence(shaped[lastIdx].semi);
+          shaped[lastIdx] = buildAnswerNote(s, shaped[lastIdx].duration, lastIdx, scaleIdx, rootMidi, shaped[lastIdx].degree);
+        }
+        break;
+      }
+      case 3: { // Hook & Turnaround: A[0..3] + B[4..7]
+        shaped = shaped.map((bNote, i) => {
+          if (i < 4 && i < barA.length) return { ...barA[i], index: i };
+          return bNote;
+        });
+        const lastIdx = shaped.findLastIndex(n => !n.isRest);
+        if (lastIdx >= 4) {
+          const s = snapCadence(shaped[lastIdx].semi);
+          shaped[lastIdx] = buildAnswerNote(s, shaped[lastIdx].duration, lastIdx, scaleIdx, rootMidi, shaped[lastIdx].degree);
+        }
+        break;
+      }
+      case 4: { // Rising Sequence: A[0..3] shifted +2 scale steps + B[4..7]
+        shaped = shaped.map((bNote, i) => {
+          if (i < 4 && i < barA.length) {
+            const a = barA[i];
+            if (a.isRest) return { ...a, index: i };
+            const s = semiAtStep(stepOf(a.semi) + 2);
+            return buildAnswerNote(s, a.duration, i, scaleIdx, rootMidi, (a.degree + 2) & 7);
+          }
+          return bNote;
+        });
+        break;
+      }
+      case 5: { // Octave Chorus: Bar B lifted +12 semitones
+        shaped = shaped.map((bNote, i) => bNote.isRest ? bNote : buildAnswerNote(bNote.semi + 12, bNote.duration, i, scaleIdx, rootMidi, bNote.degree));
+        break;
+      }
+      case 6: { // Mirror Answer: inverted first half around pivot + resolved tail
+        const firstSounding = barA.find(n => !n.isRest) || shaped.find(n => !n.isRest);
+        const pivot = firstSounding ? stepOf(firstSounding.semi) : 0;
+        shaped = shaped.map((bNote, i) => {
+          if (i < 4 && !bNote.isRest) {
+            const s = Math.max(-12, Math.min(24, semiAtStep(2 * pivot - stepOf(bNote.semi))));
+            return buildAnswerNote(s, bNote.duration, i, scaleIdx, rootMidi, bNote.degree);
+          }
+          return bNote;
+        });
+        const lastIdx = shaped.findLastIndex(n => !n.isRest);
+        if (lastIdx >= 0) {
+          const s = snapTonic(shaped[lastIdx].semi);
+          shaped[lastIdx] = buildAnswerNote(s, shaped[lastIdx].duration, lastIdx, scaleIdx, rootMidi, s === 12 ? 7 : 0);
+        }
+        break;
+      }
+      case 7: { // Double Finale: snappy 16th pickups + held quarter cadence
+        const lastIdx = shaped.findLastIndex(n => !n.isRest);
+        shaped = shaped.map((bNote, i) => {
+          if (bNote.isRest) return bNote;
+          if (i === lastIdx) return buildAnswerNote(snapTonic(bNote.semi), 2, i, scaleIdx, rootMidi, bNote.degree);
+          const dur = i < 6 && bNote.duration === 1 ? 0 : bNote.duration;
+          return buildAnswerNote(bNote.semi, dur, i, scaleIdx, rootMidi, bNote.degree);
+        });
+        break;
+      }
+    }
+    return shaped;
+  }
+
   function parseVoiceInfo(voice) {
     voice = voice || {};
     const instIdx = (voice.instrument | 0) & 15;
@@ -67,27 +292,31 @@
     const scaleIdx = (voice.scale | 0) & 7;
     const tempoIdx = (voice.tempo | 0) & 7;
     const grooveIdx = (voice.groove | 0) & 3;
+    const phraseFormIdx = (voice.phraseForm | 0) & 7;
+    const backingIdx = (voice.backingTexture | 0) & 7;
+    const drumBassIdx = (voice.drumBass | 0) & 15;
+    const harmonyIdx = (voice.harmonyProg | 0) & 7;
+    const leadExprIdx = (voice.leadExpr | 0) & 7;
+    const stageIdx = (voice.acousticStage | 0) & 7;
+    const sigGate = Math.max(0, Math.min(31, voice.signatureGate | 0));
+    const hasSignatureDrop = sigGate === SIGNATURE_GATE_ACTIVE;
+    const sigDropIdx = phraseFormIdx & 3;
     const decaySec = decaySeconds(voice.decay);
     const rootMidi = midiNote(pitchIdx);
     const rootFreq = noteFrequency(rootMidi);
     const rootName = noteName(rootMidi);
 
     const notes = Array.isArray(voice.notes) ? voice.notes : [];
-    const parsedNotes = notes.map((n, i) => {
-      const degree = (n.degree | 0) & 7;
-      const duration = (n.duration | 0) & 3;
-      const isRest = duration === 3;
-      let midi = null, freq = null, name = 'Rest';
-      if (!isRest) {
-        const semi = scaleDegreeSemitones(scaleIdx, degree);
-        midi = rootMidi + semi;
-        freq = noteFrequency(midi);
-        name = noteName(midi);
-      }
-      // Duration in beats: 0 -> 16th (0.25 beat), 1 -> 8th (0.5 beat), 2 -> Quarter (1.0 beat), 3 -> 8th rest (0.5 beat)
-      const beats = duration === 0 ? 0.25 : duration === 1 ? 0.5 : duration === 2 ? 1.0 : 0.5;
-      return { index: i, degree, duration, isRest, midi, freq, name, beats };
-    });
+    const parsedNotes = parseNoteArray(notes, scaleIdx, rootMidi);
+    const hasAnthem = Array.isArray(voice.answerNotes) && voice.answerNotes.length > 0;
+    const rawAnswerNotes = hasAnthem ? parseNoteArray(voice.answerNotes, scaleIdx, rootMidi) : [];
+    const effectiveAnswerNotes = hasAnthem ? resolveAnswerBar(parsedNotes, rawAnswerNotes, phraseFormIdx, scaleIdx, rootMidi) : [];
+    const anthemNotes = hasAnthem
+      ? [
+          ...parsedNotes.map((n, i) => ({ ...n, index: i, bar: 0 })),
+          ...effectiveAnswerNotes.map((n, i) => ({ ...n, index: parsedNotes.length + i, bar: 1 }))
+        ]
+      : parsedNotes.map((n, i) => ({ ...n, index: i, bar: 0 }));
 
     return {
       instrument: INSTRUMENTS[instIdx],
@@ -104,7 +333,27 @@
       tempoIndex: tempoIdx,
       groove: GROOVES[grooveIdx],
       grooveIndex: grooveIdx,
-      notes: parsedNotes
+      phraseForm: PHRASE_FORMS[phraseFormIdx],
+      phraseFormIndex: phraseFormIdx,
+      backingTexture: BACKING_TEXTURES[backingIdx],
+      backingTextureIndex: backingIdx,
+      drumBass: DRUM_BASS_GROOVES[drumBassIdx],
+      drumBassIndex: drumBassIdx,
+      harmonyProg: HARMONY_PROGS[harmonyIdx],
+      harmonyProgIndex: harmonyIdx,
+      leadExpr: LEAD_EXPRESSIONS[leadExprIdx],
+      leadExprIndex: leadExprIdx,
+      acousticStage: ACOUSTIC_STAGES[stageIdx],
+      acousticStageIndex: stageIdx,
+      signatureGate: sigGate,
+      hasSignatureDrop,
+      signatureDropIndex: sigDropIdx,
+      signatureDrop: hasSignatureDrop ? SIGNATURE_DROPS[sigDropIdx] : null,
+      hasAnthem,
+      notes: parsedNotes,
+      answerNotes: rawAnswerNotes,
+      effectiveAnswerNotes,
+      anthemNotes
     };
   }
 
@@ -2739,33 +2988,72 @@
     return handle;
   }
 
-  // Fanfare finishing: trims rumble and harsh highs, compresses gently instead of pumping, and adds a
-  // short generated room reverb. Notes, timing, instrument and decay all still come from the DNA.
+  // Fanfare & Anthem finishing: deterministic room impulses per acoustic stage, gentle bus
+  // compression, and clean ConstantSource release timers so OfflineAudioContext MP4 exports match live playback.
+  const STAGE_CONFIGS = [
+    { seconds: 1.4, curve: 3.0, dry: 0.85, wet: 0.22, low: 70, high: 6500, rLow: 220, rHigh: 4200, pan: 0.15 }, // 0: Studio Room
+    { seconds: 1.75, curve: 2.4, dry: 0.80, wet: 0.30, low: 85, high: 6800, rLow: 280, rHigh: 5400, pan: 0.22, slap: 0.042 }, // 1: Ice Rink PA
+    { seconds: 0.32, curve: 4.5, dry: 0.94, wet: 0.12, low: 110, high: 5200, rLow: 300, rHigh: 3600, pan: 0.10 }, // 2: Arcade Cab
+    { seconds: 2.3, curve: 2.1, dry: 0.76, wet: 0.34, low: 65, high: 6400, rLow: 180, rHigh: 4800, pan: 0.24 }, // 3: Stadium Hall
+    { seconds: 0.48, curve: 1.1, dry: 0.84, wet: 0.28, low: 75, high: 6500, rLow: 250, rHigh: 5600, pan: 0.18, gated: true }, // 4: Gated 80s
+    { seconds: 0.90, curve: 2.8, dry: 0.82, wet: 0.24, low: 190, high: 3800, rLow: 320, rHigh: 3200, pan: 0.12 }, // 5: Jumbotron
+    { seconds: 2.1, curve: 2.2, dry: 0.78, wet: 0.36, low: 70, high: 7200, rLow: 320, rHigh: 6200, pan: 0.25, shimmer: true }, // 6: Shimmer Hall
+    { seconds: 1.25, curve: 2.7, dry: 0.84, wet: 0.28, low: 75, high: 6600, rLow: 240, rHigh: 5000, pan: 0.38, pingPong: true } // 7: Wide Ping-Pong
+  ];
   const roomImpulses = new WeakMap();
-  function fanfareRoom(ctx) {
-    let impulse = roomImpulses.get(ctx);
-    if (impulse) return impulse;
-    const length = Math.round(ctx.sampleRate * 1.4);
-    impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+  function fanfareRoom(ctx, stageIndex = 0) {
+    const idx = (stageIndex | 0) & 7;
+    let byStage = roomImpulses.get(ctx);
+    if (!byStage) { byStage = new Array(8); roomImpulses.set(ctx, byStage); }
+    if (byStage[idx]) return byStage[idx];
+    const cfg = STAGE_CONFIGS[idx];
+    const length = Math.max(64, Math.round(ctx.sampleRate * cfg.seconds));
+    const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
     for (let channel = 0; channel < 2; channel++) {
       const data = impulse.getChannelData(channel);
-      for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 3;
+      let seed = (0x55425530 + idx * 977 + channel * 7919) >>> 0;
+      const rand = () => {
+        seed = (seed + 0x6d2b79f5) >>> 0;
+        let z = seed;
+        z = Math.imul(z ^ (z >>> 15), z | 1);
+        z ^= z + Math.imul(z ^ (z >>> 7), z | 61);
+        return ((z ^ (z >>> 14)) >>> 0) / 2147483648 - 1;
+      };
+      for (let i = 0; i < length; i++) {
+        const u = i / length;
+        let env = (1 - u) ** cfg.curve;
+        if (cfg.gated) env = u < 0.82 ? 0.9 - u * 0.2 : ((1 - u) / 0.18) ** 2.5 * 0.74;
+        if (cfg.shimmer) env *= 0.82 + 0.18 * Math.sin(i * 0.015 + channel * 1.4);
+        if (cfg.pingPong) {
+          const tap = Math.floor((i / ctx.sampleRate) / 0.11);
+          env *= (tap % 2 === channel) ? 1.25 : 0.45;
+        }
+        data[i] = rand() * env;
+      }
+      if (cfg.slap) {
+        for (const [mult, amp] of [[1, 0.55], [2, 0.32]]) {
+          const tapIdx = Math.min(length - 1, Math.round(ctx.sampleRate * cfg.slap * mult) + channel * 17);
+          data[tapIdx] = Math.max(-1, Math.min(1, data[tapIdx] + (channel ? -amp : amp)));
+        }
+      }
     }
-    roomImpulses.set(ctx, impulse);
+    byStage[idx] = impulse;
     return impulse;
   }
-  function createFanfareChain(ctx) {
+
+  function createFanfareChain(ctx, stageIndex = 0) {
+    const cfg = STAGE_CONFIGS[(stageIndex | 0) & 7];
     const input = ctx.createGain(), lowCut = ctx.createBiquadFilter(), highCut = ctx.createBiquadFilter();
     const dry = ctx.createGain(), wet = ctx.createGain(), room = ctx.createConvolver();
     const roomLowCut = ctx.createBiquadFilter(), roomHighCut = ctx.createBiquadFilter();
     const compressor = ctx.createDynamicsCompressor(), master = ctx.createGain(), t = ctx.currentTime;
     const chainNodes = [input, lowCut, highCut, dry, wet, room, roomLowCut, roomHighCut, compressor, master];
-    lowCut.type = 'highpass'; lowCut.frequency.setValueAtTime(70, t);
-    highCut.type = 'lowpass'; highCut.frequency.setValueAtTime(6500, t); highCut.Q.setValueAtTime(0.5, t);
-    room.buffer = fanfareRoom(ctx);
-    roomLowCut.type = 'highpass'; roomLowCut.frequency.setValueAtTime(220, t);
-    roomHighCut.type = 'lowpass'; roomHighCut.frequency.setValueAtTime(4200, t);
-    dry.gain.setValueAtTime(0.85, t); wet.gain.setValueAtTime(0.22, t);
+    lowCut.type = 'highpass'; lowCut.frequency.setValueAtTime(cfg.low, t);
+    highCut.type = 'lowpass'; highCut.frequency.setValueAtTime(cfg.high, t); highCut.Q.setValueAtTime(0.5, t);
+    room.buffer = fanfareRoom(ctx, stageIndex);
+    roomLowCut.type = 'highpass'; roomLowCut.frequency.setValueAtTime(cfg.rLow, t);
+    roomHighCut.type = 'lowpass'; roomHighCut.frequency.setValueAtTime(cfg.rHigh, t);
+    dry.gain.setValueAtTime(cfg.dry, t); wet.gain.setValueAtTime(cfg.wet, t);
     compressor.threshold.setValueAtTime(-18, t); compressor.knee.setValueAtTime(24, t);
     compressor.ratio.setValueAtTime(3, t); compressor.attack.setValueAtTime(0.01, t); compressor.release.setValueAtTime(0.3, t);
     const buses = contextBuses.get(ctx);
@@ -2824,7 +3112,7 @@
       master.gain.linearRampToValueAtTime(0, now + 0.03);
       disconnectAfter(0.05);
     };
-    return { lead, pad, dry: percussion, silence: input.silence, disconnectAfter, disconnectAll };
+    return { lead, pad, dry: percussion, panWidth: cfg.pan, tailSeconds: cfg.seconds + 0.15, silence: input.silence, disconnectAfter, disconnectAll };
   }
 
   // Conservative fanfare-only trims for the brighter/layered voices. The shared voice and
@@ -2863,18 +3151,39 @@
     const n = pitches.length;
     return pitches[((index % n) + n) % n] + 12 * Math.floor(index / n);
   }
-  // The chord under a melody note is a scale triad (every other scale note) that contains it,
-  // preferring the home chord, then the chords built on the 4th and 5th notes, as most songs do.
-  const CHORD_PREFERENCE = [0, 3, 4, 5, 1, 2, 6];
-  function chordFor(pitches, semitone) {
+
+  const HARMONY_PREFERENCES = [
+    [0, 3, 4, 5, 1, 2, 6], // 0: Heroic (I-IV-V)
+    [0, 4, 5, 3, 1, 2, 6], // 1: Anthemic (I-V-vi-IV)
+    [5, 3, 6, 0, 1, 4, 2], // 2: Dark Drive (vi-IV-VII)
+    [0, 3, 4, 5, 1, 2, 6], // 3: Rink Pedal (upper triads over tonic pedal bass)
+    [0, 4, 3, 1, 5, 2, 6], // 4: Quartal Synth (stacked 4th/sus voicings)
+    [3, 4, 0, 6, 1, 5, 2], // 5: Blues Turn (IV-V-I)
+    [1, 3, 5, 0, 4, 2, 6], // 6: Modal Float (ii-IV-vi)
+    [0, 1, 2, 3, 4, 5, 6]  // 7: Stepwise Lift
+  ];
+  function chordFor(pitches, semitone, harmonyIdx = 0, beatHint = 0) {
+    const h = (harmonyIdx | 0) & 7;
     const n = pitches.length, step = ((scaleIndexOf(pitches, semitone) % n) + n) % n;
+    if (h === 4 && n >= 4) {
+      // Quartal/sus voicing [0, 3, 4] in scale steps that always contains the melody pitch class.
+      const roots = [step, step - 3, step - 4].map(r => ((r % n) + n) % n);
+      const pref = HARMONY_PREFERENCES[4];
+      const root = pref.find(r => r < n && roots.includes(r)) ?? roots[0];
+      return { root, tones: [0, 3, 4].map(k => pitches[(root + k) % n]), pedal: false };
+    }
     const roots = [step, step - 2, step - 4].map(r => ((r % n) + n) % n);
-    const root = CHORD_PREFERENCE.find(r => r < n && roots.includes(r)) ?? roots[0];
-    return { root, tones: [0, 2, 4].map(k => pitches[(root + k) % n]) };
+    let pref = HARMONY_PREFERENCES[h];
+    if (h === 7) {
+      const rot = (beatHint | 0) % pref.length;
+      pref = pref.slice(rot).concat(pref.slice(0, rot));
+    }
+    const root = pref.find(r => r < n && roots.includes(r)) ?? roots[0];
+    return { root, tones: [0, 2, 4].map(k => pitches[(root + k) % n]), pedal: h === 3 };
   }
+
   // Loop variations, chosen from the DNA so an ubu's song develops the same way every time: a
-  // four-loop cycle of the original melody, variation A, the original, then variation B. Each
-  // keeps the melody's rhythm and scale; the chords follow whatever the melody becomes.
+  // four-loop cycle of the original melody, variation A, the original, then variation B.
   const shift = (p, n, steps) => n.isRest ? n : { ...n, semi: scaleSemitone(p, scaleIndexOf(p, n.semi) + steps) };
   const VARIATIONS = [
     (notes, p) => notes.map(n => shift(p, n, 2)), // a third higher
@@ -2891,6 +3200,10 @@
     const mix = value => { hash = Math.imul(hash ^ (value & 255), 16777619) >>> 0; };
     for (const key of ['instrument', 'pitch', 'decay', 'timbreMod', 'scale', 'tempo', 'groove']) mix(voice[key] | 0);
     for (const note of voice.notes || []) { mix(note.degree | 0); mix(note.duration | 0); }
+    if (Array.isArray(voice.answerNotes) && voice.answerNotes.length) {
+      for (const key of ['phraseForm', 'backingTexture', 'drumBass', 'harmonyProg', 'leadExpr', 'acousticStage', 'signatureGate']) mix(voice[key] | 0);
+      for (const note of voice.answerNotes) { mix(note.degree | 0); mix(note.duration | 0); }
+    }
     return hash;
   }
   function loopVariations(voice) {
@@ -2898,53 +3211,451 @@
     return [null, VARIATIONS[a], null, VARIATIONS[(a + 1 + (seed >>> 8) % (VARIATIONS.length - 1)) % VARIATIONS.length]];
   }
 
-  // Accompaniment under the melody: a soft pad follows the chords, with a bass pulse and quiet
-  // percussion on each beat. Brass accents frame the sounding melody, while the pad opens up
-  // toward its final note. These are backing voices; the DNA lead is never rewritten.
+  // Pre-beat-1 1/32 Signature Drop intro cues (Goal Horn, Air Siren, Crowd Chant, Synth Riser).
+  function scheduleSignatureDrop(ctx, dest, dropIndex, start, leadSec, rootFreq, pitches) {
+    const sources = [], rawSources = [];
+    let latestStop = start + leadSec;
+    const pushRaw = (node, stopAt) => {
+      sources.push(node);
+      rawSources.push({ node, stopAt });
+      if (stopAt > latestStop) latestStop = stopAt;
+    };
+    const kind = (dropIndex | 0) & 3;
+    if (kind === 0) {
+      // 0: Goal Horn — thick stadium brass foghorn triad stack punching into Beat 1
+      let hornBase = rootFreq;
+      while (hornBase > 175) hornBase /= 2;
+      while (hornBase < 85) hornBase *= 2;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass'; filter.frequency.setValueAtTime(950, start);
+      filter.frequency.linearRampToValueAtTime(1650, start + leadSec * 0.7);
+      filter.connect(dest.pad);
+      for (const [ratio, det, vol] of [[1, -9, 0.22], [1, 9, 0.22], [1.498, 4, 0.16], [2, -5, 0.14]]) {
+        const osc = ctx.createOscillator(), g = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(hornBase * ratio, start);
+        osc.detune.setValueAtTime(det, start);
+        g.gain.setValueAtTime(0.0001, start);
+        g.gain.linearRampToValueAtTime(vol, start + 0.025);
+        g.gain.setValueAtTime(vol, start + leadSec * 0.78);
+        g.gain.exponentialRampToValueAtTime(0.0001, start + leadSec + 0.06);
+        osc.connect(g); g.connect(filter);
+        osc.start(start); osc.stop(start + leadSec + 0.08);
+        pushRaw(osc, start + leadSec + 0.08);
+      }
+      rawSources[rawSources.length - 1].node.onended = () => { try { filter.disconnect(); } catch {} };
+    } else if (kind === 1) {
+      // 1: Air Siren — rising dual-voice arena siren sweeping an octave into Beat 1
+      let sirenFreq = rootFreq;
+      while (sirenFreq > 520) sirenFreq /= 2;
+      while (sirenFreq < 220) sirenFreq *= 2;
+      for (const [mult, det, vol] of [[0.5, -7, 0.18], [0.75, 7, 0.13]]) {
+        const osc = ctx.createOscillator(), g = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(sirenFreq * mult, start);
+        osc.frequency.exponentialRampToValueAtTime(sirenFreq * mult * 2, start + leadSec * 0.92);
+        osc.detune.setValueAtTime(det, start);
+        g.gain.setValueAtTime(0.0001, start);
+        g.gain.linearRampToValueAtTime(vol, start + 0.04);
+        g.gain.exponentialRampToValueAtTime(0.0001, start + leadSec + 0.04);
+        osc.connect(g); g.connect(dest.pad);
+        osc.start(start); osc.stop(start + leadSec + 0.06);
+        pushRaw(osc, start + leadSec + 0.06);
+      }
+    } else if (kind === 2) {
+      // 2: Crowd Chant — 3-count stadium clap + formant shout ("HEY! HEY! HEY!")
+      const noiseBuf = grainNoise(ctx);
+      const step = leadSec / 3;
+      for (let c = 0; c < 3; c++) {
+        const at = start + c * step;
+        const dur = Math.min(0.11, step * 0.8);
+        const burst = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+        burst.buffer = noiseBuf;
+        bp.type = 'bandpass'; bp.frequency.setValueAtTime(1150 + c * 140, at); bp.Q.setValueAtTime(2.2, at);
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.linearRampToValueAtTime(0.16 + c * 0.03, at + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+        burst.connect(bp); bp.connect(g); g.connect(dest.pad);
+        burst.start(at); burst.stop(at + dur + 0.02);
+        burst.onended = () => { try { bp.disconnect(); g.disconnect(); } catch {} };
+        pushRaw(burst, at + dur + 0.02);
+
+        const stomp = ctx.createOscillator(), sg = ctx.createGain();
+        stomp.type = 'sine'; stomp.frequency.setValueAtTime(135, at);
+        stomp.frequency.exponentialRampToValueAtTime(58, at + 0.09);
+        sg.gain.setValueAtTime(0.0001, at);
+        sg.gain.linearRampToValueAtTime(0.28, at + 0.005);
+        sg.gain.exponentialRampToValueAtTime(0.0001, at + 0.1);
+        stomp.connect(sg); sg.connect(dest.dry);
+        stomp.start(at); stomp.stop(at + 0.12);
+        pushRaw(stomp, at + 0.12);
+      }
+    } else {
+      // 3: Synth Riser — rapid 8-note upward scale run into Beat 1
+      let riserRoot = rootFreq;
+      while (riserRoot > 440) riserRoot /= 2;
+      const steps = 8, dt = leadSec / steps;
+      for (let s = 0; s < steps; s++) {
+        const at = start + s * dt;
+        const semi = scaleSemitone(pitches, s);
+        const osc = ctx.createOscillator(), g = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(riserRoot * Math.pow(2, semi / 12), at);
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.linearRampToValueAtTime(0.08 + s * 0.012, at + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, at + dt * 1.15);
+        osc.connect(g); g.connect(dest.pad);
+        osc.start(at); osc.stop(at + dt * 1.2 + 0.02);
+        pushRaw(osc, at + dt * 1.2 + 0.02);
+      }
+    }
+    return {
+      endTime: latestStop,
+      stop() { for (const src of sources) { try { src.stop(); } catch {} } }
+    };
+  }
+
+  // Accompaniment under the melody: backing texture (pad/organ/arp/brass/fifths/choir/comp/pluck)
+  // plus drum & bass groove (16 patterns). Texture 0 + Groove 0 reproduces the original backing exactly.
   function accompany(ctx, dest, plan) {
-    const { start, end, secondsPerBeat, chords, padRoot, bassRoot, onsets, looping } = plan, sources = [], rawSources = [];
+    const {
+      start, end, secondsPerBeat, chords, padRoot, bassRoot, onsets, looping,
+      backingIndex = 0, drumBassIndex = 0, pitches = [0, 2, 4, 5, 7, 9, 11]
+    } = plan;
+    const sources = [], rawSources = [], cleanups = [];
+    const maxStop = looping ? end - 0.004 : Infinity;
+    const capStop = t => Math.min(maxStop, t);
+    const pushRaw = (node, stopAt) => {
+      sources.push(node);
+      rawSources.push({ node, stopAt });
+      if (stopAt > latestStop) latestStop = stopAt;
+    };
+
     const firstNote = onsets[0], finalNote = onsets[onsets.length - 1];
     const lift = at => !firstNote ? 0 : Math.max(0, Math.min(1,
       (at - firstNote.at) / Math.max(secondsPerBeat * 0.5, finalNote.at - firstNote.at)));
+
     const pad = ctx.createBiquadFilter();
-    pad.type = 'lowpass'; pad.frequency.setValueAtTime(1100, start); pad.connect(dest.pad);
-    if (finalNote) pad.frequency.linearRampToValueAtTime(1600, finalNote.at);
-    let voicing = plan.previousVoicing, latestStop = end;
+    pad.type = 'lowpass';
+    const basePadFreq = backingIndex === 3 ? 850 : backingIndex === 4 ? 1450 : backingIndex === 5 ? 1900 : 1100;
+    pad.frequency.setValueAtTime(basePadFreq, start);
+    pad.connect(dest.pad);
+    cleanups.push(pad);
+    if (finalNote) pad.frequency.linearRampToValueAtTime(Math.min(3200, basePadFreq + 500), finalNote.at);
+
+    let voicing = plan.previousVoicing, latestStop = Math.min(maxStop, end);
+
     chords.forEach((chord, k) => {
-      const last = k === chords.length - 1, from = chord.at, until = last ? end + (looping ? 0 : 0.65) : chord.until + 0.1;
-      // Pad: two slightly detuned triangles per chord note, crossfading into the next chord.
+      const last = k === chords.length - 1;
+      const from = chord.at;
+      const until = capStop(last ? end + (looping ? -0.02 : 0.65) : chord.until + 0.1);
+      if (until <= from + 0.015) return;
       voicing = padVoicing(chord.tones, voicing);
       chord.voicing = voicing;
-      for (const tone of voicing) for (const detune of [-6, 6]) {
-        const osc = ctx.createOscillator(), gain = ctx.createGain();
-        osc.type = 'triangle'; osc.frequency.setValueAtTime(padRoot * Math.pow(2, tone / 12), from); osc.detune.setValueAtTime(detune, from);
-        const attackEnd = from + Math.min(0.08, (until - from) * 0.25);
-        const releaseStart = Math.max(attackEnd, until - (last ? 0.5 : 0.1));
-        gain.gain.setValueAtTime(0.0001, from); gain.gain.linearRampToValueAtTime(0.027 + 0.011 * lift(from), attackEnd);
-        gain.gain.linearRampToValueAtTime(0.027 + 0.011 * lift(releaseStart), releaseStart);
-        gain.gain.exponentialRampToValueAtTime(0.0001, until);
-        osc.connect(gain); gain.connect(pad); osc.start(from); osc.stop(until + 0.05);
-        sources.push(osc); rawSources.push({ node: osc, stopAt: until + 0.05 });
-        if (until + 0.05 > latestStop) latestStop = until + 0.05;
+
+      if (backingIndex === 0) {
+        // 0: Warm Strings (baseline detuned triangle pad)
+        for (const tone of voicing) for (const detune of [-6, 6]) {
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = 'triangle'; osc.frequency.setValueAtTime(padRoot * Math.pow(2, tone / 12), from); osc.detune.setValueAtTime(detune, from);
+          const attackEnd = from + Math.min(0.08, (until - from) * 0.25);
+          const releaseStart = Math.max(attackEnd, until - (last ? 0.5 : 0.1));
+          gain.gain.setValueAtTime(0.0001, from); gain.gain.linearRampToValueAtTime(0.027 + 0.011 * lift(from), attackEnd);
+          gain.gain.linearRampToValueAtTime(0.027 + 0.011 * lift(releaseStart), releaseStart);
+          gain.gain.exponentialRampToValueAtTime(0.0001, until);
+          osc.connect(gain); gain.connect(pad);
+          const stopAt = capStop(until + 0.05);
+          osc.start(from); osc.stop(stopAt);
+          pushRaw(osc, stopAt);
+        }
+      } else if (backingIndex === 1) {
+        // 1: Rink Organ (drawbar stadium organ: 8', 4', and 2-2/3' harmonics with rotary chorus)
+        for (const tone of voicing) {
+          const baseF = padRoot * Math.pow(2, tone / 12);
+          for (const [mult, det, lvl] of [[1, -5, 0.032], [2, 6, 0.022], [2.996, 0, 0.014]]) {
+            const osc = ctx.createOscillator(), gain = ctx.createGain();
+            osc.type = mult === 1 ? 'triangle' : 'sine';
+            osc.frequency.setValueAtTime(baseF * mult, from);
+            osc.detune.setValueAtTime(det, from);
+            const attackEnd = from + Math.min(0.018, (until - from) * 0.2);
+            const releaseStart = Math.max(attackEnd, until - 0.06);
+            const peak = lvl * (1 + 0.28 * lift(from));
+            gain.gain.setValueAtTime(0.0001, from);
+            gain.gain.linearRampToValueAtTime(peak, attackEnd);
+            gain.gain.setValueAtTime(peak, releaseStart);
+            gain.gain.exponentialRampToValueAtTime(0.0001, until);
+            osc.connect(gain); gain.connect(pad);
+            const stopAt = capStop(until + 0.03);
+            osc.start(from); osc.stop(stopAt);
+            pushRaw(osc, stopAt);
+          }
+        }
+      } else if (backingIndex === 2) {
+        // 2: Chip Arp (fast 16th-note retro square chord arpeggiator)
+        const stepDur = secondsPerBeat * 0.25;
+        const arpTones = [voicing[0], voicing[1], voicing[2], voicing[0] + 12];
+        const chordEnd = Math.min(capStop(chord.until), until);
+        for (let idx = 0, at = from; at < chordEnd - 0.01; idx++, at = from + idx * stepDur) {
+          const noteEnd = capStop(Math.min(chordEnd, at + stepDur * 0.88));
+          if (noteEnd <= at + 0.01) break;
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(padRoot * 2 * Math.pow(2, arpTones[idx & 3] / 12), at);
+          gain.gain.setValueAtTime(0.0001, at);
+          gain.gain.linearRampToValueAtTime(0.028 + 0.01 * lift(at), at + Math.min(0.006, (noteEnd - at) * 0.3));
+          gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
+          osc.connect(gain); gain.connect(pad);
+          const stopAt = capStop(noteEnd + 0.02);
+          osc.start(at); osc.stop(stopAt);
+          pushRaw(osc, stopAt);
+        }
+      } else if (backingIndex === 3) {
+        // 3: Brass Section (ensemble sawtooth swell per chord)
+        const swell = ctx.createBiquadFilter();
+        swell.type = 'lowpass';
+        swell.frequency.setValueAtTime(480, from);
+        swell.frequency.linearRampToValueAtTime(1950, from + Math.min(0.16, (until - from) * 0.45));
+        swell.connect(dest.pad);
+        cleanups.push(swell);
+        for (const tone of voicing) for (const detune of [-8, 8]) {
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(padRoot * Math.pow(2, tone / 12), from);
+          osc.detune.setValueAtTime(detune, from);
+          const attackEnd = from + Math.min(0.055, (until - from) * 0.25);
+          const releaseStart = Math.max(attackEnd, until - 0.12);
+          gain.gain.setValueAtTime(0.0001, from);
+          gain.gain.linearRampToValueAtTime(0.022 + 0.01 * lift(from), attackEnd);
+          gain.gain.linearRampToValueAtTime(0.019 + 0.009 * lift(releaseStart), releaseStart);
+          gain.gain.exponentialRampToValueAtTime(0.0001, until);
+          osc.connect(gain); gain.connect(swell);
+          const stopAt = capStop(until + 0.04);
+          osc.start(from); osc.stop(stopAt);
+          pushRaw(osc, stopAt);
+        }
+      } else if (backingIndex === 4) {
+        // 4: Power Fifths (root + fifth + octave saw/square stadium power chords)
+        const rootSemi = chord.tones[0];
+        const powerTones = [rootSemi, rootSemi + 7, rootSemi + 12];
+        for (const [ti, tone] of powerTones.entries()) {
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = ti === 1 ? 'square' : 'sawtooth';
+          osc.frequency.setValueAtTime(padRoot * Math.pow(2, tone / 12), from);
+          osc.detune.setValueAtTime(ti * 5 - 5, from);
+          const attackEnd = from + Math.min(0.015, (until - from) * 0.2);
+          gain.gain.setValueAtTime(0.0001, from);
+          gain.gain.linearRampToValueAtTime(0.03 + 0.01 * lift(from), attackEnd);
+          gain.gain.exponentialRampToValueAtTime(0.0001, until);
+          osc.connect(gain); gain.connect(pad);
+          const stopAt = capStop(until + 0.03);
+          osc.start(from); osc.stop(stopAt);
+          pushRaw(osc, stopAt);
+        }
+      } else if (backingIndex === 5) {
+        // 5: Glassy Choir (vowel formant pad with airy upper shimmer)
+        const f1 = ctx.createBiquadFilter(), f2 = ctx.createBiquadFilter();
+        f1.type = 'bandpass'; f1.frequency.setValueAtTime(820, from); f1.Q.setValueAtTime(2.4, from);
+        f2.type = 'bandpass'; f2.frequency.setValueAtTime(2150, from); f2.Q.setValueAtTime(2.8, from);
+        f1.connect(dest.pad); f2.connect(dest.pad);
+        cleanups.push(f1, f2);
+        for (const tone of voicing) {
+          const osc = ctx.createOscillator(), shimmer = ctx.createOscillator(), g = ctx.createGain(), sg = ctx.createGain();
+          const f = padRoot * Math.pow(2, tone / 12);
+          osc.type = 'sawtooth'; osc.frequency.setValueAtTime(f, from); osc.detune.setValueAtTime(-4, from);
+          shimmer.type = 'sine'; shimmer.frequency.setValueAtTime(f * 2, from); shimmer.detune.setValueAtTime(5, from);
+          const attackEnd = from + Math.min(0.1, (until - from) * 0.3);
+          const releaseStart = Math.max(attackEnd, until - 0.14);
+          g.gain.setValueAtTime(0.0001, from); g.gain.linearRampToValueAtTime(0.048, attackEnd);
+          g.gain.setValueAtTime(0.048, releaseStart); g.gain.exponentialRampToValueAtTime(0.0001, until);
+          sg.gain.setValueAtTime(0.0001, from); sg.gain.linearRampToValueAtTime(0.016, attackEnd);
+          sg.gain.exponentialRampToValueAtTime(0.0001, until);
+          osc.connect(g); g.connect(f1); g.connect(f2);
+          shimmer.connect(sg); sg.connect(pad);
+          const stopAt = capStop(until + 0.04);
+          osc.start(from); osc.stop(stopAt);
+          shimmer.start(from); shimmer.stop(stopAt);
+          pushRaw(osc, stopAt); pushRaw(shimmer, stopAt);
+        }
+      } else if (backingIndex === 6) {
+        // 6: Electric Comp (rhythmic Rhodes/EP chord stabs on beats)
+        const chordEnd = Math.min(capStop(chord.until), until);
+        for (let b = 0, at = from; at < chordEnd - 0.015; b++, at = from + b * secondsPerBeat) {
+          const dur = Math.min(secondsPerBeat * 0.78, chordEnd - at);
+          if (dur <= 0.02) break;
+          for (const tone of voicing) {
+            const h = playTone(ctx, pad, {
+              instrument: 12,
+              freq: padRoot * Math.pow(2, tone / 12),
+              startTime: at,
+              duration: dur,
+              decay: dur,
+              volume: 0.11 + (b === 0 ? 0.03 : 0),
+              soft: 0.005
+            });
+            sources.push(h);
+            if (h.endTime > latestStop) latestStop = Math.min(maxStop, h.endTime);
+          }
+        }
+      } else {
+        // 7: FM Pluck Grid (eighth-note resonant synth chord pulses)
+        const eighth = secondsPerBeat * 0.5;
+        const chordEnd = Math.min(capStop(chord.until), until);
+        for (let s = 0, at = from; at < chordEnd - 0.015; s++, at = from + s * eighth) {
+          const dur = Math.min(eighth * 0.72, chordEnd - at);
+          if (dur <= 0.02) break;
+          for (const tone of voicing) {
+            const osc = ctx.createOscillator(), g = ctx.createGain();
+            osc.type = s % 2 ? 'triangle' : 'sawtooth';
+            osc.frequency.setValueAtTime(padRoot * 2 * Math.pow(2, tone / 12), at);
+            g.gain.setValueAtTime(0.0001, at);
+            g.gain.linearRampToValueAtTime(s % 2 ? 0.022 : 0.032, at + 0.006);
+            g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+            osc.connect(g); g.connect(pad);
+            const stopAt = capStop(at + dur + 0.02);
+            osc.start(at); osc.stop(stopAt);
+            pushRaw(osc, stopAt);
+          }
+        }
       }
-      // Bass has its own beat pulse even when successive pad chords were merged.
-      for (let pulse = 0, at = from; at < chord.until - 0.01; pulse++, at = from + pulse * secondsPerBeat) {
-        const osc = ctx.createOscillator(), gain = ctx.createGain();
-        const ring = Math.min(chord.until - at, secondsPerBeat * 0.85);
-        let freq = bassRoot * Math.pow(2, chord.tones[0] / 12);
-        if (freq > 160) freq /= 2;
-        osc.type = 'sine'; osc.frequency.setValueAtTime(freq, at);
-        gain.gain.setValueAtTime(0.0001, at); gain.gain.linearRampToValueAtTime(pulse ? 0.2 : 0.26, at + Math.min(0.012, ring / 2));
-        gain.gain.exponentialRampToValueAtTime(0.0001, at + ring);
-        osc.connect(gain); gain.connect(dest.dry); osc.start(at); osc.stop(at + ring + 0.05);
-        sources.push(osc); rawSources.push({ node: osc, stopAt: at + ring + 0.05 });
-        if (at + ring + 0.05 > latestStop) latestStop = at + ring + 0.05;
+
+      // Bassline synthesis per chord according to drumBassIndex (0..15)
+      const bassSemiBase = chord.pedal ? 0 : chord.tones[0];
+      const baseBassFreq = (() => {
+        let f = bassRoot * Math.pow(2, bassSemiBase / 12);
+        while (f > 160) f /= 2;
+        return f;
+      })();
+
+      if (drumBassIndex === 0 || drumBassIndex === 1 || drumBassIndex === 3 || drumBassIndex === 12) {
+        // Quarter-beat sine bass pulse (exact baseline when drumBassIndex === 0)
+        for (let pulse = 0, at = from; at < chord.until - 0.01; pulse++, at = from + pulse * secondsPerBeat) {
+          const ring = Math.min(chord.until - at, secondsPerBeat * 0.85, maxStop - at - 0.01);
+          if (ring <= 0.015) break;
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = 'sine'; osc.frequency.setValueAtTime(baseBassFreq, at);
+          gain.gain.setValueAtTime(0.0001, at);
+          gain.gain.linearRampToValueAtTime(pulse ? 0.2 : 0.26, at + Math.min(0.012, ring / 2));
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + ring);
+          osc.connect(gain); gain.connect(dest.dry);
+          const stopAt = capStop(at + ring + 0.05);
+          osc.start(at); osc.stop(stopAt);
+          pushRaw(osc, stopAt);
+        }
+      } else if (drumBassIndex === 2 || drumBassIndex === 13) {
+        // Octave disco / electro bounce (eighth or 16th octave alternation)
+        const step = drumBassIndex === 13 ? secondsPerBeat * 0.25 : secondsPerBeat * 0.5;
+        for (let s = 0, at = from; at < chord.until - 0.01; s++, at = from + s * step) {
+          const ring = Math.min(chord.until - at, step * 0.85, maxStop - at - 0.01);
+          if (ring <= 0.012) break;
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = drumBassIndex === 13 ? 'sawtooth' : 'triangle';
+          osc.frequency.setValueAtTime(baseBassFreq * (s % 2 ? 2 : 1), at);
+          gain.gain.setValueAtTime(0.0001, at);
+          gain.gain.linearRampToValueAtTime(drumBassIndex === 13 ? 0.14 : 0.22, at + Math.min(0.008, ring / 2));
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + ring);
+          osc.connect(gain); gain.connect(dest.dry);
+          const stopAt = capStop(at + ring + 0.03);
+          osc.start(at); osc.stop(stopAt);
+          pushRaw(osc, stopAt);
+        }
+      } else if (drumBassIndex === 4) {
+        // 8-Bit Chiptune eighth-note triangle bass
+        const step = secondsPerBeat * 0.5;
+        for (let s = 0, at = from; at < chord.until - 0.01; s++, at = from + s * step) {
+          const ring = Math.min(chord.until - at, step * 0.8, maxStop - at - 0.01);
+          if (ring <= 0.012) break;
+          const fifth = chord.tones[2] ?? (bassSemiBase + 7);
+          let f = bassRoot * Math.pow(2, (s % 4 === 3 ? fifth : bassSemiBase) / 12);
+          while (f > 190) f /= 2;
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = 'triangle'; osc.frequency.setValueAtTime(f, at);
+          gain.gain.setValueAtTime(0.0001, at);
+          gain.gain.linearRampToValueAtTime(0.24, at + 0.005);
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + ring);
+          osc.connect(gain); gain.connect(dest.dry);
+          const stopAt = capStop(at + ring + 0.02);
+          osc.start(at); osc.stop(stopAt);
+          pushRaw(osc, stopAt);
+        }
+      } else if (drumBassIndex === 5 || drumBassIndex === 10) {
+        // Root-Fifth Tuba / Oom-pah bass
+        for (let pulse = 0, at = from; at < chord.until - 0.01; pulse++, at = from + pulse * secondsPerBeat) {
+          const ring = Math.min(chord.until - at, secondsPerBeat * 0.75, maxStop - at - 0.01);
+          if (ring <= 0.015) break;
+          const semi = pulse % 2 === 0 ? bassSemiBase : (chord.tones[2] ?? (bassSemiBase + 7));
+          let f = bassRoot * Math.pow(2, semi / 12);
+          while (f > 180) f /= 2;
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = 'triangle'; osc.frequency.setValueAtTime(f, at);
+          gain.gain.setValueAtTime(0.0001, at);
+          gain.gain.linearRampToValueAtTime(0.24, at + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + ring);
+          osc.connect(gain); gain.connect(dest.dry);
+          const stopAt = capStop(at + ring + 0.03);
+          osc.start(at); osc.stop(stopAt);
+          pushRaw(osc, stopAt);
+        }
+      } else if (drumBassIndex === 6 || drumBassIndex === 14 || drumBassIndex === 15) {
+        // Sustained 808 / Pedal Sub Drone across the whole chord
+        const ring = Math.min(chord.until - from, maxStop - from - 0.015);
+        if (ring > 0.02) {
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(drumBassIndex === 6 ? baseBassFreq * 1.25 : baseBassFreq, from);
+          if (drumBassIndex === 6) osc.frequency.exponentialRampToValueAtTime(baseBassFreq, from + Math.min(0.09, ring * 0.4));
+          gain.gain.setValueAtTime(0.0001, from);
+          gain.gain.linearRampToValueAtTime(drumBassIndex === 15 ? 0.19 : 0.25, from + Math.min(0.025, ring * 0.3));
+          gain.gain.exponentialRampToValueAtTime(0.0001, from + ring);
+          osc.connect(gain); gain.connect(dest.dry);
+          const stopAt = capStop(from + ring + 0.03);
+          osc.start(from); osc.stop(stopAt);
+          pushRaw(osc, stopAt);
+        }
+      } else if (drumBassIndex === 7 || drumBassIndex === 11) {
+        // Pumping eighth-note Synthwave / Punk bass chug
+        const step = secondsPerBeat * 0.5;
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass'; lp.frequency.setValueAtTime(520, from); lp.connect(dest.dry);
+        cleanups.push(lp);
+        for (let s = 0, at = from; at < chord.until - 0.01; s++, at = from + s * step) {
+          const ring = Math.min(chord.until - at, step * 0.82, maxStop - at - 0.01);
+          if (ring <= 0.012) break;
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = 'sawtooth'; osc.frequency.setValueAtTime(baseBassFreq, at);
+          gain.gain.setValueAtTime(0.0001, at);
+          gain.gain.linearRampToValueAtTime(s % 2 === 0 ? 0.2 : 0.15, at + 0.006);
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + ring);
+          osc.connect(gain); gain.connect(lp);
+          const stopAt = capStop(at + ring + 0.02);
+          osc.start(at); osc.stop(stopAt);
+          pushRaw(osc, stopAt);
+        }
+      } else {
+        // 8 (Walking Rink) & 9 (Funk Slap): scale-walking / syncopated bass notes
+        const walkTones = [chord.tones[0], chord.tones[1] ?? chord.tones[0], chord.tones[2] ?? chord.tones[0], scaleSemitone(pitches, scaleIndexOf(pitches, chord.tones[0]) + 5)];
+        const step = drumBassIndex === 9 ? secondsPerBeat * 0.5 : secondsPerBeat;
+        for (let s = 0, at = from; at < chord.until - 0.01; s++, at = from + s * step) {
+          const ring = Math.min(chord.until - at, step * (drumBassIndex === 9 ? 0.62 : 0.88), maxStop - at - 0.01);
+          if (ring <= 0.012) break;
+          let f = bassRoot * Math.pow(2, walkTones[s % walkTones.length] / 12);
+          while (f > 195) f /= 2;
+          const osc = ctx.createOscillator(), gain = ctx.createGain();
+          osc.type = drumBassIndex === 9 ? 'triangle' : 'sine';
+          osc.frequency.setValueAtTime(drumBassIndex === 9 ? f * 1.18 : f, at);
+          if (drumBassIndex === 9) osc.frequency.exponentialRampToValueAtTime(f, at + Math.min(0.018, ring * 0.4));
+          gain.gain.setValueAtTime(0.0001, at);
+          gain.gain.linearRampToValueAtTime(0.23, at + 0.006);
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + ring);
+          osc.connect(gain); gain.connect(dest.dry);
+          const stopAt = capStop(at + ring + 0.02);
+          osc.start(at); osc.stop(stopAt);
+          pushRaw(osc, stopAt);
+        }
       }
     });
-    // Short opening call, fuller arrival. A single/very short phrase gets just the arrival,
-    // and an all-rest phrase gets neither. Use the actual swung onsets, not a beat estimate.
+
+    // Opening call & finale brass arrival accents (preserved on all textures, extra bold on Brass Section)
     const accents = [];
-    // playTone has a 50 ms minimum decay; skip a call that would smear a tight shuffle pair.
     if (firstNote && finalNote.at - firstNote.at >= secondsPerBeat * 0.5 && onsets[1].at - firstNote.at >= 0.08) accents.push(firstNote);
     if (finalNote) accents.push(finalNote);
     for (const note of accents) {
@@ -2953,8 +3664,8 @@
       if (!chord?.voicing) continue;
       const duration = finale ? Math.min(0.6, secondsPerBeat * 0.9, end - note.at + (looping ? 0 : 0.25))
         : Math.min(0.22, (onsets[1].at - note.at) * 0.65);
+      if (duration <= 0.02) continue;
       const tones = [...chord.voicing];
-      // An upper octave of the final melody pitch supplies the lift without adding a new degree.
       if (finale) tones.push(((note.semi % 12) + 12) % 12 + 12);
       for (const tone of tones) {
         const h = playTone(ctx, dest.pad, {
@@ -2962,58 +3673,217 @@
           duration, decay: duration, volume: finale ? 0.28 : 0.2, soft: 0.006
         });
         sources.push(h);
-        if (h.endTime > latestStop) latestStop = h.endTime;
+        if (h.endTime > latestStop) latestStop = Math.min(maxStop, h.endTime);
       }
     }
-    // Percussion: a soft hat on every beat, a little stronger every fourth (reusing per-context grainNoise).
-    const hatBuffer = grainNoise(ctx);
-    const hatFilter = ctx.createBiquadFilter();
-    hatFilter.type = 'highpass'; hatFilter.frequency.setValueAtTime(3500, start); hatFilter.connect(dest.dry);
-    for (let beat = 0, at = start; at < end - 0.01; beat++, at = start + beat * secondsPerBeat) {
-      const hat = ctx.createBufferSource(), gain = ctx.createGain();
-      hat.buffer = hatBuffer;
-      gain.gain.setValueAtTime(beat % 4 ? 0.025 : 0.04, at); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.04);
-      hat.connect(gain); gain.connect(hatFilter); hat.start(at); hat.stop(at + 0.06);
-      sources.push(hat); rawSources.push({ node: hat, stopAt: at + 0.06 });
-      if (at + 0.06 > latestStop) latestStop = at + 0.06;
+
+    // Percussion & Drum Kit synthesis according to drumBassIndex (0..15)
+    if (drumBassIndex !== 15) {
+      const noiseBuf = grainNoise(ctx);
+      const hatFilter = ctx.createBiquadFilter();
+      hatFilter.type = 'highpass'; hatFilter.frequency.setValueAtTime(3500, start); hatFilter.connect(dest.dry);
+      cleanups.push(hatFilter);
+
+      const addKick = (at, peak = 0.35, startFreq = 150, endFreq = 80, dur = 0.18, wave = 'sine') => {
+        if (at >= maxStop - 0.02) return;
+        const d = Math.min(dur, maxStop - at - 0.01);
+        if (d <= 0.01) return;
+        const kick = ctx.createOscillator(), gain = ctx.createGain();
+        kick.type = wave;
+        kick.frequency.setValueAtTime(startFreq, at);
+        kick.frequency.exponentialRampToValueAtTime(endFreq, at + Math.min(0.12, d * 0.75));
+        gain.gain.setValueAtTime(0.0001, at);
+        gain.gain.linearRampToValueAtTime(peak, at + 0.004);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + d);
+        kick.connect(gain); gain.connect(dest.dry);
+        const stopAt = capStop(at + d + 0.02);
+        kick.start(at); kick.stop(stopAt);
+        pushRaw(kick, stopAt);
+      };
+
+      const addHat = (at, peak = 0.03, dur = 0.04) => {
+        if (at >= maxStop - 0.015) return;
+        const d = Math.min(dur, maxStop - at - 0.008);
+        if (d <= 0.008) return;
+        const hat = ctx.createBufferSource(), gain = ctx.createGain();
+        hat.buffer = noiseBuf;
+        gain.gain.setValueAtTime(peak, at);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + d);
+        hat.connect(gain); gain.connect(hatFilter);
+        const stopAt = capStop(at + d + 0.02);
+        hat.start(at); hat.stop(stopAt);
+        pushRaw(hat, stopAt);
+      };
+
+      const snareFilter = drumBassIndex > 0 ? ctx.createBiquadFilter() : null;
+      if (snareFilter) {
+        snareFilter.type = 'bandpass';
+        snareFilter.frequency.setValueAtTime(drumBassIndex === 1 || drumBassIndex === 13 ? 1350 : 1850, start);
+        snareFilter.Q.setValueAtTime(1.1, start);
+        snareFilter.connect(dest.dry);
+        cleanups.push(snareFilter);
+      }
+      const addSnare = (at, peak = 0.14, dur = 0.11, bodyFreq = 195) => {
+        if (!snareFilter || at >= maxStop - 0.02) return;
+        const d = Math.min(dur, maxStop - at - 0.01);
+        if (d <= 0.01) return;
+        const n = ctx.createBufferSource(), ng = ctx.createGain();
+        n.buffer = noiseBuf;
+        ng.gain.setValueAtTime(0.0001, at);
+        ng.gain.linearRampToValueAtTime(peak, at + 0.003);
+        ng.gain.exponentialRampToValueAtTime(0.0001, at + d);
+        n.connect(ng); ng.connect(snareFilter);
+        const stopAt = capStop(at + d + 0.02);
+        n.start(at); n.stop(stopAt);
+        pushRaw(n, stopAt);
+        if (bodyFreq > 0) {
+          const body = ctx.createOscillator(), bg = ctx.createGain();
+          body.type = 'triangle';
+          body.frequency.setValueAtTime(bodyFreq, at);
+          body.frequency.exponentialRampToValueAtTime(Math.max(60, bodyFreq * 0.55), at + Math.min(0.05, d * 0.6));
+          bg.gain.setValueAtTime(0.0001, at);
+          bg.gain.linearRampToValueAtTime(peak * 0.65, at + 0.003);
+          bg.gain.exponentialRampToValueAtTime(0.0001, at + Math.min(0.07, d));
+          body.connect(bg); bg.connect(dest.dry);
+          body.start(at); body.stop(stopAt);
+          pushRaw(body, stopAt);
+        }
+      };
+
+      if (drumBassIndex === 0) {
+        // 0: Exact baseline hat on every beat + kick on bookend accents
+        for (let beat = 0, at = start; at < end - 0.01; beat++, at = start + beat * secondsPerBeat) {
+          addHat(at, beat % 4 ? 0.025 : 0.04, 0.04);
+        }
+        for (const at of accents.map(note => note.at)) addKick(at, 0.35, 150, 80, 0.18);
+      } else if (drumBassIndex === 1) {
+        // 1: Arena Stomp-Clap (boom-boom-CLAP)
+        for (let beat = 0, at = start; at < end - 0.01; beat++, at = start + beat * secondsPerBeat) {
+          if (beat % 2 === 0) {
+            addKick(at, 0.36, 140, 62, 0.19);
+            if (at + secondsPerBeat * 0.5 < end - 0.02) addKick(at + secondsPerBeat * 0.5, 0.32, 135, 60, 0.17);
+          } else {
+            addSnare(at, 0.18, 0.13, 0); // clap burst
+          }
+        }
+      } else if (drumBassIndex === 2 || drumBassIndex === 13) {
+        // 2 & 13: Four-on-Floor / Electro (kick every beat, offbeat open hat, clap/snare on 2 & 4)
+        for (let beat = 0, at = start; at < end - 0.01; beat++, at = start + beat * secondsPerBeat) {
+          addKick(at, 0.34, 155, 58, 0.17);
+          if (beat % 2 === 1) addSnare(at, 0.14, 0.1, drumBassIndex === 13 ? 0 : 185);
+          if (at + secondsPerBeat * 0.5 < end - 0.015) addHat(at + secondsPerBeat * 0.5, 0.055, 0.08);
+        }
+      } else if (drumBassIndex === 3 || drumBassIndex === 9) {
+        // 3 & 9: Breakbeat / Funk (syncopated kick on 1 & 2.5, crisp snare on 2 & 4, 8th hats)
+        const half = secondsPerBeat * 0.5;
+        for (let s = 0, at = start; at < end - 0.01; s++, at = start + s * half) {
+          const stepInBar = s % 8;
+          addHat(at, s % 2 === 0 ? 0.035 : 0.022, 0.035);
+          if (stepInBar === 0 || stepInBar === 5) addKick(at, 0.34, 150, 62, 0.16);
+          if (stepInBar === 2 || stepInBar === 6) addSnare(at, 0.16, 0.1, 200);
+          else if (drumBassIndex === 9 && stepInBar === 7) addSnare(at, 0.06, 0.05, 220);
+        }
+      } else if (drumBassIndex === 4) {
+        // 4: 8-Bit Chiptune kit
+        const half = secondsPerBeat * 0.5;
+        for (let s = 0, at = start; at < end - 0.01; s++, at = start + s * half) {
+          addHat(at, 0.03, 0.025);
+          if (s % 4 === 0) addKick(at, 0.26, 210, 55, 0.11, 'square');
+          if (s % 4 === 2) addSnare(at, 0.12, 0.07, 0);
+        }
+      } else if (drumBassIndex === 5) {
+        // 5: Marching Snare rudimental 16ths
+        const q = secondsPerBeat * 0.25;
+        for (let s = 0, at = start; at < end - 0.01; s++, at = start + s * q) {
+          const accent = s % 4 === 0;
+          addSnare(at, accent ? 0.15 : 0.055, accent ? 0.08 : 0.04, accent ? 230 : 0);
+          if (s % 8 === 0) addKick(at, 0.3, 130, 65, 0.16);
+        }
+      } else if (drumBassIndex === 6) {
+        // 6: Halftime Boom (808 kick on beat 1, heavy snare on beat 3, rapid 16th hats)
+        const q = secondsPerBeat * 0.25;
+        for (let s = 0, at = start; at < end - 0.01; s++, at = start + s * q) {
+          addHat(at, s % 2 === 0 ? 0.036 : 0.02, 0.025);
+          if (s % 16 === 0 || s % 16 === 6) addKick(at, 0.38, 135, 48, 0.24);
+          if (s % 16 === 8) addSnare(at, 0.19, 0.15, 180);
+        }
+      } else if (drumBassIndex === 7) {
+        // 7: Synthwave Drive (gated snare + bar-end tom fill)
+        for (let beat = 0, at = start; at < end - 0.01; beat++, at = start + beat * secondsPerBeat) {
+          addHat(at, 0.035, 0.045);
+          if (beat % 2 === 0) addKick(at, 0.35, 150, 58, 0.18);
+          else addSnare(at, 0.18, 0.16, 175);
+          if (beat % 4 === 3 && at + secondsPerBeat * 0.5 < end - 0.02) {
+            addKick(at + secondsPerBeat * 0.5, 0.24, 190, 95, 0.12);
+          }
+        }
+      } else if (drumBassIndex === 8 || drumBassIndex === 10) {
+        // 8 (Walking Rink) & 10 (Polka Bounce)
+        for (let beat = 0, at = start; at < end - 0.01; beat++, at = start + beat * secondsPerBeat) {
+          addHat(at, 0.042, drumBassIndex === 8 ? 0.09 : 0.04);
+          if (beat % 2 === 0) addKick(at, 0.3, 145, 70, 0.15);
+          else addSnare(at, 0.12, 0.075, 240);
+          if (at + secondsPerBeat * 0.5 < end - 0.015) {
+            addHat(at + secondsPerBeat * 0.5, drumBassIndex === 10 ? 0.055 : 0.025, 0.05);
+          }
+        }
+      } else if (drumBassIndex === 11) {
+        // 11: Double-Time Punk sprint
+        const half = secondsPerBeat * 0.5;
+        for (let s = 0, at = start; at < end - 0.01; s++, at = start + s * half) {
+          addHat(at, 0.04, 0.04);
+          if (s % 2 === 0) addKick(at, 0.32, 160, 68, 0.12);
+          else addSnare(at, 0.15, 0.085, 210);
+        }
+      } else if (drumBassIndex === 12) {
+        // 12: Tribal Toms stadium floor-tom pattern
+        const half = secondsPerBeat * 0.5;
+        const tomFreqs = [115, 145, 115, 175, 130, 115, 165, 195];
+        for (let s = 0, at = start; at < end - 0.01; s++, at = start + s * half) {
+          const tf = tomFreqs[s & 7];
+          addKick(at, s % 2 === 0 ? 0.28 : 0.18, tf * 1.35, tf, 0.14);
+        }
+      } else if (drumBassIndex === 14) {
+        // 14: Anthem Tympani booms on chord arrivals + finale
+        for (const c of chords) addKick(c.at, 0.34, 125, 65, 0.26);
+        for (const at of accents.map(note => note.at)) addKick(at, 0.35, 150, 72, 0.22);
+      }
     }
-    for (const at of accents.map(note => note.at)) {
-      const kick = ctx.createOscillator(), gain = ctx.createGain();
-      kick.type = 'sine'; kick.frequency.setValueAtTime(150, at); kick.frequency.exponentialRampToValueAtTime(80, at + 0.12);
-      gain.gain.setValueAtTime(0.0001, at); gain.gain.linearRampToValueAtTime(0.35, at + 0.004);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.18);
-      kick.connect(gain); gain.connect(dest.dry); kick.start(at); kick.stop(at + 0.2);
-      sources.push(kick); rawSources.push({ node: kick, stopAt: at + 0.2 });
-      if (at + 0.2 > latestStop) latestStop = at + 0.2;
-    }
+
+    const disconnectCleanups = () => {
+      for (const node of cleanups) { try { node.disconnect(); } catch {} }
+    };
     const lastRaw = rawSources.reduce((best, item) => (!best || item.stopAt > best.stopAt ? item : best), null);
     if (lastRaw) {
-      lastRaw.node.onended = () => { try { pad.disconnect(); hatFilter.disconnect(); } catch {} };
+      lastRaw.node.onended = disconnectCleanups;
     } else {
-      try { pad.disconnect(); hatFilter.disconnect(); } catch {}
+      disconnectCleanups();
     }
     return {
       voicing,
       endTime: latestStop,
       stop() {
         for (const source of sources) { try { source.stop(); } catch {} }
-        try { pad.disconnect(); hatFilter.disconnect(); } catch {}
+        disconnectCleanups();
       }
     };
   }
 
   // options.loop repeats the phrase seamlessly until stopped. Each repeat is scheduled on the audio
-  // clock an even number of beats after the last (the melody plus a rest of about four of its own
-  // notes, rounded up), and the accompaniment runs through the rest, so the loop stays on one beat.
+  // clock an even number of beats after the last (the melody plus a rest of about four average notes,
+  // rounded up), and the accompaniment runs through the rest, so the loop stays on one beat.
   function playFanfare(voice, customCtx = null, onNoteCallback = null, options = {}) {
     stopAll();
     const ctx = customCtx || getAudioContext();
     if (!ctx) return { stop() {} };
 
     const parsed = parseVoiceInfo(voice);
-    const master = createFanfareChain(ctx);
+    const master = createFanfareChain(ctx, parsed.acousticStageIndex);
     const secondsPerBeat = 60 / parsed.tempoBpm;
-    const now = ctx.currentTime + 0.05; // tiny lead-in for smooth scheduling
+    const introLead = parsed.hasSignatureDrop && options.includeDrop !== false
+      ? Math.min(0.42, Math.max(0.24, secondsPerBeat * 0.75))
+      : 0;
+    const now = ctx.currentTime + 0.05;
 
     const activeNodes = [];
     const timers = new Set();
@@ -3021,8 +3891,13 @@
     const pitches = scalePitches(parsed.scaleIndex), variations = loopVariations(voice);
     const fit = (freq, low) => { while (freq >= low * 2) freq /= 2; while (freq < low) freq *= 2; return freq; };
     const padRoot = fit(parsed.rootFreq, 130), bassRoot = fit(parsed.rootFreq, 80);
-    const baseNotes = parsed.notes.map(n => ({ ...n, semi: n.isRest ? null : n.midi - parsed.rootMidi }));
+    const sequenceSource = parsed.anthemNotes;
+    const baseNotes = sequenceSource.map(n => ({ ...n, semi: n.isRest ? null : n.midi - parsed.rootMidi }));
     let previousVoicing = null;
+
+    if (introLead > 0) {
+      activeNodes.push(scheduleSignatureDrop(ctx, master, parsed.signatureDropIndex, now, introLead, parsed.rootFreq, pitches));
+    }
 
     function pruneFinished() {
       const t = ctx.currentTime;
@@ -3033,60 +3908,105 @@
       activeNodes.length = keep;
     }
 
+    function scheduleLeadVoice(freq, startTime, duration, decay, panVal, pitchBend = 0, volScale = 1, detuneExtra = 0) {
+      let dest = master.lead, panner = null;
+      if (ctx.createStereoPanner) {
+        panner = ctx.createStereoPanner();
+        panner.pan.setValueAtTime(audioMode === 'mono' ? 0 : panVal, startTime);
+        panner.connect(master.lead);
+        dest = panner;
+      }
+      const handle = playTone(ctx, dest, {
+        instrument: parsed.instrumentIndex,
+        freq,
+        startTime,
+        duration,
+        decay,
+        timbreMod: detuneExtra ? (parsed.timbreMod | 1) : parsed.timbreMod,
+        pitchBend,
+        volume: FANFARE_LEVELS[parsed.instrumentIndex] * volScale,
+        soft: 0.012,
+        cleanupNode: panner
+      });
+      activeNodes.push(handle);
+      return handle;
+    }
+
     function phrase(phraseStart, accompanyUntil = null, variation = null) {
       const notes = variation ? variation(baseNotes, pitches) : baseNotes;
-      let currentTime = phraseStart, beat = 0;
+      let currentTime = phraseStart, beat = 0, prevSemi = null;
       const onsets = [];
+      const expr = parsed.leadExprIndex;
+
       notes.forEach((note, i) => {
-        // Groove / swing offset
         let swingOffset = 0;
         if (parsed.grooveIndex === 1 && (i % 2 === 1)) {
-          // Light swing
           swingOffset = secondsPerBeat * 0.12;
         } else if (parsed.grooveIndex === 2 && (i % 2 === 1)) {
-          // Shuffle
           swingOffset = secondsPerBeat * 0.22;
         }
 
         const noteStartTime = currentTime + swingOffset;
         const nominalDuration = note.beats * secondsPerBeat;
-        // Staccato groove shortens held note
         const playDuration = parsed.grooveIndex === 3 ? nominalDuration * 0.55 : nominalDuration * 0.92;
 
         if (!note.isRest) {
-          // Notes alternate slightly left and right for width, and may ring a little past their
-          // length (the DNA decay still caps it) so the line sounds connected rather than chopped.
-          let dest = master.lead, panner = null;
-          if (ctx.createStereoPanner) {
-            panner = ctx.createStereoPanner();
-            const fanfarePan = audioMode === 'mono' ? 0 : (i % 2 ? 0.15 : -0.15);
-            panner.pan.setValueAtTime(fanfarePan, noteStartTime);
-            panner.connect(master.lead);
-            dest = panner;
-          }
+          const basePan = (i % 2 ? master.panWidth : -master.panWidth);
           let freq = parsed.rootFreq * Math.pow(2, note.semi / 12);
-          while (freq > 2600) freq /= 2; // variations never climb into shrill registers
-          const handle = playTone(ctx, dest, {
-            instrument: parsed.instrumentIndex,
-            freq,
-            startTime: noteStartTime,
-            duration: playDuration,
-            decay: Math.min(parsed.decaySeconds, playDuration * 1.5),
-            timbreMod: parsed.timbreMod,
-            volume: FANFARE_LEVELS[parsed.instrumentIndex],
-            soft: 0.012,
-            cleanupNode: panner
-          });
-          activeNodes.push(handle);
+          while (freq > 2600) freq /= 2;
+          const noteDecay = Math.min(parsed.decaySeconds, playDuration * 1.5);
+
+          let bend = 0;
+          if (expr === 1 && prevSemi !== null) {
+            bend = Math.max(-12, Math.min(12, note.semi - prevSemi));
+          } else if (expr === 4 && note.beats >= 0.5) {
+            bend = 2;
+          }
+
+          if (expr === 6 && note.duration === 2 && playDuration >= 0.16) {
+            // 6: Held Trill — rapid upper-neighbor ornament across the first half, settling on the target pitch
+            const upperSemi = scaleSemitone(pitches, scaleIndexOf(pitches, note.semi) + 1);
+            let upperFreq = parsed.rootFreq * Math.pow(2, upperSemi / 12);
+            while (upperFreq > 2600) upperFreq /= 2;
+            const seg = playDuration * 0.22;
+            scheduleLeadVoice(freq, noteStartTime, seg, seg, basePan, 0, 0.92);
+            scheduleLeadVoice(upperFreq, noteStartTime + seg, seg, seg, -basePan, 0, 0.85);
+            scheduleLeadVoice(freq, noteStartTime + seg * 2, playDuration - seg * 2, noteDecay, basePan, 0, 1);
+          } else {
+            scheduleLeadVoice(freq, noteStartTime, playDuration, noteDecay, basePan, bend, expr === 7 ? 0.88 : 1, expr === 7 ? 1 : 0);
+          }
+
+          if (expr === 2) {
+            // 2: Twin-Lead 3rds — harmonized diatonic 3rd panned opposite
+            const thirdSemi = scaleSemitone(pitches, scaleIndexOf(pitches, note.semi) + 2);
+            let thirdFreq = parsed.rootFreq * Math.pow(2, thirdSemi / 12);
+            while (thirdFreq > 2600) thirdFreq /= 2;
+            scheduleLeadVoice(thirdFreq, noteStartTime, playDuration, noteDecay, -basePan, bend, 0.52);
+          } else if (expr === 3) {
+            // 3: Octave Stack — upper octave (or lower if already high) unison reinforcement
+            const octFreq = freq * 2 <= 2600 ? freq * 2 : freq * 0.5;
+            scheduleLeadVoice(octFreq, noteStartTime, playDuration, noteDecay, -basePan * 0.7, bend, 0.45);
+          } else if (expr === 5) {
+            // 5: Dotted Echo — quieter stereo-flipped delay tap (clamped inside loop window if looping)
+            const echoTime = noteStartTime + secondsPerBeat * 0.75;
+            if (!accompanyUntil || echoTime + 0.08 < accompanyUntil) {
+              scheduleLeadVoice(freq, echoTime, playDuration * 0.65, noteDecay * 0.65, -basePan, 0, 0.36);
+            }
+          } else if (expr === 7) {
+            // 7: Vibrato Swell — detuned octave/unison shimmer companion
+            scheduleLeadVoice(freq * 1.0055, noteStartTime + 0.008, playDuration * 0.95, noteDecay, -basePan, 0, 0.5, 1);
+          }
+
+          prevSemi = note.semi;
           onsets.push({ beat, at: noteStartTime, semi: note.semi });
         }
 
-        // Visual callback sync
         if (typeof onNoteCallback === 'function' && !isOfflineContext(ctx)) {
           const delayMs = Math.max(0, (noteStartTime - ctx.currentTime) * 1000);
+          const callbackIdx = note.index;
           const timerId = setTimeout(() => {
             timers.delete(timerId);
-            onNoteCallback(i, parsed.notes[note.index]);
+            onNoteCallback(callbackIdx, sequenceSource[callbackIdx]);
           }, delayMs);
           timers.add(timerId);
         }
@@ -3094,8 +4014,7 @@
         currentTime += nominalDuration;
         beat += note.beats;
       });
-      // One chord per beat plus the final sounding onset, merging repeats. The last melody
-      // note supplies the arrival harmony, including during trailing rests and loop padding.
+
       const until = accompanyUntil ?? currentTime, chords = [], boundaries = [];
       const finalNote = onsets[onsets.length - 1];
       for (let b = 0; phraseStart + b * secondsPerBeat < until - 0.01; b++) boundaries.push(phraseStart + b * secondsPerBeat);
@@ -3104,34 +4023,46 @@
       for (let k = 0; k < boundaries.length; k++) {
         const at = boundaries[k], b = (at - phraseStart) / secondsPerBeat;
         const sounding = [...onsets].reverse().find(o => o.beat <= b + 1e-9) ?? onsets[0];
-        // Hold the final note's compatible harmony through the release/loop gap. A short last
-        // note between beats must not land against an unrelated pad or a forced major cadence.
-        const chord = finalNote && at >= finalNote.at - 1e-9 ? chordFor(pitches, finalNote.semi)
-          : b < beat && sounding ? chordFor(pitches, sounding.semi) : chordFor(pitches, 0);
+        const chord = finalNote && at >= finalNote.at - 1e-9 ? chordFor(pitches, finalNote.semi, parsed.harmonyProgIndex, k)
+          : b < beat && sounding ? chordFor(pitches, sounding.semi, parsed.harmonyProgIndex, k)
+          : chordFor(pitches, 0, parsed.harmonyProgIndex, k);
         const next = boundaries[k + 1] ?? until;
         const previous = chords[chords.length - 1];
-        if (previous && previous.root === chord.root) previous.until = next;
+        if (previous && previous.root === chord.root && previous.pedal === chord.pedal) previous.until = next;
         else chords.push({ ...chord, at, until: next });
       }
-      const backing = accompany(ctx, master, { start: phraseStart, end: until, secondsPerBeat, chords, padRoot, bassRoot,
-        previousVoicing, onsets, looping: !!options.loop });
+      const backing = accompany(ctx, master, {
+        start: phraseStart,
+        end: until,
+        secondsPerBeat,
+        chords,
+        padRoot,
+        bassRoot,
+        previousVoicing,
+        onsets,
+        looping: !!options.loop,
+        backingIndex: parsed.backingTextureIndex,
+        drumBassIndex: parsed.drumBassIndex,
+        pitches
+      });
       previousVoicing = backing.voicing;
       activeNodes.push(backing);
       return currentTime;
     }
 
-    // Final finish callback. The handle stays active while the reverb tail rings, so stopping
-    // after the last note still silences the tail, without reporting the finish twice.
     let finished = false;
+    const firstPhraseStart = now + introLead;
     if (options.loop) {
-      const melodyBeats = parsed.notes.reduce((sum, n) => sum + n.beats, 0);
-      const loopBeats = melodyBeats + 4 * melodyBeats / Math.max(1, parsed.notes.length);
+      const melodyBeats = sequenceSource.reduce((sum, n) => sum + n.beats, 0);
+      const loopBeats = melodyBeats + 4 * melodyBeats / Math.max(1, sequenceSource.length);
       const period = Math.ceil(loopBeats / 2) * 2 * secondsPerBeat;
-      let next = now, repeat = 0;
-      // Keep at least one full repeat queued ahead of the audio clock.
+      let next = firstPhraseStart, repeat = 0;
       const queue = () => {
         pruneFinished();
-        while (next < ctx.currentTime + period) { phrase(next, next + period, variations[repeat++ % variations.length]); next += period; }
+        while (next < ctx.currentTime + period + introLead) {
+          phrase(next, next + period, variations[repeat++ % variations.length]);
+          next += period;
+        }
         if (!isOfflineContext(ctx)) {
           const id = setTimeout(() => { timers.delete(id); queue(); }, period * 500);
           timers.add(id);
@@ -3139,14 +4070,14 @@
       };
       queue();
     } else {
-      const end = phrase(now);
-      master.disconnectAfter(Math.max(0.5, end - ctx.currentTime + 1.55));
+      const end = phrase(firstPhraseStart);
+      master.disconnectAfter(Math.max(0.5, end - ctx.currentTime + master.tailSeconds));
       if (typeof onNoteCallback === 'function' && !isOfflineContext(ctx)) {
         const finishDelayMs = Math.max(0, (end - ctx.currentTime + 0.2) * 1000);
         const finishTimer = setTimeout(() => {
           timers.delete(finishTimer);
           finished = true;
-          onNoteCallback(-1, null); // -1 indicates playback finished
+          onNoteCallback(-1, null);
         }, finishDelayMs);
         timers.add(finishTimer);
       }
@@ -3173,6 +4104,14 @@
     SCALES,
     TEMPOS,
     GROOVES,
+    PHRASE_FORMS,
+    BACKING_TEXTURES,
+    DRUM_BASS_GROOVES,
+    HARMONY_PROGS,
+    LEAD_EXPRESSIONS,
+    ACOUSTIC_STAGES,
+    SIGNATURE_DROPS,
+    SIGNATURE_GATE_ACTIVE,
     NOTE_NAMES,
     midiNote,
     noteFrequency,

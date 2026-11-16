@@ -84,12 +84,20 @@ DNA is exactly 1024 bits (128 bytes). Previous 256-bit beta and 512-bit ubus are
 | 548–549 | 2 | Voice Synthesizer: Timbre modulation |
 | 550–552 | 3 | Goal Fanfare: Scale / mode |
 | 553–555 | 3 | Goal Fanfare: Tempo |
-| 556–595 | 40 | Goal Fanfare: 8-note sequence (8 × 5 bits: 3-bit degree, 2-bit duration) |
+| 556–595 | 40 | Goal Fanfare: Bar A 8-note sequence (8 × 5 bits: 3-bit degree, 2-bit duration) |
 | 596–597 | 2 | Goal Fanfare: Groove / swing |
-| 598–1013 | 416 | Unassigned reserve; preserve in full |
+| 598–600 | 3 | Goal Anthem: Phrase form |
+| 601–640 | 40 | Goal Anthem: Bar B 8-note answer sequence (8 × 5 bits: 3-bit degree, 2-bit duration) |
+| 641–643 | 3 | Goal Anthem: Backing texture |
+| 644–647 | 4 | Goal Anthem: Drum & bass groove |
+| 648–650 | 3 | Goal Anthem: Harmony progression |
+| 651–653 | 3 | Goal Anthem: Lead expression |
+| 654–656 | 3 | Goal Anthem: Acoustic stage |
+| 657–661 | 5 | Goal Anthem: Signature drop gate (active only for 31) |
+| 662–1013 | 352 | Unassigned reserve; preserve in full |
 | 1014–1023 | 10 | Ubuquity |
 
-374 + 120 + 16 + 24 + 16 + 48 + 416 + 10 = 1024.
+374 + 120 + 16 + 24 + 16 + 48 + 64 + 352 + 10 = 1024.
 
 ## Body-part attributes
 
@@ -227,6 +235,22 @@ Displacement fields decode through the centered cubic into percentages px, py in
 4. Offset = direction × travel × min(1, length).
 
 This uses the available opening after lids/flips and contains the entire iris (and therefore the smaller pupil), including diagonal extremes. No lids reproduces the previous radial bounds.
+
+## Voice and goal anthem
+
+Bits 534–661 (128 bits) define each ubu's deterministic Web Audio voice synthesizer and two-bar goal anthem:
+
+- **Voice synthesizer (bits 534–549, 16 bits):** 4-bit instrument selector (`0–15`), 6-bit root pitch (`0–63`, mapping to MIDI `36–99` / `C2–D#7`), 4-bit decay (`0–15`, `0.12 + 0.06 × raw` seconds), and 2-bit timbre modulation (`0–3`).
+- **Bar A call fanfare (bits 550–597, 48 bits):** 3-bit scale (`0–7`), 3-bit tempo (`0–7`, `84–168` BPM in 12-BPM steps), eight 5-bit notes (`bits 556 + 5i`, high 3 bits scale degree `0–7`, low 2 bits duration: `0` = 16th, `1` = 8th, `2` = quarter, `3` = 8th rest), and 2-bit groove (`0–3`). Trading card staff engraving renders Bar A.
+- **Anthem expansion (bits 598–661, 64 bits):**
+  - `phraseForm` (bits 598–600, `0–7`): combines Bar A and Bar B (`Call & Response`, `Resolved Answer`, `Rhythmic Rhyme`, `Hook & Turnaround`, `Rising Sequence`, `Octave Chorus`, `Mirror Answer`, `Double Finale`).
+  - `answerNotes` (bits 601–640, `8 × 5` bits): Bar B sequence using the same 3-bit degree + 2-bit duration encoding as Bar A.
+  - `backingTexture` (bits 641–643, `0–7`): `Warm Strings`, `Rink Organ`, `Chip Arp`, `Brass Section`, `Power Fifths`, `Glassy Choir`, `Electric Comp`, `FM Pluck Grid`.
+  - `drumBass` (bits 644–647, `0–15`): selects one of 16 deterministic bassline and percussion kit arrangements (`Beat Pulse` through `Drumless Anthem`).
+  - `harmonyProg` (bits 648–650, `0–7`): selects chord-root preference, tonic pedal, or quartal voicing (`Heroic`, `Anthemic`, `Dark Drive`, `Rink Pedal`, `Quartal Synth`, `Blues Turn`, `Modal Float`, `Stepwise Lift`).
+  - `leadExpr` (bits 651–653, `0–7`): `Clean`, `Portamento Glide`, `Twin-Lead 3rds`, `Octave Stack`, `Brass Scoop`, `Dotted Echo`, `Held Trill`, `Vibrato Swell`.
+  - `acousticStage` (bits 654–656, `0–7`): selects one of 8 deterministic stereo stage impulses (`Studio Room`, `Ice Rink PA`, `Arcade Cab`, `Stadium Hall`, `Gated 80s`, `Jumbotron`, `Shimmer Hall`, `Wide Ping-Pong`).
+  - `signatureGate` (bits 657–661, `0–31`): active only for `31` (`1/32`), triggering a pre-downbeat signature intro drop (`Goal Horn`, `Air Siren`, `Crowd Chant`, or `Synth Riser` indexed by `phraseForm & 3`) and displaying a card drop badge. Appearance rarity and gameplay ability remain independent of audio fields.
 
 ## Ubuquity
 

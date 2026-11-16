@@ -303,7 +303,18 @@
         const raw = read(dna, 556 + i * 5, 5);
         return { degree: raw >> 2, duration: raw & 3 };
       }),
-      groove: read(dna, 596, 2)
+      groove: read(dna, 596, 2),
+      phraseForm: read(dna, 598, 3),
+      answerNotes: Array.from({ length: 8 }, (_, i) => {
+        const raw = read(dna, 601 + i * 5, 5);
+        return { degree: raw >> 2, duration: raw & 3 };
+      }),
+      backingTexture: read(dna, 641, 3),
+      drumBass: read(dna, 644, 4),
+      harmonyProg: read(dna, 648, 3),
+      leadExpr: read(dna, 651, 3),
+      acousticStage: read(dna, 654, 3),
+      signatureGate: read(dna, 657, 5)
     };
     return {
       dna: new Uint8Array(dna), nameSeed, parts: ubunym(nameSeed), attributes,
