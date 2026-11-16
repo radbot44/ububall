@@ -5454,9 +5454,8 @@ test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-i
   const ububallMatch = require('../shared/ububall-match.js');
   const cssSrc = fs.readFileSync(require.resolve('../web/ububall.css'), 'utf8');
   const siteCssSrc = fs.readFileSync(require.resolve('../web/site.css'), 'utf8');
-  const rinkDocSrc = fs.readFileSync(require.resolve('../docs/rink-stage.md'), 'utf8');
 
-  // 1. CSS & handoff doc invariants for stacked phone shots
+  // 1. CSS invariants for stacked phone shots
   assert.match(cssSrc, /html:has\(body\[data-shot="collection"\]\)\s*\{\s*overflow-x:\s*clip;\s*\}/, 'html clips horizontal scatter overflow on Collection');
   assert.match(cssSrc, /@media \(orientation: portrait\), \(width < 56rem\), \(\(pointer: coarse\) and \(max-height: 600px\)\)[\s\S]*?body:is\(\[data-shot="team"\], \[data-shot="rules"\]\) \.ball-page/, 'ububall.css defines stacked flex layout for phone rules/team shots');
   assert.equal(/\.team-sheet\s*\{[^}]*allow-discrete/.test(cssSrc.slice(cssSrc.indexOf('Phones and narrow screens stack'))), false, 'stacked in-flow .team-sheet omits allow-discrete display hold so closing never leaves a flex box');
@@ -5467,7 +5466,6 @@ test('Rink stage Phase 6: stacked phone shots, docked phone rules/team with on-i
   assert.match(cssSrc, /@media \(max-width: 47\.99rem\)[\s\S]*?body\[data-shot="collection"\] \.rink-stage[\s\S]*?width:\s*calc\(100% \* 600 \/ 484\)/, 'mobile Collection aligns portrait rink boards edge-to-edge without side gutters');
   assert.match(cssSrc, /@media \(max-width: 34rem\)[\s\S]*?\.team-sheet \.roster-grid[\s\S]*?repeat\(3,\s*minmax\(0,\s*1fr\)\)/, 'mobile Change Team scales picker ubu tiles to 3 per row');
   assert.match(siteCssSrc, /@media \(orientation: portrait\) and \(max-width: 34rem\)[\s\S]*?\.collection-ice \.ubu-grid[\s\S]*?repeat\(3,\s*minmax\(0,\s*1fr\)\)/, 'mobile portrait Collection scales ubu buttons to 3 per row');
-  assert.match(rinkDocSrc, /Phase 6 built/, 'docs/rink-stage.md Log records Phase 6 completion');
 
   // 2. Exercise phone canDock, stacked rules/team, wideScreen resize preservation, compactPhoneStage camera cuts, orientation isolation, and portrait play geometry
   const stageCode =
@@ -5875,10 +5873,9 @@ test('Rink stage Phase 7: dead layout CSS & modal setup dialog code removed, sco
     'Group 9 covers cast scatter/return, lineup skate-in/out, and Mint spotlight/scamper'
   );
 
-  // 4. Handoff document docs/rink-stage.md marks all 7 phases complete and settles Open points into Decisions
+  // 4. Design contract docs/rink-stage.md marks all 7 phases complete and links to the archived log
   assert.match(rinkDocSrc, /All 7 phases \(Phases 1–7\) are built and complete\./, 'docs/rink-stage.md Status marks all 7 phases complete');
-  assert.match(rinkDocSrc, /## Open points\s+None\./, 'docs/rink-stage.md Open points moved into Decisions');
-  assert.match(rinkDocSrc, /Phase 7 built/, 'docs/rink-stage.md Log records Phase 7');
+  assert.match(rinkDocSrc, /archive\/rink-stage-implementation-2026-11\.md/, 'docs/rink-stage.md links to archived implementation plan and log');
 });
 
 test('mobile trace fixes: offscreen goalCall/goalSweep/popup caches, skaterStyleCache CSSOM guard, updateClock hidden guard, and Portrait top REPLAY watermark', () => {

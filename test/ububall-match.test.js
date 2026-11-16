@@ -1224,8 +1224,8 @@ test('A6 & D1b: M.VERSION is 5, resolveTurn nests attribution under state.play w
     assert.equal(Object.hasOwn(res.state, k), false, `play field ${k} never leaks onto top-level state`);
   }
   const agents = fs.readFileSync(path.join(__dirname, '..', 'AGENTS.md'), 'utf8');
-  assert.match(agents, /Never compare client-simulated and server state for exact equality/i);
-  assert.match(agents, /never carry client-simulated state into the next turn/i);
+  assert.match(agents, /demand exact cross-engine equality for cosmetic comparisons/i);
+  assert.match(agents, /do not promote client simulations into the next turn/i);
 });
 
 test('v28 Tape-to-Tape & presentation sync: Synergy×Chemistry scales Snap redirect and awards live pass meter to receiver and passer in both playTick and fastTick', () => {
