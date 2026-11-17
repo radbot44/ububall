@@ -1170,21 +1170,27 @@
       }
       if (s.time <= 0) { s.path = null; return; }
       const depth = s.strength * s.time / .3;
+      const prevSpd = Math.hypot(prev.vx, prev.vy), curSpd = Math.hypot(b.vx, b.vy);
+      const dirDot = prevSpd > 10 && curSpd > 10 ? (prev.vx * b.vx + prev.vy * b.vy) / (prevSpd * curSpd) : 1;
+      const turnCut = Math.max(0, Math.min(1, (1 - dirDot) * 1.6));
+      const tear = Math.max(0, Math.min(1, Math.max(s.strength * 0.85, turnCut) * (0.4 + 0.6 * (s.time / .3))));
       s.time -= dt;
       if (!s.path) {
-        s.path = { points: [{ x: prev.x, y: prev.y, depth }], width: b.radius * 1.7, age: 0 };
+        s.path = { points: [{ x: prev.x, y: prev.y, depth, tear }], width: b.radius * 1.7, age: 0 };
         fx.skids.push(s.path); if (fx.skids.length > 30) fx.skids.shift();
       }
       const lastPt = s.path.points[s.path.points.length - 1];
       if (!lastPt || Math.hypot(b.x - lastPt.x, b.y - lastPt.y) >= 1) {
-        s.path.points.push({ x: b.x, y: b.y, depth });
+        s.path.points.push({ x: b.x, y: b.y, depth, tear });
       }
       s.path.age = 0;
     }
 
+    const stochasticCount = amount => (amount > 0 ? Math.floor(amount) + (Math.random() < (amount % 1) ? 1 : 0) : 0);
+
     function flames(x, y, spread, vx, vy, amount, spreadY = spread) {
       const fx = getEffects();
-      for (let k = Math.ceil(amount); k > 0 && fx.particles.length < 850; k--) {
+      for (let k = stochasticCount(amount); k > 0 && fx.particles.length < 850; k--) {
         const px = x + (Math.random() - .5) * spread, py = y + (Math.random() - .5) * spreadY, life = .18 + Math.random() * .22;
         fx.particles.push({ x: px, y: py, px, py, vx: vx + (Math.random() - .5) * 50, vy: vy + (Math.random() - .5) * 50,
           team: -1, color: ['#fff3b0', '#ffc43d', '#ff7a1a', '#ff3b1a'][Math.floor(Math.random() * 4)], life, duration: life, flame: 10 + Math.random() * 12 });
@@ -1259,7 +1265,7 @@
       const ux = speed ? ball.vx / speed : 0, uy = speed ? ball.vy / speed : -1;
       if (ballOnFire() && !fx.netFire?.lit) flames(ball.x - ux * ball.radius * .5, ball.y - uy * ball.radius * .5, ball.radius * 1.4, -ball.vx * .12, -ball.vy * .12, dt * 120);
       if (level <= 0 || speed < 1 || fx.netFire?.lit) return;
-      const count = Math.ceil(dt * 90 * Math.min(1, level));
+      const count = stochasticCount(dt * 90 * Math.min(1, level));
       for (let k = 0; k < count && fx.particles.length < 850; k++) {
         const x = ball.x - ux * ball.radius, y = ball.y - uy * ball.radius, life = .2 + Math.random() * .2;
         fx.particles.push({ x, y, px: x, py: y, vx: -ball.vx * .25 + (Math.random() - .5) * 160, vy: -ball.vy * .25 + (Math.random() - .5) * 160,
@@ -1275,7 +1281,7 @@
       const midX = (mouth + back) / 2, midY = (P.rink.goalTop + P.rink.goalBottom) / 2;
       const height = P.rink.goalBottom - P.rink.goalTop;
       flames(midX, midY, depth, 0, 0, dt * 210, height);
-      const sparks = Math.ceil(dt * 90);
+      const sparks = stochasticCount(dt * 90);
       for (let k = 0; k < sparks && fx.particles.length < 850; k++) {
         const x = midX + (Math.random() - .5) * depth, y = midY + (Math.random() - .5) * height, life = .2 + Math.random() * .2;
         fx.particles.push({ x, y, px: x, py: y, vx: (Math.random() - .5) * 140, vy: (Math.random() - .5) * 140,
@@ -1288,7 +1294,39 @@
       getEffects().netFire = { mouth: team ? P.rink.left : P.rink.right, lit: true };
     }
 
-    function burnIce(ball) {
+    const burnPaceForBall = (ball, minSpeed = 0) => {
+      const share = Math.max(paceShare(ball), minSpeed / P.BASE_LAUNCH_SPEED);
+      return Math.max(0, Math.min(1, (share - HEAT.sustain) / (2.0 - HEAT.sustain)));
+    };
+    const emberHeatForSpeed = speed => 0.45 + 0.55 * Math.max(0, Math.min(1, speed));
+    const emberCoolRateForSpeed = speed => {
+      const s = Math.max(0, Math.min(1, speed));
+      return (0.45 + 0.55 * s) / (0.55 * (1 + s));
+    };
+
+    function dropPathEmbers(fx, x, y, spread, count, speed = 0) {
+      if (isReducedMotion()) return;
+      const s = Math.max(0, Math.min(1, speed));
+      const colors = ['#fff1c1', '#ffc43d', '#ff942e', '#ff6d1f'];
+      for (let k = 0; k < count && fx.particles.length < 850; k++) {
+        const ang = Math.random() * Math.PI * 2;
+        const r = Math.random() * spread;
+        const px = x + Math.cos(ang) * r, py = y + Math.sin(ang) * r;
+        const drift = 4 + Math.random() * 14;
+        const life = (0.30 + Math.random() * 0.28) * (1 + s);
+        fx.particles.push({
+          x: px, y: py, px, py,
+          vx: Math.cos(ang) * drift, vy: Math.sin(ang) * drift,
+          team: -1, color: colors[Math.floor(Math.random() * colors.length)],
+          life, duration: life,
+          size: (0.85 + Math.random() * 0.55) * (0.8 + 0.35 * s),
+          alphaScale: 0.45 + 0.55 * s,
+          emberSpark: true
+        });
+      }
+    }
+
+    function burnIce(ball, dt = 1 / 60) {
       if (!ball) return;
       const fx = getEffects();
       const last = fx.burnState.path?.points.at(-1);
@@ -1301,16 +1339,22 @@
       }
       const points = fx.burnState.path.points, previous = points.at(-1);
       const depth = .2 + .8 * Math.min(1, fx.fireTime / .5);
-      const pace = Math.max(0, Math.min(1, (paceShare(ball) - HEAT.sustain) / (2.0 - HEAT.sustain)));
+      const pace = burnPaceForBall(ball);
       const speed = Math.max(0, Math.min(1, Math.hypot(ball.vx || 0, ball.vy || 0) / ((P.BASE_LAUNCH_SPEED || 720) * 1.75)));
+      const emberHeat = emberHeatForSpeed(speed);
       if (!previous) {
-        points.push({ x: ball.x, y: ball.y, depth, pace, speed });
+        points.push({ x: ball.x, y: ball.y, depth, pace, speed, heat: emberHeat });
+        dropPathEmbers(fx, ball.x, ball.y, ball.radius * 0.55, 2, speed);
       } else if (Math.hypot(ball.x - previous.x, ball.y - previous.y) >= 2) {
-        points.push({ x: ball.x, y: ball.y, depth, pace, speed });
-      } else if (points.length === 1) {
+        points.push({ x: ball.x, y: ball.y, depth, pace, speed, heat: emberHeat });
+        if (Math.random() < 0.25 + 0.55 * speed) dropPathEmbers(fx, ball.x, ball.y, ball.radius * 0.55, 1, speed);
+      } else if (points.length === 1 && dt > 0) {
         previous.depth = Math.max(previous.depth, depth);
         previous.pace = Math.max(previous.pace ?? 0, pace);
         previous.speed = speed;
+        previous.heat = emberHeat;
+        const n = stochasticCount((0.10 + 0.14 * speed) * dt * 60);
+        if (n > 0) dropPathEmbers(fx, ball.x, ball.y, ball.radius * 0.55, n, speed);
       }
       fx.burnState.path.age = 0;
     }
@@ -1385,8 +1429,7 @@
         if (draft > 0.32) {
           if (!reduced && draft > 0.35) {
             const s = speed || 1, ux = b.vx / s, uy = b.vy / s;
-            const rate = dt * 36 * draft;
-            const count = Math.floor(rate) + (Math.random() < (rate % 1) ? 1 : 0);
+            const count = stochasticCount(dt * 36 * draft);
             for (let k = 0; k < count && fx.particles.length < 340; k++) {
               const spread = (Math.random() - .5) * b.radius * 1.05;
               const x = b.x - ux * (b.radius * .6) - uy * spread;
@@ -1422,7 +1465,7 @@
       }
       if (reduced) return;
       sparkBall(ball, dt);
-      burnIce(ball);
+      burnIce(ball, dt);
       fx.materialEmitters.forEach((emitter, i) => {
         const b = view.bodies[i];
         if (!b) return;
@@ -1596,7 +1639,16 @@
       const moving = isMoving();
       if (moving) for (const s of fieldFx.skids) s.age += dt;
       for (let i = fieldFx.skids.length - 1; i >= 0; i--) if (fieldFx.skids[i].age >= SKID_LIFE) fieldFx.skids.splice(i, 1);
-      if (moving) for (const s of fieldFx.burns) s.age += dt;
+      if (moving) {
+        for (const s of fieldFx.burns) {
+          s.age += dt;
+          if (s.poof) {
+            if (s.heat > 0) s.heat = Math.max(0, s.heat - dt * emberCoolRateForSpeed(s.speed ?? 0));
+          } else if (s.points) {
+            for (const p of s.points) if (p.heat > 0) p.heat = Math.max(0, p.heat - dt * emberCoolRateForSpeed(p.speed ?? 0));
+          }
+        }
+      }
       for (let i = fieldFx.burns.length - 1; i >= 0; i--) if (fieldFx.burns[i].age >= BURN_LIFE) fieldFx.burns.splice(i, 1);
       for (const list of [fieldFx.ripples, fieldFx.pings]) {
         for (let i = list.length - 1; i >= 0; i--) if ((list[i].life -= dt) <= 0) list.splice(i, 1);
@@ -1671,8 +1723,10 @@
           if (isMeteor) {
             const poofX = x - nx * (body.radius * 0.45);
             const poofY = y - ny * (body.radius * 0.45);
-            fx.burns.push({ poof: true, x: poofX, y: poofY, radius: 30, age: 0 });
+            const poofSpeed = Math.max(0, Math.min(1, velocity / ((P.BASE_LAUNCH_SPEED || 720) * 1.75)));
+            fx.burns.push({ poof: true, x: poofX, y: poofY, radius: 30, age: 0, pace: burnPaceForBall(body, velocity), speed: poofSpeed, heat: emberHeatForSpeed(poofSpeed) });
             if (fx.burns.length > 30) fx.burns.shift();
+            dropPathEmbers(fx, poofX, poofY, 20, 4, poofSpeed);
           }
         }
       }
@@ -1869,10 +1923,11 @@
       const age = Math.floor(s.age * 4) / 4;
       const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
       if (fade <= 0.01) return;
+      const paceAlphaScale = 0.92 + 0.24 * (s.pace ?? 0.35);
       const r = s.radius || 30;
       ctx.save();
       const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
-      for (const [offset, col] of burnPoofStops(fade)) grad.addColorStop(offset, col);
+      for (const [offset, col] of burnPoofStops(Math.min(1, fade * paceAlphaScale))) grad.addColorStop(offset, col);
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
@@ -3928,16 +3983,26 @@
           const t = Math.min(1, Math.max(0, s.age / SKID_LIFE));
           const fade = 1 - t * t * (3 - 2 * t);
           const thin = 0.6 + 0.4 * fade;
-          if (fade > 0.005) gpu.drawSoftRibbon(s.points, p => s.width * 0.85 * (0.4 + 0.6 * p.depth) * thin, false, fade, hardIce);
+          if (fade > 0.005) gpu.drawSoftRibbon(s.points, p => s.width * 0.85 * (0.4 + 0.6 * p.depth) * thin, false, fade, hardIce, null, p => p.tear ?? p.depth ?? 0.35);
         }
         for (const s of fx.burns) {
           const t = Math.min(1, Math.max(0, s.age / BURN_LIFE));
           const fade = 1 - t * t * (3 - 2 * t);
           if (fade <= 0.005) continue;
           if (s.poof) {
-            gpu.drawRadialStops(s.x, s.y, s.radius || 30, burnPoofStops(fade), 1, 24);
+            const r0 = s.radius || 30;
+            gpu.drawSoftRibbon(
+              [{ x: s.x, y: s.y, depth: 1, pace: s.pace ?? 0.35, speed: 0.0, heat: s.heat ?? 0 }],
+              () => (r0 * 2) / 1.5,
+              true,
+              fade,
+              hardIce,
+              p => p.pace,
+              p => p.speed,
+              p => p.heat
+            );
           } else if (s.points && s.points.length >= 1) {
-            gpu.drawSoftRibbon(s.points, p => s.width * (0.5 + 0.5 * p.depth), true, fade, hardIce, p => p.pace ?? 0.35, p => p.speed ?? 0.35);
+            gpu.drawSoftRibbon(s.points, p => s.width * (0.5 + 0.5 * p.depth), true, fade, hardIce, p => p.pace ?? 0.35, p => p.speed ?? 0.35, p => p.heat ?? 0);
           }
         }
         gpu.setClip(0);
@@ -4638,7 +4703,7 @@
           const col = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? home : away);
           const fade = Math.max(0, p.life / p.duration);
           const shimmer = p.celebration && fade < 0.38 ? 0.55 + 0.45 * Math.sin((p.twinkle || 0) + fade * 38) : 1;
-          const baseAlpha = Math.min(1, fade * 2) * (p.celebration || p.snap ? 0.95 : 0.65) * shimmer;
+          const baseAlpha = Math.min(1, fade * 2) * (p.celebration || p.snap ? 0.95 : 0.65) * shimmer * (p.alphaScale ?? 1);
           if (p.flash) {
             if (doc?.createElement) {
               const sz = (p.flashSize || 170) * fade;
@@ -4744,11 +4809,11 @@
             gpu.fillCircle(f.x, f.y, 4.2, f.team === 0 ? home : away, 0.82);
           }
           for (const p of fx.particles) {
-            if (!p.flame && !p.celebration) continue;
+            if (!p.flame && !p.celebration && !p.emberSpark) continue;
             const col = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? home : away);
             const fade = Math.max(0, p.life / p.duration);
-            const r = p.flame ? p.flame * 0.55 * (0.4 + 0.6 * fade) : (p.size || 2) * (1.6 + 0.8 * fade);
-            gpu.fillCircle(p.x, p.y, r, col, Math.min(1, fade * 1.8) * (p.flame ? 0.72 : 0.62));
+            const r = p.flame ? p.flame * 0.55 * (0.4 + 0.6 * fade) : (p.emberSpark ? (p.size || 1.3) * (1.8 + 0.6 * fade) : (p.size || 2) * (1.6 + 0.8 * fade));
+            gpu.fillCircle(p.x, p.y, r, col, Math.min(1, fade * 1.8) * (p.flame ? 0.72 : (p.emberSpark ? 0.45 * (p.alphaScale ?? 1) : 0.62)));
           }
         }
         if (predictedGoalBloom) {

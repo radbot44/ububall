@@ -213,19 +213,20 @@ void main() {
     float s = 1.0 - r;
     float along = v_color.r;
     float pace = clamp(v_color.g, 0.0, 1.0);
-    float speed = clamp(v_color.b, 0.0, 1.0);
-    float mess = 1.0 - speed;
+    float intensity = clamp(v_color.b, 0.0, 1.0);
+    float emberHeat = clamp(v_color.a, 0.0, 1.0);
     float nMacro = vnoise(v_fieldPos * 0.042);
     float nCoarse = vnoise(v_fieldPos * 0.105 + vec2(11.7, 5.3));
     float nMid = vnoise(v_fieldPos * 0.24 + vec2(17.3, 9.1));
     float nFine = vnoise(v_fieldPos * 0.54 + vec2(4.2, 23.7));
     float edgeNoise = (nMacro * 0.52 + nCoarse * 0.34 + nMid * 0.14) - 0.55;
-    float edgeAmp = isBurn ? mix(0.08, 0.34, mess) : 0.32;
+    float edgeAmp = isBurn ? mix(0.08, 0.34, 1.0 - intensity) : mix(0.14, 0.38, intensity);
     float sWarp = clamp(s + edgeNoise * edgeAmp * smoothstep(0.0, 0.34, s), 0.0, 1.0);
     float prof = smoothstep(0.0, 0.94, sWarp) * (0.34 + 0.66 * smoothstep(0.06, 0.86, sWarp));
     float alpha;
     vec3 rgb;
     if (isBurn) {
+      float mess = 1.0 - intensity;
       float mottleVar = mix(0.10, 0.46, mess);
       float mottle = (0.99 - mottleVar * 0.5) + mottleVar * (nMacro * 0.45 + nCoarse * 0.38 + nMid * 0.17);
       float grainVar = mix(0.04, 0.16, mess);
@@ -240,12 +241,30 @@ void main() {
       float charMix = clamp(smoothstep(0.12, 0.92, sWarp) + charNoise, 0.0, 1.0);
       rgb = mix(vec3(0.177, 0.071, 0.024), vec3(0.080, 0.033, 0.010), charMix) * paceShade;
       rgb = mix(rgb, vec3(0.012, 0.006, 0.003), min(1.0, speck * 0.88));
+      if (emberHeat > 0.001) {
+        float glowCurve = emberHeat * emberHeat;
+        float fissure = (0.35 + 0.65 * nCoarse) * (0.40 + 0.60 * (1.0 - min(1.0, speck)));
+        float emberGlow = glowCurve * smoothstep(0.20, 0.88, sWarp) * fissure;
+        rgb = mix(rgb, vec3(0.64, 0.15, 0.025), clamp(emberGlow * 0.24, 0.0, 0.22));
+        alpha += emberGlow * 0.03 * fade;
+
+        float nGlintA = vnoise(v_fieldPos * 1.15 + vec2(43.1, 19.7));
+        float nGlintB = vnoise(v_fieldPos * 1.95 + vec2(11.3, 57.9));
+        float flicker = 0.70 + 0.30 * sin(u_time * 16.0 + nMacro * 14.0 + nCoarse * 9.0);
+        float sparkDot = smoothstep(0.55, 0.72, nGlintA * nGlintB + (nFine - 0.5) * 0.14) * smoothstep(0.10, 0.68, sWarp);
+        float sparkGlow = sparkDot * emberHeat * (0.45 + 0.55 * glowCurve) * flicker;
+        rgb = mix(rgb, vec3(1.0, 0.60, 0.14), clamp(sparkGlow * 1.35, 0.0, 0.90));
+        alpha += sparkGlow * 0.38 * fade;
+      }
     } else {
+      float tear = intensity;
       float nTrack = vnoise(vec2(along * 0.028 + nMacro * 0.55, r * 7.2 + nCoarse * 0.9));
       float nTrackFine = vnoise(vec2(along * 0.065 + nMid * 0.40, r * 13.5 + nCoarse * 0.7));
-      float striation = 0.72 + 0.56 * (nTrack * 0.65 + nTrackFine * 0.35);
-      float scrape = 0.82 + 0.34 * (nMacro * 0.35 + nMid * 0.35 + nFine * 0.30);
-      alpha = 0.185 * fade * prof * striation * scrape;
+      float trackMix = nTrack * 0.65 + nTrackFine * 0.35;
+      float striation = mix(0.80, 0.62, tear) + mix(0.38, 0.76, tear) * trackMix;
+      float scrapeMix = nMacro * 0.35 + nMid * 0.35 + nFine * 0.30;
+      float scrape = mix(0.90, 0.72, tear) + mix(0.20, 0.54, tear) * scrapeMix;
+      alpha = mix(0.135, 0.215, tear) * fade * prof * striation * scrape;
       rgb = vec3(0.0);
     }
     float outA = clamp(alpha, 0.0, 1.0) * clipMask;
@@ -335,20 +354,27 @@ void main() {
   }
 
   if (mode == 9) {
-    // #13 Feathered & Animated Motion Trails
-    // v_uv.x = alongU (0..1), v_uv.y = acrossV (-1..1), v_ext.y = heat, v_ext.z = spinFactor
-    float across = abs(v_uv.y);
-    float feather = 1.0 - smoothstep(0.18, 1.0, across);
-    feather *= (0.45 + 0.55 * (1.0 - across * across));
+    // #13 Feathered & Turbulent Motion Trails
+    // v_uv.x = alongU (0..1), v_uv.y = acrossV (-1..1), v_ext.y = heat
+    float signedAcross = clamp(v_uv.y, -1.0, 1.0);
+    float tail = 1.0 - clamp(v_uv.x, 0.0, 1.0);
     float heat = v_ext.y;
-    float streaks = 0.86 + 0.14 * sin(v_uv.x * 24.0 - u_time * (heat > 1.5 ? 24.0 : 14.0) + across * 4.5);
-    float shimmer = heat > 1.5
-      ? 0.85 + 0.30 * vnoise(vec2(v_uv.x * 8.0 - u_time * 11.0, v_uv.y * 3.0))
-      : 1.0;
-    float mask = feather * streaks * shimmer * clipMask;
+    float hot = clamp(heat / 1.5, 0.0, 1.35);
+    float flowRate = mix(5.5, 13.5, clamp(hot, 0.0, 1.0));
+    float turbMacro = vnoise(vec2(v_uv.x * 5.2 - u_time * flowRate, signedAcross * 2.4 + v_fieldPos.y * 0.015));
+    float turbFine = vnoise(vec2(v_uv.x * 11.5 - u_time * (flowRate * 1.45), signedAcross * 4.8 + v_fieldPos.x * 0.02));
+    float warpAmt = (0.09 + 0.22 * hot) * smoothstep(0.05, 0.85, tail);
+    float acrossWarped = clamp(abs(signedAcross + (turbMacro - 0.5) * warpAmt * 2.0), 0.0, 1.0);
+    float feather = pow(1.0 - smoothstep(0.0, 1.0, acrossWarped), mix(1.30, 1.55, clamp(hot, 0.0, 1.0)));
+    float filaments = mix(0.84, 0.56, clamp(hot, 0.0, 1.0)) + mix(0.24, 0.72, clamp(hot, 0.0, 1.0)) * (turbMacro * 0.58 + turbFine * 0.42);
+    float wispClip = heat > 1.0 ? smoothstep(0.08 * tail * hot, 0.35 + 0.25 * tail, turbFine * 0.65 + (1.0 - acrossWarped) * 0.55) : 1.0;
+    float mask = feather * filaments * wispClip * clipMask;
     if (mask <= 0.002) discard;
     vec4 col = v_color * mask;
-    if (heat > 2.0) col.rgb += vec3(0.35, 0.18, 0.04) * (1.0 - across) * v_color.a * mask;
+    if (heat > 1.4) {
+      float coreHeat = smoothstep(1.4, 2.2, heat) * (1.0 - acrossWarped) * (0.65 + 0.55 * turbFine);
+      col.rgb += vec3(0.40, 0.19, 0.04) * coreHeat * v_color.a * mask;
+    }
     outColor = col;
     return;
   }
@@ -939,7 +965,7 @@ void main() {
       pushV(cx + sz, cy + sz, 1, 1, rgb[0], rgb[1], rgb[2], alpha, 10, phase, 0, 0, clipMode, 0);
     }
 
-    function drawSoftRibbon(points, widthAt, isBurn, fade, paceAt = null, speedAt = null) {
+    function drawSoftRibbon(points, widthAt, isBurn, fade, paceAt = null, speedAt = null, heatAt = null) {
       if (!points || !points.length || fade <= 0.005) return;
       const bFlag = isBurn ? 1 : 0;
       ububallWebGL.emitSoftRibbonTriangles(points, widthAt, poly => {
@@ -948,11 +974,11 @@ void main() {
         const v0 = poly[0];
         for (let i = 1; i + 1 < poly.length; i++) {
           const v1 = poly[i], v2 = poly[i + 1];
-          pushV(v0.x, v0.y, v0.u, v0.v, v0.s, v0.p, v0.sp, 1, 5, bFlag, fade, 0, clipMode, 0);
-          pushV(v1.x, v1.y, v1.u, v1.v, v1.s, v1.p, v1.sp, 1, 5, bFlag, fade, 0, clipMode, 0);
-          pushV(v2.x, v2.y, v2.u, v2.v, v2.s, v2.p, v2.sp, 1, 5, bFlag, fade, 0, clipMode, 0);
+          pushV(v0.x, v0.y, v0.u, v0.v, v0.s, v0.p, v0.sp, v0.h, 5, bFlag, fade, 0, clipMode, 0);
+          pushV(v1.x, v1.y, v1.u, v1.v, v1.s, v1.p, v1.sp, v1.h, 5, bFlag, fade, 0, clipMode, 0);
+          pushV(v2.x, v2.y, v2.u, v2.v, v2.s, v2.p, v2.sp, v2.h, 5, bFlag, fade, 0, clipMode, 0);
         }
-      }, paceAt, speedAt);
+      }, paceAt, speedAt, heatAt);
     }
 
     function drawTrails(trails, bodies, home, away, ballHeatFn, shaderMode) {
@@ -1492,6 +1518,7 @@ void main() {
 
     // Burn ice & flame dots
     const ball = simBodies[6];
+    const spawnCount = amt => (amt > 0 ? Math.floor(amt) + (Math.random() < (amt % 1) ? 1 : 0) : 0);
     if (P.ballOnFire(ball) && !fx.netFire?.lit) {
       fx.fireTime += sdt;
       if (!fx.burnState.path) {
@@ -1502,7 +1529,7 @@ void main() {
       const depth = 0.2 + 0.8 * Math.min(1, fx.fireTime / 0.5);
       if (!prev || Math.hypot(ball.x - prev.x, ball.y - prev.y) >= 3) pts.push({ x: ball.x, y: ball.y, depth });
       if (!fxFlags.flameShader) {
-        for (let k = Math.ceil(sdt * 110); k > 0 && fx.particles.length < 400; k--) {
+        for (let k = spawnCount(sdt * 110); k > 0 && fx.particles.length < 400; k--) {
           const life = 0.18 + Math.random() * 0.2;
           fx.particles.push({
             x: ball.x + (Math.random() - 0.5) * 18, y: ball.y + (Math.random() - 0.5) * 18,
@@ -1516,7 +1543,7 @@ void main() {
     if (fx.netFire?.lit) {
       const mouth = fx.netFire.mouth, back = mouth < 500 ? mouth - P.rink.goalDepth : mouth + P.rink.goalDepth;
       const midX = (mouth + back) * 0.5, midY = 300;
-      for (let k = Math.ceil(sdt * 170); k > 0 && fx.particles.length < 450; k--) {
+      for (let k = spawnCount(sdt * 170); k > 0 && fx.particles.length < 450; k--) {
         const life = 0.2 + Math.random() * 0.22;
         fx.particles.push({
           x: midX + (Math.random() - 0.5) * P.rink.goalDepth, y: midY + (Math.random() - 0.5) * 130,

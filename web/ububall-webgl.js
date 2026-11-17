@@ -234,18 +234,19 @@ void main() {
       float s = 1.0 - r;
       float along = v_color.r;
       float pace = clamp(v_color.g, 0.0, 1.0);
-      float speed = clamp(v_color.b, 0.0, 1.0);
-      float mess = 1.0 - speed;
+      float intensity = clamp(v_color.b, 0.0, 1.0);
+      float emberHeat = clamp(v_color.a, 0.0, 1.0);
       float nMacro = vnoise(v_fieldPos * 0.042);
       float nCoarse = vnoise(v_fieldPos * 0.105 + vec2(11.7, 5.3));
       float nMid = vnoise(v_fieldPos * 0.24 + vec2(17.3, 9.1));
       float nFine = vnoise(v_fieldPos * 0.54 + vec2(4.2, 23.7));
       float edgeNoise = (nMacro * 0.52 + nCoarse * 0.34 + nMid * 0.14) - 0.55;
-      float edgeAmp = isBurn ? mix(0.08, 0.34, mess) : 0.32;
+      float edgeAmp = isBurn ? mix(0.08, 0.34, 1.0 - intensity) : mix(0.14, 0.38, intensity);
       float sWarp = clamp(s + edgeNoise * edgeAmp * smoothstep(0.0, 0.34, s), 0.0, 1.0);
       // Continuous cumulative feather matching the darker reddish-brown profile shared with impact scorches
       float prof = smoothstep(0.0, 0.94, sWarp) * (0.34 + 0.66 * smoothstep(0.06, 0.86, sWarp));
       if (isBurn) {
+        float mess = 1.0 - intensity;
         float mottleVar = mix(0.10, 0.46, mess);
         float mottle = (0.99 - mottleVar * 0.5) + mottleVar * (nMacro * 0.45 + nCoarse * 0.38 + nMid * 0.17);
         float grainVar = mix(0.04, 0.16, mess);
@@ -260,13 +261,32 @@ void main() {
         float charMix = clamp(smoothstep(0.05, 0.78, sWarp) + charNoise, 0.0, 1.0);
         rgb = mix(vec3(0.220, 0.082, 0.024), vec3(0.098, 0.033, 0.010), charMix) * paceShade;
         rgb = mix(rgb, vec3(0.012, 0.006, 0.003), min(1.0, speck * 0.88));
+        if (emberHeat > 0.001) {
+          float glowCurve = emberHeat * emberHeat;
+          float fissure = (0.35 + 0.65 * nCoarse) * (0.40 + 0.60 * (1.0 - min(1.0, speck)));
+          float emberGlow = glowCurve * smoothstep(0.20, 0.88, sWarp) * fissure;
+          rgb = mix(rgb, vec3(0.64, 0.15, 0.025), clamp(emberGlow * 0.24, 0.0, 0.22));
+          alpha += emberGlow * 0.03 * fade;
+
+          // Subtle pinpoint glowing sparks lingering briefly inside the fresh scorch path
+          float nGlintA = vnoise(v_fieldPos * 1.15 + vec2(43.1, 19.7));
+          float nGlintB = vnoise(v_fieldPos * 1.95 + vec2(11.3, 57.9));
+          float flicker = 0.70 + 0.30 * sin(u_time * 16.0 + nMacro * 14.0 + nCoarse * 9.0);
+          float sparkDot = smoothstep(0.55, 0.72, nGlintA * nGlintB + (nFine - 0.5) * 0.14) * smoothstep(0.10, 0.68, sWarp);
+          float sparkGlow = sparkDot * emberHeat * (0.45 + 0.55 * glowCurve) * flicker;
+          rgb = mix(rgb, vec3(1.0, 0.60, 0.14), clamp(sparkGlow * 1.35, 0.0, 0.90));
+          alpha += sparkGlow * 0.38 * fade;
+        }
       } else {
-        // Striated along the direction of travel (along) with slight asymmetric ice-scrape chatter
+        // Striated along the direction of travel (along), scaled by skate cut/brake tear intensity
+        float tear = intensity;
         float nTrack = vnoise(vec2(along * 0.028 + nMacro * 0.55, r * 7.2 + nCoarse * 0.9));
         float nTrackFine = vnoise(vec2(along * 0.065 + nMid * 0.40, r * 13.5 + nCoarse * 0.7));
-        float striation = 0.72 + 0.56 * (nTrack * 0.65 + nTrackFine * 0.35);
-        float scrape = 0.82 + 0.34 * (nMacro * 0.35 + nMid * 0.35 + nFine * 0.30);
-        alpha = 0.185 * fade * prof * striation * scrape;
+        float trackMix = nTrack * 0.65 + nTrackFine * 0.35;
+        float striation = mix(0.80, 0.62, tear) + mix(0.38, 0.76, tear) * trackMix;
+        float scrapeMix = nMacro * 0.35 + nMid * 0.35 + nFine * 0.30;
+        float scrape = mix(0.90, 0.72, tear) + mix(0.20, 0.54, tear) * scrapeMix;
+        alpha = mix(0.135, 0.215, tear) * fade * prof * striation * scrape;
         rgb = vec3(0.0);
       }
       alpha = clamp(alpha, 0.0, 1.0);
@@ -336,18 +356,26 @@ void main() {
   }
 
   if (mode == 9) {
-    // #13 Feathered & Animated Motion Trails: v_uv.x = alongU, v_uv.y = signed across offset, v_ext.y = heat, v_ext.z = halfWidth
-    float across = v_ext.z > 0.0001 ? clamp(abs(v_uv.y) / v_ext.z, 0.0, 1.0) : clamp(abs(v_uv.y), 0.0, 1.0);
-    float feather = pow(1.0 - smoothstep(0.0, 1.0, across), 1.35);
+    // #13 Feathered & Turbulent Motion Trails: v_uv.x = alongU (0..1), v_uv.y = signed across offset, v_ext.y = heat, v_ext.z = halfWidth
+    float signedAcross = v_ext.z > 0.0001 ? clamp(v_uv.y / v_ext.z, -1.0, 1.0) : clamp(v_uv.y, -1.0, 1.0);
+    float tail = 1.0 - clamp(v_uv.x, 0.0, 1.0);
     float heat = v_ext.y;
-    float streaks = 0.86 + 0.14 * sin(v_uv.x * 24.0 - u_time * (heat > 1.5 ? 24.0 : 14.0) + across * 4.5);
-    float shimmer = heat > 1.5
-      ? 0.85 + 0.30 * vnoise(vec2(v_uv.x * 8.0 - u_time * 11.0, across * 3.0))
-      : 1.0;
-    float mask = feather * streaks * shimmer * clipMask;
+    float hot = clamp(heat / 1.5, 0.0, 1.35);
+    float flowRate = mix(5.5, 13.5, clamp(hot, 0.0, 1.0));
+    float turbMacro = vnoise(vec2(v_uv.x * 5.2 - u_time * flowRate, signedAcross * 2.4 + v_fieldPos.y * 0.015));
+    float turbFine = vnoise(vec2(v_uv.x * 11.5 - u_time * (flowRate * 1.45), signedAcross * 4.8 + v_fieldPos.x * 0.02));
+    float warpAmt = (0.09 + 0.22 * hot) * smoothstep(0.05, 0.85, tail);
+    float acrossWarped = clamp(abs(signedAcross + (turbMacro - 0.5) * warpAmt * 2.0), 0.0, 1.0);
+    float feather = pow(1.0 - smoothstep(0.0, 1.0, acrossWarped), mix(1.30, 1.55, clamp(hot, 0.0, 1.0)));
+    float filaments = mix(0.84, 0.56, clamp(hot, 0.0, 1.0)) + mix(0.24, 0.72, clamp(hot, 0.0, 1.0)) * (turbMacro * 0.58 + turbFine * 0.42);
+    float wispClip = heat > 1.0 ? smoothstep(0.08 * tail * hot, 0.35 + 0.25 * tail, turbFine * 0.65 + (1.0 - acrossWarped) * 0.55) : 1.0;
+    float mask = feather * filaments * wispClip * clipMask;
     if (mask <= 0.002) discard;
     vec4 col = v_color * mask;
-    if (heat > 2.0) col.rgb += vec3(0.35, 0.18, 0.04) * (1.0 - across) * v_color.a * mask;
+    if (heat > 1.4) {
+      float coreHeat = smoothstep(1.4, 2.2, heat) * (1.0 - acrossWarped) * (0.65 + 0.55 * turbFine);
+      col.rgb += vec3(0.40, 0.19, 0.04) * coreHeat * v_color.a * mask;
+    }
     float tpdf = hash21(gl_FragCoord.xy) + hash21(gl_FragCoord.xy + vec2(17.3, 31.7)) - 1.0;
     float dither = tpdf * (1.25 / 255.0) * smoothstep(0.0, 0.04, col.a);
     col.rgb = max(vec3(0.0), col.rgb + dither);
@@ -637,7 +665,8 @@ void main() {
             v: prev.v + t * (cur.v - prev.v),
             s: prev.s + t * (cur.s - prev.s),
             p: prev.p + t * (cur.p - prev.p),
-            sp: prev.sp + t * (cur.sp - prev.sp)
+            sp: prev.sp + t * (cur.sp - prev.sp),
+            h: prev.h + t * (cur.h - prev.h)
           });
         }
         out.push(cur);
@@ -650,7 +679,8 @@ void main() {
           v: prev.v + t * (cur.v - prev.v),
           s: prev.s + t * (cur.s - prev.s),
           p: prev.p + t * (cur.p - prev.p),
-          sp: prev.sp + t * (cur.sp - prev.sp)
+          sp: prev.sp + t * (cur.sp - prev.sp),
+          h: prev.h + t * (cur.h - prev.h)
         });
       }
       prev = cur;
@@ -732,10 +762,11 @@ void main() {
    * outer round joins, and Voronoi-clipped inner corners so tight curves and sharp bounces
    * never twist, pinch, or double-darken.
    */
-  function emitSoftRibbonTriangles(points, widthAt, emitPoly, paceAt = null, speedAt = null) {
+  function emitSoftRibbonTriangles(points, widthAt, emitPoly, paceAt = null, speedAt = null, heatAt = null) {
     if (!points || !points.length) return;
     const paceVal = pt => paceAt ? paceAt(pt) : (pt.pace ?? 0.35);
     const speedVal = pt => speedAt ? speedAt(pt) : (pt.speed ?? 0.35);
+    const heatVal = pt => heatAt ? heatAt(pt) : (pt.heat ?? 0);
     const raw = [points[0]];
     for (let i = 1; i < points.length; i++) {
       const prev = raw[raw.length - 1], cur = points[i];
@@ -745,13 +776,13 @@ void main() {
       }
     }
     if (raw.length === 1) {
-      const p0 = raw[0], r0 = Math.max(0.5, widthAt(p0) * 0.5 * 1.5), pv = paceVal(p0), sv = speedVal(p0), discSteps = 20;
+      const p0 = raw[0], r0 = Math.max(0.5, widthAt(p0) * 0.5 * 1.5), pv = paceVal(p0), sv = speedVal(p0), hv = heatVal(p0), discSteps = 20;
       for (let s = 0; s < discSteps; s++) {
         const a0 = (s / discSteps) * Math.PI * 2, a1 = ((s + 1) / discSteps) * Math.PI * 2;
         emitPoly([
-          { x: p0.x, y: p0.y, u: 0, v: 0, s: 0, p: pv, sp: sv },
-          { x: p0.x + Math.cos(a0) * r0, y: p0.y + Math.sin(a0) * r0, u: Math.cos(a0), v: Math.sin(a0), s: 0, p: pv, sp: sv },
-          { x: p0.x + Math.cos(a1) * r0, y: p0.y + Math.sin(a1) * r0, u: Math.cos(a1), v: Math.sin(a1), s: 0, p: pv, sp: sv }
+          { x: p0.x, y: p0.y, u: 0, v: 0, s: 0, p: pv, sp: sv, h: hv },
+          { x: p0.x + Math.cos(a0) * r0, y: p0.y + Math.sin(a0) * r0, u: Math.cos(a0), v: Math.sin(a0), s: 0, p: pv, sp: sv, h: hv },
+          { x: p0.x + Math.cos(a1) * r0, y: p0.y + Math.sin(a1) * r0, u: Math.cos(a1), v: Math.sin(a1), s: 0, p: pv, sp: sv, h: hv }
         ]);
       }
       return;
@@ -767,7 +798,8 @@ void main() {
       const dw = Math.abs(widthAt(b) - (widthAt(a) + widthAt(c)) * 0.5);
       const dp = Math.abs(paceVal(b) - (paceVal(a) + paceVal(c)) * 0.5);
       const dsp = Math.abs(speedVal(b) - (speedVal(a) + speedVal(c)) * 0.5);
-      if (perp < 0.35 && along > 0 && along < 1 && acl < 30 && dw < 0.8 && dp < 0.08 && dsp < 0.08) continue;
+      const dh = Math.abs(heatVal(b) - (heatVal(a) + heatVal(c)) * 0.5);
+      if (perp < 0.35 && along > 0 && along < 1 && acl < 30 && dw < 0.8 && dp < 0.08 && dsp < 0.08 && dh < 0.08) continue;
       clean.push(b);
     }
     clean.push(raw[raw.length - 1]);
@@ -778,12 +810,14 @@ void main() {
     const halfs = new Array(n);
     const paces = new Array(n);
     const speeds = new Array(n);
+    const heats = new Array(n);
     let maxR = 0.5;
     for (let k = 0; k < n; k++) {
       const r = Math.max(0.5, widthAt(clean[k]) * 0.5 * 1.5); // 1.5x outer feather extent
       halfs[k] = r;
       paces[k] = paceVal(clean[k]);
       speeds[k] = speedVal(clean[k]);
+      heats[k] = heatVal(clean[k]);
       if (r > maxR) maxR = r;
     }
 
@@ -810,13 +844,13 @@ void main() {
 
     const capSteps = 10;
     {
-      const p0 = clean[0], r0 = halfs[0], pv0 = paces[0], sv0 = speeds[0], baseAng = Math.atan2(ny[0], nx[0]);
+      const p0 = clean[0], r0 = halfs[0], pv0 = paces[0], sv0 = speeds[0], hv0 = heats[0], baseAng = Math.atan2(ny[0], nx[0]);
       for (let s = 0; s < capSteps; s++) {
         const a0 = (s / capSteps) * Math.PI, a1 = ((s + 1) / capSteps) * Math.PI;
         emitPoly([
-          { x: p0.x, y: p0.y, u: 0, v: 0, s: 0, p: pv0, sp: sv0 },
-          { x: p0.x + Math.cos(baseAng + a0) * r0, y: p0.y + Math.sin(baseAng + a0) * r0, u: Math.cos(a0), v: Math.sin(a0), s: 0, p: pv0, sp: sv0 },
-          { x: p0.x + Math.cos(baseAng + a1) * r0, y: p0.y + Math.sin(baseAng + a1) * r0, u: Math.cos(a1), v: Math.sin(a1), s: 0, p: pv0, sp: sv0 }
+          { x: p0.x, y: p0.y, u: 0, v: 0, s: 0, p: pv0, sp: sv0, h: hv0 },
+          { x: p0.x + Math.cos(baseAng + a0) * r0, y: p0.y + Math.sin(baseAng + a0) * r0, u: Math.cos(a0), v: Math.sin(a0), s: 0, p: pv0, sp: sv0, h: hv0 },
+          { x: p0.x + Math.cos(baseAng + a1) * r0, y: p0.y + Math.sin(baseAng + a1) * r0, u: Math.cos(a1), v: Math.sin(a1), s: 0, p: pv0, sp: sv0, h: hv0 }
         ]);
       }
     }
@@ -824,7 +858,7 @@ void main() {
     const searchDist = maxR * 3.0;
     for (let i = 0; i < m; i++) {
       const p0 = clean[i], p1 = clean[i + 1], r0 = halfs[i], r1 = halfs[i + 1];
-      const s0 = cumLen[i], s1 = cumLen[i + 1], pv0 = paces[i], pv1 = paces[i + 1], sv0 = speeds[i], sv1 = speeds[i + 1];
+      const s0 = cumLen[i], s1 = cumLen[i + 1], pv0 = paces[i], pv1 = paces[i + 1], sv0 = speeds[i], sv1 = speeds[i + 1], hv0 = heats[i], hv1 = heats[i + 1];
       const nxi = nx[i], nyi = ny[i];
       const extraPlanes = [];
       for (let j = i - 2; j >= 0 && cumLen[i] - cumLen[j + 1] <= searchDist; j--) {
@@ -844,10 +878,10 @@ void main() {
 
       for (const side of [1, -1]) {
         let poly = [
-          { x: p0.x, y: p0.y, u: 0, v: 0, s: s0, p: pv0, sp: sv0 },
-          { x: p1.x, y: p1.y, u: 0, v: 0, s: s1, p: pv1, sp: sv1 },
-          { x: p1.x + side * nxi * r1, y: p1.y + side * nyi * r1, u: side, v: 0, s: s1, p: pv1, sp: sv1 },
-          { x: p0.x + side * nxi * r0, y: p0.y + side * nyi * r0, u: side, v: 0, s: s0, p: pv0, sp: sv0 }
+          { x: p0.x, y: p0.y, u: 0, v: 0, s: s0, p: pv0, sp: sv0, h: hv0 },
+          { x: p1.x, y: p1.y, u: 0, v: 0, s: s1, p: pv1, sp: sv1, h: hv1 },
+          { x: p1.x + side * nxi * r1, y: p1.y + side * nyi * r1, u: side, v: 0, s: s1, p: pv1, sp: sv1, h: hv1 },
+          { x: p0.x + side * nxi * r0, y: p0.y + side * nyi * r0, u: side, v: 0, s: s0, p: pv0, sp: sv0, h: hv0 }
         ];
         if (joints[i] && joints[i].sIn === side) poly = clipRibbonPoly(poly, p0.x, p0.y, joints[i].bx, joints[i].by);
         if (joints[i + 1] && joints[i + 1].sIn === side) poly = clipRibbonPoly(poly, p1.x, p1.y, -joints[i + 1].bx, -joints[i + 1].by);
@@ -863,14 +897,14 @@ void main() {
         if (Math.abs(dAng) < 1e-4 && ox0 * ox1 + oy0 * oy1 < -0.9999) dAng = -sOut * Math.PI;
         if (Math.abs(dAng) > 1e-3) {
           const steps = Math.max(1, Math.ceil(Math.abs(dAng) / (Math.PI / 10)));
-          const pk = clean[i + 1], rk = halfs[i + 1], pvk = paces[i + 1], svk = speeds[i + 1];
+          const pk = clean[i + 1], rk = halfs[i + 1], pvk = paces[i + 1], svk = speeds[i + 1], hvk = heats[i + 1];
           const fanPlanes = extraPlanes.filter(pl => (pl.j <= i - 2 || pl.j >= i + 3) && (pk.x - pl.ox) * pl.bx + (pk.y - pl.oy) * pl.by > 2.0);
           for (let s = 0; s < steps; s++) {
             const a0 = ang0 + (s / steps) * dAng, a1 = ang0 + ((s + 1) / steps) * dAng;
             const tri = [
-              { x: pk.x, y: pk.y, u: 0, v: 0, s: s1, p: pvk, sp: svk },
-              { x: pk.x + Math.cos(a0) * rk, y: pk.y + Math.sin(a0) * rk, u: Math.cos((s / steps) * Math.abs(dAng)), v: Math.sin((s / steps) * Math.abs(dAng)), s: s1, p: pvk, sp: svk },
-              { x: pk.x + Math.cos(a1) * rk, y: pk.y + Math.sin(a1) * rk, u: Math.cos(((s + 1) / steps) * Math.abs(dAng)), v: Math.sin(((s + 1) / steps) * Math.abs(dAng)), s: s1, p: pvk, sp: svk }
+              { x: pk.x, y: pk.y, u: 0, v: 0, s: s1, p: pvk, sp: svk, h: hvk },
+              { x: pk.x + Math.cos(a0) * rk, y: pk.y + Math.sin(a0) * rk, u: Math.cos((s / steps) * Math.abs(dAng)), v: Math.sin((s / steps) * Math.abs(dAng)), s: s1, p: pvk, sp: svk, h: hvk },
+              { x: pk.x + Math.cos(a1) * rk, y: pk.y + Math.sin(a1) * rk, u: Math.cos(((s + 1) / steps) * Math.abs(dAng)), v: Math.sin(((s + 1) / steps) * Math.abs(dAng)), s: s1, p: pvk, sp: svk, h: hvk }
             ];
             const clipped = fanPlanes.length ? applyRibbonSlabs([tri], fanPlanes) : [tri];
             for (let k = 0; k < clipped.length; k++) emitPoly(clipped[k]);
@@ -880,14 +914,14 @@ void main() {
     }
 
     {
-      const pm = clean[n - 1], rm = halfs[n - 1], sm = cumLen[n - 1], pvm = paces[n - 1], svm = speeds[n - 1];
+      const pm = clean[n - 1], rm = halfs[n - 1], sm = cumLen[n - 1], pvm = paces[n - 1], svm = speeds[n - 1], hvm = heats[n - 1];
       const baseAng = Math.atan2(-ny[m - 1], -nx[m - 1]);
       for (let s = 0; s < capSteps; s++) {
         const a0 = (s / capSteps) * Math.PI, a1 = ((s + 1) / capSteps) * Math.PI;
         emitPoly([
-          { x: pm.x, y: pm.y, u: 0, v: 0, s: sm, p: pvm, sp: svm },
-          { x: pm.x + Math.cos(baseAng + a0) * rm, y: pm.y + Math.sin(baseAng + a0) * rm, u: -Math.cos(a0), v: Math.sin(a0), s: sm, p: pvm, sp: svm },
-          { x: pm.x + Math.cos(baseAng + a1) * rm, y: pm.y + Math.sin(baseAng + a1) * rm, u: -Math.cos(a1), v: Math.sin(a1), s: sm, p: pvm, sp: svm }
+          { x: pm.x, y: pm.y, u: 0, v: 0, s: sm, p: pvm, sp: svm, h: hvm },
+          { x: pm.x + Math.cos(baseAng + a0) * rm, y: pm.y + Math.sin(baseAng + a0) * rm, u: -Math.cos(a0), v: Math.sin(a0), s: sm, p: pvm, sp: svm, h: hvm },
+          { x: pm.x + Math.cos(baseAng + a1) * rm, y: pm.y + Math.sin(baseAng + a1) * rm, u: -Math.cos(a1), v: Math.sin(a1), s: sm, p: pvm, sp: svm, h: hvm }
         ]);
       }
     }
@@ -1849,7 +1883,7 @@ void main() {
     }
 
     // Continuous non-overlapping feathered skid & warm umber-to-soot burn ribbon
-    function drawSoftRibbon(points, widthAt, isBurn, fade, hardEdge = false, paceAt = null, speedAt = null) {
+    function drawSoftRibbon(points, widthAt, isBurn, fade, hardEdge = false, paceAt = null, speedAt = null, heatAt = null) {
       if (!points || !points.length || fade <= 0.005 || contextLost) return;
       const bFlag = isBurn ? 1 : 0;
       const hFlag = hardEdge ? 1 : 0;
@@ -1859,11 +1893,11 @@ void main() {
         const v0 = poly[0];
         for (let i = 1; i + 1 < poly.length; i++) {
           const v1 = poly[i], v2 = poly[i + 1];
-          pushVert(v0.x, v0.y, v0.u, v0.v, v0.s, v0.p, v0.sp, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-          pushVert(v1.x, v1.y, v1.u, v1.v, v1.s, v1.p, v1.sp, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-          pushVert(v2.x, v2.y, v2.u, v2.v, v2.s, v2.p, v2.sp, 1, 5, bFlag, fade, hFlag, currentClip, 0);
+          pushVert(v0.x, v0.y, v0.u, v0.v, v0.s, v0.p, v0.sp, v0.h, 5, bFlag, fade, hFlag, currentClip, 0);
+          pushVert(v1.x, v1.y, v1.u, v1.v, v1.s, v1.p, v1.sp, v1.h, 5, bFlag, fade, hFlag, currentClip, 0);
+          pushVert(v2.x, v2.y, v2.u, v2.v, v2.s, v2.p, v2.sp, v2.h, 5, bFlag, fade, hFlag, currentClip, 0);
         }
-      }, paceAt, speedAt);
+      }, paceAt, speedAt, heatAt);
     }
 
     function drawTaperedSpinArc(cx, cy, radius, startAngle, arcSweep, maxWidth, color, peakAlpha) {

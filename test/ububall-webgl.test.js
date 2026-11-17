@@ -778,5 +778,94 @@ test('emitSoftRibbonTriangles tracks along/pace attributes and burnIce scorches 
   pres.drawScene();
   assert.equal(fx.iceCache.burnSnap[0].count, 2, 'Canvas 2D iceCache rebuilds cleanly from 1-point to 2-point burn');
   assert.equal(fx.iceCache.rebuilds, 2, '1-to-2 point transition forces a clean ribbon rebuild');
+
+  // Ember intensity and duration scale with speed: slow base ~0.45 / 0.55s vs fast max 1.0 / 1.1s
+  const slowPt = fx.burns[0].points[0];
+  const fastPt = fx.burns[0].points[1];
+  assert.ok(slowPt.heat >= 0.44 && slowPt.heat <= 0.48, `slow fireball starts near 0.45 base heat, got ${slowPt.heat}`);
+  assert.ok(fastPt.heat > 0.90 && fastPt.heat <= 1.0, `fast fireball starts near 1.0 max heat, got ${fastPt.heat}`);
+  const slowSparks = fx.particles.filter(p => p.emberSpark && p.alphaScale < 0.5);
+  assert.ok(slowSparks.length >= 2, `expected slow base path sparks, got ${slowSparks.length}`);
+  for (const sp of slowSparks) {
+    assert.ok(sp.duration >= 0.29 && sp.duration <= 0.60 && Math.hypot(sp.vx, sp.vy) <= 20, 'slow path sparks use shorter base duration');
+  }
+
+  pres.addWallEffect(ball, 1300, 'wall', 1, 0);
+  const poof = fx.burns.find(b => b.poof);
+  assert.ok(poof, 'meteor wall hit pushes a burn poof');
+  assert.equal(poof.heat, 1, 'max-speed meteor burn poof starts at 1.0 ember heat');
+  assert.ok(Math.abs(poof.pace - Math.max(0, Math.min(1, (1300 / P.BASE_LAUNCH_SPEED - 0.7) / 1.3))) < 1e-6, `meteor burn poof records matching pace, got ${poof.pace}`);
+  // Lower-pace wall hit uses ball pace rather than hardcoded 0.78
+  const medBall = { ...ball, vx: 860, vy: 0, pace: 860 };
+  pres.addWallEffect(medBall, 860, 'wall', 1, 0);
+  const medPoof = fx.burns.filter(b => b.poof).at(-1);
+  assert.ok(medPoof.pace < 0.45 && medPoof.pace > 0.3, `medium meteor bounce matches ~860 px/s burn pace, got ${medPoof.pace}`);
+  const maxSparks = fx.particles.filter(p => p.emberSpark && p.alphaScale > 0.99);
+  assert.ok(maxSparks.length >= 4, 'max-speed meteor wall poof leaves high-intensity ember sparks');
+  for (const sp of maxSparks) {
+    assert.ok(sp.duration >= 0.59 && sp.duration <= 1.18, `max-speed path sparks use up to 2x duration, got ${sp.duration}`);
+  }
+
+  pres.updateEffects(0.56);
+  assert.equal(slowPt.heat, 0, 'slow burn point cools out in base ~0.55s window');
+  assert.ok(fastPt.heat > 0.35, `fast burn point still glows past 0.56s, got ${fastPt.heat}`);
+  assert.ok(poof.heat > 0.45 && poof.heat < 0.55, `max-speed poof cools midway over 0.56s, got ${poof.heat}`);
+  pres.updateEffects(0.65);
+  assert.equal(fastPt.heat, 0, 'fast burn point finishes cooling within 1.1s max');
+  assert.equal(poof.heat, 0, 'max-speed poof finishes cooling within 1.1s max');
+  assert.equal(fx.particles.filter(p => p.emberSpark).length, 0, 'all path ember sparks expire after max cooling window');
+
+  // markIce records cut/brake tear intensity on skid points
+  const skater = bodies[0];
+  skater.x = 300; skater.y = 250; skater.vx = 520; skater.vy = 0;
+  pres.markIce(skater, 0, 1 / 60);
+  skater.x = 306; skater.y = 256; skater.vx = 60; skater.vy = 180; // sharp slow/cut triggers skid
+  pres.markIce(skater, 0, 1 / 60);
+  assert.equal(fx.skids.length, 1);
+  assert.ok(fx.skids[0].points[1].tear > 0.4, `expected elevated cut tear on sharp brake/turn, got ${fx.skids[0].points[1].tear}`);
+
+  // emitSoftRibbonTriangles propagates heat h across polygons and single-point poofs
+  const heatPolys = [];
+  emitSoftRibbonTriangles(
+    [{ x: 100, y: 100, pace: 0.7, speed: 0.3, heat: 0.0 }, { x: 200, y: 100, pace: 0.7, speed: 0.3, heat: 1.0 }],
+    () => 20,
+    poly => heatPolys.push(poly),
+    pt => pt.pace,
+    pt => pt.speed,
+    pt => pt.heat
+  );
+  assert.ok(heatPolys.some(poly => poly.some(v => v.h > 0.9) && poly.some(v => v.h < 0.1) || heatPolys.length > 1), 'ember heat propagates across ribbon segments');
+  const poofPolys = [];
+  emitSoftRibbonTriangles([{ x: 150, y: 150, pace: 0.78, speed: 0.0, heat: 0.85 }], () => (30 * 2) / 1.5, poly => poofPolys.push(poly), pt => pt.pace, pt => pt.speed, pt => pt.heat);
+  assert.ok(poofPolys.length >= 16 && Math.abs(poofPolys[0][0].h - 0.85) < 1e-6, '1-point poof disc preserves ember heat');
+
+  // Particle emitters scale emission rate proportionally with slow-motion dt (0.1x) and emit zero when dt = 0
+  fx.particles.length = 0;
+  pres.lightNet(0);
+  pres.burnNet(0);
+  assert.equal(fx.particles.length, 0, 'burnNet spawns zero particles when paused (dt=0)');
+
+  let slowTotal = 0;
+  for (let i = 0; i < 60; i++) {
+    fx.particles.length = 0;
+    pres.burnNet(0.1 / 60);
+    slowTotal += fx.particles.length;
+  }
+  // Expected: (210 + 90) * 0.1 = 30 particles over 60 slow frames (previously Math.ceil gave 120!)
+  assert.ok(slowTotal >= 12 && slowTotal <= 55, `0.1x burnNet should spawn ~30 particles over 60 frames, got ${slowTotal}`);
+
+  fx.netFire = null;
+  ball.onFire = true;
+  ball.vx = 900;
+  ball.vy = 0;
+  ball.pace = 900;
+  let ballSlowTotal = 0;
+  for (let i = 0; i < 60; i++) {
+    fx.particles.length = 0;
+    pres.sparkBall(ball, 0.1 / 60);
+    ballSlowTotal += fx.particles.length;
+  }
+  // Expected: (120 + 90) * 0.1 = 21 particles over 60 slow frames (previously Math.ceil gave 120!)
+  assert.ok(ballSlowTotal >= 8 && ballSlowTotal <= 40, `0.1x sparkBall should spawn ~21 particles over 60 frames, got ${ballSlowTotal}`);
   pres.dispose();
 });
