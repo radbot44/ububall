@@ -661,3 +661,122 @@ test('emitSoftRibbonTriangles and Canvas 2D softRibbon avoid gaps, twists, and s
   }
   c2dPres.dispose();
 });
+
+test('emitSoftRibbonTriangles tracks along/pace attributes and burnIce scorches for slow fireballs', () => {
+  const { emitSoftRibbonTriangles } = globalThis.ububallWebgl;
+  const { createRinkPresenter, createEffectsState } = globalThis.ububallPresentation;
+  const P = globalThis.ububallPhysics;
+  const ububallMatch = globalThis.ububallMatch;
+  const ububallReplay = globalThis.ububallReplay;
+
+  // Multi-point ribbon preserves non-decreasing arc-length s and per-point pace/speed p, sp
+  const pathPts = [
+    { x: 100, y: 200, pace: 0.2, speed: 0.1 },
+    { x: 180, y: 200, pace: 0.6, speed: 0.55 },
+    { x: 260, y: 260, pace: 0.9, speed: 0.95 }
+  ];
+  const polys = [];
+  emitSoftRibbonTriangles(pathPts, () => 22, poly => polys.push(poly), pt => pt.pace, pt => pt.speed);
+  assert.ok(polys.length > 0, 'multi-point ribbon emits polygons');
+  let maxS = 0;
+  let seenMidPace = false;
+  let seenMidSpeed = false;
+  for (const poly of polys) {
+    for (const v of poly) {
+      assert.ok(Number.isFinite(v.s) && v.s >= 0, `arc-length s must be finite non-negative, got ${v.s}`);
+      assert.ok(v.p >= 0.19 && v.p <= 0.91, `pace p must remain interpolated in [0.2, 0.9], got ${v.p}`);
+      assert.ok(v.sp >= 0.09 && v.sp <= 0.96, `speed sp must remain interpolated in [0.1, 0.95], got ${v.sp}`);
+      if (v.s > maxS) maxS = v.s;
+      if (v.p > 0.4 && v.p < 0.8) seenMidPace = true;
+      if (v.sp > 0.3 && v.sp < 0.8) seenMidSpeed = true;
+    }
+  }
+  assert.ok(maxS > 150, `expected accumulated travel distance > 150, got ${maxS}`);
+  assert.ok(seenMidPace, 'interpolated pace values are emitted along the ribbon');
+  assert.ok(seenMidSpeed, 'interpolated speed values are emitted along the ribbon');
+
+  // Single-point burn emits a closed radial scorch disc with unit-bounded u,v
+  const spotPolys = [];
+  emitSoftRibbonTriangles([{ x: 400, y: 300, pace: 0.78, speed: 0.12 }], () => 20, poly => spotPolys.push(poly), pt => pt.pace, pt => pt.speed);
+  assert.ok(spotPolys.length >= 16, `expected circular fan segments for 1-point burn, got ${spotPolys.length}`);
+  for (const poly of spotPolys) {
+    for (const v of poly) {
+      assert.ok(Math.hypot(v.u, v.v) <= 1.001, `1-point burn radial uv exceeds 1: (${v.u}, ${v.v})`);
+      assert.ok(Math.abs(v.p - 0.78) < 1e-6, `1-point burn preserves pace p=0.78, got ${v.p}`);
+      assert.ok(Math.abs(v.sp - 0.12) < 1e-6, `1-point burn preserves speed sp=0.12, got ${v.sp}`);
+    }
+  }
+
+  // Slow-moving / held fireball (onFire=true, high pace, < 2 px motion then >= 2 px) still burns ice
+  const bodies = P.kickoff();
+  const ball = bodies[6];
+  ball.x = 500;
+  ball.y = 300;
+  ball.vx = 10;
+  ball.vy = 0;
+  ball.onFire = true;
+  ball.fireTicks = 60;
+  ball.pace = 960;
+
+  const makeCtx = () => {
+    const ctx = {
+      arcs: 0,
+      globalAlpha: 1, fillStyle: '#000', strokeStyle: '#000', lineWidth: 1,
+      lineCap: 'butt', lineJoin: 'miter', font: '12px sans-serif', textAlign: 'left', textBaseline: 'alphabetic',
+      shadowBlur: 0, shadowColor: 'transparent', globalCompositeOperation: 'source-over',
+      save() {}, restore() {}, beginPath() {}, closePath() {}, setLineDash() {},
+      moveTo() {}, lineTo() {}, fill() {}, stroke() {}, arc() { ctx.arcs++; }, ellipse() {}, roundRect() {}, clip() {},
+      quadraticCurveTo() {}, bezierCurveTo() {}, setTransform() {}, clearRect() {}, drawImage() {},
+      fillRect() {}, strokeRect() {}, fillText() {}, strokeText() {}, measureText: () => ({ width: 20 }),
+      translate() {}, rotate() {}, scale() {},
+      createRadialGradient() { return { addColorStop() {} }; },
+      createLinearGradient() { return { addColorStop() {} }; }
+    };
+    return ctx;
+  };
+  const iceCtx = makeCtx();
+  const iceLayer = { width: 0, height: 0, getContext: () => iceCtx };
+  const fx = createEffectsState([], {});
+  fx.fireTime = 0.4;
+  const view = {
+    canvas: { width: 1000, height: 600, clientWidth: 1000, clientHeight: 600, getContext: () => makeCtx() },
+    ctx: makeCtx(),
+    badgeCanvas: { width: 1000, height: 600 },
+    badgeCtx: makeCtx(),
+    bodies, entries: [], mode: 'standard', portrait: false, field: null
+  };
+  const pres = createRinkPresenter({
+    P, ububallMatch, ububallReplay,
+    doc: { createElement: () => iceLayer },
+    getView: () => view, getEffects: () => fx, getPhase: () => 'play',
+    getPlans: () => [], getRenderSize: () => ({ renderWidth: 1000, renderHeight: 600, deviceWidth: 1000, deviceHeight: 600 })
+  });
+
+  pres.burnIce(ball);
+  assert.equal(fx.burns.length, 1, 'stationary fireball creates an initial burn mark');
+  assert.equal(fx.burns[0].points.length, 1, 'initial slow fireball burn starts with 1 point');
+  assert.ok(fx.burns[0].points[0].pace > 0.4, `expected positive normalized pace on burn point, got ${fx.burns[0].points[0].pace}`);
+  assert.ok(fx.burns[0].points[0].speed < 0.05, `expected low normalized speed for slow fireball, got ${fx.burns[0].points[0].speed}`);
+
+  // Tiny drift < 2px updates stationary spot rather than staying empty; Canvas 2D draws 1-point spot cleanly
+  ball.x = 501;
+  fx.fireTime = 0.6;
+  pres.burnIce(ball);
+  assert.equal(fx.burns[0].points.length, 1);
+  assert.equal(fx.burns[0].points[0].depth, 1);
+  pres.drawScene();
+  assert.equal(fx.iceCache.burnSnap.length, 1, 'Canvas 2D iceCache tracks single-point burn');
+  assert.ok(iceCtx.arcs > 0, 'Canvas 2D draws feathered circular arc bands for 1-point burn');
+  assert.equal(fx.iceCache.rebuilds, 1);
+
+  // Drift >= 2px extends into a continuous slow-fireball burn trail; fast launch raises point speed
+  ball.x = 503.5;
+  ball.vx = 1100;
+  pres.burnIce(ball);
+  assert.equal(fx.burns[0].points.length, 2, 'slow drift >= 2 px appends second burn point');
+  assert.ok(fx.burns[0].points[1].speed > 0.8, `expected high normalized speed for fast fireball, got ${fx.burns[0].points[1].speed}`);
+  pres.drawScene();
+  assert.equal(fx.iceCache.burnSnap[0].count, 2, 'Canvas 2D iceCache rebuilds cleanly from 1-point to 2-point burn');
+  assert.equal(fx.iceCache.rebuilds, 2, '1-to-2 point transition forces a clean ribbon rebuild');
+  pres.dispose();
+});

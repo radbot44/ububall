@@ -211,12 +211,44 @@ void main() {
     bool isBurn = v_ext.y > 0.5;
     float fade = clamp(v_ext.z, 0.0, 1.0);
     float s = 1.0 - r;
-    float prof = smoothstep(0.0, 0.94, s) * (0.34 + 0.66 * smoothstep(0.06, 0.86, s));
-    float alpha = (isBurn ? 0.357 : 0.170) * fade * prof;
-    vec3 rgb = isBurn
-      ? mix(vec3(0.177, 0.071, 0.024), vec3(0.086, 0.037, 0.012), smoothstep(0.12, 0.92, s))
-      : vec3(0.0);
-    float outA = alpha * clipMask;
+    float along = v_color.r;
+    float pace = clamp(v_color.g, 0.0, 1.0);
+    float speed = clamp(v_color.b, 0.0, 1.0);
+    float mess = 1.0 - speed;
+    float nMacro = vnoise(v_fieldPos * 0.042);
+    float nCoarse = vnoise(v_fieldPos * 0.105 + vec2(11.7, 5.3));
+    float nMid = vnoise(v_fieldPos * 0.24 + vec2(17.3, 9.1));
+    float nFine = vnoise(v_fieldPos * 0.54 + vec2(4.2, 23.7));
+    float edgeNoise = (nMacro * 0.52 + nCoarse * 0.34 + nMid * 0.14) - 0.55;
+    float edgeAmp = isBurn ? mix(0.08, 0.34, mess) : 0.32;
+    float sWarp = clamp(s + edgeNoise * edgeAmp * smoothstep(0.0, 0.34, s), 0.0, 1.0);
+    float prof = smoothstep(0.0, 0.94, sWarp) * (0.34 + 0.66 * smoothstep(0.06, 0.86, sWarp));
+    float alpha;
+    vec3 rgb;
+    if (isBurn) {
+      float mottleVar = mix(0.10, 0.46, mess);
+      float mottle = (0.99 - mottleVar * 0.5) + mottleVar * (nMacro * 0.45 + nCoarse * 0.38 + nMid * 0.17);
+      float grainVar = mix(0.04, 0.16, mess);
+      float emberGrain = (1.0 - grainVar * 0.5) + grainVar * nFine;
+      float nSpeckA = vnoise(v_fieldPos * 0.95 + vec2(31.4, 14.2));
+      float nSpeckB = vnoise(v_fieldPos * 1.65 + vec2(7.8, 41.9));
+      float speck = smoothstep(0.45, 0.68, nSpeckA * nSpeckB + (nCoarse - 0.5) * 0.10) * smoothstep(0.08, 0.56, sWarp) * mix(0.22, 1.15, mess);
+      float paceAlpha = mix(0.92, 1.16, pace);
+      float paceShade = mix(1.06, 0.78, pace);
+      alpha = 0.357 * fade * prof * mottle * emberGrain * (1.0 + speck * 0.42) * paceAlpha;
+      float charNoise = ((nCoarse - 0.5) * 0.28 + (nMid - 0.5) * 0.14) * mix(0.30, 1.15, mess);
+      float charMix = clamp(smoothstep(0.12, 0.92, sWarp) + charNoise, 0.0, 1.0);
+      rgb = mix(vec3(0.177, 0.071, 0.024), vec3(0.080, 0.033, 0.010), charMix) * paceShade;
+      rgb = mix(rgb, vec3(0.012, 0.006, 0.003), min(1.0, speck * 0.88));
+    } else {
+      float nTrack = vnoise(vec2(along * 0.028 + nMacro * 0.55, r * 7.2 + nCoarse * 0.9));
+      float nTrackFine = vnoise(vec2(along * 0.065 + nMid * 0.40, r * 13.5 + nCoarse * 0.7));
+      float striation = 0.72 + 0.56 * (nTrack * 0.65 + nTrackFine * 0.35);
+      float scrape = 0.82 + 0.34 * (nMacro * 0.35 + nMid * 0.35 + nFine * 0.30);
+      alpha = 0.185 * fade * prof * striation * scrape;
+      rgb = vec3(0.0);
+    }
+    float outA = clamp(alpha, 0.0, 1.0) * clipMask;
     if (outA <= 0.001) discard;
     outColor = vec4(rgb * outA, outA);
     return;
@@ -907,8 +939,8 @@ void main() {
       pushV(cx + sz, cy + sz, 1, 1, rgb[0], rgb[1], rgb[2], alpha, 10, phase, 0, 0, clipMode, 0);
     }
 
-    function drawSoftRibbon(points, widthAt, isBurn, fade) {
-      if (!points || points.length < 2 || fade <= 0.005) return;
+    function drawSoftRibbon(points, widthAt, isBurn, fade, paceAt = null, speedAt = null) {
+      if (!points || !points.length || fade <= 0.005) return;
       const bFlag = isBurn ? 1 : 0;
       ububallWebGL.emitSoftRibbonTriangles(points, widthAt, poly => {
         if (poly.length < 3) return;
@@ -916,11 +948,11 @@ void main() {
         const v0 = poly[0];
         for (let i = 1; i + 1 < poly.length; i++) {
           const v1 = poly[i], v2 = poly[i + 1];
-          pushV(v0.x, v0.y, v0.u, v0.v, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-          pushV(v1.x, v1.y, v1.u, v1.v, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-          pushV(v2.x, v2.y, v2.u, v2.v, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
+          pushV(v0.x, v0.y, v0.u, v0.v, v0.s, v0.p, v0.sp, 1, 5, bFlag, fade, 0, clipMode, 0);
+          pushV(v1.x, v1.y, v1.u, v1.v, v1.s, v1.p, v1.sp, 1, 5, bFlag, fade, 0, clipMode, 0);
+          pushV(v2.x, v2.y, v2.u, v2.v, v2.s, v2.p, v2.sp, 1, 5, bFlag, fade, 0, clipMode, 0);
         }
-      });
+      }, paceAt, speedAt);
     }
 
     function drawTrails(trails, bodies, home, away, ballHeatFn, shaderMode) {

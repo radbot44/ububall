@@ -1301,7 +1301,17 @@
       }
       const points = fx.burnState.path.points, previous = points.at(-1);
       const depth = .2 + .8 * Math.min(1, fx.fireTime / .5);
-      if (!previous || Math.hypot(ball.x - previous.x, ball.y - previous.y) >= 3) points.push({ x: ball.x, y: ball.y, depth });
+      const pace = Math.max(0, Math.min(1, (paceShare(ball) - HEAT.sustain) / (2.0 - HEAT.sustain)));
+      const speed = Math.max(0, Math.min(1, Math.hypot(ball.vx || 0, ball.vy || 0) / ((P.BASE_LAUNCH_SPEED || 720) * 1.75)));
+      if (!previous) {
+        points.push({ x: ball.x, y: ball.y, depth, pace, speed });
+      } else if (Math.hypot(ball.x - previous.x, ball.y - previous.y) >= 2) {
+        points.push({ x: ball.x, y: ball.y, depth, pace, speed });
+      } else if (points.length === 1) {
+        previous.depth = Math.max(previous.depth, depth);
+        previous.pace = Math.max(previous.pace ?? 0, pace);
+        previous.speed = speed;
+      }
       fx.burnState.path.age = 0;
     }
 
@@ -1747,8 +1757,12 @@
       }
       const n = clean.length;
       if (n < 2) return;
-      const m = n - 1, halfs = new Array(n);
-      for (let k = 0; k < n; k++) halfs[k] = Math.max(0.5, widthAt(clean[k]) * 0.5);
+      const m = n - 1, halfs = new Array(n), hard = bench?.flags.noIceShadow;
+      for (let k = 0; k < n; k++) {
+        const pt = clean[k];
+        const jitter = hard ? 1 : 0.86 + 0.14 * (Math.abs(Math.sin(pt.x * 0.19 + pt.y * 0.31) * 43758.5453) % 1);
+        halfs[k] = Math.max(0.5, widthAt(pt) * 0.5 * jitter);
+      }
       const tx = new Array(m), ty = new Array(m), nx = new Array(m), ny = new Array(m), slen = new Array(m);
       for (let i = 0; i < m; i++) {
         const dx = clean[i + 1].x - clean[i].x, dy = clean[i + 1].y - clean[i].y;
@@ -1781,7 +1795,7 @@
 
       const ctx = getView().ctx;
       ctx.save();
-      const alpha = ctx.globalAlpha, hard = bench?.flags.noIceShadow;
+      const alpha = ctx.globalAlpha;
       for (let band = 0; band < (hard ? 1 : ICE_FEATHER.length); band++) {
         const scale = hard ? 1 : ICE_FEATHER[band];
         ctx.globalAlpha = alpha * (hard ? 1 : ICE_OPACITY[band]);
@@ -1869,11 +1883,31 @@
     // Darker reddish-brown ember scorch gradient matching burnPoofStops without a separate core stripe.
     const BURN_COLORS = ['#381506', '#311205', '#290f04', '#220c04', '#1d0a03'];
     function paintBurnSlice(ctx, s, points, prevPoint = null) {
-      if (!points || points.length < 2) return;
+      if (!points || !points.length) return;
       const age = Math.floor(s.age * 4) / 4;
       const t = age / BURN_LIFE, fade = 1 - t * t * (3 - 2 * t);
       if (fade <= 0.005) return;
-      ctx.globalAlpha = .60 * fade;
+      let paceSum = 0;
+      for (let i = 0; i < points.length; i++) paceSum += points[i].pace ?? 0.35;
+      const avgPace = paceSum / points.length;
+      const baseAlpha = Math.min(0.75, 0.60 * (0.92 + 0.24 * avgPace)) * fade;
+      if (points.length === 1) {
+        if (prevPoint) return;
+        const p0 = points[0], r0 = Math.max(0.5, s.width * (0.5 + 0.5 * p0.depth) * 0.5);
+        const hard = bench?.flags.noIceShadow;
+        ctx.save();
+        for (let band = 0; band < (hard ? 1 : ICE_FEATHER.length); band++) {
+          const scale = hard ? 1 : ICE_FEATHER[band];
+          ctx.globalAlpha = baseAlpha * (hard ? 1 : ICE_OPACITY[band]);
+          ctx.fillStyle = BURN_COLORS[band];
+          ctx.beginPath();
+          ctx.arc(p0.x, p0.y, r0 * scale, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+        return;
+      }
+      ctx.globalAlpha = baseAlpha;
       softRibbon(points, p => s.width * (.5 + .5 * p.depth), BURN_COLORS, prevPoint, s.age >= .25 || P.settled(getView().bodies));
     }
 
@@ -1912,7 +1946,7 @@
         for (let i = 0; i < burnSnap.length; i++) {
           const prev = burnSnap[i], cur = fx.burns[i];
           const curCount = cur.poof ? 1 : (cur.points?.length || 0);
-          if (cur !== prev.ref || Math.floor(cur.age * 4) !== prev.bucket || curCount < prev.count) {
+          if (cur !== prev.ref || Math.floor(cur.age * 4) !== prev.bucket || curCount < prev.count || (!cur.poof && prev.count === 1 && curCount >= 2)) {
             canAppend = false;
             break;
           }
@@ -1972,7 +2006,7 @@
                   else burnSnap.push({ ref: s, bucket: Math.floor(s.age * 4), count: 1 });
                 } else {
                   const len = s.points?.length || 0;
-                  if (len > prevCount && len >= 2) {
+                  if (len > prevCount && len >= 1) {
                     if (prevCount < 2) paintBurnSlice(lctx, s, s.points, null);
                     else paintBurnSlice(lctx, s, s.points.slice(prevCount - 1), s.points[prevCount - 2]);
                   }
@@ -3902,8 +3936,8 @@
           if (fade <= 0.005) continue;
           if (s.poof) {
             gpu.drawRadialStops(s.x, s.y, s.radius || 30, burnPoofStops(fade), 1, 24);
-          } else if (s.points && s.points.length >= 2) {
-            gpu.drawSoftRibbon(s.points, p => s.width * (0.5 + 0.5 * p.depth), true, fade, hardIce);
+          } else if (s.points && s.points.length >= 1) {
+            gpu.drawSoftRibbon(s.points, p => s.width * (0.5 + 0.5 * p.depth), true, fade, hardIce, p => p.pace ?? 0.35, p => p.speed ?? 0.35);
           }
         }
         gpu.setClip(0);
