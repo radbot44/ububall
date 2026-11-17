@@ -1175,7 +1175,11 @@
         s.path = { points: [{ x: prev.x, y: prev.y, depth }], width: b.radius * 1.7, age: 0 };
         fx.skids.push(s.path); if (fx.skids.length > 30) fx.skids.shift();
       }
-      s.path.points.push({ x: b.x, y: b.y, depth }); s.path.age = 0;
+      const lastPt = s.path.points[s.path.points.length - 1];
+      if (!lastPt || Math.hypot(b.x - lastPt.x, b.y - lastPt.y) >= 1) {
+        s.path.points.push({ x: b.x, y: b.y, depth });
+      }
+      s.path.age = 0;
     }
 
     function flames(x, y, spread, vx, vy, amount, spreadY = spread) {
@@ -1690,21 +1694,92 @@
     }
 
     // One feathered profile across the width and around the ends.
-    // Five fills cover the sides and caps; calculate normals/widths only once per point.
+    // Five fills cover the sides and caps; per-segment normals with round outer joins
+    // and bounded inner miters prevent spikes and bowties on tight curves and bounces.
     // Only cap tails after a fade bucket or when the field settles. Growing slices
     // keep butt joints, so incremental appends never paint overlapping end caps.
     const ICE_FEATHER = [1.5, 1.16, .84, .54, .28];
     const ICE_OPACITY = [.055, .17, .28, .30, .195];
+    function pushRibbonJoint(arr, side, pk, rk, t0x, t0y, n0x, n0y, t1x, t1y, n1x, n1y, maxLen) {
+      const dot = t0x * t1x + t0y * t1y;
+      const cross = t0x * t1y - t0y * t1x;
+      if (side * cross < -1e-4 || (dot < -0.999 && Math.abs(cross) <= 1e-4 && side < 0)) {
+        const ox0 = side * n0x, oy0 = side * n0y;
+        const ox1 = side * n1x, oy1 = side * n1y;
+        const ang0 = Math.atan2(oy0, ox0);
+        let dAng = Math.atan2(ox0 * oy1 - oy0 * ox1, ox0 * ox1 + oy0 * oy1);
+        if (Math.abs(dAng) < 1e-4 && ox0 * ox1 + oy0 * oy1 < -0.9999) dAng = -side * Math.PI;
+        const steps = Math.max(1, Math.ceil(Math.abs(dAng) / (Math.PI / 8)));
+        for (let s = 0; s <= steps; s++) {
+          const a = ang0 + (s / steps) * dAng;
+          arr.push([pk.x, pk.y, Math.cos(a) * rk, Math.sin(a) * rk]);
+        }
+        return;
+      }
+      if (dot > 0.999) {
+        arr.push([pk.x, pk.y, side * n1x * rk, side * n1y * rk]);
+        return;
+      }
+      const denom = 1 + dot;
+      if (denom > 0.4) {
+        const mx = side * (n0x + n1x) / denom;
+        const my = side * (n0y + n1y) / denom;
+        const ml = Math.hypot(mx, my);
+        if (ml <= 1.8 && ml * rk * Math.sin(Math.acos(Math.min(1, Math.max(-1, dot))) * 0.5) <= maxLen) {
+          arr.push([pk.x, pk.y, mx * rk, my * rk]);
+          return;
+        }
+      }
+      arr.push([pk.x, pk.y, side * n0x * rk, side * n0y * rk]);
+      arr.push([pk.x, pk.y, 0, 0]);
+      arr.push([pk.x, pk.y, side * n1x * rk, side * n1y * rk]);
+    }
+
     function softRibbon(points, widthAt, color, prevPoint = null, capEnd = false) {
       if (!points || points.length < 2) return;
-      const ctx = getView().ctx, edges = [];
-      for (let k = 0; k < points.length; k++) {
-        const p = points[k];
-        const a = k === 0 && prevPoint ? prevPoint : points[Math.max(0, k - 1)];
-        const b = k === 0 && prevPoint ? p : points[Math.min(points.length - 1, k + 1)];
-        const half = widthAt(p) / (2 * (Math.hypot(b.x - a.x, b.y - a.y) || 1));
-        edges.push([p.x, p.y, -(b.y - a.y) * half, (b.x - a.x) * half]);
+      const clean = [points[0]];
+      for (let i = 1; i < points.length; i++) {
+        const prev = clean[clean.length - 1], cur = points[i];
+        const d2 = (cur.x - prev.x) ** 2 + (cur.y - prev.y) ** 2;
+        if (d2 >= 0.64 || i === points.length - 1) {
+          if (d2 >= 0.04) clean.push(cur);
+        }
       }
+      const n = clean.length;
+      if (n < 2) return;
+      const m = n - 1, halfs = new Array(n);
+      for (let k = 0; k < n; k++) halfs[k] = Math.max(0.5, widthAt(clean[k]) * 0.5);
+      const tx = new Array(m), ty = new Array(m), nx = new Array(m), ny = new Array(m), slen = new Array(m);
+      for (let i = 0; i < m; i++) {
+        const dx = clean[i + 1].x - clean[i].x, dy = clean[i + 1].y - clean[i].y;
+        const l = Math.hypot(dx, dy) || 1;
+        slen[i] = l; tx[i] = dx / l; ty[i] = dy / l; nx[i] = -ty[i]; ny[i] = tx[i];
+      }
+      let prevTx = 0, prevTy = 0, prevNx = 0, prevNy = 0, hasPrev = false;
+      if (prevPoint) {
+        const dx = clean[0].x - prevPoint.x, dy = clean[0].y - prevPoint.y;
+        const l = Math.hypot(dx, dy);
+        if (l >= 0.2) {
+          prevTx = dx / l; prevTy = dy / l; prevNx = -prevTy; prevNy = prevTx; hasPrev = true;
+        }
+      }
+      const left = [], right = [];
+      if (hasPrev) {
+        pushRibbonJoint(left, 1, clean[0], halfs[0], prevTx, prevTy, prevNx, prevNy, tx[0], ty[0], nx[0], ny[0], slen[0]);
+        pushRibbonJoint(right, -1, clean[0], halfs[0], prevTx, prevTy, prevNx, prevNy, tx[0], ty[0], nx[0], ny[0], slen[0]);
+      } else {
+        left.push([clean[0].x, clean[0].y, nx[0] * halfs[0], ny[0] * halfs[0]]);
+        right.push([clean[0].x, clean[0].y, -nx[0] * halfs[0], -ny[0] * halfs[0]]);
+      }
+      for (let k = 1; k < n - 1; k++) {
+        const maxL = Math.min(slen[k - 1], slen[k]);
+        pushRibbonJoint(left, 1, clean[k], halfs[k], tx[k - 1], ty[k - 1], nx[k - 1], ny[k - 1], tx[k], ty[k], nx[k], ny[k], maxL);
+        pushRibbonJoint(right, -1, clean[k], halfs[k], tx[k - 1], ty[k - 1], nx[k - 1], ny[k - 1], tx[k], ty[k], nx[k], ny[k], maxL);
+      }
+      left.push([clean[n - 1].x, clean[n - 1].y, nx[m - 1] * halfs[n - 1], ny[m - 1] * halfs[n - 1]]);
+      right.push([clean[n - 1].x, clean[n - 1].y, -nx[m - 1] * halfs[n - 1], -ny[m - 1] * halfs[n - 1]]);
+
+      const ctx = getView().ctx;
       ctx.save();
       const alpha = ctx.globalAlpha, hard = bench?.flags.noIceShadow;
       for (let band = 0; band < (hard ? 1 : ICE_FEATHER.length); band++) {
@@ -1712,29 +1787,30 @@
         ctx.globalAlpha = alpha * (hard ? 1 : ICE_OPACITY[band]);
         ctx.fillStyle = Array.isArray(color) ? color[band] : color;
         ctx.beginPath();
-        const first = edges[0];
-        ctx.moveTo(first[0] + first[2] * scale, first[1] + first[3] * scale);
-        for (let k = 1; k < edges.length; k++) {
-          const e = edges[k];
+        const fL = left[0];
+        ctx.moveTo(fL[0] + fL[2] * scale, fL[1] + fL[3] * scale);
+        for (let k = 1; k < left.length; k++) {
+          const e = left[k];
           ctx.lineTo(e[0] + e[2] * scale, e[1] + e[3] * scale);
         }
-        const last = edges[edges.length - 1];
         if (capEnd) {
           // Nested round caps feather lengthwise using the same five polygon fills.
-          const nx = last[2] * scale, ny = last[3] * scale;
-          ctx.lineTo(last[0] + (nx + ny) * .7071, last[1] + (ny - nx) * .7071);
-          ctx.lineTo(last[0] + ny, last[1] - nx);
-          ctx.lineTo(last[0] + (ny - nx) * .7071, last[1] - (nx + ny) * .7071);
+          const lN = left[left.length - 1];
+          const onx = lN[2] * scale, ony = lN[3] * scale;
+          ctx.lineTo(lN[0] + (onx + ony) * .7071, lN[1] + (ony - onx) * .7071);
+          ctx.lineTo(lN[0] + ony, lN[1] - onx);
+          ctx.lineTo(lN[0] + (ony - onx) * .7071, lN[1] - (onx + ony) * .7071);
         }
-        for (let k = edges.length - 1; k >= 0; k--) {
-          const e = edges[k];
-          ctx.lineTo(e[0] - e[2] * scale, e[1] - e[3] * scale);
+        for (let k = right.length - 1; k >= 0; k--) {
+          const e = right[k];
+          ctx.lineTo(e[0] + e[2] * scale, e[1] + e[3] * scale);
         }
         if (!prevPoint) {
-          const nx = first[2] * scale, ny = first[3] * scale;
-          ctx.lineTo(first[0] - (nx + ny) * .7071, first[1] + (nx - ny) * .7071);
-          ctx.lineTo(first[0] - ny, first[1] + nx);
-          ctx.lineTo(first[0] + (nx - ny) * .7071, first[1] + (nx + ny) * .7071);
+          const fR = right[0];
+          const rnx = -fR[2] * scale, rny = -fR[3] * scale;
+          ctx.lineTo(fR[0] - (rnx + rny) * .7071, fR[1] + (rnx - rny) * .7071);
+          ctx.lineTo(fR[0] - rny, fR[1] + rnx);
+          ctx.lineTo(fR[0] + (rnx - rny) * .7071, fR[1] + (rnx + rny) * .7071);
         }
         ctx.closePath(); ctx.fill();
       }

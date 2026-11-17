@@ -909,58 +909,18 @@ void main() {
 
     function drawSoftRibbon(points, widthAt, isBurn, fade) {
       if (!points || points.length < 2 || fade <= 0.005) return;
-      const clean = [points[0]];
-      for (let i = 1; i < points.length; i++) {
-        const prev = clean[clean.length - 1], cur = points[i];
-        if ((cur.x - prev.x) ** 2 + (cur.y - prev.y) ** 2 >= 0.64 || i === points.length - 1) {
-          if ((cur.x - prev.x) ** 2 + (cur.y - prev.y) ** 2 >= 0.04) clean.push(cur);
+      const bFlag = isBurn ? 1 : 0;
+      ububallWebGL.emitSoftRibbonTriangles(points, widthAt, poly => {
+        if (poly.length < 3) return;
+        ensure((poly.length - 2) * 3);
+        const v0 = poly[0];
+        for (let i = 1; i + 1 < poly.length; i++) {
+          const v1 = poly[i], v2 = poly[i + 1];
+          pushV(v0.x, v0.y, v0.u, v0.v, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
+          pushV(v1.x, v1.y, v1.u, v1.v, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
+          pushV(v2.x, v2.y, v2.u, v2.v, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
         }
-      }
-      const n = clean.length;
-      if (n < 2) return;
-      const normals = new Array(n), halfs = new Array(n);
-      for (let k = 0; k < n; k++) {
-        const a = clean[Math.max(0, k - 1)], b = clean[Math.min(n - 1, k + 1)];
-        const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
-        normals[k] = [-dy / len, dx / len];
-        halfs[k] = Math.max(0.5, widthAt(clean[k]) * 0.5 * 1.5);
-      }
-      const capSteps = 10, bFlag = isBurn ? 1 : 0;
-      ensure((n - 1) * 6 + capSteps * 6);
-      {
-        const p0 = clean[0], r0 = halfs[0], baseAng = Math.atan2(normals[0][1], normals[0][0]);
-        for (let s = 0; s < capSteps; s++) {
-          const a0 = (s / capSteps) * Math.PI, a1 = ((s + 1) / capSteps) * Math.PI;
-          pushV(p0.x, p0.y, 0, 0, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-          pushV(p0.x + Math.cos(baseAng + a0) * r0, p0.y + Math.sin(baseAng + a0) * r0, Math.cos(a0), Math.sin(a0), 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-          pushV(p0.x + Math.cos(baseAng + a1) * r0, p0.y + Math.sin(baseAng + a1) * r0, Math.cos(a1), Math.sin(a1), 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-        }
-      }
-      let pLx = clean[0].x + normals[0][0] * halfs[0], pLy = clean[0].y + normals[0][1] * halfs[0];
-      let pRx = clean[0].x - normals[0][0] * halfs[0], pRy = clean[0].y - normals[0][1] * halfs[0];
-      for (let k = 1; k < n; k++) {
-        const pk = clean[k], nk = normals[k], rk = halfs[k];
-        let lx = pk.x + nk[0] * rk, ly = pk.y + nk[1] * rk, rx = pk.x - nk[0] * rk, ry = pk.y - nk[1] * rk;
-        const sdx = pk.x - clean[k - 1].x, sdy = pk.y - clean[k - 1].y;
-        if ((lx - pLx) * sdx + (ly - pLy) * sdy < 0) { lx = pLx; ly = pLy; }
-        if ((rx - pRx) * sdx + (ry - pRy) * sdy < 0) { rx = pRx; ry = pRy; }
-        pushV(pLx, pLy, 1, 0, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-        pushV(lx, ly, 1, 0, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-        pushV(pRx, pRy, -1, 0, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-        pushV(pRx, pRy, -1, 0, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-        pushV(lx, ly, 1, 0, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-        pushV(rx, ry, -1, 0, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-        pLx = lx; pLy = ly; pRx = rx; pRy = ry;
-      }
-      {
-        const pm = clean[n - 1], rm = halfs[n - 1], baseAng = Math.atan2(-normals[n - 1][1], -normals[n - 1][0]);
-        for (let s = 0; s < capSteps; s++) {
-          const a0 = (s / capSteps) * Math.PI, a1 = ((s + 1) / capSteps) * Math.PI;
-          pushV(pm.x, pm.y, 0, 0, 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-          pushV(pm.x + Math.cos(baseAng + a0) * rm, pm.y + Math.sin(baseAng + a0) * rm, -Math.cos(a0), Math.sin(a0), 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-          pushV(pm.x + Math.cos(baseAng + a1) * rm, pm.y + Math.sin(baseAng + a1) * rm, -Math.cos(a1), Math.sin(a1), 1, 1, 1, 1, 5, bFlag, fade, 0, clipMode, 0);
-        }
-      }
+      });
     }
 
     function drawTrails(trails, bodies, home, away, ballHeatFn, shaderMode) {

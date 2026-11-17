@@ -586,6 +586,253 @@ void main() {
     return out;
   }
 
+  // Clip a convex ribbon polygon [{ x, y, u, v }, ...] to half-plane (p - o) · n >= 0.
+  function clipRibbonPoly(poly, ox, oy, nx, ny) {
+    if (poly.length < 3) return [];
+    const out = [];
+    let prev = poly[poly.length - 1];
+    let prevD = (prev.x - ox) * nx + (prev.y - oy) * ny;
+    for (let i = 0; i < poly.length; i++) {
+      const cur = poly[i];
+      const curD = (cur.x - ox) * nx + (cur.y - oy) * ny;
+      if (curD >= -1e-6) {
+        if (prevD < -1e-6) {
+          const t = prevD / (prevD - curD);
+          out.push({
+            x: prev.x + t * (cur.x - prev.x),
+            y: prev.y + t * (cur.y - prev.y),
+            u: prev.u + t * (cur.u - prev.u),
+            v: prev.v + t * (cur.v - prev.v)
+          });
+        }
+        out.push(cur);
+      } else if (prevD >= -1e-6) {
+        const t = prevD / (prevD - curD);
+        out.push({
+          x: prev.x + t * (cur.x - prev.x),
+          y: prev.y + t * (cur.y - prev.y),
+          u: prev.u + t * (cur.u - prev.u),
+          v: prev.v + t * (cur.v - prev.v)
+        });
+      }
+      prev = cur;
+      prevD = curD;
+    }
+    return out;
+  }
+
+  // Apply Voronoi bisector planes, guarding each non-adjacent cut to the finite neighbor segment's slab.
+  function applyRibbonSlabs(polys, planes) {
+    let cur = polys;
+    for (let pIdx = 0; pIdx < planes.length; pIdx++) {
+      const pl = planes[pIdx];
+      const next = [];
+      for (let k = 0; k < cur.length; k++) {
+        const p = cur[k];
+        if (p.length < 3) continue;
+        const s0 = pl.s0, s1 = pl.s1;
+        const out0 = clipRibbonPoly(p, s0.x, s0.y, -pl.tx, -pl.ty);
+        if (out0.length >= 3) next.push(out0);
+        const in0 = clipRibbonPoly(p, s0.x, s0.y, pl.tx, pl.ty);
+        if (in0.length >= 3) {
+          const out1 = clipRibbonPoly(in0, s1.x, s1.y, pl.tx, pl.ty);
+          if (out1.length >= 3) next.push(out1);
+          const inside = clipRibbonPoly(in0, s1.x, s1.y, -pl.tx, -pl.ty);
+          if (inside.length >= 3) {
+            const cp = clipRibbonPoly(inside, pl.ox, pl.oy, pl.bx, pl.by);
+            if (cp.length >= 3) next.push(cp);
+          }
+        }
+      }
+      cur = next;
+    }
+    return cur;
+  }
+
+  // Compute the line-intersection bisector plane separating segment i and segment j (pointing from i toward j).
+  function ribbonSegBisector(clean, tx, ty, i, j) {
+    const ai = clean[i], bi = clean[i + 1], aj = clean[j], bj = clean[j + 1];
+    const mxI = (ai.x + bi.x) * 0.5, myI = (ai.y + bi.y) * 0.5;
+    const mxJ = (aj.x + bj.x) * 0.5, myJ = (aj.y + bj.y) * 0.5;
+    const tix = tx[i], tiy = ty[i], tjx = tx[j], tjy = ty[j];
+    const cross = tix * tjy - tiy * tjx;
+    const dot = tix * tjx + tiy * tjy;
+    if (Math.abs(cross) > 1e-4) {
+      const dx = aj.x - ai.x, dy = aj.y - ai.y;
+      const s = (dx * tjy - dy * tjx) / cross;
+      const qx = ai.x + s * tix, qy = ai.y + s * tiy;
+      for (const sign of [1, -1]) {
+        let bx = tix + sign * tjx, by = tiy + sign * tjy;
+        const bl = Math.hypot(bx, by);
+        if (bl > 1e-5) {
+          bx /= bl; by /= bl;
+          const dI = (mxI - qx) * bx + (myI - qy) * by;
+          const dJ = (mxJ - qx) * bx + (myJ - qy) * by;
+          if (dI * dJ <= 1e-6) {
+            return dJ >= dI
+              ? { ox: qx, oy: qy, bx, by }
+              : { ox: qx, oy: qy, bx: -bx, by: -by };
+          }
+        }
+      }
+      return null;
+    }
+    if (dot < -0.9) {
+      const dx = mxJ - mxI, dy = myJ - myI;
+      const proj = dx * tix + dy * tiy;
+      const px = dx - proj * tix, py = dy - proj * tiy;
+      const pl = Math.hypot(px, py);
+      if (pl > 1e-4) {
+        return { ox: (mxI + mxJ) * 0.5, oy: (myI + myJ) * 0.5, bx: px / pl, by: py / pl };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Tessellates a feathered polyline ribbon into non-overlapping triangles with round caps,
+   * outer round joins, and Voronoi-clipped inner corners so tight curves and sharp bounces
+   * never twist, pinch, or double-darken.
+   */
+  function emitSoftRibbonTriangles(points, widthAt, emitPoly) {
+    if (!points || points.length < 2) return;
+    const raw = [points[0]];
+    for (let i = 1; i < points.length; i++) {
+      const prev = raw[raw.length - 1], cur = points[i];
+      const d2 = (cur.x - prev.x) ** 2 + (cur.y - prev.y) ** 2;
+      if (d2 >= 0.64 || i === points.length - 1) {
+        if (d2 >= 0.04) raw.push(cur);
+      }
+    }
+    if (raw.length < 2) return;
+
+    // Collapse nearly-collinear micro-steps while preserving corners, curves, and width tapers
+    const clean = [raw[0]];
+    for (let i = 1; i < raw.length - 1; i++) {
+      const a = clean[clean.length - 1], b = raw[i], c = raw[i + 1];
+      const acx = c.x - a.x, acy = c.y - a.y, acl = Math.hypot(acx, acy) || 1;
+      const perp = Math.abs((b.x - a.x) * acy - (b.y - a.y) * acx) / acl;
+      const along = ((b.x - a.x) * acx + (b.y - a.y) * acy) / (acl * acl);
+      const dw = Math.abs(widthAt(b) - (widthAt(a) + widthAt(c)) * 0.5);
+      if (perp < 0.35 && along > 0 && along < 1 && acl < 30 && dw < 0.8) continue;
+      clean.push(b);
+    }
+    clean.push(raw[raw.length - 1]);
+    const n = clean.length;
+    if (n < 2) return;
+
+    const m = n - 1;
+    const halfs = new Array(n);
+    let maxR = 0.5;
+    for (let k = 0; k < n; k++) {
+      const r = Math.max(0.5, widthAt(clean[k]) * 0.5 * 1.5); // 1.5x outer feather extent
+      halfs[k] = r;
+      if (r > maxR) maxR = r;
+    }
+
+    const tx = new Array(m), ty = new Array(m), nx = new Array(m), ny = new Array(m);
+    const cumLen = new Array(n);
+    cumLen[0] = 0;
+    for (let i = 0; i < m; i++) {
+      const dx = clean[i + 1].x - clean[i].x, dy = clean[i + 1].y - clean[i].y;
+      const l = Math.hypot(dx, dy) || 1;
+      tx[i] = dx / l; ty[i] = dy / l;
+      nx[i] = -ty[i]; ny[i] = tx[i];
+      cumLen[i + 1] = cumLen[i] + l;
+    }
+
+    const joints = new Array(n).fill(null);
+    for (let k = 1; k < n - 1; k++) {
+      const dot = tx[k - 1] * tx[k] + ty[k - 1] * ty[k];
+      const cross = tx[k - 1] * ty[k] - ty[k - 1] * tx[k];
+      const sIn = cross > 1e-6 ? 1 : cross < -1e-6 ? -1 : (dot < 0 ? 1 : 0);
+      let bx = tx[k - 1] + tx[k], by = ty[k - 1] + ty[k], bl = Math.hypot(bx, by);
+      if (bl < 1e-5) { bx = -tx[k - 1]; by = -ty[k - 1]; bl = 1; }
+      joints[k] = { dot, cross, sIn, bx: bx / bl, by: by / bl };
+    }
+
+    const capSteps = 10;
+    {
+      const p0 = clean[0], r0 = halfs[0], baseAng = Math.atan2(ny[0], nx[0]);
+      for (let s = 0; s < capSteps; s++) {
+        const a0 = (s / capSteps) * Math.PI, a1 = ((s + 1) / capSteps) * Math.PI;
+        emitPoly([
+          { x: p0.x, y: p0.y, u: 0, v: 0 },
+          { x: p0.x + Math.cos(baseAng + a0) * r0, y: p0.y + Math.sin(baseAng + a0) * r0, u: Math.cos(a0), v: Math.sin(a0) },
+          { x: p0.x + Math.cos(baseAng + a1) * r0, y: p0.y + Math.sin(baseAng + a1) * r0, u: Math.cos(a1), v: Math.sin(a1) }
+        ]);
+      }
+    }
+
+    const searchDist = maxR * 3.0;
+    for (let i = 0; i < m; i++) {
+      const p0 = clean[i], p1 = clean[i + 1], r0 = halfs[i], r1 = halfs[i + 1], nxi = nx[i], nyi = ny[i];
+      const extraPlanes = [];
+      for (let j = i - 2; j >= 0 && cumLen[i] - cumLen[j + 1] <= searchDist; j--) {
+        if (tx[i] * tx[j] + ty[i] * ty[j] > 0.65) continue;
+        const b = ribbonSegBisector(clean, tx, ty, j, i);
+        if (b && (p0.x - b.ox) * b.bx + (p0.y - b.oy) * b.by >= -1e-4 && (p1.x - b.ox) * b.bx + (p1.y - b.oy) * b.by >= -1e-4) {
+          extraPlanes.push({ j, ox: b.ox, oy: b.oy, bx: b.bx, by: b.by, s0: clean[j], s1: clean[j + 1], tx: tx[j], ty: ty[j] });
+        }
+      }
+      for (let j = i + 2; j < m && cumLen[j] - cumLen[i + 1] <= searchDist; j++) {
+        if (tx[i] * tx[j] + ty[i] * ty[j] > 0.65) continue;
+        const b = ribbonSegBisector(clean, tx, ty, i, j);
+        if (b && (p0.x - b.ox) * (-b.bx) + (p0.y - b.oy) * (-b.by) >= -1e-4 && (p1.x - b.ox) * (-b.bx) + (p1.y - b.oy) * (-b.by) >= -1e-4) {
+          extraPlanes.push({ j, ox: b.ox, oy: b.oy, bx: -b.bx, by: -b.by, s0: clean[j], s1: clean[j + 1], tx: tx[j], ty: ty[j] });
+        }
+      }
+
+      for (const side of [1, -1]) {
+        let poly = [
+          { x: p0.x, y: p0.y, u: 0, v: 0 },
+          { x: p1.x, y: p1.y, u: 0, v: 0 },
+          { x: p1.x + side * nxi * r1, y: p1.y + side * nyi * r1, u: side, v: 0 },
+          { x: p0.x + side * nxi * r0, y: p0.y + side * nyi * r0, u: side, v: 0 }
+        ];
+        if (joints[i] && joints[i].sIn === side) poly = clipRibbonPoly(poly, p0.x, p0.y, joints[i].bx, joints[i].by);
+        if (joints[i + 1] && joints[i + 1].sIn === side) poly = clipRibbonPoly(poly, p1.x, p1.y, -joints[i + 1].bx, -joints[i + 1].by);
+        const clipped = applyRibbonSlabs([poly], extraPlanes);
+        for (let k = 0; k < clipped.length; k++) emitPoly(clipped[k]);
+      }
+
+      if (i + 1 < n - 1 && joints[i + 1] && joints[i + 1].sIn !== 0) {
+        const sOut = -joints[i + 1].sIn;
+        const ox0 = sOut * nx[i], oy0 = sOut * ny[i], ox1 = sOut * nx[i + 1], oy1 = sOut * ny[i + 1];
+        const ang0 = Math.atan2(oy0, ox0);
+        let dAng = Math.atan2(ox0 * oy1 - oy0 * ox1, ox0 * ox1 + oy0 * oy1);
+        if (Math.abs(dAng) < 1e-4 && ox0 * ox1 + oy0 * oy1 < -0.9999) dAng = -sOut * Math.PI;
+        if (Math.abs(dAng) > 1e-3) {
+          const steps = Math.max(1, Math.ceil(Math.abs(dAng) / (Math.PI / 10)));
+          const pk = clean[i + 1], rk = halfs[i + 1];
+          const fanPlanes = extraPlanes.filter(pl => (pl.j <= i - 2 || pl.j >= i + 3) && (pk.x - pl.ox) * pl.bx + (pk.y - pl.oy) * pl.by > 2.0);
+          for (let s = 0; s < steps; s++) {
+            const a0 = ang0 + (s / steps) * dAng, a1 = ang0 + ((s + 1) / steps) * dAng;
+            const tri = [
+              { x: pk.x, y: pk.y, u: 0, v: 0 },
+              { x: pk.x + Math.cos(a0) * rk, y: pk.y + Math.sin(a0) * rk, u: Math.cos((s / steps) * Math.abs(dAng)), v: Math.sin((s / steps) * Math.abs(dAng)) },
+              { x: pk.x + Math.cos(a1) * rk, y: pk.y + Math.sin(a1) * rk, u: Math.cos(((s + 1) / steps) * Math.abs(dAng)), v: Math.sin(((s + 1) / steps) * Math.abs(dAng)) }
+            ];
+            const clipped = fanPlanes.length ? applyRibbonSlabs([tri], fanPlanes) : [tri];
+            for (let k = 0; k < clipped.length; k++) emitPoly(clipped[k]);
+          }
+        }
+      }
+    }
+
+    {
+      const pm = clean[n - 1], rm = halfs[n - 1], baseAng = Math.atan2(-ny[m - 1], -nx[m - 1]);
+      for (let s = 0; s < capSteps; s++) {
+        const a0 = (s / capSteps) * Math.PI, a1 = ((s + 1) / capSteps) * Math.PI;
+        emitPoly([
+          { x: pm.x, y: pm.y, u: 0, v: 0 },
+          { x: pm.x + Math.cos(baseAng + a0) * rm, y: pm.y + Math.sin(baseAng + a0) * rm, u: -Math.cos(a0), v: Math.sin(a0) },
+          { x: pm.x + Math.cos(baseAng + a1) * rm, y: pm.y + Math.sin(baseAng + a1) * rm, u: -Math.cos(a1), v: Math.sin(a1) }
+        ]);
+      }
+    }
+  }
+
   let nextSourceId = 1;
   const sourceIds = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
   function idForSource(src) {
@@ -1544,93 +1791,19 @@ void main() {
     // Continuous non-overlapping feathered skid & warm umber-to-soot burn ribbon
     function drawSoftRibbon(points, widthAt, isBurn, fade, hardEdge = false) {
       if (!points || points.length < 2 || fade <= 0.005 || contextLost) return;
-      // Filter duplicate near-zero-distance points to guarantee clean normals without folding
-      const clean = [points[0]];
-      for (let i = 1; i < points.length; i++) {
-        const prev = clean[clean.length - 1], cur = points[i];
-        if ((cur.x - prev.x) ** 2 + (cur.y - prev.y) ** 2 >= 0.64 || i === points.length - 1) {
-          if ((cur.x - prev.x) ** 2 + (cur.y - prev.y) ** 2 >= 0.04) clean.push(cur);
-        }
-      }
-      const n = clean.length;
-      if (n < 2) return;
-
-      const normals = new Array(n);
-      const halfs = new Array(n);
-      const tangents = new Array(n);
-      for (let k = 0; k < n; k++) {
-        const a = clean[Math.max(0, k - 1)];
-        const b = clean[Math.min(n - 1, k + 1)];
-        const dx = b.x - a.x, dy = b.y - a.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const tx = dx / len, ty = dy / len;
-        tangents[k] = [tx, ty];
-        normals[k] = [-ty, tx];
-        halfs[k] = Math.max(0.5, widthAt(clean[k]) * 0.5 * 1.5); // 1.5x outer feather extent
-      }
-
-      const capSteps = 10;
-      ensureSpace((n - 1) * 6 + capSteps * 2 * 3);
       const bFlag = isBurn ? 1 : 0;
       const hFlag = hardEdge ? 1 : 0;
-
-      // Start semicircular feathered cap around clean[0] facing -tangents[0]
-      {
-        const p0 = clean[0], r0 = halfs[0];
-        const baseAng = Math.atan2(normals[0][1], normals[0][0]); // +normal (+1,0) -> +PI through -tangent -> -normal (-1,0)
-        for (let s = 0; s < capSteps; s++) {
-          const a0 = (s / capSteps) * Math.PI;
-          const a1 = ((s + 1) / capSteps) * Math.PI;
-          const w0 = baseAng + a0, w1 = baseAng + a1;
-          // Map world fan angle onto unit semicircle: a=0 -> (+1,0), a=PI/2 -> (0,1), a=PI -> (-1,0)
-          const u0 = Math.cos(a0), v0 = Math.sin(a0);
-          const u1 = Math.cos(a1), v1 = Math.sin(a1);
-          pushVert(p0.x, p0.y, 0, 0, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-          pushVert(p0.x + Math.cos(w0) * r0, p0.y + Math.sin(w0) * r0, u0, v0, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-          pushVert(p0.x + Math.cos(w1) * r0, p0.y + Math.sin(w1) * r0, u1, v1, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
+      emitSoftRibbonTriangles(points, widthAt, poly => {
+        if (poly.length < 3) return;
+        ensureSpace((poly.length - 2) * 3);
+        const v0 = poly[0];
+        for (let i = 1; i + 1 < poly.length; i++) {
+          const v1 = poly[i], v2 = poly[i + 1];
+          pushVert(v0.x, v0.y, v0.u, v0.v, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
+          pushVert(v1.x, v1.y, v1.u, v1.v, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
+          pushVert(v2.x, v2.y, v2.u, v2.v, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
         }
-      }
-
-      // Continuous non-overlapping ribbon strip along clean[0..n-1]
-      let prevLx = clean[0].x + normals[0][0] * halfs[0];
-      let prevLy = clean[0].y + normals[0][1] * halfs[0];
-      let prevRx = clean[0].x - normals[0][0] * halfs[0];
-      let prevRy = clean[0].y - normals[0][1] * halfs[0];
-      for (let k = 1; k < n; k++) {
-        const pk = clean[k], nk = normals[k], rk = halfs[k];
-        let lx = pk.x + nk[0] * rk, ly = pk.y + nk[1] * rk;
-        let rx = pk.x - nk[0] * rk, ry = pk.y - nk[1] * rk;
-        // Prevent inner-corner bowtie inversion on tight curves so semi-transparent fill never double-darkens
-        const segDx = pk.x - clean[k - 1].x, segDy = pk.y - clean[k - 1].y;
-        if ((lx - prevLx) * segDx + (ly - prevLy) * segDy < 0) { lx = prevLx; ly = prevLy; }
-        if ((rx - prevRx) * segDx + (ry - prevRy) * segDy < 0) { rx = prevRx; ry = prevRy; }
-
-        pushVert(prevLx, prevLy, 1, 0, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-        pushVert(lx, ly, 1, 0, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-        pushVert(prevRx, prevRy, -1, 0, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-
-        pushVert(prevRx, prevRy, -1, 0, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-        pushVert(lx, ly, 1, 0, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-        pushVert(rx, ry, -1, 0, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-
-        prevLx = lx; prevLy = ly; prevRx = rx; prevRy = ry;
-      }
-
-      // End semicircular feathered cap around clean[n-1] facing +tangents[n-1]
-      {
-        const pm = clean[n - 1], rm = halfs[n - 1];
-        const baseAng = Math.atan2(-normals[n - 1][1], -normals[n - 1][0]); // -normal (-1,0) -> +tangent -> +normal (+1,0)
-        for (let s = 0; s < capSteps; s++) {
-          const a0 = (s / capSteps) * Math.PI;
-          const a1 = ((s + 1) / capSteps) * Math.PI;
-          const w0 = baseAng + a0, w1 = baseAng + a1;
-          const u0 = -Math.cos(a0), v0 = Math.sin(a0);
-          const u1 = -Math.cos(a1), v1 = Math.sin(a1);
-          pushVert(pm.x, pm.y, 0, 0, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-          pushVert(pm.x + Math.cos(w0) * rm, pm.y + Math.sin(w0) * rm, u0, v0, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-          pushVert(pm.x + Math.cos(w1) * rm, pm.y + Math.sin(w1) * rm, u1, v1, 1, 1, 1, 1, 5, bFlag, fade, hFlag, currentClip, 0);
-        }
-      }
+      });
     }
 
     function drawTaperedSpinArc(cx, cy, radius, startAngle, arcSweep, maxWidth, color, peakAlpha) {
@@ -2064,7 +2237,7 @@ void main() {
     };
   }
 
-  const api = { create, createSceneRenderer, parseColor };
+  const api = { create, createSceneRenderer, parseColor, emitSoftRibbonTriangles };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.ububallWebGL = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

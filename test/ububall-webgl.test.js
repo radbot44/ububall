@@ -539,3 +539,125 @@ test('exporting videoFrame views enable preserveDrawingBuffer, disable alpha, an
   assert.equal(expCanvas._mockGl.calls.texImage2D, texUploadsAfterFrame1 + 1, 'scorebug texture updates cleanly when scorebugRev increments');
   expPres.dispose();
 });
+
+test('emitSoftRibbonTriangles and Canvas 2D softRibbon avoid gaps, twists, and spikes on sharp bounces and reversals', () => {
+  function distToPolyline(x, y, pts) {
+    let best = Infinity;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / l2)) : 0;
+      best = Math.min(best, Math.hypot(x - (a.x + t * dx), y - (a.y + t * dy)));
+    }
+    return best;
+  }
+
+  function samplePointInTris(tris, x, y) {
+    let hits = 0, minR = Infinity;
+    for (const [a, b, c] of tris) {
+      const denom = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+      if (Math.abs(denom) < 1e-9) continue;
+      const l1 = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / denom;
+      const l2 = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / denom;
+      const l3 = 1 - l1 - l2;
+      if (l1 >= -1e-5 && l2 >= -1e-5 && l3 >= -1e-5) {
+        hits++;
+        const u = l1 * a.u + l2 * b.u + l3 * c.u;
+        const v = l1 * a.v + l2 * b.v + l3 * c.v;
+        minR = Math.min(minR, Math.hypot(u, v));
+      }
+    }
+    return { hits, minR };
+  }
+
+  const bouncePts = [
+    { x: 460, y: 500, depth: 1 }, { x: 430, y: 400, depth: 1 }, { x: 400, y: 300, depth: 1 },
+    { x: 370, y: 200, depth: 1 }, { x: 365, y: 185, depth: 1 }, { x: 362, y: 180, depth: 1 },
+    { x: 358, y: 192, depth: 1 }, { x: 345, y: 240, depth: 1 }, { x: 330, y: 300, depth: 1 },
+    { x: 326, y: 315, depth: 1 }, { x: 335, y: 310, depth: 1 }, { x: 380, y: 280, depth: 1 },
+    { x: 460, y: 245, depth: 1 }
+  ];
+  const tris = [];
+  globalThis.ububallWebgl.emitSoftRibbonTriangles(bouncePts, p => 24 * (0.5 + 0.5 * p.depth), poly => {
+    for (let i = 1; i + 1 < poly.length; i++) tris.push([poly[0], poly[i], poly[i + 1]]);
+  });
+  assert.ok(tris.length > 0, 'emits ribbon triangles for sharp bounce');
+  for (const tri of tris) {
+    for (const v of tri) {
+      assert.ok(Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.u) && Number.isFinite(v.v));
+      assert.ok(Math.hypot(v.u, v.v) <= 1.001, 'UV stays within outer feather disc');
+      assert.ok(distToPolyline(v.x, v.y, bouncePts) <= 18.05, 'vertices stay bounded within 1.5x half-width of polyline');
+    }
+  }
+  // Every point along the sharp bounce apex must stay on the dark centerline (no hollow centerline drift)
+  for (const pt of bouncePts.slice(3, 11)) {
+    const sample = samplePointInTris(tris, pt.x, pt.y);
+    assert.ok(sample.hits >= 1, `point (${pt.x}, ${pt.y}) on sharp bounce is covered`);
+    assert.ok(sample.minR <= 0.05, `point (${pt.x}, ${pt.y}) stays on centerline (r=${sample.minR})`);
+  }
+  // Check off-center points around the sharp apex are not double-darkened by overlapping segments
+  for (const [qx, qy] of [[355, 186], [368, 188], [362, 172], [338, 305]]) {
+    const sample = samplePointInTris(tris, qx, qy);
+    assert.ok(sample.hits <= 1, `no double-darkening triangle overlap at (${qx}, ${qy}), got ${sample.hits}`);
+  }
+
+  // Exact 180-deg collinear reversal still emits a smooth round turnaround cap without NaN/spikes
+  const revTris = [];
+  globalThis.ububallWebgl.emitSoftRibbonTriangles(
+    [{ x: 200, y: 400 }, { x: 200, y: 200 }, { x: 200, y: 400 }],
+    () => 24,
+    poly => { for (let i = 1; i + 1 < poly.length; i++) revTris.push([poly[0], poly[i], poly[i + 1]]); }
+  );
+  assert.ok(samplePointInTris(revTris, 200, 190).hits >= 1, '180-deg turnaround cap covers apex beyond (200, 200)');
+
+  // Canvas 2D fallback softRibbon also keeps sharp-bounce polygon vertices bounded without miter spikes
+  const { createRinkPresenter, createEffectsState } = globalThis.ububallPresentation;
+  const P = globalThis.ububallPhysics;
+  const ububallMatch = globalThis.ububallMatch;
+  const ububallReplay = globalThis.ububallReplay;
+  const make2dCtx = () => {
+    const verts = [];
+    return {
+      verts,
+      globalAlpha: 1, fillStyle: '#000', strokeStyle: '#000', lineWidth: 1,
+      lineCap: 'butt', lineJoin: 'miter', font: '12px sans-serif', textAlign: 'left', textBaseline: 'alphabetic',
+      shadowBlur: 0, shadowColor: 'transparent', globalCompositeOperation: 'source-over',
+      save() {}, restore() {}, beginPath() {}, closePath() {}, setLineDash() {},
+      moveTo(x, y) { verts.push({ x, y }); },
+      lineTo(x, y) { verts.push({ x, y }); },
+      fill() {}, stroke() {}, arc() {}, ellipse() {}, roundRect() {}, clip() {},
+      quadraticCurveTo() {}, bezierCurveTo() {},
+      setTransform() {}, clearRect() {}, drawImage() {}, fillRect() {}, strokeRect() {},
+      fillText() {}, strokeText() {}, measureText: () => ({ width: 20 }),
+      translate() {}, rotate() {}, scale() {},
+      createRadialGradient() { return { addColorStop() {} }; },
+      createLinearGradient() { return { addColorStop() {} }; }
+    };
+  };
+  const c2dCanvas = { width: 1000, height: 600, clientWidth: 1000, clientHeight: 600, getContext: () => make2dCtx() };
+  const mockDoc = {
+    createElement: () => {
+      const ctx = make2dCtx();
+      return { width: 0, height: 0, getContext: () => ctx };
+    }
+  };
+  const c2dView = {
+    canvas: c2dCanvas, ctx: make2dCtx(),
+    badgeCanvas: { width: 1000, height: 600 }, badgeCtx: make2dCtx(),
+    bodies: P.kickoff(), entries: [], mode: 'standard', portrait: false, field: null
+  };
+  const c2dFx = createEffectsState([], {});
+  c2dFx.burns.push({ points: bouncePts, width: 24, age: 0.3 });
+  const c2dPres = createRinkPresenter({
+    P, ububallMatch, ububallReplay, doc: mockDoc,
+    getView: () => c2dView, getEffects: () => c2dFx, getPhase: () => 'play',
+    getPlans: () => [], getRenderSize: () => ({ renderWidth: 1000, renderHeight: 600, deviceWidth: 1000, deviceHeight: 600 })
+  });
+  c2dPres.drawScene();
+  const c2dVerts = c2dFx.iceCache.layer.getContext('2d').verts;
+  assert.ok(c2dVerts.length > 0, 'Canvas 2D softRibbon emits path vertices');
+  for (const pt of c2dVerts) {
+    assert.ok(distToPolyline(pt.x, pt.y, bouncePts) <= 18.05, `Canvas 2D vertex (${pt.x}, ${pt.y}) stays bounded within 1.5x half-width`);
+  }
+  c2dPres.dispose();
+});
