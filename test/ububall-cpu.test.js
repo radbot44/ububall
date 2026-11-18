@@ -516,3 +516,234 @@ test('selective 2-turn look-ahead bridges finishTurn stuns to convert 2-turn Kno
   assert.throws(() => C.plan(pGodState, 1, { level: 'god', lookaheadTop: -1 }));
   assert.throws(() => C.plan(pGodState, 1, { level: 'god', lookaheadBudget: 999 }));
 });
+
+test('CPU goaltending upgrades: legal crease pocket, live Pulse goal-line saves, midfield Cannonball & Guard Iron Saves', () => {
+  // 1. Legal 44 px crease pocket when defender is alone vs 88 px cone fallback when crease-warned or joined by teammate
+  const pocketState = S.initialState(15, 'standard');
+  pocketState.bodies.slice(0, 6).forEach((b, i) => {
+    Object.assign(b, { x: i < 3 ? 260 : 520, y: 150 + (i % 3) * 140, vx: 0, vy: 0, meter: 0, stunned: false, carded: false });
+  });
+  Object.assign(pocketState.bodies[3], { x: 892, y: 300 });
+  Object.assign(pocketState.bodies[6], { x: 640, y: 260, vx: 0, vy: 0 });
+  assert.equal(C.canOccupyCrease(pocketState, 1, 0), true, 'lone goalie without warning can occupy crease pocket');
+  const pPt = C.goalPocketPoint(640, 260, 1, true);
+  assert.ok(940 - pPt.x < M.FOULS.crease && 940 - pPt.x >= 40, `pocket sits legally inside 80 px crease (got x=${pPt.x})`);
+
+  // Second defender near crease blocks pocket entry so CPU avoids 2-defender Goal Camping foul
+  Object.assign(pocketState.bodies[4], { x: 865, y: 312 });
+  assert.equal(C.canOccupyCrease(pocketState, 1, 0), false, 'teammate near crease disables in-crease pocket');
+  const fallbackPt = C.goalPocketPoint(640, 260, 1, false);
+  assert.equal(fallbackPt.x, C.shotConePoint(640, 260, 1, 88).x);
+
+  // Active Goal Camping warning also blocks pocket entry
+  Object.assign(pocketState.bodies[4], { x: 520, y: 180 });
+  pocketState.fouls = { ...M.newFouls(), crease: [false, true] };
+  assert.equal(C.canOccupyCrease(pocketState, 1, 0), false, 'active crease warning disables pocket');
+
+  // 2. traceIncomingShot detects direct & wall-banked Pulse rockets and CPU dives to the goal line to save them
+  const pulseBank = S.initialState(16, 'pulse');
+  pulseBank.bodies.slice(0, 6).forEach((b, i) => {
+    M.applyStats(P, b, { impulse: 195 }, 'pulse');
+    Object.assign(b, { x: i < 3 ? 260 : 430, y: 140 + (i % 3) * 150, vx: 0, vy: 0, omega: 0, meter: 0 });
+  });
+  Object.assign(pulseBank.bodies[3], { x: 904, y: 356 });
+  let bankVy = -220;
+  for (let vy = -140; vy >= -440; vy -= 10) {
+    Object.assign(pulseBank.bodies[6], { x: 600, y: 136, vx: 740, vy, omega: 0, strikerTeam: 0 });
+    if (M.resolveTurn(P, pulseBank, Array(6).fill(C.HOLD), { effects: false }).replay.goal === 0) { bankVy = vy; break; }
+  }
+  Object.assign(pulseBank.bodies[6], { x: 600, y: 136, vx: 740, vy: bankVy, omega: 0, strikerTeam: 0 });
+  const inc = C.traceIncomingShot(pulseBank.bodies[6], 1);
+  assert.ok(inc && inc.crosses && inc.bounces >= 1, 'traceIncomingShot detects top-wall bank into right goal');
+  assert.equal(C.traceIncomingShot(pulseBank.bodies[6], 1, inc.time / 2), null, 'a shorter trace does not reuse the longer horizon');
+  assert.deepEqual(C.traceIncomingShot(pulseBank.bodies[6], 1), inc, 'a shorter trace does not hide a later shot');
+  const pulseSaveDec = C.plan(pulseBank, 1, { level: 'medium', seed: 7 });
+  const pulseSaveRes = M.resolveTurn(P, pulseBank, [C.HOLD, C.HOLD, C.HOLD, ...pulseSaveDec.plans], { effects: false });
+  assert.notEqual(pulseSaveRes.replay.goal, 0, 'Medium CPU intercepts moving Pulse bank shot at the goal mouth');
+
+  // 3. Midfield Cannonball threat (< x=545) triggers defensive alert & save
+  const midCannon = S.initialState(18, 'standard');
+  const cannonball = P.SUPERS.find(s => s.key === 'cannonball');
+  midCannon.bodies.slice(0, 6).forEach((b, i) => {
+    M.applyStats(P, b, i === 0 ? { power: 225, impulse: 195 } : { impulse: 155 }, 'standard');
+    Object.assign(b, { vx: 0, vy: 0, omega: 0, meter: 0, equippedSuper: null });
+  });
+  Object.assign(midCannon.bodies[0], { x: 430, y: 300, meter: 100, equippedSuper: cannonball });
+  Object.assign(midCannon.bodies[1], { x: 210, y: 190 });
+  Object.assign(midCannon.bodies[2], { x: 210, y: 410 });
+  Object.assign(midCannon.bodies[3], { x: 865, y: 375 });
+  Object.assign(midCannon.bodies[4], { x: 565, y: 215 });
+  Object.assign(midCannon.bodies[5], { x: 350, y: 465 });
+  Object.assign(midCannon.bodies[6], { x: 505, y: 300, vx: 0, vy: 0 });
+  const threat = C.assessOpponentThreat(midCannon, 1, false);
+  assert.equal(threat.shotDanger, true, 'midfield Cannonball at x=505 flags shotDanger');
+  assert.equal(threat.fireballThreat, true, 'armed Cannonball striker flags fireballThreat');
+  const laser = { ...C.strike(midCannon.bodies[0], midCannon.bodies[6], 940, 258, 'cannonball', 0), power: 1, superArm: true };
+  assert.equal(M.resolveTurn(P, midCannon, [laser, C.GUARD, C.GUARD, C.HOLD, C.HOLD, C.HOLD], { effects: false }).replay.goal, 0);
+  const midSaveDec = C.plan(midCannon, 1, { level: 'hard', seed: 7 });
+  const midSaveRes = M.resolveTurn(P, midCannon, [laser, C.GUARD, C.GUARD, ...midSaveDec.plans], { effects: false });
+  assert.notEqual(midSaveRes.replay.goal, 0, 'Hard CPU saves midfield Cannonball top-corner laser');
+
+  // 4. Close fireball Wide-Stance Guard Iron Save (holds ground where un-guarded HOLD concedes)
+  const fireGuard = S.initialState(21, 'standard');
+  fireGuard.bodies.slice(0, 6).forEach((b, i) => {
+    const st = i === 0 ? { power: 255, mass: 240, impulse: 230 }
+      : i === 3 ? { mass: 120, stability: 135, size: 127, reach: 210 }
+      : {};
+    M.applyStats(P, b, st, 'standard');
+    Object.assign(b, { vx: 0, vy: 0, omega: 0, meter: 0, equippedSuper: null, guarding: false });
+    P.syncEffectiveStats(b);
+  });
+  Object.assign(fireGuard.bodies[0], { x: 605, y: 300, meter: 100, equippedSuper: cannonball });
+  Object.assign(fireGuard.bodies[1], { x: 200, y: 190 });
+  Object.assign(fireGuard.bodies[2], { x: 200, y: 410 });
+  Object.assign(fireGuard.bodies[4], { x: 350, y: 120 });
+  Object.assign(fireGuard.bodies[5], { x: 350, y: 480 });
+  Object.assign(fireGuard.bodies[6], { x: 685, y: 300 });
+  let glanceShot = null;
+  for (const gx of [852, 872, 892]) {
+    for (const gy of [300, 308, 314]) {
+      Object.assign(fireGuard.bodies[3], { x: gx, y: gy, guarding: false });
+      P.syncEffectiveStats(fireGuard.bodies[3]);
+      for (let ty = 244; ty <= 356; ty += 2) {
+        const opp = [{ ...C.strike(fireGuard.bodies[0], fireGuard.bodies[6], 940, ty, 'cannonball', 0), power: 1, superArm: true }, C.GUARD, C.GUARD];
+        const rH = M.resolveTurn(P, fireGuard, [...opp, C.HOLD, C.HOLD, C.HOLD], { effects: false });
+        const rG = M.resolveTurn(P, fireGuard, [...opp, C.GUARD, C.HOLD, C.HOLD], { effects: false });
+        if (rH.replay.goal === 0 && rG.replay.goal === null) { glanceShot = opp; break; }
+      }
+      if (glanceShot) break;
+    }
+    if (glanceShot) break;
+  }
+  assert.ok(glanceShot, 'constructed glancing Cannonball shot requiring Wide-Stance Guard');
+  const fgDec = C.plan(fireGuard, 1, { level: 'hard', seed: 7 });
+  const fgRes = M.resolveTurn(P, fireGuard, [...glanceShot, ...fgDec.plans], { effects: false });
+  assert.notEqual(fgRes.replay.goal, 0, 'Hard CPU preserves Guard anchor in topBasins and blocks glancing Cannonball');
+});
+
+test('CPU shooting upgrades: full-force fireballs, point-blank Spin Strike, shoulder benders, Meteor Banks & wall-rebound one-timers', () => {
+  const cannonball = P.SUPERS.find(s => s.key === 'cannonball');
+  const mkState = (mode, overrides = {}) => {
+    const bodies = P.kickoff();
+    const stats = Array.from({ length: 6 }, (_, i) => ({
+      impulse: 145, traction: 135, spin: 150, curve: 150,
+      size: 127, mass: 127, bounciness: 127, grip: 140,
+      power: 165, reach: 135, strength: 140, stability: 135,
+      efficiency: 127, synergy: 150, chemistry: 150,
+      ...(overrides[i] || {})
+    }));
+    for (let i = 0; i < 6; i++) {
+      M.applyStats(P, bodies[i], stats[i], mode);
+      bodies[i].personality = { aggression: 32, creativity: 32, teamwork: 32, clutch: 32 };
+      bodies[i].meter = 0;
+      bodies[i].equippedSuper = null;
+      bodies[i].vx = 0; bodies[i].vy = 0; bodies[i].omega = 0;
+    }
+    return { version: M.VERSION, mode, bodies, stats, scores: [0, 0], turn: 2, roundTurns: 2, phase: 'plan', winner: null, fouls: M.newFouls() };
+  };
+
+  // 1. Full-force priority & fast-goal tie-breaker: Medium CPU launches at full power (1.0) to outrace a diving goalie
+  const race = mkState('standard', { 0: { impulse: 220, size: 155 }, 3: { power: 220, impulse: 205 } });
+  Object.assign(race.bodies[1], { x: 760, y: 140 });
+  Object.assign(race.bodies[2], { x: 760, y: 460 });
+  Object.assign(race.bodies[3], { x: 385, y: 300 });
+  Object.assign(race.bodies[4], { x: 780, y: 200 });
+  Object.assign(race.bodies[5], { x: 860, y: 300 });
+  Object.assign(race.bodies[6], { x: 325, y: 300 });
+  let diveOpp = null;
+  for (const sy of [355, 375, 405, 435]) {
+    Object.assign(race.bodies[0], { x: 96, y: sy });
+    for (const dy of [248, 258, 270, 285]) {
+      for (const pwr of [0.35, 0.50, 0.65, 0.80]) {
+        const cand = [{ ...C.aim(race.bodies[0], 96, dy, 260), power: pwr }, C.HOLD, C.HOLD];
+        const weak = C.strike(race.bodies[3], race.bodies[6], 60, 252, null, 0);
+        const full = { ...weak, power: 1 };
+        if (M.resolveTurn(P, race, [...cand, weak, C.HOLD, C.HOLD], { effects: false }).replay.goal === null &&
+            M.resolveTurn(P, race, [...cand, full, C.HOLD, C.HOLD], { effects: false }).replay.goal === 1) {
+          diveOpp = cand; break;
+        }
+      }
+      if (diveOpp) break;
+    }
+    if (diveOpp) break;
+  }
+  assert.ok(diveOpp, 'found speed-race goalie dive');
+  const raceDec = C.plan(race, 1, { level: 'medium', seed: 7 });
+  assert.ok(raceDec.plans[0].power >= 0.96, `CPU launches full-force shot (got power=${raceDec.plans[0].power})`);
+  assert.equal(M.resolveTurn(P, race, [...diveOpp, ...raceDec.plans], { effects: false }).replay.goal, 1, 'full-force shot beats diving goalie');
+
+  // 2. Point-blank Spin Strike (+50% bonus speed) & Goalie-bypassing curved bender around center Guard
+  const curveSt = mkState('standard', {
+    0: { size: 130, reach: 130, mass: 200, stability: 200 },
+    3: { curve: 250, spin: 250, power: 225, impulse: 205 }
+  });
+  Object.assign(curveSt.bodies[0], { x: 205, y: 300, guarding: true });
+  Object.assign(curveSt.bodies[1], { x: 235, y: 88, guarding: true });
+  Object.assign(curveSt.bodies[2], { x: 235, y: 512, guarding: true });
+  Object.assign(curveSt.bodies[3], { x: 475, y: 300 });
+  Object.assign(curveSt.bodies[4], { x: 760, y: 160 });
+  Object.assign(curveSt.bodies[5], { x: 860, y: 300 });
+  Object.assign(curveSt.bodies[6], { x: 395, y: 300 });
+  P.syncEffectiveStats(curveSt.bodies[0]);
+  const curveDec = C.plan(curveSt, 1, { level: 'hard', seed: 7 });
+  const curveRes = M.resolveTurn(P, curveSt, [C.GUARD, C.GUARD, C.GUARD, ...curveDec.plans], { effects: false });
+  assert.equal(curveRes.replay.goal, 1, 'Hard CPU curves shot wide around squared-up slot Guard blocker');
+  assert.ok(curveDec.plans[0].power >= 0.95, `uses full-power shot around blocker (got power=${curveDec.plans[0].power})`);
+  const pbSt = mkState('standard', { 0: { impulse: 250, size: 165 }, 3: { power: 25, spin: 250, curve: 100, impulse: 185 } });
+  Object.assign(pbSt.bodies[0], { x: 102, y: 382 });
+  Object.assign(pbSt.bodies[1], { x: 780, y: 130 });
+  Object.assign(pbSt.bodies[2], { x: 780, y: 470 });
+  Object.assign(pbSt.bodies[3], { x: 318, y: 300 });
+  Object.assign(pbSt.bodies[4], { x: 760, y: 210 });
+  Object.assign(pbSt.bodies[5], { x: 860, y: 300 });
+  Object.assign(pbSt.bodies[6], { x: 268, y: 300 });
+  const pbDec = C.plan(pbSt, 1, { level: 'hard', seed: 7 });
+  assert.ok(pbDec.plans[0].power >= 0.96 && Math.abs(pbDec.plans[0].spin) > 0.5, 'point-blank striker unleashes full-power Spin Strike');
+
+  // 3. Screened Corner Meteor Bank & Glancing Fireball Overpower
+  const bankSt = mkState('standard', { 3: { power: 240, impulse: 215 } });
+  Object.assign(bankSt.bodies[0], { x: 148, y: 282, guarding: true });
+  Object.assign(bankSt.bodies[1], { x: 215, y: 255, guarding: true });
+  Object.assign(bankSt.bodies[2], { x: 250, y: 95, guarding: true });
+  Object.assign(bankSt.bodies[3], { x: 455, y: 175 });
+  Object.assign(bankSt.bodies[4], { x: 760, y: 180 });
+  Object.assign(bankSt.bodies[5], { x: 860, y: 300 });
+  Object.assign(bankSt.bodies[6], { x: 375, y: 250 });
+  const bankDec = C.plan(bankSt, 1, { level: 'hard', seed: 7 });
+  const bankRes = M.resolveTurn(P, bankSt, [C.GUARD, C.GUARD, C.GUARD, ...bankDec.plans], { effects: false });
+  assert.equal(bankRes.replay.goal, 1, 'Hard CPU converts full-power far-corner Meteor Bank behind double screen');
+  assert.equal(bankRes.replay.label, 'FIREBALL!', 'corner bank ignites full-speed Meteor Bank fireball');
+
+  // 4. Canonical moving-ball wall-bounce trajectory & Pulse cross-slot / off-board rebound one-timers (> 0.32s lead)
+  const bounceSt = mkState('pulse', { 3: { impulse: 215, power: 220 } });
+  Object.assign(bounceSt.bodies[0], { x: 108, y: 344, guarding: true });
+  Object.assign(bounceSt.bodies[1], { x: 740, y: 130 });
+  Object.assign(bounceSt.bodies[2], { x: 740, y: 470 });
+  Object.assign(bounceSt.bodies[3], { x: 515, y: 205 });
+  Object.assign(bounceSt.bodies[4], { x: 780, y: 420 });
+  Object.assign(bounceSt.bodies[5], { x: 865, y: 300 });
+  Object.assign(bounceSt.bodies[6], { x: 320, y: 102, vx: -45, vy: -290 });
+  const samples = C.traceMovingBall(bounceSt.bodies[6]);
+  assert.ok(samples && samples.some(s => s.vy > 100 && s.t > 0.32), 'traceMovingBall captures top-wall rebound past 0.32s');
+  const slowBall = { ...bounceSt.bodies[6], friction: 300 };
+  const initialSlowTrace = C.traceMovingBall(slowBall);
+  slowBall.friction = bounceSt.bodies[6].friction;
+  assert.notDeepEqual(C.traceMovingBall(slowBall), initialSlowTrace, 'changing friction invalidates the moving-ball trace');
+  const bounceDec = C.plan(bounceSt, 1, { level: 'hard', seed: 7 });
+  const bounceRes = M.resolveTurn(P, bounceSt, [C.GUARD, C.HOLD, C.HOLD, ...bounceDec.plans], { effects: false });
+  assert.equal(bounceRes.replay.goal, 1, 'Hard CPU intercepts off-wall Pulse rebound past 0.32s and scores');
+
+  // 5. Tight-wing angle snipe / Post English around near-post Guard
+  const wingSt = mkState('standard', { 3: { spin: 245, curve: 235, power: 225, impulse: 205, grip: 225 } });
+  Object.assign(wingSt.bodies[0], { x: 96, y: 264, guarding: true });
+  Object.assign(wingSt.bodies[1], { x: 260, y: 495, guarding: true });
+  Object.assign(wingSt.bodies[2], { x: 740, y: 460 });
+  Object.assign(wingSt.bodies[3], { x: 248, y: 108 });
+  Object.assign(wingSt.bodies[4], { x: 760, y: 200 });
+  Object.assign(wingSt.bodies[5], { x: 860, y: 300 });
+  Object.assign(wingSt.bodies[6], { x: 196, y: 145 });
+  const wingDec = C.plan(wingSt, 1, { level: 'medium', seed: 7 });
+  const wingRes = M.resolveTurn(P, wingSt, [C.GUARD, C.GUARD, C.HOLD, ...wingDec.plans], { effects: false });
+  assert.equal(wingRes.replay.goal, 1, 'Medium CPU converts tight-wing angle shot past near-post Guard');
+  assert.ok(wingDec.plans[0].power >= 0.96, 'tight-wing shot launches at full power');
+});

@@ -2,11 +2,13 @@
 
 The local CPU evaluates complete three-player plans through `ububallMatch.resolveTurn` (`fastSearch: true`, `fastTick: true`), using the canonical gameplay physics, 240 Hz timestep, 12-second turn cap (1 second in Pulse), explicit guard braking, supers, stun, and meter rules. It never receives the human's planned arrows or super arming choices, and judges every turn fresh without requiring match history so single-turn replays remain self-contained; on `hard` and above, optional resolved-turn `history` adapts opponent predictions to repeated setups (including alternating kickoff patterns) and offensive/defensive tendencies. Browser planning runs in a Web Worker from the public state captured at the start of the turn. Launch waits for that plan; a reset cancels old work. Worker failure or a ten-second timeout falls back to the heuristic planner.
 
-The planner seeds search from the personality heuristic (`cpuPlans`), then builds a coordinated three-player play portfolio (`jointTeamPlays`) alongside single-skater options: open-aperture goal aiming (`scanGoalAperture`), goalie screen-clearing checks and `Shockwave` crease blasts paired with simultaneous sniper shots, two-turn goalie-knockout slot parks and wing-space chips, synchronized Tape-to-Tape `Snap` one-timers, `Pack Draft` slipstream breakaways, corner `Rim-Around` exits, coordinated two-skater defensive fire drills and wing breakouts, non-contact `Magnet` fly-by pulls and slot yanks, dynamic shot-cone goalie coverage (`shotConePoint`, always outside the 80 px crease), and dedicated `Sticky` ball-carrier drives and takedowns. Search interleaves single-skater options by tactical intent, then spends its refinement budget in a two-gear (coarse-to-fine) perturbation loop concentrating edits on skaters that actively participate in the rollout (`activeMask`).
+The planner seeds search from the personality heuristic (`cpuPlans`). Its shot candidates include full-power open lanes, point-blank spin strikes, shots that curve around blockers, and board banks. For moving balls, `traceMovingBall` uses loose-ball physics to generate intercept candidates, including after rebounds. Coordinated plays include screen clears, Shockwave crease blasts, goalie knockouts, slot parks, Snap one-timers, Pack Draft breakaways, Rim-Around exits, wing breakouts, Magnet pulls, and Sticky drives and takedowns.
 
-To maximize tactical strength per simulation, multi-opponent presets use a worst-case-aware `r = 0` gate (`bestMin` cap so one-sided blunders never prune plays that beat guarding goalies) plus inline challenger wobble (`ensureWobbled`). When a Standard or Classic rollout truncates at its tick horizon, `evaluateBodies` projects curved skater stopping slides and a 6-substep skater-aware ball coast—stopping blocked shots at goalies while awarding discounted impending-goal equity when an unobstructed ball crosses the open goal mouth after the cutoff—alongside post-horizon crease-camping warnings/cards, charged 100-meter Super reserve equity, and antisymmetric positional features (`strikeAccess`, `coneCover`, `shotChance`) weighted by `WEIGHTS` (`chance: 200`, `access: 0.7`, `cover: 0.6`). In Pulse mode, `evaluateBodies` keeps skater and ball positional features synchronized at turn-end coordinates while projecting carry-over ball velocity and unstoppable imminent goal-mouth crossings.
+On defense, `assessOpponentThreat` estimates shot and cross-slot pass danger. The planner generates goal-line intercepts for incoming shots, Guard saves, and pocket coverage for a goalie with room under the crease allowance. Crease warnings and nearby teammates can shift coverage outside the crease. Candidate rollouts use match rules to evaluate whether a save or a crease violation occurs. Refinement focuses on skaters involved in the play and includes the goalie when a candidate concedes.
 
-On `hard`, `insane`, and `god`, top distinct tactical basins run a trajectory-aware adversarial counter-search (`findCounter`, 1–2 rounds) targeting ball-path midpoints, goal-mouth plugs, and active playmakers, and re-verify any newly promoted runner-up basin with execution `wobble`. On `insane` and `god`, whenever no forced Turn-1 goal is already locked, top distinct finalists bridge through canonical `finishTurn` settlement (`preservePartial: false`: applying knockout stuns, penalty cards, expired Standard supers, 25% whiff refunds, and carried Pulse momentum/supers) into a bounded simultaneous-move Turn-2 micro-game (`lookaheadTop`, `lookaheadBreadth`, `lookaheadBudget`), with `god` chaining up to 3 continuous turns (`pulseDepth: 3`) in Pulse mode.
+Multi-opponent presets use worst-case-aware screening (`bestMin`) and check execution wobble for close contenders. An early goal earns a tie-break bonus of up to 0.06% of the goal weight. When a Standard or Classic rollout reaches its horizon, `evaluateBodies` projects skater stopping slides and a six-substep, skater-aware ball coast. It scores discounted impending goals, crease warnings and cards, charged Super reserves, and positional features (`strikeAccess`, `coneCover`, `shotChance`). In Pulse, it uses end-of-turn positions and projects the ball’s carry-over velocity.
+
+On Hard and above, the counter-search (`findCounter`) tests ball-path interceptions, goal-mouth blocks, checks on playmakers, and scoring replies such as far-post shots and Snap passes. It can reserve a finalist slot for a Guard or crease-pocket plan during an active threat. Insane and Ububall God use canonical `finishTurn` settlement to search a second turn when the first turn has no locked goal. Ububall God can search up to three turns in Pulse.
 
 ## Difficulty presets
 
@@ -14,10 +16,10 @@ Choose a CPU difficulty in **New match**. The initial default is Medium.
 
 | Level | Label | Team candidates | Opponent scenarios | Horizon ticks |
 | --- | --- | ---: | ---: | ---: |
-| `easy` | Easy | 14 | 1 (Heuristic) | 240 |
-| `medium` | Medium | 48 | 2 (+ Guard brake) | 420 |
-| `hard` | Hard | 84 | 3 (+ Open-corner sniper, striker check blitz, trajectory counter-search & history learning) | 500 |
-| `insane` | Insane | 150 | 4 (+ Multi-attacker rush, dual refine, counter-search, multi-pattern learning & 2-turn finalist look-ahead) | 580 |
+| `easy` | Easy | 14 | 1 (Heuristic + live goal-line save) | 240 |
+| `medium` | Medium | 48 | 2 (+ Guard brake / active threat shot) | 420 |
+| `hard` | Hard | 84 | 3 (+ Open-corner sniper, striker check blitz, scoring-punish counter-search & history learning) | 500 |
+| `insane` | Insane | 150 | 4 (+ Snap/curve rush, dual refine, counter-search, multi-pattern learning & 2-turn finalist look-ahead) | 580 |
 | `god` | Ububall God | 240 | 4 (+ 720-tick rollout + 1.35s coast, dual wobble/refine, 2-round counter-search, dual-bridge 2-turn look-ahead & 3-turn Pulse chain) | 720 |
 
 Each candidate blends its average and worst outcome across the active opponent scenarios (`risk` weights: `.15`, `.35`, `.53`, `.55`, `.55`), verifying execution `wobble` across all contenders within the final selection window. Final selection deduplicates quantized tactical basins (`planBasinKey`) before Boltzmann sampling (`temperature`: `45`, `3.0`, `1.5`, `0.8`, `0.4`) so repeated local tweaks never drown out a sharp pass or bank shot. Team personality traits (`aggression`, `creativity`, `teamwork`, `clutch`) express style at equal strength through a bounded tie-break bias (`±8`) among near-optimal candidates rather than changing evaluation weights or risk tolerance. DNA and game physics are unchanged.
@@ -57,7 +59,7 @@ Pass `--config personal/cpu-experiment.json` with an `a` and/or `b` profile. Eac
 }
 ```
 
-Omitted values inherit the preset and default weights in `shared/ububall-cpu.js`. Candidate counts are bounded to 1–1000, opponent scenarios to 1–5, `lookaheadTop` to 0–20, `lookaheadBreadth` to 2–8, `lookaheadBudget` to 0–400, `pulseDepth` to 1–3, `screenTop` to 1–1000, risk to 0–1 and weights to nonnegative finite values.
+Omitted values inherit the preset and default weights in `shared/ububall-cpu.js`. Candidate counts are bounded to 1–1000, opponent scenarios to 1–5, `lookaheadTop` to 0–20, `lookaheadBreadth` to 2–8, `lookaheadTicks` to 60–2880, `lookaheadBudget` to 0–400, `pulseDepth` to 1–3, `screenTop` to 1–1000, risk to 0–1 and weights to nonnegative finite values.
 
 ## Measure stat value
 
@@ -78,4 +80,4 @@ CPU search calls `resolveTurn` with `effects: false`, which skips presentation-o
 
 ## Validation notes
 
-In isolated Node benchmarks (`sim:cpu`), all 17 CPU suites pass (`Medium` averaging ~108 simulations/turn and `Hard` ~213 simulations/turn across tactical fixtures). Selective 2-turn look-ahead (`Insane` and `Ububall God`) adds ~30–100 bounded short rollouts per non-terminal turn and defeated the 1-turn `Insane` planner 3–1 (`17–12` goals) in swapped-side Pulse matches and `8–5` in swapped-side Standard matches.
+The CPU suite checks reproducibility, search budgets, tactical fixtures, and planning across all five difficulty levels. The shooting and goaltending fixtures resolve selected plans through the match engine, including Pulse rebounds, Cannonball threats, Guard saves, and screened bank shots.
