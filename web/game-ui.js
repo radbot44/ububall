@@ -59,14 +59,14 @@
         event.preventDefault();
         popover.anchor.setAttribute('aria-expanded', 'false');
         popover.anchor = button;
-        popover.align = align;
+        popover._align = align;
         prepare?.();
         button.setAttribute('aria-expanded', 'true');
         place(popover, button, align);
         return;
       }
       popover.anchor = button;
-      popover.align = align;
+      popover._align = align;
       if (!popover.matches(':popover-open')) prepare?.();
     });
     if (!popover.dataset.placed) {
@@ -74,23 +74,34 @@
       popover.addEventListener('toggle', event => {
         const open = event.newState === 'open';
         if (popover.anchor) popover.anchor.setAttribute('aria-expanded', String(open));
-        if (open && popover.anchor) place(popover, popover.anchor, popover.align);
+        if (open && popover.anchor) place(popover, popover.anchor, popover._align);
       });
-      addEventListener('resize', () => { if (popover.matches(':popover-open') && popover.anchor) place(popover, popover.anchor, popover.align); });
+      addEventListener('resize', () => { if (popover.matches(':popover-open') && popover.anchor) place(popover, popover.anchor, popover._align); });
       addEventListener('scroll', event => {
         if (!popover.matches(':popover-open') || !popover.anchor) return;
         if (event.target === popover || popover.contains?.(event.target)) return;
         const a = popover.anchor.getBoundingClientRect();
         if (a.bottom < 0 || a.top > innerHeight || a.right < 0 || a.left > innerWidth) popover.hidePopover();
-        else place(popover, popover.anchor, popover.align);
+        else place(popover, popover.anchor, popover._align);
       }, true);
     }
     button.setAttribute('aria-expanded', 'false');
   }
 
+  // Never leak raw JS runtime error jargon into player-facing modals.
+  const RAW_RUNTIME_ERROR = /^(Cannot (read|set) propert|.* is not (a function|defined|iterable|an object|a constructor)|undefined is not|null is not|Right-hand side of|Assignment to constant|Unexpected token|Failed to execute ['"])/i;
+  function errorMessage(error, fallback = 'Something went wrong. Please try again.') {
+    const raw = typeof error === 'string' ? error : error?.message;
+    if (!raw || typeof raw !== 'string') return fallback;
+    const text = raw.trim();
+    if (!text || RAW_RUNTIME_ERROR.test(text)) return fallback;
+    return text;
+  }
+
   // Confirm and name dialogs, styled as game panels. Each creates an isolated top-layer dialog
   // removed on close so concurrent alerts or confirmations never collide.
   function panel({ title, message, input, confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false }) {
+    const safeMsg = message ? errorMessage(message) : '';
     const dlg = document.body.appendChild(el('dialog', { className: 'game-dialog' }));
     const field = input ? el('input', { className: 'game-dialog-input', value: input.value || '', maxLength: input.maxLength || 40, required: true }) : null;
     if (field) {
@@ -101,7 +112,7 @@
     const confirmBtn = el('button', { type: 'submit', className: danger ? 'game-dialog-danger' : 'primary', textContent: confirmLabel });
     const cancelBtn = showCancel ? el('button', { type: 'button', className: 'quiet', textContent: cancelLabel }) : null;
     const actions = el('div', { className: 'game-dialog-actions' }, ...(cancelBtn ? [cancelBtn] : []), confirmBtn);
-    const form = el('form', { method: 'dialog' }, el('h2', { textContent: title }), ...(message ? [el('p', { textContent: message })] : []),
+    const form = el('form', { method: 'dialog' }, el('h2', { textContent: title }), ...(safeMsg ? [el('p', { textContent: safeMsg })] : []),
       ...(field ? [field] : []), actions);
     dlg.replaceChildren(form);
     dlg.setAttribute('aria-label', title);
@@ -174,7 +185,7 @@
       label.textContent = native.selectedOptions[0]?.textContent || '';
       button.disabled = native.disabled;
       if (native.disabled && list.matches(':popover-open')) list.hidePopover();
-      else if (list.matches(':popover-open')) { fill(); place(list, button, list.align); }
+      else if (list.matches(':popover-open')) { fill(); place(list, button, list._align); }
     }
     dropdown(button, list, { prepare: fill, haspopup: 'listbox' });
     list.addEventListener('toggle', event => { if (event.newState === 'open') (list.querySelector('[aria-selected="true"]') || list.querySelector('button'))?.focus(); });
@@ -262,7 +273,7 @@
   addEventListener('contextmenu', event => { if (swallow || tipTarget(event)) event.preventDefault(); }, true);
   for (const type of ['scroll', 'resize']) addEventListener(type, () => { if (tipFor) hideTip(); }, true);
 
-  root.gameUi = { ICONS: {}, icon, fillIcons, dropdown, place, confirm, ask, blocking, select, scale: () => uiScale, updateScale };
+  root.gameUi = { ICONS: {}, icon, fillIcons, dropdown, place, confirm, ask, blocking, select, errorMessage, scale: () => uiScale, updateScale };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => fillIcons());
   else fillIcons();
 })(globalThis);

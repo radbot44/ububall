@@ -814,12 +814,29 @@
       const meters = state.dirtyMeters;
       if (!meters) return;
       const setFill = fn('setMeterFill') ?? presFallback()?.setMeterFill;
+      const P = getP();
+      const hudSuperText = $('stadium-super-text');
       for (const body of meters) {
-        const fill = $(`super-fill-${body.playerIndex}`), pct = $(`super-pct-${body.playerIndex}`);
+        const idx = body.playerIndex;
+        const meterVal = Math.max(0, Math.min(100, body.meter || 0));
+        const fill = $(`super-fill-${idx}`), pct = $(`super-pct-${idx}`), panel = $(`super-panel-${idx}`);
         if (fill) setFill?.(fill, body.meter);
-        if (pct) {
-          const pctTxt = Math.floor(body.meter) + '%';
+        panel?.classList?.toggle?.('ready', !body.superArm && body.meter >= 100);
+        if (pct && !body.carded && !body.stunned && !body.superArm) {
+          const pctTxt = body.meter >= 100 ? 'Ready' : `${Math.floor(meterVal)}%`;
           if (pct.textContent !== pctTxt) pct.textContent = pctTxt;
+        }
+        if (hudSuperText && idx === state.selected && !body.carded && !body.stunned && !body.superArm) {
+          const s = body.equippedSuper || P?.SUPERS?.[0];
+          const sName = s?.name || 'Super';
+          const hudTxt = `${sName} ${Math.floor(meterVal)}%`;
+          if (hudSuperText.textContent !== hudTxt) hudSuperText.textContent = hudTxt;
+        }
+        const pill = $(`portrait-pill-${idx}`);
+        if (pill) {
+          pill.style?.setProperty?.('--meter', `${meterVal.toFixed(1)}%`);
+          pill.classList?.toggle?.('ready', !body.superArm && body.meter >= 100);
+          pill.classList?.toggle?.('armed', Boolean(body.superArm));
         }
       }
       meters.clear();
@@ -3750,7 +3767,10 @@
         return;
       }
       setShot(homeShot, { beforeLayout: applyDom });
+      const loc = getLoc();
+      const openingRoster = Boolean(loc?.search && new URLSearchParams(loc.search).has('roster'));
       const rs = getRinkStage();
+      if (openingRoster) return;
       if (rs?.classList?.contains?.('collection-shrinking')) {
         state.afterCollectionShrink = () => { if (isHomeShot()) fn('castTo')?.(false); };
       } else {

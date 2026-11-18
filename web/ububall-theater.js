@@ -994,14 +994,17 @@
         } catch (error) { $('export-status').textContent = error.message; }
         $('export-close').textContent = 'Close';
       };
+      const exportMenu = $('replay-export-menu'), exportOpen = $('replay-export-open');
+      if (exportOpen && exportMenu && gameUi?.dropdown) gameUi.dropdown(exportOpen, exportMenu, { align: 'end', haspopup: 'menu' });
+      const closeExportMenu = () => { if (exportMenu?.matches?.(':popover-open')) try { exportMenu.hidePopover(); } catch {} };
       $('replay-export-video').hidden = !(VideoEncoder && OfflineAudioContext);
-      $('replay-export-video').onclick = () => openExport('video');
-      $('replay-export-file').onclick = () => openExport('replay');
+      $('replay-export-video').onclick = () => { closeExportMenu(); openExport('video'); };
+      $('replay-export-file').onclick = () => { closeExportMenu(); openExport('replay'); };
 
       const canShareFiles = Boolean(navigator?.canShare && File && navigator.canShare({ files: [new File([], 'card.png', { type: 'image/png' })] }));
       $('share-send').hidden = !canShareFiles;
       $('share-save').classList?.toggle?.('primary', !canShareFiles);
-      $('replay-card').onclick = openShare;
+      $('replay-card').onclick = () => { closeExportMenu(); openShare(); };
       $('share-private').onchange = event => {
         try { localStorage.setItem('ububall-export-private', event.target.checked ? 'on' : 'off'); } catch {}
         drawShareCard(event.target.checked);

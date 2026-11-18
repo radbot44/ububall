@@ -670,6 +670,7 @@ body:has(.viewer:modal) { overflow: hidden; }
 #ubunym { margin: .625rem 0 .125rem; overflow-wrap: anywhere; font-size: 1.25rem; }
 .viewer-archetype { margin: 0 0 .25rem; font-size: .875rem; color: var(--secondary); letter-spacing: .015em; }
 #details, #authenticity { font-size: .75rem; color: var(--muted); margin: .1875rem 0; }
+.details-rarity { text-decoration: underline dotted color-mix(in srgb, var(--muted) 65%, transparent); text-underline-offset: .1875rem; cursor: help; }
 #download { margin: .75rem 0 .5rem; }
 
 .viewer-stats {
@@ -1024,7 +1025,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
   padding: 1rem 12% 1.25rem;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   justify-items: center;
   gap: .75rem;
 }
@@ -1052,6 +1053,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .collection-viewer-arrow {
   position: relative;
   z-index: 3;
+  align-self: center;
   width: 2.875rem;
   height: 2.875rem;
   border-radius: 50%;
@@ -1142,12 +1144,16 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
   .collection-ice .ubu-tile-heart svg { width: 1rem; height: 1rem; }
 }
 @media (max-width: 47.99rem) and (min-height: 37.5625rem) {
+  .collection-world.viewer-open { z-index: 30; }
   .collection-viewer-frame {
-    padding: .375rem 10.5% calc(4.5rem + var(--safe-bottom, 0px));
-    min-height: calc(100dvh - var(--collection-viewer-top, 8rem) - .5rem);
-    max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - .25rem);
+    position: fixed;
+    inset: calc(3.375rem + var(--safe-top, 0px)) 0 calc(4.375rem + var(--safe-bottom, 0px)) 0;
+    padding: .375rem .5rem;
+    min-height: 0;
+    max-height: none;
     grid-template-columns: repeat(2, auto);
     grid-template-rows: minmax(0, 1fr) auto;
+    align-items: start;
     justify-content: center;
     gap: .375rem .75rem;
   }
@@ -1155,7 +1161,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
     grid-column: 1 / -1;
     grid-row: 1;
     width: min(calc(100vw - 1rem), 100%);
-    max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - 7.5rem - var(--safe-bottom, 0px));
+    max-height: 100%;
   }
   #viewer-prev { grid-column: 1; grid-row: 2; justify-self: end; }
   #viewer-next { grid-column: 2; grid-row: 2; justify-self: start; }
@@ -1170,7 +1176,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
   }
   .viewer.on-ice {
     padding: .75rem .625rem;
-    max-height: calc(100dvh - var(--collection-viewer-top, 8rem) - 7.5rem - var(--safe-bottom, 0px));
+    max-height: 100%;
   }
 }
 @media (max-height: 37.5rem) {

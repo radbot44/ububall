@@ -58,11 +58,10 @@
   addEventListener('keydown', rememberPlayUrl, true);
 
   function closeTransientUI() {
-    for (const id of ['viewer', 'account-dialog']) {
-      const dlg = document.getElementById(id);
-      if (dlg?.open) dlg.close();
+    for (const dlg of document.querySelectorAll('dialog[open]:not([data-blocking="true"])')) {
+      dlg.close();
     }
-    for (const pop of document.querySelectorAll('.game-popover, #more-menu')) {
+    for (const pop of document.querySelectorAll('.game-popover, #more-menu, .stat-drawer')) {
       if (pop.matches?.(':popover-open')) {
         try { pop.hidePopover(); } catch {}
       }

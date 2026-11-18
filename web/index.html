@@ -190,6 +190,7 @@
             </svg>
           </button>
         </div>
+        <div id="portrait-roster" class="portrait-roster" aria-label="Skaters and super status"></div>
         <div id="bug-tab" class="bug-tab" role="status" aria-live="polite"></div>
       </div>
       <div class="stadium-stage-area">
@@ -316,9 +317,12 @@ SOFTWARE.
             <button id="replay-trails" class="replay-toggle" type="button" aria-pressed="false" title="Show the path each ubu has taken this turn">Trails</button>
             <button id="replay-stats" type="button">Stats</button>
             <button id="replay-take-over" type="button" title="Play against the CPU from the start of this turn">Play from here</button>
-            <button id="replay-export-video" class="replay-export" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12"/><path d="M8 4l0 16"/><path d="M16 4l0 16"/><path d="M4 8l4 0"/><path d="M4 16l4 0"/><path d="M4 12l16 0"/><path d="M16 8l4 0"/><path d="M16 16l4 0"/></svg>Export video</button>
-            <button id="replay-export-file" class="replay-export" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 11l5 5l5 -5"/><path d="M12 4l0 12"/></svg>Export replay</button>
-            <button id="replay-card" class="replay-export" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M15 6a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M15 18a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M8.7 10.7l6.6 -3.4"/><path d="M8.7 13.3l6.6 3.4"/></svg>Share</button>
+            <button id="replay-export-open" class="replay-export" type="button" aria-haspopup="menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M15 6a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M15 18a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M8.7 10.7l6.6 -3.4"/><path d="M8.7 13.3l6.6 3.4"/></svg>Share / Export<svg class="icon" aria-hidden="true"><use href="#icon-chevron-down"/></svg></button>
+            <div id="replay-export-menu" class="replay-export-menu">
+              <button id="replay-export-video" class="replay-export" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12"/><path d="M8 4l0 16"/><path d="M16 4l0 16"/><path d="M4 8l4 0"/><path d="M4 16l4 0"/><path d="M4 12l16 0"/><path d="M16 8l4 0"/><path d="M16 16l4 0"/></svg>Export video</button>
+              <button id="replay-export-file" class="replay-export" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 11l5 5l5 -5"/><path d="M12 4l0 12"/></svg>Export replay</button>
+              <button id="replay-card" class="replay-export" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M15 6a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M15 18a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M8.7 10.7l6.6 -3.4"/><path d="M8.7 13.3l6.6 3.4"/></svg>Share card</button>
+            </div>
             <button id="replay-exit" type="button">Exit replay</button>
           </div>
         </div>

@@ -119,7 +119,9 @@
     tab.style.left = Math.max(width / 2, Math.min(board.width - width / 2, x)) + 'px';
     const scoreBottom = tab.parentElement.querySelector('.bug-home').getBoundingClientRect().bottom;
     const statusBottom = tab.parentElement.querySelector('.bug-status').getBoundingClientRect().bottom;
-    tab.style.top = Math.max(scoreBottom, statusBottom) - board.top + 'px';
+    const rosterEl = $('portrait-roster');
+    const rosterBottom = rosterEl && rosterEl.offsetHeight ? rosterEl.getBoundingClientRect().bottom : 0;
+    tab.style.top = Math.max(scoreBottom, statusBottom, rosterBottom) - board.top + 'px';
     tab.classList.add('show');
     bugTabTimer = setTimeout(() => { tab.classList.remove('show'); bugTabTimer = setTimeout(nextBugTab, 300); }, 2600);
   }
@@ -921,11 +923,11 @@
       }
     });
     const hasMoves = Boolean(actions.aimed || actions.guarding);
-    $('launch-plan').hidden = !planning || !hasMoves;
-    $('launch-plan').textContent = planning && hasMoves
-      ? Object.entries(actions).filter(([, count]) => count).map(([action, count]) => count + ' ' + action).join(' · ') : '';
-    if (planning && !hasMoves) $('launch').dataset.tip = 'No moves are planned.';
-    else delete $('launch').dataset.tip;
+    $('launch-plan').hidden = !planning;
+    $('launch-plan').textContent = !planning ? '' : hasMoves
+      ? Object.entries(actions).filter(([, count]) => count).map(([action, count]) => count + ' ' + action).join(' · ')
+      : 'No moves planned';
+    delete $('launch').dataset.tip;
     fieldView.bodies.slice(0, 6).forEach((b, i) => {
       const awayCard = i >= 3 ? $(`player-${i}`) : null;
       const shield = awayCard?.querySelector('.card-guard');
@@ -957,7 +959,26 @@
       const panel = $(`super-panel-${i}`);
       panel?.classList.toggle('armed', Boolean(b.superArm));
       panel?.classList.toggle('ready', !b.superArm && b.meter >= 100);
-      if (pctNode) pctNode.textContent = b.carded ? 'Carded' : b.stunned ? 'Stunned' : b.superArm ? 'Armed' : b.meter >= 100 ? 'Ready' : `${Math.round(b.meter || 0)}%`;
+      const statusText = b.carded ? 'Carded' : b.stunned ? 'Stunned' : b.superArm ? 'Armed' : b.meter >= 100 ? 'Ready' : `${Math.round(b.meter || 0)}%`;
+      if (pctNode) pctNode.textContent = statusText;
+      const pill = $(`portrait-pill-${i}`);
+      if (pill) {
+        const meterVal = Math.max(0, Math.min(100, b.meter || 0));
+        pill.style.setProperty('--meter', `${meterVal.toFixed(1)}%`);
+        pill.classList.toggle('selected', i < 3 && i === selected);
+        pill.classList.toggle('ready', !b.superArm && b.meter >= 100);
+        pill.classList.toggle('armed', Boolean(b.superArm));
+        pill.classList.toggle('carded', Boolean(b.carded));
+        pill.classList.toggle('stunned', Boolean(b.stunned));
+        if (i < 3) pill.setAttribute('aria-pressed', String(i === selected));
+        const ubuName = fieldView.entries[i]?.model?.parts?.fullName || `Ubu ${i + 1}`;
+        pill.setAttribute('aria-label', classicMode() ? ubuName : `${ubuName} · ${superTitle} ${statusText}`);
+        const pillSuper = $(`portrait-super-${i}`);
+        if (pillSuper && b.equippedSuper?.icon) {
+          if (pillSuper.getAttribute('src') !== b.equippedSuper.icon) pillSuper.src = b.equippedSuper.icon;
+          if (pillSuper.alt !== superTitle) pillSuper.alt = superTitle;
+        }
+      }
     });
     const hudSuperBtn = $('stadium-super-btn');
     const hudSuperText = $('stadium-super-text');
@@ -1114,6 +1135,44 @@
         card.append(header, renderSuperPanel(i));
         $('cpu-team').append(card);
       });
+    }
+    const portraitRoster = $('portrait-roster');
+    if (portraitRoster) {
+      const makeGroup = (side, start) => {
+        const group = document.createElement('div');
+        group.className = `portrait-roster-group ${side}`;
+        fieldView.entries.slice(start, start + 3).forEach((entry, offset) => {
+          const i = start + offset;
+          const pill = document.createElement('button');
+          pill.type = 'button';
+          pill.id = `portrait-pill-${i}`;
+          pill.className = 'portrait-pill';
+          pill.dataset.team = side;
+          pill.style.setProperty('--meter', '0%');
+          const ring = document.createElement('span');
+          ring.className = 'portrait-pill-ring';
+          ring.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'portrait-pill-art', 96) : ubuRender(entry.model, 'portrait-pill-art'));
+          const superImg = document.createElement('img');
+          superImg.id = `portrait-super-${i}`;
+          superImg.className = 'portrait-pill-super';
+          const initialSuper = entry.equippedSuper || resolveEquippedSuper(entry, i);
+          superImg.src = initialSuper?.icon || 'assets/00_stalwart.png';
+          superImg.alt = initialSuper?.displayName || initialSuper?.name || '';
+          pill.append(ring, superImg);
+          pill.onclick = () => {
+            if (i < 3 && phase === 'plan' && !theater && !online?.spectating && selected !== i) {
+              selected = i;
+              sync();
+              draw();
+              return;
+            }
+            openStatDrawer(i);
+          };
+          group.append(pill);
+        });
+        return group;
+      };
+      portraitRoster.replaceChildren(makeGroup('home', 0), makeGroup('away', 3));
     }
   }
   function fitStadium() {
@@ -1610,7 +1669,8 @@
     const pick = node('button', { type: 'button', className: 'formation-pick' }, node('span', { className: 'formation-pos', textContent: POSITIONS[i] }));
     if (entry) {
       const arch = archetypeOfModel(entry.model);
-      const subLabel = entry.label && entry.label !== entry.model.parts.fullName
+      const hideGuestLabel = fixed && entry.label === 'Guest ubu' && Boolean(arch);
+      const subLabel = !hideGuestLabel && entry.label && entry.label !== entry.model.parts.fullName
         ? [arch, entry.label].filter(Boolean).join(' · ')
         : (arch || entry.label || '');
       pick.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'formation-art', 256) : ubuRender(entry.model, 'formation-art'), node('span', { className: 'formation-name' },
@@ -1867,6 +1927,14 @@
   window.addEventListener('ubu:session', async event => {
     savedTeams = null; teamIndex = -1; updateTeamBar(); updateHome();
     if (event.detail?.owner) try { await adoptAccountTeam(); } catch {}
+    if (sheetOpen()) {
+      if (!event.detail?.owner && setupFor !== 'lobby') draft = [...guestTeam];
+      void loadCollection();
+      void loadTeams();
+      const step = $('roster-dialog')?.dataset?.step;
+      if (step === 'mode') setupStep('mode');
+      else rosterSlots();
+    }
   });
   // An unopened signup pack takes the place of the home team until it is opened.
   function showSignupPack() {
@@ -2307,7 +2375,6 @@
     url.searchParams.delete('roster');
     history.replaceState(null, '', url);
     $('new-match').click();
-    loadCollection();
   }
   window.addEventListener('ubu:screen', openRosterFromLink);
   // Default to the phone’s top edge in landscape until the player chooses a side.

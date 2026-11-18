@@ -1445,10 +1445,21 @@
       viewerArch.textContent = archLabel;
       viewerArch.hidden = !archLabel;
     }
-    const abilityText = ab ? ` · Ability ${ab.percentile.toFixed(3)} / 100` : '';
-    const rarityText = r ? ` · Rarity ${r.percentile.toFixed(3)} / 100 (${r.bits.toFixed(6)} bits)` : '';
+    const score = value => (typeof ubuList?.rarityScore === 'function' ? ubuList.rarityScore(value) : value.toFixed(2));
     const grade = document.createElement('strong'); grade.dataset.grade = model.grade; grade.textContent = model.grade;
-    $('details').replaceChildren('Ubuquity ', grade, abilityText + rarityText + (serial ? ' · ' + ubuList.serialLabel(serial) : ''));
+    const parts = ['Ubuquity ', grade];
+    if (ab) parts.push(` · Ability ${score(ab.percentile)} / 100`);
+    if (r) {
+      parts.push(' · ');
+      const raritySpan = document.createElement('span');
+      raritySpan.className = 'details-rarity';
+      raritySpan.tabIndex = 0;
+      raritySpan.dataset.tip = `${r.bits.toFixed(6)} bits`;
+      raritySpan.textContent = `Rarity ${score(r.percentile)} / 100`;
+      parts.push(raritySpan);
+    }
+    if (serial) parts.push(' · ' + ubuList.serialLabel(serial));
+    $('details').replaceChildren(...parts);
     $('authenticity').textContent = result.type === 'signed' ? 'Verified mint certificate' : 'Custom · unsigned';
     $('download').hidden = false;
     window.ubuAudio?.stop();
