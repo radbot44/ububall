@@ -1737,12 +1737,15 @@ body.online-match .bug-team { text-transform: none; letter-spacing: .01em; }
     gap: .25rem; padding: .1875rem .5rem;
   }
   body:is([data-shot="match"], [data-shot="replay"]) .portrait-roster {
-    position: absolute; top: .25rem; left: 50%; transform: translateX(-50%); z-index: 7;
-    width: min(calc(100% - .75rem), 28rem);
-    display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+    position: absolute; bottom: -.75rem; left: 50%; transform: translateX(-50%); z-index: 0;
+    width: min(calc(100% - 1rem), 28rem);
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(5.75rem, 25%) minmax(0, 1fr);
+    align-items: center;
     pointer-events: none;
   }
-  .portrait-roster-group { display: flex; align-items: center; gap: .375rem; pointer-events: none; }
+  .portrait-roster-group { display: flex; align-items: center; gap: .375rem; justify-self: center; pointer-events: none; }
+  .portrait-roster-group.home { grid-column: 1; }
+  .portrait-roster-group.away { grid-column: 3; }
   .portrait-pill {
     position: relative; width: 2rem; height: 2rem; min-height: 0; padding: 0;
     border: 0; border-radius: 50%; background: none; box-shadow: none; flex: none;
@@ -1875,6 +1878,7 @@ body[data-shot="replay"] .stadium-actions > :not(.replay-bar), body[data-shot="r
   body:is([data-shot="match"], [data-shot="replay"]) .bug-brand img { height: 1.1875rem; }
   body:is([data-shot="match"], [data-shot="replay"]) .bug-team { height: 2.125rem; }
   body:is([data-shot="match"], [data-shot="replay"]) .bug-status { height: 1.25rem; }
+  body:is([data-shot="match"], [data-shot="replay"]) .portrait-roster { bottom: -.625rem; }
   body:is([data-shot="match"], [data-shot="replay"]) .portrait-pill { width: 1.75rem; height: 1.75rem; }
   body:is([data-shot="match"], [data-shot="replay"]) :is(.portrait-pill-super, .portrait-pill-state) { width: .8125rem; height: .8125rem; }
   body:is([data-shot="match"], [data-shot="replay"]) .portrait-pill-state .icon { width: .5625rem; height: .5625rem; }
