@@ -70,18 +70,145 @@
     };
   }
 
-  function createBodyProjector({
-    P,
-    getEntries = () => null,
-    getAnonymous = () => false,
-    anonymousName = i => `Ubu ${i + 1}`,
-    isClassicMode = () => false,
-    resolveEquippedSuper = (entry, i) => entry?.equippedSuper || P.SUPERS[i % P.SUPERS.length],
-    getShownSim = () => null,
-    getShownSeat = () => 0,
-    getTargetBodies = () => null,
-    getDirtyMeters = () => null
-  }) {
+  function createMatchSession(bindings = {}) {
+    const state = {
+      fieldView: null,
+      fieldEffects: null,
+      dirtyMeters: null,
+      layoutDirty: true,
+      renderWidth: 1,
+      renderHeight: 1,
+      deviceWidth: 0,
+      deviceHeight: 0,
+      visibleRinkHeight: 600,
+      roster: [],
+      draft: [],
+      cpuTeam: [],
+      simBodies: [],
+      plans: [],
+      cpu: [],
+      selected: 0,
+      scores: [0, 0],
+      shownScores: [0, 0],
+      turn: 1,
+      phase: 'plan',
+      elapsed: 0,
+      accumulator: 0,
+      drag: null,
+      dragDirty: false,
+      drawingDragFrame: false,
+      skaters: [],
+      rinkWrap: null,
+      playSegments: [],
+      goalReplay: null,
+      postGoal: null,
+      authoritativeBodies: null,
+      theater: null,
+      activePlayback: null,
+      recording: null,
+      recordingOnline: false,
+      lastSaved: null,
+      lastCompletedReplay: null,
+      cast: null,
+      shot: 'home',
+      videoClock: null,
+      videoAudio: null,
+      cardShot: false,
+      matchTicks: 0,
+      online: null,
+      onlineReplay: null,
+      cpuClient: null,
+      cpuGeneration: 0,
+      stats: [],
+      play: null,
+      tally: null,
+      scoringPlayer: null,
+      roundTurns: 0,
+      fouls: null,
+      hitStopUntil: 0,
+      foulInfo: null,
+      guide: null,
+      cameraMove: null
+    };
+    if (bindings && typeof bindings === 'object') {
+      Object.defineProperties(state, Object.getOwnPropertyDescriptors(bindings));
+    }
+    const defineMethod = (name, fn) => {
+      if (!Object.prototype.hasOwnProperty.call(state, name)) {
+        Object.defineProperty(state, name, { value: fn, enumerable: false, configurable: true, writable: true });
+      }
+    };
+    defineMethod('setShot', (next, doc = (typeof document !== 'undefined' ? document : null)) => {
+      state.shot = next;
+      if (doc?.body?.dataset) doc.body.dataset.shot = next;
+    });
+    defineMethod('bumpCpuGeneration', () => {
+      state.cpuGeneration = (state.cpuGeneration || 0) + 1;
+      state.cpuClient?.cancel?.();
+      state.cpuClient?.dispose?.();
+    });
+    defineMethod('syncShownScores', sc => {
+      if (Array.isArray(state.shownScores) && Array.isArray(sc)) {
+        state.shownScores.splice(0, 2, ...sc);
+      }
+    });
+    defineMethod('loadWatchReplay', ({ stats: nextStats }) => {
+      state.stats = nextStats;
+      state.phase = 'replay';
+      state.selected = 0;
+      state.drag = null;
+    });
+    defineMethod('endReplay', () => {
+      state.phase = 'over';
+      state.recording = null;
+    });
+    defineMethod('loadReplayTurn', ({ scores, turn, plans, guide }) => {
+      state.scores = scores;
+      state.turn = turn;
+      state.plans = plans;
+      state.guide = guide;
+    });
+    defineMethod('takeOverFromReplay', (
+      { roster, simBodies, scores, turn, fouls, roundTurns, recording },
+      { ububallMatch, syncViewBodies } = {}
+    ) => {
+      state.roster = roster;
+      state.simBodies = simBodies;
+      syncViewBodies?.(simBodies, 0);
+      state.scores = scores;
+      state.turn = turn;
+      state.fouls = fouls;
+      if (ububallMatch) {
+        state.play = ububallMatch.newPlay();
+        state.tally = ububallMatch.newTally();
+      }
+      state.roundTurns = roundTurns;
+      state.matchTicks = 0;
+      state.playSegments = [];
+      state.selected = 0;
+      state.drag = null;
+      state.elapsed = 0;
+      state.accumulator = 0;
+      state.phase = 'plan';
+      state.recording = recording;
+    });
+    return state;
+  }
+
+  function createBodyProjector(deps = {}) {
+    const state = deps.state || deps.session || null;
+    const {
+      P,
+      getEntries = () => state?.fieldView?.entries || null,
+      getAnonymous = () => Boolean(state?.fieldView?.anonymous),
+      anonymousName = i => `Ubu ${i + 1}`,
+      isClassicMode = () => false,
+      resolveEquippedSuper = (entry, i) => entry?.equippedSuper || P.SUPERS[i % P.SUPERS.length],
+      getShownSim = () => null,
+      getShownSeat = () => 0,
+      getTargetBodies = () => state?.fieldView?.bodies || null,
+      getDirtyMeters = () => state?.dirtyMeters || null
+    } = deps;
     const PROJECTED_STATIC = new WeakMap();
 
     function projectBody(cb, vb, i, seat = 0, entries = getEntries(), anonymous = getAnonymous()) {
@@ -473,6 +600,7 @@
     applySeatTransform,
     transformSimSeat,
     viewFouls,
+    createMatchSession,
     createBodyProjector,
     createPlaybackDriver
   };

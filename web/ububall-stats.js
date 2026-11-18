@@ -29,44 +29,52 @@
       `ububall-${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}`;
   }
 
-  function createStatsController({
-    $,
-    document,
-    addEventListener,
-    history,
-    P,
-    ububallMatch,
-    ububallReplay,
-    ubuRender,
-    gameUi,
-    onlineOrder,
-    viewIndex,
-    getFieldView,
-    getSkaters,
-    getThemeColors,
-    drawRinkSurface,
-    viewTally,
-    getScores,
-    getPhase,
-    getOnline,
-    getTheater,
-    getRecording,
-    getLastCompletedReplay,
-    getLastSaved,
-    getShot,
-    getCameraMove,
-    replayStore,
-    libraryEntry,
-    seekReplay,
-    updateReplayBar,
-    watchReplay,
-    matchInProgress,
-    finishCpuMatch,
-    closeFirstTurnGuide,
-    closeSummary,
-    newMatch,
-    exitMatchMode
-  }) {
+  function createStatsController(deps = {}) {
+    const s = deps.state || deps.session || null;
+    const pres = deps.presenter || null;
+    const thCtrl = deps.theater || null;
+    const act = deps.actions || deps;
+
+    const document = deps.document ?? root.document;
+    const $ = deps.$ ?? act.$ ?? (id => document?.getElementById?.(id));
+    const addEventListener = deps.addEventListener ?? root.addEventListener;
+    const history = deps.history ?? root.history;
+
+    const P = deps.P ?? act.P ?? root.ububallPhysics;
+    const ububallMatch = deps.ububallMatch ?? act.ububallMatch ?? root.ububallMatch;
+    const ububallReplay = deps.ububallReplay ?? act.ububallReplay ?? root.ububallReplay;
+    const rawUbuRender = deps.ubuRender ?? act.ubuRender ?? root.ubuRender;
+    const ubuRender = (model, cls) => rawUbuRender(model, cls);
+    const gameUi = deps.gameUi ?? act.gameUi ?? root.gameUi;
+    const pbGlobal = root.ububallPlayback ?? (typeof require === 'function' ? (() => { try { return require('./ububall-playback.js'); } catch { return null; } })() : null);
+    const onlineOrder = deps.onlineOrder ?? act.onlineOrder ?? pbGlobal?.onlineOrder;
+    const viewIndex = deps.viewIndex ?? act.viewIndex ?? pbGlobal?.viewIndex;
+
+    const getFieldView = deps.getFieldView ?? (s ? () => s.fieldView : act.getFieldView);
+    const getSkaters = deps.getSkaters ?? (s ? () => s.skaters : act.getSkaters);
+    const getThemeColors = deps.getThemeColors ?? (pres ? () => pres.getThemeColors() : act.getThemeColors);
+    const drawRinkSurface = deps.drawRinkSurface ?? (pres ? (ctx, colors) => pres.drawRinkSurface(ctx, colors) : act.drawRinkSurface);
+    const viewTally = deps.viewTally ?? act.viewTally;
+    const getScores = deps.getScores ?? (s ? () => s.scores : act.getScores);
+    const getPhase = deps.getPhase ?? (s ? () => s.phase : act.getPhase);
+    const getOnline = deps.getOnline ?? (s ? () => s.online : act.getOnline);
+    const getTheater = deps.getTheater ?? (s ? () => s.theater : act.getTheater);
+    const getRecording = deps.getRecording ?? (s ? () => s.recording : act.getRecording);
+    const getLastCompletedReplay = deps.getLastCompletedReplay ?? (s ? () => s.lastCompletedReplay : act.getLastCompletedReplay);
+    const getLastSaved = deps.getLastSaved ?? (s ? () => s.lastSaved : act.getLastSaved);
+    const getShot = deps.getShot ?? (s ? () => s.shot : act.getShot);
+    const getCameraMove = deps.getCameraMove ?? (s ? () => s.cameraMove : act.getCameraMove);
+    const replayStore = deps.replayStore ?? act.replayStore;
+    const libraryEntry = deps.libraryEntry ?? act.libraryEntry;
+    const seekReplay = deps.seekReplay ?? (thCtrl ? (at, th, turnIdx) => thCtrl.seekReplay(at, th, turnIdx) : act.seekReplay);
+    const updateReplayBar = deps.updateReplayBar ?? (thCtrl ? () => thCtrl.updateReplayBar() : act.updateReplayBar);
+    const watchReplay = deps.watchReplay ?? (thCtrl ? (replay, file) => thCtrl.watchReplay(replay, file) : act.watchReplay);
+    const matchInProgress = deps.matchInProgress ?? act.matchInProgress;
+    const finishCpuMatch = deps.finishCpuMatch ?? act.finishCpuMatch;
+    const closeFirstTurnGuide = deps.closeFirstTurnGuide ?? act.closeFirstTurnGuide;
+    const closeSummary = deps.closeSummary ?? act.closeSummary;
+    const newMatch = deps.newMatch ?? act.newMatch;
+    const exitMatchMode = deps.exitMatchMode ?? act.exitMatchMode;
     let activeStatsContext = null;
     const deletedReplays = [];
 

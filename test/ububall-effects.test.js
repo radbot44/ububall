@@ -77,7 +77,114 @@ function section(start, end) {
   return source.slice(a, b);
 }
 const __PLAYBACK_PROJ_SHIM__ = "const {\n  PRESENTATION_KEYS, stripPresentation, onlineOrder, viewIndex, applySeatTransform, transformSimSeat\n} = ububallPlayback;\nconst viewFouls = (f, seat) => ububallPlayback.viewFouls(ububallMatch, f, seat);\nconst { projectBody, viewBodies, toViewBody, syncViewBodies } = ububallPlayback.createBodyProjector({\n  P,\n  getEntries: () => (typeof fieldView.entries !== 'undefined' ? fieldView.entries : null),\n  getAnonymous: () => Boolean(typeof fieldView.anonymous !== 'undefined' && fieldView.anonymous),\n  anonymousName: i => (typeof anonymousName === 'function' ? anonymousName(i) : ububallTheater.anonymousName(ububallReplay, i)),\n  isClassicMode: () => (typeof classicMode === 'function' ? classicMode() : false),\n  resolveEquippedSuper: (entry, i) => (typeof resolveEquippedSuper === 'function' ? resolveEquippedSuper(entry, i) : entry?.equippedSuper),\n  getShownSim: () => (typeof shownSim === 'function' ? shownSim() : (typeof simBodies !== 'undefined' ? simBodies : null)),\n  getShownSeat: () => (typeof shownSeat === 'function' ? shownSeat() : 0),\n  getTargetBodies: () => fieldView.bodies,\n  getDirtyMeters: () => (typeof dirtyMeters !== 'undefined' ? dirtyMeters : null)\n});";
-const __THEATER_SHIM__ = "const anonymousName = i => ububallTheater.anonymousName(ububallReplay, i);\nconst _thCtrl = ububallTheater.createReplayTheater({\n  $,\n  window: typeof window !== 'undefined' ? window : {},\n  document: typeof document !== 'undefined' ? document : {},\n  navigator: typeof navigator !== 'undefined' ? navigator : null,\n  localStorage: typeof localStorage !== 'undefined' ? localStorage : { getItem: () => null, setItem() {} },\n  getComputedStyle: typeof getComputedStyle === 'function' ? getComputedStyle : (() => ({ fontFamily: 'sans-serif' })),\n  MessageChannel: typeof MessageChannel !== 'undefined' ? MessageChannel : null,\n  Blob: typeof Blob !== 'undefined' ? Blob : null,\n  File: typeof File !== 'undefined' ? File : null,\n  Image: typeof Image !== 'undefined' ? Image : null,\n  URL: typeof URL !== 'undefined' ? URL : null,\n  HTMLCanvasElement: typeof HTMLCanvasElement !== 'undefined' ? HTMLCanvasElement : null,\n  HTMLImageElement: typeof HTMLImageElement !== 'undefined' ? HTMLImageElement : null,\n  VideoEncoder: typeof VideoEncoder !== 'undefined' ? VideoEncoder : null,\n  VideoFrame: typeof VideoFrame !== 'undefined' ? VideoFrame : null,\n  AudioEncoder: typeof AudioEncoder !== 'undefined' ? AudioEncoder : null,\n  AudioData: typeof AudioData !== 'undefined' ? AudioData : null,\n  OfflineAudioContext: typeof OfflineAudioContext !== 'undefined' ? OfflineAudioContext : null,\n  setTimeout: typeof setTimeout === 'function' ? setTimeout : (() => 1),\n  P,\n  ubu,\n  ububallMatch,\n  ububallReplay,\n  getMp4: () => (typeof ububallMP4 !== 'undefined' ? ububallMP4 : (typeof window !== 'undefined' ? window.ububallMP4 : null)),\n  gameUi: typeof gameUi !== 'undefined' ? gameUi : null,\n  GOAL_CALL_SECONDS: typeof GOAL_CALL_SECONDS !== 'undefined' ? GOAL_CALL_SECONDS : 2.4,\n  materialStyles: typeof materialStyles !== 'undefined' ? materialStyles : {},\n  createEffectsState,\n  onlineOrder,\n  viewIndex,\n  stripPresentation,\n  transformSimSeat,\n  viewFouls: (f, seat) => viewFouls(f, seat),\n  runPlaybackTicks,\n  replayEvents: (turnObj, tick, sim) => (typeof replayEvents === 'function' ? replayEvents(turnObj, tick, sim) : undefined),\n  getReplayFx: () => replayFx,\n  replayHitStop: th => replayHitStop(th),\n  syncReplay: th => syncReplay(th),\n  makeGuide: (sim, turnPlans, seat, gTurn, gScores) => makeGuide(sim, turnPlans, seat, gTurn, gScores),\n  traceGuide: (sim, g) => traceGuide(sim, g),\n  recordTrails: () => recordTrails(),\n  trailPositions: () => (typeof trailPositions === 'function' ? trailPositions() : []),\n  clearDiscontinuousTrails: before => (typeof clearDiscontinuousTrails === 'function' ? clearDiscontinuousTrails(before) : undefined),\n  emitSkaterEffects: dt => emitSkaterEffects(dt),\n  updatePopups: (dt, popups) => updatePopups(dt, popups),\n  updateEffects: (dt, fx) => updateEffects(dt, fx),\n  clearEffects: () => clearEffects(),\n  celebrate: (team, ball, label, scorer) => (typeof celebrate === 'function' ? celebrate(team, ball, label, scorer) : undefined),\n  loopFanfare: voice => (typeof loopFanfare === 'function' ? loopFanfare(voice) : undefined),\n  stopFanfare: () => stopFanfare(),\n  quench: () => (typeof quench === 'function' ? quench() : undefined),\n  lightNet: team => (typeof lightNet === 'function' ? lightNet(team) : undefined),\n  ballOnFire: () => (typeof ballOnFire === 'function' ? ballOnFire() : false),\n  popup: (body, text) => (typeof popup === 'function' ? popup(body, text) : undefined),\n  goalTab: (team, label, scorer) => (typeof goalTab === 'function' ? goalTab(team, label, scorer) : undefined),\n  replayFileName: (recorded, title) => replayFileName(recorded, title),\n  downloadReplay: (file, recorded, title) => (typeof downloadReplay === 'function' ? downloadReplay(file, recorded, title) : undefined),\n  rinkLogo: typeof rinkLogo !== 'undefined' ? rinkLogo : null,\n  getThemeColors: () => (typeof themeColors !== 'undefined' ? themeColors : {}),\n  getSkaters: () => (typeof skaters !== 'undefined' ? skaters : []),\n  clockNow: () => clockNow(),\n  gameAudio: () => gameAudio(),\n  classicMode: () => classicMode(),\n  normalStats: () => normalStats(),\n  idlePlan: () => (typeof idlePlan === 'function' ? idlePlan() : { angle: 0, power: 0, spin: 0, guard: false }),\n  resolveEquippedSuper: (entry, i) => resolveEquippedSuper(entry, i),\n  kickoff: isNew => kickoff(isNew),\n  buildTeam: () => buildTeam(),\n  resetPlans: keep => (typeof resetPlans === 'function' ? resetPlans(keep) : undefined),\n  saveRecording: () => saveRecording(),\n  saveActiveMatch: state => (typeof saveActiveMatch === 'function' ? saveActiveMatch(state) : undefined),\n  stopDemo: () => stopDemo(),\n  closeSummary: () => closeSummary(),\n  endGoalReplay: () => endGoalReplay(),\n  showMode: m => showMode(m),\n  enterMatch: next => enterMatch(next),\n  setShot: next => {\n    if (typeof setShot === 'function') setShot(next);\n    else if (typeof shot !== 'undefined') { shot = next; if (document.body?.dataset) document.body.dataset.shot = next; }\n  },\n  updateHome: () => (typeof updateHome === 'function' ? updateHome() : undefined),\n  bumpCpuGeneration: () => { cpuGeneration++; cpuClient.cancel(); cpuClient.dispose?.(); },\n  say: msg => say(msg),\n  sync: () => sync(),\n  draw: () => draw(),\n  getTheater: () => theater,\n  setTheater: next => { theater = next; },\n  getActivePlayback: () => activePlayback,\n  setActivePlayback: next => { activePlayback = next; },\n  getFieldView: () => fieldView,\n  setFieldView: next => { fieldView = next; },\n  getFieldEffects: () => fieldEffects,\n  setFieldEffects: next => { fieldEffects = next; },\n  getVideoAudio: () => videoAudio,\n  setVideoAudio: next => { videoAudio = next; },\n  getVideoClock: () => videoClock,\n  setVideoClock: next => { videoClock = next; },\n  setCardShot: next => { cardShot = next; },\n  markLayoutDirty: () => { if (typeof layoutDirty !== 'undefined') layoutDirty = true; },\n  setHitStopUntil: next => { hitStopUntil = next; },\n  getShot: () => (typeof shot !== 'undefined' ? shot : 'match'),\n  getScores: () => scores,\n  getTurn: () => turn,\n  syncShownScores: sc => { if (typeof shownScores !== 'undefined') shownScores.splice(0, 2, ...sc); },\n  setFouls: next => { fouls = next; },\n  onWatchReplayLoaded: ({ stats: nextStats }) => {\n    stats = nextStats;\n    phase = 'replay'; selected = 0; drag = null;\n  },\n  onEndReplayState: () => {\n    phase = 'over'; recording = null;\n  },\n  onLoadReplayTurnState: ({ scores: sc, turn: tn, plans: pl, guide: gd }) => {\n    scores = sc; turn = tn; plans = pl; guide = gd;\n  },\n  onPlayFromHereState: ({ roster: nextRoster, simBodies: nextSim, scores: nextScores, turn: nextTurn, fouls: nextFouls, roundTurns: nextRoundTurns, recording: nextRec }) => {\n    roster = nextRoster;\n    simBodies = nextSim;\n    syncViewBodies(simBodies, 0);\n    scores = nextScores; turn = nextTurn; fouls = nextFouls;\n    play = ububallMatch.newPlay(); tally = ububallMatch.newTally();\n    roundTurns = nextRoundTurns; matchTicks = 0; playSegments = [];\n    selected = 0; drag = null; elapsed = accumulator = 0; phase = 'plan';\n    recording = nextRec;\n  }\n});\n_thCtrl.bindEvents();\nconst {\n  isExporting, cancelExport, createReplaySession, withPlaybackContext, loadReplayTurn, stepReplay,\n  seekReplay, endReplayTurn, advanceReplay, updateReplayBar, replayMarks, watchReplay,\n  clearReplayViewer, endReplay, composeFrame, paintField, exportSlice, exportVideo, drawShareCard, playFromHere\n} = _thCtrl;";
+const __THEATER_SHIM__ = `const anonymousName = i => ububallTheater.anonymousName(ububallReplay, i);
+const _thState = ububallPlayback.createMatchSession({
+  get fieldView() { return fieldView; }, set fieldView(v) { fieldView = v; },
+  get fieldEffects() { return fieldEffects; }, set fieldEffects(v) { fieldEffects = v; },
+  get skaters() { return typeof skaters !== 'undefined' ? skaters : []; },
+  get theater() { return typeof theater !== 'undefined' ? theater : null; }, set theater(v) { theater = v; },
+  get activePlayback() { return typeof activePlayback !== 'undefined' ? activePlayback : null; }, set activePlayback(v) { activePlayback = v; },
+  get videoAudio() { return typeof videoAudio !== 'undefined' ? videoAudio : null; }, set videoAudio(v) { videoAudio = v; },
+  get videoClock() { return typeof videoClock !== 'undefined' ? videoClock : null; }, set videoClock(v) { videoClock = v; },
+  set cardShot(v) { cardShot = v; },
+  set layoutDirty(v) { if (typeof layoutDirty !== 'undefined') layoutDirty = v; },
+  set hitStopUntil(v) { hitStopUntil = v; },
+  get shot() { return typeof shot !== 'undefined' ? shot : 'match'; }, set shot(v) { if (typeof shot !== 'undefined') shot = v; },
+  get scores() { return scores; }, set scores(v) { scores = v; },
+  get shownScores() { return typeof shownScores !== 'undefined' ? shownScores : undefined; },
+  get turn() { return turn; }, set turn(v) { turn = v; },
+  get fouls() { return fouls; }, set fouls(v) { fouls = v; },
+  get stats() { return typeof stats !== 'undefined' ? stats : []; }, set stats(v) { stats = v; },
+  get phase() { return typeof phase !== 'undefined' ? phase : 'plan'; }, set phase(v) { phase = v; },
+  get selected() { return typeof selected !== 'undefined' ? selected : 0; }, set selected(v) { selected = v; },
+  get drag() { return typeof drag !== 'undefined' ? drag : null; }, set drag(v) { drag = v; },
+  get recording() { return typeof recording !== 'undefined' ? recording : null; }, set recording(v) { recording = v; },
+  get plans() { return typeof plans !== 'undefined' ? plans : []; }, set plans(v) { plans = v; },
+  get guide() { return typeof guide !== 'undefined' ? guide : null; }, set guide(v) { guide = v; },
+  get roster() { return typeof roster !== 'undefined' ? roster : []; }, set roster(v) { roster = v; },
+  get simBodies() { return typeof simBodies !== 'undefined' ? simBodies : []; }, set simBodies(v) { simBodies = v; },
+  get play() { return typeof play !== 'undefined' ? play : null; }, set play(v) { play = v; },
+  get tally() { return typeof tally !== 'undefined' ? tally : null; }, set tally(v) { tally = v; },
+  get roundTurns() { return typeof roundTurns !== 'undefined' ? roundTurns : 0; }, set roundTurns(v) { roundTurns = v; },
+  get matchTicks() { return typeof matchTicks !== 'undefined' ? matchTicks : 0; }, set matchTicks(v) { matchTicks = v; },
+  get playSegments() { return typeof playSegments !== 'undefined' ? playSegments : []; }, set playSegments(v) { playSegments = v; },
+  get elapsed() { return typeof elapsed !== 'undefined' ? elapsed : 0; }, set elapsed(v) { elapsed = v; },
+  get accumulator() { return typeof accumulator !== 'undefined' ? accumulator : 0; }, set accumulator(v) { accumulator = v; },
+  get cpuGeneration() { return typeof cpuGeneration !== 'undefined' ? cpuGeneration : 0; }, set cpuGeneration(v) { if (typeof cpuGeneration !== 'undefined') cpuGeneration = v; },
+  get cpuClient() { return typeof cpuClient !== 'undefined' ? cpuClient : null; }
+});
+const _thCtrl = ububallTheater.createReplayTheater({
+  $,
+  env: globalThis,
+  window: typeof window !== 'undefined' ? window : {},
+  document: typeof document !== 'undefined' ? document : {},
+  localStorage: typeof localStorage !== 'undefined' ? localStorage : { getItem: () => null, setItem() {} },
+  getComputedStyle: typeof getComputedStyle === 'function' ? getComputedStyle : (() => ({ fontFamily: 'sans-serif' })),
+  P, ubu, ububallMatch, ububallReplay,
+  gameUi: typeof gameUi !== 'undefined' ? gameUi : null,
+  GOAL_CALL_SECONDS: typeof GOAL_CALL_SECONDS !== 'undefined' ? GOAL_CALL_SECONDS : 2.4,
+  materialStyles: typeof materialStyles !== 'undefined' ? materialStyles : {},
+  createEffectsState,
+  state: _thState,
+  playback: { onlineOrder, viewIndex, stripPresentation, transformSimSeat, viewFouls, runPlaybackTicks, syncViewBodies },
+  actions: {
+    replayEvents: (turnObj, tick, sim) => (typeof replayEvents === 'function' ? replayEvents(turnObj, tick, sim) : undefined),
+    getReplayFx: () => replayFx,
+    replayHitStop: th => replayHitStop(th),
+    syncReplay: th => syncReplay(th),
+    makeGuide: (sim, turnPlans, seat, gTurn, gScores) => makeGuide(sim, turnPlans, seat, gTurn, gScores),
+    traceGuide: (sim, g) => traceGuide(sim, g),
+    recordTrails: () => recordTrails(),
+    trailPositions: () => (typeof trailPositions === 'function' ? trailPositions() : []),
+    clearDiscontinuousTrails: before => (typeof clearDiscontinuousTrails === 'function' ? clearDiscontinuousTrails(before) : undefined),
+    emitSkaterEffects: dt => emitSkaterEffects(dt),
+    updatePopups: (dt, popups) => updatePopups(dt, popups),
+    updateEffects: (dt, fx) => updateEffects(dt, fx),
+    clearEffects: () => clearEffects(),
+    celebrate: (team, ball, label, scorer) => (typeof celebrate === 'function' ? celebrate(team, ball, label, scorer) : undefined),
+    loopFanfare: voice => (typeof loopFanfare === 'function' ? loopFanfare(voice) : undefined),
+    stopFanfare: () => stopFanfare(),
+    quench: () => (typeof quench === 'function' ? quench() : undefined),
+    lightNet: team => (typeof lightNet === 'function' ? lightNet(team) : undefined),
+    ballOnFire: () => (typeof ballOnFire === 'function' ? ballOnFire() : false),
+    popup: (body, text) => (typeof popup === 'function' ? popup(body, text) : undefined),
+    goalTab: (team, label, scorer) => (typeof goalTab === 'function' ? goalTab(team, label, scorer) : undefined),
+    replayFileName: (recorded, title) => replayFileName(recorded, title),
+    downloadReplay: (file, recorded, title) => (typeof downloadReplay === 'function' ? downloadReplay(file, recorded, title) : undefined),
+    rinkLogo: typeof rinkLogo !== 'undefined' ? rinkLogo : null,
+    getThemeColors: () => (typeof themeColors !== 'undefined' ? themeColors : {}),
+    clockNow: () => clockNow(),
+    gameAudio: () => gameAudio(),
+    classicMode: () => classicMode(),
+    normalStats: () => normalStats(),
+    idlePlan: () => (typeof idlePlan === 'function' ? idlePlan() : { angle: 0, power: 0, spin: 0, guard: false }),
+    resolveEquippedSuper: (entry, i) => resolveEquippedSuper(entry, i),
+    kickoff: isNew => kickoff(isNew),
+    buildTeam: () => buildTeam(),
+    resetPlans: keep => (typeof resetPlans === 'function' ? resetPlans(keep) : undefined),
+    saveRecording: () => saveRecording(),
+    saveActiveMatch: st => (typeof saveActiveMatch === 'function' ? saveActiveMatch(st) : undefined),
+    stopDemo: () => stopDemo(),
+    closeSummary: () => closeSummary(),
+    endGoalReplay: () => endGoalReplay(),
+    showMode: m => showMode(m),
+    enterMatch: next => enterMatch(next),
+    setShot: next => {
+      if (typeof setShot === 'function') setShot(next);
+      else _thState.setShot(next, typeof document !== 'undefined' ? document : null);
+    },
+    updateHome: () => (typeof updateHome === 'function' ? updateHome() : undefined),
+    say: msg => say(msg),
+    sync: () => sync(),
+    draw: () => draw()
+  }
+});
+_thCtrl.bindEvents();
+const {
+  isExporting, cancelExport, createReplaySession, withPlaybackContext, loadReplayTurn, stepReplay,
+  seekReplay, endReplayTurn, advanceReplay, updateReplayBar, replayMarks, watchReplay,
+  clearReplayViewer, endReplay, composeFrame, paintField, exportSlice, exportVideo, drawShareCard, playFromHere
+} = _thCtrl;`;
 const __PLAYBACK_DRIVER_SHIM__ = "const postGoalState = { steps: 0, onTick: null };\nconst {\n  impactFor, applyTickEvents, stepPostGoalFrame, runPlaybackTicks, advancePostGoal, stepOnlineTurn\n} = ububallPlayback.createPlaybackDriver({\n  P,\n  ububallMatch,\n  clockNow: () => (typeof clockNow === 'function' ? clockNow() : performance.now()),\n  impact: (ms, shake) => impact(ms, shake),\n  creditSave: (body, own, iron) => creditSave(body, own, iron),\n  popup: (body, text) => popup(body, text),\n  getBallView: () => fieldView.bodies[6],\n  traceGuide: sim => (typeof traceGuide === 'function' ? traceGuide(sim) : undefined),\n  recordTrails: () => (typeof recordTrails === 'function' ? recordTrails() : undefined)\n});";
 
 test('trail gradient retains a hot sample between cool endpoints', () => {

@@ -275,3 +275,161 @@ test('ububall-theater: watchReplay, seekReplay, advanceReplay, exportSlice, with
   assert.equal(roster.length, 3);
   assert.ok(recording, 'starts fresh local replay recording');
 });
+
+test('ububall-theater: createMatchSession drives createReplayTheater, createRinkPresenter, and createBodyProjector without callback bags', () => {
+  const ubus = Array.from({ length: 6 }, (_, i) => ({ dna: ubu.toCode(ubu.randomDNA()), super: i % 8 }));
+  const rec = ububallReplay.create({ mode: 'standard', seat: 1, names: ['Alpha', 'Beta'], ubus });
+  const normal = { mass: 127, size: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 };
+  const b1 = P.kickoff();
+  b1.slice(0, 6).forEach(b => P.applyStats(b, normal));
+  b1[3].x = 760; b1[3].y = 410; b1[3].carded = true;
+  const plans = Array.from({ length: 6 }, () => ({ angle: 0, power: 0.4, spin: 0, superArm: false, guard: false }));
+  const t1 = ububallReplay.addTurn(rec, {
+    turn: 1,
+    scores: [0, 1],
+    fouls: { ...ububallMatch.newFouls(), crease: [true, false], corner: 0, cornerTurns: 1 },
+    bodies: b1,
+    plans
+  });
+  t1.ticks = 20;
+  t1.saves = [];
+  t1.stops = [];
+  t1.goal = null;
+
+  const dummy = () => {};
+  const els = new Map();
+  const $ = id => {
+    if (!els.has(id)) {
+      els.set(id, {
+        value: '1', max: 0, textContent: '', hidden: false, disabled: false, checked: false,
+        style: {}, dataset: {},
+        classList: { toggle: dummy, add: dummy, remove: dummy },
+        setAttribute: dummy, replaceChildren: dummy, matches: () => false,
+        addEventListener: dummy, closest: () => ({ hidden: false }), querySelectorAll: () => []
+      });
+    }
+    return els.get(id);
+  };
+  let cpuCancelled = 0;
+  const doc = {
+    body: { dataset: {}, classList: { toggle: dummy } },
+    createElement: () => ({ style: {}, setAttribute: dummy, getContext: () => ({}) })
+  };
+  const state = ububallPlayback.createMatchSession({
+    fieldView: { mode: 'standard', anonymous: false, portrait: false, entries: [], bodies: P.kickoff() },
+    fieldEffects: ububallPresentation.createEffectsState([], {}),
+    dirtyMeters: new Set(),
+    simBodies: P.kickoff(),
+    fouls: ububallMatch.newFouls(),
+    cpuClient: { cancel() { cpuCancelled++; }, dispose: dummy }
+  });
+
+  const shownSim = () => (state.activePlayback || state.theater)?.sim ?? state.simBodies;
+  const shownSeat = () => (state.activePlayback || state.theater)?.seat ?? 0;
+  const projector = ububallPlayback.createBodyProjector({
+    P,
+    state,
+    anonymousName: i => ububallTheater.anonymousName(ububallReplay, i),
+    isClassicMode: () => ububallMatch.rule(state.fieldView.mode, 'classic'),
+    resolveEquippedSuper: (e, i) => e?.equippedSuper || P.SUPERS[i % 8],
+    getShownSim: shownSim,
+    getShownSeat: shownSeat
+  });
+  const presenter = ububallPresentation.createRinkPresenter({
+    P,
+    ububallMatch,
+    ububallReplay,
+    state,
+    clockNow: () => 1000,
+    gameAudio: () => null,
+    anonymousName: i => ububallTheater.anonymousName(ububallReplay, i)
+  });
+  const driver = ububallPlayback.createPlaybackDriver({
+    P,
+    ububallMatch,
+    clockNow: () => state.videoClock ?? state.activePlayback?.clock ?? 1000,
+    impact: ms => { state.hitStopUntil = 1000 + ms; },
+    creditSave: dummy,
+    popup: dummy,
+    getBallView: () => state.fieldView.bodies[6],
+    traceGuide: dummy,
+    recordTrails: () => presenter.recordTrails()
+  });
+
+  const ctrl = ububallTheater.createReplayTheater({
+    $,
+    document: doc,
+    localStorage: { getItem: () => null, setItem: dummy },
+    getComputedStyle: () => ({ fontFamily: 'sans-serif' }),
+    P,
+    ubu,
+    ububallMatch,
+    ububallReplay,
+    gameUi: { select: dummy },
+    state,
+    presenter,
+    playback: { ...ububallPlayback, runPlaybackTicks: driver.runPlaybackTicks, syncViewBodies: projector.syncViewBodies },
+    actions: {
+      replayEvents: dummy,
+      getReplayFx: () => ({ hit: dummy, wall: dummy, shock: dummy, super: dummy }),
+      replayHitStop: th => th.fx?.hitStopUntil ?? state.hitStopUntil,
+      syncReplay: th => projector.syncViewBodies(th ? th.sim : shownSim(), th ? th.seat : shownSeat(), th?.bodies || state.fieldView.bodies, th?.anonymous, null, th?.entries),
+      makeGuide: (sim, turnPlans, seat, gTurn, gScores) => {
+        const start = projector.viewBodies(sim, seat);
+        return {
+          turn: gTurn, goals: gScores[0] + gScores[1], seat, ticks: 0, start,
+          paths: start.map(b => [b.x, b.y]),
+          moves: ububallPlayback.onlineOrder(turnPlans, seat).map(p => ({ ...p, angle: p.angle + (seat ? Math.PI : 0) }))
+        };
+      },
+      traceGuide: dummy,
+      goalTab: dummy,
+      replayFileName: ububallStats.replayFileName,
+      downloadReplay: dummy,
+      clockNow: () => state.videoClock ?? state.activePlayback?.clock ?? 1000,
+      gameAudio: () => null,
+      classicMode: () => false,
+      normalStats: () => normal,
+      idlePlan: () => ({ angle: 0, power: 0, spin: 0, guard: false }),
+      resolveEquippedSuper: (e, i) => e?.equippedSuper || P.SUPERS[i % 8],
+      kickoff: () => { state.simBodies = P.kickoff(); projector.syncViewBodies(state.simBodies, 0); return state.fieldView.bodies; },
+      buildTeam: dummy,
+      resetPlans: dummy,
+      saveRecording: dummy,
+      saveActiveMatch: dummy,
+      stopDemo: dummy,
+      closeSummary: dummy,
+      endGoalReplay: dummy,
+      showMode: dummy,
+      enterMatch: next => state.setShot(next, doc),
+      updateHome: dummy,
+      say: dummy,
+      sync: dummy,
+      draw: dummy
+    }
+  });
+  ctrl.bindEvents();
+
+  ctrl.watchReplay(rec, null);
+  assert.equal(state.shot, 'replay');
+  assert.equal(doc.body.dataset.shot, 'replay');
+  assert.equal(state.phase, 'replay');
+  assert.equal(state.cpuGeneration, 1);
+  assert.equal(cpuCancelled, 1);
+  assert.deepEqual(state.scores, [1, 0]);
+  assert.deepEqual(state.shownScores, [1, 0]);
+
+  ctrl.playFromHere();
+  assert.equal(state.theater, null);
+  assert.equal(state.shot, 'match');
+  assert.equal(state.phase, 'plan');
+  assert.equal(state.simBodies[0].carded, true);
+  assert.equal(state.roster.length, 3);
+  assert.ok(state.recording);
+
+  ctrl.watchReplay(rec, null);
+  ctrl.endReplay();
+  assert.equal(state.theater, null);
+  assert.equal(state.phase, 'over');
+  assert.equal(state.recording, null);
+});

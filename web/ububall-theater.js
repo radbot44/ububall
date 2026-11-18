@@ -67,117 +67,134 @@
     };
   }
 
-  function createReplayTheater({
-    $,
-    window = root,
-    document,
-    navigator = root.navigator,
-    localStorage = root.localStorage,
-    getComputedStyle = root.getComputedStyle,
-    MessageChannel = root.MessageChannel,
-    Blob = root.Blob,
-    File = root.File,
-    Image = root.Image,
-    URL = root.URL,
-    HTMLCanvasElement = root.HTMLCanvasElement,
-    HTMLImageElement = root.HTMLImageElement,
-    VideoEncoder = root.VideoEncoder,
-    VideoFrame = root.VideoFrame,
-    AudioEncoder = root.AudioEncoder,
-    AudioData = root.AudioData,
-    OfflineAudioContext = root.OfflineAudioContext,
-    setTimeout = root.setTimeout,
-    P,
-    ubu,
-    ububallMatch,
-    ububallReplay,
-    getMp4 = () => (typeof ububallMP4 !== 'undefined' ? ububallMP4 : window?.ububallMP4),
-    gameUi,
-    GOAL_CALL_SECONDS = 2.4,
-    materialStyles = {},
-    createEffectsState,
-    onlineOrder,
-    viewIndex,
-    stripPresentation,
-    transformSimSeat,
-    viewFouls,
-    runPlaybackTicks,
-    replayEvents,
-    getReplayFx,
-    replayHitStop,
-    syncReplay,
-    makeGuide,
-    traceGuide,
-    recordTrails,
-    trailPositions,
-    clearDiscontinuousTrails,
-    emitSkaterEffects,
-    updatePopups,
-    updateEffects,
-    clearEffects,
-    celebrate,
-    loopFanfare,
-    stopFanfare,
-    quench,
-    lightNet,
-    ballOnFire,
-    popup,
-    goalTab,
-    replayFileName,
-    downloadReplay,
-    rinkLogo,
-    getThemeColors,
-    getSkaters,
-    ensureEntrySprites = null,
-    releaseViewGpu = null,
-    clockNow,
-    gameAudio,
-    classicMode,
-    normalStats,
-    idlePlan,
-    resolveEquippedSuper,
-    kickoff,
-    buildTeam,
-    resetPlans,
-    saveRecording,
-    saveActiveMatch,
-    stopDemo,
-    closeSummary,
-    endGoalReplay,
-    showMode,
-    enterMatch,
-    setShot,
-    updateHome,
-    bumpCpuGeneration,
-    say,
-    sync,
-    draw,
-    // Shared state getters & setters
-    getTheater,
-    setTheater,
-    getActivePlayback,
-    setActivePlayback,
-    getFieldView,
-    setFieldView,
-    getFieldEffects,
-    setFieldEffects,
-    getVideoAudio,
-    setVideoAudio,
-    getVideoClock,
-    setVideoClock,
-    setCardShot,
-    markLayoutDirty,
-    setHitStopUntil,
-    getShot,
-    getScores,
-    getTurn,
-    syncShownScores,
-    setFouls,
-    onWatchReplayLoaded,
-    onEndReplayState,
-    onLoadReplayTurnState,
-    onPlayFromHereState
-  }) {
+  function createReplayTheater(deps = {}) {
+    const s = deps.state || deps.session || null;
+    const pres = deps.presenter || null;
+    const pb = deps.playback || null;
+    const act = deps.actions || deps;
+
+    const window = deps.window ?? root;
+    const env = deps.env ?? window;
+    const document = deps.document ?? env?.document ?? window?.document ?? root.document;
+    const $ = deps.$ ?? act.$ ?? (id => document?.getElementById?.(id));
+    const navigator = deps.navigator !== undefined ? deps.navigator : (env?.navigator ?? window?.navigator ?? root.navigator);
+    const localStorage = deps.localStorage ?? env?.localStorage ?? window?.localStorage ?? root.localStorage;
+    const getComputedStyle = deps.getComputedStyle ?? env?.getComputedStyle ?? window?.getComputedStyle ?? root.getComputedStyle;
+    const MessageChannel = deps.MessageChannel ?? env?.MessageChannel ?? window?.MessageChannel ?? root.MessageChannel;
+    const Blob = deps.Blob ?? env?.Blob ?? window?.Blob ?? root.Blob;
+    const File = deps.File ?? env?.File ?? window?.File ?? root.File;
+    const Image = deps.Image ?? env?.Image ?? window?.Image ?? root.Image;
+    const URL = deps.URL ?? env?.URL ?? window?.URL ?? root.URL;
+    const HTMLCanvasElement = deps.HTMLCanvasElement !== undefined ? deps.HTMLCanvasElement : (env?.HTMLCanvasElement ?? window?.HTMLCanvasElement ?? root.HTMLCanvasElement);
+    const HTMLImageElement = deps.HTMLImageElement !== undefined ? deps.HTMLImageElement : (env?.HTMLImageElement ?? window?.HTMLImageElement ?? root.HTMLImageElement);
+    const VideoEncoder = deps.VideoEncoder !== undefined ? deps.VideoEncoder : (env?.VideoEncoder ?? window?.VideoEncoder ?? root.VideoEncoder);
+    const VideoFrame = deps.VideoFrame !== undefined ? deps.VideoFrame : (env?.VideoFrame ?? window?.VideoFrame ?? root.VideoFrame);
+    const AudioEncoder = deps.AudioEncoder !== undefined ? deps.AudioEncoder : (env?.AudioEncoder ?? window?.AudioEncoder ?? root.AudioEncoder);
+    const AudioData = deps.AudioData !== undefined ? deps.AudioData : (env?.AudioData ?? window?.AudioData ?? root.AudioData);
+    const OfflineAudioContext = deps.OfflineAudioContext !== undefined ? deps.OfflineAudioContext : (env?.OfflineAudioContext ?? window?.OfflineAudioContext ?? root.OfflineAudioContext);
+    const setTimeout = deps.setTimeout ?? env?.setTimeout ?? window?.setTimeout ?? root.setTimeout;
+
+    const P = deps.P ?? act.P ?? root.ububallPhysics;
+    const ubu = deps.ubu ?? act.ubu ?? root.ubu;
+    const ububallMatch = deps.ububallMatch ?? act.ububallMatch ?? root.ububallMatch;
+    const ububallReplay = deps.ububallReplay ?? act.ububallReplay ?? root.ububallReplay;
+    const getMp4 = deps.getMp4 ?? act.getMp4 ?? (() => (typeof ububallMP4 !== 'undefined' ? ububallMP4 : (env?.ububallMP4 ?? window?.ububallMP4)));
+    const gameUi = deps.gameUi !== undefined ? deps.gameUi : (act.gameUi ?? root.gameUi);
+    const replayFileName = deps.replayFileName ?? act.replayFileName ?? root.ububallStats?.replayFileName;
+
+    const presGlobal = window?.ububallPresentation ?? root.ububallPresentation ?? (typeof require === 'function' ? (() => { try { return require('./ububall-presentation.js'); } catch { return null; } })() : null);
+    const GOAL_CALL_SECONDS = deps.GOAL_CALL_SECONDS ?? pres?.GOAL_CALL_SECONDS ?? presGlobal?.GOAL_CALL_SECONDS ?? 2.4;
+    const materialStyles = deps.materialStyles ?? pres?.MATERIAL_STYLES ?? presGlobal?.MATERIAL_STYLES ?? {};
+    const createEffectsState = deps.createEffectsState ?? pres?.createEffectsState ?? presGlobal?.createEffectsState ?? act.createEffectsState;
+    const recordTrails = deps.recordTrails ?? (pres ? () => pres.recordTrails() : act.recordTrails);
+    const trailPositions = deps.trailPositions ?? (pres ? () => pres.trailPositions() : act.trailPositions);
+    const clearDiscontinuousTrails = deps.clearDiscontinuousTrails ?? (pres ? before => pres.clearDiscontinuousTrails(before) : act.clearDiscontinuousTrails);
+    const emitSkaterEffects = deps.emitSkaterEffects ?? (pres ? dt => pres.emitSkaterEffects(dt) : act.emitSkaterEffects);
+    const updatePopups = deps.updatePopups ?? (pres ? (dt, popups) => pres.updatePopups(dt, popups) : act.updatePopups);
+    const updateEffects = deps.updateEffects ?? (pres ? (dt, fx) => pres.updateEffects(dt, fx) : act.updateEffects);
+    const clearEffects = deps.clearEffects ?? (pres ? () => pres.clearEffects() : act.clearEffects);
+    const celebrate = deps.celebrate ?? (pres ? (team, ball, label, scorer) => pres.celebrate(team, ball, label, scorer) : act.celebrate);
+    const loopFanfare = deps.loopFanfare ?? (pres ? voice => pres.loopFanfare(voice) : act.loopFanfare);
+    const stopFanfare = deps.stopFanfare ?? (pres ? () => pres.stopFanfare() : act.stopFanfare);
+    const quench = deps.quench ?? (pres ? () => pres.quench() : act.quench);
+    const lightNet = deps.lightNet ?? (pres ? team => pres.lightNet(team) : act.lightNet);
+    const ballOnFire = deps.ballOnFire ?? (pres ? () => pres.ballOnFire() : act.ballOnFire);
+    const popup = deps.popup ?? (pres ? (body, text) => pres.popup(body, text) : act.popup);
+    const rinkLogo = deps.rinkLogo !== undefined ? deps.rinkLogo : (pres?.rinkLogo ?? act.rinkLogo ?? null);
+    const getThemeColors = deps.getThemeColors ?? (pres ? () => pres.getThemeColors() : act.getThemeColors);
+    const ensureEntrySprites = deps.ensureEntrySprites ?? (pres?.ensureEntrySprites ? e => pres.ensureEntrySprites(e) : (act.ensureEntrySprites ?? null));
+    const releaseViewGpu = deps.releaseViewGpu ?? (pres?.releaseViewGpu ? v => pres.releaseViewGpu(v) : (act.releaseViewGpu ?? null));
+
+    const pbGlobal = window?.ububallPlayback ?? root.ububallPlayback ?? (typeof require === 'function' ? (() => { try { return require('./ububall-playback.js'); } catch { return null; } })() : null);
+    const onlineOrder = deps.onlineOrder ?? pb?.onlineOrder ?? pbGlobal?.onlineOrder;
+    const viewIndex = deps.viewIndex ?? pb?.viewIndex ?? pbGlobal?.viewIndex;
+    const stripPresentation = deps.stripPresentation ?? pb?.stripPresentation ?? pbGlobal?.stripPresentation;
+    const transformSimSeat = deps.transformSimSeat ?? pb?.transformSimSeat ?? pbGlobal?.transformSimSeat;
+    const viewFouls = deps.viewFouls ?? act.viewFouls ?? (pb?.viewFouls
+      ? (pb.viewFouls.length >= 3 ? (f, seat) => pb.viewFouls(ububallMatch, f, seat) : pb.viewFouls)
+      : (f, seat) => pbGlobal?.viewFouls(ububallMatch, f, seat));
+    const runPlaybackTicks = deps.runPlaybackTicks ?? pb?.runPlaybackTicks ?? act.runPlaybackTicks;
+    const syncViewBodies = deps.syncViewBodies ?? pb?.syncViewBodies ?? act.syncViewBodies;
+
+    const getSkaters = deps.getSkaters ?? (s ? () => s.skaters : act.getSkaters);
+    const getTheater = deps.getTheater ?? (s ? () => s.theater : act.getTheater);
+    const setTheater = deps.setTheater ?? (s ? next => { s.theater = next; } : act.setTheater);
+    const getActivePlayback = deps.getActivePlayback ?? (s ? () => s.activePlayback : act.getActivePlayback);
+    const setActivePlayback = deps.setActivePlayback ?? (s ? next => { s.activePlayback = next; } : act.setActivePlayback);
+    const getFieldView = deps.getFieldView ?? (s ? () => s.fieldView : act.getFieldView);
+    const setFieldView = deps.setFieldView ?? (s ? next => { s.fieldView = next; } : act.setFieldView);
+    const getFieldEffects = deps.getFieldEffects ?? (s ? () => s.fieldEffects : act.getFieldEffects);
+    const setFieldEffects = deps.setFieldEffects ?? (s ? next => { s.fieldEffects = next; } : act.setFieldEffects);
+    const getVideoAudio = deps.getVideoAudio ?? (s ? () => s.videoAudio : act.getVideoAudio);
+    const setVideoAudio = deps.setVideoAudio ?? (s ? next => { s.videoAudio = next; } : act.setVideoAudio);
+    const getVideoClock = deps.getVideoClock ?? (s ? () => s.videoClock : act.getVideoClock);
+    const setVideoClock = deps.setVideoClock ?? (s ? next => { s.videoClock = next; } : act.setVideoClock);
+    const setCardShot = deps.setCardShot ?? (s ? next => { s.cardShot = next; } : act.setCardShot);
+    const markLayoutDirty = deps.markLayoutDirty ?? (s ? () => { s.layoutDirty = true; } : act.markLayoutDirty);
+    const setHitStopUntil = deps.setHitStopUntil ?? (s ? next => { s.hitStopUntil = next; } : act.setHitStopUntil);
+    const getShot = deps.getShot ?? (s ? () => s.shot : act.getShot);
+    const setShot = deps.setShot ?? act.setShot ?? (s?.setShot ? next => s.setShot(next, document) : (next => { if (s) s.shot = next; }));
+    const getScores = deps.getScores ?? (s ? () => s.scores : act.getScores);
+    const getTurn = deps.getTurn ?? (s ? () => s.turn : act.getTurn);
+    const syncShownScores = deps.syncShownScores ?? (s?.syncShownScores ? sc => s.syncShownScores(sc) : act.syncShownScores);
+    const setFouls = deps.setFouls ?? (s ? next => { s.fouls = next; } : act.setFouls);
+    const bumpCpuGeneration = deps.bumpCpuGeneration ?? act.bumpCpuGeneration ?? (s?.bumpCpuGeneration ? () => s.bumpCpuGeneration() : (() => {
+      if (s) { s.cpuGeneration++; s.cpuClient?.cancel?.(); s.cpuClient?.dispose?.(); }
+    }));
+
+    const onWatchReplayLoaded = deps.onWatchReplayLoaded ?? (s?.loadWatchReplay ? payload => s.loadWatchReplay(payload) : act.onWatchReplayLoaded);
+    const onEndReplayState = deps.onEndReplayState ?? (s?.endReplay ? () => s.endReplay() : act.onEndReplayState);
+    const onLoadReplayTurnState = deps.onLoadReplayTurnState ?? (s?.loadReplayTurn ? payload => s.loadReplayTurn(payload) : act.onLoadReplayTurnState);
+    const onPlayFromHereState = deps.onPlayFromHereState ?? (s?.takeOverFromReplay ? payload => s.takeOverFromReplay(payload, { ububallMatch, syncViewBodies }) : act.onPlayFromHereState);
+
+    const replayEvents = deps.replayEvents ?? act.replayEvents;
+    const getReplayFx = deps.getReplayFx ?? act.getReplayFx;
+    const replayHitStop = deps.replayHitStop ?? act.replayHitStop;
+    const syncReplay = deps.syncReplay ?? act.syncReplay;
+    const makeGuide = deps.makeGuide ?? act.makeGuide;
+    const traceGuide = deps.traceGuide ?? act.traceGuide;
+    const goalTab = deps.goalTab ?? act.goalTab;
+    const downloadReplay = deps.downloadReplay ?? act.downloadReplay;
+    const clockNow = deps.clockNow ?? act.clockNow;
+    const gameAudio = deps.gameAudio ?? act.gameAudio;
+    const classicMode = deps.classicMode ?? act.classicMode;
+    const normalStats = deps.normalStats ?? act.normalStats;
+    const idlePlan = deps.idlePlan ?? act.idlePlan;
+    const resolveEquippedSuper = deps.resolveEquippedSuper ?? act.resolveEquippedSuper;
+    const kickoff = deps.kickoff ?? act.kickoff;
+    const buildTeam = deps.buildTeam ?? act.buildTeam;
+    const resetPlans = deps.resetPlans ?? act.resetPlans;
+    const saveRecording = deps.saveRecording ?? act.saveRecording;
+    const saveActiveMatch = deps.saveActiveMatch ?? act.saveActiveMatch;
+    const stopDemo = deps.stopDemo ?? act.stopDemo;
+    const closeSummary = deps.closeSummary ?? act.closeSummary;
+    const endGoalReplay = deps.endGoalReplay ?? act.endGoalReplay;
+    const showMode = deps.showMode ?? act.showMode;
+    const enterMatch = deps.enterMatch ?? act.enterMatch;
+    const updateHome = deps.updateHome ?? act.updateHome;
+    const say = deps.say ?? act.say;
+    const sync = deps.sync ?? act.sync;
+    const draw = deps.draw ?? act.draw;
     const WIN_SECONDS = GOAL_CALL_SECONDS + .6;
     const currentReplay = () => getActivePlayback() || getTheater();
     const anonName = i => anonymousName(ububallReplay, i);
