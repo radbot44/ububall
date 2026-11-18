@@ -193,7 +193,7 @@
   const {
     PRESENTATION_KEYS, stripPresentation, onlineOrder, viewIndex, applySeatTransform,
     transformSimSeat, viewFouls: projectFouls, createMatchSession, resolveEquippedSuper: calcEquippedSuper,
-    restoreEntry: decodeSavedEntry, createBodyProjector, createPlaybackDriver,
+    formatDrawerSuperStatus, restoreEntry: decodeSavedEntry, createBodyProjector, createPlaybackDriver,
     createMeterController, createPlanClockController, createFrameLoop, createSummaryController,
     createCpuTurnPlanner, createBannerController, bindMatchShortcuts, bindSpinSlider, createDemoFingerController,
     createGoalReplayController, createMatchLifecycleController, createOnlineMatchController,
@@ -1052,6 +1052,7 @@
       }
     }
     renderKnobs();
+    if (statDrawer.matches(':popover-open')) updateStatDrawerSuper(Number(statDrawer.dataset.player));
     if (online?.active) {
       $('launch').disabled = phase !== 'plan';
       $('launch-label').textContent = phase === 'plan' ? 'Lock moves' : phase === 'play' ? 'In motion…' : phase === 'over' ? 'Match complete' : 'Waiting…';
@@ -1076,6 +1077,71 @@
     return portrait;
   }
   const archetypeOfModel = model => (typeof ubuArchetype !== 'undefined' && model ? ubuArchetype.format(model) : '');
+  function updateStatDrawerSuper(i) {
+    const card = $('stat-drawer-super');
+    if (!card || Number(card.dataset.player) !== i) return;
+    const body = fieldView.bodies?.[i];
+    const meterVal = Math.max(0, Math.min(100, body?.meter || 0));
+    card.classList.toggle('armed', Boolean(body?.superArm));
+    card.classList.toggle('ready', !body?.superArm && meterVal >= 100);
+    const fill = $('stat-drawer-super-fill');
+    if (fill) setMeterFill(fill, meterVal);
+    const pct = $('stat-drawer-super-pct');
+    if (pct) pct.textContent = formatDrawerSuperStatus(body);
+  }
+  function renderDrawerSuperCard(entry, i) {
+    if (classicMode()) return null;
+    const body = fieldView.bodies?.[i];
+    const rawAbility = body?.equippedSuper || entry?.equippedSuper;
+    const ability = rawAbility && rawAbility.copies != null
+      ? rawAbility
+      : resolveEquippedSuper({ ...entry, equippedSuper: rawAbility }, i);
+    if (!ability) return null;
+    const meterVal = Math.max(0, Math.min(100, body?.meter || 0));
+    const card = document.createElement('div');
+    card.id = 'stat-drawer-super';
+    card.className = 'stat-drawer-super';
+    card.dataset.player = i;
+    card.classList.toggle('armed', Boolean(body?.superArm));
+    card.classList.toggle('ready', !body?.superArm && meterVal >= 100);
+    const top = document.createElement('div');
+    top.className = 'stat-drawer-super-head';
+    const icon = document.createElement('img');
+    icon.className = 'stat-drawer-super-icon';
+    icon.src = ability.icon || P.SUPERS[0].icon;
+    icon.alt = '';
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'stat-drawer-super-title';
+    const name = document.createElement('strong');
+    name.textContent = ability.displayName || ability.name;
+    const pct = document.createElement('span');
+    pct.id = 'stat-drawer-super-pct';
+    pct.className = 'super-pct';
+    pct.textContent = formatDrawerSuperStatus(body);
+    titleWrap.append(name, pct);
+    const track = document.createElement('div');
+    track.className = 'super-meter-track';
+    const fill = document.createElement('i');
+    fill.id = 'stat-drawer-super-fill';
+    fill.className = 'super-meter-fill';
+    setMeterFill(fill, meterVal);
+    track.append(fill);
+    const main = document.createElement('div');
+    main.className = 'stat-drawer-super-main';
+    main.append(titleWrap, track);
+    top.append(icon, main);
+    const desc = document.createElement('p');
+    desc.className = 'stat-drawer-super-desc';
+    desc.textContent = ability.desc || '';
+    card.append(top, desc);
+    if (ability.copies > 1) {
+      const mastery = document.createElement('small');
+      mastery.className = 'stat-drawer-super-mastery';
+      mastery.textContent = `Mastery (${ability.copies}×): +${(ability.bonusTicks / 240).toFixed(1)}s duration · +${ability.bonusRefund}% meter refund`;
+      card.append(mastery);
+    }
+    return card;
+  }
   function openStatDrawer(i) {
     if (drawerClosed.player === i && performance.now() - drawerClosed.at < 400) return;
     const entry = fieldView.entries[i], close = document.createElement('button');
@@ -1088,9 +1154,10 @@
       Object.assign(document.createElement('small'), { textContent: [archText, sideText].filter(Boolean).join(' · ') }));
     const head = document.createElement('div'); head.className = 'stat-drawer-head';
     head.append(ubuRender.spriteImg ? ubuRender.spriteImg(entry.model, 'stat-drawer-art', 256) : ubuRender(entry.model, 'stat-drawer-art'), titles, close);
+    const superCard = renderDrawerSuperCard(entry, i);
     const box = renderStatsBox(stats[i] || entry.model.stats || {});
     statDrawer.dataset.player = i; statDrawer.dataset.side = i < 3 ? 'home' : 'away';
-    statDrawer.replaceChildren(head, box);
+    statDrawer.replaceChildren(head, ...(superCard ? [superCard] : []), box);
     if (!statDrawer.matches(':popover-open')) statDrawer.showPopover();
   }
   // Sidebars can be hidden for a bigger rink; each device remembers the choice.

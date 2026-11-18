@@ -763,6 +763,16 @@
     };
   }
 
+  function formatDrawerSuperStatus(body) {
+    const meterVal = Math.max(0, Math.min(100, body?.meter || 0));
+    const meterPct = Math.floor(meterVal);
+    if (body?.superArm) return `Armed · ${meterPct}%`;
+    if (body?.carded) return `${meterPct}% · Carded`;
+    if (body?.stunned) return `${meterPct}% · Stunned`;
+    if (meterVal >= 100) return '100% · Ready';
+    return `${meterPct}%`;
+  }
+
   function createMeterController(deps = {}) {
     const { state, fn, $ } = makeLookup(deps);
     const getP = () => deps.P ?? state.P;
@@ -837,6 +847,18 @@
           pill.style?.setProperty?.('--meter', `${meterVal.toFixed(1)}%`);
           pill.classList?.toggle?.('ready', !body.superArm && body.meter >= 100);
           pill.classList?.toggle?.('armed', Boolean(body.superArm));
+        }
+        const drawerSuper = $('stat-drawer-super');
+        if (drawerSuper?.dataset?.player != null && Number(drawerSuper.dataset.player) === idx) {
+          const drawerFill = $('stat-drawer-super-fill');
+          const drawerPct = $('stat-drawer-super-pct');
+          if (drawerFill) setFill?.(drawerFill, body.meter);
+          drawerSuper.classList?.toggle?.('ready', !body.superArm && body.meter >= 100);
+          drawerSuper.classList?.toggle?.('armed', Boolean(body.superArm));
+          if (drawerPct) {
+            const drawerTxt = formatDrawerSuperStatus(body);
+            if (drawerPct.textContent !== drawerTxt) drawerPct.textContent = drawerTxt;
+          }
         }
       }
       meters.clear();
@@ -4033,6 +4055,7 @@
     createMatchSession,
     wrapSessionState,
     resolveEquippedSuper,
+    formatDrawerSuperStatus,
     restoreEntry,
     createBodyProjector,
     createPlaybackDriver,

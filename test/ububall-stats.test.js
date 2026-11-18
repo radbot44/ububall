@@ -329,3 +329,47 @@ test('ububall-playback: flushMeters updates stadium super pill and portrait mini
   assert.equal($('portrait-pill-1').classList.contains('ready'), true);
   assert.equal($('portrait-pill-1').style.getPropertyValue('--meter'), '100.0%');
 });
+
+test('ububall-playback: formatDrawerSuperStatus and flushMeters keep open stat-drawer super card in sync', () => {
+  assert.equal(ububallPlayback.formatDrawerSuperStatus({ meter: 42.9 }), '42%');
+  assert.equal(ububallPlayback.formatDrawerSuperStatus({ meter: 99.7 }), '99%');
+  assert.equal(ububallPlayback.formatDrawerSuperStatus({ meter: 100 }), '100% · Ready');
+  assert.equal(ububallPlayback.formatDrawerSuperStatus({ meter: 100, superArm: true }), 'Armed · 100%');
+  assert.equal(ububallPlayback.formatDrawerSuperStatus({ meter: 84, carded: true }), '84% · Carded');
+  assert.equal(ububallPlayback.formatDrawerSuperStatus({ meter: 67, stunned: true }), '67% · Stunned');
+
+  const makeNode = () => {
+    const classes = new Set();
+    const props = new Map();
+    return {
+      dataset: {},
+      textContent: '',
+      style: { setProperty: (k, v) => props.set(k, v), getPropertyValue: k => props.get(k) || '' },
+      classList: {
+        contains: c => classes.has(c),
+        toggle: (c, force) => { const on = force === undefined ? !classes.has(c) : Boolean(force); if (on) classes.add(c); else classes.delete(c); return on; }
+      }
+    };
+  };
+  const map = new Map();
+  const $ = id => { if (!map.has(id)) map.set(id, makeNode()); return map.get(id); };
+  $('stat-drawer-super').dataset.player = '4';
+
+  const filled = [];
+  const otherBody = { playerIndex: 1, meter: 55, superArm: false, carded: false, stunned: false, equippedSuper: { name: 'Stalwart' } };
+  const awayBody = { playerIndex: 4, meter: 100, superArm: false, carded: false, stunned: false, equippedSuper: { name: 'Knockout' } };
+  const state = {
+    selected: 0,
+    dirtyMeters: new Set([otherBody, awayBody]),
+    P
+  };
+  const ctrl = ububallPlayback.createMeterController({
+    state, $, P, ububallMatch,
+    setMeterFill(el, m) { filled.push([el, m]); }
+  });
+  ctrl.flushMeters();
+  assert.equal($('stat-drawer-super-pct').textContent, '100% · Ready');
+  assert.equal($('stat-drawer-super').classList.contains('ready'), true);
+  assert.equal($('stat-drawer-super').classList.contains('armed'), false);
+  assert.ok(filled.some(([el, m]) => el === $('stat-drawer-super-fill') && m === 100));
+});
