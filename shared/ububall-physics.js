@@ -6,7 +6,7 @@ const {
   SPIN_STRIKE_MIN_OMEGA, SURFACES, SUPERS, DAZE, SIZE, ICE_BITE, CARVE_DRIVE, TRUE_GLIDE,
   TEMPERED_SHOT, SWEET_SPOT, BOARD_SPRING, TAPE_TO_TAPE, PACK_DRAFT, SUPER, HEAT, FIRE_TICKS,
   IRON_COOLDOWN_TICKS, SNAP, RIM, TAILGATE, HIP_CLIP, tailgateFactor, carveDriveBoost,
-  ballOnFire, ballCurveFactor, holder, dazeSlow, multiplier, launchSpeed, syncEffectiveStats,
+  ballOnFire, ballCurveFactor, holder, dazeSlow, multiplier, launchSpeed, colossusProgress, syncEffectiveStats,
   applyStats, spawn, makeUbu, makeBall, setStriker, clearStriker, clearHeat, kickoff, superMastery
 } = require('./physics/constants.js');
 const { applyDoubledGuard, endSuper, triggerShockwave, triggerIronShockwave } = require('./physics/collide.js');
@@ -18,7 +18,7 @@ const api = Object.freeze({
   STRIKE_GAIN, CLOSE_SPIN_GAIN, STRIKE_POWER, STRIKE_MIN_SPEED, SPIN_STRIKE_MIN_OMEGA, SURFACES, SUPERS, DAZE, SIZE,
   ICE_BITE, CARVE_DRIVE, TRUE_GLIDE, TEMPERED_SHOT, SWEET_SPOT, BOARD_SPRING, TAPE_TO_TAPE, PACK_DRAFT, SUPER, HEAT,
   FIRE_TICKS, IRON_COOLDOWN_TICKS, SNAP, RIM, TAILGATE, HIP_CLIP, tailgateFactor, carveDriveBoost, ballOnFire,
-  ballCurveFactor, holder, dazeSlow, multiplier, launchSpeed, syncEffectiveStats, applyStats, applyDoubledGuard,
+  ballCurveFactor, holder, dazeSlow, multiplier, launchSpeed, colossusProgress, syncEffectiveStats, applyStats, applyDoubledGuard,
   spawn, makeUbu, makeBall, setStriker, clearStriker, clearHeat, kickoff, endSuper, superMastery, step, stepPostGoal,
   launch, settled, stop, ballRun, wouldScore, triggerShockwave, triggerIronShockwave, startTurn, predictTurn
 });

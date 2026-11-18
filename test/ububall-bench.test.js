@@ -75,11 +75,6 @@ test('syncTickBodies updates dynamic kinematics and ball fire state without dirt
 });
 
 test('shot-spin slider coalesces oninput via dragDirty without saveActiveMatch spam and saves once on onchange', () => {
-  const source = fs.readFileSync(require.resolve('../web/ububall.js'), 'utf8');
-  const start = source.indexOf('  let saveActiveMatchTimer = 0;');
-  const end = source.indexOf("  for (const [id, delta] of [['spin-less'", start);
-  assert.ok(start >= 0 && end > start, 'found spin slider handler block');
-
   const spinElem = {};
   let saves = 0, syncs = 0, draws = 0;
   const sandbox = {
@@ -98,7 +93,7 @@ test('shot-spin slider coalesces oninput via dragDirty without saveActiveMatch s
     saveActiveMatch: () => { saves++; }
   };
 
-  vm.runInNewContext(source.slice(start, end), sandbox);
+  ububallPlayback.bindSpinSlider(sandbox);
 
   // Simulate 30 rapid slider drag input events
   for (let k = -15; k <= 15; k++) {
@@ -121,11 +116,6 @@ test('shot-spin slider coalesces oninput via dragDirty without saveActiveMatch s
 });
 
 test('demoAim animates via requestAnimationFrame + dragDirty instead of setTimeout double-draws', async () => {
-  const source = fs.readFileSync(require.resolve('../web/ububall.js'), 'utf8');
-  const start = source.indexOf('  function placeFinger(x, y, rects = null) {');
-  const end = source.indexOf('  // Standalone reloads can resume a CPU match', start);
-  assert.ok(start >= 0 && end > start, 'found demoAim block');
-
   let rafCalls = 0, timeoutDragCalls = 0, draws = 0, now = 1000;
   const finger = {
     style: {},
@@ -163,7 +153,7 @@ test('demoAim animates via requestAnimationFrame + dragDirty instead of setTimeo
     draw: () => { draws++; }
   };
 
-  const demoAim = vm.runInNewContext(source.slice(start, end) + '\n;demoAim;', sandbox);
+  const { demoAim } = ububallPlayback.createDemoFingerController(sandbox);
   await demoAim(1, 0, { angle: 0.25, power: 0.8, spin: 0.2, guard: false }, () => true);
 
   assert.ok(rafCalls >= 3, 'demoAim steps on requestAnimationFrame');

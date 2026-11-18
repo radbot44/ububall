@@ -714,8 +714,8 @@
         {
           id: 'super-stalwart',
           title: '00 · Stalwart (Steel Anchor & Impact Shockwave)',
-          when: 'Launching with Stalwart (`launch`) and absorbing checks or shots (`impact`).',
-          visual: 'Gold & indigo aura (`#ffd166` / `#4f5fc2`), 3x braking slide to immovable anchor, golden burst + 36 px shockwave on impact.',
+          when: 'Launching and sliding with Stalwart active (`launch`, `markIce`) and absorbing checks or shots (`impact`).',
+          visual: 'Gold & indigo aura (`#ffd166` / `#4f5fc2`), 3x braking slide leaving continuous skidmarks everywhere while live, golden burst + 36 px shockwave on impact.',
           soundLabel: 'Play steel clank',
           variants: [
             { id: 'both', label: 'Launch + Impact Scenario' },
@@ -760,9 +760,9 @@
         },
         {
           id: 'super-sticky',
-          title: '02 · Sticky (Goop Splat Grab & Emerald Tether)',
-          when: 'Touching the ball with Sticky active (`handleSuper("sticky", "impact")`, `drawStickyTether`).',
-          visual: 'Emerald aura (`#42c66b`), bouncy cartoon goop-splat & jelly bubble pops, and pulsing tangent energy bridge (`#44dd66` / `#d9ffe3`).',
+          title: '02 · Sticky (Goop Splat Grab, Release Burst & Emerald Tether)',
+          when: 'Grabbing the ball (`handleSuper("sticky", "impact")`), holding (`drawStickyTether`), and releasing the ball (`checkStickyRelease`).',
+          visual: 'Emerald aura (`#42c66b`), goop-splat/jelly bubble/streak particles and shockwave on both ball grab and release, and pulsing tangent energy bridge (`#44dd66` / `#d9ffe3`).',
           soundLabel: 'Play goop splat',
           duration: 2.8,
           playSound: ctx => ctx.audio()?.playSuper('sticky', 'impact'),
@@ -780,9 +780,9 @@
         },
         {
           id: 'super-cannonball',
-          title: '03 · Cannonball (Explosive Blast & Instant Fireball)',
+          title: '03 · Cannonball (Explosive Blast, Side Fire Jets & Ground Scorch)',
           when: 'Striking the ball with Cannonball active (`handleSuper("cannonball", "impact")`).',
-          visual: 'Fiery red/orange conic shader aura with multi-pass bloom, `#ff634d` blast burst + 48 px shockwave, radial space-warp wavefront, `ballFlare = 1` + `ballWarpFlare = 1` heat-devil flare, instant fireball ignition, and hit-stop + shake.',
+          visual: 'Fiery red/orange conic shader aura with multi-pass bloom; on ball impact, a quick fanned burst of fireball `flame` jets ejecting forward at ±45° toward the ball, light-grey gunpowder smoke puffs shooting forward along the ball direction at ~50% ball speed, charred ground scorch + glowing embers (`fx.burns`), `#ff634d` blast burst + 48 px shockwave, radial space-warp wavefront, `ballFlare = 1` + `ballWarpFlare = 1` heat-devil flare, instant fireball ignition, and hit-stop + shake.',
           soundLabel: 'Play cannonball boom',
           duration: 2.6,
           playSound: ctx => ctx.audio()?.playSuper('cannonball', 'impact'),
@@ -822,9 +822,9 @@
         },
         {
           id: 'super-colossus',
-          title: '05 · Colossus (1.5x Max Titan Growth & Thunderclap)',
-          when: 'Launching with Colossus armed (`handleSuper("colossus", "launch")`).',
-          visual: 'Golden titan aura (`#ffe043` / `#c8961e`), sky-splitting thunderclap & rolling giant rumble, and uniform 1.5x max size/mass growing over 40 ticks to bowl defenders aside.',
+          title: '05 · Colossus (Cracked Ice Dent, Growth Lines & Titan Expansion)',
+          when: 'Launching with Colossus armed (`handleSuper("colossus", "launch")`), swelling across 40 expansion ticks, and hitting full size (`colossusProgress >= 1`).',
+          visual: 'Golden titan aura (`#ffe043` / `#c8961e`), golden growth-ring burst and radial growth lines while swelling to 1.5x max size/mass, slamming down a big circular ice dent with branching fracture cracks fading like skidmarks (`fx.skids`) and ice-shard spray upon reaching full size, and sky-splitting thunderclap.',
           soundLabel: 'Play colossus thunder',
           duration: 2.7,
           playSound: ctx => ctx.audio()?.playSuper('colossus', 'launch'),

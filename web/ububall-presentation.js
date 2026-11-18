@@ -108,6 +108,7 @@
       netFire: null,
       spaceWarps: [],
       superImpactTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
+      colossusGrowTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       carveTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       rimSparkTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       wallEffectTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
@@ -116,6 +117,7 @@
       puckSlideTime: -Infinity,
       lastCannonImpact: -Infinity,
       lastFireHitSound: -Infinity,
+      stickyHolderIdx: -1,
       materialEmitters: createMaterialEmitters(entries, stylesMap),
       iceCache: {},
       rinkCache: null
@@ -180,7 +182,7 @@
         continue;
       }
       p.px = p.x; p.py = p.y;
-      const drag = Math.exp(-dt * (p.celebration ? 1.3 : 4));
+      const drag = Math.exp(-dt * (p.drag ?? (p.celebration ? 1.3 : 4)));
       p.vx *= drag; p.vy = p.vy * drag + (p.celebration ? 95 : 0) * dt;
       p.x += p.vx * dt; p.y += p.vy * dt;
     }
@@ -1158,15 +1160,21 @@
       const s = fx.skidState[i] ||= { time: 0 }, prev = s.prev;
       s.prev = { x: b.x, y: b.y, vx: b.vx, vy: b.vy };
       if (!prev || dt <= 0) return;
-      if (Math.hypot(b.x - prev.x, b.y - prev.y) > 60) { s.time = 0; s.path = null; return; }
+      const moved = Math.hypot(b.x - prev.x, b.y - prev.y);
+      if (moved > 60) { s.time = 0; s.path = null; return; }
       const slowed = Math.hypot(prev.vx, prev.vy) - Math.hypot(b.vx, b.vy);
-      if (slowed > SKID_SLOWDOWN) {
-        const strength = Math.min(1, slowed / 600);
+      const stalwartSliding = b.superActive === 'stalwart' && !b.carded && (moved >= 0.5 || Math.hypot(b.vx || 0, b.vy || 0) >= 8);
+      if (slowed > SKID_SLOWDOWN || stalwartSliding) {
+        const strength = stalwartSliding
+          ? Math.max(0.82, Math.min(1, slowed / 600))
+          : Math.min(1, slowed / 600);
         Object.assign(s, { time: .3, strength: Math.max(s.time > 0 ? s.strength : 0, strength) });
-        const now = clockNow(), map = (fx.carveTimes ||= new WeakMap());
-        if (now - (map.get(b) ?? -Infinity) >= 180) {
-          map.set(b, now);
-          gameAudio()?.playCarve?.({ volume: Math.min(0.55, 0.18 + 0.36 * strength), speed: Math.hypot(prev.vx, prev.vy), x: b.x, y: b.y });
+        if (slowed > SKID_SLOWDOWN) {
+          const now = clockNow(), map = (fx.carveTimes ||= new WeakMap());
+          if (now - (map.get(b) ?? -Infinity) >= 180) {
+            map.set(b, now);
+            gameAudio()?.playCarve?.({ volume: Math.min(0.55, 0.18 + 0.36 * strength), speed: Math.hypot(prev.vx, prev.vy), x: b.x, y: b.y });
+          }
         }
       }
       if (s.time <= 0) { s.path = null; return; }
@@ -1360,6 +1368,102 @@
       fx.burnState.path.age = 0;
     }
 
+    function emitColossusGrowth(fx, body, amount, isBurst = false) {
+      if (!fx || !body || isReducedMotion()) return;
+      const count = isBurst ? 22 : stochasticCount(amount);
+      const r = body.radius || 25;
+      const bvx = (body.vx || 0) * 0.42, bvy = (body.vy || 0) * 0.42;
+      const colors = ['#ffe043', '#fff5b8', '#ffffff', '#ffbe2e'];
+      const phaseOffset = Math.random() * Math.PI * 2;
+      for (let k = 0; k < count && fx.particles.length < 520; k++) {
+        const ang = isBurst
+          ? phaseOffset + (k / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.14
+          : Math.random() * Math.PI * 2;
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        const startR = r * 1.04 + Math.random() * 7;
+        const px = body.x + ca * startR, py = body.y + sa * startR;
+        const spd = isBurst ? (280 + Math.random() * 160) : (250 + Math.random() * 170);
+        const life = isBurst ? (0.30 + Math.random() * 0.14) : (0.24 + Math.random() * 0.14);
+        const len = (isBurst ? 19 : 15) + Math.random() * 11;
+        fx.particles.push({
+          x: px, y: py, px, py,
+          vx: bvx + ca * spd, vy: bvy + sa * spd,
+          team: body.team,
+          color: colors[k % colors.length],
+          life, duration: life,
+          growthLine: true,
+          angle: ang,
+          len,
+          width: isBurst ? (2.6 + Math.random() * 1.4) : (2.2 + Math.random() * 1.2)
+        });
+      }
+    }
+
+    function emitStickyParticles(fx, x, y, holder, stage, ball = null) {
+      if (!fx || isReducedMotion()) return;
+      const colors = ['#44dd66', '#d9ffe3', '#7ef29a', '#21845b'];
+      const isRelease = stage === 'release';
+      const team = holder?.team ?? -1;
+      if (fx.particles.length < 520) {
+        fx.particles.push({
+          x, y, px: x, py: y, vx: 0, vy: 0,
+          team: -1, color: isRelease ? '#d9ffe3' : '#44dd66',
+          life: 0.15, duration: 0.15,
+          flash: true, flashSize: isRelease ? 68 : 78, overlay: true
+        });
+        const count = isRelease ? 18 : 16;
+        const baseVx = (ball?.vx ?? holder?.vx ?? 0) * 0.25;
+        const baseVy = (ball?.vy ?? holder?.vy ?? 0) * 0.25;
+        const midX = isRelease && holder && ball ? (holder.x + ball.x) * 0.5 : x;
+        const midY = isRelease && holder && ball ? (holder.y + ball.y) * 0.5 : y;
+        for (let k = 0; k < count && fx.particles.length < 520; k++) {
+          const ang = (k / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.32;
+          const spd = (isRelease ? 95 : 70) + Math.random() * (isRelease ? 145 : 120);
+          const life = 0.22 + Math.random() * 0.18;
+          const ox = isRelease && k % 2 === 1 ? midX : x;
+          const oy = isRelease && k % 2 === 1 ? midY : y;
+          const shape = k % 4 === 0 ? 'streak' : k % 3 === 0 ? 'bubble' : 'circle';
+          fx.particles.push({
+            x: ox, y: oy, px: ox, py: oy,
+            vx: baseVx + Math.cos(ang) * spd,
+            vy: baseVy + Math.sin(ang) * spd,
+            team,
+            color: colors[k % colors.length],
+            life, duration: life,
+            materialShape: shape,
+            angle: ang,
+            size: shape === 'streak' ? (2.6 + Math.random() * 1.8) : (2.2 + Math.random() * 2.4),
+            snap: shape === 'streak',
+            overlay: true
+          });
+        }
+      }
+      if (fx.shockwaves.length < 40) {
+        fx.shockwaves.push({
+          x, y,
+          currentRadius: 6,
+          maxRadius: isRelease ? 32 : 36,
+          team,
+          color: isRelease ? '#d9ffe3' : '#44dd66',
+          life: 0.20,
+          duration: 0.20,
+          overlay: true
+        });
+      }
+    }
+
+    function checkStickyRelease(fx, view) {
+      if (!fx || fx.stickyHolderIdx < 0 || !view?.bodies?.length) return;
+      const holder = P.holder?.(view.bodies);
+      const curIdx = holder ? view.bodies.indexOf(holder) : -1;
+      if (curIdx !== fx.stickyHolderIdx) {
+        const prevHolder = view.bodies[fx.stickyHolderIdx];
+        const ball = view.bodies[6];
+        if (ball) emitStickyParticles(fx, ball.x, ball.y, prevHolder, 'release', ball);
+        fx.stickyHolderIdx = curIdx;
+      }
+    }
+
     function emitSkaterEffects(dt) {
       const fx = getEffects(), view = getView(), audio = gameAudio(), reduced = isReducedMotion();
       const now = clockNow();
@@ -1426,6 +1530,66 @@
             }
           }
         }
+        if (b.superActive === 'colossus' && !b.carded && !reduced) {
+          const gMap = (fx.colossusGrowTimes ||= new WeakMap());
+          const prevP = gMap.get(b) ?? 0;
+          const p = P.colossusProgress ? P.colossusProgress(b) : 1;
+          if (p < 1 || prevP < 1) {
+            const dp = Math.max(0, p - prevP);
+            emitColossusGrowth(fx, b, Math.max(dt * 85, dp * 38), false);
+            const targetR = Math.max(b.baseRadius ?? b.radius, P.SUPER?.colossusRadius || 56.25);
+            for (const gate of [0.28, 0.62, 0.96]) {
+              if (prevP < gate && p >= gate && fx.shockwaves.length < 40) {
+                const startR = Math.max(b.radius * 0.96, 22);
+                fx.shockwaves.push({
+                  x: b.x, y: b.y, target: b,
+                  currentRadius: startR,
+                  maxRadius: Math.max(startR + 34, targetR * (1.28 + gate * 0.24)),
+                  team: b.team, color: gate > 0.9 ? '#fff5b8' : '#ffe043',
+                  life: 0.32, duration: 0.32,
+                  colossusGrowth: true, width: gate > 0.9 ? 3.2 : 2.6,
+                  startAngle: gate * 2.1
+                });
+              }
+            }
+            gMap.set(b, p);
+            if (prevP < 1 && p >= 1) {
+              const dentR = targetR * 1.14;
+              const startR = targetR * 0.88;
+              fx.skids.push({
+                dent: true,
+                x: b.x,
+                y: b.y,
+                startR,
+                radius: dentR,
+                age: 0,
+                cracks: buildDentCracks(b.x * 0.13 + b.y * 0.29 + clockNow() * 0.001)
+              });
+              if (fx.skids.length > 30) fx.skids.shift();
+              fx.shake = Math.max(fx.shake || 0, 0.55);
+              if (fx.particles.length < 520) {
+                fx.particles.push({ x: b.x, y: b.y, px: b.x, py: b.y, vx: 0, vy: 0, team: -1, color: '#ffe043', life: 0.20, duration: 0.20, flash: true, flashSize: 132, overlay: true });
+                for (let k = 0; k < 16 && fx.particles.length < 520; k++) {
+                  const ang = (k / 16) * Math.PI * 2 + (Math.random() - 0.5) * 0.24;
+                  const dist = targetR * (0.72 + Math.random() * 0.38);
+                  const px = b.x + Math.cos(ang) * dist, py = b.y + Math.sin(ang) * dist;
+                  const spd = 135 + Math.random() * 185, life = 0.24 + Math.random() * 0.20;
+                  const isIce = k % 3 !== 0;
+                  fx.particles.push({
+                    x: px, y: py, px, py,
+                    vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+                    team: b.team,
+                    color: isIce ? (k % 2 === 0 ? '#e6f4ff' : '#a8d8ff') : (k % 6 === 0 ? '#ffffff' : '#ffe043'),
+                    life, duration: life,
+                    materialShape: isIce ? (k % 2 === 0 ? 'shard' : 'chip') : 'spark',
+                    size: isIce ? (2.4 + Math.random() * 2.2) : (2.8 + Math.random() * 2.0),
+                    angle: ang
+                  });
+                }
+              }
+            }
+          }
+        }
         const draft = P.tailgateFactor ? P.tailgateFactor(view.bodies, b) : 0;
         if (draft > 0.32) {
           if (!reduced && draft > 0.35) {
@@ -1465,6 +1629,7 @@
         }
       }
       if (reduced) return;
+      checkStickyRelease(fx, view);
       sparkBall(ball, dt);
       burnIce(ball, dt);
       fx.materialEmitters.forEach((emitter, i) => {
@@ -1499,6 +1664,7 @@
       if (fx.netFire) fx.netFire.lit = false;
       fx.shake = fx.shakeX = fx.shakeY = 0; if (!view.field && rinkWrap) rinkWrap.style.translate = '';
       fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.ballWarpFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.fireWarp = fx.koWarp = null;
+      fx.stickyHolderIdx = -1;
       if (fx.spaceWarps) fx.spaceWarps.length = 0;
       if (fx.iceCache) { fx.iceCache.key = null; fx.iceCache.skidSnap = null; fx.iceCache.burnSnap = null; }
     }
@@ -1516,6 +1682,7 @@
       fx.lastHipClipSound = -Infinity;
       fx.ghostPhaseTimes = new Map();
       fx.superImpactTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
+      fx.colossusGrowTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.carveTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.rimSparkTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.wallEffectTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
@@ -1683,6 +1850,7 @@
       fieldFx.kickoffGlow = Math.max(0, fieldFx.kickoffGlow - dt / 1.5);
       if (fieldFx.goalSweep && (fieldFx.goalSweep.p += dt / 1.5) >= 1) fieldFx.goalSweep = null;
       if (fieldFx.goalCall && (fieldFx.goalCall.t += dt) >= GOAL_CALL_SECONDS) fieldFx.goalCall = null;
+      checkStickyRelease(fieldFx, view);
     }
 
     function addWallEffect(body, velocity, wallType, nx, ny) {
@@ -1967,10 +2135,137 @@
       softRibbon(points, p => s.width * (.5 + .5 * p.depth), BURN_COLORS, prevPoint, s.age >= .25 || P.settled(getView().bodies));
     }
 
+    function buildDentCracks(seed = 1) {
+      let s = (Math.floor(seed * 99991) || 137) >>> 0;
+      const rand = () => {
+        s = (s * 1664525 + 1013904223) >>> 0;
+        return s / 4294967296;
+      };
+      const cracks = [];
+      const rays = 10;
+      const baseRot = rand() * Math.PI * 2;
+      for (let i = 0; i < rays; i++) {
+        const ang0 = baseRot + (i / rays) * Math.PI * 2 + (rand() - 0.5) * 0.28;
+        const rStart = 0.20 + rand() * 0.24;
+        const rEnd = 0.96 + rand() * 0.34;
+        const segs = 4;
+        const pts = [];
+        let curA = ang0;
+        for (let k = 0; k <= segs; k++) {
+          const u = k / segs;
+          const r = rStart + (rEnd - rStart) * u;
+          if (k > 0) curA += (rand() - 0.5) * 0.26;
+          pts.push([Math.cos(curA) * r, Math.sin(curA) * r]);
+        }
+        cracks.push({ pts, w: 1.9 + rand() * 0.9 });
+        if (i % 2 === 0 || rand() < 0.45) {
+          const branchIdx = 1 + Math.floor(rand() * 2);
+          const origin = pts[branchIdx];
+          const bAng = curA + (rand() < 0.5 ? 1 : -1) * (0.45 + rand() * 0.45);
+          const bLen = 0.24 + rand() * 0.26;
+          const midA = bAng + (rand() - 0.5) * 0.24;
+          cracks.push({
+            pts: [
+              origin,
+              [origin[0] + Math.cos(bAng) * bLen * 0.55, origin[1] + Math.sin(bAng) * bLen * 0.55],
+              [origin[0] + Math.cos(midA) * bLen, origin[1] + Math.sin(midA) * bLen]
+            ],
+            w: 1.2 + rand() * 0.5
+          });
+        }
+      }
+      for (let c = 0; c < 3; c++) {
+        const a0 = baseRot + c * 2.1 + rand() * 0.8;
+        const span = 0.45 + rand() * 0.55;
+        const rad = c === 1 ? (0.52 + rand() * 0.12) : (0.82 + rand() * 0.12);
+        const pts = [];
+        for (let k = 0; k <= 3; k++) {
+          const a = a0 + (k / 3) * span;
+          const rr = rad + (rand() - 0.5) * 0.06;
+          pts.push([Math.cos(a) * rr, Math.sin(a) * rr]);
+        }
+        cracks.push({ pts, w: 1.3 + rand() * 0.5 });
+      }
+      return cracks;
+    }
+
+    function dentRadiusAt(s) {
+      const grow = Math.min(1, Math.max(0, (s.age ?? 1) / 0.17));
+      const ease = 1 - (1 - grow) ** 2.2;
+      const startR = s.startR ?? (s.radius * 0.55);
+      return startR + (s.radius - startR) * ease;
+    }
+
+    function dentStops(fade) {
+      return [
+        [0.00, `rgba(0, 0, 0, ${(0.18 * fade).toFixed(3)})`],
+        [0.58, `rgba(0, 0, 0, ${(0.24 * fade).toFixed(3)})`],
+        [0.84, `rgba(0, 0, 0, ${(0.34 * fade).toFixed(3)})`],
+        [0.95, `rgba(0, 0, 0, ${(0.16 * fade).toFixed(3)})`],
+        [1.00, 'rgba(0, 0, 0, 0)']
+      ];
+    }
+
+    function paintDent(ctx, s) {
+      const age = s.age < 0.20 ? s.age : Math.floor(s.age * 4) / 4;
+      const t = Math.min(1, Math.max(0, age / SKID_LIFE));
+      const fade = 1 - t * t * (3 - 2 * t);
+      if (fade <= 0.005) return;
+      const r = dentRadiusAt(s);
+      ctx.save();
+      const grad = ctx.createRadialGradient(s.x, s.y, r * 0.12, s.x, s.y, r * 1.12);
+      for (const [offset, col] of dentStops(fade)) grad.addColorStop(offset, col);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r * 1.12, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = `rgba(0, 0, 0, ${(0.28 * fade).toFixed(3)})`;
+      ctx.lineWidth = 3.2;
+      ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.94, 0, Math.PI * 2); ctx.stroke();
+
+      ctx.strokeStyle = `rgba(220, 238, 255, ${(0.13 * fade).toFixed(3)})`;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(s.x, s.y, r * 1.01, 0, Math.PI * 2); ctx.stroke();
+
+      ctx.strokeStyle = `rgba(0, 0, 0, ${(0.16 * fade).toFixed(3)})`;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.62, 0, Math.PI * 2); ctx.stroke();
+
+      if (s.cracks?.length) {
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (const crack of s.cracks) {
+          const pts = crack.pts;
+          if (!pts || pts.length < 2) continue;
+          ctx.strokeStyle = `rgba(228, 243, 255, ${(0.15 * fade).toFixed(3)})`;
+          ctx.lineWidth = Math.max(0.8, (crack.w || 1.5) * 0.55);
+          ctx.beginPath();
+          ctx.moveTo(s.x + pts[0][0] * r + 0.9, s.y + pts[0][1] * r + 0.9);
+          for (let k = 1; k < pts.length; k++) ctx.lineTo(s.x + pts[k][0] * r + 0.9, s.y + pts[k][1] * r + 0.9);
+          ctx.stroke();
+
+          ctx.strokeStyle = `rgba(0, 0, 0, ${(0.44 * fade).toFixed(3)})`;
+          ctx.lineWidth = crack.w || 1.5;
+          ctx.beginPath();
+          ctx.moveTo(s.x + pts[0][0] * r, s.y + pts[0][1] * r);
+          for (let k = 1; k < pts.length; k++) ctx.lineTo(s.x + pts[k][0] * r, s.y + pts[k][1] * r);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
+    const skidBucket = s => (s.dent && s.age < 0.20 ? Math.floor(s.age * 30) : Math.floor(s.age * 4));
+    const skidCount = s => (s.dent ? 1 : (s.points?.length || 0));
+
     function paintIce() {
       const fx = getEffects(), ctx = getView().ctx;
       inRink(() => {
-        for (const s of fx.skids) paintSkidSlice(ctx, s, s.points, null);
+        for (const s of fx.skids) {
+          if (s.dent) paintDent(ctx, s);
+          else paintSkidSlice(ctx, s, s.points, null);
+        }
         for (const s of fx.burns) {
           if (s.poof) paintBurnPoof(ctx, s);
           else paintBurnSlice(ctx, s, s.points, null);
@@ -1992,7 +2287,8 @@
       if (canAppend) {
         for (let i = 0; i < skidSnap.length; i++) {
           const prev = skidSnap[i], cur = fx.skids[i];
-          if (cur !== prev.ref || Math.floor(cur.age * 4) !== prev.bucket || cur.points.length < prev.count) {
+          const curCount = skidCount(cur);
+          if (cur !== prev.ref || skidBucket(cur) !== prev.bucket || curCount < prev.count) {
             canAppend = false;
             break;
           }
@@ -2021,14 +2317,14 @@
         view.ctx.clearRect(0, 0, 1000, 600);
         view.ctx.save();
         try { paintIce(); } finally { view.ctx.restore(); view.ctx = main; }
-        cache.skidSnap = fx.skids.map(s => ({ ref: s, bucket: Math.floor(s.age * 4), count: s.points.length }));
+        cache.skidSnap = fx.skids.map(s => ({ ref: s, bucket: skidBucket(s), count: skidCount(s) }));
         cache.burnSnap = fx.burns.map(s => ({ ref: s, bucket: Math.floor(s.age * 4), count: s.poof ? 1 : (s.points?.length || 0) }));
         cache.rebuilds = (cache.rebuilds || 0) + 1;
       } else {
         let hasDelta = fx.skids.length > skidSnap.length || fx.burns.length > burnSnap.length;
         if (!hasDelta) {
           for (let i = 0; i < skidSnap.length; i++) {
-            if (fx.skids[i].points.length > skidSnap[i].count) { hasDelta = true; break; }
+            if (skidCount(fx.skids[i]) > skidSnap[i].count) { hasDelta = true; break; }
           }
         }
         if (!hasDelta) {
@@ -2047,12 +2343,19 @@
             inRink(() => {
               for (let i = 0; i < fx.skids.length; i++) {
                 const s = fx.skids[i], prevCount = i < skidSnap.length ? skidSnap[i].count : 0;
-                if (s.points.length > prevCount && s.points.length >= 2) {
-                  if (prevCount < 2) paintSkidSlice(lctx, s, s.points, null);
-                  else paintSkidSlice(lctx, s, s.points.slice(prevCount - 1), s.points[prevCount - 2]);
+                if (s.dent) {
+                  if (prevCount === 0) paintDent(lctx, s);
+                  if (i < skidSnap.length) skidSnap[i].count = 1;
+                  else skidSnap.push({ ref: s, bucket: skidBucket(s), count: 1 });
+                } else {
+                  const len = s.points?.length || 0;
+                  if (len > prevCount && len >= 2) {
+                    if (prevCount < 2) paintSkidSlice(lctx, s, s.points, null);
+                    else paintSkidSlice(lctx, s, s.points.slice(prevCount - 1), s.points[prevCount - 2]);
+                  }
+                  if (i < skidSnap.length) skidSnap[i].count = len;
+                  else skidSnap.push({ ref: s, bucket: skidBucket(s), count: len });
                 }
-                if (i < skidSnap.length) skidSnap[i].count = s.points.length;
-                else skidSnap.push({ ref: s, bucket: Math.floor(s.age * 4), count: s.points.length });
               }
               for (let i = 0; i < fx.burns.length; i++) {
                 const s = fx.burns[i], prevCount = i < burnSnap.length ? burnSnap[i].count : 0;
@@ -2092,7 +2395,7 @@
         const scale = Math.min(1, 1000 / view.canvas.width);
         if (bench?.flags.freezeIceKey) {
           let key = view.canvas.width + ',' + view.canvas.height;
-          for (const s of fx.skids) key += ',' + Math.floor(s.age * 4) + ':' + (s.points.length >> 3);
+          for (const s of fx.skids) key += ',' + skidBucket(s) + ':' + (s.dent ? 'd' + Math.round(s.x) + '_' + Math.round(s.y) : ((s.points?.length || 0) >> 3));
           key += '|';
           for (const s of fx.burns) key += ',' + Math.floor(s.age * 4) + ':' + (s.poof ? 'p' + Math.round(s.x) + '_' + Math.round(s.y) : ((s.points?.length || 0) >> 3));
           cachedLayer(fx.iceCache, key, paintIce, scale);
@@ -3131,6 +3434,20 @@
           const size = (p.flashSize || 170) * fade; c.globalAlpha = fade * .85;
           c.drawImage(glowSprite(color, doc), p.x - size / 2, p.y - size / 2, size, size); continue;
         }
+        if (p.growthLine) {
+          const ang = p.angle || 0;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const halfLen = (p.len || 14) * (0.45 + 0.55 * fade) * 0.5;
+          const lw = Math.max(1, (p.width || 2.4) * (0.45 + 0.55 * fade));
+          const x0 = p.x - ca * halfLen, y0 = p.y - sa * halfLen;
+          const x1 = p.x + ca * halfLen, y1 = p.y + sa * halfLen;
+          c.globalAlpha = Math.min(1, fade * 2.2) * 0.92;
+          c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1);
+          c.strokeStyle = color; c.lineWidth = lw; c.stroke();
+          c.beginPath(); c.moveTo(x0 + ca * halfLen * 0.25, y0 + sa * halfLen * 0.25); c.lineTo(x1, y1);
+          c.strokeStyle = '#ffffff'; c.lineWidth = Math.max(0.9, lw * 0.44); c.stroke();
+          continue;
+        }
         if (p.materialShape) {
           c.save(); c.translate(p.x, p.y); c.rotate(p.angle);
           c.strokeStyle = c.fillStyle = color; c.lineWidth = p.snap ? 2.4 : 1;
@@ -3680,6 +3997,34 @@
       }
     }
 
+    function emitCannonJetPuffs(fx, x, y, forwardAng, amountPerSide, minSpd, maxSpd) {
+      if (!fx || isReducedMotion()) return;
+      const flameCols = ['#fff3b0', '#ffc43d', '#ff7a1a', '#ff3b1a'];
+      const count = Math.max(1, Math.round(amountPerSide));
+      for (const sign of [-1, 1]) {
+        const baseAng = forwardAng + sign * (Math.PI / 4);
+        for (let k = 0; k < count && fx.particles.length < 850; k++) {
+          const frac = k / Math.max(1, count - 1);
+          const ang = baseAng + (Math.random() - 0.5) * 0.50;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const dist = 2 + frac * 34 + (Math.random() - 0.5) * 6;
+          const px = x + ca * dist, py = y + sa * dist;
+          const spd = minSpd + (maxSpd - minSpd) * frac + (Math.random() - 0.5) * 50;
+          const life = 0.14 + Math.random() * 0.14;
+          const sizeScale = 1.15 - 0.35 * frac;
+          fx.particles.push({
+            x: px, y: py, px, py,
+            vx: ca * spd,
+            vy: sa * spd,
+            team: -1,
+            color: flameCols[Math.floor(Math.random() * 4)],
+            life, duration: life,
+            flame: (10 + Math.random() * 12) * sizeScale
+          });
+        }
+      }
+    }
+
     function handleSuper(key, stage, body, target = null) {
       const fx = getEffects(), view = getView();
       if (key === 'cannonball' && stage === 'impact') fx.lastCannonImpact = clockNow();
@@ -3687,6 +4032,43 @@
         const now = clockNow();
         if (now - (fx.superImpactTimes.get(body) ?? -Infinity) < 100) return;
         fx.superImpactTimes.set(body, now);
+      }
+      if (stage === 'launch' && body && !isReducedMotion() && key === 'colossus') {
+        const baseR = body.baseRadius ?? body.radius ?? 25;
+        const targetR = Math.max(baseR, P.SUPER?.colossusRadius || 56.25);
+        const dentR = targetR * 1.12;
+        const startR = Math.max(baseR, 22) * 1.05;
+        fx.colossusGrowTimes ||= new WeakMap();
+        fx.colossusGrowTimes.set(body, 0);
+        if (fx.particles.length < 480) {
+          fx.particles.push({ x: body.x, y: body.y, px: body.x, py: body.y, vx: 0, vy: 0, team: -1, color: '#ffe043', life: 0.22, duration: 0.22, flash: true, flashSize: 138, overlay: true });
+          for (let k = 0; k < 10 && fx.particles.length < 480; k++) {
+            const ang = (k / 10) * Math.PI * 2 + (Math.random() - 0.5) * 0.24;
+            const dist = startR * (0.7 + Math.random() * 0.4);
+            const px = body.x + Math.cos(ang) * dist, py = body.y + Math.sin(ang) * dist;
+            const spd = 120 + Math.random() * 160, life = 0.22 + Math.random() * 0.2;
+            fx.particles.push({
+              x: px, y: py, px, py,
+              vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+              team: body.team,
+              color: k % 3 === 0 ? '#ffffff' : '#ffe043',
+              life, duration: life,
+              materialShape: 'spark',
+              size: 2.8 + Math.random() * 2.0,
+              angle: ang
+            });
+          }
+        }
+        emitColossusGrowth(fx, body, 18, true);
+        if (fx.shockwaves.length < 40) {
+          fx.shockwaves.push({
+            x: body.x, y: body.y, target: body,
+            currentRadius: startR, maxRadius: dentR * 1.24,
+            team: body.team, color: '#ffe043',
+            life: 0.34, duration: 0.34,
+            colossusGrowth: true, width: 3.4, startAngle: 0
+          });
+        }
       }
       if (stage === 'impact' && target && !isReducedMotion()) {
         const dx = target.x - body.x, dy = target.y - body.y;
@@ -3737,10 +4119,55 @@
             fx.ballFlare = 1;
             fx.ballWarpFlare = 1;
             pushSpaceWarp(fx, x, y, 110, 0.30, 1, 0, 1.0, 0.85);
+            const forwardAng = Math.atan2(ny, nx);
+            const angL = forwardAng - Math.PI / 4, angR = forwardAng + Math.PI / 4;
+            const scorchReach = 46;
+            const lx = x + Math.cos(angL) * scorchReach, ly = y + Math.sin(angL) * scorchReach;
+            const rx = x + Math.cos(angR) * scorchReach, ry = y + Math.sin(angR) * scorchReach;
+            fx.burns.push({
+              width: 50,
+              age: 0,
+              points: [
+                { x: lx, y: ly, depth: 0.25, pace: 0.72, speed: 0.85, heat: 0.82 },
+                { x, y, depth: 1.0, pace: 0.90, speed: 0.95, heat: 1.0 },
+                { x: rx, y: ry, depth: 0.25, pace: 0.72, speed: 0.85, heat: 0.82 }
+              ]
+            });
+            if (fx.burns.length > 30) fx.burns.shift();
+            dropPathEmbers(fx, x, y, 24, 6, 0.92);
+            dropPathEmbers(fx, (x + lx) * 0.5, (y + ly) * 0.5, 16, 4, 0.86);
+            dropPathEmbers(fx, (x + rx) * 0.5, (y + ry) * 0.5, 16, 4, 0.86);
+            emitCannonJetPuffs(fx, x, y, forwardAng, 24, 180, 520);
+            const bvx = target.vx || 0, bvy = target.vy || 0;
+            const bSpd = Math.hypot(bvx, bvy);
+            const bAng = bSpd > 1 ? Math.atan2(bvy, bvx) : Math.atan2(dy, dx);
+            const smokeBaseSpd = (bSpd > 1 ? bSpd : 700) * 0.5;
+            const smokeCols = ['#8e949d', '#a9afb8', '#c2c7cf', '#d6dae0'];
+            for (let k = 0; k < 14 && fx.particles.length < 850; k++) {
+              const ang = bAng + (Math.random() - 0.5) * 0.44;
+              const sSpd = smokeBaseSpd * (0.82 + Math.random() * 0.36);
+              const sLife = 0.50 + Math.random() * 0.28;
+              const sx = x + Math.cos(ang) * (4 + Math.random() * 10);
+              const sy = y + Math.sin(ang) * (4 + Math.random() * 10);
+              fx.particles.push({
+                x: sx, y: sy, px: sx, py: sy,
+                vx: Math.cos(ang) * sSpd,
+                vy: Math.sin(ang) * sSpd,
+                team: -1,
+                color: smokeCols[k % smokeCols.length],
+                life: sLife, duration: sLife,
+                drag: 1.35,
+                materialShape: 'circle',
+                size: 4.5 + Math.random() * 5.0
+              });
+            }
           }
           burst(x, y, body.team, 3.5, false, tangent, color);
           if (fx.shockwaves.length < 32) fx.shockwaves.push({ x, y, currentRadius: 4,
             maxRadius: key === 'cannonball' ? 48 : 36, team: body.team, color, life: .24, duration: .24 });
+        } else if (key === 'sticky') {
+          emitStickyParticles(fx, x, y, body, 'grab', target);
+          fx.stickyHolderIdx = view.bodies ? view.bodies.indexOf(body) : -1;
         }
       }
       const closeness = (key === 'magnet' && stage === 'pull' && body && target)
@@ -4029,11 +4456,33 @@
         const hardIce = Boolean(bench?.flags.noIceShadow);
         gpu.setClip(1);
         for (const s of fx.skids) {
-          if (!s.points || s.points.length < 2) continue;
           const t = Math.min(1, Math.max(0, s.age / SKID_LIFE));
           const fade = 1 - t * t * (3 - 2 * t);
+          if (fade <= 0.005) continue;
+          if (s.dent) {
+            const r = dentRadiusAt(s);
+            gpu.drawRadialStops(s.x, s.y, r * 1.12, dentStops(fade), 1, 32);
+            gpu.strokeCircle(s.x, s.y, r * 0.94, '#000000', 3.2, 0.28 * fade);
+            gpu.strokeCircle(s.x, s.y, r * 1.01, '#dceeff', 1.4, 0.13 * fade);
+            gpu.strokeCircle(s.x, s.y, r * 0.62, '#000000', 1.6, 0.16 * fade);
+            if (s.cracks?.length) {
+              for (const crack of s.cracks) {
+                const pts = crack.pts;
+                if (!pts || pts.length < 2) continue;
+                const w = crack.w || 1.5;
+                for (let k = 0; k < pts.length - 1; k++) {
+                  const x0 = s.x + pts[k][0] * r, y0 = s.y + pts[k][1] * r;
+                  const x1 = s.x + pts[k + 1][0] * r, y1 = s.y + pts[k + 1][1] * r;
+                  gpu.strokeLine(x0 + 0.9, y0 + 0.9, x1 + 0.9, y1 + 0.9, '#e4f3ff', Math.max(0.8, w * 0.55), 0.15 * fade, true);
+                  gpu.strokeLine(x0, y0, x1, y1, '#000000', w, 0.44 * fade, true);
+                }
+              }
+            }
+            continue;
+          }
+          if (!s.points || s.points.length < 2) continue;
           const thin = 0.6 + 0.4 * fade;
-          if (fade > 0.005) gpu.drawSoftRibbon(s.points, p => s.width * 0.85 * (0.4 + 0.6 * p.depth) * thin, false, fade, hardIce, null, p => p.tear ?? p.depth ?? 0.35);
+          gpu.drawSoftRibbon(s.points, p => s.width * 0.85 * (0.4 + 0.6 * p.depth) * thin, false, fade, hardIce, null, p => p.tear ?? p.depth ?? 0.35);
         }
         for (const s of fx.burns) {
           const t = Math.min(1, Math.max(0, s.age / BURN_LIFE));
@@ -4288,12 +4737,30 @@
       // Helper for shockwaves (shared by Pass 1 non-overlay and Pass 3 overlay)
       const drawShockwaveItem = s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
-        const isSpecial = s.dramatic || s.hipClip || s.check || s.spinStrike || s.spinTwirl || s.koCone;
+        const isSpecial = s.dramatic || s.hipClip || s.check || s.spinStrike || s.spinTwirl || s.koCone || s.colossusGrowth;
         const expand = isSpecial ? 1 - (1 - progress) ** 2.6 : progress;
         const fade = isSpecial ? (1 - progress) ** 1.25 : 1 - progress;
         const r = s.currentRadius + (s.maxRadius - s.currentRadius) * expand;
         const waveColor = s.color || (s.team === 0 ? home : away);
         const baseW = s.width || (s.overlay ? 4.5 : 6);
+        if (s.colossusGrowth) {
+          const cx = s.target?.x ?? s.x, cy = s.target?.y ?? s.y;
+          const a = Math.max(0, fade * 0.90);
+          gpu.strokeCircle(cx, cy, r, waveColor, Math.max(1.2, baseW * fade), a, 12, 8);
+          if (fade > 0.18) {
+            gpu.strokeCircle(cx, cy, Math.max(2, r - 4), '#fff5b8', Math.max(1, baseW * 0.45 * fade), a * 0.72);
+          }
+          const rayCount = 12;
+          const rot = s.startAngle || 0;
+          const rayLen = 18 + 14 * expand;
+          for (let k = 0; k < rayCount; k++) {
+            const ang = rot + (k / rayCount) * Math.PI * 2;
+            const ca = Math.cos(ang), sa = Math.sin(ang);
+            const r0 = Math.max(2, r * 0.90), r1 = r + rayLen;
+            gpu.strokeLine(cx + ca * r0, cy + sa * r0, cx + ca * r1, cy + sa * r1, k % 2 === 0 ? '#ffffff' : waveColor, Math.max(1.2, 2.8 * fade), a * 0.92, true);
+          }
+          return;
+        }
         if (s.spinTwirl) {
           const tx = s.target?.x ?? s.x, ty = s.target?.y ?? s.y;
           const dir = s.spinDir || 1;
@@ -4780,6 +5247,18 @@
             }
             continue;
           }
+          if (p.growthLine) {
+            const ang = p.angle || 0;
+            const ca = Math.cos(ang), sa = Math.sin(ang);
+            const halfLen = (p.len || 14) * (0.45 + 0.55 * fade) * 0.5;
+            const lw = Math.max(1, (p.width || 2.4) * (0.45 + 0.55 * fade));
+            const x0 = p.x - ca * halfLen, y0 = p.y - sa * halfLen;
+            const x1 = p.x + ca * halfLen, y1 = p.y + sa * halfLen;
+            const a = Math.min(1, fade * 2.2) * 0.92;
+            gpu.strokeLine(x0, y0, x1, y1, col, lw, a, true);
+            gpu.strokeLine(x0 + ca * halfLen * 0.25, y0 + sa * halfLen * 0.25, x1, y1, '#ffffff', Math.max(0.9, lw * 0.44), a, true);
+            continue;
+          }
           if (p.materialShape) {
             const sz = p.size * Math.min(1, fade * 2);
             const lw = p.snap ? 2.4 : 1;
@@ -4877,6 +5356,14 @@
             gpu.fillCircle(f.x, f.y, 4.2, f.team === 0 ? home : away, 0.82);
           }
           for (const p of fx.particles) {
+            if (p.growthLine) {
+              const fade = Math.max(0, p.life / p.duration);
+              const ang = p.angle || 0, ca = Math.cos(ang), sa = Math.sin(ang);
+              const halfLen = (p.len || 14) * (0.45 + 0.55 * fade) * 0.5;
+              const lw = Math.max(1.4, (p.width || 2.4) * 1.35 * (0.45 + 0.55 * fade));
+              gpu.strokeLine(p.x - ca * halfLen, p.y - sa * halfLen, p.x + ca * halfLen, p.y + sa * halfLen, p.color || '#ffe043', lw, Math.min(1, fade * 2) * 0.58, true);
+              continue;
+            }
             if (!p.flame && !p.celebration && !p.emberSpark) continue;
             const col = p.color || (p.team === -1 ? '#ffffff' : p.team === 0 ? home : away);
             const fade = Math.max(0, p.life / p.duration);
@@ -5439,13 +5926,49 @@
       drawGuides(home, away, text, playback ? playback.guide : getGuide());
       fx.shockwaves.forEach(s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
-        const expand = (s.dramatic || s.hipClip || s.check || s.spinStrike || s.spinTwirl || s.koCone) ? 1 - (1 - progress) ** 2.6 : progress;
-        const fade = (s.dramatic || s.hipClip || s.check || s.spinStrike || s.spinTwirl || s.koCone) ? (1 - progress) ** 1.25 : 1 - progress;
+        const expand = (s.dramatic || s.hipClip || s.check || s.spinStrike || s.spinTwirl || s.koCone || s.colossusGrowth) ? 1 - (1 - progress) ** 2.6 : progress;
+        const fade = (s.dramatic || s.hipClip || s.check || s.spinStrike || s.spinTwirl || s.koCone || s.colossusGrowth) ? (1 - progress) ** 1.25 : 1 - progress;
         const r = s.currentRadius + (s.maxRadius - s.currentRadius) * expand;
         const targetCtx = s.overlay && view.badgeCtx ? view.badgeCtx : view.ctx;
         const waveColor = s.color || (s.team === 0 ? home : away);
         const baseW = s.width || (s.overlay ? 4.5 : 6);
         targetCtx.save();
+        if (s.colossusGrowth) {
+          const cx = s.target?.x ?? s.x, cy = s.target?.y ?? s.y;
+          const a = Math.max(0, fade * 0.90);
+          targetCtx.lineCap = 'round';
+          targetCtx.setLineDash([12, 8]);
+          targetCtx.beginPath();
+          targetCtx.arc(cx, cy, r, 0, Math.PI * 2);
+          targetCtx.strokeStyle = waveColor;
+          targetCtx.lineWidth = Math.max(1.2, baseW * fade);
+          targetCtx.globalAlpha = a;
+          targetCtx.stroke();
+          targetCtx.setLineDash([]);
+          if (fade > 0.18) {
+            targetCtx.beginPath();
+            targetCtx.arc(cx, cy, Math.max(2, r - 4), 0, Math.PI * 2);
+            targetCtx.strokeStyle = '#fff5b8';
+            targetCtx.lineWidth = Math.max(1, baseW * 0.45 * fade);
+            targetCtx.globalAlpha = a * 0.72;
+            targetCtx.stroke();
+          }
+          const rayCount = 12, rot = s.startAngle || 0, rayLen = 18 + 14 * expand;
+          targetCtx.lineWidth = Math.max(1.2, 2.8 * fade);
+          targetCtx.globalAlpha = a * 0.92;
+          for (let k = 0; k < rayCount; k++) {
+            const ang = rot + (k / rayCount) * Math.PI * 2;
+            const ca = Math.cos(ang), sa = Math.sin(ang);
+            const r0 = Math.max(2, r * 0.90), r1 = r + rayLen;
+            targetCtx.strokeStyle = k % 2 === 0 ? '#ffffff' : waveColor;
+            targetCtx.beginPath();
+            targetCtx.moveTo(cx + ca * r0, cy + sa * r0);
+            targetCtx.lineTo(cx + ca * r1, cy + sa * r1);
+            targetCtx.stroke();
+          }
+          targetCtx.restore();
+          return;
+        }
         if (s.spinTwirl) {
           const tx = s.target?.x ?? s.x, ty = s.target?.y ?? s.y;
           const dir = s.spinDir || 1;

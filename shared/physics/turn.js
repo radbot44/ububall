@@ -138,6 +138,7 @@ function wouldScore(bodies, removed, ticks = 960) { return ballRun(bodies, { rem
 function startTurn(bodies, plans, onSuper = null) {
   const count = bodies.length;
   const skaterEnd = count === 7 && bodies[6].team === -1 ? 6 : count;
+  const launchedSupers = onSuper ? [] : null;
   for (let i = 0; i < skaterEnd; i++) {
     const b = bodies[i];
     if (b.team < 0) continue;
@@ -158,11 +159,16 @@ function startTurn(bodies, plans, onSuper = null) {
       b.superHit = false;
       b.superRefunded = false;
       const sa = b.superActive;
-      if (sa === 'stalwart' || sa === 'colossus' || sa === 'ghost') onSuper?.(sa, 'launch', b);
+      if (launchedSupers && (sa === 'stalwart' || sa === 'colossus' || sa === 'ghost')) {
+        launchedSupers.push([sa, b]);
+      }
     }
     syncEffectiveStats(b);
   }
   launch(bodies, plans);
+  if (launchedSupers) {
+    for (let i = 0; i < launchedSupers.length; i++) onSuper(launchedSupers[i][0], 'launch', launchedSupers[i][1]);
+  }
 }
 const PREDICTION_TICKS = 480;
 function predictTurn(bodies, plans) {
