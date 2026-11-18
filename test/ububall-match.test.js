@@ -941,7 +941,7 @@ test('opposing Iron Save leads to REBOUND! callout on quick follow-up goal', () 
 test('planning phase match state ensures iterable CPU plans on reload and turn launch', () => {
   const bodies = P.kickoff();
   const humanPlans = Array.from({ length: 3 }, () => ({ angle: 0, power: 0.5, spin: 0, superArm: false, guard: false }));
-  const cpuBaseline = P.cpuPlans(bodies, () => 0.5, [0, 0]);
+  const cpuBaseline = C.cpuPlans(bodies, () => 0.5, [0, 0]);
   assert.equal(cpuBaseline.length, 3, 'cpu baseline generates 3 plans');
 
   // Verify that combining human plans and CPU baseline produces a valid 6-plan turn
@@ -960,7 +960,7 @@ test('planning phase match state ensures iterable CPU plans on reload and turn l
   };
   const restoredCpu1 = mockSavedWithCpu.cpuDone && Array.isArray(mockSavedWithCpu.cpu) && mockSavedWithCpu.cpu.length === 3
     ? mockSavedWithCpu.cpu
-    : P.cpuPlans(bodies, () => 0.5, [0, 0]);
+    : C.cpuPlans(bodies, () => 0.5, [0, 0]);
   assert.deepEqual([...mockSavedWithCpu.plans, ...restoredCpu1].length, 6);
 
   const mockLegacySavedWithoutCpu = {
@@ -969,7 +969,7 @@ test('planning phase match state ensures iterable CPU plans on reload and turn l
   };
   const restoredCpu2 = Array.isArray(mockLegacySavedWithoutCpu.cpu) && mockLegacySavedWithoutCpu.cpu.length === 3
     ? mockLegacySavedWithoutCpu.cpu
-    : P.cpuPlans(bodies, () => 0.5, [0, 0]);
+    : C.cpuPlans(bodies, () => 0.5, [0, 0]);
   assert.equal(restoredCpu2.length, 3);
   assert.doesNotThrow(() => {
     const combined = [...mockLegacySavedWithoutCpu.plans, ...restoredCpu2];

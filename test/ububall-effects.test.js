@@ -3210,6 +3210,7 @@ test('D4-11, D4-16, D4-17, D4-18, D4-20, D2-10, D4-02: UI icon/grid rules, clear
 
   // 5. D2-10 & D4-02: prepareCPU passes clock/roundTurns/play fields, and setUbuScreenGuard is registered
   {
+    const ububallCPU = require('../shared/ububall-cpu.js');
     const prepCode = section('function prepareCPU(initialPlans = null) {', '// Big announcements over the rink.');
     let receivedState = null;
     const play = ububallMatch.newPlay({ age: 42, last: 1, lastTouch: [1, null], banked: true });
@@ -3217,12 +3218,12 @@ test('D4-11, D4-16, D4-17, D4-18, D4-20, D2-10, D4-02: UI icon/grid rules, clear
       Array, console,
       cpuGeneration: 0, cpuDone: false, cpu: [], cpuReady: null,
       online: null, demo: false, demoLevels: ['medium', 'hard'], cpuLevel: 'hard',
-      P, ububallMatch, simBodies: P.kickoff(), stats: [], scores: [2, 1], turn: 4,
+      P, ububallCPU, ububallMatch, simBodies: P.kickoff(), stats: [], scores: [2, 1], turn: 4,
       fouls: ububallMatch.newFouls(), matchMode: 'pulse', matchTicks: 480, roundTurns: 2, play,
       phase: 'plan', saveActiveMatch: () => {},
       cpuClient: {
         cancel() {},
-        plan(state) { receivedState = state; return Promise.resolve({ plans: P.cpuPlans(P.kickoff(), () => 0.5, [0, 0]) }); }
+        plan(state) { receivedState = state; return Promise.resolve({ plans: ububallCPU.cpuPlans(P.kickoff(), () => 0.5, [0, 0]) }); }
       }
     });
     env.prepareCPU();

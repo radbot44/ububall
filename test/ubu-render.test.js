@@ -85,7 +85,7 @@ const context = vm.createContext({
   Math, Object, Array, Set, Map, WeakMap, Float32Array, Uint8Array, Number, String, Boolean, parseInt, parseFloat, Promise
 });
 context.globalThis = context;
-vm.runInContext(fs.readFileSync(require.resolve('../shared/ubu-render.js'), 'utf8'), context);
+context.ubuRender = cjsRender.createUbuRenderer(context);
 
 function flushRaf(time = 50) {
   const batch = rafQueue.splice(0);
@@ -327,7 +327,7 @@ test('sprite cache runs FIFO, differentiates mutated attributes on decoded model
     Math, Object, Array, Set, Map, WeakMap, Float32Array, Uint8Array, Number, String, Boolean, parseInt, parseFloat, Promise
   });
   spriteCtx.globalThis = spriteCtx;
-  vm.runInContext(fs.readFileSync(require.resolve('../shared/ubu-render.js'), 'utf8'), spriteCtx);
+  spriteCtx.ubuRender = cjsRender.createUbuRenderer(spriteCtx);
 
   const models = Array.from({ length: 12 }, (_, i) => {
     const dna = new Uint8Array(128);

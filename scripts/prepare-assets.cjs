@@ -29,7 +29,14 @@ for (const name of readdirSync(target)) if (!topFiles.includes(name)) rmSync(joi
 for (const name of readdirSync(targetAssets)) if (!assetFiles.includes(name)) rmSync(join(targetAssets, name), { recursive: true, force: true });
 
 for (const name of webFiles) copyFileSync(join(root, 'web', name), join(target, name));
-for (const name of sharedFiles) copyFileSync(join(root, 'shared', name), join(target, name));
+const bundledShared = new Set(['ubu.js', 'ubu-render.js', 'ubu-audio.js', 'ububall-physics.js', 'ububall-cpu.js']);
+for (const name of sharedFiles) {
+  if (bundledShared.has(name)) {
+    buildSync({ entryPoints: [join(root, 'shared', name)], outfile: join(target, name), bundle: true, format: 'iife' });
+  } else {
+    copyFileSync(join(root, 'shared', name), join(target, name));
+  }
+}
 for (const name of assetFiles) copyFileSync(join(root, 'web', 'assets', name), join(targetAssets, name));
 buildSync({ stdin: { contents: "export { DiscordSDK } from '@discord/embedded-app-sdk';", resolveDir: root },
   outfile: join(target, 'discord-sdk.js'), bundle: true, format: 'esm', minify: true, legalComments: 'linked' });

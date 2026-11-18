@@ -6,6 +6,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const { buildSync } = require('esbuild');
+const BUNDLED_SHARED = new Set(['ubu.js', 'ubu-render.js', 'ubu-audio.js', 'ububall-physics.js', 'ububall-cpu.js']);
 
 const root = path.resolve(__dirname, '..');
 const webDir = path.join(root, 'web');
@@ -193,7 +195,19 @@ function createBenchServer() {
     }
     if (SHARED_FILES.has(clean)) {
       const p = path.join(sharedDir, clean);
-      if (fs.existsSync(p)) return serveFile(res, p);
+      if (fs.existsSync(p)) {
+        if (BUNDLED_SHARED.has(clean)) {
+          const out = buildSync({ entryPoints: [p], bundle: true, format: 'iife', write: false }).outputFiles[0].contents;
+          res.writeHead(200, {
+            'Content-Type': 'text/javascript; charset=utf-8',
+            'Cache-Control': 'no-store',
+            'Content-Length': out.length
+          });
+          res.end(out);
+          return;
+        }
+        return serveFile(res, p);
+      }
     }
 
     res.writeHead(404);

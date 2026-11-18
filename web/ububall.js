@@ -614,7 +614,7 @@
     cpuDone = false;
     cpuClient.cancel();
     if (online?.active) return;
-    cpu = Array.isArray(initialPlans) && initialPlans.length === 3 ? initialPlans : P.cpuPlans(simBodies, () => .5, scores);
+    cpu = Array.isArray(initialPlans) && initialPlans.length === 3 ? initialPlans : ububallCPU.cpuPlans(simBodies, () => .5, scores);
     const turns = !demo && typeof recording !== 'undefined' ? recording?.turns : null;
     let history;
     if (turns?.length) {

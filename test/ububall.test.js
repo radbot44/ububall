@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const P = require('../shared/ububall-physics.js');
 const M = require('../shared/ububall-match.js');
+const C = require('../shared/ububall-cpu.js');
 const normal = { mass: 127, size: 127, traction: 127, spin: 127, grip: 127, impulse: 127, curve: 127 };
 test('exponential stat curve preserves endpoints and spreads mid-range stats evenly', () => {
   assert.ok(Math.abs(P.multiplier(0) - 2 / 3) < 1e-12);
@@ -169,7 +170,8 @@ test('maximum-speed strikes transfer momentum without passing through the ball',
   assert.ok(b[6].vx > 500); assert.ok(b[6].x > b[0].x);
 });
 test('CPU plans depend on field state, are bounded, and do not mutate it', () => {
-  const b = P.kickoff(), before = structuredClone(b), plans = P.cpuPlans(b, () => .5);
+  assert.equal(P.cpuPlans, undefined);
+  const b = P.kickoff(), before = structuredClone(b), plans = C.cpuPlans(b, () => .5);
   assert.deepEqual(b, before); assert.equal(plans.length, 3);
   assert.ok(plans.every(p => Number.isFinite(p.angle) && p.power >= 0 && p.power <= 1));
 });
@@ -177,7 +179,7 @@ test('repeated crowded turns stay finite, bounded and settle', () => {
   let seed = 9; const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
   let b = P.kickoff();
   for (let turn = 0; turn < 100; turn++) {
-    P.launch(b, [...Array.from({ length: 3 }, () => ({ angle: random() * Math.PI * 2, power: random() })), ...P.cpuPlans(b, random)]);
+    P.launch(b, [...Array.from({ length: 3 }, () => ({ angle: random() * Math.PI * 2, power: random() })), ...C.cpuPlans(b, random)]);
     const goal = resolve(b);
     assert.ok(b.every(p => [p.x, p.y, p.vx, p.vy].every(Number.isFinite)));
     assert.ok(b.slice(0, 6).every(p => p.x >= 60 - P.rink.goalDepth + p.radius - 0.1 && p.x <= 940 + P.rink.goalDepth - p.radius + 0.1 && p.y >= 84.9 && p.y <= 515.1));
@@ -187,7 +189,7 @@ test('repeated crowded turns stay finite, bounded and settle', () => {
 test('CPU can complete a first-to-five match against a stationary team', () => {
   let b = P.kickoff(); const score = [0, 0];
   for (let turn = 0; turn < 150 && Math.max(...score) < 5; turn++) {
-    P.launch(b, [...Array.from({ length: 3 }, () => ({ angle: 0, power: 0 })), ...P.cpuPlans(b, () => .5)]);
+    P.launch(b, [...Array.from({ length: 3 }, () => ({ angle: 0, power: 0 })), ...C.cpuPlans(b, () => .5)]);
     const goal = resolve(b);
     if (goal !== null) { score[goal]++; b = P.kickoff(); } else P.stop(b);
   }
@@ -823,7 +825,7 @@ test('AI Tactical Brain dynamically assigns roles and behaviors from 24-bit pers
   bRole[3].personality = { aggression: 0, creativity: 31, teamwork: 31, clutch: 31 };
   bRole[4].personality = { aggression: 63, creativity: 0, teamwork: 0, clutch: 31 };
   bRole[5].personality = { aggression: 63, creativity: 0, teamwork: 0, clutch: 31 };
-  const rolePlans = P.cpuPlans(bRole, () => 0.5, [0, 0]);
+  const rolePlans = C.cpuPlans(bRole, () => 0.5, [0, 0]);
   assert.ok(rolePlans[0].power < 0.35);
   assert.ok(rolePlans[1].power > 0.5);
 
@@ -831,9 +833,9 @@ test('AI Tactical Brain dynamically assigns roles and behaviors from 24-bit pers
   const bCre = P.kickoff();
   Object.assign(bCre[0], { x: 300, y: 300 });
   Object.assign(bCre[4], { x: 580, y: 300, personality: { aggression: 50, creativity: 0, teamwork: 0, clutch: 31 } });
-  const linearPlan = P.cpuPlans(bCre, () => 0.5)[1];
+  const linearPlan = C.cpuPlans(bCre, () => 0.5)[1];
   bCre[4].personality = { aggression: 50, creativity: 63, teamwork: 0, clutch: 31 };
-  const creativePlan = P.cpuPlans(bCre, () => 0.5)[1];
+  const creativePlan = C.cpuPlans(bCre, () => 0.5)[1];
   assert.equal(linearPlan.spin, 0);
   assert.ok(Math.abs(creativePlan.spin) > 0.4);
 
@@ -842,17 +844,17 @@ test('AI Tactical Brain dynamically assigns roles and behaviors from 24-bit pers
   Object.assign(bTmw[0], { x: 320, y: 300 });
   Object.assign(bTmw[4], { x: 580, y: 300, personality: { aggression: 45, creativity: 10, teamwork: 0, clutch: 31 } });
   Object.assign(bTmw[5], { x: 400, y: 160 });
-  const soloPlan = P.cpuPlans(bTmw, () => 0.5)[1];
+  const soloPlan = C.cpuPlans(bTmw, () => 0.5)[1];
   bTmw[4].personality = { aggression: 45, creativity: 10, teamwork: 63, clutch: 31 };
-  const passPlan = P.cpuPlans(bTmw, () => 0.5)[1];
+  const passPlan = C.cpuPlans(bTmw, () => 0.5)[1];
   assert.ok(Math.abs(soloPlan.angle - passPlan.angle) > 0.15);
 
   // 4. Option A Clutch spectrum: Iceman (0) stays composed in crease vs Hero Ball (63) surges up-ice at match point
   const bClu = P.kickoff();
   for (let i = 3; i < 6; i++) bClu[i].personality = { aggression: 31, creativity: 31, teamwork: 31, clutch: 0 };
-  const icemanPlans = P.cpuPlans(bClu, () => 0.9, [4, 3]);
+  const icemanPlans = C.cpuPlans(bClu, () => 0.9, [4, 3]);
   for (let i = 3; i < 6; i++) bClu[i].personality = { aggression: 31, creativity: 31, teamwork: 31, clutch: 63 };
-  const heroPlans = P.cpuPlans(bClu, () => 0.9, [4, 3]);
+  const heroPlans = C.cpuPlans(bClu, () => 0.9, [4, 3]);
   assert.ok(heroPlans[0].power > icemanPlans[0].power);
   assert.ok(heroPlans[1].power > icemanPlans[1].power);
 
@@ -860,7 +862,7 @@ test('AI Tactical Brain dynamically assigns roles and behaviors from 24-bit pers
   const bSup = P.kickoff();
   Object.assign(bSup[3], { x: 830, y: 300, meter: 100, equippedSuper: P.SUPERS[0], personality: { aggression: 0, creativity: 31, teamwork: 31, clutch: 0 } });
   Object.assign(bSup[4], { x: 570, y: 300, meter: 100, equippedSuper: P.SUPERS[3], personality: { aggression: 60, creativity: 31, teamwork: 31, clutch: 63 } });
-  const supPlans = P.cpuPlans(bSup, () => 0.5, [4, 2]);
+  const supPlans = C.cpuPlans(bSup, () => 0.5, [4, 2]);
   assert.equal(supPlans[0].superArm, true); // Anchor arms Stalwart in crease under threat
   assert.ok(supPlans[0].power > 0);
   assert.equal(supPlans[1].superArm, true); // Striker arms Cannonball on clean look
