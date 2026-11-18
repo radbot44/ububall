@@ -119,9 +119,7 @@
     tab.style.left = Math.max(width / 2, Math.min(board.width - width / 2, x)) + 'px';
     const scoreBottom = tab.parentElement.querySelector('.bug-home').getBoundingClientRect().bottom;
     const statusBottom = tab.parentElement.querySelector('.bug-status').getBoundingClientRect().bottom;
-    const rosterEl = $('portrait-roster');
-    const rosterBottom = rosterEl && rosterEl.offsetHeight ? rosterEl.getBoundingClientRect().bottom : 0;
-    tab.style.top = Math.max(scoreBottom, statusBottom, rosterBottom) - board.top + 'px';
+    tab.style.top = Math.max(scoreBottom, statusBottom) - board.top + 'px';
     tab.classList.add('show');
     bugTabTimer = setTimeout(() => { tab.classList.remove('show'); bugTabTimer = setTimeout(nextBugTab, 300); }, 2600);
   }
@@ -971,13 +969,47 @@
         pill.classList.toggle('carded', Boolean(b.carded));
         pill.classList.toggle('stunned', Boolean(b.stunned));
         if (i < 3) pill.setAttribute('aria-pressed', String(i === selected));
-        const ubuName = fieldView.entries[i]?.model?.parts?.fullName || `Ubu ${i + 1}`;
-        pill.setAttribute('aria-label', classicMode() ? ubuName : `${ubuName} · ${superTitle} ${statusText}`);
         const pillSuper = $(`portrait-super-${i}`);
         if (pillSuper && b.equippedSuper?.icon) {
           if (pillSuper.getAttribute('src') !== b.equippedSuper.icon) pillSuper.src = b.equippedSuper.icon;
           if (pillSuper.alt !== superTitle) pillSuper.alt = superTitle;
         }
+        const plan = i < 3 ? plans[i] : null;
+        const canAct = !b.carded && !b.stunned;
+        const pillGuarded = canAct && (i < 3 ? (planning ? Boolean(plan?.guard) : phase === 'play' && Boolean(b.guarding)) : (phase === 'play' && Boolean(b.guarding)));
+        const pillAimed = canAct && i < 3 && planning && !pillGuarded && Boolean((plan?.power || 0) > 0 || plan?.spin || b.superArm);
+        const stateKind = b.carded ? 'carded'
+          : b.stunned ? 'stunned'
+          : pillGuarded ? (b.ironGuard ? 'iron-guard' : 'guard')
+          : pillAimed ? 'aimed'
+          : '';
+        const pillState = $(`portrait-state-${i}`);
+        if (pillState) {
+          pillState.hidden = !stateKind;
+          if (pillState.dataset.state !== stateKind) {
+            pillState.dataset.state = stateKind;
+            if (stateKind === 'carded') {
+              const cardMark = document.createElement('span');
+              cardMark.className = 'portrait-state-card';
+              pillState.replaceChildren(cardMark);
+            } else if (stateKind === 'stunned') {
+              pillState.replaceChildren(gameUi.icon('sparkles'));
+            } else if (stateKind === 'guard' || stateKind === 'iron-guard') {
+              pillState.replaceChildren(gameUi.icon('shield'));
+            } else if (stateKind === 'aimed') {
+              pillState.replaceChildren(gameUi.icon('check'));
+            } else {
+              pillState.replaceChildren();
+            }
+          }
+        }
+        const stateLabel = stateKind === 'carded' ? 'Yellow card'
+          : stateKind === 'stunned' ? 'Stunned'
+          : stateKind === 'iron-guard' || stateKind === 'guard' ? 'Guarding'
+          : stateKind === 'aimed' ? 'Move planned'
+          : '';
+        const ubuName = fieldView.entries[i]?.model?.parts?.fullName || `Ubu ${i + 1}`;
+        pill.setAttribute('aria-label', [ubuName, !classicMode() && `${superTitle} ${statusText}`, stateLabel].filter(Boolean).join(' · '));
       }
     });
     const hudSuperBtn = $('stadium-super-btn');
@@ -1158,7 +1190,12 @@
           const initialSuper = entry.equippedSuper || resolveEquippedSuper(entry, i);
           superImg.src = initialSuper?.icon || 'assets/00_stalwart.png';
           superImg.alt = initialSuper?.displayName || initialSuper?.name || '';
-          pill.append(ring, superImg);
+          const stateBadge = document.createElement('span');
+          stateBadge.id = `portrait-state-${i}`;
+          stateBadge.className = 'portrait-pill-state';
+          stateBadge.setAttribute('aria-hidden', 'true');
+          stateBadge.hidden = true;
+          pill.append(ring, superImg, stateBadge);
           pill.onclick = () => {
             if (i < 3 && phase === 'plan' && !theater && !online?.spectating && selected !== i) {
               selected = i;
