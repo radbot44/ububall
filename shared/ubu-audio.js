@@ -2268,6 +2268,63 @@
     tail.stop(tAt + 0.1);
   }
 
+  // Celebratory ubu twirl layered on top of the bullwhip strike when spin >= 10 rad/s:
+  // upward gyroscopic flutter + airy spin-sheen shimmer around the striking ubu.
+  function playSpinTwirl(options = {}) {
+    const ctx = options.ctx || getAudioContext();
+    if (!ctx) return;
+    const master = createMasterChain(ctx, null, 0.28);
+    const dest = routePanner(ctx, master, options);
+    const now = ctx.currentTime;
+    const volume = Math.max(0.05, Math.min(1.0, options.volume ?? 0.85));
+    const spinNorm = Math.min(1, Math.max(0.25, (Math.abs(options.spin) || 14) / 20));
+    const dur = 0.24;
+
+    const carrier = ctx.createOscillator(), overtone = ctx.createOscillator();
+    const lfo = ctx.createOscillator(), lfoGain = ctx.createGain();
+    const toneGain = ctx.createGain(), overGain = ctx.createGain();
+    carrier.type = 'sine';
+    carrier.frequency.setValueAtTime(380 + 90 * spinNorm, now);
+    carrier.frequency.exponentialRampToValueAtTime(760 + 260 * spinNorm, now + dur * 0.72);
+    carrier.frequency.exponentialRampToValueAtTime(620 + 180 * spinNorm, now + dur);
+
+    overtone.type = 'triangle';
+    overtone.frequency.setValueAtTime(760 + 180 * spinNorm, now);
+    overtone.frequency.exponentialRampToValueAtTime(1480 + 420 * spinNorm, now + dur * 0.72);
+    overtone.frequency.exponentialRampToValueAtTime(1180 + 300 * spinNorm, now + dur);
+
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(22 + 12 * spinNorm, now);
+    lfo.frequency.linearRampToValueAtTime(34 + 14 * spinNorm, now + dur);
+    lfoGain.gain.setValueAtTime(65 + 45 * spinNorm, now);
+
+    toneGain.gain.setValueAtTime(0.0001, now);
+    toneGain.gain.linearRampToValueAtTime(0.22 * volume, now + 0.02);
+    toneGain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+
+    overGain.gain.setValueAtTime(0.0001, now);
+    overGain.gain.linearRampToValueAtTime(0.11 * volume, now + 0.025);
+    overGain.gain.exponentialRampToValueAtTime(0.0001, now + dur * 0.92);
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(carrier.frequency);
+    lfoGain.connect(overtone.frequency);
+    carrier.connect(toneGain); toneGain.connect(dest);
+    overtone.connect(overGain); overGain.connect(dest);
+
+    carrier.start(now); overtone.start(now); lfo.start(now);
+    carrier.stop(now + dur + 0.02); overtone.stop(now + dur + 0.02); lfo.stop(now + dur + 0.02);
+
+    noiseGrain(ctx, dest, now, dur * 0.85, {
+      type: 'bandpass',
+      freq: 1200 + 300 * spinNorm,
+      mid: 2400 + 500 * spinNorm,
+      to: 1650 + 300 * spinNorm,
+      q: 2.8,
+      level: 0.18 * volume
+    });
+  }
+
   // Hockey dasher-board bounce: polite flex on light/medium hits, plus a deep hollow woody/HDPE
   // dasher-box "thock" reserved strictly for truly hard board hits.
   function playWallHit(options = {}) {
@@ -4144,6 +4201,7 @@
     playCarve,
     playSlipstream,
     playSpinStrike,
+    playSpinTwirl,
     playWallHit,
     playFireImpact,
     playSave,

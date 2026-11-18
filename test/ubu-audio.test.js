@@ -553,6 +553,7 @@ test('movement wobble, spin wobble, puck slide, spin strike, fire impact, save s
   assert.doesNotThrow(() => audio.playSpin({ omega: 14, radius: 25 }));
   assert.doesNotThrow(() => audio.playPuckSlide({ speed: 500 }));
   assert.doesNotThrow(() => audio.playSpinStrike({ spin: 16 }));
+  assert.doesNotThrow(() => audio.playSpinTwirl({ spin: 16 }));
   assert.doesNotThrow(() => audio.playFireImpact({ volume: 0.8 }));
   assert.doesNotThrow(() => audio.playSave({ own: false }));
   assert.doesNotThrow(() => audio.playFirework({ ring: true, pan: -0.3 }));
@@ -610,12 +611,18 @@ test('movement wobble, spin wobble, puck slide, spin strike, fire impact, save s
     assert.ok(osc.stopped - osc.started <= 0.02, 'any whip transient oscillator is <20 ms percussive snap');
   }
 
+  const twirlCtx = recordedContext();
+  audio.playSpinTwirl({ ctx: twirlCtx, spin: 16, volume: 0.9 });
+  assert.ok(twirlCtx.nodes.filter(n => n.kind === 'oscillator').length >= 3, 'spin twirl layers carrier, overtone, and flutter LFO');
+  assert.ok(twirlCtx.nodes.some(n => n.kind === 'buffer'), 'spin twirl includes airy bandpass shimmer');
+
   const shared = recordedContext();
   audio.shareMasterChain(shared);
   audio.playUbuMove({ ctx: shared, speed: 480, mass: 3, radius: 25 });
   audio.playSpin({ ctx: shared, omega: 14, radius: 25 });
   audio.playPuckSlide({ ctx: shared, speed: 550, spin: 12 });
   audio.playSpinStrike({ ctx: shared, spin: 18, volume: 0.9 });
+  audio.playSpinTwirl({ ctx: shared, spin: 16, volume: 0.9 });
   audio.playFireImpact({ ctx: shared, volume: 0.85 });
   audio.playSave({ ctx: shared, own: false });
   audio.playSave({ ctx: shared, own: true });

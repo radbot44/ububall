@@ -306,16 +306,16 @@ function strikeCloseSpin(bodies) {
   P.step(bodies, 0);
 }
 
-test('spin strike counter-rotates the ball 1x from range, ramping to 2x spin and a power boost within 2 ball diameters', () => {
+test('point-blank strike boosts speed >=180 px/s regardless of spin; Spin Strike upgrades at |omega|>=10 within 2 ball diameters', () => {
   for (const spin of [-1, 0, 1]) {
-    [15, 15, 22.5, 30].forEach((gain, i) => {
+    [20, 20, 30, 40].forEach((gain, i) => {
       const gap = [300, 72, 36, 0][i];
       const bodies = closeSpinSetup(gap, spin), control = structuredClone(bodies);
       control[6].openingShot = false;
       strikeCloseSpin(bodies); strikeCloseSpin(control);
-      // Within range, the strike adds speed along the ball's heading: half the ubu's 432 px/s at
-      // point blank and full spin. From range it adds none.
-      const boost = [0, 0, 108, 216][i] * Math.abs(spin), speed = Math.hypot(control[6].vx, control[6].vy);
+      // Within range, any strike >= 180 px/s adds speed along the ball's heading: half the ubu's 432 px/s at
+      // point blank regardless of spin. From range it adds none.
+      const boost = [0, 0, 108, 216][i], speed = Math.hypot(control[6].vx, control[6].vy);
       assert.ok(Math.abs(Math.hypot(bodies[6].vx, bodies[6].vy) - speed - boost) < 1e-9);
       assert.ok(Math.abs(bodies[6].vx * control[6].vy - bodies[6].vy * control[6].vx) < 1e-6);
       // Contact friction already spins the ball against the ubu; the bonus adds to it, up to the ±24 cap.
@@ -325,7 +325,24 @@ test('spin strike counter-rotates the ball 1x from range, ramping to 2x spin and
     });
   }
   assert.equal(closeSpinSetup(0, 1, 37.5)[0].spinStrike, 2);
+  assert.equal(closeSpinSetup(0, 0, 37.5)[0].spinStrike, 2);
   assert.equal(closeSpinSetup(300)[0].spinStrike, 1);
+
+  // Threshold checks: speed >= 180 px/s required for boost; |omega| >= 10 rad/s required for spinStruck
+  const contactFlags = (gap, vx, omega) => {
+    const b = P.kickoff(); b.slice(0, 6).forEach(x => P.applyStats(x));
+    Object.assign(b[0], { x: 400, y: 300, vx, vy: 0, omega, spinStrike: gap < 72 ? 2 - gap / 72 : 1 });
+    Object.assign(b[6], { x: 442.9, y: 300, vx: 0, vy: 0, openingShot: true });
+    let out = null;
+    P.step(b, 0, ev => { out = { struck: ev.struck, spinStruck: ev.spinStruck }; });
+    return out;
+  };
+  assert.deepEqual(contactFlags(0, 179, 20), { struck: false, spinStruck: false });
+  assert.deepEqual(contactFlags(0, 180, 0), { struck: true, spinStruck: false });
+  assert.deepEqual(contactFlags(0, 432, 9.9), { struck: true, spinStruck: false });
+  assert.deepEqual(contactFlags(0, 432, 10), { struck: true, spinStruck: true });
+  assert.deepEqual(contactFlags(0, 432, -10), { struck: true, spinStruck: true });
+  assert.deepEqual(contactFlags(72, 432, 20), { struck: false, spinStruck: false });
 });
 
 test('spin strike uses the remaining spin, which decays at 5 rad/s while moving and 30 rad/s once linear motion settles', () => {
@@ -1421,23 +1438,23 @@ test('Super Mastery grants refund on hit and stacks with whiff refund, without d
   assert.equal(b[1].meter, 45, 'whiffed Master super refunded 45% (25% whiff + 20% mastery)');
 });
 
-test('launch spin scales with base maxSpin of 15 rad/s and DNA spin stat', () => {
+test('launch spin scales with base maxSpin of 20 rad/s and DNA spin stat', () => {
   const b = P.kickoff();
   P.applyStats(b[0], { ...normal, spin: 127 });
-  assert.equal(b[0].maxSpin, 15, 'base stat 127 yields maxSpin 15 rad/s');
+  assert.equal(b[0].maxSpin, 20, 'base stat 127 yields maxSpin 20 rad/s');
 
   P.applyStats(b[1], { ...normal, spin: 0 });
-  assert.ok(Math.abs(b[1].maxSpin - 10) < 1e-6, 'min spin stat 0 yields 10 rad/s (2/3x)');
+  assert.ok(Math.abs(b[1].maxSpin - 40 / 3) < 1e-6, 'min spin stat 0 yields 13.33 rad/s (2/3x)');
 
   P.applyStats(b[2], { ...normal, spin: 255 });
-  assert.ok(Math.abs(b[2].maxSpin - 22.5) < 1e-6, 'max spin stat 255 yields 22.5 rad/s (1.5x)');
+  assert.equal(b[2].maxSpin, 30, 'max spin stat 255 yields 30 rad/s (1.5x)');
 
   P.launch([b[0]], [{ angle: 0, power: 1, spin: 1 }]);
-  assert.equal(b[0].omega, 15, 'launch with spin 1 applies full maxSpin 15 rad/s');
+  assert.equal(b[0].omega, 20, 'launch with spin 1 applies full maxSpin 20 rad/s');
 
   b[0].omega = 0;
   P.launch([b[0]], [{ angle: 0, power: 1, spin: -0.5 }]);
-  assert.equal(b[0].omega, -7.5, 'launch from rest with spin -0.5 applies -7.5 rad/s');
+  assert.equal(b[0].omega, -10, 'launch from rest with spin -0.5 applies -10 rad/s');
 });
 
 test('iron guard status starts false on play start, turns true upon iron save, and persists', () => {

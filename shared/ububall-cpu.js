@@ -319,7 +319,7 @@
       const power = distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * effFriction * Math.max(0, distance + extraDrive)) / maxV);
 
       if (Math.abs(spin) > 0.01 && power > 0.05) {
-        const omega0 = spin * (b.maxSpin || 15);
+        const omega0 = spin * (b.maxSpin || P.BASE_MAX_SPIN || 20);
         const curveF = b.curveFactor ?? SKATER_CURVE;
         const v0 = Math.max(60, power * maxV);
         const estT = Math.min(1.2, distance / (v0 * 0.72));
@@ -436,7 +436,7 @@
     let speed = distance < 2 ? 0 : Math.min(maxV, Math.sqrt(2 * effFriction * Math.max(0, distance + drive)));
     let chordAngle = 0;
     if (clampedSpin && speed > 0 && distance >= 2) {
-      const omega0 = clampedSpin * (body.maxSpin || 15);
+      const omega0 = clampedSpin * (body.maxSpin || P.BASE_MAX_SPIN || 20);
       const curveF = body.curveFactor ?? SKATER_CURVE;
       const pass1 = integrateSpinArc(speed, effFriction, distance, omega0, curveF);
       const arcDist = distance / pass1.chordRatio;
@@ -619,14 +619,17 @@
       ux = nux; uy = nuy;
     }
 
-    if (clampedSpin) {
+    const hitR = P.ballHitRadius ? P.ballHitRadius(body) : Math.max(effRadius, body.reach || effRadius, 18);
+    const launchGap = Math.hypot(ball.x - body.x, ball.y - body.y) - hitR - ball.radius;
+    const prox = launchGap < 4 * ball.radius ? Math.max(0, Math.min(1, 1 - launchGap / (4 * ball.radius))) : 0;
+    if (clampedSpin || prox > 0) {
       // Pre-compensate contact normal for tangential grip kick, canonical spinStrike/closeSpin, point-blank strikeBoost & Magnus curve.
       const approxCx = leadX - ux * contact, approxCy = leadY - uy * contact;
       const appDist = Math.hypot(approxCx - body.x, approxCy - body.y);
       const { maxV, effFriction } = skaterDrive(body, superKey, clampedSpin);
       const strikeDrive = Math.max(1200, effDrive);
       const v0 = Math.min(maxV, Math.sqrt(2 * effFriction * Math.max(0, appDist + strikeDrive)));
-      const arc = integrateSpinArc(v0, effFriction, appDist, clampedSpin * (body.maxSpin || 15), body.curveFactor ?? SKATER_CURVE);
+      const arc = integrateSpinArc(v0, effFriction, appDist, clampedSpin * (body.maxSpin || P.BASE_MAX_SPIN || 20), body.curveFactor ?? SKATER_CURVE);
       const vImp = Math.max(80, arc.endSpeed);
       const arrivalSkew = arc.endTheta - arc.chordAngle;
       const vn = vImp * Math.cos(arrivalSkew), vt = vImp * Math.sin(arrivalSkew);
@@ -642,16 +645,14 @@
       const dvtB = tang / mB;
       let wBall = Math.max(-24, Math.min(24, -2 * tang / (mB * ball.radius)));
 
-      const hitR = P.ballHitRadius ? P.ballHitRadius(body) : Math.max(effRadius, body.reach || effRadius, 18);
-      const launchGap = Math.hypot(ball.x - body.x, ball.y - body.y) - hitR - ball.radius;
-      const prox = launchGap < 4 * ball.radius ? Math.max(0, Math.min(1, 1 - launchGap / (4 * ball.radius))) : 0;
       const spinStrikeGain = (P.STRIKE_GAIN ?? 1) + ((P.CLOSE_SPIN_GAIN ?? 2) - (P.STRIKE_GAIN ?? 1)) * prox * prox * (3 - 2 * prox);
       const small = (body.sizeMult || 1) ** (P.SIZE?.strike ?? -0.5);
       const closeSpin = -spinStrikeGain * arc.endOmega * small * (body.curveMult ?? 1);
       wBall = Math.max(-24, Math.min(24, wBall + closeSpin));
 
-      const spinRatio = Math.min(1, Math.abs(arc.endOmega) / (body.maxSpin || 15));
-      const strikeBoost = small * (P.STRIKE_POWER ?? 0.5) * (spinStrikeGain - 1) * spinRatio * vImp;
+      const strikeBoost = vImp >= (P.STRIKE_MIN_SPEED ?? 180)
+        ? small * (P.STRIKE_POWER ?? 0.5) * (spinStrikeGain - 1) * vImp
+        : 0;
       const postSpeed = Math.max(160, Math.hypot(dvnB, dvtB) + strikeBoost);
       const ballFric = (ball.friction ?? 85) + AIR_DRAG * postSpeed * postSpeed * 0.6;
       const bCurveF = P.ballCurveFactor ? P.ballCurveFactor({ curveMult: body.curveMult ?? 1 }, false) : SKATER_CURVE * (body.curveMult ?? 1);
@@ -1083,7 +1084,7 @@
           ? [aperture.y, Math.abs(farCornerY - aperture.y) < 12 ? RINK_CY : farCornerY, nearCornerY]
           : [farCornerY, RINK_CY, nearCornerY];
         const onWing = Math.abs(ball.y - RINK_CY) > 75;
-        const benderSpin = sideSign => (onWing ? -sideSign : sideSign) * (team ? 1 : -1);
+        const benderSpin = sideSign => -sideSign * (team ? 1 : -1);
 
         // Point-blank Spin Strike (+50% bonus ball speed within 4 * ball.radius = 72 px)
         if (pointBlank) {
@@ -1108,16 +1109,25 @@
 
         // Goalie-bypassing curved benders: bow wide past top/bottom shoulder and hook inside each post
         const bendOff = onWing ? 21 : 24;
-        const topBender = strike(body, ball, goal, GOAL_Y_TOP + bendOff, superArmKey, benderSpin(-1), SHOT_DRIVE);
+        const benderScale = Math.min(1, 22 / (body.maxSpin || P.BASE_MAX_SPIN || 20));
+        const topBender = strike(body, ball, goal, GOAL_Y_TOP + bendOff, superArmKey, benderSpin(-1) * benderScale, SHOT_DRIVE);
         topBender.power = 1;
-        const botBender = strike(body, ball, goal, GOAL_Y_BOT - bendOff, superArmKey, benderSpin(1), SHOT_DRIVE);
+        const botBender = strike(body, ball, goal, GOAL_Y_BOT - bendOff, superArmKey, benderSpin(1) * benderScale, SHOT_DRIVE);
         botBender.power = 1;
+        const wideTop = strike(body, ball, goal, GOAL_Y_TOP + 15, superArmKey, benderSpin(-1), SHOT_DRIVE);
+        wideTop.power = 1;
+        const wideBot = strike(body, ball, goal, GOAL_Y_BOT - 15, superArmKey, benderSpin(1), SHOT_DRIVE);
+        wideBot.power = 1;
         if (goalieY >= RINK_CY) {
           moves.push(tag({ ...topBender, superArm: arm }, 'shoot'));
+          if (!onWing) moves.push(tag({ ...wideTop, superArm: arm }, 'shoot'));
           moves.push(tag({ ...botBender, superArm: arm }, 'shoot'));
+          if (!onWing) moves.push(tag({ ...wideBot, superArm: arm }, 'shoot'));
         } else {
           moves.push(tag({ ...botBender, superArm: arm }, 'shoot'));
+          if (!onWing) moves.push(tag({ ...wideBot, superArm: arm }, 'shoot'));
           moves.push(tag({ ...topBender, superArm: arm }, 'shoot'));
+          if (!onWing) moves.push(tag({ ...wideTop, superArm: arm }, 'shoot'));
         }
 
         // Full-power Corner Meteor Bank lasers (1.0 wall restitution + zero tangential loss when onFire)
@@ -1521,7 +1531,13 @@
           const vImp = Math.sqrt(Math.max(6400, vSend0 * vSend0 - 2 * sender.friction * dSend));
           const tSend = sender.friction > 0 ? Math.max(0, (vSend0 - vImp) / sender.friction) : dSend / vSend0;
           const mP = sender.mass || 3, mB = ball.mass || 1;
-          const vPass0 = Math.max(180, Math.min((2 * mP / (mP + mB)) * vImp, (1.88 / (1 / mP + 1 / mB)) * (sender.power || 1) * vImp));
+          const sHitR = P.ballHitRadius ? P.ballHitRadius(sender) : Math.max(sender.radius, sender.reach || sender.radius, 18);
+          const sGap = Math.max(0, Math.hypot(ball.x - sender.x, ball.y - sender.y) - sHitR - ball.radius);
+          const sProx = sGap < 4 * ball.radius ? Math.max(0, 1 - sGap / (4 * ball.radius)) : 0;
+          const sBoost = (sProx > 0 && vImp >= (P.STRIKE_MIN_SPEED ?? 180))
+            ? (sender.sizeMult || 1) ** (P.SIZE?.strike ?? -0.5) * (P.STRIKE_POWER ?? 0.5) * ((P.CLOSE_SPIN_GAIN ?? 2) - (P.STRIKE_GAIN ?? 1)) * sProx * sProx * (3 - 2 * sProx) * vImp
+            : 0;
+          const vPass0 = Math.max(180, Math.min((2 * mP / (mP + mB)) * vImp, (1.88 / (1 / mP + 1 / mB)) * (sender.power || 1) * vImp) + sBoost);
           const dPass = Math.hypot(snapX - ball.x, snapY - ball.y) || 1;
           const tPass = dPass / Math.max(140, vPass0 - 0.5 * (ball.friction ?? 85) * (dPass / vPass0));
           const vPassEnd = Math.max(100, vPass0 - (ball.friction ?? 85) * tPass);

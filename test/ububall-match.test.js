@@ -592,17 +592,24 @@ test('a touch is only a save if the ball then stays out of the goal', () => {
 test('hit-stop comes from the hitting ubu, longer for shots that travel or head into goal', () => {
   const shoot=(angle,power,place)=>{
     const moves=Array.from({length:6},still); moves[0]={angle,power,spin:0,superArm:false,guard:false};
-    return M.resolveTurn(P,shotState({x:300+43*Math.cos(angle),y:300+43*Math.sin(angle)},{0:{x:300,y:300},...place}),moves).replay.stops;
+    return M.resolveTurn(P,shotState({x:300+120*Math.cos(angle),y:300+120*Math.sin(angle)},{0:{x:300,y:300},...place}),moves).replay.stops;
   };
   // Straight at the far goal: its own path goes in, whoever is in the way.
-  assert.deepEqual(shoot(0,1)[0],{tick:1,ms:M.HIT_STOP.goal});
+  assert.equal(shoot(0,1)[0].ms,M.HIT_STOP.goal);
   // Off the boards and a long way untouched.
   const away={3:{x:820,y:540},4:{x:690,y:540},5:{x:690,y:540}};
   assert.equal(shoot(-1.2,1,{1:{x:310,y:540},2:{x:310,y:540},...away})[0].ms,M.HIT_STOP.long);
   // Straight into a nearby ubu: a big shot, but stopped at once.
-  assert.equal(shoot(-1.2,1,{1:{x:345,y:150}})[0].ms,M.HIT_STOP.hit);
-  // A soft touch is not a big shot.
-  assert.deepEqual(shoot(0,.5).filter(s=>s.tick===1),[]);
+  assert.equal(shoot(-1.2,1,{1:{x:365,y:130}})[0].ms,M.HIT_STOP.hit);
+  // A soft touch from outside point-blank range is not a big shot.
+  assert.deepEqual(shoot(0,.5).filter(s=>s.tick<=30),[]);
+  // Point-blank strike (>= 180 px/s, spin 0) earns hit-stop without Spin Strike popup; |omega|>=10 sets replay.struck
+  const pbPlain = M.resolveTurn(P,shotState({x:343,y:300},{0:{x:300,y:300}}),[{angle:0,power:.4,spin:0,superArm:false,guard:false},...Array.from({length:5},still)]);
+  assert.equal(pbPlain.replay.stops[0].ms, M.HIT_STOP.hit);
+  assert.deepEqual(pbPlain.replay.struck, []);
+  const pbSpin = M.resolveTurn(P,shotState({x:343,y:300},{0:{x:300,y:300}}),[{angle:0,power:.4,spin:.55,superArm:false,guard:false},...Array.from({length:5},still)]);
+  assert.equal(pbSpin.replay.stops[0].ms, M.HIT_STOP.hit);
+  assert.deepEqual(pbSpin.replay.struck, [1]);
   // A fast ball off a still ubu is not a big shot either.
   const ping=M.resolveTurn(P,shotState({x:400,y:200,vx:1000},{3:{x:520,y:200}}),Array.from({length:6},still));
   assert.deepEqual(ping.replay.stops,[]);
@@ -631,10 +638,10 @@ test('super stats swing meter gain harder than other stats', () => {
 });
 
 test('a Cannonball hit always earns big-shot hit-stop', () => {
-  const state=shotState({x:343,y:300},{0:{x:300,y:300}});
+  const state=shotState({x:420,y:300},{0:{x:300,y:300}});
   state.bodies[0].superActive='cannonball'; state.bodies[0].superTicks=P.SUPER.ticks;
   const moves=Array.from({length:6},still); moves[0]={angle:0,power:.4,spin:0,superArm:false,guard:false};
-  const plain=M.resolveTurn(P,shotState({x:343,y:300},{0:{x:300,y:300}}),moves);
+  const plain=M.resolveTurn(P,shotState({x:420,y:300},{0:{x:300,y:300}}),moves);
   // The soft shot itself earns no pause; the Cannonball version pauses on the hit.
   const first=r=>r.replay.stops[0]?.tick ?? Infinity, cannon=M.resolveTurn(P,state,moves);
   assert.ok(first(cannon)<first(plain) && cannon.replay.stops[0].ms>=M.HIT_STOP.hit);

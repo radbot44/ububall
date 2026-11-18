@@ -298,9 +298,10 @@
     return t.preBallSpeed;
   }
   function tickTouch(contact) {
-    const { a, b, speed, impulse, plow, iron, checker, snapped, spinStruck } = contact;
+    const { a, b, speed, impulse, plow, iron, checker, snapped, spinStruck, struck } = contact;
     const t = activeTick, player = toucher(a, b, speed);
     if (snapped) t.snapped = true;
+    if (struck || spinStruck) t.struck = true;
     if (spinStruck) t.spinStruck = true;
     if ((a.team === -1 || b.team === -1) && speed >= 15 && (plow || t.preOnFire || (t.ball?.onFire && !t.cannon))) {
       t.fireHit = true;
@@ -409,7 +410,7 @@
     if (t.checked.length) t.checked.length = 0;
     if (t.deferredPasses.length) t.deferredPasses.length = 0;
     t.bodies = bodies; t.play = play; t.ball = ball; t.fx = fx; t.tally = tally;
-    t.cannon = false; t.fireHit = false; t.snapped = false; t.spinStruck = false; t.postRing = false; t.postSide = -1; t.postX = 0; t.postY = 0;
+    t.cannon = false; t.fireHit = false; t.snapped = false; t.struck = false; t.spinStruck = false; t.postRing = false; t.postSide = -1; t.postX = 0; t.postY = 0;
     t.incomingCredit = null; t.passSender = -1; t.stickyGrab = -1; t.ironSaver = -1; t.magnetTeam = -1; t.passMask = 0; t.ballCheckMask = 0;
     t.preBallX = ball ? ball.x : 0; t.preBallY = ball ? ball.y : 0;
     t.preBallSpeed = -1;
@@ -644,9 +645,10 @@
     const speed = (tally && touched.size) ? Math.hypot(ball.vx, ball.vy) : 0;
     const incomingBig = play.big;
     const big = cannon || (touched.size ? bigShot(P, before, touched, ball) : false), struck = t.spinStruck;
+    const anyStrike = t.struck || t.spinStruck;
     const snapped = t.snapped;
     const hasIron = tickSaves.length > 0 && tickSaves.some(s => s.iron);
-    let stop = effects ? Math.max(hasIron ? HIT_STOP.iron : 0, hitStop(P, bodies, ball, big, struck, tickSaves.length > 0 && tickSaves.some(save => !save.own), incomingBig)) : 0;
+    let stop = effects ? Math.max(hasIron ? HIT_STOP.iron : 0, hitStop(P, bodies, ball, big, anyStrike, tickSaves.length > 0 && tickSaves.some(save => !save.own), incomingBig)) : 0;
     if (effects) {
       if (t.fireHit) stop = Math.max(stop, HIT_STOP.fire);
       if (snapped) stop = Math.max(stop, big ? HIT_STOP.long : HIT_STOP.snap);

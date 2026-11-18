@@ -3245,19 +3245,20 @@
     }
 
     function handleCollision(contact) {
-      const { a, b, speed = 0, impulse = 0, plow = false, iron = false, snapped = false, spinStruck = false, tangentImpulse = 0, passerSlot = -1 } = contact;
+      const { a, b, speed = 0, impulse = 0, plow = false, iron = false, snapped = false, spinStruck = false, struck = false, tangentImpulse = 0, passerSlot = -1 } = contact;
       if (iron) {
         if (a?.guarding) a.ironGuard = true;
         if (b?.guarding) b.ironGuard = true;
       }
       const isBall = a.team === -1 || b.team === -1;
       const isSnap = isBall && Boolean(snapped);
+      const isStrike = isBall && Boolean(struck || spinStruck);
       const isSpinStrike = isBall && Boolean(spinStruck);
       const isHipClip = !isBall && a.team !== b.team && tangentImpulse >= 55 && tangentImpulse >= speed * 0.22;
       const isCheck = !isBall && a.team !== b.team && !isHipClip && speed >= 65;
       const spinBoost = !isBall && a.team !== b.team ? (tangentImpulse || 0) * 0.45 : 0;
       const effSpeed = Math.max(speed, spinBoost);
-      if (effSpeed < 15 && !isSnap && !isSpinStrike) return;
+      if (effSpeed < 15 && !isSnap && !isStrike) return;
       const fx = getEffects();
       const distance = Math.hypot(b.x - a.x, b.y - a.y) || 1;
       const x = a.x + (b.x - a.x) * a.radius / distance, y = a.y + (b.y - a.y) * a.radius / distance;
@@ -3378,63 +3379,107 @@
           fx.particles.push(p);
         }
       }
-      if (isSpinStrike && !isReducedMotion()) {
+      if (isStrike && !isReducedMotion()) {
         const ball = a.team === -1 ? a : b;
         const striker = a.team === -1 ? b : a;
         const strikeTeam = striker?.team >= 0 ? striker.team : 0;
         const heading = Math.atan2(ball.vy || 0, ball.vx || 0);
-        const spinVal = ball.omega || -(striker?.omega || 0) || 14;
-        const spinDir = Math.sign(spinVal) || 1;
-        const spinPower = Math.min(1, Math.max(0.35, Math.abs(spinVal) / 20));
-        if (fx.shockwaves.length < 30) {
-          fx.shockwaves.push({
-            x: ball.x, y: ball.y,
-            currentRadius: 18, maxRadius: 68 + 10 * spinPower,
-            team: strikeTeam, color: null,
-            spinStrike: true, spinDir, startAngle: heading, blades: 3,
-            width: 3.6 + 1.4 * spinPower,
-            life: 0.30, duration: 0.30, overlay: true
-          });
-          fx.shockwaves.push({
-            x, y,
-            currentRadius: 11, maxRadius: 46 + 8 * spinPower,
-            team: strikeTeam, color: null,
-            spinStrike: true, spinDir, startAngle: heading + spinDir * 0.55, blades: 2,
-            width: 2.8 + 1.0 * spinPower,
-            life: 0.23, duration: 0.23, overlay: true
-          });
-        }
-        if (fx.particles.length < 400) {
-          fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: strikeTeam, color: null, life: 0.22, duration: 0.22, flash: true, flashSize: 128, overlay: true });
-          fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ffffff', life: 0.12, duration: 0.12, flash: true, flashSize: 64, overlay: true });
-        }
-        for (let k = 0; k < 20 && fx.particles.length < 400; k++) {
-          const isSwirlWing = k < 12;
-          const radialAng = isSwirlWing
-            ? heading + (k / 12) * Math.PI * 2
-            : heading + (Math.random() - 0.5) * 0.52;
-          const moveAng = isSwirlWing
-            ? radialAng + spinDir * (1.05 + (Math.random() - 0.5) * 0.25)
-            : radialAng + spinDir * 0.22;
-          const spd = isSwirlWing ? 185 + Math.random() * 210 : 250 + Math.random() * 290;
-          const life = 0.20 + Math.random() * 0.14;
-          const spawnR = ball.radius * (isSwirlWing ? 0.85 : 0.65);
-          const sx = ball.x + Math.cos(radialAng) * spawnR;
-          const sy = ball.y + Math.sin(radialAng) * spawnR;
-          const p = {
-            x: sx, y: sy,
-            px: sx - Math.cos(moveAng) * 8, py: sy - Math.sin(moveAng) * 8,
-            vx: Math.cos(moveAng) * spd, vy: Math.sin(moveAng) * spd,
-            team: strikeTeam,
-            color: k % 4 === 0 ? '#ffffff' : null,
-            life, duration: life, snap: true, overlay: true
-          };
-          if (k < 8) {
-            p.materialShape = 'streak';
-            p.size = 2.8 + Math.random() * 1.8;
-            p.angle = moveAng;
+        if (isSpinStrike) {
+          const spinVal = ball.omega || -(striker?.omega || 0) || 14;
+          const spinDir = Math.sign(spinVal) || 1;
+          const ubuSpinDir = Math.sign(striker?.omega || -spinVal) || 1;
+          const spinPower = Math.min(1, Math.max(0.35, Math.abs(striker?.omega || spinVal) / 20));
+          if (fx.shockwaves.length < 30) {
+            fx.shockwaves.push({
+              x: ball.x, y: ball.y,
+              currentRadius: 18, maxRadius: 68 + 10 * spinPower,
+              team: strikeTeam, color: null,
+              spinStrike: true, spinDir, startAngle: heading, blades: 3,
+              width: 3.6 + 1.4 * spinPower,
+              life: 0.30, duration: 0.30, overlay: true
+            });
+            fx.shockwaves.push({
+              x, y,
+              currentRadius: 11, maxRadius: 46 + 8 * spinPower,
+              team: strikeTeam, color: null,
+              spinStrike: true, spinDir, startAngle: heading + spinDir * 0.55, blades: 2,
+              width: 2.8 + 1.0 * spinPower,
+              life: 0.23, duration: 0.23, overlay: true
+            });
+            if (striker) {
+              const sr = striker.radius || 25;
+              fx.shockwaves.push({
+                target: striker, x: striker.x, y: striker.y,
+                currentRadius: sr * 0.72, maxRadius: sr * 1.54,
+                team: strikeTeam, color: null,
+                spinTwirl: true, spinDir: ubuSpinDir, startAngle: striker.rotation || heading,
+                width: 3.4 + 1.2 * spinPower,
+                life: 0.44, duration: 0.44, overlay: true
+              });
+            }
           }
-          fx.particles.push(p);
+          if (fx.particles.length < 400) {
+            fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: strikeTeam, color: null, life: 0.22, duration: 0.22, flash: true, flashSize: 128, overlay: true });
+            fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ffffff', life: 0.12, duration: 0.12, flash: true, flashSize: 64, overlay: true });
+          }
+          for (let k = 0; k < 20 && fx.particles.length < 400; k++) {
+            const isSwirlWing = k < 12;
+            const radialAng = isSwirlWing
+              ? heading + (k / 12) * Math.PI * 2
+              : heading + (Math.random() - 0.5) * 0.52;
+            const moveAng = isSwirlWing
+              ? radialAng + spinDir * (1.05 + (Math.random() - 0.5) * 0.25)
+              : radialAng + spinDir * 0.22;
+            const spd = isSwirlWing ? 185 + Math.random() * 210 : 250 + Math.random() * 290;
+            const life = 0.20 + Math.random() * 0.14;
+            const spawnR = ball.radius * (isSwirlWing ? 0.85 : 0.65);
+            const sx = ball.x + Math.cos(radialAng) * spawnR;
+            const sy = ball.y + Math.sin(radialAng) * spawnR;
+            const p = {
+              x: sx, y: sy,
+              px: sx - Math.cos(moveAng) * 8, py: sy - Math.sin(moveAng) * 8,
+              vx: Math.cos(moveAng) * spd, vy: Math.sin(moveAng) * spd,
+              team: strikeTeam,
+              color: k % 4 === 0 ? '#ffffff' : null,
+              life, duration: life, snap: true, overlay: true
+            };
+            if (k < 8) {
+              p.materialShape = 'streak';
+              p.size = 2.8 + Math.random() * 1.8;
+              p.angle = moveAng;
+            }
+            fx.particles.push(p);
+          }
+        } else {
+          if (fx.shockwaves.length < 30) {
+            fx.shockwaves.push({ x: ball.x, y: ball.y, currentRadius: 18, maxRadius: 62, team: strikeTeam, color: null, life: 0.25, duration: 0.25, overlay: true });
+            fx.shockwaves.push({ x, y, currentRadius: 11, maxRadius: 42, team: strikeTeam, color: null, life: 0.20, duration: 0.20, overlay: true });
+          }
+          if (fx.particles.length < 400) {
+            fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: strikeTeam, color: null, life: 0.20, duration: 0.20, flash: true, flashSize: 116, overlay: true });
+            fx.particles.push({ x, y, px: x, py: y, vx: 0, vy: 0, team: -1, color: '#ffffff', life: 0.11, duration: 0.11, flash: true, flashSize: 56, overlay: true });
+          }
+          for (let k = 0; k < 14 && fx.particles.length < 400; k++) {
+            const ang = heading + (Math.random() - 0.5) * 0.72;
+            const spd = 210 + Math.random() * 260;
+            const life = 0.18 + Math.random() * 0.12;
+            const sx = ball.x + Math.cos(ang) * (ball.radius * 0.65);
+            const sy = ball.y + Math.sin(ang) * (ball.radius * 0.65);
+            const p = {
+              x: sx, y: sy,
+              px: sx - Math.cos(ang) * 7, py: sy - Math.sin(ang) * 7,
+              vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+              team: strikeTeam,
+              color: k % 4 === 0 ? '#ffffff' : null,
+              life, duration: life, snap: true, overlay: true
+            };
+            if (k < 6) {
+              p.materialShape = 'streak';
+              p.size = 2.6 + Math.random() * 1.4;
+              p.angle = ang;
+            }
+            fx.particles.push(p);
+          }
         }
       }
       if (plow) flames(x, y, 40, (b.vx || a.vx) * 0.1, (b.vy || a.vy) * 0.1, 15);
@@ -3445,11 +3490,15 @@
         const player = a.team !== -1 ? a : b;
         const norm = Math.min(1.0, Math.max(0.0, (speed - 25) / 550));
         const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
-        if (isSpinStrike && gameAudio()?.playSpinStrike) {
+        if (isStrike && gameAudio()) {
           const sMap = (fx.spinStrikeTimes ||= new WeakMap());
           if (now - (sMap.get(ball) ?? -Infinity) > 50) {
             sMap.set(ball, now);
-            gameAudio().playSpinStrike({ volume: Math.min(1.0, 0.45 + 0.55 * (norm ** 0.8)), spin: ball.omega || player.omega || 14, x, y });
+            const strikeVol = Math.min(1.0, 0.45 + 0.55 * (norm ** 0.8));
+            gameAudio().playSpinStrike?.({ volume: strikeVol, spin: ball.omega || player.omega || 14, x, y });
+            if (isSpinStrike) {
+              gameAudio().playSpinTwirl?.({ volume: strikeVol, spin: player.omega || ball.omega || 14, x: player.x, y: player.y });
+            }
           }
         }
         const isFlamingCollision = (plow || P.ballOnFire?.(ball)) && (now - (fx.lastCannonImpact ?? -Infinity) > 20);
@@ -4238,12 +4287,30 @@
       // Helper for shockwaves (shared by Pass 1 non-overlay and Pass 3 overlay)
       const drawShockwaveItem = s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
-        const isSpecial = s.dramatic || s.hipClip || s.check || s.spinStrike || s.koCone;
+        const isSpecial = s.dramatic || s.hipClip || s.check || s.spinStrike || s.spinTwirl || s.koCone;
         const expand = isSpecial ? 1 - (1 - progress) ** 2.6 : progress;
         const fade = isSpecial ? (1 - progress) ** 1.25 : 1 - progress;
         const r = s.currentRadius + (s.maxRadius - s.currentRadius) * expand;
         const waveColor = s.color || (s.team === 0 ? home : away);
         const baseW = s.width || (s.overlay ? 4.5 : 6);
+        if (s.spinTwirl) {
+          const tx = s.target?.x ?? s.x, ty = s.target?.y ?? s.y;
+          const dir = s.spinDir || 1;
+          const twirlR = s.currentRadius + (s.maxRadius - s.currentRadius) * Math.sin(Math.min(1, progress * 1.15) * Math.PI * 0.65);
+          const rot = (s.startAngle || 0) + dir * (progress ** 0.72) * Math.PI * 3.8;
+          const bladeW = Math.max(1.4, baseW * (0.5 + 0.5 * fade));
+          const peakAlpha = Math.max(0, fade * 0.94);
+          gpu.strokeCircle(tx, ty, twirlR * 0.96, waveColor, Math.max(1, bladeW * 0.45), peakAlpha * 0.35);
+          for (let bIdx = 0; bIdx < 3; bIdx++) {
+            const a0 = rot + (bIdx * Math.PI * 2) / 3;
+            gpu.drawTaperedSpinArc(tx, ty, twirlR, a0, 1.38 * dir, bladeW, waveColor, peakAlpha);
+          }
+          for (let bIdx = 0; bIdx < 2; bIdx++) {
+            const a0 = rot + 0.45 * dir + bIdx * Math.PI;
+            gpu.drawTaperedSpinArc(tx, ty, twirlR * 0.68, a0, 1.55 * dir, bladeW * 0.62, '#ffffff', peakAlpha * 0.88);
+          }
+          return;
+        }
         if (s.koCone) {
           const dir = s.normalAngle || 0;
           const halfArc = 0.56 + 0.24 * expand;
@@ -5371,13 +5438,37 @@
       drawGuides(home, away, text, playback ? playback.guide : getGuide());
       fx.shockwaves.forEach(s => {
         const progress = 1 - Math.max(0, s.life / s.duration);
-        const expand = (s.dramatic || s.hipClip || s.check || s.spinStrike || s.koCone) ? 1 - (1 - progress) ** 2.6 : progress;
-        const fade = (s.dramatic || s.hipClip || s.check || s.spinStrike || s.koCone) ? (1 - progress) ** 1.25 : 1 - progress;
+        const expand = (s.dramatic || s.hipClip || s.check || s.spinStrike || s.spinTwirl || s.koCone) ? 1 - (1 - progress) ** 2.6 : progress;
+        const fade = (s.dramatic || s.hipClip || s.check || s.spinStrike || s.spinTwirl || s.koCone) ? (1 - progress) ** 1.25 : 1 - progress;
         const r = s.currentRadius + (s.maxRadius - s.currentRadius) * expand;
         const targetCtx = s.overlay && view.badgeCtx ? view.badgeCtx : view.ctx;
         const waveColor = s.color || (s.team === 0 ? home : away);
         const baseW = s.width || (s.overlay ? 4.5 : 6);
         targetCtx.save();
+        if (s.spinTwirl) {
+          const tx = s.target?.x ?? s.x, ty = s.target?.y ?? s.y;
+          const dir = s.spinDir || 1;
+          const twirlR = s.currentRadius + (s.maxRadius - s.currentRadius) * Math.sin(Math.min(1, progress * 1.15) * Math.PI * 0.65);
+          const rot = (s.startAngle || 0) + dir * (progress ** 0.72) * Math.PI * 3.8;
+          const bladeW = Math.max(1.4, baseW * (0.5 + 0.5 * fade));
+          const peakAlpha = Math.max(0, fade * 0.94);
+          targetCtx.beginPath();
+          targetCtx.arc(tx, ty, twirlR * 0.96, 0, Math.PI * 2);
+          targetCtx.strokeStyle = waveColor;
+          targetCtx.lineWidth = Math.max(1, bladeW * 0.45);
+          targetCtx.globalAlpha = peakAlpha * 0.35;
+          targetCtx.stroke();
+          for (let bIdx = 0; bIdx < 3; bIdx++) {
+            const a0 = rot + (bIdx * Math.PI * 2) / 3;
+            fillTaperedSpinArc(targetCtx, tx, ty, twirlR, a0, 1.38 * dir, bladeW, waveColor, peakAlpha);
+          }
+          for (let bIdx = 0; bIdx < 2; bIdx++) {
+            const a0 = rot + 0.45 * dir + bIdx * Math.PI;
+            fillTaperedSpinArc(targetCtx, tx, ty, twirlR * 0.68, a0, 1.55 * dir, bladeW * 0.62, '#ffffff', peakAlpha * 0.88);
+          }
+          targetCtx.restore();
+          return;
+        }
         if (s.koCone) {
           const dir = s.normalAngle || 0;
           const halfArc = 0.56 + 0.24 * expand;

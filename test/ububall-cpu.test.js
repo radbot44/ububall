@@ -210,7 +210,7 @@ test('CPU search infers cooldown clock when omitted, sanitizes Classic supers, a
   const zeroMove = { angle: 0, power: 0, spin: 0, superArm: false, guard: false };
   P.startTurn(sim, [zeroMove, zeroMove, zeroMove, ...basePlans]);
   sim[0].y = 500;
-  for (let t = 0; t < 180; t++) P.step(sim, P.DT);
+  for (let t = 0; t < 120; t++) P.step(sim, P.DT);
   assert.ok(sim[6].y < 260, `counter-rotated ball bends upward (y=${sim[6].y}) away from blocker at y=314`);
 });
 
@@ -487,7 +487,7 @@ test('selective 2-turn look-ahead bridges finishTurn stuns to convert 2-turn Kno
   Object.assign(koState.bodies[3], { x: 850, y: 300 });
   Object.assign(koState.bodies[4], { x: 355, y: 300 });
   Object.assign(koState.bodies[5], { x: 245, y: 295, meter: 100, equippedSuper: koSuper });
-  Object.assign(koState.bodies[6], { x: 295, y: 300 });
+  Object.assign(koState.bodies[6], { x: 270, y: 300 });
 
   const oneTurn = C.plan(koState, 1, { level: 'insane', candidates: 90, lookaheadTop: 0, seed: 4 });
   const twoTurn = C.plan(koState, 1, { level: 'insane', candidates: 90, seed: 4 });
@@ -688,7 +688,7 @@ test('CPU shooting upgrades: full-force fireballs, point-blank Spin Strike, shou
   const curveDec = C.plan(curveSt, 1, { level: 'hard', seed: 7 });
   const curveRes = M.resolveTurn(P, curveSt, [C.GUARD, C.GUARD, C.GUARD, ...curveDec.plans], { effects: false });
   assert.equal(curveRes.replay.goal, 1, 'Hard CPU curves shot wide around squared-up slot Guard blocker');
-  assert.ok(curveDec.plans[0].power >= 0.95, `uses full-power shot around blocker (got power=${curveDec.plans[0].power})`);
+  assert.ok(curveDec.plans[0].power >= 0.75 && Math.abs(curveDec.plans[0].spin) > 0.5, `uses high-power curved shot around blocker (got power=${curveDec.plans[0].power})`);
   const pbSt = mkState('standard', { 0: { impulse: 250, size: 165 }, 3: { power: 25, spin: 250, curve: 100, impulse: 185 } });
   Object.assign(pbSt.bodies[0], { x: 102, y: 382 });
   Object.assign(pbSt.bodies[1], { x: 780, y: 130 });

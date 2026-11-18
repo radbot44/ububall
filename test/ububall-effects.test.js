@@ -2113,6 +2113,7 @@ test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim
     playSpin: o => calls.spin.push(o),
     playPuckSlide: o => calls.puck.push(o),
     playSpinStrike: o => calls.whip.push(o),
+    playSpinTwirl: o => (calls.twirl ||= []).push(o),
     playFireImpact: o => calls.fire.push(o),
     playFirework: o => calls.firework.push(o),
     stopMotion: () => {},
@@ -2156,11 +2157,26 @@ test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim
   assert.ok(snapParticles.some(p => p.flash && p.team === 1), "Snap includes compact team-colored flash");
   assert.ok(snapParticles.some(p => p.materialShape === "streak" && p.team === 1), "Snap includes team-colored directional streaks");
 
-  // 1b. Spin strike collision triggers playSpinStrike whip sound
+  // 1b. Point-blank plain strike gets whip sound + impact ring without twirl; Spin strike (>=10 rad/s) adds playSpinTwirl & ubu twirl
   now += 200;
+  const wBeforePlain = fx.shockwaves.length;
+  Object.assign(bodies[6], { x: 460, y: 300, vx: 620, vy: 0, omega: 0 });
+  Object.assign(bodies[0], { x: 416, y: 300, omega: 0 });
+  env.handleCollision({ a: bodies[0], b: bodies[6], speed: 360, impulse: 480, plow: false, iron: false, snapped: false, struck: true, spinStruck: false, tangentImpulse: 0 });
+  assert.equal(calls.whip.length, 1, "Point-blank plain strike triggers playSpinStrike whip sound");
+  assert.equal((calls.twirl || []).length, 0, "Plain strike does not trigger playSpinTwirl");
+  assert.equal(fx.shockwaves.slice(wBeforePlain).some(s => s.spinTwirl), false, "Plain strike does not spawn ubu twirl");
+  assert.ok(fx.shockwaves.slice(wBeforePlain).length >= 1, "Plain strike emits impact ring");
+
+  now += 200;
+  const wBeforeSpin = fx.shockwaves.length;
   Object.assign(bodies[6], { x: 460, y: 300, vx: 620, vy: -80, omega: -16 });
-  env.handleCollision({ a: bodies[0], b: bodies[6], speed: 360, impulse: 480, plow: false, iron: false, snapped: false, spinStruck: true, tangentImpulse: 0 });
-  assert.equal(calls.whip.length, 1, "Spin strike triggers playSpinStrike whip sound");
+  Object.assign(bodies[0], { x: 416, y: 300, omega: 14 });
+  env.handleCollision({ a: bodies[0], b: bodies[6], speed: 360, impulse: 480, plow: false, iron: false, snapped: false, struck: true, spinStruck: true, tangentImpulse: 0 });
+  assert.equal(calls.whip.length, 2, "Spin strike triggers playSpinStrike whip sound");
+  assert.equal((calls.twirl || []).length, 1, "Spin strike adds playSpinTwirl twirling sound");
+  const twirlWave = fx.shockwaves.slice(wBeforeSpin).find(s => s.spinTwirl);
+  assert.ok(twirlWave && twirlWave.target === bodies[0], "Spin strike spawns spinTwirl vortex over the striking ubu");
 
   // 1c. Flaming ball impacts trigger playFireImpact on skater hit and flaming wall bounce (but not on Cannonball ignition tick)
   now += 200;
@@ -2257,6 +2273,7 @@ test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim
     playCarve: o => forwarded.push(["carve", o]),
     playSlipstream: o => forwarded.push(["slipstream", o]),
     playSpinStrike: o => forwarded.push(["whip", o]),
+    playSpinTwirl: o => forwarded.push(["twirl", o]),
     playFireImpact: o => forwarded.push(["fire", o]),
     playSave: o => forwarded.push(["save", o]),
     playFirework: o => forwarded.push(["firework", o]),
@@ -2274,12 +2291,13 @@ test("Snap team-color FX, Spin Strike whip, Flaming Ball woosh, Hard Brake & Rim
   adapter.playCarve({ volume: 0.6 });
   adapter.playSlipstream({ volume: 0.5 });
   adapter.playSpinStrike({ spin: 15 });
+  adapter.playSpinTwirl({ spin: 15 });
   adapter.playFireImpact({ volume: 0.8 });
   adapter.playSave({ own: false });
   adapter.playFirework({ ring: false });
   adapter.stop();
   assert.deepEqual(forwarded.map(e => e[0]), [
-    "ball", "goal", "move", "spin", "puck", "carve", "slipstream", "whip", "fire", "save", "firework", "stopMotion"
+    "ball", "goal", "move", "spin", "puck", "carve", "slipstream", "whip", "twirl", "fire", "save", "firework", "stopMotion"
   ]);
   assert.equal(forwarded[0][1].snap, true);
   assert.equal(forwarded[1][2].spin, 16);
@@ -2346,6 +2364,7 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
     playCarve: () => { audioHits.add('playCarve'); },
     playSlipstream: () => { audioHits.add('playSlipstream'); },
     playSpinStrike: () => { audioHits.add('playSpinStrike'); },
+    playSpinTwirl: () => { audioHits.add('playSpinTwirl'); },
     playWallHit: () => { audioHits.add('playWallHit'); },
     playFireImpact: () => { audioHits.add('playFireImpact'); },
     playSave: () => { audioHits.add('playSave'); },
@@ -2539,7 +2558,7 @@ test('Effects Demo catalog covers all 8 match-flow groups, all match sounds, all
   for (const expected of [
     'playGameStart', 'playCollision', 'playBallHit', 'playBallHit:snap',
     'playUbuMove', 'playSpin', 'playPuckSlide',
-    'playCarve', 'playSlipstream', 'playSpinStrike', 'playWallHit', 'playFireImpact',
+    'playCarve', 'playSlipstream', 'playSpinStrike', 'playSpinTwirl', 'playWallHit', 'playFireImpact',
     'playSave', 'playFirework', 'playGoalHit:post', 'playGoalHit:net',
     'playSizzle', 'playIronSave', 'playSuper', 'playFoul:warning', 'playFoul:card',
     'playVoice', 'playFanfare',

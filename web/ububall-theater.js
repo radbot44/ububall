@@ -53,6 +53,7 @@
       playCarve: o => A.playCarve?.(into(o)),
       playSlipstream: o => A.playSlipstream?.(into(o)),
       playSpinStrike: o => A.playSpinStrike?.(into(o)),
+      playSpinTwirl: o => A.playSpinTwirl?.(into(o)),
       playFireImpact: o => A.playFireImpact?.(into(o)),
       playSave: o => A.playSave?.(into(o)),
       playFirework: o => A.playFirework?.(into(o)),

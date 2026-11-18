@@ -423,23 +423,30 @@
         },
         {
           id: 'spin-strike',
-          title: 'Point-Blank Spin Strike (`"Spin strike!"`)',
-          when: 'Skater launched with spin touches the ball first within 2 ball diameters (`tick.struck`, `playSpinStrike`).',
-          visual: 'Twin expanding team-colored rotating swirl-blade shockwaves (`s.spinStrike`), contact flash, 20 tangential spin-whip streaks & sparks, accelerating bullwhip loop-unwind whoosh into a supersonic whipcrack, extra shot speed + Magnus curve, hit-stop, and `"Spin strike!"` callout.',
-          soundLabel: 'Play whipcrack',
+          title: 'Point-Blank Strike & Spin Strike (`"Spin strike!"`)',
+          when: 'Skater (>=180 px/s) touches the ball first within 2 ball diameters: always boosts shot speed & cracks (`struck`, `playSpinStrike`), and upgrades to `"Spin strike!"` with ubu twirl when `|omega| >= 10 rad/s` (`tick.struck`, `playSpinTwirl`).',
+          visual: 'Plain point-blank strike emits a crisp team-colored impact ring, flash, directional streaks, hit-stop, and bullwhip crack (no popup); Spin Strike (`>=10 rad/s`) upgrades to twin rotating swirl-blade shockwaves, a 3-blade twirl vortex over the striking ubu (`s.spinTwirl`), `playSpinTwirl`, and `"Spin strike!"` callout.',
+          soundLabel: 'Play strike / twirl',
+          variants: [
+            { id: 'spin', label: 'Spin Strike (>=10 rad/s)' },
+            { id: 'plain', label: 'Point-Blank Strike (No Spin)' }
+          ],
           duration: 2.5,
-          playSound: ctx => {
-            ctx.audio()?.playSpinStrike?.({ volume: 0.92, spin: 16 });
+          playSound: (ctx, variant = 'spin') => {
+            ctx.audio()?.playSpinStrike?.({ volume: 0.92, spin: variant === 'spin' ? 16 : 0 });
+            if (variant === 'spin') ctx.audio()?.playSpinTwirl?.({ volume: 0.92, spin: 16 });
             ctx.audio()?.playBallHit({ volume: 0.9, snap: false });
           },
-          run: ctx => {
+          run: (ctx, variant = 'spin') => {
             ctx.resetStage({ phase: 'play', mode: 'standard' });
-            ctx.place(0, 380, 310);
+            ctx.place(0, 380, variant === 'spin' ? 310 : 300);
             ctx.place(6, 434, 300);
             ctx.place(3, 780, 140);
             ctx.place(4, 780, 460);
             const plans = ctx.idlePlans();
-            plans[0] = { angle: -0.14, power: 0.95, spin: 1.0, guard: false };
+            plans[0] = variant === 'spin'
+              ? { angle: -0.14, power: 0.95, spin: 1.0, guard: false }
+              : { angle: 0, power: 0.95, spin: 0, guard: false };
             ctx.launchPlans(plans);
           }
         },
