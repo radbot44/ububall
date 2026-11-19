@@ -9,10 +9,12 @@ const M = require('../shared/ububall-match.js');
 const S = require('../scripts/cpu-simulation.cjs');
 const createClient = require('../web/ububall-cpu-client.js');
 
-test('all 5 CPU difficulty tiers (Easy through Ububall God) are reproducible, bounded and leave public state unchanged', () => {
-  assert.deepEqual(Object.keys(C.LEVELS), ['easy', 'medium', 'hard', 'insane', 'god']);
+test('CPU presets are reproducible and bounded, and missing Ballistic weights fall back to God', () => {
+  assert.deepEqual(Object.keys(C.LEVELS), ['easy', 'medium', 'hard', 'insane', 'god', 'ballistic']);
   assert.equal(C.LEVEL_LABELS.insane, 'Insane');
   assert.equal(C.LEVEL_LABELS.god, 'Ububall God');
+  assert.equal(C.LEVEL_LABELS.ballistic, 'Ballistic');
+  assert.deepEqual(C.LEVELS.ballistic, { ...C.LEVELS.god, nn: true, nnWeight: .55, nnPolicy: true, nnOpponent: true });
 
   const state = S.initialState(4), before = structuredClone(state);
   const first = C.plan(state, 1, { level: 'easy', seed: 4 });
@@ -30,12 +32,19 @@ test('all 5 CPU difficulty tiers (Easy through Ububall God) are reproducible, bo
     assert.deepEqual(a.plans, b.plans, `${level} deterministic`);
     assert.equal(a.diagnostics.candidates, C.LEVELS[level].candidates);
     M.validatePlans(a.plans);
+    if (level === 'god') {
+      const fallback = C.plan(state, 1, { level: 'ballistic', seed: 12 });
+      assert.deepEqual(fallback.plans, a.plans);
+      assert.equal(fallback.diagnostics.level, 'god');
+      assert.equal(fallback.diagnostics.score, a.diagnostics.score);
+    }
   }
   assert.deepEqual(state, before);
 
   assert.throws(() => C.plan(state, 1, { candidates: Infinity }));
   assert.throws(() => C.plan(state, 1, { opponents: 6 }));
   assert.throws(() => C.plan(state, 1, { level: 'impossible' }));
+  assert.throws(() => C.plan(state, 1, { level: 'ballistic', nn: false }), /hybrid neural search/);
 });
 
 test('two-rung adversarial screening keeps Medium and Hard simulation counts lean while converting tactical fixtures', () => {
@@ -95,7 +104,7 @@ test('CPU search accounts for a carried Pulse super and drives an active Sticky 
   assert.equal(carryRes.replay.goal, 1, 'Sticky carrier drives ball directly into open net');
 });
 
-test('CPU supers are legal across all 5 levels and full simulations include guard and meter rules', () => {
+test('CPU supers are legal and full simulations include guard and meter rules', () => {
   const state = S.initialState(17);
   state.bodies.slice(0, 6).forEach((b, i) => { b.meter = 100; b.equippedSuper = P.SUPERS[i]; });
   const a = C.plan(state, 0, { level: 'insane' }).plans, b = C.plan(state, 1, { level: 'god' }).plans;
@@ -156,6 +165,30 @@ test('worker client snapshots public state, cancels stale work and reports failu
   assert.equal(workers[1].terminated, true);
   client.plan(state, {});
   assert.equal(workers.length, 3);
+});
+
+test('worker client can check neural availability during an active plan', async t => {
+  const workers = [];
+  const client = createClient(() => {
+    const worker = { postMessage(data) { this.data = data; }, terminate() { this.terminated = true; } };
+    workers.push(worker);
+    return worker;
+  });
+  t.after(() => client.dispose());
+  const plan = client.plan(S.initialState(), { level: 'god' });
+  const available = client.hasNeuralWeights();
+  assert.deepEqual(workers[1].data, { checkNeuralWeights: true });
+  workers[1].onmessage({ data: { hasNeuralWeights: true } });
+  assert.equal(await available, true);
+  assert.equal(workers[1].terminated, true);
+  assert.equal(workers[0].terminated, undefined);
+  workers[0].onmessage({ data: { result: { plans: [] } } });
+  assert.deepEqual(await plan, { plans: [] });
+
+  const unavailable = client.hasNeuralWeights();
+  workers[2].onerror();
+  assert.equal(await unavailable, false);
+  assert.equal(workers[2].terminated, true);
 });
 
 test('decided() does not cut off search while ball sits in a corner or skater slides toward crease, and Colossus strike accounts for swollen radius', () => {
@@ -310,7 +343,7 @@ test('tactical puzzles: CPU converts screened bank/curve shot and finds zero-tea
   assert.equal(outPass.replay.goal, 0, 'Medium CPU finds cross-ice Snap one-timer goal in 34 candidates even when teamwork=0');
 });
 
-test('shot-cone geometry stays strictly outside the 80 px crease and UI markup exposes all 5 CPU tiers in <= 3-per-row grid', () => {
+test('shot-cone geometry clears the crease and six CPU tiers fit in a two-by-three grid', () => {
   for (const team of [0, 1]) {
     for (const bx of [120, 350, 500, 750, 890]) {
       for (const by of [90, 200, 300, 420, 510]) {
@@ -322,13 +355,16 @@ test('shot-cone geometry stays strictly outside the 80 px crease and UI markup e
   }
 
   const indexHtml = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
-  for (const val of ['easy', 'medium', 'hard', 'insane', 'god']) {
-    assert.ok(indexHtml.includes(`name="cpu-level" value="${val}"`), `web/index.html includes radio for ${val}`);
-  }
+  const fieldset = indexHtml.match(/<fieldset id="cpu-levels"[^>]*>([\s\S]*?)<\/fieldset>/)[1];
+  const tiers = [...fieldset.matchAll(/name="cpu-level" value="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(tiers, Object.keys(C.LEVELS));
+  assert.match(fieldset, /<label data-tier="ballistic" hidden>/);
   assert.ok(indexHtml.includes('<span>Ububall God</span>'), 'web/index.html displays Ububall God label');
 
   const css = fs.readFileSync(path.join(__dirname, '../web/ububall.css'), 'utf8');
-  assert.ok(css.includes('grid-template-columns: repeat(6, minmax(0, 1fr))'), '6-column spanned 3+2 grid keeps <= 3 items per row');
+  assert.match(css, /\.cpu-levels \{[^}]*grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)/);
+  assert.match(css, /\.cpu-levels label \{[^}]*grid-column: span 2/);
+  assert.match(css, /\.cpu-levels:has\(\[data-tier="ballistic"\]\[hidden\]\) label:nth-of-type\(n \+ 4\) \{ grid-column: span 3;/);
 });
 
 test('Hard+ adapts to resolved history on repeated setups and extreme style traits keep forced goals', () => {

@@ -21,8 +21,11 @@ Choose a CPU difficulty in **New match**. The initial default is Medium.
 | `hard` | Hard | 84 | 3 (+ Open-corner sniper, striker check blitz, scoring-punish counter-search & history learning) | 500 |
 | `insane` | Insane | 150 | 4 (+ Snap/curve rush, dual refine, counter-search, multi-pattern learning & 2-turn finalist look-ahead) | 580 |
 | `god` | Ububall God | 240 | 4 (+ 720-tick rollout + 1.35s coast, dual wobble/refine, 2-round counter-search, dual-bridge 2-turn look-ahead & 3-turn Pulse chain) | 720 |
+| `ballistic` | Ballistic | 240 | God scenarios and a learned response when distinct, with God counter-search and look-ahead | 720 |
 
-Each candidate blends its average and worst outcome across the active opponent scenarios (`risk` weights: `.15`, `.35`, `.53`, `.55`, `.55`), verifying execution `wobble` across all contenders within the final selection window. Final selection deduplicates quantized tactical basins (`planBasinKey`) before Boltzmann sampling (`temperature`: `45`, `3.0`, `1.5`, `0.8`, `0.4`) so repeated local tweaks never drown out a sharp pass or bank shot. Team personality traits (`aggression`, `creativity`, `teamwork`, `clutch`) express style at equal strength through a bounded tie-break bias (`±8`) among near-optimal candidates rather than changing evaluation weights or risk tolerance. DNA and game physics are unchanged.
+Ballistic appears in **New match** once the browser worker loads compatible weights. It uses Ububall God's search budget, including the third Pulse turn, and adds candidate plays from the neural policy and a 55% neural blend for eligible positional evaluations. A saved Ballistic match can continue with Ububall God if the weights become unavailable. The other five presets use heuristic search by default, even when weights are installed.
+
+Each candidate blends its average and worst outcome across the active opponent scenarios (`risk` weights in preset order are `.15`, `.35`, `.53`, `.55`, `.55`, `.55`), verifying execution `wobble` across all contenders within the final selection window. Final selection deduplicates quantized tactical basins (`planBasinKey`) before Boltzmann sampling (`temperature` values are `45`, `3.0`, `1.5`, `0.8`, `0.4`, `0.4`) so repeated local tweaks never drown out a sharp pass or bank shot. Team personality traits (`aggression`, `creativity`, `teamwork`, `clutch`) express style at equal strength through a bounded tie-break bias (`±8`) among near-optimal candidates rather than changing evaluation weights or risk tolerance.
 
 ## Run comparisons
 
@@ -42,7 +45,7 @@ Reports contain scores, wins, capped games, turn counts, simulation counts and m
 
 ## Compare rule weights and budgets
 
-Pass `--config personal/cpu-experiment.json` with an `a` and/or `b` profile. Each can be a preset name (`easy`, `medium`, `hard`, `insane`, `god`) or an object:
+Pass `--config personal/cpu-experiment.json` with an `a` and/or `b` profile. Each can be a preset name (`easy`, `medium`, `hard`, `insane`, `god`, `ballistic`) or an object:
 
 ```json
 {
@@ -80,23 +83,23 @@ CPU search calls `resolveTurn` with `effects: false`, which skips presentation-o
 
 ## Validation notes
 
-The CPU suite checks reproducibility, search budgets, tactical fixtures, and planning across all five difficulty levels. The shooting and goaltending fixtures resolve selected plans through the match engine, including Pulse rebounds, Cannonball threats, Guard saves, and screened bank shots.
+The CPU suite checks reproducibility, search budgets, tactical fixtures, and planning across all six difficulty levels. The shooting and goaltending fixtures resolve selected plans through the match engine, including Pulse rebounds, Cannonball threats, Guard saves, and screened bank shots. The neural suite also trains a temporary v2 model and uses it to plan a Ballistic turn.
 
 ## Train and run the Path 1 neural evaluator and policy
 
-`shared/cpu/nn.js`, `scripts/nn-generate.cjs`, and `scripts/train-nn.py` implement an optional `UBNN` (`float16`, ~378 KB) residual network (`196 -> 256 -> 256 -> 256` `LayerNorm` + `SiLU` trunk with a 3-way next-goal Value head and an 18-output 3-skater Policy head). Coordinates are canonicalized per team (`+x` attacking direction, `[attack, support, defend]` skater role order, `(cos, sin)` angles) and augmented 2x vertically during GPU training.
+`shared/cpu/nn.js`, `scripts/nn-generate.cjs`, and `scripts/train-nn.py` implement UBNN format 2. The default float16 residual network uses a `315 -> 256 -> 256 -> 256` trunk with LayerNorm and SiLU, a three-way next-goal value head, and an 18-output policy head. The observation includes all 15 skater stats, personality, current and next-turn stun, Super state, and ball striker and Sticky offset fields. Each side is encoded with `+x` as the attack direction, skaters in `[attack, support, defend]` order, and angles as `(cos, sin)`. Training applies vertical reflection to the signed observation and policy channels.
 
 ```powershell
-# 1. Generate binary training shards across all CPU worker threads (~216 float32s / 864 B per row)
+# 1. Generate v2 binary training shards across CPU worker threads (335 float32s / 1,340 B per row)
 npm run nn:gen:quick
-npm run nn:gen -- --matches 1200 --preset mixed --mode mixed --out personal/nn-shards
+npm run nn:gen -- --matches 1200 --preset mixed --mode mixed --out personal/nn-shards-v2
 
 # 2. Train on RTX 4090 (VRAM-resident CUDA bf16 PyTorch) and export web/assets/ububall-net.bin
-python scripts/train-nn.py --shards personal/nn-shards --epochs 25 --batch-size 4096
+python scripts/train-nn.py --shards personal/nn-shards-v2 --epochs 25 --batch-size 4096
 
-# 3. Compare Neural + Search or Pure-NN ("only") head-to-head against baseline presets
-npm run sim:cpu -- --games 10 --mode standard --a "{\"level\":\"hard\",\"nn\":true,\"weightsPath\":\"web/assets/ububall-net.bin\"}" --b "{\"level\":\"hard\",\"nn\":false}"
+# 3. Compare Ballistic or pure policy head-to-head against heuristic presets
+npm run sim:cpu -- --games 10 --mode standard --nn-weights web/assets/ububall-net.bin --a ballistic --b god
 npm run sim:cpu -- --games 10 --mode pulse --a "{\"level\":\"hard\",\"nn\":\"only\",\"weightsPath\":\"web/assets/ububall-net.bin\"}" --b medium
 ```
 
-When `web/assets/ububall-net.bin` is present (and matches `P.VERSION`), `scripts/prepare-assets.cjs` copies it into `dist/public/assets/ububall-net.bin` and `web/ububall-cpu-worker.js` preloads it once on worker startup. If the file is absent or physics `VERSION` advances, `ububallCPU.plan` runs the deterministic heuristic planner unchanged.
+Regenerate v1 shards before training v2. The trainer requires the v2 shard manifest, and the worker requires a v2 model with the current physics version and finite weights. After training, restart `npm run dev` so the asset preparation step copies `web/assets/ububall-net.bin` to the public directory, then reload the game.

@@ -59,7 +59,7 @@ function prepareSearchState(input, classic) {
 function plan(input, team = 1, config = {}) {
   if (team !== 0 && team !== 1) throw new Error('Invalid CPU team.');
   const level = config.level || 'medium';
-  if (!LEVELS[level]) throw new Error('Invalid CPU level.');
+  if (!Object.hasOwn(LEVELS, level)) throw new Error('Invalid CPU level.');
   const settings = { ...LEVELS[level], ...config };
   const rawWeights = { ...WEIGHTS, ...config.weights };
   if (!Number.isInteger(settings.candidates) || settings.candidates < 1 || settings.candidates > 1000 ||
@@ -87,6 +87,10 @@ function plan(input, team = 1, config = {}) {
       (settings.nnPolicy !== undefined && typeof settings.nnPolicy !== 'boolean') ||
       (settings.nnOpponent !== undefined && typeof settings.nnOpponent !== 'boolean') ||
       Object.values(rawWeights).some(v => !Number.isFinite(v) || v < 0)) throw new Error('Invalid CPU search settings.');
+
+  if (level === 'ballistic' && settings.nn !== true) throw new Error('Ballistic requires hybrid neural search.');
+  const nnModel = getModel(settings);
+  if (level === 'ballistic' && !nnModel) return plan(input, team, { ...config, level: 'god', nn: false });
 
   const started = performance.now(), random = randomSource(config.seed ?? 1);
   const classic = M.rule(input.mode, 'classic');
@@ -116,7 +120,6 @@ function plan(input, team = 1, config = {}) {
   const step4Threat = assessOpponentThreat(state, team, classic);
   const pulse = M.rule(state.mode, 'pulse');
   const fullTurnTicks = M.turnTicks(state.mode);
-  const nnModel = getModel(settings);
   if (settings.nn === 'only') {
     if (!nnModel) throw new Error('Neural weights are required for nn: "only" mode.');
     syncSlidesFromBodies(state.bodies);
@@ -149,11 +152,11 @@ function plan(input, team = 1, config = {}) {
     weight: nnWeight,
     scale: settings.nnScale ?? (weights.goal * 0.45),
     classic,
+    stats: state.stats,
     blitz: M.rule(state.mode, 'blitz'),
     scores: state.scores,
     roundTurns: (state.roundTurns || 0) + 1
   } : null;
-  const nnOppCtx = (nnModel && nnWeight > 0) ? { ...nnCtx } : null;
   const baseHorizon = settings.searchTicks || SEARCH_TICKS;
   const searchTicks = startCreaseWarned ? fullTurnTicks : baseHorizon;
 
@@ -195,7 +198,7 @@ function plan(input, team = 1, config = {}) {
       }
     }
   }
-  if (nnModel && settings.nnOpponent !== false && settings.opponents >= 3 && responses.length < 5) {
+  if (nnModel && settings.nnOpponent !== false && settings.opponents >= 3 && (level === 'ballistic' || responses.length < 5)) {
     syncSlidesFromBodies(state.bodies);
     const ball0 = state.bodies[6], ballR0 = ball0.radius || 18, oppT = 1 - team;
     const oppPerm = [0, 1, 2];
@@ -262,7 +265,7 @@ function plan(input, team = 1, config = {}) {
     const val = evaluateBodies(endBodies, result.state.fouls, team, goal, weights, comp, toucher, multiTeamTouch, tmw, partial, pulse, nnCtx)
       + (goal === team ? weights.goal * 0.0006 * speedShare : 0);
     const valOpp = evalOpp
-      ? evaluateBodies(endBodies, result.state.fouls, 1 - team, goal, rawWeights, comp, toucher, false, 0.5, partial, pulse, nnOppCtx)
+      ? evaluateBodies(endBodies, result.state.fouls, 1 - team, goal, rawWeights, comp, toucher, false, 0.5, partial, pulse, nnCtx)
         + (goal === 1 - team ? rawWeights.goal * 0.0006 * speedShare : 0)
       : 0;
     return {
@@ -1150,7 +1153,7 @@ function plan(input, team = 1, config = {}) {
   const chosen = choose(finalPool, settings.temperature, random, style);
   return {
     plans: M.validatePlans(chosen.moves),
-    diagnostics: { level, candidates: evaluated, simulations, ticks, score: chosen.value, milliseconds: performance.now() - started }
+    diagnostics: { level, ...(nnModel ? { nn: true } : {}), candidates: evaluated, simulations, ticks, score: chosen.value, milliseconds: performance.now() - started }
   };
 }
 

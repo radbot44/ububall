@@ -410,6 +410,7 @@ function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scor
       classic: nnCtx.classic,
       pulse: isPulse,
       blitz: nnCtx.blitz,
+      stats: nnCtx.stats,
       scores: nnCtx.scores,
       roundTurns: nnCtx.roundTurns,
       slideX: coastActive ? slideX : null,

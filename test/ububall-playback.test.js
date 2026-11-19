@@ -556,6 +556,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
   assert.equal(parsed.physics, P.VERSION);
 
   // Restore with matching versions succeeds
+  parsed.level = 'ballistic';
   parsed.play.last = 2;
   parsed.play.assist[0] = 1;
   parsed.play.credit[2] = 1;
@@ -567,6 +568,7 @@ test('active match save and restore enforces matching matchVersion and physicsVe
   assert.equal(ok, true);
   env.saveActiveMatch();
   const resaved = JSON.parse(store['ububall-active-match']);
+  assert.equal(resaved.level, 'ballistic');
   assert.deepEqual(resaved.play, parsed.play);
   assert.equal(resaved.roundTurns, 3);
   assert.equal(resaved.matchTicks, 701);

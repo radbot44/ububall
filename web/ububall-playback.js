@@ -1871,7 +1871,7 @@
         fn('endGoalReplay')?.();
         state.playSegments = [];
         state.cpuMode = saved.mode || 'standard';
-        const validCpuLevels = deps.VALID_CPU_LEVELS ?? state.VALID_CPU_LEVELS ?? ['easy', 'medium', 'hard', 'insane', 'god'];
+        const validCpuLevels = deps.VALID_CPU_LEVELS ?? state.VALID_CPU_LEVELS ?? ['easy', 'medium', 'hard', 'insane', 'god', 'ballistic'];
         state.cpuLevel = validCpuLevels.includes(saved.level) ? saved.level : 'medium';
         state.fieldView.mode = state.cpuMode;
         const doc = getDoc();
@@ -3608,7 +3608,8 @@
       if (qSignIn) qSignIn.hidden = Boolean(active || fn('signedIn')?.());
       const { mode, level, team } = state.lastCpuSetup || { mode: 'standard', level: 'easy' };
       if (qSetup) {
-        qSetup.textContent = [ububallMatch.modeName(mode), level[0].toUpperCase() + level.slice(1),
+        const levelLabel = level === 'ballistic' && !state.ballisticAvailable ? 'Choose CPU' : level[0].toUpperCase() + level.slice(1);
+        qSetup.textContent = [ububallMatch.modeName(mode), levelLabel,
           team ? 'Last team' : fn('signedIn')?.() ? 'Your team' : 'Guest team'].join(' · ');
       }
     }

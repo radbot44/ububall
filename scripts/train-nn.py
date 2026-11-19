@@ -2,10 +2,10 @@
 """
 VRAM-Resident RTX 4090 PyTorch Trainer (+ Portable NumPy Fallback) for Ububall Neural CPU.
 
-Reads fixed 216-float binary shards from `personal/nn-shards/` (written by `scripts/nn-generate.cjs`),
+Reads UBNN v2 binary shards from `personal/nn-shards/` (written by `scripts/nn-generate.cjs`),
 applies 2x vertical rink reflection augmentation (yielding 4x effective samples per simulated turn),
-trains `UbuballNet` (196 -> 256 -> 256 -> 256 residual LayerNorm + SiLU trunk -> Value[3] + Policy[18]),
-and exports a compact ~378 KB little-endian float16 `UBNN` weight file to `web/assets/ububall-net.bin`.
+trains `UbuballNet` (315 -> 256 -> 256 -> 256 residual LayerNorm + SiLU trunk -> Value[3] + Policy[18]),
+and exports little-endian float16 `UBNN` weights to `web/assets/ububall-net.bin`.
 
 Usage on RTX 4090 desktop:
   python scripts/train-nn.py --shards personal/nn-shards --epochs 25 --batch-size 4096
@@ -26,32 +26,35 @@ from pathlib import Path
 import numpy as np
 
 NN_MAGIC = b"UBNN"
-NN_FORMAT = 1
-INPUT_DIM = 196
+NN_FORMAT = 2
+SKATER_FLOATS = 47
+BALL_START = 6 * SKATER_FLOATS
+INPUT_DIM = BALL_START + 17 + 16
 POLICY_DIM = 18
 VALUE_DIM = 3
-ROW_FLOATS = 216
-DEFAULT_PHYS_VERSION = 30
+NEXT_GOAL = INPUT_DIM + POLICY_DIM
+TURNS_TO_GOAL = NEXT_GOAL + 1
+ROW_FLOATS = TURNS_TO_GOAL + 1
 
 # Exact signed channels negated under vertical reflection (y -> 600 - y)
 Y_FLIP_OBS = [
-    1, 3, 4,
-    29, 31, 32,
-    57, 59, 60,
-    85, 87, 88,
-    113, 115, 116,
-    141, 143, 144,
-    169, 171, 172,
+    *(i * SKATER_FLOATS + k for i in range(6) for k in (1, 3, 4)),
+    *(BALL_START + k for k in (1, 3, 4, 16)),
 ]
 Y_FLIP_POL = [1, 3, 7, 9, 13, 15]
 
 
 def load_shards(shard_dir: Path) -> tuple[np.ndarray, int]:
     manifest_path = shard_dir / "manifest.json"
-    phys_version = DEFAULT_PHYS_VERSION
-    if manifest_path.exists():
-        meta = json.loads(manifest_path.read_text(encoding="utf-8"))
-        phys_version = int(meta.get("physVersion", DEFAULT_PHYS_VERSION))
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Missing {manifest_path}. Generate UBNN v{NN_FORMAT} shards with npm run nn:gen.")
+    meta = json.loads(manifest_path.read_text(encoding="utf-8"))
+    expected = {"format": NN_FORMAT, "rowFloats": ROW_FLOATS, "inputDim": INPUT_DIM, "policyDim": POLICY_DIM}
+    if any(meta.get(key) != value for key, value in expected.items()):
+        raise ValueError(f"Incompatible UBNN shard manifest. Generate UBNN v{NN_FORMAT} shards with npm run nn:gen.")
+    phys_version = meta.get("physVersion")
+    if type(phys_version) is not int or not 0 < phys_version <= 0xFFFFFFFF:
+        raise ValueError(f"Invalid physics version in {manifest_path}.")
 
     files = sorted(glob.glob(str(shard_dir / "*.bin")))
     if not files:
@@ -59,7 +62,7 @@ def load_shards(shard_dir: Path) -> tuple[np.ndarray, int]:
 
     arrays = []
     for fpath in files:
-        mm = np.memmap(fpath, dtype=np.float32, mode="r")
+        mm = np.memmap(fpath, dtype="<f4", mode="r")
         if mm.size % ROW_FLOATS != 0:
             raise ValueError(f"Shard {fpath} float count {mm.size} is not divisible by {ROW_FLOATS}.")
         arrays.append(np.array(mm.reshape(-1, ROW_FLOATS), dtype=np.float32, copy=True))
@@ -166,18 +169,18 @@ def train_pytorch(
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(1, epochs), eta_min=lr * 0.05)
 
-    # Move dataset directly into VRAM when <= 16 GB (2M rows is ~1.73 GB -> fits easily in 24 GB 4090)
+    # Move the dataset directly into VRAM when <= 16 GB.
     vram_resident = device.type == "cuda" and train_data.nbytes <= 16 * (1024 ** 3)
     target_dev = device if vram_resident else torch.device("cpu")
 
     tr_obs = torch.from_numpy(train_data[:, :INPUT_DIM]).to(target_dev)
-    tr_pol = torch.from_numpy(train_data[:, INPUT_DIM : INPUT_DIM + POLICY_DIM]).to(target_dev)
-    tr_val_soft = torch.from_numpy(build_soft_value_targets(train_data[:, 214], train_data[:, 215])).to(target_dev)
+    tr_pol = torch.from_numpy(train_data[:, INPUT_DIM:NEXT_GOAL]).to(target_dev)
+    tr_val_soft = torch.from_numpy(build_soft_value_targets(train_data[:, NEXT_GOAL], train_data[:, TURNS_TO_GOAL])).to(target_dev)
 
     va_obs = torch.from_numpy(val_data[:, :INPUT_DIM]).to(device)
-    va_pol = torch.from_numpy(val_data[:, INPUT_DIM : INPUT_DIM + POLICY_DIM]).to(device)
-    va_val_soft = torch.from_numpy(build_soft_value_targets(val_data[:, 214], val_data[:, 215])).to(device)
-    va_raw_goal = torch.from_numpy(val_data[:, 214]).to(device)
+    va_pol = torch.from_numpy(val_data[:, INPUT_DIM:NEXT_GOAL]).to(device)
+    va_val_soft = torch.from_numpy(build_soft_value_targets(val_data[:, NEXT_GOAL], val_data[:, TURNS_TO_GOAL])).to(device)
+    va_raw_goal = torch.from_numpy(val_data[:, NEXT_GOAL]).to(device)
 
     obs_flip_idx = torch.tensor(Y_FLIP_OBS, dtype=torch.long, device=device)
     pol_flip_idx = torch.tensor(Y_FLIP_POL, dtype=torch.long, device=device)
@@ -374,13 +377,13 @@ def train_numpy_fallback(
     step_num = 0
 
     tr_obs = train_data[:, :INPUT_DIM]
-    tr_pol = train_data[:, INPUT_DIM : INPUT_DIM + POLICY_DIM]
-    tr_val = build_soft_value_targets(train_data[:, 214], train_data[:, 215])
+    tr_pol = train_data[:, INPUT_DIM:NEXT_GOAL]
+    tr_val = build_soft_value_targets(train_data[:, NEXT_GOAL], train_data[:, TURNS_TO_GOAL])
 
     va_obs = val_data[:, :INPUT_DIM]
-    va_pol = val_data[:, INPUT_DIM : INPUT_DIM + POLICY_DIM]
-    va_val = build_soft_value_targets(val_data[:, 214], val_data[:, 215])
-    va_goal = val_data[:, 214]
+    va_pol = val_data[:, INPUT_DIM:NEXT_GOAL]
+    va_val = build_soft_value_targets(val_data[:, NEXT_GOAL], val_data[:, TURNS_TO_GOAL])
+    va_goal = val_data[:, NEXT_GOAL]
 
     def fwd_bwd(bx: np.ndarray, bv: np.ndarray, bp: np.ndarray, need_grad: bool = True):
         N = bx.shape[0]

@@ -2,6 +2,7 @@
 (function(root) {
   'use strict';
   const noop = () => {};
+  const TIMEOUT_MS = 10000;
   function createCPUClient(makeWorker = () => new Worker('ububall-cpu-worker.js')) {
     // A worker that finished its plan is kept for the next one, so its scripts stay loaded and its
     // search code stays optimized. A cancelled, disposed or failed worker is terminated and replaced.
@@ -15,6 +16,24 @@
     return {
       cancel() { cancel(); },
       dispose() { cancel(); dropIdle(); },
+      hasNeuralWeights() {
+        return new Promise(resolve => {
+          let worker, timer;
+          const finish = available => {
+            clearTimeout(timer);
+            worker?.terminate();
+            resolve(available);
+          };
+          const failed = () => finish(false);
+          try {
+            worker = makeWorker();
+            worker.onmessage = ({ data }) => finish(data?.hasNeuralWeights === true);
+            worker.onerror = worker.onmessageerror = failed;
+            timer = setTimeout(failed, TIMEOUT_MS);
+            worker.postMessage({ checkNeuralWeights: true });
+          } catch { failed(); }
+        });
+      },
       plan(state, config, team = 1) {
         cancel();
         return new Promise(resolve => {
@@ -38,7 +57,7 @@
             worker.onmessage = ({ data }) => data?.result ? finish(data.result, true) : failed();
             worker.onerror = failed;
             worker.onmessageerror = failed;
-            timer = setTimeout(failed, 10000);
+            timer = setTimeout(failed, TIMEOUT_MS);
             worker.postMessage({ state: snapshot, config, team });
           } catch { failed(); }
         });

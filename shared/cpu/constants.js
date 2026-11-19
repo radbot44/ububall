@@ -10,14 +10,17 @@ const LEVEL_LABELS = Object.freeze({
   medium: 'Medium',
   hard: 'Hard',
   insane: 'Insane',
-  god: 'Ububall God'
+  god: 'Ububall God',
+  ballistic: 'Ballistic'
 });
+const GOD_LEVEL = Object.freeze({ candidates: 240, opponents: 4, searchTicks: 720, wobble: true, godWobble: true, godRefine: true, risk: .55, temperature: .4, counterBudget: 36, counterTop: 10, counterRounds: 2, learn: true, lookaheadTop: 5, lookaheadBreadth: 4, lookaheadTicks: 340, lookaheadBudget: 96, godBridgeDual: true, pulseDepth: 3, nn: false });
 const LEVELS = Object.freeze({
-  easy: Object.freeze({ candidates: 14, opponents: 1, searchTicks: 240, wobble: false, risk: .15, temperature: 45 }),
-  medium: Object.freeze({ candidates: 48, opponents: 2, searchTicks: 420, wobble: true, risk: .35, temperature: 3.0 }),
-  hard: Object.freeze({ candidates: 84, opponents: 3, searchTicks: 500, wobble: true, risk: .53, temperature: 1.5, counterBudget: 13, counterTop: 5, counterRounds: 1, learn: true }),
-  insane: Object.freeze({ candidates: 150, opponents: 4, searchTicks: 580, wobble: true, godRefine: true, risk: .55, temperature: .8, counterBudget: 26, counterTop: 8, counterRounds: 1, learn: true, lookaheadTop: 4, lookaheadBreadth: 4, lookaheadTicks: 300, lookaheadBudget: 56, pulseDepth: 2 }),
-  god: Object.freeze({ candidates: 240, opponents: 4, searchTicks: 720, wobble: true, godWobble: true, godRefine: true, risk: .55, temperature: .4, counterBudget: 36, counterTop: 10, counterRounds: 2, learn: true, lookaheadTop: 5, lookaheadBreadth: 4, lookaheadTicks: 340, lookaheadBudget: 96, godBridgeDual: true, pulseDepth: 3 })
+  easy: Object.freeze({ candidates: 14, opponents: 1, searchTicks: 240, wobble: false, risk: .15, temperature: 45, nn: false }),
+  medium: Object.freeze({ candidates: 48, opponents: 2, searchTicks: 420, wobble: true, risk: .35, temperature: 3.0, nn: false }),
+  hard: Object.freeze({ candidates: 84, opponents: 3, searchTicks: 500, wobble: true, risk: .53, temperature: 1.5, counterBudget: 13, counterTop: 5, counterRounds: 1, learn: true, nn: false }),
+  insane: Object.freeze({ candidates: 150, opponents: 4, searchTicks: 580, wobble: true, godRefine: true, risk: .55, temperature: .8, counterBudget: 26, counterTop: 8, counterRounds: 1, learn: true, lookaheadTop: 4, lookaheadBreadth: 4, lookaheadTicks: 300, lookaheadBudget: 56, pulseDepth: 2, nn: false }),
+  god: GOD_LEVEL,
+  ballistic: Object.freeze({ ...GOD_LEVEL, nn: true, nnWeight: .55, nnPolicy: true, nnOpponent: true })
 });
 const WEIGHTS = Object.freeze({
   goal: 10000, progress: 1, access: .7, cover: .6, chance: 200, meter: .35,

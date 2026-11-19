@@ -1,4 +1,4 @@
-/* Selective Turn-2 / Turn-3 discounted look-ahead for Insane and Ububall God levels. */
+/* Selective Turn-2 / Turn-3 discounted look-ahead for Insane, Ububall God, and Ballistic. */
 'use strict';
 const {
   P, M, HOLD, GUARD, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY,
@@ -46,6 +46,13 @@ function runMultiTurnLookahead(ctx) {
       const maxT2Sims = settings.lookaheadBudget ?? (lookaheadTop * t2Breadth * 4);
       let t2SimsUsed = 0;
       const GAMMA_T2 = 0.60;
+
+      function neuralContext(sNode, resolvingTurn) {
+        return nnCtx && {
+          ...nnCtx, stats: sNode.stats, scores: sNode.scores,
+          roundTurns: (sNode.roundTurns || 0) + resolvingTurn
+        };
+      }
 
       function buildTurn2Portfolio(sNode, side, cap) {
         const sOwn = side * 3, sOpp = (1 - side) * 3;
@@ -202,6 +209,7 @@ function runMultiTurnLookahead(ctx) {
       }
 
       function evalMultiTurn(sNode, remPulseDepth, cap) {
+        const nodeNN = neuralContext(sNode, 1);
         const ourPlays = buildTurn2Portfolio(sNode, team, cap);
         const oppPlays = buildTurn2Portfolio(sNode, 1 - team, cap);
         const nOur = ourPlays.length, nOpp = oppPlays.length;
@@ -234,7 +242,7 @@ function runMultiTurnLookahead(ctx) {
             ticks += tDone2;
             const eb2 = res2.state.bodies;
             const partial2 = !pulse && !hitDec2 && res2.replay.goal === null && tDone2 < fullTurnTicks && !P.settled(eb2);
-            const v = evaluateBodies(eb2, res2.state.fouls, team, res2.replay.goal, weights, 0, null, false, tmw, partial2, pulse, nnCtx);
+            const v = evaluateBodies(eb2, res2.state.fouls, team, res2.replay.goal, weights, 0, null, false, tmw, partial2, pulse, nodeNN);
             sumB += v;
             if (v < minB) {
               minB = v;
@@ -292,7 +300,7 @@ function runMultiTurnLookahead(ctx) {
           return { blended: rawV1, delta: 0 };
         }
         const s2 = res1.state;
-        const v1Settled = evaluateBodies(s2.bodies, s2.fouls, team, null, weights, 0, null, false, tmw, false, pulse, nnCtx);
+        const v1Settled = evaluateBodies(s2.bodies, s2.fouls, team, null, weights, 0, null, false, tmw, false, pulse, neuralContext(s2, 0));
         const v2 = evalMultiTurn(s2, extraPulseDepth, t2Breadth);
         const clampedV2 = Math.max(-weights.goal * 0.96, Math.min(weights.goal * 0.96, v2));
         const swing = clampedV2 - v1Settled;

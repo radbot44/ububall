@@ -1,16 +1,19 @@
-/* Team-canonical 196-float state encoder, policy move decoder, and zero-allocation fp16 inference. */
+/* Team-canonical state encoder, policy move decoder, and fp16 inference. */
 'use strict';
 const {
   P, M, HOLD, TWO_PI, RINK_LEFT, RINK_RIGHT, RINK_CX, RINK_CY
 } = require('./constants.js');
 
 const NN_MAGIC = 0x4e4e4255; // ASCII "UBNN" little-endian
-const NN_FORMAT = 1;
-const NN_INPUT_DIM = 196;
+const NN_FORMAT = 2;
+const SKATER_FLOATS = 47;
+const BALL_START = 6 * SKATER_FLOATS;
+const MATCH_START = BALL_START + 17;
+const NN_INPUT_DIM = MATCH_START + 16;
 const NN_HIDDEN_DIM = 256;
 const NN_VALUE_DIM = 3;
 const NN_POLICY_DIM = 18;
-const NN_ROW_FLOATS = 216; // 196 obs + 18 policy + 1 nextGoal + 1 turnsToGoal
+const NN_ROW_FLOATS = NN_INPUT_DIM + NN_POLICY_DIM + 2; // nextGoal, turnsToGoal
 
 const SUPER_KEYS = Object.freeze({
   stalwart: 0, knockout: 1, sticky: 2, cannonball: 3,
@@ -19,13 +22,8 @@ const SUPER_KEYS = Object.freeze({
 
 // Exact signed indices negated under vertical reflection (y -> 600 - y)
 const Y_FLIP_OBS_INDICES = Object.freeze([
-  1, 3, 4,
-  29, 31, 32,
-  57, 59, 60,
-  85, 87, 88,
-  113, 115, 116,
-  141, 143, 144,
-  169, 171, 172
+  ...Array.from({ length: 6 }, (_, i) => [1, 3, 4].map(k => i * SKATER_FLOATS + k)).flat(),
+  BALL_START + 1, BALL_START + 3, BALL_START + 4, BALL_START + 16
 ]);
 const Y_FLIP_POL_INDICES = Object.freeze([1, 3, 7, 9, 13, 15]);
 
@@ -74,13 +72,13 @@ function roleOrderIndices(stateLike, team, outPerm = [0, 1, 2]) {
   return roleOrderFromCoords(stateLike.bodies, team, null, null, ball.x, ball.y, outPerm);
 }
 
-function writeSkaterFeatures(b, dir, classic, sx, sy, vx, vy, omega, out, base) {
+function writeSkaterFeatures(b, raw, dir, classic, sx, sy, zeroVel, out, base) {
   out[base] = dir * (sx - RINK_CX) / 440;
   out[base + 1] = (sy - RINK_CY) / 240;
-  out[base + 2] = dir * vx / 720;
-  out[base + 3] = vy / 720;
-  out[base + 4] = dir * omega / 20;
-  const stunned = Boolean(b.stunned || b.stunnedNext);
+  out[base + 2] = dir * (zeroVel ? 0 : (b.vx || 0)) / 720;
+  out[base + 3] = (zeroVel ? 0 : (b.vy || 0)) / 720;
+  out[base + 4] = dir * (zeroVel ? 0 : (b.omega || 0)) / 20;
+  const stunned = Boolean(b.stunned);
   out[base + 5] = b.carded ? -1 : stunned ? 0 : 1;
   out[base + 6] = b.carded ? 1 : 0;
   out[base + 7] = stunned ? 1 : 0;
@@ -101,20 +99,37 @@ function writeSkaterFeatures(b, dir, classic, sx, sy, vx, vy, omega, out, base) 
   for (let s = 0; s < 8; s++) out[base + 20 + s] = 0;
   if (!classic && b.equippedSuper) {
     const rawId = b.equippedSuper.id;
-    const key = b.equippedSuper.key ? b.equippedSuper.key.toLowerCase() : null;
-    const sId = Number.isInteger(rawId) && rawId >= 0 && rawId < 8
-      ? rawId
-      : (key && SUPER_KEYS[key] !== undefined ? SUPER_KEYS[key] : -1);
-    if (sId >= 0) {
+    const sId = Number.isInteger(rawId) && rawId >= 0 && rawId < 8 ? rawId : SUPER_KEYS[b.equippedSuper.key];
+    if (Number.isInteger(sId)) {
       const lvl = b.equippedSuper.level || 1;
-      const activeBonus = (b.superActive && SUPER_KEYS[String(b.superActive).toLowerCase()] === sId) ? 0.2 : 0;
+      const activeBonus = SUPER_KEYS[b.superActive] === sId ? 0.2 : 0;
       out[base + 20 + sId] = 0.6 + 0.1 * lvl + activeBonus;
     }
   }
+  out[base + 28] = (b.baseFriction ?? b.friction ?? 150) / 150 - 1;
+  out[base + 29] = (b.maxSpin ?? P.BASE_MAX_SPIN) / P.BASE_MAX_SPIN - 1;
+  out[base + 30] = (b.grip ?? 0.3) / 0.3 - 1;
+  out[base + 31] = (b.baseBounciness ?? b.bounciness ?? 1) - 1;
+  out[base + 32] = (b.baseStrength ?? b.strength ?? 1) - 1;
+  out[base + 33] = (b.baseStability ?? b.stability ?? 1) - 1;
+  out[base + 34] = classic ? 0 : M.superStat(P, raw?.efficiency) - 1;
+  out[base + 35] = (b.synergyMult ?? 1) - 1;
+  out[base + 36] = (b.chemistryMult ?? 1) - 1;
+  const personality = b.personality;
+  out[base + 37] = (personality?.aggression ?? 31.5) / 63;
+  out[base + 38] = (personality?.creativity ?? 31.5) / 63;
+  out[base + 39] = (personality?.teamwork ?? 31.5) / 63;
+  out[base + 40] = (personality?.clutch ?? 31.5) / 63;
+  out[base + 41] = b.stunnedNext ? 1 : 0;
+  out[base + 42] = b.ironGuard ? 1 : 0;
+  out[base + 43] = classic ? 0 : (b.superHoldTicks || 0) / 480;
+  out[base + 44] = !classic && b.shockwaveFired ? 1 : 0;
+  out[base + 45] = !classic && b.usedSuperThisTurn ? 1 : 0;
+  out[base + 46] = classic ? 0 : (b.superBonusRefund || 0) / 20;
 }
 
 /**
- * Encodes any match state (or rollout projected state) into a 196-float canonical observation
+ * Encodes any match state (or rollout projected state) into a canonical observation
  * where `team` always attacks toward +x, with zero heap allocations.
  */
 function encodeObservation(bodies, fouls, team, hints, out = sharedObs, permOut = sharedPerm) {
@@ -136,25 +151,13 @@ function encodeObservation(bodies, fouls, team, hints, out = sharedObs, permOut 
   roleOrderFromCoords(bodies, 1 - team, slideX, slideY, bx, by, sharedOppPerm);
 
   const ownStart = team * 3, oppStart = (1 - team) * 3;
-  for (let r = 0; r < 3; r++) {
-    const idx = ownStart + permOut[r];
+  const stats = hints?.stats;
+  for (let r = 0; r < 6; r++) {
+    const idx = r < 3 ? ownStart + permOut[r] : oppStart + sharedOppPerm[r - 3];
     const b = bodies[idx];
     const sx = slideX ? slideX[idx] : b.x;
     const sy = slideY ? slideY[idx] : b.y;
-    const vx = zeroVel ? 0 : (b.vx || 0);
-    const vy = zeroVel ? 0 : (b.vy || 0);
-    const om = zeroVel ? 0 : (b.omega || 0);
-    writeSkaterFeatures(b, dir, classic, sx, sy, vx, vy, om, out, r * 28);
-  }
-  for (let r = 0; r < 3; r++) {
-    const idx = oppStart + sharedOppPerm[r];
-    const b = bodies[idx];
-    const sx = slideX ? slideX[idx] : b.x;
-    const sy = slideY ? slideY[idx] : b.y;
-    const vx = zeroVel ? 0 : (b.vx || 0);
-    const vy = zeroVel ? 0 : (b.vy || 0);
-    const om = zeroVel ? 0 : (b.omega || 0);
-    writeSkaterFeatures(b, dir, classic, sx, sy, vx, vy, om, out, (3 + r) * 28);
+    writeSkaterFeatures(b, stats?.[idx], dir, classic, sx, sy, zeroVel, out, r * SKATER_FLOATS);
   }
 
   const bvx = zeroVel ? 0 : (ball.vx || 0);
@@ -163,47 +166,54 @@ function encodeObservation(bodies, fouls, team, hints, out = sharedObs, permOut 
   const ownGoalX = team ? RINK_RIGHT : RINK_LEFT;
   const oppGoalX = RINK_LEFT + RINK_RIGHT - ownGoalX;
 
-  out[168] = dir * (bx - RINK_CX) / 440;
-  out[169] = (by - RINK_CY) / 240;
-  out[170] = dir * bvx / 1200;
-  out[171] = bvy / 1200;
-  out[172] = dir * bom / 20;
-  out[173] = ball.onFire ? 1 : 0;
-  out[174] = (ball.fireTicks || 0) / 60;
-  out[175] = (ball.pace || 0) / 1200;
-  out[176] = (ball.curveMult ?? 1) - 1;
-  out[177] = (ball.strikerPower ?? 1) - 1;
-  out[178] = Math.hypot(oppGoalX - bx, RINK_CY - by) / 900;
-  out[179] = Math.hypot(ownGoalX - bx, RINK_CY - by) / 900;
+  out[BALL_START] = dir * (bx - RINK_CX) / 440;
+  out[BALL_START + 1] = (by - RINK_CY) / 240;
+  out[BALL_START + 2] = dir * bvx / 1200;
+  out[BALL_START + 3] = bvy / 1200;
+  out[BALL_START + 4] = dir * bom / 20;
+  out[BALL_START + 5] = ball.onFire ? 1 : 0;
+  out[BALL_START + 6] = (ball.fireTicks || 0) / 60;
+  out[BALL_START + 7] = (ball.pace || 0) / 1200;
+  out[BALL_START + 8] = (ball.curveMult ?? 1) - 1;
+  out[BALL_START + 9] = (ball.strikerPower ?? 1) - 1;
+  out[BALL_START + 10] = Math.hypot(oppGoalX - bx, RINK_CY - by) / 900;
+  out[BALL_START + 11] = Math.hypot(ownGoalX - bx, RINK_CY - by) / 900;
+  out[BALL_START + 12] = ball.strikerTeam === team ? 1 : ball.strikerTeam === 1 - team ? -1 : 0;
+  out[BALL_START + 13] = (ball.strikerSynergy ?? 1) - 1;
+  out[BALL_START + 14] = ball.openingShot ? 1 : 0;
+  const stickOffset = ball.stickOffset && P.holder(bodies) ? ball.stickOffset : null;
+  out[BALL_START + 15] = stickOffset ? dir * stickOffset.x / 50 : 0;
+  out[BALL_START + 16] = stickOffset ? stickOffset.y / 50 : 0;
 
-  const scores = hints?.scores || [0, 0];
-  const ownScore = scores[team] || 0, oppScore = scores[1 - team] || 0;
+  const scores = hints?.scores;
+  const ownScore = scores?.[team] || 0, oppScore = scores?.[1 - team] || 0;
   const corner = fouls && fouls.corner !== null && fouls.corner !== undefined ? fouls.corner : M.cornerOf(P, bx, by);
   const inOwnCorner = corner !== null && ((corner & 1) === team) ? 1 : 0;
   const inOppCorner = corner !== null && ((corner & 1) !== team) ? 1 : 0;
 
-  out[180] = classic ? 1 : 0;
-  out[181] = pulse ? 1 : 0;
-  out[182] = blitz ? 1 : 0;
-  out[183] = (ownScore - oppScore) / 5;
-  out[184] = Math.max(0, 4 - ownScore) / 4;
-  out[185] = Math.max(0, 4 - oppScore) / 4;
-  out[186] = Math.min(1, (hints?.roundTurns || 0) / 40);
-  out[187] = fouls?.crease?.[team] ? 1 : 0;
-  out[188] = fouls?.crease?.[1 - team] ? 1 : 0;
-  out[189] = inOwnCorner;
-  out[190] = inOppCorner;
-  out[191] = Math.min(1, (fouls?.cornerTurns || 0) / 2);
-  out[192] = Math.min(1, (hints?.strikeOwn ?? 300) / 600);
-  out[193] = Math.min(1, (hints?.strikeOther ?? 300) / 600);
-  out[194] = Math.min(1, (hints?.coneOwn ?? 300) / 600);
-  out[195] = Math.min(1, (hints?.coneOther ?? 300) / 600);
+  out[MATCH_START] = classic ? 1 : 0;
+  out[MATCH_START + 1] = pulse ? 1 : 0;
+  out[MATCH_START + 2] = blitz ? 1 : 0;
+  out[MATCH_START + 3] = (ownScore - oppScore) / 5;
+  out[MATCH_START + 4] = Math.max(0, 4 - ownScore) / 4;
+  out[MATCH_START + 5] = Math.max(0, 4 - oppScore) / 4;
+  out[MATCH_START + 6] = Math.min(1, (hints?.roundTurns || 0) / 40);
+  out[MATCH_START + 7] = fouls?.crease?.[team] ? 1 : 0;
+  out[MATCH_START + 8] = fouls?.crease?.[1 - team] ? 1 : 0;
+  out[MATCH_START + 9] = inOwnCorner;
+  out[MATCH_START + 10] = inOppCorner;
+  out[MATCH_START + 11] = Math.min(1, (fouls?.cornerTurns || 0) / 2);
+  out[MATCH_START + 12] = Math.min(1, (hints?.strikeOwn ?? 300) / 600);
+  out[MATCH_START + 13] = Math.min(1, (hints?.strikeOther ?? 300) / 600);
+  out[MATCH_START + 14] = Math.min(1, (hints?.coneOwn ?? 300) / 600);
+  out[MATCH_START + 15] = Math.min(1, (hints?.coneOther ?? 300) / 600);
   return out;
 }
 
 function encodeState(state, team, geomHints = null, out = sharedObs, permOut = sharedPerm) {
   return encodeObservation(state.bodies, state.fouls, team, {
     mode: state.mode || 'standard',
+    stats: state.stats,
     scores: state.scores,
     roundTurns: state.roundTurns || 0,
     ...(geomHints || {})
@@ -331,6 +341,7 @@ function parseWeights(bufferLike, opts = {}) {
   let off = 16;
   const take = n => {
     const arr = decodeF16Slice(dv, off, n, Boolean(opts.forceBitwise));
+    if (!arr.every(Number.isFinite)) throw new Error('Non-finite UBNN weights.');
     off += n * 2;
     return arr;
   };

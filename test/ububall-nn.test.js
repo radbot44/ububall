@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 
 const C = require('../shared/ububall-cpu.js');
@@ -78,7 +79,7 @@ function buildSyntheticUbnnBuffer(hiddenDim = 32, physVersion = P.VERSION, seed 
   return ab;
 }
 
-test('196-float state encoder and plan encoder satisfy exact left-right team reflection and vertical reflection', () => {
+test('UBNN v2 observes all skater stats and preserves team swap and vertical reflection', () => {
   const st0 = S.initialState(23, 'pulse');
   // Assign distinct asymmetrical positions, velocities, spins, daze, meters, and fouls
   const coords = [
@@ -89,8 +90,20 @@ test('196-float state encoder and plan encoder satisfy exact left-right team ref
     { x: 610, y: 210, vx: -250, vy: -80, omega: 9.5, daze: 0, meter: 100 },
     { x: 705, y: 455, vx: 90, vy: 130, omega: -2.5, daze: 0.30, meter: 15 }
   ];
-  coords.forEach((c, i) => Object.assign(st0.bodies[i], c));
-  Object.assign(st0.bodies[6], { x: 560, y: 235, vx: 440, vy: -190, omega: 11.0, onFire: true, fireTicks: 30, pace: 860 });
+  coords.forEach((c, i) => {
+    const b = st0.bodies[i];
+    Object.assign(b, c, {
+      stunned: i === 2, stunnedNext: i === 1, ironGuard: i === 0, superHoldTicks: 80 * (i + 1),
+      shockwaveFired: i === 5, usedSuperThisTurn: i % 2 === 0, superBonusRefund: 2 * (i + 1),
+      holding: i === 1, personality: { aggression: i, creativity: 23 + i, teamwork: 44 - i, clutch: 63 - i }
+    });
+    st0.stats[i].efficiency = 255 - 40 * i;
+  });
+  Object.assign(st0.bodies[1], { equippedSuper: P.SUPERS[2], superActive: 'sticky', superTicks: 360 });
+  Object.assign(st0.bodies[6], {
+    x: 560, y: 235, vx: 440, vy: -190, omega: 11.0, onFire: true, fireTicks: 30, pace: 860,
+    strikerTeam: 0, strikerSynergy: 1.25, openingShot: true, stickOffset: { x: 28, y: -22 }
+  });
   st0.scores = [3, 1];
   st0.roundTurns = 6;
   st0.fouls = { crease: [true, false], corner: 1, cornerTurns: 1, cards: [], faceoff: false };
@@ -114,6 +127,8 @@ test('196-float state encoder and plan encoder satisfy exact left-right team ref
   mb.x = 1000 - mb.x;
   mb.vx = -mb.vx;
   mb.omega = -mb.omega;
+  mb.strikerTeam = 1;
+  mb.stickOffset.x *= -1;
   stMirrorX.scores = [st0.scores[1], st0.scores[0]];
   stMirrorX.fouls = { crease: [false, true], corner: 0, cornerTurns: 1, cards: [], faceoff: false };
 
@@ -124,7 +139,42 @@ test('196-float state encoder and plan encoder satisfy exact left-right team ref
 
   assert.deepEqual(perm0, perm1);
   for (let k = 0; k < C.NN_INPUT_DIM; k++) {
-    assert.ok(Math.abs(obs0[k] - obs1[k]) < 1e-6, `obs[${k}] horizontal symmetry mismatch: ${obs0[k]} vs ${obs1[k]}`);
+    assert.ok(obs0[k] === obs1[k], `obs[${k}] horizontal symmetry mismatch: ${obs0[k]} vs ${obs1[k]}`);
+  }
+
+  const skaterFloats = 47;
+  const ballStart = 6 * skaterFloats;
+  const permOpp = [0, 1, 2];
+  assert.equal(C.encodeState(st0, 1, null, undefined, permOpp)[ballStart + 12], -1);
+  const order = [...perm0, ...permOpp.map(i => i + 3)];
+  for (const [r, i] of order.entries()) {
+    const b = st0.bodies[i], base = r * skaterFloats;
+    assert.equal(obs0[base + 5], b.stunned ? 0 : 1);
+    assert.equal(obs0[base + 7], Number(b.stunned));
+    assert.deepEqual(obs0.slice(base + 14, base + 20), Float32Array.of(
+      (b.baseRadius - 25) / 12.5, (b.baseMass - 3) / 1.5, (P.launchSpeed(b) - 720) / 360,
+      (b.baseReach - 25) / 12.5, b.power - 1, b.curveMult - 1
+    ));
+    assert.deepEqual(obs0.slice(base + 28, base + 47), Float32Array.of(
+      b.baseFriction / 150 - 1, b.maxSpin / P.BASE_MAX_SPIN - 1, b.grip / .3 - 1,
+      b.baseBounciness - 1, b.baseStrength - 1, b.baseStability - 1, M.superStat(P, st0.stats[i].efficiency) - 1,
+      b.synergyMult - 1, b.chemistryMult - 1, b.personality.aggression / 63, b.personality.creativity / 63,
+      b.personality.teamwork / 63, b.personality.clutch / 63, Number(b.stunnedNext), Number(b.ironGuard),
+      b.superHoldTicks / 480, Number(b.shockwaveFired), Number(b.usedSuperThisTurn), b.superBonusRefund / 20
+    ));
+  }
+  assert.deepEqual(obs0.slice(ballStart + 12, ballStart + 17), Float32Array.of(1, .25, 1, 28 / 50, -22 / 50));
+
+  const classic = structuredClone(st0);
+  classic.mode = 'classic';
+  classic.bodies[1].holding = false;
+  classic.bodies[6].strikerTeam = -1;
+  const classicObs = C.encodeState(classic, 0);
+  assert.deepEqual(classicObs.slice(ballStart + 12, ballStart + 17), Float32Array.of(0, .25, 1, 0, 0));
+  for (let base = 0; base < ballStart; base += skaterFloats) {
+    assert.equal(classicObs[base + 34], 0, 'Classic has no efficiency contribution');
+    assert.deepEqual(classicObs.slice(base + 37, base + 41), obs0.slice(base + 37, base + 41));
+    assert.deepEqual(classicObs.slice(base + 43, base + 47), new Float32Array(4));
   }
 
   // Verify vertical reflection (y -> 600 - y, vy -> -vy, omega -> -omega) matches Y_FLIP_OBS_INDICES
@@ -134,6 +184,7 @@ test('196-float state encoder and plan encoder satisfy exact left-right team ref
     b.vy = -b.vy;
     b.omega = -b.omega;
   }
+  stMirrorY.bodies[6].stickOffset.y *= -1;
   stMirrorY.fouls.corner = 3; // top-right (1) reflects to bottom-right (3), still opponent end
   const obsY = new Float32Array(C.NN_INPUT_DIM), permY = [0, 1, 2];
   C.encodeState(stMirrorY, 0, hintsFor(stMirrorY, 0), obsY, permY);
@@ -141,7 +192,7 @@ test('196-float state encoder and plan encoder satisfy exact left-right team ref
   const flipSet = new Set(C.Y_FLIP_OBS_INDICES);
   for (let k = 0; k < C.NN_INPUT_DIM; k++) {
     const expected = flipSet.has(k) ? -obs0[k] : obs0[k];
-    assert.ok(Math.abs(obsY[k] - expected) < 1e-6, `obs[${k}] vertical symmetry mismatch: ${obsY[k]} vs ${expected}`);
+    assert.ok(obsY[k] === expected, `obs[${k}] vertical symmetry mismatch: ${obsY[k]} vs ${expected}`);
   }
 
   // Verify plan encode -> decode round-trip & horizontal reflection
@@ -175,6 +226,12 @@ test('UBNN fp16 parser, bitwise half-float fallback, version guard, nn:"only", a
   // Mismatched physics version gracefully returns null without throwing
   const staleBuf = buildSyntheticUbnnBuffer(32, P.VERSION + 1, 99);
   assert.equal(C.parseWeights(staleBuf), null);
+  const legacyBuf = buf.slice(0);
+  new DataView(legacyBuf).setUint16(4, 1, true);
+  assert.throws(() => C.parseWeights(legacyBuf), /Unsupported UBNN model shape/);
+  const invalidBuf = buf.slice(0);
+  new DataView(invalidBuf).setUint16(16, 0x7c00, true);
+  assert.throws(() => C.parseWeights(invalidBuf), /Non-finite UBNN weights/);
 
   // Load weights & test nn: 'only' zero-rollout mode + hybrid rollout mode
   C.loadWeights(buf);
@@ -190,21 +247,46 @@ test('UBNN fp16 parser, bitwise half-float fallback, version guard, nn:"only", a
   assert.equal(only0.plans[1].power, 0, 'stunned skater remains stationary in nn:"only" mode');
   M.validatePlans(only0.plans);
 
-  // Hybrid search stays deterministic and respects nn: false opt-out
-  const baselineBefore = (() => {
-    C.clearWeights();
-    const r = C.plan(state, 1, { level: 'medium', seed: 8 });
-    C.loadWeights(buf);
-    return r;
-  })();
-  const optOut = C.plan(state, 1, { level: 'medium', seed: 8, nn: false });
-  assert.deepEqual(optOut.plans, baselineBefore.plans);
-  assert.equal(optOut.diagnostics.score, baselineBefore.diagnostics.score);
+  // All five other presets ignore installed weights unless explicitly requested.
+  const levels = Object.keys(C.LEVELS).filter(level => level !== 'ballistic');
+  C.clearWeights();
+  const baselines = levels.map(level => C.plan(state, 1, { level, seed: 8 }));
+  C.loadWeights(buf);
+  for (const [i, level] of levels.entries()) {
+    const actual = C.plan(state, 1, { level, seed: 8 });
+    assert.deepEqual(actual.plans, baselines[i].plans, level);
+    assert.equal(actual.diagnostics.score, baselines[i].diagnostics.score, level);
+    assert.equal(actual.diagnostics.nn, undefined, level);
+  }
 
   const hybridA = C.plan(state, 1, { level: 'medium', seed: 8, nn: true, nnWeight: 0.5 });
   const hybridB = C.plan(state, 1, { level: 'medium', seed: 8, nn: true, nnWeight: 0.5 });
   assert.deepEqual(hybridA.plans, hybridB.plans);
+  assert.equal(hybridA.diagnostics.nn, true);
   M.validatePlans(hybridA.plans);
+});
+
+test('CPU worker reports availability only for runnable v2 weights', async t => {
+  t.after(() => C.clearWeights());
+  const source = fs.readFileSync(path.resolve(__dirname, '../web/ububall-cpu-worker.js'), 'utf8');
+  const valid = buildSyntheticUbnnBuffer();
+  const invalid = valid.slice(0);
+  new DataView(invalid).setUint16(16, 0x7e00, true);
+  for (const [asset, expected] of [[null, false], [invalid, false], [buildSyntheticUbnnBuffer(32, P.VERSION + 1), false], [valid, true]]) {
+    C.clearWeights();
+    let requests = 0, message;
+    const self = { postMessage(data) { message = data; } };
+    vm.runInNewContext(source, {
+      self, importScripts() {}, ububallCPU: C,
+      async fetch() { requests++; return { ok: asset !== null, async arrayBuffer() { return asset; } }; }
+    });
+    await self.onmessage({ data: { state: S.initialState(), config: { level: 'easy', candidates: 1 } } });
+    assert.equal(requests, 0, 'heuristic requests skip weight loading');
+    await self.onmessage({ data: { checkNeuralWeights: true } });
+    assert.equal(message.hasNeuralWeights, expected);
+    await self.onmessage({ data: { checkNeuralWeights: true } });
+    assert.equal(requests, 1);
+  }
 });
 
 test('end-to-end pipeline: nn-generate.cjs -> train-nn.py -> exported UBNN weights run in CPU planner', t => {
@@ -224,18 +306,49 @@ test('end-to-end pipeline: nn-generate.cjs -> train-nn.py -> exported UBNN weigh
   assert.equal(genRun.status, 0, genRun.stderr);
   const manifest = JSON.parse(fs.readFileSync(path.join(shardDir, 'manifest.json'), 'utf8'));
   assert.equal(manifest.physVersion, P.VERSION);
+  assert.equal(manifest.format, 2);
+  assert.equal(manifest.inputDim, 315);
+  assert.equal(manifest.rowFloats, 335);
   assert.ok(manifest.totalRows >= 16);
+  const nextGoal = C.NN_INPUT_DIM + C.NN_POLICY_DIM;
+  for (const shard of manifest.shards) {
+    const rows = fs.readFileSync(path.join(shardDir, shard.file));
+    assert.equal(rows.length, shard.rows * C.NN_ROW_FLOATS * 4);
+    for (let i = 0; i + 1 < shard.rows; i += 2) {
+      const own = i * C.NN_ROW_FLOATS, opp = own + C.NN_ROW_FLOATS;
+      const goal = rows.readFloatLE((own + nextGoal) * 4);
+      assert.ok(goal === -rows.readFloatLE((opp + nextGoal) * 4) && [-1, 0, 1].includes(goal));
+      const turns = rows.readFloatLE((own + nextGoal + 1) * 4);
+      assert.equal(turns, rows.readFloatLE((opp + nextGoal + 1) * 4));
+      assert.ok(Number.isInteger(turns) && turns >= 0 && turns < 16);
+    }
+  }
 
   const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
+  const trainer = path.resolve(__dirname, '../scripts/train-nn.py');
+  const manifestPath = path.join(shardDir, 'manifest.json');
+  fs.writeFileSync(manifestPath, JSON.stringify({ ...manifest, format: 1 }));
+  const legacyRun = spawnSync(pyCmd, [trainer, '--shards', shardDir, '--out', binOut, '--report', repOut], { encoding: 'utf8' });
+  assert.notEqual(legacyRun.status, 0);
+  assert.match(legacyRun.stderr, /Incompatible UBNN shard manifest/);
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+
+  const schemaRun = spawnSync(pyCmd, ['-c',
+    'import json, runpy, sys; d = runpy.run_path(sys.argv[1]); print(json.dumps([d["Y_FLIP_OBS"], d["Y_FLIP_POL"]]))', trainer
+  ], { encoding: 'utf8' });
+  assert.equal(schemaRun.status, 0, schemaRun.stderr);
+  assert.deepEqual(JSON.parse(schemaRun.stdout), [C.Y_FLIP_OBS_INDICES, C.Y_FLIP_POL_INDICES]);
+
   const trainRun = spawnSync(
     pyCmd,
-    [path.resolve(__dirname, '../scripts/train-nn.py'), '--shards', shardDir, '--out', binOut, '--report', repOut, '--hidden', '64', '--epochs', '3', '--batch-size', '32'],
+    [trainer, '--shards', shardDir, '--out', binOut, '--report', repOut, '--hidden', '64', '--epochs', '3', '--batch-size', '32'],
     { encoding: 'utf8' }
   );
   assert.equal(trainRun.status, 0, trainRun.stderr || trainRun.stdout);
   assert.ok(fs.existsSync(binOut));
   const report = JSON.parse(fs.readFileSync(repOut, 'utf8'));
   assert.equal(report.physVersion, P.VERSION);
+  assert.equal(report.trainRows + report.valRows, manifest.totalRows);
 
   const rawBuf = fs.readFileSync(binOut);
   const loaded = C.loadWeights(rawBuf);
@@ -243,7 +356,14 @@ test('end-to-end pipeline: nn-generate.cjs -> train-nn.py -> exported UBNN weigh
 
   const st = S.initialState(3, 'standard');
   const fastPlan = C.plan(st, 1, { nn: 'only', seed: 1 });
-  const hybPlan = C.plan(st, 1, { level: 'hard', nn: true, seed: 1 });
+  const hybPlan = C.plan(st, 1, { level: 'ballistic', seed: 1 });
+  const repeated = C.plan(st, 1, { level: 'ballistic', seed: 1 });
   M.validatePlans(fastPlan.plans);
   M.validatePlans(hybPlan.plans);
+  assert.equal(hybPlan.diagnostics.level, 'ballistic');
+  assert.equal(hybPlan.diagnostics.nn, true);
+  assert.equal(hybPlan.diagnostics.candidates, C.LEVELS.god.candidates);
+  assert.ok(hybPlan.diagnostics.simulations > 0);
+  assert.deepEqual(hybPlan.plans, repeated.plans);
+  assert.equal(hybPlan.diagnostics.score, repeated.diagnostics.score);
 });

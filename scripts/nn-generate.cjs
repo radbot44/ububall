@@ -5,11 +5,9 @@
  *
  * Spawns lock-free worker_threads across all CPU cores (e.g. 32 threads on i9-14900K) to play
  * mixed Standard / Pulse / Classic matches between strong search teachers + exploratory noise,
- * writing fixed 216-float (864-byte) little-endian Float32 rows to `personal/nn-shards/`:
- *   [0..195]   196 team-canonical observation floats
- *   [196..213]  18 teacher move targets (3 role-ordered skaters x [cosA, sinA, power, spin, super, guard])
- *   [214]        1 next-goal round label (+1 own team scores next, -1 opponent scores next, 0 turn cap)
- *   [215]        1 turnsUntilGoal (0 on scoring turn, k turns before round ends)
+ * writing little-endian Float32 rows to `personal/nn-shards/`. Each row starts with the
+ * team-canonical observation, then the teacher policy, next-goal label (+1 own, -1 opponent,
+ * 0 turn cap), and turns remaining in the round (0 on the scoring turn).
  */
 const fs = require('node:fs');
 const os = require('node:os');
@@ -29,6 +27,8 @@ const KICKOFF_POS = Object.freeze([
   { x: 500, y: 300 }
 ]);
 const RESOLVE_OPTS = Object.freeze({ effects: false, fastSearch: true, fastTick: true });
+const NEXT_GOAL = NN.NN_INPUT_DIM + NN.NN_POLICY_DIM;
+const TURNS_TO_GOAL = NEXT_GOAL + 1;
 
 const TEACHER_PRESETS = Object.freeze({
   fast: Object.freeze({ level: 'medium', candidates: 36, opponents: 2, searchTicks: 340, wobble: true, nn: false }),
@@ -124,10 +124,10 @@ function playAndRecordMatch(job, rowSink) {
     for (let k = 0; k < n; k++) {
       const rec = roundBuf[k];
       const turnsToGoal = n - 1 - k;
-      rec.row0[214] = goalTeam === null ? 0 : (goalTeam === 0 ? 1 : -1);
-      rec.row0[215] = turnsToGoal;
-      rec.row1[214] = goalTeam === null ? 0 : (goalTeam === 1 ? 1 : -1);
-      rec.row1[215] = turnsToGoal;
+      rec.row0[NEXT_GOAL] = goalTeam === null ? 0 : (goalTeam === 0 ? 1 : -1);
+      rec.row0[TURNS_TO_GOAL] = turnsToGoal;
+      rec.row1[NEXT_GOAL] = goalTeam === null ? 0 : (goalTeam === 1 ? 1 : -1);
+      rec.row1[TURNS_TO_GOAL] = turnsToGoal;
       if (rec.keep0) { rowSink(rec.row0); rowsWritten++; }
       if (rec.keep1) { rowSink(rec.row1); rowsWritten++; }
     }
