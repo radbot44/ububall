@@ -1,14 +1,23 @@
-/* Board position heuristic evaluation, spatial feature extraction, and basin deduplication. */
+/* Board position heuristic evaluation, spatial feature extraction, neural value blend, and basin deduplication. */
 'use strict';
 const { P, M, WEIGHTS, SUPER_RESERVE_BONUS, COMPLEX, TWO_PI, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, RINK_SPAN, GOAL_Y_TOP, GOAL_Y_BOT, SKATER_CURVE, SPIN_DECAY, AIR_DRAG, WALL_RESTITUTION, contactRadius, creativityOf } = require('./constants.js');
-const { strike } = require('./kinematics.js');
 const { GOAL_APERTURE_YS, shotConePoint, goalPocketPoint, guardReachRadius } = require('./threat.js');
+const { NN_INPUT_DIM, encodeObservation, forward } = require('./nn.js');
 
 const slideX = new Float64Array(6), slideY = new Float64Array(6);
+const evalObsBuf = new Float32Array(NN_INPUT_DIM);
+const evalPermBuf = [0, 1, 2];
 const FEATURE_NAMES = Object.freeze(['progress', 'access', 'cover', 'chance', 'meter', 'stun', 'daze']);
 const FEATURES = new Float64Array(FEATURE_NAMES.length);
 const FEATURE_CAP = 600, WRONG_SIDE = 60;
 const unavailable = b => b.carded || b.stunned || b.stunnedNext;
+
+function syncSlidesFromBodies(bodies) {
+  for (let i = 0; i < 6; i++) {
+    slideX[i] = bodies[i].x;
+    slideY[i] = bodies[i].y;
+  }
+}
 
 // Distance from team t's best-placed skater to the spot behind the ball that strikes it at the goal t attacks.
 function strikeAccess(bodies, t, bx, by, ballR) {
@@ -105,7 +114,7 @@ function shotChance(bodies, t, bx, by, ballR, strikeDist, oppStrikeDist = FEATUR
   return baseChance + openDanger;
 }
 
-function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scorer = null, teamTouches = false, tmw = 0.5, partial = false, isPulse = false) {
+function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scorer = null, teamTouches = false, tmw = 0.5, partial = false, isPulse = false, nnCtx = null) {
   if (goal !== null && goal !== undefined && goal >= 0) {
     if (goal !== team) return -weights.goal;
     const scorerCre = scorer ? creativityOf(scorer) : (31.5 / 63);
@@ -214,7 +223,6 @@ function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scor
       const ny = cy0 + uy * midSpd * stepT;
       const segDx = nx - cx0, segDy = ny - cy0, segLen2 = segDx * segDx + segDy * segDy;
 
-      // Check if any sliding skater intercepts this coast segment before a wall or goal line
       let hitT = 2;
       if (segLen2 > 1e-4) {
         const frac = (s + 0.5) / steps;
@@ -240,7 +248,6 @@ function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scor
       cx = nx;
       cy = ny;
 
-      // Check unobstructed goal-mouth crossing (Left net scores for Team 1; Right net scores for Team 0)
       let goalForTeam = -1, goalLineX = 0, tCross = 1;
       if (cx <= RINK_LEFT && cx0 > RINK_LEFT) {
         tCross = (cx0 - RINK_LEFT) / Math.max(1e-4, cx0 - cx);
@@ -336,18 +343,18 @@ function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scor
     if (d2 > DAZE_F) dDiff += (d2 - DAZE_F) / (DAZE_M - DAZE_F) * DAZE_M;
   }
 
-  // Next-turn position: who can strike the ball goalward, who guards the shot cone, and how open each goal is.
   const strikeOwn = strikeAccess(bodies, team, pbx, pby, ballR);
   const strikeOther = strikeAccess(bodies, 1 - team, pbx, pby, ballR);
+  const coneOther = coneCover(bodies, 1 - team, pbx, pby, fouls);
+  const coneOwn = coneCover(bodies, team, pbx, pby, fouls);
   FEATURES[0] = dir * (bx + coastDx - RINK_CX);
   FEATURES[1] = strikeOther - strikeOwn;
-  FEATURES[2] = coneCover(bodies, 1 - team, pbx, pby, fouls) - coneCover(bodies, team, pbx, pby, fouls);
+  FEATURES[2] = coneOther - coneOwn;
   FEATURES[3] = shotChance(bodies, team, pbx, pby, ballR, strikeOwn, strikeOther) - shotChance(bodies, 1 - team, pbx, pby, ballR, strikeOther, strikeOwn);
   FEATURES[4] = mDiff;
   FEATURES[5] = sDiff;
   FEATURES[6] = dDiff / DAZE_M;
 
-  // Post-horizon slide-in crease foul penalty when truncated before settlement
   let postFoul = 0;
   if (coastActive) {
     for (let t = 0; t < 2; t++) {
@@ -398,6 +405,44 @@ function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scor
     }
   }
 
+  if (nnCtx && nnCtx.model && nnCtx.weight > 0 && Math.abs(impendingGoalBonus) < weights.goal * 0.5) {
+    encodeObservation(bodies, fouls, team, {
+      classic: nnCtx.classic,
+      pulse: isPulse,
+      blitz: nnCtx.blitz,
+      scores: nnCtx.scores,
+      roundTurns: nnCtx.roundTurns,
+      slideX: coastActive ? slideX : null,
+      slideY: coastActive ? slideY : null,
+      pbx: !isPulse ? pbx : bx,
+      pby: !isPulse ? pby : by,
+      zeroSettledVel: coastActive,
+      strikeOwn,
+      strikeOther,
+      coneOwn,
+      coneOther
+    }, evalObsBuf, evalPermBuf);
+    const nnRes = forward(evalObsBuf, false, nnCtx.model);
+    if (nnRes) {
+      const hPositional =
+        FEATURES[0] * weights.progress +
+        FEATURES[1] * weights.access +
+        FEATURES[2] * weights.cover +
+        FEATURES[3] * (weights.chance ?? 0) +
+        FEATURES[4] * weights.meter +
+        FEATURES[5] * (weights.stun ?? 185) +
+        FEATURES[6] * (weights.daze ?? 120) +
+        stickyBonus + superReserve;
+      const hardRules =
+        -cDiff * weights.card -
+        (warned + stall) * weights.warning +
+        postFoul + impendingGoalBonus;
+      const w = nnCtx.weight;
+      const scale = nnCtx.scale ?? (weights.goal * 0.45);
+      return (1 - w) * hPositional + w * (nnRes.value * scale) + hardRules;
+    }
+  }
+
   return FEATURES[0] * weights.progress +
     FEATURES[1] * weights.access +
     FEATURES[2] * weights.cover +
@@ -410,9 +455,9 @@ function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scor
     postFoul + stickyBonus + superReserve + impendingGoalBonus;
 }
 
-function evaluate(state, team, goal, weights, complexity = 0, scorer = null, teamTouches = false, tmw = 0.5) {
+function evaluate(state, team, goal, weights, complexity = 0, scorer = null, teamTouches = false, tmw = 0.5, nnCtx = null) {
   const isPulse = state.mode ? M.rule(state.mode, 'pulse') : false;
-  return evaluateBodies(state.bodies, state.fouls, team, goal, weights, complexity, scorer, teamTouches, tmw, false, isPulse);
+  return evaluateBodies(state.bodies, state.fouls, team, goal, weights, complexity, scorer, teamTouches, tmw, false, isPulse, nnCtx);
 }
 
 // Position features of a settled state from team's side (calibration input; see docs/cpu-simulation.md).
@@ -437,5 +482,4 @@ function planBasinKey(moves) {
   return key;
 }
 
-
-module.exports = { FEATURE_NAMES, strikeAccess, coneCover, shotChance, evaluateBodies, evaluate, features, planBasinKey };
+module.exports = { FEATURE_NAMES, syncSlidesFromBodies, strikeAccess, coneCover, shotChance, evaluateBodies, evaluate, features, planBasinKey };

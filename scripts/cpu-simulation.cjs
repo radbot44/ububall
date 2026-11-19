@@ -48,13 +48,28 @@ function kickoff(state) {
   state.phase = 'plan';
 }
 
+const modelCache = new Map();
+function resolveProfileConfig(profile) {
+  if (typeof profile === 'string') return { level: profile };
+  if (!profile || typeof profile !== 'object') return { level: 'medium' };
+  const { weightsPath, ...rest } = profile;
+  if (!weightsPath) return rest;
+  const resolved = require('node:path').resolve(weightsPath);
+  let cached = modelCache.get(resolved);
+  if (cached === undefined) {
+    cached = C.parseWeights(require('node:fs').readFileSync(resolved));
+    modelCache.set(resolved, cached);
+  }
+  return { ...rest, nnModel: cached };
+}
+
 function choose(state, team, profile, seed, history) {
   const started = performance.now();
   if (profile === 'legacy' || profile === 'hold') {
     const plans = profile === 'legacy' ? C.legacy(state, team, C.randomSource(seed)) : [C.HOLD, C.HOLD, C.HOLD];
     return { plans, diagnostics: { milliseconds: performance.now() - started, simulations: 0 } };
   }
-  return C.plan(state, team, { ...(typeof profile === 'string' ? { level: profile } : profile), seed, ...(history?.length ? { history } : {}) });
+  return C.plan(state, team, { ...resolveProfileConfig(profile), seed, ...(history?.length ? { history } : {}) });
 }
 
 function match({ seed = 1, mode = 'standard', profiles = ['medium', 'legacy'], maxTurns = 80, swapped = false, trace = false } = {}) {
@@ -143,7 +158,7 @@ async function runCli() {
   const args = process.argv.slice(2), values = {};
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
-    if (!['--games', '--turns', '--seed', '--a', '--b', '--mode', '--config', '--output', '--scenarios', '--trace', '--threads'].includes(key)) {
+    if (!['--games', '--turns', '--seed', '--a', '--b', '--mode', '--config', '--output', '--scenarios', '--trace', '--threads', '--nn-weights'].includes(key)) {
       throw new Error('Unknown option: ' + key);
     }
     if (['--scenarios', '--trace'].includes(key)) values[key.slice(2)] = true;
@@ -153,8 +168,10 @@ async function runCli() {
     }
   }
   const fs = require('node:fs');
+  if (values['nn-weights']) C.loadWeights(fs.readFileSync(values['nn-weights']));
   const config = values.config ? JSON.parse(fs.readFileSync(values.config, 'utf8')) : {};
-  const profiles = [config.a || values.a || 'medium', config.b || values.b || 'legacy'];
+  const parseProf = raw => (typeof raw === 'string' && raw.trim().startsWith('{') ? JSON.parse(raw) : raw);
+  const profiles = [parseProf(config.a || values.a || 'medium'), parseProf(config.b || values.b || 'legacy')];
   const games = values.games !== undefined ? Number(values.games) : 1;
   const maxTurns = values.turns !== undefined ? Number(values.turns) : 80;
   const seed = values.seed !== undefined ? Number(values.seed) : 1;

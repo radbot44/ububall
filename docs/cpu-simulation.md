@@ -81,3 +81,22 @@ CPU search calls `resolveTurn` with `effects: false`, which skips presentation-o
 ## Validation notes
 
 The CPU suite checks reproducibility, search budgets, tactical fixtures, and planning across all five difficulty levels. The shooting and goaltending fixtures resolve selected plans through the match engine, including Pulse rebounds, Cannonball threats, Guard saves, and screened bank shots.
+
+## Train and run the Path 1 neural evaluator and policy
+
+`shared/cpu/nn.js`, `scripts/nn-generate.cjs`, and `scripts/train-nn.py` implement an optional `UBNN` (`float16`, ~378 KB) residual network (`196 -> 256 -> 256 -> 256` `LayerNorm` + `SiLU` trunk with a 3-way next-goal Value head and an 18-output 3-skater Policy head). Coordinates are canonicalized per team (`+x` attacking direction, `[attack, support, defend]` skater role order, `(cos, sin)` angles) and augmented 2x vertically during GPU training.
+
+```powershell
+# 1. Generate binary training shards across all CPU worker threads (~216 float32s / 864 B per row)
+npm run nn:gen:quick
+npm run nn:gen -- --matches 1200 --preset mixed --mode mixed --out personal/nn-shards
+
+# 2. Train on RTX 4090 (VRAM-resident CUDA bf16 PyTorch) and export web/assets/ububall-net.bin
+python scripts/train-nn.py --shards personal/nn-shards --epochs 25 --batch-size 4096
+
+# 3. Compare Neural + Search or Pure-NN ("only") head-to-head against baseline presets
+npm run sim:cpu -- --games 10 --mode standard --a "{\"level\":\"hard\",\"nn\":true,\"weightsPath\":\"web/assets/ububall-net.bin\"}" --b "{\"level\":\"hard\",\"nn\":false}"
+npm run sim:cpu -- --games 10 --mode pulse --a "{\"level\":\"hard\",\"nn\":\"only\",\"weightsPath\":\"web/assets/ububall-net.bin\"}" --b medium
+```
+
+When `web/assets/ububall-net.bin` is present (and matches `P.VERSION`), `scripts/prepare-assets.cjs` copies it into `dist/public/assets/ububall-net.bin` and `web/ububall-cpu-worker.js` preloads it once on worker startup. If the file is absent or physics `VERSION` advances, `ububallCPU.plan` runs the deterministic heuristic planner unchanged.

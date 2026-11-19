@@ -10,7 +10,8 @@ const { aim, strike, traceMovingBall } = require('./kinematics.js');
 const { shotConePoint, canOccupyCrease, goalPocketPoint, bestBankTargetY, traceIncomingShot, guardCoversSegment, assessOpponentThreat, scanGoalAperture } = require('./threat.js');
 const { legacy } = require('./baseline.js');
 const { options, place3, jointTeamPlays, wobble } = require('./candidates.js');
-const { evaluateBodies, planBasinKey } = require('./evaluate.js');
+const { syncSlidesFromBodies, strikeAccess, coneCover, evaluateBodies, planBasinKey } = require('./evaluate.js');
+const { NN_INPUT_DIM, encodeState, decodePolicyPlans, getModel, forward } = require('./nn.js');
 const { buildOpponentResponses, sanitizePredictedMove, learnedOpponentResponses } = require('./opponent.js');
 const { runMultiTurnLookahead } = require('./lookahead.js');
 
@@ -80,6 +81,11 @@ function plan(input, team = 1, config = {}) {
       (settings.godBridgeDual !== undefined && typeof settings.godBridgeDual !== 'boolean') ||
       (settings.screenTop !== undefined && (!Number.isInteger(settings.screenTop) || settings.screenTop < 1 || settings.screenTop > 1000)) ||
       (settings.wobbleTop !== undefined && (!Number.isInteger(settings.wobbleTop) || settings.wobbleTop < 0 || settings.wobbleTop > 1000)) ||
+      (settings.nn !== undefined && settings.nn !== true && settings.nn !== false && settings.nn !== 'only') ||
+      (settings.nnWeight !== undefined && (!Number.isFinite(settings.nnWeight) || settings.nnWeight < 0 || settings.nnWeight > 1)) ||
+      (settings.nnScale !== undefined && (!Number.isFinite(settings.nnScale) || settings.nnScale < 0)) ||
+      (settings.nnPolicy !== undefined && typeof settings.nnPolicy !== 'boolean') ||
+      (settings.nnOpponent !== undefined && typeof settings.nnOpponent !== 'boolean') ||
       Object.values(rawWeights).some(v => !Number.isFinite(v) || v < 0)) throw new Error('Invalid CPU search settings.');
 
   const started = performance.now(), random = randomSource(config.seed ?? 1);
@@ -110,6 +116,44 @@ function plan(input, team = 1, config = {}) {
   const step4Threat = assessOpponentThreat(state, team, classic);
   const pulse = M.rule(state.mode, 'pulse');
   const fullTurnTicks = M.turnTicks(state.mode);
+  const nnModel = getModel(settings);
+  if (settings.nn === 'only') {
+    if (!nnModel) throw new Error('Neural weights are required for nn: "only" mode.');
+    syncSlidesFromBodies(state.bodies);
+    const ball0 = state.bodies[6], ballR0 = ball0.radius || 18;
+    const permOnly = [0, 1, 2];
+    const obsOnly = encodeState(state, team, {
+      strikeOwn: strikeAccess(state.bodies, team, ball0.x, ball0.y, ballR0),
+      strikeOther: strikeAccess(state.bodies, 1 - team, ball0.x, ball0.y, ballR0),
+      coneOwn: coneCover(state.bodies, team, ball0.x, ball0.y, state.fouls),
+      coneOther: coneCover(state.bodies, 1 - team, ball0.x, ball0.y, state.fouls)
+    }, new Float32Array(NN_INPUT_DIM), permOnly);
+    const nnOut = forward(obsOnly, true, nnModel);
+    const onlyPlans = M.validatePlans(decodePolicyPlans(nnOut.polOut, state, team, permOnly, classic, 0, random));
+    return {
+      plans: onlyPlans,
+      diagnostics: {
+        level,
+        nn: 'only',
+        candidates: 1,
+        simulations: 0,
+        ticks: 0,
+        score: nnOut.value * weights.goal * 0.75,
+        milliseconds: performance.now() - started
+      }
+    };
+  }
+  const nnWeight = nnModel ? (settings.nnWeight ?? 0.50) : 0;
+  const nnCtx = (nnModel && nnWeight > 0) ? {
+    model: nnModel,
+    weight: nnWeight,
+    scale: settings.nnScale ?? (weights.goal * 0.45),
+    classic,
+    blitz: M.rule(state.mode, 'blitz'),
+    scores: state.scores,
+    roundTurns: (state.roundTurns || 0) + 1
+  } : null;
+  const nnOppCtx = (nnModel && nnWeight > 0) ? { ...nnCtx } : null;
   const baseHorizon = settings.searchTicks || SEARCH_TICKS;
   const searchTicks = startCreaseWarned ? fullTurnTicks : baseHorizon;
 
@@ -149,6 +193,24 @@ function plan(input, team = 1, config = {}) {
         if (responses.length >= 5) responses[responses.length - 1] = learned;
         else responses.push(learned);
       }
+    }
+  }
+  if (nnModel && settings.nnOpponent !== false && settings.opponents >= 3 && responses.length < 5) {
+    syncSlidesFromBodies(state.bodies);
+    const ball0 = state.bodies[6], ballR0 = ball0.radius || 18, oppT = 1 - team;
+    const oppPerm = [0, 1, 2];
+    const oppObs = encodeState(state, oppT, {
+      strikeOwn: strikeAccess(state.bodies, oppT, ball0.x, ball0.y, ballR0),
+      strikeOther: strikeAccess(state.bodies, team, ball0.x, ball0.y, ballR0),
+      coneOwn: coneCover(state.bodies, oppT, ball0.x, ball0.y, state.fouls),
+      coneOther: coneCover(state.bodies, team, ball0.x, ball0.y, state.fouls)
+    }, new Float32Array(NN_INPUT_DIM), oppPerm);
+    const oppOut = forward(oppObs, true, nnModel);
+    if (oppOut) {
+      const oppPred = decodePolicyPlans(oppOut.polOut, state, oppT, oppPerm, classic, 0, random)
+        .map((mv, k) => sanitizePredictedMove(mv, state.bodies[oppT * 3 + k], classic));
+      const pKey = planKey(oppPred, 0);
+      if (!responses.some(r => planKey(r, 0) === pKey)) responses.push(oppPred);
     }
   }
   const respCount = responses.length;
@@ -197,10 +259,10 @@ function plan(input, team = 1, config = {}) {
     const endBall = endBodies[6];
     const goal = result.replay.goal;
     const speedShare = goal === null ? 0 : Math.max(0, 1 - ticksDone / fullTurnTicks);
-    const val = evaluateBodies(endBodies, result.state.fouls, team, goal, weights, comp, toucher, multiTeamTouch, tmw, partial, pulse)
+    const val = evaluateBodies(endBodies, result.state.fouls, team, goal, weights, comp, toucher, multiTeamTouch, tmw, partial, pulse, nnCtx)
       + (goal === team ? weights.goal * 0.0006 * speedShare : 0);
     const valOpp = evalOpp
-      ? evaluateBodies(endBodies, result.state.fouls, 1 - team, goal, rawWeights, comp, toucher, false, 0.5, partial, pulse)
+      ? evaluateBodies(endBodies, result.state.fouls, 1 - team, goal, rawWeights, comp, toucher, false, 0.5, partial, pulse, nnOppCtx)
         + (goal === 1 - team ? rawWeights.goal * 0.0006 * speedShare : 0)
       : 0;
     return {
@@ -468,6 +530,26 @@ function plan(input, team = 1, config = {}) {
         const intent = getIntent(opt);
         const keepDef = step4Threat.shotDanger && i === defRoleIdx && j <= 8 && (intent === 'cover' || intent === 'guard');
         consider(next, keepDef || (i === primaryAtkIdx && j <= 8 && (intent === 'shoot' || intent === 'carry' || intent === 'magnet')), keepDef);
+      }
+    }
+  }
+
+  // 2.5 Neural Policy Candidate Seeding (proposes learned coordinated 3-skater plays within candidate cap)
+  if (nnModel && settings.nnPolicy !== false && evaluated < settings.candidates * 0.68) {
+    syncSlidesFromBodies(state.bodies);
+    const ball0 = state.bodies[6], ballR0 = ball0.radius || 18;
+    const ownPerm = [0, 1, 2];
+    const ownObs = encodeState(state, team, {
+      strikeOwn: strikeAccess(state.bodies, team, ball0.x, ball0.y, ballR0),
+      strikeOther: strikeAccess(state.bodies, 1 - team, ball0.x, ball0.y, ballR0),
+      coneOwn: coneCover(state.bodies, team, ball0.x, ball0.y, state.fouls),
+      coneOther: coneCover(state.bodies, 1 - team, ball0.x, ball0.y, state.fouls)
+    }, new Float32Array(NN_INPUT_DIM), ownPerm);
+    const polRes = forward(ownObs, true, nnModel);
+    if (polRes) {
+      consider(decodePolicyPlans(polRes.polOut, state, team, ownPerm, classic, 0, random), true, false);
+      if (settings.candidates >= 36) {
+        consider(decodePolicyPlans(polRes.polOut, state, team, ownPerm, classic, 0.20, random), false, false);
       }
     }
   }
@@ -1031,7 +1113,7 @@ function plan(input, team = 1, config = {}) {
 
     ({ finalPool, simulations, ticks } = runMultiTurnLookahead({
       settings, evaluated, finalPool, pulse, fullTurnTicks, state, team, classic,
-      weights, tmw, maxGoal, ensureWobbled, responses, combineValues, pruneMargin, simulations, ticks
+      weights, tmw, maxGoal, ensureWobbled, responses, combineValues, pruneMargin, simulations, ticks, nnCtx
     }));
   // Before final selection, guarantee that the leader and any contender within the style/Boltzmann window is wobble-verified
   if (settings.wobble !== false && finalPool.length > 0) {
