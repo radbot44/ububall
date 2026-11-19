@@ -1403,3 +1403,77 @@ test('D4-04 & D4-07: offlineAudio.playFanfare routes customCtx to OfflineAudioCo
   assert.ok(stopFanfareCount >= 1, 'exportVideo finally stops fanfare');
   assert.ok(createdCanvases.length >= 3 && createdCanvases.every(c => c.width === 0 && c.height === 0), 'exportVideo finally releases offscreen canvas backing stores');
 });
+
+test('MP4 export loads Uburoom Sans at weight 400 for scorebug and goalSweep finishes cleanly at 60fps', async () => {
+  const harness = createReplayExportHarness({ seat: 0 });
+  const fontLoads = [];
+  const drawnFonts = [];
+  harness.context.document.fonts = {
+    load: (spec, text) => { fontLoads.push({ spec, text }); return Promise.resolve(); },
+    ready: Promise.resolve()
+  };
+  const origCreateElement = harness.context.document.createElement;
+  harness.context.document.createElement = tag => {
+    const el = origCreateElement(tag);
+    if (tag === 'canvas') {
+      const origGetContext = el.getContext.bind(el);
+      el.getContext = kind => {
+        const ctx = origGetContext(kind);
+        if (!ctx) return ctx;
+        return new Proxy(ctx, {
+          get(target, prop) {
+            if (prop === 'fillText') return (...args) => { drawnFonts.push(target.font); return target.fillText(...args); };
+            return target[prop];
+          }
+        });
+      };
+    }
+    return el;
+  };
+  harness.env.watchReplay(harness.rec, null);
+  await harness.env.exportVideo(harness.env.exportSlice('turn', false));
+  assert.ok(fontLoads.some(f => /400\s+\d+px\s+'Uburoom Sans'/.test(f.spec)), 'exportVideo loads Uburoom Sans at weight 400');
+  assert.ok(drawnFonts.length >= 5, 'scorebug drew team names, scores, and turn label');
+  assert.ok(drawnFonts.every(f => f.startsWith('400 ') && f.includes("'Uburoom Sans'")), `expected scorebug fonts to use weight 400 Uburoom Sans, got: ${drawnFonts.join('; ')}`);
+
+  // Verify 90 fixed 60fps steps (1.5s) finish goalSweep cleanly without a phantom frame at p = 0.9999999999999984
+  const fx = createEffectsState([], {});
+  fx.goalSweep = { team: 0, p: 0 };
+  const presenter = ububallPresentation.createRinkPresenter({
+    P,
+    ububallMatch,
+    ububallReplay,
+    getView: () => ({ canvas: { width: 1000, height: 600 }, bodies: P.kickoff(), entries: [], mode: 'standard' }),
+    getEffects: () => fx,
+    getGameAudio: () => null,
+    isReducedMotion: () => false
+  });
+  for (let i = 0; i < 90; i++) presenter.updateEffects(1 / 60, fx);
+  assert.equal(fx.goalSweep, null, 'goalSweep clears on the 90th 60fps frame');
+});
+
+test('MP4 export prefers VBR + hardware acceleration and falls back to 720p60 when 1080p60 is unsupported', async () => {
+  const harness = createReplayExportHarness({ seat: 0 });
+  const probed = [];
+  const origIsSupported = harness.context.VideoEncoder.isConfigSupported;
+  harness.context.VideoEncoder.isConfigSupported = async cfg => {
+    probed.push(cfg);
+    // Reject 1080p60 to exercise mobile/constrained-encoder 720p60 fallback
+    if (cfg.width === 1920 && cfg.framerate === 60) return { supported: false, config: cfg };
+    return origIsSupported(cfg);
+  };
+  let configured = null;
+  const origConfigure = harness.context.VideoEncoder.prototype.configure;
+  harness.context.VideoEncoder.prototype.configure = function (cfg) {
+    configured = cfg;
+    return origConfigure.call(this, cfg);
+  };
+  harness.env.watchReplay(harness.rec, null);
+  await harness.env.exportVideo(harness.env.exportSlice('turn', false));
+  assert.equal(probed[0].bitrateMode, 'variable', 'probes VBR before CBR');
+  assert.equal(probed[0].hardwareAcceleration, 'prefer-hardware', 'prefers hardware acceleration first');
+  assert.equal(configured.width, 1280, 'falls back to 720p width when 1080p60 is unsupported');
+  assert.equal(configured.height, 720, 'falls back to 720p height when 1080p60 is unsupported');
+  assert.equal(configured.framerate, 60, 'preserves 60fps on 720p60 fallback');
+  assert.equal(configured.bitrateMode, 'variable');
+});

@@ -45,6 +45,7 @@ test('the MP4 writer lays out a playable file with its movie box first', async (
   assert.deepEqual([view.getUint32(stss.start + 12), view.getUint32(stss.start + 16), view.getUint32(stss.start + 20)], [2, 1, 3]);
   const mvhd = find(top, 'moov').find(b => b.type === 'mvhd');
   assert.equal(view.getUint32(mvhd.start + 24), 50, 'movie duration in ms');
+  assert.ok(Buffer.from(file).includes(Buffer.from([0x63, 0x6f, 0x6c, 0x72, 0x6e, 0x63, 0x6c, 0x78, 0, 1, 0, 1, 0, 1, 0])), 'avc1 includes BT.709 nclx colr box');
   const opus = new Uint8Array(await new Blob(MP4.write(video, { ...audio, codec: 'opus', preSkip: MP4.opusPreSkip(Uint8Array.of(...Buffer.from('OpusHead'), 1, 2, 0x38, 1)) })).arrayBuffer());
   assert.ok(Buffer.from(opus).includes(Buffer.from('dOps')));
   assert.ok(Buffer.from(opus).includes(Buffer.from([0x64, 0x4f, 0x70, 0x73, 0, 2, 1, 0x38])), 'dOps carries the channels and pre-skip big-endian');

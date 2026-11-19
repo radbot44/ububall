@@ -56,7 +56,8 @@
     let c = String(hex || '#ffffff').replace('#', '');
     if (c.length === 3) c = c.split('').map(x => x + x).join('');
     const num = parseInt(c, 16);
-    return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${alpha})`;
+    const a = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 0;
+    return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${a < 1e-4 ? 0 : +a.toFixed(4)})`;
   }
 
   function heatColor(h, alpha = 1) {
@@ -1023,7 +1024,7 @@
             try {
               const gpu = webglApi.createSceneRenderer(view.canvas, {
                 alpha: !view.videoFrame,
-                preserveDrawingBuffer: Boolean(view.exporting),
+                preserveDrawingBuffer: Boolean(view.exporting && !view.videoFrame),
                 enableGpuTimer: Boolean(bench || deps.enableGpuTimer),
                 onContextLost: () => onAssetLoad?.(),
                 onContextRestored: () => onAssetLoad?.()
@@ -1848,7 +1849,7 @@
       tickWarps(fieldFx.spaceWarps);
       if (fx !== fieldFx) tickWarps(fx.spaceWarps);
       fieldFx.kickoffGlow = Math.max(0, fieldFx.kickoffGlow - dt / 1.5);
-      if (fieldFx.goalSweep && (fieldFx.goalSweep.p += dt / 1.5) >= 1) fieldFx.goalSweep = null;
+      if (fieldFx.goalSweep && (fieldFx.goalSweep.p += dt / 1.5) >= 1 - 1e-6) fieldFx.goalSweep = null;
       if (fieldFx.goalCall && (fieldFx.goalCall.t += dt) >= GOAL_CALL_SECONDS) fieldFx.goalCall = null;
       checkStickyRelease(fieldFx, view);
     }
@@ -2424,7 +2425,8 @@
           ctx.fillStyle = `rgba(8, 10, 14, ${dim.toFixed(3)})`;
           ctx.fillRect(60, 60, 880, 480);
         }
-        ctx.fillStyle = hexToRgba(color, .12 * Math.sin(Math.PI * p)); ctx.fillRect(60, 60, 880, 480);
+        const wash = 0.12 * Math.sin(Math.PI * p);
+        if (wash > 0.001) { ctx.fillStyle = hexToRgba(color, wash); ctx.fillRect(60, 60, 880, 480); }
         const band = ctx.createLinearGradient(x - 220, 0, x + 220, 0);
         band.addColorStop(0, hexToRgba(color, 0)); band.addColorStop(.4, hexToRgba(color, .32));
         band.addColorStop(.5, 'rgba(255,255,255,.5)'); band.addColorStop(.6, hexToRgba(color, .32)); band.addColorStop(1, hexToRgba(color, 0));
@@ -5443,7 +5445,8 @@
         const dim = 0.14 * Math.sin(Math.PI * p);
         gpu.setClip(1);
         if (dim > 0.005) gpu.fillRect(60, 60, 880, 480, `rgba(8, 10, 14, ${dim.toFixed(3)})`, 1);
-        gpu.fillRect(60, 60, 880, 480, hexToRgba(sColor, 0.12 * Math.sin(Math.PI * p)), 1);
+        const wash = 0.12 * Math.sin(Math.PI * p);
+        if (wash > 0.001) gpu.fillRect(60, 60, 880, 480, sColor, wash);
         gpu.fillBandLinearX(60, 60, 880, 480, sx - 220, sx + 220, [
           [0.0, hexToRgba(sColor, 0)],
           [0.4, hexToRgba(sColor, 0.32)],

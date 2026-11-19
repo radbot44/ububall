@@ -21,6 +21,18 @@
   const box = (type, ...content) => { const body = bytes(...content); return bytes([32, body.length + 8], ascii(type), body); };
   const full = (type, version, flags, ...content) => box(type, [8, version], [24, flags], ...content);
   const MATRIX = bytes(...[0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000].map(v => [32, v]));
+  const u32Table = (type, version, flags, headerInts, values) => {
+    const bodyLen = 4 + (headerInts.length + values.length) * 4;
+    const out = new Uint8Array(bodyLen + 8);
+    const dv = new DataView(out.buffer);
+    dv.setUint32(0, out.length);
+    for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+    out[8] = version; out[9] = (flags >> 16) & 255; out[10] = (flags >> 8) & 255; out[11] = flags & 255;
+    let at = 12;
+    for (const v of headerInts) { dv.setUint32(at, v >>> 0); at += 4; }
+    for (const v of values) { dv.setUint32(at, v >>> 0); at += 4; }
+    return out;
+  };
   // Run-length sample durations.
   function stts(samples) {
     const runs = [];
@@ -28,7 +40,9 @@
       const last = runs.at(-1);
       if (last && last[1] === s.duration) last[0]++; else runs.push([1, s.duration]);
     }
-    return full('stts', 0, 0, [32, runs.length], ...runs.flatMap(([n, d]) => [[32, n], [32, d]]));
+    const vals = new Uint32Array(runs.length * 2);
+    for (let i = 0; i < runs.length; i++) { vals[i * 2] = runs[i][0]; vals[i * 2 + 1] = runs[i][1]; }
+    return u32Table('stts', 0, 0, [runs.length], vals);
   }
   // Optional composition-time offsets (for B-frame streams where PTS != DTS).
   function ctts(samples) {
@@ -39,7 +53,27 @@
       const off = Math.round(cto(s)), last = runs.at(-1);
       if (last && last[1] === off) last[0]++; else runs.push([1, off]);
     }
-    return [full('ctts', signed ? 1 : 0, 0, [32, runs.length], ...runs.flatMap(([n, c]) => [[32, n], [32, c]]))];
+    const out = new Uint8Array(16 + runs.length * 8);
+    const dv = new DataView(out.buffer);
+    dv.setUint32(0, out.length);
+    for (let i = 0; i < 4; i++) out[4 + i] = 'ctts'.charCodeAt(i);
+    out[8] = signed ? 1 : 0;
+    dv.setUint32(12, runs.length);
+    for (let i = 0, at = 16; i < runs.length; i++, at += 8) {
+      dv.setUint32(at, runs[i][0]);
+      if (signed) dv.setInt32(at + 4, runs[i][1]); else dv.setUint32(at + 4, runs[i][1]);
+    }
+    return [out];
+  }
+  function stss(samples) {
+    const keys = [];
+    for (let i = 0; i < samples.length; i++) if (samples[i].key) keys.push(i + 1);
+    return u32Table('stss', 0, 0, [keys.length], keys);
+  }
+  function stsz(samples) {
+    const sizes = new Uint32Array(samples.length);
+    for (let i = 0; i < samples.length; i++) sizes[i] = samples[i].data.length;
+    return u32Table('stsz', 0, 0, [0, samples.length], sizes);
   }
   // Each track's samples form one chunk at `offset` in the file.
   function trak(id, track, offset, sampleEntry, handler, header) {
@@ -48,9 +82,9 @@
     const video = handler === 'vide';
     const stbl = box('stbl', full('stsd', 0, 0, [32, 1], sampleEntry), stts(track.samples),
       ...(video ? ctts(track.samples) : []),
-      ...(video ? [full('stss', 0, 0, [32, track.samples.filter(s => s.key).length], ...track.samples.flatMap((s, i) => s.key ? [[32, i + 1]] : []))] : []),
+      ...(video ? [stss(track.samples)] : []),
       full('stsc', 0, 0, [32, 1], [32, 1], [32, track.samples.length], [32, 1]),
-      full('stsz', 0, 0, [32, 0], [32, track.samples.length], ...track.samples.map(s => [32, s.data.length])),
+      stsz(track.samples),
       full('stco', 0, 0, [32, 1], [32, offset]));
     return box('trak',
       full('tkhd', 0, 3, [32, 0], [32, 0], [32, id], [32, 0], [32, trackMovieDuration], [64, 0], [16, 0], [16, video ? 0 : 1], [16, video ? 0 : 0x100], [16, 0],
@@ -61,8 +95,10 @@
         box('minf', header, box('dinf', full('dref', 0, 0, [32, 1], full('url ', 0, 1))), stbl)));
   }
   function avc1(v) {
+    // BT.709 nclx color metadata so Safari/QuickTime/mobile players preserve dark slate & ice colors.
+    const colr = box('colr', ascii('nclx'), [16, 1], [16, 1], [16, 1], [8, 0]);
     return box('avc1', [48, 0], [16, 1], [16, 0], [16, 0], [32, 0], [32, 0], [32, 0], [16, v.width], [16, v.height],
-      [32, 0x480000], [32, 0x480000], [32, 0], [16, 1], new Uint8Array(32), [16, 0x18], [16, 0xffff], box('avcC', v.description));
+      [32, 0x480000], [32, 0x480000], [32, 0], [16, 1], new Uint8Array(32), [16, 0x18], [16, 0xffff], box('avcC', v.description), colr);
   }
   // ISO 14496-1 descriptor: tag, then its length in four 7-bit bytes.
   const descriptor = (tag, body) => bytes([8, tag], [8, 0x80 | body.length >> 21 & 127], [8, 0x80 | body.length >> 14 & 127], [8, 0x80 | body.length >> 7 & 127], [8, body.length & 127], body);

@@ -611,17 +611,17 @@ void main() {
         out = [r, g, b, a];
       }
     } else if (s.startsWith('rgb')) {
-      const m = s.match(/[\d.]+/g);
+      const m = s.match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi);
       if (m && m.length >= 3) {
         out = [
-          Math.min(1, Number(m[0]) / 255),
-          Math.min(1, Number(m[1]) / 255),
-          Math.min(1, Number(m[2]) / 255),
+          Math.max(0, Math.min(1, Number(m[0]) / 255)),
+          Math.max(0, Math.min(1, Number(m[1]) / 255)),
+          Math.max(0, Math.min(1, Number(m[2]) / 255)),
           m.length >= 4 ? Math.max(0, Math.min(1, Number(m[3]))) : 1
         ];
       }
     } else if (s.startsWith('hsl')) {
-      const m = s.match(/[\d.]+/g);
+      const m = s.match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi);
       if (m && m.length >= 3) {
         const h = ((Number(m[0]) % 360) + 360) % 360 / 60;
         const sat = Math.max(0, Math.min(1, Number(m[1]) / 100));

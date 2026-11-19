@@ -238,6 +238,12 @@ test('ububallWebgl.parseColor parses hex and rgb/rgba strings accurately', () =>
   assert.ok(Math.abs(c3[1] - 0.4) < 1e-4);
   assert.ok(Math.abs(c3[2] - 0.8) < 1e-4);
   assert.equal(c3[3], 0.5);
+
+  const c4 = parseColor('rgba(232, 202, 72, 6.008935185918509e-16)');
+  assert.ok(c4[3] < 1e-12, 'scientific-notation tiny alpha does not get misparsed as opaque');
+
+  const c5 = parseColor('hsla(48, 78%, 60%, 1.2e-7)');
+  assert.ok(c5[3] < 1e-6, 'hsla scientific-notation alpha parses accurately');
 });
 
 test('ububallWebgl.createSceneRenderer returns null cleanly when WebGL2 is unavailable', () => {
@@ -472,7 +478,7 @@ test('source files contain zero raw NUL (0x00) bytes', () => {
   }
 });
 
-test('exporting videoFrame views enable preserveDrawingBuffer, disable alpha, and composite scorebug in one WebGL2 pass', () => {
+test('exporting videoFrame views disable preserveDrawingBuffer and alpha, and composite scorebug in one WebGL2 pass', () => {
   const { ububallPhysics: P, ububallMatch, ububallReplay, ubu, rarity, ububallPresentation } = globalThis;
   const { createEffectsState, MATERIAL_STYLES, createRinkPresenter } = ububallPresentation;
 
@@ -524,7 +530,7 @@ test('exporting videoFrame views enable preserveDrawingBuffer, disable alpha, an
     getView: () => expView, getEffects: () => expFx, getPhase: () => 'play'
   });
   expPres.drawScene();
-  assert.equal(expCanvas._mockGl.contextAttrs.preserveDrawingBuffer, true, 'export canvas enables preserveDrawingBuffer');
+  assert.equal(expCanvas._mockGl.contextAttrs.preserveDrawingBuffer, false, 'direct videoFrame export avoids preserveDrawingBuffer tile-GPU copies');
   assert.equal(expCanvas._mockGl.contextAttrs.alpha, false, 'direct 1080p videoFrame canvas uses opaque backbuffer');
   const texUploadsAfterFrame1 = expCanvas._mockGl.calls.texImage2D;
 

@@ -5,9 +5,15 @@
 
   const SEEK_EFFECTS = .4;
   const VIDEO = Object.freeze({
-    width: 1920, height: 1080, fps: 60, bitrate: 1.5e6, keySeconds: 5, hold: 1, bug: 78,
+    width: 1920, height: 1080, fps: 60, bitrate: 4.5e6, keySeconds: 2, hold: 1, bug: 78,
     field: { x: 0, y: 78 - 42 * 1.92, width: 1920, height: 1152 }
   });
+  const VIDEO_PROFILES = Object.freeze([
+    { width: 1920, height: 1080, fps: 60, bitrate: 4.5e6, codecs: ['avc1.64002A', 'avc1.4D402A', 'avc1.42E02A'] },
+    { width: 1280, height: 720,  fps: 60, bitrate: 2.5e6, codecs: ['avc1.640020', 'avc1.4D4020', 'avc1.42E020'] },
+    { width: 1920, height: 1080, fps: 30, bitrate: 3.0e6, codecs: ['avc1.640028', 'avc1.4D4028', 'avc1.42E028'] },
+    { width: 1280, height: 720,  fps: 30, bitrate: 1.8e6, codecs: ['avc1.64001F', 'avc1.4D401F', 'avc1.42E01F'] }
+  ]);
   const CARD = Object.freeze({
     width: 1080, height: 980, field: 146, crop: [42, 550],
     cta: 'Collect & Collide at', tagline: '3v3 turn-based hockey'
@@ -222,9 +228,18 @@
       return videoLogoImage.decode?.().catch(() => {}) ?? Promise.resolve();
     }
 
-    const videoFieldSize = () => ({
-      width: Math.round(VIDEO.field.width * VIDEO.width / 1920),
-      height: Math.round(VIDEO.field.height * VIDEO.width / 1920)
+    async function ensureDisplayFont() {
+      const fonts = document?.fonts;
+      if (!fonts) return;
+      try {
+        await fonts.load?.(`400 38px 'Uburoom Sans'`, '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ·');
+        if (fonts.ready) await fonts.ready;
+      } catch {}
+    }
+
+    const videoFieldSize = (width = VIDEO.width) => ({
+      width: Math.round(VIDEO.field.width * width / 1920),
+      height: Math.round(VIDEO.field.height * width / 1920)
     });
 
     function replayEntry(u, i, anon = false) {
@@ -486,6 +501,7 @@
           emitSkaterEffects(delta * th.speed);
         }
         if (!th.exporting) updateReplayBar();
+        else if (th.videoFrame) ensureScorebug(th);
         draw();
       });
     }
@@ -566,12 +582,15 @@
 
     function ensureScorebug(session) {
       const themeColors = getThemeColors();
-      const k = VIDEO.width / 1920;
+      const width = session.videoSpec?.width || VIDEO.width;
+      const k = width / 1920;
       const { names, scores: frameScores, turn: frameTurn, scorebug } = session;
-      const key = `${names}|${frameScores}|${frameTurn}`;
+      const key = `${width}|${names}|${frameScores}|${frameTurn}`;
       if (scorebug?.key !== key) {
-        const { home, away, text, surface } = themeColors, cx = 960, font = scorebug?.font || getComputedStyle(document.body).fontFamily;
-        const layer = scorebug?.layer || Object.assign(document.createElement('canvas'), { width: VIDEO.width, height: Math.ceil(VIDEO.bug * k) }), b = layer.getContext('2d');
+        const { home, away, text, surface } = themeColors, cx = 960;
+        const bodyFont = getComputedStyle(document.body)?.fontFamily || 'sans-serif';
+        const font = scorebug?.font || `'Uburoom Sans', ${bodyFont}`;
+        const layer = scorebug?.layer || Object.assign(document.createElement('canvas'), { width, height: Math.ceil(VIDEO.bug * k) }), b = layer.getContext('2d');
         b.setTransform(k, 0, 0, k, 0, 0); b.clearRect(0, 0, 1920, VIDEO.bug);
         b.beginPath(); b.roundRect(cx - 560, 9, 1120, 60, 14); b.fillStyle = surface; b.fill();
         const logo = videoLogoImage?.naturalWidth ? videoLogoImage : rinkLogo, logoHeight = logo?.naturalWidth ? 170 * logo.naturalHeight / logo.naturalWidth : 0;
@@ -581,12 +600,12 @@
           const left = team ? cx : cx - 360;
           b.fillStyle = team ? away : home; b.fillRect(left, 9, 360, 60);
           b.fillStyle = team ? '#ffffff' : '#1b1e26';
-          b.font = `800 25px ${font}`; b.textAlign = team ? 'right' : 'left';
-          b.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 344 : left + 16, 40);
-          b.font = `800 38px ${font}`; b.textAlign = 'center';
+          b.font = `400 25px ${font}`; b.textAlign = team ? 'right' : 'left';
+          b.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 344 : left + 16, 40, 256);
+          b.font = `400 38px ${font}`; b.textAlign = 'center';
           b.fillText(String(frameScores[team]), team ? left + 40 : left + 320, 40);
         }
-        b.fillStyle = text; b.textAlign = 'center'; b.font = `800 23px ${font}`;
+        b.fillStyle = text; b.textAlign = 'center'; b.font = `400 23px ${font}`;
         b.fillText(`T${frameTurn}  REPLAY`, cx + 460, 40);
         session.scorebug = { key, font, layer, rev: (scorebug?.rev || 0) + 1 };
       }
@@ -599,10 +618,11 @@
 
     function composeFrame(v, session) {
       const themeColors = getThemeColors();
-      const f = VIDEO.field, k = VIDEO.width / 1920;
+      const width = session.videoSpec?.width || VIDEO.width, height = session.videoSpec?.height || VIDEO.height;
+      const f = VIDEO.field, k = width / 1920;
       const scorebug = ensureScorebug(session);
       v.setTransform(1, 0, 0, 1, 0, 0);
-      v.fillStyle = themeColors.background; v.fillRect(0, 0, VIDEO.width, VIDEO.height);
+      v.fillStyle = themeColors.background; v.fillRect(0, 0, width, height);
       v.setTransform(k, 0, 0, k, 0, 0);
       paintField(v, f.x, f.y, f.width, f.height, session);
       v.setTransform(1, 0, 0, 1, 0, 0);
@@ -628,8 +648,10 @@
         });
         encoder.configure(config);
         const left = buffer.getChannelData(0), right = buffer.getChannelData(1);
+        const chunkBuf = new Float32Array(4800 * 2);
         for (let at = 0; at < length; at += 4800) {
-          const n = Math.min(4800, length - at), data = new Float32Array(n * 2);
+          const n = Math.min(4800, length - at);
+          const data = n === 4800 ? chunkBuf : chunkBuf.subarray(0, n * 2);
           data.set(left.subarray(at, at + n)); data.set(right.subarray(at, at + n), n);
           const audio = new AudioData({ format: 'f32-planar', sampleRate: rate, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(at * 1e6 / rate), data });
           encoder.encode(audio); audio.close();
@@ -653,17 +675,27 @@
       try {
         if (!getMp4() && window?.loadMp4Script) await window.loadMp4Script();
         const mp4 = getMp4();
-        let config = null;
-        search: for (const codec of ['avc1.64002A', 'avc1.4D402A', 'avc1.42E02A']) {
-          for (const bitrateMode of ['constant', 'variable']) {
-            if (videoCancelled) break search;
-            const option = { codec, width: VIDEO.width, height: VIDEO.height, bitrate: VIDEO.bitrate, bitrateMode, framerate: VIDEO.fps, avc: { format: 'avc' } };
-            if ((await VideoEncoder.isConfigSupported(option).catch(() => ({}))).supported) { config = option; break search; }
+        let config = null, vid = null;
+        search: for (const profile of VIDEO_PROFILES) {
+          for (const hardwareAcceleration of ['prefer-hardware', 'no-preference']) {
+            for (const codec of profile.codecs) {
+              for (const bitrateMode of ['variable', 'constant']) {
+                if (videoCancelled) break search;
+                const option = {
+                  codec, width: profile.width, height: profile.height, bitrate: profile.bitrate,
+                  bitrateMode, framerate: profile.fps, latencyMode: 'quality', hardwareAcceleration,
+                  avc: { format: 'avc' }
+                };
+                if ((await VideoEncoder.isConfigSupported(option).catch(() => ({}))).supported) {
+                  config = option; vid = profile; break search;
+                }
+              }
+            }
           }
         }
         if (!videoCancelled && !config) { status.textContent = 'This browser cannot encode MP4 video.'; progress.hidden = true; close.textContent = 'Close'; return; }
         const skaters = getSkaters() || [];
-        if (!videoCancelled) await Promise.all([videoLogo(), ...skaters.map(node => node?.firstChild?.decode?.().catch(() => {}))]);
+        if (!videoCancelled) await Promise.all([videoLogo(), ensureDisplayFont(), ...skaters.map(node => node?.firstChild?.decode?.().catch(() => {}))]);
         if (!videoCancelled) {
           session = createReplaySession(slice.replay, {
             file: slice.file,
@@ -672,21 +704,22 @@
             anonymous: Boolean(slice.hidden || slice.replay.anonymous),
             exporting: true,
             clock: 0,
-            field: videoFieldSize()
+            field: videoFieldSize(vid.width)
           });
+          session.videoSpec = vid;
           if (ensureEntrySprites) await ensureEntrySprites(session.entries);
-          const holdFrames = Math.ceil(VIDEO.hold * VIDEO.fps), rate = 48000;
+          const holdFrames = Math.ceil(VIDEO.hold * vid.fps), rate = 48000;
           const frameBudget = 1 + holdFrames + session.replay.turns.reduce((frames, t) => frames +
-            Math.ceil(t.ticks * P.DT * VIDEO.fps) + 1 +
-            t.stops.reduce((extra, stop) => extra + Math.ceil(stop.ms * VIDEO.fps / 1000) + 1, 0) +
-            (t.goal ? Math.ceil(2.5 * VIDEO.fps) + 1 : 0) +
-            (winningTurn(t) ? Math.ceil(WIN_SECONDS * VIDEO.fps) + 1 : 0), 0);
-          const maxFrames = 5 * 60 * VIDEO.fps;
+            Math.ceil(t.ticks * P.DT * vid.fps) + 1 +
+            t.stops.reduce((extra, stop) => extra + Math.ceil(stop.ms * vid.fps / 1000) + 1, 0) +
+            (t.goal ? Math.ceil(2.5 * vid.fps) + 1 : 0) +
+            (winningTurn(t) ? Math.ceil(WIN_SECONDS * vid.fps) + 1 : 0), 0);
+          const maxFrames = 5 * 60 * vid.fps;
           if (frameBudget > maxFrames) {
             status.textContent = 'This replay is too long to export as an MP4 (5 minutes maximum). Export a single round or turn instead.';
             progress.hidden = true; close.textContent = 'Close'; return;
           }
-          const offline = new OfflineAudioContext(2, Math.ceil(frameBudget / VIDEO.fps * rate), rate);
+          const offline = new OfflineAudioContext(2, Math.ceil(frameBudget / vid.fps * rate), rate);
           const samples = [];
           let v = null;
           let description = null, failure = null, wakeQueue = null;
@@ -697,7 +730,7 @@
             output: (chunk, meta) => {
               if (meta?.decoderConfig?.description) description = ownBytes(meta.decoderConfig.description);
               const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
-              samples.push({ data, duration: 90000 / VIDEO.fps, key: chunk.type === 'key' });
+              samples.push({ data, duration: 90000 / vid.fps, key: chunk.type === 'key' });
             }
           });
           encoder.addEventListener('dequeue', wake);
@@ -719,15 +752,15 @@
           const rendering = offline.startRendering();
           rendering?.catch?.(() => {});
           gameAudio()?.stop?.();
-          // Configure direct 1920x1080 WebGL2 composition (background + cropped field + scorebug quad)
-          const kVid = VIDEO.width / 1920;
+          // Configure direct WebGL2 composition (background + cropped field + scorebug quad)
+          const kVid = vid.width / 1920;
           const fScale = (VIDEO.field.width * kVid) / 1000;
-          session.field = { width: VIDEO.width, height: VIDEO.height };
+          session.field = { width: vid.width, height: vid.height };
           session.videoFrame = {
-            width: VIDEO.width,
-            height: VIDEO.height,
-            logW: VIDEO.width / fScale,
-            logH: VIDEO.height / fScale,
+            width: vid.width,
+            height: vid.height,
+            logW: vid.width / fScale,
+            logH: vid.height / fScale,
             offX: -(VIDEO.field.x * kVid) / fScale,
             offY: -(VIDEO.field.y * kVid) / fScale,
             scorebugLayer: null,
@@ -738,43 +771,42 @@
           withPlaybackContext(session, () => draw());
           const directGpuVideo = Boolean(session.canvas?._webglComposite);
           if (!directGpuVideo) {
-            // Canvas 2D fallback: restore 1920x1152 field buffer and allocate 1920x1080 2D compositor canvas
+            // Canvas 2D fallback: restore scaled field buffer and allocate 2D compositor canvas
             session.videoFrame = null;
-            session.field = videoFieldSize();
+            session.field = videoFieldSize(vid.width);
             withPlaybackContext(session, () => draw());
-            out = document.createElement('canvas'); out.width = VIDEO.width; out.height = VIDEO.height;
+            out = document.createElement('canvas'); out.width = vid.width; out.height = vid.height;
             v = out.getContext('2d');
           }
+          const perfNow = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : 0);
+          let lastYield = perfNow(), lastYieldFrame = 0;
           let frames = 0, endFrame = Infinity;
           for (; frames < endFrame && !videoCancelled && !failure; frames++) {
             const f = frames;
             if (f) {
-              session.clock = f * 1000 / VIDEO.fps;
-              updatePopups(1 / VIDEO.fps, session.fx.popups);
+              session.clock = f * 1000 / vid.fps;
+              updatePopups(1 / vid.fps, session.fx.popups);
               withPlaybackContext(session, () => {
-                updateEffects(1 / VIDEO.fps, session.fx);
-                advanceReplay(1 / VIDEO.fps, session);
+                updateEffects(1 / vid.fps, session.fx);
+                advanceReplay(1 / vid.fps, session);
               });
-              if (directGpuVideo) {
-                const prevRev = session.scorebug?.rev || 0;
-                ensureScorebug(session);
-                if (session.scorebug.rev !== prevRev) withPlaybackContext(session, () => draw());
-              }
             }
             if (!directGpuVideo) composeFrame(v, session);
             if (session.paused && endFrame === Infinity) endFrame = f + holdFrames;
-            const frame = new VideoFrame(directGpuVideo ? session.canvas : out, { timestamp: Math.round(f * 1e6 / VIDEO.fps), duration: Math.round(1e6 / VIDEO.fps) });
-            encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * VIDEO.fps) === 0 }); frame.close();
+            const frame = new VideoFrame(directGpuVideo ? session.canvas : out, { timestamp: Math.round(f * 1e6 / vid.fps), duration: Math.round(1e6 / vid.fps) });
+            encoder.encode(frame, { keyFrame: f % (VIDEO.keySeconds * vid.fps) === 0 }); frame.close();
             pump();
-            while (encoder.encodeQueueSize > 4 && !videoCancelled && !failure) {
+            while (encoder.encodeQueueSize > 10 && !videoCancelled && !failure) {
               await new Promise(resolve => {
                 wakeQueue = resolve;
                 setTimeout(wake, 3000);
               });
             }
-            if (f % 15 === 0) {
+            const nowMs = perfNow();
+            if (f === 0 || nowMs - lastYield >= 40 || (nowMs === lastYield && f - lastYieldFrame >= 15)) {
+              lastYield = nowMs; lastYieldFrame = f;
               progress.value = .9 * f / Math.min(endFrame, frameBudget);
-              status.textContent = `Rendering ${formatClock(f / VIDEO.fps / P.DT)}…`;
+              status.textContent = `Rendering ${formatClock(f / vid.fps / P.DT)}…`;
               await yieldTask();
             }
           }
@@ -783,9 +815,9 @@
           if (!videoCancelled) {
             stopAudio();
             status.textContent = 'Mixing sound…';
-            const audio = await encodeAudio(await rendering, Math.round(frames / VIDEO.fps * rate));
+            const audio = await encodeAudio(await rendering, Math.round(frames / vid.fps * rate));
             if (!videoCancelled) {
-              blob = new Blob(mp4.write({ width: VIDEO.width, height: VIDEO.height, timescale: 90000, description, samples }, audio), { type: 'video/mp4' });
+              blob = new Blob(mp4.write({ width: vid.width, height: vid.height, timescale: 90000, description, samples }, audio), { type: 'video/mp4' });
               if (!audio) status.textContent = 'This browser cannot encode sound, so the video is silent.';
             }
           }
@@ -902,7 +934,7 @@
       const skaters = getSkaters() || [];
       await Promise.all([
         videoLogo(),
-        document.fonts?.load?.(`40px 'Uburoom Sans'`)?.catch(() => {}),
+        ensureDisplayFont(),
         ensureEntrySprites ? ensureEntrySprites(th.entries) : Promise.resolve(),
         ...skaters.map(node => node?.firstChild?.decode?.().catch(() => {}))
       ]);
