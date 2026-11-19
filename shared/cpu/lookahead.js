@@ -82,13 +82,15 @@ function runMultiTurnLookahead(ctx) {
         const defB = sNode.bodies[sOwn + defI];
         const defWarned = Boolean(sNode.fouls?.crease?.[side]) && M.inCrease(P, defB, side);
         const lockdown = base.slice();
-        if (!defB.stunned) {
+        if (!defB.stunned && !defB.carded) {
           const dSup = supKeyOf(defI);
-          if (!defWarned && Math.hypot(defB.x - sCone.x, defB.y - sCone.y) < 24 && Math.hypot(defB.vx || 0, defB.vy || 0) < 45) {
+          const sAllowPkt = canOccupyCrease(sNode, side, defI) || dSup === 'stalwart';
+          const sAnchor = Math.abs(sBall.x - sOwnGoal) < 520 ? goalPocketPoint(sBall.x, sBall.y, side, sAllowPkt) : sCone;
+          if (!defWarned && Math.hypot(defB.x - sAnchor.x, defB.y - sAnchor.y) < 24 && Math.hypot(defB.vx || 0, defB.vy || 0) < 45) {
             lockdown[defI] = { ...GUARD, superArm: Boolean(dSup === 'stalwart') };
           } else {
-            const armD = (Math.abs(sBall.x - sOwnGoal) < 340 && (dSup === 'stalwart' || dSup === 'colossus')) ? dSup : null;
-            const mvD = aim(defB, sCone.x, sCone.y, 105, armD, 0);
+            const armD = (Math.abs(sBall.x - sOwnGoal) < 400 && (dSup === 'stalwart' || dSup === 'colossus')) ? dSup : null;
+            const mvD = aim(defB, sAnchor.x, sAnchor.y, 0, armD, 0);
             if (armD) mvD.superArm = true;
             lockdown[defI] = mvD;
           }

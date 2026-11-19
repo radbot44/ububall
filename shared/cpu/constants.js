@@ -182,8 +182,12 @@ function fitsRole(job, move, body, state) {
 
 function roles(state, team) {
   const ball = state.bodies[6], body = i => state.bodies[team * 3 + i];
+  const active = [0, 1, 2].filter(i => !body(i).carded && !body(i).stunned);
+  const defPool = active.length ? active : [0, 1, 2];
   const nearest = (list, x, y) => list.reduce((a, b) => Math.hypot(body(b).x - x, body(b).y - y) < Math.hypot(body(a).x - x, body(a).y - y) ? b : a);
-  const defender = nearest([0, 1, 2], team ? RINK_RIGHT : RINK_LEFT, RINK_CY), rest = [0, 1, 2].filter(i => i !== defender);
+  const defender = nearest(defPool, team ? RINK_RIGHT : RINK_LEFT, RINK_CY);
+  const restActive = active.filter(i => i !== defender);
+  const rest = restActive.length ? restActive : [0, 1, 2].filter(i => i !== defender);
   const attacker = nearest(rest, ball.x, ball.y);
   return [0, 1, 2].map(i => i === defender ? 'defend' : i === attacker ? 'attack' : 'support');
 }

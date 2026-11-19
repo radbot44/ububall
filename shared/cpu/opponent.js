@@ -3,7 +3,7 @@
 const { HOLD, GUARD, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT, behindBall, getIntent , roles
 } = require('./constants.js');
 const { aim, strike } = require('./kinematics.js');
-const { shotConePoint, assessOpponentThreat, scanGoalAperture, stickyCarryMove } = require('./threat.js');
+const { shotConePoint, bestBankTargetY, assessOpponentThreat, scanGoalAperture, stickyCarryMove } = require('./threat.js');
 const { legacy } = require('./baseline.js');
 const { jointTeamPlays } = require('./candidates.js');
 const { planBasinKey } = require('./evaluate.js');
@@ -17,8 +17,12 @@ function buildOpponentResponses(state, team, classic, count) {
   const oppGoal = team ? RINK_RIGHT : RINK_LEFT;
   const oppOwnGoal = team ? RINK_LEFT : RINK_RIGHT;
   const ownBodies = [state.bodies[ownStart], state.bodies[ownStart + 1], state.bodies[ownStart + 2]];
+  const ownJobs = roles(state, team);
+  const ownDefIdx = ownJobs.indexOf('defend');
+  const ownGoalie = ownBodies[ownDefIdx >= 0 ? ownDefIdx : 0];
   const oppAp = scanGoalAperture(ball, oppGoal, ownBodies);
   const threatInfo = assessOpponentThreat(state, team, classic);
+  const bankInfo = threatInfo.shotDanger ? bestBankTargetY(ball, oppGoal, ownGoalie.y, ownBodies) : null;
 
   const guardOpponents = [
     state.bodies[oppStart].stunned ? HOLD : GUARD,
@@ -31,9 +35,14 @@ function buildOpponentResponses(state, team, classic, count) {
       const sb = state.bodies[oppStart + si];
       const sSup = !classic && sb.meter >= 100 && sb.equippedSuper ? sb.equippedSuper.key?.toLowerCase() : null;
       const armS = (sSup === 'cannonball' || sSup === 'sticky' || sSup === 'ghost') ? sSup : null;
-      const targetY = (sSup === 'cannonball' && oppAp.y === RINK_CY) ? (ownBodies[0].y >= RINK_CY ? RINK_CY - 30 : RINK_CY + 30) : oppAp.y;
-      const spinS = !oppAp.open && oppAp.blocker ? oppAp.blocker.side * 0.85 : 0;
-      const shotMv = strike(sb, ball, oppGoal, targetY, armS, spinS);
+      let shotMv;
+      if (!oppAp.open && bankInfo && bankInfo.clear && (!armS || armS === 'cannonball')) {
+        shotMv = strike(sb, ball, oppGoal, bankInfo.bankY, armS, 0, 2400);
+      } else {
+        const targetY = (sSup === 'cannonball' && oppAp.y === RINK_CY) ? (ownGoalie.y >= RINK_CY ? RINK_CY - 30 : RINK_CY + 30) : oppAp.y;
+        const spinS = !oppAp.open && oppAp.blocker ? oppAp.blocker.side * 0.85 : 0;
+        shotMv = strike(sb, ball, oppGoal, targetY, armS, spinS, 2400);
+      }
       shotMv.power = 1;
       if (armS) shotMv.superArm = true;
       const activeThreat2 = guardOpponents.slice();
@@ -41,6 +50,27 @@ function buildOpponentResponses(state, team, classic, count) {
       return [opponent, activeThreat2];
     }
     return [opponent, guardOpponents];
+  }
+
+  // On Hard+, keep opponents' other 2 skaters in GUARD while testing a bank / opposite-corner shot ONLY when truly on defense
+  // (so offensive setups in the opponent's half still test pure guardOpponents).
+  const guardOrBank = guardOpponents.slice();
+  if (threatInfo.shotDanger && threatInfo.oppStrikerIdx >= 0 && !threatInfo.incoming &&
+      threatInfo.distToOwnGoal < 580 && (threatInfo.oppFirstToBall || threatInfo.distToOwnGoal < 440)) {
+    const si = threatInfo.oppStrikerIdx;
+    const sb = state.bodies[oppStart + si];
+    const sSup = !classic && sb.meter >= 100 && sb.equippedSuper ? sb.equippedSuper.key?.toLowerCase() : null;
+    const armS = (sSup === 'cannonball' || sSup === 'ghost') ? sSup : null;
+    let altShot;
+    if (bankInfo && (!oppAp.open || (bankInfo.clear && Math.abs(ball.y - RINK_CY) > 48))) {
+      altShot = strike(sb, ball, oppGoal, bankInfo.bankY, armS, 0, 2400);
+    } else {
+      const oppAltY = oppAp.y !== RINK_CY ? RINK_CY : (ownGoalie.y >= RINK_CY ? GOAL_Y_TOP + 26 : GOAL_Y_BOT - 26);
+      altShot = strike(sb, ball, oppGoal, oppAltY, armS, 0, 2400);
+    }
+    altShot.power = 1;
+    if (armS) altShot.superArm = true;
+    guardOrBank[si] = altShot;
   }
 
   // 3rd opponent scenario (Hard+): open-aperture sniper + striker body-check blitz (keep 'defend' role strictly first!)
@@ -77,7 +107,7 @@ function buildOpponentResponses(state, team, classic, count) {
       blitz[k] = mv;
     }
   }
-  if (count === 3) return [opponent, guardOpponents, blitz];
+  if (count === 3) return [opponent, guardOrBank, blitz];
 
   // 4th opponent scenario (Insane & Ububall God):
   const oppCoverX = oppOwnGoal + (oppTeam ? -88 : 88);
@@ -101,8 +131,8 @@ function buildOpponentResponses(state, team, classic, count) {
         } else if (behindBall(b, ball, oppTeam) && !(oppJobs[k] === 'defend' && Math.abs(b.x - oppOwnGoal) < 165)) {
           if (threatInfo.shotDanger && k === threatInfo.oppStrikerIdx) {
             const altY = oppSuper === 'cannonball'
-              ? (ownBodies[0].y >= RINK_CY ? RINK_CY - 30 : RINK_CY + 30)
-              : (ownBodies[0].y >= RINK_CY ? GOAL_Y_TOP + 26 : GOAL_Y_BOT - 26);
+              ? (ownGoalie.y >= RINK_CY ? RINK_CY - 30 : RINK_CY + 30)
+              : (ownGoalie.y >= RINK_CY ? GOAL_Y_TOP + 26 : GOAL_Y_BOT - 26);
             const curveSpin = armAtk ? 0 : ((altY < RINK_CY ? 0.92 : -0.92) * (oppTeam ? -1 : 1));
             const mv = strike(b, ball, oppGoal, altY, armAtk ? oppSuper : null, curveSpin);
             mv.power = 1;
@@ -123,7 +153,7 @@ function buildOpponentResponses(state, team, classic, count) {
       }
     }
   }
-  if (count === 4) return [opponent, guardOpponents, blitz, attack];
+  if (count === 4) return [opponent, guardOrBank, blitz, attack];
 
   const ballR = ball.radius || 18;
   const bankY = ball.y < RINK_CY ? (2 * (RINK_TOP + ballR) - RINK_CY) : (2 * (RINK_BOTTOM - ballR) - RINK_CY);
@@ -132,7 +162,7 @@ function buildOpponentResponses(state, team, classic, count) {
     if (!b.stunned && oppJobs[k] === 'attack' && behindBall(b, ball, oppTeam)) return strike(b, ball, oppGoal, bankY, null, 0);
     return mv;
   });
-  return [opponent, guardOpponents, blitz, attack, bankResp];
+  return [opponent, guardOrBank, blitz, attack, bankResp];
 }
 
 function sanitizePredictedMove(body, mv, classic) {

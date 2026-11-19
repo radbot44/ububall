@@ -2,11 +2,11 @@
 'use strict';
 const { P, M, HOLD, GUARD, WOBBLE, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT, SHOT_DRIVE, segmentBlocked, behindBall, isPointBlank, tag, getIntent } = require('./constants.js');
 const { aim, strike } = require('./kinematics.js');
-const { shotConePoint, canOccupyCrease, goalPocketPoint, guardCoversSegment, assessOpponentThreat, scanGoalAperture, stickyCarryMove, rimAroundMove } = require('./threat.js');
+const { aimInTime, estShotArrival, shotConePoint, canOccupyCrease, goalPocketPoint, timedGoalieIntercept, guardCoversSegment, assessOpponentThreat, scanGoalAperture, stickyCarryMove, rimAroundMove } = require('./threat.js');
 
 function options(state, team, index, base) {
   const body = state.bodies[team * 3 + index], ball = state.bodies[6];
-  if (body.stunned) return [HOLD];
+  if (body.stunned || body.carded) return [HOLD];
   const goal = team ? RINK_LEFT : RINK_RIGHT, ownGoal = RINK_LEFT + RINK_RIGHT - goal;
   const isBehind = behindBall(body, ball, team);
   const pointBlank = isPointBlank(body, ball);
@@ -21,26 +21,101 @@ function options(state, team, index, base) {
   const pocket = goalPocketPoint(ball.x, ball.y, team, allowPocket);
   const threatInfo = assessOpponentThreat(state, team, M.rule(state.mode, 'classic'));
   const incoming = threatInfo.incoming;
-  const d0 = Math.abs(state.bodies[team * 3].x - ownGoal);
-  const d1 = Math.abs(state.bodies[team * 3 + 1].x - ownGoal);
-  const d2 = Math.abs(state.bodies[team * 3 + 2].x - ownGoal);
-  const isDefSkater = Math.abs(body.x - ownGoal) <= Math.min(d0, d1, d2) + 35;
+  let minDefD = Infinity;
+  for (let k = 0; k < 3; k++) {
+    const tb = state.bodies[team * 3 + k];
+    if (!tb.carded && !tb.stunned) {
+      const dk = Math.abs(tb.x - ownGoal);
+      if (dk < minDefD) minDefD = dk;
+    }
+  }
+  const isDefSkater = Math.abs(body.x - ownGoal) <= minDefD + 35;
   const creaseWarned = Boolean(state.fouls?.crease?.[team]) && M.inCrease(P, body, team);
+  const defPriority = isDefSkater && (threatInfo.shotDanger || Math.abs(ball.x - ownGoal) < 440);
+  const skipGoalieOffense = isDefSkater && !body.holding && threatInfo.shotDanger && (threatInfo.oppFirstToBall || dBall > 115);
 
   function generateMoves(superArmKey) {
     const arm = Boolean(superArmKey);
     const moves = [];
     const extraShots = [];
     const specialSupers = [];
+    const defMoves = [];
     if (creaseWarned) {
       const exitX = ownGoal + (team ? -102 : 102);
+      // Even when warned, keep GUARD available during live shotDanger so the CPU can prevent a -10,000 goal over a -400 card.
+      if (threatInfo.shotDanger) {
+        moves.push(tag({ ...GUARD, superArm: arm && superArmKey === 'stalwart' }, 'guard'));
+      }
       for (const exitY of [RINK_CY, RINK_CY - 55, RINK_CY + 55]) {
         moves.push(tag({ ...aim(body, exitX, exitY, 35, superArmKey, 0), superArm: arm }, 'cover'));
       }
-      if (arm && superArmKey === 'stalwart') moves.push(tag({ ...GUARD, superArm: true }, 'guard'));
+      if (!threatInfo.shotDanger && arm && superArmKey === 'stalwart') {
+        moves.push(tag({ ...GUARD, superArm: true }, 'guard'));
+      }
     } else {
       moves.push(tag({ ...HOLD, superArm: false }, 'hold'));
       moves.push(tag({ ...GUARD, superArm: arm && superArmKey === 'stalwart' }, 'guard'));
+    }
+
+    // Build goalie / defensive positioning & save candidates first so defending skaters always test saves early.
+    const canPocketNow = allowPocket || (arm && superArmKey === 'stalwart');
+    if (incoming && incoming.crosses) {
+      const tReach = Math.hypot(body.x - incoming.lineX, body.y - incoming.lineY) / Math.max(180, P.launchSpeed(body));
+      if (tReach <= incoming.time + 0.30 || isDefSkater) {
+        const timedMv = timedGoalieIntercept(body, ball, incoming, team, canPocketNow || !creaseWarned, superArmKey);
+        defMoves.push(tag({ ...timedMv, superArm: arm }, 'cover'));
+        const lineX = (canPocketNow || threatInfo.shotDanger) ? incoming.lineX : cone.x;
+        const lineDist = Math.hypot(body.x - lineX, body.y - incoming.lineY);
+        const lineDrive = lineDist > 52 ? 160 : 0;
+        defMoves.push(tag({ ...aim(body, lineX, incoming.lineY, lineDrive, superArmKey, 0), superArm: arm }, 'cover'));
+        defMoves.push(tag({ ...aim(body, incoming.midX, incoming.midY, 90, superArmKey, 0), superArm: arm }, 'cover'));
+      }
+    }
+
+    if (isDefSkater && (threatInfo.shotDanger || defPriority)) {
+      const saveX = (canPocketNow || (creaseWarned && threatInfo.shotDanger)) ? (ownGoal + (team ? -44 : 44)) : cone.x;
+      if (canPocketNow || (creaseWarned && threatInfo.shotDanger)) {
+        const pkt = goalPocketPoint(ball.x, ball.y, team, true);
+        // Constant-glide (~120 px) pocket slide: crisp (~0.28s) on lateral shifts without slamming into the back net on retreats.
+        defMoves.push(tag({ ...aim(body, pkt.x, pkt.y, threatInfo.shotDanger ? 120 : 0, superArmKey, 0), superArm: arm }, 'cover'));
+        if (threatInfo.shotDanger) {
+          // Centered deep crease anchor (deduplicated against pkt): seals wall-bank angles & dual-corner snipes.
+          if (Math.abs(pkt.y - RINK_CY) > 8) {
+            defMoves.push(tag({ ...aim(body, saveX, RINK_CY, 120, superArmKey, 0), superArm: arm }, 'cover'));
+          }
+          // Bank-corridor / near-side post seal placed early so Medium+ sweeps & keepDef always evaluate it.
+          if (Math.abs(ball.y - RINK_CY) > 45) {
+            const bankSealY = ball.y < RINK_CY ? GOAL_Y_TOP + 22 : GOAL_Y_BOT - 22;
+            defMoves.push(tag({ ...aim(body, saveX, bankSealY, 95, superArmKey, 0), superArm: arm }, 'cover'));
+          }
+        }
+        if (Math.hypot(body.x - saveX, body.y - RINK_CY) > 22) {
+          defMoves.push(tag({ ...aim(body, saveX, RINK_CY, 0, superArmKey, 0), superArm: arm }, 'cover'));
+        }
+      }
+      defMoves.push(tag({ ...aim(body, cone.x, cone.y, threatInfo.shotDanger ? 120 : 0, superArmKey, 0), superArm: arm }, 'cover'));
+      if (threatInfo.shotDanger) {
+        const farCornerY = body.y >= RINK_CY ? GOAL_Y_TOP + 26 : GOAL_Y_BOT - 26;
+        const farDist = Math.hypot(body.x - saveX, body.y - farCornerY);
+        defMoves.push(tag({ ...aim(body, saveX, farCornerY, 150, superArmKey, 0), superArm: arm }, 'cover'));
+        if (farDist > 58) {
+          const farDive = aim(body, saveX, farCornerY, 260, superArmKey, 0);
+          farDive.power = Math.max(farDive.power, 0.90);
+          defMoves.push(tag({ ...farDive, superArm: arm }, 'cover'));
+        }
+        // Slide-through save that exits a warned crease while crossing the shot line.
+        if (creaseWarned) {
+          const exitX = ownGoal + (team ? -98 : 98);
+          const slideY = Math.max(GOAL_Y_TOP + 16, Math.min(GOAL_Y_BOT - 16, RINK_CY + (ball.y - RINK_CY) * 0.25));
+          defMoves.push(tag({ ...aim(body, exitX, slideY, 90, superArmKey, 0), superArm: arm }, 'cover'));
+        }
+      }
+    } else {
+      defMoves.push(tag({ ...aim(body, cone.x, cone.y, 0, superArmKey, 0), superArm: arm }, 'cover'));
+    }
+
+    if (defPriority) {
+      for (let di = 0; di < defMoves.length; di++) moves.push(defMoves[di]);
     }
 
     let carrier = null, bestEligible = null, bestEDist = Infinity;
@@ -111,7 +186,7 @@ function options(state, team, index, base) {
       moves.push(tag(stickyCarryMove(body, ball, goal, aperture.y, superArmKey, 0), 'carry'));
       moves.push(tag(stickyCarryMove(body, ball, goal, RINK_CY - 48, superArmKey, 0.75), 'carry'));
       moves.push(tag(stickyCarryMove(body, ball, goal, RINK_CY + 48, superArmKey, -0.75), 'carry'));
-    } else if (isBehind && !(isDefSkater && threatInfo.shotDanger && dBall > 135 && Math.abs(ball.x - goal) > 520)) {
+    } else if (isBehind && !skipGoalieOffense) {
       let oppGoalie = opponents[0], bestGoalieD = Math.abs(opponents[0].x - goal);
       for (let oi = 1; oi < 3; oi++) {
         const gd = Math.abs(opponents[oi].x - goal);
@@ -158,6 +233,13 @@ function options(state, team, index, base) {
       wideTop.power = 1;
       const wideBot = strike(body, ball, goal, GOAL_Y_BOT - 15, superArmKey, benderSpin(1), SHOT_DRIVE);
       wideBot.power = 1;
+      if (!aperture.open && aperture.blocker && !onWing && (body.curveMult ?? 1) >= 1.32 && (body.maxSpin ?? 20) >= 25) {
+        const openSideSign = aperture.blocker.body.y >= RINK_CY ? -1 : 1;
+        const widePostY = openSideSign < 0 ? GOAL_Y_TOP - 80 : GOAL_Y_BOT + 80;
+        const wideBend = strike(body, ball, goal, widePostY, superArmKey, -openSideSign * (team ? 1 : -1), SHOT_DRIVE);
+        wideBend.power = 1;
+        moves.push(tag({ ...wideBend, superArm: arm }, 'shoot'));
+      }
       if (goalieY >= RINK_CY) {
         moves.push(tag({ ...topBender, superArm: arm }, 'shoot'));
         if (!onWing) moves.push(tag({ ...wideTop, superArm: arm }, 'shoot'));
@@ -194,7 +276,7 @@ function options(state, team, index, base) {
         extraShots.push(tag({ ...altFar, superArm: arm }, 'shoot'));
       }
 
-      // Glancing shoulder fireball overpower against un-guarded blockers & extra-wide benders when screened
+      // Glancing shoulder fireball overpower against un-guarded blockers when screened
       if (!aperture.open && aperture.blocker) {
         const blkBody = aperture.blocker.body;
         const canOverpower = (arm && superArmKey === 'cannonball') || (body.power || 1) >= 1.16 || Boolean(ball.onFire);
@@ -206,11 +288,6 @@ function options(state, team, index, base) {
             moves.push(tag({ ...ovShot, superArm: arm }, 'shoot'));
           }
         }
-        const openSideSign = blkBody.y >= RINK_CY ? -1 : 1;
-        const widePostY = openSideSign < 0 ? GOAL_Y_TOP + 18 : GOAL_Y_BOT - 18;
-        const wideBend = strike(body, ball, goal, widePostY, superArmKey, openSideSign * (team ? 1 : -1), SHOT_DRIVE);
-        wideBend.power = 1;
-        extraShots.push(tag({ ...wideBend, superArm: arm }, 'shoot'));
       }
 
       // Secondary center-bank & moderate-spin changeups in extraShots
@@ -224,7 +301,7 @@ function options(state, team, index, base) {
         extraShots.push(tag({ ...midBend, superArm: arm }, 'shoot'));
       }
       extraShots.push(tag({ ...aim(body, ball.x, ball.y, 150, superArmKey, 0), superArm: arm }, 'chase'));
-    } else {
+    } else if (!skipGoalieOffense) {
       const backX = Math.max(RINK_LEFT + 40, Math.min(RINK_RIGHT - 40, ball.x + (team ? 68 : -68)));
       const dyBall = body.y - ball.y;
       const sides = Math.abs(dyBall) > 28 ? [dyBall < 0 ? -55 : 55] : [-54, 54];
@@ -236,26 +313,13 @@ function options(state, team, index, base) {
       }
     }
 
-    if (incoming && incoming.crosses && !creaseWarned) {
-      const tReach = Math.hypot(body.x - incoming.lineX, body.y - incoming.lineY) / Math.max(180, P.launchSpeed(body));
-      if (tReach <= incoming.time + 0.28 || isDefSkater) {
-        const lineDrive = Math.hypot(body.x - incoming.lineX, body.y - incoming.lineY) > 18 ? 260 : 0;
-        moves.unshift(tag({ ...aim(body, incoming.lineX, incoming.lineY, lineDrive, superArmKey, 0), superArm: arm }, 'cover'));
-        moves.push(tag({ ...aim(body, incoming.midX, incoming.midY, 210, superArmKey, 0), superArm: arm }, 'cover'));
+    if (!defPriority) {
+      if (incoming && incoming.crosses && defMoves.length) {
+        moves.unshift(defMoves[0]);
+        for (let di = 1; di < defMoves.length; di++) moves.push(defMoves[di]);
+      } else {
+        for (let di = 0; di < defMoves.length; di++) moves.push(defMoves[di]);
       }
-    }
-
-    if (threatInfo.shotDanger && !creaseWarned && isDefSkater && (allowPocket || (arm && superArmKey === 'stalwart'))) {
-      moves.push(tag({ ...aim(body, pocket.x, pocket.y, 140, superArmKey, 0), superArm: arm }, 'cover'));
-    }
-    moves.push(tag({ ...aim(body, cone.x, cone.y, 0, superArmKey, 0), superArm: arm }, 'cover'));
-
-    if (threatInfo.shotDanger && !creaseWarned && isDefSkater) {
-      const saveX = (allowPocket || (arm && superArmKey === 'stalwart')) ? pocket.x : cone.x;
-      const farCornerY = body.y >= RINK_CY ? GOAL_Y_TOP + 26 : GOAL_Y_BOT - 26;
-      const farDive = aim(body, saveX, farCornerY, 320, superArmKey, 0);
-      farDive.power = Math.max(farDive.power, 0.92);
-      moves.push(tag({ ...farDive, superArm: arm }, 'cover'));
     }
 
     if (threat) {
@@ -285,10 +349,10 @@ function options(state, team, index, base) {
   }
 
   const unarmedMoves = generateMoves(null);
-  const boostBase = !creaseWarned && isBehind && !body.holding && aperture.open && Math.abs(ball.x - goal) < 560 && base && !base.guard && base.power > 0.35
+  const boostBase = !creaseWarned && isBehind && !skipGoalieOffense && !body.holding && aperture.open && Math.abs(ball.x - goal) < 560 && base && !base.guard && base.power > 0.35
     ? { ...base, power: Math.max(base.power, 0.96) }
     : base;
-  const cleanBase = creaseWarned && base && (!base.power || base.guard) ? unarmedMoves[0] : boostBase;
+  const cleanBase = creaseWarned && !threatInfo.shotDanger && base && (!base.power || base.guard) ? unarmedMoves[0] : boostBase;
   if (!hasSuper) {
     return [unarmedMoves[0], unarmedMoves[1], cleanBase, ...unarmedMoves.slice(2)];
   }
@@ -352,12 +416,12 @@ function jointTeamPlays(state, team, currentBest, jobs) {
   const threatInfo = assessOpponentThreat(state, team, classic);
   const defAllowPocket = threatInfo.shotDanger && canOccupyCrease(state, team, defIdx);
   const defPocket = goalPocketPoint(ball.x, ball.y, team, defAllowPocket);
-  const smartCover = defBody.stunned ? HOLD
-    : (state.fouls?.crease?.[team] && M.inCrease(P, defBody, team))
+  const smartCover = (defBody.stunned || defBody.carded) ? HOLD
+    : (state.fouls?.crease?.[team] && M.inCrease(P, defBody, team) && !threatInfo.shotDanger)
       ? tag(aim(defBody, ownGoal + (team ? -102 : 102), defBody.y < RINK_CY ? RINK_CY - 55 : RINK_CY + 55, 35, null, 0), 'cover')
       : (defAllowPocket && Math.hypot(defBody.x - defPocket.x, defBody.y - defPocket.y) < 18 && Math.hypot(defBody.vx || 0, defBody.vy || 0) < 35)
         ? tag({ ...GUARD, superArm: false }, 'guard')
-        : tag(aim(defBody, defPocket.x, defPocket.y, threatInfo.shotDanger ? 95 : 0, null, 0), 'cover');
+        : tag(aim(defBody, defPocket.x, defPocket.y, 0, null, 0), 'cover');
 
   // 1. Active Sticky Carrier Escort Drive
   for (let cIdx = 0; cIdx < 3; cIdx++) {
@@ -418,7 +482,7 @@ function jointTeamPlays(state, team, currentBest, jobs) {
       const saverAllowPocket = useDeepPocket && (canOccupyCrease(state, team, saverIdx) || saverS === 'stalwart');
       const pocketTarget = incoming
         ? { x: saverAllowPocket ? incoming.lineX : cone.x, y: incoming.lineY }
-        : (useDeepPocket ? goalPocketPoint(ball.x, oppAperture.y, team, saverAllowPocket) : refGoalPt);
+        : (useDeepPocket ? goalPocketPoint(ball.x, ball.y, team, saverAllowPocket) : refGoalPt);
 
       let disruptIdx = -1, bestDisD = Infinity;
       for (let i = 0; i < 3; i++) {
@@ -428,10 +492,10 @@ function jointTeamPlays(state, team, currentBest, jobs) {
         if (d < bestDisD) { bestDisD = d; disruptIdx = i; }
       }
 
-      const closeGoalThreat = Math.abs(ball.x - ownGoal) < 380 || Boolean(oppCarrier || incoming || threatInfo.fireballThreat);
+      const closeGoalThreat = Math.abs(ball.x - ownGoal) < 420 || Boolean(oppCarrier || incoming || threatInfo.fireballThreat);
       const saverWarned = Boolean(state.fouls?.crease?.[team]) && M.inCrease(P, saverB, team);
       const ballR = ball.radius || 18;
-      const coversShotInGuard = !saverWarned && Math.hypot(saverB.vx || 0, saverB.vy || 0) < 55 && (
+      const coversShotInGuard = (!saverWarned || threatInfo.shotDanger) && Math.hypot(saverB.vx || 0, saverB.vy || 0) < 55 && (
         (Math.hypot(saverB.x - pocketTarget.x, saverB.y - pocketTarget.y) < 22) ||
         (Math.hypot(saverB.x - cone.x, saverB.y - cone.y) < 22) ||
         (threatInfo.fireballThreat && (
@@ -441,14 +505,16 @@ function jointTeamPlays(state, team, currentBest, jobs) {
       );
 
       let saveMv;
-      if (coversShotInGuard) {
+      if (incoming && incoming.crosses) {
+        const armSave = closeGoalThreat && (saverS === 'stalwart' || saverS === 'colossus') ? saverS : null;
+        const rawInc = timedGoalieIntercept(saverB, ball, incoming, team, saverAllowPocket || threatInfo.shotDanger, armSave);
+        if (armSave) rawInc.superArm = true;
+        saveMv = tag(rawInc, 'cover');
+      } else if (coversShotInGuard) {
         saveMv = tag({ ...GUARD, superArm: Boolean(closeGoalThreat && saverS === 'stalwart') }, 'guard');
       } else {
         const armSave = closeGoalThreat && (saverS === 'stalwart' || saverS === 'colossus') ? saverS : null;
-        const distToSave = Math.hypot(saverB.x - pocketTarget.x, saverB.y - pocketTarget.y);
-        const saveDrive = useDeepPocket ? (distToSave > 32 ? 260 : 120) : 135;
-        const rawSave = aim(saverB, pocketTarget.x, pocketTarget.y, saveDrive, armSave, 0);
-        if (distToSave > 55 && threatInfo.shotDanger) rawSave.power = Math.max(rawSave.power, 0.94);
+        const rawSave = aim(saverB, pocketTarget.x, pocketTarget.y, threatInfo.shotDanger ? 120 : 0, armSave, 0);
         if (armSave) rawSave.superArm = true;
         saveMv = tag(rawSave, 'cover');
       }

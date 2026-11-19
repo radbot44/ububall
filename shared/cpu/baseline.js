@@ -25,7 +25,7 @@ function cpuPlans(bodies, random = Math.random, scores = [0, 0]) {
   const strikeScore = i => {
     const b = players[i], { agg, surge } = traits[i];
     const d = Math.hypot(b.x - ball.x, b.y - ball.y);
-    return -d + (b.x >= ball.x - 10 ? 75 : -45) + (agg - 0.5) * 110 + Math.max(0, surge) * 35 - (b.stunned ? 10000 : 0);
+    return -d + (b.x >= ball.x - 10 ? 75 : -45) + (agg - 0.5) * 110 + Math.max(0, surge) * 35 - ((b.stunned || b.carded) ? 10000 : 0);
   };
   const s0 = strikeScore(0), s1 = strikeScore(1), s2 = strikeScore(2);
   const strikerIdx = s1 > s0 ? (s2 > s1 ? 2 : 1) : (s2 > s0 ? 2 : 0);
@@ -36,7 +36,7 @@ function cpuPlans(bodies, random = Math.random, scores = [0, 0]) {
     const b = players[i], { agg, surge } = traits[i];
     const sKey = b.equippedSuper?.key || b.superKey;
     const dGoal = Math.hypot(b.x - 850, b.y - RINK_CY);
-    return (1 - agg) * 170 - dGoal * 0.45 - surge * 40 + (sKey === 'stalwart' ? 60 : 0) + (b.slot === 0 ? 8 : 0);
+    return (1 - agg) * 170 - dGoal * 0.45 - surge * 40 + (sKey === 'stalwart' ? 60 : 0) + (b.slot === 0 ? 8 : 0) - ((b.stunned || b.carded) ? 10000 : 0);
   };
   const anchorIdx = anchorScore(r0) >= anchorScore(r1) ? r0 : r1;
   const wingIdx = anchorIdx === r0 ? r1 : r0;
@@ -126,30 +126,45 @@ function cpuPlans(bodies, random = Math.random, scores = [0, 0]) {
         }
       }
     } else if (idx === anchorIdx) {
-      const anchorX = Math.max(700, Math.min(875, 855 - agg * 65 - Math.max(0, surge) * 95 + Math.max(0, -surge) * 18));
-      const ySpan = 55 + agg * 25;
-      const anchorY = Math.max(RINK_CY - ySpan, Math.min(RINK_CY + ySpan, ball.y));
+      const baseX = Math.max(760, Math.min(875, 855 - agg * 55 - Math.max(0, surge) * 65 + Math.max(0, -surge) * 18));
+      const anchorDist = RINK_RIGHT - baseX;
+      const spanX = Math.max(anchorDist, Math.abs(RINK_RIGHT - ball.x));
+      const tLine = Math.min(0.75, (anchorDist / spanX) * 1.1);
+      const anchorY = Math.max(RINK_CY - 40, Math.min(RINK_CY + 40, RINK_CY + (ball.y - RINK_CY) * tLine));
+
+      let minOppBallT = Infinity;
+      for (let hi = 0; hi < 3; hi++) {
+        const hb = humans[hi];
+        if (hb.carded || hb.stunned) continue;
+        const hd = Math.max(0, Math.hypot(hb.x - ball.x, hb.y - ball.y) - contactRadius(hb) - (ball.radius || 18));
+        const ht = hd / Math.max(200, P.launchSpeed(hb));
+        if (ht < minOppBallT) minOppBallT = ht;
+      }
+      const ownAnchorT = Math.max(0, dBall - reachR - (ball.radius || 18)) / Math.max(200, P.launchSpeed(b));
 
       const inc = traceIncomingShot(ball, 1);
       if (inc && inc.crosses) {
         tx = Math.min(914, RINK_RIGHT - 32);
         ty = Math.max(GOAL_Y_TOP + 20, Math.min(GOAL_Y_BOT - 20, inc.y));
-        extraDrive = Math.hypot(tx - b.x, ty - b.y) > 22 ? 220 : 0;
-      } else if (ball.x > 740 && b.x >= ball.x - 8 && dBall < 170 && (agg > 0.25 || ball.x > 810)) {
+        const incDist = Math.hypot(tx - b.x, ty - b.y);
+        extraDrive = incDist > 42 ? 130 : 0;
+      } else if (ball.x > 740 && b.x >= ball.x - 8 && dBall < 165 && ownAnchorT + 0.07 < minOppBallT && (agg > 0.25 || ball.x > 820)) {
         const clearY = ball.y < RINK_CY ? 140 : 460;
         const bdx = 200 - ball.x, bdy = clearY - ball.y, bd = Math.hypot(bdx, bdy) || 1;
         tx = ball.x - (bdx / bd) * contactDist;
         ty = ball.y - (bdy / bd) * contactDist;
         extraDrive = 190;
+      } else if (b.guarding && b.x >= 770 && Math.abs(b.y - anchorY) < 28) {
+        tx = b.x; ty = b.y;
       } else {
-        tx = anchorX; ty = anchorY;
+        tx = baseX; ty = anchorY;
       }
 
       if (canSuper) {
         const inCrease = b.x >= 770 && b.y >= 220 && b.y <= 380;
-        const threat = ball.x > 480 || pressure >= 0.45;
+        const threat = ball.x > 460 || pressure >= 0.45;
         if (sKey === 'stalwart' && inCrease && threat && Math.hypot(tx - b.x, ty - b.y) < 45) superArm = true;
-        else if (sKey === 'colossus' && (inCrease || ball.x > 580)) superArm = true;
+        else if (sKey === 'colossus' && (inCrease || ball.x > 560)) superArm = true;
         else if ((sKey === 'shockwave' || sKey === 'sticky') && ball.x > 680 && dBall < 220) superArm = true;
         else if (sKey === 'magnet' && ball.x > 650 && dBall < 190) superArm = true;
       }
@@ -179,7 +194,8 @@ function cpuPlans(bodies, random = Math.random, scores = [0, 0]) {
     const dx = tx - b.x, dy = ty - b.y, distance = Math.hypot(dx, dy);
     const { maxV, effFriction } = skaterDrive(b, superArm ? sKey : null, spin);
     let angle = Math.atan2(dy, dx);
-    const power = distance < 10 ? 0 : Math.min(1, Math.sqrt(2 * effFriction * Math.max(0, distance + extraDrive)) / maxV);
+    const stopThresh = idx === anchorIdx && extraDrive === 0 ? 18 : 10;
+    const power = distance < stopThresh ? 0 : Math.min(1, Math.sqrt(2 * effFriction * Math.max(0, distance + extraDrive)) / maxV);
 
     if (Math.abs(spin) > 0.01 && power > 0.05) {
       const omega0 = spin * (b.maxSpin || P.BASE_MAX_SPIN || 20);

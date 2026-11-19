@@ -2,7 +2,7 @@
 'use strict';
 const { P, M, WEIGHTS, SUPER_RESERVE_BONUS, COMPLEX, TWO_PI, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, RINK_SPAN, GOAL_Y_TOP, GOAL_Y_BOT, SKATER_CURVE, SPIN_DECAY, AIR_DRAG, WALL_RESTITUTION, contactRadius, creativityOf } = require('./constants.js');
 const { strike } = require('./kinematics.js');
-const { GOAL_APERTURE_YS, shotConePoint, goalPocketPoint } = require('./threat.js');
+const { GOAL_APERTURE_YS, shotConePoint, goalPocketPoint, guardReachRadius } = require('./threat.js');
 
 const slideX = new Float64Array(6), slideY = new Float64Array(6);
 const FEATURE_NAMES = Object.freeze(['progress', 'access', 'cover', 'chance', 'meter', 'stun', 'daze']);
@@ -74,8 +74,9 @@ function coneCover(bodies, t, bx, by, fouls = null) {
   return best;
 }
 
-// Team t's next-turn shooting chance: open share of the goal mouth x angle it subtends x striker readiness.
-function shotChance(bodies, t, bx, by, ballR, strikeDist) {
+// Team t's next-turn shooting chance: open share of the goal mouth x angle it subtends x striker readiness,
+// with moderate amplification when a wide-open net (>= 60% unobstructed) is left to a close uncontested striker.
+function shotChance(bodies, t, bx, by, ballR, strikeDist, oppStrikeDist = FEATURE_CAP) {
   if (strikeDist >= FEATURE_CAP) return 0;
   const gx = t ? RINK_LEFT : RINK_RIGHT, adx = Math.max(10, t ? bx - gx : gx - bx);
   const angle = Math.atan2(GOAL_Y_BOT - by, adx) - Math.atan2(GOAL_Y_TOP - by, adx);
@@ -88,12 +89,20 @@ function shotChance(bodies, t, bx, by, ballR, strikeDist) {
       if (b.carded) continue;
       const s = ((slideX[i] - bx) * dx + (slideY[i] - by) * dy) / len2;
       if (s <= 0.05 || s >= 1) continue;
-      const clr = Math.hypot(slideX[i] - (bx + s * dx), slideY[i] - (by + s * dy)) - ((b.radius || 25) + ballR);
+      const blkR = b.guarding ? guardReachRadius(b) : contactRadius(b);
+      const clr = Math.hypot(slideX[i] - (bx + s * dx), slideY[i] - (by + s * dy)) - (blkR + ballR);
       if (clr < minClear) minClear = clr;
     }
     open += minClear <= 0 ? 0 : minClear >= 20 ? 1 : minClear / 20;
   }
-  return (open / GOAL_APERTURE_YS.length) * angle * Math.exp(-strikeDist / 250);
+  const openFrac = open / GOAL_APERTURE_YS.length;
+  const baseChance = openFrac * angle * Math.exp(-strikeDist / 250);
+  if (openFrac < 0.60 || strikeDist >= 260) return baseChance;
+  const uncontested = strikeDist < oppStrikeDist
+    ? (1.0 + Math.min(0.45, (oppStrikeDist - strikeDist) / 240))
+    : 0.60;
+  const openDanger = (openFrac - 0.40) * openFrac * Math.min(0.90, angle + 0.15) * Math.exp(-strikeDist / 220) * uncontested * 0.50;
+  return baseChance + openDanger;
 }
 
 function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scorer = null, teamTouches = false, tmw = 0.5, partial = false, isPulse = false) {
@@ -256,7 +265,8 @@ function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scor
           for (let di = defStart; di < defStart + 3; di++) {
             const db = bodies[di];
             if (db.carded) continue;
-            if (Math.hypot(slideX[di] - goalLineX, slideY[di] - cy) <= contactRadius(db) + ballR + 20) { nearBlocker = true; break; }
+            const blkR = db.guarding ? guardReachRadius(db) : contactRadius(db);
+            if (Math.hypot(slideX[di] - goalLineX, slideY[di] - cy) <= blkR + ballR + 16) { nearBlocker = true; break; }
           }
           if (!nearBlocker) impendingGoalBonus = sign * weights.goal * (0.76 + 0.12 * freshness);
         } else {
@@ -265,8 +275,13 @@ function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scor
           for (let di = defStart; di < defStart + 3; di++) {
             const db = bodies[di];
             if (unavailable(db)) continue;
-            const distToLine = Math.max(0, Math.hypot(db.x - goalLineX, db.y - cy) - contactRadius(db) - ballR);
-            const maxCover = Math.max(P.launchSpeed(db) * 1.18, Math.hypot(db.vx || 0, db.vy || 0)) * (crossTime + 0.04);
+            const ddx = goalLineX - db.x, ddy = cy - db.y;
+            const dRaw = Math.hypot(ddx, ddy);
+            const blkR = db.guarding ? guardReachRadius(db) : contactRadius(db);
+            const distToLine = Math.max(0, dRaw - blkR - ballR);
+            const vToward = dRaw > 1 ? ((db.vx || 0) * ddx + (db.vy || 0) * ddy) / dRaw : 0;
+            const effSpeed = Math.max(P.launchSpeed(db) * 0.92, vToward);
+            const maxCover = effSpeed * Math.max(0, crossTime - 0.02);
             if (distToLine <= maxCover) { saveable = true; break; }
           }
           if (!saveable) impendingGoalBonus = sign * weights.goal * (0.70 + 0.12 * freshness);
@@ -327,7 +342,7 @@ function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scor
   FEATURES[0] = dir * (bx + coastDx - RINK_CX);
   FEATURES[1] = strikeOther - strikeOwn;
   FEATURES[2] = coneCover(bodies, 1 - team, pbx, pby, fouls) - coneCover(bodies, team, pbx, pby, fouls);
-  FEATURES[3] = shotChance(bodies, team, pbx, pby, ballR, strikeOwn) - shotChance(bodies, 1 - team, pbx, pby, ballR, strikeOther);
+  FEATURES[3] = shotChance(bodies, team, pbx, pby, ballR, strikeOwn, strikeOther) - shotChance(bodies, 1 - team, pbx, pby, ballR, strikeOther, strikeOwn);
   FEATURES[4] = mDiff;
   FEATURES[5] = sDiff;
   FEATURES[6] = dDiff / DAZE_M;

@@ -747,3 +747,94 @@ test('CPU shooting upgrades: full-force fireballs, point-blank Spin Strike, shou
   assert.equal(wingRes.replay.goal, 1, 'Medium CPU converts tight-wing angle shot past near-post Guard');
   assert.ok(wingDec.plans[0].power >= 0.96, 'tight-wing shot launches at full power');
 });
+
+test('CPU goaltending defense: wall-bank awareness, carded-defender handoff, warned-crease saves and crease discipline', () => {
+  const mkDef = (overrides = {}) => {
+    const bodies = P.kickoff();
+    const stats = Array.from({ length: 6 }, (_, i) => ({
+      impulse: 155, traction: 140, spin: 150, curve: 150,
+      size: 127, mass: 127, bounciness: 127, grip: 140,
+      power: 170, reach: 140, strength: 140, stability: 140,
+      efficiency: 127, synergy: 140, chemistry: 140,
+      ...(overrides[i] || {})
+    }));
+    for (let i = 0; i < 6; i++) {
+      M.applyStats(P, bodies[i], stats[i], 'standard');
+      bodies[i].personality = { aggression: 32, creativity: 32, teamwork: 32, clutch: 32 };
+      bodies[i].meter = 0;
+      bodies[i].equippedSuper = null;
+      bodies[i].vx = 0; bodies[i].vy = 0; bodies[i].omega = 0;
+      bodies[i].stunned = false; bodies[i].carded = false; bodies[i].guarding = false;
+      P.syncEffectiveStats(bodies[i]);
+    }
+    return { version: M.VERSION, mode: 'standard', bodies, stats, scores: [0, 0], turn: 2, roundTurns: 2, phase: 'plan', winner: null, fouls: M.newFouls() };
+  };
+
+  // 1. Midfield top-wall bank shot: Hard/Insane/God adjust into the crease pocket & save the verified bank shot
+  const bankSt = mkDef({ 0: { power: 235, impulse: 220 } });
+  Object.assign(bankSt.bodies[0], { x: 455, y: 255 });
+  Object.assign(bankSt.bodies[1], { x: 260, y: 420 });
+  Object.assign(bankSt.bodies[2], { x: 150, y: 300 });
+  Object.assign(bankSt.bodies[3], { x: 878, y: 345 });
+  Object.assign(bankSt.bodies[4], { x: 660, y: 340 });
+  Object.assign(bankSt.bodies[5], { x: 450, y: 460 });
+  Object.assign(bankSt.bodies[6], { x: 520, y: 210 });
+  let verifiedBank = null;
+  for (let gy = 238; gy <= 362; gy += 6) {
+    const mv = { ...C.strike(bankSt.bodies[0], bankSt.bodies[6], 940, 2 * (60 + 18) - gy, null, 0, 2400), power: 1 };
+    const r = M.resolveTurn(P, bankSt, [mv, C.HOLD, C.HOLD, C.HOLD, C.HOLD, C.HOLD], { effects: false });
+    if (r.replay.goal === 0 && (r.replay.label === 'BANK SHOT!' || r.replay.label === 'FIREBALL!')) { verifiedBank = mv; break; }
+  }
+  assert.ok(verifiedBank, 'constructed verified midfield top-wall bank shot');
+  for (const level of ['hard', 'insane', 'god']) {
+    const dec = C.plan(bankSt, 1, { level, seed: 7 });
+    const res = M.resolveTurn(P, bankSt, [verifiedBank, C.HOLD, C.HOLD, ...dec.plans], { effects: false });
+    assert.notEqual(res.replay.goal, 0, `${level} saves midfield top-wall bank shot`);
+  }
+
+  // 2. Carded skater at kickoff spot hands defender role to live teammate instead of leaving net empty
+  const cardSt = mkDef();
+  Object.assign(cardSt.bodies[0], { x: 580, y: 300 });
+  Object.assign(cardSt.bodies[1], { x: 250, y: 150 });
+  Object.assign(cardSt.bodies[2], { x: 140, y: 300 });
+  Object.assign(cardSt.bodies[3], { x: 820, y: 300, carded: true });
+  Object.assign(cardSt.bodies[4], { x: 795, y: 352 });
+  Object.assign(cardSt.bodies[5], { x: 520, y: 150 });
+  Object.assign(cardSt.bodies[6], { x: 645, y: 300 });
+  const centerShot = { ...C.strike(cardSt.bodies[0], cardSt.bodies[6], 940, 300, null, 0, 2400), power: 1 };
+  assert.equal(M.resolveTurn(P, cardSt, [centerShot, C.HOLD, C.HOLD, C.HOLD, C.HOLD, C.HOLD], { effects: false }).replay.goal, 0);
+  const cardDec = C.plan(cardSt, 1, { level: 'medium', seed: 7 });
+  const cardRes = M.resolveTurn(P, cardSt, [centerShot, C.HOLD, C.HOLD, ...cardDec.plans], { effects: false });
+  assert.notEqual(cardRes.replay.goal, 0, 'live backup defender covers net when kickoff skater is carded');
+
+  // 3. Crease-warned goalie keeps GUARD/save options under live shotDanger instead of fleeing to concede
+  const warnSt = mkDef();
+  warnSt.fouls = { ...M.newFouls(), crease: [false, true] };
+  Object.assign(warnSt.bodies[0], { x: 640, y: 300 });
+  Object.assign(warnSt.bodies[1], { x: 260, y: 150 });
+  Object.assign(warnSt.bodies[2], { x: 140, y: 300 });
+  Object.assign(warnSt.bodies[3], { x: 892, y: 300 });
+  Object.assign(warnSt.bodies[4], { x: 520, y: 140 });
+  Object.assign(warnSt.bodies[5], { x: 520, y: 460 });
+  Object.assign(warnSt.bodies[6], { x: 705, y: 300 });
+  const warnOpts = C.options(warnSt, 1, 0, C.HOLD);
+  assert.ok(warnOpts.some(m => m.guard), 'warned goalie retains GUARD save option under active shotDanger');
+  const warnShot = { ...C.strike(warnSt.bodies[0], warnSt.bodies[6], 940, 300, null, 0, 2400), power: 1 };
+  const warnDec = C.plan(warnSt, 1, { level: 'god', seed: 7 });
+  const warnRes = M.resolveTurn(P, warnSt, [warnShot, C.HOLD, C.HOLD, ...warnDec.plans], { effects: false });
+  assert.notEqual(warnRes.replay.goal, 0, 'Ububall God saves direct shot rather than fleeing warned crease');
+
+  // 4. Baseline anchor does not rush out to clear when an opponent reaches the ball first
+  const rushSt = mkDef();
+  Object.assign(rushSt.bodies[0], { x: 740, y: 240 });
+  Object.assign(rushSt.bodies[1], { x: 260, y: 400 });
+  Object.assign(rushSt.bodies[2], { x: 150, y: 300 });
+  Object.assign(rushSt.bodies[3], { x: 882, y: 295 });
+  Object.assign(rushSt.bodies[4], { x: 520, y: 420 });
+  Object.assign(rushSt.bodies[5], { x: 450, y: 160 });
+  Object.assign(rushSt.bodies[6], { x: 790, y: 230 });
+  rushSt.bodies[3].personality = { aggression: 58, creativity: 32, teamwork: 32, clutch: 32 };
+  const baseGoalie = C.legacy(rushSt, 1)[0];
+  const vxDir = baseGoalie.power > 0 ? Math.cos(baseGoalie.angle) * baseGoalie.power : 0;
+  assert.ok(baseGoalie.guard || vxDir > -0.5, 'baseline anchor stays near crease instead of charging out when beaten to the ball');
+});
