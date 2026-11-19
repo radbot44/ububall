@@ -1,6 +1,6 @@
 /* Opponent response portfolio generation and online tendency learning. */
 'use strict';
-const { HOLD, GUARD, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT, behindBall, getIntent , roles
+const { HOLD, GUARD, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT, SHOT_DRIVE, behindBall, getIntent , roles
 } = require('./constants.js');
 const { aim, strike } = require('./kinematics.js');
 const { shotConePoint, bestBankTargetY, assessOpponentThreat, scanGoalAperture, stickyCarryMove } = require('./threat.js');
@@ -358,9 +358,11 @@ function learnedOpponentResponses(state, team, classic, history, maxLearned = 2)
     const armAtk = (aKey === 'cannonball' || aKey === 'sticky' || aKey === 'ghost') ? aKey : null;
     const ballR = ball.radius || 18;
     if (bankW / totalOffW >= 0.28) {
-      const bankTargetY = bankTopW >= bankBotW ? (2 * (RINK_TOP + ballR) - RINK_CY) : (2 * (RINK_BOTTOM - ballR) - RINK_CY);
-      const bMv = strike(atkB, ball, oppAtkGoal, bankTargetY, armAtk, 0);
-      bMv.power = Math.min(1, bMv.power * 1.22);
+      const bankTargetY = bankTopW >= bankBotW
+        ? (2 * (RINK_TOP + ballR) - (RINK_CY + 24))
+        : (2 * (RINK_BOTTOM - ballR) - (RINK_CY - 24));
+      const bMv = strike(atkB, ball, oppAtkGoal, bankTargetY, armAtk, 0, SHOT_DRIVE);
+      bMv.power = 1;
       if (armAtk) bMv.superArm = true;
       base[atkK] = bMv;
     } else if (passW / totalOffW >= 0.26 && supK >= 0 && !state.bodies[oppStart + supK].stunned) {

@@ -1,22 +1,10 @@
 /* Goal-pocket geometry, incoming shot threat tracing, and crease legality. */
 'use strict';
-const { P, M, RINK, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT, contactRadius, skaterDrive, segmentBlocked, behindBall, roles
+const { P, M, RINK, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT, contactRadius, segmentBlocked, behindBall, roles
 } = require('./constants.js');
 const { aim, ballTraceKey, traceMovingBall, skaterTravelTime } = require('./kinematics.js');
 
 const GOAL_APERTURE_YS = [RINK_CY, RINK_CY - 28, RINK_CY + 28, RINK_CY - 50, RINK_CY + 50];
-
-// Crisp kinematic launch that arrives at (x, y) within `tTarget` seconds without needlessly blasting past the crease.
-function aimInTime(body, x, y, tTarget = 0.26, superKey = null) {
-  const d = Math.hypot(x - body.x, y - body.y);
-  if (d < 4) return aim(body, x, y, 0, superKey, 0);
-  const { maxV, effFriction } = skaterDrive(body, superKey, 0);
-  const t = Math.max(0.10, tTarget);
-  const vNeed = Math.min(maxV, d / t + 0.5 * effFriction * t);
-  const vStop = Math.sqrt(2 * effFriction * d);
-  const drive = vNeed > vStop ? Math.max(0, (vNeed * vNeed) / (2 * effFriction) - d) : 0;
-  return aim(body, x, y, drive, superKey, 0);
-}
 
 function shotConePoint(ballX, ballY, team, dist = 88) {
   const ownGoalX = team ? RINK_RIGHT : RINK_LEFT;
@@ -72,17 +60,6 @@ function goalPocketPoint(ballX, ballY, team, allowCrease = true) {
   const rawY = RINK_CY + (ballY - RINK_CY) * Math.min(0.65, t * 1.15);
   const y = Math.max(RINK_CY - 36, Math.min(RINK_CY + 36, rawY));
   return { x: coverX, y };
-}
-
-// Estimated time (seconds) until a full-power opponent strike on the current ball crosses the goal pocket.
-// Uses a 0.85 lead factor so the goalie arrives slightly ahead of the shot rather than milliseconds late.
-function estShotArrival(ball, ownGoalX, bestOppT = 0, oppStriker = null) {
-  const oppT = Number.isFinite(bestOppT) ? Math.min(0.45, Math.max(0, bestOppT)) : 0.10;
-  const flightD = Math.max(0, Math.abs(ball.x - ownGoalX) - 44);
-  const estSpd = oppStriker
-    ? Math.max(1050, Math.min(1550, P.launchSpeed(oppStriker) * Math.max(1, oppStriker.power || 1) * 1.15))
-    : 1200;
-  return Math.min(0.46, Math.max(0.18, (oppT + flightD / estSpd) * 0.92));
 }
 
 // Compute a realistic flat-wall bank target Y toward goalX.
@@ -241,9 +218,22 @@ function assessOpponentThreat(state, team, classic = false) {
   const ownDefIdx = ownJobs.indexOf('defend');
   const incoming = traceIncomingShot(ball, team);
   const bSpd = !ball.stickOffset ? Math.hypot(ball.vx || 0, ball.vy || 0) : 0;
-  const leadBx = bSpd > 35 ? Math.max(RINK_LEFT + 28, Math.min(RINK_RIGHT - 28, ball.x + (ball.vx || 0) * 0.18)) : ball.x;
-  const leadBy = bSpd > 35 ? Math.max(RINK_TOP + 28, Math.min(RINK_BOTTOM - 28, ball.y + (ball.vy || 0) * 0.18)) : ball.y;
-  const leadBall = bSpd > 35 ? { x: leadBx, y: leadBy } : ball;
+  let leadBalls = null;
+  if (bSpd > 35) {
+    const samples = traceMovingBall(ball);
+    if (samples && samples.length) {
+      // Sample ~0.18s and ~0.36s along canonical ball trace (including wall rebounds in Pulse!).
+      const s1 = samples[Math.min(samples.length - 1, 21)];
+      const s2 = samples.length > 42 ? samples[42] : null;
+      leadBalls = s2 ? [s1, s2] : [s1];
+    } else {
+      leadBalls = [{
+        t: 0.18,
+        x: Math.max(RINK_LEFT + 28, Math.min(RINK_RIGHT - 28, ball.x + (ball.vx || 0) * 0.18)),
+        y: Math.max(RINK_TOP + 28, Math.min(RINK_BOTTOM - 28, ball.y + (ball.vy || 0) * 0.18))
+      }];
+    }
+  }
 
   let oppCarrier = null, oppStriker = null, oppStrikerIdx = -1, bestOppT = Infinity;
   let fireballThreat = Boolean(ball.onFire);
@@ -256,9 +246,18 @@ function assessOpponentThreat(state, team, classic = false) {
     if (oppJobs[i] === 'defend' && Math.abs(op.x - atkGoalX) < 165 && Math.abs(ball.x - atkGoalX) < 340) continue;
     const opSup = (!classic && (op.meter ?? 0) >= 100 && op.equippedSuper) ? op.equippedSuper.key?.toLowerCase() : null;
     const behNow = behindBall(op, ball, oppTeam);
-    const behLead = bSpd > 35 && behindBall(op, leadBall, oppTeam);
     const dNow = Math.max(0, Math.hypot(op.x - ball.x, op.y - ball.y) - contactRadius(op) - (ball.radius || 18));
-    const dLead = bSpd > 35 ? Math.max(0, Math.hypot(op.x - leadBx, op.y - leadBy) - contactRadius(op) - (ball.radius || 18)) : dNow;
+    let behLead = false, dLead = dNow;
+    if (leadBalls) {
+      for (let li = 0; li < leadBalls.length; li++) {
+        const lb = leadBalls[li];
+        const dl = Math.max(0, Math.hypot(op.x - lb.x, op.y - lb.y) - contactRadius(op) - (ball.radius || 18));
+        if (behindBall(op, lb, oppTeam) && (!behLead || dl < dLead)) {
+          behLead = true;
+          dLead = dl;
+        }
+      }
+    }
     // Allow slight side-angle / bank-cut reach (within 42 px past ball X) or Magnet pull within 210 px
     const sideAngleOk = (oppTeam === 0 ? op.x <= ball.x + 42 : op.x >= ball.x - 42) && dNow < 150;
     const magnetPullOk = opSup === 'magnet' && dNow < 210;
@@ -393,7 +392,7 @@ function rimAroundMove(body, ball, team, superKey = null) {
 
 
 module.exports = {
-  GOAL_APERTURE_YS, aimInTime, estShotArrival, shotConePoint, canOccupyCrease, goalPocketPoint, bestBankTargetY,
+  GOAL_APERTURE_YS, shotConePoint, canOccupyCrease, goalPocketPoint, bestBankTargetY,
   timedGoalieIntercept, traceIncomingShot,
   guardReachRadius, guardCoversSegment, assessOpponentThreat, scanGoalAperture,
   stickyCarryMove, rimAroundMove

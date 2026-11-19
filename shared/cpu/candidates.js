@@ -2,7 +2,7 @@
 'use strict';
 const { P, M, HOLD, GUARD, WOBBLE, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT, SHOT_DRIVE, segmentBlocked, behindBall, isPointBlank, tag, getIntent } = require('./constants.js');
 const { aim, strike } = require('./kinematics.js');
-const { aimInTime, estShotArrival, shotConePoint, canOccupyCrease, goalPocketPoint, timedGoalieIntercept, guardCoversSegment, assessOpponentThreat, scanGoalAperture, stickyCarryMove, rimAroundMove } = require('./threat.js');
+const { shotConePoint, canOccupyCrease, goalPocketPoint, bestBankTargetY, timedGoalieIntercept, guardCoversSegment, assessOpponentThreat, scanGoalAperture, stickyCarryMove, rimAroundMove } = require('./threat.js');
 
 function options(state, team, index, base) {
   const body = state.bodies[team * 3 + index], ball = state.bodies[6];
@@ -252,10 +252,10 @@ function options(state, team, index, base) {
         if (!onWing) moves.push(tag({ ...wideTop, superArm: arm }, 'shoot'));
       }
 
-      // Full-power Corner Meteor Bank lasers (1.0 wall restitution + zero tangential loss when onFire)
+      // Full-power Corner Meteor Bank lasers: aim past center toward the far half so both cold (0.82) and Meteor Bank (1.0) rebounds clear the near post
       const ballR = ball.radius || 18;
-      const topGoalRefY = goalieY >= RINK_CY - 12 ? GOAL_Y_TOP + 24 : GOAL_Y_BOT - 24;
-      const botGoalRefY = goalieY <= RINK_CY + 12 ? GOAL_Y_BOT - 24 : GOAL_Y_TOP + 24;
+      const topGoalRefY = goalieY <= RINK_CY + 8 ? GOAL_Y_BOT - 26 : RINK_CY + 18;
+      const botGoalRefY = goalieY >= RINK_CY - 8 ? GOAL_Y_TOP + 26 : RINK_CY - 18;
       const bankTopCorner = strike(body, ball, goal, 2 * (RINK_TOP + ballR) - topGoalRefY, superArmKey, 0, SHOT_DRIVE);
       bankTopCorner.power = 1;
       const bankBotCorner = strike(body, ball, goal, 2 * (RINK_BOTTOM - ballR) - botGoalRefY, superArmKey, 0, SHOT_DRIVE);
@@ -571,6 +571,33 @@ function jointTeamPlays(state, team, currentBest, jobs) {
         defensivePlays.push(slotLock);
       }
 
+      // Coordinated 2-skater Lane-Split / Bank-Wall Block: goalie anchors crease while a teammate cuts the wall-bank corridor or opposite half-cone.
+      if (threatInfo.shotDanger && !incoming && disruptIdx >= 0) {
+        const disB = ownBodies[disruptIdx], disS = superOf(disruptIdx);
+        const armSplit = closeGoalThreat && (disS === 'stalwart' || disS === 'colossus') ? disS : null;
+        const laneSplit = fireDrill.slice();
+        const centerX = saverAllowPocket ? (ownGoal + (team ? -44 : 44)) : cone.x;
+        const anchorDist = Math.hypot(saverB.x - centerX, saverB.y - RINK_CY);
+        laneSplit[saverIdx] = (!saverWarned && anchorDist < 20 && Math.hypot(saverB.vx || 0, saverB.vy || 0) < 45)
+          ? tag({ ...GUARD, superArm: Boolean(closeGoalThreat && saverS === 'stalwart') }, 'guard')
+          : tag(aim(saverB, centerX, RINK_CY, 120, null, 0), 'cover');
+        const bankBlock = Math.abs(ball.y - RINK_CY) > 45 ? bestBankTargetY(ball, ownGoal, saverB.y, ownBodies) : null;
+        let blockX, blockY;
+        if (bankBlock) {
+          // Intercept the bank-rebound corridor between bounce wall and goal mouth (staying safely outside crease).
+          blockX = Math.max(RINK_LEFT + 95, Math.min(RINK_RIGHT - 95, bankBlock.bounceX * 0.35 + ownGoal * 0.65));
+          blockY = Math.max(RINK_TOP + 36, Math.min(RINK_BOTTOM - 36, bankBlock.wallY * 0.45 + RINK_CY * 0.55));
+        } else {
+          const highCone = shotConePoint(ball.x, ball.y, team, 132);
+          blockX = highCone.x;
+          blockY = Math.max(GOAL_Y_TOP + 12, Math.min(GOAL_Y_BOT - 12, saverB.y >= RINK_CY ? RINK_CY - 28 : RINK_CY + 28));
+        }
+        const splitMv = aim(disB, blockX, blockY, 150, armSplit, 0);
+        if (armSplit) splitMv.superArm = true;
+        laneSplit[disruptIdx] = tag(splitMv, 'cover');
+        defensivePlays.push(laneSplit);
+      }
+
       // Coordinated Defensive Clear + Wing Breakout when a skater is behind the ball in own zone
       for (let clrIdx = 0; clrIdx < 3; clrIdx++) {
         if (clrIdx === saverIdx) continue;
@@ -592,10 +619,13 @@ function jointTeamPlays(state, team, currentBest, jobs) {
       }
     }
   }
+  let pushedDef = 0;
   if (highDanger && defensivePlays.length > 0) {
     plays.push(defensivePlays[0]);
-    if (threatInfo.shotDanger && threatInfo.oppReceiver && defensivePlays.length > 1) {
+    pushedDef = 1;
+    if (threatInfo.shotDanger && defensivePlays.length > 1) {
       plays.push(defensivePlays[1]);
+      pushedDef = 2;
     }
   }
 
@@ -682,7 +712,7 @@ function jointTeamPlays(state, team, currentBest, jobs) {
     }
   }
 
-  for (let dp = highDanger ? 1 : 0; dp < defensivePlays.length; dp++) {
+  for (let dp = pushedDef; dp < defensivePlays.length; dp++) {
     plays.push(defensivePlays[dp]);
   }
 

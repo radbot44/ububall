@@ -105,6 +105,9 @@ function plan(input, team = 1, config = {}) {
   const startCreaseWarned = Boolean(state.fouls?.crease?.[team]);
   const jobs = roles(state, team);
   const primaryAtkIdx = jobs.indexOf('attack');
+  const defRoleIdx = jobs.indexOf('defend');
+  const ownGoalX = team ? RINK_RIGHT : RINK_LEFT;
+  const step4Threat = assessOpponentThreat(state, team, classic);
   const pulse = M.rule(state.mode, 'pulse');
   const fullTurnTicks = M.turnTicks(state.mode);
   const baseHorizon = settings.searchTicks || SEARCH_TICKS;
@@ -268,13 +271,49 @@ function plan(input, team = 1, config = {}) {
       entry.values[0] = (entry.values[0] + wPos + wNeg) / 3;
     }
     if (settings.godWobble && respCount >= 3 && entry.values.length >= 3) {
-      const gwPos = simulate(wobble(entry.moves, 1), responses[2], 2);
-      const gwNeg = simulate(wobble(entry.moves, -1), responses[2], 2);
-      entry.values[2] = (entry.values[2] + gwPos + gwNeg) / 3;
+      let gwIdx = 2;
+      if (step4Threat.shotDanger) {
+        let worstV = Infinity;
+        for (let r = 1; r < entry.values.length; r++) {
+          if (entry.values[r] < worstV) { worstV = entry.values[r]; gwIdx = r; }
+        }
+      }
+      const gwPos = simulate(wobble(entry.moves, 1), responses[gwIdx], gwIdx);
+      const gwNeg = simulate(wobble(entry.moves, -1), responses[gwIdx], gwIdx);
+      if (entry.values[gwIdx] > -weights.goal * 0.5 && (gwPos <= -weights.goal * 0.85 || gwNeg <= -weights.goal * 0.85)) {
+        entry.values[gwIdx] = Math.min((entry.values[gwIdx] + gwPos + gwNeg) / 3, -3500);
+      } else {
+        entry.values[gwIdx] = (entry.values[gwIdx] + gwPos + gwNeg) / 3;
+      }
+      entry.threatWobbled = true;
     }
     entry.value = combineValues(entry.values, entry.fit);
     entry.wobbled = true;
     return entry.value;
+  }
+
+  // Wobble-verifies a finalist's worst non-legacy threat scenario (e.g. bank shot or counter) during active shotDanger
+  // so 1-pixel fluke saves lose to genuinely sturdy goalie positions.
+  function ensureThreatWobbled(entry) {
+    if (!entry || entry.threatWobbled || settings.wobble === false || !step4Threat.shotDanger) return;
+    if (!entry.values || entry.values.length < 2) return;
+    let worstR = 1;
+    for (let r = 2; r < entry.values.length; r++) {
+      if (entry.values[r] < entry.values[worstR]) worstR = r;
+    }
+    if (entry.values[worstR] <= -weights.goal * 0.5 || !responses[worstR]) {
+      entry.threatWobbled = true;
+      return;
+    }
+    const tPos = simulate(wobble(entry.moves, 1), responses[worstR], worstR);
+    const tNeg = simulate(wobble(entry.moves, -1), responses[worstR], worstR);
+    if (tPos <= -weights.goal * 0.85 || tNeg <= -weights.goal * 0.85) {
+      entry.values[worstR] = Math.min((entry.values[worstR] + tPos + tNeg) / 3, -3500);
+    } else {
+      entry.values[worstR] = (entry.values[worstR] + tPos + tNeg) / 3;
+    }
+    entry.value = combineValues(entry.values, entry.fit);
+    entry.threatWobbled = true;
   }
 
   const scored = [], finalists = [];
@@ -418,9 +457,6 @@ function plan(input, team = 1, config = {}) {
   }
 
   // 2. Single-skater interleaved option sweep
-  const defRoleIdx = jobs.indexOf('defend');
-  const ownGoalX = team ? RINK_RIGHT : RINK_LEFT;
-  const step4Threat = assessOpponentThreat(state, team, classic);
   const choices = [0, 1, 2].map(i => options(state, team, i, best[i]));
   const maxChoiceLen = Math.max(choices[0].length, choices[1].length, choices[2].length);
   for (let j = 0; j < maxChoiceLen && evaluated < settings.candidates * 0.52; j++) {
@@ -623,7 +659,7 @@ function plan(input, team = 1, config = {}) {
     function findCounter(targetMoves, seedOpp, budget, scoringOnly = false) {
       const seenOpp = new Set([planKey(seedOpp, 0)]);
       const seedOut = runRollout(targetMoves, seedOpp, true);
-      let oppBest = seedOpp, oppBestScore = seedOut.valOpp, targetValUs = seedOut.val;
+      let oppBest = seedOpp, oppBestScore = seedOut.valOpp, targetValUs = seedOut.val, oppBestEndY = seedOut.endBallY;
       let oppEval = 1;
 
       function tryOpp(candOpp) {
@@ -637,6 +673,7 @@ function plan(input, team = 1, config = {}) {
           oppBest = candOpp;
           oppBestScore = out.valOpp;
           targetValUs = out.val;
+          oppBestEndY = out.endBallY;
         }
         return true;
       }
@@ -783,7 +820,7 @@ function plan(input, team = 1, config = {}) {
       if (counterThreat.shotDanger && seedOut.goalScored !== team) {
         runScoringPunish();
         if (scoringOnly || oppBestScore >= rawWeights.goal * 0.95) {
-          return { moves: oppBest, valForUs: targetValUs };
+          return { moves: oppBest, valForUs: targetValUs, endBallY: oppBestEndY };
         }
       }
 
@@ -878,7 +915,7 @@ function plan(input, team = 1, config = {}) {
           }
         }
       }
-      return { moves: oppBest, valForUs: targetValUs };
+      return { moves: oppBest, valForUs: targetValUs, endBallY: oppBestEndY };
     }
 
     // Ensure #1 entering counter-search is wobble-verified
@@ -915,6 +952,68 @@ function plan(input, team = 1, config = {}) {
         cand.value = combineValues(cand.values, cand.fit);
       }
       topBasins.sort((a, b) => b.value - a.value);
+
+      // Post-counter goalie-only rescue pass: if the counter exposed a goal against #1 and EVERY finalist now concedes
+      // at least one scenario, test a few targeted defender adjustments on `target` against the new counter first.
+      if (counterThreat.shotDanger && counter.valForUs <= -weights.goal * 0.5 &&
+          topBasins[0]?.values?.some(v => v <= -weights.goal * 0.85)) {
+        const dIdx = defRoleIdx >= 0 ? defRoleIdx : 0;
+        const defB = state.bodies[ownStart + dIdx];
+        if (!defB.stunned && !defB.carded) {
+          const repairOpts = [];
+          const seenRep = new Set([getMoveId(target.moves[dIdx])]);
+          const addRep = mv => {
+            if (!mv || repairOpts.length >= 5) return;
+            const id = getMoveId(mv);
+            if (seenRep.has(id)) return;
+            seenRep.add(id);
+            repairOpts.push(mv);
+          };
+          // Aim directly at the goal-mouth Y where the counter just scored (inside the crease pocket if legal).
+          if (Number.isFinite(counter.endBallY) && counter.endBallY >= GOAL_Y_TOP - 20 && counter.endBallY <= GOAL_Y_BOT + 20) {
+            const allowP = canOccupyCrease(state, team, dIdx);
+            const saveX = allowP ? (ownGoalX + (team ? -44 : 44)) : (ownGoalX + (team ? -88 : 88));
+            const clampY = Math.max(GOAL_Y_TOP + 22, Math.min(GOAL_Y_BOT - 22, counter.endBallY));
+            addRep(aim(defB, saveX, clampY, 120, null, 0));
+          }
+          const defChoices = choices[dIdx] || [];
+          for (let ci = 0; ci < Math.min(8, defChoices.length) && repairOpts.length < 5; ci++) {
+            const c = defChoices[ci];
+            const it = getIntent(c);
+            if (c.guard || it === 'cover') addRep(c);
+          }
+          for (let ri = 0; ri < repairOpts.length; ri++) {
+            const repMoves = target.moves.slice();
+            repMoves[dIdx] = repairOpts[ri];
+            const vCounter = simulate(repMoves, counter.moves, rNew);
+            if (vCounter <= -weights.goal * 0.5) continue;
+            const repVals = new Array(responses.length);
+            repVals[rNew] = vCounter;
+            let concedesOld = false;
+            for (let r = 0; r < rNew; r++) {
+              const vr = simulate(repMoves, responses[r], r);
+              repVals[r] = vr;
+              if (vr <= -weights.goal * 0.85) { concedesOld = true; break; }
+            }
+            if (!concedesOld) {
+              const repFit = roleFit(repMoves);
+              const repEntry = {
+                moves: repMoves,
+                value: combineValues(repVals, repFit),
+                basin: planBasinKey(repMoves),
+                fit: repFit,
+                values: repVals,
+                meta: rolloutMeta.get(planKey(repMoves, 0)),
+                wobbled: settings.wobble === false
+              };
+              topBasins.push(repEntry);
+              topBasins.sort((a, b) => b.value - a.value);
+              if (topBasins.length > topLimit) topBasins.length = topLimit;
+              break;
+            }
+          }
+        }
+      }
 
       // If counter-search exposed a goal against #1 during shotDanger and promoted a new leader, verify the new leader too!
       if (round === baseRounds - 1 && counterThreat.shotDanger && counter.valForUs <= -weights.goal * 0.5 && topBasins[0] !== prevTarget) {
@@ -955,6 +1054,13 @@ function plan(input, team = 1, config = {}) {
       if (!distinctPool[i].wobbled && distinctPool[i].value >= leaderVal - contendMargin) {
         ensureWobbled(distinctPool[i]);
       }
+    }
+    // Under live shotDanger, also wobble-verify the top 2 finalists against their worst non-legacy threat shot.
+    if (step4Threat.shotDanger && responses.length >= 2) {
+      distinctPool.sort((a, b) => b.value - a.value);
+      const nTW = Math.min(2, distinctPool.length);
+      for (let i = 0; i < nTW; i++) ensureThreatWobbled(distinctPool[i]);
+      distinctPool.sort((a, b) => b.value - a.value);
     }
     finalPool = distinctPool;
   }

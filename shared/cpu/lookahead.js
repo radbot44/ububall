@@ -6,7 +6,7 @@ const {
   behindBall, isPointBlank, bReach, copy, roles
 } = require('./constants.js');
 const { aim, strike, traceMovingBall } = require('./kinematics.js');
-const { shotConePoint, canOccupyCrease, goalPocketPoint, assessOpponentThreat, scanGoalAperture } = require('./threat.js');
+const { shotConePoint, canOccupyCrease, goalPocketPoint, bestBankTargetY, timedGoalieIntercept, traceIncomingShot, assessOpponentThreat, scanGoalAperture } = require('./threat.js');
 const { legacy } = require('./baseline.js');
 const { options, jointTeamPlays } = require('./candidates.js');
 const { evaluateBodies, planBasinKey } = require('./evaluate.js');
@@ -85,14 +85,22 @@ function runMultiTurnLookahead(ctx) {
         if (!defB.stunned && !defB.carded) {
           const dSup = supKeyOf(defI);
           const sAllowPkt = canOccupyCrease(sNode, side, defI) || dSup === 'stalwart';
-          const sAnchor = Math.abs(sBall.x - sOwnGoal) < 520 ? goalPocketPoint(sBall.x, sBall.y, side, sAllowPkt) : sCone;
-          if (!defWarned && Math.hypot(defB.x - sAnchor.x, defB.y - sAnchor.y) < 24 && Math.hypot(defB.vx || 0, defB.vy || 0) < 45) {
-            lockdown[defI] = { ...GUARD, superArm: Boolean(dSup === 'stalwart') };
+          const sIncoming = traceIncomingShot(sBall, side);
+          if (sIncoming && sIncoming.crosses) {
+            const armD = (dSup === 'stalwart' || dSup === 'colossus') ? dSup : null;
+            const mvInc = timedGoalieIntercept(defB, sBall, sIncoming, side, sAllowPkt, armD);
+            if (armD) mvInc.superArm = true;
+            lockdown[defI] = mvInc;
           } else {
-            const armD = (Math.abs(sBall.x - sOwnGoal) < 400 && (dSup === 'stalwart' || dSup === 'colossus')) ? dSup : null;
-            const mvD = aim(defB, sAnchor.x, sAnchor.y, 0, armD, 0);
-            if (armD) mvD.superArm = true;
-            lockdown[defI] = mvD;
+            const sAnchor = Math.abs(sBall.x - sOwnGoal) < 520 ? goalPocketPoint(sBall.x, sBall.y, side, sAllowPkt) : sCone;
+            if (!defWarned && Math.hypot(defB.x - sAnchor.x, defB.y - sAnchor.y) < 24 && Math.hypot(defB.vx || 0, defB.vy || 0) < 45) {
+              lockdown[defI] = { ...GUARD, superArm: Boolean(dSup === 'stalwart') };
+            } else {
+              const armD = (Math.abs(sBall.x - sOwnGoal) < 400 && (dSup === 'stalwart' || dSup === 'colossus')) ? dSup : null;
+              const mvD = aim(defB, sAnchor.x, sAnchor.y, 0, armD, 0);
+              if (armD) mvD.superArm = true;
+              lockdown[defI] = mvD;
+            }
           }
         }
         let enemyStriker = null, bestEnemyD = Infinity;
@@ -167,10 +175,13 @@ function runMultiTurnLookahead(ctx) {
 
         if (bestShooter >= 0 && portfolio.length < cap) {
           const sb = sNode.bodies[sOwn + bestShooter];
-          const bankTopY = 2 * (RINK_TOP + sBallR) - RINK_CY;
-          const bankBotY = 2 * (RINK_BOTTOM - sBallR) - RINK_CY;
-          const topClr = segmentBlocked(sBall.x, sBall.y, (sBall.x + sAtkGoal) * 0.5, RINK_TOP + sBallR, sEnemies, sBallR + 4);
-          const chosenBankY = !topClr ? bankTopY : bankBotY;
+          const oppJobs = roles(sNode, 1 - side);
+          const oppDefI = oppJobs.indexOf('defend');
+          const oppGoalieY = sEnemies[oppDefI >= 0 ? oppDefI : 0]?.y ?? RINK_CY;
+          const bInfo = bestBankTargetY(sBall, sAtkGoal, oppGoalieY, sEnemies);
+          const chosenBankY = bInfo
+            ? bInfo.bankY
+            : (sBall.y < RINK_CY ? (2 * (RINK_TOP + sBallR) - (RINK_CY + 24)) : (2 * (RINK_BOTTOM - sBallR) - (RINK_CY - 24)));
           const bankMv = strike(sb, sBall, sAtkGoal, chosenBankY, null, 0, SHOT_DRIVE);
           bankMv.power = 1;
           const bankPlay = lockdown.slice();
