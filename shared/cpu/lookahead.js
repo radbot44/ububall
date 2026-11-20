@@ -9,8 +9,12 @@ const { aim, strike, traceMovingBall } = require('./kinematics.js');
 const { shotConePoint, canOccupyCrease, goalPocketPoint, bestBankTargetY, timedGoalieIntercept, traceIncomingShot, assessOpponentThreat, scanGoalAperture } = require('./threat.js');
 const { legacy } = require('./baseline.js');
 const { options, jointTeamPlays } = require('./candidates.js');
-const { evaluateBodies, planBasinKey } = require('./evaluate.js');
+const { syncSlidesFromBodies, strikeAccess, coneCover, evaluateBodies, planBasinKey } = require('./evaluate.js');
+const { NN_INPUT_DIM, encodeState, decodePolicyPlans, forward } = require('./nn.js');
 const { buildOpponentResponses } = require('./opponent.js');
+
+const t2ObsBuf = new Float32Array(NN_INPUT_DIM);
+const t2PermBuf = [0, 1, 2];
 
 function runMultiTurnLookahead(ctx) {
   const {
@@ -54,7 +58,7 @@ function runMultiTurnLookahead(ctx) {
         };
       }
 
-      function buildTurn2Portfolio(sNode, side, cap) {
+      function buildTurn2Portfolio(sNode, side, cap, nodeNN = null) {
         const sOwn = side * 3, sOpp = (1 - side) * 3;
         const sBall = sNode.bodies[6];
         const sAtkGoal = side ? RINK_LEFT : RINK_RIGHT;
@@ -131,6 +135,19 @@ function runMultiTurnLookahead(ctx) {
           lockdown[chkI] = mvC;
         }
         addPlay(lockdown);
+
+        const usePolicy = side === team ? settings.nnPolicy !== false : settings.nnOpponent !== false;
+        if (nodeNN?.model && usePolicy && portfolio.length < cap) {
+          syncSlidesFromBodies(sNode.bodies);
+          encodeState(sNode, side, {
+            strikeOwn: strikeAccess(sNode.bodies, side, sBall.x, sBall.y, sBallR),
+            strikeOther: strikeAccess(sNode.bodies, 1 - side, sBall.x, sBall.y, sBallR),
+            coneOwn: coneCover(sNode.bodies, side, sBall.x, sBall.y, sNode.fouls),
+            coneOther: coneCover(sNode.bodies, 1 - side, sBall.x, sBall.y, sNode.fouls)
+          }, t2ObsBuf, t2PermBuf);
+          const polRes = forward(t2ObsBuf, true, nodeNN.model);
+          if (polRes) addPlay(decodePolicyPlans(polRes.polOut, sNode, side, t2PermBuf, classic, 0));
+        }
 
         const joint = jointTeamPlays(sNode, side, base, sJobs);
         let bestShooter = -1, bestShootD = Infinity, carrierI = -1;
@@ -210,8 +227,8 @@ function runMultiTurnLookahead(ctx) {
 
       function evalMultiTurn(sNode, remPulseDepth, cap) {
         const nodeNN = neuralContext(sNode, 1);
-        const ourPlays = buildTurn2Portfolio(sNode, team, cap);
-        const oppPlays = buildTurn2Portfolio(sNode, 1 - team, cap);
+        const ourPlays = buildTurn2Portfolio(sNode, team, cap, nodeNN);
+        const oppPlays = buildTurn2Portfolio(sNode, 1 - team, cap, nodeNN);
         const nOur = ourPlays.length, nOpp = oppPlays.length;
         const canDecS2 = !pulse && !sNode.fouls?.crease?.[0] && !sNode.fouls?.crease?.[1] && sNode.fouls?.corner === null;
         let bestRowVal = -Infinity;

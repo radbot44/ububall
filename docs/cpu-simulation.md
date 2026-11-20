@@ -85,6 +85,14 @@ CPU search calls `resolveTurn` with `effects: false`, which skips presentation-o
 
 The CPU suite checks reproducibility, search budgets, tactical fixtures, and planning across all six difficulty levels. The shooting and goaltending fixtures resolve selected plans through the match engine, including Pulse rebounds, Cannonball threats, Guard saves, and screened bank shots. The neural suite also trains a temporary v2 model and uses it to plan a Ballistic turn.
 
+## Study policy moves from the same position
+
+```powershell
+node scripts/nn-policy-study.cjs --standard web/assets/ububall-net-standard.bin --pulse web/assets/ububall-net-pulse.bin --seeds 2 --out personal/nn-policy-study
+```
+
+The study samples seeded God, pure-policy, and Ballistic games and includes tactical fixtures. It tests each plan against the same set of opponent replies and compares goal outcomes. Scoreless Pulse branches get a second turn with the same heuristic continuation for both sides. A position ties when its goal difference summed across replies is equal. The report keeps cards, crease warnings, final ball position and the moves for each case. The ablations compare Ballistic with its own policy, opponent policy, or value head disabled one at a time. Policy lineage tracks direct proposals and refinements in the single-skater sweep and local fine-tuning. The report includes importable `.ububall` clips for the clearest policy gains and losses.
+
 ## Train and run the Path 1 neural evaluator and policy
 
 `shared/cpu/nn.js`, `scripts/nn-generate.cjs`, and `scripts/train-nn.py` implement UBNN format 2. The default float16 residual network uses a `315 -> 256 -> 256 -> 256` trunk with LayerNorm and SiLU, a three-way next-goal value head, and an 18-output policy head. The observation includes all 15 skater stats, personality, current and next-turn stun, Super state, and ball striker and Sticky offset fields. Each side is encoded with `+x` as the attack direction, skaters in `[attack, support, defend]` order, and angles as `(cos, sin)`. Training applies vertical reflection to the signed observation and policy channels.

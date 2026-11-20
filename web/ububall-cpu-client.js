@@ -6,7 +6,7 @@
   function createCPUClient(makeWorker = () => new Worker('ububall-cpu-worker.js')) {
     // A worker that finished its plan is kept for the next one, so its scripts stay loaded and its
     // search code stays optimized. A cancelled, disposed or failed worker is terminated and replaced.
-    let cancel = noop, idle = null;
+    let cancel = noop, idle = null, disposed = false;
     const dropIdle = () => {
       if (!idle) return;
       const w = idle; idle = null;
@@ -15,19 +15,28 @@
     };
     return {
       cancel() { cancel(); },
-      dispose() { cancel(); dropIdle(); },
+      dispose() { disposed = true; cancel(); dropIdle(); },
       hasNeuralWeights(pulse = false) {
         return new Promise(resolve => {
-          let worker, timer;
-          const finish = available => {
+          let worker, timer, done = false;
+          const finish = (available, keep = false) => {
+            if (done) return;
+            done = true;
             clearTimeout(timer);
-            worker?.terminate();
+            const reuse = keep && !disposed && !idle && cancel === noop && Boolean(worker);
+            if (worker) {
+              worker.onmessage = worker.onmessageerror = noop;
+              worker.onerror = reuse ? () => { if (idle === worker) dropIdle(); } : noop;
+            }
+            if (reuse) idle = worker;
+            else worker?.terminate();
             resolve(available);
           };
-          const failed = () => finish(false);
+          const failed = () => finish(false, false);
           try {
-            worker = makeWorker();
-            worker.onmessage = ({ data }) => finish(data?.hasNeuralWeights === true);
+            worker = idle || makeWorker();
+            if (worker === idle) idle = null;
+            worker.onmessage = ({ data }) => finish(data?.hasNeuralWeights === true, true);
             worker.onerror = worker.onmessageerror = failed;
             timer = setTimeout(failed, TIMEOUT_MS);
             worker.postMessage({ checkNeuralWeights: true, pulse });
@@ -41,11 +50,17 @@
           const finish = (value, keep = false) => {
             if (done) return;
             done = true; clearTimeout(timer); cancel = noop;
+            const reuse = keep && !disposed && Boolean(worker);
             if (worker) {
               worker.onmessage = worker.onmessageerror = noop;
-              worker.onerror = keep ? () => { if (idle === worker) dropIdle(); } : noop;
+              worker.onerror = reuse ? () => { if (idle === worker) dropIdle(); } : noop;
             }
-            if (keep && worker) idle = worker; else worker?.terminate();
+            if (reuse) {
+              if (idle && idle !== worker) dropIdle();
+              idle = worker;
+            } else {
+              worker?.terminate();
+            }
             resolve(value);
           };
           cancel = () => finish(null);

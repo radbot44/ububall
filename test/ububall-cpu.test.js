@@ -186,10 +186,11 @@ test('worker client can check neural availability during an active plan', async 
   assert.deepEqual(await plan, { plans: [] });
 
   const unavailable = client.hasNeuralWeights();
-  assert.deepEqual(workers[2].data, { checkNeuralWeights: true, pulse: false });
-  workers[2].onerror();
+  assert.equal(workers.length, 2);
+  assert.deepEqual(workers[0].data, { checkNeuralWeights: true, pulse: false });
+  workers[0].onerror();
   assert.equal(await unavailable, false);
-  assert.equal(workers[2].terminated, true);
+  assert.equal(workers[0].terminated, true);
 });
 
 test('decided() does not cut off search while ball sits in a corner or skater slides toward crease, and Colossus strike accounts for swollen radius', () => {

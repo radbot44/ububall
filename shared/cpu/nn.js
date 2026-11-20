@@ -33,13 +33,14 @@ const sharedPerm = [0, 1, 2];
 const sharedOppPerm = [0, 1, 2];
 
 // Zero-allocation role ordering ([attack, support, defend] in 0..2) matching constants.roles()
-function roleOrderFromCoords(bodies, team, slideX, slideY, bx, by, outPerm) {
+function roleOrderFromCoords(bodies, team, slideX, slideY, bx, by, outPerm, projectSettled = false) {
   const base = team * 3;
   const goalX = team ? RINK_RIGHT : RINK_LEFT;
   let activeMask = 0;
   for (let i = 0; i < 3; i++) {
     const b = bodies[base + i];
-    if (!b.carded && !b.stunned) activeMask |= (1 << i);
+    const active = projectSettled ? !b.stunnedNext : (!b.carded && !b.stunned);
+    if (active) activeMask |= (1 << i);
   }
   const defMask = activeMask || 7;
   let def = -1, bestDefD = Infinity;
@@ -72,22 +73,29 @@ function roleOrderIndices(stateLike, team, outPerm = [0, 1, 2]) {
   return roleOrderFromCoords(stateLike.bodies, team, null, null, ball.x, ball.y, outPerm);
 }
 
-function writeSkaterFeatures(b, raw, dir, classic, sx, sy, zeroVel, out, base) {
+function writeSkaterFeatures(b, raw, dir, classic, sx, sy, projectSettled, out, base) {
   out[base] = dir * (sx - RINK_CX) / 440;
   out[base + 1] = (sy - RINK_CY) / 240;
-  out[base + 2] = dir * (zeroVel ? 0 : (b.vx || 0)) / 720;
-  out[base + 3] = (zeroVel ? 0 : (b.vy || 0)) / 720;
-  out[base + 4] = dir * (zeroVel ? 0 : (b.omega || 0)) / 20;
-  const stunned = Boolean(b.stunned);
-  out[base + 5] = b.carded ? -1 : stunned ? 0 : 1;
-  out[base + 6] = b.carded ? 1 : 0;
+  out[base + 2] = dir * (projectSettled ? 0 : (b.vx || 0)) / 720;
+  out[base + 3] = (projectSettled ? 0 : (b.vy || 0)) / 720;
+  out[base + 4] = dir * (projectSettled ? 0 : (b.omega || 0)) / 20;
+  const carded = projectSettled ? false : Boolean(b.carded);
+  const stunned = projectSettled ? Boolean(b.stunnedNext) : Boolean(b.stunned);
+  out[base + 5] = carded ? -1 : stunned ? 0 : 1;
+  out[base + 6] = carded ? 1 : 0;
   out[base + 7] = stunned ? 1 : 0;
   out[base + 8] = (b.daze || 0) / 0.4;
-  out[base + 9] = classic ? 0 : (b.meter || 0) / 100;
-  out[base + 10] = b.holding ? 1 : 0;
-  out[base + 11] = b.guarding ? 1 : 0;
-  out[base + 12] = (b.ironCooldownTicks || 0) / 48;
-  out[base + 13] = (!classic && b.superActive) ? Math.min(1, (b.superTicks || 360) / 720) : 0;
+  let meter = b.meter || 0;
+  if (projectSettled && !classic && (b.superActive || b.usedSuperThisTurn) && !b.superRefunded) {
+    const bonusRefund = b.equippedSuper?.bonusRefund ?? b.superBonusRefund ?? 0;
+    const whiff = !b.superHit ? (P.SUPER?.whiffRefund ?? 25) : 0;
+    meter = Math.min(100, meter + bonusRefund + whiff);
+  }
+  out[base + 9] = classic ? 0 : meter / 100;
+  out[base + 10] = (!projectSettled && b.holding) ? 1 : 0;
+  out[base + 11] = (!projectSettled && b.guarding) ? 1 : 0;
+  out[base + 12] = projectSettled ? 0 : (b.ironCooldownTicks || 0) / 48;
+  out[base + 13] = (!projectSettled && !classic && b.superActive) ? Math.min(1, (b.superTicks || 360) / 720) : 0;
 
   out[base + 14] = ((b.baseRadius ?? b.radius ?? 25) - 25) / 12.5;
   out[base + 15] = ((b.baseMass ?? b.mass ?? 3) - 3) / 1.5;
@@ -102,7 +110,7 @@ function writeSkaterFeatures(b, raw, dir, classic, sx, sy, zeroVel, out, base) {
     const sId = Number.isInteger(rawId) && rawId >= 0 && rawId < 8 ? rawId : SUPER_KEYS[b.equippedSuper.key];
     if (Number.isInteger(sId)) {
       const lvl = b.equippedSuper.level || 1;
-      const activeBonus = SUPER_KEYS[b.superActive] === sId ? 0.2 : 0;
+      const activeBonus = (!projectSettled && SUPER_KEYS[b.superActive] === sId) ? 0.2 : 0;
       out[base + 20 + sId] = 0.6 + 0.1 * lvl + activeBonus;
     }
   }
@@ -120,11 +128,11 @@ function writeSkaterFeatures(b, raw, dir, classic, sx, sy, zeroVel, out, base) {
   out[base + 38] = (personality?.creativity ?? 31.5) / 63;
   out[base + 39] = (personality?.teamwork ?? 31.5) / 63;
   out[base + 40] = (personality?.clutch ?? 31.5) / 63;
-  out[base + 41] = b.stunnedNext ? 1 : 0;
-  out[base + 42] = b.ironGuard ? 1 : 0;
-  out[base + 43] = classic ? 0 : (b.superHoldTicks || 0) / 480;
-  out[base + 44] = !classic && b.shockwaveFired ? 1 : 0;
-  out[base + 45] = !classic && b.usedSuperThisTurn ? 1 : 0;
+  out[base + 41] = (!projectSettled && b.stunnedNext) ? 1 : 0;
+  out[base + 42] = (!projectSettled && b.ironGuard) ? 1 : 0;
+  out[base + 43] = (!projectSettled && !classic) ? (b.superHoldTicks || 0) / 480 : 0;
+  out[base + 44] = (!projectSettled && !classic && b.shockwaveFired) ? 1 : 0;
+  out[base + 45] = (!projectSettled && !classic && b.usedSuperThisTurn) ? 1 : 0;
   out[base + 46] = classic ? 0 : (b.superBonusRefund || 0) / 20;
 }
 
@@ -137,18 +145,17 @@ function encodeObservation(bodies, fouls, team, hints, out = sharedObs, permOut 
   const mode = hints?.mode || 'standard';
   const classic = hints?.classic !== undefined ? Boolean(hints.classic) : M.rule(mode, 'classic');
   const pulse = hints?.pulse !== undefined ? Boolean(hints.pulse) : M.rule(mode, 'pulse');
-  const blitz = hints?.blitz !== undefined ? Boolean(hints.blitz) : M.rule(mode, 'blitz');
 
   const slideX = hints?.slideX || null;
   const slideY = hints?.slideY || null;
-  const zeroVel = Boolean(hints?.zeroSettledVel);
+  const projectSettled = Boolean(hints?.zeroSettledVel);
 
   const ball = bodies[6];
   const bx = hints?.pbx !== undefined ? hints.pbx : ball.x;
   const by = hints?.pby !== undefined ? hints.pby : ball.y;
 
-  roleOrderFromCoords(bodies, team, slideX, slideY, bx, by, permOut);
-  roleOrderFromCoords(bodies, 1 - team, slideX, slideY, bx, by, sharedOppPerm);
+  roleOrderFromCoords(bodies, team, slideX, slideY, bx, by, permOut, projectSettled);
+  roleOrderFromCoords(bodies, 1 - team, slideX, slideY, bx, by, sharedOppPerm, projectSettled);
 
   const ownStart = team * 3, oppStart = (1 - team) * 3;
   const stats = hints?.stats;
@@ -157,12 +164,12 @@ function encodeObservation(bodies, fouls, team, hints, out = sharedObs, permOut 
     const b = bodies[idx];
     const sx = slideX ? slideX[idx] : b.x;
     const sy = slideY ? slideY[idx] : b.y;
-    writeSkaterFeatures(b, stats?.[idx], dir, classic, sx, sy, zeroVel, out, r * SKATER_FLOATS);
+    writeSkaterFeatures(b, stats?.[idx], dir, classic, sx, sy, projectSettled, out, r * SKATER_FLOATS);
   }
 
-  const bvx = zeroVel ? 0 : (ball.vx || 0);
-  const bvy = zeroVel ? 0 : (ball.vy || 0);
-  const bom = zeroVel ? 0 : (ball.omega || 0);
+  const bvx = projectSettled ? 0 : (ball.vx || 0);
+  const bvy = projectSettled ? 0 : (ball.vy || 0);
+  const bom = projectSettled ? 0 : (ball.omega || 0);
   const ownGoalX = team ? RINK_RIGHT : RINK_LEFT;
   const oppGoalX = RINK_LEFT + RINK_RIGHT - ownGoalX;
 
@@ -171,17 +178,17 @@ function encodeObservation(bodies, fouls, team, hints, out = sharedObs, permOut 
   out[BALL_START + 2] = dir * bvx / 1200;
   out[BALL_START + 3] = bvy / 1200;
   out[BALL_START + 4] = dir * bom / 20;
-  out[BALL_START + 5] = ball.onFire ? 1 : 0;
-  out[BALL_START + 6] = (ball.fireTicks || 0) / 60;
-  out[BALL_START + 7] = (ball.pace || 0) / 1200;
-  out[BALL_START + 8] = (ball.curveMult ?? 1) - 1;
-  out[BALL_START + 9] = (ball.strikerPower ?? 1) - 1;
+  out[BALL_START + 5] = (!projectSettled && ball.onFire) ? 1 : 0;
+  out[BALL_START + 6] = projectSettled ? 0 : (ball.fireTicks || 0) / 60;
+  out[BALL_START + 7] = projectSettled ? 0 : (ball.pace || 0) / 1200;
+  out[BALL_START + 8] = projectSettled ? 0 : (ball.curveMult ?? 1) - 1;
+  out[BALL_START + 9] = projectSettled ? 0 : (ball.strikerPower ?? 1) - 1;
   out[BALL_START + 10] = Math.hypot(oppGoalX - bx, RINK_CY - by) / 900;
   out[BALL_START + 11] = Math.hypot(ownGoalX - bx, RINK_CY - by) / 900;
-  out[BALL_START + 12] = ball.strikerTeam === team ? 1 : ball.strikerTeam === 1 - team ? -1 : 0;
-  out[BALL_START + 13] = (ball.strikerSynergy ?? 1) - 1;
-  out[BALL_START + 14] = ball.openingShot ? 1 : 0;
-  const stickOffset = ball.stickOffset && P.holder(bodies) ? ball.stickOffset : null;
+  out[BALL_START + 12] = projectSettled ? 0 : (ball.strikerTeam === team ? 1 : ball.strikerTeam === 1 - team ? -1 : 0);
+  out[BALL_START + 13] = projectSettled ? 0 : (ball.strikerSynergy ?? 1) - 1;
+  out[BALL_START + 14] = (!projectSettled && ball.openingShot) ? 1 : 0;
+  const stickOffset = (!projectSettled && ball.stickOffset && P.holder(bodies)) ? ball.stickOffset : null;
   out[BALL_START + 15] = stickOffset ? dir * stickOffset.x / 50 : 0;
   out[BALL_START + 16] = stickOffset ? stickOffset.y / 50 : 0;
 
@@ -193,11 +200,12 @@ function encodeObservation(bodies, fouls, team, hints, out = sharedObs, permOut 
 
   out[MATCH_START] = classic ? 1 : 0;
   out[MATCH_START + 1] = pulse ? 1 : 0;
-  out[MATCH_START + 2] = blitz ? 1 : 0;
+  // Blitz only sets the human planning timer, not physics or match rules; keep 0 so Blitz shares trained weights.
+  out[MATCH_START + 2] = 0;
   out[MATCH_START + 3] = (ownScore - oppScore) / 5;
   out[MATCH_START + 4] = Math.max(0, 4 - ownScore) / 4;
   out[MATCH_START + 5] = Math.max(0, 4 - oppScore) / 4;
-  out[MATCH_START + 6] = Math.min(1, (hints?.roundTurns || 0) / 40);
+  out[MATCH_START + 6] = Math.min(1, (hints?.roundTurns || 0) / (pulse ? 120 : 40));
   out[MATCH_START + 7] = fouls?.crease?.[team] ? 1 : 0;
   out[MATCH_START + 8] = fouls?.crease?.[1 - team] ? 1 : 0;
   out[MATCH_START + 9] = inOwnCorner;

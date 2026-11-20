@@ -366,7 +366,11 @@ test('end-to-end pipeline: nn-generate.cjs -> train-nn.py -> exported UBNN weigh
     for (let i = 0; i + 1 < shard.rows; i += 2) {
       const own = i * C.NN_ROW_FLOATS, opp = own + C.NN_ROW_FLOATS;
       const goal = rows.readFloatLE((own + nextGoal) * 4);
-      assert.ok(goal === -rows.readFloatLE((opp + nextGoal) * 4) && [-1, 0, 1].includes(goal));
+      const oppGoal = rows.readFloatLE((opp + nextGoal) * 4);
+      assert.ok(
+        (goal === -oppGoal && [-1, 0, 1].includes(goal)) || (goal === -2 && oppGoal === -2),
+        `unexpected pair nextGoal: ${goal} vs ${oppGoal}`
+      );
       const turns = rows.readFloatLE((own + nextGoal + 1) * 4);
       assert.equal(turns, rows.readFloatLE((opp + nextGoal + 1) * 4));
       assert.ok(Number.isInteger(turns) && turns >= 0 && turns < 16);
@@ -415,4 +419,93 @@ test('end-to-end pipeline: nn-generate.cjs -> train-nn.py -> exported UBNN weigh
   assert.ok(hybPlan.diagnostics.simulations > 0);
   assert.deepEqual(hybPlan.plans, repeated.plans);
   assert.equal(hybPlan.diagnostics.score, repeated.diagnostics.score);
+});
+
+test('Standard settled-turn projection, blitz zeroing, pulse roundTurns scaling, and worker probe reuse', async () => {
+  const st = S.initialState(29, 'standard');
+  st.roundTurns = 24;
+  // Skater 0 was stunned this turn (clears next turn), skater 1 gets stunned next turn, skater 2 whiffed a super.
+  Object.assign(st.bodies[0], { stunned: true, stunnedNext: false, vx: 120, vy: -80, omega: 4 });
+  Object.assign(st.bodies[1], {
+    stunned: false, stunnedNext: true, holding: true, guarding: true, ironGuard: true,
+    ironCooldownTicks: 24, superActive: 'sticky', superTicks: 300, superHoldTicks: 180,
+    shockwaveFired: true, usedSuperThisTurn: true, superHit: false, superRefunded: false,
+    meter: 10, equippedSuper: { ...P.SUPERS[2], level: 2, bonusRefund: 6 }, superBonusRefund: 6
+  });
+  Object.assign(st.bodies[6], {
+    vx: 300, vy: -150, omega: 6, onFire: true, fireTicks: 40, pace: 900,
+    curveMult: 1.25, strikerPower: 1.2, strikerTeam: 0, strikerSynergy: 1.15,
+    openingShot: true, stickOffset: { x: 20, y: -10 }
+  });
+
+  const perm = [0, 1, 2];
+  const projObs = C.encodeObservation(st.bodies, st.fouls, 0, {
+    mode: 'blitz', stats: st.stats, scores: st.scores, roundTurns: 24, zeroSettledVel: true
+  }, new Float32Array(C.NN_INPUT_DIM), perm);
+
+  const skaterFloats = 47;
+  const ballStart = 6 * skaterFloats;
+  const matchStart = ballStart + 17;
+
+  // Blitz channel stays 0; Standard roundTurns uses /40.
+  assert.equal(projObs[matchStart + 2], 0);
+  assert.ok(Math.abs(projObs[matchStart + 6] - 24 / 40) < 1e-6);
+
+  // Pulse roundTurns uses /120.
+  const pulseObs = C.encodeState({ ...st, mode: 'pulse-blitz', roundTurns: 24 }, 0, null, new Float32Array(C.NN_INPUT_DIM));
+  assert.equal(pulseObs[matchStart + 2], 0);
+  assert.ok(Math.abs(pulseObs[matchStart + 6] - 24 / 120) < 1e-6);
+
+  // Skater 1 (stunnedNext) promoted to stunned, transient flags cleared, and whiff+bonus refund applied.
+  const r1 = perm.indexOf(1);
+  const b1 = r1 * skaterFloats;
+  assert.equal(projObs[b1 + 5], 0);
+  assert.equal(projObs[b1 + 7], 1);
+  assert.equal(projObs[b1 + 10], 0); // holding
+  assert.equal(projObs[b1 + 11], 0); // guarding
+  assert.equal(projObs[b1 + 12], 0); // ironCooldownTicks
+  assert.equal(projObs[b1 + 13], 0); // superActive
+  assert.equal(projObs[b1 + 41], 0); // stunnedNext
+  assert.equal(projObs[b1 + 42], 0); // ironGuard
+  assert.equal(projObs[b1 + 43], 0); // superHoldTicks
+  assert.equal(projObs[b1 + 44], 0); // shockwaveFired
+  assert.equal(projObs[b1 + 45], 0); // usedSuperThisTurn
+  const expectedMeter = Math.min(100, 10 + 6 + P.SUPER.whiffRefund) / 100;
+  assert.ok(Math.abs(projObs[b1 + 9] - expectedMeter) < 1e-6);
+
+  // Skater 0's expiring Turn-1 stun is cleared.
+  const r0 = perm.indexOf(0);
+  assert.equal(projObs[r0 * skaterFloats + 5], 1);
+  assert.equal(projObs[r0 * skaterFloats + 7], 0);
+
+  // Transient ball fields cleared.
+  for (const idx of [2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16]) {
+    assert.equal(projObs[ballStart + idx], 0, `ball[${idx}] should clear on settled projection`);
+  }
+
+  // CPU client reuses the probed worker on the subsequent plan() call.
+  const createCPUClient = require('../web/ububall-cpu-client.js');
+  let spawned = 0, terminated = 0;
+  const client = createCPUClient(() => {
+    spawned++;
+    const w = {
+      onmessage: null, onerror: null, onmessageerror: null,
+      postMessage(msg) {
+        queueMicrotask(() => {
+          if (msg.checkNeuralWeights) w.onmessage?.({ data: { hasNeuralWeights: true } });
+          else w.onmessage?.({ data: { result: { plans: [], diagnostics: {} } } });
+        });
+      },
+      terminate() { terminated++; }
+    };
+    return w;
+  });
+  assert.equal(await client.hasNeuralWeights(false), true);
+  assert.equal(spawned, 1);
+  assert.equal(terminated, 0);
+  const res = await client.plan(st, { level: 'ballistic' }, 1);
+  assert.ok(res && Array.isArray(res.plans));
+  assert.equal(spawned, 1, 'plan() should reuse the warm worker from hasNeuralWeights()');
+  client.dispose();
+  assert.equal(terminated, 1);
 });

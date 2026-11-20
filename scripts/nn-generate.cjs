@@ -26,15 +26,17 @@ const KICKOFF_POS = Object.freeze([
   { x: 820, y: 300 }, { x: 690, y: 180 }, { x: 690, y: 420 },
   { x: 500, y: 300 }
 ]);
-const RESOLVE_OPTS = Object.freeze({ effects: false, fastSearch: true, fastTick: true });
+const RESOLVE_OPTS = Object.freeze({ effects: false, fastSearch: true, fastTick: false });
 const NEXT_GOAL = NN.NN_INPUT_DIM + NN.NN_POLICY_DIM;
 const TURNS_TO_GOAL = NEXT_GOAL + 1;
+const VALUE_MASK = -2;
 
 const TEACHER_PRESETS = Object.freeze({
   fast: Object.freeze({ level: 'medium', candidates: 36, opponents: 2, searchTicks: 340, wobble: true, nn: false }),
   balanced: Object.freeze({ level: 'hard', candidates: 68, opponents: 3, searchTicks: 460, wobble: true, nn: false }),
   strong: Object.freeze({ level: 'insane', candidates: 120, opponents: 4, searchTicks: 540, wobble: true, nn: false }),
-  god: Object.freeze({ level: 'god', candidates: 200, opponents: 4, searchTicks: 680, wobble: true, nn: false })
+  god: Object.freeze({ level: 'god', candidates: 200, opponents: 4, searchTicks: 680, wobble: true, nn: false }),
+  ballistic: Object.freeze({ level: 'ballistic', candidates: 200, opponents: 4, searchTicks: 680, wobble: true, nn: true })
 });
 
 function makeMatchState(seed, mode) {
@@ -105,11 +107,24 @@ function maybePerturbPlans(plans, state, team, random, classic) {
   return out;
 }
 
-function playAndRecordMatch(job, rowSink) {
-  const { seed, mode, presetName, maxTurns } = job;
+function playAndRecordMatch(job, rowSink, teacherModel = null) {
+  const { seed, mode, presetName, maxTurns, teacherWeight, teacherScale } = job;
   const random = C.randomSource(seed ^ 0x9e3779b9);
-  const teacherCfg = TEACHER_PRESETS[presetName] || TEACHER_PRESETS.balanced;
+  const baseTeacher = TEACHER_PRESETS[presetName] || TEACHER_PRESETS.balanced;
+  const teacherCfg = teacherModel
+    ? {
+      ...baseTeacher,
+      nn: true,
+      nnModel: teacherModel,
+      nnPolicy: true,
+      nnOpponent: true,
+      ...(teacherWeight !== undefined ? { nnWeight: teacherWeight } : { nnWeight: C.LEVELS.ballistic.nnWeight }),
+      ...(teacherScale !== undefined ? { nnScale: teacherScale } : {})
+    }
+    : (baseTeacher.level === 'ballistic' ? { ...TEACHER_PRESETS.god } : baseTeacher);
   const classic = M.rule(mode, 'classic');
+  const pulse = M.rule(mode, 'pulse');
+  const stallThreshold = pulse ? 90 : 30;
   let state = makeMatchState(seed, mode);
   const history = [];
   const roundBuf = []; // Buffered rows until next goal or match end resolves nextGoal label
@@ -119,14 +134,15 @@ function playAndRecordMatch(job, rowSink) {
 
   let turnsPlayed = 0, goalsScored = 0, rowsWritten = 0;
 
-  function flushRound(goalTeam) {
+  function flushRound(goalTeam, maskAll = false) {
     const n = roundBuf.length;
     for (let k = 0; k < n; k++) {
       const rec = roundBuf[k];
       const turnsToGoal = n - 1 - k;
-      rec.row0[NEXT_GOAL] = goalTeam === null ? 0 : (goalTeam === 0 ? 1 : -1);
+      const masked = maskAll || rec.maskValue;
+      rec.row0[NEXT_GOAL] = masked ? VALUE_MASK : (goalTeam === null ? 0 : (goalTeam === 0 ? 1 : -1));
       rec.row0[TURNS_TO_GOAL] = turnsToGoal;
-      rec.row1[NEXT_GOAL] = goalTeam === null ? 0 : (goalTeam === 1 ? 1 : -1);
+      rec.row1[NEXT_GOAL] = masked ? VALUE_MASK : (goalTeam === null ? 0 : (goalTeam === 1 ? 1 : -1));
       rec.row1[TURNS_TO_GOAL] = turnsToGoal;
       if (rec.keep0) { rowSink(rec.row0); rowsWritten++; }
       if (rec.keep1) { rowSink(rec.row1); rowsWritten++; }
@@ -159,7 +175,8 @@ function playAndRecordMatch(job, rowSink) {
     const exec0 = exploreSide === 0 ? maybePerturbPlans(dec0.plans, state, 0, random, classic) : dec0.plans;
     const exec1 = exploreSide === 1 ? maybePerturbPlans(dec1.plans, state, 1, random, classic) : dec1.plans;
 
-    roundBuf.push({ row0, row1, keep0: true, keep1: true });
+    // Mask value supervision for both teams on perturbed launch turns while preserving teacher policy targets.
+    roundBuf.push({ row0, row1, keep0: true, keep1: true, maskValue: exploreSide >= 0 });
 
     const allMoves = [...exec0, ...exec1];
     history.push({
@@ -179,12 +196,16 @@ function playAndRecordMatch(job, rowSink) {
       if (state.phase === 'goal') resetKickoff(state);
     }
   }
-  if (roundBuf.length > 0) flushRound(null);
+  if (roundBuf.length > 0) flushRound(null, roundBuf.length < stallThreshold);
   return { turnsPlayed, goalsScored, rowsWritten };
 }
 
-if (!isMainThread && workerData && workerData.sharedCtrl) {
-  const { workerId, sharedCtrl, jobs, shardPath } = workerData;
+if (!isMainThread && require.main === module && workerData && workerData.sharedCtrl) {
+  const { workerId, sharedCtrl, jobs, shardPath, teacherWeightsPath } = workerData;
+  const teacherModel = teacherWeightsPath ? NN.parseWeights(fs.readFileSync(teacherWeightsPath)) : null;
+  if (teacherWeightsPath && !teacherModel) {
+    throw new Error(`Incompatible teacher weights (physics version mismatch): ${teacherWeightsPath}`);
+  }
   const ctrl = new Int32Array(sharedCtrl);
   const fd = fs.openSync(shardPath, 'w');
   const CHUNK_ROWS = 512;
@@ -207,7 +228,7 @@ if (!isMainThread && workerData && workerData.sharedCtrl) {
   for (;;) {
     const idx = Atomics.add(ctrl, 0, 1);
     if (idx >= jobs.length) break;
-    const stats = playAndRecordMatch(jobs[idx], sink);
+    const stats = playAndRecordMatch(jobs[idx], sink, teacherModel);
     totalTurns += stats.turnsPlayed;
     totalGoals += stats.goalsScored;
     matchesDone++;
@@ -221,12 +242,17 @@ if (!isMainThread && workerData && workerData.sharedCtrl) {
 }
 
 function parseCli(argv) {
+  let turnsSet = false;
   const opts = {
     matches: 400,
     turns: 70,
     seed: 1001,
     mode: 'mixed',
+    classicShare: 0,
     preset: 'balanced',
+    teacherWeights: null,
+    teacherWeight: undefined,
+    teacherScale: undefined,
     threads: Math.max(1, typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length),
     out: path.resolve(__dirname, '../personal/nn-shards')
   };
@@ -237,26 +263,43 @@ function parseCli(argv) {
     const val = argv[++i];
     if (val === undefined) throw new Error(`Missing value for ${arg}`);
     if (arg === '--matches') opts.matches = Number(val);
-    else if (arg === '--turns') opts.turns = Number(val);
+    else if (arg === '--turns') { opts.turns = Number(val); turnsSet = true; }
     else if (arg === '--seed') opts.seed = Number(val);
     else if (arg === '--mode') opts.mode = val;
+    else if (arg === '--classic-share') opts.classicShare = Number(val);
     else if (arg === '--preset') opts.preset = val;
+    else if (arg === '--teacher-weights') opts.teacherWeights = path.resolve(val);
+    else if (arg === '--teacher-weight') opts.teacherWeight = Number(val);
+    else if (arg === '--teacher-scale') opts.teacherScale = Number(val);
     else if (arg === '--threads') opts.threads = Number(val);
     else if (arg === '--out') opts.out = path.resolve(val);
     else throw new Error(`Unknown option: ${arg}`);
   }
-  if (!Number.isInteger(opts.matches) || opts.matches < 1 || !Number.isInteger(opts.turns) || opts.turns < 5) {
-    throw new Error('Invalid --matches or --turns.');
+  if (!turnsSet && (opts.mode === 'pulse' || opts.mode === 'pulse-pack')) opts.turns = 180;
+  if (!Number.isInteger(opts.matches) || opts.matches < 1 || !Number.isInteger(opts.turns) || opts.turns < 5 ||
+      !Number.isFinite(opts.classicShare) || opts.classicShare < 0 || opts.classicShare > 1 ||
+      (opts.teacherWeight !== undefined && (!Number.isFinite(opts.teacherWeight) || opts.teacherWeight < 0 || opts.teacherWeight > 1)) ||
+      (opts.teacherScale !== undefined && (!Number.isFinite(opts.teacherScale) || opts.teacherScale < 0))) {
+    throw new Error('Invalid --matches, --turns, --classic-share, or teacher NN options.');
   }
   return opts;
 }
 
-function pickMode(modeArg, idx) {
-  if (modeArg !== 'mixed') return modeArg;
-  const r = idx % 20;
-  if (r < 11) return 'standard';
-  if (r < 17) return 'pulse';
-  return 'classic';
+function pickMode(modeArg, idx, classicShare = 0) {
+  if (modeArg === 'standard-pack') return (idx % 5 === 0) ? 'classic' : 'standard';
+  if (modeArg === 'pulse-pack') return (idx % 5 === 0) ? 'classic-pulse' : 'pulse';
+  if (modeArg === 'mixed') {
+    const r = idx % 20;
+    if (r < 10) return 'standard';
+    if (r < 15) return 'pulse';
+    if (r < 18) return 'classic';
+    return 'classic-pulse';
+  }
+  if (classicShare > 0 && ((idx % 20) / 20) < classicShare) {
+    if (modeArg === 'standard') return 'classic';
+    if (modeArg === 'pulse') return 'classic-pulse';
+  }
+  return modeArg;
 }
 
 function pickPreset(presetArg, idx) {
@@ -269,6 +312,10 @@ function pickPreset(presetArg, idx) {
 
 async function main() {
   const opts = parseCli(process.argv.slice(2));
+  if (opts.teacherWeights) {
+    const parsed = NN.parseWeights(fs.readFileSync(opts.teacherWeights));
+    if (!parsed) throw new Error(`Incompatible teacher weights (physics version mismatch): ${opts.teacherWeights}`);
+  }
   fs.mkdirSync(opts.out, { recursive: true });
   for (const existing of fs.readdirSync(opts.out)) {
     if (existing.endsWith('.bin')) fs.unlinkSync(path.join(opts.out, existing));
@@ -276,9 +323,11 @@ async function main() {
 
   const jobs = Array.from({ length: opts.matches }, (_, i) => ({
     seed: opts.seed + i,
-    mode: pickMode(opts.mode, i),
+    mode: pickMode(opts.mode, i, opts.classicShare),
     presetName: pickPreset(opts.preset, i),
-    maxTurns: opts.turns
+    maxTurns: opts.turns,
+    teacherWeight: opts.teacherWeight,
+    teacherScale: opts.teacherScale
   }));
 
   const workerCount = Math.min(opts.threads, jobs.length);
@@ -286,7 +335,8 @@ async function main() {
   const ctrl = new Int32Array(sharedCtrl);
   const started = performance.now();
 
-  console.error(`[nn-generate] Running ${jobs.length} matches across ${workerCount} threads -> ${opts.out}`);
+  const teacherTag = opts.teacherWeights ? ` [Gen-2 teacher=${path.basename(opts.teacherWeights)}]` : '';
+  console.error(`[nn-generate] Running ${jobs.length} matches across ${workerCount} threads${teacherTag} -> ${opts.out}`);
 
   const progressTimer = setInterval(() => {
     const done = Atomics.load(ctrl, 1);
@@ -299,7 +349,7 @@ async function main() {
   const summaries = await Promise.all(Array.from({ length: workerCount }, (_, w) => new Promise((resolve, reject) => {
     const shardPath = path.join(opts.out, `shard_${String(w).padStart(2, '0')}.bin`);
     const worker = new Worker(__filename, {
-      workerData: { workerId: w, sharedCtrl, jobs, shardPath }
+      workerData: { workerId: w, sharedCtrl, jobs, shardPath, teacherWeightsPath: opts.teacherWeights }
     });
     worker.on('message', resolve);
     worker.on('error', reject);
@@ -330,6 +380,7 @@ async function main() {
     totalRows,
     mode: opts.mode,
     preset: opts.preset,
+    teacherWeights: opts.teacherWeights ? path.basename(opts.teacherWeights) : null,
     seed: opts.seed,
     elapsedSeconds: Number(elapsedSec.toFixed(2)),
     turnsPerSecond: Number((totalTurns / Math.max(0.001, elapsedSec)).toFixed(1)),

@@ -439,7 +439,7 @@ function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scor
         (warned + stall) * weights.warning +
         postFoul + impendingGoalBonus;
       const w = nnCtx.weight;
-      const scale = nnCtx.scale ?? (weights.goal * 0.45);
+      const scale = nnCtx.scale ?? (weights.goal * 0.12);
       return (1 - w) * hPositional + w * (nnRes.value * scale) + hardRules;
     }
   }

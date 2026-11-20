@@ -147,10 +147,10 @@ function plan(input, team = 1, config = {}) {
     };
   }
   const nnWeight = nnModel ? (settings.nnWeight ?? 0.50) : 0;
-  const nnCtx = (nnModel && nnWeight > 0) ? {
+  const nnCtx = nnModel ? {
     model: nnModel,
     weight: nnWeight,
-    scale: settings.nnScale ?? (weights.goal * 0.45),
+    scale: settings.nnScale ?? (weights.goal * 0.12),
     classic,
     stats: state.stats,
     blitz: M.rule(state.mode, 'blitz'),
@@ -503,12 +503,14 @@ function plan(input, team = 1, config = {}) {
   bestR0 = seedRes.r0;
   bestMin = seedRes.minVal ?? seedRes.value;
   bestAvg01 = seedRes.avg01;
+  const policyTrace = config.tracePolicy === true ? { proposals: [], lineage: new WeakMap() } : null;
 
-  function consider(moves, primaryStrike = false, keepDefSafe = false) {
+  function consider(moves, primaryStrike = false, keepDefSafe = false, source = null) {
     if (evaluated >= settings.candidates) return false;
     const pk = planKey(moves, 0);
     if (seenPlans.has(pk)) return false;
     seenPlans.add(pk);
+    if (policyTrace && source) policyTrace.lineage.set(moves, source);
     const res = score(moves, primaryStrike, keepDefSafe);
     if (res.value > bestScore + 1e-8) {
       best = moves;
@@ -519,6 +521,38 @@ function plan(input, team = 1, config = {}) {
       nearWobbles = 0;
     }
     return true;
+  }
+
+  function considerPolicy(moves, primaryStrike) {
+    const source = policyTrace ? { proposal: policyTrace.proposals.length, refined: false } : null;
+    const submitted = consider(moves, primaryStrike, false, source);
+    if (source) policyTrace.proposals.push({ plans: M.validatePlans(moves), submitted });
+  }
+
+  function policyRefinement(base) {
+    const source = policyTrace?.lineage.get(base);
+    return source && { proposal: source.proposal, refined: true };
+  }
+
+  // 1.5 Neural Policy Candidate Seeding (proposes learned coordinated 3-skater plays before single-skater sweep
+  //     so Stages 2-4 refine around the neural play whenever it beats legacy)
+  if (nnModel && settings.nnPolicy !== false && evaluated < settings.candidates) {
+    syncSlidesFromBodies(state.bodies);
+    const ball0 = state.bodies[6], ballR0 = ball0.radius || 18;
+    const ownPerm = [0, 1, 2];
+    const ownObs = encodeState(state, team, {
+      strikeOwn: strikeAccess(state.bodies, team, ball0.x, ball0.y, ballR0),
+      strikeOther: strikeAccess(state.bodies, 1 - team, ball0.x, ball0.y, ballR0),
+      coneOwn: coneCover(state.bodies, team, ball0.x, ball0.y, state.fouls),
+      coneOther: coneCover(state.bodies, 1 - team, ball0.x, ball0.y, state.fouls)
+    }, new Float32Array(NN_INPUT_DIM), ownPerm);
+    const polRes = forward(ownObs, true, nnModel);
+    if (polRes) {
+      considerPolicy(decodePolicyPlans(polRes.polOut, state, team, ownPerm, classic, 0, random), true);
+      if (settings.candidates >= 36) {
+        considerPolicy(decodePolicyPlans(polRes.polOut, state, team, ownPerm, classic, 0.20, random), false);
+      }
+    }
   }
 
   // 2. Single-skater interleaved option sweep
@@ -532,27 +566,7 @@ function plan(input, team = 1, config = {}) {
         next[i] = opt;
         const intent = getIntent(opt);
         const keepDef = step4Threat.shotDanger && i === defRoleIdx && j <= 8 && (intent === 'cover' || intent === 'guard');
-        consider(next, keepDef || (i === primaryAtkIdx && j <= 8 && (intent === 'shoot' || intent === 'carry' || intent === 'magnet')), keepDef);
-      }
-    }
-  }
-
-  // 2.5 Neural Policy Candidate Seeding (proposes learned coordinated 3-skater plays within candidate cap)
-  if (nnModel && settings.nnPolicy !== false && evaluated < settings.candidates * 0.68) {
-    syncSlidesFromBodies(state.bodies);
-    const ball0 = state.bodies[6], ballR0 = ball0.radius || 18;
-    const ownPerm = [0, 1, 2];
-    const ownObs = encodeState(state, team, {
-      strikeOwn: strikeAccess(state.bodies, team, ball0.x, ball0.y, ballR0),
-      strikeOther: strikeAccess(state.bodies, 1 - team, ball0.x, ball0.y, ballR0),
-      coneOwn: coneCover(state.bodies, team, ball0.x, ball0.y, state.fouls),
-      coneOther: coneCover(state.bodies, 1 - team, ball0.x, ball0.y, state.fouls)
-    }, new Float32Array(NN_INPUT_DIM), ownPerm);
-    const polRes = forward(ownObs, true, nnModel);
-    if (polRes) {
-      consider(decodePolicyPlans(polRes.polOut, state, team, ownPerm, classic, 0, random), true, false);
-      if (settings.candidates >= 36) {
-        consider(decodePolicyPlans(polRes.polOut, state, team, ownPerm, classic, 0.20, random), false, false);
+        consider(next, keepDef || (i === primaryAtkIdx && j <= 8 && (intent === 'shoot' || intent === 'carry' || intent === 'magnet')), keepDef, policyRefinement(best));
       }
     }
   }
@@ -650,7 +664,7 @@ function plan(input, team = 1, config = {}) {
         next[i].spin = 0;
       }
     }
-    consider(next, false);
+    consider(next, false, false, policyRefinement(best));
   }
 
   // 5. Optional screenTop path when caller explicitly specifies settings.screenTop
@@ -1151,9 +1165,10 @@ function plan(input, team = 1, config = {}) {
   }
 
   const chosen = choose(finalPool, settings.temperature, random, style);
+  const policy = policyTrace && { proposals: policyTrace.proposals, selectedFrom: policyTrace.lineage.get(chosen.moves) ?? null };
   return {
     plans: M.validatePlans(chosen.moves),
-    diagnostics: { level, ...(nnModel ? { nn: true } : {}), candidates: evaluated, simulations, ticks, score: chosen.value, milliseconds: performance.now() - started }
+    diagnostics: { level, ...(nnModel ? { nn: true } : {}), ...(policyTrace ? { policy } : {}), candidates: evaluated, simulations, ticks, score: chosen.value, milliseconds: performance.now() - started }
   };
 }
 
