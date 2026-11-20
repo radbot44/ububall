@@ -9,6 +9,10 @@ function decode(text) {
 }
 const random = () => encode(crypto.getRandomValues(new Uint8Array(32)));
 const canonicalSecret = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+const pkceHash = /^[A-Za-z0-9_-]{43}$/;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+export const MOBILE_ORIGIN = 'https://localhost';
+
 let cachedSecret, cachedKey;
 function signingKey(secret) {
   if (typeof secret !== 'string' || !canonicalSecret.test(secret)) throw new Error('Session secret is not configured.');
@@ -33,13 +37,22 @@ async function unseal(token, secret, purpose) {
     if (pieces.length !== 2 || !await crypto.subtle.verify('HMAC', await signingKey(secret), decode(pieces[1]), encoder.encode(pieces[0]))) return null;
     const value = JSON.parse(decoder.decode(decode(pieces[0])));
     if (!value || typeof value !== 'object' || value.purpose !== purpose) return null;
-    if ((value.purpose !== 'session' || value.guest) && (!Number.isSafeInteger(value.expires) || value.expires <= Date.now() / 1000)) return null;
+    const persistentDiscord = (value.purpose === 'session' || value.purpose === 'mobile') && !value.guest;
+    if (!persistentDiscord && (!Number.isSafeInteger(value.expires) || value.expires <= Date.now() / 1000)) return null;
     return value;
   } catch { return null; }
 }
 function cookie(request, name) {
   const matches = (request.headers.get('Cookie') || '').split(';').map(s => s.trim()).filter(s => s.startsWith(name + '='));
   return matches.length === 1 ? matches[0].slice(name.length + 1) : '';
+}
+function bearer(request) {
+  const header = request.headers.get('Authorization') || '';
+  if (!header.startsWith('Bearer ')) return '';
+  return header.slice(7).trim();
+}
+async function sha256Base64Url(text) {
+  return encode(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(text))));
 }
 const indefinite = 34560000;
 const setCookie = (name, value, seconds) => `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${seconds}`;
@@ -70,30 +83,73 @@ export function activityOrigin(env) {
     ? `https://${env.DISCORD_CLIENT_ID}.discordsays.com` : null;
 }
 export function requestOrigin(env, value) {
+  if (value?.mobile) return MOBILE_ORIGIN;
   return value?.instance ? activityOrigin(env) : origin(env);
 }
+export function isMobileOrigin(request) {
+  return request.headers.get('Origin') === MOBILE_ORIGIN;
+}
+export function corsHeaders(request) {
+  if (!isMobileOrigin(request)) return {};
+  return { 'Access-Control-Allow-Origin': MOBILE_ORIGIN, 'Vary': 'Origin' };
+}
 const GUEST = /^g_[A-Za-z0-9_-]{43}$/;
+function validDiscordOrGuest(value) {
+  if (!value || !pkceHash.test(value.csrf || '')) return false;
+  const discord = value.guest === undefined && discordId.test(value.owner) && (value.alias === undefined || GUEST.test(value.alias));
+  const guest = value.guest === true && GUEST.test(value.owner) && value.alias === undefined;
+  return discord || guest;
+}
 // Guest IDs can never match a Discord ID, so they can never reach a mint collection.
 export async function session(request, env) {
-  const embedded = activityOrigin(env);
   const source = request.headers.get('Origin');
+  const mobileToken = bearer(request);
+  if (mobileToken || source === MOBILE_ORIGIN) {
+    if (source && source !== MOBILE_ORIGIN) return null;
+    const value = await unseal(mobileToken, env.SESSION_SECRET, 'mobile');
+    return validDiscordOrGuest(value) ? { ...value, mobile: true } : null;
+  }
+  const embedded = activityOrigin(env);
   const activity = embedded && (source === embedded || (!source &&
     (new URL(request.url).origin === embedded || cookie(request, activityName))));
   const value = await unseal(cookie(request, activity ? activityName : sessionName), env.SESSION_SECRET, activity ? 'activity' : 'session');
-  if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value.csrf)) return null;
+  if (!value || !pkceHash.test(value.csrf)) return null;
   if (activity) return discordId.test(value.owner) && validInstance(value.instance) ? value : null;
-  const discord = value.guest === undefined && discordId.test(value.owner) && (value.alias === undefined || GUEST.test(value.alias));
-  const guest = value.guest === true && GUEST.test(value.owner) && value.alias === undefined;
-  return discord || guest ? value : null;
+  return validDiscordOrGuest(value) ? value : null;
 }
-export async function guest(env) {
-  const value = { purpose: 'session', owner: 'g_' + random(), guest: true, csrf: random(), expires: Math.floor(Date.now() / 1000) + 604800 };
-  return { value, cookie: setCookie(sessionName, await seal(value, env.SESSION_SECRET), 604800) };
+export async function guest(env, options = {}) {
+  const mobile = Boolean(options?.mobile);
+  const value = { purpose: mobile ? 'mobile' : 'session', owner: 'g_' + random(), guest: true, csrf: random(), expires: Math.floor(Date.now() / 1000) + 604800 };
+  const sealed = await seal(value, env.SESSION_SECRET);
+  return mobile ? { value: { ...value, mobile: true }, token: sealed, cookie: null } : { value, cookie: setCookie(sessionName, sealed, 604800) };
 }
 export function mutationAllowed(request, env, value) {
   return request.headers.get('Origin') === requestOrigin(env, value) && request.headers.get('X-Ubu-CSRF') === value.csrf;
 }
-export function logoutCookie(env, value) { return value?.instance ? activityCookie(env, '', 0) : setCookie(sessionName, '', 0); }
+export function logoutCookie(env, value) {
+  if (value?.mobile) return null;
+  return value?.instance ? activityCookie(env, '', 0) : setCookie(sessionName, '', 0);
+}
+export async function issueSocketTicket(sessionValue, matchId, env) {
+  if (!sessionValue || sessionValue.instance || !uuidPattern.test(matchId || '')) throw new Error('Invalid socket ticket request.');
+  return seal({
+    purpose: 'socket',
+    match: matchId,
+    owner: sessionValue.owner,
+    ...(sessionValue.guest ? { guest: true } : {}),
+    ...(sessionValue.alias ? { alias: sessionValue.alias } : {}),
+    ...(sessionValue.name ? { name: sessionValue.name } : {}),
+    ...(sessionValue.mobile ? { mobile: true } : {}),
+    csrf: sessionValue.csrf,
+    expires: Math.floor(Date.now() / 1000) + 30
+  }, env.SESSION_SECRET);
+}
+export async function verifySocketTicket(ticket, matchId, env) {
+  if (!ticket || !uuidPattern.test(matchId || '')) return null;
+  const value = await unseal(ticket, env.SESSION_SECRET, 'socket');
+  if (!value || value.match !== matchId || !validDiscordOrGuest(value)) return null;
+  return value.mobile ? { ...value, mobile: true } : value;
+}
 
 const discordApi = 'https://discord.com/api/v10';
 async function exchange(env, code, redirect, fetchDiscord) {
@@ -130,39 +186,43 @@ export async function activityParticipants(env, instance, fetchDiscord = fetch) 
 export async function activityMember(env, instance, owner, fetchDiscord = fetch) {
   return (await activityParticipants(env, instance, fetchDiscord))?.includes(owner) ?? false;
 }
-export async function refreshProfile(session, env, fetchDiscord = fetch) {
-  if (!session || session.guest || !discordId.test(session.owner)) throw new Error('Invalid session.');
+export async function refreshProfile(sessionValue, env, fetchDiscord = fetch) {
+  if (!sessionValue || sessionValue.guest || !discordId.test(sessionValue.owner)) throw new Error('Invalid session.');
   const now = Date.now();
-  const throttled = Number.isSafeInteger(session.refreshed) && now - session.refreshed < 60000;
-  let name = session.name, avatar = session.avatar, refreshed = session.refreshed;
+  const throttled = Number.isSafeInteger(sessionValue.refreshed) && now - sessionValue.refreshed < 60000;
+  let name = sessionValue.name, avatar = sessionValue.avatar, refreshed = sessionValue.refreshed;
   if (env.DISCORD_ACTIVITY_BOT_TOKEN && !throttled) {
     refreshed = now;
     try {
-      const response = await fetchDiscord(`${discordApi}/users/${session.owner}`, {
+      const response = await fetchDiscord(`${discordApi}/users/${sessionValue.owner}`, {
         headers: { Authorization: `Bot ${env.DISCORD_ACTIVITY_BOT_TOKEN}` }, signal: AbortSignal.timeout(5000)
       });
       if (response.ok) {
         const user = await response.json();
-        if (user?.id === session.owner) {
+        if (user?.id === sessionValue.owner) {
           const fresh = [user.global_name, user.username].find(n => typeof n === 'string' && n.trim())?.trim().slice(0, 32);
           if (fresh) name = fresh;
-          if (session.instance) avatar = typeof user.avatar === 'string' && /^(a_)?[0-9a-f]{32}$/.test(user.avatar) ? user.avatar : null;
+          if (sessionValue.instance) avatar = typeof user.avatar === 'string' && /^(a_)?[0-9a-f]{32}$/.test(user.avatar) ? user.avatar : null;
         }
       }
     } catch {}
   }
+  const purpose = sessionValue.mobile ? 'mobile' : (sessionValue.instance ? 'activity' : 'session');
   const sessionToken = await seal({
-    purpose: session.instance ? 'activity' : 'session',
-    owner: session.owner,
+    purpose,
+    owner: sessionValue.owner,
     ...(name ? { name } : {}),
-    csrf: session.csrf,
-    ...(session.alias ? { alias: session.alias } : {}),
+    csrf: sessionValue.csrf,
+    ...(sessionValue.alias ? { alias: sessionValue.alias } : {}),
     ...(refreshed !== undefined ? { refreshed } : {}),
-    ...(session.instance ? { instance: session.instance, avatar, launch: session.launch, issued: session.issued, expires: session.expires } : {})
+    ...(sessionValue.instance ? { instance: sessionValue.instance, avatar, launch: sessionValue.launch, issued: sessionValue.issued, expires: sessionValue.expires } : {})
   }, env.SESSION_SECRET);
-  const maxAge = session.instance ? Math.max(0, (Number.isSafeInteger(session.expires) ? session.expires : Math.floor(now / 1000) + 86400) - Math.floor(now / 1000)) : indefinite;
-  const cookie = session.instance ? activityCookie(env, sessionToken, maxAge) : setCookie(sessionName, sessionToken, indefinite);
-  return { session: { owner: session.owner, name: name ?? null, csrf: session.csrf }, cookie };
+  if (sessionValue.mobile) {
+    return { session: { owner: sessionValue.owner, name: name ?? null, csrf: sessionValue.csrf, token: sessionToken }, cookie: null };
+  }
+  const maxAge = sessionValue.instance ? Math.max(0, (Number.isSafeInteger(sessionValue.expires) ? sessionValue.expires : Math.floor(now / 1000) + 86400) - Math.floor(now / 1000)) : indefinite;
+  const cookieHeader = sessionValue.instance ? activityCookie(env, sessionToken, maxAge) : setCookie(sessionName, sessionToken, indefinite);
+  return { session: { owner: sessionValue.owner, name: name ?? null, csrf: sessionValue.csrf }, cookie: cookieHeader };
 }
 
 export async function activityLogin(request, env, data, fetchDiscord = fetch) {
@@ -205,8 +265,18 @@ export function safeReturnPath(raw, env) {
 export async function login(request, env) {
   const reqUrl = new URL(request.url);
   const returnTo = safeReturnPath(reqUrl.searchParams.get('return') || reqUrl.searchParams.get('return_to'), env);
+  const mobile = reqUrl.searchParams.get('platform') === 'android';
+  const challenge = reqUrl.searchParams.get('challenge') || '';
+  if (mobile && !pkceHash.test(challenge)) {
+    return new Response('Invalid mobile login challenge.', { status: 400, headers: {
+      'Content-Type': 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'
+    } });
+  }
   const nonce = random();
-  const token = await seal({ purpose: 'oauth', nonce, returnTo, expires: Math.floor(Date.now() / 1000) + 600 }, env.SESSION_SECRET);
+  const token = await seal({
+    purpose: 'oauth', nonce, returnTo, ...(mobile ? { mobile: true, challenge } : {}),
+    expires: Math.floor(Date.now() / 1000) + 600
+  }, env.SESSION_SECRET);
   const url = new URL('https://discord.com/oauth2/authorize');
   url.search = new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID, response_type: 'code', scope: 'identify',
     redirect_uri: origin(env) + '/auth/callback', state: nonce }).toString();
@@ -222,6 +292,19 @@ export async function callback(request, env, fetchDiscord = fetch) {
   try {
     const { owner, name } = await exchange(env, code, origin(env) + '/auth/callback', fetchDiscord);
     const returnTo = safeReturnPath(state.returnTo, env);
+    if (state.mobile) {
+      if (!pkceHash.test(state.challenge || '')) return failed();
+      const handoff = await seal({
+        purpose: 'mobile-handoff', owner, ...(name ? { name } : {}), challenge: state.challenge, returnTo,
+        expires: Math.floor(Date.now() / 1000) + 60
+      }, env.SESSION_SECRET);
+      const headers = new Headers({
+        Location: `${origin(env)}/auth-complete.html?mobile=1#ticket=${handoff}`,
+        'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'
+      });
+      headers.append('Set-Cookie', setCookie(stateName, '', 0));
+      return new Response(null, { status: 302, headers });
+    }
     // A guest signing in keeps their match seats: the Discord session names the guest ID it replaced.
     const previous = await session(request, env);
     // The display name is shown in the header; the ID never is.
@@ -232,4 +315,36 @@ export async function callback(request, env, fetchDiscord = fetch) {
     headers.append('Set-Cookie', setCookie(sessionName, sessionToken, indefinite));
     return new Response(null, { status: 302, headers });
   } catch { return failed(); }
+}
+export async function mobileExchange(request, env, data) {
+  const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...corsHeaders(request) };
+  if (!isMobileOrigin(request)) return Response.json({ error: 'Invalid mobile origin.' }, { status: 403, headers });
+  const { ticket, verifier } = data || {};
+  if (typeof ticket !== 'string' || !ticket || ticket.length > 1024 || typeof verifier !== 'string' || !pkceHash.test(verifier)) {
+    return Response.json({ error: 'Invalid mobile sign-in request.' }, { status: 400, headers });
+  }
+  const handoff = await unseal(ticket, env.SESSION_SECRET, 'mobile-handoff');
+  if (!handoff || !discordId.test(handoff.owner) || !pkceHash.test(handoff.challenge)) {
+    return Response.json({ error: 'Mobile sign-in expired. Please try again.' }, { status: 401, headers });
+  }
+  const computed = await sha256Base64Url(verifier);
+  if (computed !== handoff.challenge) {
+    return Response.json({ error: 'Invalid mobile sign-in verifier.' }, { status: 403, headers });
+  }
+  const previous = await session(request, env);
+  const csrf = random();
+  const token = await seal({
+    purpose: 'mobile',
+    owner: handoff.owner,
+    ...(handoff.name ? { name: handoff.name } : {}),
+    csrf,
+    ...(previous?.guest ? { alias: previous.owner } : {})
+  }, env.SESSION_SECRET);
+  return Response.json({
+    owner: handoff.owner,
+    name: handoff.name ?? null,
+    csrf,
+    token,
+    returnTo: safeReturnPath(handoff.returnTo, env)
+  }, { status: 200, headers });
 }

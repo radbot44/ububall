@@ -19,17 +19,53 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 12px;
+      gap: 14px;
+      text-align: center;
+      padding: 24px;
     }
+    .return-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 18px;
+      border-radius: 10px;
+      background: #0066FF;
+      color: #FFFFFF;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .return-btn[hidden] { display: none; }
   </style>
 </head>
 <body>
   <div class="status">
-    <p>Signing in to Ububall…</p>
+    <p id="status-text">Signing in to Ububall…</p>
+    <a id="mobile-return" class="return-btn" href="ububall://auth" hidden>Return to Ububall App</a>
   </div>
   <script>
     'use strict';
     (() => {
+      const params = new URLSearchParams(location.search);
+      if (params.get('mobile') === '1') {
+        const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+        const ticket = hashParams.get('ticket') || '';
+        const deepLink = 'ububall://auth' + (ticket ? '#ticket=' + encodeURIComponent(ticket) : '');
+        const btn = document.getElementById('mobile-return');
+        const txt = document.getElementById('status-text');
+        if (history.replaceState) {
+          history.replaceState(null, '', location.pathname + location.search);
+        }
+        if (btn) {
+          btn.href = deepLink;
+          btn.hidden = false;
+        }
+        if (txt) {
+          txt.textContent = 'Signed in! Returning to Ububall…';
+        }
+        location.replace(deepLink);
+        return;
+      }
+
       const isPopup = window.name === 'ubu_discord_auth' || Boolean(window.opener);
       try {
         if (typeof BroadcastChannel !== 'undefined') {

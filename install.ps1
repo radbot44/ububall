@@ -84,7 +84,7 @@ $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 if ($LASTEXITCODE -ne 0) { throw 'Could not protect the settings directory.' }
 # Copy only Git's source file list plus new deployment tooling before its first commit.
 # Credentials, dependencies and runtime state are never copied from the source.
-$files = @(& git -C $source ls-files)
+$files = @(& git -C $source ls-files | Where-Object { $_ -notlike 'mobile/*' })
 if ($LASTEXITCODE -ne 0) { throw 'Could not list source files.' }
 $files = @($files + @('install.ps1', 'deploy.ps1', 'update.ps1', 'scripts/deploy-config.cjs', 'test/deploy-config.test.cjs') | Sort-Object -Unique)
 $oldHashes = @{}

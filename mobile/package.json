@@ -1,0 +1,30 @@
+{
+  "name": "ububall-mobile",
+  "private": true,
+  "description": "Capacitor Android/iOS native wrapper for Ububall (consumes ../dist/public)",
+  "scripts": {
+    "prepare:web": "node ../scripts/prepare-assets.cjs",
+    "sync": "node ../scripts/prepare-assets.cjs && cap sync android",
+    "open:android": "cap open android",
+    "run:android": "node ../scripts/prepare-assets.cjs && cap run android",
+    "build:debug": "node ../scripts/prepare-assets.cjs && cap sync android && node -e \"const r=require('child_process').spawnSync(process.platform==='win32'?'cmd.exe':'./gradlew',process.platform==='win32'?['/c','gradlew.bat','assembleDebug']:['assembleDebug'],{cwd:'android',stdio:'inherit'});process.exit(r.status??1)\"",
+    "build:release": "node ../scripts/prepare-assets.cjs && cap sync android && node -e \"const r=require('child_process').spawnSync(process.platform==='win32'?'cmd.exe':'./gradlew',process.platform==='win32'?['/c','gradlew.bat','bundleRelease']:['bundleRelease'],{cwd:'android',stdio:'inherit'});process.exit(r.status??1)\""
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/browser": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/haptics": "^8.0.0",
+    "@capacitor/screen-orientation": "^8.0.0",
+    "@capacitor/share": "^8.0.0",
+    "@capacitor/splash-screen": "^8.0.0",
+    "@capacitor/status-bar": "^8.0.0",
+    "@capacitor/system-bars": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.0.0"
+  }
+}

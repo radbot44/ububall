@@ -8,7 +8,8 @@
   let refreshRun = 0, inFlight = null, inFlightOwner;
 
   async function request(init) {
-    const response = await fetch('/api/starter', init);
+    const f = window.ubuPlatform?.fetch || fetch;
+    const response = init === undefined ? await f('/api/starter') : await f('/api/starter', init);
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'The mint is unavailable. Try again.');
     return data;

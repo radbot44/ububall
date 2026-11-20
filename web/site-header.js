@@ -1,6 +1,7 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id);
+  const apiFetch = (path, init) => (window.ubuPlatform?.fetch ? window.ubuPlatform.fetch(path, init) : fetch(path, init));
 
   let currentSession = null;
   let loginConfigured = false;
@@ -50,6 +51,11 @@
       });
     }
     const returnPath = (location.pathname === '/index.html' ? '/' : location.pathname) + location.search + location.hash;
+    if (window.ubuPlatform?.isNative) {
+      authPendingUntil = Date.now() + 600000;
+      void window.ubuPlatform.openDiscordLogin(returnPath).catch(() => {});
+      return;
+    }
     const redirect = () => {
       location.assign('/auth/discord?return=' + encodeURIComponent(returnPath));
     };
@@ -108,7 +114,7 @@
   async function checkSession(broadcast = true) {
     const seq = ++sessionSeq;
     try {
-      const res = await fetch('/api/session', { signal: window.ubuActivity?.signal });
+      const res = await apiFetch('/api/session', { signal: window.ubuActivity?.signal });
       if (seq !== sessionSeq) return currentSession;
       if (res.status === 503) {
         const err = await res.json().catch(() => ({}));
@@ -119,6 +125,7 @@
         return currentSession;
       }
       if (res.status === 401 || res.status === 403) {
+        window.ubuPlatform?.clearMobileToken?.();
         const prevOwner = currentSession?.owner || null;
         currentSession = null;
         updateHeaderUI();
@@ -130,6 +137,7 @@
       loginConfigured = true;
       const data = await res.json();
       if (seq !== sessionSeq) return currentSession;
+      if (data?.site) window.ubuPlatform?.setSiteOrigin?.(data.site);
       const prevOwner = currentSession?.owner || null;
       const prevName = currentSession?.name || null;
       currentSession = (data?.owner || data?.guest) ? data : null;
@@ -187,7 +195,7 @@
     if (!currentSession || loggingOut) return;
     loggingOut = true;
     try {
-      await fetch('/api/logout', {
+      await apiFetch('/api/logout', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -197,6 +205,7 @@
       });
     } catch {}
     try {
+      window.ubuPlatform?.clearMobileToken?.();
       const accountDialog = $('account-dialog');
       if (accountDialog && accountDialog.open) {
         accountDialog.close();
@@ -267,7 +276,7 @@
         const originalText = refreshBtn.textContent;
         refreshBtn.textContent = 'Refreshing…';
         try {
-          const res = await fetch('/api/session/refresh', {
+          const res = await apiFetch('/api/session/refresh', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -278,7 +287,9 @@
           if (res.ok) {
             const data = await res.json();
             if (currentSession?.owner !== requestOwner) return;
-            currentSession = { ...currentSession, ...data };
+            if (data?.token) window.ubuPlatform?.setMobileToken?.(data.token);
+            const { token: _unusedToken, ...sessionFields } = data || {};
+            currentSession = { ...currentSession, ...sessionFields };
             updateHeaderUI();
             window.dispatchEvent(new CustomEvent('ubu:session', { detail: currentSession }));
             authChannel?.postMessage({ type: 'session-changed' });

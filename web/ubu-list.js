@@ -216,7 +216,8 @@
   let configRequest = null, loading = null, loaded = false, generation = 0, accountEpoch = 0, favSeq = 0, owner;
   const changing = new Set();
   async function request(path, options) {
-    const response = await fetch(path, options);
+    const f = root.ubuPlatform?.fetch || fetch;
+    const response = options === undefined ? await f(path) : await f(path, options);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Could not load your ubus.');
     return data;

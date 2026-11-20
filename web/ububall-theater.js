@@ -842,8 +842,12 @@
       if (!blob) return;
       progress.value = 1;
       const name = replayFileName(slice.replay.recorded, slice.replay.title) + '.mp4';
-      const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
-      link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+      if (root?.ubuPlatform?.isNative && root.ubuPlatform.exportFile) {
+        void root.ubuPlatform.exportFile(blob, name).catch(() => {});
+      } else {
+        const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+        link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+      }
       status.textContent = `${status.textContent.startsWith('This browser') ? status.textContent + ' ' : ''}Saved ${name} (${(blob.size / 1e6).toFixed(1)} MB).`;
     }
 
@@ -1033,7 +1037,10 @@
       $('replay-export-video').onclick = () => { closeExportMenu(); openExport('video'); };
       $('replay-export-file').onclick = () => { closeExportMenu(); openExport('replay'); };
 
-      const canShareFiles = Boolean(navigator?.canShare && File && navigator.canShare({ files: [new File([], 'card.png', { type: 'image/png' })] }));
+      const canShareFiles = Boolean(
+        (root?.ubuPlatform?.isNative && root.ubuPlatform.canShare?.()) ||
+        (navigator?.canShare && File && navigator.canShare({ files: [new File([], 'card.png', { type: 'image/png' })] }))
+      );
       $('share-send').hidden = !canShareFiles;
       $('share-save').classList?.toggle?.('primary', !canShareFiles);
       $('replay-card').onclick = () => { closeExportMenu(); openShare(); };
@@ -1042,13 +1049,24 @@
         drawShareCard(event.target.checked);
       };
       $('share-send').onclick = async () => {
-        try { await navigator.share({ files: [await cardImage], text: 'A moment from ububall. Play at https://ububall.com' }); } catch {}
+        try {
+          const file = await cardImage;
+          if (root?.ubuPlatform?.isNative && root.ubuPlatform.exportFile) {
+            await root.ubuPlatform.exportFile(file, file.name || 'ububall-card.png', { text: 'A moment from ububall. Play at https://ububall.com' });
+          } else {
+            await navigator.share({ files: [file], text: 'A moment from ububall. Play at https://ububall.com' });
+          }
+        } catch {}
       };
       $('share-save').onclick = async () => {
         try {
           const file = await cardImage;
-          const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: file.name });
-          link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+          if (root?.ubuPlatform?.isNative && root.ubuPlatform.exportFile) {
+            await root.ubuPlatform.exportFile(file, file.name || 'ububall-card.png');
+          } else {
+            const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: file.name });
+            link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+          }
         } catch {}
       };
       $('share-close').onclick = () => $('share-dialog').close();

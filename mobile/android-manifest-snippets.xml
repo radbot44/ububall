@@ -1,0 +1,37 @@
+<!--
+  Paste these <intent-filter> blocks inside <activity android:name=".MainActivity" ...>
+  in mobile/android/app/src/main/AndroidManifest.xml after running `npx cap add android`.
+
+  Also ensure MainActivity has:
+    android:launchMode="singleTask"
+    android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
+-->
+
+<!-- 1. Custom scheme OAuth & app deep links (works immediately before App Links DNS verification) -->
+<intent-filter>
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data android:scheme="ububall" />
+</intent-filter>
+
+<!-- 2. Verified Android App Links for match invites, spectating, Mint, Collection & OAuth return -->
+<intent-filter android:autoVerify="true">
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data android:scheme="https" android:host="ububall.tch.one" android:pathPrefix="/" />
+</intent-filter>
+
+<!-- 3. Open .ubu certificates and .ububall replay archives directly from Android Files / Discord -->
+<intent-filter>
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data android:scheme="content" />
+    <data android:scheme="file" />
+    <data android:mimeType="*/*" />
+    <data android:host="*" />
+    <data android:pathPattern=".*\\.ubu" />
+    <data android:pathPattern=".*\\.ububall" />
+</intent-filter>

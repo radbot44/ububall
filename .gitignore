@@ -15,7 +15,15 @@ secrets/
 *.pem
 *.p12
 *.pfx
+*.jks
+*.keystore
 *.log
 wrangler.local.jsonc
 wrangler.deploy.jsonc
 /bench-results
+mobile/node_modules/
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/local.properties
+mobile/android/capacitor.settings.gradle

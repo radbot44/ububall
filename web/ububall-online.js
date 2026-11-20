@@ -1,6 +1,8 @@
 'use strict';
 function ububallOnline(hooks) {
   const $ = id => document.getElementById(id);
+  const apiFetch = (path, init) => (window.ubuPlatform?.fetch ? window.ubuPlatform.fetch(path, init) : fetch(path, init));
+  const publicOrigin = () => window.ubuPlatform?.publicOrigin?.() || session?.site || location.origin;
   const params = new URL(location.href).searchParams;
   const watchInvite = params.get('watch'), invite = watchInvite ? null : params.get('match');
   const activity = window.ubuActivity;
@@ -49,9 +51,10 @@ function ububallOnline(hooks) {
     catch (error) { status(error.message, true); }
   }
   async function refreshSession() {
-    const response = await fetch('/api/session', { signal: requests.signal });
+    const response = await apiFetch('/api/session', { signal: requests.signal });
     const nextSession = response.ok ? await readJson(response) : null;
     if (!response.ok || !nextSession) throw new Error('Could not check your session. Reopen online settings to retry.');
+    if (nextSession.site) window.ubuPlatform?.setSiteOrigin?.(nextSession.site);
     session = nextSession;
     account();
     const returnDest = invite ? '/?match=' + encodeURIComponent(invite) : (id ? '/?match=' + encodeURIComponent(id) : ((location.pathname === '/index.html' ? '/' : location.pathname) + location.search));
@@ -74,7 +77,7 @@ function ububallOnline(hooks) {
     if (activity && path.startsWith('/api/ububall') && path !== '/api/ububall/lobby') await lobbyReady;
     if (!playable()) await refreshSession();
     if (!playable()) throw new Error('Sign in with Discord or play as a guest below.');
-    const response = await fetch(path, { signal: requests.signal, headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf,
+    const response = await apiFetch(path, { signal: requests.signal, headers: { 'Content-Type': 'application/json', 'X-Ubu-CSRF': session.csrf,
       ...(activity ? { 'X-Ubu-Connection': connection } : {}) }, ...(data === undefined ? {} : { method: 'POST', body: JSON.stringify(data) }) });
     const result = await readJson(response);
     if (disposed) throw new DOMException('Activity closed.', 'AbortError');
@@ -90,7 +93,7 @@ function ububallOnline(hooks) {
     const encodedMatch = encodeURIComponent(match);
     if (key === 'activity') return api('/api/ububall/' + encodedMatch + '/activity-watch-state');
     if (activity) await lobbyReady;
-    const response = await fetch('/api/ububall/' + encodedMatch + '/watch-state?key=' + encodeURIComponent(key), {
+    const response = await apiFetch('/api/ububall/' + encodedMatch + '/watch-state?key=' + encodeURIComponent(key), {
       signal: requests.signal, headers: activity ? { 'X-Ubu-Connection': connection } : {} });
     const result = await readJson(response);
     if (!response.ok || !result) throw new Error(result?.error || (response.status >= 500 ? 'Server unavailable. Try again shortly.' : 'Could not reach the match.'));
@@ -146,7 +149,7 @@ function ububallOnline(hooks) {
       return;
     }
     $('lobby-invite').hidden = next.paired;
-    $('online-invite').value = location.origin + '/?match=' + id;
+    $('online-invite').value = publicOrigin() + '/?match=' + id;
     const other = 1 - next.seat, them = next.names[other] || (next.occupied[other] ? 'Your opponent' : 'Opponent'), ready = next.ready[next.seat];
     if (before && !before.occupied[other] && next.occupied[other]) nudge(`${them} joined`);
     if (before && !before.rematch[other] && next.rematch[other]) nudge(`${them} wants a rematch`);
@@ -188,13 +191,35 @@ function ububallOnline(hooks) {
   const title = document.title;
   function nudge(text) { if (document.hidden) document.title = '● ' + text + ' · ' + title; }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = title; }, { signal: requests.signal });
+  let connectSeq = 0;
   function connect() {
     if (disposed || stopped || outdated || !id) return;
+    const seq = ++connectSeq;
     connecting = true; showLoading();
-    const path = watchKey === 'activity' ? '/activity-watch-socket?connection=' + connection :
-      watchKey ? '/watch-socket?key=' + encodeURIComponent(watchKey) + (activity ? '&connection=' + connection : '') : '/socket' + (activity ? '?connection=' + connection : '');
-    const current = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/ububall/' + encodeURIComponent(id) + path);
-    socket = current;
+    if (window.ubuPlatform?.isNative && !watchKey && !activity) {
+      api('/api/ububall/' + encodeURIComponent(id) + '/socket-ticket', {})
+        .then(res => openSocket(res?.ticket || ''))
+        .catch(error => {
+          if (disposed || stopped || outdated || seq !== connectSeq) return;
+          connecting = false; showLoading();
+          status(error.message, true);
+          retry = setTimeout(connect, 2000);
+        });
+      return;
+    }
+    openSocket('');
+    function openSocket(ticket) {
+      if (disposed || stopped || outdated || !id || seq !== connectSeq) return;
+      const ticketQuery = ticket ? '?ticket=' + encodeURIComponent(ticket) : '';
+      const path = watchKey === 'activity' ? '/activity-watch-socket?connection=' + connection :
+        watchKey ? '/watch-socket?key=' + encodeURIComponent(watchKey) + (activity ? '&connection=' + connection : '') :
+        '/socket' + (activity ? '?connection=' + connection : ticketQuery);
+      const fullPath = '/api/ububall/' + encodeURIComponent(id) + path;
+      const wsEndpoint = window.ubuPlatform?.wsUrl
+        ? window.ubuPlatform.wsUrl(fullPath)
+        : ((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + fullPath);
+      const current = new WebSocket(wsEndpoint);
+      socket = current;
     function ended(code) {
       if (![4001, 4002, 4003].includes(code)) return false;
       connecting = false; stopped = true; showLoading(); hooks.onDisconnect(false);
@@ -231,6 +256,7 @@ function ububallOnline(hooks) {
         connect();
       }, 1500);
     };
+    }
   }
   async function enter(matchId, initial, key = null) {
     if (disposed || outdated) return;
@@ -373,10 +399,13 @@ function ububallOnline(hooks) {
     finally { $('online-create').disabled = !playable(); }
   };
   async function guestSession() {
-    const response = await fetch('/api/guest', { method: 'POST', signal: requests.signal });
+    const response = await apiFetch('/api/guest', { method: 'POST', signal: requests.signal });
     const result = await readJson(response);
     if (!response.ok || !result) throw new Error(result?.error || 'Could not start a guest session.');
-    session = result; account();
+    if (result.token) window.ubuPlatform?.setMobileToken?.(result.token);
+    if (result.site) window.ubuPlatform?.setSiteOrigin?.(result.site);
+    const { token: _unusedToken, ...sessionFields } = result;
+    session = sessionFields; account();
   }
   async function ensureSession() {
     await refreshSession();
@@ -715,7 +744,7 @@ function ububallOnline(hooks) {
       if (!state?.watchAllowed) return;
       try { receive(await api('/api/ububall/' + encodeURIComponent(id) + '/share-watch', {})); }
       catch (error) { status(error.message, true); return; }
-      const link = new URL('/', session?.site || window.location.origin);
+      const link = new URL('/', publicOrigin());
       link.searchParams.set('watch', id + '.' + state.watchKey);
       try { await navigator.clipboard.writeText(link.href); flashCopied(copy, 'Copied!'); }
       catch {
@@ -725,8 +754,10 @@ function ububallOnline(hooks) {
     };
   }
   // Phones get their share sheet, so the invite goes straight to a chat app.
-  $('online-share').hidden = !navigator.share || !matchMedia('(pointer: coarse)').matches;
-  $('online-share').onclick = () => navigator.share({ title: 'Ububall', text: 'Play me at Ububall', url: $('online-invite').value }).catch(() => {});
+  $('online-share').hidden = !(window.ubuPlatform?.isNative ? window.ubuPlatform.canShare() : (navigator.share && matchMedia('(pointer: coarse)').matches));
+  $('online-share').onclick = () => (window.ubuPlatform?.isNative
+    ? window.ubuPlatform.shareUrl({ title: 'Ububall', text: 'Play me at Ububall', url: $('online-invite').value })
+    : navigator.share({ title: 'Ububall', text: 'Play me at Ububall', url: $('online-invite').value })).catch(() => {});
   $('online-copy').onclick = async () => {
     try { await navigator.clipboard.writeText($('online-invite').value); flashCopied($('online-copy'), 'Copied!'); status(''); }
     catch { $('online-invite').select(); status('Could not copy the invite.', true); }

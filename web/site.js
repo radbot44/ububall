@@ -1766,7 +1766,8 @@
   });
 
   async function api(path, options) {
-    const response = await fetch(path, options);
+    const f = window.ubuPlatform?.fetch || fetch;
+    const response = options === undefined ? await f(path) : await f(path, options);
     const data = await response.json();
     if (!response.ok) { const error = new Error(data.error || 'The mint could not complete this request.'); error.status = response.status; throw error; }
     return data;
@@ -1836,14 +1837,23 @@
     }
   }
 
+  async function openImportedUbuBytes(bytes) {
+    try {
+      if (bytes.byteLength > ubuFile.MAX_BYTES) throw new Error('A .ubu file must contain 1–1024 bytes.');
+      const result = await inspect(bytes);
+      display(new TextDecoder().decode(bytes), result, true);
+      if (session?.owner) status('');
+    } catch (error) {
+      if (session?.owner) status(error.message);
+      else void gameUi.confirm({ title: 'Could not open .ubu file', message: error.message, confirmLabel: 'OK', cancelLabel: null });
+    }
+  }
+
   async function handleImportFile(event) {
     const file = event.target.files[0]; if (!file) return;
     try {
       if (file.size > ubuFile.MAX_BYTES) throw new Error('A .ubu file must contain 1–1024 bytes.');
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const result = await inspect(bytes);
-      display(new TextDecoder().decode(bytes), result, true);
-      if (session?.owner) status('');
+      await openImportedUbuBytes(new Uint8Array(await file.arrayBuffer()));
     } catch (error) {
       if (session?.owner) status(error.message);
       else void gameUi.confirm({ title: 'Could not open .ubu file', message: error.message, confirmLabel: 'OK', cancelLabel: null });
@@ -1852,11 +1862,20 @@
   for (const id of ['import', 'signed-out-import', 'recovery-import']) {
     $(id)?.addEventListener('change', handleImportFile);
   }
+  window.addEventListener('ubu:import-ubu-bytes', event => {
+    if (event.detail?.bytes) void openImportedUbuBytes(event.detail.bytes);
+  });
 
   $('download').addEventListener('click', () => {
     if (!current) return;
-    const url = URL.createObjectURL(new Blob([current.text], { type: 'application/json' }));
-    const link = document.createElement('a'); link.href = url; link.download = current.name.replaceAll(' ', '-') + '.ubu';
+    const blob = new Blob([current.text], { type: 'application/json' });
+    const filename = current.name.replaceAll(' ', '-') + '.ubu';
+    if (window.ubuPlatform?.isNative && window.ubuPlatform.exportFile) {
+      void window.ubuPlatform.exportFile(blob, filename).catch(() => {});
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a'); link.href = url; link.download = filename;
     document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
   // Packs sit under individual spotlights on the dark ice; after finishing a pack, new packs fade in.

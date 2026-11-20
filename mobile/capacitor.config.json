@@ -1,0 +1,26 @@
+{
+  "appId": "one.tch.ububall",
+  "appName": "Ububall",
+  "webDir": "../dist/public",
+  "backgroundColor": "#101112",
+  "server": {
+    "androidScheme": "https",
+    "hostname": "localhost"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 350,
+      "launchAutoHide": true,
+      "backgroundColor": "#101112",
+      "showSpinner": false
+    },
+    "SystemBars": {
+      "insetsHandling": "css"
+    }
+  }
+}

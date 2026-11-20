@@ -3508,6 +3508,7 @@
       const owned = Boolean(ownsFullscreen());
       const active = Boolean(d?.fullscreenElement) || Boolean(fullscreenDisplay?.matches);
       d?.body?.classList?.toggle?.('match-fullscreen', isMatchShot() && active);
+      getWin()?.ubuPlatform?.setImmersive?.(isMatchShot() && active);
       btn.hidden = !isMatchShot() || Boolean(state.inDiscord) || (!owned && (active || !d?.fullscreenEnabled));
       btn.disabled = Boolean(state.fullscreenRequest);
       const label = owned ? 'Exit fullscreen' : 'Enter fullscreen';
@@ -3558,6 +3559,7 @@
       if (state.fieldView) state.fieldView.portrait = next;
       getStadium()?.classList?.toggle?.('portrait-mode', next);
       getWin()?.ubuAudio?.setOrientation?.(next);
+      getWin()?.ubuPlatform?.setOrientation?.(next);
       const rot = getBtnRotate();
       if (rot) {
         rot.setAttribute('aria-pressed', String(next));

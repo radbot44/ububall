@@ -8,11 +8,17 @@ const ID = /^[A-Za-z0-9_-]{21}[AQgw]$/;
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const uuid = new RegExp('^' + UUID + '$');
 const watchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(watch-state|watch-socket)$');
-const matchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(join|team|rules|unready|state|socket|forfeit|rematch|skip-replay|leave|allow-watch|share-watch|activity-watch-state|activity-watch-socket)$');
+const matchRoute = new RegExp('^/api/ububall/(' + UUID + ')/(join|team|rules|unready|state|socket|socket-ticket|forfeit|rematch|skip-replay|leave|allow-watch|share-watch|activity-watch-state|activity-watch-socket)$');
 const COLLECTION_PAGE = 200;
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers
 } });
+function withCors(response, cors) {
+  if (!cors['Access-Control-Allow-Origin'] || response.status === 101 || response.webSocket) return response;
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(cors)) headers.set(key, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
 function configuration(env) {
   const keys = JSON.parse(env.MINT_PUBLIC_KEYS || '{}');
   if (!ID.test(env.MINT_ID || '') || !/^[A-Za-z0-9_-]{1,32}$/.test(env.MINT_KEY_ID || '') ||
@@ -221,20 +227,49 @@ export default {
       const asset = await env.ASSETS.fetch(request);
       return asset.status === 404 ? env.ASSETS.fetch(new Request(new URL('/effects.html', url), request)) : asset;
     }
+    if (path === '/.well-known/assetlinks.json' && request.method === 'GET') {
+      const fingerprints = String(env.ANDROID_SHA256_FINGERPRINTS || '').split(',')
+        .map(s => s.trim().toUpperCase())
+        .filter(s => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(s));
+      const pkg = String(env.ANDROID_PACKAGE_NAME || 'one.tch.ububall').trim();
+      if (!fingerprints.length || !/^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/.test(pkg)) {
+        return json({ error: 'Android App Links are not configured yet.' }, 404);
+      }
+      return Response.json([{
+        relation: ['delegate_permission/common.handle_all_urls'],
+        target: { namespace: 'android_app', package_name: pkg, sha256_cert_fingerprints: fingerprints }
+      }], { headers: { 'Cache-Control': 'public, max-age=3600', 'X-Content-Type-Options': 'nosniff' } });
+    }
     if (!path.startsWith('/api/') && !path.startsWith('/auth/')) return env.ASSETS.fetch(request);
+    const cors = auth.corsHeaders(request);
+    const reply = (data, status = 200, headers = {}) => json(data, status, { ...cors, ...headers });
+    if (request.method === 'OPTIONS' && path.startsWith('/api/') && auth.isMobileOrigin(request)) {
+      return new Response(null, { status: 204, headers: {
+        ...cors,
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Ubu-CSRF',
+        'Access-Control-Max-Age': '86400',
+        'Cache-Control': 'no-store'
+      } });
+    }
     try {
       if (path === '/api/config' && request.method === 'GET') {
         let config;
-        try { config = configuration(env); } catch { return json({ ready: false, login: auth.configured(env) }); }
-        return json({ ready: true, login: auth.configured(env), mint: config.mint, keys: config.keys, lifetimeLimit: config.limit });
+        try { config = configuration(env); } catch { return reply({ ready: false, login: auth.configured(env) }); }
+        return reply({ ready: true, login: auth.configured(env), mint: config.mint, keys: config.keys, lifetimeLimit: config.limit });
       }
-      if (!auth.configured(env)) return json({ error: 'Discord login is not configured yet.' }, 503);
+      if (!auth.configured(env)) return reply({ error: 'Discord login is not configured yet.' }, 503);
       const site = auth.origin(env), embedded = auth.activityOrigin(env);
-      if (url.origin !== site && url.origin !== embedded) return json({ error: 'Invalid site origin.' }, 400);
+      if (url.origin !== site && url.origin !== embedded) return reply({ error: 'Invalid site origin.' }, 400);
       if (path === '/auth/activity' && request.method === 'POST') {
         let data;
-        try { data = await body(request, 1536); } catch { return json({ error: 'Invalid Activity sign-in request.' }, 400); }
+        try { data = await body(request, 1536); } catch { return reply({ error: 'Invalid Activity sign-in request.' }, 400); }
         return auth.activityLogin(request, env, data);
+      }
+      if (path === '/api/auth/mobile' && request.method === 'POST') {
+        let data;
+        try { data = await body(request, 1536); } catch { return reply({ error: 'Invalid mobile sign-in request.' }, 400); }
+        return auth.mobileExchange(request, env, data);
       }
       if (url.origin === site && request.method === 'GET') {
         if (path === '/auth/discord') return auth.login(request, env);
@@ -244,48 +279,63 @@ export default {
       if (watch && request.method === 'GET') {
         const [, id, action] = watch, key = url.searchParams.get('key');
         const source = request.headers.get('Origin');
-        if (action === 'watch-socket' && source !== site && (!embedded || source !== embedded)) return json({ error: 'Invalid socket origin.' }, 403);
-        if (!uuid.test(key || '')) return json({ error: 'Invalid watch link.' }, 400);
+        if (action === 'watch-socket' && source !== site && source !== auth.MOBILE_ORIGIN && (!embedded || source !== embedded)) {
+          return reply({ error: 'Invalid socket origin.' }, 403);
+        }
+        if (!uuid.test(key || '')) return reply({ error: 'Invalid watch link.' }, 400);
         const viewer = await auth.session(request, env);
         let activityHeaders = {};
         if ((embedded && (source === embedded || url.origin === embedded)) || viewer?.instance) {
           const connection = request.headers.get('X-Ubu-Connection') || url.searchParams.get('connection');
           const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
           if (!viewer?.instance || !uuid.test(connection || '') || !await queue.current(viewer.owner, 'activity:' + viewer.instance, viewer.launch || '', connection)) {
-            return json({ error: 'This Activity connection has ended.' }, 409);
+            return reply({ error: 'This Activity connection has ended.' }, 409);
           }
           activityHeaders = { 'X-Match-Owner': viewer.owner, 'X-Match-Connection': connection, 'X-Match-Expires': viewer.expires ? String(viewer.expires * 1000) : '' };
         }
-        return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + action, {
+        const watchRes = await env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + action, {
           headers: { 'X-Match-Watch': key, ...activityHeaders, ...(action === 'watch-socket' && request.headers.get('Upgrade')?.toLowerCase() === 'websocket' ? { Upgrade: 'websocket' } : {}) }
         }));
+        return withCors(watchRes, cors);
       }
-      const session = await auth.session(request, env);
+      const match = path.match(matchRoute);
+      let session = await auth.session(request, env);
+      if (!session && match && match[2] === 'socket' && request.method === 'GET') {
+        session = await auth.verifySocketTicket(url.searchParams.get('ticket') || '', match[1], env);
+      }
       if (path === '/api/session' && request.method === 'GET') {
-        const refresh = session && !session.guest && !session.instance ? auth.refreshCookie(request) : null;
-        return json(!session ? { owner: null } :
-          session.guest ? { owner: null, guest: true, csrf: session.csrf } :
+        const refresh = session && !session.guest && !session.instance && !session.mobile ? auth.refreshCookie(request) : null;
+        return reply(!session ? { owner: null, ...(auth.isMobileOrigin(request) ? { site } : {}) } :
+          session.guest ? { owner: null, guest: true, csrf: session.csrf, ...(session.mobile ? { site } : {}) } :
             { owner: session.owner, name: session.name ?? null, csrf: session.csrf,
+              ...(session.mobile ? { site } : {}),
               ...(session.instance ? { instance: session.instance, site, avatar: session.avatar, launch: session.launch } : {}) },
           200, refresh ? { 'Set-Cookie': refresh } : {});
       }
       if (path === '/api/guest' && request.method === 'POST') {
-        if (request.headers.get('Origin') !== auth.origin(env)) return json({ error: 'Invalid request origin.' }, 403);
-        if (session) return json(session.guest ? { owner: null, guest: true, csrf: session.csrf } : { owner: session.owner, name: session.name ?? null, csrf: session.csrf });
-        const created = await auth.guest(env);
-        return json({ owner: null, guest: true, csrf: created.value.csrf }, 200, { 'Set-Cookie': created.cookie });
+        const mobileReq = auth.isMobileOrigin(request);
+        if (request.headers.get('Origin') !== auth.origin(env) && !mobileReq) return reply({ error: 'Invalid request origin.' }, 403);
+        if (session) return reply(session.guest ? { owner: null, guest: true, csrf: session.csrf, ...(session.mobile ? { site } : {}) } :
+          { owner: session.owner, name: session.name ?? null, csrf: session.csrf, ...(session.mobile ? { site } : {}) });
+        const created = await auth.guest(env, { mobile: mobileReq });
+        return mobileReq
+          ? reply({ owner: null, guest: true, csrf: created.value.csrf, token: created.token, site })
+          : reply({ owner: null, guest: true, csrf: created.value.csrf }, 200, { 'Set-Cookie': created.cookie });
       }
-      if (!session) return json({ error: 'Sign in with Discord or play as a guest first.' }, 401);
-      if (request.method !== 'GET' && !auth.mutationAllowed(request, env, session)) return json({ error: 'Invalid request origin or token.' }, 403);
-      if (path === '/api/logout' && request.method === 'POST') return json({ ok: true }, 200, { 'Set-Cookie': auth.logoutCookie(env, session) });
+      if (!session) return reply({ error: 'Sign in with Discord or play as a guest first.' }, 401);
+      if (request.method !== 'GET' && !auth.mutationAllowed(request, env, session)) return reply({ error: 'Invalid request origin or token.' }, 403);
+      if (path === '/api/logout' && request.method === 'POST') {
+        const cleared = auth.logoutCookie(env, session);
+        return reply({ ok: true }, 200, cleared ? { 'Set-Cookie': cleared } : {});
+      }
       if (path === '/api/session/refresh' && request.method === 'POST') {
-        if (session.guest) return json({ error: 'Sign in with Discord first.' }, 403);
-        const { session: updated, cookie } = await auth.refreshProfile(session, env);
-        return json(updated, 200, { 'Set-Cookie': cookie });
+        if (session.guest) return reply({ error: 'Sign in with Discord first.' }, 403);
+        const { session: updated, cookie: refreshedCookie } = await auth.refreshProfile(session, env);
+        return reply(updated, 200, refreshedCookie ? { 'Set-Cookie': refreshedCookie } : {});
       }
       if (path === '/api/ububall/lobby' && request.method === 'POST') {
         let data;
-        try { data = await body(request, 1024); } catch { return json({ error: 'Invalid lobby request.' }, 400); }
+        try { data = await body(request, 1024); } catch { return reply({ error: 'Invalid lobby request.' }, 400); }
         const actions = ['join', 'poll', 'reconcile', 'ready', 'unready', 'challenge', 'accept', 'decline', 'cancel', 'ack', 'leave'];
         if (!data || typeof data !== 'object' || Array.isArray(data) || !actions.includes(data.action) ||
             data.instance !== session.instance || !auth.validInstance(data.instance) ||
@@ -297,86 +347,90 @@ export default {
             (['accept', 'decline', 'cancel', 'ack'].includes(data.action) && (typeof data.id !== 'string' || !uuid.test(data.id))) ||
             (data.match !== undefined && (typeof data.match !== 'string' || !uuid.test(data.match))) ||
             (data.watch !== undefined && (typeof data.watch !== 'string' || !uuid.test(data.watch)))) {
-          return json({ error: 'Invalid lobby request.' }, 400);
+          return reply({ error: 'Invalid lobby request.' }, 400);
         }
         // The signed Activity session was created only after Discord verified membership.
         const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
         let participants;
         if (data.action === 'reconcile') {
-          if (!await queue.current(session.owner, 'activity:' + session.instance, session.launch, data.connection)) return json({ error: 'This Activity connection has ended.' }, 409);
+          if (!await queue.current(session.owner, 'activity:' + session.instance, session.launch, data.connection)) return reply({ error: 'This Activity connection has ended.' }, 409);
           const checkedBefore = Date.now();
           const users = await auth.activityParticipants(env, session.instance);
-          if (!users) return json({ error: 'Discord could not verify the Activity.' }, 503);
+          if (!users) return reply({ error: 'Discord could not verify the Activity.' }, 503);
           participants = { users, checkedBefore };
         }
         try {
           const result = await queue.lobby(session.owner, 'activity:' + session.instance,
             { name: session.name || 'Player', avatar: session.avatar || null, launch: session.launch, issued: session.issued, expires: session.expires * 1000 }, data, participants);
-          return json(result, result.error ? 409 : 200);
+          return reply(result, result.error ? 409 : 200);
         }
-        catch (error) { return json({ error: error.message }, 409); }
+        catch (error) { return reply({ error: error.message }, 409); }
       }
       const activityConnection = request.headers.get('X-Ubu-Connection') || url.searchParams.get('connection') || '';
       if (path.startsWith('/api/ububall') && session.instance) {
         const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
         if (!uuid.test(activityConnection) || !await queue.current(session.owner, 'activity:' + session.instance, session.launch || '', activityConnection)) {
-          return json({ error: 'This Activity connection has ended.' }, 409);
+          return reply({ error: 'This Activity connection has ended.' }, 409);
         }
       }
       if (path === '/api/ububall/queue' && request.method === 'POST') {
         let data;
-        try { data = await body(request); } catch { return json({ error: 'Invalid queue request.' }, 400); }
+        try { data = await body(request); } catch { return reply({ error: 'Invalid queue request.' }, 400); }
         if (!data || typeof data !== 'object' || Array.isArray(data) ||
           !['public', 'friends'].includes(data.queue) || !['enter', 'poll', 'cancel', 'ack'].includes(data.action) ||
           (data.action === 'ack' ? typeof data.id !== 'string' || !uuid.test(data.id) : Object.hasOwn(data, 'id')) ||
           Object.keys(data).some(key => !['queue', 'action', 'id', 'instance'].includes(key))) {
-          return json({ error: 'Invalid queue request.' }, 400);
+          return reply({ error: 'Invalid queue request.' }, 400);
         }
         let scope = 'public';
         if (data.queue === 'friends') {
-          if (!session.instance || data.instance !== session.instance || !auth.validInstance(data.instance)) return json({ error: 'Open this queue inside a Discord Activity.' }, 403);
+          if (!session.instance || data.instance !== session.instance || !auth.validInstance(data.instance)) return reply({ error: 'Open this queue inside a Discord Activity.' }, 403);
           if (data.action === 'enter' && !await auth.activityMember(env, data.instance, session.owner)) {
-            return json({ error: 'Join this Activity in Discord first.' }, 403);
+            return reply({ error: 'Join this Activity in Discord first.' }, 403);
           }
           scope = 'activity:' + data.instance;
         }
         const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
         const result = await queue.update(session.owner, Boolean(session.guest), scope, data.action, data.id ?? null,
           session.instance ? { instance: session.instance, launch: session.launch, connection: activityConnection } : null);
-        return result.status === 'closed' ? json({ error: 'This Activity connection has ended.' }, 409) : json(result);
+        return result.status === 'closed' ? reply({ error: 'This Activity connection has ended.' }, 409) : reply(result);
       }
       if (path === '/api/ububall/activity-watch' && request.method === 'GET') {
         const instance = url.searchParams.get('instance');
         if (!session.instance || instance !== session.instance || !await auth.activityMember(env, instance, session.owner)) {
-          return json({ error: 'Join this Activity in Discord first.' }, 403);
+          return reply({ error: 'Join this Activity in Discord first.' }, 403);
         }
         const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
-        return json(await queue.watch('activity:' + instance));
+        return reply(await queue.watch('activity:' + instance));
       }
       if (path === '/api/ububall' && request.method === 'POST') {
         let data;
-        try { data = await body(request); } catch { return json({ error: 'Invalid match request.' }, 400); }
-        if (!data || typeof data !== 'object' || Array.isArray(data) || typeof data.mode !== 'string' || Object.keys(data).some(k => k !== 'mode')) return json({ error: 'Invalid match request.' }, 400);
+        try { data = await body(request); } catch { return reply({ error: 'Invalid match request.' }, 400); }
+        if (!data || typeof data !== 'object' || Array.isArray(data) || typeof data.mode !== 'string' || Object.keys(data).some(k => k !== 'mode')) return reply({ error: 'Invalid match request.' }, 400);
         const id = crypto.randomUUID();
         const response = await env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/create', {
           method: 'POST', headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Name': encodeURIComponent(session.name || ''), 'Content-Type': 'application/json' }, body: JSON.stringify(data)
         }));
         const result = await response.json();
-        return json(response.ok ? { id, ...result } : result, response.status);
+        return reply(response.ok ? { id, ...result } : result, response.status);
       }
-      const match = path.match(matchRoute);
       if (match) {
         const [, id, action] = match, activityWatch = action.startsWith('activity-watch-');
+        if (action === 'socket-ticket') {
+          if (request.method !== 'POST') return reply({ error: 'Method not allowed.' }, 405);
+          if (session.instance) return reply({ error: 'Socket tickets are only used outside Discord Activities.' }, 400);
+          return reply({ ticket: await auth.issueSocketTicket(session, id, env) });
+        }
         const socket = action === 'socket' || action === 'activity-watch-socket';
         const get = action === 'state' || socket || activityWatch;
-        if (activityWatch && !session.instance) return json({ error: 'Open this match inside its Discord Activity.' }, 403);
-        if (request.method !== (get ? 'GET' : 'POST')) return json({ error: 'Method not allowed.' }, 405);
+        if (activityWatch && !session.instance) return reply({ error: 'Open this match inside its Discord Activity.' }, 403);
+        if (request.method !== (get ? 'GET' : 'POST')) return reply({ error: 'Method not allowed.' }, 405);
         // Browser sockets cannot carry custom CSRF headers; enforce the exact Origin instead.
-        if (socket && request.headers.get('Origin') !== auth.requestOrigin(env, session)) return json({ error: 'Invalid socket origin.' }, 403);
+        if (socket && request.headers.get('Origin') !== auth.requestOrigin(env, session)) return reply({ error: 'Invalid socket origin.' }, 403);
         let data;
-        if (!get) { try { data = await body(request, 2048); } catch { return json({ error: 'Invalid match request.' }, 400); } }
+        if (!get) { try { data = await body(request, 2048); } catch { return reply({ error: 'Invalid match request.' }, 400); } }
         const allowAlias = !get || socket || request.headers.get('X-Ubu-CSRF') === session.csrf;
-        return env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + (activityWatch ? action.slice(9) : action), {
+        const matchRes = await env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/' + (activityWatch ? action.slice(9) : action), {
           method: request.method,
           headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Alias': allowAlias ? (session.alias || '') : '',
             'X-Match-Name': encodeURIComponent(session.name || ''),
@@ -386,49 +440,50 @@ export default {
             'Content-Type': 'application/json', ...(socket ? { Upgrade: 'websocket' } : {}) },
           body: get ? undefined : JSON.stringify(data)
         }));
+        return withCors(matchRes, cors);
       }
-      if (session.guest) return json({ error: 'Sign in with Discord to use the mint.' }, 403);
+      if (session.guest) return reply({ error: 'Sign in with Discord to use the mint.' }, 403);
       const config = configuration(env);
       const registry = env.MINT.get(env.MINT.idFromName(config.mint));
       if (path === '/api/ubus' && request.method === 'GET') {
         const result = await registry.collection(session.owner, url.searchParams.get('after') || '');
-        return json(result, result.status || 200);
+        return reply(result, result.status || 200);
       }
-      if (path === '/api/teams' && request.method === 'GET') return json(await registry.teams(session.owner));
+      if (path === '/api/teams' && request.method === 'GET') return reply(await registry.teams(session.owner));
       if (path === '/api/teams' && request.method === 'POST') {
         let data;
-        try { data = await body(request, 8192); } catch { return json({ error: 'Invalid saved teams body.' }, 400); }
+        try { data = await body(request, 8192); } catch { return reply({ error: 'Invalid saved teams body.' }, 400); }
         const result = await registry.saveTeams(session.owner, data);
-        return json(result, result.status || 200);
+        return reply(result, result.status || 200);
       }
       if (path === '/api/favorites' && request.method === 'POST') {
         let data;
-        try { data = await body(request, 2048); } catch { return json({ error: 'Invalid favorite request body.' }, 400); }
+        try { data = await body(request, 2048); } catch { return reply({ error: 'Invalid favorite request body.' }, 400); }
         const result = await registry.favorite(session.owner, data);
-        return json(result, result.status || 200);
+        return reply(result, result.status || 200);
       }
-      if (path === '/api/starter' && request.method === 'GET') return json(await registry.starterStatus(session.owner));
+      if (path === '/api/starter' && request.method === 'GET') return reply(await registry.starterStatus(session.owner));
       if (path === '/api/starter' && request.method === 'POST') {
         let data;
-        try { data = await body(request); } catch { return json({ error: 'Choose a starter pack.' }, 400); }
+        try { data = await body(request); } catch { return reply({ error: 'Choose a starter pack.' }, 400); }
         const result = await registry.claimStarter(session.owner, data?.kind);
-        return json(result, result.status || 200);
+        return reply(result, result.status || 200);
       }
       if ((path === '/api/packs' || path === '/api/mint') && request.method === 'POST') {
         let data;
-        try { data = await body(request); } catch { return json({ error: 'Provide a JSON request ID; maximum body size is 512 bytes.' }, 400); }
+        try { data = await body(request); } catch { return reply({ error: 'Provide a JSON request ID; maximum body size is 512 bytes.' }, 400); }
         const allowed = path === '/api/packs' ? ['request'] : ['request', 'choice'];
         if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !allowed.includes(key)) ||
             typeof data.request !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(data.request) ||
-            (Object.hasOwn(data, 'choice') && (typeof data.choice !== 'string' || !ID.test(data.choice)))) return json({ error: 'Provide a valid request ID and pack choice.' }, 400);
+            (Object.hasOwn(data, 'choice') && (typeof data.choice !== 'string' || !ID.test(data.choice)))) return reply({ error: 'Provide a valid request ID and pack choice.' }, 400);
         const result = path === '/api/packs' ? await registry.offer(session.owner, data.request) : await registry.issue(session.owner, data.request, data.choice);
-        return json(result, result.status || 200, result.status === 503 ? { 'Retry-After': '2' } : {});
+        return reply(result, result.status || 200, result.status === 503 ? { 'Retry-After': '2' } : {});
       }
-      return json({ error: 'Endpoint not found.' }, 404);
+      return reply({ error: 'Endpoint not found.' }, 404);
     } catch (error) {
       console.error(error);
       const service = path.startsWith('/api/ububall') ? 'Online play' : 'Mint service';
-      return json({ error: `${service} unavailable. Retry the same request.` }, 503, { 'Retry-After': '2' });
+      return reply({ error: `${service} unavailable. Retry the same request.` }, 503, { 'Retry-After': '2' });
     }
   }
 };

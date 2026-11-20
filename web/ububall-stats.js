@@ -544,9 +544,15 @@
     }
 
     function downloadReplay(file, recorded, title = null) {
+      const blob = new Blob([file], { type: 'application/gzip' });
+      const filename = `${replayFileName(recorded, title)}.ububall`;
+      if (root?.ubuPlatform?.isNative && root.ubuPlatform.exportFile) {
+        void root.ubuPlatform.exportFile(blob, filename).catch(() => {});
+        return;
+      }
       const link = Object.assign(document.createElement('a'), {
-        href: URL.createObjectURL(new Blob([file], { type: 'application/gzip' })),
-        download: `${replayFileName(recorded, title)}.ububall`
+        href: URL.createObjectURL(blob),
+        download: filename
       });
       link.click();
       setTimeout(() => URL.revokeObjectURL(link.href), 60000);
@@ -760,6 +766,23 @@
         }
         await listReplays(problems.join(' '));
       };
+      root?.addEventListener?.('ubu:import-replay-bytes', async event => {
+        const bytes = event?.detail?.bytes;
+        if (!(bytes instanceof Uint8Array)) return;
+        try {
+          if (bytes.byteLength > 8 << 20) throw new Error('This replay is too large.');
+          const entry = libraryEntry(await ububallReplay.read(bytes), bytes, false);
+          try {
+            await replayStore.add(entry);
+          } catch {
+            sessionReplays.unshift({ ...entry, id: nextSessionReplayId--, pinned: false, ephemeral: true });
+          }
+          openReplays();
+        } catch (error) {
+          openReplays();
+          replaysNote(error.message);
+        }
+      });
       $('replays-open').onclick = openReplays;
       $('replays-close').onclick = () => $('replays-dialog').close();
     }

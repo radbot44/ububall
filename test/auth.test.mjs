@@ -202,3 +202,107 @@ test('refreshProfile updates user identity via Discord bot API, enforces cooldow
   assert.equal(noBot.session.name, 'Old Name');
   assert.match(noBot.cookie, /Max-Age=34560000/);
 });
+
+test('mobile PKCE OAuth flow issues Bearer session, upgrades mobile guests, and enforces https://localhost origin', async () => {
+  const verifier = Buffer.alloc(32, 9).toString('base64url');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = Buffer.from(digest).toString('base64url');
+
+  // Missing or malformed challenge on android login fails closed.
+  assert.equal((await auth.login(new Request(env.ORIGIN + '/auth/discord?platform=android'), env)).status, 400);
+  assert.equal((await auth.login(new Request(env.ORIGIN + '/auth/discord?platform=android&challenge=short'), env)).status, 400);
+
+  // Start mobile guest session first to verify seat alias preservation.
+  const guestCreated = await auth.guest(env, { mobile: true });
+  assert.equal(guestCreated.cookie, null);
+  assert.ok(guestCreated.token);
+  const guestReq = new Request(env.ORIGIN + '/api/session', {
+    headers: { Origin: auth.MOBILE_ORIGIN, Authorization: `Bearer ${guestCreated.token}` }
+  });
+  const guestSession = await auth.session(guestReq, env);
+  assert.equal(guestSession.guest, true);
+  assert.equal(guestSession.mobile, true);
+
+  // Start mobile Discord OAuth in Custom Tabs.
+  const start = await auth.login(new Request(
+    `${env.ORIGIN}/auth/discord?platform=android&challenge=${challenge}&return=${encodeURIComponent('/?match=12345678-1234-4000-8000-123456789abc')}`
+  ), env);
+  assert.equal(start.status, 302);
+  const state = new URL(start.headers.get('Location')).searchParams.get('state');
+  const stateCookie = start.headers.get('Set-Cookie').split(';')[0];
+
+  const cb = await auth.callback(new Request(`${env.ORIGIN}/auth/callback?code=mob-code&state=${state}`, {
+    headers: { Cookie: stateCookie }
+  }), env, async url => Response.json(url.endsWith('/token') ? { access_token: 'tok', token_type: 'Bearer' } : { id: '123456789012345678', global_name: 'PixelPlayer' }));
+  assert.equal(cb.status, 302);
+  const redirectLoc = cb.headers.get('Location');
+  assert.ok(redirectLoc.startsWith(env.ORIGIN + '/auth-complete.html?mobile=1#ticket='));
+  assert.ok(!(cb.headers.get('Set-Cookie') || '').includes('__Host-ubu-session='));
+  const ticket = new URL(redirectLoc).hash.slice('#ticket='.length);
+
+  // Wrong origin or wrong PKCE verifier is rejected.
+  const wrongOrigin = await auth.mobileExchange(new Request(env.ORIGIN + '/api/auth/mobile', {
+    method: 'POST', headers: { Origin: env.ORIGIN }
+  }), env, { ticket, verifier });
+  assert.equal(wrongOrigin.status, 403);
+
+  const wrongVerifier = await auth.mobileExchange(new Request(env.ORIGIN + '/api/auth/mobile', {
+    method: 'POST', headers: { Origin: auth.MOBILE_ORIGIN }
+  }), env, { ticket, verifier: Buffer.alloc(32, 5).toString('base64url') });
+  assert.equal(wrongVerifier.status, 403);
+
+  // Valid exchange from https://localhost upgrades guest session and returns Bearer token + CORS header.
+  const exReq = new Request(env.ORIGIN + '/api/auth/mobile', {
+    method: 'POST',
+    headers: { Origin: auth.MOBILE_ORIGIN, Authorization: `Bearer ${guestCreated.token}` }
+  });
+  const exRes = await auth.mobileExchange(exReq, env, { ticket, verifier });
+  assert.equal(exRes.status, 200);
+  assert.equal(exRes.headers.get('Access-Control-Allow-Origin'), auth.MOBILE_ORIGIN);
+  const exBody = await exRes.json();
+  assert.equal(exBody.owner, '123456789012345678');
+  assert.equal(exBody.name, 'PixelPlayer');
+  assert.equal(exBody.returnTo, '/?match=12345678-1234-4000-8000-123456789abc');
+  assert.ok(exBody.token);
+
+  // Authenticated mobile request validates Bearer + https://localhost + X-Ubu-CSRF, rejecting evil origins or cookie mixups.
+  const authedReq = new Request(env.ORIGIN + '/api/teams', {
+    method: 'POST',
+    headers: { Origin: auth.MOBILE_ORIGIN, Authorization: `Bearer ${exBody.token}`, 'X-Ubu-CSRF': exBody.csrf }
+  });
+  const mobSession = await auth.session(authedReq, env);
+  assert.equal(mobSession.owner, '123456789012345678');
+  assert.equal(mobSession.alias, guestSession.owner);
+  assert.equal(mobSession.mobile, true);
+  assert.equal(auth.mutationAllowed(authedReq, env, mobSession), true);
+  assert.equal(auth.mutationAllowed(new Request(env.ORIGIN + '/api/teams', {
+    method: 'POST', headers: { Origin: env.ORIGIN, Authorization: `Bearer ${exBody.token}`, 'X-Ubu-CSRF': exBody.csrf }
+  }), env, mobSession), false);
+  assert.equal(await auth.session(new Request(env.ORIGIN + '/api/session', {
+    headers: { Origin: 'https://evil.example', Authorization: `Bearer ${exBody.token}` }
+  }), env), null);
+
+  // Profile refresh for mobile returns updated Bearer token with null cookie.
+  const refreshed = await auth.refreshProfile(mobSession, { ...env, DISCORD_ACTIVITY_BOT_TOKEN: 'bot' },
+    async () => Response.json({ id: '123456789012345678', global_name: 'RenamedPixel' }));
+  assert.equal(refreshed.cookie, null);
+  assert.equal(refreshed.session.name, 'RenamedPixel');
+  assert.ok(refreshed.session.token);
+});
+
+test('match-scoped WebSocket tickets bind strictly to match ID and expire cleanly', async () => {
+  const matchA = '12345678-1234-4000-8000-123456789abc';
+  const matchB = '87654321-1234-4000-8000-123456789abc';
+  const mobSession = { purpose: 'mobile', mobile: true, owner: '123456789012345678', name: 'PixelPlayer', csrf: 'A'.repeat(43) };
+  const ticket = await auth.issueSocketTicket(mobSession, matchA, env);
+  const verified = await auth.verifySocketTicket(ticket, matchA, env);
+  assert.equal(verified.owner, '123456789012345678');
+  assert.equal(verified.mobile, true);
+  assert.equal(auth.requestOrigin(env, verified), auth.MOBILE_ORIGIN);
+  assert.equal(await auth.verifySocketTicket(ticket, matchB, env), null);
+
+  const expired = await auth.seal({
+    purpose: 'socket', match: matchA, owner: '123456789012345678', mobile: true, csrf: 'A'.repeat(43), expires: 1000
+  }, env.SESSION_SECRET);
+  assert.equal(await auth.verifySocketTicket(expired, matchA, env), null);
+});

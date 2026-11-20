@@ -87,7 +87,7 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const legacyText = await legacy.text();
     assert.match(legacyText, /location\.replace\('\/' \+ location\.search/);
     for (const path of ['/ubu-render.js', '/demo.html', '/site.js', '/rarity.js', '/ubu-archetype.js', '/app.js', '/ububall.html', '/ububall.js', '/ububall-playback.js', '/ububall-stats.js', '/ububall-theater.js', '/ububall.css',
-      '/ububall-activity.js', '/discord-sdk.js']) assert.equal((await fetch(path)).status, 200);
+      '/platform.js', '/ububall-activity.js', '/discord-sdk.js']) assert.equal((await fetch(path)).status, 200);
     for (const path of ['/worker.mjs', '/mint.js', '/auth.mjs', '/AGENTS.md', '/.dev.vars', '/state/mint.sqlite']) assert.equal((await fetch(path)).status, 404);
     const response = await fetch('/api/config'), config = await response.json();
     assert.equal(config.lifetimeLimit, 3); assert.equal(config.keys['test-1'], privateKey.x);
@@ -769,5 +769,36 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal((await (await fetch(base + '/state', { headers: d })).json()).occupied[1], false);
     assert.equal((await post(base + '/leave', {}, d)).status, 200);
     assert.equal((await (await fetch(base + '/state', { headers: d })).json()).phase, 'over');
+  });
+
+  await t.test('Android Capacitor mobile CORS, PKCE Bearer sessions, and match socket tickets', async () => {
+    const preflight = await fetch('/api/session', { method: 'OPTIONS', headers: { Origin: 'https://localhost' } });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), 'https://localhost');
+
+    // Unconfigured assetlinks returns 404 cleanly.
+    assert.equal((await fetch('/.well-known/assetlinks.json')).status, 404);
+
+    // Mobile guest session issues Bearer token and can create a match + socket ticket.
+    const guestRes = await fetch('/api/guest', { method: 'POST', headers: { Origin: 'https://localhost' } });
+    assert.equal(guestRes.status, 200);
+    assert.equal(guestRes.headers.get('Access-Control-Allow-Origin'), 'https://localhost');
+    const mobGuest = await guestRes.json();
+    assert.equal(mobGuest.guest, true);
+    assert.ok(mobGuest.token);
+
+    const mobHeaders = {
+      Origin: 'https://localhost',
+      Authorization: `Bearer ${mobGuest.token}`,
+      'X-Ubu-CSRF': mobGuest.csrf,
+      'Content-Type': 'application/json'
+    };
+    const matchRes = await fetch('/api/ububall', { method: 'POST', headers: mobHeaders, body: JSON.stringify({ mode: 'standard' }) });
+    assert.equal(matchRes.status, 200);
+    const createdMatch = await matchRes.json();
+    const ticketRes = await fetch(`/api/ububall/${createdMatch.id}/socket-ticket`, { method: 'POST', headers: mobHeaders, body: '{}' });
+    assert.equal(ticketRes.status, 200);
+    const { ticket } = await ticketRes.json();
+    assert.ok(ticket);
   });
 });
