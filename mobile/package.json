@@ -20,8 +20,7 @@
     "@capacitor/screen-orientation": "^8.0.0",
     "@capacitor/share": "^8.0.0",
     "@capacitor/splash-screen": "^8.0.0",
-    "@capacitor/status-bar": "^8.0.0",
-    "@capacitor/system-bars": "^8.0.0"
+    "@capacitor/status-bar": "^8.0.0"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
