@@ -124,3 +124,17 @@ foreach ($mode in @('standard', 'pulse')) {
 Any ruleset with Pulse uses `ububall-net-pulse.bin`. Other rulesets use `ububall-net-standard.bin`. If that specialist is missing or incompatible, the browser tries the general `ububall-net.bin`. To compare a specialist with parallel simulator workers, set `weightsPath` on the Ballistic profile and pass the matching `--mode`.
 
 Regenerate v1 shards before training v2. The trainer requires the v2 shard manifest, and the worker requires a v2 model with the current physics version and finite weights. After training, restart `npm run dev` to copy the model assets to the public directory, then reload the game.
+
+The optional `--policy-focus pulse` setting emphasizes Pulse examples with an immediate goal for either side, a moving loose-ball race, a defensive Guard, or a charged Super use. It caps the combined policy weight at twice the normal weight. Value targets and validation loss use the same settings as the default `--policy-focus uniform`. Train both variants on the same shards and use separate output paths before comparing them in Ballistic.
+
+## Sweep trainer settings on existing Pulse shards
+
+```powershell
+npm run nn:sweep -- --shards personal/nn-pulse-shards --incumbent web/assets/ububall-net-pulse.bin --out personal/nn-pulse-sweep
+```
+
+The sweep trains uniform, combined, immediate-goal-only, defensive Guard, and shorter value-horizon variants. It uses Python 3.11 on Windows and accepts `--python` for a different executable. The position screen gives every checkpoint the same fresh Pulse positions and opponent replies at the full Ballistic search budget. The two finalists play side-swapped matches against the incumbent with a reduced search budget and a 42-turn cap. Reports keep capped games separate from wins.
+
+Use `--calibration` with an earlier full-budget Pulse `sim:cpu` report whose two profiles specify Ballistic weight paths. The sweep repeats those seeds with the reduced budget. Short matches rank finalists if calibration reproduces the full-budget ranking and at least half the games finish in each comparison. Otherwise the sweep uses the position ranking. Set `--full-pairs 4` to test the selected candidate against the incumbent at full budget on a separate set of seeds. Set `--seed` to change the disjoint benchmark seed ranges for a new experiment. Checkpoints and the incremental report are written to the run directory.
+
+The sweep skips byte-identical weights when screening and selecting finalists. Repeat the same command with `--resume` to reuse completed stages. You can add `--full-pairs 4` on resume after reviewing a sweep that stopped at short matches.

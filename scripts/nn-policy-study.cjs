@@ -256,5 +256,7 @@ async function main() {
   console.log(JSON.stringify({ summary, examples }, null, 2));
 }
 
+module.exports = { runReply };
+
 if (!isMainThread && workerData?.policyStudy) parentPort.postMessage(runJob(workerData.policyStudy));
 else if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });

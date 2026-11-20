@@ -29,7 +29,8 @@ NN_MAGIC = b"UBNN"
 NN_FORMAT = 2
 SKATER_FLOATS = 47
 BALL_START = 6 * SKATER_FLOATS
-INPUT_DIM = BALL_START + 17 + 16
+MATCH_START = BALL_START + 17
+INPUT_DIM = MATCH_START + 16
 POLICY_DIM = 18
 VALUE_DIM = 3
 NEXT_GOAL = INPUT_DIM + POLICY_DIM
@@ -125,6 +126,30 @@ def build_soft_value_targets(next_goal: np.ndarray, turns_to_goal: np.ndarray, g
     return targets, valid.astype(np.float32)
 
 
+def pulse_policy_weights(data: np.ndarray, focus: str = "pulse") -> np.ndarray:
+    """Upweight tactical Pulse rows using only UBNN v2 observations and labels."""
+    skaters = data[:, :BALL_START].reshape(-1, 6, SKATER_FLOATS)
+    own = skaters[:, :3]
+    plans = data[:, INPUT_DIM:NEXT_GOAL].reshape(-1, 3, 6)
+    pulse = data[:, MATCH_START + 1] > 0.5
+    immediate_goal = (np.abs(data[:, NEXT_GOAL]) == 1) & (data[:, TURNS_TO_GOAL] == 0)
+    ball_speed = np.hypot(data[:, BALL_START + 2], data[:, BALL_START + 3]) * 1200
+    own_access = data[:, MATCH_START + 12] * 600
+    opp_access = data[:, MATCH_START + 13] * 600
+    held = (skaters[:, :, 10] > 0.5).any(axis=1)
+    race = (~held) & (ball_speed > 55) & (np.maximum(own_access, opp_access) < 300) & (np.abs(own_access - opp_access) < 120)
+    guarding = ((own[:, :, 5] > 0.5) & (plans[:, :, 5] > 0.5)).any(axis=1)
+    defensive_guard = guarding & (data[:, BALL_START] < 0) & (opp_access < 180)
+    charged_super = ((own[:, :, 5] > 0.5) & (own[:, :, 9] >= 0.999) & (plans[:, :, 4] > 0.5)).any(axis=1)
+    if focus == "immediate":
+        added = 0.75 * immediate_goal
+    elif focus == "defense":
+        added = 0.75 * defensive_guard
+    else:
+        added = 0.75 * immediate_goal + 0.35 * race + 0.35 * (defensive_guard | charged_super)
+    return np.minimum(2.0, 1.0 + pulse * added).astype(np.float32)
+
+
 # ---------------------------------------------------------------------------
 # Engine 1: Native PyTorch (VRAM-resident CUDA + bf16 Tensor Cores on RTX 4090)
 # ---------------------------------------------------------------------------
@@ -139,6 +164,7 @@ def train_pytorch(
     out_path: Path,
     phys_version: int,
     gamma: float,
+    policy_weights: np.ndarray | None = None,
 ) -> dict:
     import torch
     import torch.nn as nn
@@ -190,6 +216,7 @@ def train_pytorch(
     tr_pol = torch.from_numpy(train_data[:, INPUT_DIM:NEXT_GOAL]).to(target_dev)
     tr_val_soft = torch.from_numpy(tr_val_np).to(target_dev)
     tr_val_mask = torch.from_numpy(tr_vmask_np).to(target_dev)
+    tr_pol_weights = None if policy_weights is None else torch.from_numpy(policy_weights).to(target_dev)
 
     va_obs = torch.from_numpy(val_data[:, :INPUT_DIM]).to(target_dev)
     va_pol = torch.from_numpy(val_data[:, INPUT_DIM:NEXT_GOAL]).to(target_dev)
@@ -211,6 +238,7 @@ def train_pytorch(
         y_val: torch.Tensor,
         y_vmask: torch.Tensor,
         y_pol: torch.Tensor,
+        row_weights: torch.Tensor | None = None,
     ):
         log_probs = F.log_softmax(v_logits, dim=-1)
         val_per_row = -(y_val * log_probs).sum(dim=-1)
@@ -228,6 +256,13 @@ def train_pytorch(
         pwr_mask = (active_bool & not_guard).float()
         sup_mask = (active_bool & (~classic_bool) & charged_bool).float()
         moving_mask = (active_bool & not_guard & (p_true[:, :, 2] > 0.02)).float()
+
+        if row_weights is not None:
+            weight = row_weights[:, None]
+            grd_mask = grd_mask * weight
+            pwr_mask = pwr_mask * weight
+            sup_mask = sup_mask * weight
+            moving_mask = moving_mask * weight
 
         active_denom = moving_mask.sum().clamp_min(1.0)
         grd_denom = grd_mask.sum().clamp_min(1.0)
@@ -272,6 +307,7 @@ def train_pytorch(
             bp = tr_pol[idx].to(device, non_blocking=True).clone()
             bv = tr_val_soft[idx].to(device, non_blocking=True)
             bm = tr_val_mask[idx].to(device, non_blocking=True)
+            pw = None if tr_pol_weights is None else tr_pol_weights[idx].to(device, non_blocking=True)
 
             # 50% on-GPU vertical reflection augmentation (zero memory overhead)
             flip_mask = torch.rand(bx.shape[0], device=device) < 0.5
@@ -283,10 +319,10 @@ def train_pytorch(
             if use_bf16:
                 with torch.amp.autocast("cuda", dtype=torch.bfloat16):
                     vl, po = model(bx)
-                    loss, v_l, p_l = compute_losses(bx, vl, po, bv, bm, bp)
+                    loss, v_l, p_l = compute_losses(bx, vl, po, bv, bm, bp, pw)
             else:
                 vl, po = model(bx)
-                loss, v_l, p_l = compute_losses(bx, vl, po, bv, bm, bp)
+                loss, v_l, p_l = compute_losses(bx, vl, po, bv, bm, bp, pw)
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
@@ -447,6 +483,7 @@ def train_numpy_fallback(
     out_path: Path,
     phys_version: int,
     gamma: float,
+    policy_weights: np.ndarray | None = None,
 ) -> dict:
     rng = np.random.default_rng(seed)
     H = hidden_dim
@@ -477,7 +514,7 @@ def train_numpy_fallback(
     va_val, va_vmask = build_soft_value_targets(val_data[:, NEXT_GOAL], val_data[:, TURNS_TO_GOAL], gamma)
     va_goal = val_data[:, NEXT_GOAL]
 
-    def fwd_bwd(bx: np.ndarray, bv: np.ndarray, bm: np.ndarray, bp: np.ndarray, need_grad: bool = True):
+    def fwd_bwd(bx: np.ndarray, bv: np.ndarray, bm: np.ndarray, bp: np.ndarray, need_grad: bool = True, row_weights: np.ndarray | None = None):
         N = bx.shape[0]
         z0 = bx @ params["sW"] + params["sb"]
         ln0, c_ln0 = _ln_fwd(z0, params["sg"], params["sbe"])
@@ -515,6 +552,13 @@ def train_numpy_fallback(
         pwr_m = (active & not_grd).astype(np.float32)
         sup_m = (active & (~classic_m) & charged).astype(np.float32)
         mv = (active & not_grd & (t3[:, :, 2] > 0.02)).astype(np.float32)
+
+        if row_weights is not None:
+            weight = row_weights[:, None]
+            grd_m *= weight
+            pwr_m *= weight
+            sup_m *= weight
+            mv *= weight
 
         mv_sum = max(1.0, float(mv.sum()))
         grd_sum = max(1.0, float(grd_m.sum()))
@@ -608,7 +652,8 @@ def train_numpy_fallback(
                 bx[np.ix_(flip, Y_FLIP_OBS)] *= -1.0
                 bp[np.ix_(flip, Y_FLIP_POL)] *= -1.0
 
-            vl, pl, grads = fwd_bwd(bx, bv, bm, bp, need_grad=True)
+            pw = None if policy_weights is None else policy_weights[idx]
+            vl, pl, grads = fwd_bwd(bx, bv, bm, bp, row_weights=pw)
             step_num += 1
             bc1 = 1.0 - 0.9 ** step_num
             bc2 = 1.0 - 0.999 ** step_num
@@ -698,12 +743,14 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=3e-4, help="Peak AdamW learning rate")
     parser.add_argument("--gamma", type=float, default=None, help="Per-turn value discount (default: 0.993 for Pulse, 0.985 otherwise)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--policy-focus", choices=["uniform", "pulse", "immediate", "defense"], default="uniform", help="Upweight selected Pulse positions in the training policy loss")
     parser.add_argument("--backend", choices=["auto", "torch", "numpy"], default="auto", help="Training backend")
     args = parser.parse_args()
 
     shards, phys_version, shard_mode = load_shards(args.shards)
     gamma = args.gamma if args.gamma is not None else (0.993 if "pulse" in shard_mode.lower() else 0.985)
     train_data, val_data = split_train_val(shards, val_frac=0.10)
+    policy_weights = None if args.policy_focus == "uniform" else pulse_policy_weights(train_data, args.policy_focus)
     total_rows = len(train_data) + len(val_data)
     print(f"[train-nn] Loaded {total_rows:,} rows across {len(shards)} shards ({len(train_data):,} train, {len(val_data):,} val), mode={shard_mode}, gamma={gamma}, physVersion={phys_version}")
 
@@ -718,14 +765,17 @@ def main() -> None:
             print("[train-nn] PyTorch not installed in current Python; using vectorized NumPy AdamW fallback.")
 
     if use_torch:
-        res = train_pytorch(train_data, val_data, args.hidden, args.epochs, args.batch_size, args.lr, args.seed, args.out, phys_version, gamma)
+        res = train_pytorch(train_data, val_data, args.hidden, args.epochs, args.batch_size, args.lr, args.seed, args.out, phys_version, gamma, policy_weights)
     else:
         eff_bs = min(args.batch_size, 512)
-        res = train_numpy_fallback(train_data, val_data, args.hidden, args.epochs, eff_bs, args.lr * 3.0, args.seed, args.out, phys_version, gamma)
+        res = train_numpy_fallback(train_data, val_data, args.hidden, args.epochs, eff_bs, args.lr * 3.0, args.seed, args.out, phys_version, gamma, policy_weights)
 
     res["trainRows"] = int(len(train_data))
     res["valRows"] = int(len(val_data))
     res["physVersion"] = phys_version
+    res["policyFocus"] = args.policy_focus
+    if policy_weights is not None:
+        res["policyWeights"] = {"upweightedRows": int((policy_weights > 1).sum()), "mean": float(policy_weights.mean())}
     res["outPath"] = str(args.out)
 
     args.report.parent.mkdir(parents=True, exist_ok=True)

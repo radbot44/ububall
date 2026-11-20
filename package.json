@@ -13,6 +13,7 @@
     "nn:gen:deep": "node scripts/nn-generate.cjs --deep",
     "nn:train": "python3 scripts/train-nn.py",
     "nn:eval": "node scripts/nn-eval.cjs",
+    "nn:sweep": "node scripts/nn-sweep.cjs",
     "sim:cpu": "node scripts/cpu-simulation.cjs",
     "sim:stats": "node scripts/stat-balance.cjs",
     "bench:serve": "node scripts/serve-bench.cjs",
