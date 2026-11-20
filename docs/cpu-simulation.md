@@ -23,7 +23,7 @@ Choose a CPU difficulty in **New match**. The initial default is Medium.
 | `god` | Ububall God | 240 | 4 (+ 720-tick rollout + 1.35s coast, dual wobble/refine, 2-round counter-search, dual-bridge 2-turn look-ahead & 3-turn Pulse chain) | 720 |
 | `ballistic` | Ballistic | 240 | God scenarios and a learned response when distinct, with God counter-search and look-ahead | 720 |
 
-Ballistic appears in **New match** once the browser worker loads compatible weights. It uses Ububall God's search budget, including the third Pulse turn, and adds candidate plays from the neural policy and a 55% neural blend for eligible positional evaluations. A saved Ballistic match can continue with Ububall God if the weights become unavailable. The other five presets use heuristic search by default, even when weights are installed.
+Ballistic appears in **New match** once the browser worker loads compatible weights for the selected rules. It uses Ububall God's search budget, including the third Pulse turn, and adds candidate plays from the neural policy and a 55% neural blend for eligible positional evaluations. A saved Ballistic match can continue with Ububall God if the weights become unavailable. The other five presets use heuristic search by default, even when weights are installed.
 
 Each candidate blends its average and worst outcome across the active opponent scenarios (`risk` weights in preset order are `.15`, `.35`, `.53`, `.55`, `.55`, `.55`), verifying execution `wobble` across all contenders within the final selection window. Final selection deduplicates quantized tactical basins (`planBasinKey`) before Boltzmann sampling (`temperature` values are `45`, `3.0`, `1.5`, `0.8`, `0.4`, `0.4`) so repeated local tweaks never drown out a sharp pass or bank shot. Team personality traits (`aggression`, `creativity`, `teamwork`, `clutch`) express style at equal strength through a bounded tie-break bias (`±8`) among near-optimal candidates rather than changing evaluation weights or risk tolerance.
 
@@ -98,8 +98,21 @@ npm run nn:gen -- --matches 1200 --preset mixed --mode mixed --out personal/nn-s
 python scripts/train-nn.py --shards personal/nn-shards-v2 --epochs 25 --batch-size 4096
 
 # 3. Compare Ballistic or pure policy head-to-head against heuristic presets
-npm run sim:cpu -- --games 10 --mode standard --nn-weights web/assets/ububall-net.bin --a ballistic --b god
+npm run sim:cpu -- --games 10 --threads 1 --mode standard --nn-weights web/assets/ububall-net.bin --a ballistic --b god
 npm run sim:cpu -- --games 10 --mode pulse --a "{\"level\":\"hard\",\"nn\":\"only\",\"weightsPath\":\"web/assets/ububall-net.bin\"}" --b medium
 ```
 
-Regenerate v1 shards before training v2. The trainer requires the v2 shard manifest, and the worker requires a v2 model with the current physics version and finite weights. After training, restart `npm run dev` so the asset preparation step copies `web/assets/ububall-net.bin` to the public directory, then reload the game.
+To train separate models, generate one dataset per mode and export each checkpoint to its own asset:
+
+```powershell
+foreach ($mode in @('standard', 'pulse')) {
+    npm run nn:gen -- --matches 2000 --turns 70 --preset mixed --mode $mode --out "personal/nn-$mode-shards"
+    if ($LASTEXITCODE -ne 0) { break }
+    python scripts/train-nn.py --shards "personal/nn-$mode-shards" --epochs 25 --batch-size 4096 --out "web/assets/ububall-net-$mode.bin" --report "personal/nn-$mode-report.json"
+    if ($LASTEXITCODE -ne 0) { break }
+}
+```
+
+Any ruleset with Pulse uses `ububall-net-pulse.bin`. Other rulesets use `ububall-net-standard.bin`. If that specialist is missing or incompatible, the browser tries the general `ububall-net.bin`. To compare a specialist with parallel simulator workers, set `weightsPath` on the Ballistic profile and pass the matching `--mode`.
+
+Regenerate v1 shards before training v2. The trainer requires the v2 shard manifest, and the worker requires a v2 model with the current physics version and finite weights. After training, restart `npm run dev` to copy the model assets to the public directory, then reload the game.

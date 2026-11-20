@@ -16,7 +16,7 @@
     return {
       cancel() { cancel(); },
       dispose() { cancel(); dropIdle(); },
-      hasNeuralWeights() {
+      hasNeuralWeights(pulse = false) {
         return new Promise(resolve => {
           let worker, timer;
           const finish = available => {
@@ -30,7 +30,7 @@
             worker.onmessage = ({ data }) => finish(data?.hasNeuralWeights === true);
             worker.onerror = worker.onmessageerror = failed;
             timer = setTimeout(failed, TIMEOUT_MS);
-            worker.postMessage({ checkNeuralWeights: true });
+            worker.postMessage({ checkNeuralWeights: true, pulse });
           } catch { failed(); }
         });
       },

@@ -176,8 +176,8 @@ test('worker client can check neural availability during an active plan', async 
   });
   t.after(() => client.dispose());
   const plan = client.plan(S.initialState(), { level: 'god' });
-  const available = client.hasNeuralWeights();
-  assert.deepEqual(workers[1].data, { checkNeuralWeights: true });
+  const available = client.hasNeuralWeights(true);
+  assert.deepEqual(workers[1].data, { checkNeuralWeights: true, pulse: true });
   workers[1].onmessage({ data: { hasNeuralWeights: true } });
   assert.equal(await available, true);
   assert.equal(workers[1].terminated, true);
@@ -186,6 +186,7 @@ test('worker client can check neural availability during an active plan', async 
   assert.deepEqual(await plan, { plans: [] });
 
   const unavailable = client.hasNeuralWeights();
+  assert.deepEqual(workers[2].data, { checkNeuralWeights: true, pulse: false });
   workers[2].onerror();
   assert.equal(await unavailable, false);
   assert.equal(workers[2].terminated, true);

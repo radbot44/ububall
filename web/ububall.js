@@ -36,7 +36,6 @@
   let online = null, onlineRoster = '', onlineTurn = 0, onlineReplay = null, onlineDisconnected = false, onlinePhase = '';
   const cpuClient = createCPUClient();
   const VALID_CPU_LEVELS = typeof ububallCPU === 'object' && ububallCPU?.LEVELS ? Object.keys(ububallCPU.LEVELS) : ['easy', 'medium', 'hard', 'insane', 'god', 'ballistic'];
-  let ballisticAvailable = false;
   let cpuGeneration = 0, cpuReady = Promise.resolve(), cpuDone = false, cpuLevel = 'medium', cpuMode = 'standard', cpuMatchSeed = (Math.random() * 0x100000000) >>> 0;
   // The home screen demo (CPU against CPU) plays silently.
   let demo = false, demoLevels = ['medium', 'hard'], demoRun = 0, demoGame = 0;
@@ -219,9 +218,7 @@
   let lastCpuSetup = null;
   try {
     const saved = JSON.parse(localStorage.getItem(quickPlayKey));
-    if (saved && VALID_CPU_LEVELS.includes(saved.level) &&
-        (saved.mode === 'standard' || typeof saved.mode === 'string' &&
-          saved.mode.split('-').every(rule => ububallMatch.RULES.includes(rule))) &&
+    if (saved && VALID_CPU_LEVELS.includes(saved.level) && ububallMatch.MODES.includes(saved.mode) &&
         Array.isArray(saved.team) && saved.team.length === 3 &&
         saved.team.every(entry => entry && typeof entry.key === 'string')) lastCpuSetup = saved;
   } catch {}
@@ -488,7 +485,7 @@
     get teamIndex() { return teamIndex; }, set teamIndex(v) { teamIndex = v; },
     get rosterSlot() { return rosterSlot; }, set rosterSlot(v) { rosterSlot = v; },
     get lastCpuSetup() { return lastCpuSetup; }, set lastCpuSetup(v) { lastCpuSetup = v; },
-    get ballisticAvailable() { return ballisticAvailable; },
+    get ballisticAvailable() { return lastCpuSetup?.level === 'ballistic' && hasBallisticWeights(lastCpuSetup.mode); },
     get rulesGameNumber() { return rulesGameNumber; }, set rulesGameNumber(v) { rulesGameNumber = v; },
     get fullscreenRequest() { return fullscreenRequest; }, set fullscreenRequest(v) { fullscreenRequest = v; },
     get videoCancelled() { return videoCancelled; }, set videoCancelled(v) { videoCancelled = v; },
@@ -2138,36 +2135,58 @@
   // invite on top and Ready in place of Start.
   const chosenMode = () => ububallMatch.RULES.filter(rule => $('rule-' + rule).checked).join('-') || 'standard';
   const modeSummary = () => { $('mode-summary').textContent = ububallMatch.modeName(chosenMode()); };
-  for (const rule of ububallMatch.RULES) $('rule-' + rule).addEventListener('change', modeSummary);
-  const ballisticTier = $('cpu-levels').querySelector('[data-tier="ballistic"]');
-  let ballisticCheck, selectBallisticWhenReady = false;
-  $('cpu-levels').addEventListener('change', () => { selectBallisticWhenReady = false; });
-  function checkBallistic() {
-    return ballisticCheck ??= cpuClient.hasNeuralWeights().then(available => {
-      ballisticAvailable = available;
-      ballisticTier.hidden = !available;
-      if (available && selectBallisticWhenReady && setupFor === 'cpu') ballisticTier.querySelector('input').checked = true;
-      selectBallisticWhenReady = false;
-      updateHome();
-      return available;
-    });
+  const cpuLevels = $('cpu-levels');
+  const ballisticTier = cpuLevels.querySelector('[data-tier="ballistic"]');
+  const ballisticRadio = ballisticTier.querySelector('input');
+  const godRadio = cpuLevels.querySelector('[value="god"]');
+  const checkedModels = new Map(), availableModels = new Set();
+  let preferBallistic = false;
+  cpuLevels.addEventListener('change', () => { preferBallistic = ballisticRadio.checked; });
+
+  function hasBallisticWeights(mode) {
+    return availableModels.has(ububallMatch.rule(mode, 'pulse'));
   }
+  function syncBallisticOption() {
+    const available = hasBallisticWeights(chosenMode());
+    ballisticTier.hidden = !available;
+    if (available && preferBallistic) ballisticRadio.checked = true;
+    if (!available && ballisticRadio.checked) godRadio.checked = true;
+  }
+  function checkBallistic(mode) {
+    const pulse = ububallMatch.rule(mode, 'pulse');
+    if (!checkedModels.has(pulse)) {
+      checkedModels.set(pulse, cpuClient.hasNeuralWeights(pulse).then(available => {
+        if (available) availableModels.add(pulse);
+        if (setupFor === 'cpu') syncBallisticOption();
+        updateHome();
+        return available;
+      }));
+    }
+    return checkedModels.get(pulse);
+  }
+  for (const rule of ububallMatch.RULES) $('rule-' + rule).addEventListener('change', () => {
+    modeSummary();
+    if (rule === 'pulse' && setupFor === 'cpu') {
+      syncBallisticOption();
+      void checkBallistic(chosenMode());
+    }
+  });
   function openSetup(step, purpose = 'cpu', mode = cpuMode, level = cpuLevel, team = roster) {
     setupFor = purpose; resetSetupSlots();
     for (const rule of ububallMatch.RULES) $('rule-' + rule).checked = ububallMatch.rule(mode, rule);
     modeSummary();
     $('rules-status').textContent = '';
     if (purpose === 'rules') rulesGameNumber = online.state.gameNumber;
-    selectBallisticWhenReady = purpose === 'cpu' && level === 'ballistic' && ballisticTier.hidden;
-    if (level === 'ballistic' && ballisticTier.hidden) level = 'god';
+    preferBallistic = purpose === 'cpu' && level === 'ballistic';
     const levelRadio = document.querySelector(`input[name="cpu-level"][value="${level}"]`) || document.querySelector('input[name="cpu-level"][value="medium"]');
     if (levelRadio) levelRadio.checked = true;
+    if (purpose === 'cpu') syncBallisticOption();
     draft = [...team]; rosterSlot = 0; $('roster-status').textContent = '';
     $('roster-scroll').scrollTop = 0;
     void loadCollection();
     setupStep(step);
     openSheet();
-    if (purpose === 'cpu') void checkBallistic();
+    if (purpose === 'cpu') void checkBallistic(mode);
   }
   // The online lobby. A guest seat fields the room's own three ubus; otherwise the player
   // picks from their collection, starting from their current, last or favorite team.
@@ -2266,7 +2285,7 @@
   async function startFromSetup(button) {
     if (button.disabled || draft.some(entry => !entry)) return;
     const team = [...draft], mode = chosenMode(), level = document.querySelector('input[name="cpu-level"]:checked').value;
-    if (level === 'ballistic' && !ballisticAvailable) return;
+    if (level === 'ballistic' && !hasBallisticWeights(mode)) return;
     button.disabled = true;
     try {
       if (online?.active) {
@@ -2378,7 +2397,7 @@
       const inlineSetup = saved.team.some(entry => Boolean(entry.dna) || entry.key?.startsWith('guest-') || entry.key?.startsWith('replay-') || entry.key?.startsWith('custom-'));
       const guestSetup = saved.team.every(entry => Boolean(entry.key?.startsWith('guest-')));
       if (!inlineSetup && signedIn()) await ubuList.load({ refresh: true });
-      const canQuickPlay = saved.level !== 'ballistic' || await checkBallistic();
+      const canQuickPlay = saved.level !== 'ballistic' || await checkBallistic(saved.mode);
       if (online?.active || matchInProgress() || location.pathname !== '/' || sheetOpen()) return;
       const team = guestSetup && signedIn() ? roster : saved.team.map(entry => entry.dna ? restoreEntry(entry)
         : signedIn() ? restoreTeam([{ serial: entry.key, super: entry.equippedSuper?.id ?? null }]).team[0] : null);
@@ -2442,7 +2461,7 @@
     restoredMatch = restoreActiveMatch();
     if (!restoredMatch) newMatch(false, draft, { standby: true });
     if (isMatchShot()) fitOrientation();
-    if (!restoredMatch && lastCpuSetup?.level === 'ballistic') void checkBallistic();
+    if (!restoredMatch && lastCpuSetup?.level === 'ballistic') void checkBallistic(lastCpuSetup.mode);
   } else if (history.state?.match) {
     // Discord opens the friends queue. Online matches and watch links resume through their URLs.
     const { match, ...homeState } = history.state;

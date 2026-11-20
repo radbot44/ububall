@@ -266,27 +266,76 @@ test('UBNN fp16 parser, bitwise half-float fallback, version guard, nn:"only", a
   M.validatePlans(hybridA.plans);
 });
 
-test('CPU worker reports availability only for runnable v2 weights', async t => {
-  t.after(() => C.clearWeights());
+function startCpuWorker(assets) {
+  const requests = [];
+  let message, modelWidth;
+  const self = { postMessage(data) { message = data; } };
   const source = fs.readFileSync(path.resolve(__dirname, '../web/ububall-cpu-worker.js'), 'utf8');
+  vm.runInNewContext(source, {
+    self, importScripts() {}, ububallMatch: M,
+    ububallCPU: {
+      ...C,
+      plan(state, team, config) {
+        modelWidth = config.nnModel?.H;
+        return C.plan(state, team, config);
+      }
+    },
+    async fetch(url) {
+      const name = url.replace(/^assets\//, '');
+      requests.push(name);
+      return { ok: Object.hasOwn(assets, name), async arrayBuffer() { return assets[name]; } };
+    }
+  });
+  return {
+    requests,
+    async probe(pulse) {
+      await self.onmessage({ data: { checkNeuralWeights: true, pulse } });
+      return message.hasNeuralWeights;
+    },
+    async plan(mode, level) {
+      const data = { state: S.initialState(1, mode), config: { level, candidates: 1, counterBudget: 0, lookaheadTop: 0 } };
+      await self.onmessage({ data });
+      return { level: message.result.diagnostics.level, modelWidth };
+    }
+  };
+}
+
+test('CPU worker picks and caches specialist weights for the match rules', async () => {
+  const standard = 'ububall-net-standard.bin', pulse = 'ububall-net-pulse.bin';
+  const worker = startCpuWorker({
+    [standard]: buildSyntheticUbnnBuffer(32),
+    [pulse]: buildSyntheticUbnnBuffer(48),
+    'ububall-net.bin': buildSyntheticUbnnBuffer(64)
+  });
+  await worker.plan('standard', 'god');
+  assert.deepEqual(worker.requests, [], 'heuristic requests skip weight loading');
+  assert.deepEqual(await worker.plan('standard', 'ballistic'), { level: 'ballistic', modelWidth: 32 });
+  assert.deepEqual(await worker.plan('pulse', 'ballistic'), { level: 'ballistic', modelWidth: 48 });
+  assert.deepEqual(await worker.plan('classic-pulse-blitz', 'ballistic'), { level: 'ballistic', modelWidth: 48 });
+  assert.deepEqual(await worker.plan('classic-blitz', 'ballistic'), { level: 'ballistic', modelWidth: 32 });
+  assert.equal(await worker.probe(false), true);
+  assert.equal(await worker.probe(true), true);
+  assert.deepEqual(worker.requests, [standard, pulse]);
+});
+
+test('CPU worker uses playable general weights as fallback and keeps other modes isolated', async () => {
+  const standard = 'ububall-net-standard.bin', pulse = 'ububall-net-pulse.bin', general = 'ububall-net.bin';
   const valid = buildSyntheticUbnnBuffer();
   const invalid = valid.slice(0);
   new DataView(invalid).setUint16(16, 0x7e00, true);
-  for (const [asset, expected] of [[null, false], [invalid, false], [buildSyntheticUbnnBuffer(32, P.VERSION + 1), false], [valid, true]]) {
-    C.clearWeights();
-    let requests = 0, message;
-    const self = { postMessage(data) { message = data; } };
-    vm.runInNewContext(source, {
-      self, importScripts() {}, ububallCPU: C,
-      async fetch() { requests++; return { ok: asset !== null, async arrayBuffer() { return asset; } }; }
-    });
-    await self.onmessage({ data: { state: S.initialState(), config: { level: 'easy', candidates: 1 } } });
-    assert.equal(requests, 0, 'heuristic requests skip weight loading');
-    await self.onmessage({ data: { checkNeuralWeights: true } });
-    assert.equal(message.hasNeuralWeights, expected);
-    await self.onmessage({ data: { checkNeuralWeights: true } });
-    assert.equal(requests, 1);
-  }
+  const fallback = startCpuWorker({ [standard]: invalid, [general]: buildSyntheticUbnnBuffer(64) });
+  assert.equal(await fallback.probe(false), true);
+  assert.equal(await fallback.probe(true), true);
+  assert.deepEqual(await fallback.plan('standard', 'ballistic'), { level: 'ballistic', modelWidth: 64 });
+  assert.deepEqual(await fallback.plan('pulse', 'ballistic'), { level: 'ballistic', modelWidth: 64 });
+  assert.deepEqual(fallback.requests, [standard, general, pulse]);
+
+  const missing = startCpuWorker({ [standard]: valid, [pulse]: buildSyntheticUbnnBuffer(48, P.VERSION + 1), [general]: invalid });
+  assert.equal(await missing.probe(false), true);
+  assert.equal(await missing.probe(true), false);
+  assert.deepEqual(await missing.plan('standard', 'ballistic'), { level: 'ballistic', modelWidth: 32 });
+  assert.deepEqual(await missing.plan('pulse', 'ballistic'), { level: 'god', modelWidth: undefined });
+  assert.deepEqual(missing.requests, [standard, pulse, general]);
 });
 
 test('end-to-end pipeline: nn-generate.cjs -> train-nn.py -> exported UBNN weights run in CPU planner', t => {
