@@ -418,6 +418,10 @@
     if (!isNative) return;
     document.documentElement.classList.add('capacitor-native', `capacitor-${platform}`);
     decorateAudioWithHaptics();
+    if (!window.ubuAudio?.__hapticsWired) {
+      document.addEventListener('DOMContentLoaded', decorateAudioWithHaptics, { once: true });
+      window.addEventListener?.('load', decorateAudioWithHaptics, { once: true });
+    }
 
     const App = plugins().App;
     if (App?.addListener) {

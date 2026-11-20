@@ -437,11 +437,11 @@ body[data-shot="home"] .play-home .mint-entry-links { justify-content: center; }
 .discord-activity .play-home > :not(.activity-play, .home-team, .mint-entry),
 .discord-activity #signed-out-panel a[href="/"],
 body[data-shot="lobby"] .rink-stage > :is(.demo-badge, .demo-play, .demo-finger, .field-banner, #skip-goal-replay) { display: none; }
-.discord-activity .site-header {
+html:is(.discord-activity, .capacitor-native) body .site-header {
   margin-top: max(.375rem, calc(var(--safe-top, 0px) + .25rem));
   width: min(114rem, calc(100% - 1.5rem - var(--safe-left, 0px) - var(--safe-right, 0px)));
 }
-.discord-activity body[data-shot="collection"] .collection-dock { top: var(--safe-top, 0px); }
+html:is(.discord-activity, .capacitor-native) body[data-shot="collection"] .collection-dock { top: var(--safe-top, 0px); }
 body[data-shot="lobby"] .ball-page {
   gap: 1rem; height: auto;
   padding-bottom: max(.75rem, var(--safe-bottom, 0px));

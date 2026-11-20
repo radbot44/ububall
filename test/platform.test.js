@@ -337,3 +337,49 @@ test('asset allowlist, index.html script load order, install.ps1 mobile exclusio
     assert.ok(mobPkg.dependencies['@capacitor/haptics']);
   }
 });
+
+test('haptics decoration wires ubuAudio even when platform.js executes before ubu-audio.js during interactive defer load', () => {
+  const hapticsCalls = [];
+  const docEvents = new Map();
+  const mockWindow = {
+    location: { origin: 'https://localhost', protocol: 'https:', host: 'localhost', pathname: '/', search: '', hash: '' },
+    localStorage: makeStorage(),
+    sessionStorage: makeStorage(),
+    Capacitor: {
+      isNativePlatform: () => true,
+      getPlatform: () => 'android',
+      Plugins: {
+        App: { addListener() {}, getLaunchUrl: async () => null },
+        Haptics: { impact: async opts => { hapticsCalls.push(opts.style); } }
+      }
+    },
+    addEventListener() {}
+  };
+  const mockDocument = {
+    readyState: 'interactive',
+    documentElement: { classList: { add() {} } },
+    body: { dataset: { shot: 'home' } },
+    addEventListener(type, fn) { if (!docEvents.has(type)) docEvents.set(type, []); docEvents.get(type).push(fn); }
+  };
+  const sandbox = {
+    window: mockWindow,
+    document: mockDocument,
+    location: mockWindow.location,
+    localStorage: mockWindow.localStorage,
+    sessionStorage: mockWindow.sessionStorage,
+    navigator: {},
+    performance: { now: () => 500 },
+    URL,
+    URLSearchParams
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(platformSource, sandbox);
+
+  // ubu-audio.js loads after platform.js while document.readyState is 'interactive'
+  mockWindow.ubuAudio = { playCollision() { return 'ok'; } };
+  for (const fn of (docEvents.get('DOMContentLoaded') || [])) fn();
+
+  assert.equal(mockWindow.ubuAudio.__hapticsWired, true);
+  assert.equal(mockWindow.ubuAudio.playCollision(), 'ok');
+  assert.deepEqual(hapticsCalls, ['LIGHT']);
+});
