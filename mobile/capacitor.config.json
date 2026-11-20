@@ -20,7 +20,9 @@
       "showSpinner": false
     },
     "SystemBars": {
-      "insetsHandling": "css"
+      "insetsHandling": "css",
+      "style": "DARK",
+      "hidden": false
     }
   }
 }

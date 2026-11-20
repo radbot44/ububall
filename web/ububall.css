@@ -442,6 +442,11 @@ html:is(.discord-activity, .capacitor-native) body .site-header {
   width: min(114rem, calc(100% - 1.5rem - var(--safe-left, 0px) - var(--safe-right, 0px)));
 }
 html:is(.discord-activity, .capacitor-native) body[data-shot="collection"] .collection-dock { top: var(--safe-top, 0px); }
+html:is(.discord-activity, .capacitor-native) dialog:not(.stat-drawer):not(.team-sheet):not(.on-ice) {
+  inset: var(--safe-top, 0px) var(--safe-right, 0px) var(--safe-bottom, 0px) var(--safe-left, 0px);
+  max-width: calc(100vw - 1.5rem - var(--safe-left, 0px) - var(--safe-right, 0px));
+  max-height: calc(100dvh - 1.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+}
 body[data-shot="lobby"] .ball-page {
   gap: 1rem; height: auto;
   padding-bottom: max(.75rem, var(--safe-bottom, 0px));
@@ -690,11 +695,16 @@ body[data-shot="lobby"] .play-home { align-self: center; gap: .6875rem; }
 .team .card-header .card-select { flex: 1; min-width: 0; }
 /* The stat drawer slides in over the screen edge on its team's side. */
 .stat-drawer {
-  position: fixed; inset: 0 auto 0 0; width: min(18.75rem, 86vw); height: 100dvh; max-height: none; margin: 0; padding: .875rem .875rem 1.25rem;
+  position: fixed; inset: 0 auto 0 0; width: min(18.75rem, 86vw); height: 100dvh; max-height: none; margin: 0;
+  padding: calc(.875rem + var(--safe-top, 0px)) .875rem calc(1.25rem + var(--safe-bottom, 0px)) calc(.875rem + var(--safe-left, 0px));
   overflow-y: auto; border: 0; border-right: .0625rem solid var(--border); border-radius: 0 1.125rem 1.125rem 0;
   background: var(--card); color: var(--text); box-shadow: var(--panel-shadow); animation: drawer-in-left .2s ease-out;
 }
-.stat-drawer[data-side="away"] { inset: 0 0 0 auto; border-right: 0; border-left: .0625rem solid var(--border); border-radius: 1.125rem 0 0 1.125rem; animation-name: drawer-in-right; }
+.stat-drawer[data-side="away"] {
+  inset: 0 0 0 auto; border-right: 0; border-left: .0625rem solid var(--border); border-radius: 1.125rem 0 0 1.125rem;
+  padding: calc(.875rem + var(--safe-top, 0px)) calc(.875rem + var(--safe-right, 0px)) calc(1.25rem + var(--safe-bottom, 0px)) .875rem;
+  animation-name: drawer-in-right;
+}
 .stat-drawer::backdrop { background: rgb(0 0 0 / .35); }
 @keyframes drawer-in-left { from { translate: -100% 0; } }
 @keyframes drawer-in-right { from { translate: 100% 0; } }
