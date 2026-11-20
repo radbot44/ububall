@@ -17,6 +17,9 @@
   let memorySite = '';
   let pendingVerifier = null;
   let lastHapticAt = 0;
+  let lastOtaCheckAt = 0;
+  let otaBootConfirmed = false;
+  const OTA_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
   function readStorage(storage, key) {
     try { return storage?.getItem?.(key) || ''; } catch { return ''; }
@@ -414,13 +417,54 @@
     try { void plugins().App?.minimizeApp?.(); } catch {}
   }
 
+  function notifyOtaBootOk() {
+    if (!isNative || otaBootConfirmed) return;
+    const OtaUpdater = plugins().OtaUpdater;
+    if (!OtaUpdater?.notifyBootOk) return;
+    otaBootConfirmed = true;
+    try { void OtaUpdater.notifyBootOk(); } catch {}
+  }
+
+  async function checkForUpdate(force = false) {
+    if (!isNative) return null;
+    const OtaUpdater = plugins().OtaUpdater;
+    if (!OtaUpdater?.checkForUpdate) return null;
+    const now = Date.now();
+    if (!force && lastOtaCheckAt && now - lastOtaCheckAt < OTA_CHECK_INTERVAL_MS) {
+      return { status: 'throttled' };
+    }
+    lastOtaCheckAt = now;
+    try {
+      return await OtaUpdater.checkForUpdate({ origin: apiOrigin() });
+    } catch {
+      return null;
+    }
+  }
+
+  async function getOtaStatus() {
+    if (!isNative) return null;
+    const OtaUpdater = plugins().OtaUpdater;
+    if (!OtaUpdater?.getStatus) return null;
+    try {
+      return await OtaUpdater.getStatus();
+    } catch {
+      return null;
+    }
+  }
+
   function initNativeLifecycle() {
     if (!isNative) return;
     document.documentElement.classList.add('capacitor-native', `capacitor-${platform}`);
     decorateAudioWithHaptics();
-    if (!window.ubuAudio?.__hapticsWired) {
-      document.addEventListener('DOMContentLoaded', decorateAudioWithHaptics, { once: true });
-      window.addEventListener?.('load', decorateAudioWithHaptics, { once: true });
+    const onReady = () => {
+      decorateAudioWithHaptics();
+      notifyOtaBootOk();
+    };
+    if (document.readyState === 'complete') {
+      onReady();
+    } else {
+      document.addEventListener('DOMContentLoaded', onReady, { once: true });
+      window.addEventListener?.('load', onReady, { once: true });
     }
 
     const App = plugins().App;
@@ -439,6 +483,7 @@
             const ctx = window.ubuAudio?.getAudioContext?.();
             if (ctx?.state === 'suspended') void ctx.resume?.();
             void window.checkUbuSession?.(false);
+            void checkForUpdate(false);
           }
         } catch {}
       });
@@ -448,6 +493,9 @@
     }
 
     try { void plugins().SplashScreen?.hide?.(); } catch {}
+    if (typeof setTimeout === 'function') {
+      setTimeout(() => { void checkForUpdate(false); }, 2500);
+    }
   }
 
   if (typeof document !== 'undefined') {
@@ -476,7 +524,9 @@
     exportFile,
     setOrientation,
     setImmersive,
-    haptic
+    haptic,
+    checkForUpdate,
+    getOtaStatus
   });
 
   if (typeof window !== 'undefined') window.ubuPlatform = api;

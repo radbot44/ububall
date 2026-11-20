@@ -359,6 +359,7 @@ test('haptics decoration wires ubuAudio even when platform.js executes before ub
     readyState: 'interactive',
     documentElement: { classList: { add() {} } },
     body: { dataset: { shot: 'home' } },
+    querySelector: () => null,
     addEventListener(type, fn) { if (!docEvents.has(type)) docEvents.set(type, []); docEvents.get(type).push(fn); }
   };
   const sandbox = {
@@ -382,4 +383,93 @@ test('haptics decoration wires ubuAudio even when platform.js executes before ub
   assert.equal(mockWindow.ubuAudio.__hapticsWired, true);
   assert.equal(mockWindow.ubuAudio.playCollision(), 'ok');
   assert.deepEqual(hapticsCalls, ['LIGHT']);
+});
+
+test('silent OTA lifecycle confirms boot via notifyBootOk and throttles background checkForUpdate', async () => {
+  let bootConfirmed = 0;
+  const checkCalls = [];
+  const docEvents = new Map();
+  let scheduledFn = null;
+
+  const mockWindow = {
+    location: { origin: 'https://localhost', protocol: 'https:', host: 'localhost', pathname: '/', search: '', hash: '' },
+    localStorage: makeStorage(),
+    sessionStorage: makeStorage(),
+    Capacitor: {
+      isNativePlatform: () => true,
+      getPlatform: () => 'android',
+      Plugins: {
+        App: { addListener() {}, getLaunchUrl: async () => null },
+        OtaUpdater: {
+          notifyBootOk: async () => { bootConfirmed++; return { isOta: true }; },
+          checkForUpdate: async opts => { checkCalls.push(opts); return { status: 'staged', version: '0123456789abcdef' }; },
+          getStatus: async () => ({ activeVersion: '0123456789abcdef', isOta: true })
+        }
+      }
+    },
+    addEventListener() {}
+  };
+  const mockDocument = {
+    readyState: 'interactive',
+    documentElement: { classList: { add() {} } },
+    body: { dataset: { shot: 'home' } },
+    querySelector: () => null,
+    addEventListener(type, fn) { if (!docEvents.has(type)) docEvents.set(type, []); docEvents.get(type).push(fn); }
+  };
+  const sandbox = {
+    window: mockWindow,
+    document: mockDocument,
+    location: mockWindow.location,
+    localStorage: mockWindow.localStorage,
+    sessionStorage: mockWindow.sessionStorage,
+    navigator: {},
+    performance: { now: () => 500 },
+    setTimeout: fn => { scheduledFn = fn; return 1; },
+    Date,
+    URL,
+    URLSearchParams
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(platformSource, sandbox);
+
+  assert.equal(bootConfirmed, 0, 'must wait until DOMContentLoaded before confirming OTA boot');
+  for (const fn of (docEvents.get('DOMContentLoaded') || [])) fn();
+  assert.equal(bootConfirmed, 1);
+
+  assert.equal(typeof scheduledFn, 'function');
+  scheduledFn();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(JSON.stringify(checkCalls)), [{ origin: 'https://ububall.tch.one' }]);
+
+  const throttled = await mockWindow.ubuPlatform.checkForUpdate(false);
+  assert.equal(throttled.status, 'throttled');
+  assert.equal(checkCalls.length, 1);
+
+  const forced = await mockWindow.ubuPlatform.checkForUpdate(true);
+  assert.equal(forced.status, 'staged');
+  assert.equal(checkCalls.length, 2);
+
+  const status = await mockWindow.ubuPlatform.getOtaStatus();
+  assert.equal(status.isOta, true);
+});
+
+test('prepare-assets generates mobile-manifest.json with accurate SHA-256 hashes for dist/public', () => {
+  const { execFileSync } = require('node:child_process');
+  const { createHash } = require('node:crypto');
+  const root = path.resolve(__dirname, '..');
+  execFileSync(process.execPath, [path.join(root, 'scripts/prepare-assets.cjs')], { cwd: root });
+  const manifestPath = path.join(root, 'dist/public/mobile-manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  assert.equal(manifest.schema, 1);
+  assert.equal(manifest.minNativeVersion, 1);
+  assert.match(manifest.version, /^[0-9a-f]{16}$/);
+  assert.ok(manifest.files['index.html']);
+  assert.ok(manifest.files['platform.js']);
+  assert.ok(manifest.files['assets/ububall-logo.svg']);
+  for (const [rel, meta] of Object.entries(manifest.files)) {
+    const bytes = fs.readFileSync(path.join(root, 'dist/public', rel));
+    assert.equal(bytes.length, meta.size, `size mismatch for ${rel}`);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    assert.equal(digest, meta.sha256, `sha256 mismatch for ${rel}`);
+  }
 });
