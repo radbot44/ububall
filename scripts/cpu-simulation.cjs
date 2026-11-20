@@ -72,9 +72,9 @@ function choose(state, team, profile, seed, history) {
   return C.plan(state, team, { ...resolveProfileConfig(profile), seed, ...(history?.length ? { history } : {}) });
 }
 
-function match({ seed = 1, mode = 'standard', profiles = ['medium', 'legacy'], maxTurns = 80, swapped = false, trace = false } = {}) {
+function match({ seed = 1, mode = 'standard', profiles = ['medium', 'legacy'], maxTurns = 80, swapped = false, fixedRosters = false, trace = false } = {}) {
   let state = initialState(seed, mode);
-  if (swapped) {
+  if (swapped && !fixedRosters) {
     const bodies = state.bodies;
     for (let i = 0; i < 3; i++) {
       const a = bodies[i], b = bodies[i + 3];
@@ -83,13 +83,13 @@ function match({ seed = 1, mode = 'standard', profiles = ['medium', 'legacy'], m
       b.team = 0; a.team = 1;
       [state.stats[i], state.stats[i + 3]] = [state.stats[i + 3], state.stats[i]];
     }
-    profiles = [...profiles].reverse();
   }
+  if (swapped) profiles = [...profiles].reverse();
   const timing = [[], []], simulations = [0, 0], turns = [], history = [];
   const fouls = { campingWarnings: [0, 0], cornerWarnings: 0, cards: [0, 0], cornerResets: 0 };
   let count = 0;
   while (state.winner === null && count < maxTurns) {
-    const decisions = profiles.map((p, team) => choose(state, team, p, seed + count * 17 + (swapped ? 1 - team : team), history));
+    const decisions = profiles.map((p, team) => choose(state, team, p, seed + count * 17 + (swapped && !fixedRosters ? 1 - team : team), history));
     decisions.forEach((d, i) => { timing[i].push(d.diagnostics.milliseconds); simulations[i] += d.diagnostics.simulations; });
     const moves = [...decisions[0].plans, ...decisions[1].plans];
     history.push({

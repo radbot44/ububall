@@ -96,7 +96,7 @@ function playSingleMatch({ seed, mode, maxTurns, nnTeam, nnModel, nnScale, nnWei
 
   const nnGoals = state.scores[nnTeam];
   const godGoals = state.scores[1 - nnTeam];
-  const outcome = nnGoals > godGoals ? 1 : nnGoals < godGoals ? -1 : 0;
+  const outcome = state.winner === null ? null : state.winner === nnTeam ? 1 : -1;
   return { outcome, nnGoals, godGoals, turns, nnMs, godMs };
 }
 
@@ -111,6 +111,7 @@ function playPair(job, nnModel) {
     wins: (m0.outcome === 1 ? 1 : 0) + (m1.outcome === 1 ? 1 : 0),
     draws: (m0.outcome === 0 ? 1 : 0) + (m1.outcome === 0 ? 1 : 0),
     losses: (m0.outcome === -1 ? 1 : 0) + (m1.outcome === -1 ? 1 : 0),
+    capped: Number(m0.outcome === null) + Number(m1.outcome === null),
     nnGoals: m0.nnGoals + m1.nnGoals,
     godGoals: m0.godGoals + m1.godGoals,
     turns: m0.turns + m1.turns,
@@ -204,16 +205,18 @@ function summarizeGroup(rows) {
     nnGoals += r.nnGoals; godGoals += r.godGoals;
     turns += r.turns; nnMs += r.nnMs; godMs += r.godMs;
   }
-  const matches = wins + draws + losses;
-  const score = matches > 0 ? (wins + 0.5 * draws) / matches : 0.5;
+  const capped = rows.reduce((sum, row) => sum + (row.capped ?? 0), 0);
+  const finished = wins + draws + losses;
+  const matches = finished + capped;
+  const score = finished > 0 ? (wins + 0.5 * draws) / finished : 0.5;
   const clamped = Math.max(0.005, Math.min(0.995, score));
   const elo = Math.round(400 * Math.log10(clamped / (1 - clamped)));
   const decided = wins + losses;
   const z = decided > 0 ? (wins - 0.5 * decided) / Math.sqrt(0.25 * decided) : 0;
   return {
-    matches, wins, draws, losses,
-    scorePct: Number((score * 100).toFixed(1)),
-    elo,
+    matches, wins, draws, losses, capped,
+    scorePct: finished ? Number((score * 100).toFixed(1)) : null,
+    elo: finished ? elo : null,
     zScore: Number(z.toFixed(2)),
     nnGoals, godGoals,
     goalDiff: nnGoals - godGoals,
@@ -303,19 +306,19 @@ async function main() {
       byMode
     });
   }
-  table.sort((a, b) => b.scorePct - a.scorePct || b.goalDiff - a.goalDiff);
+  table.sort((a, b) => (b.scorePct ?? -1) - (a.scorePct ?? -1) || b.goalDiff - a.goalDiff);
 
   console.error('');
-  console.error('nnScale  nnWeight  W-D-L       Score%   Elo    z     Goals(NN-God)  ms/turn(NN vs God)');
+  console.error('nnScale  nnWeight  W-D-L/cap   Score%   Elo    z     Goals(NN-God)  ms/turn(NN vs God)');
   console.error('-------  --------  ----------  ------  ----  -----  -------------  ------------------');
   for (const row of table) {
-    const wdl = `${row.wins}-${row.draws}-${row.losses}`.padEnd(10);
+    const wdl = `${row.wins}-${row.draws}-${row.losses}/${row.capped}`.padEnd(10);
     const goals = `${row.nnGoals}-${row.godGoals} (${row.goalDiff >= 0 ? '+' : ''}${row.goalDiff})`.padEnd(13);
-    const eloStr = `${row.elo >= 0 ? '+' : ''}${row.elo}`.padStart(4);
+    const eloStr = (row.elo === null ? 'n/a' : `${row.elo >= 0 ? '+' : ''}${row.elo}`).padStart(4);
     const zStr = `${row.zScore >= 0 ? '+' : ''}${row.zScore.toFixed(2)}`.padStart(5);
     console.error(
       `${String(row.nnScale).padStart(7)}  ${row.nnWeight.toFixed(2).padStart(8)}  ${wdl}  ` +
-      `${row.scorePct.toFixed(1).padStart(5)}%  ${eloStr}  ${zStr}  ${goals}  ` +
+      `${(row.scorePct?.toFixed(1) ?? 'n/a').padStart(5)}%  ${eloStr}  ${zStr}  ${goals}  ` +
       `${row.nnMsPerTurn.toFixed(1)} vs ${row.godMsPerTurn.toFixed(1)}`
     );
   }

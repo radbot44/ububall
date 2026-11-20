@@ -114,7 +114,7 @@ To train separate models, generate one dataset per mode and export each checkpoi
 
 ```powershell
 foreach ($mode in @('standard', 'pulse')) {
-    npm run nn:gen -- --matches 2000 --turns 70 --preset mixed --mode $mode --out "personal/nn-$mode-shards"
+    npm run nn:gen -- --matches 2000 --preset mixed --mode "$mode-pack" --out "personal/nn-$mode-shards"
     if ($LASTEXITCODE -ne 0) { break }
     python scripts/train-nn.py --shards "personal/nn-$mode-shards" --epochs 25 --batch-size 4096 --out "web/assets/ububall-net-$mode.bin" --report "personal/nn-$mode-report.json"
     if ($LASTEXITCODE -ne 0) { break }
@@ -138,3 +138,22 @@ The sweep trains uniform, combined, immediate-goal-only, defensive Guard, and sh
 Use `--calibration` with an earlier full-budget Pulse `sim:cpu` report whose two profiles specify Ballistic weight paths. The sweep repeats those seeds with the reduced budget. Short matches rank finalists if calibration reproduces the full-budget ranking and at least half the games finish in each comparison. Otherwise the sweep uses the position ranking. Set `--full-pairs 4` to test the selected candidate against the incumbent at full budget on a separate set of seeds. Set `--seed` to change the disjoint benchmark seed ranges for a new experiment. Checkpoints and the incremental report are written to the run directory.
 
 The sweep skips byte-identical weights when screening and selecting finalists. Repeat the same command with `--resume` to reuse completed stages. You can add `--full-pairs 4` on resume after reviewing a sweep that stopped at short matches.
+
+## Train a Pulse policy head from competing plays
+
+```powershell
+node scripts/nn-pulse-comparison.cjs --out personal/pulse-comparison-run --seed 43001 --train 32 --holdout 8 --turns 8 --pairs 4
+```
+
+Supply a fresh output directory and a seed range disjoint from prior training. The runner snapshots the incumbent and assigns consecutive, separate roster seeds to training, position evaluation, and matches. Each position comes from a full-budget Ballistic versus God trajectory. The collector saves the God move, Ballistic move, policy proposals and distinct finalists against common replies. Each scoreless first turn gets a deterministic legacy continuation. The seed files include the encoded position after that first turn for future value training.
+
+Both challengers start from the incumbent and update only its policy head with the same optimizer and number of steps. The control imitates God's selected plan. The comparison model adds a pairwise loss favoring candidates with higher mean net goals across replies. A seed file keeps every candidate for its root position together. The held-out position metric ranks saved moves by the training loss. The match test uses the actual emitted Ballistic plans.
+
+Each matchup plays both seats on the same rosters, with a 180-turn cap and the default Ballistic search budget. The runner saves checkpoints and raw games in the run directory. The standings include completed wins, losses, caps, latency and a two-sided randomization test that swaps profile labels for whole roster pairs. Use a larger independent seed range to confirm a promising pilot.
+
+The same branches can train a separate three-class value head to predict the following turn's goal under the recorded legacy continuation. The probe freezes the trunk and policy. It checks whether candidate endpoints for the same root and opponent reply are ordered correctly, restricted to branches that survived the first turn. The match command tests the exported head at the default neural blend on a fresh seed range.
+
+```powershell
+py -3.11 scripts/probe-pulse-value.py personal/pulse-comparison-run
+node scripts/nn-pulse-comparison.cjs --value-from personal/pulse-comparison-run --out personal/pulse-value-matches --seed 43045 --pairs 4
+```

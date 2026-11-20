@@ -1166,6 +1166,11 @@ function plan(input, team = 1, config = {}) {
 
   const chosen = choose(finalPool, settings.temperature, random, style);
   const policy = policyTrace && { proposals: policyTrace.proposals, selectedFrom: policyTrace.lineage.get(chosen.moves) ?? null };
+  if (policy && config.traceFinalists) {
+    policy.finalists = finalPool.map(entry => ({
+      plans: M.validatePlans(entry.moves), lineage: policyTrace.lineage.get(entry.moves) ?? null
+    }));
+  }
   return {
     plans: M.validatePlans(chosen.moves),
     diagnostics: { level, ...(nnModel ? { nn: true } : {}), ...(policyTrace ? { policy } : {}), candidates: evaluated, simulations, ticks, score: chosen.value, milliseconds: performance.now() - started }

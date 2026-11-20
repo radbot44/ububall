@@ -16,7 +16,6 @@ CI and CPU-only test environments can verify the exact same binary export pipeli
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import math
 import os
@@ -45,7 +44,7 @@ Y_FLIP_OBS = [
 Y_FLIP_POL = [1, 3, 7, 9, 13, 15]
 
 
-def load_shards(shard_dir: Path) -> tuple[list[np.ndarray], int, str]:
+def load_shards(shard_dir: Path):
     manifest_path = shard_dir / "manifest.json"
     if not manifest_path.is_file():
         raise FileNotFoundError(f"Missing {manifest_path}. Generate UBNN v{NN_FORMAT} shards with npm run nn:gen.")
@@ -57,7 +56,11 @@ def load_shards(shard_dir: Path) -> tuple[list[np.ndarray], int, str]:
     if type(phys_version) is not int or not 0 < phys_version <= 0xFFFFFFFF:
         raise ValueError(f"Invalid physics version in {manifest_path}.")
 
-    files = sorted(glob.glob(str(shard_dir / "*.bin")))
+    entries = meta.get("shards")
+    if entries is None:
+        entries = [{"file": file.name} for file in shard_dir.glob("*.bin")]
+    entries = sorted(entries, key=lambda entry: entry["file"])
+    files = [shard_dir / entry["file"] for entry in entries]
     if not files:
         raise FileNotFoundError(f"No .bin shards found in {shard_dir}. Run `npm run nn:gen` first.")
 
@@ -67,10 +70,29 @@ def load_shards(shard_dir: Path) -> tuple[list[np.ndarray], int, str]:
         if mm.size % ROW_FLOATS != 0:
             raise ValueError(f"Shard {fpath} float count {mm.size} is not divisible by {ROW_FLOATS}.")
         arrays.append(np.array(mm.reshape(-1, ROW_FLOATS), dtype=np.float32, copy=True))
-    return arrays, phys_version, str(meta.get("mode", "mixed"))
+    return arrays, phys_version, str(meta.get("mode", "mixed")), entries
 
 
-def split_train_val(shards: list[np.ndarray], val_frac: float = 0.10) -> tuple[np.ndarray, np.ndarray]:
+def split_train_val(shards: list[np.ndarray], val_frac: float = 0.10, entries=None) -> tuple[np.ndarray, np.ndarray]:
+    if entries and any("games" in entry for entry in entries):
+        groups = {"train": [], "val": []}
+        seen = set()
+        for shard, entry in zip(shards, entries):
+            start = 0
+            for game in entry["games"]:
+                end = start + game["rows"]
+                if game["seed"] in seen or not start < end <= len(shard):
+                    raise ValueError("Duplicate match seed or invalid match row count.")
+                groups[game["split"]].append(shard[start:end])
+                seen.add(game["seed"])
+                start = end
+            if start != len(shard):
+                raise ValueError("Match row counts disagree with the shard size.")
+        if groups["train"] and groups["val"]:
+            return np.concatenate(groups["train"]), np.concatenate(groups["val"])
+        if len(seen) > 1:
+            raise ValueError("Generated matches must include both train and validation seeds.")
+        print("[train-nn] Single-match smoke dataset: validation cannot measure generalization.")
     # Hold out whole shards when >= 4 shards exist so no round is split across train/val.
     if len(shards) >= 4:
         val_shards = max(1, min(len(shards) - 1, int(round(len(shards) * val_frac))))
@@ -747,9 +769,9 @@ def main() -> None:
     parser.add_argument("--backend", choices=["auto", "torch", "numpy"], default="auto", help="Training backend")
     args = parser.parse_args()
 
-    shards, phys_version, shard_mode = load_shards(args.shards)
+    shards, phys_version, shard_mode, entries = load_shards(args.shards)
     gamma = args.gamma if args.gamma is not None else (0.993 if "pulse" in shard_mode.lower() else 0.985)
-    train_data, val_data = split_train_val(shards, val_frac=0.10)
+    train_data, val_data = split_train_val(shards, val_frac=0.10, entries=entries)
     policy_weights = None if args.policy_focus == "uniform" else pulse_policy_weights(train_data, args.policy_focus)
     total_rows = len(train_data) + len(val_data)
     print(f"[train-nn] Loaded {total_rows:,} rows across {len(shards)} shards ({len(train_data):,} train, {len(val_data):,} val), mode={shard_mode}, gamma={gamma}, physVersion={phys_version}")

@@ -338,6 +338,32 @@ test('CPU worker uses playable general weights as fallback and keeps other modes
   assert.deepEqual(missing.requests, [standard, pulse, general]);
 });
 
+test('mixed teachers cover Classic-Pulse and split complete matches before scheduling', () => {
+  const { buildJobs } = require('../scripts/nn-generate.cjs');
+  const jobs = buildJobs({ mode: 'pulse-pack', matches: 100, seed: 910, preset: 'mixed', turns: 70 });
+  const classic = jobs.filter(job => job.mode === 'classic-pulse');
+  assert.equal(classic.length, 20);
+  assert.equal(classic.filter(job => job.presetName === 'god').length, 2);
+  assert.equal(jobs.filter(job => job.split === 'val').length, 10);
+  assert.ok(jobs.every(job => job.maxTurns === 180));
+});
+
+test('paired comparison counts caps separately and swaps the winner back into profile order', () => {
+  const { summarizeGames } = require('../scripts/nn-pulse-comparison.cjs');
+  const { summarizeGroup } = require('../scripts/nn-eval.cjs');
+  const base = { scores: [1, 5], turns: 20, timing: [{ meanMs: 10 }, { meanMs: 30 }] };
+  const result = summarizeGames([
+    { ...base, seed: 1, swapped: false, winner: 0, capped: false },
+    { ...base, seed: 1, swapped: true, winner: 1, capped: false },
+    { ...base, seed: 2, swapped: false, winner: null, capped: true },
+    { ...base, seed: 2, swapped: true, winner: 0, capped: false }
+  ]);
+  assert.deepEqual([result.wins, result.losses, result.capped, result.pairedTwoSidedP], [2, 1, 1, 1]);
+  assert.deepEqual(result.meanMsPerTurn, [20, 20]);
+  const capped = summarizeGroup([{ wins: 0, draws: 0, losses: 0, capped: 2, turns: 2, nnMs: 0, godMs: 0, nnGoals: 3, godGoals: 0 }]);
+  assert.deepEqual([capped.matches, capped.scorePct, capped.elo], [2, null, null]);
+});
+
 test('end-to-end pipeline: nn-generate.cjs -> train-nn.py -> exported UBNN weights run in CPU planner', t => {
   t.after(() => C.clearWeights());
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ububall-nn-e2e-'));
@@ -402,6 +428,8 @@ test('end-to-end pipeline: nn-generate.cjs -> train-nn.py -> exported UBNN weigh
   const report = JSON.parse(fs.readFileSync(repOut, 'utf8'));
   assert.equal(report.physVersion, P.VERSION);
   assert.equal(report.trainRows + report.valRows, manifest.totalRows);
+  assert.equal(report.valRows, manifest.shards.flatMap(shard => shard.games)
+    .filter(game => game.split === 'val').reduce((sum, game) => sum + game.rows, 0));
 
   const rawBuf = fs.readFileSync(binOut);
   const loaded = C.loadWeights(rawBuf);

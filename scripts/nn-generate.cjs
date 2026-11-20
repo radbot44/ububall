@@ -12,6 +12,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { Worker, isMainThread, parentPort, workerData } = require('node:worker_threads');
 
 const P = require('../shared/ububall-physics.js');
@@ -225,10 +226,13 @@ if (!isMainThread && require.main === module && workerData && workerData.sharedC
     if (buffered >= CHUNK_ROWS) flushDisk();
   };
 
+  const games = [];
   for (;;) {
     const idx = Atomics.add(ctrl, 0, 1);
     if (idx >= jobs.length) break;
     const stats = playAndRecordMatch(jobs[idx], sink, teacherModel);
+    const { seed, mode, presetName, split, maxTurns } = jobs[idx];
+    games.push({ seed, mode, presetName, split, maxTurns, rows: stats.rowsWritten });
     totalTurns += stats.turnsPlayed;
     totalGoals += stats.goalsScored;
     matchesDone++;
@@ -237,7 +241,7 @@ if (!isMainThread && require.main === module && workerData && workerData.sharedC
   }
   flushDisk();
   fs.closeSync(fd);
-  parentPort.postMessage({ workerId, shardPath, matchesDone, totalTurns, totalGoals, totalRows });
+  parentPort.postMessage({ workerId, shardPath, matchesDone, totalTurns, totalGoals, totalRows, games });
   return;
 }
 
@@ -275,7 +279,7 @@ function parseCli(argv) {
     else if (arg === '--out') opts.out = path.resolve(val);
     else throw new Error(`Unknown option: ${arg}`);
   }
-  if (!turnsSet && (opts.mode === 'pulse' || opts.mode === 'pulse-pack')) opts.turns = 180;
+  opts.turnsSet = turnsSet;
   if (!Number.isInteger(opts.matches) || opts.matches < 1 || !Number.isInteger(opts.turns) || opts.turns < 5 ||
       !Number.isFinite(opts.classicShare) || opts.classicShare < 0 || opts.classicShare > 1 ||
       (opts.teacherWeight !== undefined && (!Number.isFinite(opts.teacherWeight) || opts.teacherWeight < 0 || opts.teacherWeight > 1)) ||
@@ -310,6 +314,24 @@ function pickPreset(presetArg, idx) {
   return 'god';
 }
 
+function buildJobs(opts) {
+  const counts = new Map();
+  const jobs = Array.from({ length: opts.matches }, (_, i) => {
+    const mode = pickMode(opts.mode, i, opts.classicShare);
+    const index = counts.get(mode) || 0;
+    counts.set(mode, index + 1);
+    return { seed: opts.seed + i, mode, presetName: pickPreset(opts.preset, index),
+      maxTurns: !opts.turnsSet && M.rule(mode, 'pulse') ? 180 : opts.turns,
+      teacherWeight: opts.teacherWeight, teacherScale: opts.teacherScale, split: 'train' };
+  });
+  if (jobs.length > 1) {
+    const ranked = jobs.map(job => ({ job, key: createHash('sha256').update(String(job.seed)).digest('hex') }))
+      .sort((a, b) => a.key.localeCompare(b.key));
+    for (const { job } of ranked.slice(0, Math.max(1, Math.round(jobs.length / 10)))) job.split = 'val';
+  }
+  return jobs;
+}
+
 async function main() {
   const opts = parseCli(process.argv.slice(2));
   if (opts.teacherWeights) {
@@ -321,14 +343,7 @@ async function main() {
     if (existing.endsWith('.bin')) fs.unlinkSync(path.join(opts.out, existing));
   }
 
-  const jobs = Array.from({ length: opts.matches }, (_, i) => ({
-    seed: opts.seed + i,
-    mode: pickMode(opts.mode, i, opts.classicShare),
-    presetName: pickPreset(opts.preset, i),
-    maxTurns: opts.turns,
-    teacherWeight: opts.teacherWeight,
-    teacherScale: opts.teacherScale
-  }));
+  const jobs = buildJobs(opts);
 
   const workerCount = Math.min(opts.threads, jobs.length);
   const sharedCtrl = new SharedArrayBuffer(16);
@@ -360,7 +375,7 @@ async function main() {
   const elapsedSec = (performance.now() - started) / 1000;
   const shards = summaries
     .filter(s => s.totalRows > 0)
-    .map(s => ({ file: path.basename(s.shardPath), rows: s.totalRows, matches: s.matchesDone, goals: s.totalGoals }));
+    .map(s => ({ file: path.basename(s.shardPath), rows: s.totalRows, matches: s.matchesDone, goals: s.totalGoals, games: s.games }));
   for (const s of summaries) {
     if (s.totalRows === 0 && fs.existsSync(s.shardPath)) fs.unlinkSync(s.shardPath);
   }
@@ -397,4 +412,4 @@ if (isMainThread && require.main === module) {
   });
 }
 
-module.exports = { playAndRecordMatch, makeMatchState };
+module.exports = { playAndRecordMatch, makeMatchState, geomHintsFor, buildJobs };
