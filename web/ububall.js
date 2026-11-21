@@ -123,7 +123,7 @@
     tab.classList.add('show');
     bugTabTimer = setTimeout(() => { tab.classList.remove('show'); bugTabTimer = setTimeout(nextBugTab, 300); }, 2600);
   }
-  let arrowGrab = null, dragStart = null, dragStartClient = null, dragClient = null, dragPointerType = '', dragMoved = false;
+  let arrowGrab = null, dragStart = null, dragStartClient = null, dragClient = null, dragPointerType = '', dragMoved = false, dragMaxTravel = 0, dragLiftPx = 0;
   let pullBehind = false;
   try { pullBehind = localStorage.getItem('ububall-aim-style') === 'pull'; } catch {}
   const firstTurnKey = 'ububall-first-turn-guide';
@@ -135,9 +135,15 @@
   // The floating spin slider: on by default with a mouse, off on touch screens.
   let spinSlider = !matchMedia('(pointer: coarse)').matches;
   try { spinSlider = (localStorage.getItem('ububall-spin-slider') ?? (spinSlider ? 'on' : 'off')) === 'on'; } catch {}
-  // Touch aim magnifying glass on phone screens: off by default, enabled from the pause menu.
-  let aimMagnifier = false;
-  try { aimMagnifier = localStorage.getItem('ububall-aim-magnifier') === 'on'; } catch {}
+  // Touch aiming aid on phone screens (Drag arrow scheme): 'offset' (Above finger, default), 'magnifier', or 'off'.
+  const TOUCH_AIM_MODES = ['offset', 'magnifier', 'off'];
+  const TOUCH_AIM_LABELS = { offset: 'Above finger', magnifier: 'Magnifier', off: 'Off' };
+  let touchAim = 'offset';
+  try {
+    const savedTouchAim = localStorage.getItem('ububall-touch-aim');
+    if (TOUCH_AIM_MODES.includes(savedTouchAim)) touchAim = savedTouchAim;
+    else if (localStorage.getItem('ububall-aim-magnifier') === 'on') touchAim = 'magnifier';
+  } catch {}
   // Pause menu settings: each button shows its name and current value, and pressing it switches the value.
   function showSetting(id, on) {
     $(id).setAttribute('aria-pressed', String(Boolean(on)));
@@ -319,7 +325,7 @@
     get firstTurnStep() { return firstTurnStep; }, set firstTurnStep(v) { firstTurnStep = v; },
     get firstTurnStarted() { return firstTurnStarted; }, set firstTurnStarted(v) { firstTurnStarted = v; },
     get spinSlider() { return spinSlider; }, set spinSlider(v) { spinSlider = v; },
-    get aimMagnifier() { return aimMagnifier; }, set aimMagnifier(v) { aimMagnifier = v; },
+    get touchAim() { return touchAim; }, set touchAim(v) { touchAim = v; },
     get pullBehind() { return pullBehind; }, set pullBehind(v) { pullBehind = v; },
     get stats() { return stats; }, set stats(v) { stats = v; },
     get play() { return play; }, set play(v) { play = v; },
@@ -468,6 +474,8 @@
     get dragClient() { return dragClient; }, set dragClient(v) { dragClient = v; },
     get dragPointerType() { return dragPointerType; }, set dragPointerType(v) { dragPointerType = v; },
     get dragMoved() { return dragMoved; }, set dragMoved(v) { dragMoved = v; },
+    get dragMaxTravel() { return dragMaxTravel; }, set dragMaxTravel(v) { dragMaxTravel = v; },
+    get dragLiftPx() { return dragLiftPx; }, set dragLiftPx(v) { dragLiftPx = v; },
     get dragMode() { return dragMode; }, set dragMode(v) { dragMode = v; },
     get arrowGrab() { return arrowGrab; }, set arrowGrab(v) { arrowGrab = v; },
     get returnShot() { return returnShot; }, set returnShot(v) { returnShot = v; },
@@ -2134,19 +2142,23 @@
       try { localStorage.setItem('ububall-audio-mode', audioMode); } catch {}
     };
   }
-  // The floating spin slider and touch aim magnifier are preferences kept per device.
+  // The floating spin slider and touch aim aid are preferences kept per device.
   showSetting('setting-spin', spinSlider);
   $('setting-spin').onclick = () => {
     spinSlider = !spinSlider; showSetting('setting-spin', spinSlider);
     try { localStorage.setItem('ububall-spin-slider', spinSlider ? 'on' : 'off'); } catch {}
     draw();
   };
-  showSetting('setting-magnifier', aimMagnifier);
-  $('setting-magnifier').onclick = () => {
-    aimMagnifier = !aimMagnifier; showSetting('setting-magnifier', aimMagnifier);
-    try { localStorage.setItem('ububall-aim-magnifier', aimMagnifier ? 'on' : 'off'); } catch {}
-    updateAimLoupe();
-  };
+  const touchAimSetting = $('setting-touch-aim');
+  if (touchAimSetting) {
+    touchAimSetting.querySelector('.setting-value').textContent = TOUCH_AIM_LABELS[touchAim] || 'Above finger';
+    touchAimSetting.onclick = () => {
+      touchAim = TOUCH_AIM_MODES[(TOUCH_AIM_MODES.indexOf(touchAim) + 1) % TOUCH_AIM_MODES.length];
+      touchAimSetting.querySelector('.setting-value').textContent = TOUCH_AIM_LABELS[touchAim];
+      try { localStorage.setItem('ububall-touch-aim', touchAim); } catch {}
+      updateAimLoupe();
+    };
+  }
   // Match setup: a mode screen (rules and CPU level), then the team screen where only the ubu list
   // scrolls. Online play borrows the mode screen, and its lobby is the same team screen with the
   // invite on top and Ready in place of Start.

@@ -1601,10 +1601,10 @@ test('aim magnifying glass: sample geometry maps landscape and portrait (-90deg)
   assert.ok(edge.sx + edge.sw <= 1200 + 1e-6 && edge.sy + edge.sh <= 720 + 1e-6);
 });
 
-test('aim magnifying glass: off by default and appears only when enabled on phone touch drag in Drag arrow mode', () => {
+test('touch aim aid: Magnifier appears only when touchAim === "magnifier" on phone touch drag in Drag arrow mode', () => {
   const { createStageController } = ububallPlayback;
 
-  function makeEnv({ portraitPhone = true, wideDesktop = false, pullBehind = false, aimMagnifier = false } = {}) {
+  function makeEnv({ portraitPhone = true, wideDesktop = false, pullBehind = false, touchAim = 'offset' } = {}) {
     const drawImageCalls = [];
     const loupeCtx = {
       setTransform() {}, clearRect() {}, save() {}, restore() {},
@@ -1638,8 +1638,8 @@ test('aim magnifying glass: off by default and appears only when enabled on phon
       P, ububallMatch,
       shot: 'match', phase: 'plan', selected: 0,
       drag: null, dragMode: null, dragStart: null, dragStartClient: null,
-      dragClient: null, dragPointerType: '', dragMoved: false, dragDirty: false,
-      arrowGrab: null, tapGuards: false, pullBehind, aimMagnifier, cameraMove: null, foulInfo: null,
+      dragClient: null, dragPointerType: '', dragMoved: false, dragMaxTravel: 0, dragLiftPx: 0, dragDirty: false,
+      arrowGrab: null, tapGuards: false, pullBehind, touchAim, cameraMove: null, foulInfo: null,
       fieldView: { canvas: rinkCanvas, portrait: portraitPhone, bodies, field: null },
       bodies, plans, skaters: [],
       gameUi: { scale: () => 1 },
@@ -1666,55 +1666,158 @@ test('aim magnifying glass: off by default and appears only when enabled on phon
     return { state, ctrl, rinkCanvas, loupeEl, loupeCanvas, pointerEl, drawImageCalls };
   }
 
-  // 0. Disabled by default (aimMagnifier: false): stays hidden even on portrait phone touch drag
-  const offEnv = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: false, aimMagnifier: false });
-  offEnv.rinkCanvas.onpointerdown({ pointerId: 9, pointerType: 'touch', button: 0, clientX: 190, clientY: 510 });
-  offEnv.rinkCanvas.onpointermove({ pointerId: 9, pointerType: 'touch', clientX: 190, clientY: 450 });
-  offEnv.ctrl.updateAimLoupe();
-  assert.equal(offEnv.loupeEl.hidden, true, 'loupe stays hidden when aimMagnifier setting is off');
-  assert.equal(offEnv.drawImageCalls.length, 0);
+  // 0. Default ('offset') and 'off': magnifier stays hidden
+  for (const mode of ['offset', 'off']) {
+    const env = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: false, touchAim: mode });
+    env.rinkCanvas.onpointerdown({ pointerId: 9, pointerType: 'touch', button: 0, clientX: 190, clientY: 510 });
+    env.rinkCanvas.onpointermove({ pointerId: 9, pointerType: 'touch', clientX: 190, clientY: 450 });
+    env.ctrl.updateAimLoupe();
+    assert.equal(env.loupeEl.hidden, true, `magnifier stays hidden in "${mode}" mode`);
+    assert.equal(env.drawImageCalls.length, 0);
+  }
 
-  // 1. Portrait phone + touch + Drag arrow mode + setting enabled: hidden on tap, shown on drag, hidden on pointerup
-  const phone = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: false, aimMagnifier: true });
+  // 1. Portrait phone + touch + Drag arrow mode + touchAim === 'magnifier'
+  const phone = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: false, touchAim: 'magnifier' });
   // Body 0 at (250, 300) in portrait rect (left=10, top=60, w=360, h=600) is at screen (190, 510)
   phone.rinkCanvas.onpointerdown({ pointerId: 1, pointerType: 'touch', button: 0, clientX: 190, clientY: 510 });
   assert.equal(phone.loupeEl.hidden, true, 'tap before drag threshold does not show loupe');
   phone.rinkCanvas.onpointermove({ pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 450 });
   phone.ctrl.updateAimLoupe();
-  assert.equal(phone.loupeEl.hidden, false, 'touch drag on phone in Drag arrow mode shows loupe when enabled');
+  assert.equal(phone.loupeEl.hidden, false, 'touch drag on phone in Drag arrow mode shows loupe when set to magnifier');
   assert.equal(phone.loupeCanvas.width, 224, 'loupe backing store scales by DPR');
   assert.equal(phone.drawImageCalls.length, 1, 'loupe samples the rink canvas');
   assert.match(phone.loupeEl.style.transform, /^translate3d\(/, 'loupe positioned via translate3d');
   phone.rinkCanvas.onpointerup({ type: 'pointerup', pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 450 });
   assert.equal(phone.loupeEl.hidden, true, 'loupe hides immediately when finger lifts');
 
-  // 2. Landscape phone (wideScreen=false, portraitPhone=false) + touch + enabled: also shown
-  const landPhone = makeEnv({ portraitPhone: false, wideDesktop: false, pullBehind: false, aimMagnifier: true });
-  // Body 0 at (250, 300) in landscape rect (left=40, top=60, w=500, h=300) is at screen (165, 210)
+  // 2. Landscape phone (wideScreen=false, portraitPhone=false) + touch + magnifier
+  const landPhone = makeEnv({ portraitPhone: false, wideDesktop: false, pullBehind: false, touchAim: 'magnifier' });
   landPhone.rinkCanvas.onpointerdown({ pointerId: 2, pointerType: 'touch', button: 0, clientX: 165, clientY: 210 });
   landPhone.rinkCanvas.onpointermove({ pointerId: 2, pointerType: 'touch', clientX: 230, clientY: 210 });
   landPhone.ctrl.updateAimLoupe();
-  assert.equal(landPhone.loupeEl.hidden, false, 'loupe appears on landscape phone screens when enabled');
+  assert.equal(landPhone.loupeEl.hidden, false, 'loupe appears on landscape phone screens in magnifier mode');
 
-  // 3. Pull back control scheme: NEVER shown on phone even when enabled
-  const pullEnv = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: true, aimMagnifier: true });
+  // 3. Pull back control scheme: NEVER shown even when set to magnifier
+  const pullEnv = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: true, touchAim: 'magnifier' });
   pullEnv.rinkCanvas.onpointerdown({ pointerId: 3, pointerType: 'touch', button: 0, clientX: 190, clientY: 510 });
   pullEnv.rinkCanvas.onpointermove({ pointerId: 3, pointerType: 'touch', clientX: 190, clientY: 580 });
   pullEnv.ctrl.updateAimLoupe();
   assert.equal(pullEnv.loupeEl.hidden, true, 'loupe is suppressed on Pull back control scheme');
   assert.equal(pullEnv.drawImageCalls.length, 0);
 
-  // 4. Mouse drag on phone-sized window: NEVER shown even when enabled
-  const mouseEnv = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: false, aimMagnifier: true });
+  // 4. Mouse drag on phone-sized window: NEVER shown
+  const mouseEnv = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: false, touchAim: 'magnifier' });
   mouseEnv.rinkCanvas.onpointerdown({ pointerId: 4, pointerType: 'mouse', button: 0, clientX: 190, clientY: 510 });
   mouseEnv.rinkCanvas.onpointermove({ pointerId: 4, pointerType: 'mouse', clientX: 190, clientY: 450 });
   mouseEnv.ctrl.updateAimLoupe();
   assert.equal(mouseEnv.loupeEl.hidden, true, 'loupe is not shown for mouse drags');
 
-  // 5. Desktop / wide screen touch drag: NEVER shown even when enabled
-  const desktopEnv = makeEnv({ portraitPhone: false, wideDesktop: true, pullBehind: false, aimMagnifier: true });
+  // 5. Desktop / wide screen touch drag: NEVER shown
+  const desktopEnv = makeEnv({ portraitPhone: false, wideDesktop: true, pullBehind: false, touchAim: 'magnifier' });
   desktopEnv.rinkCanvas.onpointerdown({ pointerId: 5, pointerType: 'touch', button: 0, clientX: 165, clientY: 210 });
   desktopEnv.rinkCanvas.onpointermove({ pointerId: 5, pointerType: 'touch', clientX: 230, clientY: 210 });
   desktopEnv.ctrl.updateAimLoupe();
   assert.equal(desktopEnv.loupeEl.hidden, true, 'loupe is not shown on wide desktop screens');
+});
+
+test('touch aim aid: Above finger ("offset", default) floats arrowhead above finger on phone touch drags and never on Pull back, Off, or mouse', () => {
+  const { createStageController, computeTouchAimLift, applyTouchAimOffset } = ububallPlayback;
+
+  // Pure helper checks: arrow grabs below tip avoid double-offset
+  assert.equal(computeTouchAimLift({ active: true, dragMode: 'aim', maxOffsetPx: 52 }), 52);
+  assert.equal(computeTouchAimLift({ active: true, dragMode: 'arrow', arrowScreenY: 400, clientY: 452, maxOffsetPx: 52 }), 0);
+  assert.equal(computeTouchAimLift({ active: true, dragMode: 'arrow', arrowScreenY: 400, clientY: 420, maxOffsetPx: 52 }), 32);
+  assert.equal(computeTouchAimLift({ active: false, dragMode: 'aim', maxOffsetPx: 52 }), 0);
+
+  const halfRamp = applyTouchAimOffset({ clientX: 190, clientY: 492, liftPx: 52, maxTravel: 18, rampDistance: 36 });
+  assert.equal(halfRamp.lift, 26);
+  assert.equal(halfRamp.clientY, 466);
+  const fullRamp = applyTouchAimOffset({ clientX: 190, clientY: 470, liftPx: 52, maxTravel: 60, rampDistance: 36 });
+  assert.equal(fullRamp.lift, 52);
+  assert.equal(fullRamp.clientY, 418);
+
+  function makePhoneEnv({ pullBehind = false, touchAim = 'offset', wideDesktop = false, portraitPhone = true } = {}) {
+    const rinkCanvas = {
+      width: 1200, height: 720, _webglComposite: true, style: {},
+      getBoundingClientRect: () => portraitPhone
+        ? { left: 10, top: 60, right: 370, bottom: 660, width: 360, height: 600 }
+        : { left: 40, top: 60, right: 540, bottom: 360, width: 500, height: 300 },
+      setPointerCapture() {}, addEventListener() {}
+    };
+    const bodies = [
+      { x: 250, y: 300, radius: 26, reach: 26, impulse: 1, stunned: false, carded: false, rotation: 0 },
+      { x: 350, y: 180, radius: 26, reach: 26, impulse: 1, stunned: false, carded: false, rotation: 0 },
+      { x: 350, y: 420, radius: 26, reach: 26, impulse: 1, stunned: false, carded: false, rotation: 0 }
+    ];
+    const plans = bodies.map(() => ({ angle: 0, power: 0, spin: 0, guard: false }));
+    const state = {
+      P, ububallMatch,
+      shot: 'match', phase: 'plan', selected: 0,
+      drag: null, dragMode: null, dragStart: null, dragStartClient: null,
+      dragClient: null, dragPointerType: '', dragMoved: false, dragMaxTravel: 0, dragLiftPx: 0, dragDirty: false,
+      arrowGrab: null, tapGuards: false, pullBehind, touchAim, cameraMove: null, foulInfo: null,
+      fieldView: { canvas: rinkCanvas, portrait: portraitPhone, bodies, field: null },
+      bodies, plans, skaters: [],
+      gameUi: { scale: () => 1 },
+      impulseGeometry: (b, pl) => ({ ringR: 28, scale: 110, distance: 28 + 110 * pl.power, x: b.x + Math.cos(pl.angle) * (28 + 110 * pl.power), y: b.y + Math.sin(pl.angle) * (28 + 110 * pl.power), visible: pl.power > 0 }),
+      warningAt: () => null,
+      sync() {}, draw() {}
+    };
+    const ctrl = createStageController({
+      state,
+      portraitScreen: { matches: portraitPhone },
+      wideScreen: { matches: wideDesktop },
+      window: { innerWidth: portraitPhone ? 390 : 844, innerHeight: portraitPhone ? 844 : 390, devicePixelRatio: 2 },
+      document: {
+        documentElement: { clientWidth: portraitPhone ? 390 : 844, clientHeight: portraitPhone ? 844 : 390 },
+        body: { dataset: { shot: 'match' } },
+        getElementById: () => null,
+        querySelector: () => null
+      }
+    });
+    return { state, ctrl, rinkCanvas };
+  }
+
+  // 1. Portrait phone touch drag with touchAim === 'offset' floats arrow tip ~52px above finger
+  const offsetEnv = makePhoneEnv({ touchAim: 'offset' });
+  const offEnv = makePhoneEnv({ touchAim: 'off' });
+  // Body 0 at field (250, 300) is at screen (190, 510) in portrait rect (h=600 -> 0.6px per field unit, max arrow length ~82.8px)
+  // Dragging 40px right to (230, 510) exceeds the 36px ramp while staying well under 100% power:
+  // in 'off' mode arrow tip lands at (230, 510); in 'offset' mode arrow tip lands 52px higher at (230, 458)!
+  for (const env of [offsetEnv, offEnv]) {
+    env.rinkCanvas.onpointerdown({ pointerId: 1, pointerType: 'touch', button: 0, clientX: 190, clientY: 510 });
+    env.rinkCanvas.onpointermove({ pointerId: 1, pointerType: 'touch', clientX: 230, clientY: 510 });
+  }
+  const tipOffset = offsetEnv.ctrl.screenPoint(offsetEnv.state.impulseGeometry(offsetEnv.state.bodies[0], offsetEnv.state.plans[0]));
+  const tipDirect = offEnv.ctrl.screenPoint(offEnv.state.impulseGeometry(offEnv.state.bodies[0], offEnv.state.plans[0]));
+  assert.ok(Math.abs(tipDirect.x - 230) < 1.5 && Math.abs(tipDirect.y - 510) < 1.5, 'Off mode places arrow tip directly under finger');
+  assert.ok(Math.abs(tipOffset.x - 230) < 1.5 && Math.abs(tipOffset.y - (510 - 52)) < 1.5, 'Above finger mode places arrow tip 52px above finger');
+
+  // Monotonic ramp: sliding finger back to the ubu keeps full 52px lift (arrow stays above finger instead of dropping under it)
+  offsetEnv.rinkCanvas.onpointermove({ pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 505 });
+  const tipPulledBack = offsetEnv.ctrl.screenPoint(offsetEnv.state.impulseGeometry(offsetEnv.state.bodies[0], offsetEnv.state.plans[0]));
+  assert.ok(Math.abs(tipPulledBack.y - (505 - 52)) < 1.5, 'lift remains locked at 52px when sliding finger back toward ubu');
+  // Slide right to (230, 510) so arrow tip is at (230, 458), clear of Body 0 horizontally, and release
+  offsetEnv.rinkCanvas.onpointermove({ pointerId: 1, pointerType: 'touch', clientX: 230, clientY: 510 });
+  offsetEnv.rinkCanvas.onpointerup({ type: 'pointerup', pointerId: 1, pointerType: 'touch', clientX: 230, clientY: 510 });
+
+  // 2. Re-grabbing the existing arrow right below its tip (52px below, clear of ubu body) hits arrow mode with 0 extra lift
+  const arrowBefore = offsetEnv.state.impulseGeometry(offsetEnv.state.bodies[0], offsetEnv.state.plans[0]);
+  const arrowScreen = offsetEnv.ctrl.screenPoint(arrowBefore);
+  offsetEnv.rinkCanvas.onpointerdown({ pointerId: 2, pointerType: 'touch', button: 0, clientX: arrowScreen.x, clientY: arrowScreen.y + 52 });
+  assert.equal(offsetEnv.state.dragMode, 'arrow', 'touching below existing arrow tip grabs arrow handle');
+  assert.equal(offsetEnv.state.dragLiftPx, 0, 'already below tip -> zero extra lift, no double offset');
+  offsetEnv.rinkCanvas.onpointermove({ pointerId: 2, pointerType: 'touch', clientX: arrowScreen.x, clientY: arrowScreen.y + 52 - 15 });
+  const arrowMoved = offsetEnv.ctrl.screenPoint(offsetEnv.state.impulseGeometry(offsetEnv.state.bodies[0], offsetEnv.state.plans[0]));
+  assert.ok(Math.abs(arrowMoved.y - (arrowScreen.y - 15)) < 1.5, 'arrow tracks 1:1 staying 52px above finger');
+  offsetEnv.rinkCanvas.onpointerup({ type: 'pointerup', pointerId: 2, pointerType: 'touch', clientX: arrowScreen.x, clientY: arrowScreen.y + 37 });
+
+  // 3. Pull back and mouse drags get zero lift
+  const pullEnv = makePhoneEnv({ pullBehind: true, touchAim: 'offset' });
+  pullEnv.rinkCanvas.onpointerdown({ pointerId: 3, pointerType: 'touch', button: 0, clientX: 190, clientY: 510 });
+  assert.equal(pullEnv.state.dragLiftPx, 0, 'Pull back never applies upward finger offset');
+
+  const mouseEnv = makePhoneEnv({ pullBehind: false, touchAim: 'offset' });
+  mouseEnv.rinkCanvas.onpointerdown({ pointerId: 4, pointerType: 'mouse', button: 0, clientX: 190, clientY: 510 });
+  assert.equal(mouseEnv.state.dragLiftPx, 0, 'mouse drags never apply upward finger offset');
 });

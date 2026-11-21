@@ -1280,6 +1280,23 @@
     return { cssW, cssH, focusX, focusY, x0, y0, x1, y1, sx, sy, sw, sh, radius, zoom };
   }
 
+  function computeTouchAimLift({ active, dragMode, arrowScreenY, clientY, maxOffsetPx = 52 } = {}) {
+    if (!active) return 0;
+    const maxOff = Math.max(0, Number(maxOffsetPx) || 0);
+    if (dragMode === 'arrow' && Number.isFinite(arrowScreenY) && Number.isFinite(clientY)) {
+      const existingBelow = Math.max(0, clientY - arrowScreenY);
+      return Math.max(0, maxOff - existingBelow);
+    }
+    return maxOff;
+  }
+
+  function applyTouchAimOffset({ clientX, clientY, liftPx = 0, maxTravel = 0, rampDistance = 36 } = {}) {
+    if (!(liftPx > 0)) return { clientX, clientY, lift: 0 };
+    const ramp = rampDistance > 0 ? Math.min(1, Math.max(0, maxTravel / rampDistance)) : 1;
+    const lift = liftPx * ramp;
+    return { clientX, clientY: clientY - lift, lift };
+  }
+
   function createBannerController(deps = {}) {
     const { $, getSetTimeout, getClearTimeout } = makeLookup(deps);
     let bannerTimer = 0, bannerGone = null;
@@ -2873,15 +2890,33 @@
     }
     const point = rawOverrides.point ?? pointImpl;
 
+    const TOUCH_AIM_OFFSET_PX = 52;
+    const usesTouchAimOffset = pointerType => Boolean(
+      (state.touchAim ?? 'offset') === 'offset' &&
+      !state.pullBehind &&
+      pointerType === 'touch' &&
+      compactPhoneStage()
+    );
+
     function fieldTargetImpl(event) {
       const scale = getGameUi()?.scale?.() || 1;
-      const near = p => { const q = screenPoint(p); return Math.hypot(q.x - event.clientX, q.y - event.clientY) <= 22 * scale; };
+      const near = (p, extraY = 0, radius = 22) => {
+        const q = screenPoint(p);
+        return Math.hypot(q.x - event.clientX, (q.y + extraY) - event.clientY) <= radius * scale;
+      };
       const own = (state.fieldView?.bodies || state.bodies || []).slice(0, 3);
       const impFn = fn('impulseGeometry');
       const arrow = own.findIndex((b, i) => { const a = impFn(b, state.plans[i]); return a.visible && near(a); });
       if (arrow >= 0) return { mode: 'arrow', index: arrow };
       const p = point(event);
-      return { mode: 'aim', index: own.findIndex(b => !b.stunned && !b.carded && Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12) };
+      const ubuIndex = own.findIndex(b => !b.stunned && !b.carded && Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 12);
+      if (ubuIndex >= 0) return { mode: 'aim', index: ubuIndex };
+      if (usesTouchAimOffset(event.pointerType)) {
+        const offsetPx = TOUCH_AIM_OFFSET_PX * scale;
+        const offsetArrow = own.findIndex((b, i) => { const a = impFn(b, state.plans[i]); return a.visible && near(a, offsetPx, 26); });
+        if (offsetArrow >= 0) return { mode: 'arrow', index: offsetArrow };
+      }
+      return { mode: 'aim', index: -1 };
     }
     const fieldTarget = rawOverrides.fieldTarget ?? fieldTargetImpl;
 
@@ -3281,7 +3316,7 @@
 
     function shouldShowAimLoupe() {
       return Boolean(
-        state.aimMagnifier &&
+        state.touchAim === 'magnifier' &&
         state.drag !== null &&
         state.dragMoved &&
         state.dragClient &&
@@ -3458,6 +3493,8 @@
       state.dragStartClient = null;
       state.dragClient = null;
       state.dragPointerType = '';
+      state.dragMaxTravel = 0;
+      state.dragLiftPx = 0;
       state.dragMode = null;
       state.dragDirty = false;
       updateAimLoupe();
@@ -3488,6 +3525,7 @@
         const p = point(event);
         const target = fieldTarget(event);
         if (target.index < 0) return;
+        const scale = getGameUi()?.scale?.() || 1;
         state.tapGuards = state.selected === target.index;
         state.selected = target.index;
         state.drag = event.pointerId;
@@ -3497,11 +3535,21 @@
         state.dragClient = { x: event.clientX, y: event.clientY };
         state.dragPointerType = event.pointerType || '';
         state.dragMoved = false;
+        state.dragMaxTravel = 0;
+        let arrowScreenY;
         if (state.dragMode === 'arrow') {
           const viewBodies = state.fieldView?.bodies || state.bodies || [];
           const arrow = fn('impulseGeometry')(viewBodies[state.selected], state.plans[state.selected]);
           state.arrowGrab = { x: p.x - arrow.x, y: p.y - arrow.y, distance: arrow.distance, power: state.plans[state.selected].power };
+          arrowScreenY = screenPoint(arrow).y;
         }
+        state.dragLiftPx = computeTouchAimLift({
+          active: usesTouchAimOffset(state.dragPointerType),
+          dragMode: state.dragMode,
+          arrowScreenY,
+          clientY: event.clientY,
+          maxOffsetPx: TOUCH_AIM_OFFSET_PX * scale
+        });
         canvas.setPointerCapture?.(state.drag);
         fn('sync')?.(); fn('draw')?.();
       };
@@ -3520,20 +3568,30 @@
         const b = viewBodies[state.selected];
         const scale = getGameUi()?.scale?.() || 1;
         const tapRadius = (event.pointerType === 'mouse' ? 5 : 12) * scale;
-        if (!state.dragMoved && state.dragStartClient && Math.hypot(event.clientX - state.dragStartClient.x, event.clientY - state.dragStartClient.y) < tapRadius) return;
+        const travel = state.dragStartClient ? Math.hypot(event.clientX - state.dragStartClient.x, event.clientY - state.dragStartClient.y) : Infinity;
+        if (!state.dragMoved && travel < tapRadius) return;
         state.dragMoved = true;
+        state.dragMaxTravel = Math.max(state.dragMaxTravel || 0, travel);
         state.dragClient = { x: event.clientX, y: event.clientY };
         if (!state.dragPointerType && event.pointerType) state.dragPointerType = event.pointerType;
         state.plans[state.selected].guard = false;
+        const offsetPt = applyTouchAimOffset({
+          clientX: event.clientX,
+          clientY: event.clientY,
+          liftPx: state.dragLiftPx || 0,
+          maxTravel: state.dragMaxTravel,
+          rampDistance: 36 * scale
+        });
+        const ap = offsetPt.lift > 0 ? point(offsetPt) : p;
         const impFn = fn('impulseGeometry');
         if (state.dragMode === 'arrow') {
-          const dx = p.x - state.arrowGrab.x - b.x, dy = p.y - state.arrowGrab.y - b.y;
+          const dx = ap.x - state.arrowGrab.x - b.x, dy = ap.y - state.arrowGrab.y - b.y;
           const arrow = impFn(b, state.plans[state.selected]);
           const rawAngle = Math.atan2(dy, dx);
           state.plans[state.selected].angle = ((rawAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
           state.plans[state.selected].power = Math.max(0, Math.min(1, state.arrowGrab.power + (Math.hypot(dx, dy) - state.arrowGrab.distance) / arrow.scale));
         } else if (state.dragMode === 'aim') {
-          const dx = p.x - b.x, dy = p.y - b.y;
+          const dx = ap.x - b.x, dy = ap.y - b.y;
           const arrow = impFn(b, state.plans[state.selected]);
           const rawAngle = Math.atan2(state.pullBehind ? -dy : dy, state.pullBehind ? -dx : dx);
           state.plans[state.selected].angle = ((rawAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
@@ -4321,6 +4379,8 @@
     positionSpinControl,
     computeAimLoupeLayout,
     computeAimLoupeSample,
+    computeTouchAimLift,
+    applyTouchAimOffset,
     createBannerController,
     bindMatchShortcuts,
     bindSpinSlider,
