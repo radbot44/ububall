@@ -61,6 +61,11 @@ try {
     $buildAction = 'build'
     if ($ResetMint) { $buildAction = 'build-reset' }
     Run node @('scripts/deploy-config.cjs', $buildAction, $SettingsDirectory)
+    $otaKeyCandidate = Join-Path $SettingsDirectory 'ota-signing-key.pem'
+    if (!$env:UBUBALL_OTA_SIGNING_KEY -and (Test-Path -LiteralPath $otaKeyCandidate -PathType Leaf)) {
+        $env:UBUBALL_OTA_SIGNING_KEY = $otaKeyCandidate
+    }
+    Run node @('scripts/prepare-assets.cjs', '--require-ota-signature')
     $wrangler = Join-Path $PSScriptRoot 'node_modules\wrangler\bin\wrangler.js'
     $arguments = @($wrangler, 'deploy', '--config', 'wrangler.deploy.jsonc', '--keep-vars', '--secrets-file', (Join-Path $SettingsDirectory 'deploy-secrets.json'))
     if ($DryRun) { $arguments += '--dry-run' }

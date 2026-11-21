@@ -13,6 +13,7 @@ state/
 secrets/
 *.key
 *.pem
+!mobile/ota-public-key.pem
 *.p12
 *.pfx
 *.jks

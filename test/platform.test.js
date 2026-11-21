@@ -432,9 +432,13 @@ test('silent OTA lifecycle confirms boot via notifyBootOk and throttles backgrou
   sandbox.globalThis = sandbox;
   vm.runInNewContext(platformSource, sandbox);
 
-  assert.equal(bootConfirmed, 0, 'must wait until DOMContentLoaded before confirming OTA boot');
+  assert.equal(bootConfirmed, 0, 'must wait until markAppReady before confirming OTA boot');
   for (const fn of (docEvents.get('DOMContentLoaded') || [])) fn();
+  assert.equal(bootConfirmed, 0, 'DOMContentLoaded alone must not confirm OTA boot before app init');
+  mockWindow.ubuPlatform.markAppReady();
   assert.equal(bootConfirmed, 1);
+  mockWindow.ubuPlatform.markAppReady();
+  assert.equal(bootConfirmed, 1, 'markAppReady is idempotent');
 
   assert.equal(typeof scheduledFn, 'function');
   scheduledFn();
@@ -453,23 +457,106 @@ test('silent OTA lifecycle confirms boot via notifyBootOk and throttles backgrou
   assert.equal(status.isOta, true);
 });
 
-test('prepare-assets generates mobile-manifest.json with accurate SHA-256 hashes for dist/public', () => {
+test('silent OTA lifecycle suppresses notifyBootOk when an uncaught startup error occurred', () => {
+  let bootConfirmed = 0;
+  const winEvents = new Map();
+  const mockWindow = {
+    location: { origin: 'https://localhost', protocol: 'https:', host: 'localhost', pathname: '/', search: '', hash: '' },
+    localStorage: makeStorage(),
+    sessionStorage: makeStorage(),
+    Capacitor: {
+      isNativePlatform: () => true,
+      getPlatform: () => 'android',
+      Plugins: {
+        App: { addListener() {}, getLaunchUrl: async () => null },
+        OtaUpdater: {
+          notifyBootOk: async () => { bootConfirmed++; return { isOta: true }; }
+        }
+      }
+    },
+    addEventListener(type, fn) { if (!winEvents.has(type)) winEvents.set(type, []); winEvents.get(type).push(fn); }
+  };
+  const mockDocument = {
+    readyState: 'interactive',
+    documentElement: { classList: { add() {} } },
+    body: { dataset: { shot: 'home' } },
+    querySelector: () => null,
+    addEventListener() {}
+  };
+  const sandbox = {
+    window: mockWindow,
+    document: mockDocument,
+    location: mockWindow.location,
+    localStorage: mockWindow.localStorage,
+    sessionStorage: mockWindow.sessionStorage,
+    navigator: {},
+    performance: { now: () => 500 },
+    setTimeout: () => 1,
+    Date,
+    URL,
+    URLSearchParams
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(platformSource, sandbox);
+
+  for (const fn of (winEvents.get('error') || [])) fn(new Error('boot syntax/runtime error'));
+  mockWindow.ubuPlatform.markAppReady();
+  assert.equal(bootConfirmed, 0, 'must not confirm OTA boot after a startup script error');
+});
+
+test('prepare-assets generates mobile-manifest.json with accurate SHA-256 hashes, issuedAt, and native compatibility floor', () => {
   const { execFileSync } = require('node:child_process');
-  const { createHash } = require('node:crypto');
+  const { createHash, generateKeyPairSync } = require('node:crypto');
+  const os = require('node:os');
+  const ota = require('../scripts/ota-manifest.cjs');
   const root = path.resolve(__dirname, '..');
   execFileSync(process.execPath, [path.join(root, 'scripts/prepare-assets.cjs')], { cwd: root });
   const manifestPath = path.join(root, 'dist/public/mobile-manifest.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const manifestBytes = fs.readFileSync(manifestPath);
+  const manifest = JSON.parse(manifestBytes.toString('utf8'));
   assert.equal(manifest.schema, 1);
   assert.equal(manifest.minNativeVersion, 1);
+  assert.ok(Number.isSafeInteger(manifest.issuedAt) && manifest.issuedAt > 1700000000000);
   assert.match(manifest.version, /^[0-9a-f]{16}$/);
   assert.ok(manifest.files['index.html']);
   assert.ok(manifest.files['platform.js']);
   assert.ok(manifest.files['assets/ububall-logo.svg']);
+  assert.equal(manifest.files['mobile-manifest.json'], undefined);
+  assert.equal(manifest.files['mobile-manifest.sig'], undefined);
   for (const [rel, meta] of Object.entries(manifest.files)) {
     const bytes = fs.readFileSync(path.join(root, 'dist/public', rel));
     assert.equal(bytes.length, meta.size, `size mismatch for ${rel}`);
     const digest = createHash('sha256').update(bytes).digest('hex');
     assert.equal(digest, meta.sha256, `sha256 mismatch for ${rel}`);
+  }
+
+  // Test ECDSA P-256 signing & verification and plugin floor resolution via scripts/ota-manifest.cjs
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const privPem = privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const pubPem = publicKey.export({ type: 'spki', format: 'pem' });
+  const sig = ota.signManifest(manifestBytes, privPem);
+  assert.equal(ota.verifyManifest(manifestBytes, sig, pubPem), true);
+  const tampered = Buffer.from(manifestBytes);
+  tampered[10] ^= 1;
+  assert.equal(ota.verifyManifest(tampered, sig, pubPem), false);
+
+  const compat = JSON.parse(fs.readFileSync(path.join(root, 'mobile/native-compat.json'), 'utf8'));
+  assert.equal(ota.minNativeVersion(new Set(['App', 'Haptics', 'OtaUpdater']), compat), 1);
+  assert.throws(() => ota.minNativeVersion(new Set(['App', 'FutureCameraPlugin']), compat), /FutureCameraPlugin/);
+
+  // Test --require-ota-signature fails closed when no OTA signing key is present
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ububall-ota-'));
+  try {
+    assert.throws(() => {
+      execFileSync(process.execPath, [path.join(root, 'scripts/prepare-assets.cjs'), '--require-ota-signature'], {
+        cwd: root,
+        stdio: 'pipe',
+        env: { ...process.env, UBUBALL_OTA_SIGNING_KEY: '', LOCALAPPDATA: tmpDir, HOME: tmpDir, USERPROFILE: tmpDir }
+      });
+    }, /No OTA signing key found/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // Restore signed dist/public after negative test
+    execFileSync(process.execPath, [path.join(root, 'scripts/prepare-assets.cjs')], { cwd: root });
   }
 });
