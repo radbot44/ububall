@@ -8,6 +8,7 @@
     "open:android": "cap open android",
     "run:android": "node ../scripts/prepare-assets.cjs && cap run android",
     "build:debug": "node ../scripts/prepare-assets.cjs && cap sync android && node -e \"const r=require('child_process').spawnSync(process.platform==='win32'?'cmd.exe':'./gradlew',process.platform==='win32'?['/c','gradlew.bat','assembleDebug']:['assembleDebug'],{cwd:'android',stdio:'inherit'});process.exit(r.status??1)\"",
+    "build:release-apk": "node ../scripts/prepare-assets.cjs && cap sync android && node -e \"const r=require('child_process').spawnSync(process.platform==='win32'?'cmd.exe':'./gradlew',process.platform==='win32'?['/c','gradlew.bat','assembleRelease']:['assembleRelease'],{cwd:'android',stdio:'inherit'});process.exit(r.status??1)\"",
     "build:release": "node ../scripts/prepare-assets.cjs && cap sync android && node -e \"const r=require('child_process').spawnSync(process.platform==='win32'?'cmd.exe':'./gradlew',process.platform==='win32'?['/c','gradlew.bat','bundleRelease']:['bundleRelease'],{cwd:'android',stdio:'inherit'});process.exit(r.status??1)\""
   },
   "dependencies": {

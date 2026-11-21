@@ -1,5 +1,15 @@
 apply plugin: 'com.android.application'
 
+def signingProps = new Properties()
+def signingCandidates = [
+    rootProject.file('keystore.properties'),
+    System.getenv('LOCALAPPDATA') ? new File(System.getenv('LOCALAPPDATA'), 'ubumint/android-signing.properties') : null,
+    System.getProperty('user.home') ? new File(System.getProperty('user.home'), '.config/ubumint/android-signing.properties') : null
+].findAll { it != null && it.isFile() }
+if (!signingCandidates.isEmpty()) {
+    signingCandidates[0].withInputStream { signingProps.load(it) }
+}
+
 android {
     namespace = "one.tch.ububall"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -22,8 +32,21 @@ android {
     androidResources {
         noCompress "bin", "woff2"
     }
+    signingConfigs {
+        if (signingProps.getProperty('storeFile')) {
+            release {
+                storeFile file(signingProps.getProperty('storeFile'))
+                storePassword signingProps.getProperty('storePassword')
+                keyAlias signingProps.getProperty('keyAlias')
+                keyPassword signingProps.getProperty('keyPassword')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (signingConfigs.findByName('release') != null) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
