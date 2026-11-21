@@ -754,6 +754,14 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     const d = { ...g, Cookie: discordCookie, 'X-Ubu-CSRF': discordSession.csrf };
     const claimed = await (await fetch(base + '/state', { headers: d })).json();
     assert.equal(claimed.seat, 0); assert.equal(claimed.guestTeam, null);
+    // Repeated read-only /state polls do not bump the persisted revision.
+    const polledAgain = await (await fetch(base + '/state', { headers: d })).json();
+    assert.equal(polledAgain.revision, claimed.revision);
+    // Unknown match watch-state returns 404 without allocating Durable Object tables.
+    const strayId = crypto.randomUUID(), strayKey = crypto.randomUUID();
+    assert.equal((await fetch(`/api/ububall/${strayId}/watch-state?key=${strayKey}`)).status, 404);
+    const strayStorage = await server.getWorker().getDurableObjectStorage('UBUBALL', { name: strayId });
+    assert.equal((await strayStorage.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='match_state'")).length, 0);
     assert.equal((await (await fetch('/api/ubus', { headers: d })).json()).ubus.length, 3);
     assert.equal((await fetch(base + '/state', { headers: g })).status, 400);
     const rematch = await post(base + '/rematch', {}, d);
@@ -800,5 +808,14 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(ticketRes.status, 200);
     const { ticket } = await ticketRes.json();
     assert.ok(ticket);
+
+    // Rate limiting caps repeated match creation from the same guest session.
+    let lastStatus = 200;
+    for (let i = 0; i < 12; i++) {
+      const res = await fetch('/api/ububall', { method: 'POST', headers: { ...mobHeaders, 'CF-Connecting-IP': '203.0.113.77' }, body: JSON.stringify({ mode: 'standard' }) });
+      lastStatus = res.status;
+      if (lastStatus === 429) break;
+    }
+    assert.equal(lastStatus, 429);
   });
 });

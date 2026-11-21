@@ -5,6 +5,8 @@ const ubu = require('../shared/ubu.js');
 const { starterTeam } = require('../shared/rarity.js');
 const idle = () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false });
 const hold = () => Array.from({ length: 3 }, idle);
+// Each player's disconnects may pause the Blitz clock for this long per game; after that it runs.
+const PAUSE_BUDGET_MS = 60000;
 // Durable storage adapter will persist this object; no client-supplied owner identities.
 class MatchRoom {
   constructor(host, mode, guest = false) {
@@ -126,8 +128,10 @@ class MatchRoom {
     const s = this.state;
     if (s.phase === 'lobby' && s.ready.every(Boolean) && s.connected.every(Boolean)) {
       s.game = { version: rules.VERSION, mode: s.mode, ...this.kickoff(), play: rules.newPlay(), scores: [0, 0], turn: 1 };
+      s.pauseUsed = [0, 0];
       this.beginPlanning(now);
     }
+    if (s.phase === 'plan' && s.pausedAt != null && s.pauseEnds != null && now >= s.pauseEnds) this.resumeClock(s.pauseEnds);
     if (s.phase === 'resolving' && s.playUntil !== null && now >= s.playUntil) {
       s.playUntil = null;
       if (s.game.winner !== null) { s.phase = 'over'; s.winner = s.game.winner; return; }
@@ -158,32 +162,69 @@ class MatchRoom {
   }
   connect(owner, now) {
     const s = this.state, i = this.seat(owner);
+    this.chargePause(now);
     s.connected[i] = true; s.disconnectedAt[i] = null;
-    if (s.phase === 'plan' && s.connected.every(Boolean) && s.remaining !== null) {
-      s.deadline = now + s.remaining; s.remaining = null;
-    }
+    if (s.phase === 'plan') this.resumeClock(now);
   }
   disconnect(owner, now) {
     const s = this.state, i = this.seat(owner);
     if (!s.connected[i]) return;
+    this.chargePause(now);
     s.connected[i] = false; s.disconnectedAt[i] = now;
-    if (s.phase === 'plan' && s.deadline !== null) { s.remaining = Math.max(0, s.deadline - now); s.deadline = null; }
+    if (s.phase !== 'plan') return;
+    if (s.deadline !== null && !this.clockRuns()) {
+      s.remaining = Math.max(0, s.deadline - now); s.deadline = null; s.pausedAt = now;
+    }
+    this.planPauseEnd();
+  }
+  // The Blitz clock runs while everyone is connected, or once every absent player has spent their pause budget.
+  clockRuns() {
+    const s = this.state, used = s.pauseUsed || [0, 0];
+    return s.connected.every((on, i) => on || used[i] >= PAUSE_BUDGET_MS);
+  }
+  // Bills paused time to each absent player.
+  chargePause(now) {
+    const s = this.state;
+    if (s.phase !== 'plan' || s.pausedAt == null) return;
+    const elapsed = Math.max(0, now - s.pausedAt);
+    s.pauseUsed ||= [0, 0];
+    s.connected.forEach((on, i) => { if (!on) s.pauseUsed[i] = Math.min(PAUSE_BUDGET_MS, s.pauseUsed[i] + elapsed); });
+    s.pausedAt = Math.max(s.pausedAt, now);
+  }
+  planPauseEnd() {
+    const s = this.state, used = s.pauseUsed || [0, 0];
+    const left = s.connected.flatMap((on, i) => on ? [] : [PAUSE_BUDGET_MS - used[i]]);
+    s.pauseEnds = s.pausedAt != null && left.length ? s.pausedAt + Math.max(0, Math.min(...left)) : null;
+  }
+  resumeClock(now) {
+    const s = this.state;
+    this.chargePause(now);
+    if (!this.clockRuns()) { this.planPauseEnd(); return; }
+    if (s.remaining !== null && rules.planningMilliseconds(s.mode) !== null) { s.deadline = now + s.remaining; s.remaining = null; }
+    s.pausedAt = null; s.pauseEnds = null;
+  }
+  // Planning is open while both players are present, or while the Blitz clock runs without an absent player.
+  planOpen() {
+    const s = this.state;
+    return s.phase === 'plan' && (s.connected.every(Boolean) || s.deadline !== null);
   }
   beginPlanning(now) {
     const s = this.state;
     if (!s.players[1] || !['lobby', 'resolving'].includes(s.phase)) throw new Error('Cannot begin turn.');
-    // Guarding ubus stay on guard into the next turn of the same round.
+    // Guarding ubus stay on guard into the next turn of the same round; other plans clear.
     const keepGuard = s.game?.phase === 'plan';
     s.phase = 'plan'; s.locked = [false, false];
-    s.drafts = keepGuard ? s.drafts.map(draft => draft.map(p => ({ ...p, superArm: false }))) : [hold(), hold()];
+    s.drafts = keepGuard ? s.drafts.map(draft => draft.map(p => p.guard ? { ...p, superArm: false } : idle())) : [hold(), hold()];
     s.replay = null;
     const duration = rules.planningMilliseconds(s.mode);
-    s.deadline = duration !== null && s.connected.every(Boolean) ? now + duration : null;
+    s.deadline = duration !== null && this.clockRuns() ? now + duration : null;
     s.remaining = s.deadline === null ? duration : null;
+    s.pausedAt = duration !== null && s.deadline === null ? now : null;
+    this.planPauseEnd();
   }
   submit(owner, turn, moves, lock, now) {
     const s = this.state, i = this.seat(owner);
-    if (s.phase !== 'plan' || s.turn !== turn || s.locked[i] || !s.connected.every(Boolean) ||
+    if (s.phase !== 'plan' || s.turn !== turn || s.locked[i] || !this.planOpen() ||
         (s.deadline !== null && now >= s.deadline) || typeof lock !== 'boolean') throw new Error('Turn is not editable.');
     const validated = rules.validatePlans(moves);
     if (rules.rule(s.mode, 'classic') && validated.some(p => p.superArm)) throw new Error('Classic has no supers.');
@@ -195,8 +236,8 @@ class MatchRoom {
   }
   takeTurn(now) {
     const s = this.state;
-    if (s.phase !== 'plan' || !s.connected.every(Boolean) || !(s.locked.every(Boolean) || (s.deadline !== null && now >= s.deadline))) return null;
-    s.phase = 'resolving'; s.deadline = null;
+    if (!this.planOpen() || !(s.locked.every(Boolean) || (s.deadline !== null && now >= s.deadline))) return null;
+    s.phase = 'resolving'; s.deadline = null; s.pausedAt = null; s.pauseEnds = null;
     return structuredClone(s.drafts.flat());
   }
   claimForfeit(owner, now) {
@@ -239,12 +280,18 @@ class MatchRoom {
       game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
       playUntil: s.playUntil };
   }
+  // A seat sees its own roster; the opponent's stays hidden until kickoff, then shows without serials.
+  rosterView(seat) {
+    const s = this.state;
+    return s.rosters.map((team, i) => i === seat ? structuredClone(team) :
+      s.game && team ? team.map(({ dna, superId }) => ({ dna, superId })) : null);
+  }
   view(owner) {
     const s = this.state, seat = this.seat(owner);
     return { version: s.version, physicsVersion: P.VERSION, seat, mode: s.mode, phase: s.phase, turn: s.turn,
       occupied: s.players.map(Boolean), names: [...s.names], connected: [...s.connected], locked: [...s.locked],
       moves: structuredClone(s.drafts[seat]), deadline: s.deadline, remaining: s.remaining, winner: s.winner,
-      ready: [...s.ready], left: [...s.left], rosters: structuredClone(s.rosters),
+      ready: [...s.ready], left: [...s.left], rosters: this.rosterView(seat), planOpen: this.planOpen(),
       guestTeam: structuredClone(s.guestTeams[seat]),
       game: structuredClone(s.game), replay: s.phase === 'resolving' ? structuredClone(s.replay) : null,
       playUntil: s.playUntil, disconnectedAt: [...s.disconnectedAt], rematch: [...s.rematch],

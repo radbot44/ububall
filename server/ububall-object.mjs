@@ -24,19 +24,26 @@ export class UbuballMatch extends DurableObject {
     super(ctx, env);
     // Workerd answers heartbeats itself, so pings never wake a hibernating match.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
-    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS match_state (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL)');
-    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS retired_connections (connection TEXT PRIMARY KEY)');
-    const row = ctx.storage.sql.exec('SELECT data FROM match_state WHERE id=1').toArray()[0];
+    // Tables are created on first write, so stray requests for unknown match IDs store nothing.
+    this.tables = ctx.storage.sql.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name='match_state'").toArray().length > 0;
+    const row = this.tables ? ctx.storage.sql.exec('SELECT data FROM match_state WHERE id=1').toArray()[0] : null;
     if (row) { this.room = Object.create(MatchRoom.prototype); this.room.state = JSON.parse(row.data); }
+  }
+  ensureTables() {
+    if (this.tables) return;
+    this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS match_state (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL)');
+    this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS retired_connections (connection TEXT PRIMARY KEY)');
+    this.tables = true;
   }
   seen(ws, a) { return Math.max(a.lastSeen, this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0); }
   save() {
+    this.ensureTables();
     this.room.state.revision = (this.room.state.revision || 0) + 1;
     this.ctx.storage.sql.exec('INSERT OR REPLACE INTO match_state (id, data) VALUES (1, ?)', JSON.stringify(this.room.state));
   }
   async schedule(now) {
     const s = this.room.state;
-    const deadlines = [s.expires, s.deadline, s.playUntil];
+    const deadlines = [s.expires, s.deadline, s.playUntil, s.phase === 'plan' ? s.pauseEnds ?? null : null];
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment();
       if (a.live) deadlines.push(this.seen(ws, a) + 30000, a.expires);
@@ -116,30 +123,38 @@ export class UbuballMatch extends DurableObject {
     server.send(JSON.stringify(this.watchSnapshot(now)));
     return new Response(null, { status: 101, webSocket: client });
   }
+  stage() {
+    const s = this.room?.state;
+    return s ? `${s.phase}:${s.turn}:${s.playUntil}:${s.deadline}:${s.pauseEnds}` : '';
+  }
   registry() { return this.env.MINT.get(this.env.MINT.idFromName(this.env.MINT_ID)); }
+  async ensureTeam(owner) {
+    try {
+      const team = await this.registry().matchTeam(owner);
+      if (team?.entries?.length !== 3) throw new Error('Incomplete team.');
+      return team;
+    } catch { return null; }
+  }
   async fetch(request) {
     return this.ctx.blockConcurrencyWhile(async () => {
       const now = Date.now(), path = new URL(request.url).pathname;
       const connection = request.headers.get('X-Match-Connection');
-      if (path !== '/depart' && connection && this.ctx.storage.sql.exec('SELECT connection FROM retired_connections WHERE connection = ?', connection).toArray().length) {
+      if (path !== '/depart' && connection && this.tables && this.ctx.storage.sql.exec('SELECT connection FROM retired_connections WHERE connection = ?', connection).toArray().length) {
         return json({ error: 'This Activity connection has ended.' }, 409);
       }
       if (path === '/pair') {
         if (!this.room) {
           const { players: [first, second], quickStart, challenge, activity } = await request.json();
           // A failure here keeps both queue assignments, so the queue retries this match.
-          let teams;
-          try {
-            teams = await Promise.all([first, second].map(player => player.guest ? null : this.registry().matchTeam(player.owner)));
-            if ([first, second].some((player, i) => !player.guest && teams[i]?.entries?.length !== 3)) throw new Error('Incomplete team.');
-          } catch { return json({ error: 'Could not prepare the teams.' }, 503); }
+          const teams = await Promise.all([first, second].map(player => player.guest ? true : this.ensureTeam(player.owner)));
+          if (teams.some(team => !team)) return json({ error: 'Could not prepare the teams.' }, 503);
           const room = new MatchRoom(first.owner, 'standard', Boolean(first.guest));
           room.join(second.owner, Boolean(second.guest));
           room.state.paired = true;
           room.state.challenge = Boolean(challenge);
           room.state.matchKind = activity ? 'friend' : 'online';
           if (activity) { room.state.activity = activity; room.state.watch = { allowed: [true, true], key: null }; }
-          if (quickStart) room.readyPair(teams);
+          if (quickStart) room.readyPair(teams.map(team => team === true ? null : team));
           this.room = room;
           this.save();
           await this.schedule(now);
@@ -158,7 +173,7 @@ export class UbuballMatch extends DurableObject {
       }
       if (path === '/depart') {
         const owner = request.headers.get('X-Match-Owner');
-        if (connection) this.ctx.storage.sql.exec('INSERT OR IGNORE INTO retired_connections (connection) VALUES (?)', connection);
+        if (connection) { this.ensureTables(); this.ctx.storage.sql.exec('INSERT OR IGNORE INTO retired_connections (connection) VALUES (?)', connection); }
         if (!this.room) return json({ left: true, created: false });
         for (const ws of this.ctx.getWebSockets()) {
           const a = ws.deserializeAttachment();
@@ -179,10 +194,10 @@ export class UbuballMatch extends DurableObject {
       }
       if (path === '/watch-state' || path === '/watch-socket') {
         if (this.room && now < this.room.state.expires) {
-          const s = this.room.state, before = `${s.phase}:${s.turn}:${s.playUntil}`;
+          const before = this.stage();
           const swept = this.sweep(now);
           this.room.advance(now);
-          if (swept || `${s.phase}:${s.turn}:${s.playUntil}` !== before) {
+          if (swept || this.stage() !== before) {
             this.save(); this.broadcast(now); await this.schedule(now);
           }
         }
@@ -193,24 +208,24 @@ export class UbuballMatch extends DurableObject {
       const owner = request.headers.get('X-Match-Owner'), guest = request.headers.get('X-Match-Guest') === '1';
       if (!owner) return json({ error: 'Sign in first.' }, 401);
       try {
+        let changed = path !== '/state';
         if (path === '/create') {
           if (this.room) throw new Error('Match already exists.');
           const data = await request.json();
           const room = new MatchRoom(owner, data?.mode, guest);
-          if (!guest) {
-            try { await this.registry().matchTeam(owner); }
-            catch { return json({ error: 'Mint service unavailable. Retry the same request.' }, 503); }
+          if (!guest && !await this.ensureTeam(owner)) {
+            return json({ error: 'Mint service unavailable. Retry the same request.' }, 503);
           }
           this.room = room;
         } else if (!this.room || now >= this.room.state.expires) return json({ error: 'Match expired or not found.' }, 404);
-        this.sweep(now);
+        if (this.sweep(now)) changed = true;
         const alias = request.headers.get('X-Match-Alias');
         if (alias && this.room.state.players.includes(alias) && !this.room.state.players.includes(owner)) {
-          if (!guest) {
-            try { await this.registry().matchTeam(owner); }
-            catch { return json({ error: 'Mint service unavailable. Retry the same request.' }, 503); }
+          if (!guest && !await this.ensureTeam(owner)) {
+            return json({ error: 'Mint service unavailable. Retry the same request.' }, 503);
           }
           if (this.room.claim(owner, alias)) {
+            changed = true;
             for (const ws of this.ctx.getWebSockets()) {
               const a = ws.deserializeAttachment();
               if (a.owner === alias) { a.owner = owner; ws.serializeAttachment(a); }
@@ -221,14 +236,15 @@ export class UbuballMatch extends DurableObject {
           if (!this.room.state.players.includes(owner) && (this.room.state.phase !== 'lobby' || this.room.state.players[1])) {
             throw new Error('Match is full.');
           }
-          if (!guest) {
-            try { await this.registry().matchTeam(owner); }
-            catch { return json({ error: 'Mint service unavailable. Retry the same request.' }, 503); }
+          if (!guest && !await this.ensureTeam(owner)) {
+            return json({ error: 'Mint service unavailable. Retry the same request.' }, 503);
           }
           this.room.join(owner, guest);
         }
         else this.room.seat(owner);
+        const seat = this.room.seat(owner), previousName = this.room.state.names[seat];
         this.room.rename(owner, decodeURIComponent(request.headers.get('X-Match-Name') || ''));
+        if (this.room.state.names[seat] !== previousName) changed = true;
         if (path === '/socket') {
           if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return json({ error: 'WebSocket required.' }, 426);
           // One controlling connection per player. Replacing a tab cannot leave a ghost player.
@@ -272,7 +288,11 @@ export class UbuballMatch extends DurableObject {
         }
         if (path === '/rematch') this.room.rematch(owner, now);
         if (path === '/skip-replay') this.room.skipReplay(owner, (await request.json())?.startedAt, now);
-        this.room.advance(now); this.save(); this.broadcast(now); await this.schedule(now);
+        const before = this.stage();
+        this.room.advance(now);
+        if (changed || this.stage() !== before) {
+          this.save(); this.broadcast(now); await this.schedule(now);
+        }
         return json(path === '/leave' ? { left: true } : this.snapshot(owner, now));
       } catch (error) {
         if (CLIENT_HTTP_ERRORS.has(error.message)) return json({ error: error.message }, 400);
@@ -318,9 +338,9 @@ export class UbuballMatch extends DurableObject {
         }
       } catch (error) {
         // Deadline may have passed before the alarm ran; resolve the last accepted draft.
-        const s = this.room.state, before = `${s.phase}:${s.turn}:${s.playUntil}`;
+        const before = this.stage();
         this.room.advance(now);
-        if (`${s.phase}:${s.turn}:${s.playUntil}` !== before) {
+        if (this.stage() !== before) {
           this.save(); this.broadcast(now); await this.schedule(now);
         }
         const safeMessage = CLIENT_WS_ERRORS.has(error.message) ? error.message : 'Invalid message.';
@@ -341,12 +361,13 @@ export class UbuballMatch extends DurableObject {
       const now = Date.now();
       if (now >= this.room.state.expires) {
         for (const ws of this.ctx.getWebSockets()) this.retire(ws, now, 4002);
-        this.ctx.storage.sql.exec('DELETE FROM match_state'); this.ctx.storage.sql.exec('DELETE FROM retired_connections'); this.room = null; return;
+        // Drop the whole object's storage (tables included), not just its rows.
+        this.room = null; this.tables = false; await this.ctx.storage.deleteAll(); return;
       }
-      const s = this.room.state, before = `${s.phase}:${s.turn}:${s.playUntil}`;
+      const before = this.stage();
       const swept = this.sweep(now);
       this.room.advance(now);
-      if (swept || `${s.phase}:${s.turn}:${s.playUntil}` !== before) {
+      if (swept || this.stage() !== before) {
         this.save(); this.broadcast(now);
       }
       await this.schedule(now);

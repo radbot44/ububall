@@ -44,6 +44,24 @@ export class UbuballQueue extends DurableObject {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS challenges (
       id TEXT PRIMARY KEY, scope TEXT NOT NULL, sender TEXT NOT NULL, target TEXT NOT NULL, expires INTEGER NOT NULL
     )`);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS rate_limits (
+      key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires INTEGER NOT NULL
+    )`);
+  }
+
+  allow(key, limit, windowMs) {
+    return this.ctx.blockConcurrencyWhile(() => {
+      const now = Date.now();
+      this.sql.exec('DELETE FROM rate_limits WHERE expires <= ?', now);
+      const row = this.sql.exec('SELECT count, expires FROM rate_limits WHERE key = ?', key).toArray()[0];
+      if (!row) {
+        this.sql.exec('INSERT INTO rate_limits (key, count, expires) VALUES (?, 1, ?)', key, now + windowMs);
+        return true;
+      }
+      if (row.count >= limit) return false;
+      this.sql.exec('UPDATE rate_limits SET count = count + 1 WHERE key = ?', key);
+      return true;
+    });
   }
 
   match(id) { return this.env.UBUBALL.get(this.env.UBUBALL.idFromName(id)); }
@@ -61,6 +79,7 @@ export class UbuballQueue extends DurableObject {
     this.sql.exec('DELETE FROM activity_matches WHERE expires <= ?', now);
     this.sql.exec('DELETE FROM lobby_members WHERE expires <= ?', now);
     this.sql.exec('DELETE FROM lobby_connections WHERE expires <= ?', now);
+    this.sql.exec('DELETE FROM rate_limits WHERE expires <= ?', now);
     this.sql.exec(`DELETE FROM challenges WHERE expires <= ? OR NOT EXISTS
       (SELECT 1 FROM lobby_members WHERE owner = sender AND lobby_members.scope = challenges.scope) OR NOT EXISTS
       (SELECT 1 FROM lobby_members WHERE owner = target AND lobby_members.scope = challenges.scope)`, now);

@@ -2450,7 +2450,7 @@
         state.onlineDisconnected = false;
         const viewBodies = state.fieldView?.bodies || state.bodies || [];
         const armed = viewBodies.slice(0, 3).map(b => Boolean(b.superArm));
-        if (s.spectator || fresh || !s.connected.every(Boolean) || s.locked[s.seat]) state.drag = null;
+        if (s.spectator || fresh || !(s.planOpen ?? s.connected.every(Boolean)) || s.locked[s.seat]) state.drag = null;
         if (fresh) {
           fn('dirtyPrediction')?.();
           state.onlineTurn = s.turn; state.scoringPlayer = null; fn('clearEffects')?.();
@@ -2529,7 +2529,7 @@
           fn('syncViewBodies')?.(state.onlineReplay.simBodies, s.seat);
         }
         if (!s.spectator) finishOnlineRecording(s);
-        state.phase = s.phase === 'over' ? 'over' : s.phase === 'resolving' ? 'play' : !s.spectator && s.connected.every(Boolean) && !s.locked[s.seat] ? 'plan' : 'waiting';
+        state.phase = s.phase === 'over' ? 'over' : s.phase === 'resolving' ? 'play' : !s.spectator && (s.planOpen ?? s.connected.every(Boolean)) && !s.locked[s.seat] ? 'plan' : 'waiting';
         fn('sync')?.();
         if (state.onlineReplay && !state.goalReplay && (state.onlineReplay.currentTick ?? 0) < state.onlineReplay.ticks) playOnlineReplay();
         fn('draw')?.();

@@ -54,6 +54,39 @@ test('private drafts, turn locking, disconnect pause and latest-draft Blitz expi
   assert.equal(room.takeTurn(53001),null);
   assert.throws(()=>room.submit('host',1,moves,true,53001));
 });
+test('Blitz disconnect pause budget is capped at 60s per player per game', () => {
+  const room = new MatchRoom('host', 'blitz', true); room.join('guest', true);
+  room.readyPair([null, null]);
+  room.connect('host', 0); room.connect('guest', 0); room.advance(0);
+  assert.equal(room.state.deadline, 5000);
+  // Guest disconnects at t=1000 (4000ms remaining). Pauses until 61000.
+  room.disconnect('guest', 1000);
+  assert.equal(room.state.remaining, 4000);
+  assert.equal(room.state.deadline, null);
+  assert.equal(room.state.pauseEnds, 61000);
+  assert.equal(room.view('host').planOpen, false);
+  // Guest reconnects after 40s (40s used, 20s budget left) and disconnects again 1s later.
+  room.connect('guest', 41000);
+  assert.equal(room.state.deadline, 45000);
+  assert.equal(room.state.pauseUsed[1], 40000);
+  room.disconnect('guest', 42000);
+  assert.equal(room.state.remaining, 3000);
+  assert.equal(room.state.pauseEnds, 62000);
+  // Once the remaining 20s pause budget expires at 62000, the Blitz clock resumes automatically.
+  room.advance(61999);
+  assert.equal(room.state.deadline, null);
+  room.advance(62000);
+  assert.equal(room.state.deadline, 65000);
+  assert.equal(room.state.remaining, null);
+  assert.equal(room.view('host').planOpen, true);
+  // Host can still edit moves while the clock runs during guest's post-budget disconnect.
+  const moves = Array.from({ length: 3 }, () => ({ angle: 0, power: 0.5, spin: 0, superArm: false, guard: false }));
+  room.submit('host', 1, moves, false, 63000);
+  // At 65000 the turn resolves even with guest still disconnected.
+  room.advance(65000);
+  assert.equal(room.state.phase, 'resolving');
+  assert.equal(room.state.turn, 2);
+});
 test('changing rules restarts instant play before launch and rejects stale editors and locked turns', () => {
   const room = new MatchRoom('host', 'standard', true); room.join('guest', true); room.readyPair([null, null]);
   room.connect('host', 1000); room.connect('guest', 1000); room.advance(1000);
@@ -92,17 +125,24 @@ const rarity = require('../shared/rarity.js');
   room.selectTeam('host', room.state.guestTeams[0], hostSupers);
   room.advance(1000);
   assert.equal(room.state.phase, 'lobby');
+  // Opponent roster remains private in the lobby before kickoff.
+  assert.equal(room.view('guest').rosters[0], null);
+  assert.ok(Array.isArray(room.view('host').rosters[0]));
   room.selectTeam('guest', room.state.guestTeams[1], guestSupers);
   room.advance(1000);
   assert.equal(room.state.phase, 'plan');
   assert.equal(room.state.turn, 1);
   assert.ok(room.state.game);
+  // After kickoff, opponent roster is visible without serials.
+  assert.equal(room.view('guest').rosters[0].length, 3);
+  assert.equal('serial' in room.view('guest').rosters[0][0], false);
   const moves = () => Array.from({ length: 3 }, () => ({ angle: 0, power: 0, spin: 0, superArm: false, guard: false }));
-  room.submit('host', 1, moves(), true, 1100);
+  const launched = moves(); launched[0] = { angle: 1, power: 0.3, spin: 0.2, superArm: false, guard: false };
+  room.submit('host', 1, launched, true, 1100);
   room.advance(1100);
   assert.equal(room.state.phase, 'plan');
   assert.equal(room.state.locked[0], true);
-  const guarded = moves(); guarded[1].guard = true;
+  const guarded = moves(); guarded[1] = { angle: 2, power: 0.5, spin: 0, superArm: false, guard: true };
   room.submit('guest', 1, guarded, true, 1200);
   room.advance(1200);
   assert.equal(room.state.phase, 'resolving');
@@ -116,9 +156,11 @@ const rarity = require('../shared/rarity.js');
   assert.equal(room.state.locked[0], false);
   assert.equal(room.state.locked[1], false);
   assert.equal(room.state.replay, null);
-  // A guarding ubu stays on guard into the next turn.
+  // A guarding ubu stays on guard into the next turn; non-guarding launches clear to idle.
   assert.deepEqual(room.state.drafts[1].map(p => p.guard), [false, true, false]);
+  assert.equal(room.state.drafts[1][1].power, 0.5);
   assert.deepEqual(room.state.drafts[0].map(p => p.guard), [false, false, false]);
+  assert.deepEqual(room.state.drafts[0].map(p => p.power), [0, 0, 0]);
 });
 
 test('authoritative resolution is repeatable, immutable, bounded and serializable', () => {

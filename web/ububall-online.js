@@ -825,7 +825,7 @@ function ububallOnline(hooks) {
       }
     },
     send(moves, lock = false) {
-      if (outdated || watchKey || !state || state.phase !== 'plan' || state.locked[state.seat] || !state.connected.every(Boolean) || socket?.readyState !== WebSocket.OPEN) return false;
+      if (outdated || watchKey || !state || state.phase !== 'plan' || state.locked[state.seat] || !(state.planOpen ?? state.connected.every(Boolean)) || socket?.readyState !== WebSocket.OPEN) return false;
       const text = JSON.stringify({ type: 'moves', turn: state.turn, gameNumber: state.gameNumber, moves, lock });
       if (!lock && (text === lastDraft || Date.now() - sentAt < 120)) return false;
       socket.send(text); lastDraft = text; sentAt = Date.now(); return true;

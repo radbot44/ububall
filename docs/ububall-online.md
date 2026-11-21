@@ -1,6 +1,6 @@
 # Online Ububall implementation
 
-Online play supports invite and matchmaking matches; every signed-in player fields their own ubus. Deliberately closing or leaving the Discord Activity forfeits an active match immediately; unexpected network interruptions retain the 60-second disconnect grace before the connected opponent may claim forfeit. Disconnects pause planning and preserve the remaining Blitz time. Blitz expiry uses the latest server-saved draft, even if not locked. Opponent drafts remain private until resolution.
+Online play supports invite and matchmaking matches; every signed-in player fields their own ubus. Deliberately closing or leaving the Discord Activity forfeits an active match immediately; unexpected network interruptions retain the 60-second disconnect grace before the connected opponent may claim forfeit. Disconnects pause planning and preserve the remaining Blitz time up to a 60-second pause budget per player per game; once a disconnected player's pause budget is exhausted, the Blitz clock runs while they are absent. Blitz expiry uses the latest server-saved draft, even if not locked. Opponent drafts remain private until resolution, and opponent rosters remain private in the lobby until kickoff (and never include opponent serial numbers).
 
 The online match shares the local game's meter and Blitz rules. Its server-side lifecycle handles move validation, private drafts, locking, deadline expiry, pause/resume and forfeit authorization.
 

@@ -317,6 +317,9 @@ export default {
         if (request.headers.get('Origin') !== auth.origin(env) && !mobileReq) return reply({ error: 'Invalid request origin.' }, 403);
         if (session) return reply(session.guest ? { owner: null, guest: true, csrf: session.csrf, ...(session.mobile ? { site } : {}) } :
           { owner: session.owner, name: session.name ?? null, csrf: session.csrf, ...(session.mobile ? { site } : {}) });
+        const clientIp = request.headers.get('CF-Connecting-IP') || 'local';
+        const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
+        if (!await queue.allow('guest:' + clientIp, 15, 60000)) return reply({ error: 'Too many guest sessions. Try again shortly.' }, 429);
         const created = await auth.guest(env, { mobile: mobileReq });
         return mobileReq
           ? reply({ owner: null, guest: true, csrf: created.value.csrf, token: created.token, site })
@@ -407,6 +410,12 @@ export default {
         let data;
         try { data = await body(request); } catch { return reply({ error: 'Invalid match request.' }, 400); }
         if (!data || typeof data !== 'object' || Array.isArray(data) || typeof data.mode !== 'string' || Object.keys(data).some(k => k !== 'mode')) return reply({ error: 'Invalid match request.' }, 400);
+        const queue = env.QUEUE.get(env.QUEUE.idFromName('ububall'));
+        const clientIp = request.headers.get('CF-Connecting-IP') || 'local';
+        if (!await queue.allow('match:' + session.owner, 10, 60000) ||
+            (session.guest && !await queue.allow('guest-match:' + clientIp, 15, 60000))) {
+          return reply({ error: 'Too many matches created. Try again shortly.' }, 429);
+        }
         const id = crypto.randomUUID();
         const response = await env.UBUBALL.get(env.UBUBALL.idFromName(id)).fetch(new Request('https://match/create', {
           method: 'POST', headers: { 'X-Match-Owner': session.owner, 'X-Match-Guest': session.guest ? '1' : '', 'X-Match-Name': encodeURIComponent(session.name || ''), 'Content-Type': 'application/json' }, body: JSON.stringify(data)
