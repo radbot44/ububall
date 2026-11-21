@@ -1,0 +1,7 @@
+{
+  "versionCode": 2,
+  "nativeVersions": {
+    "1": ["App", "Browser", "Filesystem", "Haptics", "OtaUpdater", "ScreenOrientation", "Share", "SplashScreen", "StatusBar", "SystemBars"],
+    "2": ["App", "Browser", "Filesystem", "Haptics", "OtaUpdater", "ScreenOrientation", "Share", "SplashScreen", "StatusBar", "SystemBars"]
+  }
+}

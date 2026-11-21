@@ -19,6 +19,8 @@
   let lastHapticAt = 0;
   let lastOtaCheckAt = 0;
   let otaBootConfirmed = false;
+  let appReady = false;
+  let bootErrors = 0;
   const OTA_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
   function readStorage(storage, key) {
@@ -34,6 +36,9 @@
   if (isNative) {
     memoryToken = readStorage(window.localStorage, TOKEN_KEY);
     memorySite = readStorage(window.localStorage, SITE_KEY);
+    // platform.js is the first deferred script: any uncaught script error before app.js reports
+    // ready means this web bundle did not start cleanly, so an OTA bundle stays unconfirmed.
+    window.addEventListener?.('error', () => { if (!appReady) bootErrors++; });
   }
 
   function apiOrigin() {
@@ -417,6 +422,13 @@
     try { void plugins().App?.minimizeApp?.(); } catch {}
   }
 
+  // Called by app.js once every deferred script has run and the first screen is shown.
+  function markAppReady() {
+    if (appReady) return;
+    appReady = true;
+    if (bootErrors === 0) notifyOtaBootOk();
+  }
+
   function notifyOtaBootOk() {
     if (!isNative || otaBootConfirmed) return;
     const OtaUpdater = plugins().OtaUpdater;
@@ -456,15 +468,11 @@
     if (!isNative) return;
     document.documentElement.classList.add('capacitor-native', `capacitor-${platform}`);
     decorateAudioWithHaptics();
-    const onReady = () => {
-      decorateAudioWithHaptics();
-      notifyOtaBootOk();
-    };
     if (document.readyState === 'complete') {
-      onReady();
+      decorateAudioWithHaptics();
     } else {
-      document.addEventListener('DOMContentLoaded', onReady, { once: true });
-      window.addEventListener?.('load', onReady, { once: true });
+      document.addEventListener('DOMContentLoaded', decorateAudioWithHaptics, { once: true });
+      window.addEventListener?.('load', decorateAudioWithHaptics, { once: true });
     }
 
     const App = plugins().App;
@@ -493,6 +501,8 @@
     }
 
     try { void plugins().SplashScreen?.hide?.(); } catch {}
+    // Release APKs (native versionCode 2+) also check natively; this nudge keeps older APKs and
+    // debug builds with a local origin updating.
     if (typeof setTimeout === 'function') {
       setTimeout(() => { void checkForUpdate(false); }, 2500);
     }
@@ -525,6 +535,7 @@
     setOrientation,
     setImmersive,
     haptic,
+    markAppReady,
     checkForUpdate,
     getOtaStatus
   });

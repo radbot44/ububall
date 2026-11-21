@@ -145,4 +145,5 @@
   window.showUbuScreen = show;
   show();
   document.documentElement.classList.remove('booting');
+  window.ubuPlatform?.markAppReady?.();
 })();

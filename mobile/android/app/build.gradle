@@ -10,6 +10,19 @@ if (!signingCandidates.isEmpty()) {
     signingCandidates[0].withInputStream { signingProps.load(it) }
 }
 
+// Native compatibility record shared with scripts/prepare-assets.cjs (OTA minNativeVersion).
+def nativeCompat = new groovy.json.JsonSlurper().parse(rootProject.file('../native-compat.json'))
+def nativeVersionCode = nativeCompat.versionCode as int
+if (!nativeCompat.nativeVersions.containsKey(String.valueOf(nativeVersionCode))) {
+    throw new GradleException("mobile/native-compat.json has no nativeVersions entry for versionCode ${nativeVersionCode}")
+}
+// Public half of the OTA manifest signing key. Empty disables signed OTA updates (fail closed).
+def otaPublicKeyFile = rootProject.file('../ota-public-key.pem')
+def otaPublicKey = otaPublicKeyFile.isFile()
+    ? otaPublicKeyFile.text.replaceAll(/-----(BEGIN|END) PUBLIC KEY-----/, '').replaceAll(/\s/, '')
+    : ''
+if (!(otaPublicKey ==~ /^[A-Za-z0-9+\/=]*$/)) throw new GradleException('mobile/ota-public-key.pem is not a PEM public key')
+
 android {
     namespace = "one.tch.ububall"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -17,8 +30,9 @@ android {
         applicationId "one.tch.ububall"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode nativeVersionCode
         versionName "1.0"
+        buildConfigField 'String', 'OTA_PUBLIC_KEY', "\"${otaPublicKey}\""
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -66,6 +80,7 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
+    testImplementation 'org.json:json:20240303'
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

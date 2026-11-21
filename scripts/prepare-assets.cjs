@@ -1,12 +1,12 @@
 'use strict';
 const { existsSync, mkdirSync, copyFileSync, readdirSync, readFileSync, writeFileSync, rmSync } = require('node:fs');
-const { createHash } = require('node:crypto');
 const { resolve, join } = require('node:path');
 const { buildSync } = require('esbuild');
+const ota = require('./ota-manifest.cjs');
 const root = resolve(__dirname, '..');
 const target = join(root, 'dist', 'public');
 const targetAssets = join(target, 'assets');
-const OTA_MIN_NATIVE_VERSION = 1;
+const requireOtaSignature = process.argv.includes('--require-ota-signature');
 mkdirSync(targetAssets, { recursive: true });
 
 // Explicit public files only; repository contents and secrets are never an asset root.
@@ -30,7 +30,7 @@ const assetFiles = [
 
 // Remove files dropped from the lists so they are never served. The folder itself stays,
 // keeping a running wrangler dev watching it.
-const topFiles = [...webFiles, ...sharedFiles, 'discord-sdk.js', 'discord-sdk.js.LEGAL.txt', 'discord-sdk.LICENSE.md', 'mobile-manifest.json', 'assets'];
+const topFiles = [...webFiles, ...sharedFiles, 'discord-sdk.js', 'discord-sdk.js.LEGAL.txt', 'discord-sdk.LICENSE.md', ota.MANIFEST_NAME, ota.SIGNATURE_NAME, 'assets'];
 for (const name of readdirSync(target)) if (!topFiles.includes(name)) rmSync(join(target, name), { recursive: true, force: true });
 for (const name of readdirSync(targetAssets)) if (!assetFiles.includes(name)) rmSync(join(targetAssets, name), { recursive: true, force: true });
 
@@ -48,22 +48,22 @@ buildSync({ stdin: { contents: "export { DiscordSDK } from '@discord/embedded-ap
   outfile: join(target, 'discord-sdk.js'), bundle: true, format: 'esm', minify: true, legalComments: 'linked', absWorkingDir: root });
 copyFileSync(join(root, 'node_modules', '@discord', 'embedded-app-sdk', 'LICENSE.md'), join(target, 'discord-sdk.LICENSE.md'));
 
-// Generate deterministic SHA-256 manifest for Capacitor Android silent delta OTA updates.
-const manifestPaths = [
-  ...readdirSync(target).filter(name => name !== 'assets' && name !== 'mobile-manifest.json'),
-  ...readdirSync(targetAssets).map(name => `assets/${name}`)
-].sort();
-const files = {};
-const summaryLines = [];
-for (const rel of manifestPaths) {
-  const bytes = readFileSync(join(target, rel));
-  const sha256 = createHash('sha256').update(bytes).digest('hex');
-  files[rel] = { sha256, size: bytes.length };
-  summaryLines.push(`${rel}:${sha256}`);
+// Signed SHA-256 manifest for Capacitor Android silent delta OTA updates (scripts/ota-manifest.cjs).
+// The native floor follows the Capacitor plugins the web code uses (mobile/native-compat.json).
+const nativeCompat = JSON.parse(readFileSync(join(root, 'mobile', 'native-compat.json'), 'utf8'));
+const usedPlugins = ota.nativePluginsUsed(webFiles.filter(name => name.endsWith('.js')).map(name => readFileSync(join(root, 'web', name), 'utf8')));
+const { bytes: manifestBytes } = ota.buildManifest(target, { minNativeVersion: ota.minNativeVersion(usedPlugins, nativeCompat), issuedAt: Date.now() });
+writeFileSync(join(target, ota.MANIFEST_NAME), manifestBytes);
+const signaturePath = join(target, ota.SIGNATURE_NAME);
+const keyPath = ota.signingKeyPath();
+if (keyPath) {
+  const signature = ota.signManifest(manifestBytes, readFileSync(keyPath, 'utf8'));
+  const publicKeyPath = process.env.UBUBALL_OTA_PUBLIC_KEY || join(root, 'mobile', 'ota-public-key.pem');
+  if (!ota.verifyManifest(manifestBytes, signature, readFileSync(publicKeyPath, 'utf8'))) {
+    throw new Error(`OTA signing key ${keyPath} does not match ${publicKeyPath}; installed apps would reject this manifest.`);
+  }
+  writeFileSync(signaturePath, signature + '\n');
+} else {
+  rmSync(signaturePath, { force: true });
+  if (requireOtaSignature) throw new Error('No OTA signing key found (UBUBALL_OTA_SIGNING_KEY or %LOCALAPPDATA%\\ubumint\\ota-signing-key.pem); refusing to publish an unsigned mobile manifest.');
 }
-const version = createHash('sha256').update(summaryLines.join('\n')).digest('hex').slice(0, 16);
-writeFileSync(
-  join(target, 'mobile-manifest.json'),
-  JSON.stringify({ schema: 1, minNativeVersion: OTA_MIN_NATIVE_VERSION, version, files }, null, 2) + '\n',
-  'utf8'
-);

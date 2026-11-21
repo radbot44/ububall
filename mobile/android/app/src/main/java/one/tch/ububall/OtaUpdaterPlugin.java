@@ -7,6 +7,7 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import com.getcapacitor.Bridge;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Logger;
@@ -24,154 +25,88 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.HashSet;
-import java.util.Iterator;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Pattern;
 import org.json.JSONObject;
 
+/**
+ * Silent delta OTA updates for the bundled web app.
+ *
+ * Trust: release builds only fetch from {@link #DEFAULT_ORIGIN} and only accept a manifest whose
+ * ECDSA P-256 signature verifies against the public key compiled into the APK
+ * ({@code BuildConfig.OTA_PUBLIC_KEY}, from mobile/ota-public-key.pem). Every file is then checked
+ * against the manifest's SHA-256 and size. Manifests older than the newest one accepted (or the
+ * APK's own) are rejected as replays.
+ *
+ * Scheduling: release builds check natively after start-up and on resume, so a bundle whose web
+ * code stops asking for updates can never strand the app. The web app may also nudge a check.
+ *
+ * Boot health and rollback live in {@link OtaBootState}; all disk work runs on one executor.
+ */
 @CapacitorPlugin(name = "OtaUpdater")
 public class OtaUpdaterPlugin extends Plugin {
     private static final String TAG = "UbuballOta";
     private static final String PREFS = "UbuballOta";
     private static final String DEFAULT_ORIGIN = "https://ububall.tch.one";
-    private static final String KEY_BINARY_STAMP = "binary_stamp";
-    private static final String KEY_ACTIVE_VERSION = "active_version";
-    private static final String KEY_ACTIVE_PATH = "active_path";
-    private static final String KEY_PREVIOUS_VERSION = "previous_version";
-    private static final String KEY_PREVIOUS_PATH = "previous_path";
-    private static final String KEY_PENDING_VERSION = "pending_version";
-    private static final String KEY_PENDING_PATH = "pending_path";
-    private static final String KEY_UNCONFIRMED_VERSION = "unconfirmed_version";
-    private static final String KEY_BLOCKED_VERSION = "blocked_version";
 
     private static final int MAX_MANIFEST_BYTES = 256 * 1024;
-    private static final int MAX_FILES = 200;
-    private static final long MAX_FILE_BYTES = 10L * 1024L * 1024L;
-    private static final long MAX_TOTAL_BYTES = 32L * 1024L * 1024L;
-    private static final long WATCHDOG_TIMEOUT_MS = 10_000L;
-
-    private static final Pattern VERSION_RE = Pattern.compile("^[0-9a-f]{16,64}$");
-    private static final Pattern SHA256_RE = Pattern.compile("^[0-9a-f]{64}$");
-    private static final Pattern REL_PATH_RE = Pattern.compile("^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$");
+    private static final int MAX_SIGNATURE_BYTES = 4 * 1024;
+    private static final long WATCHDOG_TIMEOUT_MS = 15_000L;
+    private static final long AUTO_CHECK_FIRST_DELAY_MS = 20_000L;
+    private static final long AUTO_CHECK_INTERVAL_MS = 5 * 60 * 1000L;
 
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
     private static final AtomicBoolean SYNCING = new AtomicBoolean(false);
     private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
     private static Runnable watchdogRunnable = null;
+    private static long nextAutoCheckAt = 0;
 
     /**
-     * Runs before BridgeActivity.onCreate() so Capacitor's Bridge loads the promoted OTA
-     * bundle (or rolls back a failed one) on the very first WebView navigation.
+     * Runs before BridgeActivity.onCreate() so Capacitor's Bridge loads the promoted OTA bundle
+     * (or a restored one) on the very first WebView navigation.
      *
-     * @return true if this launch is booting an unconfirmed OTA bundle that needs a watchdog.
+     * @return true if this launch boots an unconfirmed OTA bundle that needs a watchdog.
      */
     public static boolean prepareOnLaunch(Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        SharedPreferences capPrefs = context.getSharedPreferences(
-            com.getcapacitor.plugin.WebView.WEBVIEW_PREFS_NAME,
-            Activity.MODE_PRIVATE
-        );
-
-        String stamp = binaryStamp(context);
-        String savedStamp = prefs.getString(KEY_BINARY_STAMP, "");
-        if (!stamp.equals(savedStamp)) {
-            Logger.info(TAG, "New binary detected (" + stamp + "); clearing cached OTA bundles.");
+        SharedPreferences prefs = prefs(context);
+        OtaBootState.Decision decision = OtaBootState.onLaunch(snapshot(prefs), binaryStamp(context), OtaUpdaterPlugin::isValidBundleDir);
+        if (decision.clearAll) {
+            Logger.info(TAG, "New binary detected; clearing cached OTA bundles.");
             deleteRecursively(otaRoot(context));
-            prefs.edit().clear().putString(KEY_BINARY_STAMP, stamp).commit();
-            capPrefs.edit().putString(com.getcapacitor.plugin.WebView.CAP_SERVER_PATH, "").commit();
-            return false;
+            prefs.edit().clear().commit();
         }
-
-        // If the previous launch of an OTA bundle never called notifyBootOk(), roll back immediately.
-        String unconfirmed = prefs.getString(KEY_UNCONFIRMED_VERSION, "");
-        if (!unconfirmed.isEmpty()) {
-            Logger.warn(TAG, "Rolling back unconfirmed OTA version " + unconfirmed);
-            String prevPath = prefs.getString(KEY_PREVIOUS_PATH, "");
-            String prevVersion = prefs.getString(KEY_PREVIOUS_VERSION, "");
-            if (!isValidBundleDir(prevPath)) {
-                prevPath = "";
-                prevVersion = "";
-            }
-            prefs.edit()
-                .putString(KEY_BLOCKED_VERSION, unconfirmed)
-                .putString(KEY_ACTIVE_PATH, prevPath)
-                .putString(KEY_ACTIVE_VERSION, prevVersion)
-                .putString(KEY_UNCONFIRMED_VERSION, "")
-                .putString(KEY_PENDING_PATH, "")
-                .putString(KEY_PENDING_VERSION, "")
-                .commit();
-            capPrefs.edit().putString(com.getcapacitor.plugin.WebView.CAP_SERVER_PATH, prevPath).commit();
-            return false;
+        if (decision.action == OtaBootState.Action.ROLLBACK) {
+            Logger.warn(TAG, "Unconfirmed OTA bundle failed to start; restored " + (decision.serverPath.isEmpty() ? "APK assets" : decision.serverPath));
+        } else if (decision.action == OtaBootState.Action.BOOT_UNCONFIRMED) {
+            Logger.info(TAG, "Booting unconfirmed OTA bundle " + decision.serverPath);
         }
-
-        // Promote a verified pending bundle silently on this cold launch.
-        String pendingVersion = prefs.getString(KEY_PENDING_VERSION, "");
-        String pendingPath = prefs.getString(KEY_PENDING_PATH, "");
-        if (!pendingVersion.isEmpty() && isValidBundleDir(pendingPath)) {
-            String prevPath = prefs.getString(KEY_ACTIVE_PATH, "");
-            String prevVersion = prefs.getString(KEY_ACTIVE_VERSION, "");
-            Logger.info(TAG, "Promoting silent OTA bundle " + pendingVersion);
-            prefs.edit()
-                .putString(KEY_PREVIOUS_PATH, prevPath)
-                .putString(KEY_PREVIOUS_VERSION, prevVersion)
-                .putString(KEY_ACTIVE_PATH, pendingPath)
-                .putString(KEY_ACTIVE_VERSION, pendingVersion)
-                .putString(KEY_UNCONFIRMED_VERSION, pendingVersion)
-                .putString(KEY_PENDING_PATH, "")
-                .putString(KEY_PENDING_VERSION, "")
-                .commit();
-            capPrefs.edit().putString(com.getcapacitor.plugin.WebView.CAP_SERVER_PATH, pendingPath).commit();
-            return true;
-        }
-
-        // Verify the active bundle still exists on disk; otherwise revert cleanly to APK assets.
-        String activePath = prefs.getString(KEY_ACTIVE_PATH, "");
-        if (!activePath.isEmpty() && !isValidBundleDir(activePath)) {
-            Logger.warn(TAG, "Active OTA directory missing; reverting to built-in APK assets.");
-            prefs.edit()
-                .putString(KEY_ACTIVE_PATH, "")
-                .putString(KEY_ACTIVE_VERSION, "")
-                .commit();
-            capPrefs.edit().putString(com.getcapacitor.plugin.WebView.CAP_SERVER_PATH, "").commit();
-        } else if (!activePath.isEmpty()) {
-            capPrefs.edit().putString(com.getcapacitor.plugin.WebView.CAP_SERVER_PATH, activePath).commit();
-        }
-        return false;
+        apply(context, prefs, decision);
+        return decision.action == OtaBootState.Action.BOOT_UNCONFIRMED;
     }
 
     public static void armBootWatchdog(Context context, Bridge bridge) {
         cancelWatchdog();
         final Context appCtx = context.getApplicationContext();
         watchdogRunnable = () -> {
-            SharedPreferences prefs = appCtx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            String unconfirmed = prefs.getString(KEY_UNCONFIRMED_VERSION, "");
-            if (unconfirmed.isEmpty()) return;
-            Logger.warn(TAG, "OTA boot watchdog expired for " + unconfirmed + "; rolling back.");
-            String prevPath = prefs.getString(KEY_PREVIOUS_PATH, "");
-            String prevVersion = prefs.getString(KEY_PREVIOUS_VERSION, "");
-            if (!isValidBundleDir(prevPath)) {
-                prevPath = "";
-                prevVersion = "";
-            }
-            prefs.edit()
-                .putString(KEY_BLOCKED_VERSION, unconfirmed)
-                .putString(KEY_ACTIVE_PATH, prevPath)
-                .putString(KEY_ACTIVE_VERSION, prevVersion)
-                .putString(KEY_UNCONFIRMED_VERSION, "")
-                .commit();
-            SharedPreferences capPrefs = appCtx.getSharedPreferences(
-                com.getcapacitor.plugin.WebView.WEBVIEW_PREFS_NAME,
-                Activity.MODE_PRIVATE
-            );
-            capPrefs.edit().putString(com.getcapacitor.plugin.WebView.CAP_SERVER_PATH, prevPath).commit();
-            if (bridge != null) {
-                if (prevPath.isEmpty()) bridge.setServerAssetPath("public");
-                else bridge.setServerBasePath(prevPath);
+            watchdogRunnable = null;
+            SharedPreferences prefs = prefs(appCtx);
+            OtaBootState.Decision decision = OtaBootState.onWatchdogExpired(snapshot(prefs), OtaUpdaterPlugin::isValidBundleDir);
+            if (decision.action == OtaBootState.Action.NONE) return;
+            apply(appCtx, prefs, decision);
+            if (bridge == null) return;
+            if (decision.action == OtaBootState.Action.RETRY) {
+                Logger.warn(TAG, "OTA boot watchdog expired; reloading for another attempt.");
+                bridge.reload();
+                armBootWatchdog(appCtx, bridge);
+            } else {
+                Logger.warn(TAG, "OTA boot watchdog expired again; rolling back.");
+                if (decision.serverPath.isEmpty()) bridge.setServerAssetPath("public");
+                else bridge.setServerBasePath(decision.serverPath);
             }
         };
         MAIN_HANDLER.postDelayed(watchdogRunnable, WATCHDOG_TIMEOUT_MS);
@@ -184,31 +119,61 @@ public class OtaUpdaterPlugin extends Plugin {
         }
     }
 
+    @Override
+    public void load() {
+        if (BuildConfig.DEBUG) return; // Debug builds update only when the web app asks (local origins).
+        nextAutoCheckAt = SystemClock.elapsedRealtime() + AUTO_CHECK_FIRST_DELAY_MS;
+        MAIN_HANDLER.postDelayed(this::autoCheck, AUTO_CHECK_FIRST_DELAY_MS);
+    }
+
+    @Override
+    protected void handleOnResume() {
+        if (!BuildConfig.DEBUG) autoCheck();
+    }
+
+    private void autoCheck() {
+        long now = SystemClock.elapsedRealtime();
+        if (now < nextAutoCheckAt || !SYNCING.compareAndSet(false, true)) return;
+        nextAutoCheckAt = now + AUTO_CHECK_INTERVAL_MS;
+        final Context ctx = getContext().getApplicationContext();
+        EXECUTOR.execute(() -> {
+            try {
+                JSObject result = performSync(ctx, DEFAULT_ORIGIN);
+                Logger.info(TAG, "Automatic OTA check: " + result.optString("status"));
+            } catch (Exception ex) {
+                Logger.warn(TAG, "Automatic OTA check failed: " + ex.getMessage());
+            } finally {
+                SYNCING.set(false);
+            }
+        });
+    }
+
     @PluginMethod
     public void notifyBootOk(PluginCall call) {
         cancelWatchdog();
-        Context ctx = getContext();
-        SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        String unconfirmed = prefs.getString(KEY_UNCONFIRMED_VERSION, "");
-        if (!unconfirmed.isEmpty()) {
-            Logger.info(TAG, "Confirmed healthy boot of OTA bundle " + unconfirmed);
-            prefs.edit().putString(KEY_UNCONFIRMED_VERSION, "").apply();
-            pruneOldBundles(ctx, prefs);
-        }
-        call.resolve(buildStatus(ctx, prefs));
+        final Context ctx = getContext().getApplicationContext();
+        // Runs on the OTA executor so cleanup can never delete a bundle a sync is staging.
+        EXECUTOR.execute(() -> {
+            SharedPreferences prefs = prefs(ctx);
+            Map<String, String> updates = OtaBootState.onBootConfirmed(snapshot(prefs));
+            if (!updates.isEmpty()) {
+                Logger.info(TAG, "Confirmed healthy boot of OTA bundle " + prefs.getString(OtaBootState.KEY_UNCONFIRMED_VERSION, ""));
+                write(prefs, updates);
+                pruneOldBundles(ctx, prefs);
+            }
+            call.resolve(buildStatus(ctx, prefs));
+        });
     }
 
     @PluginMethod
     public void getStatus(PluginCall call) {
         Context ctx = getContext();
-        SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        call.resolve(buildStatus(ctx, prefs));
+        call.resolve(buildStatus(ctx, prefs(ctx)));
     }
 
     @PluginMethod
     public void checkForUpdate(PluginCall call) {
-        String requestedOrigin = call.getString("origin", DEFAULT_ORIGIN);
-        String origin = sanitizeOrigin(requestedOrigin);
+        String origin = sanitizeOrigin(call.getString("origin", DEFAULT_ORIGIN));
         if (origin == null) {
             call.reject("Disallowed OTA origin");
             return;
@@ -222,8 +187,7 @@ public class OtaUpdaterPlugin extends Plugin {
         final Context ctx = getContext().getApplicationContext();
         EXECUTOR.execute(() -> {
             try {
-                JSObject result = performSync(ctx, origin);
-                call.resolve(result);
+                call.resolve(performSync(ctx, origin));
             } catch (Exception ex) {
                 Logger.warn(TAG, "OTA update check failed: " + ex.getMessage());
                 JSObject err = new JSObject();
@@ -237,133 +201,108 @@ public class OtaUpdaterPlugin extends Plugin {
     }
 
     private static JSObject performSync(Context ctx, String origin) throws Exception {
-        SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        String builtInVersion = readBuiltInVersion(ctx);
-        String activeVersion = prefs.getString(KEY_ACTIVE_VERSION, "");
-        String pendingVersion = prefs.getString(KEY_PENDING_VERSION, "");
-        String blockedVersion = prefs.getString(KEY_BLOCKED_VERSION, "");
+        SharedPreferences prefs = prefs(ctx);
+        JSONObject builtIn = readBuiltInManifest(ctx);
+        String builtInVersion = builtIn.optString("version", "");
+        String activeVersion = prefs.getString(OtaBootState.KEY_ACTIVE_VERSION, "");
+        String pendingVersion = prefs.getString(OtaBootState.KEY_PENDING_VERSION, "");
+        String blockedVersion = prefs.getString(OtaBootState.KEY_BLOCKED_VERSION, "");
         String currentVersion = !pendingVersion.isEmpty()
             ? pendingVersion
             : (!activeVersion.isEmpty() ? activeVersion : builtInVersion);
 
-        String manifestUrl = origin + "/mobile-manifest.json?t=" + System.currentTimeMillis();
-        byte[] manifestBytes = downloadBytes(manifestUrl, MAX_MANIFEST_BYTES);
-        JSONObject manifest = new JSONObject(new String(manifestBytes, StandardCharsets.UTF_8));
-
-        if (manifest.optInt("schema", -1) != 1) {
-            throw new IOException("Unsupported manifest schema");
+        long stamp = System.currentTimeMillis();
+        byte[] manifestBytes = downloadBytes(origin + "/mobile-manifest.json?t=" + stamp, MAX_MANIFEST_BYTES);
+        // Unsigned manifests are accepted only from a debug build's local development origin.
+        boolean requireSignature = !BuildConfig.DEBUG || DEFAULT_ORIGIN.equals(origin);
+        if (requireSignature) {
+            byte[] signature = downloadBytes(origin + "/mobile-manifest.sig?t=" + stamp, MAX_SIGNATURE_BYTES);
+            if (!OtaManifest.verifySignature(manifestBytes, signature, BuildConfig.OTA_PUBLIC_KEY)) {
+                throw new IOException("Manifest signature is invalid");
+            }
         }
-        int minNative = manifest.optInt("minNativeVersion", Integer.MAX_VALUE);
-        if (minNative < 1 || minNative > BuildConfig.VERSION_CODE) {
+        OtaManifest manifest = OtaManifest.parse(manifestBytes);
+
+        if (manifest.minNativeVersion > BuildConfig.VERSION_CODE) {
             JSObject skipped = new JSObject();
             skipped.put("status", "incompatible-native");
-            skipped.put("minNativeVersion", minNative);
+            skipped.put("minNativeVersion", manifest.minNativeVersion);
             skipped.put("nativeVersionCode", BuildConfig.VERSION_CODE);
             return skipped;
         }
-        String remoteVersion = manifest.optString("version", "");
-        if (!VERSION_RE.matcher(remoteVersion).matches()) {
-            throw new IOException("Invalid manifest version");
-        }
-        if (remoteVersion.equals(blockedVersion)) {
+        if (manifest.version.equals(blockedVersion)) {
             JSObject blocked = new JSObject();
             blocked.put("status", "blocked");
-            blocked.put("version", remoteVersion);
+            blocked.put("version", manifest.version);
             return blocked;
         }
-        if (remoteVersion.equals(currentVersion)) {
+        if (manifest.version.equals(currentVersion)) {
             JSObject upToDate = new JSObject();
             upToDate.put("status", "up-to-date");
             upToDate.put("version", currentVersion);
             return upToDate;
         }
-
-        JSONObject filesObj = manifest.optJSONObject("files");
-        if (filesObj == null || filesObj.length() == 0 || filesObj.length() > MAX_FILES) {
-            throw new IOException("Invalid manifest files table");
-        }
-        if (!filesObj.has("index.html") || !filesObj.has("platform.js")) {
-            throw new IOException("Manifest missing required entrypoints");
+        long floor = OtaBootState.issuedAtFloor(snapshot(prefs), builtIn.optLong("issuedAt", 0));
+        if (requireSignature && manifest.issuedAt < floor) {
+            JSObject stale = new JSObject();
+            stale.put("status", "stale");
+            stale.put("version", manifest.version);
+            return stale;
         }
 
         File root = otaRoot(ctx);
-        if (!root.exists() && !root.mkdirs()) {
-            throw new IOException("Could not create OTA root directory");
-        }
-        File stagingDir = new File(root, "staging-" + remoteVersion);
+        if (!root.exists() && !root.mkdirs()) throw new IOException("Could not create OTA root directory");
+        File stagingDir = new File(root, "staging-" + manifest.version);
         deleteRecursively(stagingDir);
-        if (!stagingDir.mkdirs()) {
-            throw new IOException("Could not create OTA staging directory");
-        }
+        if (!stagingDir.mkdirs()) throw new IOException("Could not create OTA staging directory");
 
         String stagingCanonical = stagingDir.getCanonicalPath();
-        String activePath = prefs.getString(KEY_ACTIVE_PATH, "");
-        String previousPath = prefs.getString(KEY_PREVIOUS_PATH, "");
-        long totalBytes = 0;
+        String activePath = prefs.getString(OtaBootState.KEY_ACTIVE_PATH, "");
+        String previousPath = prefs.getString(OtaBootState.KEY_PREVIOUS_PATH, "");
         int downloaded = 0;
         int reused = 0;
 
         try {
-            Iterator<String> keys = filesObj.keys();
-            while (keys.hasNext()) {
-                String relPath = keys.next();
-                if (!REL_PATH_RE.matcher(relPath).matches() || relPath.contains("..")) {
-                    throw new IOException("Invalid relative path: " + relPath);
-                }
-                JSONObject entry = filesObj.optJSONObject(relPath);
-                if (entry == null) throw new IOException("Malformed file entry: " + relPath);
-                String expectedSha = entry.optString("sha256", "");
-                long expectedSize = entry.optLong("size", -1);
-                if (!SHA256_RE.matcher(expectedSha).matches() || expectedSize < 0 || expectedSize > MAX_FILE_BYTES) {
-                    throw new IOException("Invalid hash or size for " + relPath);
-                }
-                totalBytes += expectedSize;
-                if (totalBytes > MAX_TOTAL_BYTES) {
-                    throw new IOException("Manifest exceeds total size budget");
-                }
-
-                File dest = new File(stagingDir, relPath);
+            for (OtaManifest.Entry entry : manifest.files) {
+                File dest = new File(stagingDir, entry.path);
                 File parent = dest.getParentFile();
                 if (parent != null && !parent.exists() && !parent.mkdirs()) {
-                    throw new IOException("Could not create parent dir for " + relPath);
+                    throw new IOException("Could not create parent dir for " + entry.path);
                 }
-                String destCanonical = dest.getCanonicalPath();
-                if (!destCanonical.startsWith(stagingCanonical + File.separator)) {
-                    throw new IOException("Path escapes staging root: " + relPath);
+                if (!dest.getCanonicalPath().startsWith(stagingCanonical + File.separator)) {
+                    throw new IOException("Path escapes staging root: " + entry.path);
                 }
-
-                if (tryReuseLocalFile(activePath, relPath, expectedSha, expectedSize, dest)
-                    || tryReuseLocalFile(previousPath, relPath, expectedSha, expectedSize, dest)
-                    || tryReuseApkAsset(ctx, relPath, expectedSha, expectedSize, dest)) {
+                if (tryReuseLocalFile(activePath, entry, dest)
+                    || tryReuseLocalFile(previousPath, entry, dest)
+                    || tryReuseApkAsset(ctx, entry, dest)) {
                     reused++;
                 } else {
-                    String fileUrl = origin + "/" + relPath + "?v=" + expectedSha.substring(0, 12);
-                    downloadAndVerify(fileUrl, dest, expectedSha, expectedSize);
+                    String fileUrl = origin + "/" + entry.path + "?v=" + entry.sha256.substring(0, 12);
+                    downloadAndVerify(fileUrl, dest, entry);
                     downloaded++;
                 }
             }
 
-            // Persist the manifest itself inside the staged bundle for diagnostics/inspection.
+            // Keep the verified manifest inside the bundle for diagnostics.
             try (FileOutputStream fos = new FileOutputStream(new File(stagingDir, "mobile-manifest.json"))) {
                 fos.write(manifestBytes);
             }
 
-            File finalDir = new File(root, "bundle-" + remoteVersion);
+            File finalDir = new File(root, "bundle-" + manifest.version);
             deleteRecursively(finalDir);
-            if (!stagingDir.renameTo(finalDir)) {
-                throw new IOException("Atomic bundle promotion rename failed");
-            }
+            if (!stagingDir.renameTo(finalDir)) throw new IOException("Atomic bundle promotion rename failed");
 
-            prefs.edit()
-                .putString(KEY_PENDING_VERSION, remoteVersion)
-                .putString(KEY_PENDING_PATH, finalDir.getAbsolutePath())
-                .commit();
+            Map<String, String> updates = new HashMap<>();
+            updates.put(OtaBootState.KEY_PENDING_VERSION, manifest.version);
+            updates.put(OtaBootState.KEY_PENDING_PATH, finalDir.getAbsolutePath());
+            if (requireSignature) updates.put(OtaBootState.KEY_HIGHEST_ISSUED_AT, String.valueOf(Math.max(floor, manifest.issuedAt)));
+            write(prefs, updates);
             pruneOldBundles(ctx, prefs);
 
-            Logger.info(TAG, "Staged silent OTA " + remoteVersion + " (downloaded=" + downloaded + ", reused=" + reused + ")");
+            Logger.info(TAG, "Staged silent OTA " + manifest.version + " (downloaded=" + downloaded + ", reused=" + reused + ")");
             JSObject staged = new JSObject();
             staged.put("status", "staged");
-            staged.put("version", remoteVersion);
+            staged.put("version", manifest.version);
             staged.put("downloaded", downloaded);
             staged.put("reused", reused);
             return staged;
@@ -373,30 +312,28 @@ public class OtaUpdaterPlugin extends Plugin {
         }
     }
 
-    private static boolean tryReuseLocalFile(String baseDir, String relPath, String expectedSha, long expectedSize, File dest) {
+    private static boolean tryReuseLocalFile(String baseDir, OtaManifest.Entry entry, File dest) {
         if (baseDir == null || baseDir.isEmpty()) return false;
-        File src = new File(baseDir, relPath);
-        if (!src.isFile() || src.length() != expectedSize) return false;
+        File src = new File(baseDir, entry.path);
+        if (!src.isFile() || src.length() != entry.size) return false;
         try {
-            String actual = copyAndHash(new FileInputStream(src), dest, expectedSize);
-            if (expectedSha.equals(actual)) return true;
+            if (entry.sha256.equals(copyAndHash(new FileInputStream(src), dest, entry.size))) return true;
         } catch (IOException ignored) {}
         //noinspection ResultOfMethodCallIgnored
         dest.delete();
         return false;
     }
 
-    private static boolean tryReuseApkAsset(Context ctx, String relPath, String expectedSha, long expectedSize, File dest) {
-        try (InputStream in = ctx.getAssets().open("public/" + relPath)) {
-            String actual = copyAndHash(in, dest, expectedSize);
-            if (expectedSha.equals(actual)) return true;
+    private static boolean tryReuseApkAsset(Context ctx, OtaManifest.Entry entry, File dest) {
+        try (InputStream in = ctx.getAssets().open("public/" + entry.path)) {
+            if (entry.sha256.equals(copyAndHash(in, dest, entry.size))) return true;
         } catch (IOException ignored) {}
         //noinspection ResultOfMethodCallIgnored
         dest.delete();
         return false;
     }
 
-    private static void downloadAndVerify(String urlStr, File dest, String expectedSha, long expectedSize) throws IOException {
+    private static void downloadAndVerify(String urlStr, File dest, OtaManifest.Entry entry) throws IOException {
         HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
         conn.setInstanceFollowRedirects(false);
         conn.setConnectTimeout(10_000);
@@ -405,8 +342,8 @@ public class OtaUpdaterPlugin extends Plugin {
         try {
             int code = conn.getResponseCode();
             if (code != 200) throw new IOException("HTTP " + code + " for " + urlStr);
-            String actual = copyAndHash(conn.getInputStream(), dest, expectedSize);
-            if (!expectedSha.equals(actual)) {
+            String actual = copyAndHash(conn.getInputStream(), dest, entry.size);
+            if (!entry.sha256.equals(actual)) {
                 //noinspection ResultOfMethodCallIgnored
                 dest.delete();
                 throw new IOException("SHA-256 mismatch for " + urlStr);
@@ -429,16 +366,12 @@ public class OtaUpdaterPlugin extends Plugin {
             int n;
             while ((n = input.read(buf)) != -1) {
                 written += n;
-                if (written > expectedSize) {
-                    throw new IOException("File exceeded expected size");
-                }
+                if (written > expectedSize) throw new IOException("File exceeded expected size");
                 md.update(buf, 0, n);
                 out.write(buf, 0, n);
             }
         }
-        if (written != expectedSize) {
-            throw new IOException("Size mismatch: expected " + expectedSize + ", got " + written);
-        }
+        if (written != expectedSize) throw new IOException("Size mismatch: expected " + expectedSize + ", got " + written);
         return toHex(md.digest());
     }
 
@@ -450,14 +383,14 @@ public class OtaUpdaterPlugin extends Plugin {
         conn.setRequestProperty("Cache-Control", "no-cache");
         try {
             int code = conn.getResponseCode();
-            if (code != 200) throw new IOException("HTTP " + code + " for manifest");
+            if (code != 200) throw new IOException("HTTP " + code + " for " + urlStr.replaceAll("\\?.*$", ""));
             try (InputStream in = conn.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
                 byte[] buf = new byte[8192];
                 int n;
                 int total = 0;
                 while ((n = in.read(buf)) != -1) {
                     total += n;
-                    if (total > maxBytes) throw new IOException("Manifest too large");
+                    if (total > maxBytes) throw new IOException("Response too large");
                     out.write(buf, 0, n);
                 }
                 return out.toByteArray();
@@ -481,30 +414,56 @@ public class OtaUpdaterPlugin extends Plugin {
         return null;
     }
 
-    private static String readBuiltInVersion(Context ctx) {
+    private static JSONObject readBuiltInManifest(Context ctx) {
         try (InputStream in = ctx.getAssets().open("public/mobile-manifest.json");
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buf = new byte[4096];
             int n;
             while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
-            JSONObject obj = new JSONObject(out.toString(StandardCharsets.UTF_8.name()));
-            return obj.optString("version", "");
+            return new JSONObject(out.toString(StandardCharsets.UTF_8.name()));
         } catch (Exception ignored) {
-            return "";
+            return new JSONObject();
         }
     }
 
     private static JSObject buildStatus(Context ctx, SharedPreferences prefs) {
-        String activeVersion = prefs.getString(KEY_ACTIVE_VERSION, "");
-        String builtInVersion = readBuiltInVersion(ctx);
+        String activeVersion = prefs.getString(OtaBootState.KEY_ACTIVE_VERSION, "");
+        String builtInVersion = readBuiltInManifest(ctx).optString("version", "");
         JSObject out = new JSObject();
         out.put("activeVersion", activeVersion.isEmpty() ? builtInVersion : activeVersion);
         out.put("builtInVersion", builtInVersion);
-        out.put("pendingVersion", prefs.getString(KEY_PENDING_VERSION, ""));
-        out.put("blockedVersion", prefs.getString(KEY_BLOCKED_VERSION, ""));
+        out.put("pendingVersion", prefs.getString(OtaBootState.KEY_PENDING_VERSION, ""));
+        out.put("blockedVersion", prefs.getString(OtaBootState.KEY_BLOCKED_VERSION, ""));
         out.put("isOta", !activeVersion.isEmpty());
         out.put("nativeVersionCode", BuildConfig.VERSION_CODE);
+        out.put("nativeAutoCheck", !BuildConfig.DEBUG);
         return out;
+    }
+
+    private static SharedPreferences prefs(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private static Map<String, String> snapshot(SharedPreferences prefs) {
+        Map<String, String> out = new HashMap<>();
+        for (Map.Entry<String, ?> entry : prefs.getAll().entrySet()) {
+            if (entry.getValue() instanceof String) out.put(entry.getKey(), (String) entry.getValue());
+        }
+        return out;
+    }
+
+    private static void write(SharedPreferences prefs, Map<String, String> updates) {
+        SharedPreferences.Editor editor = prefs.edit();
+        for (Map.Entry<String, String> entry : updates.entrySet()) editor.putString(entry.getKey(), entry.getValue());
+        editor.commit();
+    }
+
+    private static void apply(Context ctx, SharedPreferences prefs, OtaBootState.Decision decision) {
+        write(prefs, decision.updates);
+        ctx.getSharedPreferences(com.getcapacitor.plugin.WebView.WEBVIEW_PREFS_NAME, Activity.MODE_PRIVATE)
+            .edit()
+            .putString(com.getcapacitor.plugin.WebView.CAP_SERVER_PATH, decision.serverPath)
+            .commit();
     }
 
     private static String binaryStamp(Context ctx) {
@@ -526,22 +485,13 @@ public class OtaUpdaterPlugin extends Plugin {
         return dir.isDirectory() && new File(dir, "index.html").isFile() && new File(dir, "platform.js").isFile();
     }
 
+    /** Must run on {@link #EXECUTOR}: it deletes every directory not referenced by the preferences. */
     private static void pruneOldBundles(Context ctx, SharedPreferences prefs) {
-        File root = otaRoot(ctx);
-        File[] children = root.listFiles();
+        File[] children = otaRoot(ctx).listFiles();
         if (children == null) return;
-        Set<String> keep = new HashSet<>();
-        for (String p : new String[] {
-            prefs.getString(KEY_ACTIVE_PATH, ""),
-            prefs.getString(KEY_PREVIOUS_PATH, ""),
-            prefs.getString(KEY_PENDING_PATH, "")
-        }) {
-            if (!p.isEmpty()) keep.add(new File(p).getName());
-        }
+        Set<String> keep = OtaBootState.keepDirectoryNames(snapshot(prefs));
         for (File child : children) {
-            if (!keep.contains(child.getName())) {
-                deleteRecursively(child);
-            }
+            if (!keep.contains(child.getName())) deleteRecursively(child);
         }
     }
 
@@ -549,9 +499,7 @@ public class OtaUpdaterPlugin extends Plugin {
         if (f == null || !f.exists()) return;
         if (f.isDirectory()) {
             File[] items = f.listFiles();
-            if (items != null) {
-                for (File item : items) deleteRecursively(item);
-            }
+            if (items != null) for (File item : items) deleteRecursively(item);
         }
         //noinspection ResultOfMethodCallIgnored
         f.delete();
