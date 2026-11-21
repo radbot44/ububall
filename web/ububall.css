@@ -883,12 +883,42 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
 .knob svg:focus-visible { outline: .125rem solid var(--primary); outline-offset: .125rem; border-radius: 50%; }
 .knob-track { fill: none; stroke: var(--background); stroke-width: 8; }
 .knob-value { fill: none; stroke: var(--primary); stroke-width: 8; stroke-linecap: round; }
+.knob-arc-arrow { fill: none; stroke: var(--primary); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
 .knob-face { fill: var(--elevated); stroke: var(--border); stroke-width: 1.5; }
 .knob-needle { stroke: var(--text); stroke-width: 6; stroke-linecap: round; }
-.knob b { font-size: .75rem; font-variant-numeric: tabular-nums; color: var(--text); }
-.knob small { font-size: .625rem; color: var(--muted); }
+.knob-arrow { fill: none; stroke: var(--text); stroke-width: 5.5; stroke-linecap: round; stroke-linejoin: round; }
+.knob small { font-family: var(--font-display); font-weight: 400; font-synthesis: none; font-size: .625rem; color: var(--muted); }
 .knob.disabled { opacity: .45; }
 .knob.disabled svg { cursor: default; }
+.knob-popover {
+  padding: .25rem; border-radius: 999px; overflow: visible;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+}
+.knob-popover:popover-open { display: inline-flex; align-items: center; gap: .125rem; }
+.knob-popover .knob-step {
+  display: grid; place-items: center; width: 2rem; height: 2rem; min-height: 0; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--text); box-shadow: none;
+  touch-action: none;
+}
+.knob-popover .knob-step:hover { background: var(--hover); }
+.knob-popover .knob-step:active { background: color-mix(in srgb, var(--primary) 24%, transparent); color: var(--primary); }
+.knob-popover .knob-step .icon { width: 1rem; height: 1rem; }
+.knob-popover .knob-readout {
+  min-width: 3.125rem; height: 2rem; min-height: 0; padding: 0 .375rem;
+  border: 0; border-radius: 999px; background: transparent; color: var(--text); box-shadow: none;
+  font-size: .875rem; font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.knob-popover .knob-readout:not(:disabled):hover { background: var(--hover); }
+.knob-popover .knob-readout:not(:disabled):active { background: color-mix(in srgb, var(--primary) 22%, transparent); }
+.knob-popover .knob-readout:disabled { opacity: 1; cursor: default; }
+.knob-drag-pill {
+  position: fixed; z-index: 60; pointer-events: none;
+  padding: .25rem .625rem; border-radius: 999px;
+  border: .0625rem solid var(--border); background: var(--elevated); color: var(--text);
+  box-shadow: var(--panel-shadow);
+  font-size: .875rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2;
+}
+.knob-drag-pill.fine { border-color: var(--primary); color: var(--primary); }
 
 
 /* Stadium */
@@ -2217,7 +2247,6 @@ button.stats-event-time { padding: 0; min-height: 0; border: 0; background: none
   .super-name-badge { font-size: .875rem; }
   .super-pct { font-size: .8125rem; }
 
-  .knob b { font-size: .875rem; }
   .knob small { font-size: .8125rem; }
 
   .setting-value { font-size: .8125rem; }

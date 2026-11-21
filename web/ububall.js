@@ -802,8 +802,120 @@
     wrap.append(topRow, meterTrack);
     return wrap;
   }
-  // Up and right increase each knob. Angle wraps and its needle follows the launch direction.
+  // Up and right increase each knob. Angle wraps and its arrow follows the launch direction.
   const knobs = [];
+  function formatKnobValue(kind, value) {
+    const shown = Math.round(value) % (kind === 'angle' ? 360 : Infinity);
+    return kind === 'angle' ? `${shown}°` : kind === 'spin' && shown > 0 ? `+${shown}` : kind === 'power' ? `${shown}%` : `${shown}`;
+  }
+  function placeKnobOverlay(el, anchor) {
+    const a = anchor.getBoundingClientRect(), scale = gameUi.scale(), gap = 8 * scale, margin = 8 * scale;
+    el.style.inset = 'auto';
+    el.style.left = el.style.top = '0px';
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const left = Math.max(margin, Math.min(a.left + a.width / 2 - w / 2, innerWidth - margin - w));
+    let top = a.top - gap - h;
+    if (top < margin && a.bottom + gap + h <= innerHeight - margin) top = a.bottom + gap;
+    el.style.left = left + 'px';
+    el.style.top = Math.max(margin, Math.min(top, innerHeight - margin - h)) + 'px';
+  }
+  const knobDragPill = document.createElement('div');
+  knobDragPill.className = 'knob-drag-pill';
+  knobDragPill.hidden = true;
+  document.body.append(knobDragPill);
+  function showKnobDragPill(knob, value, fine) {
+    knobDragPill.textContent = formatKnobValue(knob.kind, value);
+    knobDragPill.classList.toggle('fine', Boolean(fine));
+    knobDragPill.hidden = false;
+    placeKnobOverlay(knobDragPill, knob.svg);
+  }
+  function hideKnobDragPill() {
+    knobDragPill.hidden = true;
+    knobDragPill.classList.remove('fine');
+  }
+  const knobPopover = document.createElement('div');
+  knobPopover.className = 'knob-popover game-popover';
+  knobPopover.setAttribute('popover', 'auto');
+  knobPopover.innerHTML =
+    '<button type="button" class="knob-step" data-dir="-1" aria-label="Decrease"><svg class="icon" aria-hidden="true"><use href="#icon-minus"/></svg></button>' +
+    '<button type="button" class="knob-readout"></button>' +
+    '<button type="button" class="knob-step" data-dir="1" aria-label="Increase"><svg class="icon" aria-hidden="true"><use href="#icon-plus"/></svg></button>';
+  document.body.append(knobPopover);
+  const knobPopoverReadout = knobPopover.querySelector('.knob-readout');
+  let activeKnobPopover = null, knobRepeatTimer = 0;
+  function stopKnobRepeat() {
+    if (knobRepeatTimer) { clearTimeout(knobRepeatTimer); knobRepeatTimer = 0; }
+  }
+  function closeKnobPopover() {
+    stopKnobRepeat();
+    activeKnobPopover = null;
+    if (knobPopover.matches?.(':popover-open')) knobPopover.hidePopover?.();
+  }
+  function syncKnobPopover() {
+    if (!activeKnobPopover || !knobPopover.matches?.(':popover-open')) return;
+    if (!knobEditable(selected)) { closeKnobPopover(); return; }
+    const kind = activeKnobPopover.kind;
+    const text = formatKnobValue(kind, knobValue(kind, selected));
+    const resettable = kind === 'power' || kind === 'spin';
+    knobPopoverReadout.textContent = text;
+    knobPopoverReadout.disabled = !resettable;
+    knobPopoverReadout.title = resettable ? `Tap to reset ${kind} to 0` : '';
+    knobPopoverReadout.setAttribute('aria-label', resettable ? `${text}. Reset ${kind} to 0` : text);
+    placeKnobOverlay(knobPopover, activeKnobPopover.svg);
+  }
+  function openKnobPopover(knob) {
+    if (!knobEditable(selected)) return;
+    stopKnobRepeat();
+    activeKnobPopover = knob;
+    if (!knobPopover.matches?.(':popover-open')) knobPopover.showPopover?.();
+    syncKnobPopover();
+  }
+  function stepActiveKnob(dir, shiftKey) {
+    if (!activeKnobPopover || !knobEditable(selected)) { stopKnobRepeat(); return; }
+    const kind = activeKnobPopover.kind;
+    setKnob(kind, selected, knobValue(kind, selected) + dir * (shiftKey ? 10 : 1));
+    scheduleSaveActiveMatch();
+  }
+  for (const btn of knobPopover.querySelectorAll('.knob-step')) {
+    const dir = Number(btn.dataset.dir);
+    btn.onpointerdown = e => {
+      if (e.button !== 0 || !activeKnobPopover || !knobEditable(selected)) return;
+      e.preventDefault();
+      btn.setPointerCapture?.(e.pointerId);
+      const shift = e.shiftKey;
+      stepActiveKnob(dir, shift);
+      stopKnobRepeat();
+      let count = 0;
+      const tick = () => {
+        stepActiveKnob(dir, shift);
+        if (!activeKnobPopover || !knobEditable(selected)) return;
+        count++;
+        const delay = count < 5 ? 140 : count < 11 ? 75 : 38;
+        knobRepeatTimer = setTimeout(tick, delay);
+      };
+      knobRepeatTimer = setTimeout(tick, 380);
+    };
+    btn.onpointerup = btn.onpointercancel = btn.onlostpointercapture = stopKnobRepeat;
+    btn.onclick = e => { if (e.detail === 0) stepActiveKnob(dir, e.shiftKey); };
+  }
+  knobPopoverReadout.onclick = () => {
+    if (!activeKnobPopover || !knobEditable(selected)) return;
+    const kind = activeKnobPopover.kind;
+    if (kind !== 'power' && kind !== 'spin') return;
+    setKnob(kind, selected, 0);
+    if (phase === 'plan') saveActiveMatch();
+  };
+  knobPopover.addEventListener('toggle', e => {
+    if (e.newState === 'closed') { stopKnobRepeat(); activeKnobPopover = null; }
+  });
+  addEventListener('resize', () => {
+    if (activeKnobPopover && knobPopover.matches?.(':popover-open')) placeKnobOverlay(knobPopover, activeKnobPopover.svg);
+  });
+  addEventListener('scroll', e => {
+    if (!activeKnobPopover || !knobPopover.matches?.(':popover-open')) return;
+    if (e.target === knobPopover || knobPopover.contains?.(e.target)) return;
+    placeKnobOverlay(knobPopover, activeKnobPopover.svg);
+  }, true);
   function wheelKnob(e, kind, i) {
     if (!e.deltaY || !knobEditable(i)) return;
     e.preventDefault();
@@ -811,28 +923,91 @@
     scheduleSaveActiveMatch();
   }
   function makeKnob(kind) {
-    const wrap = document.createElement('div'); wrap.className = 'knob';
-    wrap.innerHTML = '<svg viewBox="0 0 100 100" role="slider" tabindex="0"><circle class="knob-track" cx="50" cy="50" r="40"/>' +
-      '<path class="knob-value"/><circle class="knob-face" cx="50" cy="50" r="29"/><line class="knob-needle" x1="50" y1="50" x2="50" y2="26"/></svg>' +
-      `<b></b><small>${kind[0].toUpperCase() + kind.slice(1)}</small>`;
+    const wrap = document.createElement('div'); wrap.className = `knob knob-${kind}`;
+    const label = kind[0].toUpperCase() + kind.slice(1);
+    wrap.innerHTML = (kind === 'angle'
+      ? '<svg viewBox="0 0 100 100" role="slider" tabindex="0"><circle class="knob-track" cx="50" cy="50" r="40"/>' +
+        '<circle class="knob-face" cx="50" cy="50" r="29"/>' +
+        '<path class="knob-arrow" d="M50 71 L50 28 M39 39 L50 28 L61 39"/></svg>'
+      : '<svg viewBox="0 0 100 100" role="slider" tabindex="0"><circle class="knob-track" cx="50" cy="50" r="40"/>' +
+        '<path class="knob-value"/>' +
+        (kind === 'spin' ? '<path class="knob-arc-arrow"/>' : '') +
+        '<circle class="knob-face" cx="50" cy="50" r="29"/>' +
+        '<line class="knob-needle" x1="50" y1="50" x2="50" y2="26"/></svg>') +
+      `<small>${label}</small>`;
     const svg = wrap.querySelector('svg');
     const [min, max] = KNOB_RANGE[kind];
     svg.setAttribute('aria-valuemin', min); svg.setAttribute('aria-valuemax', max);
+    const knob = { kind, wrap, svg };
     let grab = null;
+    const onFineTouchDown = ev => {
+      if (!grab || ev.pointerType !== 'touch' || ev.pointerId === grab.id) return;
+      grab.finePointers.add(ev.pointerId);
+      if (!grab.fine) {
+        grab.fine = true;
+        grab.x = grab.lastX; grab.y = grab.lastY;
+        grab.value = knobValue(kind, grab.index);
+        if (grab.dragged) showKnobDragPill(knob, grab.value, true);
+      }
+    };
+    const onFineTouchEnd = ev => {
+      if (!grab || !grab.finePointers.delete(ev.pointerId)) return;
+      if (grab.fine && grab.finePointers.size === 0) {
+        grab.fine = false;
+        grab.x = grab.lastX; grab.y = grab.lastY;
+        grab.value = knobValue(kind, grab.index);
+        if (grab.dragged) showKnobDragPill(knob, grab.value, false);
+      }
+    };
+    const detachFineTouch = () => {
+      removeEventListener('pointerdown', onFineTouchDown, true);
+      removeEventListener('pointerup', onFineTouchEnd, true);
+      removeEventListener('pointercancel', onFineTouchEnd, true);
+    };
     svg.onpointerdown = e => {
       if (grab || e.button !== 0 || !knobEditable(selected)) return;
+      const wasOpen = activeKnobPopover === knob && Boolean(knobPopover.matches?.(':popover-open'));
       e.preventDefault(); svg.setPointerCapture(e.pointerId);
-      grab = { id: e.pointerId, index: selected, x: e.clientX, y: e.clientY, value: knobValue(kind, selected) };
+      grab = {
+        id: e.pointerId, pointerType: e.pointerType, index: selected,
+        startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY,
+        value: knobValue(kind, selected), dragged: false, fine: false, wasOpen, cancelled: false, finePointers: new Set()
+      };
+      if (e.pointerType === 'touch') {
+        addEventListener('pointerdown', onFineTouchDown, true);
+        addEventListener('pointerup', onFineTouchEnd, true);
+        addEventListener('pointercancel', onFineTouchEnd, true);
+      }
     };
     svg.onpointermove = e => {
       if (grab?.id !== e.pointerId) return;
+      grab.lastX = e.clientX; grab.lastY = e.clientY;
+      if (!grab.dragged) {
+        if (Math.hypot(e.clientX - grab.startX, e.clientY - grab.startY) < 6) return;
+        grab.dragged = true;
+        grab.x = e.clientX; grab.y = e.clientY;
+        grab.value = knobValue(kind, grab.index);
+        closeKnobPopover();
+      }
       const distance = (e.clientX - grab.x) - (e.clientY - grab.y);
-      setKnob(kind, grab.index, grab.value + distance / (KNOB_SWEEP * gameUi.scale()) * (max - min) * (e.shiftKey ? .25 : 1), typeof requestAnimationFrame === 'function');
+      const sensitivity = (e.shiftKey ? .25 : 1) * (grab.fine ? .5 : 1);
+      setKnob(kind, grab.index, grab.value + distance / (KNOB_SWEEP * gameUi.scale()) * (max - min) * sensitivity, typeof requestAnimationFrame === 'function');
+      showKnobDragPill(knob, knobValue(kind, grab.index), grab.fine);
     };
+    svg.onpointercancel = e => { if (grab?.id === e.pointerId) grab.cancelled = true; };
     svg.onlostpointercapture = () => {
+      const finished = grab;
       grab = null;
-      if (dragDirty) { dragDirty = false; sync(); draw(); }
-      if (phase === 'plan') saveActiveMatch();
+      detachFineTouch();
+      hideKnobDragPill();
+      if (!finished) return;
+      if (finished.dragged) {
+        if (dragDirty) { dragDirty = false; sync(); draw(); }
+        if (phase === 'plan') saveActiveMatch();
+      } else if (!finished.cancelled) {
+        if (finished.wasOpen) closeKnobPopover();
+        else openKnobPopover(knob);
+      }
     };
     svg.addEventListener('wheel', e => wheelKnob(e, kind, selected), { passive: false });
     svg.onkeydown = e => {
@@ -841,8 +1016,7 @@
       e.preventDefault(); setKnob(kind, selected, knobValue(kind, selected) + step * (e.shiftKey ? 10 : 1), Boolean(e.repeat && typeof requestAnimationFrame === 'function'));
       if (phase === 'plan') { if (e.repeat) scheduleSaveActiveMatch(); else saveActiveMatch(); }
     };
-    if (kind === 'spin') svg.ondblclick = () => { setKnob(kind, selected, 0); if (phase === 'plan') saveActiveMatch(); };
-    knobs.push({ kind, wrap, svg });
+    knobs.push(knob);
     return wrap;
   }
   function knobArc(from, to) {
@@ -856,13 +1030,28 @@
       const i = selected, b = fieldView.bodies[i];
       if (!b || !plans[i]) continue;
       const value = knobValue(knob.kind, i);
-      // Power sweeps 270° from lower left; spin runs either way from the top; angle is all needle.
+      // Power sweeps 270° from lower left; spin runs either way from the top with an arrowhead; angle is an arrow.
       const needle = knob.kind === 'angle' ? value : knob.kind === 'power' ? -135 + 2.7 * value : 1.35 * value;
-      const [from, to] = knob.kind === 'power' ? [-135, needle] : knob.kind === 'spin' ? [Math.min(0, needle), Math.max(0, needle)] : [0, 0];
-      knob.wrap.querySelector('.knob-value').setAttribute('d', to - from > .5 ? knobArc(from, to) : '');
-      knob.wrap.querySelector('.knob-needle').setAttribute('transform', `rotate(${needle} 50 50)`);
+      if (knob.kind === 'angle') {
+        knob.wrap.querySelector('.knob-arrow').setAttribute('transform', `rotate(${needle} 50 50)`);
+      } else if (knob.kind === 'power') {
+        knob.wrap.querySelector('.knob-value').setAttribute('d', needle + 135 > .5 ? knobArc(-135, needle) : '');
+        knob.wrap.querySelector('.knob-needle').setAttribute('transform', `rotate(${needle} 50 50)`);
+      } else {
+        knob.wrap.querySelector('.knob-needle').setAttribute('transform', `rotate(${needle} 50 50)`);
+        const arrow = knob.wrap.querySelector('.knob-arc-arrow');
+        if (Math.abs(needle) > .5) {
+          const dir = Math.sign(needle);
+          const [from, to] = [Math.min(0, needle), Math.max(0, needle)];
+          knob.wrap.querySelector('.knob-value').setAttribute('d', to - from > .5 ? knobArc(from, to) : '');
+          arrow.setAttribute('d', dir > 0 ? 'M43 3.5 L51 10 L43 16.5' : 'M57 3.5 L49 10 L57 16.5');
+          arrow.setAttribute('transform', `rotate(${needle} 50 50)`);
+        } else {
+          knob.wrap.querySelector('.knob-value').setAttribute('d', '');
+          arrow.setAttribute('d', '');
+        }
+      }
       const shown = Math.round(value) % (knob.kind === 'angle' ? 360 : Infinity);
-      knob.wrap.querySelector('b').textContent = knob.kind === 'angle' ? `${shown}°` : knob.kind === 'spin' && shown > 0 ? `+${shown}` : knob.kind === 'power' ? `${shown}%` : `${shown}`;
       const editable = knobEditable(i);
       knob.wrap.classList.toggle('disabled', !editable);
       knob.svg.setAttribute('aria-disabled', String(!editable));
@@ -871,6 +1060,7 @@
       knob.svg.setAttribute('aria-valuetext', knob.kind === 'angle' ? `${shown} degrees` : knob.kind === 'power' ? `${shown}% power` :
         shown === 0 ? 'No spin' : `${Math.abs(shown)}% ${shown < 0 ? 'counterclockwise' : 'clockwise'}`);
     }
+    syncKnobPopover();
   }
   function sync() {
     const _tSync = bench?.rec ? performance.now() : 0;
