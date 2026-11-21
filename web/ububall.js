@@ -123,7 +123,7 @@
     tab.classList.add('show');
     bugTabTimer = setTimeout(() => { tab.classList.remove('show'); bugTabTimer = setTimeout(nextBugTab, 300); }, 2600);
   }
-  let arrowGrab = null, dragStart = null, dragStartClient = null, dragClient = null, dragPointerType = '', dragMoved = false, dragMaxTravel = 0, dragLiftPx = 0;
+  let arrowGrab = null, dragStart = null, dragStartClient = null, dragClient = null, dragPointerType = '', dragMoved = false, dragMaxTravel = 0, dragLiftPx = 0, spinDrag = null;
   let pullBehind = false;
   try { pullBehind = localStorage.getItem('ububall-aim-style') === 'pull'; } catch {}
   const firstTurnKey = 'ububall-first-turn-guide';
@@ -476,6 +476,7 @@
     get dragMoved() { return dragMoved; }, set dragMoved(v) { dragMoved = v; },
     get dragMaxTravel() { return dragMaxTravel; }, set dragMaxTravel(v) { dragMaxTravel = v; },
     get dragLiftPx() { return dragLiftPx; }, set dragLiftPx(v) { dragLiftPx = v; },
+    get spinDrag() { return spinDrag; }, set spinDrag(v) { spinDrag = v; },
     get dragMode() { return dragMode; }, set dragMode(v) { dragMode = v; },
     get arrowGrab() { return arrowGrab; }, set arrowGrab(v) { arrowGrab = v; },
     get returnShot() { return returnShot; }, set returnShot(v) { returnShot = v; },
@@ -874,7 +875,7 @@
   function sync() {
     const _tSync = bench?.rec ? performance.now() : 0;
     updateFirstTurnGuide();
-    if (drag === null) updateAimLoupe();
+    if (drag === null) { spinDrag = null; updateAimLoupe(); }
     updateClock();
     const planning = phase === 'plan';
     const isGoal = phase === 'goal';

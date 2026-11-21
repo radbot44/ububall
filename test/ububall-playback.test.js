@@ -1821,3 +1821,106 @@ test('touch aim aid: Above finger ("offset", default) floats arrowhead above fin
   mouseEnv.rinkCanvas.onpointerdown({ pointerId: 4, pointerType: 'mouse', button: 0, clientX: 190, clientY: 510 });
   assert.equal(mouseEnv.state.dragLiftPx, 0, 'mouse drags never apply upward finger offset');
 });
+
+test('two-finger spin: second finger left/right drag sets spin across all touch aim modes and handles independent finger lifts cleanly', () => {
+  const { createStageController, computeSecondFingerSpin } = ububallPlayback;
+
+  // Pure helper: 85px per 100% spin (170px total -100%..+100%), relative startSpin, soft zero-snap
+  assert.equal(computeSecondFingerSpin({ startSpin: 0, startX: 100, clientX: 185, spanPx: 85 }), 1);
+  assert.equal(computeSecondFingerSpin({ startSpin: 0, startX: 100, clientX: 15, spanPx: 85 }), -1);
+  assert.equal(computeSecondFingerSpin({ startSpin: 0.5, startX: 200, clientX: 115, spanPx: 85 }), -0.5);
+  assert.equal(computeSecondFingerSpin({ startSpin: 0.5, startX: 200, clientX: 157, spanPx: 85, zeroSnap: 0.03 }), 0);
+  assert.equal(computeSecondFingerSpin({ startSpin: 0, startX: 100, clientX: 300, spanPx: 85 }), 1);
+  assert.equal(computeSecondFingerSpin({ startSpin: 0, startX: 100, clientX: -100, spanPx: 85 }), -1);
+
+  function makeMultiTouchEnv({ pullBehind = false, touchAim = 'offset' } = {}) {
+    const stageListeners = new Map();
+    const stageArea = {
+      addEventListener(type, fn) {
+        if (!stageListeners.has(type)) stageListeners.set(type, []);
+        stageListeners.get(type).push(fn);
+      },
+      emit(type, evt) { for (const fn of stageListeners.get(type) || []) fn(evt); },
+      setPointerCapture() {}, releasePointerCapture() {}
+    };
+    const rinkCanvas = {
+      width: 1200, height: 720, _webglComposite: true, style: {},
+      getBoundingClientRect: () => ({ left: 10, top: 60, right: 370, bottom: 660, width: 360, height: 600 }),
+      setPointerCapture() {}, releasePointerCapture() {}, addEventListener() {}
+    };
+    const bodies = [
+      { x: 250, y: 300, radius: 26, reach: 26, impulse: 1, stunned: false, carded: false, rotation: 0 },
+      { x: 350, y: 180, radius: 26, reach: 26, impulse: 1, stunned: false, carded: false, rotation: 0 },
+      { x: 350, y: 420, radius: 26, reach: 26, impulse: 1, stunned: false, carded: false, rotation: 0 }
+    ];
+    const plans = bodies.map(() => ({ angle: 0, power: 0, spin: 0, guard: false }));
+    let guardToggles = 0;
+    const state = {
+      P, ububallMatch,
+      shot: 'match', phase: 'plan', selected: 0,
+      drag: null, dragMode: null, dragStart: null, dragStartClient: null,
+      dragClient: null, dragPointerType: '', dragMoved: false, dragMaxTravel: 0, dragLiftPx: 0, spinDrag: null, dragDirty: false,
+      arrowGrab: null, tapGuards: false, pullBehind, touchAim, cameraMove: null, foulInfo: null,
+      fieldView: { canvas: rinkCanvas, portrait: true, bodies, field: null },
+      bodies, plans, skaters: [],
+      gameUi: { scale: () => 1 },
+      impulseGeometry: (b, pl) => ({ ringR: 28, scale: 110, distance: 28 + 110 * pl.power, x: b.x + Math.cos(pl.angle) * (28 + 110 * pl.power), y: b.y + Math.sin(pl.angle) * (28 + 110 * pl.power), visible: pl.power > 0 }),
+      warningAt: () => null,
+      toggleGuard() { guardToggles++; },
+      sync() {}, draw() {}
+    };
+    const ctrl = createStageController({
+      state,
+      stageArea,
+      portraitScreen: { matches: true },
+      wideScreen: { matches: false },
+      window: { innerWidth: 390, innerHeight: 844, devicePixelRatio: 2 },
+      document: {
+        documentElement: { clientWidth: 390, clientHeight: 844 },
+        body: { dataset: { shot: 'match' } },
+        getElementById: () => null,
+        querySelector: () => null
+      }
+    });
+    return { state, ctrl, rinkCanvas, stageArea, getGuardToggles: () => guardToggles };
+  }
+
+  // 1. Works in Drag arrow mode (Above finger) and allows lifting finger 2 while finger 1 keeps aiming
+  const env = makeMultiTouchEnv({ pullBehind: false, touchAim: 'offset' });
+  env.rinkCanvas.onpointerdown({ pointerId: 1, pointerType: 'touch', button: 0, clientX: 190, clientY: 510 });
+  env.rinkCanvas.onpointermove({ pointerId: 1, pointerType: 'touch', clientX: 230, clientY: 510 });
+  // Finger 2 lands on rink and drags 42.5px right -> +0.5 spin
+  env.rinkCanvas.onpointerdown({ pointerId: 2, pointerType: 'touch', button: 0, clientX: 100, clientY: 300 });
+  assert.ok(env.state.spinDrag && env.state.spinDrag.id === 2, 'second touch starts spinDrag');
+  env.rinkCanvas.onpointermove({ pointerId: 2, pointerType: 'touch', clientX: 142.5, clientY: 305 });
+  assert.ok(Math.abs(env.state.plans[0].spin - 0.5) < 1e-6, 'dragging right 42.5px sets +50% spin');
+  assert.equal(env.state.dragDirty, true);
+  // Lift finger 2: spin persists and finger 1 continues aiming
+  env.rinkCanvas.onpointerup({ type: 'pointerup', pointerId: 2, pointerType: 'touch', clientX: 142.5, clientY: 305 });
+  assert.equal(env.state.spinDrag, null);
+  assert.equal(env.state.drag, 1, 'finger 1 aim drag stays active after finger 2 lifts');
+  // Put finger 2 down again on the stage gutter (outside rink canvas) and drag 85px left -> -0.5 spin
+  const gutterTarget = { closest: () => null };
+  env.stageArea.emit('pointerdown', { pointerId: 3, pointerType: 'touch', button: 0, clientX: 300, clientY: 200, target: gutterTarget });
+  assert.ok(env.state.spinDrag && env.state.spinDrag.id === 3, 'second touch on stage gutter starts spinDrag');
+  env.stageArea.emit('pointermove', { pointerId: 3, pointerType: 'touch', clientX: 215, clientY: 200, target: gutterTarget });
+  assert.ok(Math.abs(env.state.plans[0].spin - (-0.5)) < 1e-6, 'second gesture adjusts relatively from previous spin');
+  // Lift finger 1 first while finger 2 is still down: both drags end cleanly
+  env.rinkCanvas.onpointerup({ type: 'pointerup', pointerId: 1, pointerType: 'touch', clientX: 230, clientY: 510 });
+  assert.equal(env.state.drag, null);
+  assert.equal(env.state.spinDrag, null, 'lifting finger 1 also ends spinDrag');
+  assert.equal(env.getGuardToggles(), 0, 'engaging spin drag never triggers accidental guard toggle');
+
+  // 2. Also works in Pull back mode, and ignores interactive buttons in stageArea
+  const pullEnv = makeMultiTouchEnv({ pullBehind: true, touchAim: 'off' });
+  pullEnv.rinkCanvas.onpointerdown({ pointerId: 10, pointerType: 'touch', button: 0, clientX: 190, clientY: 510 });
+  // Touching a button inside stageArea does NOT hijack into spinDrag
+  pullEnv.stageArea.emit('pointerdown', { pointerId: 11, pointerType: 'touch', button: 0, clientX: 50, clientY: 50, target: { closest: () => ({}) } });
+  assert.equal(pullEnv.state.spinDrag, null, 'buttons inside stageArea are not hijacked for spin');
+  // Touching rink with finger 2 in Pull back mode DOES set spin and prevents tap-guard if finger 1 never moved
+  pullEnv.rinkCanvas.onpointerdown({ pointerId: 12, pointerType: 'touch', button: 0, clientX: 200, clientY: 400 });
+  pullEnv.rinkCanvas.onpointermove({ pointerId: 12, pointerType: 'touch', clientX: 115, clientY: 400 });
+  assert.equal(pullEnv.state.plans[0].spin, -1, 'Pull back mode supports two-finger spin');
+  pullEnv.rinkCanvas.onpointerup({ type: 'pointerup', pointerId: 10, pointerType: 'touch', clientX: 190, clientY: 510 });
+  assert.equal(pullEnv.getGuardToggles(), 0, 'using finger 2 prevents tap-to-guard on finger 1 release');
+});

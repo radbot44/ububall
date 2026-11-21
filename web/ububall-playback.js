@@ -1297,6 +1297,13 @@
     return { clientX, clientY: clientY - lift, lift };
   }
 
+  function computeSecondFingerSpin({ startSpin = 0, startX = 0, clientX = 0, spanPx = 85, zeroSnap = 0.03 } = {}) {
+    const span = Math.max(1, Number(spanPx) || 85);
+    const raw = Math.max(-1, Math.min(1, (Number(startSpin) || 0) + (clientX - startX) / span));
+    if (zeroSnap > 0 && Math.abs(raw) <= zeroSnap) return 0;
+    return raw;
+  }
+
   function createBannerController(deps = {}) {
     const { $, getSetTimeout, getClearTimeout } = makeLookup(deps);
     let bannerTimer = 0, bannerGone = null;
@@ -3486,7 +3493,54 @@
       ctx.restore();
     }
 
+    const TOUCH_SPIN_SPAN_PX = 85;
+    function endSpinDrag(event) {
+      if (!state.spinDrag) return;
+      if (event && event.pointerId !== undefined && event.pointerId !== state.spinDrag.id) return;
+      const prev = state.spinDrag;
+      state.spinDrag = null;
+      try { prev.target?.releasePointerCapture?.(prev.id); } catch {}
+    }
+
+    function startSpinDrag(event, captureEl) {
+      if (state.drag === null || state.spinDrag) return;
+      if (event.pointerType !== 'touch' || state.dragPointerType !== 'touch') return;
+      if (event.pointerId === state.drag) return;
+      if (!playableShot() || state.phase !== 'plan') return;
+      const plan = state.plans?.[state.selected];
+      if (!plan || !knobEditable(state.selected)) return;
+      state.spinDrag = {
+        id: event.pointerId,
+        startX: event.clientX,
+        startSpin: plan.spin || 0,
+        target: captureEl || null
+      };
+      state.dragMoved = true;
+      try { captureEl?.setPointerCapture?.(event.pointerId); } catch {}
+    }
+
+    function moveSpinDrag(event) {
+      if (!state.spinDrag || state.spinDrag.id !== event.pointerId) return;
+      if (state.drag === null || !playableShot() || state.phase !== 'plan') {
+        endSpinDrag(event);
+        return;
+      }
+      const plan = state.plans?.[state.selected];
+      if (!plan) return;
+      const scale = getGameUi()?.scale?.() || 1;
+      plan.spin = computeSecondFingerSpin({
+        startSpin: state.spinDrag.startSpin,
+        startX: state.spinDrag.startX,
+        clientX: event.clientX,
+        spanPx: TOUCH_SPIN_SPAN_PX * scale,
+        zeroSnap: 0.03
+      });
+      plan.guard = false;
+      state.dragDirty = true;
+    }
+
     function endCanvasDragImpl() {
+      endSpinDrag();
       state.arrowGrab = null;
       state.drag = null;
       state.dragStart = null;
@@ -3516,7 +3570,10 @@
       canvas.onpointerdown = event => {
         if (!isMatchShot() || state.cameraMove) return;
         if (event.pointerType === 'mouse' && event.button !== 0) return;
-        if (state.drag !== null) return;
+        if (state.drag !== null) {
+          startSpinDrag(event, canvas);
+          return;
+        }
         fn('gameAudio')?.()?.getAudioContext?.();
         const warning = fn('warningAt')?.(point(event));
         if (warning) { openFoulInfo(warning); return; }
@@ -3555,6 +3612,10 @@
       };
       canvas.onpointermove = event => {
         if (!isMatchShot() || state.cameraMove) { if (canvas.style) canvas.style.cursor = 'default'; return; }
+        if (state.spinDrag && event.pointerId === state.spinDrag.id) {
+          moveSpinDrag(event);
+          return;
+        }
         const p = point(event);
         if (state.drag !== event.pointerId || !playableShot() || state.phase !== 'plan') {
           if (fn('warningAt')?.(p)) { if (canvas.style) canvas.style.cursor = 'pointer'; }
@@ -3600,14 +3661,46 @@
         state.dragDirty = true;
       };
       canvas.onpointerup = canvas.onpointercancel = event => {
+        if (state.spinDrag && event.pointerId === state.spinDrag.id) {
+          endSpinDrag(event);
+          return;
+        }
         if (state.drag !== event.pointerId) return;
         if (event.type === 'pointerup' && state.dragMode === 'aim' && !state.dragMoved && state.tapGuards) fn('toggleGuard')?.(state.selected);
         endCanvasDrag();
       };
       canvas.onlostpointercapture = event => {
+        if (state.spinDrag && event.pointerId === state.spinDrag.id) {
+          endSpinDrag(event);
+          return;
+        }
         if (state.drag !== event.pointerId) return;
         endCanvasDrag();
       };
+    }
+
+    // Catch a second finger dropped on the dark stage gutters around the rink (without hijacking buttons/controls).
+    const stageAreaEl = getStageArea();
+    if (stageAreaEl?.addEventListener) {
+      stageAreaEl.addEventListener('pointerdown', event => {
+        if (state.drag === null || state.spinDrag) return;
+        if (event.target === canvas) return;
+        if (event.target?.closest?.('button, input, a, select, dialog, .foul-info, #field-spin')) return;
+        startSpinDrag(event, stageAreaEl);
+      });
+      stageAreaEl.addEventListener('pointermove', event => {
+        if (state.spinDrag && state.spinDrag.id === event.pointerId && state.spinDrag.target === stageAreaEl) {
+          moveSpinDrag(event);
+        }
+      });
+      const finishStageSpin = event => {
+        if (state.spinDrag && state.spinDrag.id === event.pointerId && state.spinDrag.target === stageAreaEl) {
+          endSpinDrag(event);
+        }
+      };
+      stageAreaEl.addEventListener('pointerup', finishStageSpin);
+      stageAreaEl.addEventListener('pointercancel', finishStageSpin);
+      stageAreaEl.addEventListener('lostpointercapture', finishStageSpin);
     }
 
     function teamHint(classic) {
@@ -4381,6 +4474,7 @@
     computeAimLoupeSample,
     computeTouchAimLift,
     applyTouchAimOffset,
+    computeSecondFingerSpin,
     createBannerController,
     bindMatchShortcuts,
     bindSpinSlider,
