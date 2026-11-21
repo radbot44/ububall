@@ -1541,3 +1541,180 @@ test('D4-10, D4-14, D4-19: ububall-online.js handles non-JSON 502 errors, null-s
     assert.equal(h.getOutdated(), 1);
   }
 });
+
+test('aim magnifying glass: layout keeps glass above finger and sidesteps cleanly at screen edges', () => {
+  const { computeAimLoupeLayout } = ububallPlayback;
+  const portraitBounds = { left: 0, top: 0, right: 390, bottom: 844 };
+
+  // Centered drag sits directly above the finger with clearance and points straight down
+  const mid = computeAimLoupeLayout({ pointerX: 195, pointerY: 450, diameter: 112, bounds: portraitBounds });
+  assert.equal(mid.cx, 195);
+  assert.equal(mid.cy, 450 - 56 - 36);
+  assert.ok(Math.abs(mid.angle - Math.PI / 2) < 1e-9, 'pointer points straight down toward finger');
+
+  // Near left and right edges: clamped inside safe bounds
+  const left = computeAimLoupeLayout({ pointerX: 12, pointerY: 450, diameter: 112, bounds: portraitBounds });
+  assert.equal(left.left, 8);
+  const right = computeAimLoupeLayout({ pointerX: 382, pointerY: 450, diameter: 112, bounds: portraitBounds });
+  assert.equal(right.left + right.diameter, 390 - 8);
+
+  // Near top edge (e.g. short landscape phone): clamps vertically and sidesteps away from the fingertip
+  const landscapeBounds = { left: 0, top: 0, right: 844, bottom: 390 };
+  const topRight = computeAimLoupeLayout({ pointerX: 650, pointerY: 70, diameter: 108, bounds: landscapeBounds });
+  assert.equal(topRight.top, 8);
+  assert.ok(topRight.cx < 650 - 54, 'shifts left of fingertip when on right half near top edge');
+  const topLeft = computeAimLoupeLayout({ pointerX: 180, pointerY: 70, diameter: 108, bounds: landscapeBounds });
+  assert.equal(topLeft.top, 8);
+  assert.ok(topLeft.cx > 180 + 54, 'shifts right of fingertip when on left half near top edge');
+});
+
+test('aim magnifying glass: sample geometry maps landscape and portrait (-90deg) coords without out-of-bounds src rects', () => {
+  const { computeAimLoupeSample } = ububallPlayback;
+
+  // Landscape rink
+  const land = computeAimLoupeSample({
+    pointerX: 300, pointerY: 200,
+    rect: { left: 50, top: 50, right: 550, bottom: 350, width: 500, height: 300 },
+    portrait: false, srcWidth: 1000, srcHeight: 600, diameter: 112, zoom: 2
+  });
+  assert.equal(land.focusX, 250);
+  assert.equal(land.focusY, 150);
+  assert.ok(land.sx >= 0 && land.sy >= 0 && land.sx + land.sw <= 1000 && land.sy + land.sh <= 600);
+
+  // Portrait rink (rotated -90deg): bottom-left of rect is field (0,0), top-right is field (1000,600)
+  const portRect = { left: 10, top: 60, right: 370, bottom: 660, width: 360, height: 600 };
+  const portCenter = computeAimLoupeSample({
+    pointerX: 190, pointerY: 360,
+    rect: portRect, portrait: true, srcWidth: 1200, srcHeight: 720, diameter: 108, zoom: 2
+  });
+  assert.equal(portCenter.cssW, 600);
+  assert.equal(portCenter.cssH, 360);
+  assert.equal(portCenter.focusX, 300);
+  assert.equal(portCenter.focusY, 180);
+
+  // Dragging past the edge stays safely clamped inside [0, srcWidth] x [0, srcHeight]
+  const edge = computeAimLoupeSample({
+    pointerX: 5, pointerY: 55,
+    rect: portRect, portrait: true, srcWidth: 1200, srcHeight: 720, diameter: 108, zoom: 2
+  });
+  assert.ok(edge.sx >= 0 && edge.sy >= 0);
+  assert.ok(edge.sx + edge.sw <= 1200 + 1e-6 && edge.sy + edge.sh <= 720 + 1e-6);
+});
+
+test('aim magnifying glass: off by default and appears only when enabled on phone touch drag in Drag arrow mode', () => {
+  const { createStageController } = ububallPlayback;
+
+  function makeEnv({ portraitPhone = true, wideDesktop = false, pullBehind = false, aimMagnifier = false } = {}) {
+    const drawImageCalls = [];
+    const loupeCtx = {
+      setTransform() {}, clearRect() {}, save() {}, restore() {},
+      beginPath() {}, arc() {}, clip() {}, fillRect() {},
+      translate() {}, scale() {}, rotate() {},
+      moveTo() {}, lineTo() {}, stroke() {},
+      drawImage(...args) { drawImageCalls.push(args); }
+    };
+    const loupeCanvas = { width: 0, height: 0, getContext: () => loupeCtx };
+    const pointerEl = { style: {} };
+    const loupeEl = {
+      hidden: true,
+      offsetWidth: 112,
+      style: { setProperty(k, v) { this[k] = v; } },
+      querySelector: sel => sel === 'canvas' ? loupeCanvas : sel === '.aim-loupe-pointer' ? pointerEl : null
+    };
+    const rinkCanvas = {
+      width: 1200, height: 720, _webglComposite: true, style: {},
+      getBoundingClientRect: () => portraitPhone
+        ? { left: 10, top: 60, right: 370, bottom: 660, width: 360, height: 600 }
+        : { left: 40, top: 60, right: 540, bottom: 360, width: 500, height: 300 },
+      setPointerCapture() {}, addEventListener() {}
+    };
+    const bodies = [
+      { x: 250, y: 300, radius: 26, reach: 26, impulse: 1, stunned: false, carded: false, rotation: 0 },
+      { x: 350, y: 180, radius: 26, reach: 26, impulse: 1, stunned: false, carded: false, rotation: 0 },
+      { x: 350, y: 420, radius: 26, reach: 26, impulse: 1, stunned: false, carded: false, rotation: 0 }
+    ];
+    const plans = bodies.map(() => ({ angle: 0, power: 0, spin: 0, guard: false }));
+    const state = {
+      P, ububallMatch,
+      shot: 'match', phase: 'plan', selected: 0,
+      drag: null, dragMode: null, dragStart: null, dragStartClient: null,
+      dragClient: null, dragPointerType: '', dragMoved: false, dragDirty: false,
+      arrowGrab: null, tapGuards: false, pullBehind, aimMagnifier, cameraMove: null, foulInfo: null,
+      fieldView: { canvas: rinkCanvas, portrait: portraitPhone, bodies, field: null },
+      bodies, plans, skaters: [],
+      gameUi: { scale: () => 1 },
+      presenter: { getThemeColors: () => ({ background: '#101217' }) },
+      aimLoupe: loupeEl,
+      impulseGeometry: (b, pl) => ({ ringR: 28, scale: 110, distance: 28 + 110 * pl.power, x: b.x + Math.cos(pl.angle) * (28 + 110 * pl.power), y: b.y + Math.sin(pl.angle) * (28 + 110 * pl.power), visible: pl.power > 0 }),
+      warningAt: () => null,
+      sync() {},
+      draw() { ctrl.updateAimLoupe(); }
+    };
+    const ctrl = createStageController({
+      state,
+      aimLoupe: loupeEl,
+      portraitScreen: { matches: portraitPhone },
+      wideScreen: { matches: wideDesktop },
+      window: { innerWidth: portraitPhone ? 390 : 844, innerHeight: portraitPhone ? 844 : 390, devicePixelRatio: 2 },
+      document: {
+        documentElement: { clientWidth: portraitPhone ? 390 : 844, clientHeight: portraitPhone ? 844 : 390 },
+        body: { dataset: { shot: 'match' } },
+        getElementById: () => null,
+        querySelector: () => null
+      }
+    });
+    return { state, ctrl, rinkCanvas, loupeEl, loupeCanvas, pointerEl, drawImageCalls };
+  }
+
+  // 0. Disabled by default (aimMagnifier: false): stays hidden even on portrait phone touch drag
+  const offEnv = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: false, aimMagnifier: false });
+  offEnv.rinkCanvas.onpointerdown({ pointerId: 9, pointerType: 'touch', button: 0, clientX: 190, clientY: 510 });
+  offEnv.rinkCanvas.onpointermove({ pointerId: 9, pointerType: 'touch', clientX: 190, clientY: 450 });
+  offEnv.ctrl.updateAimLoupe();
+  assert.equal(offEnv.loupeEl.hidden, true, 'loupe stays hidden when aimMagnifier setting is off');
+  assert.equal(offEnv.drawImageCalls.length, 0);
+
+  // 1. Portrait phone + touch + Drag arrow mode + setting enabled: hidden on tap, shown on drag, hidden on pointerup
+  const phone = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: false, aimMagnifier: true });
+  // Body 0 at (250, 300) in portrait rect (left=10, top=60, w=360, h=600) is at screen (190, 510)
+  phone.rinkCanvas.onpointerdown({ pointerId: 1, pointerType: 'touch', button: 0, clientX: 190, clientY: 510 });
+  assert.equal(phone.loupeEl.hidden, true, 'tap before drag threshold does not show loupe');
+  phone.rinkCanvas.onpointermove({ pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 450 });
+  phone.ctrl.updateAimLoupe();
+  assert.equal(phone.loupeEl.hidden, false, 'touch drag on phone in Drag arrow mode shows loupe when enabled');
+  assert.equal(phone.loupeCanvas.width, 224, 'loupe backing store scales by DPR');
+  assert.equal(phone.drawImageCalls.length, 1, 'loupe samples the rink canvas');
+  assert.match(phone.loupeEl.style.transform, /^translate3d\(/, 'loupe positioned via translate3d');
+  phone.rinkCanvas.onpointerup({ type: 'pointerup', pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 450 });
+  assert.equal(phone.loupeEl.hidden, true, 'loupe hides immediately when finger lifts');
+
+  // 2. Landscape phone (wideScreen=false, portraitPhone=false) + touch + enabled: also shown
+  const landPhone = makeEnv({ portraitPhone: false, wideDesktop: false, pullBehind: false, aimMagnifier: true });
+  // Body 0 at (250, 300) in landscape rect (left=40, top=60, w=500, h=300) is at screen (165, 210)
+  landPhone.rinkCanvas.onpointerdown({ pointerId: 2, pointerType: 'touch', button: 0, clientX: 165, clientY: 210 });
+  landPhone.rinkCanvas.onpointermove({ pointerId: 2, pointerType: 'touch', clientX: 230, clientY: 210 });
+  landPhone.ctrl.updateAimLoupe();
+  assert.equal(landPhone.loupeEl.hidden, false, 'loupe appears on landscape phone screens when enabled');
+
+  // 3. Pull back control scheme: NEVER shown on phone even when enabled
+  const pullEnv = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: true, aimMagnifier: true });
+  pullEnv.rinkCanvas.onpointerdown({ pointerId: 3, pointerType: 'touch', button: 0, clientX: 190, clientY: 510 });
+  pullEnv.rinkCanvas.onpointermove({ pointerId: 3, pointerType: 'touch', clientX: 190, clientY: 580 });
+  pullEnv.ctrl.updateAimLoupe();
+  assert.equal(pullEnv.loupeEl.hidden, true, 'loupe is suppressed on Pull back control scheme');
+  assert.equal(pullEnv.drawImageCalls.length, 0);
+
+  // 4. Mouse drag on phone-sized window: NEVER shown even when enabled
+  const mouseEnv = makeEnv({ portraitPhone: true, wideDesktop: false, pullBehind: false, aimMagnifier: true });
+  mouseEnv.rinkCanvas.onpointerdown({ pointerId: 4, pointerType: 'mouse', button: 0, clientX: 190, clientY: 510 });
+  mouseEnv.rinkCanvas.onpointermove({ pointerId: 4, pointerType: 'mouse', clientX: 190, clientY: 450 });
+  mouseEnv.ctrl.updateAimLoupe();
+  assert.equal(mouseEnv.loupeEl.hidden, true, 'loupe is not shown for mouse drags');
+
+  // 5. Desktop / wide screen touch drag: NEVER shown even when enabled
+  const desktopEnv = makeEnv({ portraitPhone: false, wideDesktop: true, pullBehind: false, aimMagnifier: true });
+  desktopEnv.rinkCanvas.onpointerdown({ pointerId: 5, pointerType: 'touch', button: 0, clientX: 165, clientY: 210 });
+  desktopEnv.rinkCanvas.onpointermove({ pointerId: 5, pointerType: 'touch', clientX: 230, clientY: 210 });
+  desktopEnv.ctrl.updateAimLoupe();
+  assert.equal(desktopEnv.loupeEl.hidden, true, 'loupe is not shown on wide desktop screens');
+});

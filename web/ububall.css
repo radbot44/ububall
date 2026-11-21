@@ -1162,6 +1162,69 @@ button.card-guard { background: transparent; border: 0; box-shadow: none; paddin
 #field-spin { left: 0; top: 0; width: 9.125rem; max-width: calc(100% - .75rem); height: 2.75rem; box-sizing: border-box; visibility: hidden; pointer-events: auto; }
 #shot-spin { font-size: 1rem; }
 
+/* Touch aiming magnifying glass on phone screens (Drag arrow scheme). */
+.aim-loupe {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  width: clamp(6rem, 28vmin, 7.75rem);
+  height: clamp(6rem, 28vmin, 7.75rem);
+  pointer-events: none;
+  user-select: none;
+  will-change: transform;
+}
+.aim-loupe-lens {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: .15625rem solid var(--team-home);
+  background: var(--background);
+  box-shadow:
+    0 0 0 .125rem rgb(16 18 23 / .92),
+    0 .625rem 1.75rem rgb(0 0 0 / .62),
+    inset 0 0 0 .0625rem rgb(255 255 255 / .22);
+  overflow: hidden;
+}
+.aim-loupe-lens::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 30% 24%, rgb(255 255 255 / .22), rgb(255 255 255 / .04) 36%, transparent 62%),
+    radial-gradient(circle at 50% 50%, transparent 66%, rgb(0 0 0 / .28) 100%);
+}
+.aim-loupe canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+.aim-loupe-pointer {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.aim-loupe-pointer::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: .75rem;
+  height: .5rem;
+  transform: translate(-50%, calc(var(--loupe-radius, 3.5rem) - .0625rem));
+  background: var(--team-home);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  filter: drop-shadow(0 .125rem .1875rem rgb(0 0 0 / .65));
+}
+
 .classic-match .super-panel { display: none; }
 .classic-match #stadium-super-btn { visibility: hidden; }
 #blitz-clock { font-weight: 800; color: var(--primary); font-variant-numeric: tabular-nums; margin-left: .375rem; }

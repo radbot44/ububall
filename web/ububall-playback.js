@@ -1224,6 +1224,62 @@
     if (control._lastXf !== xf) { control._lastXf = xf; control.style.transform = xf; }
   }
 
+  function computeAimLoupeLayout({ pointerX, pointerY, diameter, bounds, fingerGap = 36, margin = 8 } = {}) {
+    const d = Math.max(1, Number(diameter) || 108);
+    const radius = d / 2;
+    const bLeft = Number.isFinite(bounds?.left) ? bounds.left : 0;
+    const bTop = Number.isFinite(bounds?.top) ? bounds.top : 0;
+    const bRight = Number.isFinite(bounds?.right) ? bounds.right : (bLeft + d + margin * 2);
+    const bBottom = Number.isFinite(bounds?.bottom) ? bounds.bottom : (bTop + d + margin * 2);
+    const minX = bLeft + margin + radius;
+    const maxX = Math.max(minX, bRight - margin - radius);
+    const minY = bTop + margin + radius;
+    const maxY = Math.max(minY, bBottom - margin - radius);
+
+    let cx = Math.max(minX, Math.min(maxX, pointerX));
+    let cy = pointerY - radius - fingerGap;
+
+    if (cy < minY) {
+      cy = minY;
+      // When pinned against the top edge, glide horizontally away from the finger so it stays clear of the fingertip.
+      const clearance = 24;
+      const overlap = Math.max(0, (cy + radius + clearance) - pointerY);
+      if (overlap > 0) {
+        const t = Math.min(1, overlap / 36);
+        const sideShift = (radius + 42) * t;
+        const midX = (bLeft + bRight) / 2;
+        const shiftedX = pointerX >= midX ? pointerX - sideShift : pointerX + sideShift;
+        cx = Math.max(minX, Math.min(maxX, shiftedX));
+      }
+    } else if (cy > maxY) {
+      cy = maxY;
+    }
+
+    const angle = Math.atan2(pointerY - cy, pointerX - cx);
+    return { cx, cy, left: cx - radius, top: cy - radius, radius, diameter: d, angle };
+  }
+
+  function computeAimLoupeSample({ pointerX, pointerY, rect, portrait, srcWidth, srcHeight, diameter, zoom = 2 } = {}) {
+    if (!rect || !(rect.width > 0) || !(rect.height > 0) || !(srcWidth > 0) || !(srcHeight > 0)) return null;
+    const cssW = portrait ? rect.height : rect.width;
+    const cssH = portrait ? rect.width : rect.height;
+    const focusX = portrait ? (rect.bottom - pointerY) : (pointerX - rect.left);
+    const focusY = portrait ? (pointerX - rect.left) : (pointerY - rect.top);
+    const radius = diameter / 2;
+    const halfSpan = radius / zoom + 2;
+    const x0 = Math.max(0, Math.min(cssW, focusX - halfSpan));
+    const y0 = Math.max(0, Math.min(cssH, focusY - halfSpan));
+    const x1 = Math.max(0, Math.min(cssW, focusX + halfSpan));
+    const y1 = Math.max(0, Math.min(cssH, focusY + halfSpan));
+    const scaleX = srcWidth / cssW;
+    const scaleY = srcHeight / cssH;
+    const sx = x0 * scaleX;
+    const sy = y0 * scaleY;
+    const sw = Math.max(0, (x1 - x0) * scaleX);
+    const sh = Math.max(0, (y1 - y0) * scaleY);
+    return { cssW, cssH, focusX, focusY, x0, y0, x1, y1, sx, sy, sw, sh, radius, zoom };
+  }
+
   function createBannerController(deps = {}) {
     const { $, getSetTimeout, getClearTimeout } = makeLookup(deps);
     let bannerTimer = 0, bannerGone = null;
@@ -3207,13 +3263,204 @@
       updateReplaySkip(state.shot === 'match' ? state.goalReplay : null);
     }
 
+    let aimLoupeEl = deps.aimLoupe ?? state.aimLoupe ?? $('aim-loupe') ?? null;
+    if (!aimLoupeEl && doc?.createElement && doc?.body?.append) {
+      aimLoupeEl = doc.createElement('div');
+      aimLoupeEl.id = 'aim-loupe';
+      aimLoupeEl.className = 'aim-loupe';
+      aimLoupeEl.hidden = true;
+      aimLoupeEl.setAttribute('aria-hidden', 'true');
+      aimLoupeEl.innerHTML = '<div class="aim-loupe-pointer"></div><div class="aim-loupe-lens"><canvas></canvas></div>';
+      doc.body.append(aimLoupeEl);
+      state.aimLoupe = aimLoupeEl;
+    }
+    let aimLoupeCanvas = aimLoupeEl?.querySelector?.('canvas') ?? null;
+    let aimLoupeCtx = null;
+    let aimLoupePointer = aimLoupeEl?.querySelector?.('.aim-loupe-pointer') ?? null;
+    let aimLoupeDiameter = 0;
+
+    function shouldShowAimLoupe() {
+      return Boolean(
+        state.aimMagnifier &&
+        state.drag !== null &&
+        state.dragMoved &&
+        state.dragClient &&
+        state.shot === 'match' &&
+        !state.cameraMove &&
+        state.phase === 'plan' &&
+        !state.pullBehind &&
+        state.dragPointerType === 'touch' &&
+        compactPhoneStage() &&
+        !state.fieldView?.field
+      );
+    }
+
+    function updateAimLoupe() {
+      const loupe = deps.aimLoupe ?? state.aimLoupe ?? aimLoupeEl;
+      if (!loupe) return;
+      if (!shouldShowAimLoupe()) {
+        if (!loupe.hidden) loupe.hidden = true;
+        aimLoupeDiameter = 0;
+        return;
+      }
+      const view = state.fieldView;
+      const viewCanvas = view?.canvas;
+      if (!viewCanvas?.getBoundingClientRect) {
+        if (!loupe.hidden) loupe.hidden = true;
+        return;
+      }
+      const srcCanvas = viewCanvas._webglComposite ? viewCanvas : (view._active2dCanvas || viewCanvas);
+      if (!srcCanvas || !(srcCanvas.width > 0) || !(srcCanvas.height > 0)) {
+        if (!loupe.hidden) loupe.hidden = true;
+        return;
+      }
+      const rect = viewCanvas.getBoundingClientRect();
+      if (!(rect.width > 0) || !(rect.height > 0)) {
+        if (!loupe.hidden) loupe.hidden = true;
+        return;
+      }
+
+      if (loupe.hidden) {
+        loupe.hidden = false;
+        aimLoupeDiameter = 0;
+      }
+      const d = getDoc(), win = getWin();
+      const vw = d?.documentElement?.clientWidth || win?.innerWidth || rect.right || 390;
+      const vh = d?.documentElement?.clientHeight || win?.innerHeight || rect.bottom || 844;
+      if (!aimLoupeDiameter) {
+        aimLoupeDiameter = loupe.offsetWidth || Math.round(Math.max(96, Math.min(124, Math.min(vw, vh) * 0.28)));
+      }
+      const diameter = aimLoupeDiameter;
+      const arenaRect = d?.querySelector?.('.arena-layout')?.getBoundingClientRect?.();
+      const bounds = arenaRect && arenaRect.width > 0 && arenaRect.height > 0
+        ? arenaRect
+        : { left: 0, top: 0, right: vw, bottom: vh };
+      const layout = computeAimLoupeLayout({
+        pointerX: state.dragClient.x,
+        pointerY: state.dragClient.y,
+        diameter,
+        bounds
+      });
+
+      const xf = `translate3d(${Math.round(layout.left)}px, ${Math.round(layout.top)}px, 0)`;
+      if (loupe.style) {
+        if (loupe._lastXf !== xf) { loupe._lastXf = xf; loupe.style.transform = xf; }
+        const radStr = `${layout.radius}px`;
+        if (loupe._lastRad !== radStr) { loupe._lastRad = radStr; loupe.style.setProperty?.('--loupe-radius', radStr); }
+      }
+      aimLoupePointer ||= loupe.querySelector?.('.aim-loupe-pointer') ?? null;
+      if (aimLoupePointer?.style) {
+        const ptrXf = `rotate(${(layout.angle - Math.PI / 2).toFixed(3)}rad)`;
+        if (aimLoupePointer._lastXf !== ptrXf) { aimLoupePointer._lastXf = ptrXf; aimLoupePointer.style.transform = ptrXf; }
+      }
+
+      aimLoupeCanvas ||= loupe.querySelector?.('canvas') ?? null;
+      if (!aimLoupeCanvas?.getContext) return;
+      aimLoupeCtx ||= aimLoupeCanvas.getContext('2d');
+      if (!aimLoupeCtx) return;
+
+      const dpr = Math.min((typeof win?.devicePixelRatio === 'number' && win.devicePixelRatio) || 1, 3);
+      const bufSize = Math.max(1, Math.round(diameter * dpr));
+      if (aimLoupeCanvas.width !== bufSize || aimLoupeCanvas.height !== bufSize) {
+        aimLoupeCanvas.width = bufSize;
+        aimLoupeCanvas.height = bufSize;
+      }
+
+      const portrait = Boolean(view.portrait);
+      const sample = computeAimLoupeSample({
+        pointerX: state.dragClient.x,
+        pointerY: state.dragClient.y,
+        rect,
+        portrait,
+        srcWidth: srcCanvas.width,
+        srcHeight: srcCanvas.height,
+        diameter,
+        zoom: 2
+      });
+      if (!sample) return;
+
+      const ctx = aimLoupeCtx;
+      const R = sample.radius;
+      const bgColor = (deps.presenter ?? state.presenter)?.getThemeColors?.()?.background || '#101217';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, diameter, diameter);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(R, R, R, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, diameter, diameter);
+      ctx.translate(R, R);
+      ctx.scale(sample.zoom, sample.zoom);
+      if (portrait) ctx.rotate(-Math.PI / 2);
+      ctx.translate(-sample.focusX, -sample.focusY);
+      ctx.imageSmoothingEnabled = true;
+      if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+      if (sample.sw > 0.5 && sample.sh > 0.5) {
+        ctx.drawImage(srcCanvas, sample.sx, sample.sy, sample.sw, sample.sh, sample.x0, sample.y0, sample.x1 - sample.x0, sample.y1 - sample.y0);
+      }
+      if (!viewCanvas._webglComposite) {
+        const bodies = view.bodies || [];
+        const skaters = state.skaters || [];
+        for (let i = 0; i < 6; i++) {
+          const b = bodies[i], node = skaters[i];
+          const art = node?.firstChild || node?.querySelector?.('canvas,img') || null;
+          if (!b || !art) continue;
+          const isReady = art.tagName === 'CANVAS' ? (art.width > 0 && art.height > 0) : (art.complete && art.naturalWidth > 0);
+          if (!isReady) continue;
+          const bx = (b.x / 1000) * sample.cssW;
+          const by = (b.y / 600) * sample.cssH;
+          const size = (b.radius * 2 / 1000) * sample.cssW;
+          ctx.save();
+          ctx.globalAlpha = b.carded ? 0.3 : b.superActive === 'ghost' ? 0.45 : 1;
+          ctx.translate(bx, by);
+          ctx.rotate((b.rotation || 0) + (portrait ? Math.PI / 2 : 0));
+          ctx.drawImage(art, -size / 2, -size / 2, size, size);
+          ctx.restore();
+        }
+        if (view.badgeCanvas && view.badgeCanvas.width > 0 && view.badgeCanvas.height > 0 && sample.sw > 0.5 && sample.sh > 0.5) {
+          const bScaleX = view.badgeCanvas.width / sample.cssW;
+          const bScaleY = view.badgeCanvas.height / sample.cssH;
+          const bsx = sample.x0 * bScaleX, bsy = sample.y0 * bScaleY;
+          const bsw = (sample.x1 - sample.x0) * bScaleX, bsh = (sample.y1 - sample.y0) * bScaleY;
+          if (bsw > 0.5 && bsh > 0.5) {
+            ctx.drawImage(view.badgeCanvas, bsx, bsy, bsw, bsh, sample.x0, sample.y0, sample.x1 - sample.x0, sample.y1 - sample.y0);
+          }
+        }
+      }
+      ctx.restore();
+
+      // Subtle open-center reticle ticks around the exact touch coordinate (keeps arrowhead tip unobstructed).
+      ctx.save();
+      ctx.lineCap = 'round';
+      const inner = 8, outer = 13;
+      const drawTicks = () => {
+        ctx.beginPath();
+        ctx.moveTo(R - outer, R); ctx.lineTo(R - inner, R);
+        ctx.moveTo(R + inner, R); ctx.lineTo(R + outer, R);
+        ctx.moveTo(R, R - outer); ctx.lineTo(R, R - inner);
+        ctx.moveTo(R, R + inner); ctx.lineTo(R, R + outer);
+        ctx.stroke();
+      };
+      ctx.strokeStyle = 'rgba(16, 18, 23, 0.55)';
+      ctx.lineWidth = 2.5;
+      drawTicks();
+      ctx.strokeStyle = 'rgba(248, 247, 244, 0.72)';
+      ctx.lineWidth = 1.25;
+      drawTicks();
+      ctx.restore();
+    }
+
     function endCanvasDragImpl() {
       state.arrowGrab = null;
       state.drag = null;
       state.dragStart = null;
       state.dragStartClient = null;
+      state.dragClient = null;
+      state.dragPointerType = '';
       state.dragMode = null;
       state.dragDirty = false;
+      updateAimLoupe();
       if (state.phase === 'plan') fn('saveActiveMatch')?.();
       updateFirstTurnGuide();
       fn('sync')?.(); fn('draw')?.();
@@ -3247,6 +3494,8 @@
         state.dragMode = target.mode;
         state.dragStart = p;
         state.dragStartClient = { x: event.clientX, y: event.clientY };
+        state.dragClient = { x: event.clientX, y: event.clientY };
+        state.dragPointerType = event.pointerType || '';
         state.dragMoved = false;
         if (state.dragMode === 'arrow') {
           const viewBodies = state.fieldView?.bodies || state.bodies || [];
@@ -3273,6 +3522,8 @@
         const tapRadius = (event.pointerType === 'mouse' ? 5 : 12) * scale;
         if (!state.dragMoved && state.dragStartClient && Math.hypot(event.clientX - state.dragStartClient.x, event.clientY - state.dragStartClient.y) < tapRadius) return;
         state.dragMoved = true;
+        state.dragClient = { x: event.clientX, y: event.clientY };
+        if (!state.dragPointerType && event.pointerType) state.dragPointerType = event.pointerType;
         state.plans[state.selected].guard = false;
         const impFn = fn('impulseGeometry');
         if (state.dragMode === 'arrow') {
@@ -3849,6 +4100,7 @@
       camera,
       setShot,
       endCanvasDrag,
+      updateAimLoupe,
       updateReplaySkip,
       teamHint,
       setupStep,
@@ -4067,6 +4319,8 @@
     createSummaryController,
     createCpuTurnPlanner,
     positionSpinControl,
+    computeAimLoupeLayout,
+    computeAimLoupeSample,
     createBannerController,
     bindMatchShortcuts,
     bindSpinSlider,
