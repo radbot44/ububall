@@ -13,7 +13,8 @@ mkdirSync(targetAssets, { recursive: true });
 const webFiles = [
   'ububall.html', 'ububall.css', 'ububall.js', 'ububall-webgl.js', 'ububall-presentation.js', 'ububall-playback.js', 'ububall-stats.js', 'ububall-theater.js', 'ububall-bench.js', 'mp4.js', 'ububall-online.js', 'ububall-cpu-worker.js', 'ububall-cpu-client.js',
   'index.html', 'platform.js', 'app.js', 'site.css', 'site.js', 'site-header.js', 'pack-scene.js', 'starter.js', 'ubu-list.js', 'game-ui.js', 'ububall-activity.js',
-  'voice.html', 'demo.html', 'demo.js', 'effects.html', 'effects.css', 'effects.js', 'auth-complete.html'
+  'voice.html', 'demo.html', 'demo.js', 'effects.html', 'effects.css', 'effects.js', 'auth-complete.html',
+  'favicon.svg', 'favicon.ico', 'apple-touch-icon.png'
 ];
 const sharedFiles = [
   'ububall-match.js', 'ububall-physics.js', 'ububall-replay.js', 'ububall-cpu.js', 'ubu.js', 'ubu-archetype.js', 'ubu-file.js', 'ubu-render.js', 'ubu-audio.js', 'rarity.js', 'ability.js'
