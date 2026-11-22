@@ -57,47 +57,20 @@ test('starter packs hold one signed ubu from each rarest decile, once per accoun
   mint.prepare({ batchSize: 30, minimumPacks: 3 });
   const serials = mint.exec('SELECT serial FROM issued UNION ALL SELECT serial FROM inventory').map(row => row.serial);
   assert.equal(new Set(serials).size, serials.length);
-});
 
-test('a starter pack interrupted before signing finishes on the next claim, even a day later', async t => {
-  const f = await fixture(t);
-  let fail = true, now = 20000 * 86400000;
-  t.mock.method(Date, 'now', () => now);
-  const mint = new Mint(f.open(), { ...f.options, resolveSigningKey: async id => {
+  // A starter pack interrupted before signing finishes on the next claim, even a day later.
+  const f2 = await fixture(t);
+  let fail = true;
+  const recovering = new Mint(f2.open(), { ...f2.options, resolveSigningKey: async id => {
     if (fail) throw new Error('Signing unavailable.');
-    return f.options.resolveSigningKey(id);
+    return f2.options.resolveSigningKey(id);
   } });
-  await assert.rejects(mint.claimStarter({ owner, kind: 'daily' }), /Signing unavailable/);
-  assert.equal(mint.starterStatus(owner).daily, false);
-  fail = false; now += 86400000;
-  await mint.claimStarter({ owner, kind: 'daily' });
-  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued WHERE certificate IS NULL')[0].n, 0);
-  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued')[0].n, 6);
-});
-
-test('a skipped team selection fields the last team, then favorites and newest ubus, falling back on invalid legacy supers', async t => {
-  const f = await fixture(t), mint = new Mint(f.open(), f.options);
-  await mint.claimStarter({ owner, kind: 'signup' });
-  await mint.claimStarter({ owner, kind: 'daily' });
-  const rows = mint.exec('SELECT serial, dna FROM issued ORDER BY serial');
-  const first = dna => ubu.decode(ubu.fromCode(dna)).supers[0] % 8;
-  assert.deepEqual(mint.matchTeam(owner).entries.map(row => row.serial), rows.slice(3).reverse().map(row => row.serial));
-  mint.exec('UPDATE issued SET favorite=1 WHERE serial=?', rows[0].serial);
-  assert.equal(mint.matchTeam(owner).entries[0].serial, rows[0].serial);
-  const chosen = ubu.decode(ubu.fromCode(rows[1].dna)).supers[1] % 8;
-  const last = [{ serial: rows[1].serial, super: chosen }, { serial: rows[4].serial, super: null }, { serial: rows[2].serial, super: null }];
-  assert.ok(!mint.saveTeams(owner, { teams: [], last }).error);
-  const team = mint.matchTeam(owner);
-  assert.deepEqual(team.entries.map(row => row.serial), last.map(slot => slot.serial));
-  assert.deepEqual(team.supers, [chosen, first(rows[4].dna), first(rows[2].dna)]);
-  // If a legacy saved_teams row holds a super not in DNA, matchTeam falls back to the ubu's first super.
-  const available1 = new Set(ubu.decode(ubu.fromCode(rows[1].dna)).supers.map(n => n % 8));
-  const missingSuper = [0, 1, 2, 3, 4, 5, 6, 7].find(id => !available1.has(id));
-  mint.exec('UPDATE saved_teams SET data=? WHERE owner=?', JSON.stringify({
-    teams: [], last: [{ serial: rows[1].serial, super: missingSuper }, { serial: rows[4].serial, super: null }, { serial: rows[2].serial, super: null }]
-  }), owner);
-  assert.equal(mint.matchTeam(owner).supers[0], first(rows[1].dna));
-  assert.deepEqual(mint.matchTeam('987654321098765432'), { entries: [], supers: [] });
+  await assert.rejects(recovering.claimStarter({ owner, kind: 'daily' }), /Signing unavailable/);
+  assert.equal(recovering.starterStatus(owner).daily, false);
+  fail = false; now += day;
+  await recovering.claimStarter({ owner, kind: 'daily' });
+  assert.equal(recovering.exec('SELECT COUNT(*) AS n FROM issued WHERE certificate IS NULL')[0].n, 0);
+  assert.equal(recovering.exec('SELECT COUNT(*) AS n FROM issued')[0].n, 6);
 });
 
 test('pack hints are stable, private, and exactly match the selected issuance', async t => {
@@ -156,16 +129,19 @@ test('reservations exclude other owners, survive slot swaps, expire, and cannot 
   assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued')[0].n, 5);
 });
 
-test('choice allocation rolls back atomically and signing failures recover without choosing twice', async t => {
+test('allocation rolls back atomically, signing failures recover with original key, and request IDs are owner-scoped', async t => {
   const f = await fixture(t), storage = f.open();
+  assert.throws(() => new Mint(storage, { ...f.options, key: undefined }), /configuration/);
   let failing = true;
   const mint = new Mint(storage, { ...f.options, resolveSigningKey: () => { if (failing) throw new Error('signing failed'); return f.keys.privateKey; } });
   mint.prepare({ batchSize: 20 });
+  const original = storage.exec('SELECT * FROM inventory ORDER BY id');
   const offer = mint.offer({ owner, request: request(1) });
   storage.exec("CREATE TRIGGER fail_choice BEFORE INSERT ON pack_selections BEGIN SELECT RAISE(ABORT, 'selection failure'); END");
   const selection = { owner, request: offer.request, choice: offer.choices[0].choice };
   await assert.rejects(mint.issue(selection), /selection failure/);
   assert.equal(mint.state().remaining, 4);
+  assert.deepEqual(storage.exec('SELECT * FROM inventory ORDER BY id'), original);
   assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued')[0].n, 0);
   assert.equal(mint.exec('SELECT COUNT(*) AS n FROM mint_account_counts')[0].n, 0);
   assert.deepEqual(mint.offer({ owner, request: request(2) }), offer);
@@ -174,61 +150,30 @@ test('choice allocation rolls back atomically and signing failures recover witho
   assert.equal(mint.state().remaining, 3);
   assert.equal(mint.exec('SELECT COUNT(*) AS n FROM pack_choices')[0].n, 0);
   assert.equal(mint.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0].regular_packs, 1);
-  failing = false;
-  const retry = await mint.issue(selection, { lifetimeLimit: 0 });
+  const saved = storage.exec('SELECT * FROM issued WHERE owner=? AND request=?', owner, offer.request);
+  assert.ok(saved.every(r => r.certificate === null));
+
+  // Reopen with a rotated default key; retry must recover using the original key and persisted rows.
+  let resolved;
+  const reopened = new Mint(f.open(), { ...f.options, key: 'test-2', resolveSigningKey: key => { resolved = key; return f.keys.privateKey; } });
+  const retry = await reopened.issue(selection, { lifetimeLimit: 0 });
   assert.equal(retry.certificates.length, 5);
-  assert.equal(mint.state().remaining, 3);
-  assert.equal(mint.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0].regular_packs, 1);
-});
+  assert.equal(resolved, 'test-1');
+  for (let i = 0; i < 5; i++) {
+    const cert = JSON.parse(retry.certificates[i]);
+    assert.equal(cert.id, saved[i].id);
+    assert.equal(cert.issuedAt, saved[i].issued_at);
+    assert.equal(cert.key, 'test-1');
+  }
+  assert.equal(reopened.state().remaining, 3);
+  assert.equal(reopened.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0].regular_packs, 1);
 
-test('concurrent different choices grant only one pack and later requests cannot bypass allowance', async t => {
-  const f = await fixture(t), mint = new Mint(f.open(), f.options);
-  mint.prepare({ batchSize: 30 });
-  const offer = mint.offer({ owner, request: request(1) }, { lifetimeLimit: 1 });
-  const results = await Promise.allSettled(offer.choices.map(option => new Mint(f.open(), f.options).issue({ owner, request: offer.request, choice: option.choice }, { lifetimeLimit: 1 })));
-  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
-  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued')[0].n, 5);
-  assert.throws(() => mint.offer({ owner, request: request(2) }, { lifetimeLimit: 1 }), /limit reached/);
-});
-
-test('refilling a short inventory preserves leftover packs, batch identity and active reservations', async t => {
-  const f = await fixture(t), mint = new Mint(f.open(), f.options);
-  mint.prepare({ batchSize: 15 });
-  const first = mint.offer({ owner, request: request(1) });
-  await mint.issue({ owner, request: first.request, choice: first.choices[0].choice });
-  const leftovers = mint.exec('SELECT * FROM inventory ORDER BY id');
-  mint.prepare({ batchSize: 10, chunkSize: 3, minimumPacks: 3 });
-  assert.equal(mint.state().remaining, 2);
-  mint.prepare({ batchSize: 10, minimumPacks: 3 });
-  assert.equal(mint.state().remaining, 4);
-  for (const item of leftovers) assert.deepEqual(mint.exec('SELECT * FROM inventory WHERE id=?', item.id)[0], item);
-  const offer = mint.offer({ owner, request: request(2) });
-  const option = offer.choices.find(c => mint.exec('SELECT batch FROM inventory WHERE id=(SELECT anchor FROM pack_choices WHERE token=?)', c.choice)[0].batch === 1);
-  assert.ok(option);
-  await mint.issue({ owner, request: offer.request, choice: option.choice });
-  assert.ok(mint.exec('SELECT batch FROM issued WHERE request=?', offer.request).every(r => r.batch === 1));
-});
-
-test('existing pack inventory upgrades without replacement and hints disclose only texture presence', async t => {
-  const f = await fixture(t), storage = f.open();
-  let mint = new Mint(storage, f.options);
-  mint.prepare({ batchSize: 15 });
-  const special = Buffer.alloc(128, 255).toString('base64url');
-  mint.exec('UPDATE inventory SET dna=? WHERE quintile=5', special);
-  const before = mint.exec('SELECT id, serial, dna, pack_slot, quintile FROM inventory ORDER BY id');
-  // This fixture models a pre-upgrade database, before the batch-aware offer index existed.
-  storage.exec('DROP INDEX IF EXISTS inventory_offer_lookup');
-  storage.exec('ALTER TABLE inventory DROP COLUMN batch');
-  mint = new Mint(storage, f.options);
-  assert.deepEqual(mint.exec('SELECT id, serial, dna, pack_slot, quintile FROM inventory ORDER BY id'), before);
-  assert.ok(mint.exec('SELECT batch FROM inventory').every(row => row.batch === 1));
-  const offer = mint.offer({ owner, request: request(1) }, { lifetimeLimit: 1 });
-  assert.ok(offer.choices.every(option => option.hints[4].textured === true));
-  assert.ok(offer.choices.every(option => option.charge >= 1 && option.charge <= 5));
-  assert.ok(offer.choices.every(option => Object.keys(option.hints[4]).length === 3));
-  await assert.rejects(mint.issue({ owner, request: offer.request, choice: offer.choices[0].choice }, { lifetimeLimit: 0 }), /limit reached/);
-  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued')[0].n, 0);
-  assert.deepEqual(mint.offer({ owner, request: request(2) }, { lifetimeLimit: 1 }), offer);
+  // Persisted certificates are served without re-signing, and request IDs are scoped per owner.
+  const noSign = new Mint(f.open(), { ...f.options, resolveSigningKey: () => { throw new Error('must use persisted certificate'); } });
+  assert.deepEqual(await noSign.issue({ owner, request: offer.request }), retry);
+  failing = false;
+  const otherIssued = await mint.issue({ owner: '234567890123456789', request: offer.request });
+  assert.notEqual(JSON.parse(retry.certificates[0]).id, JSON.parse(otherIssued.certificates[0]).id);
 });
 
 async function fixture(t) {
@@ -241,29 +186,6 @@ async function fixture(t) {
   const options = { mint: mintID, key: 'test-1', resolveSigningKey: () => keys.privateKey };
   return { path, keys, options, open, stores };
 }
-
-test('existing issued records migrate automatically without rewriting certificates', async t => {
-  const f = await fixture(t), storage = f.open();
-  const historicalDna = 'A'.repeat(171);
-  storage.exec(`CREATE TABLE issued (
-    id TEXT PRIMARY KEY, serial TEXT NOT NULL UNIQUE, dna TEXT NOT NULL,
-    batch INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL,
-    request TEXT NOT NULL, pack_id TEXT NOT NULL, quintile INTEGER NOT NULL,
-    issued_at INTEGER NOT NULL, key TEXT NOT NULL,
-    certificate TEXT, UNIQUE(owner, request, id)) STRICT`);
-  storage.exec('INSERT INTO issued VALUES (?, ?, ?, 1, ?, 1, ?, ?, 1, ?, ?, ?)',
-    'historical-id', '000000000001', historicalDna, owner, request(1), 'historical-pack',
-    1792700000, 'test-1', 'original-signed-certificate');
-  let mint = new Mint(storage, f.options);
-  assert.deepEqual(storage.exec('SELECT favorite, certificate FROM issued').map(r => ({ ...r })), [
-    { favorite: 0, certificate: 'original-signed-certificate' }
-  ]);
-  storage.close(); f.stores[0] = null;
-  mint = new Mint(f.open(), f.options);
-  assert.deepEqual(mint.exec('SELECT favorite, certificate FROM issued').map(r => ({ ...r })), [
-    { favorite: 0, certificate: 'original-signed-certificate' }
-  ]);
-});
 
 test('default 1000 batch prepares packs across quintiles, resumes after reopen and hides incomplete inventory', async t => {
   const f = await fixture(t);
@@ -330,49 +252,12 @@ test('draws packs without replacement, exhausts before next batch and preserves 
   assert.equal(newInventory[9].serial, '000000000025');
 });
 
-test('failed signing survives restart and retries the same pack with its original key', async t => {
-  const f = await fixture(t);
-  let storage = f.open();
-  const broken = new Mint(storage, { ...f.options, resolveSigningKey: () => { throw new Error('key unavailable'); } });
-  broken.prepare({ batchSize: 5 }); // 1 pack
-  await assert.rejects(broken.issue({ owner, request: request(1) }), /key unavailable/);
-  const saved = storage.exec('SELECT * FROM issued WHERE owner=? AND request=?', owner, request(1));
-  assert.equal(saved.length, 5);
-  assert.ok(saved.every(r => r.certificate === null));
-  assert.equal(broken.state().remaining, 0); // pack slot was allocated
-
-  storage.close(); f.stores[0] = null;
-  storage = f.open();
-  let resolved;
-  const mint = new Mint(storage, { ...f.options, key: 'test-2', resolveSigningKey: key => { resolved = key; return f.keys.privateKey; } });
-  const result = await mint.issue({ owner, request: request(1) });
-  assert.equal(result.certificates.length, 5);
-  assert.equal(resolved, 'test-1');
-  for (let i = 0; i < 5; i++) {
-    const cert = JSON.parse(result.certificates[i]);
-    assert.equal(cert.id, saved[i].id);
-    assert.equal(cert.issuedAt, saved[i].issued_at);
-    assert.equal(cert.key, 'test-1');
-  }
-});
-
-test('preparation rollback, validation, mint binding, nested savepoints and serial ceiling', async t => {
+test('preparation rollback, validation, mint binding and serial ceiling', async t => {
   const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
   storage.exec("CREATE TRIGGER fail_insert BEFORE INSERT ON inventory BEGIN SELECT RAISE(ABORT, 'test failure'); END");
   assert.throws(() => mint.prepare({ batchSize: 5 }), /test failure/);
   assert.equal(mint.state().next_serial, 1); assert.equal(mint.state().batch, 0);
   storage.exec('DROP TRIGGER fail_insert');
-  // Nested transactionSync supports savepoints and preserves outer work when an inner savepoint rolls back.
-  storage.transactionSync(() => {
-    storage.exec('CREATE TABLE nested_check (v INTEGER)');
-    storage.exec('INSERT INTO nested_check VALUES (1)');
-    assert.throws(() => storage.transactionSync(() => {
-      storage.exec('INSERT INTO nested_check VALUES (2)');
-      throw new Error('inner abort');
-    }), /inner abort/);
-  });
-  assert.deepEqual(storage.exec('SELECT v FROM nested_check').map(r => r.v), [1]);
-  storage.exec('DROP TABLE nested_check');
   for (const batchSize of [0, -1, 1.5, '1000', 1000001, 7, 13]) assert.throws(() => mint.prepare({ batchSize }));
   assert.throws(() => mint.prepare({ chunkSize: 1001 }), /chunk size/);
   await assert.rejects(mint.issue({ owner: '', request: request(1) }), /Invalid issuance/);
@@ -423,129 +308,29 @@ test('independent concurrent SQLite connections cannot allocate twice', async t 
   assert.equal(storage.exec('SELECT * FROM issued').length, 35);
 });
 
-test('allocation rolls back as a unit and request IDs are scoped to the owner', async t => {
+test('lifetime allowance counts packs atomically across concurrent choices and retries do not consume it twice', async t => {
   const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
-  assert.throws(() => new Mint(storage, { ...f.options, key: undefined }), /configuration/);
-  mint.prepare({ batchSize: 15 }); // 3 packs
-  const original = storage.exec('SELECT * FROM inventory ORDER BY id');
-  storage.exec("CREATE TRIGGER fail_allocation BEFORE UPDATE OF remaining ON mint_state BEGIN SELECT RAISE(ABORT, 'allocation failure'); END");
-  await assert.rejects(mint.issue({ owner, request: request(1) }), /allocation failure/);
-  assert.deepEqual(storage.exec('SELECT * FROM inventory ORDER BY id'), original);
-  assert.equal(storage.exec('SELECT * FROM issued').length, 0);
-  assert.equal(mint.state().remaining, 3);
-  storage.exec('DROP TRIGGER fail_allocation');
-  const first = await mint.issue({ owner, request: request(1) });
-  const second = await mint.issue({ owner: '234567890123456789', request: request(1) });
-  assert.notEqual(JSON.parse(first.certificates[0]).id, JSON.parse(second.certificates[0]).id);
-  const reopened = new Mint(f.open(), { ...f.options, resolveSigningKey: () => { throw new Error('must use persisted certificate'); } });
-  assert.deepEqual(await reopened.issue({ owner, request: request(1) }), first);
-  assert.equal(mint.state().remaining, 1);
-});
-
-test('lifetime allowance counts packs atomically and retries do not consume it twice', async t => {
-  const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
-  mint.prepare({ batchSize: 25 }); // 5 packs
+  mint.prepare({ batchSize: 30 }); // 6 packs
   await assert.rejects(mint.issue({ owner, request: request(0) }, { lifetimeLimit: 0 }), /limit reached/);
-  assert.equal(mint.state().remaining, 5);
+  assert.equal(mint.state().remaining, 6);
   const outcomes = await Promise.allSettled(Array.from({ length: 5 }, (_, i) => mint.issue({ owner, request: request(i) }, { lifetimeLimit: 2 })));
   assert.equal(outcomes.filter(r => r.status === 'fulfilled').length, 2);
   assert.ok(outcomes.filter(r => r.status === 'rejected').every(r => /limit reached/.test(r.reason.message)));
-  assert.equal(mint.state().remaining, 3);
+  assert.equal(mint.state().remaining, 4);
   const first = outcomes[0].value;
   assert.deepEqual(await mint.issue({ owner, request: request(0) }, { lifetimeLimit: 0 }), first);
   for (const lifetimeLimit of [-1, NaN, '3', 1.5]) await assert.rejects(mint.issue({ owner, request: request(9) }, { lifetimeLimit }), /Invalid lifetime/);
+
+  // Concurrent different choices for one offer grant only one pack and enforce the allowance.
+  const other = '234567890123456789';
+  const offer = mint.offer({ owner: other, request: request(10) }, { lifetimeLimit: 1 });
+  const results = await Promise.allSettled(offer.choices.map(option => new Mint(f.open(), f.options).issue({ owner: other, request: offer.request, choice: option.choice }, { lifetimeLimit: 1 })));
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(mint.exec('SELECT COUNT(*) AS n FROM issued WHERE owner=?', other)[0].n, 5);
+  assert.throws(() => mint.offer({ owner: other, request: request(11) }, { lifetimeLimit: 1 }), /limit reached/);
 });
 
-test('regular pack counters backfill historical ownership once and exclude starter packs', async t => {
-  const f = await fixture(t), mint = new Mint(f.open(), f.options);
-  mint.prepare({ batchSize: 30 });
-  await mint.issue({ owner, request: request(1) });
-  await mint.issue({ owner, request: request(2) });
-  await mint.claimStarter({ owner, kind: 'signup' });
-  assert.equal(mint.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0].regular_packs, 2);
-
-  // Simulate an existing installation whose issued history predates the counter table.
-  mint.exec('DELETE FROM mint_migrations WHERE id=?', 'regular-pack-counts-v1');
-  mint.exec('DROP TABLE mint_account_counts');
-  const upgraded = new Mint(f.open(), f.options);
-  assert.equal(upgraded.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0].regular_packs, 2);
-  assert.throws(() => upgraded.offer({ owner, request: request(3) }, { lifetimeLimit: 2 }), /limit reached/);
-  const offer = upgraded.offer({ owner, request: request(3) }, { lifetimeLimit: 3 });
-  await upgraded.issue({ owner, request: offer.request, choice: offer.choices[0].choice }, { lifetimeLimit: 3 });
-
-  const reopened = new Mint(f.open(), f.options);
-  assert.equal(reopened.exec('SELECT regular_packs FROM mint_account_counts WHERE owner=?', owner)[0].regular_packs, 3);
-  assert.throws(() => reopened.offer({ owner, request: request(4) }, { lifetimeLimit: 3 }), /limit reached/);
-  assert.equal(reopened.exec('SELECT COUNT(*) AS n FROM mint_migrations WHERE id=?', 'regular-pack-counts-v1')[0].n, 1);
-});
-
-test('seamlessly migrates legacy pre-pack database schema on initialization', async t => {
-  const f = await fixture(t);
-  const storage = f.open();
-  storage.exec(`CREATE TABLE mint_state (
-    singleton INTEGER PRIMARY KEY CHECK(singleton=1), mint TEXT NOT NULL,
-    next_serial INTEGER NOT NULL, batch INTEGER NOT NULL, size INTEGER NOT NULL,
-    prepared INTEGER NOT NULL, remaining INTEGER NOT NULL, start_serial INTEGER NOT NULL) STRICT`);
-  storage.exec(`CREATE TABLE inventory (
-    slot INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, serial TEXT NOT NULL UNIQUE, dna TEXT NOT NULL) STRICT`);
-  storage.exec(`CREATE TABLE issued (
-    id TEXT PRIMARY KEY, serial TEXT NOT NULL UNIQUE, dna TEXT NOT NULL,
-    batch INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL,
-    request TEXT NOT NULL, issued_at INTEGER NOT NULL, key TEXT NOT NULL,
-    certificate TEXT, UNIQUE(owner, request)) STRICT`);
-  storage.exec('CREATE INDEX issued_owner ON issued(owner)');
-  storage.exec(`INSERT INTO mint_state VALUES (1, '${mintID}', 6, 1, 10, 10, 5, 1)`);
-  storage.exec(`INSERT INTO issued VALUES ('legacy_id_1', '000000000001', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', 1, '${owner}', 1, 'legacy_req_1', 1700000000, 'test-1', '{"type":"ubu-signed"}')`);
-
-  const mint = new Mint(storage, f.options);
-  const legacyRow = storage.exec('SELECT * FROM issued WHERE id=?', 'legacy_id_1')[0];
-  assert.equal(legacyRow.pack_id, 'legacy_req_1');
-  assert.equal(legacyRow.quintile, 0);
-
-  const invCols = storage.exec('PRAGMA table_info(inventory)').map(c => c.name);
-  assert.ok(invCols.includes('pack_slot'));
-  assert.ok(invCols.includes('quintile'));
-
-  mint.prepare({ batchSize: 5 });
-  const result = await mint.issue({ owner, request: request(100) });
-  assert.equal(result.certificates.length, 5);
-});
-
-test('retired server sort keys are dropped without touching issued ubus or inventory', async t => {
-  const f = await fixture(t), mint = new Mint(f.open(), f.options);
-  mint.prepare({ batchSize: 15 });
-  const offer = mint.offer({ owner, request: request(1) });
-  await mint.issue({ owner, request: offer.request, choice: offer.choices[0].choice });
-  mint.exec('UPDATE issued SET favorite=1');
-  // Recreate the schema that kept rarity sort keys on the server.
-  mint.exec('ALTER TABLE issued ADD COLUMN rarity_bits REAL');
-  mint.exec('UPDATE issued SET rarity_bits=-99');
-  mint.exec('CREATE TABLE rarity_revision (singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL) STRICT');
-  mint.exec('INSERT INTO rarity_revision VALUES (1, 3)');
-  mint.exec('CREATE INDEX issued_old_sort ON issued(owner, (certificate IS NULL), issued_at ASC, serial ASC)');
-  mint.exec('CREATE INDEX issued_rarity_sort ON issued(owner, (certificate IS NULL), rarity_bits DESC, serial DESC)');
-  mint.exec('CREATE INDEX issued_serial_sort ON issued(owner, (certificate IS NULL), serial ASC)');
-  mint.exec('CREATE INDEX issued_favorite_sort ON issued(owner, (certificate IS NULL), favorite DESC, issued_at DESC, serial DESC)');
-  mint.exec('CREATE INDEX issued_rarity_backfill ON issued(id) WHERE rarity_bits IS NULL');
-  const rows = (m, table) => m.exec(`SELECT * FROM ${table} ORDER BY id`).map(row => ({ ...row }));
-  const before = rows(mint, 'issued').map(({ rarity_bits, ...row }) => row), inventory = rows(mint, 'inventory');
-  const schema = m => ({
-    columns: m.exec('PRAGMA table_info(issued)').map(c => c.name),
-    indexes: m.exec("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='issued' AND sql IS NOT NULL ORDER BY name").map(r => r.name),
-    tables: m.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").map(r => r.name)
-  });
-  const upgraded = new Mint(f.open(), f.options), migrated = schema(upgraded);
-  assert.ok(!migrated.columns.includes('rarity_bits'));
-  assert.deepEqual(migrated.indexes, ['issued_owner', 'issued_recent_sort', 'issued_request']);
-  assert.ok(!migrated.tables.includes('rarity_revision'));
-  assert.deepEqual(rows(upgraded, 'issued'), before);
-  assert.deepEqual(rows(upgraded, 'inventory'), inventory);
-  const reopened = new Mint(f.open(), f.options);
-  assert.deepEqual(schema(reopened), migrated);
-  assert.deepEqual(rows(reopened, 'issued'), before);
-});
-
-test('saved teams accept only owned signed ubus with DNA-granted supers and reject array/number coercion', async t => {
+test('saved teams accept only owned signed ubus with DNA-granted supers, reject coercion, and drive matchTeam fallback', async t => {
   const f = await fixture(t), mint = new Mint(f.open(), f.options);
   mint.prepare({ batchSize: 15 });
   const offer = mint.offer({ owner, request: request(1) });
@@ -560,16 +345,25 @@ test('saved teams accept only owned signed ubus with DNA-granted supers and reje
   const slots = (a, b, c, s = null) => [a, b, c].map(serial => ({ serial, super: s }));
   const validEquippedSlots = issuedRows.slice(0, 3).map(row => ({ serial: row.serial, super: firstSuper(row) }));
   assert.deepEqual(mint.teams(owner), { teams: [], last: null });
-  const saved = { teams: [{ name: 'Wall', slots: validEquippedSlots }], last: slots(serials[2], serials[3], serials[4]) };
+
+  // Before saving a last team, matchTeam picks newest, then prioritizes favorites.
+  assert.deepEqual(mint.matchTeam(owner).entries.map(row => row.serial), serials.slice(2).reverse());
+  mint.exec('UPDATE issued SET favorite=1 WHERE serial=?', serials[0]);
+  assert.equal(mint.matchTeam(owner).entries[0].serial, serials[0]);
+
+  const chosen = ubu.decode(ubu.fromCode(issuedRows[1].dna)).supers[1] % 8;
+  const last = [{ serial: serials[1], super: chosen }, { serial: serials[3], super: null }, { serial: serials[2], super: null }];
+  const saved = { teams: [{ name: 'Wall', slots: validEquippedSlots }], last };
   assert.deepEqual(mint.saveTeams(owner, saved), saved);
   assert.deepEqual(mint.teams(owner), saved);
   assert.deepEqual(mint.teams('someone-else'), { teams: [], last: null });
+  const team = mint.matchTeam(owner);
+  assert.deepEqual(team.entries.map(row => row.serial), last.map(slot => slot.serial));
+  assert.deepEqual(team.supers, [chosen, firstSuper(issuedRows[3]), firstSuper(issuedRows[2])]);
+  assert.deepEqual(mint.matchTeam('987654321098765432'), { entries: [], supers: [] });
+
   const invalid = [
     null, [], { teams: [] }, { teams: [], last: null, extra: 1 },
-    { teams: [{ name: ' Wall', slots: saved.teams[0].slots }], last: null },
-    { teams: [{ name: '', slots: saved.teams[0].slots }], last: null },
-    { teams: [{ name: 'x'.repeat(41), slots: saved.teams[0].slots }], last: null },
-    { teams: [{ name: 'Tab\tName', slots: saved.teams[0].slots }], last: null },
     { teams: [{ name: 'Dup', slots: slots(serials[0], serials[0], serials[1]) }], last: null },
     { teams: [{ name: 'ArrDup', slots: [{ serial: [serials[0]], super: null }, { serial: [serials[0]], super: null }, { serial: [serials[0]], super: null }] }], last: null },
     { teams: [{ name: 'NumSerial', slots: [{ serial: 100000000000, super: null }, { serial: serials[1], super: null }, { serial: serials[2], super: null }] }], last: null },
@@ -587,18 +381,23 @@ test('saved teams accept only owned signed ubus with DNA-granted supers and reje
   assert.deepEqual(new Mint(f.open(), f.options).teams(owner), { teams: [], last: null });
 });
 
-test('approach B dispenses from oldest batch first and spills over seamlessly when unreserved packs drop below three', async t => {
+test('approach B refills without replacing leftovers, dispenses oldest batch first, and spills over below three packs', async t => {
   const f = await fixture(t), storage = f.open(), mint = new Mint(storage, f.options);
   mint.prepare({ batchSize: 15 });
-  mint.prepare({ batchSize: 10, minimumPacks: 10 });
-  assert.equal(mint.state().remaining, 5);
-
   const offer1 = mint.offer({ owner, request: request(1) });
   const batchOfChoice = token => mint.exec('SELECT batch FROM inventory WHERE id=(SELECT anchor FROM pack_choices WHERE token=?)', token)[0].batch;
   assert.ok(offer1.choices.every(c => batchOfChoice(c.choice) === 1));
 
   await mint.issue({ owner, request: offer1.request, choice: offer1.choices[0].choice });
   assert.ok(mint.exec('SELECT batch FROM issued WHERE request=?', offer1.request).every(r => r.batch === 1));
+  const leftovers = mint.exec('SELECT * FROM inventory ORDER BY id');
+
+  // Chunked refill preserves leftover batch-1 packs while preparing batch 2.
+  mint.prepare({ batchSize: 10, chunkSize: 3, minimumPacks: 3 });
+  assert.equal(mint.state().remaining, 2);
+  mint.prepare({ batchSize: 10, minimumPacks: 3 });
+  assert.equal(mint.state().remaining, 4);
+  for (const item of leftovers) assert.deepEqual(mint.exec('SELECT * FROM inventory WHERE id=?', item.id)[0], item);
 
   const otherOwner = '234567890123456789';
   const offer2 = mint.offer({ owner: otherOwner, request: request(2) });

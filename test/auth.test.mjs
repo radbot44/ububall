@@ -99,7 +99,7 @@ test('Discord login return navigation preserves safe paths and rejects malicious
   assert.equal(res.headers.get('Location'), env.ORIGIN + '/mint.html');
 });
 
-test('guest sessions are distinct from Discord identities and Discord login records the replaced guest', async () => {
+test('guest sessions are distinct from Discord identities, expire, and Discord login records the replaced guest', async () => {
   const guest = await auth.guest(env);
   const cookie = guest.cookie.split(';')[0];
   const value = await auth.session(new Request(env.ORIGIN, { headers: { Cookie: cookie } }), env);
@@ -112,9 +112,7 @@ test('guest sessions are distinct from Discord identities and Discord login reco
   const discord = getSetCookies(result.headers).find(c => c.startsWith('__Host-ubu-session=')).split(';')[0];
   const upgraded = await auth.session(new Request(env.ORIGIN, { headers: { Cookie: discord } }), env);
   assert.equal(upgraded.owner, '123456789012345678'); assert.equal(upgraded.alias, value.owner); assert.equal(upgraded.guest, undefined);
-});
 
-test('Discord logins last indefinitely while guest sessions and OAuth states expire', async () => {
   const expiredDiscord = await auth.seal({ purpose: 'session', owner: '123456789012345678', csrf: 'A'.repeat(43), expires: 1000 }, env.SESSION_SECRET);
   const discordSession = await auth.session(new Request(env.ORIGIN, { headers: { Cookie: `__Host-ubu-session=${expiredDiscord}` } }), env);
   assert.equal(discordSession?.owner, '123456789012345678');

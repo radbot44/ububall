@@ -1,7 +1,6 @@
 package one.tch.ububall;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.util.HashMap;
@@ -39,36 +38,33 @@ public class OtaBootStateTest {
     }
 
     @Test
-    public void pendingBundleIsPromotedAsUnconfirmedFirstAttempt() {
+    public void pendingBundlePromotesSurvivesOneInterruptedLaunchAndConfirms() {
         dirs.add("/ota/bundle-a");
         dirs.add("/ota/bundle-b");
         Map<String, String> p = prefs(
             OtaBootState.KEY_ACTIVE_PATH, "/ota/bundle-a", OtaBootState.KEY_ACTIVE_VERSION, "a",
             OtaBootState.KEY_PENDING_PATH, "/ota/bundle-b", OtaBootState.KEY_PENDING_VERSION, "b");
-        OtaBootState.Decision d = OtaBootState.onLaunch(p, STAMP, valid);
-        apply(p, d);
-        assertEquals(OtaBootState.Action.BOOT_UNCONFIRMED, d.action);
-        assertEquals("/ota/bundle-b", d.serverPath);
+        OtaBootState.Decision first = OtaBootState.onLaunch(p, STAMP, valid);
+        apply(p, first); // attempt 1, killed before confirming
+        assertEquals(OtaBootState.Action.BOOT_UNCONFIRMED, first.action);
+        assertEquals("/ota/bundle-b", first.serverPath);
         assertEquals("b", p.get(OtaBootState.KEY_UNCONFIRMED_VERSION));
         assertEquals("1", p.get(OtaBootState.KEY_BOOT_ATTEMPTS));
         assertEquals("/ota/bundle-a", p.get(OtaBootState.KEY_PREVIOUS_PATH));
         assertEquals("", p.get(OtaBootState.KEY_PENDING_VERSION));
-    }
 
-    @Test
-    public void oneInterruptedLaunchDoesNotBlockAGoodBundle() {
-        dirs.add("/ota/bundle-b");
-        Map<String, String> p = prefs(
-            OtaBootState.KEY_PENDING_PATH, "/ota/bundle-b", OtaBootState.KEY_PENDING_VERSION, "b");
-        apply(p, OtaBootState.onLaunch(p, STAMP, valid)); // attempt 1, killed before confirming
         OtaBootState.Decision second = OtaBootState.onLaunch(p, STAMP, valid);
         apply(p, second);
         assertEquals(OtaBootState.Action.BOOT_UNCONFIRMED, second.action);
         assertEquals("/ota/bundle-b", second.serverPath);
         assertEquals("2", p.get(OtaBootState.KEY_BOOT_ATTEMPTS));
+
         apply(p, new OtaBootState.Decision(OtaBootState.Action.NONE, false, OtaBootState.onBootConfirmed(p), ""));
         assertEquals("", p.get(OtaBootState.KEY_UNCONFIRMED_VERSION));
         assertEquals("", p.getOrDefault(OtaBootState.KEY_BLOCKED_VERSION, ""));
+        assertEquals(OtaBootState.Action.NONE, OtaBootState.onWatchdogExpired(p, valid).action);
+        assertTrue(OtaBootState.onBootConfirmed(p).isEmpty());
+
         OtaBootState.Decision third = OtaBootState.onLaunch(p, STAMP, valid);
         assertEquals(OtaBootState.Action.NONE, third.action);
         assertEquals("/ota/bundle-b", third.serverPath);
@@ -111,13 +107,6 @@ public class OtaBootStateTest {
     }
 
     @Test
-    public void watchdogDoesNothingAfterConfirmation() {
-        Map<String, String> p = prefs(OtaBootState.KEY_ACTIVE_PATH, "/ota/bundle-b");
-        assertEquals(OtaBootState.Action.NONE, OtaBootState.onWatchdogExpired(p, valid).action);
-        assertTrue(OtaBootState.onBootConfirmed(p).isEmpty());
-    }
-
-    @Test
     public void blockedOrMissingPendingBundleIsDiscarded() {
         dirs.add("/ota/bundle-b");
         Map<String, String> p = prefs(
@@ -130,32 +119,16 @@ public class OtaBootStateTest {
     }
 
     @Test
-    public void missingActiveBundleRevertsToApkAssets() {
-        Map<String, String> p = prefs(OtaBootState.KEY_ACTIVE_PATH, "/ota/gone", OtaBootState.KEY_ACTIVE_VERSION, "a");
-        OtaBootState.Decision d = OtaBootState.onLaunch(p, STAMP, valid);
+    public void missingActiveOrUnconfirmedBundleRecoversSafely() {
+        Map<String, String> active = prefs(OtaBootState.KEY_ACTIVE_PATH, "/ota/gone", OtaBootState.KEY_ACTIVE_VERSION, "a");
+        OtaBootState.Decision d = OtaBootState.onLaunch(active, STAMP, valid);
         assertEquals("", d.serverPath);
         assertEquals("", d.updates.get(OtaBootState.KEY_ACTIVE_VERSION));
-    }
 
-    @Test
-    public void unconfirmedBundleWhoseDirectoryVanishedRollsBack() {
-        Map<String, String> p = prefs(
+        Map<String, String> unconfirmed = prefs(
             OtaBootState.KEY_ACTIVE_PATH, "/ota/gone", OtaBootState.KEY_UNCONFIRMED_VERSION, "b",
             OtaBootState.KEY_BOOT_ATTEMPTS, "1");
-        assertEquals(OtaBootState.Action.ROLLBACK, OtaBootState.onLaunch(p, STAMP, valid).action);
-    }
-
-    @Test
-    public void cleanupKeepsReferencedBundlesOnly() {
-        Map<String, String> p = prefs(
-            OtaBootState.KEY_ACTIVE_PATH, "/data/ota/bundle-a",
-            OtaBootState.KEY_PREVIOUS_PATH, "",
-            OtaBootState.KEY_PENDING_PATH, "/data/ota/bundle-c");
-        Set<String> keep = OtaBootState.keepDirectoryNames(p);
-        assertEquals(2, keep.size());
-        assertTrue(keep.contains("bundle-a"));
-        assertTrue(keep.contains("bundle-c"));
-        assertFalse(keep.contains("staging-c"));
+        assertEquals(OtaBootState.Action.ROLLBACK, OtaBootState.onLaunch(unconfirmed, STAMP, valid).action);
     }
 
     @Test

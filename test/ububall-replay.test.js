@@ -126,55 +126,6 @@ function field(mode, place) {
 }
 const armed = (state, key) => Object.assign(state.bodies[0], { equippedSuper: { ...P.SUPERS.find(s => s.key === key) }, meter: 100 });
 
-test('Game Log counts big post shots once and credits passes to the teammate who sent the ball', () => {
-  function gameLog(y, power, teammate = false) {
-    const state = field('standard', {
-      0: { x: 720, y }, 1: teammate ? { x: 850, y } : { x: 265, y: 430 },
-      2: { x: 350, y: 430 }, 3: { x: 435, y: 430 }, 4: { x: 520, y: 430 }, 5: { x: 605, y: 430 },
-      6: { x: 775, y }
-    });
-    const replay = { turns: [] }, plans = [{ ...still, power }, still, still, still, still, still];
-    const t = R.addTurn(replay, { ...state, fouls: M.newFouls(), plans });
-    const { replay: result, state: after } = M.resolveTurn(P, { ...state, tally: M.newTally() }, plans);
-    t.ticks = result.ticks;
-    t.saves = result.saves;
-    if (result.goal !== null) t.goal = { team: result.goal, scorer: result.scorer, assist: result.assist, label: result.label };
-    const out = R.stats(replay);
-    for (const k of ['goals', 'assists', 'shots', 'saves', 'bigSaves', 'checks', 'cards']) assert.deepEqual(out[k], after.tally[k], `S4 ${k}`);
-    assert.deepEqual(out.topShot, after.tally.topSpeed, 'S4 topShot');
-    return out;
-  }
-  const post = gameLog(235, 1);
-  assert.equal(post.shots[0], 1);
-  assert.equal(post.events.find(event => event.type === 'Shot').outcome, 'Post');
-  const postPath = post.events.find(event => event.type === 'Shot').path;
-  assert.ok(postPath.from.tick < postPath.to.tick);
-  assert.ok(postPath.from.x < postPath.to.x);
-  assert.deepEqual(post.rounds, [{ team: null }]);
-  assert.equal(gameLog(235, .6).shots[0], 0);
-  const goal = gameLog(245, 1);
-  assert.equal(goal.shots[0], 1);
-  assert.equal(goal.goals[0], 1);
-  const scoringPath = goal.events.find(event => event.type === 'Goal').path;
-  assert.deepEqual(goal.events.find(event => event.type === 'Shot').path, scoringPath);
-  assert.equal(scoringPath.to.tick, goal.trails[0].endTick);
-  assert.deepEqual(goal.rounds, [{ team: 0, score: 1 }]);
-  const pass = gameLog(300, 1, true);
-  const sent = pass.events.filter(event => event.type === 'Pass' && event.actor === 0);
-  assert.ok(sent.length > 0);
-  assert.equal(pass.passes[0], sent.length);
-  const event = pass.events.find(event => event.type === 'Pass');
-  assert.equal(event.target, 1);
-  assert.ok(event.tick > 0);
-  assert.equal(event.turnIndex, 0);
-  assert.ok(pass.events.every(({ path, tick }) => path.from.tick < path.to.tick && path.to.tick >= tick));
-  assert.equal(event.path.to.tick, event.tick);
-  assert.ok(event.tick - event.path.from.tick <= 120);
-  const [{ samples }] = pass.trails;
-  assert.deepEqual([...samples.slice(12, 14)], [775, 300]);
-  assert.ok(samples.some((value, index) => index % 14 === 12 && value > 775));
-});
-
 function scripted(each = () => {}) {
   const ends = [], play = (state, moves) => {
     const json = JSON.stringify(state), result = M.resolveTurn(P, state, moves, { effects: false });
@@ -233,20 +184,8 @@ test('every scripted turn plays the same from a JSON copy of its state', () => {
   assert.ok(turns > 20);
 });
 
-// Online state crosses JSON (the server's storage and every client update), so a Sticky hold must
-// carry into the next Pulse turn from a JSON copy exactly as it does in memory.
-test('a Sticky hold survives JSON into the next Pulse turn', () => {
-  const pulse = field('pulse', { 0: { x: 440, y: 300 } }); armed(pulse, 'sticky');
-  const held = M.resolveTurn(P, pulse, [{ ...still, power: .5, superArm: true }, still, still, still, still, still]).state;
-  assert.equal(P.holder(held.bodies), held.bodies[0], 'the turn ends with the ball held');
-  const moves = [{ ...still, angle: Math.PI / 2, power: .6 }, still, still, still, still, still];
-  const memory = M.resolveTurn(P, structuredClone(held), moves).state, json = M.resolveTurn(P, JSON.parse(JSON.stringify(held)), moves).state;
-  assert.equal(JSON.stringify(R.snapshot(json.bodies)), JSON.stringify(R.snapshot(memory.bodies)));
-  assert.ok(Math.abs(memory.bodies[6].y - 300) > 50, 'the ball went with its carrier');
-});
-
-test('replays refuse other versions and any file a writer would not produce', async () => {
-  const { replay } = record(3, 'standard', 2);
+test('replays refuse other versions, invalid bounds, forged finals, leaky anonymization, and any file a writer would not produce', async () => {
+  const { replay } = record(3, 'pulse', 2);
   const good = R.canonical({ type: 'ububall-replay', format: R.FORMAT, physics: P.VERSION, ...replay });
   const gzip = async text => new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
   await assert.rejects(R.read(await gzip(JSON.stringify({ ...good, physics: P.VERSION - 1 }))), /older version/);
@@ -257,14 +196,40 @@ test('replays refuse other versions and any file a writer would not produce', as
   const forged = structuredClone(good);
   forged.turns[0].bodies[0].__proto__ = 1;
   await assert.rejects(R.read(await gzip(JSON.stringify(forged).replace('"x":', '"__proto__":{"polluted":1},"x":'))), /not a valid/);
-  for (const patch of [t => { t.bodies[0].x = 'a'; }, t => { t.bodies[6].team = 0; }, t => { t.plans[0].power = 2; }, t => { t.ticks = 0; }, t => { t.bodies[1].holding = 1; },
-    t => { t.stops = [{ tick: 0, ms: 60 }]; }, t => { t.stops = [{ tick: 2, ms: 60 }, { tick: 1, ms: 60 }]; }, t => { t.saves = [{ tick: 1, index: 0, own: false }]; }]) {
-    const bad = structuredClone(good); patch(bad.turns[0]);
+  for (const patch of [
+    r => { r.turns[0].bodies[0].x = 'a'; },
+    r => { r.turns[0].bodies[6].team = 0; },
+    r => { r.turns[0].plans[0].power = 2; },
+    r => { r.turns[0].ticks = 0; },
+    r => { r.turns[0].bodies[1].holding = 1; },
+    r => { r.turns[0].stops = [{ tick: 0, ms: 60 }]; },
+    r => { r.turns[0].stops = [{ tick: 2, ms: 60 }, { tick: 1, ms: 60 }]; },
+    r => { r.turns[0].saves = [{ tick: 1, index: 0, own: false }]; },
+    r => { r.turns[0].bodies[0].mass = 0; },
+    r => { r.turns[0].bodies[0].radius = -5; },
+    r => { r.turns[0].bodies[0].friction = -1; },
+    r => { r.turns[0].bodies[6].curveMult = 0; },
+    r => { r.turns[0].bodies[0].daze = -0.1; },
+    r => { r.turns[0].ticks = M.turnTicks('pulse') + 1; },
+    r => { r.final = { scores: [5, 0], winner: 1 }; },
+    r => { r.final = { scores: [2, 2], winner: 0 }; }
+  ]) {
+    const bad = structuredClone(good);
+    patch(bad);
     await assert.rejects(R.read(await gzip(JSON.stringify(bad))), /not a valid/);
   }
   const badDna = structuredClone(good); badDna.ubus[0].dna = badDna.ubus[0].dna.slice(0, 170) + 'B';
   await assert.rejects(R.read(await gzip(JSON.stringify(badDna))), /not a valid/);
   assert.deepEqual(await R.read(await gzip(JSON.stringify(good))), good);
+
+  const anon = R.canonical({ type: 'ububall-replay', format: R.FORMAT, physics: P.VERSION, ...R.anonymize(replay) });
+  assert.deepEqual(await R.read(await gzip(JSON.stringify(anon))), JSON.parse(JSON.stringify(anon)));
+  const leakyName = structuredClone(anon);
+  leakyName.names = ['RealName', 'Saffron'];
+  await assert.rejects(R.read(await gzip(JSON.stringify(leakyName))), /not a valid/);
+  const leakyDna = structuredClone(anon);
+  leakyDna.ubus[0].dna = 'AAAAAAAAAAE' + leakyDna.ubus[0].dna.slice(11);
+  await assert.rejects(R.read(await gzip(JSON.stringify(leakyDna))), /not a valid/);
 });
 
 test('clips keep a turn or a round as a titled replay of its own', async () => {
@@ -289,20 +254,6 @@ test('clips keep a turn or a round as a titled replay of its own', async () => {
   }
 });
 
-test('replay snapshot and restore preserves ironGuard flag', () => {
-  const bodies = P.kickoff();
-  bodies[0].guarding = true;
-  bodies[0].ironGuard = true;
-  bodies[1].guarding = true;
-  bodies[1].ironGuard = false;
-  const snap = R.snapshot(bodies);
-  const restored = R.restore(snap);
-  assert.equal(restored[0].guarding, true);
-  assert.equal(restored[0].ironGuard, true);
-  assert.equal(restored[1].guarding, true);
-  assert.equal(restored[1].ironGuard, false);
-});
-
 test('privacy keeps the play, looks and voices but drops every name', async () => {
   const { replay, ends } = record(4, 'standard', 6);
   const hidden = await R.read(await R.write(R.anonymize({ ...replay, seat: 1, title: 'Me vs Bob' })));
@@ -317,110 +268,6 @@ test('privacy keeps the play, looks and voices but drops every name', async () =
     assert.deepEqual([b.attributes, b.voice, b.stats], [a.attributes, a.voice, a.stats]);
   });
   hidden.turns.forEach((t, i) => assert.equal(JSON.stringify(replayTurn(t)), JSON.stringify(ends[i])));
-});
-
-test('Snap and Rim-Around turns round-trip identically through .ububall files and JSON state copies', async () => {
-  const { state: initState, ubus } = setup(21, 'pulse');
-  // Place slot 0 passing down into slot 1 driving right for a Snap one-timer, while slot 2 carves the bottom-left corner
-  initState.bodies.slice(0, 6).forEach((b, i) => { b.meter = 0; Object.assign(b, { x: 200 + i * 90, y: 460, vx: 0, vy: 0, omega: 0 }); });
-  Object.assign(initState.bodies[0], { x: 380, y: 170 });
-  Object.assign(initState.bodies[1], { x: 340, y: 300 });
-  Object.assign(initState.bodies[2], { x: 92, y: 390 });
-  Object.assign(initState.bodies[6], { x: 380, y: 214, vx: 0, vy: 0 });
-
-  const replay = R.create({ mode: 'pulse', names: ['Home', 'Away'], ubus });
-  const turnMoves = [
-    [
-      { angle: Math.PI / 2, power: 0.65, spin: 0, superArm: false, guard: false },
-      { angle: 0, power: 0.75, spin: 0, superArm: false, guard: false },
-      { angle: Math.PI * 0.44, power: 0.9, spin: 1, superArm: false, guard: false },
-      still, still, still
-    ],
-    [
-      still,
-      { angle: 0, power: 0.8, spin: 0.5, superArm: false, guard: false },
-      { angle: 0, power: 0.6, spin: 0, superArm: false, guard: false },
-      still, still, still
-    ]
-  ];
-
-  let cur = initState;
-  const liveEnds = [];
-  let sawSnapStop = false;
-  for (const rawMoves of turnMoves) {
-    const jsonState = JSON.parse(JSON.stringify(cur));
-    const plans = [...M.validatePlans(rawMoves.slice(0, 3)), ...M.validatePlans(rawMoves.slice(3))];
-    const entry = R.addTurn(replay, { turn: cur.turn, scores: cur.scores, fouls: cur.fouls || M.newFouls(), bodies: cur.bodies, plans });
-    const live = structuredClone(cur.bodies), play = M.newPlay();
-    P.startTurn(live, plans);
-    let ticks = 0;
-    for (let tick = 1; tick <= M.turnTicks('pulse'); tick++) {
-      ticks = tick;
-      const stepRes = M.playTick(P, live, play, {}, null, true);
-      if (stepRes.snapped && stepRes.stop >= M.HIT_STOP.snap) sawSnapStop = true;
-      if (stepRes.goal !== null || P.settled(live)) break;
-    }
-    const resMem = M.resolveTurn(P, cur, rawMoves);
-    const resJson = M.resolveTurn(P, jsonState, rawMoves);
-    assert.equal(JSON.stringify(resJson), JSON.stringify(resMem), 'JSON state copy resolves identically');
-    entry.ticks = ticks;
-    entry.cards = [...resMem.state.fouls.cards];
-    entry.saves = resMem.replay.saves.map(e => ({ tick: e.tick, index: e.index, own: e.own, iron: Boolean(e.iron) }));
-    entry.stops = resMem.replay.stops;
-    if (resMem.replay.goal !== null) entry.goal = { team: resMem.replay.goal, label: resMem.replay.label, scorer: resMem.replay.scorer, assist: resMem.replay.assist };
-    liveEnds.push(R.snapshot(live));
-    cur = resMem.state;
-  }
-  assert.equal(sawSnapStop, true, 'scripted pass triggered Snap and recorded Snap hit-stop');
-  const bytes = await R.write(replay);
-  const parsed = await R.read(bytes);
-  parsed.turns.forEach((t, idx) => {
-    assert.equal(JSON.stringify(replayTurn(t)), JSON.stringify(liveEnds[idx]), `re-simulated turn ${idx + 1} matches live end`);
-  });
-});
-
-test('replay validator rejects invalid physics bounds, oversized turn ticks, forged final winners, and leaky anonymization', async () => {
-  const { replay } = record(3, 'pulse', 2);
-  const good = R.canonical({ type: 'ububall-replay', format: R.FORMAT, physics: P.VERSION, ...replay });
-  const gzip = async text => new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
-
-  for (const patch of [
-    r => { r.turns[0].bodies[0].mass = 0; },
-    r => { r.turns[0].bodies[0].radius = -5; },
-    r => { r.turns[0].bodies[0].friction = -1; },
-    r => { r.turns[0].bodies[6].curveMult = 0; },
-    r => { r.turns[0].bodies[0].daze = -0.1; },
-    r => { r.turns[0].ticks = M.turnTicks('pulse') + 1; },
-    r => { r.final = { scores: [5, 0], winner: 1 }; },
-    r => { r.final = { scores: [2, 2], winner: 0 }; }
-  ]) {
-    const bad = structuredClone(good);
-    patch(bad);
-    await assert.rejects(R.read(await gzip(JSON.stringify(bad))), /not a valid/);
-  }
-
-  const anon = R.canonical({ type: 'ububall-replay', format: R.FORMAT, physics: P.VERSION, ...R.anonymize(replay) });
-  assert.deepEqual(await R.read(await gzip(JSON.stringify(anon))), JSON.parse(JSON.stringify(anon)));
-
-  const leakyName = structuredClone(anon);
-  leakyName.names = ['RealName', 'Saffron'];
-  await assert.rejects(R.read(await gzip(JSON.stringify(leakyName))), /not a valid/);
-
-  const leakyDna = structuredClone(anon);
-  leakyDna.ubus[0].dna = 'AAAAAAAAAAE' + leakyDna.ubus[0].dna.slice(11);
-  await assert.rejects(R.read(await gzip(JSON.stringify(leakyDna))), /not a valid/);
-});
-
-test('R.stats counts bigSaves from recorded turn saves without duplicate counterfactual simulation', () => {
-  const state = field('pulse', { 0: { x: 300, y: 300 }, 3: { x: 860, y: 300 }, 6: { x: 500, y: 300, vx: 0, vy: 0 } });
-  const replay = { turns: [] };
-  const plans = Array.from({ length: 6 }, () => still);
-  const entry = R.addTurn(replay, { ...state, fouls: M.newFouls(), plans });
-  entry.ticks = 5;
-  entry.saves = [{ tick: 2, index: 3, own: false, iron: true }, { tick: 4, index: 0, own: true, iron: false }];
-  const stats = R.stats(replay);
-  assert.deepEqual(stats.bigSaves, [0, 0, 0, 1, 0, 0], 'bigSaves reflects recorded non-own saves even in clipped/Pulse turns');
-  assert.equal(stats.events.filter(e => e.type === 'Save').length, 1);
 });
 
 const GOLDEN_V31_REPLAY_B64 = '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';

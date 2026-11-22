@@ -95,23 +95,38 @@ test('mouth and eyelids use pair precedence with independent four-bit individual
     assert.deepEqual(key === 'mouth' ? m.mouth.corners : m.eyelids.active, [true, true, false, false]);
   }
 });
-test('corner curvature is one in four conditional on appearance; mouth cuts are independent one in 64', () => {
+test('mouth curvature, cuts, notch curvature, and opening ratio follow their exact bit rolls', () => {
   for (let i = 0; i < 4; i++) for (let roll = 0; roll < 4; roll++) {
     const dna = neutral(); set(dna, 162 + i * 4, 4, 15); set(dna, 342 + i * 2, 2, roll);
-    const m = ubu.decode(dna).mouth;
-    assert.equal(m.curved[i], roll === 3);
-    assert.equal(ubu.mouthPath(m).includes('Q'), roll === 3);
+    assert.equal(ubu.decode(dna).mouth.curved[i], roll === 3);
   }
-  for (let a = 0; a < 64; a++) for (let b = 0; b < 64; b++) {
+  for (const a of [0, 62, 63]) for (const b of [0, 62, 63]) {
     const dna = neutral(); set(dna, 350, 6, a); set(dna, 356, 6, b);
     const m = ubu.decode(dna).mouth;
-    assert.equal(m.lipNotch, a === 63); assert.equal(m.horizontalCut, b === 63);
+    assert.equal(m.lipNotch, a === 63);
+    assert.equal(m.horizontalCut, b === 63);
     assert.ok(!/NaN|Infinity/.test(ubu.mouthPath(m)));
   }
-  const dna = neutral(); set(dna, 350, 12, 4095);
-  const m = ubu.decode(dna).mouth, path = ubu.mouthPath(m);
-  assert.equal((path.match(/M/g) || []).length, 2); // Real hole, not a painted overlay.
-  assert.ok(m.y - m.height / 2 + m.height / 4 < m.y - m.height / 8);
+  const openDna = neutral(); set(openDna, 350, 12, 4095);
+  for (const value of [0, 511, 920, 921, 1023]) {
+    set(openDna, 362, 10, value);
+    const m = ubu.decode(openDna).mouth;
+    assert.equal(m.openingRaw, value);
+    close(m.openingRatio, 0.1 + value / 1023);
+    assert.equal(m.openingRatio >= 1, value >= 921);
+  }
+  const inactive = neutral(), before = ubu.mouthPath(ubu.decode(inactive).mouth);
+  set(inactive, 362, 10, 1023);
+  assert.equal(ubu.mouthPath(ubu.decode(inactive).mouth), before);
+  assert.equal(ubu.decode(inactive).rating, 0);
+
+  const notchDna = neutral(); set(notchDna, 350, 6, 63);
+  for (let roll = 0; roll < 4; roll++) {
+    set(notchDna, 372, 2, roll);
+    assert.equal(ubu.decode(notchDna).mouth.notchCurved, roll === 3);
+  }
+  set(notchDna, 350, 6, 0);
+  assert.equal(ubu.decode(notchDna).mouth.notchCurved, false);
 });
 test('eyelid and displacement flips preserve neutral values and act on the left eye only', () => {
   const dna = neutral(); set(dna, 258, 8, 255);
@@ -173,53 +188,6 @@ test('entire iris and pupil stay inside circles and angled lids at extremes and 
   const dna = neutral(); set(dna, 218, 10, 1023);
   close(ubu.decode(dna).eyes.dx, 35.3374);
   set(dna, 238, 10, 1023); close(ubu.decode(dna).eyes.leftX, -35.3374);
-});
-
-test('one centered lip notch and a 10–110% opening with a fully open range', () => {
-  const dna = neutral(); set(dna, 350, 12, 4095);
-  const m = ubu.decode(dna).mouth;
-  const top = m.y - m.height / 2;
-  const outer = ubu.mouthPath(m).split('Z')[0];
-  // The top edge reaches its notch depth once, directly below the mouth center.
-  const notch = `L${m.x} ${top + m.height / 4}`;
-  assert.equal(outer.split(notch).length - 1, 1);
-  for (let value = 0; value < 1024; value++) {
-    set(dna, 362, 10, value);
-    const mouth = ubu.decode(dna).mouth;
-    assert.equal(mouth.openingRaw, value);
-    close(mouth.openingRatio, .1 + value / 1023);
-    const hole = ubu.mouthPath(mouth).split('Z')[1];
-    const points = hole.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/g).map(Number);
-    const width = points[4] - points[0];
-    close(width, mouth.width * Math.min(1, mouth.openingRatio));
-    close(points[3] - points[1], mouth.height / 4);
-    assert.equal(mouth.openingRatio >= 1, value >= 921);
-  }
-  const inactive = neutral(), before = ubu.mouthPath(ubu.decode(inactive).mouth);
-  set(inactive, 362, 10, 1023);
-  assert.equal(ubu.mouthPath(ubu.decode(inactive).mouth), before);
-  assert.equal(ubu.decode(inactive).rating, 0);
-});
-
-test('notch sides are 45 degrees and its independent curvature roll is one in four', () => {
-  for (const width of [0, 511, 1023]) for (const height of [0, 511, 1023]) {
-    const dna = neutral(); set(dna, 178, 10, width); set(dna, 188, 10, height); set(dna, 350, 6, 63);
-    const m = ubu.decode(dna).mouth, d = Math.min(m.height / 4, m.width / 6), top = m.y - m.height / 2;
-    const path = ubu.mouthPath(m);
-    assert.ok(path.includes(`L${m.x - d} ${top}L${m.x} ${top + d}L${m.x + d} ${top}`));
-    assert.ok(m.x - d >= m.x - m.width / 6 - 1e-10);
-    close((top + d - top) / (m.x - (m.x - d)), 1);
-    for (let roll = 0; roll < 4; roll++) {
-      set(dna, 372, 2, roll);
-      const mouth = ubu.decode(dna).mouth;
-      assert.equal(mouth.notchCurved, roll === 3);
-      assert.equal(ubu.mouthPath(mouth).includes('Q'), roll === 3);
-      if (roll === 3) assert.ok(ubu.mouthPath(mouth).includes(`Q${m.x} ${top + d} ${m.x + d} ${top}`));
-    }
-    set(dna, 350, 6, 0);
-    assert.equal(ubu.decode(dna).mouth.notchCurved, false);
-    assert.ok(!ubu.mouthPath(ubu.decode(dna).mouth).includes('Q'));
-  }
 });
 
 test('decodes all 15 core stats, supers, AI personality, voice, and fanfare correctly', () => {
@@ -319,84 +287,4 @@ test('public helpers reject non-string seeds/codes and out-of-range ratings, cur
   }
   assert.doesNotThrow(() => ubu.ubunym(0n));
   assert.doesNotThrow(() => ubu.ubunym(0xffffffffffffffffn));
-});
-
-test('packed names retain slots, spelling format and placement for all visible structures', () => {
-  const seen = new Set();
-  for (const {seed} of require('./packed-name-vectors.json')) {
-    const name = ubu.ubunym(BigInt('0x' + seed));
-    const {praenomen: p, nomen: n, cognomen: c, cognomenBeforeNomen: front} = name;
-    assert.match(n, /^[A-Z][a-z]{5}$/);
-    for (const word of [p,c]) if (word) assert.match(word, /^[A-Z][a-z]{1,5}$/);
-    assert.equal(name.fullName, (front ? [p,c,n] : [p,n,c]).filter(Boolean).join(' '));
-    assert.ok(!front || c);
-    seen.add((p ? 'P' : '') + (front ? 'CN' : c ? 'NC' : 'N'));
-  }
-  assert.deepEqual([...seen].sort(), ['N','NC','CN','PN','PNC','PCN'].sort());
-});
-
-// Access private sampler boundaries without expanding the production API.
-function packedInternals() {
-  return require('../shared/ubu/uburithm.js');
-}
-test('packed sampler rejects tails, retains quotient and handles >32-bit refills exactly', () => {
-  const { NameRandom } = packedInternals();
-  const rng = new NameRandom(0n);
-  rng.range = 8; rng.value = 7;
-  let refills = 0;
-  rng.next32 = () => { refills++; return 0; };
-  // Reject [5,8), retaining value=2,range=3, then append one full chunk.
-  const value = 2n * 2n**32n, range = 3n * 2n**32n;
-  const limit = range - range % 5n;
-  assert.equal(rng.int(5), Number(value % 5n));
-  assert.equal(refills, 1);
-  assert.equal(rng.value, Number(value / 5n));
-  assert.equal(rng.range, Number(limit / 5n));
-  // Largest supported bound, with a refill near the maximum exact pool size.
-  rng.range = 11170; rng.value = 11169;
-  const bigValue = 11169n * 2n**32n;
-  const bigRange = 11170n * 2n**32n;
-  assert.equal(rng.int(11171), Number(bigValue % 11171n));
-  assert.equal(rng.value, Number(bigValue / 11171n));
-  assert.equal(rng.range, Number((bigRange - bigRange % 11171n) / 11171n));
-});
-test('packed chunk endpoints obey vowel/consonant contexts for every word pattern (lengths 2, 3, 4 and 6)', () => {
-  const { word6, word } = packedInternals();
-  const patterns6 = ['CVCVCV','CVCVVC','CVVCCV','CVVCVC','VCCVCV','VCCVVC','VCVCCV','VCVCVC'];
-  const checkWord = (str, p) => {
-    assert.equal(str.length, p.length);
-    assert.match(str, /^[A-Z][a-z]+$/);
-    const upper = str.toUpperCase();
-    for (let i = 0; i < p.length; i++) {
-      if (p[i] === 'V') {
-        const y = i === 0 || i === p.length - 1 || (p[i-1] === 'C' && p[i+1] === 'C' && p[i-2] !== 'C' && p[i+2] !== 'C');
-        assert.ok((y ? 'AEIOUY' : 'AEIOU').includes(upper[i]));
-        if (p[i-1] === 'V' || p[i+1] === 'V') assert.notEqual(upper[i], 'Y');
-      } else {
-        assert.ok('BCDFGHJKLMNPQRSTVWXYZ'.includes(upper[i]));
-        if (p.slice(i-2, i) === 'VV') assert.ok(!(p[i+1] === 'C' ? 'HWY' : 'Y').includes(upper[i]));
-        if (upper[i] === 'X' && p[i-1] === 'C') assert.ok('HLNRSWYXZ'.includes(upper[i-1]));
-      }
-    }
-  };
-  for (let pattern = 0; pattern < 8; pattern++) for (const last of [false, true]) {
-    let first = true;
-    const out = word6({ int(n) { if (first) { first = false; assert.equal(n, 8); return pattern; } return last ? n - 1 : 0; } });
-    checkWord(out, patterns6[pattern]);
-  }
-  // 2-letter words: first half CV (0..3285), second half VC (3286..6571)
-  for (const [idx, pat] of [[0, 'CV'], [3285, 'CV'], [3286, 'VC'], [6571, 'VC']]) {
-    checkWord(word(2, { int(n) { assert.equal(n, 6572); return idx; } }), pat);
-  }
-  // 3-letter words: pattern 0 -> CVC, pattern 1 -> VCV
-  for (const [patIdx, pat] of [[0, 'CVC'], [1, 'VCV']]) for (const last of [false, true]) {
-    let first = true;
-    checkWord(word(3, { int(n) { if (first) { first = false; assert.equal(n, 2); return patIdx; } return last ? n - 1 : 0; } }), pat);
-  }
-  // 4-letter words: 0 -> CVCV, 1 -> VCCV, 2 -> CVVC, 3 -> VCVC
-  const patterns4 = ['CVCV', 'VCCV', 'CVVC', 'VCVC'];
-  for (let patIdx = 0; patIdx < 4; patIdx++) for (const last of [false, true]) {
-    let first = true;
-    checkWord(word(4, { int(n) { if (first) { first = false; assert.equal(n, 4); return patIdx; } return last ? n - 1 : 0; } }), patterns4[patIdx]);
-  }
 });

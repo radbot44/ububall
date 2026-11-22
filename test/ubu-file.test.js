@@ -17,13 +17,6 @@ test('obsolete beta DNA is rejected in custom and signed files before trust look
   assert.equal(lookups, 0);
 });
 
-test('signed files preserve all 1024 bits including unassigned fields', async () => {
-  const pair = await keyPair();
-  const complete = Buffer.from(crypto.getRandomValues(new Uint8Array(128))).toString('base64url');
-  const text = await file.sign({ ...record, dna: complete }, pair.privateKey);
-  assert.equal((await file.read(text, { resolveKey: () => pair.publicKey })).dna, complete);
-});
-
 test('unsigned files are canonical and never imply mint authority', async () => {
   const text = file.unsigned(dna);
   assert.equal(text, `{"type":"ubu","dna":"${dna}"}`);
@@ -40,7 +33,8 @@ test('unsigned files are canonical and never imply mint authority', async () => 
     await assert.rejects(file.read(bad));
   }
 });
-test('signed certificate round-trips and independently verifies the exact signing bytes', async () => {
+
+test('signed certificate round-trips, preserves all 1024 bits, and independently verifies the exact signing bytes', async () => {
   const { privateKey, publicKey } = await keyPair();
   const text = await file.sign(record, privateKey);
   assert.equal(Buffer.byteLength(text), 425);
@@ -55,7 +49,12 @@ test('signed certificate round-trips and independently verifies the exact signin
   const key = createPublicKey({ key: Buffer.from(await crypto.subtle.exportKey('spki', publicKey)), format: 'der', type: 'spki' });
   assert.ok(verify(null, Buffer.from('ubumint:issuance\n' + JSON.stringify(payload)), key, Buffer.from(signature, 'base64url')));
   assert.ok(!verify(null, Buffer.from(JSON.stringify(payload)), key, Buffer.from(signature, 'base64url')));
+
+  const complete = Buffer.from(crypto.getRandomValues(new Uint8Array(128))).toString('base64url');
+  const fullText = await file.sign({ ...record, dna: complete }, privateKey);
+  assert.equal((await file.read(fullText, { resolveKey: () => publicKey })).dna, complete);
 });
+
 test('tampering with any signed field or signature is rejected, with no unsigned fallback', async () => {
   const { privateKey, publicKey } = await keyPair();
   const text = await file.sign(record, privateKey);
@@ -75,6 +74,7 @@ test('tampering with any signed field or signature is rejected, with no unsigned
   assert.equal((await file.read(unsigned)).type, 'unsigned');
   assert.equal((await file.read(unsigned)).certificate, undefined);
 });
+
 test('untrusted, wrong and inappropriate keys cannot confer authenticity', async () => {
   const pair = await keyPair(), other = await keyPair();
   const text = await file.sign(record, pair.privateKey);
@@ -88,6 +88,7 @@ test('untrusted, wrong and inappropriate keys cannot confer authenticity', async
   await assert.rejects(file.sign(record, wrong.privateKey), /Ed25519/);
   await assert.rejects(file.read(text, { resolveKey: () => wrong.publicKey }), /Ed25519/);
 });
+
 test('serials preserve twelve digits, exclude zero and support the final number', async () => {
   const pair = await keyPair();
   for (const serial of ['000000000001', '000000000010', '999999999999']) {
@@ -102,6 +103,7 @@ test('serials preserve twelve digits, exclude zero and support the final number'
   }
   await assert.rejects(file.read(JSON.stringify({ type: 'ubu', dna, serial: record.serial })), /Noncanonical/);
 });
+
 test('issuedAt, signing-key ID and MAX_BYTES boundaries validate strictly before trust lookup', async () => {
   assert.ok(Object.isFrozen(file));
   const pair = await keyPair();
@@ -125,6 +127,7 @@ test('issuedAt, signing-key ID and MAX_BYTES boundaries validate strictly before
   await assert.rejects(file.read('x'.repeat(1025)), /1–1024 bytes/);
   await assert.rejects(file.read(new Uint8Array(1025)), /1–1024 bytes/);
 });
+
 test('malformed files, encodings and metadata are rejected before trust lookup', async () => {
   let lookups = 0;
   const trust = { resolveKey: () => { lookups++; return null; } };

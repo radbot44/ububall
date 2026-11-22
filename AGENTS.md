@@ -36,7 +36,12 @@ Only approved specifications and implemented behavior are binding. Keep proposed
 
 - Prefer plain JavaScript, platform APIs and the smallest code and dependency surface meeting a **current** requirement. No speculative framework, plugin infrastructure or build system. Keep each rule implemented once; avoid repeated conversions, unbounded caches and heavyweight mint request paths.
 - Measure performance before claiming an optimization; consider CPU/latency, memory, startup and code size. Performance work must not weaken determinism, cryptography, authorization or atomic ownership.
-- Add focused tests when changing protocol, cryptography, authority, accounting or other meaningful behavior; don't add contrived tests for documentation. Run relevant tests and report what actually ran, failed or skipped. For mint/Worker/auth work run `npm test` and `npm run test:worker` when the environment supports them. `scripts/prepare-assets.cjs` explicitly controls published assets; never serve the repository root.
+- **Keep tests minimal and high-value—do not add tests unless they guard a real, recurring risk.** Only write or extend tests for permanent protocol/binary formats, cryptography, trust/auth boundaries, atomic mint/ownership accounting, server-authoritative online rules, OTA safety, or core physics/replay determinism. Never add trivial, frivolous, or bloat tests:
+  - No source-text, CSS, HTML, PowerShell, or Markdown greps (`readFileSync` + string/regex matching).
+  - No fake browser/DOM/Canvas/WebGL/WebAudio/VideoEncoder mock suites asserting call counts, draw order, attributes, CSS properties, or timer churn. Test pure math/state directly; verify UI and visuals in a real browser.
+  - No cosmetic, copy, or balance-tuning locks (hex colors, stroke widths, particle counts, audio cutoffs, callout strings, stat/rarity formula mirrors, or brittle CPU tactical puzzles—`ububall-replay.test.js` already locks physics determinism).
+  - No "Phase N" / roadmap / task-diary tests, no dead one-off migration tests, and no offline Python/ML/calibration/Monte Carlo scripts in `npm test`.
+  - If a test needs heavy mock scaffolding just to run, do not write it. Run relevant tests and report what actually ran, failed or skipped. For mint/Worker/auth work run `npm test` and `npm run test:worker` when the environment supports them. `scripts/prepare-assets.cjs` explicitly controls published assets; never serve the repository root.
 - Work and run commands inside this repository. `shared/ubu-render.js` is used by the designer and the site; preserve accepted geometry, finishes and lighting.
 
 ## Operations are separate from code changes

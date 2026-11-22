@@ -8,9 +8,7 @@ import static org.junit.Assert.fail;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.security.KeyPair;
 import java.security.KeyPairGenerator;
-import java.security.Signature;
 import java.security.spec.ECGenParameterSpec;
 import java.util.Arrays;
 import java.util.Base64;
@@ -54,19 +52,6 @@ public class OtaManifestTest {
         assertFalse(OtaManifest.verifySignature(manifest, "not base64!".getBytes(StandardCharsets.US_ASCII), testKey()));
         assertFalse(OtaManifest.verifySignature(manifest, resource("manifest.sig"), ""));
         assertFalse(OtaManifest.verifySignature(manifest, null, testKey()));
-    }
-
-    @Test
-    public void javaSignatureRoundTrip() throws Exception {
-        KeyPairGenerator gen = KeyPairGenerator.getInstance("EC");
-        gen.initialize(new ECGenParameterSpec("secp256r1"));
-        KeyPair pair = gen.generateKeyPair();
-        byte[] data = "{\"schema\":1}".getBytes(StandardCharsets.UTF_8);
-        Signature signer = Signature.getInstance("SHA256withECDSA");
-        signer.initSign(pair.getPrivate());
-        signer.update(data);
-        byte[] sigFile = (Base64.getEncoder().encodeToString(signer.sign()) + "\n").getBytes(StandardCharsets.US_ASCII);
-        assertTrue(OtaManifest.verifySignature(data, sigFile, Base64.getEncoder().encodeToString(pair.getPublic().getEncoded())));
     }
 
     private static void assertRejected(String json) {

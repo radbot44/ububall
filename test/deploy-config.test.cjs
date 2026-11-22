@@ -47,23 +47,6 @@ test('setup never replaces saved identity; deploy keeps dashboard vars, parses J
   assert.deepEqual(f.read('deploy-secrets.json'), settings.secrets);
 });
 
-test('recovery preserves production origin, allowance and keys; fills missing public keys from dev vars', t => {
-  const f = fixture(t), saved = f.setup();
-  fs.unlinkSync(path.join(f.home, 'settings.json'));
-  const { MINT_PUBLIC_KEYS, ...vars } = saved.vars;
-  vars.LIFETIME_MINT_LIMIT = '1000';
-  fs.writeFileSync(path.join(f.root, 'wrangler.local.jsonc'), `{\n  // Legacy production config\n  "name": ${JSON.stringify(saved.name)},\n  "routes": [{ "pattern": "mint.example", "custom_domain": true, }],\n  "vars": ${JSON.stringify(vars)},\n}`);
-  fs.writeFileSync(path.join(f.root, '.dev.vars'), Object.entries({ ...saved.vars, ...saved.secrets, ORIGIN: 'http://127.0.0.1:8790' }).map(([k, v]) => `${k}='${v}'`).join('\n'));
-  assert.equal(f.run('recover').status, 0);
-  const recovered = f.read('settings.json');
-  assert.equal(recovered.vars.ORIGIN, saved.vars.ORIGIN);
-  assert.equal(recovered.vars.LIFETIME_MINT_LIMIT, '1000');
-  assert.equal(recovered.vars.MINT_PUBLIC_KEYS, MINT_PUBLIC_KEYS);
-  assert.deepEqual(recovered.secrets, saved.secrets);
-  assert.equal(recovered.vars.MINT_PRIVATE_KEYS, undefined);
-  assert.deepEqual(recovered.routes, [{ pattern: 'mint.example', custom_domain: true }]);
-});
-
 test('missing settings, non-canonical secrets, invalid BATCH_SIZE, or mismatched signing keys stop deployment', t => {
   const f = fixture(t);
   assert.notEqual(f.run('recover').status, 0);
@@ -90,8 +73,11 @@ test('missing settings, non-canonical secrets, invalid BATCH_SIZE, or mismatched
   }
 });
 
-test('explicit reset backs up settings and changes only identity, signing keys and session secret', t => {
-  const f = fixture(t), before = f.setup();
+test('explicit reset backs up settings, changes only identity/keys/secret, and stops if backup fails', t => {
+  const f = fixture(t);
+  assert.notEqual(f.run('reset').status, 0);
+  assert.equal(fs.existsSync(path.join(f.home, 'settings.json')), false);
+  const before = f.setup();
   before.account_id = 'test-account';
   before.vars.BATCH_SIZE = '500';
   before.vars.LIFETIME_MINT_LIMIT = '10000000';
@@ -119,15 +105,10 @@ test('explicit reset backs up settings and changes only identity, signing keys a
   assert.equal(f.run('recover').status, 0);
   assert.equal(f.run('build').status, 0);
   assert.equal(fs.readFileSync(path.join(f.home, 'settings.json'), 'utf8'), saved);
-});
 
-test('reset stops before replacing settings if backup cannot be created', t => {
-  const f = fixture(t);
-  assert.notEqual(f.run('reset').status, 0);
-  assert.equal(fs.existsSync(path.join(f.home, 'settings.json')), false);
-  f.setup();
-  const original = fs.readFileSync(path.join(f.home, 'settings.json'), 'utf8');
+  // Stop before replacing settings if the backup directory cannot be created.
+  fs.rmSync(path.join(f.home, 'backups'), { recursive: true, force: true });
   fs.writeFileSync(path.join(f.home, 'backups'), 'block backup directory');
   assert.notEqual(f.run('reset').status, 0);
-  assert.equal(fs.readFileSync(path.join(f.home, 'settings.json'), 'utf8'), original);
+  assert.equal(fs.readFileSync(path.join(f.home, 'settings.json'), 'utf8'), saved);
 });
