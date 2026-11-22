@@ -358,26 +358,22 @@ SOFTWARE.
     </div>
     <div class="pause-settings">
       <div class="setting-slider" title="Adjust sound effects volume">
-        <div class="setting-slider-header">
-          <label for="setting-sound-volume">Sound</label>
-          <span id="setting-sound-val" class="setting-value">80%</span>
-        </div>
+        <label for="setting-sound-volume">Sound</label>
         <input id="setting-sound-volume" class="game-slider" type="range" min="0" max="100" step="5" value="80" aria-label="Sound volume">
+        <span id="setting-sound-val" class="setting-value">80%</span>
       </div>
       <div class="setting-slider" title="Adjust music and fanfare volume">
-        <div class="setting-slider-header">
-          <label for="setting-music-volume">Music</label>
-          <span id="setting-music-val" class="setting-value">80%</span>
-        </div>
+        <label for="setting-music-volume">Music</label>
         <input id="setting-music-volume" class="game-slider" type="range" min="0" max="100" step="5" value="80" aria-label="Music volume">
+        <span id="setting-music-val" class="setting-value">80%</span>
       </div>
-      <button id="setting-audio-mode" class="setting" type="button" aria-pressed="true" title="Switch between stereo and mono sound"><span>Audio</span><span class="setting-value">Stereo</span></button>
-      <button id="setting-aim" class="setting" type="button" title="Switch how dragging on the rink aims a launch"><span>Aim by</span><span class="setting-value">Drag arrow</span></button>
-      <button id="setting-touch-aim" class="setting" type="button" title="Choose how touch aiming stays clear of your finger on phone screens"><span>Touch aim</span><span class="setting-value">Above finger</span></button>
-      <button id="setting-spin" class="setting" type="button" aria-pressed="false" title="Turn the spin slider beside the selected ubu on or off"><span>Spin slider</span><span class="setting-value">Off</span></button>
-      <button id="guide-moves" class="setting" type="button" aria-pressed="false" title="Turn on or off each ubu's launch arrow while a turn plays"><span>Show moves</span><span class="setting-value">Off</span></button>
-      <button id="guide-trails" class="setting" type="button" aria-pressed="false" title="Turn on or off the path each ubu and the ball takes in a turn"><span>Show trails</span><span class="setting-value">Off</span></button>
-      <button id="setting-sidebar" class="setting" type="button"><span>Controls side</span><span class="setting-value">Left</span></button>
+      <button id="setting-audio-mode" class="setting" type="button" aria-pressed="true" title="Switch between stereo and mono sound"><span>Audio</span><span class="setting-pill"><span class="setting-seg" data-value="stereo">Stereo</span><span class="setting-seg" data-value="mono">Mono</span></span></button>
+      <button id="setting-aim" class="setting" type="button" title="Switch how dragging on the rink aims a launch"><span>Aim by</span><span class="setting-pill"><span class="setting-seg" data-value="drag">Drag arrow</span><span class="setting-seg" data-value="pull">Pull back</span></span></button>
+      <button id="setting-touch-aim" class="setting" type="button" title="Choose how touch aiming stays clear of your finger on phone screens"><span>Touch aim</span><span class="setting-pill"><span class="setting-seg" data-value="offset">Above</span><span class="setting-seg" data-value="magnifier">Magnifier</span><span class="setting-seg" data-value="off">Off</span></span></button>
+      <button id="setting-spin" class="setting" type="button" aria-pressed="false" title="Turn the spin slider beside the selected ubu on or off"><span>Spin slider</span><span class="setting-pill"><span class="setting-seg" data-value="off">Off</span><span class="setting-seg" data-value="on">On</span></span></button>
+      <button id="guide-moves" class="setting" type="button" aria-pressed="false" title="Turn on or off each ubu's launch arrow while a turn plays"><span>Show moves</span><span class="setting-pill"><span class="setting-seg" data-value="off">Off</span><span class="setting-seg" data-value="on">On</span></span></button>
+      <button id="guide-trails" class="setting" type="button" aria-pressed="false" title="Turn on or off the path each ubu and the ball takes in a turn"><span>Show trails</span><span class="setting-pill"><span class="setting-seg" data-value="off">Off</span><span class="setting-seg" data-value="on">On</span></span></button>
+      <button id="setting-sidebar" class="setting" type="button"><span>Controls side</span><span class="setting-pill"><span class="setting-seg" data-value="left">Left</span><span class="setting-seg" data-value="right">Right</span></span></button>
     </div>
     <nav class="pause-links" aria-label="Leave to"><a href="/mint">Ubu Mint</a><a href="/collection">Collection</a></nav>
     </div>

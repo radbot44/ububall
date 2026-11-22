@@ -132,9 +132,9 @@
   try { superHintSeen = localStorage.getItem('ububall-super-hint') === 'seen'; } catch {}
   let firstTurnStep = null, firstTurnStarted = null;
   try { firstTurnSeen = localStorage.getItem(firstTurnKey) === 'seen'; } catch {}
-  // The floating spin slider: on by default with a mouse, off on touch screens.
-  let spinSlider = !matchMedia('(pointer: coarse)').matches;
-  try { spinSlider = (localStorage.getItem('ububall-spin-slider') ?? (spinSlider ? 'on' : 'off')) === 'on'; } catch {}
+  // The floating spin slider: off by default (can be enabled in settings).
+  let spinSlider = false;
+  try { spinSlider = localStorage.getItem('ububall-spin-slider') === 'on'; } catch {}
   // Touch aiming aid on phone screens (Drag arrow scheme): 'offset' (Above finger, default), 'magnifier', or 'off'.
   const TOUCH_AIM_MODES = ['offset', 'magnifier', 'off'];
   const TOUCH_AIM_LABELS = { offset: 'Above finger', magnifier: 'Magnifier', off: 'Off' };
@@ -144,16 +144,32 @@
     if (TOUCH_AIM_MODES.includes(savedTouchAim)) touchAim = savedTouchAim;
     else if (localStorage.getItem('ububall-aim-magnifier') === 'on') touchAim = 'magnifier';
   } catch {}
-  // Pause menu settings: each button shows its name and current value, and pressing it switches the value.
-  function showSetting(id, on) {
-    $(id).setAttribute('aria-pressed', String(Boolean(on)));
-    $(id).querySelector('.setting-value').textContent = on ? 'On' : 'Off';
+  // Pause menu settings: each button shows its options in a segmented pill; clicking a segment picks it and clicking the row cycles it.
+  function setSettingPill(el, value) {
+    if (!el) return;
+    const segs = el.querySelectorAll('.setting-seg');
+    if (segs.length) {
+      for (const seg of segs) seg.classList.toggle('active', seg.dataset.value === value);
+      return;
+    }
+    const badge = el.querySelector('.setting-value');
+    if (badge) badge.textContent = value;
   }
-  $('setting-aim').querySelector('.setting-value').textContent = pullBehind ? 'Pull back' : 'Drag arrow';
-  $('setting-aim').onclick = () => {
-    pullBehind = !pullBehind;
+  function clickedSettingValue(e) {
+    return e?.target?.closest?.('.setting-seg')?.dataset.value || null;
+  }
+  function showSetting(id, on) {
+    const el = $(id);
+    if (!el) return;
+    el.setAttribute('aria-pressed', String(Boolean(on)));
+    setSettingPill(el, on ? 'on' : 'off');
+  }
+  setSettingPill($('setting-aim'), pullBehind ? 'pull' : 'drag');
+  $('setting-aim').onclick = e => {
+    const picked = clickedSettingValue(e);
+    pullBehind = picked ? picked === 'pull' : !pullBehind;
     try { localStorage.setItem('ububall-aim-style', pullBehind ? 'pull' : 'drag'); } catch {}
-    $('setting-aim').querySelector('.setting-value').textContent = pullBehind ? 'Pull back' : 'Drag arrow';
+    setSettingPill($('setting-aim'), pullBehind ? 'pull' : 'drag');
     updateFirstTurnGuide();
     updateAimLoupe();
   };
@@ -824,7 +840,7 @@
   knobDragPill.hidden = true;
   document.body.append(knobDragPill);
   function showKnobDragPill(knob, value, fine) {
-    knobDragPill.textContent = formatKnobValue(knob.kind, value);
+    knobDragPill.textContent = `${formatKnobValue(knob.kind, value)}${fine ? ' · ½×' : ''}`;
     knobDragPill.classList.toggle('fine', Boolean(fine));
     knobDragPill.hidden = false;
     placeKnobOverlay(knobDragPill, knob.svg);
@@ -1091,7 +1107,10 @@
     $('launch').disabled = phase === 'play' || phase === 'cpu-wait';
     document.querySelector('.stadium')?.classList.toggle('goal-phase', isGoal);
     $('launch-label').textContent = isGoal ? 'Next kickoff' : phase === 'over' ? 'New match' : phase === 'play' ? 'In motion…' : phase === 'cpu-wait' ? 'CPU planning…' : 'Launch team';
-    $('shot-guard').disabled = $('shot-reset').disabled = !knobEditable(selected);
+    const selPlan = plans[selected];
+    const hasResettablePlan = Boolean(selPlan?.power > 0 || selPlan?.spin || selPlan?.guard || curB?.superArm);
+    $('shot-guard').disabled = !knobEditable(selected);
+    $('shot-reset').disabled = !knobEditable(selected) || !hasResettablePlan;
     $('shot-guard').setAttribute('aria-pressed', String(planning && Boolean(plans[selected]?.guard)));
     const actions = { aimed: 0, guarding: 0, idle: 0 };
     const spinValue = Math.round((plans[selected].spin || 0) * 100);
@@ -1753,8 +1772,10 @@
     }
   }
   for (const key of ['moves', 'trails']) {
-    $(`replay-${key}`).onclick = $(`guide-${key}`).onclick = () => {
-      guides[key] = !guides[key]; showGuides();
+    $(`replay-${key}`).onclick = $(`guide-${key}`).onclick = e => {
+      const picked = clickedSettingValue(e);
+      guides[key] = picked ? picked === 'on' : !guides[key];
+      showGuides();
       try { localStorage.setItem('ububall-guides', JSON.stringify(guides)); } catch {}
       draw();
     };
@@ -2284,8 +2305,7 @@
     if (btn) {
       const isSt = audioMode === 'stereo';
       btn.setAttribute('aria-pressed', isSt ? 'true' : 'false');
-      const val = btn.querySelector('.setting-value');
-      if (val) val.textContent = isSt ? 'Stereo' : 'Mono';
+      setSettingPill(btn, audioMode);
     }
   }
   function applyAudioSettings() {
@@ -2326,8 +2346,9 @@
 
   const audioModeBtn = $('setting-audio-mode');
   if (audioModeBtn) {
-    audioModeBtn.onclick = () => {
-      audioMode = audioMode === 'stereo' ? 'mono' : 'stereo';
+    audioModeBtn.onclick = e => {
+      const picked = clickedSettingValue(e);
+      audioMode = picked === 'stereo' || picked === 'mono' ? picked : (audioMode === 'stereo' ? 'mono' : 'stereo');
       updateAudioModeUI();
       window.ubuAudio?.setAudioMode?.(audioMode);
       try { localStorage.setItem('ububall-audio-mode', audioMode); } catch {}
@@ -2335,17 +2356,22 @@
   }
   // The floating spin slider and touch aim aid are preferences kept per device.
   showSetting('setting-spin', spinSlider);
-  $('setting-spin').onclick = () => {
-    spinSlider = !spinSlider; showSetting('setting-spin', spinSlider);
+  $('setting-spin').onclick = e => {
+    const picked = clickedSettingValue(e);
+    spinSlider = picked ? picked === 'on' : !spinSlider;
+    showSetting('setting-spin', spinSlider);
     try { localStorage.setItem('ububall-spin-slider', spinSlider ? 'on' : 'off'); } catch {}
     draw();
   };
   const touchAimSetting = $('setting-touch-aim');
   if (touchAimSetting) {
-    touchAimSetting.querySelector('.setting-value').textContent = TOUCH_AIM_LABELS[touchAim] || 'Above finger';
-    touchAimSetting.onclick = () => {
-      touchAim = TOUCH_AIM_MODES[(TOUCH_AIM_MODES.indexOf(touchAim) + 1) % TOUCH_AIM_MODES.length];
-      touchAimSetting.querySelector('.setting-value').textContent = TOUCH_AIM_LABELS[touchAim];
+    setSettingPill(touchAimSetting, touchAim);
+    touchAimSetting.onclick = e => {
+      const picked = clickedSettingValue(e);
+      touchAim = picked && TOUCH_AIM_MODES.includes(picked)
+        ? picked
+        : TOUCH_AIM_MODES[(TOUCH_AIM_MODES.indexOf(touchAim) + 1) % TOUCH_AIM_MODES.length];
+      setSettingPill(touchAimSetting, touchAim);
       try { localStorage.setItem('ububall-touch-aim', touchAim); } catch {}
       updateAimLoupe();
     };
@@ -2752,10 +2778,11 @@
     const side = sidebarSide === 'left' || sidebarSide === 'right' ? sidebarSide : topSide;
     stadium.dataset.controlsSide = side;
     layoutDirty = true;
-    sidebarSetting.querySelector('.setting-value').textContent = side === 'left' ? 'Left' : 'Right';
+    setSettingPill(sidebarSetting, side);
   }
-  sidebarSetting.onclick = () => {
-    sidebarSide = stadium.dataset.controlsSide === 'left' ? 'right' : 'left';
+  sidebarSetting.onclick = e => {
+    const picked = clickedSettingValue(e);
+    sidebarSide = picked === 'left' || picked === 'right' ? picked : (stadium.dataset.controlsSide === 'left' ? 'right' : 'left');
     try { localStorage.setItem('ububall.controls-side', sidebarSide); } catch {}
     updateTopSide();
   };

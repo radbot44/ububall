@@ -318,7 +318,7 @@ function resolveContacts(bodies, std7, ball, skaterEnd, count, ballIdx, stdRink,
             const a = idx < ballIdx ? s : bClone, c = idx < ballIdx ? bClone : s;
             const hadCannon = s.superActive === 'cannonball';
             const sDrive = (s.vx * (ball0.x - s.x) + s.vy * (ball0.y - s.y)) / (Math.hypot(ball0.x - s.x, ball0.y - s.y) || 1);
-            if (hadCannon || (ballOnFire(ball0) && s.team === ball0.strikerTeam && sDrive >= HOT_DRIVE)) energySource = true;
+            if (hadCannon || (ballOnFire(ball0) && s.team === ball0.strikerTeam && sDrive > HOT_DRIVE.min)) energySource = true;
             collide(
               a, c,
               ev => {

@@ -375,8 +375,9 @@ function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, o
   const stalwartB = b.team >= 0 && b.superActive === 'stalwart';
   const anchorA = stalwartA && a.vx === 0 && a.vy === 0;
   const anchorB = stalwartB && b.vx === 0 && b.vy === 0;
-  const rawInvA = fireWin >= 0 && a.team === -1 ? fireWin / b.mass : 1 / a.mass;
-  const rawInvB = fireWin >= 0 && b.team === -1 ? fireWin / a.mass : 1 / b.mass;
+  const fireW = fireWin >= 0 ? Math.min(1, (1 - fireWin) * 4) : 0;
+  const rawInvA = fireWin >= 0 && a.team === -1 ? 1 / (a.mass * (1 - fireW) + (b.mass / fireWin) * fireW) : 1 / a.mass;
+  const rawInvB = fireWin >= 0 && b.team === -1 ? 1 / (b.mass * (1 - fireW) + (a.mass / fireWin) * fireW) : 1 / b.mass;
   const invA = anchorA ? 0 : rawInvA;
   const invB = anchorB ? 0 : rawInvB;
   const inverse = invA + invB;
@@ -478,8 +479,8 @@ function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, o
     relSpeed >= HIP_CLIP.minRelSpeed && Math.abs(rvt) >= Math.abs(closing) * HIP_CLIP.glanceRatio;
   const slip = rvt - a.omega * a.radius - b.omega * b.radius;
   const gripPair = Math.sqrt(a.grip * b.grip);
-  const limit = gripPair * baseImpulse;
   const massDenom = frictionA + frictionB;
+  const limit = gripPair * (fireWin >= 0 && massDenom > 0 ? -(1 + restitution) * closing / massDenom : baseImpulse);
   const slipDenom = massDenom + (spinA ? 2 * frictionA : 0) + (spinB ? 2 * frictionB : 0);
   const effectiveLimit = hipClip && massDenom > 0
     ? limit + gripPair * HIP_CLIP.gripBoost * Math.abs(rvt) / massDenom
@@ -577,9 +578,11 @@ function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, o
     const speed = Math.hypot(ball.vx, ball.vy), pace = ball.pace || 0;
     if (!own) ball.pace = speed;
     else if (snapped && speed > pace) ball.pace = speed;
-    else if (!ironSave && hot && drive >= HOT_DRIVE && pace > speed) {
+    else if (!ironSave && hot && drive > HOT_DRIVE.min && pace > speed) {
+      const t = Math.min(1, (drive - HOT_DRIVE.min) / (HOT_DRIVE.max - HOT_DRIVE.min));
+      const target = speed + (pace - speed) * t;
       const ux = speed ? ball.vx / speed : (ball.x - player.x) / (d || 1), uy = speed ? ball.vy / speed : (ball.y - player.y) / (d || 1);
-      ball.vx = ux * pace; ball.vy = uy * pace;
+      ball.vx = ux * target; ball.vy = uy * target;
     }
   }
 

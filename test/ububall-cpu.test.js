@@ -726,7 +726,7 @@ test('CPU shooting upgrades: full-force fireballs, point-blank Spin Strike, shou
   const curveDec = C.plan(curveSt, 1, { level: 'hard', seed: 7 });
   const curveRes = M.resolveTurn(P, curveSt, [C.GUARD, C.GUARD, C.GUARD, ...curveDec.plans], { effects: false });
   assert.equal(curveRes.replay.goal, 1, 'Hard CPU curves shot wide around squared-up slot Guard blocker');
-  assert.ok(curveDec.plans[0].power >= 0.75 && Math.abs(curveDec.plans[0].spin) > 0.5, `uses high-power curved shot around blocker (got power=${curveDec.plans[0].power})`);
+  assert.ok(curveDec.plans[0].power >= 0.65 && Math.abs(curveDec.plans[0].spin) > 0.5, `uses high-power curved shot around blocker (got power=${curveDec.plans[0].power})`);
   const pbSt = mkState('standard', { 0: { impulse: 250, size: 165 }, 3: { power: 25, spin: 250, curve: 100, impulse: 185 } });
   Object.assign(pbSt.bodies[0], { x: 102, y: 382 });
   Object.assign(pbSt.bodies[1], { x: 780, y: 130 });

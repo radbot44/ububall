@@ -1,7 +1,7 @@
 'use strict';
 // Bump VERSION with any change to how a turn plays out (startTurn, step and their tuning): saved
 // replays re-simulate their turns and refuse a different version (docs/ububall-file.md).
-const VERSION = 30;
+const VERSION = 31;
 const rink = Object.freeze({ left: 60, right: 940, top: 60, bottom: 540, corner: 100, goalTop: 230, goalBottom: 370, goalDepth: 38 });
 const DT = 1 / 240, SUBSTEPS = 16, BASE_LAUNCH_SPEED = 720;
 const IRON_COOLDOWN_TICKS = 48; // ~200 ms at 240 Hz DT: cooldown after an Iron Save
@@ -36,7 +36,7 @@ const PACK_DRAFT = Object.freeze({ exp: .5, maxCut: .65 });
 const HEAT = Object.freeze({ orange: 540 / BASE_LAUNCH_SPEED, red: 720 / BASE_LAUNCH_SPEED, redHot: 800 / BASE_LAUNCH_SPEED, fire: 840 / BASE_LAUNCH_SPEED, sustain: .70 });
 const FIRE_TICKS = 60;
 const IRON_KEEP = .1;
-const HOT_DRIVE = 100;
+const HOT_DRIVE = Object.freeze({ min: 60, max: 140 });
 const SNAP = Object.freeze({ minPassSpeed: 180, minDrive: 140, redirect: .35, heatTicks: 30 });
 const STRIKE_MIN_SPEED = SNAP.minPassSpeed;
 const RIM = Object.freeze({ maxNormal: 190, minTangent: 150, bounceScale: .35, spinKeep: .92, checkGrip: 1.25 });
