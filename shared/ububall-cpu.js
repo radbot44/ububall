@@ -5,7 +5,7 @@ const {
   decided, randomSource, segmentBlocked, behindBall, isPointBlank
 } = require('./cpu/constants.js');
 const { cpuPlans, legacy } = require('./cpu/baseline.js');
-const { aim, traceMovingBall, strike } = require('./cpu/kinematics.js');
+const { aim, traceMovingBall, strike, goalStrike } = require('./cpu/kinematics.js');
 const {
   shotConePoint, goalPocketPoint, canOccupyCrease, traceIncomingShot,
   guardCoversSegment, assessOpponentThreat, scanGoalAperture
@@ -26,7 +26,7 @@ const api = Object.freeze({
   LEVELS, LEVEL_LABELS, WEIGHTS, WOBBLE, COMPLEX, SEARCH_TICKS, HOLD, GUARD,
   NN_MAGIC, NN_FORMAT, NN_INPUT_DIM, NN_HIDDEN_DIM, NN_VALUE_DIM, NN_POLICY_DIM, NN_ROW_FLOATS,
   Y_FLIP_OBS_INDICES, Y_FLIP_POL_INDICES,
-  randomSource, legacy, decided, plan, aim, strike, behindBall, isPointBlank,
+  randomSource, legacy, decided, plan, aim, strike, goalStrike, behindBall, isPointBlank,
   evaluate, features, FEATURE_NAMES, options, segmentBlocked, cpuPlans, baseline,
   shotConePoint, goalPocketPoint, canOccupyCrease, traceIncomingShot, traceMovingBall,
   guardCoversSegment, assessOpponentThreat, scanGoalAperture, jointTeamPlays,

@@ -1,10 +1,11 @@
-/* Goal-pocket geometry, incoming shot threat tracing, and crease legality. */
+/* Goal-pocket geometry, incoming shot threat tracing, moving-defender aperture, and crease legality. */
 'use strict';
 const { P, M, RINK, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT, contactRadius, segmentBlocked, behindBall, roles
 } = require('./constants.js');
 const { aim, ballTraceKey, traceMovingBall, skaterTravelTime } = require('./kinematics.js');
 
 const GOAL_APERTURE_YS = [RINK_CY, RINK_CY - 28, RINK_CY + 28, RINK_CY - 50, RINK_CY + 50];
+const SAFE_SHOT_YS = [RINK_CY, RINK_CY - 28, RINK_CY + 28, GOAL_Y_TOP + 21, GOAL_Y_BOT - 21];
 
 function shotConePoint(ballX, ballY, team, dist = 88) {
   const ownGoalX = team ? RINK_RIGHT : RINK_LEFT;
@@ -62,23 +63,23 @@ function goalPocketPoint(ballX, ballY, team, allowCrease = true) {
   return { x: coverX, y };
 }
 
-// Compute a realistic flat-wall bank target Y toward goalX.
-// Bank shots enter the goal mouth diagonally away from the bank wall, so aiming past center toward the far half
-// (+24 px off center) clears the near post on both cold (0.82) and Meteor Bank (1.0) rebounds.
+// Compute a realistic flat-wall bank target toward goalX accounting for 0.82 wall restitution, wall-grip slowdown, and 100px corners.
 function bestBankTargetY(ball, goalX, goalieY = RINK_CY, blockers = []) {
   const ballR = ball.radius || 18;
   const cornerOff = RINK.corner ?? 100;
-  const flatMinX = RINK_LEFT + cornerOff + 8;
-  const flatMaxX = RINK_RIGHT - cornerOff - 8;
+  const flatMinX = RINK_LEFT + cornerOff + 12;
+  const flatMaxX = RINK_RIGHT - cornerOff - 12;
   const topWallY = RINK_TOP + ballR;
   const botWallY = RINK_BOTTOM - ballR;
   const goalYTop = goalieY <= RINK_CY ? RINK_CY + 30 : RINK_CY + 20;
   const goalYBot = goalieY >= RINK_CY ? RINK_CY - 30 : RINK_CY - 20;
+  // Cold rebounds lose normal speed (0.82) AND tangential speed via wall grip (~0.73x), steepening the outgoing angle.
+  // Aiming steeper into the flat wall (~1.36x virtual depth) places bounceX cleanly inside [flatMinX, flatMaxX].
+  const bankSteep = ball.onFire ? 1.06 : 1.36;
   const candidates = [
-    { wallY: topWallY, refY: 2 * topWallY - goalYTop, goalY: goalYTop, side: -1 },
-    { wallY: botWallY, refY: 2 * botWallY - goalYBot, goalY: goalYBot, side: 1 }
+    { wallY: topWallY, refY: topWallY + (topWallY - goalYTop) * bankSteep, goalY: goalYTop, side: -1 },
+    { wallY: botWallY, refY: botWallY + (botWallY - goalYBot) * bankSteep, goalY: goalYBot, side: 1 }
   ];
-  // Prefer same-side wall first (shorter, faster bank)
   if (ball.y > RINK_CY) candidates.reverse();
   let fallback = null;
   for (let i = 0; i < candidates.length; i++) {
@@ -86,7 +87,7 @@ function bestBankTargetY(ball, goalX, goalieY = RINK_CY, blockers = []) {
     const dyTotal = c.refY - ball.y;
     if (Math.abs(dyTotal) < 20) continue;
     const tWall = (c.wallY - ball.y) / dyTotal;
-    if (tWall <= 0.08 || tWall >= 0.92) continue;
+    if (tWall <= 0.08 || tWall >= 0.88) continue;
     const bounceX = ball.x + tWall * (goalX - ball.x);
     if (bounceX < flatMinX || bounceX > flatMaxX) continue;
     if (!fallback) fallback = { bankY: c.refY, wallSide: c.side, bounceX, wallY: c.wallY, goalY: c.goalY };
@@ -104,7 +105,6 @@ function timedGoalieIntercept(body, ball, incoming, team, allowCrease, superKey 
   const fric = body.friction || 150;
   const samples = traceMovingBall(ball);
   if (samples && samples.length) {
-    // Prefer an intercept point along the actual trajectory close to the goal mouth where skater arrives cleanly in time.
     const maxDistFromGoal = allowCrease ? 115 : 155;
     const minDistFromGoal = allowCrease ? 24 : 84;
     let bestPt = null, bestScore = Infinity;
@@ -151,7 +151,7 @@ function traceIncomingShot(ball, team, maxHorizon = 1.2) {
     entry = { sig, t0: undefined, t1: undefined };
     incomingCache.set(ball, entry);
   }
-  const slot = team ? "t1" : "t0";
+  const slot = team ? 't1' : 't0';
   if (entry[slot] !== undefined) return entry[slot];
 
   const ownGoalX = team ? RINK_RIGHT : RINK_LEFT;
@@ -162,7 +162,7 @@ function traceIncomingShot(ball, team, maxHorizon = 1.2) {
   const sim = [{ ...ball, team: -1, stickOffset: null }];
   const bSim = sim[0];
   let bounces = 0, prevX = bSim.x, prevY = bSim.y;
-  const onWall = (_b, _v, type) => { if (type === "wall" || type === "post") bounces++; };
+  const onWall = (_b, _v, type) => { if (type === 'wall' || type === 'post') bounces++; };
   let out = null;
   for (let t = 1; t <= maxTicks; t++) {
     prevX = bSim.x; prevY = bSim.y;
@@ -222,7 +222,6 @@ function assessOpponentThreat(state, team, classic = false) {
   if (bSpd > 35) {
     const samples = traceMovingBall(ball);
     if (samples && samples.length) {
-      // Sample ~0.18s and ~0.36s along canonical ball trace (including wall rebounds in Pulse!).
       const s1 = samples[Math.min(samples.length - 1, 21)];
       const s2 = samples.length > 42 ? samples[42] : null;
       leadBalls = s2 ? [s1, s2] : [s1];
@@ -242,7 +241,6 @@ function assessOpponentThreat(state, team, classic = false) {
     const op = state.bodies[oppStart + i];
     if (op.carded || op.stunned) continue;
     if (op.holding && !oppCarrier) oppCarrier = op;
-    // Ignore a lone opponent goalie parked deep in their own crease when the ball is still in their half
     if (oppJobs[i] === 'defend' && Math.abs(op.x - atkGoalX) < 165 && Math.abs(ball.x - atkGoalX) < 340) continue;
     const opSup = (!classic && (op.meter ?? 0) >= 100 && op.equippedSuper) ? op.equippedSuper.key?.toLowerCase() : null;
     const behNow = behindBall(op, ball, oppTeam);
@@ -258,7 +256,6 @@ function assessOpponentThreat(state, team, classic = false) {
         }
       }
     }
-    // Allow slight side-angle / bank-cut reach (within 42 px past ball X) or Magnet pull within 210 px
     const sideAngleOk = (oppTeam === 0 ? op.x <= ball.x + 42 : op.x >= ball.x - 42) && dNow < 150;
     const magnetPullOk = opSup === 'magnet' && dNow < 210;
     if (behNow || behLead || sideAngleOk || magnetPullOk) {
@@ -291,7 +288,6 @@ function assessOpponentThreat(state, team, classic = false) {
 
   const distToOwnGoal = Math.abs(ball.x - ownGoalX);
   const pressingTheirZone = Math.abs(ball.x - atkGoalX) < 380 && bestOwnNonDefT < bestOppT;
-  // Never let the goalie's own proximity silence shotDanger (which tricks the goalie into vacating the crease!).
   const weClearFirst = distToOwnGoal < 185 && bestOwnBehindNonDefT + 0.06 < bestOppT;
   const strikerSuper = (oppStriker && !classic && (oppStriker.meter ?? 0) >= 100 && oppStriker.equippedSuper)
     ? oppStriker.equippedSuper.key?.toLowerCase()
@@ -339,29 +335,59 @@ function assessOpponentThreat(state, team, classic = false) {
   };
 }
 
+const projOpponentsBuf = [
+  { x: 0, y: 0, radius: 25, carded: false, body: null },
+  { x: 0, y: 0, radius: 25, carded: false, body: null },
+  { x: 0, y: 0, radius: 25, carded: false, body: null }
+];
+
+// Scans open goal lanes against velocity-projected defenders (~0.18s lead + goalie crease recovery),
+// keeping corner targets >= 21 px inside posts so shots never clip the 18 px post circle.
 function scanGoalAperture(ball, goalX, opponents) {
+  const nOpp = Math.min(3, opponents.length);
+  const tFlight = Math.min(0.22, Math.max(0.10, Math.abs(goalX - ball.x) / 1500));
+  for (let i = 0; i < nOpp; i++) {
+    const op = opponents[i], slot = projOpponentsBuf[i];
+    slot.body = op;
+    slot.carded = Boolean(op.carded);
+    slot.radius = op.guarding ? guardReachRadius(op) : (op.radius || 25);
+    if (op.carded) { slot.x = op.x; slot.y = op.y; continue; }
+    const vx = op.vx || 0, vy = op.vy || 0;
+    let px = Math.max(RINK_LEFT + 25, Math.min(RINK_RIGHT - 25, op.x + vx * tFlight));
+    let py = Math.max(RINK_TOP + 25, Math.min(RINK_BOTTOM - 25, op.y + vy * tFlight));
+    // Anticipate un-stunned goalie sliding partway toward the shot-cone Y when out of position
+    if (!op.stunned && !op.guarding && Math.abs(op.x - goalX) < 175 && vx * vx + vy * vy < 900) {
+      const targetConeY = Math.max(RINK_CY - 38, Math.min(RINK_CY + 38, RINK_CY + (ball.y - RINK_CY) * 0.25));
+      if (Math.abs(py - targetConeY) > 22) py += (targetConeY - py) * 0.22;
+    }
+    slot.x = px;
+    slot.y = py;
+  }
+
   let bestY = RINK_CY, bestClear = -1, firstBlocker = null;
-  for (let a = 0; a < GOAL_APERTURE_YS.length; a++) {
-    const ty = GOAL_APERTURE_YS[a];
-    const blk = segmentBlocked(ball.x, ball.y, goalX, ty, opponents, (ball.radius || 18) + 5);
+  const ballR = ball.radius || 18;
+  for (let a = 0; a < SAFE_SHOT_YS.length; a++) {
+    const ty = SAFE_SHOT_YS[a];
+    const blk = segmentBlocked(ball.x, ball.y, goalX, ty, projOpponentsBuf, ballR + 5);
     if (!blk) {
       const dx = goalX - ball.x, dy = ty - ball.y, len2 = dx * dx + dy * dy || 1;
       let minC = 999;
-      for (let i = 0; i < opponents.length; i++) {
-        const op = opponents[i];
+      for (let i = 0; i < nOpp; i++) {
+        const op = projOpponentsBuf[i];
         if (op.carded) continue;
         const t = Math.max(0.05, Math.min(0.98, ((op.x - ball.x) * dx + (op.y - ball.y) * dy) / len2));
-        const clr = Math.hypot(op.x - (ball.x + t * dx), op.y - (ball.y + t * dy)) - (op.radius || 25);
+        const clr = Math.hypot(op.x - (ball.x + t * dx), op.y - (ball.y + t * dy)) - op.radius;
         if (clr < minC) minC = clr;
       }
-      const sc = minC - Math.abs(ty - RINK_CY) * 0.15;
+      const sc = minC - Math.abs(ty - RINK_CY) * 0.14;
       if (sc > bestClear) { bestClear = sc; bestY = ty; }
     } else if (!firstBlocker) {
-      firstBlocker = blk;
+      firstBlocker = { body: blk.body.body || blk.body, dist: blk.dist, side: blk.side };
     }
   }
   if (bestClear >= 0) return { y: bestY, open: true, blocker: null };
-  return { y: firstBlocker && firstBlocker.body.y >= RINK_CY ? RINK_CY - 50 : RINK_CY + 50, open: false, blocker: firstBlocker };
+  const refBody = firstBlocker ? firstBlocker.body : null;
+  return { y: refBody && refBody.y >= RINK_CY ? GOAL_Y_TOP + 21 : GOAL_Y_BOT - 21, open: false, blocker: firstBlocker };
 }
 
 function stickyCarryMove(body, ball, goalX, targetY, superKey = null, spin = 0) {
@@ -389,7 +415,6 @@ function rimAroundMove(body, ball, team, superKey = null) {
   mv.superArm = Boolean(superKey);
   return mv;
 }
-
 
 module.exports = {
   GOAL_APERTURE_YS, shotConePoint, canOccupyCrease, goalPocketPoint, bestBankTargetY,

@@ -2,13 +2,13 @@
 
 The local CPU evaluates complete three-player plans through `ububallMatch.resolveTurn` (`fastSearch: true`, `fastTick: true`), using the canonical gameplay physics, 240 Hz timestep, 12-second turn cap (1 second in Pulse), explicit guard braking, supers, stun, and meter rules. It never receives the human's planned arrows or super arming choices, and judges every turn fresh without requiring match history so single-turn replays remain self-contained; on `hard` and above, optional resolved-turn `history` adapts opponent predictions to repeated setups (including alternating kickoff patterns) and offensive/defensive tendencies. Browser planning runs in a Web Worker from the public state captured at the start of the turn. Launch waits for that plan; a reset cancels old work. Worker failure or a ten-second timeout falls back to the heuristic planner.
 
-The planner seeds search from the personality heuristic (`cpuPlans`). Its shot candidates include full-power open lanes, point-blank spin strikes, shots that curve around blockers, and board banks. For moving balls, `traceMovingBall` uses loose-ball physics to generate intercept candidates, including after rebounds. Coordinated plays include screen clears, Shockwave crease blasts, goalie knockouts, slot parks, Snap one-timers, Pack Draft breakaways, Rim-Around exits, wing breakouts, Magnet pulls, and Sticky drives and takedowns.
+The planner seeds search from the personality heuristic (`cpuPlans`). Goal-bound shot candidates use `goalStrike`, a zero-allocation scalar 2-body forward shot solver that refines launch angles for approach skew, grip spin, point-blank Spin Strike hooks, fireball curve, `0.82` and Meteor board-bank rebounds, and rounded-corner clearance while pruning side-clipping whiffs and irrelevant Super-armed duplicates upfront. `scanGoalAperture` projects defender motion forward before choosing open lanes, and `traceMovingBall` uses loose-ball physics to generate intercept candidates, including after rebounds. Coordinated plays include screen clears, Shockwave crease blasts, goalie knockouts, slot parks, Snap one-timers, Pack Draft breakaways, Rim-Around exits, wing breakouts, Magnet pulls, and Sticky drives and takedowns.
 
 On defense, `assessOpponentThreat` estimates shot and cross-slot pass danger. The planner generates goal-line intercepts for incoming shots, Guard saves, and pocket coverage for a goalie with room under the crease allowance. Crease warnings and nearby teammates can shift coverage outside the crease. Candidate rollouts use match rules to evaluate whether a save or a crease violation occurs. Refinement focuses on skaters involved in the play and includes the goalie when a candidate concedes.
 
-Multi-opponent presets use worst-case-aware screening (`bestMin`) and check execution wobble for close contenders. An early goal earns a tie-break bonus of up to 0.06% of the goal weight. When a Standard or Classic rollout reaches its horizon, `evaluateBodies` projects skater stopping slides and a six-substep, skater-aware ball coast. It scores discounted impending goals, crease warnings and cards, charged Super reserves, and positional features (`strikeAccess`, `coneCover`, `shotChance`). In Pulse, it uses end-of-turn positions and projects the ball’s carry-over velocity.
+Multi-opponent presets use worst-case-aware screening (`bestMin`), exit early once a wobble-verified goal holds across all scenarios, and defer inline wobble on smooth midfield stepping stones until finalist selection. An early goal earns a tie-break bonus of up to 0.06% of the goal weight. When a Standard or Classic rollout reaches its horizon, `evaluateBodies` projects skater stopping slides and a six-substep, skater-aware ball coast. It scores discounted impending goals, crease warnings and cards, charged Super reserves, and positional features (`strikeAccess`, `coneCover`, `shotChance`). In Pulse, it uses end-of-turn positions and projects the ball’s carry-over velocity.
 
-On Hard and above, the counter-search (`findCounter`) tests ball-path interceptions, goal-mouth blocks, checks on playmakers, and scoring replies such as far-post shots and Snap passes. It can reserve a finalist slot for a Guard or crease-pocket plan during an active threat. Insane and Ububall God use canonical `finishTurn` settlement to search a second turn when the first turn has no locked goal. Ububall God can search up to three turns in Pulse.
+On Hard and above, the counter-search (`findCounter`) tests ball-path interceptions, goal-mouth blocks, checks on playmakers, and scoring replies such as far-post shots and Snap passes. It can reserve a finalist slot for a Guard or crease-pocket plan during an active threat. Insane and Ububall God reuse settled Turn-1 rollout states (or step canonical `finishTurn` settlement) to search a second turn when the first turn has no locked goal. Ububall God can search up to three turns in Pulse.
 
 ## Difficulty presets
 
@@ -16,12 +16,12 @@ Choose a CPU difficulty in **New match**. The initial default is Medium.
 
 | Level | Label | Team candidates | Opponent scenarios | Horizon ticks |
 | --- | --- | ---: | ---: | ---: |
-| `easy` | Easy | 14 | 1 (Heuristic + live goal-line save) | 240 |
-| `medium` | Medium | 48 | 2 (+ Guard brake / active threat shot) | 420 |
-| `hard` | Hard | 84 | 3 (+ Open-corner sniper, striker check blitz, scoring-punish counter-search & history learning) | 500 |
-| `insane` | Insane | 150 | 4 (+ Snap/curve rush, dual refine, counter-search, multi-pattern learning & 2-turn finalist look-ahead) | 580 |
-| `god` | Ububall God | 240 | 4 (+ 720-tick rollout + 1.35s coast, dual wobble/refine, 2-round counter-search, dual-bridge 2-turn look-ahead & 3-turn Pulse chain) | 720 |
-| `ballistic` | Ballistic | 240 | God scenarios and a learned response when distinct, with God counter-search and look-ahead | 720 |
+| `easy` | Easy | 12 | 1 (Heuristic + live goal-line save) | 240 |
+| `medium` | Medium | 36 | 2 (+ Guard brake / active threat shot) | 420 |
+| `hard` | Hard | 56 | 3 (+ Open-corner sniper, striker check blitz, scoring-punish counter-search & history learning) | 500 |
+| `insane` | Insane | 96 | 4 (+ Snap/curve rush, dual refine, counter-search, multi-pattern learning & 2-turn finalist look-ahead) | 580 |
+| `god` | Ububall God | 160 | 4 (+ 720-tick rollout + 1.35s coast, dual wobble/refine, 2-round counter-search, dual-bridge 2-turn look-ahead & 3-turn Pulse chain) | 720 |
+| `ballistic` | Ballistic | 160 | God scenarios and a learned response when distinct, with God counter-search and look-ahead | 720 |
 
 Ballistic appears in **New match** once the browser worker loads compatible weights for the selected rules. It uses Ububall God's search budget, including the third Pulse turn, and adds candidate plays from the neural policy and a 55% neural blend for eligible positional evaluations. A saved Ballistic match can continue with Ububall God if the weights become unavailable. The other five presets use heuristic search by default, even when weights are installed.
 

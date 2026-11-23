@@ -188,7 +188,7 @@ function evaluateBodies(bodies, fouls, team, goal, weights, complexity = 0, scor
     const steps = isPulse ? 4 : 6;
     const totalT = Math.min(maxT, bSpd0 / (bFric + AIR_DRAG * bSpd0 * bSpd0 * 0.5));
     const dtC = totalT / steps;
-    const bCurve = ((ball.onFire ? P.BURNING_BALL_CURVE : P.BALL_CURVE) ?? 0.06) * (ball.curveMult ?? 1);
+    const bCurve = P.ballCurveFactor ? P.ballCurveFactor(ball, Boolean(ball.onFire)) : ((ball.onFire ? 0.08 : 0.06) * (ball.curveMult ?? 1));
     const xMin = RINK_LEFT + ballR, xMax = RINK_RIGHT - ballR;
     const yMin = RINK_TOP + ballR, yMax = RINK_BOTTOM - ballR;
     let elapsedT = 0;

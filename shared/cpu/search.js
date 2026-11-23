@@ -1,15 +1,15 @@
-/* Two-stage gated rollout search, adversarial counter-search, and Boltzmann style selection. */
+/* Two-stage gated rollout search, lazy wobble, guided shot bracketing, and adversarial counter-search. */
 'use strict';
 const {
-  P, M, HOLD, GUARD, LEVELS, WEIGHTS, WOBBLE, COMPLEX, ROLE_INTENTS, SEARCH_TICKS,
-  RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT,
-  SHOT_DRIVE, decided, randomSource, contactRadius, skaterDrive, segmentBlocked,
-  creativityOf, behindBall, isPointBlank, bReach, MOVE_ID, getIntent, copy, fitsRole, roles
+  P, M, HOLD, GUARD, LEVELS, WEIGHTS, SEARCH_TICKS,
+  RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT,
+  SHOT_DRIVE, decided, randomSource,
+  creativityOf, behindBall, MOVE_ID, getIntent, copy, fitsRole, roles
 } = require('./constants.js');
-const { aim, strike, traceMovingBall } = require('./kinematics.js');
-const { shotConePoint, canOccupyCrease, goalPocketPoint, bestBankTargetY, traceIncomingShot, guardCoversSegment, assessOpponentThreat, scanGoalAperture } = require('./threat.js');
+const { aim, strike, goalStrike } = require('./kinematics.js');
+const { canOccupyCrease, goalPocketPoint, bestBankTargetY, assessOpponentThreat, scanGoalAperture } = require('./threat.js');
 const { legacy } = require('./baseline.js');
-const { options, place3, jointTeamPlays, wobble } = require('./candidates.js');
+const { options, jointTeamPlays, wobble } = require('./candidates.js');
 const { syncSlidesFromBodies, strikeAccess, coneCover, evaluateBodies, planBasinKey } = require('./evaluate.js');
 const { NN_INPUT_DIM, encodeState, decodePolicyPlans, getModel, forward } = require('./nn.js');
 const { buildOpponentResponses, sanitizePredictedMove, learnedOpponentResponses } = require('./opponent.js');
@@ -54,6 +54,15 @@ function prepareSearchState(input, classic) {
     clock,
     fouls: input.fouls
   };
+}
+
+function cleanGoalMove(body, ball, goalX, targetY, superKey, spin, bankSide = 0) {
+  const gs = goalStrike(body, ball, goalX, targetY, superKey, spin, SHOT_DRIVE, bankSide);
+  if (gs.valid) return { angle: gs.angle, power: gs.power, spin: gs.spin, superArm: gs.superArm, guard: false };
+  const fb = strike(body, ball, goalX, targetY, superKey, spin, SHOT_DRIVE);
+  fb.power = 1;
+  if (superKey) fb.superArm = true;
+  return fb;
 }
 
 function plan(input, team = 1, config = {}) {
@@ -117,6 +126,7 @@ function plan(input, team = 1, config = {}) {
   const primaryAtkIdx = jobs.indexOf('attack');
   const defRoleIdx = jobs.indexOf('defend');
   const ownGoalX = team ? RINK_RIGHT : RINK_LEFT;
+  const atkGoalX = team ? RINK_LEFT : RINK_RIGHT;
   const step4Threat = assessOpponentThreat(state, team, classic);
   const pulse = M.rule(state.mode, 'pulse');
   const fullTurnTicks = M.turnTicks(state.mode);
@@ -159,10 +169,12 @@ function plan(input, team = 1, config = {}) {
   } : null;
   const baseHorizon = settings.searchTicks || SEARCH_TICKS;
   const searchTicks = startCreaseWarned ? fullTurnTicks : baseHorizon;
+  const needSettledCache = (settings.lookaheadTop || 0) > 0;
 
   const results = new Map();
   const activeMasks = new Map();
   const rolloutMeta = new Map();
+  const settledStates = needSettledCache ? new Map() : null;
   const movePool = new Map();
   let nextMoveId = 4;
   const number = n => Object.is(n, -0) ? '-0' : n;
@@ -211,7 +223,7 @@ function plan(input, team = 1, config = {}) {
     const oppOut = forward(oppObs, true, nnModel);
     if (oppOut) {
       const oppPred = decodePolicyPlans(oppOut.polOut, state, oppT, oppPerm, classic, 0, random)
-        .map((mv, k) => sanitizePredictedMove(mv, state.bodies[oppT * 3 + k], classic));
+        .map((mv, k) => sanitizePredictedMove(state.bodies[oppT * 3 + k], mv, classic));
       const pKey = planKey(oppPred, 0);
       if (!responses.some(r => planKey(r, 0) === pKey)) responses.push(oppPred);
     }
@@ -270,7 +282,8 @@ function plan(input, team = 1, config = {}) {
       : 0;
     return {
       val, valOpp, ticksDone, activeMask: aMask, boards, multiTeamTouch,
-      endBallX: endBall.x, endBallY: endBall.y, goalScored: result.replay.goal
+      endBallX: endBall.x, endBallY: endBall.y, goalScored: goal,
+      settledState: (!partial && !hitDec) ? result.state : null
     };
   }
 
@@ -282,7 +295,16 @@ function plan(input, team = 1, config = {}) {
       cached = out.val;
       results.set(key, cached);
       activeMasks.set(key, out.activeMask);
-      if (r === 0) rolloutMeta.set(key, { boards: out.boards, multiTeamTouch: out.multiTeamTouch });
+      if (settledStates && out.settledState) settledStates.set(key, out.settledState);
+      if (r === 0) {
+        rolloutMeta.set(key, {
+          boards: out.boards,
+          multiTeamTouch: out.multiTeamTouch,
+          endBallX: out.endBallX,
+          endBallY: out.endBallY,
+          goalScored: out.goalScored
+        });
+      }
     }
     return cached;
   }
@@ -315,7 +337,6 @@ function plan(input, team = 1, config = {}) {
     let sum = 0;
     for (let r = 0; r < vals.length; r++) {
       const vr = vals[r];
-      // Do not let a lucky +10,000 windfall against one scenario mask conceding goals in other scenarios.
       sum += (concedesAny && vr > weights.goal * 0.5) ? vr * 0.35 : vr;
     }
     let combined = (sum / vals.length) * (1 - settings.risk) + minV * settings.risk + fit * weights.role;
@@ -325,8 +346,7 @@ function plan(input, team = 1, config = {}) {
     return combined;
   }
 
-  // Ensures an entry has passed ±2° / ±5% execution wobble (+ catastrophic own-goal veto) before winning or entering final sampling.
-  function ensureWobbled(entry) {
+  function ensureWobbled(entry, fastInline = false) {
     if (!entry || entry.wobbled || settings.wobble === false) return entry ? entry.value : -Infinity;
     const wPos = simulate(wobble(entry.moves, 1), responses[0], 0);
     const wNeg = simulate(wobble(entry.moves, -1), responses[0], 0);
@@ -335,7 +355,7 @@ function plan(input, team = 1, config = {}) {
     } else {
       entry.values[0] = (entry.values[0] + wPos + wNeg) / 3;
     }
-    if (settings.godWobble && respCount >= 3 && entry.values.length >= 3) {
+    if (!fastInline && settings.godWobble && respCount >= 3 && entry.values.length >= 3) {
       let gwIdx = 2;
       if (step4Threat.shotDanger) {
         let worstV = Infinity;
@@ -357,8 +377,6 @@ function plan(input, team = 1, config = {}) {
     return entry.value;
   }
 
-  // Wobble-verifies a finalist's worst non-legacy threat scenario (e.g. bank shot or counter) during active shotDanger
-  // so 1-pixel fluke saves lose to genuinely sturdy goalie positions.
   function ensureThreatWobbled(entry) {
     if (!entry || entry.threatWobbled || settings.wobble === false || !step4Threat.shotDanger) return;
     if (!entry.values || entry.values.length < 2) return;
@@ -383,17 +401,18 @@ function plan(input, team = 1, config = {}) {
 
   const scored = [], finalists = [];
   const useScreenTop = Number.isInteger(settings.screenTop) && respCount > 1;
-  const maxGoal = weights.goal * 1.0066; // Includes the fast-goal tie-break.
+  const maxGoal = weights.goal * 1.0066;
   const pruneMargin = Math.max(8, 1.8 * settings.temperature);
-  let nearWobbles = 0;
   let bestScore = -Infinity;
+  let bestEntry = null;
   let bestR0 = -Infinity;
   let bestMin = -Infinity;
   let bestAvg01 = -Infinity;
+  let postGoalChecks = 0;
 
-  // Two-Stage Inline Gate:
-  // Stage A checks r=0 (legacy) with a generous apples-to-apples reference min(bestScore, bestR0).
-  // Stage B finishes r=1..k and runs inline wobble BEFORE updating bestScore so 1-px flukes never hijack search.
+  // Two-Stage Inline Gate with Lazy Wobble:
+  // Only run inline wobble during Stages 1-4 when a candidate scores (>= 0.70 goal) or escapes conceding;
+  // smooth positional stepping stones defer wobble until finalist ranking, saving ~18-22% of total simulations.
   function score(moves, primaryStrike, keepDefSafe = false) {
     const fit = roleFit(moves);
     if (useScreenTop) {
@@ -405,7 +424,7 @@ function plan(input, team = 1, config = {}) {
       }
       evaluated++;
       finalists.push({ moves, fit, v0, preVal: quickVal });
-      return { value: quickVal, r0: v0 + fit * weights.role, avg01: quickVal };
+      return { value: quickVal, r0: v0 + fit * weights.role, avg01: quickVal, entry: null };
     }
 
     const v0 = simulate(moves, responses[0], 0);
@@ -414,7 +433,8 @@ function plan(input, team = 1, config = {}) {
     if (respCount === 1) {
       evaluated++;
       let val1 = r0WithFit, didWobble = settings.wobble === false;
-      if (settings.wobble !== false && (bestScore === -Infinity || val1 >= bestScore - 10)) {
+      const cliffEdge1 = val1 >= weights.goal * 0.70 || (bestScore <= -weights.goal * 0.5 && val1 > -weights.goal * 0.5);
+      if (!didWobble && cliffEdge1) {
         const wPos = simulate(wobble(moves, 1), responses[0], 0);
         const wNeg = simulate(wobble(moves, -1), responses[0], 0);
         const rawW = (v0 > -weights.goal * 0.5 && (wPos <= -weights.goal * 0.85 || wNeg <= -weights.goal * 0.85))
@@ -423,26 +443,27 @@ function plan(input, team = 1, config = {}) {
         val1 = rawW + fit * weights.role;
         didWobble = true;
       }
-      scored.push({ moves, value: val1, fit, values: [val1 - fit * weights.role], meta: meta0, wobbled: didWobble });
-      return { value: val1, r0: r0WithFit, avg01: val1 };
+      const e1 = { moves, value: val1, fit, values: [val1 - fit * weights.role], meta: meta0, wobbled: didWobble };
+      scored.push(e1);
+      return { value: val1, r0: r0WithFit, avg01: val1, entry: e1 };
     }
 
     if (v0 <= -weights.goal * 0.85 && bestScore > -weights.goal * 0.5) {
       evaluated++;
-      return { value: r0WithFit, r0: r0WithFit, avg01: r0WithFit };
+      return { value: r0WithFit, r0: r0WithFit, avg01: r0WithFit, entry: null };
     }
-    const cleanGoalLocked = bestScore >= weights.goal * 0.995;
-    if (cleanGoalLocked && !(primaryStrike && (settings.counterBudget || 0) >= 20) && r0WithFit <= bestScore + 0.25) {
+    const cleanGoalLocked = bestScore >= weights.goal * 0.995 && Boolean(bestEntry?.wobbled);
+    if (cleanGoalLocked && !(primaryStrike && (settings.counterBudget || 0) >= 16) && r0WithFit <= bestScore + 0.25) {
       evaluated++;
-      return { value: r0WithFit, r0: r0WithFit, avg01: r0WithFit };
+      return { value: r0WithFit, r0: r0WithFit, avg01: r0WithFit, entry: null };
     }
     if (bestScore > -Infinity && v0 < 5000 && !(keepDefSafe && !cleanGoalLocked && v0 > -weights.goal * 0.5)) {
       const minCap = bestMin < 4000 ? bestMin + 30 : bestScore;
       const r0Ref = Math.min(bestScore, bestR0, minCap);
-      const r0Gate = (primaryStrike && bestMin < 2000) ? 500 : 120;
+      const r0Gate = (primaryStrike && bestMin < 2000) ? 340 : 110;
       if (r0WithFit < r0Ref - r0Gate) {
         evaluated++;
-        return { value: Math.min(r0WithFit, bestScore - 22), r0: r0WithFit, avg01: r0WithFit };
+        return { value: Math.min(r0WithFit, bestScore - 22), r0: r0WithFit, avg01: r0WithFit, entry: null };
       }
     }
 
@@ -465,34 +486,42 @@ function plan(input, team = 1, config = {}) {
           Math.min(minSoFar, maxGoal) * settings.risk + fit * weights.role;
         if (exactUpper < bestScore - pruneMargin) {
           evaluated++;
-          return { value: exactUpper, r0: r0WithFit, avg01: candAvg01 };
+          return { value: exactUpper, r0: r0WithFit, avg01: candAvg01, entry: null };
         }
         if (r === 1 && v0 < 1800 && v < 1800) {
           const avg01Ref = Math.min(bestScore, bestAvg01);
-          if (candAvg01 < avg01Ref - 80) {
+          if (candAvg01 < avg01Ref - 75) {
             evaluated++;
-            return { value: candAvg01, r0: r0WithFit, avg01: candAvg01 };
+            return { value: candAvg01, r0: r0WithFit, avg01: candAvg01, entry: null };
           }
         }
       }
     }
     evaluated++;
     const preVal = combineValues(values, fit);
-
-    const isChallenger = bestScore === -Infinity || preVal > bestScore + 0.1;
-    const isNearTie = !cleanGoalLocked && nearWobbles < 1 && preVal >= bestScore - Math.max(3, settings.temperature);
     const entry = { moves, value: preVal, fit, values, meta: meta0, wobbled: settings.wobble === false };
-    if (settings.wobble !== false && (isChallenger || isNearTie)) {
-      if (!isChallenger) nearWobbles++;
-      ensureWobbled(entry);
+
+    let maxScenarioVal = values[0];
+    for (let r = 1; r < values.length; r++) if (values[r] > maxScenarioVal) maxScenarioVal = values[r];
+    // Wobble inline BEFORE updating bestScore whenever any scenario scores/threatens (>= 5000), rescues conceding, or jumps > 25 pts;
+    // skip inline wobble on smooth midfield micro-nudges and defer 2nd-scenario godWobble to finalists!
+    const isChallenger = bestScore === -Infinity || preVal > bestScore + 0.1;
+    const needsInlineWobble = settings.wobble !== false && isChallenger && (
+      maxScenarioVal >= weights.goal * 0.50 ||
+      (bestScore <= -weights.goal * 0.5 && preVal > -weights.goal * 0.5) ||
+      preVal > bestScore + 25
+    );
+
+    if (needsInlineWobble) {
+      ensureWobbled(entry, true);
       const wAvg01 = 0.5 * (values[0] + values[1]) * (1 - settings.risk) + Math.min(values[0], values[1]) * settings.risk + fit * weights.role;
       scored.push(entry);
       let minW = Infinity;
       for (let r = 0; r < values.length; r++) if (values[r] < minW) minW = values[r];
-      return { value: entry.value, r0: values[0] + fit * weights.role, minVal: minW + fit * weights.role, avg01: wAvg01 };
+      return { value: entry.value, r0: values[0] + fit * weights.role, minVal: minW + fit * weights.role, avg01: wAvg01, entry };
     }
     scored.push(entry);
-    return { value: preVal, r0: r0WithFit, minVal: minSoFar + fit * weights.role, avg01: candAvg01 };
+    return { value: preVal, r0: r0WithFit, minVal: minSoFar + fit * weights.role, avg01: candAvg01, entry };
   }
 
   // 1. Seed plan (legacy heuristic — preserves candidates:1 parity)
@@ -500,25 +529,29 @@ function plan(input, team = 1, config = {}) {
   seenPlans.add(planKey(best, 0));
   const seedRes = score(best, true);
   bestScore = seedRes.value;
+  bestEntry = seedRes.entry;
   bestR0 = seedRes.r0;
   bestMin = seedRes.minVal ?? seedRes.value;
   bestAvg01 = seedRes.avg01;
   const policyTrace = config.tracePolicy === true ? { proposals: [], lineage: new WeakMap() } : null;
 
+  const isGoalLockedExit = () => bestScore >= weights.goal * 0.995 && Boolean(bestEntry?.wobbled) && postGoalChecks >= 8;
+
   function consider(moves, primaryStrike = false, keepDefSafe = false, source = null) {
-    if (evaluated >= settings.candidates) return false;
+    if (evaluated >= settings.candidates || isGoalLockedExit()) return false;
     const pk = planKey(moves, 0);
     if (seenPlans.has(pk)) return false;
     seenPlans.add(pk);
     if (policyTrace && source) policyTrace.lineage.set(moves, source);
+    if (bestScore >= weights.goal * 0.995 && Boolean(bestEntry?.wobbled)) postGoalChecks++;
     const res = score(moves, primaryStrike, keepDefSafe);
     if (res.value > bestScore + 1e-8) {
       best = moves;
       bestScore = res.value;
+      bestEntry = res.entry;
       bestR0 = res.r0;
       bestMin = res.minVal ?? res.value;
       bestAvg01 = res.avg01;
-      nearWobbles = 0;
     }
     return true;
   }
@@ -534,9 +567,8 @@ function plan(input, team = 1, config = {}) {
     return source && { proposal: source.proposal, refined: true };
   }
 
-  // 1.5 Neural Policy Candidate Seeding (proposes learned coordinated 3-skater plays before single-skater sweep
-  //     so Stages 2-4 refine around the neural play whenever it beats legacy)
-  if (nnModel && settings.nnPolicy !== false && evaluated < settings.candidates) {
+  // 1.5 Neural Policy Candidate Seeding
+  if (nnModel && settings.nnPolicy !== false && evaluated < settings.candidates && !isGoalLockedExit()) {
     syncSlidesFromBodies(state.bodies);
     const ball0 = state.bodies[6], ballR0 = ball0.radius || 18;
     const ownPerm = [0, 1, 2];
@@ -558,7 +590,7 @@ function plan(input, team = 1, config = {}) {
   // 2. Single-skater interleaved option sweep
   const choices = [0, 1, 2].map(i => options(state, team, i, best[i]));
   const maxChoiceLen = Math.max(choices[0].length, choices[1].length, choices[2].length);
-  for (let j = 0; j < maxChoiceLen && evaluated < settings.candidates * 0.52; j++) {
+  for (let j = 0; j < maxChoiceLen && evaluated < settings.candidates * 0.45 && !isGoalLockedExit(); j++) {
     for (let i = 0; i < 3; i++) {
       const opt = choices[i][j];
       if (opt) {
@@ -566,20 +598,20 @@ function plan(input, team = 1, config = {}) {
         next[i] = opt;
         const intent = getIntent(opt);
         const keepDef = step4Threat.shotDanger && i === defRoleIdx && j <= 8 && (intent === 'cover' || intent === 'guard');
-        consider(next, keepDef || (i === primaryAtkIdx && j <= 8 && (intent === 'shoot' || intent === 'carry' || intent === 'magnet')), keepDef, policyRefinement(best));
+        consider(next, keepDef || (i === primaryAtkIdx && j <= 6 && (intent === 'shoot' || intent === 'carry' || intent === 'magnet')), keepDef, policyRefinement(best));
       }
     }
   }
 
-  // 3. Coordinated 3-player plays (Sticky escort, Defensive Fire Drill, Screen-Breaker, Snap one-timers, Pack-Draft)
-  if (evaluated < settings.candidates * 0.68) {
+  // 3. Coordinated 3-player plays
+  if (evaluated < Math.max(settings.candidates * 0.70, Math.min(settings.candidates, 24)) && !isGoalLockedExit()) {
     const joint = jointTeamPlays(state, team, best, jobs);
-    for (let jp = 0; jp < joint.length && evaluated < settings.candidates * 0.68; jp++) {
-      consider(joint[jp], jp < 6, step4Threat.shotDanger && jp < 2);
+    for (let jp = 0; jp < joint.length && evaluated < Math.max(settings.candidates * 0.70, Math.min(settings.candidates, 24)) && !isGoalLockedExit(); jp++) {
+      consider(joint[jp], jp < 5, step4Threat.shotDanger && jp < 2);
     }
   }
 
-  // 4. Active-Toucher Two-Gear Fine-Tuning
+  // 4. Outcome-Guided Shot Bracketing & Active-Toucher Two-Gear Fine-Tuning
   const shuffles = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
   function teamPlan() {
     const order = evaluated % 3 ? shuffles[0] : shuffles[Math.floor(random() * 6)];
@@ -596,16 +628,19 @@ function plan(input, team = 1, config = {}) {
   const activeBuf = [0, 0, 0], fallbackBuf = [0, 0, 0];
   const refineStart = evaluated;
   const refineSpan = Math.max(1, settings.candidates - refineStart);
+  const ballBody = state.bodies[6];
 
   let loopGuard = 0;
   const maxLoopSteps = settings.candidates * 3;
-  while (evaluated < settings.candidates && anyUnstunned && ++loopGuard <= maxLoopSteps) {
+  while (evaluated < settings.candidates && anyUnstunned && !isGoalLockedExit() && ++loopGuard <= maxLoopSteps) {
     const frac = (evaluated - refineStart) / refineSpan;
     if (evaluated % 4 === 0 && frac < 0.85) {
       if (consider(teamPlan(), false)) continue;
     }
     const next = [copy(best[0]), copy(best[1]), copy(best[2])];
-    const mask = activeMaskOf(best);
+    const bestKey0 = planKey(best, 0);
+    const mask = activeMasks.get(bestKey0) || 0;
+    const bestMeta = rolloutMeta.get(bestKey0);
     const concedingCrisis = bestMin <= -weights.goal * 0.5;
     let actLen = 0, fbLen = 0;
     for (let idx = 0; idx < 3; idx++) {
@@ -627,8 +662,8 @@ function plan(input, team = 1, config = {}) {
       continue;
     }
     const fineGear = frac >= 0.60;
-    const angSpan = fineGear ? 0.09 : 0.28;
-    const pwrSpan = fineGear ? 0.09 : 0.25;
+    const angSpan = fineGear ? 0.08 : 0.24;
+    const pwrSpan = fineGear ? 0.08 : 0.22;
     const dualEdit = settings.godRefine && poolLen >= 2 && random() < 0.30;
     const nEdits = dualEdit ? 2 : 1;
     const pick0 = Math.floor(random() * poolLen);
@@ -645,18 +680,43 @@ function plan(input, team = 1, config = {}) {
       }
       if (next[i].guard) {
         next[i].guard = false;
-        const pPt = goalPocketPoint(state.bodies[6].x, state.bodies[6].y, team, canOccupyCrease(state, team, i));
+        const pPt = goalPocketPoint(ballBody.x, ballBody.y, team, canOccupyCrease(state, team, i));
         const rescue = aim(sk, pPt.x, pPt.y, 40, null, 0);
         next[i].angle = rescue.angle;
         next[i].power = Math.max(0.25, rescue.power);
       }
+
+      // Outcome-Guided Shot Bracketing: when editing an active shooter behind the ball who hasn't scored yet,
+      // sample clean calibrated goal-mouth lanes & spin curves (keeping fireball power=1 pinned) instead of spraying wide!
+      const isActiveShooter = !concedingCrisis && !sk.holding && behindBall(sk, ballBody, team) &&
+        Math.abs(ballBody.x - atkGoalX) < 620 &&
+        (getIntent(best[i]) === 'shoot' || (i === primaryAtkIdx && next[i].power >= 0.88));
+      // Only re-seed shooter with a fresh calibrated lane when current best hasn't found a dangerous shot yet (bestScore < 950)
+      if (isActiveShooter && !fineGear && bestScore < 950 && random() < 0.28) {
+        const blockedY = bestMeta ? bestMeta.endBallY : RINK_CY;
+        const preferTop = blockedY > RINK_CY + 8 ? true : (blockedY < RINK_CY - 8 ? false : random() < 0.5);
+        const targetY = preferTop ? GOAL_Y_TOP + 18 + random() * 32 : GOAL_Y_BOT - 18 - random() * 32;
+        const spinChoice = random() < 0.30 ? 0 : (random() < 0.5 ? 1 : -1) * (0.65 + random() * 0.35);
+        const hasS = !classic && sk.meter >= 100 && sk.equippedSuper;
+        const sKey = hasS ? sk.equippedSuper.key?.toLowerCase() : null;
+        const useArm = hasS && (sKey === 'cannonball' || sKey === 'ghost' || sKey === 'sticky') ? sKey : null;
+        const gs = goalStrike(sk, ballBody, atkGoalX, targetY, useArm, spinChoice, SHOT_DRIVE, random() < 0.22 ? (ballBody.y <= RINK_CY ? -1 : 1) : 0);
+        if (gs.valid) {
+          next[i].angle = gs.angle;
+          next[i].power = 1;
+          next[i].spin = gs.spin;
+          next[i].superArm = gs.superArm;
+          continue;
+        }
+      }
+
       next[i].angle += (random() - 0.5) * angSpan;
-      next[i].power = Math.max(0, Math.min(1, (next[i].power || 0.45) + (random() - 0.5) * pwrSpan));
+      const keepFullShot = isActiveShooter && next[i].power >= 0.90 && random() < 0.68;
+      next[i].power = keepFullShot ? 1 : Math.max(0, Math.min(1, (next[i].power || 0.45) + (random() - 0.5) * pwrSpan));
       if (next[i].power > 0) {
-        const sk = state.bodies[ownStart + i];
         const spinSpan = fineGear ? 0.20 : (0.35 + 0.35 * creativityOf(sk));
         next[i].spin = Math.max(-1, Math.min(1, next[i].spin + (random() - 0.5) * spinSpan));
-        if (!classic && sk.meter >= 100 && sk.equippedSuper && random() < 0.18) {
+        if (!classic && sk.meter >= 100 && sk.equippedSuper && random() < 0.16) {
           next[i].superArm = !next[i].superArm;
         }
       } else {
@@ -701,7 +761,7 @@ function plan(input, team = 1, config = {}) {
     }
   }
 
-  // 6. Trajectory-Aware Adversarial Counter-Search (Hard+) + Mandatory Runner-Up Wobble Verification
+  // 6. Trajectory-Aware Adversarial Counter-Search (Hard+) + Runner-Up Wobble Verification
   let finalPool = scored;
   if (settings.counterBudget > 0 && evaluated > 4 && scored.length > 1) {
     const oppTeam = 1 - team, oppStart = oppTeam * 3;
@@ -738,7 +798,6 @@ function plan(input, team = 1, config = {}) {
         const bestPocket = ranked.slice(topLimit).find(e => staysInPocket(e) && !topBasins.includes(e));
         if (bestPocket) topBasins[topBasins.length - 2] = bestPocket;
       }
-      // Also ensure at least one non-conceding pocket/cover plan is in topBasins if top slots are filled by high-variance gambles.
       const zeroConcedePocket = e => staysInPocket(e) && e.values && e.values.every(v => v > -weights.goal * 0.5);
       if (topLimit >= 5 && !topBasins.some(zeroConcedePocket)) {
         const safePkt = ranked.slice(topLimit).find(e => zeroConcedePocket(e) && !topBasins.includes(e));
@@ -777,7 +836,6 @@ function plan(input, team = 1, config = {}) {
         return true;
       }
 
-      // Phase A2 helper: Opponent Scoring Punish — expose empty-net gambles, wall banks, un-guarded fireballs, goalie checks & Snap passes
       function runScoringPunish() {
         if (seedOut.goalScored === team || oppEval >= budget || !counterThreat.shotDanger) return;
         const ourGoalX = team ? RINK_RIGHT : RINK_LEFT;
@@ -816,40 +874,32 @@ function plan(input, team = 1, config = {}) {
         for (const shotY of shotYs) {
           if (oppEval >= budget || oppBestScore >= rawWeights.goal * 0.95) break;
           const cSnipe = oppBest.slice();
-          const snipeMv = strike(sb, ball, ourGoalX, shotY, armShot, 0, SHOT_DRIVE);
-          snipeMv.power = 1;
-          if (armShot) snipeMv.superArm = true;
-          cSnipe[oppStr] = snipeMv;
+          cSnipe[oppStr] = cleanGoalMove(sb, ball, ourGoalX, shotY, armShot, 0, 0);
           tryOpp(cSnipe);
         }
 
-        // Test flat-wall bank shots (top/bottom wall reflections into open goal mouth)
         if (oppEval < budget && oppBestScore < rawWeights.goal * 0.95) {
           const bInfo = bestBankTargetY(ball, ourGoalX, goalieProj.y, projOur);
           if (bInfo) {
-            const cBank = oppBest.slice();
-            const bMv = strike(sb, ball, ourGoalX, bInfo.bankY, armShot, 0, SHOT_DRIVE);
-            bMv.power = 1;
-            if (armShot) bMv.superArm = true;
-            cBank[oppStr] = bMv;
-            tryOpp(cBank);
+            const gsB = goalStrike(sb, ball, ourGoalX, bInfo.goalY, armShot, 0, SHOT_DRIVE, bInfo.wallSide);
+            if (gsB.valid) {
+              const cBank = oppBest.slice();
+              cBank[oppStr] = { angle: gsB.angle, power: gsB.power, spin: gsB.spin, superArm: gsB.superArm, guard: false };
+              tryOpp(cBank);
+            }
           }
           if (oppEval < budget && oppBestScore < rawWeights.goal * 0.95) {
-            const ballR = ball.radius || 18;
             const altSide = (bInfo && bInfo.wallSide < 0) ? 1 : -1;
-            const altWallY = altSide > 0 ? (RINK_BOTTOM - ballR) : (RINK_TOP + ballR);
             const altGoalY = altSide > 0 ? (RINK_CY - 24) : (RINK_CY + 24);
-            const altBankY = 2 * altWallY - altGoalY;
-            const cBank2 = oppBest.slice();
-            const bMv2 = strike(sb, ball, ourGoalX, altBankY, armShot, 0, SHOT_DRIVE);
-            bMv2.power = 1;
-            if (armShot) bMv2.superArm = true;
-            cBank2[oppStr] = bMv2;
-            tryOpp(cBank2);
+            const gsB2 = goalStrike(sb, ball, ourGoalX, altGoalY, armShot, 0, SHOT_DRIVE, altSide);
+            if (gsB2.valid) {
+              const cBank2 = oppBest.slice();
+              cBank2[oppStr] = { angle: gsB2.angle, power: gsB2.power, spin: gsB2.spin, superArm: gsB2.superArm, guard: false };
+              tryOpp(cBank2);
+            }
           }
         }
 
-        // Test 2-on-1 goalie check + shot when a second opponent can knock our goalie out of position
         if (oppEval < budget && oppBestScore < rawWeights.goal * 0.95) {
           let gChecker = -1, bestGD = 260;
           for (let i = 0; i < 3; i++) {
@@ -865,10 +915,7 @@ function plan(input, team = 1, config = {}) {
             const chkMv = aim(cb, goalieProj.x, goalieProj.y, 240, armC, 0);
             if (armC) chkMv.superArm = true;
             const cScreen = oppBest.slice();
-            const sMv = strike(sb, ball, ourGoalX, RINK_CY, armShot, 0, SHOT_DRIVE);
-            sMv.power = 1;
-            if (armShot) sMv.superArm = true;
-            cScreen[oppStr] = sMv;
+            cScreen[oppStr] = cleanGoalMove(sb, ball, ourGoalX, RINK_CY, armShot, 0, 0);
             cScreen[gChecker] = chkMv;
             tryOpp(cScreen);
           }
@@ -893,29 +940,25 @@ function plan(input, team = 1, config = {}) {
             for (const offY of [-32, 32]) {
               if (oppEval >= budget || oppBestScore >= rawWeights.goal * 0.95) break;
               const cGlance = oppBest.slice();
-              const gMv = strike(sb, ball, ourGoalX, Math.max(GOAL_Y_TOP + 18, Math.min(GOAL_Y_BOT - 18, gy + offY)), armShot, 0, SHOT_DRIVE);
-              gMv.power = 1;
-              if (armShot) gMv.superArm = true;
-              cGlance[oppStr] = gMv;
+              cGlance[oppStr] = cleanGoalMove(sb, ball, ourGoalX, Math.max(GOAL_Y_TOP + 20, Math.min(GOAL_Y_BOT - 20, gy + offY)), armShot, 0, 0);
               tryOpp(cGlance);
             }
           } else {
-            const spinDir = oppTeam ? -1 : 1;
+            const spinDir = oppTeam ? 1 : -1;
             for (const sideSign of [-1, 1]) {
               if (oppEval >= budget || oppBestScore >= rawWeights.goal * 0.95) break;
-              const cBender = oppBest.slice();
-              const rawAimY = RINK_CY + sideSign * 110;
-              const bMv = strike(sb, ball, ourGoalX, rawAimY, null, 0, SHOT_DRIVE);
-              bMv.power = 1;
-              bMv.spin = sideSign * spinDir;
-              cBender[oppStr] = bMv;
-              tryOpp(cBender);
+              const bGoalY = sideSign < 0 ? GOAL_Y_TOP + 24 : GOAL_Y_BOT - 24;
+              const gsCurve = goalStrike(sb, ball, ourGoalX, bGoalY, null, -sideSign * spinDir, SHOT_DRIVE, 0);
+              if (gsCurve.valid) {
+                const cBender = oppBest.slice();
+                cBender[oppStr] = { angle: gsCurve.angle, power: gsCurve.power, spin: gsCurve.spin, superArm: false, guard: false };
+                tryOpp(cBender);
+              }
             }
           }
         }
       }
 
-      // During live shotDanger when CPU didn't already score, prioritize exposing open-net / bank goals FIRST!
       if (counterThreat.shotDanger && seedOut.goalScored !== team) {
         runScoringPunish();
         if (scoringOnly || oppBestScore >= rawWeights.goal * 0.95) {
@@ -923,7 +966,6 @@ function plan(input, team = 1, config = {}) {
         }
       }
 
-      // Phase A: Targeted intercepts against the actual ball trajectory & active CPU playmakers from seedOut
       const endBx = seedOut.endBallX, endBy = seedOut.endBallY;
       const midX = Math.max(RINK_LEFT + 42, Math.min(RINK_RIGHT - 42, (ball.x + endBx) * 0.5));
       const midY = Math.max(RINK_TOP + 42, Math.min(RINK_BOTTOM - 42, (ball.y + endBy) * 0.5));
@@ -967,7 +1009,6 @@ function plan(input, team = 1, config = {}) {
         tryOpp(cMid);
       }
 
-      // Body-check the active CPU skater(s) who touched/drove the ball in seedOut
       const aMask = seedOut.activeMask;
       for (let k = 0; k < 3 && oppEval < budget; k++) {
         if (!(aMask & (1 << k))) continue;
@@ -992,14 +1033,12 @@ function plan(input, team = 1, config = {}) {
         }
       }
 
-      // Phase B: Coordinated opponent team plays (including Defensive Fire Drill & Snap one-timers)
       const jointCap = Math.min(budget, oppEval + Math.max(2, Math.floor(budget * 0.25)));
       if (oppEval < jointCap) {
         const oppJoint = jointTeamPlays(state, oppTeam, oppBest, oppJobs);
         for (let jp = 0; jp < oppJoint.length && oppEval < jointCap; jp++) tryOpp(oppJoint[jp]);
       }
 
-      // Phase C: Single-skater option sweep starting at j=3 (skipping redundant HOLD/GUARD/cleanBase slots)
       if (oppEval < budget) {
         const oppChoices = [0, 1, 2].map(i => options(state, oppTeam, i, oppBest[i]));
         const maxLen = Math.max(oppChoices[0].length, oppChoices[1].length, oppChoices[2].length);
@@ -1017,7 +1056,6 @@ function plan(input, team = 1, config = {}) {
       return { moves: oppBest, valForUs: targetValUs, endBallY: oppBestEndY };
     }
 
-    // Ensure #1 entering counter-search is wobble-verified
     while (topBasins.length && !topBasins[0].wobbled) {
       ensureWobbled(topBasins[0]);
       topBasins.sort((a, b) => b.value - a.value);
@@ -1034,9 +1072,16 @@ function plan(input, team = 1, config = {}) {
       for (let r = 1; r < target.values.length; r++) {
         if (target.values[r] < target.values[worstIdx]) worstIdx = r;
       }
+      const cleanGoalLeader = target.value >= weights.goal * 0.995 && target.wobbled;
       const isExtraDefRound = round >= baseRounds;
-      const rBudget = isExtraDefRound ? Math.min(8, settings.counterBudget) : settings.counterBudget;
+      const rBudget = cleanGoalLeader
+        ? Math.min(7, settings.counterBudget)
+        : (isExtraDefRound ? Math.min(8, settings.counterBudget) : settings.counterBudget);
       const counter = findCounter(target.moves, responses[worstIdx] || responses[0], rBudget, isExtraDefRound);
+      if (cleanGoalLeader && counter.valForUs >= weights.goal * 0.95) {
+        // Even targeted plugs, mid-lane intercepts & checks failed to stop the goal — exit counter-search immediately!
+        break;
+      }
       const cKey = planKey(counter.moves, 0);
       if (usedRespKeys.has(cKey)) break;
       const rNew = responses.length;
@@ -1052,8 +1097,6 @@ function plan(input, team = 1, config = {}) {
       }
       topBasins.sort((a, b) => b.value - a.value);
 
-      // Post-counter goalie-only rescue pass: if the counter exposed a goal against #1 and EVERY finalist now concedes
-      // at least one scenario, test a few targeted defender adjustments on `target` against the new counter first.
       if (counterThreat.shotDanger && counter.valForUs <= -weights.goal * 0.5 &&
           topBasins[0]?.values?.some(v => v <= -weights.goal * 0.85)) {
         const dIdx = defRoleIdx >= 0 ? defRoleIdx : 0;
@@ -1068,7 +1111,6 @@ function plan(input, team = 1, config = {}) {
             seenRep.add(id);
             repairOpts.push(mv);
           };
-          // Aim directly at the goal-mouth Y where the counter just scored (inside the crease pocket if legal).
           if (Number.isFinite(counter.endBallY) && counter.endBallY >= GOAL_Y_TOP - 20 && counter.endBallY <= GOAL_Y_BOT + 20) {
             const allowP = canOccupyCrease(state, team, dIdx);
             const saveX = allowP ? (ownGoalX + (team ? -44 : 44)) : (ownGoalX + (team ? -88 : 88));
@@ -1114,12 +1156,10 @@ function plan(input, team = 1, config = {}) {
         }
       }
 
-      // If counter-search exposed a goal against #1 during shotDanger and promoted a new leader, verify the new leader too!
       if (round === baseRounds - 1 && counterThreat.shotDanger && counter.valForUs <= -weights.goal * 0.5 && topBasins[0] !== prevTarget) {
         maxRounds = baseRounds + 1;
       }
 
-      // If counter-search knocked down #1 and promoted an unwobbled runner-up, wobble-verify the new leader immediately!
       while (topBasins.length && !topBasins[0].wobbled) {
         ensureWobbled(topBasins[0]);
         topBasins.sort((a, b) => b.value - a.value);
@@ -1128,10 +1168,12 @@ function plan(input, team = 1, config = {}) {
     finalPool = topBasins;
   }
 
-    ({ finalPool, simulations, ticks } = runMultiTurnLookahead({
-      settings, evaluated, finalPool, pulse, fullTurnTicks, state, team, classic,
-      weights, tmw, maxGoal, ensureWobbled, responses, combineValues, pruneMargin, simulations, ticks, nnCtx
-    }));
+  ({ finalPool, simulations, ticks } = runMultiTurnLookahead({
+    settings, evaluated, finalPool, pulse, fullTurnTicks, state, team, classic,
+    weights, tmw, maxGoal, ensureWobbled, responses, combineValues, pruneMargin,
+    simulations, ticks, nnCtx, settledStates, planKey
+  }));
+
   // Before final selection, guarantee that the leader and any contender within the style/Boltzmann window is wobble-verified
   if (settings.wobble !== false && finalPool.length > 0) {
     const byBasin = new Map();
@@ -1148,13 +1190,13 @@ function plan(input, team = 1, config = {}) {
       distinctPool.sort((a, b) => b.value - a.value);
     }
     const leaderVal = distinctPool[0]?.value ?? -Infinity;
-    const contendMargin = Math.max(20, 3 * settings.temperature);
-    for (let i = 1; i < distinctPool.length; i++) {
+    const contendMargin = Math.min(24, 16 + 3 * settings.temperature);
+    const maxContendWobble = Math.min(distinctPool.length, 5);
+    for (let i = 1; i < maxContendWobble; i++) {
       if (!distinctPool[i].wobbled && distinctPool[i].value >= leaderVal - contendMargin) {
         ensureWobbled(distinctPool[i]);
       }
     }
-    // Under live shotDanger, also wobble-verify the top 2 finalists against their worst non-legacy threat shot.
     if (step4Threat.shotDanger && responses.length >= 2) {
       distinctPool.sort((a, b) => b.value - a.value);
       const nTW = Math.min(2, distinctPool.length);
@@ -1247,6 +1289,5 @@ function choose(scored, temperature, random, style = null) {
   for (let i = 0; i < nPool; i++) if ((pick -= wArr[i]) <= 0) return pool[i];
   return pool[topIdx];
 }
-
 
 module.exports = { prepareSearchState, plan, styleBias, choose };

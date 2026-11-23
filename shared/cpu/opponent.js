@@ -1,12 +1,23 @@
 /* Opponent response portfolio generation and online tendency learning. */
 'use strict';
-const { HOLD, GUARD, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT, SHOT_DRIVE, behindBall, getIntent , roles
+const { HOLD, GUARD, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY, GOAL_Y_TOP, GOAL_Y_BOT, SHOT_DRIVE, behindBall, getIntent, roles
 } = require('./constants.js');
-const { aim, strike } = require('./kinematics.js');
+const { aim, strike, goalStrike } = require('./kinematics.js');
 const { shotConePoint, bestBankTargetY, assessOpponentThreat, scanGoalAperture, stickyCarryMove } = require('./threat.js');
 const { legacy } = require('./baseline.js');
 const { jointTeamPlays } = require('./candidates.js');
 const { planBasinKey } = require('./evaluate.js');
+
+function cleanOppShot(body, ball, goalX, targetY, superKey, spin, drive = SHOT_DRIVE, bankSide = 0) {
+  const gs = goalStrike(body, ball, goalX, targetY, superKey, spin, drive, bankSide);
+  if (gs.valid) {
+    return { angle: gs.angle, power: gs.power, spin: gs.spin, superArm: gs.superArm, guard: false };
+  }
+  const fb = strike(body, ball, goalX, targetY, superKey, spin, drive);
+  if (drive >= 2000) fb.power = 1;
+  if (superKey) fb.superArm = true;
+  return fb;
+}
 
 function buildOpponentResponses(state, team, classic, count) {
   const oppTeam = 1 - team, oppStart = oppTeam * 3, ownStart = team * 3;
@@ -37,14 +48,12 @@ function buildOpponentResponses(state, team, classic, count) {
       const armS = (sSup === 'cannonball' || sSup === 'sticky' || sSup === 'ghost') ? sSup : null;
       let shotMv;
       if (!oppAp.open && bankInfo && bankInfo.clear && (!armS || armS === 'cannonball')) {
-        shotMv = strike(sb, ball, oppGoal, bankInfo.bankY, armS, 0, 2400);
+        shotMv = cleanOppShot(sb, ball, oppGoal, bankInfo.goalY, armS, 0, SHOT_DRIVE, bankInfo.wallSide);
       } else {
         const targetY = (sSup === 'cannonball' && oppAp.y === RINK_CY) ? (ownGoalie.y >= RINK_CY ? RINK_CY - 30 : RINK_CY + 30) : oppAp.y;
         const spinS = !oppAp.open && oppAp.blocker ? oppAp.blocker.side * 0.85 : 0;
-        shotMv = strike(sb, ball, oppGoal, targetY, armS, spinS, 2400);
+        shotMv = cleanOppShot(sb, ball, oppGoal, targetY, armS, spinS, SHOT_DRIVE, 0);
       }
-      shotMv.power = 1;
-      if (armS) shotMv.superArm = true;
       const activeThreat2 = guardOpponents.slice();
       activeThreat2[si] = shotMv;
       return [opponent, activeThreat2];
@@ -52,8 +61,6 @@ function buildOpponentResponses(state, team, classic, count) {
     return [opponent, guardOpponents];
   }
 
-  // On Hard+, keep opponents' other 2 skaters in GUARD while testing a bank / opposite-corner shot ONLY when truly on defense
-  // (so offensive setups in the opponent's half still test pure guardOpponents).
   const guardOrBank = guardOpponents.slice();
   if (threatInfo.shotDanger && threatInfo.oppStrikerIdx >= 0 && !threatInfo.incoming &&
       threatInfo.distToOwnGoal < 580 && (threatInfo.oppFirstToBall || threatInfo.distToOwnGoal < 440)) {
@@ -63,17 +70,14 @@ function buildOpponentResponses(state, team, classic, count) {
     const armS = (sSup === 'cannonball' || sSup === 'ghost') ? sSup : null;
     let altShot;
     if (bankInfo && (!oppAp.open || (bankInfo.clear && Math.abs(ball.y - RINK_CY) > 48))) {
-      altShot = strike(sb, ball, oppGoal, bankInfo.bankY, armS, 0, 2400);
+      altShot = cleanOppShot(sb, ball, oppGoal, bankInfo.goalY, armS, 0, SHOT_DRIVE, bankInfo.wallSide);
     } else {
       const oppAltY = oppAp.y !== RINK_CY ? RINK_CY : (ownGoalie.y >= RINK_CY ? GOAL_Y_TOP + 26 : GOAL_Y_BOT - 26);
-      altShot = strike(sb, ball, oppGoal, oppAltY, armS, 0, 2400);
+      altShot = cleanOppShot(sb, ball, oppGoal, oppAltY, armS, 0, SHOT_DRIVE, 0);
     }
-    altShot.power = 1;
-    if (armS) altShot.superArm = true;
     guardOrBank[si] = altShot;
   }
 
-  // 3rd opponent scenario (Hard+): open-aperture sniper + striker body-check blitz (keep 'defend' role strictly first!)
   const oppCone = shotConePoint(ball.x, ball.y, oppTeam, 88);
   const oppJobs = roles(state, oppTeam);
   let primaryOwn = ownBodies[0], bestOD = Infinity;
@@ -96,10 +100,14 @@ function buildOpponentResponses(state, team, classic, count) {
       blitz[k] = mv;
     } else if ((oppJobs[k] === 'attack' || k === threatInfo.oppStrikerIdx) && behindBall(b, ball, oppTeam)) {
       const armA = (oppSup === 'cannonball' || oppSup === 'sticky' || oppSup === 'ghost' || oppSup === 'magnet') ? oppSup : null;
-      const mv = strike(b, ball, oppGoal, oppAp.y, armA, oppAp.blocker ? oppAp.blocker.side * 0.7 : 0);
-      if (threatInfo.shotDanger) mv.power = 1;
-      if (armA) mv.superArm = true;
-      blitz[k] = mv;
+      const spinB = oppAp.blocker ? oppAp.blocker.side * 0.7 : 0;
+      if (threatInfo.shotDanger) {
+        blitz[k] = cleanOppShot(b, ball, oppGoal, oppAp.y, armA, spinB, SHOT_DRIVE, 0);
+      } else {
+        const mv = strike(b, ball, oppGoal, oppAp.y, armA, spinB);
+        if (armA) mv.superArm = true;
+        blitz[k] = mv;
+      }
     } else {
       const armK = (oppSup === 'knockout' || oppSup === 'shockwave' || oppSup === 'colossus') ? oppSup : null;
       const mv = aim(b, primaryOwn.x + (primaryOwn.vx || 0) * 0.14, primaryOwn.y + (primaryOwn.vy || 0) * 0.14, 225, armK, 0);
@@ -109,7 +117,6 @@ function buildOpponentResponses(state, team, classic, count) {
   }
   if (count === 3) return [opponent, guardOrBank, blitz];
 
-  // 4th opponent scenario (Insane & Ububall God):
   const oppCoverX = oppOwnGoal + (oppTeam ? -88 : 88);
   let attack = null;
   if (threatInfo.shotDanger && threatInfo.oppStrikerIdx >= 0 && threatInfo.oppReceiverIdx >= 0 && threatInfo.distToOwnGoal < 480) {
@@ -134,10 +141,7 @@ function buildOpponentResponses(state, team, classic, count) {
               ? (ownGoalie.y >= RINK_CY ? RINK_CY - 30 : RINK_CY + 30)
               : (ownGoalie.y >= RINK_CY ? GOAL_Y_TOP + 26 : GOAL_Y_BOT - 26);
             const curveSpin = armAtk ? 0 : ((altY < RINK_CY ? 0.92 : -0.92) * (oppTeam ? -1 : 1));
-            const mv = strike(b, ball, oppGoal, altY, armAtk ? oppSuper : null, curveSpin);
-            mv.power = 1;
-            if (armAtk) mv.superArm = true;
-            attack[k] = mv;
+            attack[k] = cleanOppShot(b, ball, oppGoal, altY, armAtk ? oppSuper : null, curveSpin, SHOT_DRIVE, 0);
           } else {
             const mv = strike(b, ball, oppGoal, RINK_CY, armAtk ? oppSuper : null, 0);
             if (threatInfo.shotDanger) mv.power = 1;
@@ -155,11 +159,13 @@ function buildOpponentResponses(state, team, classic, count) {
   }
   if (count === 4) return [opponent, guardOrBank, blitz, attack];
 
-  const ballR = ball.radius || 18;
-  const bankY = ball.y < RINK_CY ? (2 * (RINK_TOP + ballR) - RINK_CY) : (2 * (RINK_BOTTOM - ballR) - RINK_CY);
+  const bSide = ball.y < RINK_CY ? -1 : 1;
+  const bTargetY = bSide < 0 ? RINK_CY + 22 : RINK_CY - 22;
   const bankResp = attack.map((mv, k) => {
     const b = state.bodies[oppStart + k];
-    if (!b.stunned && oppJobs[k] === 'attack' && behindBall(b, ball, oppTeam)) return strike(b, ball, oppGoal, bankY, null, 0);
+    if (!b.stunned && oppJobs[k] === 'attack' && behindBall(b, ball, oppTeam)) {
+      return cleanOppShot(b, ball, oppGoal, bTargetY, null, 0, SHOT_DRIVE, bSide);
+    }
     return mv;
   });
   return [opponent, guardOrBank, blitz, attack, bankResp];
@@ -180,10 +186,6 @@ function sanitizePredictedMove(body, mv, classic) {
   };
 }
 
-// Learns up to `maxLearned` opponent responses for Hard+ from resolved match history:
-// 1. Multi-pattern kickoff / setup memory (remembers alternating kickoff plays instead of only the last one).
-// 2. Offensive & defensive habit tracking (corner-sniping, wall-banking, cross-ice passing, guard, checks, supers, spin).
-// Never accesses current-turn private inputs.
 function learnedOpponentResponses(state, team, classic, history, maxLearned = 2) {
   if (!Array.isArray(history) || history.length === 0 || maxLearned <= 0) return [];
   const oppTeam = 1 - team, oppStart = oppTeam * 3, ownStart = team * 3;
@@ -191,7 +193,6 @@ function learnedOpponentResponses(state, team, classic, history, maxLearned = 2)
   const isKickoff = (state.roundTurns || 0) === 0;
   const out = [];
 
-  // 1. Frequency + recency weighted state-similarity memory (retains up to 2 distinct kickoff/setup patterns)
   const patternMap = new Map();
   const maxScan = Math.min(history.length, 32);
   let matchOrdinal = 0;
@@ -238,7 +239,6 @@ function learnedOpponentResponses(state, team, classic, history, maxLearned = 2)
     if (out.length >= maxLearned) return out;
   }
 
-  // 2. Tendency adaptation across recent turns (both offensive shot/bank/pass tendencies and defensive/check/super habits)
   let moveW = 0, anchorTotalW = 0, anchorGuardW = 0;
   let launchW = 0, checkW = 0, spinAbsSum = 0;
   let superAvailW = 0, superArmW = 0;
@@ -295,7 +295,6 @@ function learnedOpponentResponses(state, team, classic, history, maxLearned = 2)
             if (eDiff < 0.36) { checkW += w; break; }
           }
         } else if (hitsBall && oppBehind) {
-          // Exact circle-impact normal gives true outgoing puck direction (including steep wall-bank cuts)
           const contactR = 44;
           const tImp = Math.max(0, tProj - Math.sqrt(Math.max(0, contactR * contactR - perp * perp)));
           const impX = obx + uxL * tImp, impY = oby + uyL * tImp;
@@ -351,20 +350,14 @@ function learnedOpponentResponses(state, team, classic, history, maxLearned = 2)
   const supK = oppJobs.indexOf('support');
   const defK = oppJobs.indexOf('defend');
 
-  // Adapt attacker/wing to observed bank-shot, cross-ice pass, or corner-sniping habits
   const atkB = atkK >= 0 ? state.bodies[oppStart + atkK] : null;
   if (atkB && !atkB.stunned && !atkB.holding && behindBall(atkB, ball, oppTeam) && totalOffW >= 0.75) {
     const aKey = !classic && (atkB.meter ?? 0) >= 100 && superEagerness >= 0.4 ? atkB.equippedSuper?.key?.toLowerCase() : null;
     const armAtk = (aKey === 'cannonball' || aKey === 'sticky' || aKey === 'ghost') ? aKey : null;
-    const ballR = ball.radius || 18;
     if (bankW / totalOffW >= 0.28) {
-      const bankTargetY = bankTopW >= bankBotW
-        ? (2 * (RINK_TOP + ballR) - (RINK_CY + 24))
-        : (2 * (RINK_BOTTOM - ballR) - (RINK_CY - 24));
-      const bMv = strike(atkB, ball, oppAtkGoal, bankTargetY, armAtk, 0, SHOT_DRIVE);
-      bMv.power = 1;
-      if (armAtk) bMv.superArm = true;
-      base[atkK] = bMv;
+      const wSide = bankTopW >= bankBotW ? -1 : 1;
+      const bGoalY = wSide < 0 ? RINK_CY + 24 : RINK_CY - 24;
+      base[atkK] = cleanOppShot(atkB, ball, oppAtkGoal, bGoalY, armAtk, 0, SHOT_DRIVE, wSide);
     } else if (passW / totalOffW >= 0.26 && supK >= 0 && !state.bodies[oppStart + supK].stunned) {
       const supB = state.bodies[oppStart + supK];
       const passX = Math.max(RINK_LEFT + 110, Math.min(RINK_RIGHT - 110, supB.x * 0.64 + oppAtkGoal * 0.36));
@@ -375,9 +368,7 @@ function learnedOpponentResponses(state, team, classic, history, maxLearned = 2)
     } else if (shotSampleW >= 0.75 && (topCornerW + botCornerW) / shotSampleW >= 0.32) {
       const favY = topCornerW >= botCornerW ? GOAL_Y_TOP + 22 : GOAL_Y_BOT - 22;
       const favSpin = avgAbsSpin > 0.22 ? (favY < RINK_CY ? -avgAbsSpin : avgAbsSpin) * (oppTeam ? 1 : -1) : 0;
-      const cMv = strike(atkB, ball, oppAtkGoal, favY, armAtk, favSpin);
-      if (armAtk) cMv.superArm = true;
-      base[atkK] = cMv;
+      base[atkK] = cleanOppShot(atkB, ball, oppAtkGoal, favY, armAtk, favSpin, SHOT_DRIVE, 0);
     }
   }
 
@@ -419,11 +410,9 @@ function learnedOpponentResponses(state, team, classic, history, maxLearned = 2)
   return out;
 }
 
-// Backward-compatible single-response wrapper
 function learnedOpponentResponse(state, team, classic, history) {
   const list = learnedOpponentResponses(state, team, classic, history, 1);
   return list.length ? list[0] : null;
 }
-
 
 module.exports = { buildOpponentResponses, sanitizePredictedMove, learnedOpponentResponses, learnedOpponentResponse };

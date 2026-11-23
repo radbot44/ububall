@@ -2,16 +2,15 @@
 'use strict';
 const {
   P, M, HOLD, GUARD, RINK_LEFT, RINK_RIGHT, RINK_TOP, RINK_BOTTOM, RINK_CX, RINK_CY,
-  GOAL_Y_TOP, GOAL_Y_BOT, SHOT_DRIVE, decided, skaterDrive, segmentBlocked,
-  behindBall, isPointBlank, bReach, copy, roles
+  GOAL_Y_TOP, GOAL_Y_BOT, SHOT_DRIVE, decided, contactRadius,
+  behindBall, isPointBlank, roles
 } = require('./constants.js');
-const { aim, strike, traceMovingBall } = require('./kinematics.js');
-const { shotConePoint, canOccupyCrease, goalPocketPoint, bestBankTargetY, timedGoalieIntercept, traceIncomingShot, assessOpponentThreat, scanGoalAperture } = require('./threat.js');
+const { aim, strike, goalStrike } = require('./kinematics.js');
+const { shotConePoint, canOccupyCrease, goalPocketPoint, bestBankTargetY, timedGoalieIntercept, traceIncomingShot, scanGoalAperture } = require('./threat.js');
 const { legacy } = require('./baseline.js');
-const { options, jointTeamPlays } = require('./candidates.js');
+const { jointTeamPlays } = require('./candidates.js');
 const { syncSlidesFromBodies, strikeAccess, coneCover, evaluateBodies, planBasinKey } = require('./evaluate.js');
 const { NN_INPUT_DIM, encodeState, decodePolicyPlans, forward } = require('./nn.js');
-const { buildOpponentResponses } = require('./opponent.js');
 
 const t2ObsBuf = new Float32Array(NN_INPUT_DIM);
 const t2PermBuf = [0, 1, 2];
@@ -19,13 +18,11 @@ const t2PermBuf = [0, 1, 2];
 function runMultiTurnLookahead(ctx) {
   const {
     settings, evaluated, pulse, fullTurnTicks, state, team, classic,
-    weights, tmw, maxGoal, ensureWobbled, responses, combineValues, pruneMargin, nnCtx
+    weights, tmw, maxGoal, ensureWobbled, responses, combineValues, pruneMargin, nnCtx,
+    settledStates, planKey
   } = ctx;
   let { finalPool, simulations, ticks } = ctx;
-  // 7. Selective Multi-Turn Look-Ahead (Insane & Ububall God):
-  //    Bridges top distinct finalists through canonical Turn-1 settlement (`finishTurn`: stuns, cards, whiff refunds,
-  //    expired Standard supers, or carried Pulse velocity/supers) and solves a Turn-2 simultaneous micro-game
-  //    (chaining into Turn 3 in Pulse mode on Ububall God) discounted at gamma = 0.60.
+
   const lookaheadTop = settings.lookaheadTop || 0;
   if (lookaheadTop > 0 && evaluated > 4 && finalPool.length > 1) {
     const byB = new Map();
@@ -42,7 +39,7 @@ function runMultiTurnLookahead(ctx) {
       contenders.sort((a, b) => b.value - a.value);
     }
 
-    // Skip Turn-2 look-ahead only when #1 already locks in a clean forced Turn-1 goal (>= 9,200) across all scenarios
+    // Skip Turn-2 look-ahead when #1 already locks in a clean forced Turn-1 goal (>= 9,200) across all scenarios
     if (contenders.length > 1 && contenders[0].value < weights.goal * 0.92) {
       const t2Breadth = settings.lookaheadBreadth || 4;
       const t2Horizon = pulse ? fullTurnTicks : (settings.lookaheadTicks || 320);
@@ -164,12 +161,16 @@ function runMultiTurnLookahead(ctx) {
           addPlay(joint[0]);
         } else if (bestShooter >= 0) {
           const sb = sNode.bodies[sOwn + bestShooter], sSup = supKeyOf(bestShooter);
-          const armS = (sSup === 'cannonball' || sSup === 'sticky' || sSup === 'ghost' || sSup === 'magnet') ? sSup : null;
-          const snipeSpin = !sAp.open && sAp.blocker ? -sAp.blocker.side * (side ? 1 : -1) : (isPointBlank(sb, sBall) ? (sAp.y <= RINK_CY ? 1 : -1) * (side ? 1 : -1) : 0);
+          const armS = (sSup === 'cannonball' || sSup === 'sticky' || sSup === 'ghost') ? sSup : null;
           const snipeTargetY = !sAp.open && sAp.blocker ? (sAp.blocker.body.y >= RINK_CY ? GOAL_Y_TOP + 21 : GOAL_Y_BOT - 21) : sAp.y;
-          const snipeMv = strike(sb, sBall, sAtkGoal, snipeTargetY, armS, snipeSpin, SHOT_DRIVE);
-          snipeMv.power = 1;
-          if (armS) snipeMv.superArm = true;
+          const gap = bestShootD - contactRadius(sb) - sBallR;
+          const snipeSpin = !sAp.open && sAp.blocker
+            ? -sAp.blocker.side * (side ? 1 : -1)
+            : (isPointBlank(sb, sBall) ? ((snipeTargetY <= RINK_CY ? -1 : 1) * (gap < 38 ? 1 : -1) * (side ? 1 : -1)) : 0);
+          const gs = goalStrike(sb, sBall, sAtkGoal, snipeTargetY, armS, snipeSpin, SHOT_DRIVE, 0);
+          const snipeMv = gs.valid
+            ? { angle: gs.angle, power: gs.power, spin: gs.spin, superArm: gs.superArm, guard: false }
+            : (() => { const fb = strike(sb, sBall, sAtkGoal, snipeTargetY, armS, snipeSpin, SHOT_DRIVE); fb.power = 1; if (armS) fb.superArm = true; return fb; })();
           const snipePlay = lockdown.slice();
           snipePlay[bestShooter] = snipeMv;
           if (!sAp.open && sAp.blocker) {
@@ -203,16 +204,17 @@ function runMultiTurnLookahead(ctx) {
           const oppDefI = oppJobs.indexOf('defend');
           const oppGoalieY = sEnemies[oppDefI >= 0 ? oppDefI : 0]?.y ?? RINK_CY;
           const bInfo = bestBankTargetY(sBall, sAtkGoal, oppGoalieY, sEnemies);
-          const chosenBankY = bInfo
-            ? bInfo.bankY
-            : (sBall.y < RINK_CY ? (2 * (RINK_TOP + sBallR) - (RINK_CY + 24)) : (2 * (RINK_BOTTOM - sBallR) - (RINK_CY - 24)));
-          const bankMv = strike(sb, sBall, sAtkGoal, chosenBankY, null, 0, SHOT_DRIVE);
-          bankMv.power = 1;
-          const bankPlay = lockdown.slice();
-          bankPlay[bestShooter] = bankMv;
-          addPlay(bankPlay);
+          const bSide = bInfo ? bInfo.wallSide : (sBall.y < RINK_CY ? -1 : 1);
+          const bGoalY = bInfo ? bInfo.goalY : (bSide < 0 ? RINK_CY + 24 : RINK_CY - 24);
+          const bankGs = goalStrike(sb, sBall, sAtkGoal, bGoalY, null, 0, SHOT_DRIVE, bSide);
+          if (bankGs.valid) {
+            const bankPlay = lockdown.slice();
+            bankPlay[bestShooter] = { angle: bankGs.angle, power: bankGs.power, spin: bankGs.spin, superArm: false, guard: false };
+            addPlay(bankPlay);
+          }
         }
-        if (portfolio.length < cap) {
+        // Only add all-guard fallback when ball is actually near our defensive half; otherwise prefer coordinated joint plays
+        if (portfolio.length < cap && Math.abs(sBall.x - sOwnGoal) < 460) {
           const pureGuard = [0, 1, 2].map(i => {
             const b = sNode.bodies[sOwn + i];
             if (b.stunned) return HOLD;
@@ -284,7 +286,6 @@ function runMultiTurnLookahead(ctx) {
           }
         }
 
-        // Deeper Pulse Turn-3 Chaining (Ububall God: 3 continuous 1-second turns of carry-over momentum & supers)
         if (pulse && remPulseDepth > 0 && t2SimsUsed + 4 <= maxT2Sims && bestSaddleState && Math.abs(bestRowVal) < weights.goal * 0.55) {
           const v3 = evalMultiTurn(bestSaddleState, remPulseDepth - 1, 2);
           const clampedV3 = Math.max(-weights.goal * 0.94, Math.min(weights.goal * 0.94, v3));
@@ -293,30 +294,38 @@ function runMultiTurnLookahead(ctx) {
         return bestRowVal;
       }
 
-      function bridgeAndEvalTurn2(moves, oppMoves, rawV1) {
+      function bridgeAndEvalTurn2(moves, oppMoves, rawV1, rIdx = -1) {
         if (t2SimsUsed >= maxT2Sims || rawV1 >= weights.goal * 0.90 || rawV1 <= -weights.goal * 0.85) {
           return { blended: rawV1, delta: 0 };
         }
-        const bridgeMoves = team
-          ? [oppMoves[0], oppMoves[1], oppMoves[2], moves[0], moves[1], moves[2]]
-          : [moves[0], moves[1], moves[2], oppMoves[0], oppMoves[1], oppMoves[2]];
-        const bridgeTicks = pulse ? fullTurnTicks : Math.min(fullTurnTicks, 1680);
-        const res1 = M.resolveTurn(P, state, bridgeMoves, {
-          effects: false, fastSearch: true, fastTick: true, ticks: bridgeTicks,
-          decided: null, preservePartial: false
-        });
-        simulations++;
-        t2SimsUsed++;
-        ticks += res1.replay.ticks;
+        // Reuse already-settled Turn-1 state from Stage 1-6 when available (100% of Pulse rollouts & settled Standard rollouts!)
+        let s2 = (rIdx >= 0 && settledStates && planKey) ? settledStates.get(planKey(moves, rIdx)) : undefined;
+        let bridgeGoal = null;
+        if (!s2) {
+          const bridgeMoves = team
+            ? [oppMoves[0], oppMoves[1], oppMoves[2], moves[0], moves[1], moves[2]]
+            : [moves[0], moves[1], moves[2], oppMoves[0], oppMoves[1], oppMoves[2]];
+          const bridgeTicks = pulse ? fullTurnTicks : Math.min(fullTurnTicks, 1680);
+          const res1 = M.resolveTurn(P, state, bridgeMoves, {
+            effects: false, fastSearch: true, fastTick: true, ticks: bridgeTicks,
+            decided: null, preservePartial: false
+          });
+          simulations++;
+          t2SimsUsed++;
+          ticks += res1.replay.ticks;
+          bridgeGoal = res1.replay.goal;
+          s2 = res1.state;
+        } else if (s2.phase === 'goal') {
+          bridgeGoal = s2.scores[team] > state.scores[team] ? team : (1 - team);
+        }
 
-        if (res1.replay.goal !== null) {
-          const settledGoalVal = res1.replay.goal === team ? weights.goal : -weights.goal;
+        if (bridgeGoal !== null) {
+          const settledGoalVal = bridgeGoal === team ? weights.goal : -weights.goal;
           return { blended: settledGoalVal, delta: settledGoalVal - rawV1 };
         }
-        if (res1.state.winner !== null) {
+        if (s2.winner !== null) {
           return { blended: rawV1, delta: 0 };
         }
-        const s2 = res1.state;
         const v1Settled = evaluateBodies(s2.bodies, s2.fouls, team, null, weights, 0, null, false, tmw, false, pulse, neuralContext(s2, 0));
         const v2 = evalMultiTurn(s2, extraPulseDepth, t2Breadth);
         const clampedV2 = Math.max(-weights.goal * 0.96, Math.min(weights.goal * 0.96, v2));
@@ -341,10 +350,10 @@ function runMultiTurnLookahead(ctx) {
         for (let r = 1; r < cand.values.length; r++) {
           if (cand.values[r] < cand.values[worstIdx]) worstIdx = r;
         }
-        const bWorst = bridgeAndEvalTurn2(cand.moves, responses[worstIdx] || responses[0], cand.values[worstIdx]);
+        const bWorst = bridgeAndEvalTurn2(cand.moves, responses[worstIdx] || responses[0], cand.values[worstIdx], worstIdx);
         let b0 = null;
         if (worstIdx !== 0 && t2SimsUsed + 6 <= maxT2Sims && ((settings.godBridgeDual && rankIdx < 2) || bWorst.delta > 350 || cand.values[0] >= weights.goal * 0.70)) {
-          b0 = bridgeAndEvalTurn2(cand.moves, responses[0], cand.values[0]);
+          b0 = bridgeAndEvalTurn2(cand.moves, responses[0], cand.values[0], 0);
         }
 
         const nextVals = cand.values.slice();
@@ -371,7 +380,6 @@ function runMultiTurnLookahead(ctx) {
       }
       contenders.sort((a, b) => b.value - a.value);
 
-      // Lazy promotion guard: if inspected leaders dropped into a Turn-2 trap so an un-inspected candidate rose to #1, verify #1 too!
       let extraChecks = 0;
       while (contenders.length && !contenders[0].t2Checked && t2SimsUsed < maxT2Sims && extraChecks < 2) {
         extraChecks++;
