@@ -2,8 +2,8 @@
    taps or reads at a glance, Inter for running text and small numbers. */
 @font-face {
   font-family: 'Uburoom Sans';
-  src: url('assets/UburoomSans-Regular.woff2') format('woff2');
-  font-weight: 400;
+  src: url('assets/UburoomSans-Variable.woff2') format('woff2');
+  font-weight: 300 800;
   font-style: normal;
   font-display: swap;
 }
@@ -54,9 +54,9 @@ html::before {
 ::-webkit-scrollbar-button { display: none; }
 ::-webkit-scrollbar-thumb { border: .125rem solid transparent; border-radius: 6.1875rem; background: var(--scroll-thumb) padding-box; }
 ::-webkit-scrollbar-thumb:hover { background-color: var(--muted); }
-/* Uburoom Sans has a single heavy weight; never let the browser fake a bolder one. */
+/* Uburoom Sans variable font uses weight 700 for display elements; never let the browser synthesize weights. */
 h1, h2, h3, legend, summary, button, .button, .site-nav, .display {
-  font-family: var(--font-display); font-weight: 400; font-synthesis: none; letter-spacing: .01em;
+  font-family: var(--font-display); font-weight: 700; font-synthesis: none; letter-spacing: .01em;
 }
 main { width: min(65rem, calc(100% - 3rem)); margin: 0 auto 3rem; }
 a { color: inherit; text-decoration: none; }
@@ -243,7 +243,7 @@ a { color: inherit; text-decoration: none; }
   background: var(--elevated);
   color: var(--text);
   font-size: .8125rem;
-  font-weight: 500;
+  font-weight: 700;
   cursor: pointer;
   touch-action: manipulation;
 }
@@ -320,7 +320,7 @@ a { color: inherit; text-decoration: none; }
 .provider-info h3 {
   margin: 0;
   font-size: .875rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 .provider-info p {
   margin: .125rem 0 0;
@@ -369,11 +369,11 @@ h2 { font-size: 1.125rem; margin: 0; }
   font-size: clamp(1.625rem, calc(100vw * 0.042), 2.5rem); line-height: 1.05; -webkit-text-stroke: .06em #101217; paint-order: stroke fill;
   text-shadow: 0 .375rem 1.125rem #000a;
 }
-.pack-subtitle { margin: 0; min-height: 1.35em; color: var(--muted); font-family: var(--font-display); font-size: clamp(.875rem, calc(100vw * 0.022), 1.125rem); }
+.pack-subtitle { margin: 0; min-height: 1.35em; color: var(--muted); font-family: var(--font-display); font-weight: 700; font-size: clamp(.875rem, calc(100vw * 0.022), 1.125rem); }
 .pack-subtitle:empty { visibility: hidden; }
 #status { color: var(--muted); font-size: .75rem; margin: .25rem auto 0; min-height: 1.0625rem; max-width: 35rem; }
 #status:empty { min-height: 0; margin: 0; }
-.pack-prompt { margin: 0; font-family: 'Uburoom Sans', Inter, sans-serif; font-size: 1.25rem; color: var(--primary); animation: prompt-pulse 1.6s ease-in-out infinite; }
+.pack-prompt { margin: 0; font-family: 'Uburoom Sans', Inter, sans-serif; font-weight: 700; font-size: 1.25rem; color: var(--primary); animation: prompt-pulse 1.6s ease-in-out infinite; }
 .pack-prompt:empty { display: none; }
 /* Nothing shows until the page knows its screen, so a load never flashes the wrong one. */
 html.booting body { visibility: hidden; }
@@ -588,7 +588,6 @@ body:has(.viewer:modal) { overflow: hidden; }
 }
 #close-viewer {
   font-size: 1.625rem;
-  font-weight: 300;
   line-height: 1;
 }
 .viewer-body {
@@ -788,7 +787,7 @@ body:has(.viewer:modal) { overflow: hidden; }
   gap: .4375rem;
   padding: .4375rem 1rem;
   font-size: .8125rem;
-  font-weight: 500;
+  font-weight: 700;
   border-radius: .5625rem;
   background: var(--card);
   color: var(--text);
@@ -1277,7 +1276,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
   min-height: 2.25rem;
   padding: .5rem .875rem;
   font-size: .8125rem;
-  font-weight: 600;
+  font-weight: 700;
   text-decoration: none;
 }
 .card-top .card-heart { width: 3.9cqw; height: 3.9cqw; padding: .55cqw; }
@@ -1338,7 +1337,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 }
 .ubu-chip img { width: 1.25rem; height: 1.25rem; }
 .ubu-chip[aria-pressed="true"] { border-color: currentColor; background: color-mix(in srgb, var(--card), currentColor 16%); }
-.ubu-chip[data-grade] { font-family: var(--font-display); font-size: .8125rem; }
+.ubu-chip[data-grade] { font-family: var(--font-display); font-weight: 700; font-size: .8125rem; }
 .ubu-chip[aria-pressed="false"]:not([data-grade]) { color: var(--muted); }
 .ubu-clear { margin-left: auto; color: var(--muted); }
 @media (orientation: portrait) and (max-width: 520px) {
@@ -1408,7 +1407,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .ubu-tile-art { position: relative; display: grid; place-items: center; width: 6.25rem; height: 6.25rem; border-radius: 50%; background: radial-gradient(circle, #ffffff0a, transparent 70%); }
 .ubu-tile-svg { display: block; width: 100%; height: 100%; }
 .ubu-tile-name {
-  display: block; max-width: 100%; font-family: var(--font-display); font-size: .8125rem; line-height: 1.15;
+  display: block; max-width: 100%; font-family: var(--font-display); font-weight: 700; font-size: .8125rem; line-height: 1.15;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ubu-tile-archetype {
@@ -1421,7 +1420,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 @media (max-width: 47.99rem), ((pointer: coarse) and (max-height: 600px)) {
   .ubu-tile-meta { display: none; }
 }
-.ubu-tile-grade { font-family: var(--font-display); font-size: .8125rem; }
+.ubu-tile-grade { font-family: var(--font-display); font-weight: 700; font-size: .8125rem; }
 .ubu-tile-supers { display: flex; flex-wrap: wrap; justify-content: center; gap: .1875rem; min-height: 1.375rem; }
 .ubu-tile-supers span { position: relative; display: inline-grid; }
 .ubu-tile-supers img { width: 1.375rem; height: 1.375rem; border-radius: 50%; background: #10121752; }
@@ -1537,9 +1536,9 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .coin-edge { position: absolute; inset: 1.2%; border-radius: 50%; background: color-mix(in srgb, var(--coin-color) 58%, #000); transform: translateZ(calc(var(--coin-depth) * var(--depth))); }
 .coin-edge:nth-child(even) { background: color-mix(in srgb, var(--coin-color) 74%, #000); }
 .card-title-stack { grid-column: 2; grid-row: 3; position: relative; z-index: 2; align-self: end; text-align: center; }
-.trading-card h3 { font-size: 4.8cqw; font-weight: 400; line-height: 1.08; letter-spacing: 0; margin: 0; overflow-wrap: anywhere; color: #eee7de; text-shadow: 0 .125rem .1875rem #0006; }
-.card-archetype { margin: .3cqw 0 0; font-family: var(--font-body); font-size: 2cqw; line-height: 1.15; letter-spacing: .04em; color: #d6cdc2; text-shadow: 0 .0625rem .125rem #0008; }
-.trading-card { font-family: 'Uburoom Sans', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.trading-card h3 { font-size: 4.8cqw; font-weight: 700; line-height: 1.08; letter-spacing: 0; margin: 0; overflow-wrap: anywhere; color: #eee7de; text-shadow: 0 .125rem .1875rem #0006; }
+.card-archetype { margin: .3cqw 0 0; font-family: var(--font-body); font-weight: 400; font-size: 2cqw; line-height: 1.15; letter-spacing: .04em; color: #d6cdc2; text-shadow: 0 .0625rem .125rem #0008; }
+.trading-card { font-family: 'Uburoom Sans', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; font-weight: 700; }
 /* Glass panel: the card material shows through, framed like the card's inner rule. */
 .card-side { grid-column: 3; grid-row: 2; position: relative; z-index: 2; display: grid; grid-template-rows: 33cqw auto; align-content: start; gap: 1.2cqw; }
 .card-stats { display: grid; gap: 1.3cqw; padding: 1.8cqw 2.2cqw 2.2cqw; }
@@ -1552,10 +1551,10 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .stat-flip.flipped > .card-stats-back { transform: none; }
 .stat-flip:focus-visible { outline: .125rem solid var(--text); outline-offset: .125rem; }
 .card-stats-back .full-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1cqw 1.4cqw; }
-.card-stats-back .full-stats h5 { margin: 0 0 .3cqw; font-size: 1.2cqw; font-weight: 400; text-transform: uppercase; letter-spacing: .14em; text-shadow: 0 .0625rem .125rem #0008; }
+.card-stats-back .full-stats h5 { margin: 0 0 .3cqw; font-size: 1.2cqw; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; text-shadow: 0 .0625rem .125rem #0008; }
 .full-stat { display: flex; align-items: center; gap: .5cqw; margin-top: .3cqw; padding: .35cqw .6cqw; border-radius: .5cqw; font-size: 1.4cqw; line-height: 1.2; color: #f3ece4; text-shadow: 0 .0625rem .125rem #0008; background: linear-gradient(90deg, color-mix(in srgb, var(--stat-color) 42%, transparent) var(--stat-fill), #10121752 var(--stat-fill)); }
 .full-stat span { flex: 1; }
-.full-stat b { font-weight: 400; font-variant-numeric: tabular-nums; }
+.full-stat b { font-weight: 700; font-variant-numeric: tabular-nums; }
 .full-stat em { font-style: normal; }
 .card-fanfare { padding: 1.5cqw 1.6cqw .6cqw; color: #eee7de; cursor: pointer; transition: border-color .2s; }
 .card-fanfare:focus-visible { outline: .125rem solid var(--text); outline-offset: .125rem; }
@@ -1576,7 +1575,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .card-fanfare svg { display: block; width: 100%; height: 8cqw; margin-top: .4cqw; overflow: visible; filter: drop-shadow(0 .0625rem .0625rem #0007); }
 .card-fanfare h4 span { float: right; letter-spacing: .06em; text-transform: none; color: var(--muted); }
 .card-stats, .card-fanfare { position: relative; text-align: left; border: .0625rem solid #e6d8ce40; border-radius: .5rem; background: radial-gradient(ellipse at var(--light-x) var(--light-y), #ffffff12, transparent 70%), linear-gradient(160deg, #ffffff10, #ffffff03 45%, #10121726); backdrop-filter: blur(.3125rem) saturate(1.15); box-shadow: inset 0 .0625rem #ffffff1a, inset 0 -.0625rem #0000002e, 0 .25rem .75rem #00000024; }
-.card-side h4 { font-size: 1.3cqw; font-weight: 400; text-transform: uppercase; letter-spacing: .18em; color: #eee7de; text-shadow: 0 .0625rem .125rem #0008; margin: 0; }
+.card-side h4 { font-size: 1.3cqw; font-weight: 700; text-transform: uppercase; letter-spacing: .18em; color: #eee7de; text-shadow: 0 .0625rem .125rem #0008; margin: 0; }
 .card-stat { display: grid; gap: .7cqw; }
 .card-stat > span { font-size: 1.75cqw; line-height: 1; color: #f3ece4; text-shadow: 0 .0625rem .125rem #0008; }
 .stat-bar { position: relative; height: 1.5cqw; border-radius: 6.1875rem; background: #10121766; overflow: hidden; box-shadow: inset 0 .0625rem .125rem #0007, 0 .0625rem #ffffff14; }
@@ -1585,7 +1584,7 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .card-ability { bottom: 12.3cqw; transform-origin: left center; }
 .card-rarity { bottom: 5cqw; transform-origin: left center; }
 .card-ability span, .card-rarity span { display: block; font-size: 1.15cqw; text-transform: uppercase; letter-spacing: .16em; color: #2c2f38d9; }
-.card-ability strong, .card-rarity strong { display: block; font-size: 2.7cqw; line-height: 1.1; font-weight: 400; font-variant-numeric: tabular-nums; }
+.card-ability strong, .card-rarity strong { display: block; font-size: 2.7cqw; line-height: 1.1; font-weight: 700; font-variant-numeric: tabular-nums; }
 .card-ability.is-charged {
   background:
     radial-gradient(ellipse at var(--light-x) var(--light-y), #e6f5ff80, transparent 58%),
@@ -1688,10 +1687,10 @@ input[type=file] { position: absolute; width: .0625rem; height: .0625rem; opacit
 .card-supers { grid-column: 3; grid-row: 3; position: relative; z-index: 2; align-self: end; text-align: right; }
 .card-supers div { display: flex; justify-content: flex-end; gap: .6cqw; margin-top: .5cqw; }
 .card-supers img { width: 4.8cqw; height: 4.8cqw; padding: .15cqw; border-radius: 50%; background: #10121752; box-shadow: inset 0 .0625rem .125rem #0007, 0 .0625rem #ffffff14; }
-.card-top > span { font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.card-top > span { font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; font-weight: 400; }
 .card-ubuquity { grid-column: 1; grid-row: 2; align-self: start; margin-top: 3cqw; position: relative; z-index: 2; text-align: center; }
 .badge-caption { display: block; font-size: 1.2cqw; text-transform: uppercase; letter-spacing: .15em; color: var(--muted); }
-.grade-lettering { display: block; margin-top: 1.8cqw; font-family: 'Uburoom Sans', Inter, sans-serif; font-size: 8.6cqw; line-height: 1.15; font-weight: 400; font-synthesis: none; letter-spacing: -.02em; -webkit-text-stroke: 0; color: var(--grade-color); }
+.grade-lettering { display: block; margin-top: 1.8cqw; font-family: 'Uburoom Sans', Inter, sans-serif; font-size: 8.6cqw; line-height: 1.15; font-weight: 700; font-synthesis: none; letter-spacing: -.02em; -webkit-text-stroke: 0; color: var(--grade-color); }
 .card-ubuquity { -webkit-text-stroke: 0; }
 .card-ubuquity[data-grade="C"] { --grade-color: #aab0bc; }
 [data-grade="C"] .grade-lettering { font-size: 8cqw; }

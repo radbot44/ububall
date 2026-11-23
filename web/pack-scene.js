@@ -808,7 +808,7 @@
         ctx.drawImage(ububallLogo, pointer * 5 - width / 2, pointerY * 3 - height / 2 - 26, width, height);
         ctx.restore();
       }
-      ctx.font = "34px 'Uburoom Sans', Inter, sans-serif"; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = "700 34px 'Uburoom Sans', Inter, sans-serif"; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = '#00000060'; ctx.fillText(starterLabel, pointer * 5, 79 + pointerY * 3);
       ctx.fillStyle = '#fff'; ctx.fillText(starterLabel, pointer * 5, 77 + pointerY * 3);
       ctx.restore();

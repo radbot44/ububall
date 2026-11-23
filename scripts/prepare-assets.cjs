@@ -22,7 +22,7 @@ const sharedFiles = [
 const optionalAssets = ['ububall-net-standard.bin', 'ububall-net-pulse.bin', 'ububall-net.bin']
   .filter(name => existsSync(join(root, 'web', 'assets', name)));
 const assetFiles = [
-  'uburoom-wordmark-brand.svg', 'uburoom-oomark-brand.svg', 'oomark-pattern.svg', 'ububall-logo.svg', 'ububall-logo-com.svg', 'UburoomSans-Regular.woff2',
+  'uburoom-wordmark-brand.svg', 'uburoom-oomark-brand.svg', 'oomark-pattern.svg', 'ububall-logo.svg', 'ububall-logo-com.svg', 'UburoomSans-Variable.woff2',
   '00_stalwart.png', '01_knockout.png', '02_sticky.png', '03_cannonball.png',
   '04_magnet.png', '05_colossus.png', '06_shockwave.png', '07_ghost.png',
   ...optionalAssets

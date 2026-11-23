@@ -232,7 +232,7 @@
       const fonts = document?.fonts;
       if (!fonts) return;
       try {
-        await fonts.load?.(`400 38px 'Uburoom Sans'`, '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ·');
+        await fonts.load?.(`700 38px 'Uburoom Sans'`, '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ·');
         if (fonts.ready) await fonts.ready;
       } catch {}
     }
@@ -600,12 +600,12 @@
           const left = team ? cx : cx - 360;
           b.fillStyle = team ? away : home; b.fillRect(left, 9, 360, 60);
           b.fillStyle = team ? '#ffffff' : '#1b1e26';
-          b.font = `400 25px ${font}`; b.textAlign = team ? 'right' : 'left';
+          b.font = `700 25px ${font}`; b.textAlign = team ? 'right' : 'left';
           b.fillText(names[team].toUpperCase().slice(0, 16), team ? left + 344 : left + 16, 40, 256);
-          b.font = `400 38px ${font}`; b.textAlign = 'center';
+          b.font = `700 38px ${font}`; b.textAlign = 'center';
           b.fillText(String(frameScores[team]), team ? left + 40 : left + 320, 40);
         }
-        b.fillStyle = text; b.textAlign = 'center'; b.font = `400 23px ${font}`;
+        b.fillStyle = text; b.textAlign = 'center'; b.font = `700 23px ${font}`;
         b.fillText(`T${frameTurn}  REPLAY`, cx + 460, 40);
         session.scorebug = { key, font, layer, rev: (scorebug?.rev || 0) + 1 };
       }
@@ -919,11 +919,11 @@
       g.fillStyle = surface; g.fillRect(bugLeft + side, 36, middle, 90);
       g.fillStyle = text; g.textAlign = 'center'; g.font = `800 28px ${font}`; g.fillText(`T${cardTurn}`, CARD.width / 2, 82);
       g.restore();
-      g.textBaseline = 'alphabetic'; g.textAlign = 'center'; g.fillStyle = text; g.font = `400 34px 'Uburoom Sans', ${font}`;
+      g.textBaseline = 'alphabetic'; g.textAlign = 'center'; g.fillStyle = text; g.font = `700 34px 'Uburoom Sans', ${font}`;
       g.fillText(CARD.cta, CARD.width / 2, fieldBottom + 60);
       const logo = videoLogoImage, logoWidth = 500, logoHeight = logo?.naturalWidth ? logoWidth * logo.naturalHeight / logo.naturalWidth : 0;
       if (logoHeight) g.drawImage(logo, (CARD.width - logoWidth) / 2, fieldBottom + 80, logoWidth, logoHeight);
-      g.font = `400 40px 'Uburoom Sans', ${font}`; g.fillStyle = text;
+      g.font = `700 40px 'Uburoom Sans', ${font}`; g.fillStyle = text;
       g.fillText(CARD.tagline, CARD.width / 2, fieldBottom + 100 + logoHeight + 30);
       const name = `${replayFileName(th.replay.recorded, hidden ? null : th.replay.title)}-turn-${cardTurn}.png`;
       cardImage = new Promise((resolve, reject) => out.toBlob(blob => {
