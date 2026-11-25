@@ -1320,7 +1320,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 .team-sheet[data-step="mode"] #start-match, .team-sheet[data-step="team"] #sheet-next,
 .team-sheet:not([data-for="cpu"]) .cpu-levels { display: none; }
 .team-sheet[data-for="rules"] #sheet-next { display: block; }
-.team-sheet-foot { padding: .75rem 1rem calc(.75rem + var(--safe-bottom)); border-top: .0625rem solid var(--border); background: var(--card); }
+.team-sheet-foot { flex: none; padding: .75rem 1rem calc(.75rem + var(--safe-bottom)); border-top: .0625rem solid var(--border); background: var(--card); }
 .team-sheet-foot button { width: 100%; min-height: 3.5rem; border-radius: 1rem; font-size: 1.25rem; }
 .team-sheet[data-step="mode"][data-for="cpu"] .team-sheet-foot {
   display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: .625rem;
@@ -1331,7 +1331,7 @@ body:has(#online-dialog[open]) { overflow: hidden; }
 #sheet-team-preview svg, #sheet-team-preview img { display: block; width: 1.75rem; height: 1.75rem; }
 
 /* Mode screen: the logo across the sheet, then the three rules (any combination) in their colours. */
-.mode-step { justify-content: center; gap: .875rem; overflow-y: auto; padding-block: .75rem; }
+.mode-step { justify-content: center; gap: .875rem; overflow-y: auto; overscroll-behavior: contain; padding-block: .75rem; }
 .mode-logo { margin: 0; padding: 0 2.75rem; }
 .mode-logo img { display: block; width: 100%; max-height: clamp(4rem, calc(100dvh * 0.22), 13.75rem); object-fit: contain; }
 .mode-intro { margin: 0; color: var(--muted); font-family: var(--font-display); font-weight: 700; font-size: clamp(.875rem, calc(100vw * 0.024), 1.125rem); text-align: center; }
@@ -1505,21 +1505,33 @@ body:is([data-shot="team"], [data-shot="rules"]) .rink-stage { width: min(100%, 
 /* Phones and narrow screens stack the rink above the docked team sheet and keep the three kickoff
    slots clear across the ice. */
 @media (orientation: portrait), (width < 56rem), ((pointer: coarse) and (max-height: 600px)) {
-  body:is([data-shot="team"], [data-shot="rules"]) { padding-bottom: 0; }
+  body:is([data-shot="team"], [data-shot="rules"]) { height: 100dvh; overflow: hidden; padding-bottom: 0; }
   body:is([data-shot="team"], [data-shot="rules"]) :is(.site-header, .site-nav) { display: none; }
   body:is([data-shot="team"], [data-shot="rules"]) .ball-page {
     display: flex; flex-direction: column; align-items: center; gap: .3125rem;
-    width: min(55rem, calc(100% - .5rem)); margin: 0 auto;
+    width: min(55rem, calc(100% - .5rem)); height: 100dvh; margin: 0 auto;
     padding-top: max(.25rem, var(--safe-top, 0px));
+    padding-bottom: max(.375rem, var(--safe-bottom, 0px));
   }
   body:is([data-shot="team"], [data-shot="rules"]) .arena-layout { order: -1; flex: none; width: 100%; }
   body:is([data-shot="team"], [data-shot="rules"]) .stadium-stage-area { min-height: 0; }
+  body:is([data-shot="team"], [data-shot="rules"]) .rink-stage {
+    width: min(100%, max(17.5rem, calc(36dvh * 5 / 3)));
+    margin: -2.5% auto;
+  }
   .team-sheet {
     position: relative; inset: auto; z-index: 20;
+    flex: 1; min-height: 0; height: auto;
     width: 100%; max-width: none; padding-top: 0;
     border: .0625rem solid var(--border); border-radius: 1.125rem;
     translate: 0 0; transition: opacity .18s ease-out, translate .18s ease-out;
   }
+  .team-sheet .team-sheet-foot { padding: .5rem .75rem; }
+  .team-sheet .team-sheet-foot button { min-height: 2.75rem; font-size: 1.0625rem; }
+  .team-sheet .mode-step { justify-content: flex-start; gap: .5rem; padding-block: .5rem; }
+  .team-sheet .mode-logo img { max-height: clamp(2.25rem, 8dvh, 4.5rem); }
+  .team-sheet .mode-option { padding: .625rem .25rem .5rem; }
+  .team-sheet .cpu-levels span { min-height: 2.3125rem; }
   @starting-style { .team-sheet.open { opacity: 0; translate: 0 .625rem; } }
   .team-sheet .team-sheet-close { top: .375rem; right: .5rem; width: 1.875rem; height: 1.875rem; min-height: 0; padding: .25rem; }
   .team-sheet .sheet-step { padding: 0 .75rem; }
@@ -1647,41 +1659,29 @@ body:is([data-shot="team"], [data-shot="rules"]) .rink-stage { width: min(100%, 
   .team-sheet .roster-grid .ubu-tile-inspect { left: .1875rem; }
   .team-sheet .roster-grid :is(.ubu-tile-heart svg, .ubu-tile-inspect svg) { width: .9375rem; height: .9375rem; }
 }
-@media (orientation: portrait) and (min-height: 36rem) {
-  body:is([data-shot="team"], [data-shot="rules"]) { height: 100dvh; overflow: hidden; }
-  body:is([data-shot="team"], [data-shot="rules"]) .ball-page {
-    height: 100dvh;
-    padding-bottom: max(.375rem, var(--safe-bottom, 0px));
-  }
-  body:is([data-shot="team"], [data-shot="rules"]) .rink-stage {
-    width: min(100%, calc(36dvh * 5 / 3));
-    margin: -2.5% auto;
-  }
-  .team-sheet { flex: 1; min-height: 0; height: auto; }
-  .team-sheet .team-sheet-foot { padding: .5rem .75rem; }
-  .team-sheet .team-sheet-foot button { min-height: 2.75rem; font-size: 1.0625rem; }
-  .team-sheet .mode-step { justify-content: flex-start; gap: .5rem; padding-block: .5rem; }
-  .team-sheet .mode-logo img { max-height: clamp(2.25rem, 8dvh, 4.5rem); }
-  .team-sheet .mode-option { padding: .625rem .25rem .5rem; }
-  .team-sheet .cpu-levels span { min-height: 2.3125rem; }
-}
-@media (orientation: portrait) and (min-height: 36rem) and (max-height: 44rem) {
+@media (orientation: portrait) and (max-height: 44rem), (width < 56rem) and (max-height: 44rem), (pointer: coarse) and (max-height: 600px) {
   .team-sheet .team-sheet-foot { padding: .375rem .75rem; }
   .team-sheet .team-sheet-foot button { min-height: 2.4375rem; font-size: 1rem; }
 }
-@media (max-height: 35.99rem), (orientation: landscape) and ((width < 56rem) or ((pointer: coarse) and (max-height: 600px))) {
-  body:is([data-shot="team"], [data-shot="rules"]) { overflow-x: clip; overflow-y: auto; }
-  body:is([data-shot="team"], [data-shot="rules"]) .ball-page { padding-bottom: max(.75rem, var(--safe-bottom, 0px)); }
-  body:is([data-shot="team"], [data-shot="rules"]) .rink-stage {
-    width: min(100%, calc(48dvh * 5 / 3)); margin: -3% auto;
-  }
-  .team-sheet { flex: none; height: min(30rem, 84dvh); }
-  .team-sheet .team-sheet-foot { padding: .5rem .875rem; }
-  .team-sheet .team-sheet-foot button { min-height: 2.75rem; font-size: 1.0625rem; }
-  .team-sheet .mode-step { justify-content: flex-start; gap: .5rem; padding-block: .5rem; }
+@media (orientation: portrait) and (max-height: 36rem), (width < 56rem) and (max-height: 36rem), (pointer: coarse) and (max-height: 36rem) {
   .team-sheet .mode-logo img { max-height: 2.5rem; }
   .team-sheet .mode-option { padding: .5rem .25rem; }
   .team-sheet .cpu-levels span { min-height: 2.125rem; }
+}
+/* Extreme short viewports (e.g., open software keyboard or heavy zoom): let the page scroll explicitly
+   rather than clipping controls or squeezing content into a one-line inner scroller. */
+@media (orientation: portrait) and (max-height: 21.99rem), (width < 56rem) and (max-height: 21.99rem), (pointer: coarse) and (max-height: 21.99rem) {
+  body:is([data-shot="team"], [data-shot="rules"]) { height: auto; overflow-x: clip; overflow-y: auto; }
+  body:is([data-shot="team"], [data-shot="rules"]) .ball-page {
+    height: auto; min-height: 100dvh;
+    padding-bottom: max(.75rem, var(--safe-bottom, 0px));
+  }
+  body:is([data-shot="team"], [data-shot="rules"]) .rink-stage {
+    width: min(100%, 17.5rem); margin: 0 auto;
+  }
+  .team-sheet { flex: none; height: auto; overflow: visible; }
+  .team-sheet .sheet-step { flex: none; overflow: visible; }
+  .team-sheet .roster-scroll { flex: none; overflow: visible; }
 }
 
 /* Announcements over the rink ("Plan your shot…", "Launch!", the winner). */
