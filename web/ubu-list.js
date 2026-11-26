@@ -663,8 +663,25 @@
       }
     }
 
+    // True until a render has built the current projection (or after one was skipped while paused).
+    let stale = true;
+    // A picker-only change (lineup, target position, locks): patch mounted tiles' role state in
+    // place, leaving the projection, batch limit, observers and focused nodes untouched.
+    function refreshRoles() {
+      if (stale || !describe) return render();
+      if (paused?.()) { stale = true; return; }
+      for (const { item, main } of visible) {
+        if (!main) continue;
+        const { badge = '', action = '' } = describe(item);
+        const name = item.model.parts.fullName;
+        const pressed = String(Boolean(badge)), label = name + ', ' + (badge ? badge + ' on your team' : action);
+        if (main.getAttribute('aria-pressed') !== pressed) main.setAttribute('aria-pressed', pressed);
+        if (main.getAttribute('aria-label') !== label) main.setAttribute('aria-label', label);
+      }
+    }
     function render() {
-      if (paused?.()) return;
+      if (paused?.()) { stale = true; return; }
+      stale = false;
       const all = [...items.values()].filter(item => !hidden?.(item) && !(pick && item.pending));
       allView = view(all, state);
       limit = sentinelObserver ? BATCH : allView.length;
@@ -691,6 +708,7 @@
     root.addEventListener('ubu-list:change', render);
     return {
       render,
+      refreshRoles,
       clearFilters: () => toolbarHost.querySelector('.ubu-clear').click(),
       shownItems: () => [...allView],
       ensureVisible

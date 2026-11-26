@@ -2029,7 +2029,7 @@
         if (rosterSlot !== i) {
           rosterSlot = i;
           [...$('roster-slots').children].forEach((card, at) => card.classList.toggle('is-selected', at === i));
-          teamHint(setupClassic()); rosterList.render();
+          teamHint(setupClassic()); rosterList.refreshRoles();
         }
         superChoices();
       } });
@@ -2094,7 +2094,7 @@
     $('roster-slots').replaceChildren(...draft.map((entry, i) => slotView(entry, i, classic, locked, fixed)));
     changedSlot = -1;
     teamHint(classic);
-    rosterList.render();
+    rosterList.refreshRoles();
     $('start-match').disabled = draft.some(d => !d);
     updateTeamBar();
   }
