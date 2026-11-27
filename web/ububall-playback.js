@@ -1612,6 +1612,13 @@
       super: (key, stage, body, target = null) => {
         syncReplayTick();
         fn('handleSuper')?.(key, stage, replayView(body), target ? replayView(target) : null);
+      },
+      launch: (body, idx, kind, preVx, preVy, postVx, postVy, strength) => {
+        syncReplayTick();
+        const seat = shownSeat();
+        const sSign = seat ? -1 : 1;
+        const viewIdx = seat ? (idx < 3 ? idx + 3 : idx - 3) : idx;
+        fn('handleLaunch')?.(replayView(body), viewIdx, kind, preVx * sSign, preVy * sSign, postVx * sSign, postVy * sSign, strength);
       }
     };
 
@@ -1620,7 +1627,7 @@
       const before = fn('trailPositions')?.() || [];
       const r = state.goalReplay, segment = r.segments[++r.index];
       r.sim = stripPresentation(structuredClone(segment.bodies)); r.tick = 0;
-      P.startTurn(r.sim, segment.plans, replayFx.super);
+      P.startTurn(r.sim, segment.plans, replayFx.super, replayFx.launch);
       syncReplay();
       fn('clearDiscontinuousTrails')?.(before);
     }
@@ -2018,7 +2025,7 @@
           (fn('recordSegment') ?? recordSegment)(state.simBodies, saved.turnPlans);
           (fn('beginGuide') ?? beginGuide)(state.simBodies, saved.turnPlans, 0);
           const liveFx = deps.liveFx ?? state.liveFx;
-          P.startTurn(state.simBodies, saved.turnPlans, liveFx?.super ?? fn('handleSuper'));
+          P.startTurn(state.simBodies, saved.turnPlans, liveFx?.super ?? fn('handleSuper'), liveFx?.launch ?? fn('handleLaunch'));
           fn('syncViewBodies')?.(state.simBodies, 0);
           state.elapsed = state.accumulator = 0;
           state.phase = 'play';
@@ -2525,7 +2532,7 @@
           if (!s.spectator) recordOnlineTurn(s);
           fn('beginGuide')?.(state.onlineReplay.simBodies, state.onlineReplay.plans, s.seat);
           const rfx = deps.replayFx ?? state.replayFx;
-          P.startTurn(state.onlineReplay.simBodies, state.onlineReplay.plans, rfx?.super);
+          P.startTurn(state.onlineReplay.simBodies, state.onlineReplay.plans, rfx?.super, rfx?.launch);
           fn('syncViewBodies')?.(state.onlineReplay.simBodies, s.seat);
         }
         if (!s.spectator) finishOnlineRecording(s);
@@ -3540,6 +3547,11 @@
     }
 
     function endCanvasDragImpl() {
+      if (state.drag !== null && state.dragMoved) {
+        fn('gameAudio')?.()?.playAimScrape?.({ id: state.selected, speed: 0 });
+      }
+      state.lastAimScrapePt = null;
+      state.lastAimScrapeAt = 0;
       endSpinDrag();
       state.arrowGrab = null;
       state.drag = null;
@@ -3658,6 +3670,21 @@
           state.plans[state.selected].angle = ((rawAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
           state.plans[state.selected].power = aimPower(Math.hypot(dx, dy), arrow);
         }
+        const scrapeNow = getPerf()?.now?.() ?? Date.now();
+        if (state.lastAimScrapePt && state.lastAimScrapeAt > 0) {
+          const dtSec = Math.max(0.006, (scrapeNow - state.lastAimScrapeAt) / 1000);
+          const dRink = Math.hypot(ap.x - state.lastAimScrapePt.x, ap.y - state.lastAimScrapePt.y);
+          const dragSpd = dRink / dtSec;
+          fn('gameAudio')?.()?.playAimScrape?.({
+            id: state.selected,
+            speed: dragSpd,
+            power: state.plans[state.selected].power,
+            x: b.x,
+            y: b.y
+          });
+        }
+        state.lastAimScrapePt = { x: ap.x, y: ap.y };
+        state.lastAimScrapeAt = scrapeNow;
         state.dragDirty = true;
       };
       canvas.onpointerup = canvas.onpointercancel = event => {

@@ -108,6 +108,11 @@
       sizzle: null,
       netFire: null,
       spaceWarps: [],
+      contactMarks: [],
+      guardFlexes: [],
+      guardSetTimes: new Map(),
+      ballTapWarp: null,
+      lastGuardHitTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       superImpactTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       colossusGrowTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       carveTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
@@ -798,11 +803,12 @@
     return cache;
   }
 
-  function drawGuardShield(badgeCtx, b, isPortrait, iron) {
+  function drawGuardShield(badgeCtx, b, isPortrait, iron, scaleMul = 1, nudgeX = 0, nudgeY = 0) {
     badgeCtx.save();
     const p = isPortrait ? { x: b.x - b.radius * .65, y: b.y + b.radius * .65 } : { x: b.x + b.radius * .65, y: b.y + b.radius * .65 };
-    badgeCtx.translate(p.x, p.y); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
-    badgeCtx.scale(1.1, 1.1); badgeCtx.translate(-12, -12); badgeCtx.fillStyle = iron ? '#c3ccd6' : '#4798ff';
+    badgeCtx.translate(p.x + nudgeX, p.y + nudgeY); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
+    const s = 1.1 * scaleMul;
+    badgeCtx.scale(s, s); badgeCtx.translate(-12, -12); badgeCtx.fillStyle = iron ? '#c3ccd6' : '#4798ff';
     badgeCtx.fill(GUARD_SHIELD);
     if (iron) {
       badgeCtx.strokeStyle = '#6b7785';
@@ -1268,8 +1274,9 @@
         }
         if (!fx.sizzle) fx.sizzle = gameAudio()?.playSizzle?.({ x: ball.x, y: ball.y }) || null;
         else if (fx.sizzle?.setCoords) fx.sizzle.setCoords(ball.x, ball.y);
-      } else {
-        quench();
+      } else if (fx.sizzle) {
+        fx.sizzle.stop();
+        fx.sizzle = null;
       }
       const level = Math.max(fx.ballFlare, (share - HEAT.red) / (HEAT.redHot - HEAT.red));
       const ux = speed ? ball.vx / speed : 0, uy = speed ? ball.vy / speed : -1;
@@ -1664,9 +1671,12 @@
       fx.heatTime = 0;
       if (fx.netFire) fx.netFire.lit = false;
       fx.shake = fx.shakeX = fx.shakeY = 0; if (!view.field && rinkWrap) rinkWrap.style.translate = '';
-      fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.ballWarpFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.fireWarp = fx.koWarp = null;
+      fx.danger[0] = fx.danger[1] = fx.ballFlare = fx.ballWarpFlare = fx.kickoffGlow = 0; fx.goalSweep = fx.fireWarp = fx.koWarp = fx.ballTapWarp = null;
       fx.stickyHolderIdx = -1;
       if (fx.spaceWarps) fx.spaceWarps.length = 0;
+      if (fx.contactMarks) fx.contactMarks.length = 0;
+      if (fx.guardFlexes) fx.guardFlexes.length = 0;
+      if (fx.guardSetTimes) fx.guardSetTimes.clear();
       if (fx.iceCache) { fx.iceCache.key = null; fx.iceCache.skidSnap = null; fx.iceCache.burnSnap = null; }
     }
 
@@ -1689,6 +1699,7 @@
       fx.wallEffectTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.slipstreamTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.spinStrikeTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
+      fx.lastGuardHitTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       if (Array.isArray(view.bodies)) {
         for (const b of view.bodies) {
           if (b && typeof b === 'object') {
@@ -1819,9 +1830,11 @@
         }
       }
       for (let i = fieldFx.burns.length - 1; i >= 0; i--) if (fieldFx.burns[i].age >= BURN_LIFE) fieldFx.burns.splice(i, 1);
-      for (const list of [fieldFx.ripples, fieldFx.pings]) {
+      for (const list of [fieldFx.ripples, fieldFx.pings, fieldFx.contactMarks, fieldFx.guardFlexes]) {
+        if (!list) continue;
         for (let i = list.length - 1; i >= 0; i--) if ((list[i].life -= dt) <= 0) list.splice(i, 1);
       }
+      if (fieldFx.ballTapWarp && (fieldFx.ballTapWarp.life -= dt) <= 0) fieldFx.ballTapWarp = null;
       const threat = moving ? goalThreat() : null;
       for (const side of [0, 1]) fieldFx.danger[side] += ((threat?.side === side ? threat.level : 0) - fieldFx.danger[side]) * Math.min(1, dt * 10);
       burnNet(dt);
@@ -3564,8 +3577,144 @@
       }
     }
 
+    function aimCoilPose(b, plan, phase, reduced = false) {
+      if (phase !== 'plan' || !b || !plan || plan.guard || b.carded || b.stunned) return null;
+      const p = Math.max(0, Math.min(1, Number(plan.power) || 0));
+      if (p <= 0.015) return null;
+      const rScale = Math.min(1.18, Math.max(0.78, (b.radius || 25) / 25));
+      const dist = (1.5 + 3.1 * (p ** 1.12)) * rScale;
+      const ang = plan.angle || 0;
+      const comp = reduced ? 0 : 0.048 * (p ** 1.15);
+      return {
+        dx: -Math.cos(ang) * dist,
+        dy: -Math.sin(ang) * dist,
+        angle: ang,
+        power: p,
+        scaleX: 1 - comp,
+        scaleY: 1 + comp * 0.68
+      };
+    }
+
+    function guardBadgeMotion(fx, index, b, phase, nowMs) {
+      let scale = 1, nx = 0, ny = 0;
+      const setInfo = fx?.guardSetTimes?.get?.(index);
+      if (setInfo && phase === 'plan') {
+        const age = (nowMs - setInfo.at) / 1000;
+        if (age >= 0 && age < 0.16) {
+          const u = age / 0.16;
+          scale *= setInfo.on ? (1 + 0.24 * Math.sin(u * Math.PI) * (1 - u * 0.45)) : (1 - 0.12 * (1 - u));
+        } else if (age >= 0.16) {
+          fx.guardSetTimes.delete(index);
+        }
+      }
+      if (fx?.guardFlexes?.length) {
+        for (let k = fx.guardFlexes.length - 1; k >= 0; k--) {
+          const fl = fx.guardFlexes[k];
+          if (fl.body === b || (index >= 0 && fl.index === index)) {
+            const prog = 1 - Math.max(0, fl.life / fl.duration);
+            const env = Math.sin(Math.min(1, prog / 0.32) * Math.PI * 0.5) * ((1 - prog) ** 1.35);
+            scale *= 1 + 0.22 * fl.strength * env;
+            const recoil = 2.6 * fl.strength * env;
+            nx -= Math.cos(fl.angle) * recoil;
+            ny -= Math.sin(fl.angle) * recoil;
+            break;
+          }
+        }
+      }
+      return { scale, nx, ny };
+    }
+
+    function triggerGuardToggle(index, on = true) {
+      const fx = getEffects(), view = getView();
+      const b = view?.bodies?.[index];
+      if (fx?.guardSetTimes && index >= 0) {
+        fx.guardSetTimes.set(index, { on: Boolean(on), at: clockNow() });
+      }
+      gameAudio()?.playGuardToggle?.(Boolean(on), b ? { x: b.x, y: b.y } : {});
+    }
+
+    function handleLaunch(body, index, kind, preVx, preVy, postVx, postVy, strength = 0.5) {
+      if (!body || body.carded) return;
+      const fx = getEffects(), audio = gameAudio(), reduced = isReducedMotion();
+      if (kind === 'coast') return;
+      if (kind === 'brake') {
+        const preSpd = Math.hypot(preVx || 0, preVy || 0);
+        const s = Math.max(0.2, Math.min(1, strength || preSpd / 550));
+        audio?.playUbuMove?.({ id: index, speed: 0 });
+        audio?.playCarve?.({ brake: true, speed: preSpd, volume: Math.min(0.78, 0.30 + 0.46 * s), x: body.x, y: body.y });
+        if (!reduced && fx) {
+          if (index >= 0 && index < 6) {
+            const st = fx.skidState[index] ||= { time: 0 };
+            Object.assign(st, {
+              time: 0.32,
+              strength: Math.max(st.time > 0 ? st.strength : 0, 0.72 + 0.28 * s),
+              prev: { x: body.x - (preVx || 0) * P.DT * 2.5, y: body.y - (preVy || 0) * P.DT * 2.5, vx: preVx || 0, vy: preVy || 0 }
+            });
+          }
+          const stopAng = Math.atan2(preVy || 0, preVx || 1);
+          fx.guardFlexes?.push({
+            body, index, angle: stopAng, strength: 0.45 + 0.45 * s, graze: 0,
+            iron: Boolean(body.ironGuard), life: 0.19, duration: 0.19
+          });
+          const count = Math.round(6 + 10 * s);
+          for (let k = 0; k < count && fx.particles.length < 400; k++) {
+            const ang = stopAng + (Math.random() - 0.5) * 0.92;
+            const spd = 85 + 145 * s + Math.random() * 95;
+            const life = 0.14 + Math.random() * 0.12;
+            const sx = body.x + Math.cos(stopAng) * (body.radius * 0.78) + (Math.random() - 0.5) * 8;
+            const sy = body.y + Math.sin(stopAng) * (body.radius * 0.78) + (Math.random() - 0.5) * 8;
+            fx.particles.push({
+              x: sx, y: sy, px: sx - Math.cos(ang) * 5, py: sy - Math.sin(ang) * 5,
+              vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+              team: -1, color: k % 3 === 0 ? '#ffffff' : '#d8f1ff',
+              life, duration: life,
+              materialShape: k < 5 ? 'streak' : undefined,
+              size: k < 5 ? 2.1 + Math.random() * 1.2 : 1.7 + Math.random() * 1.3,
+              angle: ang, snap: true, overlay: true
+            });
+          }
+        }
+        return;
+      }
+      if (kind === 'cut') {
+        const s = Math.max(0.16, Math.min(1, strength || 0.4));
+        const postSpd = Math.hypot(postVx || 0, postVy || 0);
+        audio?.playCarve?.({ cut: s, speed: Math.max(postSpd, Math.hypot(preVx || 0, preVy || 0)), volume: Math.min(0.68, 0.20 + 0.44 * s), x: body.x, y: body.y });
+        if (!reduced && fx) {
+          if (index >= 0 && index < 6) {
+            const st = fx.skidState[index] ||= { time: 0 };
+            Object.assign(st, {
+              time: Math.max(st.time || 0, 0.26 + 0.08 * s),
+              strength: Math.max(st.time > 0 ? st.strength : 0, 0.52 + 0.42 * s),
+              prev: { x: body.x - (preVx || 0) * P.DT * 2, y: body.y - (preVy || 0) * P.DT * 2, vx: preVx || 0, vy: preVy || 0 }
+            });
+          }
+          // Outside-edge snow spray opposite the cut vector
+          const sprayAng = Math.atan2((preVy || 0) - (postVy || 0), (preVx || 0) - (postVx || 0));
+          const count = Math.round(4 + 9 * s);
+          for (let k = 0; k < count && fx.particles.length < 400; k++) {
+            const ang = sprayAng + (Math.random() - 0.5) * 0.78;
+            const spd = 70 + 125 * s + Math.random() * 85;
+            const life = 0.13 + Math.random() * 0.11;
+            const sx = body.x + Math.cos(sprayAng) * (body.radius * 0.72);
+            const sy = body.y + Math.sin(sprayAng) * (body.radius * 0.72);
+            fx.particles.push({
+              x: sx, y: sy, px: sx - Math.cos(ang) * 5, py: sy - Math.sin(ang) * 5,
+              vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+              team: k % 4 === 0 ? body.team : -1,
+              color: k % 4 === 0 ? null : (k % 2 === 0 ? '#ffffff' : '#d6eeff'),
+              life, duration: life,
+              materialShape: k < 4 ? 'streak' : undefined,
+              size: 1.8 + Math.random() * 1.2 * s,
+              angle: ang, snap: true, overlay: true
+            });
+          }
+        }
+      }
+    }
+
     function handleCollision(contact) {
-      const { a, b, speed = 0, impulse = 0, plow = false, iron = false, snapped = false, spinStruck = false, struck = false, tangentImpulse = 0, passerSlot = -1 } = contact;
+      const { a, b, speed = 0, impulse = 0, plow = false, iron = false, snapped = false, spinStruck = false, struck = false, tangentImpulse = 0, passerSlot = -1, graze: rawGraze = 0, tangentSign: rawTangentSign = 1 } = contact;
       if (iron) {
         if (a?.guarding) a.ironGuard = true;
         if (b?.guarding) b.ironGuard = true;
@@ -3577,16 +3726,29 @@
       const isHipClip = !isBall && a.team !== b.team && tangentImpulse >= 55 && tangentImpulse >= speed * 0.22;
       const isCheck = !isBall && a.team !== b.team && !isHipClip && speed >= 65;
       const spinBoost = !isBall && a.team !== b.team ? (tangentImpulse || 0) * 0.45 : 0;
-      const effSpeed = Math.max(speed, spinBoost);
+      const graze = isBall ? Math.max(0, Math.min(1, Number(rawGraze) || 0)) : 0;
+      const tangentSign = rawTangentSign < 0 ? -1 : 1;
+      const grazeSpeedEst = isBall && graze > 0.35 ? speed / Math.max(0.22, Math.sqrt(Math.max(0.04, 1 - graze * graze))) : speed;
+      const effSpeed = Math.max(speed, spinBoost, grazeSpeedEst * 0.65);
       if (effSpeed < 15 && !isSnap && !isStrike) return;
-      const fx = getEffects();
+      const fx = getEffects(), view = getView();
       const distance = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-      const x = a.x + (b.x - a.x) * a.radius / distance, y = a.y + (b.y - a.y) * a.radius / distance;
+      const ballObj = isBall ? (a.team === -1 ? a : b) : null;
+      const skaterObj = isBall ? (a.team !== -1 ? a : b) : null;
+      // Place ball contact mark on the exact struck edge of the ball (even on extended-Reach poke touches)
+      const x = isBall
+        ? ballObj.x + (skaterObj.x - ballObj.x) * ballObj.radius / distance
+        : a.x + (b.x - a.x) * a.radius / distance;
+      const y = isBall
+        ? ballObj.y + (skaterObj.y - ballObj.y) * ballObj.radius / distance
+        : a.y + (b.y - a.y) * a.radius / distance;
       const normalAngle = Math.atan2(b.y - a.y, b.x - a.x);
       const tangent = normalAngle + Math.PI / 2;
       const sparkStrength = Math.min(1.35, effSpeed / 600);
-      burst(x, y, a.team, sparkStrength, false, tangent);
-      if (a.team !== b.team) burst(x, y, b.team, sparkStrength, false, tangent);
+      if (!isBall || graze < 0.55) {
+        burst(x, y, a.team, sparkStrength * (isBall ? (1 - 0.55 * graze) : 1), false, tangent);
+        if (a.team !== b.team) burst(x, y, b.team, sparkStrength * (isBall ? (1 - 0.55 * graze) : 1), false, tangent);
+      }
       if (isHipClip && !isReducedMotion()) {
         const hipStrength = Math.min(1, Math.max(0.12, (Math.max(tangentImpulse, effSpeed * 0.42) - 50) / 195));
         const dur = 0.14 + 0.10 * hipStrength;
@@ -3805,11 +3967,113 @@
       if (plow) flames(x, y, 40, (b.vx || a.vx) * 0.1, (b.vy || a.vy) * 0.1, 15);
       const now = clockNow();
       if (!plow && speed >= 15) contactMeter?.(a, b, speed, passerSlot);
+      // Guard Beat 2: braced shield flex & weighted knock whenever a guarding skater absorbs a hit
+      const guardNow = clockNow();
+      for (const [guarder, other] of [[a, b], [b, a]]) {
+        if (!guarder || guarder.team < 0 || !guarder.guarding || plow) continue;
+        const hitStr = Math.min(1, Math.max(0.10, Math.max(effSpeed / 540, (impulse || 0) / 860)));
+        const hitAng = Math.atan2(other.y - guarder.y, other.x - guarder.x);
+        const gIdx = view?.bodies ? view.bodies.indexOf(guarder) : -1;
+        if (!isReducedMotion() && fx.guardFlexes && fx.guardFlexes.length < 24) {
+          fx.guardFlexes.push({
+            body: guarder,
+            index: gIdx,
+            angle: hitAng,
+            strength: hitStr,
+            graze,
+            iron: Boolean(iron || guarder.ironGuard),
+            life: 0.16 + 0.10 * hitStr,
+            duration: 0.16 + 0.10 * hitStr
+          });
+          if (hitStr >= 0.28) {
+            const braceBack = hitAng + Math.PI;
+            const puffs = Math.round(3 + 6 * hitStr);
+            for (let k = 0; k < puffs && fx.particles.length < 400; k++) {
+              const ang = braceBack + (Math.random() - 0.5) * 0.85;
+              const spd = 48 + 85 * hitStr + Math.random() * 55;
+              const life = 0.12 + Math.random() * 0.09;
+              const sx = guarder.x + Math.cos(ang) * (guarder.radius * 0.82);
+              const sy = guarder.y + Math.sin(ang) * (guarder.radius * 0.82);
+              fx.particles.push({
+                x: sx, y: sy, px: sx, py: sy,
+                vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+                team: -1, color: iron || guarder.ironGuard ? '#e3f4ff' : '#a8d4ff',
+                life, duration: life, size: 1.8 + 1.1 * hitStr, snap: true, overlay: true
+              });
+            }
+          }
+        }
+        const ghMap = (fx.lastGuardHitTimes ||= new WeakMap());
+        if (guardNow - (ghMap.get(guarder) ?? -Infinity) > 45) {
+          ghMap.set(guarder, guardNow);
+          gameAudio()?.playGuardHit?.({
+            strength: hitStr,
+            graze,
+            volume: Math.min(1, 0.30 + 0.70 * (hitStr ** 0.85)),
+            x, y
+          });
+        }
+      }
+
       if (isBall) {
         const ball = a.team === -1 ? a : b;
         const player = a.team !== -1 ? a : b;
-        const norm = Math.min(1.0, Math.max(0.0, (speed - 25) / 550));
+        const norm = Math.min(1.0, Math.max(0.0, (Math.max(speed, effSpeed * 0.75) - 20) / 540));
         const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
+        const faceAngle = Math.atan2(player.y - ball.y, player.x - ball.x);
+        const bodyCoreDist = (player.radius || 25) + (ball.radius || 18);
+        const isPoke = distance > bodyCoreDist + 1.2 && (player.reach || player.radius) > (player.radius || 25) + 1.2;
+
+        if (!isReducedMotion()) {
+          if (fx.contactMarks && fx.contactMarks.length < 28) {
+            const markDur = 0.11 + 0.05 * norm;
+            fx.contactMarks.push({
+              ball,
+              player,
+              x, y,
+              faceAngle,
+              hitAngle: faceAngle + Math.PI,
+              strength: Math.max(0.22, norm),
+              graze,
+              tangentSign,
+              poke: isPoke,
+              team: player.team,
+              life: markDur,
+              duration: markDur
+            });
+          }
+          if (graze < 0.50 && !P.ballOnFire?.(ball)) {
+            const sq = (1 - graze / 0.50) * (0.35 + 0.65 * norm);
+            if (!fx.ballTapWarp || sq >= (fx.ballTapWarp.strength || 0)) {
+              fx.ballTapWarp = {
+                nx: Math.cos(faceAngle),
+                ny: Math.sin(faceAngle),
+                strength: sq,
+                life: 0.09,
+                duration: 0.09
+              };
+            }
+          } else if (graze >= 0.42) {
+            const skimDir = faceAngle + tangentSign * (Math.PI * 0.5);
+            const skimCount = Math.round(3 + 6 * graze * (0.4 + 0.6 * norm));
+            for (let k = 0; k < skimCount && fx.particles.length < 400; k++) {
+              const ang = skimDir + (Math.random() - 0.35) * 0.36;
+              const spd = 95 + 165 * norm + Math.random() * 95;
+              const life = 0.09 + Math.random() * 0.07;
+              fx.particles.push({
+                x, y,
+                px: x - Math.cos(ang) * 6, py: y - Math.sin(ang) * 6,
+                vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+                team: k % 3 === 0 ? player.team : -1,
+                color: k % 3 === 0 ? null : '#ffffff',
+                life, duration: life,
+                materialShape: 'streak',
+                size: 1.6 + 1.1 * norm,
+                angle: ang, snap: true, overlay: true
+              });
+            }
+          }
+        }
         if (isStrike && gameAudio()) {
           const sMap = (fx.spinStrikeTimes ||= new WeakMap());
           if (now - (sMap.get(ball) ?? -Infinity) > 50) {
@@ -3840,11 +4104,18 @@
         }
         if (isSnap || isSpinStrike || !player._lastHitSound || (now - player._lastHitSound) > 55) {
           player._lastHitSound = now;
-          if (player.voice && gameAudio()) {
-            gameAudio().playCollision(player.voice, { volume, x, y });
+          const voiceDuck = isSnap || isSpinStrike ? 1 : (graze > 0.42 ? Math.max(0.14, 1 - (graze - 0.42) * 1.48) : 1);
+          if (player.voice && gameAudio() && !(graze > 0.72 && norm < 0.38 && !isSnap && !isSpinStrike)) {
+            gameAudio().playCollision(player.voice, { volume: volume * voiceDuck, x, y });
           }
           if (gameAudio()) {
-            gameAudio().playBallHit({ volume: isSnap ? Math.min(1.0, volume * 1.15) : volume, snap: isSnap, x, y });
+            gameAudio().playBallHit({
+              volume: isSnap ? Math.min(1.0, volume * 1.15) : volume,
+              snap: isSnap,
+              graze,
+              poke: isPoke,
+              x, y
+            });
           }
         }
       } else if (a.team !== -1 && b.team !== -1) {
@@ -5005,7 +5276,15 @@
         }
 
         const teamCol = i < 3 ? home : away;
-        if (!b.carded) gpu.strokeCircle(b.x, b.y, reachR + 2, teamCol, 4, 1);
+        const coil = aimCoilPose(b, fieldPlans?.[i], phase, reduced);
+        if (!b.carded) {
+          gpu.strokeCircle(b.x, b.y, reachR + 2, teamCol, 4, 1);
+          if (coil) {
+            const backAng = coil.angle + Math.PI;
+            const halfSpan = 0.34 + 0.44 * coil.power;
+            gpu.strokeArc(b.x, b.y, Math.max(8, b.radius - 1.2), backAng - halfSpan, backAng + halfSpan, '#ffffff', 2.2, 0.18 + 0.36 * coil.power, true);
+          }
+        }
 
         if ((phase === 'goal' || (onlineReplay?.goalPlayed && phase === 'play')) && b === scoringPlayer) {
           const goalAccent = b.team === 0 ? home : away;
@@ -5013,22 +5292,28 @@
           gpu.strokeCircle(b.x, b.y, b.radius + 15, goalAccent, 2, 1);
         }
 
-        // Render rasterized character sprite inside the GPU scene so heat refraction bends skaters too
+        // Render rasterized character sprite inside the GPU scene (coiled back inside fixed ring when aimed in plan)
         if (!bench?.flags.noDomSkaters) {
           const art = resolveSkaterArt(i);
           const opacity = b.carded ? 0.3 : b.superActive === 'ghost' ? 0.45 : 1;
           const stunAmt = (b.stunned || b.stunnedNext) && !b.carded ? 1 : 0;
           const rot = b.rotation + (view.portrait ? Math.PI / 2 : 0);
           const sz = b.radius * 2;
+          const cx = b.x + (coil ? coil.dx : 0), cy = b.y + (coil ? coil.dy : 0);
+          gpu.pushTransform();
+          gpu.translate(cx, cy);
+          if (coil && (coil.scaleX !== 1 || coil.scaleY !== 1)) {
+            gpu.rotate(coil.angle);
+            gpu.scale(coil.scaleX, coil.scaleY);
+            gpu.rotate(-coil.angle);
+          }
           if (art) {
-            gpu.pushTransform();
-            gpu.translate(b.x, b.y);
             gpu.rotate(rot);
             gpu.drawTexture(null, art, -sz / 2, -sz / 2, sz, sz, opacity, stunAmt);
-            gpu.popTransform();
           } else {
-            gpu.fillCircle(b.x, b.y, b.radius, view.entries?.[i]?.model?.attributes?.background?.hex || teamCol, opacity);
+            gpu.fillCircle(0, 0, b.radius, view.entries?.[i]?.model?.attributes?.background?.hex || teamCol, opacity);
           }
+          gpu.popTransform();
         }
 
         if (ubuWarped) gpu.popTransform();
@@ -5038,11 +5323,11 @@
           if (draft > 0.22) drawTailgateConeWebGL(b, draft);
         }
 
-        if ((inAction && b.guarding) || (phase === 'plan' && i < 3 && fieldPlans[i]?.guard)) {
+        if ((inAction && b.guarding) || (phase === 'plan' && fieldPlans?.[i]?.guard)) {
           const iron = phase === 'plan'
             ? Boolean(predictionCache?.data.guards.some(g => g.index === i && g.held))
             : Boolean(b.ironGuard);
-          badgeOverlayQueue.push({ kind: 'guard', b, iron });
+          badgeOverlayQueue.push({ kind: 'guard', b, index: i, iron });
         }
 
         if (b.superActive === 'magnet') {
@@ -5172,7 +5457,16 @@
       const ball = view.bodies[6];
       if (ball) {
         const fw = fx.fireWarp && fx.fireWarp.life > 0 && !reduced ? fx.fireWarp : null;
+        const tw = !fw && fx.ballTapWarp && fx.ballTapWarp.life > 0 && !reduced ? fx.ballTapWarp : null;
         let warpScaleX = 1, warpScaleY = 1, warpAngle = 0;
+        if (tw) {
+          const tp = 1 - Math.max(0, tw.life / tw.duration);
+          const env = Math.sin(Math.min(1, tp / 0.35) * Math.PI * 0.5) * ((1 - tp) ** 1.3);
+          const amt = env * 0.11 * (tw.strength || 0.6);
+          warpScaleX = 1 - amt;
+          warpScaleY = 1 + amt * 0.78;
+          warpAngle = Math.atan2(tw.ny || 0, tw.nx || 1);
+        }
         if (fw) {
           const wp = 1 - Math.max(0, fw.life / fw.duration);
           const env = (1 - wp) * Math.cos(wp * Math.PI * 2.2);
@@ -5191,7 +5485,7 @@
           gpu.popTransform();
         }
         gpu.pushTransform();
-        if (fw) {
+        if (fw || tw) {
           gpu.translate(ball.x, ball.y);
           gpu.rotate(warpAngle);
           gpu.scale(warpScaleX, warpScaleY);
@@ -5583,12 +5877,83 @@
         if (s.overlay) drawShockwaveItem(s);
       }
 
+      // Guard Beat 2: directional inward-flexing shield arc on struck side of guarding skater
+      if (fx.guardFlexes?.length && !reduced) {
+        for (const fl of fx.guardFlexes) {
+          const gb = fl.body || (fl.index >= 0 ? view.bodies[fl.index] : null);
+          if (!gb) continue;
+          const prog = 1 - Math.max(0, fl.life / fl.duration);
+          const fade = (1 - prog) ** 1.2;
+          const dentEnv = Math.sin(Math.min(1, prog / 0.28) * Math.PI * 0.5) * ((1 - prog) ** 1.35);
+          const reachR = Math.max(gb.radius, gb.reach || gb.radius, 18);
+          const dentPx = (2.4 + 5.2 * fl.strength) * dentEnv;
+          const cx = gb.x - Math.cos(fl.angle) * dentPx;
+          const cy = gb.y - Math.sin(fl.angle) * dentPx;
+          const halfSpan = 0.52 + 0.38 * fl.strength;
+          const shieldCol = fl.iron ? '#d8e6f3' : '#5aa6ff';
+          gpu.strokeArc(cx, cy, reachR + 3, fl.angle - halfSpan, fl.angle + halfSpan, shieldCol, (3.2 + 2.8 * fl.strength) * (0.45 + 0.55 * fade), Math.min(1, fade * (0.62 + 0.36 * fl.strength)), true);
+          if (fade > 0.22) {
+            gpu.strokeArc(cx, cy, reachR + 2.2, fl.angle - halfSpan * 0.58, fl.angle + halfSpan * 0.58, '#ffffff', (1.6 + 1.4 * fl.strength) * fade, fade * 0.88, true);
+          }
+        }
+      }
+
+      // System #2: Contact-edge mark on the struck rim of the ball (flat square chord vs. sideways graze skim + Reach glint)
+      if (fx.contactMarks?.length && !reduced) {
+        for (const m of fx.contactMarks) {
+          const prog = 1 - Math.max(0, m.life / m.duration);
+          const fade = (1 - prog) ** 1.15;
+          const bRef = m.ball || ball;
+          const teamCol = m.team === 0 ? home : m.team === 1 ? away : '#ffffff';
+          if (m.poke && m.player && fade > 0.12) {
+            const pReach = Math.max(m.player.radius, m.player.reach || m.player.radius, 18) + 2;
+            const span = 0.42 * (0.65 + 0.35 * fade);
+            gpu.strokeArc(m.player.x, m.player.y, pReach, m.hitAngle - span, m.hitAngle + span, '#ffffff', 3.4 * fade, fade * 0.92, true);
+            gpu.strokeArc(m.player.x, m.player.y, pReach + 2.2, m.hitAngle - span * 0.75, m.hitAngle + span * 0.75, teamCol, 2.2 * fade, fade * 0.78, true);
+          }
+          if (!bRef) continue;
+          if (m.graze < 0.45) {
+            // Square hit: bright contact mark flattening cleanly against the struck face of the ball
+            const nx = Math.cos(m.faceAngle), ny = Math.sin(m.faceAngle);
+            const tx = -ny, ty = nx;
+            const pressIn = 1.6 * Math.sin(Math.min(1, prog / 0.35) * Math.PI * 0.5) * fade;
+            const rx = bRef.x + nx * (bRef.radius - pressIn);
+            const ry = bRef.y + ny * (bRef.radius - pressIn);
+            const halfChord = (5.5 + 5.8 * m.strength) * (0.72 + 0.28 * (1 - prog * 0.5));
+            gpu.strokeLine(rx - tx * halfChord, ry - ty * halfChord, rx + tx * halfChord, ry + ty * halfChord, teamCol, 5.2 * fade, fade * 0.85, true);
+            gpu.strokeLine(rx - tx * halfChord * 0.78, ry - ty * halfChord * 0.78, rx + tx * halfChord * 0.78, ry + ty * halfChord * 0.78, '#ffffff', 2.8 * fade, fade * 0.98, true);
+            gpu.fillCircle(rx, ry, (3.2 + 2.2 * m.strength) * fade, '#ffffff', fade * 0.95);
+          } else {
+            // Glancing graze: thin contact mark skimming sideways along the struck rim
+            const sweepDir = m.tangentSign || 1;
+            const slideStart = m.faceAngle + sweepDir * (0.55 * prog);
+            const sweep = sweepDir * (0.68 + 0.52 * m.graze) * (0.55 + 0.45 * fade);
+            gpu.drawTaperedSpinArc(bRef.x, bRef.y, bRef.radius + 1.2, slideStart, sweep, (2.2 + 1.5 * m.strength) * fade, teamCol, fade * 0.90);
+            gpu.drawTaperedSpinArc(bRef.x, bRef.y, bRef.radius + 0.8, slideStart + sweep * 0.18, sweep * 0.72, 1.5 * fade, '#ffffff', fade * 0.96);
+          }
+        }
+      }
+
+      const nowOverlayMs = clockNow();
       for (const item of badgeOverlayQueue) {
         if (item.kind === 'super') drawSuperBadgeWebGL(item.b, item.key);
         else if (item.kind === 'guard') {
           const b = item.b;
-          const gp = view.portrait ? { x: b.x - b.radius * 0.65, y: b.y + b.radius * 0.65 } : { x: b.x + b.radius * 0.65, y: b.y + b.radius * 0.65 };
-          drawShieldWebGL(gp.x, gp.y, item.iron, 1);
+          const gm = reduced ? { scale: 1, nx: 0, ny: 0 } : guardBadgeMotion(fx, item.index ?? -1, b, phase, nowOverlayMs);
+          const gp = view.portrait ? { x: b.x - b.radius * 0.65 + gm.nx, y: b.y + b.radius * 0.65 + gm.ny } : { x: b.x + b.radius * 0.65 + gm.nx, y: b.y + b.radius * 0.65 + gm.ny };
+          const sz = 32 * gm.scale;
+          const st = getStampCanvas(`guardShield:${item.iron ? 1 : 0}`, 32, 32, pxScale, g => {
+            g.translate(16, 16); g.scale(1.1, 1.1); g.translate(-12, -12);
+            g.fillStyle = item.iron ? '#c3ccd6' : '#4798ff'; g.fill(GUARD_SHIELD);
+            if (item.iron) { g.strokeStyle = '#6b7785'; g.lineWidth = 1.5; g.stroke(GUARD_SHIELD); }
+          });
+          if (st) {
+            gpu.pushTransform();
+            gpu.translate(gp.x, gp.y);
+            if (view.portrait) gpu.rotate(Math.PI / 2);
+            gpu.drawTexture(st.key, st.canvas, -sz / 2, -sz / 2, sz, sz, 1);
+            gpu.popTransform();
+          }
         }
       }
 
@@ -6129,7 +6494,22 @@
           drawSuperBadge(b, activeKey);
         }
 
-        if (!b.carded) circle(b.x, b.y, reachR + 2, i < 3 ? home : away, 4);
+        const coil2D = aimCoilPose(b, fieldPlans?.[i], phase, isReducedMotion());
+        if (!b.carded) {
+          circle(b.x, b.y, reachR + 2, i < 3 ? home : away, 4);
+          if (coil2D) {
+            const backAng = coil2D.angle + Math.PI, halfSpan = 0.34 + 0.44 * coil2D.power;
+            view.ctx.save();
+            view.ctx.beginPath();
+            view.ctx.arc(b.x, b.y, Math.max(8, b.radius - 1.2), backAng - halfSpan, backAng + halfSpan);
+            view.ctx.strokeStyle = '#ffffff';
+            view.ctx.lineWidth = 2.2;
+            view.ctx.lineCap = 'round';
+            view.ctx.globalAlpha = 0.18 + 0.36 * coil2D.power;
+            view.ctx.stroke();
+            view.ctx.restore();
+          }
+        }
 
         if ((phase === 'goal' || (onlineReplay?.goalPlayed && phase === 'play')) && b === scoringPlayer) {
           const goalAccent = b.team === 0 ? home : away;
@@ -6143,11 +6523,12 @@
           const draft = P.tailgateFactor ? P.tailgateFactor(view.bodies, b) : 0;
           if (draft > 0.22) drawTailgateCone(b, draft);
         }
-        if ((inAction && b.guarding) || (phase === 'plan' && i < 3 && fieldPlans[i]?.guard)) {
+        if ((inAction && b.guarding) || (phase === 'plan' && fieldPlans?.[i]?.guard)) {
           const iron = phase === 'plan'
             ? Boolean(predictionCache?.data.guards.some(g => g.index === i && g.held))
             : Boolean(b.ironGuard);
-          drawGuardShield(view.badgeCtx, b, view.portrait, iron);
+          const gm = isReducedMotion() ? { scale: 1, nx: 0, ny: 0 } : guardBadgeMotion(fx, i, b, phase, clockNow());
+          drawGuardShield(view.badgeCtx, b, view.portrait, iron, gm.scale, gm.nx, gm.ny);
         }
 
         const slow = P.dazeSlow(b);
@@ -6245,9 +6626,12 @@
         const opacity = b.carded ? '0.3' : b.superActive === 'ghost' ? '0.45' : '1';
         const filter = (b.stunned || b.stunnedNext) && !b.carded ? 'grayscale(0.8) brightness(0.7)' : '';
         const rot = b.rotation + (view.portrait ? Math.PI / 2 : 0);
+        const cx2D = b.x + (coil2D ? coil2D.dx : 0), cy2D = b.y + (coil2D ? coil2D.dy : 0);
         const transform = ubuWarped
-          ? `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${ubuWarpAngle}rad) scale(${ubuScaleX.toFixed(4)}, ${ubuScaleY.toFixed(4)}) rotate(${rot - ubuWarpAngle}rad)`
-          : `translate(${b.x / 1000 * renderWidth}px, ${b.y / 600 * renderHeight}px) translate(-50%, -50%) rotate(${rot}rad)`;
+          ? `translate(${cx2D / 1000 * renderWidth}px, ${cy2D / 600 * renderHeight}px) translate(-50%, -50%) rotate(${ubuWarpAngle}rad) scale(${ubuScaleX.toFixed(4)}, ${ubuScaleY.toFixed(4)}) rotate(${rot - ubuWarpAngle}rad)`
+          : coil2D && (coil2D.scaleX !== 1 || coil2D.scaleY !== 1)
+            ? `translate(${cx2D / 1000 * renderWidth}px, ${cy2D / 600 * renderHeight}px) translate(-50%, -50%) rotate(${coil2D.angle}rad) scale(${coil2D.scaleX.toFixed(4)}, ${coil2D.scaleY.toFixed(4)}) rotate(${rot - coil2D.angle}rad)`
+            : `translate(${cx2D / 1000 * renderWidth}px, ${cy2D / 600 * renderHeight}px) translate(-50%, -50%) rotate(${rot}rad)`;
 
         let prev = skaterStyleCache.get(skaters[i]);
         if (!prev) { prev = {}; skaterStyleCache.set(skaters[i], prev); }
@@ -6284,7 +6668,16 @@
       };
       if (ball) {
         const fw = fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion() ? fx.fireWarp : null;
+        const tw = !fw && fx.ballTapWarp && fx.ballTapWarp.life > 0 && !isReducedMotion() ? fx.ballTapWarp : null;
         let warpScaleX = 1, warpScaleY = 1, warpAngle = 0;
+        if (tw) {
+          const tp = 1 - Math.max(0, tw.life / tw.duration);
+          const env = Math.sin(Math.min(1, tp / 0.35) * Math.PI * 0.5) * ((1 - tp) ** 1.3);
+          const amt = env * 0.11 * (tw.strength || 0.6);
+          warpScaleX = 1 - amt;
+          warpScaleY = 1 + amt * 0.78;
+          warpAngle = Math.atan2(tw.ny || 0, tw.nx || 1);
+        }
         if (fw) {
           const wp = 1 - Math.max(0, fw.life / fw.duration);
           const env = (1 - wp) * Math.cos(wp * Math.PI * 2.2);
@@ -6309,7 +6702,7 @@
           view.ctx.restore();
         }
         view.ctx.save();
-        if (fw) {
+        if (fw || tw) {
           view.ctx.translate(ball.x, ball.y);
           view.ctx.rotate(warpAngle);
           view.ctx.scale(warpScaleX, warpScaleY);
@@ -6327,6 +6720,70 @@
         view.ctx.restore();
         view.bodies.slice(0, 6).forEach(b => { if (!b.carded) drawSpin(b, b.team ? away : home); });
         drawSpin(ball, text);
+        if (!isReducedMotion()) {
+          if (fx.guardFlexes?.length) {
+            for (const fl of fx.guardFlexes) {
+              const gb = fl.body || (fl.index >= 0 ? view.bodies[fl.index] : null);
+              if (!gb) continue;
+              const prog = 1 - Math.max(0, fl.life / fl.duration);
+              const fade = (1 - prog) ** 1.2;
+              const dentEnv = Math.sin(Math.min(1, prog / 0.28) * Math.PI * 0.5) * ((1 - prog) ** 1.35);
+              const reachR = Math.max(gb.radius, gb.reach || gb.radius, 18);
+              const dentPx = (2.4 + 5.2 * fl.strength) * dentEnv;
+              const cx = gb.x - Math.cos(fl.angle) * dentPx, cy = gb.y - Math.sin(fl.angle) * dentPx;
+              const halfSpan = 0.52 + 0.38 * fl.strength;
+              view.ctx.save();
+              view.ctx.lineCap = 'round';
+              view.ctx.beginPath();
+              view.ctx.arc(cx, cy, reachR + 3, fl.angle - halfSpan, fl.angle + halfSpan);
+              view.ctx.strokeStyle = fl.iron ? '#d8e6f3' : '#5aa6ff';
+              view.ctx.lineWidth = (3.2 + 2.8 * fl.strength) * (0.45 + 0.55 * fade);
+              view.ctx.globalAlpha = Math.min(1, fade * (0.62 + 0.36 * fl.strength));
+              view.ctx.stroke();
+              view.ctx.restore();
+            }
+          }
+          if (fx.contactMarks?.length) {
+            for (const m of fx.contactMarks) {
+              const prog = 1 - Math.max(0, m.life / m.duration);
+              const fade = (1 - prog) ** 1.15;
+              const bRef = m.ball || ball;
+              const teamCol = m.team === 0 ? home : m.team === 1 ? away : '#ffffff';
+              view.ctx.save();
+              view.ctx.lineCap = 'round';
+              if (m.poke && m.player && fade > 0.12) {
+                const pReach = Math.max(m.player.radius, m.player.reach || m.player.radius, 18) + 2;
+                const span = 0.42 * (0.65 + 0.35 * fade);
+                view.ctx.beginPath();
+                view.ctx.arc(m.player.x, m.player.y, pReach, m.hitAngle - span, m.hitAngle + span);
+                view.ctx.strokeStyle = '#ffffff';
+                view.ctx.lineWidth = 3.2 * fade;
+                view.ctx.globalAlpha = fade * 0.92;
+                view.ctx.stroke();
+              }
+              if (m.graze < 0.45) {
+                const nx = Math.cos(m.faceAngle), ny = Math.sin(m.faceAngle);
+                const tx = -ny, ty = nx;
+                const pressIn = 1.6 * Math.sin(Math.min(1, prog / 0.35) * Math.PI * 0.5) * fade;
+                const rx = bRef.x + nx * (bRef.radius - pressIn), ry = bRef.y + ny * (bRef.radius - pressIn);
+                const halfChord = (5.5 + 5.8 * m.strength) * (0.72 + 0.28 * (1 - prog * 0.5));
+                line(rx - tx * halfChord, ry - ty * halfChord, rx + tx * halfChord, ry + ty * halfChord, teamCol, 5.0 * fade);
+                line(rx - tx * halfChord * 0.78, ry - ty * halfChord * 0.78, rx + tx * halfChord * 0.78, ry + ty * halfChord * 0.78, '#ffffff', 2.6 * fade);
+              } else {
+                const sweepDir = m.tangentSign || 1;
+                const a0 = m.faceAngle + sweepDir * (0.55 * prog);
+                const a1 = a0 + sweepDir * (0.68 + 0.52 * m.graze) * (0.55 + 0.45 * fade);
+                view.ctx.beginPath();
+                view.ctx.arc(bRef.x, bRef.y, bRef.radius + 1.0, sweepDir > 0 ? a0 : a1, sweepDir > 0 ? a1 : a0);
+                view.ctx.strokeStyle = '#ffffff';
+                view.ctx.lineWidth = (2.0 + 1.2 * m.strength) * fade;
+                view.ctx.globalAlpha = fade * 0.94;
+                view.ctx.stroke();
+              }
+              view.ctx.restore();
+            }
+          }
+        }
       }
 
       drawParticles(home, away);
@@ -6560,6 +7017,8 @@
       handleWall,
       handleSuper,
       handleShockwave,
+      handleLaunch,
+      triggerGuardToggle,
       impact,
       dispose
     };

@@ -343,7 +343,7 @@
         if (!th.exporting) {
           onLoadReplayTurnState?.({ scores: th.scores, turn: th.turn, plans: th.plans, guide: th.guide });
         }
-        P.startTurn(th.sim, t.plans, fx ? replayFx.super : null);
+        P.startTurn(th.sim, t.plans, fx ? replayFx.super : null, fx ? replayFx.launch : null);
         updateReplayFouls(th);
       });
     }

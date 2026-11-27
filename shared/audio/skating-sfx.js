@@ -405,37 +405,194 @@ function playPuckSlide(options = {}) {
   });
 }
 
-// Ice hockey hard brake & corner rim-around skate shave: restrained steel-edge shave and soft
-// snow spray (~170 ms), kept polite in the mix.
+// Dry skate-blade rasp that follows finger movement while aiming: rasps on brisk drags,
+// whispers on tiny angle/power corrections, and drops dead silent the instant the finger holds still.
+function aimScrapeParams(dragSpeed, power, volume) {
+  const s = Math.min(1, Math.max(0, (dragSpeed - 12) / 950));
+  const p = Math.min(1, Math.max(0, Number(power) || 0));
+  const freq = (1180 + 1620 * Math.pow(s, 0.82)) * (0.92 + 0.18 * p);
+  const q = 1.9 + 0.85 * p;
+  const hissFreq = 2850 + 1450 * s;
+  const level = (0.005 + 0.062 * Math.pow(s, 0.92)) * (0.78 + 0.28 * p) * Math.max(0, Math.min(1.5, volume));
+  return { freq, q, hissFreq, level };
+}
+
+function playAimScrape(options = {}) {
+  const ctx = options.ctx || getAudioContext();
+  if (!ctx) return { stop() {} };
+  const dragSpeed = Number(options.speed ?? 480);
+  const power = Number(options.power ?? 0.65);
+  const volume = options.volume ?? 1;
+
+  if (options.id !== undefined && options.id !== null) {
+    const loopKey = 'aim:' + options.id;
+    let map = motionLoops.get(ctx);
+    if (dragSpeed <= 14 || volume <= 0) {
+      map?.get(loopKey)?.stop();
+      return { stop() {} };
+    }
+    if (!map) { map = new Map(); motionLoops.set(ctx, map); }
+    activeMotionContexts.add(ctx);
+    const now = ctx.currentTime;
+    const p = aimScrapeParams(dragSpeed, power, volume);
+    let entry = map.get(loopKey);
+    if (!entry || entry.stopped) {
+      const cleanup = [], master = createMasterChain(ctx, cleanup);
+      const src = ctx.createBufferSource(), band = ctx.createBiquadFilter();
+      const crisp = ctx.createBiquadFilter(), crispGain = ctx.createGain(), outGain = ctx.createGain();
+      src.buffer = grainNoise(ctx);
+      src.loop = true;
+      band.type = 'bandpass';
+      band.frequency.setValueAtTime(p.freq, now);
+      band.Q.setValueAtTime(p.q, now);
+      crisp.type = 'highpass';
+      crisp.frequency.setValueAtTime(p.hissFreq, now);
+      crisp.Q.setValueAtTime(0.85, now);
+      crispGain.gain.setValueAtTime(0.32, now);
+      outGain.gain.setValueAtTime(0, now);
+
+      src.connect(band);
+      band.connect(outGain);
+      src.connect(crisp);
+      crisp.connect(crispGain);
+      crispGain.connect(outGain);
+
+      let panner = null;
+      const initialPan = getPan(options);
+      if (ctx.createStereoPanner) {
+        panner = ctx.createStereoPanner();
+        panner.pan.setValueAtTime(initialPan, now);
+        outGain.connect(panner);
+        panner.connect(master);
+        cleanup.push(panner);
+      } else {
+        outGain.connect(master);
+      }
+      src.onended = () => {
+        for (const n of [src, band, crisp, crispGain, outGain, ...cleanup]) { try { n.disconnect(); } catch {} }
+      };
+      src.start(now, Math.random() * 0.75);
+      entry = {
+        stopped: false, timer: null, sources: [src], src, band, crisp, outGain, panner,
+        freq0: p.freq, freq: p.freq, hiss0: p.hissFreq, hiss: p.hissFreq,
+        paramT0: now, paramT1: now,
+        t0: now, g0: 0, tPeak: now, gPeak: 0, tZero: now,
+        stop() {
+          if (entry.stopped) return;
+          entry.stopped = true;
+          if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
+          if (entry.panner) { try { entry.panner.disconnect(); } catch {} }
+          map.delete(loopKey);
+          if (!map.size) activeMotionContexts.delete(ctx);
+          try {
+            const t = ctx.currentTime, g = currentLoopGain(entry, t);
+            outGain.gain.cancelScheduledValues(t);
+            outGain.gain.setValueAtTime(g, t);
+            outGain.gain.linearRampToValueAtTime(0, t + 0.020);
+            src.stop(t + 0.025);
+          } catch {}
+        }
+      };
+      map.set(loopKey, entry);
+    } else {
+      const rampEnd = now + 0.028;
+      const curFreq = interpRamp(entry.paramT0, entry.freq0, entry.paramT1, entry.freq, now);
+      const curHiss = interpRamp(entry.paramT0, entry.hiss0, entry.paramT1, entry.hiss, now);
+      if (entry.panner) {
+        const curPan = getPan(options);
+        entry.panner.pan.cancelScheduledValues(now);
+        entry.panner.pan.setValueAtTime(curPan, now);
+      }
+      entry.band.frequency.cancelScheduledValues(now);
+      entry.band.frequency.setValueAtTime(curFreq, now);
+      entry.band.frequency.linearRampToValueAtTime(p.freq, rampEnd);
+      entry.band.Q.setValueAtTime(p.q, now);
+      entry.crisp.frequency.cancelScheduledValues(now);
+      entry.crisp.frequency.setValueAtTime(curHiss, now);
+      entry.crisp.frequency.linearRampToValueAtTime(p.hissFreq, rampEnd);
+      entry.freq0 = curFreq; entry.freq = p.freq;
+      entry.hiss0 = curHiss; entry.hiss = p.hissFreq;
+      entry.paramT0 = now; entry.paramT1 = rampEnd;
+    }
+    const cur = currentLoopGain(entry, now), tPeak = now + 0.016, tZero = now + 0.068;
+    entry.outGain.gain.cancelScheduledValues(now);
+    entry.outGain.gain.setValueAtTime(cur, now);
+    entry.outGain.gain.linearRampToValueAtTime(p.level, tPeak);
+    entry.outGain.gain.linearRampToValueAtTime(0, tZero);
+    entry.t0 = now; entry.g0 = cur; entry.tPeak = tPeak; entry.gPeak = p.level; entry.tZero = tZero;
+    if (!isOfflineContext(ctx)) {
+      extendLoopTimer(entry, 65);
+    }
+    return { stop: () => entry.stop() };
+  }
+
+  // Standalone two-gesture audition (brisk pull rasp -> brief hold silence -> tiny whisper correction)
+  const master = createMasterChain(ctx, null, 0.65);
+  const dest = routePanner(ctx, master, options);
+  const now = ctx.currentTime;
+  const pFast = aimScrapeParams(760, 0.85, volume);
+  const pFine = aimScrapeParams(135, 0.88, volume);
+  noiseGrain(ctx, dest, now, 0.20, { freq: pFast.freq * 0.85, to: pFast.freq * 1.15, q: pFast.q, level: pFast.level * 1.8 });
+  noiseGrain(ctx, dest, now + 0.01, 0.16, { type: 'highpass', freq: pFast.hissFreq, to: pFast.hissFreq * 0.9, q: 0.9, level: pFast.level * 0.85 });
+  noiseGrain(ctx, dest, now + 0.31, 0.14, { freq: pFine.freq, to: pFine.freq * 0.92, q: pFine.q + 0.5, level: pFine.level * 2.1 });
+  return { stop() {} };
+}
+
+// Ice hockey hard brake, Pulse outside-edge cut & corner rim-around skate shave (~140-175 ms).
 function playCarve(options = {}) {
   const ctx = options.ctx || getAudioContext();
   if (!ctx) return;
-  const master = createMasterChain(ctx, null, 0.2);
+  const brake = Boolean(options.brake);
+  const cut = Math.min(1, Math.max(0, Number(options.cut) || 0));
+  const master = createMasterChain(ctx, null, 0.22);
   const dest = routePanner(ctx, master, options);
   const now = ctx.currentTime;
   const volume = Math.max(0.03, Math.min(1.0, options.volume ?? 0.42));
   const speedNorm = Math.min(1, Math.max(0, (Number(options.speed) || 320) / 620));
   const rimmed = Boolean(options.rimmed);
-  const pitchMul = 0.92 + 0.28 * speedNorm + (rimmed ? 0.08 : 0);
+  const pitchMul = 0.92 + 0.28 * speedNorm + (rimmed ? 0.08 : 0) + 0.10 * cut;
 
-  // 1. Restrained steel-blade edge shave sweep (rises higher on fast corner rim-arounds)
+  if (brake) {
+    // Decisive Pulse Guard hockey-stop: twin steel edges bite hard and pitch downward to a dead stop
+    const stopDur = 0.135;
+    const spray = ctx.createBufferSource(), sprayFilter = ctx.createBiquadFilter(), sprayGain = ctx.createGain();
+    spray.buffer = grainNoise(ctx);
+    sprayFilter.type = 'bandpass';
+    sprayFilter.Q.setValueAtTime(1.75, now);
+    sprayFilter.frequency.setValueAtTime(2480 * pitchMul, now);
+    sprayFilter.frequency.exponentialRampToValueAtTime(760 * pitchMul, now + stopDur);
+    sprayGain.gain.setValueAtTime(0.0001, now);
+    sprayGain.gain.linearRampToValueAtTime(0.20 * volume, now + 0.008);
+    sprayGain.gain.linearRampToValueAtTime(0.13 * volume, now + 0.048);
+    sprayGain.gain.exponentialRampToValueAtTime(0.0001, now + stopDur);
+    spray.connect(sprayFilter); sprayFilter.connect(sprayGain); sprayGain.connect(dest);
+    spray.start(now, Math.random() * 0.7);
+    spray.stop(now + stopDur + 0.015);
+
+    // Forward snow-plume hiss + twin-blade anchor thud
+    noiseGrain(ctx, dest, now + 0.004, 0.11, { freq: 3400 * pitchMul, to: 1150 * pitchMul, q: 1.1, level: 0.11 * volume });
+    noiseGrain(ctx, dest, now, 0.055, { freq: 360, to: 145, q: 2.0, level: 0.12 * volume });
+    return;
+  }
+
+  // 1. Restrained steel-blade edge shave sweep (rises higher on fast corner rim-arounds & lateral Pulse cuts)
   const spray = ctx.createBufferSource(), sprayFilter = ctx.createBiquadFilter(), sprayGain = ctx.createGain();
   spray.buffer = grainNoise(ctx);
   sprayFilter.type = 'bandpass';
-  sprayFilter.Q.setValueAtTime(rimmed ? 1.85 : 1.6, now);
-  sprayFilter.frequency.setValueAtTime(1350 * pitchMul, now);
-  sprayFilter.frequency.exponentialRampToValueAtTime((rimmed ? 2680 : 2350) * pitchMul, now + (rimmed ? 0.065 : 0.045));
+  sprayFilter.Q.setValueAtTime(rimmed ? 1.85 : (1.6 + 0.55 * cut), now);
+  sprayFilter.frequency.setValueAtTime((1350 + 180 * cut) * pitchMul, now);
+  sprayFilter.frequency.exponentialRampToValueAtTime((rimmed ? 2680 : (2350 + 320 * cut)) * pitchMul, now + (rimmed ? 0.065 : 0.045));
   sprayFilter.frequency.exponentialRampToValueAtTime((rimmed ? 1320 : 1050) * pitchMul, now + 0.165);
   sprayGain.gain.setValueAtTime(0.0001, now);
-  sprayGain.gain.linearRampToValueAtTime(0.13 * volume, now + 0.012);
-  sprayGain.gain.linearRampToValueAtTime(0.095 * volume, now + 0.05);
+  sprayGain.gain.linearRampToValueAtTime((0.13 + 0.045 * cut) * volume, now + 0.012);
+  sprayGain.gain.linearRampToValueAtTime((0.095 + 0.025 * cut) * volume, now + 0.05);
   sprayGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.165);
   spray.connect(sprayFilter); sprayFilter.connect(sprayGain); sprayGain.connect(dest);
   spray.start(now, Math.random() * 0.7);
   spray.stop(now + 0.18);
 
   // 2. Soft shaved-ice snow spray
-  noiseGrain(ctx, dest, now + 0.006, 0.13, { freq: 2900 * pitchMul, to: 1500 * pitchMul, q: 1.0, level: 0.065 * volume });
+  noiseGrain(ctx, dest, now + 0.006, 0.13, { freq: 2900 * pitchMul, to: 1500 * pitchMul, q: 1.0, level: (0.065 + 0.025 * cut) * volume });
 
   // 3. Subtle ice-crystal shave texture in the initial bite
   for (let i = 0; i < 3; i++) {
@@ -444,12 +601,12 @@ function playCarve(options = {}) {
       freq: (1150 + i * 240 + Math.random() * 250) * pitchMul,
       to: (900 + i * 140) * pitchMul,
       q: 2.6,
-      level: (0.075 - i * 0.018) * volume
+      level: (0.075 - i * 0.018) * (1 + 0.25 * cut) * volume
     });
   }
 
   // 4. Gentle low-mid skate pressure weight
-  noiseGrain(ctx, dest, now, 0.075, { freq: 420 * (0.95 + 0.15 * speedNorm), to: 250, q: 2.2, level: 0.07 * volume });
+  noiseGrain(ctx, dest, now, 0.075, { freq: 420 * (0.95 + 0.15 * speedNorm), to: 250, q: 2.2, level: (0.07 + 0.03 * cut) * volume });
 }
 
 // Continuous tailgating wind: smooth overlapping rushing-air stream when triggered repeatedly
@@ -670,4 +827,4 @@ function playSpinTwirl(options = {}) {
 // Hockey dasher-board bounce: polite flex on light/medium hits, plus a deep hollow woody/HDPE
 // dasher-box "thock" reserved strictly for truly hard board hits.
 
-module.exports = { playUbuMove, playSpin, playPuckSlide, playCarve, playSlipstream, playSpinStrike, playSpinTwirl };
+module.exports = { playUbuMove, playSpin, playPuckSlide, playAimScrape, playCarve, playSlipstream, playSpinStrike, playSpinTwirl };

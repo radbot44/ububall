@@ -70,23 +70,75 @@ function playBallHit(options = {}) {
   const ctx = options.ctx || getAudioContext();
   if (!ctx) return;
   const snap = Boolean(options.snap);
-  const master = createMasterChain(ctx, null, snap ? 0.11 : 0.08);
+  const poke = Boolean(options.poke);
+  const graze = snap ? 0 : Math.max(0, Math.min(1, Number(options.graze) || 0));
+  const square = Math.max(0, 1 - graze * 0.88);
+  const skim = Math.max(0, (graze - 0.30) / 0.70);
+  const master = createMasterChain(ctx, null, snap ? 0.12 : 0.095);
   const dest = routePanner(ctx, master, options);
   const now = ctx.currentTime;
   const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.8));
 
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = 'triangle';
-  osc.frequency.setValueAtTime(snap ? 280 : 220, now);
-  osc.frequency.exponentialRampToValueAtTime(75, now + 0.05);
+  // 1. Center-of-mass vulcanized puck body (strong on square hits, recedes on paper-thin grazes)
+  if (square > 0.08) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    const startHz = snap ? 285 : (228 + 24 * square);
+    osc.frequency.setValueAtTime(startHz, now);
+    osc.frequency.exponentialRampToValueAtTime(76 + 18 * (1 - square), now + 0.048);
+    strike(gain, (0.14 + 0.58 * square) * volume, now, now + (0.042 + 0.028 * square));
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start(now);
+    osc.stop(now + 0.08);
 
-  strike(gain, 0.7 * volume, now, now + 0.07);
+    // Dry woody/stick-face tap attack transient on square contacts
+    const tap = ctx.createOscillator(), tapGain = ctx.createGain();
+    tap.type = 'sine';
+    tap.frequency.setValueAtTime(940 + 180 * square, now);
+    tap.frequency.exponentialRampToValueAtTime(215, now + 0.012);
+    strike(tapGain, 0.34 * square * volume, now, now + 0.015);
+    tap.connect(tapGain);
+    tapGain.connect(dest);
+    tap.start(now);
+    tap.stop(now + 0.022);
 
-  osc.connect(gain);
-  gain.connect(dest);
-  osc.start(now);
-  osc.stop(now + 0.08);
+    noiseGrain(ctx, dest, now, 0.015, {
+      freq: 1580, to: 660, q: 1.9,
+      level: 0.22 * square * volume
+    });
+  }
+
+  // 2. Thin sideways edge "shik" when clipping/grazing the ball tangentially
+  if (skim > 0.04) {
+    const shikDur = 0.026 + 0.016 * skim;
+    const src = ctx.createBufferSource(), band = ctx.createBiquadFilter(), gain = ctx.createGain();
+    src.buffer = grainNoise(ctx);
+    band.type = 'bandpass';
+    band.Q.setValueAtTime(3.1 + 0.9 * skim, now);
+    band.frequency.setValueAtTime(2450 + 550 * skim, now);
+    band.frequency.exponentialRampToValueAtTime(4200 + 600 * skim, now + shikDur * 0.42);
+    band.frequency.exponentialRampToValueAtTime(1850, now + shikDur);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.38 * skim * volume, now + 0.0025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + shikDur);
+    src.connect(band);
+    band.connect(gain);
+    gain.connect(dest);
+    src.start(now, Math.random() * 0.75);
+    src.stop(now + shikDur + 0.015);
+
+    noiseGrain(ctx, dest, now + 0.002, 0.020, {
+      type: 'highpass', freq: 3800, to: 2900, q: 1.3,
+      level: 0.18 * skim * volume
+    });
+  }
+
+  // 3. Crisp extended-Reach blade-tip click when poke-checking outside body radius
+  if (poke && !snap) {
+    blip(ctx, dest, now, 0.018, 1560, 960, 0.16 * volume);
+  }
 
   if (snap) {
     const crack = ctx.createOscillator(), crackGain = ctx.createGain();

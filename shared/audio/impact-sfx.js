@@ -548,6 +548,99 @@ function playSuper(key, phase = key === 'magnet' ? 'pull' : 'impact', options = 
   return handle;
 }
 
+// Guard Beat 1 (planning toggle): two close-set skate edges planting into the ice when Guard is armed,
+// or a light un-weighting blade release when Guard is cleared.
+function playGuardToggle(on = true, options = {}) {
+  const volume = Number.isFinite(options.volume) ? Math.max(0, Math.min(1.5, options.volume)) : 0.75;
+  if (!volume) return;
+  const ctx = options.ctx || getAudioContext();
+  if (!ctx) return;
+  const master = createMasterChain(ctx, null, 0.16);
+  const dest = routePanner(ctx, master, options);
+  const now = ctx.currentTime;
+
+  if (!on) {
+    noiseGrain(ctx, dest, now, 0.052, { freq: 1380, to: 720, q: 2.1, level: 0.095 * volume });
+    blip(ctx, dest, now, 0.038, 210, 145, 0.075 * volume);
+    return;
+  }
+
+  // Twin staggered skate-edge bites (~19 ms apart) + compact low boot-plant weight
+  for (const [offset, freqFrom, freqTo, grainLvl, thudFrom, thudTo, thudLvl] of [
+    [0.000, 2050, 960, 0.19, 176, 78, 0.20],
+    [0.019, 2480, 1140, 0.23, 215, 92, 0.16]
+  ]) {
+    const t = now + offset;
+    noiseGrain(ctx, dest, t, 0.024, { freq: freqFrom, to: freqTo, q: 2.6, level: grainLvl * volume });
+    const boot = ctx.createOscillator(), bootGain = ctx.createGain();
+    boot.type = 'triangle';
+    boot.frequency.setValueAtTime(thudFrom, t);
+    boot.frequency.exponentialRampToValueAtTime(thudTo, t + 0.032);
+    strike(bootGain, thudLvl * volume, t, t + 0.038);
+    boot.connect(bootGain);
+    bootGain.connect(dest);
+    boot.start(t);
+    boot.stop(t + 0.045);
+  }
+  // Subtle cold-steel edge lock glint
+  blip(ctx, dest, now + 0.019, 0.028, 1420, 1180, 0.048 * volume);
+}
+
+// Guard Beat 2 (absorbing an impact in play): scaled low-mid braced knock + shield shell resonance
+// + heel-blade ice anchor grit so strong defensive reads carry physical weight anywhere on the rink.
+function playGuardHit(options = {}) {
+  const volume = Number.isFinite(options.volume) ? Math.max(0, Math.min(1.5, options.volume)) : 0.85;
+  if (!volume) return;
+  const ctx = options.ctx || getAudioContext();
+  if (!ctx) return;
+  const strength = Math.max(0.06, Math.min(1.0, Number(options.strength) ?? 0.55));
+  const graze = Math.max(0, Math.min(1, Number(options.graze) || 0));
+  const square = 1 - 0.42 * graze;
+  const hold = 0.07 + 0.08 * strength;
+  const master = createMasterChain(ctx, null, hold + 0.05);
+  const dest = routePanner(ctx, master, options);
+  const now = ctx.currentTime;
+
+  // 1. Planted low knock (barely murmurs on a soft poke, lands with heavy chest-thud on a hard drive)
+  const knockDur = 0.048 + 0.052 * strength;
+  const knock = ctx.createOscillator(), knockGain = ctx.createGain();
+  knock.type = 'triangle';
+  knock.frequency.setValueAtTime((148 + 42 * strength) * (0.92 + 0.08 * square), now);
+  knock.frequency.exponentialRampToValueAtTime(48 + 14 * (1 - strength), now + knockDur);
+  strike(knockGain, (0.14 + 0.48 * strength) * square * volume, now, now + knockDur);
+  knock.connect(knockGain);
+  knockGain.connect(dest);
+  knock.start(now);
+  knock.stop(now + knockDur + 0.015);
+
+  // 2. Braced shield face transient & hollow pad shell
+  const shell = ctx.createOscillator(), shellFilter = ctx.createBiquadFilter(), shellGain = ctx.createGain();
+  const shellDur = 0.036 + 0.034 * strength;
+  shell.type = 'triangle';
+  shell.frequency.setValueAtTime(390 + 110 * strength, now);
+  shell.frequency.exponentialRampToValueAtTime(185, now + shellDur);
+  shellFilter.type = 'bandpass';
+  shellFilter.Q.setValueAtTime(2.7, now);
+  shellFilter.frequency.setValueAtTime(360 + 90 * strength, now);
+  strike(shellGain, (0.10 + 0.30 * strength) * volume, now, now + shellDur);
+  shell.connect(shellFilter);
+  shellFilter.connect(shellGain);
+  shellGain.connect(dest);
+  shell.start(now);
+  shell.stop(now + shellDur + 0.015);
+
+  // 3. Heel-blade ice anchor grit on medium-to-heavy stops (defender holding their ground)
+  if (strength > 0.24) {
+    const grit = (strength - 0.24) / 0.76;
+    noiseGrain(ctx, dest, now + 0.004, 0.045 + 0.045 * grit, {
+      freq: 1550 + 450 * grit,
+      to: 680,
+      q: 2.1,
+      level: 0.20 * grit * volume
+    });
+  }
+}
+
 // An iron save: a heavy metallic clank with a sharp hiss of steam rushing through it.
 function playIronSave(options = {}) {
   const volume = Number.isFinite(options.volume) ? Math.max(0, Math.min(1.5, options.volume)) : 1;
@@ -723,4 +816,4 @@ function playGameStart(options = {}) {
 // Fanfare & Anthem finishing: deterministic room impulses per acoustic stage, gentle bus
 // compression, and clean ConstantSource release timers so OfflineAudioContext MP4 exports match live playback.
 
-module.exports = { playWallHit, playFireImpact, playSave, playFirework, playGoalHit, playSuper, playIronSave, playFoul, playGameStart };
+module.exports = { playWallHit, playFireImpact, playSave, playFirework, playGoalHit, playSuper, playGuardToggle, playGuardHit, playIronSave, playFoul, playGameStart };

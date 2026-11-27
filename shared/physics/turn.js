@@ -6,15 +6,17 @@ const { walls, endSuper } = require('./collide.js');
 const { step } = require('./step.js');
 
 const ZERO_PLAN = Object.freeze({ angle: 0, power: 0, spin: 0 });
-function launch(bodies, plans) {
+function launch(bodies, plans, onLaunch = null) {
   const count = bodies.length;
   const std7 = count === 7 && bodies[6].team === -1;
   const skaterEnd = std7 ? 6 : count;
+  const reportLaunch = typeof onLaunch === 'function' ? onLaunch : null;
   for (let i = 0; i < skaterEnd; i++) {
     const b = bodies[i];
     if (!std7 && b.team < 0) { b.spinStrike = 0; continue; }
     b.spinStrike = 0;
     syncEffectiveStats(b);
+    const preVx = b.vx || 0, preVy = b.vy || 0;
     if (b.stunned) {
       b.vx = 0; b.vy = 0; b.omega = 0;
       b.daze = 0;
@@ -22,6 +24,10 @@ function launch(bodies, plans) {
     }
     if (b.guarding) {
       b.vx *= GUARD_BRAKE; b.vy *= GUARD_BRAKE; b.omega *= GUARD_BRAKE; b.daze = 0;
+      if (reportLaunch) {
+        const preSpd = Math.hypot(preVx, preVy);
+        if (preSpd >= 65) reportLaunch(b, i, 'brake', preVx, preVy, b.vx, b.vy, Math.min(1, (preSpd - 65) / 540));
+      }
       continue;
     }
     const plan = plans[i] || ZERO_PLAN;
@@ -38,6 +44,17 @@ function launch(bodies, plans) {
       b.omega = Math.max(-b.maxSpin, Math.min(b.maxSpin, b.omega + spinInput * b.maxSpin));
       b.launchSpin = spinInput !== 0 ? b.omega : (b.launchSpin && b.omega * b.launchSpin > 0 ? b.omega : 0);
       b.spinStrike = STRIKE_GAIN;
+      if (reportLaunch && prevSpeed >= 70) {
+        const ux = preVx / prevSpeed, uy = preVy / prevSpeed;
+        const dvx = b.vx - preVx, dvy = b.vy - preVy;
+        const dvCross = Math.abs(-dvx * uy + dvy * ux);
+        const dvBack = Math.max(0, -(dvx * ux + dvy * uy));
+        const cutLoad = Math.min(1, Math.hypot(dvCross, dvBack * 0.85) / 460);
+        if (cutLoad >= 0.16) reportLaunch(b, i, 'cut', preVx, preVy, b.vx, b.vy, cutLoad);
+      }
+    } else if (reportLaunch) {
+      const preSpd = Math.hypot(preVx, preVy);
+      if (preSpd >= 28) reportLaunch(b, i, 'coast', preVx, preVy, b.vx, b.vy, Math.min(1, preSpd / 620));
     }
   }
   const ball = std7 ? bodies[6] : bodies.find(b => b.team === -1);
@@ -135,7 +152,7 @@ function ballRun(bodies, { removed = null, boards = false, ticks = 960 } = {}) {
   return { goal: null, distance };
 }
 function wouldScore(bodies, removed, ticks = 960) { return ballRun(bodies, { removed, ticks }).goal; }
-function startTurn(bodies, plans, onSuper = null) {
+function startTurn(bodies, plans, onSuper = null, onLaunch = null) {
   const count = bodies.length;
   const skaterEnd = count === 7 && bodies[6].team === -1 ? 6 : count;
   const launchedSupers = onSuper ? [] : null;
@@ -165,7 +182,7 @@ function startTurn(bodies, plans, onSuper = null) {
     }
     syncEffectiveStats(b);
   }
-  launch(bodies, plans);
+  launch(bodies, plans, onLaunch);
   if (launchedSupers) {
     for (let i = 0; i < launchedSupers.length; i++) onSuper(launchedSupers[i][0], 'launch', launchedSupers[i][1]);
   }

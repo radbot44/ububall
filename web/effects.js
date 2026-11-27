@@ -82,6 +82,97 @@
           }
         },
         {
+          id: 'plan-aim-coil',
+          title: 'Loaded Shot Coil, Finger-Speed Blade Scrape & Guard Plant',
+          when: 'Dragging outward to load a shot (`aimCoilPose`, `playAimScrape`) or tapping to plant Guard (`triggerGuardToggle`, `playGuardToggle`). Try dragging or tapping any home ubu directly on the rink!',
+          visual: 'Inner character face coils back up to 4.6 px with a white back-rim tension arc while the true hitbox ring stays fixed; fast drags rasp, tiny corrections whisper, still holds go silent, and the ubu stays cocked until Launch.',
+          soundLabel: 'Play scrape / plant',
+          variants: [
+            { id: 'load-scrape', label: 'Brisk Pull -> Hold -> Fine Tweak' },
+            { id: 'guard-toggle', label: 'Guard Plant & Un-Weight Toggle' },
+            { id: 'loaded-trio', label: 'Loaded Trio vs. Fixed Hitbox Rings' }
+          ],
+          duration: 2.9,
+          playSound: (ctx, variant = 'load-scrape') => {
+            if (variant === 'guard-toggle') {
+              ctx.audio()?.playGuardToggle?.(true, { x: 310, y: 300 });
+            } else {
+              ctx.audio()?.playAimScrape?.({ speed: 680, power: 0.88, x: 310, y: 300 });
+            }
+          },
+          run: (ctx, variant = 'load-scrape') => {
+            ctx.resetStage({ phase: 'plan', mode: 'standard' });
+            ctx.place(0, 290, 300);
+            ctx.place(1, 290, 170);
+            ctx.place(2, 290, 430);
+            ctx.place(6, 470, 300);
+            ctx.setSelected(0);
+            if (variant === 'loaded-trio') {
+              ctx.plans[0] = { angle: 0, power: 1.0, spin: 0, guard: false };
+              ctx.plans[1] = { angle: 0.24, power: 0.48, spin: 0, guard: false };
+              ctx.plans[2] = { angle: -0.22, power: 0.85, spin: 0, guard: true };
+              ctx.presenter.dirtyPrediction();
+              return;
+            }
+            if (variant === 'guard-toggle') {
+              ctx.plans[0] = { angle: 0.06, power: 0.92, spin: 0, guard: false };
+              ctx.presenter.dirtyPrediction();
+              let stage = 0;
+              ctx.setPlanDriver(t => {
+                if (stage === 0 && t >= 0.45) {
+                  stage = 1;
+                  ctx.plans[0] = { ...ctx.plans[0], guard: true };
+                  ctx.presenter.triggerGuardToggle?.(0, true);
+                  ctx.presenter.dirtyPrediction();
+                } else if (stage === 1 && t >= 1.35) {
+                  stage = 2;
+                  ctx.plans[0] = { ...ctx.plans[0], guard: false };
+                  ctx.presenter.triggerGuardToggle?.(0, false);
+                  ctx.presenter.dirtyPrediction();
+                } else if (stage === 2 && t >= 2.15) {
+                  stage = 3;
+                  ctx.plans[0] = { ...ctx.plans[0], guard: true };
+                  ctx.presenter.triggerGuardToggle?.(0, true);
+                  ctx.presenter.dirtyPrediction();
+                }
+              });
+              return;
+            }
+            // Animated finger pull: brisk rasp (0.12-0.48s) -> dead-silent hold (0.48-1.05s) -> tiny whisper angle tweak (1.05-1.45s) -> stays loaded!
+            ctx.plans[0] = { angle: 0.16, power: 0, spin: 0, guard: false };
+            ctx.presenter.dirtyPrediction();
+            let lastP = 0, lastA = 0.16;
+            ctx.setPlanDriver((t, dt) => {
+              let p = lastP, a = lastA;
+              if (t >= 0.12 && t < 0.48) {
+                const u = (t - 0.12) / 0.36;
+                const ease = 1 - (1 - u) ** 2.4;
+                p = 0.96 * ease;
+                a = 0.16 - 0.18 * ease;
+              } else if (t >= 0.48 && t < 1.05) {
+                p = 0.96;
+                a = -0.02;
+              } else if (t >= 1.05 && t < 1.45) {
+                const u = (t - 1.05) / 0.40;
+                p = 0.96;
+                a = -0.02 + 0.065 * Math.sin(u * Math.PI * 0.5);
+              } else if (t >= 1.45) {
+                p = 0.96;
+                a = 0.045;
+              }
+              const dPower = Math.abs(p - lastP), dAngle = Math.abs(a - lastA);
+              const tipSpeed = dt > 1e-4 ? Math.hypot(dPower * 165, dAngle * 180) / dt : 0;
+              ctx.audio()?.playAimScrape?.({ id: 0, speed: tipSpeed, power: p, x: 290, y: 300 });
+              if (dPower > 1e-4 || dAngle > 1e-4) {
+                ctx.plans[0] = { angle: a, power: p, spin: 0, guard: false };
+                ctx.presenter.dirtyPrediction();
+              }
+              lastP = p;
+              lastA = a;
+            });
+          }
+        },
+        {
           id: 'plan-prediction',
           title: 'Trajectory, Wall Stamps, Stop Marks & Pulse Ticks',
           when: 'Planning moves with board bounces, stops, or Pulse 1-second turns (`paintPrediction`).',
@@ -373,14 +464,163 @@
             ctx.place(3, 760, 260, { vx: -430, vy: 80 });
             ctx.place(6, 480, 300, { vx: 380, vy: -140, pace: 380 });
           }
+        },
+        {
+          id: 'pulse-adjustments',
+          title: 'Pulse Turn Resume: Coast vs. Sideways Cut vs. Guard Brake',
+          when: 'Resuming from a quiet Pulse turn boundary with 0% power (`coast`), cross-momentum steering (`cut`), or Guard braking (`brake`).',
+          visual: 'Quiet turn boundary: coasting keeps smooth unbroken glide hiss; steering carves outside-edge snow spray (`playCarve` `cut`); Guard cuts glide hiss short with a forward snow-stop plume & front shield flex (`brake: true`).',
+          soundLabel: 'Play cut / brake',
+          variants: [
+            { id: 'all-three', label: 'Compare All 3 Side-by-Side' },
+            { id: 'coast', label: 'Coast (Unbroken Glide Hiss)' },
+            { id: 'cut', label: 'Steer Across Momentum (Edge Carve)' },
+            { id: 'brake', label: 'Guard Brake (Hockey Stop Spray)' }
+          ],
+          duration: 2.2,
+          playSound: (ctx, variant = 'all-three') => {
+            if (variant === 'coast') ctx.audio()?.playUbuMove?.({ speed: 540, duration: 0.75 });
+            else if (variant === 'brake') ctx.audio()?.playCarve?.({ brake: true, speed: 580, volume: 0.75 });
+            else ctx.audio()?.playCarve?.({ cut: 0.9, speed: 560, volume: 0.68 });
+          },
+          run: (ctx, variant = 'all-three') => {
+            ctx.resetStage({ phase: 'play', mode: 'pulse' });
+            ctx.place(6, 780, 300);
+            ctx.place(3, 860, 140);
+            ctx.place(4, 860, 460);
+            ctx.place(5, 890, 300);
+            if (variant === 'coast') {
+              ctx.place(0, 170, 300, { vx: 540, vy: 0 });
+              ctx.place(1, 140, 110);
+              ctx.place(2, 140, 490);
+              ctx.after(0.45, () => {
+                const next = ctx.idlePlans();
+                ctx.P.startTurn(ctx.bodies, next, ctx.liveFx.super, ctx.liveFx.launch);
+              });
+            } else if (variant === 'cut') {
+              ctx.place(0, 180, 360, { vx: 560, vy: 20 });
+              ctx.place(1, 140, 110);
+              ctx.place(2, 140, 490);
+              ctx.after(0.42, () => {
+                const next = ctx.idlePlans();
+                next[0] = { angle: -Math.PI * 0.44, power: 1.0, spin: 0.35, guard: false };
+                ctx.P.startTurn(ctx.bodies, next, ctx.liveFx.super, ctx.liveFx.launch);
+              });
+            } else if (variant === 'brake') {
+              ctx.place(0, 180, 300, { vx: 600, vy: 0 });
+              ctx.place(1, 140, 110);
+              ctx.place(2, 140, 490);
+              ctx.after(0.42, () => {
+                const next = ctx.idlePlans();
+                next[0] = { angle: 0, power: 0, spin: 0, guard: true };
+                ctx.P.startTurn(ctx.bodies, next, ctx.liveFx.super, ctx.liveFx.launch);
+              });
+            } else {
+              // Top skater coasts smoothly, middle skater cuts sharply upward-right, bottom skater slams Guard brake!
+              ctx.place(0, 170, 155, { vx: 520, vy: 0 });
+              ctx.place(1, 170, 315, { vx: 560, vy: 35 });
+              ctx.place(2, 170, 455, { vx: 590, vy: 0 });
+              ctx.after(0.44, () => {
+                const next = ctx.idlePlans();
+                next[0] = { angle: 0, power: 0, spin: 0, guard: false };
+                next[1] = { angle: -Math.PI * 0.42, power: 1.0, spin: 0.3, guard: false };
+                next[2] = { angle: 0, power: 0, spin: 0, guard: true };
+                ctx.P.startTurn(ctx.bodies, next, ctx.liveFx.super, ctx.liveFx.launch);
+              });
+            }
+          }
         }
       ]
     },
     {
       id: 'impacts',
       title: '4. Shots, Impacts & Ball Heat',
-      summary: 'Checks, Hip Clips, Daze swirls, Spin Strikes, Snap one-timers, wall/post/net physics, and Fireballs.',
+      summary: 'Ordinary shot tactility (square tap vs. thin graze shik), Checks, Hip Clips, Spin Strikes, Snaps, walls/posts, and Fireballs.',
       items: [
+        {
+          id: 'ordinary-shot-tactility',
+          title: 'Ordinary Shot Lab: Clean Strike, Glancing Graze, Braced Save & 6-Skater Scrum',
+          when: 'Every ordinary ball touch (`contactMarks`, `ballTapWarp`, `playBallHit` `graze`/`poke`, `guardFlexes`, `playGuardHit`). Test with Mute sound ON or eyes closed!',
+          visual: 'Square hit flattens a bright contact mark on the struck ball face with a solid tap; graze skims sideways with a thin shik & ducked voice; Reach poke glints the outer ring; Guard dents inward on the struck side.',
+          soundLabel: 'Play tap / shik / brace',
+          variants: [
+            { id: 'clean-strike', label: '1. Clean Square Strike (Flat Tap)' },
+            { id: 'glancing-graze', label: '2. Glancing Graze (Thin Shik)' },
+            { id: 'braced-save', label: '3. Braced Guard Save (Shield Flex)' },
+            { id: 'poke-reach', label: 'Extended Reach Poke-Touch Glint' },
+            { id: 'six-scrum', label: '6-Skater Scramble Readability Test' }
+          ],
+          duration: 2.3,
+          playSound: (ctx, variant = 'clean-strike') => {
+            if (variant === 'glancing-graze') {
+              ctx.audio()?.playBallHit?.({ volume: 0.85, graze: 0.92, x: 500, y: 300 });
+            } else if (variant === 'braced-save') {
+              ctx.audio()?.playGuardHit?.({ strength: 0.85, graze: 0.08, volume: 0.92, x: 260, y: 300 });
+              ctx.audio()?.playBallHit?.({ volume: 0.78, graze: 0.08, x: 260, y: 300 });
+            } else if (variant === 'poke-reach') {
+              ctx.audio()?.playBallHit?.({ volume: 0.78, graze: 0.35, poke: true, x: 500, y: 300 });
+            } else {
+              ctx.audio()?.playBallHit?.({ volume: 0.88, graze: 0.02, x: 500, y: 300 });
+            }
+          },
+          run: (ctx, variant = 'clean-strike') => {
+            ctx.resetStage({ phase: 'play', mode: 'standard' });
+            if (variant === 'clean-strike') {
+              // Moderate speed (<840 px/s so no fireball, >2 ball diameters gap at launch so ordinary touch, not point-blank strike)
+              ctx.place(1, 200, 120);
+              ctx.place(2, 200, 480);
+              ctx.place(3, 820, 140);
+              ctx.place(4, 820, 460);
+              ctx.place(5, 860, 140);
+              ctx.place(0, 320, 300, { vx: 560, vy: 0 });
+              ctx.place(6, 470, 300, { vx: 0, vy: 0 });
+            } else if (variant === 'glancing-graze') {
+              // Skater clips the top edge of the ball tangentially — watch the ball kick downward-right with a thin sideways shik!
+              ctx.place(1, 200, 120);
+              ctx.place(2, 200, 480);
+              ctx.place(3, 820, 140);
+              ctx.place(4, 820, 460);
+              ctx.place(5, 860, 460);
+              ctx.place(0, 340, 264, { vx: 580, vy: 0 });
+              ctx.place(6, 470, 300, { vx: 0, vy: 0 });
+            } else if (variant === 'poke-reach') {
+              // High-Reach compact skater catches a passing ball cleanly with the outer Reach ring outside its body silhouette
+              ctx.boostStats(0, { size: 40, reach: 255 });
+              ctx.place(1, 200, 120);
+              ctx.place(2, 200, 480);
+              ctx.place(3, 820, 140);
+              ctx.place(4, 820, 460);
+              ctx.place(5, 860, 460);
+              ctx.place(0, 460, 350, { vx: 120, vy: 0 });
+              ctx.place(6, 340, 302, { vx: 520, vy: 0, strikerTeam: 1 });
+            } else if (variant === 'braced-save') {
+              // Same incoming shot met squarely by a planted Guarding defender
+              ctx.boostStats(0, { stability: 210, mass: 200 });
+              ctx.bodies[0].guarding = true;
+              ctx.P.syncEffectiveStats(ctx.bodies[0]);
+              ctx.place(0, 235, 300);
+              ctx.place(1, 220, 130);
+              ctx.place(2, 220, 470);
+              ctx.place(3, 720, 300);
+              ctx.place(6, 420, 300, { vx: -620, vy: 0, pace: 620, strikerTeam: 1 });
+              ctx.play.credit[3] = 1;
+              ctx.play.last = 3;
+            } else {
+              // 6-skater scramble: thin graze -> braced midfield Guard knock -> clean square strike out of traffic!
+              ctx.bodies[1].guarding = true;
+              ctx.P.syncEffectiveStats(ctx.bodies[1]);
+              ctx.place(0, 350, 266, { vx: 560, vy: 15 });   // Grazes ball downward-right
+              ctx.place(4, 545, 348, { vx: -120, vy: -40 }); // Opponent body in traffic
+              ctx.bodies[4].guarding = true;
+              ctx.P.syncEffectiveStats(ctx.bodies[4]);       // Braced opponent Guard takes deflected hit
+              ctx.place(1, 430, 385);                        // Braced home Guard absorbs check/rebound
+              ctx.place(2, 365, 420, { vx: 460, vy: -155 }); // Arrives for clean square follow-up strike
+              ctx.place(3, 560, 235, { vx: -420, vy: 130 });
+              ctx.place(5, 620, 320, { vx: -360, vy: -45 });
+              ctx.place(6, 465, 300, { vx: -60, vy: 0 });
+            }
+          }
+        },
         {
           id: 'body-check-daze',
           title: 'Body Check, Hip Clip & Daze Dizzy Swirl',
@@ -613,8 +853,71 @@
     {
       id: 'saves',
       title: '5. Saves',
-      summary: 'Goal-line interceptions, sheepish own-responsibility saves, metallic Iron Saves, and friendly Fireball Traps.',
+      summary: 'Two-beat Guard stance & shield flex, goal-line saves (`Save!` & `Save...`), metallic Iron Saves, and friendly Traps.',
       items: [
+        {
+          id: 'guard-two-beat',
+          title: 'Two-Beat Guard: Skate-Edge Plant & Scaled Shield Flex',
+          when: 'Choosing Guard in planning (`playGuardToggle`) and taking a light poke vs. hard shot/check in play (`guardFlexes`, `playGuardHit`).',
+          visual: 'Beat 1 plants two close-set skate edges (`chak-set` + shield lock pulse); Beat 2 dents the struck side of the Guard ring inward with heel-ice puffs and a low knock scaled from soft poke to heavy drive.',
+          soundLabel: 'Play plant + hit',
+          variants: [
+            { id: 'plant-then-save', label: 'Full 2-Beat: Plant -> Heavy Stop' },
+            { id: 'heavy-stop', label: 'Heavy Drive (Deep Flex & Knock)' },
+            { id: 'light-poke', label: 'Weak Poke (Subtle Flex & Murmur)' }
+          ],
+          duration: 2.5,
+          playSound: (ctx, variant = 'plant-then-save') => {
+            if (variant === 'light-poke') {
+              ctx.audio()?.playGuardHit?.({ strength: 0.14, graze: 0.25, volume: 0.5, x: 320, y: 300 });
+            } else if (variant === 'heavy-stop') {
+              ctx.audio()?.playGuardHit?.({ strength: 0.94, graze: 0.04, volume: 0.96, x: 320, y: 300 });
+            } else {
+              ctx.audio()?.playGuardToggle?.(true, { x: 320, y: 300 });
+              setTimeout(() => ctx.audio()?.playGuardHit?.({ strength: 0.92, graze: 0.04, volume: 0.95, x: 320, y: 300 }), 380);
+            }
+          },
+          run: (ctx, variant = 'plant-then-save') => {
+            if (variant === 'plant-then-save') {
+              ctx.resetStage({ phase: 'plan', mode: 'standard' });
+              ctx.boostStats(0, { stability: 220, mass: 210 });
+              ctx.place(0, 310, 300);
+              ctx.place(1, 210, 140);
+              ctx.place(2, 210, 460);
+              ctx.place(3, 610, 300);
+              ctx.place(6, 520, 300);
+              ctx.plans[0] = { angle: 0, power: 0.7, spin: 0, guard: false };
+              ctx.plans[3] = { angle: Math.PI, power: 0.92, spin: 0, guard: false };
+              ctx.presenter.dirtyPrediction();
+              let planted = false, launched = false;
+              ctx.setPlanDriver(t => {
+                if (!planted && t >= 0.28) {
+                  planted = true;
+                  ctx.plans[0] = { ...ctx.plans[0], guard: true };
+                  ctx.presenter.triggerGuardToggle?.(0, true);
+                  ctx.presenter.dirtyPrediction();
+                } else if (!launched && t >= 0.82) {
+                  launched = true;
+                  ctx.setPlanDriver(null);
+                  ctx.launchPlans(ctx.plans);
+                }
+              });
+              return;
+            }
+            ctx.resetStage({ phase: 'play', mode: 'standard' });
+            ctx.boostStats(0, { stability: 220, mass: 210 });
+            ctx.bodies[0].guarding = true;
+            ctx.P.syncEffectiveStats(ctx.bodies[0]);
+            ctx.place(0, 320, 300);
+            ctx.place(1, 210, 140);
+            ctx.place(2, 210, 460);
+            if (variant === 'light-poke') {
+              ctx.place(6, 405, 306, { vx: -155, vy: -12, strikerTeam: 1 });
+            } else {
+              ctx.place(6, 515, 300, { vx: -680, vy: 0, pace: 680, strikerTeam: 1 });
+            }
+          }
+        },
         {
           id: 'standard-save',
           title: 'Goal-Line Save (`"Save!"` & `"Save..."`)',
@@ -1387,7 +1690,9 @@
       shockwave: (source, radius, type = null) =>
         presenter.handleShockwave(source, radius, type),
       super: (key, stage, body, target = null) =>
-        presenter.handleSuper(key, stage, body, target)
+        presenter.handleSuper(key, stage, body, target),
+      launch: (body, idx, kind, preVx, preVy, postVx, postVy, strength) =>
+        presenter.handleLaunch(body, idx, kind, preVx, preVy, postVx, postVy, strength)
     };
 
     // Scorebug & banner helpers
@@ -1504,6 +1809,11 @@
     }
 
     let draggingPlan = false;
+    let dragMoved = false;
+    let dragTapGuards = false;
+    let lastDragScrapePt = null;
+    let lastDragScrapeAt = 0;
+    let planDriver = null;
     let rafId = 0;
     let lastRaf = 0;
     function scheduleLoop() {
@@ -1911,6 +2221,10 @@
 
     function resetStage({ phase: nextPhase = 'plan', mode = 'standard', glow = 0 } = {}) {
       draggingPlan = false;
+      dragMoved = false;
+      lastDragScrapePt = null;
+      lastDragScrapeAt = 0;
+      planDriver = null;
       stopAllAudio();
       clearStageLayers();
       clearTimeout(bugTabTimer); bugTabTimer = 0; bugTabs.length = 0; $('bug-tab')?.classList.remove('show');
@@ -1978,11 +2292,13 @@
 
     function launchPlans(turnPlans = plans) {
       draggingPlan = false;
+      planDriver = null;
+      ubuAudio?.playAimScrape?.({ id: selected, speed: 0 });
       plans = turnPlans.map(p => ({ angle: 0, power: 0, spin: 0, guard: false, ...p }));
       phase = 'play';
       elapsed = 0;
       accumulator = 0;
-      P.startTurn(view.bodies, plans, liveFx.super);
+      P.startTurn(view.bodies, plans, liveFx.super, liveFx.launch);
       syncMeters();
       syncScorebug();
       scheduleLoop();
@@ -2168,6 +2484,7 @@
       P,
       ububallMatch,
       presenter,
+      liveFx,
       get bodies() { return view.bodies; },
       get entries() { return view.entries; },
       get plans() { return plans; },
@@ -2197,6 +2514,7 @@
       runStageLineup,
       runStageMint,
       after: (sec, fn) => timedCallbacks.push({ at: sec, fn }),
+      setPlanDriver: fn => { planDriver = typeof fn === 'function' ? fn : null; },
       playTimedSizzle(seconds = 1.5) {
         const a = activeAudio();
         if (!a) return;
@@ -2436,10 +2754,15 @@
       const warn = presenter.warningAt(p, fouls);
       if (warn) { openFoulInfo(warn); return; }
       if (phase !== 'plan') return;
+      planDriver = null;
       const idx = view.bodies.slice(0, 3).findIndex(b => Math.hypot(b.x - p.x, b.y - p.y) < b.radius + 18);
       if (idx >= 0) {
+        dragTapGuards = selected === idx;
         selected = idx;
         draggingPlan = true;
+        dragMoved = false;
+        lastDragScrapePt = p;
+        lastDragScrapeAt = performance.now();
         canvas.setPointerCapture(e.pointerId);
         draw();
       } else {
@@ -2448,8 +2771,12 @@
           return g.visible && Math.hypot(g.x - p.x, g.y - p.y) < 28;
         });
         if (arrowIdx >= 0) {
+          dragTapGuards = false;
           selected = arrowIdx;
           draggingPlan = true;
+          dragMoved = false;
+          lastDragScrapePt = p;
+          lastDragScrapeAt = performance.now();
           canvas.setPointerCapture(e.pointerId);
         }
       }
@@ -2457,16 +2784,43 @@
     canvas.addEventListener('pointermove', e => {
       if (!draggingPlan || phase !== 'plan') return;
       const p = rinkPoint(e), b = view.bodies[selected];
+      if (!dragMoved && lastDragScrapePt && Math.hypot(p.x - lastDragScrapePt.x, p.y - lastDragScrapePt.y) < 4) return;
+      dragMoved = true;
       const dx = p.x - b.x, dy = p.y - b.y, dist = Math.hypot(dx, dy);
       const geom = impulseGeometry(P, b, { angle: 0, power: 1, spin: plans[selected]?.spin || 0 });
       plans[selected].angle = Math.atan2(dy, dx);
       plans[selected].power = Math.max(0, Math.min(1, (dist - geom.ringR) / Math.max(1, geom.scale)));
       plans[selected].guard = false;
+      const nowScrape = performance.now();
+      if (lastDragScrapePt && lastDragScrapeAt > 0) {
+        const dtS = Math.max(0.006, (nowScrape - lastDragScrapeAt) / 1000);
+        const dragSpd = Math.hypot(p.x - lastDragScrapePt.x, p.y - lastDragScrapePt.y) / dtS;
+        activeAudio()?.playAimScrape?.({ id: selected, speed: dragSpd, power: plans[selected].power, x: b.x, y: b.y });
+      }
+      lastDragScrapePt = p;
+      lastDragScrapeAt = nowScrape;
       presenter.dirtyPrediction();
       draw();
+      scheduleLoop();
     });
     for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-      canvas.addEventListener(ev, () => { draggingPlan = false; });
+      canvas.addEventListener(ev, event => {
+        if (!draggingPlan) return;
+        if (ev === 'pointerup' && phase === 'plan' && !dragMoved && dragTapGuards) {
+          const nextG = !plans[selected].guard;
+          plans[selected] = { ...plans[selected], guard: nextG };
+          presenter.triggerGuardToggle?.(selected, nextG);
+          presenter.dirtyPrediction();
+          draw();
+          scheduleLoop();
+        }
+        if (dragMoved) activeAudio()?.playAimScrape?.({ id: selected, speed: 0 });
+        draggingPlan = false;
+        dragMoved = false;
+        dragTapGuards = false;
+        lastDragScrapePt = null;
+        lastDragScrapeAt = 0;
+      });
     }
 
     // Wire transport & filter controls
@@ -2551,6 +2905,7 @@
       if (paused || doc.hidden) return false;
       if (autoLoop && activeDemo) return true;
       if (phase !== 'plan' || postGoal || goalReplay || timedCallbacks.length || castState || stageChoreoActive) return true;
+      if (planDriver || fx.guardSetTimes?.size || fx.contactMarks?.length || fx.guardFlexes?.length || fx.ballTapWarp) return true;
       if (fx.kickoffGlow > 0 || fx.fireWarp || fx.koWarp || fx.particles.length || fx.shockwaves.length || fx.skids.length || fx.burns.length || fx.pings?.length || fx.popups?.length) return true;
       if (fouls.crease.some(Boolean) || presenter.stalling(fouls)) return true;
       if (activeDemo) return true;
@@ -2590,6 +2945,9 @@
         const frozenByHitStop = clockMs < hitStopUntil;
         const simDt = frozenByHitStop ? 0 : scaledDt;
 
+        if (phase === 'plan' && planDriver && !draggingPlan) {
+          planDriver(scenarioElapsed, rawDt * speedMultiplier);
+        }
         presenter.updatePopups(rawDt * speedMultiplier);
         presenter.updateEffects(simDt);
         if (!frozenByHitStop) advanceStageChoreo(simDt);

@@ -444,6 +444,7 @@
     handleWall: (...a) => handleWall(...a),
     handleShockwave: (...a) => handleShockwave(...a),
     handleSuper: (...a) => handleSuper(...a),
+    handleLaunch: (...a) => handleLaunch(...a),
     clearReplayViewer: (...a) => clearReplayViewer(...a),
     prepareCPU: (...a) => prepareCPU(...a),
     startPlanClock: (...a) => startPlanClock(...a),
@@ -630,7 +631,7 @@
     trailPositions, clearDiscontinuousTrails, recordTrails,
     dirtyPrediction, badgePoint, rounded, line, circle,
     drawImpulse, drawSuperBadge, drawGuides, drawRinkSurface,
-    handleCollision, handleWall, handleSuper, handleShockwave, impact
+    handleCollision, handleWall, handleSuper, handleShockwave, handleLaunch, impact
   } = presenter;
   function getThemeColors() {
     themeColors = presenter.getThemeColors();
@@ -753,7 +754,7 @@
   function resetPlans(keepGuard = false) {
     dirtyPrediction();
     startPlanClock();
-    if (!online?.active) planBanner = banner('Plan your shot…', 1300, 'plan');
+    if (!online?.active && !(pulseMode() && roundTurns > 0)) planBanner = banner('Plan your shot…', 1300, 'plan');
     plans = Array.from({ length: 3 }, (_, i) => keepGuard && plans?.[i]?.guard ? { ...plans[i] } : idlePlan());
     prepareCPU(); // Snapshot before any human planning input.
     sync();
@@ -1005,6 +1006,21 @@
         grab.value = knobValue(kind, grab.index);
         closeKnobPopover();
       }
+      const prevClientX = grab.scrapeX ?? grab.startX, prevClientY = grab.scrapeY ?? grab.startY;
+      const nowKnob = performance.now();
+      if (kind !== 'spin' && grab.scrapeAt) {
+        const dtK = Math.max(0.006, (nowKnob - grab.scrapeAt) / 1000);
+        const pxMove = Math.hypot(e.clientX - prevClientX, e.clientY - prevClientY);
+        const bKnob = fieldView.bodies[grab.index];
+        gameAudio()?.playAimScrape?.({
+          id: grab.index,
+          speed: (pxMove * 1.65) / dtK,
+          power: plans[grab.index]?.power ?? 0.5,
+          x: bKnob?.x ?? 500,
+          y: bKnob?.y ?? 300
+        });
+      }
+      grab.scrapeX = e.clientX; grab.scrapeY = e.clientY; grab.scrapeAt = nowKnob;
       const distance = (e.clientX - grab.x) - (e.clientY - grab.y);
       const sensitivity = (e.shiftKey ? .25 : 1) * (grab.fine ? .5 : 1);
       setKnob(kind, grab.index, grab.value + distance / (KNOB_SWEEP * gameUi.scale()) * (max - min) * sensitivity, typeof requestAnimationFrame === 'function');
@@ -1018,6 +1034,7 @@
       hideKnobDragPill();
       if (!finished) return;
       if (finished.dragged) {
+        if (kind !== 'spin') gameAudio()?.playAimScrape?.({ id: finished.index, speed: 0 });
         if (dragDirty) { dragDirty = false; sync(); draw(); }
         if (phase === 'plan') saveActiveMatch();
       } else if (!finished.cancelled) {
@@ -1894,10 +1911,10 @@
     recordSegment(simBodies, turnPlans); beginGuide(simBodies, turnPlans, 0);
     if (recording) ububallReplay.addTurn(recording, { turn, scores, fouls, bodies: simBodies, plans: turnPlans });
     saveActiveMatch({ bodies: simBodies, turnPlans });
-    P.startTurn(simBodies, turnPlans, liveFx.super);
+    P.startTurn(simBodies, turnPlans, liveFx.super, liveFx.launch);
     syncViewBodies(simBodies, 0);
     elapsed = accumulator = 0; phase = 'play'; sync(); say('Turn in motion…');
-    if (!demo && shot === 'match') banner('Launch!', 800, 'launch');
+    if (!demo && shot === 'match' && !(pulseMode() && roundTurns > 0)) banner('Launch!', 800, 'launch');
   };
   const { cancelScheduledSave, flushScheduledSave, scheduleSaveActiveMatch } = bindSpinSlider({ state });
   for (const [id, delta] of [['spin-less', -.1], ['spin-more', .1]]) {
@@ -1910,10 +1927,24 @@
   }
   // Guarding replaces the launch and brakes the ubu. The arrow stays (faded), so clearing guard
   // brings the launch back.
+  let guardSettleRaf = 0;
+  function animateGuardSettle() {
+    guardSettleRaf = 0;
+    if (phase !== 'plan' || !fieldEffects.guardSetTimes?.size) return;
+    draw();
+    if (fieldEffects.guardSetTimes.size && typeof requestAnimationFrame === 'function') {
+      guardSettleRaf = requestAnimationFrame(animateGuardSettle);
+    }
+  }
   function toggleGuard(i) {
     if (!knobEditable(i)) return;
-    plans[i] = { ...plans[i], guard: !plans[i].guard };
+    const nextGuard = !plans[i].guard;
+    plans[i] = { ...plans[i], guard: nextGuard };
+    presenter.triggerGuardToggle?.(i, nextGuard);
     sync(); draw();
+    if (!guardSettleRaf && !reducedMotion.matches && typeof requestAnimationFrame === 'function') {
+      guardSettleRaf = requestAnimationFrame(animateGuardSettle);
+    }
     saveActiveMatch();
   }
   $('shot-guard').onclick = () => toggleGuard(selected);
@@ -1931,7 +1962,8 @@
     collide: contact => { syncLive(); handleCollision({ ...contact, a: liveView(contact.a), b: liveView(contact.b) }); },
     wall: (body, velocity, wallType, nx, ny, rimmed = false) => { syncLive(); handleWall(liveView(body), velocity, wallType, nx, ny, rimmed); },
     shockwave: (source, radius, type = null) => { syncLive(); handleShockwave(liveView(source), radius, type); },
-    super: (key, stage, body, target = null) => { syncLive(); handleSuper(key, stage, liveView(body), target ? liveView(target) : null); }
+    super: (key, stage, body, target = null) => { syncLive(); handleSuper(key, stage, liveView(body), target ? liveView(target) : null); },
+    launch: (body, idx, kind, preVx, preVy, postVx, postVy, strength) => { syncLive(); handleLaunch(liveView(body), idx, kind, preVx, preVy, postVx, postVy, strength); }
   };
   const replaySkip = $('skip-goal-replay');
   replaySkip.onclick = async () => {

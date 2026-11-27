@@ -589,7 +589,9 @@ function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, o
   const passerSlot = (isBall && closing < 0 && fireWin < 0 && !ironSave && !player.guarding &&
     prevStrikerTeam === player.team && prevStrikerSlot >= 0 && pSlot >= 0 && prevStrikerSlot !== pSlot &&
     preBallSpeed >= TAPE_TO_TAPE.minPassSpeed) ? prevStrikerSlot : -1;
-  emitCollide(onCollide, a, b, -closing, baseImpulse, fireWin >= 0, ironSave, checker, snapped, spinStruck, Math.abs(tangent), passerSlot, struck);
+  const graze = relSpeed > 1e-3 ? Math.min(1, Math.abs(rvt) / relSpeed) : 0;
+  const tangentSign = (rvt || tangent) < 0 ? -1 : 1;
+  emitCollide(onCollide, a, b, -closing, baseImpulse, fireWin >= 0, ironSave, checker, snapped, spinStruck, Math.abs(tangent), passerSlot, struck, graze, tangentSign);
 }
 
 
