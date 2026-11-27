@@ -34,6 +34,7 @@ function reflect(b, nx, ny, penetration, wallType = 'wall', onWall = null, isCor
     const slip = b.vx * tx + b.vy * ty + b.omega * b.radius;
     const gripScale = surface.gripScale * (counterRim ? RIM.checkGrip : 1);
     const limit = (b.grip * gripScale) * rebound * velocity * effMass;
+    const preOmega = b.omega;
     const impulse = Math.max(-limit, Math.min(limit, -slip * effMass / 3));
     b.vx += impulse * tx / effMass; b.vy += impulse * ty / effMass;
     b.omega += 2 * impulse / (effMass * b.radius);
@@ -61,7 +62,16 @@ function reflect(b, nx, ny, penetration, wallType = 'wall', onWall = null, isCor
         b.vx *= scale; b.vy *= scale;
       }
     }
-    if (typeof onWall === 'function') onWall(b, velocity, wallType, nx, ny, rimmed);
+    if (typeof onWall === 'function') {
+      const absPreOmega = Math.abs(preOmega || 0);
+      const spinBite = absPreOmega >= 4 && Math.abs(impulse) > 10
+        ? Math.sign(impulse) * Math.min(1, (Math.abs(impulse) / Math.max(1, effMass * 165)) * Math.min(1.25, absPreOmega / 14))
+        : 0;
+      const counterScuff = counterRim && Math.abs(vt) >= 115 && absPreOmega >= 4.5
+        ? Math.min(1, (Math.abs(vt) / 420) * (absPreOmega / 14))
+        : 0;
+      onWall(b, velocity, wallType, nx, ny, rimmed, spinBite, counterScuff);
+    }
   }
 }
 function walls(b, onWall = null, carrier = null) {
@@ -412,11 +422,11 @@ function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, o
 
   const baseImpulse = -(1 + restitution) * closing / inverse;
 
-  let impulseA = baseImpulse, impulseB = baseImpulse, sweetMult = 1;
+  let impulseA = baseImpulse, impulseB = baseImpulse, sweetMult = 1, pokeFrac = 0;
   if (isBall) {
     const bodyCoreDist = Math.max(player.radius, 25) + ball.radius;
     const maxReachDist = ballHitRadius(player) + ball.radius;
-    const pokeFrac = d > bodyCoreDist ? Math.min(1, (d - bodyCoreDist) / Math.max(1, maxReachDist - bodyCoreDist)) : 0;
+    pokeFrac = d > bodyCoreDist ? Math.min(1, (d - bodyCoreDist) / Math.max(1, maxReachDist - bodyCoreDist)) : 0;
     sweetMult = 1 - (1 - SWEET_SPOT.pokeTipMin) * pokeFrac;
     if (a.team !== -1 && a.power) impulseB *= a.power;
     else if (b.team !== -1 && b.power) impulseA *= b.power;
@@ -456,9 +466,10 @@ function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, o
   }
 
   let checker = knockoutChecker;
+  const knockA = !isBall ? Math.abs(impulseA * invA) : 0;
+  const knockB = !isBall ? Math.abs(impulseB * invB) : 0;
   if (!isBall && a.team !== b.team) {
     const driveA = normalA, driveB = -normalB;
-    const knockA = Math.abs(impulseA * invA), knockB = Math.abs(impulseB * invB);
     if (!checker) {
       if (driveB > driveA && knockA > DAZE.speed && !stalwartA) checker = b;
       else if (driveA > driveB && knockB > DAZE.speed && !stalwartB) checker = a;
@@ -591,7 +602,7 @@ function collide(a, b, onCollide = null, allBodies = null, onShockwave = null, o
     preBallSpeed >= TAPE_TO_TAPE.minPassSpeed) ? prevStrikerSlot : -1;
   const graze = relSpeed > 1e-3 ? Math.min(1, Math.abs(rvt) / relSpeed) : 0;
   const tangentSign = (rvt || tangent) < 0 ? -1 : 1;
-  emitCollide(onCollide, a, b, -closing, baseImpulse, fireWin >= 0, ironSave, checker, snapped, spinStruck, Math.abs(tangent), passerSlot, struck, graze, tangentSign);
+  emitCollide(onCollide, a, b, -closing, baseImpulse, fireWin >= 0, ironSave, checker, snapped, spinStruck, Math.abs(tangent), passerSlot, struck, graze, tangentSign, pokeFrac, knockA, knockB);
 }
 
 

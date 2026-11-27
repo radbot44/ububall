@@ -1010,7 +1010,8 @@
       if (!active) { state.lastTime = 0; state.accumulator = 0; postGoalState.steps = 0; }
       const fx = state.fieldEffects || {};
       const hadEffects = fx.particles?.length || fx.fireworks?.length || fx.trails?.some?.(trail => trail.length) || fx.shockwaves?.length || fx.goalCall || fx.fireWarp || fx.koWarp ||
-        fx.ripples?.length || fx.pings?.length || fx.popups?.length || fx.kickoffGlow || fx.goalSweep || (fx.danger?.[0] > .02) || (fx.danger?.[1] > .02);
+        fx.ripples?.length || fx.pings?.length || fx.popups?.length || fx.contactMarks?.length || fx.guardFlexes?.length || fx.launchNicks?.length || fx.ubuRecoils?.length || fx.wallSmudges?.length || fx.tapeCatches?.length || fx.ballTapWarp ||
+        fx.kickoffGlow || fx.goalSweep || (fx.danger?.[0] > .02) || (fx.danger?.[1] > .02);
       const { simDelta, handledReplay } = stepFrameEffects({ state, actions: deps, ububallMatch, delta, active });
       if (!handledReplay) {
         if ((state.phase === 'play' || state.postGoal) && active && !state.online?.active) {
@@ -1304,6 +1305,24 @@
     return raw;
   }
 
+  function emitSpinDetent(state, fn, index, prevSpin, nextSpin, nowMs = Date.now()) {
+    const p = Number(prevSpin) || 0, n = Number(nextSpin) || 0;
+    if (Math.abs(n - p) < 1e-4) return;
+    const audio = fn('gameAudio')?.();
+    if (!audio?.playSpinTick) return;
+    const b = (state.fieldView?.bodies || state.bodies)?.[index];
+    const crossedZero = (Math.abs(p) > 0.005 && Math.abs(n) <= 0.005) || (p * n < 0);
+    if (crossedZero) {
+      state._lastSpinTickAt = nowMs;
+      audio.playSpinTick({ spin: 0, center: true, x: b?.x ?? 500, y: b?.y ?? 300 });
+      return;
+    }
+    if (Math.floor(Math.abs(n) / 0.08) !== Math.floor(Math.abs(p) / 0.08) && nowMs - (state._lastSpinTickAt || 0) >= 20) {
+      state._lastSpinTickAt = nowMs;
+      audio.playSpinTick({ spin: n, center: false, x: b?.x ?? 500, y: b?.y ?? 300 });
+    }
+  }
+
   function createBannerController(deps = {}) {
     const { $, getSetTimeout, getClearTimeout } = makeLookup(deps);
     let bannerTimer = 0, bannerGone = null;
@@ -1439,8 +1458,11 @@
     if (spinEl) {
       spinEl.oninput = () => {
         if (!fn('knobEditable')?.(state.selected)) return;
-        state.plans[state.selected].spin = Number(spinEl.value) * 0.01;
+        const prevSpin = state.plans[state.selected].spin || 0;
+        const nextSpin = Number(spinEl.value) * 0.01;
+        state.plans[state.selected].spin = nextSpin;
         state.plans[state.selected].guard = false;
+        emitSpinDetent(state, fn, state.selected, prevSpin, nextSpin, (typeof performance !== 'undefined' ? performance.now() : Date.now()));
         if (typeof getRaf() === 'function') state.dragDirty = true;
         else { fn('sync')?.(); fn('draw')?.(); }
       };
@@ -1600,10 +1622,10 @@
         syncReplayTick();
         fn('handleCollision')?.({ ...contact, a: replayView(contact.a), b: replayView(contact.b) });
       },
-      wall: (body, velocity, wallType, nx, ny, rimmed = false) => {
+      wall: (body, velocity, wallType, nx, ny, rimmed = false, spinBite = 0, counterScuff = 0) => {
         syncReplayTick();
         const seat = shownSeat();
-        fn('handleWall')?.(replayView(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny, rimmed);
+        fn('handleWall')?.(replayView(body), velocity, wallType, seat ? -nx : nx, seat ? -ny : ny, rimmed, spinBite, counterScuff);
       },
       shock: (source, radius, type = null) => {
         syncReplayTick();
@@ -2865,9 +2887,13 @@
     function setKnob(kind, i, value, deferDraw = false) {
       if (!knobEditable(i)) return;
       const plan = state.plans[i], [min, max] = KNOB_RANGE[kind];
+      const prevSpin = kind === 'spin' ? (plan.spin || 0) : 0;
       if (kind === 'angle') plan.angle = (((value - 90 + (state.fieldView?.portrait ? 90 : 0)) % 360 + 360) % 360) * Math.PI / 180;
       else plan[kind] = Math.max(min, Math.min(max, value)) / 100;
       plan.guard = false;
+      if (kind === 'spin') {
+        emitSpinDetent(state, fn, i, prevSpin, plan.spin || 0, getPerf()?.now?.() ?? Date.now());
+      }
       if (deferDraw) { state.dragDirty = true; return; }
       fn('sync')?.(); fn('draw')?.();
     }
@@ -3535,6 +3561,7 @@
       const plan = state.plans?.[state.selected];
       if (!plan) return;
       const scale = getGameUi()?.scale?.() || 1;
+      const prevSpin = plan.spin || 0;
       plan.spin = computeSecondFingerSpin({
         startSpin: state.spinDrag.startSpin,
         startX: state.spinDrag.startX,
@@ -3543,6 +3570,7 @@
         zeroSnap: 0.03
       });
       plan.guard = false;
+      emitSpinDetent(state, fn, state.selected, prevSpin, plan.spin, getPerf()?.now?.() ?? Date.now());
       state.dragDirty = true;
     }
 

@@ -827,4 +827,99 @@ function playSpinTwirl(options = {}) {
 // Hockey dasher-board bounce: polite flex on light/medium hits, plus a deep hollow woody/HDPE
 // dasher-box "thock" reserved strictly for truly hard board hits.
 
-module.exports = { playUbuMove, playSpin, playPuckSlide, playAimScrape, playCarve, playSlipstream, playSpinStrike, playSpinTwirl };
+// Launch skate push-off: completes the loaded-shot spring when a skater fires from rest or surges ahead,
+// scaling pitch and crunch by mass (crisp featherweight toe-push vs. deep heavyweight twin-blade dig).
+function playLaunchPush(options = {}) {
+  const ctx = options.ctx || getAudioContext();
+  if (!ctx) return;
+  const p = Math.max(0.12, Math.min(1, Number(options.power ?? 0.78)));
+  const massRatio = Math.max(0.70, Math.min(2.2, (Number(options.mass) || 3) / 3));
+  const sizeRatio = Math.max(0.65, Math.min(2.2, (Number(options.radius) || 25) / 25));
+  const heavy = Math.max(0, Math.min(1, (massRatio * 0.75 + sizeRatio * 0.25 - 0.80) / 0.85));
+  const dur = 0.068 + 0.038 * heavy + 0.018 * p;
+  const master = createMasterChain(ctx, null, dur + 0.04);
+  const dest = routePanner(ctx, master, options);
+  const now = ctx.currentTime;
+  const volume = Math.max(0.04, Math.min(1.0, options.volume ?? (0.28 + 0.44 * p)));
+
+  // 1. Twin-blade ice bite ("shk!") — crisp & airy for sprinters, gritty & lower for bruisers
+  const startHz = (2240 - 780 * heavy) * (0.92 + 0.16 * p);
+  const endHz = (1160 - 520 * heavy) * (0.90 + 0.14 * p);
+  const pushSrc = ctx.createBufferSource(), pushBand = ctx.createBiquadFilter(), pushGain = ctx.createGain();
+  pushSrc.buffer = grainNoise(ctx);
+  pushBand.type = 'bandpass';
+  pushBand.Q.setValueAtTime(2.05 - 0.35 * heavy, now);
+  pushBand.frequency.setValueAtTime(startHz, now);
+  pushBand.frequency.exponentialRampToValueAtTime(Math.max(180, endHz), now + dur);
+  pushGain.gain.setValueAtTime(0.0001, now);
+  pushGain.gain.linearRampToValueAtTime((0.20 + 0.08 * p) * volume, now + 0.006);
+  pushGain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+  pushSrc.connect(pushBand); pushBand.connect(pushGain); pushGain.connect(dest);
+  pushSrc.start(now, Math.random() * 0.75);
+  pushSrc.stop(now + dur + 0.015);
+
+  // 2. Boot-push impulse body: quick toe snap on light ubus, deep ice-dig thud on heavyweights
+  const kick = ctx.createOscillator(), kickGain = ctx.createGain();
+  kick.type = 'triangle';
+  const kickStart = 265 - 122 * heavy;
+  const kickEnd = Math.max(38, 124 - 68 * heavy);
+  const kickDur = 0.036 + 0.036 * heavy;
+  kick.frequency.setValueAtTime(kickStart, now);
+  kick.frequency.exponentialRampToValueAtTime(kickEnd, now + kickDur);
+  strike(kickGain, (0.14 + 0.24 * heavy) * (0.55 + 0.45 * p) * volume, now, now + kickDur + 0.008, 0.0015);
+  kick.connect(kickGain); kickGain.connect(dest);
+  kick.start(now); kick.stop(now + kickDur + 0.016);
+
+  // 3. Staggered second-blade heel nick crystal grain
+  noiseGrain(ctx, dest, now + 0.014, 0.022 + 0.014 * heavy, {
+    freq: (2850 - 920 * heavy),
+    to: Math.max(420, 1480 - 540 * heavy),
+    q: 2.3,
+    level: (0.11 + 0.06 * heavy) * volume
+  });
+}
+
+// Precision watch-crown spin dial tick: soft escapement click that rises subtly with |spin|,
+// with a distinct warm brass/wood zero-center detent click when crossing or resetting to 0.
+function playSpinTick(options = {}) {
+  const ctx = options.ctx || getAudioContext();
+  if (!ctx) return;
+  const center = Boolean(options.center);
+  const absSpin = Math.min(1, Math.max(0, Math.abs(Number(options.spin) || 0)));
+  const master = createMasterChain(ctx, null, 0.045);
+  const dest = routePanner(ctx, master, options);
+  const now = ctx.currentTime;
+  const volume = Math.max(0.03, Math.min(1.0, options.volume ?? 0.55));
+
+  if (center) {
+    const det = ctx.createOscillator(), detGain = ctx.createGain();
+    det.type = 'triangle';
+    det.frequency.setValueAtTime(840, now);
+    det.frequency.exponentialRampToValueAtTime(385, now + 0.017);
+    strike(detGain, 0.24 * volume, now, now + 0.020, 0.0008);
+    det.connect(detGain); detGain.connect(dest);
+    det.start(now); det.stop(now + 0.026);
+    noiseGrain(ctx, dest, now, 0.009, { freq: 1680, to: 920, q: 2.6, level: 0.11 * volume });
+    return;
+  }
+
+  const tick = ctx.createOscillator(), tickGain = ctx.createGain();
+  tick.type = 'sine';
+  const f0 = 2480 + 980 * absSpin;
+  const f1 = 1240 + 420 * absSpin;
+  tick.frequency.setValueAtTime(f0, now);
+  tick.frequency.exponentialRampToValueAtTime(f1, now + 0.0085);
+  strike(tickGain, (0.14 + 0.06 * absSpin) * volume, now, now + 0.010, 0.0005);
+  tick.connect(tickGain); tickGain.connect(dest);
+  tick.start(now); tick.stop(now + 0.015);
+
+  noiseGrain(ctx, dest, now, 0.006, {
+    type: 'bandpass',
+    freq: 3650 + 900 * absSpin,
+    to: 2150 + 500 * absSpin,
+    q: 3.4,
+    level: 0.095 * volume
+  });
+}
+
+module.exports = { playUbuMove, playSpin, playPuckSlide, playAimScrape, playLaunchPush, playSpinTick, playCarve, playSlipstream, playSpinStrike, playSpinTwirl };

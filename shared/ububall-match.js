@@ -344,7 +344,7 @@
     }
     t.fx.collide?.(contact);
   }
-  function tickWall(body, velocity, type, nx, ny, rimmed = false) {
+  function tickWall(body, velocity, type, nx, ny, rimmed = false, spinBite = 0, counterScuff = 0) {
     const t = activeTick;
     if (body === t.ball && type === 'wall') {
       t.play.banked = true;
@@ -356,7 +356,7 @@
       const bi = findSkaterIdx(t.bodies, body);
       if (bi >= 0) t.wallBumped.add(bi);
     }
-    t.fx.wall?.(body, velocity, type, nx, ny, rimmed);
+    t.fx.wall?.(body, velocity, type, nx, ny, rimmed, spinBite, counterScuff);
   }
   function recordSaves(bodies, play, tally, tickSaves, incomingBig, onSave = null) {
     for (const save of tickSaves) {

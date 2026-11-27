@@ -167,6 +167,13 @@
           side.presenter.handleSuper(key, stage, side.view.bodies[idx], tIdx >= 0 ? side.view.bodies[tIdx] : null);
         });
       }
+    }, (body, idx, kind, pvx, pvy, vx, vy, strength) => {
+      for (const side of [cpuSide, gpuSide]) {
+        syncBodiesToView(side.view.bodies);
+        withDetRandom(9500 + idx * 19, () => {
+          side.presenter.handleLaunch?.(side.view.bodies[idx], idx, kind, pvx, pvy, vx, vy, strength);
+        });
+      }
     });
 
     const ball = simBodies[6];
@@ -196,13 +203,13 @@
           });
         }
       },
-      wall: (body, vel, wType, nx, ny, rimmed) => {
+      wall: (body, vel, wType, nx, ny, rimmed, spinBite = 0, counterScuff = 0) => {
         const ib = simBodies.indexOf(body);
         const sSeed = 20000 + (rngStepCounter++);
         for (const side of [cpuSide, gpuSide]) {
           syncBodiesToView(side.view.bodies);
           withDetRandom(sSeed, () => {
-            side.presenter.handleWall(side.view.bodies[ib], vel, wType, nx, ny, rimmed);
+            side.presenter.handleWall(side.view.bodies[ib], vel, wType, nx, ny, rimmed, spinBite, counterScuff);
           });
         }
       },

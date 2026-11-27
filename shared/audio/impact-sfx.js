@@ -88,6 +88,102 @@ function playWallHit(options = {}) {
     frame.connect(frameGain); frameGain.connect(dest);
     frame.start(now); frame.stop(now + 0.096);
   }
+
+  // 5. Tangential spin-bite "english chirp" when heavy spin grabs the dasher glass and kicks sideways
+  const spinBite = Math.min(1, Math.max(0, Math.abs(Number(options.spinBite) || 0)));
+  const scuff = Math.min(1, Math.max(0, Number(options.scuff) || 0));
+  if (spinBite > 0.12 && scuff < 0.35) {
+    const chirpDur = 0.032 + 0.016 * spinBite;
+    const chirp = ctx.createOscillator(), cFilter = ctx.createBiquadFilter(), cGain = ctx.createGain();
+    chirp.type = 'triangle';
+    const fStart = 1580 + 360 * spinBite;
+    const fPeak = 2560 + 580 * spinBite;
+    chirp.frequency.setValueAtTime(fStart, now + 0.002);
+    chirp.frequency.exponentialRampToValueAtTime(fPeak, now + 0.002 + chirpDur * 0.46);
+    chirp.frequency.exponentialRampToValueAtTime(1820, now + 0.002 + chirpDur);
+    cFilter.type = 'bandpass';
+    cFilter.Q.setValueAtTime(5.2, now + 0.002);
+    cFilter.frequency.setValueAtTime(2250 + 400 * spinBite, now + 0.002);
+    cGain.gain.setValueAtTime(0.0001, now + 0.002);
+    cGain.gain.linearRampToValueAtTime(0.24 * spinBite * volume, now + 0.007);
+    cGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.002 + chirpDur);
+    chirp.connect(cFilter); cFilter.connect(cGain); cGain.connect(dest);
+    chirp.start(now + 0.002); chirp.stop(now + chirpDur + 0.014);
+
+    noiseGrain(ctx, dest, now + 0.003, chirpDur, {
+      type: 'bandpass', freq: 2450 + 450 * spinBite, to: 1480, q: 3.4,
+      level: 0.16 * spinBite * volume
+    });
+  }
+
+  // 6. Choked kickplate "scuff-check" when counter-spin fights a corner rim-around and scrubs speed
+  if (scuff > 0.12) {
+    const scuffDur = 0.052 + 0.022 * scuff;
+    noiseGrain(ctx, dest, now, scuffDur, {
+      type: 'bandpass', freq: 1120 + 240 * scuff, to: 340, q: 1.85,
+      level: 0.30 * scuff * volume
+    });
+    const choke = ctx.createOscillator(), chokeGain = ctx.createGain();
+    choke.type = 'triangle';
+    choke.frequency.setValueAtTime(168, now);
+    choke.frequency.exponentialRampToValueAtTime(64, now + 0.048);
+    strike(chokeGain, 0.26 * scuff * volume, now, now + 0.054, 0.0015);
+    choke.connect(chokeGain); chokeGain.connect(dest);
+    choke.start(now); choke.stop(now + 0.064);
+  }
+}
+
+// Weight-class skater-on-skater shoulder bump: light nimble jersey brush for featherweights,
+// scaling down into a planted low-end pad thud & armor knock when heavyweights collide or stonewall.
+function playBodyBump(options = {}) {
+  const ctx = options.ctx || getAudioContext();
+  if (!ctx) return;
+  const massA = Math.max(1.2, Number(options.massA) || 3);
+  const massB = Math.max(1.2, Number(options.massB) || 3);
+  const avgRatio = Math.max(0.68, Math.min(2.15, ((massA + massB) * 0.5) / 3));
+  const peakRatio = Math.max(0.72, Math.min(2.25, Math.max(massA, massB) / 3));
+  const heavy = Math.max(0, Math.min(1, (Math.max(avgRatio, peakRatio * 0.92) - 0.80) / 0.82));
+  const asym = Math.max(0, Math.min(1, Number(options.asymmetry) || 0));
+  const speedNorm = Math.max(0.12, Math.min(1, (Number(options.speed) || 240) / 520));
+  const dur = 0.044 + 0.044 * heavy;
+  const master = createMasterChain(ctx, null, dur + 0.04);
+  const dest = routePanner(ctx, master, options);
+  const now = ctx.currentTime;
+  const volume = Math.max(0.04, Math.min(1.0, options.volume ?? (0.24 + 0.56 * speedNorm)));
+
+  // 1. Weight-scaled shoulder/chest body thud (high & nimble for light ubus, deep sub-bass for heavyweights)
+  const sub = ctx.createOscillator(), subGain = ctx.createGain();
+  sub.type = heavy > 0.45 ? 'sine' : 'triangle';
+  const f0 = 248 - 132 * heavy;
+  const f1 = Math.max(38, 118 - 76 * heavy);
+  sub.frequency.setValueAtTime(f0, now);
+  sub.frequency.exponentialRampToValueAtTime(f1, now + dur);
+  strike(subGain, (0.16 + 0.42 * heavy) * volume, now, now + dur + 0.008, 0.0018);
+  sub.connect(subGain); subGain.connect(dest);
+  sub.start(now); sub.stop(now + dur + 0.018);
+
+  // 2. Padded shell / shoulder-plate knock (heavier & lower with weight + stonewall asymmetry)
+  const pad = ctx.createOscillator(), padFilter = ctx.createBiquadFilter(), padGain = ctx.createGain();
+  pad.type = 'triangle';
+  const pf0 = 620 - 270 * heavy + 45 * asym;
+  const pf1 = Math.max(120, 290 - 135 * heavy);
+  pad.frequency.setValueAtTime(pf0, now);
+  pad.frequency.exponentialRampToValueAtTime(pf1, now + 0.036 + 0.018 * heavy);
+  padFilter.type = 'bandpass';
+  padFilter.Q.setValueAtTime(2.1 + 0.7 * asym, now);
+  padFilter.frequency.setValueAtTime(pf0 * 0.92, now);
+  strike(padGain, (0.18 + 0.16 * asym) * volume, now, now + 0.042 + 0.018 * heavy, 0.0012);
+  pad.connect(padFilter); padFilter.connect(padGain); padGain.connect(dest);
+  pad.start(now); pad.stop(now + 0.068);
+
+  // 3. Dry jersey/shell contact brush
+  noiseGrain(ctx, dest, now, 0.020 + 0.012 * heavy, {
+    type: 'bandpass',
+    freq: 1480 - 620 * heavy,
+    to: Math.max(320, 760 - 340 * heavy),
+    q: 1.85,
+    level: (0.15 + 0.06 * speedNorm) * volume
+  });
 }
 
 // Flaming ball impact: a rushing, blossoming flaming woosh — like a sudden surge of fire
@@ -816,4 +912,4 @@ function playGameStart(options = {}) {
 // Fanfare & Anthem finishing: deterministic room impulses per acoustic stage, gentle bus
 // compression, and clean ConstantSource release timers so OfflineAudioContext MP4 exports match live playback.
 
-module.exports = { playWallHit, playFireImpact, playSave, playFirework, playGoalHit, playSuper, playGuardToggle, playGuardHit, playIronSave, playFoul, playGameStart };
+module.exports = { playWallHit, playBodyBump, playFireImpact, playSave, playFirework, playGoalHit, playSuper, playGuardToggle, playGuardHit, playIronSave, playFoul, playGameStart };

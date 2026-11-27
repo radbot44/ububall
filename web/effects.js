@@ -173,6 +173,84 @@
           }
         },
         {
+          id: 'plan-spin-crown',
+          title: 'Spin Crown Winding & Wound Inner-Face Tilt',
+          when: 'Winding Spin via the Spin knob, slider, `Q`/`E`, or mouse wheel (`playSpinTick`, `aimCoilPose` `twist` & wound rim arc). Try scrolling your mouse wheel over the rink!',
+          visual: 'Inner character face tilts up to 16 deg in the wound CW/CCW direction with a glowing directional inner-rim crescent, paired with crisp watch-crown escapement ticks and a warm center-detent click across 0.',
+          soundLabel: 'Play crown / detent',
+          variants: [
+            { id: 'wind-zero-wind', label: 'Wind CW -> Zero Detent -> Wind CCW' },
+            { id: 'wound-trio', label: 'CW vs. Zero vs. CCW Wound Trio' },
+            { id: 'center-detent', label: 'Zero-Detent Notch Click' }
+          ],
+          duration: 3.0,
+          playSound: (ctx, variant = 'wind-zero-wind') => {
+            if (variant === 'center-detent') {
+              ctx.audio()?.playSpinTick?.({ spin: 0, center: true, x: 310, y: 300 });
+            } else {
+              [0.2, 0.5, 0.85].forEach((sp, idx) => {
+                setTimeout(() => ctx.audio()?.playSpinTick?.({ spin: sp, center: false, x: 310, y: 300 }), idx * 75);
+              });
+              setTimeout(() => ctx.audio()?.playSpinTick?.({ spin: 0, center: true, x: 310, y: 300 }), 280);
+            }
+          },
+          run: (ctx, variant = 'wind-zero-wind') => {
+            ctx.resetStage({ phase: 'plan', mode: 'standard' });
+            ctx.place(0, 290, 300);
+            ctx.place(1, 290, 165);
+            ctx.place(2, 290, 435);
+            ctx.place(6, 510, 300);
+            ctx.setSelected(0);
+            if (variant === 'wound-trio') {
+              ctx.plans[1] = { angle: 0.08, power: 0.72, spin: 1.0, guard: false };
+              ctx.plans[0] = { angle: 0, power: 0.72, spin: 0, guard: false };
+              ctx.plans[2] = { angle: -0.08, power: 0.72, spin: -1.0, guard: false };
+              ctx.presenter.dirtyPrediction();
+              return;
+            }
+            if (variant === 'center-detent') {
+              ctx.plans[0] = { angle: 0, power: 0.68, spin: 0.45, guard: false };
+              ctx.presenter.dirtyPrediction();
+              let prevS = 0.45;
+              ctx.setPlanDriver(t => {
+                const s = t < 0.2 ? 0.45 : t < 1.1 ? 0.45 - ((t - 0.2) / 0.9) * 0.90 : -0.45 + Math.min(1, (t - 1.1) / 0.9) * 0.45;
+                if ((Math.abs(prevS) > 0.005 && Math.abs(s) <= 0.005) || (prevS * s < 0)) {
+                  ctx.audio()?.playSpinTick?.({ spin: 0, center: true, x: 290, y: 300 });
+                } else if (Math.floor(Math.abs(s) / 0.12) !== Math.floor(Math.abs(prevS) / 0.12)) {
+                  ctx.audio()?.playSpinTick?.({ spin: s, center: false, x: 290, y: 300 });
+                }
+                if (Math.abs(s - prevS) > 1e-4) {
+                  ctx.plans[0] = { angle: 0, power: 0.68, spin: s, guard: false };
+                  ctx.presenter.dirtyPrediction();
+                  prevS = s;
+                }
+              });
+              return;
+            }
+            ctx.plans[0] = { angle: 0, power: 0.76, spin: 0, guard: false };
+            ctx.presenter.dirtyPrediction();
+            let lastS = 0;
+            ctx.setPlanDriver(t => {
+              let s = 0;
+              if (t >= 0.10 && t < 0.85) s = Math.min(1, (t - 0.10) / 0.75);
+              else if (t >= 0.85 && t < 1.15) s = 1;
+              else if (t >= 1.15 && t < 2.25) s = 1 - ((t - 1.15) / 1.10) * 2;
+              else if (t >= 2.25) s = -1;
+              const crossedZero = (Math.abs(lastS) > 0.005 && Math.abs(s) <= 0.005) || (lastS * s < 0);
+              if (crossedZero) {
+                ctx.audio()?.playSpinTick?.({ spin: 0, center: true, x: 290, y: 300 });
+              } else if (Math.floor(Math.abs(s) / 0.09) !== Math.floor(Math.abs(lastS) / 0.09)) {
+                ctx.audio()?.playSpinTick?.({ spin: s, center: false, x: 290, y: 300 });
+              }
+              if (Math.abs(s - lastS) > 1e-4) {
+                ctx.plans[0] = { angle: 0, power: 0.76, spin: s, guard: false };
+                ctx.presenter.dirtyPrediction();
+                lastS = s;
+              }
+            });
+          }
+        },
+        {
           id: 'plan-prediction',
           title: 'Trajectory, Wall Stamps, Stop Marks & Pulse Ticks',
           when: 'Planning moves with board bounces, stops, or Pulse 1-second turns (`paintPrediction`).',
@@ -251,8 +329,79 @@
     {
       id: 'movement',
       title: '3. Movement, Spin & Materials',
-      summary: 'Moving ubu wobbles, puck glides, tapered spin arcs & spin wobble, ice hockey braking, front wind cones, and 32 DNA materials.',
+      summary: 'Launch skate push-offs, moving ubu wobbles, puck glides, tapered spin arcs, ice braking, front wind cones, Pulse cuts, and 32 DNA materials.',
       items: [
+        {
+          id: 'launch-skate-push',
+          title: 'Launch Skate Push-Off: Sprinter Snap vs. Bruiser Dig',
+          when: 'Releasing **Launch team** from a loaded coil (`startTurn` `kind === "push"`, `launchNicks`, `ubuRecoils`, `playLaunchPush`).',
+          visual: 'Coiled ubus snap forward out of their rings leaving twin V-shaped skate-blade heel nicks and backward shaved-ice puffs—crisp & high for featherweight sprinters, deep & crunchy for heavy bruisers, and silent at 0% power.',
+          soundLabel: 'Play skate push',
+          variants: [
+            { id: 'trio-stereo', label: '3-Skater Stereo Spring Uncoil' },
+            { id: 'light-sprinter', label: 'Featherweight Sprinter (Crisp Push)' },
+            { id: 'heavy-bruiser', label: 'Heavyweight Bruiser (Deep Ice Dig)' },
+            { id: 'idle-silent', label: '0% Power Control (Dead Silent)' }
+          ],
+          duration: 2.3,
+          playSound: (ctx, variant = 'trio-stereo') => {
+            if (variant === 'idle-silent') return;
+            if (variant === 'light-sprinter') {
+              ctx.audio()?.playLaunchPush?.({ power: 0.95, mass: 2.3, radius: 18, x: 240, y: 300 });
+            } else if (variant === 'heavy-bruiser') {
+              ctx.audio()?.playLaunchPush?.({ power: 0.95, mass: 4.8, radius: 37, x: 240, y: 300 });
+            } else {
+              ctx.audio()?.playLaunchPush?.({ power: 0.92, mass: 2.4, radius: 19, x: 200, y: 175 });
+              setTimeout(() => ctx.audio()?.playLaunchPush?.({ power: 0.95, mass: 3.1, radius: 25, x: 340, y: 300 }), 45);
+              setTimeout(() => ctx.audio()?.playLaunchPush?.({ power: 0.95, mass: 4.7, radius: 36, x: 480, y: 425 }), 90);
+            }
+          },
+          run: (ctx, variant = 'trio-stereo') => {
+            ctx.resetStage({ phase: 'plan', mode: 'standard' });
+            ctx.place(6, 780, 300);
+            ctx.place(3, 850, 150);
+            ctx.place(4, 850, 450);
+            ctx.place(5, 880, 300);
+            if (variant === 'light-sprinter') {
+              ctx.boostStats(0, { size: 0, mass: 0, impulse: 240 });
+              ctx.place(0, 240, 300);
+              ctx.place(1, 160, 120);
+              ctx.place(2, 160, 480);
+              ctx.plans[0] = { angle: 0, power: 0.96, spin: 0, guard: false };
+            } else if (variant === 'heavy-bruiser') {
+              ctx.boostStats(0, { size: 255, mass: 255, impulse: 210 });
+              ctx.place(0, 240, 300);
+              ctx.place(1, 160, 120);
+              ctx.place(2, 160, 480);
+              ctx.plans[0] = { angle: 0, power: 0.96, spin: 0, guard: false };
+            } else if (variant === 'idle-silent') {
+              ctx.place(0, 260, 300);
+              ctx.place(1, 260, 175);
+              ctx.place(2, 260, 425);
+              // All 0% power: stays completely uncoiled and silent on launch
+            } else {
+              // Left-to-right stereo showcase: featherweight top-left, balanced center, heavyweight bottom-mid
+              ctx.boostStats(0, { size: 5, mass: 5, impulse: 235 });
+              ctx.boostStats(1, { size: 127, mass: 127, impulse: 200 });
+              ctx.boostStats(2, { size: 250, mass: 255, impulse: 210 });
+              ctx.place(0, 200, 175);
+              ctx.place(1, 300, 300);
+              ctx.place(2, 410, 425);
+              ctx.plans[0] = { angle: 0.06, power: 0.95, spin: 0, guard: false };
+              ctx.plans[1] = { angle: 0, power: 0.92, spin: 0, guard: false };
+              ctx.plans[2] = { angle: -0.06, power: 0.95, spin: 0, guard: false };
+            }
+            ctx.presenter.dirtyPrediction();
+            let fired = false;
+            ctx.setPlanDriver(t => {
+              if (!fired && t >= 0.42) {
+                fired = true;
+                ctx.setPlanDriver(null);
+                ctx.launchPlans(ctx.plans);
+              }
+            });
+          }
+        },
         {
           id: 'motion-trails',
           title: 'Skater & Ball Motion Trails',
@@ -535,7 +684,7 @@
     {
       id: 'impacts',
       title: '4. Shots, Impacts & Ball Heat',
-      summary: 'Ordinary shot tactility (square tap vs. thin graze shik), Checks, Hip Clips, Spin Strikes, Snaps, walls/posts, and Fireballs.',
+      summary: 'Ordinary shot tactility, Reach sweet-spot vs. toe-poke, Tape-to-Tape catches, weight-class bumps, board spin-bite chirps, Strikes, Snaps, and Fireballs.',
       items: [
         {
           id: 'ordinary-shot-tactility',
@@ -618,6 +767,152 @@
               ctx.place(3, 560, 235, { vx: -420, vy: 130 });
               ctx.place(5, 620, 320, { vx: -360, vy: -45 });
               ctx.place(6, 465, 300, { vx: -60, vy: 0 });
+            }
+          }
+        },
+        {
+          id: 'sweet-spot-vs-toepoke',
+          title: 'Reach Sweet Spot: Body-Core Punch vs. Outstretched Toe-Poke',
+          when: 'Striking flush on the body core (`pokeFrac = 0`, 100% power) vs. catching the ball out on the extended Reach ring (`pokeFrac -> 1`, `SWEET_SPOT` tip falloff).',
+          visual: 'Flush center-body hit gives a chesty sweet-spot thump, inner white core flash, and crisp shooter follow-through; outstretched toe-poke leaves the body un-jarred and bows only the Reach ring outward with a lighter, higher tip click.',
+          soundLabel: 'Play core / toe-poke',
+          variants: [
+            { id: 'compare-seq', label: 'Compare Sequence: Core Punch -> Tip Toe-Poke' },
+            { id: 'flush-core', label: 'Flush Body-Core Sweet Spot (Full Punch)' },
+            { id: 'tip-toepoke', label: 'Outstretched Reach Toe-Poke (Ring Bow)' }
+          ],
+          duration: 2.5,
+          playSound: (ctx, variant = 'compare-seq') => {
+            if (variant === 'flush-core') {
+              ctx.audio()?.playBallHit?.({ volume: 0.90, graze: 0.02, poke: false, pokeFrac: 0, x: 470, y: 300 });
+            } else if (variant === 'tip-toepoke') {
+              ctx.audio()?.playBallHit?.({ volume: 0.84, graze: 0.12, poke: true, pokeFrac: 0.95, x: 470, y: 300 });
+            } else {
+              ctx.audio()?.playBallHit?.({ volume: 0.90, graze: 0.02, poke: false, pokeFrac: 0, x: 360, y: 240 });
+              setTimeout(() => ctx.audio()?.playBallHit?.({ volume: 0.84, graze: 0.12, poke: true, pokeFrac: 0.95, x: 640, y: 360 }), 420);
+            }
+          },
+          run: (ctx, variant = 'compare-seq') => {
+            ctx.resetStage({ phase: 'play', mode: 'standard' });
+            ctx.place(2, 160, 490);
+            ctx.place(3, 850, 140);
+            ctx.place(4, 850, 460);
+            ctx.place(5, 880, 300);
+            if (variant === 'flush-core') {
+              ctx.boostStats(0, { size: 165, reach: 95, power: 190 });
+              ctx.place(1, 160, 110);
+              ctx.place(0, 320, 300, { vx: 560, vy: 0 });
+              ctx.place(6, 470, 300, { vx: 0, vy: 0 });
+            } else if (variant === 'tip-toepoke') {
+              // Compact skater with huge Reach ring catches passing ball right at the outer Reach tip!
+              ctx.boostStats(0, { size: 15, reach: 255, power: 190 });
+              ctx.place(1, 160, 110);
+              ctx.place(0, 455, 353, { vx: 80, vy: 0 });
+              ctx.place(6, 330, 300, { vx: 490, vy: 0, strikerTeam: 1 });
+            } else {
+              // Step 1 (0.22s): Skater 0 drills the ball flush on body core; Step 2 (1.05s): reset ball across Skater 1's outstretched Reach tip!
+              ctx.boostStats(0, { size: 165, reach: 95, power: 190 });
+              ctx.boostStats(1, { size: 15, reach: 255, power: 190 });
+              ctx.place(0, 250, 215, { vx: 560, vy: 0 });
+              ctx.place(1, 610, 413, { vx: 0, vy: 0 });
+              ctx.place(6, 390, 215, { vx: 0, vy: 0 });
+              ctx.after(1.05, () => {
+                ctx.place(1, 610, 413, { vx: 75, vy: 0 });
+                ctx.place(6, 485, 360, { vx: 490, vy: 0, omega: 0, strikerTeam: 1, onFire: false, fireTicks: 0, pace: 200 });
+              });
+            }
+          }
+        },
+        {
+          id: 'tape-to-tape-catch',
+          title: 'Teammate "Tape-to-Tape" Catch vs. Opponent Ricochet',
+          when: 'Non-guarding teammate cleanly receives a live teammate pass (`passerSlot >= 0`, `>=140 px/s`) below full Snap One-Timer threshold.',
+          visual: 'Warm cupped composite-blade "thup" pocket catch, twin concentric team-colored rings around the ball, white receiver-rim catch arc, and brief dashed pass-thread shimmer back to the passer.',
+          soundLabel: 'Play cupped catch',
+          variants: [
+            { id: 'tape-catch', label: 'Live Teammate Reception (Cupped Thup)' },
+            { id: 'ricochet-control', label: 'Opponent Deflection Control (Brittle Tap)' },
+            { id: 'give-and-go', label: '3-Skater Tape-to-Tape Relay Triangle' }
+          ],
+          duration: 2.5,
+          playSound: (ctx, variant = 'tape-catch') => {
+            if (variant === 'ricochet-control') {
+              ctx.audio()?.playBallHit?.({ volume: 0.82, graze: 0.15, tape: false, x: 520, y: 300 });
+            } else {
+              ctx.audio()?.playBallHit?.({ volume: 0.84, graze: 0.10, tape: true, x: 520, y: 300 });
+            }
+          },
+          run: (ctx, variant = 'tape-catch') => {
+            ctx.resetStage({ phase: 'play', mode: 'standard' });
+            ctx.place(3, 840, 140);
+            ctx.place(4, 840, 460);
+            ctx.place(5, 870, 300);
+            if (variant === 'give-and-go') {
+              // Skater 1 passes down-right to stationary/gliding Skater 0 (Tape-to-Tape #1), angled toward gliding Skater 2 (Tape-to-Tape #2)!
+              ctx.place(1, 250, 165, { vx: 40, vy: 20 });
+              ctx.place(0, 455, 355, { vx: 35, vy: -35 }); // <140 drive so cushioned Tape-to-Tape catch, not Snap!
+              ctx.place(2, 665, 205, { vx: 55, vy: 20 });
+              ctx.place(6, 305, 205, { vx: 330, vy: 245, pace: 410, strikerTeam: 0, strikerSlot: 1 });
+              ctx.play.last = 1;
+            } else {
+              const fromTeammate = variant !== 'ricochet-control';
+              ctx.place(1, 250, 210, { vx: 30, vy: 15 });
+              ctx.place(2, 220, 460);
+              if (!fromTeammate) ctx.place(3, 250, 210, { vx: 20, vy: 10 });
+              ctx.place(0, 520, 318, { vx: 45, vy: -30 }); // Drive below SNAP.minDrive (140) so pure Tape-to-Tape reception
+              ctx.place(6, 335, 242, {
+                vx: 380, vy: 145, pace: 405,
+                strikerTeam: fromTeammate ? 0 : 1,
+                strikerSlot: fromTeammate ? 1 : 0
+              });
+              ctx.play.last = fromTeammate ? 1 : 3;
+            }
+          }
+        },
+        {
+          id: 'weight-class-bumps',
+          title: 'Weight-Class Shoulder Bumps & Asymmetric Stonewall',
+          when: 'Skaters jostle or check in open ice (`playBodyBump`, asymmetric `knockA`/`knockB` `ubuRecoils` squash & brace).',
+          visual: 'Heavyweight stonewall barely yields and flashes a white shoulder-brace arc while the lightweight runner compresses and recoils; audio shifts from nimble jersey brush on featherweights to a deep sub-bass pad thud on heavyweights.',
+          soundLabel: 'Play pad thud / brush',
+          variants: [
+            { id: 'stonewall', label: 'Heavyweight Stonewall vs. Featherweight' },
+            { id: 'heavy-clash', label: 'Two Heavyweights (Deep Pad Thud)' },
+            { id: 'feather-jostle', label: 'Two Featherweights (Light Jersey Brush)' }
+          ],
+          duration: 2.3,
+          playSound: (ctx, variant = 'stonewall') => {
+            if (variant === 'feather-jostle') {
+              ctx.audio()?.playBodyBump?.({ speed: 280, massA: 2.3, massB: 2.3, asymmetry: 0.05, volume: 0.72, x: 500, y: 300 });
+            } else if (variant === 'heavy-clash') {
+              ctx.audio()?.playBodyBump?.({ speed: 360, massA: 4.8, massB: 4.8, asymmetry: 0.08, volume: 0.88, x: 500, y: 300 });
+            } else {
+              ctx.audio()?.playBodyBump?.({ speed: 380, massA: 4.8, massB: 2.3, asymmetry: 0.78, volume: 0.88, x: 500, y: 300 });
+            }
+          },
+          run: (ctx, variant = 'stonewall') => {
+            ctx.resetStage({ phase: 'play', mode: 'standard' });
+            ctx.place(1, 180, 125);
+            ctx.place(2, 180, 475);
+            ctx.place(4, 820, 125);
+            ctx.place(5, 820, 475);
+            ctx.place(6, 500, 110);
+            if (variant === 'feather-jostle') {
+              ctx.boostStats(0, { size: 0, mass: 0, strength: 60, stability: 70 });
+              ctx.boostStats(3, { size: 0, mass: 0, strength: 60, stability: 70 });
+              ctx.place(0, 415, 300, { vx: 230, vy: 12 });
+              ctx.place(3, 555, 304, { vx: -220, vy: -12 });
+            } else if (variant === 'heavy-clash') {
+              ctx.boostStats(0, { size: 255, mass: 255, strength: 220, stability: 220 });
+              ctx.boostStats(3, { size: 255, mass: 255, strength: 220, stability: 220 });
+              ctx.place(0, 395, 300, { vx: 280, vy: 0 });
+              ctx.place(3, 575, 300, { vx: -280, vy: 0 });
+            } else {
+              // Home Skater 0 is an anchored Heavyweight tank; Away Skater 3 is a fast Featherweight runner bouncing off!
+              ctx.boostStats(0, { size: 250, mass: 255, strength: 255, stability: 255 });
+              ctx.boostStats(3, { size: 5, mass: 0, strength: 25, stability: 15 });
+              ctx.place(0, 445, 300, { vx: 55, vy: 0 });
+              ctx.place(3, 595, 302, { vx: -470, vy: 0 });
             }
           }
         },
@@ -740,6 +1035,45 @@
             ctx.place(0, 380, 130, { vx: 160, vy: -vy });
             ctx.place(3, 620, 470, { vx: -160, vy });
             ctx.place(6, 500, 160, { vx: 140, vy: -(vy + 30), pace: vy + 30 });
+          }
+        },
+        {
+          id: 'board-spin-bite',
+          title: 'Board Spin-Bite Chirp & Corner Counter-Rim Scuff',
+          when: 'Spinning ball or skater grabs the dasher glass (`spinBite` friction impulse in `reflect`) or counter-spin fights a corner rim-around (`counterScuff`).',
+          visual: 'Heavy spin stamps an angled tangential smudge & directional sparks along the boards with a rubber-on-glass chirp as the bank kicks wide; counter-spin in a corner puffs white scrub dust with a choked kickplate scuff-check.',
+          soundLabel: 'Play chirp / scuff',
+          variants: [
+            { id: 'english-chirp', label: 'Heavy Spin Bank (Rubber Chirp & Wide Kick)' },
+            { id: 'flat-bank', label: 'No-Spin Bank Control (Straight Bounce)' },
+            { id: 'counter-scuff', label: 'Counter-Spin Corner Check (Kickplate Scuff)' }
+          ],
+          duration: 2.3,
+          playSound: (ctx, variant = 'english-chirp') => {
+            if (variant === 'flat-bank') {
+              ctx.audio()?.playWallHit?.({ volume: 0.72, speed: 460, spinBite: 0, scuff: 0, x: 500, y: 60 });
+            } else if (variant === 'counter-scuff') {
+              ctx.audio()?.playWallHit?.({ volume: 0.72, speed: 340, spinBite: 0, scuff: 0.92, x: 110, y: 90 });
+            } else {
+              ctx.audio()?.playWallHit?.({ volume: 0.76, speed: 470, spinBite: 0.92, scuff: 0, x: 500, y: 60 });
+            }
+          },
+          run: (ctx, variant = 'english-chirp') => {
+            ctx.resetStage({ phase: 'play', mode: 'standard' });
+            ctx.place(1, 200, 470);
+            ctx.place(2, 340, 470);
+            ctx.place(3, 820, 460);
+            ctx.place(4, 820, 140);
+            ctx.place(5, 680, 470);
+            if (variant === 'counter-scuff') {
+              // Top-left corner arc (x < 160, y < 160): moving counter-clockwise (vt < 0) while negative -omega fights the corner and scrubs speed!
+              ctx.place(0, 152, 114, { vx: -440, vy: -210, omega: -19 });
+              ctx.place(6, 500, 300);
+            } else {
+              const withSpin = variant !== 'flat-bank';
+              ctx.place(0, 330, 180, { vx: 120, vy: -410, omega: withSpin ? 19 : 0 });
+              ctx.place(6, 520, 175, { vx: 90, vy: -460, omega: withSpin ? 22 : 0, pace: 470 });
+            }
           }
         },
         {
@@ -1685,8 +2019,8 @@
 
     const liveFx = {
       collide: contact => presenter.handleCollision(contact),
-      wall: (body, velocity, wallType, nx, ny, rimmed = false) =>
-        presenter.handleWall(body, velocity, wallType, nx, ny, rimmed),
+      wall: (body, velocity, wallType, nx, ny, rimmed = false, spinBite = 0, counterScuff = 0) =>
+        presenter.handleWall(body, velocity, wallType, nx, ny, rimmed, spinBite, counterScuff),
       shockwave: (source, radius, type = null) =>
         presenter.handleShockwave(source, radius, type),
       super: (key, stage, body, target = null) =>
@@ -2749,6 +3083,31 @@
       }
       return { x: ((event.clientX - r.left) / r.width) * 1000, y: ((event.clientY - r.top) / r.height) * 600 };
     }
+    let lastWheelSpinTickAt = 0;
+    canvas.addEventListener('wheel', e => {
+      if (phase !== 'plan' || !e.deltaY || e.ctrlKey) return;
+      e.preventDefault();
+      planDriver = null;
+      const prevSpin = plans[selected]?.spin || 0;
+      const step = (e.shiftKey ? 0.16 : 0.08) * -Math.sign(e.deltaY);
+      let nextSpin = Math.max(-1, Math.min(1, Math.round((prevSpin + step) * 100) / 100));
+      if (Math.abs(nextSpin) < 0.035) nextSpin = 0;
+      if (Math.abs(nextSpin - prevSpin) < 1e-4) return;
+      plans[selected] = { ...plans[selected], spin: nextSpin, guard: false };
+      const b = view.bodies[selected];
+      const nowMs = performance.now();
+      const crossedZero = (Math.abs(prevSpin) > 0.005 && Math.abs(nextSpin) <= 0.005) || (prevSpin * nextSpin < 0);
+      if (crossedZero) {
+        lastWheelSpinTickAt = nowMs;
+        activeAudio()?.playSpinTick?.({ spin: 0, center: true, x: b?.x ?? 500, y: b?.y ?? 300 });
+      } else if (nowMs - lastWheelSpinTickAt >= 18) {
+        lastWheelSpinTickAt = nowMs;
+        activeAudio()?.playSpinTick?.({ spin: nextSpin, center: false, x: b?.x ?? 500, y: b?.y ?? 300 });
+      }
+      presenter.dirtyPrediction();
+      draw();
+      scheduleLoop();
+    }, { passive: false });
     canvas.addEventListener('pointerdown', e => {
       const p = rinkPoint(e);
       const warn = presenter.warningAt(p, fouls);
@@ -2905,7 +3264,7 @@
       if (paused || doc.hidden) return false;
       if (autoLoop && activeDemo) return true;
       if (phase !== 'plan' || postGoal || goalReplay || timedCallbacks.length || castState || stageChoreoActive) return true;
-      if (planDriver || fx.guardSetTimes?.size || fx.contactMarks?.length || fx.guardFlexes?.length || fx.ballTapWarp) return true;
+      if (planDriver || fx.guardSetTimes?.size || fx.contactMarks?.length || fx.guardFlexes?.length || fx.launchNicks?.length || fx.ubuRecoils?.length || fx.wallSmudges?.length || fx.tapeCatches?.length || fx.ballTapWarp) return true;
       if (fx.kickoffGlow > 0 || fx.fireWarp || fx.koWarp || fx.particles.length || fx.shockwaves.length || fx.skids.length || fx.burns.length || fx.pings?.length || fx.popups?.length) return true;
       if (fouls.crease.some(Boolean) || presenter.stalling(fouls)) return true;
       if (activeDemo) return true;

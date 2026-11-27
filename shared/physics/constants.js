@@ -331,9 +331,9 @@ function clearHeat(ball) {
 const contactEvent = {
   a: null, b: null, speed: 0, impulse: 0, plow: false, iron: false,
   checker: null, snapped: false, spinStruck: false, tangentImpulse: 0, passerSlot: -1, struck: false,
-  graze: 0, tangentSign: 1
+  graze: 0, tangentSign: 1, pokeFrac: 0, knockA: 0, knockB: 0
 };
-function emitCollide(onCollide, a, b, speed, impulse = 0, plow = false, iron = false, checker = null, snapped = false, spinStruck = false, tangentImpulse = 0, passerSlot = -1, struck = false, graze = 0, tangentSign = 1) {
+function emitCollide(onCollide, a, b, speed, impulse = 0, plow = false, iron = false, checker = null, snapped = false, spinStruck = false, tangentImpulse = 0, passerSlot = -1, struck = false, graze = 0, tangentSign = 1, pokeFrac = 0, knockA = 0, knockB = 0) {
   if (typeof onCollide !== 'function') return;
   contactEvent.a = a;
   contactEvent.b = b;
@@ -349,6 +349,9 @@ function emitCollide(onCollide, a, b, speed, impulse = 0, plow = false, iron = f
   contactEvent.struck = struck;
   contactEvent.graze = graze;
   contactEvent.tangentSign = tangentSign;
+  contactEvent.pokeFrac = pokeFrac;
+  contactEvent.knockA = knockA;
+  contactEvent.knockB = knockB;
   onCollide(contactEvent);
 }
 function kickoff() {

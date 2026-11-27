@@ -56,6 +56,7 @@
       playUbuMove: o => A.playUbuMove?.(into(o)),
       playSpin: o => A.playSpin?.(into(o)),
       playPuckSlide: o => A.playPuckSlide?.(into(o)),
+      playLaunchPush: o => A.playLaunchPush?.(into(o)),
       playCarve: o => A.playCarve?.(into(o)),
       playSlipstream: o => A.playSlipstream?.(into(o)),
       playSpinStrike: o => A.playSpinStrike?.(into(o)),
@@ -64,10 +65,12 @@
       playSave: o => A.playSave?.(into(o)),
       playFirework: o => A.playFirework?.(into(o)),
       playWallHit: o => A.playWallHit(into(o)),
+      playBodyBump: o => A.playBodyBump?.(into(o)),
       playGoalHit: (type, o) => A.playGoalHit(type, into(o)),
       playSuper: (key, phase, o) => A.playSuper(key, phase, into(o)),
       playSizzle: o => A.playSizzle(into(o)),
       playFoul: (kind, o) => A.playFoul(kind, into(o)),
+      playGuardHit: o => A.playGuardHit?.(into(o)),
       playIronSave: o => A.playIronSave?.(into(o)),
       playFanfare: (voice, _customCtx, onNote, o) => A.playFanfare?.(voice, ctx, onNote || null, { ...o, loop: false })
     };

@@ -1920,7 +1920,14 @@
   for (const [id, delta] of [['spin-less', -.1], ['spin-more', .1]]) {
     $(id).onclick = () => {
       if (!knobEditable(selected)) return;
-      plans[selected].spin = Math.max(-1, Math.min(1, Math.round(((plans[selected].spin || 0) + delta) * 10) / 10)); plans[selected].guard = false;
+      const prevSpin = plans[selected].spin || 0;
+      const nextSpin = Math.max(-1, Math.min(1, Math.round((prevSpin + delta) * 10) / 10));
+      plans[selected].spin = nextSpin; plans[selected].guard = false;
+      if (Math.abs(nextSpin - prevSpin) > 1e-4) {
+        const b = fieldView.bodies[selected];
+        const center = (Math.abs(prevSpin) > 0.005 && Math.abs(nextSpin) <= 0.005) || (prevSpin * nextSpin < 0);
+        gameAudio()?.playSpinTick?.({ spin: center ? 0 : nextSpin, center, x: b?.x ?? 500, y: b?.y ?? 300 });
+      }
       sync(); draw();
       saveActiveMatch();
     };
@@ -1960,7 +1967,7 @@
   const syncLive = () => (typeof syncTickBodies === 'function' ? syncTickBodies(liveSim(), 0) : syncViewBodies(liveSim(), 0));
   const liveFx = {
     collide: contact => { syncLive(); handleCollision({ ...contact, a: liveView(contact.a), b: liveView(contact.b) }); },
-    wall: (body, velocity, wallType, nx, ny, rimmed = false) => { syncLive(); handleWall(liveView(body), velocity, wallType, nx, ny, rimmed); },
+    wall: (body, velocity, wallType, nx, ny, rimmed = false, spinBite = 0, counterScuff = 0) => { syncLive(); handleWall(liveView(body), velocity, wallType, nx, ny, rimmed, spinBite, counterScuff); },
     shockwave: (source, radius, type = null) => { syncLive(); handleShockwave(liveView(source), radius, type); },
     super: (key, stage, body, target = null) => { syncLive(); handleSuper(key, stage, liveView(body), target ? liveView(target) : null); },
     launch: (body, idx, kind, preVx, preVy, postVx, postVy, strength) => { syncLive(); handleLaunch(liveView(body), idx, kind, preVx, preVy, postVx, postVy, strength); }

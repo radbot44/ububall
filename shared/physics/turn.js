@@ -44,13 +44,26 @@ function launch(bodies, plans, onLaunch = null) {
       b.omega = Math.max(-b.maxSpin, Math.min(b.maxSpin, b.omega + spinInput * b.maxSpin));
       b.launchSpin = spinInput !== 0 ? b.omega : (b.launchSpin && b.omega * b.launchSpin > 0 ? b.omega : 0);
       b.spinStrike = STRIKE_GAIN;
-      if (reportLaunch && prevSpeed >= 70) {
-        const ux = preVx / prevSpeed, uy = preVy / prevSpeed;
+      if (reportLaunch) {
         const dvx = b.vx - preVx, dvy = b.vy - preVy;
-        const dvCross = Math.abs(-dvx * uy + dvy * ux);
-        const dvBack = Math.max(0, -(dvx * ux + dvy * uy));
-        const cutLoad = Math.min(1, Math.hypot(dvCross, dvBack * 0.85) / 460);
-        if (cutLoad >= 0.16) reportLaunch(b, i, 'cut', preVx, preVy, b.vx, b.vy, cutLoad);
+        let didCut = false;
+        if (prevSpeed >= 70) {
+          const ux = preVx / prevSpeed, uy = preVy / prevSpeed;
+          const dvCross = Math.abs(-dvx * uy + dvy * ux);
+          const dvBack = Math.max(0, -(dvx * ux + dvy * uy));
+          const cutLoad = Math.min(1, Math.hypot(dvCross, dvBack * 0.85) / 460);
+          if (cutLoad >= 0.16) {
+            reportLaunch(b, i, 'cut', preVx, preVy, b.vx, b.vy, cutLoad);
+            didCut = true;
+          }
+        }
+        if (!didCut) {
+          const dvMag = Math.hypot(dvx, dvy);
+          if (dvMag >= 55) {
+            const pushLoad = Math.min(1, power * (0.42 + 0.58 * Math.min(1.25, dvMag / 620)));
+            reportLaunch(b, i, 'push', preVx, preVy, b.vx, b.vy, pushLoad);
+          }
+        }
       }
     } else if (reportLaunch) {
       const preSpd = Math.hypot(preVx, preVy);

@@ -110,9 +110,14 @@
       spaceWarps: [],
       contactMarks: [],
       guardFlexes: [],
+      launchNicks: [],
+      ubuRecoils: [],
+      wallSmudges: [],
+      tapeCatches: [],
       guardSetTimes: new Map(),
       ballTapWarp: null,
       lastGuardHitTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
+      lastBodyBumpTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       superImpactTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       colossusGrowTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
       carveTimes: typeof WeakMap !== 'undefined' ? new WeakMap() : new Map(),
@@ -1676,6 +1681,10 @@
       if (fx.spaceWarps) fx.spaceWarps.length = 0;
       if (fx.contactMarks) fx.contactMarks.length = 0;
       if (fx.guardFlexes) fx.guardFlexes.length = 0;
+      if (fx.launchNicks) fx.launchNicks.length = 0;
+      if (fx.ubuRecoils) fx.ubuRecoils.length = 0;
+      if (fx.wallSmudges) fx.wallSmudges.length = 0;
+      if (fx.tapeCatches) fx.tapeCatches.length = 0;
       if (fx.guardSetTimes) fx.guardSetTimes.clear();
       if (fx.iceCache) { fx.iceCache.key = null; fx.iceCache.skidSnap = null; fx.iceCache.burnSnap = null; }
     }
@@ -1700,6 +1709,7 @@
       fx.slipstreamTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.spinStrikeTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       fx.lastGuardHitTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
+      fx.lastBodyBumpTimes = typeof WeakMap !== 'undefined' ? new WeakMap() : new Map();
       if (Array.isArray(view.bodies)) {
         for (const b of view.bodies) {
           if (b && typeof b === 'object') {
@@ -1830,7 +1840,7 @@
         }
       }
       for (let i = fieldFx.burns.length - 1; i >= 0; i--) if (fieldFx.burns[i].age >= BURN_LIFE) fieldFx.burns.splice(i, 1);
-      for (const list of [fieldFx.ripples, fieldFx.pings, fieldFx.contactMarks, fieldFx.guardFlexes]) {
+      for (const list of [fieldFx.ripples, fieldFx.pings, fieldFx.contactMarks, fieldFx.guardFlexes, fieldFx.launchNicks, fieldFx.ubuRecoils, fieldFx.wallSmudges, fieldFx.tapeCatches]) {
         if (!list) continue;
         for (let i = list.length - 1; i >= 0; i--) if ((list[i].life -= dt) <= 0) list.splice(i, 1);
       }
@@ -2417,6 +2427,39 @@
           drawIceLayer(fx.iceCache, fx, scale);
         }
       }
+      if (fx.launchNicks?.length && !isReducedMotion()) {
+        inRink(() => {
+          ctx.save();
+          ctx.lineCap = 'round';
+          for (const nk of fx.launchNicks) {
+            const prog = 1 - Math.max(0, nk.life / nk.duration);
+            const fade = (1 - prog) ** 1.35;
+            if (fade <= 0.02) continue;
+            const splay = 0.44 + 0.14 * nk.heavy;
+            const backBase = nk.angle + Math.PI;
+            const nickLen = (8.5 + 5.5 * nk.strength + 3.2 * nk.heavy) * (0.7 + 0.3 * Math.min(1, prog / 0.12));
+            const heelOff = (nk.radius || 25) * 0.62;
+            const latOff = (nk.radius || 25) * (0.34 + 0.08 * nk.heavy);
+            const perp = nk.angle + Math.PI * 0.5;
+            for (const side of [-1, 1]) {
+              const bx = nk.x + Math.cos(backBase) * heelOff + Math.cos(perp) * (side * latOff);
+              const by = nk.y + Math.sin(backBase) * heelOff + Math.sin(perp) * (side * latOff);
+              const bladeAng = backBase + side * splay;
+              const ex = bx + Math.cos(bladeAng) * nickLen;
+              const ey = by + Math.sin(bladeAng) * nickLen;
+              ctx.strokeStyle = 'rgba(0, 0, 0, 1)';
+              ctx.lineWidth = (2.1 + 1.8 * nk.heavy) * (0.55 + 0.45 * fade);
+              ctx.globalAlpha = (0.26 + 0.18 * nk.heavy) * fade;
+              ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
+              ctx.strokeStyle = '#e8f6ff';
+              ctx.lineWidth = (1.1 + 0.7 * nk.heavy) * fade;
+              ctx.globalAlpha = (0.42 + 0.22 * nk.strength) * fade;
+              ctx.beginPath(); ctx.moveTo(bx + 0.6, by + 0.6); ctx.lineTo(ex + 0.6, ey + 0.6); ctx.stroke();
+            }
+          }
+          ctx.restore();
+        });
+      }
       if (getPhase() === 'plan' && pulseMode() && !P.settled(view.bodies)) {
         inRink(() => { ctx.fillStyle = 'rgba(120,170,255,.07)'; ctx.fillRect(60, 60, 880, 480); });
       }
@@ -2552,6 +2595,45 @@
 
     function drawFieldOver(colors) {
       const { border, text, home, away } = colors, fx = getEffects(), view = getView(), ctx = view.ctx;
+      if (fx.wallSmudges?.length && !isReducedMotion()) {
+        ctx.save();
+        ctx.lineCap = 'round';
+        for (const sm of fx.wallSmudges) {
+          const prog = 1 - Math.max(0, sm.life / sm.duration);
+          const fade = (1 - prog) ** 1.25;
+          if (fade <= 0.02) continue;
+          const tx = -sm.ny, ty = sm.nx;
+          const col = sm.team === 0 ? home : sm.team === 1 ? away : '#ffd76b';
+          if (sm.scuff > 0.08) {
+            const half = (11 + 14 * sm.scuff) * (0.65 + 0.35 * prog);
+            const wx = sm.x - sm.nx * 1.5, wy = sm.y - sm.ny * 1.5;
+            ctx.strokeStyle = '#14161a';
+            ctx.lineWidth = (4.2 + 2.4 * sm.scuff) * fade;
+            ctx.globalAlpha = 0.62 * fade;
+            ctx.beginPath(); ctx.moveTo(wx - tx * half, wy - ty * half); ctx.lineTo(wx + tx * half, wy + ty * half); ctx.stroke();
+            ctx.strokeStyle = '#dceeff';
+            ctx.lineWidth = 2.0 * fade;
+            ctx.globalAlpha = 0.75 * fade;
+            ctx.beginPath(); ctx.moveTo(wx - tx * half * 0.65, wy - ty * half * 0.65); ctx.lineTo(wx + tx * half * 0.65, wy + ty * half * 0.65); ctx.stroke();
+          } else {
+            const dir = Math.sign(sm.bite) || 1, mag = Math.min(1, Math.abs(sm.bite));
+            const len = (14 + 22 * mag) * (0.55 + 0.45 * Math.min(1, prog / 0.35));
+            const x0 = sm.x - sm.nx * 1.2 - tx * dir * 4;
+            const y0 = sm.y - sm.ny * 1.2 - ty * dir * 4;
+            const x1 = x0 + tx * dir * len - sm.nx * 2.2;
+            const y1 = y0 + ty * dir * len - sm.ny * 2.2;
+            ctx.strokeStyle = col;
+            ctx.lineWidth = (3.6 + 2.2 * mag) * fade;
+            ctx.globalAlpha = 0.85 * fade;
+            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.8 * fade;
+            ctx.globalAlpha = 0.92 * fade;
+            ctx.beginPath(); ctx.moveTo(x0 + tx * dir * len * 0.22, y0 + ty * dir * len * 0.22); ctx.lineTo(x1, y1); ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
       for (const r of fx.ripples) {
         const p = 1 - r.life / r.duration;
         const baseScale = r.goalPocket ? 13 : (r.net ? 9.5 : 8);
@@ -3580,19 +3662,65 @@
     function aimCoilPose(b, plan, phase, reduced = false) {
       if (phase !== 'plan' || !b || !plan || plan.guard || b.carded || b.stunned) return null;
       const p = Math.max(0, Math.min(1, Number(plan.power) || 0));
-      if (p <= 0.015) return null;
+      const spin = Math.max(-1, Math.min(1, Number(plan.spin) || 0));
+      if (p <= 0.015 && Math.abs(spin) <= 0.02) return null;
       const rScale = Math.min(1.18, Math.max(0.78, (b.radius || 25) / 25));
-      const dist = (1.5 + 3.1 * (p ** 1.12)) * rScale;
+      const dist = p > 0.015 ? (1.5 + 3.1 * (p ** 1.12)) * rScale : 0;
       const ang = plan.angle || 0;
-      const comp = reduced ? 0 : 0.048 * (p ** 1.15);
+      const comp = reduced || p <= 0.015 ? 0 : 0.048 * (p ** 1.15);
       return {
         dx: -Math.cos(ang) * dist,
         dy: -Math.sin(ang) * dist,
         angle: ang,
         power: p,
+        spin,
+        twist: reduced ? 0 : spin * 0.28,
         scaleX: 1 - comp,
         scaleY: 1 + comp * 0.68
       };
+    }
+
+    function ubuBodyMotion(fx, index, b, reduced = false) {
+      if (reduced || !fx?.ubuRecoils?.length) return null;
+      let dx = 0, dy = 0, axis = 0, scaleX = 1, scaleY = 1, braceAngle = null, braceStrength = 0, sweetStrength = 0;
+      for (let k = fx.ubuRecoils.length - 1; k >= 0; k--) {
+        const rc = fx.ubuRecoils[k];
+        if (rc.body !== b && !(index >= 0 && rc.index === index)) continue;
+        const prog = 1 - Math.max(0, rc.life / rc.duration);
+        const env = Math.sin(Math.min(1, prog / 0.30) * Math.PI * 0.5) * ((1 - prog) ** 1.3);
+        if (rc.kind === 'push') {
+          const snap = (1.6 + 2.2 * rc.strength) * env;
+          dx += Math.cos(rc.angle) * snap;
+          dy += Math.sin(rc.angle) * snap;
+          axis = rc.angle;
+          const stretch = 0.055 * rc.strength * env;
+          scaleX *= 1 + stretch;
+          scaleY *= 1 - stretch * 0.62;
+        } else if (rc.kind === 'sweet') {
+          const follow = (1.5 + 1.8 * rc.strength) * env;
+          dx += Math.cos(rc.angle) * follow;
+          dy += Math.sin(rc.angle) * follow;
+          axis = rc.angle;
+          const settle = 0.038 * rc.strength * env;
+          scaleX *= 1 - settle;
+          scaleY *= 1 + settle * 0.65;
+          sweetStrength = Math.max(sweetStrength, rc.strength * ((1 - prog) ** 1.15));
+        } else if (rc.kind === 'bump') {
+          const shove = (0.4 + 3.8 * rc.strength) * env;
+          dx += Math.cos(rc.angle) * shove;
+          dy += Math.sin(rc.angle) * shove;
+          axis = rc.angle;
+          const sq = 0.095 * rc.strength * env;
+          scaleX *= 1 - sq;
+          scaleY *= 1 + sq * 0.78;
+          if (rc.stonewall) {
+            braceAngle = rc.angle + Math.PI;
+            braceStrength = Math.max(braceStrength, (1 - prog) ** 1.15);
+          }
+        }
+      }
+      if (!dx && !dy && scaleX === 1 && scaleY === 1 && !braceStrength && !sweetStrength) return null;
+      return { dx, dy, axis, scaleX, scaleY, braceAngle, braceStrength, sweetStrength };
     }
 
     function guardBadgeMotion(fx, index, b, phase, nowMs) {
@@ -3710,11 +3838,71 @@
             });
           }
         }
+        return;
+      }
+      if (kind === 'push') {
+        const s = Math.max(0.18, Math.min(1, strength || 0.65));
+        const pushAng = Math.atan2((postVy || 0) - (preVy || 0), (postVx || 0) - (preVx || 0));
+        const massVal = body.mass || 3;
+        const heavy = Math.max(0, Math.min(1, (massVal / 3 - 0.80) / 0.82));
+        audio?.playLaunchPush?.({
+          power: s,
+          mass: massVal,
+          radius: body.radius || 25,
+          volume: Math.min(0.84, 0.24 + 0.48 * s),
+          x: body.x,
+          y: body.y
+        });
+        if (!reduced && fx) {
+          if (fx.launchNicks && fx.launchNicks.length < 24) {
+            fx.launchNicks.push({
+              x: body.x,
+              y: body.y,
+              radius: body.radius || 25,
+              angle: pushAng,
+              strength: s,
+              heavy,
+              team: body.team,
+              life: 1.35,
+              duration: 1.35
+            });
+          }
+          if (fx.ubuRecoils && fx.ubuRecoils.length < 24) {
+            fx.ubuRecoils.push({
+              body,
+              index,
+              kind: 'push',
+              angle: pushAng,
+              strength: s,
+              life: 0.11,
+              duration: 0.11
+            });
+          }
+          const backAng = pushAng + Math.PI;
+          const puffCount = Math.round(3 + 5 * s + 2 * heavy);
+          for (let k = 0; k < puffCount && fx.particles.length < 400; k++) {
+            const side = k % 2 === 0 ? 1 : -1;
+            const ang = backAng + side * (0.34 + 0.12 * heavy) + (Math.random() - 0.5) * 0.24;
+            const spd = 55 + 95 * s + Math.random() * 55;
+            const life = 0.11 + Math.random() * 0.08;
+            const sx = body.x + Math.cos(backAng) * ((body.radius || 25) * 0.72);
+            const sy = body.y + Math.sin(backAng) * ((body.radius || 25) * 0.72);
+            fx.particles.push({
+              x: sx, y: sy, px: sx - Math.cos(ang) * 4, py: sy - Math.sin(ang) * 4,
+              vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+              team: -1, color: k % 3 === 0 ? '#ffffff' : '#d6eeff',
+              life, duration: life,
+              materialShape: k < 3 ? 'streak' : undefined,
+              size: 1.6 + 0.9 * s + 0.6 * heavy,
+              angle: ang, snap: true, overlay: true
+            });
+          }
+        }
       }
     }
 
     function handleCollision(contact) {
-      const { a, b, speed = 0, impulse = 0, plow = false, iron = false, snapped = false, spinStruck = false, struck = false, tangentImpulse = 0, passerSlot = -1, graze: rawGraze = 0, tangentSign: rawTangentSign = 1 } = contact;
+      const { a, b, speed = 0, impulse = 0, plow = false, iron = false, snapped = false, spinStruck = false, struck = false, tangentImpulse = 0, passerSlot = -1, graze: rawGraze = 0, tangentSign: rawTangentSign = 1, pokeFrac: rawPokeFrac = 0, knockA: rawKnockA = 0, knockB: rawKnockB = 0 } = contact;
       if (iron) {
         if (a?.guarding) a.ironGuard = true;
         if (b?.guarding) b.ironGuard = true;
@@ -4022,7 +4210,14 @@
         const volume = Math.min(1.0, 0.15 + 0.85 * (norm ** 0.8));
         const faceAngle = Math.atan2(player.y - ball.y, player.x - ball.x);
         const bodyCoreDist = (player.radius || 25) + (ball.radius || 18);
-        const isPoke = distance > bodyCoreDist + 1.2 && (player.reach || player.radius) > (player.radius || 25) + 1.2;
+        const reachExtra = Math.max(0, (player.reach || player.radius) - (player.radius || 25));
+        const reachSpanWeight = reachExtra > 0.8 ? Math.min(1, reachExtra / 9) : 0;
+        const estPokeFrac = distance > bodyCoreDist + 0.8 && reachExtra > 0.8
+          ? Math.min(1, (distance - bodyCoreDist) / Math.max(1, reachExtra))
+          : 0;
+        const pokeFrac = Math.max(0, Math.min(1, (Number(rawPokeFrac) || estPokeFrac) * reachSpanWeight));
+        const isPoke = pokeFrac > 0.14;
+        const isTapeCatch = passerSlot >= 0 && !isSnap && !iron && !plow && !player.guarding;
 
         if (!isReducedMotion()) {
           if (fx.contactMarks && fx.contactMarks.length < 28) {
@@ -4037,9 +4232,45 @@
               graze,
               tangentSign,
               poke: isPoke,
+              pokeFrac,
+              tape: isTapeCatch,
               team: player.team,
               life: markDur,
               duration: markDur
+            });
+          }
+          // System #3: Flush body-core sweet-spot follow-through vs. Reach-only toe-poke flex
+          if (!player.guarding && !isTapeCatch && norm >= 0.16 && !isPoke && graze < 0.44 && fx.ubuRecoils && fx.ubuRecoils.length < 24) {
+            const pIdx = view?.bodies ? view.bodies.indexOf(player) : -1;
+            fx.ubuRecoils.push({
+              body: player,
+              index: pIdx,
+              kind: 'sweet',
+              angle: faceAngle + Math.PI,
+              strength: (1 - graze) * (0.42 + 0.58 * norm),
+              life: 0.10,
+              duration: 0.10
+            });
+          }
+          // System #5: Warm teammate "Tape-to-Tape" twin-ring catch & pass-thread shimmer
+          if (isTapeCatch && fx.tapeCatches && fx.tapeCatches.length < 16) {
+            const passer = view?.bodies?.slice(0, 6).find((o, idx) =>
+              o && o !== player && o.team === player.team && ((o.slot !== undefined ? o.slot : (idx % 3)) === passerSlot)
+            ) || null;
+            fx.tapeCatches.push({
+              ball,
+              receiver: player,
+              passer,
+              x: ball.x,
+              y: ball.y,
+              px: passer ? passer.x : null,
+              py: passer ? passer.y : null,
+              rx: player.x,
+              ry: player.y,
+              contactAngle: faceAngle + Math.PI,
+              team: player.team,
+              life: 0.28,
+              duration: 0.28
             });
           }
           if (graze < 0.50 && !P.ballOnFire?.(ball)) {
@@ -4114,6 +4345,8 @@
               snap: isSnap,
               graze,
               poke: isPoke,
+              pokeFrac,
+              tape: isTapeCatch,
               x, y
             });
           }
@@ -4121,6 +4354,34 @@
       } else if (a.team !== -1 && b.team !== -1) {
         const norm = Math.min(1.0, Math.max(0.0, (effSpeed - 40) / 600));
         const volume = Math.min(1.0, 0.12 + 0.75 * (norm ** 0.8));
+        const massA = a.mass || 3, massB = b.mass || 3;
+        const kA = Number(rawKnockA) > 0 ? Number(rawKnockA) : effSpeed * (massB / Math.max(1, massA + massB));
+        const kB = Number(rawKnockB) > 0 ? Number(rawKnockB) : effSpeed * (massA / Math.max(1, massA + massB));
+        const maxK = Math.max(kA, kB, 1), minK = Math.min(kA, kB);
+        const asym = Math.max(0, Math.min(1, (maxK - minK) / maxK));
+
+        // System #4: Asymmetric Strength/Stability body squash & recoil on ordinary shoulder bumps
+        if (!isReducedMotion() && speed >= 42 && fx.ubuRecoils && fx.ubuRecoils.length < 24) {
+          const idxA = view?.bodies ? view.bodies.indexOf(a) : -1;
+          const idxB = view?.bodies ? view.bodies.indexOf(b) : -1;
+          const strA = Math.min(1, Math.max(0.04, kA / 440));
+          const strB = Math.min(1, Math.max(0.04, kB / 440));
+          fx.ubuRecoils.push({
+            body: a, index: idxA, kind: 'bump',
+            angle: normalAngle + Math.PI,
+            strength: strA,
+            stonewall: asym > 0.32 && kA < kB,
+            life: 0.14, duration: 0.14
+          });
+          fx.ubuRecoils.push({
+            body: b, index: idxB, kind: 'bump',
+            angle: normalAngle,
+            strength: strB,
+            stonewall: asym > 0.32 && kB < kA,
+            life: 0.14, duration: 0.14
+          });
+        }
+
         if (isHipClip && gameAudio()?.playSpinStrike && (now - (fx.lastHipClipSound ?? -Infinity) > 65)) {
           fx.lastHipClipSound = now;
           gameAudio().playSpinStrike({
@@ -4130,17 +4391,31 @@
             x, y
           });
         }
-        const primary = (Math.hypot(a.vx, a.vy) * a.mass >= Math.hypot(b.vx, b.vy) * b.mass) ? a : b;
+        const bumpMap = (fx.lastBodyBumpTimes ||= new WeakMap());
+        const primary = (Math.hypot(a.vx, a.vy) * massA >= Math.hypot(b.vx, b.vy) * massB) ? a : b;
+        if (speed >= 42 && gameAudio()?.playBodyBump && (now - (bumpMap.get(primary) ?? -Infinity) > 55)) {
+          bumpMap.set(primary, now);
+          gameAudio().playBodyBump({
+            speed: effSpeed,
+            massA,
+            massB,
+            asymmetry: asym,
+            volume: Math.min(0.92, 0.20 + 0.68 * (norm ** 0.85)),
+            x, y
+          });
+        }
         if (primary.voice && gameAudio()) {
           if (!primary._lastHitSound || (now - primary._lastHitSound) > 65) {
             primary._lastHitSound = now;
-            gameAudio().playCollision(primary.voice, { volume, x, y });
+            const heavyPeak = Math.max(massA, massB) / 3;
+            const chimeDuck = heavyPeak > 1.25 ? Math.max(0.58, 1 - (heavyPeak - 1.25) * 0.38) : 1;
+            gameAudio().playCollision(primary.voice, { volume: volume * chimeDuck, x, y });
           }
         }
       }
     }
 
-    function handleWall(body, velocity, wallType, nx, ny, rimmed = false) {
+    function handleWall(body, velocity, wallType, nx, ny, rimmed = false, spinBite = 0, counterScuff = 0) {
       if (velocity < 20 && !rimmed) return;
       const fx = getEffects(), view = getView();
       const cx = body.x + nx * body.radius, cy = body.y + ny * body.radius;
@@ -4255,6 +4530,53 @@
           }
         }
       }
+      if (wallType === 'wall' && !isReducedMotion()) {
+        const absBite = Math.abs(spinBite || 0);
+        if ((absBite > 0.12 || counterScuff > 0.12) && fx.wallSmudges && fx.wallSmudges.length < 20) {
+          const smDur = counterScuff > 0.12 ? 0.32 : 0.28;
+          fx.wallSmudges.push({
+            x: cx, y: cy, nx, ny,
+            bite: spinBite || 0,
+            scuff: counterScuff || 0,
+            team: body.team,
+            life: smDur,
+            duration: smDur
+          });
+          const tx = -ny, ty = nx;
+          if (counterScuff > 0.12) {
+            const count = Math.round(5 + 7 * counterScuff);
+            const inAng = Math.atan2(-ny, -nx);
+            for (let k = 0; k < count && fx.particles.length < 450; k++) {
+              const ang = inAng + (Math.random() - 0.5) * 1.15;
+              const spd = 45 + 95 * counterScuff + Math.random() * 55;
+              const life = 0.14 + Math.random() * 0.11;
+              fx.particles.push({
+                x: cx, y: cy, px: cx, py: cy,
+                vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+                team: -1, color: k % 2 === 0 ? '#ffffff' : '#cfe8ff',
+                life, duration: life, size: 1.9 + 1.1 * counterScuff, snap: true, overlay: true
+              });
+            }
+          } else if (absBite > 0.12) {
+            const kickDir = Math.sign(spinBite) || 1;
+            const kickAng = Math.atan2(ty * kickDir - ny * 0.28, tx * kickDir - nx * 0.28);
+            const count = Math.round(4 + 7 * absBite);
+            for (let k = 0; k < count && fx.particles.length < 450; k++) {
+              const ang = kickAng + (Math.random() - 0.5) * 0.36;
+              const spd = 85 + 150 * absBite + Math.random() * 75;
+              const life = 0.12 + Math.random() * 0.10;
+              fx.particles.push({
+                x: cx, y: cy, px: cx - Math.cos(ang) * 5, py: cy - Math.sin(ang) * 5,
+                vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+                team: k % 3 === 0 ? body.team : -1,
+                color: k % 3 === 0 ? null : (k % 2 === 0 ? '#ffffff' : '#ffe6a3'),
+                life, duration: life,
+                materialShape: 'streak', size: 1.9 + 1.4 * absBite, angle: ang, snap: true, overlay: true
+              });
+            }
+          }
+        }
+      }
       const audio = gameAudio();
       if (!audio) return;
       if (body.team === -1 && P.ballOnFire?.(body) && velocity >= 90 && (now - (fx.lastFireHitSound ?? -Infinity) > 55)) {
@@ -4266,7 +4588,13 @@
       } else if (wallType === 'net') {
         audio.playGoalHit('net', { volume, x: cx, y: cy });
       } else {
-        audio.playWallHit({ volume: Math.min(0.85, 0.1 + 0.68 * (norm ** 1.05)), speed: velocity, x: cx, y: cy });
+        audio.playWallHit({
+          volume: Math.min(0.85, 0.1 + 0.68 * (norm ** 1.05)),
+          speed: velocity,
+          spinBite,
+          scuff: counterScuff,
+          x: cx, y: cy
+        });
       }
     }
 
@@ -4779,6 +5107,30 @@
         }
         gpu.setClip(0);
       }
+      if (fx.launchNicks?.length && !reduced) {
+        gpu.setClip(1);
+        for (const nk of fx.launchNicks) {
+          const prog = 1 - Math.max(0, nk.life / nk.duration);
+          const fade = (1 - prog) ** 1.35;
+          if (fade <= 0.02) continue;
+          const splay = 0.44 + 0.14 * nk.heavy;
+          const backBase = nk.angle + Math.PI;
+          const nickLen = (8.5 + 5.5 * nk.strength + 3.2 * nk.heavy) * (0.7 + 0.3 * Math.min(1, prog / 0.12));
+          const heelOff = (nk.radius || 25) * 0.62;
+          const latOff = (nk.radius || 25) * (0.34 + 0.08 * nk.heavy);
+          const perp = nk.angle + Math.PI * 0.5;
+          for (const side of [-1, 1]) {
+            const bx = nk.x + Math.cos(backBase) * heelOff + Math.cos(perp) * (side * latOff);
+            const by = nk.y + Math.sin(backBase) * heelOff + Math.sin(perp) * (side * latOff);
+            const bladeAng = backBase + side * splay;
+            const ex = bx + Math.cos(bladeAng) * nickLen;
+            const ey = by + Math.sin(bladeAng) * nickLen;
+            gpu.strokeLine(bx, by, ex, ey, '#000000', (2.1 + 1.8 * nk.heavy) * (0.55 + 0.45 * fade), (0.26 + 0.18 * nk.heavy) * fade, true);
+            gpu.strokeLine(bx + 0.6, by + 0.6, ex + 0.6, ey + 0.6, '#e8f6ff', (1.1 + 0.7 * nk.heavy) * fade, (0.42 + 0.22 * nk.strength) * fade, true);
+          }
+        }
+        gpu.setClip(0);
+      }
       if (phase === 'plan' && pulseMode() && !P.settled(view.bodies)) {
         gpu.setClip(1);
         gpu.fillRect(60, 60, 880, 480, 'rgba(120,170,255,0.07)', 1);
@@ -5277,12 +5629,24 @@
 
         const teamCol = i < 3 ? home : away;
         const coil = aimCoilPose(b, fieldPlans?.[i], phase, reduced);
+        const bodyMot = ubuBodyMotion(fx, i, b, reduced);
         if (!b.carded) {
           gpu.strokeCircle(b.x, b.y, reachR + 2, teamCol, 4, 1);
-          if (coil) {
+          if (coil && coil.power > 0.015) {
             const backAng = coil.angle + Math.PI;
             const halfSpan = 0.34 + 0.44 * coil.power;
             gpu.strokeArc(b.x, b.y, Math.max(8, b.radius - 1.2), backAng - halfSpan, backAng + halfSpan, '#ffffff', 2.2, 0.18 + 0.36 * coil.power, true);
+          }
+          if (coil && Math.abs(coil.spin) > 0.04) {
+            const sDir = Math.sign(coil.spin), sMag = Math.abs(coil.spin);
+            const startA = (coil.angle || 0) - sDir * 0.85;
+            gpu.drawTaperedSpinArc(b.x + (coil.dx || 0), b.y + (coil.dy || 0), Math.max(9, b.radius - 2.2), startA, sDir * (0.85 + 1.15 * sMag), 1.6 + 1.3 * sMag, '#ffffff', 0.26 + 0.48 * sMag);
+          }
+          if (bodyMot?.braceStrength > 0.08 && bodyMot.braceAngle !== null) {
+            gpu.strokeArc(b.x, b.y, reachR + 2.8, bodyMot.braceAngle - 0.62, bodyMot.braceAngle + 0.62, '#ffffff', 3.0 * bodyMot.braceStrength, 0.78 * bodyMot.braceStrength, true);
+          }
+          if (bodyMot?.sweetStrength > 0.08) {
+            gpu.strokeCircle(b.x, b.y, Math.max(7, b.radius - 1.5), '#ffffff', 2.4 * bodyMot.sweetStrength, 0.72 * bodyMot.sweetStrength);
           }
         }
 
@@ -5292,20 +5656,25 @@
           gpu.strokeCircle(b.x, b.y, b.radius + 15, goalAccent, 2, 1);
         }
 
-        // Render rasterized character sprite inside the GPU scene (coiled back inside fixed ring when aimed in plan)
+        // Render rasterized character sprite inside the GPU scene (coiled/wound in plan; recoiling/following-through in play)
         if (!bench?.flags.noDomSkaters) {
           const art = resolveSkaterArt(i);
           const opacity = b.carded ? 0.3 : b.superActive === 'ghost' ? 0.45 : 1;
           const stunAmt = (b.stunned || b.stunnedNext) && !b.carded ? 1 : 0;
-          const rot = b.rotation + (view.portrait ? Math.PI / 2 : 0);
+          const rot = b.rotation + (view.portrait ? Math.PI / 2 : 0) + (coil ? coil.twist : 0);
           const sz = b.radius * 2;
-          const cx = b.x + (coil ? coil.dx : 0), cy = b.y + (coil ? coil.dy : 0);
+          const cx = b.x + (coil ? coil.dx : 0) + (bodyMot ? bodyMot.dx : 0);
+          const cy = b.y + (coil ? coil.dy : 0) + (bodyMot ? bodyMot.dy : 0);
           gpu.pushTransform();
           gpu.translate(cx, cy);
           if (coil && (coil.scaleX !== 1 || coil.scaleY !== 1)) {
             gpu.rotate(coil.angle);
             gpu.scale(coil.scaleX, coil.scaleY);
             gpu.rotate(-coil.angle);
+          } else if (bodyMot && (bodyMot.scaleX !== 1 || bodyMot.scaleY !== 1)) {
+            gpu.rotate(bodyMot.axis);
+            gpu.scale(bodyMot.scaleX, bodyMot.scaleY);
+            gpu.rotate(-bodyMot.axis);
           }
           if (art) {
             gpu.rotate(rot);
@@ -5680,7 +6049,31 @@
         gpu.endEmissive(0.5);
       }
 
-      // 13. Pass 3: Post-Refraction Field Overlays (ripples, pings, goalSweep, Pulse bar, badges, fouls, popups, fireworks)
+      // 13. Pass 3: Post-Refraction Field Overlays (wallSmudges, ripples, pings, goalSweep, Pulse bar, badges, fouls, popups, fireworks)
+      if (fx.wallSmudges?.length && !reduced) {
+        for (const sm of fx.wallSmudges) {
+          const prog = 1 - Math.max(0, sm.life / sm.duration);
+          const fade = (1 - prog) ** 1.25;
+          if (fade <= 0.02) continue;
+          const tx = -sm.ny, ty = sm.nx;
+          const col = sm.team === 0 ? home : sm.team === 1 ? away : '#ffd76b';
+          if (sm.scuff > 0.08) {
+            const half = (11 + 14 * sm.scuff) * (0.65 + 0.35 * prog);
+            const wx = sm.x - sm.nx * 1.5, wy = sm.y - sm.ny * 1.5;
+            gpu.strokeLine(wx - tx * half, wy - ty * half, wx + tx * half, wy + ty * half, '#14161a', (4.2 + 2.4 * sm.scuff) * fade, 0.62 * fade, true);
+            gpu.strokeLine(wx - tx * half * 0.65, wy - ty * half * 0.65, wx + tx * half * 0.65, wy + ty * half * 0.65, '#dceeff', 2.0 * fade, 0.75 * fade, true);
+          } else {
+            const dir = Math.sign(sm.bite) || 1, mag = Math.min(1, Math.abs(sm.bite));
+            const len = (14 + 22 * mag) * (0.55 + 0.45 * Math.min(1, prog / 0.35));
+            const x0 = sm.x - sm.nx * 1.2 - tx * dir * 4;
+            const y0 = sm.y - sm.ny * 1.2 - ty * dir * 4;
+            const x1 = x0 + tx * dir * len - sm.nx * 2.2;
+            const y1 = y0 + ty * dir * len - sm.ny * 2.2;
+            gpu.strokeLine(x0, y0, x1, y1, col, (3.6 + 2.2 * mag) * fade, 0.85 * fade, true);
+            gpu.strokeLine(x0 + tx * dir * len * 0.22, y0 + ty * dir * len * 0.22, x1, y1, '#ffffff', 1.8 * fade, 0.92 * fade, true);
+          }
+        }
+      }
       for (const r of fx.ripples) {
         const p = 1 - r.life / r.duration;
         const baseScale = r.goalPocket ? 13 : (r.net ? 9.5 : 8);
@@ -5906,10 +6299,14 @@
           const bRef = m.ball || ball;
           const teamCol = m.team === 0 ? home : m.team === 1 ? away : '#ffffff';
           if (m.poke && m.player && fade > 0.12) {
+            const pf = Math.max(0.2, m.pokeFrac || 0.75);
+            const bow = (1.4 + 3.4 * pf) * Math.sin(Math.min(1, prog / 0.32) * Math.PI * 0.5) * fade;
             const pReach = Math.max(m.player.radius, m.player.reach || m.player.radius, 18) + 2;
-            const span = 0.42 * (0.65 + 0.35 * fade);
-            gpu.strokeArc(m.player.x, m.player.y, pReach, m.hitAngle - span, m.hitAngle + span, '#ffffff', 3.4 * fade, fade * 0.92, true);
-            gpu.strokeArc(m.player.x, m.player.y, pReach + 2.2, m.hitAngle - span * 0.75, m.hitAngle + span * 0.75, teamCol, 2.2 * fade, fade * 0.78, true);
+            const px = m.player.x + Math.cos(m.hitAngle) * bow;
+            const py = m.player.y + Math.sin(m.hitAngle) * bow;
+            const span = (0.36 + 0.18 * pf) * (0.65 + 0.35 * fade);
+            gpu.strokeArc(px, py, pReach, m.hitAngle - span, m.hitAngle + span, '#ffffff', (2.8 + 1.2 * pf) * fade, fade * 0.94, true);
+            gpu.strokeArc(px, py, pReach + 2.4, m.hitAngle - span * 0.75, m.hitAngle + span * 0.75, teamCol, 2.2 * fade, fade * 0.80, true);
           }
           if (!bRef) continue;
           if (m.graze < 0.45) {
@@ -5930,6 +6327,28 @@
             const sweep = sweepDir * (0.68 + 0.52 * m.graze) * (0.55 + 0.45 * fade);
             gpu.drawTaperedSpinArc(bRef.x, bRef.y, bRef.radius + 1.2, slideStart, sweep, (2.2 + 1.5 * m.strength) * fade, teamCol, fade * 0.90);
             gpu.drawTaperedSpinArc(bRef.x, bRef.y, bRef.radius + 0.8, slideStart + sweep * 0.18, sweep * 0.72, 1.5 * fade, '#ffffff', fade * 0.96);
+          }
+        }
+      }
+
+      if (fx.tapeCatches?.length && !reduced) {
+        for (const tc of fx.tapeCatches) {
+          const prog = 1 - Math.max(0, tc.life / tc.duration);
+          const fade = (1 - prog) ** 1.2;
+          if (fade <= 0.02) continue;
+          const bRef = tc.ball || ball;
+          const col = tc.team === 0 ? home : away;
+          const bx = bRef ? bRef.x : tc.x, by = bRef ? bRef.y : tc.y, br = bRef ? bRef.radius : 18;
+          const expand = 1 - (1 - prog) ** 2.2;
+          gpu.strokeCircle(bx, by, br + 2.5 + 11 * expand, col, 2.8 * fade, 0.88 * fade);
+          gpu.strokeCircle(bx, by, br + 6.5 + 16 * expand, '#ffffff', 1.7 * fade, 0.72 * fade);
+          if (tc.receiver) {
+            const rReach = Math.max(tc.receiver.radius, tc.receiver.reach || tc.receiver.radius, 18) + 2.5;
+            gpu.strokeArc(tc.receiver.x, tc.receiver.y, rReach, tc.contactAngle - 0.56, tc.contactAngle + 0.56, '#ffffff', 2.8 * fade, 0.85 * fade, true);
+          }
+          if (tc.px != null && tc.py != null && fade > 0.22) {
+            const pX = tc.passer ? tc.passer.x : tc.px, pY = tc.passer ? tc.passer.y : tc.py;
+            gpu.strokeLine(pX, pY, bx, by, col, 2.0 * fade, 0.36 * fade, true, 7, 7);
           }
         }
       }
@@ -6495,9 +6914,10 @@
         }
 
         const coil2D = aimCoilPose(b, fieldPlans?.[i], phase, isReducedMotion());
+        const bodyMot2D = ubuBodyMotion(fx, i, b, isReducedMotion());
         if (!b.carded) {
           circle(b.x, b.y, reachR + 2, i < 3 ? home : away, 4);
-          if (coil2D) {
+          if (coil2D && coil2D.power > 0.015) {
             const backAng = coil2D.angle + Math.PI, halfSpan = 0.34 + 0.44 * coil2D.power;
             view.ctx.save();
             view.ctx.beginPath();
@@ -6507,6 +6927,28 @@
             view.ctx.lineCap = 'round';
             view.ctx.globalAlpha = 0.18 + 0.36 * coil2D.power;
             view.ctx.stroke();
+            view.ctx.restore();
+          }
+          if (coil2D && Math.abs(coil2D.spin) > 0.04) {
+            const sDir = Math.sign(coil2D.spin), sMag = Math.abs(coil2D.spin);
+            const startA = (coil2D.angle || 0) - sDir * 0.85;
+            fillTaperedSpinArc(view.ctx, b.x + (coil2D.dx || 0), b.y + (coil2D.dy || 0), Math.max(9, b.radius - 2.2), startA, sDir * (0.85 + 1.15 * sMag), 1.6 + 1.3 * sMag, '#ffffff', 0.26 + 0.48 * sMag);
+          }
+          if (bodyMot2D?.braceStrength > 0.08 && bodyMot2D.braceAngle !== null) {
+            view.ctx.save();
+            view.ctx.beginPath();
+            view.ctx.arc(b.x, b.y, reachR + 2.8, bodyMot2D.braceAngle - 0.62, bodyMot2D.braceAngle + 0.62);
+            view.ctx.strokeStyle = '#ffffff';
+            view.ctx.lineWidth = 3.0 * bodyMot2D.braceStrength;
+            view.ctx.lineCap = 'round';
+            view.ctx.globalAlpha = 0.78 * bodyMot2D.braceStrength;
+            view.ctx.stroke();
+            view.ctx.restore();
+          }
+          if (bodyMot2D?.sweetStrength > 0.08) {
+            view.ctx.save();
+            view.ctx.globalAlpha = 0.72 * bodyMot2D.sweetStrength;
+            circle(b.x, b.y, Math.max(7, b.radius - 1.5), '#ffffff', 2.4 * bodyMot2D.sweetStrength);
             view.ctx.restore();
           }
         }
@@ -6625,13 +7067,16 @@
         const wPct = b.radius / 5 + '%';
         const opacity = b.carded ? '0.3' : b.superActive === 'ghost' ? '0.45' : '1';
         const filter = (b.stunned || b.stunnedNext) && !b.carded ? 'grayscale(0.8) brightness(0.7)' : '';
-        const rot = b.rotation + (view.portrait ? Math.PI / 2 : 0);
-        const cx2D = b.x + (coil2D ? coil2D.dx : 0), cy2D = b.y + (coil2D ? coil2D.dy : 0);
+        const rot = b.rotation + (view.portrait ? Math.PI / 2 : 0) + (coil2D ? coil2D.twist : 0);
+        const cx2D = b.x + (coil2D ? coil2D.dx : 0) + (bodyMot2D ? bodyMot2D.dx : 0);
+        const cy2D = b.y + (coil2D ? coil2D.dy : 0) + (bodyMot2D ? bodyMot2D.dy : 0);
         const transform = ubuWarped
           ? `translate(${cx2D / 1000 * renderWidth}px, ${cy2D / 600 * renderHeight}px) translate(-50%, -50%) rotate(${ubuWarpAngle}rad) scale(${ubuScaleX.toFixed(4)}, ${ubuScaleY.toFixed(4)}) rotate(${rot - ubuWarpAngle}rad)`
           : coil2D && (coil2D.scaleX !== 1 || coil2D.scaleY !== 1)
             ? `translate(${cx2D / 1000 * renderWidth}px, ${cy2D / 600 * renderHeight}px) translate(-50%, -50%) rotate(${coil2D.angle}rad) scale(${coil2D.scaleX.toFixed(4)}, ${coil2D.scaleY.toFixed(4)}) rotate(${rot - coil2D.angle}rad)`
-            : `translate(${cx2D / 1000 * renderWidth}px, ${cy2D / 600 * renderHeight}px) translate(-50%, -50%) rotate(${rot}rad)`;
+            : bodyMot2D && (bodyMot2D.scaleX !== 1 || bodyMot2D.scaleY !== 1)
+              ? `translate(${cx2D / 1000 * renderWidth}px, ${cy2D / 600 * renderHeight}px) translate(-50%, -50%) rotate(${bodyMot2D.axis}rad) scale(${bodyMot2D.scaleX.toFixed(4)}, ${bodyMot2D.scaleY.toFixed(4)}) rotate(${rot - bodyMot2D.axis}rad)`
+              : `translate(${cx2D / 1000 * renderWidth}px, ${cy2D / 600 * renderHeight}px) translate(-50%, -50%) rotate(${rot}rad)`;
 
         let prev = skaterStyleCache.get(skaters[i]);
         if (!prev) { prev = {}; skaterStyleCache.set(skaters[i], prev); }
@@ -6752,13 +7197,17 @@
               view.ctx.save();
               view.ctx.lineCap = 'round';
               if (m.poke && m.player && fade > 0.12) {
+                const pf = Math.max(0.2, m.pokeFrac || 0.75);
+                const bow = (1.4 + 3.4 * pf) * Math.sin(Math.min(1, prog / 0.32) * Math.PI * 0.5) * fade;
                 const pReach = Math.max(m.player.radius, m.player.reach || m.player.radius, 18) + 2;
-                const span = 0.42 * (0.65 + 0.35 * fade);
+                const px = m.player.x + Math.cos(m.hitAngle) * bow;
+                const py = m.player.y + Math.sin(m.hitAngle) * bow;
+                const span = (0.36 + 0.18 * pf) * (0.65 + 0.35 * fade);
                 view.ctx.beginPath();
-                view.ctx.arc(m.player.x, m.player.y, pReach, m.hitAngle - span, m.hitAngle + span);
+                view.ctx.arc(px, py, pReach, m.hitAngle - span, m.hitAngle + span);
                 view.ctx.strokeStyle = '#ffffff';
-                view.ctx.lineWidth = 3.2 * fade;
-                view.ctx.globalAlpha = fade * 0.92;
+                view.ctx.lineWidth = (2.8 + 1.2 * pf) * fade;
+                view.ctx.globalAlpha = fade * 0.94;
                 view.ctx.stroke();
               }
               if (m.graze < 0.45) {
@@ -6779,6 +7228,40 @@
                 view.ctx.lineWidth = (2.0 + 1.2 * m.strength) * fade;
                 view.ctx.globalAlpha = fade * 0.94;
                 view.ctx.stroke();
+              }
+              view.ctx.restore();
+            }
+          }
+          if (fx.tapeCatches?.length) {
+            for (const tc of fx.tapeCatches) {
+              const prog = 1 - Math.max(0, tc.life / tc.duration);
+              const fade = (1 - prog) ** 1.2;
+              if (fade <= 0.02) continue;
+              const bRef = tc.ball || ball;
+              const col = tc.team === 0 ? home : away;
+              const bx = bRef ? bRef.x : tc.x, by = bRef ? bRef.y : tc.y, br = bRef ? bRef.radius : 18;
+              const expand = 1 - (1 - prog) ** 2.2;
+              view.ctx.save();
+              view.ctx.lineCap = 'round';
+              view.ctx.globalAlpha = 0.88 * fade;
+              circle(bx, by, br + 2.5 + 11 * expand, col, 2.8 * fade);
+              view.ctx.globalAlpha = 0.72 * fade;
+              circle(bx, by, br + 6.5 + 16 * expand, '#ffffff', 1.7 * fade);
+              if (tc.receiver) {
+                const rReach = Math.max(tc.receiver.radius, tc.receiver.reach || tc.receiver.radius, 18) + 2.5;
+                view.ctx.beginPath();
+                view.ctx.arc(tc.receiver.x, tc.receiver.y, rReach, tc.contactAngle - 0.56, tc.contactAngle + 0.56);
+                view.ctx.strokeStyle = '#ffffff';
+                view.ctx.lineWidth = 2.8 * fade;
+                view.ctx.globalAlpha = 0.85 * fade;
+                view.ctx.stroke();
+              }
+              if (tc.px != null && tc.py != null && fade > 0.22) {
+                const pX = tc.passer ? tc.passer.x : tc.px, pY = tc.passer ? tc.passer.y : tc.py;
+                view.ctx.setLineDash([7, 7]);
+                view.ctx.globalAlpha = 0.36 * fade;
+                line(pX, pY, bx, by, col, 2.0 * fade);
+                view.ctx.setLineDash([]);
               }
               view.ctx.restore();
             }

@@ -71,41 +71,87 @@ function playBallHit(options = {}) {
   if (!ctx) return;
   const snap = Boolean(options.snap);
   const poke = Boolean(options.poke);
+  const pokeFrac = snap ? 0 : Math.max(0, Math.min(1, options.pokeFrac !== undefined ? (Number(options.pokeFrac) || 0) : (poke ? 0.85 : 0)));
+  const tape = Boolean(options.tape) && !snap;
   const graze = snap ? 0 : Math.max(0, Math.min(1, Number(options.graze) || 0));
   const square = Math.max(0, 1 - graze * 0.88);
   const skim = Math.max(0, (graze - 0.30) / 0.70);
-  const master = createMasterChain(ctx, null, snap ? 0.12 : 0.095);
+  const coreWeight = Math.max(0.38, 1 - 0.58 * pokeFrac);
+  const master = createMasterChain(ctx, null, snap ? 0.12 : (tape ? 0.105 : 0.098));
   const dest = routePanner(ctx, master, options);
   const now = ctx.currentTime;
   const volume = Math.max(0.04, Math.min(1.0, options.volume ?? 0.8));
 
-  // 1. Center-of-mass vulcanized puck body (strong on square hits, recedes on paper-thin grazes)
+  // Teammate Tape-to-Tape reception: warm, cupped composite-blade "thup" pocket catch
+  if (tape) {
+    const cup = ctx.createOscillator(), cupGain = ctx.createGain();
+    cup.type = 'triangle';
+    cup.frequency.setValueAtTime(184 + 22 * square, now);
+    cup.frequency.exponentialRampToValueAtTime(86, now + 0.054);
+    strike(cupGain, (0.28 + 0.36 * square) * coreWeight * volume, now, now + 0.060, 0.002);
+    cup.connect(cupGain); cupGain.connect(dest);
+    cup.start(now); cup.stop(now + 0.072);
+
+    const pocket = ctx.createOscillator(), pFilter = ctx.createBiquadFilter(), pGain = ctx.createGain();
+    pocket.type = 'triangle';
+    pocket.frequency.setValueAtTime(590, now);
+    pocket.frequency.exponentialRampToValueAtTime(285, now + 0.032);
+    pFilter.type = 'bandpass';
+    pFilter.Q.setValueAtTime(2.5, now);
+    pFilter.frequency.setValueAtTime(540, now);
+    strike(pGain, 0.28 * volume, now, now + 0.036, 0.0015);
+    pocket.connect(pFilter); pFilter.connect(pGain); pGain.connect(dest);
+    pocket.start(now); pocket.stop(now + 0.045);
+
+    noiseGrain(ctx, dest, now, 0.022, {
+      type: 'bandpass', freq: 1220, to: 640, q: 2.2,
+      level: 0.20 * volume
+    });
+    if (pokeFrac > 0.12) {
+      blip(ctx, dest, now, 0.017, 1380 + 360 * pokeFrac, 880, (0.09 + 0.10 * pokeFrac) * volume);
+    }
+    return;
+  }
+
+  // 1. Center-of-mass vulcanized puck body (strong on flush body-core hits, thins on toe-pokes & grazes)
   if (square > 0.08) {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'triangle';
-    const startHz = snap ? 285 : (228 + 24 * square);
+    const startHz = snap ? 285 : (224 + 26 * square + 42 * pokeFrac);
     osc.frequency.setValueAtTime(startHz, now);
-    osc.frequency.exponentialRampToValueAtTime(76 + 18 * (1 - square), now + 0.048);
-    strike(gain, (0.14 + 0.58 * square) * volume, now, now + (0.042 + 0.028 * square));
+    osc.frequency.exponentialRampToValueAtTime(76 + 18 * (1 - square) + 28 * pokeFrac, now + 0.048);
+    strike(gain, (0.14 + 0.58 * square) * coreWeight * volume, now, now + (0.042 + 0.028 * square * coreWeight));
     osc.connect(gain);
     gain.connect(dest);
     osc.start(now);
     osc.stop(now + 0.08);
 
+    // Flush body-core sweet-spot chest punch (absent when toe-poking out on the Reach ring)
+    if (!snap && pokeFrac < 0.12 && square > 0.58) {
+      const sweet = (1 - pokeFrac / 0.12) * ((square - 0.58) / 0.42);
+      const punch = ctx.createOscillator(), punchGain = ctx.createGain();
+      punch.type = 'sine';
+      punch.frequency.setValueAtTime(146, now);
+      punch.frequency.exponentialRampToValueAtTime(62, now + 0.046);
+      strike(punchGain, 0.28 * sweet * volume, now, now + 0.052, 0.0012);
+      punch.connect(punchGain); punchGain.connect(dest);
+      punch.start(now); punch.stop(now + 0.062);
+    }
+
     // Dry woody/stick-face tap attack transient on square contacts
     const tap = ctx.createOscillator(), tapGain = ctx.createGain();
     tap.type = 'sine';
-    tap.frequency.setValueAtTime(940 + 180 * square, now);
-    tap.frequency.exponentialRampToValueAtTime(215, now + 0.012);
-    strike(tapGain, 0.34 * square * volume, now, now + 0.015);
+    tap.frequency.setValueAtTime(940 + 180 * square + 220 * pokeFrac, now);
+    tap.frequency.exponentialRampToValueAtTime(215 + 90 * pokeFrac, now + 0.012);
+    strike(tapGain, 0.34 * square * (0.72 + 0.28 * coreWeight) * volume, now, now + 0.015);
     tap.connect(tapGain);
     tapGain.connect(dest);
     tap.start(now);
     tap.stop(now + 0.022);
 
     noiseGrain(ctx, dest, now, 0.015, {
-      freq: 1580, to: 660, q: 1.9,
+      freq: 1580 + 380 * pokeFrac, to: 660 + 240 * pokeFrac, q: 1.9,
       level: 0.22 * square * volume
     });
   }
@@ -135,9 +181,16 @@ function playBallHit(options = {}) {
     });
   }
 
-  // 3. Crisp extended-Reach blade-tip click when poke-checking outside body radius
-  if (poke && !snap) {
-    blip(ctx, dest, now, 0.018, 1560, 960, 0.16 * volume);
+  // 3. Progressive outstretched Reach toe-poke click (scales smoothly in pitch & brightness with pokeFrac)
+  if ((poke || pokeFrac > 0.08) && !snap) {
+    const pf = Math.max(0.25, pokeFrac || 0.85);
+    blip(ctx, dest, now, 0.018, 1420 + 480 * pf, 880 + 240 * pf, (0.10 + 0.14 * pf) * volume);
+    if (pf > 0.45) {
+      noiseGrain(ctx, dest, now, 0.011, {
+        type: 'bandpass', freq: 2950 + 650 * pf, to: 1850, q: 3.0,
+        level: 0.14 * pf * volume
+      });
+    }
   }
 
   if (snap) {
