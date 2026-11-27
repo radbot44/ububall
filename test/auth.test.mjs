@@ -39,6 +39,21 @@ test('Discord login validates state, exchanges credentials server-side and seals
   assert.equal(await auth.session(new Request(env.ORIGIN, { headers: { Cookie: forged } }), env), null);
   assert.equal(await auth.session(request, { ...env, SESSION_SECRET: Buffer.alloc(32, 8).toString('base64url') }), null);
 });
+test('OAuth callback stays on the initiating configured hostname', async () => {
+  const dual = { ...env, LEGACY_ORIGIN: 'https://legacy.example' };
+  const start = await auth.login(new Request(dual.LEGACY_ORIGIN + '/auth/discord?return=/collection'), dual);
+  const state = new URL(start.headers.get('Location')).searchParams.get('state');
+  const headers = { Cookie: start.headers.get('Set-Cookie').split(';')[0] };
+  const finish = site => new Request(site + '/auth/callback?code=test&state=' + state, { headers });
+  assert.equal((await auth.callback(finish(dual.ORIGIN), dual, () => assert.fail('must not exchange'))).status, 400);
+  const response = await auth.callback(finish(dual.LEGACY_ORIGIN), dual, async (url, options) => {
+    if (!url.endsWith('/token')) return Response.json({ id: '123456789012345678' });
+    assert.equal(options.body.get('redirect_uri'), dual.LEGACY_ORIGIN + '/auth/callback');
+    return Response.json({ access_token: 'temporary', token_type: 'Bearer' });
+  });
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get('Location'), dual.LEGACY_ORIGIN + '/collection');
+});
 test('invalid OAuth state, oversized codes, placeholder secrets and invalid Discord identities never create a session', async () => {
   let calls = 0;
   const { stateCookie, state } = await authorize();

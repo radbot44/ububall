@@ -9,14 +9,14 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
   const keys = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
   const privateKey = await crypto.subtle.exportKey('jwk', keys.privateKey);
   const env = {
-    ORIGIN: 'http://127.0.0.1', DISCORD_CLIENT_ID: '123', DISCORD_CLIENT_SECRET: 'test-only', DISCORD_ACTIVITY_BOT_TOKEN: 'test-bot',
+    ORIGIN: 'http://127.0.0.1', LEGACY_ORIGIN: 'https://localhost:8443', DISCORD_CLIENT_ID: '123', DISCORD_CLIENT_SECRET: 'test-only', DISCORD_ACTIVITY_BOT_TOKEN: 'test-bot',
     SESSION_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url'),
     MINT_ID: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url'), MINT_KEY_ID: 'test-1',
     MINT_PUBLIC_KEYS: JSON.stringify({ 'test-1': privateKey.x }), MINT_PRIVATE_KEYS: JSON.stringify({ 'test-1': privateKey }),
     BATCH_SIZE: '10', LIFETIME_MINT_LIMIT: '1'
   };
   const server = createTestHarness({ workers: [{ configPath: './wrangler.jsonc', vars: {
-    ORIGIN: env.ORIGIN, MINT_ID: env.MINT_ID, MINT_KEY_ID: env.MINT_KEY_ID, MINT_PUBLIC_KEYS: env.MINT_PUBLIC_KEYS,
+    ORIGIN: env.ORIGIN, LEGACY_ORIGIN: env.LEGACY_ORIGIN, MINT_ID: env.MINT_ID, MINT_KEY_ID: env.MINT_KEY_ID, MINT_PUBLIC_KEYS: env.MINT_PUBLIC_KEYS,
     DISCORD_CLIENT_ID: env.DISCORD_CLIENT_ID, BATCH_SIZE: env.BATCH_SIZE, LIFETIME_MINT_LIMIT: env.LIFETIME_MINT_LIMIT
   }, secrets: { SESSION_SECRET: env.SESSION_SECRET, MINT_PRIVATE_KEYS: env.MINT_PRIVATE_KEYS, DISCORD_CLIENT_SECRET: env.DISCORD_CLIENT_SECRET,
     DISCORD_ACTIVITY_BOT_TOKEN: env.DISCORD_ACTIVITY_BOT_TOKEN } }] });
@@ -62,6 +62,26 @@ test('Cloudflare Worker, assets, OAuth sessions and SQLite Durable Object', { ti
     assert.equal(config.lifetimeLimit, 1); assert.equal(config.keys['test-1'], privateKey.x);
     assert.ok(!JSON.stringify(config).includes(privateKey.d));
     assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  });
+  await t.test('legacy hostname keeps same-origin login and guest sessions without accepting cross-host writes', async () => {
+    const legacy = env.LEGACY_ORIGIN;
+    const worker = await server.getWorker().getExport();
+    const atLegacy = (path, init) => worker.fetch(new Request(legacy + path, init));
+    const start = await atLegacy('/auth/discord?return=/collection', { redirect: 'manual' });
+    assert.equal(start.status, 302, start.status === 302 ? undefined : await start.text());
+    assert.equal(new URL(start.headers.get('Location')).searchParams.get('redirect_uri'), legacy + '/auth/callback');
+    const signed = await atLegacy('/api/session', { headers: { Cookie: user.cookie } });
+    assert.equal((await signed.json()).owner, '123456789012345678');
+    const guest = await atLegacy('/api/guest', { method: 'POST', headers: { Origin: legacy } });
+    assert.equal(guest.status, 200, guest.status === 200 ? undefined : await guest.text());
+    assert.equal((await guest.json()).guest, true);
+    const guestHeaders = { Cookie: guest.headers.get('Set-Cookie').split(';')[0] };
+    const session = await (await atLegacy('/api/session', { headers: guestHeaders })).json();
+    const logout = (origin) => atLegacy('/api/logout', {
+      method: 'POST', headers: { ...guestHeaders, Origin: origin, 'X-Ubu-CSRF': session.csrf }
+    });
+    assert.equal((await logout(env.ORIGIN)).status, 403);
+    assert.equal((await logout(legacy)).status, 200);
   });
   await t.test('public mint endpoint rejects missing auth, CSRF, forged owner and oversized input', async () => {
     const unauthenticated = await fetch('/api/mint', { method: 'POST' });

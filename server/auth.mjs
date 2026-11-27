@@ -78,13 +78,18 @@ export function origin(env) {
   if (url.origin !== env.ORIGIN || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))) throw new Error('Invalid configured origin.');
   return url.origin;
 }
+export function webOrigin(request, env) {
+  const requested = new URL(request.url).origin;
+  if (requested === origin(env)) return requested;
+  return requested.startsWith('https://') && requested === env.LEGACY_ORIGIN ? requested : null;
+}
 export function activityOrigin(env) {
   return discordId.test(env.DISCORD_CLIENT_ID || '') && env.DISCORD_ACTIVITY_BOT_TOKEN
     ? `https://${env.DISCORD_CLIENT_ID}.discordsays.com` : null;
 }
-export function requestOrigin(env, value) {
+export function requestOrigin(env, value, request) {
   if (value?.mobile) return MOBILE_ORIGIN;
-  return value?.instance ? activityOrigin(env) : origin(env);
+  return value?.instance ? activityOrigin(env) : request ? webOrigin(request, env) : origin(env);
 }
 export function isMobileOrigin(request) {
   return request.headers.get('Origin') === MOBILE_ORIGIN;
@@ -124,7 +129,8 @@ export async function guest(env, options = {}) {
   return mobile ? { value: { ...value, mobile: true }, token: sealed, cookie: null } : { value, cookie: setCookie(sessionName, sealed, 604800) };
 }
 export function mutationAllowed(request, env, value) {
-  return request.headers.get('Origin') === requestOrigin(env, value) && request.headers.get('X-Ubu-CSRF') === value.csrf;
+  const expected = requestOrigin(env, value, request);
+  return Boolean(expected && request.headers.get('Origin') === expected && request.headers.get('X-Ubu-CSRF') === value.csrf);
 }
 export function logoutCookie(env, value) {
   if (value?.mobile) return null;
@@ -246,11 +252,10 @@ export async function activityLogin(request, env, data, fetchDiscord = fetch) {
   } catch { return json({ error: 'Could not sign in to the Discord Activity. Try again.' }, 502); }
 }
 
-export function safeReturnPath(raw, env) {
+export function safeReturnPath(raw, env, base = origin(env)) {
   if (!raw || typeof raw !== 'string' || raw.length > 512 || /[\x00-\x1F\x7F]/.test(raw)) return '/';
   if (raw.startsWith('//') || raw.startsWith('/\\') || raw.startsWith('\\')) return '/';
   try {
-    const base = origin(env);
     const parsed = new URL(raw, base);
     if (parsed.origin !== base) return '/';
     const target = parsed.pathname + parsed.search + parsed.hash;
@@ -264,7 +269,9 @@ export function safeReturnPath(raw, env) {
 
 export async function login(request, env) {
   const reqUrl = new URL(request.url);
-  const returnTo = safeReturnPath(reqUrl.searchParams.get('return') || reqUrl.searchParams.get('return_to'), env);
+  const site = webOrigin(request, env);
+  if (!site) return new Response('Invalid site origin.', { status: 400 });
+  const returnTo = safeReturnPath(reqUrl.searchParams.get('return') || reqUrl.searchParams.get('return_to'), env, site);
   const mobile = reqUrl.searchParams.get('platform') === 'android';
   const challenge = reqUrl.searchParams.get('challenge') || '';
   if (mobile && !pkceHash.test(challenge)) {
@@ -274,24 +281,25 @@ export async function login(request, env) {
   }
   const nonce = random();
   const token = await seal({
-    purpose: 'oauth', nonce, returnTo, ...(mobile ? { mobile: true, challenge } : {}),
+    purpose: 'oauth', nonce, returnTo, site, ...(mobile ? { mobile: true, challenge } : {}),
     expires: Math.floor(Date.now() / 1000) + 600
   }, env.SESSION_SECRET);
   const url = new URL('https://discord.com/oauth2/authorize');
   url.search = new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID, response_type: 'code', scope: 'identify',
-    redirect_uri: origin(env) + '/auth/callback', state: nonce }).toString();
+    redirect_uri: site + '/auth/callback', state: nonce }).toString();
   return new Response(null, { status: 302, headers: { Location: url.href, 'Set-Cookie': setCookie(stateName, token, 600), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
 }
 export async function callback(request, env, fetchDiscord = fetch) {
   const url = new URL(request.url);
+  const site = webOrigin(request, env);
   const state = await unseal(cookie(request, stateName), env.SESSION_SECRET, 'oauth');
   const failed = () => new Response('Discord login failed. Please try again.', { status: 400,
     headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff', 'Set-Cookie': setCookie(stateName, '', 0), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
   const code = url.searchParams.get('code');
-  if (!state || state.nonce !== url.searchParams.get('state') || !code || code.length > 1024 || url.searchParams.has('error')) return failed();
+  if (!site || !state || (state.site ?? env.LEGACY_ORIGIN ?? origin(env)) !== site || state.nonce !== url.searchParams.get('state') || !code || code.length > 1024 || url.searchParams.has('error')) return failed();
   try {
-    const { owner, name } = await exchange(env, code, origin(env) + '/auth/callback', fetchDiscord);
-    const returnTo = safeReturnPath(state.returnTo, env);
+    const { owner, name } = await exchange(env, code, site + '/auth/callback', fetchDiscord);
+    const returnTo = safeReturnPath(state.returnTo, env, site);
     if (state.mobile) {
       if (!pkceHash.test(state.challenge || '')) return failed();
       const handoff = await seal({
@@ -299,7 +307,7 @@ export async function callback(request, env, fetchDiscord = fetch) {
         expires: Math.floor(Date.now() / 1000) + 60
       }, env.SESSION_SECRET);
       const headers = new Headers({
-        Location: `${origin(env)}/auth-complete.html?mobile=1#ticket=${handoff}`,
+        Location: `${site}/auth-complete.html?mobile=1#ticket=${handoff}`,
         'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'
       });
       headers.append('Set-Cookie', setCookie(stateName, '', 0));
@@ -310,7 +318,7 @@ export async function callback(request, env, fetchDiscord = fetch) {
     // The display name is shown in the header; the ID never is.
     const sessionToken = await seal({ purpose: 'session', owner, ...(name ? { name } : {}), csrf: random(),
       ...(previous?.guest ? { alias: previous.owner } : {}) }, env.SESSION_SECRET);
-    const headers = new Headers({ Location: origin(env) + returnTo, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+    const headers = new Headers({ Location: site + returnTo, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
     headers.append('Set-Cookie', setCookie(stateName, '', 0));
     headers.append('Set-Cookie', setCookie(sessionName, sessionToken, indefinite));
     return new Response(null, { status: 302, headers });
