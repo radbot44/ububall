@@ -259,8 +259,8 @@ export default {
         return reply({ ready: true, login: auth.configured(env), mint: config.mint, keys: config.keys, lifetimeLimit: config.limit });
       }
       if (!auth.configured(env)) return reply({ error: 'Discord login is not configured yet.' }, 503);
-      const site = auth.origin(env), embedded = auth.activityOrigin(env);
-      if (url.origin !== site && url.origin !== embedded) return reply({ error: 'Invalid site origin.' }, 400);
+      const site = auth.origin(env), web = auth.webOrigin(request, env), embedded = auth.activityOrigin(env);
+      if (!web && url.origin !== embedded) return reply({ error: 'Invalid site origin.' }, 400);
       if (path === '/auth/activity' && request.method === 'POST') {
         let data;
         try { data = await body(request, 1536); } catch { return reply({ error: 'Invalid Activity sign-in request.' }, 400); }
@@ -271,7 +271,7 @@ export default {
         try { data = await body(request, 1536); } catch { return reply({ error: 'Invalid mobile sign-in request.' }, 400); }
         return auth.mobileExchange(request, env, data);
       }
-      if (url.origin === site && request.method === 'GET') {
+      if (web && request.method === 'GET') {
         if (path === '/auth/discord') return auth.login(request, env);
         if (path === '/auth/callback') return auth.callback(request, env);
       }
@@ -279,7 +279,7 @@ export default {
       if (watch && request.method === 'GET') {
         const [, id, action] = watch, key = url.searchParams.get('key');
         const source = request.headers.get('Origin');
-        if (action === 'watch-socket' && source !== site && source !== auth.MOBILE_ORIGIN && (!embedded || source !== embedded)) {
+        if (action === 'watch-socket' && (!source || source !== (web || site)) && source !== auth.MOBILE_ORIGIN && (!embedded || source !== embedded)) {
           return reply({ error: 'Invalid socket origin.' }, 403);
         }
         if (!uuid.test(key || '')) return reply({ error: 'Invalid watch link.' }, 400);
@@ -314,7 +314,7 @@ export default {
       }
       if (path === '/api/guest' && request.method === 'POST') {
         const mobileReq = auth.isMobileOrigin(request);
-        if (request.headers.get('Origin') !== auth.origin(env) && !mobileReq) return reply({ error: 'Invalid request origin.' }, 403);
+        if ((!web || request.headers.get('Origin') !== web) && !mobileReq) return reply({ error: 'Invalid request origin.' }, 403);
         if (session) return reply(session.guest ? { owner: null, guest: true, csrf: session.csrf, ...(session.mobile ? { site } : {}) } :
           { owner: session.owner, name: session.name ?? null, csrf: session.csrf, ...(session.mobile ? { site } : {}) });
         const clientIp = request.headers.get('CF-Connecting-IP') || 'local';
@@ -435,7 +435,8 @@ export default {
         if (activityWatch && !session.instance) return reply({ error: 'Open this match inside its Discord Activity.' }, 403);
         if (request.method !== (get ? 'GET' : 'POST')) return reply({ error: 'Method not allowed.' }, 405);
         // Browser sockets cannot carry custom CSRF headers; enforce the exact Origin instead.
-        if (socket && request.headers.get('Origin') !== auth.requestOrigin(env, session)) return reply({ error: 'Invalid socket origin.' }, 403);
+        const socketOrigin = socket ? auth.requestOrigin(env, session, request) : null;
+        if (socket && (!socketOrigin || request.headers.get('Origin') !== socketOrigin)) return reply({ error: 'Invalid socket origin.' }, 403);
         let data;
         if (!get) { try { data = await body(request, 2048); } catch { return reply({ error: 'Invalid match request.' }, 400); } }
         const allowAlias = !get || socket || request.headers.get('X-Ubu-CSRF') === session.csrf;

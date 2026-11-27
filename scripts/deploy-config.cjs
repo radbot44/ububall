@@ -48,6 +48,13 @@ function validate(s) {
   if (!s.name || !v || !s.secrets) throw Error('Incomplete production settings.');
   const origin = new URL(v.ORIGIN);
   if (origin.protocol !== 'https:' || origin.origin !== v.ORIGIN) throw Error('ORIGIN must be an exact HTTPS origin without a trailing slash.');
+  if (v.LEGACY_ORIGIN !== undefined) {
+    let legacy;
+    try { legacy = new URL(v.LEGACY_ORIGIN); } catch {}
+    if (!legacy || legacy.protocol !== 'https:' || legacy.origin !== v.LEGACY_ORIGIN || legacy.origin === origin.origin) {
+      throw Error('LEGACY_ORIGIN must be a distinct exact HTTPS origin without a trailing slash.');
+    }
+  }
   if (!/^[1-9][0-9]{0,19}$/.test(String(v.DISCORD_CLIENT_ID || ''))) throw Error('A Discord application ID is required.');
   for (const name of secretNames) if (!s.secrets[name] || s.secrets[name].includes('<')) throw Error(`Missing saved secret: ${name}`);
   if (Object.hasOwn(v, activityToken)) throw Error(`Store ${activityToken} under secrets.`);

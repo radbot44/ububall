@@ -21,7 +21,8 @@ To configure local login/minting, copy `.dev.vars.example` to ignored `.dev.vars
 
 | Setting | Meaning |
 | --- | --- |
-| ORIGIN | Exact website origin, no trailing slash or path; HTTPS except loopback development |
+| ORIGIN | Canonical website origin, no trailing slash or path; HTTPS except loopback development |
+| LEGACY_ORIGIN | Optional second, exact HTTPS origin for an existing deployment address; login and same-origin requests still work there |
 | DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET | Discord OAuth application credentials |
 | SESSION_SECRET | Canonical unpadded base64url of 32 random bytes; used for session HMAC, separate from mint signing |
 | MINT_ID | Permanent canonical base64url of 16 random bytes; keep it stable |
@@ -33,6 +34,13 @@ To configure local login/minting, copy `.dev.vars.example` to ignored `.dev.vars
 | LIFETIME_MINT_LIMIT | Configurable lifetime regular pack limit per Discord account (each pack contains 5 ubus; excludes starter packs); defaults to 0, so new issuance is closed |
 
 Secret values belong in ignored local configuration or Cloudflare secrets, never frontend assets, Git or public vars. The example is placeholders only. Tests create ephemeral credentials in memory; there is no automatic production key generation or test-login bypass in the application.
+
+## Moving the web address without moving the mint
+
+1. In Cloudflare, use the **same production Worker**. Activate the new domain in that account, then add it under **Workers & Pages → Worker → Settings → Domains & Routes → Add → Custom Domain**. Cloudflare creates DNS and the certificate; keep the old domain attached. Do not create another Worker.
+2. In the same Discord application under **OAuth2 → Redirects**, add `https://ububall.com/auth/callback` and keep the old callback. Do not change the Activity URL mapping during the web cutover; existing Android builds and the Activity may still use the old hostname.
+3. Back up the saved production settings privately. In its `vars`, set `ORIGIN` to `https://ububall.com` and `LEGACY_ORIGIN` to `https://ububall.tch.one`. Add `{"pattern":"ububall.com","custom_domain":true}` to the saved `routes` array if it is not present. Keep existing routes, Worker name, Durable Object bindings, mint identity and keys, and session secret. Run the normal deployment, not `-Setup` or `-ResetMint`.
+4. Compare both hosts' `/api/config` mint ID and public keys with their pre-deploy values. Open the game and test Discord sign-in, a guest match, and a match invite. The new hostname starts a new browser session and has separate local storage, so local settings and local-only replays do not follow automatically. Signed-in collections and account teams continue to use the same registry.
 
 ## Requests and ownership
 
