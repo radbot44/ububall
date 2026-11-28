@@ -1006,21 +1006,6 @@
         grab.value = knobValue(kind, grab.index);
         closeKnobPopover();
       }
-      const prevClientX = grab.scrapeX ?? grab.startX, prevClientY = grab.scrapeY ?? grab.startY;
-      const nowKnob = performance.now();
-      if (kind !== 'spin' && grab.scrapeAt) {
-        const dtK = Math.max(0.006, (nowKnob - grab.scrapeAt) / 1000);
-        const pxMove = Math.hypot(e.clientX - prevClientX, e.clientY - prevClientY);
-        const bKnob = fieldView.bodies[grab.index];
-        gameAudio()?.playAimScrape?.({
-          id: grab.index,
-          speed: (pxMove * 1.65) / dtK,
-          power: plans[grab.index]?.power ?? 0.5,
-          x: bKnob?.x ?? 500,
-          y: bKnob?.y ?? 300
-        });
-      }
-      grab.scrapeX = e.clientX; grab.scrapeY = e.clientY; grab.scrapeAt = nowKnob;
       const distance = (e.clientX - grab.x) - (e.clientY - grab.y);
       const sensitivity = (e.shiftKey ? .25 : 1) * (grab.fine ? .5 : 1);
       setKnob(kind, grab.index, grab.value + distance / (KNOB_SWEEP * gameUi.scale()) * (max - min) * sensitivity, typeof requestAnimationFrame === 'function');
@@ -1034,7 +1019,6 @@
       hideKnobDragPill();
       if (!finished) return;
       if (finished.dragged) {
-        if (kind !== 'spin') gameAudio()?.playAimScrape?.({ id: finished.index, speed: 0 });
         if (dragDirty) { dragDirty = false; sync(); draw(); }
         if (phase === 'plan') saveActiveMatch();
       } else if (!finished.cancelled) {

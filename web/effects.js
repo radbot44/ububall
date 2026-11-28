@@ -83,24 +83,22 @@
         },
         {
           id: 'plan-aim-coil',
-          title: 'Loaded Shot Coil, Rubber Stretch & Guard Plant',
-          when: 'Dragging outward to load a shot (`aimCoilPose`, `playAimScrape`) or tapping to plant Guard (`triggerGuardToggle`, `playGuardToggle`). Try dragging or tapping any home ubu directly on the rink!',
-          visual: 'The face coils back up to 4.6 px inside its fixed hitbox, with a white arc along the back rim. A low rubber stretch tightens in pitch as shot power rises. Fine tweaks sound softer, and holding still goes quiet until the next movement.',
-          soundLabel: 'Play stretch / plant',
+          title: 'Loaded Shot Coil & Guard Plant',
+          when: 'Dragging outward to load a shot (`aimCoilPose`) or tapping to plant Guard (`triggerGuardToggle`, `playGuardToggle`). Try dragging or tapping any home ubu directly on the rink!',
+          visual: 'The face coils back up to 4.6 px inside its fixed hitbox, with a white arc along the back rim.',
+          soundLabel: 'Play guard plant',
           variants: [
-            { id: 'load-scrape', label: 'Brisk Pull -> Hold -> Fine Tweak' },
+            { id: 'load-coil', label: 'Brisk Pull -> Hold -> Fine Tweak' },
             { id: 'guard-toggle', label: 'Guard Plant & Un-Weight Toggle' },
             { id: 'loaded-trio', label: 'Loaded Trio vs. Fixed Hitbox Rings' }
           ],
           duration: 2.9,
-          playSound: (ctx, variant = 'load-scrape') => {
+          playSound: (ctx, variant = 'load-coil') => {
             if (variant === 'guard-toggle') {
               ctx.audio()?.playGuardToggle?.(true, { x: 310, y: 300 });
-            } else {
-              ctx.audio()?.playAimScrape?.({ speed: 680, power: 0.88, x: 310, y: 300 });
             }
           },
-          run: (ctx, variant = 'load-scrape') => {
+          run: (ctx, variant = 'load-coil') => {
             ctx.resetStage({ phase: 'plan', mode: 'standard' });
             ctx.place(0, 290, 300);
             ctx.place(1, 290, 170);
@@ -138,11 +136,11 @@
               });
               return;
             }
-            // Brisk pull, silent hold, then a small angle correction at full tension.
+            // Brisk pull, hold, then a small angle correction at full tension.
             ctx.plans[0] = { angle: 0.16, power: 0, spin: 0, guard: false };
             ctx.presenter.dirtyPrediction();
             let lastP = 0, lastA = 0.16;
-            ctx.setPlanDriver((t, dt) => {
+            ctx.setPlanDriver(t => {
               let p = lastP, a = lastA;
               if (t >= 0.12 && t < 0.48) {
                 const u = (t - 0.12) / 0.36;
@@ -161,8 +159,6 @@
                 a = 0.045;
               }
               const dPower = Math.abs(p - lastP), dAngle = Math.abs(a - lastA);
-              const tipSpeed = dt > 1e-4 ? Math.hypot(dPower * 165, dAngle * 180) / dt : 0;
-              ctx.audio()?.playAimScrape?.({ id: 0, speed: tipSpeed, power: p, x: 290, y: 300 });
               if (dPower > 1e-4 || dAngle > 1e-4) {
                 ctx.plans[0] = { angle: a, power: p, spin: 0, guard: false };
                 ctx.presenter.dirtyPrediction();
@@ -827,7 +823,7 @@
           id: 'tape-to-tape-catch',
           title: 'Teammate "Tape-to-Tape" Catch vs. Opponent Ricochet',
           when: 'Non-guarding teammate cleanly receives a live teammate pass (`passerSlot >= 0`, `>=140 px/s`) below full Snap One-Timer threshold.',
-          visual: 'Warm cupped composite-blade "thup" pocket catch, twin concentric team-colored rings around the ball, white receiver-rim catch arc, and brief dashed pass-thread shimmer back to the passer.',
+          visual: 'Warm cupped composite-blade "thup" pocket catch, twin concentric team-colored rings around the ball, and white receiver-rim catch arc.',
           soundLabel: 'Play cupped catch',
           variants: [
             { id: 'tape-catch', label: 'Live Teammate Reception (Cupped Thup)' },
@@ -2145,8 +2141,7 @@
     let draggingPlan = false;
     let dragMoved = false;
     let dragTapGuards = false;
-    let lastDragScrapePt = null;
-    let lastDragScrapeAt = 0;
+    let dragStartPt = null;
     let planDriver = null;
     let rafId = 0;
     let lastRaf = 0;
@@ -2556,8 +2551,7 @@
     function resetStage({ phase: nextPhase = 'plan', mode = 'standard', glow = 0 } = {}) {
       draggingPlan = false;
       dragMoved = false;
-      lastDragScrapePt = null;
-      lastDragScrapeAt = 0;
+      dragStartPt = null;
       planDriver = null;
       stopAllAudio();
       clearStageLayers();
@@ -2627,7 +2621,6 @@
     function launchPlans(turnPlans = plans) {
       draggingPlan = false;
       planDriver = null;
-      ubuAudio?.playAimScrape?.({ id: selected, speed: 0 });
       plans = turnPlans.map(p => ({ angle: 0, power: 0, spin: 0, guard: false, ...p }));
       phase = 'play';
       elapsed = 0;
@@ -3120,8 +3113,7 @@
         selected = idx;
         draggingPlan = true;
         dragMoved = false;
-        lastDragScrapePt = p;
-        lastDragScrapeAt = performance.now();
+        dragStartPt = p;
         canvas.setPointerCapture(e.pointerId);
         draw();
       } else {
@@ -3134,8 +3126,7 @@
           selected = arrowIdx;
           draggingPlan = true;
           dragMoved = false;
-          lastDragScrapePt = p;
-          lastDragScrapeAt = performance.now();
+          dragStartPt = p;
           canvas.setPointerCapture(e.pointerId);
         }
       }
@@ -3143,21 +3134,13 @@
     canvas.addEventListener('pointermove', e => {
       if (!draggingPlan || phase !== 'plan') return;
       const p = rinkPoint(e), b = view.bodies[selected];
-      if (!dragMoved && lastDragScrapePt && Math.hypot(p.x - lastDragScrapePt.x, p.y - lastDragScrapePt.y) < 4) return;
+      if (!dragMoved && dragStartPt && Math.hypot(p.x - dragStartPt.x, p.y - dragStartPt.y) < 4) return;
       dragMoved = true;
       const dx = p.x - b.x, dy = p.y - b.y, dist = Math.hypot(dx, dy);
       const geom = impulseGeometry(P, b, { angle: 0, power: 1, spin: plans[selected]?.spin || 0 });
       plans[selected].angle = Math.atan2(dy, dx);
       plans[selected].power = Math.max(0, Math.min(1, (dist - geom.ringR) / Math.max(1, geom.scale)));
       plans[selected].guard = false;
-      const nowScrape = performance.now();
-      if (lastDragScrapePt && lastDragScrapeAt > 0) {
-        const dtS = Math.max(0.006, (nowScrape - lastDragScrapeAt) / 1000);
-        const dragSpd = Math.hypot(p.x - lastDragScrapePt.x, p.y - lastDragScrapePt.y) / dtS;
-        activeAudio()?.playAimScrape?.({ id: selected, speed: dragSpd, power: plans[selected].power, x: b.x, y: b.y });
-      }
-      lastDragScrapePt = p;
-      lastDragScrapeAt = nowScrape;
       presenter.dirtyPrediction();
       draw();
       scheduleLoop();
@@ -3173,12 +3156,10 @@
           draw();
           scheduleLoop();
         }
-        if (dragMoved) activeAudio()?.playAimScrape?.({ id: selected, speed: 0 });
         draggingPlan = false;
         dragMoved = false;
         dragTapGuards = false;
-        lastDragScrapePt = null;
-        lastDragScrapeAt = 0;
+        dragStartPt = null;
       });
     }
 

@@ -3575,11 +3575,6 @@
     }
 
     function endCanvasDragImpl() {
-      if (state.drag !== null && state.dragMoved) {
-        fn('gameAudio')?.()?.playAimScrape?.({ id: state.selected, speed: 0 });
-      }
-      state.lastAimScrapePt = null;
-      state.lastAimScrapeAt = 0;
       endSpinDrag();
       state.arrowGrab = null;
       state.drag = null;
@@ -3698,21 +3693,6 @@
           state.plans[state.selected].angle = ((rawAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
           state.plans[state.selected].power = aimPower(Math.hypot(dx, dy), arrow);
         }
-        const scrapeNow = getPerf()?.now?.() ?? Date.now();
-        if (state.lastAimScrapePt && state.lastAimScrapeAt > 0) {
-          const dtSec = Math.max(0.006, (scrapeNow - state.lastAimScrapeAt) / 1000);
-          const dRink = Math.hypot(ap.x - state.lastAimScrapePt.x, ap.y - state.lastAimScrapePt.y);
-          const dragSpd = dRink / dtSec;
-          fn('gameAudio')?.()?.playAimScrape?.({
-            id: state.selected,
-            speed: dragSpd,
-            power: state.plans[state.selected].power,
-            x: b.x,
-            y: b.y
-          });
-        }
-        state.lastAimScrapePt = { x: ap.x, y: ap.y };
-        state.lastAimScrapeAt = scrapeNow;
         state.dragDirty = true;
       };
       canvas.onpointerup = canvas.onpointercancel = event => {

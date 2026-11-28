@@ -204,7 +204,6 @@ test('null AudioContext safely no-ops across playback entrypoints', () => {
   assert.doesNotThrow(() => audio.playSpinStrike({ spin: 16 }));
   assert.doesNotThrow(() => audio.playSpinTwirl({ spin: 16 }));
   assert.doesNotThrow(() => audio.playFireImpact({ volume: 0.8 }));
-  assert.doesNotThrow(() => audio.playAimScrape({ speed: 520, power: 0.8 }).stop());
   assert.doesNotThrow(() => audio.playGuardToggle(true));
   assert.doesNotThrow(() => audio.playGuardToggle(false));
   assert.doesNotThrow(() => audio.playGuardHit({ strength: 0.75, graze: 0.2 }));
@@ -269,10 +268,6 @@ test('all synthesis entrypoints satisfy WebAudio AudioParam spec invariants', ()
   audio.playWallHit({ ctx, volume: 0.72, speed: 350, spinBite: 0, scuff: 0.88, x: 110, y: 90 });
   audio.playBodyBump({ ctx, speed: 380, massA: 4.8, massB: 2.3, asymmetry: 0.78, x: 500, y: 300 });
   audio.playBodyBump({ ctx, speed: 260, massA: 2.2, massB: 2.3, asymmetry: 0.05, x: 500, y: 300 });
-  audio.playAimScrape({ ctx, speed: 620, power: 0.85 }).stop();
-  audio.playAimScrape({ ctx, id: 0, speed: 680, power: 0.9, x: 240, y: 300 });
-  audio.playAimScrape({ ctx, id: 0, speed: 120, power: 0.9, x: 245, y: 302 });
-  audio.playAimScrape({ ctx, id: 0, speed: 0 });
   audio.playGuardToggle(true, { ctx, volume: 0.8, x: 180, y: 300 });
   audio.playGuardToggle(false, { ctx, volume: 0.8, x: 180, y: 300 });
   audio.playGuardHit({ ctx, strength: 0.15, graze: 0.6, volume: 0.5, x: 300, y: 300 });

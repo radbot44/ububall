@@ -4282,19 +4282,13 @@
               duration: 0.10
             });
           }
-          // System #5: Warm teammate "Tape-to-Tape" twin-ring catch & pass-thread shimmer
+          // System #5: Warm teammate "Tape-to-Tape" twin-ring catch
           if (isTapeCatch && fx.tapeCatches && fx.tapeCatches.length < 16) {
-            const passer = view?.bodies?.slice(0, 6).find((o, idx) =>
-              o && o !== player && o.team === player.team && ((o.slot !== undefined ? o.slot : (idx % 3)) === passerSlot)
-            ) || null;
             fx.tapeCatches.push({
               ball,
               receiver: player,
-              passer,
               x: ball.x,
               y: ball.y,
-              px: passer ? passer.x : null,
-              py: passer ? passer.y : null,
               rx: player.x,
               ry: player.y,
               contactAngle: faceAngle + Math.PI,
@@ -6382,10 +6376,6 @@
             const rReach = Math.max(tc.receiver.radius, tc.receiver.reach || tc.receiver.radius, 18) + 2.5;
             gpu.strokeArc(tc.receiver.x, tc.receiver.y, rReach, tc.contactAngle - 0.56, tc.contactAngle + 0.56, '#ffffff', 2.8 * fade, 0.85 * fade, true);
           }
-          if (tc.px != null && tc.py != null && fade > 0.22) {
-            const pX = tc.passer ? tc.passer.x : tc.px, pY = tc.passer ? tc.passer.y : tc.py;
-            gpu.strokeLine(pX, pY, bx, by, col, 2.0 * fade, 0.36 * fade, true, 7, 7);
-          }
         }
       }
 
@@ -7301,13 +7291,6 @@
                 view.ctx.lineWidth = 2.8 * fade;
                 view.ctx.globalAlpha = 0.85 * fade;
                 view.ctx.stroke();
-              }
-              if (tc.px != null && tc.py != null && fade > 0.22) {
-                const pX = tc.passer ? tc.passer.x : tc.px, pY = tc.passer ? tc.passer.y : tc.py;
-                view.ctx.setLineDash([7, 7]);
-                view.ctx.globalAlpha = 0.36 * fade;
-                line(pX, pY, bx, by, col, 2.0 * fade);
-                view.ctx.setLineDash([]);
               }
               view.ctx.restore();
             }
