@@ -77,7 +77,6 @@ function playUbuMove(options = {}) {
           if (entry.stopped) return;
           entry.stopped = true;
           if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
-          if (entry.panner) { try { entry.panner.disconnect(); } catch {} }
           map.delete(loopKey);
           if (!map.size) activeMotionContexts.delete(ctx);
           try {
@@ -86,7 +85,9 @@ function playUbuMove(options = {}) {
             outGain.gain.setValueAtTime(g, t);
             outGain.gain.linearRampToValueAtTime(0, t + 0.025);
             osc.stop(t + 0.03); lfo.stop(t + 0.03);
-          } catch {}
+          } catch {
+            if (entry.panner) { try { entry.panner.disconnect(); } catch {} }
+          }
         }
       };
       map.set(loopKey, entry);
@@ -260,7 +261,6 @@ function playSpin(options = {}) {
           if (entry.stopped) return;
           entry.stopped = true;
           if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
-          if (entry.panner) { try { entry.panner.disconnect(); } catch {} }
           map.delete(loopKey);
           if (!map.size) activeMotionContexts.delete(ctx);
           try {
@@ -269,7 +269,9 @@ function playSpin(options = {}) {
             outGain.gain.setValueAtTime(g, t);
             outGain.gain.linearRampToValueAtTime(0, t + 0.025);
             osc1.stop(t + 0.03); osc2.stop(t + 0.03); lfo.stop(t + 0.03);
-          } catch {}
+          } catch {
+            if (entry.panner) { try { entry.panner.disconnect(); } catch {} }
+          }
         }
       };
       map.set(loopKey, entry);
@@ -405,16 +407,44 @@ function playPuckSlide(options = {}) {
   });
 }
 
-// Dry skate-blade rasp that follows finger movement while aiming: rasps on brisk drags,
-// whispers on tiny angle/power corrections, and drops dead silent the instant the finger holds still.
-function aimScrapeParams(dragSpeed, power, volume) {
+// Shot power tightens the pitch. Drag speed opens the hollow rubber resonance.
+function aimStretchParams(dragSpeed, power, volume) {
   const s = Math.min(1, Math.max(0, (dragSpeed - 12) / 950));
   const p = Math.min(1, Math.max(0, Number(power) || 0));
-  const freq = (1180 + 1620 * Math.pow(s, 0.82)) * (0.92 + 0.18 * p);
-  const q = 1.9 + 0.85 * p;
-  const hissFreq = 2850 + 1450 * s;
-  const level = (0.005 + 0.062 * Math.pow(s, 0.92)) * (0.78 + 0.28 * p) * Math.max(0, Math.min(1.5, volume));
-  return { freq, q, hissFreq, level };
+  const freq = 78 + 72 * p + 18 * s;
+  const resonance = freq * (2.5 + 1.3 * s);
+  const level = (0.012 + 0.095 * Math.sqrt(s)) * Math.max(0, Math.min(1.5, volume));
+  return { freq, resonance, level };
+}
+
+function createAimStretch(ctx, dest, now, params) {
+  const src = ctx.createOscillator(), body = ctx.createBiquadFilter();
+  src.type = 'triangle';
+  body.type = 'lowpass';
+  body.Q.value = 5;
+  let from = { freq: params.freq * 0.82, resonance: params.resonance * 0.7 };
+  let to = from, start = now, end = now;
+  const tune = (target, time) => {
+    from = {
+      freq: interpRamp(start, from.freq, end, to.freq, time),
+      resonance: interpRamp(start, from.resonance, end, to.resonance, time)
+    };
+    start = time;
+    end = time + 0.055;
+    to = target;
+    for (const [param, key] of [[src.frequency, 'freq'], [body.frequency, 'resonance']]) {
+      param.cancelScheduledValues(start);
+      param.linearRampToValueAtTime(from[key], start);
+      param.linearRampToValueAtTime(to[key], end);
+    }
+  };
+  src.frequency.setValueAtTime(from.freq, now);
+  body.frequency.setValueAtTime(from.resonance, now);
+  tune(params, now);
+  src.connect(body);
+  body.connect(dest);
+  src.start(now);
+  return { src, body, tune };
 }
 
 function playAimScrape(options = {}) {
@@ -434,28 +464,13 @@ function playAimScrape(options = {}) {
     if (!map) { map = new Map(); motionLoops.set(ctx, map); }
     activeMotionContexts.add(ctx);
     const now = ctx.currentTime;
-    const p = aimScrapeParams(dragSpeed, power, volume);
+    const p = aimStretchParams(dragSpeed, power, volume);
     let entry = map.get(loopKey);
     if (!entry || entry.stopped) {
       const cleanup = [], master = createMasterChain(ctx, cleanup);
-      const src = ctx.createBufferSource(), band = ctx.createBiquadFilter();
-      const crisp = ctx.createBiquadFilter(), crispGain = ctx.createGain(), outGain = ctx.createGain();
-      src.buffer = grainNoise(ctx);
-      src.loop = true;
-      band.type = 'bandpass';
-      band.frequency.setValueAtTime(p.freq, now);
-      band.Q.setValueAtTime(p.q, now);
-      crisp.type = 'highpass';
-      crisp.frequency.setValueAtTime(p.hissFreq, now);
-      crisp.Q.setValueAtTime(0.85, now);
-      crispGain.gain.setValueAtTime(0.32, now);
+      const outGain = ctx.createGain();
       outGain.gain.setValueAtTime(0, now);
-
-      src.connect(band);
-      band.connect(outGain);
-      src.connect(crisp);
-      crisp.connect(crispGain);
-      crispGain.connect(outGain);
+      const { src, body, tune } = createAimStretch(ctx, outGain, now, p);
 
       let panner = null;
       const initialPan = getPan(options);
@@ -469,19 +484,15 @@ function playAimScrape(options = {}) {
         outGain.connect(master);
       }
       src.onended = () => {
-        for (const n of [src, band, crisp, crispGain, outGain, ...cleanup]) { try { n.disconnect(); } catch {} }
+        for (const n of [src, body, outGain, ...cleanup]) { try { n.disconnect(); } catch {} }
       };
-      src.start(now, Math.random() * 0.75);
       entry = {
-        stopped: false, timer: null, sources: [src], src, band, crisp, outGain, panner,
-        freq0: p.freq, freq: p.freq, hiss0: p.hissFreq, hiss: p.hissFreq,
-        paramT0: now, paramT1: now,
+        stopped: false, timer: null, sources: [src], tune, outGain, panner,
         t0: now, g0: 0, tPeak: now, gPeak: 0, tZero: now,
         stop() {
           if (entry.stopped) return;
           entry.stopped = true;
           if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
-          if (entry.panner) { try { entry.panner.disconnect(); } catch {} }
           map.delete(loopKey);
           if (!map.size) activeMotionContexts.delete(ctx);
           try {
@@ -490,29 +501,19 @@ function playAimScrape(options = {}) {
             outGain.gain.setValueAtTime(g, t);
             outGain.gain.linearRampToValueAtTime(0, t + 0.020);
             src.stop(t + 0.025);
-          } catch {}
+          } catch {
+            if (entry.panner) { try { entry.panner.disconnect(); } catch {} }
+          }
         }
       };
       map.set(loopKey, entry);
     } else {
-      const rampEnd = now + 0.028;
-      const curFreq = interpRamp(entry.paramT0, entry.freq0, entry.paramT1, entry.freq, now);
-      const curHiss = interpRamp(entry.paramT0, entry.hiss0, entry.paramT1, entry.hiss, now);
       if (entry.panner) {
         const curPan = getPan(options);
         entry.panner.pan.cancelScheduledValues(now);
         entry.panner.pan.setValueAtTime(curPan, now);
       }
-      entry.band.frequency.cancelScheduledValues(now);
-      entry.band.frequency.setValueAtTime(curFreq, now);
-      entry.band.frequency.linearRampToValueAtTime(p.freq, rampEnd);
-      entry.band.Q.setValueAtTime(p.q, now);
-      entry.crisp.frequency.cancelScheduledValues(now);
-      entry.crisp.frequency.setValueAtTime(curHiss, now);
-      entry.crisp.frequency.linearRampToValueAtTime(p.hissFreq, rampEnd);
-      entry.freq0 = curFreq; entry.freq = p.freq;
-      entry.hiss0 = curHiss; entry.hiss = p.hissFreq;
-      entry.paramT0 = now; entry.paramT1 = rampEnd;
+      entry.tune(p, now);
     }
     const cur = currentLoopGain(entry, now), tPeak = now + 0.016, tZero = now + 0.068;
     entry.outGain.gain.cancelScheduledValues(now);
@@ -526,15 +527,24 @@ function playAimScrape(options = {}) {
     return { stop: () => entry.stop() };
   }
 
-  // Standalone two-gesture audition (brisk pull rasp -> brief hold silence -> tiny whisper correction)
+  // Audition the same voice through a brisk pull, a hold, and a fine correction.
   const master = createMasterChain(ctx, null, 0.65);
   const dest = routePanner(ctx, master, options);
   const now = ctx.currentTime;
-  const pFast = aimScrapeParams(760, 0.85, volume);
-  const pFine = aimScrapeParams(135, 0.88, volume);
-  noiseGrain(ctx, dest, now, 0.20, { freq: pFast.freq * 0.85, to: pFast.freq * 1.15, q: pFast.q, level: pFast.level * 1.8 });
-  noiseGrain(ctx, dest, now + 0.01, 0.16, { type: 'highpass', freq: pFast.hissFreq, to: pFast.hissFreq * 0.9, q: 0.9, level: pFast.level * 0.85 });
-  noiseGrain(ctx, dest, now + 0.31, 0.14, { freq: pFine.freq, to: pFine.freq * 0.92, q: pFine.q + 0.5, level: pFine.level * 2.1 });
+  function gesture(start, duration, speed, initialPower, finalPower) {
+    const gain = ctx.createGain();
+    gain.connect(dest);
+    const initial = aimStretchParams(speed, initialPower, volume);
+    const voice = createAimStretch(ctx, gain, start, initial);
+    voice.tune(aimStretchParams(speed, finalPower, volume), start + 0.028);
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(initial.level, start + 0.025);
+    gain.gain.setValueAtTime(initial.level, start + duration - 0.045);
+    gain.gain.linearRampToValueAtTime(0, start + duration);
+    voice.src.stop(start + duration);
+  }
+  gesture(now, 0.23, dragSpeed, 0.08, power);
+  gesture(now + 0.34, 0.14, 105, power, power + 0.03);
   return { stop() {} };
 }
 
@@ -880,7 +890,7 @@ function playLaunchPush(options = {}) {
 }
 
 // Precision watch-crown spin dial tick: soft escapement click that rises subtly with |spin|,
-// with a distinct warm brass/wood zero-center detent click when crossing or resetting to 0.
+// with a firmer, noise-free strike when the crown seats at zero.
 function playSpinTick(options = {}) {
   const ctx = options.ctx || getAudioContext();
   if (!ctx) return;
@@ -891,28 +901,18 @@ function playSpinTick(options = {}) {
   const now = ctx.currentTime;
   const volume = Math.max(0.03, Math.min(1.0, options.volume ?? 0.55));
 
-  if (center) {
-    const det = ctx.createOscillator(), detGain = ctx.createGain();
-    det.type = 'triangle';
-    det.frequency.setValueAtTime(840, now);
-    det.frequency.exponentialRampToValueAtTime(385, now + 0.017);
-    strike(detGain, 0.24 * volume, now, now + 0.020, 0.0008);
-    det.connect(detGain); detGain.connect(dest);
-    det.start(now); det.stop(now + 0.026);
-    noiseGrain(ctx, dest, now, 0.009, { freq: 1680, to: 920, q: 2.6, level: 0.11 * volume });
-    return;
-  }
-
   const tick = ctx.createOscillator(), tickGain = ctx.createGain();
   tick.type = 'sine';
-  const f0 = 2480 + 980 * absSpin;
-  const f1 = 1240 + 420 * absSpin;
+  const f0 = center ? 2220 : 2480 + 980 * absSpin;
+  const f1 = center ? 980 : 1240 + 420 * absSpin;
+  const peak = center ? 0.24 : 0.14 + 0.06 * absSpin;
   tick.frequency.setValueAtTime(f0, now);
   tick.frequency.exponentialRampToValueAtTime(f1, now + 0.0085);
-  strike(tickGain, (0.14 + 0.06 * absSpin) * volume, now, now + 0.010, 0.0005);
+  strike(tickGain, peak * volume, now, now + 0.010, 0.0005);
   tick.connect(tickGain); tickGain.connect(dest);
   tick.start(now); tick.stop(now + 0.015);
 
+  if (center) return;
   noiseGrain(ctx, dest, now, 0.006, {
     type: 'bandpass',
     freq: 3650 + 900 * absSpin,

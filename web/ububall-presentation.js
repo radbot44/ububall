@@ -808,8 +808,10 @@
     return cache;
   }
 
-  function drawGuardShield(badgeCtx, b, isPortrait, iron, scaleMul = 1, nudgeX = 0, nudgeY = 0) {
+  function drawGuardShield(badgeCtx, b, isPortrait, iron, scaleMul = 1, nudgeX = 0, nudgeY = 0, alpha = 1) {
+    if (alpha <= 0.01) return;
     badgeCtx.save();
+    if (alpha < 1) badgeCtx.globalAlpha *= alpha;
     const p = isPortrait ? { x: b.x - b.radius * .65, y: b.y + b.radius * .65 } : { x: b.x + b.radius * .65, y: b.y + b.radius * .65 };
     badgeCtx.translate(p.x + nudgeX, p.y + nudgeY); if (isPortrait) badgeCtx.rotate(Math.PI / 2);
     const s = 1.1 * scaleMul;
@@ -3723,16 +3725,39 @@
       return { dx, dy, axis, scaleX, scaleY, braceAngle, braceStrength, sweetStrength };
     }
 
+    const GUARD_TOGGLE_MS = 160;
+
+    function pruneGuardSetTimes(fx = getEffects(), nowMs = clockNow(), phase = getPhase(), fieldPlans = getPlans()) {
+      if (!fx?.guardSetTimes?.size) return false;
+      if (phase !== 'plan' || isReducedMotion()) {
+        fx.guardSetTimes.clear();
+        return false;
+      }
+      for (const [idx, info] of fx.guardSetTimes) {
+        const ageMs = nowMs - info.at;
+        if (ageMs < 0 || ageMs >= GUARD_TOGGLE_MS || (info.on && fieldPlans && !fieldPlans[idx]?.guard)) {
+          fx.guardSetTimes.delete(idx);
+        }
+      }
+      return fx.guardSetTimes.size > 0;
+    }
+
     function guardBadgeMotion(fx, index, b, phase, nowMs) {
-      let scale = 1, nx = 0, ny = 0;
+      let scale = 1, nx = 0, ny = 0, alpha = 1;
       const setInfo = fx?.guardSetTimes?.get?.(index);
       if (setInfo && phase === 'plan') {
-        const age = (nowMs - setInfo.at) / 1000;
-        if (age >= 0 && age < 0.16) {
-          const u = age / 0.16;
-          scale *= setInfo.on ? (1 + 0.24 * Math.sin(u * Math.PI) * (1 - u * 0.45)) : (1 - 0.12 * (1 - u));
-        } else if (age >= 0.16) {
+        const ageMs = nowMs - setInfo.at;
+        if (ageMs >= 0 && ageMs < GUARD_TOGGLE_MS) {
+          const u = ageMs / GUARD_TOGGLE_MS;
+          if (setInfo.on) {
+            scale *= 1 + 0.24 * Math.sin(u * Math.PI) * (1 - u * 0.45);
+          } else {
+            scale *= Math.max(0.05, 1 - 0.72 * u * (0.45 + 0.55 * u));
+            alpha *= Math.max(0, (1 - u) ** 1.35);
+          }
+        } else {
           fx.guardSetTimes.delete(index);
+          if (!setInfo.on) alpha = 0;
         }
       }
       if (fx?.guardFlexes?.length) {
@@ -3749,14 +3774,19 @@
           }
         }
       }
-      return { scale, nx, ny };
+      return { scale, nx, ny, alpha };
     }
 
     function triggerGuardToggle(index, on = true) {
       const fx = getEffects(), view = getView();
       const b = view?.bodies?.[index];
       if (fx?.guardSetTimes && index >= 0) {
-        fx.guardSetTimes.set(index, { on: Boolean(on), at: clockNow() });
+        if (isReducedMotion()) {
+          fx.guardSetTimes.delete(index);
+        } else {
+          const iron = Boolean(predictionCache?.data?.guards?.some(g => g.index === index && g.held));
+          fx.guardSetTimes.set(index, { on: Boolean(on), at: clockNow(), iron });
+        }
       }
       gameAudio()?.playGuardToggle?.(Boolean(on), b ? { x: b.x, y: b.y } : {});
     }
@@ -5594,6 +5624,8 @@
       };
 
       const badgeOverlayQueue = [];
+      const nowGuardMs = clockNow();
+      pruneGuardSetTimes(fx, nowGuardMs, phase, fieldPlans);
 
       view.bodies.slice(0, 6).forEach((b, i) => {
         const reachR = Math.max(b.radius, b.reach || b.radius, 18);
@@ -5692,11 +5724,15 @@
           if (draft > 0.22) drawTailgateConeWebGL(b, draft);
         }
 
-        if ((inAction && b.guarding) || (phase === 'plan' && fieldPlans?.[i]?.guard)) {
-          const iron = phase === 'plan'
-            ? Boolean(predictionCache?.data.guards.some(g => g.index === i && g.held))
-            : Boolean(b.ironGuard);
-          badgeOverlayQueue.push({ kind: 'guard', b, index: i, iron });
+        const showGuard = (inAction && b.guarding) || (phase === 'plan' && fieldPlans?.[i]?.guard);
+        const shrinkGuard = !showGuard && phase === 'plan' && !reduced ? fx?.guardSetTimes?.get?.(i) : null;
+        if (showGuard || (shrinkGuard && !shrinkGuard.on)) {
+          const iron = showGuard
+            ? (phase === 'plan'
+              ? Boolean(predictionCache?.data.guards.some(g => g.index === i && g.held))
+              : Boolean(b.ironGuard))
+            : Boolean(shrinkGuard.iron);
+          badgeOverlayQueue.push({ kind: 'guard', b, index: i, iron, transient: !showGuard });
         }
 
         if (b.superActive === 'magnet') {
@@ -6353,25 +6389,26 @@
         }
       }
 
-      const nowOverlayMs = clockNow();
       for (const item of badgeOverlayQueue) {
         if (item.kind === 'super') drawSuperBadgeWebGL(item.b, item.key);
         else if (item.kind === 'guard') {
           const b = item.b;
-          const gm = reduced ? { scale: 1, nx: 0, ny: 0 } : guardBadgeMotion(fx, item.index ?? -1, b, phase, nowOverlayMs);
-          const gp = view.portrait ? { x: b.x - b.radius * 0.65 + gm.nx, y: b.y + b.radius * 0.65 + gm.ny } : { x: b.x + b.radius * 0.65 + gm.nx, y: b.y + b.radius * 0.65 + gm.ny };
-          const sz = 32 * gm.scale;
-          const st = getStampCanvas(`guardShield:${item.iron ? 1 : 0}`, 32, 32, pxScale, g => {
-            g.translate(16, 16); g.scale(1.1, 1.1); g.translate(-12, -12);
-            g.fillStyle = item.iron ? '#c3ccd6' : '#4798ff'; g.fill(GUARD_SHIELD);
-            if (item.iron) { g.strokeStyle = '#6b7785'; g.lineWidth = 1.5; g.stroke(GUARD_SHIELD); }
-          });
-          if (st) {
-            gpu.pushTransform();
-            gpu.translate(gp.x, gp.y);
-            if (view.portrait) gpu.rotate(Math.PI / 2);
-            gpu.drawTexture(st.key, st.canvas, -sz / 2, -sz / 2, sz, sz, 1);
-            gpu.popTransform();
+          const gm = reduced ? { scale: 1, nx: 0, ny: 0, alpha: item.transient ? 0 : 1 } : guardBadgeMotion(fx, item.index ?? -1, b, phase, nowGuardMs);
+          if (gm.alpha > 0.01) {
+            const gp = view.portrait ? { x: b.x - b.radius * 0.65 + gm.nx, y: b.y + b.radius * 0.65 + gm.ny } : { x: b.x + b.radius * 0.65 + gm.nx, y: b.y + b.radius * 0.65 + gm.ny };
+            const sz = 32 * gm.scale;
+            const st = getStampCanvas(`guardShield:${item.iron ? 1 : 0}`, 32, 32, pxScale, g => {
+              g.translate(16, 16); g.scale(1.1, 1.1); g.translate(-12, -12);
+              g.fillStyle = item.iron ? '#c3ccd6' : '#4798ff'; g.fill(GUARD_SHIELD);
+              if (item.iron) { g.strokeStyle = '#6b7785'; g.lineWidth = 1.5; g.stroke(GUARD_SHIELD); }
+            });
+            if (st) {
+              gpu.pushTransform();
+              gpu.translate(gp.x, gp.y);
+              if (view.portrait) gpu.rotate(Math.PI / 2);
+              gpu.drawTexture(st.key, st.canvas, -sz / 2, -sz / 2, sz, sz, gm.alpha);
+              gpu.popTransform();
+            }
           }
         }
       }
@@ -6875,8 +6912,11 @@
       const goalReplay = getGoalReplay();
       const onlineReplay = getOnlineReplay();
       const skaters = getSkaters();
-      const fwActive = fx.fireWarp && fx.fireWarp.life > 0 && !isReducedMotion() ? fx.fireWarp : null;
-      const koActive = fx.koWarp && fx.koWarp.life > 0 && !isReducedMotion() ? fx.koWarp : null;
+      const reduced2D = isReducedMotion();
+      const nowGuard2DMs = clockNow();
+      pruneGuardSetTimes(fx, nowGuard2DMs, phase, fieldPlans);
+      const fwActive = fx.fireWarp && fx.fireWarp.life > 0 && !reduced2D ? fx.fireWarp : null;
+      const koActive = fx.koWarp && fx.koWarp.life > 0 && !reduced2D ? fx.koWarp : null;
 
       view.bodies.slice(0, 6).forEach((b, i) => {
         const reachR = Math.max(b.radius, b.reach || b.radius, 18);
@@ -6965,12 +7005,18 @@
           const draft = P.tailgateFactor ? P.tailgateFactor(view.bodies, b) : 0;
           if (draft > 0.22) drawTailgateCone(b, draft);
         }
-        if ((inAction && b.guarding) || (phase === 'plan' && fieldPlans?.[i]?.guard)) {
-          const iron = phase === 'plan'
-            ? Boolean(predictionCache?.data.guards.some(g => g.index === i && g.held))
-            : Boolean(b.ironGuard);
-          const gm = isReducedMotion() ? { scale: 1, nx: 0, ny: 0 } : guardBadgeMotion(fx, i, b, phase, clockNow());
-          drawGuardShield(view.badgeCtx, b, view.portrait, iron, gm.scale, gm.nx, gm.ny);
+        const showGuard = (inAction && b.guarding) || (phase === 'plan' && fieldPlans?.[i]?.guard);
+        const shrinkGuard = !showGuard && phase === 'plan' && !reduced2D ? fx?.guardSetTimes?.get?.(i) : null;
+        if (showGuard || (shrinkGuard && !shrinkGuard.on)) {
+          const iron = showGuard
+            ? (phase === 'plan'
+              ? Boolean(predictionCache?.data.guards.some(g => g.index === i && g.held))
+              : Boolean(b.ironGuard))
+            : Boolean(shrinkGuard.iron);
+          const gm = reduced2D ? { scale: 1, nx: 0, ny: 0, alpha: showGuard ? 1 : 0 } : guardBadgeMotion(fx, i, b, phase, nowGuard2DMs);
+          if (gm.alpha > 0.01) {
+            drawGuardShield(view.badgeCtx, b, view.portrait, iron, gm.scale, gm.nx, gm.ny, gm.alpha);
+          }
         }
 
         const slow = P.dazeSlow(b);
@@ -7501,6 +7547,7 @@
       handleSuper,
       handleShockwave,
       handleLaunch,
+      pruneGuardSetTimes,
       triggerGuardToggle,
       impact,
       dispose

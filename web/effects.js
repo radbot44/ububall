@@ -83,10 +83,10 @@
         },
         {
           id: 'plan-aim-coil',
-          title: 'Loaded Shot Coil, Finger-Speed Blade Scrape & Guard Plant',
+          title: 'Loaded Shot Coil, Rubber Stretch & Guard Plant',
           when: 'Dragging outward to load a shot (`aimCoilPose`, `playAimScrape`) or tapping to plant Guard (`triggerGuardToggle`, `playGuardToggle`). Try dragging or tapping any home ubu directly on the rink!',
-          visual: 'Inner character face coils back up to 4.6 px with a white back-rim tension arc while the true hitbox ring stays fixed; fast drags rasp, tiny corrections whisper, still holds go silent, and the ubu stays cocked until Launch.',
-          soundLabel: 'Play scrape / plant',
+          visual: 'The face coils back up to 4.6 px inside its fixed hitbox, with a white arc along the back rim. A low rubber stretch tightens in pitch as shot power rises. Fine tweaks sound softer, and holding still goes quiet until the next movement.',
+          soundLabel: 'Play stretch / plant',
           variants: [
             { id: 'load-scrape', label: 'Brisk Pull -> Hold -> Fine Tweak' },
             { id: 'guard-toggle', label: 'Guard Plant & Un-Weight Toggle' },
@@ -138,7 +138,7 @@
               });
               return;
             }
-            // Animated finger pull: brisk rasp (0.12-0.48s) -> dead-silent hold (0.48-1.05s) -> tiny whisper angle tweak (1.05-1.45s) -> stays loaded!
+            // Brisk pull, silent hold, then a small angle correction at full tension.
             ctx.plans[0] = { angle: 0.16, power: 0, spin: 0, guard: false };
             ctx.presenter.dirtyPrediction();
             let lastP = 0, lastA = 0.16;
@@ -176,7 +176,7 @@
           id: 'plan-spin-crown',
           title: 'Spin Crown Winding & Wound Inner-Face Tilt',
           when: 'Winding Spin via the Spin knob, slider, `Q`/`E`, or mouse wheel (`playSpinTick`, `aimCoilPose` `twist` & wound rim arc). Try scrolling your mouse wheel over the rink!',
-          visual: 'Inner character face tilts up to 16 deg in the wound CW/CCW direction with a glowing directional inner-rim crescent, paired with crisp watch-crown escapement ticks and a warm center-detent click across 0.',
+          visual: 'Inner character face tilts up to 16 deg in the wound CW/CCW direction with a glowing directional inner-rim crescent. The crown makes a short tick at each step, with a firmer, lower tick at zero.',
           soundLabel: 'Play crown / detent',
           variants: [
             { id: 'wind-zero-wind', label: 'Wind CW -> Zero Detent -> Wind CCW' },
@@ -3264,7 +3264,7 @@
       if (paused || doc.hidden) return false;
       if (autoLoop && activeDemo) return true;
       if (phase !== 'plan' || postGoal || goalReplay || timedCallbacks.length || castState || stageChoreoActive) return true;
-      if (planDriver || fx.guardSetTimes?.size || fx.contactMarks?.length || fx.guardFlexes?.length || fx.launchNicks?.length || fx.ubuRecoils?.length || fx.wallSmudges?.length || fx.tapeCatches?.length || fx.ballTapWarp) return true;
+      if (planDriver || (presenter.pruneGuardSetTimes ? presenter.pruneGuardSetTimes() : Boolean(fx.guardSetTimes?.size)) || fx.contactMarks?.length || fx.guardFlexes?.length || fx.launchNicks?.length || fx.ubuRecoils?.length || fx.wallSmudges?.length || fx.tapeCatches?.length || fx.ballTapWarp) return true;
       if (fx.kickoffGlow > 0 || fx.fireWarp || fx.koWarp || fx.particles.length || fx.shockwaves.length || fx.skids.length || fx.burns.length || fx.pings?.length || fx.popups?.length) return true;
       if (fouls.crease.some(Boolean) || presenter.stalling(fouls)) return true;
       if (activeDemo) return true;

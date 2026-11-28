@@ -1898,6 +1898,8 @@
     if (phase !== 'plan') return;
     closeFirstTurnGuide(true);
     const generation = cpuGeneration;
+    stopGuardSettle();
+    fieldEffects.guardSetTimes?.clear();
     phase = 'cpu-wait'; drag = null; sync(); say('CPU is finishing its plan…');
     await cpuReady;
     if (generation !== cpuGeneration || phase !== 'cpu-wait' || online?.active) return;
@@ -1935,11 +1937,21 @@
   // Guarding replaces the launch and brakes the ubu. The arrow stays (faded), so clearing guard
   // brings the launch back.
   let guardSettleRaf = 0;
+  function stopGuardSettle() {
+    if (guardSettleRaf && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(guardSettleRaf);
+    }
+    guardSettleRaf = 0;
+  }
   function animateGuardSettle() {
     guardSettleRaf = 0;
-    if (phase !== 'plan' || !fieldEffects.guardSetTimes?.size) return;
+    if (document.hidden || phase !== 'plan' || reducedMotion.matches) {
+      presenter.pruneGuardSetTimes?.();
+      return;
+    }
+    const active = presenter.pruneGuardSetTimes ? presenter.pruneGuardSetTimes() : Boolean(fieldEffects.guardSetTimes?.size);
     draw();
-    if (fieldEffects.guardSetTimes.size && typeof requestAnimationFrame === 'function') {
+    if (active && presenter.pruneGuardSetTimes?.() && typeof requestAnimationFrame === 'function') {
       guardSettleRaf = requestAnimationFrame(animateGuardSettle);
     }
   }
@@ -1949,7 +1961,7 @@
     plans[i] = { ...plans[i], guard: nextGuard };
     presenter.triggerGuardToggle?.(i, nextGuard);
     sync(); draw();
-    if (!guardSettleRaf && !reducedMotion.matches && typeof requestAnimationFrame === 'function') {
+    if (!guardSettleRaf && !document.hidden && !reducedMotion.matches && presenter.pruneGuardSetTimes?.() && typeof requestAnimationFrame === 'function') {
       guardSettleRaf = requestAnimationFrame(animateGuardSettle);
     }
     saveActiveMatch();
@@ -2753,9 +2765,28 @@
     history.replaceState(homeState, '');
   }
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) flushScheduledSave();
+    if (document.hidden) {
+      stopGuardSettle();
+      flushScheduledSave();
+    } else if (phase === 'plan' && fieldEffects.guardSetTimes?.size) {
+      if (!reducedMotion.matches && presenter.pruneGuardSetTimes?.()) {
+        if (!guardSettleRaf && typeof requestAnimationFrame === 'function') {
+          guardSettleRaf = requestAnimationFrame(animateGuardSettle);
+        }
+      } else {
+        draw();
+      }
+    }
     updateLocalPlanClock(localPlayBlocked());
     lastTime = 0; accumulator = 0;
+  });
+  reducedMotion.addEventListener?.('change', () => {
+    if (!reducedMotion.matches) return;
+    stopGuardSettle();
+    if (fieldEffects.guardSetTimes?.size) {
+      fieldEffects.guardSetTimes.clear();
+      if (phase === 'plan') draw();
+    }
   });
   const ro = new ResizeObserver(entries => {
     gameUi.updateScale?.();
